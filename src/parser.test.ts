@@ -5,11 +5,17 @@ import { forEachChild, parseSourceFile } from "./parser.ts";
 import {
 	type ArrayType,
 	type ClassDeclaration,
+	type ConstructorDeclaration,
 	type EnumDeclaration,
+	type FieldDeclaration,
 	type Identifier,
+	type InitializerBlock,
 	type InterfaceDeclaration,
+	type MethodDeclaration,
 	type Node,
+	type NodeArray,
 	NodeFlags,
+	type Parameter,
 	type PrimitiveType,
 	type QualifiedName,
 	SyntaxKind,
@@ -155,10 +161,10 @@ test("nested generics in a heritage clause close cleanly", () => {
 	expectNoErrors("class C extends java.util.HashMap<String, java.util.List<Integer>> {}");
 });
 
-test("class body is skipped without errors (members come in M6)", () => {
+test("class body with a field and a method parses without errors", () => {
 	const sf = expectNoErrors("class C { private int x = 1; void m() { return; } }");
 	const cls = sf.statements[0] as ClassDeclaration;
-	expect(cls.members).toHaveLength(0);
+	expect(cls.members).toHaveLength(2);
 });
 
 test("multiple top-level type declarations", () => {
@@ -262,4 +268,108 @@ test("type parameter with multiple bounds", () => {
 	const sf = expectNoErrors("class C<T extends A & B & java.io.Serializable> {}");
 	const cls = sf.statements[0] as ClassDeclaration;
 	expect(cls.typeParameters![0]!.constraint).toHaveLength(3);
+});
+
+// M6: members
+
+function classMembers(text: string): NodeArray<Node> {
+	const sf = expectNoErrors(text);
+	return (sf.statements[0] as ClassDeclaration).members;
+}
+
+test("field declarations and multiple declarators", () => {
+	const members = classMembers("class C { private int x; int a, b = 1, c[]; }");
+	expect(members).toHaveLength(2);
+	const f0 = members[0] as FieldDeclaration;
+	expect(f0.kind).toBe(SyntaxKind.FieldDeclaration);
+	expect(f0.declarators).toHaveLength(1);
+	const f1 = members[1] as FieldDeclaration;
+	expect(f1.declarators).toHaveLength(3);
+	expect(f1.declarators[2]!.arrayRankAfterName).toBe(1);
+});
+
+test("method with parameters and throws", () => {
+	const members = classMembers("class C { public void m(int a, String b) throws java.io.IOException {} }");
+	const m = members[0] as MethodDeclaration;
+	expect(m.kind).toBe(SyntaxKind.MethodDeclaration);
+	expect(m.parameters).toHaveLength(2);
+	expect(m.throws).toHaveLength(1);
+	expect(m.body).toBeDefined();
+});
+
+test("generic method", () => {
+	const members = classMembers("class C { <T> T id(T x) { return x; } }");
+	const m = members[0] as MethodDeclaration;
+	expect(m.typeParameters).toHaveLength(1);
+	expect((m.returnType as TypeReference).typeName.kind).toBe(SyntaxKind.Identifier);
+});
+
+test("varargs parameter", () => {
+	const members = classMembers("class C { void f(int... xs) {} }");
+	const m = members[0] as MethodDeclaration;
+	expect((m.parameters[0] as Parameter).isVarArgs).toBe(true);
+});
+
+test("abstract / interface method has no body", () => {
+	const sf = expectNoErrors("interface I { int compute(int x); }");
+	const m = (sf.statements[0] as InterfaceDeclaration).members[0] as MethodDeclaration;
+	expect(m.body).toBeUndefined();
+});
+
+test("constructors, including generic constructors", () => {
+	const plain = classMembers("class C { C(int x) {} }");
+	expect((plain[0] as ConstructorDeclaration).kind).toBe(SyntaxKind.ConstructorDeclaration);
+	const generic = classMembers("class C { <T> C(T x) {} }");
+	const ctor = generic[0] as ConstructorDeclaration;
+	expect(ctor.kind).toBe(SyntaxKind.ConstructorDeclaration);
+	expect(ctor.typeParameters).toHaveLength(1);
+});
+
+test("static and instance initializer blocks", () => {
+	const members = classMembers("class C { static {} {} }");
+	expect((members[0] as InitializerBlock).isStatic).toBe(true);
+	expect((members[1] as InitializerBlock).isStatic).toBe(false);
+});
+
+test("nested type declarations as members", () => {
+	const members = classMembers("class C { class Inner {} static interface N {} }");
+	expect(members.map((m) => m.kind)).toEqual([
+		SyntaxKind.ClassDeclaration,
+		SyntaxKind.InterfaceDeclaration,
+	]);
+});
+
+test("enum with constants then a body", () => {
+	const sf = expectNoErrors("enum E { A, B, C; int code; void m() {} }");
+	const e = sf.statements[0] as EnumDeclaration;
+	expect(e.enumConstants).toHaveLength(3);
+	expect(e.members).toHaveLength(2);
+});
+
+test("enum constant with arguments and a class body", () => {
+	const sf = expectNoErrors("enum E { A(1) { void m() {} }, B(2); E(int x) {} }");
+	const e = sf.statements[0] as EnumDeclaration;
+	expect(e.enumConstants).toHaveLength(2);
+	expect(e.enumConstants[0]!.classBody).toBeDefined();
+	expect(e.members).toHaveLength(1); // the constructor
+});
+
+test("annotation type element with default", () => {
+	expectNoErrors("@interface Config { int timeout() default 30; String name(); }");
+});
+
+test("trailing comma in enum constants", () => {
+	const sf = expectNoErrors("enum E { A, B, }");
+	expect((sf.statements[0] as EnumDeclaration).enumConstants).toHaveLength(2);
+});
+
+test("forEachChild walks a method declaration", () => {
+	const members = classMembers("class C { int add(int a, int b) { return a; } }");
+	const kinds: SyntaxKind[] = [];
+	forEachChild(members[0]!, (n) => {
+		kinds.push(n.kind);
+		return undefined;
+	});
+	expect(kinds).toContain(SyntaxKind.Parameter);
+	expect(kinds).toContain(SyntaxKind.Block);
 });

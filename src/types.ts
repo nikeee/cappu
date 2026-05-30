@@ -434,6 +434,7 @@ export interface EnumDeclaration extends Statement {
 	readonly modifiers?: NodeArray<ModifierLike>;
 	readonly name: Identifier;
 	readonly implementsTypes?: NodeArray<TypeNode>;
+	readonly enumConstants: NodeArray<EnumConstantDeclaration>;
 	readonly members: NodeArray<Node>;
 }
 
@@ -449,6 +450,73 @@ export type TypeDeclaration =
 	| InterfaceDeclaration
 	| EnumDeclaration
 	| AnnotationTypeDeclaration;
+
+// Members
+
+export interface Block extends Statement {
+	readonly kind: SyntaxKind.Block;
+	readonly statements: NodeArray<Statement>;
+}
+
+export interface VariableDeclarator extends Node {
+	readonly kind: SyntaxKind.VariableDeclarator;
+	readonly name: Identifier;
+	/** Extra array rank from C-style brackets after the name (int a[]). */
+	readonly arrayRankAfterName: number;
+	readonly initializer?: Node;
+}
+
+export interface FieldDeclaration extends Node {
+	readonly kind: SyntaxKind.FieldDeclaration;
+	readonly modifiers?: NodeArray<ModifierLike>;
+	readonly type: TypeNode;
+	readonly declarators: NodeArray<VariableDeclarator>;
+}
+
+export interface Parameter extends Node {
+	readonly kind: SyntaxKind.Parameter;
+	readonly modifiers?: NodeArray<ModifierLike>;
+	readonly type: TypeNode;
+	readonly isVarArgs: boolean;
+	readonly name: Identifier;
+	readonly arrayRankAfterName: number;
+}
+
+export interface MethodDeclaration extends Node {
+	readonly kind: SyntaxKind.MethodDeclaration;
+	readonly modifiers?: NodeArray<ModifierLike>;
+	readonly typeParameters?: NodeArray<TypeParameter>;
+	readonly returnType: TypeNode;
+	readonly name: Identifier;
+	readonly parameters: NodeArray<Parameter>;
+	readonly throws?: NodeArray<TypeNode>;
+	/** Undefined for abstract/interface/annotation-element methods. */
+	readonly body?: Block;
+}
+
+export interface ConstructorDeclaration extends Node {
+	readonly kind: SyntaxKind.ConstructorDeclaration;
+	readonly modifiers?: NodeArray<ModifierLike>;
+	readonly typeParameters?: NodeArray<TypeParameter>;
+	readonly name: Identifier;
+	readonly parameters: NodeArray<Parameter>;
+	readonly throws?: NodeArray<TypeNode>;
+	readonly body: Block;
+}
+
+export interface InitializerBlock extends Node {
+	readonly kind: SyntaxKind.InitializerBlock;
+	readonly isStatic: boolean;
+	readonly body: Block;
+}
+
+export interface EnumConstantDeclaration extends Node {
+	readonly kind: SyntaxKind.EnumConstantDeclaration;
+	readonly modifiers?: NodeArray<ModifierLike>;
+	readonly name: Identifier;
+	readonly arguments?: NodeArray<Node>;
+	readonly classBody?: NodeArray<Node>;
+}
 
 // Diagnostics
 

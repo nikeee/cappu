@@ -16,22 +16,29 @@ import { tokenToString } from "./utilities.ts";
 import { isModifierKeyword, isPrimitiveTypeKeyword } from "./utilities.ts";
 import {
 	type Annotation,
+	type AnnotationTypeDeclaration,
 	type ArrayType,
+	type Block,
 	type ClassDeclaration,
+	type ConstructorDeclaration,
 	type Diagnostic,
 	type DiagnosticMessage,
 	type EmptyStatement,
 	type EntityName,
+	type EnumConstantDeclaration,
 	type EnumDeclaration,
+	type FieldDeclaration,
 	type Identifier,
 	type ImportDeclaration,
+	type InitializerBlock,
 	type InterfaceDeclaration,
-	type AnnotationTypeDeclaration,
+	type MethodDeclaration,
 	type ModifierLike,
 	type Node,
 	type NodeArray,
 	NodeFlags,
 	type PackageDeclaration,
+	type Parameter,
 	type PrimitiveType,
 	type QualifiedName,
 	type Scanner,
@@ -42,6 +49,7 @@ import {
 	type TypeNode,
 	type TypeParameter,
 	type TypeReference,
+	type VariableDeclarator,
 	type WildcardType,
 } from "./types.ts";
 
@@ -82,6 +90,28 @@ function nextToken(): SyntaxKind {
 
 function getNodePos(): number {
 	return scanner.getTokenFullStart();
+}
+
+// Speculation. Wraps the scanner's lookAhead/tryScan and additionally saves and
+// restores the parser-level state (current token, diagnostics, error flag) so a
+// failed/peeked parse leaves no trace. Mirrors the TS speculationHelper.
+function speculationHelper<T>(callback: () => T, isLookahead: boolean): T {
+	const saveToken = currentToken;
+	const saveDiagnosticsLength = parseDiagnostics.length;
+	const saveErrorBeforeNextFinishedNode = parseErrorBeforeNextFinishedNode;
+
+	const result = isLookahead ? scanner.lookAhead(callback) : scanner.tryScan(callback);
+
+	if (!result || isLookahead) {
+		currentToken = saveToken;
+		parseDiagnostics.length = saveDiagnosticsLength;
+		parseErrorBeforeNextFinishedNode = saveErrorBeforeNextFinishedNode;
+	}
+	return result;
+}
+
+function lookAhead<T>(callback: () => T): T {
+	return speculationHelper(callback, /*isLookahead*/ true);
 }
 
 function createNode<T extends Node>(kind: SyntaxKind, pos: number): Mutable<T> {
@@ -266,9 +296,36 @@ function isListElement(context: ParsingContext, _inErrorRecovery: boolean): bool
 			return isStartOfType();
 		case ParsingContext.TypeParameters:
 			return token() === SyntaxKind.Identifier || token() === SyntaxKind.AtToken;
+		case ParsingContext.ClassMembers:
+			return isStartOfClassMember();
+		case ParsingContext.Parameters:
+			return isStartOfParameter();
 		default:
 			return false;
 	}
+}
+
+function isStartOfClassMember(): boolean {
+	switch (token()) {
+		case SyntaxKind.SemicolonToken:
+		case SyntaxKind.OpenBraceToken: // initializer block
+		case SyntaxKind.LessThanToken: // generic method/constructor
+		case SyntaxKind.AtToken:
+		case SyntaxKind.ClassKeyword:
+		case SyntaxKind.InterfaceKeyword:
+		case SyntaxKind.EnumKeyword:
+			return true;
+		default:
+			return isModifierKeyword(token()) || isStartOfType();
+	}
+}
+
+function isStartOfParameter(): boolean {
+	return (
+		token() === SyntaxKind.AtToken ||
+		token() === SyntaxKind.FinalKeyword ||
+		isStartOfType()
+	);
 }
 
 function isInSomeParsingContext(): boolean {
@@ -546,17 +603,302 @@ function skipBalanced(open: SyntaxKind, close: SyntaxKind): void {
 	}
 }
 
-// Type declarations
+// Members
 
-function parseTypeBodyStub(): NodeArray<Node> {
+// A block whose statements are not yet parsed (skipped). M7 replaces this with
+// real statement parsing.
+function parseBlockStub(): Block {
 	const pos = getNodePos();
+	const statementsPos = getNodePos();
 	if (token() === SyntaxKind.OpenBraceToken) {
-		// Members are parsed in M6; for now skip the balanced body.
 		skipBalanced(SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken);
 	} else {
 		parseExpected(SyntaxKind.OpenBraceToken);
 	}
-	return createNodeArray<Node>([], pos);
+	const node = createNode<Block>(SyntaxKind.Block, pos);
+	node.statements = createNodeArray<Statement>([], statementsPos);
+	return finishNode(node, pos);
+}
+
+// Trailing C-style array brackets after a declarator/parameter name (int a[]).
+function parseArrayRankAfterName(): number {
+	let rank = 0;
+	while (token() === SyntaxKind.OpenBracketToken) {
+		nextToken();
+		parseExpected(SyntaxKind.CloseBracketToken);
+		rank++;
+	}
+	return rank;
+}
+
+// Skip a variable initializer (after '='). Real expression parsing is M8; here
+// we consume up to the next top-level ',' or ';'.
+function skipInitializer(): void {
+	let depth = 0;
+	while (token() !== SyntaxKind.EndOfFileToken) {
+		const t = token();
+		if (depth === 0 && (t === SyntaxKind.CommaToken || t === SyntaxKind.SemicolonToken)) {
+			return;
+		}
+		if (t === SyntaxKind.OpenParenToken || t === SyntaxKind.OpenBracketToken || t === SyntaxKind.OpenBraceToken) {
+			depth++;
+		} else if (
+			t === SyntaxKind.CloseParenToken ||
+			t === SyntaxKind.CloseBracketToken ||
+			t === SyntaxKind.CloseBraceToken
+		) {
+			if (depth === 0) return;
+			depth--;
+		}
+		nextToken();
+	}
+}
+
+function parseVariableDeclarator(name: Identifier): VariableDeclarator {
+	const arrayRankAfterName = parseArrayRankAfterName();
+	let initializer: Node | undefined;
+	if (parseOptional(SyntaxKind.EqualsToken)) {
+		// M8 parses the real initializer expression; for now skip it.
+		skipInitializer();
+		initializer = undefined;
+	}
+	const node = createNode<VariableDeclarator>(SyntaxKind.VariableDeclarator, name.pos);
+	node.name = name;
+	node.arrayRankAfterName = arrayRankAfterName;
+	node.initializer = initializer;
+	return finishNode(node, name.pos);
+}
+
+function parseFieldDeclaration(
+	pos: number,
+	modifiers: NodeArray<ModifierLike> | undefined,
+	type: TypeNode,
+	firstName: Identifier,
+): FieldDeclaration {
+	const declaratorsPos = firstName.pos;
+	const declarators: VariableDeclarator[] = [parseVariableDeclarator(firstName)];
+	while (parseOptional(SyntaxKind.CommaToken)) {
+		declarators.push(parseVariableDeclarator(parseIdentifier()));
+	}
+	parseExpected(SyntaxKind.SemicolonToken);
+	const node = createNode<FieldDeclaration>(SyntaxKind.FieldDeclaration, pos);
+	node.modifiers = modifiers;
+	node.type = type;
+	node.declarators = createNodeArray(declarators, declaratorsPos);
+	return finishNode(node, pos);
+}
+
+function parseParameter(): Parameter {
+	const pos = getNodePos();
+	const modifiers = parseModifiers();
+	const type = parseType();
+	const isVarArgs = parseOptional(SyntaxKind.DotDotDotToken);
+	const name = parseIdentifier();
+	const arrayRankAfterName = parseArrayRankAfterName();
+	const node = createNode<Parameter>(SyntaxKind.Parameter, pos);
+	node.modifiers = modifiers;
+	node.type = type;
+	node.isVarArgs = isVarArgs;
+	node.name = name;
+	node.arrayRankAfterName = arrayRankAfterName;
+	return finishNode(node, pos);
+}
+
+function parseFormalParameters(): NodeArray<Parameter> {
+	parseExpected(SyntaxKind.OpenParenToken);
+	const parameters = parseDelimitedList(ParsingContext.Parameters, parseParameter);
+	parseExpected(SyntaxKind.CloseParenToken);
+	return parameters;
+}
+
+function parseThrows(): NodeArray<TypeNode> | undefined {
+	return parseOptional(SyntaxKind.ThrowsKeyword) ? parseTypeList() : undefined;
+}
+
+function parseMethodDeclaration(
+	pos: number,
+	modifiers: NodeArray<ModifierLike> | undefined,
+	typeParameters: NodeArray<TypeParameter> | undefined,
+	returnType: TypeNode,
+	name: Identifier,
+): MethodDeclaration {
+	const parameters = parseFormalParameters();
+	// C-style array return rank: int m()[]
+	let actualReturnType = returnType;
+	const extraRank = parseArrayRankAfterName();
+	for (let i = 0; i < extraRank; i++) {
+		const array = createNode<ArrayType>(SyntaxKind.ArrayType, actualReturnType.pos);
+		array.elementType = actualReturnType;
+		actualReturnType = finishNode(array, actualReturnType.pos);
+	}
+	const throwsClause = parseThrows();
+	// Annotation-element default value (@interface): 'default <value>'. Skipped
+	// until M8.
+	if (parseOptional(SyntaxKind.DefaultKeyword)) {
+		skipInitializer();
+	}
+	let body: Block | undefined;
+	if (token() === SyntaxKind.OpenBraceToken) {
+		body = parseBlockStub();
+	} else {
+		parseExpected(SyntaxKind.SemicolonToken);
+	}
+	const node = createNode<MethodDeclaration>(SyntaxKind.MethodDeclaration, pos);
+	node.modifiers = modifiers;
+	node.typeParameters = typeParameters;
+	node.returnType = actualReturnType;
+	node.name = name;
+	node.parameters = parameters;
+	node.throws = throwsClause;
+	node.body = body;
+	return finishNode(node, pos);
+}
+
+function parseConstructorDeclaration(
+	pos: number,
+	modifiers: NodeArray<ModifierLike> | undefined,
+	typeParameters: NodeArray<TypeParameter> | undefined,
+): ConstructorDeclaration {
+	const name = parseIdentifier();
+	const parameters = parseFormalParameters();
+	const throwsClause = parseThrows();
+	const body = parseBlockStub();
+	const node = createNode<ConstructorDeclaration>(SyntaxKind.ConstructorDeclaration, pos);
+	node.modifiers = modifiers;
+	node.typeParameters = typeParameters;
+	node.name = name;
+	node.parameters = parameters;
+	node.throws = throwsClause;
+	node.body = body;
+	return finishNode(node, pos);
+}
+
+function hasStaticModifier(modifiers: NodeArray<ModifierLike> | undefined): boolean {
+	return !!modifiers?.some((m) => m.kind === SyntaxKind.StaticKeyword);
+}
+
+function parseInitializerBlock(
+	pos: number,
+	modifiers: NodeArray<ModifierLike> | undefined,
+): InitializerBlock {
+	const body = parseBlockStub();
+	const node = createNode<InitializerBlock>(SyntaxKind.InitializerBlock, pos);
+	node.isStatic = hasStaticModifier(modifiers);
+	node.body = body;
+	return finishNode(node, pos);
+}
+
+// After optional type parameters, a member is a constructor when it is
+// 'Identifier (' with no return type.
+function isConstructorDeclaration(): boolean {
+	return (
+		token() === SyntaxKind.Identifier &&
+		lookAhead(() => {
+			nextToken();
+			return token() === SyntaxKind.OpenParenToken;
+		})
+	);
+}
+
+function parseClassMember(): Node {
+	const pos = getNodePos();
+	if (token() === SyntaxKind.SemicolonToken) {
+		return parseEmptyStatement();
+	}
+	const modifiers = parseModifiers();
+
+	if (token() === SyntaxKind.OpenBraceToken) {
+		return parseInitializerBlock(pos, modifiers);
+	}
+	switch (token()) {
+		case SyntaxKind.ClassKeyword:
+			return parseClassDeclaration(pos, modifiers);
+		case SyntaxKind.InterfaceKeyword:
+			return parseInterfaceDeclaration(pos, modifiers);
+		case SyntaxKind.EnumKeyword:
+			return parseEnumDeclaration(pos, modifiers);
+		case SyntaxKind.AtToken:
+			return parseAnnotationTypeDeclaration(pos, modifiers);
+	}
+
+	const typeParameters = parseTypeParameters();
+	if (isConstructorDeclaration()) {
+		return parseConstructorDeclaration(pos, modifiers, typeParameters);
+	}
+	const type = parseType();
+	const name = parseIdentifier();
+	if (token() === SyntaxKind.OpenParenToken) {
+		return parseMethodDeclaration(pos, modifiers, typeParameters, type, name);
+	}
+	return parseFieldDeclaration(pos, modifiers, type, name);
+}
+
+// Type declarations
+
+function parseClassBody(): NodeArray<Node> {
+	const pos = getNodePos();
+	if (token() !== SyntaxKind.OpenBraceToken) {
+		parseExpected(SyntaxKind.OpenBraceToken);
+		return createNodeArray<Node>([], pos);
+	}
+	parseExpected(SyntaxKind.OpenBraceToken);
+	const members = parseList(ParsingContext.ClassMembers, parseClassMember);
+	parseExpected(SyntaxKind.CloseBraceToken);
+	return members;
+}
+
+function parseAnnotations(): NodeArray<Annotation> | undefined {
+	const pos = getNodePos();
+	const list: Annotation[] = [];
+	while (token() === SyntaxKind.AtToken && !isAnnotationTypeDeclarationStart()) {
+		list.push(parseAnnotation());
+	}
+	return list.length ? createNodeArray(list, pos) : undefined;
+}
+
+function parseEnumConstant(): EnumConstantDeclaration {
+	const pos = getNodePos();
+	const annotations = parseAnnotations();
+	const name = parseIdentifier();
+	if (token() === SyntaxKind.OpenParenToken) {
+		// Constructor arguments; real expressions in M8.
+		skipBalanced(SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+	}
+	const classBody = token() === SyntaxKind.OpenBraceToken ? parseClassBody() : undefined;
+	const node = createNode<EnumConstantDeclaration>(SyntaxKind.EnumConstantDeclaration, pos);
+	node.modifiers = annotations;
+	node.name = name;
+	node.arguments = undefined;
+	node.classBody = classBody;
+	return finishNode(node, pos);
+}
+
+function isStartOfEnumConstant(): boolean {
+	return token() === SyntaxKind.Identifier || token() === SyntaxKind.AtToken;
+}
+
+function parseEnumBody(): { enumConstants: NodeArray<EnumConstantDeclaration>; members: NodeArray<Node> } {
+	const constantsPos = getNodePos();
+	parseExpected(SyntaxKind.OpenBraceToken);
+
+	const constants: EnumConstantDeclaration[] = [];
+	if (isStartOfEnumConstant()) {
+		constants.push(parseEnumConstant());
+		while (parseOptional(SyntaxKind.CommaToken)) {
+			if (!isStartOfEnumConstant()) break; // trailing comma
+			constants.push(parseEnumConstant());
+		}
+	}
+	const enumConstants = createNodeArray(constants, constantsPos);
+
+	let members: NodeArray<Node>;
+	if (parseOptional(SyntaxKind.SemicolonToken)) {
+		members = parseList(ParsingContext.ClassMembers, parseClassMember);
+	} else {
+		members = createNodeArray<Node>([], getNodePos());
+	}
+	parseExpected(SyntaxKind.CloseBraceToken);
+	return { enumConstants, members };
 }
 
 function parseClassDeclaration(pos: number, modifiers: NodeArray<ModifierLike> | undefined): ClassDeclaration {
@@ -565,7 +907,7 @@ function parseClassDeclaration(pos: number, modifiers: NodeArray<ModifierLike> |
 	const typeParameters = parseTypeParameters();
 	const extendsType = parseOptional(SyntaxKind.ExtendsKeyword) ? parseType() : undefined;
 	const implementsTypes = parseOptional(SyntaxKind.ImplementsKeyword) ? parseTypeList() : undefined;
-	const members = parseTypeBodyStub();
+	const members = parseClassBody();
 	const node = createNode<ClassDeclaration>(SyntaxKind.ClassDeclaration, pos);
 	node.modifiers = modifiers;
 	node.name = name;
@@ -584,7 +926,7 @@ function parseInterfaceDeclaration(
 	const name = parseIdentifier();
 	const typeParameters = parseTypeParameters();
 	const extendsTypes = parseOptional(SyntaxKind.ExtendsKeyword) ? parseTypeList() : undefined;
-	const members = parseTypeBodyStub();
+	const members = parseClassBody();
 	const node = createNode<InterfaceDeclaration>(SyntaxKind.InterfaceDeclaration, pos);
 	node.modifiers = modifiers;
 	node.name = name;
@@ -598,11 +940,12 @@ function parseEnumDeclaration(pos: number, modifiers: NodeArray<ModifierLike> | 
 	parseExpected(SyntaxKind.EnumKeyword);
 	const name = parseIdentifier();
 	const implementsTypes = parseOptional(SyntaxKind.ImplementsKeyword) ? parseTypeList() : undefined;
-	const members = parseTypeBodyStub();
+	const { enumConstants, members } = parseEnumBody();
 	const node = createNode<EnumDeclaration>(SyntaxKind.EnumDeclaration, pos);
 	node.modifiers = modifiers;
 	node.name = name;
 	node.implementsTypes = implementsTypes;
+	node.enumConstants = enumConstants;
 	node.members = members;
 	return finishNode(node, pos);
 }
@@ -614,7 +957,7 @@ function parseAnnotationTypeDeclaration(
 	parseExpected(SyntaxKind.AtToken);
 	parseExpected(SyntaxKind.InterfaceKeyword);
 	const name = parseIdentifier();
-	const members = parseTypeBodyStub();
+	const members = parseClassBody();
 	const node = createNode<AnnotationTypeDeclaration>(SyntaxKind.AnnotationTypeDeclaration, pos);
 	node.modifiers = modifiers;
 	node.name = name;
@@ -806,9 +1149,66 @@ export function forEachChild<T>(
 				visitNodes(cbNode, cbNodes, n.modifiers) ||
 				visitNode(cbNode, n.name) ||
 				visitNodes(cbNode, cbNodes, n.implementsTypes) ||
+				visitNodes(cbNode, cbNodes, n.enumConstants) ||
 				visitNodes(cbNode, cbNodes, n.members)
 			);
 		}
+		case SyntaxKind.FieldDeclaration: {
+			const n = node as FieldDeclaration;
+			return (
+				visitNodes(cbNode, cbNodes, n.modifiers) ||
+				visitNode(cbNode, n.type) ||
+				visitNodes(cbNode, cbNodes, n.declarators)
+			);
+		}
+		case SyntaxKind.VariableDeclarator: {
+			const n = node as VariableDeclarator;
+			return visitNode(cbNode, n.name) || visitNode(cbNode, n.initializer);
+		}
+		case SyntaxKind.MethodDeclaration: {
+			const n = node as MethodDeclaration;
+			return (
+				visitNodes(cbNode, cbNodes, n.modifiers) ||
+				visitNodes(cbNode, cbNodes, n.typeParameters) ||
+				visitNode(cbNode, n.returnType) ||
+				visitNode(cbNode, n.name) ||
+				visitNodes(cbNode, cbNodes, n.parameters) ||
+				visitNodes(cbNode, cbNodes, n.throws) ||
+				visitNode(cbNode, n.body)
+			);
+		}
+		case SyntaxKind.ConstructorDeclaration: {
+			const n = node as ConstructorDeclaration;
+			return (
+				visitNodes(cbNode, cbNodes, n.modifiers) ||
+				visitNodes(cbNode, cbNodes, n.typeParameters) ||
+				visitNode(cbNode, n.name) ||
+				visitNodes(cbNode, cbNodes, n.parameters) ||
+				visitNodes(cbNode, cbNodes, n.throws) ||
+				visitNode(cbNode, n.body)
+			);
+		}
+		case SyntaxKind.InitializerBlock:
+			return visitNode(cbNode, (node as InitializerBlock).body);
+		case SyntaxKind.Parameter: {
+			const n = node as Parameter;
+			return (
+				visitNodes(cbNode, cbNodes, n.modifiers) ||
+				visitNode(cbNode, n.type) ||
+				visitNode(cbNode, n.name)
+			);
+		}
+		case SyntaxKind.EnumConstantDeclaration: {
+			const n = node as EnumConstantDeclaration;
+			return (
+				visitNodes(cbNode, cbNodes, n.modifiers) ||
+				visitNode(cbNode, n.name) ||
+				visitNodes(cbNode, cbNodes, n.arguments) ||
+				visitNodes(cbNode, cbNodes, n.classBody)
+			);
+		}
+		case SyntaxKind.Block:
+			return visitNodes(cbNode, cbNodes, (node as Block).statements);
 		case SyntaxKind.AnnotationTypeDeclaration: {
 			const n = node as AnnotationTypeDeclaration;
 			return (
