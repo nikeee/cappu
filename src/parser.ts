@@ -94,6 +94,7 @@ import {
 	type TypeParameter,
 	type TypeReference,
 	type VariableDeclarator,
+	type VarType,
 	type WhileStatement,
 	type WildcardType,
 } from "./types.ts";
@@ -496,6 +497,17 @@ function parseEntityName(): EntityName {
 
 // Types
 
+// 'var' (SE10) is valid as a local-variable / parameter / resource type. Used in
+// those positions instead of parseType so it becomes a VarType node.
+function parseTypeOrVar(): TypeNode {
+	if (isContextualKeyword("var")) {
+		const pos = getNodePos();
+		nextToken();
+		return finishNode(createNode<VarType>(SyntaxKind.VarType, pos), pos);
+	}
+	return parseType();
+}
+
 function parseType(): TypeNode {
 	let type = parseNonArrayType();
 	while (token() === SyntaxKind.OpenBracketToken) {
@@ -735,7 +747,7 @@ function parseFieldDeclaration(
 function parseParameter(): Parameter {
 	const pos = getNodePos();
 	const modifiers = parseModifiers();
-	const type = parseType();
+	const type = parseTypeOrVar();
 	const isVarArgs = parseOptional(SyntaxKind.DotDotDotToken);
 	const name = parseIdentifier();
 	const arrayRankAfterName = parseArrayRankAfterName();
@@ -1820,7 +1832,7 @@ function parseLocalVariableDeclarationRest(
 	pos: number,
 	modifiers: NodeArray<ModifierLike> | undefined,
 ): LocalVariableDeclarationStatement {
-	const type = parseType();
+	const type = parseTypeOrVar();
 	const declaratorsPos = getNodePos();
 	const declarators: VariableDeclarator[] = [parseVariableDeclarator(parseIdentifier())];
 	while (parseOptional(SyntaxKind.CommaToken)) {
@@ -2029,7 +2041,7 @@ function parseLabeledStatement(): LabeledStatement {
 function parseResource(): Resource {
 	const pos = getNodePos();
 	const modifiers = parseModifiers();
-	const type = parseType();
+	const type = parseTypeOrVar();
 	const name = parseIdentifier();
 	parseExpected(SyntaxKind.EqualsToken);
 	const initializer = parseExpression();

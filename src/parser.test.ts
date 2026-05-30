@@ -617,3 +617,32 @@ test("'module' as an ordinary identifier is still a normal class member", () => 
 	expect(sf.moduleDeclaration).toBeUndefined();
 	expect(sf.statements).toHaveLength(1);
 });
+
+// M12: SE10 var and SE13/15 text blocks
+
+test("var local variable type", () => {
+	const stmt = firstStatement("var x = 10;") as import("./types.ts").LocalVariableDeclarationStatement;
+	expect(stmt.kind).toBe(SyntaxKind.LocalVariableDeclarationStatement);
+	expect(stmt.type.kind).toBe(SyntaxKind.VarType);
+});
+
+test("var in an enhanced for", () => {
+	const fe = firstStatement("for (var item : items) use(item);") as import("./types.ts").ForEachStatement;
+	expect(fe.kind).toBe(SyntaxKind.ForEachStatement);
+	expect(fe.parameter.type.kind).toBe(SyntaxKind.VarType);
+});
+
+test("var in try-with-resources", () => {
+	expectNoErrors("class C { void m() { try (var r = open()) {} } }");
+});
+
+test("var is still usable as an identifier", () => {
+	const e = expr("var.length") ;
+	expect(e.kind).toBe(SyntaxKind.PropertyAccessExpression);
+});
+
+test("text block literal", () => {
+	const sf = expectNoErrors('class C { String s = """\n  hello\n  """; }');
+	const field = (sf.statements[0] as ClassDeclaration).members[0] as FieldDeclaration;
+	expect(field.declarators[0]!.initializer?.kind).toBe(SyntaxKind.TextBlockLiteral);
+});

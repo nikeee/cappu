@@ -388,7 +388,12 @@ export type EntityName = Identifier | QualifiedName;
 
 // Type nodes
 
-export type TypeNode = PrimitiveType | TypeReference | ArrayType | WildcardType;
+export type TypeNode = PrimitiveType | TypeReference | ArrayType | WildcardType | VarType;
+
+/** The SE10 inferred local-variable type 'var'. */
+export interface VarType extends Node {
+	readonly kind: SyntaxKind.VarType;
+}
 
 export interface PrimitiveType extends Node {
 	readonly kind: SyntaxKind.PrimitiveType;
