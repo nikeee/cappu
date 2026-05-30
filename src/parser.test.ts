@@ -3,14 +3,19 @@ import { expect } from "expect";
 
 import { forEachChild, parseSourceFile } from "./parser.ts";
 import {
+	type ArrayType,
 	type ClassDeclaration,
 	type EnumDeclaration,
 	type Identifier,
 	type InterfaceDeclaration,
 	type Node,
 	NodeFlags,
+	type PrimitiveType,
 	type QualifiedName,
 	SyntaxKind,
+	type TypeNode,
+	type TypeReference,
+	type WildcardType,
 } from "./types.ts";
 
 function parse(text: string) {
@@ -183,4 +188,78 @@ test("forEachChild walks a class header", () => {
 	expect(kinds).toContain(SyntaxKind.Identifier); // name
 	expect(kinds).toContain(SyntaxKind.TypeParameter);
 	expect(kinds).toContain(SyntaxKind.TypeReference); // extends Bar
+});
+
+// M5: types parser (exercised through the extends/type-parameter positions)
+
+function extendsType(typeText: string): { type: TypeNode; errors: number } {
+	const sf = parse(`class C extends ${typeText} {}`);
+	const cls = sf.statements[0] as ClassDeclaration;
+	return { type: cls.extendsType!, errors: sf.parseDiagnostics.length };
+}
+
+test("simple and qualified type references", () => {
+	const simple = extendsType("Foo");
+	expect(simple.errors).toBe(0);
+	expect(simple.type.kind).toBe(SyntaxKind.TypeReference);
+	expect(((simple.type as TypeReference).typeName as Identifier).text).toBe("Foo");
+
+	const qualified = extendsType("java.util.List");
+	expect((qualified.type as TypeReference).typeName.kind).toBe(SyntaxKind.QualifiedName);
+});
+
+test("type arguments", () => {
+	expect((extendsType("List<String>").type as TypeReference).typeArguments).toHaveLength(1);
+	expect((extendsType("Map<K, V>").type as TypeReference).typeArguments).toHaveLength(2);
+});
+
+test("deeply nested generics close one '>' at a time", () => {
+	const { type, errors } = extendsType("A<B<C<D>>>");
+	expect(errors).toBe(0);
+	const a = type as TypeReference;
+	const b = a.typeArguments![0] as TypeReference;
+	const c = b.typeArguments![0] as TypeReference;
+	const d = c.typeArguments![0] as TypeReference;
+	expect((d.typeName as Identifier).text).toBe("D");
+});
+
+test("wildcards: bounded and unbounded", () => {
+	const { type, errors } = extendsType("Map<? extends Number, ? super Integer>");
+	expect(errors).toBe(0);
+	const args = (type as TypeReference).typeArguments!;
+	expect((args[0] as WildcardType).hasExtends).toBe(true);
+	expect((args[1] as WildcardType).hasSuper).toBe(true);
+
+	const unbounded = (extendsType("List<?>").type as TypeReference).typeArguments![0] as WildcardType;
+	expect(unbounded.kind).toBe(SyntaxKind.WildcardType);
+	expect(unbounded.hasExtends).toBe(false);
+	expect(unbounded.hasSuper).toBe(false);
+});
+
+test("diamond yields an empty type-argument list", () => {
+	const { type, errors } = extendsType("List<>");
+	expect(errors).toBe(0);
+	expect((type as TypeReference).typeArguments).toHaveLength(0);
+});
+
+test("array types nest per '[]'", () => {
+	const { type, errors } = extendsType("int[][]");
+	expect(errors).toBe(0);
+	const outer = type as ArrayType;
+	expect(outer.kind).toBe(SyntaxKind.ArrayType);
+	const inner = outer.elementType as ArrayType;
+	expect(inner.kind).toBe(SyntaxKind.ArrayType);
+	expect((inner.elementType as PrimitiveType).keyword).toBe(SyntaxKind.IntKeyword);
+});
+
+test("array inside a type argument", () => {
+	const { type, errors } = extendsType("List<int[]>");
+	expect(errors).toBe(0);
+	expect((type as TypeReference).typeArguments![0]!.kind).toBe(SyntaxKind.ArrayType);
+});
+
+test("type parameter with multiple bounds", () => {
+	const sf = expectNoErrors("class C<T extends A & B & java.io.Serializable> {}");
+	const cls = sf.statements[0] as ClassDeclaration;
+	expect(cls.typeParameters![0]!.constraint).toHaveLength(3);
 });
