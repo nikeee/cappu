@@ -571,3 +571,49 @@ test("type-use annotations are accepted", () => {
 test("lambda as a field initializer parses cleanly", () => {
 	expectNoErrors("class C { Runnable r = (int a) -> { int b = a; }; }");
 });
+
+// M11: SE9 modules (module-info.java)
+
+test("module declaration with all directive kinds", () => {
+	const sf = expectNoErrors(
+		"open module com.acme.app {\n" +
+			"  requires java.base;\n" +
+			"  requires transitive java.sql;\n" +
+			"  requires static lombok;\n" +
+			"  exports com.acme.api;\n" +
+			"  exports com.acme.internal to com.acme.app, com.acme.test;\n" +
+			"  opens com.acme.impl;\n" +
+			"  uses com.acme.spi.Service;\n" +
+			"  provides com.acme.spi.Service with com.acme.impl.ServiceImpl;\n" +
+			"}",
+	);
+	const mod = sf.moduleDeclaration!;
+	expect(mod.kind).toBe(SyntaxKind.ModuleDeclaration);
+	expect(mod.isOpen).toBe(true);
+	expect(mod.directives).toHaveLength(8);
+	expect(mod.directives.map((d) => d.kind)).toEqual([
+		SyntaxKind.RequiresDirective,
+		SyntaxKind.RequiresDirective,
+		SyntaxKind.RequiresDirective,
+		SyntaxKind.ExportsDirective,
+		SyntaxKind.ExportsDirective,
+		SyntaxKind.OpensDirective,
+		SyntaxKind.UsesDirective,
+		SyntaxKind.ProvidesDirective,
+	]);
+});
+
+test("plain (non-open) module and requires modifiers", () => {
+	const sf = expectNoErrors("module m { requires transitive a.b; }");
+	const mod = sf.moduleDeclaration!;
+	expect(mod.isOpen).toBe(false);
+	const req = mod.directives[0] as import("./types.ts").RequiresDirective;
+	expect(req.isTransitive).toBe(true);
+});
+
+test("'module' as an ordinary identifier is still a normal class member", () => {
+	// not a module-info: a class whose field is named 'module'
+	const sf = expectNoErrors("class C { int module; }");
+	expect(sf.moduleDeclaration).toBeUndefined();
+	expect(sf.statements).toHaveLength(1);
+});

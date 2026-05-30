@@ -321,11 +321,53 @@ export interface SourceFile extends Node {
 	/** Top-level type declarations (and any stray empty statements). */
 	readonly statements: NodeArray<Statement>;
 	readonly endOfFileToken: Token<SyntaxKind.EndOfFileToken>;
+	/** Present instead of statements when this is a module-info.java (SE9). */
+	readonly moduleDeclaration?: ModuleDeclaration;
 	fileName: string;
 	text: string;
 	parseDiagnostics: Diagnostic[];
 	/** Diagnostics produced by the binder (duplicate declarations, ...). */
 	bindDiagnostics?: Diagnostic[];
+}
+
+// Module declarations (SE9)
+
+export interface ModuleDeclaration extends Node {
+	readonly kind: SyntaxKind.ModuleDeclaration;
+	readonly annotations?: NodeArray<Annotation>;
+	readonly isOpen: boolean;
+	readonly name: EntityName;
+	readonly directives: NodeArray<Node>;
+}
+
+export interface RequiresDirective extends Node {
+	readonly kind: SyntaxKind.RequiresDirective;
+	readonly isTransitive: boolean;
+	readonly isStatic: boolean;
+	readonly name: EntityName;
+}
+
+export interface ExportsDirective extends Node {
+	readonly kind: SyntaxKind.ExportsDirective;
+	readonly packageName: EntityName;
+	readonly toModules?: NodeArray<EntityName>;
+}
+
+export interface OpensDirective extends Node {
+	readonly kind: SyntaxKind.OpensDirective;
+	readonly packageName: EntityName;
+	readonly toModules?: NodeArray<EntityName>;
+}
+
+export interface UsesDirective extends Node {
+	readonly kind: SyntaxKind.UsesDirective;
+	readonly typeName: EntityName;
+}
+
+export interface ProvidesDirective extends Node {
+	readonly kind: SyntaxKind.ProvidesDirective;
+	readonly typeName: EntityName;
+	readonly withTypes: NodeArray<EntityName>;
 }
 
 // Names

@@ -54,6 +54,12 @@ import {
 	type LambdaExpression,
 	type LiteralExpression,
 	type MethodReferenceExpression,
+	type ModuleDeclaration,
+	type ExportsDirective,
+	type OpensDirective,
+	type ProvidesDirective,
+	type RequiresDirective,
+	type UsesDirective,
 	type LocalVariableDeclarationStatement,
 	type MethodDeclaration,
 	type ModifierLike,
@@ -107,6 +113,7 @@ const enum ParsingContext {
 	ArrayInitializerElements,
 	SwitchClauses,
 	CatchClauses,
+	ModuleDirectives,
 	Count,
 }
 
@@ -291,6 +298,7 @@ function isListTerminator(context: ParsingContext): boolean {
 		case ParsingContext.EnumConstants:
 		case ParsingContext.SwitchClauses:
 		case ParsingContext.ArrayInitializerElements:
+		case ParsingContext.ModuleDirectives:
 			return token() === SyntaxKind.CloseBraceToken;
 		case ParsingContext.Parameters:
 		case ParsingContext.ArgumentExpressions:
@@ -346,6 +354,8 @@ function isListElement(context: ParsingContext, _inErrorRecovery: boolean): bool
 			return token() === SyntaxKind.OpenBraceToken || isStartOfExpression();
 		case ParsingContext.SwitchClauses:
 			return token() === SyntaxKind.CaseKeyword || token() === SyntaxKind.DefaultKeyword;
+		case ParsingContext.ModuleDirectives:
+			return isModuleDirectiveStart();
 		default:
 			return false;
 	}
@@ -1063,6 +1073,138 @@ function parseImportDeclarations(): NodeArray<ImportDeclaration> {
 		list.push(parseImportDeclaration());
 	}
 	return createNodeArray(list, pos);
+}
+
+// Contextual keywords (var, yield, module, requires, ...) are scanned as
+// identifiers; these helpers recognize them by text.
+function isContextualKeyword(text: string): boolean {
+	return token() === SyntaxKind.Identifier && scanner.getTokenValue() === text;
+}
+
+function parseContextualKeyword(text: string): boolean {
+	if (isContextualKeyword(text)) {
+		nextToken();
+		return true;
+	}
+	return false;
+}
+
+// Module declarations (SE9, module-info.java)
+
+function parseModuleName(): EntityName {
+	return parseEntityName();
+}
+
+function parseRequiresDirective(): RequiresDirective {
+	const pos = getNodePos();
+	parseContextualKeyword("requires");
+	let isTransitive = false;
+	let isStatic = false;
+	// 'static' is a real keyword, 'transitive' is contextual; either order.
+	while (true) {
+		if (token() === SyntaxKind.StaticKeyword) {
+			isStatic = true;
+			nextToken();
+		} else if (isContextualKeyword("transitive")) {
+			isTransitive = true;
+			nextToken();
+		} else {
+			break;
+		}
+	}
+	const name = parseModuleName();
+	parseExpected(SyntaxKind.SemicolonToken);
+	const node = createNode<RequiresDirective>(SyntaxKind.RequiresDirective, pos);
+	node.isTransitive = isTransitive;
+	node.isStatic = isStatic;
+	node.name = name;
+	return finishNode(node, pos);
+}
+
+function parseToModuleList(): NodeArray<EntityName> {
+	const pos = getNodePos();
+	const list: EntityName[] = [parseModuleName()];
+	while (parseOptional(SyntaxKind.CommaToken)) {
+		list.push(parseModuleName());
+	}
+	return createNodeArray(list, pos);
+}
+
+function parseExportsOrOpensDirective(
+	keyword: "exports" | "opens",
+	kind: SyntaxKind.ExportsDirective | SyntaxKind.OpensDirective,
+): ExportsDirective | OpensDirective {
+	const pos = getNodePos();
+	parseContextualKeyword(keyword);
+	const packageName = parseEntityName();
+	const toModules = parseContextualKeyword("to") ? parseToModuleList() : undefined;
+	parseExpected(SyntaxKind.SemicolonToken);
+	const node = createNode<ExportsDirective | OpensDirective>(kind, pos);
+	node.packageName = packageName;
+	node.toModules = toModules;
+	return finishNode(node, pos);
+}
+
+function parseUsesDirective(): UsesDirective {
+	const pos = getNodePos();
+	parseContextualKeyword("uses");
+	const typeName = parseEntityName();
+	parseExpected(SyntaxKind.SemicolonToken);
+	const node = createNode<UsesDirective>(SyntaxKind.UsesDirective, pos);
+	node.typeName = typeName;
+	return finishNode(node, pos);
+}
+
+function parseProvidesDirective(): ProvidesDirective {
+	const pos = getNodePos();
+	parseContextualKeyword("provides");
+	const typeName = parseEntityName();
+	parseContextualKeyword("with");
+	const withPos = getNodePos();
+	const withTypes: EntityName[] = [parseEntityName()];
+	while (parseOptional(SyntaxKind.CommaToken)) {
+		withTypes.push(parseEntityName());
+	}
+	parseExpected(SyntaxKind.SemicolonToken);
+	const node = createNode<ProvidesDirective>(SyntaxKind.ProvidesDirective, pos);
+	node.typeName = typeName;
+	node.withTypes = createNodeArray(withTypes, withPos);
+	return finishNode(node, pos);
+}
+
+function isModuleDirectiveStart(): boolean {
+	return (
+		isContextualKeyword("requires") ||
+		isContextualKeyword("exports") ||
+		isContextualKeyword("opens") ||
+		isContextualKeyword("uses") ||
+		isContextualKeyword("provides")
+	);
+}
+
+function parseModuleDirective(): Node {
+	if (isContextualKeyword("requires")) return parseRequiresDirective();
+	if (isContextualKeyword("exports")) return parseExportsOrOpensDirective("exports", SyntaxKind.ExportsDirective);
+	if (isContextualKeyword("opens")) return parseExportsOrOpensDirective("opens", SyntaxKind.OpensDirective);
+	if (isContextualKeyword("uses")) return parseUsesDirective();
+	return parseProvidesDirective();
+}
+
+function parseModuleDeclaration(): ModuleDeclaration {
+	const pos = getNodePos();
+	const annotations = parseAnnotations();
+	const isOpen = parseContextualKeyword("open");
+	parseContextualKeyword("module");
+	const name = parseModuleName();
+	parseExpected(SyntaxKind.OpenBraceToken);
+	const directives = parseList(ParsingContext.ModuleDirectives, parseModuleDirective);
+	parseExpected(SyntaxKind.CloseBraceToken);
+	const node = createNode<ModuleDeclaration>(SyntaxKind.ModuleDeclaration, pos);
+	node.annotations = annotations;
+	node.isOpen = isOpen;
+	node.name = name;
+	node.directives = directives;
+	return finishNode(node, pos);
 }
 
 // Top-level elements: an empty statement or a type declaration.
@@ -2009,12 +2151,21 @@ export function parseSourceFile(fileNameArg: string, text: string): SourceFile {
 	const pos = getNodePos();
 	const packageDeclaration = token() === SyntaxKind.PackageKeyword ? parsePackageDeclaration() : undefined;
 	const imports = parseImportDeclarations();
-	const statements = parseList(ParsingContext.SourceElements, parseSourceElement);
+
+	let moduleDeclaration: ModuleDeclaration | undefined;
+	let statements: NodeArray<Statement>;
+	if ((isContextualKeyword("open") || isContextualKeyword("module")) && !packageDeclaration) {
+		moduleDeclaration = parseModuleDeclaration();
+		statements = createNodeArray<Statement>([], getNodePos());
+	} else {
+		statements = parseList(ParsingContext.SourceElements, parseSourceElement);
+	}
 	const endOfFileToken = parseExpectedToken<Token<SyntaxKind.EndOfFileToken>>(SyntaxKind.EndOfFileToken);
 
 	const node = createNode<SourceFile>(SyntaxKind.SourceFile, pos);
 	node.packageDeclaration = packageDeclaration;
 	node.imports = imports;
+	node.moduleDeclaration = moduleDeclaration;
 	node.statements = statements;
 	node.endOfFileToken = endOfFileToken;
 	node.fileName = fileName;
@@ -2057,9 +2208,34 @@ export function forEachChild<T>(
 			return (
 				visitNode(cbNode, sf.packageDeclaration) ||
 				visitNodes(cbNode, cbNodes, sf.imports) ||
+				visitNode(cbNode, sf.moduleDeclaration) ||
 				visitNodes(cbNode, cbNodes, sf.statements) ||
 				visitNode(cbNode, sf.endOfFileToken)
 			);
+		}
+		case SyntaxKind.ModuleDeclaration: {
+			const n = node as ModuleDeclaration;
+			return (
+				visitNodes(cbNode, cbNodes, n.annotations) ||
+				visitNode(cbNode, n.name) ||
+				visitNodes(cbNode, cbNodes, n.directives)
+			);
+		}
+		case SyntaxKind.RequiresDirective:
+			return visitNode(cbNode, (node as RequiresDirective).name);
+		case SyntaxKind.ExportsDirective: {
+			const n = node as ExportsDirective;
+			return visitNode(cbNode, n.packageName) || visitNodes(cbNode, cbNodes, n.toModules);
+		}
+		case SyntaxKind.OpensDirective: {
+			const n = node as OpensDirective;
+			return visitNode(cbNode, n.packageName) || visitNodes(cbNode, cbNodes, n.toModules);
+		}
+		case SyntaxKind.UsesDirective:
+			return visitNode(cbNode, (node as UsesDirective).typeName);
+		case SyntaxKind.ProvidesDirective: {
+			const n = node as ProvidesDirective;
+			return visitNode(cbNode, n.typeName) || visitNodes(cbNode, cbNodes, n.withTypes);
 		}
 		case SyntaxKind.PackageDeclaration: {
 			const n = node as PackageDeclaration;
