@@ -632,6 +632,23 @@ export interface ClassLiteralExpression extends Expression {
 	readonly type: TypeNode;
 }
 
+export interface LambdaExpression extends Expression {
+	readonly kind: SyntaxKind.LambdaExpression;
+	/** Each parameter is an Identifier (inferred type) or a Parameter (explicit). */
+	readonly parameters: NodeArray<Node>;
+	/** Expression or Block. */
+	readonly body: Node;
+}
+
+export interface MethodReferenceExpression extends Expression {
+	readonly kind: SyntaxKind.MethodReferenceExpression;
+	readonly expression: Expression;
+	readonly typeArguments?: NodeArray<TypeNode | WildcardType>;
+	/** Undefined for a constructor reference (Foo::new). */
+	readonly name?: Identifier;
+	readonly isConstructorRef: boolean;
+}
+
 // Statements
 
 export interface Block extends Statement {

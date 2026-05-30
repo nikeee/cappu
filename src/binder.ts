@@ -73,6 +73,7 @@ function isContainer(node: Node): boolean {
 		case SyntaxKind.ForStatement:
 		case SyntaxKind.ForEachStatement:
 		case SyntaxKind.CatchClause:
+		case SyntaxKind.LambdaExpression:
 			return true;
 		default:
 			return isTypeDeclaration(node);

@@ -51,7 +51,9 @@ import {
 	type InstanceofExpression,
 	type InterfaceDeclaration,
 	type LabeledStatement,
+	type LambdaExpression,
 	type LiteralExpression,
+	type MethodReferenceExpression,
 	type LocalVariableDeclarationStatement,
 	type MethodDeclaration,
 	type ModifierLike,
@@ -320,7 +322,8 @@ function isStartOfType(): boolean {
 		isPrimitiveTypeKeyword(token()) ||
 		token() === SyntaxKind.VoidKeyword ||
 		token() === SyntaxKind.Identifier ||
-		token() === SyntaxKind.QuestionToken
+		token() === SyntaxKind.QuestionToken ||
+		token() === SyntaxKind.AtToken // type-use annotation (SE8)
 	);
 }
 
@@ -498,6 +501,11 @@ function parseType(): TypeNode {
 
 function parseNonArrayType(): TypeNode {
 	const pos = getNodePos();
+	// SE8 type-use annotations (JSR 308), e.g. @NonNull String. Consumed but not
+	// yet attached to the type node.
+	while (token() === SyntaxKind.AtToken && !isAnnotationTypeDeclarationStart()) {
+		parseAnnotation();
+	}
 	if (isPrimitiveTypeKeyword(token()) || token() === SyntaxKind.VoidKeyword) {
 		const keyword = token();
 		nextToken();
@@ -1147,7 +1155,60 @@ function parseExpression(): Expression {
 	return parseAssignmentExpression();
 }
 
+// SE8 lambda detection: "x ->" (concise) or "( ... ) ->".
+function isLambdaStart(): boolean {
+	if (token() === SyntaxKind.Identifier) {
+		return lookAhead(() => (nextToken(), token() === SyntaxKind.ArrowToken));
+	}
+	if (token() === SyntaxKind.OpenParenToken) {
+		return lookAhead(() => {
+			nextToken(); // '('
+			let depth = 1;
+			while (depth > 0 && token() !== SyntaxKind.EndOfFileToken) {
+				if (token() === SyntaxKind.OpenParenToken) depth++;
+				else if (token() === SyntaxKind.CloseParenToken) depth--;
+				nextToken();
+			}
+			return token() === SyntaxKind.ArrowToken;
+		});
+	}
+	return false;
+}
+
+function parseLambdaParameter(): Node {
+	// Inferred parameter: a bare identifier followed by ',' or ')'.
+	if (
+		token() === SyntaxKind.Identifier &&
+		lookAhead(() => (nextToken(), token() === SyntaxKind.CommaToken || token() === SyntaxKind.CloseParenToken))
+	) {
+		return parseIdentifier();
+	}
+	return parseParameter();
+}
+
+function parseLambdaExpression(): LambdaExpression {
+	const pos = getNodePos();
+	let parameters: NodeArray<Node>;
+	if (token() === SyntaxKind.OpenParenToken) {
+		parseExpected(SyntaxKind.OpenParenToken);
+		parameters = parseDelimitedList(ParsingContext.Parameters, parseLambdaParameter);
+		parseExpected(SyntaxKind.CloseParenToken);
+	} else {
+		const paramsPos = getNodePos();
+		parameters = createNodeArray<Node>([parseIdentifier()], paramsPos);
+	}
+	parseExpected(SyntaxKind.ArrowToken);
+	const body = token() === SyntaxKind.OpenBraceToken ? parseBlock() : parseExpression();
+	const node = createNode<LambdaExpression>(SyntaxKind.LambdaExpression, pos);
+	node.parameters = parameters;
+	node.body = body;
+	return finishNode(node, pos);
+}
+
 function parseAssignmentExpression(): Expression {
+	if (isLambdaStart()) {
+		return parseLambdaExpression();
+	}
 	const pos = getNodePos();
 	const left = parseConditionalExpression();
 	reScanGreaterIfNeeded();
@@ -1436,6 +1497,23 @@ function parseExpressionSuffixes(start: Expression): Expression {
 			node.expression = expr;
 			node.typeArguments = undefined;
 			node.arguments = args;
+			expr = finishNode(node, exprPos);
+			continue;
+		}
+		if (token() === SyntaxKind.ColonColonToken) {
+			// SE8 method reference: expr :: [typeArgs] (Identifier | new)
+			nextToken();
+			const typeArguments = token() === SyntaxKind.LessThanToken ? parseTypeArguments() : undefined;
+			const node = createNode<MethodReferenceExpression>(SyntaxKind.MethodReferenceExpression, exprPos);
+			node.expression = expr;
+			node.typeArguments = typeArguments;
+			if (parseOptional(SyntaxKind.NewKeyword)) {
+				node.isConstructorRef = true;
+				node.name = undefined;
+			} else {
+				node.isConstructorRef = false;
+				node.name = parseIdentifier();
+			}
 			expr = finishNode(node, exprPos);
 			continue;
 		}
@@ -2243,6 +2321,18 @@ export function forEachChild<T>(
 			return visitNodes(cbNode, cbNodes, (node as ArrayInitializer).elements);
 		case SyntaxKind.ClassLiteralExpression:
 			return visitNode(cbNode, (node as ClassLiteralExpression).type);
+		case SyntaxKind.LambdaExpression: {
+			const n = node as LambdaExpression;
+			return visitNodes(cbNode, cbNodes, n.parameters) || visitNode(cbNode, n.body);
+		}
+		case SyntaxKind.MethodReferenceExpression: {
+			const n = node as MethodReferenceExpression;
+			return (
+				visitNode(cbNode, n.expression) ||
+				visitNodes(cbNode, cbNodes, n.typeArguments) ||
+				visitNode(cbNode, n.name)
+			);
+		}
 		case SyntaxKind.AnnotationTypeDeclaration: {
 			const n = node as AnnotationTypeDeclaration;
 			return (

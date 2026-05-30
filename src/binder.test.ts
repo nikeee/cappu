@@ -1,15 +1,16 @@
 import { test } from "node:test";
 import { expect } from "expect";
 
-import { parseSourceFile } from "./parser.ts";
+import { forEachChild, parseSourceFile } from "./parser.ts";
 import { bindSourceFile } from "./binder.ts";
 import {
 	type ClassDeclaration,
 	type EnumDeclaration,
 	type MethodDeclaration,
 	type Node,
-	SymbolFlags,
 	type SourceFile,
+	SymbolFlags,
+	SyntaxKind,
 } from "./types.ts";
 
 function bindJava(text: string): SourceFile {
@@ -100,4 +101,18 @@ test("local class is scoped to the enclosing block", () => {
 	const sf = bindJava("class C { void m() { class Local {} } }");
 	const method = sf.locals!.get("C")!.members!.get("m")!.declarations![0] as MethodDeclaration;
 	expect(method.body!.locals?.get("Local")?.flags).toBe(SymbolFlags.Class);
+});
+
+test("typed lambda parameters are scoped to the lambda (M10)", () => {
+	const sf = bindJava("class C { Runnable r = (int a) -> { int b = a; }; }");
+	expect(sf.bindDiagnostics).toHaveLength(0);
+	// Find the lambda node and check its parameter scope.
+	let lambda: Node | undefined;
+	const visit = (n: Node): undefined => {
+		if (n.kind === SyntaxKind.LambdaExpression) lambda = n;
+		forEachChild(n, visit);
+		return undefined;
+	};
+	visit(sf);
+	expect(lambda?.locals?.get("a")?.flags).toBe(SymbolFlags.Parameter);
 });

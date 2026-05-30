@@ -533,3 +533,41 @@ test("field initializers are now parsed as expressions", () => {
 	const field = (sf.statements[0] as ClassDeclaration).members[0] as FieldDeclaration;
 	expect(field.declarators[0]!.initializer?.kind).toBe(SyntaxKind.BinaryExpression);
 });
+
+// M10: SE8 lambdas, method references, default methods, type annotations
+
+test("lambda expressions: concise, parenthesized, typed, block body", () => {
+	expect(expr("x -> x + 1").kind).toBe(SyntaxKind.LambdaExpression);
+	expect(expr("() -> 42").kind).toBe(SyntaxKind.LambdaExpression);
+	const two = expr("(a, b) -> a + b") as import("./types.ts").LambdaExpression;
+	expect(two.parameters).toHaveLength(2);
+	const typed = expr("(int a, String b) -> { return a; }") as import("./types.ts").LambdaExpression;
+	expect(typed.parameters).toHaveLength(2);
+	expect(typed.body.kind).toBe(SyntaxKind.Block);
+});
+
+test("a parenthesized expression is not mistaken for a lambda", () => {
+	expect(expr("(a + b) * c").kind).toBe(SyntaxKind.BinaryExpression);
+});
+
+test("method references", () => {
+	const m = expr("Foo::bar") as import("./types.ts").MethodReferenceExpression;
+	expect(m.kind).toBe(SyntaxKind.MethodReferenceExpression);
+	expect(m.isConstructorRef).toBe(false);
+	const ctor = expr("ArrayList::new") as import("./types.ts").MethodReferenceExpression;
+	expect(ctor.isConstructorRef).toBe(true);
+	expect(expr("this::handle").kind).toBe(SyntaxKind.MethodReferenceExpression);
+	expect(expr("java.util.Objects::requireNonNull").kind).toBe(SyntaxKind.MethodReferenceExpression);
+});
+
+test("default and static interface methods", () => {
+	expectNoErrors("interface I { default int x() { return 1; } static int y() { return 2; } }");
+});
+
+test("type-use annotations are accepted", () => {
+	expectNoErrors("class C { java.util.List<@NonNull String> xs; }");
+});
+
+test("lambda as a field initializer parses cleanly", () => {
+	expectNoErrors("class C { Runnable r = (int a) -> { int b = a; }; }");
+});
