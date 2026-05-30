@@ -7,14 +7,15 @@
     "ci": "oxlint --type-aware --deny-warnings -f github",
     "lint": "oxlint",
     "format": "oxfmt",
-    "test": "node --test"
+    "test": "tsx --test"
   },
   "keywords": [],
   "author": "Niklas Mollenhauer <nikeee@outlook.com>",
   "license": "MIT",
   "type": "module",
   "private": true,
-  "dependencies": {
-    "expect": "^30.4.1"
+  "devDependencies": {
+    "expect": "^30.4.1",
+    "tsx": "^4.22.3"
   }
 }
