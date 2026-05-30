@@ -291,6 +291,8 @@ export interface Node extends ReadonlyTextRange {
 	flags: NodeFlags;
 	parent: Node;
 	symbol?: Symbol;
+	/** Symbol table for the scope this node introduces (set by the binder). */
+	locals?: SymbolTable;
 }
 
 export interface NodeArray<T extends Node> extends ReadonlyArray<T>, ReadonlyTextRange {
@@ -322,6 +324,8 @@ export interface SourceFile extends Node {
 	fileName: string;
 	text: string;
 	parseDiagnostics: Diagnostic[];
+	/** Diagnostics produced by the binder (duplicate declarations, ...). */
+	bindDiagnostics?: Diagnostic[];
 }
 
 // Names

@@ -45,6 +45,9 @@ export const Diagnostics = {
 	Hexadecimal_digit_expected: diag(1104, "Hexadecimal_digit_expected", "Hexadecimal digit expected."),
 	Binary_digit_expected: diag(1105, "Binary_digit_expected", "Binary digit expected."),
 	Invalid_character: diag(1106, "Invalid_character", "Invalid character."),
+
+	// Binder
+	Duplicate_declaration_0: diag(1200, "Duplicate_declaration_0", "Duplicate declaration '{0}'."),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */
