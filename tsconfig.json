@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+
+    "lib": ["esnext"],
+    "types": ["node"],
+
+    "skipLibCheck": true,
+    "skipDefaultLibCheck": true,
+
+    "erasableSyntaxOnly": true,
+
+    "resolveJsonModule": true,
+
+    "strict": true,
+    "noImplicitReturns": true,
+    "verbatimModuleSyntax": true,
+    "forceConsistentCasingInFileNames": true,
+    // "noUncheckedIndexedAccess": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "noFallthroughCasesInSwitch": true,
+
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src"]
+}
