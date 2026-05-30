@@ -332,7 +332,7 @@ export interface Diagnostic extends ReadonlyTextRange {
 
 // Scanner
 
-export type ErrorCallback = (message: DiagnosticMessage, length: number) => void;
+export type ErrorCallback = (message: DiagnosticMessage, pos: number, length: number) => void;
 
 export interface Scanner {
 	scan(): SyntaxKind;
