@@ -301,12 +301,6 @@ export interface Token<TKind extends SyntaxKind> extends Node {
 	readonly kind: TKind;
 }
 
-export interface Identifier extends Node {
-	readonly kind: SyntaxKind.Identifier;
-	/** The identifier text as written in the source. */
-	readonly text: string;
-}
-
 // Nodes
 //
 // Concrete node interfaces are added per milestone as the corresponding parser
@@ -320,12 +314,141 @@ export interface EmptyStatement extends Statement {
 
 export interface SourceFile extends Node {
 	readonly kind: SyntaxKind.SourceFile;
+	readonly packageDeclaration?: PackageDeclaration;
+	readonly imports: NodeArray<ImportDeclaration>;
+	/** Top-level type declarations (and any stray empty statements). */
 	readonly statements: NodeArray<Statement>;
 	readonly endOfFileToken: Token<SyntaxKind.EndOfFileToken>;
 	fileName: string;
 	text: string;
 	parseDiagnostics: Diagnostic[];
 }
+
+// Names
+
+export interface Identifier extends Node {
+	readonly kind: SyntaxKind.Identifier;
+	/** The identifier text as written in the source. */
+	readonly text: string;
+}
+
+export interface QualifiedName extends Node {
+	readonly kind: SyntaxKind.QualifiedName;
+	readonly left: EntityName;
+	readonly right: Identifier;
+}
+
+export type EntityName = Identifier | QualifiedName;
+
+// Type nodes
+
+export type TypeNode = PrimitiveType | TypeReference | ArrayType | WildcardType;
+
+export interface PrimitiveType extends Node {
+	readonly kind: SyntaxKind.PrimitiveType;
+	/** The primitive keyword kind (IntKeyword, BooleanKeyword, VoidKeyword, ...). */
+	readonly keyword: SyntaxKind;
+}
+
+export interface TypeReference extends Node {
+	readonly kind: SyntaxKind.TypeReference;
+	readonly typeName: EntityName;
+	readonly typeArguments?: NodeArray<TypeNode | WildcardType>;
+}
+
+export interface ArrayType extends Node {
+	readonly kind: SyntaxKind.ArrayType;
+	readonly elementType: TypeNode;
+}
+
+export interface WildcardType extends Node {
+	readonly kind: SyntaxKind.WildcardType;
+	readonly hasExtends: boolean;
+	readonly hasSuper: boolean;
+	readonly type?: TypeNode;
+}
+
+export interface TypeParameter extends Node {
+	readonly kind: SyntaxKind.TypeParameter;
+	readonly name: Identifier;
+	/** Bounds: T extends A & B. */
+	readonly constraint?: NodeArray<TypeNode>;
+}
+
+// Modifiers and annotations
+
+/** A modifier is either a keyword token (public, static, ...) or an annotation. */
+export type ModifierLike = Node;
+
+export interface Annotation extends Node {
+	readonly kind: SyntaxKind.Annotation;
+	readonly typeName: EntityName;
+	readonly args?: NodeArray<AnnotationArgument>;
+}
+
+export interface AnnotationArgument extends Node {
+	readonly kind: SyntaxKind.AnnotationArgument;
+	readonly name?: Identifier;
+	readonly value: Node;
+}
+
+// Compilation unit pieces
+
+export interface PackageDeclaration extends Node {
+	readonly kind: SyntaxKind.PackageDeclaration;
+	readonly annotations?: NodeArray<Annotation>;
+	readonly name: EntityName;
+}
+
+export interface ImportDeclaration extends Node {
+	readonly kind: SyntaxKind.ImportDeclaration;
+	readonly isStatic: boolean;
+	readonly name: EntityName;
+	readonly isOnDemand: boolean;
+}
+
+// Type declarations. They are statements so they can appear both at the top
+// level and (as local classes) inside blocks.
+
+export interface ClassDeclaration extends Statement {
+	readonly kind: SyntaxKind.ClassDeclaration;
+	readonly modifiers?: NodeArray<ModifierLike>;
+	readonly name: Identifier;
+	readonly typeParameters?: NodeArray<TypeParameter>;
+	readonly extendsType?: TypeNode;
+	readonly implementsTypes?: NodeArray<TypeNode>;
+	readonly members: NodeArray<Node>;
+}
+
+export interface InterfaceDeclaration extends Statement {
+	readonly kind: SyntaxKind.InterfaceDeclaration;
+	readonly modifiers?: NodeArray<ModifierLike>;
+	readonly name: Identifier;
+	readonly typeParameters?: NodeArray<TypeParameter>;
+	readonly extendsTypes?: NodeArray<TypeNode>;
+	readonly members: NodeArray<Node>;
+}
+
+export interface EnumDeclaration extends Statement {
+	readonly kind: SyntaxKind.EnumDeclaration;
+	readonly modifiers?: NodeArray<ModifierLike>;
+	readonly name: Identifier;
+	readonly implementsTypes?: NodeArray<TypeNode>;
+	readonly members: NodeArray<Node>;
+}
+
+export interface AnnotationTypeDeclaration extends Statement {
+	readonly kind: SyntaxKind.AnnotationTypeDeclaration;
+	readonly modifiers?: NodeArray<ModifierLike>;
+	readonly name: Identifier;
+	readonly members: NodeArray<Node>;
+}
+
+export type TypeDeclaration =
+	| ClassDeclaration
+	| InterfaceDeclaration
+	| EnumDeclaration
+	| AnnotationTypeDeclaration;
 
 // Diagnostics
 

@@ -13,19 +13,36 @@ import { createScanner } from "./scanner.ts";
 import { createDiagnostic } from "./diagnostics.ts";
 import { Diagnostics } from "./diagnostics.ts";
 import { tokenToString } from "./utilities.ts";
+import { isModifierKeyword, isPrimitiveTypeKeyword } from "./utilities.ts";
 import {
+	type Annotation,
+	type ArrayType,
+	type ClassDeclaration,
 	type Diagnostic,
 	type DiagnosticMessage,
 	type EmptyStatement,
+	type EntityName,
+	type EnumDeclaration,
 	type Identifier,
+	type ImportDeclaration,
+	type InterfaceDeclaration,
+	type AnnotationTypeDeclaration,
+	type ModifierLike,
 	type Node,
 	type NodeArray,
 	NodeFlags,
+	type PackageDeclaration,
+	type PrimitiveType,
+	type QualifiedName,
 	type Scanner,
 	type SourceFile,
 	type Statement,
 	SyntaxKind,
 	type Token,
+	type TypeNode,
+	type TypeParameter,
+	type TypeReference,
+	type WildcardType,
 } from "./types.ts";
 
 type Mutable<T> = { -readonly [P in keyof T]: T[P] };
@@ -218,8 +235,26 @@ function isListTerminator(context: ParsingContext): boolean {
 }
 
 function isStartOfStatement(): boolean {
-	// M3 stub: only the empty statement is recognized. Extended in M7.
-	return token() === SyntaxKind.SemicolonToken;
+	// M4: empty statements and type declarations. Full statement set in M7.
+	switch (token()) {
+		case SyntaxKind.SemicolonToken:
+		case SyntaxKind.ClassKeyword:
+		case SyntaxKind.InterfaceKeyword:
+		case SyntaxKind.EnumKeyword:
+		case SyntaxKind.AtToken:
+			return true;
+		default:
+			return isModifierKeyword(token());
+	}
+}
+
+function isStartOfType(): boolean {
+	return (
+		isPrimitiveTypeKeyword(token()) ||
+		token() === SyntaxKind.VoidKeyword ||
+		token() === SyntaxKind.Identifier ||
+		token() === SyntaxKind.QuestionToken
+	);
 }
 
 function isListElement(context: ParsingContext, _inErrorRecovery: boolean): boolean {
@@ -227,6 +262,10 @@ function isListElement(context: ParsingContext, _inErrorRecovery: boolean): bool
 		case ParsingContext.SourceElements:
 		case ParsingContext.BlockStatements:
 			return isStartOfStatement();
+		case ParsingContext.TypeArguments:
+			return isStartOfType();
+		case ParsingContext.TypeParameters:
+			return token() === SyntaxKind.Identifier || token() === SyntaxKind.AtToken;
 		default:
 			return false;
 	}
@@ -289,7 +328,367 @@ function parseList<T extends Node>(context: ParsingContext, parseElement: () => 
 	return createNodeArray(list, listPos);
 }
 
-// Statements (M3: empty statement only)
+// A comma-separated list. Mirrors the TS parseDelimitedList, including the
+// "skip a token if no progress" guard so malformed input cannot loop.
+function parseDelimitedList<T extends Node>(context: ParsingContext, parseElement: () => T): NodeArray<T> {
+	const saveParsingContext = parsingContext;
+	parsingContext |= 1 << context;
+	const list: T[] = [];
+	const listPos = getNodePos();
+
+	while (true) {
+		if (isListElement(context, /*inErrorRecovery*/ false)) {
+			const startPos = scanner.getTokenFullStart();
+			list.push(parseElement());
+			if (parseOptional(SyntaxKind.CommaToken)) {
+				continue;
+			}
+			if (isListTerminator(context)) {
+				break;
+			}
+			parseExpected(SyntaxKind.CommaToken);
+			if (startPos === scanner.getTokenFullStart()) {
+				nextToken();
+			}
+			continue;
+		}
+		if (isListTerminator(context)) {
+			break;
+		}
+		if (abortParsingListOrMoveToNextToken(context)) {
+			break;
+		}
+	}
+
+	parsingContext = saveParsingContext;
+	return createNodeArray(list, listPos);
+}
+
+// Names
+
+function makeQualifiedName(left: EntityName, right: Identifier): QualifiedName {
+	const node = createNode<QualifiedName>(SyntaxKind.QualifiedName, left.pos);
+	node.left = left;
+	node.right = right;
+	return finishNode(node, left.pos);
+}
+
+function parseEntityName(): EntityName {
+	let entity: EntityName = parseIdentifier();
+	while (parseOptional(SyntaxKind.DotToken)) {
+		entity = makeQualifiedName(entity, parseIdentifier());
+	}
+	return entity;
+}
+
+// Types
+
+function parseType(): TypeNode {
+	let type = parseNonArrayType();
+	while (token() === SyntaxKind.OpenBracketToken) {
+		const pos = type.pos;
+		nextToken(); // '['
+		parseExpected(SyntaxKind.CloseBracketToken);
+		const array = createNode<ArrayType>(SyntaxKind.ArrayType, pos);
+		array.elementType = type;
+		type = finishNode(array, pos);
+	}
+	return type;
+}
+
+function parseNonArrayType(): TypeNode {
+	const pos = getNodePos();
+	if (isPrimitiveTypeKeyword(token()) || token() === SyntaxKind.VoidKeyword) {
+		const keyword = token();
+		nextToken();
+		const node = createNode<PrimitiveType>(SyntaxKind.PrimitiveType, pos);
+		node.keyword = keyword;
+		return finishNode(node, pos);
+	}
+	if (token() === SyntaxKind.QuestionToken) {
+		return parseWildcardType();
+	}
+	const typeName = parseEntityName();
+	const typeArguments = token() === SyntaxKind.LessThanToken ? parseTypeArguments() : undefined;
+	const node = createNode<TypeReference>(SyntaxKind.TypeReference, pos);
+	node.typeName = typeName;
+	node.typeArguments = typeArguments;
+	return finishNode(node, pos);
+}
+
+function parseWildcardType(): WildcardType {
+	const pos = getNodePos();
+	parseExpected(SyntaxKind.QuestionToken);
+	let hasExtends = false;
+	let hasSuper = false;
+	let type: TypeNode | undefined;
+	if (parseOptional(SyntaxKind.ExtendsKeyword)) {
+		hasExtends = true;
+		type = parseType();
+	} else if (parseOptional(SyntaxKind.SuperKeyword)) {
+		hasSuper = true;
+		type = parseType();
+	}
+	const node = createNode<WildcardType>(SyntaxKind.WildcardType, pos);
+	node.hasExtends = hasExtends;
+	node.hasSuper = hasSuper;
+	node.type = type;
+	return finishNode(node, pos);
+}
+
+function parseTypeArgument(): TypeNode | WildcardType {
+	return token() === SyntaxKind.QuestionToken ? parseWildcardType() : parseType();
+}
+
+// The closing '>' is always a single GreaterThanToken (the scanner never munches
+// '>>'), so nested type arguments close naturally one '>' at a time.
+function parseTypeArguments(): NodeArray<TypeNode | WildcardType> {
+	parseExpected(SyntaxKind.LessThanToken);
+	const list = parseDelimitedList(ParsingContext.TypeArguments, parseTypeArgument);
+	parseExpected(SyntaxKind.GreaterThanToken);
+	return list;
+}
+
+function parseTypeParameter(): TypeParameter {
+	const pos = getNodePos();
+	const name = parseIdentifier();
+	let constraint: NodeArray<TypeNode> | undefined;
+	if (parseOptional(SyntaxKind.ExtendsKeyword)) {
+		const bounds: TypeNode[] = [parseType()];
+		const boundsPos = bounds[0]!.pos;
+		while (parseOptional(SyntaxKind.AmpersandToken)) {
+			bounds.push(parseType());
+		}
+		constraint = createNodeArray(bounds, boundsPos);
+	}
+	const node = createNode<TypeParameter>(SyntaxKind.TypeParameter, pos);
+	node.name = name;
+	node.constraint = constraint;
+	return finishNode(node, pos);
+}
+
+function parseTypeParameters(): NodeArray<TypeParameter> | undefined {
+	if (token() !== SyntaxKind.LessThanToken) {
+		return undefined;
+	}
+	parseExpected(SyntaxKind.LessThanToken);
+	const list = parseDelimitedList(ParsingContext.TypeParameters, parseTypeParameter);
+	parseExpected(SyntaxKind.GreaterThanToken);
+	return list;
+}
+
+function parseTypeList(): NodeArray<TypeNode> {
+	const pos = getNodePos();
+	const list: TypeNode[] = [parseType()];
+	while (parseOptional(SyntaxKind.CommaToken)) {
+		list.push(parseType());
+	}
+	return createNodeArray(list, pos);
+}
+
+// Modifiers and annotations
+
+function isAnnotationTypeDeclarationStart(): boolean {
+	// Current token is '@'. It introduces an @interface declaration (rather than
+	// an annotation used as a modifier) when followed by 'interface'.
+	return scanner.lookAhead(() => scanner.scan()) === SyntaxKind.InterfaceKeyword;
+}
+
+function parseModifiers(): NodeArray<ModifierLike> | undefined {
+	const pos = getNodePos();
+	const list: ModifierLike[] = [];
+	while (true) {
+		if (isModifierKeyword(token())) {
+			list.push(parseTokenNode());
+			continue;
+		}
+		if (token() === SyntaxKind.AtToken && !isAnnotationTypeDeclarationStart()) {
+			list.push(parseAnnotation());
+			continue;
+		}
+		break;
+	}
+	return list.length ? createNodeArray(list, pos) : undefined;
+}
+
+function parseAnnotation(): Annotation {
+	const pos = getNodePos();
+	parseExpected(SyntaxKind.AtToken);
+	const typeName = parseEntityName();
+	// Argument values are expressions; their parsing is added in M8. For now the
+	// parenthesized argument list is skipped so headers parse cleanly.
+	if (token() === SyntaxKind.OpenParenToken) {
+		skipBalanced(SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+	}
+	const node = createNode<Annotation>(SyntaxKind.Annotation, pos);
+	node.typeName = typeName;
+	node.args = undefined;
+	return finishNode(node, pos);
+}
+
+// Consume a balanced run of open/close tokens, used to skip not-yet-parsed
+// bodies (class members in M4, annotation arguments). The opening token is the
+// current token.
+function skipBalanced(open: SyntaxKind, close: SyntaxKind): void {
+	nextToken(); // opening token
+	let depth = 1;
+	while (depth > 0 && token() !== SyntaxKind.EndOfFileToken) {
+		if (token() === open) {
+			depth++;
+		} else if (token() === close) {
+			depth--;
+			if (depth === 0) {
+				nextToken();
+				return;
+			}
+		}
+		nextToken();
+	}
+}
+
+// Type declarations
+
+function parseTypeBodyStub(): NodeArray<Node> {
+	const pos = getNodePos();
+	if (token() === SyntaxKind.OpenBraceToken) {
+		// Members are parsed in M6; for now skip the balanced body.
+		skipBalanced(SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken);
+	} else {
+		parseExpected(SyntaxKind.OpenBraceToken);
+	}
+	return createNodeArray<Node>([], pos);
+}
+
+function parseClassDeclaration(pos: number, modifiers: NodeArray<ModifierLike> | undefined): ClassDeclaration {
+	parseExpected(SyntaxKind.ClassKeyword);
+	const name = parseIdentifier();
+	const typeParameters = parseTypeParameters();
+	const extendsType = parseOptional(SyntaxKind.ExtendsKeyword) ? parseType() : undefined;
+	const implementsTypes = parseOptional(SyntaxKind.ImplementsKeyword) ? parseTypeList() : undefined;
+	const members = parseTypeBodyStub();
+	const node = createNode<ClassDeclaration>(SyntaxKind.ClassDeclaration, pos);
+	node.modifiers = modifiers;
+	node.name = name;
+	node.typeParameters = typeParameters;
+	node.extendsType = extendsType;
+	node.implementsTypes = implementsTypes;
+	node.members = members;
+	return finishNode(node, pos);
+}
+
+function parseInterfaceDeclaration(
+	pos: number,
+	modifiers: NodeArray<ModifierLike> | undefined,
+): InterfaceDeclaration {
+	parseExpected(SyntaxKind.InterfaceKeyword);
+	const name = parseIdentifier();
+	const typeParameters = parseTypeParameters();
+	const extendsTypes = parseOptional(SyntaxKind.ExtendsKeyword) ? parseTypeList() : undefined;
+	const members = parseTypeBodyStub();
+	const node = createNode<InterfaceDeclaration>(SyntaxKind.InterfaceDeclaration, pos);
+	node.modifiers = modifiers;
+	node.name = name;
+	node.typeParameters = typeParameters;
+	node.extendsTypes = extendsTypes;
+	node.members = members;
+	return finishNode(node, pos);
+}
+
+function parseEnumDeclaration(pos: number, modifiers: NodeArray<ModifierLike> | undefined): EnumDeclaration {
+	parseExpected(SyntaxKind.EnumKeyword);
+	const name = parseIdentifier();
+	const implementsTypes = parseOptional(SyntaxKind.ImplementsKeyword) ? parseTypeList() : undefined;
+	const members = parseTypeBodyStub();
+	const node = createNode<EnumDeclaration>(SyntaxKind.EnumDeclaration, pos);
+	node.modifiers = modifiers;
+	node.name = name;
+	node.implementsTypes = implementsTypes;
+	node.members = members;
+	return finishNode(node, pos);
+}
+
+function parseAnnotationTypeDeclaration(
+	pos: number,
+	modifiers: NodeArray<ModifierLike> | undefined,
+): AnnotationTypeDeclaration {
+	parseExpected(SyntaxKind.AtToken);
+	parseExpected(SyntaxKind.InterfaceKeyword);
+	const name = parseIdentifier();
+	const members = parseTypeBodyStub();
+	const node = createNode<AnnotationTypeDeclaration>(SyntaxKind.AnnotationTypeDeclaration, pos);
+	node.modifiers = modifiers;
+	node.name = name;
+	node.members = members;
+	return finishNode(node, pos);
+}
+
+function parseTypeDeclaration(): Statement {
+	const pos = getNodePos();
+	const modifiers = parseModifiers();
+	switch (token()) {
+		case SyntaxKind.ClassKeyword:
+			return parseClassDeclaration(pos, modifiers);
+		case SyntaxKind.InterfaceKeyword:
+			return parseInterfaceDeclaration(pos, modifiers);
+		case SyntaxKind.EnumKeyword:
+			return parseEnumDeclaration(pos, modifiers);
+		case SyntaxKind.AtToken:
+			return parseAnnotationTypeDeclaration(pos, modifiers);
+		default: {
+			parseErrorAtCurrentToken(Diagnostics.Declaration_expected);
+			if (token() !== SyntaxKind.EndOfFileToken) {
+				nextToken();
+			}
+			return createMissingNode<Statement>(SyntaxKind.ClassDeclaration, /*reportAtCurrentPosition*/ false);
+		}
+	}
+}
+
+// Compilation unit pieces
+
+function parsePackageDeclaration(): PackageDeclaration {
+	const pos = getNodePos();
+	parseExpected(SyntaxKind.PackageKeyword);
+	const name = parseEntityName();
+	parseExpected(SyntaxKind.SemicolonToken);
+	const node = createNode<PackageDeclaration>(SyntaxKind.PackageDeclaration, pos);
+	node.name = name;
+	node.annotations = undefined;
+	return finishNode(node, pos);
+}
+
+function parseImportDeclaration(): ImportDeclaration {
+	const pos = getNodePos();
+	parseExpected(SyntaxKind.ImportKeyword);
+	const isStatic = parseOptional(SyntaxKind.StaticKeyword);
+	let name: EntityName = parseIdentifier();
+	let isOnDemand = false;
+	while (parseOptional(SyntaxKind.DotToken)) {
+		if (token() === SyntaxKind.AsteriskToken) {
+			nextToken();
+			isOnDemand = true;
+			break;
+		}
+		name = makeQualifiedName(name, parseIdentifier());
+	}
+	parseExpected(SyntaxKind.SemicolonToken);
+	const node = createNode<ImportDeclaration>(SyntaxKind.ImportDeclaration, pos);
+	node.isStatic = isStatic;
+	node.name = name;
+	node.isOnDemand = isOnDemand;
+	return finishNode(node, pos);
+}
+
+function parseImportDeclarations(): NodeArray<ImportDeclaration> {
+	const pos = getNodePos();
+	const list: ImportDeclaration[] = [];
+	while (token() === SyntaxKind.ImportKeyword) {
+		list.push(parseImportDeclaration());
+	}
+	return createNodeArray(list, pos);
+}
+
+// Statements (M4: empty statement + type declarations)
 
 function parseEmptyStatement(): EmptyStatement {
 	const pos = getNodePos();
@@ -298,8 +697,10 @@ function parseEmptyStatement(): EmptyStatement {
 }
 
 function parseStatement(): Statement {
-	// M3 stub matching isStartOfStatement.
-	return parseEmptyStatement();
+	if (token() === SyntaxKind.SemicolonToken) {
+		return parseEmptyStatement();
+	}
+	return parseTypeDeclaration();
 }
 
 // Entry point
@@ -314,10 +715,14 @@ export function parseSourceFile(fileNameArg: string, text: string): SourceFile {
 
 	nextToken();
 	const pos = getNodePos();
+	const packageDeclaration = token() === SyntaxKind.PackageKeyword ? parsePackageDeclaration() : undefined;
+	const imports = parseImportDeclarations();
 	const statements = parseList(ParsingContext.SourceElements, parseStatement);
 	const endOfFileToken = parseExpectedToken<Token<SyntaxKind.EndOfFileToken>>(SyntaxKind.EndOfFileToken);
 
 	const node = createNode<SourceFile>(SyntaxKind.SourceFile, pos);
+	node.packageDeclaration = packageDeclaration;
+	node.imports = imports;
 	node.statements = statements;
 	node.endOfFileToken = endOfFileToken;
 	node.fileName = fileName;
@@ -357,10 +762,79 @@ export function forEachChild<T>(
 	switch (node.kind) {
 		case SyntaxKind.SourceFile: {
 			const sf = node as SourceFile;
-			return visitNodes(cbNode, cbNodes, sf.statements) || visitNode(cbNode, sf.endOfFileToken);
+			return (
+				visitNode(cbNode, sf.packageDeclaration) ||
+				visitNodes(cbNode, cbNodes, sf.imports) ||
+				visitNodes(cbNode, cbNodes, sf.statements) ||
+				visitNode(cbNode, sf.endOfFileToken)
+			);
+		}
+		case SyntaxKind.PackageDeclaration: {
+			const n = node as PackageDeclaration;
+			return visitNodes(cbNode, cbNodes, n.annotations) || visitNode(cbNode, n.name);
+		}
+		case SyntaxKind.ImportDeclaration:
+			return visitNode(cbNode, (node as ImportDeclaration).name);
+		case SyntaxKind.QualifiedName: {
+			const n = node as QualifiedName;
+			return visitNode(cbNode, n.left) || visitNode(cbNode, n.right);
+		}
+		case SyntaxKind.ClassDeclaration: {
+			const n = node as ClassDeclaration;
+			return (
+				visitNodes(cbNode, cbNodes, n.modifiers) ||
+				visitNode(cbNode, n.name) ||
+				visitNodes(cbNode, cbNodes, n.typeParameters) ||
+				visitNode(cbNode, n.extendsType) ||
+				visitNodes(cbNode, cbNodes, n.implementsTypes) ||
+				visitNodes(cbNode, cbNodes, n.members)
+			);
+		}
+		case SyntaxKind.InterfaceDeclaration: {
+			const n = node as InterfaceDeclaration;
+			return (
+				visitNodes(cbNode, cbNodes, n.modifiers) ||
+				visitNode(cbNode, n.name) ||
+				visitNodes(cbNode, cbNodes, n.typeParameters) ||
+				visitNodes(cbNode, cbNodes, n.extendsTypes) ||
+				visitNodes(cbNode, cbNodes, n.members)
+			);
+		}
+		case SyntaxKind.EnumDeclaration: {
+			const n = node as EnumDeclaration;
+			return (
+				visitNodes(cbNode, cbNodes, n.modifiers) ||
+				visitNode(cbNode, n.name) ||
+				visitNodes(cbNode, cbNodes, n.implementsTypes) ||
+				visitNodes(cbNode, cbNodes, n.members)
+			);
+		}
+		case SyntaxKind.AnnotationTypeDeclaration: {
+			const n = node as AnnotationTypeDeclaration;
+			return (
+				visitNodes(cbNode, cbNodes, n.modifiers) ||
+				visitNode(cbNode, n.name) ||
+				visitNodes(cbNode, cbNodes, n.members)
+			);
+		}
+		case SyntaxKind.TypeReference: {
+			const n = node as TypeReference;
+			return visitNode(cbNode, n.typeName) || visitNodes(cbNode, cbNodes, n.typeArguments);
+		}
+		case SyntaxKind.ArrayType:
+			return visitNode(cbNode, (node as ArrayType).elementType);
+		case SyntaxKind.WildcardType:
+			return visitNode(cbNode, (node as WildcardType).type);
+		case SyntaxKind.TypeParameter: {
+			const n = node as TypeParameter;
+			return visitNode(cbNode, n.name) || visitNodes(cbNode, cbNodes, n.constraint);
+		}
+		case SyntaxKind.Annotation: {
+			const n = node as Annotation;
+			return visitNode(cbNode, n.typeName) || visitNodes(cbNode, cbNodes, n.args);
 		}
 		default:
-			// Tokens and childless nodes (EmptyStatement, Identifier, ...).
+			// Tokens and childless nodes (EmptyStatement, Identifier, PrimitiveType).
 			return undefined;
 	}
 }
