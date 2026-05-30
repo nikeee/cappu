@@ -307,6 +307,26 @@ export interface Identifier extends Node {
 	readonly text: string;
 }
 
+// Nodes
+//
+// Concrete node interfaces are added per milestone as the corresponding parser
+// is written. The base set below is what the parser core (M3) needs.
+
+export interface Statement extends Node {}
+
+export interface EmptyStatement extends Statement {
+	readonly kind: SyntaxKind.EmptyStatement;
+}
+
+export interface SourceFile extends Node {
+	readonly kind: SyntaxKind.SourceFile;
+	readonly statements: NodeArray<Statement>;
+	readonly endOfFileToken: Token<SyntaxKind.EndOfFileToken>;
+	fileName: string;
+	text: string;
+	parseDiagnostics: Diagnostic[];
+}
+
 // Diagnostics
 
 export const enum DiagnosticCategory {
