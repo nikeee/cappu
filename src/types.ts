@@ -453,11 +453,6 @@ export type TypeDeclaration =
 
 // Members
 
-export interface Block extends Statement {
-	readonly kind: SyntaxKind.Block;
-	readonly statements: NodeArray<Statement>;
-}
-
 export interface VariableDeclarator extends Node {
 	readonly kind: SyntaxKind.VariableDeclarator;
 	readonly name: Identifier;
@@ -514,8 +509,251 @@ export interface EnumConstantDeclaration extends Node {
 	readonly kind: SyntaxKind.EnumConstantDeclaration;
 	readonly modifiers?: NodeArray<ModifierLike>;
 	readonly name: Identifier;
-	readonly arguments?: NodeArray<Node>;
+	readonly arguments?: NodeArray<Expression>;
 	readonly classBody?: NodeArray<Node>;
+}
+
+// Expressions
+
+export interface Expression extends Node {}
+
+export interface LiteralExpression extends Expression {
+	readonly kind:
+		| SyntaxKind.NumericLiteral
+		| SyntaxKind.StringLiteral
+		| SyntaxKind.CharacterLiteral
+		| SyntaxKind.TextBlockLiteral;
+	readonly value: string;
+}
+
+export interface ParenthesizedExpression extends Expression {
+	readonly kind: SyntaxKind.ParenthesizedExpression;
+	readonly expression: Expression;
+}
+
+export interface PrefixUnaryExpression extends Expression {
+	readonly kind: SyntaxKind.PrefixUnaryExpression;
+	readonly operator: SyntaxKind;
+	readonly operand: Expression;
+}
+
+export interface PostfixUnaryExpression extends Expression {
+	readonly kind: SyntaxKind.PostfixUnaryExpression;
+	readonly operand: Expression;
+	readonly operator: SyntaxKind;
+}
+
+export interface BinaryExpression extends Expression {
+	readonly kind: SyntaxKind.BinaryExpression;
+	readonly left: Expression;
+	readonly operatorToken: SyntaxKind;
+	readonly right: Expression;
+}
+
+export interface AssignmentExpression extends Expression {
+	readonly kind: SyntaxKind.AssignmentExpression;
+	readonly left: Expression;
+	readonly operatorToken: SyntaxKind;
+	readonly right: Expression;
+}
+
+export interface ConditionalExpression extends Expression {
+	readonly kind: SyntaxKind.ConditionalExpression;
+	readonly condition: Expression;
+	readonly whenTrue: Expression;
+	readonly whenFalse: Expression;
+}
+
+export interface InstanceofExpression extends Expression {
+	readonly kind: SyntaxKind.InstanceofExpression;
+	readonly expression: Expression;
+	readonly type: TypeNode;
+}
+
+export interface CastExpression extends Expression {
+	readonly kind: SyntaxKind.CastExpression;
+	readonly type: TypeNode;
+	readonly expression: Expression;
+}
+
+export interface PropertyAccessExpression extends Expression {
+	readonly kind: SyntaxKind.PropertyAccessExpression;
+	readonly expression: Expression;
+	readonly name: Identifier;
+}
+
+export interface ElementAccessExpression extends Expression {
+	readonly kind: SyntaxKind.ElementAccessExpression;
+	readonly expression: Expression;
+	readonly argumentExpression: Expression;
+}
+
+export interface CallExpression extends Expression {
+	readonly kind: SyntaxKind.CallExpression;
+	readonly expression: Expression;
+	readonly typeArguments?: NodeArray<TypeNode | WildcardType>;
+	readonly arguments: NodeArray<Expression>;
+}
+
+export interface ObjectCreationExpression extends Expression {
+	readonly kind: SyntaxKind.ObjectCreationExpression;
+	readonly type: TypeNode;
+	readonly arguments: NodeArray<Expression>;
+	readonly classBody?: NodeArray<Node>;
+}
+
+export interface ArrayCreationExpression extends Expression {
+	readonly kind: SyntaxKind.ArrayCreationExpression;
+	readonly elementType: TypeNode;
+	readonly dimensions: NodeArray<Expression>;
+	readonly additionalRank: number;
+	readonly initializer?: ArrayInitializer;
+}
+
+export interface ArrayInitializer extends Expression {
+	readonly kind: SyntaxKind.ArrayInitializer;
+	readonly elements: NodeArray<Expression>;
+}
+
+export interface ThisExpression extends Expression {
+	readonly kind: SyntaxKind.ThisExpression;
+}
+
+export interface SuperExpression extends Expression {
+	readonly kind: SyntaxKind.SuperExpression;
+}
+
+export interface ClassLiteralExpression extends Expression {
+	readonly kind: SyntaxKind.ClassLiteralExpression;
+	readonly type: TypeNode;
+}
+
+// Statements
+
+export interface Block extends Statement {
+	readonly kind: SyntaxKind.Block;
+	readonly statements: NodeArray<Statement>;
+}
+
+export interface LocalVariableDeclarationStatement extends Statement {
+	readonly kind: SyntaxKind.LocalVariableDeclarationStatement;
+	readonly modifiers?: NodeArray<ModifierLike>;
+	readonly type: TypeNode;
+	readonly declarators: NodeArray<VariableDeclarator>;
+}
+
+export interface ExpressionStatement extends Statement {
+	readonly kind: SyntaxKind.ExpressionStatement;
+	readonly expression: Expression;
+}
+
+export interface IfStatement extends Statement {
+	readonly kind: SyntaxKind.IfStatement;
+	readonly condition: Expression;
+	readonly thenStatement: Statement;
+	readonly elseStatement?: Statement;
+}
+
+export interface WhileStatement extends Statement {
+	readonly kind: SyntaxKind.WhileStatement;
+	readonly condition: Expression;
+	readonly statement: Statement;
+}
+
+export interface DoStatement extends Statement {
+	readonly kind: SyntaxKind.DoStatement;
+	readonly statement: Statement;
+	readonly condition: Expression;
+}
+
+export interface ForStatement extends Statement {
+	readonly kind: SyntaxKind.ForStatement;
+	readonly initializer?: Node;
+	readonly condition?: Expression;
+	readonly incrementors?: NodeArray<Expression>;
+	readonly statement: Statement;
+}
+
+export interface ForEachStatement extends Statement {
+	readonly kind: SyntaxKind.ForEachStatement;
+	readonly parameter: Parameter;
+	readonly expression: Expression;
+	readonly statement: Statement;
+}
+
+export interface BreakStatement extends Statement {
+	readonly kind: SyntaxKind.BreakStatement;
+	readonly label?: Identifier;
+}
+
+export interface ContinueStatement extends Statement {
+	readonly kind: SyntaxKind.ContinueStatement;
+	readonly label?: Identifier;
+}
+
+export interface ReturnStatement extends Statement {
+	readonly kind: SyntaxKind.ReturnStatement;
+	readonly expression?: Expression;
+}
+
+export interface ThrowStatement extends Statement {
+	readonly kind: SyntaxKind.ThrowStatement;
+	readonly expression: Expression;
+}
+
+export interface SynchronizedStatement extends Statement {
+	readonly kind: SyntaxKind.SynchronizedStatement;
+	readonly expression: Expression;
+	readonly body: Block;
+}
+
+export interface AssertStatement extends Statement {
+	readonly kind: SyntaxKind.AssertStatement;
+	readonly condition: Expression;
+	readonly message?: Expression;
+}
+
+export interface LabeledStatement extends Statement {
+	readonly kind: SyntaxKind.LabeledStatement;
+	readonly label: Identifier;
+	readonly statement: Statement;
+}
+
+export interface Resource extends Node {
+	readonly kind: SyntaxKind.Resource;
+	readonly modifiers?: NodeArray<ModifierLike>;
+	readonly type?: TypeNode;
+	readonly name: Identifier;
+	readonly initializer: Expression;
+}
+
+export interface CatchClause extends Node {
+	readonly kind: SyntaxKind.CatchClause;
+	/** Catch type, possibly a multi-catch union (A | B). */
+	readonly catchTypes: NodeArray<TypeNode>;
+	readonly name: Identifier;
+	readonly block: Block;
+}
+
+export interface TryStatement extends Statement {
+	readonly kind: SyntaxKind.TryStatement;
+	readonly resources?: NodeArray<Resource>;
+	readonly tryBlock: Block;
+	readonly catchClauses: NodeArray<CatchClause>;
+	readonly finallyBlock?: Block;
+}
+
+export interface SwitchClause extends Node {
+	readonly kind: SyntaxKind.SwitchClause;
+	readonly isDefault: boolean;
+	readonly labelExpression?: Expression;
+	readonly statements: NodeArray<Statement>;
+}
+
+export interface SwitchStatement extends Statement {
+	readonly kind: SyntaxKind.SwitchStatement;
+	readonly expression: Expression;
+	readonly clauses: NodeArray<SwitchClause>;
 }
 
 // Diagnostics

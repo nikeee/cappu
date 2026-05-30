@@ -373,3 +373,163 @@ test("forEachChild walks a method declaration", () => {
 	expect(kinds).toContain(SyntaxKind.Parameter);
 	expect(kinds).toContain(SyntaxKind.Block);
 });
+
+// M7 + M8: statements and expressions (parsed inside real method bodies)
+
+function methodBody(stmts: string) {
+	const sf = expectNoErrors(`class C { void m() { ${stmts} } }`);
+	const method = (sf.statements[0] as ClassDeclaration).members[0] as MethodDeclaration;
+	return method.body!.statements;
+}
+
+function firstStatement(stmts: string) {
+	return methodBody(stmts)[0]!;
+}
+
+function expr(text: string) {
+	// an expression in statement position
+	const s = firstStatement(`${text};`) as import("./types.ts").ExpressionStatement;
+	return s.expression;
+}
+
+test("local variable declarations with initializers", () => {
+	const stmts = methodBody("int x = 1, y; final String s = \"a\";");
+	expect(stmts).toHaveLength(2);
+	expect(stmts[0]!.kind).toBe(SyntaxKind.LocalVariableDeclarationStatement);
+});
+
+test("expression statements: calls, assignment, increment", () => {
+	expect(expr("foo()").kind).toBe(SyntaxKind.CallExpression);
+	expect(expr("a = b").kind).toBe(SyntaxKind.AssignmentExpression);
+	expect(expr("i++").kind).toBe(SyntaxKind.PostfixUnaryExpression);
+	expect(expr("a.b.c").kind).toBe(SyntaxKind.PropertyAccessExpression);
+	expect(expr("a.b().c[0].d").kind).toBe(SyntaxKind.PropertyAccessExpression);
+});
+
+test("binary operator precedence: a + b * c", () => {
+	const e = expr("a + b * c") as import("./types.ts").BinaryExpression;
+	expect(e.kind).toBe(SyntaxKind.BinaryExpression);
+	expect(e.operatorToken).toBe(SyntaxKind.PlusToken);
+	const right = e.right as import("./types.ts").BinaryExpression;
+	expect(right.operatorToken).toBe(SyntaxKind.AsteriskToken);
+});
+
+test("logical precedence: a || b && c groups && tighter", () => {
+	const e = expr("a || b && c") as import("./types.ts").BinaryExpression;
+	expect(e.operatorToken).toBe(SyntaxKind.BarBarToken);
+	expect((e.right as import("./types.ts").BinaryExpression).operatorToken).toBe(
+		SyntaxKind.AmpersandAmpersandToken,
+	);
+});
+
+test("shift vs relational: a << b < c", () => {
+	const e = expr("a << b < c") as import("./types.ts").BinaryExpression;
+	// '<' is lower precedence than '<<', so the top operator is '<'
+	expect(e.operatorToken).toBe(SyntaxKind.LessThanToken);
+	expect((e.left as import("./types.ts").BinaryExpression).operatorToken).toBe(
+		SyntaxKind.LessThanLessThanToken,
+	);
+});
+
+test("ternary and assignment are right-associative", () => {
+	const ternary = expr("a ? b : c ? d : e") as import("./types.ts").ConditionalExpression;
+	expect(ternary.kind).toBe(SyntaxKind.ConditionalExpression);
+	expect((ternary.whenFalse as import("./types.ts").ConditionalExpression).kind).toBe(
+		SyntaxKind.ConditionalExpression,
+	);
+	const assign = expr("a = b = c") as import("./types.ts").AssignmentExpression;
+	expect((assign.right as import("./types.ts").AssignmentExpression).kind).toBe(
+		SyntaxKind.AssignmentExpression,
+	);
+});
+
+test("compound shift assignment a >>= b", () => {
+	const e = expr("a >>= b") as import("./types.ts").AssignmentExpression;
+	expect(e.kind).toBe(SyntaxKind.AssignmentExpression);
+	expect(e.operatorToken).toBe(SyntaxKind.GreaterThanGreaterThanEqualsToken);
+});
+
+test("instanceof", () => {
+	const e = expr("o instanceof String") as import("./types.ts").InstanceofExpression;
+	expect(e.kind).toBe(SyntaxKind.InstanceofExpression);
+	expect(e.type.kind).toBe(SyntaxKind.TypeReference);
+});
+
+test("cast vs parenthesized vs subtraction", () => {
+	expect(expr("(int) x").kind).toBe(SyntaxKind.CastExpression);
+	expect(expr("(Foo) bar").kind).toBe(SyntaxKind.CastExpression);
+	expect(expr("(a)").kind).toBe(SyntaxKind.ParenthesizedExpression);
+	// (a) - b is a subtraction, not a cast
+	expect(expr("(a) - b").kind).toBe(SyntaxKind.BinaryExpression);
+});
+
+test("object, array and anonymous-class creation", () => {
+	expect(expr("new Foo(1, 2)").kind).toBe(SyntaxKind.ObjectCreationExpression);
+	expect(expr("new int[3][]").kind).toBe(SyntaxKind.ArrayCreationExpression);
+	const arr = expr("new int[]{1, 2, 3}") as import("./types.ts").ArrayCreationExpression;
+	expect(arr.initializer).toBeDefined();
+	const anon = expr("new Runnable() { public void run() {} }") as import("./types.ts").ObjectCreationExpression;
+	expect(anon.classBody).toBeDefined();
+});
+
+test("class literals and generic method calls", () => {
+	expect(expr("String.class").kind).toBe(SyntaxKind.ClassLiteralExpression);
+	expect(expr("int.class").kind).toBe(SyntaxKind.ClassLiteralExpression);
+	expect(expr("this.<String>doIt()").kind).toBe(SyntaxKind.CallExpression);
+});
+
+test("control-flow statements", () => {
+	expect(firstStatement("if (a) b(); else c();").kind).toBe(SyntaxKind.IfStatement);
+	expect(firstStatement("while (a) b();").kind).toBe(SyntaxKind.WhileStatement);
+	expect(firstStatement("do b(); while (a);").kind).toBe(SyntaxKind.DoStatement);
+	expect(firstStatement("for (int i = 0; i < n; i++) b();").kind).toBe(SyntaxKind.ForStatement);
+	expect(firstStatement("for (String s : list) b();").kind).toBe(SyntaxKind.ForEachStatement);
+	expect(firstStatement("return x;").kind).toBe(SyntaxKind.ReturnStatement);
+	expect(firstStatement("throw e;").kind).toBe(SyntaxKind.ThrowStatement);
+	expect(firstStatement("synchronized (lock) {}").kind).toBe(SyntaxKind.SynchronizedStatement);
+	expect(firstStatement("assert x > 0 : \"bad\";").kind).toBe(SyntaxKind.AssertStatement);
+});
+
+test("labeled break and continue", () => {
+	const labeled = firstStatement("outer: for (;;) break outer;") as import("./types.ts").LabeledStatement;
+	expect(labeled.kind).toBe(SyntaxKind.LabeledStatement);
+	expect(labeled.label.text).toBe("outer");
+});
+
+test("try with resources, multi-catch and finally", () => {
+	const t = firstStatement(
+		"try (Reader r = open(); Reader q = open()) { use(); } catch (IOException | RuntimeException e) { log(e); } finally { close(); }",
+	) as import("./types.ts").TryStatement;
+	expect(t.kind).toBe(SyntaxKind.TryStatement);
+	expect(t.resources).toHaveLength(2);
+	expect(t.catchClauses).toHaveLength(1);
+	expect(t.catchClauses[0]!.catchTypes).toHaveLength(2);
+	expect(t.finallyBlock).toBeDefined();
+});
+
+test("switch statement with cases and default", () => {
+	const sw = firstStatement("switch (x) { case 1: a(); break; case 2: b(); default: c(); }") as
+		import("./types.ts").SwitchStatement;
+	expect(sw.kind).toBe(SyntaxKind.SwitchStatement);
+	expect(sw.clauses).toHaveLength(3);
+	expect(sw.clauses[2]!.isDefault).toBe(true);
+});
+
+test("string switch (SE7)", () => {
+	expectNoErrors("class C { void m(String s) { switch (s) { case \"a\": break; default: } } }");
+});
+
+test("local class declaration inside a method", () => {
+	expect(firstStatement("class Local {} ").kind).toBe(SyntaxKind.ClassDeclaration);
+});
+
+test("nested blocks", () => {
+	const block = firstStatement("{ int x = 1; { int y = 2; } }");
+	expect(block.kind).toBe(SyntaxKind.Block);
+});
+
+test("field initializers are now parsed as expressions", () => {
+	const sf = expectNoErrors("class C { int x = 1 + 2; int[] a = {1, 2, 3}; }");
+	const field = (sf.statements[0] as ClassDeclaration).members[0] as FieldDeclaration;
+	expect(field.declarators[0]!.initializer?.kind).toBe(SyntaxKind.BinaryExpression);
+});
