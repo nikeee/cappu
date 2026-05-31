@@ -7,13 +7,13 @@ export { forEachChild, parseSourceFile } from "./parser.ts";
 export { bindSourceFile } from "./binder.ts";
 export { createDiagnostic, Diagnostics, formatMessage } from "./diagnostics.ts";
 export {
-	isAssignmentOperator,
-	isKeyword,
-	isLiteralKind,
-	isModifierKeyword,
-	isPrimitiveTypeKeyword,
-	isReservedWord,
-	textToKeyword,
-	tokenToString,
+  isAssignmentOperator,
+  isKeyword,
+  isLiteralKind,
+  isModifierKeyword,
+  isPrimitiveTypeKeyword,
+  isReservedWord,
+  textToKeyword,
+  tokenToString,
 } from "./utilities.ts";
 export * from "./types.ts";

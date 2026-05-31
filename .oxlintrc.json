@@ -1,4 +1,4 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "import", "promise"],
+  "plugins": ["typescript", "import", "promise"]
 }

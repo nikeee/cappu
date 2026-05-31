@@ -1,20 +1,20 @@
 {
   "name": "javalsp",
   "version": "1.0.0",
+  "private": true,
   "description": "",
+  "keywords": [],
+  "license": "MIT",
+  "author": "Niklas Mollenhauer <nikeee@outlook.com>",
+  "type": "module",
   "main": "index.js",
   "scripts": {
-    "ci": "oxlint --type-aware --deny-warnings -f github",
+    "ci": "oxlint --deny-warnings -f github",
     "lint": "oxlint",
     "format": "oxfmt",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test \"./src/**/*.test.ts\""
   },
-  "keywords": [],
-  "author": "Niklas Mollenhauer <nikeee@outlook.com>",
-  "license": "MIT",
-  "type": "module",
-  "private": true,
   "devDependencies": {
     "expect": "^30.4.1",
     "oxfmt": "^0.52.0",

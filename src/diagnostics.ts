@@ -8,67 +8,79 @@
 import { type Diagnostic, DiagnosticCategory, type DiagnosticMessage } from "./types.ts";
 
 function diag(code: number, key: string, message: string): DiagnosticMessage {
-	return { code, key, category: DiagnosticCategory.Error, message };
+  return { code, key, category: DiagnosticCategory.Error, message };
 }
 
 export const Diagnostics = {
-	_0_expected: diag(1001, "_0_expected", "'{0}' expected."),
-	Identifier_expected: diag(1002, "Identifier_expected", "Identifier expected."),
-	Declaration_or_statement_expected: diag(
-		1003,
-		"Declaration_or_statement_expected",
-		"Declaration or statement expected.",
-	),
-	Statement_expected: diag(1004, "Statement_expected", "Statement expected."),
-	Expression_expected: diag(1005, "Expression_expected", "Expression expected."),
-	Type_expected: diag(1006, "Type_expected", "Type expected."),
-	Unexpected_token: diag(1007, "Unexpected_token", "Unexpected token."),
-	Trailing_comma_not_allowed: diag(1008, "Trailing_comma_not_allowed", "Trailing comma not allowed."),
+  _0_expected: diag(1001, "_0_expected", "'{0}' expected."),
+  Identifier_expected: diag(1002, "Identifier_expected", "Identifier expected."),
+  Declaration_or_statement_expected: diag(
+    1003,
+    "Declaration_or_statement_expected",
+    "Declaration or statement expected.",
+  ),
+  Statement_expected: diag(1004, "Statement_expected", "Statement expected."),
+  Expression_expected: diag(1005, "Expression_expected", "Expression expected."),
+  Type_expected: diag(1006, "Type_expected", "Type expected."),
+  Unexpected_token: diag(1007, "Unexpected_token", "Unexpected token."),
+  Trailing_comma_not_allowed: diag(
+    1008,
+    "Trailing_comma_not_allowed",
+    "Trailing comma not allowed.",
+  ),
 
-	// Type declaration members / class body
-	Declaration_expected: diag(1020, "Declaration_expected", "Declaration expected."),
-	Parameter_declaration_expected: diag(
-		1021,
-		"Parameter_declaration_expected",
-		"Parameter declaration expected.",
-	),
+  // Type declaration members / class body
+  Declaration_expected: diag(1020, "Declaration_expected", "Declaration expected."),
+  Parameter_declaration_expected: diag(
+    1021,
+    "Parameter_declaration_expected",
+    "Parameter declaration expected.",
+  ),
 
-	// Scanner
-	Unterminated_string_literal: diag(1100, "Unterminated_string_literal", "Unterminated string literal."),
-	Unterminated_character_literal: diag(
-		1101,
-		"Unterminated_character_literal",
-		"Unterminated character literal.",
-	),
-	Unterminated_comment: diag(1102, "Unterminated_comment", "'*/' expected."),
-	Digit_expected: diag(1103, "Digit_expected", "Digit expected."),
-	Hexadecimal_digit_expected: diag(1104, "Hexadecimal_digit_expected", "Hexadecimal digit expected."),
-	Binary_digit_expected: diag(1105, "Binary_digit_expected", "Binary digit expected."),
-	Invalid_character: diag(1106, "Invalid_character", "Invalid character."),
+  // Scanner
+  Unterminated_string_literal: diag(
+    1100,
+    "Unterminated_string_literal",
+    "Unterminated string literal.",
+  ),
+  Unterminated_character_literal: diag(
+    1101,
+    "Unterminated_character_literal",
+    "Unterminated character literal.",
+  ),
+  Unterminated_comment: diag(1102, "Unterminated_comment", "'*/' expected."),
+  Digit_expected: diag(1103, "Digit_expected", "Digit expected."),
+  Hexadecimal_digit_expected: diag(
+    1104,
+    "Hexadecimal_digit_expected",
+    "Hexadecimal digit expected.",
+  ),
+  Binary_digit_expected: diag(1105, "Binary_digit_expected", "Binary digit expected."),
+  Invalid_character: diag(1106, "Invalid_character", "Invalid character."),
 
-	// Binder
-	Duplicate_declaration_0: diag(1200, "Duplicate_declaration_0", "Duplicate declaration '{0}'."),
+  // Binder
+  Duplicate_declaration_0: diag(1200, "Duplicate_declaration_0", "Duplicate declaration '{0}'."),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */
 export function formatMessage(message: DiagnosticMessage, args: readonly string[]): string {
-	return message.message.replace(/\{(\d+)\}/g, (whole, indexText: string) => {
-		const index = Number(indexText);
-		return index < args.length ? args[index]! : whole;
-	});
+  return message.message.replace(/\{(\d+)\}/g, (whole, indexText: string) => {
+    const index = Number(indexText);
+    return index < args.length ? args[index]! : whole;
+  });
 }
 
 export function createDiagnostic(
-	start: number,
-	length: number,
-	message: DiagnosticMessage,
-	...args: string[]
+  start: number,
+  length: number,
+  message: DiagnosticMessage,
+  ...args: string[]
 ): Diagnostic {
-	return {
-		pos: start,
-		end: start + length,
-		code: message.code,
-		category: message.category,
-		messageText: formatMessage(message, args),
-	};
+  return {
+    pos: start,
+    end: start + length,
+    code: message.code,
+    category: message.category,
+    messageText: formatMessage(message, args),
+  };
 }

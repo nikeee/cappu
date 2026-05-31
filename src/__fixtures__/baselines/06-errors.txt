@@ -1,0 +1,34 @@
+SourceFile [0,64]
+  ClassDeclaration [0,63]
+    Identifier "Broken" [5,12]
+    FieldDeclaration [14,25]
+      PrimitiveType [14,19]
+      VariableDeclarator [19,23]
+        Identifier "x" [19,21]
+        Identifier "" [23,23] (HasError)
+    MethodDeclaration [25,48]
+      PrimitiveType [25,31]
+      Identifier "m" [31,33]
+      Block [34,48]
+        ReturnStatement [36,45] (HasError)
+          Identifier "" [45,45] (HasError)
+    FieldDeclaration [48,51] (HasError)
+      Annotation [48,51]
+        Identifier "" [51,51] (HasError)
+      TypeReference [51,51]
+        Identifier "" [51,51] (HasError)
+      VariableDeclarator [51,51]
+        Identifier "" [51,51] (HasError)
+    FieldDeclaration [52,61] (HasError)
+      TypeReference [52,53]
+        Identifier "$" [52,53] (HasError)
+      VariableDeclarator [53,61]
+        Identifier "garbage" [53,61]
+  EndOfFileToken [63,64]
+
+Parse diagnostics:
+  [24,25] Expression expected.
+  [35,36] Parameter declaration expected.
+  [47,48] Expression expected.
+  [51,52] Invalid character.
+  [62,63] ';' expected.
