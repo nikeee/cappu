@@ -58,6 +58,7 @@ const enum Char {
   E = 0x45,
   F = 0x46,
   L = 0x4c,
+  P = 0x50,
   X = 0x58,
   Z = 0x5a,
   OpenBracket = 0x5b,
@@ -72,6 +73,7 @@ const enum Char {
   f = 0x66,
   l = 0x6c,
   n = 0x6e,
+  p = 0x70,
   r = 0x72,
   s = 0x73,
   t = 0x74,
@@ -422,10 +424,36 @@ export function createScanner(textInitial = "", onErrorInitial?: ErrorCallback):
       if (next === Char.x || next === Char.X) {
         tokenFlags |= TokenFlags.HexSpecifier;
         pos += 2;
-        if (!scanDigitsWithUnderscores(isHexDigit)) {
+        const hadDigits = scanDigitsWithUnderscores(isHexDigit);
+        // Hexadecimal floating-point literal: 0x1.8p3, 0x1p-1023, 0x.5p1
+        let isHexFloat = false;
+        if (text.charCodeAt(pos) === Char.Dot) {
+          isHexFloat = true;
+          pos++;
+          scanDigitsWithUnderscores(isHexDigit);
+        } else if (!hadDigits) {
           error(Diagnostics.Hexadecimal_digit_expected, pos, 0);
         }
-        scanIntegerSuffix();
+        if (text.charCodeAt(pos) === Char.p || text.charCodeAt(pos) === Char.P) {
+          isHexFloat = true;
+          pos++;
+          if (text.charCodeAt(pos) === Char.Plus || text.charCodeAt(pos) === Char.Minus) pos++;
+          if (!scanDigitsWithUnderscores(isDigit)) {
+            error(Diagnostics.Digit_expected, pos, 0);
+          }
+        }
+        if (isHexFloat) {
+          const suffix = text.charCodeAt(pos);
+          if (suffix === Char.f || suffix === Char.F) {
+            tokenFlags |= TokenFlags.FloatSuffix;
+            pos++;
+          } else if (suffix === Char.d || suffix === Char.D) {
+            tokenFlags |= TokenFlags.DoubleSuffix;
+            pos++;
+          }
+        } else {
+          scanIntegerSuffix();
+        }
         return finishNumber();
       }
       if (next === Char.b || next === Char.B) {

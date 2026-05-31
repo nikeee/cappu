@@ -1440,6 +1440,7 @@ function isStartOfExpression(): boolean {
     case SyntaxKind.ThisKeyword:
     case SyntaxKind.SuperKeyword:
     case SyntaxKind.NewKeyword:
+    case SyntaxKind.SwitchKeyword: // SE14 switch expression
     case SyntaxKind.Identifier:
     case SyntaxKind.OpenParenToken:
     case SyntaxKind.ExclamationToken:
@@ -1689,6 +1690,7 @@ function isStartOfReferenceCastOperand(): boolean {
     case SyntaxKind.ThisKeyword:
     case SyntaxKind.SuperKeyword:
     case SyntaxKind.NewKeyword:
+    case SyntaxKind.SwitchKeyword:
     case SyntaxKind.ExclamationToken:
     case SyntaxKind.TildeToken:
       return true;
@@ -1849,6 +1851,43 @@ function parseExpressionSuffixes(start: Expression): Expression {
       continue;
     }
     if (token() === SyntaxKind.OpenBracketToken) {
+      // Empty brackets here mean an array class literal: Foo[].class,
+      // Map.Entry[][].class. Non-empty brackets are an element access.
+      if (lookAhead(() => (nextToken(), token() === SyntaxKind.CloseBracketToken))) {
+        let rank = 0;
+        while (
+          token() === SyntaxKind.OpenBracketToken &&
+          lookAhead(() => (nextToken(), token() === SyntaxKind.CloseBracketToken))
+        ) {
+          nextToken();
+          parseExpected(SyntaxKind.CloseBracketToken);
+          rank++;
+        }
+        parseExpected(SyntaxKind.DotToken);
+        parseExpected(SyntaxKind.ClassKeyword);
+        const entity =
+          expressionToEntityName(expr) ??
+          createMissingNode<Identifier>(SyntaxKind.Identifier, false);
+        let typeNode: TypeNode = finishNode(
+          Object.assign(createNode<TypeReference>(SyntaxKind.TypeReference, exprPos), {
+            typeName: entity,
+            typeArguments: undefined,
+          }),
+          exprPos,
+        );
+        for (let i = 0; i < rank; i++) {
+          typeNode = finishNode(
+            Object.assign(createNode<ArrayType>(SyntaxKind.ArrayType, exprPos), {
+              elementType: typeNode,
+            }),
+            exprPos,
+          );
+        }
+        const node = createNode<ClassLiteralExpression>(SyntaxKind.ClassLiteralExpression, exprPos);
+        node.type = typeNode;
+        expr = finishNode(node, exprPos);
+        continue;
+      }
       nextToken();
       const argumentExpression = parseExpression();
       parseExpected(SyntaxKind.CloseBracketToken);
@@ -2033,13 +2072,10 @@ function parseStatement(): Statement {
     case SyntaxKind.EnumKeyword:
       return parseTypeDeclaration();
   }
-  // SE14 yield statement (contextual). Only when 'yield' is followed by the
-  // start of an expression and not '(' (so "yield(...)" stays a call to a
-  // method named yield); otherwise 'yield' is an ordinary identifier.
-  if (
-    isContextualKeyword("yield") &&
-    lookAhead(() => (nextToken(), isStartOfExpression() && token() !== SyntaxKind.OpenParenToken))
-  ) {
+  // SE14 yield statement (contextual): 'yield' at statement start followed by
+  // the start of an expression (incl. "yield (x)" and "yield () -> ..."). 'yield'
+  // remains usable as an identifier elsewhere (types, names, member access).
+  if (isContextualKeyword("yield") && lookAhead(() => (nextToken(), isStartOfExpression()))) {
     return parseYieldStatement();
   }
   if (
@@ -2288,15 +2324,26 @@ function parseLabeledStatement(): LabeledStatement {
 function parseResource(): Resource {
   const pos = getNodePos();
   const modifiers = parseModifiers();
-  const type = parseTypeOrVar();
-  const name = parseIdentifier();
-  parseExpected(SyntaxKind.EqualsToken);
-  const initializer = parseExpression();
   const node = createNode<Resource>(SyntaxKind.Resource, pos);
   node.modifiers = modifiers;
-  node.type = type;
-  node.name = name;
-  node.initializer = initializer;
+  // Declaration form ([final] Type name = expr) vs SE9 variable-access form
+  // (an existing variable/field, e.g. try (fm) or try (this.lock)).
+  const isDeclaration =
+    modifiers !== undefined ||
+    lookAhead(() => {
+      parseTypeOrVar();
+      if (token() !== SyntaxKind.Identifier) return false;
+      nextToken();
+      return token() === SyntaxKind.EqualsToken;
+    });
+  if (isDeclaration) {
+    node.type = parseTypeOrVar();
+    node.name = parseIdentifier();
+    parseExpected(SyntaxKind.EqualsToken);
+    node.initializer = parseExpression();
+  } else {
+    node.expression = parseExpression();
+  }
   return finishNode(node, pos);
 }
 
@@ -2362,6 +2409,7 @@ function parseIdentifierOrUnderscore(): Identifier {
 // followed by a binding identifier or a '(' record deconstruction.
 function isPatternStart(): boolean {
   return lookAhead(() => {
+    parseModifiers(); // final / annotations on a type pattern
     parseTypeOrVar();
     return token() === SyntaxKind.Identifier || token() === SyntaxKind.OpenParenToken;
   });
@@ -2387,6 +2435,7 @@ function parseComponentPattern(): Node {
 
 function parsePattern(): Node {
   const pos = getNodePos();
+  parseModifiers(); // optional 'final' / annotations on a type pattern
   const type = parseTypeOrVar();
   if (token() === SyntaxKind.OpenParenToken) {
     parseExpected(SyntaxKind.OpenParenToken);
@@ -2435,9 +2484,10 @@ function parseSwitchClause(): SwitchClause {
       list.push(parseCaseLabelElement());
     }
     labels = createNodeArray(list, labelsPos);
-    // SE21 guard
+    // SE21 guard; parse at conditional level so a trailing "->" is the switch
+    // arrow rather than a lambda.
     if (parseContextualKeyword("when")) {
-      guard = parseExpression();
+      guard = parseConditionalExpression();
     }
   } else {
     parseExpected(SyntaxKind.DefaultKeyword);
@@ -2809,7 +2859,8 @@ export function forEachChild<T>(
         visitNodes(cbNode, cbNodes, n.modifiers) ||
         visitNode(cbNode, n.type) ||
         visitNode(cbNode, n.name) ||
-        visitNode(cbNode, n.initializer)
+        visitNode(cbNode, n.initializer) ||
+        visitNode(cbNode, n.expression)
       );
     }
     case SyntaxKind.CatchClause: {

@@ -86,11 +86,12 @@ function containerTable(node: Node): SymbolTable {
   if (node.kind === SyntaxKind.SourceFile) {
     return file.locals!;
   }
-  if (isTypeDeclaration(node)) {
-    const symbol = node.symbol!;
-    symbol.members ??= createSymbolTable();
-    return symbol.members;
+  if (isTypeDeclaration(node) && node.symbol) {
+    node.symbol.members ??= createSymbolTable();
+    return node.symbol.members;
   }
+  // A type declaration whose symbol was never created (missing name after a
+  // parse error) falls back to a plain locals table, so binding stays robust.
   node.locals ??= createSymbolTable();
   return node.locals;
 }

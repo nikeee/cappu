@@ -226,3 +226,14 @@ test("consecutive '<' are scanned as separate tokens", () => {
     SyntaxKind.Identifier,
   ]);
 });
+
+test("hexadecimal floating-point literals (0x1p1023, 0x1.8p-3)", () => {
+  const { tokens, errorCodes } = tokenize("0x1p1023 0x1.8p-3 0x1.0p0d");
+  expect(errorCodes).toEqual([]);
+  expect(tokens.map(t => t.kind)).toEqual([
+    SyntaxKind.NumericLiteral,
+    SyntaxKind.NumericLiteral,
+    SyntaxKind.NumericLiteral,
+  ]);
+  expect(tokens[2]!.flags & TokenFlags.DoubleSuffix).toBeTruthy();
+});

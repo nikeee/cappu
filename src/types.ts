@@ -823,9 +823,12 @@ export interface LabeledStatement extends Statement {
 export interface Resource extends Node {
   readonly kind: SyntaxKind.Resource;
   readonly modifiers?: NodeArray<ModifierLike>;
+  // Declaration form: type + name + initializer.
   readonly type?: TypeNode;
-  readonly name: Identifier;
-  readonly initializer: Expression;
+  readonly name?: Identifier;
+  readonly initializer?: Expression;
+  // SE9 variable-access form: try (existingVar) / try (this.lock).
+  readonly expression?: Expression;
 }
 
 export interface CatchClause extends Node {

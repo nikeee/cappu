@@ -707,9 +707,13 @@ test("classic colon switch still works", () => {
   expect(sw.clauses[0]!.isArrow).toBe(false);
 });
 
-test("yield as an identifier is not a yield statement", () => {
-  // 'yield' used as a method name
-  expect(expr("yield()").kind).toBe(SyntaxKind.CallExpression);
+test("yield statement vs yield as an identifier", () => {
+  // statement-start 'yield <expr>' is a yield statement (incl. parenthesized / lambda)
+  expect(firstStatement("yield 42;").kind).toBe(SyntaxKind.YieldStatement);
+  expect(firstStatement("yield (a + b);").kind).toBe(SyntaxKind.YieldStatement);
+  expect(firstStatement("yield () -> x;").kind).toBe(SyntaxKind.YieldStatement);
+  // 'yield' as a receiver in member access stays an ordinary identifier
+  expect(expr("this.yield()").kind).toBe(SyntaxKind.CallExpression);
 });
 
 // M14: SE16/17 records, sealed/permits, instanceof patterns
@@ -856,4 +860,12 @@ test("nested conditional in array initializer", () => {
 
 test("deeply nested blocks terminate", () => {
   expectNoErrors("class C { void m() { { { { int x = 1; } } } } }");
+});
+
+test("array class literal on reference and qualified types", () => {
+  expect(expr("String[].class").kind).toBe(SyntaxKind.ClassLiteralExpression);
+  expect(expr("Map.Entry[].class").kind).toBe(SyntaxKind.ClassLiteralExpression);
+  expect(expr("int[][].class").kind).toBe(SyntaxKind.ClassLiteralExpression);
+  // a real element access is still an element access
+  expect(expr("a[0]").kind).toBe(SyntaxKind.ElementAccessExpression);
 });
