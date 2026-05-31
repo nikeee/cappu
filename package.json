@@ -13,7 +13,12 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "typecheck": "tsc --noEmit",
+    "lsp": "tsx src/server.ts",
     "test": "tsx --test \"./src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12"
   },
   "devDependencies": {
     "expect": "^30.4.1",
