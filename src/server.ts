@@ -11,14 +11,18 @@ import {
   type Diagnostic as LspDiagnostic,
   DiagnosticSeverity,
   type DocumentSymbol,
+  type Hover,
   type InitializeParams,
   type InitializeResult,
   type Location,
+  MarkupKind,
   TextDocuments,
   TextDocumentSyncKind,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 
+import { createChecker } from "./checker.ts";
+import { typeToString } from "./checkerTypes.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import {
@@ -28,18 +32,15 @@ import {
 } from "./lineMap.ts";
 import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
 import { createProgram } from "./program.ts";
-import {
-  findReferences,
-  getDeclarationNameNode,
-  getSourceFileOfNode,
-  resolveIdentifier,
-} from "./resolver.ts";
+import { findReferences, getDeclarationNameNode, getSourceFileOfNode } from "./resolver.ts";
 import {
   DiagnosticCategory,
   type Diagnostic as JavaDiagnostic,
   type Identifier,
   type Node,
   type SourceFile,
+  type Symbol,
+  SymbolFlags,
 } from "./types.ts";
 import { loadJavaFiles, uriToPath } from "./workspace.ts";
 
@@ -48,6 +49,7 @@ const connection = createConnection(process.stdin, process.stdout);
 const documents = new TextDocuments(TextDocument);
 const program = createProgram();
 loadJdkStub(program);
+const checker = createChecker(program);
 
 connection.onInitialize((params: InitializeParams): InitializeResult => {
   // Scan workspace folders for .java files so cross-file resolution works
@@ -69,6 +71,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       documentSymbolProvider: true,
       definitionProvider: true,
       referencesProvider: true,
+      hoverProvider: true,
     },
   };
 });
@@ -155,7 +158,7 @@ function identifierAt(
 connection.onReferences((params): Location[] | null => {
   const identifier = identifierAt(params.textDocument.uri, params.position);
   if (!identifier) return null;
-  const symbol = resolveIdentifier(identifier, program);
+  const symbol = checker.resolveName(identifier);
   if (!symbol) return null;
   return findReferences(symbol, program).map(locationOf);
 });
@@ -163,10 +166,44 @@ connection.onReferences((params): Location[] | null => {
 connection.onDefinition((params): Definition | null => {
   const identifier = identifierAt(params.textDocument.uri, params.position);
   if (!identifier) return null;
-  const symbol = resolveIdentifier(identifier, program);
+  const symbol = checker.resolveName(identifier);
   if (!symbol) return null;
   const nameNode = getDeclarationNameNode(symbol);
   return nameNode ? locationOf(nameNode) : null;
+});
+
+function symbolKindWord(flags: SymbolFlags): string {
+  if (flags & SymbolFlags.Class) return "class";
+  if (flags & SymbolFlags.Interface) return "interface";
+  if (flags & SymbolFlags.Enum) return "enum";
+  if (flags & SymbolFlags.Record) return "record";
+  if (flags & SymbolFlags.Annotation) return "@interface";
+  if (flags & SymbolFlags.Constructor) return "constructor";
+  if (flags & SymbolFlags.Method) return "method";
+  if (flags & SymbolFlags.Field) return "field";
+  if (flags & SymbolFlags.EnumConstant) return "enum constant";
+  if (flags & SymbolFlags.Parameter) return "parameter";
+  if (flags & SymbolFlags.TypeParameter) return "type parameter";
+  if (flags & SymbolFlags.LocalVariable) return "variable";
+  return "symbol";
+}
+
+function hoverText(symbol: Symbol): string {
+  const word = symbolKindWord(symbol.flags);
+  if (symbol.flags & SymbolFlags.Type) {
+    return `${word} ${symbol.escapedName}`;
+  }
+  return `${word} ${symbol.escapedName}: ${typeToString(checker.getTypeOfSymbol(symbol))}`;
+}
+
+connection.onHover((params): Hover | null => {
+  const identifier = identifierAt(params.textDocument.uri, params.position);
+  if (!identifier) return null;
+  const symbol = checker.resolveName(identifier);
+  if (!symbol) return null;
+  return {
+    contents: { kind: MarkupKind.Markdown, value: "```java\n" + hoverText(symbol) + "\n```" },
+  };
 });
 
 documents.listen(connection);
