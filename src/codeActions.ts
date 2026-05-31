@@ -7,13 +7,18 @@ import type { Checker } from "./checker.ts";
 import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
+import { findReferences } from "./resolver.ts";
 import { entityNameToString, skipTrivia } from "./utilities.ts";
 import {
+  type AssignmentExpression,
   type Identifier,
   type ImportDeclaration,
+  type LocalVariableDeclarationStatement,
   type Node,
   type SourceFile,
+  SymbolFlags,
   SyntaxKind,
+  type VariableDeclarator,
 } from "./types.ts";
 
 function forEachDescendant(node: Node, cb: (n: Node) => void): void {
@@ -241,6 +246,77 @@ function extractLocalVariable(
   ];
 }
 
+// --- inline local variable ---------------------------------------------------------
+
+// Initializers whose precedence is below a primary need wrapping in parentheses
+// when substituted into a larger expression.
+const NEEDS_PARENTHESES = new Set<SyntaxKind>([
+  SyntaxKind.BinaryExpression,
+  SyntaxKind.ConditionalExpression,
+  SyntaxKind.InstanceofExpression,
+  SyntaxKind.AssignmentExpression,
+  SyntaxKind.CastExpression,
+  SyntaxKind.LambdaExpression,
+]);
+
+function isAssignmentTarget(use: Node): boolean {
+  return (
+    use.parent.kind === SyntaxKind.AssignmentExpression &&
+    (use.parent as AssignmentExpression).left === use
+  );
+}
+
+function inlineLocalVariable(
+  program: Program,
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  const identifier = getIdentifierAtPosition(sourceFile, start) as Identifier | undefined;
+  if (!identifier) return [];
+  const symbol = checker.resolveName(identifier);
+  if (!symbol || !(symbol.flags & SymbolFlags.LocalVariable)) return [];
+
+  const declarator = symbol.valueDeclaration as VariableDeclarator | undefined;
+  if (!declarator || declarator.kind !== SyntaxKind.VariableDeclarator) return [];
+  const initializer = declarator.initializer;
+  if (!initializer) return []; // nothing to inline
+
+  const statement = declarator.parent as LocalVariableDeclarationStatement;
+  if (
+    statement.kind !== SyntaxKind.LocalVariableDeclarationStatement ||
+    statement.declarators.length !== 1
+  ) {
+    return []; // multi-declarator statements are not handled
+  }
+
+  const uses = findReferences(symbol, program, checker.resolveName).filter(
+    node => node !== declarator.name,
+  );
+  if (uses.some(isAssignmentTarget)) return []; // reassigned: inlining would change semantics
+
+  const initText = sourceFile.text.slice(
+    skipTrivia(sourceFile.text, initializer.pos),
+    initializer.end,
+  );
+  const replacement = NEEDS_PARENTHESES.has(initializer.kind) ? `(${initText})` : initText;
+
+  const changes: TextChange[] = uses.map(use => ({
+    start: skipTrivia(sourceFile.text, use.pos),
+    end: use.end,
+    newText: replacement,
+  }));
+
+  // Delete the whole declaration line (indentation through the trailing newline).
+  const statementStart = skipTrivia(sourceFile.text, statement.pos);
+  const lineStart = sourceFile.text.lastIndexOf("\n", statementStart - 1) + 1;
+  const afterNewline = sourceFile.text.indexOf("\n", statement.end);
+  const lineEnd = afterNewline < 0 ? sourceFile.text.length : afterNewline + 1;
+  changes.push({ start: lineStart, end: lineEnd, newText: "" });
+
+  return [{ title: "Inline local variable", kind: "refactor.inline", changes }];
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
@@ -252,5 +328,6 @@ export function getCodeActions(
     ...addMissingImport(program, checker, sourceFile, start),
     ...organizeImports(sourceFile),
     ...extractLocalVariable(sourceFile, start, end),
+    ...inlineLocalVariable(program, checker, sourceFile, start),
   ];
 }

@@ -163,3 +163,71 @@ test("no extract for an expression outside a block (field initializer)", () => {
   const ctx = setup("class C { int f = 1 + 2; }");
   expect(extractAction(ctx, "1 + 2")).toBeUndefined();
 });
+
+// --- inline local variable ---------------------------------------------------------
+
+function inlineAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {
+  let offset = -1;
+  for (let i = 0; i < occ; i++) offset = ctx.text.indexOf(needle, offset + 1);
+  const sf = ctx.program.getSourceFile("file:///T.java")!;
+  return getCodeActions(ctx.program, ctx.checker, sf, offset, offset).find(
+    a => a.kind === "refactor.inline",
+  );
+}
+
+test("inlines a local into its single use and removes the declaration", () => {
+  const ctx = setup(
+    ["class C {", "  int m() {", "    int total = 1;", "    return total + 2;", "  }", "}"].join(
+      "\n",
+    ),
+  );
+  const action = inlineAt(ctx, "total")!;
+  expect(apply(ctx.text, action)).toBe(
+    ["class C {", "  int m() {", "    return 1 + 2;", "  }", "}"].join("\n"),
+  );
+});
+
+test("inlines into multiple uses", () => {
+  const ctx = setup(
+    [
+      "class C {",
+      "  void m() {",
+      "    String msg = name();",
+      "    use(msg, msg);",
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+  const action = inlineAt(ctx, "msg")!;
+  expect(apply(ctx.text, action)).toBe(
+    ["class C {", "  void m() {", "    use(name(), name());", "  }", "}"].join("\n"),
+  );
+});
+
+test("wraps a compound initializer in parentheses when inlining", () => {
+  const ctx = setup(
+    ["class C {", "  int m() {", "    int sum = a + b;", "    return sum * 2;", "  }", "}"].join(
+      "\n",
+    ),
+  );
+  const action = inlineAt(ctx, "sum")!;
+  expect(apply(ctx.text, action)).toBe(
+    ["class C {", "  int m() {", "    return (a + b) * 2;", "  }", "}"].join("\n"),
+  );
+});
+
+test("no inline when the local is reassigned", () => {
+  const ctx = setup(
+    ["class C {", "  void m() {", "    int n = 1;", "    n = 2;", "    use(n);", "  }", "}"].join(
+      "\n",
+    ),
+  );
+  expect(inlineAt(ctx, "n ", 1)).toBeUndefined();
+});
+
+test("no inline for a local without an initializer", () => {
+  const ctx = setup(
+    ["class C {", "  void m() {", "    int x;", "    use(x);", "  }", "}"].join("\n"),
+  );
+  expect(inlineAt(ctx, "x")).toBeUndefined();
+});
