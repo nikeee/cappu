@@ -23,6 +23,7 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 
 import { createChecker } from "./checker.ts";
 import { typeToString } from "./checkerTypes.ts";
+import { type CompletionItem, getCompletions } from "./completions.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import {
@@ -72,6 +73,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       definitionProvider: true,
       referencesProvider: true,
       hoverProvider: true,
+      completionProvider: { triggerCharacters: ["."] },
     },
   };
 });
@@ -195,6 +197,17 @@ function hoverText(symbol: Symbol): string {
   }
   return `${word} ${symbol.escapedName}: ${typeToString(checker.getTypeOfSymbol(symbol))}`;
 }
+
+connection.onCompletion((params): CompletionItem[] => {
+  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  if (!sourceFile) return [];
+  const offset = getPositionOfLineAndCharacter(
+    computeLineStarts(sourceFile.text),
+    params.position.line,
+    params.position.character,
+  );
+  return getCompletions(program, checker, sourceFile, offset);
+});
 
 connection.onHover((params): Hover | null => {
   const identifier = identifierAt(params.textDocument.uri, params.position);

@@ -1,0 +1,8 @@
+=== here ===
+  method charAt
+  method compareTo
+  method concat
+  method isEmpty
+  method length
+  method split
+  method substring
