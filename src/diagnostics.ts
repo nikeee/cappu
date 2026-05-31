@@ -77,6 +77,11 @@ export const Diagnostics = {
     "Switch_expression_not_exhaustive_0",
     "Switch expression does not cover all values of '{0}' (no default).",
   ),
+  Cannot_resolve_member_0_in_1: diag(
+    1303,
+    "Cannot_resolve_member_0_in_1",
+    "Cannot resolve symbol '{0}' in type '{1}'.",
+  ),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */

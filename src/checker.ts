@@ -30,7 +30,7 @@ import {
   resolveIdentifier,
   resolveTypeEntityName,
 } from "./resolver.ts";
-import { entityNameToString, tokenToString } from "./utilities.ts";
+import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
 import {
   type Annotation,
   type ArrayCreationExpression,
@@ -250,7 +250,43 @@ export function createChecker(program: Program): Checker {
         }
       }
     }
+    // Every type implicitly extends java.lang.Object (JLS 8.1.4), so its members
+    // are inherited even without an explicit `extends`.
+    const object = objectSymbol();
+    if (object && symbol !== object) {
+      const inherited = object.members?.get(name);
+      if (inherited) return { symbol: inherited, subst: new Map() };
+    }
     return undefined;
+  }
+
+  // A class type is "closed" when its full member set is known: it and every
+  // transitive super type resolve to a declaration we modeled. Enums and records
+  // are excluded because the compiler synthesizes members (values/valueOf,
+  // component accessors) we do not bind. Only closed types are eligible for the
+  // unresolved-member diagnostic, so an unmodeled super type never yields a false
+  // positive.
+  function isClosedType(type: ClassType): boolean {
+    if (type.symbol.flags & (SymbolFlags.Enum | SymbolFlags.Record | SymbolFlags.Annotation)) {
+      return false;
+    }
+    const supertypesResolve = (symbol: Symbol, seen: Set<Symbol>): boolean => {
+      if (seen.has(symbol)) return true;
+      seen.add(symbol);
+      const declaration = declarationOf(symbol);
+      if (!declaration) return false;
+      for (const typeNode of superTypeNodesOf(declaration)) {
+        if (typeNode.kind !== SyntaxKind.TypeReference) return false;
+        const superSymbol = resolveTypeEntityName(
+          (typeNode as TypeReference).typeName,
+          declaration,
+          program,
+        );
+        if (!superSymbol || !supertypesResolve(superSymbol, seen)) return false;
+      }
+      return true;
+    };
+    return supertypesResolve(type.symbol, new Set());
   }
 
   function resolveType(typeNode: TypeNode, fromNode: Node): Type {
@@ -1037,6 +1073,31 @@ export function createChecker(program: Program): Checker {
                 Diagnostics.Method_does_not_override_a_supertype_method,
               ),
             );
+          }
+          break;
+        }
+        case SyntaxKind.PropertyAccessExpression: {
+          const access = node as PropertyAccessExpression;
+          // super.* is modeled imprecisely (super resolves to Object), so skip it
+          // to avoid false positives on inherited members.
+          if (access.expression.kind !== SyntaxKind.SuperExpression) {
+            const receiver = getTypeOfExpression(access.expression);
+            if (
+              receiver.kind === TypeKind.Class &&
+              isClosedType(receiver as ClassType) &&
+              !lookupTypedMember(receiver as ClassType, access.name.text)
+            ) {
+              const start = skipTrivia(getSourceFileOfNode(access.name).text, access.name.pos);
+              diagnostics.push(
+                createDiagnostic(
+                  start,
+                  access.name.end - start,
+                  Diagnostics.Cannot_resolve_member_0_in_1,
+                  access.name.text,
+                  typeToString(receiver),
+                ),
+              );
+            }
           }
           break;
         }

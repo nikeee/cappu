@@ -1,25 +1,40 @@
 === here ===
+  class ArithmeticException
+  class ArrayIndexOutOfBoundsException
+  class AssertionError
   class Boolean
   class Box
   class Byte
   class Character
   class Class
+  class ClassCastException
   class Double
+  class Error
   class Exception
   class Float
   class IllegalArgumentException
   class IllegalStateException
+  class IndexOutOfBoundsException
   class Integer
+  class InterruptedException
   class Long
+  class Math
+  class NullPointerException
   class Number
+  class NumberFormatException
   class Object
   class RuntimeException
   class Short
+  class StackTraceElement
   class String
+  class StringBuilder
   class System
+  class Thread
   class Throwable
+  class UnsupportedOperationException
   class Void
   field field
+  interface AutoCloseable
   interface CharSequence
   interface Comparable
   interface Iterable
