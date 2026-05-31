@@ -1077,3 +1077,37 @@ test("switch with null, default, guarded and record patterns", () => {
 test("empty type declarations of every kind", () => {
   expectNoErrors("class A {} interface B {} enum C {} @interface D {} record E() {}");
 });
+
+// --- error cases: one pinned test per parser diagnostic code -----------------------
+
+function codes(text: string): number[] {
+  return parse(text).parseDiagnostics.map(d => d.code);
+}
+
+test("missing close brace -> '}' expected (1001)", () => {
+  expect(codes("class C {")).toContain(1001);
+});
+
+test("type declaration without a name -> Identifier expected (1002)", () => {
+  expect(codes("class { }")).toContain(1002);
+});
+
+test("stray tokens at the top level -> Declaration or statement expected (1003)", () => {
+  expect(codes("int 123;")).toContain(1003);
+});
+
+test("assignment with no right-hand side -> Expression expected (1005)", () => {
+  expect(codes("class C { void m() { int x = ; } }")).toContain(1005);
+});
+
+test("a bare literal as a class member -> Unexpected token (1007)", () => {
+  expect(codes("class C { 123 }")).toContain(1007);
+});
+
+test("modifiers not followed by a declaration -> Declaration expected (1020)", () => {
+  expect(codes("public 123")).toContain(1020);
+});
+
+test("malformed parameter list -> Parameter declaration expected (1021)", () => {
+  expect(codes("class C { void m( { } }")).toContain(1021);
+});
