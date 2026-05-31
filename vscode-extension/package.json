@@ -1,28 +1,36 @@
 {
   "name": "javalsp-test-client",
   "displayName": "javalsp test client",
-  "description": "Minimal VS Code client for testing the javalsp language server",
   "version": "0.0.1",
   "private": true,
-  "engines": {
-    "vscode": "^1.80.0"
-  },
-  "categories": ["Programming Languages"],
-  "activationEvents": ["onLanguage:java"],
+  "description": "Minimal VS Code client for testing the javalsp language server",
+  "categories": [
+    "Programming Languages"
+  ],
   "main": "./extension.js",
-  "contributes": {
-    "languages": [
-      {
-        "id": "java",
-        "aliases": ["Java"],
-        "extensions": [".java"]
-      }
-    ]
-  },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
     "@types/vscode": "^1.80.0"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "java",
+        "aliases": [
+          "Java"
+        ],
+        "extensions": [
+          ".java"
+        ]
+      }
+    ]
+  },
+  "activationEvents": [
+    "onLanguage:java"
+  ],
+  "engines": {
+    "vscode": "^1.80.0"
   }
 }

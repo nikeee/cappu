@@ -1,0 +1,28 @@
+=== count ===
+  field count: int
+=== local ===
+  variable local: int
+=== total ===
+  method total: int
+=== paramDecl ===
+  parameter arg: String
+=== paramUse ===
+  parameter arg: String
+=== Tref ===
+  type parameter T
+=== valueField ===
+  field value: T
+=== Container ===
+  class Container
+=== Shape ===
+  interface Shape
+=== Color ===
+  enum Color
+=== RED ===
+  enum constant RED: Color
+=== Point ===
+  record Point
+=== List ===
+  interface List
+=== Box ===
+  class Box

@@ -1,0 +1,12 @@
+=== today ===
+  field today: LocalDate
+=== dates ===
+  field dates: List<LocalDate>
+=== u ===
+  field u: Unknown
+=== path ===
+  field path: java.nio.file.Path
+=== whenDecl ===
+  parameter when: LocalDate
+=== whenUse ===
+  parameter when: LocalDate

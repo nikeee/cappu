@@ -24,6 +24,7 @@ import {
 } from "./checkerTypes.ts";
 import {
   getDirectSuperTypeSymbols,
+  getSourceFileOfNode,
   lookupMember,
   Meaning,
   resolveIdentifier,
@@ -72,6 +73,12 @@ export interface Checker {
   isAssignableTo(source: Type, target: Type): boolean;
   /** The chosen overload for a call (JLS 15.12.2), or undefined if unresolved. */
   resolveCall(call: CallExpression): MethodDeclaration | undefined;
+  /**
+   * Display string for a symbol's type (for hover). Falls back to the written
+   * type syntax when the type cannot be resolved (e.g. a JDK type outside the
+   * stub) instead of rendering the unhelpful "<error>".
+   */
+  typeStringOfSymbol(symbol: Symbol): string;
   /** High-precision semantic diagnostics (type mismatches between known types). */
   getSemanticDiagnostics(sourceFile: SourceFile): Diagnostic[];
 }
@@ -389,6 +396,28 @@ export function createChecker(program: Program): Checker {
     const found = lookupTypedMember(receiver as ClassType, access.name.text);
     if (!found) return errorType;
     return substitute(getTypeOfSymbol(found.symbol), found.subst);
+  }
+
+  function nodeSourceText(node: Node): string {
+    return getSourceFileOfNode(node).text.slice(node.pos, node.end).trim().replace(/\s+/g, " ");
+  }
+
+  function typeStringOfSymbol(symbol: Symbol): string {
+    // For a symbol declared with explicit type syntax, show that syntax: it is
+    // always correct and clean, and never degrades to "<error>" when a type
+    // (or a type argument) lies outside the modeled set - the common case for
+    // JDK types the stub does not include.
+    const declared = declaredTypeNodeOf(symbol);
+    if (declared && declared.typeNode.kind !== SyntaxKind.VarType) {
+      const text = nodeSourceText(declared.typeNode);
+      if (text) return text;
+    }
+    // No written type (var, enum constant, ...): use the computed type, which
+    // also surfaces var inference (var x = "s" -> String).
+    const type = getTypeOfSymbol(symbol);
+    if (!isError(type)) return typeToString(type);
+    if (declared && declared.typeNode.kind === SyntaxKind.VarType) return "var";
+    return typeToString(type);
   }
 
   function resolveMemberAccess(access: PropertyAccessExpression): Symbol | undefined {
@@ -1046,6 +1075,7 @@ export function createChecker(program: Program): Checker {
     resolveName,
     isAssignableTo,
     resolveCall,
+    typeStringOfSymbol,
     getSemanticDiagnostics,
   };
 }

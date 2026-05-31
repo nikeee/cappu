@@ -26,7 +26,6 @@ import {
 import { TextDocument } from "vscode-languageserver-textdocument";
 
 import { createChecker } from "./checker.ts";
-import { typeToString } from "./checkerTypes.ts";
 import { type CompletionItem, getCompletions } from "./completions.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
 import { loadJdkStub } from "./jdkStub.ts";
@@ -44,9 +43,8 @@ import {
   type Identifier,
   type Node,
   type SourceFile,
-  type Symbol,
-  SymbolFlags,
 } from "./types.ts";
+import { getHoverText } from "./hover.ts";
 import { loadJavaFiles, uriToPath } from "./workspace.ts";
 
 // Communicate over stdio (the standard transport for editor language clients).
@@ -194,30 +192,6 @@ connection.onDefinition((params): Definition | null => {
   return nameNode ? locationOf(nameNode) : null;
 });
 
-function symbolKindWord(flags: SymbolFlags): string {
-  if (flags & SymbolFlags.Class) return "class";
-  if (flags & SymbolFlags.Interface) return "interface";
-  if (flags & SymbolFlags.Enum) return "enum";
-  if (flags & SymbolFlags.Record) return "record";
-  if (flags & SymbolFlags.Annotation) return "@interface";
-  if (flags & SymbolFlags.Constructor) return "constructor";
-  if (flags & SymbolFlags.Method) return "method";
-  if (flags & SymbolFlags.Field) return "field";
-  if (flags & SymbolFlags.EnumConstant) return "enum constant";
-  if (flags & SymbolFlags.Parameter) return "parameter";
-  if (flags & SymbolFlags.TypeParameter) return "type parameter";
-  if (flags & SymbolFlags.LocalVariable) return "variable";
-  return "symbol";
-}
-
-function hoverText(symbol: Symbol): string {
-  const word = symbolKindWord(symbol.flags);
-  if (symbol.flags & SymbolFlags.Type) {
-    return `${word} ${symbol.escapedName}`;
-  }
-  return `${word} ${symbol.escapedName}: ${typeToString(checker.getTypeOfSymbol(symbol))}`;
-}
-
 connection.onCompletion((params): CompletionItem[] => {
   const sourceFile = program.getSourceFile(params.textDocument.uri);
   if (!sourceFile) return [];
@@ -235,7 +209,10 @@ connection.onHover((params): Hover | null => {
   const symbol = checker.resolveName(identifier);
   if (!symbol) return null;
   return {
-    contents: { kind: MarkupKind.Markdown, value: "```java\n" + hoverText(symbol) + "\n```" },
+    contents: {
+      kind: MarkupKind.Markdown,
+      value: "```java\n" + getHoverText(checker, symbol) + "\n```",
+    },
   };
 });
 

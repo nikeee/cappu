@@ -1,0 +1,16 @@
+=== mapField ===
+  field registry: Map<String, List<Integer>>
+=== s ===
+  variable s: String
+=== n ===
+  variable n: int
+=== b ===
+  variable b: boolean
+=== item ===
+  parameter item: String
+=== itemUse ===
+  parameter item: String
+=== elem ===
+  parameter elem: String
+=== elemUse ===
+  parameter elem: String
