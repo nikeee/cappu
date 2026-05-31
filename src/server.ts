@@ -6,6 +6,8 @@
 // Run with: node --run lsp  (the client speaks JSON-RPC over stdio).
 
 import {
+  type CodeAction,
+  type CodeActionParams,
   createConnection,
   type Definition,
   type Diagnostic as LspDiagnostic,
@@ -27,6 +29,7 @@ import {
 import { TextDocument } from "vscode-languageserver-textdocument";
 
 import { createChecker } from "./checker.ts";
+import { getCodeActions } from "./codeActions.ts";
 import { type CompletionItem, getCompletions } from "./completions.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
 import { loadJdkStub } from "./jdkStub.ts";
@@ -80,6 +83,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       hoverProvider: true,
       completionProvider: { triggerCharacters: ["."] },
       renameProvider: { prepareProvider: true },
+      codeActionProvider: true,
     },
   };
 });
@@ -238,6 +242,37 @@ connection.onCompletion((params): CompletionItem[] => {
     params.position.character,
   );
   return getCompletions(program, checker, sourceFile, offset);
+});
+
+connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
+  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  if (!sourceFile) return [];
+  const lineStarts = computeLineStarts(sourceFile.text);
+  const start = getPositionOfLineAndCharacter(
+    lineStarts,
+    params.range.start.line,
+    params.range.start.character,
+  );
+  const end = getPositionOfLineAndCharacter(
+    lineStarts,
+    params.range.end.line,
+    params.range.end.character,
+  );
+  return getCodeActions(program, checker, sourceFile, start, end).map(action => ({
+    title: action.title,
+    kind: action.kind,
+    edit: {
+      changes: {
+        [params.textDocument.uri]: action.changes.map(c => ({
+          range: {
+            start: getLineAndCharacterOfPosition(lineStarts, c.start),
+            end: getLineAndCharacterOfPosition(lineStarts, c.end),
+          },
+          newText: c.newText,
+        })),
+      },
+    },
+  }));
 });
 
 connection.onHover((params): Hover | null => {

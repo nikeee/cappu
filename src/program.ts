@@ -23,6 +23,8 @@ export interface GlobalIndex {
   /** simpleName -> type symbol for all top-level types in a package. */
   getPackageTypes(packageName: string): SymbolTable | undefined;
   getPackageSymbol(packageName: string): Symbol | undefined;
+  /** Fully-qualified names of all top-level types with the given simple name (for import suggestions). */
+  findFqnsBySimpleName(simpleName: string): string[];
 }
 
 const TYPE_DECLARATION_KINDS = new Set<SyntaxKind>([
@@ -171,6 +173,14 @@ export function createProgram(): Program {
     getType: fqn => typesByFqn.get(fqn),
     getPackageTypes: packageName => packages.get(packageName),
     getPackageSymbol: packageName => packageSymbols.get(packageName),
+    findFqnsBySimpleName: simpleName => {
+      const result: string[] = [];
+      for (const fqn of typesByFqn.keys()) {
+        const dot = fqn.lastIndexOf(".");
+        if ((dot < 0 ? fqn : fqn.slice(dot + 1)) === simpleName) result.push(fqn);
+      }
+      return result;
+    },
   };
 
   return {
