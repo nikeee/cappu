@@ -20,6 +20,7 @@ import {
 } from "./utilities.ts";
 import {
   type Annotation,
+  type AnnotationArgument,
   type AnnotationTypeDeclaration,
   type ArrayCreationExpression,
   type ArrayInitializer,
@@ -128,6 +129,7 @@ const enum ParsingContext {
   SwitchClauses,
   CatchClauses,
   ModuleDirectives,
+  AnnotationValues,
   Count,
 }
 
@@ -343,6 +345,7 @@ function isListTerminator(context: ParsingContext): boolean {
       return token() === SyntaxKind.CloseBraceToken;
     case ParsingContext.Parameters:
     case ParsingContext.ArgumentExpressions:
+    case ParsingContext.AnnotationValues:
       return token() === SyntaxKind.CloseParenToken;
     case ParsingContext.TypeArguments:
     case ParsingContext.TypeParameters:
@@ -397,8 +400,15 @@ function isListElement(context: ParsingContext, _inErrorRecovery: boolean): bool
     case ParsingContext.Parameters:
       return isStartOfParameter();
     case ParsingContext.ArgumentExpressions:
+      return isStartOfExpression();
     case ParsingContext.ArrayInitializerElements:
-      return token() === SyntaxKind.OpenBraceToken || isStartOfExpression();
+    case ParsingContext.AnnotationValues:
+      // element values may be expressions, { ... } arrays or @annotations
+      return (
+        token() === SyntaxKind.OpenBraceToken ||
+        token() === SyntaxKind.AtToken ||
+        isStartOfExpression()
+      );
     case ParsingContext.SwitchClauses:
       return token() === SyntaxKind.CaseKeyword || token() === SyntaxKind.DefaultKeyword;
     case ParsingContext.ModuleDirectives:
@@ -637,6 +647,7 @@ function parseTypeArguments(): NodeArray<TypeNode | WildcardType> {
 
 function parseTypeParameter(): TypeParameter {
   const pos = getNodePos();
+  const annotations = parseAnnotations(); // <@NonNull T>
   const name = parseIdentifier();
   let constraint: NodeArray<TypeNode> | undefined;
   if (parseOptional(SyntaxKind.ExtendsKeyword)) {
@@ -648,6 +659,7 @@ function parseTypeParameter(): TypeParameter {
     constraint = createNodeArray(bounds, boundsPos);
   }
   const node = createNode<TypeParameter>(SyntaxKind.TypeParameter, pos);
+  node.annotations = annotations;
   node.name = name;
   node.constraint = constraint;
   return finishNode(node, pos);
@@ -733,18 +745,59 @@ function parseModifiers(): NodeArray<ModifierLike> | undefined {
   return list.length ? createNodeArray(list, pos) : undefined;
 }
 
+// An annotation element value: a nested annotation, a { ... } array of element
+// values, or a constant expression (parsed at conditional level).
+function parseElementValue(): Node {
+  if (token() === SyntaxKind.OpenBraceToken) {
+    return parseElementValueArrayInitializer();
+  }
+  if (token() === SyntaxKind.AtToken && !isAnnotationTypeDeclarationStart()) {
+    return parseAnnotation();
+  }
+  return parseConditionalExpression();
+}
+
+function parseElementValueArrayInitializer(): ArrayInitializer {
+  const pos = getNodePos();
+  parseExpected(SyntaxKind.OpenBraceToken);
+  const elements = parseDelimitedList(ParsingContext.ArrayInitializerElements, parseElementValue);
+  parseExpected(SyntaxKind.CloseBraceToken);
+  const node = createNode<ArrayInitializer>(SyntaxKind.ArrayInitializer, pos);
+  node.elements = elements as unknown as NodeArray<Expression>;
+  return finishNode(node, pos);
+}
+
+function parseAnnotationArgument(): AnnotationArgument {
+  const pos = getNodePos();
+  let name: Identifier | undefined;
+  // NormalAnnotation pair: Identifier = ElementValue.
+  if (
+    token() === SyntaxKind.Identifier &&
+    lookAhead(() => (nextToken(), token() === SyntaxKind.EqualsToken))
+  ) {
+    name = parseIdentifier();
+    parseExpected(SyntaxKind.EqualsToken);
+  }
+  const value = parseElementValue();
+  const node = createNode<AnnotationArgument>(SyntaxKind.AnnotationArgument, pos);
+  node.name = name;
+  node.value = value;
+  return finishNode(node, pos);
+}
+
 function parseAnnotation(): Annotation {
   const pos = getNodePos();
   parseExpected(SyntaxKind.AtToken);
   const typeName = parseEntityName();
-  // Argument values are expressions; their parsing is added in M8. For now the
-  // parenthesized argument list is skipped so headers parse cleanly.
+  let args: NodeArray<AnnotationArgument> | undefined;
   if (token() === SyntaxKind.OpenParenToken) {
-    skipBalanced(SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+    parseExpected(SyntaxKind.OpenParenToken);
+    args = parseDelimitedList(ParsingContext.AnnotationValues, parseAnnotationArgument);
+    parseExpected(SyntaxKind.CloseParenToken);
   }
   const node = createNode<Annotation>(SyntaxKind.Annotation, pos);
   node.typeName = typeName;
-  node.args = undefined;
+  node.args = args;
   return finishNode(node, pos);
 }
 
@@ -779,33 +832,6 @@ function parseArrayRankAfterName(): number {
     rank++;
   }
   return rank;
-}
-
-// Skip a variable initializer (after '='). Real expression parsing is M8; here
-// we consume up to the next top-level ',' or ';'.
-function skipInitializer(): void {
-  let depth = 0;
-  while (token() !== SyntaxKind.EndOfFileToken) {
-    const t = token();
-    if (depth === 0 && (t === SyntaxKind.CommaToken || t === SyntaxKind.SemicolonToken)) {
-      return;
-    }
-    if (
-      t === SyntaxKind.OpenParenToken ||
-      t === SyntaxKind.OpenBracketToken ||
-      t === SyntaxKind.OpenBraceToken
-    ) {
-      depth++;
-    } else if (
-      t === SyntaxKind.CloseParenToken ||
-      t === SyntaxKind.CloseBracketToken ||
-      t === SyntaxKind.CloseBraceToken
-    ) {
-      if (depth === 0) return;
-      depth--;
-    }
-    nextToken();
-  }
 }
 
 function parseVariableDeclarator(name: Identifier): VariableDeclarator {
@@ -844,15 +870,39 @@ function parseParameter(): Parameter {
   const pos = getNodePos();
   const modifiers = parseModifiers();
   const type = parseTypeOrVar();
-  const isVarArgs = parseOptional(SyntaxKind.DotDotDotToken);
-  const name = parseIdentifier();
-  const arrayRankAfterName = parseArrayRankAfterName();
   const node = createNode<Parameter>(SyntaxKind.Parameter, pos);
   node.modifiers = modifiers;
   node.type = type;
-  node.isVarArgs = isVarArgs;
-  node.name = name;
-  node.arrayRankAfterName = arrayRankAfterName;
+
+  // Receiver parameter: [Identifier .] this  (JLS ReceiverParameter).
+  if (token() === SyntaxKind.ThisKeyword) {
+    nextToken();
+    node.isReceiver = true;
+    node.isVarArgs = false;
+    node.arrayRankAfterName = 0;
+    return finishNode(node, pos);
+  }
+  if (
+    token() === SyntaxKind.Identifier &&
+    lookAhead(
+      () => (
+        nextToken(),
+        token() === SyntaxKind.DotToken && (nextToken(), token() === SyntaxKind.ThisKeyword)
+      ),
+    )
+  ) {
+    parseIdentifier(); // qualifier (Outer)
+    parseExpected(SyntaxKind.DotToken);
+    parseExpected(SyntaxKind.ThisKeyword);
+    node.isReceiver = true;
+    node.isVarArgs = false;
+    node.arrayRankAfterName = 0;
+    return finishNode(node, pos);
+  }
+
+  node.isVarArgs = parseOptional(SyntaxKind.DotDotDotToken);
+  node.name = parseIdentifier();
+  node.arrayRankAfterName = parseArrayRankAfterName();
   return finishNode(node, pos);
 }
 
@@ -884,10 +934,10 @@ function parseMethodDeclaration(
     actualReturnType = finishNode(array, actualReturnType.pos);
   }
   const throwsClause = parseThrows();
-  // Annotation-element default value (@interface): 'default <value>'. Skipped
-  // until M8.
+  // Annotation-interface element default value: 'default <ElementValue>'.
+  let defaultValue: Node | undefined;
   if (parseOptional(SyntaxKind.DefaultKeyword)) {
-    skipInitializer();
+    defaultValue = parseElementValue();
   }
   let body: Block | undefined;
   if (token() === SyntaxKind.OpenBraceToken) {
@@ -902,6 +952,7 @@ function parseMethodDeclaration(
   node.name = name;
   node.parameters = parameters;
   node.throws = throwsClause;
+  node.defaultValue = defaultValue;
   node.body = body;
   return finishNode(node, pos);
 }
@@ -1667,6 +1718,11 @@ function isCastExpression(): boolean {
     if (token() === SyntaxKind.CloseParenToken) return false;
     const primitive = isPrimitiveTypeKeyword(token()) || token() === SyntaxKind.VoidKeyword;
     parseType();
+    while (token() === SyntaxKind.AmpersandToken) {
+      // SE8 intersection cast: (A & B)
+      nextToken();
+      parseType();
+    }
     if (token() !== SyntaxKind.CloseParenToken) return false;
     nextToken(); // ')'
     // A primitive cast (int)x is unambiguous. A reference cast must be
@@ -1703,10 +1759,20 @@ function parseCastExpression(): CastExpression {
   const pos = getNodePos();
   parseExpected(SyntaxKind.OpenParenToken);
   const type = parseType();
+  let bounds: NodeArray<TypeNode> | undefined;
+  if (token() === SyntaxKind.AmpersandToken) {
+    const boundsPos = getNodePos();
+    const list: TypeNode[] = [];
+    while (parseOptional(SyntaxKind.AmpersandToken)) {
+      list.push(parseType());
+    }
+    bounds = createNodeArray(list, boundsPos);
+  }
   parseExpected(SyntaxKind.CloseParenToken);
   const expression = parseUnaryExpression();
   const node = createNode<CastExpression>(SyntaxKind.CastExpression, pos);
   node.type = type;
+  node.bounds = bounds;
   node.expression = expression;
   return finishNode(node, pos);
 }
@@ -1830,9 +1896,19 @@ function parseExpressionSuffixes(start: Expression): Expression {
         expr = finishNode(node, exprPos);
         continue;
       }
-      // Qualified this/super (Outer.this) are consumed but not modeled yet.
-      if (token() === SyntaxKind.ThisKeyword || token() === SyntaxKind.SuperKeyword) {
+      // Qualified this/super: Outer.this, Type.super.m()
+      if (token() === SyntaxKind.ThisKeyword) {
         nextToken();
+        const t = createNode<ThisExpression>(SyntaxKind.ThisExpression, exprPos);
+        t.qualifier = expr;
+        expr = finishNode(t, exprPos);
+        continue;
+      }
+      if (token() === SyntaxKind.SuperKeyword) {
+        nextToken();
+        const s = createNode<SuperExpression>(SyntaxKind.SuperExpression, exprPos);
+        s.qualifier = expr;
+        expr = finishNode(s, exprPos);
         continue;
       }
       const typeArguments = token() === SyntaxKind.LessThanToken ? parseTypeArguments() : undefined;
@@ -2213,6 +2289,7 @@ function parseForStatement(): Statement {
   }
 
   let initializer: Node | undefined;
+  let initializerExpressions: NodeArray<Expression> | undefined;
   if (token() === SyntaxKind.SemicolonToken) {
     nextToken();
   } else {
@@ -2224,10 +2301,11 @@ function parseForStatement(): Statement {
       const initPos = getNodePos();
       initializer = parseLocalVariableDeclarationRest(initPos, parseModifiers());
     } else {
-      initializer = parseExpression();
-      // Additional comma-separated init expressions are parsed but only the
-      // first is retained.
-      while (parseOptional(SyntaxKind.CommaToken)) parseExpression();
+      // StatementExpressionList: for (i = 0, j = n; ...)
+      const initPos = getNodePos();
+      const list: Expression[] = [parseExpression()];
+      while (parseOptional(SyntaxKind.CommaToken)) list.push(parseExpression());
+      initializerExpressions = createNodeArray(list, initPos);
     }
     parseExpected(SyntaxKind.SemicolonToken);
   }
@@ -2247,6 +2325,7 @@ function parseForStatement(): Statement {
 
   const node = createNode<ForStatement>(SyntaxKind.ForStatement, pos);
   node.initializer = initializer;
+  node.initializerExpressions = initializerExpressions;
   node.condition = condition;
   node.incrementors = incrementors;
   node.statement = statement;
@@ -2746,6 +2825,7 @@ export function forEachChild<T>(
         visitNode(cbNode, n.name) ||
         visitNodes(cbNode, cbNodes, n.parameters) ||
         visitNodes(cbNode, cbNodes, n.throws) ||
+        visitNode(cbNode, n.defaultValue) ||
         visitNode(cbNode, n.body)
       );
     }
@@ -2811,6 +2891,7 @@ export function forEachChild<T>(
       const n = node as ForStatement;
       return (
         visitNode(cbNode, n.initializer) ||
+        visitNodes(cbNode, cbNodes, n.initializerExpressions) ||
         visitNode(cbNode, n.condition) ||
         visitNodes(cbNode, cbNodes, n.incrementors) ||
         visitNode(cbNode, n.statement)
@@ -2954,7 +3035,11 @@ export function forEachChild<T>(
     }
     case SyntaxKind.CastExpression: {
       const n = node as CastExpression;
-      return visitNode(cbNode, n.type) || visitNode(cbNode, n.expression);
+      return (
+        visitNode(cbNode, n.type) ||
+        visitNodes(cbNode, cbNodes, n.bounds) ||
+        visitNode(cbNode, n.expression)
+      );
     }
     case SyntaxKind.PropertyAccessExpression: {
       const n = node as PropertyAccessExpression;
@@ -3022,12 +3107,24 @@ export function forEachChild<T>(
       return visitNode(cbNode, (node as WildcardType).type);
     case SyntaxKind.TypeParameter: {
       const n = node as TypeParameter;
-      return visitNode(cbNode, n.name) || visitNodes(cbNode, cbNodes, n.constraint);
+      return (
+        visitNodes(cbNode, cbNodes, n.annotations) ||
+        visitNode(cbNode, n.name) ||
+        visitNodes(cbNode, cbNodes, n.constraint)
+      );
     }
     case SyntaxKind.Annotation: {
       const n = node as Annotation;
       return visitNode(cbNode, n.typeName) || visitNodes(cbNode, cbNodes, n.args);
     }
+    case SyntaxKind.AnnotationArgument: {
+      const n = node as AnnotationArgument;
+      return visitNode(cbNode, n.name) || visitNode(cbNode, n.value);
+    }
+    case SyntaxKind.ThisExpression:
+      return visitNode(cbNode, (node as ThisExpression).qualifier);
+    case SyntaxKind.SuperExpression:
+      return visitNode(cbNode, (node as SuperExpression).qualifier);
     default:
       // Tokens and childless nodes (EmptyStatement, Identifier, PrimitiveType).
       return undefined;

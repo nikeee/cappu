@@ -869,3 +869,63 @@ test("array class literal on reference and qualified types", () => {
   // a real element access is still an element access
   expect(expr("a[0]").kind).toBe(SyntaxKind.ElementAccessExpression);
 });
+
+// Remaining JLS-conformance constructs
+
+test("annotation arguments are parsed into the AST", () => {
+  const sf = expectNoErrors('@Column(name = "id", nullable = false) class C {}');
+  const ann = (sf.statements[0] as ClassDeclaration)
+    .modifiers![0] as import("./types.ts").Annotation;
+  expect(ann.kind).toBe(SyntaxKind.Annotation);
+  expect(ann.args).toHaveLength(2);
+  expect(ann.args![0]!.name?.text).toBe("name");
+  // single-element and array-valued annotations
+  const sf2 = expectNoErrors('@SuppressWarnings({"a", "b"}) class C {}');
+  const ann2 = (sf2.statements[0] as ClassDeclaration)
+    .modifiers![0] as import("./types.ts").Annotation;
+  expect(ann2.args).toHaveLength(1);
+  expect(ann2.args![0]!.value.kind).toBe(SyntaxKind.ArrayInitializer);
+  // nested annotation value
+  expectNoErrors("@Wrap(@Inner(1)) class C {}");
+});
+
+test("annotated type parameter <@NonNull T>", () => {
+  const sf = expectNoErrors("class C<@NonNull T extends Object> {}");
+  expect((sf.statements[0] as ClassDeclaration).typeParameters![0]!.annotations).toHaveLength(1);
+});
+
+test("intersection cast (A & B) x", () => {
+  const e = expr("(Runnable & java.io.Serializable) x") as import("./types.ts").CastExpression;
+  expect(e.kind).toBe(SyntaxKind.CastExpression);
+  expect(e.bounds).toHaveLength(1);
+});
+
+test("receiver parameter", () => {
+  const members = classMembers("class C { void m(C this, int x) {} void n(Outer.C this) {} }");
+  const m = members[0] as MethodDeclaration;
+  expect((m.parameters[0] as Parameter).isReceiver).toBe(true);
+  expect(m.parameters).toHaveLength(2);
+  expect((members[1] as MethodDeclaration).parameters[0]!.isReceiver).toBe(true);
+});
+
+test("annotation element with default value (parsed, not skipped)", () => {
+  const sf = expectNoErrors('@interface A { int count() default 1; String name() default "x"; }');
+  const el = (sf.statements[0] as import("./types.ts").AnnotationTypeDeclaration)
+    .members[0] as MethodDeclaration;
+  expect(el.defaultValue).toBeDefined();
+});
+
+test("qualified this and super are modeled", () => {
+  const t = expr("Outer.this") as import("./types.ts").ThisExpression;
+  expect(t.kind).toBe(SyntaxKind.ThisExpression);
+  expect(t.qualifier).toBeDefined();
+  expect(expr("Foo.super.m()").kind).toBe(SyntaxKind.CallExpression);
+});
+
+test("for with a statement-expression init list", () => {
+  const f = firstStatement(
+    "for (i = 0, j = n; i < j; i++, j--) step();",
+  ) as import("./types.ts").ForStatement;
+  expect(f.initializerExpressions).toHaveLength(2);
+  expect(f.incrementors).toHaveLength(2);
+});

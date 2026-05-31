@@ -424,6 +424,7 @@ export interface WildcardType extends Node {
 
 export interface TypeParameter extends Node {
   readonly kind: SyntaxKind.TypeParameter;
+  readonly annotations?: NodeArray<Annotation>;
   readonly name: Identifier;
   /** Bounds: T extends A & B. */
   readonly constraint?: NodeArray<TypeNode>;
@@ -555,8 +556,11 @@ export interface Parameter extends Node {
   readonly modifiers?: NodeArray<ModifierLike>;
   readonly type: TypeNode;
   readonly isVarArgs: boolean;
-  readonly name: Identifier;
+  /** Absent for a receiver parameter (Foo this / Outer.this). */
+  readonly name?: Identifier;
   readonly arrayRankAfterName: number;
+  /** True for the receiver parameter "Foo this". */
+  readonly isReceiver?: boolean;
 }
 
 export interface MethodDeclaration extends Node {
@@ -569,6 +573,8 @@ export interface MethodDeclaration extends Node {
   readonly throws?: NodeArray<TypeNode>;
   /** Undefined for abstract/interface/annotation-element methods. */
   readonly body?: Block;
+  /** SE annotation-interface element default value (default <ElementValue>). */
+  readonly defaultValue?: Node;
 }
 
 export interface ConstructorDeclaration extends Node {
@@ -657,6 +663,8 @@ export interface InstanceofExpression extends Expression {
 export interface CastExpression extends Expression {
   readonly kind: SyntaxKind.CastExpression;
   readonly type: TypeNode;
+  /** SE8 intersection cast: (A & B & C) e -> additional types after the first. */
+  readonly bounds?: NodeArray<TypeNode>;
   readonly expression: Expression;
 }
 
@@ -701,10 +709,14 @@ export interface ArrayInitializer extends Expression {
 
 export interface ThisExpression extends Expression {
   readonly kind: SyntaxKind.ThisExpression;
+  /** Qualifier in Outer.this. */
+  readonly qualifier?: Expression;
 }
 
 export interface SuperExpression extends Expression {
   readonly kind: SyntaxKind.SuperExpression;
+  /** Qualifier in Type.super. */
+  readonly qualifier?: Expression;
 }
 
 export interface ClassLiteralExpression extends Expression {
@@ -769,7 +781,10 @@ export interface DoStatement extends Statement {
 
 export interface ForStatement extends Statement {
   readonly kind: SyntaxKind.ForStatement;
+  /** A local variable declaration init form. */
   readonly initializer?: Node;
+  /** A statement-expression-list init form (for (i = 0, j = n; ...)). */
+  readonly initializerExpressions?: NodeArray<Expression>;
   readonly condition?: Expression;
   readonly incrementors?: NodeArray<Expression>;
   readonly statement: Statement;
