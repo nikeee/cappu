@@ -41,11 +41,20 @@ const FIXTURES: Record<string, string> = {
     'public class Hello { public static void main(String[] args) { System.out.println("Hello, world"); } }',
   ReturnLiterals:
     'class ReturnLiterals { int i() { return 42; } long l() { return 7L; } boolean b() { return true; } java.lang.String s() { return "hi"; } int big() { return 1000000; } int echo(int p) { return p; } void v() {} }',
+  Arithmetic:
+    "class Arithmetic { int add(int a, int b) { return a + b; } int poly(int a, int b, int c) { return a * b + c; } long mix(int a, long b) { return a + b; } double dm(double x, int y) { return x * y; } int shift(int a, int n) { return a << n; } int bits(int a, int b) { return (a & b) | (a ^ b); } int neg(int a) { return -a; } int not(int a) { return ~a; } int rem(int a, int b) { return a % b; } }",
+  Locals:
+    "class Locals { int compute(int n) { int x = n + 1; int y = x * 2; int z; z = x + y; return z; } long widen(int n) { long w = n; return w + 1; } int reassign(int n) { int t = n; t = t + t; return t; } }",
+  // Uses a method call (not a constant expression) so javac does not fold it,
+  // keeping the comparison honest until constant folding (JLS 15.28) is added.
+  Compute:
+    "public class Compute { static int v() { return 42; } public static void main(String[] args) { int a = v(); int b = a - 2; System.out.println(b); } }",
 };
 
 // Fixtures with a runnable main and the output they must print.
 const RUNS: Record<string, string> = {
   Hello: "Hello, world\n",
+  Compute: "40\n",
 };
 
 // javap -c per-method instruction lines, with constant-pool indices stripped so

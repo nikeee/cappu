@@ -9,21 +9,26 @@
 // Reference output is cross-checked against `javac` in the tests.
 
 import type { Checker } from "./checker.ts";
+import { type Type, TypeKind } from "./checkerTypes.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import { resolveTypeEntityName } from "./resolver.ts";
 import { entityNameToString, tokenToString } from "./utilities.ts";
 import {
   type ArrayType as AstArrayType,
+  type AssignmentExpression,
+  type BinaryExpression,
   type CallExpression,
   type ClassDeclaration,
   type ExpressionStatement,
+  type LocalVariableDeclarationStatement,
   type FieldDeclaration,
   type Identifier,
   type LiteralExpression,
   type MethodDeclaration,
   type Node,
   type Parameter,
+  type PrefixUnaryExpression,
   type PropertyAccessExpression,
   type ReturnStatement,
   type SourceFile,
@@ -109,6 +114,35 @@ const OP_LLOAD_0 = 0x1e;
 const OP_FLOAD_0 = 0x22;
 const OP_DLOAD_0 = 0x26;
 const OP_ALOAD_BASE_0 = 0x2a; // aload_0
+const OP_ISTORE = 0x36;
+const OP_LSTORE = 0x37;
+const OP_FSTORE = 0x38;
+const OP_DSTORE = 0x39;
+const OP_ASTORE = 0x3a;
+const OP_ISTORE_0 = 0x3b;
+const OP_LSTORE_0 = 0x3f;
+const OP_FSTORE_0 = 0x43;
+const OP_DSTORE_0 = 0x47;
+const OP_ASTORE_0 = 0x4b;
+const OP_IADD = 0x60; // arithmetic bases; + type offset (I=0,J=1,F=2,D=3)
+const OP_ISUB = 0x64;
+const OP_IMUL = 0x68;
+const OP_IDIV = 0x6c;
+const OP_IREM = 0x70;
+const OP_INEG = 0x74; // negate base; + type offset
+const OP_ISHL = 0x78; // shift bases; + (long ? 1 : 0)
+const OP_ISHR = 0x7a;
+const OP_IUSHR = 0x7c;
+const OP_IAND = 0x7e;
+const OP_IOR = 0x80;
+const OP_IXOR = 0x82;
+const OP_LXOR = 0x83;
+const OP_I2L = 0x85;
+const OP_I2F = 0x86;
+const OP_I2D = 0x87;
+const OP_L2F = 0x89;
+const OP_L2D = 0x8a;
+const OP_F2D = 0x8d;
 const OP_POP = 0x57;
 const OP_POP2 = 0x58;
 const OP_GETSTATIC = 0xb2;
@@ -530,25 +564,63 @@ function generateBody(
     methodDescriptor(method, program).lastIndexOf(")") + 1,
   );
 
-  const paramSlots = new Map<Symbol, { slot: number; descriptor: string }>();
-  let slot = isStatic ? 0 : 1;
+  // Slots for parameters and (as they are declared) locals; shared map keyed by
+  // the declaration symbol.
+  const locals = new Map<Symbol, { slot: number; descriptor: string }>();
+  let nextSlot = isStatic ? 0 : 1;
   for (const p of method.parameters) {
     const descriptor = paramDescriptor(p as Parameter, program);
-    if (p.symbol) paramSlots.set(p.symbol, { slot, descriptor });
-    slot += slotsOf(descriptor);
+    if (p.symbol) locals.set(p.symbol, { slot: nextSlot, descriptor });
+    nextSlot += slotsOf(descriptor);
   }
-  const maxLocals = slot;
+  let maxLocals = nextSlot;
 
   const code = new ByteBuffer();
   let depth = 0;
   let maxStack = 0;
-  const push = (descriptor: string): void => {
-    depth += slotsOf(descriptor);
+  const grow = (slots: number): void => {
+    depth += slots;
     if (depth > maxStack) maxStack = depth;
   };
-  const pushRef = (): void => push("L");
+  const push = (descriptor: string): void => grow(slotsOf(descriptor));
+  const pushRef = (): void => grow(1);
   const pop = (slots: number): void => {
     depth -= slots;
+  };
+
+  // Numeric category of a descriptor: I (byte/char/short/boolean/int), J, F, D,
+  // or A (reference). Used for promotion and conversion.
+  const category = (descriptor: string): string => {
+    const c = descriptor[0];
+    return c === "J" || c === "D" || c === "F" ? c : c === "L" || c === "[" ? "A" : "I";
+  };
+
+  // Widening numeric conversion of the value on top of the stack (JLS 5.1.2),
+  // used for promotion, assignment and arguments. No-op when categories match.
+  const coerce = (from: string, to: string): void => {
+    const a = category(from);
+    const b = category(to);
+    if (a === b) return;
+    const op =
+      a === "I" && b === "J"
+        ? OP_I2L
+        : a === "I" && b === "F"
+          ? OP_I2F
+          : a === "I" && b === "D"
+            ? OP_I2D
+            : a === "J" && b === "F"
+              ? OP_L2F
+              : a === "J" && b === "D"
+                ? OP_L2D
+                : a === "F" && b === "D"
+                  ? OP_F2D
+                  : undefined;
+    if (op === undefined) return; // narrowing / reference: nothing to insert here
+    code.u1(op);
+    grow(
+      slotsOf(to === "J" || to === "D" ? "J" : "I") -
+        slotsOf(from === "J" || from === "D" ? "J" : "I"),
+    );
   };
 
   const ldc = (index: number): void => {
@@ -594,6 +666,37 @@ function generateBody(
     else {
       code.u1(full);
       code.u1(varSlot);
+    }
+  };
+  const storeVar = (varSlot: number, descriptor: string): void => {
+    const kind = category(descriptor) === "I" ? "I" : category(descriptor);
+    const full = { I: OP_ISTORE, J: OP_LSTORE, F: OP_FSTORE, D: OP_DSTORE, A: OP_ASTORE }[kind]!;
+    const short0 = {
+      I: OP_ISTORE_0,
+      J: OP_LSTORE_0,
+      F: OP_FSTORE_0,
+      D: OP_DSTORE_0,
+      A: OP_ASTORE_0,
+    }[kind]!;
+    if (varSlot <= 3) code.u1(short0 + varSlot);
+    else {
+      code.u1(full);
+      code.u1(varSlot);
+    }
+    pop(slotsOf(descriptor));
+  };
+
+  // Descriptor of a checker Type, for `var` locals.
+  const typeDescriptor = (type: Type): string => {
+    switch (type.kind) {
+      case TypeKind.Primitive:
+        return PRIMITIVE_DESCRIPTOR[type.name] ?? "I";
+      case TypeKind.Class:
+        return `L${binaryName(type.symbol)};`;
+      case TypeKind.Array:
+        return `[${typeDescriptor(type.elementType)}`;
+      default:
+        return "Ljava/lang/Object;"; // type variable / wildcard / null / error
     }
   };
 
@@ -656,12 +759,16 @@ function generateBody(
         return `L${thisInternalName};`;
       case SyntaxKind.Identifier: {
         const symbol = checker.resolveName(node as Identifier);
-        const local = symbol ? paramSlots.get(symbol) : undefined;
+        const local = symbol ? locals.get(symbol) : undefined;
         if (!local) throw new UnsupportedEmit(); // fields/statics via simple name: later
         loadVar(local.slot, local.descriptor);
         push(local.descriptor);
         return local.descriptor;
       }
+      case SyntaxKind.BinaryExpression:
+        return emitBinary(node as BinaryExpression);
+      case SyntaxKind.PrefixUnaryExpression:
+        return emitPrefixUnary(node as PrefixUnaryExpression);
       case SyntaxKind.PropertyAccessExpression: {
         const access = node as PropertyAccessExpression;
         const symbol = checker.resolveName(access.name);
@@ -726,6 +833,124 @@ function generateBody(
     return returnDesc;
   };
 
+  // Numeric category of an expression's static type, or undefined for anything
+  // non-numeric (references, String -> concatenation, unknown).
+  const numericCategory = (type: Type): string | undefined => {
+    if (type.kind !== TypeKind.Primitive) return undefined;
+    switch (type.name) {
+      case "long":
+        return "J";
+      case "float":
+        return "F";
+      case "double":
+        return "D";
+      case "byte":
+      case "short":
+      case "char":
+      case "boolean":
+      case "int":
+        return "I";
+      default:
+        return undefined; // void
+    }
+  };
+  const TYPE_OFFSET: Record<string, number> = { I: 0, J: 1, F: 2, D: 3 };
+  const ARITHMETIC: Record<number, number> = {
+    [SyntaxKind.PlusToken]: OP_IADD,
+    [SyntaxKind.MinusToken]: OP_ISUB,
+    [SyntaxKind.AsteriskToken]: OP_IMUL,
+    [SyntaxKind.SlashToken]: OP_IDIV,
+    [SyntaxKind.PercentToken]: OP_IREM,
+    [SyntaxKind.AmpersandToken]: OP_IAND,
+    [SyntaxKind.BarToken]: OP_IOR,
+    [SyntaxKind.CaretToken]: OP_IXOR,
+  };
+  const SHIFTS: Record<number, number> = {
+    [SyntaxKind.LessThanLessThanToken]: OP_ISHL,
+    [SyntaxKind.GreaterThanGreaterThanToken]: OP_ISHR,
+    [SyntaxKind.GreaterThanGreaterThanGreaterThanToken]: OP_IUSHR,
+  };
+
+  // Emit an operand promoted to `targetCat`. An int literal promoted to long is
+  // folded to a long constant (as javac does: 1 -> lconst_1, not iconst_1; i2l).
+  const emitOperand = (node: Node, targetCat: string): void => {
+    if (targetCat === "J" && node.kind === SyntaxKind.NumericLiteral) {
+      const text = (node as LiteralExpression).value.replace(/_/g, "");
+      if (!/[.eEfFdDlL]/.test(text)) {
+        longConst(BigInt(/^0[0-7]+$/.test(text) ? parseInt(text, 8) : Number(text)));
+        push("J");
+        return;
+      }
+    }
+    coerce(emitExpr(node), targetCat);
+  };
+
+  const emitBinary = (node: BinaryExpression): string => {
+    const op = node.operatorToken;
+    const lc = numericCategory(checker.getTypeOfExpression(node.left));
+    const rc = numericCategory(checker.getTypeOfExpression(node.right));
+    if (!lc || !rc) throw new UnsupportedEmit(); // String concat / comparisons: later
+
+    const shift = SHIFTS[op];
+    if (shift !== undefined) {
+      const longShift = lc === "J";
+      emitExpr(node.left); // already int or long (unary promotion is a no-op here)
+      coerce(emitExpr(node.right), "I"); // the shift distance is always int
+      code.u1(shift + (longShift ? 1 : 0));
+      pop(1); // pops the int distance; the result keeps the left operand's size
+      return longShift ? "J" : "I";
+    }
+
+    const base = ARITHMETIC[op];
+    if (base === undefined) throw new UnsupportedEmit();
+    const bitwise = base === OP_IAND || base === OP_IOR || base === OP_IXOR;
+    if (bitwise && (lc === "F" || lc === "D" || rc === "F" || rc === "D")) {
+      throw new UnsupportedEmit();
+    }
+    // Binary numeric promotion (JLS 5.6.2).
+    const t =
+      lc === "D" || rc === "D"
+        ? "D"
+        : lc === "F" || rc === "F"
+          ? "F"
+          : lc === "J" || rc === "J"
+            ? "J"
+            : "I";
+    emitOperand(node.left, t);
+    emitOperand(node.right, t);
+    code.u1(base + TYPE_OFFSET[t]!);
+    pop(slotsOf(t)); // two operands of t -> one result of t
+    return t;
+  };
+
+  const emitPrefixUnary = (node: PrefixUnaryExpression): string => {
+    const op = node.operator;
+    if (op === SyntaxKind.PlusToken) return emitExpr(node.operand); // unary plus: no-op
+    const c = numericCategory(checker.getTypeOfExpression(node.operand));
+    if (!c) throw new UnsupportedEmit();
+    if (op === SyntaxKind.MinusToken) {
+      emitExpr(node.operand);
+      code.u1(OP_INEG + TYPE_OFFSET[c]!);
+      return c;
+    }
+    if (op === SyntaxKind.TildeToken) {
+      if (c !== "I" && c !== "J") throw new UnsupportedEmit();
+      emitExpr(node.operand);
+      if (c === "I") {
+        code.u1(OP_ICONST_M1);
+        grow(1);
+        code.u1(OP_IXOR);
+        pop(1);
+        return "I";
+      }
+      longConst(-1n);
+      code.u1(OP_LXOR);
+      pop(2);
+      return "J";
+    }
+    throw new UnsupportedEmit(); // logical '!': needs control flow
+  };
+
   const emitReturn = (): void => {
     switch (returnDescriptor[0]) {
       case "V":
@@ -750,6 +975,19 @@ function generateBody(
     }
   };
 
+  // Assignment used as a statement: store into a local, leaving nothing on the
+  // stack (field/array targets and compound assignment come later).
+  const emitAssignStatement = (assign: AssignmentExpression): void => {
+    if (assign.operatorToken !== SyntaxKind.EqualsToken) throw new UnsupportedEmit();
+    if (assign.left.kind !== SyntaxKind.Identifier) throw new UnsupportedEmit();
+    const symbol = checker.resolveName(assign.left as Identifier);
+    const local = symbol ? locals.get(symbol) : undefined;
+    if (!local) throw new UnsupportedEmit();
+    const rd = emitExpr(assign.right);
+    coerce(rd, local.descriptor);
+    storeVar(local.slot, local.descriptor);
+  };
+
   // Returns true if the statement is a definite terminator (return).
   const emitStmt = (stmt: Node): boolean => {
     switch (stmt.kind) {
@@ -762,8 +1000,34 @@ function generateBody(
       }
       case SyntaxKind.EmptyStatement:
         return false;
+      case SyntaxKind.LocalVariableDeclarationStatement: {
+        const decl = stmt as LocalVariableDeclarationStatement;
+        for (const d of decl.declarators) {
+          const declarator = d as VariableDeclarator;
+          const isVar = decl.type.kind === SyntaxKind.VarType;
+          if (isVar && !declarator.initializer) throw new UnsupportedEmit();
+          const descriptor = isVar
+            ? typeDescriptor(checker.getTypeOfExpression(declarator.initializer!))
+            : descriptorOf(decl.type, program);
+          const slot = nextSlot;
+          nextSlot += slotsOf(descriptor);
+          if (nextSlot > maxLocals) maxLocals = nextSlot;
+          if (declarator.symbol) locals.set(declarator.symbol, { slot, descriptor });
+          if (declarator.initializer) {
+            const rd = emitExpr(declarator.initializer);
+            coerce(rd, descriptor);
+            storeVar(slot, descriptor);
+          }
+        }
+        return false;
+      }
       case SyntaxKind.ExpressionStatement: {
-        const desc = emitExpr((stmt as ExpressionStatement).expression);
+        const expression = (stmt as ExpressionStatement).expression;
+        if (expression.kind === SyntaxKind.AssignmentExpression) {
+          emitAssignStatement(expression as AssignmentExpression);
+          return false;
+        }
+        const desc = emitExpr(expression);
         if (desc !== "V") {
           code.u1(slotsOf(desc) === 2 ? OP_POP2 : OP_POP);
           pop(slotsOf(desc));
