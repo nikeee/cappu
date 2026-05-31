@@ -4,6 +4,8 @@
 // hover and as the base for assignability/overloads/inference (P6-P8).
 // Everything unknown degrades to errorType.
 
+import { createDiagnostic, Diagnostics } from "./diagnostics.ts";
+import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import {
   type ArrayType,
@@ -16,6 +18,7 @@ import {
   primitiveType,
   type Type,
   TypeKind,
+  typeToString,
   typeVariable,
   type WildcardType,
 } from "./checkerTypes.ts";
@@ -30,10 +33,12 @@ import { tokenToString } from "./utilities.ts";
 import {
   type ArrayCreationExpression,
   type ArrayType as AstArrayType,
+  type AssignmentExpression,
   type BinaryExpression,
   type CallExpression,
   type CastExpression,
   type ConditionalExpression,
+  type Diagnostic,
   type ElementAccessExpression,
   type Identifier,
   type LiteralExpression,
@@ -43,11 +48,14 @@ import {
   type ParenthesizedExpression,
   type PrefixUnaryExpression,
   type PropertyAccessExpression,
+  type ReturnStatement,
+  type SourceFile,
   type Symbol,
   SymbolFlags,
   SyntaxKind,
   type TypeNode,
   type TypeReference,
+  type VariableDeclarator,
   type WildcardType as AstWildcardType,
 } from "./types.ts";
 
@@ -61,6 +69,8 @@ export interface Checker {
   isAssignableTo(source: Type, target: Type): boolean;
   /** The chosen overload for a call (JLS 15.12.2), or undefined if unresolved. */
   resolveCall(call: CallExpression): MethodDeclaration | undefined;
+  /** High-precision semantic diagnostics (type mismatches between known types). */
+  getSemanticDiagnostics(sourceFile: SourceFile): Diagnostic[];
 }
 
 // Primitive widening (JLS 5.1.2) and boxing (JLS 5.1.7).
@@ -548,6 +558,103 @@ export function createChecker(program: Program): Checker {
     return chooseOverload(decls, call.arguments.map(getTypeOfExpression));
   }
 
+  // --- semantic diagnostics ----------------------------------------------------------
+
+  // Only types we can fully reason about are checked, so a mismatch is never a
+  // false positive: no error type and no type variable / wildcard / intersection
+  // anywhere (those need substitution/inference we do not perform yet).
+  function isConcrete(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Primitive:
+      case TypeKind.Null:
+        return true;
+      case TypeKind.Class:
+        return (type as ClassType).typeArguments.every(isConcrete);
+      case TypeKind.Array:
+        return isConcrete((type as ArrayType).elementType);
+      default:
+        return false;
+    }
+  }
+
+  function enclosingReturnType(node: Node): Type | undefined {
+    let current: Node | undefined = node;
+    while (current) {
+      if (current.kind === SyntaxKind.MethodDeclaration) {
+        return resolveType((current as MethodDeclaration).returnType, current);
+      }
+      if (current.kind === SyntaxKind.LambdaExpression) return undefined; // lambda target typing: later
+      current = current.parent;
+    }
+    return undefined;
+  }
+
+  function getSemanticDiagnostics(sourceFile: SourceFile): Diagnostic[] {
+    const diagnostics: Diagnostic[] = [];
+
+    const checkAssignment = (valueNode: Node, targetType: Type): void => {
+      if (targetType.kind === TypeKind.Primitive && targetType.name === "void") return;
+      if (!isConcrete(targetType)) return;
+      const valueType = getTypeOfExpression(valueNode);
+      if (!isConcrete(valueType)) return;
+      // High-precision scope: only the primitive<->reference boundary, where an
+      // incompatibility is unambiguous (e.g. int x = "s"). Primitive-to-primitive
+      // is skipped because constant narrowing (JLS 5.2) is legal without a cast,
+      // and reference-to-reference / generic cases depend on subtyping precision
+      // we do not fully model yet. These are broadened in P11.
+      const oneIsPrimitive =
+        (targetType.kind === TypeKind.Primitive) !== (valueType.kind === TypeKind.Primitive);
+      if (!oneIsPrimitive) return;
+      if (!isAssignableTo(valueType, targetType)) {
+        diagnostics.push(
+          createDiagnostic(
+            valueNode.pos,
+            valueNode.end - valueNode.pos,
+            Diagnostics.Incompatible_types_0_1,
+            typeToString(valueType),
+            typeToString(targetType),
+          ),
+        );
+      }
+    };
+
+    const visit = (node: Node): void => {
+      switch (node.kind) {
+        case SyntaxKind.VariableDeclarator: {
+          const d = node as VariableDeclarator;
+          if (d.initializer && d.symbol && d.initializer.kind !== SyntaxKind.ArrayInitializer) {
+            checkAssignment(d.initializer, getTypeOfSymbol(d.symbol));
+          }
+          break;
+        }
+        case SyntaxKind.AssignmentExpression: {
+          const a = node as AssignmentExpression;
+          if (a.operatorToken === SyntaxKind.EqualsToken) {
+            checkAssignment(a.right, getTypeOfExpression(a.left));
+          }
+          break;
+        }
+        case SyntaxKind.ReturnStatement: {
+          const r = node as ReturnStatement;
+          if (r.expression) {
+            const ret = enclosingReturnType(node);
+            if (ret) checkAssignment(r.expression, ret);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+      forEachChild(node, child => {
+        visit(child);
+        return undefined;
+      });
+    };
+
+    visit(sourceFile);
+    return diagnostics;
+  }
+
   return {
     resolveType,
     getTypeOfSymbol,
@@ -555,5 +662,6 @@ export function createChecker(program: Program): Checker {
     resolveName,
     isAssignableTo,
     resolveCall,
+    getSemanticDiagnostics,
   };
 }

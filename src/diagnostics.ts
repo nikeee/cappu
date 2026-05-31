@@ -60,6 +60,13 @@ export const Diagnostics = {
 
   // Binder
   Duplicate_declaration_0: diag(1200, "Duplicate_declaration_0", "Duplicate declaration '{0}'."),
+
+  // Checker (semantic)
+  Incompatible_types_0_1: diag(
+    1300,
+    "Incompatible_types_0_1",
+    "Incompatible types: '{0}' cannot be converted to '{1}'.",
+  ),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */

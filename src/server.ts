@@ -106,9 +106,11 @@ function toLspDiagnostic(d: JavaDiagnostic, lineStarts: readonly number[]): LspD
 
 function validate(uri: string, sourceFile: SourceFile): void {
   const lineStarts = computeLineStarts(sourceFile.text);
-  const diagnostics = [...sourceFile.parseDiagnostics, ...(sourceFile.bindDiagnostics ?? [])].map(
-    d => toLspDiagnostic(d, lineStarts),
-  );
+  const diagnostics = [
+    ...sourceFile.parseDiagnostics,
+    ...(sourceFile.bindDiagnostics ?? []),
+    ...checker.getSemanticDiagnostics(sourceFile),
+  ].map(d => toLspDiagnostic(d, lineStarts));
   connection.sendDiagnostics({ uri, diagnostics });
 }
 

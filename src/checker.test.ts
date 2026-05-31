@@ -170,3 +170,34 @@ test("most-specific overload is chosen", () => {
     ),
   ).toBe("String");
 });
+
+// P9: semantic diagnostics (type mismatch)
+
+function semanticDiags(text: string): string[] {
+  const ctx = setup(text);
+  const sf = ctx.program.getSourceFile(ctx.uri)!;
+  return ctx.checker.getSemanticDiagnostics(sf).map(d => d.messageText);
+}
+
+test("type mismatch is reported for concrete incompatible types", () => {
+  expect(semanticDiags('class C { int x = "s"; }')).toHaveLength(1);
+  expect(semanticDiags("class C { String s = 3; }")).toHaveLength(1);
+  expect(semanticDiags('class C { int m() { return "s"; } }')).toHaveLength(1);
+  expect(semanticDiags('class C { void m() { int v = 0; v = "s"; } }')).toHaveLength(1);
+});
+
+test("compatible assignments produce no diagnostics", () => {
+  expect(semanticDiags("class C { int x = 1; long y = x; double d = y; }")).toHaveLength(0);
+  expect(semanticDiags('class C { String s = "ok"; Object o = s; Integer bi = 3; }')).toHaveLength(
+    0,
+  );
+  expect(semanticDiags("class C { int m() { return 0; } }")).toHaveLength(0);
+});
+
+test("no diagnostics when a type is unknown or generic (no false positives)", () => {
+  expect(semanticDiags("class C { void m() { var x = mystery(); int y = x; } }")).toHaveLength(0);
+  expect(semanticDiags("class C<T> { T t; void m(T p) { t = p; } }")).toHaveLength(0);
+  expect(semanticDiags("class C { java.util.List<String> a; void m() { a = a; } }")).toHaveLength(
+    0,
+  );
+});
