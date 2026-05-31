@@ -68,6 +68,14 @@ test("lambda parameter with an unknown target resolves without a type", () => {
   expect(getHoverText(ctx.checker, symbolAt(ctx, "x", 2))).toBe("(parameter) x");
 });
 
+test("array .length resolves as an int field, Object methods resolve on arrays", () => {
+  const ctx = setup(
+    "class C { void m(String[] arr) { int n = arr.length; var s = arr.hashCode(); } }",
+  );
+  expect(getHoverText(ctx.checker, symbolAt(ctx, "length"))).toBe("(field) int length");
+  expect(getHoverText(ctx.checker, symbolAt(ctx, "hashCode"))).toBe("int hashCode()");
+});
+
 test("package-name qualifiers resolve and hover as packages", () => {
   const ctx = setup("class C { java.util.List<String> xs; }");
   expect(getHoverText(ctx.checker, symbolAt(ctx, "java"))).toBe("package java");

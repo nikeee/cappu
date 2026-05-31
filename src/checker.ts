@@ -162,6 +162,17 @@ export function createChecker(program: Program): Checker {
   const intType = primitiveType("int");
   const charType = primitiveType("char");
 
+  // Synthetic symbol for the implicit `length` field of every array (JLS 10.7).
+  const arrayLengthSymbol: Symbol = { flags: SymbolFlags.Field, escapedName: "length" };
+  symbolTypes.set(arrayLengthSymbol, intType);
+
+  // Members accessible on an array value: the implicit `length`, plus everything
+  // inherited from Object (clone, equals, hashCode, getClass, toString).
+  function arrayMember(name: string): Symbol | undefined {
+    if (name === "length") return arrayLengthSymbol;
+    return objectSymbol()?.members?.get(name);
+  }
+
   function classTypeByFqn(fqn: string): Type {
     const symbol = program.getGlobalIndex().getType(fqn);
     return symbol ? classType(symbol) : errorType;
@@ -493,6 +504,10 @@ export function createChecker(program: Program): Checker {
 
   function typeOfMemberAccess(access: PropertyAccessExpression): Type {
     const receiver = getTypeOfExpression(access.expression);
+    if (receiver.kind === TypeKind.Array) {
+      const member = arrayMember(access.name.text);
+      return member ? getTypeOfSymbol(member) : errorType;
+    }
     if (receiver.kind !== TypeKind.Class) return errorType;
     const found = lookupTypedMember(receiver as ClassType, access.name.text);
     if (!found) return errorType;
@@ -578,6 +593,7 @@ export function createChecker(program: Program): Checker {
 
   function resolveMemberAccess(access: PropertyAccessExpression): Symbol | undefined {
     const targetType = getTypeOfExpression(access.expression);
+    if (targetType.kind === TypeKind.Array) return arrayMember(access.name.text);
     if (targetType.kind !== TypeKind.Class) return undefined;
     return lookupMember((targetType as ClassType).symbol, access.name.text, Meaning.Any, program);
   }
