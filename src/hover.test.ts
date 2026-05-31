@@ -47,6 +47,27 @@ test("record-pattern binding variable hovers as its type", () => {
   expect(getHoverText(ctx.checker, symbolAt(ctx, "zz", 2))).toBe("(local variable) double zz");
 });
 
+test("concise lambda parameter resolves and infers its type from the target", () => {
+  const ctx = setup(
+    "class C { java.util.function.Function<Integer, Integer> twice = x -> x * 2; }",
+  );
+  expect(getHoverText(ctx.checker, symbolAt(ctx, "x", 2))).toBe("(parameter) Integer x");
+});
+
+test("multi-parameter lambda infers each parameter from the SAM", () => {
+  const ctx = setup(
+    "class C { java.util.function.BiFunction<String, Integer, Integer> f = (key, num) -> num; }",
+  );
+  expect(getHoverText(ctx.checker, symbolAt(ctx, "key", 1))).toBe("(parameter) String key");
+  expect(getHoverText(ctx.checker, symbolAt(ctx, "num", 1))).toBe("(parameter) Integer num");
+});
+
+test("lambda parameter with an unknown target resolves without a type", () => {
+  const ctx = setup("class C { void m() { var f = x -> x; } }");
+  // resolves (so hover appears) but the target type is unknown, so no type shown
+  expect(getHoverText(ctx.checker, symbolAt(ctx, "x", 2))).toBe("(parameter) x");
+});
+
 test("getDocumentation returns the cleaned Javadoc of a method", () => {
   const ctx = setup(
     [

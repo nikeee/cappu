@@ -46,5 +46,10 @@ export function getHoverText(checker: Checker, symbol: Symbol): string {
   if (symbol.flags & SymbolFlags.TypeParameter) {
     return `(${word}) ${symbol.escapedName}`;
   }
-  return `(${word}) ${checker.typeStringOfSymbol(symbol)} ${symbol.escapedName}`;
+  const type = checker.typeStringOfSymbol(symbol);
+  // Omit an unresolvable type (e.g. a lambda parameter whose target is unknown)
+  // rather than printing "<error>".
+  return type === "<error>"
+    ? `(${word}) ${symbol.escapedName}`
+    : `(${word}) ${type} ${symbol.escapedName}`;
 }

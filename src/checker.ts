@@ -44,6 +44,7 @@ import {
   type ElementAccessExpression,
   type EnumDeclaration,
   type Identifier,
+  type LambdaExpression,
   type LiteralExpression,
   type MethodDeclaration,
   type Node,
@@ -376,10 +377,59 @@ export function createChecker(program: Program): Checker {
         } else {
           type = resolveType(declared.typeNode, declared.from);
         }
+      } else {
+        // A concise lambda parameter (x -> ...) has no written type; infer it
+        // from the target functional interface.
+        type = inferLambdaParameterType(symbol);
       }
     }
     symbolTypes.set(symbol, type);
     return type;
+  }
+
+  // The single abstract method of a functional interface (its SAM), searched
+  // through inherited interfaces.
+  function functionalMethod(
+    typeSymbol: Symbol,
+    seen = new Set<Symbol>(),
+  ): MethodDeclaration | undefined {
+    if (seen.has(typeSymbol)) return undefined;
+    seen.add(typeSymbol);
+    for (const member of typeSymbol.members?.values() ?? []) {
+      if (member.flags & SymbolFlags.Method) {
+        const decl = member.declarations?.find(d => d.kind === SyntaxKind.MethodDeclaration);
+        if (decl) return decl as MethodDeclaration;
+      }
+    }
+    for (const superSymbol of getDirectSuperTypeSymbols(typeSymbol, program)) {
+      const found = functionalMethod(superSymbol, seen);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  // The functional-interface type a lambda is being assigned/converted to. Only
+  // the common case (assigned to a typed variable/field) is handled.
+  function lambdaTargetType(lambda: Node): Type | undefined {
+    const parent = lambda.parent;
+    if (parent.kind === SyntaxKind.VariableDeclarator && parent.symbol) {
+      return getTypeOfSymbol(parent.symbol);
+    }
+    return undefined;
+  }
+
+  function inferLambdaParameterType(symbol: Symbol): Type {
+    const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+    if (!declaration || declaration.kind !== SyntaxKind.Identifier) return errorType;
+    const lambda = declaration.parent;
+    if (!lambda || lambda.kind !== SyntaxKind.LambdaExpression) return errorType;
+    const index = (lambda as LambdaExpression).parameters.indexOf(declaration);
+    const target = lambdaTargetType(lambda);
+    if (index < 0 || !target || target.kind !== TypeKind.Class) return errorType;
+    const sam = functionalMethod(target.symbol);
+    if (!sam || index >= sam.parameters.length) return errorType;
+    const paramType = resolveType(sam.parameters[index]!.type, sam);
+    return substitute(paramType, substitutionFor(target.symbol, target.typeArguments));
   }
 
   // Infer the type of a `var` declaration: from the initializer for a local, or

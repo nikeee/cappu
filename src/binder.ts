@@ -178,6 +178,25 @@ function bindDeclaration(node: Node): void {
     case SyntaxKind.Parameter:
       declareIntoContainer(named(node), node, SymbolFlags.Parameter, SymbolFlags.Parameter);
       break;
+    case SyntaxKind.Identifier: {
+      // A concise lambda parameter (x -> ...) is a bare Identifier; declare it
+      // as a parameter in the enclosing lambda scope (typed params are Parameter
+      // nodes, handled above).
+      const lambda = node.parent;
+      if (
+        lambda &&
+        lambda.kind === SyntaxKind.LambdaExpression &&
+        (lambda as unknown as { parameters: readonly Node[] }).parameters.includes(node)
+      ) {
+        declareIntoContainer(
+          node as Identifier,
+          node,
+          SymbolFlags.Parameter,
+          SymbolFlags.Parameter,
+        );
+      }
+      break;
+    }
     case SyntaxKind.TypePattern:
       // SE21 pattern binding variable (case String s, instanceof patterns).
       declareIntoContainer(named(node), node, SymbolFlags.LocalVariable, SymbolFlags.None);
