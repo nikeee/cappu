@@ -45,6 +45,7 @@ import {
   type SourceFile,
 } from "./types.ts";
 import { getHoverText } from "./hover.ts";
+import { skipTrivia } from "./utilities.ts";
 import { loadJavaFiles, uriToPath } from "./workspace.ts";
 
 // Communicate over stdio (the standard transport for editor language clients).
@@ -139,10 +140,13 @@ connection.onDocumentSymbol((params): DocumentSymbol[] => {
 function locationOf(node: Node): Location {
   const file = getSourceFileOfNode(node);
   const lineStarts = computeLineStarts(file.text);
+  // node.pos includes leading trivia; advance to the token's real start so the
+  // highlighted range covers only the symbol name.
+  const start = skipTrivia(file.text, node.pos);
   return {
     uri: file.fileName,
     range: {
-      start: getLineAndCharacterOfPosition(lineStarts, node.pos),
+      start: getLineAndCharacterOfPosition(lineStarts, start),
       end: getLineAndCharacterOfPosition(lineStarts, node.end),
     },
   };

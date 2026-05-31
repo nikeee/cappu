@@ -13,6 +13,45 @@ export function entityNameToString(name: EntityName): string {
   return `${entityNameToString(qualified.left)}.${qualified.right.text}`;
 }
 
+// Advance past leading trivia (whitespace, line breaks, line and block comments)
+// starting at `pos`. Node positions include leading trivia (node.pos is the full
+// start, as in the TS compiler), so this maps a node's pos to where its actual
+// token text begins - the position wanted for a goto/reference/rename range.
+export function skipTrivia(text: string, pos: number): number {
+  const length = text.length;
+  while (pos < length) {
+    const ch = text.charCodeAt(pos);
+    // space, tab, vertical tab, form feed, line feed, carriage return
+    if (ch === 0x20 || ch === 0x09 || ch === 0x0b || ch === 0x0c || ch === 0x0a || ch === 0x0d) {
+      pos++;
+      continue;
+    }
+    if (ch === 0x2f /* / */) {
+      const next = text.charCodeAt(pos + 1);
+      if (next === 0x2f /* / */) {
+        pos += 2;
+        while (pos < length && text.charCodeAt(pos) !== 0x0a && text.charCodeAt(pos) !== 0x0d) {
+          pos++;
+        }
+        continue;
+      }
+      if (next === 0x2a /* * */) {
+        pos += 2;
+        while (
+          pos < length &&
+          !(text.charCodeAt(pos) === 0x2a && text.charCodeAt(pos + 1) === 0x2f)
+        ) {
+          pos++;
+        }
+        pos += 2;
+        continue;
+      }
+    }
+    break;
+  }
+  return pos;
+}
+
 // Text -> kind for every reserved word (and the reserved literals true/false/null).
 // Contextual keywords (var, yield, record, sealed, ...) are intentionally absent:
 // they are scanned as identifiers and recognized positionally by the parser.
