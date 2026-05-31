@@ -10,7 +10,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { emitSourceFile } from "./emitter.ts";
-import { parseSourceFile } from "./parser.ts";
+import { loadJdkStub } from "./jdkStub.ts";
+import { createProgram } from "./program.ts";
+import { pathToUri } from "./workspace.ts";
 
 function main(argv: string[]): number {
   let outDir: string | undefined;
@@ -24,9 +26,13 @@ function main(argv: string[]): number {
     return 2;
   }
 
+  // One program over all inputs (+ the JDK stub) so type descriptors resolve.
+  const program = createProgram();
+  loadJdkStub(program);
+  for (const file of files) program.addProjectFile(pathToUri(file), readFileSync(file, "utf8"));
+
   for (const file of files) {
-    const source = readFileSync(file, "utf8");
-    const sourceFile = parseSourceFile(file, source);
+    const sourceFile = program.getSourceFile(pathToUri(file))!;
     if (sourceFile.parseDiagnostics.length > 0) {
       for (const d of sourceFile.parseDiagnostics) {
         process.stderr.write(`${file}: error ${d.code}: ${d.messageText}\n`);
@@ -34,7 +40,7 @@ function main(argv: string[]): number {
       return 1;
     }
     const target = outDir ?? dirname(file);
-    for (const cls of emitSourceFile(sourceFile)) {
+    for (const cls of emitSourceFile(sourceFile, program)) {
       const out = join(target, `${cls.name}.class`);
       writeFileSync(out, cls.bytes);
       process.stdout.write(`${out}\n`);

@@ -9,17 +9,50 @@
 // Reference output is cross-checked against `javac` in the tests.
 
 import { forEachChild } from "./parser.ts";
-import { type ClassDeclaration, type Node, type SourceFile, SyntaxKind } from "./types.ts";
+import type { Program } from "./program.ts";
+import { resolveTypeEntityName } from "./resolver.ts";
+import { entityNameToString, tokenToString } from "./utilities.ts";
+import {
+  type ArrayType as AstArrayType,
+  type ClassDeclaration,
+  type FieldDeclaration,
+  type Node,
+  type SourceFile,
+  type Symbol,
+  SymbolFlags,
+  SyntaxKind,
+  type TypeNode,
+  type TypeReference,
+  type VariableDeclarator,
+} from "./types.ts";
 
 const MAGIC = 0xcafebabe;
 const MINOR_VERSION = 0;
 const MAJOR_VERSION = 65; // Java 21
 
-// Class access flags (JVMS 4.1, Table 4.1-B).
+// Access flags (JVMS 4.1 / 4.5 / 4.6).
 const ACC_PUBLIC = 0x0001;
+const ACC_PRIVATE = 0x0002;
+const ACC_PROTECTED = 0x0004;
+const ACC_STATIC = 0x0008;
 const ACC_FINAL = 0x0010;
 const ACC_SUPER = 0x0020;
+const ACC_VOLATILE = 0x0040;
+const ACC_TRANSIENT = 0x0080;
 const ACC_ABSTRACT = 0x0400;
+
+// Primitive field descriptors (JVMS 4.3.2).
+const PRIMITIVE_DESCRIPTOR: Record<string, string> = {
+  byte: "B",
+  char: "C",
+  double: "D",
+  float: "F",
+  int: "I",
+  long: "J",
+  short: "S",
+  boolean: "Z",
+  void: "V",
+};
 
 // Constant pool tags (JVMS 4.4, Table 4.4-A).
 const CONSTANT_Utf8 = 1;
@@ -146,8 +179,110 @@ function classAccessFlags(declaration: ClassDeclaration): number {
   return flags;
 }
 
+function memberAccessFlags(modifiers: readonly Node[] | undefined): number {
+  let flags = 0;
+  for (const modifier of modifiers ?? []) {
+    switch (modifier.kind) {
+      case SyntaxKind.PublicKeyword:
+        flags |= ACC_PUBLIC;
+        break;
+      case SyntaxKind.PrivateKeyword:
+        flags |= ACC_PRIVATE;
+        break;
+      case SyntaxKind.ProtectedKeyword:
+        flags |= ACC_PROTECTED;
+        break;
+      case SyntaxKind.StaticKeyword:
+        flags |= ACC_STATIC;
+        break;
+      case SyntaxKind.FinalKeyword:
+        flags |= ACC_FINAL;
+        break;
+      case SyntaxKind.VolatileKeyword:
+        flags |= ACC_VOLATILE;
+        break;
+      case SyntaxKind.TransientKeyword:
+        flags |= ACC_TRANSIENT;
+        break;
+      default:
+        break;
+    }
+  }
+  return flags;
+}
+
+// Internal (binary) name of a type symbol: package with '/' separators, nested
+// types joined by '$'. e.g. java.lang.String -> "java/lang/String".
+function binaryName(symbol: Symbol): string {
+  const names = [symbol.escapedName];
+  let parent = symbol.parent;
+  while (parent && parent.flags & SymbolFlags.Type) {
+    names.unshift(parent.escapedName);
+    parent = parent.parent;
+  }
+  const pkg = parent && parent.flags & SymbolFlags.Package ? parent.escapedName : "";
+  const nested = names.join("$");
+  return pkg ? `${pkg.replace(/\./g, "/")}/${nested}` : nested;
+}
+
+// Field/return type descriptor (JVMS 4.3.2). Type references are resolved to a
+// binary name; an unresolved name falls back to its written form (best effort).
+function descriptorOf(typeNode: TypeNode, program: Program): string {
+  switch (typeNode.kind) {
+    case SyntaxKind.PrimitiveType: {
+      const keyword = tokenToString((typeNode as { keyword: SyntaxKind }).keyword) ?? "int";
+      return PRIMITIVE_DESCRIPTOR[keyword] ?? "I";
+    }
+    case SyntaxKind.ArrayType:
+      return `[${descriptorOf((typeNode as AstArrayType).elementType, program)}`;
+    case SyntaxKind.TypeReference: {
+      const ref = typeNode as TypeReference;
+      const symbol = resolveTypeEntityName(ref.typeName, typeNode, program);
+      const name = symbol
+        ? binaryName(symbol)
+        : entityNameToString(ref.typeName).replace(/\./g, "/");
+      return `L${name};`;
+    }
+    default:
+      return "Ljava/lang/Object;";
+  }
+}
+
+// One field_info per declarator (int a, b; emits two fields).
+function emitFields(
+  declaration: ClassDeclaration,
+  cp: ConstantPool,
+  program: Program,
+): {
+  buffer: ByteBuffer;
+  count: number;
+} {
+  const buffer = new ByteBuffer();
+  let count = 0;
+  for (const member of declaration.members) {
+    if (member.kind !== SyntaxKind.FieldDeclaration) continue;
+    const field = member as FieldDeclaration;
+    const descriptor = descriptorOf(field.type, program);
+    const flags = memberAccessFlags(field.modifiers);
+    for (const declarator of field.declarators) {
+      const name = (declarator as VariableDeclarator).name.text;
+      buffer.u2(flags);
+      buffer.u2(cp.utf8(name));
+      buffer.u2(cp.utf8(descriptor));
+      buffer.u2(0); // attributes_count (ConstantValue comes later)
+      count++;
+    }
+  }
+  return { buffer, count };
+}
+
 // The default no-arg constructor: invokes the super constructor and returns.
-function emitDefaultConstructor(cp: ConstantPool, superInternalName: string): ByteBuffer {
+// `accessFlags` mirrors the class's accessibility (JLS 8.8.9).
+function emitDefaultConstructor(
+  cp: ConstantPool,
+  superInternalName: string,
+  accessFlags: number,
+): ByteBuffer {
   const superInit = cp.methodref(superInternalName, "<init>", "()V");
 
   const code = new ByteBuffer();
@@ -167,7 +302,7 @@ function emitDefaultConstructor(cp: ConstantPool, superInternalName: string): By
   codeAttr.u2(0); // attributes_count
 
   const method = new ByteBuffer();
-  method.u2(0); // access_flags
+  method.u2(accessFlags);
   method.u2(cp.utf8("<init>"));
   method.u2(cp.utf8("()V"));
   method.u2(1); // attributes_count
@@ -181,28 +316,34 @@ export interface EmittedClass {
   readonly bytes: Uint8Array;
 }
 
-function emitClass(declaration: ClassDeclaration): EmittedClass {
+function emitClass(declaration: ClassDeclaration, program: Program): EmittedClass {
   const name = declaration.name.text;
   const superInternalName = "java/lang/Object"; // resolving `extends` comes later
 
+  const accessFlags = classAccessFlags(declaration);
   const cp = new ConstantPool();
-  // Reserve the well-known entries in a stable order; the constructor adds the
-  // super Methodref/Class/NameAndType as needed.
   const thisClassIndex = cp.classInfo(name);
   const superClassIndex = cp.classInfo(superInternalName);
-  const constructor = emitDefaultConstructor(cp, superInternalName);
+  const fields = emitFields(declaration, cp, program);
+  // The default constructor inherits the class's accessibility (JLS 8.8.9).
+  const constructor = emitDefaultConstructor(
+    cp,
+    superInternalName,
+    accessFlags & (ACC_PUBLIC | ACC_PROTECTED | ACC_PRIVATE),
+  );
 
   const out = new ByteBuffer();
   out.u4(MAGIC);
   out.u2(MINOR_VERSION);
   out.u2(MAJOR_VERSION);
   cp.writeInto(out);
-  out.u2(classAccessFlags(declaration));
+  out.u2(accessFlags);
   out.u2(thisClassIndex);
   out.u2(superClassIndex);
   out.u2(0); // interfaces_count
-  out.u2(0); // fields_count
-  out.u2(1); // methods_count
+  out.u2(fields.count);
+  out.append(fields.buffer);
+  out.u2(1); // methods_count (the default constructor)
   out.append(constructor);
   out.u2(0); // attributes_count
 
@@ -210,10 +351,12 @@ function emitClass(declaration: ClassDeclaration): EmittedClass {
 }
 
 /** Emit a .class file for every top-level class declaration in a source file. */
-export function emitSourceFile(sourceFile: SourceFile): EmittedClass[] {
+export function emitSourceFile(sourceFile: SourceFile, program: Program): EmittedClass[] {
   const result: EmittedClass[] = [];
   forEachChild(sourceFile, (node: Node) => {
-    if (node.kind === SyntaxKind.ClassDeclaration) result.push(emitClass(node as ClassDeclaration));
+    if (node.kind === SyntaxKind.ClassDeclaration) {
+      result.push(emitClass(node as ClassDeclaration, program));
+    }
     return undefined;
   });
   return result;
