@@ -731,3 +731,46 @@ test("instanceof type pattern", () => {
 test("'record' usable as an ordinary identifier", () => {
 	expectNoErrors("class C { int record = 1; }");
 });
+
+// M15: SE21 pattern matching in switch, record patterns, guards, unnamed
+
+test("switch with type patterns and guards", () => {
+	const sf = expectNoErrors(
+		"class C { String f(Object o) {\n" +
+			"  return switch (o) {\n" +
+			"    case Integer i when i > 0 -> \"pos\";\n" +
+			"    case String s -> s;\n" +
+			"    case null -> \"null\";\n" +
+			"    default -> \"other\";\n" +
+			"  };\n" +
+			"} }",
+	);
+	expect(sf.parseDiagnostics).toHaveLength(0);
+});
+
+test("record deconstruction pattern with nested patterns and unnamed", () => {
+	const sw = firstStatement(
+		"switch (shape) { case Rect(Point(var x, var y), int w) -> use(x); case Pair(_, var b) -> use(b); default -> {} }",
+	) as import("./types.ts").SwitchStatement;
+	const first = sw.clauses[0]!;
+	expect(first.labels![0]!.kind).toBe(SyntaxKind.RecordPattern);
+	const rec = first.labels![0] as import("./types.ts").RecordPattern;
+	// nested record pattern as first component
+	expect(rec.patterns[0]!.kind).toBe(SyntaxKind.RecordPattern);
+});
+
+test("guard expression is recorded", () => {
+	const sw = firstStatement("switch (o) { case Integer i when i > 0 -> a(); default -> b(); }") as
+		import("./types.ts").SwitchStatement;
+	expect(sw.clauses[0]!.guard?.kind).toBe(SyntaxKind.BinaryExpression);
+	expect(sw.clauses[0]!.labels![0]!.kind).toBe(SyntaxKind.TypePattern);
+});
+
+test("case null, default combined label", () => {
+	const sw = firstStatement("switch (o) { case null, default -> x(); }") as import("./types.ts").SwitchStatement;
+	expect(sw.clauses[0]!.labels).toHaveLength(2);
+});
+
+test("repeated unnamed variables parse cleanly", () => {
+	expectNoErrors("class C { void m() { var _ = a(); var _ = b(); } }");
+});

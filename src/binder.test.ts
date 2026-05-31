@@ -103,6 +103,11 @@ test("local class is scoped to the enclosing block", () => {
 	expect(method.body!.locals?.get("Local")?.flags).toBe(SymbolFlags.Class);
 });
 
+test("unnamed variables '_' are not declared and do not collide (M15)", () => {
+	const sf = bindJava("class C { void m() { var _ = a(); var _ = b(); } }");
+	expect(sf.bindDiagnostics).toHaveLength(0);
+});
+
 test("typed lambda parameters are scoped to the lambda (M10)", () => {
 	const sf = bindJava("class C { Runnable r = (int a) -> { int b = a; }; }");
 	expect(sf.bindDiagnostics).toHaveLength(0);

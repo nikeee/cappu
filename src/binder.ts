@@ -122,8 +122,8 @@ function declareSymbol(
 }
 
 function declareIntoContainer(name: Identifier | undefined, node: Node, flags: SymbolFlags, excludes: SymbolFlags): void {
-	if (!name || name.text === "") {
-		return; // missing name (parse error); nothing to declare
+	if (!name || name.text === "" || name.text === "_") {
+		return; // missing name, or the unnamed variable '_' (SE21): nothing to declare
 	}
 	declareSymbol(containerTable(container), name.text, node, name, flags, excludes);
 }
@@ -164,6 +164,10 @@ function bindDeclaration(node: Node): void {
 			break;
 		case SyntaxKind.Parameter:
 			declareIntoContainer(named(node), node, SymbolFlags.Parameter, SymbolFlags.Parameter);
+			break;
+		case SyntaxKind.TypePattern:
+			// SE21 pattern binding variable (case String s, instanceof patterns).
+			declareIntoContainer(named(node), node, SymbolFlags.LocalVariable, SymbolFlags.None);
 			break;
 		case SyntaxKind.TypeParameter:
 			declareIntoContainer(named(node), node, SymbolFlags.TypeParameter, SymbolFlags.TypeParameter);

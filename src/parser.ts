@@ -54,6 +54,7 @@ import {
 	type LabeledStatement,
 	type LambdaExpression,
 	type LiteralExpression,
+	type MatchAllPattern,
 	type MethodReferenceExpression,
 	type ModuleDeclaration,
 	type ExportsDirective,
@@ -78,7 +79,9 @@ import {
 	type QualifiedName,
 	type RecordComponent,
 	type RecordDeclaration,
+	type RecordPattern,
 	type Resource,
+	type TypePattern,
 	type ReturnStatement,
 	type CallExpression,
 	type Scanner,
@@ -2240,6 +2243,64 @@ function parseTryStatement(): TryStatement {
 	return finishNode(node, pos);
 }
 
+// Patterns (SE16/SE21)
+
+function parseIdentifierOrUnderscore(): Identifier {
+	return parseIdentifier();
+}
+
+// A case label is a pattern (rather than a constant) when, after a type, it is
+// followed by a binding identifier or a '(' record deconstruction.
+function isPatternStart(): boolean {
+	return lookAhead(() => {
+		parseTypeOrVar();
+		return token() === SyntaxKind.Identifier || token() === SyntaxKind.OpenParenToken;
+	});
+}
+
+function parseComponentPattern(): Node {
+	// Unnamed pattern '_'
+	if (
+		isContextualKeyword("_") &&
+		lookAhead(() => (nextToken(), token() === SyntaxKind.CommaToken || token() === SyntaxKind.CloseParenToken))
+	) {
+		const pos = getNodePos();
+		nextToken();
+		return finishNode(createNode<MatchAllPattern>(SyntaxKind.MatchAllPattern, pos), pos);
+	}
+	return parsePattern();
+}
+
+function parsePattern(): Node {
+	const pos = getNodePos();
+	const type = parseTypeOrVar();
+	if (token() === SyntaxKind.OpenParenToken) {
+		parseExpected(SyntaxKind.OpenParenToken);
+		const patterns = parseDelimitedList(ParsingContext.Parameters, parseComponentPattern);
+		parseExpected(SyntaxKind.CloseParenToken);
+		const node = createNode<RecordPattern>(SyntaxKind.RecordPattern, pos);
+		node.type = type;
+		node.patterns = patterns;
+		return finishNode(node, pos);
+	}
+	const name = parseIdentifierOrUnderscore();
+	const node = createNode<TypePattern>(SyntaxKind.TypePattern, pos);
+	node.type = type;
+	node.name = name;
+	return finishNode(node, pos);
+}
+
+function parseCaseLabelElement(): Node {
+	// 'case null, default' allows the default keyword inside the label list.
+	if (token() === SyntaxKind.DefaultKeyword) {
+		return parseTokenNode();
+	}
+	if (isPatternStart()) {
+		return parsePattern();
+	}
+	return parseConditionalExpression();
+}
+
 function makeExpressionStatement(expression: Expression): ExpressionStatement {
 	const node = createNode<ExpressionStatement>(SyntaxKind.ExpressionStatement, expression.pos);
 	node.expression = expression;
@@ -2250,15 +2311,20 @@ function parseSwitchClause(): SwitchClause {
 	const pos = getNodePos();
 	let isDefault = false;
 	let labels: NodeArray<Expression> | undefined;
+	let guard: Expression | undefined;
 	if (parseOptional(SyntaxKind.CaseKeyword)) {
-		// Case labels are constant expressions; parse at conditional level so a
-		// trailing "-> ..." is the switch arrow, not a lambda.
+		// Case labels are constants or SE21 patterns; the parser stays at
+		// conditional level for constants so a trailing "->" is the switch arrow.
 		const labelsPos = getNodePos();
-		const list: Expression[] = [parseConditionalExpression()];
+		const list: Node[] = [parseCaseLabelElement()];
 		while (parseOptional(SyntaxKind.CommaToken)) {
-			list.push(parseConditionalExpression());
+			list.push(parseCaseLabelElement());
 		}
 		labels = createNodeArray(list, labelsPos);
+		// SE21 guard
+		if (parseContextualKeyword("when")) {
+			guard = parseExpression();
+		}
 	} else {
 		parseExpected(SyntaxKind.DefaultKeyword);
 		isDefault = true;
@@ -2296,6 +2362,7 @@ function parseSwitchClause(): SwitchClause {
 	node.isDefault = isDefault;
 	node.isArrow = isArrow;
 	node.labels = labels;
+	node.guard = guard;
 	node.statements = createNodeArray(statements, statementsPos);
 	return finishNode(node, pos);
 }
@@ -2635,7 +2702,19 @@ export function forEachChild<T>(
 		}
 		case SyntaxKind.SwitchClause: {
 			const n = node as SwitchClause;
-			return visitNodes(cbNode, cbNodes, n.labels) || visitNodes(cbNode, cbNodes, n.statements);
+			return (
+				visitNodes(cbNode, cbNodes, n.labels) ||
+				visitNode(cbNode, n.guard) ||
+				visitNodes(cbNode, cbNodes, n.statements)
+			);
+		}
+		case SyntaxKind.TypePattern: {
+			const n = node as TypePattern;
+			return visitNode(cbNode, n.type) || visitNode(cbNode, n.name);
+		}
+		case SyntaxKind.RecordPattern: {
+			const n = node as RecordPattern;
+			return visitNode(cbNode, n.type) || visitNodes(cbNode, cbNodes, n.patterns);
 		}
 		case SyntaxKind.SwitchExpression: {
 			const n = node as SwitchExpression;

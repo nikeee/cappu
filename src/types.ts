@@ -846,9 +846,30 @@ export interface SwitchClause extends Node {
 	readonly isDefault: boolean;
 	/** True for the SE14 arrow form (case L -> ...), false for the colon form. */
 	readonly isArrow: boolean;
-	/** Case labels (case A, B). Undefined for 'default'. */
-	readonly labels?: NodeArray<Expression>;
+	/** Case labels: constant expressions or SE21 patterns (case A, B). */
+	readonly labels?: NodeArray<Node>;
+	/** SE21 guard: case ... when <expr>. */
+	readonly guard?: Expression;
 	readonly statements: NodeArray<Statement>;
+}
+
+// Patterns (SE16 type patterns, SE21 record patterns and unnamed)
+
+export interface TypePattern extends Node {
+	readonly kind: SyntaxKind.TypePattern;
+	readonly type: TypeNode;
+	/** Binding variable; may be the unnamed '_'. */
+	readonly name: Identifier;
+}
+
+export interface RecordPattern extends Node {
+	readonly kind: SyntaxKind.RecordPattern;
+	readonly type: TypeNode;
+	readonly patterns: NodeArray<Node>;
+}
+
+export interface MatchAllPattern extends Node {
+	readonly kind: SyntaxKind.MatchAllPattern;
 }
 
 export interface SwitchStatement extends Statement {
