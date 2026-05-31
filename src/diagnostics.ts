@@ -67,6 +67,16 @@ export const Diagnostics = {
     "Incompatible_types_0_1",
     "Incompatible types: '{0}' cannot be converted to '{1}'.",
   ),
+  Method_does_not_override_a_supertype_method: diag(
+    1301,
+    "Method_does_not_override_a_supertype_method",
+    "Method does not override or implement a method from a supertype.",
+  ),
+  Switch_expression_not_exhaustive_0: diag(
+    1302,
+    "Switch_expression_not_exhaustive_0",
+    "Switch expression does not cover all values of '{0}' (no default).",
+  ),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */

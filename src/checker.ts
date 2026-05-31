@@ -29,8 +29,9 @@ import {
   resolveIdentifier,
   resolveTypeEntityName,
 } from "./resolver.ts";
-import { tokenToString } from "./utilities.ts";
+import { entityNameToString, tokenToString } from "./utilities.ts";
 import {
+  type Annotation,
   type ArrayCreationExpression,
   type ArrayType as AstArrayType,
   type AssignmentExpression,
@@ -40,6 +41,7 @@ import {
   type ConditionalExpression,
   type Diagnostic,
   type ElementAccessExpression,
+  type EnumDeclaration,
   type Identifier,
   type LiteralExpression,
   type MethodDeclaration,
@@ -50,6 +52,7 @@ import {
   type PropertyAccessExpression,
   type ReturnStatement,
   type SourceFile,
+  type SwitchExpression,
   type Symbol,
   SymbolFlags,
   SyntaxKind,
@@ -859,6 +862,89 @@ export function createChecker(program: Program): Checker {
     return undefined;
   }
 
+  // --- @Override (JLS 9.6.4.4) -------------------------------------------------------
+
+  function hasOverrideAnnotation(decl: MethodDeclaration): boolean {
+    for (const modifier of decl.modifiers ?? []) {
+      if (modifier.kind !== SyntaxKind.Annotation) continue;
+      const name = entityNameToString((modifier as Annotation).typeName);
+      if (name === "Override" || name.endsWith(".Override")) return true;
+    }
+    return false;
+  }
+
+  // "ok" if some supertype (incl. Object) declares a method of the same name,
+  // "missing" if the whole hierarchy is known and none does, "unknown" if any
+  // supertype is unresolved (so we never flag on incomplete information).
+  function overrideStatus(decl: MethodDeclaration): "ok" | "missing" | "unknown" {
+    const enclosing = enclosingTypeSymbol(decl);
+    if (!enclosing) return "unknown";
+    const name = decl.name.text;
+    const seen = new Set<Symbol>();
+    let incomplete = false;
+
+    const declaresMethod = (typeSymbol: Symbol): boolean => {
+      const member = typeSymbol.members?.get(name);
+      return !!member && (member.flags & SymbolFlags.Method) !== 0;
+    };
+    const search = (typeSymbol: Symbol): boolean => {
+      if (seen.has(typeSymbol)) return false;
+      seen.add(typeSymbol);
+      const declaration = declarationOf(typeSymbol);
+      if (!declaration) {
+        incomplete = true;
+        return false;
+      }
+      for (const typeNode of superTypeNodesOf(declaration)) {
+        if (typeNode.kind !== SyntaxKind.TypeReference) {
+          incomplete = true;
+          continue;
+        }
+        const superSymbol = resolveTypeEntityName(
+          (typeNode as TypeReference).typeName,
+          declaration,
+          program,
+        );
+        if (!superSymbol) {
+          incomplete = true;
+          continue;
+        }
+        if (declaresMethod(superSymbol) || search(superSymbol)) return true;
+      }
+      return false;
+    };
+
+    if (search(enclosing)) return "ok";
+    // Every type implicitly extends Object; require it to be known to decide.
+    const objectSymbol = program.getGlobalIndex().getType("java.lang.Object");
+    if (!objectSymbol) return "unknown";
+    if (declaresMethod(objectSymbol)) return "ok";
+    return incomplete ? "unknown" : "missing";
+  }
+
+  // --- switch-expression exhaustiveness over enums (JLS 14.11.1.1) -------------------
+
+  function missingEnumLabels(sw: SwitchExpression): string[] | undefined {
+    const selector = getTypeOfExpression(sw.expression);
+    if (selector.kind !== TypeKind.Class || !(selector.symbol.flags & SymbolFlags.Enum)) {
+      return undefined;
+    }
+    const declaration = declarationOf(selector.symbol);
+    if (!declaration || declaration.kind !== SyntaxKind.EnumDeclaration) return undefined;
+    const constants = (declaration as EnumDeclaration).enumConstants.map(c => c.name.text);
+    if (constants.length === 0) return undefined;
+
+    const covered = new Set<string>();
+    for (const clause of sw.clauses) {
+      if (clause.isDefault || clause.guard) return undefined; // default / guard: do not reason
+      for (const label of clause.labels ?? []) {
+        if (label.kind !== SyntaxKind.Identifier) return undefined; // non-constant label
+        covered.add((label as Identifier).text);
+      }
+    }
+    return constants.filter(c => !covered.has(c));
+  }
+
   function getSemanticDiagnostics(sourceFile: SourceFile): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
 
@@ -909,6 +995,34 @@ export function createChecker(program: Program): Checker {
           if (r.expression) {
             const ret = enclosingReturnType(node);
             if (ret) checkAssignment(r.expression, ret);
+          }
+          break;
+        }
+        case SyntaxKind.MethodDeclaration: {
+          const m = node as MethodDeclaration;
+          if (hasOverrideAnnotation(m) && overrideStatus(m) === "missing") {
+            diagnostics.push(
+              createDiagnostic(
+                m.name.pos,
+                m.name.end - m.name.pos,
+                Diagnostics.Method_does_not_override_a_supertype_method,
+              ),
+            );
+          }
+          break;
+        }
+        case SyntaxKind.SwitchExpression: {
+          const sw = node as SwitchExpression;
+          const missing = missingEnumLabels(sw);
+          if (missing && missing.length > 0) {
+            diagnostics.push(
+              createDiagnostic(
+                sw.expression.pos,
+                sw.expression.end - sw.expression.pos,
+                Diagnostics.Switch_expression_not_exhaustive_0,
+                typeToString(getTypeOfExpression(sw.expression)),
+              ),
+            );
           }
           break;
         }

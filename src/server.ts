@@ -18,8 +18,10 @@ import {
   type InitializeResult,
   type Location,
   MarkupKind,
+  type TextEdit,
   TextDocuments,
   TextDocumentSyncKind,
+  type WorkspaceEdit,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 
@@ -76,6 +78,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       referencesProvider: true,
       hoverProvider: true,
       completionProvider: { triggerCharacters: ["."] },
+      renameProvider: true,
     },
   };
 });
@@ -167,6 +170,19 @@ connection.onReferences((params): Location[] | null => {
   const symbol = checker.resolveName(identifier);
   if (!symbol) return null;
   return findReferences(symbol, program).map(locationOf);
+});
+
+connection.onRenameRequest((params): WorkspaceEdit | null => {
+  const identifier = identifierAt(params.textDocument.uri, params.position);
+  if (!identifier) return null;
+  const symbol = checker.resolveName(identifier);
+  if (!symbol) return null;
+  const changes: Record<string, TextEdit[]> = {};
+  for (const node of findReferences(symbol, program)) {
+    const location = locationOf(node);
+    (changes[location.uri] ??= []).push({ range: location.range, newText: params.newName });
+  }
+  return Object.keys(changes).length > 0 ? { changes } : null;
 });
 
 connection.onDefinition((params): Definition | null => {
