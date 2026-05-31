@@ -16,7 +16,9 @@ import {
   type ArrayType as AstArrayType,
   type ClassDeclaration,
   type FieldDeclaration,
+  type MethodDeclaration,
   type Node,
+  type Parameter,
   type SourceFile,
   type Symbol,
   SymbolFlags,
@@ -39,7 +41,11 @@ const ACC_FINAL = 0x0010;
 const ACC_SUPER = 0x0020;
 const ACC_VOLATILE = 0x0040;
 const ACC_TRANSIENT = 0x0080;
+const ACC_SYNCHRONIZED = 0x0020;
+const ACC_NATIVE = 0x0100;
 const ACC_ABSTRACT = 0x0400;
+const ACC_STRICT = 0x0800;
+const ACC_VARARGS = 0x0080;
 
 // Primitive field descriptors (JVMS 4.3.2).
 const PRIMITIVE_DESCRIPTOR: Record<string, string> = {
@@ -61,6 +67,16 @@ const CONSTANT_NameAndType = 12;
 const CONSTANT_Methodref = 10;
 
 // Opcodes (JVMS 6.5) used so far.
+const OP_ACONST_NULL = 0x01;
+const OP_ICONST_0 = 0x03;
+const OP_LCONST_0 = 0x09;
+const OP_FCONST_0 = 0x0b;
+const OP_DCONST_0 = 0x0e;
+const OP_IRETURN = 0xac;
+const OP_LRETURN = 0xad;
+const OP_FRETURN = 0xae;
+const OP_DRETURN = 0xaf;
+const OP_ARETURN = 0xb0;
 const OP_ALOAD_0 = 0x2a;
 const OP_INVOKESPECIAL = 0xb7;
 const OP_RETURN = 0xb1;
@@ -310,6 +326,130 @@ function emitDefaultConstructor(
   return method;
 }
 
+function methodAccessFlags(method: MethodDeclaration): number {
+  let flags = 0;
+  for (const modifier of method.modifiers ?? []) {
+    switch (modifier.kind) {
+      case SyntaxKind.PublicKeyword:
+        flags |= ACC_PUBLIC;
+        break;
+      case SyntaxKind.PrivateKeyword:
+        flags |= ACC_PRIVATE;
+        break;
+      case SyntaxKind.ProtectedKeyword:
+        flags |= ACC_PROTECTED;
+        break;
+      case SyntaxKind.StaticKeyword:
+        flags |= ACC_STATIC;
+        break;
+      case SyntaxKind.FinalKeyword:
+        flags |= ACC_FINAL;
+        break;
+      case SyntaxKind.AbstractKeyword:
+        flags |= ACC_ABSTRACT;
+        break;
+      case SyntaxKind.SynchronizedKeyword:
+        flags |= ACC_SYNCHRONIZED;
+        break;
+      case SyntaxKind.NativeKeyword:
+        flags |= ACC_NATIVE;
+        break;
+      case SyntaxKind.StrictfpKeyword:
+        flags |= ACC_STRICT;
+        break;
+      default:
+        break;
+    }
+  }
+  if (method.parameters.some(p => (p as Parameter).isVarArgs)) flags |= ACC_VARARGS;
+  return flags;
+}
+
+function paramDescriptor(parameter: Parameter, program: Program): string {
+  const base = descriptorOf(parameter.type, program);
+  return parameter.isVarArgs ? `[${base}` : base; // T... is T[] at the bytecode level
+}
+
+function methodDescriptor(method: MethodDeclaration, program: Program): string {
+  const params = method.parameters.map(p => paramDescriptor(p as Parameter, program)).join("");
+  return `(${params})${descriptorOf(method.returnType, program)}`;
+}
+
+// One slot per value, two for long/double (JVMS 2.6.1).
+function slotsOf(descriptor: string): number {
+  return descriptor === "J" || descriptor === "D" ? 2 : 1;
+}
+
+// Placeholder body: return the default value for the return type. Real statement
+// code generation replaces this in the next milestone; this keeps every emitted
+// method verifiable in the meantime.
+function defaultReturnBody(returnDescriptor: string): { code: ByteBuffer; maxStack: number } {
+  const code = new ByteBuffer();
+  switch (returnDescriptor[0]) {
+    case "V":
+      code.u1(OP_RETURN);
+      return { code, maxStack: 0 };
+    case "J":
+      code.u1(OP_LCONST_0);
+      code.u1(OP_LRETURN);
+      return { code, maxStack: 2 };
+    case "D":
+      code.u1(OP_DCONST_0);
+      code.u1(OP_DRETURN);
+      return { code, maxStack: 2 };
+    case "F":
+      code.u1(OP_FCONST_0);
+      code.u1(OP_FRETURN);
+      return { code, maxStack: 1 };
+    case "L":
+    case "[":
+      code.u1(OP_ACONST_NULL);
+      code.u1(OP_ARETURN);
+      return { code, maxStack: 1 };
+    default: // B C S Z I
+      code.u1(OP_ICONST_0);
+      code.u1(OP_IRETURN);
+      return { code, maxStack: 1 };
+  }
+}
+
+function emitMethod(method: MethodDeclaration, cp: ConstantPool, program: Program): ByteBuffer {
+  const flags = methodAccessFlags(method);
+  const descriptor = methodDescriptor(method, program);
+
+  const info = new ByteBuffer();
+  info.u2(flags);
+  info.u2(cp.utf8(method.name.text));
+  info.u2(cp.utf8(descriptor));
+
+  // abstract / native methods carry no Code attribute.
+  if (flags & (ACC_ABSTRACT | ACC_NATIVE) || !method.body) {
+    info.u2(0); // attributes_count
+    return info;
+  }
+
+  const isStatic = (flags & ACC_STATIC) !== 0;
+  const argsSize =
+    (isStatic ? 0 : 1) +
+    method.parameters.reduce((n, p) => n + slotsOf(paramDescriptor(p as Parameter, program)), 0);
+  const returnDescriptor = descriptor.slice(descriptor.lastIndexOf(")") + 1);
+  const { code, maxStack } = defaultReturnBody(returnDescriptor);
+
+  const codeAttr = new ByteBuffer();
+  codeAttr.u2(cp.utf8("Code"));
+  codeAttr.u4(12 + code.length);
+  codeAttr.u2(maxStack);
+  codeAttr.u2(argsSize); // max_locals
+  codeAttr.u4(code.length);
+  codeAttr.append(code);
+  codeAttr.u2(0); // exception_table_length
+  codeAttr.u2(0); // attributes_count
+
+  info.u2(1); // attributes_count
+  info.append(codeAttr);
+  return info;
+}
+
 export interface EmittedClass {
   /** Simple class name (becomes <name>.class). */
   readonly name: string;
@@ -325,12 +465,23 @@ function emitClass(declaration: ClassDeclaration, program: Program): EmittedClas
   const thisClassIndex = cp.classInfo(name);
   const superClassIndex = cp.classInfo(superInternalName);
   const fields = emitFields(declaration, cp, program);
-  // The default constructor inherits the class's accessibility (JLS 8.8.9).
-  const constructor = emitDefaultConstructor(
-    cp,
-    superInternalName,
-    accessFlags & (ACC_PUBLIC | ACC_PROTECTED | ACC_PRIVATE),
+
+  // Methods: the synthesized default constructor (inherits the class's
+  // accessibility, JLS 8.8.9) plus every declared method.
+  const methods = new ByteBuffer();
+  let methodCount = 1;
+  methods.append(
+    emitDefaultConstructor(
+      cp,
+      superInternalName,
+      accessFlags & (ACC_PUBLIC | ACC_PROTECTED | ACC_PRIVATE),
+    ),
   );
+  for (const member of declaration.members) {
+    if (member.kind !== SyntaxKind.MethodDeclaration) continue;
+    methods.append(emitMethod(member as MethodDeclaration, cp, program));
+    methodCount++;
+  }
 
   const out = new ByteBuffer();
   out.u4(MAGIC);
@@ -343,8 +494,8 @@ function emitClass(declaration: ClassDeclaration, program: Program): EmittedClas
   out.u2(0); // interfaces_count
   out.u2(fields.count);
   out.append(fields.buffer);
-  out.u2(1); // methods_count (the default constructor)
-  out.append(constructor);
+  out.u2(methodCount);
+  out.append(methods);
   out.u2(0); // attributes_count
 
   return { name, bytes: out.toUint8Array() };

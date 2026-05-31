@@ -32,6 +32,10 @@ const FIXTURES: Record<string, string> = {
   Fields: "class Fields { int a; java.lang.String b; long c; int[] d; boolean e; double[][] f; }",
   ModifiedFields:
     "public class ModifiedFields { public int x; private static final long y = 0; protected java.lang.String z; }",
+  Methods:
+    "public class Methods { void a() {} public int b(int p) { return p; } static long c(long x, int y) { return x; } java.lang.String d(java.lang.String s) { return s; } int[] e(int[] arr) { return arr; } }",
+  VarargsAndAbstract:
+    "abstract class VarargsAndAbstract { abstract int f(int n); int g(int... xs) { return 0; } static double h(double a, double b) { return a; } }",
 };
 
 function emit(name: string, source: string): Uint8Array {
@@ -69,9 +73,18 @@ for (const [name, source] of Object.entries(FIXTURES)) {
   test(`emit is JVM-valid: ${name}`, { skip: HAS_JAVA ? false : "no JDK" }, () => {
     const dir = mkdtempSync(join(tmpdir(), "emit-"));
     writeFileSync(join(dir, `${name}.class`), emit(name, source));
-    // javap reads it without error -> structurally valid.
     const out = execFileSync("javap", ["-p", join(dir, `${name}.class`)], { encoding: "utf8" });
     expect(out).toContain(`class ${name}`);
+    // Loading the class runs the bytecode verifier over every method. A bad body
+    // would raise VerifyError/ClassFormatError; "Main method not found" (or an
+    // actual run) means it verified cleanly.
+    let stderr = "";
+    try {
+      execFileSync("java", ["-cp", dir, name], { encoding: "utf8", stdio: "pipe" });
+    } catch (e) {
+      stderr = String((e as { stderr?: string }).stderr ?? "");
+    }
+    expect(stderr).not.toMatch(/VerifyError|ClassFormatError|Incompatible/);
   });
 
   test(`members match javac: ${name}`, { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" }, () => {
