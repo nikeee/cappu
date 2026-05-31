@@ -44,12 +44,16 @@ interface CacheEntry {
 }
 
 export interface Program {
-  /** Record (or update) an open editor document; bumps the effective version. */
+  /** Record (or update) an open editor document; overrides any project file. */
   setOpenDocument(uri: string, text: string, version: number): void;
   closeDocument(uri: string): void;
-  /** Parse + bind the file for a uri (cached by version), or undefined if unknown. */
+  /** Register a workspace file read from disk (open documents take precedence). */
+  addProjectFile(uri: string, text: string): void;
+  /** Parse + bind the file for a uri (cached), or undefined if unknown. */
   getSourceFile(uri: string): SourceFile | undefined;
   getOpenUris(): string[];
+  /** All known uris (open documents + project files). */
+  getAllUris(): string[];
   /** Cross-file type index over all current files (rebuilt when files change). */
   getGlobalIndex(): GlobalIndex;
 }
@@ -58,26 +62,44 @@ function named(node: Node): string | undefined {
   return (node as { name?: { text: string } }).name?.text;
 }
 
+interface VersionedCacheEntry extends CacheEntry {
+  readonly key: string;
+}
+
 export function createProgram(): Program {
   const openDocuments = new Map<string, OpenDocument>();
-  const cache = new Map<string, CacheEntry>();
+  const projectFiles = new Map<string, string>();
+  const cache = new Map<string, VersionedCacheEntry>();
   let generation = 0;
   let indexGeneration = -1;
   let index: GlobalIndex | undefined;
 
-  function getSourceFile(uri: string): SourceFile | undefined {
+  // Effective text + cache key for a uri; open documents win over project files.
+  function resolveSource(uri: string): { text: string; key: string } | undefined {
     const open = openDocuments.get(uri);
-    if (!open) return undefined;
+    if (open) return { text: open.text, key: `o${open.version}` };
+    const text = projectFiles.get(uri);
+    if (text !== undefined) return { text, key: "p" };
+    return undefined;
+  }
+
+  function getSourceFile(uri: string): SourceFile | undefined {
+    const source = resolveSource(uri);
+    if (!source) return undefined;
 
     const cached = cache.get(uri);
-    if (cached && cached.version === open.version) {
+    if (cached && cached.key === source.key) {
       return cached.sourceFile;
     }
 
-    const sourceFile = parseSourceFile(uri, open.text);
+    const sourceFile = parseSourceFile(uri, source.text);
     bindSourceFile(sourceFile);
-    cache.set(uri, { version: open.version, sourceFile });
+    cache.set(uri, { version: 0, key: source.key, sourceFile });
     return sourceFile;
+  }
+
+  function allUris(): string[] {
+    return [...new Set([...projectFiles.keys(), ...openDocuments.keys()])];
   }
 
   function buildIndex(): GlobalIndex {
@@ -95,7 +117,7 @@ export function createProgram(): Program {
       return symbol;
     }
 
-    for (const uri of openDocuments.keys()) {
+    for (const uri of allUris()) {
       const sourceFile = getSourceFile(uri);
       if (!sourceFile) continue;
       const packageName = sourceFile.packageDeclaration
@@ -130,8 +152,14 @@ export function createProgram(): Program {
       cache.delete(uri);
       generation++;
     },
+    addProjectFile(uri, text) {
+      projectFiles.set(uri, text);
+      cache.delete(uri);
+      generation++;
+    },
     getSourceFile,
     getOpenUris: () => [...openDocuments.keys()],
+    getAllUris: allUris,
     getGlobalIndex() {
       if (!index || indexGeneration !== generation) {
         index = buildIndex();
