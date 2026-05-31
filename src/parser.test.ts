@@ -929,3 +929,151 @@ test("for with a statement-expression init list", () => {
   expect(f.initializerExpressions).toHaveLength(2);
   expect(f.incrementors).toHaveLength(2);
 });
+
+// === Edge cases: generics (parser) ===
+
+test("deeply nested generic with mixed args closes correctly", () => {
+  const { type, errors } = extendsType(
+    "java.util.Map<String, java.util.List<java.util.Map<Integer, String>>>",
+  );
+  expect(errors).toBe(0);
+  expect(type.kind).toBe(SyntaxKind.TypeReference);
+});
+
+test("four-level nested generic (>>>> closes)", () => {
+  const { type, errors } = extendsType("A<B<C<D<E>>>>");
+  expect(errors).toBe(0);
+  let t = type as TypeReference;
+  let depth = 0;
+  while (t.typeArguments && t.typeArguments.length) {
+    depth++;
+    t = t.typeArguments[0] as TypeReference;
+  }
+  expect(depth).toBe(4);
+});
+
+test("nested wildcards: ? super List<? extends Number>", () => {
+  const { type, errors } = extendsType("A<? super java.util.List<? extends Number>>");
+  expect(errors).toBe(0);
+  const outer = (type as TypeReference).typeArguments![0] as WildcardType;
+  expect(outer.kind).toBe(SyntaxKind.WildcardType);
+  expect(outer.hasSuper).toBe(true);
+});
+
+test("multiple bounds with a generic bound", () => {
+  const sf = expectNoErrors(
+    "class C<T extends Comparable<T> & java.io.Serializable & Cloneable> {}",
+  );
+  expect((sf.statements[0] as ClassDeclaration).typeParameters![0]!.constraint).toHaveLength(3);
+});
+
+test("recursive type bound", () => {
+  expectNoErrors("class Node<T extends Comparable<T>> { T value; }");
+});
+
+test("annotated type parameters <@A T, @B U>", () => {
+  const sf = expectNoErrors("class C<@Deprecated T, @Deprecated U extends Number> {}");
+  expect((sf.statements[0] as ClassDeclaration).typeParameters).toHaveLength(2);
+});
+
+test("raw type and parameterized type both parse", () => {
+  expectNoErrors("class C { java.util.List raw; java.util.List<String> typed; }");
+});
+
+test("wildcard array and nested wildcard array", () => {
+  expectNoErrors("class C { java.util.List<?>[] a; java.util.Map<String, ?>[] b; }");
+});
+
+test("diamond in object creation", () => {
+  const e = expr("new java.util.ArrayList<>()") as import("./types.ts").ObjectCreationExpression;
+  expect(e.kind).toBe(SyntaxKind.ObjectCreationExpression);
+});
+
+test("explicit generic method invocation captures type arguments", () => {
+  const call = expr("this.<String>doIt()") as import("./types.ts").CallExpression;
+  expect(call.kind).toBe(SyntaxKind.CallExpression);
+  expect(call.typeArguments).toHaveLength(1);
+});
+
+test("explicit multi type-argument call", () => {
+  const call = expr("Helper.<String, Integer>make()") as import("./types.ts").CallExpression;
+  expect(call.typeArguments).toHaveLength(2);
+});
+
+test("generic varargs parameter", () => {
+  const members = classMembers("class C { void m(java.util.List<String>... xs) {} }");
+  const p = (members[0] as MethodDeclaration).parameters[0] as Parameter;
+  expect(p.isVarArgs).toBe(true);
+});
+
+test("cast to a parameterized type and to an intersection", () => {
+  expect(expr("(java.util.Map<String, Integer>) o").kind).toBe(SyntaxKind.CastExpression);
+  const inter = expr("(Runnable & java.io.Serializable) o") as import("./types.ts").CastExpression;
+  expect(inter.bounds).toHaveLength(1);
+});
+
+test("generic field initialized with diamond, no errors", () => {
+  expectNoErrors(
+    "class C { java.util.Map<String, java.util.List<Integer>> m = new java.util.HashMap<>(); }",
+  );
+});
+
+test("'>>=' stays a compound shift assignment, not generic close", () => {
+  const e = expr("a >>= b") as import("./types.ts").AssignmentExpression;
+  expect(e.operatorToken).toBe(SyntaxKind.GreaterThanGreaterThanEqualsToken);
+});
+
+test("object creation with multiple type arguments", () => {
+  const e = expr(
+    "new java.util.HashMap<String, Integer>()",
+  ) as import("./types.ts").ObjectCreationExpression;
+  expect(e.kind).toBe(SyntaxKind.ObjectCreationExpression);
+  expect((e.type as TypeReference).typeArguments).toHaveLength(2);
+});
+
+// === Edge cases: expressions / statements (parser) ===
+
+test("nested ternary associativity", () => {
+  const e = expr("a ? b : c ? d : e") as import("./types.ts").ConditionalExpression;
+  expect(e.whenFalse.kind).toBe(SyntaxKind.ConditionalExpression);
+});
+
+test("lambdas in both branches of a conditional", () => {
+  expectNoErrors("class C { Runnable pick(boolean b) { return b ? () -> {} : () -> {}; } }");
+});
+
+test("labeled nested loops with labeled break/continue", () => {
+  expectNoErrors(
+    "class C { void m() { outer: for (;;) { inner: for (;;) { if (true) break outer; else continue inner; } } } }",
+  );
+});
+
+test("multidimensional and initialized array creation", () => {
+  expect(expr("new int[2][3]").kind).toBe(SyntaxKind.ArrayCreationExpression);
+  expect(expr("new int[][]{ {1, 2}, {3} }").kind).toBe(SyntaxKind.ArrayCreationExpression);
+});
+
+test("anonymous class with members", () => {
+  const e = expr(
+    "new Runnable() { public void run() { int x = 1; } }",
+  ) as import("./types.ts").ObjectCreationExpression;
+  expect(e.classBody).toBeDefined();
+});
+
+test("chained calls, indexing and field access", () => {
+  expect(expr("a.b().c[0].d().e").kind).toBe(SyntaxKind.PropertyAccessExpression);
+});
+
+test("switch with null, default, guarded and record patterns", () => {
+  expectNoErrors(
+    "class C { int m(Object o) { return switch (o) {" +
+      " case null -> 0;" +
+      " case Integer i when i > 0 -> 1;" +
+      " case Point(int x, int y) -> x + y;" +
+      " default -> -1; }; } }",
+  );
+});
+
+test("empty type declarations of every kind", () => {
+  expectNoErrors("class A {} interface B {} enum C {} @interface D {} record E() {}");
+});

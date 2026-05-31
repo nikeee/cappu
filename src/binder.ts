@@ -191,6 +191,22 @@ function bindDeclaration(node: Node): void {
       declareIntoContainer(named(node), node, flags, flags);
       break;
     }
+    case SyntaxKind.CatchClause: {
+      // The catch variable is the clause's `name`, scoped to the catch block.
+      const name = named(node);
+      if (name && name.text) {
+        node.locals = createSymbolTable();
+        declareSymbol(
+          node.locals,
+          name.text,
+          name,
+          name,
+          SymbolFlags.Parameter,
+          SymbolFlags.Parameter,
+        );
+      }
+      break;
+    }
     default:
       break;
   }
