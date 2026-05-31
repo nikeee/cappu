@@ -106,3 +106,60 @@ test("no organize action when imports are already minimal and sorted", () => {
   const ctx = setup("package app;\nimport java.util.List;\nclass C { List<String> xs; }");
   expect(organize(ctx)).toBeUndefined();
 });
+
+// --- extract local variable --------------------------------------------------------
+
+function extractAction(ctx: ReturnType<typeof setup>, exprText: string, occ = 1) {
+  let start = -1;
+  for (let i = 0; i < occ; i++) start = ctx.text.indexOf(exprText, start + 1);
+  const sf = ctx.program.getSourceFile("file:///T.java")!;
+  return getCodeActions(ctx.program, ctx.checker, sf, start, start + exprText.length).find(
+    a => a.kind === "refactor.extract",
+  );
+}
+
+test("extracts a binary expression into a local above the statement", () => {
+  const ctx = setup(
+    ["class C {", "  int m() {", "    int b = compute() + 1;", "    return b;", "  }", "}"].join(
+      "\n",
+    ),
+  );
+  const action = extractAction(ctx, "compute() + 1")!;
+  expect(apply(ctx.text, action)).toBe(
+    [
+      "class C {",
+      "  int m() {",
+      "    var extracted = compute() + 1;",
+      "    int b = extracted;",
+      "    return b;",
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+});
+
+test("extracts a call argument expression", () => {
+  const ctx = setup(["class C {", "  void m() {", "    use(a * b + c);", "  }", "}"].join("\n"));
+  const action = extractAction(ctx, "a * b + c")!;
+  expect(apply(ctx.text, action)).toBe(
+    [
+      "class C {",
+      "  void m() {",
+      "    var extracted = a * b + c;",
+      "    use(extracted);",
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+});
+
+test("no extract for a selection that is not a whole expression", () => {
+  const ctx = setup(["class C {", "  void m() {", "    use(a + b);", "  }", "}"].join("\n"));
+  // "a +" is not a complete expression node
+  expect(extractAction(ctx, "a +")).toBeUndefined();
+});
+
+test("no extract for an expression outside a block (field initializer)", () => {
+  const ctx = setup("class C { int f = 1 + 2; }");
+  expect(extractAction(ctx, "1 + 2")).toBeUndefined();
+});

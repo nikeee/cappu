@@ -151,12 +151,106 @@ function organizeImports(sourceFile: SourceFile): CodeActionResult[] {
   ];
 }
 
+// --- extract local variable --------------------------------------------------------
+
+const EXPRESSION_KINDS = new Set<SyntaxKind>([
+  SyntaxKind.BinaryExpression,
+  SyntaxKind.CallExpression,
+  SyntaxKind.PropertyAccessExpression,
+  SyntaxKind.ElementAccessExpression,
+  SyntaxKind.ParenthesizedExpression,
+  SyntaxKind.ConditionalExpression,
+  SyntaxKind.CastExpression,
+  SyntaxKind.ObjectCreationExpression,
+  SyntaxKind.ArrayCreationExpression,
+  SyntaxKind.PrefixUnaryExpression,
+  SyntaxKind.PostfixUnaryExpression,
+  SyntaxKind.InstanceofExpression,
+  SyntaxKind.SwitchExpression,
+  SyntaxKind.MethodReferenceExpression,
+  SyntaxKind.NumericLiteral,
+  SyntaxKind.StringLiteral,
+  SyntaxKind.TextBlockLiteral,
+  SyntaxKind.CharacterLiteral,
+]);
+
+// The expression node whose token span equals the selection [start, end).
+function expressionInRange(sourceFile: SourceFile, start: number, end: number): Node | undefined {
+  let found: Node | undefined;
+  const visit = (node: Node): void => {
+    const nodeStart = skipTrivia(sourceFile.text, node.pos);
+    if (nodeStart === start && node.end === end && EXPRESSION_KINDS.has(node.kind) && !found) {
+      found = node;
+    }
+    forEachChild(node, child => {
+      visit(child);
+      return undefined;
+    });
+  };
+  visit(sourceFile);
+  return found;
+}
+
+// The statement directly inside a Block that encloses the node, or undefined if
+// the node is not within a block (e.g. a field initializer).
+function enclosingStatementInBlock(node: Node): Node | undefined {
+  let current: Node | undefined = node.parent;
+  let child: Node = node;
+  while (current) {
+    if (current.kind === SyntaxKind.Block) return child;
+    child = current;
+    current = current.parent;
+  }
+  return undefined;
+}
+
+function indentationAt(text: string, offset: number): string {
+  const lineStart = text.lastIndexOf("\n", offset - 1) + 1;
+  return text.slice(lineStart, offset);
+}
+
+function extractLocalVariable(
+  sourceFile: SourceFile,
+  start: number,
+  end: number,
+): CodeActionResult[] {
+  if (end <= start) return [];
+  const expression = expressionInRange(sourceFile, start, end);
+  if (!expression) return [];
+  const statement = enclosingStatementInBlock(expression);
+  if (!statement) return [];
+
+  const statementStart = skipTrivia(sourceFile.text, statement.pos);
+  const indent = indentationAt(sourceFile.text, statementStart);
+  const exprText = sourceFile.text.slice(start, end);
+  const name = "extracted";
+
+  return [
+    {
+      title: "Extract local variable",
+      kind: "refactor.extract",
+      changes: [
+        {
+          start: statementStart,
+          end: statementStart,
+          newText: `var ${name} = ${exprText};\n${indent}`,
+        },
+        { start, end, newText: name },
+      ],
+    },
+  ];
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
   sourceFile: SourceFile,
   start: number,
-  _end: number,
+  end: number,
 ): CodeActionResult[] {
-  return [...addMissingImport(program, checker, sourceFile, start), ...organizeImports(sourceFile)];
+  return [
+    ...addMissingImport(program, checker, sourceFile, start),
+    ...organizeImports(sourceFile),
+    ...extractLocalVariable(sourceFile, start, end),
+  ];
 }
