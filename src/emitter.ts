@@ -20,17 +20,21 @@ import {
   type BinaryExpression,
   type CallExpression,
   type ClassDeclaration,
+  type DoStatement,
   type ExpressionStatement,
-  type LocalVariableDeclarationStatement,
   type FieldDeclaration,
+  type ForStatement,
   type Identifier,
+  type IfStatement,
   type LiteralExpression,
+  type LocalVariableDeclarationStatement,
   type MethodDeclaration,
   type Node,
   type Parameter,
   type PrefixUnaryExpression,
   type PropertyAccessExpression,
   type ReturnStatement,
+  type WhileStatement,
   type SourceFile,
   type Symbol,
   SymbolFlags,
@@ -90,6 +94,7 @@ const CONSTANT_NameAndType = 12;
 // Opcodes (JVMS 6.5) used so far.
 const OP_ACONST_NULL = 0x01;
 const OP_ICONST_0 = 0x03;
+const OP_ICONST_1 = 0x04;
 const OP_LCONST_0 = 0x09;
 const OP_FCONST_0 = 0x0b;
 const OP_DCONST_0 = 0x0e;
@@ -151,8 +156,24 @@ const OP_INVOKEVIRTUAL = 0xb6;
 const OP_INVOKESPECIAL = 0xb7;
 const OP_INVOKESTATIC = 0xb8;
 const OP_INVOKEINTERFACE = 0xb9;
+const OP_IINC = 0x84;
+const OP_IFEQ = 0x99; // if<cond> against 0; +offset within (eq,ne,lt,ge,gt,le)
+const OP_IF_ICMPEQ = 0x9f; // if_icmp<cond>; same offset order
+const OP_IF_ACMPEQ = 0xa5;
+const OP_IF_ACMPNE = 0xa6;
+const OP_GOTO = 0xa7;
+const OP_IFNULL = 0xc6;
+const OP_IFNONNULL = 0xc7;
 const OP_ALOAD_0 = 0x2a;
 const OP_RETURN = 0xb1;
+
+// StackMapTable verification_type_info tags (JVMS 4.7.4).
+const ITEM_Integer = 1;
+const ITEM_Float = 2;
+const ITEM_Double = 3;
+const ITEM_Long = 4;
+const ITEM_Object = 7;
+const FULL_FRAME = 255;
 
 // A growable big-endian byte buffer.
 class ByteBuffer {
@@ -196,6 +217,11 @@ class ByteBuffer {
   }
   get length(): number {
     return this.bytes.length;
+  }
+  // Overwrite a previously-reserved u2 (for branch-offset backpatching).
+  patchU2(pos: number, value: number): void {
+    this.bytes[pos] = (value >>> 8) & 0xff;
+    this.bytes[pos + 1] = value & 0xff;
   }
 }
 
@@ -558,7 +584,7 @@ function generateBody(
   program: Program,
   checker: Checker,
   thisInternalName: string,
-): { code: ByteBuffer; maxStack: number; maxLocals: number } {
+): { code: ByteBuffer; maxStack: number; maxLocals: number; stackMapTable?: ByteBuffer } {
   const isStatic = (methodAccessFlags(method) & ACC_STATIC) !== 0;
   const returnDescriptor = methodDescriptor(method, program).slice(
     methodDescriptor(method, program).lastIndexOf(")") + 1,
@@ -567,15 +593,58 @@ function generateBody(
   // Slots for parameters and (as they are declared) locals; shared map keyed by
   // the declaration symbol.
   const locals = new Map<Symbol, { slot: number; descriptor: string }>();
+  // Descriptors of the locals currently in scope, in slot order, for stack-map
+  // frames (this, then params, then declared locals; long/double = one entry).
+  const activeLocals: string[] = [];
   let nextSlot = isStatic ? 0 : 1;
+  if (!isStatic) activeLocals.push(`L${thisInternalName};`);
   for (const p of method.parameters) {
     const descriptor = paramDescriptor(p as Parameter, program);
     if (p.symbol) locals.set(p.symbol, { slot: nextSlot, descriptor });
+    activeLocals.push(descriptor);
     nextSlot += slotsOf(descriptor);
   }
   let maxLocals = nextSlot;
-
   const code = new ByteBuffer();
+
+  // Run `body` in a nested local scope: locals it declares are dropped (and their
+  // slots reusable) afterwards, so a stack-map frame at a later label lists only
+  // the locals actually in scope there.
+  const inScope = (body: () => boolean): boolean => {
+    const savedActive = activeLocals.length;
+    const savedSlot = nextSlot;
+    const terminated = body();
+    activeLocals.length = savedActive;
+    nextSlot = savedSlot;
+    return terminated;
+  };
+
+  // --- labels, branches and stack-map frames ---------------------------------------
+  interface Label {
+    offset: number; // resolved when placed
+  }
+  interface Frame {
+    locals: string[];
+    stack: string[];
+  }
+  const frameAt = new Map<number, Frame>(); // offset -> frame snapshot
+  const fixups: { at: number; from: number; label: Label }[] = [];
+  const newLabel = (): Label => ({ offset: -1 });
+  const placeLabel = (label: Label, stack: string[] = []): void => {
+    label.offset = code.length;
+    frameAt.set(label.offset, { locals: [...activeLocals], stack });
+    // The frame defines the operand stack here; resync the linear depth counter
+    // across the branch join.
+    depth = stack.reduce((n, d) => n + slotsOf(d), 0);
+  };
+  const branchTo = (op: number, label: Label): void => {
+    const from = code.length;
+    code.u1(op);
+    const at = code.length;
+    code.u2(0); // placeholder offset, backpatched below
+    fixups.push({ at, from, label });
+  };
+
   let depth = 0;
   let maxStack = 0;
   const grow = (slots: number): void => {
@@ -765,10 +834,14 @@ function generateBody(
         push(local.descriptor);
         return local.descriptor;
       }
-      case SyntaxKind.BinaryExpression:
-        return emitBinary(node as BinaryExpression);
-      case SyntaxKind.PrefixUnaryExpression:
-        return emitPrefixUnary(node as PrefixUnaryExpression);
+      case SyntaxKind.BinaryExpression: {
+        const b = node as BinaryExpression;
+        return isBooleanOperator(b.operatorToken) ? emitBoolean(node) : emitBinary(b);
+      }
+      case SyntaxKind.PrefixUnaryExpression: {
+        const u = node as PrefixUnaryExpression;
+        return u.operator === SyntaxKind.ExclamationToken ? emitBoolean(node) : emitPrefixUnary(u);
+      }
       case SyntaxKind.PropertyAccessExpression: {
         const access = node as PropertyAccessExpression;
         const symbol = checker.resolveName(access.name);
@@ -988,15 +1061,171 @@ function generateBody(
     storeVar(local.slot, local.descriptor);
   };
 
+  // Comparison operator -> offset into the if_icmp<cond> family (eq,ne,lt,ge,gt,le).
+  const COMPARE_OFFSET: Record<number, number> = {
+    [SyntaxKind.EqualsEqualsToken]: 0,
+    [SyntaxKind.ExclamationEqualsToken]: 1,
+    [SyntaxKind.LessThanToken]: 2,
+    [SyntaxKind.GreaterThanEqualsToken]: 3,
+    [SyntaxKind.GreaterThanToken]: 4,
+    [SyntaxKind.LessThanEqualsToken]: 5,
+  };
+  const NEGATED = [1, 0, 3, 2, 5, 4]; // negation of each comparison offset
+
+  // Emit a branch to `label` taken when `expr` is true (whenTrue) or false.
+  const emitBranch = (expr: Node, label: Label, whenTrue: boolean): void => {
+    switch (expr.kind) {
+      case SyntaxKind.ParenthesizedExpression:
+        emitBranch((expr as unknown as { expression: Node }).expression, label, whenTrue);
+        return;
+      case SyntaxKind.PrefixUnaryExpression: {
+        const u = expr as PrefixUnaryExpression;
+        if (u.operator === SyntaxKind.ExclamationToken) {
+          emitBranch(u.operand, label, !whenTrue);
+          return;
+        }
+        break;
+      }
+      case SyntaxKind.BinaryExpression: {
+        const b = expr as BinaryExpression;
+        const op = b.operatorToken;
+        if (op === SyntaxKind.AmpersandAmpersandToken) {
+          if (whenTrue) {
+            const skip = newLabel();
+            emitBranch(b.left, skip, false);
+            emitBranch(b.right, label, true);
+            placeLabel(skip);
+          } else {
+            emitBranch(b.left, label, false);
+            emitBranch(b.right, label, false);
+          }
+          return;
+        }
+        if (op === SyntaxKind.BarBarToken) {
+          if (whenTrue) {
+            emitBranch(b.left, label, true);
+            emitBranch(b.right, label, true);
+          } else {
+            const skip = newLabel();
+            emitBranch(b.left, skip, true);
+            emitBranch(b.right, label, false);
+            placeLabel(skip);
+          }
+          return;
+        }
+        const offset = COMPARE_OFFSET[op];
+        if (offset !== undefined) {
+          const isEquality =
+            op === SyntaxKind.EqualsEqualsToken || op === SyntaxKind.ExclamationEqualsToken;
+          const isNull = (n: Node): boolean => n.kind === SyntaxKind.NullKeyword;
+          const lc = numericCategory(checker.getTypeOfExpression(b.left));
+          const rc = numericCategory(checker.getTypeOfExpression(b.right));
+          if (isEquality && (isNull(b.left) || isNull(b.right))) {
+            emitExpr(isNull(b.left) ? b.right : b.left);
+            const eq = op === SyntaxKind.EqualsEqualsToken;
+            branchTo(eq === whenTrue ? OP_IFNULL : OP_IFNONNULL, label);
+            pop(1);
+            return;
+          }
+          if (isEquality && !lc && !rc) {
+            emitExpr(b.left);
+            emitExpr(b.right);
+            const eq = op === SyntaxKind.EqualsEqualsToken;
+            branchTo(eq === whenTrue ? OP_IF_ACMPEQ : OP_IF_ACMPNE, label);
+            pop(2);
+            return;
+          }
+          if (lc === "I" && rc === "I") {
+            emitExpr(b.left);
+            emitExpr(b.right);
+            branchTo(OP_IF_ICMPEQ + (whenTrue ? offset : NEGATED[offset]!), label);
+            pop(2);
+            return;
+          }
+          throw new UnsupportedEmit(); // long/float/double comparisons: later
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    // Fall back: evaluate a boolean value and branch on zero/non-zero.
+    emitExpr(expr);
+    branchTo(OP_IFEQ + (whenTrue ? 1 : 0), label); // ifne when true, ifeq when false
+    pop(1);
+  };
+
+  const isBooleanOperator = (op: SyntaxKind): boolean =>
+    op === SyntaxKind.AmpersandAmpersandToken ||
+    op === SyntaxKind.BarBarToken ||
+    COMPARE_OFFSET[op] !== undefined;
+
+  // Materialize a boolean expression as an int 0/1 on the stack, via the standard
+  // branch-and-push pattern. The merge label carries one int on the stack.
+  const emitBoolean = (expr: Node): string => {
+    const trueL = newLabel();
+    const contL = newLabel();
+    emitBranch(expr, trueL, true);
+    code.u1(OP_ICONST_0);
+    push("I");
+    branchTo(OP_GOTO, contL);
+    placeLabel(trueL); // reached when the condition is true; stack empty here
+    code.u1(OP_ICONST_1);
+    push("I");
+    placeLabel(contL, ["I"]); // both paths converge with one int on the stack
+    return "Z";
+  };
+
+  // i++ / ++i / i-- / --i on an int local -> iinc.
+  const emitIncrement = (expr: Node): void => {
+    const u = expr as unknown as { operator: SyntaxKind; operand: Node };
+    if (u.operator !== SyntaxKind.PlusPlusToken && u.operator !== SyntaxKind.MinusMinusToken) {
+      throw new UnsupportedEmit();
+    }
+    if (u.operand.kind !== SyntaxKind.Identifier) throw new UnsupportedEmit();
+    const symbol = checker.resolveName(u.operand as Identifier);
+    const local = symbol ? locals.get(symbol) : undefined;
+    if (!local || category(local.descriptor) !== "I") throw new UnsupportedEmit();
+    code.u1(OP_IINC);
+    code.u1(local.slot);
+    code.u1((u.operator === SyntaxKind.PlusPlusToken ? 1 : -1) & 0xff);
+  };
+
+  // An expression used as a statement (its value, if any, is discarded).
+  const emitStatementExpression = (expr: Node): void => {
+    if (expr.kind === SyntaxKind.PostfixUnaryExpression) {
+      emitIncrement(expr);
+      return;
+    }
+    if (expr.kind === SyntaxKind.PrefixUnaryExpression) {
+      const u = expr as PrefixUnaryExpression;
+      if (u.operator === SyntaxKind.PlusPlusToken || u.operator === SyntaxKind.MinusMinusToken) {
+        emitIncrement(expr);
+        return;
+      }
+    }
+    if (expr.kind === SyntaxKind.AssignmentExpression) {
+      emitAssignStatement(expr as AssignmentExpression);
+      return;
+    }
+    const desc = emitExpr(expr);
+    if (desc !== "V") {
+      code.u1(slotsOf(desc) === 2 ? OP_POP2 : OP_POP);
+      pop(slotsOf(desc));
+    }
+  };
+
   // Returns true if the statement is a definite terminator (return).
   const emitStmt = (stmt: Node): boolean => {
     switch (stmt.kind) {
       case SyntaxKind.Block: {
-        let terminated = false;
-        for (const s of (stmt as unknown as { statements: readonly Node[] }).statements) {
-          terminated = emitStmt(s);
-        }
-        return terminated;
+        return inScope(() => {
+          let terminated = false;
+          for (const s of (stmt as unknown as { statements: readonly Node[] }).statements) {
+            terminated = emitStmt(s);
+          }
+          return terminated;
+        });
       }
       case SyntaxKind.EmptyStatement:
         return false;
@@ -1013,6 +1242,7 @@ function generateBody(
           nextSlot += slotsOf(descriptor);
           if (nextSlot > maxLocals) maxLocals = nextSlot;
           if (declarator.symbol) locals.set(declarator.symbol, { slot, descriptor });
+          activeLocals.push(descriptor);
           if (declarator.initializer) {
             const rd = emitExpr(declarator.initializer);
             coerce(rd, descriptor);
@@ -1021,24 +1251,69 @@ function generateBody(
         }
         return false;
       }
-      case SyntaxKind.ExpressionStatement: {
-        const expression = (stmt as ExpressionStatement).expression;
-        if (expression.kind === SyntaxKind.AssignmentExpression) {
-          emitAssignStatement(expression as AssignmentExpression);
-          return false;
-        }
-        const desc = emitExpr(expression);
-        if (desc !== "V") {
-          code.u1(slotsOf(desc) === 2 ? OP_POP2 : OP_POP);
-          pop(slotsOf(desc));
-        }
+      case SyntaxKind.ExpressionStatement:
+        emitStatementExpression((stmt as ExpressionStatement).expression);
         return false;
-      }
       case SyntaxKind.ReturnStatement: {
         const expr = (stmt as ReturnStatement).expression;
         if (expr) emitExpr(expr);
         emitReturn();
         return true;
+      }
+      case SyntaxKind.IfStatement: {
+        const s = stmt as IfStatement;
+        if (s.elseStatement) {
+          const elseL = newLabel();
+          const endL = newLabel();
+          emitBranch(s.condition, elseL, false);
+          const thenTerm = inScope(() => emitStmt(s.thenStatement));
+          if (!thenTerm) branchTo(OP_GOTO, endL);
+          placeLabel(elseL);
+          const elseTerm = inScope(() => emitStmt(s.elseStatement!));
+          const terminated = thenTerm && elseTerm;
+          if (!terminated) placeLabel(endL);
+          return terminated;
+        }
+        const endL = newLabel();
+        emitBranch(s.condition, endL, false);
+        inScope(() => emitStmt(s.thenStatement));
+        placeLabel(endL);
+        return false;
+      }
+      case SyntaxKind.WhileStatement: {
+        const s = stmt as WhileStatement;
+        const startL = newLabel();
+        const endL = newLabel();
+        placeLabel(startL);
+        emitBranch(s.condition, endL, false);
+        inScope(() => emitStmt(s.statement));
+        branchTo(OP_GOTO, startL);
+        placeLabel(endL);
+        return false;
+      }
+      case SyntaxKind.DoStatement: {
+        const s = stmt as DoStatement;
+        const startL = newLabel();
+        placeLabel(startL);
+        inScope(() => emitStmt(s.statement));
+        emitBranch(s.condition, startL, true);
+        return false;
+      }
+      case SyntaxKind.ForStatement: {
+        const s = stmt as ForStatement;
+        return inScope(() => {
+          if (s.initializer) emitStmt(s.initializer);
+          for (const e of s.initializerExpressions ?? []) emitStatementExpression(e);
+          const startL = newLabel();
+          const endL = newLabel();
+          placeLabel(startL);
+          if (s.condition) emitBranch(s.condition, endL, false);
+          inScope(() => emitStmt(s.statement));
+          for (const e of s.incrementors ?? []) emitStatementExpression(e);
+          branchTo(OP_GOTO, startL);
+          placeLabel(endL);
+          return false;
+        });
       }
       default:
         throw new UnsupportedEmit();
@@ -1051,7 +1326,45 @@ function generateBody(
     if (returnDescriptor === "V") code.u1(OP_RETURN);
     else throw new UnsupportedEmit(); // non-void path falls off the end
   }
-  return { code, maxStack, maxLocals };
+
+  // Backpatch branch offsets (signed, relative to the branch opcode address).
+  for (const { at, from, label } of fixups) {
+    if (label.offset < 0) throw new UnsupportedEmit(); // label never placed
+    code.patchU2(at, (label.offset - from) & 0xffff);
+  }
+
+  // StackMapTable: a full_frame at every branch-target offset (JVMS 4.7.4).
+  const targetOffsets = [...new Set(fixups.map(f => f.label.offset))].sort((a, b) => a - b);
+  let stackMapTable: ByteBuffer | undefined;
+  if (targetOffsets.length > 0) {
+    const writeVerification = (buf: ByteBuffer, descriptor: string): void => {
+      const c = category(descriptor);
+      if (c === "I") buf.u1(ITEM_Integer);
+      else if (c === "F") buf.u1(ITEM_Float);
+      else if (c === "D") buf.u1(ITEM_Double);
+      else if (c === "J") buf.u1(ITEM_Long);
+      else {
+        const internal = descriptor[0] === "[" ? descriptor : descriptor.slice(1, -1);
+        buf.u1(ITEM_Object);
+        buf.u2(cp.classInfo(internal));
+      }
+    };
+    stackMapTable = new ByteBuffer();
+    stackMapTable.u2(targetOffsets.length);
+    let previous = -1;
+    for (const offset of targetOffsets) {
+      const frame = frameAt.get(offset)!;
+      stackMapTable.u1(FULL_FRAME);
+      stackMapTable.u2(previous < 0 ? offset : offset - previous - 1);
+      stackMapTable.u2(frame.locals.length);
+      for (const d of frame.locals) writeVerification(stackMapTable, d);
+      stackMapTable.u2(frame.stack.length);
+      for (const d of frame.stack) writeVerification(stackMapTable, d);
+      previous = offset;
+    }
+  }
+
+  return { code, maxStack, maxLocals, stackMapTable };
 }
 
 function emitMethod(
@@ -1075,7 +1388,12 @@ function emitMethod(
     return info;
   }
 
-  let body: { code: ByteBuffer; maxStack: number; maxLocals: number };
+  let body: {
+    code: ByteBuffer;
+    maxStack: number;
+    maxLocals: number;
+    stackMapTable?: ByteBuffer;
+  };
   try {
     body = generateBody(method, cp, program, checker, thisInternalName);
   } catch (e) {
@@ -1090,15 +1408,25 @@ function emitMethod(
     body = { code: fallback.code, maxStack: fallback.maxStack, maxLocals: argsSize };
   }
 
+  // Optional StackMapTable sub-attribute: name(2) + length(4) + body.
+  const smt = body.stackMapTable;
+  const smtIndex = smt ? cp.utf8("StackMapTable") : 0;
+  const smtBytes = smt ? 6 + smt.length : 0;
+
   const codeAttr = new ByteBuffer();
   codeAttr.u2(cp.utf8("Code"));
-  codeAttr.u4(12 + body.code.length);
+  codeAttr.u4(12 + body.code.length + smtBytes);
   codeAttr.u2(body.maxStack);
   codeAttr.u2(body.maxLocals);
   codeAttr.u4(body.code.length);
   codeAttr.append(body.code);
   codeAttr.u2(0); // exception_table_length
-  codeAttr.u2(0); // attributes_count
+  codeAttr.u2(smt ? 1 : 0); // attributes_count
+  if (smt) {
+    codeAttr.u2(smtIndex);
+    codeAttr.u4(smt.length);
+    codeAttr.append(smt);
+  }
 
   info.u2(1); // attributes_count
   info.append(codeAttr);

@@ -57,6 +57,31 @@ const RUNS: Record<string, string> = {
   Compute: "40\n",
 };
 
+// Control-flow fixtures: verified by the JVM (our StackMapTable must be accepted)
+// and run for their output. Not byte-matched to javac (we emit full_frame frames
+// and may allocate slots differently).
+const CONTROL: Record<string, { source: string; stdout: string }> = {
+  ControlFlow: {
+    source: [
+      "public class ControlFlow {",
+      "  static int sum(int n) { int s = 0; for (int i = 0; i < n; i++) { s = s + i; } return s; }",
+      "  static int absish(int x) { if (x < 0) { return -x; } else { return x; } }",
+      "  static int countdown(int n) { int c = 0; while (n > 0) { c = c + 1; n = n - 1; } return c; }",
+      "  static int firstSet(int x) { int i = 0; do { i = i + 1; } while (i < x); return i; }",
+      "  static boolean inRange(int x, int lo, int hi) { return x >= lo && x <= hi; }",
+      "  public static void main(String[] args) {",
+      "    System.out.println(sum(5));",
+      "    System.out.println(absish(-7));",
+      "    System.out.println(countdown(3));",
+      "    System.out.println(firstSet(4));",
+      "    System.out.println(inRange(5, 1, 10));",
+      "  }",
+      "}",
+    ].join("\n"),
+    stdout: "10\n7\n3\n4\ntrue\n",
+  },
+};
+
 // javap -c per-method instruction lines, with constant-pool indices stripped so
 // only mnemonics + symbolic operands remain (comparable across compilers).
 function codeByMethod(classFile: string): Map<string, string[]> {
@@ -175,4 +200,24 @@ for (const [name, expected] of Object.entries(RUNS)) {
 
 function source(name: string): string {
   return FIXTURES[name]!;
+}
+
+for (const [name, { source: src, stdout }] of Object.entries(CONTROL)) {
+  test(`control flow binary baseline: ${name}`, () => {
+    const bytes = emit(name, src);
+    const baseline = join(baselinesDir, `${name}.class`);
+    if (shouldUpdate || !existsSync(baseline)) {
+      mkdirSync(baselinesDir, { recursive: true });
+      writeFileSync(baseline, bytes);
+    }
+    expect(Buffer.from(bytes).equals(readFileSync(baseline))).toBe(true);
+  });
+
+  test(`control flow verifies and runs: ${name}`, { skip: HAS_JAVA ? false : "no JDK" }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "emit-cf-"));
+    writeFileSync(join(dir, `${name}.class`), emit(name, src));
+    // The JVM verifier checks our StackMapTable on load; a wrong frame -> VerifyError.
+    const out = execFileSync("java", ["-cp", dir, name], { encoding: "utf8" });
+    expect(out).toBe(stdout);
+  });
 }
