@@ -3,7 +3,7 @@
   "explorer.fileNesting.patterns": {
     "tsconfig.json": "tsconfig.*.json",
     "package.json": "package-lock.json, .npmrc, yarn.lock, .yarnrc",
-    "*.ts": "$(capture).test.ts"
+    "*.ts": "$(capture).*.ts"
   },
   "editor.formatOnSaveMode": "modificationsIfAvailable",
   "[javascript]": {

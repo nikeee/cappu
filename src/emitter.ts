@@ -8,17 +8,24 @@
 //
 // Reference output is cross-checked against `javac` in the tests.
 
+import type { Checker } from "./checker.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import { resolveTypeEntityName } from "./resolver.ts";
 import { entityNameToString, tokenToString } from "./utilities.ts";
 import {
   type ArrayType as AstArrayType,
+  type CallExpression,
   type ClassDeclaration,
+  type ExpressionStatement,
   type FieldDeclaration,
+  type Identifier,
+  type LiteralExpression,
   type MethodDeclaration,
   type Node,
   type Parameter,
+  type PropertyAccessExpression,
+  type ReturnStatement,
   type SourceFile,
   type Symbol,
   SymbolFlags,
@@ -27,6 +34,10 @@ import {
   type TypeReference,
   type VariableDeclarator,
 } from "./types.ts";
+
+// Thrown when a construct is not yet handled by code generation; the caller
+// falls back to a verifiable placeholder body so output is always valid.
+class UnsupportedEmit extends Error {}
 
 const MAGIC = 0xcafebabe;
 const MINOR_VERSION = 0;
@@ -62,9 +73,14 @@ const PRIMITIVE_DESCRIPTOR: Record<string, string> = {
 
 // Constant pool tags (JVMS 4.4, Table 4.4-A).
 const CONSTANT_Utf8 = 1;
+const CONSTANT_Integer = 3;
+const CONSTANT_Long = 5;
 const CONSTANT_Class = 7;
-const CONSTANT_NameAndType = 12;
+const CONSTANT_String = 8;
+const CONSTANT_Fieldref = 9;
 const CONSTANT_Methodref = 10;
+const CONSTANT_InterfaceMethodref = 11;
+const CONSTANT_NameAndType = 12;
 
 // Opcodes (JVMS 6.5) used so far.
 const OP_ACONST_NULL = 0x01;
@@ -77,8 +93,31 @@ const OP_LRETURN = 0xad;
 const OP_FRETURN = 0xae;
 const OP_DRETURN = 0xaf;
 const OP_ARETURN = 0xb0;
-const OP_ALOAD_0 = 0x2a;
+const OP_ICONST_M1 = 0x02;
+const OP_BIPUSH = 0x10;
+const OP_SIPUSH = 0x11;
+const OP_LDC = 0x12;
+const OP_LDC_W = 0x13;
+const OP_LDC2_W = 0x14;
+const OP_ILOAD = 0x15;
+const OP_LLOAD = 0x16;
+const OP_FLOAD = 0x17;
+const OP_DLOAD = 0x18;
+const OP_ALOAD = 0x19;
+const OP_ILOAD_0 = 0x1a;
+const OP_LLOAD_0 = 0x1e;
+const OP_FLOAD_0 = 0x22;
+const OP_DLOAD_0 = 0x26;
+const OP_ALOAD_BASE_0 = 0x2a; // aload_0
+const OP_POP = 0x57;
+const OP_POP2 = 0x58;
+const OP_GETSTATIC = 0xb2;
+const OP_GETFIELD = 0xb4;
+const OP_INVOKEVIRTUAL = 0xb6;
 const OP_INVOKESPECIAL = 0xb7;
+const OP_INVOKESTATIC = 0xb8;
+const OP_INVOKEINTERFACE = 0xb9;
+const OP_ALOAD_0 = 0x2a;
 const OP_RETURN = 0xb1;
 
 // A growable big-endian byte buffer.
@@ -176,6 +215,52 @@ class ConstantPool {
       b.u2(classIndex);
       b.u2(ntIndex);
     });
+  }
+
+  interfaceMethodref(internalClass: string, name: string, descriptor: string): number {
+    const classIndex = this.classInfo(internalClass);
+    const ntIndex = this.nameAndType(name, descriptor);
+    return this.intern(`im:${internalClass}:${name}:${descriptor}`, b => {
+      b.u1(CONSTANT_InterfaceMethodref);
+      b.u2(classIndex);
+      b.u2(ntIndex);
+    });
+  }
+
+  fieldref(internalClass: string, name: string, descriptor: string): number {
+    const classIndex = this.classInfo(internalClass);
+    const ntIndex = this.nameAndType(name, descriptor);
+    return this.intern(`f:${internalClass}:${name}:${descriptor}`, b => {
+      b.u1(CONSTANT_Fieldref);
+      b.u2(classIndex);
+      b.u2(ntIndex);
+    });
+  }
+
+  string(value: string): number {
+    const utf8Index = this.utf8(value);
+    return this.intern(`s:${value}`, b => {
+      b.u1(CONSTANT_String);
+      b.u2(utf8Index);
+    });
+  }
+
+  integer(value: number): number {
+    return this.intern(`i:${value}`, b => {
+      b.u1(CONSTANT_Integer);
+      b.u4(value);
+    });
+  }
+
+  long(value: bigint): number {
+    // Long occupies two pool entries (JVMS 4.4.5).
+    const index = this.intern(`l:${value}`, b => {
+      b.u1(CONSTANT_Long);
+      b.u4(Number((value >> 32n) & 0xffffffffn));
+      b.u4(Number(value & 0xffffffffn));
+    });
+    this.count++; // the second (unusable) slot
+    return index;
   }
 
   /** Write `constant_pool_count` followed by the pool entries. */
@@ -413,7 +498,305 @@ function defaultReturnBody(returnDescriptor: string): { code: ByteBuffer; maxSta
   }
 }
 
-function emitMethod(method: MethodDeclaration, cp: ConstantPool, program: Program): ByteBuffer {
+// Split a method descriptor's parameter list into individual descriptors.
+function parseParamDescriptors(methodDescriptor: string): string[] {
+  const params: string[] = [];
+  let i = methodDescriptor.indexOf("(") + 1;
+  while (methodDescriptor[i] !== ")") {
+    const start = i;
+    while (methodDescriptor[i] === "[") i++;
+    if (methodDescriptor[i] === "L") i = methodDescriptor.indexOf(";", i) + 1;
+    else i++;
+    params.push(methodDescriptor.slice(start, i));
+  }
+  return params;
+}
+
+function isStaticDeclaration(declaration: { modifiers?: readonly Node[] }): boolean {
+  return (declaration.modifiers ?? []).some(m => m.kind === SyntaxKind.StaticKeyword);
+}
+
+// Generate real bytecode for a method body. Throws UnsupportedEmit for anything
+// not yet handled, so emitMethod can fall back to a verifiable placeholder.
+function generateBody(
+  method: MethodDeclaration,
+  cp: ConstantPool,
+  program: Program,
+  checker: Checker,
+  thisInternalName: string,
+): { code: ByteBuffer; maxStack: number; maxLocals: number } {
+  const isStatic = (methodAccessFlags(method) & ACC_STATIC) !== 0;
+  const returnDescriptor = methodDescriptor(method, program).slice(
+    methodDescriptor(method, program).lastIndexOf(")") + 1,
+  );
+
+  const paramSlots = new Map<Symbol, { slot: number; descriptor: string }>();
+  let slot = isStatic ? 0 : 1;
+  for (const p of method.parameters) {
+    const descriptor = paramDescriptor(p as Parameter, program);
+    if (p.symbol) paramSlots.set(p.symbol, { slot, descriptor });
+    slot += slotsOf(descriptor);
+  }
+  const maxLocals = slot;
+
+  const code = new ByteBuffer();
+  let depth = 0;
+  let maxStack = 0;
+  const push = (descriptor: string): void => {
+    depth += slotsOf(descriptor);
+    if (depth > maxStack) maxStack = depth;
+  };
+  const pushRef = (): void => push("L");
+  const pop = (slots: number): void => {
+    depth -= slots;
+  };
+
+  const ldc = (index: number): void => {
+    if (index <= 0xff) {
+      code.u1(OP_LDC);
+      code.u1(index);
+    } else {
+      code.u1(OP_LDC_W);
+      code.u2(index);
+    }
+  };
+  const intConst = (value: number): void => {
+    if (value >= -1 && value <= 5) code.u1(OP_ICONST_M1 + (value + 1));
+    else if (value >= -128 && value <= 127) {
+      code.u1(OP_BIPUSH);
+      code.u1(value & 0xff);
+    } else if (value >= -32768 && value <= 32767) {
+      code.u1(OP_SIPUSH);
+      code.u2(value & 0xffff);
+    } else ldc(cp.integer(value));
+  };
+  const longConst = (value: bigint): void => {
+    if (value === 0n) code.u1(OP_LCONST_0);
+    else if (value === 1n) code.u1(0x0a);
+    else {
+      code.u1(OP_LDC2_W);
+      code.u2(cp.long(value));
+    }
+  };
+  const loadVar = (varSlot: number, descriptor: string): void => {
+    const c = descriptor[0];
+    const kind =
+      c === "J" ? "J" : c === "D" ? "D" : c === "F" ? "F" : c === "L" || c === "[" ? "A" : "I";
+    const full = { I: OP_ILOAD, J: OP_LLOAD, F: OP_FLOAD, D: OP_DLOAD, A: OP_ALOAD }[kind];
+    const short0 = {
+      I: OP_ILOAD_0,
+      J: OP_LLOAD_0,
+      F: OP_FLOAD_0,
+      D: OP_DLOAD_0,
+      A: OP_ALOAD_BASE_0,
+    }[kind];
+    if (varSlot <= 3) code.u1(short0 + varSlot);
+    else {
+      code.u1(full);
+      code.u1(varSlot);
+    }
+  };
+
+  const fieldInfoOf = (
+    symbol: Symbol,
+  ): { owner: string; name: string; descriptor: string; isStatic: boolean } => {
+    const declarator = symbol.valueDeclaration;
+    if (!declarator || declarator.kind !== SyntaxKind.VariableDeclarator)
+      throw new UnsupportedEmit();
+    const field = declarator.parent as FieldDeclaration;
+    if (field.kind !== SyntaxKind.FieldDeclaration || !symbol.parent) throw new UnsupportedEmit();
+    return {
+      owner: binaryName(symbol.parent),
+      name: symbol.escapedName,
+      descriptor: descriptorOf(field.type, program),
+      isStatic: isStaticDeclaration(field),
+    };
+  };
+
+  const emitExpr = (node: Node): string => {
+    switch (node.kind) {
+      case SyntaxKind.ParenthesizedExpression:
+        return emitExpr((node as unknown as { expression: Node }).expression);
+      case SyntaxKind.NumericLiteral: {
+        const text = (node as LiteralExpression).value.replace(/_/g, "");
+        if (/[lL]$/.test(text)) {
+          longConst(BigInt(text.slice(0, -1)));
+          push("J");
+          return "J";
+        }
+        if (/[.eEfFdD]/.test(text)) throw new UnsupportedEmit(); // floating point: later
+        intConst(/^0[0-7]+$/.test(text) ? parseInt(text, 8) : Number(text));
+        push("I");
+        return "I";
+      }
+      case SyntaxKind.StringLiteral:
+      case SyntaxKind.TextBlockLiteral:
+        ldc(cp.string((node as LiteralExpression).value));
+        pushRef();
+        return "Ljava/lang/String;";
+      case SyntaxKind.CharacterLiteral:
+        intConst((node as LiteralExpression).value.charCodeAt(0));
+        push("I");
+        return "C";
+      case SyntaxKind.TrueKeyword:
+        code.u1(0x04); // iconst_1
+        push("I");
+        return "Z";
+      case SyntaxKind.FalseKeyword:
+        code.u1(OP_ICONST_0);
+        push("I");
+        return "Z";
+      case SyntaxKind.NullKeyword:
+        code.u1(OP_ACONST_NULL);
+        pushRef();
+        return "Ljava/lang/Object;";
+      case SyntaxKind.ThisExpression:
+        code.u1(OP_ALOAD_0);
+        pushRef();
+        return `L${thisInternalName};`;
+      case SyntaxKind.Identifier: {
+        const symbol = checker.resolveName(node as Identifier);
+        const local = symbol ? paramSlots.get(symbol) : undefined;
+        if (!local) throw new UnsupportedEmit(); // fields/statics via simple name: later
+        loadVar(local.slot, local.descriptor);
+        push(local.descriptor);
+        return local.descriptor;
+      }
+      case SyntaxKind.PropertyAccessExpression: {
+        const access = node as PropertyAccessExpression;
+        const symbol = checker.resolveName(access.name);
+        if (!symbol || !(symbol.flags & SymbolFlags.Field)) throw new UnsupportedEmit();
+        const info = fieldInfoOf(symbol);
+        if (info.isStatic) {
+          code.u1(OP_GETSTATIC);
+        } else {
+          emitExpr(access.expression);
+          code.u1(OP_GETFIELD);
+          pop(1);
+        }
+        code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
+        push(info.descriptor);
+        return info.descriptor;
+      }
+      case SyntaxKind.CallExpression:
+        return emitCall(node as CallExpression);
+      default:
+        throw new UnsupportedEmit();
+    }
+  };
+
+  const emitCall = (call: CallExpression): string => {
+    const decl = checker.resolveCall(call);
+    const owner = decl?.symbol?.parent;
+    if (!decl || !decl.symbol || !owner) throw new UnsupportedEmit();
+    const ownerName = binaryName(owner);
+    const isInterface = (owner.flags & SymbolFlags.Interface) !== 0;
+    const staticCall = isStaticDeclaration(decl);
+    const descriptor = methodDescriptor(decl, program);
+    const callee = call.expression;
+
+    if (!staticCall) {
+      if (callee.kind === SyntaxKind.PropertyAccessExpression) {
+        emitExpr((callee as PropertyAccessExpression).expression);
+      } else if (callee.kind === SyntaxKind.Identifier) {
+        code.u1(OP_ALOAD_0); // implicit this
+        pushRef();
+      } else throw new UnsupportedEmit();
+    }
+    for (const arg of call.arguments) emitExpr(arg);
+
+    const argSlots = parseParamDescriptors(descriptor).reduce((n, d) => n + slotsOf(d), 0);
+    const returnDesc = descriptor.slice(descriptor.lastIndexOf(")") + 1);
+    if (staticCall) {
+      code.u1(OP_INVOKESTATIC);
+      code.u2(cp.methodref(ownerName, decl.name.text, descriptor));
+      pop(argSlots);
+    } else if (isInterface) {
+      code.u1(OP_INVOKEINTERFACE);
+      code.u2(cp.interfaceMethodref(ownerName, decl.name.text, descriptor));
+      code.u1(argSlots + 1);
+      code.u1(0);
+      pop(argSlots + 1);
+    } else {
+      code.u1(OP_INVOKEVIRTUAL);
+      code.u2(cp.methodref(ownerName, decl.name.text, descriptor));
+      pop(argSlots + 1);
+    }
+    if (returnDesc !== "V") push(returnDesc);
+    return returnDesc;
+  };
+
+  const emitReturn = (): void => {
+    switch (returnDescriptor[0]) {
+      case "V":
+        code.u1(OP_RETURN);
+        break;
+      case "J":
+        code.u1(OP_LRETURN);
+        break;
+      case "D":
+        code.u1(OP_DRETURN);
+        break;
+      case "F":
+        code.u1(OP_FRETURN);
+        break;
+      case "L":
+      case "[":
+        code.u1(OP_ARETURN);
+        break;
+      default:
+        code.u1(OP_IRETURN);
+        break;
+    }
+  };
+
+  // Returns true if the statement is a definite terminator (return).
+  const emitStmt = (stmt: Node): boolean => {
+    switch (stmt.kind) {
+      case SyntaxKind.Block: {
+        let terminated = false;
+        for (const s of (stmt as unknown as { statements: readonly Node[] }).statements) {
+          terminated = emitStmt(s);
+        }
+        return terminated;
+      }
+      case SyntaxKind.EmptyStatement:
+        return false;
+      case SyntaxKind.ExpressionStatement: {
+        const desc = emitExpr((stmt as ExpressionStatement).expression);
+        if (desc !== "V") {
+          code.u1(slotsOf(desc) === 2 ? OP_POP2 : OP_POP);
+          pop(slotsOf(desc));
+        }
+        return false;
+      }
+      case SyntaxKind.ReturnStatement: {
+        const expr = (stmt as ReturnStatement).expression;
+        if (expr) emitExpr(expr);
+        emitReturn();
+        return true;
+      }
+      default:
+        throw new UnsupportedEmit();
+    }
+  };
+
+  if (!method.body || method.body.kind !== SyntaxKind.Block) throw new UnsupportedEmit();
+  const terminated = emitStmt(method.body);
+  if (!terminated) {
+    if (returnDescriptor === "V") code.u1(OP_RETURN);
+    else throw new UnsupportedEmit(); // non-void path falls off the end
+  }
+  return { code, maxStack, maxLocals };
+}
+
+function emitMethod(
+  method: MethodDeclaration,
+  cp: ConstantPool,
+  program: Program,
+  checker: Checker,
+  thisInternalName: string,
+): ByteBuffer {
   const flags = methodAccessFlags(method);
   const descriptor = methodDescriptor(method, program);
 
@@ -428,20 +811,28 @@ function emitMethod(method: MethodDeclaration, cp: ConstantPool, program: Progra
     return info;
   }
 
-  const isStatic = (flags & ACC_STATIC) !== 0;
-  const argsSize =
-    (isStatic ? 0 : 1) +
-    method.parameters.reduce((n, p) => n + slotsOf(paramDescriptor(p as Parameter, program)), 0);
-  const returnDescriptor = descriptor.slice(descriptor.lastIndexOf(")") + 1);
-  const { code, maxStack } = defaultReturnBody(returnDescriptor);
+  let body: { code: ByteBuffer; maxStack: number; maxLocals: number };
+  try {
+    body = generateBody(method, cp, program, checker, thisInternalName);
+  } catch (e) {
+    if (!(e instanceof UnsupportedEmit)) throw e;
+    // Unhandled construct: emit a verifiable placeholder so output stays valid.
+    const isStatic = (flags & ACC_STATIC) !== 0;
+    const argsSize =
+      (isStatic ? 0 : 1) +
+      method.parameters.reduce((n, p) => n + slotsOf(paramDescriptor(p as Parameter, program)), 0);
+    const returnDescriptor = descriptor.slice(descriptor.lastIndexOf(")") + 1);
+    const fallback = defaultReturnBody(returnDescriptor);
+    body = { code: fallback.code, maxStack: fallback.maxStack, maxLocals: argsSize };
+  }
 
   const codeAttr = new ByteBuffer();
   codeAttr.u2(cp.utf8("Code"));
-  codeAttr.u4(12 + code.length);
-  codeAttr.u2(maxStack);
-  codeAttr.u2(argsSize); // max_locals
-  codeAttr.u4(code.length);
-  codeAttr.append(code);
+  codeAttr.u4(12 + body.code.length);
+  codeAttr.u2(body.maxStack);
+  codeAttr.u2(body.maxLocals);
+  codeAttr.u4(body.code.length);
+  codeAttr.append(body.code);
   codeAttr.u2(0); // exception_table_length
   codeAttr.u2(0); // attributes_count
 
@@ -456,7 +847,11 @@ export interface EmittedClass {
   readonly bytes: Uint8Array;
 }
 
-function emitClass(declaration: ClassDeclaration, program: Program): EmittedClass {
+function emitClass(
+  declaration: ClassDeclaration,
+  program: Program,
+  checker: Checker,
+): EmittedClass {
   const name = declaration.name.text;
   const superInternalName = "java/lang/Object"; // resolving `extends` comes later
 
@@ -479,7 +874,7 @@ function emitClass(declaration: ClassDeclaration, program: Program): EmittedClas
   );
   for (const member of declaration.members) {
     if (member.kind !== SyntaxKind.MethodDeclaration) continue;
-    methods.append(emitMethod(member as MethodDeclaration, cp, program));
+    methods.append(emitMethod(member as MethodDeclaration, cp, program, checker, name));
     methodCount++;
   }
 
@@ -502,11 +897,15 @@ function emitClass(declaration: ClassDeclaration, program: Program): EmittedClas
 }
 
 /** Emit a .class file for every top-level class declaration in a source file. */
-export function emitSourceFile(sourceFile: SourceFile, program: Program): EmittedClass[] {
+export function emitSourceFile(
+  sourceFile: SourceFile,
+  program: Program,
+  checker: Checker,
+): EmittedClass[] {
   const result: EmittedClass[] = [];
   forEachChild(sourceFile, (node: Node) => {
     if (node.kind === SyntaxKind.ClassDeclaration) {
-      result.push(emitClass(node as ClassDeclaration, program));
+      result.push(emitClass(node as ClassDeclaration, program, checker));
     }
     return undefined;
   });

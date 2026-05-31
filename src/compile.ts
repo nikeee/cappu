@@ -9,6 +9,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { createChecker } from "./checker.ts";
 import { emitSourceFile } from "./emitter.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
@@ -30,6 +31,7 @@ function main(argv: string[]): number {
   const program = createProgram();
   loadJdkStub(program);
   for (const file of files) program.addProjectFile(pathToUri(file), readFileSync(file, "utf8"));
+  const checker = createChecker(program);
 
   for (const file of files) {
     const sourceFile = program.getSourceFile(pathToUri(file))!;
@@ -40,7 +42,7 @@ function main(argv: string[]): number {
       return 1;
     }
     const target = outDir ?? dirname(file);
-    for (const cls of emitSourceFile(sourceFile, program)) {
+    for (const cls of emitSourceFile(sourceFile, program, checker)) {
       const out = join(target, `${cls.name}.class`);
       writeFileSync(out, cls.bytes);
       process.stdout.write(`${out}\n`);
