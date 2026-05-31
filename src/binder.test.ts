@@ -120,3 +120,12 @@ test("typed lambda parameters are scoped to the lambda (M10)", () => {
   visit(sf);
   expect(lambda?.locals?.get("a")?.flags).toBe(SymbolFlags.Parameter);
 });
+
+test("symbol.parent and valueDeclaration are set (P1)", () => {
+  const sf = bindJava("class C { int x; void m() {} }");
+  const c = sf.locals!.get("C")!;
+  const x = c.members!.get("x")!;
+  expect(x.parent).toBe(c); // member -> enclosing type
+  expect(x.valueDeclaration).toBe(x.declarations![0]);
+  expect(c.valueDeclaration).toBe(c.declarations![0]);
+});

@@ -2,7 +2,16 @@
 // text tables and small SyntaxKind range predicates. Mirrors the role of
 // utilities in the TS compiler.
 
-import { SyntaxKind } from "./types.ts";
+import { type EntityName, type Identifier, type QualifiedName, SyntaxKind } from "./types.ts";
+
+/** Dotted text of an entity name (a, a.b, a.b.c). */
+export function entityNameToString(name: EntityName): string {
+  if (name.kind === SyntaxKind.Identifier) {
+    return (name as Identifier).text;
+  }
+  const qualified = name as QualifiedName;
+  return `${entityNameToString(qualified.left)}.${qualified.right.text}`;
+}
 
 // Text -> kind for every reserved word (and the reserved literals true/false/null).
 // Contextual keywords (var, yield, record, sealed, ...) are intentionally absent:

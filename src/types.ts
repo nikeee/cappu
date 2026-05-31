@@ -990,5 +990,8 @@ export interface Symbol {
   escapedName: string;
   declarations?: Node[];
   members?: SymbolTable;
+  /** Enclosing symbol: member -> type -> package. */
   parent?: Symbol;
+  /** First declaration (for hover/goto and value symbols). */
+  valueDeclaration?: Node;
 }

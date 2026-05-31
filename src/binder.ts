@@ -123,6 +123,8 @@ function declareSymbol(
   }
   symbol.declarations ??= [];
   symbol.declarations.push(node);
+  symbol.valueDeclaration ??= node;
+  symbol.parent ??= container.symbol;
   node.symbol = symbol;
   return symbol;
 }

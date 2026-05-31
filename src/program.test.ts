@@ -33,3 +33,31 @@ test("unknown and closed documents return undefined", () => {
   expect(program.getSourceFile("file:///A.java")).toBeUndefined();
   expect(program.getOpenUris()).toEqual([]);
 });
+
+test("global index resolves types across files by FQN and package", () => {
+  const program = createProgram();
+  program.setOpenDocument("file:///A.java", "package com.app;\nclass A {}", 1);
+  program.setOpenDocument("file:///B.java", "package com.app;\ninterface B {}", 1);
+  program.setOpenDocument("file:///C.java", "class C {}", 1); // default package
+  const index = program.getGlobalIndex();
+
+  expect(index.getType("com.app.A")?.flags).toBe(SymbolFlags.Class);
+  expect(index.getType("com.app.B")?.flags).toBe(SymbolFlags.Interface);
+  expect(index.getType("C")?.flags).toBe(SymbolFlags.Class);
+
+  const pkg = index.getPackageTypes("com.app")!;
+  expect([...pkg.keys()].sort()).toEqual(["A", "B"]);
+  expect(index.getPackageSymbol("com.app")?.flags).toBe(SymbolFlags.Package);
+  // top-level type's parent is the package symbol
+  expect(index.getType("com.app.A")?.parent).toBe(index.getPackageSymbol("com.app"));
+});
+
+test("index rebuilds when a document changes", () => {
+  const program = createProgram();
+  program.setOpenDocument("file:///A.java", "package p;\nclass A {}", 1);
+  expect(program.getGlobalIndex().getType("p.A")).toBeDefined();
+  program.setOpenDocument("file:///A.java", "package p;\nclass Renamed {}", 2);
+  const index = program.getGlobalIndex();
+  expect(index.getType("p.A")).toBeUndefined();
+  expect(index.getType("p.Renamed")).toBeDefined();
+});
