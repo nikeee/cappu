@@ -7,6 +7,7 @@
 
 import {
   createConnection,
+  type Definition,
   type Diagnostic as LspDiagnostic,
   DiagnosticSeverity,
   type DocumentSymbol,
@@ -17,9 +18,20 @@ import {
 import { TextDocument } from "vscode-languageserver-textdocument";
 
 import { getDocumentSymbols } from "./documentSymbols.ts";
-import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
+import {
+  computeLineStarts,
+  getLineAndCharacterOfPosition,
+  getPositionOfLineAndCharacter,
+} from "./lineMap.ts";
+import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
 import { createProgram } from "./program.ts";
-import { DiagnosticCategory, type Diagnostic as JavaDiagnostic, type SourceFile } from "./types.ts";
+import { getDeclarationNameNode, getSourceFileOfNode, resolveIdentifier } from "./resolver.ts";
+import {
+  DiagnosticCategory,
+  type Diagnostic as JavaDiagnostic,
+  type Identifier,
+  type SourceFile,
+} from "./types.ts";
 
 // Communicate over stdio (the standard transport for editor language clients).
 const connection = createConnection(process.stdin, process.stdout);
@@ -31,6 +43,7 @@ connection.onInitialize(
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
       documentSymbolProvider: true,
+      definitionProvider: true,
     },
   }),
 );
@@ -86,6 +99,31 @@ connection.onDocumentSymbol((params): DocumentSymbol[] => {
   const sourceFile = program.getSourceFile(params.textDocument.uri);
   if (!sourceFile) return [];
   return getDocumentSymbols(sourceFile, computeLineStarts(sourceFile.text));
+});
+
+connection.onDefinition((params): Definition | null => {
+  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  if (!sourceFile) return null;
+  const offset = getPositionOfLineAndCharacter(
+    computeLineStarts(sourceFile.text),
+    params.position.line,
+    params.position.character,
+  );
+  const identifier = getIdentifierAtPosition(sourceFile, offset);
+  if (!identifier) return null;
+  const symbol = resolveIdentifier(identifier as Identifier, program);
+  if (!symbol) return null;
+  const nameNode = getDeclarationNameNode(symbol);
+  if (!nameNode) return null;
+  const targetFile = getSourceFileOfNode(nameNode);
+  const targetLineStarts = computeLineStarts(targetFile.text);
+  return {
+    uri: targetFile.fileName,
+    range: {
+      start: getLineAndCharacterOfPosition(targetLineStarts, nameNode.pos),
+      end: getLineAndCharacterOfPosition(targetLineStarts, nameNode.end),
+    },
+  };
 });
 
 documents.listen(connection);
