@@ -58,6 +58,16 @@ test("renaming a local stays within its method and matches every use", () => {
   expect(refs.length).toBe(4); // declaration + three uses
 });
 
+test("renaming a parameter covers its declaration and uses within the method only", () => {
+  const ctx = setup({
+    "file:///P.java":
+      "class P { int f(int amount) { return amount + amount; } int g(int amount) { return amount; } }",
+  });
+  const param = symbolAt(ctx, "file:///P.java", "amount"); // f's parameter
+  const refs = findReferences(param, ctx.program, ctx.checker.resolveName);
+  expect(refs.length).toBe(3); // declaration + two uses in f, not g's amount
+});
+
 test("renaming a method matches its qualified call site", () => {
   const ctx = setup({
     "file:///D.java": "class D { void run() {} void m(D d) { d.run(); } }",

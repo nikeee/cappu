@@ -231,3 +231,49 @@ test("no inline for a local without an initializer", () => {
   );
   expect(inlineAt(ctx, "x")).toBeUndefined();
 });
+
+// --- change signature: remove unused parameter -------------------------------------
+
+function rewriteAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {
+  let offset = -1;
+  for (let i = 0; i < occ; i++) offset = ctx.text.indexOf(needle, offset + 1);
+  const sf = ctx.program.getSourceFile("file:///T.java")!;
+  return getCodeActions(ctx.program, ctx.checker, sf, offset, offset).find(
+    a => a.kind === "refactor.rewrite",
+  );
+}
+
+test("removes an unused middle parameter from the declaration and call sites", () => {
+  const ctx = setup(
+    "class C { void m(int aa, int bb, int cc) { use(aa, cc); } void caller() { m(1, 2, 3); } }",
+  );
+  const action = rewriteAt(ctx, "bb")!;
+  expect(action.title).toBe("Remove unused parameter 'bb'");
+  expect(apply(ctx.text, action)).toBe(
+    "class C { void m(int aa, int cc) { use(aa, cc); } void caller() { m(1, 3); } }",
+  );
+});
+
+test("removes an unused last parameter", () => {
+  const ctx = setup("class C { void m(int aa, int bb) { use(aa); } void caller() { m(1, 2); } }");
+  expect(apply(ctx.text, rewriteAt(ctx, "bb")!)).toBe(
+    "class C { void m(int aa) { use(aa); } void caller() { m(1); } }",
+  );
+});
+
+test("removes the only parameter", () => {
+  const ctx = setup("class C { void m(int aa) {} void caller() { m(1); } }");
+  expect(apply(ctx.text, rewriteAt(ctx, "aa")!)).toBe(
+    "class C { void m() {} void caller() { m(); } }",
+  );
+});
+
+test("no remove-parameter when the parameter is used", () => {
+  const ctx = setup("class C { void m(int aa) { use(aa); } }");
+  expect(rewriteAt(ctx, "aa")).toBeUndefined();
+});
+
+test("no remove-parameter for an overloaded method (ambiguous call sites)", () => {
+  const ctx = setup("class C { void m(int aa) {} void m(int aa, int bb) {} }");
+  expect(rewriteAt(ctx, "aa")).toBeUndefined();
+});

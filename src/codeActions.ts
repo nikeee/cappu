@@ -7,14 +7,17 @@ import type { Checker } from "./checker.ts";
 import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
-import { findReferences } from "./resolver.ts";
+import { findReferences, getSourceFileOfNode } from "./resolver.ts";
 import { entityNameToString, skipTrivia } from "./utilities.ts";
 import {
   type AssignmentExpression,
+  type CallExpression,
   type Identifier,
   type ImportDeclaration,
   type LocalVariableDeclarationStatement,
+  type MethodDeclaration,
   type Node,
+  type PropertyAccessExpression,
   type SourceFile,
   SymbolFlags,
   SyntaxKind,
@@ -317,6 +320,85 @@ function inlineLocalVariable(
   return [{ title: "Inline local variable", kind: "refactor.inline", changes }];
 }
 
+// --- change signature: remove an unused parameter ----------------------------------
+
+// Delete the element at `index` from a comma-separated list, taking the adjacent
+// comma with it (the following one, or the preceding one for the last element).
+function listItemRemoval(text: string, nodes: readonly Node[], index: number): TextChange {
+  const startOf = (n: Node) => skipTrivia(text, n.pos);
+  if (nodes.length === 1) return { start: startOf(nodes[0]!), end: nodes[0]!.end, newText: "" };
+  if (index < nodes.length - 1) {
+    return { start: startOf(nodes[index]!), end: startOf(nodes[index + 1]!), newText: "" };
+  }
+  return { start: nodes[index - 1]!.end, end: nodes[index]!.end, newText: "" };
+}
+
+// The call expression whose callee is this method-name reference, or undefined
+// (e.g. the declaration name, or a non-call reference).
+function callForMethodReference(reference: Node): CallExpression | undefined {
+  const parent = reference.parent;
+  if (
+    parent.kind === SyntaxKind.CallExpression &&
+    (parent as CallExpression).expression === reference
+  ) {
+    return parent as CallExpression;
+  }
+  if (
+    parent.kind === SyntaxKind.PropertyAccessExpression &&
+    (parent as PropertyAccessExpression).name === reference &&
+    parent.parent.kind === SyntaxKind.CallExpression &&
+    (parent.parent as CallExpression).expression === parent
+  ) {
+    return parent.parent as CallExpression;
+  }
+  return undefined;
+}
+
+function removeUnusedParameter(
+  program: Program,
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  const identifier = getIdentifierAtPosition(sourceFile, start) as Identifier | undefined;
+  if (!identifier) return [];
+  const symbol = checker.resolveName(identifier);
+  if (!symbol || !(symbol.flags & SymbolFlags.Parameter)) return [];
+
+  const parameter = symbol.valueDeclaration;
+  if (!parameter || parameter.kind !== SyntaxKind.Parameter) return [];
+  const method = parameter.parent as MethodDeclaration;
+  if (method.kind !== SyntaxKind.MethodDeclaration || !method.symbol) return [];
+  const paramIndex = method.parameters.indexOf(parameter as never);
+  if (paramIndex < 0) return [];
+
+  // Only when the parameter is genuinely unused in the body.
+  const uses = findReferences(symbol, program, checker.resolveName).filter(
+    n => n !== (parameter as { name?: Node }).name,
+  );
+  if (uses.length > 0) return [];
+
+  // Overloads share a symbol; removing an argument by position would corrupt the
+  // other overloads' calls, so only handle a uniquely-named method.
+  if ((method.symbol.declarations?.length ?? 0) !== 1) return [];
+
+  // Gather call sites. Bail if any is in another file (this action edits one file).
+  const calls: CallExpression[] = [];
+  for (const reference of findReferences(method.symbol, program, checker.resolveName)) {
+    const call = callForMethodReference(reference);
+    if (!call) continue;
+    if (getSourceFileOfNode(call).fileName !== sourceFile.fileName) return [];
+    if (call.arguments.length === method.parameters.length) calls.push(call);
+  }
+
+  const name = (parameter as unknown as { name: Identifier }).name.text;
+  const changes: TextChange[] = [listItemRemoval(sourceFile.text, method.parameters, paramIndex)];
+  for (const call of calls) {
+    changes.push(listItemRemoval(sourceFile.text, call.arguments, paramIndex));
+  }
+  return [{ title: `Remove unused parameter '${name}'`, kind: "refactor.rewrite", changes }];
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
@@ -329,5 +411,6 @@ export function getCodeActions(
     ...organizeImports(sourceFile),
     ...extractLocalVariable(sourceFile, start, end),
     ...inlineLocalVariable(program, checker, sourceFile, start),
+    ...removeUnusedParameter(program, checker, sourceFile, start),
   ];
 }
