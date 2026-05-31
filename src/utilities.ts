@@ -52,6 +52,14 @@ export function skipTrivia(text: string, pos: number): number {
   return pos;
 }
 
+// A legal Java identifier (JLS 3.8): starts with a letter/$/_, continues with
+// those or digits, and is not a reserved keyword or reserved literal. Used to
+// validate a rename's new name. (A simplified ASCII view of JavaLetter.)
+export function isValidIdentifier(name: string): boolean {
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) return false;
+  return !textToKeyword.has(name);
+}
+
 // Text -> kind for every reserved word (and the reserved literals true/false/null).
 // Contextual keywords (var, yield, record, sealed, ...) are intentionally absent:
 // they are scanned as identifiers and recognized positionally by the parser.

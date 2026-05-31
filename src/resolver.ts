@@ -320,15 +320,25 @@ function candidateUris(symbol: Symbol, program: Program): string[] {
   return program.getAllUris();
 }
 
-/** All identifier nodes (uses and declaration names) that refer to a symbol. */
-export function findReferences(symbol: Symbol, program: Program): Node[] {
+/**
+ * All identifier nodes (uses and declaration names) that refer to a symbol.
+ *
+ * `resolve` maps an identifier to its symbol. The default resolves lexical names
+ * only; pass the checker's resolveName to also match member accesses (a.field),
+ * which is required for a correct rename of fields and methods.
+ */
+export function findReferences(
+  symbol: Symbol,
+  program: Program,
+  resolve: (id: Identifier) => Symbol | undefined = id => resolveIdentifier(id, program),
+): Node[] {
   const result: Node[] = [];
   for (const uri of candidateUris(symbol, program)) {
     const sourceFile = program.getSourceFile(uri);
     if (!sourceFile) continue;
     forEachDescendant(sourceFile, node => {
       if (node.kind !== SyntaxKind.Identifier) return;
-      if (resolveIdentifier(node as Identifier, program) === symbol) result.push(node);
+      if (resolve(node as Identifier) === symbol) result.push(node);
     });
   }
   return result;

@@ -12,10 +12,13 @@ import {
   DiagnosticSeverity,
   type DocumentSymbol,
   type Hover,
+  ErrorCodes,
   type InitializeParams,
   type InitializeResult,
   type Location,
   MarkupKind,
+  type Range,
+  ResponseError,
   type TextEdit,
   TextDocuments,
   TextDocumentSyncKind,
@@ -41,9 +44,10 @@ import {
   type Identifier,
   type Node,
   type SourceFile,
+  type Symbol,
 } from "./types.ts";
 import { getHoverText } from "./hover.ts";
-import { skipTrivia } from "./utilities.ts";
+import { isValidIdentifier, skipTrivia } from "./utilities.ts";
 import { loadJavaFiles, uriToPath } from "./workspace.ts";
 
 // Communicate over stdio (the standard transport for editor language clients).
@@ -75,7 +79,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       referencesProvider: true,
       hoverProvider: true,
       completionProvider: { triggerCharacters: ["."] },
-      renameProvider: true,
+      renameProvider: { prepareProvider: true },
     },
   };
 });
@@ -135,19 +139,26 @@ connection.onDocumentSymbol((params): DocumentSymbol[] => {
   return getDocumentSymbols(sourceFile, computeLineStarts(sourceFile.text));
 });
 
-function locationOf(node: Node): Location {
+function rangeOf(node: Node): Range {
   const file = getSourceFileOfNode(node);
   const lineStarts = computeLineStarts(file.text);
   // node.pos includes leading trivia; advance to the token's real start so the
   // highlighted range covers only the symbol name.
   const start = skipTrivia(file.text, node.pos);
   return {
-    uri: file.fileName,
-    range: {
-      start: getLineAndCharacterOfPosition(lineStarts, start),
-      end: getLineAndCharacterOfPosition(lineStarts, node.end),
-    },
+    start: getLineAndCharacterOfPosition(lineStarts, start),
+    end: getLineAndCharacterOfPosition(lineStarts, node.end),
   };
+}
+
+function locationOf(node: Node): Location {
+  return { uri: getSourceFileOfNode(node).fileName, range: rangeOf(node) };
+}
+
+// A symbol declared in the synthetic JDK stub cannot be edited.
+function isStubSymbol(symbol: Symbol): boolean {
+  const declaration = getDeclarationNameNode(symbol);
+  return !!declaration && getSourceFileOfNode(declaration).fileName.startsWith("jdk:///");
 }
 
 function identifierAt(
@@ -169,7 +180,17 @@ connection.onReferences((params): Location[] | null => {
   if (!identifier) return null;
   const symbol = checker.resolveName(identifier);
   if (!symbol) return null;
-  return findReferences(symbol, program).map(locationOf);
+  return findReferences(symbol, program, checker.resolveName).map(locationOf);
+});
+
+// Validate the cursor position before the editor shows its rename box: returns
+// the identifier range if it names a renameable (non-JDK) symbol, else null.
+connection.onPrepareRename((params): Range | null => {
+  const identifier = identifierAt(params.textDocument.uri, params.position);
+  if (!identifier) return null;
+  const symbol = checker.resolveName(identifier);
+  if (!symbol || isStubSymbol(symbol)) return null;
+  return rangeOf(identifier);
 });
 
 connection.onRenameRequest((params): WorkspaceEdit | null => {
@@ -177,8 +198,22 @@ connection.onRenameRequest((params): WorkspaceEdit | null => {
   if (!identifier) return null;
   const symbol = checker.resolveName(identifier);
   if (!symbol) return null;
+  if (isStubSymbol(symbol)) {
+    throw new ResponseError(
+      ErrorCodes.InvalidRequest,
+      "Cannot rename a symbol defined by the JDK.",
+    );
+  }
+  if (!isValidIdentifier(params.newName)) {
+    throw new ResponseError(
+      ErrorCodes.InvalidParams,
+      `'${params.newName}' is not a valid Java identifier.`,
+    );
+  }
+  // resolveName also matches member accesses (a.field), so field/method uses
+  // across the workspace are renamed, not just lexical occurrences.
   const changes: Record<string, TextEdit[]> = {};
-  for (const node of findReferences(symbol, program)) {
+  for (const node of findReferences(symbol, program, checker.resolveName)) {
     const location = locationOf(node);
     (changes[location.uri] ??= []).push({ range: location.range, newText: params.newName });
   }

@@ -2,8 +2,19 @@ import { test } from "node:test";
 import { expect } from "expect";
 
 import { forEachChild, parseSourceFile } from "./parser.ts";
-import { skipTrivia } from "./utilities.ts";
+import { isValidIdentifier, skipTrivia } from "./utilities.ts";
 import { type Identifier, type Node, SyntaxKind } from "./types.ts";
+
+test("isValidIdentifier accepts names and rejects keywords/garbage", () => {
+  expect(isValidIdentifier("foo")).toBe(true);
+  expect(isValidIdentifier("_x$2")).toBe(true);
+  expect(isValidIdentifier("$")).toBe(true);
+  expect(isValidIdentifier("2foo")).toBe(false); // leading digit
+  expect(isValidIdentifier("a b")).toBe(false); // space
+  expect(isValidIdentifier("")).toBe(false);
+  expect(isValidIdentifier("class")).toBe(false); // reserved keyword
+  expect(isValidIdentifier("true")).toBe(false); // reserved literal
+});
 
 test("skipTrivia advances over whitespace and line breaks", () => {
   expect(skipTrivia("   x", 0)).toBe(3);
