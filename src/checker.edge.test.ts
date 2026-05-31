@@ -92,10 +92,10 @@ test("inherited generic member call return type (graceful type variable)", () =>
   expect(t.startsWith("Iterator")).toBe(true);
 });
 
-test("generic method return is the (uninferred) type variable", () => {
+test("generic method return is inferred from the argument (T = Integer)", () => {
   expect(
     initType("class C { <T> T id(T arg) { return arg; } void m() { var zz = id(1); } }", ""),
-  ).toBe("T");
+  ).toBe("Integer");
 });
 
 test("member access chain types through fields", () => {

@@ -143,6 +143,106 @@ export function createChecker(program: Program): Checker {
     return symbol ? classType(symbol) : errorType;
   }
 
+  // --- type-variable substitution (JLS 4.5, 18) --------------------------------------
+
+  function declarationOf(symbol: Symbol): Node | undefined {
+    return symbol.valueDeclaration ?? symbol.declarations?.[0];
+  }
+
+  // The type-parameter symbols a generic class/interface declares, in order.
+  function classTypeParameters(symbol: Symbol): Symbol[] {
+    const declaration = declarationOf(symbol) as
+      | { typeParameters?: readonly { symbol?: Symbol }[] }
+      | undefined;
+    const out: Symbol[] = [];
+    for (const tp of declaration?.typeParameters ?? []) if (tp.symbol) out.push(tp.symbol);
+    return out;
+  }
+
+  // Map a generic type's parameters to the arguments it was instantiated with.
+  function substitutionFor(symbol: Symbol, args: readonly Type[]): Map<Symbol, Type> {
+    const params = classTypeParameters(symbol);
+    const map = new Map<Symbol, Type>();
+    params.forEach((p, i) => {
+      if (i < args.length) map.set(p, args[i]!);
+    });
+    return map;
+  }
+
+  // Replace type variables in `type` according to `map` (identity if empty).
+  function substitute(type: Type, map: Map<Symbol, Type>): Type {
+    if (map.size === 0) return type;
+    switch (type.kind) {
+      case TypeKind.TypeVariable:
+        return map.get(type.symbol) ?? type;
+      case TypeKind.Class:
+        return type.typeArguments.length === 0
+          ? type
+          : classType(
+              type.symbol,
+              type.typeArguments.map(a => substitute(a, map)),
+            );
+      case TypeKind.Array:
+        return arrayType(substitute(type.elementType, map));
+      case TypeKind.Wildcard:
+        return type.bound ? { ...type, bound: substitute(type.bound, map) } : type;
+      case TypeKind.Intersection:
+        return { kind: TypeKind.Intersection, types: type.types.map(t => substitute(t, map)) };
+      default:
+        return type;
+    }
+  }
+
+  // Direct super-type references of a type declaration (class extends/implements,
+  // interface extends, enum/record implements). Read generically to avoid
+  // importing every declaration interface.
+  function superTypeNodesOf(declaration: Node): TypeNode[] {
+    const d = declaration as {
+      extendsType?: TypeNode;
+      extendsTypes?: readonly TypeNode[];
+      implementsTypes?: readonly TypeNode[];
+    };
+    const out: TypeNode[] = [];
+    if (d.extendsType) out.push(d.extendsType);
+    if (d.extendsTypes) out.push(...d.extendsTypes);
+    if (d.implementsTypes) out.push(...d.implementsTypes);
+    return out;
+  }
+
+  interface TypedMember {
+    readonly symbol: Symbol;
+    // Substitution that maps the declaring type's parameters to concrete arguments.
+    readonly subst: Map<Symbol, Type>;
+  }
+
+  // Member lookup that also yields the substitution to apply to the member's
+  // declared type, threading type arguments through the inheritance chain so that
+  // e.g. ArrayList<String>.iterator() resolves Iterator<E> to Iterator<String>.
+  function lookupTypedMember(
+    receiver: ClassType,
+    name: string,
+    seen = new Set<Symbol>(),
+  ): TypedMember | undefined {
+    const symbol = receiver.symbol;
+    if (seen.has(symbol)) return undefined;
+    seen.add(symbol);
+    const subst = substitutionFor(symbol, receiver.typeArguments);
+    const own = symbol.members?.get(name);
+    if (own) return { symbol: own, subst };
+    const declaration = declarationOf(symbol);
+    if (declaration) {
+      for (const typeNode of superTypeNodesOf(declaration)) {
+        if (typeNode.kind !== SyntaxKind.TypeReference) continue;
+        const superType = substitute(resolveType(typeNode, declaration), subst);
+        if (superType.kind === TypeKind.Class) {
+          const found = lookupTypedMember(superType as ClassType, name, seen);
+          if (found) return found;
+        }
+      }
+    }
+    return undefined;
+  }
+
   function resolveType(typeNode: TypeNode, fromNode: Node): Type {
     switch (typeNode.kind) {
       case SyntaxKind.PrimitiveType:
@@ -208,10 +308,84 @@ export function createChecker(program: Program): Checker {
       type = symbol.parent ? classType(symbol.parent) : errorType;
     } else {
       const declared = declaredTypeNodeOf(symbol);
-      if (declared) type = resolveType(declared.typeNode, declared.from);
+      if (declared) {
+        if (declared.typeNode.kind === SyntaxKind.VarType) {
+          // Break cycles like `var x = x;` while inferring from the initializer.
+          symbolTypes.set(symbol, errorType);
+          type = inferVarType(declared.from);
+        } else {
+          type = resolveType(declared.typeNode, declared.from);
+        }
+      }
     }
     symbolTypes.set(symbol, type);
     return type;
+  }
+
+  // Infer the type of a `var` declaration: from the initializer for a local, or
+  // from the iterable's element type for an enhanced-for variable.
+  function inferVarType(declaration: Node): Type {
+    if (declaration.kind === SyntaxKind.VariableDeclarator) {
+      const init = (declaration as VariableDeclarator).initializer;
+      return init ? getTypeOfExpression(init) : errorType;
+    }
+    if (
+      declaration.kind === SyntaxKind.Parameter &&
+      declaration.parent.kind === SyntaxKind.ForEachStatement
+    ) {
+      const iterable = getTypeOfExpression(
+        (declaration.parent as unknown as { expression: Node }).expression,
+      );
+      return elementTypeOf(iterable);
+    }
+    return errorType;
+  }
+
+  // The element type of an array, or the E of Iterable<E> (threading type
+  // arguments through the inheritance chain), else errorType.
+  function elementTypeOf(iterable: Type): Type {
+    if (iterable.kind === TypeKind.Array) return iterable.elementType;
+    if (iterable.kind === TypeKind.Class) {
+      const iterableSymbol = program.getGlobalIndex().getType("java.lang.Iterable");
+      if (iterableSymbol) {
+        const instance = asInstanceOf(iterable as ClassType, iterableSymbol);
+        if (instance && instance.typeArguments.length > 0) return instance.typeArguments[0]!;
+      }
+    }
+    return errorType;
+  }
+
+  // The instantiation of `targetSymbol` that `receiver` is a subtype of, with
+  // type arguments substituted along the way (e.g. how ArrayList<String> sees
+  // Iterable<String>), or undefined if `receiver` is not such a subtype.
+  function asInstanceOf(
+    receiver: ClassType,
+    targetSymbol: Symbol,
+    seen = new Set<Symbol>(),
+  ): ClassType | undefined {
+    if (receiver.symbol === targetSymbol) return receiver;
+    if (seen.has(receiver.symbol)) return undefined;
+    seen.add(receiver.symbol);
+    const declaration = declarationOf(receiver.symbol);
+    if (!declaration) return undefined;
+    const subst = substitutionFor(receiver.symbol, receiver.typeArguments);
+    for (const typeNode of superTypeNodesOf(declaration)) {
+      if (typeNode.kind !== SyntaxKind.TypeReference) continue;
+      const superType = substitute(resolveType(typeNode, declaration), subst);
+      if (superType.kind === TypeKind.Class) {
+        const found = asInstanceOf(superType as ClassType, targetSymbol, seen);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  }
+
+  function typeOfMemberAccess(access: PropertyAccessExpression): Type {
+    const receiver = getTypeOfExpression(access.expression);
+    if (receiver.kind !== TypeKind.Class) return errorType;
+    const found = lookupTypedMember(receiver as ClassType, access.name.text);
+    if (!found) return errorType;
+    return substitute(getTypeOfSymbol(found.symbol), found.subst);
   }
 
   function resolveMemberAccess(access: PropertyAccessExpression): Symbol | undefined {
@@ -292,14 +466,10 @@ export function createChecker(program: Program): Checker {
         return getTypeOfExpression((node as ParenthesizedExpression).expression);
       case SyntaxKind.CastExpression:
         return resolveType((node as CastExpression).type, node);
-      case SyntaxKind.PropertyAccessExpression: {
-        const symbol = resolveMemberAccess(node as PropertyAccessExpression);
-        return symbol ? getTypeOfSymbol(symbol) : errorType;
-      }
-      case SyntaxKind.CallExpression: {
-        const decl = resolveCall(node as CallExpression);
-        return decl ? resolveType(decl.returnType, decl) : errorType;
-      }
+      case SyntaxKind.PropertyAccessExpression:
+        return typeOfMemberAccess(node as PropertyAccessExpression);
+      case SyntaxKind.CallExpression:
+        return typeOfCall(node as CallExpression);
       case SyntaxKind.ObjectCreationExpression:
         return resolveType((node as ObjectCreationExpression).type, node);
       case SyntaxKind.ArrayCreationExpression: {
@@ -541,21 +711,121 @@ export function createChecker(program: Program): Checker {
     return decls[0]!;
   }
 
-  function resolveCall(call: CallExpression): MethodDeclaration | undefined {
+  interface CallInfo {
+    readonly decl: MethodDeclaration;
+    // Substitution from the receiver's type arguments (for instance calls).
+    readonly receiverSubst: Map<Symbol, Type>;
+  }
+
+  function resolveCallInfo(call: CallExpression): CallInfo | undefined {
     const callee = call.expression;
     let symbol: Symbol | undefined;
-    if (callee.kind === SyntaxKind.Identifier)
+    let receiverSubst = new Map<Symbol, Type>();
+    if (callee.kind === SyntaxKind.Identifier) {
       symbol = resolveIdentifier(callee as Identifier, program);
-    else if (callee.kind === SyntaxKind.PropertyAccessExpression) {
-      symbol = resolveMemberAccess(callee as PropertyAccessExpression);
+    } else if (callee.kind === SyntaxKind.PropertyAccessExpression) {
+      const access = callee as PropertyAccessExpression;
+      const receiver = getTypeOfExpression(access.expression);
+      if (receiver.kind === TypeKind.Class) {
+        const found = lookupTypedMember(receiver as ClassType, access.name.text);
+        if (found) {
+          symbol = found.symbol;
+          receiverSubst = found.subst;
+        }
+      } else {
+        symbol = resolveMemberAccess(access);
+      }
     }
     if (!symbol) return undefined;
     const decls = (symbol.declarations ?? []).filter(
       d => d.kind === SyntaxKind.MethodDeclaration,
     ) as MethodDeclaration[];
     if (decls.length === 0) return undefined;
-    if (decls.length === 1) return decls[0];
-    return chooseOverload(decls, call.arguments.map(getTypeOfExpression));
+    const decl =
+      decls.length === 1
+        ? decls[0]!
+        : chooseOverload(decls, call.arguments.map(getTypeOfExpression));
+    return { decl, receiverSubst };
+  }
+
+  function resolveCall(call: CallExpression): MethodDeclaration | undefined {
+    return resolveCallInfo(call)?.decl;
+  }
+
+  // The method type-parameter symbols a generic method declares (its own <T>).
+  function methodTypeParameters(decl: MethodDeclaration): Set<Symbol> {
+    const out = new Set<Symbol>();
+    for (const tp of decl.typeParameters ?? []) if (tp.symbol) out.add(tp.symbol);
+    return out;
+  }
+
+  // A primitive argument can never bind a type variable (those are reference
+  // types), so box it - id(1) infers T = Integer, matching JLS 18.
+  function boxIfPrimitive(type: Type): Type {
+    if (type.kind === TypeKind.Primitive) {
+      const boxed = BOX[type.name];
+      if (boxed) return classTypeByFqn(boxed);
+    }
+    return type;
+  }
+
+  // Collect bindings for `vars` by matching a parameter type against an argument
+  // type (JLS 18, pragmatic): first binding wins, gaps stay unbound.
+  function unify(param: Type, arg: Type, vars: Set<Symbol>, out: Map<Symbol, Type>): void {
+    switch (param.kind) {
+      case TypeKind.TypeVariable:
+        if (
+          vars.has(param.symbol) &&
+          !out.has(param.symbol) &&
+          !isError(arg) &&
+          arg.kind !== TypeKind.Null
+        ) {
+          out.set(param.symbol, arg);
+        }
+        return;
+      case TypeKind.Class:
+        if (arg.kind === TypeKind.Class && param.symbol === arg.symbol) {
+          param.typeArguments.forEach((pa, i) =>
+            unify(pa, arg.typeArguments[i] ?? errorType, vars, out),
+          );
+        }
+        return;
+      case TypeKind.Array:
+        if (arg.kind === TypeKind.Array) unify(param.elementType, arg.elementType, vars, out);
+        return;
+      default:
+        return;
+    }
+  }
+
+  function inferMethodTypeArguments(
+    decl: MethodDeclaration,
+    argTypes: Type[],
+    receiverSubst: Map<Symbol, Type>,
+    vars: Set<Symbol>,
+  ): Map<Symbol, Type> {
+    const out = new Map<Symbol, Type>();
+    decl.parameters.forEach((p, i) => {
+      if (i >= argTypes.length) return;
+      const paramType = substitute(resolveType(p.type, decl), receiverSubst);
+      unify(paramType, boxIfPrimitive(argTypes[i]!), vars, out);
+    });
+    return out;
+  }
+
+  function typeOfCall(call: CallExpression): Type {
+    const info = resolveCallInfo(call);
+    if (!info) return errorType;
+    let returnType = substitute(resolveType(info.decl.returnType, info.decl), info.receiverSubst);
+    const vars = methodTypeParameters(info.decl);
+    if (vars.size > 0) {
+      const argTypes = call.arguments.map(getTypeOfExpression);
+      returnType = substitute(
+        returnType,
+        inferMethodTypeArguments(info.decl, argTypes, info.receiverSubst, vars),
+      );
+    }
+    return returnType;
   }
 
   // --- semantic diagnostics ----------------------------------------------------------
