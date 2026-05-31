@@ -42,12 +42,15 @@ import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
 import { createProgram } from "./program.ts";
 import { findReferences, getDeclarationNameNode, getSourceFileOfNode } from "./resolver.ts";
 import {
+  type CallExpression,
   DiagnosticCategory,
   type Diagnostic as JavaDiagnostic,
   type Identifier,
   type Node,
+  type PropertyAccessExpression,
   type SourceFile,
   type Symbol,
+  SyntaxKind,
 } from "./types.ts";
 import { getHoverText } from "./hover.ts";
 import { isValidIdentifier, skipTrivia } from "./utilities.ts";
@@ -275,17 +278,46 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
   }));
 });
 
+// The call expression whose callee is this method-name identifier, so hover can
+// show the specific overload rather than the first declaration.
+function enclosingCall(identifier: Identifier): CallExpression | undefined {
+  const parent = identifier.parent;
+  if (
+    parent.kind === SyntaxKind.CallExpression &&
+    (parent as CallExpression).expression === identifier
+  ) {
+    return parent as CallExpression;
+  }
+  if (
+    parent.kind === SyntaxKind.PropertyAccessExpression &&
+    (parent as PropertyAccessExpression).name === identifier &&
+    parent.parent.kind === SyntaxKind.CallExpression &&
+    (parent.parent as CallExpression).expression === parent
+  ) {
+    return parent.parent as CallExpression;
+  }
+  return undefined;
+}
+
 connection.onHover((params): Hover | null => {
   const identifier = identifierAt(params.textDocument.uri, params.position);
   if (!identifier) return null;
   const symbol = checker.resolveName(identifier);
   if (!symbol) return null;
-  return {
-    contents: {
-      kind: MarkupKind.Markdown,
-      value: "```java\n" + getHoverText(checker, symbol) + "\n```",
-    },
-  };
+
+  // For a method call, prefer the resolved overload's signature and Javadoc.
+  const call = enclosingCall(identifier);
+  const overload = call ? checker.resolveCall(call) : undefined;
+  const text = overload
+    ? (checker.signatureOfDeclaration(overload) ?? getHoverText(checker, symbol))
+    : getHoverText(checker, symbol);
+  const doc = overload
+    ? checker.getDocumentationOfNode(overload)
+    : checker.getDocumentation(symbol);
+
+  let value = "```java\n" + text + "\n```";
+  if (doc) value += "\n\n" + doc;
+  return { contents: { kind: MarkupKind.Markdown, value } };
 });
 
 documents.listen(connection);

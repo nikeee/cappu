@@ -1,17 +1,17 @@
 === count ===
-  field count: int
+  (field) int count
 === local ===
-  variable local: int
+  (local variable) int local
 === total ===
-  method total: int
+  int total()
 === paramDecl ===
-  parameter arg: String
+  (parameter) String arg
 === paramUse ===
-  parameter arg: String
+  (parameter) String arg
 === Tref ===
-  type parameter T
+  (type parameter) T
 === valueField ===
-  field value: T
+  (field) T value
 === Container ===
   class Container
 === Shape ===
@@ -19,7 +19,7 @@
 === Color ===
   enum Color
 === RED ===
-  enum constant RED: Color
+  (enum constant) Color RED
 === Point ===
   record Point
 === List ===

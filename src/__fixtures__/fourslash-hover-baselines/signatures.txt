@@ -1,0 +1,8 @@
+=== area ===
+  double area(Object s)
+=== r ===
+  (local variable) double r
+=== pick ===
+  <T> T pick(T x, T y) throws Exception
+=== plain ===
+  int plain(int a, int b)

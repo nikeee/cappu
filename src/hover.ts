@@ -16,15 +16,35 @@ export function symbolKindWord(flags: SymbolFlags): string {
   if (flags & SymbolFlags.EnumConstant) return "enum constant";
   if (flags & SymbolFlags.Parameter) return "parameter";
   if (flags & SymbolFlags.TypeParameter) return "type parameter";
-  if (flags & SymbolFlags.LocalVariable) return "variable";
+  if (flags & SymbolFlags.LocalVariable) return "local variable";
   return "symbol";
 }
 
-/** One-line hover label, e.g. "variable x: String" or "class Foo". */
+const TYPE_FLAGS =
+  SymbolFlags.Class |
+  SymbolFlags.Interface |
+  SymbolFlags.Enum |
+  SymbolFlags.Record |
+  SymbolFlags.Annotation;
+
+/**
+ * One-line hover label, in the style of the C#/Roslyn language service:
+ *   methods  -> the full signature            e.g.  int add(int a, int b)
+ *   types    -> keyword + name                e.g.  class Foo
+ *   values   -> (kind) type name              e.g.  (field) int count
+ *   type var -> (type parameter) name         e.g.  (type parameter) T
+ */
 export function getHoverText(checker: Checker, symbol: Symbol): string {
+  if (symbol.flags & (SymbolFlags.Method | SymbolFlags.Constructor)) {
+    const signature = checker.signatureOfSymbol(symbol);
+    if (signature) return signature;
+  }
   const word = symbolKindWord(symbol.flags);
-  if (symbol.flags & SymbolFlags.Type) {
+  if (symbol.flags & TYPE_FLAGS) {
     return `${word} ${symbol.escapedName}`;
   }
-  return `${word} ${symbol.escapedName}: ${checker.typeStringOfSymbol(symbol)}`;
+  if (symbol.flags & SymbolFlags.TypeParameter) {
+    return `(${word}) ${symbol.escapedName}`;
+  }
+  return `(${word}) ${checker.typeStringOfSymbol(symbol)} ${symbol.escapedName}`;
 }

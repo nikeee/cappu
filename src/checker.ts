@@ -79,6 +79,18 @@ export interface Checker {
    * stub) instead of rendering the unhelpful "<error>".
    */
   typeStringOfSymbol(symbol: Symbol): string;
+  /** Full signature of a method/constructor symbol (for hover), or undefined. */
+  signatureOfSymbol(symbol: Symbol): string | undefined;
+  /** Signature of a specific method/constructor declaration (e.g. a chosen overload). */
+  signatureOfDeclaration(declaration: Node): string | undefined;
+  /**
+   * The Javadoc comment attached to a symbol's declaration, cleaned to plain
+   * text, or undefined. Parsed lazily from the source on demand (not retained on
+   * nodes), so it costs nothing until a hover asks for it.
+   */
+  getDocumentation(symbol: Symbol): string | undefined;
+  /** The Javadoc comment attached to a specific declaration node. */
+  getDocumentationOfNode(node: Node): string | undefined;
   /** High-precision semantic diagnostics (type mismatches between known types). */
   getSemanticDiagnostics(sourceFile: SourceFile): Diagnostic[];
 }
@@ -330,7 +342,9 @@ export function createChecker(program: Program): Checker {
         return parent.type ? { typeNode: parent.type, from: declaration } : undefined;
       }
       case SyntaxKind.Parameter:
-      case SyntaxKind.RecordComponent: {
+      case SyntaxKind.RecordComponent:
+      case SyntaxKind.TypePattern: {
+        // TypePattern: a pattern binding variable, e.g. `case Circle(double r)`.
         const t = (declaration as { type?: TypeNode }).type;
         return t ? { typeNode: t, from: declaration } : undefined;
       }
@@ -435,7 +449,10 @@ export function createChecker(program: Program): Checker {
   }
 
   function nodeSourceText(node: Node): string {
-    return getSourceFileOfNode(node).text.slice(node.pos, node.end).trim().replace(/\s+/g, " ");
+    const text = getSourceFileOfNode(node).text;
+    // Start at the token, not node.pos, which includes leading trivia (e.g. a
+    // Javadoc comment before the return type would otherwise be captured).
+    return text.slice(skipTrivia(text, node.pos), node.end).trim().replace(/\s+/g, " ");
   }
 
   function typeStringOfSymbol(symbol: Symbol): string {
@@ -454,6 +471,58 @@ export function createChecker(program: Program): Checker {
     if (!isError(type)) return typeToString(type);
     if (declared && declared.typeNode.kind === SyntaxKind.VarType) return "var";
     return typeToString(type);
+  }
+
+  function signatureOfSymbol(symbol: Symbol): string | undefined {
+    const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+    return declaration ? signatureOfDeclaration(declaration) : undefined;
+  }
+
+  function signatureOfDeclaration(declaration: Node): string | undefined {
+    if (
+      declaration.kind !== SyntaxKind.MethodDeclaration &&
+      declaration.kind !== SyntaxKind.ConstructorDeclaration
+    ) {
+      return undefined;
+    }
+    const m = declaration as MethodDeclaration;
+    const parts: string[] = [];
+    if (m.typeParameters && m.typeParameters.length > 0) {
+      parts.push(`<${m.typeParameters.map(nodeSourceText).join(", ")}>`);
+    }
+    if (declaration.kind === SyntaxKind.MethodDeclaration) parts.push(nodeSourceText(m.returnType));
+    const params = m.parameters.map(nodeSourceText).join(", ");
+    let signature = `${parts.join(" ")}${parts.length > 0 ? " " : ""}${m.name.text}(${params})`;
+    if (m.throws && m.throws.length > 0) {
+      signature += ` throws ${m.throws.map(nodeSourceText).join(", ")}`;
+    }
+    return signature;
+  }
+
+  // Clean a raw `/** ... */` block to plain text: drop the delimiters and the
+  // leading "* " on each line, collapse the blank edges.
+  function cleanJavadoc(raw: string): string {
+    const body = raw.slice(3, -2); // strip "/**" and "*/"
+    return body
+      .split("\n")
+      .map(line => line.replace(/^\s*\*? ?/, "").trimEnd())
+      .join("\n")
+      .trim();
+  }
+
+  function getDocumentationOfNode(node: Node): string | undefined {
+    const text = getSourceFileOfNode(node).text;
+    // The doc comment sits in the declaration's leading trivia: [pos, tokenStart).
+    const leading = text.slice(node.pos, skipTrivia(text, node.pos));
+    const blocks = leading.match(/\/\*\*[\s\S]*?\*\//g);
+    if (!blocks) return undefined;
+    const doc = cleanJavadoc(blocks[blocks.length - 1]!); // nearest to the declaration
+    return doc.length > 0 ? doc : undefined;
+  }
+
+  function getDocumentation(symbol: Symbol): string | undefined {
+    const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+    return declaration ? getDocumentationOfNode(declaration) : undefined;
   }
 
   function resolveMemberAccess(access: PropertyAccessExpression): Symbol | undefined {
@@ -1137,6 +1206,10 @@ export function createChecker(program: Program): Checker {
     isAssignableTo,
     resolveCall,
     typeStringOfSymbol,
+    signatureOfSymbol,
+    signatureOfDeclaration,
+    getDocumentation,
+    getDocumentationOfNode,
     getSemanticDiagnostics,
   };
 }

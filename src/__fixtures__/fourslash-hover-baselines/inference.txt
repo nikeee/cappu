@@ -1,16 +1,16 @@
 === mapField ===
-  field registry: Map<String, List<Integer>>
+  (field) Map<String, List<Integer>> registry
 === s ===
-  variable s: String
+  (local variable) String s
 === n ===
-  variable n: int
+  (local variable) int n
 === b ===
-  variable b: boolean
+  (local variable) boolean b
 === item ===
-  parameter item: String
+  (parameter) String item
 === itemUse ===
-  parameter item: String
+  (parameter) String item
 === elem ===
-  parameter elem: String
+  (parameter) String elem
 === elemUse ===
-  parameter elem: String
+  (parameter) String elem

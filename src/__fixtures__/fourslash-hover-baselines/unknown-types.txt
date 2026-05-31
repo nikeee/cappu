@@ -1,12 +1,12 @@
 === today ===
-  field today: LocalDate
+  (field) LocalDate today
 === dates ===
-  field dates: List<LocalDate>
+  (field) List<LocalDate> dates
 === u ===
-  field u: Unknown
+  (field) Unknown u
 === path ===
-  field path: java.nio.file.Path
+  (field) java.nio.file.Path path
 === whenDecl ===
-  parameter when: LocalDate
+  (parameter) LocalDate when
 === whenUse ===
-  parameter when: LocalDate
+  (parameter) LocalDate when
