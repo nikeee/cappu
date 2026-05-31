@@ -59,6 +59,8 @@ export interface Checker {
   resolveName(identifier: Identifier): Symbol | undefined;
   /** JLS assignment conversion: can a value of `source` be assigned to `target`? */
   isAssignableTo(source: Type, target: Type): boolean;
+  /** The chosen overload for a call (JLS 15.12.2), or undefined if unresolved. */
+  resolveCall(call: CallExpression): MethodDeclaration | undefined;
 }
 
 // Primitive widening (JLS 5.1.2) and boxing (JLS 5.1.7).
@@ -285,14 +287,8 @@ export function createChecker(program: Program): Checker {
         return symbol ? getTypeOfSymbol(symbol) : errorType;
       }
       case SyntaxKind.CallExpression: {
-        const callee = (node as CallExpression).expression;
-        let methodSymbol: Symbol | undefined;
-        if (callee.kind === SyntaxKind.Identifier) {
-          methodSymbol = resolveIdentifier(callee as Identifier, program);
-        } else if (callee.kind === SyntaxKind.PropertyAccessExpression) {
-          methodSymbol = resolveMemberAccess(callee as PropertyAccessExpression);
-        }
-        return methodSymbol ? getTypeOfSymbol(methodSymbol) : errorType;
+        const decl = resolveCall(node as CallExpression);
+        return decl ? resolveType(decl.returnType, decl) : errorType;
       }
       case SyntaxKind.ObjectCreationExpression:
         return resolveType((node as ObjectCreationExpression).type, node);
@@ -397,13 +393,14 @@ export function createChecker(program: Program): Checker {
     });
   }
 
-  function isAssignableToClass(source: Type, target: ClassType): boolean {
+  function isAssignableToClass(source: Type, target: ClassType, allowBoxing: boolean): boolean {
     switch (source.kind) {
       case TypeKind.Null:
         return true;
       case TypeKind.Primitive: {
+        if (!allowBoxing) return false;
         const boxed = BOX[source.name];
-        return boxed ? isAssignableToClass(classTypeByFqn(boxed), target) : false;
+        return boxed ? isAssignableToClass(classTypeByFqn(boxed), target, true) : false;
       }
       case TypeKind.Class:
         if (source.symbol === target.symbol) {
@@ -419,10 +416,14 @@ export function createChecker(program: Program): Checker {
     }
   }
 
-  function isAssignableToPrimitive(source: Type, target: { name: string }): boolean {
+  function isAssignableToPrimitive(
+    source: Type,
+    target: { name: string },
+    allowBoxing: boolean,
+  ): boolean {
     if (source.kind === TypeKind.Primitive) return primitiveWidens(source.name, target.name);
     // unboxing then widening (Integer -> int -> long)
-    if (source.kind === TypeKind.Class) {
+    if (allowBoxing && source.kind === TypeKind.Class) {
       const unboxed = UNBOX[fqnOf(source)];
       if (unboxed) return primitiveWidens(unboxed, target.name);
     }
@@ -439,14 +440,14 @@ export function createChecker(program: Program): Checker {
     return parts.join(".");
   }
 
-  function isAssignableTo(source: Type, target: Type): boolean {
+  function isAssignableTo(source: Type, target: Type, allowBoxing = true): boolean {
     if (isError(source) || isError(target)) return true; // degrade, never a false error
     if (source === target) return true;
     switch (target.kind) {
       case TypeKind.Primitive:
-        return isAssignableToPrimitive(source, target);
+        return isAssignableToPrimitive(source, target, allowBoxing);
       case TypeKind.Class:
-        return isAssignableToClass(source, target);
+        return isAssignableToClass(source, target, allowBoxing);
       case TypeKind.Array:
         if (source.kind === TypeKind.Null) return true;
         if (source.kind !== TypeKind.Array) return false;
@@ -465,5 +466,94 @@ export function createChecker(program: Program): Checker {
     }
   }
 
-  return { resolveType, getTypeOfSymbol, getTypeOfExpression, resolveName, isAssignableTo };
+  // --- overload resolution (JLS 15.12.2) ---------------------------------------------
+
+  interface ParamInfo {
+    type: Type;
+    isVarArgs: boolean;
+  }
+
+  function methodParams(decl: MethodDeclaration): ParamInfo[] {
+    return decl.parameters.map(p => ({
+      type: resolveType(p.type, decl),
+      isVarArgs: !!p.isVarArgs,
+    }));
+  }
+
+  function paramSlotType(p: ParamInfo): Type {
+    return p.isVarArgs ? arrayType(p.type) : p.type;
+  }
+
+  function applicable(
+    params: ParamInfo[],
+    args: Type[],
+    allowBoxing: boolean,
+    varargs: boolean,
+  ): boolean {
+    if (!varargs) {
+      if (params.length !== args.length) return false;
+      return params.every((p, i) => isAssignableTo(args[i]!, paramSlotType(p), allowBoxing));
+    }
+    if (params.length === 0) return false;
+    const last = params[params.length - 1]!;
+    if (!last.isVarArgs) return false;
+    if (args.length < params.length - 1) return false;
+    for (let i = 0; i < params.length - 1; i++) {
+      if (!isAssignableTo(args[i]!, params[i]!.type, true)) return false;
+    }
+    for (let i = params.length - 1; i < args.length; i++) {
+      if (!isAssignableTo(args[i]!, last.type, true)) return false;
+    }
+    return true;
+  }
+
+  function moreSpecific(a: MethodDeclaration, b: MethodDeclaration): boolean {
+    const pa = methodParams(a);
+    const pb = methodParams(b);
+    if (pa.length !== pb.length) return false;
+    return pa.every((p, i) => isAssignableTo(paramSlotType(p), paramSlotType(pb[i]!), true));
+  }
+
+  function chooseOverload(decls: MethodDeclaration[], args: Type[]): MethodDeclaration {
+    const phases: ReadonlyArray<readonly [boolean, boolean]> = [
+      [false, false], // strict
+      [true, false], // boxing
+      [true, true], // varargs
+    ];
+    for (const [allowBoxing, varargs] of phases) {
+      const ok = decls.filter(d => applicable(methodParams(d), args, allowBoxing, varargs));
+      if (ok.length > 0) {
+        let best = ok[0]!;
+        for (const d of ok.slice(1)) if (moreSpecific(d, best)) best = d;
+        return best;
+      }
+    }
+    return decls[0]!;
+  }
+
+  function resolveCall(call: CallExpression): MethodDeclaration | undefined {
+    const callee = call.expression;
+    let symbol: Symbol | undefined;
+    if (callee.kind === SyntaxKind.Identifier)
+      symbol = resolveIdentifier(callee as Identifier, program);
+    else if (callee.kind === SyntaxKind.PropertyAccessExpression) {
+      symbol = resolveMemberAccess(callee as PropertyAccessExpression);
+    }
+    if (!symbol) return undefined;
+    const decls = (symbol.declarations ?? []).filter(
+      d => d.kind === SyntaxKind.MethodDeclaration,
+    ) as MethodDeclaration[];
+    if (decls.length === 0) return undefined;
+    if (decls.length === 1) return decls[0];
+    return chooseOverload(decls, call.arguments.map(getTypeOfExpression));
+  }
+
+  return {
+    resolveType,
+    getTypeOfSymbol,
+    getTypeOfExpression,
+    resolveName,
+    isAssignableTo,
+    resolveCall,
+  };
 }

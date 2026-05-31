@@ -117,3 +117,56 @@ test("wildcard variance in type arguments", () => {
   // List<String> -> List<Object> (invariant) is NOT allowed
   expect(ctx.checker.isAssignableTo(t("ls"), t("lo"))).toBe(false);
 });
+
+// P7: overload resolution
+
+test("overload resolution picks the overload matching the argument types", () => {
+  expect(
+    initializerType(
+      'class C { String f(int x){return "";} int f(String s){return 0;} void m(){ var res = f(1); } }',
+      "res",
+    ),
+  ).toBe("String");
+  expect(
+    initializerType(
+      'class C { String f(int x){return "";} int f(String s){return 0;} void m(){ var res = f("s"); } }',
+      "res",
+    ),
+  ).toBe("int");
+});
+
+test("strict phase beats boxing phase", () => {
+  // f(1): the int overload applies strictly; the Integer overload only via boxing
+  expect(
+    initializerType(
+      'class C { int f(int x){return 0;} String f(Integer i){return "";} void m(){ var res = f(1); } }',
+      "res",
+    ),
+  ).toBe("int");
+});
+
+test("varargs overload is used only when no fixed-arity overload applies", () => {
+  expect(
+    initializerType(
+      "class C { int g(int... xs){return 0;} void m(){ var res = g(1, 2, 3); } }",
+      "res",
+    ),
+  ).toBe("int");
+  // a fixed-arity overload wins over varargs for an exact arity match
+  expect(
+    initializerType(
+      'class C { String g(int a){return "";} int g(int... xs){return 0;} void m(){ var res = g(7); } }',
+      "res",
+    ),
+  ).toBe("String");
+});
+
+test("most-specific overload is chosen", () => {
+  // h(String) is more specific than h(Object); "s" matches both, String wins
+  expect(
+    initializerType(
+      'class C { int h(Object o){return 0;} String h(String s){return "";} void m(){ var res = h("s"); } }',
+      "res",
+    ),
+  ).toBe("String");
+});
