@@ -83,12 +83,14 @@ import {
 	type Statement,
 	type SuperExpression,
 	type SwitchClause,
+	type SwitchExpression,
 	type SwitchStatement,
 	type SynchronizedStatement,
 	SyntaxKind,
 	type ThisExpression,
 	type ThrowStatement,
 	type Token,
+	type YieldStatement,
 	type TryStatement,
 	type TypeNode,
 	type TypeParameter,
@@ -1554,6 +1556,8 @@ function parseAtom(): Expression {
 		}
 		case SyntaxKind.NewKeyword:
 			return parseNewExpression();
+		case SyntaxKind.SwitchKeyword:
+			return parseSwitchExpression();
 		case SyntaxKind.Identifier:
 			return parseIdentifier();
 		default:
@@ -1813,6 +1817,15 @@ function parseStatement(): Statement {
 		case SyntaxKind.InterfaceKeyword:
 		case SyntaxKind.EnumKeyword:
 			return parseTypeDeclaration();
+	}
+	// SE14 yield statement (contextual). Only when 'yield' is followed by the
+	// start of an expression and not '(' (so "yield(...)" stays a call to a
+	// method named yield); otherwise 'yield' is an ordinary identifier.
+	if (
+		isContextualKeyword("yield") &&
+		lookAhead(() => (nextToken(), isStartOfExpression() && token() !== SyntaxKind.OpenParenToken))
+	) {
+		return parseYieldStatement();
 	}
 	if (token() === SyntaxKind.Identifier && lookAhead(() => (nextToken(), token() === SyntaxKind.ColonToken))) {
 		return parseLabeledStatement();
@@ -2104,34 +2117,71 @@ function parseTryStatement(): TryStatement {
 	return finishNode(node, pos);
 }
 
+function makeExpressionStatement(expression: Expression): ExpressionStatement {
+	const node = createNode<ExpressionStatement>(SyntaxKind.ExpressionStatement, expression.pos);
+	node.expression = expression;
+	return finishNode(node, expression.pos);
+}
+
 function parseSwitchClause(): SwitchClause {
 	const pos = getNodePos();
 	let isDefault = false;
-	let labelExpression: Expression | undefined;
+	let labels: NodeArray<Expression> | undefined;
 	if (parseOptional(SyntaxKind.CaseKeyword)) {
-		labelExpression = parseExpression();
+		// Case labels are constant expressions; parse at conditional level so a
+		// trailing "-> ..." is the switch arrow, not a lambda.
+		const labelsPos = getNodePos();
+		const list: Expression[] = [parseConditionalExpression()];
+		while (parseOptional(SyntaxKind.CommaToken)) {
+			list.push(parseConditionalExpression());
+		}
+		labels = createNodeArray(list, labelsPos);
 	} else {
 		parseExpected(SyntaxKind.DefaultKeyword);
 		isDefault = true;
 	}
-	parseExpected(SyntaxKind.ColonToken);
 
+	let isArrow = false;
 	const statementsPos = getNodePos();
-	const statements: Statement[] = [];
-	while (
-		token() !== SyntaxKind.CaseKeyword &&
-		token() !== SyntaxKind.DefaultKeyword &&
-		token() !== SyntaxKind.CloseBraceToken &&
-		token() !== SyntaxKind.EndOfFileToken
-	) {
-		if (!isStartOfStatementToken()) break;
-		statements.push(parseStatement());
+	let statements: Statement[];
+	if (parseOptional(SyntaxKind.ArrowToken)) {
+		// SE14 arrow rule: a single block, throw, or expression.
+		isArrow = true;
+		if (token() === SyntaxKind.OpenBraceToken) {
+			statements = [parseBlock()];
+		} else if (token() === SyntaxKind.ThrowKeyword) {
+			statements = [parseThrowStatement()];
+		} else {
+			const expression = parseExpression();
+			parseExpected(SyntaxKind.SemicolonToken);
+			statements = [makeExpressionStatement(expression)];
+		}
+	} else {
+		parseExpected(SyntaxKind.ColonToken);
+		statements = [];
+		while (
+			token() !== SyntaxKind.CaseKeyword &&
+			token() !== SyntaxKind.DefaultKeyword &&
+			token() !== SyntaxKind.CloseBraceToken &&
+			token() !== SyntaxKind.EndOfFileToken
+		) {
+			if (!isStartOfStatementToken()) break;
+			statements.push(parseStatement());
+		}
 	}
 	const node = createNode<SwitchClause>(SyntaxKind.SwitchClause, pos);
 	node.isDefault = isDefault;
-	node.labelExpression = labelExpression;
+	node.isArrow = isArrow;
+	node.labels = labels;
 	node.statements = createNodeArray(statements, statementsPos);
 	return finishNode(node, pos);
+}
+
+function parseSwitchBlock(): NodeArray<SwitchClause> {
+	parseExpected(SyntaxKind.OpenBraceToken);
+	const clauses = parseList(ParsingContext.SwitchClauses, parseSwitchClause);
+	parseExpected(SyntaxKind.CloseBraceToken);
+	return clauses;
 }
 
 function parseSwitchStatement(): SwitchStatement {
@@ -2140,12 +2190,33 @@ function parseSwitchStatement(): SwitchStatement {
 	parseExpected(SyntaxKind.OpenParenToken);
 	const expression = parseExpression();
 	parseExpected(SyntaxKind.CloseParenToken);
-	parseExpected(SyntaxKind.OpenBraceToken);
-	const clauses = parseList(ParsingContext.SwitchClauses, parseSwitchClause);
-	parseExpected(SyntaxKind.CloseBraceToken);
+	const clauses = parseSwitchBlock();
 	const node = createNode<SwitchStatement>(SyntaxKind.SwitchStatement, pos);
 	node.expression = expression;
 	node.clauses = clauses;
+	return finishNode(node, pos);
+}
+
+function parseSwitchExpression(): SwitchExpression {
+	const pos = getNodePos();
+	parseExpected(SyntaxKind.SwitchKeyword);
+	parseExpected(SyntaxKind.OpenParenToken);
+	const expression = parseExpression();
+	parseExpected(SyntaxKind.CloseParenToken);
+	const clauses = parseSwitchBlock();
+	const node = createNode<SwitchExpression>(SyntaxKind.SwitchExpression, pos);
+	node.expression = expression;
+	node.clauses = clauses;
+	return finishNode(node, pos);
+}
+
+function parseYieldStatement(): YieldStatement {
+	const pos = getNodePos();
+	parseContextualKeyword("yield");
+	const expression = parseExpression();
+	parseExpected(SyntaxKind.SemicolonToken);
+	const node = createNode<YieldStatement>(SyntaxKind.YieldStatement, pos);
+	node.expression = expression;
 	return finishNode(node, pos);
 }
 
@@ -2441,8 +2512,14 @@ export function forEachChild<T>(
 		}
 		case SyntaxKind.SwitchClause: {
 			const n = node as SwitchClause;
-			return visitNode(cbNode, n.labelExpression) || visitNodes(cbNode, cbNodes, n.statements);
+			return visitNodes(cbNode, cbNodes, n.labels) || visitNodes(cbNode, cbNodes, n.statements);
 		}
+		case SyntaxKind.SwitchExpression: {
+			const n = node as SwitchExpression;
+			return visitNode(cbNode, n.expression) || visitNodes(cbNode, cbNodes, n.clauses);
+		}
+		case SyntaxKind.YieldStatement:
+			return visitNode(cbNode, (node as YieldStatement).expression);
 		case SyntaxKind.ParenthesizedExpression:
 			return visitNode(cbNode, (node as ParenthesizedExpression).expression);
 		case SyntaxKind.PrefixUnaryExpression:

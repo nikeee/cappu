@@ -646,3 +646,43 @@ test("text block literal", () => {
 	const field = (sf.statements[0] as ClassDeclaration).members[0] as FieldDeclaration;
 	expect(field.declarators[0]!.initializer?.kind).toBe(SyntaxKind.TextBlockLiteral);
 });
+
+// M13: SE14 switch expressions, arrow rules, yield
+
+function valueExpr(text: string) {
+	const stmt = firstStatement(`var v = ${text};`) as import("./types.ts").LocalVariableDeclarationStatement;
+	return stmt.declarators[0]!.initializer!;
+}
+
+test("switch expression with arrow rules", () => {
+	const e = valueExpr("switch (day) { case MON, TUE -> 1; default -> 0; }") as import("./types.ts").SwitchExpression;
+	expect(e.kind).toBe(SyntaxKind.SwitchExpression);
+	expect(e.clauses).toHaveLength(2);
+	expect(e.clauses[0]!.isArrow).toBe(true);
+	expect(e.clauses[0]!.labels).toHaveLength(2);
+	expect(e.clauses[1]!.isDefault).toBe(true);
+});
+
+test("switch expression with block + yield", () => {
+	const sf = expectNoErrors(
+		"class C { int m(int x) { return switch (x) { case 1 -> { yield 10; } default -> 0; }; } }",
+	);
+	expect(sf.parseDiagnostics).toHaveLength(0);
+});
+
+test("arrow switch statement", () => {
+	const sw = firstStatement("switch (x) { case 1 -> a(); case 2 -> { b(); } default -> throw new E(); }") as
+		import("./types.ts").SwitchStatement;
+	expect(sw.clauses).toHaveLength(3);
+	expect(sw.clauses.every((c) => c.isArrow)).toBe(true);
+});
+
+test("classic colon switch still works", () => {
+	const sw = firstStatement("switch (x) { case 1: a(); break; default: }") as import("./types.ts").SwitchStatement;
+	expect(sw.clauses[0]!.isArrow).toBe(false);
+});
+
+test("yield as an identifier is not a yield statement", () => {
+	// 'yield' used as a method name
+	expect(expr("yield()").kind).toBe(SyntaxKind.CallExpression);
+});

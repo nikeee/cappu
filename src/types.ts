@@ -814,7 +814,10 @@ export interface TryStatement extends Statement {
 export interface SwitchClause extends Node {
 	readonly kind: SyntaxKind.SwitchClause;
 	readonly isDefault: boolean;
-	readonly labelExpression?: Expression;
+	/** True for the SE14 arrow form (case L -> ...), false for the colon form. */
+	readonly isArrow: boolean;
+	/** Case labels (case A, B). Undefined for 'default'. */
+	readonly labels?: NodeArray<Expression>;
 	readonly statements: NodeArray<Statement>;
 }
 
@@ -822,6 +825,17 @@ export interface SwitchStatement extends Statement {
 	readonly kind: SyntaxKind.SwitchStatement;
 	readonly expression: Expression;
 	readonly clauses: NodeArray<SwitchClause>;
+}
+
+export interface SwitchExpression extends Expression {
+	readonly kind: SyntaxKind.SwitchExpression;
+	readonly expression: Expression;
+	readonly clauses: NodeArray<SwitchClause>;
+}
+
+export interface YieldStatement extends Statement {
+	readonly kind: SyntaxKind.YieldStatement;
+	readonly expression: Expression;
 }
 
 // Diagnostics
