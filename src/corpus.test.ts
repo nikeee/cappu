@@ -16,8 +16,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { bindSourceFile } from "./binder.ts";
-import { parseSourceFile } from "./parser.ts";
-import { SyntaxKind } from "./types.ts";
+import { createChecker } from "./checker.ts";
+import { loadJdkStub } from "./jdkStub.ts";
+import { forEachChild, parseSourceFile } from "./parser.ts";
+import { createProgram } from "./program.ts";
+import { pathToUri } from "./workspace.ts";
+import { type Identifier, type Node, SyntaxKind } from "./types.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const corpusDir = process.env.JAVA_CORPUS_DIR ?? join(here, "..", "corpus");
@@ -55,5 +59,46 @@ test(
     console.log(
       `corpus: ${files.length} files, ${cleanFiles} clean, ${totalDiagnostics} parse diagnostics total`,
     );
+  },
+);
+
+// Conformance/robustness for the semantic layer: load the whole corpus into one
+// Program (+ JDK stub), then resolve every identifier and type every expression.
+// Real code must not crash the resolver/checker, and a healthy fraction of names
+// must resolve (the rest are JDK types outside the minimal stub).
+test(
+  "Java corpus resolves and types without crashing",
+  { skip: files.length === 0 ? "no corpus present" : false },
+  () => {
+    const program = createProgram();
+    loadJdkStub(program);
+    for (const file of files)
+      program.setOpenDocument(pathToUri(file), readFileSync(file, "utf8"), 1);
+    const checker = createChecker(program);
+
+    let identifiers = 0;
+    let resolved = 0;
+    const walk = (node: Node): void => {
+      if (node.kind === SyntaxKind.Identifier) {
+        identifiers++;
+        if (checker.resolveName(node as Identifier)) resolved++;
+      }
+      checker.getTypeOfExpression(node); // must not throw
+      forEachChild(node, child => {
+        walk(child);
+        return undefined;
+      });
+    };
+    for (const file of files) {
+      const sf = program.getSourceFile(pathToUri(file));
+      if (sf) walk(sf);
+    }
+
+    const rate = identifiers === 0 ? 1 : resolved / identifiers;
+    console.log(
+      `corpus semantics: ${identifiers} identifiers, ${(rate * 100).toFixed(1)}% resolved`,
+    );
+    expect(identifiers).toBeGreaterThan(0);
+    expect(rate).toBeGreaterThan(0.5); // regression floor; real code resolves well above this
   },
 );
