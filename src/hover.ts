@@ -5,6 +5,7 @@ import type { Checker } from "./checker.ts";
 import { type Symbol, SymbolFlags } from "./types.ts";
 
 export function symbolKindWord(flags: SymbolFlags): string {
+  if (flags & SymbolFlags.Package) return "package";
   if (flags & SymbolFlags.Class) return "class";
   if (flags & SymbolFlags.Interface) return "interface";
   if (flags & SymbolFlags.Enum) return "enum";
@@ -40,7 +41,7 @@ export function getHoverText(checker: Checker, symbol: Symbol): string {
     if (signature) return signature;
   }
   const word = symbolKindWord(symbol.flags);
-  if (symbol.flags & TYPE_FLAGS) {
+  if (symbol.flags & (TYPE_FLAGS | SymbolFlags.Package)) {
     return `${word} ${symbol.escapedName}`;
   }
   if (symbol.flags & SymbolFlags.TypeParameter) {

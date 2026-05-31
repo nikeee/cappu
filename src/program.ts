@@ -25,6 +25,8 @@ export interface GlobalIndex {
   getPackageSymbol(packageName: string): Symbol | undefined;
   /** Fully-qualified names of all top-level types with the given simple name (for import suggestions). */
   findFqnsBySimpleName(simpleName: string): string[];
+  /** A package symbol for an exact package or any prefix of one (e.g. "java" or "java.util"). */
+  getPackageByName(name: string): Symbol | undefined;
 }
 
 const TYPE_DECLARATION_KINDS = new Set<SyntaxKind>([
@@ -117,6 +119,9 @@ export function createProgram(): Program {
   const packages = new Map<string, SymbolTable>();
   const packageSymbols = new Map<string, Symbol>();
   const typesByFqn = new Map<string, Symbol>();
+  // Every package name plus every dotted prefix of one (so "java" resolves even
+  // though only "java.util" holds types), mapping to a package symbol.
+  const packagesByName = new Map<string, Symbol>();
 
   function extractTypes(uri: string): TypeEntry[] {
     const sourceFile = getSourceFile(uri);
@@ -167,6 +172,24 @@ export function createProgram(): Program {
         typesByFqn.set(packageName ? `${packageName}.${simpleName}` : simpleName, symbol);
       }
     }
+
+    // Index every package and every dotted prefix of one. Real packages keep
+    // their symbol; intermediate prefixes get a synthetic package symbol.
+    packagesByName.clear();
+    for (const [name, symbol] of packageSymbols) packagesByName.set(name, symbol);
+    for (const name of packageSymbols.keys()) {
+      const segments = name.split(".");
+      for (let i = 1; i < segments.length; i++) {
+        const prefix = segments.slice(0, i).join(".");
+        if (!packagesByName.has(prefix)) {
+          packagesByName.set(prefix, {
+            flags: SymbolFlags.Package,
+            escapedName: prefix,
+            members: new Map(),
+          });
+        }
+      }
+    }
   }
 
   const globalIndex: GlobalIndex = {
@@ -181,6 +204,7 @@ export function createProgram(): Program {
       }
       return result;
     },
+    getPackageByName: name => packagesByName.get(name),
   };
 
   return {

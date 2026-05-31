@@ -52,6 +52,7 @@ import {
   type ParenthesizedExpression,
   type PrefixUnaryExpression,
   type PropertyAccessExpression,
+  type QualifiedName,
   type ReturnStatement,
   type SourceFile,
   type SwitchExpression,
@@ -590,7 +591,29 @@ export function createChecker(program: Program): Checker {
     ) {
       return resolveMemberAccess(parent as PropertyAccessExpression);
     }
-    return resolveIdentifier(identifier, program);
+    const direct = resolveIdentifier(identifier, program);
+    if (direct) return direct;
+    // Fallback: a segment of a qualified name (java.util.List) - resolve it as
+    // the type it names, or as a package / package prefix.
+    return resolveQualifiedSegment(identifier);
+  }
+
+  // The dotted prefix a qualified-name segment denotes: the whole left..id chain
+  // when id is the `right`, or just id when it is the leftmost root.
+  function qualifiedPrefix(identifier: Identifier): string | undefined {
+    const parent = identifier.parent;
+    if (!parent || parent.kind !== SyntaxKind.QualifiedName) return undefined;
+    const qn = parent as QualifiedName;
+    if (qn.right === identifier) return entityNameToString(qn);
+    if (qn.left === identifier) return identifier.text;
+    return undefined;
+  }
+
+  function resolveQualifiedSegment(identifier: Identifier): Symbol | undefined {
+    const prefix = qualifiedPrefix(identifier);
+    if (!prefix) return undefined;
+    const index = program.getGlobalIndex();
+    return index.getType(prefix) ?? index.getPackageByName(prefix);
   }
 
   function numericLiteralType(value: string): Type {

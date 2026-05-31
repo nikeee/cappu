@@ -68,6 +68,13 @@ test("lambda parameter with an unknown target resolves without a type", () => {
   expect(getHoverText(ctx.checker, symbolAt(ctx, "x", 2))).toBe("(parameter) x");
 });
 
+test("package-name qualifiers resolve and hover as packages", () => {
+  const ctx = setup("class C { java.util.List<String> xs; }");
+  expect(getHoverText(ctx.checker, symbolAt(ctx, "java"))).toBe("package java");
+  expect(getHoverText(ctx.checker, symbolAt(ctx, "util"))).toBe("package java.util");
+  expect(getHoverText(ctx.checker, symbolAt(ctx, "List"))).toBe("interface List");
+});
+
 test("getDocumentation returns the cleaned Javadoc of a method", () => {
   const ctx = setup(
     [
