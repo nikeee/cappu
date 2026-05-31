@@ -686,3 +686,48 @@ test("yield as an identifier is not a yield statement", () => {
 	// 'yield' used as a method name
 	expect(expr("yield()").kind).toBe(SyntaxKind.CallExpression);
 });
+
+// M14: SE16/17 records, sealed/permits, instanceof patterns
+
+test("record declaration with components and compact constructor", () => {
+	const sf = expectNoErrors("record Point(int x, int y) implements Comparable<Point> { Point { if (x < 0) throw new E(); } }");
+	const rec = sf.statements[0] as import("./types.ts").RecordDeclaration;
+	expect(rec.kind).toBe(SyntaxKind.RecordDeclaration);
+	expect(rec.recordComponents).toHaveLength(2);
+	expect(rec.implementsTypes).toHaveLength(1);
+	expect(rec.members[0]!.kind).toBe(SyntaxKind.CompactConstructorDeclaration);
+});
+
+test("generic record", () => {
+	const sf = expectNoErrors("record Box<T>(T value) {}");
+	const rec = sf.statements[0] as import("./types.ts").RecordDeclaration;
+	expect(rec.typeParameters).toHaveLength(1);
+	expect(rec.recordComponents).toHaveLength(1);
+});
+
+test("sealed class with permits", () => {
+	const sf = expectNoErrors("public sealed class Shape permits Circle, Square {}");
+	const cls = sf.statements[0] as ClassDeclaration;
+	expect(cls.permitsTypes).toHaveLength(2);
+});
+
+test("non-sealed class", () => {
+	expectNoErrors("non-sealed class Sub extends Shape {}");
+});
+
+test("sealed interface with permits", () => {
+	const sf = expectNoErrors("sealed interface I permits A, B {}");
+	expect((sf.statements[0] as InterfaceDeclaration).permitsTypes).toHaveLength(2);
+});
+
+test("instanceof type pattern", () => {
+	const e = expr("o instanceof String s") as import("./types.ts").InstanceofExpression;
+	expect(e.kind).toBe(SyntaxKind.InstanceofExpression);
+	expect(e.name?.text).toBe("s");
+	// plain instanceof without a binding
+	expect((expr("o instanceof String") as import("./types.ts").InstanceofExpression).name).toBeUndefined();
+});
+
+test("'record' usable as an ordinary identifier", () => {
+	expectNoErrors("class C { int record = 1; }");
+});

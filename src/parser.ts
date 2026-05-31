@@ -28,6 +28,7 @@ import {
 	type CatchClause,
 	type ClassDeclaration,
 	type ClassLiteralExpression,
+	type CompactConstructorDeclaration,
 	type ConditionalExpression,
 	type ConstructorDeclaration,
 	type ContinueStatement,
@@ -75,6 +76,8 @@ import {
 	type PrimitiveType,
 	type PropertyAccessExpression,
 	type QualifiedName,
+	type RecordComponent,
+	type RecordDeclaration,
 	type Resource,
 	type ReturnStatement,
 	type CallExpression,
@@ -315,7 +318,8 @@ function isListTerminator(context: ParsingContext): boolean {
 }
 
 function isStartOfStatement(): boolean {
-	// M4: empty statements and type declarations. Full statement set in M7.
+	// Top-level: empty statement or type declaration (incl. contextual record /
+	// sealed / non-sealed starts).
 	switch (token()) {
 		case SyntaxKind.SemicolonToken:
 		case SyntaxKind.ClassKeyword:
@@ -324,7 +328,12 @@ function isStartOfStatement(): boolean {
 		case SyntaxKind.AtToken:
 			return true;
 		default:
-			return isModifierKeyword(token());
+			return (
+				isModifierKeyword(token()) ||
+				isContextualKeyword("sealed") ||
+				isContextualKeyword("non") ||
+				isRecordDeclarationStart()
+			);
 	}
 }
 
@@ -626,6 +635,22 @@ function isAnnotationTypeDeclarationStart(): boolean {
 	return scanner.lookAhead(() => scanner.scan()) === SyntaxKind.InterfaceKeyword;
 }
 
+// 'sealed' / 'non-sealed' are contextual modifiers. Recognize them only when the
+// modifier list continues into a type declaration, so an identifier named
+// "sealed" used as a type is left alone.
+function isContextualModifierFollow(): boolean {
+	return (
+		isModifierKeyword(token()) ||
+		token() === SyntaxKind.AtToken ||
+		token() === SyntaxKind.ClassKeyword ||
+		token() === SyntaxKind.InterfaceKeyword ||
+		token() === SyntaxKind.EnumKeyword ||
+		isContextualKeyword("sealed") ||
+		isContextualKeyword("non") ||
+		isContextualKeyword("record")
+	);
+}
+
 function parseModifiers(): NodeArray<ModifierLike> | undefined {
 	const pos = getNodePos();
 	const list: ModifierLike[] = [];
@@ -636,6 +661,23 @@ function parseModifiers(): NodeArray<ModifierLike> | undefined {
 		}
 		if (token() === SyntaxKind.AtToken && !isAnnotationTypeDeclarationStart()) {
 			list.push(parseAnnotation());
+			continue;
+		}
+		if (isContextualKeyword("sealed") && lookAhead(() => (nextToken(), isContextualModifierFollow()))) {
+			list.push(parseIdentifier()); // 'sealed'
+			continue;
+		}
+		if (
+			isContextualKeyword("non") &&
+			lookAhead(() => {
+				nextToken();
+				return token() === SyntaxKind.MinusToken && (nextToken(), isContextualKeyword("sealed"));
+			})
+		) {
+			const mod = parseIdentifier(); // 'non'
+			parseExpected(SyntaxKind.MinusToken);
+			parseContextualKeyword("sealed");
+			list.push(mod);
 			continue;
 		}
 		break;
@@ -868,6 +910,9 @@ function parseClassMember(): Node {
 	if (token() === SyntaxKind.OpenBraceToken) {
 		return parseInitializerBlock(pos, modifiers);
 	}
+	if (isRecordDeclarationStart()) {
+		return parseRecordDeclaration(pos, modifiers);
+	}
 	switch (token()) {
 		case SyntaxKind.ClassKeyword:
 			return parseClassDeclaration(pos, modifiers);
@@ -880,6 +925,10 @@ function parseClassMember(): Node {
 	}
 
 	const typeParameters = parseTypeParameters();
+	// Record compact constructor: Name { ... } (no parameter list).
+	if (token() === SyntaxKind.Identifier && lookAhead(() => (nextToken(), token() === SyntaxKind.OpenBraceToken))) {
+		return parseCompactConstructor(pos, modifiers);
+	}
 	if (isConstructorDeclaration()) {
 		return parseConstructorDeclaration(pos, modifiers, typeParameters);
 	}
@@ -965,6 +1014,7 @@ function parseClassDeclaration(pos: number, modifiers: NodeArray<ModifierLike> |
 	const typeParameters = parseTypeParameters();
 	const extendsType = parseOptional(SyntaxKind.ExtendsKeyword) ? parseType() : undefined;
 	const implementsTypes = parseOptional(SyntaxKind.ImplementsKeyword) ? parseTypeList() : undefined;
+	const permitsTypes = parseContextualKeyword("permits") ? parseTypeList() : undefined;
 	const members = parseClassBody();
 	const node = createNode<ClassDeclaration>(SyntaxKind.ClassDeclaration, pos);
 	node.modifiers = modifiers;
@@ -972,6 +1022,7 @@ function parseClassDeclaration(pos: number, modifiers: NodeArray<ModifierLike> |
 	node.typeParameters = typeParameters;
 	node.extendsType = extendsType;
 	node.implementsTypes = implementsTypes;
+	node.permitsTypes = permitsTypes;
 	node.members = members;
 	return finishNode(node, pos);
 }
@@ -984,12 +1035,14 @@ function parseInterfaceDeclaration(
 	const name = parseIdentifier();
 	const typeParameters = parseTypeParameters();
 	const extendsTypes = parseOptional(SyntaxKind.ExtendsKeyword) ? parseTypeList() : undefined;
+	const permitsTypes = parseContextualKeyword("permits") ? parseTypeList() : undefined;
 	const members = parseClassBody();
 	const node = createNode<InterfaceDeclaration>(SyntaxKind.InterfaceDeclaration, pos);
 	node.modifiers = modifiers;
 	node.name = name;
 	node.typeParameters = typeParameters;
 	node.extendsTypes = extendsTypes;
+	node.permitsTypes = permitsTypes;
 	node.members = members;
 	return finishNode(node, pos);
 }
@@ -1023,9 +1076,72 @@ function parseAnnotationTypeDeclaration(
 	return finishNode(node, pos);
 }
 
+// SE16 record. 'record' is contextual: it introduces a record only when
+// followed by an identifier and a '(' or type parameters.
+function isRecordDeclarationStart(): boolean {
+	return (
+		isContextualKeyword("record") &&
+		lookAhead(() => {
+			nextToken(); // 'record'
+			if (token() !== SyntaxKind.Identifier) return false;
+			nextToken(); // name
+			return token() === SyntaxKind.OpenParenToken || token() === SyntaxKind.LessThanToken;
+		})
+	);
+}
+
+function parseRecordComponent(): RecordComponent {
+	const pos = getNodePos();
+	const annotations = parseAnnotations();
+	const type = parseType();
+	const isVarArgs = parseOptional(SyntaxKind.DotDotDotToken);
+	const name = parseIdentifier();
+	const node = createNode<RecordComponent>(SyntaxKind.RecordComponent, pos);
+	node.annotations = annotations;
+	node.type = type;
+	node.isVarArgs = isVarArgs;
+	node.name = name;
+	return finishNode(node, pos);
+}
+
+function parseRecordDeclaration(pos: number, modifiers: NodeArray<ModifierLike> | undefined): RecordDeclaration {
+	parseContextualKeyword("record");
+	const name = parseIdentifier();
+	const typeParameters = parseTypeParameters();
+	parseExpected(SyntaxKind.OpenParenToken);
+	const recordComponents = parseDelimitedList(ParsingContext.Parameters, parseRecordComponent);
+	parseExpected(SyntaxKind.CloseParenToken);
+	const implementsTypes = parseOptional(SyntaxKind.ImplementsKeyword) ? parseTypeList() : undefined;
+	const members = parseClassBody();
+	const node = createNode<RecordDeclaration>(SyntaxKind.RecordDeclaration, pos);
+	node.modifiers = modifiers;
+	node.name = name;
+	node.typeParameters = typeParameters;
+	node.recordComponents = recordComponents;
+	node.implementsTypes = implementsTypes;
+	node.members = members;
+	return finishNode(node, pos);
+}
+
+function parseCompactConstructor(
+	pos: number,
+	modifiers: NodeArray<ModifierLike> | undefined,
+): CompactConstructorDeclaration {
+	const name = parseIdentifier();
+	const body = parseBlock();
+	const node = createNode<CompactConstructorDeclaration>(SyntaxKind.CompactConstructorDeclaration, pos);
+	node.modifiers = modifiers;
+	node.name = name;
+	node.body = body;
+	return finishNode(node, pos);
+}
+
 function parseTypeDeclaration(): Statement {
 	const pos = getNodePos();
 	const modifiers = parseModifiers();
+	if (isRecordDeclarationStart()) {
+		return parseRecordDeclaration(pos, modifiers);
+	}
 	switch (token()) {
 		case SyntaxKind.ClassKeyword:
 			return parseClassDeclaration(pos, modifiers);
@@ -1413,6 +1529,10 @@ function parseBinaryExpressionRest(leftStart: Expression, minPrecedence: number,
 			const node = createNode<InstanceofExpression>(SyntaxKind.InstanceofExpression, pos);
 			node.expression = left;
 			node.type = type;
+			// SE16 type pattern: o instanceof String s
+			if (token() === SyntaxKind.Identifier) {
+				node.name = parseIdentifier();
+			}
 			left = finishNode(node, pos);
 			continue;
 		}
@@ -1861,6 +1981,9 @@ function parseLocalVariableDeclarationRest(
 function parseLocalDeclarationStatement(): Statement {
 	const pos = getNodePos();
 	const modifiers = parseModifiers();
+	if (isRecordDeclarationStart()) {
+		return parseRecordDeclaration(pos, modifiers);
+	}
 	switch (token()) {
 		case SyntaxKind.ClassKeyword:
 			return parseClassDeclaration(pos, modifiers);
@@ -2544,7 +2667,26 @@ export function forEachChild<T>(
 		}
 		case SyntaxKind.InstanceofExpression: {
 			const n = node as InstanceofExpression;
-			return visitNode(cbNode, n.expression) || visitNode(cbNode, n.type);
+			return visitNode(cbNode, n.expression) || visitNode(cbNode, n.type) || visitNode(cbNode, n.name);
+		}
+		case SyntaxKind.RecordDeclaration: {
+			const n = node as RecordDeclaration;
+			return (
+				visitNodes(cbNode, cbNodes, n.modifiers) ||
+				visitNode(cbNode, n.name) ||
+				visitNodes(cbNode, cbNodes, n.typeParameters) ||
+				visitNodes(cbNode, cbNodes, n.recordComponents) ||
+				visitNodes(cbNode, cbNodes, n.implementsTypes) ||
+				visitNodes(cbNode, cbNodes, n.members)
+			);
+		}
+		case SyntaxKind.RecordComponent: {
+			const n = node as RecordComponent;
+			return visitNodes(cbNode, cbNodes, n.annotations) || visitNode(cbNode, n.type) || visitNode(cbNode, n.name);
+		}
+		case SyntaxKind.CompactConstructorDeclaration: {
+			const n = node as CompactConstructorDeclaration;
+			return visitNodes(cbNode, cbNodes, n.modifiers) || visitNode(cbNode, n.name) || visitNode(cbNode, n.body);
 		}
 		case SyntaxKind.CastExpression: {
 			const n = node as CastExpression;

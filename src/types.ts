@@ -468,6 +468,8 @@ export interface ClassDeclaration extends Statement {
 	readonly typeParameters?: NodeArray<TypeParameter>;
 	readonly extendsType?: TypeNode;
 	readonly implementsTypes?: NodeArray<TypeNode>;
+	/** SE17 sealed: permitted subclasses. */
+	readonly permitsTypes?: NodeArray<TypeNode>;
 	readonly members: NodeArray<Node>;
 }
 
@@ -477,7 +479,33 @@ export interface InterfaceDeclaration extends Statement {
 	readonly name: Identifier;
 	readonly typeParameters?: NodeArray<TypeParameter>;
 	readonly extendsTypes?: NodeArray<TypeNode>;
+	readonly permitsTypes?: NodeArray<TypeNode>;
 	readonly members: NodeArray<Node>;
+}
+
+export interface RecordDeclaration extends Statement {
+	readonly kind: SyntaxKind.RecordDeclaration;
+	readonly modifiers?: NodeArray<ModifierLike>;
+	readonly name: Identifier;
+	readonly typeParameters?: NodeArray<TypeParameter>;
+	readonly recordComponents: NodeArray<RecordComponent>;
+	readonly implementsTypes?: NodeArray<TypeNode>;
+	readonly members: NodeArray<Node>;
+}
+
+export interface RecordComponent extends Node {
+	readonly kind: SyntaxKind.RecordComponent;
+	readonly annotations?: NodeArray<Annotation>;
+	readonly type: TypeNode;
+	readonly isVarArgs: boolean;
+	readonly name: Identifier;
+}
+
+export interface CompactConstructorDeclaration extends Node {
+	readonly kind: SyntaxKind.CompactConstructorDeclaration;
+	readonly modifiers?: NodeArray<ModifierLike>;
+	readonly name: Identifier;
+	readonly body: Block;
 }
 
 export interface EnumDeclaration extends Statement {
@@ -619,6 +647,8 @@ export interface InstanceofExpression extends Expression {
 	readonly kind: SyntaxKind.InstanceofExpression;
 	readonly expression: Expression;
 	readonly type: TypeNode;
+	/** SE16 pattern binding variable: o instanceof String s. */
+	readonly name?: Identifier;
 }
 
 export interface CastExpression extends Expression {

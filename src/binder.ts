@@ -57,6 +57,7 @@ function isTypeDeclaration(node: Node): boolean {
 		case SyntaxKind.InterfaceDeclaration:
 		case SyntaxKind.EnumDeclaration:
 		case SyntaxKind.AnnotationTypeDeclaration:
+		case SyntaxKind.RecordDeclaration:
 			return true;
 		default:
 			return false;
@@ -141,6 +142,15 @@ function bindDeclaration(node: Node): void {
 			break;
 		case SyntaxKind.AnnotationTypeDeclaration:
 			declareIntoContainer(named(node), node, SymbolFlags.Annotation, SymbolFlags.Type);
+			break;
+		case SyntaxKind.RecordDeclaration:
+			declareIntoContainer(named(node), node, SymbolFlags.Record, SymbolFlags.Type);
+			break;
+		case SyntaxKind.RecordComponent:
+			declareIntoContainer(named(node), node, SymbolFlags.Field, SymbolFlags.Field);
+			break;
+		case SyntaxKind.CompactConstructorDeclaration:
+			declareIntoContainer(named(node), node, SymbolFlags.Constructor, SymbolFlags.None);
 			break;
 		case SyntaxKind.MethodDeclaration:
 			// Overloading is allowed: methods do not exclude each other.
