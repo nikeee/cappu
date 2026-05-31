@@ -20,6 +20,7 @@ import {
 import { TextDocument } from "vscode-languageserver-textdocument";
 
 import { getDocumentSymbols } from "./documentSymbols.ts";
+import { loadJdkStub } from "./jdkStub.ts";
 import {
   computeLineStarts,
   getLineAndCharacterOfPosition,
@@ -46,6 +47,7 @@ import { loadJavaFiles, uriToPath } from "./workspace.ts";
 const connection = createConnection(process.stdin, process.stdout);
 const documents = new TextDocuments(TextDocument);
 const program = createProgram();
+loadJdkStub(program);
 
 connection.onInitialize((params: InitializeParams): InitializeResult => {
   // Scan workspace folders for .java files so cross-file resolution works
