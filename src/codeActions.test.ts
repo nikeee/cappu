@@ -75,3 +75,34 @@ test("no import offered for java.lang types", () => {
   const ctx = setup("package app;\nclass C { String s; }");
   expect(actionsAt(ctx, "String").filter(a => a.kind === "quickfix")).toEqual([]);
 });
+
+// --- organize imports --------------------------------------------------------------
+
+function organize(ctx: ReturnType<typeof setup>) {
+  return actionsAt(ctx, "class").find(a => a.kind === "source.organizeImports");
+}
+
+test("removes an unused single-type import", () => {
+  const ctx = setup(
+    "package app;\nimport java.util.List;\nimport java.util.Map;\nclass C { List<String> xs; }",
+  );
+  expect(apply(ctx.text, organize(ctx)!)).toBe(
+    "package app;\nimport java.util.List;\nclass C { List<String> xs; }",
+  );
+});
+
+test("sorts imports and keeps on-demand and static", () => {
+  const ctx = setup(
+    "package app;\nimport java.util.Map;\nimport static java.lang.Math.max;\nimport java.util.*;\nimport java.util.List;\n" +
+      "class C { List<String> xs; Map<String,String> m; }",
+  );
+  expect(apply(ctx.text, organize(ctx)!)).toBe(
+    "package app;\nimport java.util.*;\nimport java.util.List;\nimport java.util.Map;\nimport static java.lang.Math.max;\n" +
+      "class C { List<String> xs; Map<String,String> m; }",
+  );
+});
+
+test("no organize action when imports are already minimal and sorted", () => {
+  const ctx = setup("package app;\nimport java.util.List;\nclass C { List<String> xs; }");
+  expect(organize(ctx)).toBeUndefined();
+});

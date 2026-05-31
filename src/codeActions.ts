@@ -5,9 +5,24 @@
 
 import type { Checker } from "./checker.ts";
 import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
+import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
-import { entityNameToString } from "./utilities.ts";
-import { type Identifier, type ImportDeclaration, type SourceFile } from "./types.ts";
+import { entityNameToString, skipTrivia } from "./utilities.ts";
+import {
+  type Identifier,
+  type ImportDeclaration,
+  type Node,
+  type SourceFile,
+  SyntaxKind,
+} from "./types.ts";
+
+function forEachDescendant(node: Node, cb: (n: Node) => void): void {
+  cb(node);
+  forEachChild(node, child => {
+    forEachDescendant(child, cb);
+    return undefined;
+  });
+}
 
 export interface TextChange {
   readonly start: number;
@@ -88,6 +103,54 @@ function addMissingImport(
   }));
 }
 
+// --- organize imports --------------------------------------------------------------
+
+function importText(imp: ImportDeclaration): string {
+  const star = imp.isOnDemand ? ".*" : "";
+  return `import ${imp.isStatic ? "static " : ""}${entityNameToString(imp.name)}${star};`;
+}
+
+function organizeImports(sourceFile: SourceFile): CodeActionResult[] {
+  const imports = sourceFile.imports;
+  if (imports.length === 0) return [];
+
+  // Simple names used anywhere in the body (a conservative "is this import used?"
+  // check: keep the import if its type name appears at all, so a used import is
+  // never removed).
+  const used = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    forEachDescendant(statement, n => {
+      if (n.kind === SyntaxKind.Identifier) used.add((n as Identifier).text);
+    });
+  }
+
+  const kept = imports.filter(imp => {
+    if (imp.isStatic || imp.isOnDemand) return true; // cannot tell precisely: keep
+    const fqn = entityNameToString(imp.name);
+    return used.has(fqn.slice(fqn.lastIndexOf(".") + 1));
+  });
+
+  // Non-static group first, then static; alphabetical within each.
+  const sorted = [...kept].sort((a, b) => {
+    if (a.isStatic !== b.isStatic) return a.isStatic ? 1 : -1;
+    const ta = importText(a);
+    const tb = importText(b);
+    return ta < tb ? -1 : ta > tb ? 1 : 0;
+  });
+
+  const start = skipTrivia(sourceFile.text, imports[0]!.pos);
+  const end = imports[imports.length - 1]!.end;
+  const newText = sorted.map(importText).join("\n");
+  if (newText === sourceFile.text.slice(start, end)) return []; // already organized
+  return [
+    {
+      title: "Organize imports",
+      kind: "source.organizeImports",
+      changes: [{ start, end, newText }],
+    },
+  ];
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
@@ -95,5 +158,5 @@ export function getCodeActions(
   start: number,
   _end: number,
 ): CodeActionResult[] {
-  return [...addMissingImport(program, checker, sourceFile, start)];
+  return [...addMissingImport(program, checker, sourceFile, start), ...organizeImports(sourceFile)];
 }
