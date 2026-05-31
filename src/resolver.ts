@@ -298,8 +298,6 @@ export function getDeclarationNameNode(symbol: Symbol): Node | undefined {
 
 // --- find references ------------------------------------------------------------------
 
-let referenceCache: { index: GlobalIndex; table: Map<Symbol, Node[]> } | undefined;
-
 function forEachDescendant(node: Node, cb: (n: Node) => void): void {
   cb(node);
   forEachChild(node, child => {
@@ -308,28 +306,30 @@ function forEachDescendant(node: Node, cb: (n: Node) => void): void {
   });
 }
 
-function buildReferenceTable(program: Program): Map<Symbol, Node[]> {
-  const table = new Map<Symbol, Node[]>();
-  for (const uri of program.getAllUris()) {
-    const sourceFile = program.getSourceFile(uri);
-    if (!sourceFile) continue;
-    forEachDescendant(sourceFile, node => {
-      if (node.kind !== SyntaxKind.Identifier) return;
-      const symbol = resolveIdentifier(node as Identifier, program);
-      if (!symbol) return;
-      const list = table.get(symbol);
-      if (list) list.push(node);
-      else table.set(symbol, [node]);
-    });
+// Locals, parameters and type parameters cannot be referenced outside the file
+// that declares them, so narrow the search to that file. Everything else (types,
+// fields, methods) may be referenced cross-file, so the whole workspace is scanned.
+const FILE_LOCAL_FLAGS =
+  SymbolFlags.LocalVariable | SymbolFlags.Parameter | SymbolFlags.TypeParameter;
+
+function candidateUris(symbol: Symbol, program: Program): string[] {
+  if (symbol.flags & FILE_LOCAL_FLAGS) {
+    const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+    if (declaration) return [getSourceFileOfNode(declaration).fileName];
   }
-  return table;
+  return program.getAllUris();
 }
 
 /** All identifier nodes (uses and declaration names) that refer to a symbol. */
 export function findReferences(symbol: Symbol, program: Program): Node[] {
-  const index = program.getGlobalIndex();
-  if (referenceCache?.index !== index) {
-    referenceCache = { index, table: buildReferenceTable(program) };
+  const result: Node[] = [];
+  for (const uri of candidateUris(symbol, program)) {
+    const sourceFile = program.getSourceFile(uri);
+    if (!sourceFile) continue;
+    forEachDescendant(sourceFile, node => {
+      if (node.kind !== SyntaxKind.Identifier) return;
+      if (resolveIdentifier(node as Identifier, program) === symbol) result.push(node);
+    });
   }
-  return referenceCache.table.get(symbol) ?? [];
+  return result;
 }

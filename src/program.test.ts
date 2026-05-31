@@ -61,3 +61,31 @@ test("index rebuilds when a document changes", () => {
   expect(index.getType("p.A")).toBeUndefined();
   expect(index.getType("p.Renamed")).toBeDefined();
 });
+
+test("changing one file re-binds only that file (others keep their SourceFile)", () => {
+  const program = createProgram();
+  program.setOpenDocument("file:///A.java", "class A {}", 1);
+  program.setOpenDocument("file:///B.java", "class B {}", 1);
+  program.getGlobalIndex();
+  const aBefore = program.getSourceFile("file:///A.java");
+
+  program.setOpenDocument("file:///B.java", "class B2 {}", 2);
+  const index = program.getGlobalIndex();
+  expect(index.getType("B")).toBeUndefined();
+  expect(index.getType("B2")).toBeDefined();
+  // The untouched file's bound SourceFile is reused - no re-bind on reindex.
+  expect(program.getSourceFile("file:///A.java")).toBe(aBefore);
+  expect(index.getType("A")).toBeDefined();
+});
+
+test("closing a document removes only its types from the index", () => {
+  const program = createProgram();
+  program.addProjectFile("file:///A.java", "package p;\nclass A {}");
+  program.setOpenDocument("file:///B.java", "package p;\nclass B {}", 1);
+  expect(program.getGlobalIndex().getType("p.B")).toBeDefined();
+
+  program.closeDocument("file:///B.java");
+  const index = program.getGlobalIndex();
+  expect(index.getType("p.B")).toBeUndefined();
+  expect(index.getType("p.A")).toBeDefined();
+});

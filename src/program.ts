@@ -70,9 +70,6 @@ export function createProgram(): Program {
   const openDocuments = new Map<string, OpenDocument>();
   const projectFiles = new Map<string, string>();
   const cache = new Map<string, VersionedCacheEntry>();
-  let generation = 0;
-  let indexGeneration = -1;
-  let index: GlobalIndex | undefined;
 
   // Effective text + cache key for a uri; open documents win over project files.
   function resolveSource(uri: string): { text: string; key: string } | undefined {
@@ -102,12 +99,56 @@ export function createProgram(): Program {
     return [...new Set([...projectFiles.keys(), ...openDocuments.keys()])];
   }
 
-  function buildIndex(): GlobalIndex {
-    const packages = new Map<string, SymbolTable>();
-    const packageSymbols = new Map<string, Symbol>();
-    const typesByFqn = new Map<string, Symbol>();
+  // Incremental cross-file index. Each file's top-level types are extracted once
+  // (re-binding only when the file itself changes); the derived FQN/package maps
+  // are rebuilt cheaply from those cached per-file lists. A single edit therefore
+  // re-binds only the edited file, not the whole workspace.
+  interface TypeEntry {
+    packageName: string;
+    simpleName: string;
+    symbol: Symbol;
+  }
+  const fileTypes = new Map<string, TypeEntry[]>();
+  const dirty = new Set<string>();
+  let indexBuilt = false;
 
-    function packageSymbolFor(packageName: string): Symbol {
+  const packages = new Map<string, SymbolTable>();
+  const packageSymbols = new Map<string, Symbol>();
+  const typesByFqn = new Map<string, Symbol>();
+
+  function extractTypes(uri: string): TypeEntry[] {
+    const sourceFile = getSourceFile(uri);
+    if (!sourceFile) return [];
+    const packageName = sourceFile.packageDeclaration
+      ? entityNameToString(sourceFile.packageDeclaration.name)
+      : "";
+    const entries: TypeEntry[] = [];
+    for (const statement of sourceFile.statements) {
+      if (!TYPE_DECLARATION_KINDS.has(statement.kind) || !statement.symbol) continue;
+      const simpleName = named(statement);
+      if (simpleName) entries.push({ packageName, simpleName, symbol: statement.symbol });
+    }
+    return entries;
+  }
+
+  function refreshIndex(): void {
+    if (indexBuilt && dirty.size === 0) return;
+    // Re-extract only the changed (dirty) files; everything else keeps its cached
+    // per-file type list (and its already-bound SourceFile). On the first build
+    // every file is dirty by definition.
+    const toVisit = indexBuilt ? dirty : new Set(allUris());
+    for (const uri of toVisit) {
+      if (resolveSource(uri)) fileTypes.set(uri, extractTypes(uri));
+      else fileTypes.delete(uri);
+    }
+    dirty.clear();
+    indexBuilt = true;
+
+    // Rebuild the cheap derived maps from the per-file lists (no parsing/binding).
+    packages.clear();
+    packageSymbols.clear();
+    typesByFqn.clear();
+    const packageSymbolFor = (packageName: string): Symbol => {
       let symbol = packageSymbols.get(packageName);
       if (!symbol) {
         symbol = { flags: SymbolFlags.Package, escapedName: packageName, members: new Map() };
@@ -115,57 +156,44 @@ export function createProgram(): Program {
         packages.set(packageName, symbol.members!);
       }
       return symbol;
-    }
-
-    for (const uri of allUris()) {
-      const sourceFile = getSourceFile(uri);
-      if (!sourceFile) continue;
-      const packageName = sourceFile.packageDeclaration
-        ? entityNameToString(sourceFile.packageDeclaration.name)
-        : "";
-      const packageSymbol = packageSymbolFor(packageName);
-
-      for (const statement of sourceFile.statements) {
-        if (!TYPE_DECLARATION_KINDS.has(statement.kind) || !statement.symbol) continue;
-        const simpleName = named(statement);
-        if (!simpleName) continue;
-        statement.symbol.parent = packageSymbol;
-        packageSymbol.members!.set(simpleName, statement.symbol);
-        typesByFqn.set(packageName ? `${packageName}.${simpleName}` : simpleName, statement.symbol);
+    };
+    for (const entries of fileTypes.values()) {
+      for (const { packageName, simpleName, symbol } of entries) {
+        const packageSymbol = packageSymbolFor(packageName);
+        symbol.parent = packageSymbol;
+        packageSymbol.members!.set(simpleName, symbol);
+        typesByFqn.set(packageName ? `${packageName}.${simpleName}` : simpleName, symbol);
       }
     }
-
-    return {
-      getType: fqn => typesByFqn.get(fqn),
-      getPackageTypes: packageName => packages.get(packageName),
-      getPackageSymbol: packageName => packageSymbols.get(packageName),
-    };
   }
+
+  const globalIndex: GlobalIndex = {
+    getType: fqn => typesByFqn.get(fqn),
+    getPackageTypes: packageName => packages.get(packageName),
+    getPackageSymbol: packageName => packageSymbols.get(packageName),
+  };
 
   return {
     setOpenDocument(uri, text, version) {
       openDocuments.set(uri, { text, version });
-      generation++;
+      dirty.add(uri);
     },
     closeDocument(uri) {
       openDocuments.delete(uri);
       cache.delete(uri);
-      generation++;
+      dirty.add(uri);
     },
     addProjectFile(uri, text) {
       projectFiles.set(uri, text);
       cache.delete(uri);
-      generation++;
+      dirty.add(uri);
     },
     getSourceFile,
     getOpenUris: () => [...openDocuments.keys()],
     getAllUris: allUris,
     getGlobalIndex() {
-      if (!index || indexGeneration !== generation) {
-        index = buildIndex();
-        indexGeneration = generation;
-      }
-      return index;
+      refreshIndex();
+      return globalIndex;
     },
   };
 }

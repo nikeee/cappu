@@ -150,3 +150,28 @@ test("findReferences returns the declaration and all uses", () => {
   const refs = findReferences(sym!, program);
   expect(refs.length).toBe(3); // declaration + 2 uses
 });
+
+test("findReferences for a local variable stays within its file", () => {
+  const program = programOf({
+    "file:///A.java": "package p;\nclass A { void m() { int local = 1; use(local); } }",
+    // a same-named local in another file must not be picked up
+    "file:///B.java": "package p;\nclass B { void m() { int local = 2; use(local); } }",
+  });
+  const sym = resolveInFile(program, "file:///A.java", "local", 1);
+  expect(sym?.flags).toBe(SymbolFlags.LocalVariable);
+  const refs = findReferences(sym!, program);
+  expect(refs.length).toBe(2); // declaration + 1 use, only in A.java
+  expect(refs.every(r => r.parent && true)).toBe(true);
+});
+
+test("findReferences for a cross-file type spans the workspace", () => {
+  const program = programOf({
+    "file:///Base.java": "package p;\nclass Base {}",
+    "file:///A.java": "package p;\nclass A extends Base {}",
+    "file:///B.java": "package p;\nclass B extends Base {}",
+  });
+  const sym = program.getGlobalIndex().getType("p.Base")!;
+  const refs = findReferences(sym, program);
+  // declaration name in Base.java + the two extends uses
+  expect(refs.length).toBe(3);
+});
