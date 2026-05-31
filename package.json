@@ -15,6 +15,7 @@
     "format": "oxfmt",
     "typecheck": "tsc --noEmit",
     "lsp": "tsx src/server.ts",
+    "compile": "tsx src/compile.ts",
     "test": "tsx --test \"./src/**/*.test.ts\""
   },
   "dependencies": {
