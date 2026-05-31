@@ -8,10 +8,12 @@
   class Character
   class Class
   class ClassCastException
+  class Deprecated
   class Double
   class Error
   class Exception
   class Float
+  class FunctionalInterface
   class IllegalArgumentException
   class IllegalStateException
   class IndexOutOfBoundsException
@@ -23,11 +25,14 @@
   class Number
   class NumberFormatException
   class Object
+  class Override
   class RuntimeException
+  class SafeVarargs
   class Short
   class StackTraceElement
   class String
   class StringBuilder
+  class SuppressWarnings
   class System
   class Thread
   class Throwable

@@ -212,6 +212,12 @@ class UnsupportedOperationException extends RuntimeException {}
 class NumberFormatException extends IllegalArgumentException {}
 class ArithmeticException extends RuntimeException {}
 class InterruptedException extends Exception {}
+
+@interface Override {}
+@interface Deprecated {}
+@interface SuppressWarnings { String[] value(); }
+@interface FunctionalInterface {}
+@interface SafeVarargs {}
 `;
 
 const JAVA_IO = `package java.io;
