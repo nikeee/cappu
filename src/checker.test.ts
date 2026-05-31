@@ -73,3 +73,47 @@ test("expression typing: arithmetic, string concat, comparison", () => {
 test("unknown expressions degrade to <error>, never throw", () => {
   expect(initializerType("class C { void m() { var x = mystery(); } }", "x")).toBe("<error>");
 });
+
+// P6: assignability
+
+import { nullType } from "./checkerTypes.ts";
+
+test("assignability: widening, boxing, subtyping, arrays, null", () => {
+  const ctx = setup(
+    "class C { int iv; long lv; double dv; Integer bi; String sv; Object ov;" +
+      " java.util.ArrayList<String> al; java.util.List<String> ls; int[] ia; String[] sa; }",
+  );
+  const t = (name: string) =>
+    ctx.checker.getTypeOfSymbol(ctx.checker.resolveName(identifierAt(ctx, name))!);
+  const a = (x: string, y: string) => ctx.checker.isAssignableTo(t(x), t(y));
+
+  // primitive widening
+  expect(a("iv", "lv")).toBe(true); // int -> long
+  expect(a("iv", "dv")).toBe(true); // int -> double
+  expect(a("lv", "iv")).toBe(false); // long -> int (narrowing)
+  // boxing / unboxing
+  expect(a("iv", "bi")).toBe(true); // int -> Integer
+  expect(a("bi", "iv")).toBe(true); // Integer -> int
+  // reference subtyping
+  expect(a("sv", "ov")).toBe(true); // String -> Object
+  expect(a("ov", "sv")).toBe(false); // Object -> String
+  expect(a("al", "ls")).toBe(true); // ArrayList<String> -> List<String>
+  // arrays
+  expect(a("sa", "ov")).toBe(true); // String[] -> Object
+  expect(a("ia", "sa")).toBe(false); // int[] -> String[]
+  // null
+  expect(ctx.checker.isAssignableTo(nullType, t("sv"))).toBe(true);
+  expect(ctx.checker.isAssignableTo(nullType, t("iv"))).toBe(false);
+});
+
+test("wildcard variance in type arguments", () => {
+  const ctx = setup(
+    "class C { java.util.List<String> ls; java.util.List<? extends Object> wl; java.util.List<Object> lo; }",
+  );
+  const t = (name: string) =>
+    ctx.checker.getTypeOfSymbol(ctx.checker.resolveName(identifierAt(ctx, name))!);
+  // List<String> -> List<? extends Object> (covariant)
+  expect(ctx.checker.isAssignableTo(t("ls"), t("wl"))).toBe(true);
+  // List<String> -> List<Object> (invariant) is NOT allowed
+  expect(ctx.checker.isAssignableTo(t("ls"), t("lo"))).toBe(false);
+});

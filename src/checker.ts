@@ -6,17 +6,26 @@
 
 import type { Program } from "./program.ts";
 import {
+  type ArrayType,
   arrayType,
   type ClassType,
   classType,
   errorType,
+  isError,
   nullType,
   primitiveType,
   type Type,
   TypeKind,
   typeVariable,
+  type WildcardType,
 } from "./checkerTypes.ts";
-import { lookupMember, Meaning, resolveIdentifier, resolveTypeEntityName } from "./resolver.ts";
+import {
+  getDirectSuperTypeSymbols,
+  lookupMember,
+  Meaning,
+  resolveIdentifier,
+  resolveTypeEntityName,
+} from "./resolver.ts";
 import { tokenToString } from "./utilities.ts";
 import {
   type ArrayCreationExpression,
@@ -48,6 +57,35 @@ export interface Checker {
   getTypeOfExpression(node: Node): Type;
   /** Resolve a name use OR a member access (a.b) to its symbol. */
   resolveName(identifier: Identifier): Symbol | undefined;
+  /** JLS assignment conversion: can a value of `source` be assigned to `target`? */
+  isAssignableTo(source: Type, target: Type): boolean;
+}
+
+// Primitive widening (JLS 5.1.2) and boxing (JLS 5.1.7).
+const WIDENING: Record<string, readonly string[]> = {
+  byte: ["short", "int", "long", "float", "double"],
+  short: ["int", "long", "float", "double"],
+  char: ["int", "long", "float", "double"],
+  int: ["long", "float", "double"],
+  long: ["float", "double"],
+  float: ["double"],
+};
+const BOX: Record<string, string> = {
+  boolean: "java.lang.Boolean",
+  byte: "java.lang.Byte",
+  short: "java.lang.Short",
+  char: "java.lang.Character",
+  int: "java.lang.Integer",
+  long: "java.lang.Long",
+  float: "java.lang.Float",
+  double: "java.lang.Double",
+};
+const UNBOX: Record<string, string> = Object.fromEntries(
+  Object.entries(BOX).map(([prim, fqn]) => [fqn, prim]),
+);
+
+function primitiveWidens(from: string, to: string): boolean {
+  return from === to || (WIDENING[from]?.includes(to) ?? false);
 }
 
 const COMPARISON_OPERATORS = new Set<SyntaxKind>([
@@ -300,5 +338,132 @@ export function createChecker(program: Program): Checker {
     }
   }
 
-  return { resolveType, getTypeOfSymbol, getTypeOfExpression, resolveName };
+  function objectSymbol(): Symbol | undefined {
+    return program.getGlobalIndex().getType("java.lang.Object");
+  }
+
+  // source's class symbol is a subtype of target's (incl. implicit Object).
+  function isClassSubtype(sourceSym: Symbol, targetSym: Symbol): boolean {
+    if (sourceSym === targetSym) return true;
+    if (targetSym === objectSymbol()) return true;
+    const seen = new Set<Symbol>();
+    const queue: Symbol[] = [sourceSym];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (current === targetSym) return true;
+      if (seen.has(current)) continue;
+      seen.add(current);
+      queue.push(...getDirectSuperTypeSymbols(current, program));
+    }
+    return false;
+  }
+
+  function typesEqual(a: Type, b: Type): boolean {
+    if (a.kind !== b.kind) return false;
+    switch (a.kind) {
+      case TypeKind.Primitive:
+        return a.name === (b as { name: string }).name;
+      case TypeKind.Class: {
+        const bc = b as ClassType;
+        return (
+          a.symbol === bc.symbol &&
+          a.typeArguments.length === bc.typeArguments.length &&
+          a.typeArguments.every((t, i) => typesEqual(t, bc.typeArguments[i]!))
+        );
+      }
+      case TypeKind.Array:
+        return typesEqual(a.elementType, (b as ArrayType).elementType);
+      case TypeKind.TypeVariable:
+        return a.symbol === (b as { symbol: Symbol }).symbol;
+      default:
+        return true;
+    }
+  }
+
+  // Type-argument compatibility for two invocations of the same generic type,
+  // honouring wildcard variance (JLS 4.5.1, 4.10.2).
+  function typeArgumentsCompatible(srcArgs: readonly Type[], tgtArgs: readonly Type[]): boolean {
+    if (srcArgs.length === 0 || tgtArgs.length === 0) return true; // raw type involved
+    if (srcArgs.length !== tgtArgs.length) return true;
+    return tgtArgs.every((tgt, i) => {
+      const src = srcArgs[i]!;
+      if (tgt.kind === TypeKind.Wildcard) {
+        const w = tgt as WildcardType;
+        if (w.isExtends && w.bound) return isAssignableTo(src, w.bound);
+        if (w.isSuper && w.bound) return isAssignableTo(w.bound, src);
+        return true; // unbounded ?
+      }
+      return typesEqual(src, tgt);
+    });
+  }
+
+  function isAssignableToClass(source: Type, target: ClassType): boolean {
+    switch (source.kind) {
+      case TypeKind.Null:
+        return true;
+      case TypeKind.Primitive: {
+        const boxed = BOX[source.name];
+        return boxed ? isAssignableToClass(classTypeByFqn(boxed), target) : false;
+      }
+      case TypeKind.Class:
+        if (source.symbol === target.symbol) {
+          return typeArgumentsCompatible(source.typeArguments, target.typeArguments);
+        }
+        return isClassSubtype(source.symbol, target.symbol);
+      case TypeKind.Array:
+        return target.symbol === objectSymbol();
+      case TypeKind.TypeVariable:
+        return target.symbol === objectSymbol();
+      default:
+        return false;
+    }
+  }
+
+  function isAssignableToPrimitive(source: Type, target: { name: string }): boolean {
+    if (source.kind === TypeKind.Primitive) return primitiveWidens(source.name, target.name);
+    // unboxing then widening (Integer -> int -> long)
+    if (source.kind === TypeKind.Class) {
+      const unboxed = UNBOX[fqnOf(source)];
+      if (unboxed) return primitiveWidens(unboxed, target.name);
+    }
+    return false;
+  }
+
+  function fqnOf(type: ClassType): string {
+    const parts: string[] = [type.symbol.escapedName];
+    let parent = type.symbol.parent;
+    while (parent && parent.escapedName) {
+      parts.unshift(parent.escapedName);
+      parent = parent.parent;
+    }
+    return parts.join(".");
+  }
+
+  function isAssignableTo(source: Type, target: Type): boolean {
+    if (isError(source) || isError(target)) return true; // degrade, never a false error
+    if (source === target) return true;
+    switch (target.kind) {
+      case TypeKind.Primitive:
+        return isAssignableToPrimitive(source, target);
+      case TypeKind.Class:
+        return isAssignableToClass(source, target);
+      case TypeKind.Array:
+        if (source.kind === TypeKind.Null) return true;
+        if (source.kind !== TypeKind.Array) return false;
+        // primitive element arrays are invariant; reference element arrays covariant
+        if (
+          source.elementType.kind === TypeKind.Primitive ||
+          target.elementType.kind === TypeKind.Primitive
+        ) {
+          return typesEqual(source.elementType, target.elementType);
+        }
+        return isAssignableTo(source.elementType, target.elementType);
+      case TypeKind.TypeVariable:
+        return source.kind === TypeKind.Null;
+      default:
+        return source.kind === TypeKind.Null || isError(source);
+    }
+  }
+
+  return { resolveType, getTypeOfSymbol, getTypeOfExpression, resolveName, isAssignableTo };
 }

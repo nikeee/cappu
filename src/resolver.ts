@@ -104,6 +104,11 @@ function superTypeNodes(declaration: Node): readonly TypeNode[] {
   }
 }
 
+/** Direct super-type symbols (extends/implements) of a type symbol. */
+export function getDirectSuperTypeSymbols(typeSymbol: Symbol, program: Program): Symbol[] {
+  return superTypeSymbols(typeSymbol, program);
+}
+
 function superTypeSymbols(typeSymbol: Symbol, program: Program): Symbol[] {
   if (resolvingSupertypes.has(typeSymbol)) return [];
   const declaration = typeSymbol.valueDeclaration ?? typeSymbol.declarations?.[0];
