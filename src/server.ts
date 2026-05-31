@@ -1,5 +1,3 @@
-#!/home/nikeee/.npm-bin/bin/tsx
-
 // Java language server. The LSP protocol/transport is handled by
 // vscode-languageserver; everything semantic comes from this project's
 // scanner/parser/binder via the Program (which caches parse+bind per document
