@@ -11,15 +11,10 @@ import pkg from "../package.json" with { type: "json" };
 
 await yargs(hideBin(process.argv))
   .scriptName("cappu")
-  .command(
-    "lsp",
-    "Start the Java language server (JSON-RPC over stdio)",
-    {},
-    async () => {
-      // Importing starts the server via its module side effects.
-      await import("./server.ts");
-    },
-  )
+  .command("lsp", "Start the Java language server (JSON-RPC over stdio)", {}, async () => {
+    // Importing starts the server via its module side effects.
+    await import("./server.ts");
+  })
   .command(
     "compile [files..]",
     "Compile .java files to .class bytecode",

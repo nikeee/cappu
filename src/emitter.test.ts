@@ -137,6 +137,36 @@ function emit(name: string, source: string): Uint8Array {
   return cls.bytes;
 }
 
+// Emit every class declared in `source` (top-level and, later, nested/lambda
+// synthetics), keyed by internal name.
+function emitClasses(mainClass: string, source: string): { name: string; bytes: Uint8Array }[] {
+  const program = createProgram();
+  loadJdkStub(program);
+  const uri = `file:///${mainClass}.java`;
+  program.setOpenDocument(uri, source, 1);
+  return emitSourceFile(program.getSourceFile(uri)!, program, createChecker(program));
+}
+
+// Compile `source` with both javac and our emitter, run the main class under
+// `java`, and assert our stdout equals javac's (and the expected text). Writes
+// every emitted class so multi-class programs (nested classes, lambdas) work.
+function runsLikeJavac(mainClass: string, source: string, expectedStdout: string): void {
+  const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
+  writeFileSync(join(ref, `${mainClass}.java`), source);
+  execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${mainClass}.java`)]);
+  const refOut = execFileSync("java", ["-cp", ref, mainClass], { encoding: "utf8" });
+
+  const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+  for (const c of emitClasses(mainClass, source)) {
+    const out = join(ours, `${c.name}.class`);
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, c.bytes);
+  }
+  const ourOut = execFileSync("java", ["-cp", ours, mainClass], { encoding: "utf8" });
+  expect(ourOut).toBe(refOut);
+  expect(refOut).toBe(expectedStdout);
+}
+
 // javap -p member signature lines (fields, constructors, methods), normalized.
 function members(classFile: string): string[] {
   const out = execFileSync("javap", ["-p", classFile], { encoding: "utf8" });
@@ -437,6 +467,30 @@ test(
 
     expect(ourOut).toBe(refOut);
     expect(refOut).toBe("42\n7\n2\n");
+  },
+);
+
+test(
+  "break and continue in loops run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Lp",
+      [
+        "public class Lp {",
+        "  static int sumEven(int n){ int s=0; for(int i=0;i<n;i++){ if(i%2==1) continue; s=s+i; } return s; }",
+        "  static int firstGt(int n, int t){ int r=-1; for(int i=0;i<n;i++){ if(i>t){ r=i; break; } } return r; }",
+        "  static int whileBreak(int n){ int c=0; while(true){ c=c+1; if(c>=n) break; } return c; }",
+        "  static int doCont(int n){ int s=0,i=0; do { i=i+1; if(i==3) continue; s=s+i; } while(i<n); return s; }",
+        "  static int nested(int n){ int c=0; for(int i=0;i<n;i++){ for(int j=0;j<n;j++){ if(j==2) break; c=c+1; } } return c; }",
+        "  public static void main(String[] a){",
+        "    System.out.println(sumEven(6)); System.out.println(firstGt(10,4));",
+        "    System.out.println(whileBreak(5)); System.out.println(doCont(5)); System.out.println(nested(4));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "6\n5\n5\n12\n8\n",
+    );
   },
 );
 

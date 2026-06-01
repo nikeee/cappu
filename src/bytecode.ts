@@ -23,6 +23,7 @@ import {
   type ClassDeclaration,
   type ConstructorDeclaration,
   type BreakStatement,
+  type ContinueStatement,
   type DoStatement,
   type InstanceofExpression,
   type ExpressionStatement,
@@ -809,6 +810,7 @@ function generateBody(
   const fixups: { at: number; from: number; label: Label }[] = []; // u2 branch offsets
   const wideFixups: { at: number; from: number; label: Label }[] = []; // u4 switch offsets
   const breakTargets: Label[] = []; // enclosing switch/loop end labels for `break`
+  const continueTargets: Label[] = []; // enclosing loop re-test/increment labels for `continue`
   const newLabel = (): Label => ({ offset: -1 });
   // A branch target's frame is defined by the operand stack on the branch-taken
   // path, which can differ from the live stack at the label site (e.g. when the
@@ -1847,7 +1849,11 @@ function generateBody(
         const endL = newLabel();
         placeLabel(startL);
         emitBranch(s.condition, endL, false);
+        breakTargets.push(endL);
+        continueTargets.push(startL); // continue re-tests the condition
         inScope(() => emitStmt(s.statement));
+        breakTargets.pop();
+        continueTargets.pop();
         branchTo(OP_GOTO, startL);
         placeLabel(endL);
         return false;
@@ -1855,9 +1861,17 @@ function generateBody(
       case SyntaxKind.DoStatement: {
         const s = stmt as DoStatement;
         const startL = newLabel();
+        const condL = newLabel();
+        const endL = newLabel();
         placeLabel(startL);
+        breakTargets.push(endL);
+        continueTargets.push(condL); // continue jumps to the trailing condition
         inScope(() => emitStmt(s.statement));
+        breakTargets.pop();
+        continueTargets.pop();
+        placeLabel(condL);
         emitBranch(s.condition, startL, true);
+        placeLabel(endL);
         return false;
       }
       case SyntaxKind.ForStatement: {
@@ -1866,10 +1880,16 @@ function generateBody(
           if (s.initializer) emitStmt(s.initializer);
           for (const e of s.initializerExpressions ?? []) emitStatementExpression(e);
           const startL = newLabel();
+          const stepL = newLabel();
           const endL = newLabel();
           placeLabel(startL);
           if (s.condition) emitBranch(s.condition, endL, false);
+          breakTargets.push(endL);
+          continueTargets.push(stepL); // continue runs the incrementors, then re-tests
           inScope(() => emitStmt(s.statement));
+          breakTargets.pop();
+          continueTargets.pop();
+          placeLabel(stepL);
           for (const e of s.incrementors ?? []) emitStatementExpression(e);
           branchTo(OP_GOTO, startL);
           placeLabel(endL);
@@ -1879,6 +1899,13 @@ function generateBody(
       case SyntaxKind.BreakStatement: {
         if ((stmt as BreakStatement).label) throw new UnsupportedEmit(); // labeled break: later
         const target = breakTargets.at(-1);
+        if (!target) throw new UnsupportedEmit();
+        branchTo(OP_GOTO, target);
+        return true;
+      }
+      case SyntaxKind.ContinueStatement: {
+        if ((stmt as ContinueStatement).label) throw new UnsupportedEmit(); // labeled continue: later
+        const target = continueTargets.at(-1);
         if (!target) throw new UnsupportedEmit();
         branchTo(OP_GOTO, target);
         return true;
