@@ -19,6 +19,7 @@ import {
   type BinaryExpression,
   type CallExpression,
   type ClassDeclaration,
+  type ConstructorDeclaration,
   type DoStatement,
   type ExpressionStatement,
   type FieldDeclaration,
@@ -29,6 +30,7 @@ import {
   type LocalVariableDeclarationStatement,
   type MethodDeclaration,
   type Node,
+  type ObjectCreationExpression,
   type Parameter,
   type PrefixUnaryExpression,
   type PropertyAccessExpression,
@@ -148,8 +150,12 @@ const OP_L2D = 0x8a;
 const OP_F2D = 0x8d;
 const OP_POP = 0x57;
 const OP_POP2 = 0x58;
+const OP_DUP = 0x59;
+const OP_NEW = 0xbb;
 const OP_GETSTATIC = 0xb2;
+const OP_PUTSTATIC = 0xb3;
 const OP_GETFIELD = 0xb4;
+const OP_PUTFIELD = 0xb5;
 const OP_INVOKEVIRTUAL = 0xb6;
 const OP_INVOKESPECIAL = 0xb7;
 const OP_INVOKESTATIC = 0xb8;
@@ -574,6 +580,17 @@ function isStaticDeclaration(declaration: { modifiers?: readonly Node[] }): bool
   return (declaration.modifiers ?? []).some(m => m.kind === SyntaxKind.StaticKeyword);
 }
 
+// A declared constructor of `typeSymbol` taking `argCount` parameters, if any.
+function findConstructor(typeSymbol: Symbol, argCount: number): ConstructorDeclaration | undefined {
+  const declaration = typeSymbol.valueDeclaration ?? typeSymbol.declarations?.[0];
+  const members = (declaration as { members?: readonly Node[] } | undefined)?.members ?? [];
+  return members.find(
+    m =>
+      m.kind === SyntaxKind.ConstructorDeclaration &&
+      (m as ConstructorDeclaration).parameters.length === argCount,
+  ) as ConstructorDeclaration | undefined;
+}
+
 // Generate real bytecode for a method body. Throws UnsupportedEmit for anything
 // not yet handled, so emitMethod can fall back to a verifiable placeholder.
 function generateBody(
@@ -851,11 +868,30 @@ function generateBody(
       case SyntaxKind.Identifier: {
         const symbol = checker.resolveName(node as Identifier);
         const local = symbol ? locals.get(symbol) : undefined;
-        if (!local) throw new UnsupportedEmit(); // fields/statics via simple name: later
-        loadVar(local.slot, local.descriptor);
-        push(local.descriptor);
-        return local.descriptor;
+        if (local) {
+          loadVar(local.slot, local.descriptor);
+          push(local.descriptor);
+          return local.descriptor;
+        }
+        // A field referenced by its simple name: implicit `this.f` or a static.
+        if (symbol && symbol.flags & SymbolFlags.Field) {
+          const info = fieldInfoOf(symbol);
+          if (info.isStatic) {
+            code.u1(OP_GETSTATIC);
+          } else {
+            code.u1(OP_ALOAD_0);
+            pushRef();
+            code.u1(OP_GETFIELD);
+            pop(1);
+          }
+          code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
+          push(info.descriptor);
+          return info.descriptor;
+        }
+        throw new UnsupportedEmit();
       }
+      case SyntaxKind.ObjectCreationExpression:
+        return emitNew(node);
       case SyntaxKind.BinaryExpression: {
         const b = node as BinaryExpression;
         return isBooleanOperator(b.operatorToken) ? emitBoolean(node) : emitBinary(b);
@@ -926,6 +962,37 @@ function generateBody(
     }
     if (returnDesc !== "V") push(returnDesc);
     return returnDesc;
+  };
+
+  // new T(args): new; dup; <args>; invokespecial T.<init>:(...)V -> leaves the ref.
+  const emitNew = (node: Node): string => {
+    const created = checker.getTypeOfExpression(node);
+    if (created.kind !== TypeKind.Class) throw new UnsupportedEmit();
+    const owner = binaryName(created.symbol);
+    const args = (node as ObjectCreationExpression).arguments ?? [];
+
+    const ctor = findConstructor(created.symbol, args.length);
+    const ctorParams = ctor
+      ? ctor.parameters.map(p => paramDescriptor(p as Parameter, program))
+      : [];
+    if (!ctor && args.length > 0) throw new UnsupportedEmit(); // unknown constructor
+    const ctorDescriptor = `(${ctorParams.join("")})V`;
+
+    code.u1(OP_NEW);
+    code.u2(cp.classInfo(owner));
+    pushRef();
+    code.u1(OP_DUP);
+    pushRef();
+    let argSlots = 0;
+    args.forEach((arg, i) => {
+      const d = emitExpr(arg);
+      if (i < ctorParams.length) coerce(d, ctorParams[i]!);
+      argSlots += slotsOf(ctorParams[i] ?? d);
+    });
+    code.u1(OP_INVOKESPECIAL);
+    code.u2(cp.methodref(owner, "<init>", ctorDescriptor));
+    pop(1 + argSlots); // invokespecial consumes the dup'd ref and the arguments
+    return `L${owner};`;
   };
 
   // Numeric category of an expression's static type, or undefined for anything
@@ -1070,17 +1137,64 @@ function generateBody(
     }
   };
 
-  // Assignment used as a statement: store into a local, leaving nothing on the
-  // stack (field/array targets and compound assignment come later).
+  // Assignment used as a statement: store into a local or field, leaving nothing
+  // on the stack (array targets and compound assignment come later).
   const emitAssignStatement = (assign: AssignmentExpression): void => {
     if (assign.operatorToken !== SyntaxKind.EqualsToken) throw new UnsupportedEmit();
-    if (assign.left.kind !== SyntaxKind.Identifier) throw new UnsupportedEmit();
-    const symbol = checker.resolveName(assign.left as Identifier);
-    const local = symbol ? locals.get(symbol) : undefined;
-    if (!local) throw new UnsupportedEmit();
-    const rd = emitExpr(assign.right);
-    coerce(rd, local.descriptor);
-    storeVar(local.slot, local.descriptor);
+    const target = assign.left;
+
+    // Local: emit value (coerced) and store.
+    if (target.kind === SyntaxKind.Identifier) {
+      const symbol = checker.resolveName(target as Identifier);
+      const local = symbol ? locals.get(symbol) : undefined;
+      if (local) {
+        coerce(emitExpr(assign.right), local.descriptor);
+        storeVar(local.slot, local.descriptor);
+        return;
+      }
+      // Field by simple name: implicit `this.f = v` or a static field.
+      if (symbol && symbol.flags & SymbolFlags.Field) {
+        const info = fieldInfoOf(symbol);
+        if (info.isStatic) {
+          coerce(emitExpr(assign.right), info.descriptor);
+          code.u1(OP_PUTSTATIC);
+          code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
+          pop(slotsOf(info.descriptor));
+        } else {
+          code.u1(OP_ALOAD_0);
+          pushRef();
+          coerce(emitExpr(assign.right), info.descriptor);
+          code.u1(OP_PUTFIELD);
+          code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
+          pop(1 + slotsOf(info.descriptor)); // receiver + value
+        }
+        return;
+      }
+      throw new UnsupportedEmit();
+    }
+
+    // `obj.f = v` / `Type.staticF = v`.
+    if (target.kind === SyntaxKind.PropertyAccessExpression) {
+      const access = target as PropertyAccessExpression;
+      const symbol = checker.resolveName(access.name);
+      if (!symbol || !(symbol.flags & SymbolFlags.Field)) throw new UnsupportedEmit();
+      const info = fieldInfoOf(symbol);
+      if (info.isStatic) {
+        coerce(emitExpr(assign.right), info.descriptor);
+        code.u1(OP_PUTSTATIC);
+        code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
+        pop(slotsOf(info.descriptor));
+      } else {
+        emitExpr(access.expression); // receiver
+        coerce(emitExpr(assign.right), info.descriptor);
+        code.u1(OP_PUTFIELD);
+        code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
+        pop(1 + slotsOf(info.descriptor));
+      }
+      return;
+    }
+
+    throw new UnsupportedEmit();
   };
 
   // Comparison operator -> offset into the if_icmp<cond> family (eq,ne,lt,ge,gt,le).

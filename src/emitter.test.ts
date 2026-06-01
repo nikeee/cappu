@@ -233,6 +233,43 @@ test(
   },
 );
 
+test(
+  "object creation and field access run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    const name = "Obj";
+    const src = [
+      "public class Obj {",
+      "  int x;",
+      "  static int count;",
+      "  void set(int v) { this.x = v; }",
+      "  int get() { return x; }",
+      "  static void bump() { count = count + 1; }",
+      "  public static void main(String[] args) {",
+      "    Obj o = new Obj();",
+      "    o.set(42);",
+      "    System.out.println(o.get());",
+      "    o.x = 7;",
+      "    System.out.println(o.x);",
+      "    bump(); bump();",
+      "    System.out.println(count);",
+      "  }",
+      "}",
+    ].join("\n");
+    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
+    writeFileSync(join(ref, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+
+    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+    writeFileSync(join(ours, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+
+    expect(ourOut).toBe(refOut);
+    expect(refOut).toBe("42\n7\n2\n");
+  },
+);
+
 for (const [name, { source: src, stdout }] of Object.entries(CONTROL)) {
   test(`control flow binary baseline: ${name}`, () => {
     const bytes = emit(name, src);
