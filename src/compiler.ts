@@ -1,10 +1,7 @@
-#!/usr/bin/env -S tsx
-
-// Minimal command-line compiler: javac-lite. Reads .java files, parses them and
+// Minimal compiler core: javac-lite. Reads .java files, parses them and
 // writes one .class file per top-level class into the output directory (default:
 // alongside each source). Code generation is at an early stage - see emitter.ts.
-//
-//   tsx src/compile.ts [-d <outdir>] <file.java> ...
+// Invoked via cli.ts (`cappu compile`).
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -15,13 +12,7 @@ import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
 import { pathToUri } from "./workspace.ts";
 
-function main(argv: string[]): number {
-  let outDir: string | undefined;
-  const files: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "-d") outDir = argv[++i];
-    else files.push(argv[i]!);
-  }
+export function runCompile(files: string[], outDir?: string): number {
   if (files.length === 0) {
     process.stderr.write("usage: compile [-d <outdir>] <file.java> ...\n");
     return 2;
@@ -52,5 +43,3 @@ function main(argv: string[]): number {
   }
   return 0;
 }
-
-process.exit(main(process.argv.slice(2)));
