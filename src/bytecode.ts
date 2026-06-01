@@ -90,6 +90,16 @@ const CONSTANT_Fieldref = 9;
 const CONSTANT_Methodref = 10;
 const CONSTANT_InterfaceMethodref = 11;
 const CONSTANT_NameAndType = 12;
+const CONSTANT_MethodHandle = 15;
+const CONSTANT_InvokeDynamic = 18;
+const REF_invokeStatic = 6; // MethodHandle reference_kind (JVMS 4.4.8)
+
+// java.lang.invoke.StringConcatFactory.makeConcatWithConstants bootstrap (JLS 15.18.1).
+const STRING_CONCAT_FACTORY = "java/lang/invoke/StringConcatFactory";
+const MAKE_CONCAT = "makeConcatWithConstants";
+const MAKE_CONCAT_BSM_DESCRIPTOR =
+  "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;";
+const OP_INVOKEDYNAMIC = 0xba;
 
 // Opcodes (JVMS 6.5) used so far.
 const OP_ACONST_NULL = 0x01;
@@ -235,6 +245,8 @@ class ConstantPool {
   private entries = new ByteBuffer();
   private count = 0; // number of entries (next index is count + 1)
   private cache = new Map<string, number>();
+  // BootstrapMethods entries (JVMS 4.7.23): bootstrap MethodHandle + static args.
+  private bootstraps: { handle: number; args: number[] }[] = [];
 
   private intern(key: string, write: (b: ByteBuffer) => void): number {
     const existing = this.cache.get(key);
@@ -325,6 +337,51 @@ class ConstantPool {
     });
     this.count++; // the second (unusable) slot
     return index;
+  }
+
+  private methodHandle(referenceKind: number, referenceIndex: number): number {
+    return this.intern(`mh:${referenceKind}:${referenceIndex}`, b => {
+      b.u1(CONSTANT_MethodHandle);
+      b.u1(referenceKind);
+      b.u2(referenceIndex);
+    });
+  }
+
+  /**
+   * An invokedynamic to StringConcatFactory.makeConcatWithConstants with the given
+   * recipe and dynamic-argument descriptor. Registers the bootstrap method and
+   * returns the CONSTANT_InvokeDynamic index.
+   */
+  invokeDynamicConcat(recipe: string, dynamicArgsDescriptor: string): number {
+    const handle = this.methodHandle(
+      REF_invokeStatic,
+      this.methodref(STRING_CONCAT_FACTORY, MAKE_CONCAT, MAKE_CONCAT_BSM_DESCRIPTOR),
+    );
+    const recipeIndex = this.string(recipe);
+    const bootstrapIndex = this.bootstraps.length;
+    this.bootstraps.push({ handle, args: [recipeIndex] });
+    const nt = this.nameAndType(MAKE_CONCAT, `(${dynamicArgsDescriptor})Ljava/lang/String;`);
+    return this.intern(`indy:${bootstrapIndex}:${dynamicArgsDescriptor}`, b => {
+      b.u1(CONSTANT_InvokeDynamic);
+      b.u2(bootstrapIndex);
+      b.u2(nt);
+    });
+  }
+
+  get bootstrapMethodCount(): number {
+    return this.bootstraps.length;
+  }
+
+  /** The BootstrapMethods attribute body (num_bootstrap_methods + entries). */
+  bootstrapMethodsBody(): ByteBuffer {
+    const body = new ByteBuffer();
+    body.u2(this.bootstraps.length);
+    for (const { handle, args } of this.bootstraps) {
+      body.u2(handle);
+      body.u2(args.length);
+      for (const a of args) body.u2(a);
+    }
+    return body;
   }
 
   /** Write `constant_pool_count` followed by the pool entries. */
@@ -937,6 +994,12 @@ function generateBody(
         return emitNew(node);
       case SyntaxKind.BinaryExpression: {
         const b = node as BinaryExpression;
+        if (
+          b.operatorToken === SyntaxKind.PlusToken &&
+          isStringType(checker.getTypeOfExpression(b))
+        ) {
+          return emitStringConcat(b);
+        }
         return isBooleanOperator(b.operatorToken) ? emitBoolean(node) : emitBinary(b);
       }
       case SyntaxKind.PrefixUnaryExpression: {
@@ -1088,6 +1151,44 @@ function generateBody(
       }
     }
     coerce(emitExpr(node), targetCat);
+  };
+
+  const isStringType = (type: Type): boolean =>
+    type.kind === TypeKind.Class && binaryName(type.symbol) === "java/lang/String";
+
+  // String concatenation a + b + ... -> invokedynamic makeConcatWithConstants
+  // (JLS 15.18.1). Every operand is a dynamic argument (recipe of  markers);
+  // operand types drive the indy descriptor (so char appends a char, not its code).
+  const emitStringConcat = (node: BinaryExpression): string => {
+    const operands: Node[] = [];
+    const flatten = (n: Node): void => {
+      if (
+        n.kind === SyntaxKind.BinaryExpression &&
+        (n as BinaryExpression).operatorToken === SyntaxKind.PlusToken &&
+        isStringType(checker.getTypeOfExpression(n))
+      ) {
+        flatten((n as BinaryExpression).left);
+        flatten((n as BinaryExpression).right);
+      } else {
+        operands.push(n);
+      }
+    };
+    flatten(node);
+
+    let descriptor = "";
+    let argSlots = 0;
+    for (const operand of operands) {
+      const d = typeDescriptor(checker.getTypeOfExpression(operand));
+      emitExpr(operand);
+      descriptor += d;
+      argSlots += slotsOf(d);
+    }
+    code.u1(OP_INVOKEDYNAMIC);
+    code.u2(cp.invokeDynamicConcat(String.fromCharCode(1).repeat(operands.length), descriptor));
+    code.u2(0);
+    pop(argSlots);
+    push("Ljava/lang/String;");
+    return "Ljava/lang/String;";
   };
 
   const emitBinary = (node: BinaryExpression): string => {
@@ -1804,6 +1905,19 @@ export function emitClass(
     methodCount++;
   }
 
+  // Class attributes, built before writeInto so any new Utf8 names land in the
+  // pool. BootstrapMethods carries the invokedynamic targets for string concat.
+  const classAttributes = new ByteBuffer();
+  let classAttributeCount = 0;
+  if (cp.bootstrapMethodCount > 0) {
+    const nameIndex = cp.utf8("BootstrapMethods");
+    const body = cp.bootstrapMethodsBody();
+    classAttributes.u2(nameIndex);
+    classAttributes.u4(body.length);
+    classAttributes.append(body);
+    classAttributeCount++;
+  }
+
   const out = new ByteBuffer();
   out.u4(MAGIC);
   out.u2(MINOR_VERSION);
@@ -1817,7 +1931,8 @@ export function emitClass(
   out.append(fields.buffer);
   out.u2(methodCount);
   out.append(methods);
-  out.u2(0); // attributes_count
+  out.u2(classAttributeCount);
+  out.append(classAttributes);
 
   return { name, bytes: out.toUint8Array() };
 }

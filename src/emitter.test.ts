@@ -235,6 +235,36 @@ test(
 );
 
 test(
+  "string concatenation (invokedynamic) runs identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    const name = "Sc";
+    const src = [
+      "public class Sc {",
+      "  public static void main(String[] args) {",
+      '    String who = "world";',
+      "    int n = 42;",
+      '    System.out.println("Hello, " + who + "!");',
+      '    System.out.println("n = " + n + ", twice = " + (n * 2));',
+      '    System.out.println("char: " + \'X\' + " bool: " + true);',
+      '    System.out.println(1 + 2 + " items");',
+      "  }",
+      "}",
+    ].join("\n");
+    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
+    writeFileSync(join(ref, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+
+    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+    writeFileSync(join(ours, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+    expect(ourOut).toBe(refOut);
+    expect(refOut).toBe("Hello, world!\nn = 42, twice = 84\nchar: X bool: true\n3 items\n");
+  },
+);
+
+test(
   "field initializers and static constants run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {
