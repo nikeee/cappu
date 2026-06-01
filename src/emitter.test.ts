@@ -471,6 +471,35 @@ test(
 );
 
 test(
+  "compound assignment (+=, bitwise, narrowing, fields, string) runs identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Ca",
+      [
+        "public class Ca {",
+        "  static int f; int g;",
+        "  static int locals(int n){ int s=0; for(int i=0;i<n;i++){ s+=i; s*=2; s-=1; } return s; }",
+        "  static int bits(int x){ x<<=2; x|=1; x^=3; x&=0xFE; x>>=1; return x; }",
+        "  static int narrow(){ byte b=10; b+=300; return b; }", // implicit narrowing back to byte
+        "  static double dbl(double d, int i){ d+=i; d*=1.5; return d; }",
+        "  static int idivd(int i){ i+=2.7; return i; }", // int += double -> d2i narrowing
+        "  static int statics(int n){ f=5; f+=n; return f; }",
+        "  int inst(int n){ g=1; g+=n; g*=3; return g; }",
+        '  static String str(){ String s="a"; s+="b"; s+=1; s+=true; return s; }',
+        "  public static void main(String[] a){",
+        "    System.out.println(locals(4)); System.out.println(bits(255)); System.out.println(narrow());",
+        "    System.out.println(dbl(2.0,3)); System.out.println(idivd(5)); System.out.println(statics(10));",
+        "    System.out.println(new Ca().inst(4)); System.out.println(str());",
+        "  }",
+        "}",
+      ].join("\n"),
+      "7\n127\n54\n7.5\n7\n15\n15\nab1true\n",
+    );
+  },
+);
+
+test(
   "break and continue in loops run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

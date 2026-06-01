@@ -633,9 +633,16 @@ export function createChecker(program: Program): Checker {
   }
 
   function numericLiteralType(value: string): Type {
-    if (/[lL]$/.test(value)) return primitiveType("long");
-    if (/[fF]$/.test(value)) return primitiveType("float");
-    if (/[dD]$/.test(value) || /[.eEpP]/.test(value)) return primitiveType("double");
+    const v = value.replace(/_/g, "");
+    // In hex/binary integer literals the letters a-f are digits, not type
+    // suffixes; only a trailing L counts (and a 'p' marks a hex float).
+    if (/^0[xXbB]/.test(v)) {
+      if (/[pP]/.test(v)) return primitiveType("double");
+      return /[lL]$/.test(v) ? primitiveType("long") : intType;
+    }
+    if (/[lL]$/.test(v)) return primitiveType("long");
+    if (/[fF]$/.test(v)) return primitiveType("float");
+    if (/[dD]$/.test(v) || /[.eE]/.test(v)) return primitiveType("double");
     return intType;
   }
 

@@ -1468,59 +1468,135 @@ function generateBody(
   };
 
   // Assignment used as a statement: store into a local or field, leaving nothing
-  // on the stack (array targets and compound assignment come later).
+  // Compound-assignment operator -> its underlying binary operator.
+  const COMPOUND_BASE: Partial<Record<SyntaxKind, SyntaxKind>> = {
+    [SyntaxKind.PlusEqualsToken]: SyntaxKind.PlusToken,
+    [SyntaxKind.MinusEqualsToken]: SyntaxKind.MinusToken,
+    [SyntaxKind.AsteriskEqualsToken]: SyntaxKind.AsteriskToken,
+    [SyntaxKind.SlashEqualsToken]: SyntaxKind.SlashToken,
+    [SyntaxKind.PercentEqualsToken]: SyntaxKind.PercentToken,
+    [SyntaxKind.AmpersandEqualsToken]: SyntaxKind.AmpersandToken,
+    [SyntaxKind.BarEqualsToken]: SyntaxKind.BarToken,
+    [SyntaxKind.CaretEqualsToken]: SyntaxKind.CaretToken,
+    [SyntaxKind.LessThanLessThanEqualsToken]: SyntaxKind.LessThanLessThanToken,
+    [SyntaxKind.GreaterThanGreaterThanEqualsToken]: SyntaxKind.GreaterThanGreaterThanToken,
+    [SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken]:
+      SyntaxKind.GreaterThanGreaterThanGreaterThanToken,
+  };
+
+  // For `target op= rhs`, with the current target value already on the stack,
+  // combine it with rhs (JLS 15.26.2: implicit narrowing back to the target).
+  const combineCompound = (targetDesc: string, baseOp: SyntaxKind, rhsNode: Node): void => {
+    const tcat = category(targetDesc);
+    if (tcat === "A") {
+      // String concatenation: the current string is on the stack, append rhs.
+      const rhsDesc = emitExpr(rhsNode);
+      code.u1(OP_INVOKEDYNAMIC);
+      code.u2(cp.invokeDynamicConcat(String.fromCharCode(1).repeat(2), `${targetDesc}${rhsDesc}`));
+      code.u2(0);
+      pop(2);
+      push("Ljava/lang/String;");
+      return;
+    }
+    const shift = SHIFTS[baseOp];
+    if (shift !== undefined) {
+      coerce(emitExpr(rhsNode), "I"); // shift distance is always int
+      code.u1(shift + (tcat === "J" ? 1 : 0));
+      pop(); // distance
+      convertPrimitive(tcat, targetDesc); // narrow for byte/char/short
+      return;
+    }
+    const base = ARITHMETIC[baseOp];
+    if (base === undefined) throw new UnsupportedEmit();
+    const rcat = numericCategory(checker.getTypeOfExpression(rhsNode)) ?? "I";
+    const p = promote(tcat, rcat);
+    coerce(tcat, p); // widen the current value to the promotion type
+    emitOperand(rhsNode, p);
+    code.u1(base + TYPE_OFFSET[p]!);
+    pop(2);
+    push(p);
+    convertPrimitive(p, targetDesc); // narrow the result back to the target type
+  };
+
+  // `target = rhs` and `target op= rhs` for locals and (static/instance) fields.
+  // Array-element targets come with arrays.
   const emitAssignStatement = (assign: AssignmentExpression): void => {
-    if (assign.operatorToken !== SyntaxKind.EqualsToken) throw new UnsupportedEmit();
+    const op = assign.operatorToken;
+    const baseOp = op === SyntaxKind.EqualsToken ? undefined : COMPOUND_BASE[op];
+    if (op !== SyntaxKind.EqualsToken && baseOp === undefined) throw new UnsupportedEmit();
     const target = assign.left;
 
-    // Local: emit value (coerced) and store.
+    // Leave the value to store on the stack: rhs alone, or `current op rhs`.
+    const emitValue = (descriptor: string, loadCurrent: () => void): void => {
+      if (baseOp === undefined) {
+        coerce(emitExpr(assign.right), descriptor);
+        return;
+      }
+      loadCurrent();
+      combineCompound(descriptor, baseOp, assign.right);
+    };
+
+    // Write to a field. For a compound assignment on an instance field the
+    // receiver is dup'd so the read (getfield) and write (putfield) share it.
+    const writeField = (
+      info: { owner: string; name: string; descriptor: string; isStatic: boolean },
+      emitReceiver: () => void,
+    ): void => {
+      const ref = (): void => code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
+      if (info.isStatic) {
+        emitValue(info.descriptor, () => {
+          code.u1(OP_GETSTATIC);
+          ref();
+          push(info.descriptor);
+        });
+        code.u1(OP_PUTSTATIC);
+        ref();
+        pop(); // value
+        return;
+      }
+      emitReceiver();
+      if (baseOp !== undefined) {
+        code.u1(OP_DUP); // one receiver for the read, one for the write
+        push(stack[stack.length - 1]!);
+      }
+      emitValue(info.descriptor, () => {
+        code.u1(OP_GETFIELD);
+        ref();
+        pop(1); // receiver -> field value
+        push(info.descriptor);
+      });
+      code.u1(OP_PUTFIELD);
+      ref();
+      pop(2); // receiver + value
+    };
+
     if (target.kind === SyntaxKind.Identifier) {
       const symbol = checker.resolveName(target as Identifier);
       const local = symbol ? locals.get(symbol) : undefined;
       if (local) {
-        coerce(emitExpr(assign.right), local.descriptor);
+        emitValue(local.descriptor, () => {
+          loadVar(local.slot, local.descriptor);
+          push(local.descriptor);
+        });
         storeVar(local.slot, local.descriptor);
         return;
       }
-      // Field by simple name: implicit `this.f = v` or a static field.
+      // Field by simple name: implicit `this.f` or a static field.
       if (symbol && symbol.flags & SymbolFlags.Field) {
-        const info = fieldInfoOf(symbol);
-        if (info.isStatic) {
-          coerce(emitExpr(assign.right), info.descriptor);
-          code.u1(OP_PUTSTATIC);
-          code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
-          pop(); // value
-        } else {
+        writeField(fieldInfoOf(symbol), () => {
           code.u1(OP_ALOAD_0);
-          pushRef();
-          coerce(emitExpr(assign.right), info.descriptor);
-          code.u1(OP_PUTFIELD);
-          code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
-          pop(2); // receiver + value
-        }
+          pushRef(`L${thisInternalName};`);
+        });
         return;
       }
       throw new UnsupportedEmit();
     }
 
-    // `obj.f = v` / `Type.staticF = v`.
     if (target.kind === SyntaxKind.PropertyAccessExpression) {
       const access = target as PropertyAccessExpression;
       const symbol = checker.resolveName(access.name);
       if (!symbol || !(symbol.flags & SymbolFlags.Field)) throw new UnsupportedEmit();
-      const info = fieldInfoOf(symbol);
-      if (info.isStatic) {
-        coerce(emitExpr(assign.right), info.descriptor);
-        code.u1(OP_PUTSTATIC);
-        code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
-        pop(); // value
-      } else {
-        emitExpr(access.expression); // receiver
-        coerce(emitExpr(assign.right), info.descriptor);
-        code.u1(OP_PUTFIELD);
-        code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
-        pop(2); // receiver + value
-      }
+      writeField(fieldInfoOf(symbol), () => emitExpr(access.expression));
       return;
     }
 
