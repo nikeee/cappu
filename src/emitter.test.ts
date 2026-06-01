@@ -546,6 +546,35 @@ test(
 );
 
 test(
+  "method references (static/bound/unbound/constructor) run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Mr",
+      [
+        "import java.util.function.Supplier;",
+        "import java.util.function.Predicate;",
+        "import java.util.function.Function;",
+        "import java.util.function.Consumer;",
+        "public class Mr {",
+        "  public static void main(String[] a){",
+        "    Predicate<String> empty = String::isEmpty;", // unbound instance
+        '    System.out.println(empty.test("")); System.out.println(empty.test("x"));',
+        "    Consumer<String> pr = System.out::println;", // bound instance
+        '    pr.accept("bound!");',
+        "    Function<String,Integer> len = String::length;", // unbound; int->Integer adapted by the metafactory
+        '    System.out.println(len.apply("hello"));',
+        "    Supplier<Mr> ctor = Mr::new;", // constructor reference
+        "    System.out.println(ctor.get() != null);",
+        "  }",
+        "}",
+      ].join("\n"),
+      "true\nfalse\nbound!\n5\ntrue\n",
+    );
+  },
+);
+
+test(
   "this-capturing lambdas (instance context) run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

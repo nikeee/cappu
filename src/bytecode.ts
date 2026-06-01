@@ -22,6 +22,7 @@ import {
   type CastExpression,
   type ConditionalExpression,
   type LambdaExpression,
+  type MethodReferenceExpression,
   type ClassDeclaration,
   type ConstructorDeclaration,
   type BreakStatement,
@@ -1293,6 +1294,8 @@ function generateBody(
         return emitConditional(node as ConditionalExpression);
       case SyntaxKind.LambdaExpression:
         return emitLambda(node as LambdaExpression);
+      case SyntaxKind.MethodReferenceExpression:
+        return emitMethodRef(node);
       case SyntaxKind.CallExpression:
         return emitCall(node as CallExpression);
       case SyntaxKind.CastExpression:
@@ -2068,6 +2071,66 @@ function generateBody(
     code.u2(idx);
     code.u2(0);
     pop(captureParams.length + (needsThis ? 1 : 0));
+    push(interfaceDesc);
+    return interfaceDesc;
+  };
+
+  // A method reference (JLS 15.13): an invokedynamic whose impl handle points
+  // directly at the referenced method/constructor (no synthetic body). For a
+  // bound reference (expr::m) the receiver is evaluated and captured; static,
+  // unbound (Type::m), and constructor (Type::new) references capture nothing.
+  const emitMethodRef = (node: Node): string => {
+    const info = checker.getMethodRefInfo(node);
+    if (!info) throw new UnsupportedEmit();
+    const ref = node as MethodReferenceExpression;
+    const instParamDescs = info.instParams.map(t => typeDescriptor(t));
+    const samErased = `(${info.erasedParams.map(t => typeDescriptor(t)).join("")})${descOf(info.erasedReturn)}`;
+    const instantiated = `(${instParamDescs.join("")})${descOf(info.instReturn)}`;
+    const interfaceDesc = typeDescriptor(info.interfaceType);
+    const ownerInternal = binaryName(info.ownerSymbol);
+    const isInterface = (info.ownerSymbol.flags & SymbolFlags.Interface) !== 0;
+
+    let refKind: number;
+    let implName: string;
+    let implDescriptor: string;
+    let dynamicArgs = "";
+    if (info.kind === "constructor") {
+      refKind = REF_newInvokeSpecial;
+      implName = "<init>";
+      const ctor = findConstructor(info.ownerSymbol, info.instParams.length);
+      const ctorParams = ctor
+        ? ctor.parameters.map(p => paramDescriptor(p as Parameter, program))
+        : [];
+      implDescriptor = `(${ctorParams.join("")})V`;
+    } else {
+      const decl = info.target!;
+      implName = decl.name.text;
+      implDescriptor = methodDescriptor(decl, program);
+      refKind =
+        info.kind === "static"
+          ? REF_invokeStatic
+          : isInterface
+            ? REF_invokeInterface
+            : REF_invokeVirtual;
+      if (info.kind === "bound") {
+        dynamicArgs = emitExpr(ref.expression); // evaluate and capture the receiver
+      }
+    }
+    const idx = cp.invokeDynamicLambda(
+      info.samName,
+      `(${dynamicArgs})${interfaceDesc}`,
+      samErased,
+      refKind,
+      ownerInternal,
+      implName,
+      implDescriptor,
+      instantiated,
+      isInterface,
+    );
+    code.u1(OP_INVOKEDYNAMIC);
+    code.u2(idx);
+    code.u2(0);
+    if (dynamicArgs) pop(1); // the captured receiver
     push(interfaceDesc);
     return interfaceDesc;
   };

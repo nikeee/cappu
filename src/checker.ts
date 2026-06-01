@@ -47,6 +47,7 @@ import {
   type LambdaExpression,
   type LiteralExpression,
   type MethodDeclaration,
+  type MethodReferenceExpression,
   type Node,
   type ObjectCreationExpression,
   type ParenthesizedExpression,
@@ -79,10 +80,21 @@ export interface LambdaInfo {
   readonly instReturn: Type;
 }
 
+/** Method-reference lowering info: the SAM info plus the referenced method. */
+export interface MethodRefInfo extends LambdaInfo {
+  readonly kind: "static" | "bound" | "unbound" | "constructor";
+  /** The type declaring the referenced method (or the constructed type). */
+  readonly ownerSymbol: Symbol;
+  /** The referenced method declaration (undefined for a constructor reference). */
+  readonly target?: MethodDeclaration;
+}
+
 export interface Checker {
   resolveType(typeNode: TypeNode, fromNode: Node): Type;
   /** Lambda lowering info (target interface, SAM, erased + instantiated types). */
   getLambdaInfo(lambda: Node): LambdaInfo | undefined;
+  /** Method-reference lowering info (kind, target method), or undefined. */
+  getMethodRefInfo(node: Node): MethodRefInfo | undefined;
   getTypeOfSymbol(symbol: Symbol): Type;
   getTypeOfExpression(node: Node): Type;
   /** Resolve a name use OR a member access (a.b) to its symbol. */
@@ -479,7 +491,12 @@ export function createChecker(program: Program): Checker {
     const target = lambdaTargetType(lambda);
     if (!target || target.kind !== TypeKind.Class) return undefined;
     const sam = functionalMethod(target.symbol);
-    if (!sam) return undefined;
+    return sam ? functionalInfo(target, sam) : undefined;
+  }
+
+  // Build the SAM info (erased + instantiated parameter/return types) for a
+  // functional interface, shared by lambdas and method references.
+  function functionalInfo(target: ClassType, sam: MethodDeclaration): LambdaInfo {
     const subst = substitutionFor(target.symbol, target.typeArguments);
     const erasedParams = sam.parameters.map(p => resolveType((p as { type: TypeNode }).type, sam));
     const erasedReturn = resolveType(sam.returnType, sam);
@@ -491,6 +508,61 @@ export function createChecker(program: Program): Checker {
       instParams: erasedParams.map(t => substitute(t, subst)),
       instReturn: substitute(erasedReturn, subst),
     };
+  }
+
+  // A method reference (JLS 15.13): the target functional-interface info plus
+  // the referenced method's kind, declaring type, and declaration.
+  function getMethodRefInfo(node: Node): MethodRefInfo | undefined {
+    if (node.kind !== SyntaxKind.MethodReferenceExpression) return undefined;
+    const ref = node as MethodReferenceExpression;
+    const target = lambdaTargetType(node);
+    if (!target || target.kind !== TypeKind.Class) return undefined;
+    const sam = functionalMethod(target.symbol);
+    if (!sam) return undefined;
+    const fi = functionalInfo(target, sam);
+
+    const asType = (e: Node): Symbol | undefined =>
+      e.kind === SyntaxKind.Identifier
+        ? resolveTypeEntityName(e as Identifier, e, program)
+        : undefined;
+    const overloads = (typeSymbol: Symbol, name: string): MethodDeclaration[] => {
+      const m = lookupMember(typeSymbol, name, Meaning.Value, program);
+      return (m?.declarations?.filter(d => d.kind === SyntaxKind.MethodDeclaration) ??
+        []) as MethodDeclaration[];
+    };
+    const isStaticDecl = (d: Node): boolean =>
+      ((d as { modifiers?: readonly Node[] }).modifiers ?? []).some(
+        m => m.kind === SyntaxKind.StaticKeyword,
+      );
+    const arity = fi.instParams.length;
+
+    // Type::new
+    if (ref.isConstructorRef) {
+      const owner = asType(ref.expression);
+      return owner ? { ...fi, kind: "constructor", ownerSymbol: owner } : undefined;
+    }
+    const name = ref.name!.text;
+    // Type::method - a static method (arity == SAM arity) or an unbound instance
+    // method (the SAM's first parameter is the receiver, so arity == SAM-1).
+    const typeSym = asType(ref.expression);
+    if (typeSym) {
+      const cands = overloads(typeSym, name);
+      const staticM = cands.find(d => isStaticDecl(d) && d.parameters.length === arity);
+      if (staticM) return { ...fi, kind: "static", ownerSymbol: typeSym, target: staticM };
+      const unbound =
+        cands.find(d => !isStaticDecl(d) && d.parameters.length === arity - 1) ??
+        (cands.length === 1 ? cands[0] : undefined);
+      return unbound
+        ? { ...fi, kind: "unbound", ownerSymbol: typeSym, target: unbound }
+        : undefined;
+    }
+    // expr::method - bound to the value of `expr` (arity == SAM arity).
+    const recv = getTypeOfExpression(ref.expression);
+    if (recv.kind !== TypeKind.Class) return undefined;
+    const cands = overloads(recv.symbol, name);
+    const decl =
+      cands.find(d => d.parameters.length === arity) ?? (cands.length === 1 ? cands[0] : undefined);
+    return decl ? { ...fi, kind: "bound", ownerSymbol: recv.symbol, target: decl } : undefined;
   }
 
   function inferLambdaParameterType(symbol: Symbol): Type {
@@ -1360,6 +1432,7 @@ export function createChecker(program: Program): Checker {
   return {
     resolveType,
     getLambdaInfo,
+    getMethodRefInfo,
     getTypeOfSymbol,
     getTypeOfExpression,
     resolveName,
