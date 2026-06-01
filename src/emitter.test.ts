@@ -441,6 +441,59 @@ test(
 );
 
 test(
+  "switch statements (table + lookup, fall-through, break) run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    const name = "Sw";
+    const src = [
+      "public class Sw {",
+      "  static String day(int n) {",
+      "    switch (n) {",
+      '      case 1: return "Mon";',
+      '      case 2: return "Tue";',
+      '      case 3: case 4: return "midweek";', // shared labels
+      '      case 7: return "Sun";',
+      '      default: return "other";',
+      "    }",
+      "  }",
+      "  static int classify(int x) {",
+      "    int r = 0;",
+      "    switch (x) {",
+      "      case 0: r = 100; break;",
+      "      case 10: r = 200;", // falls through to case 11
+      "      case 11: r = r + 5; break;",
+      "      default: r = -1;",
+      "    }",
+      "    return r;",
+      "  }",
+      "  static int sparse(int x) {", // sparse -> lookupswitch
+      "    switch (x) { case 1: return 1; case 1000: return 2; case 1000000: return 3; default: return 0; }",
+      "  }",
+      "  public static void main(String[] args) {",
+      "    System.out.println(day(1)); System.out.println(day(3)); System.out.println(day(4));",
+      "    System.out.println(day(7)); System.out.println(day(9));",
+      "    System.out.println(classify(0)); System.out.println(classify(10));",
+      "    System.out.println(classify(11)); System.out.println(classify(99));",
+      "    System.out.println(sparse(1)); System.out.println(sparse(1000));",
+      "    System.out.println(sparse(1000000)); System.out.println(sparse(5));",
+      "  }",
+      "}",
+    ].join("\n");
+    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
+    writeFileSync(join(ref, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+
+    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+    writeFileSync(join(ours, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+
+    expect(ourOut).toBe(refOut);
+    expect(refOut).toBe("Mon\nmidweek\nmidweek\nSun\nother\n100\n205\n5\n-1\n1\n2\n3\n0\n");
+  },
+);
+
+test(
   "float and double arithmetic run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

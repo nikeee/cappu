@@ -22,6 +22,7 @@ import {
   type ConditionalExpression,
   type ClassDeclaration,
   type ConstructorDeclaration,
+  type BreakStatement,
   type DoStatement,
   type InstanceofExpression,
   type ExpressionStatement,
@@ -44,6 +45,8 @@ import {
   type TypeNode,
   type TypeReference,
   type VariableDeclarator,
+  type SwitchClause,
+  type SwitchStatement,
   type WhileStatement,
 } from "./types.ts";
 
@@ -200,6 +203,8 @@ const OP_IF_ICMPEQ = 0x9f; // if_icmp<cond>; same offset order
 const OP_IF_ACMPEQ = 0xa5;
 const OP_IF_ACMPNE = 0xa6;
 const OP_GOTO = 0xa7;
+const OP_TABLESWITCH = 0xaa;
+const OP_LOOKUPSWITCH = 0xab;
 const OP_IFNULL = 0xc6;
 const OP_IFNONNULL = 0xc7;
 const OP_ALOAD_0 = 0x2a;
@@ -260,6 +265,13 @@ class ByteBuffer {
   patchU2(pos: number, value: number): void {
     this.bytes[pos] = (value >>> 8) & 0xff;
     this.bytes[pos + 1] = value & 0xff;
+  }
+  // Overwrite a previously-reserved u4 (for tableswitch/lookupswitch offsets).
+  patchU4(pos: number, value: number): void {
+    this.bytes[pos] = (value >>> 24) & 0xff;
+    this.bytes[pos + 1] = (value >>> 16) & 0xff;
+    this.bytes[pos + 2] = (value >>> 8) & 0xff;
+    this.bytes[pos + 3] = value & 0xff;
   }
 }
 
@@ -794,7 +806,9 @@ function generateBody(
     stack: string[];
   }
   const frameAt = new Map<number, Frame>(); // offset -> frame snapshot
-  const fixups: { at: number; from: number; label: Label }[] = [];
+  const fixups: { at: number; from: number; label: Label }[] = []; // u2 branch offsets
+  const wideFixups: { at: number; from: number; label: Label }[] = []; // u4 switch offsets
+  const breakTargets: Label[] = []; // enclosing switch/loop end labels for `break`
   const newLabel = (): Label => ({ offset: -1 });
   // A branch target's frame is defined by the operand stack on the branch-taken
   // path, which can differ from the live stack at the label site (e.g. when the
@@ -829,6 +843,12 @@ function generateBody(
   // Pop `count` operand VALUES (not slots).
   const pop = (count = 1): void => {
     for (let i = 0; i < count; i++) stack.pop();
+  };
+  // Replace the live stack (e.g. at a switch clause boundary, where the previous
+  // clause may have ended on a terminator and left dead values behind).
+  const setStack = (to: string[]): void => {
+    stack.length = 0;
+    stack.push(...to);
   };
 
   // Numeric category of a descriptor: I (byte/char/short/boolean/int), J, F, D,
@@ -1708,6 +1728,52 @@ function generateBody(
     }
   };
 
+  // Constant value of a case label (integral or char). Non-constant or
+  // non-integral labels are not supported (string/enum/pattern switch: later).
+  const caseValue = (node: Node): number => {
+    if (node.kind === SyntaxKind.CharacterLiteral) {
+      return (node as LiteralExpression).value.charCodeAt(0);
+    }
+    const folded = foldConstant(node);
+    if (!folded || folded.kind !== "int") throw new UnsupportedEmit();
+    return Number(folded.value);
+  };
+
+  // tableswitch / lookupswitch (JVMS 6). Operands are 4-byte and must start on a
+  // 4-byte boundary from the method's code start; offsets are relative to the
+  // opcode. The choice mirrors javac's density heuristic (Gen.visitSwitch).
+  const emitSwitchInstr = (cases: { value: number; label: Label }[], defaultLabel: Label): void => {
+    const from = code.length; // opcode address; switch offsets are relative to it
+    const n = cases.length;
+    const lo = n ? cases[0]!.value : 0;
+    const hi = n ? cases[n - 1]!.value : 0;
+    const tableCost = 4 + (hi - lo + 1) + 3 * 3; // space + 3 * time (JVMS heuristic)
+    const lookupCost = 3 + 2 * n + 3 * n;
+    const useTable = n > 0 && tableCost <= lookupCost;
+    const wide = (label: Label): void => {
+      wideFixups.push({ at: code.length, from, label });
+      code.u4(0); // placeholder, backpatched
+    };
+    if (useTable) {
+      code.u1(OP_TABLESWITCH);
+      while (code.length % 4 !== 0) code.u1(0); // align operands to 4 bytes
+      wide(defaultLabel);
+      code.u4(lo & 0xffffffff);
+      code.u4(hi & 0xffffffff);
+      const byValue = new Map(cases.map(c => [c.value, c.label]));
+      for (let v = lo; v <= hi; v++) wide(byValue.get(v) ?? defaultLabel);
+    } else {
+      code.u1(OP_LOOKUPSWITCH);
+      while (code.length % 4 !== 0) code.u1(0);
+      wide(defaultLabel);
+      code.u4(n & 0xffffffff);
+      for (const c of cases) {
+        code.u4(c.value & 0xffffffff);
+        wide(c.label);
+      }
+    }
+  };
+
   // Returns true if the statement is a definite terminator (return).
   const emitStmt = (stmt: Node): boolean => {
     switch (stmt.kind) {
@@ -1810,6 +1876,66 @@ function generateBody(
           return false;
         });
       }
+      case SyntaxKind.BreakStatement: {
+        if ((stmt as BreakStatement).label) throw new UnsupportedEmit(); // labeled break: later
+        const target = breakTargets.at(-1);
+        if (!target) throw new UnsupportedEmit();
+        branchTo(OP_GOTO, target);
+        return true;
+      }
+      case SyntaxKind.SwitchStatement: {
+        const s = stmt as SwitchStatement;
+        // Colon-form switch over an integral selector. Arrow form, guards, and
+        // pattern/string/enum labels are not handled yet.
+        const unsupported = (cl: SwitchClause): boolean =>
+          cl.isArrow ||
+          cl.guard !== undefined ||
+          (cl.labels?.some(l => l.kind !== SyntaxKind.CharacterLiteral && !foldConstant(l)) ??
+            false);
+        if (s.clauses.some(unsupported)) throw new UnsupportedEmit();
+        if (numericCategory(checker.getTypeOfExpression(s.expression)) !== "I") {
+          throw new UnsupportedEmit();
+        }
+        coerce(emitExpr(s.expression), "I");
+        pop(); // selector consumed by the switch instruction
+        const base = [...stack];
+
+        const endL = newLabel();
+        breakTargets.push(endL);
+        const clauseLabels = s.clauses.map(() => newLabel());
+        let defaultLabel = endL;
+        const cases: { value: number; label: Label }[] = [];
+        s.clauses.forEach((cl, i) => {
+          if (cl.isDefault) defaultLabel = clauseLabels[i]!;
+          for (const lab of cl.labels ?? []) {
+            cases.push({ value: caseValue(lab), label: clauseLabels[i]! });
+          }
+        });
+        cases.sort((a, b) => a.value - b.value);
+        emitSwitchInstr(cases, defaultLabel);
+
+        let lastTerminated = false;
+        s.clauses.forEach((cl, i) => {
+          setStack(base); // a prior clause's terminator may have left dead values
+          placeLabel(clauseLabels[i]!);
+          lastTerminated = inScope(() => {
+            let term = false;
+            for (const st of cl.statements) term = emitStmt(st);
+            return term;
+          });
+        });
+        setStack(base);
+        placeLabel(endL);
+        breakTargets.pop();
+
+        // The switch terminates only if every value reaches a return: a default
+        // exists, the last clause does not fall through, and nothing branches to
+        // the end (a break, or a defaulting selector when no default clause).
+        const hasDefault = s.clauses.some(cl => cl.isDefault);
+        const endBranched =
+          fixups.some(f => f.label === endL) || wideFixups.some(f => f.label === endL);
+        return hasDefault && lastTerminated && !endBranched;
+      }
       default:
         throw new UnsupportedEmit();
     }
@@ -1851,9 +1977,15 @@ function generateBody(
     if (label.offset < 0) throw new UnsupportedEmit(); // label never placed
     code.patchU2(at, (label.offset - from) & 0xffff);
   }
+  for (const { at, from, label } of wideFixups) {
+    if (label.offset < 0) throw new UnsupportedEmit();
+    code.patchU4(at, (label.offset - from) & 0xffffffff);
+  }
 
   // StackMapTable: a full_frame at every branch-target offset (JVMS 4.7.4).
-  const targetOffsets = [...new Set(fixups.map(f => f.label.offset))].sort((a, b) => a - b);
+  const targetOffsets = [...new Set([...fixups, ...wideFixups].map(f => f.label.offset))].sort(
+    (a, b) => a - b,
+  );
   let stackMapTable: ByteBuffer | undefined;
   if (targetOffsets.length > 0) {
     const writeVerification = (buf: ByteBuffer, descriptor: string): void => {
