@@ -235,6 +235,43 @@ test(
 );
 
 test(
+  "field initializers and static constants run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    const name = "Ini";
+    const src = [
+      "public class Ini {",
+      "  int a = 5;",
+      "  int b = a + 10;",
+      "  static int s = 100;",
+      "  static final int K = 42;",
+      "  static final long BIG = 1000L;",
+      "  int getA() { return a; }",
+      "  int getB() { return b; }",
+      "  public static void main(String[] args) {",
+      "    Ini o = new Ini();",
+      "    System.out.println(o.getA());",
+      "    System.out.println(o.getB());",
+      "    System.out.println(s);",
+      "    System.out.println(K);",
+      "    System.out.println(BIG);",
+      "  }",
+      "}",
+    ].join("\n");
+    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
+    writeFileSync(join(ref, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+
+    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+    writeFileSync(join(ours, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+    expect(ourOut).toBe(refOut);
+    expect(refOut).toBe("5\n15\n100\n42\n1000\n");
+  },
+);
+
+test(
   "object creation and field access run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

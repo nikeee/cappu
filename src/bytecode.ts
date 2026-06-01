@@ -430,49 +430,76 @@ function emitFields(
     const descriptor = descriptorOf(field.type, program);
     const flags = memberAccessFlags(field.modifiers);
     for (const declarator of field.declarators) {
-      const name = (declarator as VariableDeclarator).name.text;
+      const d = declarator as VariableDeclarator;
       buffer.u2(flags);
-      buffer.u2(cp.utf8(name));
+      buffer.u2(cp.utf8(d.name.text));
       buffer.u2(cp.utf8(descriptor));
-      buffer.u2(0); // attributes_count (ConstantValue comes later)
+      // static final fields with a compile-time constant carry a ConstantValue.
+      const constIndex = constantValueIndex(field, d, cp, program);
+      if (constIndex === undefined) {
+        buffer.u2(0); // attributes_count
+      } else {
+        buffer.u2(1);
+        buffer.u2(cp.utf8("ConstantValue"));
+        buffer.u4(2);
+        buffer.u2(constIndex);
+      }
       count++;
     }
   }
   return { buffer, count };
 }
 
-// The default no-arg constructor: invokes the super constructor and returns.
-// `accessFlags` mirrors the class's accessibility (JLS 8.8.9).
-function emitDefaultConstructor(
+function hasFinalModifier(modifiers: readonly Node[] | undefined): boolean {
+  return (modifiers ?? []).some(m => m.kind === SyntaxKind.FinalKeyword);
+}
+
+// True when a `static final` field's initializer is a constant eligible for a
+// ConstantValue attribute (so it is excluded from <clinit>).
+function isConstantValueField(
+  field: FieldDeclaration,
+  declarator: VariableDeclarator,
+  program: Program,
+): boolean {
+  if (
+    !isStaticDeclaration(field) ||
+    !hasFinalModifier(field.modifiers) ||
+    !declarator.initializer
+  ) {
+    return false;
+  }
+  const descriptor = descriptorOf(field.type, program);
+  if (
+    descriptor === "Ljava/lang/String;" &&
+    declarator.initializer.kind === SyntaxKind.StringLiteral
+  ) {
+    return true;
+  }
+  return (
+    foldConstant(declarator.initializer) !== undefined &&
+    ["J", "Z", "I", "S", "B", "C"].includes(descriptor)
+  );
+}
+
+// The constant-pool index of a field's ConstantValue (JVMS 4.7.2), or undefined.
+function constantValueIndex(
+  field: FieldDeclaration,
+  declarator: VariableDeclarator,
   cp: ConstantPool,
-  superInternalName: string,
-  accessFlags: number,
-): ByteBuffer {
-  const superInit = cp.methodref(superInternalName, "<init>", "()V");
-
-  const code = new ByteBuffer();
-  code.u1(OP_ALOAD_0);
-  code.u1(OP_INVOKESPECIAL);
-  code.u2(superInit);
-  code.u1(OP_RETURN);
-
-  const codeAttr = new ByteBuffer();
-  codeAttr.u2(cp.utf8("Code"));
-  codeAttr.u4(12 + code.length); // max_stack(2)+max_locals(2)+code_length(4)+code+except(2)+attrs(2)
-  codeAttr.u2(1); // max_stack
-  codeAttr.u2(1); // max_locals (this)
-  codeAttr.u4(code.length);
-  codeAttr.append(code);
-  codeAttr.u2(0); // exception_table_length
-  codeAttr.u2(0); // attributes_count
-
-  const method = new ByteBuffer();
-  method.u2(accessFlags);
-  method.u2(cp.utf8("<init>"));
-  method.u2(cp.utf8("()V"));
-  method.u2(1); // attributes_count
-  method.append(codeAttr);
-  return method;
+  program: Program,
+): number | undefined {
+  if (!isConstantValueField(field, declarator, program)) return undefined;
+  const init = declarator.initializer!;
+  const descriptor = descriptorOf(field.type, program);
+  if (descriptor === "Ljava/lang/String;") {
+    return cp.string((init as LiteralExpression).value);
+  }
+  const folded = foldConstant(init)!;
+  const intValue = folded.kind === "boolean" ? (folded.value ? 1 : 0) : Number(folded.value);
+  if (descriptor === "J") {
+    return cp.long(folded.kind === "boolean" ? BigInt(intValue) : (folded.value as bigint));
+  }
+  return cp.integer(intValue);
 }
 
 function methodAccessFlags(method: MethodDeclaration | ConstructorDeclaration): number {
@@ -593,6 +620,14 @@ function findConstructor(typeSymbol: Symbol, argCount: number): ConstructorDecla
 
 // Generate real bytecode for a method body. Throws UnsupportedEmit for anything
 // not yet handled, so emitMethod can fall back to a verifiable placeholder.
+interface FieldInit {
+  isStatic: boolean;
+  owner: string;
+  name: string;
+  descriptor: string;
+  init: Node;
+}
+
 function generateBody(
   method: MethodDeclaration | ConstructorDeclaration,
   cp: ConstantPool,
@@ -602,6 +637,9 @@ function generateBody(
   // For constructors: the super class's internal name; an implicit super.<init>()
   // call is emitted before the body (explicit super()/this() is not yet handled).
   ctorSuper?: string,
+  // Field initializers run in the prologue: instance fields after super() in a
+  // constructor, static fields at the top of <clinit>.
+  fieldInits: FieldInit[] = [],
 ): { code: ByteBuffer; maxStack: number; maxLocals: number; stackMapTable?: ByteBuffer } {
   const isConstructor = method.kind === SyntaxKind.ConstructorDeclaration;
   const isStatic =
@@ -1471,6 +1509,21 @@ function generateBody(
     code.u2(cp.methodref(ctorSuper, "<init>", "()V"));
     pop(1);
   }
+  for (const fi of fieldInits) {
+    if (fi.isStatic) {
+      coerce(emitExpr(fi.init), fi.descriptor);
+      code.u1(OP_PUTSTATIC);
+      code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
+      pop(slotsOf(fi.descriptor));
+    } else {
+      code.u1(OP_ALOAD_0);
+      pushRef();
+      coerce(emitExpr(fi.init), fi.descriptor);
+      code.u1(OP_PUTFIELD);
+      code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
+      pop(1 + slotsOf(fi.descriptor));
+    }
+  }
   const terminated = emitStmt(method.body);
   if (!terminated) {
     if (returnDescriptor === "V") code.u1(OP_RETURN);
@@ -1591,21 +1644,31 @@ function writeCodeAttribute(info: ByteBuffer, cp: ConstantPool, body: MethodBody
 
 function emitConstructorMethod(
   ctor: ConstructorDeclaration,
+  flags: number,
   cp: ConstantPool,
   program: Program,
   checker: Checker,
   thisInternalName: string,
   superInternalName: string,
+  instanceInits: FieldInit[],
 ): ByteBuffer {
   const descriptor = `(${ctor.parameters.map(p => paramDescriptor(p as Parameter, program)).join("")})V`;
   const info = new ByteBuffer();
-  info.u2(methodAccessFlags(ctor));
+  info.u2(flags);
   info.u2(cp.utf8("<init>"));
   info.u2(cp.utf8(descriptor));
 
   let body: MethodBody;
   try {
-    body = generateBody(ctor, cp, program, checker, thisInternalName, superInternalName);
+    body = generateBody(
+      ctor,
+      cp,
+      program,
+      checker,
+      thisInternalName,
+      superInternalName,
+      instanceInits,
+    );
   } catch (e) {
     if (!(e instanceof UnsupportedEmit)) throw e;
     // Fallback: a valid constructor that just calls super() (body skipped).
@@ -1644,31 +1707,100 @@ export function emitClass(
   const superClassIndex = cp.classInfo(superInternalName);
   const fields = emitFields(declaration, cp, program);
 
-  // Constructors: the declared ones, or a synthesized default constructor that
-  // inherits the class's accessibility (JLS 8.8.9) when none are declared.
+  // Field initializers: instance ones run in each constructor, static ones in
+  // <clinit>; static-final compile-time constants are excluded (ConstantValue).
+  const instanceInits: FieldInit[] = [];
+  const staticInits: FieldInit[] = [];
+  for (const member of declaration.members) {
+    if (member.kind !== SyntaxKind.FieldDeclaration) continue;
+    const field = member as FieldDeclaration;
+    const isStatic = isStaticDeclaration(field);
+    const descriptor = descriptorOf(field.type, program);
+    for (const declarator of field.declarators) {
+      const d = declarator as VariableDeclarator;
+      if (!d.initializer) continue;
+      if (isStatic && isConstantValueField(field, d, program)) continue;
+      (isStatic ? staticInits : instanceInits).push({
+        isStatic,
+        owner: name,
+        name: d.name.text,
+        descriptor,
+        init: d.initializer,
+      });
+    }
+  }
+
+  // Constructors: the declared ones, or a synthesized default constructor (which
+  // inherits the class's accessibility, JLS 8.8.9) when none are declared. Each
+  // runs the instance field initializers.
   const methods = new ByteBuffer();
   let methodCount = 0;
   const declaredConstructors = declaration.members.filter(
     m => m.kind === SyntaxKind.ConstructorDeclaration,
   ) as ConstructorDeclaration[];
   if (declaredConstructors.length === 0) {
+    const defaultCtor = {
+      kind: SyntaxKind.ConstructorDeclaration,
+      parameters: [],
+      body: { kind: SyntaxKind.Block, statements: [] },
+    } as unknown as ConstructorDeclaration;
+    const flags = accessFlags & (ACC_PUBLIC | ACC_PROTECTED | ACC_PRIVATE);
     methods.append(
-      emitDefaultConstructor(
+      emitConstructorMethod(
+        defaultCtor,
+        flags,
         cp,
+        program,
+        checker,
+        name,
         superInternalName,
-        accessFlags & (ACC_PUBLIC | ACC_PROTECTED | ACC_PRIVATE),
+        instanceInits,
       ),
     );
     methodCount++;
   } else {
     for (const ctor of declaredConstructors) {
-      methods.append(emitConstructorMethod(ctor, cp, program, checker, name, superInternalName));
+      methods.append(
+        emitConstructorMethod(
+          ctor,
+          methodAccessFlags(ctor),
+          cp,
+          program,
+          checker,
+          name,
+          superInternalName,
+          instanceInits,
+        ),
+      );
       methodCount++;
     }
   }
   for (const member of declaration.members) {
     if (member.kind !== SyntaxKind.MethodDeclaration) continue;
     methods.append(emitMethod(member as MethodDeclaration, cp, program, checker, name));
+    methodCount++;
+  }
+
+  // Static field initializers -> <clinit>.
+  if (staticInits.length > 0) {
+    const clinit = {
+      kind: SyntaxKind.MethodDeclaration,
+      modifiers: [{ kind: SyntaxKind.StaticKeyword }],
+      parameters: [],
+      returnType: { kind: SyntaxKind.PrimitiveType, keyword: SyntaxKind.VoidKeyword },
+      name: { text: "<clinit>" },
+      body: { kind: SyntaxKind.Block, statements: [] },
+    } as unknown as MethodDeclaration;
+    const info = new ByteBuffer();
+    info.u2(ACC_STATIC);
+    info.u2(cp.utf8("<clinit>"));
+    info.u2(cp.utf8("()V"));
+    writeCodeAttribute(
+      info,
+      cp,
+      generateBody(clinit, cp, program, checker, name, undefined, staticInits),
+    );
+    methods.append(info);
     methodCount++;
   }
 
