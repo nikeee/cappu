@@ -18,9 +18,11 @@ import {
   type AssignmentExpression,
   type BinaryExpression,
   type CallExpression,
+  type CastExpression,
   type ClassDeclaration,
   type ConstructorDeclaration,
   type DoStatement,
+  type InstanceofExpression,
   type ExpressionStatement,
   type FieldDeclaration,
   type ForStatement,
@@ -155,9 +157,20 @@ const OP_LXOR = 0x83;
 const OP_I2L = 0x85;
 const OP_I2F = 0x86;
 const OP_I2D = 0x87;
+const OP_L2I = 0x88;
 const OP_L2F = 0x89;
 const OP_L2D = 0x8a;
+const OP_F2I = 0x8b;
+const OP_F2L = 0x8c;
 const OP_F2D = 0x8d;
+const OP_D2I = 0x8e;
+const OP_D2L = 0x8f;
+const OP_D2F = 0x90;
+const OP_I2B = 0x91;
+const OP_I2C = 0x92;
+const OP_I2S = 0x93;
+const OP_CHECKCAST = 0xc0;
+const OP_INSTANCEOF = 0xc1;
 const OP_POP = 0x57;
 const OP_POP2 = 0x58;
 const OP_DUP = 0x59;
@@ -1024,9 +1037,78 @@ function generateBody(
       }
       case SyntaxKind.CallExpression:
         return emitCall(node as CallExpression);
+      case SyntaxKind.CastExpression:
+        return emitCast(node as CastExpression);
+      case SyntaxKind.InstanceofExpression:
+        return emitInstanceof(node as InstanceofExpression);
       default:
         throw new UnsupportedEmit();
     }
+  };
+
+  // Numeric conversion from one category to another, for primitive casts.
+  const PRIMITIVE_CONVERSION: Record<string, number | undefined> = {
+    IJ: OP_I2L,
+    IF: OP_I2F,
+    ID: OP_I2D,
+    JI: OP_L2I,
+    JF: OP_L2F,
+    JD: OP_L2D,
+    FI: OP_F2I,
+    FJ: OP_F2L,
+    FD: OP_F2D,
+    DI: OP_D2I,
+    DJ: OP_D2L,
+    DF: OP_D2F,
+  };
+  const convertPrimitive = (fromCat: string, targetDescriptor: string): void => {
+    const targetCat =
+      targetDescriptor === "J"
+        ? "J"
+        : targetDescriptor === "D"
+          ? "D"
+          : targetDescriptor === "F"
+            ? "F"
+            : "I";
+    if (fromCat !== targetCat) {
+      const op = PRIMITIVE_CONVERSION[`${fromCat}${targetCat}`];
+      if (op === undefined) throw new UnsupportedEmit();
+      code.u1(op);
+      grow(slotsOf(targetDescriptor) - slotsOf(fromCat === "J" || fromCat === "D" ? "J" : "I"));
+    }
+    if (targetDescriptor === "B") code.u1(OP_I2B);
+    else if (targetDescriptor === "C") code.u1(OP_I2C);
+    else if (targetDescriptor === "S") code.u1(OP_I2S);
+  };
+
+  const emitCast = (node: CastExpression): string => {
+    const targetDescriptor = descriptorOf(node.type, program);
+    const c = targetDescriptor[0]!;
+    if ("BCDFIJSZ".includes(c)) {
+      const fromCat = numericCategory(checker.getTypeOfExpression(node.expression));
+      if (!fromCat) throw new UnsupportedEmit();
+      emitExpr(node.expression);
+      convertPrimitive(fromCat, targetDescriptor);
+      return targetDescriptor;
+    }
+    // Reference cast: checkcast to the target class/array (no stack-size change).
+    emitExpr(node.expression);
+    const klass = c === "[" ? targetDescriptor : targetDescriptor.slice(1, -1);
+    code.u1(OP_CHECKCAST);
+    code.u2(cp.classInfo(klass));
+    return targetDescriptor;
+  };
+
+  const emitInstanceof = (node: InstanceofExpression): string => {
+    if (node.name) throw new UnsupportedEmit(); // pattern binding (x instanceof T t): later
+    emitExpr(node.expression);
+    const descriptor = descriptorOf(node.type, program);
+    const klass = descriptor[0] === "[" ? descriptor : descriptor.slice(1, -1);
+    code.u1(OP_INSTANCEOF);
+    code.u2(cp.classInfo(klass));
+    pop(1); // objectref
+    push("I"); // boolean result
+    return "Z";
   };
 
   const emitCall = (call: CallExpression): string => {

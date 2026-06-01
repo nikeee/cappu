@@ -235,6 +235,42 @@ test(
 );
 
 test(
+  "casts and instanceof run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    const name = "Cast";
+    const src = [
+      "public class Cast {",
+      "  public static void main(String[] args) {",
+      "    long big = 300L;",
+      "    int i = (int) big;",
+      "    byte b = (byte) i;",
+      "    int t = (int) (i * 2);",
+      "    System.out.println(i);",
+      "    System.out.println(b);",
+      "    System.out.println(t);",
+      '    Object o = "hello";',
+      "    String s = (String) o;",
+      "    System.out.println(s);",
+      "    System.out.println(o instanceof String);",
+      "    System.out.println(o instanceof Integer);",
+      "  }",
+      "}",
+    ].join("\n");
+    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
+    writeFileSync(join(ref, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+
+    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+    writeFileSync(join(ours, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+    expect(ourOut).toBe(refOut);
+    expect(refOut).toBe("300\n44\n600\nhello\ntrue\nfalse\n");
+  },
+);
+
+test(
   "inheritance, interfaces and packages run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {
