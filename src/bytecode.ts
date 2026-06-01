@@ -475,7 +475,7 @@ function emitDefaultConstructor(
   return method;
 }
 
-function methodAccessFlags(method: MethodDeclaration): number {
+function methodAccessFlags(method: MethodDeclaration | ConstructorDeclaration): number {
   let flags = 0;
   for (const modifier of method.modifiers ?? []) {
     switch (modifier.kind) {
@@ -594,16 +594,21 @@ function findConstructor(typeSymbol: Symbol, argCount: number): ConstructorDecla
 // Generate real bytecode for a method body. Throws UnsupportedEmit for anything
 // not yet handled, so emitMethod can fall back to a verifiable placeholder.
 function generateBody(
-  method: MethodDeclaration,
+  method: MethodDeclaration | ConstructorDeclaration,
   cp: ConstantPool,
   program: Program,
   checker: Checker,
   thisInternalName: string,
+  // For constructors: the super class's internal name; an implicit super.<init>()
+  // call is emitted before the body (explicit super()/this() is not yet handled).
+  ctorSuper?: string,
 ): { code: ByteBuffer; maxStack: number; maxLocals: number; stackMapTable?: ByteBuffer } {
-  const isStatic = (methodAccessFlags(method) & ACC_STATIC) !== 0;
-  const returnDescriptor = methodDescriptor(method, program).slice(
-    methodDescriptor(method, program).lastIndexOf(")") + 1,
-  );
+  const isConstructor = method.kind === SyntaxKind.ConstructorDeclaration;
+  const isStatic =
+    !isConstructor && (methodAccessFlags(method as MethodDeclaration) & ACC_STATIC) !== 0;
+  const returnDescriptor = isConstructor
+    ? "V"
+    : descriptorOf((method as MethodDeclaration).returnType, program);
 
   // Slots for parameters and (as they are declared) locals; shared map keyed by
   // the declaration symbol.
@@ -1457,6 +1462,15 @@ function generateBody(
   };
 
   if (!method.body || method.body.kind !== SyntaxKind.Block) throw new UnsupportedEmit();
+  if (isConstructor && ctorSuper) {
+    // Implicit super(): aload_0; invokespecial <super>.<init>:()V. (An explicit
+    // super()/this() in the body is not handled and triggers the fallback.)
+    code.u1(OP_ALOAD_0);
+    pushRef();
+    code.u1(OP_INVOKESPECIAL);
+    code.u2(cp.methodref(ctorSuper, "<init>", "()V"));
+    pop(1);
+  }
   const terminated = emitStmt(method.body);
   if (!terminated) {
     if (returnDescriptor === "V") code.u1(OP_RETURN);
@@ -1524,12 +1538,7 @@ function emitMethod(
     return info;
   }
 
-  let body: {
-    code: ByteBuffer;
-    maxStack: number;
-    maxLocals: number;
-    stackMapTable?: ByteBuffer;
-  };
+  let body: MethodBody;
   try {
     body = generateBody(method, cp, program, checker, thisInternalName);
   } catch (e) {
@@ -1544,9 +1553,21 @@ function emitMethod(
     body = { code: fallback.code, maxStack: fallback.maxStack, maxLocals: argsSize };
   }
 
-  // Optional StackMapTable sub-attribute: name(2) + length(4) + body.
+  writeCodeAttribute(info, cp, body);
+  return info;
+}
+
+interface MethodBody {
+  code: ByteBuffer;
+  maxStack: number;
+  maxLocals: number;
+  stackMapTable?: ByteBuffer;
+}
+
+// Append the Code attribute (with an optional StackMapTable sub-attribute) and
+// set the method's attributes_count to 1.
+function writeCodeAttribute(info: ByteBuffer, cp: ConstantPool, body: MethodBody): void {
   const smt = body.stackMapTable;
-  const smtIndex = smt ? cp.utf8("StackMapTable") : 0;
   const smtBytes = smt ? 6 + smt.length : 0;
 
   const codeAttr = new ByteBuffer();
@@ -1559,13 +1580,47 @@ function emitMethod(
   codeAttr.u2(0); // exception_table_length
   codeAttr.u2(smt ? 1 : 0); // attributes_count
   if (smt) {
-    codeAttr.u2(smtIndex);
+    codeAttr.u2(cp.utf8("StackMapTable"));
     codeAttr.u4(smt.length);
     codeAttr.append(smt);
   }
 
   info.u2(1); // attributes_count
   info.append(codeAttr);
+}
+
+function emitConstructorMethod(
+  ctor: ConstructorDeclaration,
+  cp: ConstantPool,
+  program: Program,
+  checker: Checker,
+  thisInternalName: string,
+  superInternalName: string,
+): ByteBuffer {
+  const descriptor = `(${ctor.parameters.map(p => paramDescriptor(p as Parameter, program)).join("")})V`;
+  const info = new ByteBuffer();
+  info.u2(methodAccessFlags(ctor));
+  info.u2(cp.utf8("<init>"));
+  info.u2(cp.utf8(descriptor));
+
+  let body: MethodBody;
+  try {
+    body = generateBody(ctor, cp, program, checker, thisInternalName, superInternalName);
+  } catch (e) {
+    if (!(e instanceof UnsupportedEmit)) throw e;
+    // Fallback: a valid constructor that just calls super() (body skipped).
+    const argsSize =
+      1 +
+      ctor.parameters.reduce((n, p) => n + slotsOf(paramDescriptor(p as Parameter, program)), 0);
+    const code = new ByteBuffer();
+    code.u1(OP_ALOAD_0);
+    code.u1(OP_INVOKESPECIAL);
+    code.u2(cp.methodref(superInternalName, "<init>", "()V"));
+    code.u1(OP_RETURN);
+    body = { code, maxStack: 1, maxLocals: argsSize };
+  }
+
+  writeCodeAttribute(info, cp, body);
   return info;
 }
 
@@ -1589,17 +1644,28 @@ export function emitClass(
   const superClassIndex = cp.classInfo(superInternalName);
   const fields = emitFields(declaration, cp, program);
 
-  // Methods: the synthesized default constructor (inherits the class's
-  // accessibility, JLS 8.8.9) plus every declared method.
+  // Constructors: the declared ones, or a synthesized default constructor that
+  // inherits the class's accessibility (JLS 8.8.9) when none are declared.
   const methods = new ByteBuffer();
-  let methodCount = 1;
-  methods.append(
-    emitDefaultConstructor(
-      cp,
-      superInternalName,
-      accessFlags & (ACC_PUBLIC | ACC_PROTECTED | ACC_PRIVATE),
-    ),
-  );
+  let methodCount = 0;
+  const declaredConstructors = declaration.members.filter(
+    m => m.kind === SyntaxKind.ConstructorDeclaration,
+  ) as ConstructorDeclaration[];
+  if (declaredConstructors.length === 0) {
+    methods.append(
+      emitDefaultConstructor(
+        cp,
+        superInternalName,
+        accessFlags & (ACC_PUBLIC | ACC_PROTECTED | ACC_PRIVATE),
+      ),
+    );
+    methodCount++;
+  } else {
+    for (const ctor of declaredConstructors) {
+      methods.append(emitConstructorMethod(ctor, cp, program, checker, name, superInternalName));
+      methodCount++;
+    }
+  }
   for (const member of declaration.members) {
     if (member.kind !== SyntaxKind.MethodDeclaration) continue;
     methods.append(emitMethod(member as MethodDeclaration, cp, program, checker, name));
