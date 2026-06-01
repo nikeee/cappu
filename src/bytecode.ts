@@ -10,6 +10,7 @@
 import type { Checker } from "./checker.ts";
 import { type Type, TypeKind } from "./checkerTypes.ts";
 import { foldConstant } from "./constfold.ts";
+import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import { resolveTypeEntityName } from "./resolver.ts";
 import { entityNameToString, tokenToString } from "./utilities.ts";
@@ -20,6 +21,7 @@ import {
   type CallExpression,
   type CastExpression,
   type ConditionalExpression,
+  type LambdaExpression,
   type ClassDeclaration,
   type ConstructorDeclaration,
   type BreakStatement,
@@ -71,6 +73,7 @@ const ACC_SYNCHRONIZED = 0x0020;
 const ACC_NATIVE = 0x0100;
 const ACC_ABSTRACT = 0x0400;
 const ACC_STRICT = 0x0800;
+const ACC_SYNTHETIC = 0x1000;
 const ACC_VARARGS = 0x0080;
 
 // Primitive field descriptors (JVMS 4.3.2).
@@ -99,6 +102,7 @@ const CONSTANT_Methodref = 10;
 const CONSTANT_InterfaceMethodref = 11;
 const CONSTANT_NameAndType = 12;
 const CONSTANT_MethodHandle = 15;
+const CONSTANT_MethodType = 16;
 const CONSTANT_InvokeDynamic = 18;
 const REF_invokeStatic = 6; // MethodHandle reference_kind (JVMS 4.4.8)
 
@@ -107,6 +111,10 @@ const STRING_CONCAT_FACTORY = "java/lang/invoke/StringConcatFactory";
 const MAKE_CONCAT = "makeConcatWithConstants";
 const MAKE_CONCAT_BSM_DESCRIPTOR =
   "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;";
+// java.lang.invoke.LambdaMetafactory.metafactory bootstrap (JLS 15.27 lambdas).
+const LAMBDA_METAFACTORY = "java/lang/invoke/LambdaMetafactory";
+const LAMBDA_METAFACTORY_BSM_DESCRIPTOR =
+  "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;";
 const OP_INVOKEDYNAMIC = 0xba;
 
 // Opcodes (JVMS 6.5) used so far.
@@ -431,6 +439,49 @@ class ConstantPool {
     });
   }
 
+  private methodType(descriptor: string): number {
+    const descIndex = this.utf8(descriptor);
+    return this.intern(`mt:${descriptor}`, b => {
+      b.u1(CONSTANT_MethodType);
+      b.u2(descIndex);
+    });
+  }
+
+  /**
+   * An invokedynamic that builds a lambda via LambdaMetafactory.metafactory. The
+   * call-site name is the SAM name; `indyDescriptor` takes the captured values and
+   * returns the functional interface. `samErased` / `instantiated` are the SAM's
+   * method type erased and as instantiated; `impl*` names the synthetic method
+   * holding the lambda body. Returns the CONSTANT_InvokeDynamic index.
+   */
+  invokeDynamicLambda(
+    samName: string,
+    indyDescriptor: string,
+    samErased: string,
+    implOwner: string,
+    implName: string,
+    implDescriptor: string,
+    instantiated: string,
+  ): number {
+    const bsmHandle = this.methodHandle(
+      REF_invokeStatic,
+      this.methodref(LAMBDA_METAFACTORY, "metafactory", LAMBDA_METAFACTORY_BSM_DESCRIPTOR),
+    );
+    const implHandle = this.methodHandle(
+      REF_invokeStatic,
+      this.methodref(implOwner, implName, implDescriptor),
+    );
+    const args = [this.methodType(samErased), implHandle, this.methodType(instantiated)];
+    const bootstrapIndex = this.bootstraps.length;
+    this.bootstraps.push({ handle: bsmHandle, args });
+    const nt = this.nameAndType(samName, indyDescriptor);
+    return this.intern(`indy:${bootstrapIndex}:${samName}:${indyDescriptor}`, b => {
+      b.u1(CONSTANT_InvokeDynamic);
+      b.u2(bootstrapIndex);
+      b.u2(nt);
+    });
+  }
+
   get bootstrapMethodCount(): number {
     return this.bootstraps.length;
   }
@@ -523,6 +574,9 @@ function descriptorOf(typeNode: TypeNode, program: Program): string {
     case SyntaxKind.TypeReference: {
       const ref = typeNode as TypeReference;
       const symbol = resolveTypeEntityName(ref.typeName, typeNode, program);
+      // A type variable erases to its leftmost bound, or Object if unbounded
+      // (JLS 4.6). Method/field descriptors are always over erased types.
+      if (symbol && symbol.flags & SymbolFlags.TypeParameter) return "Ljava/lang/Object;";
       const name = symbol
         ? binaryName(symbol)
         : entityNameToString(ref.typeName).replace(/\./g, "/");
@@ -748,6 +802,15 @@ interface FieldInit {
   init: Node;
 }
 
+// A synthetic private-static method holding a lambda body. `params` are the
+// captured outer locals followed by the lambda's own parameters.
+interface LambdaImpl {
+  name: string;
+  params: { symbol: Symbol; descriptor: string }[];
+  returnDescriptor: string;
+  body: Node;
+}
+
 function generateBody(
   method: MethodDeclaration | ConstructorDeclaration,
   cp: ConstantPool,
@@ -760,13 +823,35 @@ function generateBody(
   // Field initializers run in the prologue: instance fields after super() in a
   // constructor, static fields at the top of <clinit>.
   fieldInits: FieldInit[] = [],
+  // Sink for synthetic lambda-body methods: each lambda encountered is emitted
+  // eagerly (so a failure falls back this whole method) and its method_info is
+  // appended here for emitClass to add to the class.
+  lambdaMethods: ByteBuffer[] = [],
+  // When set, emit a synthetic lambda body instead of a declared method: the
+  // params (captures, then the lambda's own params) and return type are given,
+  // and `body` is the lambda's expression or block.
+  lambdaSpec?: {
+    params: { symbol: Symbol; descriptor: string }[];
+    returnDescriptor: string;
+    body: Node;
+  },
 ): { code: ByteBuffer; maxStack: number; maxLocals: number; stackMapTable?: ByteBuffer } {
-  const isConstructor = method.kind === SyntaxKind.ConstructorDeclaration;
-  const isStatic =
-    !isConstructor && (methodAccessFlags(method as MethodDeclaration) & ACC_STATIC) !== 0;
-  const returnDescriptor = isConstructor
-    ? "V"
-    : descriptorOf((method as MethodDeclaration).returnType, program);
+  const isConstructor = !lambdaSpec && method.kind === SyntaxKind.ConstructorDeclaration;
+  const isStatic = lambdaSpec
+    ? true
+    : !isConstructor && (methodAccessFlags(method as MethodDeclaration) & ACC_STATIC) !== 0;
+  const returnDescriptor = lambdaSpec
+    ? lambdaSpec.returnDescriptor
+    : isConstructor
+      ? "V"
+      : descriptorOf((method as MethodDeclaration).returnType, program);
+  // Name used for synthetic lambda methods declared in this body: lambda$<m>$<n>.
+  const enclosingName = lambdaSpec
+    ? "lambda"
+    : isConstructor
+      ? "new"
+      : (method as MethodDeclaration).name.text;
+  let lambdaCounter = 0;
 
   // Slots for parameters and (as they are declared) locals; shared map keyed by
   // the declaration symbol.
@@ -786,12 +871,18 @@ function generateBody(
     activeLocals.push({ slot: 0, descriptor: `L${thisInternalName};` });
     assigned.add(0);
   }
-  for (const p of method.parameters) {
-    const descriptor = paramDescriptor(p as Parameter, program);
-    if (p.symbol) locals.set(p.symbol, { slot: nextSlot, descriptor });
-    activeLocals.push({ slot: nextSlot, descriptor });
+  // Parameters: a lambda impl's captures + own params, or the method's params.
+  const params: { symbol?: Symbol; descriptor: string }[] = lambdaSpec
+    ? lambdaSpec.params
+    : method.parameters.map(p => ({
+        symbol: p.symbol,
+        descriptor: paramDescriptor(p as Parameter, program),
+      }));
+  for (const p of params) {
+    if (p.symbol) locals.set(p.symbol, { slot: nextSlot, descriptor: p.descriptor });
+    activeLocals.push({ slot: nextSlot, descriptor: p.descriptor });
     assigned.add(nextSlot);
-    nextSlot += slotsOf(descriptor);
+    nextSlot += slotsOf(p.descriptor);
   }
   let maxLocals = nextSlot;
   const code = new ByteBuffer();
@@ -1186,6 +1277,8 @@ function generateBody(
       }
       case SyntaxKind.ConditionalExpression:
         return emitConditional(node as ConditionalExpression);
+      case SyntaxKind.LambdaExpression:
+        return emitLambda(node as LambdaExpression);
       case SyntaxKind.CallExpression:
         return emitCall(node as CallExpression);
       case SyntaxKind.CastExpression:
@@ -1294,7 +1387,25 @@ function generateBody(
       code.u2(cp.methodref(ownerName, decl.name.text, descriptor));
       pop(argCount + 1);
     }
-    if (returnDesc !== "V") push(returnDesc);
+    if (returnDesc === "V") return returnDesc;
+    push(returnDesc);
+    // Synthetic cast after an erased generic return (JLS 5.2): the method ref
+    // uses the erased descriptor (a type variable becomes Object), so when the
+    // call's static type is more specific, checkcast to it - as javac does.
+    if (returnDesc === "Ljava/lang/Object;") {
+      const actual = checker.getTypeOfExpression(call);
+      const actualDesc = typeDescriptor(actual);
+      if (
+        actualDesc !== "Ljava/lang/Object;" &&
+        (actual.kind === TypeKind.Class || actual.kind === TypeKind.Array)
+      ) {
+        code.u1(OP_CHECKCAST);
+        code.u2(cp.classInfo(actualDesc[0] === "[" ? actualDesc : actualDesc.slice(1, -1)));
+        pop();
+        push(actualDesc);
+        return actualDesc;
+      }
+    }
     return returnDesc;
   };
 
@@ -1818,7 +1929,95 @@ function generateBody(
     return desc;
   };
 
-  // i++ / ++i / i-- / --i on an int local -> iinc.
+  // A lambda (JLS 15.27): lowered to an invokedynamic bound by
+  // LambdaMetafactory. The body becomes a synthetic private-static method
+  // (collected in `lambdas`, emitted by emitClass) whose parameters are the
+  // captured outer locals followed by the lambda's own parameters. Capturing
+  // `this` or instance members is not supported yet (v1 covers static context).
+  const isVoidType = (t: Type): boolean =>
+    t.kind === TypeKind.Primitive && (t as { name: string }).name === "void";
+  const descOf = (t: Type): string => (isVoidType(t) ? "V" : typeDescriptor(t));
+
+  const emitLambda = (node: LambdaExpression): string => {
+    const info = checker.getLambdaInfo(node);
+    if (!info) throw new UnsupportedEmit();
+
+    // Captured variables: identifiers in the body that resolve to a local in
+    // scope at the lambda site (JLS 15.27.2 - effectively final). Bail on any
+    // `this`/instance-member use so the static impl method stays well-formed.
+    const captures: Symbol[] = [];
+    const seen = new Set<Symbol>();
+    const walk = (n: Node): void => {
+      if (n.kind === SyntaxKind.ThisExpression) throw new UnsupportedEmit();
+      if (n.kind === SyntaxKind.Identifier) {
+        const sym = checker.resolveName(n as Identifier);
+        if (sym && locals.has(sym)) {
+          if (!seen.has(sym)) {
+            seen.add(sym);
+            captures.push(sym);
+          }
+        } else if (sym && sym.flags & SymbolFlags.Field && !fieldInfoOf(sym).isStatic) {
+          throw new UnsupportedEmit(); // implicit-this instance field
+        }
+      }
+      forEachChild(n, c => {
+        walk(c);
+        return undefined;
+      });
+    };
+    walk(node.body);
+
+    const instParamDescs = info.instParams.map(t => typeDescriptor(t));
+    const instReturnDesc = descOf(info.instReturn);
+    const samErased = `(${info.erasedParams.map(t => typeDescriptor(t)).join("")})${descOf(info.erasedReturn)}`;
+    const instantiated = `(${instParamDescs.join("")})${instReturnDesc}`;
+
+    const captureParams = captures.map(s => ({ symbol: s, descriptor: locals.get(s)!.descriptor }));
+    const ownParams = node.parameters.map((p, i) => {
+      const sym = (p as { symbol?: Symbol }).symbol;
+      if (!sym || i >= instParamDescs.length) throw new UnsupportedEmit();
+      return { symbol: sym, descriptor: instParamDescs[i]! };
+    });
+    const implParams = [...captureParams, ...ownParams];
+    const implName = `lambda$${enclosingName}$${lambdaCounter++}`;
+    const implDescriptor = `(${implParams.map(p => p.descriptor).join("")})${instReturnDesc}`;
+    // Emit the body method eagerly: if it cannot be compiled, the exception
+    // propagates and this whole enclosing method falls back (no dangling indy).
+    lambdaMethods.push(
+      emitLambdaMethod(
+        { name: implName, params: implParams, returnDescriptor: instReturnDesc, body: node.body },
+        cp,
+        program,
+        checker,
+        thisInternalName,
+        lambdaMethods,
+      ),
+    );
+
+    // invokedynamic: push captured values, then bind the call site.
+    for (const c of captureParams) {
+      loadVar(locals.get(c.symbol)!.slot, c.descriptor);
+      push(c.descriptor);
+    }
+    const interfaceDesc = typeDescriptor(info.interfaceType);
+    const indyDescriptor = `(${captureParams.map(c => c.descriptor).join("")})${interfaceDesc}`;
+    const idx = cp.invokeDynamicLambda(
+      info.samName,
+      indyDescriptor,
+      samErased,
+      thisInternalName,
+      implName,
+      implDescriptor,
+      instantiated,
+    );
+    code.u1(OP_INVOKEDYNAMIC);
+    code.u2(idx);
+    code.u2(0);
+    pop(captureParams.length);
+    push(interfaceDesc);
+    return interfaceDesc;
+  };
+
   // ++ / -- used as a statement (the result value is not needed). An int local
   // uses iinc; a field or wide local is a read-modify-write via emitStore.
   const emitIncrement = (expr: Node): void => {
@@ -2162,35 +2361,53 @@ function generateBody(
     }
   };
 
-  if (!method.body || method.body.kind !== SyntaxKind.Block) throw new UnsupportedEmit();
-  if (isConstructor && ctorSuper) {
-    // Implicit super(): aload_0; invokespecial <super>.<init>:()V. (An explicit
-    // super()/this() in the body is not handled and triggers the fallback.)
-    code.u1(OP_ALOAD_0);
-    pushRef();
-    code.u1(OP_INVOKESPECIAL);
-    code.u2(cp.methodref(ctorSuper, "<init>", "()V"));
-    pop(1);
-  }
-  for (const fi of fieldInits) {
-    if (fi.isStatic) {
-      coerce(emitExpr(fi.init), fi.descriptor);
-      code.u1(OP_PUTSTATIC);
-      code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
-      pop(); // value
+  if (lambdaSpec) {
+    // Lambda body: an expression (its value is the result, or discarded when the
+    // SAM returns void) or a block.
+    if (lambdaSpec.body.kind === SyntaxKind.Block) {
+      const terminated = emitStmt(lambdaSpec.body);
+      if (!terminated) {
+        if (returnDescriptor === "V") code.u1(OP_RETURN);
+        else throw new UnsupportedEmit();
+      }
+    } else if (returnDescriptor === "V") {
+      emitStatementExpression(lambdaSpec.body);
+      code.u1(OP_RETURN);
     } else {
+      coerce(emitExpr(lambdaSpec.body), returnDescriptor);
+      emitReturn();
+    }
+  } else {
+    if (!method.body || method.body.kind !== SyntaxKind.Block) throw new UnsupportedEmit();
+    if (isConstructor && ctorSuper) {
+      // Implicit super(): aload_0; invokespecial <super>.<init>:()V. (An explicit
+      // super()/this() in the body is not handled and triggers the fallback.)
       code.u1(OP_ALOAD_0);
       pushRef();
-      coerce(emitExpr(fi.init), fi.descriptor);
-      code.u1(OP_PUTFIELD);
-      code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
-      pop(2); // receiver + value
+      code.u1(OP_INVOKESPECIAL);
+      code.u2(cp.methodref(ctorSuper, "<init>", "()V"));
+      pop(1);
     }
-  }
-  const terminated = emitStmt(method.body);
-  if (!terminated) {
-    if (returnDescriptor === "V") code.u1(OP_RETURN);
-    else throw new UnsupportedEmit(); // non-void path falls off the end
+    for (const fi of fieldInits) {
+      if (fi.isStatic) {
+        coerce(emitExpr(fi.init), fi.descriptor);
+        code.u1(OP_PUTSTATIC);
+        code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
+        pop(); // value
+      } else {
+        code.u1(OP_ALOAD_0);
+        pushRef();
+        coerce(emitExpr(fi.init), fi.descriptor);
+        code.u1(OP_PUTFIELD);
+        code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
+        pop(2); // receiver + value
+      }
+    }
+    const terminated = emitStmt(method.body);
+    if (!terminated) {
+      if (returnDescriptor === "V") code.u1(OP_RETURN);
+      else throw new UnsupportedEmit(); // non-void path falls off the end
+    }
   }
 
   // Backpatch branch offsets (signed, relative to the branch opcode address).
@@ -2249,6 +2466,7 @@ function emitMethod(
   program: Program,
   checker: Checker,
   thisInternalName: string,
+  lambdaMethods: ByteBuffer[],
 ): ByteBuffer {
   const flags = methodAccessFlags(method);
   const descriptor = methodDescriptor(method, program);
@@ -2266,7 +2484,16 @@ function emitMethod(
 
   let body: MethodBody;
   try {
-    body = generateBody(method, cp, program, checker, thisInternalName);
+    body = generateBody(
+      method,
+      cp,
+      program,
+      checker,
+      thisInternalName,
+      undefined,
+      [],
+      lambdaMethods,
+    );
   } catch (e) {
     if (!(e instanceof UnsupportedEmit)) throw e;
     // Unhandled construct: emit a verifiable placeholder so output stays valid.
@@ -2279,6 +2506,36 @@ function emitMethod(
     body = { code: fallback.code, maxStack: fallback.maxStack, maxLocals: argsSize };
   }
 
+  writeCodeAttribute(info, cp, body);
+  return info;
+}
+
+// A synthetic private-static method holding a lambda body. Its own nested
+// lambdas are emitted eagerly into `lambdaMethods` during generateBody.
+function emitLambdaMethod(
+  impl: LambdaImpl,
+  cp: ConstantPool,
+  program: Program,
+  checker: Checker,
+  thisInternalName: string,
+  lambdaMethods: ByteBuffer[],
+): ByteBuffer {
+  const descriptor = `(${impl.params.map(p => p.descriptor).join("")})${impl.returnDescriptor}`;
+  const info = new ByteBuffer();
+  info.u2(ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC);
+  info.u2(cp.utf8(impl.name));
+  info.u2(cp.utf8(descriptor));
+  const body = generateBody(
+    {} as MethodDeclaration,
+    cp,
+    program,
+    checker,
+    thisInternalName,
+    undefined,
+    [],
+    lambdaMethods,
+    { params: impl.params, returnDescriptor: impl.returnDescriptor, body: impl.body },
+  );
   writeCodeAttribute(info, cp, body);
   return info;
 }
@@ -2324,6 +2581,7 @@ function emitConstructorMethod(
   thisInternalName: string,
   superInternalName: string,
   instanceInits: FieldInit[],
+  lambdaMethods: ByteBuffer[],
 ): ByteBuffer {
   const descriptor = `(${ctor.parameters.map(p => paramDescriptor(p as Parameter, program)).join("")})V`;
   const info = new ByteBuffer();
@@ -2341,6 +2599,7 @@ function emitConstructorMethod(
       thisInternalName,
       superInternalName,
       instanceInits,
+      lambdaMethods,
     );
   } catch (e) {
     if (!(e instanceof UnsupportedEmit)) throw e;
@@ -2428,6 +2687,9 @@ export function emitClass(
   // runs the instance field initializers.
   const methods = new ByteBuffer();
   let methodCount = 0;
+  // Synthetic lambda-body methods, emitted eagerly into this list as each
+  // method/ctor is generated, then appended after the declared members.
+  const lambdaMethods: ByteBuffer[] = [];
   const declaredConstructors = declaration.members.filter(
     m => m.kind === SyntaxKind.ConstructorDeclaration,
   ) as ConstructorDeclaration[];
@@ -2448,6 +2710,7 @@ export function emitClass(
         name,
         superInternalName,
         instanceInits,
+        lambdaMethods,
       ),
     );
     methodCount++;
@@ -2463,6 +2726,7 @@ export function emitClass(
           name,
           superInternalName,
           instanceInits,
+          lambdaMethods,
         ),
       );
       methodCount++;
@@ -2470,7 +2734,9 @@ export function emitClass(
   }
   for (const member of declaration.members) {
     if (member.kind !== SyntaxKind.MethodDeclaration) continue;
-    methods.append(emitMethod(member as MethodDeclaration, cp, program, checker, name));
+    methods.append(
+      emitMethod(member as MethodDeclaration, cp, program, checker, name, lambdaMethods),
+    );
     methodCount++;
   }
 
@@ -2488,12 +2754,24 @@ export function emitClass(
     info.u2(ACC_STATIC);
     info.u2(cp.utf8("<clinit>"));
     info.u2(cp.utf8("()V"));
-    writeCodeAttribute(
-      info,
+    const clinitBody = generateBody(
+      clinit,
       cp,
-      generateBody(clinit, cp, program, checker, name, undefined, staticInits),
+      program,
+      checker,
+      name,
+      undefined,
+      staticInits,
+      lambdaMethods,
     );
+    writeCodeAttribute(info, cp, clinitBody);
     methods.append(info);
+    methodCount++;
+  }
+
+  // Append the synthetic lambda-body methods emitted while generating the above.
+  for (const impl of lambdaMethods) {
+    methods.append(impl);
     methodCount++;
   }
 

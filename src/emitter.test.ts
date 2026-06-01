@@ -520,6 +520,32 @@ test(
 );
 
 test(
+  "lambda expressions (invokedynamic / LambdaMetafactory) run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Lam",
+      [
+        "import java.util.function.Supplier;",
+        "import java.util.function.Predicate;",
+        "import java.util.function.Consumer;",
+        "public class Lam {",
+        "  public static void main(String[] a){",
+        '    Runnable r = () -> System.out.println("ran"); r.run();', // no params, void
+        '    Supplier<String> s = () -> "hello"; System.out.println(s.get());', // no params, returns String
+        '    String msg = "cap"; Supplier<String> s2 = () -> msg + "!"; System.out.println(s2.get());', // captures msg
+        "    Predicate<String> p = str -> str.isEmpty();", // one param, calls a method on it
+        '    System.out.println(p.test("")); System.out.println(p.test("x"));',
+        '    Consumer<String> c = x -> System.out.println("got:" + x); c.accept("z");', // void SAM with a param
+        "  }",
+        "}",
+      ].join("\n"),
+      "ran\nhello\ncap!\ntrue\nfalse\ngot:z\n",
+    );
+  },
+);
+
+test(
   "static nested classes and field ++ run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

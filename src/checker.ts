@@ -65,8 +65,24 @@ import {
   type WildcardType as AstWildcardType,
 } from "./types.ts";
 
+/** What the emitter needs to lower a lambda expression (see getLambdaInfo). */
+export interface LambdaInfo {
+  /** The target functional interface (a Class type). */
+  readonly interfaceType: Type;
+  /** The single abstract method's name (the invokedynamic call name). */
+  readonly samName: string;
+  /** SAM parameter/return types unsubstituted (type variables erase to Object). */
+  readonly erasedParams: readonly Type[];
+  readonly erasedReturn: Type;
+  /** SAM parameter/return types with the target's type arguments substituted. */
+  readonly instParams: readonly Type[];
+  readonly instReturn: Type;
+}
+
 export interface Checker {
   resolveType(typeNode: TypeNode, fromNode: Node): Type;
+  /** Lambda lowering info (target interface, SAM, erased + instantiated types). */
+  getLambdaInfo(lambda: Node): LambdaInfo | undefined;
   getTypeOfSymbol(symbol: Symbol): Type;
   getTypeOfExpression(node: Node): Type;
   /** Resolve a name use OR a member access (a.b) to its symbol. */
@@ -428,6 +444,30 @@ export function createChecker(program: Program): Checker {
       return getTypeOfSymbol(parent.symbol);
     }
     return undefined;
+  }
+
+  // Everything the emitter needs to lower a lambda: the target functional
+  // interface, its SAM, and the SAM's parameter/return types both unsubstituted
+  // (for the erased SAM method type) and instantiated with the target's type
+  // arguments (for the lambda's own signature). Undefined when the target type
+  // or its SAM cannot be resolved (the emitter then falls back).
+  function getLambdaInfo(lambda: Node): LambdaInfo | undefined {
+    if (lambda.kind !== SyntaxKind.LambdaExpression) return undefined;
+    const target = lambdaTargetType(lambda);
+    if (!target || target.kind !== TypeKind.Class) return undefined;
+    const sam = functionalMethod(target.symbol);
+    if (!sam) return undefined;
+    const subst = substitutionFor(target.symbol, target.typeArguments);
+    const erasedParams = sam.parameters.map(p => resolveType((p as { type: TypeNode }).type, sam));
+    const erasedReturn = resolveType(sam.returnType, sam);
+    return {
+      interfaceType: target,
+      samName: sam.name.text,
+      erasedParams,
+      erasedReturn,
+      instParams: erasedParams.map(t => substitute(t, subst)),
+      instReturn: substitute(erasedReturn, subst),
+    };
   }
 
   function inferLambdaParameterType(symbol: Symbol): Type {
@@ -1296,6 +1336,7 @@ export function createChecker(program: Program): Checker {
 
   return {
     resolveType,
+    getLambdaInfo,
     getTypeOfSymbol,
     getTypeOfExpression,
     resolveName,
