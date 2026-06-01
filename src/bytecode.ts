@@ -46,7 +46,6 @@ import {
   type TypeNode,
   type TypeReference,
   type VariableDeclarator,
-  type SwitchClause,
   type SwitchStatement,
   type WhileStatement,
 } from "./types.ts";
@@ -212,6 +211,7 @@ const OP_ALOAD_0 = 0x2a;
 const OP_RETURN = 0xb1;
 
 // StackMapTable verification_type_info tags (JVMS 4.7.4).
+const ITEM_Top = 0;
 const ITEM_Integer = 1;
 const ITEM_Float = 2;
 const ITEM_Double = 3;
@@ -771,15 +771,26 @@ function generateBody(
   // Slots for parameters and (as they are declared) locals; shared map keyed by
   // the declaration symbol.
   const locals = new Map<Symbol, { slot: number; descriptor: string }>();
-  // Descriptors of the locals currently in scope, in slot order, for stack-map
-  // frames (this, then params, then declared locals; long/double = one entry).
-  const activeLocals: string[] = [];
+  // Locals currently in scope, in slot order, for stack-map frames (this, then
+  // params, then declared locals; long/double = one entry). Each carries its
+  // slot so frames can mark a not-yet-assigned local as `top` (see `assigned`).
+  const TOP = " top"; // sentinel descriptor for an unassigned slot
+  const activeLocals: { slot: number; descriptor: string }[] = [];
+  // Slots that are definitely assigned at the current point (JLS 16). A frame
+  // lists the real type for an assigned slot and `top` otherwise; the set is
+  // intersected across the paths that reach each branch target.
+  const assigned = new Set<number>();
+  let reachable = true; // is the next instruction reachable by fall-through?
   let nextSlot = isStatic ? 0 : 1;
-  if (!isStatic) activeLocals.push(`L${thisInternalName};`);
+  if (!isStatic) {
+    activeLocals.push({ slot: 0, descriptor: `L${thisInternalName};` });
+    assigned.add(0);
+  }
   for (const p of method.parameters) {
     const descriptor = paramDescriptor(p as Parameter, program);
     if (p.symbol) locals.set(p.symbol, { slot: nextSlot, descriptor });
-    activeLocals.push(descriptor);
+    activeLocals.push({ slot: nextSlot, descriptor });
+    assigned.add(nextSlot);
     nextSlot += slotsOf(descriptor);
   }
   let maxLocals = nextSlot;
@@ -793,14 +804,29 @@ function generateBody(
     const savedSlot = nextSlot;
     const terminated = body();
     activeLocals.length = savedActive;
+    for (const slot of [...assigned]) if (slot >= savedSlot) assigned.delete(slot); // freed slots
     nextSlot = savedSlot;
     return terminated;
+  };
+
+  // The frame's locals: in-scope locals with their type, or `top` if the slot is
+  // not in `assignedSet`. Trailing tops are trimmed (the javac convention).
+  const frameLocals = (assignedSet: Set<number>): string[] => {
+    const out = activeLocals.map(e => (assignedSet.has(e.slot) ? e.descriptor : TOP));
+    while (out.length > 0 && out[out.length - 1] === TOP) out.pop();
+    return out;
+  };
+  const intersect = (a: Set<number>, b: Set<number>): Set<number> => {
+    const r = new Set<number>();
+    for (const x of a) if (b.has(x)) r.add(x);
+    return r;
   };
 
   // --- labels, branches and stack-map frames ---------------------------------------
   interface Label {
     offset: number; // resolved when placed
     targetStack?: string[]; // operand stack as seen at the branch target (recorded by branchTo)
+    assignedAtTarget?: Set<number>; // slots assigned on every branch path to here
   }
   interface Frame {
     locals: string[];
@@ -818,8 +844,19 @@ function generateBody(
   // prefers it, falling back to the live stack for fall-through-only labels.
   const placeLabel = (label: Label): void => {
     label.offset = code.length;
+    // Assignment state here: the branches' intersection, further intersected
+    // with the fall-through state when the previous instruction can fall in.
+    const here =
+      label.assignedAtTarget === undefined
+        ? new Set(assigned)
+        : reachable
+          ? intersect(label.assignedAtTarget, assigned)
+          : new Set(label.assignedAtTarget);
+    assigned.clear();
+    for (const s of here) assigned.add(s);
+    reachable = true;
     frameAt.set(label.offset, {
-      locals: [...activeLocals],
+      locals: frameLocals(here),
       stack: [...(label.targetStack ?? stack)],
     });
   };
@@ -830,6 +867,11 @@ function generateBody(
     code.u2(0); // placeholder offset, backpatched below
     fixups.push({ at, from, label });
     if (label.targetStack === undefined) label.targetStack = [...stack];
+    label.assignedAtTarget =
+      label.assignedAtTarget === undefined
+        ? new Set(assigned)
+        : intersect(label.assignedAtTarget, assigned);
+    if (op === OP_GOTO) reachable = false; // an unconditional jump does not fall through
   };
 
   // Typed operand stack: one descriptor per value (top last). Drives max_stack and
@@ -961,6 +1003,7 @@ function generateBody(
       code.u1(varSlot);
     }
     pop(); // the value being stored
+    assigned.add(varSlot); // the slot is now definitely assigned
   };
 
   // Descriptor of a checker Type, for `var` locals.
@@ -1465,6 +1508,7 @@ function generateBody(
         code.u1(OP_IRETURN);
         break;
     }
+    reachable = false; // a return does not fall through
   };
 
   // Assignment used as a statement: store into a local or field, leaving nothing
@@ -1831,6 +1875,12 @@ function generateBody(
     const wide = (label: Label): void => {
       wideFixups.push({ at: code.length, from, label });
       code.u4(0); // placeholder, backpatched
+      // Record the switch-entry state for this target (like branchTo does).
+      if (label.targetStack === undefined) label.targetStack = [...stack];
+      label.assignedAtTarget =
+        label.assignedAtTarget === undefined
+          ? new Set(assigned)
+          : intersect(label.assignedAtTarget, assigned);
     };
     if (useTable) {
       code.u1(OP_TABLESWITCH);
@@ -1850,6 +1900,7 @@ function generateBody(
         wide(c.label);
       }
     }
+    reachable = false; // a switch dispatches to its cases; it does not fall through
   };
 
   // Returns true if the statement is a definite terminator (return).
@@ -1879,7 +1930,7 @@ function generateBody(
           nextSlot += slotsOf(descriptor);
           if (nextSlot > maxLocals) maxLocals = nextSlot;
           if (declarator.symbol) locals.set(declarator.symbol, { slot, descriptor });
-          activeLocals.push(descriptor);
+          activeLocals.push({ slot, descriptor });
           if (declarator.initializer) {
             const rd = emitExpr(declarator.initializer);
             coerce(rd, descriptor);
@@ -1988,44 +2039,74 @@ function generateBody(
       }
       case SyntaxKind.SwitchStatement: {
         const s = stmt as SwitchStatement;
-        // Colon-form switch over an integral selector. Arrow form, guards, and
-        // pattern/string/enum labels are not handled yet.
-        const unsupported = (cl: SwitchClause): boolean =>
-          cl.isArrow ||
-          cl.guard !== undefined ||
-          (cl.labels?.some(l => l.kind !== SyntaxKind.CharacterLiteral && !foldConstant(l)) ??
-            false);
-        if (s.clauses.some(unsupported)) throw new UnsupportedEmit();
-        if (numericCategory(checker.getTypeOfExpression(s.expression)) !== "I") {
-          throw new UnsupportedEmit();
-        }
-        coerce(emitExpr(s.expression), "I");
-        pop(); // selector consumed by the switch instruction
-        const base = [...stack];
+        // Integral or String selector, colon or arrow form. Guards and
+        // pattern/enum labels are not handled yet.
+        if (s.clauses.some(cl => cl.guard !== undefined)) throw new UnsupportedEmit();
+        const selType = checker.getTypeOfExpression(s.expression);
+        const isString = isStringType(selType);
+        if (!isString && numericCategory(selType) !== "I") throw new UnsupportedEmit();
 
         const endL = newLabel();
-        breakTargets.push(endL);
         const clauseLabels = s.clauses.map(() => newLabel());
         let defaultLabel = endL;
-        const cases: { value: number; label: Label }[] = [];
         s.clauses.forEach((cl, i) => {
           if (cl.isDefault) defaultLabel = clauseLabels[i]!;
-          for (const lab of cl.labels ?? []) {
-            cases.push({ value: caseValue(lab), label: clauseLabels[i]! });
-          }
         });
-        cases.sort((a, b) => a.value - b.value);
-        emitSwitchInstr(cases, defaultLabel);
 
+        if (isString) {
+          // Dispatch by chained String.equals (javac uses a hashCode switch; an
+          // equals chain runs identically and keeps the emitter simple).
+          const selDesc = "Ljava/lang/String;";
+          emitExpr(s.expression);
+          const tmp = nextSlot;
+          nextSlot += 1;
+          if (nextSlot > maxLocals) maxLocals = nextSlot;
+          activeLocals.push({ slot: tmp, descriptor: selDesc });
+          storeVar(tmp, selDesc); // selector evaluated once into a temp
+          for (const cl of s.clauses) {
+            const i = s.clauses.indexOf(cl);
+            for (const lab of cl.labels ?? []) {
+              if (lab.kind !== SyntaxKind.StringLiteral) throw new UnsupportedEmit();
+              loadVar(tmp, selDesc);
+              push(selDesc);
+              ldc(cp.string((lab as LiteralExpression).value));
+              push(selDesc);
+              code.u1(OP_INVOKEVIRTUAL);
+              code.u2(cp.methodref("java/lang/String", "equals", "(Ljava/lang/Object;)Z"));
+              pop(2);
+              push("I");
+              pop(); // boolean consumed by the branch
+              branchTo(OP_IFEQ + 1, clauseLabels[i]!); // ifne: matched -> this clause
+            }
+          }
+          branchTo(OP_GOTO, defaultLabel);
+        } else {
+          coerce(emitExpr(s.expression), "I");
+          pop(); // selector consumed by the switch instruction
+          const cases: { value: number; label: Label }[] = [];
+          s.clauses.forEach((cl, i) => {
+            for (const lab of cl.labels ?? []) {
+              cases.push({ value: caseValue(lab), label: clauseLabels[i]! });
+            }
+          });
+          cases.sort((a, b) => a.value - b.value);
+          emitSwitchInstr(cases, defaultLabel);
+        }
+        const base = [...stack];
+
+        breakTargets.push(endL);
+        const arrow = s.clauses.some(cl => cl.isArrow); // arrow clauses do not fall through
         let lastTerminated = false;
         s.clauses.forEach((cl, i) => {
           setStack(base); // a prior clause's terminator may have left dead values
           placeLabel(clauseLabels[i]!);
-          lastTerminated = inScope(() => {
-            let term = false;
-            for (const st of cl.statements) term = emitStmt(st);
-            return term;
+          const term = inScope(() => {
+            let t = false;
+            for (const st of cl.statements) t = emitStmt(st);
+            return t;
           });
+          if (arrow && !term) branchTo(OP_GOTO, endL); // implicit break after an arrow clause
+          lastTerminated = term;
         });
         setStack(base);
         placeLabel(endL);
@@ -2092,6 +2173,10 @@ function generateBody(
   let stackMapTable: ByteBuffer | undefined;
   if (targetOffsets.length > 0) {
     const writeVerification = (buf: ByteBuffer, descriptor: string): void => {
+      if (descriptor === TOP) {
+        buf.u1(ITEM_Top);
+        return;
+      }
       const c = category(descriptor);
       if (c === "I") buf.u1(ITEM_Integer);
       else if (c === "F") buf.u1(ITEM_Float);

@@ -471,6 +471,52 @@ test(
 );
 
 test(
+  "definite assignment: uninitialized locals across branches verify like javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Da",
+      [
+        "public class Da {",
+        "  static int ifElse(int c){ int r; if(c>0){ r=1; } else { r=2; } return r; }",
+        "  static int viaLoop(int n){ int r; if(n<0){ r=-1; } else { r=0; for(int i=0;i<n;i++){ r=r+i; } } return r; }",
+        "  public static void main(String[] a){",
+        "    System.out.println(ifElse(5)); System.out.println(ifElse(-3));",
+        "    System.out.println(viaLoop(4)); System.out.println(viaLoop(-1));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "1\n2\n6\n-1\n",
+    );
+  },
+);
+
+test(
+  "arrow and string switch run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Sw2",
+      [
+        "public class Sw2 {",
+        "  static int arrowI(int n){ int r; switch(n){ case 1 -> r=10; case 2,3 -> r=20; default -> r=99; } return r; }",
+        '  static String arrowStr(int n){ switch(n){ case 0 -> { return "zero"; } case 1 -> { return "one"; } default -> { return "many"; } } }',
+        '  static String colonStr(String s){ switch(s){ case "a": return "A"; case "b": case "c": return "BC"; default: return "?"; } }',
+        '  static String arrowStrSel(String s){ switch(s){ case "x" -> { return "X"; } default -> { return "Z"; } } }',
+        "  public static void main(String[] a){",
+        "    System.out.println(arrowI(1)); System.out.println(arrowI(3)); System.out.println(arrowI(7));",
+        "    System.out.println(arrowStr(0)); System.out.println(arrowStr(5));",
+        '    System.out.println(colonStr("a")); System.out.println(colonStr("c")); System.out.println(colonStr("z"));',
+        '    System.out.println(arrowStrSel("x")); System.out.println(arrowStrSel("q"));',
+        "  }",
+        "}",
+      ].join("\n"),
+      "10\n20\n99\nzero\nmany\nA\nBC\n?\nX\nZ\n",
+    );
+  },
+);
+
+test(
   "compound assignment (+=, bitwise, narrowing, fields, string) runs identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {
