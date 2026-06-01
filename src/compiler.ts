@@ -1,10 +1,8 @@
-#!/usr/bin/env -S tsx
-
-// Minimal command-line compiler: javac-lite. Reads .java files, parses them and
-// writes one .class file per top-level class into the output directory (default:
-// alongside each source). Code generation is at an early stage - see emitter.ts.
-//
-//   tsx src/compile.ts [-d <outdir>] <file.java> ...
+// Minimal compiler core: javac-lite. Reads .java files, parses them and
+// writes one .class file per top-level class under the output root, mirroring
+// each class's package as a directory path (com.app.Foo -> com/app/Foo.class) so
+// the tree can be packed straight into a jar. Output root defaults to the cwd.
+// Code generation is at an early stage - see emitter.ts. Invoked via cli.ts.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -15,13 +13,7 @@ import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
 import { pathToUri } from "./workspace.ts";
 
-function main(argv: string[]): number {
-  let outDir: string | undefined;
-  const files: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "-d") outDir = argv[++i];
-    else files.push(argv[i]!);
-  }
+export function runCompile(files: string[], outDir?: string): number {
   if (files.length === 0) {
     process.stderr.write("usage: compile [-d <outdir>] <file.java> ...\n");
     return 2;
@@ -33,6 +25,8 @@ function main(argv: string[]): number {
   for (const file of files) program.addProjectFile(pathToUri(file), readFileSync(file, "utf8"));
   const checker = createChecker(program);
 
+  // Single output root so every class lands in one coherent package tree.
+  const target = outDir ?? ".";
   for (const file of files) {
     const sourceFile = program.getSourceFile(pathToUri(file))!;
     if (sourceFile.parseDiagnostics.length > 0) {
@@ -41,7 +35,6 @@ function main(argv: string[]): number {
       }
       return 1;
     }
-    const target = outDir ?? dirname(file);
     for (const cls of emitSourceFile(sourceFile, program, checker)) {
       // cls.name is the internal name (com/app/Foo); mirror it as a directory path.
       const out = join(target, `${cls.name}.class`);
@@ -52,5 +45,3 @@ function main(argv: string[]): number {
   }
   return 0;
 }
-
-process.exit(main(process.argv.slice(2)));
