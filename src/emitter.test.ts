@@ -75,6 +75,21 @@ const RUNS: Record<string, string> = {
   Compute: "40\n",
 };
 
+// Multi-class fixtures (a top-level class with static nested classes). Each
+// emitted class - including the Outer$Inner ones - gets a binary baseline and is
+// byte-matched against javac. Straight-line bodies only, so the instruction
+// streams compare exactly (field ++ lowers to getfield/iconst_1/iadd/putfield,
+// matching javac).
+const MULTI_FIXTURES: Record<string, string> = {
+  Nest: [
+    "public class Nest {",
+    "  static class Point { int x, y; Point(int x, int y){ this.x=x; this.y=y; } int sum(){ return x+y; } }",
+    "  static class Counter { static int total; int n; void tick(){ n++; total++; } int get(){ return n; } }",
+    "  static int helper(int a){ return a*2; }",
+    "}",
+  ].join("\n"),
+};
+
 // Control-flow fixtures: verified by the JVM (our StackMapTable must be accepted)
 // and run for their output. Not byte-matched to javac (we emit full_frame frames
 // and may allocate slots differently).
@@ -244,6 +259,40 @@ for (const [name, expected] of Object.entries(RUNS)) {
     const out = execFileSync("java", ["-cp", dir, name], { encoding: "utf8" });
     expect(out).toBe(expected);
   });
+}
+
+for (const [name, source] of Object.entries(MULTI_FIXTURES)) {
+  test(`multi-class binary baseline: ${name}`, () => {
+    for (const c of emitClasses(name, source)) {
+      const baseline = join(baselinesDir, `${c.name}.class`);
+      if (shouldUpdate || !existsSync(baseline)) {
+        mkdirSync(baselinesDir, { recursive: true });
+        writeFileSync(baseline, c.bytes);
+      }
+      expect(Buffer.from(c.bytes).equals(readFileSync(baseline))).toBe(true);
+    }
+  });
+
+  test(
+    `multi-class bytecode matches javac: ${name}`,
+    { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+    () => {
+      const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
+      writeFileSync(join(ref, `${name}.java`), source);
+      execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
+      const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+      const emitted = emitClasses(name, source);
+      // Every nested class is emitted as its own Outer$Inner.class.
+      expect(emitted.map(c => c.name).sort()).toEqual(["Nest", "Nest$Counter", "Nest$Point"]);
+      for (const c of emitted) writeFileSync(join(ours, `${c.name}.class`), c.bytes);
+      for (const c of emitted) {
+        const reference = codeByMethod(join(ref, `${c.name}.class`));
+        const generated = codeByMethod(join(ours, `${c.name}.class`));
+        expect([...generated.keys()].sort()).toEqual([...reference.keys()].sort());
+        for (const [sig, instrs] of reference) expect(generated.get(sig)).toEqual(instrs);
+      }
+    },
+  );
 }
 
 function source(name: string): string {
@@ -467,6 +516,30 @@ test(
 
     expect(ourOut).toBe(refOut);
     expect(refOut).toBe("42\n7\n2\n");
+  },
+);
+
+test(
+  "static nested classes and field ++ run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Nest",
+      [
+        "public class Nest {",
+        "  static class Point { int x, y; Point(int x, int y){ this.x=x; this.y=y; } int sum(){ return x+y; } }",
+        "  static class Counter { static int total; int n; void tick(){ n++; total++; } int get(){ return n; } }",
+        "  static int helper(int a){ return a*2; }",
+        "  public static void main(String[] a){",
+        "    Point p = new Point(3,4); System.out.println(p.sum());",
+        "    Counter c = new Counter(); c.tick(); c.tick();",
+        "    System.out.println(c.get()); System.out.println(Counter.total);",
+        "    System.out.println(helper(21));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "7\n2\n2\n42\n",
+    );
   },
 );
 

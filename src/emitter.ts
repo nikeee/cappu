@@ -11,18 +11,26 @@ import { type ClassDeclaration, type Node, type SourceFile, SyntaxKind } from ".
 
 export type { EmittedClass } from "./bytecode.ts";
 
-/** Emit a .class file for every top-level class declaration in a source file. */
+/**
+ * Emit a .class file for every class declaration in a source file: top-level
+ * classes and their nested classes (each gets its own class file named
+ * Outer$Inner, the binary name the class-file writer derives from the symbol).
+ */
 export function emitSourceFile(
   sourceFile: SourceFile,
   program: Program,
   checker: Checker,
 ): EmittedClass[] {
   const result: EmittedClass[] = [];
-  forEachChild(sourceFile, (node: Node) => {
+  const visit = (node: Node): void => {
     if (node.kind === SyntaxKind.ClassDeclaration) {
       result.push(emitClass(node as ClassDeclaration, program, checker));
     }
-    return undefined;
-  });
+    forEachChild(node, child => {
+      visit(child);
+      return undefined;
+    });
+  };
+  visit(sourceFile);
   return result;
 }

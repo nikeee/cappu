@@ -1562,26 +1562,17 @@ function generateBody(
     convertPrimitive(p, targetDesc); // narrow the result back to the target type
   };
 
-  // `target = rhs` and `target op= rhs` for locals and (static/instance) fields.
-  // Array-element targets come with arrays.
-  const emitAssignStatement = (assign: AssignmentExpression): void => {
-    const op = assign.operatorToken;
-    const baseOp = op === SyntaxKind.EqualsToken ? undefined : COMPOUND_BASE[op];
-    if (op !== SyntaxKind.EqualsToken && baseOp === undefined) throw new UnsupportedEmit();
-    const target = assign.left;
-
-    // Leave the value to store on the stack: rhs alone, or `current op rhs`.
-    const emitValue = (descriptor: string, loadCurrent: () => void): void => {
-      if (baseOp === undefined) {
-        coerce(emitExpr(assign.right), descriptor);
-        return;
-      }
-      loadCurrent();
-      combineCompound(descriptor, baseOp, assign.right);
-    };
-
-    // Write to a field. For a compound assignment on an instance field the
-    // receiver is dup'd so the read (getfield) and write (putfield) share it.
+  // Store into an assignable target (local / static field / instance field).
+  // `emitValue(descriptor, loadCurrent)` must leave the value to store on the
+  // stack; for a read-modify-write (compound assignment, increment) it calls
+  // `loadCurrent` to push the current value. `needsCurrent` tells an instance
+  // field to dup its receiver so the read and the write share it. Shared by
+  // plain/compound assignment and by ++/-- on fields and wide locals.
+  const emitStore = (
+    target: Node,
+    needsCurrent: boolean,
+    emitValue: (descriptor: string, loadCurrent: () => void) => void,
+  ): void => {
     const writeField = (
       info: { owner: string; name: string; descriptor: string; isStatic: boolean },
       emitReceiver: () => void,
@@ -1599,7 +1590,7 @@ function generateBody(
         return;
       }
       emitReceiver();
-      if (baseOp !== undefined) {
+      if (needsCurrent) {
         code.u1(OP_DUP); // one receiver for the read, one for the write
         push(stack[stack.length - 1]!);
       }
@@ -1645,6 +1636,22 @@ function generateBody(
     }
 
     throw new UnsupportedEmit();
+  };
+
+  // `target = rhs` and `target op= rhs` for locals and (static/instance) fields.
+  // Array-element targets come with arrays.
+  const emitAssignStatement = (assign: AssignmentExpression): void => {
+    const op = assign.operatorToken;
+    const baseOp = op === SyntaxKind.EqualsToken ? undefined : COMPOUND_BASE[op];
+    if (op !== SyntaxKind.EqualsToken && baseOp === undefined) throw new UnsupportedEmit();
+    emitStore(assign.left, baseOp !== undefined, (descriptor, loadCurrent) => {
+      if (baseOp === undefined) {
+        coerce(emitExpr(assign.right), descriptor);
+        return;
+      }
+      loadCurrent();
+      combineCompound(descriptor, baseOp, assign.right);
+    });
   };
 
   // Comparison operator -> offset into the if_icmp<cond> family (eq,ne,lt,ge,gt,le).
@@ -1812,18 +1819,48 @@ function generateBody(
   };
 
   // i++ / ++i / i-- / --i on an int local -> iinc.
+  // ++ / -- used as a statement (the result value is not needed). An int local
+  // uses iinc; a field or wide local is a read-modify-write via emitStore.
   const emitIncrement = (expr: Node): void => {
     const u = expr as unknown as { operator: SyntaxKind; operand: Node };
     if (u.operator !== SyntaxKind.PlusPlusToken && u.operator !== SyntaxKind.MinusMinusToken) {
       throw new UnsupportedEmit();
     }
-    if (u.operand.kind !== SyntaxKind.Identifier) throw new UnsupportedEmit();
-    const symbol = checker.resolveName(u.operand as Identifier);
-    const local = symbol ? locals.get(symbol) : undefined;
-    if (!local || category(local.descriptor) !== "I") throw new UnsupportedEmit();
-    code.u1(OP_IINC);
-    code.u1(local.slot);
-    code.u1((u.operator === SyntaxKind.PlusPlusToken ? 1 : -1) & 0xff);
+    const isInc = u.operator === SyntaxKind.PlusPlusToken;
+    if (u.operand.kind === SyntaxKind.Identifier) {
+      const symbol = checker.resolveName(u.operand as Identifier);
+      const local = symbol ? locals.get(symbol) : undefined;
+      if (local && category(local.descriptor) === "I") {
+        code.u1(OP_IINC);
+        code.u1(local.slot);
+        code.u1((isInc ? 1 : -1) & 0xff);
+        return;
+      }
+    }
+    emitStore(u.operand, true, (descriptor, loadCurrent) => {
+      const cat = category(descriptor);
+      if (cat === "A") throw new UnsupportedEmit();
+      loadCurrent();
+      if (cat === "J") {
+        longConst(1n);
+        push("J");
+      } else if (cat === "F") {
+        floatConst(1);
+        push("F");
+      } else if (cat === "D") {
+        doubleConst(1);
+        push("D");
+      } else {
+        code.u1(OP_ICONST_1);
+        push("I");
+      }
+      code.u1(
+        ARITHMETIC[isInc ? SyntaxKind.PlusToken : SyntaxKind.MinusToken]! + TYPE_OFFSET[cat]!,
+      );
+      pop(2);
+      push(cat);
+      convertPrimitive(cat, descriptor); // narrow back for byte/char/short
+    });
   };
 
   // An expression used as a statement (its value, if any, is discarded).
