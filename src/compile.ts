@@ -6,7 +6,7 @@
 //
 //   tsx src/compile.ts [-d <outdir>] <file.java> ...
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { createChecker } from "./checker.ts";
@@ -43,7 +43,9 @@ function main(argv: string[]): number {
     }
     const target = outDir ?? dirname(file);
     for (const cls of emitSourceFile(sourceFile, program, checker)) {
+      // cls.name is the internal name (com/app/Foo); mirror it as a directory path.
       const out = join(target, `${cls.name}.class`);
+      mkdirSync(dirname(out), { recursive: true });
       writeFileSync(out, cls.bytes);
       process.stdout.write(`${out}\n`);
     }

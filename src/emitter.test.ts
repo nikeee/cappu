@@ -235,6 +235,56 @@ test(
 );
 
 test(
+  "inheritance, interfaces and packages run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    const sources: Record<string, string> = {
+      "Animal.java": 'package com.app;\npublic class Animal { String sound() { return "?"; } }',
+      "Dog.java":
+        'package com.app;\npublic class Dog extends Animal implements Runnable { public void run() {} String sound() { return "woof"; } }',
+      "Main.java":
+        "package com.app;\npublic class Main { public static void main(String[] args) { Animal a = new Dog(); System.out.println(a.sound()); } }",
+    };
+
+    // javac reference.
+    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
+    for (const [file, text] of Object.entries(sources)) writeFileSync(join(ref, file), text);
+    execFileSync("javac", [
+      "--release",
+      "21",
+      "-d",
+      ref,
+      ...Object.keys(sources).map(f => join(ref, f)),
+    ]);
+    const refOut = execFileSync("java", ["-cp", ref, "com.app.Main"], { encoding: "utf8" });
+
+    // Ours: one program over all sources; write each class to its package path.
+    const program = createProgram();
+    loadJdkStub(program);
+    for (const [file, text] of Object.entries(sources)) {
+      program.addProjectFile(`file:///${file}`, text);
+    }
+    const checker = createChecker(program);
+    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+    for (const file of Object.keys(sources)) {
+      for (const cls of emitSourceFile(
+        program.getSourceFile(`file:///${file}`)!,
+        program,
+        checker,
+      )) {
+        const out = join(ours, `${cls.name}.class`);
+        mkdirSync(dirname(out), { recursive: true });
+        writeFileSync(out, cls.bytes);
+      }
+    }
+    const ourOut = execFileSync("java", ["-cp", ours, "com.app.Main"], { encoding: "utf8" });
+
+    expect(ourOut).toBe(refOut);
+    expect(refOut).toBe("woof\n");
+  },
+);
+
+test(
   "string concatenation (invokedynamic) runs identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

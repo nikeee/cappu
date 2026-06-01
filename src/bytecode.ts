@@ -1789,9 +1789,22 @@ function emitConstructorMethod(
 }
 
 export interface EmittedClass {
-  /** Simple class name (becomes <name>.class). */
+  /** Internal/binary name, e.g. "com/app/Foo" (becomes <name>.class under outdir). */
   readonly name: string;
   readonly bytes: Uint8Array;
+}
+
+// Resolve a type reference to its internal name, falling back to its written
+// (dotted -> slashed) form when it does not resolve.
+function resolveInternalName(
+  typeNode: TypeNode | undefined,
+  from: Node,
+  program: Program,
+): string | undefined {
+  if (!typeNode || typeNode.kind !== SyntaxKind.TypeReference) return undefined;
+  const ref = typeNode as TypeReference;
+  const symbol = resolveTypeEntityName(ref.typeName, from, program);
+  return symbol ? binaryName(symbol) : entityNameToString(ref.typeName).replace(/\./g, "/");
 }
 
 export function emitClass(
@@ -1799,13 +1812,20 @@ export function emitClass(
   program: Program,
   checker: Checker,
 ): EmittedClass {
-  const name = declaration.name.text;
-  const superInternalName = "java/lang/Object"; // resolving `extends` comes later
+  // Ensure the global index is built so symbols carry their package parent.
+  program.getGlobalIndex();
+  const name = declaration.symbol ? binaryName(declaration.symbol) : declaration.name.text;
+  const superInternalName =
+    resolveInternalName(declaration.extendsType, declaration, program) ?? "java/lang/Object";
+  const interfaceNames = (declaration.implementsTypes ?? [])
+    .map(t => resolveInternalName(t, declaration, program))
+    .filter((n): n is string => n !== undefined);
 
   const accessFlags = classAccessFlags(declaration);
   const cp = new ConstantPool();
   const thisClassIndex = cp.classInfo(name);
   const superClassIndex = cp.classInfo(superInternalName);
+  const interfaceIndices = interfaceNames.map(n => cp.classInfo(n));
   const fields = emitFields(declaration, cp, program);
 
   // Field initializers: instance ones run in each constructor, static ones in
@@ -1926,7 +1946,8 @@ export function emitClass(
   out.u2(accessFlags);
   out.u2(thisClassIndex);
   out.u2(superClassIndex);
-  out.u2(0); // interfaces_count
+  out.u2(interfaceIndices.length);
+  for (const index of interfaceIndices) out.u2(index);
   out.u2(fields.count);
   out.append(fields.buffer);
   out.u2(methodCount);
