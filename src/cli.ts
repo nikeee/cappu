@@ -7,6 +7,7 @@ import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
 import { runCompile } from "./compiler.ts";
+import pkg from "../package.json" with { type: "json" };
 
 await yargs(hideBin(process.argv))
   .scriptName("cappu")
@@ -32,7 +33,7 @@ await yargs(hideBin(process.argv))
         })
         .option("out-dir", {
           alias: "d",
-          describe: "Output directory (default: alongside each source)",
+          describe: "Output root for the package tree (default: current directory)",
           type: "string",
         }),
     args => {
@@ -41,5 +42,6 @@ await yargs(hideBin(process.argv))
   )
   .demandCommand(1, "Specify a command: lsp or compile")
   .strict()
+  .version(pkg.version)
   .help()
   .parse();
