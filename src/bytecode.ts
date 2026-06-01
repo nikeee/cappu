@@ -85,7 +85,9 @@ const PRIMITIVE_DESCRIPTOR: Record<string, string> = {
 // Constant pool tags (JVMS 4.4, Table 4.4-A).
 const CONSTANT_Utf8 = 1;
 const CONSTANT_Integer = 3;
+const CONSTANT_Float = 4;
 const CONSTANT_Long = 5;
+const CONSTANT_Double = 6;
 const CONSTANT_Class = 7;
 const CONSTANT_String = 8;
 const CONSTANT_Fieldref = 9;
@@ -109,7 +111,15 @@ const OP_ICONST_0 = 0x03;
 const OP_ICONST_1 = 0x04;
 const OP_LCONST_0 = 0x09;
 const OP_FCONST_0 = 0x0b;
+const OP_FCONST_1 = 0x0c;
+const OP_FCONST_2 = 0x0d;
 const OP_DCONST_0 = 0x0e;
+const OP_DCONST_1 = 0x0f;
+const OP_LCMP = 0x94;
+const OP_FCMPL = 0x95;
+const OP_FCMPG = 0x96;
+const OP_DCMPL = 0x97;
+const OP_DCMPG = 0x98;
 const OP_IRETURN = 0xac;
 const OP_LRETURN = 0xad;
 const OP_FRETURN = 0xae;
@@ -349,6 +359,27 @@ class ConstantPool {
       b.u4(Number(value & 0xffffffffn));
     });
     this.count++; // the second (unusable) slot
+    return index;
+  }
+
+  float(value: number): number {
+    const view = new DataView(new ArrayBuffer(4));
+    view.setFloat32(0, value);
+    return this.intern(`f:${view.getUint32(0)}`, b => {
+      b.u1(CONSTANT_Float);
+      b.u4(view.getUint32(0));
+    });
+  }
+
+  double(value: number): number {
+    const view = new DataView(new ArrayBuffer(8));
+    view.setFloat64(0, value);
+    const index = this.intern(`d:${view.getUint32(0)}:${view.getUint32(4)}`, b => {
+      b.u1(CONSTANT_Double);
+      b.u4(view.getUint32(0));
+      b.u4(view.getUint32(4));
+    });
+    this.count++; // the second (unusable) slot (JVMS 4.4.5)
     return index;
   }
 
@@ -750,6 +781,7 @@ function generateBody(
   // --- labels, branches and stack-map frames ---------------------------------------
   interface Label {
     offset: number; // resolved when placed
+    targetStack?: string[]; // operand stack as seen at the branch target (recorded by branchTo)
   }
   interface Frame {
     locals: string[];
@@ -758,12 +790,16 @@ function generateBody(
   const frameAt = new Map<number, Frame>(); // offset -> frame snapshot
   const fixups: { at: number; from: number; label: Label }[] = [];
   const newLabel = (): Label => ({ offset: -1 });
-  const placeLabel = (label: Label, stack: string[] = []): void => {
+  // A branch target's frame is defined by the operand stack on the branch-taken
+  // path, which can differ from the live stack at the label site (e.g. when the
+  // fall-through arrives after a terminator). branchTo records it; placeLabel
+  // prefers it, falling back to the live stack for fall-through-only labels.
+  const placeLabel = (label: Label): void => {
     label.offset = code.length;
-    frameAt.set(label.offset, { locals: [...activeLocals], stack });
-    // The frame defines the operand stack here; resync the linear depth counter
-    // across the branch join.
-    depth = stack.reduce((n, d) => n + slotsOf(d), 0);
+    frameAt.set(label.offset, {
+      locals: [...activeLocals],
+      stack: [...(label.targetStack ?? stack)],
+    });
   };
   const branchTo = (op: number, label: Label): void => {
     const from = code.length;
@@ -771,18 +807,22 @@ function generateBody(
     const at = code.length;
     code.u2(0); // placeholder offset, backpatched below
     fixups.push({ at, from, label });
+    if (label.targetStack === undefined) label.targetStack = [...stack];
   };
 
-  let depth = 0;
+  // Typed operand stack: one descriptor per value (top last). Drives max_stack and
+  // the stack-map frames snapshotted at branch targets.
+  const stack: string[] = [];
   let maxStack = 0;
-  const grow = (slots: number): void => {
-    depth += slots;
-    if (depth > maxStack) maxStack = depth;
+  const push = (descriptor: string): void => {
+    stack.push(descriptor);
+    const slots = stack.reduce((n, d) => n + slotsOf(d), 0);
+    if (slots > maxStack) maxStack = slots;
   };
-  const push = (descriptor: string): void => grow(slotsOf(descriptor));
-  const pushRef = (): void => grow(1);
-  const pop = (slots: number): void => {
-    depth -= slots;
+  const pushRef = (descriptor = "Ljava/lang/Object;"): void => push(descriptor);
+  // Pop `count` operand VALUES (not slots).
+  const pop = (count = 1): void => {
+    for (let i = 0; i < count; i++) stack.pop();
   };
 
   // Numeric category of a descriptor: I (byte/char/short/boolean/int), J, F, D,
@@ -814,10 +854,8 @@ function generateBody(
                   : undefined;
     if (op === undefined) return; // narrowing / reference: nothing to insert here
     code.u1(op);
-    grow(
-      slotsOf(to === "J" || to === "D" ? "J" : "I") -
-        slotsOf(from === "J" || from === "D" ? "J" : "I"),
-    );
+    pop(); // replace the converted value on the typed stack
+    push(b);
   };
 
   const ldc = (index: number): void => {
@@ -845,6 +883,20 @@ function generateBody(
     else {
       code.u1(OP_LDC2_W);
       code.u2(cp.long(value));
+    }
+  };
+  const floatConst = (value: number): void => {
+    if (value === 0) code.u1(OP_FCONST_0);
+    else if (value === 1) code.u1(OP_FCONST_1);
+    else if (value === 2) code.u1(OP_FCONST_2);
+    else ldc(cp.float(value));
+  };
+  const doubleConst = (value: number): void => {
+    if (value === 0) code.u1(OP_DCONST_0);
+    else if (value === 1) code.u1(OP_DCONST_1);
+    else {
+      code.u1(OP_LDC2_W);
+      code.u2(cp.double(value));
     }
   };
   const loadVar = (varSlot: number, descriptor: string): void => {
@@ -880,7 +932,7 @@ function generateBody(
       code.u1(full);
       code.u1(varSlot);
     }
-    pop(slotsOf(descriptor));
+    pop(); // the value being stored
   };
 
   // Descriptor of a checker Type, for `var` locals.
@@ -948,7 +1000,16 @@ function generateBody(
           push("J");
           return "J";
         }
-        if (/[.eEfFdD]/.test(text)) throw new UnsupportedEmit(); // floating point: later
+        if (/[fF]$/.test(text)) {
+          floatConst(parseFloat(text.slice(0, -1)));
+          push("F");
+          return "F";
+        }
+        if (/[.eE]/.test(text) || /[dD]$/.test(text)) {
+          doubleConst(parseFloat(/[dD]$/.test(text) ? text.slice(0, -1) : text));
+          push("D");
+          return "D";
+        }
         intConst(/^0[0-7]+$/.test(text) ? parseInt(text, 8) : Number(text));
         push("I");
         return "I";
@@ -1074,7 +1135,8 @@ function generateBody(
       const op = PRIMITIVE_CONVERSION[`${fromCat}${targetCat}`];
       if (op === undefined) throw new UnsupportedEmit();
       code.u1(op);
-      grow(slotsOf(targetDescriptor) - slotsOf(fromCat === "J" || fromCat === "D" ? "J" : "I"));
+      pop();
+      push(targetCat);
     }
     if (targetDescriptor === "B") code.u1(OP_I2B);
     else if (targetDescriptor === "C") code.u1(OP_I2C);
@@ -1132,21 +1194,22 @@ function generateBody(
     for (const arg of call.arguments) emitExpr(arg);
 
     const argSlots = parseParamDescriptors(descriptor).reduce((n, d) => n + slotsOf(d), 0);
+    const argCount = call.arguments.length;
     const returnDesc = descriptor.slice(descriptor.lastIndexOf(")") + 1);
     if (staticCall) {
       code.u1(OP_INVOKESTATIC);
       code.u2(cp.methodref(ownerName, decl.name.text, descriptor));
-      pop(argSlots);
+      pop(argCount);
     } else if (isInterface) {
       code.u1(OP_INVOKEINTERFACE);
       code.u2(cp.interfaceMethodref(ownerName, decl.name.text, descriptor));
-      code.u1(argSlots + 1);
+      code.u1(argSlots + 1); // invokeinterface "count" is in argument slots
       code.u1(0);
-      pop(argSlots + 1);
+      pop(argCount + 1);
     } else {
       code.u1(OP_INVOKEVIRTUAL);
       code.u2(cp.methodref(ownerName, decl.name.text, descriptor));
-      pop(argSlots + 1);
+      pop(argCount + 1);
     }
     if (returnDesc !== "V") push(returnDesc);
     return returnDesc;
@@ -1166,21 +1229,20 @@ function generateBody(
     if (!ctor && args.length > 0) throw new UnsupportedEmit(); // unknown constructor
     const ctorDescriptor = `(${ctorParams.join("")})V`;
 
+    const ref = `L${owner};`;
     code.u1(OP_NEW);
     code.u2(cp.classInfo(owner));
-    pushRef();
+    pushRef(ref);
     code.u1(OP_DUP);
-    pushRef();
-    let argSlots = 0;
+    pushRef(ref);
     args.forEach((arg, i) => {
       const d = emitExpr(arg);
       if (i < ctorParams.length) coerce(d, ctorParams[i]!);
-      argSlots += slotsOf(ctorParams[i] ?? d);
     });
     code.u1(OP_INVOKESPECIAL);
     code.u2(cp.methodref(owner, "<init>", ctorDescriptor));
-    pop(1 + argSlots); // invokespecial consumes the dup'd ref and the arguments
-    return `L${owner};`;
+    pop(1 + args.length); // invokespecial consumes the dup'd ref and the arguments
+    return ref;
   };
 
   // Numeric category of an expression's static type, or undefined for anything
@@ -1258,17 +1320,14 @@ function generateBody(
     flatten(node);
 
     let descriptor = "";
-    let argSlots = 0;
     for (const operand of operands) {
-      const d = typeDescriptor(checker.getTypeOfExpression(operand));
+      descriptor += typeDescriptor(checker.getTypeOfExpression(operand));
       emitExpr(operand);
-      descriptor += d;
-      argSlots += slotsOf(d);
     }
     code.u1(OP_INVOKEDYNAMIC);
     code.u2(cp.invokeDynamicConcat(String.fromCharCode(1).repeat(operands.length), descriptor));
     code.u2(0);
-    pop(argSlots);
+    pop(operands.length);
     push("Ljava/lang/String;");
     return "Ljava/lang/String;";
   };
@@ -1285,7 +1344,7 @@ function generateBody(
       emitExpr(node.left); // already int or long (unary promotion is a no-op here)
       coerce(emitExpr(node.right), "I"); // the shift distance is always int
       code.u1(shift + (longShift ? 1 : 0));
-      pop(1); // pops the int distance; the result keeps the left operand's size
+      pop(); // pops the int distance; the result keeps the left operand
       return longShift ? "J" : "I";
     }
 
@@ -1307,7 +1366,8 @@ function generateBody(
     emitOperand(node.left, t);
     emitOperand(node.right, t);
     code.u1(base + TYPE_OFFSET[t]!);
-    pop(slotsOf(t)); // two operands of t -> one result of t
+    pop(2); // two operands -> one result
+    push(t);
     return t;
   };
 
@@ -1326,14 +1386,17 @@ function generateBody(
       emitExpr(node.operand);
       if (c === "I") {
         code.u1(OP_ICONST_M1);
-        grow(1);
+        push("I");
         code.u1(OP_IXOR);
-        pop(1);
+        pop(2);
+        push("I");
         return "I";
       }
       longConst(-1n);
+      push("J");
       code.u1(OP_LXOR);
       pop(2);
+      push("J");
       return "J";
     }
     throw new UnsupportedEmit(); // logical '!': needs control flow
@@ -1385,14 +1448,14 @@ function generateBody(
           coerce(emitExpr(assign.right), info.descriptor);
           code.u1(OP_PUTSTATIC);
           code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
-          pop(slotsOf(info.descriptor));
+          pop(); // value
         } else {
           code.u1(OP_ALOAD_0);
           pushRef();
           coerce(emitExpr(assign.right), info.descriptor);
           code.u1(OP_PUTFIELD);
           code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
-          pop(1 + slotsOf(info.descriptor)); // receiver + value
+          pop(2); // receiver + value
         }
         return;
       }
@@ -1409,13 +1472,13 @@ function generateBody(
         coerce(emitExpr(assign.right), info.descriptor);
         code.u1(OP_PUTSTATIC);
         code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
-        pop(slotsOf(info.descriptor));
+        pop(); // value
       } else {
         emitExpr(access.expression); // receiver
         coerce(emitExpr(assign.right), info.descriptor);
         code.u1(OP_PUTFIELD);
         code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
-        pop(1 + slotsOf(info.descriptor));
+        pop(2); // receiver + value
       }
       return;
     }
@@ -1485,26 +1548,40 @@ function generateBody(
           if (isEquality && (isNull(b.left) || isNull(b.right))) {
             emitExpr(isNull(b.left) ? b.right : b.left);
             const eq = op === SyntaxKind.EqualsEqualsToken;
+            pop(1); // objectref consumed by the branch
             branchTo(eq === whenTrue ? OP_IFNULL : OP_IFNONNULL, label);
-            pop(1);
             return;
           }
           if (isEquality && !lc && !rc) {
             emitExpr(b.left);
             emitExpr(b.right);
             const eq = op === SyntaxKind.EqualsEqualsToken;
-            branchTo(eq === whenTrue ? OP_IF_ACMPEQ : OP_IF_ACMPNE, label);
             pop(2);
+            branchTo(eq === whenTrue ? OP_IF_ACMPEQ : OP_IF_ACMPNE, label);
             return;
           }
           if (lc === "I" && rc === "I") {
             emitExpr(b.left);
             emitExpr(b.right);
-            branchTo(OP_IF_ICMPEQ + (whenTrue ? offset : NEGATED[offset]!), label);
             pop(2);
+            branchTo(OP_IF_ICMPEQ + (whenTrue ? offset : NEGATED[offset]!), label);
             return;
           }
-          throw new UnsupportedEmit(); // long/float/double comparisons: later
+          if (lc && rc) {
+            // long/float/double: cmp leaves -1/0/1, then branch against 0.
+            const t = lc === "D" || rc === "D" ? "D" : lc === "F" || rc === "F" ? "F" : "J";
+            emitOperand(b.left, t);
+            emitOperand(b.right, t);
+            // For < and <=, use the "g" variant so NaN compares as greater.
+            const g = op === SyntaxKind.LessThanToken || op === SyntaxKind.LessThanEqualsToken;
+            code.u1(
+              t === "J" ? OP_LCMP : t === "F" ? (g ? OP_FCMPG : OP_FCMPL) : g ? OP_DCMPG : OP_DCMPL,
+            );
+            pop(2); // two operands -> one int result, then consumed by the branch
+            branchTo(OP_IFEQ + (whenTrue ? offset : NEGATED[offset]!), label);
+            return;
+          }
+          throw new UnsupportedEmit();
         }
         break;
       }
@@ -1513,8 +1590,8 @@ function generateBody(
     }
     // Fall back: evaluate a boolean value and branch on zero/non-zero.
     emitExpr(expr);
+    pop(1); // the value is consumed by the branch
     branchTo(OP_IFEQ + (whenTrue ? 1 : 0), label); // ifne when true, ifeq when false
-    pop(1);
   };
 
   const isBooleanOperator = (op: SyntaxKind): boolean =>
@@ -1531,10 +1608,11 @@ function generateBody(
     code.u1(OP_ICONST_0);
     push("I");
     branchTo(OP_GOTO, contL);
-    placeLabel(trueL); // reached when the condition is true; stack empty here
+    pop(); // the false-path value is not on the stack when the true label is reached
+    placeLabel(trueL);
     code.u1(OP_ICONST_1);
     push("I");
-    placeLabel(contL, ["I"]); // both paths converge with one int on the stack
+    placeLabel(contL); // both paths converge with one int atop the entry stack
     return "Z";
   };
 
@@ -1573,7 +1651,7 @@ function generateBody(
     const desc = emitExpr(expr);
     if (desc !== "V") {
       code.u1(slotsOf(desc) === 2 ? OP_POP2 : OP_POP);
-      pop(slotsOf(desc));
+      pop(); // discard the unused value
     }
   };
 
@@ -1697,14 +1775,14 @@ function generateBody(
       coerce(emitExpr(fi.init), fi.descriptor);
       code.u1(OP_PUTSTATIC);
       code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
-      pop(slotsOf(fi.descriptor));
+      pop(); // value
     } else {
       code.u1(OP_ALOAD_0);
       pushRef();
       coerce(emitExpr(fi.init), fi.descriptor);
       code.u1(OP_PUTFIELD);
       code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
-      pop(1 + slotsOf(fi.descriptor));
+      pop(2); // receiver + value
     }
   }
   const terminated = emitStmt(method.body);

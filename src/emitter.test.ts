@@ -424,6 +424,42 @@ test(
   },
 );
 
+test(
+  "float and double arithmetic run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    const name = "Fp";
+    const src = [
+      "public class Fp {",
+      "  static double area(double r) { return 3.14159 * r * r; }",
+      "  static boolean closeEnough(double a, double b) { double diff = a - b; if (diff < 0.0) { diff = -diff; } return diff < 0.001; }",
+      "  public static void main(String[] args) {",
+      "    double d = 2.5;",
+      "    float f = 1.5f;",
+      "    double sum = d + f;",
+      "    System.out.println(sum);",
+      "    System.out.println(area(2.0));",
+      "    System.out.println(d > f);",
+      "    System.out.println(closeEnough(1.0, 1.0005));",
+      "    int n = (int) 9.99;",
+      "    System.out.println(n);",
+      "  }",
+      "}",
+    ].join("\n");
+    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
+    writeFileSync(join(ref, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+
+    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+    writeFileSync(join(ours, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+
+    expect(ourOut).toBe(refOut);
+    expect(refOut).toBe("4.0\n12.56636\ntrue\ntrue\n9\n");
+  },
+);
+
 for (const [name, { source: src, stdout }] of Object.entries(CONTROL)) {
   test(`control flow binary baseline: ${name}`, () => {
     const bytes = emit(name, src);

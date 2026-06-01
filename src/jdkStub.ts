@@ -251,6 +251,7 @@ class PrintStream extends OutputStream {
   public void println(char c) {}
   public void println(boolean b) {}
   public void println(long l) {}
+  public void println(float f) {}
   public void println(double d) {}
   public PrintStream printf(String format, Object... args) { return null; }
   public PrintStream append(CharSequence s) { return null; }
