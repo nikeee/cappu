@@ -83,6 +83,17 @@ test("mixed int/long promotes to long", () => {
   expect(fold("2147483647 + 1L")).toEqual({ kind: "long", value: 2147483648n }); // no int overflow
 });
 
+test("hex and binary literals fold (a-f are digits, not float suffixes)", () => {
+  expect(fold("0xff")).toEqual({ kind: "int", value: 255n });
+  expect(fold("0xe")).toEqual({ kind: "int", value: 14n }); // not an exponent
+  expect(fold("0xd")).toEqual({ kind: "int", value: 13n }); // not a double suffix
+  expect(fold("0xff + 1")).toEqual({ kind: "int", value: 256n });
+  expect(fold("0xFFFFFFFF")).toEqual({ kind: "int", value: -1n }); // 32-bit wrap
+  expect(fold("0xFFL")).toEqual({ kind: "long", value: 255n });
+  expect(fold("0b1010")).toEqual({ kind: "int", value: 10n });
+  expect(fold("0x1.8p1")).toBeUndefined(); // hex floating-point: not an int constant
+});
+
 test("non-constant expressions and divide-by-zero do not fold", () => {
   expect(fold("m()")).toBeUndefined();
   expect(fold("1 / 0")).toBeUndefined(); // left for the JVM to throw at runtime

@@ -51,6 +51,22 @@ const FIXTURES: Record<string, string> = {
   // keeping the comparison honest until constant folding (JLS 15.28) is added.
   Compute:
     "public class Compute { static int v() { return 42; } public static void main(String[] args) { int a = v(); int b = a - 2; System.out.println(b); } }",
+  // float/double arithmetic over parameters (not constant-foldable), so the
+  // instruction stream is byte-comparable to javac: fadd/fmul/ddiv/fneg/frem,
+  // and the f2d widening for the mixed double+float operand.
+  FloatArith:
+    "class FloatArith { float mul(float a, float b) { return a * b; } float addc(float a) { return a + 0.1f; } double div(double a, double b) { return a / b; } float neg(float a) { return -a; } double mix(double a, float b) { return a + b; } float rem(float a, float b) { return a % b; } double poly(double x) { return x * x + x; } }",
+  // Every primitive numeric conversion: i2f, l2d, l2f, f2d, d2i, d2l, d2f, f2i.
+  FloatConv:
+    "class FloatConv { int toInt(double d) { return (int) d; } long toLong(double d) { return (long) d; } double widenLong(long x) { return x; } float fromLong(long x) { return x; } float fromInt(int n) { return n; } double widenFloat(float f) { return f; } int truncFloat(float f) { return (int) f; } float narrowDouble(double d) { return (float) d; } }",
+  // Float/double constant literals: exercises the JS parseFloat -> setFloat32
+  // path (32-bit rounding must match javac's decimal-to-float) and fconst_0/1/2.
+  FloatConst:
+    "class FloatConst { float a() { return 0.1f; } float b() { return 3.14159f; } float c() { return 1.0e10f; } float d() { return 0.3f; } float big() { return 16777217f; } double e() { return 0.1; } double pi() { return 3.141592653589793; } float fz() { return 0.0f; } float fo() { return 1.0f; } float ft() { return 2.0f; } }",
+  // Integer literal forms, including hex digits a-f that must NOT be read as
+  // float/double suffixes (0xff, 0xe, 0xd), octal, binary, and 32-bit wrap.
+  IntLiterals:
+    "class IntLiterals { int hexFf() { return 0xff; } int hexE() { return 0xe; } int hexD() { return 0xd; } int hex1e() { return 0x1e; } int cafe() { return 0xCafe; } int allOnes() { return 0xFFFFFFFF; } long hexL() { return 0xFFL; } int oct() { return 010; } int bin() { return 0b1010; } int big() { return 1000000; } }",
 };
 
 // Fixtures with a runnable main and the output they must print.

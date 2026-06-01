@@ -918,7 +918,7 @@ function generateBody(
     }
   };
   const storeVar = (varSlot: number, descriptor: string): void => {
-    const kind = category(descriptor) === "I" ? "I" : category(descriptor);
+    const kind = category(descriptor);
     const full = { I: OP_ISTORE, J: OP_LSTORE, F: OP_FSTORE, D: OP_DSTORE, A: OP_ASTORE }[kind]!;
     const short0 = {
       I: OP_ISTORE_0,
@@ -965,6 +965,24 @@ function generateBody(
     };
   };
 
+  // Read a field: getstatic, or emit the receiver then getfield. `emitReceiver`
+  // is only invoked for instance fields (skipped for statics, like javac).
+  const emitFieldRead = (
+    info: { owner: string; name: string; descriptor: string; isStatic: boolean },
+    emitReceiver: () => void,
+  ): string => {
+    if (info.isStatic) {
+      code.u1(OP_GETSTATIC);
+    } else {
+      emitReceiver();
+      code.u1(OP_GETFIELD);
+      pop(1); // the receiver, replaced by the field value
+    }
+    code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
+    push(info.descriptor);
+    return info.descriptor;
+  };
+
   const emitExpr = (node: Node): string => {
     // Fold compile-time constant expressions (JLS 15.28), as javac does, so e.g.
     // 6 * 7 emits `bipush 42`. Only composite expressions are folded here; plain
@@ -995,22 +1013,39 @@ function generateBody(
         return emitExpr((node as unknown as { expression: Node }).expression);
       case SyntaxKind.NumericLiteral: {
         const text = (node as LiteralExpression).value.replace(/_/g, "");
-        if (/[lL]$/.test(text)) {
-          longConst(BigInt(text.slice(0, -1)));
-          push("J");
-          return "J";
-        }
-        if (/[fF]$/.test(text)) {
+        // In hex/binary integer literals the letters a-f are digits, not type
+        // suffixes, so f/d/e must not be read as float/double/exponent there;
+        // only a trailing L is a suffix. (parseFloat would silently return 0.)
+        const isHex = /^0[xX]/.test(text);
+        const isBin = /^0[bB]/.test(text);
+        if (isHex && /[pP]/.test(text)) throw new UnsupportedEmit(); // hex floating-point literal
+        if (!isHex && !isBin && /[fF]$/.test(text)) {
           floatConst(parseFloat(text.slice(0, -1)));
           push("F");
           return "F";
         }
-        if (/[.eE]/.test(text) || /[dD]$/.test(text)) {
+        if (!isHex && !isBin && (/[.eE]/.test(text) || /[dD]$/.test(text))) {
           doubleConst(parseFloat(/[dD]$/.test(text) ? text.slice(0, -1) : text));
           push("D");
           return "D";
         }
-        intConst(/^0[0-7]+$/.test(text) ? parseInt(text, 8) : Number(text));
+        if (/[lL]$/.test(text)) {
+          const body = text.slice(0, -1);
+          const v =
+            isHex || isBin
+              ? BigInt(body)
+              : BigInt(/^0[0-7]+$/.test(body) ? parseInt(body, 8) : body);
+          longConst(BigInt.asIntN(64, v));
+          push("J");
+          return "J";
+        }
+        const value =
+          isHex || isBin
+            ? Number(BigInt.asIntN(32, BigInt(text))) // wrap to signed 32-bit (0xFFFFFFFF -> -1)
+            : /^0[0-7]+$/.test(text)
+              ? parseInt(text, 8)
+              : Number(text);
+        intConst(value);
         push("I");
         return "I";
       }
@@ -1049,18 +1084,10 @@ function generateBody(
         }
         // A field referenced by its simple name: implicit `this.f` or a static.
         if (symbol && symbol.flags & SymbolFlags.Field) {
-          const info = fieldInfoOf(symbol);
-          if (info.isStatic) {
-            code.u1(OP_GETSTATIC);
-          } else {
+          return emitFieldRead(fieldInfoOf(symbol), () => {
             code.u1(OP_ALOAD_0);
             pushRef();
-            code.u1(OP_GETFIELD);
-            pop(1);
-          }
-          code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
-          push(info.descriptor);
-          return info.descriptor;
+          });
         }
         throw new UnsupportedEmit();
       }
@@ -1084,17 +1111,7 @@ function generateBody(
         const access = node as PropertyAccessExpression;
         const symbol = checker.resolveName(access.name);
         if (!symbol || !(symbol.flags & SymbolFlags.Field)) throw new UnsupportedEmit();
-        const info = fieldInfoOf(symbol);
-        if (info.isStatic) {
-          code.u1(OP_GETSTATIC);
-        } else {
-          emitExpr(access.expression);
-          code.u1(OP_GETFIELD);
-          pop(1);
-        }
-        code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
-        push(info.descriptor);
-        return info.descriptor;
+        return emitFieldRead(fieldInfoOf(symbol), () => emitExpr(access.expression));
       }
       case SyntaxKind.CallExpression:
         return emitCall(node as CallExpression);
@@ -1123,14 +1140,7 @@ function generateBody(
     DF: OP_D2F,
   };
   const convertPrimitive = (fromCat: string, targetDescriptor: string): void => {
-    const targetCat =
-      targetDescriptor === "J"
-        ? "J"
-        : targetDescriptor === "D"
-          ? "D"
-          : targetDescriptor === "F"
-            ? "F"
-            : "I";
+    const targetCat = category(targetDescriptor); // B/C/S/Z/I all collapse to I
     if (fromCat !== targetCat) {
       const op = PRIMITIVE_CONVERSION[`${fromCat}${targetCat}`];
       if (op === undefined) throw new UnsupportedEmit();
@@ -1267,6 +1277,15 @@ function generateBody(
     }
   };
   const TYPE_OFFSET: Record<string, number> = { I: 0, J: 1, F: 2, D: 3 };
+  // Binary numeric promotion (JLS 5.6.2): the wider of the two operand categories.
+  const promote = (a: string, b: string): string =>
+    a === "D" || b === "D"
+      ? "D"
+      : a === "F" || b === "F"
+        ? "F"
+        : a === "J" || b === "J"
+          ? "J"
+          : "I";
   const ARITHMETIC: Record<number, number> = {
     [SyntaxKind.PlusToken]: OP_IADD,
     [SyntaxKind.MinusToken]: OP_ISUB,
@@ -1354,15 +1373,7 @@ function generateBody(
     if (bitwise && (lc === "F" || lc === "D" || rc === "F" || rc === "D")) {
       throw new UnsupportedEmit();
     }
-    // Binary numeric promotion (JLS 5.6.2).
-    const t =
-      lc === "D" || rc === "D"
-        ? "D"
-        : lc === "F" || rc === "F"
-          ? "F"
-          : lc === "J" || rc === "J"
-            ? "J"
-            : "I";
+    const t = promote(lc, rc);
     emitOperand(node.left, t);
     emitOperand(node.right, t);
     code.u1(base + TYPE_OFFSET[t]!);
@@ -1569,7 +1580,7 @@ function generateBody(
           }
           if (lc && rc) {
             // long/float/double: cmp leaves -1/0/1, then branch against 0.
-            const t = lc === "D" || rc === "D" ? "D" : lc === "F" || rc === "F" ? "F" : "J";
+            const t = promote(lc, rc);
             emitOperand(b.left, t);
             emitOperand(b.right, t);
             // For < and <=, use the "g" variant so NaN compares as greater.
@@ -1696,7 +1707,9 @@ function generateBody(
         return false;
       case SyntaxKind.ReturnStatement: {
         const expr = (stmt as ReturnStatement).expression;
-        if (expr) emitExpr(expr);
+        // Widen the value to the return type (JLS 5.2 assignment context), e.g.
+        // `double f(long x){ return x; }` needs an l2d before dreturn.
+        if (expr) coerce(emitExpr(expr), returnDescriptor);
         emitReturn();
         return true;
       }

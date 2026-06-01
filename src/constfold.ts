@@ -140,7 +140,11 @@ export function foldConstant(node: Node): ConstValue | undefined {
       return foldConstant((node as unknown as { expression: Node }).expression);
     case SyntaxKind.NumericLiteral: {
       const text = (node as LiteralExpression).value;
-      if (/[.eEfFdD]/.test(text.replace(/_/g, ""))) return undefined; // float/double
+      const t = text.replace(/_/g, "");
+      const isHexOrBin = /^0[xXbB]/.test(t);
+      // Decimal float/double, or hex floating-point: not an integer constant.
+      // (In hex/binary literals a-f are digits, so only guard them on a 'p' exponent.)
+      if (isHexOrBin ? /[pP]/.test(t) : /[.eEfFdD]/.test(t)) return undefined;
       const isLong = /[lL]$/.test(text);
       const parsed = parseIntLiteral(isLong ? text.replace(/[lL]$/, "") : text);
       if (parsed === undefined) return undefined;
