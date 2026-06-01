@@ -436,12 +436,35 @@ export function createChecker(program: Program): Checker {
     return undefined;
   }
 
-  // The functional-interface type a lambda is being assigned/converted to. Only
-  // the common case (assigned to a typed variable/field) is handled.
+  // The functional-interface type a lambda is being assigned/converted to
+  // (JLS 15.27.3 - assignment, return, and invocation contexts).
   function lambdaTargetType(lambda: Node): Type | undefined {
     const parent = lambda.parent;
+    // T f = () -> ...;
     if (parent.kind === SyntaxKind.VariableDeclarator && parent.symbol) {
       return getTypeOfSymbol(parent.symbol);
+    }
+    // return () -> ...;  -> the enclosing method's declared return type.
+    if (parent.kind === SyntaxKind.ReturnStatement) {
+      let n: Node | undefined = parent.parent;
+      while (
+        n &&
+        n.kind !== SyntaxKind.MethodDeclaration &&
+        n.kind !== SyntaxKind.LambdaExpression
+      ) {
+        n = n.parent;
+      }
+      return n && n.kind === SyntaxKind.MethodDeclaration
+        ? resolveType((n as MethodDeclaration).returnType, n)
+        : undefined;
+    }
+    // m(() -> ...)  -> the resolved method's parameter type at the lambda's index.
+    if (parent.kind === SyntaxKind.CallExpression) {
+      const call = parent as CallExpression;
+      const index = call.arguments.indexOf(lambda);
+      const decl = index >= 0 ? resolveCall(call) : undefined;
+      const param = decl?.parameters[index] as { type?: TypeNode } | undefined;
+      return param?.type ? resolveType(param.type, decl!) : undefined;
     }
     return undefined;
   }

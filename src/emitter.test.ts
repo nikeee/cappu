@@ -546,6 +546,33 @@ test(
 );
 
 test(
+  "this-capturing lambdas (instance context) run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Th",
+      [
+        "import java.util.function.Supplier;",
+        "public class Th {",
+        '  String label = "L";',
+        "  String suffix(String s){ return label + s; }",
+        '  Supplier<String> labeler(){ return () -> label + "!"; }', // captures this (field)
+        "  Supplier<String> withLocal(String x){ return () -> label + x; }", // this + local
+        "  Supplier<String> viaMethod(String y){ return () -> suffix(y); }", // this (instance method) + local
+        "  public static void main(String[] a){",
+        "    Th t = new Th();",
+        "    System.out.println(t.labeler().get());",
+        '    System.out.println(t.withLocal("X").get());',
+        '    System.out.println(t.viaMethod("Y").get());',
+        "  }",
+        "}",
+      ].join("\n"),
+      "L!\nLX\nLY\n",
+    );
+  },
+);
+
+test(
   "static nested classes and field ++ run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

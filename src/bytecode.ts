@@ -104,7 +104,11 @@ const CONSTANT_NameAndType = 12;
 const CONSTANT_MethodHandle = 15;
 const CONSTANT_MethodType = 16;
 const CONSTANT_InvokeDynamic = 18;
-const REF_invokeStatic = 6; // MethodHandle reference_kind (JVMS 4.4.8)
+const REF_invokeVirtual = 5; // MethodHandle reference_kind (JVMS 4.4.8)
+const REF_invokeStatic = 6;
+const REF_invokeSpecial = 7;
+const REF_newInvokeSpecial = 8;
+const REF_invokeInterface = 9;
 
 // java.lang.invoke.StringConcatFactory.makeConcatWithConstants bootstrap (JLS 15.18.1).
 const STRING_CONCAT_FACTORY = "java/lang/invoke/StringConcatFactory";
@@ -458,19 +462,26 @@ class ConstantPool {
     samName: string,
     indyDescriptor: string,
     samErased: string,
+    implRefKind: number,
     implOwner: string,
     implName: string,
     implDescriptor: string,
     instantiated: string,
+    implIsInterface = false,
   ): number {
     const bsmHandle = this.methodHandle(
       REF_invokeStatic,
       this.methodref(LAMBDA_METAFACTORY, "metafactory", LAMBDA_METAFACTORY_BSM_DESCRIPTOR),
     );
-    const implHandle = this.methodHandle(
-      REF_invokeStatic,
-      this.methodref(implOwner, implName, implDescriptor),
-    );
+    // The impl reference: a constructor (<init>) or a normal method, on a class
+    // or an interface.
+    const implRef =
+      implName === "<init>"
+        ? this.methodref(implOwner, implName, implDescriptor)
+        : implIsInterface
+          ? this.interfaceMethodref(implOwner, implName, implDescriptor)
+          : this.methodref(implOwner, implName, implDescriptor);
+    const implHandle = this.methodHandle(implRefKind, implRef);
     const args = [this.methodType(samErased), implHandle, this.methodType(instantiated)];
     const bootstrapIndex = this.bootstraps.length;
     this.bootstraps.push({ handle: bsmHandle, args });
@@ -802,13 +813,15 @@ interface FieldInit {
   init: Node;
 }
 
-// A synthetic private-static method holding a lambda body. `params` are the
-// captured outer locals followed by the lambda's own parameters.
+// A synthetic method holding a lambda body. `params` are the captured outer
+// locals followed by the lambda's own parameters. When `isInstance`, it is a
+// private instance method (the lambda captured `this`); otherwise private static.
 interface LambdaImpl {
   name: string;
   params: { symbol: Symbol; descriptor: string }[];
   returnDescriptor: string;
   body: Node;
+  isInstance: boolean;
 }
 
 function generateBody(
@@ -834,11 +847,12 @@ function generateBody(
     params: { symbol: Symbol; descriptor: string }[];
     returnDescriptor: string;
     body: Node;
+    isInstance: boolean;
   },
 ): { code: ByteBuffer; maxStack: number; maxLocals: number; stackMapTable?: ByteBuffer } {
   const isConstructor = !lambdaSpec && method.kind === SyntaxKind.ConstructorDeclaration;
   const isStatic = lambdaSpec
-    ? true
+    ? !lambdaSpec.isInstance
     : !isConstructor && (methodAccessFlags(method as MethodDeclaration) & ACC_STATIC) !== 0;
   const returnDescriptor = lambdaSpec
     ? lambdaSpec.returnDescriptor
@@ -1930,10 +1944,11 @@ function generateBody(
   };
 
   // A lambda (JLS 15.27): lowered to an invokedynamic bound by
-  // LambdaMetafactory. The body becomes a synthetic private-static method
-  // (collected in `lambdas`, emitted by emitClass) whose parameters are the
-  // captured outer locals followed by the lambda's own parameters. Capturing
-  // `this` or instance members is not supported yet (v1 covers static context).
+  // LambdaMetafactory. The body becomes a synthetic method (emitted into
+  // lambdaMethods) whose parameters are the captured outer locals followed by
+  // the lambda's own parameters. A lambda that uses `this`/an instance member
+  // captures the enclosing instance: the impl is a private instance method and
+  // the receiver is the first dynamic argument (REF_invokeSpecial).
   const isVoidType = (t: Type): boolean =>
     t.kind === TypeKind.Primitive && (t as { name: string }).name === "void";
   const descOf = (t: Type): string => (isVoidType(t) ? "V" : typeDescriptor(t));
@@ -1942,30 +1957,56 @@ function generateBody(
     const info = checker.getLambdaInfo(node);
     if (!info) throw new UnsupportedEmit();
 
-    // Captured variables: identifiers in the body that resolve to a local in
-    // scope at the lambda site (JLS 15.27.2 - effectively final). Bail on any
-    // `this`/instance-member use so the static impl method stays well-formed.
+    // Capture analysis (JLS 15.27.2): captured locals become impl params; any
+    // `this`/instance-member use means the enclosing instance is captured too.
     const captures: Symbol[] = [];
     const seen = new Set<Symbol>();
+    let needsThis = false;
+    const declStatic = (sym: Symbol): boolean => {
+      const d = sym.valueDeclaration ?? sym.declarations?.[0];
+      return !!d && isStaticDeclaration(d as { modifiers?: readonly Node[] });
+    };
     const walk = (n: Node): void => {
-      if (n.kind === SyntaxKind.ThisExpression) throw new UnsupportedEmit();
-      if (n.kind === SyntaxKind.Identifier) {
-        const sym = checker.resolveName(n as Identifier);
-        if (sym && locals.has(sym)) {
-          if (!seen.has(sym)) {
-            seen.add(sym);
-            captures.push(sym);
+      switch (n.kind) {
+        case SyntaxKind.ThisExpression:
+        case SyntaxKind.SuperExpression:
+          needsThis = true;
+          return;
+        case SyntaxKind.PropertyAccessExpression:
+          walk((n as PropertyAccessExpression).expression); // skip the member name
+          return;
+        case SyntaxKind.Identifier: {
+          const sym = checker.resolveName(n as Identifier);
+          if (sym && locals.has(sym)) {
+            if (!seen.has(sym)) {
+              seen.add(sym);
+              captures.push(sym);
+            }
+          } else if (sym && sym.flags & SymbolFlags.Field && !fieldInfoOf(sym).isStatic) {
+            needsThis = true; // implicit-this instance field
           }
-        } else if (sym && sym.flags & SymbolFlags.Field && !fieldInfoOf(sym).isStatic) {
-          throw new UnsupportedEmit(); // implicit-this instance field
+          return;
         }
+        case SyntaxKind.CallExpression: {
+          const callee = (n as CallExpression).expression;
+          if (callee.kind === SyntaxKind.Identifier) {
+            const m = checker.resolveName(callee as Identifier);
+            if (m && m.flags & SymbolFlags.Method && !declStatic(m)) needsThis = true;
+          } else {
+            walk(callee);
+          }
+          for (const arg of (n as CallExpression).arguments) walk(arg);
+          return;
+        }
+        default:
+          forEachChild(n, c => {
+            walk(c);
+            return undefined;
+          });
       }
-      forEachChild(n, c => {
-        walk(c);
-        return undefined;
-      });
     };
     walk(node.body);
+    if (needsThis && isStatic) throw new UnsupportedEmit(); // no enclosing instance to capture
 
     const instParamDescs = info.instParams.map(t => typeDescriptor(t));
     const instReturnDesc = descOf(info.instReturn);
@@ -1985,7 +2026,13 @@ function generateBody(
     // propagates and this whole enclosing method falls back (no dangling indy).
     lambdaMethods.push(
       emitLambdaMethod(
-        { name: implName, params: implParams, returnDescriptor: instReturnDesc, body: node.body },
+        {
+          name: implName,
+          params: implParams,
+          returnDescriptor: instReturnDesc,
+          body: node.body,
+          isInstance: needsThis,
+        },
         cp,
         program,
         checker,
@@ -1994,17 +2041,24 @@ function generateBody(
       ),
     );
 
-    // invokedynamic: push captured values, then bind the call site.
+    // invokedynamic: push the receiver (if captured), then the captured locals.
+    const thisDesc = `L${thisInternalName};`;
+    if (needsThis) {
+      code.u1(OP_ALOAD_0);
+      push(thisDesc);
+    }
     for (const c of captureParams) {
       loadVar(locals.get(c.symbol)!.slot, c.descriptor);
       push(c.descriptor);
     }
     const interfaceDesc = typeDescriptor(info.interfaceType);
-    const indyDescriptor = `(${captureParams.map(c => c.descriptor).join("")})${interfaceDesc}`;
+    const dynamicArgs = (needsThis ? thisDesc : "") + captureParams.map(c => c.descriptor).join("");
+    const indyDescriptor = `(${dynamicArgs})${interfaceDesc}`;
     const idx = cp.invokeDynamicLambda(
       info.samName,
       indyDescriptor,
       samErased,
+      needsThis ? REF_invokeSpecial : REF_invokeStatic,
       thisInternalName,
       implName,
       implDescriptor,
@@ -2013,7 +2067,7 @@ function generateBody(
     code.u1(OP_INVOKEDYNAMIC);
     code.u2(idx);
     code.u2(0);
-    pop(captureParams.length);
+    pop(captureParams.length + (needsThis ? 1 : 0));
     push(interfaceDesc);
     return interfaceDesc;
   };
@@ -2510,8 +2564,9 @@ function emitMethod(
   return info;
 }
 
-// A synthetic private-static method holding a lambda body. Its own nested
-// lambdas are emitted eagerly into `lambdaMethods` during generateBody.
+// A synthetic method holding a lambda body (private static, or private instance
+// when the lambda captured `this`). Its own nested lambdas are emitted eagerly
+// into `lambdaMethods` during generateBody.
 function emitLambdaMethod(
   impl: LambdaImpl,
   cp: ConstantPool,
@@ -2522,7 +2577,7 @@ function emitLambdaMethod(
 ): ByteBuffer {
   const descriptor = `(${impl.params.map(p => p.descriptor).join("")})${impl.returnDescriptor}`;
   const info = new ByteBuffer();
-  info.u2(ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC);
+  info.u2(ACC_PRIVATE | ACC_SYNTHETIC | (impl.isInstance ? 0 : ACC_STATIC));
   info.u2(cp.utf8(impl.name));
   info.u2(cp.utf8(descriptor));
   const body = generateBody(
@@ -2534,7 +2589,12 @@ function emitLambdaMethod(
     undefined,
     [],
     lambdaMethods,
-    { params: impl.params, returnDescriptor: impl.returnDescriptor, body: impl.body },
+    {
+      params: impl.params,
+      returnDescriptor: impl.returnDescriptor,
+      body: impl.body,
+      isInstance: impl.isInstance,
+    },
   );
   writeCodeAttribute(info, cp, body);
   return info;
