@@ -122,6 +122,29 @@ const LAMBDA_METAFACTORY_BSM_DESCRIPTOR =
   "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;";
 const OP_INVOKEDYNAMIC = 0xba;
 
+// Boxing/unboxing (JLS 5.1.7/5.1.8): primitive descriptor -> wrapper internal
+// name (Xxx.valueOf), and wrapper internal name -> [unboxing method, primitive].
+const WRAPPER: Record<string, string> = {
+  Z: "java/lang/Boolean",
+  B: "java/lang/Byte",
+  S: "java/lang/Short",
+  C: "java/lang/Character",
+  I: "java/lang/Integer",
+  J: "java/lang/Long",
+  F: "java/lang/Float",
+  D: "java/lang/Double",
+};
+const UNBOX: Record<string, readonly [string, string]> = {
+  "java/lang/Boolean": ["booleanValue", "Z"],
+  "java/lang/Byte": ["byteValue", "B"],
+  "java/lang/Short": ["shortValue", "S"],
+  "java/lang/Character": ["charValue", "C"],
+  "java/lang/Integer": ["intValue", "I"],
+  "java/lang/Long": ["longValue", "J"],
+  "java/lang/Float": ["floatValue", "F"],
+  "java/lang/Double": ["doubleValue", "D"],
+};
+
 // Opcodes (JVMS 6.5) used so far.
 const OP_ACONST_NULL = 0x01;
 const OP_ICONST_0 = 0x03;
@@ -1008,11 +1031,45 @@ function generateBody(
     return c === "J" || c === "D" || c === "F" ? c : c === "L" || c === "[" ? "A" : "I";
   };
 
-  // Widening numeric conversion of the value on top of the stack (JLS 5.1.2),
-  // used for promotion, assignment and arguments. No-op when categories match.
+  // Box a primitive (already on the stack) to its wrapper: Xxx.valueOf.
+  const box = (prim: string): void => {
+    const w = WRAPPER[prim];
+    if (!w) return;
+    code.u1(OP_INVOKESTATIC);
+    code.u2(cp.methodref(w, "valueOf", `(${prim})L${w};`));
+    pop();
+    push(`L${w};`);
+  };
+  // Unbox a wrapper reference (already on the stack) to its primitive, returning
+  // that primitive's descriptor (or undefined if `from` is not a wrapper).
+  const unbox = (from: string): string | undefined => {
+    if (from[0] !== "L") return undefined;
+    const um = UNBOX[from.slice(1, -1)];
+    if (!um) return undefined;
+    code.u1(OP_INVOKEVIRTUAL);
+    code.u2(cp.methodref(from.slice(1, -1), um[0], `()${um[1]}`));
+    pop();
+    push(um[1]);
+    return um[1];
+  };
+
+  // Convert the value on top of the stack from `from` to `to` (JLS 5.1.2 widening,
+  // 5.1.7 boxing, 5.1.8 unboxing), used for assignment, return and arguments.
   const coerce = (from: string, to: string): void => {
+    if (from === to) return;
     const a = category(from);
     const b = category(to);
+    // Boxing: a primitive into a reference target (its wrapper, or a supertype).
+    if (a !== "A" && b === "A") {
+      box(from);
+      return;
+    }
+    // Unboxing: a wrapper into a primitive target, then widen the primitive.
+    if (a === "A" && b !== "A") {
+      const prim = unbox(from);
+      if (prim !== undefined) coerce(prim, to);
+      return;
+    }
     if (a === b) return;
     const op =
       a === "I" && b === "J"
@@ -1384,9 +1441,16 @@ function generateBody(
         pushRef();
       } else throw new UnsupportedEmit();
     }
-    for (const arg of call.arguments) emitExpr(arg);
+    // Coerce each argument to its parameter type (box/unbox/widen) when the
+    // arity matches exactly; a varargs spread is left to emit as-is.
+    const paramDescs = parseParamDescriptors(descriptor);
+    const coerceArgs = call.arguments.length === paramDescs.length;
+    call.arguments.forEach((arg, i) => {
+      const d = emitExpr(arg);
+      if (coerceArgs) coerce(d, paramDescs[i]!);
+    });
 
-    const argSlots = parseParamDescriptors(descriptor).reduce((n, d) => n + slotsOf(d), 0);
+    const argSlots = paramDescs.reduce((n, d) => n + slotsOf(d), 0);
     const argCount = call.arguments.length;
     const returnDesc = descriptor.slice(descriptor.lastIndexOf(")") + 1);
     if (staticCall) {
@@ -1477,6 +1541,17 @@ function generateBody(
         return undefined; // void
     }
   };
+  // Like numericCategory, but a boxed wrapper type yields its primitive category
+  // (the operand is unboxed in numeric contexts, JLS 5.6).
+  const numericCat = (type: Type): string | undefined => {
+    const c = numericCategory(type);
+    if (c) return c;
+    if (type.kind === TypeKind.Class) {
+      const um = UNBOX[binaryName(type.symbol)];
+      if (um) return um[1] === "J" || um[1] === "F" || um[1] === "D" ? um[1] : "I";
+    }
+    return undefined;
+  };
   const TYPE_OFFSET: Record<string, number> = { I: 0, J: 1, F: 2, D: 3 };
   // Binary numeric promotion (JLS 5.6.2): the wider of the two operand categories.
   const promote = (a: string, b: string): string =>
@@ -1554,14 +1629,14 @@ function generateBody(
 
   const emitBinary = (node: BinaryExpression): string => {
     const op = node.operatorToken;
-    const lc = numericCategory(checker.getTypeOfExpression(node.left));
-    const rc = numericCategory(checker.getTypeOfExpression(node.right));
+    const lc = numericCat(checker.getTypeOfExpression(node.left));
+    const rc = numericCat(checker.getTypeOfExpression(node.right));
     if (!lc || !rc) throw new UnsupportedEmit(); // String concat / comparisons: later
 
     const shift = SHIFTS[op];
     if (shift !== undefined) {
       const longShift = lc === "J";
-      emitExpr(node.left); // already int or long (unary promotion is a no-op here)
+      emitOperand(node.left, lc); // unbox the shifted value if it is a wrapper
       coerce(emitExpr(node.right), "I"); // the shift distance is always int
       code.u1(shift + (longShift ? 1 : 0));
       pop(); // pops the int distance; the result keeps the left operand
@@ -1839,8 +1914,14 @@ function generateBody(
           const isEquality =
             op === SyntaxKind.EqualsEqualsToken || op === SyntaxKind.ExclamationEqualsToken;
           const isNull = (n: Node): boolean => n.kind === SyntaxKind.NullKeyword;
-          const lc = numericCategory(checker.getTypeOfExpression(b.left));
-          const rc = numericCategory(checker.getTypeOfExpression(b.right));
+          const leftType = checker.getTypeOfExpression(b.left);
+          const rightType = checker.getTypeOfExpression(b.right);
+          // Raw (primitive-only) categories decide reference vs numeric for ==/!=;
+          // the wrapper-aware ones drive numeric comparison (operands unboxed).
+          const rawLc = numericCategory(leftType);
+          const rawRc = numericCategory(rightType);
+          const lc = numericCat(leftType);
+          const rc = numericCat(rightType);
           if (isEquality && (isNull(b.left) || isNull(b.right))) {
             emitExpr(isNull(b.left) ? b.right : b.left);
             const eq = op === SyntaxKind.EqualsEqualsToken;
@@ -1848,7 +1929,8 @@ function generateBody(
             branchTo(eq === whenTrue ? OP_IFNULL : OP_IFNONNULL, label);
             return;
           }
-          if (isEquality && !lc && !rc) {
+          if (isEquality && !rawLc && !rawRc) {
+            // Both operands are references (incl. two wrappers): reference equality.
             emitExpr(b.left);
             emitExpr(b.right);
             const eq = op === SyntaxKind.EqualsEqualsToken;
@@ -1857,8 +1939,8 @@ function generateBody(
             return;
           }
           if (lc === "I" && rc === "I") {
-            emitExpr(b.left);
-            emitExpr(b.right);
+            emitOperand(b.left, "I"); // unbox if either side is a wrapper
+            emitOperand(b.right, "I");
             pop(2);
             branchTo(OP_IF_ICMPEQ + (whenTrue ? offset : NEGATED[offset]!), label);
             return;
@@ -1884,8 +1966,8 @@ function generateBody(
       default:
         break;
     }
-    // Fall back: evaluate a boolean value and branch on zero/non-zero.
-    emitExpr(expr);
+    // Fall back: evaluate a boolean value (unboxing a Boolean) and branch on it.
+    coerce(emitExpr(expr), "Z");
     pop(1); // the value is consumed by the branch
     branchTo(OP_IFEQ + (whenTrue ? 1 : 0), label); // ifne when true, ifeq when false
   };

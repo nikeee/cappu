@@ -546,6 +546,38 @@ test(
 );
 
 test(
+  "autoboxing and unboxing run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Box",
+      [
+        "import java.util.function.Supplier;",
+        "public class Box {",
+        "  static int unboxAdd(Integer a, int b){ return a + b; }", // unbox a
+        "  static Integer boxRet(int x){ return x; }", // box return value
+        "  static double widenUnbox(Integer a){ return a + 0.5; }", // Integer -> int -> double
+        "  static boolean cmp(Integer a, int b){ return a < b; }", // unbox in a relational
+        "  static boolean eqMixed(Integer a, int b){ return a == b; }", // unbox in == (one primitive)
+        "  static Supplier<Integer> sup(int base){ return () -> base + 1; }", // box the lambda body result
+        "  static String show(Object o){ return o.toString(); }", // box int -> Object argument
+        "  public static void main(String[] a){",
+        "    System.out.println(unboxAdd(40, 2));",
+        "    Integer r = boxRet(7); System.out.println(r);",
+        "    System.out.println(widenUnbox(3));",
+        "    System.out.println(cmp(3, 5)); System.out.println(cmp(9, 5));",
+        "    System.out.println(eqMixed(5, 5)); System.out.println(eqMixed(5, 6));",
+        "    System.out.println(sup(10).get());",
+        "    System.out.println(show(42));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "42\n7\n3.5\ntrue\nfalse\ntrue\nfalse\n11\n42\n",
+    );
+  },
+);
+
+test(
   "method references (static/bound/unbound/constructor) run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {
