@@ -9,6 +9,7 @@
 
 import type { Checker } from "./checker.ts";
 import { type Type, TypeKind } from "./checkerTypes.ts";
+import { foldConstant } from "./constfold.ts";
 import type { Program } from "./program.ts";
 import { resolveTypeEntityName } from "./resolver.ts";
 import { entityNameToString, tokenToString } from "./utilities.ts";
@@ -783,6 +784,30 @@ function generateBody(
   };
 
   const emitExpr = (node: Node): string => {
+    // Fold compile-time constant expressions (JLS 15.28), as javac does, so e.g.
+    // 6 * 7 emits `bipush 42`. Only composite expressions are folded here; plain
+    // literals fall through to their own (identical) emission below.
+    if (
+      node.kind === SyntaxKind.BinaryExpression ||
+      node.kind === SyntaxKind.PrefixUnaryExpression
+    ) {
+      const folded = foldConstant(node);
+      if (folded) {
+        if (folded.kind === "long") {
+          longConst(folded.value);
+          push("J");
+          return "J";
+        }
+        if (folded.kind === "boolean") {
+          code.u1(folded.value ? OP_ICONST_1 : OP_ICONST_0);
+          push("I");
+          return "Z";
+        }
+        intConst(Number(folded.value));
+        push("I");
+        return "I";
+      }
+    }
     switch (node.kind) {
       case SyntaxKind.ParenthesizedExpression:
         return emitExpr((node as unknown as { expression: Node }).expression);

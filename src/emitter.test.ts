@@ -45,6 +45,7 @@ const FIXTURES: Record<string, string> = {
     "class Arithmetic { int add(int a, int b) { return a + b; } int poly(int a, int b, int c) { return a * b + c; } long mix(int a, long b) { return a + b; } double dm(double x, int y) { return x * y; } int shift(int a, int n) { return a << n; } int bits(int a, int b) { return (a & b) | (a ^ b); } int neg(int a) { return -a; } int not(int a) { return ~a; } int rem(int a, int b) { return a % b; } }",
   Locals:
     "class Locals { int compute(int n) { int x = n + 1; int y = x * 2; int z; z = x + y; return z; } long widen(int n) { long w = n; return w + 1; } int reassign(int n) { int t = n; t = t + t; return t; } }",
+  Fold: "class Fold { int a() { return 6 * 7; } long b() { return 100L * 100L; } int c() { return 1 << 10; } boolean d() { return 3 < 5; } int e() { return 10 / 3 + 7 % 4; } int f() { return -(2 + 3); } int g() { return (1 + 2) * (3 + 4); } }",
   // Uses a method call (not a constant expression) so javac does not fold it,
   // keeping the comparison honest until constant folding (JLS 15.28) is added.
   Compute:
@@ -201,6 +202,36 @@ for (const [name, expected] of Object.entries(RUNS)) {
 function source(name: string): string {
   return FIXTURES[name]!;
 }
+
+test(
+  "folded overflow constants run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    const name = "Overflow";
+    const src = [
+      "public class Overflow {",
+      "  public static void main(String[] args) {",
+      "    System.out.println(2147483647 + 1);",
+      "    System.out.println(-8 >>> 1);",
+      "    System.out.println(9223372036854775807L + 1L);",
+      "    System.out.println(1 << 33);",
+      "    System.out.println(2147483647 * 2);",
+      "  }",
+      "}",
+    ].join("\n");
+    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
+    writeFileSync(join(ref, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+
+    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+    writeFileSync(join(ours, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+
+    expect(ourOut).toBe(refOut);
+    expect(refOut).toBe("-2147483648\n2147483644\n-9223372036854775808\n2\n-2\n");
+  },
+);
 
 for (const [name, { source: src, stdout }] of Object.entries(CONTROL)) {
   test(`control flow binary baseline: ${name}`, () => {
