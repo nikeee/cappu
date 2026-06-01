@@ -476,6 +476,42 @@ test(
   },
 );
 
+test(
+  "conditional (ternary) expressions run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    const name = "Tern";
+    const src = [
+      "public class Tern {",
+      "  static int max(int a, int b) { return a > b ? a : b; }",
+      "  static double pick(boolean f, int i, double d) { return f ? i : d; }", // int arm promoted to double
+      '  static String sign(int n) { return n < 0 ? "neg" : n == 0 ? "zero" : "pos"; }', // nested
+      "  static int abs(int n) { return n < 0 ? -n : n; }",
+      "  public static void main(String[] args) {",
+      "    System.out.println(max(3, 7));",
+      "    System.out.println(pick(true, 5, 2.5));",
+      "    System.out.println(pick(false, 5, 2.5));",
+      "    System.out.println(sign(-4));",
+      "    System.out.println(sign(0));",
+      "    System.out.println(sign(9));",
+      "    System.out.println(abs(-8));",
+      "  }",
+      "}",
+    ].join("\n");
+    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
+    writeFileSync(join(ref, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+
+    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+    writeFileSync(join(ours, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+
+    expect(ourOut).toBe(refOut);
+    expect(refOut).toBe("7\n5.0\n2.5\nneg\nzero\npos\n8\n");
+  },
+);
+
 for (const [name, { source: src, stdout }] of Object.entries(CONTROL)) {
   test(`control flow binary baseline: ${name}`, () => {
     const bytes = emit(name, src);

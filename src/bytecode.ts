@@ -19,6 +19,7 @@ import {
   type BinaryExpression,
   type CallExpression,
   type CastExpression,
+  type ConditionalExpression,
   type ClassDeclaration,
   type ConstructorDeclaration,
   type DoStatement,
@@ -271,11 +272,12 @@ class ConstantPool {
   // BootstrapMethods entries (JVMS 4.7.23): bootstrap MethodHandle + static args.
   private bootstraps: { handle: number; args: number[] }[] = [];
 
-  private intern(key: string, write: (b: ByteBuffer) => void): number {
+  private intern(key: string, write: (b: ByteBuffer) => void, wide = false): number {
     const existing = this.cache.get(key);
     if (existing !== undefined) return existing;
     write(this.entries);
     const index = ++this.count;
+    if (wide) this.count++; // long/double occupy a second, unusable slot (JVMS 4.4.5)
     this.cache.set(key, index);
     return index;
   }
@@ -353,13 +355,15 @@ class ConstantPool {
 
   long(value: bigint): number {
     // Long occupies two pool entries (JVMS 4.4.5).
-    const index = this.intern(`l:${value}`, b => {
-      b.u1(CONSTANT_Long);
-      b.u4(Number((value >> 32n) & 0xffffffffn));
-      b.u4(Number(value & 0xffffffffn));
-    });
-    this.count++; // the second (unusable) slot
-    return index;
+    return this.intern(
+      `l:${value}`,
+      b => {
+        b.u1(CONSTANT_Long);
+        b.u4(Number((value >> 32n) & 0xffffffffn));
+        b.u4(Number(value & 0xffffffffn));
+      },
+      true,
+    );
   }
 
   float(value: number): number {
@@ -374,13 +378,15 @@ class ConstantPool {
   double(value: number): number {
     const view = new DataView(new ArrayBuffer(8));
     view.setFloat64(0, value);
-    const index = this.intern(`d:${view.getUint32(0)}:${view.getUint32(4)}`, b => {
-      b.u1(CONSTANT_Double);
-      b.u4(view.getUint32(0));
-      b.u4(view.getUint32(4));
-    });
-    this.count++; // the second (unusable) slot (JVMS 4.4.5)
-    return index;
+    return this.intern(
+      `d:${view.getUint32(0)}:${view.getUint32(4)}`,
+      b => {
+        b.u1(CONSTANT_Double);
+        b.u4(view.getUint32(0));
+        b.u4(view.getUint32(4));
+      },
+      true,
+    );
   }
 
   private methodHandle(referenceKind: number, referenceIndex: number): number {
@@ -1052,7 +1058,7 @@ function generateBody(
       case SyntaxKind.StringLiteral:
       case SyntaxKind.TextBlockLiteral:
         ldc(cp.string((node as LiteralExpression).value));
-        pushRef();
+        pushRef("Ljava/lang/String;");
         return "Ljava/lang/String;";
       case SyntaxKind.CharacterLiteral:
         intConst((node as LiteralExpression).value.charCodeAt(0));
@@ -1072,7 +1078,7 @@ function generateBody(
         return "Ljava/lang/Object;";
       case SyntaxKind.ThisExpression:
         code.u1(OP_ALOAD_0);
-        pushRef();
+        pushRef(`L${thisInternalName};`);
         return `L${thisInternalName};`;
       case SyntaxKind.Identifier: {
         const symbol = checker.resolveName(node as Identifier);
@@ -1113,6 +1119,8 @@ function generateBody(
         if (!symbol || !(symbol.flags & SymbolFlags.Field)) throw new UnsupportedEmit();
         return emitFieldRead(fieldInfoOf(symbol), () => emitExpr(access.expression));
       }
+      case SyntaxKind.ConditionalExpression:
+        return emitConditional(node as ConditionalExpression);
       case SyntaxKind.CallExpression:
         return emitCall(node as CallExpression);
       case SyntaxKind.CastExpression:
@@ -1625,6 +1633,40 @@ function generateBody(
     push("I");
     placeLabel(contL); // both paths converge with one int atop the entry stack
     return "Z";
+  };
+
+  // Conditional expression c ? a : b (JLS 15.25). Both arms are promoted to the
+  // result type; numeric promotion is computed from the arms (the same rule as
+  // binary), otherwise the checker supplies the reference type.
+  const emitConditional = (node: ConditionalExpression): string => {
+    const tt = checker.getTypeOfExpression(node.whenTrue);
+    const ft = checker.getTypeOfExpression(node.whenFalse);
+    const lc = numericCategory(tt);
+    const rc = numericCategory(ft);
+    // The result (and stack-map) type must be one the verifier accepts for both
+    // arms. For numerics that is binary promotion; for references, the shared
+    // type of the arms (a null arm yields Object, so defer to the other arm),
+    // else the checker's computed type.
+    const OBJ = "Ljava/lang/Object;";
+    const refDesc = (): string => {
+      const dt = typeDescriptor(tt);
+      const df = typeDescriptor(ft);
+      if (dt === df) return dt;
+      if (dt === OBJ) return df;
+      if (df === OBJ) return dt;
+      return typeDescriptor(checker.getTypeOfExpression(node));
+    };
+    const desc = lc && rc ? promote(lc, rc) : refDesc();
+    const elseL = newLabel();
+    const contL = newLabel();
+    emitBranch(node.condition, elseL, false);
+    coerce(emitExpr(node.whenTrue), desc);
+    branchTo(OP_GOTO, contL);
+    pop(); // the then-value is not on the stack along the else path
+    placeLabel(elseL);
+    coerce(emitExpr(node.whenFalse), desc);
+    placeLabel(contL); // both arms converge with one value atop the entry stack
+    return desc;
   };
 
   // i++ / ++i / i-- / --i on an int local -> iinc.
