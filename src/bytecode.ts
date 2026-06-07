@@ -3088,16 +3088,26 @@ export function emitClass(
     info.u2(ACC_STATIC);
     info.u2(cp.utf8("<clinit>"));
     info.u2(cp.utf8("()V"));
-    const clinitBody = generateBody(
-      clinit,
-      cp,
-      program,
-      checker,
-      name,
-      undefined,
-      staticInits,
-      lambdaMethods,
-    );
+    let clinitBody: MethodBody;
+    try {
+      clinitBody = generateBody(
+        clinit,
+        cp,
+        program,
+        checker,
+        name,
+        undefined,
+        staticInits,
+        lambdaMethods,
+      );
+    } catch (e) {
+      if (!(e instanceof UnsupportedEmit)) throw e;
+      // An unsupported static initializer: emit an empty <clinit> so the class
+      // stays valid (the affected fields keep their default values).
+      const code = new ByteBuffer();
+      code.u1(OP_RETURN);
+      clinitBody = { code, maxStack: 0, maxLocals: 0 };
+    }
     writeCodeAttribute(info, cp, clinitBody);
     methods.append(info);
     methodCount++;
@@ -3396,19 +3406,46 @@ export function emitEnum(
   clinitInfo.u2(ACC_STATIC);
   clinitInfo.u2(cp.utf8("<clinit>"));
   clinitInfo.u2(cp.utf8("()V"));
-  const clinitBody = generateBody(
-    clinit,
-    cp,
-    program,
-    checker,
-    name,
-    undefined,
-    staticInits,
-    lambdaMethods,
-    undefined,
-    false,
-    { enumInternal: name, selfDesc, arrayDesc, valuesField: VALUES, constants },
-  );
+  const enumClinitData = {
+    enumInternal: name,
+    selfDesc,
+    arrayDesc,
+    valuesField: VALUES,
+    constants,
+  };
+  let clinitBody: MethodBody;
+  try {
+    clinitBody = generateBody(
+      clinit,
+      cp,
+      program,
+      checker,
+      name,
+      undefined,
+      staticInits,
+      lambdaMethods,
+      undefined,
+      false,
+      enumClinitData,
+    );
+  } catch (e) {
+    if (!(e instanceof UnsupportedEmit)) throw e;
+    // An unsupported user static initializer: still build the constants and
+    // $VALUES (essential for the enum), just drop the failing inits.
+    clinitBody = generateBody(
+      clinit,
+      cp,
+      program,
+      checker,
+      name,
+      undefined,
+      [],
+      [],
+      undefined,
+      false,
+      enumClinitData,
+    );
+  }
   writeCodeAttribute(clinitInfo, cp, clinitBody);
   methods.append(clinitInfo);
   methodCount++;
