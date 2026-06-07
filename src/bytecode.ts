@@ -34,6 +34,7 @@ import {
   type ContinueStatement,
   type ThrowStatement,
   type TryStatement,
+  type Block,
   type DoStatement,
   type InstanceofExpression,
   type ExpressionStatement,
@@ -1116,9 +1117,12 @@ function generateBody(
   // also need a stack-map frame (entered with the exception on the stack).
   const exceptionTable: { start: number; end: number; handler: number; catchType: number }[] = [];
   const handlerOffsets: number[] = [];
-  const breakTargets: Label[] = []; // enclosing switch/loop end labels for `break`
-  const continueTargets: Label[] = []; // enclosing loop re-test/increment labels for `continue`
+  // break/continue carry the finally depth at the loop/switch, so a jump out of
+  // a try runs the intervening finally blocks first.
+  const breakTargets: { label: Label; finallyDepth: number }[] = [];
+  const continueTargets: { label: Label; finallyDepth: number }[] = [];
   const yieldTargets: { label: Label; desc: string }[] = []; // enclosing switch-expression ends
+  const finallyStack: Node[] = []; // enclosing finally blocks, innermost last
   const newLabel = (): Label => ({ offset: -1 });
   // A branch target's frame is defined by the operand stack on the branch-taken
   // path, which can differ from the live stack at the label site (e.g. when the
@@ -2895,6 +2899,15 @@ function generateBody(
     return resultDesc;
   };
 
+  // Inline the finally blocks from the top of the stack down to `toDepth`,
+  // innermost first, before an abrupt transfer (return/break/continue) crosses
+  // them. Each is removed while emitted so a return inside it does not re-run it.
+  const runFinallies = (toDepth: number): void => {
+    const removed = finallyStack.splice(toDepth); // [toDepth..], leaving the outer ones pending
+    for (let i = removed.length - 1; i >= 0; i--) inScope(() => emitStmt(removed[i]!));
+    finallyStack.push(...removed);
+  };
+
   // Returns true if the statement is a definite terminator (return).
   const emitStmt = (stmt: Node): boolean => {
     switch (stmt.kind) {
@@ -2947,6 +2960,22 @@ function generateBody(
         // Widen the value to the return type (JLS 5.2 assignment context), e.g.
         // `double f(long x){ return x; }` needs an l2d before dreturn.
         if (expr) coerce(emitExpr(expr), returnDescriptor);
+        // A return inside a try runs the enclosing finally blocks first; the
+        // value is stashed in a temp across them (finally code uses the stack).
+        if (finallyStack.length > 0) {
+          if (returnDescriptor !== "V") {
+            const slot = nextSlot;
+            nextSlot += slotsOf(returnDescriptor);
+            if (nextSlot > maxLocals) maxLocals = nextSlot;
+            activeLocals.push({ slot, descriptor: returnDescriptor });
+            storeVar(slot, returnDescriptor);
+            runFinallies(0);
+            loadVar(slot, returnDescriptor);
+            push(returnDescriptor);
+          } else {
+            runFinallies(0);
+          }
+        }
         emitReturn();
         return true;
       }
@@ -2976,8 +3005,8 @@ function generateBody(
         const endL = newLabel();
         placeLabel(startL);
         emitBranch(s.condition, endL, false);
-        breakTargets.push(endL);
-        continueTargets.push(startL); // continue re-tests the condition
+        breakTargets.push({ label: endL, finallyDepth: finallyStack.length });
+        continueTargets.push({ label: startL, finallyDepth: finallyStack.length }); // continue re-tests the condition
         inScope(() => emitStmt(s.statement));
         breakTargets.pop();
         continueTargets.pop();
@@ -2991,8 +3020,8 @@ function generateBody(
         const condL = newLabel();
         const endL = newLabel();
         placeLabel(startL);
-        breakTargets.push(endL);
-        continueTargets.push(condL); // continue jumps to the trailing condition
+        breakTargets.push({ label: endL, finallyDepth: finallyStack.length });
+        continueTargets.push({ label: condL, finallyDepth: finallyStack.length }); // continue jumps to the trailing condition
         inScope(() => emitStmt(s.statement));
         breakTargets.pop();
         continueTargets.pop();
@@ -3011,8 +3040,8 @@ function generateBody(
           const endL = newLabel();
           placeLabel(startL);
           if (s.condition) emitBranch(s.condition, endL, false);
-          breakTargets.push(endL);
-          continueTargets.push(stepL); // continue runs the incrementors, then re-tests
+          breakTargets.push({ label: endL, finallyDepth: finallyStack.length });
+          continueTargets.push({ label: stepL, finallyDepth: finallyStack.length }); // continue runs the incrementors, then re-tests
           inScope(() => emitStmt(s.statement));
           breakTargets.pop();
           continueTargets.pop();
@@ -3075,8 +3104,8 @@ function generateBody(
             push(elem);
             coerce(elem, varDesc);
             storeVar(varSlot, varDesc);
-            breakTargets.push(endL);
-            continueTargets.push(stepL);
+            breakTargets.push({ label: endL, finallyDepth: finallyStack.length });
+            continueTargets.push({ label: stepL, finallyDepth: finallyStack.length });
             inScope(() => emitStmt(s.statement));
             breakTargets.pop();
             continueTargets.pop();
@@ -3145,8 +3174,8 @@ function generateBody(
             coerce(`L${w};`, varDesc);
           }
           storeVar(varSlot, varDesc);
-          breakTargets.push(endL);
-          continueTargets.push(startL);
+          breakTargets.push({ label: endL, finallyDepth: finallyStack.length });
+          continueTargets.push({ label: startL, finallyDepth: finallyStack.length });
           inScope(() => emitStmt(s.statement));
           breakTargets.pop();
           continueTargets.pop();
@@ -3164,41 +3193,64 @@ function generateBody(
       }
       case SyntaxKind.TryStatement: {
         const t = stmt as TryStatement;
-        if (t.resources?.length || t.finallyBlock) throw new UnsupportedEmit(); // later
+        if (t.resources?.length) throw new UnsupportedEmit(); // try-with-resources: later
+        const fin = t.finallyBlock;
         const endL = newLabel();
-        // Locals definitely assigned at try entry: the handler frame uses these
-        // (an exception may be thrown at any point in the body).
+        let reachesEnd = false;
+        // Locals definitely assigned at try entry: a handler may be reached from
+        // any point in the protected region, so its frame uses this state.
         const tryStartAssigned = new Set(assigned);
-        const tryStart = code.length;
-        const tryTerm = inScope(() => emitStmt(t.tryBlock));
-        const tryEnd = code.length;
-        if (!tryTerm) branchTo(OP_GOTO, endL); // normal completion skips the handlers
-        let allHandlersTerm = true;
-        for (const cc of t.catchClauses) {
-          // Reset to the handler's entry state: try-start locals, and the JVM
-          // pushes the caught exception onto an otherwise-empty stack.
+        // Code ranges covered by the finally catch-all (the try body and each
+        // catch body, but NOT the inline finally copies between them).
+        const protectedRanges: { start: number; end: number }[] = [];
+        const setEntryState = (): void => {
           setStack([]);
           assigned.clear();
           for (const s of tryStartAssigned) assigned.add(s);
           reachable = true;
+        };
+        const emitFinallyInline = (): boolean =>
+          inScope(() => {
+            let term = false;
+            for (const st of (fin as Block).statements) term = emitStmt(st);
+            return term;
+          });
+        // After a region completes normally: run the finally (if any) inline,
+        // then jump past the handlers - unless the finally itself terminates.
+        const completeNormally = (): void => {
+          if (fin && emitFinallyInline()) return; // finally aborts -> no fall-through
+          reachesEnd = true;
+          branchTo(OP_GOTO, endL);
+        };
+
+        const tryStart = code.length;
+        if (fin) finallyStack.push(fin);
+        const tryTerm = inScope(() => emitStmt(t.tryBlock));
+        if (fin) finallyStack.pop();
+        protectedRanges.push({ start: tryStart, end: code.length });
+        if (!tryTerm) completeNormally();
+
+        for (const cc of t.catchClauses) {
+          setEntryState();
           const excDesc =
             cc.catchTypes.length === 1
               ? descriptorOf(cc.catchTypes[0]!, program)
               : "Ljava/lang/Throwable;";
-          push(excDesc);
+          push(excDesc); // the JVM pushes the caught exception onto an empty stack
           const handlerL = newLabel();
-          placeLabel(handlerL); // stack-map frame: locals = try entry, stack = [exc]
+          placeLabel(handlerL); // frame: locals = try entry, stack = [exc]
           handlerOffsets.push(handlerL.offset);
           for (const ty of cc.catchTypes) {
             const d = descriptorOf(ty, program);
-            const internal = d[0] === "[" ? d : d.slice(1, -1);
             exceptionTable.push({
               start: tryStart,
-              end: tryEnd,
+              end: protectedRanges[0]!.end, // the try body only
               handler: handlerL.offset,
-              catchType: cp.classInfo(internal),
+              catchType: cp.classInfo(d[0] === "[" ? d : d.slice(1, -1)),
             });
           }
+          const bodyStart = code.length;
+          if (fin) finallyStack.push(fin);
           const handlerTerm = inScope(() => {
             const slot = nextSlot;
             nextSlot += slotsOf(excDesc);
@@ -3210,17 +3262,47 @@ function generateBody(
             for (const st of cc.block.statements) term = emitStmt(st);
             return term;
           });
-          if (!handlerTerm) branchTo(OP_GOTO, endL);
-          if (!handlerTerm) allHandlersTerm = false;
+          if (fin) finallyStack.pop();
+          protectedRanges.push({ start: bodyStart, end: code.length });
+          if (!handlerTerm) completeNormally();
         }
-        // Terminates only if the try body and every handler do (then nothing
-        // reaches endL).
-        const terminated = tryTerm && allHandlersTerm;
-        if (!terminated) {
+
+        // finally catch-all (JLS 14.20.2): store the in-flight exception, run the
+        // finally, then rethrow. Covers the try and catch bodies, after the
+        // specific catch entries so they win.
+        if (fin) {
+          setEntryState();
+          const exc = "Ljava/lang/Throwable;";
+          push(exc);
+          const catchAllL = newLabel();
+          placeLabel(catchAllL);
+          handlerOffsets.push(catchAllL.offset);
+          for (const r of protectedRanges) {
+            exceptionTable.push({
+              start: r.start,
+              end: r.end,
+              handler: catchAllL.offset,
+              catchType: 0,
+            });
+          }
+          const slot = nextSlot;
+          nextSlot += 1;
+          if (nextSlot > maxLocals) maxLocals = nextSlot;
+          activeLocals.push({ slot, descriptor: exc });
+          storeVar(slot, exc);
+          emitFinallyInline();
+          loadVar(slot, exc);
+          push(exc);
+          code.u1(OP_ATHROW);
+          pop(1);
+          reachable = false;
+        }
+
+        if (reachesEnd) {
           setStack([]);
           placeLabel(endL);
         }
-        return terminated;
+        return !reachesEnd;
       }
       case SyntaxKind.YieldStatement: {
         const target = yieldTargets.at(-1);
@@ -3233,20 +3315,22 @@ function generateBody(
         if ((stmt as BreakStatement).label) throw new UnsupportedEmit(); // labeled break: later
         const target = breakTargets.at(-1);
         if (!target) throw new UnsupportedEmit();
-        branchTo(OP_GOTO, target);
+        runFinallies(target.finallyDepth); // finally blocks between here and the loop/switch
+        branchTo(OP_GOTO, target.label);
         return true;
       }
       case SyntaxKind.ContinueStatement: {
         if ((stmt as ContinueStatement).label) throw new UnsupportedEmit(); // labeled continue: later
         const target = continueTargets.at(-1);
         if (!target) throw new UnsupportedEmit();
-        branchTo(OP_GOTO, target);
+        runFinallies(target.finallyDepth);
+        branchTo(OP_GOTO, target.label);
         return true;
       }
       case SyntaxKind.SwitchStatement: {
         const s = stmt as SwitchStatement;
         const { clauseLabels, endL, base } = emitSwitchDispatch(s.expression, s.clauses);
-        breakTargets.push(endL);
+        breakTargets.push({ label: endL, finallyDepth: finallyStack.length });
         const arrow = s.clauses.some(cl => cl.isArrow); // arrow clauses do not fall through
         let lastTerminated = false;
         s.clauses.forEach((cl, i) => {

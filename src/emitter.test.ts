@@ -546,6 +546,34 @@ test(
 );
 
 test(
+  "try/finally (return, catch, rethrow, ordering) runs identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Fy",
+      [
+        "public class Fy {",
+        "  static StringBuilder log = new StringBuilder();",
+        '  static int a(int n){ try { if(n<0) throw new RuntimeException(); return n*2; } finally { log.append("a"); } }', // return runs finally
+        '  static int b(int n){ try { return n; } catch (RuntimeException e) { return -1; } finally { log.append("b"); } }',
+        '  static int c(int n){ int r=0; try { r=10/n; } catch (ArithmeticException e) { r=-1; } finally { log.append("c"); r+=100; } return r; }',
+        '  static String d(int n){ try { if(n==0) throw new RuntimeException("z"); return "ok"; } finally { log.append("d"); } }',
+        "  public static void main(String[] x){",
+        "    System.out.println(a(5));",
+        "    System.out.println(b(7));",
+        "    System.out.println(c(2)); System.out.println(c(0));",
+        '    try { a(-1); } catch (RuntimeException e) { System.out.println("rethrown"); }', // exception runs finally, then rethrows
+        "    System.out.println(d(3));",
+        "    System.out.println(log.toString());",
+        "  }",
+        "}",
+      ].join("\n"),
+      "10\n7\n105\n99\nrethrown\nok\nabccad\n",
+    );
+  },
+);
+
+test(
   "try/catch (multi-catch, exception flow) runs identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {
