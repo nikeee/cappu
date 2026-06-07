@@ -546,6 +546,30 @@ test(
 );
 
 test(
+  "enum switch (statement and exhaustive expression) runs identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Es",
+      [
+        "public class Es {",
+        "  enum Color { RED, GREEN, BLUE }",
+        '  static String name(Color c){ switch (c) { case RED: return "r"; case GREEN: return "g"; default: return "?"; } }',
+        "  static int code(Color c){ return switch (c) { case RED -> 1; case GREEN -> 2; case BLUE -> 3; }; }", // exhaustive, no default
+        "  static int viaStmt(Color c){ int r=0; switch(c){ case RED: r=1; break; case BLUE: r=3; break; default: r=-1; } return r; }",
+        "  public static void main(String[] a){",
+        "    System.out.println(name(Color.RED)); System.out.println(name(Color.BLUE));",
+        "    System.out.println(code(Color.GREEN)); System.out.println(code(Color.BLUE));",
+        "    System.out.println(viaStmt(Color.RED)); System.out.println(viaStmt(Color.GREEN));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "r\n?\n2\n3\n1\n-1\n",
+    );
+  },
+);
+
+test(
   "switch expressions (arrow, yield, block, string) run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

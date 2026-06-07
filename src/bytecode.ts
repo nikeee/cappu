@@ -238,6 +238,7 @@ const OP_NEW = 0xbb;
 const OP_NEWARRAY = 0xbc;
 const OP_ANEWARRAY = 0xbd;
 const OP_ARRAYLENGTH = 0xbe;
+const OP_ATHROW = 0xbf;
 const OP_MULTIANEWARRAY = 0xc5;
 // Array load/store base opcodes; per-element variants are at a fixed offset
 // (see arrayElemOffset). AASTORE is used directly for the enum $VALUES array.
@@ -2619,15 +2620,35 @@ function generateBody(
   const emitSwitchDispatch = (
     selector: Node,
     clauses: readonly SwitchClause[],
+    // For an exhaustive switch expression with no default clause, the no-match
+    // path must throw rather than fall through without a value.
+    throwOnNoMatch = false,
   ): { clauseLabels: Label[]; endL: Label; base: string[] } => {
     if (clauses.some(cl => cl.guard !== undefined)) throw new UnsupportedEmit();
     const selType = checker.getTypeOfExpression(selector);
     const isString = isStringType(selType);
-    if (!isString && numericCategory(selType) !== "I") throw new UnsupportedEmit();
+    const enumSym =
+      selType.kind === TypeKind.Class && selType.symbol.flags & SymbolFlags.Enum
+        ? selType.symbol
+        : undefined;
+    if (!isString && !enumSym && numericCategory(selType) !== "I") throw new UnsupportedEmit();
+    // An enum switch dispatches on the constant's ordinal (declaration order),
+    // run-equivalent to javac's $SwitchMap when the enum is compiled with it.
+    const enumOrdinal = (lab: Node): number => {
+      const decl = (enumSym!.valueDeclaration ?? enumSym!.declarations?.[0]) as EnumDeclaration;
+      const i =
+        lab.kind === SyntaxKind.Identifier
+          ? decl.enumConstants.findIndex(c => c.name.text === (lab as Identifier).text)
+          : -1;
+      if (i < 0) throw new UnsupportedEmit();
+      return i;
+    };
 
     const endL = newLabel();
     const clauseLabels = clauses.map(() => newLabel());
-    let defaultLabel = endL;
+    const hasDefault = clauses.some(cl => cl.isDefault);
+    const throwL = throwOnNoMatch && !hasDefault ? newLabel() : undefined;
+    let defaultLabel = throwL ?? endL;
     clauses.forEach((cl, i) => {
       if (cl.isDefault) defaultLabel = clauseLabels[i]!;
     });
@@ -2657,18 +2678,47 @@ function generateBody(
       });
       branchTo(OP_GOTO, defaultLabel);
     } else {
-      coerce(emitExpr(selector), "I");
-      pop(); // selector consumed by the switch instruction
+      if (enumSym) {
+        emitExpr(selector);
+        code.u1(OP_INVOKEVIRTUAL);
+        code.u2(cp.methodref("java/lang/Enum", "ordinal", "()I"));
+        pop();
+        push("I");
+      } else {
+        coerce(emitExpr(selector), "I");
+      }
+      pop(); // selector (ordinal) consumed by the switch instruction
       const cases: { value: number; label: Label }[] = [];
       clauses.forEach((cl, i) => {
         for (const lab of cl.labels ?? []) {
-          cases.push({ value: caseValue(lab), label: clauseLabels[i]! });
+          cases.push({
+            value: enumSym ? enumOrdinal(lab) : caseValue(lab),
+            label: clauseLabels[i]!,
+          });
         }
       });
       cases.sort((a, b) => a.value - b.value);
       emitSwitchInstr(cases, defaultLabel);
     }
-    return { clauseLabels, endL, base: [...stack] };
+    const base = [...stack];
+    if (throwL) {
+      // No-match path of an exhaustive switch expression: throw (never reached
+      // at runtime, but every path must produce a value or throw to verify).
+      setStack(base);
+      placeLabel(throwL);
+      const err = "java/lang/IncompatibleClassChangeError";
+      code.u1(OP_NEW);
+      code.u2(cp.classInfo(err));
+      pushRef(`L${err};`);
+      code.u1(OP_DUP);
+      pushRef(`L${err};`);
+      code.u1(OP_INVOKESPECIAL);
+      code.u2(cp.methodref(err, "<init>", "()V"));
+      pop(1);
+      code.u1(OP_ATHROW);
+      pop(1);
+    }
+    return { clauseLabels, endL, base };
   };
 
   // The result type of a switch expression, from its arrow-expression and yield
@@ -2709,7 +2759,7 @@ function generateBody(
   // yields a value (arrow `case L -> v` or `yield v`), left on the stack at the end.
   const emitSwitchExpression = (node: SwitchExpression): string => {
     const resultDesc = switchResultDesc(node.clauses);
-    const { clauseLabels, endL, base } = emitSwitchDispatch(node.expression, node.clauses);
+    const { clauseLabels, endL, base } = emitSwitchDispatch(node.expression, node.clauses, true);
     yieldTargets.push({ label: endL, desc: resultDesc });
     node.clauses.forEach((cl, i) => {
       setStack(base);
