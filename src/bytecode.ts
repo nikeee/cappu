@@ -4170,19 +4170,38 @@ export function emitEnum(
     if (!(e instanceof UnsupportedEmit)) throw e;
     // An unsupported user static initializer: still build the constants and
     // $VALUES (essential for the enum), just drop the failing inits.
-    clinitBody = generateBody(
-      clinit,
-      cp,
-      program,
-      checker,
-      name,
-      undefined,
-      [],
-      [],
-      undefined,
-      false,
-      enumClinitData,
-    );
+    try {
+      clinitBody = generateBody(
+        clinit,
+        cp,
+        program,
+        checker,
+        name,
+        undefined,
+        [],
+        [],
+        undefined,
+        false,
+        enumClinitData,
+      );
+    } catch (e2) {
+      if (!(e2 instanceof UnsupportedEmit)) throw e2;
+      // Even constructing a constant (e.g. an unsupported argument) failed:
+      // fall back to an empty <clinit>. The class still verifies.
+      clinitBody = generateBody(
+        clinit,
+        cp,
+        program,
+        checker,
+        name,
+        undefined,
+        [],
+        [],
+        undefined,
+        false,
+        undefined,
+      );
+    }
   }
   writeCodeAttribute(clinitInfo, cp, clinitBody);
   methods.append(clinitInfo);

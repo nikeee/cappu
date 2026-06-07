@@ -30,7 +30,11 @@ export function emitSourceFile(
   const result: EmittedClass[] = [];
   const visit = (node: Node): void => {
     if (node.kind === SyntaxKind.ClassDeclaration) {
-      result.push(emitClass(node as ClassDeclaration, program, checker));
+      const decl = node as ClassDeclaration;
+      // Anonymous classes (new T(){...}) have no name and no bound symbol; we do
+      // not emit them yet, so skip rather than crash. The site that creates one
+      // degrades to a placeholder via the usual UnsupportedEmit path.
+      if (decl.symbol || decl.name) result.push(emitClass(decl, program, checker));
     } else if (node.kind === SyntaxKind.EnumDeclaration) {
       result.push(emitEnum(node as EnumDeclaration, program, checker));
     }

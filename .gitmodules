@@ -1,3 +1,9 @@
 [submodule "test-corpus/graph-engine"]
 	path = test-corpus/graph-engine
 	url = https://github.com/nikeee/graph-engine
+[submodule "test-corpus/algorithms-java"]
+	path = test-corpus/algorithms-java
+	url = https://github.com/TheAlgorithms/Java.git
+[submodule "test-corpus/commons-lang"]
+	path = test-corpus/commons-lang
+	url = https://github.com/apache/commons-lang.git
