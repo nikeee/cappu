@@ -32,6 +32,7 @@ import {
   type EnumDeclaration,
   type BreakStatement,
   type ContinueStatement,
+  type LabeledStatement,
   type ThrowStatement,
   type TryStatement,
   type Block,
@@ -1143,8 +1144,13 @@ function generateBody(
   const handlerOffsets: number[] = [];
   // break/continue carry the finally depth at the loop/switch, so a jump out of
   // a try runs the intervening finally blocks first.
-  const breakTargets: { label: Label; finallyDepth: number }[] = [];
-  const continueTargets: { label: Label; finallyDepth: number }[] = [];
+  // names: the labels of an enclosing labeled statement (JLS 14.7), so a
+  // `break label` / `continue label` resolves to the matching target.
+  const breakTargets: { label: Label; finallyDepth: number; names?: string[] }[] = [];
+  const continueTargets: { label: Label; finallyDepth: number; names?: string[] }[] = [];
+  // Labels declared just above a loop, consumed by that loop's targets.
+  const pendingLabels: string[] = [];
+  const takePending = (): string[] => pendingLabels.splice(0, pendingLabels.length);
   const yieldTargets: { label: Label; desc: string }[] = []; // enclosing switch-expression ends
   const finallyStack: Node[] = []; // enclosing finally blocks, innermost last
   const newLabel = (): Label => ({ offset: -1 });
@@ -3042,8 +3048,9 @@ function generateBody(
         const endL = newLabel();
         placeLabel(startL);
         emitBranch(s.condition, endL, false);
-        breakTargets.push({ label: endL, finallyDepth: finallyStack.length });
-        continueTargets.push({ label: startL, finallyDepth: finallyStack.length }); // continue re-tests the condition
+        const names = takePending();
+        breakTargets.push({ label: endL, finallyDepth: finallyStack.length, names });
+        continueTargets.push({ label: startL, finallyDepth: finallyStack.length, names }); // continue re-tests the condition
         inScope(() => emitStmt(s.statement));
         breakTargets.pop();
         continueTargets.pop();
@@ -3058,8 +3065,9 @@ function generateBody(
         const condL = newLabel();
         const endL = newLabel();
         placeLabel(startL);
-        breakTargets.push({ label: endL, finallyDepth: finallyStack.length });
-        continueTargets.push({ label: condL, finallyDepth: finallyStack.length }); // continue jumps to the trailing condition
+        const names = takePending();
+        breakTargets.push({ label: endL, finallyDepth: finallyStack.length, names });
+        continueTargets.push({ label: condL, finallyDepth: finallyStack.length, names }); // continue jumps to the trailing condition
         inScope(() => emitStmt(s.statement));
         breakTargets.pop();
         continueTargets.pop();
@@ -3079,8 +3087,9 @@ function generateBody(
           const endL = newLabel();
           placeLabel(startL);
           if (s.condition) emitBranch(s.condition, endL, false);
-          breakTargets.push({ label: endL, finallyDepth: finallyStack.length });
-          continueTargets.push({ label: stepL, finallyDepth: finallyStack.length }); // continue runs the incrementors, then re-tests
+          const names = takePending();
+          breakTargets.push({ label: endL, finallyDepth: finallyStack.length, names });
+          continueTargets.push({ label: stepL, finallyDepth: finallyStack.length, names }); // continue runs the incrementors, then re-tests
           inScope(() => emitStmt(s.statement));
           breakTargets.pop();
           continueTargets.pop();
@@ -3144,8 +3153,9 @@ function generateBody(
             push(elem);
             coerce(elem, varDesc);
             storeVar(varSlot, varDesc);
-            breakTargets.push({ label: endL, finallyDepth: finallyStack.length });
-            continueTargets.push({ label: stepL, finallyDepth: finallyStack.length });
+            const names = takePending();
+            breakTargets.push({ label: endL, finallyDepth: finallyStack.length, names });
+            continueTargets.push({ label: stepL, finallyDepth: finallyStack.length, names });
             inScope(() => emitStmt(s.statement));
             breakTargets.pop();
             continueTargets.pop();
@@ -3214,8 +3224,9 @@ function generateBody(
             coerce(`L${w};`, varDesc);
           }
           storeVar(varSlot, varDesc);
-          breakTargets.push({ label: endL, finallyDepth: finallyStack.length });
-          continueTargets.push({ label: startL, finallyDepth: finallyStack.length });
+          const names = takePending();
+          breakTargets.push({ label: endL, finallyDepth: finallyStack.length, names });
+          continueTargets.push({ label: startL, finallyDepth: finallyStack.length, names });
           inScope(() => emitStmt(s.statement));
           breakTargets.pop();
           continueTargets.pop();
@@ -3351,23 +3362,61 @@ function generateBody(
         branchTo(OP_GOTO, target.label); // the value is left on the stack at the end
         return true;
       }
-      // `break` (JLS 14.15): exits the nearest loop/switch, running crossed finallies.
+      // `break` (JLS 14.15): exits the nearest loop/switch, or the named labeled
+      // statement, running finally blocks crossed on the way out.
       case SyntaxKind.BreakStatement: {
-        if ((stmt as BreakStatement).label) throw new UnsupportedEmit(); // labeled break: later
-        const target = breakTargets.at(-1);
+        const name = (stmt as BreakStatement).label?.text;
+        const target = name
+          ? breakTargets.findLast(t => t.names?.includes(name))
+          : breakTargets.at(-1);
         if (!target) throw new UnsupportedEmit();
         runFinallies(target.finallyDepth); // finally blocks between here and the loop/switch
         branchTo(OP_GOTO, target.label);
         return true;
       }
-      // `continue` (JLS 14.16).
+      // `continue` (JLS 14.16): resumes the nearest enclosing loop, or the named
+      // labeled loop.
       case SyntaxKind.ContinueStatement: {
-        if ((stmt as ContinueStatement).label) throw new UnsupportedEmit(); // labeled continue: later
-        const target = continueTargets.at(-1);
+        const name = (stmt as ContinueStatement).label?.text;
+        const target = name
+          ? continueTargets.findLast(t => t.names?.includes(name))
+          : continueTargets.at(-1);
         if (!target) throw new UnsupportedEmit();
         runFinallies(target.finallyDepth);
         branchTo(OP_GOTO, target.label);
         return true;
+      }
+      // A labeled statement (JLS 14.7). A label on a loop is consumed by the loop
+      // (so `continue label` reaches it); a label on any other statement gets a
+      // break target at its end.
+      case SyntaxKind.LabeledStatement: {
+        const names: string[] = [];
+        let body: Node = stmt;
+        while (body.kind === SyntaxKind.LabeledStatement) {
+          names.push((body as LabeledStatement).label.text);
+          body = (body as LabeledStatement).statement;
+        }
+        const k = body.kind;
+        if (
+          k === SyntaxKind.WhileStatement ||
+          k === SyntaxKind.DoStatement ||
+          k === SyntaxKind.ForStatement ||
+          k === SyntaxKind.ForEachStatement
+        ) {
+          pendingLabels.push(...names);
+          return emitStmt(body);
+        }
+        const endL = newLabel();
+        breakTargets.push({ label: endL, finallyDepth: finallyStack.length, names });
+        const term = inScope(() => emitStmt(body));
+        breakTargets.pop();
+        const used =
+          fixups.some(f => f.label === endL) || wideFixups.some(f => f.label === endL);
+        if (used) {
+          placeLabel(endL);
+          return false;
+        }
+        return term;
       }
       // The `switch` statement (JLS 14.11).
       case SyntaxKind.SwitchStatement: {

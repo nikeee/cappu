@@ -622,6 +622,60 @@ test(
 );
 
 test(
+  "labeled break and continue run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Lb",
+      [
+        "public class Lb {",
+        "  static int firstPair(int[][] g, int t){",
+        "    int found = -1;",
+        "    outer:",
+        "    for (int i = 0; i < g.length; i++) {",
+        "      for (int j = 0; j < g[i].length; j++) {",
+        "        if (g[i][j] == t) { found = i * 10 + j; break outer; }",
+        "      }",
+        "    }",
+        "    return found;",
+        "  }",
+        "  static int skipRows(int n){",
+        "    int sum = 0;",
+        "    next:",
+        "    for (int i = 0; i < n; i++) {",
+        "      for (int j = 0; j < n; j++) {",
+        "        if (j == 1) continue next;",
+        "        sum += i * 100 + j;",
+        "      }",
+        "    }",
+        "    return sum;",
+        "  }",
+        "  static int labeledBlock(int n){",
+        "    int r = 0;",
+        "    done:",
+        "    {",
+        "      r = 1;",
+        "      if (n > 0) break done;",
+        "      r = 2;",
+        "    }",
+        "    return r;",
+        "  }",
+        "  public static void main(String[] a){",
+        "    int[][] grid = {{1,2,3},{4,5,6},{7,8,9}};",
+        "    System.out.println(firstPair(grid, 5));",
+        "    System.out.println(firstPair(grid, 42));",
+        "    System.out.println(skipRows(3));",
+        "    System.out.println(labeledBlock(1));",
+        "    System.out.println(labeledBlock(-1));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "11\n-1\n300\n1\n2\n",
+    );
+  },
+);
+
+test(
   "enum switch (statement and exhaustive expression) runs identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {
