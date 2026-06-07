@@ -1594,6 +1594,10 @@ function generateBody(
     else if (targetDescriptor === "S") code.u1(OP_I2S);
   };
 
+  /**
+   * A cast expression (JLS 15.16): a primitive cast is a narrowing/widening
+   * conversion (JLS 5.5, 5.1.3); a reference cast is a `checkcast`.
+   */
   const emitCast = (node: CastExpression): string => {
     const targetDescriptor = descriptorOf(node.type, program);
     const c = targetDescriptor[0]!;
@@ -1612,6 +1616,7 @@ function generateBody(
     return targetDescriptor;
   };
 
+  /** The `instanceof` operator (JLS 15.20.2) -> the `instanceof` instruction. */
   const emitInstanceof = (node: InstanceofExpression): string => {
     if (node.name) throw new UnsupportedEmit(); // pattern binding (x instanceof T t): later
     emitExpr(node.expression);
@@ -1653,6 +1658,12 @@ function generateBody(
     return undefined;
   };
 
+  /**
+   * A method invocation (JLS 15.12): the chosen overload (JLS 15.12.2) becomes
+   * invokestatic / invokevirtual / invokeinterface; arguments are coerced to the
+   * parameter types (JLS 5.3) and an erased generic return gets a synthetic
+   * checkcast (JLS 5.2).
+   */
   const emitCall = (call: CallExpression): string => {
     // The synthesized enum statics values()/valueOf(String) take precedence over
     // the inherited Enum.valueOf(Class, String) that resolveCall would otherwise
@@ -1726,6 +1737,7 @@ function generateBody(
   };
 
   // new T(args): new; dup; <args>; invokespecial T.<init>:(...)V -> leaves the ref.
+  /** Class instance creation `new T(args)` (JLS 15.9): new, dup, invokespecial. */
   const emitNew = (node: Node): string => {
     const created = checker.getTypeOfExpression(node);
     if (created.kind !== TypeKind.Class) throw new UnsupportedEmit();
@@ -1846,7 +1858,7 @@ function generateBody(
     return arrDesc;
   };
 
-  // Read a[i]: array, index, then xaload.
+  /** Array access read a[i] (JLS 15.10.3): array, index, then xaload. */
   const emitElementAccess = (node: ElementAccessExpression): string => {
     const arrDesc = emitExpr(node.expression);
     const elem = arrDesc[0] === "[" ? arrDesc.slice(1) : "Ljava/lang/Object;";
@@ -1964,6 +1976,11 @@ function generateBody(
     return "Ljava/lang/String;";
   };
 
+  /**
+   * A non-boolean binary operator: multiplicative/additive (JLS 15.17, 15.18),
+   * shift (15.19), and bitwise (15.22), with binary numeric promotion (5.6.2)
+   * and operand unboxing (5.1.8). Comparisons and && / || go through emitBranch.
+   */
   const emitBinary = (node: BinaryExpression): string => {
     const op = node.operatorToken;
     const lc = numericCat(checker.getTypeOfExpression(node.left));
@@ -1995,6 +2012,7 @@ function generateBody(
     return t;
   };
 
+  /** Unary +, -, ~ (JLS 15.15.3-15.15.5); logical ! goes through emitBoolean. */
   const emitPrefixUnary = (node: PrefixUnaryExpression): string => {
     const op = node.operator;
     if (op === SyntaxKind.PlusToken) return emitExpr(node.operand); // unary plus: no-op
@@ -2026,6 +2044,7 @@ function generateBody(
     throw new UnsupportedEmit(); // logical '!': needs control flow
   };
 
+  /** The return instruction for the method's return type (JLS 14.17). */
   const emitReturn = (): void => {
     switch (returnDescriptor[0]) {
       case "V":
@@ -2995,6 +3014,7 @@ function generateBody(
         emitReturn();
         return true;
       }
+      // The `if` statement (JLS 14.9).
       case SyntaxKind.IfStatement: {
         const s = stmt as IfStatement;
         if (s.elseStatement) {
@@ -3015,6 +3035,7 @@ function generateBody(
         placeLabel(endL);
         return false;
       }
+      // The `while` statement (JLS 14.12).
       case SyntaxKind.WhileStatement: {
         const s = stmt as WhileStatement;
         const startL = newLabel();
@@ -3030,6 +3051,7 @@ function generateBody(
         placeLabel(endL);
         return false;
       }
+      // The `do` statement (JLS 14.13).
       case SyntaxKind.DoStatement: {
         const s = stmt as DoStatement;
         const startL = newLabel();
@@ -3046,6 +3068,7 @@ function generateBody(
         placeLabel(endL);
         return false;
       }
+      // The basic `for` statement (JLS 14.14.1).
       case SyntaxKind.ForStatement: {
         const s = stmt as ForStatement;
         return inScope(() => {
@@ -3068,6 +3091,7 @@ function generateBody(
           return false;
         });
       }
+      // The enhanced `for` statement (JLS 14.14.2): over an array or an Iterable.
       case SyntaxKind.ForEachStatement: {
         const s = stmt as ForEachStatement;
         const iterableType = checker.getTypeOfExpression(s.expression);
@@ -3327,6 +3351,7 @@ function generateBody(
         branchTo(OP_GOTO, target.label); // the value is left on the stack at the end
         return true;
       }
+      // `break` (JLS 14.15): exits the nearest loop/switch, running crossed finallies.
       case SyntaxKind.BreakStatement: {
         if ((stmt as BreakStatement).label) throw new UnsupportedEmit(); // labeled break: later
         const target = breakTargets.at(-1);
@@ -3335,6 +3360,7 @@ function generateBody(
         branchTo(OP_GOTO, target.label);
         return true;
       }
+      // `continue` (JLS 14.16).
       case SyntaxKind.ContinueStatement: {
         if ((stmt as ContinueStatement).label) throw new UnsupportedEmit(); // labeled continue: later
         const target = continueTargets.at(-1);
@@ -3343,6 +3369,7 @@ function generateBody(
         branchTo(OP_GOTO, target.label);
         return true;
       }
+      // The `switch` statement (JLS 14.11).
       case SyntaxKind.SwitchStatement: {
         const s = stmt as SwitchStatement;
         const { clauseLabels, endL, base } = emitSwitchDispatch(s.expression, s.clauses);
