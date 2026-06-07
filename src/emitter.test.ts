@@ -546,6 +546,31 @@ test(
 );
 
 test(
+  "switch expressions (arrow, yield, block, string) run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Sx",
+      [
+        "public class Sx {",
+        "  static int arrow(int n){ return switch(n){ case 1 -> 10; case 2,3 -> 20; default -> 0; }; }",
+        '  static String yld(int n){ return switch(n){ case 0: yield "zero"; default: yield "many"; }; }', // colon + yield
+        "  static int blk(int n){ return switch(n){ case 1 -> { int t = n*100; yield t+1; } default -> -1; }; }", // arrow block + yield
+        '  static String strsw(String s){ return switch(s){ case "a" -> "A"; case "b" -> "B"; default -> "?"; }; }',
+        "  public static void main(String[] a){",
+        "    System.out.println(arrow(1)); System.out.println(arrow(3)); System.out.println(arrow(9));",
+        "    System.out.println(yld(0)); System.out.println(yld(5));",
+        "    System.out.println(blk(1)); System.out.println(blk(2));",
+        '    System.out.println(strsw("b")); System.out.println(strsw("z"));',
+        "  }",
+        "}",
+      ].join("\n"),
+      "10\n20\n0\nzero\nmany\n101\n-1\nB\n?\n",
+    );
+  },
+);
+
+test(
   "for-each over a collection (Iterator) runs identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

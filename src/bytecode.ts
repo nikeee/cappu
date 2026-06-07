@@ -55,6 +55,9 @@ import {
   type TypeReference,
   type VariableDeclarator,
   type SwitchStatement,
+  type SwitchClause,
+  type SwitchExpression,
+  type YieldStatement,
   type WhileStatement,
 } from "./types.ts";
 
@@ -1008,6 +1011,7 @@ function generateBody(
   const wideFixups: { at: number; from: number; label: Label }[] = []; // u4 switch offsets
   const breakTargets: Label[] = []; // enclosing switch/loop end labels for `break`
   const continueTargets: Label[] = []; // enclosing loop re-test/increment labels for `continue`
+  const yieldTargets: { label: Label; desc: string }[] = []; // enclosing switch-expression ends
   const newLabel = (): Label => ({ offset: -1 });
   // A branch target's frame is defined by the operand stack on the branch-taken
   // path, which can differ from the live stack at the label site (e.g. when the
@@ -1414,6 +1418,8 @@ function generateBody(
         return emitElementAccess(node as ElementAccessExpression);
       case SyntaxKind.ConditionalExpression:
         return emitConditional(node as ConditionalExpression);
+      case SyntaxKind.SwitchExpression:
+        return emitSwitchExpression(node as SwitchExpression);
       case SyntaxKind.LambdaExpression:
         return emitLambda(node as LambdaExpression);
       case SyntaxKind.MethodReferenceExpression:
@@ -2606,6 +2612,133 @@ function generateBody(
     reachable = false; // a switch dispatches to its cases; it does not fall through
   };
 
+  // Emit a switch selector and its dispatch (tableswitch/lookupswitch over an
+  // integral selector, or a chained String.equals), shared by switch statements
+  // and switch expressions. Returns the clause labels, the end label, and the
+  // operand stack as the clause bodies see it.
+  const emitSwitchDispatch = (
+    selector: Node,
+    clauses: readonly SwitchClause[],
+  ): { clauseLabels: Label[]; endL: Label; base: string[] } => {
+    if (clauses.some(cl => cl.guard !== undefined)) throw new UnsupportedEmit();
+    const selType = checker.getTypeOfExpression(selector);
+    const isString = isStringType(selType);
+    if (!isString && numericCategory(selType) !== "I") throw new UnsupportedEmit();
+
+    const endL = newLabel();
+    const clauseLabels = clauses.map(() => newLabel());
+    let defaultLabel = endL;
+    clauses.forEach((cl, i) => {
+      if (cl.isDefault) defaultLabel = clauseLabels[i]!;
+    });
+
+    if (isString) {
+      const selDesc = "Ljava/lang/String;";
+      emitExpr(selector);
+      const tmp = nextSlot;
+      nextSlot += 1;
+      if (nextSlot > maxLocals) maxLocals = nextSlot;
+      activeLocals.push({ slot: tmp, descriptor: selDesc });
+      storeVar(tmp, selDesc); // selector evaluated once into a temp
+      clauses.forEach((cl, i) => {
+        for (const lab of cl.labels ?? []) {
+          if (lab.kind !== SyntaxKind.StringLiteral) throw new UnsupportedEmit();
+          loadVar(tmp, selDesc);
+          push(selDesc);
+          ldc(cp.string((lab as LiteralExpression).value));
+          push(selDesc);
+          code.u1(OP_INVOKEVIRTUAL);
+          code.u2(cp.methodref("java/lang/String", "equals", "(Ljava/lang/Object;)Z"));
+          pop(2);
+          push("I");
+          pop();
+          branchTo(OP_IFEQ + 1, clauseLabels[i]!); // ifne: matched -> this clause
+        }
+      });
+      branchTo(OP_GOTO, defaultLabel);
+    } else {
+      coerce(emitExpr(selector), "I");
+      pop(); // selector consumed by the switch instruction
+      const cases: { value: number; label: Label }[] = [];
+      clauses.forEach((cl, i) => {
+        for (const lab of cl.labels ?? []) {
+          cases.push({ value: caseValue(lab), label: clauseLabels[i]! });
+        }
+      });
+      cases.sort((a, b) => a.value - b.value);
+      emitSwitchInstr(cases, defaultLabel);
+    }
+    return { clauseLabels, endL, base: [...stack] };
+  };
+
+  // The result type of a switch expression, from its arrow-expression and yield
+  // values: binary promotion when all are numeric, otherwise a shared reference.
+  const switchResultDesc = (clauses: readonly SwitchClause[]): string => {
+    const types: Type[] = [];
+    const collectYields = (n: Node): void => {
+      if (n.kind === SyntaxKind.YieldStatement) {
+        types.push(checker.getTypeOfExpression((n as YieldStatement).expression));
+      }
+      forEachChild(n, c => {
+        if (c.kind !== SyntaxKind.SwitchExpression) collectYields(c); // not a nested switch's yields
+        return undefined;
+      });
+    };
+    for (const cl of clauses) {
+      const arrowExpr =
+        cl.isArrow &&
+        cl.statements.length === 1 &&
+        cl.statements[0]!.kind === SyntaxKind.ExpressionStatement
+          ? (cl.statements[0] as ExpressionStatement).expression
+          : undefined;
+      if (arrowExpr) types.push(checker.getTypeOfExpression(arrowExpr));
+      else for (const st of cl.statements) collectYields(st);
+    }
+    const cats = types.map(t => numericCategory(t));
+    if (cats.length > 0 && cats.every((c): c is string => c !== undefined)) {
+      return cats.reduce((a, b) => promote(a, b));
+    }
+    for (const t of types) {
+      const d = typeDescriptor(t);
+      if (d !== "Ljava/lang/Object;") return d;
+    }
+    return "Ljava/lang/Object;";
+  };
+
+  // A switch expression (JLS 14.11.2): like a switch statement, but every arm
+  // yields a value (arrow `case L -> v` or `yield v`), left on the stack at the end.
+  const emitSwitchExpression = (node: SwitchExpression): string => {
+    const resultDesc = switchResultDesc(node.clauses);
+    const { clauseLabels, endL, base } = emitSwitchDispatch(node.expression, node.clauses);
+    yieldTargets.push({ label: endL, desc: resultDesc });
+    node.clauses.forEach((cl, i) => {
+      setStack(base);
+      placeLabel(clauseLabels[i]!);
+      const arrowExpr =
+        cl.isArrow &&
+        cl.statements.length === 1 &&
+        cl.statements[0]!.kind === SyntaxKind.ExpressionStatement
+          ? (cl.statements[0] as ExpressionStatement).expression
+          : undefined;
+      if (arrowExpr) {
+        coerce(emitExpr(arrowExpr), resultDesc);
+        branchTo(OP_GOTO, endL); // the value is the result; records the merge stack
+        pop(); // not on the live stack for the next clause
+      } else {
+        inScope(() => {
+          let t = false;
+          for (const st of cl.statements) t = emitStmt(st); // yields branch to endL
+          return t;
+        });
+      }
+    });
+    yieldTargets.pop();
+    setStack(base);
+    push(resultDesc); // both paths converge here with the result on the stack
+    placeLabel(endL);
+    return resultDesc;
+  };
+
   // Returns true if the statement is a definite terminator (return).
   const emitStmt = (stmt: Node): boolean => {
     switch (stmt.kind) {
@@ -2866,6 +2999,13 @@ function generateBody(
           return false;
         });
       }
+      case SyntaxKind.YieldStatement: {
+        const target = yieldTargets.at(-1);
+        if (!target) throw new UnsupportedEmit();
+        coerce(emitExpr((stmt as YieldStatement).expression), target.desc);
+        branchTo(OP_GOTO, target.label); // the value is left on the stack at the end
+        return true;
+      }
       case SyntaxKind.BreakStatement: {
         if ((stmt as BreakStatement).label) throw new UnsupportedEmit(); // labeled break: later
         const target = breakTargets.at(-1);
@@ -2882,61 +3022,7 @@ function generateBody(
       }
       case SyntaxKind.SwitchStatement: {
         const s = stmt as SwitchStatement;
-        // Integral or String selector, colon or arrow form. Guards and
-        // pattern/enum labels are not handled yet.
-        if (s.clauses.some(cl => cl.guard !== undefined)) throw new UnsupportedEmit();
-        const selType = checker.getTypeOfExpression(s.expression);
-        const isString = isStringType(selType);
-        if (!isString && numericCategory(selType) !== "I") throw new UnsupportedEmit();
-
-        const endL = newLabel();
-        const clauseLabels = s.clauses.map(() => newLabel());
-        let defaultLabel = endL;
-        s.clauses.forEach((cl, i) => {
-          if (cl.isDefault) defaultLabel = clauseLabels[i]!;
-        });
-
-        if (isString) {
-          // Dispatch by chained String.equals (javac uses a hashCode switch; an
-          // equals chain runs identically and keeps the emitter simple).
-          const selDesc = "Ljava/lang/String;";
-          emitExpr(s.expression);
-          const tmp = nextSlot;
-          nextSlot += 1;
-          if (nextSlot > maxLocals) maxLocals = nextSlot;
-          activeLocals.push({ slot: tmp, descriptor: selDesc });
-          storeVar(tmp, selDesc); // selector evaluated once into a temp
-          for (const cl of s.clauses) {
-            const i = s.clauses.indexOf(cl);
-            for (const lab of cl.labels ?? []) {
-              if (lab.kind !== SyntaxKind.StringLiteral) throw new UnsupportedEmit();
-              loadVar(tmp, selDesc);
-              push(selDesc);
-              ldc(cp.string((lab as LiteralExpression).value));
-              push(selDesc);
-              code.u1(OP_INVOKEVIRTUAL);
-              code.u2(cp.methodref("java/lang/String", "equals", "(Ljava/lang/Object;)Z"));
-              pop(2);
-              push("I");
-              pop(); // boolean consumed by the branch
-              branchTo(OP_IFEQ + 1, clauseLabels[i]!); // ifne: matched -> this clause
-            }
-          }
-          branchTo(OP_GOTO, defaultLabel);
-        } else {
-          coerce(emitExpr(s.expression), "I");
-          pop(); // selector consumed by the switch instruction
-          const cases: { value: number; label: Label }[] = [];
-          s.clauses.forEach((cl, i) => {
-            for (const lab of cl.labels ?? []) {
-              cases.push({ value: caseValue(lab), label: clauseLabels[i]! });
-            }
-          });
-          cases.sort((a, b) => a.value - b.value);
-          emitSwitchInstr(cases, defaultLabel);
-        }
-        const base = [...stack];
-
+        const { clauseLabels, endL, base } = emitSwitchDispatch(s.expression, s.clauses);
         breakTargets.push(endL);
         const arrow = s.clauses.some(cl => cl.isArrow); // arrow clauses do not fall through
         let lastTerminated = false;
