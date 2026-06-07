@@ -63,12 +63,6 @@ node --test src/service/someService.test.ts
 - **oxlint** + **oxfmt** for backend/frontend/ingest (config: `.oxlintrc.json`, `.oxfmtrc.json`, `.editorconfig`). Use `node --run lint` and `node --run format` to execute.
 - **lefthook**: pre-commit formats staged files; pre-push lints all components in parallel
 
-## Key Environment Variables (backend)
-- `MASTER_KEY` - NFC key derivation master secret
-- `JWKS_URI` - OIDC provider JWK endpoint
-- `DATABASE_URL` - PostgreSQL connection string
-- `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`
-
 ## Final Notices
 - NEVER use the `npx` command under any circumstances. It is strictly blocked by security policies on our system.
 - ALWAYS use allowed `npm` scripts defined in `package.json`.
