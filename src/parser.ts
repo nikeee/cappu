@@ -801,26 +801,6 @@ function parseAnnotation(): Annotation {
   return finishNode(node, pos);
 }
 
-// Consume a balanced run of open/close tokens, used to skip not-yet-parsed
-// bodies (class members in M4, annotation arguments). The opening token is the
-// current token.
-function skipBalanced(open: SyntaxKind, close: SyntaxKind): void {
-  nextToken(); // opening token
-  let depth = 1;
-  while (depth > 0 && token() !== SyntaxKind.EndOfFileToken) {
-    if (token() === open) {
-      depth++;
-    } else if (token() === close) {
-      depth--;
-      if (depth === 0) {
-        nextToken();
-        return;
-      }
-    }
-    nextToken();
-  }
-}
-
 // Members
 
 // Trailing C-style array brackets after a declarator/parameter name (int a[]).
@@ -1073,15 +1053,12 @@ function parseEnumConstant(): EnumConstantDeclaration {
   const pos = getNodePos();
   const annotations = parseAnnotations();
   const name = parseIdentifier();
-  if (token() === SyntaxKind.OpenParenToken) {
-    // Constructor arguments; real expressions in M8.
-    skipBalanced(SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
-  }
+  const args = token() === SyntaxKind.OpenParenToken ? parseArgumentList() : undefined;
   const classBody = token() === SyntaxKind.OpenBraceToken ? parseClassBody() : undefined;
   const node = createNode<EnumConstantDeclaration>(SyntaxKind.EnumConstantDeclaration, pos);
   node.modifiers = annotations;
   node.name = name;
-  node.arguments = undefined;
+  node.arguments = args;
   node.classBody = classBody;
   return finishNode(node, pos);
 }

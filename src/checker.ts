@@ -302,6 +302,14 @@ export function createChecker(program: Program): Checker {
           if (found) return found;
         }
       }
+      // An enum implicitly extends java.lang.Enum (JLS 8.9): name(), ordinal(), ...
+      if (declaration.kind === SyntaxKind.EnumDeclaration) {
+        const enumType = classTypeByFqn("java.lang.Enum");
+        if (enumType.kind === TypeKind.Class) {
+          const found = lookupTypedMember(enumType as ClassType, name, seen);
+          if (found) return found;
+        }
+      }
     }
     // Every type implicitly extends java.lang.Object (JLS 8.1.4), so its members
     // are inherited even without an explicit `extends`.
@@ -1181,7 +1189,25 @@ export function createChecker(program: Program): Checker {
     return out;
   }
 
+  // The type of the synthesized enum statics E.values() (E[]) and
+  // E.valueOf(String) (E), which have no source declaration.
+  function enumStaticCallType(call: CallExpression): Type | undefined {
+    const callee = call.expression;
+    if (callee.kind !== SyntaxKind.PropertyAccessExpression) return undefined;
+    const access = callee as PropertyAccessExpression;
+    if (access.expression.kind !== SyntaxKind.Identifier) return undefined;
+    const sym = resolveTypeEntityName(access.expression as Identifier, access.expression, program);
+    if (!sym || !(sym.flags & SymbolFlags.Enum)) return undefined;
+    const t = classType(sym);
+    if (access.name.text === "values" && call.arguments.length === 0) return arrayType(t);
+    if (access.name.text === "valueOf" && call.arguments.length === 1) return t;
+    return undefined;
+  }
+
   function typeOfCall(call: CallExpression): Type {
+    // values()/valueOf(String) take precedence over the inherited Enum.valueOf.
+    const enumType = enumStaticCallType(call);
+    if (enumType) return enumType;
     const info = resolveCallInfo(call);
     if (!info) return errorType;
     let returnType = substitute(resolveType(info.decl.returnType, info.decl), info.receiverSubst);

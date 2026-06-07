@@ -42,6 +42,15 @@ class Class<T> {
   public boolean isInstance(Object o) { return false; }
 }
 
+class Enum<E> implements Comparable<E> {
+  protected Enum(String name, int ordinal) {}
+  public final String name() { return null; }
+  public final int ordinal() { return 0; }
+  public String toString() { return null; }
+  public final int compareTo(E o) { return 0; }
+  public static <T> T valueOf(Class<T> enumType, String name) { return null; }
+}
+
 class Number {
   public int intValue() { return 0; }
   public long longValue() { return 0; }

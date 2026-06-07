@@ -3,11 +3,17 @@
 // Higher-level, source-level transformations (e.g. constant folding) belong here
 // rather than in the low-level instruction emitter.
 
-import { type EmittedClass, emitClass } from "./bytecode.ts";
+import { type EmittedClass, emitClass, emitEnum } from "./bytecode.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import type { Checker } from "./checker.ts";
-import { type ClassDeclaration, type Node, type SourceFile, SyntaxKind } from "./types.ts";
+import {
+  type ClassDeclaration,
+  type EnumDeclaration,
+  type Node,
+  type SourceFile,
+  SyntaxKind,
+} from "./types.ts";
 
 export type { EmittedClass } from "./bytecode.ts";
 
@@ -25,6 +31,8 @@ export function emitSourceFile(
   const visit = (node: Node): void => {
     if (node.kind === SyntaxKind.ClassDeclaration) {
       result.push(emitClass(node as ClassDeclaration, program, checker));
+    } else if (node.kind === SyntaxKind.EnumDeclaration) {
+      result.push(emitEnum(node as EnumDeclaration, program, checker));
     }
     forEachChild(node, child => {
       visit(child);

@@ -25,6 +25,7 @@ import {
   type MethodReferenceExpression,
   type ClassDeclaration,
   type ConstructorDeclaration,
+  type EnumDeclaration,
   type BreakStatement,
   type ContinueStatement,
   type DoStatement,
@@ -76,6 +77,7 @@ const ACC_ABSTRACT = 0x0400;
 const ACC_STRICT = 0x0800;
 const ACC_SYNTHETIC = 0x1000;
 const ACC_VARARGS = 0x0080;
+const ACC_ENUM = 0x4000;
 
 // Primitive field descriptors (JVMS 4.3.2).
 const PRIMITIVE_DESCRIPTOR: Record<string, string> = {
@@ -225,6 +227,8 @@ const OP_POP = 0x57;
 const OP_POP2 = 0x58;
 const OP_DUP = 0x59;
 const OP_NEW = 0xbb;
+const OP_ANEWARRAY = 0xbd;
+const OP_AASTORE = 0x53;
 const OP_GETSTATIC = 0xb2;
 const OP_PUTSTATIC = 0xb3;
 const OP_GETFIELD = 0xb4;
@@ -848,6 +852,22 @@ interface LambdaImpl {
   isInstance: boolean;
 }
 
+// The data the enum <clinit> needs: how to construct each constant and the
+// $VALUES array of all of them.
+interface EnumClinit {
+  enumInternal: string;
+  selfDesc: string; // L<enum>;
+  arrayDesc: string; // [L<enum>;
+  valuesField: string; // synthetic $VALUES field name
+  constants: {
+    name: string;
+    ordinal: number;
+    ctorDescriptor: string; // (Ljava/lang/String;I<userparams>)V
+    userParamDescs: string[];
+    args: Node[];
+  }[];
+}
+
 function generateBody(
   method: MethodDeclaration | ConstructorDeclaration,
   cp: ConstantPool,
@@ -873,6 +893,12 @@ function generateBody(
     body: Node;
     isInstance: boolean;
   },
+  // Enum constructor: the synthetic (String name, int ordinal) leading parameters
+  // are reserved (slots 1,2) and super(name, ordinal) calls java.lang.Enum.
+  enumCtor = false,
+  // Enum <clinit>: construct each constant and the $VALUES array before the
+  // static field initializers.
+  enumClinit?: EnumClinit,
 ): { code: ByteBuffer; maxStack: number; maxLocals: number; stackMapTable?: ByteBuffer } {
   const isConstructor = !lambdaSpec && method.kind === SyntaxKind.ConstructorDeclaration;
   const isStatic = lambdaSpec
@@ -910,12 +936,16 @@ function generateBody(
     assigned.add(0);
   }
   // Parameters: a lambda impl's captures + own params, or the method's params.
+  // An enum constructor has two synthetic leading parameters (name, ordinal).
   const params: { symbol?: Symbol; descriptor: string }[] = lambdaSpec
     ? lambdaSpec.params
-    : method.parameters.map(p => ({
-        symbol: p.symbol,
-        descriptor: paramDescriptor(p as Parameter, program),
-      }));
+    : [
+        ...(enumCtor ? [{ descriptor: "Ljava/lang/String;" }, { descriptor: "I" }] : []),
+        ...method.parameters.map(p => ({
+          symbol: p.symbol,
+          descriptor: paramDescriptor(p as Parameter, program),
+        })),
+      ];
   for (const p of params) {
     if (p.symbol) locals.set(p.symbol, { slot: nextSlot, descriptor: p.descriptor });
     activeLocals.push({ slot: nextSlot, descriptor: p.descriptor });
@@ -1186,11 +1216,18 @@ function generateBody(
   const fieldInfoOf = (
     symbol: Symbol,
   ): { owner: string; name: string; descriptor: string; isStatic: boolean } => {
+    if (!symbol.parent) throw new UnsupportedEmit();
+    // An enum constant is a public static final field of the enum, typed as the
+    // enum itself.
+    if (symbol.flags & SymbolFlags.EnumConstant) {
+      const owner = binaryName(symbol.parent);
+      return { owner, name: symbol.escapedName, descriptor: `L${owner};`, isStatic: true };
+    }
     const declarator = symbol.valueDeclaration;
     if (!declarator || declarator.kind !== SyntaxKind.VariableDeclarator)
       throw new UnsupportedEmit();
     const field = declarator.parent as FieldDeclaration;
-    if (field.kind !== SyntaxKind.FieldDeclaration || !symbol.parent) throw new UnsupportedEmit();
+    if (field.kind !== SyntaxKind.FieldDeclaration) throw new UnsupportedEmit();
     return {
       owner: binaryName(symbol.parent),
       name: symbol.escapedName,
@@ -1316,8 +1353,8 @@ function generateBody(
           push(local.descriptor);
           return local.descriptor;
         }
-        // A field referenced by its simple name: implicit `this.f` or a static.
-        if (symbol && symbol.flags & SymbolFlags.Field) {
+        // A field or enum constant by its simple name: implicit `this.f` or a static.
+        if (symbol && symbol.flags & (SymbolFlags.Field | SymbolFlags.EnumConstant)) {
           return emitFieldRead(fieldInfoOf(symbol), () => {
             code.u1(OP_ALOAD_0);
             pushRef();
@@ -1344,7 +1381,8 @@ function generateBody(
       case SyntaxKind.PropertyAccessExpression: {
         const access = node as PropertyAccessExpression;
         const symbol = checker.resolveName(access.name);
-        if (!symbol || !(symbol.flags & SymbolFlags.Field)) throw new UnsupportedEmit();
+        if (!symbol || !(symbol.flags & (SymbolFlags.Field | SymbolFlags.EnumConstant)))
+          throw new UnsupportedEmit();
         return emitFieldRead(fieldInfoOf(symbol), () => emitExpr(access.expression));
       }
       case SyntaxKind.ConditionalExpression:
@@ -1423,7 +1461,41 @@ function generateBody(
     return "Z";
   };
 
+  // The implicit static enum methods E.values() / E.valueOf(String), which have
+  // no source declaration. Returns the result descriptor, or undefined if the
+  // call is not one of them.
+  const emitEnumStaticCall = (call: CallExpression): string | undefined => {
+    const callee = call.expression;
+    if (callee.kind !== SyntaxKind.PropertyAccessExpression) return undefined;
+    const access = callee as PropertyAccessExpression;
+    if (access.expression.kind !== SyntaxKind.Identifier) return undefined;
+    const recv = resolveTypeEntityName(access.expression as Identifier, access.expression, program);
+    if (!recv || !(recv.flags & SymbolFlags.Enum)) return undefined;
+    const enumInternal = binaryName(recv);
+    const mname = access.name.text;
+    if (mname === "values" && call.arguments.length === 0) {
+      code.u1(OP_INVOKESTATIC);
+      code.u2(cp.methodref(enumInternal, "values", `()[L${enumInternal};`));
+      push(`[L${enumInternal};`);
+      return `[L${enumInternal};`;
+    }
+    if (mname === "valueOf" && call.arguments.length === 1) {
+      coerce(emitExpr(call.arguments[0]!), "Ljava/lang/String;");
+      code.u1(OP_INVOKESTATIC);
+      code.u2(cp.methodref(enumInternal, "valueOf", `(Ljava/lang/String;)L${enumInternal};`));
+      pop(1);
+      push(`L${enumInternal};`);
+      return `L${enumInternal};`;
+    }
+    return undefined;
+  };
+
   const emitCall = (call: CallExpression): string => {
+    // The synthesized enum statics values()/valueOf(String) take precedence over
+    // the inherited Enum.valueOf(Class, String) that resolveCall would otherwise
+    // pick (it ignores the arity mismatch).
+    const enumStatic = emitEnumStaticCall(call);
+    if (enumStatic) return enumStatic;
     const decl = checker.resolveCall(call);
     const owner = decl?.symbol?.parent;
     if (!decl || !decl.symbol || !owner) throw new UnsupportedEmit();
@@ -2217,6 +2289,51 @@ function generateBody(
     return interfaceDesc;
   };
 
+  // Enum <clinit> prologue: construct each constant (new + <init>, putstatic) and
+  // then the synthetic $VALUES array holding them all.
+  const emitEnumClinitPrologue = (ec: EnumClinit): void => {
+    for (const c of ec.constants) {
+      code.u1(OP_NEW);
+      code.u2(cp.classInfo(ec.enumInternal));
+      pushRef(ec.selfDesc);
+      code.u1(OP_DUP);
+      pushRef(ec.selfDesc);
+      ldc(cp.string(c.name));
+      pushRef("Ljava/lang/String;");
+      intConst(c.ordinal);
+      push("I");
+      c.args.forEach((arg, j) =>
+        coerce(emitExpr(arg), c.userParamDescs[j] ?? "Ljava/lang/Object;"),
+      );
+      code.u1(OP_INVOKESPECIAL);
+      code.u2(cp.methodref(ec.enumInternal, "<init>", c.ctorDescriptor));
+      pop(1 + 2 + c.args.length); // dup'd ref + name + ordinal + args
+      code.u1(OP_PUTSTATIC);
+      code.u2(cp.fieldref(ec.enumInternal, c.name, ec.selfDesc));
+      pop(1); // the constructed reference
+    }
+    intConst(ec.constants.length);
+    push("I");
+    code.u1(OP_ANEWARRAY);
+    code.u2(cp.classInfo(ec.enumInternal));
+    pop();
+    push(ec.arrayDesc);
+    ec.constants.forEach((c, i) => {
+      code.u1(OP_DUP);
+      push(ec.arrayDesc);
+      intConst(i);
+      push("I");
+      code.u1(OP_GETSTATIC);
+      code.u2(cp.fieldref(ec.enumInternal, c.name, ec.selfDesc));
+      pushRef(ec.selfDesc);
+      code.u1(OP_AASTORE);
+      pop(3);
+    });
+    code.u1(OP_PUTSTATIC);
+    code.u2(cp.fieldref(ec.enumInternal, ec.valuesField, ec.arrayDesc));
+    pop(1);
+  };
+
   // ++ / -- used as a statement (the result value is not needed). An int local
   // uses iinc; a field or wide local is a read-modify-write via emitStore.
   const emitIncrement = (expr: Node): void => {
@@ -2578,7 +2695,18 @@ function generateBody(
     }
   } else {
     if (!method.body || method.body.kind !== SyntaxKind.Block) throw new UnsupportedEmit();
-    if (isConstructor && ctorSuper) {
+    if (isConstructor && enumCtor) {
+      // Implicit super(name, ordinal) for an enum constructor.
+      code.u1(OP_ALOAD_0);
+      pushRef();
+      code.u1(OP_ALOAD_0 + 1); // aload_1 (name)
+      pushRef("Ljava/lang/String;");
+      code.u1(OP_ILOAD_0 + 2); // iload_2 (ordinal)
+      push("I");
+      code.u1(OP_INVOKESPECIAL);
+      code.u2(cp.methodref("java/lang/Enum", "<init>", "(Ljava/lang/String;I)V"));
+      pop(3);
+    } else if (isConstructor && ctorSuper) {
       // Implicit super(): aload_0; invokespecial <super>.<init>:()V. (An explicit
       // super()/this() in the body is not handled and triggers the fallback.)
       code.u1(OP_ALOAD_0);
@@ -2587,6 +2715,7 @@ function generateBody(
       code.u2(cp.methodref(ctorSuper, "<init>", "()V"));
       pop(1);
     }
+    if (enumClinit) emitEnumClinitPrologue(enumClinit);
     for (const fi of fieldInits) {
       if (fi.isStatic) {
         coerce(emitExpr(fi.init), fi.descriptor);
@@ -3005,6 +3134,312 @@ export function emitClass(
   for (const index of interfaceIndices) out.u2(index);
   out.u2(fields.count);
   out.append(fields.buffer);
+  out.u2(methodCount);
+  out.append(methods);
+  out.u2(classAttributeCount);
+  out.append(classAttributes);
+
+  return { name, bytes: out.toUint8Array() };
+}
+
+// One field_info with no attributes.
+function emitFieldInfo(
+  buffer: ByteBuffer,
+  cp: ConstantPool,
+  flags: number,
+  name: string,
+  descriptor: string,
+): void {
+  buffer.u2(flags);
+  buffer.u2(cp.utf8(name));
+  buffer.u2(cp.utf8(descriptor));
+  buffer.u2(0); // attributes_count
+}
+
+// public static E[] values() { return (E[]) $VALUES.clone(); }
+function emitValuesMethod(
+  cp: ConstantPool,
+  name: string,
+  valuesField: string,
+  arrayDesc: string,
+): ByteBuffer {
+  const info = new ByteBuffer();
+  info.u2(ACC_PUBLIC | ACC_STATIC);
+  info.u2(cp.utf8("values"));
+  info.u2(cp.utf8(`()${arrayDesc}`));
+  const code = new ByteBuffer();
+  code.u1(OP_GETSTATIC);
+  code.u2(cp.fieldref(name, valuesField, arrayDesc));
+  code.u1(OP_INVOKEVIRTUAL);
+  code.u2(cp.methodref(arrayDesc, "clone", "()Ljava/lang/Object;"));
+  code.u1(OP_CHECKCAST);
+  code.u2(cp.classInfo(arrayDesc));
+  code.u1(OP_ARETURN);
+  writeCodeAttribute(info, cp, { code, maxStack: 1, maxLocals: 0 });
+  return info;
+}
+
+// public static E valueOf(String name) { return (E) Enum.valueOf(E.class, name); }
+function emitValueOfMethod(cp: ConstantPool, name: string, selfDesc: string): ByteBuffer {
+  const info = new ByteBuffer();
+  info.u2(ACC_PUBLIC | ACC_STATIC);
+  info.u2(cp.utf8("valueOf"));
+  info.u2(cp.utf8(`(Ljava/lang/String;)${selfDesc}`));
+  const code = new ByteBuffer();
+  code.u1(OP_LDC_W);
+  code.u2(cp.classInfo(name)); // ldc of the Class literal E.class
+  code.u1(OP_ALOAD_0);
+  code.u1(OP_INVOKESTATIC);
+  code.u2(
+    cp.methodref(
+      "java/lang/Enum",
+      "valueOf",
+      "(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/Enum;",
+    ),
+  );
+  code.u1(OP_CHECKCAST);
+  code.u2(cp.classInfo(name));
+  code.u1(OP_ARETURN);
+  writeCodeAttribute(info, cp, { code, maxStack: 2, maxLocals: 1 });
+  return info;
+}
+
+// An enum constructor: descriptor (Ljava/lang/String;I<userparams>)V, emitted in
+// enumCtor mode (synthetic name/ordinal params, super(name, ordinal)).
+function emitEnumConstructor(
+  ctor: ConstructorDeclaration,
+  cp: ConstantPool,
+  program: Program,
+  checker: Checker,
+  name: string,
+  instanceInits: FieldInit[],
+  lambdaMethods: ByteBuffer[],
+): ByteBuffer {
+  const userParams = ctor.parameters.map(p => paramDescriptor(p as Parameter, program)).join("");
+  const descriptor = `(Ljava/lang/String;I${userParams})V`;
+  const info = new ByteBuffer();
+  info.u2(ACC_PRIVATE);
+  info.u2(cp.utf8("<init>"));
+  info.u2(cp.utf8(descriptor));
+  let body: MethodBody;
+  try {
+    body = generateBody(
+      ctor,
+      cp,
+      program,
+      checker,
+      name,
+      "java/lang/Enum",
+      instanceInits,
+      lambdaMethods,
+      undefined,
+      true,
+    );
+  } catch (e) {
+    if (!(e instanceof UnsupportedEmit)) throw e;
+    const argsSize =
+      3 +
+      ctor.parameters.reduce((n, p) => n + slotsOf(paramDescriptor(p as Parameter, program)), 0);
+    const code = new ByteBuffer();
+    code.u1(OP_ALOAD_0);
+    code.u1(OP_ALOAD_0 + 1);
+    code.u1(OP_ILOAD_0 + 2);
+    code.u1(OP_INVOKESPECIAL);
+    code.u2(cp.methodref("java/lang/Enum", "<init>", "(Ljava/lang/String;I)V"));
+    code.u1(OP_RETURN);
+    body = { code, maxStack: 3, maxLocals: argsSize };
+  }
+  writeCodeAttribute(info, cp, body);
+  return info;
+}
+
+// Emit an enum declaration: a final class extending java.lang.Enum, with a
+// static field per constant, a synthetic $VALUES array, the implicit values()
+// and valueOf(String) methods, and a <clinit> that builds the constants.
+export function emitEnum(
+  declaration: EnumDeclaration,
+  program: Program,
+  checker: Checker,
+): EmittedClass {
+  program.getGlobalIndex();
+  const name = declaration.symbol ? binaryName(declaration.symbol) : declaration.name.text;
+  const selfDesc = `L${name};`;
+  const arrayDesc = `[${selfDesc}`;
+  const VALUES = "$VALUES";
+  const superInternalName = "java/lang/Enum";
+  const interfaceNames = (declaration.implementsTypes ?? [])
+    .map(t => resolveInternalName(t, declaration, program))
+    .filter((n): n is string => n !== undefined);
+  const isPublic = (declaration.modifiers ?? []).some(m => m.kind === SyntaxKind.PublicKeyword);
+  const accessFlags = ACC_SUPER | ACC_ENUM | ACC_FINAL | (isPublic ? ACC_PUBLIC : 0);
+
+  const cp = new ConstantPool();
+  const thisClassIndex = cp.classInfo(name);
+  const superClassIndex = cp.classInfo(superInternalName);
+  const interfaceIndices = interfaceNames.map(n => cp.classInfo(n));
+
+  // Fields: declared fields, a constant field each, and the $VALUES array.
+  const fieldsBuf = new ByteBuffer();
+  const userFields = emitFields(declaration as unknown as ClassDeclaration, cp, program);
+  fieldsBuf.append(userFields.buffer);
+  let fieldCount = userFields.count;
+  for (const c of declaration.enumConstants) {
+    emitFieldInfo(
+      fieldsBuf,
+      cp,
+      ACC_PUBLIC | ACC_STATIC | ACC_FINAL | ACC_ENUM,
+      c.name.text,
+      selfDesc,
+    );
+    fieldCount++;
+  }
+  emitFieldInfo(
+    fieldsBuf,
+    cp,
+    ACC_PRIVATE | ACC_STATIC | ACC_FINAL | ACC_SYNTHETIC,
+    VALUES,
+    arrayDesc,
+  );
+  fieldCount++;
+
+  // User field initializers (instance ones run in the constructor, static in
+  // <clinit>); static-final compile-time constants carry a ConstantValue.
+  const instanceInits: FieldInit[] = [];
+  const staticInits: FieldInit[] = [];
+  for (const member of declaration.members) {
+    if (member.kind !== SyntaxKind.FieldDeclaration) continue;
+    const field = member as FieldDeclaration;
+    const isStatic = isStaticDeclaration(field);
+    const descriptor = descriptorOf(field.type, program);
+    for (const declarator of field.declarators) {
+      const d = declarator as VariableDeclarator;
+      if (!d.initializer) continue;
+      if (isStatic && isConstantValueField(field, d, program)) continue;
+      (isStatic ? staticInits : instanceInits).push({
+        isStatic,
+        owner: name,
+        name: d.name.text,
+        descriptor,
+        init: d.initializer,
+      });
+    }
+  }
+
+  const methods = new ByteBuffer();
+  let methodCount = 0;
+  const lambdaMethods: ByteBuffer[] = [];
+  const declaredCtors = declaration.members.filter(
+    m => m.kind === SyntaxKind.ConstructorDeclaration,
+  ) as ConstructorDeclaration[];
+
+  // Constructors (enum mode). A synthesized one when none is declared.
+  if (declaredCtors.length === 0) {
+    const defaultCtor = {
+      kind: SyntaxKind.ConstructorDeclaration,
+      parameters: [],
+      body: { kind: SyntaxKind.Block, statements: [] },
+    } as unknown as ConstructorDeclaration;
+    methods.append(
+      emitEnumConstructor(defaultCtor, cp, program, checker, name, instanceInits, lambdaMethods),
+    );
+    methodCount++;
+  } else {
+    for (const ctor of declaredCtors) {
+      methods.append(
+        emitEnumConstructor(ctor, cp, program, checker, name, instanceInits, lambdaMethods),
+      );
+      methodCount++;
+    }
+  }
+
+  // Per-constant construction info for <clinit> (pick the ctor by arg count).
+  const constants = declaration.enumConstants.map((c, i) => {
+    const args = [...(c.arguments ?? [])];
+    const ctor = declaredCtors.find(k => k.parameters.length === args.length);
+    const userParamDescs = ctor
+      ? ctor.parameters.map(p => paramDescriptor(p as Parameter, program))
+      : [];
+    return {
+      name: c.name.text,
+      ordinal: i,
+      ctorDescriptor: `(Ljava/lang/String;I${userParamDescs.join("")})V`,
+      userParamDescs,
+      args,
+    };
+  });
+
+  // Declared methods.
+  for (const member of declaration.members) {
+    if (member.kind !== SyntaxKind.MethodDeclaration) continue;
+    methods.append(
+      emitMethod(member as MethodDeclaration, cp, program, checker, name, lambdaMethods),
+    );
+    methodCount++;
+  }
+
+  // Implicit values() and valueOf(String).
+  methods.append(emitValuesMethod(cp, name, VALUES, arrayDesc));
+  methodCount++;
+  methods.append(emitValueOfMethod(cp, name, selfDesc));
+  methodCount++;
+
+  // <clinit>: build the constants and $VALUES, then run static field inits.
+  const clinit = {
+    kind: SyntaxKind.MethodDeclaration,
+    modifiers: [{ kind: SyntaxKind.StaticKeyword }],
+    parameters: [],
+    returnType: { kind: SyntaxKind.PrimitiveType, keyword: SyntaxKind.VoidKeyword },
+    name: { text: "<clinit>" },
+    body: { kind: SyntaxKind.Block, statements: [] },
+  } as unknown as MethodDeclaration;
+  const clinitInfo = new ByteBuffer();
+  clinitInfo.u2(ACC_STATIC);
+  clinitInfo.u2(cp.utf8("<clinit>"));
+  clinitInfo.u2(cp.utf8("()V"));
+  const clinitBody = generateBody(
+    clinit,
+    cp,
+    program,
+    checker,
+    name,
+    undefined,
+    staticInits,
+    lambdaMethods,
+    undefined,
+    false,
+    { enumInternal: name, selfDesc, arrayDesc, valuesField: VALUES, constants },
+  );
+  writeCodeAttribute(clinitInfo, cp, clinitBody);
+  methods.append(clinitInfo);
+  methodCount++;
+
+  for (const impl of lambdaMethods) {
+    methods.append(impl);
+    methodCount++;
+  }
+
+  const classAttributes = new ByteBuffer();
+  let classAttributeCount = 0;
+  if (cp.bootstrapMethodCount > 0) {
+    classAttributes.u2(cp.utf8("BootstrapMethods"));
+    const bsm = cp.bootstrapMethodsBody();
+    classAttributes.u4(bsm.length);
+    classAttributes.append(bsm);
+    classAttributeCount++;
+  }
+
+  const out = new ByteBuffer();
+  out.u4(MAGIC);
+  out.u2(MINOR_VERSION);
+  out.u2(MAJOR_VERSION);
+  cp.writeInto(out);
+  out.u2(accessFlags);
+  out.u2(thisClassIndex);
+  out.u2(superClassIndex);
+  out.u2(interfaceIndices.length);
+  for (const index of interfaceIndices) out.u2(index);
+  out.u2(fieldCount);
+  out.append(fieldsBuf);
   out.u2(methodCount);
   out.append(methods);
   out.u2(classAttributeCount);

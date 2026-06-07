@@ -546,6 +546,37 @@ test(
 );
 
 test(
+  "enum declarations run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "En",
+      [
+        "public class En {",
+        "  enum Color { RED, GREEN, BLUE }",
+        "  enum Planet {",
+        "    EARTH(5.976e24), MARS(6.421e23);",
+        "    private final double mass;",
+        "    Planet(double mass){ this.mass = mass; }",
+        "    double getMass(){ return mass; }",
+        "  }",
+        "  public static void main(String[] a){",
+        '    System.out.println(Color.RED.name() + " " + Color.RED.ordinal());',
+        "    System.out.println(Color.BLUE.ordinal());",
+        '    System.out.println(Color.valueOf("GREEN").name());', // synthesized valueOf + inherited name()
+        "    System.out.println(Planet.EARTH.getMass());", // constant with constructor arg
+        "    System.out.println(Planet.MARS.name());",
+        "    System.out.println(Color.RED == Color.RED);", // identity
+        "    System.out.println(Color.RED == Color.BLUE);",
+        "  }",
+        "}",
+      ].join("\n"),
+      "RED 0\n2\nGREEN\n5.976E24\nMARS\ntrue\nfalse\n",
+    );
+  },
+);
+
+test(
   "autoboxing and unboxing run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

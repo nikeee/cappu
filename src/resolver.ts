@@ -116,6 +116,12 @@ function superTypeSymbols(typeSymbol: Symbol, program: Program): Symbol[] {
   resolvingSupertypes.add(typeSymbol);
   try {
     const result: Symbol[] = [];
+    // An enum implicitly extends java.lang.Enum (JLS 8.9): name(), ordinal(),
+    // compareTo(), etc.
+    if (declaration.kind === SyntaxKind.EnumDeclaration) {
+      const enumSymbol = program.getGlobalIndex().getType("java.lang.Enum");
+      if (enumSymbol) result.push(enumSymbol);
+    }
     for (const typeNode of superTypeNodes(declaration)) {
       if (typeNode.kind === SyntaxKind.TypeReference) {
         const symbol = resolveTypeEntityName(
