@@ -950,6 +950,30 @@ function findConstructor(typeSymbol: Symbol, argCount: number): ConstructorDecla
   ) as ConstructorDeclaration | undefined;
 }
 
+// A resolved field/enum-constant reference: where it lives and its descriptor.
+interface FieldInfo {
+  owner: string;
+  name: string;
+  descriptor: string;
+  isStatic: boolean;
+}
+
+// A local variable / parameter slot and its descriptor (long/double take two
+// slots but one entry).
+interface LocalSlot {
+  slot: number;
+  descriptor: string;
+}
+
+// One Code-attribute exception_table entry (JVMS 4.7.3). catchType 0 is a
+// catch-all (used for finally).
+interface ExceptionTableEntry {
+  start: number;
+  end: number;
+  handler: number;
+  catchType: number;
+}
+
 // Generate real bytecode for a method body. Throws UnsupportedEmit for anything
 // not yet handled, so emitMethod can fall back to a verifiable placeholder.
 interface FieldInit {
@@ -1038,12 +1062,12 @@ function generateBody(
 
   // Slots for parameters and (as they are declared) locals; shared map keyed by
   // the declaration symbol.
-  const locals = new Map<Symbol, { slot: number; descriptor: string }>();
+  const locals = new Map<Symbol, LocalSlot>();
   // Locals currently in scope, in slot order, for stack-map frames (this, then
   // params, then declared locals; long/double = one entry). Each carries its
   // slot so frames can mark a not-yet-assigned local as `top` (see `assigned`).
   const TOP = " top"; // sentinel descriptor for an unassigned slot
-  const activeLocals: { slot: number; descriptor: string }[] = [];
+  const activeLocals: LocalSlot[] = [];
   // Slots that are definitely assigned at the current point (JLS 16). A frame
   // lists the real type for an assigned slot and `top` otherwise; the set is
   // intersected across the paths that reach each branch target.
@@ -1115,7 +1139,7 @@ function generateBody(
   const wideFixups: { at: number; from: number; label: Label }[] = []; // u4 switch offsets
   // try/catch handlers: exception_table entries and the handler offsets that
   // also need a stack-map frame (entered with the exception on the stack).
-  const exceptionTable: { start: number; end: number; handler: number; catchType: number }[] = [];
+  const exceptionTable: ExceptionTableEntry[] = [];
   const handlerOffsets: number[] = [];
   // break/continue carry the finally depth at the loop/switch, so a jump out of
   // a try runs the intervening finally blocks first.
@@ -1340,9 +1364,7 @@ function generateBody(
     }
   };
 
-  const fieldInfoOf = (
-    symbol: Symbol,
-  ): { owner: string; name: string; descriptor: string; isStatic: boolean } => {
+  const fieldInfoOf = (symbol: Symbol): FieldInfo => {
     if (!symbol.parent) throw new UnsupportedEmit();
     // An enum constant is a public static final field of the enum, typed as the
     // enum itself.
@@ -1365,10 +1387,7 @@ function generateBody(
 
   // Read a field: getstatic, or emit the receiver then getfield. `emitReceiver`
   // is only invoked for instance fields (skipped for statics, like javac).
-  const emitFieldRead = (
-    info: { owner: string; name: string; descriptor: string; isStatic: boolean },
-    emitReceiver: () => void,
-  ): string => {
+  const emitFieldRead = (info: FieldInfo, emitReceiver: () => void): string => {
     if (info.isStatic) {
       code.u1(OP_GETSTATIC);
     } else {
@@ -2094,10 +2113,7 @@ function generateBody(
     needsCurrent: boolean,
     emitValue: (descriptor: string, loadCurrent: () => void) => void,
   ): void => {
-    const writeField = (
-      info: { owner: string; name: string; descriptor: string; isStatic: boolean },
-      emitReceiver: () => void,
-    ): void => {
+    const writeField = (info: FieldInfo, emitReceiver: () => void): void => {
       const ref = (): void => code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
       if (info.isStatic) {
         emitValue(info.descriptor, () => {
@@ -3567,7 +3583,7 @@ interface MethodBody {
   maxStack: number;
   maxLocals: number;
   stackMapTable?: ByteBuffer;
-  exceptionTable?: { start: number; end: number; handler: number; catchType: number }[];
+  exceptionTable?: ExceptionTableEntry[];
 }
 
 // Append the Code attribute (with an optional StackMapTable sub-attribute) and
