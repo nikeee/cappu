@@ -638,6 +638,73 @@ function buildClassAttributes(
   return { buffer, count };
 }
 
+// Field initializers split by static-ness: instance ones run in each
+// constructor, static ones in <clinit>. static-final compile-time constants are
+// excluded (they carry a ConstantValue attribute instead). Shared by classes
+// and enums.
+function collectFieldInits(
+  members: readonly Node[],
+  ownerName: string,
+  program: Program,
+): { instanceInits: FieldInit[]; staticInits: FieldInit[] } {
+  const instanceInits: FieldInit[] = [];
+  const staticInits: FieldInit[] = [];
+  for (const member of members) {
+    if (member.kind !== SyntaxKind.FieldDeclaration) continue;
+    const field = member as FieldDeclaration;
+    const isStatic = isStaticDeclaration(field);
+    const descriptor = descriptorOf(field.type, program);
+    for (const declarator of field.declarators) {
+      const d = declarator as VariableDeclarator;
+      if (!d.initializer) continue;
+      if (isStatic && isConstantValueField(field, d, program)) continue;
+      (isStatic ? staticInits : instanceInits).push({
+        isStatic,
+        owner: ownerName,
+        name: d.name.text,
+        descriptor,
+        init: d.initializer,
+      });
+    }
+  }
+  return { instanceInits, staticInits };
+}
+
+// Assemble a class file from its parts (the constant pool must be fully
+// populated, including attribute-name Utf8s, before this runs). Shared by
+// classes and enums.
+function assembleClassFile(parts: {
+  cp: ConstantPool;
+  accessFlags: number;
+  thisClassIndex: number;
+  superClassIndex: number;
+  interfaceIndices: number[];
+  fields: ByteBuffer;
+  fieldCount: number;
+  methods: ByteBuffer;
+  methodCount: number;
+  attributes: ByteBuffer;
+  attributeCount: number;
+}): Uint8Array {
+  const out = new ByteBuffer();
+  out.u4(MAGIC);
+  out.u2(MINOR_VERSION);
+  out.u2(MAJOR_VERSION);
+  parts.cp.writeInto(out);
+  out.u2(parts.accessFlags);
+  out.u2(parts.thisClassIndex);
+  out.u2(parts.superClassIndex);
+  out.u2(parts.interfaceIndices.length);
+  for (const index of parts.interfaceIndices) out.u2(index);
+  out.u2(parts.fieldCount);
+  out.append(parts.fields);
+  out.u2(parts.methodCount);
+  out.append(parts.methods);
+  out.u2(parts.attributeCount);
+  out.append(parts.attributes);
+  return out.toUint8Array();
+}
+
 function binaryName(symbol: Symbol): string {
   const names = [symbol.escapedName];
   let parent = symbol.parent;
@@ -3461,28 +3528,7 @@ export function emitClass(
   const interfaceIndices = interfaceNames.map(n => cp.classInfo(n));
   const fields = emitFields(declaration, cp, program);
 
-  // Field initializers: instance ones run in each constructor, static ones in
-  // <clinit>; static-final compile-time constants are excluded (ConstantValue).
-  const instanceInits: FieldInit[] = [];
-  const staticInits: FieldInit[] = [];
-  for (const member of declaration.members) {
-    if (member.kind !== SyntaxKind.FieldDeclaration) continue;
-    const field = member as FieldDeclaration;
-    const isStatic = isStaticDeclaration(field);
-    const descriptor = descriptorOf(field.type, program);
-    for (const declarator of field.declarators) {
-      const d = declarator as VariableDeclarator;
-      if (!d.initializer) continue;
-      if (isStatic && isConstantValueField(field, d, program)) continue;
-      (isStatic ? staticInits : instanceInits).push({
-        isStatic,
-        owner: name,
-        name: d.name.text,
-        descriptor,
-        init: d.initializer,
-      });
-    }
-  }
+  const { instanceInits, staticInits } = collectFieldInits(declaration.members, name, program);
 
   // Constructors: the declared ones, or a synthesized default constructor (which
   // inherits the class's accessibility, JLS 8.8.9) when none are declared. Each
@@ -3594,24 +3640,22 @@ export function emitClass(
     sourceNameOf(declaration),
   );
 
-  const out = new ByteBuffer();
-  out.u4(MAGIC);
-  out.u2(MINOR_VERSION);
-  out.u2(MAJOR_VERSION);
-  cp.writeInto(out);
-  out.u2(accessFlags);
-  out.u2(thisClassIndex);
-  out.u2(superClassIndex);
-  out.u2(interfaceIndices.length);
-  for (const index of interfaceIndices) out.u2(index);
-  out.u2(fields.count);
-  out.append(fields.buffer);
-  out.u2(methodCount);
-  out.append(methods);
-  out.u2(classAttributeCount);
-  out.append(classAttributes);
-
-  return { name, bytes: out.toUint8Array() };
+  return {
+    name,
+    bytes: assembleClassFile({
+      cp,
+      accessFlags,
+      thisClassIndex,
+      superClassIndex,
+      interfaceIndices,
+      fields: fields.buffer,
+      fieldCount: fields.count,
+      methods,
+      methodCount,
+      attributes: classAttributes,
+      attributeCount: classAttributeCount,
+    }),
+  };
 }
 
 // One field_info with no attributes.
@@ -3774,28 +3818,7 @@ export function emitEnum(
   );
   fieldCount++;
 
-  // User field initializers (instance ones run in the constructor, static in
-  // <clinit>); static-final compile-time constants carry a ConstantValue.
-  const instanceInits: FieldInit[] = [];
-  const staticInits: FieldInit[] = [];
-  for (const member of declaration.members) {
-    if (member.kind !== SyntaxKind.FieldDeclaration) continue;
-    const field = member as FieldDeclaration;
-    const isStatic = isStaticDeclaration(field);
-    const descriptor = descriptorOf(field.type, program);
-    for (const declarator of field.declarators) {
-      const d = declarator as VariableDeclarator;
-      if (!d.initializer) continue;
-      if (isStatic && isConstantValueField(field, d, program)) continue;
-      (isStatic ? staticInits : instanceInits).push({
-        isStatic,
-        owner: name,
-        name: d.name.text,
-        descriptor,
-        init: d.initializer,
-      });
-    }
-  }
+  const { instanceInits, staticInits } = collectFieldInits(declaration.members, name, program);
 
   const methods = new ByteBuffer();
   let methodCount = 0;
@@ -3922,22 +3945,20 @@ export function emitEnum(
     sourceNameOf(declaration),
   );
 
-  const out = new ByteBuffer();
-  out.u4(MAGIC);
-  out.u2(MINOR_VERSION);
-  out.u2(MAJOR_VERSION);
-  cp.writeInto(out);
-  out.u2(accessFlags);
-  out.u2(thisClassIndex);
-  out.u2(superClassIndex);
-  out.u2(interfaceIndices.length);
-  for (const index of interfaceIndices) out.u2(index);
-  out.u2(fieldCount);
-  out.append(fieldsBuf);
-  out.u2(methodCount);
-  out.append(methods);
-  out.u2(classAttributeCount);
-  out.append(classAttributes);
-
-  return { name, bytes: out.toUint8Array() };
+  return {
+    name,
+    bytes: assembleClassFile({
+      cp,
+      accessFlags,
+      thisClassIndex,
+      superClassIndex,
+      interfaceIndices,
+      fields: fieldsBuf,
+      fieldCount,
+      methods,
+      methodCount,
+      attributes: classAttributes,
+      attributeCount: classAttributeCount,
+    }),
+  };
 }
