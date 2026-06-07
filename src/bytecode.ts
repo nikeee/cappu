@@ -16,6 +16,10 @@ import { resolveTypeEntityName } from "./resolver.ts";
 import { entityNameToString, tokenToString } from "./utilities.ts";
 import {
   type ArrayType as AstArrayType,
+  type ArrayCreationExpression,
+  type ArrayInitializer,
+  type ElementAccessExpression,
+  type ForEachStatement,
   type AssignmentExpression,
   type BinaryExpression,
   type CallExpression,
@@ -226,8 +230,16 @@ const OP_INSTANCEOF = 0xc1;
 const OP_POP = 0x57;
 const OP_POP2 = 0x58;
 const OP_DUP = 0x59;
+const OP_DUP2 = 0x5c;
 const OP_NEW = 0xbb;
+const OP_NEWARRAY = 0xbc;
 const OP_ANEWARRAY = 0xbd;
+const OP_ARRAYLENGTH = 0xbe;
+const OP_MULTIANEWARRAY = 0xc5;
+// Array load/store base opcodes; per-element variants are at a fixed offset
+// (see arrayElemOffset). AASTORE is used directly for the enum $VALUES array.
+const OP_IALOAD = 0x2e;
+const OP_IASTORE = 0x4f;
 const OP_AASTORE = 0x53;
 const OP_GETSTATIC = 0xb2;
 const OP_PUTSTATIC = 0xb3;
@@ -1380,11 +1392,26 @@ function generateBody(
       }
       case SyntaxKind.PropertyAccessExpression: {
         const access = node as PropertyAccessExpression;
+        // arr.length -> arraylength (the implicit field of every array, JLS 10.7).
+        if (
+          access.name.text === "length" &&
+          checker.getTypeOfExpression(access.expression).kind === TypeKind.Array
+        ) {
+          emitExpr(access.expression);
+          code.u1(OP_ARRAYLENGTH);
+          pop();
+          push("I");
+          return "I";
+        }
         const symbol = checker.resolveName(access.name);
         if (!symbol || !(symbol.flags & (SymbolFlags.Field | SymbolFlags.EnumConstant)))
           throw new UnsupportedEmit();
         return emitFieldRead(fieldInfoOf(symbol), () => emitExpr(access.expression));
       }
+      case SyntaxKind.ArrayCreationExpression:
+        return emitArrayCreation(node as ArrayCreationExpression);
+      case SyntaxKind.ElementAccessExpression:
+        return emitElementAccess(node as ElementAccessExpression);
       case SyntaxKind.ConditionalExpression:
         return emitConditional(node as ConditionalExpression);
       case SyntaxKind.LambdaExpression:
@@ -1590,6 +1617,108 @@ function generateBody(
     code.u2(cp.methodref(owner, "<init>", ctorDescriptor));
     pop(1 + args.length); // invokespecial consumes the dup'd ref and the arguments
     return ref;
+  };
+
+  // The xaload/xastore opcode offset for an array whose element has descriptor
+  // `elem` (the families are contiguous: i,l,f,d,a,b,c,s).
+  const arrayElemOffset = (elem: string): number => {
+    switch (elem[0]) {
+      case "J":
+        return 1;
+      case "F":
+        return 2;
+      case "D":
+        return 3;
+      case "L":
+      case "[":
+        return 4;
+      case "Z":
+      case "B":
+        return 5;
+      case "C":
+        return 6;
+      case "S":
+        return 7;
+      default:
+        return 0; // int
+    }
+  };
+  const NEWARRAY_ATYPE: Record<string, number> = {
+    Z: 4,
+    C: 5,
+    F: 6,
+    D: 7,
+    B: 8,
+    S: 9,
+    I: 10,
+    J: 11,
+  };
+
+  // Allocate a one-dimensional array whose element descriptor is `elem`; the
+  // length is already on the stack. Leaves the array reference.
+  const allocArray = (elem: string): string => {
+    if (NEWARRAY_ATYPE[elem] !== undefined) {
+      code.u1(OP_NEWARRAY);
+      code.u1(NEWARRAY_ATYPE[elem]!);
+    } else {
+      code.u1(OP_ANEWARRAY);
+      code.u2(cp.classInfo(elem[0] === "[" ? elem : elem.slice(1, -1)));
+    }
+    pop();
+    push(`[${elem}`);
+    return `[${elem}`;
+  };
+
+  // Build a one-dimensional array of `elem` from a brace initializer (nested
+  // initializers recurse for multidimensional arrays).
+  const arrayInitializer = (init: ArrayInitializer, elem: string): string => {
+    intConst(init.elements.length);
+    push("I");
+    const arrDesc = allocArray(elem);
+    init.elements.forEach((el, i) => {
+      code.u1(OP_DUP);
+      push(arrDesc);
+      intConst(i);
+      push("I");
+      if (el.kind === SyntaxKind.ArrayInitializer) {
+        arrayInitializer(el as ArrayInitializer, elem.slice(1));
+      } else {
+        coerce(emitExpr(el), elem);
+      }
+      code.u1(OP_IASTORE + arrayElemOffset(elem));
+      pop(3); // array, index, value
+    });
+    return arrDesc;
+  };
+
+  // new T[n] / new T[m][n] / new T[]{ ... } (JLS 15.10).
+  const emitArrayCreation = (node: ArrayCreationExpression): string => {
+    const elementType = descriptorOf(node.elementType, program);
+    const arrDesc = "[".repeat(node.dimensions.length + node.additionalRank) + elementType;
+    if (node.initializer) return arrayInitializer(node.initializer, arrDesc.slice(1));
+    if (node.dimensions.length === 1) {
+      coerce(emitExpr(node.dimensions[0]!), "I");
+      return allocArray(arrDesc.slice(1));
+    }
+    // Several given dimensions: multianewarray.
+    for (const dim of node.dimensions) coerce(emitExpr(dim), "I");
+    code.u1(OP_MULTIANEWARRAY);
+    code.u2(cp.classInfo(arrDesc));
+    code.u1(node.dimensions.length);
+    pop(node.dimensions.length);
+    push(arrDesc);
+    return arrDesc;
+  };
+
+  // Read a[i]: array, index, then xaload.
+  const emitElementAccess = (node: ElementAccessExpression): string => {
+    const arrDesc = emitExpr(node.expression);
+    const elem = arrDesc[0] === "[" ? arrDesc.slice(1) : "Ljava/lang/Object;";
+    coerce(emitExpr(node.argumentExpression), "I");
+    code.u1(OP_IALOAD + arrayElemOffset(elem));
+    pop(2); // array, index -> element
+    push(elem);
+    return elem;
   };
 
   // Numeric category of an expression's static type, or undefined for anything
@@ -1907,6 +2036,28 @@ function generateBody(
       const symbol = checker.resolveName(access.name);
       if (!symbol || !(symbol.flags & SymbolFlags.Field)) throw new UnsupportedEmit();
       writeField(fieldInfoOf(symbol), () => emitExpr(access.expression));
+      return;
+    }
+
+    // a[i] = v / a[i] op= v: array and index, then xastore. A compound store
+    // dup2s them so the read (xaload) and the write (xastore) share them.
+    if (target.kind === SyntaxKind.ElementAccessExpression) {
+      const access = target as ElementAccessExpression;
+      const arrDesc = emitExpr(access.expression);
+      const elem = arrDesc[0] === "[" ? arrDesc.slice(1) : "Ljava/lang/Object;";
+      coerce(emitExpr(access.argumentExpression), "I");
+      if (needsCurrent) {
+        code.u1(OP_DUP2); // array, index for the read and the write
+        push(arrDesc);
+        push("I");
+      }
+      emitValue(elem, () => {
+        code.u1(OP_IALOAD + arrayElemOffset(elem));
+        pop(2); // array, index -> element
+        push(elem);
+      });
+      code.u1(OP_IASTORE + arrayElemOffset(elem));
+      pop(3); // array, index, value
       return;
     }
 
@@ -2484,8 +2635,16 @@ function generateBody(
           if (declarator.symbol) locals.set(declarator.symbol, { slot, descriptor });
           activeLocals.push({ slot, descriptor });
           if (declarator.initializer) {
-            const rd = emitExpr(declarator.initializer);
-            coerce(rd, descriptor);
+            // A bare brace initializer (int[] a = {1,2,3}) gets its element type
+            // from the declared type rather than from the expression.
+            if (
+              declarator.initializer.kind === SyntaxKind.ArrayInitializer &&
+              descriptor[0] === "["
+            ) {
+              arrayInitializer(declarator.initializer as ArrayInitializer, descriptor.slice(1));
+            } else {
+              coerce(emitExpr(declarator.initializer), descriptor);
+            }
             storeVar(slot, descriptor);
           }
         }
@@ -2570,6 +2729,72 @@ function generateBody(
           continueTargets.pop();
           placeLabel(stepL);
           for (const e of s.incrementors ?? []) emitStatementExpression(e);
+          branchTo(OP_GOTO, startL);
+          placeLabel(endL);
+          return false;
+        });
+      }
+      case SyntaxKind.ForEachStatement: {
+        const s = stmt as ForEachStatement;
+        const arrType = checker.getTypeOfExpression(s.expression);
+        if (arrType.kind !== TypeKind.Array) throw new UnsupportedEmit(); // Iterable: later
+        return inScope(() => {
+          // Lower `for (T x : a)` to an index loop: T[] $a = a; int $i = 0;
+          // while ($i < $a.length) { T x = $a[$i]; <body>; $i++; }
+          const arrDesc = emitExpr(s.expression);
+          const elem = arrDesc[0] === "[" ? arrDesc.slice(1) : "Ljava/lang/Object;";
+          const reserve = (descriptor: string): number => {
+            const slot = nextSlot;
+            nextSlot += slotsOf(descriptor);
+            if (nextSlot > maxLocals) maxLocals = nextSlot;
+            activeLocals.push({ slot, descriptor });
+            return slot;
+          };
+          const arrSlot = reserve(arrDesc);
+          storeVar(arrSlot, arrDesc); // $a
+          const idxSlot = reserve("I");
+          code.u1(OP_ICONST_0);
+          push("I");
+          storeVar(idxSlot, "I"); // $i = 0
+          const param = s.parameter;
+          const varDesc =
+            param.type && param.type.kind !== SyntaxKind.VarType
+              ? descriptorOf(param.type, program)
+              : elem;
+          const varSlot = reserve(varDesc);
+          if (param.symbol) locals.set(param.symbol, { slot: varSlot, descriptor: varDesc });
+
+          const startL = newLabel();
+          const stepL = newLabel();
+          const endL = newLabel();
+          placeLabel(startL);
+          loadVar(idxSlot, "I");
+          push("I");
+          loadVar(arrSlot, arrDesc);
+          push(arrDesc);
+          code.u1(OP_ARRAYLENGTH);
+          pop();
+          push("I");
+          pop(2);
+          branchTo(OP_IF_ICMPEQ + 3, endL); // if $i >= length, exit
+          loadVar(arrSlot, arrDesc);
+          push(arrDesc);
+          loadVar(idxSlot, "I");
+          push("I");
+          code.u1(OP_IALOAD + arrayElemOffset(elem));
+          pop(2);
+          push(elem);
+          coerce(elem, varDesc);
+          storeVar(varSlot, varDesc); // x = $a[$i]
+          breakTargets.push(endL);
+          continueTargets.push(stepL);
+          inScope(() => emitStmt(s.statement));
+          breakTargets.pop();
+          continueTargets.pop();
+          placeLabel(stepL);
+          code.u1(OP_IINC);
+          code.u1(idxSlot);
+          code.u1(1);
           branchTo(OP_GOTO, startL);
           placeLabel(endL);
           return false;

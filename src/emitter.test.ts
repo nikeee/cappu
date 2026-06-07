@@ -546,6 +546,37 @@ test(
 );
 
 test(
+  "arrays (creation, access, length, store, foreach, multidim) run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Arr",
+      [
+        "public class Arr {",
+        "  static int sum(int[] a){ int s=0; for(int i=0;i<a.length;i++) s+=a[i]; return s; }",
+        "  static int sumEach(int[] a){ int s=0; for(int x : a) s+=x; return s; }",
+        "  public static void main(String[] args){",
+        "    int[] a = new int[]{3,4,5};",
+        "    System.out.println(a.length);",
+        "    System.out.println(a[1]);",
+        "    a[1] = 40; System.out.println(a[1]);",
+        "    a[2] += 100; System.out.println(a[2]);", // compound store
+        "    a[0]++; System.out.println(a[0]);", // element increment
+        "    System.out.println(sum(a));",
+        "    System.out.println(sumEach(a));",
+        '    int[] b = new int[3]; b[0]=7; System.out.println(b[0] + " " + b[2]);', // sized + default
+        '    String[] s = {"x","y"}; System.out.println(s[0] + s[1] + " " + s.length);', // bare init, ref array
+        "    int[][] m = new int[2][3]; m[1][2] = 9;", // multidim
+        '    System.out.println(m[1][2] + " " + m.length + " " + m[0].length);',
+        "  }",
+        "}",
+      ].join("\n"),
+      "3\n4\n40\n105\n4\n149\n149\n7 0\nxy 2\n9 2 3\n",
+    );
+  },
+);
+
+test(
   "enum declarations run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {
