@@ -546,6 +546,33 @@ test(
 );
 
 test(
+  "for-each over a collection (Iterator) runs identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Fe",
+      [
+        "import java.util.ArrayList;",
+        "import java.util.List;",
+        "public class Fe {",
+        "  static int total(List<Integer> xs){ int s=0; for(int v : xs) s+=v; return s; }", // unboxing element
+        "  public static void main(String[] args){",
+        "    List<String> names = new ArrayList<String>();",
+        '    names.add("alice"); names.add("bob");', // inherited Collection.add(E), not List.add(int,E)
+        "    for (String n : names) System.out.println(n);",
+        "    List<Integer> nums = new ArrayList<Integer>();",
+        "    nums.add(10); nums.add(20); nums.add(12);", // autoboxed argument
+        "    System.out.println(total(nums));",
+        "    for (Object o : names) System.out.println(o);",
+        "  }",
+        "}",
+      ].join("\n"),
+      "alice\nbob\n42\nalice\nbob\n",
+    );
+  },
+);
+
+test(
   "arrays (creation, access, length, store, foreach, multidim) run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

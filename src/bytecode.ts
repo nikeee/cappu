@@ -2736,65 +2736,131 @@ function generateBody(
       }
       case SyntaxKind.ForEachStatement: {
         const s = stmt as ForEachStatement;
-        const arrType = checker.getTypeOfExpression(s.expression);
-        if (arrType.kind !== TypeKind.Array) throw new UnsupportedEmit(); // Iterable: later
+        const iterableType = checker.getTypeOfExpression(s.expression);
+        const param = s.parameter;
+        const reserve = (descriptor: string): number => {
+          const slot = nextSlot;
+          nextSlot += slotsOf(descriptor);
+          if (nextSlot > maxLocals) maxLocals = nextSlot;
+          activeLocals.push({ slot, descriptor });
+          return slot;
+        };
+        // The loop variable's type (declared, or inferred from the element type).
+        const varDesc =
+          param.type && param.type.kind !== SyntaxKind.VarType
+            ? descriptorOf(param.type, program)
+            : typeDescriptor(checker.getTypeOfSymbol(param.symbol!));
+
+        if (iterableType.kind === TypeKind.Array) {
+          return inScope(() => {
+            // for (T x : a) -> int $i = 0; while ($i < $a.length) { x = $a[$i]; body; $i++; }
+            const arrDesc = emitExpr(s.expression);
+            const elem = arrDesc[0] === "[" ? arrDesc.slice(1) : "Ljava/lang/Object;";
+            const arrSlot = reserve(arrDesc);
+            storeVar(arrSlot, arrDesc);
+            const idxSlot = reserve("I");
+            code.u1(OP_ICONST_0);
+            push("I");
+            storeVar(idxSlot, "I");
+            const varSlot = reserve(varDesc);
+            if (param.symbol) locals.set(param.symbol, { slot: varSlot, descriptor: varDesc });
+            const startL = newLabel();
+            const stepL = newLabel();
+            const endL = newLabel();
+            placeLabel(startL);
+            loadVar(idxSlot, "I");
+            push("I");
+            loadVar(arrSlot, arrDesc);
+            push(arrDesc);
+            code.u1(OP_ARRAYLENGTH);
+            pop();
+            push("I");
+            pop(2);
+            branchTo(OP_IF_ICMPEQ + 3, endL); // if $i >= length, exit
+            loadVar(arrSlot, arrDesc);
+            push(arrDesc);
+            loadVar(idxSlot, "I");
+            push("I");
+            code.u1(OP_IALOAD + arrayElemOffset(elem));
+            pop(2);
+            push(elem);
+            coerce(elem, varDesc);
+            storeVar(varSlot, varDesc);
+            breakTargets.push(endL);
+            continueTargets.push(stepL);
+            inScope(() => emitStmt(s.statement));
+            breakTargets.pop();
+            continueTargets.pop();
+            placeLabel(stepL);
+            code.u1(OP_IINC);
+            code.u1(idxSlot);
+            code.u1(1);
+            branchTo(OP_GOTO, startL);
+            placeLabel(endL);
+            return false;
+          });
+        }
+        if (iterableType.kind !== TypeKind.Class) throw new UnsupportedEmit();
         return inScope(() => {
-          // Lower `for (T x : a)` to an index loop: T[] $a = a; int $i = 0;
-          // while ($i < $a.length) { T x = $a[$i]; <body>; $i++; }
-          const arrDesc = emitExpr(s.expression);
-          const elem = arrDesc[0] === "[" ? arrDesc.slice(1) : "Ljava/lang/Object;";
-          const reserve = (descriptor: string): number => {
-            const slot = nextSlot;
-            nextSlot += slotsOf(descriptor);
-            if (nextSlot > maxLocals) maxLocals = nextSlot;
-            activeLocals.push({ slot, descriptor });
-            return slot;
-          };
-          const arrSlot = reserve(arrDesc);
-          storeVar(arrSlot, arrDesc); // $a
-          const idxSlot = reserve("I");
-          code.u1(OP_ICONST_0);
-          push("I");
-          storeVar(idxSlot, "I"); // $i = 0
-          const param = s.parameter;
-          const varDesc =
-            param.type && param.type.kind !== SyntaxKind.VarType
-              ? descriptorOf(param.type, program)
-              : elem;
+          // for (T x : it) -> Iterator $i = it.iterator();
+          //   while ($i.hasNext()) { T x = (T) $i.next(); body; }
+          const ITER = "java/util/Iterator";
+          emitExpr(s.expression);
+          code.u1(OP_INVOKEINTERFACE);
+          code.u2(
+            cp.interfaceMethodref("java/lang/Iterable", "iterator", "()Ljava/util/Iterator;"),
+          );
+          code.u1(1);
+          code.u1(0);
+          pop();
+          push("Ljava/util/Iterator;");
+          const itSlot = reserve("Ljava/util/Iterator;");
+          storeVar(itSlot, "Ljava/util/Iterator;");
           const varSlot = reserve(varDesc);
           if (param.symbol) locals.set(param.symbol, { slot: varSlot, descriptor: varDesc });
-
           const startL = newLabel();
-          const stepL = newLabel();
           const endL = newLabel();
           placeLabel(startL);
-          loadVar(idxSlot, "I");
-          push("I");
-          loadVar(arrSlot, arrDesc);
-          push(arrDesc);
-          code.u1(OP_ARRAYLENGTH);
+          loadVar(itSlot, "Ljava/util/Iterator;");
+          push("Ljava/util/Iterator;");
+          code.u1(OP_INVOKEINTERFACE);
+          code.u2(cp.interfaceMethodref(ITER, "hasNext", "()Z"));
+          code.u1(1);
+          code.u1(0);
           pop();
           push("I");
-          pop(2);
-          branchTo(OP_IF_ICMPEQ + 3, endL); // if $i >= length, exit
-          loadVar(arrSlot, arrDesc);
-          push(arrDesc);
-          loadVar(idxSlot, "I");
-          push("I");
-          code.u1(OP_IALOAD + arrayElemOffset(elem));
-          pop(2);
-          push(elem);
-          coerce(elem, varDesc);
-          storeVar(varSlot, varDesc); // x = $a[$i]
+          pop();
+          branchTo(OP_IFEQ, endL); // !hasNext -> exit
+          loadVar(itSlot, "Ljava/util/Iterator;");
+          push("Ljava/util/Iterator;");
+          code.u1(OP_INVOKEINTERFACE);
+          code.u2(cp.interfaceMethodref(ITER, "next", "()Ljava/lang/Object;"));
+          code.u1(1);
+          code.u1(0);
+          pop();
+          push("Ljava/lang/Object;");
+          // (T) next(): a reference cast, or unbox via the wrapper for a primitive.
+          if (category(varDesc) === "A") {
+            if (varDesc !== "Ljava/lang/Object;") {
+              code.u1(OP_CHECKCAST);
+              code.u2(cp.classInfo(varDesc[0] === "[" ? varDesc : varDesc.slice(1, -1)));
+              pop();
+              push(varDesc);
+            }
+          } else {
+            const w = WRAPPER[varDesc]!;
+            code.u1(OP_CHECKCAST);
+            code.u2(cp.classInfo(w));
+            pop();
+            push(`L${w};`);
+            coerce(`L${w};`, varDesc);
+          }
+          storeVar(varSlot, varDesc);
           breakTargets.push(endL);
-          continueTargets.push(stepL);
+          continueTargets.push(startL);
           inScope(() => emitStmt(s.statement));
           breakTargets.pop();
           continueTargets.pop();
-          placeLabel(stepL);
-          code.u1(OP_IINC);
-          code.u1(idxSlot);
-          code.u1(1);
           branchTo(OP_GOTO, startL);
           placeLabel(endL);
           return false;

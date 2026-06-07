@@ -321,6 +321,45 @@ export function createChecker(program: Program): Checker {
     return undefined;
   }
 
+  // All method declarations named `name` reachable from `receiver` (its own
+  // members plus every super type / Object), each paired with the substitution
+  // for the type that declares it. Unlike lookupTypedMember this gathers every
+  // overload across the hierarchy, so e.g. List.add(int,E) does not hide the
+  // inherited Collection.add(E).
+  function collectTypedOverloads(
+    receiver: ClassType,
+    name: string,
+    seen = new Set<Symbol>(),
+    out: { decl: MethodDeclaration; subst: Map<Symbol, Type> }[] = [],
+  ): { decl: MethodDeclaration; subst: Map<Symbol, Type> }[] {
+    const symbol = receiver.symbol;
+    if (seen.has(symbol)) return out;
+    seen.add(symbol);
+    const subst = substitutionFor(symbol, receiver.typeArguments);
+    const add = (sym: Symbol | undefined, s: Map<Symbol, Type>): void => {
+      for (const d of sym?.declarations ?? [])
+        if (d.kind === SyntaxKind.MethodDeclaration)
+          out.push({ decl: d as MethodDeclaration, subst: s });
+    };
+    add(symbol.members?.get(name), subst);
+    const declaration = declarationOf(symbol);
+    if (declaration) {
+      for (const typeNode of superTypeNodesOf(declaration)) {
+        if (typeNode.kind !== SyntaxKind.TypeReference) continue;
+        const superType = substitute(resolveType(typeNode, declaration), subst);
+        if (superType.kind === TypeKind.Class)
+          collectTypedOverloads(superType as ClassType, name, seen, out);
+      }
+      if (declaration.kind === SyntaxKind.EnumDeclaration) {
+        const e = classTypeByFqn("java.lang.Enum");
+        if (e.kind === TypeKind.Class) collectTypedOverloads(e as ClassType, name, seen, out);
+      }
+    }
+    const object = objectSymbol();
+    if (object && symbol !== object) add(object.members?.get(name), new Map());
+    return out;
+  }
+
   // A class type is "closed" when its full member set is known: it and every
   // transitive super type resolve to a declaration we modeled. Enums and records
   // are excluded because the compiler synthesizes members (values/valueOf,
@@ -1016,7 +1055,11 @@ export function createChecker(program: Program): Checker {
         }
         return isAssignableTo(source.elementType, target.elementType);
       case TypeKind.TypeVariable:
-        return source.kind === TypeKind.Null;
+        // A value is assignable to a type-variable target when inference can bind
+        // it (we do not run full inference, so accept any reference/boxable value
+        // - lenient, never a false error). This also makes a generic parameter
+        // applicable during overload resolution, e.g. List.add(E) for add("x").
+        return source.kind !== TypeKind.Primitive || allowBoxing;
       default:
         return source.kind === TypeKind.Null || isError(source);
     }
@@ -1103,14 +1146,20 @@ export function createChecker(program: Program): Checker {
       const access = callee as PropertyAccessExpression;
       const receiver = getTypeOfExpression(access.expression);
       if (receiver.kind === TypeKind.Class) {
-        const found = lookupTypedMember(receiver as ClassType, access.name.text);
-        if (found) {
-          symbol = found.symbol;
-          receiverSubst = found.subst;
-        }
-      } else {
-        symbol = resolveMemberAccess(access);
+        // Gather overloads across the whole hierarchy and pick by applicability,
+        // so an override/overload in a subtype does not hide inherited ones.
+        const cands = collectTypedOverloads(receiver as ClassType, access.name.text);
+        if (cands.length === 0) return undefined;
+        const decl =
+          cands.length === 1
+            ? cands[0]!.decl
+            : chooseOverload(
+                cands.map(c => c.decl),
+                call.arguments.map(getTypeOfExpression),
+              );
+        return { decl, receiverSubst: cands.find(c => c.decl === decl)!.subst };
       }
+      symbol = resolveMemberAccess(access);
     }
     if (!symbol) return undefined;
     const decls = (symbol.declarations ?? []).filter(
