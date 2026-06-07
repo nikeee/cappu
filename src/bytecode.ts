@@ -32,6 +32,7 @@ import {
   type EnumDeclaration,
   type BreakStatement,
   type ContinueStatement,
+  type ThrowStatement,
   type DoStatement,
   type InstanceofExpression,
   type ExpressionStatement,
@@ -604,6 +605,39 @@ function memberAccessFlags(modifiers: readonly Node[] | undefined): number {
 
 // Internal (binary) name of a type symbol: package with '/' separators, nested
 // types joined by '$'. e.g. java.lang.String -> "java/lang/String".
+// The source file's base name (for the SourceFile attribute), or undefined.
+function sourceNameOf(node: Node): string | undefined {
+  let n: Node | undefined = node;
+  while (n && n.kind !== SyntaxKind.SourceFile) n = n.parent;
+  const fileName = (n as { fileName?: string } | undefined)?.fileName;
+  return fileName ? fileName.split("/").pop() || undefined : undefined;
+}
+
+// The class-level attributes shared by classes and enums: SourceFile and (when
+// any invokedynamic was emitted) BootstrapMethods. Must run before the constant
+// pool is written so the attribute name Utf8s are interned.
+function buildClassAttributes(
+  cp: ConstantPool,
+  sourceName: string | undefined,
+): { buffer: ByteBuffer; count: number } {
+  const buffer = new ByteBuffer();
+  let count = 0;
+  if (sourceName) {
+    buffer.u2(cp.utf8("SourceFile"));
+    buffer.u4(2);
+    buffer.u2(cp.utf8(sourceName));
+    count++;
+  }
+  if (cp.bootstrapMethodCount > 0) {
+    buffer.u2(cp.utf8("BootstrapMethods"));
+    const body = cp.bootstrapMethodsBody();
+    buffer.u4(body.length);
+    buffer.append(body);
+    count++;
+  }
+  return { buffer, count };
+}
+
 function binaryName(symbol: Symbol): string {
   const names = [symbol.escapedName];
   let parent = symbol.parent;
@@ -3049,6 +3083,13 @@ function generateBody(
           return false;
         });
       }
+      case SyntaxKind.ThrowStatement: {
+        emitExpr((stmt as ThrowStatement).expression);
+        code.u1(OP_ATHROW);
+        pop(1);
+        reachable = false;
+        return true; // throw is a terminator
+      }
       case SyntaxKind.YieldStatement: {
         const target = yieldTargets.at(-1);
         if (!target) throw new UnsupportedEmit();
@@ -3548,16 +3589,10 @@ export function emitClass(
 
   // Class attributes, built before writeInto so any new Utf8 names land in the
   // pool. BootstrapMethods carries the invokedynamic targets for string concat.
-  const classAttributes = new ByteBuffer();
-  let classAttributeCount = 0;
-  if (cp.bootstrapMethodCount > 0) {
-    const nameIndex = cp.utf8("BootstrapMethods");
-    const body = cp.bootstrapMethodsBody();
-    classAttributes.u2(nameIndex);
-    classAttributes.u4(body.length);
-    classAttributes.append(body);
-    classAttributeCount++;
-  }
+  const { buffer: classAttributes, count: classAttributeCount } = buildClassAttributes(
+    cp,
+    sourceNameOf(declaration),
+  );
 
   const out = new ByteBuffer();
   out.u4(MAGIC);
@@ -3882,15 +3917,10 @@ export function emitEnum(
     methodCount++;
   }
 
-  const classAttributes = new ByteBuffer();
-  let classAttributeCount = 0;
-  if (cp.bootstrapMethodCount > 0) {
-    classAttributes.u2(cp.utf8("BootstrapMethods"));
-    const bsm = cp.bootstrapMethodsBody();
-    classAttributes.u4(bsm.length);
-    classAttributes.append(bsm);
-    classAttributeCount++;
-  }
+  const { buffer: classAttributes, count: classAttributeCount } = buildClassAttributes(
+    cp,
+    sourceNameOf(declaration),
+  );
 
   const out = new ByteBuffer();
   out.u4(MAGIC);

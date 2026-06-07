@@ -546,6 +546,27 @@ test(
 );
 
 test(
+  "throw statements run identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Tw",
+      [
+        "public class Tw {",
+        '  static int checked(int n){ if (n < 0) throw new IllegalArgumentException("neg"); return n * 2; }',
+        "  static int half(int n){ if (n == 0) throw new RuntimeException(); return 100 / n; }",
+        "  public static void main(String[] a){",
+        "    System.out.println(checked(5));",
+        "    System.out.println(half(4));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "10\n25\n",
+    );
+  },
+);
+
+test(
   "enum switch (statement and exhaustive expression) runs identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

@@ -200,6 +200,10 @@ class Thread implements Runnable {
 }
 
 class Throwable {
+  public Throwable() {}
+  public Throwable(String message) {}
+  public Throwable(String message, Throwable cause) {}
+  public Throwable(Throwable cause) {}
   public String getMessage() { return null; }
   public String getLocalizedMessage() { return null; }
   public Throwable getCause() { return null; }
@@ -207,20 +211,30 @@ class Throwable {
   public StackTraceElement[] getStackTrace() { return null; }
 }
 class StackTraceElement {}
-class Error extends Throwable {}
-class AssertionError extends Error {}
-class Exception extends Throwable {}
-class RuntimeException extends Exception {}
-class IllegalArgumentException extends RuntimeException {}
-class IllegalStateException extends RuntimeException {}
-class NullPointerException extends RuntimeException {}
-class IndexOutOfBoundsException extends RuntimeException {}
-class ArrayIndexOutOfBoundsException extends IndexOutOfBoundsException {}
-class ClassCastException extends RuntimeException {}
-class UnsupportedOperationException extends RuntimeException {}
-class NumberFormatException extends IllegalArgumentException {}
-class ArithmeticException extends RuntimeException {}
-class InterruptedException extends Exception {}
+class Error extends Throwable { public Error() {} public Error(String m) {} }
+class AssertionError extends Error { public AssertionError() {} public AssertionError(Object m) {} }
+class Exception extends Throwable {
+  public Exception() {}
+  public Exception(String m) {}
+  public Exception(String m, Throwable c) {}
+  public Exception(Throwable c) {}
+}
+class RuntimeException extends Exception {
+  public RuntimeException() {}
+  public RuntimeException(String m) {}
+  public RuntimeException(String m, Throwable c) {}
+  public RuntimeException(Throwable c) {}
+}
+class IllegalArgumentException extends RuntimeException { public IllegalArgumentException() {} public IllegalArgumentException(String m) {} }
+class IllegalStateException extends RuntimeException { public IllegalStateException() {} public IllegalStateException(String m) {} }
+class NullPointerException extends RuntimeException { public NullPointerException() {} public NullPointerException(String m) {} }
+class IndexOutOfBoundsException extends RuntimeException { public IndexOutOfBoundsException() {} public IndexOutOfBoundsException(String m) {} }
+class ArrayIndexOutOfBoundsException extends IndexOutOfBoundsException { public ArrayIndexOutOfBoundsException() {} public ArrayIndexOutOfBoundsException(String m) {} }
+class ClassCastException extends RuntimeException { public ClassCastException() {} public ClassCastException(String m) {} }
+class UnsupportedOperationException extends RuntimeException { public UnsupportedOperationException() {} public UnsupportedOperationException(String m) {} }
+class NumberFormatException extends IllegalArgumentException { public NumberFormatException() {} public NumberFormatException(String m) {} }
+class ArithmeticException extends RuntimeException { public ArithmeticException() {} public ArithmeticException(String m) {} }
+class InterruptedException extends Exception { public InterruptedException() {} public InterruptedException(String m) {} }
 
 @interface Override {}
 @interface Deprecated {}
