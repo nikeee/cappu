@@ -33,6 +33,7 @@ import {
   type BreakStatement,
   type ContinueStatement,
   type ThrowStatement,
+  type TryStatement,
   type DoStatement,
   type InstanceofExpression,
   type ExpressionStatement,
@@ -1016,7 +1017,7 @@ function generateBody(
   // Enum <clinit>: construct each constant and the $VALUES array before the
   // static field initializers.
   enumClinit?: EnumClinit,
-): { code: ByteBuffer; maxStack: number; maxLocals: number; stackMapTable?: ByteBuffer } {
+): MethodBody {
   const isConstructor = !lambdaSpec && method.kind === SyntaxKind.ConstructorDeclaration;
   const isStatic = lambdaSpec
     ? !lambdaSpec.isInstance
@@ -1111,6 +1112,10 @@ function generateBody(
   const frameAt = new Map<number, Frame>(); // offset -> frame snapshot
   const fixups: { at: number; from: number; label: Label }[] = []; // u2 branch offsets
   const wideFixups: { at: number; from: number; label: Label }[] = []; // u4 switch offsets
+  // try/catch handlers: exception_table entries and the handler offsets that
+  // also need a stack-map frame (entered with the exception on the stack).
+  const exceptionTable: { start: number; end: number; handler: number; catchType: number }[] = [];
+  const handlerOffsets: number[] = [];
   const breakTargets: Label[] = []; // enclosing switch/loop end labels for `break`
   const continueTargets: Label[] = []; // enclosing loop re-test/increment labels for `continue`
   const yieldTargets: { label: Label; desc: string }[] = []; // enclosing switch-expression ends
@@ -3157,6 +3162,66 @@ function generateBody(
         reachable = false;
         return true; // throw is a terminator
       }
+      case SyntaxKind.TryStatement: {
+        const t = stmt as TryStatement;
+        if (t.resources?.length || t.finallyBlock) throw new UnsupportedEmit(); // later
+        const endL = newLabel();
+        // Locals definitely assigned at try entry: the handler frame uses these
+        // (an exception may be thrown at any point in the body).
+        const tryStartAssigned = new Set(assigned);
+        const tryStart = code.length;
+        const tryTerm = inScope(() => emitStmt(t.tryBlock));
+        const tryEnd = code.length;
+        if (!tryTerm) branchTo(OP_GOTO, endL); // normal completion skips the handlers
+        let allHandlersTerm = true;
+        for (const cc of t.catchClauses) {
+          // Reset to the handler's entry state: try-start locals, and the JVM
+          // pushes the caught exception onto an otherwise-empty stack.
+          setStack([]);
+          assigned.clear();
+          for (const s of tryStartAssigned) assigned.add(s);
+          reachable = true;
+          const excDesc =
+            cc.catchTypes.length === 1
+              ? descriptorOf(cc.catchTypes[0]!, program)
+              : "Ljava/lang/Throwable;";
+          push(excDesc);
+          const handlerL = newLabel();
+          placeLabel(handlerL); // stack-map frame: locals = try entry, stack = [exc]
+          handlerOffsets.push(handlerL.offset);
+          for (const ty of cc.catchTypes) {
+            const d = descriptorOf(ty, program);
+            const internal = d[0] === "[" ? d : d.slice(1, -1);
+            exceptionTable.push({
+              start: tryStart,
+              end: tryEnd,
+              handler: handlerL.offset,
+              catchType: cp.classInfo(internal),
+            });
+          }
+          const handlerTerm = inScope(() => {
+            const slot = nextSlot;
+            nextSlot += slotsOf(excDesc);
+            if (nextSlot > maxLocals) maxLocals = nextSlot;
+            activeLocals.push({ slot, descriptor: excDesc });
+            if (cc.name.symbol) locals.set(cc.name.symbol, { slot, descriptor: excDesc });
+            storeVar(slot, excDesc); // astore the exception into the catch parameter
+            let term = false;
+            for (const st of cc.block.statements) term = emitStmt(st);
+            return term;
+          });
+          if (!handlerTerm) branchTo(OP_GOTO, endL);
+          if (!handlerTerm) allHandlersTerm = false;
+        }
+        // Terminates only if the try body and every handler do (then nothing
+        // reaches endL).
+        const terminated = tryTerm && allHandlersTerm;
+        if (!terminated) {
+          setStack([]);
+          placeLabel(endL);
+        }
+        return terminated;
+      }
       case SyntaxKind.YieldStatement: {
         const target = yieldTargets.at(-1);
         if (!target) throw new UnsupportedEmit();
@@ -3284,9 +3349,13 @@ function generateBody(
   }
 
   // StackMapTable: a full_frame at every branch-target offset (JVMS 4.7.4).
-  const targetOffsets = [...new Set([...fixups, ...wideFixups].map(f => f.label.offset))].sort(
-    (a, b) => a - b,
-  );
+  const targetOffsets = [
+    ...new Set([
+      ...fixups.map(f => f.label.offset),
+      ...wideFixups.map(f => f.label.offset),
+      ...handlerOffsets,
+    ]),
+  ].sort((a, b) => a - b);
   let stackMapTable: ByteBuffer | undefined;
   if (targetOffsets.length > 0) {
     const writeVerification = (buf: ByteBuffer, descriptor: string): void => {
@@ -3320,7 +3389,7 @@ function generateBody(
     }
   }
 
-  return { code, maxStack, maxLocals, stackMapTable };
+  return { code, maxStack, maxLocals, stackMapTable, exceptionTable };
 }
 
 function emitMethod(
@@ -3414,6 +3483,7 @@ interface MethodBody {
   maxStack: number;
   maxLocals: number;
   stackMapTable?: ByteBuffer;
+  exceptionTable?: { start: number; end: number; handler: number; catchType: number }[];
 }
 
 // Append the Code attribute (with an optional StackMapTable sub-attribute) and
@@ -3421,15 +3491,22 @@ interface MethodBody {
 function writeCodeAttribute(info: ByteBuffer, cp: ConstantPool, body: MethodBody): void {
   const smt = body.stackMapTable;
   const smtBytes = smt ? 6 + smt.length : 0;
+  const handlers = body.exceptionTable ?? [];
 
   const codeAttr = new ByteBuffer();
   codeAttr.u2(cp.utf8("Code"));
-  codeAttr.u4(12 + body.code.length + smtBytes);
+  codeAttr.u4(12 + body.code.length + handlers.length * 8 + smtBytes);
   codeAttr.u2(body.maxStack);
   codeAttr.u2(body.maxLocals);
   codeAttr.u4(body.code.length);
   codeAttr.append(body.code);
-  codeAttr.u2(0); // exception_table_length
+  codeAttr.u2(handlers.length); // exception_table_length
+  for (const h of handlers) {
+    codeAttr.u2(h.start);
+    codeAttr.u2(h.end);
+    codeAttr.u2(h.handler);
+    codeAttr.u2(h.catchType);
+  }
   codeAttr.u2(smt ? 1 : 0); // attributes_count
   if (smt) {
     codeAttr.u2(cp.utf8("StackMapTable"));

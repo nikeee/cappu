@@ -546,6 +546,33 @@ test(
 );
 
 test(
+  "try/catch (multi-catch, exception flow) runs identically to javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Tc",
+      [
+        "public class Tc {",
+        "  static int parse(String s){ try { return Integer.parseInt(s); } catch (NumberFormatException e) { return -1; } }",
+        "  static String classify(int n){",
+        '    try { if (n<0) throw new IllegalArgumentException("neg"); if (n==0) throw new RuntimeException("zero"); return "pos"; }',
+        '    catch (IllegalArgumentException e) { return "iae:" + e.getMessage(); }', // method call on catch param
+        '    catch (RuntimeException e) { return "rte:" + e.getMessage(); }', // second handler
+        "  }",
+        "  static int withFlow(int[] a, int i){ int r=0; try { r = a[i]; } catch (ArrayIndexOutOfBoundsException e) { r = -1; } return r + 1; }",
+        "  public static void main(String[] x){",
+        '    System.out.println(parse("42")); System.out.println(parse("zz"));',
+        "    System.out.println(classify(5)); System.out.println(classify(-1)); System.out.println(classify(0));",
+        "    System.out.println(withFlow(new int[]{7,8}, 1)); System.out.println(withFlow(new int[]{7}, 5));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "42\n-1\npos\niae:neg\nrte:zero\n9\n0\n",
+    );
+  },
+);
+
+test(
   "throw statements run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

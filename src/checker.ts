@@ -438,6 +438,14 @@ export function createChecker(program: Program): Checker {
       }
       case SyntaxKind.MethodDeclaration:
         return { typeNode: (declaration as MethodDeclaration).returnType, from: declaration };
+      case SyntaxKind.Identifier: {
+        // A catch parameter `catch (E e)`: its type is the (first) catch type.
+        const parent = declaration.parent as { kind: SyntaxKind; catchTypes?: readonly TypeNode[] };
+        if (parent.kind === SyntaxKind.CatchClause && parent.catchTypes?.length) {
+          return { typeNode: parent.catchTypes[0]!, from: declaration };
+        }
+        return undefined;
+      }
       default:
         return undefined;
     }
