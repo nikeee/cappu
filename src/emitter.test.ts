@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { createChecker } from "./checker.ts";
 import { emitSourceFile } from "./emitter.ts";
+import { type Disasm, disasmFiles } from "./javapNormalize.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
 
@@ -124,58 +125,6 @@ const CONTROL: Record<string, { source: string; stdout: string }> = {
     stdout: "10\n7\n3\n4\ntrue\n",
   },
 };
-
-// Normalized disassembly of a class: its member signatures (fields, ctors,
-// methods - sorted) and per-method instruction lines with constant-pool indices
-// stripped, so only mnemonics + symbolic operands remain (comparable across
-// compilers and the form we check into javac-baselines/).
-interface Disasm {
-  members: string[];
-  code: [string, string[]][]; // [methodSignature, instructionLines]
-}
-
-// Disassemble one or more class files in a SINGLE javap invocation, keyed by the
-// (binary) class name javap prints. Used both to read javac's output (when
-// regenerating baselines) and to disassemble our own emitted classes.
-function disasmFiles(classFiles: string[]): Map<string, Disasm> {
-  const out = execFileSync("javap", ["-c", "-p", ...classFiles], { encoding: "utf8" });
-  const map = new Map<string, Disasm>();
-  let cur: Disasm | undefined;
-  let method: string[] | undefined;
-  for (const raw of out.split("\n")) {
-    const t = raw.trim();
-    if (!t) continue;
-    // A class header is unindented (raw === trimmed), names a class/interface/enum
-    // and opens a brace; everything below it (indented) belongs to that class.
-    const header = raw === t && t.endsWith("{") && /(?:class|interface|enum)\s+[\w$.]+/.test(t);
-    if (header) {
-      const name = t.match(/(?:class|interface|enum)\s+([\w$.]+)/)![1]!;
-      cur = { members: [], code: [] };
-      map.set(name, cur);
-      method = undefined;
-    } else if (!cur) {
-      continue;
-    } else if (/^\d+:/.test(t)) {
-      method?.push(
-        t
-          .replace(/^\d+:\s*/, "")
-          .replace(/#\d+/g, "#")
-          .replace(/\s+/g, " ")
-          .trim(),
-      );
-    } else if (t.endsWith(";") && !t.startsWith("//")) {
-      cur.members.push(t);
-      if (t.includes("(")) {
-        method = [];
-        cur.code.push([t, method]); // a method/constructor declaration line
-      } else {
-        method = undefined; // a field (or `static {};`): no comparable code
-      }
-    }
-  }
-  for (const d of map.values()) d.members.sort();
-  return map;
-}
 
 // Compare our disassembly of a class against the javac reference.
 function expectMatchesJavac(ours: Disasm | undefined, reference: Disasm): void {

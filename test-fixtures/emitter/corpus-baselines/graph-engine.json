@@ -1,0 +1,12 @@
+{
+  "de.uks.se.StringEx": [
+    [
+      "public de.uks.se.StringEx();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ]
+}

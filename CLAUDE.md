@@ -115,6 +115,15 @@ submodule spec; a plain `git submodule update --init` also works but leaves the
 non-Java files on disk. The corpus tests are skipped when no submodule is
 checked out, so CI without them still passes.
 
+A second tier, `corpus bytecode matches javac`, checks our emitted bytecode
+against javac for real-world code. javac cannot build these projects (external
+deps) and we degrade methods using unstubbed types, so the baseline
+(`test-fixtures/emitter/corpus-baselines/*.json`) records only the
+(class, method) pairs we currently match javac on; the test is then a
+regression guard over that set. Regenerating it (`UPDATE_BASELINES=1`)
+recompiles every JDK-only corpus file with javac and is slow (~10 min); the
+normal run just reads the JSON and disassembles the baselined classes (seconds).
+
 ## Linting / Formatting
 - **oxlint** + **oxfmt** for backend/frontend/ingest (config: `.oxlintrc.json`, `.oxfmtrc.json`, `.editorconfig`). Use `node --run lint` and `node --run format` to execute.
 - **lefthook**: pre-commit formats staged files; pre-push lints all components in parallel
