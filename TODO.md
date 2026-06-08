@@ -67,9 +67,16 @@ verifiable placeholder, never a crash.
       member routes through it.
 - [x] **Local-class** `this$0`: same machinery as anonymous, wired through the
       synthesized constructor and the `new`-site (alongside local captures).
-- [ ] Anonymous/local classes with **own fields, initializer blocks, declared
-      constructors alongside capture, or inherited-member access** (needs
-      binder/checker scoping of the body and constructor augmentation).
+- [x] Anonymous classes **accessing inherited members**: overriding a super
+      method and calling an inherited (non-overridden) method both work via
+      normal virtual dispatch on the emitted subclass (verified: an anon override
+      reached through an inherited method runs correctly).
+- [ ] Anonymous/local classes with **own instance fields, initializer blocks, or
+      declared constructors alongside capture**. `anonymousTarget` currently
+      rejects any non-method body member, so such a `new T(){...}` degrades (the
+      enclosing method falls back, returning null). Supporting it needs the
+      synthesized constructor to run the field initializers through the full body
+      emitter (it is hand-rolled today, emitting only super() + capture stores).
 - [x] User-defined interfaces are now emitted (ACC_INTERFACE|ACC_ABSTRACT, super
       Object, `extends` as super-interfaces): abstract methods (no Code), default
       and static methods (with Code), and implicitly public-static-final constant
