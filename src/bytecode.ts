@@ -1194,10 +1194,15 @@ function generateBody(
     assigned.clear();
     for (const s of here) assigned.add(s);
     reachable = true;
-    frameAt.set(label.offset, {
-      locals: frameLocals(here),
-      stack: [...(label.targetStack ?? stack)],
-    });
+    const frameStack = [...(label.targetStack ?? stack)];
+    // Execution at a branch target has exactly the frame's operand stack. Reset
+    // the live stack to it so a value left behind by a preceding terminator
+    // (e.g. `return x` keeps x on the typed stack) does not pollute later frames.
+    if (label.targetStack !== undefined) {
+      stack.length = 0;
+      stack.push(...label.targetStack);
+    }
+    frameAt.set(label.offset, { locals: frameLocals(here), stack: frameStack });
   };
   const branchTo = (op: number, label: Label): void => {
     const from = code.length;
@@ -1647,8 +1652,9 @@ function generateBody(
 
   /** The `instanceof` operator (JLS 15.20.2) -> the `instanceof` instruction. */
   const emitInstanceof = (node: InstanceofExpression): string => {
-    // TODO: type-pattern binding `x instanceof T t` (JLS 14.30.1 / 15.20.2):
-    // bind `t` to a local and store the checkcast result into it.
+    // A type-pattern binding `x instanceof T t` as a plain value (not the matched
+    // condition of an if/&&) is unsupported here; emitBranch handles the common
+    // matched-condition case (JLS 14.30.1) and binds `t`.
     if (node.name) throw new UnsupportedEmit();
     emitExpr(node.expression);
     const descriptor = descriptorOf(node.type, program);
@@ -2290,6 +2296,49 @@ function generateBody(
         const u = expr as PrefixUnaryExpression;
         if (u.operator === SyntaxKind.ExclamationToken) {
           emitBranch(u.operand, label, !whenTrue);
+          return;
+        }
+        break;
+      }
+      case SyntaxKind.InstanceofExpression: {
+        const io = expr as InstanceofExpression;
+        // Type-pattern binding `x instanceof T t` (JLS 14.30.1) as the matched
+        // (fall-through) condition of an `if`/`&&`: test, branch away on no match,
+        // then bind t = (T) x on the matched path. The operand is evaluated once
+        // into a temp (safe for side effects and reused for the cast). The
+        // when-true direction (negation, ||, value context) is left to the
+        // value-based fallback, which does not bind.
+        if (io.name?.symbol && !whenTrue) {
+          const desc = descriptorOf(io.type, program);
+          const internal = desc[0] === "[" ? desc : desc.slice(1, -1);
+          const xDesc = emitExpr(io.expression);
+          const tmp = nextSlot;
+          nextSlot += slotsOf(xDesc);
+          if (nextSlot > maxLocals) maxLocals = nextSlot;
+          activeLocals.push({ slot: tmp, descriptor: xDesc });
+          storeVar(tmp, xDesc);
+          loadVar(tmp, xDesc);
+          push(xDesc);
+          code.u1(OP_INSTANCEOF);
+          code.u2(cp.classInfo(internal));
+          pop();
+          push("I");
+          pop(); // consumed by the branch
+          branchTo(OP_IFEQ, label); // no match -> branch
+          const tSlot = nextSlot;
+          nextSlot += slotsOf(desc);
+          if (nextSlot > maxLocals) maxLocals = nextSlot;
+          activeLocals.push({ slot: tSlot, descriptor: desc });
+          locals.set(io.name.symbol, { slot: tSlot, descriptor: desc });
+          loadVar(tmp, xDesc);
+          push(xDesc);
+          if (desc !== "Ljava/lang/Object;") {
+            code.u1(OP_CHECKCAST);
+            code.u2(cp.classInfo(internal));
+            pop();
+            push(desc);
+          }
+          storeVar(tSlot, desc);
           return;
         }
         break;

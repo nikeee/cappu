@@ -182,17 +182,29 @@ function bindDeclaration(node: Node): void {
       // A concise lambda parameter (x -> ...) is a bare Identifier; declare it
       // as a parameter in the enclosing lambda scope (typed params are Parameter
       // nodes, handled above).
-      const lambda = node.parent;
+      const parent = node.parent;
       if (
-        lambda &&
-        lambda.kind === SyntaxKind.LambdaExpression &&
-        (lambda as unknown as { parameters: readonly Node[] }).parameters.includes(node)
+        parent &&
+        parent.kind === SyntaxKind.LambdaExpression &&
+        (parent as unknown as { parameters: readonly Node[] }).parameters.includes(node)
       ) {
         declareIntoContainer(
           node as Identifier,
           node,
           SymbolFlags.Parameter,
           SymbolFlags.Parameter,
+        );
+      } else if (
+        parent &&
+        parent.kind === SyntaxKind.InstanceofExpression &&
+        (parent as { name?: Node }).name === node
+      ) {
+        // The binding variable of a type pattern `x instanceof T t` (JLS 14.30.1).
+        declareIntoContainer(
+          node as Identifier,
+          node,
+          SymbolFlags.LocalVariable,
+          SymbolFlags.LocalVariable,
         );
       }
       break;

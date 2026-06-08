@@ -22,7 +22,9 @@ verifiable placeholder, never a crash.
 
 ## Expressions
 
-- [ ] `instanceof` type-pattern binding `x instanceof T t` (JLS 14.30.1 / 15.20.2).
+- [x] `instanceof` type-pattern binding `x instanceof T t` (JLS 14.30.1) as the
+      matched condition of an `if`/`&&`. The when-true direction (negation, `||`,
+      plain value context) still degrades and does not bind.
 - [ ] Array constructor references `T[]::new` (JLS 15.13.3).
 
 ## Classes and members

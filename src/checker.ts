@@ -444,10 +444,18 @@ export function createChecker(program: Program): Checker {
         return t ? { typeNode: t, from: declaration } : undefined;
       }
       case SyntaxKind.Identifier: {
+        const parent = declaration.parent as {
+          kind: SyntaxKind;
+          catchTypes?: readonly TypeNode[];
+          type?: TypeNode;
+        };
         // A catch parameter `catch (E e)`: its type is the (first) catch type.
-        const parent = declaration.parent as { kind: SyntaxKind; catchTypes?: readonly TypeNode[] };
         if (parent.kind === SyntaxKind.CatchClause && parent.catchTypes?.length) {
           return { typeNode: parent.catchTypes[0]!, from: declaration };
+        }
+        // A type-pattern binding `x instanceof T t`: its type is the pattern type.
+        if (parent.kind === SyntaxKind.InstanceofExpression && parent.type) {
+          return { typeNode: parent.type, from: declaration };
         }
         return undefined;
       }

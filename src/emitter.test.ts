@@ -643,6 +643,32 @@ test(
 );
 
 test(
+  "instanceof type-pattern binding runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Iof",
+      [
+        "public class Iof {",
+        "  static String describe(Object o){",
+        '    if (o instanceof String s) { return "str:" + s.length(); }',
+        '    if (o instanceof Integer i && i.intValue() > 0) { return "posint:" + i; }',
+        '    return "other";',
+        "  }",
+        "  public static void main(String[] a){",
+        '    System.out.println(describe("hello"));',
+        "    System.out.println(describe(Integer.valueOf(42)));",
+        "    System.out.println(describe(Integer.valueOf(-1)));",
+        "    System.out.println(describe(new Object()));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "str:5\nposint:42\nother\nother\n",
+    );
+  },
+);
+
+test(
   "assert statement: disabled by default, throws AssertionError under -ea",
   { skip: HAS_JAVA ? false : "no JDK" },
   () => {
