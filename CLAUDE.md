@@ -119,6 +119,12 @@ checked out, so CI without them still passes.
 - **oxlint** + **oxfmt** for backend/frontend/ingest (config: `.oxlintrc.json`, `.oxfmtrc.json`, `.editorconfig`). Use `node --run lint` and `node --run format` to execute.
 - **lefthook**: pre-commit formats staged files; pre-push lints all components in parallel
 
+## Prompt log
+- `PROMPTS.md` is a verbatim, chronological record of the user's prompts. Append
+  each new prompt to it (verbatim, typos included).
+- Add the triggering prompt(s) verbatim to the bottom of every commit message,
+  after a `---` separator, prefixed with `Prompt:`.
+
 ## Final Notices
 - NEVER use the `npx` command under any circumstances. It is strictly blocked by security policies on our system.
 - ALWAYS use allowed `npm` scripts defined in `package.json`.
