@@ -90,8 +90,12 @@ verifiable placeholder, never a crash.
 
 These do not affect correctness but widen the diff vs javac's output.
 
-- [ ] `InnerClasses` (JVMS 4.7.6), `NestHost` / `NestMembers` (4.7.28 / 4.7.29)
-      for nested types.
+- [x] `NestHost` / `NestMembers` (JVMS 4.7.28 / 4.7.29): each top-level type
+      emits NestMembers listing its nested/local/anonymous classes, and each of
+      those emits NestHost - so nestmates share private access (an inner class
+      reading a private outer field, etc.).
+- [ ] `InnerClasses` (JVMS 4.7.6) for reflection (getEnclosingClass /
+      isAnonymousClass); not required for access control under nestmates.
 - [ ] `Signature` (JVMS 4.7.9) for generic signatures.
 - [ ] `LineNumberTable` (JVMS 4.7.12) and `LocalVariableTable` (4.7.13).
 - [ ] `RuntimeVisibleAnnotations` (JVMS 4.7.16).

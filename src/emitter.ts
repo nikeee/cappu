@@ -5,6 +5,7 @@
 
 import {
   type EmittedClass,
+  computeNestMembers,
   emitAnonymousClassIfPossible,
   emitClass,
   emitEnum,
@@ -36,23 +37,26 @@ export function emitSourceFile(
   checker: Checker,
 ): EmittedClass[] {
   const result: EmittedClass[] = [];
+  // Nest grouping (host -> members) so each class gets NestHost / NestMembers,
+  // letting nestmates share private access.
+  const nest = computeNestMembers(sourceFile, program);
   const visit = (node: Node): void => {
     if (node.kind === SyntaxKind.ClassDeclaration) {
       const decl = node as ClassDeclaration;
       // Anonymous classes (new T(){...}) live as ObjectCreationExpression.classBody,
       // not ClassDeclaration; a ClassDeclaration with no name/symbol is skipped.
-      // TODO: emit anonymous classes (JLS 15.9.5).
-      if (decl.symbol || decl.name) result.push(emitClass(decl, program, checker));
+      if (decl.symbol || decl.name) result.push(emitClass(decl, program, checker, nest));
     } else if (node.kind === SyntaxKind.InterfaceDeclaration) {
-      result.push(emitInterface(node as InterfaceDeclaration, program, checker));
+      result.push(emitInterface(node as InterfaceDeclaration, program, checker, nest));
     } else if (node.kind === SyntaxKind.EnumDeclaration) {
-      result.push(emitEnum(node as EnumDeclaration, program, checker));
+      result.push(emitEnum(node as EnumDeclaration, program, checker, nest));
     } else if (node.kind === SyntaxKind.ObjectCreationExpression) {
       // Anonymous class (new T(){...}): emitted as its own Outer$N when supported.
       const anon = emitAnonymousClassIfPossible(
         node as ObjectCreationExpression,
         program,
         checker,
+        nest,
       );
       if (anon) result.push(anon);
     }

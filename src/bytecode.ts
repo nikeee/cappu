@@ -66,6 +66,7 @@ import {
   type SwitchStatement,
   type SwitchClause,
   type TypePattern,
+  type SourceFile,
   type SwitchExpression,
   type YieldStatement,
   type WhileStatement,
@@ -635,6 +636,10 @@ function sourceNameOf(node: Node): string | undefined {
 function buildClassAttributes(
   cp: ConstantPool,
   sourceName: string | undefined,
+  // This class's binary name and the nest grouping (host -> all member names),
+  // used to emit NestHost / NestMembers so nestmates share private access.
+  name?: string,
+  nestMembers?: Map<string, string[]>,
 ): { buffer: ByteBuffer; count: number } {
   const buffer = new ByteBuffer();
   let count = 0;
@@ -651,7 +656,66 @@ function buildClassAttributes(
     buffer.append(body);
     count++;
   }
+  if (name && nestMembers) {
+    // The nest host is the top-level type (the name up to the first '$').
+    const host = name.replace(/\$.*/, "");
+    if (name === host) {
+      const members = (nestMembers.get(host) ?? []).filter(n => n !== host);
+      if (members.length > 0) {
+        buffer.u2(cp.utf8("NestMembers"));
+        buffer.u4(2 + 2 * members.length);
+        buffer.u2(members.length);
+        for (const m of members) buffer.u2(cp.classInfo(m));
+        count++;
+      }
+    } else {
+      buffer.u2(cp.utf8("NestHost"));
+      buffer.u4(2);
+      buffer.u2(cp.classInfo(host));
+      count++;
+    }
+  }
   return { buffer, count };
+}
+
+// The nest grouping of a source file: host binary name -> every member of that
+// nest (including the host). Mirrors the class discovery in emitSourceFile.
+export function computeNestMembers(
+  sourceFile: SourceFile,
+  program: Program,
+): Map<string, string[]> {
+  program.getGlobalIndex();
+  const byHost = new Map<string, string[]>();
+  const add = (n: string): void => {
+    const host = n.replace(/\$.*/, "");
+    const list = byHost.get(host);
+    if (list) list.push(n);
+    else byHost.set(host, [n]);
+  };
+  const visit = (node: Node): void => {
+    if (node.kind === SyntaxKind.ClassDeclaration) {
+      const d = node as ClassDeclaration;
+      if (d.symbol) add(binaryName(d.symbol));
+      else if (d.name) add(d.name.text);
+    } else if (
+      node.kind === SyntaxKind.InterfaceDeclaration ||
+      node.kind === SyntaxKind.EnumDeclaration
+    ) {
+      if (node.symbol) add(binaryName(node.symbol));
+    } else if (
+      node.kind === SyntaxKind.ObjectCreationExpression &&
+      (node as ObjectCreationExpression).classBody &&
+      anonymousTarget(node as ObjectCreationExpression, program)
+    ) {
+      add(anonymousClassName(node as ObjectCreationExpression, program));
+    }
+    forEachChild(node, c => {
+      visit(c);
+      return undefined;
+    });
+  };
+  visit(sourceFile);
+  return byHost;
 }
 
 // Field initializers split by static-ness: instance ones run in each
@@ -4784,6 +4848,7 @@ export function emitClass(
   declaration: ClassDeclaration,
   program: Program,
   checker: Checker,
+  nestMembers?: Map<string, string[]>,
 ): EmittedClass {
   // Ensure the global index is built so symbols carry their package parent.
   program.getGlobalIndex();
@@ -4965,6 +5030,8 @@ export function emitClass(
   const { buffer: classAttributes, count: classAttributeCount } = buildClassAttributes(
     cp,
     sourceNameOf(declaration),
+    name,
+    nestMembers,
   );
 
   return {
@@ -4993,6 +5060,7 @@ export function emitInterface(
   declaration: InterfaceDeclaration,
   program: Program,
   checker: Checker,
+  nestMembers?: Map<string, string[]>,
 ): EmittedClass {
   program.getGlobalIndex();
   const name = declaration.symbol ? binaryName(declaration.symbol) : declaration.name.text;
@@ -5072,6 +5140,8 @@ export function emitInterface(
   const { buffer: classAttributes, count: classAttributeCount } = buildClassAttributes(
     cp,
     sourceNameOf(declaration),
+    name,
+    nestMembers,
   );
   return {
     name,
@@ -5153,6 +5223,7 @@ export function emitAnonymousClassIfPossible(
   node: ObjectCreationExpression,
   program: Program,
   checker: Checker,
+  nestMembers?: Map<string, string[]>,
 ): EmittedClass | undefined {
   const target = anonymousTarget(node, program);
   if (!target) return undefined;
@@ -5216,6 +5287,8 @@ export function emitAnonymousClassIfPossible(
   const { buffer: classAttributes, count: classAttributeCount } = buildClassAttributes(
     cp,
     sourceNameOf(node),
+    name,
+    nestMembers,
   );
   return {
     name,
@@ -5353,6 +5426,7 @@ export function emitEnum(
   declaration: EnumDeclaration,
   program: Program,
   checker: Checker,
+  nestMembers?: Map<string, string[]>,
 ): EmittedClass {
   program.getGlobalIndex();
   const name = declaration.symbol ? binaryName(declaration.symbol) : declaration.name.text;
@@ -5539,6 +5613,8 @@ export function emitEnum(
   const { buffer: classAttributes, count: classAttributeCount } = buildClassAttributes(
     cp,
     sourceNameOf(declaration),
+    name,
+    nestMembers,
   );
 
   return {

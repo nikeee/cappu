@@ -1844,3 +1844,29 @@ test(
     );
   },
 );
+
+test(
+  "private cross-nest access (nestmates) runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Nestmate",
+      [
+        "public class Nestmate {",
+        "  private int secret = 42;",
+        "  private int hidden(){ return 8; }",
+        "  Runnable r(){",
+        "    return new Runnable(){ public void run(){ System.out.println(secret + hidden()); } };",
+        "  }",
+        "  static class Helper { static int peek(Nestmate n){ return n.secret; } }",
+        "  public static void main(String[] a){",
+        "    Nestmate n = new Nestmate();",
+        "    n.r().run();",
+        "    System.out.println(Helper.peek(n));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "50\n42\n",
+    );
+  },
+);
