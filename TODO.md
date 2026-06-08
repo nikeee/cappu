@@ -30,8 +30,17 @@ verifiable placeholder, never a crash.
 
 ## Classes and members
 
-- [ ] Anonymous classes `new T(){...}` (JLS 15.9.5) and local classes (JLS 14.3):
-      emit as their own `Outer$N` class files (currently skipped).
+- [x] Local classes (JLS 14.3) **without capture**: emitted as `Outer$Name`
+      (binaryName recovers the enclosing type from the AST; the local-class
+      declaration statement is a no-op in a method body). Language service
+      (resolution/hover/completion/references) already works for them.
+- [ ] Local classes **with capture** of enclosing locals / `this` (synthetic
+      fields + constructor params, `new`-site argument passing).
+- [ ] Anonymous classes `new T(){...}` (JLS 15.9.5): emit the classBody as its
+      own `Outer$N`, with capture; needs binder/checker scoping of the body.
+- [ ] User-defined interfaces are not emitted (emitSourceFile visits only class
+      and enum declarations), so a program using an interface declared in the
+      same file fails at load with NoClassDefFoundError.
 - [x] Explicit constructor invocations (JLS 8.8.7.1): a leading `super(args)` or
       `this(args)`; `this(...)` skips this constructor's field initializers. The
       target overload is resolved by argument count (as for `new`).

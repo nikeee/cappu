@@ -718,6 +718,14 @@ function assembleClassFile(parts: {
   return out.toUint8Array();
 }
 
+const TYPE_DECL_KINDS = new Set([
+  SyntaxKind.ClassDeclaration,
+  SyntaxKind.InterfaceDeclaration,
+  SyntaxKind.EnumDeclaration,
+  SyntaxKind.RecordDeclaration,
+  SyntaxKind.AnnotationTypeDeclaration,
+]);
+
 function binaryName(symbol: Symbol): string {
   const names = [symbol.escapedName];
   let parent = symbol.parent;
@@ -726,6 +734,17 @@ function binaryName(symbol: Symbol): string {
     parent = parent.parent;
   }
   const pkg = parent && parent.flags & SymbolFlags.Package ? parent.escapedName : "";
+  // A local class's symbol-parent chain stops at the enclosing method/block (not a
+  // type), so no type prefix was collected. Recover it from the AST so the class
+  // is named Outer$Counter rather than a bare, top-level-looking name. TODO: javac
+  // disambiguates with a sequence number (Outer$1Counter); we omit it, so two
+  // local classes of the same simple name in one top-level type would collide.
+  if (!pkg && names.length === 1) {
+    const decl = symbol.valueDeclaration ?? symbol.declarations?.[0];
+    let node = decl?.parent;
+    while (node && !TYPE_DECL_KINDS.has(node.kind)) node = node.parent;
+    if (node?.symbol) return `${binaryName(node.symbol)}$${symbol.escapedName}`;
+  }
   const nested = names.join("$");
   return pkg ? `${pkg.replace(/\./g, "/")}/${nested}` : nested;
 }
@@ -3773,6 +3792,13 @@ function generateBody(
         placeLabel(endL);
         return false;
       }
+      // A local class/interface/enum/record declaration (JLS 14.3) is emitted as
+      // its own class by the source-file driver; as a statement it is a no-op.
+      case SyntaxKind.ClassDeclaration:
+      case SyntaxKind.InterfaceDeclaration:
+      case SyntaxKind.EnumDeclaration:
+      case SyntaxKind.RecordDeclaration:
+        return false;
       // TODO: unhandled statements degrade to a placeholder method body.
       default:
         throw new UnsupportedEmit();

@@ -1612,3 +1612,35 @@ test(
     );
   },
 );
+
+test(
+  "local classes (no capture) run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Local",
+      [
+        "public class Local {",
+        "  static int counter(){",
+        "    class Counter { int n; int inc(){ n = n + 1; return n; } }",
+        "    Counter c = new Counter();",
+        "    c.inc();",
+        "    return c.inc();",
+        "  }",
+        "  static int viaInterface(int v){",
+        "    class Doubler implements java.util.function.IntUnaryOperator {",
+        "      public int applyAsInt(int x){ return x * 2; }",
+        "    }",
+        "    java.util.function.IntUnaryOperator op = new Doubler();",
+        "    return op.applyAsInt(v);",
+        "  }",
+        "  public static void main(String[] a){",
+        "    System.out.println(counter());",
+        "    System.out.println(viaInterface(21));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "2\n42\n",
+    );
+  },
+);
