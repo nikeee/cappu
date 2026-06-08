@@ -820,6 +820,31 @@ test(
 );
 
 test(
+  "try-with-resources variable-access form runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "TwrVar",
+      [
+        "public class TwrVar {",
+        "  static class R implements AutoCloseable {",
+        "    String n; R(String n){ this.n = n; }",
+        '    public void close(){ System.out.println("close " + n); }',
+        "  }",
+        "  static void useExisting(){",
+        '    R r = new R("v");',
+        // SE9 variable-access form: the resource is an already-declared variable.
+        '    try (r) { System.out.println("body"); }',
+        "  }",
+        "  public static void main(String[] a){ useExisting(); }",
+        "}",
+      ].join("\n"),
+      "body\nclose v\n",
+    );
+  },
+);
+
+test(
   "labeled break and continue run identically to javac",
   { skip: HAS_JAVA ? false : "no JDK" },
   () => {

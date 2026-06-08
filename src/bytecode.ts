@@ -8,7 +8,7 @@
 // Reference output is cross-checked against `javac` in the tests.
 
 import type { Checker } from "./checker.ts";
-import { type Type, TypeKind } from "./checkerTypes.ts";
+import { type ClassType, type Type, TypeKind } from "./checkerTypes.ts";
 import { foldConstant } from "./constfold.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
@@ -3531,32 +3531,46 @@ function generateBody(
         const emitResourceNest = (i: number): boolean => {
           if (i >= resources.length) return emitUserBody();
           const res = resources[i]!;
-          // TODO: support the variable-access resource form `try (existingVar)`
-          // (JLS 14.20.3, SE9): only the declaration form `try (T r = init)` is
-          // handled here.
           // TODO: emit the null guard `if (r != null) ...close` (JLS 14.20.3.1).
           // We assume the resource is non-null (javac elides the guard only for a
           // definitely-non-null initializer); a null resource would NPE on close
           // here instead of being skipped.
-          if (!res.type || !res.name || !res.initializer) throw new UnsupportedEmit();
-          const desc = descriptorOf(res.type, program);
+          // Two forms (JLS 14.20.3): a declaration `try (T r = init)` and the
+          // SE9 variable-access form `try (existingVar)`. Both materialize the
+          // resource value into a fresh slot used for close().
+          let desc: string;
+          let isInterface: boolean;
+          let valueExpr: Node;
+          if (res.type && res.name && res.initializer) {
+            desc = descriptorOf(res.type, program);
+            const typeSymbol =
+              res.type.kind === SyntaxKind.TypeReference
+                ? resolveTypeEntityName((res.type as TypeReference).typeName, res, program)
+                : undefined;
+            isInterface = !!typeSymbol && (typeSymbol.flags & SymbolFlags.Interface) !== 0;
+            valueExpr = res.initializer;
+          } else if (res.expression) {
+            const exprType = checker.getTypeOfExpression(res.expression);
+            desc = typeDescriptor(exprType);
+            isInterface =
+              exprType.kind === TypeKind.Class &&
+              ((exprType as ClassType).symbol.flags & SymbolFlags.Interface) !== 0;
+            valueExpr = res.expression;
+          } else {
+            throw new UnsupportedEmit();
+          }
           if (desc[0] !== "L") throw new UnsupportedEmit();
           const ownerInternal = desc.slice(1, -1);
-          const typeSymbol =
-            res.type.kind === SyntaxKind.TypeReference
-              ? resolveTypeEntityName((res.type as TypeReference).typeName, res, program)
-              : undefined;
-          const isInterface = !!typeSymbol && (typeSymbol.flags & SymbolFlags.Interface) !== 0;
           // Open the resource before the protected region: if the initializer
           // throws there is nothing to close.
           const slot = nextSlot;
           nextSlot += slotsOf(desc);
           if (nextSlot > maxLocals) maxLocals = nextSlot;
           activeLocals.push({ slot, descriptor: desc });
-          // The resource symbol (bound by the binder) keys the local so the body
-          // can reference the resource; references resolve to this same symbol.
+          // For the declaration form, the resource symbol (bound by the binder)
+          // keys the local so the body can reference the resource.
           if (res.symbol) locals.set(res.symbol, { slot, descriptor: desc });
-          coerce(emitExpr(res.initializer), desc);
+          coerce(emitExpr(valueExpr), desc);
           storeVar(slot, desc);
           const action: FinallyAction = { kind: "resource", slot, ownerInternal, isInterface };
           return emitTryConstruct(() => emitResourceNest(i + 1), [], action);

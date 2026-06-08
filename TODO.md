@@ -42,7 +42,8 @@ verifiable placeholder, never a crash.
 - [x] Resource variable binding, so the body can reference the resource.
 - [ ] Null guard `if (r != null) r.close()` (JLS 14.20.3.1); resources are
       assumed non-null.
-- [ ] Variable-access resource form `try (existingVar)` (SE9).
+- [x] Variable-access resource form `try (existingVar)` (SE9): the resource
+      value is materialized into a slot and closed like the declaration form.
 
 ## Checker
 
