@@ -1,0 +1,17 @@
+{
+  "Empty": {
+    "members": [
+      "Empty();"
+    ],
+    "code": [
+      [
+        "Empty();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ]
+    ]
+  }
+}

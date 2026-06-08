@@ -1,0 +1,105 @@
+{
+  "Nest$Counter": {
+    "members": [
+      "Nest$Counter();",
+      "int get();",
+      "int n;",
+      "static int total;",
+      "void tick();"
+    ],
+    "code": [
+      [
+        "Nest$Counter();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "void tick();",
+        [
+          "aload_0",
+          "dup",
+          "getfield # // Field n:I",
+          "iconst_1",
+          "iadd",
+          "putfield # // Field n:I",
+          "getstatic # // Field total:I",
+          "iconst_1",
+          "iadd",
+          "putstatic # // Field total:I",
+          "return"
+        ]
+      ],
+      [
+        "int get();",
+        [
+          "aload_0",
+          "getfield # // Field n:I",
+          "ireturn"
+        ]
+      ]
+    ]
+  },
+  "Nest$Point": {
+    "members": [
+      "Nest$Point(int, int);",
+      "int sum();",
+      "int x;",
+      "int y;"
+    ],
+    "code": [
+      [
+        "Nest$Point(int, int);",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "aload_0",
+          "iload_1",
+          "putfield # // Field x:I",
+          "aload_0",
+          "iload_2",
+          "putfield # // Field y:I",
+          "return"
+        ]
+      ],
+      [
+        "int sum();",
+        [
+          "aload_0",
+          "getfield # // Field x:I",
+          "aload_0",
+          "getfield # // Field y:I",
+          "iadd",
+          "ireturn"
+        ]
+      ]
+    ]
+  },
+  "Nest": {
+    "members": [
+      "public Nest();",
+      "static int helper(int);"
+    ],
+    "code": [
+      [
+        "public Nest();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "static int helper(int);",
+        [
+          "iload_0",
+          "iconst_2",
+          "imul",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "Hello": {
+    "members": [
+      "public Hello();",
+      "public static void main(java.lang.String[]);"
+    ],
+    "code": [
+      [
+        "public Hello();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "public static void main(java.lang.String[]);",
+        [
+          "getstatic # // Field java/lang/System.out:Ljava/io/PrintStream;",
+          "ldc # // String Hello, world",
+          "invokevirtual # // Method java/io/PrintStream.println:(Ljava/lang/String;)V",
+          "return"
+        ]
+      ]
+    ]
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "FloatArith": {
+    "members": [
+      "FloatArith();",
+      "double div(double, double);",
+      "double mix(double, float);",
+      "double poly(double);",
+      "float addc(float);",
+      "float mul(float, float);",
+      "float neg(float);",
+      "float rem(float, float);"
+    ],
+    "code": [
+      [
+        "FloatArith();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "float mul(float, float);",
+        [
+          "fload_1",
+          "fload_2",
+          "fmul",
+          "freturn"
+        ]
+      ],
+      [
+        "float addc(float);",
+        [
+          "fload_1",
+          "ldc # // float 0.1f",
+          "fadd",
+          "freturn"
+        ]
+      ],
+      [
+        "double div(double, double);",
+        [
+          "dload_1",
+          "dload_3",
+          "ddiv",
+          "dreturn"
+        ]
+      ],
+      [
+        "float neg(float);",
+        [
+          "fload_1",
+          "fneg",
+          "freturn"
+        ]
+      ],
+      [
+        "double mix(double, float);",
+        [
+          "dload_1",
+          "fload_3",
+          "f2d",
+          "dadd",
+          "dreturn"
+        ]
+      ],
+      [
+        "float rem(float, float);",
+        [
+          "fload_1",
+          "fload_2",
+          "frem",
+          "freturn"
+        ]
+      ],
+      [
+        "double poly(double);",
+        [
+          "dload_1",
+          "dload_1",
+          "dmul",
+          "dload_1",
+          "dadd",
+          "dreturn"
+        ]
+      ]
+    ]
+  }
+}

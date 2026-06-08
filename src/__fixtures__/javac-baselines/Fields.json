@@ -1,0 +1,23 @@
+{
+  "Fields": {
+    "members": [
+      "Fields();",
+      "boolean e;",
+      "double[][] f;",
+      "int a;",
+      "int[] d;",
+      "java.lang.String b;",
+      "long c;"
+    ],
+    "code": [
+      [
+        "Fields();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ]
+    ]
+  }
+}

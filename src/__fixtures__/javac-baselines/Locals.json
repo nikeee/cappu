@@ -1,0 +1,64 @@
+{
+  "Locals": {
+    "members": [
+      "Locals();",
+      "int compute(int);",
+      "int reassign(int);",
+      "long widen(int);"
+    ],
+    "code": [
+      [
+        "Locals();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "int compute(int);",
+        [
+          "iload_1",
+          "iconst_1",
+          "iadd",
+          "istore_2",
+          "iload_2",
+          "iconst_2",
+          "imul",
+          "istore_3",
+          "iload_2",
+          "iload_3",
+          "iadd",
+          "istore 4",
+          "iload 4",
+          "ireturn"
+        ]
+      ],
+      [
+        "long widen(int);",
+        [
+          "iload_1",
+          "i2l",
+          "lstore_2",
+          "lload_2",
+          "lconst_1",
+          "ladd",
+          "lreturn"
+        ]
+      ],
+      [
+        "int reassign(int);",
+        [
+          "iload_1",
+          "istore_2",
+          "iload_2",
+          "iload_2",
+          "iadd",
+          "istore_2",
+          "iload_2",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}

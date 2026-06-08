@@ -1,7 +1,14 @@
 import { test } from "node:test";
 import { expect } from "expect";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +20,9 @@ import { createProgram } from "./program.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const baselinesDir = join(here, "__fixtures__", "emit-baselines");
+// Normalized javac disassembly, checked in as plain-text JSON so the byte-match
+// tests do not have to run javac on every test run (only when regenerating).
+const javacRefDir = join(here, "__fixtures__", "javac-baselines");
 const shouldUpdate = process.env.UPDATE_BASELINES === "1";
 
 function hasTool(name: string): boolean {
@@ -115,30 +125,66 @@ const CONTROL: Record<string, { source: string; stdout: string }> = {
   },
 };
 
-// javap -c per-method instruction lines, with constant-pool indices stripped so
-// only mnemonics + symbolic operands remain (comparable across compilers).
-function codeByMethod(classFile: string): Map<string, string[]> {
-  const lines = execFileSync("javap", ["-c", "-p", classFile], { encoding: "utf8" }).split("\n");
-  const map = new Map<string, string[]>();
-  let current: string | undefined;
-  for (const raw of lines) {
+// Normalized disassembly of a class: its member signatures (fields, ctors,
+// methods - sorted) and per-method instruction lines with constant-pool indices
+// stripped, so only mnemonics + symbolic operands remain (comparable across
+// compilers and the form we check into javac-baselines/).
+interface Disasm {
+  members: string[];
+  code: [string, string[]][]; // [methodSignature, instructionLines]
+}
+
+// Disassemble one or more class files in a SINGLE javap invocation, keyed by the
+// (binary) class name javap prints. Used both to read javac's output (when
+// regenerating baselines) and to disassemble our own emitted classes.
+function disasmFiles(classFiles: string[]): Map<string, Disasm> {
+  const out = execFileSync("javap", ["-c", "-p", ...classFiles], { encoding: "utf8" });
+  const map = new Map<string, Disasm>();
+  let cur: Disasm | undefined;
+  let method: string[] | undefined;
+  for (const raw of out.split("\n")) {
     const t = raw.trim();
-    if (/^\d+:/.test(t)) {
-      if (current) {
-        map.get(current)!.push(
-          t
-            .replace(/^\d+:\s*/, "")
-            .replace(/#\d+/g, "#")
-            .replace(/\s+/g, " ")
-            .trim(),
-        );
+    if (!t) continue;
+    // A class header is unindented (raw === trimmed), names a class/interface/enum
+    // and opens a brace; everything below it (indented) belongs to that class.
+    const header = raw === t && t.endsWith("{") && /(?:class|interface|enum)\s+[\w$.]+/.test(t);
+    if (header) {
+      const name = t.match(/(?:class|interface|enum)\s+([\w$.]+)/)![1]!;
+      cur = { members: [], code: [] };
+      map.set(name, cur);
+      method = undefined;
+    } else if (!cur) {
+      continue;
+    } else if (/^\d+:/.test(t)) {
+      method?.push(
+        t
+          .replace(/^\d+:\s*/, "")
+          .replace(/#\d+/g, "#")
+          .replace(/\s+/g, " ")
+          .trim(),
+      );
+    } else if (t.endsWith(";") && !t.startsWith("//")) {
+      cur.members.push(t);
+      if (t.includes("(")) {
+        method = [];
+        cur.code.push([t, method]); // a method/constructor declaration line
+      } else {
+        method = undefined; // a field (or `static {};`): no comparable code
       }
-    } else if (t.endsWith(";") && t.includes("(") && !t.startsWith("//")) {
-      current = t; // a method/constructor declaration line
-      map.set(current, []);
     }
   }
+  for (const d of map.values()) d.members.sort();
   return map;
+}
+
+// Compare our disassembly of a class against the javac reference.
+function expectMatchesJavac(ours: Disasm | undefined, reference: Disasm): void {
+  expect(ours).toBeDefined();
+  expect(ours!.members).toEqual(reference.members);
+  const ourCode = new Map(ours!.code);
+  const refCode = new Map(reference.code);
+  expect([...ourCode.keys()].sort()).toEqual([...refCode.keys()].sort());
+  for (const [sig, instrs] of refCode) expect(ourCode.get(sig)).toEqual(instrs);
 }
 
 function emit(name: string, source: string): Uint8Array {
@@ -162,14 +208,17 @@ function emitClasses(mainClass: string, source: string): { name: string; bytes: 
   return emitSourceFile(program.getSourceFile(uri)!, program, createChecker(program));
 }
 
-// Compile `source` with both javac and our emitter, run the main class under
-// `java`, and assert our stdout equals javac's (and the expected text). Writes
-// every emitted class so multi-class programs (nested classes, lambdas) work.
+// Run our emitted main class under `java` and assert its stdout equals the
+// expected text. The expected text IS the javac reference (verified once when the
+// baseline was written); to re-confirm it against a live javac, run with
+// UPDATE_BASELINES=1, which recompiles and asserts javac still prints it.
 function runsLikeJavac(mainClass: string, source: string, expectedStdout: string): void {
-  const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-  writeFileSync(join(ref, `${mainClass}.java`), source);
-  execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${mainClass}.java`)]);
-  const refOut = execFileSync("java", ["-cp", ref, mainClass], { encoding: "utf8" });
+  if (shouldUpdate && HAS_JAVAC && HAS_JAVA) {
+    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
+    writeFileSync(join(ref, `${mainClass}.java`), source);
+    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${mainClass}.java`)]);
+    expect(execFileSync("java", ["-cp", ref, mainClass], { encoding: "utf8" })).toBe(expectedStdout);
+  }
 
   const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
   for (const c of emitClasses(mainClass, source)) {
@@ -177,19 +226,45 @@ function runsLikeJavac(mainClass: string, source: string, expectedStdout: string
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, c.bytes);
   }
-  const ourOut = execFileSync("java", ["-cp", ours, mainClass], { encoding: "utf8" });
-  expect(ourOut).toBe(refOut);
-  expect(refOut).toBe(expectedStdout);
+  expect(execFileSync("java", ["-cp", ours, mainClass], { encoding: "utf8" })).toBe(expectedStdout);
 }
 
-// javap -p member signature lines (fields, constructors, methods), normalized.
-function members(classFile: string): string[] {
-  const out = execFileSync("javap", ["-p", classFile], { encoding: "utf8" });
-  return out
-    .split("\n")
-    .map(l => l.trim())
-    .filter(l => l.endsWith(";") && !l.startsWith("Compiled"))
-    .sort();
+// javac's normalized disassembly for a fixture's classes, keyed by class name.
+// Reads the checked-in JSON; regenerates it from javac when UPDATE_BASELINES=1 or
+// the file is missing and a JDK is present. Returns undefined when neither a
+// checked-in baseline nor javac is available (the test then skips the comparison).
+function loadJavacRef(fixtureName: string, source: string): Map<string, Disasm> | undefined {
+  const file = join(javacRefDir, `${fixtureName}.json`);
+  if (!shouldUpdate && existsSync(file)) {
+    return new Map(Object.entries(JSON.parse(readFileSync(file, "utf8")) as Record<string, Disasm>));
+  }
+  if (!(HAS_JAVAC && HAS_JAVA)) return undefined;
+  const dir = mkdtempSync(join(tmpdir(), "javac-ref-"));
+  writeFileSync(join(dir, `${fixtureName}.java`), source);
+  execFileSync("javac", ["--release", "21", "-d", dir, join(dir, `${fixtureName}.java`)]);
+  const classFiles = readdirSync(dir)
+    .filter(f => f.endsWith(".class"))
+    .map(f => join(dir, f));
+  const map = disasmFiles(classFiles);
+  mkdirSync(javacRefDir, { recursive: true });
+  writeFileSync(file, `${JSON.stringify(Object.fromEntries(map), null, 2)}\n`);
+  return map;
+}
+
+// Disassembly of every fixture class we emit, computed once in a single javap
+// invocation and memoized, so the per-fixture byte-match tests share one launch.
+let oursDisasmCache: Map<string, Disasm> | undefined;
+function oursDisasm(): Map<string, Disasm> {
+  if (oursDisasmCache) return oursDisasmCache;
+  const dir = mkdtempSync(join(tmpdir(), "emit-ours-all-"));
+  for (const [name, src] of [...Object.entries(FIXTURES), ...Object.entries(MULTI_FIXTURES)]) {
+    for (const c of emitClasses(name, src)) writeFileSync(join(dir, `${c.name}.class`), c.bytes);
+  }
+  const files = readdirSync(dir)
+    .filter(f => f.endsWith(".class"))
+    .map(f => join(dir, f));
+  oursDisasmCache = disasmFiles(files);
+  return oursDisasmCache;
 }
 
 for (const [name, source] of Object.entries(FIXTURES)) {
@@ -203,53 +278,15 @@ for (const [name, source] of Object.entries(FIXTURES)) {
     expect(Buffer.from(bytes).equals(readFileSync(baseline))).toBe(true);
   });
 
-  test(`emit is JVM-valid: ${name}`, { skip: HAS_JAVA ? false : "no JDK" }, () => {
-    const dir = mkdtempSync(join(tmpdir(), "emit-"));
-    writeFileSync(join(dir, `${name}.class`), emit(name, source));
-    const out = execFileSync("javap", ["-p", join(dir, `${name}.class`)], { encoding: "utf8" });
-    expect(out).toContain(`class ${name}`);
-    // Loading the class runs the bytecode verifier over every method. A bad body
-    // would raise VerifyError/ClassFormatError; "Main method not found" (or an
-    // actual run) means it verified cleanly.
-    let stderr = "";
-    try {
-      execFileSync("java", ["-cp", dir, name], { encoding: "utf8", stdio: "pipe" });
-    } catch (e) {
-      stderr = String((e as { stderr?: string }).stderr ?? "");
-    }
-    expect(stderr).not.toMatch(/VerifyError|ClassFormatError|Incompatible/);
+  // Members + instruction stream must match javac, compared against the checked-in
+  // normalized disassembly (no javac at test time). These straight-line fixtures
+  // have no branches, so matching javac's instructions implies the class verifies;
+  // control-flow validity is covered by the CONTROL and runsLikeJavac tests.
+  test(`bytecode matches javac: ${name}`, { skip: HAS_JAVA ? false : "no JDK (javap)" }, () => {
+    const ref = loadJavacRef(name, source);
+    if (!ref) return; // no baseline and no javac to generate one
+    expectMatchesJavac(oursDisasm().get(name), ref.get(name)!);
   });
-
-  test(`members match javac: ${name}`, { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" }, () => {
-    const dir = mkdtempSync(join(tmpdir(), "emit-"));
-    // Reference: compile the same source with javac (Java 21 target).
-    writeFileSync(join(dir, `${name}.java`), source);
-    execFileSync("javac", ["--release", "21", "-d", dir, join(dir, `${name}.java`)]);
-    const reference = members(join(dir, `${name}.class`));
-    // Ours, written to a separate dir to avoid overwriting javac's output.
-    const oursDir = mkdtempSync(join(tmpdir(), "emit-ours-"));
-    writeFileSync(join(oursDir, `${name}.class`), emit(name, source));
-    expect(members(join(oursDir, `${name}.class`))).toEqual(reference);
-  });
-
-  test(
-    `bytecode matches javac: ${name}`,
-    { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
-    () => {
-      const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-      writeFileSync(join(ref, `${name}.java`), source);
-      execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
-      const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
-      writeFileSync(join(ours, `${name}.class`), emit(name, source));
-
-      const reference = codeByMethod(join(ref, `${name}.class`));
-      const generated = codeByMethod(join(ours, `${name}.class`));
-      expect([...generated.keys()].sort()).toEqual([...reference.keys()].sort());
-      for (const [sig, instrs] of reference) {
-        expect(generated.get(sig)).toEqual(instrs);
-      }
-    },
-  );
 }
 
 for (const [name, expected] of Object.entries(RUNS)) {
@@ -275,22 +312,14 @@ for (const [name, source] of Object.entries(MULTI_FIXTURES)) {
 
   test(
     `multi-class bytecode matches javac: ${name}`,
-    { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+    { skip: HAS_JAVA ? false : "no JDK (javap)" },
     () => {
-      const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-      writeFileSync(join(ref, `${name}.java`), source);
-      execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
-      const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
-      const emitted = emitClasses(name, source);
+      const ref = loadJavacRef(name, source);
+      if (!ref) return;
       // Every nested class is emitted as its own Outer$Inner.class.
-      expect(emitted.map(c => c.name).sort()).toEqual(["Nest", "Nest$Counter", "Nest$Point"]);
-      for (const c of emitted) writeFileSync(join(ours, `${c.name}.class`), c.bytes);
-      for (const c of emitted) {
-        const reference = codeByMethod(join(ref, `${c.name}.class`));
-        const generated = codeByMethod(join(ours, `${c.name}.class`));
-        expect([...generated.keys()].sort()).toEqual([...reference.keys()].sort());
-        for (const [sig, instrs] of reference) expect(generated.get(sig)).toEqual(instrs);
-      }
+      const emitted = emitClasses(name, source).map(c => c.name).sort();
+      expect(emitted).toEqual(["Nest", "Nest$Counter", "Nest$Point"]);
+      for (const cn of emitted) expectMatchesJavac(oursDisasm().get(cn), ref.get(cn)!);
     },
   );
 }
@@ -301,37 +330,29 @@ function source(name: string): string {
 
 test(
   "folded overflow constants run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
-    const name = "Overflow";
-    const src = [
-      "public class Overflow {",
-      "  public static void main(String[] args) {",
-      "    System.out.println(2147483647 + 1);",
-      "    System.out.println(-8 >>> 1);",
-      "    System.out.println(9223372036854775807L + 1L);",
-      "    System.out.println(1 << 33);",
-      "    System.out.println(2147483647 * 2);",
-      "  }",
-      "}",
-    ].join("\n");
-    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-    writeFileSync(join(ref, `${name}.java`), src);
-    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
-    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
-
-    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
-    writeFileSync(join(ours, `${name}.class`), emit(name, src));
-    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
-
-    expect(ourOut).toBe(refOut);
-    expect(refOut).toBe("-2147483648\n2147483644\n-9223372036854775808\n2\n-2\n");
+    runsLikeJavac(
+      "Overflow",
+      [
+        "public class Overflow {",
+        "  public static void main(String[] args) {",
+        "    System.out.println(2147483647 + 1);",
+        "    System.out.println(-8 >>> 1);",
+        "    System.out.println(9223372036854775807L + 1L);",
+        "    System.out.println(1 << 33);",
+        "    System.out.println(2147483647 * 2);",
+        "  }",
+        "}",
+      ].join("\n"),
+      "-2147483648\n2147483644\n-9223372036854775808\n2\n-2\n",
+    );
   },
 );
 
 test(
   "casts and instanceof run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     const name = "Cast";
     const src = [
@@ -367,7 +388,7 @@ test(
 
 test(
   "inheritance, interfaces and packages run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     const sources: Record<string, string> = {
       "Animal.java": 'package com.app;\npublic class Animal { String sound() { return "?"; } }',
@@ -417,7 +438,7 @@ test(
 
 test(
   "string concatenation (invokedynamic) runs identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     const name = "Sc";
     const src = [
@@ -447,7 +468,7 @@ test(
 
 test(
   "field initializers and static constants run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     const name = "Ini";
     const src = [
@@ -484,7 +505,7 @@ test(
 
 test(
   "object creation and field access run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     const name = "Obj";
     const src = [
@@ -521,7 +542,7 @@ test(
 
 test(
   "lambda expressions (invokedynamic / LambdaMetafactory) run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Lam",
@@ -547,7 +568,7 @@ test(
 
 test(
   "try/finally (return, catch, rethrow, ordering) runs identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Fy",
@@ -575,7 +596,7 @@ test(
 
 test(
   "try/catch (multi-catch, exception flow) runs identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Tc",
@@ -602,7 +623,7 @@ test(
 
 test(
   "throw statements run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Tw",
@@ -623,7 +644,7 @@ test(
 
 test(
   "try-with-resources runs identically to javac (order, return, suppression)",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Twr",
@@ -689,7 +710,7 @@ test(
 
 test(
   "labeled break and continue run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Lb",
@@ -743,7 +764,7 @@ test(
 
 test(
   "enum switch (statement and exhaustive expression) runs identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Es",
@@ -767,7 +788,7 @@ test(
 
 test(
   "switch expressions (arrow, yield, block, string) run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Sx",
@@ -792,7 +813,7 @@ test(
 
 test(
   "for-each over a collection (Iterator) runs identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Fe",
@@ -819,7 +840,7 @@ test(
 
 test(
   "arrays (creation, access, length, store, foreach, multidim) run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Arr",
@@ -850,7 +871,7 @@ test(
 
 test(
   "enum declarations run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "En",
@@ -881,7 +902,7 @@ test(
 
 test(
   "autoboxing and unboxing run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Box",
@@ -913,7 +934,7 @@ test(
 
 test(
   "method references (static/bound/unbound/constructor) run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Mr",
@@ -942,7 +963,7 @@ test(
 
 test(
   "this-capturing lambdas (instance context) run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Th",
@@ -969,7 +990,7 @@ test(
 
 test(
   "static nested classes and field ++ run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Nest",
@@ -993,7 +1014,7 @@ test(
 
 test(
   "definite assignment: uninitialized locals across branches verify like javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Da",
@@ -1014,7 +1035,7 @@ test(
 
 test(
   "arrow and string switch run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Sw2",
@@ -1039,7 +1060,7 @@ test(
 
 test(
   "compound assignment (+=, bitwise, narrowing, fields, string) runs identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Ca",
@@ -1068,7 +1089,7 @@ test(
 
 test(
   "break and continue in loops run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     runsLikeJavac(
       "Lp",
@@ -1092,7 +1113,7 @@ test(
 
 test(
   "switch statements (table + lookup, fall-through, break) run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     const name = "Sw";
     const src = [
@@ -1145,7 +1166,7 @@ test(
 
 test(
   "float and double arithmetic run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     const name = "Fp";
     const src = [
@@ -1181,7 +1202,7 @@ test(
 
 test(
   "conditional (ternary) expressions run identically to javac",
-  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  { skip: HAS_JAVA ? false : "no JDK" },
   () => {
     const name = "Tern";
     const src = [

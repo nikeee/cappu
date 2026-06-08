@@ -1,0 +1,73 @@
+{
+  "Fold": {
+    "members": [
+      "Fold();",
+      "boolean d();",
+      "int a();",
+      "int c();",
+      "int e();",
+      "int f();",
+      "int g();",
+      "long b();"
+    ],
+    "code": [
+      [
+        "Fold();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "int a();",
+        [
+          "bipush 42",
+          "ireturn"
+        ]
+      ],
+      [
+        "long b();",
+        [
+          "ldc2_w # // long 10000l",
+          "lreturn"
+        ]
+      ],
+      [
+        "int c();",
+        [
+          "sipush 1024",
+          "ireturn"
+        ]
+      ],
+      [
+        "boolean d();",
+        [
+          "iconst_1",
+          "ireturn"
+        ]
+      ],
+      [
+        "int e();",
+        [
+          "bipush 6",
+          "ireturn"
+        ]
+      ],
+      [
+        "int f();",
+        [
+          "bipush -5",
+          "ireturn"
+        ]
+      ],
+      [
+        "int g();",
+        [
+          "bipush 21",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}

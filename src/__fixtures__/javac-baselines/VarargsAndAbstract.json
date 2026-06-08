@@ -1,0 +1,38 @@
+{
+  "VarargsAndAbstract": {
+    "members": [
+      "VarargsAndAbstract();",
+      "abstract int f(int);",
+      "int g(int...);",
+      "static double h(double, double);"
+    ],
+    "code": [
+      [
+        "VarargsAndAbstract();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "abstract int f(int);",
+        []
+      ],
+      [
+        "int g(int...);",
+        [
+          "iconst_0",
+          "ireturn"
+        ]
+      ],
+      [
+        "static double h(double, double);",
+        [
+          "dload_0",
+          "dreturn"
+        ]
+      ]
+    ]
+  }
+}

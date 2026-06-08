@@ -1,0 +1,37 @@
+{
+  "Pt": {
+    "members": [
+      "Pt(int, int);",
+      "int sum();",
+      "int x;",
+      "int y;"
+    ],
+    "code": [
+      [
+        "Pt(int, int);",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "aload_0",
+          "iload_1",
+          "putfield # // Field x:I",
+          "aload_0",
+          "iload_2",
+          "putfield # // Field y:I",
+          "return"
+        ]
+      ],
+      [
+        "int sum();",
+        [
+          "aload_0",
+          "getfield # // Field x:I",
+          "aload_0",
+          "getfield # // Field y:I",
+          "iadd",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}

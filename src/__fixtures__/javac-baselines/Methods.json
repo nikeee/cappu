@@ -1,0 +1,56 @@
+{
+  "Methods": {
+    "members": [
+      "int[] e(int[]);",
+      "java.lang.String d(java.lang.String);",
+      "public Methods();",
+      "public int b(int);",
+      "static long c(long, int);",
+      "void a();"
+    ],
+    "code": [
+      [
+        "public Methods();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "void a();",
+        [
+          "return"
+        ]
+      ],
+      [
+        "public int b(int);",
+        [
+          "iload_1",
+          "ireturn"
+        ]
+      ],
+      [
+        "static long c(long, int);",
+        [
+          "lload_0",
+          "lreturn"
+        ]
+      ],
+      [
+        "java.lang.String d(java.lang.String);",
+        [
+          "aload_1",
+          "areturn"
+        ]
+      ],
+      [
+        "int[] e(int[]);",
+        [
+          "aload_1",
+          "areturn"
+        ]
+      ]
+    ]
+  }
+}

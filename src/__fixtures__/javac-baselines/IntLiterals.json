@@ -1,0 +1,97 @@
+{
+  "IntLiterals": {
+    "members": [
+      "IntLiterals();",
+      "int allOnes();",
+      "int big();",
+      "int bin();",
+      "int cafe();",
+      "int hex1e();",
+      "int hexD();",
+      "int hexE();",
+      "int hexFf();",
+      "int oct();",
+      "long hexL();"
+    ],
+    "code": [
+      [
+        "IntLiterals();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "int hexFf();",
+        [
+          "sipush 255",
+          "ireturn"
+        ]
+      ],
+      [
+        "int hexE();",
+        [
+          "bipush 14",
+          "ireturn"
+        ]
+      ],
+      [
+        "int hexD();",
+        [
+          "bipush 13",
+          "ireturn"
+        ]
+      ],
+      [
+        "int hex1e();",
+        [
+          "bipush 30",
+          "ireturn"
+        ]
+      ],
+      [
+        "int cafe();",
+        [
+          "ldc # // int 51966",
+          "ireturn"
+        ]
+      ],
+      [
+        "int allOnes();",
+        [
+          "iconst_m1",
+          "ireturn"
+        ]
+      ],
+      [
+        "long hexL();",
+        [
+          "ldc2_w # // long 255l",
+          "lreturn"
+        ]
+      ],
+      [
+        "int oct();",
+        [
+          "bipush 8",
+          "ireturn"
+        ]
+      ],
+      [
+        "int bin();",
+        [
+          "bipush 10",
+          "ireturn"
+        ]
+      ],
+      [
+        "int big();",
+        [
+          "ldc # // int 1000000",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}
