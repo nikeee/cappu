@@ -3735,6 +3735,23 @@ function generateBody(
     }
   } else {
     if (!method.body || method.body.kind !== SyntaxKind.Block) throw new UnsupportedEmit();
+    // A leading explicit constructor invocation (JLS 8.8.7.1): super(args) or
+    // this(args) as the first statement.
+    const firstStmt = (method.body as Block).statements[0];
+    const leadingCall =
+      isConstructor &&
+      !enumCtor &&
+      firstStmt?.kind === SyntaxKind.ExpressionStatement &&
+      (firstStmt as ExpressionStatement).expression.kind === SyntaxKind.CallExpression
+        ? ((firstStmt as ExpressionStatement).expression as CallExpression)
+        : undefined;
+    const explicitInvocation =
+      leadingCall &&
+      (leadingCall.expression.kind === SyntaxKind.SuperExpression ||
+        leadingCall.expression.kind === SyntaxKind.ThisExpression)
+        ? leadingCall
+        : undefined;
+    const isThisCall = explicitInvocation?.expression.kind === SyntaxKind.ThisExpression;
     if (isConstructor && enumCtor) {
       // Implicit super(name, ordinal) for an enum constructor.
       code.u1(OP_ALOAD_0);
@@ -3746,12 +3763,35 @@ function generateBody(
       code.u1(OP_INVOKESPECIAL);
       code.u2(cp.methodref("java/lang/Enum", "<init>", "(Ljava/lang/String;I)V"));
       pop(3);
+    } else if (isConstructor && explicitInvocation) {
+      // Explicit super(args)/this(args) (JLS 8.8.7.1). Resolve the target ctor for
+      // its parameter descriptors; super delegates to the superclass, this to a
+      // sibling ctor of the same class.
+      const classDecl = (method as Node).parent as ClassDeclaration | undefined;
+      const targetSymbol = isThisCall
+        ? classDecl?.symbol
+        : classDecl?.extendsType?.kind === SyntaxKind.TypeReference
+          ? resolveTypeEntityName(
+              (classDecl.extendsType as TypeReference).typeName,
+              classDecl,
+              program,
+            )
+          : undefined;
+      const owner = isThisCall ? thisInternalName : ctorSuper;
+      const args = explicitInvocation.arguments ?? [];
+      const target = targetSymbol && findConstructor(targetSymbol, args.length);
+      const paramDescs = target
+        ? target.parameters.map(p => paramDescriptor(p as Parameter, program))
+        : undefined;
+      if (!owner || !paramDescs) throw new UnsupportedEmit();
+      code.u1(OP_ALOAD_0);
+      pushRef();
+      args.forEach((arg, i) => coerce(emitExpr(arg), paramDescs[i]!));
+      code.u1(OP_INVOKESPECIAL);
+      code.u2(cp.methodref(owner, "<init>", `(${paramDescs.join("")})V`));
+      pop(1 + args.length);
     } else if (isConstructor && ctorSuper) {
       // Implicit super(): aload_0; invokespecial <super>.<init>:()V.
-      // TODO: explicit constructor invocations (JLS 8.8.7.1): a leading
-      // `super(args)` (with arguments) or `this(args)` is not handled - we always
-      // emit a no-arg super() and then the field inits, which triggers the
-      // fallback for constructors that chain explicitly.
       code.u1(OP_ALOAD_0);
       pushRef();
       code.u1(OP_INVOKESPECIAL);
@@ -3783,22 +3823,35 @@ function generateBody(
       code.u2(cp.fieldref(assertionsOwner, "$assertionsDisabled", "Z"));
       pop();
     }
-    for (const fi of fieldInits) {
-      if (fi.isStatic) {
-        coerce(emitExpr(fi.init), fi.descriptor);
-        code.u1(OP_PUTSTATIC);
-        code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
-        pop(); // value
-      } else {
-        code.u1(OP_ALOAD_0);
-        pushRef();
-        coerce(emitExpr(fi.init), fi.descriptor);
-        code.u1(OP_PUTFIELD);
-        code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
-        pop(2); // receiver + value
+    // Instance field initializers run after super(...); a this(...) delegation
+    // skips them (the target constructor runs them).
+    if (!isThisCall) {
+      for (const fi of fieldInits) {
+        if (fi.isStatic) {
+          coerce(emitExpr(fi.init), fi.descriptor);
+          code.u1(OP_PUTSTATIC);
+          code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
+          pop(); // value
+        } else {
+          code.u1(OP_ALOAD_0);
+          pushRef();
+          coerce(emitExpr(fi.init), fi.descriptor);
+          code.u1(OP_PUTFIELD);
+          code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
+          pop(2); // receiver + value
+        }
       }
     }
-    const terminated = emitStmt(method.body);
+    // The body, skipping a leading explicit constructor invocation (already
+    // emitted in the prologue).
+    const terminated = explicitInvocation
+      ? inScope(() => {
+          let t = false;
+          const stmts = (method.body as Block).statements;
+          for (let i = 1; i < stmts.length; i++) t = emitStmt(stmts[i]!);
+          return t;
+        })
+      : emitStmt(method.body);
     if (!terminated) {
       if (returnDescriptor === "V") code.u1(OP_RETURN);
       else throw new UnsupportedEmit(); // non-void path falls off the end

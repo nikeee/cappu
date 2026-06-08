@@ -643,6 +643,37 @@ test(
 );
 
 test(
+  "explicit super(args)/this(args) constructor invocations run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Ctor",
+      [
+        "public class Ctor {",
+        "  static class Base {",
+        "    int b;",
+        "    Base(int b){ this.b = b; }",
+        "  }",
+        "  static class Derived extends Base {",
+        "    int d = 100;", // field init runs after super(), before the rest of the body
+        "    Derived(int x){ super(x); d = d + x; }",
+        "    Derived(){ this(7); }", // this(...) delegates; must not re-run the d initializer twice
+        "    int sum(){ return b + d; }",
+        "  }",
+        "  public static void main(String[] a){",
+        "    Derived p = new Derived(5);",
+        "    System.out.println(p.b + \" \" + p.d + \" \" + p.sum());",
+        "    Derived q = new Derived();",
+        "    System.out.println(q.b + \" \" + q.d + \" \" + q.sum());",
+        "  }",
+        "}",
+      ].join("\n"),
+      "5 105 110\n7 107 114\n",
+    );
+  },
+);
+
+test(
   "instanceof type-pattern binding runs identically to javac",
   { skip: HAS_JAVA ? false : "no JDK" },
   () => {

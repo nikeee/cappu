@@ -31,8 +31,9 @@ verifiable placeholder, never a crash.
 
 - [ ] Anonymous classes `new T(){...}` (JLS 15.9.5) and local classes (JLS 14.3):
       emit as their own `Outer$N` class files (currently skipped).
-- [ ] Explicit constructor invocations (JLS 8.8.7.1): a leading `super(args)` or
-      `this(args)` (only an implicit no-arg `super()` is emitted today).
+- [x] Explicit constructor invocations (JLS 8.8.7.1): a leading `super(args)` or
+      `this(args)`; `this(...)` skips this constructor's field initializers. The
+      target overload is resolved by argument count (as for `new`).
 
 ## Try-with-resources (JLS 14.20.3) - partially done
 
