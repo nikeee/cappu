@@ -2016,10 +2016,10 @@ function generateBody(
     const op = node.operatorToken;
     const lc = numericCat(checker.getTypeOfExpression(node.left));
     const rc = numericCat(checker.getTypeOfExpression(node.right));
-    // TODO: non-numeric binary operators with a reference operand reach here and
-    // degrade: reference equality `==`/`!=` (JLS 15.21.3, if_acmpeq/if_acmpne)
-    // and boolean `&`/`|`/`^` on Boolean operands (JLS 15.22.2). String `+` is
-    // handled separately by emitStringConcat (JLS 15.18.1).
+    // Safety net for an arithmetic/bitwise/shift operator with a non-numeric
+    // operand. Reference equality and boolean &/|/^ never reach here (equality
+    // goes through emitBoolean -> emitBranch; boolean operands are category "I"),
+    // and String `+` is handled by emitStringConcat (JLS 15.18.1).
     if (!lc || !rc) throw new UnsupportedEmit();
 
     const shift = SHIFTS[op];

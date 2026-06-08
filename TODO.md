@@ -23,8 +23,6 @@ verifiable placeholder, never a crash.
 ## Expressions
 
 - [ ] `instanceof` type-pattern binding `x instanceof T t` (JLS 14.30.1 / 15.20.2).
-- [ ] Reference equality `==` / `!=` (JLS 15.21.3, if_acmpeq/if_acmpne).
-- [ ] Boolean bitwise `&` / `|` / `^` on `Boolean`/`boolean` operands (JLS 15.22.2).
 - [ ] Array constructor references `T[]::new` (JLS 15.13.3).
 
 ## Classes and members
@@ -66,3 +64,6 @@ These do not affect correctness but widen the diff vs javac's output.
 - [x] Enhanced `for` over arrays and `Iterable` (JLS 14.14.2).
 - [x] Switch statements/expressions incl. string and enum dispatch (JLS 14.11).
 - [x] Lambdas, method references, autoboxing, enums, arrays.
+- [x] `synchronized` (JLS 14.19) and `assert` (JLS 14.10).
+- [x] Reference equality `==`/`!=` incl. null, and boolean `&`/`|`/`^` - verified
+      working (via emitBoolean/emitBranch and the integer bitwise path).
