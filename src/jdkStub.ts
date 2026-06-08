@@ -550,6 +550,9 @@ interface Predicate<T> { boolean test(T t); }
 interface BiPredicate<T, U> { boolean test(T t, U u); }
 interface UnaryOperator<T> { T apply(T t); }
 interface BinaryOperator<T> { T apply(T a, T b); }
+interface IntFunction<R> { R apply(int value); }
+interface ToIntFunction<T> { int applyAsInt(T value); }
+interface IntUnaryOperator { int applyAsInt(int operand); }
 `;
 
 export const JDK_STUB_FILES: ReadonlyArray<{ uri: string; text: string }> = [

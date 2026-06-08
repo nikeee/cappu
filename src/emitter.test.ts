@@ -1561,3 +1561,27 @@ test(
     );
   },
 );
+
+test(
+  "array constructor references (T[]::new) run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "ArrNew",
+      [
+        "import java.util.function.IntFunction;",
+        "public class ArrNew {",
+        "  public static void main(String[] a){",
+        "    IntFunction<int[]> f = int[]::new;",
+        "    int[] x = f.apply(5);",
+        "    System.out.println(x.length);",
+        "    IntFunction<String[]> g = String[]::new;",
+        "    String[] s = g.apply(3);",
+        '    System.out.println(s.length + " " + (s[0] == null));',
+        "  }",
+        "}",
+      ].join("\n"),
+      "5\n3 true\n",
+    );
+  },
+);

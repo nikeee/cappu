@@ -25,7 +25,8 @@ verifiable placeholder, never a crash.
 - [x] `instanceof` type-pattern binding `x instanceof T t` (JLS 14.30.1) as the
       matched condition of an `if`/`&&`. The when-true direction (negation, `||`,
       plain value context) still degrades and does not bind.
-- [ ] Array constructor references `T[]::new` (JLS 15.13.3).
+- [x] Array constructor references `T[]::new` (JLS 15.13.3): bound to a synthetic
+      `(int) -> new T[len]` helper via invokedynamic (REF_invokeStatic).
 
 ## Classes and members
 

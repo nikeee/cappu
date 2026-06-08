@@ -39,6 +39,7 @@ import {
   type AssertStatement,
   type Block,
   type CatchClause,
+  type ClassLiteralExpression,
   type DoStatement,
   type InstanceofExpression,
   type ExpressionStatement,
@@ -2638,20 +2639,40 @@ function generateBody(
     const samErased = `(${info.erasedParams.map(t => typeDescriptor(t)).join("")})${descOf(info.erasedReturn)}`;
     const instantiated = `(${instParamDescs.join("")})${descOf(info.instReturn)}`;
     const interfaceDesc = typeDescriptor(info.interfaceType);
-    const ownerInternal = binaryName(info.ownerSymbol);
-    const isInterface = (info.ownerSymbol.flags & SymbolFlags.Interface) !== 0;
+
+    // T[]::new (JLS 15.13.3): bind a synthetic `(int) -> new T[len]` helper.
+    if (info.kind === "arrayConstructor") {
+      const arrayDesc = descriptorOf((ref.expression as ClassLiteralExpression).type, program);
+      const implName = `lambda$${enclosingName}$${lambdaCounter++}`;
+      lambdaMethods.push(emitArrayCtorRefMethod(cp, implName, arrayDesc));
+      const idx = cp.invokeDynamicLambda(
+        info.samName,
+        `()${interfaceDesc}`,
+        samErased,
+        REF_invokeStatic,
+        thisInternalName,
+        implName,
+        `(I)${arrayDesc}`,
+        instantiated,
+      );
+      code.u1(OP_INVOKEDYNAMIC);
+      code.u2(idx);
+      code.u2(0);
+      push(interfaceDesc);
+      return interfaceDesc;
+    }
+
+    const ownerInternal = binaryName(info.ownerSymbol!);
+    const isInterface = (info.ownerSymbol!.flags & SymbolFlags.Interface) !== 0;
 
     let refKind: number;
     let implName: string;
     let implDescriptor: string;
     let dynamicArgs = "";
     if (info.kind === "constructor") {
-      // TODO: array constructor references `T[]::new` (JLS 15.13.3) are not
-      // handled: they construct an array (IntFunction<T[]>) via a synthetic
-      // anewarray helper rather than an <init> MethodHandle.
       refKind = REF_newInvokeSpecial;
       implName = "<init>";
-      const ctor = findConstructor(info.ownerSymbol, info.instParams.length);
+      const ctor = findConstructor(info.ownerSymbol!, info.instParams.length);
       const ctorParams = ctor
         ? ctor.parameters.map(p => paramDescriptor(p as Parameter, program))
         : [];
@@ -4036,6 +4057,41 @@ function emitLambdaMethod(
     },
   );
   writeCodeAttribute(info, cp, body);
+  return info;
+}
+
+// The synthetic impl method for an array constructor reference `T[]::new`
+// (JLS 15.13.3): `(int len) -> new <elem>[len]`, a private static helper the
+// invokedynamic binds via LambdaMetafactory. `arrayDesc` is the array type, e.g.
+// "[I" or "[Ljava/lang/String;".
+const NEWARRAY_ATYPE_BY_DESC: Record<string, number> = {
+  Z: 4,
+  C: 5,
+  F: 6,
+  D: 7,
+  B: 8,
+  S: 9,
+  I: 10,
+  J: 11,
+};
+function emitArrayCtorRefMethod(cp: ConstantPool, name: string, arrayDesc: string): ByteBuffer {
+  const elem = arrayDesc.slice(1); // element descriptor
+  const code = new ByteBuffer();
+  code.u1(OP_ILOAD_0); // the requested length
+  const atype = NEWARRAY_ATYPE_BY_DESC[elem];
+  if (atype !== undefined) {
+    code.u1(OP_NEWARRAY);
+    code.u1(atype);
+  } else {
+    code.u1(OP_ANEWARRAY);
+    code.u2(cp.classInfo(elem[0] === "[" ? elem : elem.slice(1, -1)));
+  }
+  code.u1(OP_ARETURN);
+  const info = new ByteBuffer();
+  info.u2(ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC);
+  info.u2(cp.utf8(name));
+  info.u2(cp.utf8(`(I)${arrayDesc}`));
+  writeCodeAttribute(info, cp, { code, maxStack: 1, maxLocals: 1 });
   return info;
 }
 

@@ -82,9 +82,10 @@ export interface LambdaInfo {
 
 /** Method-reference lowering info: the SAM info plus the referenced method. */
 export interface MethodRefInfo extends LambdaInfo {
-  readonly kind: "static" | "bound" | "unbound" | "constructor";
-  /** The type declaring the referenced method (or the constructed type). */
-  readonly ownerSymbol: Symbol;
+  readonly kind: "static" | "bound" | "unbound" | "constructor" | "arrayConstructor";
+  /** The type declaring the referenced method (or the constructed type). Absent
+   * for an array constructor reference `T[]::new`, which has no class. */
+  readonly ownerSymbol?: Symbol;
   /** The referenced method declaration (undefined for a constructor reference). */
   readonly target?: MethodDeclaration;
 }
@@ -604,8 +605,12 @@ export function createChecker(program: Program): Checker {
       );
     const arity = fi.instParams.length;
 
-    // Type::new
+    // Type::new (and T[]::new, an array constructor reference, JLS 15.13.3).
     if (ref.isConstructorRef) {
+      if (ref.expression.kind === SyntaxKind.ClassLiteralExpression) {
+        const t = (ref.expression as { type?: TypeNode }).type;
+        if (t?.kind === SyntaxKind.ArrayType) return { ...fi, kind: "arrayConstructor" };
+      }
       const owner = asType(ref.expression);
       return owner ? { ...fi, kind: "constructor", ownerSymbol: owner } : undefined;
     }
