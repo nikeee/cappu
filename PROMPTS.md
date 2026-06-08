@@ -55,3 +55,4 @@ no timestamps were captured.
 ## Live (timestamped)
 
 - 2026-06-08 12:41 — also append the prompt timestamp to the verbatim record in PROMPTS.md
+- 2026-06-08 12:49 — you see the TypeScript repo in this project? take it off the gitignore and add it back as a submodule
