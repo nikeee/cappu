@@ -30,6 +30,8 @@ import {
   type ClassDeclaration,
   type ConstructorDeclaration,
   type EnumDeclaration,
+  type RecordComponent,
+  type RecordDeclaration,
   type BreakStatement,
   type ContinueStatement,
   type LabeledStatement,
@@ -141,6 +143,9 @@ const MAKE_CONCAT_BSM_DESCRIPTOR =
 const LAMBDA_METAFACTORY = "java/lang/invoke/LambdaMetafactory";
 const LAMBDA_METAFACTORY_BSM_DESCRIPTOR =
   "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;";
+// java.lang.runtime.ObjectMethods.bootstrap (record equals/hashCode/toString).
+const OBJECT_METHODS_BSM_DESCRIPTOR =
+  "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/TypeDescriptor;Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/invoke/MethodHandle;)Ljava/lang/Object;";
 const OP_INVOKEDYNAMIC = 0xba;
 
 // Boxing/unboxing (JLS 5.1.7/5.1.8): primitive descriptor -> wrapper internal
@@ -501,6 +506,39 @@ class ConstantPool {
     });
   }
 
+  /**
+   * An invokedynamic to java.lang.runtime.ObjectMethods.bootstrap for a record's
+   * equals/hashCode/toString. Static args are the record Class, the ";"-joined
+   * component names, and a MethodHandle per component accessor.
+   */
+  invokeDynamicObjectMethod(
+    methodName: string,
+    descriptor: string,
+    recordInternal: string,
+    names: string,
+    getters: { name: string; descriptor: string }[],
+  ): number {
+    const bsmHandle = this.methodHandle(
+      REF_invokeStatic,
+      this.methodref("java/lang/runtime/ObjectMethods", "bootstrap", OBJECT_METHODS_BSM_DESCRIPTOR),
+    );
+    const args = [
+      this.classInfo(recordInternal),
+      this.string(names),
+      ...getters.map(g =>
+        this.methodHandle(REF_invokeVirtual, this.methodref(recordInternal, g.name, g.descriptor)),
+      ),
+    ];
+    const bootstrapIndex = this.bootstraps.length;
+    this.bootstraps.push({ handle: bsmHandle, args });
+    const nt = this.nameAndType(methodName, descriptor);
+    return this.intern(`indy:${bootstrapIndex}:${methodName}:${descriptor}`, b => {
+      b.u1(CONSTANT_InvokeDynamic);
+      b.u2(bootstrapIndex);
+      b.u2(nt);
+    });
+  }
+
   private methodType(descriptor: string): number {
     const descIndex = this.utf8(descriptor);
     return this.intern(`mt:${descriptor}`, b => {
@@ -699,7 +737,8 @@ export function computeNestMembers(
       else if (d.name) add(d.name.text);
     } else if (
       node.kind === SyntaxKind.InterfaceDeclaration ||
-      node.kind === SyntaxKind.EnumDeclaration
+      node.kind === SyntaxKind.EnumDeclaration ||
+      node.kind === SyntaxKind.RecordDeclaration
     ) {
       if (node.symbol) add(binaryName(node.symbol));
     } else if (
@@ -1692,6 +1731,15 @@ function generateBody(
       const owner = binaryName(symbol.parent);
       return { owner, name: symbol.escapedName, descriptor: `L${owner};`, isStatic: true };
     }
+    // A record component is a private final instance field of the record.
+    if (symbol.valueDeclaration?.kind === SyntaxKind.RecordComponent) {
+      return {
+        owner: binaryName(symbol.parent),
+        name: symbol.escapedName,
+        descriptor: descriptorOf((symbol.valueDeclaration as RecordComponent).type, program),
+        isStatic: false,
+      };
+    }
     const declarator = symbol.valueDeclaration;
     if (!declarator || declarator.kind !== SyntaxKind.VariableDeclarator)
       throw new UnsupportedEmit();
@@ -2172,10 +2220,14 @@ function generateBody(
     }
 
     const ctor = findConstructor(created.symbol, args.length);
+    // A record's implicit canonical constructor takes its components in order.
+    const recordDecl = createdDecl?.kind === SyntaxKind.RecordDeclaration ? (createdDecl as RecordDeclaration) : undefined;
     const ctorParams = ctor
       ? ctor.parameters.map(p => paramDescriptor(p as Parameter, program))
-      : [];
-    if (!ctor && args.length > 0) throw new UnsupportedEmit(); // unknown constructor
+      : recordDecl && !recordDecl.members.some(m => m.kind === SyntaxKind.ConstructorDeclaration)
+        ? recordDecl.recordComponents.map(c => descriptorOf(c.type, program))
+        : [];
+    if (!ctor && !recordDecl && args.length > 0) throw new UnsupportedEmit(); // unknown constructor
     const ctorDescriptor = `(${ctorParams.join("")})V`;
 
     const ref = `L${owner};`;
@@ -5417,6 +5469,188 @@ function emitEnumConstructor(
   }
   writeCodeAttribute(info, cp, body);
   return info;
+}
+
+function returnOp(descriptor: string): number {
+  const ch = descriptor[0];
+  return ch === "J"
+    ? OP_LRETURN
+    : ch === "D"
+      ? OP_DRETURN
+      : ch === "F"
+        ? OP_FRETURN
+        : ch === "L" || ch === "["
+          ? OP_ARETURN
+          : ch === "V"
+            ? OP_RETURN
+            : OP_IRETURN;
+}
+
+// Emit a record declaration (JLS 8.10): a final class extending java.lang.Record
+// with a private final field per component, the canonical constructor, component
+// accessors, and equals/hashCode/toString bound through ObjectMethods. Only the
+// implicit form is handled (no explicit/compact constructor; accessors not
+// overridden); declared methods and static fields are emitted normally.
+export function emitRecord(
+  declaration: RecordDeclaration,
+  program: Program,
+  checker: Checker,
+  nestMembers?: Map<string, string[]>,
+): EmittedClass {
+  program.getGlobalIndex();
+  const name = declaration.symbol ? binaryName(declaration.symbol) : declaration.name.text;
+  const isPublic = (declaration.modifiers ?? []).some(m => m.kind === SyntaxKind.PublicKeyword);
+  let accessFlags = ACC_SUPER | ACC_FINAL;
+  if (isPublic) accessFlags |= ACC_PUBLIC;
+  const interfaceNames = (declaration.implementsTypes ?? [])
+    .map(t => resolveInternalName(t, declaration, program))
+    .filter((n): n is string => n !== undefined);
+  const components = (declaration.recordComponents as readonly RecordComponent[]).map(c => ({
+    name: c.name.text,
+    descriptor: descriptorOf(c.type, program),
+  }));
+
+  const cp = new ConstantPool();
+  const thisClassIndex = cp.classInfo(name);
+  const superClassIndex = cp.classInfo("java/lang/Record");
+  const interfaceIndices = interfaceNames.map(n => cp.classInfo(n));
+
+  // A private final field per component, then any declared (static) fields.
+  const fields = new ByteBuffer();
+  let fieldCount = 0;
+  for (const c of components) {
+    emitFieldInfo(fields, cp, ACC_PRIVATE | ACC_FINAL, c.name, c.descriptor);
+    fieldCount++;
+  }
+  const declaredFields = emitFields(declaration as unknown as ClassDeclaration, cp, program);
+  fields.append(declaredFields.buffer);
+  fieldCount += declaredFields.count;
+
+  const methods = new ByteBuffer();
+  let methodCount = 0;
+  const lambdaMethods: ByteBuffer[] = [];
+
+  // Canonical constructor: super(); store each component parameter into its field.
+  if (declaration.members.some(m => m.kind === SyntaxKind.ConstructorDeclaration)) {
+    throw new UnsupportedEmit(); // explicit/compact constructor: later
+  }
+  {
+    const code = new ByteBuffer();
+    code.u1(OP_ALOAD_0);
+    code.u1(OP_INVOKESPECIAL);
+    code.u2(cp.methodref("java/lang/Record", "<init>", "()V"));
+    let slot = 1;
+    let maxStack = 1;
+    for (const c of components) {
+      code.u1(OP_ALOAD_0);
+      loadByDescriptor(code, c.descriptor, slot);
+      code.u1(OP_PUTFIELD);
+      code.u2(cp.fieldref(name, c.name, c.descriptor));
+      maxStack = Math.max(maxStack, 1 + slotsOf(c.descriptor));
+      slot += slotsOf(c.descriptor);
+    }
+    code.u1(OP_RETURN);
+    const info = new ByteBuffer();
+    info.u2(isPublic ? ACC_PUBLIC : 0);
+    info.u2(cp.utf8("<init>"));
+    info.u2(cp.utf8(`(${components.map(c => c.descriptor).join("")})V`));
+    writeCodeAttribute(info, cp, { code, maxStack, maxLocals: slot });
+    methods.append(info);
+    methodCount++;
+  }
+
+  // Accessor per component, unless one is explicitly declared.
+  const declaredMethodNames = new Set(
+    declaration.members
+      .filter(m => m.kind === SyntaxKind.MethodDeclaration)
+      .map(m => (m as MethodDeclaration).name.text),
+  );
+  for (const c of components) {
+    if (declaredMethodNames.has(c.name)) continue;
+    const code = new ByteBuffer();
+    code.u1(OP_ALOAD_0);
+    code.u1(OP_GETFIELD);
+    code.u2(cp.fieldref(name, c.name, c.descriptor));
+    code.u1(returnOp(c.descriptor));
+    const info = new ByteBuffer();
+    info.u2(ACC_PUBLIC);
+    info.u2(cp.utf8(c.name));
+    info.u2(cp.utf8(`()${c.descriptor}`));
+    writeCodeAttribute(info, cp, { code, maxStack: slotsOf(c.descriptor), maxLocals: 1 });
+    methods.append(info);
+    methodCount++;
+  }
+
+  // equals / hashCode / toString via the ObjectMethods bootstrap.
+  const self = `L${name};`;
+  const names = components.map(c => c.name).join(";");
+  const getters = components.map(c => ({ name: c.name, descriptor: `()${c.descriptor}` }));
+  const emitObjectMethod = (mName: string, methodDesc: string, indyDesc: string): void => {
+    const code = new ByteBuffer();
+    code.u1(OP_ALOAD_0);
+    if (mName === "equals") code.u1(OP_ALOAD_0 + 1);
+    code.u1(OP_INVOKEDYNAMIC);
+    code.u2(cp.invokeDynamicObjectMethod(mName, indyDesc, name, names, getters));
+    code.u2(0);
+    code.u1(returnOp(methodDesc.slice(methodDesc.lastIndexOf(")") + 1)));
+    const info = new ByteBuffer();
+    info.u2(ACC_PUBLIC | ACC_FINAL);
+    info.u2(cp.utf8(mName));
+    info.u2(cp.utf8(methodDesc));
+    writeCodeAttribute(info, cp, { code, maxStack: mName === "equals" ? 2 : 1, maxLocals: mName === "equals" ? 2 : 1 });
+    methods.append(info);
+    methodCount++;
+  };
+  emitObjectMethod("equals", "(Ljava/lang/Object;)Z", `(${self}Ljava/lang/Object;)Z`);
+  emitObjectMethod("hashCode", "()I", `(${self})I`);
+  emitObjectMethod("toString", "()Ljava/lang/String;", `(${self})Ljava/lang/String;`);
+
+  // Declared methods.
+  for (const member of declaration.members) {
+    if (member.kind !== SyntaxKind.MethodDeclaration) continue;
+    methods.append(emitMethod(member as MethodDeclaration, cp, program, checker, name, lambdaMethods));
+    methodCount++;
+  }
+  for (const impl of lambdaMethods) {
+    methods.append(impl);
+    methodCount++;
+  }
+
+  // The Record attribute (JVMS 4.7.30): component name + descriptor.
+  const recordAttr = new ByteBuffer();
+  recordAttr.u2(components.length);
+  for (const c of components) {
+    recordAttr.u2(cp.utf8(c.name));
+    recordAttr.u2(cp.utf8(c.descriptor));
+    recordAttr.u2(0); // component attributes_count
+  }
+
+  const { buffer: classAttributes, count: classAttributeCount } = buildClassAttributes(
+    cp,
+    sourceNameOf(declaration),
+    name,
+    nestMembers,
+  );
+  classAttributes.u2(cp.utf8("Record"));
+  classAttributes.u4(recordAttr.length);
+  classAttributes.append(recordAttr);
+
+  return {
+    name,
+    bytes: assembleClassFile({
+      cp,
+      accessFlags,
+      thisClassIndex,
+      superClassIndex,
+      interfaceIndices,
+      fields,
+      fieldCount,
+      methods,
+      methodCount,
+      attributes: classAttributes,
+      attributeCount: classAttributeCount + 1,
+    }),
+  };
 }
 
 // Emit an enum declaration: a final class extending java.lang.Enum, with a

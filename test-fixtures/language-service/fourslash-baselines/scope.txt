@@ -27,6 +27,7 @@
   class NumberFormatException
   class Object
   class Override
+  class Record
   class RuntimeException
   class SafeVarargs
   class Short

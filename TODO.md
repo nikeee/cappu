@@ -66,6 +66,14 @@ verifiable placeholder, never a crash.
       Object, `extends` as super-interfaces): abstract methods (no Code), default
       and static methods (with Code), and implicitly public-static-final constant
       fields (ConstantValue). Interface fields are treated as static at use sites.
+- [x] Record declarations (JLS 8.10): final class extending `java.lang.Record`,
+      a private final field + accessor per component, a synthesized canonical
+      constructor (`super()` then store components), and `equals`/`hashCode`/
+      `toString` via the `ObjectMethods` bootstrap (invokedynamic). Emits the
+      Record attribute (JVMS 4.7.30); declared (static) fields and methods are
+      kept; `new R(...)` resolves the canonical ctor; `r.x()` accessors resolve
+      via a binder-synthesized accessor symbol. Explicit/compact constructors
+      and explicit accessor overrides are not yet emitted (those degrade).
 - [x] Explicit constructor invocations (JLS 8.8.7.1): a leading `super(args)` or
       `this(args)`; `this(...)` skips this constructor's field initializers. The
       target overload is resolved by argument count (as for `new`).

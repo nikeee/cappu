@@ -159,9 +159,27 @@ function bindDeclaration(node: Node): void {
     case SyntaxKind.RecordDeclaration:
       declareIntoContainer(named(node), node, SymbolFlags.Record, SymbolFlags.Type);
       break;
-    case SyntaxKind.RecordComponent:
+    case SyntaxKind.RecordComponent: {
+      // The component's implicit private final field.
       declareIntoContainer(named(node), node, SymbolFlags.Field, SymbolFlags.Field);
+      // Its implicit accessor method `name()`, so `record.name()` resolves. A
+      // synthetic zero-arg MethodDeclaration returning the component's type is
+      // merged onto the same name symbol (which thus has Field | Method).
+      const c = node as { name?: Identifier; type?: Node; pos: number; end: number };
+      if (c.name) {
+        const accessor = {
+          kind: SyntaxKind.MethodDeclaration,
+          name: c.name,
+          returnType: c.type,
+          parameters: [],
+          pos: c.pos,
+          end: c.end,
+          parent: node.parent,
+        } as unknown as Node;
+        declareIntoContainer(c.name, accessor, SymbolFlags.Method, SymbolFlags.None);
+      }
       break;
+    }
     case SyntaxKind.CompactConstructorDeclaration:
       declareIntoContainer(named(node), node, SymbolFlags.Constructor, SymbolFlags.None);
       break;

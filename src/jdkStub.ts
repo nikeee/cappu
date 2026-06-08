@@ -52,6 +52,13 @@ class Enum<E> implements Comparable<E> {
   public static <T> T valueOf(Class<T> enumType, String name) { return null; }
 }
 
+abstract class Record {
+  protected Record() {}
+  public abstract boolean equals(Object o);
+  public abstract int hashCode();
+  public abstract String toString();
+}
+
 class Number {
   public int intValue() { return 0; }
   public long longValue() { return 0; }

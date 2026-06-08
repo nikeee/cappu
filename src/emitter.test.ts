@@ -1870,3 +1870,30 @@ test(
     );
   },
 );
+
+test(
+  "record declarations run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "RecMain",
+      [
+        "record Point(int x, int y) {",
+        "  int sum(){ return x + y; }",
+        "}",
+        "public class RecMain {",
+        "  public static void main(String[] a){",
+        "    Point p = new Point(3, 4);",
+        '    System.out.println(p.x() + "," + p.y());',
+        "    System.out.println(p);",
+        "    System.out.println(p.sum());",
+        "    System.out.println(p.equals(new Point(3, 4)));",
+        "    System.out.println(p.equals(new Point(3, 5)));",
+        "    System.out.println(p.hashCode() == new Point(3, 4).hashCode());",
+        "  }",
+        "}",
+      ].join("\n"),
+      "3,4\nPoint[x=3, y=4]\n7\ntrue\nfalse\ntrue\n",
+    );
+  },
+);

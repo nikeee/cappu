@@ -10,6 +10,7 @@ import {
   emitClass,
   emitEnum,
   emitInterface,
+  emitRecord,
 } from "./bytecode.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
@@ -20,6 +21,7 @@ import {
   type InterfaceDeclaration,
   type Node,
   type ObjectCreationExpression,
+  type RecordDeclaration,
   type SourceFile,
   SyntaxKind,
 } from "./types.ts";
@@ -50,6 +52,8 @@ export function emitSourceFile(
       result.push(emitInterface(node as InterfaceDeclaration, program, checker, nest));
     } else if (node.kind === SyntaxKind.EnumDeclaration) {
       result.push(emitEnum(node as EnumDeclaration, program, checker, nest));
+    } else if (node.kind === SyntaxKind.RecordDeclaration) {
+      result.push(emitRecord(node as RecordDeclaration, program, checker, nest));
     } else if (node.kind === SyntaxKind.ObjectCreationExpression) {
       // Anonymous class (new T(){...}): emitted as its own Outer$N when supported.
       const anon = emitAnonymousClassIfPossible(
