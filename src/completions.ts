@@ -75,6 +75,9 @@ function gatherTypeMembers(
       // Type parameters live in the members table for name resolution, but they
       // are not accessible members for "expr." completion.
       if (!includeTypeParameters && symbol.flags & SymbolFlags.TypeParameter) continue;
+      // Constructors are not members reachable via `expr.` (they are invoked with
+      // `new`), so exclude them from member completion.
+      if (symbol.flags & SymbolFlags.Constructor) continue;
       if (!into.has(name)) into.set(name, symbol);
     }
   }
