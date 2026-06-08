@@ -1531,3 +1531,33 @@ test(
     );
   },
 );
+
+test(
+  "common JDK library calls run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Lib",
+      [
+        "public class Lib {",
+        "  public static void main(String[] a){",
+        "    System.out.println(Math.max(3L, 7L) + Math.min(2L, 9L));",
+        "    System.out.println(Integer.toHexString(255));",
+        "    System.out.println(Integer.bitCount(255));",
+        "    System.out.println(Long.toHexString(4096L));",
+        "    System.out.println(Character.getNumericValue('7'));",
+        "    int[] src = {1, 2, 3, 4, 5};",
+        "    int[] dst = new int[5];",
+        "    System.arraycopy(src, 1, dst, 0, 3);",
+        "    StringBuilder sb = new StringBuilder();",
+        '    sb.append("x=").append(42).append(",").append(3.5).append(",").append(99L);',
+        "    System.out.println(sb.toString());",
+        "    System.out.println(dst[0] + dst[1] + dst[2]);",
+        "    System.out.println(Integer.MAX_VALUE);",
+        "  }",
+        "}",
+      ].join("\n"),
+      "9\nff\n8\n1000\n7\nx=42,3.5,99\n9\n2147483647\n",
+    );
+  },
+);

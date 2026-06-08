@@ -106,8 +106,13 @@ class StringBuilder implements CharSequence {
   public StringBuilder append(String s) { return null; }
   public StringBuilder append(Object o) { return null; }
   public StringBuilder append(int i) { return null; }
+  public StringBuilder append(long l) { return null; }
+  public StringBuilder append(float f) { return null; }
+  public StringBuilder append(double d) { return null; }
   public StringBuilder append(char c) { return null; }
+  public StringBuilder append(char[] c) { return null; }
   public StringBuilder append(boolean b) { return null; }
+  public StringBuilder append(CharSequence s) { return null; }
   public StringBuilder insert(int offset, String s) { return null; }
   public StringBuilder reverse() { return null; }
   public StringBuilder deleteCharAt(int index) { return null; }
@@ -123,19 +128,41 @@ class Boolean implements Comparable<Boolean> {
 }
 
 class Integer extends Number implements Comparable<Integer> {
+  public static final int MAX_VALUE = 2147483647;
+  public static final int MIN_VALUE = -2147483648;
   public int compareTo(Integer o) { return 0; }
   public static int parseInt(String s) { return 0; }
+  public static int parseInt(String s, int radix) { return 0; }
   public static Integer valueOf(int i) { return null; }
   public static Integer valueOf(String s) { return null; }
   public static String toString(int i) { return null; }
+  public static String toHexString(int i) { return null; }
+  public static String toBinaryString(int i) { return null; }
+  public static String toOctalString(int i) { return null; }
   public static int max(int a, int b) { return 0; }
   public static int min(int a, int b) { return 0; }
+  public static int compare(int a, int b) { return 0; }
+  public static int signum(int i) { return 0; }
+  public static int bitCount(int i) { return 0; }
+  public static int numberOfLeadingZeros(int i) { return 0; }
+  public static int numberOfTrailingZeros(int i) { return 0; }
+  public static int highestOneBit(int i) { return 0; }
+  public static int reverse(int i) { return 0; }
 }
 
 class Long extends Number implements Comparable<Long> {
+  public static final long MAX_VALUE = 9223372036854775807L;
+  public static final long MIN_VALUE = -9223372036854775808L;
   public int compareTo(Long o) { return 0; }
   public static long parseLong(String s) { return 0; }
   public static Long valueOf(long l) { return null; }
+  public static String toHexString(long l) { return null; }
+  public static String toBinaryString(long l) { return null; }
+  public static long max(long a, long b) { return 0; }
+  public static long min(long a, long b) { return 0; }
+  public static int compare(long a, long b) { return 0; }
+  public static int signum(long l) { return 0; }
+  public static int bitCount(long l) { return 0; }
 }
 
 class Double extends Number implements Comparable<Double> {
@@ -161,9 +188,15 @@ class Character implements Comparable<Character> {
   public int compareTo(Character o) { return 0; }
   public static boolean isDigit(char c) { return false; }
   public static boolean isLetter(char c) { return false; }
+  public static boolean isLetterOrDigit(char c) { return false; }
   public static boolean isWhitespace(char c) { return false; }
+  public static boolean isUpperCase(char c) { return false; }
+  public static boolean isLowerCase(char c) { return false; }
   public static char toUpperCase(char c) { return ' '; }
   public static char toLowerCase(char c) { return ' '; }
+  public static int getNumericValue(char c) { return 0; }
+  public static int digit(char c, int radix) { return 0; }
+  public static String toString(char c) { return null; }
 }
 
 class Void {}
@@ -177,10 +210,27 @@ class Math {
   public static double max(double a, double b) { return 0; }
   public static double min(double a, double b) { return 0; }
   public static double sqrt(double a) { return 0; }
+  public static long max(long a, long b) { return 0; }
+  public static long min(long a, long b) { return 0; }
+  public static float max(float a, float b) { return 0; }
+  public static float min(float a, float b) { return 0; }
+  public static float abs(float a) { return 0; }
   public static double pow(double a, double b) { return 0; }
   public static double floor(double a) { return 0; }
   public static double ceil(double a) { return 0; }
   public static long round(double a) { return 0; }
+  public static int round(float a) { return 0; }
+  public static double signum(double d) { return 0; }
+  public static double log(double a) { return 0; }
+  public static double log10(double a) { return 0; }
+  public static double sin(double a) { return 0; }
+  public static double cos(double a) { return 0; }
+  public static double cbrt(double a) { return 0; }
+  public static double hypot(double a, double b) { return 0; }
+  public static int floorDiv(int a, int b) { return 0; }
+  public static int floorMod(int a, int b) { return 0; }
+  public static int addExact(int a, int b) { return 0; }
+  public static int toIntExact(long a) { return 0; }
   public static double random() { return 0; }
 }
 
@@ -188,6 +238,7 @@ class System {
   public static final java.io.PrintStream out = null;
   public static final java.io.PrintStream err = null;
   public static final java.io.InputStream in = null;
+  public static void arraycopy(Object src, int srcPos, Object dest, int destPos, int length) {}
   public static long currentTimeMillis() { return 0; }
   public static long nanoTime() { return 0; }
   public static void exit(int code) {}
