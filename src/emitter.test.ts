@@ -820,6 +820,30 @@ test(
 );
 
 test(
+  "try-with-resources null resource skips close (JLS 14.20.3.1)",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "TwrNull",
+      [
+        "public class TwrNull {",
+        "  static class R implements AutoCloseable {",
+        '    public void close(){ System.out.println("close"); }',
+        "  }",
+        "  static R nothing(){ return null; }",
+        "  public static void main(String[] a){",
+        // resource is null: the body runs and close() must be guarded (not NPE).
+        '    try (R r = nothing()) { System.out.println("body"); }',
+        '    System.out.println("done");',
+        "  }",
+        "}",
+      ].join("\n"),
+      "body\ndone\n",
+    );
+  },
+);
+
+test(
   "try-with-resources variable-access form runs identically to javac",
   { skip: HAS_JAVA ? false : "no JDK" },
   () => {

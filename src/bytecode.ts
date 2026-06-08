@@ -989,7 +989,15 @@ interface ExceptionTableEntry {
 // `monitor` is the monitorexit of a synchronized statement.
 type FinallyAction =
   | { kind: "block"; block: Block }
-  | { kind: "resource"; slot: number; ownerInternal: string; isInterface: boolean }
+  | {
+      kind: "resource";
+      slot: number;
+      ownerInternal: string;
+      isInterface: boolean;
+      // Emit an `if (r != null)` guard around close() (JLS 14.20.3.1). Elided when
+      // the resource is definitely non-null (a `new` initializer), as javac does.
+      guarded: boolean;
+    }
   | { kind: "monitor"; slot: number };
 
 // Generate real bytecode for a method body. Throws UnsupportedEmit for anything
@@ -3025,10 +3033,19 @@ function generateBody(
     return resultDesc;
   };
 
-  // A resource's close() on a normal path (fall-through / return / break): plain
-  // `aload r; r.close()`, no suppression (there is no in-flight exception).
+  // A resource's close() (JLS 14.20.3): `aload r; r.close()`, optionally under an
+  // `if (r != null)` guard. No suppression here (callers handle the in-flight
+  // exception); used on both the normal and exceptional close paths.
   const emitResourceClose = (a: Extract<FinallyAction, { kind: "resource" }>): void => {
     const desc = `L${a.ownerInternal};`;
+    let skip: Label | undefined;
+    if (a.guarded) {
+      loadVar(a.slot, desc);
+      push(desc);
+      pop(); // consumed by the branch
+      skip = newLabel();
+      branchTo(OP_IFNULL, skip); // null resource -> skip close (JLS 14.20.3.1)
+    }
     loadVar(a.slot, desc);
     push(desc);
     if (a.isInterface) {
@@ -3041,6 +3058,7 @@ function generateBody(
       code.u2(cp.methodref(a.ownerInternal, "close", "()V"));
     }
     pop(1);
+    if (skip) placeLabel(skip);
   };
   // Emit a finally action on a normal (non-exceptional) path. Returns whether it
   // terminates abruptly (only a user block can).
@@ -3570,9 +3588,18 @@ function generateBody(
           // For the declaration form, the resource symbol (bound by the binder)
           // keys the local so the body can reference the resource.
           if (res.symbol) locals.set(res.symbol, { slot, descriptor: desc });
+          // A `new T(...)` resource is definitely non-null, so the close guard is
+          // elided (as javac does); any other value gets the null guard.
+          const guarded = valueExpr.kind !== SyntaxKind.ObjectCreationExpression;
           coerce(emitExpr(valueExpr), desc);
           storeVar(slot, desc);
-          const action: FinallyAction = { kind: "resource", slot, ownerInternal, isInterface };
+          const action: FinallyAction = {
+            kind: "resource",
+            slot,
+            ownerInternal,
+            isInterface,
+            guarded,
+          };
           return emitTryConstruct(() => emitResourceNest(i + 1), [], action);
         };
         return emitTryConstruct(() => emitResourceNest(0), t.catchClauses, fin);

@@ -40,8 +40,9 @@ verifiable placeholder, never a crash.
 - [x] Resource open/close, reverse-order close on every exit, suppressed
       exceptions via `Throwable.addSuppressed`.
 - [x] Resource variable binding, so the body can reference the resource.
-- [ ] Null guard `if (r != null) r.close()` (JLS 14.20.3.1); resources are
-      assumed non-null.
+- [x] Null guard `if (r != null) r.close()` (JLS 14.20.3.1), on both the normal
+      and exceptional close paths; elided for a `new` resource (definitely
+      non-null), as javac does.
 - [x] Variable-access resource form `try (existingVar)` (SE9): the resource
       value is materialized into a slot and closed like the declaration form.
 
