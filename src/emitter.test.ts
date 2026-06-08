@@ -1781,3 +1781,25 @@ test(
     );
   },
 );
+
+test(
+  "local class accessing enclosing instance and a captured local runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "LThis0",
+      [
+        "public class LThis0 {",
+        "  int base = 100;",
+        "  int helper(){ return 7; }",
+        "  int run(int p){",
+        "    class Calc { int compute(){ return base + helper() + p; } }",
+        "    return new Calc().compute();",
+        "  }",
+        "  public static void main(String[] a){ System.out.println(new LThis0().run(5)); }",
+        "}",
+      ].join("\n"),
+      "112\n",
+    );
+  },
+);

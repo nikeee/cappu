@@ -55,11 +55,11 @@ verifiable placeholder, never a crash.
       or calls a non-static outer method captures `this$0` (a synthetic field +
       leading constructor parameter), and implicit-`this` access to an enclosing
       member routes through it.
-- [ ] **Local-class** `this$0` (same machinery, but the local-class `new`-site
-      and emitClass synthesized-ctor path need wiring; until then a local class
-      reading an outer instance member emits an unverifiable access).
-- [ ] Anonymous/local classes with **own fields, initializer blocks, or
-      inherited-member access** (needs binder/checker scoping of the body).
+- [x] **Local-class** `this$0`: same machinery as anonymous, wired through the
+      synthesized constructor and the `new`-site (alongside local captures).
+- [ ] Anonymous/local classes with **own fields, initializer blocks, declared
+      constructors alongside capture, or inherited-member access** (needs
+      binder/checker scoping of the body and constructor augmentation).
 - [x] User-defined interfaces are now emitted (ACC_INTERFACE|ACC_ABSTRACT, super
       Object, `extends` as super-interfaces): abstract methods (no Code), default
       and static methods (with Code), and implicitly public-static-final constant

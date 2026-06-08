@@ -881,21 +881,36 @@ function outerThisInfo(
 // synthesize a constructor `<init>(captures...)`. Otherwise returns [] so the
 // class emits without capture support (methods using captures degrade). Both
 // emitClass and emitNew use this, so they agree.
-function effectiveLocalCaptures(
-  decl: ClassDeclaration,
-  program: Program,
-  checker: Checker,
-): LocalCapture[] {
-  if (decl.parent?.kind !== SyntaxKind.Block) return []; // not a local class
-  const hasDeclaredCtor = decl.members.some(m => m.kind === SyntaxKind.ConstructorDeclaration);
-  const hasInstanceInit = decl.members.some(
+// A local class whose constructor we can synthesize: declared in a block, with
+// no declared constructor and no instance field initializers.
+function isSynthesizableLocalClass(decl: ClassDeclaration): boolean {
+  if (decl.parent?.kind !== SyntaxKind.Block) return false;
+  if (decl.members.some(m => m.kind === SyntaxKind.ConstructorDeclaration)) return false;
+  return !decl.members.some(
     m =>
       m.kind === SyntaxKind.FieldDeclaration &&
       !isStaticDeclaration(m as FieldDeclaration) &&
       (m as FieldDeclaration).declarators.some(d => (d as VariableDeclarator).initializer),
   );
-  if (hasDeclaredCtor || hasInstanceInit) return [];
-  return computeLocalCaptures(decl, program, checker);
+}
+
+function effectiveLocalCaptures(
+  decl: ClassDeclaration,
+  program: Program,
+  checker: Checker,
+): LocalCapture[] {
+  return isSynthesizableLocalClass(decl) ? computeLocalCaptures(decl, program, checker) : [];
+}
+
+// The enclosing instance a synthesizable local class captures (this$0), or undefined.
+function localOuterThis(
+  decl: ClassDeclaration,
+  program: Program,
+  checker: Checker,
+): { enclosingInternal: string } | undefined {
+  return isSynthesizableLocalClass(decl)
+    ? outerThisInfo(decl.members, decl.parent, program, checker)
+    : undefined;
 }
 
 function binaryName(symbol: Symbol): string {
@@ -2053,29 +2068,41 @@ function generateBody(
     const owner = binaryName(created.symbol);
     const args = (node as ObjectCreationExpression).arguments ?? [];
 
-    // A capturing local class: its synthesized constructor takes the captured
-    // enclosing locals (loaded here from the enclosing scope), not user args.
+    // A synthesizable local class: its constructor takes this$0 (the enclosing
+    // instance) and the captured enclosing locals (loaded here), not user args.
     const createdDecl = created.symbol.valueDeclaration ?? created.symbol.declarations?.[0];
-    const captures =
-      createdDecl?.kind === SyntaxKind.ClassDeclaration
-        ? effectiveLocalCaptures(createdDecl as ClassDeclaration, program, checker)
-        : [];
-    if (captures.length > 0) {
+    const isLocal = createdDecl?.kind === SyntaxKind.ClassDeclaration;
+    const captures = isLocal
+      ? effectiveLocalCaptures(createdDecl as ClassDeclaration, program, checker)
+      : [];
+    const localThis0 = isLocal
+      ? localOuterThis(createdDecl as ClassDeclaration, program, checker)
+      : undefined;
+    const this0Desc = localThis0 ? `L${localThis0.enclosingInternal};` : undefined;
+    if (captures.length > 0 || this0Desc) {
       const ref = `L${owner};`;
       code.u1(OP_NEW);
       code.u2(cp.classInfo(owner));
       pushRef(ref);
       code.u1(OP_DUP);
       pushRef(ref);
+      if (this0Desc) {
+        code.u1(OP_ALOAD_0);
+        pushRef(this0Desc);
+      }
       for (const c of captures) {
         const slot = locals.get(c.symbol);
         if (!slot) throw new UnsupportedEmit();
         loadVar(slot.slot, c.descriptor);
         push(c.descriptor);
       }
+      const ctorDesc = `(${[
+        ...(this0Desc ? [this0Desc] : []),
+        ...captures.map(c => c.descriptor),
+      ].join("")})V`;
       code.u1(OP_INVOKESPECIAL);
-      code.u2(cp.methodref(owner, "<init>", `(${captures.map(c => c.descriptor).join("")})V`));
-      pop(1 + captures.length);
+      code.u2(cp.methodref(owner, "<init>", ctorDesc));
+      pop(1 + (this0Desc ? 1 : 0) + captures.length);
       return ref;
     }
 
@@ -4658,7 +4685,14 @@ export function emitClass(
 
   // A capturing local class (JLS 14.3): enclosing locals become synthetic final
   // val$ fields, set by a synthesized constructor; methods read them as fields.
+  // The enclosing instance (when accessed) is captured as this$0.
   const localCaptures = effectiveLocalCaptures(declaration, program, checker);
+  const outerThis = localOuterThis(declaration, program, checker);
+  const this0Descriptor = outerThis ? `L${outerThis.enclosingInternal};` : undefined;
+  if (this0Descriptor) {
+    emitFieldInfo(fields.buffer, cp, ACC_FINAL | ACC_SYNTHETIC, "this$0", this0Descriptor);
+    fields.count++;
+  }
   for (const c of localCaptures) {
     emitFieldInfo(fields.buffer, cp, ACC_FINAL | ACC_SYNTHETIC, c.fieldName, c.descriptor);
     fields.count++;
@@ -4683,10 +4717,12 @@ export function emitClass(
   const declaredConstructors = declaration.members.filter(
     m => m.kind === SyntaxKind.ConstructorDeclaration,
   ) as ConstructorDeclaration[];
-  if (localCaptures.length > 0) {
-    // A capturing local class declares no constructor (effectiveLocalCaptures
-    // gates on that); synthesize one that calls super() and stores the captures.
-    methods.append(emitSynthCtor(cp, name, superInternalName, [], localCaptures));
+  if (localCaptures.length > 0 || this0Descriptor) {
+    // A synthesizable local class declares no constructor; synthesize one that
+    // calls super() and stores this$0 and the captures.
+    methods.append(
+      emitSynthCtor(cp, name, superInternalName, [], localCaptures, this0Descriptor),
+    );
     methodCount++;
   } else if (declaredConstructors.length === 0) {
     const defaultCtor = {
@@ -4730,7 +4766,17 @@ export function emitClass(
   for (const member of declaration.members) {
     if (member.kind !== SyntaxKind.MethodDeclaration) continue;
     methods.append(
-      emitMethod(member as MethodDeclaration, cp, program, checker, name, lambdaMethods, 0, captureFieldMap),
+      emitMethod(
+        member as MethodDeclaration,
+        cp,
+        program,
+        checker,
+        name,
+        lambdaMethods,
+        0,
+        captureFieldMap,
+        outerThis,
+      ),
     );
     methodCount++;
   }
