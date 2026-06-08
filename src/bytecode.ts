@@ -12,7 +12,7 @@ import { type ClassType, type Type, TypeKind } from "./checkerTypes.ts";
 import { foldConstant } from "./constfold.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
-import { resolveTypeEntityName } from "./resolver.ts";
+import { resolveIdentifier, resolveTypeEntityName } from "./resolver.ts";
 import { entityNameToString, tokenToString } from "./utilities.ts";
 import {
   type ArrayType as AstArrayType,
@@ -728,6 +728,98 @@ const TYPE_DECL_KINDS = new Set([
   SyntaxKind.AnnotationTypeDeclaration,
 ]);
 
+// Field/parameter descriptor of a checker Type (erasing type variables and
+// wildcards to Object). Module-level twin of generateBody's typeDescriptor, for
+// capture analysis which runs outside that closure.
+function typeToDescriptor(type: Type): string {
+  switch (type.kind) {
+    case TypeKind.Primitive:
+      return PRIMITIVE_DESCRIPTOR[type.name] ?? "I";
+    case TypeKind.Class:
+      return `L${binaryName(type.symbol)};`;
+    case TypeKind.Array:
+      return `[${typeToDescriptor(type.elementType)}`;
+    default:
+      return "Ljava/lang/Object;";
+  }
+}
+
+// A local variable / parameter of an enclosing method captured by a local class
+// (JLS 14.3 / 8.1.3): stored in a synthetic final field `val$<name>`.
+interface LocalCapture {
+  symbol: Symbol;
+  fieldName: string;
+  descriptor: string;
+}
+
+// The enclosing locals a local class captures, in first-use order. Both the class
+// emission and the `new` site call this, so they agree on the field/constructor
+// layout. Captures of the enclosing instance (`this` / outer fields) are not
+// handled; method bodies that use them degrade to placeholders.
+function computeLocalCaptures(
+  decl: ClassDeclaration,
+  program: Program,
+  checker: Checker,
+): LocalCapture[] {
+  const result: LocalCapture[] = [];
+  const seen = new Set<Symbol>();
+  const within = (n: Node | undefined): boolean => !!n && n.pos >= decl.pos && n.end <= decl.end;
+  const visit = (node: Node): void => {
+    if (node.kind === SyntaxKind.Identifier) {
+      const parent = node.parent;
+      const isMemberName =
+        parent?.kind === SyntaxKind.PropertyAccessExpression &&
+        (parent as PropertyAccessExpression).name === node;
+      if (!isMemberName) {
+        const sym = resolveIdentifier(node as Identifier, program);
+        if (
+          sym &&
+          sym.flags & (SymbolFlags.LocalVariable | SymbolFlags.Parameter) &&
+          !seen.has(sym)
+        ) {
+          const declNode = sym.valueDeclaration ?? sym.declarations?.[0];
+          if (declNode && !within(declNode)) {
+            seen.add(sym);
+            result.push({
+              symbol: sym,
+              fieldName: `val$${sym.escapedName}`,
+              descriptor: typeToDescriptor(checker.getTypeOfSymbol(sym)),
+            });
+          }
+        }
+      }
+    }
+    forEachChild(node, c => {
+      visit(c);
+      return undefined;
+    });
+  };
+  for (const member of decl.members) visit(member);
+  return result;
+}
+
+// Captures we actually support emitting for a local class: only the clean case
+// (no declared constructor and no instance field initializers), where we
+// synthesize a constructor `<init>(captures...)`. Otherwise returns [] so the
+// class emits without capture support (methods using captures degrade). Both
+// emitClass and emitNew use this, so they agree.
+function effectiveLocalCaptures(
+  decl: ClassDeclaration,
+  program: Program,
+  checker: Checker,
+): LocalCapture[] {
+  if (decl.parent?.kind !== SyntaxKind.Block) return []; // not a local class
+  const hasDeclaredCtor = decl.members.some(m => m.kind === SyntaxKind.ConstructorDeclaration);
+  const hasInstanceInit = decl.members.some(
+    m =>
+      m.kind === SyntaxKind.FieldDeclaration &&
+      !isStaticDeclaration(m as FieldDeclaration) &&
+      (m as FieldDeclaration).declarators.some(d => (d as VariableDeclarator).initializer),
+  );
+  if (hasDeclaredCtor || hasInstanceInit) return [];
+  return computeLocalCaptures(decl, program, checker);
+}
+
 function binaryName(symbol: Symbol): string {
   const names = [symbol.escapedName];
   let parent = symbol.parent;
@@ -1093,6 +1185,9 @@ function generateBody(
   // <clinit> of a class that uses `assert` (JLS 14.10): initialize the synthetic
   // $assertionsDisabled field from this class's desiredAssertionStatus() first.
   assertionsOwner?: string,
+  // For a local class (JLS 14.3): enclosing locals it captures, read from the
+  // synthetic `val$x` fields rather than as locals.
+  captureFields: Map<Symbol, { ownerInternal: string; fieldName: string; descriptor: string }> = new Map(),
 ): MethodBody {
   const isConstructor = !lambdaSpec && method.kind === SyntaxKind.ConstructorDeclaration;
   const isStatic = lambdaSpec
@@ -1566,6 +1661,17 @@ function generateBody(
           push(local.descriptor);
           return local.descriptor;
         }
+        // A captured enclosing local of a local class: read from its val$ field.
+        const capture = symbol ? captureFields.get(symbol) : undefined;
+        if (capture) {
+          code.u1(OP_ALOAD_0);
+          pushRef();
+          code.u1(OP_GETFIELD);
+          code.u2(cp.fieldref(capture.ownerInternal, capture.fieldName, capture.descriptor));
+          pop();
+          push(capture.descriptor);
+          return capture.descriptor;
+        }
         // A field or enum constant by its simple name: implicit `this.f` or a static.
         if (symbol && symbol.flags & (SymbolFlags.Field | SymbolFlags.EnumConstant)) {
           return emitFieldRead(fieldInfoOf(symbol), () => {
@@ -1809,10 +1915,38 @@ function generateBody(
   // new T(args): new; dup; <args>; invokespecial T.<init>:(...)V -> leaves the ref.
   /** Class instance creation `new T(args)` (JLS 15.9): new, dup, invokespecial. */
   const emitNew = (node: Node): string => {
+    // Anonymous classes (new T(){...}) are not yet emitted; degrade.
+    if ((node as ObjectCreationExpression).classBody) throw new UnsupportedEmit();
     const created = checker.getTypeOfExpression(node);
     if (created.kind !== TypeKind.Class) throw new UnsupportedEmit();
     const owner = binaryName(created.symbol);
     const args = (node as ObjectCreationExpression).arguments ?? [];
+
+    // A capturing local class: its synthesized constructor takes the captured
+    // enclosing locals (loaded here from the enclosing scope), not user args.
+    const createdDecl = created.symbol.valueDeclaration ?? created.symbol.declarations?.[0];
+    const captures =
+      createdDecl?.kind === SyntaxKind.ClassDeclaration
+        ? effectiveLocalCaptures(createdDecl as ClassDeclaration, program, checker)
+        : [];
+    if (captures.length > 0) {
+      const ref = `L${owner};`;
+      code.u1(OP_NEW);
+      code.u2(cp.classInfo(owner));
+      pushRef(ref);
+      code.u1(OP_DUP);
+      pushRef(ref);
+      for (const c of captures) {
+        const slot = locals.get(c.symbol);
+        if (!slot) throw new UnsupportedEmit();
+        loadVar(slot.slot, c.descriptor);
+        push(c.descriptor);
+      }
+      code.u1(OP_INVOKESPECIAL);
+      code.u2(cp.methodref(owner, "<init>", `(${captures.map(c => c.descriptor).join("")})V`));
+      pop(1 + captures.length);
+      return ref;
+    }
 
     const ctor = findConstructor(created.symbol, args.length);
     const ctorParams = ctor
@@ -4015,6 +4149,8 @@ function emitMethod(
   // Implicit flags for interface members (public, and abstract for no-body
   // methods), which carry no explicit modifiers.
   extraFlags = 0,
+  // For a local class: enclosing locals captured into synthetic val$ fields.
+  captureFields: Map<Symbol, { ownerInternal: string; fieldName: string; descriptor: string }> = new Map(),
 ): ByteBuffer {
   const flags = methodAccessFlags(method) | extraFlags;
   const descriptor = methodDescriptor(method, program);
@@ -4041,6 +4177,11 @@ function emitMethod(
       undefined,
       [],
       lambdaMethods,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      captureFields,
     );
   } catch (e) {
     if (!(e instanceof UnsupportedEmit)) throw e;
@@ -4263,6 +4404,51 @@ function classUsesAssert(declaration: ClassDeclaration): boolean {
   return found;
 }
 
+// The synthesized constructor of a capturing local class: super(), then store
+// each captured value (a leading parameter) into its val$ field. Used only when
+// the class declares no constructor and has no instance field initializers.
+function emitCaptureCtor(
+  cp: ConstantPool,
+  name: string,
+  superInternal: string,
+  captures: LocalCapture[],
+): ByteBuffer {
+  const code = new ByteBuffer();
+  code.u1(OP_ALOAD_0);
+  code.u1(OP_INVOKESPECIAL);
+  code.u2(cp.methodref(superInternal, "<init>", "()V"));
+  let slot = 1;
+  let maxStack = 1;
+  for (const c of captures) {
+    code.u1(OP_ALOAD_0);
+    const ch = c.descriptor[0];
+    const loadOp =
+      ch === "J"
+        ? OP_LLOAD
+        : ch === "D"
+          ? OP_DLOAD
+          : ch === "F"
+            ? OP_FLOAD
+            : ch === "L" || ch === "["
+              ? OP_ALOAD
+              : OP_ILOAD;
+    code.u1(loadOp);
+    code.u1(slot);
+    code.u1(OP_PUTFIELD);
+    code.u2(cp.fieldref(name, c.fieldName, c.descriptor));
+    const size = slotsOf(c.descriptor);
+    maxStack = Math.max(maxStack, 1 + size);
+    slot += size;
+  }
+  code.u1(OP_RETURN);
+  const info = new ByteBuffer();
+  info.u2(0); // package-private synthetic-ish constructor
+  info.u2(cp.utf8("<init>"));
+  info.u2(cp.utf8(`(${captures.map(c => c.descriptor).join("")})V`));
+  writeCodeAttribute(info, cp, { code, maxStack, maxLocals: slot });
+  return info;
+}
+
 export function emitClass(
   declaration: ClassDeclaration,
   program: Program,
@@ -4295,6 +4481,20 @@ export function emitClass(
     fields.count++;
   }
 
+  // A capturing local class (JLS 14.3): enclosing locals become synthetic final
+  // val$ fields, set by a synthesized constructor; methods read them as fields.
+  const localCaptures = effectiveLocalCaptures(declaration, program, checker);
+  for (const c of localCaptures) {
+    emitFieldInfo(fields.buffer, cp, ACC_FINAL | ACC_SYNTHETIC, c.fieldName, c.descriptor);
+    fields.count++;
+  }
+  const captureFieldMap = new Map(
+    localCaptures.map(c => [
+      c.symbol,
+      { ownerInternal: name, fieldName: c.fieldName, descriptor: c.descriptor },
+    ]),
+  );
+
   const { instanceInits, staticInits } = collectFieldInits(declaration.members, name, program);
 
   // Constructors: the declared ones, or a synthesized default constructor (which
@@ -4308,7 +4508,12 @@ export function emitClass(
   const declaredConstructors = declaration.members.filter(
     m => m.kind === SyntaxKind.ConstructorDeclaration,
   ) as ConstructorDeclaration[];
-  if (declaredConstructors.length === 0) {
+  if (localCaptures.length > 0) {
+    // A capturing local class declares no constructor (effectiveLocalCaptures
+    // gates on that); synthesize one that stores the captures.
+    methods.append(emitCaptureCtor(cp, name, superInternalName, localCaptures));
+    methodCount++;
+  } else if (declaredConstructors.length === 0) {
     const defaultCtor = {
       kind: SyntaxKind.ConstructorDeclaration,
       parameters: [],
@@ -4350,7 +4555,7 @@ export function emitClass(
   for (const member of declaration.members) {
     if (member.kind !== SyntaxKind.MethodDeclaration) continue;
     methods.append(
-      emitMethod(member as MethodDeclaration, cp, program, checker, name, lambdaMethods),
+      emitMethod(member as MethodDeclaration, cp, program, checker, name, lambdaMethods, 0, captureFieldMap),
     );
     methodCount++;
   }

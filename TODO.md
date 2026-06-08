@@ -34,8 +34,14 @@ verifiable placeholder, never a crash.
       (binaryName recovers the enclosing type from the AST; the local-class
       declaration statement is a no-op in a method body). Language service
       (resolution/hover/completion/references) already works for them.
-- [ ] Local classes **with capture** of enclosing locals / `this` (synthetic
-      fields + constructor params, `new`-site argument passing).
+- [x] Local classes capturing enclosing **locals/parameters**: synthetic final
+      `val$x` fields, a synthesized constructor that stores them, body reads
+      rewritten to `getfield`, and the `new` site passing the captured values.
+      Limited to the clean case (no declared constructor, no instance field
+      initializers); otherwise capture is skipped (those bodies degrade).
+- [ ] Local classes capturing the enclosing instance (`this$0` for outer fields/
+      methods), declared-constructor augmentation, and instance field initializers
+      alongside capture.
 - [ ] Anonymous classes `new T(){...}` (JLS 15.9.5): emit the classBody as its
       own `Outer$N`, with capture; needs binder/checker scoping of the body.
 - [x] User-defined interfaces are now emitted (ACC_INTERFACE|ACC_ABSTRACT, super

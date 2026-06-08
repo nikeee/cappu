@@ -1674,3 +1674,35 @@ test(
     );
   },
 );
+
+test(
+  "local classes capturing enclosing locals run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Cap",
+      [
+        "public class Cap {",
+        "  static int adder(int base){",
+        "    int bonus = 100;",
+        "    class Adder { int add(int x){ return base + x + bonus; } }",
+        "    Adder a = new Adder();",
+        "    return a.add(10);",
+        "  }",
+        "  static int viaOp(int factor){",
+        "    class Mul implements java.util.function.IntUnaryOperator {",
+        "      public int applyAsInt(int x){ return x * factor; }",
+        "    }",
+        "    java.util.function.IntUnaryOperator op = new Mul();",
+        "    return op.applyAsInt(7);",
+        "  }",
+        "  public static void main(String[] z){",
+        "    System.out.println(adder(5));",
+        "    System.out.println(viaOp(3));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "115\n21\n",
+    );
+  },
+);
