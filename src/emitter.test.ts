@@ -1803,3 +1803,44 @@ test(
     );
   },
 );
+
+test(
+  "pattern switch (type patterns, guard, null, default) runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "PSw",
+      [
+        "public class PSw {",
+        "  static String describe(Object o){",
+        "    return switch (o) {",
+        '      case String s -> "str:" + s.length();',
+        '      case Integer i when i > 0 -> "pos:" + i;',
+        '      case Integer i -> "int:" + i;',
+        '      case null -> "null";',
+        '      default -> "other";',
+        "    };",
+        "  }",
+        "  static int classify(Object o){",
+        "    int r;",
+        "    switch (o) {",
+        "      case String s -> r = s.length();",
+        "      case Integer i -> r = i;",
+        "      default -> r = -1;",
+        "    }",
+        "    return r;",
+        "  }",
+        "  public static void main(String[] a){",
+        '    System.out.println(describe("hi"));',
+        "    System.out.println(describe(42));",
+        "    System.out.println(describe(-1));",
+        "    System.out.println(describe(null));",
+        "    System.out.println(describe(3.5));",
+        '    System.out.println(classify("abc") + "," + classify(7) + "," + classify(3.5));',
+        "  }",
+        "}",
+      ].join("\n"),
+      "str:2\npos:42\nint:-1\nnull\nother\n3,7,-1\n",
+    );
+  },
+);

@@ -65,6 +65,7 @@ import {
   type VariableDeclarator,
   type SwitchStatement,
   type SwitchClause,
+  type TypePattern,
   type SwitchExpression,
   type YieldStatement,
   type WhileStatement,
@@ -3340,6 +3341,10 @@ function generateBody(
   // yields a value (arrow `case L -> v` or `yield v`), left on the stack at the end.
   const emitSwitchExpression = (node: SwitchExpression): string => {
     const resultDesc = switchResultDesc(node.clauses);
+    if (isPatternSwitch(node.clauses)) {
+      emitPatternSwitch(node.expression, node.clauses, resultDesc);
+      return resultDesc;
+    }
     const { clauseLabels, endL, base } = emitSwitchDispatch(node.expression, node.clauses, true);
     yieldTargets.push({ label: endL, desc: resultDesc });
     node.clauses.forEach((cl, i) => {
@@ -3368,6 +3373,129 @@ function generateBody(
     push(resultDesc); // both paths converge here with the result on the stack
     placeLabel(endL);
     return resultDesc;
+  };
+
+  // Whether a switch uses type patterns (JLS 14.11.1, SE21) - lowered to an
+  // if/else-instanceof chain rather than the integral/string/enum dispatch.
+  const isPatternSwitch = (clauses: readonly SwitchClause[]): boolean =>
+    clauses.some(cl => (cl.labels ?? []).some(l => l.kind === SyntaxKind.TypePattern));
+
+  const throwNew = (internal: string): void => {
+    code.u1(OP_NEW);
+    code.u2(cp.classInfo(internal));
+    pushRef(`L${internal};`);
+    code.u1(OP_DUP);
+    pushRef(`L${internal};`);
+    code.u1(OP_INVOKESPECIAL);
+    code.u2(cp.methodref(internal, "<init>", "()V"));
+    pop(1);
+    code.u1(OP_ATHROW);
+    pop(1);
+    reachable = false;
+  };
+
+  // A pattern switch (JLS 14.11 / 14.30), arrow form: lowered to evaluate the
+  // selector once, then a null check (NPE unless `case null`) and an
+  // if/else-instanceof chain that binds each type pattern and applies its guard.
+  // `resultDesc` set => switch expression (each arm yields a value); returns
+  // whether a statement form terminates.
+  const emitPatternSwitch = (
+    selector: Node,
+    clauses: readonly SwitchClause[],
+    resultDesc?: string,
+  ): boolean => {
+    const selDesc = emitExpr(selector);
+    const tmpSlot = nextSlot;
+    nextSlot += slotsOf(selDesc);
+    if (nextSlot > maxLocals) maxLocals = nextSlot;
+    activeLocals.push({ slot: tmpSlot, descriptor: selDesc });
+    storeVar(tmpSlot, selDesc);
+    const endL = newLabel();
+    const nullClause = clauses.find(cl =>
+      (cl.labels ?? []).some(l => l.kind === SyntaxKind.NullKeyword),
+    );
+    const defaultClause = clauses.find(cl => cl.isDefault);
+
+    const emitArm = (cl: SwitchClause): void => {
+      if (resultDesc !== undefined) {
+        const arrowExpr =
+          cl.statements.length === 1 && cl.statements[0]!.kind === SyntaxKind.ExpressionStatement
+            ? (cl.statements[0] as ExpressionStatement).expression
+            : undefined;
+        if (!arrowExpr) throw new UnsupportedEmit(); // block/yield arm: later
+        coerce(emitExpr(arrowExpr), resultDesc);
+        branchTo(OP_GOTO, endL);
+        pop();
+      } else {
+        const term = inScope(() => {
+          let t = false;
+          for (const st of cl.statements) t = emitStmt(st);
+          return t;
+        });
+        if (!term) branchTo(OP_GOTO, endL);
+      }
+    };
+
+    // null: throws NPE unless there is a `case null`.
+    const afterNull = newLabel();
+    loadVar(tmpSlot, selDesc);
+    push(selDesc);
+    pop();
+    branchTo(OP_IFNONNULL, afterNull);
+    if (nullClause) emitArm(nullClause);
+    else throwNew("java/lang/NullPointerException");
+    placeLabel(afterNull);
+
+    for (const cl of clauses) {
+      if (cl.isDefault) continue;
+      const label = (cl.labels ?? [])[0];
+      if (label?.kind !== SyntaxKind.TypePattern) continue; // null handled above
+      const tp = label as TypePattern;
+      const desc = descriptorOf(tp.type, program);
+      if (desc[0] !== "L" && desc[0] !== "[") throw new UnsupportedEmit();
+      const internal = desc[0] === "[" ? desc : desc.slice(1, -1);
+      const nextL = newLabel();
+      loadVar(tmpSlot, selDesc);
+      push(selDesc);
+      code.u1(OP_INSTANCEOF);
+      code.u2(cp.classInfo(internal));
+      pop();
+      push("I");
+      pop();
+      branchTo(OP_IFEQ, nextL);
+      const pSlot = nextSlot;
+      nextSlot += slotsOf(desc);
+      if (nextSlot > maxLocals) maxLocals = nextSlot;
+      activeLocals.push({ slot: pSlot, descriptor: desc });
+      // The binder records the pattern variable on the TypePattern node itself.
+      const patternSym = tp.symbol ?? tp.name.symbol;
+      if (patternSym) locals.set(patternSym, { slot: pSlot, descriptor: desc });
+      loadVar(tmpSlot, selDesc);
+      push(selDesc);
+      if (desc !== "Ljava/lang/Object;") {
+        code.u1(OP_CHECKCAST);
+        code.u2(cp.classInfo(internal));
+        pop();
+        push(desc);
+      }
+      storeVar(pSlot, desc);
+      if (cl.guard) emitBranch(cl.guard, nextL, false); // guard false -> next clause
+      emitArm(cl);
+      placeLabel(nextL);
+    }
+
+    if (defaultClause) emitArm(defaultClause);
+    else if (resultDesc !== undefined) throwNew("java/lang/IncompatibleClassChangeError");
+
+    if (resultDesc !== undefined) {
+      setStack([]);
+      push(resultDesc);
+      placeLabel(endL);
+      return true;
+    }
+    setStack([]);
+    placeLabel(endL);
+    return false;
   };
 
   // A resource's close() (JLS 14.20.3): `aload r; r.close()`, optionally under an
@@ -4029,6 +4157,7 @@ function generateBody(
       // The `switch` statement (JLS 14.11).
       case SyntaxKind.SwitchStatement: {
         const s = stmt as SwitchStatement;
+        if (isPatternSwitch(s.clauses)) return emitPatternSwitch(s.expression, s.clauses);
         const { clauseLabels, endL, base } = emitSwitchDispatch(s.expression, s.clauses);
         breakTargets.push({ label: endL, finallyDepth: finallyStack.length });
         const arrow = s.clauses.some(cl => cl.isArrow); // arrow clauses do not fall through

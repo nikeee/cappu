@@ -17,8 +17,10 @@ verifiable placeholder, never a crash.
       `<clinit>` prologue (`!Class.desiredAssertionStatus()`) + guard/throw
       `AssertionError`. Message uses the `(Object)` constructor (boxing a
       primitive); javac's type-specific message ctors are not matched.
-- [ ] Pattern / guarded `switch` labels (JLS 14.11.1 / 14.30): `case Type t`,
-      record patterns, `case ... when guard`.
+- [x] Pattern `switch` (JLS 14.11.1 / 14.30), arrow form (statement + expression):
+      type patterns `case Type t`, guards `when`, `case null`, and `default`,
+      lowered to an if/else-instanceof chain (selector evaluated once, NPE when
+      null with no `case null`). Record/nested patterns and the colon form remain.
 
 ## Expressions
 
