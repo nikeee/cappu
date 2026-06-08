@@ -1736,3 +1736,27 @@ test(
     );
   },
 );
+
+test(
+  "anonymous class extending a class (super args + capture) runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "AnonExt",
+      [
+        "public class AnonExt {",
+        "  static class Base {",
+        '    Base(int v){ System.out.println("base " + v); }',
+        "    int get(){ return 0; }",
+        "  }",
+        "  static int run(int cap){",
+        "    Base b = new Base(99){ public int get(){ return cap + 1; } };",
+        "    return b.get();",
+        "  }",
+        "  public static void main(String[] a){ System.out.println(run(5)); }",
+        "}",
+      ].join("\n"),
+      "base 99\n6\n",
+    );
+  },
+);

@@ -47,9 +47,12 @@ verifiable placeholder, never a crash.
       capturing enclosing locals (reuses the local-class capture machinery), with
       a synthesized `super()`+store-captures constructor. Method bodies resolve
       via lexical scope.
-- [ ] Anonymous classes **extending a class** (super-constructor args) or with
-      own fields / `this`-member access; binder/checker scoping of the body for
-      `this.ownMember`.
+- [x] Anonymous classes **extending a class**: the synthesized constructor takes
+      the super-constructor arguments as trailing parameters (resolved via the
+      matching super ctor) and the `new` site passes them after the captures.
+- [ ] Anonymous/local classes with **own fields, initializer blocks, or `this`-
+      member / inherited-member access** (needs binder/checker scoping of the
+      body); local-class `this$0` (enclosing-instance) capture.
 - [x] User-defined interfaces are now emitted (ACC_INTERFACE|ACC_ABSTRACT, super
       Object, `extends` as super-interfaces): abstract methods (no Code), default
       and static methods (with Code), and implicitly public-static-final constant

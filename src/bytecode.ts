@@ -1932,10 +1932,11 @@ function generateBody(
     // An anonymous class implementing an interface (JLS 15.9.5): instantiate the
     // synthetic Outer$N class, passing the captured enclosing locals.
     if (oc.classBody) {
-      const iface = anonymousInterfaceImpl(oc, program, checker);
-      if (!iface) throw new UnsupportedEmit();
+      const target = anonymousTarget(oc, program);
+      if (!target) throw new UnsupportedEmit();
       const anonName = anonymousClassName(oc, program);
       const captures = collectCaptures(oc.classBody, oc.pos, oc.end, program, checker);
+      const args = oc.arguments ?? [];
       const ref = `L${anonName};`;
       code.u1(OP_NEW);
       code.u2(cp.classInfo(anonName));
@@ -1948,9 +1949,12 @@ function generateBody(
         loadVar(slot.slot, c.descriptor);
         push(c.descriptor);
       }
+      // super-constructor arguments follow the captures.
+      args.forEach((arg, i) => coerce(emitExpr(arg), target.superParamDescs[i]!));
+      const ctorDesc = `(${[...captures.map(c => c.descriptor), ...target.superParamDescs].join("")})V`;
       code.u1(OP_INVOKESPECIAL);
-      code.u2(cp.methodref(anonName, "<init>", `(${captures.map(c => c.descriptor).join("")})V`));
-      pop(1 + captures.length);
+      code.u2(cp.methodref(anonName, "<init>", ctorDesc));
+      pop(1 + captures.length + args.length);
       return ref;
     }
     const created = checker.getTypeOfExpression(node);
@@ -4443,44 +4447,64 @@ function classUsesAssert(declaration: ClassDeclaration): boolean {
 // The synthesized constructor of a capturing local class: super(), then store
 // each captured value (a leading parameter) into its val$ field. Used only when
 // the class declares no constructor and has no instance field initializers.
-function emitCaptureCtor(
+function loadByDescriptor(code: ByteBuffer, descriptor: string, slot: number): void {
+  const ch = descriptor[0];
+  const op =
+    ch === "J"
+      ? OP_LLOAD
+      : ch === "D"
+        ? OP_DLOAD
+        : ch === "F"
+          ? OP_FLOAD
+          : ch === "L" || ch === "["
+            ? OP_ALOAD
+            : OP_ILOAD;
+  code.u1(op);
+  code.u1(slot);
+}
+
+// The synthesized constructor for a capturing local/anonymous class: call super
+// (with its arguments, passed as trailing parameters), then store each captured
+// value (a leading parameter) into its val$ field. Parameter order is captures
+// then super-args; the `new` site pushes them in the same order.
+function emitSynthCtor(
   cp: ConstantPool,
   name: string,
   superInternal: string,
+  superParamDescs: string[],
   captures: LocalCapture[],
 ): ByteBuffer {
   const code = new ByteBuffer();
-  code.u1(OP_ALOAD_0);
-  code.u1(OP_INVOKESPECIAL);
-  code.u2(cp.methodref(superInternal, "<init>", "()V"));
   let slot = 1;
+  const captureSlots = captures.map(c => {
+    const s = slot;
+    slot += slotsOf(c.descriptor);
+    return s;
+  });
+  const superSlots = superParamDescs.map(d => {
+    const s = slot;
+    slot += slotsOf(d);
+    return s;
+  });
   let maxStack = 1;
-  for (const c of captures) {
+  code.u1(OP_ALOAD_0);
+  superParamDescs.forEach((d, i) => loadByDescriptor(code, d, superSlots[i]!));
+  code.u1(OP_INVOKESPECIAL);
+  code.u2(cp.methodref(superInternal, "<init>", `(${superParamDescs.join("")})V`));
+  maxStack = Math.max(maxStack, 1 + superParamDescs.reduce((n, d) => n + slotsOf(d), 0));
+  captures.forEach((c, i) => {
     code.u1(OP_ALOAD_0);
-    const ch = c.descriptor[0];
-    const loadOp =
-      ch === "J"
-        ? OP_LLOAD
-        : ch === "D"
-          ? OP_DLOAD
-          : ch === "F"
-            ? OP_FLOAD
-            : ch === "L" || ch === "["
-              ? OP_ALOAD
-              : OP_ILOAD;
-    code.u1(loadOp);
-    code.u1(slot);
+    loadByDescriptor(code, c.descriptor, captureSlots[i]!);
     code.u1(OP_PUTFIELD);
     code.u2(cp.fieldref(name, c.fieldName, c.descriptor));
-    const size = slotsOf(c.descriptor);
-    maxStack = Math.max(maxStack, 1 + size);
-    slot += size;
-  }
+    maxStack = Math.max(maxStack, 1 + slotsOf(c.descriptor));
+  });
   code.u1(OP_RETURN);
   const info = new ByteBuffer();
   info.u2(0); // package-private synthetic-ish constructor
   info.u2(cp.utf8("<init>"));
-  info.u2(cp.utf8(`(${captures.map(c => c.descriptor).join("")})V`));
+  const descs = [...captures.map(c => c.descriptor), ...superParamDescs];
+  info.u2(cp.utf8(`(${descs.join("")})V`));
   writeCodeAttribute(info, cp, { code, maxStack, maxLocals: slot });
   return info;
 }
@@ -4546,8 +4570,8 @@ export function emitClass(
   ) as ConstructorDeclaration[];
   if (localCaptures.length > 0) {
     // A capturing local class declares no constructor (effectiveLocalCaptures
-    // gates on that); synthesize one that stores the captures.
-    methods.append(emitCaptureCtor(cp, name, superInternalName, localCaptures));
+    // gates on that); synthesize one that calls super() and stores the captures.
+    methods.append(emitSynthCtor(cp, name, superInternalName, [], localCaptures));
     methodCount++;
   } else if (declaredConstructors.length === 0) {
     const defaultCtor = {
@@ -4801,22 +4825,37 @@ function anonymousClassName(node: ObjectCreationExpression, program: Program): s
   return `${base}$${index}`;
 }
 
-// If `node` is an anonymous class we can emit - it implements an interface (no
-// super constructor args), has no fields, only methods - return that interface's
-// internal name; otherwise undefined. The class emission and the `new` site share
-// this predicate so they stay in agreement.
-function anonymousInterfaceImpl(
+interface AnonymousTarget {
+  superInternal: string;
+  interfaceInternal?: string;
+  superParamDescs: string[];
+}
+
+// If `node` is an anonymous class we can emit - body is methods only (no fields
+// or initializer blocks); implements an interface, or extends a class whose
+// matching constructor is resolvable - return its super/interface and the super
+// constructor parameter descriptors; otherwise undefined. The class emission and
+// the `new` site share this so they stay in agreement.
+function anonymousTarget(
   node: ObjectCreationExpression,
   program: Program,
-  checker: Checker,
-): string | undefined {
-  void checker;
-  if (!node.classBody || (node.arguments ?? []).length > 0) return undefined;
-  if (node.type.kind !== SyntaxKind.TypeReference) return undefined;
+): AnonymousTarget | undefined {
+  if (!node.classBody || node.type.kind !== SyntaxKind.TypeReference) return undefined;
+  if (node.classBody.some(m => m.kind !== SyntaxKind.MethodDeclaration)) return undefined;
   const sym = resolveTypeEntityName((node.type as TypeReference).typeName, node, program);
-  if (!sym || !(sym.flags & SymbolFlags.Interface)) return undefined;
-  if (node.classBody.some(m => m.kind === SyntaxKind.FieldDeclaration)) return undefined;
-  return binaryName(sym);
+  if (!sym) return undefined;
+  const args = node.arguments ?? [];
+  if (sym.flags & SymbolFlags.Interface) {
+    if (args.length > 0) return undefined;
+    return { superInternal: "java/lang/Object", interfaceInternal: binaryName(sym), superParamDescs: [] };
+  }
+  // Extending a class: resolve the matching super constructor for its params.
+  const ctor = findConstructor(sym, args.length);
+  if (args.length > 0 && !ctor) return undefined;
+  const superParamDescs = ctor
+    ? ctor.parameters.map(p => paramDescriptor(p as Parameter, program))
+    : [];
+  return { superInternal: binaryName(sym), superParamDescs };
 }
 
 // Emit an anonymous interface-implementing class, or undefined if unsupported.
@@ -4825,15 +4864,15 @@ export function emitAnonymousClassIfPossible(
   program: Program,
   checker: Checker,
 ): EmittedClass | undefined {
-  const iface = anonymousInterfaceImpl(node, program, checker);
-  if (!iface) return undefined;
+  const target = anonymousTarget(node, program);
+  if (!target) return undefined;
   const name = anonymousClassName(node, program);
   const captures = collectCaptures(node.classBody!, node.pos, node.end, program, checker);
 
   const cp = new ConstantPool();
   const thisClassIndex = cp.classInfo(name);
-  const superClassIndex = cp.classInfo("java/lang/Object");
-  const interfaceIndices = [cp.classInfo(iface)];
+  const superClassIndex = cp.classInfo(target.superInternal);
+  const interfaceIndices = target.interfaceInternal ? [cp.classInfo(target.interfaceInternal)] : [];
 
   const fields = new ByteBuffer();
   let fieldCount = 0;
@@ -4845,7 +4884,7 @@ export function emitAnonymousClassIfPossible(
   const methods = new ByteBuffer();
   let methodCount = 0;
   const lambdaMethods: ByteBuffer[] = [];
-  methods.append(emitCaptureCtor(cp, name, "java/lang/Object", captures));
+  methods.append(emitSynthCtor(cp, name, target.superInternal, target.superParamDescs, captures));
   methodCount++;
   const captureMap = new Map(
     captures.map(c => [
