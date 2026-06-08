@@ -1585,3 +1585,30 @@ test(
     );
   },
 );
+
+test(
+  "Arrays utility calls on primitive arrays run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "ArrUtil",
+      [
+        "import java.util.Arrays;",
+        "public class ArrUtil {",
+        "  public static void main(String[] a){",
+        "    int[] x = {5, 3, 1, 4, 2};",
+        "    Arrays.sort(x);",
+        "    System.out.println(Arrays.toString(x));",
+        "    System.out.println(Arrays.binarySearch(x, 4));",
+        "    int[] y = Arrays.copyOf(x, 3);",
+        "    System.out.println(Arrays.toString(y));",
+        "    int[] z = new int[3];",
+        "    Arrays.fill(z, 7);",
+        "    System.out.println(Arrays.toString(z));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "[1, 2, 3, 4, 5]\n3\n[1, 2, 3]\n[7, 7, 7]\n",
+    );
+  },
+);

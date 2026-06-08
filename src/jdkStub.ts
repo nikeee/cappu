@@ -523,9 +523,28 @@ class Objects {
 class Arrays {
   public static <T> List<T> asList(T... a) { return null; }
   public static String toString(Object[] a) { return null; }
+  public static String toString(int[] a) { return null; }
+  public static String toString(long[] a) { return null; }
+  public static String toString(double[] a) { return null; }
+  public static String toString(char[] a) { return null; }
+  public static String toString(boolean[] a) { return null; }
   public static void sort(Object[] a) {}
+  public static void sort(int[] a) {}
+  public static void sort(long[] a) {}
+  public static void sort(double[] a) {}
+  public static void sort(char[] a) {}
+  public static void sort(int[] a, int from, int to) {}
   public static <T> T[] copyOf(T[] original, int newLength) { return null; }
+  public static int[] copyOf(int[] original, int newLength) { return null; }
+  public static int[] copyOfRange(int[] original, int from, int to) { return null; }
   public static void fill(Object[] a, Object val) {}
+  public static void fill(int[] a, int val) {}
+  public static void fill(char[] a, char val) {}
+  public static void fill(boolean[] a, boolean val) {}
+  public static boolean equals(int[] a, int[] b) { return false; }
+  public static boolean equals(Object[] a, Object[] b) { return false; }
+  public static int binarySearch(int[] a, int key) { return 0; }
+  public static int hashCode(int[] a) { return 0; }
 }
 
 class Collections {
