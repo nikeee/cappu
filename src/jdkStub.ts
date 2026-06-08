@@ -40,6 +40,7 @@ class Class<T> {
   public String getName() { return null; }
   public String getSimpleName() { return null; }
   public boolean isInstance(Object o) { return false; }
+  public boolean desiredAssertionStatus() { return false; }
 }
 
 class Enum<E> implements Comparable<E> {

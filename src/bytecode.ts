@@ -36,6 +36,7 @@ import {
   type SynchronizedStatement,
   type ThrowStatement,
   type TryStatement,
+  type AssertStatement,
   type Block,
   type CatchClause,
   type DoStatement,
@@ -1059,6 +1060,9 @@ function generateBody(
   // Enum <clinit>: construct each constant and the $VALUES array before the
   // static field initializers.
   enumClinit?: EnumClinit,
+  // <clinit> of a class that uses `assert` (JLS 14.10): initialize the synthetic
+  // $assertionsDisabled field from this class's desiredAssertionStatus() first.
+  assertionsOwner?: string,
 ): MethodBody {
   const isConstructor = !lambdaSpec && method.kind === SyntaxKind.ConstructorDeclaration;
   const isStatic = lambdaSpec
@@ -3625,9 +3629,40 @@ function generateBody(
           fixups.some(f => f.label === endL) || wideFixups.some(f => f.label === endL);
         return hasDefault && lastTerminated && !endBranched;
       }
-      // TODO: unhandled statements degrade to a placeholder method body. Notably
-      // the assert statement (JLS 14.10: a $assertionsDisabled static guard +
-      // throw AssertionError).
+      // The assert statement (JLS 14.10): skip when assertions are disabled, then
+      // throw AssertionError if the condition is false.
+      case SyntaxKind.AssertStatement: {
+        const s = stmt as AssertStatement;
+        const endL = newLabel();
+        code.u1(OP_GETSTATIC);
+        code.u2(cp.fieldref(thisInternalName, "$assertionsDisabled", "Z"));
+        push("I");
+        pop(); // consumed by the branch
+        branchTo(OP_IFEQ + 1, endL); // ifne: assertions disabled -> skip
+        emitBranch(s.condition, endL, true); // condition true -> skip (no error)
+        code.u1(OP_NEW);
+        code.u2(cp.classInfo("java/lang/AssertionError"));
+        pushRef("Ljava/lang/AssertionError;");
+        code.u1(OP_DUP);
+        pushRef("Ljava/lang/AssertionError;");
+        let ctorDesc = "()V";
+        if (s.message) {
+          // The detail message: AssertionError(Object) (the message is boxed if a
+          // primitive). javac uses type-specific ctors; (Object) is equivalent.
+          const md = emitExpr(s.message);
+          coerce(md, "Ljava/lang/Object;");
+          ctorDesc = "(Ljava/lang/Object;)V";
+        }
+        code.u1(OP_INVOKESPECIAL);
+        code.u2(cp.methodref("java/lang/AssertionError", "<init>", ctorDesc));
+        pop(s.message ? 2 : 1);
+        code.u1(OP_ATHROW);
+        pop(1);
+        reachable = false;
+        placeLabel(endL);
+        return false;
+      }
+      // TODO: unhandled statements degrade to a placeholder method body.
       default:
         throw new UnsupportedEmit();
     }
@@ -3675,6 +3710,30 @@ function generateBody(
       pop(1);
     }
     if (enumClinit) emitEnumClinitPrologue(enumClinit);
+    if (assertionsOwner) {
+      // $assertionsDisabled = !ThisClass.class.desiredAssertionStatus(); (JLS 14.10)
+      ldc(cp.classInfo(assertionsOwner));
+      push("Ljava/lang/Class;");
+      code.u1(OP_INVOKEVIRTUAL);
+      code.u2(cp.methodref("java/lang/Class", "desiredAssertionStatus", "()Z"));
+      pop(1);
+      push("I");
+      const enabledL = newLabel();
+      const storeL = newLabel();
+      pop(); // consumed by the branch
+      branchTo(OP_IFEQ + 1, enabledL); // ifne: assertions enabled -> push 0
+      intConst(1); // disabled -> $assertionsDisabled = true
+      push("I");
+      branchTo(OP_GOTO, storeL);
+      pop(); // the 1 is not on the stack along the enabled path
+      placeLabel(enabledL);
+      intConst(0); // enabled -> $assertionsDisabled = false
+      push("I");
+      placeLabel(storeL);
+      code.u1(OP_PUTSTATIC);
+      code.u2(cp.fieldref(assertionsOwner, "$assertionsDisabled", "Z"));
+      pop();
+    }
     for (const fi of fieldInits) {
       if (fi.isStatic) {
         coerce(emitExpr(fi.init), fi.descriptor);
@@ -3943,6 +4002,34 @@ function resolveInternalName(
   return symbol ? binaryName(symbol) : entityNameToString(ref.typeName).replace(/\./g, "/");
 }
 
+// Whether the class's own code uses `assert` (JLS 14.10), so it needs the
+// synthetic $assertionsDisabled field + <clinit> prologue. Nested type
+// declarations are excluded - each emitted class gets its own field.
+function classUsesAssert(declaration: ClassDeclaration): boolean {
+  const TYPE_DECLS = new Set([
+    SyntaxKind.ClassDeclaration,
+    SyntaxKind.InterfaceDeclaration,
+    SyntaxKind.EnumDeclaration,
+    SyntaxKind.RecordDeclaration,
+    SyntaxKind.AnnotationTypeDeclaration,
+  ]);
+  let found = false;
+  const visit = (node: Node): void => {
+    if (found) return;
+    if (node.kind === SyntaxKind.AssertStatement) {
+      found = true;
+      return;
+    }
+    if (node !== declaration && TYPE_DECLS.has(node.kind)) return;
+    forEachChild(node, child => {
+      visit(child);
+      return undefined;
+    });
+  };
+  visit(declaration);
+  return found;
+}
+
 export function emitClass(
   declaration: ClassDeclaration,
   program: Program,
@@ -3963,6 +4050,17 @@ export function emitClass(
   const superClassIndex = cp.classInfo(superInternalName);
   const interfaceIndices = interfaceNames.map(n => cp.classInfo(n));
   const fields = emitFields(declaration, cp, program);
+
+  // A class that uses `assert` gets a synthetic `static final boolean
+  // $assertionsDisabled` set in <clinit> (JLS 14.10).
+  const usesAssert = classUsesAssert(declaration);
+  if (usesAssert) {
+    fields.buffer.u2(ACC_STATIC | ACC_FINAL | ACC_SYNTHETIC);
+    fields.buffer.u2(cp.utf8("$assertionsDisabled"));
+    fields.buffer.u2(cp.utf8("Z"));
+    fields.buffer.u2(0); // no attributes
+    fields.count++;
+  }
 
   const { instanceInits, staticInits } = collectFieldInits(declaration.members, name, program);
 
@@ -4024,8 +4122,9 @@ export function emitClass(
     methodCount++;
   }
 
-  // Static field initializers -> <clinit>.
-  if (staticInits.length > 0) {
+  // Static field initializers -> <clinit>; also needed (even with no inits) when
+  // the class uses `assert`, to set $assertionsDisabled.
+  if (staticInits.length > 0 || usesAssert) {
     const clinit = {
       kind: SyntaxKind.MethodDeclaration,
       modifiers: [{ kind: SyntaxKind.StaticKeyword }],
@@ -4049,6 +4148,10 @@ export function emitClass(
         undefined,
         staticInits,
         lambdaMethods,
+        undefined,
+        false,
+        undefined,
+        usesAssert ? name : undefined,
       );
     } catch (e) {
       if (!(e instanceof UnsupportedEmit)) throw e;

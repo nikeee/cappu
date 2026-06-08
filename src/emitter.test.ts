@@ -643,6 +643,30 @@ test(
 );
 
 test(
+  "assert statement: disabled by default, throws AssertionError under -ea",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    const src = [
+      "public class Asrt {",
+      "  static int checked(int n){ assert n > 0 : \"bad \" + n; return n; }",
+      "  public static void main(String[] a){",
+      "    try { System.out.println(checked(-1)); }",
+      "    catch (AssertionError e) { System.out.println(\"caught \" + e.getMessage()); }",
+      "  }",
+      "}",
+    ].join("\n");
+    const dir = mkdtempSync(join(tmpdir(), "emit-assert-"));
+    for (const c of emitClasses("Asrt", src)) writeFileSync(join(dir, `${c.name}.class`), c.bytes);
+    // Assertions disabled (default): the assert is a no-op, checked(-1) returns -1.
+    expect(execFileSync("java", ["-cp", dir, "Asrt"], { encoding: "utf8" })).toBe("-1\n");
+    // Assertions enabled (-ea): the false assert throws AssertionError with the message.
+    expect(execFileSync("java", ["-ea", "-cp", dir, "Asrt"], { encoding: "utf8" })).toBe(
+      "caught bad -1\n",
+    );
+  },
+);
+
+test(
   "synchronized statement runs identically to javac",
   { skip: HAS_JAVA ? false : "no JDK" },
   () => {

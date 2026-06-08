@@ -13,8 +13,10 @@ verifiable placeholder, never a crash.
 - [x] `synchronized` statement (JLS 14.19): monitorenter, then the body under a
       finally that runs monitorexit on every exit (normal, return/break, and the
       catch-all exception path).
-- [ ] `assert` statement (JLS 14.10): `$assertionsDisabled` static guard +
-      throw `AssertionError`.
+- [x] `assert` statement (JLS 14.10): synthetic `$assertionsDisabled` field +
+      `<clinit>` prologue (`!Class.desiredAssertionStatus()`) + guard/throw
+      `AssertionError`. Message uses the `(Object)` constructor (boxing a
+      primitive); javac's type-specific message ctors are not matched.
 - [ ] Pattern / guarded `switch` labels (JLS 14.11.1 / 14.30): `case Type t`,
       record patterns, `case ... when guard`.
 
