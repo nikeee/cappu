@@ -54,10 +54,59 @@ For multi-step tasks, state a brief plan:
 
 ## Testing
 
-Node native test runner (`node --test`). Single test file:
+Tests use the Node test runner via `tsx` (TypeScript sources run directly).
+
+### Run everything
 ```bash
-node --test src/service/someService.test.ts
+node --run test            # all src/**/*.test.ts
 ```
+
+### Run a single file or a single test
+```bash
+node_modules/.bin/tsx --test ./src/emitter.test.ts
+node_modules/.bin/tsx --test --test-name-pattern="synchronized" ./src/emitter.test.ts
+```
+
+### The emitter backend tests (`src/emitter.ts` / `src/bytecode.ts`)
+
+These validate emitted JVM bytecode three ways. Two need a JDK on PATH
+(`java`, `javap`); the heavy `javac` step is only needed when regenerating
+baselines:
+
+1. **Binary baselines** - exact emitted `.class` bytes, stored under
+   `src/__fixtures__/emit-baselines/*.class`. No JDK needed.
+2. **Byte-match vs javac** - our normalized disassembly (`javap -c -p`,
+   constant-pool indices stripped) must equal javac's, stored as plain-text
+   JSON under `src/__fixtures__/javac-baselines/*.json`. At test time only
+   `javap` runs (over our output); the javac reference is read from disk.
+3. **Run-equivalence** (`runsLikeJavac`) - our class is run under `java` and
+   its stdout compared to the expected text (which is the javac-verified
+   reference). Only `java` runs at test time.
+
+### Regenerating baselines (UPDATE_BASELINES)
+
+When an intentional change alters emitted bytecode, regenerate both baseline
+kinds. This requires `javac`, `java`, and `javap` on PATH:
+```bash
+UPDATE_BASELINES=1 node_modules/.bin/tsx --test ./src/emitter.test.ts
+```
+This rewrites the binary `.class` baselines and the `javac-baselines/*.json`
+references (recompiling each fixture with `javac --release 21`), and re-runs
+`runsLikeJavac` against a live `javac` to confirm the hard-coded expected
+stdout still matches. Commit the regenerated fixtures. Without the flag, a
+missing baseline is auto-created (when a JDK is present) but existing ones are
+asserted against, never overwritten.
+
+### Corpus robustness tests (`src/emit-corpus.test.ts`)
+
+Auto-discovers every git submodule under `test-corpus/` and asserts the emitter
+produces class bytes for every `.java` file without throwing (degrading to a
+placeholder is fine, crashing is not). No JDK needed. Initialize submodules
+first:
+```bash
+git submodule update --init
+```
+Skipped when no submodule is checked out, so CI without them still passes.
 
 ## Linting / Formatting
 - **oxlint** + **oxfmt** for backend/frontend/ingest (config: `.oxlintrc.json`, `.oxfmtrc.json`, `.editorconfig`). Use `node --run lint` and `node --run format` to execute.
