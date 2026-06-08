@@ -1,14 +1,18 @@
 # Prompts
 
 A verbatim record of the prompts driving this work, oldest first, kept so the
-typed intent is traceable. New prompts are appended here, and each is also added
-verbatim to the bottom of the commit message(s) it produced.
+typed intent is traceable. New prompts are appended here with a timestamp, and
+each is also added verbatim to the bottom of the commit message(s) it produced.
 
-Verbatim - including typos - is intentional.
+Verbatim - including typos - is intentional. Timestamps are `YYYY-MM-DD HH:MM`
+(local). Entries marked "(logged ...)" were backfilled in one pass, so they
+carry the time they were recorded, not the exact time they were typed; per-prompt
+timestamps are captured live from here on.
 
 ## Earlier sessions (parser/binder/checker/LSP, then the compiler backend)
 
-Order within this group is approximate (reconstructed from the working summary).
+Order within this group is approximate (reconstructed from the working summary);
+no timestamps were captured.
 
 - cover all of them
 - first, look for refactoring opportunities. Add more tests with real code on a binary level. make sure float handling edge cases dont cinflict with stuff that JS/TS does with floats. then do switch and ternary
@@ -31,7 +35,7 @@ Order within this group is approximate (reconstructed from the working summary).
 - use javadoc
 - use jsdoc
 
-## Current session
+## Current session (logged 2026-06-08 12:41)
 
 1. yes
 2. yes
@@ -47,3 +51,7 @@ Order within this group is approximate (reconstructed from the working summary).
 12. tidy up the test infrastructure. move the test corpus and the other reference fixtures to a common directory. maybe with sub-directories. structure the dirs based on parser reference baselines, language-service (completion, hover, etc) and emitter tests. Keep the .test.ts files where they are
 13. is it possible to add something to the submodules spec, so we only clone .java files from the sub module? If so, do it
 14. save all (yes, all of them) of my past and future prompts to PROMPTS.md. I want to keep track of what i was typing. Maybe also add them verbatim to the bottom part of the commit messages you generate.
+
+## Live (timestamped)
+
+- 2026-06-08 12:41 — also append the prompt timestamp to the verbatim record in PROMPTS.md

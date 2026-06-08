@@ -121,7 +121,8 @@ checked out, so CI without them still passes.
 
 ## Prompt log
 - `PROMPTS.md` is a verbatim, chronological record of the user's prompts. Append
-  each new prompt to it (verbatim, typos included).
+  each new prompt to it (verbatim, typos included) prefixed with a local
+  timestamp, e.g. `- 2026-06-08 12:41 — <prompt>` (run `date "+%Y-%m-%d %H:%M"`).
 - Add the triggering prompt(s) verbatim to the bottom of every commit message,
   after a `---` separator, prefixed with `Prompt:`.
 
