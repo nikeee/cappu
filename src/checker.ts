@@ -1304,7 +1304,10 @@ export function createChecker(program: Program): Checker {
       if (current.kind === SyntaxKind.MethodDeclaration) {
         return resolveType((current as MethodDeclaration).returnType, current);
       }
-      if (current.kind === SyntaxKind.LambdaExpression) return undefined; // lambda target typing: later
+      // TODO: a `return` inside a lambda targets the SAM's return type (JLS 15.27.2
+      // / 9.8). We bail to undefined instead of inferring it from the lambda's
+      // target functional interface.
+      if (current.kind === SyntaxKind.LambdaExpression) return undefined;
       current = current.parent;
     }
     return undefined;

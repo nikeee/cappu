@@ -620,6 +620,10 @@ function sourceNameOf(node: Node): string | undefined {
 // The class-level attributes shared by classes and enums: SourceFile and (when
 // any invokedynamic was emitted) BootstrapMethods. Must run before the constant
 // pool is written so the attribute name Utf8s are interned.
+// TODO: emit the attributes javac writes that we omit, needed for closer
+// byte-equivalence: InnerClasses (JVMS 4.7.6) and NestHost/NestMembers (4.7.28/
+// 4.7.29) for nested types, Signature (4.7.9) for generic signatures, and the
+// per-method LineNumberTable (4.7.12) and LocalVariableTable (4.7.13).
 function buildClassAttributes(
   cp: ConstantPool,
   sourceName: string | undefined,
@@ -1634,7 +1638,9 @@ function generateBody(
 
   /** The `instanceof` operator (JLS 15.20.2) -> the `instanceof` instruction. */
   const emitInstanceof = (node: InstanceofExpression): string => {
-    if (node.name) throw new UnsupportedEmit(); // pattern binding (x instanceof T t): later
+    // TODO: type-pattern binding `x instanceof T t` (JLS 14.30.1 / 15.20.2):
+    // bind `t` to a local and store the checkcast result into it.
+    if (node.name) throw new UnsupportedEmit();
     emitExpr(node.expression);
     const descriptor = descriptorOf(node.type, program);
     const klass = descriptor[0] === "[" ? descriptor : descriptor.slice(1, -1);
@@ -2001,7 +2007,11 @@ function generateBody(
     const op = node.operatorToken;
     const lc = numericCat(checker.getTypeOfExpression(node.left));
     const rc = numericCat(checker.getTypeOfExpression(node.right));
-    if (!lc || !rc) throw new UnsupportedEmit(); // String concat / comparisons: later
+    // TODO: non-numeric binary operators with a reference operand reach here and
+    // degrade: reference equality `==`/`!=` (JLS 15.21.3, if_acmpeq/if_acmpne)
+    // and boolean `&`/`|`/`^` on Boolean operands (JLS 15.22.2). String `+` is
+    // handled separately by emitStringConcat (JLS 15.18.1).
+    if (!lc || !rc) throw new UnsupportedEmit();
 
     const shift = SHIFTS[op];
     if (shift !== undefined) {
@@ -2057,7 +2067,9 @@ function generateBody(
       push("J");
       return "J";
     }
-    throw new UnsupportedEmit(); // logical '!': needs control flow
+    // Logical complement `!` (JLS 15.15.6) is emitted via emitBoolean (branch to
+    // 0/1) rather than here; an unexpected operator type degrades.
+    throw new UnsupportedEmit();
   };
 
   /** The return instruction for the method's return type (JLS 14.17). */
@@ -2568,6 +2580,9 @@ function generateBody(
     let implDescriptor: string;
     let dynamicArgs = "";
     if (info.kind === "constructor") {
+      // TODO: array constructor references `T[]::new` (JLS 15.13.3) are not
+      // handled: they construct an array (IntFunction<T[]>) via a synthetic
+      // anewarray helper rather than an <init> MethodHandle.
       refKind = REF_newInvokeSpecial;
       implName = "<init>";
       const ctor = findConstructor(info.ownerSymbol, info.instParams.length);
@@ -2721,8 +2736,10 @@ function generateBody(
     }
   };
 
-  // Constant value of a case label (integral or char). Non-constant or
-  // non-integral labels are not supported (string/enum/pattern switch: later).
+  // Constant value of a case label (integral or char). String and enum labels
+  // have their own dispatch; this only covers integral/char switches.
+  // TODO: pattern and guarded labels (JLS 14.11.1 / 14.30): `case Type t`,
+  // record patterns, and `case ... when guard` are not supported and reach here.
   const caseValue = (node: Node): number => {
     if (node.kind === SyntaxKind.CharacterLiteral) {
       return (node as LiteralExpression).value.charCodeAt(0);
@@ -3449,7 +3466,13 @@ function generateBody(
         const emitResourceNest = (i: number): boolean => {
           if (i >= resources.length) return emitUserBody();
           const res = resources[i]!;
-          // Declaration form only (try (T r = init)); resolve T to a class type.
+          // TODO: support the variable-access resource form `try (existingVar)`
+          // (JLS 14.20.3, SE9): only the declaration form `try (T r = init)` is
+          // handled here.
+          // TODO: emit the null guard `if (r != null) ...close` (JLS 14.20.3.1).
+          // We assume the resource is non-null (javac elides the guard only for a
+          // definitely-non-null initializer); a null resource would NPE on close
+          // here instead of being skipped.
           if (!res.type || !res.name || !res.initializer) throw new UnsupportedEmit();
           const desc = descriptorOf(res.type, program);
           if (desc[0] !== "L") throw new UnsupportedEmit();
@@ -3566,6 +3589,10 @@ function generateBody(
           fixups.some(f => f.label === endL) || wideFixups.some(f => f.label === endL);
         return hasDefault && lastTerminated && !endBranched;
       }
+      // TODO: unhandled statements degrade to a placeholder method body. Notably
+      // the synchronized statement (JLS 14.19: monitorenter/monitorexit with a
+      // catch-all monitorexit on the exception path) and the assert statement
+      // (JLS 14.10: a $assertionsDisabled static guard + throw AssertionError).
       default:
         throw new UnsupportedEmit();
     }
@@ -3601,8 +3628,11 @@ function generateBody(
       code.u2(cp.methodref("java/lang/Enum", "<init>", "(Ljava/lang/String;I)V"));
       pop(3);
     } else if (isConstructor && ctorSuper) {
-      // Implicit super(): aload_0; invokespecial <super>.<init>:()V. (An explicit
-      // super()/this() in the body is not handled and triggers the fallback.)
+      // Implicit super(): aload_0; invokespecial <super>.<init>:()V.
+      // TODO: explicit constructor invocations (JLS 8.8.7.1): a leading
+      // `super(args)` (with arguments) or `this(args)` is not handled - we always
+      // emit a no-arg super() and then the field inits, which triggers the
+      // fallback for constructors that chain explicitly.
       code.u1(OP_ALOAD_0);
       pushRef();
       code.u1(OP_INVOKESPECIAL);

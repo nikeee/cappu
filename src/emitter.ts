@@ -31,9 +31,10 @@ export function emitSourceFile(
   const visit = (node: Node): void => {
     if (node.kind === SyntaxKind.ClassDeclaration) {
       const decl = node as ClassDeclaration;
-      // Anonymous classes (new T(){...}) have no name and no bound symbol; we do
-      // not emit them yet, so skip rather than crash. The site that creates one
-      // degrades to a placeholder via the usual UnsupportedEmit path.
+      // TODO: emit anonymous classes (JLS 15.9.5) and local classes (JLS 14.3) as
+      // their own Outer$N class files. They have no name and no bound symbol, so
+      // for now we skip rather than crash; the creation site degrades to a
+      // placeholder via the usual UnsupportedEmit path.
       if (decl.symbol || decl.name) result.push(emitClass(decl, program, checker));
     } else if (node.kind === SyntaxKind.EnumDeclaration) {
       result.push(emitEnum(node as EnumDeclaration, program, checker));
