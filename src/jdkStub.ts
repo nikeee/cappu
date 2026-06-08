@@ -62,6 +62,9 @@ class Number {
 }
 
 class String implements CharSequence, Comparable<String> {
+  public String() {}
+  public String(char[] value) {}
+  public String(char[] value, int offset, int count) {}
   public int length() { return 0; }
   public boolean isEmpty() { return false; }
   public char charAt(int index) { return ' '; }

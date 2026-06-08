@@ -1364,3 +1364,170 @@ for (const [name, { source: src, stdout }] of Object.entries(CONTROL)) {
     expect(out).toBe(stdout);
   });
 }
+
+// Test cases extracted from the corpus projects (algorithms-java, commons-lang,
+// json-java) exercising constructs the targeted suite did not cover in isolation.
+test(
+  "bit manipulation runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Bits",
+      [
+        "public class Bits {",
+        "  static int setBit(int x, int i){ return x | (1 << i); }",
+        "  static int clearBit(int x, int i){ return x & ~(1 << i); }",
+        "  static boolean isSet(int x, int i){ return (x & (1 << i)) != 0; }",
+        "  static int countOnes(int x){ int c = 0; while (x != 0) { c += x & 1; x >>>= 1; } return c; }",
+        "  static long mix(long a, int s){ return (a << s) ^ (a >>> s) | (a & 0xFFL); }",
+        "  public static void main(String[] a){",
+        "    System.out.println(setBit(0, 3));",
+        "    System.out.println(clearBit(15, 1));",
+        "    System.out.println(isSet(8, 3));",
+        "    System.out.println(countOnes(-1));",
+        "    System.out.println(mix(123456789L, 5));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "8\n13\ntrue\n32\n3947068637\n",
+    );
+  },
+);
+
+test(
+  "multidimensional arrays run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Mat",
+      [
+        "public class Mat {",
+        "  static int rectSum(int n, int m){",
+        "    int[][] g = new int[n][m];",
+        "    for (int i = 0; i < n; i++) for (int j = 0; j < m; j++) g[i][j] = i * m + j;",
+        "    int s = 0;",
+        "    for (int i = 0; i < n; i++) for (int j = 0; j < m; j++) s += g[i][j];",
+        "    return s;",
+        "  }",
+        "  static int jagged(){",
+        "    int[][] t = new int[3][];",
+        "    for (int i = 0; i < 3; i++) { t[i] = new int[i + 1]; for (int j = 0; j <= i; j++) t[i][j] = j; }",
+        "    int s = 0;",
+        "    for (int[] row : t) for (int v : row) s += v;",
+        "    return s;",
+        "  }",
+        "  public static void main(String[] a){",
+        "    System.out.println(rectSum(3, 4));",
+        "    System.out.println(jagged());",
+        "  }",
+        "}",
+      ].join("\n"),
+      "66\n4\n",
+    );
+  },
+);
+
+test(
+  "array element compound assignment runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "ArrAssign",
+      [
+        "public class ArrAssign {",
+        "  public static void main(String[] a){",
+        "    int[] x = {1, 2, 3, 4};",
+        "    x[0] += 10;",
+        "    x[1] *= 5;",
+        "    x[2]++;",
+        "    x[3] <<= 2;",
+        "    int s = 0;",
+        "    for (int v : x) s = s * 100 + v;",
+        "    System.out.println(s);",
+        "  }",
+        "}",
+      ].join("\n"),
+      "11100416\n",
+    );
+  },
+);
+
+test(
+  "char and digit arithmetic runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Chars",
+      [
+        "public class Chars {",
+        "  static int parse(String s){",
+        "    int n = 0;",
+        "    for (int i = 0; i < s.length(); i++) { char c = s.charAt(i); n = n * 10 + (c - '0'); }",
+        "    return n;",
+        "  }",
+        "  static String shift(String s){",
+        "    char[] out = new char[s.length()];",
+        "    for (int i = 0; i < s.length(); i++) out[i] = (char) (s.charAt(i) + 1);",
+        "    return new String(out);",
+        "  }",
+        "  public static void main(String[] a){",
+        '    System.out.println(parse("2026"));',
+        '    System.out.println(shift("abc"));',
+        "  }",
+        "}",
+      ].join("\n"),
+      "2026\nbcd\n",
+    );
+  },
+);
+
+test(
+  "recursion runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Rec",
+      [
+        "public class Rec {",
+        "  static long fact(int n){ return n <= 1 ? 1L : n * fact(n - 1); }",
+        "  static int fib(int n){ return n < 2 ? n : fib(n - 1) + fib(n - 2); }",
+        "  static boolean even(int n){ return n == 0 ? true : odd(n - 1); }",
+        "  static boolean odd(int n){ return n == 0 ? false : even(n - 1); }",
+        "  public static void main(String[] a){",
+        "    System.out.println(fact(10));",
+        "    System.out.println(fib(15));",
+        "    System.out.println(even(10));",
+        "    System.out.println(odd(7));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "3628800\n610\ntrue\ntrue\n",
+    );
+  },
+);
+
+test(
+  "do-while with break and continue runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "DoW",
+      [
+        "public class DoW {",
+        "  static int run(int n){",
+        "    int i = 0, s = 0;",
+        "    do {",
+        "      i++;",
+        "      if (i % 2 == 0) continue;",
+        "      if (i > n) break;",
+        "      s += i;",
+        "    } while (i < 100);",
+        "    return s;",
+        "  }",
+        "  public static void main(String[] a){ System.out.println(run(9)); }",
+        "}",
+      ].join("\n"),
+      "25\n",
+    );
+  },
+);

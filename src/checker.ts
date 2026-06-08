@@ -849,13 +849,19 @@ export function createChecker(program: Program): Checker {
     return intType;
   }
 
+  // Binary numeric promotion (JLS 5.6.2): byte/short/char promote to int, then the
+  // result is the wider of the two operand types.
   function widerNumeric(a: Type, b: Type): Type {
     const order = ["int", "long", "float", "double"];
-    const rank = (t: Type) => (t.kind === TypeKind.Primitive ? order.indexOf(t.name) : -1);
+    const rank = (t: Type) => {
+      if (t.kind !== TypeKind.Primitive) return -1;
+      const promoted = t.name === "byte" || t.name === "short" || t.name === "char" ? "int" : t.name;
+      return order.indexOf(promoted);
+    };
     const ra = rank(a);
     const rb = rank(b);
     if (ra < 0 && rb < 0) return errorType;
-    return rb > ra ? b : a;
+    return primitiveType(order[Math.max(ra, rb)]!);
   }
 
   function isString(type: Type, stringType: Type): boolean {
