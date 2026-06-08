@@ -14,3 +14,7 @@
 	path = TypeScript
 	url = https://github.com/microsoft/TypeScript/
 	shallow = true
+[submodule "test-fixtures/emitter/corpus/json-java"]
+	path = test-fixtures/emitter/corpus/json-java
+	url = https://github.com/stleary/JSON-java.git
+	shallow = true
