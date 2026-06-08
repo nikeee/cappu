@@ -3690,14 +3690,25 @@ function generateBody(
 
     const emitArm = (cl: SwitchClause): void => {
       if (resultDesc !== undefined) {
+        // Arrow `case L -> expr;` yields the expression directly; arrow-block and
+        // colon arms yield via `yield` (handled by emitStmt against yieldTargets).
         const arrowExpr =
-          cl.statements.length === 1 && cl.statements[0]!.kind === SyntaxKind.ExpressionStatement
+          cl.isArrow &&
+          cl.statements.length === 1 &&
+          cl.statements[0]!.kind === SyntaxKind.ExpressionStatement
             ? (cl.statements[0] as ExpressionStatement).expression
             : undefined;
-        if (!arrowExpr) throw new UnsupportedEmit(); // block/yield arm: later
-        coerce(emitExpr(arrowExpr), resultDesc);
-        branchTo(OP_GOTO, endL);
-        pop();
+        if (arrowExpr) {
+          coerce(emitExpr(arrowExpr), resultDesc);
+          branchTo(OP_GOTO, endL);
+          pop();
+        } else {
+          inScope(() => {
+            let t = false;
+            for (const st of cl.statements) t = emitStmt(st);
+            return t;
+          });
+        }
       } else {
         const term = inScope(() => {
           let t = false;
@@ -3707,6 +3718,12 @@ function generateBody(
         if (!term) branchTo(OP_GOTO, endL);
       }
     };
+
+    // Colon-form arms reach the end with `break` (statement) or `yield`
+    // (expression); make the switch end the target for both. Arrow arms ignore
+    // these (they branch to endL directly) but harmlessly share them.
+    if (resultDesc !== undefined) yieldTargets.push({ label: endL, desc: resultDesc });
+    else breakTargets.push({ label: endL, finallyDepth: finallyStack.length });
 
     // null: throws NPE unless there is a `case null`.
     const afterNull = newLabel();
@@ -3767,6 +3784,9 @@ function generateBody(
 
     if (defaultClause) emitArm(defaultClause);
     else if (resultDesc !== undefined) throwNew("java/lang/IncompatibleClassChangeError");
+
+    if (resultDesc !== undefined) yieldTargets.pop();
+    else breakTargets.pop();
 
     if (resultDesc !== undefined) {
       setStack([]);

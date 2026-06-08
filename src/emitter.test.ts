@@ -1954,3 +1954,42 @@ test(
     );
   },
 );
+
+test(
+  "colon-form pattern switch runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "ColonPat",
+      [
+        "public class ColonPat {",
+        "  static String f(Object o) {",
+        "    String r;",
+        "    switch (o) {",
+        '      case Integer i: r = "int:" + i; break;',
+        '      case String s: r = "str:" + s; break;',
+        '      default: r = "other"; break;',
+        "    }",
+        "    return r;",
+        "  }",
+        "  static int g(Object o) {",
+        "    return switch (o) {",
+        "      case Integer i: yield i * 2;",
+        "      case String s: yield s.length();",
+        "      default: yield -1;",
+        "    };",
+        "  }",
+        "  public static void main(String[] a){",
+        "    System.out.println(f(42));",
+        '    System.out.println(f("hi"));',
+        "    System.out.println(f(3.5));",
+        "    System.out.println(g(21));",
+        '    System.out.println(g("abcd"));',
+        "    System.out.println(g(2.0));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "int:42\nstr:hi\nother\n42\n4\n-1\n",
+    );
+  },
+);

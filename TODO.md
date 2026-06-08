@@ -21,7 +21,10 @@ verifiable placeholder, never a crash.
       type patterns `case Type t`, record deconstruction `case Point(int x, int y)`
       (incl. nested record patterns and unnamed `_` components), guards `when`,
       `case null`, and `default`, lowered to an if/else-instanceof chain (selector
-      evaluated once, NPE when null with no `case null`). The colon form remains.
+      evaluated once, NPE when null with no `case null`). Both the arrow form and
+      the colon form (`case Integer i:` ... `break;` / `yield`) are emitted; the
+      switch end is the break/yield target. Pattern cases do not fall through (JLS
+      14.11.1), so each arm is self-contained.
 
 ## Expressions
 
