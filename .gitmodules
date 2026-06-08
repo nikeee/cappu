@@ -10,3 +10,7 @@
 	path = test-fixtures/emitter/corpus/commons-lang
 	url = https://github.com/apache/commons-lang.git
 	shallow = true
+[submodule "TypeScript"]
+	path = TypeScript
+	url = https://github.com/microsoft/TypeScript/
+	shallow = true
