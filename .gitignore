@@ -1,6 +1,6 @@
 /TypeScript/
 node_modules
 
-# Local-only test corpus (e.g. OpenJDK sources - not committed; GPL)
-/corpus/
+# Local-only parser test corpus (e.g. OpenJDK sources - not committed; GPL)
+/test-fixtures/parser/corpus/
 /dist/

@@ -24,7 +24,8 @@ import { pathToUri } from "./workspace.ts";
 import { type Identifier, type Node, SyntaxKind } from "./types.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const corpusDir = process.env.JAVA_CORPUS_DIR ?? join(here, "..", "corpus");
+const corpusDir =
+  process.env.JAVA_CORPUS_DIR ?? join(here, "..", "test-fixtures", "parser", "corpus");
 
 function findJavaFiles(dir: string): string[] {
   const result: string[] = [];

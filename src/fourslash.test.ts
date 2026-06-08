@@ -17,8 +17,8 @@ import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixturesDir = join(here, "__fixtures__", "fourslash");
-const baselinesDir = join(here, "__fixtures__", "fourslash-baselines");
+const fixturesDir = join(here, "..", "test-fixtures", "language-service", "fourslash");
+const baselinesDir = join(here, "..", "test-fixtures", "language-service", "fourslash-baselines");
 const shouldUpdate = process.env.UPDATE_BASELINES === "1";
 
 interface Markers {

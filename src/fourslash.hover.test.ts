@@ -1,5 +1,5 @@
 // Fourslash-style hover (quick-info) baselines. Each fixture in
-// __fixtures__/fourslash-hover/ is a .java file with markers /*name*/ placed
+// test-fixtures/language-service/fourslash-hover/ is a .java file with markers /*name*/ placed
 // immediately before an identifier. We resolve the symbol at each marker and
 // serialize its hover label, comparing against a checked-in baseline.
 // Regenerate after intentional changes:
@@ -19,8 +19,14 @@ import { createProgram } from "./program.ts";
 import type { Identifier } from "./types.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixturesDir = join(here, "__fixtures__", "fourslash-hover");
-const baselinesDir = join(here, "__fixtures__", "fourslash-hover-baselines");
+const fixturesDir = join(here, "..", "test-fixtures", "language-service", "fourslash-hover");
+const baselinesDir = join(
+  here,
+  "..",
+  "test-fixtures",
+  "language-service",
+  "fourslash-hover-baselines",
+);
 const shouldUpdate = process.env.UPDATE_BASELINES === "1";
 
 function extractMarkers(text: string): {

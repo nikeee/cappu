@@ -19,10 +19,10 @@ import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const baselinesDir = join(here, "__fixtures__", "emit-baselines");
+const baselinesDir = join(here, "..", "test-fixtures", "emitter", "emit-baselines");
 // Normalized javac disassembly, checked in as plain-text JSON so the byte-match
 // tests do not have to run javac on every test run (only when regenerating).
-const javacRefDir = join(here, "__fixtures__", "javac-baselines");
+const javacRefDir = join(here, "..", "test-fixtures", "emitter", "javac-baselines");
 const shouldUpdate = process.env.UPDATE_BASELINES === "1";
 
 function hasTool(name: string): boolean {

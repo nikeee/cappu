@@ -74,10 +74,10 @@ These validate emitted JVM bytecode three ways. Two need a JDK on PATH
 baselines:
 
 1. **Binary baselines** - exact emitted `.class` bytes, stored under
-   `src/__fixtures__/emit-baselines/*.class`. No JDK needed.
+   `test-fixtures/emitter/emit-baselines/*.class`. No JDK needed.
 2. **Byte-match vs javac** - our normalized disassembly (`javap -c -p`,
    constant-pool indices stripped) must equal javac's, stored as plain-text
-   JSON under `src/__fixtures__/javac-baselines/*.json`. At test time only
+   JSON under `test-fixtures/emitter/javac-baselines/*.json`. At test time only
    `javap` runs (over our output); the javac reference is read from disk.
 3. **Run-equivalence** (`runsLikeJavac`) - our class is run under `java` and
    its stdout compared to the expected text (which is the javac-verified
@@ -90,7 +90,7 @@ kinds. This requires `javac`, `java`, and `javap` on PATH:
 ```bash
 UPDATE_BASELINES=1 node_modules/.bin/tsx --test ./src/emitter.test.ts
 ```
-This rewrites the binary `.class` baselines and the `javac-baselines/*.json`
+This rewrites the binary `.class` baselines and the `emitter/javac-baselines/*.json`
 references (recompiling each fixture with `javac --release 21`), and re-runs
 `runsLikeJavac` against a live `javac` to confirm the hard-coded expected
 stdout still matches. Commit the regenerated fixtures. Without the flag, a
@@ -99,7 +99,7 @@ asserted against, never overwritten.
 
 ### Corpus robustness tests (`src/emit-corpus.test.ts`)
 
-Auto-discovers every git submodule under `test-corpus/` and asserts the emitter
+Auto-discovers every git submodule under `test-fixtures/emitter/corpus/` and asserts the emitter
 produces class bytes for every `.java` file without throwing (degrading to a
 placeholder is fine, crashing is not). No JDK needed. Initialize submodules
 first:

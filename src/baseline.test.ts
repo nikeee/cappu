@@ -1,7 +1,7 @@
 // AST baseline tests, in the style of the TypeScript compiler. Each .java file
-// under __fixtures__/cases is parsed and bound, the resulting tree + diagnostics
+// under test-fixtures/parser/cases is parsed and bound, the resulting tree + diagnostics
 // are serialized to a stable text form, and compared to the checked-in baseline
-// under __fixtures__/baselines.
+// under test-fixtures/parser/baselines.
 //
 // To (re)generate baselines after an intentional change:
 //   UPDATE_BASELINES=1 node --run test
@@ -26,8 +26,8 @@ import {
 } from "./types.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const casesDir = join(here, "__fixtures__", "cases");
-const baselinesDir = join(here, "__fixtures__", "baselines");
+const casesDir = join(here, "..", "test-fixtures", "parser", "cases");
+const baselinesDir = join(here, "..", "test-fixtures", "parser", "baselines");
 const shouldUpdate = process.env.UPDATE_BASELINES === "1";
 
 function flagSuffix(flags: NodeFlags): string {

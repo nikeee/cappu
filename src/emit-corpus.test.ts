@@ -1,10 +1,11 @@
 // Emit-robustness tests over real-world Java projects checked out as git
-// submodules under test-corpus/. Every submodule directory is auto-discovered,
-// so adding a project is just `git submodule add <url> test-corpus/<name>` - no
-// change here. For every source file the emitter must produce class bytes
-// without throwing; anything it cannot compile degrades to a verifiable
-// placeholder, never a crash. Skipped when no submodule is checked out, so CI
-// without them still passes:
+// submodules under test-fixtures/emitter/corpus/. Every submodule directory is
+// auto-discovered, so adding a project is just
+// `git submodule add <url> test-fixtures/emitter/corpus/<name>` - no change here.
+// For every source file the emitter must produce class bytes without throwing;
+// anything it cannot compile degrades to a verifiable placeholder, never a
+// crash. Skipped when no submodule is checked out, so CI without them still
+// passes:
 //
 //   git submodule update --init
 
@@ -21,7 +22,7 @@ import { createProgram } from "./program.ts";
 import { pathToUri } from "./workspace.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const corpusRoot = join(here, "..", "test-corpus");
+const corpusRoot = join(here, "..", "test-fixtures", "emitter", "corpus");
 
 function findJavaFiles(dir: string): string[] {
   const out: string[] = [];
@@ -34,7 +35,7 @@ function findJavaFiles(dir: string): string[] {
   return out;
 }
 
-// Each checked-out submodule (a directory under test-corpus/ holding .java files).
+// Each checked-out submodule (a directory under test-fixtures/emitter/corpus/ holding .java files).
 const projects: { name: string; files: string[] }[] = existsSync(corpusRoot)
   ? readdirSync(corpusRoot)
       .map(name => join(corpusRoot, name))
