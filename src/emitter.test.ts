@@ -622,6 +622,70 @@ test(
 );
 
 test(
+  "try-with-resources runs identically to javac (order, return, suppression)",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Twr",
+      [
+        "public class Twr {",
+        "  static class R implements AutoCloseable {",
+        "    String n; boolean failClose;",
+        '    R(String n){ this.n = n; System.out.println("open " + n); }',
+        '    R(String n, boolean f){ this.n = n; this.failClose = f; System.out.println("open " + n); }',
+        "    public void close(){",
+        '      System.out.println("close " + n);',
+        '      if (failClose) throw new RuntimeException("close-" + n);',
+        "    }",
+        "  }",
+        "  static void normal(){",
+        '    try (R r = new R("a")) { System.out.println("body"); }',
+        "  }",
+        "  static int withReturn(){",
+        '    try (R r = new R("b")) { return 7; }',
+        "  }",
+        "  static void multi(){",
+        '    try (R x = new R("x"); R y = new R("y")) { System.out.println("body"); }',
+        "  }",
+        // close() throws while the body is already throwing: the body exception is
+        // the primary (caught), the close exception is suppressed.
+        "  static void suppressed(){",
+        "    try {",
+        '      try (R r = new R("s", true)) { throw new IllegalStateException("body-boom"); }',
+        "    } catch (Exception e) {",
+        '      System.out.println("caught " + e.getMessage());',
+        "    }",
+        "  }",
+        "  public static void main(String[] a){",
+        "    normal();",
+        '    System.out.println("ret " + withReturn());',
+        "    multi();",
+        "    suppressed();",
+        "  }",
+        "}",
+      ].join("\n"),
+      [
+        "open a",
+        "body",
+        "close a",
+        "open b",
+        "close b",
+        "ret 7",
+        "open x",
+        "open y",
+        "body",
+        "close y",
+        "close x",
+        "open s",
+        "close s",
+        "caught body-boom",
+        "",
+      ].join("\n"),
+    );
+  },
+);
+
+test(
   "labeled break and continue run identically to javac",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK" },
   () => {

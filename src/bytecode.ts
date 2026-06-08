@@ -36,6 +36,7 @@ import {
   type ThrowStatement,
   type TryStatement,
   type Block,
+  type CatchClause,
   type DoStatement,
   type InstanceofExpression,
   type ExpressionStatement,
@@ -975,6 +976,12 @@ interface ExceptionTableEntry {
   catchType: number;
 }
 
+// Cleanup that an abrupt exit must run on the way out (see finallyStack). A
+// `block` is a user finally; a `resource` is a try-with-resources close().
+type FinallyAction =
+  | { kind: "block"; block: Block }
+  | { kind: "resource"; slot: number; ownerInternal: string; isInterface: boolean };
+
 // Generate real bytecode for a method body. Throws UnsupportedEmit for anything
 // not yet handled, so emitMethod can fall back to a verifiable placeholder.
 interface FieldInit {
@@ -1152,7 +1159,10 @@ function generateBody(
   const pendingLabels: string[] = [];
   const takePending = (): string[] => pendingLabels.splice(0, pendingLabels.length);
   const yieldTargets: { label: Label; desc: string }[] = []; // enclosing switch-expression ends
-  const finallyStack: Node[] = []; // enclosing finally blocks, innermost last
+  // Pending cleanup an abrupt exit (return/break/continue) must run on its way
+  // out: either a user `finally` block (JLS 14.20.2) or the close() of a
+  // try-with-resources resource (JLS 14.20.3). Innermost last.
+  const finallyStack: FinallyAction[] = [];
   const newLabel = (): Label => ({ offset: -1 });
   // A branch target's frame is defined by the operand stack on the branch-taken
   // path, which can differ from the live stack at the label site (e.g. when the
@@ -2940,13 +2950,193 @@ function generateBody(
     return resultDesc;
   };
 
-  // Inline the finally blocks from the top of the stack down to `toDepth`,
+  // A resource's close() on a normal path (fall-through / return / break): plain
+  // `aload r; r.close()`, no suppression (there is no in-flight exception).
+  const emitResourceClose = (a: Extract<FinallyAction, { kind: "resource" }>): void => {
+    const desc = `L${a.ownerInternal};`;
+    loadVar(a.slot, desc);
+    push(desc);
+    if (a.isInterface) {
+      code.u1(OP_INVOKEINTERFACE);
+      code.u2(cp.interfaceMethodref(a.ownerInternal, "close", "()V"));
+      code.u1(1);
+      code.u1(0);
+    } else {
+      code.u1(OP_INVOKEVIRTUAL);
+      code.u2(cp.methodref(a.ownerInternal, "close", "()V"));
+    }
+    pop(1);
+  };
+  // Emit a finally action on a normal (non-exceptional) path. Returns whether it
+  // terminates abruptly (only a user block can).
+  const emitFinallyAction = (a: FinallyAction): boolean => {
+    if (a.kind === "resource") {
+      emitResourceClose(a);
+      return false;
+    }
+    let term = false;
+    for (const st of a.block.statements) term = emitStmt(st);
+    return term;
+  };
+
+  // Inline the finally actions from the top of the stack down to `toDepth`,
   // innermost first, before an abrupt transfer (return/break/continue) crosses
   // them. Each is removed while emitted so a return inside it does not re-run it.
   const runFinallies = (toDepth: number): void => {
     const removed = finallyStack.splice(toDepth); // [toDepth..], leaving the outer ones pending
-    for (let i = removed.length - 1; i >= 0; i--) inScope(() => emitStmt(removed[i]!));
+    for (let i = removed.length - 1; i >= 0; i--) inScope(() => emitFinallyAction(removed[i]!));
     finallyStack.push(...removed);
+  };
+
+  // The exceptional close of a resource (JLS 14.20.3): the in-flight exception is
+  // already stored in `primarySlot`. Close the resource; if close() itself throws,
+  // record it via primary.addSuppressed(closeExc). Leaves control falling through
+  // with an empty stack so the caller can reload and rethrow the primary.
+  const emitSuppressedClose = (
+    a: Extract<FinallyAction, { kind: "resource" }>,
+    primarySlot: number,
+  ): void => {
+    const exc = "Ljava/lang/Throwable;";
+    const bStart = code.length;
+    emitResourceClose(a);
+    const bEnd = code.length;
+    const rethrowL = newLabel();
+    branchTo(OP_GOTO, rethrowL); // close succeeded -> rethrow the primary unchanged
+    // Handler for an exception out of close(): suppress it into the primary.
+    const assignedAtClose = new Set(assigned);
+    setStack([]);
+    assigned.clear();
+    for (const s of assignedAtClose) assigned.add(s);
+    reachable = true;
+    push(exc);
+    const h2 = newLabel();
+    placeLabel(h2);
+    handlerOffsets.push(h2.offset);
+    exceptionTable.push({ start: bStart, end: bEnd, handler: h2.offset, catchType: 0 });
+    const sSlot = nextSlot;
+    nextSlot += 1;
+    if (nextSlot > maxLocals) maxLocals = nextSlot;
+    activeLocals.push({ slot: sSlot, descriptor: exc });
+    storeVar(sSlot, exc);
+    loadVar(primarySlot, exc);
+    push(exc);
+    loadVar(sSlot, exc);
+    push(exc);
+    code.u1(OP_INVOKEVIRTUAL);
+    code.u2(cp.methodref("java/lang/Throwable", "addSuppressed", "(Ljava/lang/Throwable;)V"));
+    pop(2);
+    placeLabel(rethrowL); // reached by the goto and by the addSuppressed fall-through
+  };
+
+  // Emit a try construct: a protected body, zero or more catch clauses, and an
+  // optional finally action (a user `finally` block or a resource close()). This
+  // is shared between the `try` statement and the synthetic per-resource trys of
+  // try-with-resources (JLS 14.20.2 / 14.20.3).
+  const emitTryConstruct = (
+    emitBody: () => boolean,
+    catchClauses: readonly CatchClause[],
+    fin: FinallyAction | undefined,
+  ): boolean => {
+    const endL = newLabel();
+    let reachesEnd = false;
+    // Locals definitely assigned at try entry: a handler may be reached from any
+    // point in the protected region, so its frame uses this state.
+    const tryStartAssigned = new Set(assigned);
+    // Code ranges covered by the finally catch-all (the try body and each catch
+    // body, but NOT the inline finally copies between them).
+    const protectedRanges: { start: number; end: number }[] = [];
+    const setEntryState = (): void => {
+      setStack([]);
+      assigned.clear();
+      for (const s of tryStartAssigned) assigned.add(s);
+      reachable = true;
+    };
+    const emitFinallyInline = (): boolean => inScope(() => emitFinallyAction(fin!));
+    // After a region completes normally: run the finally (if any) inline, then
+    // jump past the handlers - unless the finally itself terminates.
+    const completeNormally = (): void => {
+      if (fin && emitFinallyInline()) return; // finally aborts -> no fall-through
+      reachesEnd = true;
+      branchTo(OP_GOTO, endL);
+    };
+
+    const tryStart = code.length;
+    if (fin) finallyStack.push(fin);
+    const tryTerm = emitBody();
+    if (fin) finallyStack.pop();
+    protectedRanges.push({ start: tryStart, end: code.length });
+    if (!tryTerm) completeNormally();
+
+    for (const cc of catchClauses) {
+      setEntryState();
+      const excDesc =
+        cc.catchTypes.length === 1
+          ? descriptorOf(cc.catchTypes[0]!, program)
+          : "Ljava/lang/Throwable;";
+      push(excDesc); // the JVM pushes the caught exception onto an empty stack
+      const handlerL = newLabel();
+      placeLabel(handlerL); // frame: locals = try entry, stack = [exc]
+      handlerOffsets.push(handlerL.offset);
+      for (const ty of cc.catchTypes) {
+        const d = descriptorOf(ty, program);
+        exceptionTable.push({
+          start: tryStart,
+          end: protectedRanges[0]!.end, // the try body only
+          handler: handlerL.offset,
+          catchType: cp.classInfo(d[0] === "[" ? d : d.slice(1, -1)),
+        });
+      }
+      const bodyStart = code.length;
+      if (fin) finallyStack.push(fin);
+      const handlerTerm = inScope(() => {
+        const slot = nextSlot;
+        nextSlot += slotsOf(excDesc);
+        if (nextSlot > maxLocals) maxLocals = nextSlot;
+        activeLocals.push({ slot, descriptor: excDesc });
+        if (cc.name.symbol) locals.set(cc.name.symbol, { slot, descriptor: excDesc });
+        storeVar(slot, excDesc); // astore the exception into the catch parameter
+        let term = false;
+        for (const st of cc.block.statements) term = emitStmt(st);
+        return term;
+      });
+      if (fin) finallyStack.pop();
+      protectedRanges.push({ start: bodyStart, end: code.length });
+      if (!handlerTerm) completeNormally();
+    }
+
+    // finally catch-all (JLS 14.20.2): store the in-flight exception, run the
+    // finally, then rethrow. Covers the try and catch bodies, after the specific
+    // catch entries so they win. For a resource the close() suppresses its own
+    // exception into the in-flight one (JLS 14.20.3).
+    if (fin) {
+      setEntryState();
+      const exc = "Ljava/lang/Throwable;";
+      push(exc);
+      const catchAllL = newLabel();
+      placeLabel(catchAllL);
+      handlerOffsets.push(catchAllL.offset);
+      for (const r of protectedRanges) {
+        exceptionTable.push({ start: r.start, end: r.end, handler: catchAllL.offset, catchType: 0 });
+      }
+      const slot = nextSlot;
+      nextSlot += 1;
+      if (nextSlot > maxLocals) maxLocals = nextSlot;
+      activeLocals.push({ slot, descriptor: exc });
+      storeVar(slot, exc);
+      if (fin.kind === "resource") emitSuppressedClose(fin, slot);
+      else emitFinallyInline();
+      loadVar(slot, exc);
+      push(exc);
+      code.u1(OP_ATHROW);
+      pop(1);
+      reachable = false;
+    }
+
+    if (reachesEnd) {
+      setStack([]);
+      placeLabel(endL);
+    }
+    return !reachesEnd;
   };
 
   // Returns true if the statement is a definite terminator (return).
@@ -3244,116 +3434,44 @@ function generateBody(
       }
       case SyntaxKind.TryStatement: {
         const t = stmt as TryStatement;
-        if (t.resources?.length) throw new UnsupportedEmit(); // try-with-resources: later
-        const fin = t.finallyBlock;
-        const endL = newLabel();
-        let reachesEnd = false;
-        // Locals definitely assigned at try entry: a handler may be reached from
-        // any point in the protected region, so its frame uses this state.
-        const tryStartAssigned = new Set(assigned);
-        // Code ranges covered by the finally catch-all (the try body and each
-        // catch body, but NOT the inline finally copies between them).
-        const protectedRanges: { start: number; end: number }[] = [];
-        const setEntryState = (): void => {
-          setStack([]);
-          assigned.clear();
-          for (const s of tryStartAssigned) assigned.add(s);
-          reachable = true;
-        };
-        const emitFinallyInline = (): boolean =>
-          inScope(() => {
-            let term = false;
-            for (const st of (fin as Block).statements) term = emitStmt(st);
-            return term;
-          });
-        // After a region completes normally: run the finally (if any) inline,
-        // then jump past the handlers - unless the finally itself terminates.
-        const completeNormally = (): void => {
-          if (fin && emitFinallyInline()) return; // finally aborts -> no fall-through
-          reachesEnd = true;
-          branchTo(OP_GOTO, endL);
-        };
-
-        const tryStart = code.length;
-        if (fin) finallyStack.push(fin);
-        const tryTerm = inScope(() => emitStmt(t.tryBlock));
-        if (fin) finallyStack.pop();
-        protectedRanges.push({ start: tryStart, end: code.length });
-        if (!tryTerm) completeNormally();
-
-        for (const cc of t.catchClauses) {
-          setEntryState();
-          const excDesc =
-            cc.catchTypes.length === 1
-              ? descriptorOf(cc.catchTypes[0]!, program)
-              : "Ljava/lang/Throwable;";
-          push(excDesc); // the JVM pushes the caught exception onto an empty stack
-          const handlerL = newLabel();
-          placeLabel(handlerL); // frame: locals = try entry, stack = [exc]
-          handlerOffsets.push(handlerL.offset);
-          for (const ty of cc.catchTypes) {
-            const d = descriptorOf(ty, program);
-            exceptionTable.push({
-              start: tryStart,
-              end: protectedRanges[0]!.end, // the try body only
-              handler: handlerL.offset,
-              catchType: cp.classInfo(d[0] === "[" ? d : d.slice(1, -1)),
-            });
-          }
-          const bodyStart = code.length;
-          if (fin) finallyStack.push(fin);
-          const handlerTerm = inScope(() => {
-            const slot = nextSlot;
-            nextSlot += slotsOf(excDesc);
-            if (nextSlot > maxLocals) maxLocals = nextSlot;
-            activeLocals.push({ slot, descriptor: excDesc });
-            if (cc.name.symbol) locals.set(cc.name.symbol, { slot, descriptor: excDesc });
-            storeVar(slot, excDesc); // astore the exception into the catch parameter
-            let term = false;
-            for (const st of cc.block.statements) term = emitStmt(st);
-            return term;
-          });
-          if (fin) finallyStack.pop();
-          protectedRanges.push({ start: bodyStart, end: code.length });
-          if (!handlerTerm) completeNormally();
+        const emitUserBody = (): boolean => inScope(() => emitStmt(t.tryBlock));
+        const fin: FinallyAction | undefined = t.finallyBlock
+          ? { kind: "block", block: t.finallyBlock }
+          : undefined;
+        if (!t.resources?.length) {
+          return emitTryConstruct(emitUserBody, t.catchClauses, fin);
         }
-
-        // finally catch-all (JLS 14.20.2): store the in-flight exception, run the
-        // finally, then rethrow. Covers the try and catch bodies, after the
-        // specific catch entries so they win.
-        if (fin) {
-          setEntryState();
-          const exc = "Ljava/lang/Throwable;";
-          push(exc);
-          const catchAllL = newLabel();
-          placeLabel(catchAllL);
-          handlerOffsets.push(catchAllL.offset);
-          for (const r of protectedRanges) {
-            exceptionTable.push({
-              start: r.start,
-              end: r.end,
-              handler: catchAllL.offset,
-              catchType: 0,
-            });
-          }
+        // try-with-resources (JLS 14.20.3): `try (r1; r2) body catch.. finally..`
+        // is `try { try (r1) { try (r2) body } } catch.. finally..`. Each resource
+        // becomes a nested try whose finally is its close(); the user catch/finally
+        // wrap the whole construct.
+        const resources = t.resources;
+        const emitResourceNest = (i: number): boolean => {
+          if (i >= resources.length) return emitUserBody();
+          const res = resources[i]!;
+          // Declaration form only (try (T r = init)); resolve T to a class type.
+          if (!res.type || !res.name || !res.initializer) throw new UnsupportedEmit();
+          const desc = descriptorOf(res.type, program);
+          if (desc[0] !== "L") throw new UnsupportedEmit();
+          const ownerInternal = desc.slice(1, -1);
+          const typeSymbol =
+            res.type.kind === SyntaxKind.TypeReference
+              ? resolveTypeEntityName((res.type as TypeReference).typeName, res, program)
+              : undefined;
+          const isInterface = !!typeSymbol && (typeSymbol.flags & SymbolFlags.Interface) !== 0;
+          // Open the resource before the protected region: if the initializer
+          // throws there is nothing to close.
           const slot = nextSlot;
-          nextSlot += 1;
+          nextSlot += slotsOf(desc);
           if (nextSlot > maxLocals) maxLocals = nextSlot;
-          activeLocals.push({ slot, descriptor: exc });
-          storeVar(slot, exc);
-          emitFinallyInline();
-          loadVar(slot, exc);
-          push(exc);
-          code.u1(OP_ATHROW);
-          pop(1);
-          reachable = false;
-        }
-
-        if (reachesEnd) {
-          setStack([]);
-          placeLabel(endL);
-        }
-        return !reachesEnd;
+          activeLocals.push({ slot, descriptor: desc });
+          if (res.name.symbol) locals.set(res.name.symbol, { slot, descriptor: desc });
+          coerce(emitExpr(res.initializer), desc);
+          storeVar(slot, desc);
+          const action: FinallyAction = { kind: "resource", slot, ownerInternal, isInterface };
+          return emitTryConstruct(() => emitResourceNest(i + 1), [], action);
+        };
+        return emitTryConstruct(() => emitResourceNest(0), t.catchClauses, fin);
       }
       case SyntaxKind.YieldStatement: {
         const target = yieldTargets.at(-1);
