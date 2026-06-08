@@ -60,3 +60,6 @@ no timestamps were captured.
 - 2026-06-08 13:20 — I now see that "emits without crashing" only checks if the checker reports an emit error. Thats good, but i also want that the class files are checked against javac generate bytecode
 - 2026-06-08 13:45 — go through all corpus projects and extract some emitter test cases that are not covered yet
 - 2026-06-08 13:50 — are there some popular projects that don't have any dependencies, so we can add them as a corpus baseline and compile the entire project?
+- 2026-06-08 14:05 — continue
+- 2026-06-08 14:15 — continue
+- 2026-06-08 17:05 — make sure the tests pass
