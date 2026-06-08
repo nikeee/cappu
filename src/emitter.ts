@@ -3,7 +3,13 @@
 // Higher-level, source-level transformations (e.g. constant folding) belong here
 // rather than in the low-level instruction emitter.
 
-import { type EmittedClass, emitClass, emitEnum, emitInterface } from "./bytecode.ts";
+import {
+  type EmittedClass,
+  emitAnonymousClassIfPossible,
+  emitClass,
+  emitEnum,
+  emitInterface,
+} from "./bytecode.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import type { Checker } from "./checker.ts";
@@ -12,6 +18,7 @@ import {
   type EnumDeclaration,
   type InterfaceDeclaration,
   type Node,
+  type ObjectCreationExpression,
   type SourceFile,
   SyntaxKind,
 } from "./types.ts";
@@ -40,6 +47,14 @@ export function emitSourceFile(
       result.push(emitInterface(node as InterfaceDeclaration, program, checker));
     } else if (node.kind === SyntaxKind.EnumDeclaration) {
       result.push(emitEnum(node as EnumDeclaration, program, checker));
+    } else if (node.kind === SyntaxKind.ObjectCreationExpression) {
+      // Anonymous class (new T(){...}): emitted as its own Outer$N when supported.
+      const anon = emitAnonymousClassIfPossible(
+        node as ObjectCreationExpression,
+        program,
+        checker,
+      );
+      if (anon) result.push(anon);
     }
     forEachChild(node, child => {
       visit(child);

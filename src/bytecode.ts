@@ -761,9 +761,22 @@ function computeLocalCaptures(
   program: Program,
   checker: Checker,
 ): LocalCapture[] {
+  return collectCaptures(decl.members, decl.pos, decl.end, program, checker);
+}
+
+// Enclosing locals/parameters referenced inside a class body (a local class's
+// members, or an anonymous class's classBody spanning [lo, hi)), in first-use
+// order.
+function collectCaptures(
+  members: readonly Node[],
+  lo: number,
+  hi: number,
+  program: Program,
+  checker: Checker,
+): LocalCapture[] {
   const result: LocalCapture[] = [];
   const seen = new Set<Symbol>();
-  const within = (n: Node | undefined): boolean => !!n && n.pos >= decl.pos && n.end <= decl.end;
+  const within = (n: Node | undefined): boolean => !!n && n.pos >= lo && n.end <= hi;
   const visit = (node: Node): void => {
     if (node.kind === SyntaxKind.Identifier) {
       const parent = node.parent;
@@ -794,7 +807,7 @@ function computeLocalCaptures(
       return undefined;
     });
   };
-  for (const member of decl.members) visit(member);
+  for (const member of members) visit(member);
   return result;
 }
 
@@ -1915,8 +1928,31 @@ function generateBody(
   // new T(args): new; dup; <args>; invokespecial T.<init>:(...)V -> leaves the ref.
   /** Class instance creation `new T(args)` (JLS 15.9): new, dup, invokespecial. */
   const emitNew = (node: Node): string => {
-    // Anonymous classes (new T(){...}) are not yet emitted; degrade.
-    if ((node as ObjectCreationExpression).classBody) throw new UnsupportedEmit();
+    const oc = node as ObjectCreationExpression;
+    // An anonymous class implementing an interface (JLS 15.9.5): instantiate the
+    // synthetic Outer$N class, passing the captured enclosing locals.
+    if (oc.classBody) {
+      const iface = anonymousInterfaceImpl(oc, program, checker);
+      if (!iface) throw new UnsupportedEmit();
+      const anonName = anonymousClassName(oc, program);
+      const captures = collectCaptures(oc.classBody, oc.pos, oc.end, program, checker);
+      const ref = `L${anonName};`;
+      code.u1(OP_NEW);
+      code.u2(cp.classInfo(anonName));
+      pushRef(ref);
+      code.u1(OP_DUP);
+      pushRef(ref);
+      for (const c of captures) {
+        const slot = locals.get(c.symbol);
+        if (!slot) throw new UnsupportedEmit();
+        loadVar(slot.slot, c.descriptor);
+        push(c.descriptor);
+      }
+      code.u1(OP_INVOKESPECIAL);
+      code.u2(cp.methodref(anonName, "<init>", `(${captures.map(c => c.descriptor).join("")})V`));
+      pop(1 + captures.length);
+      return ref;
+    }
     const created = checker.getTypeOfExpression(node);
     if (created.kind !== TypeKind.Class) throw new UnsupportedEmit();
     const owner = binaryName(created.symbol);
@@ -4728,6 +4764,116 @@ export function emitInterface(
     bytes: assembleClassFile({
       cp,
       accessFlags,
+      thisClassIndex,
+      superClassIndex,
+      interfaceIndices,
+      fields,
+      fieldCount,
+      methods,
+      methodCount,
+      attributes: classAttributes,
+      attributeCount: classAttributeCount,
+    }),
+  };
+}
+
+// The binary name of an anonymous class: the enclosing top-level type plus its
+// 1-based position among anonymous-class sites in that type (Outer$N). Computed
+// the same way by the class emission and the `new` site so they agree.
+function anonymousClassName(node: ObjectCreationExpression, program: Program): string {
+  program.getGlobalIndex();
+  let top: Node | undefined;
+  for (let n: Node | undefined = node.parent; n; n = n.parent) {
+    if (TYPE_DECL_KINDS.has(n.kind)) top = n;
+  }
+  const base = top?.symbol ? binaryName(top.symbol) : "Anonymous";
+  let index = 0;
+  const count = (n: Node): void => {
+    if (n.kind === SyntaxKind.ObjectCreationExpression && (n as ObjectCreationExpression).classBody) {
+      if (n.pos <= node.pos) index++;
+    }
+    forEachChild(n, c => {
+      count(c);
+      return undefined;
+    });
+  };
+  count(top ?? node);
+  return `${base}$${index}`;
+}
+
+// If `node` is an anonymous class we can emit - it implements an interface (no
+// super constructor args), has no fields, only methods - return that interface's
+// internal name; otherwise undefined. The class emission and the `new` site share
+// this predicate so they stay in agreement.
+function anonymousInterfaceImpl(
+  node: ObjectCreationExpression,
+  program: Program,
+  checker: Checker,
+): string | undefined {
+  void checker;
+  if (!node.classBody || (node.arguments ?? []).length > 0) return undefined;
+  if (node.type.kind !== SyntaxKind.TypeReference) return undefined;
+  const sym = resolveTypeEntityName((node.type as TypeReference).typeName, node, program);
+  if (!sym || !(sym.flags & SymbolFlags.Interface)) return undefined;
+  if (node.classBody.some(m => m.kind === SyntaxKind.FieldDeclaration)) return undefined;
+  return binaryName(sym);
+}
+
+// Emit an anonymous interface-implementing class, or undefined if unsupported.
+export function emitAnonymousClassIfPossible(
+  node: ObjectCreationExpression,
+  program: Program,
+  checker: Checker,
+): EmittedClass | undefined {
+  const iface = anonymousInterfaceImpl(node, program, checker);
+  if (!iface) return undefined;
+  const name = anonymousClassName(node, program);
+  const captures = collectCaptures(node.classBody!, node.pos, node.end, program, checker);
+
+  const cp = new ConstantPool();
+  const thisClassIndex = cp.classInfo(name);
+  const superClassIndex = cp.classInfo("java/lang/Object");
+  const interfaceIndices = [cp.classInfo(iface)];
+
+  const fields = new ByteBuffer();
+  let fieldCount = 0;
+  for (const c of captures) {
+    emitFieldInfo(fields, cp, ACC_FINAL | ACC_SYNTHETIC, c.fieldName, c.descriptor);
+    fieldCount++;
+  }
+
+  const methods = new ByteBuffer();
+  let methodCount = 0;
+  const lambdaMethods: ByteBuffer[] = [];
+  methods.append(emitCaptureCtor(cp, name, "java/lang/Object", captures));
+  methodCount++;
+  const captureMap = new Map(
+    captures.map(c => [
+      c.symbol,
+      { ownerInternal: name, fieldName: c.fieldName, descriptor: c.descriptor },
+    ]),
+  );
+  for (const member of node.classBody!) {
+    if (member.kind !== SyntaxKind.MethodDeclaration) continue;
+    methods.append(
+      emitMethod(member as MethodDeclaration, cp, program, checker, name, lambdaMethods, ACC_PUBLIC, captureMap),
+    );
+    methodCount++;
+  }
+  for (const impl of lambdaMethods) {
+    methods.append(impl);
+    methodCount++;
+  }
+
+  const { buffer: classAttributes, count: classAttributeCount } = buildClassAttributes(
+    cp,
+    sourceNameOf(node),
+  );
+  return {
+    name,
+    bytes: assembleClassFile({
+      cp,
+      accessFlags: ACC_SUPER,
       thisClassIndex,
       superClassIndex,
       interfaceIndices,

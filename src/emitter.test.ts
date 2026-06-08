@@ -1706,3 +1706,33 @@ test(
     );
   },
 );
+
+test(
+  "anonymous interface classes (with capture) run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Anon",
+      [
+        "public class Anon {",
+        "  static int adder(int base){",
+        "    java.util.function.IntUnaryOperator op = new java.util.function.IntUnaryOperator(){",
+        "      public int applyAsInt(int x){ return x + base; }",
+        "    };",
+        "    return op.applyAsInt(10);",
+        "  }",
+        "  static String greet(){",
+        '    Runnable r = new Runnable(){ public void run(){ System.out.println("hi"); } };',
+        "    r.run();",
+        '    return "done";',
+        "  }",
+        "  public static void main(String[] a){",
+        "    System.out.println(adder(5));",
+        "    System.out.println(greet());",
+        "  }",
+        "}",
+      ].join("\n"),
+      "15\nhi\ndone\n",
+    );
+  },
+);

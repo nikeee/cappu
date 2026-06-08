@@ -42,8 +42,14 @@ verifiable placeholder, never a crash.
 - [ ] Local classes capturing the enclosing instance (`this$0` for outer fields/
       methods), declared-constructor augmentation, and instance field initializers
       alongside capture.
-- [ ] Anonymous classes `new T(){...}` (JLS 15.9.5): emit the classBody as its
-      own `Outer$N`, with capture; needs binder/checker scoping of the body.
+- [x] Anonymous classes implementing an **interface** (JLS 15.9.5): the classBody
+      is emitted as `Outer$N` (numbered by position) implementing the interface,
+      capturing enclosing locals (reuses the local-class capture machinery), with
+      a synthesized `super()`+store-captures constructor. Method bodies resolve
+      via lexical scope.
+- [ ] Anonymous classes **extending a class** (super-constructor args) or with
+      own fields / `this`-member access; binder/checker scoping of the body for
+      `this.ownMember`.
 - [x] User-defined interfaces are now emitted (ACC_INTERFACE|ACC_ABSTRACT, super
       Object, `extends` as super-interfaces): abstract methods (no Code), default
       and static methods (with Code), and implicitly public-static-final constant
