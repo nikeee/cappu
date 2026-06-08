@@ -38,9 +38,10 @@ verifiable placeholder, never a crash.
       fields + constructor params, `new`-site argument passing).
 - [ ] Anonymous classes `new T(){...}` (JLS 15.9.5): emit the classBody as its
       own `Outer$N`, with capture; needs binder/checker scoping of the body.
-- [ ] User-defined interfaces are not emitted (emitSourceFile visits only class
-      and enum declarations), so a program using an interface declared in the
-      same file fails at load with NoClassDefFoundError.
+- [x] User-defined interfaces are now emitted (ACC_INTERFACE|ACC_ABSTRACT, super
+      Object, `extends` as super-interfaces): abstract methods (no Code), default
+      and static methods (with Code), and implicitly public-static-final constant
+      fields (ConstantValue). Interface fields are treated as static at use sites.
 - [x] Explicit constructor invocations (JLS 8.8.7.1): a leading `super(args)` or
       `this(args)`; `this(...)` skips this constructor's field initializers. The
       target overload is resolved by argument count (as for `new`).

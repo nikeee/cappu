@@ -44,6 +44,7 @@ import {
   type InstanceofExpression,
   type ExpressionStatement,
   type FieldDeclaration,
+  type InterfaceDeclaration,
   type ForStatement,
   type Identifier,
   type IfStatement,
@@ -88,6 +89,7 @@ const ACC_VOLATILE = 0x0040;
 const ACC_TRANSIENT = 0x0080;
 const ACC_SYNCHRONIZED = 0x0020;
 const ACC_NATIVE = 0x0100;
+const ACC_INTERFACE = 0x0200;
 const ACC_ABSTRACT = 0x0400;
 const ACC_STRICT = 0x0800;
 const ACC_SYNTHETIC = 0x1000;
@@ -1439,11 +1441,14 @@ function generateBody(
       throw new UnsupportedEmit();
     const field = declarator.parent as FieldDeclaration;
     if (field.kind !== SyntaxKind.FieldDeclaration) throw new UnsupportedEmit();
+    // A field declared in an interface is implicitly public static final (JLS 9.3),
+    // even without the explicit modifier.
+    const inInterface = (symbol.parent.flags & SymbolFlags.Interface) !== 0;
     return {
       owner: binaryName(symbol.parent),
       name: symbol.escapedName,
       descriptor: descriptorOf(field.type, program),
-      isStatic: isStaticDeclaration(field),
+      isStatic: isStaticDeclaration(field) || inInterface,
     };
   };
 
@@ -4007,8 +4012,11 @@ function emitMethod(
   checker: Checker,
   thisInternalName: string,
   lambdaMethods: ByteBuffer[],
+  // Implicit flags for interface members (public, and abstract for no-body
+  // methods), which carry no explicit modifiers.
+  extraFlags = 0,
 ): ByteBuffer {
-  const flags = methodAccessFlags(method);
+  const flags = methodAccessFlags(method) | extraFlags;
   const descriptor = methodDescriptor(method, program);
 
   const info = new ByteBuffer();
@@ -4414,6 +4422,112 @@ export function emitClass(
       interfaceIndices,
       fields: fields.buffer,
       fieldCount: fields.count,
+      methods,
+      methodCount,
+      attributes: classAttributes,
+      attributeCount: classAttributeCount,
+    }),
+  };
+}
+
+// Emit a user-declared interface (JLS 9): a class file with ACC_INTERFACE |
+// ACC_ABSTRACT, super java/lang/Object, the `extends` clause as its super
+// interfaces, implicitly-public-static-final constant fields, and methods
+// (abstract -> no Code; default/static -> with Code).
+export function emitInterface(
+  declaration: InterfaceDeclaration,
+  program: Program,
+  checker: Checker,
+): EmittedClass {
+  program.getGlobalIndex();
+  const name = declaration.symbol ? binaryName(declaration.symbol) : declaration.name.text;
+  const interfaceNames = (declaration.extendsTypes ?? [])
+    .map(t => resolveInternalName(t, declaration, program))
+    .filter((n): n is string => n !== undefined);
+  let accessFlags = ACC_INTERFACE | ACC_ABSTRACT;
+  if ((declaration.modifiers ?? []).some(m => m.kind === SyntaxKind.PublicKeyword)) {
+    accessFlags |= ACC_PUBLIC;
+  }
+
+  const cp = new ConstantPool();
+  const thisClassIndex = cp.classInfo(name);
+  const superClassIndex = cp.classInfo("java/lang/Object");
+  const interfaceIndices = interfaceNames.map(n => cp.classInfo(n));
+
+  // Fields: interface fields are implicitly public static final. We emit those
+  // whose initializer is a compile-time constant with a ConstantValue.
+  const fields = new ByteBuffer();
+  let fieldCount = 0;
+  for (const member of declaration.members) {
+    if (member.kind !== SyntaxKind.FieldDeclaration) continue;
+    const field = member as FieldDeclaration;
+    const descriptor = descriptorOf(field.type, program);
+    for (const declarator of field.declarators) {
+      const d = declarator as VariableDeclarator;
+      const init = d.initializer;
+      let constIndex: number | undefined;
+      if (init) {
+        if (descriptor === "Ljava/lang/String;" && init.kind === SyntaxKind.StringLiteral) {
+          constIndex = cp.string((init as LiteralExpression).value);
+        } else {
+          const folded = foldConstant(init);
+          if (folded && ["J", "Z", "I", "S", "B", "C"].includes(descriptor)) {
+            const intValue = folded.kind === "boolean" ? (folded.value ? 1 : 0) : Number(folded.value);
+            constIndex =
+              descriptor === "J"
+                ? cp.long(folded.kind === "boolean" ? BigInt(intValue) : (folded.value as bigint))
+                : cp.integer(intValue);
+          }
+        }
+      }
+      fields.u2(ACC_PUBLIC | ACC_STATIC | ACC_FINAL);
+      fields.u2(cp.utf8(d.name.text));
+      fields.u2(cp.utf8(descriptor));
+      if (constIndex === undefined) {
+        fields.u2(0);
+      } else {
+        fields.u2(1);
+        fields.u2(cp.utf8("ConstantValue"));
+        fields.u4(2);
+        fields.u2(constIndex);
+      }
+      fieldCount++;
+    }
+  }
+
+  const methods = new ByteBuffer();
+  let methodCount = 0;
+  const lambdaMethods: ByteBuffer[] = [];
+  for (const member of declaration.members) {
+    if (member.kind !== SyntaxKind.MethodDeclaration) continue;
+    const m = member as MethodDeclaration;
+    const mods = m.modifiers ?? [];
+    const isPrivate = mods.some(x => x.kind === SyntaxKind.PrivateKeyword);
+    // Abstract (no body, not static/private) -> public abstract; default/static ->
+    // public (unless explicitly private, SE9).
+    const extra = (isPrivate ? 0 : ACC_PUBLIC) | (m.body ? 0 : ACC_ABSTRACT);
+    methods.append(emitMethod(m, cp, program, checker, name, lambdaMethods, extra));
+    methodCount++;
+  }
+  for (const impl of lambdaMethods) {
+    methods.append(impl);
+    methodCount++;
+  }
+
+  const { buffer: classAttributes, count: classAttributeCount } = buildClassAttributes(
+    cp,
+    sourceNameOf(declaration),
+  );
+  return {
+    name,
+    bytes: assembleClassFile({
+      cp,
+      accessFlags,
+      thisClassIndex,
+      superClassIndex,
+      interfaceIndices,
+      fields,
+      fieldCount,
       methods,
       methodCount,
       attributes: classAttributes,

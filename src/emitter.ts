@@ -3,13 +3,14 @@
 // Higher-level, source-level transformations (e.g. constant folding) belong here
 // rather than in the low-level instruction emitter.
 
-import { type EmittedClass, emitClass, emitEnum } from "./bytecode.ts";
+import { type EmittedClass, emitClass, emitEnum, emitInterface } from "./bytecode.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import type { Checker } from "./checker.ts";
 import {
   type ClassDeclaration,
   type EnumDeclaration,
+  type InterfaceDeclaration,
   type Node,
   type SourceFile,
   SyntaxKind,
@@ -31,11 +32,12 @@ export function emitSourceFile(
   const visit = (node: Node): void => {
     if (node.kind === SyntaxKind.ClassDeclaration) {
       const decl = node as ClassDeclaration;
-      // TODO: emit anonymous classes (JLS 15.9.5) and local classes (JLS 14.3) as
-      // their own Outer$N class files. They have no name and no bound symbol, so
-      // for now we skip rather than crash; the creation site degrades to a
-      // placeholder via the usual UnsupportedEmit path.
+      // Anonymous classes (new T(){...}) live as ObjectCreationExpression.classBody,
+      // not ClassDeclaration; a ClassDeclaration with no name/symbol is skipped.
+      // TODO: emit anonymous classes (JLS 15.9.5).
       if (decl.symbol || decl.name) result.push(emitClass(decl, program, checker));
+    } else if (node.kind === SyntaxKind.InterfaceDeclaration) {
+      result.push(emitInterface(node as InterfaceDeclaration, program, checker));
     } else if (node.kind === SyntaxKind.EnumDeclaration) {
       result.push(emitEnum(node as EnumDeclaration, program, checker));
     }

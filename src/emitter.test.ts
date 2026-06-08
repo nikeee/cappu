@@ -1644,3 +1644,33 @@ test(
     );
   },
 );
+
+test(
+  "user-defined interfaces (abstract + default methods, constants) run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Iface",
+      [
+        "public class Iface {",
+        "  interface Shape {",
+        "    int SIDES = 4;",
+        "    int area();",
+        '    default String describe(){ return "area=" + area(); }',
+        "  }",
+        "  static class Square implements Shape {",
+        "    int s; Square(int s){ this.s = s; }",
+        "    public int area(){ return s * s; }",
+        "  }",
+        "  public static void main(String[] a){",
+        "    Shape sh = new Square(3);",
+        "    System.out.println(sh.area());",
+        "    System.out.println(sh.describe());",
+        "    System.out.println(Shape.SIDES);",
+        "  }",
+        "}",
+      ].join("\n"),
+      "9\narea=9\n4\n",
+    );
+  },
+);
