@@ -197,6 +197,7 @@ class Thread implements Runnable {
   public String getName() { return null; }
   public static Thread currentThread() { return null; }
   public static void sleep(long millis) {}
+  public static boolean holdsLock(Object obj) { return false; }
 }
 
 class Throwable {

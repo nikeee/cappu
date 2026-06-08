@@ -10,8 +10,9 @@ verifiable placeholder, never a crash.
 
 ## Statements
 
-- [ ] `synchronized` statement (JLS 14.19): monitorenter/monitorexit with a
-      catch-all monitorexit on the exception path.
+- [x] `synchronized` statement (JLS 14.19): monitorenter, then the body under a
+      finally that runs monitorexit on every exit (normal, return/break, and the
+      catch-all exception path).
 - [ ] `assert` statement (JLS 14.10): `$assertionsDisabled` static guard +
       throw `AssertionError`.
 - [ ] Pattern / guarded `switch` labels (JLS 14.11.1 / 14.30): `case Type t`,

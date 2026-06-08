@@ -33,6 +33,7 @@ import {
   type BreakStatement,
   type ContinueStatement,
   type LabeledStatement,
+  type SynchronizedStatement,
   type ThrowStatement,
   type TryStatement,
   type Block,
@@ -244,6 +245,8 @@ const OP_NEWARRAY = 0xbc;
 const OP_ANEWARRAY = 0xbd;
 const OP_ARRAYLENGTH = 0xbe;
 const OP_ATHROW = 0xbf;
+const OP_MONITORENTER = 0xc2;
+const OP_MONITOREXIT = 0xc3;
 const OP_MULTIANEWARRAY = 0xc5;
 // Array load/store base opcodes; per-element variants are at a fixed offset
 // (see arrayElemOffset). AASTORE is used directly for the enum $VALUES array.
@@ -981,10 +984,12 @@ interface ExceptionTableEntry {
 }
 
 // Cleanup that an abrupt exit must run on the way out (see finallyStack). A
-// `block` is a user finally; a `resource` is a try-with-resources close().
+// `block` is a user finally; a `resource` is a try-with-resources close(); a
+// `monitor` is the monitorexit of a synchronized statement.
 type FinallyAction =
   | { kind: "block"; block: Block }
-  | { kind: "resource"; slot: number; ownerInternal: string; isInterface: boolean };
+  | { kind: "resource"; slot: number; ownerInternal: string; isInterface: boolean }
+  | { kind: "monitor"; slot: number };
 
 // Generate real bytecode for a method body. Throws UnsupportedEmit for anything
 // not yet handled, so emitMethod can fall back to a verifiable placeholder.
@@ -2991,6 +2996,13 @@ function generateBody(
       emitResourceClose(a);
       return false;
     }
+    if (a.kind === "monitor") {
+      loadVar(a.slot, "Ljava/lang/Object;");
+      push("Ljava/lang/Object;");
+      code.u1(OP_MONITOREXIT);
+      pop(1);
+      return false;
+    }
     let term = false;
     for (const st of a.block.statements) term = emitStmt(st);
     return term;
@@ -3498,6 +3510,28 @@ function generateBody(
         };
         return emitTryConstruct(() => emitResourceNest(0), t.catchClauses, fin);
       }
+      // The synchronized statement (JLS 14.19): lock the monitor, then run the
+      // body under a finally that unlocks it (on normal exit, return/break, and
+      // the exception path via the catch-all monitorexit + rethrow).
+      case SyntaxKind.SynchronizedStatement: {
+        const s = stmt as SynchronizedStatement;
+        const monDesc = "Ljava/lang/Object;";
+        const monSlot = nextSlot;
+        nextSlot += 1;
+        if (nextSlot > maxLocals) maxLocals = nextSlot;
+        activeLocals.push({ slot: monSlot, descriptor: monDesc });
+        emitExpr(s.expression);
+        code.u1(OP_DUP);
+        push(monDesc); // dup the monitor: one copy stored, one for monitorenter
+        storeVar(monSlot, monDesc);
+        code.u1(OP_MONITORENTER);
+        pop(1);
+        return emitTryConstruct(
+          () => inScope(() => emitStmt(s.body)),
+          [],
+          { kind: "monitor", slot: monSlot },
+        );
+      }
       case SyntaxKind.YieldStatement: {
         const target = yieldTargets.at(-1);
         if (!target) throw new UnsupportedEmit();
@@ -3592,9 +3626,8 @@ function generateBody(
         return hasDefault && lastTerminated && !endBranched;
       }
       // TODO: unhandled statements degrade to a placeholder method body. Notably
-      // the synchronized statement (JLS 14.19: monitorenter/monitorexit with a
-      // catch-all monitorexit on the exception path) and the assert statement
-      // (JLS 14.10: a $assertionsDisabled static guard + throw AssertionError).
+      // the assert statement (JLS 14.10: a $assertionsDisabled static guard +
+      // throw AssertionError).
       default:
         throw new UnsupportedEmit();
     }

@@ -643,6 +643,36 @@ test(
 );
 
 test(
+  "synchronized statement runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Sync",
+      [
+        "public class Sync {",
+        "  static final Object lock = new Object();",
+        "  static int counter;",
+        "  static void inc(){ synchronized (lock) { counter = counter + 1; } }",
+        "  static int withReturn(){ synchronized (lock) { return counter; } }",
+        "  static int viaException(){",
+        "    try { synchronized (lock) { throw new RuntimeException(); } }",
+        "    catch (RuntimeException e) { return -1; }",
+        "  }",
+        "  public static void main(String[] a){",
+        "    inc(); inc(); inc();",
+        "    System.out.println(counter);",
+        "    System.out.println(withReturn());",
+        "    System.out.println(viaException());",
+        "    System.out.println(Thread.holdsLock(lock));", // monitor released on every path
+        "  }",
+        "}",
+      ].join("\n"),
+      "3\n3\n-1\nfalse\n",
+    );
+  },
+);
+
+test(
   "try-with-resources runs identically to javac (order, return, suppression)",
   { skip: HAS_JAVA ? false : "no JDK" },
   () => {
