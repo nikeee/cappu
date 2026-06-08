@@ -1897,3 +1897,60 @@ test(
     );
   },
 );
+
+test(
+  "record deconstruction patterns in switch run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "RecPat",
+      [
+        "record Point(int x, int y) {}",
+        "record Line(Point from, Point to) {}",
+        "public class RecPat {",
+        "  static String f(Object o) {",
+        "    return switch (o) {",
+        "      case Line(Point(int x1, int y1), Point(int x2, int y2)) -> \"line:\" + (x1+y1+x2+y2);",
+        "      case Point(int x, int y) when x == y -> \"diag:\" + x;",
+        "      case Point(int x, int y) -> \"pt:\" + (x+y);",
+        "      case String s -> \"str:\" + s;",
+        "      default -> \"other\";",
+        "    };",
+        "  }",
+        "  public static void main(String[] a){",
+        "    System.out.println(f(new Line(new Point(1,2), new Point(3,4))));",
+        "    System.out.println(f(new Point(5,5)));",
+        "    System.out.println(f(new Point(2,3)));",
+        '    System.out.println(f("hi"));',
+        "    System.out.println(f(42));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "line:10\ndiag:5\npt:5\nstr:hi\nother\n",
+    );
+  },
+);
+
+test(
+  "instanceof record deconstruction runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "InstRec",
+      [
+        "record Point(int x, int y) {}",
+        "public class InstRec {",
+        "  static int f(Object o) {",
+        "    if (o instanceof Point(int x, int y)) return x + y;",
+        "    return -1;",
+        "  }",
+        "  public static void main(String[] a){",
+        "    System.out.println(f(new Point(3,4)));",
+        '    System.out.println(f("nope"));',
+        "  }",
+        "}",
+      ].join("\n"),
+      "7\n-1\n",
+    );
+  },
+);

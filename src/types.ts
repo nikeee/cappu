@@ -655,9 +655,12 @@ export interface ConditionalExpression extends Expression {
 export interface InstanceofExpression extends Expression {
   readonly kind: SyntaxKind.InstanceofExpression;
   readonly expression: Expression;
-  readonly type: TypeNode;
+  /** The tested type; absent for the record-pattern form (carried by `pattern`). */
+  readonly type?: TypeNode;
   /** SE16 pattern binding variable: o instanceof String s. */
   readonly name?: Identifier;
+  /** SE21 record deconstruction: o instanceof Point(int x, int y). */
+  readonly pattern?: RecordPattern;
 }
 
 export interface CastExpression extends Expression {

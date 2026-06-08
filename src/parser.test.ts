@@ -461,7 +461,7 @@ test("compound shift assignment a >>= b", () => {
 test("instanceof", () => {
   const e = expr("o instanceof String") as import("./types.ts").InstanceofExpression;
   expect(e.kind).toBe(SyntaxKind.InstanceofExpression);
-  expect(e.type.kind).toBe(SyntaxKind.TypeReference);
+  expect(e.type?.kind).toBe(SyntaxKind.TypeReference);
 });
 
 test("cast vs parenthesized vs subtraction", () => {

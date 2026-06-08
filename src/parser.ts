@@ -1641,10 +1641,23 @@ function parseBinaryExpressionRest(
       const type = parseType();
       const node = createNode<InstanceofExpression>(SyntaxKind.InstanceofExpression, pos);
       node.expression = left;
-      node.type = type;
-      // SE16 type pattern: o instanceof String s
-      if (token() === SyntaxKind.Identifier) {
-        node.name = parseIdentifier();
+      // SE21 record deconstruction: o instanceof Point(int x, int y). The type is
+      // owned by the pattern (not aliased onto node.type) so each node has one parent.
+      if (token() === SyntaxKind.OpenParenToken) {
+        const patPos = type.pos;
+        parseExpected(SyntaxKind.OpenParenToken);
+        const patterns = parseDelimitedList(ParsingContext.Parameters, parseComponentPattern);
+        parseExpected(SyntaxKind.CloseParenToken);
+        const rp = createNode<RecordPattern>(SyntaxKind.RecordPattern, patPos);
+        rp.type = type;
+        rp.patterns = patterns;
+        node.pattern = finishNode(rp, patPos);
+      } else {
+        node.type = type;
+        // SE16 type pattern: o instanceof String s
+        if (token() === SyntaxKind.Identifier) {
+          node.name = parseIdentifier();
+        }
       }
       left = finishNode(node, pos);
       continue;
@@ -2980,7 +2993,10 @@ export function forEachChild<T>(
     case SyntaxKind.InstanceofExpression: {
       const n = node as InstanceofExpression;
       return (
-        visitNode(cbNode, n.expression) || visitNode(cbNode, n.type) || visitNode(cbNode, n.name)
+        visitNode(cbNode, n.expression) ||
+        visitNode(cbNode, n.type) ||
+        visitNode(cbNode, n.name) ||
+        visitNode(cbNode, n.pattern)
       );
     }
     case SyntaxKind.RecordDeclaration: {

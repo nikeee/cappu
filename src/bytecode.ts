@@ -68,6 +68,7 @@ import {
   type SwitchStatement,
   type SwitchClause,
   type TypePattern,
+  type RecordPattern,
   type SourceFile,
   type SwitchExpression,
   type YieldStatement,
@@ -2016,7 +2017,9 @@ function generateBody(
     // A type-pattern binding `x instanceof T t` as a plain value (not the matched
     // condition of an if/&&) is unsupported here; emitBranch handles the common
     // matched-condition case (JLS 14.30.1) and binds `t`.
-    if (node.name) throw new UnsupportedEmit();
+    // A record pattern in plain value context (not a matched condition) is also
+    // left to emitBranch; here node.type is always present.
+    if (node.name || node.pattern || !node.type) throw new UnsupportedEmit();
     emitExpr(node.expression);
     const descriptor = descriptorOf(node.type, program);
     const klass = descriptor[0] === "[" ? descriptor : descriptor.slice(1, -1);
@@ -2750,7 +2753,36 @@ function generateBody(
         // into a temp (safe for side effects and reused for the cast). The
         // when-true direction (negation, ||, value context) is left to the
         // value-based fallback, which does not bind.
-        if (io.name?.symbol && !whenTrue) {
+        // Record deconstruction `x instanceof Point(int a, int b)` as the matched
+        // condition: test the record type, branch away on no match, then bind the
+        // component patterns (which themselves branch away on a nested mismatch).
+        if (io.pattern && !whenTrue) {
+          const desc = descriptorOf(io.pattern.type, program);
+          if (desc[0] !== "L") throw new UnsupportedEmit();
+          const internal = desc.slice(1, -1);
+          const xDesc = emitExpr(io.expression);
+          const tmp = allocSlot(xDesc);
+          storeVar(tmp, xDesc);
+          loadVar(tmp, xDesc);
+          push(xDesc);
+          code.u1(OP_INSTANCEOF);
+          code.u2(cp.classInfo(internal));
+          pop();
+          push("I");
+          pop();
+          branchTo(OP_IFEQ, label);
+          const objSlot = allocSlot(desc);
+          loadVar(tmp, xDesc);
+          push(xDesc);
+          code.u1(OP_CHECKCAST);
+          code.u2(cp.classInfo(internal));
+          pop();
+          push(desc);
+          storeVar(objSlot, desc);
+          emitDeconstruct(io.pattern.type, objSlot, desc, io.pattern.patterns, label);
+          return;
+        }
+        if (io.name?.symbol && io.type && !whenTrue) {
           const desc = descriptorOf(io.type, program);
           const internal = desc[0] === "[" ? desc : desc.slice(1, -1);
           const xDesc = emitExpr(io.expression);
@@ -3494,7 +3526,131 @@ function generateBody(
   // Whether a switch uses type patterns (JLS 14.11.1, SE21) - lowered to an
   // if/else-instanceof chain rather than the integral/string/enum dispatch.
   const isPatternSwitch = (clauses: readonly SwitchClause[]): boolean =>
-    clauses.some(cl => (cl.labels ?? []).some(l => l.kind === SyntaxKind.TypePattern));
+    clauses.some(cl =>
+      (cl.labels ?? []).some(
+        l => l.kind === SyntaxKind.TypePattern || l.kind === SyntaxKind.RecordPattern,
+      ),
+    );
+
+  // Resolve a record TypeNode to its components (accessor name + descriptor), for
+  // deconstruction patterns. Returns undefined if it is not a known record.
+  const recordComponentsOf = (
+    typeNode: TypeNode,
+  ): { name: string; descriptor: string }[] | undefined => {
+    if (typeNode.kind !== SyntaxKind.TypeReference) return undefined;
+    const sym = resolveTypeEntityName((typeNode as TypeReference).typeName, typeNode, program);
+    const decl = sym?.valueDeclaration ?? sym?.declarations?.[0];
+    if (!sym || !(sym.flags & SymbolFlags.Record) || decl?.kind !== SyntaxKind.RecordDeclaration)
+      return undefined;
+    return (decl as RecordDeclaration).recordComponents.map(c => ({
+      name: c.name.text,
+      descriptor: descriptorOf(c.type, program),
+    }));
+  };
+
+  // Bind one component pattern (JLS 14.30.1). The component value is on the stack
+  // top (descriptor valueDesc). A type pattern binds its variable (with a runtime
+  // checkcast on reference narrowing); a nested record pattern tests + recurses;
+  // an unnamed '_' discards. A failed nested instanceof branches to failLabel.
+  const allocSlot = (desc: string): number => {
+    const slot = nextSlot;
+    nextSlot += slotsOf(desc);
+    if (nextSlot > maxLocals) maxLocals = nextSlot;
+    activeLocals.push({ slot, descriptor: desc });
+    return slot;
+  };
+  const bindComponent = (pattern: Node, valueDesc: string, failLabel: Label): void => {
+    if (pattern.kind === SyntaxKind.MatchAllPattern) {
+      code.u1(slotsOf(valueDesc) === 2 ? OP_POP2 : OP_POP);
+      pop();
+      return;
+    }
+    // Stash the component value into a slot up front so the operand stack is empty
+    // at every fail-branch (the verifier requires a consistent stack at a target
+    // reached from multiple paths); checks then load from the slot.
+    const rawSlot = allocSlot(valueDesc);
+    storeVar(rawSlot, valueDesc);
+    if (pattern.kind === SyntaxKind.TypePattern) {
+      const tp = pattern as TypePattern;
+      const desc = descriptorOf(tp.type, program);
+      const sym = tp.symbol ?? tp.name.symbol;
+      // A narrowing reference pattern needs a runtime instanceof + checkcast into a
+      // fresh slot; otherwise the stashed slot already holds the binding value.
+      if ((desc[0] === "L" || desc[0] === "[") && desc !== valueDesc) {
+        const internal = desc[0] === "[" ? desc : desc.slice(1, -1);
+        loadVar(rawSlot, valueDesc);
+        push(valueDesc);
+        code.u1(OP_INSTANCEOF);
+        code.u2(cp.classInfo(internal));
+        pop();
+        push("I");
+        pop();
+        branchTo(OP_IFEQ, failLabel);
+        const slot = allocSlot(desc);
+        loadVar(rawSlot, valueDesc);
+        push(valueDesc);
+        code.u1(OP_CHECKCAST);
+        code.u2(cp.classInfo(internal));
+        pop();
+        push(desc);
+        storeVar(slot, desc);
+        if (sym) locals.set(sym, { slot, descriptor: desc });
+      } else if (sym) {
+        locals.set(sym, { slot: rawSlot, descriptor: desc });
+      }
+      return;
+    }
+    if (pattern.kind === SyntaxKind.RecordPattern) {
+      const rp = pattern as RecordPattern;
+      const desc = descriptorOf(rp.type, program);
+      if (desc[0] !== "L") throw new UnsupportedEmit();
+      const internal = desc.slice(1, -1);
+      loadVar(rawSlot, valueDesc);
+      push(valueDesc);
+      code.u1(OP_INSTANCEOF);
+      code.u2(cp.classInfo(internal));
+      pop();
+      push("I");
+      pop();
+      branchTo(OP_IFEQ, failLabel);
+      const slot = allocSlot(desc);
+      loadVar(rawSlot, valueDesc);
+      push(valueDesc);
+      code.u1(OP_CHECKCAST);
+      code.u2(cp.classInfo(internal));
+      pop();
+      push(desc);
+      storeVar(slot, desc);
+      emitDeconstruct(rp.type, slot, desc, rp.patterns, failLabel);
+      return;
+    }
+    throw new UnsupportedEmit();
+  };
+
+  // Deconstruct a record pattern against the value already stored in objSlot
+  // (descriptor objDesc, the record type): call each accessor and bind the
+  // corresponding component pattern.
+  const emitDeconstruct = (
+    recordTypeNode: TypeNode,
+    objSlot: number,
+    objDesc: string,
+    patterns: readonly Node[],
+    failLabel: Label,
+  ): void => {
+    const comps = recordComponentsOf(recordTypeNode);
+    if (!comps || comps.length !== patterns.length) throw new UnsupportedEmit();
+    const recordInternal = objDesc.slice(1, -1);
+    patterns.forEach((p, i) => {
+      const comp = comps[i]!;
+      loadVar(objSlot, objDesc);
+      push(objDesc);
+      code.u1(OP_INVOKEVIRTUAL);
+      code.u2(cp.methodref(recordInternal, comp.name, `()${comp.descriptor}`));
+      pop();
+      push(comp.descriptor);
+      bindComponent(p, comp.descriptor, failLabel);
+    });
+  };
 
   const throwNew = (internal: string): void => {
     code.u1(OP_NEW);
@@ -3565,9 +3721,11 @@ function generateBody(
     for (const cl of clauses) {
       if (cl.isDefault) continue;
       const label = (cl.labels ?? [])[0];
-      if (label?.kind !== SyntaxKind.TypePattern) continue; // null handled above
-      const tp = label as TypePattern;
-      const desc = descriptorOf(tp.type, program);
+      const isType = label?.kind === SyntaxKind.TypePattern;
+      const isRecord = label?.kind === SyntaxKind.RecordPattern;
+      if (!isType && !isRecord) continue; // null handled above
+      const patternType = (label as TypePattern | RecordPattern).type;
+      const desc = descriptorOf(patternType, program);
       if (desc[0] !== "L" && desc[0] !== "[") throw new UnsupportedEmit();
       const internal = desc[0] === "[" ? desc : desc.slice(1, -1);
       const nextL = newLabel();
@@ -3583,9 +3741,11 @@ function generateBody(
       nextSlot += slotsOf(desc);
       if (nextSlot > maxLocals) maxLocals = nextSlot;
       activeLocals.push({ slot: pSlot, descriptor: desc });
-      // The binder records the pattern variable on the TypePattern node itself.
-      const patternSym = tp.symbol ?? tp.name.symbol;
-      if (patternSym) locals.set(patternSym, { slot: pSlot, descriptor: desc });
+      if (isType) {
+        // The binder records the pattern variable on the TypePattern node itself.
+        const patternSym = (label as TypePattern).symbol ?? (label as TypePattern).name.symbol;
+        if (patternSym) locals.set(patternSym, { slot: pSlot, descriptor: desc });
+      }
       loadVar(tmpSlot, selDesc);
       push(selDesc);
       if (desc !== "Ljava/lang/Object;") {
@@ -3595,6 +3755,11 @@ function generateBody(
         push(desc);
       }
       storeVar(pSlot, desc);
+      // A record pattern deconstructs the matched value, binding its components
+      // (and recursively testing nested record patterns) before the guard/arm.
+      if (isRecord) {
+        emitDeconstruct(patternType, pSlot, desc, (label as RecordPattern).patterns, nextL);
+      }
       if (cl.guard) emitBranch(cl.guard, nextL, false); // guard false -> next clause
       emitArm(cl);
       placeLabel(nextL);

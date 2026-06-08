@@ -18,15 +18,20 @@ verifiable placeholder, never a crash.
       `AssertionError`. Message uses the `(Object)` constructor (boxing a
       primitive); javac's type-specific message ctors are not matched.
 - [x] Pattern `switch` (JLS 14.11.1 / 14.30), arrow form (statement + expression):
-      type patterns `case Type t`, guards `when`, `case null`, and `default`,
-      lowered to an if/else-instanceof chain (selector evaluated once, NPE when
-      null with no `case null`). Record/nested patterns and the colon form remain.
+      type patterns `case Type t`, record deconstruction `case Point(int x, int y)`
+      (incl. nested record patterns and unnamed `_` components), guards `when`,
+      `case null`, and `default`, lowered to an if/else-instanceof chain (selector
+      evaluated once, NPE when null with no `case null`). The colon form remains.
 
 ## Expressions
 
 - [x] `instanceof` type-pattern binding `x instanceof T t` (JLS 14.30.1) as the
       matched condition of an `if`/`&&`. The when-true direction (negation, `||`,
       plain value context) still degrades and does not bind.
+- [x] `instanceof` record deconstruction `x instanceof Point(int a, int b)` (JLS
+      14.30.1) as the matched condition: tests the record type, then binds each
+      component pattern via the accessors (nested record patterns recurse). Shares
+      the deconstruction machinery with pattern switch.
 - [x] Array constructor references `T[]::new` (JLS 15.13.3): bound to a synthetic
       `(int) -> new T[len]` helper via invokedynamic (REF_invokeStatic).
 
