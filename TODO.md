@@ -50,9 +50,16 @@ verifiable placeholder, never a crash.
 - [x] Anonymous classes **extending a class**: the synthesized constructor takes
       the super-constructor arguments as trailing parameters (resolved via the
       matching super ctor) and the `new` site passes them after the captures.
-- [ ] Anonymous/local classes with **own fields, initializer blocks, or `this`-
-      member / inherited-member access** (needs binder/checker scoping of the
-      body); local-class `this$0` (enclosing-instance) capture.
+- [x] Anonymous classes accessing the **enclosing instance** (`this$0`): a
+      non-static enclosing context where the body reads a non-static outer field
+      or calls a non-static outer method captures `this$0` (a synthetic field +
+      leading constructor parameter), and implicit-`this` access to an enclosing
+      member routes through it.
+- [ ] **Local-class** `this$0` (same machinery, but the local-class `new`-site
+      and emitClass synthesized-ctor path need wiring; until then a local class
+      reading an outer instance member emits an unverifiable access).
+- [ ] Anonymous/local classes with **own fields, initializer blocks, or
+      inherited-member access** (needs binder/checker scoping of the body).
 - [x] User-defined interfaces are now emitted (ACC_INTERFACE|ACC_ABSTRACT, super
       Object, `extends` as super-interfaces): abstract methods (no Code), default
       and static methods (with Code), and implicitly public-static-final constant

@@ -1760,3 +1760,24 @@ test(
     );
   },
 );
+
+test(
+  "anonymous class accessing the enclosing instance (this$0) runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Outer",
+      [
+        "public class Outer {",
+        "  int field = 10;",
+        "  int outerMethod(){ return 5; }",
+        "  Runnable makeRunnable(){",
+        "    return new Runnable(){ public void run(){ System.out.println(field + outerMethod()); } };",
+        "  }",
+        "  public static void main(String[] a){ new Outer().makeRunnable().run(); }",
+        "}",
+      ].join("\n"),
+      "15\n",
+    );
+  },
+);

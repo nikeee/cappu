@@ -811,6 +811,71 @@ function collectCaptures(
   return result;
 }
 
+// If a class body (a local class's members or an anonymous class's classBody)
+// accesses the enclosing instance - reads a non-static field of the enclosing
+// type, or calls a non-static method of it - from a non-static context, return
+// that enclosing type's internal name (it must capture `this$0`); else undefined.
+function outerThisInfo(
+  members: readonly Node[],
+  parent: Node | undefined,
+  program: Program,
+  checker: Checker,
+): { enclosingInternal: string } | undefined {
+  let typeSym: Symbol | undefined;
+  for (let n = parent; n; n = n.parent) {
+    // A static enclosing method has no enclosing instance.
+    if (
+      n.kind === SyntaxKind.MethodDeclaration &&
+      ((n as MethodDeclaration).modifiers ?? []).some(m => m.kind === SyntaxKind.StaticKeyword)
+    ) {
+      return undefined;
+    }
+    if (TYPE_DECL_KINDS.has(n.kind)) {
+      typeSym = n.symbol;
+      break;
+    }
+  }
+  if (!typeSym) return undefined;
+  let used = false;
+  const visit = (node: Node): void => {
+    if (used) return;
+    if (node.kind === SyntaxKind.Identifier) {
+      const p = node.parent;
+      const isMemberName =
+        p?.kind === SyntaxKind.PropertyAccessExpression &&
+        (p as PropertyAccessExpression).name === node;
+      const isCallee =
+        p?.kind === SyntaxKind.CallExpression && (p as CallExpression).expression === node;
+      if (!isMemberName && !isCallee) {
+        const s = resolveIdentifier(node as Identifier, program);
+        const fieldDecl = s?.valueDeclaration?.parent;
+        if (
+          s &&
+          s.flags & SymbolFlags.Field &&
+          !(s.flags & SymbolFlags.EnumConstant) &&
+          s.parent === typeSym &&
+          fieldDecl?.kind === SyntaxKind.FieldDeclaration &&
+          !isStaticDeclaration(fieldDecl as FieldDeclaration)
+        ) {
+          used = true;
+        }
+      }
+    } else if (
+      node.kind === SyntaxKind.CallExpression &&
+      (node as CallExpression).expression.kind === SyntaxKind.Identifier
+    ) {
+      const m = checker.resolveCall(node as CallExpression);
+      if (m?.symbol?.parent === typeSym && !isStaticDeclaration(m)) used = true;
+    }
+    forEachChild(node, c => {
+      visit(c);
+      return undefined;
+    });
+  };
+  for (const member of members) visit(member);
+  return used ? { enclosingInternal: binaryName(typeSym) } : undefined;
+}
+
 // Captures we actually support emitting for a local class: only the clean case
 // (no declared constructor and no instance field initializers), where we
 // synthesize a constructor `<init>(captures...)`. Otherwise returns [] so the
@@ -1201,6 +1266,9 @@ function generateBody(
   // For a local class (JLS 14.3): enclosing locals it captures, read from the
   // synthetic `val$x` fields rather than as locals.
   captureFields: Map<Symbol, { ownerInternal: string; fieldName: string; descriptor: string }> = new Map(),
+  // For a local/anonymous class accessing the enclosing instance: its class name,
+  // so implicit-this access to an enclosing-class member routes through this$0.
+  outerThis?: { enclosingInternal: string },
 ): MethodBody {
   const isConstructor = !lambdaSpec && method.kind === SyntaxKind.ConstructorDeclaration;
   const isStatic = lambdaSpec
@@ -1575,6 +1643,21 @@ function generateBody(
     return info.descriptor;
   };
 
+  // The receiver for an implicit-`this` member access: `this`, or - for a local/
+  // anonymous class reaching an enclosing-instance member - `this.this$0`.
+  const emitImplicitReceiver = (ownerInternal: string): void => {
+    code.u1(OP_ALOAD_0);
+    if (outerThis && ownerInternal === outerThis.enclosingInternal) {
+      pushRef(`L${thisInternalName};`);
+      code.u1(OP_GETFIELD);
+      code.u2(cp.fieldref(thisInternalName, "this$0", `L${outerThis.enclosingInternal};`));
+      pop();
+      pushRef(`L${outerThis.enclosingInternal};`);
+    } else {
+      pushRef();
+    }
+  };
+
   const emitExpr = (node: Node): string => {
     // Fold compile-time constant expressions (JLS 15.28), as javac does, so e.g.
     // 6 * 7 emits `bipush 42`. Only composite expressions are folded here; plain
@@ -1687,10 +1770,8 @@ function generateBody(
         }
         // A field or enum constant by its simple name: implicit `this.f` or a static.
         if (symbol && symbol.flags & (SymbolFlags.Field | SymbolFlags.EnumConstant)) {
-          return emitFieldRead(fieldInfoOf(symbol), () => {
-            code.u1(OP_ALOAD_0);
-            pushRef();
-          });
+          const fi = fieldInfoOf(symbol);
+          return emitFieldRead(fi, () => emitImplicitReceiver(fi.owner));
         }
         throw new UnsupportedEmit();
       }
@@ -1872,8 +1953,7 @@ function generateBody(
       if (callee.kind === SyntaxKind.PropertyAccessExpression) {
         emitExpr((callee as PropertyAccessExpression).expression);
       } else if (callee.kind === SyntaxKind.Identifier) {
-        code.u1(OP_ALOAD_0); // implicit this
-        pushRef();
+        emitImplicitReceiver(ownerName); // implicit this (or this$0 for an outer member)
       } else throw new UnsupportedEmit();
     }
     // Coerce each argument to its parameter type (box/unbox/widen) when the
@@ -1936,6 +2016,8 @@ function generateBody(
       if (!target) throw new UnsupportedEmit();
       const anonName = anonymousClassName(oc, program);
       const captures = collectCaptures(oc.classBody, oc.pos, oc.end, program, checker);
+      const outerThis = outerThisInfo(oc.classBody, oc.parent, program, checker);
+      const this0Desc = outerThis ? `L${outerThis.enclosingInternal};` : undefined;
       const args = oc.arguments ?? [];
       const ref = `L${anonName};`;
       code.u1(OP_NEW);
@@ -1943,6 +2025,11 @@ function generateBody(
       pushRef(ref);
       code.u1(OP_DUP);
       pushRef(ref);
+      // this$0 (the enclosing instance) is the first ctor argument.
+      if (this0Desc) {
+        code.u1(OP_ALOAD_0);
+        pushRef(this0Desc);
+      }
       for (const c of captures) {
         const slot = locals.get(c.symbol);
         if (!slot) throw new UnsupportedEmit();
@@ -1951,10 +2038,14 @@ function generateBody(
       }
       // super-constructor arguments follow the captures.
       args.forEach((arg, i) => coerce(emitExpr(arg), target.superParamDescs[i]!));
-      const ctorDesc = `(${[...captures.map(c => c.descriptor), ...target.superParamDescs].join("")})V`;
+      const ctorDesc = `(${[
+        ...(this0Desc ? [this0Desc] : []),
+        ...captures.map(c => c.descriptor),
+        ...target.superParamDescs,
+      ].join("")})V`;
       code.u1(OP_INVOKESPECIAL);
       code.u2(cp.methodref(anonName, "<init>", ctorDesc));
-      pop(1 + captures.length + args.length);
+      pop(1 + (this0Desc ? 1 : 0) + captures.length + args.length);
       return ref;
     }
     const created = checker.getTypeOfExpression(node);
@@ -4191,6 +4282,8 @@ function emitMethod(
   extraFlags = 0,
   // For a local class: enclosing locals captured into synthetic val$ fields.
   captureFields: Map<Symbol, { ownerInternal: string; fieldName: string; descriptor: string }> = new Map(),
+  // For a local/anonymous class accessing the enclosing instance via this$0.
+  outerThis?: { enclosingInternal: string },
 ): ByteBuffer {
   const flags = methodAccessFlags(method) | extraFlags;
   const descriptor = methodDescriptor(method, program);
@@ -4222,6 +4315,7 @@ function emitMethod(
       undefined,
       undefined,
       captureFields,
+      outerThis,
     );
   } catch (e) {
     if (!(e instanceof UnsupportedEmit)) throw e;
@@ -4473,9 +4567,17 @@ function emitSynthCtor(
   superInternal: string,
   superParamDescs: string[],
   captures: LocalCapture[],
+  // Enclosing-instance descriptor (L<enclosing>;) when the class captures this$0;
+  // it is the first constructor parameter, stored into the this$0 field.
+  this0Descriptor?: string,
 ): ByteBuffer {
   const code = new ByteBuffer();
   let slot = 1;
+  let this0Slot = 0;
+  if (this0Descriptor) {
+    this0Slot = slot;
+    slot += 1; // a reference is one slot
+  }
   const captureSlots = captures.map(c => {
     const s = slot;
     slot += slotsOf(c.descriptor);
@@ -4487,6 +4589,15 @@ function emitSynthCtor(
     return s;
   });
   let maxStack = 1;
+  // Store this$0 (the enclosing instance) before the super call, as javac does.
+  if (this0Descriptor) {
+    code.u1(OP_ALOAD_0);
+    code.u1(OP_ALOAD);
+    code.u1(this0Slot);
+    code.u1(OP_PUTFIELD);
+    code.u2(cp.fieldref(name, "this$0", this0Descriptor));
+    maxStack = Math.max(maxStack, 2);
+  }
   code.u1(OP_ALOAD_0);
   superParamDescs.forEach((d, i) => loadByDescriptor(code, d, superSlots[i]!));
   code.u1(OP_INVOKESPECIAL);
@@ -4503,7 +4614,11 @@ function emitSynthCtor(
   const info = new ByteBuffer();
   info.u2(0); // package-private synthetic-ish constructor
   info.u2(cp.utf8("<init>"));
-  const descs = [...captures.map(c => c.descriptor), ...superParamDescs];
+  const descs = [
+    ...(this0Descriptor ? [this0Descriptor] : []),
+    ...captures.map(c => c.descriptor),
+    ...superParamDescs,
+  ];
   info.u2(cp.utf8(`(${descs.join("")})V`));
   writeCodeAttribute(info, cp, { code, maxStack, maxLocals: slot });
   return info;
@@ -4874,8 +4989,15 @@ export function emitAnonymousClassIfPossible(
   const superClassIndex = cp.classInfo(target.superInternal);
   const interfaceIndices = target.interfaceInternal ? [cp.classInfo(target.interfaceInternal)] : [];
 
+  const outerThis = outerThisInfo(node.classBody!, node.parent, program, checker);
+  const this0Descriptor = outerThis ? `L${outerThis.enclosingInternal};` : undefined;
+
   const fields = new ByteBuffer();
   let fieldCount = 0;
+  if (this0Descriptor) {
+    emitFieldInfo(fields, cp, ACC_FINAL | ACC_SYNTHETIC, "this$0", this0Descriptor);
+    fieldCount++;
+  }
   for (const c of captures) {
     emitFieldInfo(fields, cp, ACC_FINAL | ACC_SYNTHETIC, c.fieldName, c.descriptor);
     fieldCount++;
@@ -4884,7 +5006,9 @@ export function emitAnonymousClassIfPossible(
   const methods = new ByteBuffer();
   let methodCount = 0;
   const lambdaMethods: ByteBuffer[] = [];
-  methods.append(emitSynthCtor(cp, name, target.superInternal, target.superParamDescs, captures));
+  methods.append(
+    emitSynthCtor(cp, name, target.superInternal, target.superParamDescs, captures, this0Descriptor),
+  );
   methodCount++;
   const captureMap = new Map(
     captures.map(c => [
@@ -4895,7 +5019,17 @@ export function emitAnonymousClassIfPossible(
   for (const member of node.classBody!) {
     if (member.kind !== SyntaxKind.MethodDeclaration) continue;
     methods.append(
-      emitMethod(member as MethodDeclaration, cp, program, checker, name, lambdaMethods, ACC_PUBLIC, captureMap),
+      emitMethod(
+        member as MethodDeclaration,
+        cp,
+        program,
+        checker,
+        name,
+        lambdaMethods,
+        ACC_PUBLIC,
+        captureMap,
+        outerThis,
+      ),
     );
     methodCount++;
   }
