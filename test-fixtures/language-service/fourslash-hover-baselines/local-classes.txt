@@ -1,0 +1,20 @@
+=== field ===
+  (field) int count
+=== ctorParam ===
+  (parameter) int start
+=== incMethod ===
+  int inc()
+=== fieldUse ===
+  (field) int count
+=== localVar ===
+  (local variable) Counter c
+=== ctorRef ===
+  class Counter
+=== cUse ===
+  (local variable) Counter c
+=== incUse ===
+  int inc()
+=== cUse2 ===
+  (local variable) Counter c
+=== incUse2 ===
+  int inc()
