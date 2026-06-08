@@ -1,9 +1,12 @@
 [submodule "test-corpus/graph-engine"]
 	path = test-fixtures/emitter/corpus/graph-engine
 	url = https://github.com/nikeee/graph-engine
+	shallow = true
 [submodule "test-corpus/algorithms-java"]
 	path = test-fixtures/emitter/corpus/algorithms-java
 	url = https://github.com/TheAlgorithms/Java.git
+	shallow = true
 [submodule "test-corpus/commons-lang"]
 	path = test-fixtures/emitter/corpus/commons-lang
 	url = https://github.com/apache/commons-lang.git
+	shallow = true

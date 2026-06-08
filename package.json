@@ -15,6 +15,7 @@
     "format": "oxfmt",
     "typecheck": "tsc --noEmit",
     "lsp": "tsx src/server.ts",
+    "corpus:init": "git submodule update --init && for d in test-fixtures/emitter/corpus/*/; do git -C \"$d\" sparse-checkout set --no-cone '/**/*.java' '*.java'; done",
     "test": "tsx --test \"./src/**/*.test.ts\""
   },
   "dependencies": {
