@@ -639,7 +639,9 @@ test(
         "    }",
         "  }",
         "  static void normal(){",
-        '    try (R r = new R("a")) { System.out.println("body"); }',
+        // references the resource variable in the body (r.n), exercising the
+        // binder/checker binding of the resource.
+        '    try (R r = new R("a")) { System.out.println("body " + r.n); }',
         "  }",
         "  static int withReturn(){",
         '    try (R r = new R("b")) { return 7; }',
@@ -666,7 +668,7 @@ test(
       ].join("\n"),
       [
         "open a",
-        "body",
+        "body a",
         "close a",
         "open b",
         "close b",

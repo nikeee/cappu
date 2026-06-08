@@ -3488,7 +3488,9 @@ function generateBody(
           nextSlot += slotsOf(desc);
           if (nextSlot > maxLocals) maxLocals = nextSlot;
           activeLocals.push({ slot, descriptor: desc });
-          if (res.name.symbol) locals.set(res.name.symbol, { slot, descriptor: desc });
+          // The resource symbol (bound by the binder) keys the local so the body
+          // can reference the resource; references resolve to this same symbol.
+          if (res.symbol) locals.set(res.symbol, { slot, descriptor: desc });
           coerce(emitExpr(res.initializer), desc);
           storeVar(slot, desc);
           const action: FinallyAction = { kind: "resource", slot, ownerInternal, isInterface };

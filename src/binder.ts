@@ -210,12 +210,15 @@ function bindDeclaration(node: Node): void {
       declareIntoContainer(named(node), node, flags, flags);
       break;
     }
-    // TODO: bind try-with-resources resource variables (JLS 14.20.3): a resource
-    // `try (R r = ...)` declares `r` scoped to the try block (JLS 6.3). Without a
-    // symbol the resource cannot be referenced in the body and its type resolves
-    // to errorType, so any `r.member` access degrades. Mirror VariableDeclarator,
-    // and add a Resource case to declaredTypeNodeOf in checker.ts (type is on the
-    // Resource node, not its parent).
+    case SyntaxKind.Resource: {
+      // A try-with-resources resource `try (R r = ...)` declares `r` (JLS 14.20.3,
+      // scoped to the try block per JLS 6.3). The declaration form carries a
+      // `name`; the variable-access form (try (existingVar)) does not, so named()
+      // returns undefined and nothing is declared. The type lives on the Resource
+      // node itself, which declaredTypeNodeOf (checker.ts) reads.
+      declareIntoContainer(named(node), node, SymbolFlags.LocalVariable, SymbolFlags.LocalVariable);
+      break;
+    }
     case SyntaxKind.CatchClause: {
       // The catch variable is the clause's `name`, scoped to the catch block.
       const name = named(node);

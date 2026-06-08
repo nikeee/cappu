@@ -438,6 +438,11 @@ export function createChecker(program: Program): Checker {
       }
       case SyntaxKind.MethodDeclaration:
         return { typeNode: (declaration as MethodDeclaration).returnType, from: declaration };
+      case SyntaxKind.Resource: {
+        // A try-with-resources resource carries its type on the node itself.
+        const t = (declaration as { type?: TypeNode }).type;
+        return t ? { typeNode: t, from: declaration } : undefined;
+      }
       case SyntaxKind.Identifier: {
         // A catch parameter `catch (E e)`: its type is the (first) catch type.
         const parent = declaration.parent as { kind: SyntaxKind; catchTypes?: readonly TypeNode[] };
