@@ -101,3 +101,4 @@ no timestamps were captured.
 - 2026-06-09 07:05 — continue
 - 2026-06-10 00:30 — add the build artifact to the job output of cd.yaml
 - 2026-06-10 00:30 — split the build step into multiple npm scripts for all major platforms and add their respective binaries to the build output
+- 2026-06-10 09:05 — continue with type erasure. check for bugs in checker and emitter. add cases. what else is needed for a good compiler and/or lsp?

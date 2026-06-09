@@ -61,6 +61,7 @@ import {
   SymbolFlags,
   SyntaxKind,
   type TypeNode,
+  type TypeParameter,
   type TypeReference,
   type VariableDeclarator,
   type WildcardType as AstWildcardType,
@@ -424,7 +425,8 @@ export function createChecker(program: Program): Checker {
         const ref = typeNode as TypeReference;
         const symbol = resolveTypeEntityName(ref.typeName, fromNode, program);
         if (!symbol) return errorType;
-        if (symbol.flags & SymbolFlags.TypeParameter) return typeVariable(symbol);
+        // Through getTypeOfSymbol so the variable carries its bound (cached once).
+        if (symbol.flags & SymbolFlags.TypeParameter) return getTypeOfSymbol(symbol);
         const args = ref.typeArguments?.map(a => resolveType(a as TypeNode, fromNode)) ?? [];
         return classType(symbol, args);
       }
@@ -482,7 +484,18 @@ export function createChecker(program: Program): Checker {
 
     let type: Type = errorType;
     if (symbol.flags & SymbolFlags.TypeParameter) {
-      type = typeVariable(symbol);
+      const tv = typeVariable(symbol);
+      // Cache before resolving the bound: `T extends Comparable<T>` mentions T,
+      // so the nested resolution must see the (still unbounded) variable instead
+      // of recursing forever. The bound is patched onto the cached object.
+      symbolTypes.set(symbol, tv);
+      const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+      const constraint =
+        declaration?.kind === SyntaxKind.TypeParameter
+          ? (declaration as TypeParameter).constraint?.[0]
+          : undefined;
+      if (constraint) tv.bound = resolveType(constraint, declaration!);
+      return tv;
     } else if (symbol.flags & SymbolFlags.Type) {
       type = classType(symbol);
     } else if (symbol.flags & SymbolFlags.EnumConstant) {
@@ -817,11 +830,23 @@ export function createChecker(program: Program): Checker {
     return declaration ? getDocumentationOfNode(declaration) : undefined;
   }
 
+  // The class type a member access on `type` resolves against: the type itself,
+  // or - for a type variable - its leftmost bound (JLS 4.4: the members of T are
+  // the members of its bound), unwrapped recursively for `U extends T` chains.
+  function receiverClassType(type: Type, depth = 0): ClassType | undefined {
+    if (type.kind === TypeKind.Class) return type as ClassType;
+    if (type.kind === TypeKind.TypeVariable && type.bound && depth < 8) {
+      return receiverClassType(type.bound, depth + 1);
+    }
+    return undefined;
+  }
+
   function resolveMemberAccess(access: PropertyAccessExpression): Symbol | undefined {
     const targetType = getTypeOfExpression(access.expression);
     if (targetType.kind === TypeKind.Array) return arrayMember(access.name.text);
-    if (targetType.kind !== TypeKind.Class) return undefined;
-    return lookupMember((targetType as ClassType).symbol, access.name.text, Meaning.Any, program);
+    const receiver = receiverClassType(targetType);
+    if (!receiver) return undefined;
+    return lookupMember(receiver.symbol, access.name.text, Meaning.Any, program);
   }
 
   function resolveName(identifier: Identifier): Symbol | undefined {
@@ -1244,11 +1269,12 @@ export function createChecker(program: Program): Checker {
       symbol = resolveIdentifier(callee as Identifier, program);
     } else if (callee.kind === SyntaxKind.PropertyAccessExpression) {
       const access = callee as PropertyAccessExpression;
-      const receiver = getTypeOfExpression(access.expression);
-      if (receiver.kind === TypeKind.Class) {
+      // A type-variable receiver resolves members against its bound (JLS 4.4).
+      const receiver = receiverClassType(getTypeOfExpression(access.expression));
+      if (receiver) {
         // Gather overloads across the whole hierarchy and pick by applicability,
         // so an override/overload in a subtype does not hide inherited ones.
-        const cands = collectTypedOverloads(receiver as ClassType, access.name.text);
+        const cands = collectTypedOverloads(receiver, access.name.text);
         if (cands.length === 0) return undefined;
         const decl =
           cands.length === 1

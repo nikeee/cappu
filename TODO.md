@@ -169,12 +169,12 @@ verifiable placeholder, never a crash.
 
 - [ ] A `return` inside a lambda is not typed against the SAM's return type
       (JLS 15.27.2 / 9.8).
-- [ ] A type variable erases to `java.lang.Object` rather than its leftmost bound
-      (JLS 4.6), so a method call on a bounded type parameter (`<T extends
-      Comparable<T>> ... a.compareTo(b)`) does not resolve and the method degrades.
-      A proper fix erases `T` to its bound everywhere (descriptors + member lookup),
-      matching javac; it is a broad change that should land with a full corpus
-      baseline regeneration.
+- [x] Type variables erase to their leftmost bound (JLS 4.6): descriptors use the
+      bound (`<T extends CharSequence>` -> `Ljava/lang/CharSequence;`), member
+      lookup on a type-variable receiver resolves via the bound (JLS 4.4), and the
+      synthetic checkcast generalizes from Object to any erased-vs-instantiated
+      descriptor mismatch (JLS 5.2). `TypeVariable` carries its bound (resolved
+      lazily with a cycle guard for `T extends Comparable<T>`).
 
 ## Class-file attributes javac emits that we omit (byte-equivalence)
 
@@ -186,7 +186,12 @@ These do not affect correctness but widen the diff vs javac's output.
       reading a private outer field, etc.).
 - [ ] `InnerClasses` (JVMS 4.7.6) for reflection (getEnclosingClass /
       isAnonymousClass); not required for access control under nestmates.
-- [ ] `Signature` (JVMS 4.7.9) for generic signatures.
+- [x] `Signature` (JVMS 4.7.9): emitted for generic classes/interfaces/enums
+      (type parameters with class/interface bounds, generic supertypes), methods
+      and constructors (own type params or generic param/return types; skipped
+      when synthetic this$0/capture params were spliced in), and fields. The
+      strings byte-match javac's (javap reprints `T get();` etc. identically).
+      Records and synthetic members (lambda impls, accessors) are not covered.
 - [ ] `LineNumberTable` (JVMS 4.7.12) and `LocalVariableTable` (4.7.13).
 - [ ] `RuntimeVisibleAnnotations` (JVMS 4.7.16).
 

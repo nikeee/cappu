@@ -35,6 +35,13 @@ export interface ArrayType {
 export interface TypeVariable {
   readonly kind: TypeKind.TypeVariable;
   readonly symbol: Symbol;
+  /**
+   * The leftmost declared bound (`T extends Comparable<T>` -> Comparable<T>),
+   * the type a use of T erases to (JLS 4.6). Filled in lazily by the checker
+   * after creation (the bound may reference T itself, so it cannot be resolved
+   * inside the factory without recursing); absent for an unbounded parameter.
+   */
+  bound?: Type;
 }
 
 export interface WildcardType {

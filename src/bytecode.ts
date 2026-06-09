@@ -16,6 +16,8 @@ import { resolveIdentifier, resolveTypeEntityName } from "./resolver.ts";
 import { entityNameToString, tokenToString } from "./utilities.ts";
 import {
   type ArrayType as AstArrayType,
+  type TypeParameter as AstTypeParameter,
+  type WildcardType as AstWildcardType,
   type ArrayCreationExpression,
   type ArrayInitializer,
   type ElementAccessExpression,
@@ -681,9 +683,15 @@ function buildClassAttributes(
   // used to emit NestHost / NestMembers so nestmates share private access.
   name?: string,
   nestMembers?: Map<string, string[]>,
+  // ClassSignature (JVMS 4.7.9) for a generic class/interface declaration.
+  signature?: string,
 ): { buffer: ByteBuffer; count: number } {
   const buffer = new ByteBuffer();
   let count = 0;
+  if (signature !== undefined) {
+    writeSignatureAttribute(buffer, cp, signature);
+    count++;
+  }
   if (sourceName) {
     buffer.u2(cp.utf8("SourceFile"));
     buffer.u4(2);
@@ -845,14 +853,18 @@ const TYPE_DECL_KINDS = new Set([
 // Field/parameter descriptor of a checker Type (erasing type variables and
 // wildcards to Object). Module-level twin of generateBody's typeDescriptor, for
 // capture analysis which runs outside that closure.
-function typeToDescriptor(type: Type): string {
+function typeToDescriptor(type: Type, depth = 0): string {
   switch (type.kind) {
     case TypeKind.Primitive:
       return PRIMITIVE_DESCRIPTOR[type.name] ?? "I";
     case TypeKind.Class:
       return `L${binaryName(type.symbol)};`;
     case TypeKind.Array:
-      return `[${typeToDescriptor(type.elementType)}`;
+      return `[${typeToDescriptor(type.elementType, depth)}`;
+    case TypeKind.TypeVariable:
+      // Erasure to the leftmost bound (JLS 4.6); the depth guard caps a
+      // (malformed) `T extends U, U extends T` chain.
+      return type.bound && depth < 8 ? typeToDescriptor(type.bound, depth + 1) : "Ljava/lang/Object;";
     default:
       return "Ljava/lang/Object;";
   }
@@ -1091,20 +1103,30 @@ function binaryName(symbol: Symbol): string {
 
 // Field/return type descriptor (JVMS 4.3.2). Type references are resolved to a
 // binary name; an unresolved name falls back to its written form (best effort).
-function descriptorOf(typeNode: TypeNode, program: Program): string {
+function descriptorOf(typeNode: TypeNode, program: Program, seenParams?: Set<Symbol>): string {
   switch (typeNode.kind) {
     case SyntaxKind.PrimitiveType: {
       const keyword = tokenToString((typeNode as { keyword: SyntaxKind }).keyword) ?? "int";
       return PRIMITIVE_DESCRIPTOR[keyword] ?? "I";
     }
     case SyntaxKind.ArrayType:
-      return `[${descriptorOf((typeNode as AstArrayType).elementType, program)}`;
+      return `[${descriptorOf((typeNode as AstArrayType).elementType, program, seenParams)}`;
     case SyntaxKind.TypeReference: {
       const ref = typeNode as TypeReference;
       const symbol = resolveTypeEntityName(ref.typeName, typeNode, program);
       // A type variable erases to its leftmost bound, or Object if unbounded
-      // (JLS 4.6). Method/field descriptors are always over erased types.
-      if (symbol && symbol.flags & SymbolFlags.TypeParameter) return "Ljava/lang/Object;";
+      // (JLS 4.6). Method/field descriptors are always over erased types. The
+      // seen-set guards `U extends T` chains against a (malformed) cycle.
+      if (symbol && symbol.flags & SymbolFlags.TypeParameter) {
+        if (seenParams?.has(symbol)) return "Ljava/lang/Object;";
+        const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+        const constraint =
+          declaration?.kind === SyntaxKind.TypeParameter
+            ? (declaration as AstTypeParameter).constraint?.[0]
+            : undefined;
+        if (!constraint) return "Ljava/lang/Object;";
+        return descriptorOf(constraint, program, (seenParams ?? new Set()).add(symbol));
+      }
       const name = symbol
         ? binaryName(symbol)
         : entityNameToString(ref.typeName).replace(/\./g, "/");
@@ -1131,6 +1153,10 @@ function emitFields(
     const field = member as FieldDeclaration;
     const descriptor = descriptorOf(field.type, program);
     const flags = memberAccessFlags(field.modifiers);
+    // A generic-typed field carries its un-erased type in a Signature attribute.
+    const signature = typeUsesGenerics(field.type, program)
+      ? signatureOfType(field.type, program)
+      : undefined;
     for (const declarator of field.declarators) {
       const d = declarator as VariableDeclarator;
       buffer.u2(flags);
@@ -1138,14 +1164,13 @@ function emitFields(
       buffer.u2(cp.utf8(descriptor));
       // static final fields with a compile-time constant carry a ConstantValue.
       const constIndex = constantValueIndex(field, d, cp, program);
-      if (constIndex === undefined) {
-        buffer.u2(0); // attributes_count
-      } else {
-        buffer.u2(1);
+      buffer.u2((constIndex === undefined ? 0 : 1) + (signature === undefined ? 0 : 1));
+      if (constIndex !== undefined) {
         buffer.u2(cp.utf8("ConstantValue"));
         buffer.u4(2);
         buffer.u2(constIndex);
       }
+      if (signature !== undefined) writeSignatureAttribute(buffer, cp, signature);
       count++;
     }
   }
@@ -1251,6 +1276,140 @@ function paramDescriptor(parameter: Parameter, program: Program): string {
 function methodDescriptor(method: MethodDeclaration, program: Program): string {
   const params = method.parameters.map(p => paramDescriptor(p as Parameter, program)).join("");
   return `(${params})${descriptorOf(method.returnType, program)}`;
+}
+
+// --- generic signatures (JVMS 4.7.9) -----------------------------------------
+// javac records the un-erased declaration in a Signature attribute wherever a
+// declaration mentions a type variable or type arguments (reflection, javap and
+// separate compilation read it; the JVM itself ignores it).
+
+// Whether the written type mentions generics (a type variable or type arguments),
+// i.e. whether its signature would differ from its erased descriptor.
+function typeUsesGenerics(typeNode: TypeNode | undefined, program: Program): boolean {
+  if (!typeNode) return false;
+  switch (typeNode.kind) {
+    case SyntaxKind.ArrayType:
+      return typeUsesGenerics((typeNode as AstArrayType).elementType, program);
+    case SyntaxKind.TypeReference: {
+      const ref = typeNode as TypeReference;
+      if (ref.typeArguments && ref.typeArguments.length > 0) return true;
+      const symbol = resolveTypeEntityName(ref.typeName, typeNode, program);
+      return !!symbol && (symbol.flags & SymbolFlags.TypeParameter) !== 0;
+    }
+    default:
+      return false;
+  }
+}
+
+// JavaTypeSignature for a written type: like descriptorOf, but a type variable
+// stays `TName;` and type arguments are kept (`Ljava/util/List<TT;>;`).
+function signatureOfType(typeNode: TypeNode, program: Program): string {
+  switch (typeNode.kind) {
+    case SyntaxKind.PrimitiveType: {
+      const keyword = tokenToString((typeNode as { keyword: SyntaxKind }).keyword) ?? "int";
+      return PRIMITIVE_DESCRIPTOR[keyword] ?? "I";
+    }
+    case SyntaxKind.ArrayType:
+      return `[${signatureOfType((typeNode as AstArrayType).elementType, program)}`;
+    case SyntaxKind.TypeReference: {
+      const ref = typeNode as TypeReference;
+      const symbol = resolveTypeEntityName(ref.typeName, typeNode, program);
+      if (symbol && symbol.flags & SymbolFlags.TypeParameter) {
+        return `T${symbol.escapedName};`;
+      }
+      const name = symbol
+        ? binaryName(symbol)
+        : entityNameToString(ref.typeName).replace(/\./g, "/");
+      if (!ref.typeArguments || ref.typeArguments.length === 0) return `L${name};`;
+      const args = ref.typeArguments.map(a => signatureOfTypeArgument(a, program)).join("");
+      return `L${name}<${args}>;`;
+    }
+    default:
+      return "Ljava/lang/Object;";
+  }
+}
+
+function signatureOfTypeArgument(node: Node, program: Program): string {
+  if (node.kind === SyntaxKind.WildcardType) {
+    const w = node as AstWildcardType;
+    if (w.hasExtends && w.type) return `+${signatureOfType(w.type, program)}`;
+    if (w.hasSuper && w.type) return `-${signatureOfType(w.type, program)}`;
+    return "*";
+  }
+  return signatureOfType(node as TypeNode, program);
+}
+
+// FormalTypeParameters: `<T:Ljava/lang/Object;U::Ljava/lang/Comparable<TU;>;>`.
+// An interface first bound leaves the class-bound slot empty (the `::`), as
+// javac does; an unbounded parameter gets the implicit Object class bound.
+function typeParamsSignature(
+  typeParameters: readonly AstTypeParameter[] | undefined,
+  program: Program,
+): string {
+  if (!typeParameters || typeParameters.length === 0) return "";
+  let out = "<";
+  for (const tp of typeParameters) {
+    out += tp.name.text;
+    const bounds = tp.constraint ?? [];
+    if (bounds.length === 0) {
+      out += ":Ljava/lang/Object;";
+      continue;
+    }
+    bounds.forEach((bound, i) => {
+      const symbol =
+        bound.kind === SyntaxKind.TypeReference
+          ? resolveTypeEntityName((bound as TypeReference).typeName, bound, program)
+          : undefined;
+      const isInterface = !!symbol && (symbol.flags & SymbolFlags.Interface) !== 0;
+      out += i === 0 && isInterface ? "::" : ":";
+      out += signatureOfType(bound, program);
+    });
+  }
+  return `${out}>`;
+}
+
+// MethodSignature, or undefined when the erased descriptor already says it all.
+function methodSignatureOf(
+  method: MethodDeclaration | ConstructorDeclaration,
+  program: Program,
+): string | undefined {
+  const returnType = (method as MethodDeclaration).returnType;
+  const generic =
+    (method.typeParameters?.length ?? 0) > 0 ||
+    method.parameters.some(p => typeUsesGenerics((p as Parameter).type, program)) ||
+    typeUsesGenerics(returnType, program);
+  if (!generic) return undefined;
+  const params = method.parameters
+    .map(p => {
+      const param = p as Parameter;
+      const s = signatureOfType(param.type, program);
+      return param.isVarArgs ? `[${s}` : s;
+    })
+    .join("");
+  const ret = returnType ? signatureOfType(returnType, program) : "V";
+  return `${typeParamsSignature(method.typeParameters, program)}(${params})${ret}`;
+}
+
+// ClassSignature, or undefined for a non-generic declaration. An enum has no
+// type parameters but may implement a generic interface.
+function classSignatureOf(
+  declaration: ClassDeclaration | InterfaceDeclaration | EnumDeclaration,
+  program: Program,
+): string | undefined {
+  const extendsType = (declaration as ClassDeclaration).extendsType;
+  const typeParameters = (declaration as ClassDeclaration).typeParameters;
+  const supers = [
+    ...((declaration as ClassDeclaration).implementsTypes ?? []),
+    ...((declaration as InterfaceDeclaration).extendsTypes ?? []),
+  ];
+  const generic =
+    (typeParameters?.length ?? 0) > 0 ||
+    typeUsesGenerics(extendsType, program) ||
+    supers.some(t => typeUsesGenerics(t, program));
+  if (!generic) return undefined;
+  const sup = extendsType ? signatureOfType(extendsType, program) : "Ljava/lang/Object;";
+  const ifaces = supers.map(t => signatureOfType(t, program)).join("");
+  return `${typeParamsSignature(typeParameters, program)}${sup}${ifaces}`;
 }
 
 // One slot per value, two for long/double (JVMS 2.6.1).
@@ -1850,14 +2009,18 @@ function generateBody(
 
   // Synthetic checkcast after reading an erased generic member (JLS 5.2): a field
   // or method whose declared type is a type variable uses the erased descriptor
-  // (Object), so when the access's instantiated static type is more specific,
-  // javac inserts a checkcast. `node` is the access expression (its checker type
-  // is the instantiated type); the erased value is already on the stack.
+  // (its leftmost bound, or Object), so when the access's instantiated static
+  // type is more specific, javac inserts a checkcast. `node` is the access
+  // expression (its checker type is the instantiated type); the erased value is
+  // already on the stack. The descriptors only differ when the declared type
+  // mentions a type variable (substitution replaces nothing else), so this fires
+  // exactly at erasure sites.
   const erasedCheckcast = (node: Node, descriptor: string): string => {
-    if (descriptor !== "Ljava/lang/Object;") return descriptor;
+    if (descriptor[0] !== "L" && descriptor[0] !== "[") return descriptor;
     const actual = checker.getTypeOfExpression(node);
     const actualDesc = typeDescriptor(actual);
     if (
+      actualDesc !== descriptor &&
       actualDesc !== "Ljava/lang/Object;" &&
       (actual.kind === TypeKind.Class || actual.kind === TypeKind.Array)
     ) {
@@ -5179,6 +5342,7 @@ function emitMethod(
 ): ByteBuffer {
   const flags = methodAccessFlags(method) | extraFlags;
   const descriptor = methodDescriptor(method, program);
+  const signature = methodSignatureOf(method, program);
 
   const info = new ByteBuffer();
   info.u2(flags);
@@ -5187,7 +5351,8 @@ function emitMethod(
 
   // abstract / native methods carry no Code attribute.
   if (flags & (ACC_ABSTRACT | ACC_NATIVE) || !method.body) {
-    info.u2(0); // attributes_count
+    info.u2(signature !== undefined ? 1 : 0); // attributes_count
+    if (signature !== undefined) writeSignatureAttribute(info, cp, signature);
     return info;
   }
 
@@ -5221,7 +5386,7 @@ function emitMethod(
     body = { code: fallback.code, maxStack: fallback.maxStack, maxLocals: argsSize };
   }
 
-  writeCodeAttribute(info, cp, body);
+  writeCodeAttribute(info, cp, body, signature);
   return info;
 }
 
@@ -5304,9 +5469,14 @@ interface MethodBody {
   exceptionTable?: ExceptionTableEntry[];
 }
 
-// Append the Code attribute (with an optional StackMapTable sub-attribute) and
-// set the method's attributes_count to 1.
-function writeCodeAttribute(info: ByteBuffer, cp: ConstantPool, body: MethodBody): void {
+// Append the Code attribute (with an optional StackMapTable sub-attribute) and,
+// when the declaration is generic, a Signature attribute (JVMS 4.7.9).
+function writeCodeAttribute(
+  info: ByteBuffer,
+  cp: ConstantPool,
+  body: MethodBody,
+  signature?: string,
+): void {
   const smt = body.stackMapTable;
   const smtBytes = smt ? 6 + smt.length : 0;
   const handlers = body.exceptionTable ?? [];
@@ -5332,8 +5502,17 @@ function writeCodeAttribute(info: ByteBuffer, cp: ConstantPool, body: MethodBody
     codeAttr.append(smt);
   }
 
-  info.u2(1); // attributes_count
+  info.u2(signature !== undefined ? 2 : 1); // attributes_count
   info.append(codeAttr);
+  if (signature !== undefined) writeSignatureAttribute(info, cp, signature);
+}
+
+// A Signature attribute (JVMS 4.7.9): just a Utf8 index to the signature string.
+function writeSignatureAttribute(info: ByteBuffer, cp: ConstantPool, signature: string): void {
+  const index = cp.utf8(signature);
+  info.u2(cp.utf8("Signature"));
+  info.u4(2);
+  info.u2(index);
 }
 
 function emitConstructorMethod(
@@ -5412,7 +5591,10 @@ function emitConstructorMethod(
     body = { code, maxStack: 1, maxLocals: argsSize };
   }
 
-  writeCodeAttribute(info, cp, body);
+  // A generic-typed constructor records its Signature, but not when synthetic
+  // leading parameters (this$0/captures) were spliced in - the written signature
+  // would no longer describe the descriptor.
+  writeCodeAttribute(info, cp, body, leading ? undefined : methodSignatureOf(ctor, program));
   return info;
 }
 
@@ -5841,6 +6023,7 @@ export function emitClass(
     sourceNameOf(declaration),
     name,
     nestMembers,
+    classSignatureOf(declaration, program),
   );
 
   return {
@@ -6744,6 +6927,7 @@ export function emitEnum(
     sourceNameOf(declaration),
     name,
     nestMembers,
+    classSignatureOf(declaration, program),
   );
 
   return {

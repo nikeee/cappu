@@ -114,6 +114,12 @@ const FIXTURES: Record<string, string> = {
   // (JLS 15.12.4.4), so it byte-matches javac.
   PrivateCall:
     "class PrivateCall { private int secret(int x) { return x * 2; } int use(int x) { return secret(x) + 1; } }",
+  // Type-variable erasure to the leftmost bound (JLS 4.6): T erases to
+  // CharSequence / Comparable in field and method descriptors, members of T
+  // resolve via the bound (invokeinterface CharSequence.length), and an
+  // unbounded variable still erases to Object.
+  BoundErasure:
+    "class BoundErasure<T extends CharSequence> { T v; T get() { return v; } int len() { return v.length(); } static <U extends Comparable<U>> int cmp(U a, U b) { return a.compareTo(b); } static <V> V id(V x) { return x; } }",
   // Constant loads: iconst_m1.._5, bipush, sipush, ldc (int/long/float/double/String).
   Constants:
     "class Constants { int zero() { return 0; } int five() { return 5; } int m1() { return -1; } int bp() { return 100; } int sp() { return 1000; } int big() { return 100000; } long lone() { return 1L; } long lbig() { return 10000000000L; } float fz() { return 0f; } double dz() { return 0.0; } String s() { return \"x\"; } }",
@@ -2631,6 +2637,36 @@ test(
         "}",
       ].join("\n"),
       "5\n5\n",
+    );
+  },
+);
+
+test(
+  "bounded type parameters run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Bounded",
+      [
+        "class Sorter<T extends Comparable<T>> {",
+        "  T best(T a, T b) { return a.compareTo(b) >= 0 ? a : b; }",
+        "}",
+        "class Holder<T extends CharSequence> {",
+        "  T v;",
+        "  Holder(T t) { v = t; }",
+        "  int len() { return v.length(); }",
+        "}",
+        "public class Bounded {",
+        "  static <T extends Comparable<T>> T max(T a, T b) { return a.compareTo(b) >= 0 ? a : b; }",
+        "  public static void main(String[] x){",
+        "    System.out.println(max(3, 7));", // generic static method, boxed args
+        '    System.out.println(max("ab", "aa"));',
+        "    System.out.println(new Sorter<Integer>().best(5, 2));", // class type param
+        '    System.out.println(new Holder<>("abc").len());', // bound member via field
+        "  }",
+        "}",
+      ].join("\n"),
+      "7\nab\n5\n3\n",
     );
   },
 );
