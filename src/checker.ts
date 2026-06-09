@@ -485,6 +485,13 @@ export function createChecker(program: Program): Checker {
           type = inferVarType(declared.from);
         } else {
           type = resolveType(declared.typeNode, declared.from);
+          // A varargs parameter `T... x` has type `T[]` (the written node is `T`).
+          if (
+            declared.from.kind === SyntaxKind.Parameter &&
+            (declared.from as { isVarArgs?: boolean }).isVarArgs
+          ) {
+            type = arrayType(type);
+          }
         }
       } else {
         // A concise lambda parameter (x -> ...) has no written type; infer it

@@ -2229,3 +2229,31 @@ test(
     );
   },
 );
+
+test(
+  "varargs calls and bodies run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Varargs",
+      [
+        "public class Varargs {",
+        "  static int sum(int... xs){ int s = 0; for (int v : xs) s += v; return s; }",
+        '  static String join(String sep, String... parts){',
+        '    StringBuilder b = new StringBuilder();',
+        "    for (int i = 0; i < parts.length; i++){ if (i > 0) b.append(sep); b.append(parts[i]); }",
+        "    return b.toString();",
+        "  }",
+        "  public static void main(String[] a){",
+        "    System.out.println(sum(1, 2, 3, 4));", // packed -> 10
+        "    System.out.println(sum());", // empty -> new int[0] -> 0
+        "    int[] arr = {5, 6, 7};",
+        "    System.out.println(sum(arr));", // exact-array form -> 18
+        '    System.out.println(join("-", "a", "b", "c"));', // a-b-c
+        "  }",
+        "}",
+      ].join("\n"),
+      "10\n0\n18\na-b-c\n",
+    );
+  },
+);

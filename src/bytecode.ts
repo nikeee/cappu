@@ -2173,32 +2173,64 @@ function generateBody(
         emitImplicitReceiver(ownerName); // implicit this (or this$0 for an outer member)
       } else throw new UnsupportedEmit();
     }
-    // Coerce each argument to its parameter type (box/unbox/widen) when the
-    // arity matches exactly; a varargs spread is left to emit as-is.
+    // Coerce each argument to its parameter type (box/unbox/widen). A varargs
+    // method (JLS 15.12.4.2) packs the trailing arguments into the array parameter,
+    // unless the call already passes a matching array (the exact-invocation form).
     const paramDescs = parseParamDescriptors(descriptor);
-    const coerceArgs = call.arguments.length === paramDescs.length;
-    call.arguments.forEach((arg, i) => {
-      const d = emitExpr(arg);
-      if (coerceArgs) coerce(d, paramDescs[i]!);
-    });
+    const lastParam = decl.parameters.at(-1) as Parameter | undefined;
+    const isVarargs = lastParam?.isVarArgs === true && paramDescs.length > 0;
+    let pushedValues: number; // operand entries pushed for the arguments
+    if (isVarargs) {
+      const varargsArrayDesc = paramDescs[paramDescs.length - 1]!;
+      const fixedCount = paramDescs.length - 1;
+      const lastArg = call.arguments[call.arguments.length - 1];
+      // The single-array (exact) invocation form: the last argument is itself an
+      // array assignable to the varargs parameter, so it is passed without
+      // re-wrapping. Reference arrays are covariant (Observer[] -> Object[]); the
+      // erased descriptors then differ only in the element class.
+      const refArray = (d: string): boolean => d[0] === "[" && (d[1] === "L" || d[1] === "[");
+      const exactArray =
+        call.arguments.length === paramDescs.length &&
+        lastArg !== undefined &&
+        (() => {
+          const argDesc = typeDescriptor(checker.getTypeOfExpression(lastArg));
+          return (
+            argDesc === varargsArrayDesc || (refArray(argDesc) && refArray(varargsArrayDesc))
+          );
+        })();
+      if (exactArray) {
+        call.arguments.forEach((arg, i) => coerce(emitExpr(arg), paramDescs[i]!));
+        pushedValues = paramDescs.length;
+      } else {
+        for (let i = 0; i < fixedCount; i++) coerce(emitExpr(call.arguments[i]!), paramDescs[i]!);
+        packVarargs(varargsArrayDesc.slice(1), call.arguments.slice(fixedCount));
+        pushedValues = fixedCount + 1;
+      }
+    } else {
+      const coerceArgs = call.arguments.length === paramDescs.length;
+      call.arguments.forEach((arg, i) => {
+        const d = emitExpr(arg);
+        if (coerceArgs) coerce(d, paramDescs[i]!);
+      });
+      pushedValues = call.arguments.length;
+    }
 
     const argSlots = paramDescs.reduce((n, d) => n + slotsOf(d), 0);
-    const argCount = call.arguments.length;
     const returnDesc = descriptor.slice(descriptor.lastIndexOf(")") + 1);
     if (staticCall) {
       code.u1(OP_INVOKESTATIC);
       code.u2(cp.methodref(ownerName, decl.name.text, descriptor));
-      pop(argCount);
+      pop(pushedValues);
     } else if (isInterface) {
       code.u1(OP_INVOKEINTERFACE);
       code.u2(cp.interfaceMethodref(ownerName, decl.name.text, descriptor));
       code.u1(argSlots + 1); // invokeinterface "count" is in argument slots
       code.u1(0);
-      pop(argCount + 1);
+      pop(pushedValues + 1);
     } else {
       code.u1(OP_INVOKEVIRTUAL);
       code.u2(cp.methodref(ownerName, decl.name.text, descriptor));
-      pop(argCount + 1);
+      pop(pushedValues + 1);
     }
     if (returnDesc === "V") return returnDesc;
     push(returnDesc);
@@ -2442,6 +2474,24 @@ function generateBody(
       } else {
         coerce(emitExpr(el), elem);
       }
+      code.u1(OP_IASTORE + arrayElemOffset(elem));
+      pop(3); // array, index, value
+    });
+    return arrDesc;
+  };
+
+  // Pack the trailing arguments of a varargs call into a fresh `elem[]` (JLS
+  // 15.12.4.2), leaving the array reference on the stack.
+  const packVarargs = (elem: string, args: readonly Node[]): string => {
+    intConst(args.length);
+    push("I");
+    const arrDesc = allocArray(elem);
+    args.forEach((arg, i) => {
+      code.u1(OP_DUP);
+      push(arrDesc);
+      intConst(i);
+      push("I");
+      coerce(emitExpr(arg), elem);
       code.u1(OP_IASTORE + arrayElemOffset(elem));
       pop(3); // array, index, value
     });

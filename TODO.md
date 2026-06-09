@@ -40,6 +40,12 @@ verifiable placeholder, never a crash.
       14.30.1) as the matched condition: tests the record type, then binds each
       component pattern via the accessors (nested record patterns recurse). Shares
       the deconstruction machinery with pattern switch.
+- [x] Varargs calls (JLS 15.12.4.2): the trailing arguments of a call to a
+      `T... xs` method are packed into a fresh `T[]` (with element box/widen), an
+      empty varargs slot becomes `new T[0]`, and a single array argument assignable
+      to `T[]` (incl. reference-array covariance) is passed as-is (exact form).
+      A varargs parameter is also correctly typed as `T[]` inside the method body
+      (previously `T`, which degraded e.g. a for-each over the parameter).
 - [x] Array constructor references `T[]::new` (JLS 15.13.3): bound to a synthetic
       `(int) -> new T[len]` helper via invokedynamic (REF_invokeStatic).
 
