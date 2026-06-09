@@ -911,6 +911,9 @@ export function createChecker(program: Program): Checker {
         return symbol ? getTypeOfSymbol(symbol) : errorType;
       }
       case SyntaxKind.ThisExpression: {
+        // Qualified `Outer.this` has the type of the named enclosing class.
+        const qualifier = (node as { qualifier?: Node }).qualifier;
+        if (qualifier) return getTypeOfExpression(qualifier);
         const enclosing = enclosingTypeSymbol(node);
         return enclosing ? classType(enclosing) : errorType;
       }

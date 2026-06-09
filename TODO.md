@@ -45,6 +45,9 @@ verifiable placeholder, never a crash.
       enclosing class's direct superclass so the (overridden) member resolves.
 - [x] `super.f` field access (JLS 15.11.2): reads the (hidden) superclass field
       off `this` - field access is non-virtual, so the resolved owner is used.
+- [x] Qualified `Outer.this` (JLS 15.8.4): typed as the named enclosing class and
+      emitted by routing through `this$0` (the inner class gains `this$0` when its
+      body uses a qualified `this`). Qualified `Type.super.m()` still degrades.
 - [x] `switch` over a boxed `Integer`/`Short`/`Byte`/`Character` selector: the
       selector is unboxed to int before the int dispatch (JLS 14.11 / 5.1.8).
 - [x] Varargs calls (JLS 15.12.4.2): the trailing arguments of a call to a

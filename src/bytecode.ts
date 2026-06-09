@@ -953,6 +953,14 @@ function outerThisInfo(
   let used = false;
   const visit = (node: Node): void => {
     if (used) return;
+    // A qualified `Outer.this` directly references the enclosing instance.
+    if (node.kind === SyntaxKind.ThisExpression) {
+      const q = (node as { qualifier?: Node }).qualifier;
+      if (q) {
+        const qt = checker.getTypeOfExpression(q);
+        if (qt.kind === TypeKind.Class && qt.symbol === typeSym) used = true;
+      }
+    }
     if (node.kind === SyntaxKind.Identifier) {
       const p = node.parent;
       const isMemberName =
@@ -1960,11 +1968,24 @@ function generateBody(
         code.u1(OP_ACONST_NULL);
         pushRef();
         return "Ljava/lang/Object;";
-      case SyntaxKind.ThisExpression:
+      case SyntaxKind.ThisExpression: {
+        // Qualified `Outer.this` is the enclosing instance, reached through this$0.
+        const qualifier = (node as { qualifier?: Node }).qualifier;
+        if (qualifier) {
+          const qType = checker.getTypeOfExpression(qualifier);
+          if (qType.kind !== TypeKind.Class) throw new UnsupportedEmit();
+          const qInternal = binaryName(qType.symbol);
+          emitImplicitReceiver(qInternal);
+          return `L${qInternal};`;
+        }
+        code.u1(OP_ALOAD_0);
+        pushRef(`L${thisInternalName};`);
+        return `L${thisInternalName};`;
+      }
       case SyntaxKind.SuperExpression:
-        // `this`, or `super` as a field-access receiver: the current instance.
-        // Field access is non-virtual, so super.f reads the superclass field off
-        // `this` (the resolved field already names the superclass owner).
+        // `super` as a field-access receiver: the current instance. Field access is
+        // non-virtual, so super.f reads the superclass field off `this` (the
+        // resolved field already names the superclass owner).
         code.u1(OP_ALOAD_0);
         pushRef(`L${thisInternalName};`);
         return `L${thisInternalName};`;

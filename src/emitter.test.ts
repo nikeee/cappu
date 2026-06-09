@@ -2335,3 +2335,28 @@ test(
     );
   },
 );
+
+test(
+  "qualified Outer.this access runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "QualThis",
+      [
+        "public class QualThis {",
+        "  int v = 7;",
+        "  class Inner {",
+        "    int v = 3;",
+        "    int outer() { return QualThis.this.v; }", // 7
+        "    int inner() { return v; }", // 3
+        "    int both() { return QualThis.this.v + this.v; }", // 10
+        "  }",
+        "  int run() { Inner i = new Inner(); return i.outer() * 100 + i.inner() * 10 + i.both(); }",
+        "  public static void main(String[] a){ System.out.println(new QualThis().run()); }",
+        "}",
+      ].join("\n"),
+      // outer()=7, inner()=3, both()=10 -> 7*100 + 3*10 + 10 = 740
+      "740\n",
+    );
+  },
+);
