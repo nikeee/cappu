@@ -2533,3 +2533,32 @@ test(
     );
   },
 );
+
+test(
+  "shifts with wide distances and byte/char increment overflow run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "ShiftIncEdge",
+      [
+        "public class ShiftIncEdge {",
+        "  public static void main(String[] a){",
+        "    int r = 1 << 32L;", // distance 32L masked by 31 -> 0 -> 1
+        "    System.out.println(r);",
+        "    int x = 1; long n = 40;", // 40 & 31 = 8
+        "    System.out.println(x << n);", // 256
+        "    int y = 1; long m = 8; y <<= m;", // compound, wide distance
+        "    System.out.println(y);", // 256
+        "    byte b = 127; b++;", // overflow -> -128 (iinc would give 128)
+        "    System.out.println(b);",
+        "    byte c = 127; byte d = ++c;", // prefix value, narrowed
+        "    System.out.println(d);", // -128
+        "    char ch = 65; ch++;", // 'A' -> 'B'
+        "    System.out.println(ch);",
+        "  }",
+        "}",
+      ].join("\n"),
+      "1\n256\n256\n-128\n-128\nB\n",
+    );
+  },
+);

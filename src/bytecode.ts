@@ -2724,9 +2724,14 @@ function generateBody(
 
     const shift = SHIFTS[op];
     if (shift !== undefined) {
+      // The shift opcode takes an int distance; the result type is the promoted
+      // left operand only (JLS 15.19), so a long/wider distance is narrowed with
+      // l2i (coerce never narrows, so convertPrimitive does it explicitly).
       const longShift = lc === "J";
       emitOperand(node.left, lc); // unbox the shifted value if it is a wrapper
-      coerce(emitExpr(node.right), "I"); // the shift distance is always int
+      const rcat = numericCat(checker.getTypeOfExpression(node.right)) ?? "I";
+      emitOperand(node.right, rcat);
+      if (rcat !== "I") convertPrimitive(rcat, "I");
       code.u1(shift + (longShift ? 1 : 0));
       pop(); // pops the int distance; the result keeps the left operand
       return longShift ? "J" : "I";
@@ -2840,7 +2845,10 @@ function generateBody(
     }
     const shift = SHIFTS[baseOp];
     if (shift !== undefined) {
-      coerce(emitExpr(rhsNode), "I"); // shift distance is always int
+      // The shift distance is an int; narrow a long/wider distance with l2i etc.
+      const rcat = numericCat(checker.getTypeOfExpression(rhsNode)) ?? "I";
+      emitOperand(rhsNode, rcat);
+      if (rcat !== "I") convertPrimitive(rcat, "I");
       code.u1(shift + (tcat === "J" ? 1 : 0));
       pop(); // distance
       convertPrimitive(tcat, targetDesc); // narrow for byte/char/short
@@ -3521,7 +3529,9 @@ function generateBody(
         const desc = local.descriptor;
         const cat = category(desc);
         if (cat === "A") throw new UnsupportedEmit();
-        if (cat === "I") {
+        // iinc applies only to a true int slot; byte/short/char must narrow the
+        // result (iinc does not), so they take the load/add/i2x/store path below.
+        if (desc === "I") {
           if (result === "old") {
             loadVar(local.slot, desc);
             push(desc);
@@ -3535,8 +3545,9 @@ function generateBody(
           }
           return desc;
         }
-        // long/float/double local: compute the new value, store it, and (for a
-        // value form) keep the old or new value on the stack.
+        // long/float/double, or byte/short/char: compute the new value, narrow it
+        // back to the declared type, store it, and (for a value form) keep the old
+        // or new value on the stack.
         if (result === "old") {
           loadVar(local.slot, desc);
           push(desc);
@@ -3547,6 +3558,7 @@ function generateBody(
         code.u1(addOp(cat));
         pop(2);
         push(cat);
+        convertPrimitive(cat, desc); // narrow back for byte/char/short (no-op for J/F/D)
         if (result === "new") {
           code.u1(slotsOf(desc) === 2 ? OP_DUP2 : OP_DUP);
           push(cat);

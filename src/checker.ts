@@ -995,6 +995,15 @@ export function createChecker(program: Program): Checker {
           const stringType = classTypeByFqn("java.lang.String");
           if (isString(left, stringType) || isString(right, stringType)) return stringType;
         }
+        // A shift's type is the unary-promoted LEFT operand; the distance never
+        // widens the result (JLS 15.19), so `int << long` is int, not long.
+        if (
+          b.operatorToken === SyntaxKind.LessThanLessThanToken ||
+          b.operatorToken === SyntaxKind.GreaterThanGreaterThanToken ||
+          b.operatorToken === SyntaxKind.GreaterThanGreaterThanGreaterThanToken
+        ) {
+          return widerNumeric(left, intType);
+        }
         // `&`, `|`, `^` on boolean operands are the boolean logical operators and
         // yield boolean (JLS 15.22.2); on integral operands they are bitwise.
         const isBool = (t: Type): boolean =>

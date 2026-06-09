@@ -101,7 +101,6 @@ function foldBinary(node: BinaryExpression): ConstValue | undefined {
   if (compare) return { kind: "boolean", value: compare(a.value, b.value) };
 
   const kind = a.kind === "long" || b.kind === "long" ? "long" : "int";
-  const bits = kind === "long" ? 64n : 32n;
   switch (op) {
     case SyntaxKind.PlusToken:
       return { kind, value: wrap(kind, a.value + b.value) };
@@ -120,14 +119,21 @@ function foldBinary(node: BinaryExpression): ConstValue | undefined {
     case SyntaxKind.CaretToken:
       return { kind, value: wrap(kind, a.value ^ b.value) };
     case SyntaxKind.LessThanLessThanToken:
-      return { kind, value: wrap(kind, a.value << (b.value & (bits - 1n))) };
     case SyntaxKind.GreaterThanGreaterThanToken:
-      return { kind, value: wrap(kind, a.value >> (b.value & (bits - 1n))) };
-    case SyntaxKind.GreaterThanGreaterThanGreaterThanToken:
-      return {
-        kind,
-        value: wrap(kind, BigInt.asUintN(Number(bits), a.value) >> (b.value & (bits - 1n))),
-      };
+    case SyntaxKind.GreaterThanGreaterThanGreaterThanToken: {
+      // A shift's result type and the distance mask come from the (promoted) left
+      // operand only; the right operand never widens the result (JLS 15.19).
+      const sk = a.kind;
+      const sb = sk === "long" ? 64n : 32n;
+      const dist = b.value & (sb - 1n);
+      if (op === SyntaxKind.LessThanLessThanToken) {
+        return { kind: sk, value: wrap(sk, a.value << dist) };
+      }
+      if (op === SyntaxKind.GreaterThanGreaterThanToken) {
+        return { kind: sk, value: wrap(sk, a.value >> dist) };
+      }
+      return { kind: sk, value: wrap(sk, BigInt.asUintN(Number(sb), a.value) >> dist) };
+    }
     default:
       return undefined;
   }
