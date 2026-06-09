@@ -2122,3 +2122,32 @@ test(
     );
   },
 );
+
+test(
+  "record explicit canonical and alternate constructors run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "CanonRec",
+      [
+        "record Frac(int num, int den) {",
+        "  Frac(int num, int den) {",
+        "    if (den == 0) throw new ArithmeticException();",
+        "    this.num = num;",
+        "    this.den = den;",
+        "  }",
+        "  Frac(int whole) { this(whole, 1); }",
+        "}",
+        "public class CanonRec {",
+        "  public static void main(String[] a){",
+        "    Frac f = new Frac(3, 4);",
+        '    System.out.println(f.num() + "/" + f.den());',
+        "    Frac g = new Frac(7);",
+        '    System.out.println(g.num() + "/" + g.den());',
+        "  }",
+        "}",
+      ].join("\n"),
+      "3/4\n7/1\n",
+    );
+  },
+);

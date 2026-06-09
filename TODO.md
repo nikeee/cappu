@@ -100,8 +100,10 @@ verifiable placeholder, never a crash.
       8.10.4) is emitted: its body runs (with the components bound as the
       parameters, so it can validate/reassign them), then each component field is
       assigned from its final parameter value; an unsupported body degrades to the
-      implicit canonical ctor. A full explicit canonical/alternate constructor and
-      explicit accessor overrides are not yet emitted (those degrade).
+      implicit canonical ctor. A **full explicit canonical constructor** (params
+      matching the components) and **alternate `this(...)`-delegating
+      constructors** are emitted as ordinary constructors over java/lang/Record.
+      Explicit accessor overrides are not yet emitted (those degrade).
 - [x] Explicit constructor invocations (JLS 8.8.7.1): a leading `super(args)` or
       `this(args)`; `this(...)` skips this constructor's field initializers. The
       target overload is resolved by argument count (as for `new`).

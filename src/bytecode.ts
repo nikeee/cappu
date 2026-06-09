@@ -5975,11 +5975,10 @@ export function emitRecord(
   const lambdaMethods: ByteBuffer[] = [];
 
   // Canonical constructor. The implicit form is super(); store each component
-  // parameter into its field. A full explicit canonical/alternate constructor is
-  // not yet handled; a compact constructor runs its body, then the stores.
-  if (declaration.members.some(m => m.kind === SyntaxKind.ConstructorDeclaration)) {
-    throw new UnsupportedEmit(); // explicit canonical/alternate constructor: later
-  }
+  // parameter into its field. A compact constructor runs its body, then the
+  // stores; a full explicit canonical constructor (parameters matching the
+  // components) and alternate `this(...)`-delegating constructors are emitted as
+  // ordinary constructors over java/lang/Record.
   const ctorDescriptor = `(${components.map(c => c.descriptor).join("")})V`;
   const emitImplicitCanonicalCtor = (): ByteBuffer => {
     const code = new ByteBuffer();
@@ -6007,6 +6006,15 @@ export function emitRecord(
   const compact = declaration.members.find(
     m => m.kind === SyntaxKind.CompactConstructorDeclaration,
   ) as CompactConstructorDeclaration | undefined;
+  const declaredCtors = declaration.members.filter(
+    m => m.kind === SyntaxKind.ConstructorDeclaration,
+  ) as ConstructorDeclaration[];
+  // A declared constructor whose parameters match the components is the canonical
+  // one (it assigns the fields itself); otherwise the canonical ctor is implicit
+  // or compact, and declared ctors are alternates that delegate via this(...).
+  const hasDeclaredCanonical = declaredCtors.some(
+    c => c.parameters.map(p => paramDescriptor(p as Parameter, program)).join("") === components.map(x => x.descriptor).join(""),
+  );
   if (compact) {
     const synth = {
       kind: SyntaxKind.ConstructorDeclaration,
@@ -6056,8 +6064,27 @@ export function emitRecord(
       methods.append(emitImplicitCanonicalCtor());
     }
     methodCount++;
-  } else {
+  } else if (!hasDeclaredCanonical) {
     methods.append(emitImplicitCanonicalCtor());
+    methodCount++;
+  }
+  // Declared constructors (the canonical one and/or alternates) as ordinary
+  // constructors over java/lang/Record; emitConstructorMethod falls back to a
+  // super-only ctor on an unsupported body.
+  for (const ctor of declaredCtors) {
+    methods.append(
+      emitConstructorMethod(
+        ctor,
+        methodAccessFlags(ctor),
+        cp,
+        program,
+        checker,
+        name,
+        "java/lang/Record",
+        [],
+        lambdaMethods,
+      ),
+    );
     methodCount++;
   }
 

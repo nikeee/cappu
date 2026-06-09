@@ -82,3 +82,5 @@ no timestamps were captured.
 - 2026-06-09 01:58 — continue
 - 2026-06-09 02:10 — continue
 - 2026-06-09 02:24 — continue
+- 2026-06-09 02:24 — continue
+- 2026-06-09 02:38 — find some more real-life projects that dont have any dependencies and have a lot of code. Use sub-modules just like with thte other. add them to the tests and compare the bytecode output with javac reference
