@@ -2435,3 +2435,34 @@ test(
     );
   },
 );
+
+test(
+  "increment/decrement as a value runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "IncDec",
+      [
+        "public class IncDec {",
+        "  static int id(int x){ return x; }",
+        "  public static void main(String[] a){",
+        "    int i = 5;",
+        "    int j = i++;", // j=5, i=6
+        "    int k = ++i;", // k=7, i=7
+        "    System.out.println(i + \" \" + j + \" \" + k);", // 7 5 7
+        "    int[] arr = new int[3];",
+        "    int n = 0;",
+        "    arr[n++] = 10; arr[n++] = 20;", // arr={10,20,0}, n=2
+        "    System.out.println(arr[0] + \" \" + arr[1] + \" \" + n);", // 10 20 2
+        "    System.out.println(id(n--) + \" \" + n);", // id(2)=2, n=1
+        "    long p = 100; long q = p--;", // q=100, p=99
+        "    System.out.println(p + \" \" + q);", // 99 100
+        "    double d = 1.5; double e = ++d;", // e=2.5, d=2.5
+        "    System.out.println(d + \" \" + e);", // 2.5 2.5
+        "  }",
+        "}",
+      ].join("\n"),
+      "7 5 7\n10 20 2\n2 1\n99 100\n2.5 2.5\n",
+    );
+  },
+);

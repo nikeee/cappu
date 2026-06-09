@@ -2027,8 +2027,13 @@ function generateBody(
         }
         return isBooleanOperator(b.operatorToken) ? emitBoolean(node) : emitBinary(b);
       }
+      case SyntaxKind.PostfixUnaryExpression:
+        return emitIncDec(node, "old"); // i++/i-- as a value yields the old value
       case SyntaxKind.PrefixUnaryExpression: {
         const u = node as PrefixUnaryExpression;
+        if (u.operator === SyntaxKind.PlusPlusToken || u.operator === SyntaxKind.MinusMinusToken) {
+          return emitIncDec(node, "new"); // ++i/--i yields the new value
+        }
         return u.operator === SyntaxKind.ExclamationToken ? emitBoolean(node) : emitPrefixUnary(u);
       }
       case SyntaxKind.PropertyAccessExpression: {
@@ -3489,58 +3494,92 @@ function generateBody(
 
   // ++ / -- used as a statement (the result value is not needed). An int local
   // uses iinc; a field or wide local is a read-modify-write via emitStore.
-  const emitIncrement = (expr: Node): void => {
+  // `++`/`--` (JLS 15.14.2 / 15.15.1). `result` selects what is left on the stack:
+  // "discard" (statement form), "old" (postfix value) or "new" (prefix value).
+  // A local-variable target uses iinc (int) or load/op/store (wide, with a dup to
+  // keep the result); other targets are read-modify-written via emitStore and only
+  // in statement position (a value-producing field/array in/decrement degrades).
+  const emitIncDec = (expr: Node, result: "discard" | "old" | "new"): string => {
     const u = expr as unknown as { operator: SyntaxKind; operand: Node };
     if (u.operator !== SyntaxKind.PlusPlusToken && u.operator !== SyntaxKind.MinusMinusToken) {
       throw new UnsupportedEmit();
     }
     const isInc = u.operator === SyntaxKind.PlusPlusToken;
+    const addOp = (cat: string): number =>
+      ARITHMETIC[isInc ? SyntaxKind.PlusToken : SyntaxKind.MinusToken]! + TYPE_OFFSET[cat]!;
+    const pushOne = (cat: string): void => {
+      if (cat === "J") longConst(1n);
+      else if (cat === "F") floatConst(1);
+      else if (cat === "D") doubleConst(1);
+      else code.u1(OP_ICONST_1);
+      push(cat === "J" || cat === "F" || cat === "D" ? cat : "I");
+    };
     if (u.operand.kind === SyntaxKind.Identifier) {
       const symbol = checker.resolveName(u.operand as Identifier);
       const local = symbol ? locals.get(symbol) : undefined;
-      if (local && category(local.descriptor) === "I") {
-        code.u1(OP_IINC);
-        code.u1(local.slot);
-        code.u1((isInc ? 1 : -1) & 0xff);
-        return;
+      if (local) {
+        const desc = local.descriptor;
+        const cat = category(desc);
+        if (cat === "A") throw new UnsupportedEmit();
+        if (cat === "I") {
+          if (result === "old") {
+            loadVar(local.slot, desc);
+            push(desc);
+          }
+          code.u1(OP_IINC);
+          code.u1(local.slot);
+          code.u1((isInc ? 1 : -1) & 0xff);
+          if (result === "new") {
+            loadVar(local.slot, desc);
+            push(desc);
+          }
+          return desc;
+        }
+        // long/float/double local: compute the new value, store it, and (for a
+        // value form) keep the old or new value on the stack.
+        if (result === "old") {
+          loadVar(local.slot, desc);
+          push(desc);
+        }
+        loadVar(local.slot, desc);
+        push(desc);
+        pushOne(cat);
+        code.u1(addOp(cat));
+        pop(2);
+        push(cat);
+        if (result === "new") {
+          code.u1(slotsOf(desc) === 2 ? OP_DUP2 : OP_DUP);
+          push(cat);
+        }
+        storeVar(local.slot, desc);
+        return desc;
       }
     }
+    // Field / array-element target (statement position only).
+    if (result !== "discard") throw new UnsupportedEmit();
     emitStore(u.operand, true, (descriptor, loadCurrent) => {
       const cat = category(descriptor);
       if (cat === "A") throw new UnsupportedEmit();
       loadCurrent();
-      if (cat === "J") {
-        longConst(1n);
-        push("J");
-      } else if (cat === "F") {
-        floatConst(1);
-        push("F");
-      } else if (cat === "D") {
-        doubleConst(1);
-        push("D");
-      } else {
-        code.u1(OP_ICONST_1);
-        push("I");
-      }
-      code.u1(
-        ARITHMETIC[isInc ? SyntaxKind.PlusToken : SyntaxKind.MinusToken]! + TYPE_OFFSET[cat]!,
-      );
+      pushOne(cat);
+      code.u1(addOp(cat));
       pop(2);
       push(cat);
       convertPrimitive(cat, descriptor); // narrow back for byte/char/short
     });
+    return typeDescriptor(checker.getTypeOfExpression(u.operand)); // discarded by the caller
   };
 
   // An expression used as a statement (its value, if any, is discarded).
   const emitStatementExpression = (expr: Node): void => {
     if (expr.kind === SyntaxKind.PostfixUnaryExpression) {
-      emitIncrement(expr);
+      emitIncDec(expr, "discard");
       return;
     }
     if (expr.kind === SyntaxKind.PrefixUnaryExpression) {
       const u = expr as PrefixUnaryExpression;
       if (u.operator === SyntaxKind.PlusPlusToken || u.operator === SyntaxKind.MinusMinusToken) {
-        emitIncrement(expr);
+        emitIncDec(expr, "discard");
         return;
       }
     }
