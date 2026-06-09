@@ -2566,3 +2566,30 @@ test(
     );
   },
 );
+
+test(
+  "abrupt completion inside finally runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "FinallyAbrupt",
+      [
+        "public class FinallyAbrupt {",
+        "  static int overrideReturn() { try { return 1; } finally { return 2; } }",
+        "  static int swallowThrow() { try { throw new RuntimeException(); } finally { return 3; } }",
+        "  static int breakFromFinally() {",
+        "    int s = 0;",
+        "    for (int i = 0; i < 3; i++) { try { s += i; } finally { if (i == 1) break; } }",
+        "    return s;", // i=0: s=0; i=1: s=1, finally breaks -> s=1
+        "  }",
+        "  public static void main(String[] a){",
+        "    System.out.println(overrideReturn());", // 2
+        "    System.out.println(swallowThrow());", // 3
+        "    System.out.println(breakFromFinally());", // 1
+        "  }",
+        "}",
+      ].join("\n"),
+      "2\n3\n1\n",
+    );
+  },
+);

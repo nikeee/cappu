@@ -4157,10 +4157,17 @@ function generateBody(
   // Inline the finally actions from the top of the stack down to `toDepth`,
   // innermost first, before an abrupt transfer (return/break/continue) crosses
   // them. Each is removed while emitted so a return inside it does not re-run it.
-  const runFinallies = (toDepth: number): void => {
+  // Returns true if one of the finally blocks itself completed abruptly (a return/
+  // break/continue inside the finally): the remaining finallies and the original
+  // abrupt transfer are then unreachable and must not be emitted.
+  const runFinallies = (toDepth: number): boolean => {
     const removed = finallyStack.splice(toDepth); // [toDepth..], leaving the outer ones pending
-    for (let i = removed.length - 1; i >= 0; i--) inScope(() => emitFinallyAction(removed[i]!));
+    let aborted = false;
+    for (let i = removed.length - 1; i >= 0 && !aborted; i--) {
+      aborted = inScope(() => emitFinallyAction(removed[i]!));
+    }
     finallyStack.push(...removed);
+    return aborted;
   };
 
   // The exceptional close of a resource (JLS 14.20.3): the in-flight exception is
@@ -4298,12 +4305,16 @@ function generateBody(
       if (nextSlot > maxLocals) maxLocals = nextSlot;
       activeLocals.push({ slot, descriptor: exc });
       storeVar(slot, exc);
-      if (fin.kind === "resource") emitSuppressedClose(fin, slot);
-      else emitFinallyInline();
-      loadVar(slot, exc);
-      push(exc);
-      code.u1(OP_ATHROW);
-      pop(1);
+      // The finally runs on the exceptional path too; if it completes abruptly
+      // (a return/break inside it) the in-flight exception is discarded and the
+      // rethrow is unreachable (JLS 14.20.2).
+      const finallyAborted = fin.kind === "resource" ? (emitSuppressedClose(fin, slot), false) : emitFinallyInline();
+      if (!finallyAborted) {
+        loadVar(slot, exc);
+        push(exc);
+        code.u1(OP_ATHROW);
+        pop(1);
+      }
       reachable = false;
     }
 
@@ -4375,11 +4386,13 @@ function generateBody(
             if (nextSlot > maxLocals) maxLocals = nextSlot;
             activeLocals.push({ slot, descriptor: returnDescriptor });
             storeVar(slot, returnDescriptor);
-            runFinallies(0);
+            // A finally that returns/breaks overrides this return (JLS 14.20.2):
+            // the value reload and our return opcode are then unreachable.
+            if (runFinallies(0)) return true;
             loadVar(slot, returnDescriptor);
             push(returnDescriptor);
-          } else {
-            runFinallies(0);
+          } else if (runFinallies(0)) {
+            return true;
           }
         }
         emitReturn();
@@ -4716,7 +4729,9 @@ function generateBody(
           ? breakTargets.findLast(t => t.names?.includes(name))
           : breakTargets.at(-1);
         if (!target) throw new UnsupportedEmit();
-        runFinallies(target.finallyDepth); // finally blocks between here and the loop/switch
+        // A finally crossed on the way out may itself complete abruptly, which
+        // overrides this break (JLS 14.20.2) and makes the goto unreachable.
+        if (runFinallies(target.finallyDepth)) return true;
         branchTo(OP_GOTO, target.label);
         return true;
       }
@@ -4728,7 +4743,7 @@ function generateBody(
           ? continueTargets.findLast(t => t.names?.includes(name))
           : continueTargets.at(-1);
         if (!target) throw new UnsupportedEmit();
-        runFinallies(target.finallyDepth);
+        if (runFinallies(target.finallyDepth)) return true;
         branchTo(OP_GOTO, target.label);
         return true;
       }
