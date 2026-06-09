@@ -1,0 +1,39 @@
+{
+  "PrivateCall": {
+    "members": [
+      "PrivateCall();",
+      "int use(int);",
+      "private int secret(int);"
+    ],
+    "code": [
+      [
+        "PrivateCall();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "private int secret(int);",
+        [
+          "iload_1",
+          "iconst_2",
+          "imul",
+          "ireturn"
+        ]
+      ],
+      [
+        "int use(int);",
+        [
+          "aload_0",
+          "iload_1",
+          "invokevirtual # // Method secret:(I)I",
+          "iconst_1",
+          "iadd",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}

@@ -110,6 +110,10 @@ const FIXTURES: Record<string, string> = {
   // invokestatic / invokevirtual, and an invokevirtual on a JDK-stub type (String).
   Invoke:
     "class Invoke { static int stat() { return 1; } int inst() { return 2; } int callStat() { return stat(); } int callInst() { return inst(); } int strLen(String s) { return s.length(); } }",
+  // A private instance method is invoked with invokespecial, not invokevirtual
+  // (JLS 15.12.4.4), so it byte-matches javac.
+  PrivateCall:
+    "class PrivateCall { private int secret(int x) { return x * 2; } int use(int x) { return secret(x) + 1; } }",
   // Constant loads: iconst_m1.._5, bipush, sipush, ldc (int/long/float/double/String).
   Constants:
     "class Constants { int zero() { return 0; } int five() { return 5; } int m1() { return -1; } int bp() { return 100; } int sp() { return 1000; } int big() { return 100000; } long lone() { return 1L; } long lbig() { return 10000000000L; } float fz() { return 0f; } double dz() { return 0.0; } String s() { return \"x\"; } }",
