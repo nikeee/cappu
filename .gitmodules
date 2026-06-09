@@ -30,3 +30,23 @@
 	path = test-fixtures/emitter/corpus/commons-codec
 	url = https://github.com/apache/commons-codec.git
 	shallow = true
+[submodule "test-fixtures/emitter/corpus/gson"]
+	path = test-fixtures/emitter/corpus/gson
+	url = https://github.com/google/gson.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/commons-csv"]
+	path = test-fixtures/emitter/corpus/commons-csv
+	url = https://github.com/apache/commons-csv.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/commons-cli"]
+	path = test-fixtures/emitter/corpus/commons-cli
+	url = https://github.com/apache/commons-cli.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/classgraph"]
+	path = test-fixtures/emitter/corpus/classgraph
+	url = https://github.com/classgraph/classgraph.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/commons-imaging"]
+	path = test-fixtures/emitter/corpus/commons-imaging
+	url = https://github.com/apache/commons-imaging.git
+	shallow = true

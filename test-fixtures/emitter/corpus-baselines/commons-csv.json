@@ -1,0 +1,34 @@
+{
+  "org.apache.commons.csv.Constants": [
+    [
+      "private org.apache.commons.csv.Constants();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.csv.DuplicateHeaderMode": [
+    [
+      "public static org.apache.commons.csv.DuplicateHeaderMode[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/csv/DuplicateHeaderMode;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/csv/DuplicateHeaderMode;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/csv/DuplicateHeaderMode;\"",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.csv.QuoteMode": [
+    [
+      "public static org.apache.commons.csv.QuoteMode[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/csv/QuoteMode;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/csv/QuoteMode;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/csv/QuoteMode;\"",
+        "areturn"
+      ]
+    ]
+  ]
+}

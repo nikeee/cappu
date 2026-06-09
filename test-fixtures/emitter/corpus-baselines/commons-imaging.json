@@ -1,0 +1,5426 @@
+{
+  "org.apache.commons.imaging.FormatCompliance": [
+    [
+      "public static org.apache.commons.imaging.FormatCompliance getDefault();",
+      [
+        "new # // class org/apache/commons/imaging/FormatCompliance",
+        "dup",
+        "ldc # // String ignore",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/String;Z)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.imaging.FormatCompliance(java.lang.String);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field comments:Ljava/util/List;",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field description:Ljava/lang/String;",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field failOnError:Z",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.imaging.FormatCompliance(java.lang.String, boolean);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field comments:Ljava/util/List;",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field description:Ljava/lang/String;",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field failOnError:Z",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.ImageFormat": [
+    [
+      "public abstract java.lang.String getDefaultExtension();",
+      []
+    ],
+    [
+      "public abstract java.lang.String[] getExtensions();",
+      []
+    ],
+    [
+      "public abstract java.lang.String getName();",
+      []
+    ]
+  ],
+  "org.apache.commons.imaging.ImageFormats": [
+    [
+      "public static org.apache.commons.imaging.ImageFormats[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/ImageFormats;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/ImageFormats;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/ImageFormats;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getDefaultExtension();",
+      [
+        "aload_0",
+        "getfield # // Field extensions:[Ljava/lang/String;",
+        "iconst_0",
+        "aaload",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.ImageInfo$ColorType": [
+    [
+      "public static org.apache.commons.imaging.ImageInfo$ColorType[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/ImageInfo$ColorType;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/ImageInfo$ColorType;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/ImageInfo$ColorType;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "getfield # // Field description:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.ImageInfo$CompressionAlgorithm": [
+    [
+      "public static org.apache.commons.imaging.ImageInfo$CompressionAlgorithm[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/ImageInfo$CompressionAlgorithm;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/ImageInfo$CompressionAlgorithm;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/ImageInfo$CompressionAlgorithm;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "getfield # // Field description:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.ImageInfo": [
+    [
+      "public int getBitsPerPixel();",
+      [
+        "aload_0",
+        "getfield # // Field bitsPerPixel:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.imaging.ImageInfo$ColorType getColorType();",
+      [
+        "aload_0",
+        "getfield # // Field colorType:Lorg/apache/commons/imaging/ImageInfo$ColorType;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.imaging.ImageInfo$CompressionAlgorithm getCompressionAlgorithm();",
+      [
+        "aload_0",
+        "getfield # // Field compressionAlgorithm:Lorg/apache/commons/imaging/ImageInfo$CompressionAlgorithm;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.imaging.ImageFormat getFormat();",
+      [
+        "aload_0",
+        "getfield # // Field format:Lorg/apache/commons/imaging/ImageFormat;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getFormatDetails();",
+      [
+        "aload_0",
+        "getfield # // Field formatDetails:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getFormatName();",
+      [
+        "aload_0",
+        "getfield # // Field formatName:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int getHeight();",
+      [
+        "aload_0",
+        "getfield # // Field height:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.String getMimeType();",
+      [
+        "aload_0",
+        "getfield # // Field mimeType:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int getNumberOfImages();",
+      [
+        "aload_0",
+        "getfield # // Field numberOfImages:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getPhysicalHeightDpi();",
+      [
+        "aload_0",
+        "getfield # // Field physicalHeightDpi:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public float getPhysicalHeightInch();",
+      [
+        "aload_0",
+        "getfield # // Field physicalHeightInch:F",
+        "freturn"
+      ]
+    ],
+    [
+      "public int getPhysicalWidthDpi();",
+      [
+        "aload_0",
+        "getfield # // Field physicalWidthDpi:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public float getPhysicalWidthInch();",
+      [
+        "aload_0",
+        "getfield # // Field physicalWidthInch:F",
+        "freturn"
+      ]
+    ],
+    [
+      "public int getWidth();",
+      [
+        "aload_0",
+        "getfield # // Field width:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isProgressive();",
+      [
+        "aload_0",
+        "getfield # // Field progressive:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isTransparent();",
+      [
+        "aload_0",
+        "getfield # // Field transparent:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean usesPalette();",
+      [
+        "aload_0",
+        "getfield # // Field usesPalette:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.ImagingConstants": [
+    [
+      "private org.apache.commons.imaging.ImagingConstants();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.ImagingFormatException": [
+    [
+      "public org.apache.commons.imaging.ImagingFormatException(java.lang.String, java.lang.Object...);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokestatic # // Method java/lang/String.format:(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;",
+        "invokespecial # // Method org/apache/commons/imaging/ImagingRuntimeException.\"<init>\":(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.imaging.ImagingFormatException(java.lang.String, java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method org/apache/commons/imaging/ImagingRuntimeException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.ImagingRuntimeException": [
+    [
+      "public org.apache.commons.imaging.ImagingRuntimeException(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.imaging.ImagingRuntimeException(java.lang.String, java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.ImagingOverflowException": [
+    [
+      "public org.apache.commons.imaging.ImagingOverflowException(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/imaging/ImagingException.\"<init>\":(Ljava/lang/String;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.PixelDensity": [
+    [
+      "private org.apache.commons.imaging.PixelDensity(double, double, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "dload_1",
+        "putfield # // Field horizontalDensity:D",
+        "aload_0",
+        "dload_3",
+        "putfield # // Field verticalDensity:D",
+        "aload_0",
+        "iload 5",
+        "putfield # // Field unitLength:I",
+        "return"
+      ]
+    ],
+    [
+      "public double getRawHorizontalDensity();",
+      [
+        "aload_0",
+        "getfield # // Field horizontalDensity:D",
+        "dreturn"
+      ]
+    ],
+    [
+      "public double getRawVerticalDensity();",
+      [
+        "aload_0",
+        "getfield # // Field verticalDensity:D",
+        "dreturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.color.ColorCieLab": [
+    [
+      "public org.apache.commons.imaging.color.ColorCieLab(double, double, double);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "dload_1",
+        "putfield # // Field l:D",
+        "aload_0",
+        "dload_3",
+        "putfield # // Field a:D",
+        "aload_0",
+        "dload 5",
+        "putfield # // Field b:D",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.color.ColorCieLch": [
+    [
+      "public org.apache.commons.imaging.color.ColorCieLch(double, double, double);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "dload_1",
+        "putfield # // Field l:D",
+        "aload_0",
+        "dload_3",
+        "putfield # // Field c:D",
+        "aload_0",
+        "dload 5",
+        "putfield # // Field h:D",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.color.ColorCieLuv": [
+    [
+      "public org.apache.commons.imaging.color.ColorCieLuv(double, double, double);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "dload_1",
+        "putfield # // Field l:D",
+        "aload_0",
+        "dload_3",
+        "putfield # // Field u:D",
+        "aload_0",
+        "dload 5",
+        "putfield # // Field v:D",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.color.ColorCmy": [
+    [
+      "public org.apache.commons.imaging.color.ColorCmy(double, double, double);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "dload_1",
+        "putfield # // Field c:D",
+        "aload_0",
+        "dload_3",
+        "putfield # // Field m:D",
+        "aload_0",
+        "dload 5",
+        "putfield # // Field y:D",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.color.ColorCmyk": [
+    [
+      "public org.apache.commons.imaging.color.ColorCmyk(double, double, double, double);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "dload_1",
+        "putfield # // Field c:D",
+        "aload_0",
+        "dload_3",
+        "putfield # // Field m:D",
+        "aload_0",
+        "dload 5",
+        "putfield # // Field y:D",
+        "aload_0",
+        "dload 7",
+        "putfield # // Field k:D",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.color.ColorConversions": [
+    [
+      "public static org.apache.commons.imaging.color.ColorCieLch convertCieLabToCieLch(org.apache.commons.imaging.color.ColorCieLab);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLab.l:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLab.a:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLab.b:D",
+        "invokestatic # // Method convertCieLabToCieLch:(DDD)Lorg/apache/commons/imaging/color/ColorCieLch;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.color.ColorDin99Lab convertCieLabToDin99bLab(org.apache.commons.imaging.color.ColorCieLab);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLab.l:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLab.a:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLab.b:D",
+        "invokestatic # // Method convertCieLabToDin99bLab:(DDD)Lorg/apache/commons/imaging/color/ColorDin99Lab;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.color.ColorDin99Lab convertCieLabToDin99oLab(org.apache.commons.imaging.color.ColorCieLab);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLab.l:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLab.a:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLab.b:D",
+        "invokestatic # // Method convertCieLabToDin99oLab:(DDD)Lorg/apache/commons/imaging/color/ColorDin99Lab;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.color.ColorXyz convertCieLabToXyz(org.apache.commons.imaging.color.ColorCieLab);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLab.l:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLab.a:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLab.b:D",
+        "invokestatic # // Method convertCieLabToXyz:(DDD)Lorg/apache/commons/imaging/color/ColorXyz;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.color.ColorCieLab convertCieLchToCieLab(org.apache.commons.imaging.color.ColorCieLch);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLch.l:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLch.c:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLch.h:D",
+        "invokestatic # // Method convertCieLchToCieLab:(DDD)Lorg/apache/commons/imaging/color/ColorCieLab;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.color.ColorCieLab convertCieLchToCieLab(double, double, double);",
+      [
+        "dload 4",
+        "invokestatic # // Method degree2radian:(D)D",
+        "invokestatic # // Method java/lang/Math.cos:(D)D",
+        "dload_2",
+        "dmul",
+        "dstore 6",
+        "dload 4",
+        "invokestatic # // Method degree2radian:(D)D",
+        "invokestatic # // Method java/lang/Math.sin:(D)D",
+        "dload_2",
+        "dmul",
+        "dstore 8",
+        "new # // class org/apache/commons/imaging/color/ColorCieLab",
+        "dup",
+        "dload_0",
+        "dload 6",
+        "dload 8",
+        "invokespecial # // Method org/apache/commons/imaging/color/ColorCieLab.\"<init>\":(DDD)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.color.ColorXyz convertCieLuvToXyz(org.apache.commons.imaging.color.ColorCieLuv);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLuv.l:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLuv.u:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCieLuv.v:D",
+        "invokestatic # // Method convertCieLuvToXyz:(DDD)Lorg/apache/commons/imaging/color/ColorXyz;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.color.ColorCmy convertCmykToCmy(org.apache.commons.imaging.color.ColorCmyk);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCmyk.c:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCmyk.m:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCmyk.y:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorCmyk.k:D",
+        "invokestatic # // Method convertCmykToCmy:(DDDD)Lorg/apache/commons/imaging/color/ColorCmy;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static int convertCmykToRgb(int, int, int, int);",
+      [
+        "iload_0",
+        "i2d",
+        "ldc2_w # // double 255.0d",
+        "ddiv",
+        "dstore 4",
+        "iload_1",
+        "i2d",
+        "ldc2_w # // double 255.0d",
+        "ddiv",
+        "dstore 6",
+        "iload_2",
+        "i2d",
+        "ldc2_w # // double 255.0d",
+        "ddiv",
+        "dstore 8",
+        "iload_3",
+        "i2d",
+        "ldc2_w # // double 255.0d",
+        "ddiv",
+        "dstore 10",
+        "dload 4",
+        "dload 6",
+        "dload 8",
+        "dload 10",
+        "invokestatic # // Method convertCmykToCmy:(DDDD)Lorg/apache/commons/imaging/color/ColorCmy;",
+        "invokestatic # // Method convertCmyToRgb:(Lorg/apache/commons/imaging/color/ColorCmy;)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static int convertCmykToRgbAdobe(int, int, int, int);",
+      [
+        "sipush 255",
+        "iload_0",
+        "iload_3",
+        "iadd",
+        "isub",
+        "istore 4",
+        "sipush 255",
+        "iload_1",
+        "iload_3",
+        "iadd",
+        "isub",
+        "istore 5",
+        "sipush 255",
+        "iload_2",
+        "iload_3",
+        "iadd",
+        "isub",
+        "istore 6",
+        "iload 4",
+        "iload 5",
+        "iload 6",
+        "invokestatic # // Method convertRgbToRgb:(III)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.color.ColorCieLab convertDin99bLabToCieLab(org.apache.commons.imaging.color.ColorDin99Lab);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorDin99Lab.l99:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorDin99Lab.a99:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorDin99Lab.b99:D",
+        "invokestatic # // Method convertDin99bLabToCieLab:(DDD)Lorg/apache/commons/imaging/color/ColorCieLab;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.color.ColorCieLab convertDin99oLabToCieLab(org.apache.commons.imaging.color.ColorDin99Lab);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorDin99Lab.l99:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorDin99Lab.a99:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorDin99Lab.b99:D",
+        "invokestatic # // Method convertDin99oLabToCieLab:(DDD)Lorg/apache/commons/imaging/color/ColorCieLab;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static int convertHslToRgb(org.apache.commons.imaging.color.ColorHsl);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorHsl.h:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorHsl.s:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorHsl.l:D",
+        "invokestatic # // Method convertHslToRgb:(DDD)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static int convertHsvToRgb(org.apache.commons.imaging.color.ColorHsv);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorHsv.h:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorHsv.s:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorHsv.v:D",
+        "invokestatic # // Method convertHsvToRgb:(DDD)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.color.ColorXyz convertHunterLabToXyz(org.apache.commons.imaging.color.ColorHunterLab);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorHunterLab.l:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorHunterLab.a:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorHunterLab.b:D",
+        "invokestatic # // Method convertHunterLabToXyz:(DDD)Lorg/apache/commons/imaging/color/ColorXyz;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.color.ColorCieLab convertXyzToCieLab(org.apache.commons.imaging.color.ColorXyz);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorXyz.x:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorXyz.y:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorXyz.z:D",
+        "invokestatic # // Method convertXyzToCieLab:(DDD)Lorg/apache/commons/imaging/color/ColorCieLab;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.color.ColorCieLuv convertXyzToCieLuv(org.apache.commons.imaging.color.ColorXyz);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorXyz.x:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorXyz.y:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorXyz.z:D",
+        "invokestatic # // Method convertXuzToCieLuv:(DDD)Lorg/apache/commons/imaging/color/ColorCieLuv;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.color.ColorHunterLab convertXyzToHunterLab(org.apache.commons.imaging.color.ColorXyz);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorXyz.x:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorXyz.y:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorXyz.z:D",
+        "invokestatic # // Method convertXyzToHunterLab:(DDD)Lorg/apache/commons/imaging/color/ColorHunterLab;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static int convertXyzToRgb(org.apache.commons.imaging.color.ColorXyz);",
+      [
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorXyz.x:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorXyz.y:D",
+        "aload_0",
+        "getfield # // Field org/apache/commons/imaging/color/ColorXyz.z:D",
+        "invokestatic # // Method convertXyzToRgb:(DDD)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "private static double square(double);",
+      [
+        "dload_0",
+        "dload_0",
+        "dmul",
+        "dreturn"
+      ]
+    ],
+    [
+      "private static double unPivotRgb(double);",
+      [
+        "dload_0",
+        "ldc2_w # // double 0.04045d",
+        "dcmpl",
+        "ifle 27",
+        "dload_0",
+        "ldc2_w # // double 0.055d",
+        "dadd",
+        "ldc2_w # // double 1.055d",
+        "ddiv",
+        "ldc2_w # // double 2.4d",
+        "invokestatic # // Method java/lang/Math.pow:(DD)D",
+        "dstore_0",
+        "goto 33",
+        "dload_0",
+        "ldc2_w # // double 12.92d",
+        "ddiv",
+        "dstore_0",
+        "dload_0",
+        "dreturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.imaging.color.ColorConversions();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.color.ColorDin99Lab": [
+    [
+      "public org.apache.commons.imaging.color.ColorDin99Lab(double, double, double);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "dload_1",
+        "putfield # // Field l99:D",
+        "aload_0",
+        "dload_3",
+        "putfield # // Field a99:D",
+        "aload_0",
+        "dload 5",
+        "putfield # // Field b99:D",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.color.ColorHsl": [
+    [
+      "public org.apache.commons.imaging.color.ColorHsl(double, double, double);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "dload_1",
+        "putfield # // Field h:D",
+        "aload_0",
+        "dload_3",
+        "putfield # // Field s:D",
+        "aload_0",
+        "dload 5",
+        "putfield # // Field l:D",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.color.ColorHsv": [
+    [
+      "public org.apache.commons.imaging.color.ColorHsv(double, double, double);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "dload_1",
+        "putfield # // Field h:D",
+        "aload_0",
+        "dload_3",
+        "putfield # // Field s:D",
+        "aload_0",
+        "dload 5",
+        "putfield # // Field v:D",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.color.ColorHunterLab": [
+    [
+      "public org.apache.commons.imaging.color.ColorHunterLab(double, double, double);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "dload_1",
+        "putfield # // Field l:D",
+        "aload_0",
+        "dload_3",
+        "putfield # // Field a:D",
+        "aload_0",
+        "dload 5",
+        "putfield # // Field b:D",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.color.ColorXyz": [
+    [
+      "public org.apache.commons.imaging.color.ColorXyz(double, double, double);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "dload_1",
+        "putfield # // Field x:D",
+        "aload_0",
+        "dload_3",
+        "putfield # // Field y:D",
+        "aload_0",
+        "dload 5",
+        "putfield # // Field z:D",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.common.AbstractBinaryOutputStream": [
+    [
+      "public static org.apache.commons.imaging.common.BigEndianBinaryOutputStream bigEndian(java.io.OutputStream);",
+      [
+        "new # // class org/apache/commons/imaging/common/BigEndianBinaryOutputStream",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/imaging/common/BigEndianBinaryOutputStream.\"<init>\":(Ljava/io/OutputStream;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.common.LittleEndianBinaryOutputStream littleEndian(java.io.OutputStream);",
+      [
+        "new # // class org/apache/commons/imaging/common/LittleEndianBinaryOutputStream",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/imaging/common/LittleEndianBinaryOutputStream.\"<init>\":(Ljava/io/OutputStream;)V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.common.BigEndianBinaryOutputStream": [
+    [
+      "org.apache.commons.imaging.common.BigEndianBinaryOutputStream(java.io.OutputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/imaging/common/AbstractBinaryOutputStream.\"<init>\":(Ljava/io/OutputStream;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.common.LittleEndianBinaryOutputStream": [
+    [
+      "org.apache.commons.imaging.common.LittleEndianBinaryOutputStream(java.io.OutputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/imaging/common/AbstractBinaryOutputStream.\"<init>\":(Ljava/io/OutputStream;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.common.AllocationRequestException": [
+    [
+      "public int getLimit();",
+      [
+        "aload_0",
+        "getfield # // Field limit:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.common.Allocator": [
+    [
+      "public static byte[] byteArray(int);",
+      [
+        "iload_0",
+        "invokestatic # // Method checkByteArray:(I)I",
+        "newarray byte",
+        "areturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.imaging.common.Allocator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.common.ByteConversions": [
+    [
+      "private org.apache.commons.imaging.common.ByteConversions();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.common.RationalNumber$Option": [
+    [
+      "private org.apache.commons.imaging.common.RationalNumber$Option(org.apache.commons.imaging.common.RationalNumber, double);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field rationalNumber:Lorg/apache/commons/imaging/common/RationalNumber;",
+        "aload_0",
+        "dload_2",
+        "putfield # // Field error:D",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.common.RationalNumber": [
+    [
+      "private static long gcd(long, long);",
+      [
+        "lload_2",
+        "lconst_0",
+        "lcmp",
+        "ifne 8",
+        "lload_0",
+        "lreturn",
+        "lload_2",
+        "lload_0",
+        "lload_2",
+        "lrem",
+        "invokestatic # // Method gcd:(JJ)J",
+        "lreturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.imaging.common.RationalNumber(int, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Number.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "i2l",
+        "putfield # // Field numerator:J",
+        "aload_0",
+        "iload_2",
+        "i2l",
+        "putfield # // Field divisor:J",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field unsignedType:Z",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.imaging.common.RationalNumber(int, int, boolean);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Number.\"<init>\":()V",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field unsignedType:Z",
+        "iload_3",
+        "ifeq 36",
+        "aload_0",
+        "iload_1",
+        "i2l",
+        "ldc2_w # // long 4294967295l",
+        "land",
+        "putfield # // Field numerator:J",
+        "aload_0",
+        "iload_2",
+        "i2l",
+        "ldc2_w # // long 4294967295l",
+        "land",
+        "putfield # // Field divisor:J",
+        "goto 48",
+        "aload_0",
+        "iload_1",
+        "i2l",
+        "putfield # // Field numerator:J",
+        "aload_0",
+        "iload_2",
+        "i2l",
+        "putfield # // Field divisor:J",
+        "return"
+      ]
+    ],
+    [
+      "private org.apache.commons.imaging.common.RationalNumber(long, long, boolean);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Number.\"<init>\":()V",
+        "aload_0",
+        "lload_1",
+        "putfield # // Field numerator:J",
+        "aload_0",
+        "lload_3",
+        "putfield # // Field divisor:J",
+        "aload_0",
+        "iload 5",
+        "putfield # // Field unsignedType:Z",
+        "return"
+      ]
+    ],
+    [
+      "public double doubleValue();",
+      [
+        "aload_0",
+        "getfield # // Field numerator:J",
+        "l2d",
+        "aload_0",
+        "getfield # // Field divisor:J",
+        "l2d",
+        "ddiv",
+        "dreturn"
+      ]
+    ],
+    [
+      "public float floatValue();",
+      [
+        "aload_0",
+        "invokevirtual # // Method doubleValue:()D",
+        "d2f",
+        "freturn"
+      ]
+    ],
+    [
+      "public int intValue();",
+      [
+        "aload_0",
+        "getfield # // Field numerator:J",
+        "aload_0",
+        "getfield # // Field divisor:J",
+        "ldiv",
+        "l2i",
+        "ireturn"
+      ]
+    ],
+    [
+      "public long longValue();",
+      [
+        "aload_0",
+        "getfield # // Field numerator:J",
+        "aload_0",
+        "getfield # // Field divisor:J",
+        "ldiv",
+        "lreturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.common.GenericImageMetadata$GenericImageMetadataItem": [
+    [
+      "public org.apache.commons.imaging.common.GenericImageMetadata$GenericImageMetadataItem(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field keyword:Ljava/lang/String;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field text:Ljava/lang/String;",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.String getKeyword();",
+      [
+        "aload_0",
+        "getfield # // Field keyword:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getText();",
+      [
+        "aload_0",
+        "getfield # // Field text:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "aconst_null",
+        "invokevirtual # // Method toString:(Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.common.GenericImageMetadata": [
+    [
+      "public org.apache.commons.imaging.common.GenericImageMetadata();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field items:Ljava/util/List;",
+        "return"
+      ]
+    ],
+    [
+      "public void add(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "new # // class org/apache/commons/imaging/common/GenericImageMetadata$GenericImageMetadataItem",
+        "dup",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method org/apache/commons/imaging/common/GenericImageMetadata$GenericImageMetadataItem.\"<init>\":(Ljava/lang/String;Ljava/lang/String;)V",
+        "invokevirtual # // Method add:(Lorg/apache/commons/imaging/common/ImageMetadata$ImageMetadataItem;)V",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "aconst_null",
+        "invokevirtual # // Method toString:(Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.common.ImageMetadata$ImageMetadataItem": [
+    [
+      "public abstract java.lang.String toString();",
+      []
+    ],
+    [
+      "public abstract java.lang.String toString(java.lang.String);",
+      []
+    ]
+  ],
+  "org.apache.commons.imaging.common.ImageMetadata": [
+    [
+      "public abstract java.lang.String toString(java.lang.String);",
+      []
+    ]
+  ],
+  "org.apache.commons.imaging.common.ImageBuilder": [
+    [
+      "public org.apache.commons.imaging.common.ImageBuilder(int, int, boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "iload_2",
+        "iload_3",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":(IIZZ)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.imaging.common.ImageBuilder(int, int, boolean, boolean);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "iload_2",
+        "invokevirtual # // Method checkDimensions:(II)V",
+        "aload_0",
+        "iload_1",
+        "iload_2",
+        "imul",
+        "invokestatic # // Method org/apache/commons/imaging/common/Allocator.intArray:(I)[I",
+        "putfield # // Field data:[I",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field width:I",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field height:I",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field hasAlpha:Z",
+        "aload_0",
+        "iload 4",
+        "putfield # // Field isAlphaPremultiplied:Z",
+        "return"
+      ]
+    ],
+    [
+      "public int getHeight();",
+      [
+        "aload_0",
+        "getfield # // Field height:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getRgb(int, int);",
+      [
+        "iload_2",
+        "aload_0",
+        "getfield # // Field width:I",
+        "imul",
+        "istore_3",
+        "aload_0",
+        "getfield # // Field data:[I",
+        "iload_3",
+        "iload_1",
+        "iadd",
+        "iaload",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.imaging.common.ImageBuilder getSubset(int, int, int, int);",
+      [
+        "aload_0",
+        "iload_1",
+        "iload_2",
+        "iload_3",
+        "iload 4",
+        "invokevirtual # // Method checkBounds:(IIII)V",
+        "new # // class org/apache/commons/imaging/common/ImageBuilder",
+        "dup",
+        "iload_3",
+        "iload 4",
+        "aload_0",
+        "getfield # // Field hasAlpha:Z",
+        "aload_0",
+        "getfield # // Field isAlphaPremultiplied:Z",
+        "invokespecial # // Method \"<init>\":(IIZZ)V",
+        "astore 5",
+        "iconst_0",
+        "istore 6",
+        "iload 6",
+        "iload 4",
+        "if_icmpge 81",
+        "iload 6",
+        "iload_2",
+        "iadd",
+        "aload_0",
+        "getfield # // Field width:I",
+        "imul",
+        "iload_1",
+        "iadd",
+        "istore 7",
+        "iload 6",
+        "iload_3",
+        "imul",
+        "istore 8",
+        "aload_0",
+        "getfield # // Field data:[I",
+        "iload 7",
+        "aload 5",
+        "getfield # // Field data:[I",
+        "iload 8",
+        "iload_3",
+        "invokestatic # // Method java/lang/System.arraycopy:(Ljava/lang/Object;ILjava/lang/Object;II)V",
+        "iinc 6, 1",
+        "goto 32",
+        "aload 5",
+        "areturn"
+      ]
+    ],
+    [
+      "public int getWidth();",
+      [
+        "aload_0",
+        "getfield # // Field width:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.common.RgbBufferedImageFactory": [
+    [
+      "public org.apache.commons.imaging.common.RgbBufferedImageFactory();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.common.SimpleBufferedImageFactory": [
+    [
+      "public org.apache.commons.imaging.common.SimpleBufferedImageFactory();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.bmp.BmpHeaderInfo$ColorSpace": [
+    [
+      "org.apache.commons.imaging.formats.bmp.BmpHeaderInfo$ColorSpace();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.bmp.BmpHeaderInfo$ColorSpaceCoordinate": [
+    [
+      "org.apache.commons.imaging.formats.bmp.BmpHeaderInfo$ColorSpaceCoordinate();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.bmp.BmpHeaderInfo": [
+    [
+      "org.apache.commons.imaging.formats.bmp.BmpHeaderInfo(byte, byte, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, org.apache.commons.imaging.formats.bmp.BmpHeaderInfo$ColorSpace, int, int, int, int, int, int, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field identifier1:B",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field identifier2:B",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field fileSize:I",
+        "aload_0",
+        "iload 4",
+        "putfield # // Field reserved:I",
+        "aload_0",
+        "iload 5",
+        "putfield # // Field bitmapDataOffset:I",
+        "aload_0",
+        "iload 6",
+        "putfield # // Field bitmapHeaderSize:I",
+        "aload_0",
+        "iload 7",
+        "putfield # // Field width:I",
+        "aload_0",
+        "iload 8",
+        "putfield # // Field height:I",
+        "aload_0",
+        "iload 9",
+        "putfield # // Field planes:I",
+        "aload_0",
+        "iload 10",
+        "putfield # // Field bitsPerPixel:I",
+        "aload_0",
+        "iload 11",
+        "putfield # // Field compression:I",
+        "aload_0",
+        "iload 12",
+        "putfield # // Field bitmapDataSize:I",
+        "aload_0",
+        "iload 13",
+        "putfield # // Field hResolution:I",
+        "aload_0",
+        "iload 14",
+        "putfield # // Field vResolution:I",
+        "aload_0",
+        "iload 15",
+        "putfield # // Field colorsUsed:I",
+        "aload_0",
+        "iload 16",
+        "putfield # // Field colorsImportant:I",
+        "aload_0",
+        "iload 17",
+        "putfield # // Field redMask:I",
+        "aload_0",
+        "iload 18",
+        "putfield # // Field greenMask:I",
+        "aload_0",
+        "iload 19",
+        "putfield # // Field blueMask:I",
+        "aload_0",
+        "iload 20",
+        "putfield # // Field alphaMask:I",
+        "aload_0",
+        "iload 21",
+        "putfield # // Field colorSpaceType:I",
+        "aload_0",
+        "aload 22",
+        "putfield # // Field colorSpace:Lorg/apache/commons/imaging/formats/bmp/BmpHeaderInfo$ColorSpace;",
+        "aload_0",
+        "iload 23",
+        "putfield # // Field gammaRed:I",
+        "aload_0",
+        "iload 24",
+        "putfield # // Field gammaGreen:I",
+        "aload_0",
+        "iload 25",
+        "putfield # // Field gammaBlue:I",
+        "aload_0",
+        "iload 26",
+        "putfield # // Field intent:I",
+        "aload_0",
+        "iload 27",
+        "putfield # // Field profileData:I",
+        "aload_0",
+        "iload 28",
+        "putfield # // Field profileSize:I",
+        "aload_0",
+        "iload 29",
+        "putfield # // Field reservedV5:I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.bmp.BmpImageContents": [
+    [
+      "org.apache.commons.imaging.formats.bmp.BmpImageContents(org.apache.commons.imaging.formats.bmp.BmpHeaderInfo, byte[], byte[], org.apache.commons.imaging.formats.bmp.AbstractPixelParser);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field bhi:Lorg/apache/commons/imaging/formats/bmp/BmpHeaderInfo;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field colorTable:[B",
+        "aload_0",
+        "aload_3",
+        "putfield # // Field imageData:[B",
+        "aload_0",
+        "aload 4",
+        "putfield # // Field abstractPixelParser:Lorg/apache/commons/imaging/formats/bmp/AbstractPixelParser;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.gif.DisposalMethod": [
+    [
+      "public static org.apache.commons.imaging.formats.gif.DisposalMethod[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/formats/gif/DisposalMethod;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/formats/gif/DisposalMethod;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/formats/gif/DisposalMethod;\"",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.gif.GifBlock": [
+    [
+      "org.apache.commons.imaging.formats.gif.GifBlock(int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field blockCode:I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.gif.GifHeaderInfo": [
+    [
+      "org.apache.commons.imaging.formats.gif.GifHeaderInfo(byte, byte, byte, byte, byte, byte, int, int, byte, byte, byte, boolean, byte, boolean, byte);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field identifier1:B",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field identifier2:B",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field identifier3:B",
+        "aload_0",
+        "iload 4",
+        "putfield # // Field version1:B",
+        "aload_0",
+        "iload 5",
+        "putfield # // Field version2:B",
+        "aload_0",
+        "iload 6",
+        "putfield # // Field version3:B",
+        "aload_0",
+        "iload 7",
+        "putfield # // Field logicalScreenWidth:I",
+        "aload_0",
+        "iload 8",
+        "putfield # // Field logicalScreenHeight:I",
+        "aload_0",
+        "iload 9",
+        "putfield # // Field packedFields:B",
+        "aload_0",
+        "iload 10",
+        "putfield # // Field backgroundColorIndex:B",
+        "aload_0",
+        "iload 11",
+        "putfield # // Field pixelAspectRatio:B",
+        "aload_0",
+        "iload 12",
+        "putfield # // Field globalColorTableFlag:Z",
+        "aload_0",
+        "iload 13",
+        "putfield # // Field colorResolution:B",
+        "aload_0",
+        "iload 14",
+        "putfield # // Field sortFlag:Z",
+        "aload_0",
+        "iload 15",
+        "putfield # // Field sizeOfGlobalColorTable:B",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.gif.GifImageData": [
+    [
+      "org.apache.commons.imaging.formats.gif.GifImageData(org.apache.commons.imaging.formats.gif.ImageDescriptor, org.apache.commons.imaging.formats.gif.GraphicControlExtension);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field descriptor:Lorg/apache/commons/imaging/formats/gif/ImageDescriptor;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field gce:Lorg/apache/commons/imaging/formats/gif/GraphicControlExtension;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.gif.GraphicControlExtension": [
+    [
+      "org.apache.commons.imaging.formats.gif.GraphicControlExtension(int, int, int, boolean, int, int);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokespecial # // Method org/apache/commons/imaging/formats/gif/GifBlock.\"<init>\":(I)V",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field packed:I",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field dispose:I",
+        "aload_0",
+        "iload 4",
+        "putfield # // Field transparency:Z",
+        "aload_0",
+        "iload 5",
+        "putfield # // Field delay:I",
+        "aload_0",
+        "iload 6",
+        "putfield # // Field transparentColorIndex:I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.gif.ImageDescriptor": [
+    [
+      "org.apache.commons.imaging.formats.gif.ImageDescriptor(int, int, int, int, int, byte, boolean, boolean, boolean, byte, byte[], byte[]);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokespecial # // Method org/apache/commons/imaging/formats/gif/GifBlock.\"<init>\":(I)V",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field imageLeftPosition:I",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field imageTopPosition:I",
+        "aload_0",
+        "iload 4",
+        "putfield # // Field imageWidth:I",
+        "aload_0",
+        "iload 5",
+        "putfield # // Field imageHeight:I",
+        "aload_0",
+        "iload 6",
+        "putfield # // Field packedFields:B",
+        "aload_0",
+        "iload 7",
+        "putfield # // Field localColorTableFlag:Z",
+        "aload_0",
+        "iload 8",
+        "putfield # // Field interlaceFlag:Z",
+        "aload_0",
+        "iload 9",
+        "putfield # // Field sortFlag:Z",
+        "aload_0",
+        "iload 10",
+        "putfield # // Field sizeOfLocalColorTable:B",
+        "aload_0",
+        "aload 11",
+        "putfield # // Field localColorTable:[B",
+        "aload_0",
+        "aload 12",
+        "putfield # // Field imageData:[B",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.icns.IcnsType": [
+    [
+      "public static org.apache.commons.imaging.formats.icns.IcnsType[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/formats/icns/IcnsType;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/formats/icns/IcnsType;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/formats/icns/IcnsType;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public int getBitsPerPixel();",
+      [
+        "aload_0",
+        "getfield # // Field bitsPerPixel:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getHeight();",
+      [
+        "aload_0",
+        "getfield # // Field height:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getType();",
+      [
+        "aload_0",
+        "getfield # // Field type:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getWidth();",
+      [
+        "aload_0",
+        "getfield # // Field width:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean hasMask();",
+      [
+        "aload_0",
+        "getfield # // Field hasMask:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.jpeg.decoder.Dct": [
+    [
+      "public static void forwardDct8(float[]);",
+      [
+        "aload_0",
+        "iconst_0",
+        "faload",
+        "aload_0",
+        "bipush 7",
+        "faload",
+        "fadd",
+        "fstore_1",
+        "aload_0",
+        "iconst_1",
+        "faload",
+        "aload_0",
+        "bipush 6",
+        "faload",
+        "fadd",
+        "fstore_2",
+        "aload_0",
+        "iconst_2",
+        "faload",
+        "aload_0",
+        "iconst_5",
+        "faload",
+        "fadd",
+        "fstore_3",
+        "aload_0",
+        "iconst_3",
+        "faload",
+        "aload_0",
+        "iconst_4",
+        "faload",
+        "fadd",
+        "fstore 4",
+        "aload_0",
+        "iconst_3",
+        "faload",
+        "aload_0",
+        "iconst_4",
+        "faload",
+        "fsub",
+        "fstore 5",
+        "aload_0",
+        "iconst_2",
+        "faload",
+        "aload_0",
+        "iconst_5",
+        "faload",
+        "fsub",
+        "fstore 6",
+        "aload_0",
+        "iconst_1",
+        "faload",
+        "aload_0",
+        "bipush 6",
+        "faload",
+        "fsub",
+        "fstore 7",
+        "aload_0",
+        "iconst_0",
+        "faload",
+        "aload_0",
+        "bipush 7",
+        "faload",
+        "fsub",
+        "fstore 8",
+        "fload_1",
+        "fload 4",
+        "fadd",
+        "fstore 9",
+        "fload_2",
+        "fload_3",
+        "fadd",
+        "fstore 10",
+        "fload_2",
+        "fload_3",
+        "fsub",
+        "fstore 11",
+        "fload_1",
+        "fload 4",
+        "fsub",
+        "fstore 12",
+        "fload 5",
+        "fload 6",
+        "fadd",
+        "fstore 13",
+        "fload 6",
+        "fload 7",
+        "fadd",
+        "fstore 14",
+        "fload 7",
+        "fload 8",
+        "fadd",
+        "fstore 15",
+        "fload 11",
+        "fload 12",
+        "fadd",
+        "fstore 16",
+        "fload 16",
+        "getstatic # // Field A1:F",
+        "fmul",
+        "fstore 17",
+        "fload 15",
+        "fload 13",
+        "fsub",
+        "getstatic # // Field A5:F",
+        "fmul",
+        "fstore 18",
+        "fload 13",
+        "getstatic # // Field A2:F",
+        "fmul",
+        "fload 18",
+        "fsub",
+        "fstore 19",
+        "fload 14",
+        "getstatic # // Field A3:F",
+        "fmul",
+        "fstore 20",
+        "fload 15",
+        "getstatic # // Field A4:F",
+        "fmul",
+        "fload 18",
+        "fsub",
+        "fstore 21",
+        "fload 8",
+        "fload 20",
+        "fadd",
+        "fstore 22",
+        "fload 8",
+        "fload 20",
+        "fsub",
+        "fstore 23",
+        "aload_0",
+        "iconst_0",
+        "fload 9",
+        "fload 10",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "iconst_4",
+        "fload 9",
+        "fload 10",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "iconst_2",
+        "fload 12",
+        "fload 17",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 6",
+        "fload 12",
+        "fload 17",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "iconst_5",
+        "fload 23",
+        "fload 19",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "iconst_1",
+        "fload 22",
+        "fload 21",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 7",
+        "fload 22",
+        "fload 21",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "iconst_3",
+        "fload 23",
+        "fload 19",
+        "fsub",
+        "fastore",
+        "return"
+      ]
+    ],
+    [
+      "public static void forwardDct8x8(float[]);",
+      [
+        "iconst_0",
+        "istore 24",
+        "iload 24",
+        "bipush 8",
+        "if_icmpge 406",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "bipush 7",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore_1",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_1",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "bipush 6",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore_2",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_2",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_5",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore_3",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_3",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_4",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore 4",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_3",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_4",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore 5",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_2",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_5",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore 6",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_1",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "bipush 6",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore 7",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "bipush 7",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore 8",
+        "fload_1",
+        "fload 4",
+        "fadd",
+        "fstore 9",
+        "fload_2",
+        "fload_3",
+        "fadd",
+        "fstore 10",
+        "fload_2",
+        "fload_3",
+        "fsub",
+        "fstore 11",
+        "fload_1",
+        "fload 4",
+        "fsub",
+        "fstore 12",
+        "fload 5",
+        "fload 6",
+        "fadd",
+        "fstore 13",
+        "fload 6",
+        "fload 7",
+        "fadd",
+        "fstore 14",
+        "fload 7",
+        "fload 8",
+        "fadd",
+        "fstore 15",
+        "fload 11",
+        "fload 12",
+        "fadd",
+        "fstore 16",
+        "fload 16",
+        "getstatic # // Field A1:F",
+        "fmul",
+        "fstore 17",
+        "fload 15",
+        "fload 13",
+        "fsub",
+        "getstatic # // Field A5:F",
+        "fmul",
+        "fstore 18",
+        "fload 13",
+        "getstatic # // Field A2:F",
+        "fmul",
+        "fload 18",
+        "fsub",
+        "fstore 19",
+        "fload 14",
+        "getstatic # // Field A3:F",
+        "fmul",
+        "fstore 20",
+        "fload 15",
+        "getstatic # // Field A4:F",
+        "fmul",
+        "fload 18",
+        "fsub",
+        "fstore 21",
+        "fload 8",
+        "fload 20",
+        "fadd",
+        "fstore 22",
+        "fload 8",
+        "fload 20",
+        "fsub",
+        "fstore 23",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "fload 9",
+        "fload 10",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_4",
+        "iadd",
+        "fload 9",
+        "fload 10",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_2",
+        "iadd",
+        "fload 12",
+        "fload 17",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "bipush 6",
+        "iadd",
+        "fload 12",
+        "fload 17",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_5",
+        "iadd",
+        "fload 23",
+        "fload 19",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_1",
+        "iadd",
+        "fload 22",
+        "fload 21",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "bipush 7",
+        "iadd",
+        "fload 22",
+        "fload 21",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "imul",
+        "iconst_3",
+        "iadd",
+        "fload 23",
+        "fload 19",
+        "fsub",
+        "fastore",
+        "iinc 24, 1",
+        "goto 3",
+        "iconst_0",
+        "istore 24",
+        "iload 24",
+        "bipush 8",
+        "if_icmpge 755",
+        "aload_0",
+        "iload 24",
+        "faload",
+        "aload_0",
+        "bipush 56",
+        "iload 24",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore_1",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 48",
+        "iload 24",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore_2",
+        "aload_0",
+        "bipush 16",
+        "iload 24",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 40",
+        "iload 24",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore_3",
+        "aload_0",
+        "bipush 24",
+        "iload 24",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 32",
+        "iload 24",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore 4",
+        "aload_0",
+        "bipush 24",
+        "iload 24",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 32",
+        "iload 24",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore 5",
+        "aload_0",
+        "bipush 16",
+        "iload 24",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 40",
+        "iload 24",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore 6",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 48",
+        "iload 24",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore 7",
+        "aload_0",
+        "iload 24",
+        "faload",
+        "aload_0",
+        "bipush 56",
+        "iload 24",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore 8",
+        "fload_1",
+        "fload 4",
+        "fadd",
+        "fstore 9",
+        "fload_2",
+        "fload_3",
+        "fadd",
+        "fstore 10",
+        "fload_2",
+        "fload_3",
+        "fsub",
+        "fstore 11",
+        "fload_1",
+        "fload 4",
+        "fsub",
+        "fstore 12",
+        "fload 5",
+        "fload 6",
+        "fadd",
+        "fstore 13",
+        "fload 6",
+        "fload 7",
+        "fadd",
+        "fstore 14",
+        "fload 7",
+        "fload 8",
+        "fadd",
+        "fstore 15",
+        "fload 11",
+        "fload 12",
+        "fadd",
+        "fstore 16",
+        "fload 16",
+        "getstatic # // Field A1:F",
+        "fmul",
+        "fstore 17",
+        "fload 15",
+        "fload 13",
+        "fsub",
+        "getstatic # // Field A5:F",
+        "fmul",
+        "fstore 18",
+        "fload 13",
+        "getstatic # // Field A2:F",
+        "fmul",
+        "fload 18",
+        "fsub",
+        "fstore 19",
+        "fload 14",
+        "getstatic # // Field A3:F",
+        "fmul",
+        "fstore 20",
+        "fload 15",
+        "getstatic # // Field A4:F",
+        "fmul",
+        "fload 18",
+        "fsub",
+        "fstore 21",
+        "fload 8",
+        "fload 20",
+        "fadd",
+        "fstore 22",
+        "fload 8",
+        "fload 20",
+        "fsub",
+        "fstore 23",
+        "aload_0",
+        "iload 24",
+        "fload 9",
+        "fload 10",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 32",
+        "iload 24",
+        "iadd",
+        "fload 9",
+        "fload 10",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "bipush 16",
+        "iload 24",
+        "iadd",
+        "fload 12",
+        "fload 17",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 48",
+        "iload 24",
+        "iadd",
+        "fload 12",
+        "fload 17",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "bipush 40",
+        "iload 24",
+        "iadd",
+        "fload 23",
+        "fload 19",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 24",
+        "iadd",
+        "fload 22",
+        "fload 21",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 56",
+        "iload 24",
+        "iadd",
+        "fload 22",
+        "fload 21",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "bipush 24",
+        "iload 24",
+        "iadd",
+        "fload 23",
+        "fload 19",
+        "fsub",
+        "fastore",
+        "iinc 24, 1",
+        "goto 409",
+        "return"
+      ]
+    ],
+    [
+      "public static void inverseDct8(float[]);",
+      [
+        "aload_0",
+        "iconst_2",
+        "faload",
+        "aload_0",
+        "bipush 6",
+        "faload",
+        "fsub",
+        "fstore_1",
+        "aload_0",
+        "iconst_2",
+        "faload",
+        "aload_0",
+        "bipush 6",
+        "faload",
+        "fadd",
+        "fstore_2",
+        "aload_0",
+        "iconst_5",
+        "faload",
+        "aload_0",
+        "iconst_3",
+        "faload",
+        "fsub",
+        "fstore_3",
+        "aload_0",
+        "iconst_1",
+        "faload",
+        "aload_0",
+        "bipush 7",
+        "faload",
+        "fadd",
+        "fstore 4",
+        "aload_0",
+        "iconst_3",
+        "faload",
+        "aload_0",
+        "iconst_5",
+        "faload",
+        "fadd",
+        "fstore 5",
+        "fload 4",
+        "fload 5",
+        "fsub",
+        "fstore 6",
+        "aload_0",
+        "iconst_1",
+        "faload",
+        "aload_0",
+        "bipush 7",
+        "faload",
+        "fsub",
+        "fstore 7",
+        "fload 4",
+        "fload 5",
+        "fadd",
+        "fstore 8",
+        "getstatic # // Field C6:F",
+        "fload_3",
+        "fload 7",
+        "fadd",
+        "fmul",
+        "fstore 9",
+        "getstatic # // Field Q:F",
+        "fload_3",
+        "fmul",
+        "fload 9",
+        "fadd",
+        "fstore 10",
+        "getstatic # // Field R:F",
+        "fload 7",
+        "fmul",
+        "fload 9",
+        "fsub",
+        "fstore 11",
+        "fload_1",
+        "getstatic # // Field C4:F",
+        "fmul",
+        "fstore 12",
+        "fload 6",
+        "getstatic # // Field C4:F",
+        "fmul",
+        "fstore 13",
+        "fload 11",
+        "fload 8",
+        "fsub",
+        "fstore 14",
+        "fload 14",
+        "fload 13",
+        "fsub",
+        "fstore 15",
+        "aload_0",
+        "iconst_0",
+        "faload",
+        "aload_0",
+        "iconst_4",
+        "faload",
+        "fsub",
+        "fstore 16",
+        "fload 12",
+        "fload_2",
+        "fsub",
+        "fstore 17",
+        "aload_0",
+        "iconst_0",
+        "faload",
+        "aload_0",
+        "iconst_4",
+        "faload",
+        "fadd",
+        "fstore 18",
+        "fload 10",
+        "fstore 19",
+        "fload 16",
+        "fload 17",
+        "fadd",
+        "fstore 20",
+        "fload 18",
+        "fload_2",
+        "fadd",
+        "fstore 21",
+        "fload 16",
+        "fload 17",
+        "fsub",
+        "fstore 22",
+        "fload 18",
+        "fload_2",
+        "fsub",
+        "fstore 23",
+        "fload 19",
+        "fload 15",
+        "fadd",
+        "fstore 24",
+        "aload_0",
+        "iconst_0",
+        "fload 21",
+        "fload 8",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "iconst_1",
+        "fload 20",
+        "fload 14",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "iconst_2",
+        "fload 22",
+        "fload 15",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "iconst_3",
+        "fload 23",
+        "fload 24",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "iconst_4",
+        "fload 23",
+        "fload 24",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "iconst_5",
+        "fload 22",
+        "fload 15",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 6",
+        "fload 20",
+        "fload 14",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "bipush 7",
+        "fload 21",
+        "fload 8",
+        "fsub",
+        "fastore",
+        "return"
+      ]
+    ],
+    [
+      "public static void inverseDct8x8(float[]);",
+      [
+        "iconst_0",
+        "istore 25",
+        "iload 25",
+        "bipush 8",
+        "if_icmpge 410",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_2",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "bipush 6",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore_1",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_2",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "bipush 6",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore_2",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_5",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_3",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore_3",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_1",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "bipush 7",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore 4",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_3",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_5",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore 5",
+        "fload 4",
+        "fload 5",
+        "fsub",
+        "fstore 6",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_1",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "bipush 7",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore 7",
+        "fload 4",
+        "fload 5",
+        "fadd",
+        "fstore 8",
+        "getstatic # // Field C6:F",
+        "fload_3",
+        "fload 7",
+        "fadd",
+        "fmul",
+        "fstore 9",
+        "getstatic # // Field Q:F",
+        "fload_3",
+        "fmul",
+        "fload 9",
+        "fadd",
+        "fstore 10",
+        "getstatic # // Field R:F",
+        "fload 7",
+        "fmul",
+        "fload 9",
+        "fsub",
+        "fstore 11",
+        "fload_1",
+        "getstatic # // Field C4:F",
+        "fmul",
+        "fstore 12",
+        "fload 6",
+        "getstatic # // Field C4:F",
+        "fmul",
+        "fstore 13",
+        "fload 11",
+        "fload 8",
+        "fsub",
+        "fstore 14",
+        "fload 14",
+        "fload 13",
+        "fsub",
+        "fstore 15",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_4",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore 16",
+        "fload 12",
+        "fload_2",
+        "fsub",
+        "fstore 17",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "faload",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_4",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore 18",
+        "fload 10",
+        "fstore 19",
+        "fload 16",
+        "fload 17",
+        "fadd",
+        "fstore 20",
+        "fload 18",
+        "fload_2",
+        "fadd",
+        "fstore 21",
+        "fload 16",
+        "fload 17",
+        "fsub",
+        "fstore 22",
+        "fload 18",
+        "fload_2",
+        "fsub",
+        "fstore 23",
+        "fload 19",
+        "fload 15",
+        "fadd",
+        "fstore 24",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "fload 21",
+        "fload 8",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_1",
+        "iadd",
+        "fload 20",
+        "fload 14",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_2",
+        "iadd",
+        "fload 22",
+        "fload 15",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_3",
+        "iadd",
+        "fload 23",
+        "fload 24",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_4",
+        "iadd",
+        "fload 23",
+        "fload 24",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "iconst_5",
+        "iadd",
+        "fload 22",
+        "fload 15",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "bipush 6",
+        "iadd",
+        "fload 20",
+        "fload 14",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "imul",
+        "bipush 7",
+        "iadd",
+        "fload 21",
+        "fload 8",
+        "fsub",
+        "fastore",
+        "iinc 25, 1",
+        "goto 3",
+        "iconst_0",
+        "istore 25",
+        "iload 25",
+        "bipush 8",
+        "if_icmpge 763",
+        "aload_0",
+        "bipush 16",
+        "iload 25",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 48",
+        "iload 25",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore_1",
+        "aload_0",
+        "bipush 16",
+        "iload 25",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 48",
+        "iload 25",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore_2",
+        "aload_0",
+        "bipush 40",
+        "iload 25",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 24",
+        "iload 25",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore_3",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 56",
+        "iload 25",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore 4",
+        "aload_0",
+        "bipush 24",
+        "iload 25",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 40",
+        "iload 25",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore 5",
+        "fload 4",
+        "fload 5",
+        "fsub",
+        "fstore 6",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "iadd",
+        "faload",
+        "aload_0",
+        "bipush 56",
+        "iload 25",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore 7",
+        "fload 4",
+        "fload 5",
+        "fadd",
+        "fstore 8",
+        "getstatic # // Field C6:F",
+        "fload_3",
+        "fload 7",
+        "fadd",
+        "fmul",
+        "fstore 9",
+        "getstatic # // Field Q:F",
+        "fload_3",
+        "fmul",
+        "fload 9",
+        "fadd",
+        "fstore 10",
+        "getstatic # // Field R:F",
+        "fload 7",
+        "fmul",
+        "fload 9",
+        "fsub",
+        "fstore 11",
+        "fload_1",
+        "getstatic # // Field C4:F",
+        "fmul",
+        "fstore 12",
+        "fload 6",
+        "getstatic # // Field C4:F",
+        "fmul",
+        "fstore 13",
+        "fload 11",
+        "fload 8",
+        "fsub",
+        "fstore 14",
+        "fload 14",
+        "fload 13",
+        "fsub",
+        "fstore 15",
+        "aload_0",
+        "iload 25",
+        "faload",
+        "aload_0",
+        "bipush 32",
+        "iload 25",
+        "iadd",
+        "faload",
+        "fsub",
+        "fstore 16",
+        "fload 12",
+        "fload_2",
+        "fsub",
+        "fstore 17",
+        "aload_0",
+        "iload 25",
+        "faload",
+        "aload_0",
+        "bipush 32",
+        "iload 25",
+        "iadd",
+        "faload",
+        "fadd",
+        "fstore 18",
+        "fload 10",
+        "fstore 19",
+        "fload 16",
+        "fload 17",
+        "fadd",
+        "fstore 20",
+        "fload 18",
+        "fload_2",
+        "fadd",
+        "fstore 21",
+        "fload 16",
+        "fload 17",
+        "fsub",
+        "fstore 22",
+        "fload 18",
+        "fload_2",
+        "fsub",
+        "fstore 23",
+        "fload 19",
+        "fload 15",
+        "fadd",
+        "fstore 24",
+        "aload_0",
+        "iload 25",
+        "fload 21",
+        "fload 8",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 8",
+        "iload 25",
+        "iadd",
+        "fload 20",
+        "fload 14",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 16",
+        "iload 25",
+        "iadd",
+        "fload 22",
+        "fload 15",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "bipush 24",
+        "iload 25",
+        "iadd",
+        "fload 23",
+        "fload 24",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 32",
+        "iload 25",
+        "iadd",
+        "fload 23",
+        "fload 24",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "bipush 40",
+        "iload 25",
+        "iadd",
+        "fload 22",
+        "fload 15",
+        "fadd",
+        "fastore",
+        "aload_0",
+        "bipush 48",
+        "iload 25",
+        "iadd",
+        "fload 20",
+        "fload 14",
+        "fsub",
+        "fastore",
+        "aload_0",
+        "bipush 56",
+        "iload 25",
+        "iadd",
+        "fload 21",
+        "fload 8",
+        "fsub",
+        "fastore",
+        "iinc 25, 1",
+        "goto 413",
+        "return"
+      ]
+    ],
+    [
+      "public static void scaleDequantizationMatrix(float[]);",
+      [
+        "iconst_0",
+        "istore_1",
+        "iload_1",
+        "bipush 8",
+        "if_icmpge 50",
+        "iconst_0",
+        "istore_2",
+        "iload_2",
+        "bipush 8",
+        "if_icmpge 44",
+        "aload_0",
+        "bipush 8",
+        "iload_1",
+        "imul",
+        "iload_2",
+        "iadd",
+        "dup2",
+        "faload",
+        "getstatic # // Field IDCT_SCALING_FACTORS:[F",
+        "iload_1",
+        "faload",
+        "getstatic # // Field IDCT_SCALING_FACTORS:[F",
+        "iload_2",
+        "faload",
+        "fmul",
+        "fmul",
+        "fastore",
+        "iinc 2, 1",
+        "goto 10",
+        "iinc 1, 1",
+        "goto 2",
+        "return"
+      ]
+    ],
+    [
+      "public static void scaleDequantizationVector(float[]);",
+      [
+        "iconst_0",
+        "istore_1",
+        "iload_1",
+        "bipush 8",
+        "if_icmpge 25",
+        "aload_0",
+        "iload_1",
+        "dup2",
+        "faload",
+        "getstatic # // Field IDCT_SCALING_FACTORS:[F",
+        "iload_1",
+        "faload",
+        "fmul",
+        "fastore",
+        "iinc 1, 1",
+        "goto 2",
+        "return"
+      ]
+    ],
+    [
+      "public static void scaleQuantizationMatrix(float[]);",
+      [
+        "iconst_0",
+        "istore_1",
+        "iload_1",
+        "bipush 8",
+        "if_icmpge 50",
+        "iconst_0",
+        "istore_2",
+        "iload_2",
+        "bipush 8",
+        "if_icmpge 44",
+        "aload_0",
+        "bipush 8",
+        "iload_1",
+        "imul",
+        "iload_2",
+        "iadd",
+        "dup2",
+        "faload",
+        "getstatic # // Field DCT_SCALING_FACTORS:[F",
+        "iload_1",
+        "faload",
+        "getstatic # // Field DCT_SCALING_FACTORS:[F",
+        "iload_2",
+        "faload",
+        "fmul",
+        "fmul",
+        "fastore",
+        "iinc 2, 1",
+        "goto 10",
+        "iinc 1, 1",
+        "goto 2",
+        "return"
+      ]
+    ],
+    [
+      "public static void scaleQuantizationVector(float[]);",
+      [
+        "iconst_0",
+        "istore_1",
+        "iload_1",
+        "bipush 8",
+        "if_icmpge 25",
+        "aload_0",
+        "iload_1",
+        "dup2",
+        "faload",
+        "getstatic # // Field DCT_SCALING_FACTORS:[F",
+        "iload_1",
+        "faload",
+        "fmul",
+        "fastore",
+        "iinc 1, 1",
+        "goto 2",
+        "return"
+      ]
+    ],
+    [
+      "private org.apache.commons.imaging.formats.jpeg.decoder.Dct();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.jpeg.decoder.YCbCrConverter": [
+    [
+      "public static int convertYCbCrToRgb(int, int, int);",
+      [
+        "getstatic # // Field REDS:[I",
+        "iload_2",
+        "bipush 8",
+        "ishl",
+        "iload_0",
+        "ior",
+        "iaload",
+        "istore_3",
+        "getstatic # // Field GREENS1:[I",
+        "iload_1",
+        "bipush 8",
+        "ishl",
+        "iload_2",
+        "ior",
+        "iaload",
+        "istore 4",
+        "getstatic # // Field GREENS2:[I",
+        "iload 4",
+        "bipush 8",
+        "ishl",
+        "iload_0",
+        "ior",
+        "iaload",
+        "istore 5",
+        "getstatic # // Field BLUES:[I",
+        "iload_1",
+        "bipush 8",
+        "ishl",
+        "iload_0",
+        "ior",
+        "iaload",
+        "istore 6",
+        "iload_3",
+        "iload 5",
+        "ior",
+        "iload 6",
+        "ior",
+        "ireturn"
+      ]
+    ],
+    [
+      "private static int fastRound(float);",
+      [
+        "fload_0",
+        "ldc # // float 0.5f",
+        "fadd",
+        "f2i",
+        "ireturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.imaging.formats.jpeg.decoder.YCbCrConverter();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.jpeg.decoder.ZigZag": [
+    [
+      "public static void blockToZigZag(int[], int[]);",
+      [
+        "iconst_0",
+        "istore_2",
+        "iload_2",
+        "getstatic # // Field ZIG_ZAG:[I",
+        "arraylength",
+        "if_icmpge 26",
+        "aload_1",
+        "getstatic # // Field ZIG_ZAG:[I",
+        "iload_2",
+        "iaload",
+        "aload_0",
+        "iload_2",
+        "iaload",
+        "iastore",
+        "iinc 2, 1",
+        "goto 2",
+        "return"
+      ]
+    ],
+    [
+      "public static void zigZagToBlock(int[], int[]);",
+      [
+        "iconst_0",
+        "istore_2",
+        "iload_2",
+        "getstatic # // Field ZIG_ZAG:[I",
+        "arraylength",
+        "if_icmpge 26",
+        "aload_1",
+        "iload_2",
+        "aload_0",
+        "getstatic # // Field ZIG_ZAG:[I",
+        "iload_2",
+        "iaload",
+        "iaload",
+        "iastore",
+        "iinc 2, 1",
+        "goto 2",
+        "return"
+      ]
+    ],
+    [
+      "private org.apache.commons.imaging.formats.jpeg.decoder.ZigZag();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.jpeg.iptc.IptcBlock": [
+    [
+      "public org.apache.commons.imaging.formats.jpeg.iptc.IptcBlock(int, byte[], byte[]);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_3",
+        "ldc # // String blockData",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "putfield # // Field blockData:[B",
+        "aload_0",
+        "aload_2",
+        "ldc # // String blockNameBytes",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "putfield # // Field blockNameBytes:[B",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field blockType:I",
+        "return"
+      ]
+    ],
+    [
+      "public int getBlockType();",
+      [
+        "aload_0",
+        "getfield # // Field blockType:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.jpeg.iptc.IptcConstants": [
+    [
+      "private org.apache.commons.imaging.formats.jpeg.iptc.IptcConstants();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.jpeg.iptc.IptcRecord": [
+    [
+      "public org.apache.commons.imaging.formats.jpeg.iptc.IptcRecord(org.apache.commons.imaging.formats.jpeg.iptc.IptcType, java.lang.String);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field iptcType:Lorg/apache/commons/imaging/formats/jpeg/iptc/IptcType;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field value:Ljava/lang/String;",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.String getIptcTypeName();",
+      [
+        "aload_0",
+        "getfield # // Field iptcType:Lorg/apache/commons/imaging/formats/jpeg/iptc/IptcType;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/imaging/formats/jpeg/iptc/IptcType.getName:()Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getValue();",
+      [
+        "aload_0",
+        "getfield # // Field value:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.jpeg.iptc.IptcType": [
+    [
+      "public abstract java.lang.String getName();",
+      []
+    ],
+    [
+      "public abstract int getType();",
+      []
+    ],
+    [
+      "public abstract java.lang.String toString();",
+      []
+    ]
+  ],
+  "org.apache.commons.imaging.formats.jpeg.iptc.IptcTypeLookup": [
+    [
+      "public static org.apache.commons.imaging.formats.jpeg.iptc.IptcType getIptcType(int);",
+      [
+        "getstatic # // Field IPTC_TYPE_MAP:Ljava/util/Map;",
+        "iload_0",
+        "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Map.get:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/imaging/formats/jpeg/iptc/IptcType",
+        "astore_1",
+        "aload_1",
+        "ifnull 24",
+        "aload_1",
+        "goto 28",
+        "iload_0",
+        "invokestatic # // Method org/apache/commons/imaging/formats/jpeg/iptc/IptcTypes.getUnknown:(I)Lorg/apache/commons/imaging/formats/jpeg/iptc/IptcType;",
+        "areturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.imaging.formats.jpeg.iptc.IptcTypeLookup();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.jpeg.iptc.IptcTypes$1": [
+    [
+      "public java.lang.String getName();",
+      [
+        "ldc # // String Unknown",
+        "areturn"
+      ]
+    ],
+    [
+      "public int getType();",
+      [
+        "aload_0",
+        "getfield # // Field val$type:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.jpeg.iptc.IptcTypes": [
+    [
+      "public static org.apache.commons.imaging.formats.jpeg.iptc.IptcTypes[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/formats/jpeg/iptc/IptcTypes;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/formats/jpeg/iptc/IptcTypes;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/formats/jpeg/iptc/IptcTypes;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.imaging.formats.jpeg.iptc.IptcType getUnknown(int);",
+      [
+        "new # // class org/apache/commons/imaging/formats/jpeg/iptc/IptcTypes$1",
+        "dup",
+        "iload_0",
+        "invokespecial # // Method org/apache/commons/imaging/formats/jpeg/iptc/IptcTypes$1.\"<init>\":(I)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getName();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int getType();",
+      [
+        "aload_0",
+        "getfield # // Field type:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.jpeg.iptc.PhotoshopApp13Data": [
+    [
+      "public boolean isForceUtf8Encoding();",
+      [
+        "aload_0",
+        "getfield # // Field forceUtf8Encoding:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.pcx.PcxConstants": [
+    [
+      "private org.apache.commons.imaging.formats.pcx.PcxConstants();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.png.AbstractPngText$Itxt": [
+    [
+      "public org.apache.commons.imaging.formats.png.AbstractPngText$Itxt(java.lang.String, java.lang.String, java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method org/apache/commons/imaging/formats/png/AbstractPngText.\"<init>\":(Ljava/lang/String;Ljava/lang/String;)V",
+        "aload_0",
+        "aload_3",
+        "putfield # // Field languageTag:Ljava/lang/String;",
+        "aload_0",
+        "aload 4",
+        "putfield # // Field translatedKeyword:Ljava/lang/String;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.png.AbstractPngText$Text": [
+    [
+      "public org.apache.commons.imaging.formats.png.AbstractPngText$Text(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method org/apache/commons/imaging/formats/png/AbstractPngText.\"<init>\":(Ljava/lang/String;Ljava/lang/String;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.png.AbstractPngText$Ztxt": [
+    [
+      "public org.apache.commons.imaging.formats.png.AbstractPngText$Ztxt(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method org/apache/commons/imaging/formats/png/AbstractPngText.\"<init>\":(Ljava/lang/String;Ljava/lang/String;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.png.AbstractPngText": [
+    [
+      "public org.apache.commons.imaging.formats.png.AbstractPngText(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field keyword:Ljava/lang/String;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field text:Ljava/lang/String;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.png.Extension": [
+    [
+      "public static org.apache.commons.imaging.formats.png.Extension[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/formats/png/Extension;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/formats/png/Extension;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/formats/png/Extension;\"",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.png.FilterType": [
+    [
+      "public static org.apache.commons.imaging.formats.png.FilterType[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/formats/png/FilterType;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/formats/png/FilterType;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/formats/png/FilterType;\"",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.png.GammaCorrection": [
+    [
+      "public int correctArgb(int);",
+      [
+        "ldc # // int -16777216",
+        "iload_1",
+        "iand",
+        "istore_2",
+        "iload_1",
+        "bipush 16",
+        "ishr",
+        "sipush 255",
+        "iand",
+        "istore_3",
+        "iload_1",
+        "bipush 8",
+        "ishr",
+        "sipush 255",
+        "iand",
+        "istore 4",
+        "iload_1",
+        "iconst_0",
+        "ishr",
+        "sipush 255",
+        "iand",
+        "istore 5",
+        "aload_0",
+        "iload_3",
+        "invokevirtual # // Method correctSample:(I)I",
+        "istore_3",
+        "aload_0",
+        "iload 4",
+        "invokevirtual # // Method correctSample:(I)I",
+        "istore 4",
+        "aload_0",
+        "iload 5",
+        "invokevirtual # // Method correctSample:(I)I",
+        "istore 5",
+        "iload_2",
+        "sipush 255",
+        "iload_3",
+        "iand",
+        "bipush 16",
+        "ishl",
+        "ior",
+        "sipush 255",
+        "iload 4",
+        "iand",
+        "bipush 8",
+        "ishl",
+        "ior",
+        "sipush 255",
+        "iload 5",
+        "iand",
+        "iconst_0",
+        "ishl",
+        "ior",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int correctSample(int);",
+      [
+        "aload_0",
+        "getfield # // Field lookupTable:[I",
+        "iload_1",
+        "iaload",
+        "ireturn"
+      ]
+    ],
+    [
+      "private int correctSample(int, double, double);",
+      [
+        "ldc2_w # // double 255.0d",
+        "iload_1",
+        "i2d",
+        "ldc2_w # // double 255.0d",
+        "ddiv",
+        "dload_2",
+        "dload 4",
+        "ddiv",
+        "invokestatic # // Method java/lang/Math.pow:(DD)D",
+        "dmul",
+        "invokestatic # // Method java/lang/Math.round:(D)J",
+        "l2i",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.png.InterlaceMethod": [
+    [
+      "public static org.apache.commons.imaging.formats.png.InterlaceMethod[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/formats/png/InterlaceMethod;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/formats/png/InterlaceMethod;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/formats/png/InterlaceMethod;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isProgressive();",
+      [
+        "aload_0",
+        "getfield # // Field progressive:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.png.PhysicalScale": [
+    [
+      "private org.apache.commons.imaging.formats.png.PhysicalScale(int, double, double);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field units:I",
+        "aload_0",
+        "dload_2",
+        "putfield # // Field horizontalUnitsPerPixel:D",
+        "aload_0",
+        "dload 4",
+        "putfield # // Field verticalUnitsPerPixel:D",
+        "return"
+      ]
+    ],
+    [
+      "public double getHorizontalUnitsPerPixel();",
+      [
+        "aload_0",
+        "getfield # // Field horizontalUnitsPerPixel:D",
+        "dreturn"
+      ]
+    ],
+    [
+      "public double getVerticalUnitsPerPixel();",
+      [
+        "aload_0",
+        "getfield # // Field verticalUnitsPerPixel:D",
+        "dreturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.png.PngColorType": [
+    [
+      "public static org.apache.commons.imaging.formats.png.PngColorType[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/formats/png/PngColorType;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/formats/png/PngColorType;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/formats/png/PngColorType;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "static org.apache.commons.imaging.formats.png.PngColorType getColorType(boolean, boolean);",
+      [
+        "iload_1",
+        "ifeq 16",
+        "iload_0",
+        "ifeq 12",
+        "getstatic # // Field GREYSCALE_WITH_ALPHA:Lorg/apache/commons/imaging/formats/png/PngColorType;",
+        "areturn",
+        "getstatic # // Field GREYSCALE:Lorg/apache/commons/imaging/formats/png/PngColorType;",
+        "areturn",
+        "iload_0",
+        "ifeq 24",
+        "getstatic # // Field TRUE_COLOR_WITH_ALPHA:Lorg/apache/commons/imaging/formats/png/PngColorType;",
+        "areturn",
+        "getstatic # // Field TRUE_COLOR:Lorg/apache/commons/imaging/formats/png/PngColorType;",
+        "areturn"
+      ]
+    ],
+    [
+      "int getSamplesPerPixel();",
+      [
+        "aload_0",
+        "getfield # // Field samplesPerPixel:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "int getValue();",
+      [
+        "aload_0",
+        "getfield # // Field value:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "boolean hasAlpha();",
+      [
+        "aload_0",
+        "getfield # // Field alpha:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "boolean isGreyscale();",
+      [
+        "aload_0",
+        "getfield # // Field greyscale:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.png.PngCrc": [
+    [
+      "org.apache.commons.imaging.formats.png.PngCrc();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "sipush 256",
+        "newarray long",
+        "putfield # // Field crcTable:[J",
+        "return"
+      ]
+    ],
+    [
+      "public long continuePartialCrc(long, byte[], int);",
+      [
+        "aload_0",
+        "lload_1",
+        "aload_3",
+        "invokevirtual # // Method updateCrc:(J[B)J",
+        "lreturn"
+      ]
+    ],
+    [
+      "public int crc(byte[], int);",
+      [
+        "aload_0",
+        "ldc2_w # // long 4294967295l",
+        "aload_1",
+        "invokevirtual # // Method updateCrc:(J[B)J",
+        "ldc2_w # // long 4294967295l",
+        "lxor",
+        "l2i",
+        "ireturn"
+      ]
+    ],
+    [
+      "public long finishPartialCrc(long);",
+      [
+        "lload_1",
+        "ldc2_w # // long 4294967295l",
+        "lxor",
+        "lreturn"
+      ]
+    ],
+    [
+      "private void makeCrcTable();",
+      [
+        "iconst_0",
+        "istore_3",
+        "iload_3",
+        "sipush 256",
+        "if_icmpge 64",
+        "iload_3",
+        "i2l",
+        "lstore_1",
+        "iconst_0",
+        "istore 4",
+        "iload 4",
+        "bipush 8",
+        "if_icmpge 51",
+        "lload_1",
+        "lconst_1",
+        "land",
+        "lconst_0",
+        "lcmp",
+        "ifeq 41",
+        "ldc2_w # // long 3988292384l",
+        "lload_1",
+        "iconst_1",
+        "lshr",
+        "lxor",
+        "lstore_1",
+        "goto 45",
+        "lload_1",
+        "iconst_1",
+        "lshr",
+        "lstore_1",
+        "iinc 4, 1",
+        "goto 15",
+        "aload_0",
+        "getfield # // Field crcTable:[J",
+        "iload_3",
+        "lload_1",
+        "lastore",
+        "iinc 3, 1",
+        "goto 2",
+        "aload_0",
+        "iconst_1",
+        "putfield # // Field crcTableComputed:Z",
+        "return"
+      ]
+    ],
+    [
+      "public long startPartialCrc(byte[], int);",
+      [
+        "aload_0",
+        "ldc2_w # // long 4294967295l",
+        "aload_1",
+        "invokevirtual # // Method updateCrc:(J[B)J",
+        "lreturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.png.chunks.PngChunk": [
+    [
+      "public int getChunkType();",
+      [
+        "aload_0",
+        "getfield # // Field chunkType:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getCrc();",
+      [
+        "aload_0",
+        "getfield # // Field crc:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getLength();",
+      [
+        "aload_0",
+        "getfield # // Field length:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isAncillary();",
+      [
+        "aload_0",
+        "getfield # // Field ancillary:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isPrivate();",
+      [
+        "aload_0",
+        "getfield # // Field isPrivate:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isReserved();",
+      [
+        "aload_0",
+        "getfield # // Field reserved:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isSafeToCopy();",
+      [
+        "aload_0",
+        "getfield # // Field safeToCopy:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.png.chunks.PngChunkIdat": [
+    [
+      "public org.apache.commons.imaging.formats.png.chunks.PngChunkIdat(int, int, int, byte[]);",
+      [
+        "aload_0",
+        "iload_1",
+        "iload_2",
+        "iload_3",
+        "aload 4",
+        "invokespecial # // Method org/apache/commons/imaging/formats/png/chunks/PngChunk.\"<init>\":(III[B)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.pnm.PnmConstants": [
+    [
+      "private org.apache.commons.imaging.formats.pnm.PnmConstants();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.psd.ImageResourceType": [
+    [
+      "org.apache.commons.imaging.formats.psd.ImageResourceType(int, int, java.lang.String);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field from:I",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field to:I",
+        "aload_0",
+        "aload_3",
+        "putfield # // Field description:Ljava/lang/String;",
+        "return"
+      ]
+    ],
+    [
+      "org.apache.commons.imaging.formats.psd.ImageResourceType(int, java.lang.String);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field from:I",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field to:I",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field description:Ljava/lang/String;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.psd.PsdImageContents": [
+    [
+      "public org.apache.commons.imaging.formats.psd.PsdImageContents(org.apache.commons.imaging.formats.psd.PsdHeaderInfo, int, int, int, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field header:Lorg/apache/commons/imaging/formats/psd/PsdHeaderInfo;",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field colorModeDataLength:I",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field imageResourcesLength:I",
+        "aload_0",
+        "iload 4",
+        "putfield # // Field layerAndMaskDataLength:I",
+        "aload_0",
+        "iload 5",
+        "putfield # // Field compression:I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.AbstractTiffElement$DataElement": [
+    [
+      "public org.apache.commons.imaging.formats.tiff.AbstractTiffElement$DataElement(long, int, byte[]);",
+      [
+        "aload_0",
+        "lload_1",
+        "iload_3",
+        "invokespecial # // Method org/apache/commons/imaging/formats/tiff/AbstractTiffElement.\"<init>\":(JI)V",
+        "aload_0",
+        "aload 4",
+        "putfield # // Field data:[B",
+        "return"
+      ]
+    ],
+    [
+      "public int getDataLength();",
+      [
+        "aload_0",
+        "getfield # // Field data:[B",
+        "arraylength",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.AbstractTiffElement$Stub": [
+    [
+      "public org.apache.commons.imaging.formats.tiff.AbstractTiffElement$Stub(long, int);",
+      [
+        "aload_0",
+        "lload_1",
+        "iload_3",
+        "invokespecial # // Method org/apache/commons/imaging/formats/tiff/AbstractTiffElement.\"<init>\":(JI)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.AbstractTiffElement": [
+    [
+      "public org.apache.commons.imaging.formats.tiff.AbstractTiffElement(long, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "lload_1",
+        "putfield # // Field offset:J",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field length:I",
+        "return"
+      ]
+    ],
+    [
+      "public abstract java.lang.String getElementDescription();",
+      []
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.AbstractTiffRasterData": [
+    [
+      "public abstract float[] getData();",
+      []
+    ],
+    [
+      "public abstract org.apache.commons.imaging.formats.tiff.TiffRasterDataType getDataType();",
+      []
+    ],
+    [
+      "public final int getHeight();",
+      [
+        "aload_0",
+        "getfield # // Field height:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public abstract int[] getIntData();",
+      []
+    ],
+    [
+      "public abstract int getIntValue(int, int);",
+      []
+    ],
+    [
+      "public abstract int getIntValue(int, int, int);",
+      []
+    ],
+    [
+      "public final int getSamplesPerPixel();",
+      [
+        "aload_0",
+        "getfield # // Field samplesPerPixel:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public abstract org.apache.commons.imaging.formats.tiff.TiffRasterStatistics getSimpleStatistics();",
+      []
+    ],
+    [
+      "public abstract org.apache.commons.imaging.formats.tiff.TiffRasterStatistics getSimpleStatistics(float);",
+      []
+    ],
+    [
+      "public abstract float getValue(int, int);",
+      []
+    ],
+    [
+      "public abstract float getValue(int, int, int);",
+      []
+    ],
+    [
+      "public final int getWidth();",
+      [
+        "aload_0",
+        "getfield # // Field width:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public abstract void setIntValue(int, int, int);",
+      []
+    ],
+    [
+      "public abstract void setIntValue(int, int, int, int);",
+      []
+    ],
+    [
+      "public abstract void setValue(int, int, float);",
+      []
+    ],
+    [
+      "public abstract void setValue(int, int, int, float);",
+      []
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.TiffRasterDataType": [
+    [
+      "public static org.apache.commons.imaging.formats.tiff.TiffRasterDataType[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/formats/tiff/TiffRasterDataType;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/formats/tiff/TiffRasterDataType;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/formats/tiff/TiffRasterDataType;\"",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.TiffRasterStatistics": [
+    [
+      "public int getCountOfNulls();",
+      [
+        "aload_0",
+        "getfield # // Field nNull:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getCountOfSamples();",
+      [
+        "aload_0",
+        "getfield # // Field nSample:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public float getExcludedValue();",
+      [
+        "aload_0",
+        "getfield # // Field excludedValue:F",
+        "freturn"
+      ]
+    ],
+    [
+      "public float getMaxValue();",
+      [
+        "aload_0",
+        "getfield # // Field maxValue:F",
+        "freturn"
+      ]
+    ],
+    [
+      "public float getMeanValue();",
+      [
+        "aload_0",
+        "getfield # // Field meanValue:F",
+        "freturn"
+      ]
+    ],
+    [
+      "public float getMinValue();",
+      [
+        "aload_0",
+        "getfield # // Field minValue:F",
+        "freturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.JpegImageData": [
+    [
+      "public org.apache.commons.imaging.formats.tiff.JpegImageData(long, int, byte[]);",
+      [
+        "aload_0",
+        "lload_1",
+        "iload_3",
+        "aload 4",
+        "invokespecial # // Method org/apache/commons/imaging/formats/tiff/AbstractTiffElement$DataElement.\"<init>\":(JI[B)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.constants.TiffConstants": [
+    [
+      "private org.apache.commons.imaging.formats.tiff.constants.TiffConstants();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.constants.TiffDirectoryConstants": [
+    [
+      "private org.apache.commons.imaging.formats.tiff.constants.TiffDirectoryConstants();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.constants.TiffDirectoryType": [
+    [
+      "public static org.apache.commons.imaging.formats.tiff.constants.TiffDirectoryType[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/formats/tiff/constants/TiffDirectoryType;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/formats/tiff/constants/TiffDirectoryType;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/formats/tiff/constants/TiffDirectoryType;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isImageDirectory();",
+      [
+        "aload_0",
+        "getfield # // Field isImageDirectory:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.itu_t4.BitArrayOutputStream": [
+    [
+      "org.apache.commons.imaging.formats.tiff.itu_t4.BitArrayOutputStream();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/io/OutputStream.\"<init>\":()V",
+        "aload_0",
+        "sipush 128",
+        "putfield # // Field cacheMask:I",
+        "aload_0",
+        "bipush 16",
+        "newarray byte",
+        "putfield # // Field buffer:[B",
+        "return"
+      ]
+    ],
+    [
+      "org.apache.commons.imaging.formats.tiff.itu_t4.BitArrayOutputStream(int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/io/OutputStream.\"<init>\":()V",
+        "aload_0",
+        "sipush 128",
+        "putfield # // Field cacheMask:I",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method org/apache/commons/imaging/common/Allocator.byteArray:(I)[B",
+        "putfield # // Field buffer:[B",
+        "return"
+      ]
+    ],
+    [
+      "public void close();",
+      [
+        "aload_0",
+        "invokevirtual # // Method flush:()V",
+        "return"
+      ]
+    ],
+    [
+      "public void flush();",
+      [
+        "aload_0",
+        "getfield # // Field cacheMask:I",
+        "sipush 128",
+        "if_icmpeq 30",
+        "aload_0",
+        "aload_0",
+        "getfield # // Field cache:I",
+        "invokevirtual # // Method writeByte:(I)V",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field cache:I",
+        "aload_0",
+        "sipush 128",
+        "putfield # // Field cacheMask:I",
+        "return"
+      ]
+    ],
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "getfield # // Field bytesWritten:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void write(int);",
+      [
+        "aload_0",
+        "invokevirtual # // Method flush:()V",
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method writeByte:(I)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.itu_t4.T4_T6_Tables$Entry": [
+    [
+      "org.apache.commons.imaging.formats.tiff.itu_t4.T4_T6_Tables$Entry(java.lang.String, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field bitString:Ljava/lang/String;",
+        "aload_0",
+        "iload_2",
+        "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
+        "putfield # // Field value:Ljava/lang/Integer;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.itu_t4.T4_T6_Tables": [
+    [
+      "org.apache.commons.imaging.formats.tiff.itu_t4.T4_T6_Tables();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.photometricinterpreters.floatingpoint.PaletteEntry": [
+    [
+      "public abstract boolean coversSingleEntry();",
+      []
+    ],
+    [
+      "public abstract int getArgb(float);",
+      []
+    ],
+    [
+      "public abstract float getLowerBound();",
+      []
+    ],
+    [
+      "public abstract float getUpperBound();",
+      []
+    ],
+    [
+      "public abstract boolean isCovered(float);",
+      []
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.photometricinterpreters.floatingpoint.PaletteEntryForRange": [
+    [
+      "public boolean coversSingleEntry();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getArgb(float);",
+      [
+        "aload_0",
+        "getfield # // Field v0:F",
+        "fload_1",
+        "fcmpg",
+        "ifgt 150",
+        "fload_1",
+        "aload_0",
+        "getfield # // Field v1:F",
+        "fcmpg",
+        "ifgt 150",
+        "fload_1",
+        "aload_0",
+        "getfield # // Field v0:F",
+        "fsub",
+        "aload_0",
+        "getfield # // Field v1:F",
+        "aload_0",
+        "getfield # // Field v0:F",
+        "fsub",
+        "fdiv",
+        "fstore_2",
+        "fload_2",
+        "aload_0",
+        "getfield # // Field a1:F",
+        "aload_0",
+        "getfield # // Field a0:F",
+        "fsub",
+        "fmul",
+        "aload_0",
+        "getfield # // Field a0:F",
+        "fadd",
+        "f2d",
+        "ldc2_w # // double 0.5d",
+        "dadd",
+        "d2i",
+        "istore_3",
+        "fload_2",
+        "aload_0",
+        "getfield # // Field r1:F",
+        "aload_0",
+        "getfield # // Field r0:F",
+        "fsub",
+        "fmul",
+        "aload_0",
+        "getfield # // Field r0:F",
+        "fadd",
+        "f2d",
+        "ldc2_w # // double 0.5d",
+        "dadd",
+        "d2i",
+        "istore 4",
+        "fload_2",
+        "aload_0",
+        "getfield # // Field g1:F",
+        "aload_0",
+        "getfield # // Field g0:F",
+        "fsub",
+        "fmul",
+        "aload_0",
+        "getfield # // Field g0:F",
+        "fadd",
+        "f2d",
+        "ldc2_w # // double 0.5d",
+        "dadd",
+        "d2i",
+        "istore 5",
+        "fload_2",
+        "aload_0",
+        "getfield # // Field b1:F",
+        "aload_0",
+        "getfield # // Field b0:F",
+        "fsub",
+        "fmul",
+        "aload_0",
+        "getfield # // Field b0:F",
+        "fadd",
+        "f2d",
+        "ldc2_w # // double 0.5d",
+        "dadd",
+        "d2i",
+        "istore 6",
+        "iload_3",
+        "bipush 8",
+        "ishl",
+        "iload 4",
+        "ior",
+        "bipush 8",
+        "ishl",
+        "iload 5",
+        "ior",
+        "bipush 8",
+        "ishl",
+        "iload 6",
+        "ior",
+        "ireturn",
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public float getLowerBound();",
+      [
+        "aload_0",
+        "getfield # // Field v0:F",
+        "freturn"
+      ]
+    ],
+    [
+      "public float getUpperBound();",
+      [
+        "aload_0",
+        "getfield # // Field v1:F",
+        "freturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.tiff.photometricinterpreters.floatingpoint.PaletteEntryForValue": [
+    [
+      "public boolean coversSingleEntry();",
+      [
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public float getLowerBound();",
+      [
+        "aload_0",
+        "getfield # // Field value:F",
+        "freturn"
+      ]
+    ],
+    [
+      "public float getUpperBound();",
+      [
+        "aload_0",
+        "getfield # // Field value:F",
+        "freturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.icc.IccConstants": [
+    [
+      "private org.apache.commons.imaging.icc.IccConstants();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.icc.IccTagType": [
+    [
+      "public abstract java.lang.String getName();",
+      []
+    ],
+    [
+      "public abstract int getSignature();",
+      []
+    ],
+    [
+      "public abstract java.lang.String getTypeDescription();",
+      []
+    ]
+  ],
+  "org.apache.commons.imaging.icc.IccTagTypes": [
+    [
+      "public static org.apache.commons.imaging.icc.IccTagTypes[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/icc/IccTagTypes;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/icc/IccTagTypes;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/icc/IccTagTypes;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getName();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int getSignature();",
+      [
+        "aload_0",
+        "getfield # // Field signature:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.String getTypeDescription();",
+      [
+        "aload_0",
+        "getfield # // Field typeDescription:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.internal.Debug": [
+    [
+      "private static void debug(java.lang.String, byte[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method getDebug:(Ljava/lang/String;[B)Ljava/lang/String;",
+        "invokestatic # // Method debug:(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "private static void debug(java.lang.String, char[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method getDebug:(Ljava/lang/String;[C)Ljava/lang/String;",
+        "invokestatic # // Method debug:(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "private static void debug(java.lang.String, int[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method getDebug:(Ljava/lang/String;[I)Ljava/lang/String;",
+        "invokestatic # // Method debug:(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "public static void debug(java.lang.Throwable);",
+      [
+        "aload_0",
+        "invokestatic # // Method getDebug:(Ljava/lang/Throwable;)Ljava/lang/String;",
+        "invokestatic # // Method debug:(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "public static void debug(java.lang.Throwable, int);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method getDebug:(Ljava/lang/Throwable;I)Ljava/lang/String;",
+        "invokestatic # // Method debug:(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "private static java.lang.String getDebug(java.lang.Throwable);",
+      [
+        "aload_0",
+        "iconst_m1",
+        "invokestatic # // Method getDebug:(Ljava/lang/Throwable;I)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "private static java.lang.String getStackTrace(java.lang.Throwable, int);",
+      [
+        "aload_0",
+        "iload_1",
+        "iconst_0",
+        "invokestatic # // Method getStackTrace:(Ljava/lang/Throwable;II)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.imaging.internal.Debug();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.internal.SafeOperations": [
+    [
+      "private org.apache.commons.imaging.internal.SafeOperations();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.mylzw.MyBitInputStream": [
+    [
+      "public void flushCache();",
+      [
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field bitsInCache:I",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field bitCache:I",
+        "return"
+      ]
+    ],
+    [
+      "public long getBytesRead();",
+      [
+        "aload_0",
+        "getfield # // Field bytesRead:J",
+        "lreturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.ColorComponent": [
+    [
+      "public static org.apache.commons.imaging.palette.ColorComponent[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/imaging/palette/ColorComponent;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/imaging/palette/ColorComponent;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/imaging/palette/ColorComponent;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public int argbComponent(int);",
+      [
+        "iload_1",
+        "aload_0",
+        "getfield # // Field shift:I",
+        "ishr",
+        "sipush 255",
+        "iand",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.ColorCount": [
+    [
+      "org.apache.commons.imaging.palette.ColorCount(int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field argb:I",
+        "aload_0",
+        "sipush 255",
+        "iload_1",
+        "bipush 24",
+        "ishr",
+        "iand",
+        "putfield # // Field alpha:I",
+        "aload_0",
+        "sipush 255",
+        "iload_1",
+        "bipush 16",
+        "ishr",
+        "iand",
+        "putfield # // Field red:I",
+        "aload_0",
+        "sipush 255",
+        "iload_1",
+        "bipush 8",
+        "ishr",
+        "iand",
+        "putfield # // Field green:I",
+        "aload_0",
+        "sipush 255",
+        "iload_1",
+        "iconst_0",
+        "ishr",
+        "iand",
+        "putfield # // Field blue:I",
+        "return"
+      ]
+    ],
+    [
+      "public int hashCode();",
+      [
+        "aload_0",
+        "getfield # // Field argb:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.ColorCountComparator": [
+    [
+      "public org.apache.commons.imaging.palette.ColorCountComparator(org.apache.commons.imaging.palette.ColorComponent);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String colorComponent",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/imaging/palette/ColorComponent",
+        "putfield # // Field colorComponent:Lorg/apache/commons/imaging/palette/ColorComponent;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.ColorGroup": [
+    [
+      "boolean contains(int);",
+      [
+        "sipush 255",
+        "iload_1",
+        "bipush 24",
+        "ishr",
+        "iand",
+        "istore_2",
+        "sipush 255",
+        "iload_1",
+        "bipush 16",
+        "ishr",
+        "iand",
+        "istore_3",
+        "sipush 255",
+        "iload_1",
+        "bipush 8",
+        "ishr",
+        "iand",
+        "istore 4",
+        "sipush 255",
+        "iload_1",
+        "iconst_0",
+        "ishr",
+        "iand",
+        "istore 5",
+        "aload_0",
+        "getfield # // Field ignoreAlpha:Z",
+        "ifne 62",
+        "iload_2",
+        "aload_0",
+        "getfield # // Field minAlpha:I",
+        "if_icmplt 60",
+        "iload_2",
+        "aload_0",
+        "getfield # // Field maxAlpha:I",
+        "if_icmple 62",
+        "iconst_0",
+        "ireturn",
+        "iload_3",
+        "aload_0",
+        "getfield # // Field minRed:I",
+        "if_icmplt 78",
+        "iload_3",
+        "aload_0",
+        "getfield # // Field maxRed:I",
+        "if_icmple 80",
+        "iconst_0",
+        "ireturn",
+        "iload 4",
+        "aload_0",
+        "getfield # // Field minGreen:I",
+        "if_icmplt 98",
+        "iload 4",
+        "aload_0",
+        "getfield # // Field maxGreen:I",
+        "if_icmple 100",
+        "iconst_0",
+        "ireturn",
+        "iload 5",
+        "aload_0",
+        "getfield # // Field minBlue:I",
+        "if_icmplt 118",
+        "iload 5",
+        "aload_0",
+        "getfield # // Field maxBlue:I",
+        "if_icmple 120",
+        "iconst_0",
+        "ireturn",
+        "iconst_1",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.ColorGroupCut": [
+    [
+      "org.apache.commons.imaging.palette.ColorGroupCut(org.apache.commons.imaging.palette.ColorGroup, org.apache.commons.imaging.palette.ColorGroup, org.apache.commons.imaging.palette.ColorComponent, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field less:Lorg/apache/commons/imaging/palette/ColorGroup;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field more:Lorg/apache/commons/imaging/palette/ColorGroup;",
+        "aload_0",
+        "aload_3",
+        "putfield # // Field mode:Lorg/apache/commons/imaging/palette/ColorComponent;",
+        "aload_0",
+        "iload 4",
+        "putfield # // Field limit:I",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.imaging.palette.ColorGroup getColorGroup(int);",
+      [
+        "aload_0",
+        "getfield # // Field mode:Lorg/apache/commons/imaging/palette/ColorComponent;",
+        "iload_1",
+        "invokevirtual # // Method org/apache/commons/imaging/palette/ColorComponent.argbComponent:(I)I",
+        "istore_2",
+        "iload_2",
+        "aload_0",
+        "getfield # // Field limit:I",
+        "if_icmpgt 22",
+        "aload_0",
+        "getfield # // Field less:Lorg/apache/commons/imaging/palette/ColorGroup;",
+        "areturn",
+        "aload_0",
+        "getfield # // Field more:Lorg/apache/commons/imaging/palette/ColorGroup;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.ColorSpaceSubset$RgbComparator": [
+    [
+      "public org.apache.commons.imaging.palette.ColorSpaceSubset$RgbComparator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public int compare(org.apache.commons.imaging.palette.ColorSpaceSubset, org.apache.commons.imaging.palette.ColorSpaceSubset);",
+      [
+        "aload_1",
+        "getfield # // Field org/apache/commons/imaging/palette/ColorSpaceSubset.rgb:I",
+        "aload_2",
+        "getfield # // Field org/apache/commons/imaging/palette/ColorSpaceSubset.rgb:I",
+        "isub",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.ColorSpaceSubset": [
+    [
+      "org.apache.commons.imaging.palette.ColorSpaceSubset(int, int, int[], int[]);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field total:I",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field precision:I",
+        "aload_0",
+        "aload_3",
+        "putfield # // Field mins:[I",
+        "aload_0",
+        "aload 4",
+        "putfield # // Field maxs:[I",
+        "aload_0",
+        "iconst_1",
+        "iload_2",
+        "ishl",
+        "iconst_1",
+        "isub",
+        "putfield # // Field precisionMask:I",
+        "aload_0",
+        "iconst_m1",
+        "putfield # // Field rgb:I",
+        "return"
+      ]
+    ],
+    [
+      "public boolean contains(int, int, int);",
+      [
+        "iload_1",
+        "bipush 8",
+        "aload_0",
+        "getfield # // Field precision:I",
+        "isub",
+        "ishr",
+        "istore_1",
+        "aload_0",
+        "getfield # // Field mins:[I",
+        "iconst_0",
+        "iaload",
+        "iload_1",
+        "if_icmple 22",
+        "iconst_0",
+        "ireturn",
+        "aload_0",
+        "getfield # // Field maxs:[I",
+        "iconst_0",
+        "iaload",
+        "iload_1",
+        "if_icmpge 34",
+        "iconst_0",
+        "ireturn",
+        "iload_2",
+        "bipush 8",
+        "aload_0",
+        "getfield # // Field precision:I",
+        "isub",
+        "ishr",
+        "istore_2",
+        "aload_0",
+        "getfield # // Field mins:[I",
+        "iconst_1",
+        "iaload",
+        "iload_2",
+        "if_icmple 56",
+        "iconst_0",
+        "ireturn",
+        "aload_0",
+        "getfield # // Field maxs:[I",
+        "iconst_1",
+        "iaload",
+        "iload_2",
+        "if_icmpge 68",
+        "iconst_0",
+        "ireturn",
+        "iload_3",
+        "bipush 8",
+        "aload_0",
+        "getfield # // Field precision:I",
+        "isub",
+        "ishr",
+        "istore_3",
+        "aload_0",
+        "getfield # // Field mins:[I",
+        "iconst_2",
+        "iaload",
+        "iload_3",
+        "if_icmple 90",
+        "iconst_0",
+        "ireturn",
+        "aload_0",
+        "getfield # // Field maxs:[I",
+        "iconst_2",
+        "iaload",
+        "iload_3",
+        "if_icmpge 102",
+        "iconst_0",
+        "ireturn",
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getArea();",
+      [
+        "aload_0",
+        "getfield # // Field maxs:[I",
+        "iconst_0",
+        "iaload",
+        "aload_0",
+        "getfield # // Field mins:[I",
+        "iconst_0",
+        "iaload",
+        "isub",
+        "iconst_1",
+        "iadd",
+        "istore_1",
+        "aload_0",
+        "getfield # // Field maxs:[I",
+        "iconst_1",
+        "iaload",
+        "aload_0",
+        "getfield # // Field mins:[I",
+        "iconst_1",
+        "iaload",
+        "isub",
+        "iconst_1",
+        "iadd",
+        "istore_2",
+        "aload_0",
+        "getfield # // Field maxs:[I",
+        "iconst_2",
+        "iaload",
+        "aload_0",
+        "getfield # // Field mins:[I",
+        "iconst_2",
+        "iaload",
+        "isub",
+        "iconst_1",
+        "iadd",
+        "istore_3",
+        "iload_1",
+        "iload_2",
+        "imul",
+        "iload_3",
+        "imul",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getIndex();",
+      [
+        "aload_0",
+        "getfield # // Field index:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void setIndex(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field index:I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.LongestAxisMedianCut": [
+    [
+      "public org.apache.commons.imaging.palette.LongestAxisMedianCut();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.MedianCutPalette": [
+    [
+      "org.apache.commons.imaging.palette.MedianCutPalette(org.apache.commons.imaging.palette.ColorGroup, int[]);",
+      [
+        "aload_0",
+        "aload_2",
+        "invokespecial # // Method org/apache/commons/imaging/palette/SimplePalette.\"<init>\":([I)V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field root:Lorg/apache/commons/imaging/palette/ColorGroup;",
+        "return"
+      ]
+    ],
+    [
+      "public int getPaletteIndex(int);",
+      [
+        "aload_0",
+        "getfield # // Field root:Lorg/apache/commons/imaging/palette/ColorGroup;",
+        "astore_2",
+        "aload_2",
+        "getfield # // Field org/apache/commons/imaging/palette/ColorGroup.cut:Lorg/apache/commons/imaging/palette/ColorGroupCut;",
+        "ifnull 24",
+        "aload_2",
+        "getfield # // Field org/apache/commons/imaging/palette/ColorGroup.cut:Lorg/apache/commons/imaging/palette/ColorGroupCut;",
+        "iload_1",
+        "invokevirtual # // Method org/apache/commons/imaging/palette/ColorGroupCut.getColorGroup:(I)Lorg/apache/commons/imaging/palette/ColorGroup;",
+        "astore_2",
+        "goto 5",
+        "aload_2",
+        "getfield # // Field org/apache/commons/imaging/palette/ColorGroup.paletteIndex:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.MedianCutQuantizer": [
+    [
+      "public org.apache.commons.imaging.palette.MedianCutQuantizer(boolean);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field ignoreAlpha:Z",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.Palette": [
+    [
+      "public abstract int getEntry(int);",
+      []
+    ],
+    [
+      "public abstract int length();",
+      []
+    ]
+  ],
+  "org.apache.commons.imaging.palette.PaletteFactory$DivisionCandidate": [
+    [
+      "org.apache.commons.imaging.palette.PaletteFactory$DivisionCandidate(org.apache.commons.imaging.palette.ColorSpaceSubset, org.apache.commons.imaging.palette.ColorSpaceSubset);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field dstA:Lorg/apache/commons/imaging/palette/ColorSpaceSubset;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field dstB:Lorg/apache/commons/imaging/palette/ColorSpaceSubset;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.PaletteFactory": [
+    [
+      "public org.apache.commons.imaging.palette.PaletteFactory();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private int getFrequencyTotal(int[], int[], int[], int);",
+      [
+        "iconst_0",
+        "istore 5",
+        "aload_2",
+        "iconst_2",
+        "iaload",
+        "istore 6",
+        "iload 6",
+        "aload_3",
+        "iconst_2",
+        "iaload",
+        "if_icmpgt 97",
+        "iload 6",
+        "iconst_2",
+        "iload 4",
+        "imul",
+        "ishl",
+        "istore 7",
+        "aload_2",
+        "iconst_1",
+        "iaload",
+        "istore 8",
+        "iload 8",
+        "aload_3",
+        "iconst_1",
+        "iaload",
+        "if_icmpgt 91",
+        "iload 8",
+        "iconst_1",
+        "iload 4",
+        "imul",
+        "ishl",
+        "istore 9",
+        "aload_2",
+        "iconst_0",
+        "iaload",
+        "istore 10",
+        "iload 10",
+        "aload_3",
+        "iconst_0",
+        "iaload",
+        "if_icmpgt 85",
+        "iload 7",
+        "iload 9",
+        "ior",
+        "iload 10",
+        "ior",
+        "istore 11",
+        "iload 5",
+        "aload_1",
+        "iload 11",
+        "iaload",
+        "iadd",
+        "istore 5",
+        "iinc 10, 1",
+        "goto 52",
+        "iinc 8, 1",
+        "goto 30",
+        "iinc 6, 1",
+        "goto 8",
+        "iload 5",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.QuantizedPalette": [
+    [
+      "public int getEntry(int);",
+      [
+        "aload_0",
+        "getfield # // Field subsets:Ljava/util/List;",
+        "iload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/imaging/palette/ColorSpaceSubset",
+        "astore_2",
+        "aload_2",
+        "getfield # // Field org/apache/commons/imaging/palette/ColorSpaceSubset.rgb:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "private static org.apache.commons.imaging.palette.ColorSpaceSubset[] lambda$new$0(int);",
+      [
+        "iload_0",
+        "anewarray # // class org/apache/commons/imaging/palette/ColorSpaceSubset",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.palette.SimplePalette": [
+    [
+      "public int getEntry(int);",
+      [
+        "aload_0",
+        "getfield # // Field palette:[I",
+        "iload_1",
+        "iaload",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getPaletteIndex(int);",
+      [
+        "iconst_0",
+        "istore_2",
+        "iload_2",
+        "aload_0",
+        "getfield # // Field palette:[I",
+        "arraylength",
+        "if_icmpge 29",
+        "aload_0",
+        "getfield # // Field palette:[I",
+        "iload_2",
+        "iaload",
+        "iload_1",
+        "if_icmpne 23",
+        "iload_2",
+        "ireturn",
+        "iinc 2, 1",
+        "goto 2",
+        "iconst_m1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int length();",
+      [
+        "aload_0",
+        "getfield # // Field palette:[I",
+        "arraylength",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.roundtrip.TestImages": [
+    [
+      "private org.apache.commons.imaging.roundtrip.TestImages();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.test.TestResources": [
+    [
+      "private org.apache.commons.imaging.test.TestResources();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ]
+}
