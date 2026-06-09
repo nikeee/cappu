@@ -2675,6 +2675,19 @@ function generateBody(
         storeVar(local.slot, local.descriptor);
         return;
       }
+      // An own field of an anonymous class (not a binder container, so it is in
+      // the capture map): write via implicit `this`, like the read path.
+      const capture = symbol ? captureFields.get(symbol) : undefined;
+      if (capture) {
+        writeField(
+          { owner: capture.ownerInternal, name: capture.fieldName, descriptor: capture.descriptor, isStatic: false },
+          () => {
+            code.u1(OP_ALOAD_0);
+            pushRef(`L${thisInternalName};`);
+          },
+        );
+        return;
+      }
       // Field by simple name: implicit `this.f` or a static field.
       if (symbol && symbol.flags & SymbolFlags.Field) {
         writeField(fieldInfoOf(symbol), () => {

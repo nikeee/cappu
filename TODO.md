@@ -78,10 +78,9 @@ verifiable placeholder, never a crash.
       `emitSynthCtorWithInits`); methods read the own fields through the same
       implicit-`this` getfield path as captures. An unsupported initializer
       degrades the ctor to prologue-only (fields keep defaults) rather than
-      crashing. Own-field *writes* in methods, initializer blocks, and declared
-      constructors are still unsupported; **local** classes with own field
-      initializers also remain (their synth ctor still uses the prologue-only
-      path).
+      crashing. Own-field *writes* in methods are emitted too (routed through the
+      same implicit-`this` path). Initializer blocks and declared constructors are
+      still unsupported.
 - [x] User-defined interfaces are now emitted (ACC_INTERFACE|ACC_ABSTRACT, super
       Object, `extends` as super-interfaces): abstract methods (no Code), default
       and static methods (with Code), and implicitly public-static-final constant

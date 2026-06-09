@@ -2041,3 +2041,31 @@ test(
     );
   },
 );
+
+test(
+  "anonymous class writing its own field runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "AnonWrite",
+      [
+        "interface Counter { int next(); }",
+        "public class AnonWrite {",
+        "  static Counter make() {",
+        "    return new Counter() {",
+        "      int n = 0;",
+        "      public int next() { n = n + 1; return n; }",
+        "    };",
+        "  }",
+        "  public static void main(String[] a){",
+        "    Counter c = make();",
+        "    System.out.println(c.next());",
+        "    System.out.println(c.next());",
+        "    System.out.println(c.next());",
+        "  }",
+        "}",
+      ].join("\n"),
+      "1\n2\n3\n",
+    );
+  },
+);
