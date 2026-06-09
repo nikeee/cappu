@@ -914,8 +914,18 @@ export function createChecker(program: Program): Checker {
         const enclosing = enclosingTypeSymbol(node);
         return enclosing ? classType(enclosing) : errorType;
       }
-      case SyntaxKind.SuperExpression:
+      case SyntaxKind.SuperExpression: {
+        // `super` has the type of the enclosing class's direct superclass, so a
+        // member lookup on it finds the inherited (overridden) member.
+        const enclosing = enclosingTypeSymbol(node);
+        const decl = enclosing?.valueDeclaration ?? enclosing?.declarations?.[0];
+        const ext = decl ? (decl as { extendsType?: TypeNode }).extendsType : undefined;
+        if (ext) {
+          const base = resolveType(ext, decl!);
+          if (base.kind === TypeKind.Class) return base;
+        }
         return classTypeByFqn("java.lang.Object");
+      }
       case SyntaxKind.ParenthesizedExpression:
         return getTypeOfExpression((node as ParenthesizedExpression).expression);
       case SyntaxKind.CastExpression:

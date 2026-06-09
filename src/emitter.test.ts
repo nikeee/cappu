@@ -2257,3 +2257,30 @@ test(
     );
   },
 );
+
+test(
+  "super.method() calls run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "SuperCall",
+      [
+        "class Base {",
+        "  int f() { return 1; }",
+        "  int g(int x) { return x * 2; }",
+        "}",
+        "public class SuperCall extends Base {",
+        "  int f() { return super.f() + 10; }", // 11
+        "  int h() { return super.g(super.f()); }", // g(1) = 2
+        "  public static void main(String[] a){",
+        "    SuperCall s = new SuperCall();",
+        "    System.out.println(s.f());",
+        "    System.out.println(s.h());",
+        "    System.out.println(s.g(5));", // inherited, virtual -> 10
+        "  }",
+        "}",
+      ].join("\n"),
+      "11\n2\n10\n",
+    );
+  },
+);

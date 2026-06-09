@@ -40,6 +40,9 @@ verifiable placeholder, never a crash.
       14.30.1) as the matched condition: tests the record type, then binds each
       component pattern via the accessors (nested record patterns recurse). Shares
       the deconstruction machinery with pattern switch.
+- [x] `super.m(...)` calls (JLS 15.12.3): non-virtual invokespecial against the
+      resolved superclass method on `this`. The checker types `super` as the
+      enclosing class's direct superclass so the (overridden) member resolves.
 - [x] Varargs calls (JLS 15.12.4.2): the trailing arguments of a call to a
       `T... xs` method are packed into a fresh `T[]` (with element box/widen), an
       empty varargs slot becomes `new T[0]`, and a single array argument assignable

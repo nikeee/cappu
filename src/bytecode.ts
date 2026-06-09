@@ -2165,9 +2165,17 @@ function generateBody(
     const staticCall = isStaticDeclaration(decl);
     const descriptor = methodDescriptor(decl, program);
     const callee = call.expression;
+    // `super.m(...)` (JLS 15.12.3): a non-virtual invocation of the superclass
+    // method on `this`, emitted as invokespecial against the resolved owner.
+    const isSuperCall =
+      callee.kind === SyntaxKind.PropertyAccessExpression &&
+      (callee as PropertyAccessExpression).expression.kind === SyntaxKind.SuperExpression;
 
     if (!staticCall) {
-      if (callee.kind === SyntaxKind.PropertyAccessExpression) {
+      if (isSuperCall) {
+        code.u1(OP_ALOAD_0);
+        pushRef(`L${thisInternalName};`);
+      } else if (callee.kind === SyntaxKind.PropertyAccessExpression) {
         emitExpr((callee as PropertyAccessExpression).expression);
       } else if (callee.kind === SyntaxKind.Identifier) {
         emitImplicitReceiver(ownerName); // implicit this (or this$0 for an outer member)
@@ -2221,6 +2229,11 @@ function generateBody(
       code.u1(OP_INVOKESTATIC);
       code.u2(cp.methodref(ownerName, decl.name.text, descriptor));
       pop(pushedValues);
+    } else if (isSuperCall) {
+      // super.m(): non-virtual dispatch to the resolved (super) method.
+      code.u1(OP_INVOKESPECIAL);
+      code.u2(cp.methodref(ownerName, decl.name.text, descriptor));
+      pop(pushedValues + 1);
     } else if (isInterface) {
       code.u1(OP_INVOKEINTERFACE);
       code.u2(cp.interfaceMethodref(ownerName, decl.name.text, descriptor));
