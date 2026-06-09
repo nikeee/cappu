@@ -2613,3 +2613,24 @@ test(
     );
   },
 );
+
+test(
+  "reading a generic field/return at a more specific type checkcasts (JLS 5.2)",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "GenericErasure",
+      [
+        "class Box<T> { T v; Box(T t){ v = t; } T get(){ return v; } }",
+        "public class GenericErasure {",
+        "  public static void main(String[] a){",
+        "    Box<String> b = new Box<>(\"hello\");",
+        "    System.out.println(b.v.length());", // field read: getfield Object -> checkcast String
+        "    System.out.println(b.get().length());", // method return: erased Object -> checkcast String
+        "  }",
+        "}",
+      ].join("\n"),
+      "5\n5\n",
+    );
+  },
+);

@@ -1848,6 +1848,28 @@ function generateBody(
     return info.descriptor;
   };
 
+  // Synthetic checkcast after reading an erased generic member (JLS 5.2): a field
+  // or method whose declared type is a type variable uses the erased descriptor
+  // (Object), so when the access's instantiated static type is more specific,
+  // javac inserts a checkcast. `node` is the access expression (its checker type
+  // is the instantiated type); the erased value is already on the stack.
+  const erasedCheckcast = (node: Node, descriptor: string): string => {
+    if (descriptor !== "Ljava/lang/Object;") return descriptor;
+    const actual = checker.getTypeOfExpression(node);
+    const actualDesc = typeDescriptor(actual);
+    if (
+      actualDesc !== "Ljava/lang/Object;" &&
+      (actual.kind === TypeKind.Class || actual.kind === TypeKind.Array)
+    ) {
+      code.u1(OP_CHECKCAST);
+      code.u2(cp.classInfo(actualDesc[0] === "[" ? actualDesc : actualDesc.slice(1, -1)));
+      pop();
+      push(actualDesc);
+      return actualDesc;
+    }
+    return descriptor;
+  };
+
   // The receiver for an implicit-`this` member access: `this`, or - for a local/
   // anonymous class reaching an enclosing-instance member - `this.this$0`.
   const emitImplicitReceiver = (ownerInternal: string): void => {
@@ -2000,7 +2022,7 @@ function generateBody(
         // A field or enum constant by its simple name: implicit `this.f` or a static.
         if (symbol && symbol.flags & (SymbolFlags.Field | SymbolFlags.EnumConstant)) {
           const fi = fieldInfoOf(symbol);
-          return emitFieldRead(fi, () => emitImplicitReceiver(fi.owner));
+          return erasedCheckcast(node, emitFieldRead(fi, () => emitImplicitReceiver(fi.owner)));
         }
         throw new UnsupportedEmit();
       }
@@ -2041,7 +2063,7 @@ function generateBody(
         const symbol = checker.resolveName(access.name);
         if (!symbol || !(symbol.flags & (SymbolFlags.Field | SymbolFlags.EnumConstant)))
           throw new UnsupportedEmit();
-        return emitFieldRead(fieldInfoOf(symbol), () => emitExpr(access.expression));
+        return erasedCheckcast(node, emitFieldRead(fieldInfoOf(symbol), () => emitExpr(access.expression)));
       }
       case SyntaxKind.ArrayCreationExpression:
         return emitArrayCreation(node as ArrayCreationExpression);
@@ -2295,24 +2317,9 @@ function generateBody(
     }
     if (returnDesc === "V") return returnDesc;
     push(returnDesc);
-    // Synthetic cast after an erased generic return (JLS 5.2): the method ref
-    // uses the erased descriptor (a type variable becomes Object), so when the
-    // call's static type is more specific, checkcast to it - as javac does.
-    if (returnDesc === "Ljava/lang/Object;") {
-      const actual = checker.getTypeOfExpression(call);
-      const actualDesc = typeDescriptor(actual);
-      if (
-        actualDesc !== "Ljava/lang/Object;" &&
-        (actual.kind === TypeKind.Class || actual.kind === TypeKind.Array)
-      ) {
-        code.u1(OP_CHECKCAST);
-        code.u2(cp.classInfo(actualDesc[0] === "[" ? actualDesc : actualDesc.slice(1, -1)));
-        pop();
-        push(actualDesc);
-        return actualDesc;
-      }
-    }
-    return returnDesc;
+    // An erased generic return gets a synthetic checkcast to the call's
+    // instantiated type, as javac does.
+    return erasedCheckcast(call, returnDesc);
   };
 
   // new T(args): new; dup; <args>; invokespecial T.<init>:(...)V -> leaves the ref.

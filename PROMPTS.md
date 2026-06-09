@@ -98,3 +98,4 @@ no timestamps were captured.
 - 2026-06-09 06:10 — probe / continue
 - 2026-06-09 06:35 — continue (final corpus baseline regen)
 - 2026-06-09 06:50 — cli flags question; yargs ugly; server import side effect weird; bug fixes
+- 2026-06-09 07:05 — continue
