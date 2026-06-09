@@ -43,6 +43,10 @@ verifiable placeholder, never a crash.
 - [x] `super.m(...)` calls (JLS 15.12.3): non-virtual invokespecial against the
       resolved superclass method on `this`. The checker types `super` as the
       enclosing class's direct superclass so the (overridden) member resolves.
+- [x] `super.f` field access (JLS 15.11.2): reads the (hidden) superclass field
+      off `this` - field access is non-virtual, so the resolved owner is used.
+- [x] `switch` over a boxed `Integer`/`Short`/`Byte`/`Character` selector: the
+      selector is unboxed to int before the int dispatch (JLS 14.11 / 5.1.8).
 - [x] Varargs calls (JLS 15.12.4.2): the trailing arguments of a call to a
       `T... xs` method are packed into a fresh `T[]` (with element box/widen), an
       empty varargs slot becomes `new T[0]`, and a single array argument assignable

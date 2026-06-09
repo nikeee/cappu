@@ -1961,6 +1961,10 @@ function generateBody(
         pushRef();
         return "Ljava/lang/Object;";
       case SyntaxKind.ThisExpression:
+      case SyntaxKind.SuperExpression:
+        // `this`, or `super` as a field-access receiver: the current instance.
+        // Field access is non-virtual, so super.f reads the superclass field off
+        // `this` (the resolved field already names the superclass owner).
         code.u1(OP_ALOAD_0);
         pushRef(`L${thisInternalName};`);
         return `L${thisInternalName};`;
@@ -3567,7 +3571,9 @@ function generateBody(
       selType.kind === TypeKind.Class && selType.symbol.flags & SymbolFlags.Enum
         ? selType.symbol
         : undefined;
-    if (!isString && !enumSym && numericCategory(selType) !== "I") throw new UnsupportedEmit();
+    // The selector must be int-like: an int-family primitive or a boxed wrapper
+    // (Integer/Short/Byte/Character), which `coerce(..., "I")` unboxes below.
+    if (!isString && !enumSym && numericCat(selType) !== "I") throw new UnsupportedEmit();
     // An enum switch dispatches on the constant's ordinal (declaration order),
     // run-equivalent to javac's $SwitchMap when the enum is compiled with it.
     const enumOrdinal = (lab: Node): number => {

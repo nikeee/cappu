@@ -2284,3 +2284,54 @@ test(
     );
   },
 );
+
+test(
+  "super field access runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "SuperField",
+      [
+        "class B { int x = 5; }",
+        "public class SuperField extends B {",
+        "  int x = 99;",
+        "  int hidden() { return super.x; }", // 5 (field access is non-virtual)
+        "  int own() { return x; }", // 99
+        "  public static void main(String[] a){",
+        "    SuperField s = new SuperField();",
+        "    System.out.println(s.hidden());",
+        "    System.out.println(s.own());",
+        "  }",
+        "}",
+      ].join("\n"),
+      "5\n99\n",
+    );
+  },
+);
+
+test(
+  "switch over a boxed Integer selector runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "BoxedSwitch",
+      [
+        "public class BoxedSwitch {",
+        "  static String f(Integer n) {",
+        "    switch (n) {",
+        '      case 1: return "one";',
+        '      case 2: return "two";',
+        '      default: return "many";',
+        "    }",
+        "  }",
+        "  public static void main(String[] a){",
+        "    System.out.println(f(1));",
+        "    System.out.println(f(2));",
+        "    System.out.println(f(9));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "one\ntwo\nmany\n",
+    );
+  },
+);
