@@ -2151,3 +2151,26 @@ test(
     );
   },
 );
+
+test(
+  "record explicit accessor override runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "AccRec",
+      [
+        "record Name(String first, String last) {",
+        "  public String first() { return first.toUpperCase(); }",
+        "}",
+        "public class AccRec {",
+        "  public static void main(String[] a){",
+        '    Name n = new Name("ann", "lee");',
+        "    System.out.println(n.first());",
+        "    System.out.println(n.last());",
+        "  }",
+        "}",
+      ].join("\n"),
+      "ANN\nlee\n",
+    );
+  },
+);

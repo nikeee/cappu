@@ -103,7 +103,9 @@ verifiable placeholder, never a crash.
       implicit canonical ctor. A **full explicit canonical constructor** (params
       matching the components) and **alternate `this(...)`-delegating
       constructors** are emitted as ordinary constructors over java/lang/Record.
-      Explicit accessor overrides are not yet emitted (those degrade).
+      An **explicit accessor override** (`public int x() {...}`) is emitted as a
+      declared method, suppressing the implicit accessor for that component; a
+      bare reference to the component name inside it reads the field.
 - [x] Explicit constructor invocations (JLS 8.8.7.1): a leading `super(args)` or
       `this(args)`; `this(...)` skips this constructor's field initializers. The
       target overload is resolved by argument count (as for `new`).
