@@ -995,6 +995,19 @@ export function createChecker(program: Program): Checker {
           const stringType = classTypeByFqn("java.lang.String");
           if (isString(left, stringType) || isString(right, stringType)) return stringType;
         }
+        // `&`, `|`, `^` on boolean operands are the boolean logical operators and
+        // yield boolean (JLS 15.22.2); on integral operands they are bitwise.
+        const isBool = (t: Type): boolean =>
+          t.kind === TypeKind.Primitive && (t as { name: string }).name === "boolean";
+        if (
+          (b.operatorToken === SyntaxKind.AmpersandToken ||
+            b.operatorToken === SyntaxKind.BarToken ||
+            b.operatorToken === SyntaxKind.CaretToken) &&
+          isBool(left) &&
+          isBool(right)
+        ) {
+          return booleanType;
+        }
         return widerNumeric(left, right);
       }
       default:

@@ -2509,3 +2509,27 @@ test(
     );
   },
 );
+
+test(
+  "boolean bitwise operators as values run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "BoolBitwise",
+      [
+        "public class BoolBitwise {",
+        "  public static void main(String[] a){",
+        "    boolean x = true, y = false;",
+        "    System.out.println(x & y);", // as a call argument
+        "    System.out.println(x | y);",
+        "    System.out.println(x ^ y);",
+        '    System.out.println("" + (x & y) + (x | y));', // as concat operands
+        "    boolean r = (x | y) & !(x ^ y);",
+        "    System.out.println(r);",
+        "  }",
+        "}",
+      ].join("\n"),
+      "false\ntrue\ntrue\nfalsetrue\nfalse\n",
+    );
+  },
+);
