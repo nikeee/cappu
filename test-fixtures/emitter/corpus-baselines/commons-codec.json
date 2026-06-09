@@ -1,0 +1,2121 @@
+{
+  "org.apache.commons.codec.DecoderException": [
+    [
+      "public org.apache.commons.codec.DecoderException();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Exception.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.DecoderException(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.DecoderException(java.lang.String, java.lang.Object...);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokestatic # // Method java/lang/String.format:(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;",
+        "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.DecoderException(java.lang.String, java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.EncoderException": [
+    [
+      "public org.apache.commons.codec.EncoderException();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Exception.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.EncoderException(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.EncoderException(java.lang.String, java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.CharEncoding": [
+    [
+      "public org.apache.commons.codec.CharEncoding();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.Charsets": [
+    [
+      "public org.apache.commons.codec.Charsets();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.CodecPolicy": [
+    [
+      "public static org.apache.commons.codec.CodecPolicy[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/codec/CodecPolicy;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/codec/CodecPolicy;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/codec/CodecPolicy;\"",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.Resources": [
+    [
+      "public org.apache.commons.codec.Resources();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.StringEncoderComparator": [
+    [
+      "public org.apache.commons.codec.StringEncoderComparator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field stringEncoder:Lorg/apache/commons/codec/StringEncoder;",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.StringEncoderComparator(org.apache.commons.codec.StringEncoder);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field stringEncoder:Lorg/apache/commons/codec/StringEncoder;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.AbstractBaseNCodecStreamBuilder": [
+    [
+      "protected boolean getEncode();",
+      [
+        "aload_0",
+        "getfield # // Field encode:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.BaseNCodec$AbstractBuilder": [
+    [
+      "byte[] getDecodeTable();",
+      [
+        "aload_0",
+        "getfield # // Field decodeTable:[B",
+        "areturn"
+      ]
+    ],
+    [
+      "org.apache.commons.codec.CodecPolicy getDecodingPolicy();",
+      [
+        "aload_0",
+        "getfield # // Field decodingPolicy:Lorg/apache/commons/codec/CodecPolicy;",
+        "areturn"
+      ]
+    ],
+    [
+      "int getEncodedBlockSize();",
+      [
+        "aload_0",
+        "getfield # // Field encodedBlockSize:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "byte[] getEncodeTable();",
+      [
+        "aload_0",
+        "getfield # // Field encodeTable:[B",
+        "areturn"
+      ]
+    ],
+    [
+      "int getLineLength();",
+      [
+        "aload_0",
+        "getfield # // Field lineLength:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "byte[] getLineSeparator();",
+      [
+        "aload_0",
+        "getfield # // Field lineSeparator:[B",
+        "areturn"
+      ]
+    ],
+    [
+      "byte getPadding();",
+      [
+        "aload_0",
+        "getfield # // Field padding:B",
+        "ireturn"
+      ]
+    ],
+    [
+      "int getUnencodedBlockSize();",
+      [
+        "aload_0",
+        "getfield # // Field unencodedBlockSize:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.BaseNCodec$Context": [
+    [
+      "org.apache.commons.codec.binary.BaseNCodec$Context();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.BaseNCodec": [
+    [
+      "static int getLength(byte[]);",
+      [
+        "aload_0",
+        "ifnonnull 8",
+        "iconst_0",
+        "goto 10",
+        "aload_0",
+        "arraylength",
+        "ireturn"
+      ]
+    ],
+    [
+      "protected org.apache.commons.codec.binary.BaseNCodec(int, int, int, int, byte);",
+      [
+        "aload_0",
+        "iload_1",
+        "iload_2",
+        "iload_3",
+        "iload 4",
+        "iload 5",
+        "getstatic # // Field DECODING_POLICY_DEFAULT:Lorg/apache/commons/codec/CodecPolicy;",
+        "invokespecial # // Method \"<init>\":(IIIIBLorg/apache/commons/codec/CodecPolicy;)V",
+        "return"
+      ]
+    ],
+    [
+      "int available(org.apache.commons.codec.binary.BaseNCodec$Context);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method hasData:(Lorg/apache/commons/codec/binary/BaseNCodec$Context;)Z",
+        "ifeq 20",
+        "aload_1",
+        "getfield # // Field org/apache/commons/codec/binary/BaseNCodec$Context.pos:I",
+        "aload_1",
+        "getfield # // Field org/apache/commons/codec/binary/BaseNCodec$Context.readPos:I",
+        "isub",
+        "goto 21",
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "abstract void decode(byte[], int, int, org.apache.commons.codec.binary.BaseNCodec$Context);",
+      []
+    ],
+    [
+      "public byte[] decode(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokevirtual # // Method decode:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public byte[] encode(byte[]);",
+      [
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/codec/binary/BinaryCodec.isEmpty:([B)Z",
+        "ifeq 9",
+        "aload_1",
+        "areturn",
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "aload_1",
+        "arraylength",
+        "invokevirtual # // Method encode:([BII)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "abstract void encode(byte[], int, int, org.apache.commons.codec.binary.BaseNCodec$Context);",
+      []
+    ],
+    [
+      "public java.lang.String encodeAsString(byte[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method encode:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.newStringUtf8:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String encodeToString(byte[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method encode:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.newStringUtf8:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.CodecPolicy getCodecPolicy();",
+      [
+        "aload_0",
+        "getfield # // Field decodingPolicy:Lorg/apache/commons/codec/CodecPolicy;",
+        "areturn"
+      ]
+    ],
+    [
+      "protected abstract boolean isInAlphabet(byte);",
+      []
+    ],
+    [
+      "public boolean isInAlphabet(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "iconst_1",
+        "invokevirtual # // Method isInAlphabet:([BZ)Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.BinaryCodec": [
+    [
+      "public static java.lang.String toAsciiString(byte[]);",
+      [
+        "new # // class java/lang/String",
+        "dup",
+        "aload_0",
+        "invokestatic # // Method toAsciiChars:([B)[C",
+        "invokespecial # // Method java/lang/String.\"<init>\":([C)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.binary.BinaryCodec();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public byte[] decode(byte[]);",
+      [
+        "aload_1",
+        "invokestatic # // Method fromAscii:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public byte[] encode(byte[]);",
+      [
+        "aload_1",
+        "invokestatic # // Method toAsciiBytes:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public byte[] toByteArray(java.lang.String);",
+      [
+        "aload_1",
+        "ifnonnull 8",
+        "getstatic # // Field EMPTY_BYTE_ARRAY:[B",
+        "areturn",
+        "aload_1",
+        "invokevirtual # // Method java/lang/String.toCharArray:()[C",
+        "invokestatic # // Method fromAscii:([C)[B",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.CharSequenceUtils": [
+    [
+      "public org.apache.commons.codec.binary.CharSequenceUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.StringUtils": [
+    [
+      "public org.apache.commons.codec.binary.StringUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.Base58$Builder": [
+    [
+      "public org.apache.commons.codec.binary.Base58 get();",
+      [
+        "new # // class org/apache/commons/codec/binary/Base58",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/codec/binary/Base58.\"<init>\":(Lorg/apache/commons/codec/binary/Base58$Builder;)V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.Base58": [
+    [
+      "public static org.apache.commons.codec.binary.Base58$Builder builder();",
+      [
+        "new # // class org/apache/commons/codec/binary/Base58$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/codec/binary/Base58$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.binary.Base58();",
+      [
+        "aload_0",
+        "new # // class org/apache/commons/codec/binary/Base58$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/codec/binary/Base58$Builder.\"<init>\":()V",
+        "invokespecial # // Method \"<init>\":(Lorg/apache/commons/codec/binary/Base58$Builder;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.binary.Base58(org.apache.commons.codec.binary.Base58$Builder);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/codec/binary/BaseNCodec.\"<init>\":(Lorg/apache/commons/codec/binary/BaseNCodec$AbstractBuilder;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.Base58InputStream$Builder": [
+    [
+      "public org.apache.commons.codec.binary.Base58InputStream$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/codec/binary/BaseNCodecInputStream$AbstracBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.binary.Base58InputStream get();",
+      [
+        "new # // class org/apache/commons/codec/binary/Base58InputStream",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/codec/binary/Base58InputStream.\"<init>\":(Lorg/apache/commons/codec/binary/Base58InputStream$Builder;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "protected org.apache.commons.codec.binary.Base58 newBaseNCodec();",
+      [
+        "new # // class org/apache/commons/codec/binary/Base58",
+        "dup",
+        "invokespecial # // Method org/apache/commons/codec/binary/Base58.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.Base58InputStream": [
+    [
+      "public static org.apache.commons.codec.binary.Base58InputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/codec/binary/Base58InputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/codec/binary/Base58InputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.codec.binary.Base58InputStream(org.apache.commons.codec.binary.Base58InputStream$Builder);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/codec/binary/BaseNCodecInputStream.\"<init>\":(Lorg/apache/commons/codec/binary/BaseNCodecInputStream$AbstracBuilder;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.BaseNCodecInputStream$AbstracBuilder": [
+    [
+      "public org.apache.commons.codec.binary.BaseNCodecInputStream$AbstracBuilder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/codec/binary/AbstractBaseNCodecStreamBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "protected java.io.InputStream getInputStream();",
+      [
+        "aload_0",
+        "getfield # // Field inputStream:Ljava/io/InputStream;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.BaseNCodecInputStream": [
+    [
+      "public synchronized void mark(int);",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public boolean markSupported();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.Base58OutputStream$Builder": [
+    [
+      "public org.apache.commons.codec.binary.Base58OutputStream get();",
+      [
+        "new # // class org/apache/commons/codec/binary/Base58OutputStream",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/codec/binary/Base58OutputStream.\"<init>\":(Lorg/apache/commons/codec/binary/Base58OutputStream$Builder;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "protected org.apache.commons.codec.binary.Base58 newBaseNCodec();",
+      [
+        "new # // class org/apache/commons/codec/binary/Base58",
+        "dup",
+        "invokespecial # // Method org/apache/commons/codec/binary/Base58.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.Base58OutputStream": [
+    [
+      "public static org.apache.commons.codec.binary.Base58OutputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/codec/binary/Base58OutputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/codec/binary/Base58OutputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.codec.binary.Base58OutputStream(org.apache.commons.codec.binary.Base58OutputStream$Builder);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/codec/binary/BaseNCodecOutputStream.\"<init>\":(Lorg/apache/commons/codec/binary/BaseNCodecOutputStream$AbstractBuilder;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.BaseNCodecOutputStream$AbstractBuilder": [
+    [
+      "public org.apache.commons.codec.binary.BaseNCodecOutputStream$AbstractBuilder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/codec/binary/AbstractBaseNCodecStreamBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "protected java.io.OutputStream getOutputStream();",
+      [
+        "aload_0",
+        "getfield # // Field outputStream:Ljava/io/OutputStream;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.B64": [
+    [
+      "org.apache.commons.codec.digest.B64();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.Blake3$EngineState": [
+    [
+      "private void addChunkCV(int[], long);",
+      [
+        "aload_1",
+        "astore 4",
+        "lload_2",
+        "lstore 5",
+        "lload 5",
+        "lconst_1",
+        "land",
+        "lconst_0",
+        "lcmp",
+        "ifne 43",
+        "aload_0",
+        "invokevirtual # // Method popCV:()[I",
+        "aload 4",
+        "aload_0",
+        "getfield # // Field key:[I",
+        "aload_0",
+        "getfield # // Field flags:I",
+        "invokestatic # // Method org/apache/commons/codec/digest/Blake3.parentChainingValue:([I[I[II)[I",
+        "astore 4",
+        "lload 5",
+        "iconst_1",
+        "lshr",
+        "lstore 5",
+        "goto 6",
+        "aload_0",
+        "aload 4",
+        "invokevirtual # // Method pushCV:([I)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.Blake3$Output": [
+    [
+      "private org.apache.commons.codec.digest.Blake3$Output(int[], int[], long, int, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field inputChainingValue:[I",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field blockWords:[I",
+        "aload_0",
+        "lload_3",
+        "putfield # // Field counter:J",
+        "aload_0",
+        "iload 5",
+        "putfield # // Field blockLength:I",
+        "aload_0",
+        "iload 6",
+        "putfield # // Field flags:I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.Blake3": [
+    [
+      "public static org.apache.commons.codec.digest.Blake3 initHash();",
+      [
+        "new # // class org/apache/commons/codec/digest/Blake3",
+        "dup",
+        "getstatic # // Field IV:[I",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":([II)V",
+        "areturn"
+      ]
+    ],
+    [
+      "private static int[] parentChainingValue(int[], int[], int[], int);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "iload_3",
+        "invokestatic # // Method parentOutput:([I[I[II)Lorg/apache/commons/codec/digest/Blake3$Output;",
+        "invokevirtual # // Method org/apache/commons/codec/digest/Blake3$Output.chainingValue:()[I",
+        "areturn"
+      ]
+    ],
+    [
+      "private static void round(int[], int[], byte[]);",
+      [
+        "aload_0",
+        "iconst_0",
+        "iconst_4",
+        "bipush 8",
+        "bipush 12",
+        "aload_1",
+        "aload_2",
+        "iconst_0",
+        "baload",
+        "iaload",
+        "aload_1",
+        "aload_2",
+        "iconst_1",
+        "baload",
+        "iaload",
+        "invokestatic # // Method g:([IIIIIII)V",
+        "aload_0",
+        "iconst_1",
+        "iconst_5",
+        "bipush 9",
+        "bipush 13",
+        "aload_1",
+        "aload_2",
+        "iconst_2",
+        "baload",
+        "iaload",
+        "aload_1",
+        "aload_2",
+        "iconst_3",
+        "baload",
+        "iaload",
+        "invokestatic # // Method g:([IIIIIII)V",
+        "aload_0",
+        "iconst_2",
+        "bipush 6",
+        "bipush 10",
+        "bipush 14",
+        "aload_1",
+        "aload_2",
+        "iconst_4",
+        "baload",
+        "iaload",
+        "aload_1",
+        "aload_2",
+        "iconst_5",
+        "baload",
+        "iaload",
+        "invokestatic # // Method g:([IIIIIII)V",
+        "aload_0",
+        "iconst_3",
+        "bipush 7",
+        "bipush 11",
+        "bipush 15",
+        "aload_1",
+        "aload_2",
+        "bipush 6",
+        "baload",
+        "iaload",
+        "aload_1",
+        "aload_2",
+        "bipush 7",
+        "baload",
+        "iaload",
+        "invokestatic # // Method g:([IIIIIII)V",
+        "aload_0",
+        "iconst_0",
+        "iconst_5",
+        "bipush 10",
+        "bipush 15",
+        "aload_1",
+        "aload_2",
+        "bipush 8",
+        "baload",
+        "iaload",
+        "aload_1",
+        "aload_2",
+        "bipush 9",
+        "baload",
+        "iaload",
+        "invokestatic # // Method g:([IIIIIII)V",
+        "aload_0",
+        "iconst_1",
+        "bipush 6",
+        "bipush 11",
+        "bipush 12",
+        "aload_1",
+        "aload_2",
+        "bipush 10",
+        "baload",
+        "iaload",
+        "aload_1",
+        "aload_2",
+        "bipush 11",
+        "baload",
+        "iaload",
+        "invokestatic # // Method g:([IIIIIII)V",
+        "aload_0",
+        "iconst_2",
+        "bipush 7",
+        "bipush 8",
+        "bipush 13",
+        "aload_1",
+        "aload_2",
+        "bipush 12",
+        "baload",
+        "iaload",
+        "aload_1",
+        "aload_2",
+        "bipush 13",
+        "baload",
+        "iaload",
+        "invokestatic # // Method g:([IIIIIII)V",
+        "aload_0",
+        "iconst_3",
+        "iconst_4",
+        "bipush 9",
+        "bipush 14",
+        "aload_1",
+        "aload_2",
+        "bipush 14",
+        "baload",
+        "iaload",
+        "aload_1",
+        "aload_2",
+        "bipush 15",
+        "baload",
+        "iaload",
+        "invokestatic # // Method g:([IIIIIII)V",
+        "return"
+      ]
+    ],
+    [
+      "private static int unpackInt(byte[], int);",
+      [
+        "aload_0",
+        "iload_1",
+        "baload",
+        "sipush 255",
+        "iand",
+        "aload_0",
+        "iload_1",
+        "iconst_1",
+        "iadd",
+        "baload",
+        "sipush 255",
+        "iand",
+        "bipush 8",
+        "ishl",
+        "ior",
+        "aload_0",
+        "iload_1",
+        "iconst_2",
+        "iadd",
+        "baload",
+        "sipush 255",
+        "iand",
+        "bipush 16",
+        "ishl",
+        "ior",
+        "aload_0",
+        "iload_1",
+        "iconst_3",
+        "iadd",
+        "baload",
+        "sipush 255",
+        "iand",
+        "bipush 24",
+        "ishl",
+        "ior",
+        "ireturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.codec.digest.Blake3(int[], int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class org/apache/commons/codec/digest/Blake3$EngineState",
+        "dup",
+        "aload_1",
+        "iload_2",
+        "invokespecial # // Method org/apache/commons/codec/digest/Blake3$EngineState.\"<init>\":([II)V",
+        "putfield # // Field engineState:Lorg/apache/commons/codec/digest/Blake3$EngineState;",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.digest.Blake3 doFinalize(byte[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "aload_1",
+        "arraylength",
+        "invokevirtual # // Method doFinalize:([BII)Lorg/apache/commons/codec/digest/Blake3;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.digest.Blake3 doFinalize(byte[], int, int);",
+      [
+        "aload_1",
+        "iload_2",
+        "iload_3",
+        "invokestatic # // Method checkBufferArgs:([BII)V",
+        "aload_0",
+        "getfield # // Field engineState:Lorg/apache/commons/codec/digest/Blake3$EngineState;",
+        "aload_1",
+        "iload_2",
+        "iload_3",
+        "invokevirtual # // Method org/apache/commons/codec/digest/Blake3$EngineState.outputHash:([BII)V",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.digest.Blake3 reset();",
+      [
+        "aload_0",
+        "getfield # // Field engineState:Lorg/apache/commons/codec/digest/Blake3$EngineState;",
+        "invokevirtual # // Method org/apache/commons/codec/digest/Blake3$EngineState.reset:()V",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.digest.Blake3 update(byte[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "aload_1",
+        "arraylength",
+        "invokevirtual # // Method update:([BII)Lorg/apache/commons/codec/digest/Blake3;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.digest.Blake3 update(byte[], int, int);",
+      [
+        "aload_1",
+        "iload_2",
+        "iload_3",
+        "invokestatic # // Method checkBufferArgs:([BII)V",
+        "aload_0",
+        "getfield # // Field engineState:Lorg/apache/commons/codec/digest/Blake3$EngineState;",
+        "aload_1",
+        "iload_2",
+        "iload_3",
+        "invokevirtual # // Method org/apache/commons/codec/digest/Blake3$EngineState.inputData:([BII)V",
+        "aload_0",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.Crc16$Builder": [
+    [
+      "public org.apache.commons.codec.digest.Crc16$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.digest.Crc16 get();",
+      [
+        "new # // class org/apache/commons/codec/digest/Crc16",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/codec/digest/Crc16.\"<init>\":(Lorg/apache/commons/codec/digest/Crc16$Builder;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.digest.Crc16$Builder setInit(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field init:I",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.digest.Crc16$Builder setXorOut(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field xorOut:I",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.codec.digest.Crc16$Builder table(int[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "ldc # // String table",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class \"[I\"",
+        "putfield # // Field table:[I",
+        "aload_0",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.Crc16": [
+    [
+      "public static org.apache.commons.codec.digest.Crc16$Builder builder();",
+      [
+        "new # // class org/apache/commons/codec/digest/Crc16$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/codec/digest/Crc16$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.codec.digest.Crc16(org.apache.commons.codec.digest.Crc16$Builder);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "getfield # // Field org/apache/commons/codec/digest/Crc16$Builder.init:I",
+        "putfield # // Field init:I",
+        "aload_0",
+        "aload_1",
+        "getfield # // Field org/apache/commons/codec/digest/Crc16$Builder.xorOut:I",
+        "putfield # // Field xorOut:I",
+        "aload_0",
+        "aload_1",
+        "getfield # // Field org/apache/commons/codec/digest/Crc16$Builder.init:I",
+        "putfield # // Field crc:I",
+        "aload_0",
+        "aload_1",
+        "getfield # // Field org/apache/commons/codec/digest/Crc16$Builder.table:[I",
+        "ldc # // String table",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class \"[I\"",
+        "putfield # // Field table:[I",
+        "return"
+      ]
+    ],
+    [
+      "public long getValue();",
+      [
+        "aload_0",
+        "getfield # // Field crc:I",
+        "aload_0",
+        "getfield # // Field xorOut:I",
+        "ixor",
+        "i2l",
+        "lreturn"
+      ]
+    ],
+    [
+      "public void reset();",
+      [
+        "aload_0",
+        "aload_0",
+        "getfield # // Field init:I",
+        "putfield # // Field crc:I",
+        "return"
+      ]
+    ],
+    [
+      "public void update(byte[], int, int);",
+      [
+        "iload_3",
+        "iload_2",
+        "iadd",
+        "istore 4",
+        "iload_2",
+        "istore 5",
+        "iload 5",
+        "iload 4",
+        "if_icmpge 29",
+        "aload_0",
+        "aload_1",
+        "iload 5",
+        "baload",
+        "invokevirtual # // Method update:(I)V",
+        "iinc 5, 1",
+        "goto 8",
+        "return"
+      ]
+    ],
+    [
+      "public void update(int);",
+      [
+        "aload_0",
+        "aload_0",
+        "getfield # // Field crc:I",
+        "bipush 8",
+        "iushr",
+        "aload_0",
+        "getfield # // Field table:[I",
+        "aload_0",
+        "getfield # // Field crc:I",
+        "iload_1",
+        "ixor",
+        "sipush 255",
+        "iand",
+        "iaload",
+        "ixor",
+        "putfield # // Field crc:I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.Hex": [
+    [
+      "protected static char[] encodeHex(byte[], char[]);",
+      [
+        "aload_0",
+        "arraylength",
+        "istore_2",
+        "aload_0",
+        "iconst_0",
+        "iload_2",
+        "aload_1",
+        "iload_2",
+        "iconst_1",
+        "ishl",
+        "newarray char",
+        "iconst_0",
+        "invokestatic # // Method encodeHex:([BII[C[CI)[C",
+        "areturn"
+      ]
+    ],
+    [
+      "public static char[] encodeHex(byte[], int, int, boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "iload_2",
+        "iload_3",
+        "invokestatic # // Method toAlphabet:(Z)[C",
+        "iload_2",
+        "iconst_1",
+        "ishl",
+        "newarray char",
+        "iconst_0",
+        "invokestatic # // Method encodeHex:([BII[C[CI)[C",
+        "areturn"
+      ]
+    ],
+    [
+      "public static void encodeHex(byte[], int, int, boolean, char[], int);",
+      [
+        "aload_0",
+        "iload_1",
+        "iload_2",
+        "iload_3",
+        "invokestatic # // Method toAlphabet:(Z)[C",
+        "aload 4",
+        "iload 5",
+        "invokestatic # // Method encodeHex:([BII[C[CI)[C",
+        "pop",
+        "return"
+      ]
+    ],
+    [
+      "private static char[] toAlphabet(boolean);",
+      [
+        "iload_0",
+        "ifeq 10",
+        "getstatic # // Field DIGITS_LOWER:[C",
+        "goto 13",
+        "getstatic # // Field DIGITS_UPPER:[C",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.Crypt": [
+    [
+      "public static java.lang.String crypt(byte[]);",
+      [
+        "aload_0",
+        "aconst_null",
+        "invokestatic # // Method crypt:([BLjava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String crypt(java.lang.String);",
+      [
+        "aload_0",
+        "aconst_null",
+        "invokestatic # // Method crypt:(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.digest.Crypt();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.DigestUtils": [
+    [
+      "public static byte[] md2(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method md2:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] md5(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method md5:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] sha(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha1:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] sha(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha1:(Ljava/lang/String;)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] sha1(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method sha1:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] sha256(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method sha256:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] sha3_224(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method sha3_224:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] sha3_256(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method sha3_256:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] sha3_384(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method sha3_384:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] sha3_512(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method sha3_512:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] sha384(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method sha384:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] sha512(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method sha512:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] sha512_224(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method sha512_224:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] sha512_256(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method sha512_256:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String shaHex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha1Hex:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String shaHex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha1Hex:(Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] shake128_256(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method shake128_256:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] shake256_512(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
+        "invokestatic # // Method shake256_512:([B)[B",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.Md5Crypt": [
+    [
+      "public org.apache.commons.codec.digest.Md5Crypt();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.MessageDigestAlgorithms": [
+    [
+      "private org.apache.commons.codec.digest.MessageDigestAlgorithms();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.Sha2Crypt": [
+    [
+      "public static java.lang.String sha256Crypt(byte[]);",
+      [
+        "aload_0",
+        "aconst_null",
+        "invokestatic # // Method sha256Crypt:([BLjava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha512Crypt(byte[]);",
+      [
+        "aload_0",
+        "aconst_null",
+        "invokestatic # // Method sha512Crypt:([BLjava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.digest.Sha2Crypt();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.UnixCrypt": [
+    [
+      "private static int byteToUnsigned(byte);",
+      [
+        "iload_0",
+        "sipush 255",
+        "iand",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static java.lang.String crypt(byte[]);",
+      [
+        "aload_0",
+        "aconst_null",
+        "invokestatic # // Method crypt:([BLjava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "private static int dEncrypt(int, int, int, int, int, int[]);",
+      [
+        "iload_1",
+        "iload_1",
+        "bipush 16",
+        "iushr",
+        "ixor",
+        "istore 6",
+        "iload 6",
+        "iload_3",
+        "iand",
+        "istore 7",
+        "iload 6",
+        "iload 4",
+        "iand",
+        "istore 6",
+        "iload 7",
+        "iload 7",
+        "bipush 16",
+        "ishl",
+        "ixor",
+        "iload_1",
+        "ixor",
+        "aload 5",
+        "iload_2",
+        "iaload",
+        "ixor",
+        "istore 7",
+        "iload 6",
+        "iload 6",
+        "bipush 16",
+        "ishl",
+        "ixor",
+        "iload_1",
+        "ixor",
+        "aload 5",
+        "iload_2",
+        "iconst_1",
+        "iadd",
+        "iaload",
+        "ixor",
+        "istore 8",
+        "iload 8",
+        "iconst_4",
+        "iushr",
+        "iload 8",
+        "bipush 28",
+        "ishl",
+        "ior",
+        "istore 8",
+        "iload_0",
+        "getstatic # // Field SPTRANS:[[I",
+        "iconst_1",
+        "aaload",
+        "iload 8",
+        "bipush 63",
+        "iand",
+        "iaload",
+        "getstatic # // Field SPTRANS:[[I",
+        "iconst_3",
+        "aaload",
+        "iload 8",
+        "bipush 8",
+        "iushr",
+        "bipush 63",
+        "iand",
+        "iaload",
+        "ior",
+        "getstatic # // Field SPTRANS:[[I",
+        "iconst_5",
+        "aaload",
+        "iload 8",
+        "bipush 16",
+        "iushr",
+        "bipush 63",
+        "iand",
+        "iaload",
+        "ior",
+        "getstatic # // Field SPTRANS:[[I",
+        "bipush 7",
+        "aaload",
+        "iload 8",
+        "bipush 24",
+        "iushr",
+        "bipush 63",
+        "iand",
+        "iaload",
+        "ior",
+        "getstatic # // Field SPTRANS:[[I",
+        "iconst_0",
+        "aaload",
+        "iload 7",
+        "bipush 63",
+        "iand",
+        "iaload",
+        "ior",
+        "getstatic # // Field SPTRANS:[[I",
+        "iconst_2",
+        "aaload",
+        "iload 7",
+        "bipush 8",
+        "iushr",
+        "bipush 63",
+        "iand",
+        "iaload",
+        "ior",
+        "getstatic # // Field SPTRANS:[[I",
+        "iconst_4",
+        "aaload",
+        "iload 7",
+        "bipush 16",
+        "iushr",
+        "bipush 63",
+        "iand",
+        "iaload",
+        "ior",
+        "getstatic # // Field SPTRANS:[[I",
+        "bipush 6",
+        "aaload",
+        "iload 7",
+        "bipush 24",
+        "iushr",
+        "bipush 63",
+        "iand",
+        "iaload",
+        "ior",
+        "ixor",
+        "istore_0",
+        "iload_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "private static int hPermOp(int, int, int);",
+      [
+        "iload_0",
+        "bipush 16",
+        "iload_1",
+        "isub",
+        "ishl",
+        "iload_0",
+        "ixor",
+        "iload_2",
+        "iand",
+        "istore_3",
+        "iload_0",
+        "iload_3",
+        "ixor",
+        "iload_3",
+        "bipush 16",
+        "iload_1",
+        "isub",
+        "iushr",
+        "ixor",
+        "ireturn"
+      ]
+    ],
+    [
+      "private static void permOp(int, int, int, int, int[]);",
+      [
+        "iload_0",
+        "iload_2",
+        "iushr",
+        "iload_1",
+        "ixor",
+        "iload_3",
+        "iand",
+        "istore 5",
+        "iload_0",
+        "iload 5",
+        "iload_2",
+        "ishl",
+        "ixor",
+        "istore_0",
+        "iload_1",
+        "iload 5",
+        "ixor",
+        "istore_1",
+        "aload 4",
+        "iconst_0",
+        "iload_0",
+        "iastore",
+        "aload 4",
+        "iconst_1",
+        "iload_1",
+        "iastore",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.digest.UnixCrypt();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.GitIdentifiers$DirectoryEntry": [
+    [
+      "public int compareTo(org.apache.commons.codec.digest.GitIdentifiers$DirectoryEntry);",
+      [
+        "aload_0",
+        "getfield # // Field sortKey:Ljava/lang/String;",
+        "aload_1",
+        "getfield # // Field sortKey:Ljava/lang/String;",
+        "invokevirtual # // Method java/lang/String.compareTo:(Ljava/lang/String;)I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.GitIdentifiers$FileMode": [
+    [
+      "public static org.apache.commons.codec.digest.GitIdentifiers$FileMode[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/codec/digest/GitIdentifiers$FileMode;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/codec/digest/GitIdentifiers$FileMode;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/codec/digest/GitIdentifiers$FileMode;\"",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.GitIdentifiers": [
+    [
+      "private static byte[] getGitBlobPrefix(long);",
+      [
+        "ldc # // String blob",
+        "lload_0",
+        "invokestatic # // Method getGitPrefix:(Ljava/lang/String;J)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "private static byte[] getGitTreePrefix(long);",
+      [
+        "ldc # // String tree",
+        "lload_0",
+        "invokestatic # // Method getGitPrefix:(Ljava/lang/String;J)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.codec.digest.GitIdentifiers();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.HmacAlgorithms": [
+    [
+      "public static org.apache.commons.codec.digest.HmacAlgorithms[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/codec/digest/HmacAlgorithms;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/codec/digest/HmacAlgorithms;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/codec/digest/HmacAlgorithms;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getName();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.MurmurHash": [
+    [
+      "org.apache.commons.codec.digest.MurmurHash();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "static int getLittleEndianInt(byte[], int);",
+      [
+        "aload_0",
+        "iload_1",
+        "baload",
+        "sipush 255",
+        "iand",
+        "aload_0",
+        "iload_1",
+        "iconst_1",
+        "iadd",
+        "baload",
+        "sipush 255",
+        "iand",
+        "bipush 8",
+        "ishl",
+        "ior",
+        "aload_0",
+        "iload_1",
+        "iconst_2",
+        "iadd",
+        "baload",
+        "sipush 255",
+        "iand",
+        "bipush 16",
+        "ishl",
+        "ior",
+        "aload_0",
+        "iload_1",
+        "iconst_3",
+        "iadd",
+        "baload",
+        "sipush 255",
+        "iand",
+        "bipush 24",
+        "ishl",
+        "ior",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.PureJavaCrc32": [
+    [
+      "public org.apache.commons.codec.digest.PureJavaCrc32();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "invokevirtual # // Method resetCrc:()V",
+        "return"
+      ]
+    ],
+    [
+      "public long getValue();",
+      [
+        "aload_0",
+        "getfield # // Field crc:I",
+        "iconst_m1",
+        "ixor",
+        "i2l",
+        "ldc2_w # // long 4294967295l",
+        "land",
+        "lreturn"
+      ]
+    ],
+    [
+      "public void reset();",
+      [
+        "aload_0",
+        "invokevirtual # // Method resetCrc:()V",
+        "return"
+      ]
+    ],
+    [
+      "private void resetCrc();",
+      [
+        "aload_0",
+        "iconst_m1",
+        "putfield # // Field crc:I",
+        "return"
+      ]
+    ],
+    [
+      "public final void update(int);",
+      [
+        "aload_0",
+        "aload_0",
+        "getfield # // Field crc:I",
+        "bipush 8",
+        "iushr",
+        "getstatic # // Field T:[I",
+        "aload_0",
+        "getfield # // Field crc:I",
+        "iload_1",
+        "ixor",
+        "bipush 24",
+        "ishl",
+        "bipush 24",
+        "iushr",
+        "iaload",
+        "ixor",
+        "putfield # // Field crc:I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.PureJavaCrc32C": [
+    [
+      "public org.apache.commons.codec.digest.PureJavaCrc32C();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "invokevirtual # // Method reset:()V",
+        "return"
+      ]
+    ],
+    [
+      "public long getValue();",
+      [
+        "aload_0",
+        "getfield # // Field crc:I",
+        "i2l",
+        "lstore_1",
+        "lload_1",
+        "ldc2_w # // long -1l",
+        "lxor",
+        "ldc2_w # // long 4294967295l",
+        "land",
+        "lreturn"
+      ]
+    ],
+    [
+      "public void reset();",
+      [
+        "aload_0",
+        "iconst_m1",
+        "putfield # // Field crc:I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.XXHash32": [
+    [
+      "private static int getInt(byte[], int);",
+      [
+        "aload_0",
+        "iload_1",
+        "baload",
+        "sipush 255",
+        "iand",
+        "aload_0",
+        "iload_1",
+        "iconst_1",
+        "iadd",
+        "baload",
+        "sipush 255",
+        "iand",
+        "bipush 8",
+        "ishl",
+        "ior",
+        "aload_0",
+        "iload_1",
+        "iconst_2",
+        "iadd",
+        "baload",
+        "sipush 255",
+        "iand",
+        "bipush 16",
+        "ishl",
+        "ior",
+        "aload_0",
+        "iload_1",
+        "iconst_3",
+        "iadd",
+        "baload",
+        "sipush 255",
+        "iand",
+        "bipush 24",
+        "ishl",
+        "ior",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.digest.XXHash32();",
+      [
+        "aload_0",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":(I)V",
+        "return"
+      ]
+    ],
+    [
+      "public void reset();",
+      [
+        "aload_0",
+        "invokevirtual # // Method initializeState:()V",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field totalLen:I",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field pos:I",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field stateUpdated:Z",
+        "return"
+      ]
+    ],
+    [
+      "public void update(int);",
+      [
+        "aload_0",
+        "getfield # // Field oneByte:[B",
+        "iconst_0",
+        "iload_1",
+        "sipush 255",
+        "iand",
+        "i2b",
+        "bastore",
+        "aload_0",
+        "aload_0",
+        "getfield # // Field oneByte:[B",
+        "iconst_0",
+        "iconst_1",
+        "invokevirtual # // Method update:([BII)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.language.AbstractCaverphone": [
+    [
+      "public org.apache.commons.codec.language.AbstractCaverphone();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.language.Caverphone1": [
+    [
+      "public org.apache.commons.codec.language.Caverphone1();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/codec/language/AbstractCaverphone.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.language.Caverphone2": [
+    [
+      "public org.apache.commons.codec.language.Caverphone2();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/codec/language/AbstractCaverphone.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.language.SoundexUtils": [
+    [
+      "org.apache.commons.codec.language.SoundexUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.language.bm.NameType": [
+    [
+      "public static org.apache.commons.codec.language.bm.NameType[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/codec/language/bm/NameType;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/codec/language/bm/NameType;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/codec/language/bm/NameType;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getName();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.language.bm.RuleType": [
+    [
+      "public static org.apache.commons.codec.language.bm.RuleType[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/codec/language/bm/RuleType;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/codec/language/bm/RuleType;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/codec/language/bm/RuleType;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getName();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.Base16TestData": [
+    [
+      "public org.apache.commons.codec.binary.Base16TestData();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.Base32TestData": [
+    [
+      "public org.apache.commons.codec.binary.Base32TestData();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.Base64TestData": [
+    [
+      "org.apache.commons.codec.binary.Base64TestData();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.BaseNTestData": [
+    [
+      "public org.apache.commons.codec.binary.BaseNTestData();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.Codec105ErrorInputStream": [
+    [
+      "public org.apache.commons.codec.binary.Codec105ErrorInputStream();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/io/InputStream.\"<init>\":()V",
+        "aload_0",
+        "iconst_3",
+        "putfield # // Field countdown:I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.NoOpBaseNCodec": [
+    [
+      "org.apache.commons.codec.binary.NoOpBaseNCodec();",
+      [
+        "aload_0",
+        "iconst_0",
+        "iconst_0",
+        "iconst_0",
+        "iconst_0",
+        "invokespecial # // Method org/apache/commons/codec/binary/BaseNCodec.\"<init>\":(IIII)V",
+        "return"
+      ]
+    ],
+    [
+      "void decode(byte[], int, int, org.apache.commons.codec.binary.BaseNCodec$Context);",
+      [
+        "return"
+      ]
+    ],
+    [
+      "void encode(byte[], int, int, org.apache.commons.codec.binary.BaseNCodec$Context);",
+      [
+        "return"
+      ]
+    ],
+    [
+      "protected boolean isInAlphabet(byte);",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.digest.Binary": [
+    [
+      "org.apache.commons.codec.digest.Binary();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ]
+}

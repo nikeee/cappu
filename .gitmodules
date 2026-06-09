@@ -18,3 +18,15 @@
 	path = test-fixtures/emitter/corpus/json-java
 	url = https://github.com/stleary/JSON-java.git
 	shallow = true
+[submodule "test-fixtures/emitter/corpus/commons-io"]
+	path = test-fixtures/emitter/corpus/commons-io
+	url = https://github.com/apache/commons-io.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/commons-collections"]
+	path = test-fixtures/emitter/corpus/commons-collections
+	url = https://github.com/apache/commons-collections.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/commons-codec"]
+	path = test-fixtures/emitter/corpus/commons-codec
+	url = https://github.com/apache/commons-codec.git
+	shallow = true

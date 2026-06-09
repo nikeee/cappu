@@ -1,0 +1,5186 @@
+{
+  "org.apache.commons.collections4.ArrayStack": [
+    [
+      "public org.apache.commons.collections4.ArrayStack();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.ArrayUtils": [
+    [
+      "private org.apache.commons.collections4.ArrayUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.Bag": [
+    [
+      "public abstract int getCount(java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract boolean remove(java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract boolean remove(java.lang.Object, int);",
+      []
+    ],
+    [
+      "public abstract int size();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.BoundedCollection": [
+    [
+      "public abstract boolean isFull();",
+      []
+    ],
+    [
+      "public abstract int maxSize();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.CollectionUtils$CardinalityHelper": [
+    [
+      "public int freqA(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_0",
+        "getfield # // Field cardinalityA:Lorg/apache/commons/collections4/Bag;",
+        "invokevirtual # // Method getFreq:(Ljava/lang/Object;Lorg/apache/commons/collections4/Bag;)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int freqB(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_0",
+        "getfield # // Field cardinalityB:Lorg/apache/commons/collections4/Bag;",
+        "invokevirtual # // Method getFreq:(Ljava/lang/Object;Lorg/apache/commons/collections4/Bag;)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public final int max(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method freqA:(Ljava/lang/Object;)I",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method freqB:(Ljava/lang/Object;)I",
+        "invokestatic # // Method java/lang/Math.max:(II)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public final int min(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method freqA:(Ljava/lang/Object;)I",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method freqB:(Ljava/lang/Object;)I",
+        "invokestatic # // Method java/lang/Math.min:(II)I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.CollectionUtils$EquatorWrapper": [
+    [
+      "public boolean equals(java.lang.Object);",
+      [
+        "aload_1",
+        "instanceof # // class org/apache/commons/collections4/CollectionUtils$EquatorWrapper",
+        "ifne 9",
+        "iconst_0",
+        "ireturn",
+        "aload_1",
+        "checkcast # // class org/apache/commons/collections4/CollectionUtils$EquatorWrapper",
+        "astore_2",
+        "aload_0",
+        "getfield # // Field equator:Lorg/apache/commons/collections4/Equator;",
+        "aload_0",
+        "getfield # // Field object:Ljava/lang/Object;",
+        "aload_2",
+        "invokevirtual # // Method getObject:()Ljava/lang/Object;",
+        "invokeinterface #, 3 // InterfaceMethod org/apache/commons/collections4/Equator.equate:(Ljava/lang/Object;Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int hashCode();",
+      [
+        "aload_0",
+        "getfield # // Field equator:Lorg/apache/commons/collections4/Equator;",
+        "aload_0",
+        "getfield # // Field object:Ljava/lang/Object;",
+        "invokeinterface #, 2 // InterfaceMethod org/apache/commons/collections4/Equator.hash:(Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.CollectionUtils": [
+    [
+      "private org.apache.commons.collections4.CollectionUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private static org.apache.commons.collections4.CollectionUtils$EquatorWrapper lambda$retainAll$0(org.apache.commons.collections4.Equator, java.lang.Object);",
+      [
+        "new # // class org/apache/commons/collections4/CollectionUtils$EquatorWrapper",
+        "dup",
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/collections4/CollectionUtils$EquatorWrapper.\"<init>\":(Lorg/apache/commons/collections4/Equator;Ljava/lang/Object;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "private static org.apache.commons.collections4.CollectionUtils$EquatorWrapper lambda$removeAll$0(org.apache.commons.collections4.Equator, java.lang.Object);",
+      [
+        "new # // class org/apache/commons/collections4/CollectionUtils$EquatorWrapper",
+        "dup",
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/collections4/CollectionUtils$EquatorWrapper.\"<init>\":(Lorg/apache/commons/collections4/Equator;Ljava/lang/Object;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "private static java.lang.Object lambda$isEqualCollection$0(org.apache.commons.collections4.Equator, java.lang.Object);",
+      [
+        "new # // class org/apache/commons/collections4/CollectionUtils$EquatorWrapper",
+        "dup",
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/collections4/CollectionUtils$EquatorWrapper.\"<init>\":(Lorg/apache/commons/collections4/Equator;Ljava/lang/Object;)V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.ComparatorUtils": [
+    [
+      "private org.apache.commons.collections4.ComparatorUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.EnumerationUtils": [
+    [
+      "private org.apache.commons.collections4.EnumerationUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.FactoryUtils": [
+    [
+      "private org.apache.commons.collections4.FactoryUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.FluentIterable": [
+    [
+      "org.apache.commons.collections4.FluentIterable();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_0",
+        "putfield # // Field iterable:Ljava/lang/Iterable;",
+        "return"
+      ]
+    ],
+    [
+      "public boolean isEmpty();",
+      [
+        "aload_0",
+        "getfield # // Field iterable:Ljava/lang/Iterable;",
+        "invokestatic # // Method org/apache/commons/collections4/IterableUtils.isEmpty:(Ljava/lang/Iterable;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "getfield # // Field iterable:Ljava/lang/Iterable;",
+        "invokestatic # // Method org/apache/commons/collections4/IterableUtils.size:(Ljava/lang/Iterable;)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "getfield # // Field iterable:Ljava/lang/Iterable;",
+        "invokestatic # // Method org/apache/commons/collections4/IterableUtils.toString:(Ljava/lang/Iterable;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.FunctorException": [
+    [
+      "public org.apache.commons.collections4.FunctorException();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.FunctorException(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.FunctorException(java.lang.String, java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.IterableUtils$1": [
+    [
+      "org.apache.commons.collections4.IterableUtils$1();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/FluentIterable.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.IterableUtils": [
+    [
+      "public org.apache.commons.collections4.IterableUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.IteratorUtils": [
+    [
+      "private org.apache.commons.collections4.IteratorUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.ListUtils$CharSequenceAsList": [
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "getfield # // Field sequence:Ljava/lang/CharSequence;",
+        "invokeinterface #, 1 // InterfaceMethod java/lang/CharSequence.length:()I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.ListUtils$LcsVisitor": [
+    [
+      "org.apache.commons.collections4.ListUtils$LcsVisitor();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field sequence:Ljava/util/ArrayList;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.ListUtils": [
+    [
+      "private org.apache.commons.collections4.ListUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.MapIterator": [
+    [
+      "public abstract boolean hasNext();",
+      []
+    ],
+    [
+      "public abstract void remove();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.MultiSet$Entry": [
+    [
+      "public abstract boolean equals(java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract int getCount();",
+      []
+    ],
+    [
+      "public abstract int hashCode();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.MultiSet": [
+    [
+      "public abstract boolean equals(java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract int getCount(java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract int hashCode();",
+      []
+    ],
+    [
+      "public abstract boolean remove(java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract int remove(java.lang.Object, int);",
+      []
+    ],
+    [
+      "public abstract int size();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.OrderedIterator": [
+    [
+      "public abstract boolean hasPrevious();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.OrderedMapIterator": [
+    [
+      "public abstract boolean hasPrevious();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.PredicateUtils": [
+    [
+      "private org.apache.commons.collections4.PredicateUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.ResettableIterator": [
+    [
+      "public abstract void reset();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.TransformerUtils": [
+    [
+      "private org.apache.commons.collections4.TransformerUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bag.AbstractMapBag$BagIterator": [
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field parent:Lorg/apache/commons/collections4/bag/AbstractMapBag;",
+        "getfield # // Field org/apache/commons/collections4/bag/AbstractMapBag.modCount:I",
+        "aload_0",
+        "getfield # // Field mods:I",
+        "if_icmpeq 22",
+        "new # // class java/util/ConcurrentModificationException",
+        "dup",
+        "invokespecial # // Method java/util/ConcurrentModificationException.\"<init>\":()V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field canRemove:Z",
+        "ifne 37",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":()V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field current:Ljava/util/Map$Entry;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map$Entry.getValue:()Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/collections4/bag/AbstractMapBag$MutableInteger",
+        "astore_1",
+        "aload_1",
+        "getfield # // Field org/apache/commons/collections4/bag/AbstractMapBag$MutableInteger.value:I",
+        "iconst_1",
+        "if_icmple 71",
+        "aload_1",
+        "dup",
+        "getfield # // Field org/apache/commons/collections4/bag/AbstractMapBag$MutableInteger.value:I",
+        "iconst_1",
+        "isub",
+        "putfield # // Field org/apache/commons/collections4/bag/AbstractMapBag$MutableInteger.value:I",
+        "goto 80",
+        "aload_0",
+        "getfield # // Field entryIterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "aload_0",
+        "getfield # // Field parent:Lorg/apache/commons/collections4/bag/AbstractMapBag;",
+        "dup",
+        "getfield # // Field org/apache/commons/collections4/bag/AbstractMapBag.size:I",
+        "iconst_1",
+        "isub",
+        "putfield # // Field org/apache/commons/collections4/bag/AbstractMapBag.size:I",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field canRemove:Z",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bag.AbstractMapBag$MutableInteger": [
+    [
+      "org.apache.commons.collections4.bag.AbstractMapBag$MutableInteger(int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field value:I",
+        "return"
+      ]
+    ],
+    [
+      "public int hashCode();",
+      [
+        "aload_0",
+        "getfield # // Field value:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bag.AbstractMapBag": [
+    [
+      "protected org.apache.commons.collections4.bag.AbstractMapBag();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public void clear();",
+      [
+        "aload_0",
+        "dup",
+        "getfield # // Field modCount:I",
+        "iconst_1",
+        "iadd",
+        "putfield # // Field modCount:I",
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.clear:()V",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field size:I",
+        "return"
+      ]
+    ],
+    [
+      "public boolean contains(java.lang.Object);",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Map.containsKey:(Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getCount(java.lang.Object);",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Map.get:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/collections4/bag/AbstractMapBag$MutableInteger",
+        "astore_2",
+        "aload_2",
+        "ifnull 23",
+        "aload_2",
+        "getfield # // Field org/apache/commons/collections4/bag/AbstractMapBag$MutableInteger.value:I",
+        "ireturn",
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isEmpty();",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.isEmpty:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "getfield # // Field size:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bag.HashBag": [
+    [
+      "public org.apache.commons.collections4.bag.HashBag();",
+      [
+        "aload_0",
+        "new # // class java/util/HashMap",
+        "dup",
+        "invokespecial # // Method java/util/HashMap.\"<init>\":()V",
+        "invokespecial # // Method org/apache/commons/collections4/bag/AbstractMapBag.\"<init>\":(Ljava/util/Map;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bag.PredicatedBag": [
+    [
+      "public int getCount(java.lang.Object);",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Lorg/apache/commons/collections4/Bag;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod org/apache/commons/collections4/Bag.getCount:(Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean remove(java.lang.Object, int);",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Lorg/apache/commons/collections4/Bag;",
+        "aload_1",
+        "iload_2",
+        "invokeinterface #, 3 // InterfaceMethod org/apache/commons/collections4/Bag.remove:(Ljava/lang/Object;I)Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.collection.AbstractCollectionDecorator": [
+    [
+      "protected org.apache.commons.collections4.collection.AbstractCollectionDecorator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public void clear();",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/Collection;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Collection.clear:()V",
+        "return"
+      ]
+    ],
+    [
+      "public boolean contains(java.lang.Object);",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/Collection;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Collection.contains:(Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isEmpty();",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/Collection;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Collection.isEmpty:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean remove(java.lang.Object);",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/Collection;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Collection.remove:(Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/Collection;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Collection.size:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.Object[] toArray();",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/Collection;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Collection.toArray:()[Ljava/lang/Object;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.collection.SynchronizedCollection": [
+    [
+      "public void clear();",
+      [
+        "aload_0",
+        "getfield # // Field lock:Ljava/lang/Object;",
+        "dup",
+        "astore_1",
+        "monitorenter",
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/Collection;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Collection.clear:()V",
+        "aload_1",
+        "monitorexit",
+        "goto 26",
+        "astore_2",
+        "aload_1",
+        "monitorexit",
+        "aload_2",
+        "athrow",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.collection.UnmodifiableBoundedCollection": [
+    [
+      "public void clear();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ],
+    [
+      "public boolean isFull();",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Lorg/apache/commons/collections4/BoundedCollection;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/collections4/BoundedCollection.isFull:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int maxSize();",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Lorg/apache/commons/collections4/BoundedCollection;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/collections4/BoundedCollection.maxSize:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean remove(java.lang.Object);",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.collection.UnmodifiableCollection": [
+    [
+      "public void clear();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ],
+    [
+      "public boolean remove(java.lang.Object);",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.comparators.BooleanComparator": [
+    [
+      "public static org.apache.commons.collections4.comparators.BooleanComparator booleanComparator(boolean);",
+      [
+        "iload_0",
+        "ifeq 10",
+        "getstatic # // Field TRUE_FIRST:Lorg/apache/commons/collections4/comparators/BooleanComparator;",
+        "goto 13",
+        "getstatic # // Field FALSE_FIRST:Lorg/apache/commons/collections4/comparators/BooleanComparator;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.collections4.comparators.BooleanComparator getFalseFirstComparator();",
+      [
+        "getstatic # // Field FALSE_FIRST:Lorg/apache/commons/collections4/comparators/BooleanComparator;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.collections4.comparators.BooleanComparator getTrueFirstComparator();",
+      [
+        "getstatic # // Field TRUE_FIRST:Lorg/apache/commons/collections4/comparators/BooleanComparator;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.comparators.BooleanComparator();",
+      [
+        "aload_0",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":(Z)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.comparators.BooleanComparator(boolean);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field trueFirst:Z",
+        "return"
+      ]
+    ],
+    [
+      "public boolean sortsTrueFirst();",
+      [
+        "aload_0",
+        "getfield # // Field trueFirst:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.comparators.ComparableComparator": [
+    [
+      "public org.apache.commons.collections4.comparators.ComparableComparator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.comparators.ComparatorChain": [
+    [
+      "private void checkLocked();",
+      [
+        "aload_0",
+        "getfield # // Field isLocked:Z",
+        "ifeq 17",
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String Comparator ordering cannot be changed after the first comparison is performed",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "return"
+      ]
+    ],
+    [
+      "public boolean isLocked();",
+      [
+        "aload_0",
+        "getfield # // Field isLocked:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.comparators.NullComparator": [
+    [
+      "public org.apache.commons.collections4.comparators.NullComparator();",
+      [
+        "aload_0",
+        "getstatic # // Field org/apache/commons/collections4/ComparatorUtils.NATURAL_COMPARATOR:Ljava/util/Comparator;",
+        "iconst_1",
+        "invokespecial # // Method \"<init>\":(Ljava/util/Comparator;Z)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.comparators.NullComparator(boolean);",
+      [
+        "aload_0",
+        "getstatic # // Field org/apache/commons/collections4/ComparatorUtils.NATURAL_COMPARATOR:Ljava/util/Comparator;",
+        "iload_1",
+        "invokespecial # // Method \"<init>\":(Ljava/util/Comparator;Z)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.comparators.ReverseComparator": [
+    [
+      "public org.apache.commons.collections4.comparators.ReverseComparator();",
+      [
+        "aload_0",
+        "aconst_null",
+        "invokespecial # // Method \"<init>\":(Ljava/util/Comparator;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.AbstractPredicate": [
+    [
+      "public org.apache.commons.collections4.functors.AbstractPredicate();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.CloneTransformer": [
+    [
+      "private org.apache.commons.collections4.functors.CloneTransformer();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.ConstantTransformer": [
+    [
+      "public boolean equals(java.lang.Object);",
+      [
+        "aload_1",
+        "aload_0",
+        "if_acmpne 7",
+        "iconst_1",
+        "ireturn",
+        "aload_1",
+        "instanceof # // class org/apache/commons/collections4/functors/ConstantTransformer",
+        "ifne 16",
+        "iconst_0",
+        "ireturn",
+        "aload_1",
+        "checkcast # // class org/apache/commons/collections4/functors/ConstantTransformer",
+        "invokevirtual # // Method getConstant:()Ljava/lang/Object;",
+        "astore_2",
+        "aload_2",
+        "aload_0",
+        "invokevirtual # // Method getConstant:()Ljava/lang/Object;",
+        "invokestatic # // Method java/util/Objects.equals:(Ljava/lang/Object;Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.DefaultEquator": [
+    [
+      "private org.apache.commons.collections4.functors.DefaultEquator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private java.lang.Object readResolve();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/collections4/functors/DefaultEquator;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.EqualPredicate": [
+    [
+      "public java.lang.Object getValue();",
+      [
+        "aload_0",
+        "getfield # // Field test:Ljava/lang/Object;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.ExceptionFactory": [
+    [
+      "private org.apache.commons.collections4.functors.ExceptionFactory();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private java.lang.Object readResolve();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/collections4/Factory;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.ExceptionPredicate": [
+    [
+      "private org.apache.commons.collections4.functors.ExceptionPredicate();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/functors/AbstractPredicate.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private java.lang.Object readResolve();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/collections4/Predicate;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.ExceptionTransformer": [
+    [
+      "private org.apache.commons.collections4.functors.ExceptionTransformer();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private java.lang.Object readResolve();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/collections4/Transformer;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.FalsePredicate": [
+    [
+      "private org.apache.commons.collections4.functors.FalsePredicate();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/functors/AbstractPredicate.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private java.lang.Object readResolve();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/collections4/Predicate;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.FunctorUtils": [
+    [
+      "private org.apache.commons.collections4.functors.FunctorUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.InstanceofPredicate": [
+    [
+      "public boolean test(java.lang.Object);",
+      [
+        "aload_0",
+        "getfield # // Field iType:Ljava/lang/Class;",
+        "aload_1",
+        "invokevirtual # // Method java/lang/Class.isInstance:(Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.InstantiateTransformer": [
+    [
+      "private org.apache.commons.collections4.functors.InstantiateTransformer();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field iParamTypes:[Ljava/lang/Class;",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field iArgs:[Ljava/lang/Object;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.InvokerTransformer": [
+    [
+      "private org.apache.commons.collections4.functors.InvokerTransformer(java.lang.String);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field iMethodName:Ljava/lang/String;",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field iParamTypes:[Ljava/lang/Class;",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field iArgs:[Ljava/lang/Object;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.NOPTransformer": [
+    [
+      "private org.apache.commons.collections4.functors.NOPTransformer();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private java.lang.Object readResolve();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/collections4/Transformer;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.NotNullPredicate": [
+    [
+      "private org.apache.commons.collections4.functors.NotNullPredicate();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/functors/AbstractPredicate.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private java.lang.Object readResolve();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/collections4/Predicate;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.NullPredicate": [
+    [
+      "private org.apache.commons.collections4.functors.NullPredicate();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/functors/AbstractPredicate.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private java.lang.Object readResolve();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/collections4/Predicate;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.PrototypeFactory": [
+    [
+      "private org.apache.commons.collections4.functors.PrototypeFactory();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.StringValueTransformer": [
+    [
+      "private org.apache.commons.collections4.functors.StringValueTransformer();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private java.lang.Object readResolve();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/collections4/Transformer;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.TruePredicate": [
+    [
+      "private org.apache.commons.collections4.functors.TruePredicate();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/functors/AbstractPredicate.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private java.lang.Object readResolve();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/collections4/Predicate;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.functors.UniquePredicate": [
+    [
+      "public org.apache.commons.collections4.functors.UniquePredicate();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/functors/AbstractPredicate.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/HashSet",
+        "dup",
+        "invokespecial # // Method java/util/HashSet.\"<init>\":()V",
+        "putfield # // Field iSet:Ljava/util/Set;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.AbstractEmptyIterator": [
+    [
+      "protected org.apache.commons.collections4.iterators.AbstractEmptyIterator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public boolean hasNext();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean hasPrevious();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int nextIndex();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int previousIndex();",
+      [
+        "iconst_m1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String Iterator contains no elements",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
+    ],
+    [
+      "public void reset();",
+      [
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.AbstractEmptyMapIterator": [
+    [
+      "public org.apache.commons.collections4.iterators.AbstractEmptyMapIterator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/iterators/AbstractEmptyIterator.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.AbstractUntypedIteratorDecorator": [
+    [
+      "public boolean hasNext();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.ArrayIterator": [
+    [
+      "public org.apache.commons.collections4.iterators.ArrayIterator(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/Object;I)V",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.Object getArray();",
+      [
+        "aload_0",
+        "getfield # // Field array:Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int getEndIndex();",
+      [
+        "aload_0",
+        "getfield # // Field endIndex:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getStartIndex();",
+      [
+        "aload_0",
+        "getfield # // Field startIndex:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String remove() method is not supported",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
+    ],
+    [
+      "public void reset();",
+      [
+        "aload_0",
+        "aload_0",
+        "getfield # // Field startIndex:I",
+        "putfield # // Field index:I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.ArrayListIterator": [
+    [
+      "public org.apache.commons.collections4.iterators.ArrayListIterator(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/collections4/iterators/ArrayIterator.\"<init>\":(Ljava/lang/Object;)V",
+        "aload_0",
+        "iconst_m1",
+        "putfield # // Field lastItemIndex:I",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.iterators.ArrayListIterator(java.lang.Object, int);",
+      [
+        "aload_0",
+        "aload_1",
+        "iload_2",
+        "invokespecial # // Method org/apache/commons/collections4/iterators/ArrayIterator.\"<init>\":(Ljava/lang/Object;I)V",
+        "aload_0",
+        "iconst_m1",
+        "putfield # // Field lastItemIndex:I",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.iterators.ArrayListIterator(java.lang.Object, int, int);",
+      [
+        "aload_0",
+        "aload_1",
+        "iload_2",
+        "iload_3",
+        "invokespecial # // Method org/apache/commons/collections4/iterators/ArrayIterator.\"<init>\":(Ljava/lang/Object;II)V",
+        "aload_0",
+        "iconst_m1",
+        "putfield # // Field lastItemIndex:I",
+        "return"
+      ]
+    ],
+    [
+      "public void add(java.lang.Object);",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String add() method is not supported",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.BoundedIterator": [
+    [
+      "private boolean checkBounds();",
+      [
+        "aload_0",
+        "getfield # // Field pos:J",
+        "aload_0",
+        "getfield # // Field offset:J",
+        "lsub",
+        "lconst_1",
+        "ladd",
+        "aload_0",
+        "getfield # // Field max:J",
+        "lcmp",
+        "ifle 21",
+        "iconst_0",
+        "ireturn",
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean hasNext();",
+      [
+        "aload_0",
+        "invokevirtual # // Method checkBounds:()Z",
+        "ifne 9",
+        "iconst_0",
+        "ireturn",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "private void init();",
+      [
+        "aload_0",
+        "getfield # // Field pos:J",
+        "aload_0",
+        "getfield # // Field offset:J",
+        "lcmp",
+        "ifge 47",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ifeq 47",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;",
+        "pop",
+        "aload_0",
+        "dup",
+        "getfield # // Field pos:J",
+        "lconst_1",
+        "ladd",
+        "putfield # // Field pos:J",
+        "goto 0",
+        "return"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field pos:J",
+        "aload_0",
+        "getfield # // Field offset:J",
+        "lcmp",
+        "ifgt 22",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String remove() cannot be called before calling next()",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.CollatingIterator": [
+    [
+      "public int getIteratorIndex();",
+      [
+        "aload_0",
+        "getfield # // Field lastReturned:I",
+        "iconst_m1",
+        "if_icmpne 18",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String No value has been returned yet",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field lastReturned:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field lastReturned:I",
+        "iconst_m1",
+        "if_icmpne 18",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String No value can be removed at present",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field iterators:Ljava/util/List;",
+        "aload_0",
+        "getfield # // Field lastReturned:I",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;",
+        "checkcast # // class java/util/Iterator",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.EmptyIterator": [
+    [
+      "protected org.apache.commons.collections4.iterators.EmptyIterator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/iterators/AbstractEmptyIterator.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.EmptyListIterator": [
+    [
+      "protected org.apache.commons.collections4.iterators.EmptyListIterator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/iterators/AbstractEmptyIterator.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.EmptyMapIterator": [
+    [
+      "protected org.apache.commons.collections4.iterators.EmptyMapIterator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/iterators/AbstractEmptyMapIterator.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.EmptyOrderedIterator": [
+    [
+      "protected org.apache.commons.collections4.iterators.EmptyOrderedIterator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/iterators/AbstractEmptyIterator.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.EmptyOrderedMapIterator": [
+    [
+      "protected org.apache.commons.collections4.iterators.EmptyOrderedMapIterator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/iterators/AbstractEmptyMapIterator.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.EnumerationIterator": [
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field collection:Ljava/util/Collection;",
+        "ifnonnull 17",
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String No Collection associated with this Iterator",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field last:Ljava/lang/Object;",
+        "ifnonnull 34",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String next() must have been called for remove() to function",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field collection:Ljava/util/Collection;",
+        "aload_0",
+        "getfield # // Field last:Ljava/lang/Object;",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Collection.remove:(Ljava/lang/Object;)Z",
+        "pop",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.FilterIterator": [
+    [
+      "public org.apache.commons.collections4.iterators.FilterIterator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/collections4/functors/TruePredicate.truePredicate:()Lorg/apache/commons/collections4/Predicate;",
+        "putfield # // Field predicate:Lorg/apache/commons/collections4/Predicate;",
+        "return"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field nextObjectSet:Z",
+        "ifeq 17",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String remove() cannot be called",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.FilterListIterator": [
+    [
+      "public org.apache.commons.collections4.iterators.FilterListIterator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private void clearNextObject();",
+      [
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field nextObject:Ljava/lang/Object;",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field nextObjectSet:Z",
+        "return"
+      ]
+    ],
+    [
+      "private void clearPreviousObject();",
+      [
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field previousObject:Ljava/lang/Object;",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field previousObjectSet:Z",
+        "return"
+      ]
+    ],
+    [
+      "public int nextIndex();",
+      [
+        "aload_0",
+        "getfield # // Field nextIndex:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int previousIndex();",
+      [
+        "aload_0",
+        "getfield # // Field nextIndex:I",
+        "iconst_1",
+        "isub",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String FilterListIterator.remove() is not supported.",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.IteratorChain": [
+    [
+      "public org.apache.commons.collections4.iterators.IteratorChain();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/LinkedList",
+        "dup",
+        "invokespecial # // Method java/util/LinkedList.\"<init>\":()V",
+        "putfield # // Field iteratorQueue:Ljava/util/Queue;",
+        "return"
+      ]
+    ],
+    [
+      "private void checkLocked();",
+      [
+        "aload_0",
+        "getfield # // Field isLocked:Z",
+        "ifeq 17",
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String IteratorChain cannot be changed after the first use of a method from the Iterator interface",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "return"
+      ]
+    ],
+    [
+      "public boolean hasNext();",
+      [
+        "aload_0",
+        "invokevirtual # // Method lockChain:()V",
+        "aload_0",
+        "getfield # // Field cachedHasNextValue:Ljava/lang/Boolean;",
+        "ifnonnull 15",
+        "aload_0",
+        "invokevirtual # // Method updateCurrentIterator:()V",
+        "aload_0",
+        "getfield # // Field cachedHasNextValue:Ljava/lang/Boolean;",
+        "invokevirtual # // Method java/lang/Boolean.booleanValue:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isLocked();",
+      [
+        "aload_0",
+        "getfield # // Field isLocked:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "private void lockChain();",
+      [
+        "aload_0",
+        "getfield # // Field isLocked:Z",
+        "ifne 12",
+        "aload_0",
+        "iconst_1",
+        "putfield # // Field isLocked:Z",
+        "return"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "invokevirtual # // Method lockChain:()V",
+        "aload_0",
+        "getfield # // Field lastUsedIterator:Ljava/util/Iterator;",
+        "ifnonnull 21",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String remove() has been invoked without next()",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field lastUsedIterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field lastUsedIterator:Ljava/util/Iterator;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.IteratorEnumeration": [
+    [
+      "public org.apache.commons.collections4.iterators.IteratorEnumeration();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public boolean hasMoreElements();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.IteratorIterable$1": [
+    [
+      "public boolean hasNext();",
+      [
+        "aload_0",
+        "getfield # // Field val$iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field val$iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.LazyIteratorChain": [
+    [
+      "public org.apache.commons.collections4.iterators.LazyIteratorChain();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public boolean hasNext();",
+      [
+        "aload_0",
+        "invokevirtual # // Method updateCurrentIterator:()V",
+        "aload_0",
+        "aload_0",
+        "getfield # // Field currentIterator:Ljava/util/Iterator;",
+        "putfield # // Field lastUsedIterator:Ljava/util/Iterator;",
+        "aload_0",
+        "getfield # // Field currentIterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field currentIterator:Ljava/util/Iterator;",
+        "ifnonnull 11",
+        "aload_0",
+        "invokevirtual # // Method updateCurrentIterator:()V",
+        "aload_0",
+        "getfield # // Field lastUsedIterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.LoopingIterator": [
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "return"
+      ]
+    ],
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "getfield # // Field collection:Ljava/util/Collection;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Collection.size:()I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.LoopingListIterator": [
+    [
+      "public void reset();",
+      [
+        "aload_0",
+        "invokevirtual # // Method init:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.NodeListIterator": [
+    [
+      "public void remove();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String remove() method not supported for a NodeListIterator.",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.ObjectArrayIterator": [
+    [
+      "public int getEndIndex();",
+      [
+        "aload_0",
+        "getfield # // Field endIndex:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getStartIndex();",
+      [
+        "aload_0",
+        "getfield # // Field startIndex:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String remove() method is not supported for an ObjectArrayIterator",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
+    ],
+    [
+      "public void reset();",
+      [
+        "aload_0",
+        "aload_0",
+        "getfield # // Field startIndex:I",
+        "putfield # // Field index:I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.ObjectGraphIterator": [
+    [
+      "public boolean hasNext();",
+      [
+        "aload_0",
+        "invokevirtual # // Method updateCurrentIterator:()V",
+        "aload_0",
+        "getfield # // Field hasNext:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field lastUsedIterator:Ljava/util/Iterator;",
+        "ifnonnull 17",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String Iterator remove() cannot be called at this time",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field lastUsedIterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field lastUsedIterator:Ljava/util/Iterator;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.PeekingIterator": [
+    [
+      "private void fill();",
+      [
+        "aload_0",
+        "getfield # // Field exhausted:Z",
+        "ifne 14",
+        "aload_0",
+        "getfield # // Field slotFilled:Z",
+        "ifeq 15",
+        "return",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ifeq 48",
+        "aload_0",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;",
+        "putfield # // Field slot:Ljava/lang/Object;",
+        "aload_0",
+        "iconst_1",
+        "putfield # // Field slotFilled:Z",
+        "goto 63",
+        "aload_0",
+        "iconst_1",
+        "putfield # // Field exhausted:Z",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field slot:Ljava/lang/Object;",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field slotFilled:Z",
+        "return"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field slotFilled:Z",
+        "ifeq 17",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String peek() or element() called before remove()",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.PermutationIterator": [
+    [
+      "public void remove();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String remove() is not supported",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.PushbackIterator": [
+    [
+      "public void remove();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.SingletonIterator": [
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field removeAllowed:Z",
+        "ifne 15",
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field removed:Z",
+        "ifne 29",
+        "aload_0",
+        "getfield # // Field beforeFirst:Z",
+        "ifeq 37",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":()V",
+        "athrow",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field object:Ljava/lang/Object;",
+        "aload_0",
+        "iconst_1",
+        "putfield # // Field removed:Z",
+        "return"
+      ]
+    ],
+    [
+      "public void reset();",
+      [
+        "aload_0",
+        "iconst_1",
+        "putfield # // Field beforeFirst:Z",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.SingletonListIterator": [
+    [
+      "public int nextIndex();",
+      [
+        "aload_0",
+        "getfield # // Field beforeFirst:Z",
+        "ifeq 11",
+        "iconst_0",
+        "goto 12",
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int previousIndex();",
+      [
+        "aload_0",
+        "getfield # // Field beforeFirst:Z",
+        "ifeq 11",
+        "iconst_m1",
+        "goto 12",
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field nextCalled:Z",
+        "ifeq 14",
+        "aload_0",
+        "getfield # // Field removed:Z",
+        "ifeq 22",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":()V",
+        "athrow",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field object:Ljava/lang/Object;",
+        "aload_0",
+        "iconst_1",
+        "putfield # // Field removed:Z",
+        "return"
+      ]
+    ],
+    [
+      "public void reset();",
+      [
+        "aload_0",
+        "iconst_1",
+        "putfield # // Field beforeFirst:Z",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field nextCalled:Z",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.TransformIterator": [
+    [
+      "public org.apache.commons.collections4.iterators.TransformIterator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public boolean hasNext();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.UnmodifiableIterator": [
+    [
+      "public void remove();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String remove",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.UnmodifiableListIterator": [
+    [
+      "public void remove();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String remove() is not supported",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.UnmodifiableMapIterator": [
+    [
+      "public void remove();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String remove() is not supported",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.ZippingIterator": [
+    [
+      "public boolean hasNext();",
+      [
+        "aload_0",
+        "getfield # // Field nextIterator:Ljava/util/Iterator;",
+        "ifnull 9",
+        "iconst_1",
+        "ireturn",
+        "aload_0",
+        "getfield # // Field iterators:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ifeq 62",
+        "aload_0",
+        "getfield # // Field iterators:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;",
+        "checkcast # // class java/util/Iterator",
+        "astore_1",
+        "aload_1",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ifeq 50",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field nextIterator:Ljava/util/Iterator;",
+        "iconst_1",
+        "ireturn",
+        "aload_0",
+        "getfield # // Field iterators:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "goto 9",
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field lastReturned:Ljava/util/Iterator;",
+        "ifnonnull 17",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String No value can be removed at present",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field lastReturned:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field lastReturned:Ljava/util/Iterator;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.list.AbstractListDecorator": [
+    [
+      "protected org.apache.commons.collections4.list.AbstractListDecorator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/collection/AbstractCollectionDecorator.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public int indexOf(java.lang.Object);",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/List;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.indexOf:(Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int lastIndexOf(java.lang.Object);",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/List;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.lastIndexOf:(Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.list.FixedSizeList$FixedSizeListIterator": [
+    [
+      "public void add(java.lang.Object);",
+      [
+        "invokestatic # // Method org/apache/commons/collections4/list/FixedSizeList.unsupportedOperationException:()Ljava/lang/UnsupportedOperationException;",
+        "athrow"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "invokestatic # // Method org/apache/commons/collections4/list/FixedSizeList.unsupportedOperationException:()Ljava/lang/UnsupportedOperationException;",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.list.FixedSizeList": [
+    [
+      "private static java.lang.UnsupportedOperationException unsupportedOperationException();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String List is fixed size",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public void clear();",
+      [
+        "invokestatic # // Method unsupportedOperationException:()Ljava/lang/UnsupportedOperationException;",
+        "athrow"
+      ]
+    ],
+    [
+      "public boolean isFull();",
+      [
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean remove(java.lang.Object);",
+      [
+        "invokestatic # // Method unsupportedOperationException:()Ljava/lang/UnsupportedOperationException;",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.list.PredicatedList": [
+    [
+      "public int indexOf(java.lang.Object);",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/List;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.indexOf:(Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int lastIndexOf(java.lang.Object);",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/List;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.lastIndexOf:(Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.list.TransformedList": [
+    [
+      "public int indexOf(java.lang.Object);",
+      [
+        "aload_0",
+        "invokevirtual # // Method getList:()Ljava/util/List;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.indexOf:(Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int lastIndexOf(java.lang.Object);",
+      [
+        "aload_0",
+        "invokevirtual # // Method getList:()Ljava/util/List;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.lastIndexOf:(Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.list.UnmodifiableList": [
+    [
+      "public boolean add(java.lang.Object);",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ],
+    [
+      "public void clear();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ],
+    [
+      "public boolean remove(java.lang.Object);",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.multiset.AbstractMapMultiSet$EntrySetIterator": [
+    [
+      "public boolean hasNext();",
+      [
+        "aload_0",
+        "getfield # // Field decorated:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field canRemove:Z",
+        "ifne 17",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String Iterator remove() can only be called once after next()",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field decorated:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field last:Lorg/apache/commons/collections4/MultiSet$Entry;",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field canRemove:Z",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.multiset.AbstractMapMultiSet$MapBasedMultiSetIterator": [
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field parent:Lorg/apache/commons/collections4/multiset/AbstractMapMultiSet;",
+        "getfield # // Field org/apache/commons/collections4/multiset/AbstractMapMultiSet.modCount:I",
+        "aload_0",
+        "getfield # // Field mods:I",
+        "if_icmpeq 22",
+        "new # // class java/util/ConcurrentModificationException",
+        "dup",
+        "invokespecial # // Method java/util/ConcurrentModificationException.\"<init>\":()V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field canRemove:Z",
+        "ifne 37",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":()V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field current:Ljava/util/Map$Entry;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map$Entry.getValue:()Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/collections4/multiset/AbstractMapMultiSet$MutableInteger",
+        "astore_1",
+        "aload_1",
+        "getfield # // Field org/apache/commons/collections4/multiset/AbstractMapMultiSet$MutableInteger.value:I",
+        "iconst_1",
+        "if_icmple 71",
+        "aload_1",
+        "dup",
+        "getfield # // Field org/apache/commons/collections4/multiset/AbstractMapMultiSet$MutableInteger.value:I",
+        "iconst_1",
+        "isub",
+        "putfield # // Field org/apache/commons/collections4/multiset/AbstractMapMultiSet$MutableInteger.value:I",
+        "goto 80",
+        "aload_0",
+        "getfield # // Field entryIterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "aload_0",
+        "getfield # // Field parent:Lorg/apache/commons/collections4/multiset/AbstractMapMultiSet;",
+        "dup",
+        "getfield # // Field org/apache/commons/collections4/multiset/AbstractMapMultiSet.size:I",
+        "iconst_1",
+        "isub",
+        "putfield # // Field org/apache/commons/collections4/multiset/AbstractMapMultiSet.size:I",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field canRemove:Z",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.multiset.AbstractMapMultiSet$MultiSetEntry": [
+    [
+      "public int getCount();",
+      [
+        "aload_0",
+        "getfield # // Field parentEntry:Ljava/util/Map$Entry;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map$Entry.getValue:()Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/collections4/multiset/AbstractMapMultiSet$MutableInteger",
+        "getfield # // Field org/apache/commons/collections4/multiset/AbstractMapMultiSet$MutableInteger.value:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.multiset.AbstractMapMultiSet$MutableInteger": [
+    [
+      "org.apache.commons.collections4.multiset.AbstractMapMultiSet$MutableInteger(int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field value:I",
+        "return"
+      ]
+    ],
+    [
+      "public int hashCode();",
+      [
+        "aload_0",
+        "getfield # // Field value:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.multiset.AbstractMapMultiSet": [
+    [
+      "protected org.apache.commons.collections4.multiset.AbstractMapMultiSet();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/multiset/AbstractMultiSet.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public void clear();",
+      [
+        "aload_0",
+        "dup",
+        "getfield # // Field modCount:I",
+        "iconst_1",
+        "iadd",
+        "putfield # // Field modCount:I",
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.clear:()V",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field size:I",
+        "return"
+      ]
+    ],
+    [
+      "public boolean contains(java.lang.Object);",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Map.containsKey:(Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getCount(java.lang.Object);",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Map.get:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/collections4/multiset/AbstractMapMultiSet$MutableInteger",
+        "astore_2",
+        "aload_2",
+        "ifnull 23",
+        "aload_2",
+        "getfield # // Field org/apache/commons/collections4/multiset/AbstractMapMultiSet$MutableInteger.value:I",
+        "ireturn",
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isEmpty();",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.isEmpty:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "getfield # // Field size:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "protected int uniqueElements();",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.size:()I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.multiset.AbstractMultiSet$AbstractEntry": [
+    [
+      "public org.apache.commons.collections4.multiset.AbstractMultiSet$AbstractEntry();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.multiset.AbstractMultiSet$EntrySet": [
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "getfield # // Field parent:Lorg/apache/commons/collections4/multiset/AbstractMultiSet;",
+        "invokevirtual # // Method org/apache/commons/collections4/multiset/AbstractMultiSet.uniqueElements:()I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.multiset.AbstractMultiSet$UniqueSet": [
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "getfield # // Field parent:Lorg/apache/commons/collections4/multiset/AbstractMultiSet;",
+        "invokevirtual # // Method org/apache/commons/collections4/multiset/AbstractMultiSet.uniqueElements:()I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.multiset.AbstractMultiSet": [
+    [
+      "public int remove(java.lang.Object, int);",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ],
+    [
+      "protected abstract int uniqueElements();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.multiset.HashMultiSet": [
+    [
+      "public org.apache.commons.collections4.multiset.HashMultiSet();",
+      [
+        "aload_0",
+        "new # // class java/util/HashMap",
+        "dup",
+        "invokespecial # // Method java/util/HashMap.\"<init>\":()V",
+        "invokespecial # // Method org/apache/commons/collections4/multiset/AbstractMapMultiSet.\"<init>\":(Ljava/util/Map;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.multiset.PredicatedMultiSet": [
+    [
+      "public int getCount(java.lang.Object);",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Lorg/apache/commons/collections4/MultiSet;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod org/apache/commons/collections4/MultiSet.getCount:(Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int remove(java.lang.Object, int);",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Lorg/apache/commons/collections4/MultiSet;",
+        "aload_1",
+        "iload_2",
+        "invokeinterface #, 3 // InterfaceMethod org/apache/commons/collections4/MultiSet.remove:(Ljava/lang/Object;I)I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.sequence.EditScript": [
+    [
+      "public org.apache.commons.collections4.sequence.EditScript();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field commands:Ljava/util/List;",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field lcsLength:I",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field modifications:I",
+        "return"
+      ]
+    ],
+    [
+      "public int getLCSLength();",
+      [
+        "aload_0",
+        "getfield # // Field lcsLength:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getModifications();",
+      [
+        "aload_0",
+        "getfield # // Field modifications:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.sequence.SequencesComparator$Snake": [
+    [
+      "org.apache.commons.collections4.sequence.SequencesComparator$Snake(int, int, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field start:I",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field end:I",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field diag:I",
+        "return"
+      ]
+    ],
+    [
+      "public int getDiag();",
+      [
+        "aload_0",
+        "getfield # // Field diag:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getEnd();",
+      [
+        "aload_0",
+        "getfield # // Field end:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getStart();",
+      [
+        "aload_0",
+        "getfield # // Field start:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.sequence.SequencesComparator": [
+    [
+      "private org.apache.commons.collections4.sequence.SequencesComparator$Snake buildSnake(int, int, int, int);",
+      [
+        "iload_1",
+        "istore 5",
+        "iload 5",
+        "iload_2",
+        "isub",
+        "iload 4",
+        "if_icmpge 60",
+        "iload 5",
+        "iload_3",
+        "if_icmpge 60",
+        "aload_0",
+        "getfield # // Field equator:Lorg/apache/commons/collections4/Equator;",
+        "aload_0",
+        "getfield # // Field sequence1:Ljava/util/List;",
+        "iload 5",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;",
+        "aload_0",
+        "getfield # // Field sequence2:Ljava/util/List;",
+        "iload 5",
+        "iload_2",
+        "isub",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;",
+        "invokeinterface #, 3 // InterfaceMethod org/apache/commons/collections4/Equator.equate:(Ljava/lang/Object;Ljava/lang/Object;)Z",
+        "ifeq 60",
+        "iinc 5, 1",
+        "goto 3",
+        "new # // class org/apache/commons/collections4/sequence/SequencesComparator$Snake",
+        "dup",
+        "iload_1",
+        "iload 5",
+        "iload_2",
+        "invokespecial # // Method org/apache/commons/collections4/sequence/SequencesComparator$Snake.\"<init>\":(III)V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.set.AbstractSetDecorator": [
+    [
+      "protected org.apache.commons.collections4.set.AbstractSetDecorator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/collection/AbstractCollectionDecorator.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.set.UnmodifiableSet": [
+    [
+      "public void clear();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ],
+    [
+      "public boolean remove(java.lang.Object);",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.Get": [
+    [
+      "public abstract boolean containsKey(java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract boolean containsValue(java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract boolean isEmpty();",
+      []
+    ],
+    [
+      "public abstract int size();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.Put": [
+    [
+      "public abstract void clear();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.BoundedMap": [
+    [
+      "public abstract boolean isFull();",
+      []
+    ],
+    [
+      "public abstract int maxSize();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.MultiValuedMap": [
+    [
+      "public abstract void clear();",
+      []
+    ],
+    [
+      "public abstract boolean containsKey(java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract boolean containsMapping(java.lang.Object, java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract boolean containsValue(java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract boolean isEmpty();",
+      []
+    ],
+    [
+      "public abstract boolean removeMapping(java.lang.Object, java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract int size();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.MultiMap": [
+    [
+      "public abstract boolean containsValue(java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract java.lang.Object get(java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract java.lang.Object remove(java.lang.Object);",
+      []
+    ],
+    [
+      "public abstract int size();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.ArrayCountingBloomFilter": [
+    [
+      "public void clear();",
+      [
+        "aload_0",
+        "getfield # // Field cells:[I",
+        "iconst_0",
+        "invokestatic # // Method java/util/Arrays.fill:([II)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.bloomfilter.ArrayCountingBloomFilter copy();",
+      [
+        "new # // class org/apache/commons/collections4/bloomfilter/ArrayCountingBloomFilter",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method \"<init>\":(Lorg/apache/commons/collections4/bloomfilter/ArrayCountingBloomFilter;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.bloomfilter.Shape getShape();",
+      [
+        "aload_0",
+        "getfield # // Field shape:Lorg/apache/commons/collections4/bloomfilter/Shape;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.BitMaps": [
+    [
+      "public static long getLongBit(int);",
+      [
+        "lconst_1",
+        "iload_0",
+        "lshl",
+        "lreturn"
+      ]
+    ],
+    [
+      "public static int mod(long, int);",
+      [
+        "lload_0",
+        "iconst_1",
+        "lushr",
+        "iload_2",
+        "i2l",
+        "ldiv",
+        "iconst_1",
+        "lshl",
+        "lstore_3",
+        "lload_0",
+        "lload_3",
+        "iload_2",
+        "i2l",
+        "lmul",
+        "lsub",
+        "lstore 5",
+        "lload 5",
+        "iload_2",
+        "i2l",
+        "lcmp",
+        "iflt 33",
+        "lload 5",
+        "iload_2",
+        "i2l",
+        "lsub",
+        "goto 35",
+        "lload 5",
+        "l2i",
+        "ireturn"
+      ]
+    ],
+    [
+      "static long[] newBitMap(int);",
+      [
+        "iload_0",
+        "invokestatic # // Method numberOfBitMaps:(I)I",
+        "newarray long",
+        "areturn"
+      ]
+    ],
+    [
+      "static long[] newBitMap(org.apache.commons.collections4.bloomfilter.Shape);",
+      [
+        "aload_0",
+        "invokevirtual # // Method org/apache/commons/collections4/bloomfilter/Shape.getNumberOfBits:()I",
+        "invokestatic # // Method newBitMap:(I)[J",
+        "areturn"
+      ]
+    ],
+    [
+      "static int numberOfBitMaps(org.apache.commons.collections4.bloomfilter.Shape);",
+      [
+        "aload_0",
+        "invokevirtual # // Method org/apache/commons/collections4/bloomfilter/Shape.getNumberOfBits:()I",
+        "invokestatic # // Method numberOfBitMaps:(I)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static void set(long[], int);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method getLongIndex:(I)I",
+        "dup2",
+        "laload",
+        "iload_1",
+        "invokestatic # // Method getLongBit:(I)J",
+        "lor",
+        "lastore",
+        "return"
+      ]
+    ],
+    [
+      "private org.apache.commons.collections4.bloomfilter.BitMaps();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.BloomFilter": [
+    [
+      "public abstract int cardinality();",
+      []
+    ],
+    [
+      "public abstract int characteristics();",
+      []
+    ],
+    [
+      "public abstract void clear();",
+      []
+    ],
+    [
+      "public abstract boolean contains(org.apache.commons.collections4.bloomfilter.IndexExtractor);",
+      []
+    ],
+    [
+      "public abstract org.apache.commons.collections4.bloomfilter.Shape getShape();",
+      []
+    ],
+    [
+      "public abstract boolean merge(org.apache.commons.collections4.bloomfilter.BitMapExtractor);",
+      []
+    ],
+    [
+      "public abstract boolean merge(org.apache.commons.collections4.bloomfilter.IndexExtractor);",
+      []
+    ],
+    [
+      "public default org.apache.commons.collections4.bloomfilter.IndexExtractor uniqueIndices();",
+      [
+        "aload_0",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.CellExtractor$CellPredicate": [
+    [
+      "public abstract boolean test(int, int);",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.CellExtractor": [
+    [
+      "public abstract boolean processCells(org.apache.commons.collections4.bloomfilter.CellExtractor$CellPredicate);",
+      []
+    ],
+    [
+      "public default org.apache.commons.collections4.bloomfilter.IndexExtractor uniqueIndices();",
+      [
+        "aload_0",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.CountingBloomFilter": [
+    [
+      "public abstract boolean add(org.apache.commons.collections4.bloomfilter.CellExtractor);",
+      []
+    ],
+    [
+      "public abstract int getMaxCell();",
+      []
+    ],
+    [
+      "public abstract int getMaxInsert(org.apache.commons.collections4.bloomfilter.CellExtractor);",
+      []
+    ],
+    [
+      "public abstract boolean isValid();",
+      []
+    ],
+    [
+      "public abstract boolean subtract(org.apache.commons.collections4.bloomfilter.CellExtractor);",
+      []
+    ],
+    [
+      "public default org.apache.commons.collections4.bloomfilter.IndexExtractor uniqueIndices();",
+      [
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "private static boolean lambda$getMaxInsert$0(long[], int[], int, int);",
+      [
+        "aload_0",
+        "iload_2",
+        "invokestatic # // Method org/apache/commons/collections4/bloomfilter/BitMaps.getLongIndex:(I)I",
+        "laload",
+        "iload_2",
+        "invokestatic # // Method org/apache/commons/collections4/bloomfilter/BitMaps.getLongBit:(I)J",
+        "land",
+        "lconst_0",
+        "lcmp",
+        "ifeq 33",
+        "aload_1",
+        "iconst_0",
+        "aload_1",
+        "iconst_0",
+        "iaload",
+        "iload_3",
+        "if_icmpgt 31",
+        "aload_1",
+        "iconst_0",
+        "iaload",
+        "goto 32",
+        "iload_3",
+        "iastore",
+        "iconst_1",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.CountingLongPredicate": [
+    [
+      "org.apache.commons.collections4.bloomfilter.CountingLongPredicate(long[], org.apache.commons.collections4.bloomfilter.LongBiPredicate);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field ary:[J",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field func:Lorg/apache/commons/collections4/bloomfilter/LongBiPredicate;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.Hasher": [
+    [
+      "public abstract org.apache.commons.collections4.bloomfilter.IndexExtractor indices(org.apache.commons.collections4.bloomfilter.Shape);",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.IndexExtractor$3": [
+    [
+      "public org.apache.commons.collections4.bloomfilter.IndexExtractor uniqueIndices();",
+      [
+        "aload_0",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.IndexUtils": [
+    [
+      "private org.apache.commons.collections4.bloomfilter.IndexUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.LongBiPredicate": [
+    [
+      "public abstract boolean test(long, long);",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.Shape": [
+    [
+      "public static org.apache.commons.collections4.bloomfilter.Shape fromKM(int, int);",
+      [
+        "new # // class org/apache/commons/collections4/bloomfilter/Shape",
+        "dup",
+        "iload_0",
+        "iload_1",
+        "invokespecial # // Method \"<init>\":(II)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.collections4.bloomfilter.Shape fromNM(int, int);",
+      [
+        "iload_0",
+        "invokestatic # // Method checkNumberOfItems:(I)I",
+        "pop",
+        "iload_1",
+        "invokestatic # // Method checkNumberOfBits:(I)I",
+        "pop",
+        "iload_0",
+        "iload_1",
+        "invokestatic # // Method calculateNumberOfHashFunctions:(II)I",
+        "istore_2",
+        "new # // class org/apache/commons/collections4/bloomfilter/Shape",
+        "dup",
+        "iload_2",
+        "iload_1",
+        "invokespecial # // Method \"<init>\":(II)V",
+        "astore_3",
+        "aload_3",
+        "iload_0",
+        "invokevirtual # // Method getProbability:(I)D",
+        "invokestatic # // Method checkCalculatedProbability:(D)V",
+        "aload_3",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.collections4.bloomfilter.Shape fromNMK(int, int, int);",
+      [
+        "iload_0",
+        "invokestatic # // Method checkNumberOfItems:(I)I",
+        "pop",
+        "iload_1",
+        "invokestatic # // Method checkNumberOfBits:(I)I",
+        "pop",
+        "iload_2",
+        "invokestatic # // Method checkNumberOfHashFunctions:(I)I",
+        "pop",
+        "new # // class org/apache/commons/collections4/bloomfilter/Shape",
+        "dup",
+        "iload_2",
+        "iload_1",
+        "invokespecial # // Method \"<init>\":(II)V",
+        "astore_3",
+        "aload_3",
+        "iload_0",
+        "invokevirtual # // Method getProbability:(I)D",
+        "invokestatic # // Method checkCalculatedProbability:(D)V",
+        "aload_3",
+        "areturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.collections4.bloomfilter.Shape(int, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method checkNumberOfHashFunctions:(I)I",
+        "putfield # // Field numberOfHashFunctions:I",
+        "aload_0",
+        "iload_2",
+        "invokestatic # // Method checkNumberOfBits:(I)I",
+        "putfield # // Field numberOfBits:I",
+        "return"
+      ]
+    ],
+    [
+      "public double estimateMaxN();",
+      [
+        "aload_0",
+        "getfield # // Field numberOfBits:I",
+        "i2d",
+        "getstatic # // Field LN_2:D",
+        "dmul",
+        "aload_0",
+        "getfield # // Field numberOfHashFunctions:I",
+        "i2d",
+        "ddiv",
+        "dreturn"
+      ]
+    ],
+    [
+      "public int getNumberOfBits();",
+      [
+        "aload_0",
+        "getfield # // Field numberOfBits:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getNumberOfHashFunctions();",
+      [
+        "aload_0",
+        "getfield # // Field numberOfHashFunctions:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int hashCode();",
+      [
+        "bipush 31",
+        "aload_0",
+        "getfield # // Field numberOfBits:I",
+        "iadd",
+        "bipush 31",
+        "imul",
+        "aload_0",
+        "getfield # // Field numberOfHashFunctions:I",
+        "iadd",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.SetOperations": [
+    [
+      "public static double cosineDistance(org.apache.commons.collections4.bloomfilter.BitMapExtractor, org.apache.commons.collections4.bloomfilter.BitMapExtractor);",
+      [
+        "dconst_1",
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method cosineSimilarity:(Lorg/apache/commons/collections4/bloomfilter/BitMapExtractor;Lorg/apache/commons/collections4/bloomfilter/BitMapExtractor;)D",
+        "dsub",
+        "dreturn"
+      ]
+    ],
+    [
+      "public static int hammingDistance(org.apache.commons.collections4.bloomfilter.BitMapExtractor, org.apache.commons.collections4.bloomfilter.BitMapExtractor);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method xorCardinality:(Lorg/apache/commons/collections4/bloomfilter/BitMapExtractor;Lorg/apache/commons/collections4/bloomfilter/BitMapExtractor;)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static double jaccardDistance(org.apache.commons.collections4.bloomfilter.BitMapExtractor, org.apache.commons.collections4.bloomfilter.BitMapExtractor);",
+      [
+        "dconst_1",
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method jaccardSimilarity:(Lorg/apache/commons/collections4/bloomfilter/BitMapExtractor;Lorg/apache/commons/collections4/bloomfilter/BitMapExtractor;)D",
+        "dsub",
+        "dreturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.collections4.bloomfilter.SetOperations();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private static boolean lambda$jaccardSimilarity$0(int[], long, long);",
+      [
+        "aload_0",
+        "iconst_0",
+        "dup2",
+        "iaload",
+        "lload_1",
+        "lload_3",
+        "land",
+        "invokestatic # // Method java/lang/Long.bitCount:(J)I",
+        "iadd",
+        "iastore",
+        "aload_0",
+        "iconst_1",
+        "dup2",
+        "iaload",
+        "lload_1",
+        "lload_3",
+        "lor",
+        "invokestatic # // Method java/lang/Long.bitCount:(J)I",
+        "iadd",
+        "iastore",
+        "iconst_1",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.SimpleBloomFilter": [
+    [
+      "public int characteristics();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.bloomfilter.Shape getShape();",
+      [
+        "aload_0",
+        "getfield # // Field shape:Lorg/apache/commons/collections4/bloomfilter/Shape;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.EnhancedDoubleHasher": [
+    [
+      "public org.apache.commons.collections4.bloomfilter.EnhancedDoubleHasher(long, long);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "lload_1",
+        "putfield # // Field initial:J",
+        "aload_0",
+        "lload_3",
+        "putfield # // Field increment:J",
+        "return"
+      ]
+    ],
+    [
+      "long getIncrement();",
+      [
+        "aload_0",
+        "getfield # // Field increment:J",
+        "lreturn"
+      ]
+    ],
+    [
+      "long getInitial();",
+      [
+        "aload_0",
+        "getfield # // Field initial:J",
+        "lreturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.IndexFilter$ArrayTracker": [
+    [
+      "org.apache.commons.collections4.bloomfilter.IndexFilter$ArrayTracker(org.apache.commons.collections4.bloomfilter.Shape);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method org/apache/commons/collections4/bloomfilter/Shape.getNumberOfHashFunctions:()I",
+        "newarray int",
+        "putfield # // Field seen:[I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.IndexFilter$BitMapTracker": [
+    [
+      "org.apache.commons.collections4.bloomfilter.IndexFilter$BitMapTracker(org.apache.commons.collections4.bloomfilter.Shape);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/collections4/bloomfilter/BitMaps.newBitMap:(Lorg/apache/commons/collections4/bloomfilter/Shape;)[J",
+        "putfield # // Field bits:[J",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.LayerManager$Builder": [
+    [
+      "private org.apache.commons.collections4.bloomfilter.LayerManager$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/collections4/bloomfilter/LayerManager$ExtendCheck.neverAdvance:()Ljava/util/function/Predicate;",
+        "putfield # // Field extendCheck:Ljava/util/function/Predicate;",
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/collections4/bloomfilter/LayerManager$Cleanup.noCleanup:()Ljava/util/function/Consumer;",
+        "putfield # // Field cleanup:Ljava/util/function/Consumer;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.LayerManager$Cleanup": [
+    [
+      "private org.apache.commons.collections4.bloomfilter.LayerManager$Cleanup();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.LayerManager$ExtendCheck": [
+    [
+      "private org.apache.commons.collections4.bloomfilter.LayerManager$ExtendCheck();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private static boolean lambda$neverAdvance$0(org.apache.commons.collections4.bloomfilter.LayerManager);",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.LayerManager": [
+    [
+      "void next();",
+      [
+        "aload_0",
+        "getfield # // Field filterCleanup:Ljava/util/function/Consumer;",
+        "aload_0",
+        "getfield # // Field filters:Ljava/util/LinkedList;",
+        "invokeinterface #, 2 // InterfaceMethod java/util/function/Consumer.accept:(Ljava/lang/Object;)V",
+        "aload_0",
+        "invokevirtual # // Method addFilter:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.LayeredBloomFilter$Finder": [
+    [
+      "int[] getResult();",
+      [
+        "aload_0",
+        "getfield # // Field result:[I",
+        "aload_0",
+        "getfield # // Field resultIdx:I",
+        "invokestatic # // Method java/util/Arrays.copyOf:([II)[I",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.LayeredBloomFilter": [
+    [
+      "public int cardinality();",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/collections4/bloomfilter/SetOperations.cardinality:(Lorg/apache/commons/collections4/bloomfilter/BitMapExtractor;)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int characteristics();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void cleanup();",
+      [
+        "aload_0",
+        "getfield # // Field layerManager:Lorg/apache/commons/collections4/bloomfilter/LayerManager;",
+        "invokevirtual # // Method org/apache/commons/collections4/bloomfilter/LayerManager.cleanup:()V",
+        "return"
+      ]
+    ],
+    [
+      "public final void clear();",
+      [
+        "aload_0",
+        "getfield # // Field layerManager:Lorg/apache/commons/collections4/bloomfilter/LayerManager;",
+        "invokevirtual # // Method org/apache/commons/collections4/bloomfilter/LayerManager.clear:()V",
+        "return"
+      ]
+    ],
+    [
+      "public boolean contains(org.apache.commons.collections4.bloomfilter.BitMapExtractor);",
+      [
+        "aload_0",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method createFilter:(Lorg/apache/commons/collections4/bloomfilter/BitMapExtractor;)Lorg/apache/commons/collections4/bloomfilter/SimpleBloomFilter;",
+        "invokevirtual # // Method contains:(Lorg/apache/commons/collections4/bloomfilter/BloomFilter;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean contains(org.apache.commons.collections4.bloomfilter.BloomFilterExtractor);",
+      [
+        "iconst_1",
+        "newarray boolean",
+        "dup",
+        "iconst_0",
+        "iconst_1",
+        "bastore",
+        "astore_2",
+        "aload_1",
+        "aload_0",
+        "aload_2",
+        "invokedynamic #, 0 // InvokeDynamic #:test:(Lorg/apache/commons/collections4/bloomfilter/LayeredBloomFilter;[Z)Ljava/util/function/Predicate;",
+        "invokeinterface #, 2 // InterfaceMethod org/apache/commons/collections4/bloomfilter/BloomFilterExtractor.processBloomFilters:(Ljava/util/function/Predicate;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean contains(org.apache.commons.collections4.bloomfilter.Hasher);",
+      [
+        "aload_0",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method createFilter:(Lorg/apache/commons/collections4/bloomfilter/Hasher;)Lorg/apache/commons/collections4/bloomfilter/SimpleBloomFilter;",
+        "invokevirtual # // Method contains:(Lorg/apache/commons/collections4/bloomfilter/BloomFilter;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean contains(org.apache.commons.collections4.bloomfilter.IndexExtractor);",
+      [
+        "aload_0",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method createFilter:(Lorg/apache/commons/collections4/bloomfilter/IndexExtractor;)Lorg/apache/commons/collections4/bloomfilter/SimpleBloomFilter;",
+        "invokevirtual # // Method contains:(Lorg/apache/commons/collections4/bloomfilter/BloomFilter;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public final int getDepth();",
+      [
+        "aload_0",
+        "getfield # // Field layerManager:Lorg/apache/commons/collections4/bloomfilter/LayerManager;",
+        "invokevirtual # // Method org/apache/commons/collections4/bloomfilter/LayerManager.getDepth:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public final org.apache.commons.collections4.bloomfilter.Shape getShape();",
+      [
+        "aload_0",
+        "getfield # // Field shape:Lorg/apache/commons/collections4/bloomfilter/Shape;",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isEmpty();",
+      [
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:test:()Ljava/util/function/Predicate;",
+        "invokevirtual # // Method processBloomFilters:(Ljava/util/function/Predicate;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void next();",
+      [
+        "aload_0",
+        "getfield # // Field layerManager:Lorg/apache/commons/collections4/bloomfilter/LayerManager;",
+        "invokevirtual # // Method org/apache/commons/collections4/bloomfilter/LayerManager.next:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.SparseBloomFilter": [
+    [
+      "public org.apache.commons.collections4.bloomfilter.Shape getShape();",
+      [
+        "aload_0",
+        "getfield # // Field shape:Lorg/apache/commons/collections4/bloomfilter/Shape;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.comparators.FixedOrderComparator$UnknownObjectBehavior": [
+    [
+      "public static org.apache.commons.collections4.comparators.FixedOrderComparator$UnknownObjectBehavior[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/collections4/comparators/FixedOrderComparator$UnknownObjectBehavior;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/collections4/comparators/FixedOrderComparator$UnknownObjectBehavior;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/collections4/comparators/FixedOrderComparator$UnknownObjectBehavior;\"",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.comparators.FixedOrderComparator": [
+    [
+      "public org.apache.commons.collections4.comparators.FixedOrderComparator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/HashMap",
+        "dup",
+        "invokespecial # // Method java/util/HashMap.\"<init>\":()V",
+        "putfield # // Field map:Ljava/util/Map;",
+        "aload_0",
+        "getstatic # // Field org/apache/commons/collections4/comparators/FixedOrderComparator$UnknownObjectBehavior.EXCEPTION:Lorg/apache/commons/collections4/comparators/FixedOrderComparator$UnknownObjectBehavior;",
+        "putfield # // Field unknownObjectBehavior:Lorg/apache/commons/collections4/comparators/FixedOrderComparator$UnknownObjectBehavior;",
+        "return"
+      ]
+    ],
+    [
+      "protected void checkLocked();",
+      [
+        "aload_0",
+        "invokevirtual # // Method isLocked:()Z",
+        "ifeq 17",
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String Cannot modify a FixedOrderComparator after a comparison",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.comparators.FixedOrderComparator$UnknownObjectBehavior getUnknownObjectBehavior();",
+      [
+        "aload_0",
+        "getfield # // Field unknownObjectBehavior:Lorg/apache/commons/collections4/comparators/FixedOrderComparator$UnknownObjectBehavior;",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isLocked();",
+      [
+        "aload_0",
+        "getfield # // Field isLocked:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void setUnknownObjectBehavior(org.apache.commons.collections4.comparators.FixedOrderComparator$UnknownObjectBehavior);",
+      [
+        "aload_0",
+        "invokevirtual # // Method checkLocked:()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String unknownObjectBehavior",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/collections4/comparators/FixedOrderComparator$UnknownObjectBehavior",
+        "putfield # // Field unknownObjectBehavior:Lorg/apache/commons/collections4/comparators/FixedOrderComparator$UnknownObjectBehavior;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.CartesianProductIterator": [
+    [
+      "public void remove();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String remove",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.keyvalue.MultiKey": [
+    [
+      "public int hashCode();",
+      [
+        "aload_0",
+        "getfield # // Field hashCode:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "protected java.lang.Object readResolve();",
+      [
+        "aload_0",
+        "aload_0",
+        "getfield # // Field keys:[Ljava/lang/Object;",
+        "invokevirtual # // Method calculateHashCode:([Ljava/lang/Object;)V",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "getfield # // Field keys:[Ljava/lang/Object;",
+        "arraylength",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.list.GrowthList": [
+    [
+      "public org.apache.commons.collections4.list.GrowthList();",
+      [
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "invokespecial # // Method org/apache/commons/collections4/list/AbstractSerializableListDecorator.\"<init>\":(Ljava/util/List;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.AbstractIterableMap": [
+    [
+      "public org.apache.commons.collections4.map.AbstractIterableMap();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.AbstractMapDecorator": [
+    [
+      "protected org.apache.commons.collections4.map.AbstractMapDecorator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractIterableMap.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public void clear();",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.clear:()V",
+        "return"
+      ]
+    ],
+    [
+      "public boolean containsKey(java.lang.Object);",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/Map;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Map.containsKey:(Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean containsValue(java.lang.Object);",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/Map;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Map.containsValue:(Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isEmpty();",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.isEmpty:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "invokevirtual # // Method decorated:()Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.size:()I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.EntrySetToMapIteratorAdapter": [
+    [
+      "public boolean hasNext();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.remove:()V",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field entry:Ljava/util/Map$Entry;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.AbstractHashedMap$EntrySet": [
+    [
+      "public boolean remove(java.lang.Object);",
+      [
+        "aload_1",
+        "instanceof # // class java/util/Map$Entry",
+        "ifne 9",
+        "iconst_0",
+        "ireturn",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method contains:(Ljava/lang/Object;)Z",
+        "ifne 19",
+        "iconst_0",
+        "ireturn",
+        "aload_1",
+        "checkcast # // class java/util/Map$Entry",
+        "astore_2",
+        "aload_0",
+        "getfield # // Field parent:Lorg/apache/commons/collections4/map/AbstractHashedMap;",
+        "aload_2",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map$Entry.getKey:()Ljava/lang/Object;",
+        "invokevirtual # // Method org/apache/commons/collections4/map/AbstractHashedMap.remove:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "iconst_1",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.AbstractHashedMap": [
+    [
+      "protected int calculateThreshold(int, float);",
+      [
+        "iload_1",
+        "i2f",
+        "fload_2",
+        "fmul",
+        "f2i",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void clear();",
+      [
+        "aload_0",
+        "dup",
+        "getfield # // Field modCount:I",
+        "iconst_1",
+        "iadd",
+        "putfield # // Field modCount:I",
+        "aload_0",
+        "getfield # // Field data:[Lorg/apache/commons/collections4/map/AbstractHashedMap$HashEntry;",
+        "astore_1",
+        "aload_1",
+        "aconst_null",
+        "invokestatic # // Method java/util/Arrays.fill:([Ljava/lang/Object;Ljava/lang/Object;)V",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field size:I",
+        "return"
+      ]
+    ],
+    [
+      "public boolean containsKey(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method convertKey:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "astore_1",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method hash:(Ljava/lang/Object;)I",
+        "istore_2",
+        "aload_0",
+        "getfield # // Field data:[Lorg/apache/commons/collections4/map/AbstractHashedMap$HashEntry;",
+        "aload_0",
+        "iload_2",
+        "aload_0",
+        "getfield # // Field data:[Lorg/apache/commons/collections4/map/AbstractHashedMap$HashEntry;",
+        "arraylength",
+        "invokevirtual # // Method hashIndex:(II)I",
+        "aaload",
+        "astore_3",
+        "aload_3",
+        "ifnull 62",
+        "aload_3",
+        "getfield # // Field org/apache/commons/collections4/map/AbstractHashedMap$HashEntry.hashCode:I",
+        "iload_2",
+        "if_icmpne 54",
+        "aload_0",
+        "aload_1",
+        "aload_3",
+        "getfield # // Field org/apache/commons/collections4/map/AbstractHashedMap$HashEntry.key:Ljava/lang/Object;",
+        "invokevirtual # // Method isEqualKey:(Ljava/lang/Object;Ljava/lang/Object;)Z",
+        "ifeq 54",
+        "iconst_1",
+        "ireturn",
+        "aload_3",
+        "getfield # // Field org/apache/commons/collections4/map/AbstractHashedMap$HashEntry.next:Lorg/apache/commons/collections4/map/AbstractHashedMap$HashEntry;",
+        "astore_3",
+        "goto 28",
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "protected java.lang.Object convertKey(java.lang.Object);",
+      [
+        "aload_1",
+        "ifnonnull 10",
+        "getstatic # // Field NULL:Ljava/lang/Object;",
+        "goto 11",
+        "aload_1",
+        "areturn"
+      ]
+    ],
+    [
+      "protected int hash(java.lang.Object);",
+      [
+        "aload_1",
+        "invokevirtual # // Method java/lang/Object.hashCode:()I",
+        "istore_2",
+        "iload_2",
+        "iload_2",
+        "bipush 9",
+        "ishl",
+        "iconst_m1",
+        "ixor",
+        "iadd",
+        "istore_2",
+        "iload_2",
+        "iload_2",
+        "bipush 14",
+        "iushr",
+        "ixor",
+        "istore_2",
+        "iload_2",
+        "iload_2",
+        "iconst_4",
+        "ishl",
+        "iadd",
+        "istore_2",
+        "iload_2",
+        "iload_2",
+        "bipush 10",
+        "iushr",
+        "ixor",
+        "istore_2",
+        "iload_2",
+        "ireturn"
+      ]
+    ],
+    [
+      "protected int hashIndex(int, int);",
+      [
+        "iload_1",
+        "iload_2",
+        "iconst_1",
+        "isub",
+        "iand",
+        "ireturn"
+      ]
+    ],
+    [
+      "protected void init();",
+      [
+        "return"
+      ]
+    ],
+    [
+      "protected boolean isEqualKey(java.lang.Object, java.lang.Object);",
+      [
+        "aload_1",
+        "aload_2",
+        "invokestatic # // Method java/util/Objects.equals:(Ljava/lang/Object;Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "protected boolean isEqualValue(java.lang.Object, java.lang.Object);",
+      [
+        "aload_1",
+        "aload_2",
+        "invokestatic # // Method java/util/Objects.equals:(Ljava/lang/Object;Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "getfield # // Field size:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.CaseInsensitiveMap": [
+    [
+      "public org.apache.commons.collections4.map.CaseInsensitiveMap(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractHashedMap.\"<init>\":(I)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.CaseInsensitiveMap(int, float);",
+      [
+        "aload_0",
+        "iload_1",
+        "fload_2",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractHashedMap.\"<init>\":(IF)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.ConcurrentReferenceHashMap$HashIterator": [
+    [
+      "public boolean hasMoreElements();",
+      [
+        "aload_0",
+        "invokevirtual # // Method hasNext:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean hasNext();",
+      [
+        "aload_0",
+        "getfield # // Field nextEntry:Lorg/apache/commons/collections4/map/ConcurrentReferenceHashMap$HashEntry;",
+        "ifnull 26",
+        "aload_0",
+        "getfield # // Field nextEntry:Lorg/apache/commons/collections4/map/ConcurrentReferenceHashMap$HashEntry;",
+        "invokevirtual # // Method org/apache/commons/collections4/map/ConcurrentReferenceHashMap$HashEntry.key:()Ljava/lang/Object;",
+        "ifnull 19",
+        "iconst_1",
+        "ireturn",
+        "aload_0",
+        "invokevirtual # // Method advance:()V",
+        "goto 0",
+        "iconst_0",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.ConcurrentReferenceHashMap$KeyReference": [
+    [
+      "public abstract int keyHash();",
+      []
+    ],
+    [
+      "public abstract java.lang.Object keyRef();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.map.ConcurrentReferenceHashMap$Option": [
+    [
+      "public static org.apache.commons.collections4.map.ConcurrentReferenceHashMap$Option[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/collections4/map/ConcurrentReferenceHashMap$Option;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/collections4/map/ConcurrentReferenceHashMap$Option;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/collections4/map/ConcurrentReferenceHashMap$Option;\"",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.ConcurrentReferenceHashMap$ReferenceType": [
+    [
+      "public static org.apache.commons.collections4.map.ConcurrentReferenceHashMap$ReferenceType[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/collections4/map/ConcurrentReferenceHashMap$ReferenceType;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/collections4/map/ConcurrentReferenceHashMap$ReferenceType;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/collections4/map/ConcurrentReferenceHashMap$ReferenceType;\"",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.ConcurrentReferenceHashMap$SimpleEntry": [
+    [
+      "private static boolean eq(java.lang.Object, java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method java/util/Objects.equals:(Ljava/lang/Object;Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.ConcurrentReferenceHashMap$SoftKeyReference": [
+    [
+      "public int keyHash();",
+      [
+        "aload_0",
+        "getfield # // Field hash:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.Object keyRef();",
+      [
+        "aload_0",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.ConcurrentReferenceHashMap$SoftValueReference": [
+    [
+      "public int keyHash();",
+      [
+        "aload_0",
+        "getfield # // Field hash:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.Object keyRef();",
+      [
+        "aload_0",
+        "getfield # // Field keyRef:Ljava/lang/Object;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.ConcurrentReferenceHashMap$WeakKeyReference": [
+    [
+      "public int keyHash();",
+      [
+        "aload_0",
+        "getfield # // Field hash:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.Object keyRef();",
+      [
+        "aload_0",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.ConcurrentReferenceHashMap$WeakValueReference": [
+    [
+      "public int keyHash();",
+      [
+        "aload_0",
+        "getfield # // Field hash:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.Object keyRef();",
+      [
+        "aload_0",
+        "getfield # // Field keyRef:Ljava/lang/Object;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.ConcurrentReferenceHashMap": [
+    [
+      "private static int hash(int);",
+      [
+        "iload_0",
+        "iload_0",
+        "bipush 15",
+        "ishl",
+        "sipush -12931",
+        "ixor",
+        "iadd",
+        "istore_0",
+        "iload_0",
+        "iload_0",
+        "bipush 10",
+        "iushr",
+        "ixor",
+        "istore_0",
+        "iload_0",
+        "iload_0",
+        "iconst_3",
+        "ishl",
+        "iadd",
+        "istore_0",
+        "iload_0",
+        "iload_0",
+        "bipush 6",
+        "iushr",
+        "ixor",
+        "istore_0",
+        "iload_0",
+        "iload_0",
+        "iconst_2",
+        "ishl",
+        "iload_0",
+        "bipush 14",
+        "ishl",
+        "iadd",
+        "iadd",
+        "istore_0",
+        "iload_0",
+        "iload_0",
+        "bipush 16",
+        "iushr",
+        "ixor",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean containsKey(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method hashOf:(Ljava/lang/Object;)I",
+        "istore_2",
+        "aload_0",
+        "iload_2",
+        "invokevirtual # // Method segmentFor:(I)Lorg/apache/commons/collections4/map/ConcurrentReferenceHashMap$Segment;",
+        "aload_1",
+        "iload_2",
+        "invokevirtual # // Method org/apache/commons/collections4/map/ConcurrentReferenceHashMap$Segment.containsKey:(Ljava/lang/Object;I)Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.HashedMap": [
+    [
+      "public org.apache.commons.collections4.map.HashedMap(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractHashedMap.\"<init>\":(I)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.HashedMap(int, float);",
+      [
+        "aload_0",
+        "iload_1",
+        "fload_2",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractHashedMap.\"<init>\":(IF)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.PassiveExpiringMap$ConstantTimeToLiveExpirationPolicy": [
+    [
+      "public org.apache.commons.collections4.map.PassiveExpiringMap$ConstantTimeToLiveExpirationPolicy();",
+      [
+        "aload_0",
+        "ldc2_w # // long -1l",
+        "invokespecial # // Method \"<init>\":(J)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.PassiveExpiringMap$ConstantTimeToLiveExpirationPolicy(long);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "lload_1",
+        "putfield # // Field timeToLiveMillis:J",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.PassiveExpiringMap": [
+    [
+      "public org.apache.commons.collections4.map.PassiveExpiringMap(long);",
+      [
+        "aload_0",
+        "new # // class org/apache/commons/collections4/map/PassiveExpiringMap$ConstantTimeToLiveExpirationPolicy",
+        "dup",
+        "lload_1",
+        "invokespecial # // Method org/apache/commons/collections4/map/PassiveExpiringMap$ConstantTimeToLiveExpirationPolicy.\"<init>\":(J)V",
+        "new # // class java/util/HashMap",
+        "dup",
+        "invokespecial # // Method java/util/HashMap.\"<init>\":()V",
+        "invokespecial # // Method \"<init>\":(Lorg/apache/commons/collections4/map/PassiveExpiringMap$ExpirationPolicy;Ljava/util/Map;)V",
+        "return"
+      ]
+    ],
+    [
+      "private long now();",
+      [
+        "invokestatic # // Method java/lang/System.currentTimeMillis:()J",
+        "lreturn"
+      ]
+    ],
+    [
+      "private void removeIfExpired(java.lang.Object, long);",
+      [
+        "aload_0",
+        "getfield # // Field expirationMap:Ljava/util/Map;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Map.get:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "checkcast # // class java/lang/Long",
+        "astore 4",
+        "aload_0",
+        "lload_2",
+        "aload 4",
+        "invokevirtual # // Method isExpired:(JLjava/lang/Long;)Z",
+        "ifeq 31",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method remove:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceEntry": [
+    [
+      "public int hashCode();",
+      [
+        "aload_0",
+        "getfield # // Field parent:Lorg/apache/commons/collections4/map/AbstractReferenceMap;",
+        "aload_0",
+        "invokevirtual # // Method getKey:()Ljava/lang/Object;",
+        "aload_0",
+        "invokevirtual # // Method getValue:()Ljava/lang/Object;",
+        "invokevirtual # // Method org/apache/commons/collections4/map/AbstractReferenceMap.hashEntry:(Ljava/lang/Object;Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "protected void onPurge();",
+      [
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceStrength": [
+    [
+      "public static org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceStrength[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceStrength resolve(int);",
+      [
+        "iload_0",
+        "tableswitch { // 0 to 2",
+        "28",
+        "32",
+        "36",
+        "getstatic # // Field HARD:Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;",
+        "areturn",
+        "getstatic # // Field SOFT:Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;",
+        "areturn",
+        "getstatic # // Field WEAK:Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;",
+        "areturn",
+        "new # // class java/lang/IllegalArgumentException",
+        "dup",
+        "invokespecial # // Method java/lang/IllegalArgumentException.\"<init>\":()V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.AbstractReferenceMap$SoftRef": [
+    [
+      "public int hashCode();",
+      [
+        "aload_0",
+        "getfield # // Field hash:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.AbstractReferenceMap$WeakRef": [
+    [
+      "public int hashCode();",
+      [
+        "aload_0",
+        "getfield # // Field hash:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.AbstractReferenceMap": [
+    [
+      "protected org.apache.commons.collections4.map.AbstractReferenceMap();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractHashedMap.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "protected org.apache.commons.collections4.map.AbstractReferenceMap(org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceStrength, org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceStrength, int, float, boolean);",
+      [
+        "aload_0",
+        "iload_3",
+        "fload 4",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractHashedMap.\"<init>\":(IF)V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field keyType:Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field valueType:Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;",
+        "aload_0",
+        "iload 5",
+        "putfield # // Field purgeValues:Z",
+        "return"
+      ]
+    ],
+    [
+      "protected int hashEntry(java.lang.Object, java.lang.Object);",
+      [
+        "aload_1",
+        "ifnonnull 8",
+        "iconst_0",
+        "goto 12",
+        "aload_1",
+        "invokevirtual # // Method java/lang/Object.hashCode:()I",
+        "aload_2",
+        "ifnonnull 20",
+        "iconst_0",
+        "goto 24",
+        "aload_2",
+        "invokevirtual # // Method java/lang/Object.hashCode:()I",
+        "ixor",
+        "ireturn"
+      ]
+    ],
+    [
+      "protected void purgeBeforeRead();",
+      [
+        "aload_0",
+        "invokevirtual # // Method purge:()V",
+        "return"
+      ]
+    ],
+    [
+      "protected void purgeBeforeWrite();",
+      [
+        "aload_0",
+        "invokevirtual # // Method purge:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.ReferenceIdentityMap": [
+    [
+      "public org.apache.commons.collections4.map.ReferenceIdentityMap(org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceStrength, org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceStrength, int, float);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "iload_3",
+        "fload 4",
+        "iconst_0",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractReferenceMap.\"<init>\":(Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;IFZ)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.ReferenceIdentityMap(org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceStrength, org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceStrength, int, float, boolean);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "iload_3",
+        "fload 4",
+        "iload 5",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractReferenceMap.\"<init>\":(Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;IFZ)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.ReferenceMap": [
+    [
+      "public org.apache.commons.collections4.map.ReferenceMap(org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceStrength, org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceStrength, int, float);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "iload_3",
+        "fload 4",
+        "iconst_0",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractReferenceMap.\"<init>\":(Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;IFZ)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.ReferenceMap(org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceStrength, org.apache.commons.collections4.map.AbstractReferenceMap$ReferenceStrength, int, float, boolean);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "iload_3",
+        "fload 4",
+        "iload 5",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractReferenceMap.\"<init>\":(Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;Lorg/apache/commons/collections4/map/AbstractReferenceMap$ReferenceStrength;IFZ)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.properties.AbstractPropertiesFactory$PropertyFormat": [
+    [
+      "public static org.apache.commons.collections4.properties.AbstractPropertiesFactory$PropertyFormat[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/collections4/properties/AbstractPropertiesFactory$PropertyFormat;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/collections4/properties/AbstractPropertiesFactory$PropertyFormat;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/collections4/properties/AbstractPropertiesFactory$PropertyFormat;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "static org.apache.commons.collections4.properties.AbstractPropertiesFactory$PropertyFormat toPropertyFormat(java.lang.String);",
+      [
+        "aload_0",
+        "ldc # // String fileName",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class java/lang/String",
+        "ldc # // String .xml",
+        "invokevirtual # // Method java/lang/String.endsWith:(Ljava/lang/String;)Z",
+        "ifeq 23",
+        "getstatic # // Field XML:Lorg/apache/commons/collections4/properties/AbstractPropertiesFactory$PropertyFormat;",
+        "goto 26",
+        "getstatic # // Field PROPERTIES:Lorg/apache/commons/collections4/properties/AbstractPropertiesFactory$PropertyFormat;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.properties.AbstractPropertiesFactory": [
+    [
+      "protected org.apache.commons.collections4.properties.AbstractPropertiesFactory();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.properties.OrderedPropertiesFactory": [
+    [
+      "private org.apache.commons.collections4.properties.OrderedPropertiesFactory();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/properties/AbstractPropertiesFactory.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "protected org.apache.commons.collections4.properties.OrderedProperties createProperties();",
+      [
+        "new # // class org/apache/commons/collections4/properties/OrderedProperties",
+        "dup",
+        "invokespecial # // Method org/apache/commons/collections4/properties/OrderedProperties.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.properties.PropertiesFactory$EmptyProperties": [
+    [
+      "public synchronized void clear();",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public synchronized boolean contains(java.lang.Object);",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public synchronized boolean containsKey(java.lang.Object);",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean containsValue(java.lang.Object);",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public synchronized java.lang.Object get(java.lang.Object);",
+      [
+        "aconst_null",
+        "areturn"
+      ]
+    ],
+    [
+      "public synchronized java.lang.Object getOrDefault(java.lang.Object, java.lang.Object);",
+      [
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getProperty(java.lang.String);",
+      [
+        "aconst_null",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getProperty(java.lang.String, java.lang.String);",
+      [
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public synchronized int hashCode();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public synchronized boolean isEmpty();",
+      [
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public synchronized java.lang.Object put(java.lang.Object, java.lang.Object);",
+      [
+        "aload_1",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "aload_2",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ],
+    [
+      "public synchronized java.lang.Object putIfAbsent(java.lang.Object, java.lang.Object);",
+      [
+        "aload_1",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "aload_2",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ],
+    [
+      "protected void rehash();",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public synchronized java.lang.Object remove(java.lang.Object);",
+      [
+        "aload_1",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ],
+    [
+      "public synchronized boolean remove(java.lang.Object, java.lang.Object);",
+      [
+        "aload_1",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "aload_2",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ],
+    [
+      "public synchronized java.lang.Object replace(java.lang.Object, java.lang.Object);",
+      [
+        "aload_1",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "aload_2",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ],
+    [
+      "public synchronized boolean replace(java.lang.Object, java.lang.Object, java.lang.Object);",
+      [
+        "aload_1",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "aload_2",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "aload_3",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
+        "athrow"
+      ]
+    ],
+    [
+      "public synchronized int size();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.properties.PropertiesFactory": [
+    [
+      "private org.apache.commons.collections4.properties.PropertiesFactory();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/properties/AbstractPropertiesFactory.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.properties.SortedPropertiesFactory": [
+    [
+      "private org.apache.commons.collections4.properties.SortedPropertiesFactory();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/properties/AbstractPropertiesFactory.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "protected org.apache.commons.collections4.properties.SortedProperties createProperties();",
+      [
+        "new # // class org/apache/commons/collections4/properties/SortedProperties",
+        "dup",
+        "invokespecial # // Method org/apache/commons/collections4/properties/SortedProperties.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.set.AbstractNavigableSetDecorator": [
+    [
+      "protected org.apache.commons.collections4.set.AbstractNavigableSetDecorator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/set/AbstractSortedSetDecorator.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.set.AbstractSortedSetDecorator": [
+    [
+      "protected org.apache.commons.collections4.set.AbstractSortedSetDecorator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/set/AbstractSetDecorator.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.set.MapBackedSet": [
+    [
+      "public void clear();",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.clear:()V",
+        "return"
+      ]
+    ],
+    [
+      "public boolean contains(java.lang.Object);",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Map.containsKey:(Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isEmpty();",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.isEmpty:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.size:()I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.trie.KeyAnalyzer": [
+    [
+      "public org.apache.commons.collections4.trie.KeyAnalyzer();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public abstract int bitsPerElement();",
+      []
+    ]
+  ],
+  "org.apache.commons.collections4.BulkTest": [
+    [
+      "public java.lang.String getName();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.ArrayHasher": [
+    [
+      "public org.apache.commons.collections4.bloomfilter.ArrayHasher(int...);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field values:[I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.IncrementingHasher": [
+    [
+      "public org.apache.commons.collections4.bloomfilter.IncrementingHasher(long, long);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "lload_1",
+        "putfield # // Field initial:J",
+        "aload_0",
+        "lload_3",
+        "putfield # // Field increment:J",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.NullHasher$1": [
+    [
+      "org.apache.commons.collections4.bloomfilter.NullHasher$1();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public int[] asIndexArray();",
+      [
+        "iconst_0",
+        "newarray int",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.NullHasher": [
+    [
+      "private org.apache.commons.collections4.bloomfilter.NullHasher();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.bloomfilter.TestingHashers": [
+    [
+      "private org.apache.commons.collections4.bloomfilter.TestingHashers();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.junit.ObjectToStringComparator": [
+    [
+      "public org.apache.commons.collections4.junit.ObjectToStringComparator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public int compare(java.lang.Object, java.lang.Object);",
+      [
+        "aload_1",
+        "ifnonnull 10",
+        "aload_2",
+        "ifnonnull 10",
+        "iconst_0",
+        "ireturn",
+        "aload_1",
+        "ifnonnull 16",
+        "iconst_1",
+        "ireturn",
+        "aload_2",
+        "ifnonnull 22",
+        "iconst_m1",
+        "ireturn",
+        "aload_1",
+        "invokevirtual # // Method java/lang/Object.toString:()Ljava/lang/String;",
+        "aload_2",
+        "invokevirtual # // Method java/lang/Object.toString:()Ljava/lang/String;",
+        "invokevirtual # // Method java/lang/String.compareTo:(Ljava/lang/String;)I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.collection.CompositeCollection": [
+    [
+      "public org.apache.commons.collections4.collection.CompositeCollection();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field all:Ljava/util/List;",
+        "return"
+      ]
+    ],
+    [
+      "public boolean remove(java.lang.Object);",
+      [
+        "aload_0",
+        "getfield # // Field mutator:Lorg/apache/commons/collections4/collection/CompositeCollection$CollectionMutator;",
+        "ifnonnull 17",
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String remove() is not supported on CompositeCollection without a CollectionMutator strategy",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field mutator:Lorg/apache/commons/collections4/collection/CompositeCollection$CollectionMutator;",
+        "aload_0",
+        "aload_0",
+        "getfield # // Field all:Ljava/util/List;",
+        "aload_1",
+        "invokeinterface #, 4 // InterfaceMethod org/apache/commons/collections4/collection/CompositeCollection$CollectionMutator.remove:(Lorg/apache/commons/collections4/collection/CompositeCollection;Ljava/util/List;Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.Object[] toArray();",
+      [
+        "aload_0",
+        "invokevirtual # // Method size:()I",
+        "anewarray # // class java/lang/Object",
+        "astore_1",
+        "iconst_0",
+        "istore_2",
+        "aload_0",
+        "invokevirtual # // Method iterator:()Ljava/util/Iterator;",
+        "astore_3",
+        "aload_3",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ifeq 39",
+        "aload_1",
+        "iload_2",
+        "aload_3",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;",
+        "aastore",
+        "iinc 2, 1",
+        "goto 15",
+        "aload_1",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.EmptyMapMutator": [
+    [
+      "org.apache.commons.collections4.map.EmptyMapMutator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.set.CompositeSet": [
+    [
+      "public org.apache.commons.collections4.set.CompositeSet();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field all:Ljava/util/List;",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.Object[] toArray();",
+      [
+        "aload_0",
+        "invokevirtual # // Method size:()I",
+        "anewarray # // class java/lang/Object",
+        "astore_1",
+        "iconst_0",
+        "istore_2",
+        "aload_0",
+        "invokevirtual # // Method iterator:()Ljava/util/Iterator;",
+        "astore_3",
+        "aload_3",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ifeq 39",
+        "aload_1",
+        "iload_2",
+        "aload_3",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;",
+        "aastore",
+        "iinc 2, 1",
+        "goto 15",
+        "aload_1",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.map.IdentityMap": [
+    [
+      "public org.apache.commons.collections4.map.IdentityMap(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractHashedMap.\"<init>\":(I)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.IdentityMap(int, float);",
+      [
+        "aload_0",
+        "iload_1",
+        "fload_2",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractHashedMap.\"<init>\":(IF)V",
+        "return"
+      ]
+    ]
+  ]
+}

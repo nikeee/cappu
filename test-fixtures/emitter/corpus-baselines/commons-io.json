@@ -1,0 +1,4204 @@
+{
+  "org.apache.commons.io.Buffers": [
+    [
+      "private org.apache.commons.io.Buffers();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.Charsets": [
+    [
+      "public org.apache.commons.io.Charsets();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.FileExistsException": [
+    [
+      "public org.apache.commons.io.FileExistsException();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/io/IOException.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.FileSystem$NameLengthStrategy": [
+    [
+      "public static org.apache.commons.io.FileSystem$NameLengthStrategy[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/io/FileSystem$NameLengthStrategy;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/io/FileSystem$NameLengthStrategy;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/io/FileSystem$NameLengthStrategy;\"",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.FileSystem": [
+    [
+      "public static org.apache.commons.io.FileSystem[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/io/FileSystem;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/io/FileSystem;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/io/FileSystem;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "private static org.apache.commons.io.FileSystem current();",
+      [
+        "getstatic # // Field IS_OS_LINUX:Z",
+        "ifeq 10",
+        "getstatic # // Field LINUX:Lorg/apache/commons/io/FileSystem;",
+        "areturn",
+        "getstatic # // Field IS_OS_MAC:Z",
+        "ifeq 20",
+        "getstatic # // Field MAC_OSX:Lorg/apache/commons/io/FileSystem;",
+        "areturn",
+        "getstatic # // Field IS_OS_WINDOWS:Z",
+        "ifeq 30",
+        "getstatic # // Field WINDOWS:Lorg/apache/commons/io/FileSystem;",
+        "areturn",
+        "getstatic # // Field GENERIC:Lorg/apache/commons/io/FileSystem;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.io.FileSystem getCurrent();",
+      [
+        "getstatic # // Field CURRENT:Lorg/apache/commons/io/FileSystem;",
+        "areturn"
+      ]
+    ],
+    [
+      "private static boolean getOsMatchesName(java.lang.String);",
+      [
+        "ldc # // String os.name",
+        "invokestatic # // Method getSystemProperty:(Ljava/lang/String;)Ljava/lang/String;",
+        "aload_0",
+        "invokestatic # // Method isOsNameMatch:(Ljava/lang/String;Ljava/lang/String;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "private static int indexOfFirstDot(java.lang.CharSequence);",
+      [
+        "aload_0",
+        "instanceof # // class java/lang/String",
+        "ifeq 17",
+        "aload_0",
+        "checkcast # // class java/lang/String",
+        "bipush 46",
+        "invokevirtual # // Method java/lang/String.indexOf:(I)I",
+        "ireturn",
+        "iconst_0",
+        "istore_1",
+        "iload_1",
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod java/lang/CharSequence.length:()I",
+        "if_icmpge 49",
+        "aload_0",
+        "iload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/lang/CharSequence.charAt:(I)C",
+        "bipush 46",
+        "if_icmpne 43",
+        "iload_1",
+        "ireturn",
+        "iinc 1, 1",
+        "goto 19",
+        "iconst_m1",
+        "ireturn"
+      ]
+    ],
+    [
+      "static java.lang.CharSequence[] splitExtension(java.lang.CharSequence);",
+      [
+        "aload_0",
+        "invokestatic # // Method indexOfFirstDot:(Ljava/lang/CharSequence;)I",
+        "istore_1",
+        "iload_1",
+        "iconst_1",
+        "if_icmpge 26",
+        "iconst_2",
+        "anewarray # // class java/lang/CharSequence",
+        "dup",
+        "iconst_0",
+        "aload_0",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "ldc # // String",
+        "aastore",
+        "goto 57",
+        "iconst_2",
+        "anewarray # // class java/lang/CharSequence",
+        "dup",
+        "iconst_0",
+        "aload_0",
+        "iconst_0",
+        "iload_1",
+        "invokeinterface #, 3 // InterfaceMethod java/lang/CharSequence.subSequence:(II)Ljava/lang/CharSequence;",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "aload_0",
+        "iload_1",
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod java/lang/CharSequence.length:()I",
+        "invokeinterface #, 3 // InterfaceMethod java/lang/CharSequence.subSequence:(II)Ljava/lang/CharSequence;",
+        "aastore",
+        "areturn"
+      ]
+    ],
+    [
+      "static java.lang.CharSequence trimExtension(java.lang.CharSequence);",
+      [
+        "aload_0",
+        "invokestatic # // Method indexOfFirstDot:(Ljava/lang/CharSequence;)I",
+        "istore_1",
+        "iload_1",
+        "iconst_1",
+        "if_icmpge 14",
+        "aload_0",
+        "goto 22",
+        "aload_0",
+        "iconst_0",
+        "iload_1",
+        "invokeinterface #, 3 // InterfaceMethod java/lang/CharSequence.subSequence:(II)Ljava/lang/CharSequence;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int getBlockSize();",
+      [
+        "aload_0",
+        "getfield # // Field blockSize:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public char[] getIllegalFileNameChars();",
+      [
+        "aload_0",
+        "getfield # // Field illegalFileNameChars:[I",
+        "arraylength",
+        "newarray char",
+        "astore_1",
+        "iconst_0",
+        "istore_2",
+        "iload_2",
+        "aload_0",
+        "getfield # // Field illegalFileNameChars:[I",
+        "arraylength",
+        "if_icmpge 35",
+        "aload_1",
+        "iload_2",
+        "aload_0",
+        "getfield # // Field illegalFileNameChars:[I",
+        "iload_2",
+        "iaload",
+        "i2c",
+        "castore",
+        "iinc 2, 1",
+        "goto 10",
+        "aload_1",
+        "areturn"
+      ]
+    ],
+    [
+      "public int getMaxFileNameLength();",
+      [
+        "aload_0",
+        "getfield # // Field maxFileNameLength:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getMaxPathLength();",
+      [
+        "aload_0",
+        "getfield # // Field maxPathLength:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "org.apache.commons.io.FileSystem$NameLengthStrategy getNameLengthStrategy();",
+      [
+        "aload_0",
+        "getfield # // Field nameLengthStrategy:Lorg/apache/commons/io/FileSystem$NameLengthStrategy;",
+        "areturn"
+      ]
+    ],
+    [
+      "public char getNameSeparator();",
+      [
+        "aload_0",
+        "getfield # // Field nameSeparator:C",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isCasePreserving();",
+      [
+        "aload_0",
+        "getfield # // Field casePreserving:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isCaseSensitive();",
+      [
+        "aload_0",
+        "getfield # // Field caseSensitive:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.String normalizeSeparators(java.lang.String);",
+      [
+        "aload_1",
+        "aload_0",
+        "getfield # // Field nameSeparatorOther:C",
+        "aload_0",
+        "getfield # // Field nameSeparator:C",
+        "invokestatic # // Method replace:(Ljava/lang/String;CC)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean supportsDriveLetter();",
+      [
+        "aload_0",
+        "getfield # // Field supportsDriveLetter:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.FileUtils": [
+    [
+      "public static java.lang.String byteCountToDisplaySize(java.lang.Number);",
+      [
+        "aload_0",
+        "invokevirtual # // Method java/lang/Number.longValue:()J",
+        "invokestatic # // Method byteCountToDisplaySize:(J)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String getTempDirectoryPath();",
+      [
+        "ldc_w # // String java.io.tmpdir",
+        "invokestatic # // Method java/lang/System.getProperty:(Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String getUserDirectoryPath();",
+      [
+        "ldc_w # // String user.home",
+        "invokestatic # // Method java/lang/System.getProperty:(Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.FileUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.FilenameUtils": [
+    [
+      "public static boolean equals(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "getstatic # // Field org/apache/commons/io/IOCase.SENSITIVE:Lorg/apache/commons/io/IOCase;",
+        "invokestatic # // Method equals:(Ljava/lang/String;Ljava/lang/String;ZLorg/apache/commons/io/IOCase;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static boolean equalsNormalized(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_1",
+        "getstatic # // Field org/apache/commons/io/IOCase.SENSITIVE:Lorg/apache/commons/io/IOCase;",
+        "invokestatic # // Method equals:(Ljava/lang/String;Ljava/lang/String;ZLorg/apache/commons/io/IOCase;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static boolean equalsNormalizedOnSystem(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_1",
+        "getstatic # // Field org/apache/commons/io/IOCase.SYSTEM:Lorg/apache/commons/io/IOCase;",
+        "invokestatic # // Method equals:(Ljava/lang/String;Ljava/lang/String;ZLorg/apache/commons/io/IOCase;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static boolean equalsOnSystem(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "getstatic # // Field org/apache/commons/io/IOCase.SYSTEM:Lorg/apache/commons/io/IOCase;",
+        "invokestatic # // Method equals:(Ljava/lang/String;Ljava/lang/String;ZLorg/apache/commons/io/IOCase;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static java.lang.String getBaseName(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method getName:(Ljava/lang/String;)Ljava/lang/String;",
+        "invokestatic # // Method removeExtension:(Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String getFullPath(java.lang.String);",
+      [
+        "aload_0",
+        "iconst_1",
+        "invokestatic # // Method doGetFullPath:(Ljava/lang/String;Z)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String getFullPathNoEndSeparator(java.lang.String);",
+      [
+        "aload_0",
+        "iconst_0",
+        "invokestatic # // Method doGetFullPath:(Ljava/lang/String;Z)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String getName(java.lang.String);",
+      [
+        "aload_0",
+        "ifnonnull 6",
+        "aconst_null",
+        "areturn",
+        "aload_0",
+        "invokestatic # // Method requireNonNullChars:(Ljava/lang/String;)Ljava/lang/String;",
+        "aload_0",
+        "invokestatic # // Method indexOfLastSeparator:(Ljava/lang/String;)I",
+        "iconst_1",
+        "iadd",
+        "invokevirtual # // Method java/lang/String.substring:(I)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String getPath(java.lang.String);",
+      [
+        "aload_0",
+        "iconst_1",
+        "invokestatic # // Method doGetPath:(Ljava/lang/String;I)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String getPathNoEndSeparator(java.lang.String);",
+      [
+        "aload_0",
+        "iconst_0",
+        "invokestatic # // Method doGetPath:(Ljava/lang/String;I)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String normalize(java.lang.String);",
+      [
+        "aload_0",
+        "getstatic # // Field SYSTEM_NAME_SEPARATOR:C",
+        "iconst_1",
+        "invokestatic # // Method doNormalize:(Ljava/lang/String;CZ)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String normalize(java.lang.String, boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method toSeparator:(Z)C",
+        "iconst_1",
+        "invokestatic # // Method doNormalize:(Ljava/lang/String;CZ)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String normalizeNoEndSeparator(java.lang.String);",
+      [
+        "aload_0",
+        "getstatic # // Field SYSTEM_NAME_SEPARATOR:C",
+        "iconst_0",
+        "invokestatic # // Method doNormalize:(Ljava/lang/String;CZ)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String normalizeNoEndSeparator(java.lang.String, boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method toSeparator:(Z)C",
+        "iconst_0",
+        "invokestatic # // Method doNormalize:(Ljava/lang/String;CZ)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String separatorsToSystem(java.lang.String);",
+      [
+        "invokestatic # // Method org/apache/commons/io/FileSystem.getCurrent:()Lorg/apache/commons/io/FileSystem;",
+        "aload_0",
+        "invokevirtual # // Method org/apache/commons/io/FileSystem.normalizeSeparators:(Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String separatorsToUnix(java.lang.String);",
+      [
+        "getstatic # // Field org/apache/commons/io/FileSystem.LINUX:Lorg/apache/commons/io/FileSystem;",
+        "aload_0",
+        "invokevirtual # // Method org/apache/commons/io/FileSystem.normalizeSeparators:(Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String separatorsToWindows(java.lang.String);",
+      [
+        "getstatic # // Field org/apache/commons/io/FileSystem.WINDOWS:Lorg/apache/commons/io/FileSystem;",
+        "aload_0",
+        "invokevirtual # // Method org/apache/commons/io/FileSystem.normalizeSeparators:(Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static boolean wildcardMatch(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "getstatic # // Field org/apache/commons/io/IOCase.SENSITIVE:Lorg/apache/commons/io/IOCase;",
+        "invokestatic # // Method wildcardMatch:(Ljava/lang/String;Ljava/lang/String;Lorg/apache/commons/io/IOCase;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static boolean wildcardMatchOnSystem(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "getstatic # // Field org/apache/commons/io/IOCase.SYSTEM:Lorg/apache/commons/io/IOCase;",
+        "invokestatic # // Method wildcardMatch:(Ljava/lang/String;Ljava/lang/String;Lorg/apache/commons/io/IOCase;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.FilenameUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.IOCase": [
+    [
+      "public static org.apache.commons.io.IOCase[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/io/IOCase;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/io/IOCase;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/io/IOCase;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.io.IOCase value(org.apache.commons.io.IOCase, org.apache.commons.io.IOCase);",
+      [
+        "aload_0",
+        "ifnull 8",
+        "aload_0",
+        "goto 9",
+        "aload_1",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getName();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isCaseSensitive();",
+      [
+        "aload_0",
+        "getfield # // Field sensitive:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "private java.lang.Object readResolve();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "invokestatic # // Method forName:(Ljava/lang/String;)Lorg/apache/commons/io/IOCase;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.IOIndexedException": [
+    [
+      "public int getIndex();",
+      [
+        "aload_0",
+        "getfield # // Field index:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.IORandomAccessFile": [
+    [
+      "public java.lang.String getMode();",
+      [
+        "aload_0",
+        "getfield # // Field mode:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.IOUtils$ScratchBytes": [
+    [
+      "private org.apache.commons.io.IOUtils$ScratchBytes(byte[]);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field buffer:[B",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.IOUtils$ScratchChars": [
+    [
+      "private org.apache.commons.io.IOUtils$ScratchChars(char[]);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field buffer:[C",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.IOUtils": [
+    [
+      "public static byte[] byteArray(int);",
+      [
+        "iload_0",
+        "newarray byte",
+        "areturn"
+      ]
+    ],
+    [
+      "private static char[] charArray(int);",
+      [
+        "iload_0",
+        "newarray char",
+        "areturn"
+      ]
+    ],
+    [
+      "public static void checkFromIndexSize(byte[], int, int);",
+      [
+        "iload_1",
+        "iload_2",
+        "aload_0",
+        "ldc # // String byte array",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "arraylength",
+        "invokestatic # // Method checkFromIndexSize:(III)V",
+        "return"
+      ]
+    ],
+    [
+      "public static void checkFromIndexSize(char[], int, int);",
+      [
+        "iload_1",
+        "iload_2",
+        "aload_0",
+        "ldc # // String char array",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class \"[C\"",
+        "arraylength",
+        "invokestatic # // Method checkFromIndexSize:(III)V",
+        "return"
+      ]
+    ],
+    [
+      "public static void checkFromToIndex(java.lang.CharSequence, int, int);",
+      [
+        "iload_1",
+        "iload_2",
+        "aload_0",
+        "ifnull 15",
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod java/lang/CharSequence.length:()I",
+        "goto 16",
+        "iconst_4",
+        "invokestatic # // Method checkFromToIndex:(III)V",
+        "return"
+      ]
+    ],
+    [
+      "private static void closeQ(java.io.Closeable);",
+      [
+        "aload_0",
+        "aconst_null",
+        "checkcast # // class java/util/function/Consumer",
+        "invokestatic # // Method closeQuietly:(Ljava/io/Closeable;Ljava/util/function/Consumer;)V",
+        "return"
+      ]
+    ],
+    [
+      "public static void closeQuietly(java.io.Closeable);",
+      [
+        "aload_0",
+        "aconst_null",
+        "checkcast # // class java/util/function/Consumer",
+        "invokestatic # // Method closeQuietly:(Ljava/io/Closeable;Ljava/util/function/Consumer;)V",
+        "return"
+      ]
+    ],
+    [
+      "public static void closeQuietly(java.io.InputStream);",
+      [
+        "aload_0",
+        "invokestatic # // Method closeQ:(Ljava/io/Closeable;)V",
+        "return"
+      ]
+    ],
+    [
+      "public static void closeQuietly(java.io.OutputStream);",
+      [
+        "aload_0",
+        "invokestatic # // Method closeQ:(Ljava/io/Closeable;)V",
+        "return"
+      ]
+    ],
+    [
+      "public static int length(byte[]);",
+      [
+        "aload_0",
+        "ifnonnull 8",
+        "iconst_0",
+        "goto 10",
+        "aload_0",
+        "arraylength",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static int length(char[]);",
+      [
+        "aload_0",
+        "ifnonnull 8",
+        "iconst_0",
+        "goto 10",
+        "aload_0",
+        "arraylength",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static int length(java.lang.CharSequence);",
+      [
+        "aload_0",
+        "ifnonnull 8",
+        "iconst_0",
+        "goto 14",
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod java/lang/CharSequence.length:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static int length(java.lang.Object[]);",
+      [
+        "aload_0",
+        "ifnonnull 8",
+        "iconst_0",
+        "goto 10",
+        "aload_0",
+        "arraylength",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.IOUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.LineIterator": [
+    [
+      "protected boolean isValidLine(java.lang.String);",
+      [
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.String next();",
+      [
+        "aload_0",
+        "invokevirtual # // Method nextLine:()Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "new # // class java/lang/UnsupportedOperationException",
+        "dup",
+        "ldc # // String remove not supported",
+        "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.RandomAccessFileMode": [
+    [
+      "public static org.apache.commons.io.RandomAccessFileMode[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/io/RandomAccessFileMode;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/io/RandomAccessFileMode;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/io/RandomAccessFileMode;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "private int getLevel();",
+      [
+        "aload_0",
+        "getfield # // Field level:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.String getMode();",
+      [
+        "aload_0",
+        "getfield # // Field mode:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.RandomAccessFiles": [
+    [
+      "public org.apache.commons.io.RandomAccessFiles();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.StandardLineSeparator": [
+    [
+      "public static org.apache.commons.io.StandardLineSeparator[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/io/StandardLineSeparator;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/io/StandardLineSeparator;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/io/StandardLineSeparator;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getString();",
+      [
+        "aload_0",
+        "getfield # // Field lineSeparator:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.ThreadUtils": [
+    [
+      "public org.apache.commons.io.ThreadUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.build.AbstractOrigin$ByteArrayOrigin": [
+    [
+      "public org.apache.commons.io.build.AbstractOrigin$ByteArrayOrigin(byte[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractOrigin.\"<init>\":(Ljava/lang/Object;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.build.AbstractOrigin$CharSequenceOrigin": [
+    [
+      "public org.apache.commons.io.build.AbstractOrigin$CharSequenceOrigin(java.lang.CharSequence);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractOrigin.\"<init>\":(Ljava/lang/Object;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.build.AbstractOrigin$InputStreamOrigin": [
+    [
+      "public org.apache.commons.io.build.AbstractOrigin$InputStreamOrigin(java.io.InputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractOrigin.\"<init>\":(Ljava/lang/Object;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.build.AbstractOrigin$OutputStreamOrigin": [
+    [
+      "public org.apache.commons.io.build.AbstractOrigin$OutputStreamOrigin(java.io.OutputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractOrigin.\"<init>\":(Ljava/lang/Object;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.build.AbstractOrigin$URIOrigin$URIOpenOption$Builder": [
+    [
+      "public org.apache.commons.io.build.AbstractOrigin$URIOrigin$URIOpenOption$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractSupplier.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.build.AbstractOrigin$URIOrigin$URIOpenOption get();",
+      [
+        "new # // class org/apache/commons/io/build/AbstractOrigin$URIOrigin$URIOpenOption",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractOrigin$URIOrigin$URIOpenOption.\"<init>\":(Lorg/apache/commons/io/build/AbstractOrigin$URIOrigin$URIOpenOption$Builder;)V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.build.AbstractOrigin$URIOrigin$URIOpenOption": [
+    [
+      "public static org.apache.commons.io.build.AbstractOrigin$URIOrigin$URIOpenOption$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/build/AbstractOrigin$URIOrigin$URIOpenOption$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractOrigin$URIOrigin$URIOpenOption$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.build.AbstractOriginSupplier": [
+    [
+      "public org.apache.commons.io.build.AbstractOriginSupplier();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractSupplier.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.build.AbstractStreamBuilder": [
+    [
+      "private int checkBufferSize(int);",
+      [
+        "aload_0",
+        "getfield # // Field bufferSizeChecker:Ljava/util/function/IntUnaryOperator;",
+        "iload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/function/IntUnaryOperator.applyAsInt:(I)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getBufferSize();",
+      [
+        "aload_0",
+        "getfield # // Field bufferSize:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getBufferSizeDefault();",
+      [
+        "aload_0",
+        "getfield # // Field bufferSizeDefault:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.build.AbstractSupplier": [
+    [
+      "public org.apache.commons.io.build.AbstractSupplier();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.channels.ByteArraySeekableByteChannel": [
+    [
+      "public static org.apache.commons.io.channels.ByteArraySeekableByteChannel$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/channels/ByteArraySeekableByteChannel$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/channels/ByteArraySeekableByteChannel$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "public byte[] array();",
+      [
+        "aload_0",
+        "getfield # // Field data:[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public void close();",
+      [
+        "aload_0",
+        "iconst_1",
+        "putfield # // Field closed:Z",
+        "return"
+      ]
+    ],
+    [
+      "public long getSize();",
+      [
+        "aload_0",
+        "getfield # // Field size:I",
+        "i2l",
+        "lreturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.channels.FileChannels": [
+    [
+      "private org.apache.commons.io.channels.FileChannels();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.charset.CharsetDecoders": [
+    [
+      "private org.apache.commons.io.charset.CharsetDecoders();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.charset.CharsetEncoders": [
+    [
+      "private org.apache.commons.io.charset.CharsetEncoders();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.AccumulatorPathVisitor$Builder": [
+    [
+      "public org.apache.commons.io.file.AccumulatorPathVisitor$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/file/CountingPathVisitor$AbstractBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.file.AccumulatorPathVisitor get();",
+      [
+        "new # // class org/apache/commons/io/file/AccumulatorPathVisitor",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/file/AccumulatorPathVisitor.\"<init>\":(Lorg/apache/commons/io/file/AccumulatorPathVisitor$Builder;)V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.AccumulatorPathVisitor": [
+    [
+      "public static org.apache.commons.io.file.AccumulatorPathVisitor$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/file/AccumulatorPathVisitor$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/file/AccumulatorPathVisitor$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.io.file.AccumulatorPathVisitor(org.apache.commons.io.file.AccumulatorPathVisitor$Builder);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/file/CountingPathVisitor.\"<init>\":(Lorg/apache/commons/io/file/CountingPathVisitor$AbstractBuilder;)V",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field dirList:Ljava/util/List;",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field fileList:Ljava/util/List;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.Counters$AbstractPathCounters": [
+    [
+      "protected org.apache.commons.io.file.Counters$AbstractPathCounters(org.apache.commons.io.file.Counters$Counter, org.apache.commons.io.file.Counters$Counter, org.apache.commons.io.file.Counters$Counter);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field byteCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field directoryCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "aload_0",
+        "aload_3",
+        "putfield # // Field fileCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.file.Counters$Counter getByteCounter();",
+      [
+        "aload_0",
+        "getfield # // Field byteCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.file.Counters$Counter getDirectoryCounter();",
+      [
+        "aload_0",
+        "getfield # // Field directoryCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.file.Counters$Counter getFileCounter();",
+      [
+        "aload_0",
+        "getfield # // Field fileCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void reset();",
+      [
+        "aload_0",
+        "getfield # // Field byteCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/file/Counters$Counter.reset:()V",
+        "aload_0",
+        "getfield # // Field directoryCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/file/Counters$Counter.reset:()V",
+        "aload_0",
+        "getfield # // Field fileCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/file/Counters$Counter.reset:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.Counters$BigIntegerPathCounters": [
+    [
+      "protected org.apache.commons.io.file.Counters$BigIntegerPathCounters();",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/io/file/Counters.bigIntegerCounter:()Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokestatic # // Method org/apache/commons/io/file/Counters.bigIntegerCounter:()Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokestatic # // Method org/apache/commons/io/file/Counters.bigIntegerCounter:()Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokespecial # // Method org/apache/commons/io/file/Counters$AbstractPathCounters.\"<init>\":(Lorg/apache/commons/io/file/Counters$Counter;Lorg/apache/commons/io/file/Counters$Counter;Lorg/apache/commons/io/file/Counters$Counter;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.Counters$Counter": [
+    [
+      "public abstract void add(long);",
+      []
+    ],
+    [
+      "public abstract long get();",
+      []
+    ],
+    [
+      "public abstract java.lang.Long getLong();",
+      []
+    ],
+    [
+      "public abstract void increment();",
+      []
+    ],
+    [
+      "public default void reset();",
+      [
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.Counters$LongCounter": [
+    [
+      "public void add(long);",
+      [
+        "aload_0",
+        "dup",
+        "getfield # // Field value:J",
+        "lload_1",
+        "ladd",
+        "putfield # // Field value:J",
+        "return"
+      ]
+    ],
+    [
+      "public long get();",
+      [
+        "aload_0",
+        "getfield # // Field value:J",
+        "lreturn"
+      ]
+    ],
+    [
+      "public java.lang.Long getLong();",
+      [
+        "aload_0",
+        "getfield # // Field value:J",
+        "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void increment();",
+      [
+        "aload_0",
+        "dup",
+        "getfield # // Field value:J",
+        "lconst_1",
+        "ladd",
+        "putfield # // Field value:J",
+        "return"
+      ]
+    ],
+    [
+      "public void reset();",
+      [
+        "aload_0",
+        "lconst_0",
+        "putfield # // Field value:J",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.Counters$LongPathCounters": [
+    [
+      "protected org.apache.commons.io.file.Counters$LongPathCounters();",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/io/file/Counters.longCounter:()Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokestatic # // Method org/apache/commons/io/file/Counters.longCounter:()Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokestatic # // Method org/apache/commons/io/file/Counters.longCounter:()Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokespecial # // Method org/apache/commons/io/file/Counters$AbstractPathCounters.\"<init>\":(Lorg/apache/commons/io/file/Counters$Counter;Lorg/apache/commons/io/file/Counters$Counter;Lorg/apache/commons/io/file/Counters$Counter;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.Counters$NoopCounter": [
+    [
+      "public void add(long);",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.Long getLong();",
+      [
+        "lconst_0",
+        "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void increment();",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "ldc # // String 0",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.Counters$NoopPathCounters": [
+    [
+      "private org.apache.commons.io.file.Counters$NoopPathCounters();",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/io/file/Counters.noopCounter:()Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokestatic # // Method org/apache/commons/io/file/Counters.noopCounter:()Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokestatic # // Method org/apache/commons/io/file/Counters.noopCounter:()Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokespecial # // Method org/apache/commons/io/file/Counters$AbstractPathCounters.\"<init>\":(Lorg/apache/commons/io/file/Counters$Counter;Lorg/apache/commons/io/file/Counters$Counter;Lorg/apache/commons/io/file/Counters$Counter;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.Counters$PathCounters": [
+    [
+      "public abstract org.apache.commons.io.file.Counters$Counter getByteCounter();",
+      []
+    ],
+    [
+      "public abstract org.apache.commons.io.file.Counters$Counter getDirectoryCounter();",
+      []
+    ],
+    [
+      "public abstract org.apache.commons.io.file.Counters$Counter getFileCounter();",
+      []
+    ],
+    [
+      "public default void reset();",
+      [
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.Counters": [
+    [
+      "public static org.apache.commons.io.file.Counters$Counter bigIntegerCounter();",
+      [
+        "new # // class org/apache/commons/io/file/Counters$BigIntegerCounter",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/file/Counters$BigIntegerCounter.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.io.file.Counters$PathCounters bigIntegerPathCounters();",
+      [
+        "new # // class org/apache/commons/io/file/Counters$BigIntegerPathCounters",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/file/Counters$BigIntegerPathCounters.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.io.file.Counters$Counter longCounter();",
+      [
+        "new # // class org/apache/commons/io/file/Counters$LongCounter",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/file/Counters$LongCounter.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.io.file.Counters$PathCounters longPathCounters();",
+      [
+        "new # // class org/apache/commons/io/file/Counters$LongPathCounters",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/file/Counters$LongPathCounters.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.io.file.Counters$Counter noopCounter();",
+      [
+        "getstatic # // Field org/apache/commons/io/file/Counters$NoopCounter.INSTANCE:Lorg/apache/commons/io/file/Counters$NoopCounter;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.io.file.Counters$PathCounters noopPathCounters();",
+      [
+        "getstatic # // Field org/apache/commons/io/file/Counters$NoopPathCounters.INSTANCE:Lorg/apache/commons/io/file/Counters$NoopPathCounters;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.file.Counters();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.CountingPathVisitor$AbstractBuilder": [
+    [
+      "org.apache.commons.io.file.PathFilter getDirectoryFilter();",
+      [
+        "aload_0",
+        "getfield # // Field directoryFilter:Lorg/apache/commons/io/file/PathFilter;",
+        "areturn"
+      ]
+    ],
+    [
+      "org.apache.commons.io.file.PathFilter getFileFilter();",
+      [
+        "aload_0",
+        "getfield # // Field fileFilter:Lorg/apache/commons/io/file/PathFilter;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.CountingPathVisitor$Builder": [
+    [
+      "public org.apache.commons.io.file.CountingPathVisitor$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/file/CountingPathVisitor$AbstractBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.file.CountingPathVisitor get();",
+      [
+        "new # // class org/apache/commons/io/file/CountingPathVisitor",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/file/CountingPathVisitor.\"<init>\":(Lorg/apache/commons/io/file/CountingPathVisitor$AbstractBuilder;)V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.CountingPathVisitor": [
+    [
+      "static org.apache.commons.io.filefilter.IOFileFilter defaultDirectoryFilter();",
+      [
+        "getstatic # // Field org/apache/commons/io/filefilter/TrueFileFilter.INSTANCE:Lorg/apache/commons/io/filefilter/IOFileFilter;",
+        "areturn"
+      ]
+    ],
+    [
+      "static org.apache.commons.io.filefilter.IOFileFilter defaultFileFilter();",
+      [
+        "getstatic # // Field org/apache/commons/io/filefilter/TrueFileFilter.INSTANCE:Lorg/apache/commons/io/filefilter/IOFileFilter;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.DirectoryStreamFilter": [
+    [
+      "public org.apache.commons.io.file.DirectoryStreamFilter(org.apache.commons.io.file.PathFilter);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String pathFilter",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/io/file/PathFilter",
+        "putfield # // Field pathFilter:Lorg/apache/commons/io/file/PathFilter;",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.file.PathFilter getPathFilter();",
+      [
+        "aload_0",
+        "getfield # // Field pathFilter:Lorg/apache/commons/io/file/PathFilter;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.PathUtils$RelativeSortedPaths": [
+    [
+      "static java.lang.String extractKey(java.lang.String, java.lang.String);",
+      [
+        "aload_1",
+        "aload_0",
+        "ldc # // String >",
+        "invokevirtual # // Method java/lang/String.replace:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.PathUtils": [
+    [
+      "private org.apache.commons.io.file.PathUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.SimplePathVisitor$AbstractBuilder": [
+    [
+      "public org.apache.commons.io.file.SimplePathVisitor$AbstractBuilder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractSupplier.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.StandardDeleteOption": [
+    [
+      "public static org.apache.commons.io.file.StandardDeleteOption[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/apache/commons/io/file/StandardDeleteOption;",
+        "invokevirtual # // Method \"[Lorg/apache/commons/io/file/StandardDeleteOption;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/io/file/StandardDeleteOption;\"",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.attribute.FileTimes": [
+    [
+      "private org.apache.commons.io.file.attribute.FileTimes();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.filefilter.ConditionalFileFilter": [
+    [
+      "public abstract void addFileFilter(org.apache.commons.io.filefilter.IOFileFilter);",
+      []
+    ],
+    [
+      "public abstract boolean removeFileFilter(org.apache.commons.io.filefilter.IOFileFilter);",
+      []
+    ]
+  ],
+  "org.apache.commons.io.filefilter.FalseFileFilter": [
+    [
+      "protected org.apache.commons.io.filefilter.FalseFileFilter();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.filefilter.IOFileFilter and(org.apache.commons.io.filefilter.IOFileFilter);",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/io/filefilter/IOFileFilter;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.filefilter.IOFileFilter negate();",
+      [
+        "getstatic # // Field org/apache/commons/io/filefilter/TrueFileFilter.INSTANCE:Lorg/apache/commons/io/filefilter/IOFileFilter;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.filefilter.IOFileFilter or(org.apache.commons.io.filefilter.IOFileFilter);",
+      [
+        "aload_1",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "getstatic # // Field TO_STRING:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.filefilter.FileFileFilter": [
+    [
+      "protected org.apache.commons.io.filefilter.FileFileFilter();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/filefilter/AbstractFileFilter.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.filefilter.IOFileFilter": [
+    [
+      "public default org.apache.commons.io.filefilter.IOFileFilter and(org.apache.commons.io.filefilter.IOFileFilter);",
+      [
+        "new # // class org/apache/commons/io/filefilter/AndFileFilter",
+        "dup",
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/filefilter/AndFileFilter.\"<init>\":(Lorg/apache/commons/io/filefilter/IOFileFilter;Lorg/apache/commons/io/filefilter/IOFileFilter;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public default org.apache.commons.io.filefilter.IOFileFilter negate();",
+      [
+        "new # // class org/apache/commons/io/filefilter/NotFileFilter",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/filefilter/NotFileFilter.\"<init>\":(Lorg/apache/commons/io/filefilter/IOFileFilter;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public default org.apache.commons.io.filefilter.IOFileFilter or(org.apache.commons.io.filefilter.IOFileFilter);",
+      [
+        "new # // class org/apache/commons/io/filefilter/OrFileFilter",
+        "dup",
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/filefilter/OrFileFilter.\"<init>\":(Lorg/apache/commons/io/filefilter/IOFileFilter;Lorg/apache/commons/io/filefilter/IOFileFilter;)V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.filefilter.TrueFileFilter": [
+    [
+      "protected org.apache.commons.io.filefilter.TrueFileFilter();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.filefilter.IOFileFilter and(org.apache.commons.io.filefilter.IOFileFilter);",
+      [
+        "aload_1",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.filefilter.IOFileFilter negate();",
+      [
+        "getstatic # // Field org/apache/commons/io/filefilter/FalseFileFilter.INSTANCE:Lorg/apache/commons/io/filefilter/IOFileFilter;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.filefilter.IOFileFilter or(org.apache.commons.io.filefilter.IOFileFilter);",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/io/filefilter/IOFileFilter;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "getstatic # // Field TO_STRING:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.Constants": [
+    [
+      "private org.apache.commons.io.function.Constants();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.Erase": [
+    [
+      "static void run(org.apache.commons.io.function.IORunnable);",
+      [
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IORunnable.run:()V",
+        "goto 15",
+        "astore_1",
+        "aload_1",
+        "invokestatic # // Method rethrow:(Ljava/lang/Throwable;)Ljava/lang/RuntimeException;",
+        "athrow",
+        "return"
+      ]
+    ],
+    [
+      "private org.apache.commons.io.function.Erase();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IOBiConsumer": [
+    [
+      "private void lambda$asBiConsumer$0(java.lang.Object, java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokestatic # // Method org/apache/commons/io/function/Uncheck.accept:(Lorg/apache/commons/io/function/IOBiConsumer;Ljava/lang/Object;Ljava/lang/Object;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IOBiFunction": [
+    [
+      "private java.lang.Object lambda$asBiFunction$0(java.lang.Object, java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokestatic # // Method org/apache/commons/io/function/Uncheck.apply:(Lorg/apache/commons/io/function/IOBiFunction;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IOBinaryOperator": [
+    [
+      "private java.lang.Object lambda$asBinaryOperator$0(java.lang.Object, java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokestatic # // Method org/apache/commons/io/function/Uncheck.apply:(Lorg/apache/commons/io/function/IOBiFunction;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IOComparator": [
+    [
+      "private int lambda$asComparator$0(java.lang.Object, java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokestatic # // Method org/apache/commons/io/function/Uncheck.compare:(Lorg/apache/commons/io/function/IOComparator;Ljava/lang/Object;Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IOConsumer": [
+    [
+      "private void lambda$asConsumer$0(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/io/function/Uncheck.accept:(Lorg/apache/commons/io/function/IOConsumer;Ljava/lang/Object;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IOFunction": [
+    [
+      "private java.lang.Object lambda$asFunction$0(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/io/function/Uncheck.apply:(Lorg/apache/commons/io/function/IOFunction;Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IOIntConsumer": [
+    [
+      "private void lambda$asConsumer$0(java.lang.Integer);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method java/lang/Integer.intValue:()I",
+        "invokestatic # // Method org/apache/commons/io/function/Uncheck.accept:(Lorg/apache/commons/io/function/IOIntConsumer;I)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IOPredicate": [
+    [
+      "private boolean lambda$asPredicate$0(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/io/function/Uncheck.test:(Lorg/apache/commons/io/function/IOPredicate;Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IORunnable": [
+    [
+      "public static org.apache.commons.io.function.IORunnable noop();",
+      [
+        "getstatic # // Field org/apache/commons/io/function/Constants.IO_RUNNABLE:Lorg/apache/commons/io/function/IORunnable;",
+        "areturn"
+      ]
+    ],
+    [
+      "public default java.lang.Runnable asRunnable();",
+      [
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:run:(Lorg/apache/commons/io/function/IORunnable;)Ljava/lang/Runnable;",
+        "areturn"
+      ]
+    ],
+    [
+      "private void lambda$asRunnable$0();",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/io/function/Uncheck.run:(Lorg/apache/commons/io/function/IORunnable;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IOStream$1": [
+    [
+      "public boolean hasNext();",
+      [
+        "iconst_1",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IOStream": [
+    [
+      "private static java.io.IOException lambda$forAll$0(java.lang.Integer, java.io.IOException);",
+      [
+        "aload_1",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IOStreams": [
+    [
+      "private org.apache.commons.io.function.IOStreams();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IOUnaryOperator": [
+    [
+      "private java.lang.Object lambda$asUnaryOperator$0(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/io/function/Uncheck.apply:(Lorg/apache/commons/io/function/IOFunction;Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.Uncheck": [
+    [
+      "public static void accept(org.apache.commons.io.function.IOIntConsumer, int);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokeinterface #, 2 // InterfaceMethod org/apache/commons/io/function/IOIntConsumer.accept:(I)V",
+        "goto 16",
+        "astore_2",
+        "aload_2",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow",
+        "return"
+      ]
+    ],
+    [
+      "public static boolean getAsBoolean(org.apache.commons.io.function.IOBooleanSupplier);",
+      [
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOBooleanSupplier.getAsBoolean:()Z",
+        "ireturn",
+        "astore_1",
+        "aload_1",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow"
+      ]
+    ],
+    [
+      "public static int getAsInt(org.apache.commons.io.function.IOIntSupplier);",
+      [
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOIntSupplier.getAsInt:()I",
+        "ireturn",
+        "astore_1",
+        "aload_1",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow"
+      ]
+    ],
+    [
+      "public static long getAsLong(org.apache.commons.io.function.IOLongSupplier);",
+      [
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOLongSupplier.getAsLong:()J",
+        "lreturn",
+        "astore_1",
+        "aload_1",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow"
+      ]
+    ],
+    [
+      "public static void run(org.apache.commons.io.function.IORunnable);",
+      [
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IORunnable.run:()V",
+        "goto 15",
+        "astore_1",
+        "aload_1",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow",
+        "return"
+      ]
+    ],
+    [
+      "private org.apache.commons.io.function.Uncheck();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.UncheckedIOSpliterator": [
+    [
+      "public int characteristics();",
+      [
+        "aload_0",
+        "getfield # // Field delegate:Lorg/apache/commons/io/function/IOSpliterator;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOSpliterator.characteristics:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public long estimateSize();",
+      [
+        "aload_0",
+        "getfield # // Field delegate:Lorg/apache/commons/io/function/IOSpliterator;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOSpliterator.estimateSize:()J",
+        "lreturn"
+      ]
+    ],
+    [
+      "public long getExactSizeIfKnown();",
+      [
+        "aload_0",
+        "getfield # // Field delegate:Lorg/apache/commons/io/function/IOSpliterator;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOSpliterator.getExactSizeIfKnown:()J",
+        "lreturn"
+      ]
+    ],
+    [
+      "public boolean hasCharacteristics(int);",
+      [
+        "aload_0",
+        "getfield # // Field delegate:Lorg/apache/commons/io/function/IOSpliterator;",
+        "iload_1",
+        "invokeinterface #, 2 // InterfaceMethod org/apache/commons/io/function/IOSpliterator.hasCharacteristics:(I)Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.AbstractInputStream": [
+    [
+      "public org.apache.commons.io.input.AbstractInputStream();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/io/InputStream.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public boolean isClosed();",
+      [
+        "aload_0",
+        "getfield # // Field closed:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void setClosed(boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field closed:Z",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.BoundedInputStream$AbstractBuilder": [
+    [
+      "long getCount();",
+      [
+        "aload_0",
+        "getfield # // Field count:J",
+        "lreturn"
+      ]
+    ],
+    [
+      "long getMaxCount();",
+      [
+        "aload_0",
+        "getfield # // Field maxCount:J",
+        "lreturn"
+      ]
+    ],
+    [
+      "boolean isPropagateClose();",
+      [
+        "aload_0",
+        "getfield # // Field propagateClose:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.BoundedInputStream$Builder": [
+    [
+      "public org.apache.commons.io.input.BoundedInputStream$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/input/BoundedInputStream$AbstractBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.BoundedInputStream": [
+    [
+      "public static org.apache.commons.io.input.BoundedInputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/input/BoundedInputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/input/BoundedInputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "public synchronized long getCount();",
+      [
+        "aload_0",
+        "getfield # // Field count:J",
+        "lreturn"
+      ]
+    ],
+    [
+      "public long getMaxCount();",
+      [
+        "aload_0",
+        "getfield # // Field maxCount:J",
+        "lreturn"
+      ]
+    ],
+    [
+      "public long getMaxLength();",
+      [
+        "aload_0",
+        "getfield # // Field maxCount:J",
+        "lreturn"
+      ]
+    ],
+    [
+      "public boolean isPropagateClose();",
+      [
+        "aload_0",
+        "getfield # // Field propagateClose:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public synchronized void setPropagateClose(boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field propagateClose:Z",
+        "return"
+      ]
+    ],
+    [
+      "private long toReadLen(long);",
+      [
+        "aload_0",
+        "getfield # // Field maxCount:J",
+        "lconst_0",
+        "lcmp",
+        "iflt 25",
+        "lload_1",
+        "aload_0",
+        "getfield # // Field maxCount:J",
+        "aload_0",
+        "invokevirtual # // Method getCount:()J",
+        "lsub",
+        "invokestatic # // Method java/lang/Math.min:(JJ)J",
+        "goto 26",
+        "lload_1",
+        "lreturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.BufferedFileChannelInputStream$Builder": [
+    [
+      "public org.apache.commons.io.input.BufferedFileChannelInputStream$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractStreamBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.BufferedFileChannelInputStream": [
+    [
+      "public static org.apache.commons.io.input.BufferedFileChannelInputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/input/BufferedFileChannelInputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/input/BufferedFileChannelInputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "boolean isClean();",
+      [
+        "aload_0",
+        "getfield # // Field clean:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.ByteBufferCleaner": [
+    [
+      "org.apache.commons.io.input.ByteBufferCleaner();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.CharSequenceInputStream": [
+    [
+      "public static org.apache.commons.io.input.CharSequenceInputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/input/CharSequenceInputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/input/CharSequenceInputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean markSupported();",
+      [
+        "iconst_1",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.CharSequenceReader": [
+    [
+      "public org.apache.commons.io.input.CharSequenceReader(java.lang.CharSequence);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/CharSequence;I)V",
+        "return"
+      ]
+    ],
+    [
+      "public void close();",
+      [
+        "aload_0",
+        "aload_0",
+        "getfield # // Field start:I",
+        "putfield # // Field idx:I",
+        "aload_0",
+        "aload_0",
+        "getfield # // Field start:I",
+        "putfield # // Field mark:I",
+        "return"
+      ]
+    ],
+    [
+      "public void mark(int);",
+      [
+        "aload_0",
+        "aload_0",
+        "getfield # // Field idx:I",
+        "putfield # // Field mark:I",
+        "return"
+      ]
+    ],
+    [
+      "public boolean markSupported();",
+      [
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void reset();",
+      [
+        "aload_0",
+        "aload_0",
+        "getfield # // Field mark:I",
+        "putfield # // Field idx:I",
+        "return"
+      ]
+    ],
+    [
+      "private int start();",
+      [
+        "aload_0",
+        "getfield # // Field charSequence:Ljava/lang/CharSequence;",
+        "invokeinterface #, 1 // InterfaceMethod java/lang/CharSequence.length:()I",
+        "aload_0",
+        "getfield # // Field start:I",
+        "invokestatic # // Method java/lang/Math.min:(II)I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.ClosedInputStream": [
+    [
+      "static java.io.InputStream ifNull(java.io.InputStream);",
+      [
+        "aload_0",
+        "ifnull 8",
+        "aload_0",
+        "goto 11",
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/io/input/ClosedInputStream;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.input.ClosedInputStream();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/io/InputStream.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.Input": [
+    [
+      "org.apache.commons.io.input.Input();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.ProxyInputStream$AbstractBuilder": [
+    [
+      "protected org.apache.commons.io.input.ProxyInputStream$AbstractBuilder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractStreamBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.function.IOIntConsumer getAfterRead();",
+      [
+        "aload_0",
+        "getfield # // Field afterRead:Lorg/apache/commons/io/function/IOIntConsumer;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.ProxyInputStream": [
+    [
+      "boolean isClosed();",
+      [
+        "aload_0",
+        "getfield # // Field closed:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.QueueInputStream": [
+    [
+      "public static org.apache.commons.io.input.QueueInputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/input/QueueInputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/input/QueueInputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.ReaderInputStream": [
+    [
+      "public static org.apache.commons.io.input.ReaderInputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/input/ReaderInputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/input/ReaderInputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.UnsynchronizedByteArrayInputStream$Builder": [
+    [
+      "public org.apache.commons.io.input.UnsynchronizedByteArrayInputStream$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractStreamBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.UnsynchronizedByteArrayInputStream": [
+    [
+      "public static org.apache.commons.io.input.UnsynchronizedByteArrayInputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/input/UnsynchronizedByteArrayInputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/input/UnsynchronizedByteArrayInputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.input.UnsynchronizedByteArrayInputStream(byte[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_1",
+        "arraylength",
+        "iconst_0",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":([BIII)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.input.UnsynchronizedByteArrayInputStream(byte[], int);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_1",
+        "arraylength",
+        "iload_2",
+        "ldc # // String offset",
+        "invokestatic # // Method requireNonNegative:(ILjava/lang/String;)I",
+        "aload_1",
+        "iload_2",
+        "invokestatic # // Method minPosLen:([BI)I",
+        "invokestatic # // Method java/lang/Math.min:(II)I",
+        "aload_1",
+        "iload_2",
+        "invokestatic # // Method minPosLen:([BI)I",
+        "invokespecial # // Method \"<init>\":([BIII)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.input.UnsynchronizedByteArrayInputStream(byte[], int, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/io/InputStream.\"<init>\":()V",
+        "iload_2",
+        "ldc # // String offset",
+        "invokestatic # // Method requireNonNegative:(ILjava/lang/String;)I",
+        "pop",
+        "iload_3",
+        "ldc # // String length",
+        "invokestatic # // Method requireNonNegative:(ILjava/lang/String;)I",
+        "pop",
+        "aload_0",
+        "aload_1",
+        "ldc # // String data",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "putfield # // Field data:[B",
+        "aload_0",
+        "aload_1",
+        "iload_2",
+        "invokestatic # // Method minPosLen:([BI)I",
+        "iload_3",
+        "iadd",
+        "aload_1",
+        "arraylength",
+        "invokestatic # // Method java/lang/Math.min:(II)I",
+        "putfield # // Field eod:I",
+        "aload_0",
+        "aload_1",
+        "iload_2",
+        "invokestatic # // Method minPosLen:([BI)I",
+        "putfield # // Field offset:I",
+        "aload_0",
+        "aload_1",
+        "iload_2",
+        "invokestatic # // Method minPosLen:([BI)I",
+        "putfield # // Field markedOffset:I",
+        "return"
+      ]
+    ],
+    [
+      "private org.apache.commons.io.input.UnsynchronizedByteArrayInputStream(byte[], int, int, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/io/InputStream.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String data",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "putfield # // Field data:[B",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field eod:I",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field offset:I",
+        "aload_0",
+        "iload 4",
+        "putfield # // Field markedOffset:I",
+        "return"
+      ]
+    ],
+    [
+      "public int available();",
+      [
+        "aload_0",
+        "getfield # // Field offset:I",
+        "aload_0",
+        "getfield # // Field eod:I",
+        "if_icmpge 23",
+        "aload_0",
+        "getfield # // Field eod:I",
+        "aload_0",
+        "getfield # // Field offset:I",
+        "isub",
+        "goto 24",
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void mark(int);",
+      [
+        "aload_0",
+        "aload_0",
+        "getfield # // Field offset:I",
+        "putfield # // Field markedOffset:I",
+        "return"
+      ]
+    ],
+    [
+      "public boolean markSupported();",
+      [
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void reset();",
+      [
+        "aload_0",
+        "aload_0",
+        "getfield # // Field markedOffset:I",
+        "putfield # // Field offset:I",
+        "return"
+      ]
+    ],
+    [
+      "public long skip(long);",
+      [
+        "lload_1",
+        "lconst_0",
+        "lcmp",
+        "ifge 16",
+        "new # // class java/lang/IllegalArgumentException",
+        "dup",
+        "ldc # // String Skipping backward is not supported",
+        "invokespecial # // Method java/lang/IllegalArgumentException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field eod:I",
+        "aload_0",
+        "getfield # // Field offset:I",
+        "isub",
+        "i2l",
+        "lstore_3",
+        "lload_1",
+        "lload_3",
+        "lcmp",
+        "ifge 35",
+        "lload_1",
+        "lstore_3",
+        "aload_0",
+        "aload_0",
+        "getfield # // Field offset:I",
+        "lload_1",
+        "invokestatic # // Method java/lang/Math.toIntExact:(J)I",
+        "invokestatic # // Method java/lang/Math.addExact:(II)I",
+        "putfield # // Field offset:I",
+        "lload_3",
+        "lreturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.AbstractByteArrayOutputStream": [
+    [
+      "public org.apache.commons.io.output.AbstractByteArrayOutputStream();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/io/OutputStream.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field buffers:Ljava/util/List;",
+        "aload_0",
+        "iconst_m1",
+        "putfield # // Field currentBufferIndex:I",
+        "aload_0",
+        "iconst_1",
+        "putfield # // Field reuseBuffers:Z",
+        "return"
+      ]
+    ],
+    [
+      "public abstract void reset();",
+      []
+    ],
+    [
+      "public abstract int size();",
+      []
+    ],
+    [
+      "public abstract byte[] toByteArray();",
+      []
+    ],
+    [
+      "public abstract java.io.InputStream toInputStream();",
+      []
+    ],
+    [
+      "public abstract void write(byte[], int, int);",
+      []
+    ],
+    [
+      "public abstract void write(int);",
+      []
+    ],
+    [
+      "protected void writeImpl(int);",
+      [
+        "aload_0",
+        "getfield # // Field count:I",
+        "aload_0",
+        "getfield # // Field filledBufferSum:I",
+        "isub",
+        "istore_2",
+        "iload_2",
+        "aload_0",
+        "getfield # // Field currentBuffer:[B",
+        "arraylength",
+        "if_icmpne 31",
+        "aload_0",
+        "aload_0",
+        "getfield # // Field count:I",
+        "iconst_1",
+        "iadd",
+        "invokevirtual # // Method needNewBuffer:(I)V",
+        "iconst_0",
+        "istore_2",
+        "aload_0",
+        "getfield # // Field currentBuffer:[B",
+        "iload_2",
+        "iload_1",
+        "i2b",
+        "bastore",
+        "aload_0",
+        "dup",
+        "getfield # // Field count:I",
+        "iconst_1",
+        "iadd",
+        "putfield # // Field count:I",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.NullOutputStream": [
+    [
+      "public org.apache.commons.io.output.NullOutputStream();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/io/OutputStream.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public void write(byte[], int, int);",
+      [
+        "aload_1",
+        "iload_2",
+        "iload_3",
+        "invokestatic # // Method org/apache/commons/io/IOUtils.checkFromIndexSize:([BII)V",
+        "return"
+      ]
+    ],
+    [
+      "public void write(int);",
+      [
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.NullWriter": [
+    [
+      "public void close();",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public void flush();",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public void write(char[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "aload_1",
+        "arraylength",
+        "invokevirtual # // Method write:([CII)V",
+        "return"
+      ]
+    ],
+    [
+      "public void write(char[], int, int);",
+      [
+        "aload_1",
+        "iload_2",
+        "iload_3",
+        "invokestatic # // Method org/apache/commons/io/IOUtils.checkFromIndexSize:([CII)V",
+        "return"
+      ]
+    ],
+    [
+      "public void write(int);",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public void write(java.lang.String, int, int);",
+      [
+        "aload_1",
+        "iload_2",
+        "iload_3",
+        "invokestatic # // Method org/apache/commons/io/IOUtils.checkFromIndexSize:(Ljava/lang/String;II)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.RandomAccessFileOutputStream": [
+    [
+      "public static org.apache.commons.io.output.RandomAccessFileOutputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/output/RandomAccessFileOutputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/output/RandomAccessFileOutputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.StringBuilderWriter": [
+    [
+      "public void close();",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public void flush();",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.StringBuilder getBuilder();",
+      [
+        "aload_0",
+        "getfield # // Field builder:Ljava/lang/StringBuilder;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void write(java.lang.String);",
+      [
+        "aload_1",
+        "ifnull 13",
+        "aload_0",
+        "getfield # // Field builder:Ljava/lang/StringBuilder;",
+        "aload_1",
+        "invokevirtual # // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+        "pop",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream$Builder": [
+    [
+      "public org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractStreamBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream get();",
+      [
+        "new # // class org/apache/commons/io/output/UnsynchronizedByteArrayOutputStream",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/output/UnsynchronizedByteArrayOutputStream.\"<init>\":(Lorg/apache/commons/io/output/UnsynchronizedByteArrayOutputStream$Builder;)V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream": [
+    [
+      "public static org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/output/UnsynchronizedByteArrayOutputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/output/UnsynchronizedByteArrayOutputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.WriterOutputStream$Builder": [
+    [
+      "public org.apache.commons.io.output.WriterOutputStream$Builder setWriteImmediately(boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field writeImmediately:Z",
+        "aload_0",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.WriterOutputStream": [
+    [
+      "public static org.apache.commons.io.output.WriterOutputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/output/WriterOutputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/output/WriterOutputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.ByteBuffers": [
+    [
+      "private org.apache.commons.io.ByteBuffers();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.ByteOrderMark": [
+    [
+      "public boolean equals(java.lang.Object);",
+      [
+        "aload_1",
+        "instanceof # // class org/apache/commons/io/ByteOrderMark",
+        "ifne 9",
+        "iconst_0",
+        "ireturn",
+        "aload_1",
+        "checkcast # // class org/apache/commons/io/ByteOrderMark",
+        "astore_2",
+        "aload_0",
+        "getfield # // Field bytes:[I",
+        "arraylength",
+        "aload_2",
+        "invokevirtual # // Method length:()I",
+        "if_icmpeq 28",
+        "iconst_0",
+        "ireturn",
+        "iconst_0",
+        "istore_3",
+        "iload_3",
+        "aload_0",
+        "getfield # // Field bytes:[I",
+        "arraylength",
+        "if_icmpge 61",
+        "aload_0",
+        "getfield # // Field bytes:[I",
+        "iload_3",
+        "iaload",
+        "aload_2",
+        "iload_3",
+        "invokevirtual # // Method get:(I)I",
+        "if_icmpeq 55",
+        "iconst_0",
+        "ireturn",
+        "iinc 3, 1",
+        "goto 30",
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int get(int);",
+      [
+        "aload_0",
+        "getfield # // Field bytes:[I",
+        "iload_1",
+        "iaload",
+        "ireturn"
+      ]
+    ],
+    [
+      "public byte[] getBytes();",
+      [
+        "aload_0",
+        "getfield # // Field bytes:[I",
+        "arraylength",
+        "invokestatic # // Method org/apache/commons/io/IOUtils.byteArray:(I)[B",
+        "astore_1",
+        "iconst_0",
+        "istore_2",
+        "iload_2",
+        "aload_0",
+        "getfield # // Field bytes:[I",
+        "arraylength",
+        "if_icmpge 36",
+        "aload_1",
+        "iload_2",
+        "aload_0",
+        "getfield # // Field bytes:[I",
+        "iload_2",
+        "iaload",
+        "i2b",
+        "bastore",
+        "iinc 2, 1",
+        "goto 11",
+        "aload_1",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getCharsetName();",
+      [
+        "aload_0",
+        "getfield # // Field charsetName:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "int[] getRawBytes();",
+      [
+        "aload_0",
+        "getfield # // Field bytes:[I",
+        "areturn"
+      ]
+    ],
+    [
+      "public int length();",
+      [
+        "aload_0",
+        "getfield # // Field bytes:[I",
+        "arraylength",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean matches(int[]);",
+      [
+        "aload_0",
+        "getfield # // Field bytes:[I",
+        "aload_1",
+        "if_acmpne 10",
+        "iconst_1",
+        "ireturn",
+        "aload_1",
+        "ifnonnull 16",
+        "iconst_0",
+        "ireturn",
+        "aload_0",
+        "getfield # // Field bytes:[I",
+        "arraylength",
+        "istore_2",
+        "aload_1",
+        "arraylength",
+        "iload_2",
+        "if_icmpge 30",
+        "iconst_0",
+        "ireturn",
+        "iconst_0",
+        "istore_3",
+        "iload_3",
+        "iload_2",
+        "if_icmpge 57",
+        "aload_0",
+        "getfield # // Field bytes:[I",
+        "iload_3",
+        "iaload",
+        "aload_1",
+        "iload_3",
+        "iaload",
+        "if_icmpeq 51",
+        "iconst_0",
+        "ireturn",
+        "iinc 3, 1",
+        "goto 32",
+        "iconst_1",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.ByteOrderParser": [
+    [
+      "private org.apache.commons.io.ByteOrderParser();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.FileCleaner": [
+    [
+      "public static synchronized void exitWhenFinished();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/io/FileCleaningTracker;",
+        "invokevirtual # // Method org/apache/commons/io/FileCleaningTracker.exitWhenFinished:()V",
+        "return"
+      ]
+    ],
+    [
+      "public static org.apache.commons.io.FileCleaningTracker getInstance();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/io/FileCleaningTracker;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static int getTrackCount();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/io/FileCleaningTracker;",
+        "invokevirtual # // Method org/apache/commons/io/FileCleaningTracker.getTrackCount:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static void track(java.lang.String, java.lang.Object);",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/io/FileCleaningTracker;",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method org/apache/commons/io/FileCleaningTracker.track:(Ljava/lang/String;Ljava/lang/Object;)V",
+        "return"
+      ]
+    ],
+    [
+      "public static void track(java.lang.String, java.lang.Object, org.apache.commons.io.FileDeleteStrategy);",
+      [
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/io/FileCleaningTracker;",
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokevirtual # // Method org/apache/commons/io/FileCleaningTracker.track:(Ljava/lang/String;Ljava/lang/Object;Lorg/apache/commons/io/FileDeleteStrategy;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.FileCleaner();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.FileCleaningTracker$Tracker": [
+    [
+      "public java.lang.String getPath();",
+      [
+        "aload_0",
+        "getfield # // Field path:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.FileCleaningTracker": [
+    [
+      "public void track(java.lang.String, java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "aconst_null",
+        "invokevirtual # // Method track:(Ljava/lang/String;Ljava/lang/Object;Lorg/apache/commons/io/FileDeleteStrategy;)V",
+        "return"
+      ]
+    ],
+    [
+      "public void track(java.lang.String, java.lang.Object, org.apache.commons.io.FileDeleteStrategy);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "aload_3",
+        "invokevirtual # // Method addTracker:(Ljava/lang/String;Ljava/lang/Object;Lorg/apache/commons/io/FileDeleteStrategy;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.FileDeleteStrategy$ForceFileDeleteStrategy": [
+    [
+      "org.apache.commons.io.FileDeleteStrategy$ForceFileDeleteStrategy();",
+      [
+        "aload_0",
+        "ldc # // String Force",
+        "invokespecial # // Method org/apache/commons/io/FileDeleteStrategy.\"<init>\":(Ljava/lang/String;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.FileDeleteStrategy": [
+    [
+      "protected org.apache.commons.io.FileDeleteStrategy(java.lang.String);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field name:Ljava/lang/String;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.FileSystemUtils": [
+    [
+      "public org.apache.commons.io.FileSystemUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.IO": [
+    [
+      "org.apache.commons.io.IO();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "static void clear();",
+      [
+        "invokestatic # // Method org/apache/commons/io/IOUtils.clear:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.UncheckedIOExceptions": [
+    [
+      "private org.apache.commons.io.UncheckedIOExceptions();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.channels.CloseShieldChannel": [
+    [
+      "private org.apache.commons.io.channels.CloseShieldChannel();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.comparator.AbstractFileComparator": [
+    [
+      "org.apache.commons.io.comparator.AbstractFileComparator();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.comparator.DefaultFileComparator": [
+    [
+      "public org.apache.commons.io.comparator.DefaultFileComparator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/comparator/AbstractFileComparator.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.comparator.DirectoryFileComparator": [
+    [
+      "public org.apache.commons.io.comparator.DirectoryFileComparator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/comparator/AbstractFileComparator.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.file.spi.FileSystemProviders": [
+    [
+      "public static org.apache.commons.io.file.spi.FileSystemProviders installed();",
+      [
+        "getstatic # // Field INSTALLED:Lorg/apache/commons/io/file/spi/FileSystemProviders;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.filefilter.CanExecuteFileFilter": [
+    [
+      "protected org.apache.commons.io.filefilter.CanExecuteFileFilter();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/filefilter/AbstractFileFilter.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.filefilter.CanReadFileFilter": [
+    [
+      "protected org.apache.commons.io.filefilter.CanReadFileFilter();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/filefilter/AbstractFileFilter.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.filefilter.CanWriteFileFilter": [
+    [
+      "protected org.apache.commons.io.filefilter.CanWriteFileFilter();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/filefilter/AbstractFileFilter.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.filefilter.DirectoryFileFilter": [
+    [
+      "protected org.apache.commons.io.filefilter.DirectoryFileFilter();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/filefilter/AbstractFileFilter.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.filefilter.HiddenFileFilter": [
+    [
+      "protected org.apache.commons.io.filefilter.HiddenFileFilter();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/filefilter/AbstractFileFilter.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.filefilter.SizeFileFilter": [
+    [
+      "public org.apache.commons.io.filefilter.SizeFileFilter(long);",
+      [
+        "aload_0",
+        "lload_1",
+        "iconst_1",
+        "invokespecial # // Method \"<init>\":(JZ)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.filefilter.SizeFileFilter(long, boolean);",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/filefilter/AbstractFileFilter.\"<init>\":()V",
+        "lload_1",
+        "lconst_0",
+        "lcmp",
+        "ifge 20",
+        "new # // class java/lang/IllegalArgumentException",
+        "dup",
+        "ldc # // String The size must be non-negative",
+        "invokespecial # // Method java/lang/IllegalArgumentException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "lload_1",
+        "putfield # // Field size:J",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field acceptLarger:Z",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.filefilter.SymbolicLinkFileFilter": [
+    [
+      "protected org.apache.commons.io.filefilter.SymbolicLinkFileFilter();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/filefilter/AbstractFileFilter.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.AbstractLineEndingInputStream": [
+    [
+      "org.apache.commons.io.input.AbstractLineEndingInputStream(java.io.InputStream, boolean);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/io/InputStream.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field in:Ljava/io/InputStream;",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field lineFeedAtEos:Z",
+        "return"
+      ]
+    ],
+    [
+      "public synchronized void mark(int);",
+      [
+        "invokestatic # // Method org/apache/commons/io/input/UnsupportedOperationExceptions.mark:()Ljava/lang/UnsupportedOperationException;",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.UnsupportedOperationExceptions": [
+    [
+      "org.apache.commons.io.input.UnsupportedOperationExceptions();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.MarkShieldInputStream": [
+    [
+      "public void mark(int);",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public boolean markSupported();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.MessageDigestCalculatingInputStream": [
+    [
+      "public static org.apache.commons.io.input.MessageDigestCalculatingInputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/input/MessageDigestCalculatingInputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/input/MessageDigestCalculatingInputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.ObservableInputStream$AbstractBuilder": [
+    [
+      "public org.apache.commons.io.input.ObservableInputStream$AbstractBuilder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/input/ProxyInputStream$AbstractBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.ObservableInputStream$Builder": [
+    [
+      "public org.apache.commons.io.input.ObservableInputStream$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/input/ObservableInputStream$AbstractBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.ObservableInputStream$Observer": [
+    [
+      "public org.apache.commons.io.input.ObservableInputStream$Observer();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.ObservableInputStream": [
+    [
+      "public org.apache.commons.io.input.ObservableInputStream(java.io.InputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "invokespecial # // Method \"<init>\":(Ljava/io/InputStream;Ljava/util/List;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.input.ObservableInputStream(java.io.InputStream, org.apache.commons.io.input.ObservableInputStream$Observer...);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokestatic # // Method java/util/Arrays.asList:([Ljava/lang/Object;)Ljava/util/List;",
+        "invokespecial # // Method \"<init>\":(Ljava/io/InputStream;Ljava/util/List;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.MessageDigestInputStream$Builder": [
+    [
+      "public org.apache.commons.io.input.MessageDigestInputStream$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/input/ObservableInputStream$AbstractBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.MessageDigestInputStream": [
+    [
+      "public static org.apache.commons.io.input.MessageDigestInputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/input/MessageDigestInputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/input/MessageDigestInputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.Tailer$Builder": [
+    [
+      "public org.apache.commons.io.input.Tailer$Builder setIgnoreTouch(boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field ignoreTouch:Z",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.input.Tailer$Builder setReOpen(boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field reOpen:Z",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.input.Tailer$Builder setStartThread(boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field startThread:Z",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.input.Tailer$Builder setTailable(org.apache.commons.io.input.Tailer$Tailable);",
+      [
+        "aload_0",
+        "aload_1",
+        "ldc # // String tailable",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/io/input/Tailer$Tailable",
+        "putfield # // Field tailable:Lorg/apache/commons/io/input/Tailer$Tailable;",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.input.Tailer$Builder setTailerListener(org.apache.commons.io.input.TailerListener);",
+      [
+        "aload_0",
+        "aload_1",
+        "ldc # // String tailerListener",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/io/input/TailerListener",
+        "putfield # // Field tailerListener:Lorg/apache/commons/io/input/TailerListener;",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.input.Tailer$Builder setTailFromEnd(boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field tailFromEnd:Z",
+        "aload_0",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.Tailer": [
+    [
+      "public static org.apache.commons.io.input.Tailer$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/input/Tailer$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/input/Tailer$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "public void close();",
+      [
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field run:Z",
+        "return"
+      ]
+    ],
+    [
+      "protected boolean getRun();",
+      [
+        "aload_0",
+        "getfield # // Field run:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.input.Tailer$Tailable getTailable();",
+      [
+        "aload_0",
+        "getfield # // Field tailable:Lorg/apache/commons/io/input/Tailer$Tailable;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void stop();",
+      [
+        "aload_0",
+        "invokevirtual # // Method close:()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.TailerListener": [
+    [
+      "public abstract void fileNotFound();",
+      []
+    ],
+    [
+      "public abstract void fileRotated();",
+      []
+    ],
+    [
+      "public abstract void handle(java.lang.Exception);",
+      []
+    ],
+    [
+      "public abstract void handle(java.lang.String);",
+      []
+    ],
+    [
+      "public abstract void init(org.apache.commons.io.input.Tailer);",
+      []
+    ]
+  ],
+  "org.apache.commons.io.input.TailerListenerAdapter": [
+    [
+      "public org.apache.commons.io.input.TailerListenerAdapter();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public void endOfFileReached();",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public void fileNotFound();",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public void fileRotated();",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public void handle(java.lang.Exception);",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public void handle(java.lang.String);",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public void init(org.apache.commons.io.input.Tailer);",
+      [
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.CountingInputStream": [
+    [
+      "public synchronized long getByteCount();",
+      [
+        "aload_0",
+        "getfield # // Field count:J",
+        "lreturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.ThrottledInputStream$Builder": [
+    [
+      "double getMaxBytesPerSecond();",
+      [
+        "aload_0",
+        "getfield # // Field maxBytesPerSecond:D",
+        "dreturn"
+      ]
+    ],
+    [
+      "public void setMaxBytesPerSecond(long);",
+      [
+        "aload_0",
+        "lload_1",
+        "l2d",
+        "invokevirtual # // Method setMaxBytesPerSecond:(D)Lorg/apache/commons/io/input/ThrottledInputStream$Builder;",
+        "pop",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.ThrottledInputStream": [
+    [
+      "public static org.apache.commons.io.input.ThrottledInputStream$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/input/ThrottledInputStream$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/input/ThrottledInputStream$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "double getMaxBytesPerSecond();",
+      [
+        "aload_0",
+        "getfield # // Field maxBytesPerSecond:D",
+        "dreturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.XmlStreamReaderException": [
+    [
+      "public org.apache.commons.io.input.XmlStreamReaderException(java.lang.String, java.lang.String, java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "aconst_null",
+        "aconst_null",
+        "aload_2",
+        "aload_3",
+        "aload 4",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.String getBomEncoding();",
+      [
+        "aload_0",
+        "getfield # // Field bomEncoding:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getContentTypeEncoding();",
+      [
+        "aload_0",
+        "getfield # // Field contentTypeEncoding:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getContentTypeMime();",
+      [
+        "aload_0",
+        "getfield # // Field contentTypeMime:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getXmlEncoding();",
+      [
+        "aload_0",
+        "getfield # // Field xmlEncoding:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getXmlGuessEncoding();",
+      [
+        "aload_0",
+        "getfield # // Field xmlGuessEncoding:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.comparator.NameFileComparator": [
+    [
+      "public org.apache.commons.io.comparator.NameFileComparator();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/comparator/AbstractFileComparator.\"<init>\":()V",
+        "aload_0",
+        "getstatic # // Field org/apache/commons/io/IOCase.SENSITIVE:Lorg/apache/commons/io/IOCase;",
+        "putfield # // Field ioCase:Lorg/apache/commons/io/IOCase;",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.comparator.NameFileComparator(org.apache.commons.io.IOCase);",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/comparator/AbstractFileComparator.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "getstatic # // Field org/apache/commons/io/IOCase.SENSITIVE:Lorg/apache/commons/io/IOCase;",
+        "invokestatic # // Method org/apache/commons/io/IOCase.value:(Lorg/apache/commons/io/IOCase;Lorg/apache/commons/io/IOCase;)Lorg/apache/commons/io/IOCase;",
+        "putfield # // Field ioCase:Lorg/apache/commons/io/IOCase;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.monitor.FileAlterationListener": [
+    [
+      "public abstract void onStart(org.apache.commons.io.monitor.FileAlterationObserver);",
+      []
+    ],
+    [
+      "public abstract void onStop(org.apache.commons.io.monitor.FileAlterationObserver);",
+      []
+    ]
+  ],
+  "org.apache.commons.io.monitor.FileAlterationObserver$Builder": [
+    [
+      "private org.apache.commons.io.monitor.FileAlterationObserver$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractOriginSupplier.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.monitor.FileAlterationObserver": [
+    [
+      "public static org.apache.commons.io.monitor.FileAlterationObserver$Builder builder();",
+      [
+        "new # // class org/apache/commons/io/monitor/FileAlterationObserver$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/monitor/FileAlterationObserver$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.monitor.FileEntry": [
+    [
+      "public org.apache.commons.io.monitor.FileEntry[] getChildren();",
+      [
+        "aload_0",
+        "getfield # // Field children:[Lorg/apache/commons/io/monitor/FileEntry;",
+        "ifnull 14",
+        "aload_0",
+        "getfield # // Field children:[Lorg/apache/commons/io/monitor/FileEntry;",
+        "goto 17",
+        "getstatic # // Field EMPTY_FILE_ENTRY_ARRAY:[Lorg/apache/commons/io/monitor/FileEntry;",
+        "areturn"
+      ]
+    ],
+    [
+      "public long getLastModified();",
+      [
+        "aload_0",
+        "getfield # // Field lastModified:Lorg/apache/commons/io/monitor/SerializableFileTime;",
+        "invokevirtual # // Method org/apache/commons/io/monitor/SerializableFileTime.toMillis:()J",
+        "lreturn"
+      ]
+    ],
+    [
+      "public long getLength();",
+      [
+        "aload_0",
+        "getfield # // Field length:J",
+        "lreturn"
+      ]
+    ],
+    [
+      "public int getLevel();",
+      [
+        "aload_0",
+        "getfield # // Field parent:Lorg/apache/commons/io/monitor/FileEntry;",
+        "ifnonnull 11",
+        "iconst_0",
+        "goto 20",
+        "aload_0",
+        "getfield # // Field parent:Lorg/apache/commons/io/monitor/FileEntry;",
+        "invokevirtual # // Method getLevel:()I",
+        "iconst_1",
+        "iadd",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.String getName();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.monitor.FileEntry getParent();",
+      [
+        "aload_0",
+        "getfield # // Field parent:Lorg/apache/commons/io/monitor/FileEntry;",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isDirectory();",
+      [
+        "aload_0",
+        "getfield # // Field directory:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isExists();",
+      [
+        "aload_0",
+        "getfield # // Field exists:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void setChildren(org.apache.commons.io.monitor.FileEntry...);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field children:[Lorg/apache/commons/io/monitor/FileEntry;",
+        "return"
+      ]
+    ],
+    [
+      "public void setDirectory(boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field directory:Z",
+        "return"
+      ]
+    ],
+    [
+      "public void setExists(boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field exists:Z",
+        "return"
+      ]
+    ],
+    [
+      "void setLastModified(org.apache.commons.io.monitor.SerializableFileTime);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field lastModified:Lorg/apache/commons/io/monitor/SerializableFileTime;",
+        "return"
+      ]
+    ],
+    [
+      "public void setLength(long);",
+      [
+        "aload_0",
+        "lload_1",
+        "putfield # // Field length:J",
+        "return"
+      ]
+    ],
+    [
+      "public void setName(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field name:Ljava/lang/String;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.monitor.FileAlterationListenerAdaptor": [
+    [
+      "public org.apache.commons.io.monitor.FileAlterationListenerAdaptor();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public void onStart(org.apache.commons.io.monitor.FileAlterationObserver);",
+      [
+        "return"
+      ]
+    ],
+    [
+      "public void onStop(org.apache.commons.io.monitor.FileAlterationObserver);",
+      [
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.CloseShieldOutputStream": [
+    [
+      "public static org.apache.commons.io.output.CloseShieldOutputStream wrap(java.io.OutputStream);",
+      [
+        "new # // class org/apache/commons/io/output/CloseShieldOutputStream",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method \"<init>\":(Ljava/io/OutputStream;)V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.ClosedOutputStream": [
+    [
+      "public org.apache.commons.io.output.ClosedOutputStream();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/io/OutputStream.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.ProxyOutputStream$Builder": [
+    [
+      "public org.apache.commons.io.output.ProxyOutputStream$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractStreamBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.CountingOutputStream": [
+    [
+      "protected synchronized void beforeWrite(int);",
+      [
+        "aload_0",
+        "dup",
+        "getfield # // Field count:J",
+        "iload_1",
+        "i2l",
+        "ladd",
+        "putfield # // Field count:J",
+        "return"
+      ]
+    ],
+    [
+      "public synchronized long getByteCount();",
+      [
+        "aload_0",
+        "getfield # // Field count:J",
+        "lreturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.UncheckedAppendable": [
+    [
+      "public abstract org.apache.commons.io.output.UncheckedAppendable append(char);",
+      []
+    ],
+    [
+      "public abstract org.apache.commons.io.output.UncheckedAppendable append(java.lang.CharSequence);",
+      []
+    ],
+    [
+      "public abstract org.apache.commons.io.output.UncheckedAppendable append(java.lang.CharSequence, int, int);",
+      []
+    ]
+  ],
+  "org.apache.commons.io.serialization.ClassNameMatcher": [
+    [
+      "public abstract boolean matches(java.lang.String);",
+      []
+    ]
+  ],
+  "org.apache.commons.io.serialization.ObjectStreamClassPredicate": [
+    [
+      "public org.apache.commons.io.serialization.ObjectStreamClassPredicate();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field acceptMatchers:Ljava/util/List;",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field rejectMatchers:Ljava/util/List;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.serialization.WildcardClassNameMatcher": [
+    [
+      "org.apache.commons.io.serialization.WildcardClassNameMatcher(java.lang.String);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field pattern:Ljava/lang/String;",
+        "return"
+      ]
+    ],
+    [
+      "public boolean matches(java.lang.String);",
+      [
+        "aload_1",
+        "aload_0",
+        "getfield # // Field pattern:Ljava/lang/String;",
+        "invokestatic # // Method org/apache/commons/io/FilenameUtils.wildcardMatch:(Ljava/lang/String;Ljava/lang/String;)Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.SelectorAdapter": [
+    [
+      "public boolean isOpen();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.TestResources": [
+    [
+      "public org.apache.commons.io.TestResources();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.channels.FilterFileChannel$AbstractBuilder": [
+    [
+      "protected org.apache.commons.io.channels.FilterFileChannel$AbstractBuilder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractStreamBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.channels.FilterFileChannel$Builder": [
+    [
+      "protected org.apache.commons.io.channels.FilterFileChannel$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/channels/FilterFileChannel$AbstractBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.channels.FilterFileChannel": [
+    [
+      "public static org.apache.commons.io.channels.FilterFileChannel$Builder forFilterFileChannel();",
+      [
+        "new # // class org/apache/commons/io/channels/FilterFileChannel$Builder",
+        "dup",
+        "invokespecial # // Method org/apache/commons/io/channels/FilterFileChannel$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.TestConstants": [
+    [
+      "org.apache.commons.io.function.TestConstants();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.TestUtils": [
+    [
+      "org.apache.commons.io.function.TestUtils();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "static org.apache.commons.io.function.IOIntConsumer throwingIOIntConsumer();",
+      [
+        "getstatic # // Field org/apache/commons/io/function/TestConstants.THROWING_IO_INT_CONSUMER:Lorg/apache/commons/io/function/IOIntConsumer;",
+        "areturn"
+      ]
+    ],
+    [
+      "static org.apache.commons.io.function.IORunnable throwingIORunnable();",
+      [
+        "getstatic # // Field org/apache/commons/io/function/TestConstants.THROWING_IO_RUNNABLE:Lorg/apache/commons/io/function/IORunnable;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.input.compatibility.XmlStreamReaderException": [
+    [
+      "public org.apache.commons.io.input.compatibility.XmlStreamReaderException(java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.io.InputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "aconst_null",
+        "aconst_null",
+        "aload_2",
+        "aload_3",
+        "aload 4",
+        "aload 5",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/io/InputStream;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.input.compatibility.XmlStreamReaderException(java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.io.InputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "aload_3",
+        "aload 4",
+        "aload 5",
+        "aload 6",
+        "invokespecial # // Method org/apache/commons/io/input/XmlStreamReaderException.\"<init>\":(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+        "aload_0",
+        "aload 7",
+        "putfield # // Field inputStream:Ljava/io/InputStream;",
+        "return"
+      ]
+    ],
+    [
+      "public java.io.InputStream getInputStream();",
+      [
+        "aload_0",
+        "getfield # // Field inputStream:Ljava/io/InputStream;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.monitor.CollectionFileListener": [
+    [
+      "public org.apache.commons.io.monitor.CollectionFileListener(boolean);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field createdFiles:Ljava/util/Collection;",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field changedFiles:Ljava/util/Collection;",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field deletedFiles:Ljava/util/Collection;",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field createdDirectories:Ljava/util/Collection;",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field changedDirectories:Ljava/util/Collection;",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field deletedDirectories:Ljava/util/Collection;",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field clearOnStart:Z",
+        "return"
+      ]
+    ],
+    [
+      "public void clear();",
+      [
+        "aload_0",
+        "getfield # // Field createdFiles:Ljava/util/Collection;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Collection.clear:()V",
+        "aload_0",
+        "getfield # // Field changedFiles:Ljava/util/Collection;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Collection.clear:()V",
+        "aload_0",
+        "getfield # // Field deletedFiles:Ljava/util/Collection;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Collection.clear:()V",
+        "aload_0",
+        "getfield # // Field createdDirectories:Ljava/util/Collection;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Collection.clear:()V",
+        "aload_0",
+        "getfield # // Field changedDirectories:Ljava/util/Collection;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Collection.clear:()V",
+        "aload_0",
+        "getfield # // Field deletedDirectories:Ljava/util/Collection;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Collection.clear:()V",
+        "return"
+      ]
+    ],
+    [
+      "public void onStart(org.apache.commons.io.monitor.FileAlterationObserver);",
+      [
+        "aload_0",
+        "getfield # // Field clearOnStart:Z",
+        "ifeq 11",
+        "aload_0",
+        "invokevirtual # // Method clear:()V",
+        "return"
+      ]
+    ],
+    [
+      "public void onStop(org.apache.commons.io.monitor.FileAlterationObserver);",
+      [
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.serialization.MockSerializedClass": [
+    [
+      "org.apache.commons.io.serialization.MockSerializedClass(java.lang.String);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field str:Ljava/lang/String;",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.test.CustomIOException": [
+    [
+      "public org.apache.commons.io.test.CustomIOException();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/io/IOException.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ]
+}
