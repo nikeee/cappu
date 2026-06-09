@@ -1761,17 +1761,15 @@ function generateBody(
     }
   };
   const loadVar = (varSlot: number, descriptor: string): void => {
-    const c = descriptor[0];
-    const kind =
-      c === "J" ? "J" : c === "D" ? "D" : c === "F" ? "F" : c === "L" || c === "[" ? "A" : "I";
-    const full = { I: OP_ILOAD, J: OP_LLOAD, F: OP_FLOAD, D: OP_DLOAD, A: OP_ALOAD }[kind];
+    const kind = category(descriptor);
+    const full = { I: OP_ILOAD, J: OP_LLOAD, F: OP_FLOAD, D: OP_DLOAD, A: OP_ALOAD }[kind]!;
     const short0 = {
       I: OP_ILOAD_0,
       J: OP_LLOAD_0,
       F: OP_FLOAD_0,
       D: OP_DLOAD_0,
       A: OP_ALOAD_BASE_0,
-    }[kind];
+    }[kind]!;
     if (varSlot <= 3) code.u1(short0 + varSlot);
     else {
       code.u1(full);
@@ -1798,18 +1796,9 @@ function generateBody(
   };
 
   // Descriptor of a checker Type, for `var` locals.
-  const typeDescriptor = (type: Type): string => {
-    switch (type.kind) {
-      case TypeKind.Primitive:
-        return PRIMITIVE_DESCRIPTOR[type.name] ?? "I";
-      case TypeKind.Class:
-        return `L${binaryName(type.symbol)};`;
-      case TypeKind.Array:
-        return `[${typeDescriptor(type.elementType)}`;
-      default:
-        return "Ljava/lang/Object;"; // type variable / wildcard / null / error
-    }
-  };
+  // Same mapping as the module-level twin (which capture analysis needs outside
+  // this closure); aliased here so the logic lives in one place.
+  const typeDescriptor = typeToDescriptor;
 
   const fieldInfoOf = (symbol: Symbol): FieldInfo => {
     if (!symbol.parent) throw new UnsupportedEmit();
@@ -5428,13 +5417,6 @@ function resolveInternalName(
 // synthetic $assertionsDisabled field + <clinit> prologue. Nested type
 // declarations are excluded - each emitted class gets its own field.
 function classUsesAssert(declaration: ClassDeclaration): boolean {
-  const TYPE_DECLS = new Set([
-    SyntaxKind.ClassDeclaration,
-    SyntaxKind.InterfaceDeclaration,
-    SyntaxKind.EnumDeclaration,
-    SyntaxKind.RecordDeclaration,
-    SyntaxKind.AnnotationTypeDeclaration,
-  ]);
   let found = false;
   const visit = (node: Node): void => {
     if (found) return;
@@ -5442,7 +5424,8 @@ function classUsesAssert(declaration: ClassDeclaration): boolean {
       found = true;
       return;
     }
-    if (node !== declaration && TYPE_DECLS.has(node.kind)) return;
+    // A nested type gets its own $assertionsDisabled, so do not descend into it.
+    if (node !== declaration && TYPE_DECL_KINDS.has(node.kind)) return;
     forEachChild(node, child => {
       visit(child);
       return undefined;
