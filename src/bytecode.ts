@@ -47,6 +47,7 @@ import {
   type ExpressionStatement,
   type FieldDeclaration,
   type InterfaceDeclaration,
+  type InitializerBlock,
   type ForStatement,
   type Identifier,
   type IfStatement,
@@ -770,6 +771,13 @@ function collectFieldInits(
   const instanceInits: FieldInit[] = [];
   const staticInits: FieldInit[] = [];
   for (const member of members) {
+    // An initializer block (JLS 8.6 / 8.7) runs its statements in source order,
+    // interleaved with the field initializers.
+    if (member.kind === SyntaxKind.InitializerBlock) {
+      const blk = member as InitializerBlock;
+      (blk.isStatic ? staticInits : instanceInits).push({ isStatic: blk.isStatic, block: blk.body });
+      continue;
+    }
     if (member.kind !== SyntaxKind.FieldDeclaration) continue;
     const field = member as FieldDeclaration;
     const isStatic = isStaticDeclaration(field);
@@ -1313,10 +1321,13 @@ type FinallyAction =
 // not yet handled, so emitMethod can fall back to a verifiable placeholder.
 interface FieldInit {
   isStatic: boolean;
-  owner: string;
-  name: string;
-  descriptor: string;
-  init: Node;
+  // A field initializer (owner/name/descriptor/init), or an initializer block
+  // (JLS 8.6 / 8.7) that runs its statements in place, interleaved by source order.
+  owner?: string;
+  name?: string;
+  descriptor?: string;
+  init?: Node;
+  block?: Block;
 }
 
 // A synthetic method holding a lambda body. `params` are the captured outer
@@ -4719,17 +4730,23 @@ function generateBody(
     // skips them (the target constructor runs them).
     if (!isThisCall) {
       for (const fi of fieldInits) {
-        if (fi.isStatic) {
-          coerce(emitExpr(fi.init), fi.descriptor);
+        if (fi.block) {
+          // An initializer block: run its statements in place.
+          inScope(() => {
+            for (const st of fi.block!.statements) emitStmt(st);
+            return false;
+          });
+        } else if (fi.isStatic) {
+          coerce(emitExpr(fi.init!), fi.descriptor!);
           code.u1(OP_PUTSTATIC);
-          code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
+          code.u2(cp.fieldref(fi.owner!, fi.name!, fi.descriptor!));
           pop(); // value
         } else {
           code.u1(OP_ALOAD_0);
           pushRef();
-          coerce(emitExpr(fi.init), fi.descriptor);
+          coerce(emitExpr(fi.init!), fi.descriptor!);
           code.u1(OP_PUTFIELD);
-          code.u2(cp.fieldref(fi.owner, fi.name, fi.descriptor));
+          code.u2(cp.fieldref(fi.owner!, fi.name!, fi.descriptor!));
           pop(2); // receiver + value
         }
       }

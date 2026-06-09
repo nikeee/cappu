@@ -10,6 +10,11 @@ verifiable placeholder, never a crash.
 
 ## Statements
 
+- [x] Instance and static initializer blocks (JLS 8.6 / 8.7): collected alongside
+      field initializers in source order and run in the constructor (`<init>`,
+      every non-`this()`-delegating ctor) or `<clinit>` respectively. Works for
+      top-level/nested and local classes; anonymous classes still reject a body
+      with an initializer block.
 - [x] `synchronized` statement (JLS 14.19): monitorenter, then the body under a
       finally that runs monitorexit on every exit (normal, return/break, and the
       catch-all exception path).

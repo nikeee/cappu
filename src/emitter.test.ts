@@ -2069,3 +2069,30 @@ test(
     );
   },
 );
+
+test(
+  "instance and static initializer blocks run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "InitBlocks",
+      [
+        "public class InitBlocks {",
+        "  static int s;",
+        "  static { s = 7; }",
+        "  int a;",
+        "  int b = 1;",
+        "  { a = b + 10; }",
+        "  int c = a + 100;",
+        "  public static void main(String[] x){",
+        "    InitBlocks o = new InitBlocks();",
+        "    System.out.println(s);",
+        "    System.out.println(o.a);",
+        "    System.out.println(o.c);",
+        "  }",
+        "}",
+      ].join("\n"),
+      "7\n11\n111\n",
+    );
+  },
+);
