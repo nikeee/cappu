@@ -54,10 +54,14 @@ verifiable placeholder, never a crash.
       rewritten to `getfield`, and the `new` site passing the captured values.
 - [x] Local classes with **instance field initializers alongside capture**: the
       synthesized constructor runs them after the super/this$0/capture prologue
-      (shared `emitSynthCtorWithInits` with anonymous classes); a field with no
-      declared constructor is now synthesizable.
-- [ ] Local classes with a **declared constructor** (would need the capture/this$0
-      stores spliced into it); such a class is not synthesizable and degrades.
+      (shared `emitSynthCtorWithInits` with anonymous classes).
+- [x] Local classes with a **declared constructor** alongside capture: the
+      captured locals (and this$0) are spliced into the declared constructor as
+      leading synthetic parameters - this$0 stored before super(), captures after -
+      and the `new` site passes them ahead of the user arguments (shared
+      `ctorLeading` machinery with member inner classes). A `this(...)`-delegating
+      constructor cannot forward them yet, so such a class is not synthesizable and
+      its captures degrade.
 - [x] Anonymous classes implementing an **interface** (JLS 15.9.5): the classBody
       is emitted as `Outer$N` (numbered by position) implementing the interface,
       capturing enclosing locals (reuses the local-class capture machinery), with

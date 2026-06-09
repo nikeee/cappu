@@ -2203,3 +2203,29 @@ test(
     );
   },
 );
+
+test(
+  "local class with a declared constructor and capture runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "LCtor",
+      [
+        "public class LCtor {",
+        "  int run(int k) {",
+        "    int local = 3;",
+        "    class C {",
+        "      int v;",
+        "      C(int mult) { v = (k + local) * mult; }",
+        "      int get(){ return v + k; }",
+        "    }",
+        "    return new C(2).get();",
+        "  }",
+        "  public static void main(String[] a){ System.out.println(new LCtor().run(10)); }",
+        "}",
+      ].join("\n"),
+      // v = (10 + 3) * 2 = 26; get() = 26 + 10 = 36
+      "36\n",
+    );
+  },
+);

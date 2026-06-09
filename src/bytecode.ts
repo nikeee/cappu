@@ -999,10 +999,14 @@ function outerThisInfo(
 // no declared constructor and no instance field initializers.
 function isSynthesizableLocalClass(decl: ClassDeclaration): boolean {
   if (decl.parent?.kind !== SyntaxKind.Block) return false;
-  // A declared constructor would have to be augmented with the capture stores; not
-  // yet handled. Instance field initializers are fine (the synthesized ctor runs
-  // them via emitSynthCtorWithInits).
-  return !decl.members.some(m => m.kind === SyntaxKind.ConstructorDeclaration);
+  // A declared constructor gets the capture/this$0 stores spliced in (leading
+  // synthetic parameters); instance field initializers run via the body emitter.
+  // A this(...)-delegating constructor would have to forward the captures, which
+  // is not handled, so such a class is not synthesizable (its captures degrade).
+  const ctors = decl.members.filter(
+    m => m.kind === SyntaxKind.ConstructorDeclaration,
+  ) as ConstructorDeclaration[];
+  return !ctors.some(delegatesToThis);
 }
 
 function effectiveLocalCaptures(
@@ -1447,9 +1451,11 @@ function generateBody(
   // closing return) - a record compact constructor assigns each component field
   // from its (possibly reassigned) parameter once the body completes.
   ctorTrailingStores?: { owner: string; name: string; descriptor: string; slot: number }[],
-  // A non-static member inner class's constructor receives the enclosing instance
-  // as a leading synthetic parameter (slot 1), stored into this$0 before super().
-  leadingThis0?: { descriptor: string },
+  // A declared constructor of a non-static member inner class or a capturing local
+  // class: the enclosing instance (this$0, stored before super) and/or the captured
+  // locals (val$ fields, stored after super) arrive as leading synthetic parameters
+  // - this$0 first, then the captures - ahead of the user parameters.
+  ctorLeading?: { this0Descriptor?: string; captures: LocalCapture[] },
 ): MethodBody {
   const isConstructor = !lambdaSpec && method.kind === SyntaxKind.ConstructorDeclaration;
   const isStatic = lambdaSpec
@@ -1502,7 +1508,8 @@ function generateBody(
       : [
           ...(enumCtor ? [{ descriptor: "Ljava/lang/String;" }, { descriptor: "I" }] : []),
           ...prologueParams,
-          ...(leadingThis0 ? [{ descriptor: leadingThis0.descriptor }] : []),
+          ...(ctorLeading?.this0Descriptor ? [{ descriptor: ctorLeading.this0Descriptor }] : []),
+          ...(ctorLeading?.captures ?? []).map(c => ({ descriptor: c.descriptor })),
           ...method.parameters.map(p => ({
             symbol: p.symbol,
             descriptor: paramDescriptor(p as Parameter, program),
@@ -2275,6 +2282,13 @@ function generateBody(
       : undefined;
     const this0Desc = localThis0 ? `L${localThis0.enclosingInternal};` : undefined;
     if (captures.length > 0 || this0Desc) {
+      // A declared constructor's user parameters follow this$0 and the captures;
+      // a class with no declared ctor has a synthesized one taking no user args.
+      const localCtor = findConstructor(created.symbol, args.length);
+      if (!localCtor && args.length > 0) throw new UnsupportedEmit();
+      const userParamDescs = localCtor
+        ? localCtor.parameters.map(p => paramDescriptor(p as Parameter, program))
+        : [];
       const ref = `L${owner};`;
       code.u1(OP_NEW);
       code.u2(cp.classInfo(owner));
@@ -2291,13 +2305,18 @@ function generateBody(
         loadVar(slot.slot, c.descriptor);
         push(c.descriptor);
       }
+      args.forEach((arg, i) => {
+        const d = emitExpr(arg);
+        if (i < userParamDescs.length) coerce(d, userParamDescs[i]!);
+      });
       const ctorDesc = `(${[
         ...(this0Desc ? [this0Desc] : []),
         ...captures.map(c => c.descriptor),
+        ...userParamDescs,
       ].join("")})V`;
       code.u1(OP_INVOKESPECIAL);
       code.u2(cp.methodref(owner, "<init>", ctorDesc));
-      pop(1 + (this0Desc ? 1 : 0) + captures.length);
+      pop(1 + (this0Desc ? 1 : 0) + captures.length + args.length);
       return ref;
     }
 
@@ -4691,15 +4710,27 @@ function generateBody(
         ? leadingCall
         : undefined;
     const isThisCall = explicitInvocation?.expression.kind === SyntaxKind.ThisExpression;
-    // A member inner class stores the enclosing instance (the leading synthetic
-    // parameter, slot 1) into this$0 before calling super, as javac does.
-    if (leadingThis0) {
+    // Slots of the leading synthetic parameters: this$0 (if any) then the captures,
+    // starting at slot 1 (after `this`). Forwarding them through a this(...) call is
+    // not handled, so such a constructor degrades.
+    let leadSlot = 1;
+    const leadThis0Slot = ctorLeading?.this0Descriptor ? leadSlot++ : undefined;
+    const leadCaptureSlots = (ctorLeading?.captures ?? []).map(c => {
+      const s = leadSlot;
+      leadSlot += slotsOf(c.descriptor);
+      return s;
+    });
+    if (ctorLeading && isThisCall) throw new UnsupportedEmit();
+    // The enclosing instance is stored into this$0 before calling super, as javac
+    // does (assigning the current class's own field on the uninitialized `this` is
+    // permitted by the verifier).
+    if (leadThis0Slot !== undefined) {
       code.u1(OP_ALOAD_0);
       pushRef(`L${thisInternalName};`);
-      loadVar(1, leadingThis0.descriptor);
-      push(leadingThis0.descriptor);
+      loadVar(leadThis0Slot, ctorLeading!.this0Descriptor!);
+      push(ctorLeading!.this0Descriptor!);
       code.u1(OP_PUTFIELD);
-      code.u2(cp.fieldref(thisInternalName, "this$0", leadingThis0.descriptor));
+      code.u2(cp.fieldref(thisInternalName, "this$0", ctorLeading!.this0Descriptor!));
       pop(2);
     }
     if (isConstructor && enumCtor) {
@@ -4797,6 +4828,17 @@ function generateBody(
       code.u2(cp.methodref(ctorSuper, "<init>", "()V"));
       pop(1);
     }
+    // Captured locals (val$ fields) are stored after super(), from their leading
+    // synthetic parameters - the declared-constructor counterpart of emitSynthCtor.
+    (ctorLeading?.captures ?? []).forEach((c, i) => {
+      code.u1(OP_ALOAD_0);
+      pushRef(`L${thisInternalName};`);
+      loadVar(leadCaptureSlots[i]!, c.descriptor);
+      push(c.descriptor);
+      code.u1(OP_PUTFIELD);
+      code.u2(cp.fieldref(thisInternalName, c.fieldName, c.descriptor));
+      pop(2);
+    });
     if (enumClinit) emitEnumClinitPrologue(enumClinit);
     if (assertionsOwner) {
       // $assertionsDisabled = !ThisClass.class.desiredAssertionStatus(); (JLS 14.10)
@@ -5116,18 +5158,31 @@ function emitConstructorMethod(
   superInternalName: string,
   instanceInits: FieldInit[],
   lambdaMethods: ByteBuffer[],
-  // For a non-static member inner class: the enclosing-instance descriptor, made
-  // the leading parameter and stored into this$0. outerThis routes the body's
-  // enclosing-member access through it.
-  enclosing?: { descriptor: string; outerThis: { enclosingInternal: string } },
+  // For a non-static member inner class or a capturing local class: the leading
+  // synthetic parameters (this$0 and/or captured locals) prepended to the declared
+  // ones. outerThis routes the body's enclosing-member access through this$0.
+  leading?: {
+    this0Descriptor?: string;
+    captures: LocalCapture[];
+    outerThis?: { enclosingInternal: string };
+  },
 ): ByteBuffer {
   const userParams = ctor.parameters.map(p => paramDescriptor(p as Parameter, program)).join("");
-  const descriptor = `(${enclosing ? enclosing.descriptor : ""}${userParams})V`;
+  const leadParams = leading
+    ? `${leading.this0Descriptor ?? ""}${leading.captures.map(c => c.descriptor).join("")}`
+    : "";
+  const descriptor = `(${leadParams}${userParams})V`;
   const info = new ByteBuffer();
   info.u2(flags);
   info.u2(cp.utf8("<init>"));
   info.u2(cp.utf8(descriptor));
 
+  const captureFields = new Map(
+    (leading?.captures ?? []).map(c => [
+      c.symbol,
+      { ownerInternal: thisInternalName, fieldName: c.fieldName, descriptor: c.descriptor },
+    ]),
+  );
   let body: MethodBody;
   try {
     body = generateBody(
@@ -5143,20 +5198,23 @@ function emitConstructorMethod(
       false,
       undefined,
       undefined,
+      captureFields,
+      leading?.outerThis,
       undefined,
-      enclosing?.outerThis,
       undefined,
       undefined,
-      undefined,
-      enclosing ? { descriptor: enclosing.descriptor } : undefined,
+      leading ? { this0Descriptor: leading.this0Descriptor, captures: leading.captures } : undefined,
     );
   } catch (e) {
     if (!(e instanceof UnsupportedEmit)) throw e;
     // Fallback: a valid constructor that just calls super() (body skipped). It
-    // keeps the leading this$0 parameter (unused) so the descriptor still matches.
+    // keeps the leading synthetic parameters (unused) so the descriptor still matches.
+    const leadSlots =
+      (leading?.this0Descriptor ? 1 : 0) +
+      (leading?.captures ?? []).reduce((n, c) => n + slotsOf(c.descriptor), 0);
     const argsSize =
       1 +
-      (enclosing ? 1 : 0) +
+      leadSlots +
       ctor.parameters.reduce((n, p) => n + slotsOf(paramDescriptor(p as Parameter, program)), 0);
     const code = new ByteBuffer();
     code.u1(OP_ALOAD_0);
@@ -5466,9 +5524,10 @@ export function emitClass(
         : emitSynthCtor(cp, name, superInternalName, [], localCaptures, this0Descriptor),
     );
     methodCount++;
-  } else if (this0Descriptor && outerThis && declaredConstructors.length > 0) {
-    // A non-static member inner class with declared constructors: splice the
-    // enclosing instance (this$0) into each as a leading parameter.
+  } else if ((this0Descriptor || localCaptures.length > 0) && declaredConstructors.length > 0) {
+    // A non-static member inner class, or a capturing local class, with declared
+    // constructors: splice the enclosing instance (this$0) and/or the captured
+    // locals into each as leading parameters.
     for (const ctor of declaredConstructors) {
       methods.append(
         emitConstructorMethod(
@@ -5481,7 +5540,7 @@ export function emitClass(
           superInternalName,
           instanceInits,
           lambdaMethods,
-          { descriptor: this0Descriptor, outerThis },
+          { this0Descriptor, captures: localCaptures, outerThis },
         ),
       );
       methodCount++;
