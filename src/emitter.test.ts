@@ -2593,3 +2593,23 @@ test(
     );
   },
 );
+
+test(
+  "catching a (newly stubbed) ArrayStoreException runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "ArrStore",
+      [
+        "public class ArrStore {",
+        "  public static void main(String[] a){",
+        "    Object[] o = new String[2];",
+        "    try { o[0] = Integer.valueOf(1); }",
+        '      catch (ArrayStoreException e) { System.out.println("ase"); }',
+        "  }",
+        "}",
+      ].join("\n"),
+      "ase\n",
+    );
+  },
+);

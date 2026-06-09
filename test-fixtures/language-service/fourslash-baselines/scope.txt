@@ -1,6 +1,7 @@
 === here ===
   class ArithmeticException
   class ArrayIndexOutOfBoundsException
+  class ArrayStoreException
   class AssertionError
   class Boolean
   class Box
@@ -8,6 +9,7 @@
   class Character
   class Class
   class ClassCastException
+  class CloneNotSupportedException
   class Deprecated
   class Double
   class Enum
@@ -22,18 +24,22 @@
   class InterruptedException
   class Long
   class Math
+  class NegativeArraySizeException
   class NullPointerException
   class Number
   class NumberFormatException
   class Object
+  class OutOfMemoryError
   class Override
   class Record
   class RuntimeException
   class SafeVarargs
   class Short
+  class StackOverflowError
   class StackTraceElement
   class String
   class StringBuilder
+  class StringIndexOutOfBoundsException
   class SuppressWarnings
   class System
   class Thread

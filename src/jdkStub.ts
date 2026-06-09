@@ -297,6 +297,12 @@ class ClassCastException extends RuntimeException { public ClassCastException() 
 class UnsupportedOperationException extends RuntimeException { public UnsupportedOperationException() {} public UnsupportedOperationException(String m) {} }
 class NumberFormatException extends IllegalArgumentException { public NumberFormatException() {} public NumberFormatException(String m) {} }
 class ArithmeticException extends RuntimeException { public ArithmeticException() {} public ArithmeticException(String m) {} }
+class ArrayStoreException extends RuntimeException { public ArrayStoreException() {} public ArrayStoreException(String m) {} }
+class NegativeArraySizeException extends RuntimeException { public NegativeArraySizeException() {} public NegativeArraySizeException(String m) {} }
+class StringIndexOutOfBoundsException extends IndexOutOfBoundsException { public StringIndexOutOfBoundsException() {} public StringIndexOutOfBoundsException(String m) {} }
+class CloneNotSupportedException extends Exception { public CloneNotSupportedException() {} public CloneNotSupportedException(String m) {} }
+class StackOverflowError extends Error { public StackOverflowError() {} public StackOverflowError(String m) {} }
+class OutOfMemoryError extends Error { public OutOfMemoryError() {} public OutOfMemoryError(String m) {} }
 class InterruptedException extends Exception { public InterruptedException() {} public InterruptedException(String m) {} }
 
 @interface Override {}

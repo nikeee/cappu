@@ -169,6 +169,12 @@ verifiable placeholder, never a crash.
 
 - [ ] A `return` inside a lambda is not typed against the SAM's return type
       (JLS 15.27.2 / 9.8).
+- [ ] A type variable erases to `java.lang.Object` rather than its leftmost bound
+      (JLS 4.6), so a method call on a bounded type parameter (`<T extends
+      Comparable<T>> ... a.compareTo(b)`) does not resolve and the method degrades.
+      A proper fix erases `T` to its bound everywhere (descriptors + member lookup),
+      matching javac; it is a broad change that should land with a full corpus
+      baseline regeneration.
 
 ## Class-file attributes javac emits that we omit (byte-equivalence)
 
