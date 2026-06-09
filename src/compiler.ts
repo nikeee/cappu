@@ -13,7 +13,7 @@ import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
 import { pathToUri } from "./workspace.ts";
 
-export function runCompile(files: string[], outDir?: string): number {
+export function runCompile(files: string[], outDir?: string, quiet = false): number {
   if (files.length === 0) {
     process.stderr.write("usage: compile [-d <outdir>] <file.java> ...\n");
     return 2;
@@ -40,7 +40,7 @@ export function runCompile(files: string[], outDir?: string): number {
       const out = join(target, `${cls.name}.class`);
       mkdirSync(dirname(out), { recursive: true });
       writeFileSync(out, cls.bytes);
-      process.stdout.write(`${out}\n`);
+      if (!quiet) process.stdout.write(`${out}\n`);
     }
   }
   return 0;

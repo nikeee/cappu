@@ -320,5 +320,12 @@ connection.onHover((params): Hover | null => {
   return { contents: { kind: MarkupKind.Markdown, value } };
 });
 
-documents.listen(connection);
-connection.listen();
+/**
+ * Begin serving: attach the document manager and start reading JSON-RPC from
+ * stdin. The handlers above are registered at module load, but nothing is read
+ * until this is called, so importing this module has no observable effect.
+ */
+export function startServer(): void {
+  documents.listen(connection);
+  connection.listen();
+}
