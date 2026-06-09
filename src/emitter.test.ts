@@ -2020,3 +2020,24 @@ test(
     );
   },
 );
+
+test(
+  "local class with own field initializer and capture runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "LocalField",
+      [
+        "public class LocalField {",
+        "  int run(int k) {",
+        "    int local = 3;",
+        "    class C { int v = k + local; int get(){ return v + k; } }",
+        "    return new C().get();",
+        "  }",
+        "  public static void main(String[] a){ System.out.println(new LocalField().run(10)); }",
+        "}",
+      ].join("\n"),
+      "23\n",
+    );
+  },
+);

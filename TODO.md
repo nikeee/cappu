@@ -47,11 +47,12 @@ verifiable placeholder, never a crash.
 - [x] Local classes capturing enclosing **locals/parameters**: synthetic final
       `val$x` fields, a synthesized constructor that stores them, body reads
       rewritten to `getfield`, and the `new` site passing the captured values.
-      Limited to the clean case (no declared constructor, no instance field
-      initializers); otherwise capture is skipped (those bodies degrade).
-- [ ] Local classes capturing the enclosing instance (`this$0` for outer fields/
-      methods), declared-constructor augmentation, and instance field initializers
-      alongside capture.
+- [x] Local classes with **instance field initializers alongside capture**: the
+      synthesized constructor runs them after the super/this$0/capture prologue
+      (shared `emitSynthCtorWithInits` with anonymous classes); a field with no
+      declared constructor is now synthesizable.
+- [ ] Local classes with a **declared constructor** (would need the capture/this$0
+      stores spliced into it); such a class is not synthesizable and degrades.
 - [x] Anonymous classes implementing an **interface** (JLS 15.9.5): the classBody
       is emitted as `Outer$N` (numbered by position) implementing the interface,
       capturing enclosing locals (reuses the local-class capture machinery), with

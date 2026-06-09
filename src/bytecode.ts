@@ -990,13 +990,10 @@ function outerThisInfo(
 // no declared constructor and no instance field initializers.
 function isSynthesizableLocalClass(decl: ClassDeclaration): boolean {
   if (decl.parent?.kind !== SyntaxKind.Block) return false;
-  if (decl.members.some(m => m.kind === SyntaxKind.ConstructorDeclaration)) return false;
-  return !decl.members.some(
-    m =>
-      m.kind === SyntaxKind.FieldDeclaration &&
-      !isStaticDeclaration(m as FieldDeclaration) &&
-      (m as FieldDeclaration).declarators.some(d => (d as VariableDeclarator).initializer),
-  );
+  // A declared constructor would have to be augmented with the capture stores; not
+  // yet handled. Instance field initializers are fine (the synthesized ctor runs
+  // them via emitSynthCtorWithInits).
+  return !decl.members.some(m => m.kind === SyntaxKind.ConstructorDeclaration);
 }
 
 function effectiveLocalCaptures(
@@ -5293,9 +5290,18 @@ export function emitClass(
   ) as ConstructorDeclaration[];
   if (localCaptures.length > 0 || this0Descriptor) {
     // A synthesizable local class declares no constructor; synthesize one that
-    // calls super() and stores this$0 and the captures.
+    // calls super(), stores this$0 and the captures, then runs the instance field
+    // initializers (via the body emitter) when there are any.
+    const prologue = {
+      this0Descriptor,
+      captures: localCaptures,
+      superInternal: superInternalName,
+      superParamDescs: [] as string[],
+    };
     methods.append(
-      emitSynthCtor(cp, name, superInternalName, [], localCaptures, this0Descriptor),
+      instanceInits.length > 0
+        ? emitSynthCtorWithInits(cp, name, program, checker, prologue, instanceInits, lambdaMethods)
+        : emitSynthCtor(cp, name, superInternalName, [], localCaptures, this0Descriptor),
     );
     methodCount++;
   } else if (declaredConstructors.length === 0) {
