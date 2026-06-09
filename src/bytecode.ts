@@ -80,8 +80,15 @@ import {
 } from "./types.ts";
 
 // Thrown when a construct is not yet handled by code generation; the caller
-// falls back to a verifiable placeholder body so output is always valid.
-class UnsupportedEmit extends Error {}
+// falls back to a verifiable placeholder body so output is always valid. It is
+// pure control flow thrown on every degraded method, so it deliberately does
+// not extend Error: capturing a stack trace per throw measurably dominates
+// emit profiles on real-world corpora.
+class UnsupportedEmit {
+  // Keep the Error-ish surface the catch sites / debug logging may touch.
+  readonly message = "unsupported construct";
+  readonly stack = "";
+}
 
 const MAGIC = 0xcafebabe;
 const MINOR_VERSION = 0;

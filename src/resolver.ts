@@ -260,8 +260,25 @@ function resolveTypeName(name: string, fromNode: Node, program: Program): Symbol
   return resolveTypeNameCrossFile(name, getSourceFileOfNode(fromNode), program.getGlobalIndex());
 }
 
+// Per-node resolution memo (the TypeScript compiler's nodeLinks pattern): a
+// reparse creates fresh nodes, so stale entries die with their keys. `null`
+// records a resolved-to-nothing answer (distinct from "not yet computed").
+const typeNameLinks = new WeakMap<Node, Symbol | null>();
+
 /** Resolve an entity name used as a type (Identifier, qualified, or nested). */
 export function resolveTypeEntityName(
+  name: EntityName,
+  fromNode: Node,
+  program: Program,
+): Symbol | undefined {
+  const cached = typeNameLinks.get(name);
+  if (cached !== undefined) return cached ?? undefined;
+  const result = resolveTypeEntityNameWorker(name, fromNode, program);
+  typeNameLinks.set(name, result ?? null);
+  return result;
+}
+
+function resolveTypeEntityNameWorker(
   name: EntityName,
   fromNode: Node,
   program: Program,
@@ -318,7 +335,17 @@ function meaningOf(identifier: Identifier): Meaning {
 }
 
 /** Resolve a name-use identifier to its declaration symbol, or undefined. */
+const identifierLinks = new WeakMap<Node, Symbol | null>();
+
 export function resolveIdentifier(identifier: Identifier, program: Program): Symbol | undefined {
+  const cached = identifierLinks.get(identifier);
+  if (cached !== undefined) return cached ?? undefined;
+  const result = resolveIdentifierWorker(identifier, program);
+  identifierLinks.set(identifier, result ?? null);
+  return result;
+}
+
+function resolveIdentifierWorker(identifier: Identifier, program: Program): Symbol | undefined {
   const declaration = declarationOf(identifier);
   if (declaration) return declaration.symbol;
 

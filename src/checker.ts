@@ -1261,7 +1261,20 @@ export function createChecker(program: Program): Checker {
     readonly receiverSubst: Map<Symbol, Type>;
   }
 
+  // Overload resolution is deterministic per node, and the emitter asks for the
+  // same call's target at least twice (once to dispatch, once for its type), so
+  // memoize like getTypeOfExpression does. `null` = resolved to nothing.
+  const callInfoCache = new WeakMap<CallExpression, CallInfo | null>();
+
   function resolveCallInfo(call: CallExpression): CallInfo | undefined {
+    const cached = callInfoCache.get(call);
+    if (cached !== undefined) return cached ?? undefined;
+    const result = resolveCallInfoWorker(call);
+    callInfoCache.set(call, result ?? null);
+    return result;
+  }
+
+  function resolveCallInfoWorker(call: CallExpression): CallInfo | undefined {
     const callee = call.expression;
     let symbol: Symbol | undefined;
     let receiverSubst = new Map<Symbol, Type>();
