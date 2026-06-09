@@ -2384,3 +2384,30 @@ test(
     );
   },
 );
+
+test(
+  "anonymous class using inherited members by simple name runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "AbstractAnon",
+      [
+        "abstract class Shape {",
+        "  int size;",
+        "  Shape(int s) { size = s; }",
+        "  int describe() { return 1000; }",
+        "  abstract int area();",
+        "}",
+        "public class AbstractAnon {",
+        "  public static void main(String[] a){",
+        "    Shape sq = new Shape(5) {",
+        "      int area() { return size * size + describe(); }", // inherited field + inherited method
+        "    };",
+        "    System.out.println(sq.area());", // 25 + 1000 = 1025
+        "  }",
+        "}",
+      ].join("\n"),
+      "1025\n",
+    );
+  },
+);

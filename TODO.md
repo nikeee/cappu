@@ -110,8 +110,11 @@ verifiable placeholder, never a crash.
       degrades to a placeholder instead of emitting invalid bytecode.
 - [x] Anonymous classes **accessing inherited members**: overriding a super
       method and calling an inherited (non-overridden) method both work via
-      normal virtual dispatch on the emitted subclass (verified: an anon override
-      reached through an inherited method runs correctly).
+      normal virtual dispatch on the emitted subclass. Inherited members
+      referenced by **simple name** inside the body (`size`, `describe()` for an
+      anon extending an abstract class) now resolve too: the resolver looks names
+      up on the anonymous class's supertype (its `new T(){...}` target), since the
+      body is not itself a binder container.
 - [x] **Anonymous** classes with **own instance fields** (+ initializers): the
       declared fields are emitted and the synthesized constructor runs their
       initializers after the super/this$0/capture prologue (via the body emitter,

@@ -16,6 +16,7 @@ import {
   type Identifier,
   type InterfaceDeclaration,
   type Node,
+  type ObjectCreationExpression,
   type RecordDeclaration,
   type SourceFile,
   type Symbol,
@@ -166,14 +167,33 @@ function lookupInScopes(
   program: Program,
 ): Symbol | undefined {
   let node: Node | undefined = start;
+  let prev: Node | undefined;
   while (node) {
     if (isTypeDeclaration(node) && node.symbol) {
       const member = lookupMember(node.symbol, name, meaning, program);
       if (member) return member;
+    } else if (
+      node.kind === SyntaxKind.ObjectCreationExpression &&
+      (node as ObjectCreationExpression).classBody &&
+      prev !== undefined &&
+      ((node as ObjectCreationExpression).classBody as readonly Node[]).includes(prev)
+    ) {
+      // Inside an anonymous class body: members are inherited from the type it
+      // extends/implements, so look them up on the supertype.
+      const oce = node as ObjectCreationExpression;
+      const target =
+        oce.type.kind === SyntaxKind.TypeReference
+          ? resolveTypeEntityName((oce.type as TypeReference).typeName, oce, program)
+          : undefined;
+      if (target) {
+        const member = lookupMember(target, name, meaning, program);
+        if (member) return member;
+      }
     } else {
       const local = node.locals?.get(name);
       if (local && matchesMeaning(local, meaning)) return local;
     }
+    prev = node;
     node = node.parent;
   }
   return undefined;
