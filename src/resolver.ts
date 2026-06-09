@@ -230,6 +230,30 @@ function resolveTypeNameCrossFile(
   return index.getPackageTypes("java.lang")?.get(name);
 }
 
+// A value/method imported via `import static T.member` or `import static T.*`
+// (JLS 7.5.3/7.5.4): resolve the named type and look the member up on it.
+function resolveStaticImport(
+  name: string,
+  sourceFile: SourceFile,
+  program: Program,
+): Symbol | undefined {
+  const index = program.getGlobalIndex();
+  for (const imp of sourceFile.imports) {
+    if (!imp.isStatic) continue;
+    const fqn = entityNameToString(imp.name);
+    if (imp.isOnDemand) {
+      const type = index.getType(fqn);
+      const member = type && lookupMember(type, name, Meaning.Any, program);
+      if (member) return member;
+    } else if (lastSegment(fqn) === name) {
+      const type = index.getType(fqn.slice(0, fqn.lastIndexOf(".")));
+      const member = type && lookupMember(type, name, Meaning.Any, program);
+      if (member) return member;
+    }
+  }
+  return undefined;
+}
+
 function resolveTypeName(name: string, fromNode: Node, program: Program): Symbol | undefined {
   const lexical = lookupInScopes(fromNode, name, Meaning.Type, program);
   if (lexical) return lexical;
@@ -307,13 +331,15 @@ export function resolveIdentifier(identifier: Identifier, program: Program): Sym
   const lexical = lookupInScopes(identifier, identifier.text, meaning, program);
   if (lexical) return lexical;
   if (meaning !== Meaning.Value) {
-    return resolveTypeNameCrossFile(
+    const type = resolveTypeNameCrossFile(
       identifier.text,
       getSourceFileOfNode(identifier),
       program.getGlobalIndex(),
     );
+    if (type) return type;
   }
-  return undefined;
+  // A statically-imported field or method used by its simple name.
+  return resolveStaticImport(identifier.text, getSourceFileOfNode(identifier), program);
 }
 
 export function getDeclarationNameNode(symbol: Symbol): Node | undefined {

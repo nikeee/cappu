@@ -2182,6 +2182,29 @@ function generateBody(
     // pick (it ignores the arity mismatch).
     const enumStatic = emitEnumStaticCall(call);
     if (enumStatic) return enumStatic;
+    // Array clone() (JLS 10.7): invokevirtual on the array type itself, with the
+    // covariant array return type - no source declaration to resolve.
+    if (call.expression.kind === SyntaxKind.PropertyAccessExpression && call.arguments.length === 0) {
+      const pa = call.expression as PropertyAccessExpression;
+      if (pa.name.text === "clone") {
+        const recvType = checker.getTypeOfExpression(pa.expression);
+        if (recvType.kind === TypeKind.Array) {
+          const arrDesc = typeDescriptor(recvType);
+          emitExpr(pa.expression);
+          // clone() is declared to return Object even on an array; cast back to the
+          // array type, as javac does.
+          code.u1(OP_INVOKEVIRTUAL);
+          code.u2(cp.methodref(arrDesc, "clone", "()Ljava/lang/Object;"));
+          pop();
+          push("Ljava/lang/Object;");
+          code.u1(OP_CHECKCAST);
+          code.u2(cp.classInfo(arrDesc));
+          pop();
+          push(arrDesc);
+          return arrDesc;
+        }
+      }
+    }
     const decl = checker.resolveCall(call);
     const owner = decl?.symbol?.parent;
     if (!decl || !decl.symbol || !owner) throw new UnsupportedEmit();

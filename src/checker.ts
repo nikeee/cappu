@@ -1316,6 +1316,15 @@ export function createChecker(program: Program): Checker {
   }
 
   function typeOfCall(call: CallExpression): Type {
+    // An array's clone() is covariant (JLS 10.7): it returns the array's type.
+    const callee = call.expression;
+    if (callee.kind === SyntaxKind.PropertyAccessExpression && call.arguments.length === 0) {
+      const pa = callee as PropertyAccessExpression;
+      if (pa.name.text === "clone") {
+        const recv = getTypeOfExpression(pa.expression);
+        if (recv.kind === TypeKind.Array) return recv;
+      }
+    }
     // values()/valueOf(String) take precedence over the inherited Enum.valueOf.
     const enumType = enumStaticCallType(call);
     if (enumType) return enumType;

@@ -52,6 +52,12 @@ verifiable placeholder, never a crash.
       selector is unboxed to int before the int dispatch (JLS 14.11 / 5.1.8).
 - [x] Static methods declared in an interface are invoked via an
       InterfaceMethodref (JVMS 4.4.2), not a Methodref.
+- [x] Static imports (JLS 7.5.3/7.5.4): a field or method used by its simple name
+      resolves through `import static T.member` / `import static T.*` (the member
+      is looked up on the named type).
+- [x] Array `clone()` (JLS 10.7): `invokevirtual` on the array type with the
+      declared `()Ljava/lang/Object;` descriptor, then a checkcast back to the
+      array type (covariant) - as javac does.
 - [x] Conditional `?:` over unrelated reference arms (JLS 15.25): the checker now
       computes a simplified lub (numeric promotion, the more general arm, null arm
       yields the other, else `Object`) instead of just the then-arm, so both the

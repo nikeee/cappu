@@ -2411,3 +2411,27 @@ test(
     );
   },
 );
+
+test(
+  "static imports and array clone run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "StaticImportClone",
+      [
+        "import static java.lang.Math.max;",
+        "import static java.lang.Math.min;",
+        "public class StaticImportClone {",
+        "  public static void main(String[] a){",
+        "    System.out.println(max(3, 7) + min(3, 7));", // 7 + 3 = 10
+        "    int[] x = {1, 2, 3};",
+        "    int[] y = x.clone();",
+        "    y[0] = 9;",
+        "    System.out.println(x[0] + y[0]);", // 1 + 9 = 10
+        "  }",
+        "}",
+      ].join("\n"),
+      "10\n10\n",
+    );
+  },
+);
