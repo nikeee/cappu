@@ -57,7 +57,6 @@ async function main(argv: string[]): Promise<void> {
     }
     case "compile":
       process.exit(runCompile(files, values["out-dir"], values.quiet));
-    // eslint-disable-next-line no-fallthrough -- process.exit does not return
     default:
       process.stderr.write(`cappu: unknown command '${command}'\n\n${USAGE}`);
       process.exit(2);
