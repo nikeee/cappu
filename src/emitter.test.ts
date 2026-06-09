@@ -1993,3 +1993,30 @@ test(
     );
   },
 );
+
+test(
+  "anonymous class with own field initializers runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "AnonOwnField",
+      [
+        "interface Sup { int get(); }",
+        "public class AnonOwnField {",
+        "  int base = 100;",
+        "  Sup make(int k) {",
+        "    int local = 5;",
+        "    return new Sup() {",
+        "      int v = k + local + base;",
+        "      public int get() { return v; }",
+        "    };",
+        "  }",
+        "  public static void main(String[] a){",
+        "    System.out.println(new AnonOwnField().make(7).get());",
+        "  }",
+        "}",
+      ].join("\n"),
+      "112\n",
+    );
+  },
+);

@@ -71,12 +71,16 @@ verifiable placeholder, never a crash.
       method and calling an inherited (non-overridden) method both work via
       normal virtual dispatch on the emitted subclass (verified: an anon override
       reached through an inherited method runs correctly).
-- [ ] Anonymous/local classes with **own instance fields, initializer blocks, or
-      declared constructors alongside capture**. `anonymousTarget` currently
-      rejects any non-method body member, so such a `new T(){...}` degrades (the
-      enclosing method falls back, returning null). Supporting it needs the
-      synthesized constructor to run the field initializers through the full body
-      emitter (it is hand-rolled today, emitting only super() + capture stores).
+- [x] **Anonymous** classes with **own instance fields** (+ initializers): the
+      declared fields are emitted and the synthesized constructor runs their
+      initializers after the super/this$0/capture prologue (via the body emitter,
+      `emitSynthCtorWithInits`); methods read the own fields through the same
+      implicit-`this` getfield path as captures. An unsupported initializer
+      degrades the ctor to prologue-only (fields keep defaults) rather than
+      crashing. Own-field *writes* in methods, initializer blocks, and declared
+      constructors are still unsupported; **local** classes with own field
+      initializers also remain (their synth ctor still uses the prologue-only
+      path).
 - [x] User-defined interfaces are now emitted (ACC_INTERFACE|ACC_ABSTRACT, super
       Object, `extends` as super-interfaces): abstract methods (no Code), default
       and static methods (with Code), and implicitly public-static-final constant
