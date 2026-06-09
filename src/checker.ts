@@ -332,15 +332,26 @@ export function createChecker(program: Program): Checker {
     name: string,
     seen = new Set<Symbol>(),
     out: { decl: MethodDeclaration; subst: Map<Symbol, Type> }[] = [],
+    // Erased parameter signatures already collected. A more-derived type's members
+    // are visited first, so a supertype method with the same signature is an
+    // overridden method (JLS 8.4.8.1) and is dropped - it is not a separate
+    // overload (e.g. String.length() hides the inherited CharSequence.length()).
+    sigs = new Set<string>(),
   ): { decl: MethodDeclaration; subst: Map<Symbol, Type> }[] {
     const symbol = receiver.symbol;
     if (seen.has(symbol)) return out;
     seen.add(symbol);
     const subst = substitutionFor(symbol, receiver.typeArguments);
     const add = (sym: Symbol | undefined, s: Map<Symbol, Type>): void => {
-      for (const d of sym?.declarations ?? [])
-        if (d.kind === SyntaxKind.MethodDeclaration)
-          out.push({ decl: d as MethodDeclaration, subst: s });
+      for (const d of sym?.declarations ?? []) {
+        if (d.kind !== SyntaxKind.MethodDeclaration) continue;
+        const sig = methodParams(d as MethodDeclaration)
+          .map(p => typeToString(substitute(paramSlotType(p), s)))
+          .join(",");
+        if (sigs.has(sig)) continue;
+        sigs.add(sig);
+        out.push({ decl: d as MethodDeclaration, subst: s });
+      }
     };
     add(symbol.members?.get(name), subst);
     const declaration = declarationOf(symbol);
@@ -349,11 +360,11 @@ export function createChecker(program: Program): Checker {
         if (typeNode.kind !== SyntaxKind.TypeReference) continue;
         const superType = substitute(resolveType(typeNode, declaration), subst);
         if (superType.kind === TypeKind.Class)
-          collectTypedOverloads(superType as ClassType, name, seen, out);
+          collectTypedOverloads(superType as ClassType, name, seen, out, sigs);
       }
       if (declaration.kind === SyntaxKind.EnumDeclaration) {
         const e = classTypeByFqn("java.lang.Enum");
-        if (e.kind === TypeKind.Class) collectTypedOverloads(e as ClassType, name, seen, out);
+        if (e.kind === TypeKind.Class) collectTypedOverloads(e as ClassType, name, seen, out, sigs);
       }
     }
     const object = objectSymbol();
@@ -1184,6 +1195,11 @@ export function createChecker(program: Program): Checker {
     for (const [allowBoxing, varargs] of phases) {
       const ok = decls.filter(d => applicable(methodParams(d), args, allowBoxing, varargs));
       if (ok.length > 0) {
+        // Most-specific (JLS 15.12.2.5). Candidates are ordered most-derived-first
+        // (a type's own members before inherited ones), so only a *strictly* more
+        // specific method displaces the current best; equally-specific methods
+        // (e.g. an override and the method it overrides - String.length() vs
+        // CharSequence.length()) keep the more-derived one already chosen.
         let best = ok[0]!;
         for (const d of ok.slice(1)) if (moreSpecific(d, best)) best = d;
         return best;

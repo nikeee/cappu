@@ -78,6 +78,48 @@ const FIXTURES: Record<string, string> = {
   // float/double suffixes (0xff, 0xe, 0xd), octal, binary, and 32-bit wrap.
   IntLiterals:
     "class IntLiterals { int hexFf() { return 0xff; } int hexE() { return 0xe; } int hexD() { return 0xd; } int hex1e() { return 0x1e; } int cafe() { return 0xCafe; } int allOnes() { return 0xFFFFFFFF; } long hexL() { return 0xFFL; } int oct() { return 010; } int bin() { return 0b1010; } int big() { return 1000000; } }",
+  // Every long ALU op over parameters (ladd/lsub/lmul/ldiv/lrem/lneg/land/lor/lxor
+  // and the int-shift-amount lshl/lshr/lushr), plus lcmp-free bitwise complement.
+  LongArith:
+    "class LongArith { long add(long a, long b) { return a + b; } long sub(long a, long b) { return a - b; } long mul(long a, long b) { return a * b; } long div(long a, long b) { return a / b; } long rem(long a, long b) { return a % b; } long neg(long a) { return -a; } long and(long a, long b) { return a & b; } long or(long a, long b) { return a | b; } long xor(long a, long b) { return a ^ b; } long shl(long a, int b) { return a << b; } long shr(long a, int b) { return a >> b; } long ushr(long a, int b) { return a >>> b; } long not(long a) { return ~a; } }",
+  // Widening/narrowing from int: i2l/i2f/i2d and the narrowing i2b/i2c/i2s casts.
+  IntConv:
+    "class IntConv { long toLong(int a) { return a; } float toFloat(int a) { return a; } double toDouble(int a) { return a; } byte toByte(int a) { return (byte) a; } char toChar(int a) { return (char) a; } short toShort(int a) { return (short) a; } }",
+  // Array element loads for every type (iaload/laload/faload/daload/baload/caload/
+  // saload/aaload), boolean (baload) and arraylength.
+  ArrayLoad:
+    "class ArrayLoad { int i(int[] a, int k) { return a[k]; } long l(long[] a, int k) { return a[k]; } float f(float[] a, int k) { return a[k]; } double d(double[] a, int k) { return a[k]; } byte b(byte[] a, int k) { return a[k]; } char c(char[] a, int k) { return a[k]; } short s(short[] a, int k) { return a[k]; } boolean z(boolean[] a, int k) { return a[k]; } Object o(Object[] a, int k) { return a[k]; } int len(int[] a) { return a.length; } }",
+  // Array element stores for every type (iastore/lastore/.../aastore).
+  ArrayStore:
+    "class ArrayStore { void i(int[] a, int k, int v) { a[k] = v; } void l(long[] a, int k, long v) { a[k] = v; } void f(float[] a, int k, float v) { a[k] = v; } void d(double[] a, int k, double v) { a[k] = v; } void b(byte[] a, int k, byte v) { a[k] = v; } void c(char[] a, int k, char v) { a[k] = v; } void s(short[] a, int k, short v) { a[k] = v; } void o(Object[] a, int k, Object v) { a[k] = v; } }",
+  // Array allocation: newarray (primitive), anewarray (reference), multianewarray.
+  NewArray:
+    "class NewArray { int[] prim(int n) { return new int[n]; } String[] ref(int n) { return new String[n]; } boolean[] bools(int n) { return new boolean[n]; } long[] longs(int n) { return new long[n]; } int[][] multi(int m, int n) { return new int[m][n]; } }",
+  // Static and instance field access: get/putstatic and get/putfield over int/long.
+  StaticFields:
+    "class StaticFields { static int counter; static long total; int x; long y; static int getC() { return counter; } static void setC(int v) { counter = v; } int getX() { return x; } void setX(int v) { x = v; } static long getT() { return total; } void setY(long v) { y = v; } }",
+  // Autoboxing (valueOf) and unboxing (xxxValue) for the wrapper types (JLS 5.1.7/8).
+  Boxing:
+    "class Boxing { Integer bi(int x) { return x; } Long bl(long x) { return x; } Double bd(double x) { return x; } Float bf(float x) { return x; } Boolean bz(boolean x) { return x; } Character bc(char x) { return x; } int ui(Integer x) { return x; } long ul(Long x) { return x; } double ud(Double x) { return x; } boolean uz(Boolean x) { return x; } }",
+  // checkcast (narrowing + array), upcast (no instruction), instanceof as a value.
+  CastInstance:
+    "class CastInstance { String down(Object o) { return (String) o; } CharSequence up(String s) { return s; } boolean isStr(Object o) { return o instanceof String; } int[] arr(Object o) { return (int[]) o; } }",
+  // invokedynamic StringConcatFactory for `+` with each operand type (JLS 15.18.1).
+  Concat:
+    "class Concat { String si(String a, int b) { return a + b; } String is(int a, String b) { return a + b; } String ss(String a, String b) { return a + b; } String sl(String a, long b) { return a + b; } String sd(String a, double b) { return a + b; } String sb(String a, boolean b) { return a + b; } String sc(String a, char b) { return a + b; } }",
+  // invokestatic / invokevirtual, and an invokevirtual on a JDK-stub type (String).
+  Invoke:
+    "class Invoke { static int stat() { return 1; } int inst() { return 2; } int callStat() { return stat(); } int callInst() { return inst(); } int strLen(String s) { return s.length(); } }",
+  // Constant loads: iconst_m1.._5, bipush, sipush, ldc (int/long/float/double/String).
+  Constants:
+    "class Constants { int zero() { return 0; } int five() { return 5; } int m1() { return -1; } int bp() { return 100; } int sp() { return 1000; } int big() { return 100000; } long lone() { return 1L; } long lbig() { return 10000000000L; } float fz() { return 0f; } double dz() { return 0.0; } String s() { return \"x\"; } }",
+  // The return instruction for each type (ireturn/lreturn/freturn/dreturn/areturn/return).
+  Returns:
+    "class Returns { int i() { return 7; } long l() { return 7L; } float f() { return 1.5f; } double d() { return 2.5; } boolean b() { return true; } char c() { return 'Z'; } byte by() { return 3; } short sh() { return 300; } String s() { return \"hi\"; } Object o() { return null; } void v() {} }",
+  // Varargs call packing: the trailing args become a fresh array (matching javac's
+  // anewarray/dup/iconst/astore sequence exactly), JLS 15.12.4.2.
+  VarargsPack:
+    "class VarargsPack { static int sum(int... xs) { return xs.length; } static String join(String sep, Object... ps) { return sep; } int callPrim() { return sum(1, 2, 3); } int callEmpty() { return sum(); } String callMixed() { return join(\"-\", \"a\", \"b\"); } }",
 };
 
 // Fixtures with a runnable main and the output they must print.
@@ -265,9 +307,10 @@ for (const [name, source] of Object.entries(MULTI_FIXTURES)) {
     () => {
       const ref = loadJavacRef(name, source);
       if (!ref) return;
-      // Every nested class is emitted as its own Outer$Inner.class.
+      // We must emit exactly the classes javac does (each nested class as its own
+      // Outer$Inner.class), and each must match javac's disassembly.
       const emitted = emitClasses(name, source).map(c => c.name).sort();
-      expect(emitted).toEqual(["Nest", "Nest$Counter", "Nest$Point"]);
+      expect(emitted).toEqual([...ref.keys()].sort());
       for (const cn of emitted) expectMatchesJavac(oursDisasm().get(cn), ref.get(cn)!);
     },
   );

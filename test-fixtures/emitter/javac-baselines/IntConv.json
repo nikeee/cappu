@@ -1,0 +1,71 @@
+{
+  "IntConv": {
+    "members": [
+      "IntConv();",
+      "byte toByte(int);",
+      "char toChar(int);",
+      "double toDouble(int);",
+      "float toFloat(int);",
+      "long toLong(int);",
+      "short toShort(int);"
+    ],
+    "code": [
+      [
+        "IntConv();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "long toLong(int);",
+        [
+          "iload_1",
+          "i2l",
+          "lreturn"
+        ]
+      ],
+      [
+        "float toFloat(int);",
+        [
+          "iload_1",
+          "i2f",
+          "freturn"
+        ]
+      ],
+      [
+        "double toDouble(int);",
+        [
+          "iload_1",
+          "i2d",
+          "dreturn"
+        ]
+      ],
+      [
+        "byte toByte(int);",
+        [
+          "iload_1",
+          "i2b",
+          "ireturn"
+        ]
+      ],
+      [
+        "char toChar(int);",
+        [
+          "iload_1",
+          "i2c",
+          "ireturn"
+        ]
+      ],
+      [
+        "short toShort(int);",
+        [
+          "iload_1",
+          "i2s",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}

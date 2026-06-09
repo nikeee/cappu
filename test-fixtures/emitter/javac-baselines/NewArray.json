@@ -1,0 +1,63 @@
+{
+  "NewArray": {
+    "members": [
+      "NewArray();",
+      "boolean[] bools(int);",
+      "int[] prim(int);",
+      "int[][] multi(int, int);",
+      "java.lang.String[] ref(int);",
+      "long[] longs(int);"
+    ],
+    "code": [
+      [
+        "NewArray();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "int[] prim(int);",
+        [
+          "iload_1",
+          "newarray int",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.String[] ref(int);",
+        [
+          "iload_1",
+          "anewarray # // class java/lang/String",
+          "areturn"
+        ]
+      ],
+      [
+        "boolean[] bools(int);",
+        [
+          "iload_1",
+          "newarray boolean",
+          "areturn"
+        ]
+      ],
+      [
+        "long[] longs(int);",
+        [
+          "iload_1",
+          "newarray long",
+          "areturn"
+        ]
+      ],
+      [
+        "int[][] multi(int, int);",
+        [
+          "iload_1",
+          "iload_2",
+          "multianewarray #, 2 // class \"[[I\"",
+          "areturn"
+        ]
+      ]
+    ]
+  }
+}

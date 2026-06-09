@@ -1,0 +1,59 @@
+{
+  "Invoke": {
+    "members": [
+      "Invoke();",
+      "int callInst();",
+      "int callStat();",
+      "int inst();",
+      "int strLen(java.lang.String);",
+      "static int stat();"
+    ],
+    "code": [
+      [
+        "Invoke();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "static int stat();",
+        [
+          "iconst_1",
+          "ireturn"
+        ]
+      ],
+      [
+        "int inst();",
+        [
+          "iconst_2",
+          "ireturn"
+        ]
+      ],
+      [
+        "int callStat();",
+        [
+          "invokestatic # // Method stat:()I",
+          "ireturn"
+        ]
+      ],
+      [
+        "int callInst();",
+        [
+          "aload_0",
+          "invokevirtual # // Method inst:()I",
+          "ireturn"
+        ]
+      ],
+      [
+        "int strLen(java.lang.String);",
+        [
+          "aload_1",
+          "invokevirtual # // Method java/lang/String.length:()I",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}

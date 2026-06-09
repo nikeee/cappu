@@ -1,0 +1,75 @@
+{
+  "StaticFields": {
+    "members": [
+      "StaticFields();",
+      "int getX();",
+      "int x;",
+      "long y;",
+      "static int counter;",
+      "static int getC();",
+      "static long getT();",
+      "static long total;",
+      "static void setC(int);",
+      "void setX(int);",
+      "void setY(long);"
+    ],
+    "code": [
+      [
+        "StaticFields();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "static int getC();",
+        [
+          "getstatic # // Field counter:I",
+          "ireturn"
+        ]
+      ],
+      [
+        "static void setC(int);",
+        [
+          "iload_0",
+          "putstatic # // Field counter:I",
+          "return"
+        ]
+      ],
+      [
+        "int getX();",
+        [
+          "aload_0",
+          "getfield # // Field x:I",
+          "ireturn"
+        ]
+      ],
+      [
+        "void setX(int);",
+        [
+          "aload_0",
+          "iload_1",
+          "putfield # // Field x:I",
+          "return"
+        ]
+      ],
+      [
+        "static long getT();",
+        [
+          "getstatic # // Field total:J",
+          "lreturn"
+        ]
+      ],
+      [
+        "void setY(long);",
+        [
+          "aload_0",
+          "lload_1",
+          "putfield # // Field y:J",
+          "return"
+        ]
+      ]
+    ]
+  }
+}

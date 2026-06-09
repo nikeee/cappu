@@ -1,0 +1,105 @@
+{
+  "Constants": {
+    "members": [
+      "Constants();",
+      "double dz();",
+      "float fz();",
+      "int big();",
+      "int bp();",
+      "int five();",
+      "int m1();",
+      "int sp();",
+      "int zero();",
+      "java.lang.String s();",
+      "long lbig();",
+      "long lone();"
+    ],
+    "code": [
+      [
+        "Constants();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "int zero();",
+        [
+          "iconst_0",
+          "ireturn"
+        ]
+      ],
+      [
+        "int five();",
+        [
+          "iconst_5",
+          "ireturn"
+        ]
+      ],
+      [
+        "int m1();",
+        [
+          "iconst_m1",
+          "ireturn"
+        ]
+      ],
+      [
+        "int bp();",
+        [
+          "bipush 100",
+          "ireturn"
+        ]
+      ],
+      [
+        "int sp();",
+        [
+          "sipush 1000",
+          "ireturn"
+        ]
+      ],
+      [
+        "int big();",
+        [
+          "ldc # // int 100000",
+          "ireturn"
+        ]
+      ],
+      [
+        "long lone();",
+        [
+          "lconst_1",
+          "lreturn"
+        ]
+      ],
+      [
+        "long lbig();",
+        [
+          "ldc2_w # // long 10000000000l",
+          "lreturn"
+        ]
+      ],
+      [
+        "float fz();",
+        [
+          "fconst_0",
+          "freturn"
+        ]
+      ],
+      [
+        "double dz();",
+        [
+          "dconst_0",
+          "dreturn"
+        ]
+      ],
+      [
+        "java.lang.String s();",
+        [
+          "ldc # // String x",
+          "areturn"
+        ]
+      ]
+    ]
+  }
+}
