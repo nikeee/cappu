@@ -50,6 +50,12 @@ verifiable placeholder, never a crash.
       body uses a qualified `this`). Qualified `Type.super.m()` still degrades.
 - [x] `switch` over a boxed `Integer`/`Short`/`Byte`/`Character` selector: the
       selector is unboxed to int before the int dispatch (JLS 14.11 / 5.1.8).
+- [x] Static methods declared in an interface are invoked via an
+      InterfaceMethodref (JVMS 4.4.2), not a Methodref.
+- [x] Conditional `?:` over unrelated reference arms (JLS 15.25): the checker now
+      computes a simplified lub (numeric promotion, the more general arm, null arm
+      yields the other, else `Object`) instead of just the then-arm, so both the
+      result type and the stack-map frame at the join are a true common supertype.
 - [x] Varargs calls (JLS 15.12.4.2): the trailing arguments of a call to a
       `T... xs` method are packed into a fresh `T[]` (with element box/widen), an
       empty varargs slot becomes `new T[0]`, and a single array argument assignable

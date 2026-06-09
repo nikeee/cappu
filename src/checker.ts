@@ -960,10 +960,20 @@ export function createChecker(program: Program): Checker {
       case SyntaxKind.PostfixUnaryExpression:
         return getTypeOfExpression((node as unknown as { operand: Node }).operand);
       case SyntaxKind.ConditionalExpression: {
-        const whenTrue = getTypeOfExpression((node as ConditionalExpression).whenTrue);
-        return whenTrue.kind === TypeKind.Error
-          ? getTypeOfExpression((node as ConditionalExpression).whenFalse)
-          : whenTrue;
+        // The conditional's type (JLS 15.25): binary numeric promotion for numeric
+        // arms, otherwise a simplified reference lub (the more general arm, or a
+        // null arm yields the other, else java.lang.Object).
+        const t = getTypeOfExpression((node as ConditionalExpression).whenTrue);
+        const f = getTypeOfExpression((node as ConditionalExpression).whenFalse);
+        if (t.kind === TypeKind.Error) return f;
+        if (f.kind === TypeKind.Error) return t;
+        if (t.kind === TypeKind.Null) return f;
+        if (f.kind === TypeKind.Null) return t;
+        const num = widerNumeric(t, f);
+        if (num.kind !== TypeKind.Error) return num;
+        if (isAssignableTo(f, t, false)) return t;
+        if (isAssignableTo(t, f, false)) return f;
+        return classTypeByFqn("java.lang.Object");
       }
       case SyntaxKind.BinaryExpression: {
         const b = node as BinaryExpression;

@@ -2360,3 +2360,27 @@ test(
     );
   },
 );
+
+test(
+  "interface static methods and unrelated-reference conditionals run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "IfaceCond",
+      [
+        "interface Calc { static int twice(int x){ return x * 2; } }",
+        "public class IfaceCond {",
+        "  public static void main(String[] a){",
+        "    System.out.println(Calc.twice(21));", // interface static -> 42
+        "    boolean f = true;",
+        '    Object o = f ? "str" : Integer.valueOf(1);', // lub -> Object, prints str
+        "    System.out.println(o);",
+        '    Object p = f ? Integer.valueOf(1) : "str";',
+        "    System.out.println(p);", // prints 1
+        "  }",
+        "}",
+      ].join("\n"),
+      "42\nstr\n1\n",
+    );
+  },
+);

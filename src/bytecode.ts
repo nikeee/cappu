@@ -2252,7 +2252,13 @@ function generateBody(
     const returnDesc = descriptor.slice(descriptor.lastIndexOf(")") + 1);
     if (staticCall) {
       code.u1(OP_INVOKESTATIC);
-      code.u2(cp.methodref(ownerName, decl.name.text, descriptor));
+      // A static method declared in an interface must reference an
+      // InterfaceMethodref, not a Methodref (JVMS 4.4.2).
+      code.u2(
+        isInterface
+          ? cp.interfaceMethodref(ownerName, decl.name.text, descriptor)
+          : cp.methodref(ownerName, decl.name.text, descriptor),
+      );
       pop(pushedValues);
     } else if (isSuperCall) {
       // super.m(): non-virtual dispatch to the resolved (super) method.
@@ -3186,10 +3192,17 @@ function generateBody(
     const contL = newLabel();
     emitBranch(node.condition, elseL, false);
     coerce(emitExpr(node.whenTrue), desc);
+    // Both arms must converge to `desc` in the stack-map frame: a reference arm's
+    // concrete type (e.g. String) is not a supertype of the other arm (Integer),
+    // so record the merged result type for the join, not the arm's own type.
+    pop();
+    push(desc);
     branchTo(OP_GOTO, contL);
     pop(); // the then-value is not on the stack along the else path
     placeLabel(elseL);
     coerce(emitExpr(node.whenFalse), desc);
+    pop();
+    push(desc);
     placeLabel(contL); // both arms converge with one value atop the entry stack
     return desc;
   };
