@@ -2096,3 +2096,29 @@ test(
     );
   },
 );
+
+test(
+  "record compact constructor runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "CompactRec",
+      [
+        "record Range(int lo, int hi) {",
+        "  Range {",
+        "    if (lo > hi) { int t = lo; lo = hi; hi = t; }",
+        "  }",
+        "}",
+        "public class CompactRec {",
+        "  public static void main(String[] a){",
+        "    Range r = new Range(5, 2);",
+        '    System.out.println(r.lo() + "," + r.hi());',
+        "    Range s = new Range(1, 9);",
+        '    System.out.println(s.lo() + "," + s.hi());',
+        "  }",
+        "}",
+      ].join("\n"),
+      "2,5\n1,9\n",
+    );
+  },
+);

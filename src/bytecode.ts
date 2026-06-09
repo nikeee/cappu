@@ -28,6 +28,7 @@ import {
   type LambdaExpression,
   type MethodReferenceExpression,
   type ClassDeclaration,
+  type CompactConstructorDeclaration,
   type ConstructorDeclaration,
   type EnumDeclaration,
   type RecordComponent,
@@ -1407,6 +1408,15 @@ function generateBody(
     superInternal: string;
     superParamDescs: string[];
   },
+  // A synthesized constructor whose parameters are given explicitly (with their
+  // declaration symbols, so the body resolves them as locals) rather than read
+  // from method.parameters - used for a record's canonical/compact constructor,
+  // where the parameters are the record components.
+  paramSymbols?: { symbol: Symbol; descriptor: string }[],
+  // Field stores emitted at the end of the constructor body (after it, before the
+  // closing return) - a record compact constructor assigns each component field
+  // from its (possibly reassigned) parameter once the body completes.
+  ctorTrailingStores?: { owner: string; name: string; descriptor: string; slot: number }[],
 ): MethodBody {
   const isConstructor = !lambdaSpec && method.kind === SyntaxKind.ConstructorDeclaration;
   const isStatic = lambdaSpec
@@ -1454,14 +1464,16 @@ function generateBody(
     : [];
   const params: { symbol?: Symbol; descriptor: string }[] = lambdaSpec
     ? lambdaSpec.params
-    : [
-        ...(enumCtor ? [{ descriptor: "Ljava/lang/String;" }, { descriptor: "I" }] : []),
-        ...prologueParams,
-        ...method.parameters.map(p => ({
-          symbol: p.symbol,
-          descriptor: paramDescriptor(p as Parameter, program),
-        })),
-      ];
+    : paramSymbols
+      ? paramSymbols
+      : [
+          ...(enumCtor ? [{ descriptor: "Ljava/lang/String;" }, { descriptor: "I" }] : []),
+          ...prologueParams,
+          ...method.parameters.map(p => ({
+            symbol: p.symbol,
+            descriptor: paramDescriptor(p as Parameter, program),
+          })),
+        ];
   for (const p of params) {
     if (p.symbol) locals.set(p.symbol, { slot: nextSlot, descriptor: p.descriptor });
     activeLocals.push({ slot: nextSlot, descriptor: p.descriptor });
@@ -4761,6 +4773,21 @@ function generateBody(
           return t;
         })
       : emitStmt(method.body);
+    if (ctorTrailingStores) {
+      // The compact constructor's body must complete normally (it cannot early
+      // return past the implicit field assignments); a terminating body is left
+      // to degrade rather than dropping the stores.
+      if (terminated) throw new UnsupportedEmit();
+      for (const st of ctorTrailingStores) {
+        code.u1(OP_ALOAD_0);
+        pushRef();
+        loadVar(st.slot, st.descriptor);
+        push(st.descriptor);
+        code.u1(OP_PUTFIELD);
+        code.u2(cp.fieldref(st.owner, st.name, st.descriptor));
+        pop(2);
+      }
+    }
     if (!terminated) {
       if (returnDescriptor === "V") code.u1(OP_RETURN);
       else throw new UnsupportedEmit(); // non-void path falls off the end
@@ -5947,11 +5974,14 @@ export function emitRecord(
   let methodCount = 0;
   const lambdaMethods: ByteBuffer[] = [];
 
-  // Canonical constructor: super(); store each component parameter into its field.
+  // Canonical constructor. The implicit form is super(); store each component
+  // parameter into its field. A full explicit canonical/alternate constructor is
+  // not yet handled; a compact constructor runs its body, then the stores.
   if (declaration.members.some(m => m.kind === SyntaxKind.ConstructorDeclaration)) {
-    throw new UnsupportedEmit(); // explicit/compact constructor: later
+    throw new UnsupportedEmit(); // explicit canonical/alternate constructor: later
   }
-  {
+  const ctorDescriptor = `(${components.map(c => c.descriptor).join("")})V`;
+  const emitImplicitCanonicalCtor = (): ByteBuffer => {
     const code = new ByteBuffer();
     code.u1(OP_ALOAD_0);
     code.u1(OP_INVOKESPECIAL);
@@ -5970,9 +6000,64 @@ export function emitRecord(
     const info = new ByteBuffer();
     info.u2(isPublic ? ACC_PUBLIC : 0);
     info.u2(cp.utf8("<init>"));
-    info.u2(cp.utf8(`(${components.map(c => c.descriptor).join("")})V`));
+    info.u2(cp.utf8(ctorDescriptor));
     writeCodeAttribute(info, cp, { code, maxStack, maxLocals: slot });
-    methods.append(info);
+    return info;
+  };
+  const compact = declaration.members.find(
+    m => m.kind === SyntaxKind.CompactConstructorDeclaration,
+  ) as CompactConstructorDeclaration | undefined;
+  if (compact) {
+    const synth = {
+      kind: SyntaxKind.ConstructorDeclaration,
+      parameters: [],
+      body: compact.body,
+    } as unknown as ConstructorDeclaration;
+    const compParams = declaration.recordComponents.map((rc, i) => ({
+      symbol: rc.symbol!,
+      descriptor: components[i]!.descriptor,
+    }));
+    let slot = 1;
+    const trailing = components.map(c => {
+      const s = slot;
+      slot += slotsOf(c.descriptor);
+      return { owner: name, name: c.name, descriptor: c.descriptor, slot: s };
+    });
+    const info = new ByteBuffer();
+    info.u2(isPublic ? ACC_PUBLIC : 0);
+    info.u2(cp.utf8("<init>"));
+    info.u2(cp.utf8(ctorDescriptor));
+    try {
+      const body = generateBody(
+        synth,
+        cp,
+        program,
+        checker,
+        name,
+        "java/lang/Record",
+        [],
+        lambdaMethods,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        compParams,
+        trailing,
+      );
+      writeCodeAttribute(info, cp, body);
+      methods.append(info);
+    } catch (e) {
+      if (!(e instanceof UnsupportedEmit)) throw e;
+      // An unsupported compact body degrades to the implicit canonical ctor (the
+      // validation/normalization is dropped, but the record stays valid).
+      methods.append(emitImplicitCanonicalCtor());
+    }
+    methodCount++;
+  } else {
+    methods.append(emitImplicitCanonicalCtor());
     methodCount++;
   }
 

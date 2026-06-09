@@ -96,8 +96,12 @@ verifiable placeholder, never a crash.
       `toString` via the `ObjectMethods` bootstrap (invokedynamic). Emits the
       Record attribute (JVMS 4.7.30); declared (static) fields and methods are
       kept; `new R(...)` resolves the canonical ctor; `r.x()` accessors resolve
-      via a binder-synthesized accessor symbol. Explicit/compact constructors
-      and explicit accessor overrides are not yet emitted (those degrade).
+      via a binder-synthesized accessor symbol. A **compact constructor** (JLS
+      8.10.4) is emitted: its body runs (with the components bound as the
+      parameters, so it can validate/reassign them), then each component field is
+      assigned from its final parameter value; an unsupported body degrades to the
+      implicit canonical ctor. A full explicit canonical/alternate constructor and
+      explicit accessor overrides are not yet emitted (those degrade).
 - [x] Explicit constructor invocations (JLS 8.8.7.1): a leading `super(args)` or
       `this(args)`; `this(...)` skips this constructor's field initializers. The
       target overload is resolved by argument count (as for `new`).
