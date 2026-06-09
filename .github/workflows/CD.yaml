@@ -20,3 +20,8 @@ jobs:
       - run: npm ci --no-audit
       - run: node --run ci
       - run: node --run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cappu
+          path: dist/cappu-*

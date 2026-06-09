@@ -99,3 +99,5 @@ no timestamps were captured.
 - 2026-06-09 06:35 — continue (final corpus baseline regen)
 - 2026-06-09 06:50 — cli flags question; yargs ugly; server import side effect weird; bug fixes
 - 2026-06-09 07:05 — continue
+- 2026-06-10 00:30 — add the build artifact to the job output of cd.yaml
+- 2026-06-10 00:30 — split the build step into multiple npm scripts for all major platforms and add their respective binaries to the build output

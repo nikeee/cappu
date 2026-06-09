@@ -9,7 +9,12 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "build": "tsdown && bun build ./src/cli.ts --outfile ./dist/cappu --bytecode --format=esm --compile",
+    "build": "tsdown && node --run build:linux-x64 && node --run build:linux-arm64 && node --run build:darwin-x64 && node --run build:darwin-arm64 && node --run build:windows-x64",
+    "build:linux-x64": "bun build ./src/cli.ts --outfile ./dist/cappu-linux-x64 --bytecode --format=esm --compile --target=bun-linux-x64",
+    "build:linux-arm64": "bun build ./src/cli.ts --outfile ./dist/cappu-linux-arm64 --bytecode --format=esm --compile --target=bun-linux-arm64",
+    "build:darwin-x64": "bun build ./src/cli.ts --outfile ./dist/cappu-darwin-x64 --bytecode --format=esm --compile --target=bun-darwin-x64",
+    "build:darwin-arm64": "bun build ./src/cli.ts --outfile ./dist/cappu-darwin-arm64 --bytecode --format=esm --compile --target=bun-darwin-arm64",
+    "build:windows-x64": "bun build ./src/cli.ts --outfile ./dist/cappu-windows-x64.exe --bytecode --format=esm --compile --target=bun-windows-x64",
     "ci": "oxlint --deny-warnings -f github",
     "lint": "oxlint",
     "format": "oxfmt",
