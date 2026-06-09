@@ -2174,3 +2174,32 @@ test(
     );
   },
 );
+
+test(
+  "non-static member inner class accessing the enclosing instance runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "Outer",
+      [
+        "public class Outer {",
+        "  int base = 10;",
+        "  class Inner {",
+        "    int v;",
+        "    Inner(int x) { v = x; }",
+        "    int sum() { return v + base; }",
+        "    void bump() { base = base + v; }",
+        "  }",
+        "  int run() {",
+        "    Inner i = new Inner(5);",
+        "    i.bump();",
+        "    return i.sum();",
+        "  }",
+        "  public static void main(String[] a){ System.out.println(new Outer().run()); }",
+        "}",
+      ].join("\n"),
+      // bump(): base = 10 + 5 = 15; sum(): v(5) + base(15) = 20
+      "20\n",
+    );
+  },
+);

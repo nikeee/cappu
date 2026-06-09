@@ -1024,6 +1024,36 @@ function localOuterThis(
     : undefined;
 }
 
+// A leading `this(...)` constructor invocation (delegation to a sibling ctor).
+function delegatesToThis(ctor: ConstructorDeclaration): boolean {
+  const first = (ctor.body as Block | undefined)?.statements?.[0];
+  return (
+    first?.kind === SyntaxKind.ExpressionStatement &&
+    (first as ExpressionStatement).expression.kind === SyntaxKind.CallExpression &&
+    ((first as ExpressionStatement).expression as CallExpression).expression.kind ===
+      SyntaxKind.ThisExpression
+  );
+}
+
+// The enclosing instance (this$0) a non-static member inner class captures, or
+// undefined. Like a local class, this$0 is added only when the body actually uses
+// the enclosing instance. A this(...)-delegating constructor is not yet handled
+// with this$0 (it would have to forward the enclosing instance), so such a class
+// gets no this$0 and its enclosing-member access degrades.
+function memberInnerThis0(
+  decl: ClassDeclaration,
+  program: Program,
+  checker: Checker,
+): { enclosingInternal: string } | undefined {
+  if (!decl.parent || !TYPE_DECL_KINDS.has(decl.parent.kind)) return undefined;
+  if (isStaticDeclaration(decl)) return undefined;
+  const ctors = decl.members.filter(
+    m => m.kind === SyntaxKind.ConstructorDeclaration,
+  ) as ConstructorDeclaration[];
+  if (ctors.some(delegatesToThis)) return undefined;
+  return outerThisInfo(decl.members, decl.parent, program, checker);
+}
+
 function binaryName(symbol: Symbol): string {
   const names = [symbol.escapedName];
   let parent = symbol.parent;
@@ -1417,6 +1447,9 @@ function generateBody(
   // closing return) - a record compact constructor assigns each component field
   // from its (possibly reassigned) parameter once the body completes.
   ctorTrailingStores?: { owner: string; name: string; descriptor: string; slot: number }[],
+  // A non-static member inner class's constructor receives the enclosing instance
+  // as a leading synthetic parameter (slot 1), stored into this$0 before super().
+  leadingThis0?: { descriptor: string },
 ): MethodBody {
   const isConstructor = !lambdaSpec && method.kind === SyntaxKind.ConstructorDeclaration;
   const isStatic = lambdaSpec
@@ -1469,6 +1502,7 @@ function generateBody(
       : [
           ...(enumCtor ? [{ descriptor: "Ljava/lang/String;" }, { descriptor: "I" }] : []),
           ...prologueParams,
+          ...(leadingThis0 ? [{ descriptor: leadingThis0.descriptor }] : []),
           ...method.parameters.map(p => ({
             symbol: p.symbol,
             descriptor: paramDescriptor(p as Parameter, program),
@@ -1813,16 +1847,23 @@ function generateBody(
   // The receiver for an implicit-`this` member access: `this`, or - for a local/
   // anonymous class reaching an enclosing-instance member - `this.this$0`.
   const emitImplicitReceiver = (ownerInternal: string): void => {
-    code.u1(OP_ALOAD_0);
     if (outerThis && ownerInternal === outerThis.enclosingInternal) {
+      code.u1(OP_ALOAD_0);
       pushRef(`L${thisInternalName};`);
       code.u1(OP_GETFIELD);
       code.u2(cp.fieldref(thisInternalName, "this$0", `L${outerThis.enclosingInternal};`));
       pop();
       pushRef(`L${outerThis.enclosingInternal};`);
-    } else {
-      pushRef();
+      return;
     }
+    // A member of an enclosing class (thisInternalName is Owner$...) with no this$0
+    // route available: `this` is the inner type, not the owner, so loading it would
+    // be type-unsafe. Degrade rather than emit invalid bytecode.
+    if (ownerInternal !== thisInternalName && thisInternalName.startsWith(`${ownerInternal}$`)) {
+      throw new UnsupportedEmit();
+    }
+    code.u1(OP_ALOAD_0);
+    pushRef();
   };
 
   const emitExpr = (node: Node): string => {
@@ -2257,6 +2298,35 @@ function generateBody(
       code.u1(OP_INVOKESPECIAL);
       code.u2(cp.methodref(owner, "<init>", ctorDesc));
       pop(1 + (this0Desc ? 1 : 0) + captures.length);
+      return ref;
+    }
+
+    // A non-static member inner class: its constructor takes the enclosing instance
+    // (this$0) as a leading argument, pushed here via the implicit receiver.
+    const memberThis0 = isLocal
+      ? memberInnerThis0(createdDecl as ClassDeclaration, program, checker)
+      : undefined;
+    if (memberThis0) {
+      const innerCtor = findConstructor(created.symbol, args.length);
+      if (!innerCtor && args.length > 0) throw new UnsupportedEmit();
+      const ctorParams = innerCtor
+        ? innerCtor.parameters.map(p => paramDescriptor(p as Parameter, program))
+        : [];
+      const this0Desc = `L${memberThis0.enclosingInternal};`;
+      const ref = `L${owner};`;
+      code.u1(OP_NEW);
+      code.u2(cp.classInfo(owner));
+      pushRef(ref);
+      code.u1(OP_DUP);
+      pushRef(ref);
+      emitImplicitReceiver(memberThis0.enclosingInternal);
+      args.forEach((arg, i) => {
+        const d = emitExpr(arg);
+        if (i < ctorParams.length) coerce(d, ctorParams[i]!);
+      });
+      code.u1(OP_INVOKESPECIAL);
+      code.u2(cp.methodref(owner, "<init>", `(${this0Desc}${ctorParams.join("")})V`));
+      pop(1 + 1 + args.length); // dup'd ref + this$0 + args
       return ref;
     }
 
@@ -2711,11 +2781,14 @@ function generateBody(
         );
         return;
       }
-      // Field by simple name: implicit `this.f` or a static field.
+      // Field by simple name: implicit `this.f` or a static field. The receiver
+      // goes through emitImplicitReceiver, which degrades an enclosing-class field
+      // write without a this$0 route rather than emitting a wrong-typed aload_0.
       if (symbol && symbol.flags & SymbolFlags.Field) {
-        writeField(fieldInfoOf(symbol), () => {
-          code.u1(OP_ALOAD_0);
-          pushRef(`L${thisInternalName};`);
+        const fi = fieldInfoOf(symbol);
+        writeField(fi, () => {
+          if (fi.isStatic) return;
+          emitImplicitReceiver(fi.owner);
         });
         return;
       }
@@ -4618,6 +4691,17 @@ function generateBody(
         ? leadingCall
         : undefined;
     const isThisCall = explicitInvocation?.expression.kind === SyntaxKind.ThisExpression;
+    // A member inner class stores the enclosing instance (the leading synthetic
+    // parameter, slot 1) into this$0 before calling super, as javac does.
+    if (leadingThis0) {
+      code.u1(OP_ALOAD_0);
+      pushRef(`L${thisInternalName};`);
+      loadVar(1, leadingThis0.descriptor);
+      push(leadingThis0.descriptor);
+      code.u1(OP_PUTFIELD);
+      code.u2(cp.fieldref(thisInternalName, "this$0", leadingThis0.descriptor));
+      pop(2);
+    }
     if (isConstructor && enumCtor) {
       // Implicit super(name, ordinal) for an enum constructor.
       code.u1(OP_ALOAD_0);
@@ -5032,8 +5116,13 @@ function emitConstructorMethod(
   superInternalName: string,
   instanceInits: FieldInit[],
   lambdaMethods: ByteBuffer[],
+  // For a non-static member inner class: the enclosing-instance descriptor, made
+  // the leading parameter and stored into this$0. outerThis routes the body's
+  // enclosing-member access through it.
+  enclosing?: { descriptor: string; outerThis: { enclosingInternal: string } },
 ): ByteBuffer {
-  const descriptor = `(${ctor.parameters.map(p => paramDescriptor(p as Parameter, program)).join("")})V`;
+  const userParams = ctor.parameters.map(p => paramDescriptor(p as Parameter, program)).join("");
+  const descriptor = `(${enclosing ? enclosing.descriptor : ""}${userParams})V`;
   const info = new ByteBuffer();
   info.u2(flags);
   info.u2(cp.utf8("<init>"));
@@ -5050,12 +5139,24 @@ function emitConstructorMethod(
       superInternalName,
       instanceInits,
       lambdaMethods,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      enclosing?.outerThis,
+      undefined,
+      undefined,
+      undefined,
+      enclosing ? { descriptor: enclosing.descriptor } : undefined,
     );
   } catch (e) {
     if (!(e instanceof UnsupportedEmit)) throw e;
-    // Fallback: a valid constructor that just calls super() (body skipped).
+    // Fallback: a valid constructor that just calls super() (body skipped). It
+    // keeps the leading this$0 parameter (unused) so the descriptor still matches.
     const argsSize =
       1 +
+      (enclosing ? 1 : 0) +
       ctor.parameters.reduce((n, p) => n + slotsOf(paramDescriptor(p as Parameter, program)), 0);
     const code = new ByteBuffer();
     code.u1(OP_ALOAD_0);
@@ -5315,7 +5416,11 @@ export function emitClass(
   // val$ fields, set by a synthesized constructor; methods read them as fields.
   // The enclosing instance (when accessed) is captured as this$0.
   const localCaptures = effectiveLocalCaptures(declaration, program, checker);
-  const outerThis = localOuterThis(declaration, program, checker);
+  // this$0 comes from a capturing local class or a non-static member inner class
+  // that uses the enclosing instance.
+  const outerThis =
+    localOuterThis(declaration, program, checker) ??
+    memberInnerThis0(declaration, program, checker);
   const this0Descriptor = outerThis ? `L${outerThis.enclosingInternal};` : undefined;
   if (this0Descriptor) {
     emitFieldInfo(fields.buffer, cp, ACC_FINAL | ACC_SYNTHETIC, "this$0", this0Descriptor);
@@ -5345,10 +5450,10 @@ export function emitClass(
   const declaredConstructors = declaration.members.filter(
     m => m.kind === SyntaxKind.ConstructorDeclaration,
   ) as ConstructorDeclaration[];
-  if (localCaptures.length > 0 || this0Descriptor) {
-    // A synthesizable local class declares no constructor; synthesize one that
-    // calls super(), stores this$0 and the captures, then runs the instance field
-    // initializers (via the body emitter) when there are any.
+  if ((localCaptures.length > 0 || this0Descriptor) && declaredConstructors.length === 0) {
+    // A capturing local class, or a member inner class with no declared ctor:
+    // synthesize one that calls super(), stores this$0 and the captures, then runs
+    // the instance field initializers (via the body emitter) when there are any.
     const prologue = {
       this0Descriptor,
       captures: localCaptures,
@@ -5361,6 +5466,26 @@ export function emitClass(
         : emitSynthCtor(cp, name, superInternalName, [], localCaptures, this0Descriptor),
     );
     methodCount++;
+  } else if (this0Descriptor && outerThis && declaredConstructors.length > 0) {
+    // A non-static member inner class with declared constructors: splice the
+    // enclosing instance (this$0) into each as a leading parameter.
+    for (const ctor of declaredConstructors) {
+      methods.append(
+        emitConstructorMethod(
+          ctor,
+          methodAccessFlags(ctor),
+          cp,
+          program,
+          checker,
+          name,
+          superInternalName,
+          instanceInits,
+          lambdaMethods,
+          { descriptor: this0Descriptor, outerThis },
+        ),
+      );
+      methodCount++;
+    }
   } else if (declaredConstructors.length === 0) {
     const defaultCtor = {
       kind: SyntaxKind.ConstructorDeclaration,

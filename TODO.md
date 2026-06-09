@@ -73,6 +73,15 @@ verifiable placeholder, never a crash.
       member routes through it.
 - [x] **Local-class** `this$0`: same machinery as anonymous, wired through the
       synthesized constructor and the `new`-site (alongside local captures).
+- [x] **Non-static member inner classes** (`class Outer { class Inner {...} }`)
+      that access the enclosing instance: a synthetic `this$0` field (added only
+      when the body uses the enclosing instance), spliced into each declared
+      constructor as a leading parameter and stored before `super()`; enclosing
+      instance field reads/writes and method calls route through `this$0`, and a
+      `new Inner(args)` site passes the enclosing instance. An inner class with a
+      `this(...)`-delegating constructor gets no `this$0` and its enclosing access
+      degrades; accessing an enclosing instance member with no `this$0` route
+      degrades to a placeholder instead of emitting invalid bytecode.
 - [x] Anonymous classes **accessing inherited members**: overriding a super
       method and calling an inherited (non-overridden) method both work via
       normal virtual dispatch on the emitted subclass (verified: an anon override
