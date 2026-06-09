@@ -212,6 +212,16 @@
       ]
     ],
     [
+      "public int[] getIllegalFileNameCodePoints();",
+      [
+        "aload_0",
+        "getfield # // Field illegalFileNameChars:[I",
+        "invokevirtual # // Method \"[I\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[I\"",
+        "areturn"
+      ]
+    ],
+    [
       "public int getMaxFileNameLength();",
       [
         "aload_0",
@@ -241,6 +251,16 @@
         "aload_0",
         "getfield # // Field nameSeparator:C",
         "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.String[] getReservedFileNames();",
+      [
+        "aload_0",
+        "getfield # // Field reservedFileNames:[Ljava/lang/String;",
+        "invokevirtual # // Method \"[Ljava/lang/String;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Ljava/lang/String;\"",
+        "areturn"
       ]
     ],
     [
@@ -542,6 +562,41 @@
       ]
     ],
     [
+      "public int checkIndexOf(java.lang.String, int, java.lang.String);",
+      [
+        "aload_1",
+        "ifnull 55",
+        "aload_3",
+        "ifnull 55",
+        "aload_1",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "aload_3",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "isub",
+        "istore 4",
+        "iload 4",
+        "iload_2",
+        "if_icmplt 55",
+        "iload_2",
+        "istore 5",
+        "iload 5",
+        "iload 4",
+        "if_icmpgt 55",
+        "aload_0",
+        "aload_1",
+        "iload 5",
+        "aload_3",
+        "invokevirtual # // Method checkRegionMatches:(Ljava/lang/String;ILjava/lang/String;)Z",
+        "ifeq 49",
+        "iload 5",
+        "ireturn",
+        "iinc 5, 1",
+        "goto 28",
+        "iconst_m1",
+        "ireturn"
+      ]
+    ],
+    [
       "public java.lang.String getName();",
       [
         "aload_0",
@@ -662,6 +717,20 @@
         "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
         "checkcast # // class \"[C\"",
         "arraylength",
+        "invokestatic # // Method checkFromIndexSize:(III)V",
+        "return"
+      ]
+    ],
+    [
+      "public static void checkFromIndexSize(java.lang.String, int, int);",
+      [
+        "iload_1",
+        "iload_2",
+        "aload_0",
+        "ldc # // String str",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class java/lang/String",
+        "invokevirtual # // Method java/lang/String.length:()I",
         "invokestatic # // Method checkFromIndexSize:(III)V",
         "return"
       ]
@@ -978,6 +1047,29 @@
         "getfield # // Field bufferSizeDefault:I",
         "ireturn"
       ]
+    ],
+    [
+      "private int throwIae(int, int);",
+      [
+        "new # // class java/lang/IllegalArgumentException",
+        "dup",
+        "ldc # // String Request %,d exceeds maximum %,d",
+        "iconst_2",
+        "anewarray # // class java/lang/Object",
+        "dup",
+        "iconst_0",
+        "iload_1",
+        "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "iload_2",
+        "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
+        "aastore",
+        "invokestatic # // Method java/lang/String.format:(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;",
+        "invokespecial # // Method java/lang/IllegalArgumentException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
     ]
   ],
   "org.apache.commons.io.build.AbstractSupplier": [
@@ -1006,6 +1098,33 @@
         "aload_0",
         "getfield # // Field data:[B",
         "areturn"
+      ]
+    ],
+    [
+      "private void checkRange(long, java.lang.String);",
+      [
+        "lload_1",
+        "lconst_0",
+        "lcmp",
+        "ifge 34",
+        "new # // class java/lang/IllegalArgumentException",
+        "dup",
+        "ldc # // String %s must be positive: %,d",
+        "iconst_2",
+        "anewarray # // class java/lang/Object",
+        "dup",
+        "iconst_0",
+        "aload_3",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "lload_1",
+        "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+        "aastore",
+        "invokestatic # // Method java/lang/String.format:(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;",
+        "invokespecial # // Method java/lang/IllegalArgumentException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "return"
       ]
     ],
     [
@@ -1150,6 +1269,30 @@
       ]
     ],
     [
+      "public int hashCode();",
+      [
+        "iconst_3",
+        "anewarray # // class java/lang/Object",
+        "dup",
+        "iconst_0",
+        "aload_0",
+        "getfield # // Field byteCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "aload_0",
+        "getfield # // Field directoryCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "aastore",
+        "dup",
+        "iconst_2",
+        "aload_0",
+        "getfield # // Field fileCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "aastore",
+        "invokestatic # // Method java/util/Objects.hash:([Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ],
+    [
       "public void reset();",
       [
         "aload_0",
@@ -1162,6 +1305,37 @@
         "getfield # // Field fileCounter:Lorg/apache/commons/io/file/Counters$Counter;",
         "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/file/Counters$Counter.reset:()V",
         "return"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "ldc # // String %,d files, %,d directories, %,d bytes",
+        "iconst_3",
+        "anewarray # // class java/lang/Object",
+        "dup",
+        "iconst_0",
+        "aload_0",
+        "getfield # // Field fileCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/file/Counters$Counter.get:()J",
+        "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "aload_0",
+        "getfield # // Field directoryCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/file/Counters$Counter.get:()J",
+        "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+        "aastore",
+        "dup",
+        "iconst_2",
+        "aload_0",
+        "getfield # // Field byteCounter:Lorg/apache/commons/io/file/Counters$Counter;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/file/Counters$Counter.get:()J",
+        "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+        "aastore",
+        "invokestatic # // Method java/lang/String.format:(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;",
+        "areturn"
       ]
     ]
   ],
@@ -1230,6 +1404,21 @@
         "getfield # // Field value:J",
         "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
         "areturn"
+      ]
+    ],
+    [
+      "public int hashCode();",
+      [
+        "iconst_1",
+        "anewarray # // class java/lang/Object",
+        "dup",
+        "iconst_0",
+        "aload_0",
+        "getfield # // Field value:J",
+        "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+        "aastore",
+        "invokestatic # // Method java/util/Objects.hash:([Ljava/lang/Object;)I",
+        "ireturn"
       ]
     ],
     [
@@ -2207,6 +2396,20 @@
         "invokestatic # // Method java/lang/Math.min:(II)I",
         "ireturn"
       ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "getfield # // Field charSequence:Ljava/lang/CharSequence;",
+        "aload_0",
+        "invokevirtual # // Method start:()I",
+        "aload_0",
+        "invokevirtual # // Method end:()I",
+        "invokeinterface #, 3 // InterfaceMethod java/lang/CharSequence.subSequence:(II)Ljava/lang/CharSequence;",
+        "invokeinterface #, 1 // InterfaceMethod java/lang/CharSequence.toString:()Ljava/lang/String;",
+        "areturn"
+      ]
     ]
   ],
   "org.apache.commons.io.input.ClosedInputStream": [
@@ -2641,6 +2844,18 @@
       ]
     ],
     [
+      "public void write(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "aload_1",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "invokevirtual # // Method write:(Ljava/lang/String;II)V",
+        "return"
+      ]
+    ],
+    [
       "public void write(java.lang.String, int, int);",
       [
         "aload_1",
@@ -2680,6 +2895,15 @@
       [
         "aload_0",
         "getfield # // Field builder:Ljava/lang/StringBuilder;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "getfield # // Field builder:Ljava/lang/StringBuilder;",
+        "invokevirtual # // Method java/lang/StringBuilder.toString:()Ljava/lang/String;",
         "areturn"
       ]
     ],

@@ -8,5 +8,26 @@
         "return"
       ]
     ]
+  ],
+  "de.uks.se.Tuple": [
+    [
+      "public int hashCode();",
+      [
+        "iconst_2",
+        "anewarray # // class java/lang/Object",
+        "dup",
+        "iconst_0",
+        "aload_0",
+        "getfield # // Field item0:Ljava/lang/Object;",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "aload_0",
+        "getfield # // Field item1:Ljava/lang/Object;",
+        "aastore",
+        "invokestatic # // Method java/util/Objects.hash:([Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ]
   ]
 }

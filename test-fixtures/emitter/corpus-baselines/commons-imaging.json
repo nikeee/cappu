@@ -83,6 +83,16 @@
         "aaload",
         "areturn"
       ]
+    ],
+    [
+      "public java.lang.String[] getExtensions();",
+      [
+        "aload_0",
+        "getfield # // Field extensions:[Ljava/lang/String;",
+        "invokevirtual # // Method \"[Ljava/lang/String;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Ljava/lang/String;\"",
+        "areturn"
+      ]
     ]
   ],
   "org.apache.commons.imaging.ImageInfo$ColorType": [
@@ -976,6 +986,21 @@
   ],
   "org.apache.commons.imaging.common.RationalNumber$Option": [
     [
+      "public static org.apache.commons.imaging.common.RationalNumber$Option factory(org.apache.commons.imaging.common.RationalNumber, double);",
+      [
+        "new # // class org/apache/commons/imaging/common/RationalNumber$Option",
+        "dup",
+        "aload_0",
+        "aload_0",
+        "invokevirtual # // Method org/apache/commons/imaging/common/RationalNumber.doubleValue:()D",
+        "dload_1",
+        "dsub",
+        "invokestatic # // Method java/lang/Math.abs:(D)D",
+        "invokespecial # // Method \"<init>\":(Lorg/apache/commons/imaging/common/RationalNumber;D)V",
+        "areturn"
+      ]
+    ],
+    [
       "private org.apache.commons.imaging.common.RationalNumber$Option(org.apache.commons.imaging.common.RationalNumber, double);",
       [
         "aload_0",
@@ -987,6 +1012,15 @@
         "dload_2",
         "putfield # // Field error:D",
         "return"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "getfield # // Field rationalNumber:Lorg/apache/commons/imaging/common/RationalNumber;",
+        "invokevirtual # // Method org/apache/commons/imaging/common/RationalNumber.toString:()Ljava/lang/String;",
+        "areturn"
       ]
     ]
   ],
@@ -3381,6 +3415,26 @@
       ]
     ],
     [
+      "public byte[] getBlockData();",
+      [
+        "aload_0",
+        "getfield # // Field blockData:[B",
+        "invokevirtual # // Method \"[B\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public byte[] getBlockNameBytes();",
+      [
+        "aload_0",
+        "getfield # // Field blockNameBytes:[B",
+        "invokevirtual # // Method \"[B\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "areturn"
+      ]
+    ],
+    [
       "public int getBlockType();",
       [
         "aload_0",
@@ -3939,6 +3993,16 @@
   ],
   "org.apache.commons.imaging.formats.png.chunks.PngChunk": [
     [
+      "public byte[] getBytes();",
+      [
+        "aload_0",
+        "getfield # // Field bytes:[B",
+        "invokevirtual # // Method \"[B\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "areturn"
+      ]
+    ],
+    [
       "public int getChunkType();",
       [
         "aload_0",
@@ -3960,6 +4024,16 @@
         "aload_0",
         "getfield # // Field length:I",
         "ireturn"
+      ]
+    ],
+    [
+      "public boolean[] getPropertyBits();",
+      [
+        "aload_0",
+        "getfield # // Field propertyBits:[Z",
+        "invokevirtual # // Method \"[Z\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Z\"",
+        "areturn"
       ]
     ],
     [
@@ -4055,6 +4129,49 @@
       ]
     ]
   ],
+  "org.apache.commons.imaging.formats.psd.PsdHeaderInfo": [
+    [
+      "public org.apache.commons.imaging.formats.psd.PsdHeaderInfo(int, byte[], int, int, int, int, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field version:I",
+        "aload_0",
+        "aload_2",
+        "invokevirtual # // Method \"[B\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "putfield # // Field reserved:[B",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field channels:I",
+        "aload_0",
+        "iload 4",
+        "putfield # // Field rows:I",
+        "aload_0",
+        "iload 5",
+        "putfield # // Field columns:I",
+        "aload_0",
+        "iload 6",
+        "putfield # // Field depth:I",
+        "aload_0",
+        "iload 7",
+        "putfield # // Field mode:I",
+        "return"
+      ]
+    ],
+    [
+      "public byte[] getReserved();",
+      [
+        "aload_0",
+        "getfield # // Field reserved:[B",
+        "invokevirtual # // Method \"[B\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "areturn"
+      ]
+    ]
+  ],
   "org.apache.commons.imaging.formats.psd.PsdImageContents": [
     [
       "public org.apache.commons.imaging.formats.psd.PsdImageContents(org.apache.commons.imaging.formats.psd.PsdHeaderInfo, int, int, int, int);",
@@ -4092,6 +4209,16 @@
         "aload 4",
         "putfield # // Field data:[B",
         "return"
+      ]
+    ],
+    [
+      "public byte[] getData();",
+      [
+        "aload_0",
+        "getfield # // Field data:[B",
+        "invokevirtual # // Method \"[B\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "areturn"
       ]
     ],
     [
@@ -4419,6 +4546,32 @@
         "iload_2",
         "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
         "putfield # // Field value:Ljava/lang/Integer;",
+        "return"
+      ]
+    ],
+    [
+      "public void writeBits(org.apache.commons.imaging.formats.tiff.itu_t4.BitArrayOutputStream);",
+      [
+        "iconst_0",
+        "istore_2",
+        "iload_2",
+        "aload_0",
+        "getfield # // Field bitString:Ljava/lang/String;",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "if_icmpge 41",
+        "aload_1",
+        "aload_0",
+        "getfield # // Field bitString:Ljava/lang/String;",
+        "iload_2",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
+        "bipush 48",
+        "if_icmpne 31",
+        "iconst_0",
+        "goto 32",
+        "iconst_1",
+        "invokevirtual # // Method org/apache/commons/imaging/formats/tiff/itu_t4/BitArrayOutputStream.writeBit:(I)V",
+        "iinc 2, 1",
+        "goto 2",
         "return"
       ]
     ]
@@ -5359,6 +5512,22 @@
     ]
   ],
   "org.apache.commons.imaging.palette.SimplePalette": [
+    [
+      "public org.apache.commons.imaging.palette.SimplePalette(int[]);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String palette",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class \"[I\"",
+        "invokevirtual # // Method \"[I\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[I\"",
+        "putfield # // Field palette:[I",
+        "return"
+      ]
+    ],
     [
       "public int getEntry(int);",
       [

@@ -96,3 +96,4 @@ no timestamps were captured.
 - 2026-06-09 05:25 — continue
 - 2026-06-09 05:40 — keep probing / refactor / code smells / bugs+JLS / add bytecode tests
 - 2026-06-09 06:10 — probe / continue
+- 2026-06-09 06:35 — continue (final corpus baseline regen)

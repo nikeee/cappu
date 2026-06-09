@@ -2707,6 +2707,24 @@
       ]
     ],
     [
+      "public static java.lang.String toString(java.lang.Object, java.lang.String);",
+      [
+        "aload_0",
+        "ifnull 25",
+        "new # // class org/apache/commons/lang3/builder/ToStringBuilder",
+        "dup",
+        "aload_0",
+        "getstatic # // Field org/apache/commons/lang3/builder/ToStringStyle.SIMPLE_STYLE:Lorg/apache/commons/lang3/builder/ToStringStyle;",
+        "invokespecial # // Method org/apache/commons/lang3/builder/ToStringBuilder.\"<init>\":(Ljava/lang/Object;Lorg/apache/commons/lang3/builder/ToStringStyle;)V",
+        "aload_0",
+        "invokevirtual # // Method org/apache/commons/lang3/builder/ToStringBuilder.append:(Ljava/lang/Object;)Lorg/apache/commons/lang3/builder/ToStringBuilder;",
+        "invokevirtual # // Method org/apache/commons/lang3/builder/ToStringBuilder.toString:()Ljava/lang/String;",
+        "goto 26",
+        "aload_1",
+        "areturn"
+      ]
+    ],
+    [
       "public static java.lang.String[] toStringArray(java.lang.Object[]);",
       [
         "aload_0",
@@ -3021,6 +3039,20 @@
         "invokevirtual # // Method java/lang/Character.charValue:()C",
         "goto 12",
         "iload_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static char toChar(java.lang.String, char);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/lang3/StringUtils.isEmpty:(Ljava/lang/CharSequence;)Z",
+        "ifeq 11",
+        "iload_1",
+        "goto 16",
+        "aload_0",
+        "iconst_0",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
         "ireturn"
       ]
     ],
@@ -3678,6 +3710,65 @@
       ]
     ],
     [
+      "public static java.lang.String abbreviateMiddle(java.lang.String, java.lang.String, int);",
+      [
+        "iconst_2",
+        "anewarray # // class java/lang/CharSequence",
+        "dup",
+        "iconst_0",
+        "aload_0",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "aload_1",
+        "aastore",
+        "invokestatic # // Method isAnyEmpty:([Ljava/lang/CharSequence;)Z",
+        "ifne 36",
+        "iload_2",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "if_icmpge 36",
+        "iload_2",
+        "aload_1",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "iconst_2",
+        "iadd",
+        "if_icmpge 38",
+        "aload_0",
+        "areturn",
+        "iload_2",
+        "aload_1",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "isub",
+        "istore_3",
+        "iload_3",
+        "iconst_2",
+        "idiv",
+        "iload_3",
+        "iconst_2",
+        "irem",
+        "iadd",
+        "istore 4",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "iload_3",
+        "iconst_2",
+        "idiv",
+        "isub",
+        "istore 5",
+        "aload_0",
+        "iconst_0",
+        "iload 4",
+        "invokevirtual # // Method java/lang/String.substring:(II)Ljava/lang/String;",
+        "aload_1",
+        "aload_0",
+        "iload 5",
+        "invokevirtual # // Method java/lang/String.substring:(I)Ljava/lang/String;",
+        "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public static java.lang.String appendIfMissing(java.lang.String, java.lang.CharSequence, java.lang.CharSequence...);",
       [
         "getstatic # // Field org/apache/commons/lang3/Strings.CS:Lorg/apache/commons/lang3/Strings;",
@@ -4008,6 +4099,50 @@
         "aload_1",
         "invokevirtual # // Method org/apache/commons/lang3/Strings.equals:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Z",
         "ireturn"
+      ]
+    ],
+    [
+      "public static java.lang.String getDigits(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method isEmpty:(Ljava/lang/CharSequence;)Z",
+        "ifeq 9",
+        "aload_0",
+        "areturn",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "istore_1",
+        "iload_1",
+        "newarray char",
+        "astore_2",
+        "iconst_0",
+        "istore_3",
+        "iconst_0",
+        "istore 4",
+        "iload 4",
+        "iload_1",
+        "if_icmpge 59",
+        "aload_0",
+        "iload 4",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
+        "istore 5",
+        "iload 5",
+        "invokestatic # // Method java/lang/Character.isDigit:(C)Z",
+        "ifeq 53",
+        "aload_2",
+        "iload_3",
+        "iinc 3, 1",
+        "iload 5",
+        "castore",
+        "iinc 4, 1",
+        "goto 23",
+        "new # // class java/lang/String",
+        "dup",
+        "aload_2",
+        "iconst_0",
+        "iload_3",
+        "invokespecial # // Method java/lang/String.\"<init>\":([CII)V",
+        "areturn"
       ]
     ],
     [
@@ -4992,6 +5127,27 @@
       ]
     ],
     [
+      "public static java.lang.String removeStart(java.lang.String, char);",
+      [
+        "aload_0",
+        "invokestatic # // Method isEmpty:(Ljava/lang/CharSequence;)Z",
+        "ifeq 9",
+        "aload_0",
+        "areturn",
+        "aload_0",
+        "iconst_0",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
+        "iload_1",
+        "if_icmpne 26",
+        "aload_0",
+        "iconst_1",
+        "invokevirtual # // Method java/lang/String.substring:(I)Ljava/lang/String;",
+        "goto 27",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
       "public static java.lang.String removeStart(java.lang.String, java.lang.String);",
       [
         "getstatic # // Field org/apache/commons/lang3/Strings.CS:Lorg/apache/commons/lang3/Strings;",
@@ -5355,6 +5511,26 @@
       ]
     ],
     [
+      "public static java.lang.String stripToNull(java.lang.String);",
+      [
+        "aload_0",
+        "ifnonnull 6",
+        "aconst_null",
+        "areturn",
+        "aload_0",
+        "aconst_null",
+        "invokestatic # // Method strip:(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+        "astore_0",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.isEmpty:()Z",
+        "ifeq 23",
+        "aconst_null",
+        "goto 24",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
       "public static java.lang.String substringBetween(java.lang.String, java.lang.String);",
       [
         "aload_0",
@@ -5398,6 +5574,46 @@
         "iconst_0",
         "iload_1",
         "invokestatic # // Method truncate:(Ljava/lang/String;II)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String unwrap(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method isEmpty:(Ljava/lang/CharSequence;)Z",
+        "ifne 27",
+        "aload_1",
+        "invokestatic # // Method isEmpty:(Ljava/lang/CharSequence;)Z",
+        "ifne 27",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "iconst_2",
+        "aload_1",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "imul",
+        "if_icmpge 29",
+        "aload_0",
+        "areturn",
+        "getstatic # // Field org/apache/commons/lang3/Strings.CS:Lorg/apache/commons/lang3/Strings;",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method org/apache/commons/lang3/Strings.startsWith:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Z",
+        "ifeq 65",
+        "getstatic # // Field org/apache/commons/lang3/Strings.CS:Lorg/apache/commons/lang3/Strings;",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method org/apache/commons/lang3/Strings.endsWith:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Z",
+        "ifeq 65",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method java/lang/String.lastIndexOf:(Ljava/lang/String;)I",
+        "invokevirtual # // Method java/lang/String.substring:(II)Ljava/lang/String;",
+        "areturn",
+        "aload_0",
         "areturn"
       ]
     ],
@@ -5671,6 +5887,35 @@
     [
       "public abstract int lastIndexOf(java.lang.CharSequence, java.lang.CharSequence, int);",
       []
+    ],
+    [
+      "public java.lang.String removeEnd(java.lang.String, java.lang.CharSequence);",
+      [
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/lang3/StringUtils.isEmpty:(Ljava/lang/CharSequence;)Z",
+        "ifne 14",
+        "aload_2",
+        "invokestatic # // Method org/apache/commons/lang3/StringUtils.isEmpty:(Ljava/lang/CharSequence;)Z",
+        "ifeq 16",
+        "aload_1",
+        "areturn",
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokevirtual # // Method endsWith:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Z",
+        "ifeq 42",
+        "aload_1",
+        "iconst_0",
+        "aload_1",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "aload_2",
+        "invokeinterface #, 1 // InterfaceMethod java/lang/CharSequence.length:()I",
+        "isub",
+        "invokevirtual # // Method java/lang/String.substring:(II)Ljava/lang/String;",
+        "areturn",
+        "aload_1",
+        "areturn"
+      ]
     ],
     [
       "public java.lang.String removeStart(java.lang.String, java.lang.CharSequence);",
@@ -7117,6 +7362,32 @@
         "iload_3",
         "aconst_null",
         "invokestatic # // Method toString:(Ljava/lang/Object;Lorg/apache/commons/lang3/builder/ToStringStyle;ZZLjava/lang/Class;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String toStringExclude(java.lang.Object, java.lang.String...);",
+      [
+        "new # // class org/apache/commons/lang3/builder/ReflectionToStringBuilder",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/Object;)V",
+        "aload_1",
+        "invokevirtual # // Method setExcludeFieldNames:([Ljava/lang/String;)Lorg/apache/commons/lang3/builder/ReflectionToStringBuilder;",
+        "invokevirtual # // Method toString:()Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String toStringInclude(java.lang.Object, java.lang.String...);",
+      [
+        "new # // class org/apache/commons/lang3/builder/ReflectionToStringBuilder",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/Object;)V",
+        "aload_1",
+        "invokevirtual # // Method setIncludeFieldNames:([Ljava/lang/String;)Lorg/apache/commons/lang3/builder/ReflectionToStringBuilder;",
+        "invokevirtual # // Method toString:()Ljava/lang/String;",
         "areturn"
       ]
     ],
@@ -9359,6 +9630,123 @@
       ]
     ],
     [
+      "public org.apache.commons.lang3.text.StrBuilder insert(int, boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method validateIndex:(I)V",
+        "iload_2",
+        "ifeq 95",
+        "aload_0",
+        "aload_0",
+        "getfield # // Field size:I",
+        "iconst_4",
+        "iadd",
+        "invokevirtual # // Method ensureCapacity:(I)Lorg/apache/commons/lang3/text/StrBuilder;",
+        "pop",
+        "aload_0",
+        "getfield # // Field buffer:[C",
+        "iload_1",
+        "aload_0",
+        "getfield # // Field buffer:[C",
+        "iload_1",
+        "iconst_4",
+        "iadd",
+        "aload_0",
+        "getfield # // Field size:I",
+        "iload_1",
+        "isub",
+        "invokestatic # // Method java/lang/System.arraycopy:(Ljava/lang/Object;ILjava/lang/Object;II)V",
+        "aload_0",
+        "getfield # // Field buffer:[C",
+        "iload_1",
+        "iinc 1, 1",
+        "bipush 116",
+        "castore",
+        "aload_0",
+        "getfield # // Field buffer:[C",
+        "iload_1",
+        "iinc 1, 1",
+        "bipush 114",
+        "castore",
+        "aload_0",
+        "getfield # // Field buffer:[C",
+        "iload_1",
+        "iinc 1, 1",
+        "bipush 117",
+        "castore",
+        "aload_0",
+        "getfield # // Field buffer:[C",
+        "iload_1",
+        "bipush 101",
+        "castore",
+        "aload_0",
+        "dup",
+        "getfield # // Field size:I",
+        "iconst_4",
+        "iadd",
+        "putfield # // Field size:I",
+        "goto 189",
+        "aload_0",
+        "aload_0",
+        "getfield # // Field size:I",
+        "iconst_5",
+        "iadd",
+        "invokevirtual # // Method ensureCapacity:(I)Lorg/apache/commons/lang3/text/StrBuilder;",
+        "pop",
+        "aload_0",
+        "getfield # // Field buffer:[C",
+        "iload_1",
+        "aload_0",
+        "getfield # // Field buffer:[C",
+        "iload_1",
+        "iconst_5",
+        "iadd",
+        "aload_0",
+        "getfield # // Field size:I",
+        "iload_1",
+        "isub",
+        "invokestatic # // Method java/lang/System.arraycopy:(Ljava/lang/Object;ILjava/lang/Object;II)V",
+        "aload_0",
+        "getfield # // Field buffer:[C",
+        "iload_1",
+        "iinc 1, 1",
+        "bipush 102",
+        "castore",
+        "aload_0",
+        "getfield # // Field buffer:[C",
+        "iload_1",
+        "iinc 1, 1",
+        "bipush 97",
+        "castore",
+        "aload_0",
+        "getfield # // Field buffer:[C",
+        "iload_1",
+        "iinc 1, 1",
+        "bipush 108",
+        "castore",
+        "aload_0",
+        "getfield # // Field buffer:[C",
+        "iload_1",
+        "iinc 1, 1",
+        "bipush 115",
+        "castore",
+        "aload_0",
+        "getfield # // Field buffer:[C",
+        "iload_1",
+        "bipush 101",
+        "castore",
+        "aload_0",
+        "dup",
+        "getfield # // Field size:I",
+        "iconst_5",
+        "iadd",
+        "putfield # // Field size:I",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
       "public org.apache.commons.lang3.text.StrBuilder insert(int, char);",
       [
         "aload_0",
@@ -9868,6 +10256,33 @@
       ]
     ],
     [
+      "public static org.apache.commons.lang3.text.StrMatcher charSetMatcher(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/lang3/StringUtils.isEmpty:(Ljava/lang/CharSequence;)Z",
+        "ifeq 11",
+        "getstatic # // Field NONE_MATCHER:Lorg/apache/commons/lang3/text/StrMatcher;",
+        "areturn",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "iconst_1",
+        "if_icmpne 32",
+        "new # // class org/apache/commons/lang3/text/StrMatcher$CharMatcher",
+        "dup",
+        "aload_0",
+        "iconst_0",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
+        "invokespecial # // Method org/apache/commons/lang3/text/StrMatcher$CharMatcher.\"<init>\":(C)V",
+        "areturn",
+        "new # // class org/apache/commons/lang3/text/StrMatcher$CharSetMatcher",
+        "dup",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.toCharArray:()[C",
+        "invokespecial # // Method org/apache/commons/lang3/text/StrMatcher$CharSetMatcher.\"<init>\":([C)V",
+        "areturn"
+      ]
+    ],
+    [
       "public static org.apache.commons.lang3.text.StrMatcher commaMatcher();",
       [
         "getstatic # // Field COMMA_MATCHER:Lorg/apache/commons/lang3/text/StrMatcher;",
@@ -9973,6 +10388,15 @@
   ],
   "org.apache.commons.lang3.text.StrTokenizer": [
     [
+      "private static org.apache.commons.lang3.text.StrTokenizer getCSVClone();",
+      [
+        "getstatic # // Field CSV_TOKENIZER_PROTOTYPE:Lorg/apache/commons/lang3/text/StrTokenizer;",
+        "invokevirtual # // Method clone:()Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/lang3/text/StrTokenizer",
+        "areturn"
+      ]
+    ],
+    [
       "public static org.apache.commons.lang3.text.StrTokenizer getCSVInstance();",
       [
         "invokestatic # // Method getCSVClone:()Lorg/apache/commons/lang3/text/StrTokenizer;",
@@ -10002,6 +10426,15 @@
         "invokevirtual # // Method reset:(Ljava/lang/String;)Lorg/apache/commons/lang3/text/StrTokenizer;",
         "pop",
         "aload_1",
+        "areturn"
+      ]
+    ],
+    [
+      "private static org.apache.commons.lang3.text.StrTokenizer getTSVClone();",
+      [
+        "getstatic # // Field TSV_TOKENIZER_PROTOTYPE:Lorg/apache/commons/lang3/text/StrTokenizer;",
+        "invokevirtual # // Method clone:()Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/lang3/text/StrTokenizer",
         "areturn"
       ]
     ],
@@ -11775,6 +12208,30 @@
       [
         "aload_0",
         "getfield # // Field type:Lorg/apache/commons/lang3/arch/Processor$Type;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "new # // class java/lang/StringBuilder",
+        "dup",
+        "invokespecial # // Method java/lang/StringBuilder.\"<init>\":()V",
+        "astore_1",
+        "aload_1",
+        "aload_0",
+        "getfield # // Field type:Lorg/apache/commons/lang3/arch/Processor$Type;",
+        "invokevirtual # // Method org/apache/commons/lang3/arch/Processor$Type.getLabel:()Ljava/lang/String;",
+        "invokevirtual # // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+        "bipush 32",
+        "invokevirtual # // Method java/lang/StringBuilder.append:(C)Ljava/lang/StringBuilder;",
+        "aload_0",
+        "getfield # // Field arch:Lorg/apache/commons/lang3/arch/Processor$Arch;",
+        "invokevirtual # // Method org/apache/commons/lang3/arch/Processor$Arch.getLabel:()Ljava/lang/String;",
+        "invokevirtual # // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+        "pop",
+        "aload_1",
+        "invokevirtual # // Method java/lang/StringBuilder.toString:()Ljava/lang/String;",
         "areturn"
       ]
     ]
@@ -14869,11 +15326,58 @@
       ]
     ],
     [
+      "public boolean equals(java.lang.Object);",
+      [
+        "aload_1",
+        "instanceof # // class org/apache/commons/lang3/time/FastDateFormat",
+        "ifne 9",
+        "iconst_0",
+        "ireturn",
+        "aload_1",
+        "checkcast # // class org/apache/commons/lang3/time/FastDateFormat",
+        "astore_2",
+        "aload_0",
+        "getfield # // Field printer:Lorg/apache/commons/lang3/time/FastDatePrinter;",
+        "aload_2",
+        "getfield # // Field printer:Lorg/apache/commons/lang3/time/FastDatePrinter;",
+        "invokevirtual # // Method org/apache/commons/lang3/time/FastDatePrinter.equals:(Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.String format(long);",
+      [
+        "aload_0",
+        "getfield # // Field printer:Lorg/apache/commons/lang3/time/FastDatePrinter;",
+        "lload_1",
+        "invokevirtual # // Method org/apache/commons/lang3/time/FastDatePrinter.format:(J)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public int getMaxLengthEstimate();",
       [
         "aload_0",
         "getfield # // Field printer:Lorg/apache/commons/lang3/time/FastDatePrinter;",
         "invokevirtual # // Method org/apache/commons/lang3/time/FastDatePrinter.getMaxLengthEstimate:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.String getPattern();",
+      [
+        "aload_0",
+        "getfield # // Field printer:Lorg/apache/commons/lang3/time/FastDatePrinter;",
+        "invokevirtual # // Method org/apache/commons/lang3/time/FastDatePrinter.getPattern:()Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int hashCode();",
+      [
+        "aload_0",
+        "getfield # // Field printer:Lorg/apache/commons/lang3/time/FastDatePrinter;",
+        "invokevirtual # // Method org/apache/commons/lang3/time/FastDatePrinter.hashCode:()I",
         "ireturn"
       ]
     ]
@@ -14950,6 +15454,16 @@
   ],
   "org.apache.commons.lang3.time.FastDateParser$PatternStrategy": [
     [
+      "void createPattern(java.lang.StringBuilder);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method java/lang/StringBuilder.toString:()Ljava/lang/String;",
+        "invokevirtual # // Method createPattern:(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
       "boolean isNumber();",
       [
         "iconst_0",
@@ -14985,7 +15499,93 @@
       ]
     ]
   ],
+  "org.apache.commons.lang3.time.FastDateParser$StrategyParser": [
+    [
+      "org.apache.commons.lang3.time.FastDateParser$StrategyAndWidth getNextStrategy();",
+      [
+        "aload_0",
+        "getfield # // Field currentIdx:I",
+        "aload_0",
+        "getfield # // Field this$0:Lorg/apache/commons/lang3/time/FastDateParser;",
+        "getfield # // Field org/apache/commons/lang3/time/FastDateParser.pattern:Ljava/lang/String;",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "if_icmplt 19",
+        "aconst_null",
+        "areturn",
+        "aload_0",
+        "getfield # // Field this$0:Lorg/apache/commons/lang3/time/FastDateParser;",
+        "getfield # // Field org/apache/commons/lang3/time/FastDateParser.pattern:Ljava/lang/String;",
+        "aload_0",
+        "getfield # // Field currentIdx:I",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
+        "istore_1",
+        "iload_1",
+        "invokestatic # // Method org/apache/commons/lang3/CharUtils.isAsciiAlpha:(C)Z",
+        "ifeq 47",
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method letterPattern:(C)Lorg/apache/commons/lang3/time/FastDateParser$StrategyAndWidth;",
+        "areturn",
+        "aload_0",
+        "invokevirtual # // Method literal:()Lorg/apache/commons/lang3/time/FastDateParser$StrategyAndWidth;",
+        "areturn"
+      ]
+    ]
+  ],
   "org.apache.commons.lang3.time.FastDateParser": [
+    [
+      "private static java.lang.StringBuilder simpleQuote(java.lang.StringBuilder, java.lang.String);",
+      [
+        "iconst_0",
+        "istore_2",
+        "iload_2",
+        "aload_1",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "if_icmpge 143",
+        "aload_1",
+        "iload_2",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
+        "istore_3",
+        "iload_3",
+        "lookupswitch { // 12",
+        "124",
+        "124",
+        "124",
+        "124",
+        "124",
+        "124",
+        "124",
+        "124",
+        "124",
+        "124",
+        "124",
+        "124",
+        "aload_0",
+        "bipush 92",
+        "invokevirtual # // Method java/lang/StringBuilder.append:(C)Ljava/lang/StringBuilder;",
+        "pop",
+        "aload_0",
+        "iload_3",
+        "invokevirtual # // Method java/lang/StringBuilder.append:(C)Ljava/lang/StringBuilder;",
+        "pop",
+        "iinc 2, 1",
+        "goto 2",
+        "aload_0",
+        "aload_0",
+        "invokevirtual # // Method java/lang/StringBuilder.length:()I",
+        "iconst_1",
+        "isub",
+        "invokevirtual # // Method java/lang/StringBuilder.charAt:(I)C",
+        "bipush 46",
+        "if_icmpne 165",
+        "aload_0",
+        "bipush 63",
+        "invokevirtual # // Method java/lang/StringBuilder.append:(C)Ljava/lang/StringBuilder;",
+        "pop",
+        "aload_0",
+        "areturn"
+      ]
+    ],
     [
       "private int adjustYear(int);",
       [
@@ -15138,6 +15738,15 @@
         "putfield # // Field value:Ljava/lang/String;",
         "return"
       ]
+    ],
+    [
+      "public int estimateLength();",
+      [
+        "aload_0",
+        "getfield # // Field value:Ljava/lang/String;",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "ireturn"
+      ]
     ]
   ],
   "org.apache.commons.lang3.time.FastDatePrinter$TextField": [
@@ -15153,6 +15762,21 @@
         "aload_2",
         "putfield # // Field values:[Ljava/lang/String;",
         "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.lang3.time.FastDatePrinter$TimeZoneNameRule": [
+    [
+      "public int estimateLength();",
+      [
+        "aload_0",
+        "getfield # // Field standard:Ljava/lang/String;",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "aload_0",
+        "getfield # // Field daylight:Ljava/lang/String;",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "invokestatic # // Method java/lang/Math.max:(II)I",
+        "ireturn"
       ]
     ]
   ],
@@ -16058,6 +16682,15 @@
       [
         "aload_0",
         "invokespecial # // Method org/apache/commons/lang3/reflect/testbed/GenericParent.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public void consume(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/lang3/reflect/testbed/GenericParent.consume:(Ljava/lang/Object;)V",
         "return"
       ]
     ],

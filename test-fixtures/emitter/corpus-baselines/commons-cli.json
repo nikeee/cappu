@@ -377,6 +377,16 @@
       ]
     ],
     [
+      "public int getId();",
+      [
+        "aload_0",
+        "invokevirtual # // Method getKey:()Ljava/lang/String;",
+        "iconst_0",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
+        "ireturn"
+      ]
+    ],
+    [
       "public java.lang.String getKey();",
       [
         "aload_0",
@@ -636,6 +646,49 @@
     ]
   ],
   "org.apache.commons.cli.Util": [
+    [
+      "static java.lang.String stripLeadingAndTrailingQuotes(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method isEmpty:(Ljava/lang/String;)Z",
+        "ifeq 9",
+        "aload_0",
+        "areturn",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "istore_1",
+        "iload_1",
+        "iconst_1",
+        "if_icmple 63",
+        "aload_0",
+        "ldc # // String \\\"",
+        "invokevirtual # // Method java/lang/String.startsWith:(Ljava/lang/String;)Z",
+        "ifeq 63",
+        "aload_0",
+        "ldc # // String \\\"",
+        "invokevirtual # // Method java/lang/String.endsWith:(Ljava/lang/String;)Z",
+        "ifeq 63",
+        "aload_0",
+        "iconst_1",
+        "iload_1",
+        "iconst_1",
+        "isub",
+        "invokevirtual # // Method java/lang/String.substring:(II)Ljava/lang/String;",
+        "bipush 34",
+        "invokevirtual # // Method java/lang/String.indexOf:(I)I",
+        "iconst_m1",
+        "if_icmpne 63",
+        "aload_0",
+        "iconst_1",
+        "iload_1",
+        "iconst_1",
+        "isub",
+        "invokevirtual # // Method java/lang/String.substring:(II)Ljava/lang/String;",
+        "areturn",
+        "aload_0",
+        "areturn"
+      ]
+    ],
     [
       "private org.apache.commons.cli.Util();",
       [

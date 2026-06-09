@@ -44,6 +44,24 @@
       ]
     ],
     [
+      "public int length();",
+      [
+        "aload_0",
+        "getfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "invokevirtual # // Method java/util/ArrayList.size:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void clear();",
+      [
+        "aload_0",
+        "getfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "invokevirtual # // Method java/util/ArrayList.clear:()V",
+        "return"
+      ]
+    ],
+    [
       "public boolean optBoolean(int);",
       [
         "aload_0",
@@ -407,6 +425,33 @@
       ]
     ],
     [
+      "public org.json.JSONArray put(java.lang.Object);",
+      [
+        "aload_1",
+        "invokestatic # // Method org/json/JSONObject.testValidity:(Ljava/lang/Object;)V",
+        "aload_0",
+        "getfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "aload_1",
+        "invokevirtual # // Method java/util/ArrayList.add:(Ljava/lang/Object;)Z",
+        "pop",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray putAll(org.json.JSONArray);",
+      [
+        "aload_0",
+        "getfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "aload_1",
+        "getfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "invokevirtual # // Method java/util/ArrayList.addAll:(Ljava/util/Collection;)Z",
+        "pop",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
       "public java.lang.Object query(java.lang.String);",
       [
         "aload_0",
@@ -461,6 +506,15 @@
         "astore_1",
         "aconst_null",
         "areturn"
+      ]
+    ],
+    [
+      "public boolean isEmpty();",
+      [
+        "aload_0",
+        "getfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "invokevirtual # // Method java/util/ArrayList.isEmpty:()Z",
+        "ireturn"
       ]
     ],
     [
@@ -1087,11 +1141,50 @@
       ]
     ],
     [
+      "public org.json.JSONParserConfiguration withOverwriteDuplicateKey(boolean);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/JSONParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "iload_1",
+        "putfield # // Field overwriteDuplicateKey:Z",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONParserConfiguration withUseNativeNulls(boolean);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/JSONParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "iload_1",
+        "putfield # // Field useNativeNulls:Z",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
       "public org.json.JSONParserConfiguration withStrictMode();",
       [
         "aload_0",
         "iconst_1",
         "invokevirtual # // Method withStrictMode:(Z)Lorg/json/JSONParserConfiguration;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONParserConfiguration withStrictMode(boolean);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/JSONParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "iload_1",
+        "putfield # // Field strictMode:Z",
+        "aload_2",
         "areturn"
       ]
     ],
@@ -1193,6 +1286,12 @@
       ]
     ]
   ],
+  "org.json.JSONString": [
+    [
+      "public abstract java.lang.String toJSONString();",
+      []
+    ]
+  ],
   "org.json.JSONTokener": [
     [
       "public org.json.JSONParserConfiguration getJsonParserConfiguration();",
@@ -1259,6 +1358,33 @@
         "aload_0",
         "getfield # // Field previous:C",
         "ireturn"
+      ]
+    ],
+    [
+      "public org.json.JSONException syntaxError(java.lang.String);",
+      [
+        "new # // class org/json/JSONException",
+        "dup",
+        "aload_1",
+        "aload_0",
+        "invokevirtual # // Method toString:()Ljava/lang/String;",
+        "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+        "invokespecial # // Method org/json/JSONException.\"<init>\":(Ljava/lang/String;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONException syntaxError(java.lang.String, java.lang.Throwable);",
+      [
+        "new # // class org/json/JSONException",
+        "dup",
+        "aload_1",
+        "aload_0",
+        "invokevirtual # // Method toString:()Ljava/lang/String;",
+        "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+        "aload_2",
+        "invokespecial # // Method org/json/JSONException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "areturn"
       ]
     ]
   ],
@@ -1369,6 +1495,15 @@
       ]
     ],
     [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "getfield # // Field builder:Ljava/lang/StringBuilder;",
+        "invokevirtual # // Method java/lang/StringBuilder.toString:()Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public void flush();",
       [
         "return"
@@ -1437,6 +1572,30 @@
       ]
     ],
     [
+      "private static boolean isStringAllWhiteSpace(java.lang.String);",
+      [
+        "iconst_0",
+        "istore_1",
+        "iload_1",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "if_icmpge 31",
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
+        "istore_2",
+        "iload_2",
+        "invokestatic # // Method java/lang/Character.isWhitespace:(C)Z",
+        "ifne 25",
+        "iconst_0",
+        "ireturn",
+        "iinc 1, 1",
+        "goto 2",
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
       "public static java.lang.String toString(java.lang.Object, java.lang.String);",
       [
         "aload_0",
@@ -1465,6 +1624,29 @@
         "getstatic # // Field org/json/XMLParserConfiguration.ORIGINAL:Lorg/json/XMLParserConfiguration;",
         "iload_2",
         "invokestatic # // Method toString:(Ljava/lang/Object;Ljava/lang/String;Lorg/json/XMLParserConfiguration;I)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "private static final java.lang.String indent(int);",
+      [
+        "new # // class java/lang/StringBuilder",
+        "dup",
+        "invokespecial # // Method java/lang/StringBuilder.\"<init>\":()V",
+        "astore_1",
+        "iconst_0",
+        "istore_2",
+        "iload_2",
+        "iload_0",
+        "if_icmpge 28",
+        "aload_1",
+        "bipush 32",
+        "invokevirtual # // Method java/lang/StringBuilder.append:(C)Ljava/lang/StringBuilder;",
+        "pop",
+        "iinc 2, 1",
+        "goto 10",
+        "aload_1",
+        "invokevirtual # // Method java/lang/StringBuilder.toString:()Ljava/lang/String;",
         "areturn"
       ]
     ]
@@ -1517,11 +1699,63 @@
       ]
     ],
     [
+      "public org.json.XMLParserConfiguration withcDataTagName(java.lang.String);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/XMLParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "aload_1",
+        "putfield # // Field cDataTagName:Ljava/lang/String;",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
       "public boolean isConvertNilAttributeToNull();",
       [
         "aload_0",
         "getfield # // Field convertNilAttributeToNull:Z",
         "ireturn"
+      ]
+    ],
+    [
+      "public org.json.XMLParserConfiguration withConvertNilAttributeToNull(boolean);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/XMLParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "iload_1",
+        "putfield # // Field convertNilAttributeToNull:Z",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.XMLParserConfiguration withCloseEmptyTag(boolean);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/XMLParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "iload_1",
+        "putfield # // Field closeEmptyTag:Z",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.XMLParserConfiguration withShouldTrimWhitespace(boolean);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/XMLParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "iload_1",
+        "putfield # // Field shouldTrimWhiteSpace:Z",
+        "aload_2",
+        "areturn"
       ]
     ],
     [
@@ -1537,6 +1771,88 @@
       [
         "aload_0",
         "getfield # // Field shouldTrimWhiteSpace:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.json.XMLTokener": [
+    [
+      "private static boolean isValidHex(java.lang.String);",
+      [
+        "aload_0",
+        "ifnull 11",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.isEmpty:()Z",
+        "ifeq 13",
+        "iconst_0",
+        "ireturn",
+        "iconst_0",
+        "istore_1",
+        "iload_1",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "if_icmpge 73",
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
+        "istore_2",
+        "iload_2",
+        "bipush 48",
+        "if_icmplt 41",
+        "iload_2",
+        "bipush 57",
+        "if_icmple 67",
+        "iload_2",
+        "bipush 97",
+        "if_icmplt 53",
+        "iload_2",
+        "bipush 102",
+        "if_icmple 67",
+        "iload_2",
+        "bipush 65",
+        "if_icmplt 65",
+        "iload_2",
+        "bipush 70",
+        "if_icmple 67",
+        "iconst_0",
+        "ireturn",
+        "iinc 1, 1",
+        "goto 15",
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "private static boolean isValidDecimal(java.lang.String);",
+      [
+        "aload_0",
+        "ifnull 11",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.isEmpty:()Z",
+        "ifeq 13",
+        "iconst_0",
+        "ireturn",
+        "iconst_0",
+        "istore_1",
+        "iload_1",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "if_icmpge 49",
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
+        "istore_2",
+        "iload_2",
+        "bipush 48",
+        "if_icmplt 41",
+        "iload_2",
+        "bipush 57",
+        "if_icmple 43",
+        "iconst_0",
+        "ireturn",
+        "iinc 1, 1",
+        "goto 15",
+        "iconst_1",
         "ireturn"
       ]
     ]
@@ -1815,6 +2131,32 @@
         "ldc # // String \\\"My String with \\\"s",
         "areturn"
       ]
+    ]
+  ],
+  "org.json.junit.data.MyBean": [
+    [
+      "public abstract java.lang.Integer getIntKey();",
+      []
+    ],
+    [
+      "public abstract java.lang.Double getDoubleKey();",
+      []
+    ],
+    [
+      "public abstract java.lang.String getStringKey();",
+      []
+    ],
+    [
+      "public abstract java.lang.String getEscapeStringKey();",
+      []
+    ],
+    [
+      "public abstract java.lang.Boolean isTrueKey();",
+      []
+    ],
+    [
+      "public abstract java.lang.Boolean isFalseKey();",
+      []
     ]
   ],
   "org.json.junit.data.GenericBeanInt": [
