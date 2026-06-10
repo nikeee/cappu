@@ -119,3 +119,4 @@ no timestamps were captured.
 - 2026-06-10 17:40 — now do the natural follow ups
 - 2026-06-10 17:55 — use latest zod for config file validation and typing
 - 2026-06-10 18:10 — add a "cappu init" command that bootstraps an initial config file
+- 2026-06-10 18:25 — is there another way to expose an LSP server? network/websockets? add a cli flag

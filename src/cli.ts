@@ -25,6 +25,11 @@ Options:
                         outDir, quiet, failOnDegrade) and "lspOptions"
                         (inlayHints). Command-line flags take precedence.
 
+Lsp options:
+  -p, --port <port>     Listen on a TCP port instead of stdio; the first client
+                        to connect gets the session (the server exits when it
+                        disconnects)
+
 Compile options:
   -d, --out-dir <dir>   Output root for the package tree (default: current directory)
   -q, --quiet           Do not print the path of each emitted .class file
@@ -42,6 +47,7 @@ async function main(argv: string[]): Promise<void> {
     allowPositionals: true,
     options: {
       config: { type: "string", short: "c" },
+      port: { type: "string", short: "p" },
       "out-dir": { type: "string", short: "d" },
       // No defaults: an absent flag must stay undefined so cappu.json
       // can supply the value (an explicit flag always wins).
@@ -86,6 +92,32 @@ async function main(argv: string[]): Promise<void> {
 
   switch (command) {
     case "lsp": {
+      if (values.port !== undefined) {
+        const port = Number(values.port);
+        if (!Number.isInteger(port) || port < 0 || port > 65535) {
+          process.stderr.write(`cappu: invalid port '${values.port}'\n`);
+          process.exit(2);
+        }
+        // Socket mode: listen, hand the first accepted connection to the
+        // server (configured before the lazy import, since server.ts creates
+        // its JSON-RPC connection at module load), exit when it disconnects.
+        const { createServer } = await import("node:net");
+        const tcp = createServer();
+        tcp.once("connection", socket => {
+          tcp.close(); // one session per process, like other socket-mode servers
+          socket.once("close", () => process.exit(0));
+          void import("./serverTransport.ts")
+            .then(({ setTransport }) => setTransport(socket, socket))
+            .then(() => import("./server.ts"))
+            .then(({ startServer }) => startServer(config));
+        });
+        tcp.listen(port, () => {
+          const address = tcp.address();
+          const bound = typeof address === "object" && address ? address.port : port;
+          process.stderr.write(`cappu lsp listening on port ${bound}\n`);
+        });
+        return;
+      }
       // Imported lazily so `cappu compile` never loads the LSP transport stack.
       // startServer() begins reading stdin and keeps the process alive; no exit.
       const { startServer } = await import("./server.ts");

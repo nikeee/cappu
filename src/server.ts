@@ -79,11 +79,14 @@ import {
   SymbolFlags,
   SyntaxKind,
 } from "./types.ts";
+import { getTransport } from "./serverTransport.ts";
 import { isValidIdentifier, skipTrivia } from "./utilities.ts";
 import { isSyntheticUri, loadJavaFiles, uriToPath } from "./workspace.ts";
 
-// Communicate over stdio (the standard transport for editor language clients).
-const connection = createConnection(process.stdin, process.stdout);
+// The transport is stdio (the standard for editor clients) unless the CLI
+// configured a socket via setTransport() before importing this module.
+const transport = getTransport();
+const connection = createConnection(transport.reader, transport.writer);
 const documents = new TextDocuments(TextDocument);
 const program = createProgram();
 loadJdkStub(program);
