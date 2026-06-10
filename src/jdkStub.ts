@@ -355,8 +355,104 @@ class PrintStream extends OutputStream {
   public PrintStream append(CharSequence s) { return null; }
 }
 
-class IOException extends java.lang.Exception {}
+class IOException extends java.lang.Exception { public IOException() {} public IOException(String m) {} }
 class UncheckedIOException extends java.lang.RuntimeException {}
+class FileNotFoundException extends IOException { public FileNotFoundException() {} public FileNotFoundException(String m) {} }
+class EOFException extends IOException { public EOFException() {} public EOFException(String m) {} }
+class UnsupportedEncodingException extends IOException { public UnsupportedEncodingException(String m) {} }
+
+interface Serializable {}
+
+class File implements Serializable, java.lang.Comparable<File> {
+  public File(String pathname) {}
+  public File(File parent, String child) {}
+  public File(String parent, String child) {}
+  public String getName() { return null; }
+  public String getPath() { return null; }
+  public String getAbsolutePath() { return null; }
+  public File getParentFile() { return null; }
+  public String getParent() { return null; }
+  public boolean exists() { return false; }
+  public boolean isFile() { return false; }
+  public boolean isDirectory() { return false; }
+  public boolean delete() { return false; }
+  public boolean mkdir() { return false; }
+  public boolean mkdirs() { return false; }
+  public long length() { return 0; }
+  public long lastModified() { return 0; }
+  public File[] listFiles() { return null; }
+  public String[] list() { return null; }
+  public boolean renameTo(File dest) { return false; }
+  public boolean canRead() { return false; }
+  public boolean canWrite() { return false; }
+  public java.nio.file.Path toPath() { return null; }
+  public int compareTo(File other) { return 0; }
+}
+
+class Reader implements Closeable {
+  public int read() { return 0; }
+  public int read(char[] cbuf) { return 0; }
+  public int read(char[] cbuf, int off, int len) { return 0; }
+  public void close() {}
+}
+class BufferedReader extends Reader {
+  public BufferedReader(Reader in) {}
+  public String readLine() { return null; }
+}
+class StringReader extends Reader { public StringReader(String s) {} }
+class InputStreamReader extends Reader {
+  public InputStreamReader(InputStream in) {}
+  public InputStreamReader(InputStream in, String charsetName) {}
+  public InputStreamReader(InputStream in, java.nio.charset.Charset cs) {}
+}
+
+class Writer implements Closeable, Flushable {
+  public void write(int c) {}
+  public void write(char[] cbuf) {}
+  public void write(String str) {}
+  public void write(String str, int off, int len) {}
+  public Writer append(CharSequence csq) { return null; }
+  public void flush() {}
+  public void close() {}
+}
+class StringWriter extends Writer { public StringWriter() {} public String toString() { return null; } }
+class OutputStreamWriter extends Writer {
+  public OutputStreamWriter(OutputStream out) {}
+  public OutputStreamWriter(OutputStream out, java.nio.charset.Charset cs) {}
+}
+class BufferedWriter extends Writer { public BufferedWriter(Writer out) {} public void newLine() {} }
+class PrintWriter extends Writer {
+  public PrintWriter(Writer out) {}
+  public PrintWriter(OutputStream out) {}
+  public void print(String s) {}
+  public void print(Object o) {}
+  public void print(int i) {}
+  public void println() {}
+  public void println(String s) {}
+  public void println(Object o) {}
+  public void println(int i) {}
+  public PrintWriter printf(String format, Object... args) { return null; }
+}
+
+class ByteArrayInputStream extends InputStream {
+  public ByteArrayInputStream(byte[] buf) {}
+  public ByteArrayInputStream(byte[] buf, int offset, int length) {}
+}
+class ByteArrayOutputStream extends OutputStream {
+  public ByteArrayOutputStream() {}
+  public ByteArrayOutputStream(int size) {}
+  public byte[] toByteArray() { return null; }
+  public int size() { return 0; }
+  public String toString() { return null; }
+}
+class FileInputStream extends InputStream { public FileInputStream(File file) {} public FileInputStream(String name) {} }
+class FileOutputStream extends OutputStream { public FileOutputStream(File file) {} public FileOutputStream(String name) {} }
+class FilterInputStream extends InputStream { protected FilterInputStream(InputStream in) {} }
+class FilterOutputStream extends OutputStream { public FilterOutputStream(OutputStream out) {} }
+class BufferedInputStream extends FilterInputStream { public BufferedInputStream(InputStream in) {} }
+class BufferedOutputStream extends FilterOutputStream { public BufferedOutputStream(OutputStream out) {} }
+class FileReader extends Reader { public FileReader(File file) {} public FileReader(String fileName) {} }
+class FileWriter extends Writer { public FileWriter(File file) {} public FileWriter(String fileName) {} }
 `;
 
 const JAVA_UTIL = `package java.util;
@@ -575,6 +671,83 @@ class Collections {
 
 class NoSuchElementException extends java.lang.RuntimeException {}
 class ConcurrentModificationException extends java.lang.RuntimeException {}
+class EmptyStackException extends java.lang.RuntimeException {}
+
+interface ListIterator<E> extends Iterator<E> {
+  boolean hasPrevious();
+  E previous();
+  int nextIndex();
+  int previousIndex();
+  void remove();
+  void set(E e);
+  void add(E e);
+}
+
+class Locale {
+  public static final Locale ROOT = null;
+  public static final Locale ENGLISH = null;
+  public static final Locale US = null;
+  public static final Locale GERMAN = null;
+  public static final Locale GERMANY = null;
+  public Locale(String language) {}
+  public Locale(String language, String country) {}
+  public static Locale getDefault() { return null; }
+  public String getLanguage() { return null; }
+  public String getCountry() { return null; }
+  public String toLanguageTag() { return null; }
+}
+
+class Random {
+  public Random() {}
+  public Random(long seed) {}
+  public int nextInt() { return 0; }
+  public int nextInt(int bound) { return 0; }
+  public long nextLong() { return 0; }
+  public double nextDouble() { return 0; }
+  public float nextFloat() { return 0; }
+  public boolean nextBoolean() { return false; }
+  public void nextBytes(byte[] bytes) {}
+  public void setSeed(long seed) {}
+}
+
+class Date implements java.lang.Comparable<Date> {
+  public Date() {}
+  public Date(long date) {}
+  public long getTime() { return 0; }
+  public void setTime(long time) {}
+  public boolean before(Date when) { return false; }
+  public boolean after(Date when) { return false; }
+  public int compareTo(Date anotherDate) { return 0; }
+}
+
+class UUID implements java.lang.Comparable<UUID> {
+  public static UUID randomUUID() { return null; }
+  public static UUID fromString(String name) { return null; }
+  public long getMostSignificantBits() { return 0; }
+  public long getLeastSignificantBits() { return 0; }
+  public int compareTo(UUID val) { return 0; }
+}
+
+class StringJoiner {
+  public StringJoiner(CharSequence delimiter) {}
+  public StringJoiner(CharSequence delimiter, CharSequence prefix, CharSequence suffix) {}
+  public StringJoiner add(CharSequence newElement) { return null; }
+  public int length() { return 0; }
+}
+
+class BitSet {
+  public BitSet() {}
+  public BitSet(int nbits) {}
+  public void set(int bitIndex) {}
+  public void set(int bitIndex, boolean value) {}
+  public boolean get(int bitIndex) { return false; }
+  public void clear(int bitIndex) {}
+  public void clear() {}
+  public int cardinality() { return 0; }
+  public int length() { return 0; }
+  public int size() { return 0; }
+  public int nextSetBit(int fromIndex) { return 0; }
+}
 `;
 
 const JAVA_UTIL_FUNCTION = `package java.util.function;
@@ -593,11 +766,340 @@ interface ToIntFunction<T> { int applyAsInt(T value); }
 interface IntUnaryOperator { int applyAsInt(int operand); }
 `;
 
+const JAVA_UTIL_STREAM = `package java.util.stream;
+
+interface Collector<T, A, R> {}
+
+interface Stream<T> extends java.lang.AutoCloseable {
+  Stream<T> filter(java.util.function.Predicate<T> predicate);
+  <R> Stream<R> map(java.util.function.Function<T, R> mapper);
+  void forEach(java.util.function.Consumer<T> action);
+  <R> R collect(Collector<T, ?, R> collector);
+  java.util.List<T> toList();
+  long count();
+  boolean anyMatch(java.util.function.Predicate<T> predicate);
+  boolean allMatch(java.util.function.Predicate<T> predicate);
+  boolean noneMatch(java.util.function.Predicate<T> predicate);
+  Stream<T> sorted();
+  Stream<T> distinct();
+  Stream<T> limit(long maxSize);
+  Stream<T> skip(long n);
+  java.util.Optional<T> findFirst();
+  java.util.Optional<T> findAny();
+  java.util.Optional<T> reduce(java.util.function.BinaryOperator<T> accumulator);
+  Object[] toArray();
+  void close();
+  static <T> Stream<T> of(T... values) { return null; }
+  static <T> Stream<T> empty() { return null; }
+}
+
+interface IntStream extends java.lang.AutoCloseable {
+  int sum();
+  long count();
+  IntStream filter(java.util.function.IntPredicate predicate);
+  IntStream map(java.util.function.IntUnaryOperator mapper);
+  <U> Stream<U> mapToObj(java.util.function.IntFunction<U> mapper);
+  void forEach(java.util.function.IntConsumer action);
+  int[] toArray();
+  void close();
+  static IntStream range(int startInclusive, int endExclusive) { return null; }
+  static IntStream rangeClosed(int startInclusive, int endInclusive) { return null; }
+  static IntStream of(int... values) { return null; }
+}
+
+class Collectors {
+  public static <T> Collector<T, ?, java.util.List<T>> toList() { return null; }
+  public static <T> Collector<T, ?, java.util.Set<T>> toSet() { return null; }
+  public static Collector<CharSequence, ?, String> joining() { return null; }
+  public static Collector<CharSequence, ?, String> joining(CharSequence delimiter) { return null; }
+}
+`;
+
+const JAVA_UTIL_REGEX = `package java.util.regex;
+
+class Pattern {
+  public static Pattern compile(String regex) { return null; }
+  public static Pattern compile(String regex, int flags) { return null; }
+  public static boolean matches(String regex, CharSequence input) { return false; }
+  public static String quote(String s) { return null; }
+  public Matcher matcher(CharSequence input) { return null; }
+  public String pattern() { return null; }
+  public String[] split(CharSequence input) { return null; }
+}
+
+class Matcher {
+  public boolean matches() { return false; }
+  public boolean find() { return false; }
+  public boolean lookingAt() { return false; }
+  public String group() { return null; }
+  public String group(int group) { return null; }
+  public int groupCount() { return 0; }
+  public int start() { return 0; }
+  public int end() { return 0; }
+  public String replaceAll(String replacement) { return null; }
+  public String replaceFirst(String replacement) { return null; }
+}
+
+class PatternSyntaxException extends java.lang.IllegalArgumentException {
+  public PatternSyntaxException(String desc, String regex, int index) {}
+}
+`;
+
+const JAVA_UTIL_CONCURRENT = `package java.util.concurrent;
+
+enum TimeUnit {
+  NANOSECONDS, MICROSECONDS, MILLISECONDS, SECONDS, MINUTES, HOURS, DAYS;
+  public long toMillis(long duration) { return 0; }
+  public long toSeconds(long duration) { return 0; }
+  public long toNanos(long duration) { return 0; }
+  public void sleep(long timeout) {}
+}
+
+class TimeoutException extends java.lang.Exception { public TimeoutException() {} public TimeoutException(String m) {} }
+class ExecutionException extends java.lang.Exception { public ExecutionException(java.lang.Throwable cause) {} }
+
+interface Callable<V> { V call(); }
+interface Future<V> {
+  boolean cancel(boolean mayInterruptIfRunning);
+  boolean isDone();
+  V get();
+}
+`;
+
+const JAVA_UTIL_CONCURRENT_ATOMIC = `package java.util.concurrent.atomic;
+
+class AtomicInteger extends java.lang.Number {
+  public AtomicInteger() {}
+  public AtomicInteger(int initialValue) {}
+  public int get() { return 0; }
+  public void set(int newValue) {}
+  public int incrementAndGet() { return 0; }
+  public int decrementAndGet() { return 0; }
+  public int getAndIncrement() { return 0; }
+  public int getAndDecrement() { return 0; }
+  public int addAndGet(int delta) { return 0; }
+  public int getAndAdd(int delta) { return 0; }
+  public boolean compareAndSet(int expectedValue, int newValue) { return false; }
+  public int intValue() { return 0; }
+  public long longValue() { return 0; }
+  public float floatValue() { return 0; }
+  public double doubleValue() { return 0; }
+}
+
+class AtomicLong extends java.lang.Number {
+  public AtomicLong() {}
+  public AtomicLong(long initialValue) {}
+  public long get() { return 0; }
+  public void set(long newValue) {}
+  public long incrementAndGet() { return 0; }
+  public long getAndIncrement() { return 0; }
+  public long addAndGet(long delta) { return 0; }
+  public boolean compareAndSet(long expectedValue, long newValue) { return false; }
+  public int intValue() { return 0; }
+  public long longValue() { return 0; }
+  public float floatValue() { return 0; }
+  public double doubleValue() { return 0; }
+}
+
+class AtomicBoolean {
+  public AtomicBoolean() {}
+  public AtomicBoolean(boolean initialValue) {}
+  public boolean get() { return false; }
+  public void set(boolean newValue) {}
+  public boolean compareAndSet(boolean expectedValue, boolean newValue) { return false; }
+  public boolean getAndSet(boolean newValue) { return false; }
+}
+
+class AtomicReference<V> {
+  public AtomicReference() {}
+  public AtomicReference(V initialValue) {}
+  public V get() { return null; }
+  public void set(V newValue) {}
+  public boolean compareAndSet(V expectedValue, V newValue) { return false; }
+  public V getAndSet(V newValue) { return null; }
+}
+`;
+
+const JAVA_NIO = `package java.nio;
+
+class ByteOrder {
+  public static final ByteOrder BIG_ENDIAN = null;
+  public static final ByteOrder LITTLE_ENDIAN = null;
+  public static ByteOrder nativeOrder() { return null; }
+}
+
+class ByteBuffer {
+  public static ByteBuffer allocate(int capacity) { return null; }
+  public static ByteBuffer wrap(byte[] array) { return null; }
+  public byte get() { return 0; }
+  public byte get(int index) { return 0; }
+  public ByteBuffer put(byte b) { return null; }
+  public int getInt() { return 0; }
+  public ByteBuffer putInt(int value) { return null; }
+  public long getLong() { return 0; }
+  public ByteBuffer putLong(long value) { return null; }
+  public ByteBuffer order(ByteOrder bo) { return null; }
+  public int position() { return 0; }
+  public int limit() { return 0; }
+  public int remaining() { return 0; }
+  public boolean hasRemaining() { return false; }
+  public byte[] array() { return null; }
+  public ByteBuffer flip() { return null; }
+  public ByteBuffer rewind() { return null; }
+}
+
+class BufferOverflowException extends java.lang.RuntimeException {}
+class BufferUnderflowException extends java.lang.RuntimeException {}
+`;
+
+const JAVA_NIO_CHARSET = `package java.nio.charset;
+
+class Charset implements java.lang.Comparable<Charset> {
+  public static Charset forName(String charsetName) { return null; }
+  public static Charset defaultCharset() { return null; }
+  public String name() { return null; }
+  public String displayName() { return null; }
+  public int compareTo(Charset that) { return 0; }
+}
+
+class StandardCharsets {
+  public static final Charset US_ASCII = null;
+  public static final Charset ISO_8859_1 = null;
+  public static final Charset UTF_8 = null;
+  public static final Charset UTF_16 = null;
+  public static final Charset UTF_16BE = null;
+  public static final Charset UTF_16LE = null;
+}
+`;
+
+const JAVA_NIO_FILE = `package java.nio.file;
+
+interface Path extends java.lang.Comparable<Path> {
+  Path getFileName();
+  Path getParent();
+  Path resolve(String other);
+  Path resolve(Path other);
+  Path toAbsolutePath();
+  java.io.File toFile();
+  int compareTo(Path other);
+}
+
+class Paths {
+  public static Path get(String first, String... more) { return null; }
+}
+
+class Files {
+  public static boolean exists(Path path) { return false; }
+  public static boolean isDirectory(Path path) { return false; }
+  public static boolean isRegularFile(Path path) { return false; }
+  public static byte[] readAllBytes(Path path) { return null; }
+  public static String readString(Path path) { return null; }
+  public static java.util.List<String> readAllLines(Path path) { return null; }
+  public static Path createDirectories(Path dir) { return null; }
+  public static void delete(Path path) {}
+  public static boolean deleteIfExists(Path path) { return false; }
+  public static long size(Path path) { return 0; }
+  public static java.io.InputStream newInputStream(Path path) { return null; }
+  public static java.io.OutputStream newOutputStream(Path path) { return null; }
+}
+
+class NoSuchFileException extends java.io.IOException { public NoSuchFileException(String file) {} }
+`;
+
+const JAVA_MATH = `package java.math;
+
+class BigInteger extends java.lang.Number implements java.lang.Comparable<BigInteger> {
+  public static final BigInteger ZERO = null;
+  public static final BigInteger ONE = null;
+  public static final BigInteger TWO = null;
+  public static final BigInteger TEN = null;
+  public BigInteger(String val) {}
+  public BigInteger(String val, int radix) {}
+  public BigInteger(byte[] val) {}
+  public static BigInteger valueOf(long val) { return null; }
+  public BigInteger add(BigInteger val) { return null; }
+  public BigInteger subtract(BigInteger val) { return null; }
+  public BigInteger multiply(BigInteger val) { return null; }
+  public BigInteger divide(BigInteger val) { return null; }
+  public BigInteger mod(BigInteger m) { return null; }
+  public BigInteger remainder(BigInteger val) { return null; }
+  public BigInteger pow(int exponent) { return null; }
+  public BigInteger negate() { return null; }
+  public BigInteger abs() { return null; }
+  public BigInteger gcd(BigInteger val) { return null; }
+  public BigInteger shiftLeft(int n) { return null; }
+  public BigInteger shiftRight(int n) { return null; }
+  public BigInteger and(BigInteger val) { return null; }
+  public BigInteger or(BigInteger val) { return null; }
+  public BigInteger xor(BigInteger val) { return null; }
+  public int signum() { return 0; }
+  public int bitLength() { return 0; }
+  public boolean testBit(int n) { return false; }
+  public int compareTo(BigInteger val) { return 0; }
+  public int intValue() { return 0; }
+  public long longValue() { return 0; }
+  public float floatValue() { return 0; }
+  public double doubleValue() { return 0; }
+  public String toString(int radix) { return null; }
+}
+
+class BigDecimal extends java.lang.Number implements java.lang.Comparable<BigDecimal> {
+  public static final BigDecimal ZERO = null;
+  public static final BigDecimal ONE = null;
+  public static final BigDecimal TEN = null;
+  public BigDecimal(String val) {}
+  public BigDecimal(int val) {}
+  public BigDecimal(long val) {}
+  public BigDecimal(double val) {}
+  public static BigDecimal valueOf(long val) { return null; }
+  public static BigDecimal valueOf(double val) { return null; }
+  public BigDecimal add(BigDecimal augend) { return null; }
+  public BigDecimal subtract(BigDecimal subtrahend) { return null; }
+  public BigDecimal multiply(BigDecimal multiplicand) { return null; }
+  public BigDecimal divide(BigDecimal divisor) { return null; }
+  public BigDecimal negate() { return null; }
+  public BigDecimal abs() { return null; }
+  public int scale() { return 0; }
+  public int signum() { return 0; }
+  public BigDecimal setScale(int newScale) { return null; }
+  public BigDecimal stripTrailingZeros() { return null; }
+  public int compareTo(BigDecimal val) { return 0; }
+  public int intValue() { return 0; }
+  public long longValue() { return 0; }
+  public float floatValue() { return 0; }
+  public double doubleValue() { return 0; }
+  public String toPlainString() { return null; }
+}
+`;
+
+const JAVA_LANG_ANNOTATION = `package java.lang.annotation;
+
+interface Annotation {}
+
+enum RetentionPolicy { SOURCE, CLASS, RUNTIME }
+enum ElementType { TYPE, FIELD, METHOD, PARAMETER, CONSTRUCTOR, LOCAL_VARIABLE, ANNOTATION_TYPE, PACKAGE, TYPE_PARAMETER, TYPE_USE, MODULE, RECORD_COMPONENT }
+
+@interface Retention { RetentionPolicy value(); }
+@interface Target { ElementType[] value(); }
+@interface Documented {}
+@interface Inherited {}
+@interface Repeatable { Class value(); }
+`;
+
 export const JDK_STUB_FILES: ReadonlyArray<{ uri: string; text: string }> = [
   { uri: "jdk:///java/lang.java", text: JAVA_LANG },
   { uri: "jdk:///java/io.java", text: JAVA_IO },
   { uri: "jdk:///java/util.java", text: JAVA_UTIL },
   { uri: "jdk:///java/util/function.java", text: JAVA_UTIL_FUNCTION },
+  { uri: "jdk:///java/util/stream.java", text: JAVA_UTIL_STREAM },
+  { uri: "jdk:///java/util/regex.java", text: JAVA_UTIL_REGEX },
+  { uri: "jdk:///java/util/concurrent.java", text: JAVA_UTIL_CONCURRENT },
+  { uri: "jdk:///java/util/concurrent/atomic.java", text: JAVA_UTIL_CONCURRENT_ATOMIC },
+  { uri: "jdk:///java/nio.java", text: JAVA_NIO },
+  { uri: "jdk:///java/nio/charset.java", text: JAVA_NIO_CHARSET },
+  { uri: "jdk:///java/nio/file.java", text: JAVA_NIO_FILE },
+  { uri: "jdk:///java/math.java", text: JAVA_MATH },
+  { uri: "jdk:///java/lang/annotation.java", text: JAVA_LANG_ANNOTATION },
 ];
 
 /** Register the synthetic JDK stub into a program. */
