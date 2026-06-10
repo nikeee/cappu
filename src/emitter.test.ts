@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { setDegradeListener } from "./bytecode.ts";
 import { createChecker } from "./checker.ts";
 import { emitSourceFile } from "./emitter.ts";
 import { type Disasm, disasmFiles } from "./javapNormalize.ts";
@@ -2697,3 +2698,18 @@ test(
     );
   },
 );
+
+test("the degrade listener reports placeholder bodies by class and member", () => {
+  const degraded: string[] = [];
+  setDegradeListener((cls, member) => degraded.push(`${cls}.${member}`));
+  try {
+    // bad() uses a type outside the JDK stub, so its body degrades; ok() does not.
+    emitClasses(
+      "Deg",
+      "public class Deg { void ok() { int x = 1; } void bad() { javax.swing.JFrame f = new javax.swing.JFrame(); } }",
+    );
+  } finally {
+    setDegradeListener(undefined);
+  }
+  expect(degraded).toEqual(["Deg.bad"]);
+});

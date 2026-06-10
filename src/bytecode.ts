@@ -91,6 +91,16 @@ function lineStartsOf(sourceFile: SourceFile): readonly number[] {
   return starts;
 }
 
+// Notified whenever a body cannot be fully compiled and degrades to a
+// verifiable placeholder. The compiler driver surfaces these as warnings (and
+// fails the build under --fail-on-degrade); unset, degradation stays silent.
+let degradeListener: ((className: string, member: string) => void) | undefined;
+export function setDegradeListener(
+  listener?: (className: string, member: string) => void,
+): void {
+  degradeListener = listener;
+}
+
 // Thrown when a construct is not yet handled by code generation; the caller
 // falls back to a verifiable placeholder body so output is always valid. It is
 // pure control flow thrown on every degraded method, so it deliberately does
@@ -5419,6 +5429,7 @@ function emitMethod(
     );
   } catch (e) {
     if (!(e instanceof UnsupportedEmit)) throw e;
+    degradeListener?.(thisInternalName, method.name.text);
     // Unhandled construct: emit a verifiable placeholder so output stays valid.
     const isStatic = (flags & ACC_STATIC) !== 0;
     const argsSize =
@@ -5631,6 +5642,7 @@ function emitConstructorMethod(
     );
   } catch (e) {
     if (!(e instanceof UnsupportedEmit)) throw e;
+    degradeListener?.(thisInternalName, "<init>");
     // Fallback: a valid constructor that just calls super() (body skipped). It
     // keeps the leading synthetic parameters (unused) so the descriptor still matches.
     const leadSlots =
@@ -5834,6 +5846,7 @@ function emitSynthCtorWithInits(
     );
   } catch (e) {
     if (!(e instanceof UnsupportedEmit)) throw e;
+    degradeListener?.(name, "<init>");
     // An unsupported field initializer: fall back to the prologue-only ctor so the
     // class stays valid (the affected fields keep their default values).
     return emitSynthCtor(
@@ -6056,6 +6069,7 @@ export function emitClass(
       );
     } catch (e) {
       if (!(e instanceof UnsupportedEmit)) throw e;
+      degradeListener?.(name, "<clinit>");
       // An unsupported static initializer: emit an empty <clinit> so the class
       // stays valid (the affected fields keep their default values).
       const code = new ByteBuffer();
@@ -6505,6 +6519,7 @@ function emitEnumConstructor(
     );
   } catch (e) {
     if (!(e instanceof UnsupportedEmit)) throw e;
+    degradeListener?.(name, "<init>");
     const argsSize =
       3 +
       ctor.parameters.reduce((n, p) => n + slotsOf(paramDescriptor(p as Parameter, program)), 0);
@@ -6665,6 +6680,7 @@ export function emitRecord(
       methods.append(info);
     } catch (e) {
       if (!(e instanceof UnsupportedEmit)) throw e;
+      degradeListener?.(name, "<init>");
       // An unsupported compact body degrades to the implicit canonical ctor (the
       // validation/normalization is dropped, but the record stays valid).
       methods.append(emitImplicitCanonicalCtor());
@@ -6935,6 +6951,7 @@ export function emitEnum(
     );
   } catch (e) {
     if (!(e instanceof UnsupportedEmit)) throw e;
+    degradeListener?.(name, "<clinit>");
     // An unsupported user static initializer: still build the constants and
     // $VALUES (essential for the enum), just drop the failing inits.
     try {

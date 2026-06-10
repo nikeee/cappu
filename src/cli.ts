@@ -18,6 +18,8 @@ Usage:
 Compile options:
   -d, --out-dir <dir>   Output root for the package tree (default: current directory)
   -q, --quiet           Do not print the path of each emitted .class file
+      --fail-on-degrade Fail when a method body degrades to a placeholder
+                        (an unsupported construct); degradations always warn
 
 Global:
   -h, --help            Show this help
@@ -31,6 +33,7 @@ async function main(argv: string[]): Promise<void> {
     options: {
       "out-dir": { type: "string", short: "d" },
       quiet: { type: "boolean", short: "q", default: false },
+      "fail-on-degrade": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", default: false },
     },
@@ -56,7 +59,13 @@ async function main(argv: string[]): Promise<void> {
       return;
     }
     case "compile":
-      process.exit(runCompile(files, values["out-dir"], values.quiet));
+      process.exit(
+        runCompile(files, {
+          outDir: values["out-dir"],
+          quiet: values.quiet,
+          failOnDegrade: values["fail-on-degrade"],
+        }),
+      );
     default:
       process.stderr.write(`cappu: unknown command '${command}'\n\n${USAGE}`);
       process.exit(2);
