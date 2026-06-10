@@ -137,7 +137,7 @@ function emitProjectBytes(project: { files: string[] }): Map<string, Uint8Array>
   for (const uri of uris) {
     try {
       for (const c of emitSourceFile(program.getSourceFile(uri)!, program, checker)) {
-        out.set(c.name.replace(/\//g, "."), c.bytes);
+        out.set(c.name.replaceAll("/", "."), c.bytes);
       }
     } catch {
       // the no-crash test already asserts emission does not throw

@@ -147,7 +147,7 @@ function organizeImports(sourceFile: SourceFile): CodeActionResult[] {
   });
 
   const start = skipTrivia(sourceFile.text, imports[0]!.pos);
-  const end = imports[imports.length - 1]!.end;
+  const end = imports.at(-1)!.end;
   const newText = sorted.map(importText).join("\n");
   if (newText === sourceFile.text.slice(start, end)) return []; // already organized
   return [

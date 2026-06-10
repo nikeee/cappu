@@ -872,7 +872,7 @@ export function createChecker(program: Program): Checker {
     const leading = text.slice(node.pos, skipTrivia(text, node.pos));
     const blocks = leading.match(/\/\*\*[\s\S]*?\*\//g);
     if (!blocks) return undefined;
-    const doc = cleanJavadoc(blocks[blocks.length - 1]!); // nearest to the declaration
+    const doc = cleanJavadoc(blocks.at(-1)!); // nearest to the declaration
     return doc.length > 0 ? doc : undefined;
   }
 
@@ -1266,7 +1266,7 @@ export function createChecker(program: Program): Checker {
       return params.every((p, i) => isAssignableTo(args[i]!, paramSlotType(p), allowBoxing));
     }
     if (params.length === 0) return false;
-    const last = params[params.length - 1]!;
+    const last = params.at(-1)!;
     if (!last.isVarArgs) return false;
     if (args.length < params.length - 1) return false;
     for (let i = 0; i < params.length - 1; i++) {

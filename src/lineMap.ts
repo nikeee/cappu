@@ -67,6 +67,6 @@ export function getPositionOfLineAndCharacter(
   character: number,
 ): Offset {
   if (line < 0) return 0 as Offset;
-  if (line >= lineStarts.length) return lineStarts[lineStarts.length - 1]! as Offset;
+  if (line >= lineStarts.length) return lineStarts.at(-1)! as Offset;
   return (lineStarts[line]! + character) as Offset;
 }

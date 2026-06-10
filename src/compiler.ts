@@ -67,7 +67,7 @@ export function runCompile(files: string[], options: CompileOptions = {}): numbe
   // a stub; surface every one so the build is honest about what it emitted.
   const degraded: string[] = [];
   setDegradeListener((className, member) => {
-    degraded.push(`${className.replace(/\//g, ".")}.${member}`);
+    degraded.push(`${className.replaceAll("/", ".")}.${member}`);
   });
 
   try {

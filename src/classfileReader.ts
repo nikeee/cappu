@@ -3,11 +3,13 @@
 // parse/bind pipeline exactly like the hand-written JDK stub. Loaded types
 // resolve for compilation and the LSP, but carry no code.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Program } from "./program.ts";
 import { readZipEntries } from "./zipReader.ts";
+
+const UTF8 = new TextDecoder();
 
 const ACC_PUBLIC = 0x0001;
 const ACC_PROTECTED = 0x0004;
@@ -70,7 +72,7 @@ function parseClassFile(bytes: Uint8Array): ClassInfo {
     switch (tag) {
       case 1: {
         const length = u2();
-        utf8[i] = new TextDecoder().decode(bytes.subarray(at, at + length));
+        utf8[i] = UTF8.decode(bytes.subarray(at, at + length));
         at += length;
         break;
       }
@@ -181,8 +183,8 @@ function typeAt(descriptor: string, at: number): { text: string; next: number } 
     const end = descriptor.indexOf(";", at);
     base = descriptor
       .slice(at + 1, end)
-      .replace(/\//g, ".")
-      .replace(/\$/g, ".");
+      .replaceAll("/", ".")
+      .replaceAll("$", ".");
     at = end + 1;
   } else {
     base = PRIMITIVES[descriptor[at]!] ?? "java.lang.Object";
@@ -365,11 +367,11 @@ function typeDeclLines(
   const classSig = info.signature ? parseClassSignature(info.signature) : undefined;
   const superSource = classSig
     ? classSig.superType
-    : (info.superName?.replace(/\//g, ".") ?? "java.lang.Object");
+    : (info.superName?.replaceAll("/", ".") ?? "java.lang.Object");
   const superBase = superSource.replace(/<.*/, "");
   const interfaceSources = classSig
     ? classSig.interfaces
-    : info.interfaces.map(i => i.replace(/\//g, "."));
+    : info.interfaces.map(i => i.replaceAll("/", "."));
 
   const head: string[] = ["public"];
   if (nested) head.push("static");
@@ -382,7 +384,7 @@ function typeDeclLines(
   if (!isInterface && !isEnum && !IMPLICIT_SUPERS.has(superBase)) {
     head.push("extends", superSource);
   }
-  const interfaceNames = interfaceSources.map(i => i.replace(/\$/g, "."));
+  const interfaceNames = interfaceSources.map(i => i.replaceAll("$", "."));
   if (interfaceNames.length > 0) {
     head.push(isInterface ? "extends" : "implements", interfaceNames.join(", "));
   }
@@ -466,19 +468,19 @@ function stubbable(info: ClassInfo): boolean {
  * it was unreachable from source without the outer type anyway.
  */
 function buildStubs(classes: ClassInfo[]): { name: string; source: string }[] {
+  // group nested classes by their immediate enclosing class (the binary name
+  // up to the last '$') so each lookup below is O(1)
+  const byParent = Map.groupBy(
+    classes.filter(c => c.name.includes("$")),
+    c => c.name.slice(0, c.name.lastIndexOf("$")),
+  );
   const nestedOf = (binaryName: string): ClassInfo[] =>
-    classes.filter(
-      c =>
-        c.name.startsWith(`${binaryName}$`) &&
-        !c.name.slice(binaryName.length + 1).includes("$") &&
-        stubbable(c) &&
-        !isAnonymousOrLocal(c.name),
-    );
+    (byParent.get(binaryName) ?? []).filter(c => stubbable(c) && !isAnonymousOrLocal(c.name));
   const stubs: { name: string; source: string }[] = [];
   for (const info of classes) {
     if (info.name.includes("$") || !stubbable(info)) continue;
     const slash = info.name.lastIndexOf("/");
-    const packageName = slash < 0 ? "" : info.name.slice(0, slash).replace(/\//g, ".");
+    const packageName = slash < 0 ? "" : info.name.slice(0, slash).replaceAll("/", ".");
     const simpleName = slash < 0 ? info.name : info.name.slice(slash + 1);
     const lines = packageName ? [`package ${packageName};`, ""] : [];
     lines.push(...typeDeclLines(info, simpleName, nestedOf, "", false), "");
@@ -526,17 +528,11 @@ export function loadClassPath(program: Program, entries: readonly string[]): num
     }
   };
   const visitDirectory = (dir: string): void => {
-    let names: string[];
-    try {
-      names = readdirSync(dir);
-    } catch {
-      return; // missing or unreadable classpath entry
-    }
-    for (const name of names) {
-      const full = join(dir, name);
-      if (statSync(full).isDirectory()) visitDirectory(full);
-      else if (name.endsWith(".class")) addClassBytes(readFileSync(full));
-      else if (name.endsWith(".jar")) visitJar(full);
+    // a missing or unreadable classpath entry simply matches nothing
+    for (const relative of globSync("**/*.{class,jar}", { cwd: dir })) {
+      const full = join(dir, relative);
+      if (relative.endsWith(".class")) addClassBytes(readFileSync(full));
+      else visitJar(full);
     }
   };
   for (const entry of entries) {

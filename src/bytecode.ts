@@ -1750,7 +1750,7 @@ function generateBody(
     const start = skipTrivia(lineSource.text, node.pos); // pos includes leading trivia
     if (start >= lineSource.text.length) return;
     const line = getLineAndCharacterOfPosition(lineSource.starts, start).line + 1; // 1-based
-    const last = lineNumbers[lineNumbers.length - 1];
+    const last = lineNumbers.at(-1);
     if (last && last.pc === code.length)
       last.line = line; // previous entry emitted no code yet
     else if (last && last.line === line)
@@ -1775,13 +1775,8 @@ function generateBody(
   // not in `assignedSet`. Trailing tops are trimmed (the javac convention).
   const frameLocals = (assignedSet: Set<number>): string[] => {
     const out = activeLocals.map(e => (assignedSet.has(e.slot) ? e.descriptor : TOP));
-    while (out.length > 0 && out[out.length - 1] === TOP) out.pop();
+    while (out.length > 0 && out.at(-1) === TOP) out.pop();
     return out;
-  };
-  const intersect = (a: Set<number>, b: Set<number>): Set<number> => {
-    const r = new Set<number>();
-    for (const x of a) if (b.has(x)) r.add(x);
-    return r;
   };
 
   // --- labels, branches and stack-map frames ---------------------------------------
@@ -1828,7 +1823,7 @@ function generateBody(
       label.assignedAtTarget === undefined
         ? new Set(assigned)
         : reachable
-          ? intersect(label.assignedAtTarget, assigned)
+          ? label.assignedAtTarget.intersection(assigned)
           : new Set(label.assignedAtTarget);
     assigned.clear();
     for (const s of here) assigned.add(s);
@@ -1853,7 +1848,7 @@ function generateBody(
     label.assignedAtTarget =
       label.assignedAtTarget === undefined
         ? new Set(assigned)
-        : intersect(label.assignedAtTarget, assigned);
+        : label.assignedAtTarget.intersection(assigned);
     if (op === OP_GOTO) reachable = false; // an unconditional jump does not fall through
   };
 
@@ -2492,7 +2487,7 @@ function generateBody(
     const isVarargs = lastParam?.isVarArgs === true && paramDescs.length > 0;
     let pushedValues: number; // operand entries pushed for the arguments
     if (isVarargs) {
-      const varargsArrayDesc = paramDescs[paramDescs.length - 1]!;
+      const varargsArrayDesc = paramDescs.at(-1)!;
       const fixedCount = paramDescs.length - 1;
       const lastArg = call.arguments[call.arguments.length - 1];
       // The single-array (exact) invocation form: the last argument is itself an
@@ -3129,7 +3124,7 @@ function generateBody(
       emitReceiver();
       if (needsCurrent) {
         code.u1(OP_DUP); // one receiver for the read, one for the write
-        push(stack[stack.length - 1]!);
+        push(stack.at(-1)!);
       }
       emitValue(info.descriptor, () => {
         code.u1(OP_GETFIELD);
@@ -3879,7 +3874,7 @@ function generateBody(
       label.assignedAtTarget =
         label.assignedAtTarget === undefined
           ? new Set(assigned)
-          : intersect(label.assignedAtTarget, assigned);
+          : label.assignedAtTarget.intersection(assigned);
     };
     if (useTable) {
       code.u1(OP_TABLESWITCH);

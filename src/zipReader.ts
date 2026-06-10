@@ -4,6 +4,8 @@
 
 import { inflateRawSync } from "node:zlib";
 
+const utf8 = new TextDecoder();
+
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
 const EOCD_MIN_SIZE = 22;
@@ -41,7 +43,7 @@ export function readZipEntries(bytes: Uint8Array): ZipEntry[] | undefined {
     const extraLength = view.getUint16(at + 30, true);
     const commentLength = view.getUint16(at + 32, true);
     const localOffset = view.getUint32(at + 42, true);
-    const name = new TextDecoder().decode(bytes.subarray(at + 46, at + 46 + nameLength));
+    const name = utf8.decode(bytes.subarray(at + 46, at + 46 + nameLength));
     entries.push({
       name,
       read() {

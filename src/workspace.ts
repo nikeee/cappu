@@ -1,7 +1,7 @@
 // Workspace file discovery: find .java files under a directory and map between
 // file paths and file:// URIs (the keys the Program and LSP use).
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -25,28 +25,10 @@ export function isSyntheticUri(uri: string): boolean {
 
 /** Recursively collect .java file paths under a directory, skipping build dirs. */
 export function findJavaFiles(dir: string): string[] {
-  const result: string[] = [];
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return result;
-  }
-  for (const entry of entries) {
-    const full = join(dir, entry);
-    let isDir: boolean;
-    try {
-      isDir = statSync(full).isDirectory();
-    } catch {
-      continue;
-    }
-    if (isDir) {
-      if (!SKIP_DIRS.has(entry)) result.push(...findJavaFiles(full));
-    } else if (entry.endsWith(".java")) {
-      result.push(full);
-    }
-  }
-  return result;
+  // exclude() prunes matching directories before descent (it also sees plain
+  // file names, but none of those can end in .java, so that is harmless).
+  return globSync("**/*.java", { cwd: dir, exclude: name => SKIP_DIRS.has(name) }) //
+    .map(relative => join(dir, relative));
 }
 
 /** Load every .java file under a root directory as [uri, text] pairs. */

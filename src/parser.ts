@@ -219,7 +219,7 @@ function parseErrorAtPosition(
   message: DiagnosticMessage,
   ...args: string[]
 ): void {
-  const last = parseDiagnostics[parseDiagnostics.length - 1];
+  const last = parseDiagnostics.at(-1);
   if (!last || start !== last.pos) {
     parseDiagnostics.push(createDiagnostic(start, length, message, ...args));
   }
