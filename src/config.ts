@@ -1,6 +1,6 @@
-// cappu.config.json: project configuration for the compiler and the language
+// cappu.json: project configuration for the compiler and the language
 // server. JSONC (comments + trailing commas) via comment-json. Looked up at
-// $PWD/cappu.config.json unless an explicit path is given (--config).
+// $PWD/cappu.json unless an explicit path is given (--config).
 
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
@@ -30,7 +30,7 @@ export interface CappuConfig {
   baseDir: string;
 }
 
-export const DEFAULT_CONFIG_NAME = "cappu.config.json";
+export const DEFAULT_CONFIG_NAME = "cappu.json";
 
 function emptyConfig(baseDir: string): CappuConfig {
   return { compilerOptions: { classPath: [], sourcePaths: [] }, lspOptions: {}, baseDir };
@@ -41,7 +41,7 @@ function stringArray(value: unknown): string[] {
 }
 
 /**
- * Load the config from `explicitPath`, or from `cwd`/cappu.config.json. A
+ * Load the config from `explicitPath`, or from `cwd`/cappu.json. A
  * missing default file yields the empty config; a missing explicit path or a
  * parse error throws (the caller asked for that file specifically).
  */

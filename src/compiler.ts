@@ -21,7 +21,7 @@ export interface CompileOptions {
   quiet?: boolean;
   /** Treat degraded (placeholder) method bodies as a build failure. */
   failOnDegrade?: boolean;
-  /** Project configuration (cappu.config.json); CLI flags take precedence. */
+  /** Project configuration (cappu.json); CLI flags take precedence. */
   config?: CappuConfig;
 }
 

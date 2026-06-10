@@ -17,7 +17,7 @@ Usage:
   cappu compile [options] <file...>  Compile .java files to .class bytecode
 
 Options:
-  -c, --config <file>   Project config (default: ./cappu.config.json, JSONC).
+  -c, --config <file>   Project config (default: ./cappu.json, JSONC).
                         Sections: "compilerOptions" (classPath, sourcePaths,
                         outDir, quiet, failOnDegrade) and "lspOptions"
                         (inlayHints). Command-line flags take precedence.
@@ -40,7 +40,7 @@ async function main(argv: string[]): Promise<void> {
     options: {
       config: { type: "string", short: "c" },
       "out-dir": { type: "string", short: "d" },
-      // No defaults: an absent flag must stay undefined so cappu.config.json
+      // No defaults: an absent flag must stay undefined so cappu.json
       // can supply the value (an explicit flag always wins).
       quiet: { type: "boolean", short: "q" },
       "fail-on-degrade": { type: "boolean" },

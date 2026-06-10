@@ -662,7 +662,7 @@ connection.onHover((params): Hover | null => {
  * stdin. The handlers above are registered at module load, but nothing is read
  * until this is called, so importing this module has no observable effect.
  *
- * A cappu.config.json contributes the classpath/source paths (types resolve
+ * A cappu.json contributes the classpath/source paths (types resolve
  * but are not workspace files) and the lspOptions base settings; client
  * initializationOptions and didChangeConfiguration still override the latter.
  */

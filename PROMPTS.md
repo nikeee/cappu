@@ -115,3 +115,4 @@ no timestamps were captured.
 - 2026-06-10 15:55 — continue / add classpath + cappu.config.json (jsonc via comment-json), compiler+lsp sections
 - 2026-06-10 16:40 — add classpath lookup + cappu.config.json (jsonc, comment-json), compilerOptions/lspOptions, default $PWD or --config, compiler and lsp
 - 2026-06-10 17:05 — sort all ts/js imports: node: first, then 3rd party and then internal modules
+- 2026-06-10 17:20 — rename cappu.config.json to cappu.json
