@@ -68,7 +68,7 @@ for (const fixture of fixtures) {
     const sections = markers.map(marker => {
       const id = getIdentifierAtPosition(sourceFile, marker.offset) as Identifier | undefined;
       const symbol = id ? checker.resolveName(id) : undefined;
-      const text = symbol ? getHoverText(checker, symbol) : "(unresolved)";
+      const text = symbol ? getHoverText(checker, symbol, id) : "(unresolved)";
       return `=== ${marker.name} ===\n  ${text}`;
     });
     const actual = sections.join("\n") + "\n";

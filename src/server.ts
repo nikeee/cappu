@@ -50,12 +50,11 @@ import {
   type Diagnostic as JavaDiagnostic,
   type Identifier,
   type Node,
-  type PropertyAccessExpression,
   type SourceFile,
   type Symbol,
   SyntaxKind,
 } from "./types.ts";
-import { getHoverText } from "./hover.ts";
+import { enclosingCall, getHoverText } from "./hover.ts";
 import { isValidIdentifier, skipTrivia } from "./utilities.ts";
 import { loadJavaFiles, uriToPath } from "./workspace.ts";
 
@@ -283,27 +282,6 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
   }));
 });
 
-// The call expression whose callee is this method-name identifier, so hover can
-// show the specific overload rather than the first declaration.
-function enclosingCall(identifier: Identifier): CallExpression | undefined {
-  const parent = identifier.parent;
-  if (
-    parent.kind === SyntaxKind.CallExpression &&
-    (parent as CallExpression).expression === identifier
-  ) {
-    return parent as CallExpression;
-  }
-  if (
-    parent.kind === SyntaxKind.PropertyAccessExpression &&
-    (parent as PropertyAccessExpression).name === identifier &&
-    parent.parent.kind === SyntaxKind.CallExpression &&
-    (parent.parent as CallExpression).expression === parent
-  ) {
-    return parent.parent as CallExpression;
-  }
-  return undefined;
-}
-
 // The innermost call whose argument list contains the offset (the cursor sits
 // after the callee, between the parentheses), for signature help.
 function callAt(uri: string, position: { line: number; character: number }): CallExpression | undefined {
@@ -400,12 +378,11 @@ connection.onHover((params): Hover | null => {
   const symbol = checker.resolveName(identifier);
   if (!symbol) return null;
 
-  // For a method call, prefer the resolved overload's signature and Javadoc.
+  // getHoverText renders the instantiated overload for a call use; the Javadoc
+  // still comes from the specific resolved overload's declaration.
+  const text = getHoverText(checker, symbol, identifier);
   const call = enclosingCall(identifier);
   const overload = call ? checker.resolveCall(call) : undefined;
-  const text = overload
-    ? (checker.signatureOfDeclaration(overload) ?? getHoverText(checker, symbol))
-    : getHoverText(checker, symbol);
   const doc = overload
     ? checker.getDocumentationOfNode(overload)
     : checker.getDocumentation(symbol);

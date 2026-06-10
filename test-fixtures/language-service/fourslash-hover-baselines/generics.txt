@@ -1,0 +1,24 @@
+=== tparamDecl ===
+  (type parameter) T extends CharSequence
+=== tparamUse ===
+  (type parameter) T extends CharSequence
+=== maxDecl ===
+  <U extends Comparable<U>> U max(U a, U b)
+=== aUse ===
+  (parameter) U a
+=== listGet ===
+  String get(int index)
+=== listAdd ===
+  boolean add(String e)
+=== mapGet ===
+  List<Integer> get(Object key)
+=== boxField ===
+  (field) String value
+=== boxGet ===
+  String get()
+=== boxSet ===
+  void set(String t)
+=== maxUse ===
+  Integer max(Integer a, Integer b)
+=== copyAdd ===
+  boolean add(Integer e)

@@ -57,6 +57,7 @@ import {
   type ReturnStatement,
   type SourceFile,
   type SwitchExpression,
+  type Parameter,
   type Symbol,
   SymbolFlags,
   SyntaxKind,
@@ -117,6 +118,12 @@ export interface Checker {
   signatureOfDeclaration(declaration: Node): string | undefined;
   /** Every overload declaration a call could bind to (for signature help). */
   resolveCallCandidates(call: CallExpression): MethodDeclaration[];
+  /**
+   * The resolved overload's signature with the receiver's type arguments (and
+   * inferred method type arguments) substituted in - `String get(int index)` for
+   * a call on a List<String> - or undefined when nothing instantiates.
+   */
+  instantiatedSignatureOfCall(call: CallExpression): string | undefined;
   /** The source text of each parameter of a method/constructor declaration. */
   parameterLabelsOf(declaration: Node): string[];
   /**
@@ -785,6 +792,36 @@ export function createChecker(program: Program): Checker {
   function signatureOfSymbol(symbol: Symbol): string | undefined {
     const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
     return declaration ? signatureOfDeclaration(declaration) : undefined;
+  }
+
+  function instantiatedSignatureOfCall(call: CallExpression): string | undefined {
+    const info = resolveCallInfo(call);
+    if (!info) return undefined;
+    const decl = info.decl;
+    // Substitutions, in typeOfCall's order: the receiver's type arguments, then
+    // the method's own inferred type arguments.
+    const methodSubst = (() => {
+      const vars = methodTypeParameters(decl);
+      if (vars.size === 0) return undefined;
+      const argTypes = call.arguments.map(getTypeOfExpression);
+      return inferMethodTypeArguments(decl, argTypes, info.receiverSubst, vars);
+    })();
+    const renderType = (typeNode: TypeNode | undefined): string => {
+      if (!typeNode) return "?";
+      let t = substitute(resolveType(typeNode, decl), info.receiverSubst);
+      if (methodSubst) t = substitute(t, methodSubst);
+      // An unresolvable type (outside the stub) keeps its written form rather
+      // than rendering "<error>"; a still-bare variable also reads fine as-is.
+      return isError(t) ? nodeSourceText(typeNode) : typeToString(t);
+    };
+    const params = decl.parameters
+      .map(p => {
+        const param = p as Parameter;
+        const name = param.name ? ` ${param.name.text}` : "";
+        return `${renderType(param.type)}${param.isVarArgs ? "..." : ""}${name}`;
+      })
+      .join(", ");
+    return `${renderType(decl.returnType)} ${decl.name.text}(${params})`;
   }
 
   function parameterLabelsOf(declaration: Node): string[] {
@@ -1701,6 +1738,7 @@ export function createChecker(program: Program): Checker {
     isAssignableTo,
     resolveCall,
     resolveCallCandidates,
+    instantiatedSignatureOfCall,
     parameterLabelsOf,
     typeStringOfSymbol,
     signatureOfSymbol,

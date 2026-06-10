@@ -2,7 +2,19 @@
 // and the fourslash hover baselines so both render identically.
 
 import type { Checker } from "./checker.ts";
-import { type Symbol, SymbolFlags } from "./types.ts";
+import { typeToString, TypeKind } from "./checkerTypes.ts";
+import { getSourceFileOfNode } from "./resolver.ts";
+import {
+  type CallExpression,
+  type Identifier,
+  type Node,
+  type PropertyAccessExpression,
+  type Symbol,
+  SymbolFlags,
+  SyntaxKind,
+  type TypeParameter,
+} from "./types.ts";
+import { skipTrivia } from "./utilities.ts";
 
 export function symbolKindWord(flags: SymbolFlags): string {
   if (flags & SymbolFlags.Package) return "package";
@@ -28,15 +40,53 @@ const TYPE_FLAGS =
   SymbolFlags.Record |
   SymbolFlags.Annotation;
 
+/** The call whose callee is this identifier (directly or via `recv.name`). */
+export function enclosingCall(identifier: Identifier): CallExpression | undefined {
+  const parent = identifier.parent;
+  if (
+    parent.kind === SyntaxKind.CallExpression &&
+    (parent as CallExpression).expression === identifier
+  ) {
+    return parent as CallExpression;
+  }
+  if (
+    parent.kind === SyntaxKind.PropertyAccessExpression &&
+    (parent as PropertyAccessExpression).name === identifier &&
+    parent.parent.kind === SyntaxKind.CallExpression &&
+    (parent.parent as CallExpression).expression === parent
+  ) {
+    return parent.parent as CallExpression;
+  }
+  return undefined;
+}
+
+// The written bounds of a type parameter (`T extends Comparable<T> & Cloneable`),
+// straight from the declaration source.
+function typeParameterBounds(symbol: Symbol): string | undefined {
+  const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+  if (declaration?.kind !== SyntaxKind.TypeParameter) return undefined;
+  const bounds = (declaration as TypeParameter).constraint;
+  if (!bounds || bounds.length === 0) return undefined;
+  const text = getSourceFileOfNode(declaration).text;
+  return bounds.map(b => text.slice(skipTrivia(text, b.pos), b.end)).join(" & ");
+}
+
 /**
  * One-line hover label, in the style of the C#/Roslyn language service:
  *   methods  -> the full signature            e.g.  int add(int a, int b)
  *   types    -> keyword + name                e.g.  class Foo
  *   values   -> (kind) type name              e.g.  (field) int count
- *   type var -> (type parameter) name         e.g.  (type parameter) T
+ *   type var -> (type parameter) name + bound e.g.  (type parameter) T extends CharSequence
+ *
+ * `atNode` is the referencing identifier, when hovering a use rather than the
+ * declaration: a call renders the instantiated overload (`String get(int index)`
+ * on a List<String>), and a member access renders the field's use-site type.
  */
-export function getHoverText(checker: Checker, symbol: Symbol): string {
+export function getHoverText(checker: Checker, symbol: Symbol, atNode?: Node): string {
   if (symbol.flags & (SymbolFlags.Method | SymbolFlags.Constructor)) {
+    const call = atNode?.kind === SyntaxKind.Identifier ? enclosingCall(atNode as Identifier) : undefined;
+    const instantiated = call ? checker.instantiatedSignatureOfCall(call) : undefined;
+    if (instantiated) return instantiated;
     const signature = checker.signatureOfSymbol(symbol);
     if (signature) return signature;
   }
@@ -45,12 +95,32 @@ export function getHoverText(checker: Checker, symbol: Symbol): string {
     return `${word} ${symbol.escapedName}`;
   }
   if (symbol.flags & SymbolFlags.TypeParameter) {
-    return `(${word}) ${symbol.escapedName}`;
+    const bounds = typeParameterBounds(symbol);
+    return bounds
+      ? `(${word}) ${symbol.escapedName} extends ${bounds}`
+      : `(${word}) ${symbol.escapedName}`;
   }
-  const type = checker.typeStringOfSymbol(symbol);
+  const type = useSiteTypeString(checker, atNode) ?? checker.typeStringOfSymbol(symbol);
   // Omit an unresolvable type (e.g. a lambda parameter whose target is unknown)
   // rather than printing "<error>".
   return type === "<error>"
     ? `(${word}) ${symbol.escapedName}`
     : `(${word}) ${type} ${symbol.escapedName}`;
+}
+
+// The instantiated type of a field accessed through a generic receiver
+// (`box.v` on a Box<String> is a String, not the declared T), when it is more
+// informative than the declared type.
+function useSiteTypeString(checker: Checker, atNode: Node | undefined): string | undefined {
+  if (
+    !atNode ||
+    atNode.kind !== SyntaxKind.Identifier ||
+    atNode.parent?.kind !== SyntaxKind.PropertyAccessExpression ||
+    (atNode.parent as PropertyAccessExpression).name !== atNode
+  ) {
+    return undefined;
+  }
+  const type = checker.getTypeOfExpression(atNode.parent);
+  if (type.kind === TypeKind.Error) return undefined;
+  return typeToString(type);
 }
