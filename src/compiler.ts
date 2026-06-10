@@ -73,8 +73,15 @@ export function loadConfiguredPaths(program: Program, config: CappuConfig): void
   }
 }
 
-function toCompileDiagnostic(d: Diagnostic, file: string, sourceFile: SourceFile): CompileDiagnostic {
-  const { line, character } = getLineAndCharacterOfPosition(computeLineStarts(sourceFile.text), d.pos);
+function toCompileDiagnostic(
+  d: Diagnostic,
+  file: string,
+  sourceFile: SourceFile,
+): CompileDiagnostic {
+  const { line, character } = getLineAndCharacterOfPosition(
+    computeLineStarts(sourceFile.text),
+    d.pos,
+  );
   return {
     severity: d.category === DiagnosticCategory.Error ? "error" : "warning",
     file,

@@ -31,11 +31,15 @@ const LspOptionsSchema = z.object({
   inlayHints: InlayHintsSchema.optional(),
 });
 
+export const MAVEN_CENTRAL = "https://repo.maven.apache.org/maven2";
+
 const ConfigFileSchema = z.object({
   // prefault (not default): the empty object is parsed through the section
   // schema, so the inner defaults (classPath: [], ...) apply.
   compilerOptions: CompilerOptionsSchema.prefault({}),
   lspOptions: LspOptionsSchema.prefault({}),
+  /** Package repositories dependencies are resolved from, in order. */
+  packageSources: z.array(z.string()).default([MAVEN_CENTRAL]),
 });
 
 export type CompilerConfig = z.infer<typeof CompilerOptionsSchema>;
@@ -83,6 +87,10 @@ export const CONFIG_TEMPLATE = `
       "varTypes": true,
     },
   },
+
+  // Package repositories dependencies are resolved from, in order.
+  // Default if unset: maven central.
+  // "packageSources": ["https://repo.maven.apache.org/maven2"],
 }
 `.trimStart();
 

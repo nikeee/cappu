@@ -60,7 +60,13 @@ test("unknown keys are ignored, comment-json metadata does not leak", () => {
   );
   const config = loadConfig(undefined, dir);
   expect(config.compilerOptions.outDir).toBe("o");
-  expect(Object.keys(config).sort()).toEqual(["baseDir", "compilerOptions", "lspOptions"]);
+  expect(Object.keys(config).sort()).toEqual([
+    "baseDir",
+    "compilerOptions",
+    "lspOptions",
+    "packageSources",
+  ]);
+  expect(config.packageSources).toEqual(["https://repo.maven.apache.org/maven2"]);
 });
 
 test("the init template parses and validates against the schema", () => {
