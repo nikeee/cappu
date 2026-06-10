@@ -109,3 +109,4 @@ no timestamps were captured.
 - 2026-06-10 12:05 — improve resolution on hover and other LSP tests.
 - 2026-06-10 13:40 — continue (commit regen baselines)
 - 2026-06-10 14:00 — continue
+- 2026-06-10 14:30 — do 1. then 2 (inlay hints for parameters passed an expression; var hints, configurable). 3 and 4 sound good, too.

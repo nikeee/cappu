@@ -89,3 +89,21 @@ test("closing a document removes only its types from the index", () => {
   expect(index.getType("p.B")).toBeUndefined();
   expect(index.getType("p.A")).toBeDefined();
 });
+
+test("removing a project file drops its types; an open document for it survives", () => {
+  const program = createProgram();
+  program.addProjectFile("file:///A.java", "package p;\nclass A {}");
+  program.addProjectFile("file:///B.java", "package p;\nclass B {}");
+  expect(program.getGlobalIndex().getType("p.A")).toBeDefined();
+
+  program.removeProjectFile("file:///A.java");
+  const index = program.getGlobalIndex();
+  expect(index.getType("p.A")).toBeUndefined();
+  expect(index.getType("p.B")).toBeDefined();
+  expect(program.getSourceFile("file:///A.java")).toBeUndefined();
+
+  // A file that is also open as a document keeps resolving from the editor copy.
+  program.setOpenDocument("file:///B.java", "package p;\nclass B { int x; }", 2);
+  program.removeProjectFile("file:///B.java");
+  expect(program.getGlobalIndex().getType("p.B")).toBeDefined();
+});

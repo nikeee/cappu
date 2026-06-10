@@ -53,6 +53,8 @@ export interface Program {
   closeDocument(uri: string): void;
   /** Register a workspace file read from disk (open documents take precedence). */
   addProjectFile(uri: string, text: string): void;
+  /** Forget a project file deleted from disk (an open document for it survives). */
+  removeProjectFile(uri: string): void;
   /** Parse + bind the file for a uri (cached), or undefined if unknown. */
   getSourceFile(uri: string): SourceFile | undefined;
   getOpenUris(): string[];
@@ -221,6 +223,11 @@ export function createProgram(): Program {
       projectFiles.set(uri, text);
       cache.delete(uri);
       dirty.add(uri);
+    },
+    removeProjectFile(uri) {
+      projectFiles.delete(uri);
+      cache.delete(uri);
+      dirty.add(uri); // refreshIndex drops its types once no source resolves
     },
     getSourceFile,
     getOpenUris: () => [...openDocuments.keys()],

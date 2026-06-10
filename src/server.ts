@@ -12,6 +12,8 @@ import {
   type Definition,
   type Diagnostic as LspDiagnostic,
   DiagnosticSeverity,
+  DidChangeWatchedFilesNotification,
+  FileChangeType,
   type DocumentSymbol,
   type Hover,
   ErrorCodes,
@@ -30,6 +32,7 @@ import {
   type WorkspaceEdit,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
+import { readFileSync } from "node:fs";
 
 import { createChecker } from "./checker.ts";
 import { getCodeActions } from "./codeActions.ts";
@@ -130,6 +133,41 @@ function validate(uri: string, sourceFile: SourceFile): void {
   ].map(d => toLspDiagnostic(d, lineStarts));
   connection.sendDiagnostics({ uri, diagnostics });
 }
+
+// Watch the workspace for .java files created/changed/deleted outside the
+// editor (git operations, codegen): without this the project model scanned at
+// initialize goes silently stale. Registered dynamically once the client is
+// ready; clients without the capability simply never send the events.
+connection.onInitialized(() => {
+  void connection.client
+    .register(DidChangeWatchedFilesNotification.type, {
+      watchers: [{ globPattern: "**/*.java" }],
+    })
+    .catch(() => {
+      // The client does not support dynamic file-watcher registration.
+    });
+});
+
+connection.onDidChangeWatchedFiles(params => {
+  for (const event of params.changes) {
+    if (event.type === FileChangeType.Deleted) {
+      program.removeProjectFile(event.uri);
+      continue;
+    }
+    try {
+      // Created or Changed: (re-)read from disk. An open editor document still
+      // wins inside the Program; updating the disk copy keeps didClose honest.
+      program.addProjectFile(event.uri, readFileSync(uriToPath(event.uri), "utf8"));
+    } catch {
+      program.removeProjectFile(event.uri); // unreadable: treat as gone
+    }
+  }
+  // Cross-file resolution may have changed for everything that is open.
+  for (const uri of program.getOpenUris()) {
+    const sourceFile = program.getSourceFile(uri);
+    if (sourceFile) validate(uri, sourceFile);
+  }
+});
 
 // TextDocuments fires onDidChangeContent on both open and change.
 documents.onDidChangeContent(change => {

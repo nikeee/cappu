@@ -24,6 +24,7 @@
     "test": "tsx --test \"./src/**/*.test.ts\""
   },
   "dependencies": {
+    "comment-json": "^5.0.0",
     "vscode-languageserver": "^10.0.0",
     "vscode-languageserver-textdocument": "^1.0.12"
   },
