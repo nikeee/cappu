@@ -24,3 +24,7 @@ I didn't want to just say "build a java compiler and LSP server". So this is wha
 The result is a Java-compatible compiler as well as an LSP server built on the same foundation, just like the TypeScript compiler. `.class` file baselines are verified by comparing to actual `javac` output.
 
 You probalby shouldn't use this. **This readme is the only file that wasn't edited by AI.**
+
+
+### Legal Notice
+This project is not affiliated with Java, Oracle or similar entities.
