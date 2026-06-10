@@ -41,3 +41,24 @@ test("a missing default config yields the empty config; a missing explicit one t
   expect(config.lspOptions).toEqual({});
   expect(() => loadConfig("nope.json", dir)).toThrow(/not found/);
 });
+
+test("a shape violation throws with the offending path", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cfg-"));
+  writeFileSync(
+    join(dir, DEFAULT_CONFIG_NAME),
+    '{ "compilerOptions": { "classPath": "not-an-array", "quiet": 1 } }',
+  );
+  expect(() => loadConfig(undefined, dir)).toThrow(/classPath/);
+  expect(() => loadConfig(undefined, dir)).toThrow(/quiet/);
+});
+
+test("unknown keys are ignored, comment-json metadata does not leak", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cfg-"));
+  writeFileSync(
+    join(dir, DEFAULT_CONFIG_NAME),
+    '{ /* note */ "futureOption": true, "compilerOptions": { "outDir": "o" } }',
+  );
+  const config = loadConfig(undefined, dir);
+  expect(config.compilerOptions.outDir).toBe("o");
+  expect(Object.keys(config).sort()).toEqual(["baseDir", "compilerOptions", "lspOptions"]);
+});

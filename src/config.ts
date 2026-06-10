@@ -1,31 +1,46 @@
-// cappu.json: project configuration for the compiler and the language
-// server. JSONC (comments + trailing commas) via comment-json. Looked up at
+// cappu.json: project configuration for the compiler and the language server.
+// JSONC (comments + trailing commas) via comment-json; shape validation and
+// the exported config types both come from one zod schema. Looked up at
 // $PWD/cappu.json unless an explicit path is given (--config).
 
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 
 import { parse } from "comment-json";
+import { z } from "zod";
 
-import type { InlayHintsSettings } from "./inlayHints.ts";
+const InlayHintsSchema = z.object({
+  /** Hints like `count:` before call arguments that are not plain variables. */
+  parameterNames: z.boolean().optional(),
+  /** Hints like `: String` after a `var` declaration's name. */
+  varTypes: z.boolean().optional(),
+});
 
-export interface CompilerConfig {
-  /** Directories scanned recursively for .class files (resolution only). */
-  classPath: string[];
+const CompilerOptionsSchema = z.object({
+  /** Directories or .jar files scanned for .class files (resolution only). */
+  classPath: z.array(z.string()).default([]),
   /** Directories scanned recursively for .java sources (resolution only). */
-  sourcePaths: string[];
-  outDir?: string;
-  quiet?: boolean;
-  failOnDegrade?: boolean;
-}
+  sourcePaths: z.array(z.string()).default([]),
+  outDir: z.string().optional(),
+  quiet: z.boolean().optional(),
+  failOnDegrade: z.boolean().optional(),
+});
 
-export interface LspConfig {
-  inlayHints?: Partial<InlayHintsSettings>;
-}
+const LspOptionsSchema = z.object({
+  inlayHints: InlayHintsSchema.optional(),
+});
 
-export interface CappuConfig {
-  compilerOptions: CompilerConfig;
-  lspOptions: LspConfig;
+const ConfigFileSchema = z.object({
+  // prefault (not default): the empty object is parsed through the section
+  // schema, so the inner defaults (classPath: [], ...) apply.
+  compilerOptions: CompilerOptionsSchema.prefault({}),
+  lspOptions: LspOptionsSchema.prefault({}),
+});
+
+export type CompilerConfig = z.infer<typeof CompilerOptionsSchema>;
+export type LspConfig = z.infer<typeof LspOptionsSchema>;
+
+export interface CappuConfig extends z.infer<typeof ConfigFileSchema> {
   /** Directory the config file lives in; relative paths resolve against it. */
   baseDir: string;
 }
@@ -33,17 +48,13 @@ export interface CappuConfig {
 export const DEFAULT_CONFIG_NAME = "cappu.json";
 
 function emptyConfig(baseDir: string): CappuConfig {
-  return { compilerOptions: { classPath: [], sourcePaths: [] }, lspOptions: {}, baseDir };
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+  return { ...ConfigFileSchema.parse({}), baseDir };
 }
 
 /**
- * Load the config from `explicitPath`, or from `cwd`/cappu.json. A
- * missing default file yields the empty config; a missing explicit path or a
- * parse error throws (the caller asked for that file specifically).
+ * Load the config from `explicitPath`, or from `cwd`/cappu.json. A missing
+ * default file yields the empty config; a missing explicit path, a JSONC parse
+ * error or a shape violation throws with the offending path in the message.
  */
 export function loadConfig(explicitPath?: string, cwd = process.cwd()): CappuConfig {
   const path = explicitPath ? resolve(cwd, explicitPath) : join(cwd, DEFAULT_CONFIG_NAME);
@@ -52,32 +63,12 @@ export function loadConfig(explicitPath?: string, cwd = process.cwd()): CappuCon
     return emptyConfig(cwd);
   }
   const baseDir = resolve(path, "..");
-  const raw = parse(readFileSync(path, "utf8")) as {
-    compilerOptions?: Record<string, unknown>;
-    lspOptions?: { inlayHints?: Record<string, unknown> };
-  } | null;
-  if (raw === null || typeof raw !== "object") return emptyConfig(baseDir);
-
-  const co = raw.compilerOptions ?? {};
-  const config = emptyConfig(baseDir);
-  config.compilerOptions.classPath = stringArray(co["classPath"]);
-  config.compilerOptions.sourcePaths = stringArray(co["sourcePaths"]);
-  if (typeof co["outDir"] === "string") config.compilerOptions.outDir = co["outDir"];
-  if (typeof co["quiet"] === "boolean") config.compilerOptions.quiet = co["quiet"];
-  if (typeof co["failOnDegrade"] === "boolean") {
-    config.compilerOptions.failOnDegrade = co["failOnDegrade"];
+  const raw = parse(readFileSync(path, "utf8"));
+  const result = ConfigFileSchema.safeParse(raw ?? {});
+  if (!result.success) {
+    throw new Error(`invalid ${path}:\n${z.prettifyError(result.error)}`);
   }
-  const hints = raw.lspOptions?.inlayHints;
-  if (hints && typeof hints === "object") {
-    config.lspOptions.inlayHints = {};
-    if (typeof hints["parameterNames"] === "boolean") {
-      config.lspOptions.inlayHints.parameterNames = hints["parameterNames"];
-    }
-    if (typeof hints["varTypes"] === "boolean") {
-      config.lspOptions.inlayHints.varTypes = hints["varTypes"];
-    }
-  }
-  return config;
+  return { ...result.data, baseDir };
 }
 
 /** Resolve a (possibly relative) config path entry against the config's directory. */

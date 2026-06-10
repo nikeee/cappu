@@ -117,3 +117,4 @@ no timestamps were captured.
 - 2026-06-10 17:05 — sort all ts/js imports: node: first, then 3rd party and then internal modules
 - 2026-06-10 17:20 — rename cappu.config.json to cappu.json
 - 2026-06-10 17:40 — now do the natural follow ups
+- 2026-06-10 17:55 — use latest zod for config file validation and typing
