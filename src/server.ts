@@ -28,6 +28,8 @@ import {
   MarkupKind,
   type Range,
   ResponseError,
+  type SemanticTokens,
+  SemanticTokensBuilder,
   type SignatureHelp,
   type SignatureInformation,
   type SymbolInformation,
@@ -68,6 +70,7 @@ import { type ArrayType, type ClassType, TypeKind } from "./checkerTypes.ts";
 import { forEachChild } from "./parser.ts";
 import { enclosingCall, getHoverText } from "./hover.ts";
 import { DEFAULT_INLAY_HINTS, getInlayHints, type InlayHintsSettings } from "./inlayHints.ts";
+import { getSemanticTokens, TOKEN_MODIFIERS, TOKEN_TYPES } from "./semanticTokens.ts";
 import { isValidIdentifier, skipTrivia } from "./utilities.ts";
 import { loadJavaFiles, uriToPath } from "./workspace.ts";
 
@@ -121,6 +124,10 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       documentHighlightProvider: true,
       foldingRangeProvider: true,
       typeDefinitionProvider: true,
+      semanticTokensProvider: {
+        legend: { tokenTypes: [...TOKEN_TYPES], tokenModifiers: [...TOKEN_MODIFIERS] },
+        full: true,
+      },
     },
   };
 });
@@ -525,6 +532,18 @@ connection.onTypeDefinition((params): Definition | null => {
   if (!classSymbol) return null;
   const name = getDeclarationNameNode(classSymbol);
   return name ? locationOf(name) : null;
+});
+
+connection.languages.semanticTokens.on((params): SemanticTokens => {
+  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  if (!sourceFile) return { data: [] };
+  const lineStarts = computeLineStarts(sourceFile.text);
+  const builder = new SemanticTokensBuilder();
+  for (const t of getSemanticTokens(checker, sourceFile)) {
+    const { line, character } = getLineAndCharacterOfPosition(lineStarts, t.offset);
+    builder.push(line, character, t.length, t.tokenType, t.tokenModifiers);
+  }
+  return builder.build();
 });
 
 connection.onDidChangeConfiguration(params => {
