@@ -135,11 +135,62 @@
   ],
   "org.apache.commons.codec.binary.AbstractBaseNCodecStreamBuilder": [
     [
+      "public org.apache.commons.codec.binary.AbstractBaseNCodecStreamBuilder();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_0",
+        "invokevirtual # // Method newBaseNCodec:()Lorg/apache/commons/codec/binary/BaseNCodec;",
+        "putfield # // Field baseNCodec:Lorg/apache/commons/codec/binary/BaseNCodec;",
+        "return"
+      ]
+    ],
+    [
+      "protected C getBaseNCodec();",
+      [
+        "aload_0",
+        "getfield # // Field baseNCodec:Lorg/apache/commons/codec/binary/BaseNCodec;",
+        "areturn"
+      ]
+    ],
+    [
       "protected boolean getEncode();",
       [
         "aload_0",
         "getfield # // Field encode:Z",
         "ireturn"
+      ]
+    ],
+    [
+      "protected abstract C newBaseNCodec();",
+      []
+    ],
+    [
+      "public B setBaseNCodec(C);",
+      [
+        "aload_0",
+        "aload_1",
+        "ifnull 9",
+        "aload_1",
+        "goto 13",
+        "aload_0",
+        "invokevirtual # // Method newBaseNCodec:()Lorg/apache/commons/codec/binary/BaseNCodec;",
+        "putfield # // Field baseNCodec:Lorg/apache/commons/codec/binary/BaseNCodec;",
+        "aload_0",
+        "invokevirtual # // Method asThis:()Lorg/apache/commons/codec/binary/AbstractBaseNCodecStreamBuilder;",
+        "areturn"
+      ]
+    ],
+    [
+      "public B setEncode(boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field encode:Z",
+        "aload_0",
+        "invokevirtual # // Method asThis:()Lorg/apache/commons/codec/binary/AbstractBaseNCodecStreamBuilder;",
+        "areturn"
       ]
     ]
   ],
@@ -206,6 +257,146 @@
         "aload_0",
         "getfield # // Field unencodedBlockSize:I",
         "ireturn"
+      ]
+    ],
+    [
+      "public B setDecodeTable(byte[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "ifnull 15",
+        "aload_1",
+        "invokevirtual # // Method \"[B\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "goto 16",
+        "aconst_null",
+        "putfield # // Field decodeTable:[B",
+        "aload_0",
+        "invokevirtual # // Method asThis:()Lorg/apache/commons/codec/binary/BaseNCodec$AbstractBuilder;",
+        "areturn"
+      ]
+    ],
+    [
+      "B setDecodeTableRaw(byte[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field decodeTable:[B",
+        "aload_0",
+        "invokevirtual # // Method asThis:()Lorg/apache/commons/codec/binary/BaseNCodec$AbstractBuilder;",
+        "areturn"
+      ]
+    ],
+    [
+      "public B setDecodingPolicy(org.apache.commons.codec.CodecPolicy);",
+      [
+        "aload_0",
+        "aload_1",
+        "ifnull 9",
+        "aload_1",
+        "goto 12",
+        "getstatic # // Field org/apache/commons/codec/binary/BaseNCodec.DECODING_POLICY_DEFAULT:Lorg/apache/commons/codec/CodecPolicy;",
+        "putfield # // Field decodingPolicy:Lorg/apache/commons/codec/CodecPolicy;",
+        "aload_0",
+        "invokevirtual # // Method asThis:()Lorg/apache/commons/codec/binary/BaseNCodec$AbstractBuilder;",
+        "areturn"
+      ]
+    ],
+    [
+      "B setEncodedBlockSize(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field encodedBlockSize:I",
+        "aload_0",
+        "invokevirtual # // Method asThis:()Lorg/apache/commons/codec/binary/BaseNCodec$AbstractBuilder;",
+        "areturn"
+      ]
+    ],
+    [
+      "public B setEncodeTable(byte...);",
+      [
+        "aload_0",
+        "aload_1",
+        "ifnull 15",
+        "aload_1",
+        "invokevirtual # // Method \"[B\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "goto 19",
+        "aload_0",
+        "getfield # // Field defaultEncodeTable:[B",
+        "putfield # // Field encodeTable:[B",
+        "aload_0",
+        "invokevirtual # // Method asThis:()Lorg/apache/commons/codec/binary/BaseNCodec$AbstractBuilder;",
+        "areturn"
+      ]
+    ],
+    [
+      "B setEncodeTableRaw(byte...);",
+      [
+        "aload_0",
+        "aload_1",
+        "ifnull 9",
+        "aload_1",
+        "goto 13",
+        "aload_0",
+        "getfield # // Field defaultEncodeTable:[B",
+        "putfield # // Field encodeTable:[B",
+        "aload_0",
+        "invokevirtual # // Method asThis:()Lorg/apache/commons/codec/binary/BaseNCodec$AbstractBuilder;",
+        "areturn"
+      ]
+    ],
+    [
+      "public B setLineLength(int);",
+      [
+        "aload_0",
+        "iconst_0",
+        "iload_1",
+        "invokestatic # // Method java/lang/Math.max:(II)I",
+        "putfield # // Field lineLength:I",
+        "aload_0",
+        "invokevirtual # // Method asThis:()Lorg/apache/commons/codec/binary/BaseNCodec$AbstractBuilder;",
+        "areturn"
+      ]
+    ],
+    [
+      "public B setLineSeparator(byte...);",
+      [
+        "aload_0",
+        "aload_1",
+        "ifnull 15",
+        "aload_1",
+        "invokevirtual # // Method \"[B\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "goto 18",
+        "getstatic # // Field org/apache/commons/codec/binary/BaseNCodec.CHUNK_SEPARATOR:[B",
+        "putfield # // Field lineSeparator:[B",
+        "aload_0",
+        "invokevirtual # // Method asThis:()Lorg/apache/commons/codec/binary/BaseNCodec$AbstractBuilder;",
+        "areturn"
+      ]
+    ],
+    [
+      "public B setPadding(byte);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field padding:B",
+        "aload_0",
+        "invokevirtual # // Method asThis:()Lorg/apache/commons/codec/binary/BaseNCodec$AbstractBuilder;",
+        "areturn"
+      ]
+    ],
+    [
+      "B setUnencodedBlockSize(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field unencodedBlockSize:I",
+        "aload_0",
+        "invokevirtual # // Method asThis:()Lorg/apache/commons/codec/binary/BaseNCodec$AbstractBuilder;",
+        "areturn"
       ]
     ]
   ],
@@ -533,6 +724,15 @@
   ],
   "org.apache.commons.codec.binary.BaseNCodecInputStream": [
     [
+      "public boolean isStrictDecoding();",
+      [
+        "aload_0",
+        "getfield # // Field baseNCodec:Lorg/apache/commons/codec/binary/BaseNCodec;",
+        "invokevirtual # // Method org/apache/commons/codec/binary/BaseNCodec.isStrictDecoding:()Z",
+        "ireturn"
+      ]
+    ],
+    [
       "public synchronized void mark(int);",
       [
         "return"
@@ -602,6 +802,17 @@
         "aload_0",
         "getfield # // Field outputStream:Ljava/io/OutputStream;",
         "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.codec.binary.BaseNCodecOutputStream": [
+    [
+      "public boolean isStrictDecoding();",
+      [
+        "aload_0",
+        "getfield # // Field baseNCodec:Lorg/apache/commons/codec/binary/BaseNCodec;",
+        "invokevirtual # // Method org/apache/commons/codec/binary/BaseNCodec.isStrictDecoding:()Z",
+        "ireturn"
       ]
     ]
   ],

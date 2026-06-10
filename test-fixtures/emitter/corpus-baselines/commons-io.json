@@ -630,6 +630,50 @@
       ]
     ]
   ],
+  "org.apache.commons.io.IOExceptionList": [
+    [
+      "private static java.lang.String toMessage(java.util.List<? extends java.lang.Throwable>);",
+      [
+        "ldc # // String %,d exception(s): %s",
+        "iconst_2",
+        "anewarray # // class java/lang/Object",
+        "dup",
+        "iconst_0",
+        "aload_0",
+        "invokestatic # // Method size:(Ljava/util/List;)I",
+        "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "aload_0",
+        "aastore",
+        "invokestatic # // Method java/lang/String.format:(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.IOExceptionList(java.util.List<? extends java.lang.Throwable>);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method toMessage:(Ljava/util/List;)Ljava/lang/String;",
+        "aload_1",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/String;Ljava/util/List;)V",
+        "return"
+      ]
+    ],
+    [
+      "public <T extends java.lang.Throwable> T getCause(int);",
+      [
+        "aload_0",
+        "getfield # // Field causeList:Ljava/util/List;",
+        "iload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;",
+        "checkcast # // class java/lang/Throwable",
+        "areturn"
+      ]
+    ]
+  ],
   "org.apache.commons.io.IOIndexedException": [
     [
       "public int getIndex();",
@@ -936,6 +980,17 @@
       ]
     ]
   ],
+  "org.apache.commons.io.build.AbstractOrigin$AbstractRandomAccessFileOrigin": [
+    [
+      "public org.apache.commons.io.build.AbstractOrigin$AbstractRandomAccessFileOrigin(T);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractOrigin.\"<init>\":(Ljava/lang/Object;)V",
+        "return"
+      ]
+    ]
+  ],
   "org.apache.commons.io.build.AbstractOrigin$ByteArrayOrigin": [
     [
       "public org.apache.commons.io.build.AbstractOrigin$ByteArrayOrigin(byte[]);",
@@ -1011,6 +1066,29 @@
       ]
     ]
   ],
+  "org.apache.commons.io.build.AbstractOrigin": [
+    [
+      "protected org.apache.commons.io.build.AbstractOrigin(T);",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/build/AbstractSupplier.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String origin",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "putfield # // Field origin:Ljava/lang/Object;",
+        "return"
+      ]
+    ],
+    [
+      "public T get();",
+      [
+        "aload_0",
+        "getfield # // Field origin:Ljava/lang/Object;",
+        "areturn"
+      ]
+    ]
+  ],
   "org.apache.commons.io.build.AbstractOriginSupplier": [
     [
       "public org.apache.commons.io.build.AbstractOriginSupplier();",
@@ -1018,6 +1096,30 @@
         "aload_0",
         "invokespecial # // Method org/apache/commons/io/build/AbstractSupplier.\"<init>\":()V",
         "return"
+      ]
+    ],
+    [
+      "protected org.apache.commons.io.build.AbstractOrigin<?, ?> checkOrigin();",
+      [
+        "aload_0",
+        "getfield # // Field origin:Lorg/apache/commons/io/build/AbstractOrigin;",
+        "ifnonnull 17",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String origin == null",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field origin:Lorg/apache/commons/io/build/AbstractOrigin;",
+        "areturn"
+      ]
+    ],
+    [
+      "protected org.apache.commons.io.build.AbstractOrigin<?, ?> getOrigin();",
+      [
+        "aload_0",
+        "getfield # // Field origin:Lorg/apache/commons/io/build/AbstractOrigin;",
+        "areturn"
       ]
     ]
   ],
@@ -1709,13 +1811,32 @@
       ]
     ]
   ],
+  "org.apache.commons.io.filefilter.AndFileFilter": [
+    [
+      "public java.util.List<org.apache.commons.io.filefilter.IOFileFilter> getFileFilters();",
+      [
+        "aload_0",
+        "getfield # // Field fileFilters:Ljava/util/List;",
+        "invokestatic # // Method java/util/Collections.unmodifiableList:(Ljava/util/List;)Ljava/util/List;",
+        "areturn"
+      ]
+    ]
+  ],
   "org.apache.commons.io.filefilter.ConditionalFileFilter": [
     [
       "public abstract void addFileFilter(org.apache.commons.io.filefilter.IOFileFilter);",
       []
     ],
     [
+      "public abstract java.util.List<org.apache.commons.io.filefilter.IOFileFilter> getFileFilters();",
+      []
+    ],
+    [
       "public abstract boolean removeFileFilter(org.apache.commons.io.filefilter.IOFileFilter);",
+      []
+    ],
+    [
+      "public abstract void setFileFilters(java.util.List<org.apache.commons.io.filefilter.IOFileFilter>);",
       []
     ]
   ],
@@ -1801,6 +1922,29 @@
       ]
     ]
   ],
+  "org.apache.commons.io.filefilter.OrFileFilter": [
+    [
+      "public java.util.List<org.apache.commons.io.filefilter.IOFileFilter> getFileFilters();",
+      [
+        "aload_0",
+        "getfield # // Field fileFilters:Ljava/util/List;",
+        "invokestatic # // Method java/util/Collections.unmodifiableList:(Ljava/util/List;)Ljava/util/List;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.filefilter.SuffixFileFilter": [
+    [
+      "public org.apache.commons.io.filefilter.SuffixFileFilter(java.util.List<java.lang.String>);",
+      [
+        "aload_0",
+        "aload_1",
+        "getstatic # // Field org/apache/commons/io/IOCase.SENSITIVE:Lorg/apache/commons/io/IOCase;",
+        "invokespecial # // Method \"<init>\":(Ljava/util/List;Lorg/apache/commons/io/IOCase;)V",
+        "return"
+      ]
+    ]
+  ],
   "org.apache.commons.io.filefilter.TrueFileFilter": [
     [
       "protected org.apache.commons.io.filefilter.TrueFileFilter();",
@@ -1851,6 +1995,59 @@
   ],
   "org.apache.commons.io.function.Erase": [
     [
+      "static <T, U, R> R apply(org.apache.commons.io.function.IOBiFunction<? super T, ? super U, ? extends R>, T, U);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokeinterface #, 3 // InterfaceMethod org/apache/commons/io/function/IOBiFunction.apply:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn",
+        "astore_3",
+        "aload_3",
+        "invokestatic # // Method rethrow:(Ljava/lang/Throwable;)Ljava/lang/RuntimeException;",
+        "athrow"
+      ]
+    ],
+    [
+      "static <T, R> R apply(org.apache.commons.io.function.IOFunction<? super T, ? extends R>, T);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod org/apache/commons/io/function/IOFunction.apply:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn",
+        "astore_2",
+        "aload_2",
+        "invokestatic # // Method rethrow:(Ljava/lang/Throwable;)Ljava/lang/RuntimeException;",
+        "athrow"
+      ]
+    ],
+    [
+      "static <T> int compare(org.apache.commons.io.function.IOComparator<? super T>, T, T);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokeinterface #, 3 // InterfaceMethod org/apache/commons/io/function/IOComparator.compare:(Ljava/lang/Object;Ljava/lang/Object;)I",
+        "ireturn",
+        "astore_3",
+        "aload_3",
+        "invokestatic # // Method rethrow:(Ljava/lang/Throwable;)Ljava/lang/RuntimeException;",
+        "athrow"
+      ]
+    ],
+    [
+      "static <T> T get(org.apache.commons.io.function.IOSupplier<T>);",
+      [
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOSupplier.get:()Ljava/lang/Object;",
+        "areturn",
+        "astore_1",
+        "aload_1",
+        "invokestatic # // Method rethrow:(Ljava/lang/Throwable;)Ljava/lang/RuntimeException;",
+        "athrow"
+      ]
+    ],
+    [
       "static void run(org.apache.commons.io.function.IORunnable);",
       [
         "aload_0",
@@ -1864,6 +2061,19 @@
       ]
     ],
     [
+      "static <T> boolean test(org.apache.commons.io.function.IOPredicate<? super T>, T);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod org/apache/commons/io/function/IOPredicate.test:(Ljava/lang/Object;)Z",
+        "ireturn",
+        "astore_2",
+        "aload_2",
+        "invokestatic # // Method rethrow:(Ljava/lang/Throwable;)Ljava/lang/RuntimeException;",
+        "athrow"
+      ]
+    ],
+    [
       "private org.apache.commons.io.function.Erase();",
       [
         "aload_0",
@@ -1872,7 +2082,32 @@
       ]
     ]
   ],
+  "org.apache.commons.io.function.IOBaseStream": [
+    [
+      "public abstract B unwrap();",
+      []
+    ],
+    [
+      "public abstract S wrap(B);",
+      []
+    ]
+  ],
   "org.apache.commons.io.function.IOBiConsumer": [
+    [
+      "public static <T, U> org.apache.commons.io.function.IOBiConsumer<T, U> noop();",
+      [
+        "getstatic # // Field org/apache/commons/io/function/Constants.IO_BI_CONSUMER:Lorg/apache/commons/io/function/IOBiConsumer;",
+        "areturn"
+      ]
+    ],
+    [
+      "public default java.util.function.BiConsumer<T, U> asBiConsumer();",
+      [
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:accept:(Lorg/apache/commons/io/function/IOBiConsumer;)Ljava/util/function/BiConsumer;",
+        "areturn"
+      ]
+    ],
     [
       "private void lambda$asBiConsumer$0(java.lang.Object, java.lang.Object);",
       [
@@ -1886,6 +2121,14 @@
   ],
   "org.apache.commons.io.function.IOBiFunction": [
     [
+      "public default java.util.function.BiFunction<T, U, R> asBiFunction();",
+      [
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:apply:(Lorg/apache/commons/io/function/IOBiFunction;)Ljava/util/function/BiFunction;",
+        "areturn"
+      ]
+    ],
+    [
       "private java.lang.Object lambda$asBiFunction$0(java.lang.Object, java.lang.Object);",
       [
         "aload_0",
@@ -1897,6 +2140,14 @@
     ]
   ],
   "org.apache.commons.io.function.IOBinaryOperator": [
+    [
+      "public default java.util.function.BinaryOperator<T> asBinaryOperator();",
+      [
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:apply:(Lorg/apache/commons/io/function/IOBinaryOperator;)Ljava/util/function/BinaryOperator;",
+        "areturn"
+      ]
+    ],
     [
       "private java.lang.Object lambda$asBinaryOperator$0(java.lang.Object, java.lang.Object);",
       [
@@ -1910,6 +2161,14 @@
   ],
   "org.apache.commons.io.function.IOComparator": [
     [
+      "public default java.util.Comparator<T> asComparator();",
+      [
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:compare:(Lorg/apache/commons/io/function/IOComparator;)Ljava/util/Comparator;",
+        "areturn"
+      ]
+    ],
+    [
       "private int lambda$asComparator$0(java.lang.Object, java.lang.Object);",
       [
         "aload_0",
@@ -1922,6 +2181,14 @@
   ],
   "org.apache.commons.io.function.IOConsumer": [
     [
+      "public default java.util.function.Consumer<T> asConsumer();",
+      [
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:accept:(Lorg/apache/commons/io/function/IOConsumer;)Ljava/util/function/Consumer;",
+        "areturn"
+      ]
+    ],
+    [
       "private void lambda$asConsumer$0(java.lang.Object);",
       [
         "aload_0",
@@ -1932,6 +2199,21 @@
     ]
   ],
   "org.apache.commons.io.function.IOFunction": [
+    [
+      "public static <T> org.apache.commons.io.function.IOFunction<T, T> identity();",
+      [
+        "getstatic # // Field org/apache/commons/io/function/Constants.IO_FUNCTION_ID:Lorg/apache/commons/io/function/IOFunction;",
+        "areturn"
+      ]
+    ],
+    [
+      "public default java.util.function.Function<T, R> asFunction();",
+      [
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:apply:(Lorg/apache/commons/io/function/IOFunction;)Ljava/util/function/Function;",
+        "areturn"
+      ]
+    ],
     [
       "private java.lang.Object lambda$asFunction$0(java.lang.Object);",
       [
@@ -1944,6 +2226,14 @@
   ],
   "org.apache.commons.io.function.IOIntConsumer": [
     [
+      "public default java.util.function.Consumer<java.lang.Integer> asConsumer();",
+      [
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:accept:(Lorg/apache/commons/io/function/IOIntConsumer;)Ljava/util/function/Consumer;",
+        "areturn"
+      ]
+    ],
+    [
       "private void lambda$asConsumer$0(java.lang.Integer);",
       [
         "aload_0",
@@ -1954,7 +2244,82 @@
       ]
     ]
   ],
+  "org.apache.commons.io.function.IOIterator": [
+    [
+      "public static <E> org.apache.commons.io.function.IOIterator<E> adapt(java.lang.Iterable<E>);",
+      [
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod java/lang/Iterable.iterator:()Ljava/util/Iterator;",
+        "invokestatic # // Method org/apache/commons/io/function/IOIteratorAdapter.adapt:(Ljava/util/Iterator;)Lorg/apache/commons/io/function/IOIteratorAdapter;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static <E> org.apache.commons.io.function.IOIterator<E> adapt(java.util.Iterator<E>);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/io/function/IOIteratorAdapter.adapt:(Ljava/util/Iterator;)Lorg/apache/commons/io/function/IOIteratorAdapter;",
+        "areturn"
+      ]
+    ],
+    [
+      "public default java.util.Iterator<E> asIterator();",
+      [
+        "new # // class org/apache/commons/io/function/UncheckedIOIterator",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/function/UncheckedIOIterator.\"<init>\":(Lorg/apache/commons/io/function/IOIterator;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public abstract java.util.Iterator<E> unwrap();",
+      []
+    ]
+  ],
+  "org.apache.commons.io.function.IOIteratorAdapter": [
+    [
+      "static <E> org.apache.commons.io.function.IOIteratorAdapter<E> adapt(java.util.Iterator<E>);",
+      [
+        "new # // class org/apache/commons/io/function/IOIteratorAdapter",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method \"<init>\":(Ljava/util/Iterator;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.io.function.IOIteratorAdapter(java.util.Iterator<E>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String delegate",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class java/util/Iterator",
+        "putfield # // Field delegate:Ljava/util/Iterator;",
+        "return"
+      ]
+    ],
+    [
+      "public java.util.Iterator<E> unwrap();",
+      [
+        "aload_0",
+        "getfield # // Field delegate:Ljava/util/Iterator;",
+        "areturn"
+      ]
+    ]
+  ],
   "org.apache.commons.io.function.IOPredicate": [
+    [
+      "public default java.util.function.Predicate<T> asPredicate();",
+      [
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:test:(Lorg/apache/commons/io/function/IOPredicate;)Ljava/util/function/Predicate;",
+        "areturn"
+      ]
+    ],
     [
       "private boolean lambda$asPredicate$0(java.lang.Object);",
       [
@@ -1990,6 +2355,19 @@
       ]
     ]
   ],
+  "org.apache.commons.io.function.IOSpliterator": [
+    [
+      "public default void forEachRemaining(org.apache.commons.io.function.IOConsumer<? super T>);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod tryAdvance:(Lorg/apache/commons/io/function/IOConsumer;)Z",
+        "ifeq 13",
+        "goto 0",
+        "return"
+      ]
+    ]
+  ],
   "org.apache.commons.io.function.IOStream$1": [
     [
       "public boolean hasNext();",
@@ -2010,6 +2388,17 @@
   ],
   "org.apache.commons.io.function.IOStreams": [
     [
+      "static <T> org.apache.commons.io.function.IOConsumer<T> toIOConsumer(org.apache.commons.io.function.IOConsumer<T>);",
+      [
+        "aload_0",
+        "ifnull 8",
+        "aload_0",
+        "goto 11",
+        "invokestatic # // InterfaceMethod org/apache/commons/io/function/IOConsumer.noop:()Lorg/apache/commons/io/function/IOConsumer;",
+        "areturn"
+      ]
+    ],
+    [
       "private org.apache.commons.io.function.IOStreams();",
       [
         "aload_0",
@@ -2018,7 +2407,34 @@
       ]
     ]
   ],
+  "org.apache.commons.io.function.IOSupplier": [
+    [
+      "public default java.util.function.Supplier<T> asSupplier();",
+      [
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:get:(Lorg/apache/commons/io/function/IOSupplier;)Ljava/util/function/Supplier;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.IOTriConsumer": [
+    [
+      "public static <T, U, V> org.apache.commons.io.function.IOTriConsumer<T, U, V> noop();",
+      [
+        "getstatic # // Field org/apache/commons/io/function/Constants.IO_TRI_CONSUMER:Lorg/apache/commons/io/function/IOTriConsumer;",
+        "areturn"
+      ]
+    ]
+  ],
   "org.apache.commons.io.function.IOUnaryOperator": [
+    [
+      "public default java.util.function.UnaryOperator<T> asUnaryOperator();",
+      [
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:apply:(Lorg/apache/commons/io/function/IOUnaryOperator;)Ljava/util/function/UnaryOperator;",
+        "areturn"
+      ]
+    ],
     [
       "private java.lang.Object lambda$asUnaryOperator$0(java.lang.Object);",
       [
@@ -2031,6 +2447,35 @@
   ],
   "org.apache.commons.io.function.Uncheck": [
     [
+      "public static <T, U> void accept(org.apache.commons.io.function.IOBiConsumer<T, U>, T, U);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokeinterface #, 3 // InterfaceMethod org/apache/commons/io/function/IOBiConsumer.accept:(Ljava/lang/Object;Ljava/lang/Object;)V",
+        "goto 17",
+        "astore_3",
+        "aload_3",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow",
+        "return"
+      ]
+    ],
+    [
+      "public static <T> void accept(org.apache.commons.io.function.IOConsumer<T>, T);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod org/apache/commons/io/function/IOConsumer.accept:(Ljava/lang/Object;)V",
+        "goto 16",
+        "astore_2",
+        "aload_2",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow",
+        "return"
+      ]
+    ],
+    [
       "public static void accept(org.apache.commons.io.function.IOIntConsumer, int);",
       [
         "aload_0",
@@ -2042,6 +2487,119 @@
         "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
         "athrow",
         "return"
+      ]
+    ],
+    [
+      "public static <T, U, V> void accept(org.apache.commons.io.function.IOTriConsumer<T, U, V>, T, U, V);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "aload_3",
+        "invokeinterface #, 4 // InterfaceMethod org/apache/commons/io/function/IOTriConsumer.accept:(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)V",
+        "goto 20",
+        "astore 4",
+        "aload 4",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow",
+        "return"
+      ]
+    ],
+    [
+      "public static <T, U, R> R apply(org.apache.commons.io.function.IOBiFunction<T, U, R>, T, U);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokeinterface #, 3 // InterfaceMethod org/apache/commons/io/function/IOBiFunction.apply:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn",
+        "astore_3",
+        "aload_3",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow"
+      ]
+    ],
+    [
+      "public static <T, R> R apply(org.apache.commons.io.function.IOFunction<T, R>, T);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod org/apache/commons/io/function/IOFunction.apply:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn",
+        "astore_2",
+        "aload_2",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow"
+      ]
+    ],
+    [
+      "public static <T, U, V, W, R> R apply(org.apache.commons.io.function.IOQuadFunction<T, U, V, W, R>, T, U, V, W);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "aload_3",
+        "aload 4",
+        "invokeinterface #, 5 // InterfaceMethod org/apache/commons/io/function/IOQuadFunction.apply:(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn",
+        "astore 5",
+        "aload 5",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow"
+      ]
+    ],
+    [
+      "public static <T, U, V, R> R apply(org.apache.commons.io.function.IOTriFunction<T, U, V, R>, T, U, V);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "aload_3",
+        "invokeinterface #, 4 // InterfaceMethod org/apache/commons/io/function/IOTriFunction.apply:(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn",
+        "astore 4",
+        "aload 4",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow"
+      ]
+    ],
+    [
+      "public static <T> int compare(org.apache.commons.io.function.IOComparator<T>, T, T);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokeinterface #, 3 // InterfaceMethod org/apache/commons/io/function/IOComparator.compare:(Ljava/lang/Object;Ljava/lang/Object;)I",
+        "ireturn",
+        "astore_3",
+        "aload_3",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow"
+      ]
+    ],
+    [
+      "public static <T> T get(org.apache.commons.io.function.IOSupplier<T>);",
+      [
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOSupplier.get:()Ljava/lang/Object;",
+        "areturn",
+        "astore_1",
+        "aload_1",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow"
+      ]
+    ],
+    [
+      "public static <T> T get(org.apache.commons.io.function.IOSupplier<T>, java.util.function.Supplier<java.lang.String>);",
+      [
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOSupplier.get:()Ljava/lang/Object;",
+        "areturn",
+        "astore_2",
+        "aload_2",
+        "aload_1",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;Ljava/util/function/Supplier;)Ljava/io/UncheckedIOException;",
+        "athrow"
       ]
     ],
     [
@@ -2069,6 +2627,19 @@
       ]
     ],
     [
+      "public static int getAsInt(org.apache.commons.io.function.IOIntSupplier, java.util.function.Supplier<java.lang.String>);",
+      [
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOIntSupplier.getAsInt:()I",
+        "ireturn",
+        "astore_2",
+        "aload_2",
+        "aload_1",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;Ljava/util/function/Supplier;)Ljava/io/UncheckedIOException;",
+        "athrow"
+      ]
+    ],
+    [
       "public static long getAsLong(org.apache.commons.io.function.IOLongSupplier);",
       [
         "aload_0",
@@ -2077,6 +2648,19 @@
         "astore_1",
         "aload_1",
         "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow"
+      ]
+    ],
+    [
+      "public static long getAsLong(org.apache.commons.io.function.IOLongSupplier, java.util.function.Supplier<java.lang.String>);",
+      [
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOLongSupplier.getAsLong:()J",
+        "lreturn",
+        "astore_2",
+        "aload_2",
+        "aload_1",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;Ljava/util/function/Supplier;)Ljava/io/UncheckedIOException;",
         "athrow"
       ]
     ],
@@ -2094,6 +2678,33 @@
       ]
     ],
     [
+      "public static void run(org.apache.commons.io.function.IORunnable, java.util.function.Supplier<java.lang.String>);",
+      [
+        "aload_0",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IORunnable.run:()V",
+        "goto 16",
+        "astore_2",
+        "aload_2",
+        "aload_1",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;Ljava/util/function/Supplier;)Ljava/io/UncheckedIOException;",
+        "athrow",
+        "return"
+      ]
+    ],
+    [
+      "public static <T> boolean test(org.apache.commons.io.function.IOPredicate<T>, T);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod org/apache/commons/io/function/IOPredicate.test:(Ljava/lang/Object;)Z",
+        "ireturn",
+        "astore_2",
+        "aload_2",
+        "invokestatic # // Method wrap:(Ljava/io/IOException;)Ljava/io/UncheckedIOException;",
+        "athrow"
+      ]
+    ],
+    [
       "private org.apache.commons.io.function.Uncheck();",
       [
         "aload_0",
@@ -2102,7 +2713,78 @@
       ]
     ]
   ],
+  "org.apache.commons.io.function.UncheckedIOBaseStream": [
+    [
+      "org.apache.commons.io.function.UncheckedIOBaseStream(S);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field delegate:Lorg/apache/commons/io/function/IOBaseStream;",
+        "return"
+      ]
+    ],
+    [
+      "public void close();",
+      [
+        "aload_0",
+        "getfield # // Field delegate:Lorg/apache/commons/io/function/IOBaseStream;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOBaseStream.close:()V",
+        "return"
+      ]
+    ],
+    [
+      "public boolean isParallel();",
+      [
+        "aload_0",
+        "getfield # // Field delegate:Lorg/apache/commons/io/function/IOBaseStream;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOBaseStream.isParallel:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.util.Iterator<T> iterator();",
+      [
+        "aload_0",
+        "getfield # // Field delegate:Lorg/apache/commons/io/function/IOBaseStream;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOBaseStream.iterator:()Lorg/apache/commons/io/function/IOIterator;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOIterator.asIterator:()Ljava/util/Iterator;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.function.UncheckedIOIterator": [
+    [
+      "org.apache.commons.io.function.UncheckedIOIterator(org.apache.commons.io.function.IOIterator<E>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String delegate",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/io/function/IOIterator",
+        "putfield # // Field delegate:Lorg/apache/commons/io/function/IOIterator;",
+        "return"
+      ]
+    ]
+  ],
   "org.apache.commons.io.function.UncheckedIOSpliterator": [
+    [
+      "org.apache.commons.io.function.UncheckedIOSpliterator(org.apache.commons.io.function.IOSpliterator<T>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String delegate",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/io/function/IOSpliterator",
+        "putfield # // Field delegate:Lorg/apache/commons/io/function/IOSpliterator;",
+        "return"
+      ]
+    ],
     [
       "public int characteristics();",
       [
@@ -2119,6 +2801,16 @@
         "getfield # // Field delegate:Lorg/apache/commons/io/function/IOSpliterator;",
         "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOSpliterator.estimateSize:()J",
         "lreturn"
+      ]
+    ],
+    [
+      "public java.util.Comparator<? super T> getComparator();",
+      [
+        "aload_0",
+        "getfield # // Field delegate:Lorg/apache/commons/io/function/IOSpliterator;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOSpliterator.getComparator:()Lorg/apache/commons/io/function/IOComparator;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOComparator.asComparator:()Ljava/util/Comparator;",
+        "areturn"
       ]
     ],
     [
@@ -2183,6 +2875,14 @@
         "aload_0",
         "getfield # // Field maxCount:J",
         "lreturn"
+      ]
+    ],
+    [
+      "org.apache.commons.io.function.IOBiConsumer<java.lang.Long, java.lang.Long> getOnMaxCount();",
+      [
+        "aload_0",
+        "getfield # // Field onMaxCount:Lorg/apache/commons/io/function/IOBiConsumer;",
+        "areturn"
       ]
     ],
     [
@@ -2692,6 +3392,12 @@
         "lload_3",
         "lreturn"
       ]
+    ]
+  ],
+  "org.apache.commons.io.output.AbstractByteArrayOutputStream$InputStreamConstructor": [
+    [
+      "public abstract T construct(byte[], int, int);",
+      []
     ]
   ],
   "org.apache.commons.io.output.AbstractByteArrayOutputStream": [
@@ -3440,6 +4146,54 @@
       ]
     ]
   ],
+  "org.apache.commons.io.function.IOIterable": [
+    [
+      "public default java.lang.Iterable<T> asIterable();",
+      [
+        "new # // class org/apache/commons/io/function/UncheckedIOIterable",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/function/UncheckedIOIterable.\"<init>\":(Lorg/apache/commons/io/function/IOIterable;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public abstract org.apache.commons.io.function.IOIterator<T> iterator();",
+      []
+    ],
+    [
+      "public abstract java.lang.Iterable<T> unwrap();",
+      []
+    ]
+  ],
+  "org.apache.commons.io.function.UncheckedIOIterable": [
+    [
+      "org.apache.commons.io.function.UncheckedIOIterable(org.apache.commons.io.function.IOIterable<E>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String delegate",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/io/function/IOIterable",
+        "putfield # // Field delegate:Lorg/apache/commons/io/function/IOIterable;",
+        "return"
+      ]
+    ],
+    [
+      "public java.util.Iterator<E> iterator();",
+      [
+        "new # // class org/apache/commons/io/function/UncheckedIOIterator",
+        "dup",
+        "aload_0",
+        "getfield # // Field delegate:Lorg/apache/commons/io/function/IOIterable;",
+        "invokeinterface #, 1 // InterfaceMethod org/apache/commons/io/function/IOIterable.iterator:()Lorg/apache/commons/io/function/IOIterator;",
+        "invokespecial # // Method org/apache/commons/io/function/UncheckedIOIterator.\"<init>\":(Lorg/apache/commons/io/function/IOIterator;)V",
+        "areturn"
+      ]
+    ]
+  ],
   "org.apache.commons.io.input.AbstractLineEndingInputStream": [
     [
       "org.apache.commons.io.input.AbstractLineEndingInputStream(java.io.InputStream, boolean);",
@@ -3505,6 +4259,15 @@
       [
         "aload_0",
         "invokespecial # // Method org/apache/commons/io/input/ProxyInputStream$AbstractBuilder.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public void setObservers(java.util.List<org.apache.commons.io.input.ObservableInputStream$Observer>);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field observers:Ljava/util/List;",
         "return"
       ]
     ]
@@ -3756,6 +4519,16 @@
     ]
   ],
   "org.apache.commons.io.input.CountingInputStream": [
+    [
+      "org.apache.commons.io.input.CountingInputStream(java.io.InputStream, org.apache.commons.io.input.ProxyInputStream$AbstractBuilder<?, ?>);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method org/apache/commons/io/input/ProxyInputStream.\"<init>\":(Ljava/io/InputStream;Lorg/apache/commons/io/input/ProxyInputStream$AbstractBuilder;)V",
+        "return"
+      ]
+    ],
     [
       "public synchronized long getByteCount();",
       [
@@ -4249,6 +5022,16 @@
         "aload_0",
         "invokespecial # // Method java/lang/Object.\"<init>\":()V",
         "return"
+      ]
+    ],
+    [
+      "static <T> T throwRuntimeException(java.lang.String);",
+      [
+        "new # // class java/lang/RuntimeException",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
       ]
     ]
   ],

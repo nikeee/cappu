@@ -135,6 +135,73 @@
   ],
   "org.apache.commons.imaging.ImageInfo": [
     [
+      "public org.apache.commons.imaging.ImageInfo(java.lang.String, int, java.util.List<java.lang.String>, org.apache.commons.imaging.ImageFormat, java.lang.String, int, java.lang.String, int, int, float, int, float, int, boolean, boolean, boolean, org.apache.commons.imaging.ImageInfo$ColorType, org.apache.commons.imaging.ImageInfo$CompressionAlgorithm);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field formatDetails:Ljava/lang/String;",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field bitsPerPixel:I",
+        "aload_0",
+        "aload_3",
+        "ifnonnull 25",
+        "invokestatic # // Method java/util/Collections.emptyList:()Ljava/util/List;",
+        "goto 29",
+        "aload_3",
+        "invokestatic # // Method java/util/Collections.unmodifiableList:(Ljava/util/List;)Ljava/util/List;",
+        "putfield # // Field comments:Ljava/util/List;",
+        "aload_0",
+        "aload 4",
+        "putfield # // Field format:Lorg/apache/commons/imaging/ImageFormat;",
+        "aload_0",
+        "aload 5",
+        "putfield # // Field formatName:Ljava/lang/String;",
+        "aload_0",
+        "iload 6",
+        "putfield # // Field height:I",
+        "aload_0",
+        "aload 7",
+        "putfield # // Field mimeType:Ljava/lang/String;",
+        "aload_0",
+        "iload 8",
+        "putfield # // Field numberOfImages:I",
+        "aload_0",
+        "iload 9",
+        "putfield # // Field physicalHeightDpi:I",
+        "aload_0",
+        "fload 10",
+        "putfield # // Field physicalHeightInch:F",
+        "aload_0",
+        "iload 11",
+        "putfield # // Field physicalWidthDpi:I",
+        "aload_0",
+        "fload 12",
+        "putfield # // Field physicalWidthInch:F",
+        "aload_0",
+        "iload 13",
+        "putfield # // Field width:I",
+        "aload_0",
+        "iload 14",
+        "putfield # // Field progressive:Z",
+        "aload_0",
+        "iload 15",
+        "putfield # // Field transparent:Z",
+        "aload_0",
+        "iload 16",
+        "putfield # // Field usesPalette:Z",
+        "aload_0",
+        "aload 17",
+        "putfield # // Field colorType:Lorg/apache/commons/imaging/ImageInfo$ColorType;",
+        "aload_0",
+        "aload 18",
+        "putfield # // Field compressionAlgorithm:Lorg/apache/commons/imaging/ImageInfo$CompressionAlgorithm;",
+        "return"
+      ]
+    ],
+    [
       "public int getBitsPerPixel();",
       [
         "aload_0",
@@ -957,6 +1024,31 @@
   ],
   "org.apache.commons.imaging.common.Allocator": [
     [
+      "public static <T> T apply(int, java.util.function.IntFunction<T>);",
+      [
+        "aload_1",
+        "iload_0",
+        "invokestatic # // Method check:(I)I",
+        "invokeinterface #, 2 // InterfaceMethod java/util/function/IntFunction.apply:(I)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static <T> T[] array(int, java.util.function.IntFunction<T[]>, int);",
+      [
+        "iload_0",
+        "iload_2",
+        "imul",
+        "invokestatic # // Method check:(I)I",
+        "pop",
+        "aload_1",
+        "iload_0",
+        "invokeinterface #, 2 // InterfaceMethod java/util/function/IntFunction.apply:(I)Ljava/lang/Object;",
+        "checkcast # // class \"[Ljava/lang/Object;\"",
+        "areturn"
+      ]
+    ],
+    [
       "public static byte[] byteArray(int);",
       [
         "iload_0",
@@ -1247,6 +1339,10 @@
     ]
   ],
   "org.apache.commons.imaging.common.ImageMetadata": [
+    [
+      "public abstract java.util.List<? extends org.apache.commons.imaging.common.ImageMetadata$ImageMetadataItem> getItems();",
+      []
+    ],
     [
       "public abstract java.lang.String toString(java.lang.String);",
       []
@@ -1550,6 +1646,20 @@
       ]
     ]
   ],
+  "org.apache.commons.imaging.formats.gif.GenericGifBlock": [
+    [
+      "org.apache.commons.imaging.formats.gif.GenericGifBlock(int, java.util.List<byte[]>);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokespecial # // Method org/apache/commons/imaging/formats/gif/GifBlock.\"<init>\":(I)V",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field subBlocks:Ljava/util/List;",
+        "return"
+      ]
+    ]
+  ],
   "org.apache.commons.imaging.formats.gif.GifBlock": [
     [
       "org.apache.commons.imaging.formats.gif.GifBlock(int);",
@@ -1614,6 +1724,25 @@
         "aload_0",
         "iload 15",
         "putfield # // Field sizeOfGlobalColorTable:B",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.imaging.formats.gif.GifImageContents": [
+    [
+      "org.apache.commons.imaging.formats.gif.GifImageContents(org.apache.commons.imaging.formats.gif.GifHeaderInfo, byte[], java.util.List<org.apache.commons.imaging.formats.gif.GifBlock>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field gifHeaderInfo:Lorg/apache/commons/imaging/formats/gif/GifHeaderInfo;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field globalColorTable:[B",
+        "aload_0",
+        "aload_3",
+        "putfield # // Field blocks:Ljava/util/List;",
         "return"
       ]
     ]
@@ -3584,6 +3713,44 @@
   ],
   "org.apache.commons.imaging.formats.jpeg.iptc.PhotoshopApp13Data": [
     [
+      "public org.apache.commons.imaging.formats.jpeg.iptc.PhotoshopApp13Data(java.util.List<org.apache.commons.imaging.formats.jpeg.iptc.IptcRecord>, java.util.List<org.apache.commons.imaging.formats.jpeg.iptc.IptcBlock>);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":(Ljava/util/List;Ljava/util/List;Z)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.imaging.formats.jpeg.iptc.PhotoshopApp13Data(java.util.List<org.apache.commons.imaging.formats.jpeg.iptc.IptcRecord>, java.util.List<org.apache.commons.imaging.formats.jpeg.iptc.IptcBlock>, boolean);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_2",
+        "ifnonnull 15",
+        "invokestatic # // Method java/util/Collections.emptyList:()Ljava/util/List;",
+        "goto 19",
+        "aload_2",
+        "invokestatic # // Method java/util/Collections.unmodifiableList:(Ljava/util/List;)Ljava/util/List;",
+        "putfield # // Field rawBlocks:Ljava/util/List;",
+        "aload_0",
+        "aload_1",
+        "ifnonnull 33",
+        "invokestatic # // Method java/util/Collections.emptyList:()Ljava/util/List;",
+        "goto 37",
+        "aload_1",
+        "invokestatic # // Method java/util/Collections.unmodifiableList:(Ljava/util/List;)Ljava/util/List;",
+        "putfield # // Field records:Ljava/util/List;",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field forceUtf8Encoding:Z",
+        "return"
+      ]
+    ],
+    [
       "public boolean isForceUtf8Encoding();",
       [
         "aload_0",
@@ -4846,6 +5013,16 @@
         "aload_0",
         "aload_1",
         "invokestatic # // Method getDebug:(Ljava/lang/String;[I)Ljava/lang/String;",
+        "invokestatic # // Method debug:(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "private static void debug(java.lang.String, java.util.Map<?, ?>);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method getDebug:(Ljava/lang/String;Ljava/util/Map;)Ljava/lang/String;",
         "invokestatic # // Method debug:(Ljava/lang/String;)V",
         "return"
       ]

@@ -1,4 +1,52 @@
 {
+  "de.uks.se.Lazy": [
+    [
+      "public de.uks.se.Lazy(java.util.function.Supplier<T>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field instance:Ljava/lang/Object;",
+        "aload_1",
+        "ifnonnull 23",
+        "new # // class de/uks/se/ArgumentNullException",
+        "dup",
+        "ldc # // String supplier",
+        "invokespecial # // Method de/uks/se/ArgumentNullException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field supplier:Ljava/util/function/Supplier;",
+        "return"
+      ]
+    ],
+    [
+      "public T get();",
+      [
+        "aload_0",
+        "getfield # // Field instance:Ljava/lang/Object;",
+        "ifnonnull 20",
+        "aload_0",
+        "aload_0",
+        "getfield # // Field supplier:Ljava/util/function/Supplier;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/function/Supplier.get:()Ljava/lang/Object;",
+        "putfield # // Field instance:Ljava/lang/Object;",
+        "getstatic # // Field $assertionsDisabled:Z",
+        "ifne 41",
+        "aload_0",
+        "getfield # // Field instance:Ljava/lang/Object;",
+        "ifnonnull 41",
+        "new # // class java/lang/AssertionError",
+        "dup",
+        "invokespecial # // Method java/lang/AssertionError.\"<init>\":()V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field instance:Ljava/lang/Object;",
+        "areturn"
+      ]
+    ]
+  ],
   "de.uks.se.StringEx": [
     [
       "public de.uks.se.StringEx();",
@@ -10,6 +58,20 @@
     ]
   ],
   "de.uks.se.Tuple": [
+    [
+      "public de.uks.se.Tuple(T, U);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field item0:Ljava/lang/Object;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field item1:Ljava/lang/Object;",
+        "return"
+      ]
+    ],
     [
       "public int hashCode();",
       [

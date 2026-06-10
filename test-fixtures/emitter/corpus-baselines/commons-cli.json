@@ -190,6 +190,17 @@
   ],
   "org.apache.commons.cli.Option$Builder": [
     [
+      "private static java.lang.Class<?> toType(java.lang.Class<?>);",
+      [
+        "aload_0",
+        "ifnull 8",
+        "aload_0",
+        "goto 11",
+        "getstatic # // Field DEFAULT_TYPE:Ljava/lang/Class;",
+        "areturn"
+      ]
+    ],
+    [
       "public org.apache.commons.cli.Option$Builder argName(java.lang.String);",
       [
         "aload_0",
@@ -204,6 +215,16 @@
       [
         "aload_0",
         "invokevirtual # // Method get:()Lorg/apache/commons/cli/Option;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.cli.Option$Builder converter(org.apache.commons.cli.Converter<?, ?>);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field converter:Lorg/apache/commons/cli/Converter;",
+        "aload_0",
         "areturn"
       ]
     ],
@@ -305,6 +326,17 @@
       ]
     ],
     [
+      "public org.apache.commons.cli.Option$Builder type(java.lang.Class<?>);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method toType:(Ljava/lang/Class;)Ljava/lang/Class;",
+        "putfield # // Field type:Ljava/lang/Class;",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
       "public org.apache.commons.cli.Option$Builder valueSeparator(char);",
       [
         "aload_0",
@@ -358,6 +390,22 @@
         "aload_0",
         "getfield # // Field argCount:I",
         "ireturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.cli.Converter<?, ?> getConverter();",
+      [
+        "aload_0",
+        "getfield # // Field converter:Lorg/apache/commons/cli/Converter;",
+        "ifnonnull 20",
+        "invokestatic # // Method org/apache/commons/cli/TypeHandler.getDefault:()Lorg/apache/commons/cli/TypeHandler;",
+        "aload_0",
+        "getfield # // Field type:Ljava/lang/Class;",
+        "invokevirtual # // Method org/apache/commons/cli/TypeHandler.getConverter:(Ljava/lang/Class;)Lorg/apache/commons/cli/Converter;",
+        "goto 24",
+        "aload_0",
+        "getfield # // Field converter:Lorg/apache/commons/cli/Converter;",
+        "areturn"
       ]
     ],
     [
@@ -471,6 +519,14 @@
       ]
     ],
     [
+      "public java.util.List<java.lang.String> getValuesList();",
+      [
+        "aload_0",
+        "getfield # // Field values:Ljava/util/List;",
+        "areturn"
+      ]
+    ],
+    [
       "public int hashCode();",
       [
         "iconst_2",
@@ -524,6 +580,15 @@
       ]
     ],
     [
+      "public void setConverter(org.apache.commons.cli.Converter<?, ?>);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field converter:Lorg/apache/commons/cli/Converter;",
+        "return"
+      ]
+    ],
+    [
       "public void setDescription(java.lang.String);",
       [
         "aload_0",
@@ -560,6 +625,16 @@
       ]
     ],
     [
+      "public void setType(java.lang.Class<?>);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/cli/Option$Builder.toType:(Ljava/lang/Class;)Ljava/lang/Class;",
+        "putfield # // Field type:Ljava/lang/Class;",
+        "return"
+      ]
+    ],
+    [
       "public void setType(java.lang.Object);",
       [
         "aload_0",
@@ -580,6 +655,24 @@
     ]
   ],
   "org.apache.commons.cli.OptionGroup": [
+    [
+      "public java.util.Collection<java.lang.String> getNames();",
+      [
+        "aload_0",
+        "getfield # // Field optionMap:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.keySet:()Ljava/util/Set;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.util.Collection<org.apache.commons.cli.Option> getOptions();",
+      [
+        "aload_0",
+        "getfield # // Field optionMap:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.values:()Ljava/util/Collection;",
+        "areturn"
+      ]
+    ],
     [
       "public java.lang.String getSelected();",
       [
@@ -629,6 +722,16 @@
   ],
   "org.apache.commons.cli.TypeHandler": [
     [
+      "public static java.util.Map<java.lang.Class<?>, org.apache.commons.cli.Converter<?, ? extends java.lang.Throwable>> createDefaultMap();",
+      [
+        "new # // class java/util/HashMap",
+        "dup",
+        "invokespecial # // Method java/util/HashMap.\"<init>\":()V",
+        "invokestatic # // Method putDefaultMap:(Ljava/util/Map;)Ljava/util/Map;",
+        "areturn"
+      ]
+    ],
+    [
       "public static org.apache.commons.cli.TypeHandler getDefault();",
       [
         "getstatic # // Field DEFAULT:Lorg/apache/commons/cli/TypeHandler;",
@@ -641,6 +744,20 @@
         "aload_0",
         "invokestatic # // Method createDefaultMap:()Ljava/util/Map;",
         "invokespecial # // Method \"<init>\":(Ljava/util/Map;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.cli.TypeHandler(java.util.Map<java.lang.Class<?>, org.apache.commons.cli.Converter<?, ? extends java.lang.Throwable>>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String converterMap",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class java/util/Map",
+        "putfield # // Field converterMap:Ljava/util/Map;",
         "return"
       ]
     ]
@@ -700,6 +817,52 @@
   ],
   "org.apache.commons.cli.help.OptionFormatter$Builder": [
     [
+      "public org.apache.commons.cli.help.OptionFormatter$Builder(org.apache.commons.cli.help.OptionFormatter);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "getfield # // Field org/apache/commons/cli/help/OptionFormatter.optionalDelimiters:[Ljava/lang/String;",
+        "iconst_2",
+        "invokestatic # // Method java/util/Arrays.copyOf:([Ljava/lang/Object;I)[Ljava/lang/Object;",
+        "checkcast # // class \"[Ljava/lang/String;\"",
+        "putfield # // Field optionalDelimiters:[Ljava/lang/String;",
+        "aload_0",
+        "aload_1",
+        "getfield # // Field org/apache/commons/cli/help/OptionFormatter.argNameDelimiters:[Ljava/lang/String;",
+        "iconst_2",
+        "invokestatic # // Method java/util/Arrays.copyOf:([Ljava/lang/Object;I)[Ljava/lang/Object;",
+        "checkcast # // class \"[Ljava/lang/String;\"",
+        "putfield # // Field argNameDelimiters:[Ljava/lang/String;",
+        "aload_0",
+        "aload_1",
+        "getfield # // Field org/apache/commons/cli/help/OptionFormatter.defaultArgName:Ljava/lang/String;",
+        "putfield # // Field defaultArgName:Ljava/lang/String;",
+        "aload_0",
+        "aload_1",
+        "getfield # // Field org/apache/commons/cli/help/OptionFormatter.optPrefix:Ljava/lang/String;",
+        "putfield # // Field optPrefix:Ljava/lang/String;",
+        "aload_0",
+        "aload_1",
+        "getfield # // Field org/apache/commons/cli/help/OptionFormatter.longOptPrefix:Ljava/lang/String;",
+        "putfield # // Field longOptPrefix:Ljava/lang/String;",
+        "aload_0",
+        "aload_1",
+        "getfield # // Field org/apache/commons/cli/help/OptionFormatter.optSeparator:Ljava/lang/String;",
+        "putfield # // Field optSeparator:Ljava/lang/String;",
+        "aload_0",
+        "aload_1",
+        "getfield # // Field org/apache/commons/cli/help/OptionFormatter.deprecatedFormatFunction:Ljava/util/function/Function;",
+        "putfield # // Field deprecatedFormatFunction:Ljava/util/function/Function;",
+        "aload_0",
+        "aload_1",
+        "getfield # // Field org/apache/commons/cli/help/OptionFormatter.syntaxFormatFunction:Ljava/util/function/BiFunction;",
+        "putfield # // Field syntaxFormatFunction:Ljava/util/function/BiFunction;",
+        "return"
+      ]
+    ],
+    [
       "public org.apache.commons.cli.help.OptionFormatter build(org.apache.commons.cli.Option);",
       [
         "new # // class org/apache/commons/cli/help/OptionFormatter",
@@ -714,6 +877,143 @@
       "public org.apache.commons.cli.help.OptionFormatter get();",
       [
         "aconst_null",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.cli.help.OptionFormatter$Builder setArgumentNameDelimiters(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "getfield # // Field argNameDelimiters:[Ljava/lang/String;",
+        "iconst_0",
+        "aload_1",
+        "ldc # // String",
+        "invokestatic # // Method org/apache/commons/cli/help/Util.defaultValue:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/CharSequence;",
+        "checkcast # // class java/lang/String",
+        "aastore",
+        "aload_0",
+        "getfield # // Field argNameDelimiters:[Ljava/lang/String;",
+        "iconst_1",
+        "aload_2",
+        "ldc # // String",
+        "invokestatic # // Method org/apache/commons/cli/help/Util.defaultValue:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/CharSequence;",
+        "checkcast # // class java/lang/String",
+        "aastore",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.cli.help.OptionFormatter$Builder setDeprecatedFormatFunction(java.util.function.Function<org.apache.commons.cli.Option, java.lang.String>);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field deprecatedFormatFunction:Ljava/util/function/Function;",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.cli.help.OptionFormatter$Builder setLongOptPrefix(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "ldc # // String",
+        "invokestatic # // Method org/apache/commons/cli/help/Util.defaultValue:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/CharSequence;",
+        "checkcast # // class java/lang/String",
+        "putfield # // Field longOptPrefix:Ljava/lang/String;",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.cli.help.OptionFormatter$Builder setOptArgSeparator(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "ldc # // String",
+        "invokestatic # // Method org/apache/commons/cli/help/Util.defaultValue:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/CharSequence;",
+        "checkcast # // class java/lang/String",
+        "putfield # // Field optArgSeparator:Ljava/lang/String;",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.cli.help.OptionFormatter$Builder setOptionalDelimiters(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "getfield # // Field optionalDelimiters:[Ljava/lang/String;",
+        "iconst_0",
+        "aload_1",
+        "ldc # // String",
+        "invokestatic # // Method org/apache/commons/cli/help/Util.defaultValue:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/CharSequence;",
+        "checkcast # // class java/lang/String",
+        "aastore",
+        "aload_0",
+        "getfield # // Field optionalDelimiters:[Ljava/lang/String;",
+        "iconst_1",
+        "aload_2",
+        "ldc # // String",
+        "invokestatic # // Method org/apache/commons/cli/help/Util.defaultValue:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/CharSequence;",
+        "checkcast # // class java/lang/String",
+        "aastore",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.cli.help.OptionFormatter$Builder setOptPrefix(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "ldc # // String",
+        "invokestatic # // Method org/apache/commons/cli/help/Util.defaultValue:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/CharSequence;",
+        "checkcast # // class java/lang/String",
+        "putfield # // Field optPrefix:Ljava/lang/String;",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.cli.help.OptionFormatter$Builder setOptSeparator(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "ldc # // String",
+        "invokestatic # // Method org/apache/commons/cli/help/Util.defaultValue:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/CharSequence;",
+        "checkcast # // class java/lang/String",
+        "putfield # // Field optSeparator:Ljava/lang/String;",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.cli.help.OptionFormatter$Builder setSyntaxFormatFunction(java.util.function.BiFunction<org.apache.commons.cli.help.OptionFormatter, java.lang.Boolean, java.lang.String>);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field syntaxFormatFunction:Ljava/util/function/BiFunction;",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toArgName(java.lang.String);",
+      [
+        "aload_0",
+        "getfield # // Field argNameDelimiters:[Ljava/lang/String;",
+        "iconst_0",
+        "aaload",
+        "aload_1",
+        "ldc # // String",
+        "invokestatic # // Method org/apache/commons/cli/help/Util.defaultValue:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/CharSequence;",
+        "checkcast # // class java/lang/String",
+        "aload_0",
+        "getfield # // Field argNameDelimiters:[Ljava/lang/String;",
+        "iconst_1",
+        "aaload",
+        "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
         "areturn"
       ]
     ]
@@ -736,6 +1036,57 @@
         "invokespecial # // Method org/apache/commons/cli/help/OptionFormatter$Builder.\"<init>\":()V",
         "aload_0",
         "invokevirtual # // Method org/apache/commons/cli/help/OptionFormatter$Builder.build:(Lorg/apache/commons/cli/Option;)Lorg/apache/commons/cli/help/OptionFormatter;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getArgName();",
+      [
+        "aload_0",
+        "getfield # // Field option:Lorg/apache/commons/cli/Option;",
+        "invokevirtual # // Method org/apache/commons/cli/Option.hasArg:()Z",
+        "ifeq 47",
+        "aload_0",
+        "getfield # // Field argNameDelimiters:[Ljava/lang/String;",
+        "iconst_0",
+        "aaload",
+        "aload_0",
+        "getfield # // Field option:Lorg/apache/commons/cli/Option;",
+        "invokevirtual # // Method org/apache/commons/cli/Option.getArgName:()Ljava/lang/String;",
+        "aload_0",
+        "getfield # // Field defaultArgName:Ljava/lang/String;",
+        "invokestatic # // Method org/apache/commons/cli/help/Util.defaultValue:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/CharSequence;",
+        "checkcast # // class java/lang/String",
+        "aload_0",
+        "getfield # // Field argNameDelimiters:[Ljava/lang/String;",
+        "iconst_1",
+        "aaload",
+        "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+        "goto 49",
+        "ldc # // String",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getDescription();",
+      [
+        "aload_0",
+        "getfield # // Field option:Lorg/apache/commons/cli/Option;",
+        "invokevirtual # // Method org/apache/commons/cli/Option.isDeprecated:()Z",
+        "ifeq 29",
+        "aload_0",
+        "getfield # // Field deprecatedFormatFunction:Ljava/util/function/Function;",
+        "aload_0",
+        "getfield # // Field option:Lorg/apache/commons/cli/Option;",
+        "invokeinterface #, 2 // InterfaceMethod java/util/function/Function.apply:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "checkcast # // class java/lang/String",
+        "goto 44",
+        "aload_0",
+        "getfield # // Field option:Lorg/apache/commons/cli/Option;",
+        "invokevirtual # // Method org/apache/commons/cli/Option.getDescription:()Ljava/lang/String;",
+        "ldc # // String",
+        "invokestatic # // Method org/apache/commons/cli/help/Util.defaultValue:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/CharSequence;",
+        "checkcast # // class java/lang/String",
         "areturn"
       ]
     ],
@@ -833,6 +1184,18 @@
   ],
   "org.apache.commons.cli.help.Util": [
     [
+      "static <T extends java.lang.CharSequence> T defaultValue(T, T);",
+      [
+        "aload_0",
+        "invokestatic # // Method isEmpty:(Ljava/lang/CharSequence;)Z",
+        "ifeq 11",
+        "aload_1",
+        "goto 12",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
       "static java.lang.String repeat(int, char);",
       [
         "iload_0",
@@ -863,6 +1226,31 @@
         "aload_0",
         "invokespecial # // Method java/lang/Object.\"<init>\":()V",
         "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.cli.AmbiguousOptionException": [
+    [
+      "public org.apache.commons.cli.AmbiguousOptionException(java.lang.String, java.util.Collection<java.lang.String>);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokestatic # // Method createMessage:(Ljava/lang/String;Ljava/util/Collection;)Ljava/lang/String;",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/cli/UnrecognizedOptionException.\"<init>\":(Ljava/lang/String;Ljava/lang/String;)V",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field matchingOptions:Ljava/util/Collection;",
+        "return"
+      ]
+    ],
+    [
+      "public java.util.Collection<java.lang.String> getMatchingOptions();",
+      [
+        "aload_0",
+        "getfield # // Field matchingOptions:Ljava/util/Collection;",
+        "areturn"
       ]
     ]
   ],
@@ -959,6 +1347,16 @@
         "invokespecial # // Method org/apache/commons/cli/CommandLine.\"<init>\":(Ljava/util/List;Ljava/util/List;Ljava/util/function/Consumer;)V",
         "areturn"
       ]
+    ],
+    [
+      "public org.apache.commons.cli.CommandLine$Builder setDeprecatedHandler(java.util.function.Consumer<org.apache.commons.cli.Option>);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field deprecatedHandler:Ljava/util/function/Consumer;",
+        "aload_0",
+        "areturn"
+      ]
     ]
   ],
   "org.apache.commons.cli.CommandLine": [
@@ -987,6 +1385,29 @@
       ]
     ],
     [
+      "private org.apache.commons.cli.CommandLine(java.util.List<java.lang.String>, java.util.List<org.apache.commons.cli.Option>, java.util.function.Consumer<org.apache.commons.cli.Option>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String args",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class java/util/List",
+        "putfield # // Field args:Ljava/util/List;",
+        "aload_0",
+        "aload_2",
+        "ldc # // String options",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class java/util/List",
+        "putfield # // Field options:Ljava/util/List;",
+        "aload_0",
+        "aload_3",
+        "putfield # // Field deprecatedHandler:Ljava/util/function/Consumer;",
+        "return"
+      ]
+    ],
+    [
       "private java.lang.String first(java.lang.String[]);",
       [
         "aload_1",
@@ -996,6 +1417,26 @@
         "aload_1",
         "iconst_0",
         "aaload",
+        "areturn"
+      ]
+    ],
+    [
+      "private <T> T get(java.util.function.Supplier<T>);",
+      [
+        "aload_1",
+        "ifnonnull 8",
+        "aconst_null",
+        "goto 14",
+        "aload_1",
+        "invokeinterface #, 1 // InterfaceMethod java/util/function/Supplier.get:()Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.util.List<java.lang.String> getArgList();",
+      [
+        "aload_0",
+        "getfield # // Field args:Ljava/util/List;",
         "areturn"
       ]
     ],
@@ -1022,6 +1463,24 @@
       ]
     ],
     [
+      "public java.lang.String getOptionValue(org.apache.commons.cli.Option, java.util.function.Supplier<java.lang.String>);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method getOptionValue:(Lorg/apache/commons/cli/Option;)Ljava/lang/String;",
+        "astore_3",
+        "aload_3",
+        "ifnull 14",
+        "aload_3",
+        "goto 22",
+        "aload_0",
+        "aload_2",
+        "invokevirtual # // Method get:(Ljava/util/function/Supplier;)Ljava/lang/Object;",
+        "checkcast # // class java/lang/String",
+        "areturn"
+      ]
+    ],
+    [
       "public java.lang.String getOptionValue(org.apache.commons.cli.OptionGroup);",
       [
         "aload_0",
@@ -1033,6 +1492,24 @@
       ]
     ],
     [
+      "public java.lang.String getOptionValue(org.apache.commons.cli.OptionGroup, java.util.function.Supplier<java.lang.String>);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method getOptionValue:(Lorg/apache/commons/cli/OptionGroup;)Ljava/lang/String;",
+        "astore_3",
+        "aload_3",
+        "ifnull 14",
+        "aload_3",
+        "goto 22",
+        "aload_0",
+        "aload_2",
+        "invokevirtual # // Method get:(Ljava/util/function/Supplier;)Ljava/lang/Object;",
+        "checkcast # // class java/lang/String",
+        "areturn"
+      ]
+    ],
+    [
       "public java.lang.String getOptionValue(java.lang.String);",
       [
         "aload_0",
@@ -1040,6 +1517,18 @@
         "aload_1",
         "invokevirtual # // Method resolveOption:(Ljava/lang/String;)Lorg/apache/commons/cli/Option;",
         "invokevirtual # // Method getOptionValue:(Lorg/apache/commons/cli/Option;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getOptionValue(java.lang.String, java.util.function.Supplier<java.lang.String>);",
+      [
+        "aload_0",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method resolveOption:(Ljava/lang/String;)Lorg/apache/commons/cli/Option;",
+        "aload_2",
+        "invokevirtual # // Method getOptionValue:(Lorg/apache/commons/cli/Option;Ljava/util/function/Supplier;)Ljava/lang/String;",
         "areturn"
       ]
     ],
@@ -1270,6 +1759,15 @@
       ]
     ],
     [
+      "public java.util.List<?> getRequiredOptions();",
+      [
+        "aload_0",
+        "getfield # // Field requiredOpts:Ljava/util/List;",
+        "invokestatic # // Method java/util/Collections.unmodifiableList:(Ljava/util/List;)Ljava/util/List;",
+        "areturn"
+      ]
+    ],
+    [
       "public boolean hasLongOption(java.lang.String);",
       [
         "aload_0",
@@ -1407,6 +1905,15 @@
       ]
     ],
     [
+      "public static org.apache.commons.cli.OptionBuilder withType(java.lang.Class<?>);",
+      [
+        "aload_0",
+        "putstatic # // Field type:Ljava/lang/Class;",
+        "getstatic # // Field INSTANCE:Lorg/apache/commons/cli/OptionBuilder;",
+        "areturn"
+      ]
+    ],
+    [
       "public static org.apache.commons.cli.OptionBuilder withType(java.lang.Object);",
       [
         "aload_0",
@@ -1443,6 +1950,63 @@
       ]
     ],
     [
+      "public static java.lang.Class<?> getValueType(char);",
+      [
+        "iload_0",
+        "tableswitch { // 35 to 64",
+        "152",
+        "172",
+        "144",
+        "172",
+        "172",
+        "172",
+        "172",
+        "164",
+        "148",
+        "172",
+        "172",
+        "172",
+        "168",
+        "172",
+        "172",
+        "172",
+        "172",
+        "172",
+        "172",
+        "172",
+        "172",
+        "172",
+        "172",
+        "140",
+        "172",
+        "156",
+        "172",
+        "160",
+        "172",
+        "136",
+        "getstatic # // Field OBJECT_VALUE:Ljava/lang/Class;",
+        "areturn",
+        "getstatic # // Field STRING_VALUE:Ljava/lang/Class;",
+        "areturn",
+        "getstatic # // Field NUMBER_VALUE:Ljava/lang/Class;",
+        "areturn",
+        "getstatic # // Field CLASS_VALUE:Ljava/lang/Class;",
+        "areturn",
+        "getstatic # // Field DATE_VALUE:Ljava/lang/Class;",
+        "areturn",
+        "getstatic # // Field EXISTING_FILE_VALUE:Ljava/lang/Class;",
+        "areturn",
+        "getstatic # // Field FILE_VALUE:Ljava/lang/Class;",
+        "areturn",
+        "getstatic # // Field FILES_VALUE:Ljava/lang/Class;",
+        "areturn",
+        "getstatic # // Field URL_VALUE:Ljava/lang/Class;",
+        "areturn",
+        "aconst_null",
+        "areturn"
+      ]
+    ],
+    [
       "public org.apache.commons.cli.PatternOptionBuilder();",
       [
         "aload_0",
@@ -1451,9 +2015,31 @@
       ]
     ]
   ],
+  "org.apache.commons.cli.help.TableDefinition$1": [
+    [
+      "public java.util.List<org.apache.commons.cli.help.TextStyle> columnTextStyles();",
+      [
+        "aload_0",
+        "getfield # // Field val$columnStyle:Ljava/util/List;",
+        "areturn"
+      ]
+    ]
+  ],
   "org.apache.commons.cli.help.TableDefinition": [
     [
       "public abstract java.lang.String caption();",
+      []
+    ],
+    [
+      "public abstract java.util.List<org.apache.commons.cli.help.TextStyle> columnTextStyles();",
+      []
+    ],
+    [
+      "public abstract java.util.List<java.lang.String> headers();",
+      []
+    ],
+    [
+      "public abstract java.lang.Iterable<java.util.List<java.lang.String>> rows();",
       []
     ]
   ],
