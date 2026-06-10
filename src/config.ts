@@ -18,10 +18,11 @@ const InlayHintsSchema = z.object({
 
 const CompilerOptionsSchema = z.object({
   /** Directories or .jar files scanned for .class files (resolution only). */
-  classPath: z.array(z.string()).default([]),
+  classPath: z.array(z.string()).default(["./lib/classes"]),
   /** Directories scanned recursively for .java sources (resolution only). */
-  sourcePaths: z.array(z.string()).default([]),
-  outDir: z.string().optional(),
+  sourcePaths: z.array(z.string()).default(["./src/main/java"]),
+  /** Output root for the emitted package tree. */
+  outDir: z.string().default("./build"),
   quiet: z.boolean().optional(),
   failOnDegrade: z.boolean().optional(),
 });
@@ -51,20 +52,25 @@ export const DEFAULT_CONFIG_NAME = "cappu.json";
  * The starter config `cappu init` writes: every option present, commented, and
  * valid JSONC (a test parses it against the schema so the two stay in sync).
  */
-export const CONFIG_TEMPLATE = `{
+export const CONFIG_TEMPLATE = `
+{
   // Project configuration for the cappu compiler and language server (JSONC:
   // comments and trailing commas are fine). Relative paths resolve against
   // this file's directory.
   "compilerOptions": {
     // Compiled dependencies: directories of .class files, or .jar files.
-    // Types resolve against them but are not compiled.
-    "classPath": [],
-    // Additional source directories whose .java files resolve (not compiled).
-    "sourcePaths": [],
-    // Output root for the emitted package tree (default: current directory).
-    // "outDir": "build",
+    // Types resolve against them but are not compiled. Default if unset: ["./lib/classes"].
+    // "classPath": ["./lib/classes"],
+
+    // Additional source directories whose .java files resolve (not compiled). Default if unset: ["./src/main/java"].
+    // "sourcePaths": ["./src/main/java"],
+
+    // Output root for the emitted package tree (default if unset: "./build").
+    // "outDir": "./build",
+
     // Do not print the path of each emitted .class file.
     "quiet": false,
+
     // Fail the build when a method body degrades to a placeholder because of
     // an unsupported construct (degradations always print a warning).
     "failOnDegrade": false,
@@ -78,7 +84,7 @@ export const CONFIG_TEMPLATE = `{
     },
   },
 }
-`;
+`.trimStart();
 
 function emptyConfig(baseDir: string): CappuConfig {
   return { ...ConfigFileSchema.parse({}), baseDir };

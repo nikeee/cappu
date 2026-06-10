@@ -22,7 +22,7 @@ export interface CompileOptions {
   /** Treat degraded (placeholder) method bodies as a build failure. */
   failOnDegrade?: boolean;
   /** Project configuration (cappu.json); CLI flags take precedence. */
-  config?: CappuConfig;
+  config: CappuConfig;
 }
 
 /**
@@ -45,7 +45,7 @@ export function loadConfiguredPaths(program: Program, config: CappuConfig): void
   }
 }
 
-export function runCompile(files: string[], options: CompileOptions = {}): number {
+export function runCompile(files: string[], options: CompileOptions): number {
   if (files.length === 0) {
     process.stderr.write("usage: compile [-d <outdir>] <file.java> ...\n");
     return 2;
@@ -72,7 +72,7 @@ export function runCompile(files: string[], options: CompileOptions = {}): numbe
 
   try {
     // Single output root so every class lands in one coherent package tree.
-    const target = outDir ?? ".";
+    const target = outDir;
     for (const file of files) {
       const sourceFile = program.getSourceFile(pathToUri(file))!;
       if (sourceFile.parseDiagnostics.length > 0) {
