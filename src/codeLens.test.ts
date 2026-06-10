@@ -110,3 +110,19 @@ test("abstract classes count subclasses and abstract-method overrides", () => {
   expect(impls.get("weight")).toBe(1);
   expect(impls.has("common")).toBe(false); // concrete methods get no implementations lens
 });
+
+test("implementation counts are transitive through intermediate types", () => {
+  const out = lenses(
+    {
+      "I.java": "interface I { int f(); }",
+      "Mid.java": "abstract class Mid implements I {}",
+      "Leaf.java": "class Leaf extends Mid { public int f() { return 1; } }",
+    },
+    "I.java",
+  );
+  const impls = new Map(
+    out.filter(e => e.kind === "implementations").map(e => [e.name, e.count]),
+  );
+  expect(impls.get("I")).toBe(2); // Mid (direct) and Leaf (via Mid)
+  expect(impls.get("f")).toBe(1); // Leaf's concrete body
+});

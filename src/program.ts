@@ -62,6 +62,11 @@ export interface Program {
   getAllUris(): string[];
   /** Cross-file type index over all current files (rebuilt when files change). */
   getGlobalIndex(): GlobalIndex;
+  /**
+   * Monotonically increasing counter, bumped on every file mutation. Derived
+   * caches (subtype index, ...) key their memo on it to invalidate cheaply.
+   */
+  getGeneration(): number;
 }
 
 function named(node: Node): string | undefined {
@@ -209,25 +214,30 @@ export function createProgram(): Program {
     getPackageByName: name => packagesByName.get(name),
   };
 
+  let generation = 0;
   return {
     setOpenDocument(uri, text, version) {
       openDocuments.set(uri, { text, version });
       dirty.add(uri);
+      generation++;
     },
     closeDocument(uri) {
       openDocuments.delete(uri);
       cache.delete(uri);
       dirty.add(uri);
+      generation++;
     },
     addProjectFile(uri, text) {
       projectFiles.set(uri, text);
       cache.delete(uri);
       dirty.add(uri);
+      generation++;
     },
     removeProjectFile(uri) {
       projectFiles.delete(uri);
       cache.delete(uri);
       dirty.add(uri); // refreshIndex drops its types once no source resolves
+      generation++;
     },
     getSourceFile,
     getOpenUris: () => [...openDocuments.keys()],
@@ -236,5 +246,6 @@ export function createProgram(): Program {
       refreshIndex();
       return globalIndex;
     },
+    getGeneration: () => generation,
   };
 }

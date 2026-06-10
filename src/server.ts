@@ -61,10 +61,12 @@ import {
   DiagnosticCategory,
   type Diagnostic as JavaDiagnostic,
   type Identifier,
+  type MethodDeclaration,
   type Node,
   type PrefixUnaryExpression,
   type SourceFile,
   type Symbol,
+  SymbolFlags,
   SyntaxKind,
 } from "./types.ts";
 import { type ArrayType, type ClassType, TypeKind } from "./checkerTypes.ts";
@@ -73,6 +75,7 @@ import { enclosingCall, getHoverText } from "./hover.ts";
 import { DEFAULT_INLAY_HINTS, getInlayHints, type InlayHintsSettings } from "./inlayHints.ts";
 import { getSemanticTokens, TOKEN_MODIFIERS, TOKEN_TYPES } from "./semanticTokens.ts";
 import { getCodeLenses } from "./codeLens.ts";
+import { declarationName, findMethodImplementations, getSubtypeIndex } from "./subtypes.ts";
 import { isValidIdentifier, skipTrivia } from "./utilities.ts";
 import { loadJavaFiles, uriToPath } from "./workspace.ts";
 
@@ -131,6 +134,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
         full: true,
       },
       codeLensProvider: { resolveProvider: false },
+      implementationProvider: true,
     },
   };
 });
@@ -535,6 +539,32 @@ connection.onTypeDefinition((params): Definition | null => {
   if (!classSymbol) return null;
   const name = getDeclarationNameNode(classSymbol);
   return name ? locationOf(name) : null;
+});
+
+// Implementations of the interface/abstract class or method under the cursor:
+// transitive subtypes from the subtype index, or the concrete method bodies
+// matching an abstract method by name and arity.
+connection.onImplementation((params): Definition | null => {
+  const identifier = identifierAt(params.textDocument.uri, params.position);
+  if (!identifier) return null;
+  const symbol = checker.resolveName(identifier);
+  if (!symbol) return null;
+  if (symbol.flags & (SymbolFlags.Class | SymbolFlags.Interface)) {
+    const locations = getSubtypeIndex(program)
+      .allSubtypesOf(symbol)
+      .map(declarationName)
+      .filter((n): n is Identifier => n !== undefined)
+      .map(locationOf);
+    return locations.length > 0 ? locations : null;
+  }
+  if (symbol.flags & SymbolFlags.Method) {
+    const locations = (symbol.declarations ?? [])
+      .filter(d => d.kind === SyntaxKind.MethodDeclaration)
+      .flatMap(d => findMethodImplementations(d as MethodDeclaration, program))
+      .map(m => locationOf(m.name));
+    return locations.length > 0 ? locations : null;
+  }
+  return null;
 });
 
 // A "N references" lens above every type and method declaration. The command is

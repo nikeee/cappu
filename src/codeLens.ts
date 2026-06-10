@@ -1,14 +1,14 @@
 // Code lenses: a reference count over every type and method declaration in a
 // file, and an implementation count over interfaces, abstract classes and
-// their abstract methods. All counts are gathered in ONE pass over the
-// workspace (resolving an identifier is memoized per node), instead of one
-// search per declaration; the LSP server turns entries into protocol CodeLens
-// objects.
+// their abstract methods. Reference counts come from ONE pass over the
+// workspace (resolving an identifier is memoized per node); implementation
+// counts come from the generation-memoized subtype index, so they are
+// transitive (B extends A, A implements I counts B under I).
 
 import type { Checker } from "./checker.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
-import { resolveTypeEntityName } from "./resolver.ts";
+import { declarationName, findMethodImplementations, getSubtypeIndex } from "./subtypes.ts";
 import {
   type ClassDeclaration,
   type Identifier,
@@ -17,8 +17,6 @@ import {
   type SourceFile,
   type Symbol,
   SyntaxKind,
-  type TypeNode,
-  type TypeReference,
 } from "./types.ts";
 
 const LENS_DECLARATIONS = new Set<SyntaxKind>([
@@ -28,13 +26,6 @@ const LENS_DECLARATIONS = new Set<SyntaxKind>([
   SyntaxKind.RecordDeclaration,
   SyntaxKind.AnnotationTypeDeclaration,
   SyntaxKind.MethodDeclaration,
-]);
-
-const TYPE_DECLARATIONS = new Set<SyntaxKind>([
-  SyntaxKind.ClassDeclaration,
-  SyntaxKind.InterfaceDeclaration,
-  SyntaxKind.EnumDeclaration,
-  SyntaxKind.RecordDeclaration,
 ]);
 
 export interface CodeLensEntry {
@@ -54,18 +45,17 @@ function hasAbstractModifier(node: { modifiers?: readonly Node[] }): boolean {
   return (node.modifiers ?? []).some(m => m.kind === SyntaxKind.AbstractKeyword);
 }
 
-// The written super types of a type declaration (extends + implements).
-function superTypeNodes(node: Node): readonly TypeNode[] {
-  const d = node as {
-    extendsType?: TypeNode;
-    extendsTypes?: readonly TypeNode[];
-    implementsTypes?: readonly TypeNode[];
-  };
-  return [
-    ...(d.extendsType ? [d.extendsType] : []),
-    ...(d.extendsTypes ?? []),
-    ...(d.implementsTypes ?? []),
-  ];
+/** The abstract methods of an interface or abstract class declaration. */
+export function abstractMethodsOf(declaration: Node): MethodDeclaration[] {
+  const members = (declaration as { members?: readonly Node[] }).members ?? [];
+  const isInterface = declaration.kind === SyntaxKind.InterfaceDeclaration;
+  return members.filter(
+    (m): m is MethodDeclaration =>
+      m.kind === SyntaxKind.MethodDeclaration &&
+      (isInterface
+        ? !(m as MethodDeclaration).body // default/static interface methods have one
+        : hasAbstractModifier(m as MethodDeclaration)),
+  );
 }
 
 export function getCodeLenses(
@@ -75,46 +65,37 @@ export function getCodeLenses(
 ): CodeLensEntry[] {
   // Reference targets: every type/method declaration in this file.
   const refTargets = new Map<Symbol, CodeLensEntry>();
-  // Implementation targets: interfaces and abstract classes in this file, each
-  // carrying its abstract methods so implementing members can be matched.
-  interface ImplTarget {
-    readonly entry: CodeLensEntry;
-    readonly abstractMethods: Map<MethodDeclaration, CodeLensEntry>;
-  }
-  const implTargets = new Map<Symbol, ImplTarget>();
-
-  const abstractMethodsOf = (declaration: Node): MethodDeclaration[] => {
-    const members = (declaration as { members?: readonly Node[] }).members ?? [];
-    const isInterface = declaration.kind === SyntaxKind.InterfaceDeclaration;
-    return members.filter(
-      (m): m is MethodDeclaration =>
-        m.kind === SyntaxKind.MethodDeclaration &&
-        (isInterface
-          ? !(m as MethodDeclaration).body // default/static interface methods have one
-          : hasAbstractModifier(m as MethodDeclaration)),
-    );
-  };
+  const entries: CodeLensEntry[] = [];
+  const subtypes = getSubtypeIndex(program);
 
   const collect = (node: Node): void => {
     const name = (node as { name?: Identifier }).name;
     if (name && node.symbol) {
       if (LENS_DECLARATIONS.has(node.kind) && !refTargets.has(node.symbol)) {
-        refTargets.set(node.symbol, { name, kind: "references", sites: [] });
+        const entry: CodeLensEntry = { name, kind: "references", sites: [] };
+        refTargets.set(node.symbol, entry);
+        entries.push(entry);
       }
       const isImplTarget =
         node.kind === SyntaxKind.InterfaceDeclaration ||
         (node.kind === SyntaxKind.ClassDeclaration &&
           hasAbstractModifier(node as ClassDeclaration));
-      if (isImplTarget && !implTargets.has(node.symbol)) {
-        implTargets.set(node.symbol, {
-          entry: { name, kind: "implementations", sites: [] },
-          abstractMethods: new Map(
-            abstractMethodsOf(node).map(m => [
-              m,
-              { name: m.name, kind: "implementations", sites: [] } satisfies CodeLensEntry,
-            ]),
-          ),
+      if (isImplTarget) {
+        entries.push({
+          name,
+          kind: "implementations",
+          sites: subtypes
+            .allSubtypesOf(node.symbol)
+            .map(declarationName)
+            .filter((n): n is Identifier => n !== undefined),
         });
+        for (const method of abstractMethodsOf(node)) {
+          entries.push({
+            name: method.name,
+            kind: "implementations",
+            sites: findMethodImplementations(method, program).map(m => m.name),
+          });
+        }
       }
     }
     forEachChild(node, child => {
@@ -123,13 +104,11 @@ export function getCodeLenses(
     });
   };
   collect(sourceFile);
-  if (refTargets.size === 0 && implTargets.size === 0) return [];
+  if (refTargets.size === 0) return entries;
 
-  // One workspace pass. References: every resolved identifier naming a target
-  // (except the declaration's own name). Implementations: every type whose
-  // extends/implements clause resolves to a target, plus its members matching a
-  // target's abstract methods by name and arity. Stub files cannot reference or
-  // implement user code, so jdk:/// is skipped.
+  // One workspace pass for the reference counts: every resolved identifier that
+  // names a target counts, except the declaration's own name. Stub files cannot
+  // reference user code.
   for (const uri of program.getAllUris()) {
     if (uri.startsWith("jdk:")) continue;
     const file = program.getSourceFile(uri);
@@ -142,35 +121,6 @@ export function getCodeLenses(
           entry.sites.push(node);
         }
       }
-      if (TYPE_DECLARATIONS.has(node.kind)) {
-        for (const superType of superTypeNodes(node)) {
-          if (superType.kind !== SyntaxKind.TypeReference) continue;
-          const superSymbol = resolveTypeEntityName(
-            (superType as TypeReference).typeName,
-            node,
-            program,
-          );
-          const target = superSymbol ? implTargets.get(superSymbol) : undefined;
-          if (!target) continue;
-          const name = (node as { name?: Identifier }).name;
-          if (name) target.entry.sites.push(name);
-          // Match each abstract method against this type's members.
-          const members = (node as { members?: readonly Node[] }).members ?? [];
-          for (const [abstractMethod, methodEntry] of target.abstractMethods) {
-            for (const member of members) {
-              if (member.kind !== SyntaxKind.MethodDeclaration) continue;
-              const method = member as MethodDeclaration;
-              if (
-                method.body &&
-                method.name.text === abstractMethod.name.text &&
-                method.parameters.length === abstractMethod.parameters.length
-              ) {
-                methodEntry.sites.push(method.name);
-              }
-            }
-          }
-        }
-      }
       forEachChild(node, child => {
         visit(child);
         return undefined;
@@ -178,10 +128,5 @@ export function getCodeLenses(
     };
     visit(file);
   }
-
-  const result = [...refTargets.values()];
-  for (const target of implTargets.values()) {
-    result.push(target.entry, ...target.abstractMethods.values());
-  }
-  return result;
+  return entries;
 }
