@@ -8,6 +8,7 @@
 import {
   type CodeAction,
   type CodeActionParams,
+  type CodeLens,
   createConnection,
   type Definition,
   type Diagnostic as LspDiagnostic,
@@ -71,6 +72,7 @@ import { forEachChild } from "./parser.ts";
 import { enclosingCall, getHoverText } from "./hover.ts";
 import { DEFAULT_INLAY_HINTS, getInlayHints, type InlayHintsSettings } from "./inlayHints.ts";
 import { getSemanticTokens, TOKEN_MODIFIERS, TOKEN_TYPES } from "./semanticTokens.ts";
+import { getCodeLenses } from "./codeLens.ts";
 import { isValidIdentifier, skipTrivia } from "./utilities.ts";
 import { loadJavaFiles, uriToPath } from "./workspace.ts";
 
@@ -128,6 +130,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
         legend: { tokenTypes: [...TOKEN_TYPES], tokenModifiers: [...TOKEN_MODIFIERS] },
         full: true,
       },
+      codeLensProvider: { resolveProvider: false },
     },
   };
 });
@@ -532,6 +535,26 @@ connection.onTypeDefinition((params): Definition | null => {
   if (!classSymbol) return null;
   const name = getDeclarationNameNode(classSymbol);
   return name ? locationOf(name) : null;
+});
+
+// A "N references" lens above every type and method declaration. The command is
+// the editor.action.showReferences convention (VS Code peeks the locations);
+// clients without it still render the count as plain text.
+connection.onCodeLens((params): CodeLens[] => {
+  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  if (!sourceFile) return [];
+  return getCodeLenses(program, checker, sourceFile).map(entry => {
+    const range = rangeOf(entry.name);
+    const n = entry.references.length;
+    return {
+      range,
+      command: {
+        title: n === 1 ? "1 reference" : `${n} references`,
+        command: "editor.action.showReferences",
+        arguments: [params.textDocument.uri, range.start, entry.references.map(locationOf)],
+      },
+    };
+  });
 });
 
 connection.languages.semanticTokens.on((params): SemanticTokens => {
