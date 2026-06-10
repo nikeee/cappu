@@ -23,6 +23,7 @@ import {
   ResponseError,
   type SignatureHelp,
   type SignatureInformation,
+  type SymbolInformation,
   type TextEdit,
   TextDocuments,
   TextDocumentSyncKind,
@@ -90,6 +91,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       signatureHelpProvider: { triggerCharacters: ["(", ","] },
       renameProvider: { prepareProvider: true },
       codeActionProvider: true,
+      workspaceSymbolProvider: true,
     },
   };
 });
@@ -357,6 +359,39 @@ connection.onSignatureHelp((params): SignatureHelp | null => {
   );
   const activeParameter = call.arguments.filter(a => a.end < offset).length;
   return { signatures, activeSignature, activeParameter };
+});
+
+// Workspace-wide symbol search (workspace/symbol): every declaration in every
+// project file whose name contains the query (case-insensitive). The per-file
+// outlines are flattened to SymbolInformation; jdk:/// stub files are skipped
+// (the client cannot open them).
+connection.onWorkspaceSymbol((params): SymbolInformation[] => {
+  const query = params.query.toLowerCase();
+  if (!query) return []; // an empty query would dump every declaration
+  const results: SymbolInformation[] = [];
+  for (const uri of program.getAllUris()) {
+    if (uri.startsWith("jdk:")) continue;
+    const sourceFile = program.getSourceFile(uri);
+    if (!sourceFile) continue;
+    const lineStarts = computeLineStarts(sourceFile.text);
+    const flatten = (symbols: DocumentSymbol[], container?: string): void => {
+      for (const s of symbols) {
+        if (s.name.toLowerCase().includes(query)) {
+          results.push({
+            name: s.name,
+            kind: s.kind,
+            location: { uri, range: s.range },
+            ...(container ? { containerName: container } : {}),
+          });
+        }
+        if (s.children) flatten(s.children, s.name);
+        if (results.length >= 256) return; // cap a too-broad query
+      }
+    };
+    flatten(getDocumentSymbols(sourceFile, lineStarts));
+    if (results.length >= 256) break;
+  }
+  return results;
 });
 
 connection.onHover((params): Hover | null => {
