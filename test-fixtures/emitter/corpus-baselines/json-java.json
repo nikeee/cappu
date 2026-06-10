@@ -282,6 +282,32 @@
       ]
     ],
     [
+      "public java.math.BigInteger optBigInteger(int, java.math.BigInteger);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method opt:(I)Ljava/lang/Object;",
+        "astore_3",
+        "aload_3",
+        "aload_2",
+        "invokestatic # // Method org/json/JSONObject.objectToBigInteger:(Ljava/lang/Object;Ljava/math/BigInteger;)Ljava/math/BigInteger;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.math.BigDecimal optBigDecimal(int, java.math.BigDecimal);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method opt:(I)Ljava/lang/Object;",
+        "astore_3",
+        "aload_3",
+        "aload_2",
+        "invokestatic # // Method org/json/JSONObject.objectToBigDecimal:(Ljava/lang/Object;Ljava/math/BigDecimal;)Ljava/math/BigDecimal;",
+        "areturn"
+      ]
+    ],
+    [
       "public org.json.JSONArray optJSONArray(int);",
       [
         "aload_0",
@@ -909,6 +935,42 @@
       ]
     ],
     [
+      "public java.math.BigDecimal optBigDecimal(java.lang.String, java.math.BigDecimal);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method opt:(Ljava/lang/String;)Ljava/lang/Object;",
+        "astore_3",
+        "aload_3",
+        "aload_2",
+        "invokestatic # // Method objectToBigDecimal:(Ljava/lang/Object;Ljava/math/BigDecimal;)Ljava/math/BigDecimal;",
+        "areturn"
+      ]
+    ],
+    [
+      "static java.math.BigDecimal objectToBigDecimal(java.lang.Object, java.math.BigDecimal);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_1",
+        "invokestatic # // Method objectToBigDecimal:(Ljava/lang/Object;Ljava/math/BigDecimal;Z)Ljava/math/BigDecimal;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.math.BigInteger optBigInteger(java.lang.String, java.math.BigInteger);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method opt:(Ljava/lang/String;)Ljava/lang/Object;",
+        "astore_3",
+        "aload_3",
+        "aload_2",
+        "invokestatic # // Method objectToBigInteger:(Ljava/lang/Object;Ljava/math/BigInteger;)Ljava/math/BigInteger;",
+        "areturn"
+      ]
+    ],
+    [
       "public double optDouble(java.lang.String, double);",
       [
         "aload_0",
@@ -1242,6 +1304,34 @@
       ]
     ],
     [
+      "public static java.lang.String quote(java.lang.String);",
+      [
+        "aload_0",
+        "ifnull 11",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.isEmpty:()Z",
+        "ifeq 15",
+        "ldc_w # // String \\\"\\\"",
+        "areturn",
+        "new # // class org/json/StringBuilderWriter",
+        "dup",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "iconst_2",
+        "iadd",
+        "invokespecial # // Method org/json/StringBuilderWriter.\"<init>\":(I)V",
+        "astore_1",
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method quote:(Ljava/lang/String;Ljava/io/Writer;)Ljava/io/Writer;",
+        "invokevirtual # // Method java/lang/Object.toString:()Ljava/lang/String;",
+        "areturn",
+        "astore_2",
+        "ldc_w # // String",
+        "areturn"
+      ]
+    ],
+    [
       "public java.lang.Object remove(java.lang.String);",
       [
         "aload_0",
@@ -1462,6 +1552,43 @@
     ]
   ],
   "org.json.JSONTokener": [
+    [
+      "public org.json.JSONTokener(java.io.Reader);",
+      [
+        "aload_0",
+        "aload_1",
+        "new # // class org/json/JSONParserConfiguration",
+        "dup",
+        "invokespecial # // Method org/json/JSONParserConfiguration.\"<init>\":()V",
+        "invokespecial # // Method \"<init>\":(Ljava/io/Reader;Lorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONTokener(java.lang.String);",
+      [
+        "aload_0",
+        "new # // class java/io/StringReader",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method java/io/StringReader.\"<init>\":(Ljava/lang/String;)V",
+        "invokespecial # // Method \"<init>\":(Ljava/io/Reader;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONTokener(java.lang.String, org.json.JSONParserConfiguration);",
+      [
+        "aload_0",
+        "new # // class java/io/StringReader",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method java/io/StringReader.\"<init>\":(Ljava/lang/String;)V",
+        "aload_2",
+        "invokespecial # // Method \"<init>\":(Ljava/io/Reader;Lorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
     [
       "public org.json.JSONParserConfiguration getJsonParserConfiguration();",
       [
@@ -1986,6 +2113,33 @@
   ],
   "org.json.XMLTokener": [
     [
+      "public org.json.XMLTokener(java.io.Reader);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONTokener.\"<init>\":(Ljava/io/Reader;)V",
+        "aload_0",
+        "getstatic # // Field org/json/XMLParserConfiguration.ORIGINAL:Lorg/json/XMLParserConfiguration;",
+        "putfield # // Field configuration:Lorg/json/XMLParserConfiguration;",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.XMLTokener(java.io.Reader, org.json.XMLParserConfiguration);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONTokener.\"<init>\":(Ljava/io/Reader;)V",
+        "aload_0",
+        "getstatic # // Field org/json/XMLParserConfiguration.ORIGINAL:Lorg/json/XMLParserConfiguration;",
+        "putfield # // Field configuration:Lorg/json/XMLParserConfiguration;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field configuration:Lorg/json/XMLParserConfiguration;",
+        "return"
+      ]
+    ],
+    [
       "private static boolean isValidHex(java.lang.String);",
       [
         "aload_0",
@@ -2135,6 +2289,17 @@
       [
         "aload_0",
         "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.CustomClassA(java.math.BigInteger);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field largeInt:Ljava/math/BigInteger;",
         "return"
       ]
     ]
@@ -2382,6 +2547,80 @@
       ]
     ]
   ],
+  "org.json.junit.data.Fraction": [
+    [
+      "public org.json.junit.data.Fraction(long, long);",
+      [
+        "aload_0",
+        "lload_1",
+        "invokestatic # // Method java/math/BigInteger.valueOf:(J)Ljava/math/BigInteger;",
+        "lload_3",
+        "invokestatic # // Method java/math/BigInteger.valueOf:(J)Ljava/math/BigInteger;",
+        "invokespecial # // Method \"<init>\":(Ljava/math/BigInteger;Ljava/math/BigInteger;)V",
+        "return"
+      ]
+    ],
+    [
+      "public java.math.BigDecimal bigDecimalValue();",
+      [
+        "aload_0",
+        "getfield # // Field bigDecimal:Ljava/math/BigDecimal;",
+        "areturn"
+      ]
+    ],
+    [
+      "public double doubleValue();",
+      [
+        "aload_0",
+        "getfield # // Field bigDecimal:Ljava/math/BigDecimal;",
+        "invokevirtual # // Method java/math/BigDecimal.doubleValue:()D",
+        "dreturn"
+      ]
+    ],
+    [
+      "public float floatValue();",
+      [
+        "aload_0",
+        "getfield # // Field bigDecimal:Ljava/math/BigDecimal;",
+        "invokevirtual # // Method java/math/BigDecimal.floatValue:()F",
+        "freturn"
+      ]
+    ],
+    [
+      "public java.math.BigInteger getDenominator();",
+      [
+        "aload_0",
+        "getfield # // Field denominator:Ljava/math/BigInteger;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.math.BigInteger getNumerator();",
+      [
+        "aload_0",
+        "getfield # // Field numerator:Ljava/math/BigInteger;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int intValue();",
+      [
+        "aload_0",
+        "getfield # // Field bigDecimal:Ljava/math/BigDecimal;",
+        "invokevirtual # // Method java/math/BigDecimal.intValue:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public long longValue();",
+      [
+        "aload_0",
+        "getfield # // Field bigDecimal:Ljava/math/BigDecimal;",
+        "invokevirtual # // Method java/math/BigDecimal.longValue:()J",
+        "lreturn"
+      ]
+    ]
+  ],
   "org.json.junit.data.GenericBean": [
     [
       "public T getGenericValue();",
@@ -2441,6 +2680,16 @@
         "ldc # // String \\\"My String with \\\"s",
         "areturn"
       ]
+    ],
+    [
+      "public java.io.StringReader getStringReaderKey();",
+      [
+        "new # // class java/io/StringReader",
+        "dup",
+        "ldc # // String Some String Value in a reader",
+        "invokespecial # // Method java/io/StringReader.\"<init>\":(Ljava/lang/String;)V",
+        "areturn"
+      ]
     ]
   ],
   "org.json.junit.data.MyBean": [
@@ -2466,6 +2715,10 @@
     ],
     [
       "public abstract java.lang.Boolean isFalseKey();",
+      []
+    ],
+    [
+      "public abstract java.io.StringReader getStringReaderKey();",
       []
     ]
   ],
@@ -2511,6 +2764,16 @@
         "checkcast # // class java/lang/Integer",
         "areturn"
       ]
+    ]
+  ],
+  "org.json.junit.data.MyBigNumberBean": [
+    [
+      "public abstract java.math.BigInteger getBigInteger();",
+      []
+    ],
+    [
+      "public abstract java.math.BigDecimal getBigDecimal();",
+      []
     ]
   ],
   "org.json.junit.data.MyEnum": [

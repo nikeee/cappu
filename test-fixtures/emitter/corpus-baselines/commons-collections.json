@@ -1521,6 +1521,16 @@
       ]
     ],
     [
+      "public static <E> java.util.ListIterator<E> singletonListIterator(E);",
+      [
+        "new # // class org/apache/commons/collections4/iterators/SingletonListIterator",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/iterators/SingletonListIterator.\"<init>\":(Ljava/lang/Object;)V",
+        "areturn"
+      ]
+    ],
+    [
       "public static int size(java.util.Iterator<?>);",
       [
         "iconst_0",
@@ -1573,6 +1583,14 @@
       [
         "aload_0",
         "invokestatic # // Method org/apache/commons/collections4/iterators/UnmodifiableIterator.unmodifiableIterator:(Ljava/util/Iterator;)Ljava/util/Iterator;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static <E> java.util.ListIterator<E> unmodifiableListIterator(java.util.ListIterator<E>);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/collections4/iterators/UnmodifiableListIterator.unmodifiableListIterator:(Ljava/util/ListIterator;)Ljava/util/ListIterator;",
         "areturn"
       ]
     ],
@@ -3209,6 +3227,20 @@
       ]
     ],
     [
+      "public org.apache.commons.collections4.comparators.ComparatorChain(java.util.List<java.util.Comparator<E>>, java.util.BitSet);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field comparatorChain:Ljava/util/List;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field orderingBits:Ljava/util/BitSet;",
+        "return"
+      ]
+    ],
+    [
       "public void addComparator(java.util.Comparator<E>);",
       [
         "aload_0",
@@ -3238,6 +3270,30 @@
         "aload_0",
         "getfield # // Field isLocked:Z",
         "ireturn"
+      ]
+    ],
+    [
+      "public void setForwardSort(int);",
+      [
+        "aload_0",
+        "invokevirtual # // Method checkLocked:()V",
+        "aload_0",
+        "getfield # // Field orderingBits:Ljava/util/BitSet;",
+        "iload_1",
+        "invokevirtual # // Method java/util/BitSet.clear:(I)V",
+        "return"
+      ]
+    ],
+    [
+      "public void setReverseSort(int);",
+      [
+        "aload_0",
+        "invokevirtual # // Method checkLocked:()V",
+        "aload_0",
+        "getfield # // Field orderingBits:Ljava/util/BitSet;",
+        "iload_1",
+        "invokevirtual # // Method java/util/BitSet.set:(I)V",
+        "return"
       ]
     ]
   ],
@@ -4824,6 +4880,19 @@
       ]
     ]
   ],
+  "org.apache.commons.collections4.functors.PrototypeFactory$PrototypeSerializationFactory": [
+    [
+      "private org.apache.commons.collections4.functors.PrototypeFactory$PrototypeSerializationFactory(T);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field iPrototype:Ljava/io/Serializable;",
+        "return"
+      ]
+    ]
+  ],
   "org.apache.commons.collections4.functors.PrototypeFactory": [
     [
       "private org.apache.commons.collections4.functors.PrototypeFactory();",
@@ -5218,6 +5287,95 @@
       ]
     ]
   ],
+  "org.apache.commons.collections4.iterators.AbstractListIteratorDecorator": [
+    [
+      "public org.apache.commons.collections4.iterators.AbstractListIteratorDecorator(java.util.ListIterator<E>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String iterator",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class java/util/ListIterator",
+        "putfield # // Field iterator:Ljava/util/ListIterator;",
+        "return"
+      ]
+    ],
+    [
+      "public void add(E);",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/ListIterator.add:(Ljava/lang/Object;)V",
+        "return"
+      ]
+    ],
+    [
+      "protected java.util.ListIterator<E> getListIterator();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean hasPrevious();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.hasPrevious:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int nextIndex();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.nextIndex:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public E previous();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.previous:()Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int previousIndex();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.previousIndex:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.remove:()V",
+        "return"
+      ]
+    ],
+    [
+      "public void set(E);",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/ListIterator.set:(Ljava/lang/Object;)V",
+        "return"
+      ]
+    ]
+  ],
   "org.apache.commons.collections4.iterators.AbstractUntypedIteratorDecorator": [
     [
       "protected org.apache.commons.collections4.iterators.AbstractUntypedIteratorDecorator(java.util.Iterator<I>);",
@@ -5487,6 +5645,43 @@
   ],
   "org.apache.commons.collections4.iterators.CollatingIterator": [
     [
+      "private boolean anyValueSet(java.util.BitSet);",
+      [
+        "iconst_0",
+        "istore_2",
+        "iload_2",
+        "aload_1",
+        "invokevirtual # // Method java/util/BitSet.size:()I",
+        "if_icmpge 26",
+        "aload_1",
+        "iload_2",
+        "invokevirtual # // Method java/util/BitSet.get:(I)Z",
+        "ifeq 20",
+        "iconst_1",
+        "ireturn",
+        "iinc 2, 1",
+        "goto 2",
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "private void clear(int);",
+      [
+        "aload_0",
+        "getfield # // Field values:Ljava/util/List;",
+        "iload_1",
+        "aconst_null",
+        "invokeinterface #, 3 // InterfaceMethod java/util/List.set:(ILjava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "aload_0",
+        "getfield # // Field valueSet:Ljava/util/BitSet;",
+        "iload_1",
+        "invokevirtual # // Method java/util/BitSet.clear:(I)V",
+        "return"
+      ]
+    ],
+    [
       "public java.util.Comparator<? super E> getComparator();",
       [
         "aload_0",
@@ -5543,6 +5738,45 @@
       ]
     ],
     [
+      "private boolean set(int);",
+      [
+        "aload_0",
+        "getfield # // Field iterators:Ljava/util/List;",
+        "iload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;",
+        "checkcast # // class java/util/Iterator",
+        "astore_2",
+        "aload_2",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ifeq 50",
+        "aload_0",
+        "getfield # // Field values:Ljava/util/List;",
+        "iload_1",
+        "aload_2",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;",
+        "invokeinterface #, 3 // InterfaceMethod java/util/List.set:(ILjava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "aload_0",
+        "getfield # // Field valueSet:Ljava/util/BitSet;",
+        "iload_1",
+        "invokevirtual # // Method java/util/BitSet.set:(I)V",
+        "iconst_1",
+        "ireturn",
+        "aload_0",
+        "getfield # // Field values:Ljava/util/List;",
+        "iload_1",
+        "aconst_null",
+        "invokeinterface #, 3 // InterfaceMethod java/util/List.set:(ILjava/lang/Object;)Ljava/lang/Object;",
+        "pop",
+        "aload_0",
+        "getfield # // Field valueSet:Ljava/util/BitSet;",
+        "iload_1",
+        "invokevirtual # // Method java/util/BitSet.clear:(I)V",
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
       "public void setComparator(java.util.Comparator<? super E>);",
       [
         "aload_0",
@@ -5579,6 +5813,13 @@
     ]
   ],
   "org.apache.commons.collections4.iterators.EmptyListIterator": [
+    [
+      "public static <E> java.util.ListIterator<E> emptyListIterator();",
+      [
+        "getstatic # // Field INSTANCE:Ljava/util/ListIterator;",
+        "areturn"
+      ]
+    ],
     [
       "public static <E> org.apache.commons.collections4.ResettableListIterator<E> resettableEmptyListIterator();",
       [
@@ -5858,6 +6099,31 @@
       ]
     ],
     [
+      "public org.apache.commons.collections4.iterators.FilterListIterator(java.util.ListIterator<? extends E>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field iterator:Ljava/util/ListIterator;",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.iterators.FilterListIterator(java.util.ListIterator<? extends E>, org.apache.commons.collections4.Predicate<? super E>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field iterator:Ljava/util/ListIterator;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field predicate:Lorg/apache/commons/collections4/Predicate;",
+        "return"
+      ]
+    ],
+    [
       "public org.apache.commons.collections4.iterators.FilterListIterator(org.apache.commons.collections4.Predicate<? super E>);",
       [
         "aload_0",
@@ -5900,6 +6166,14 @@
         "iconst_0",
         "putfield # // Field previousObjectSet:Z",
         "return"
+      ]
+    ],
+    [
+      "public java.util.ListIterator<? extends E> getListIterator();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "areturn"
       ]
     ],
     [
@@ -6005,12 +6279,67 @@
       ]
     ],
     [
+      "public void setListIterator(java.util.ListIterator<? extends E>);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field iterator:Ljava/util/ListIterator;",
+        "return"
+      ]
+    ],
+    [
       "public void setPredicate(org.apache.commons.collections4.Predicate<? super E>);",
       [
         "aload_0",
         "aload_1",
         "putfield # // Field predicate:Lorg/apache/commons/collections4/Predicate;",
         "return"
+      ]
+    ],
+    [
+      "private boolean setPreviousObject();",
+      [
+        "aload_0",
+        "getfield # // Field nextObjectSet:Z",
+        "ifeq 24",
+        "aload_0",
+        "invokevirtual # // Method clearNextObject:()V",
+        "aload_0",
+        "invokevirtual # // Method setPreviousObject:()Z",
+        "ifne 20",
+        "iconst_0",
+        "ireturn",
+        "aload_0",
+        "invokevirtual # // Method clearPreviousObject:()V",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "ifnonnull 33",
+        "iconst_0",
+        "ireturn",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.hasPrevious:()Z",
+        "ifeq 83",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.previous:()Ljava/lang/Object;",
+        "astore_1",
+        "aload_0",
+        "getfield # // Field predicate:Lorg/apache/commons/collections4/Predicate;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod org/apache/commons/collections4/Predicate.test:(Ljava/lang/Object;)Z",
+        "ifeq 80",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field previousObject:Ljava/lang/Object;",
+        "aload_0",
+        "iconst_1",
+        "putfield # // Field previousObjectSet:Z",
+        "iconst_1",
+        "ireturn",
+        "goto 33",
+        "iconst_0",
+        "ireturn"
       ]
     ]
   ],
@@ -6387,6 +6716,66 @@
         "putfield # // Field iterator:Ljava/util/Iterator;",
         "return"
       ]
+    ],
+    [
+      "public boolean hasNext();",
+      [
+        "aload_0",
+        "getfield # // Field currentIndex:I",
+        "aload_0",
+        "getfield # // Field wrappedIteratorIndex:I",
+        "if_icmpeq 21",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "instanceof # // class java/util/ListIterator",
+        "ifeq 31",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ireturn",
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int nextIndex();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "instanceof # // class java/util/ListIterator",
+        "ifeq 25",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "checkcast # // class java/util/ListIterator",
+        "astore_1",
+        "aload_1",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.nextIndex:()I",
+        "ireturn",
+        "aload_0",
+        "getfield # // Field currentIndex:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int previousIndex();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "instanceof # // class java/util/ListIterator",
+        "ifeq 25",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/Iterator;",
+        "checkcast # // class java/util/ListIterator",
+        "astore_1",
+        "aload_1",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.previousIndex:()I",
+        "ireturn",
+        "aload_0",
+        "getfield # // Field currentIndex:I",
+        "iconst_1",
+        "isub",
+        "ireturn"
+      ]
     ]
   ],
   "org.apache.commons.collections4.iterators.LoopingIterator": [
@@ -6443,10 +6832,39 @@
       ]
     ],
     [
+      "public void add(E);",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/ListIterator.add:(Ljava/lang/Object;)V",
+        "return"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.remove:()V",
+        "return"
+      ]
+    ],
+    [
       "public void reset();",
       [
         "aload_0",
         "invokevirtual # // Method init:()V",
+        "return"
+      ]
+    ],
+    [
+      "public void set(E);",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/ListIterator.set:(Ljava/lang/Object;)V",
         "return"
       ]
     ]
@@ -6794,6 +7212,109 @@
         "dup",
         "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":()V",
         "athrow"
+      ]
+    ]
+  ],
+  "org.apache.commons.collections4.iterators.ReverseListIterator": [
+    [
+      "public void add(E);",
+      [
+        "aload_0",
+        "getfield # // Field validForUpdate:Z",
+        "ifne 17",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String Cannot add to list until next() or previous() called",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field validForUpdate:Z",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/ListIterator.add:(Ljava/lang/Object;)V",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.previous:()Ljava/lang/Object;",
+        "pop",
+        "return"
+      ]
+    ],
+    [
+      "public boolean hasNext();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.hasPrevious:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public E next();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.previous:()Ljava/lang/Object;",
+        "astore_1",
+        "aload_0",
+        "iconst_1",
+        "putfield # // Field validForUpdate:Z",
+        "aload_1",
+        "areturn"
+      ]
+    ],
+    [
+      "public int nextIndex();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.previousIndex:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int previousIndex();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.nextIndex:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void remove();",
+      [
+        "aload_0",
+        "getfield # // Field validForUpdate:Z",
+        "ifne 17",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String Cannot remove from list until next() or previous() called",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.remove:()V",
+        "return"
+      ]
+    ],
+    [
+      "public void set(E);",
+      [
+        "aload_0",
+        "getfield # // Field validForUpdate:Z",
+        "ifne 17",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String Cannot set to list until next() or previous() called",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/ListIterator.set:(Ljava/lang/Object;)V",
+        "return"
       ]
     ]
   ],
@@ -7232,6 +7753,25 @@
   ],
   "org.apache.commons.collections4.iterators.UnmodifiableListIterator": [
     [
+      "public static <E> java.util.ListIterator<E> umodifiableListIterator(java.util.ListIterator<? extends E>);",
+      [
+        "aload_0",
+        "invokestatic # // Method unmodifiableListIterator:(Ljava/util/ListIterator;)Ljava/util/ListIterator;",
+        "areturn"
+      ]
+    ],
+    [
+      "private org.apache.commons.collections4.iterators.UnmodifiableListIterator(java.util.ListIterator<? extends E>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field iterator:Ljava/util/ListIterator;",
+        "return"
+      ]
+    ],
+    [
       "public void add(E);",
       [
         "new # // class java/lang/UnsupportedOperationException",
@@ -7239,6 +7779,42 @@
         "ldc # // String add() is not supported",
         "invokespecial # // Method java/lang/UnsupportedOperationException.\"<init>\":(Ljava/lang/String;)V",
         "athrow"
+      ]
+    ],
+    [
+      "public boolean hasPrevious();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.hasPrevious:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int nextIndex();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.nextIndex:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public E previous();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.previous:()Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int previousIndex();",
+      [
+        "aload_0",
+        "getfield # // Field iterator:Ljava/util/ListIterator;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/ListIterator.previousIndex:()I",
+        "ireturn"
       ]
     ],
     [
@@ -7788,6 +8364,15 @@
       ]
     ],
     [
+      "public java.util.ListIterator<E> listIterator();",
+      [
+        "aload_0",
+        "iconst_0",
+        "invokevirtual # // Method listIterator:(I)Ljava/util/ListIterator;",
+        "areturn"
+      ]
+    ],
+    [
       "public E remove(int);",
       [
         "aload_0",
@@ -7848,6 +8433,15 @@
         "aload_1",
         "invokeinterface #, 2 // InterfaceMethod java/util/List.lastIndexOf:(Ljava/lang/Object;)I",
         "ireturn"
+      ]
+    ],
+    [
+      "public java.util.ListIterator<E> listIterator();",
+      [
+        "aload_0",
+        "iconst_0",
+        "invokevirtual # // Method listIterator:(I)Ljava/util/ListIterator;",
+        "areturn"
       ]
     ],
     [
@@ -9850,6 +10444,27 @@
     ]
   ],
   "org.apache.commons.collections4.bloomfilter.BloomFilterExtractor": [
+    [
+      "public default org.apache.commons.collections4.bloomfilter.BloomFilter flatten();",
+      [
+        "new # // class java/util/concurrent/atomic/AtomicReference",
+        "dup",
+        "invokespecial # // Method java/util/concurrent/atomic/AtomicReference.\"<init>\":()V",
+        "astore_1",
+        "aload_0",
+        "aload_1",
+        "invokedynamic #, 0 // InvokeDynamic #:test:(Ljava/util/concurrent/atomic/AtomicReference;)Ljava/util/function/Predicate;",
+        "invokeinterface #, 2 // InterfaceMethod processBloomFilters:(Ljava/util/function/Predicate;)Z",
+        "pop",
+        "aload_1",
+        "invokevirtual # // Method java/util/concurrent/atomic/AtomicReference.get:()Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/collections4/bloomfilter/BloomFilter",
+        "ldc # // String No filters.",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/collections4/bloomfilter/BloomFilter",
+        "areturn"
+      ]
+    ],
     [
       "public abstract boolean processBloomFilters(java.util.function.Predicate<org.apache.commons.collections4.bloomfilter.BloomFilter>);",
       []
@@ -13097,6 +13712,17 @@
         "aload_0",
         "lload_1",
         "putfield # // Field timeToLiveMillis:J",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.PassiveExpiringMap$ConstantTimeToLiveExpirationPolicy(long, java.util.concurrent.TimeUnit);",
+      [
+        "aload_0",
+        "lload_1",
+        "aload_3",
+        "invokestatic # // Method org/apache/commons/collections4/map/PassiveExpiringMap.validateAndConvertToMillis:(JLjava/util/concurrent/TimeUnit;)J",
+        "invokespecial # // Method \"<init>\":(J)V",
         "return"
       ]
     ]

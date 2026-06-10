@@ -1,4 +1,17 @@
 {
+  "org.apache.commons.csv.CSVException": [
+    [
+      "public org.apache.commons.csv.CSVException(java.lang.String, java.lang.Object...);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokestatic # // Method java/lang/String.format:(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;",
+        "invokespecial # // Method java/io/IOException.\"<init>\":(Ljava/lang/String;)V",
+        "return"
+      ]
+    ]
+  ],
   "org.apache.commons.csv.Constants": [
     [
       "private org.apache.commons.csv.Constants();",

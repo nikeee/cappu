@@ -80,6 +80,29 @@
   ],
   "org.apache.commons.codec.Charsets": [
     [
+      "public static java.nio.charset.Charset toCharset(java.nio.charset.Charset);",
+      [
+        "aload_0",
+        "ifnonnull 10",
+        "invokestatic # // Method java/nio/charset/Charset.defaultCharset:()Ljava/nio/charset/Charset;",
+        "goto 11",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.nio.charset.Charset toCharset(java.lang.String);",
+      [
+        "aload_0",
+        "ifnonnull 10",
+        "invokestatic # // Method java/nio/charset/Charset.defaultCharset:()Ljava/nio/charset/Charset;",
+        "goto 14",
+        "aload_0",
+        "invokestatic # // Method java/nio/charset/Charset.forName:(Ljava/lang/String;)Ljava/nio/charset/Charset;",
+        "areturn"
+      ]
+    ],
+    [
       "public org.apache.commons.codec.Charsets();",
       [
         "aload_0",
@@ -604,6 +627,123 @@
   ],
   "org.apache.commons.codec.binary.StringUtils": [
     [
+      "public static java.nio.ByteBuffer getByteBufferUtf8(java.lang.String);",
+      [
+        "aload_0",
+        "getstatic # // Field java/nio/charset/StandardCharsets.UTF_8:Ljava/nio/charset/Charset;",
+        "invokestatic # // Method getByteBuffer:(Ljava/lang/String;Ljava/nio/charset/Charset;)Ljava/nio/ByteBuffer;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] getBytesIso8859_1(java.lang.String);",
+      [
+        "aload_0",
+        "getstatic # // Field java/nio/charset/StandardCharsets.ISO_8859_1:Ljava/nio/charset/Charset;",
+        "invokestatic # // Method getBytes:(Ljava/lang/String;Ljava/nio/charset/Charset;)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] getBytesUsAscii(java.lang.String);",
+      [
+        "aload_0",
+        "getstatic # // Field java/nio/charset/StandardCharsets.US_ASCII:Ljava/nio/charset/Charset;",
+        "invokestatic # // Method getBytes:(Ljava/lang/String;Ljava/nio/charset/Charset;)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] getBytesUtf16(java.lang.String);",
+      [
+        "aload_0",
+        "getstatic # // Field java/nio/charset/StandardCharsets.UTF_16:Ljava/nio/charset/Charset;",
+        "invokestatic # // Method getBytes:(Ljava/lang/String;Ljava/nio/charset/Charset;)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] getBytesUtf16Be(java.lang.String);",
+      [
+        "aload_0",
+        "getstatic # // Field java/nio/charset/StandardCharsets.UTF_16BE:Ljava/nio/charset/Charset;",
+        "invokestatic # // Method getBytes:(Ljava/lang/String;Ljava/nio/charset/Charset;)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] getBytesUtf16Le(java.lang.String);",
+      [
+        "aload_0",
+        "getstatic # // Field java/nio/charset/StandardCharsets.UTF_16LE:Ljava/nio/charset/Charset;",
+        "invokestatic # // Method getBytes:(Ljava/lang/String;Ljava/nio/charset/Charset;)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] getBytesUtf8(java.lang.String);",
+      [
+        "aload_0",
+        "getstatic # // Field java/nio/charset/StandardCharsets.UTF_8:Ljava/nio/charset/Charset;",
+        "invokestatic # // Method getBytes:(Ljava/lang/String;Ljava/nio/charset/Charset;)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String newStringIso8859_1(byte[]);",
+      [
+        "aload_0",
+        "getstatic # // Field java/nio/charset/StandardCharsets.ISO_8859_1:Ljava/nio/charset/Charset;",
+        "invokestatic # // Method newString:([BLjava/nio/charset/Charset;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String newStringUsAscii(byte[]);",
+      [
+        "aload_0",
+        "getstatic # // Field java/nio/charset/StandardCharsets.US_ASCII:Ljava/nio/charset/Charset;",
+        "invokestatic # // Method newString:([BLjava/nio/charset/Charset;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String newStringUtf16(byte[]);",
+      [
+        "aload_0",
+        "getstatic # // Field java/nio/charset/StandardCharsets.UTF_16:Ljava/nio/charset/Charset;",
+        "invokestatic # // Method newString:([BLjava/nio/charset/Charset;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String newStringUtf16Be(byte[]);",
+      [
+        "aload_0",
+        "getstatic # // Field java/nio/charset/StandardCharsets.UTF_16BE:Ljava/nio/charset/Charset;",
+        "invokestatic # // Method newString:([BLjava/nio/charset/Charset;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String newStringUtf16Le(byte[]);",
+      [
+        "aload_0",
+        "getstatic # // Field java/nio/charset/StandardCharsets.UTF_16LE:Ljava/nio/charset/Charset;",
+        "invokestatic # // Method newString:([BLjava/nio/charset/Charset;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String newStringUtf8(byte[]);",
+      [
+        "aload_0",
+        "getstatic # // Field java/nio/charset/StandardCharsets.UTF_8:Ljava/nio/charset/Charset;",
+        "invokestatic # // Method newString:([BLjava/nio/charset/Charset;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public org.apache.commons.codec.binary.StringUtils();",
       [
         "aload_0",
@@ -718,6 +858,22 @@
       [
         "aload_0",
         "getfield # // Field inputStream:Ljava/io/InputStream;",
+        "areturn"
+      ]
+    ],
+    [
+      "public B setByteArray(byte[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "ifnonnull 9",
+        "aconst_null",
+        "goto 17",
+        "new # // class java/io/ByteArrayInputStream",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method java/io/ByteArrayInputStream.\"<init>\":([B)V",
+        "invokevirtual # // Method setInputStream:(Ljava/io/InputStream;)Lorg/apache/commons/codec/binary/AbstractBaseNCodecStreamBuilder;",
         "areturn"
       ]
     ]
@@ -1400,6 +1556,25 @@
   ],
   "org.apache.commons.codec.binary.Hex": [
     [
+      "public static char[] encodeHex(byte[]);",
+      [
+        "aload_0",
+        "iconst_1",
+        "invokestatic # // Method encodeHex:([BZ)[C",
+        "areturn"
+      ]
+    ],
+    [
+      "public static char[] encodeHex(byte[], boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method toAlphabet:(Z)[C",
+        "invokestatic # // Method encodeHex:([B[C)[C",
+        "areturn"
+      ]
+    ],
+    [
       "protected static char[] encodeHex(byte[], char[]);",
       [
         "aload_0",
@@ -1493,6 +1668,81 @@
       ]
     ],
     [
+      "public static char[] encodeHex(java.nio.ByteBuffer);",
+      [
+        "aload_0",
+        "iconst_1",
+        "invokestatic # // Method encodeHex:(Ljava/nio/ByteBuffer;Z)[C",
+        "areturn"
+      ]
+    ],
+    [
+      "public static char[] encodeHex(java.nio.ByteBuffer, boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method toAlphabet:(Z)[C",
+        "invokestatic # // Method encodeHex:(Ljava/nio/ByteBuffer;[C)[C",
+        "areturn"
+      ]
+    ],
+    [
+      "protected static char[] encodeHex(java.nio.ByteBuffer, char[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method toByteArray:(Ljava/nio/ByteBuffer;)[B",
+        "aload_1",
+        "invokestatic # // Method encodeHex:([B[C)[C",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String encodeHexString(byte[]);",
+      [
+        "new # // class java/lang/String",
+        "dup",
+        "aload_0",
+        "invokestatic # // Method encodeHex:([B)[C",
+        "invokespecial # // Method java/lang/String.\"<init>\":([C)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String encodeHexString(byte[], boolean);",
+      [
+        "new # // class java/lang/String",
+        "dup",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method encodeHex:([BZ)[C",
+        "invokespecial # // Method java/lang/String.\"<init>\":([C)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String encodeHexString(java.nio.ByteBuffer);",
+      [
+        "new # // class java/lang/String",
+        "dup",
+        "aload_0",
+        "invokestatic # // Method encodeHex:(Ljava/nio/ByteBuffer;)[C",
+        "invokespecial # // Method java/lang/String.\"<init>\":([C)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String encodeHexString(java.nio.ByteBuffer, boolean);",
+      [
+        "new # // class java/lang/String",
+        "dup",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method encodeHex:(Ljava/nio/ByteBuffer;Z)[C",
+        "invokespecial # // Method java/lang/String.\"<init>\":([C)V",
+        "areturn"
+      ]
+    ],
+    [
       "private static char[] toAlphabet(boolean);",
       [
         "iload_0",
@@ -1500,6 +1750,55 @@
         "getstatic # // Field DIGITS_LOWER:[C",
         "goto 13",
         "getstatic # // Field DIGITS_UPPER:[C",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.binary.Hex();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "getstatic # // Field DEFAULT_CHARSET:Ljava/nio/charset/Charset;",
+        "putfield # // Field charset:Ljava/nio/charset/Charset;",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.binary.Hex(java.nio.charset.Charset);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field charset:Ljava/nio/charset/Charset;",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.binary.Hex(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method java/nio/charset/Charset.forName:(Ljava/lang/String;)Ljava/nio/charset/Charset;",
+        "invokespecial # // Method \"<init>\":(Ljava/nio/charset/Charset;)V",
+        "return"
+      ]
+    ],
+    [
+      "public java.nio.charset.Charset getCharset();",
+      [
+        "aload_0",
+        "getfield # // Field charset:Ljava/nio/charset/Charset;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getCharsetName();",
+      [
+        "aload_0",
+        "getfield # // Field charset:Ljava/nio/charset/Charset;",
+        "invokevirtual # // Method java/nio/charset/Charset.name:()Ljava/lang/String;",
         "areturn"
       ]
     ]
@@ -1543,11 +1842,47 @@
       ]
     ],
     [
+      "public static java.lang.String md2Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method md2:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String md2Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method md2:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public static byte[] md5(java.lang.String);",
       [
         "aload_0",
         "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
         "invokestatic # // Method md5:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String md5Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method md5:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String md5Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method md5:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
         "areturn"
       ]
     ],
@@ -1577,11 +1912,47 @@
       ]
     ],
     [
+      "public static java.lang.String sha1Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha1:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha1Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha1:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public static byte[] sha256(java.lang.String);",
       [
         "aload_0",
         "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
         "invokestatic # // Method sha256:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha256Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha256:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha256Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha256:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
         "areturn"
       ]
     ],
@@ -1595,11 +1966,47 @@
       ]
     ],
     [
+      "public static java.lang.String sha3_224Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha3_224:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha3_224Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha3_224:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public static byte[] sha3_256(java.lang.String);",
       [
         "aload_0",
         "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
         "invokestatic # // Method sha3_256:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha3_256Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha3_256:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha3_256Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha3_256:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
         "areturn"
       ]
     ],
@@ -1613,6 +2020,24 @@
       ]
     ],
     [
+      "public static java.lang.String sha3_384Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha3_384:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha3_384Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha3_384:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public static byte[] sha3_512(java.lang.String);",
       [
         "aload_0",
@@ -1622,11 +2047,47 @@
       ]
     ],
     [
+      "public static java.lang.String sha3_512Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha3_512:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha3_512Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha3_512:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public static byte[] sha384(java.lang.String);",
       [
         "aload_0",
         "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
         "invokestatic # // Method sha384:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha384Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha384:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha384Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha384:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
         "areturn"
       ]
     ],
@@ -1649,11 +2110,65 @@
       ]
     ],
     [
+      "public static java.lang.String sha512_224Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha512_224:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha512_224Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha512_224:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public static byte[] sha512_256(java.lang.String);",
       [
         "aload_0",
         "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
         "invokestatic # // Method sha512_256:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha512_256Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha512_256:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha512_256Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha512_256:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha512Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha512:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String sha512Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method sha512:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
         "areturn"
       ]
     ],
@@ -1683,11 +2198,77 @@
       ]
     ],
     [
+      "public static java.lang.String shake128_256Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method shake128_256:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String shake128_256Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method shake128_256:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public static byte[] shake256_512(java.lang.String);",
       [
         "aload_0",
         "invokestatic # // Method org/apache/commons/codec/binary/StringUtils.getBytesUtf8:(Ljava/lang/String;)[B",
         "invokestatic # // Method shake256_512:([B)[B",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String shake256_512Hex(byte[]);",
+      [
+        "aload_0",
+        "invokestatic # // Method shake256_512:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String shake256_512Hex(java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method shake256_512:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String digestAsHex(byte[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method digest:([B)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String digestAsHex(java.nio.ByteBuffer);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method digest:(Ljava/nio/ByteBuffer;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String digestAsHex(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method digest:(Ljava/lang/String;)[B",
+        "invokestatic # // Method org/apache/commons/codec/binary/Hex.encodeHexString:([B)Ljava/lang/String;",
         "areturn"
       ]
     ]
@@ -2827,6 +3408,36 @@
         "aload_0",
         "invokespecial # // Method java/lang/Object.\"<init>\":()V",
         "return"
+      ]
+    ],
+    [
+      "static byte[][] randomData(org.apache.commons.codec.binary.BaseNCodec, int);",
+      [
+        "new # // class java/util/Random",
+        "dup",
+        "invokespecial # // Method java/util/Random.\"<init>\":()V",
+        "astore_2",
+        "iload_1",
+        "newarray byte",
+        "astore_3",
+        "aload_2",
+        "aload_3",
+        "invokevirtual # // Method java/util/Random.nextBytes:([B)V",
+        "aload_0",
+        "aload_3",
+        "invokevirtual # // Method org/apache/commons/codec/binary/BaseNCodec.encode:([B)[B",
+        "astore 4",
+        "iconst_2",
+        "anewarray # // class \"[B\"",
+        "dup",
+        "iconst_0",
+        "aload_3",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "aload 4",
+        "aastore",
+        "areturn"
       ]
     ]
   ],

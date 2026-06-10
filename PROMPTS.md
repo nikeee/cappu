@@ -107,3 +107,4 @@ no timestamps were captured.
 - 2026-06-10 10:45 — continue (corpus regen after erasure/Signature)
 - 2026-06-10 11:20 — continue / check whats missing in the jdk stub
 - 2026-06-10 12:05 — improve resolution on hover and other LSP tests.
+- 2026-06-10 13:40 — continue (commit regen baselines)

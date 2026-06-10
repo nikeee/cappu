@@ -1369,6 +1369,17 @@
       ]
     ],
     [
+      "public static boolean containsAny(java.lang.Object[], java.lang.Object...);",
+      [
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/lang3/stream/Streams.of:([Ljava/lang/Object;)Ljava/util/stream/Stream;",
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:test:([Ljava/lang/Object;)Ljava/util/function/Predicate;",
+        "invokeinterface #, 2 // InterfaceMethod java/util/stream/Stream.anyMatch:(Ljava/util/function/Predicate;)Z",
+        "ireturn"
+      ]
+    ],
+    [
       "public static <T> T get(T[], int);",
       [
         "aload_0",
@@ -1412,6 +1423,107 @@
         "invokevirtual # // Method org/apache/commons/lang3/builder/HashCodeBuilder.append:(Ljava/lang/Object;)Lorg/apache/commons/lang3/builder/HashCodeBuilder;",
         "invokevirtual # // Method org/apache/commons/lang3/builder/HashCodeBuilder.toHashCode:()I",
         "ireturn"
+      ]
+    ],
+    [
+      "public static java.util.BitSet indexesOf(boolean[], boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "iconst_0",
+        "invokestatic # // Method indexesOf:([ZZI)Ljava/util/BitSet;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.BitSet indexesOf(byte[], byte);",
+      [
+        "aload_0",
+        "iload_1",
+        "iconst_0",
+        "invokestatic # // Method indexesOf:([BBI)Ljava/util/BitSet;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.BitSet indexesOf(char[], char);",
+      [
+        "aload_0",
+        "iload_1",
+        "iconst_0",
+        "invokestatic # // Method indexesOf:([CCI)Ljava/util/BitSet;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.BitSet indexesOf(double[], double);",
+      [
+        "aload_0",
+        "dload_1",
+        "iconst_0",
+        "invokestatic # // Method indexesOf:([DDI)Ljava/util/BitSet;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.BitSet indexesOf(double[], double, double);",
+      [
+        "aload_0",
+        "dload_1",
+        "iconst_0",
+        "dload_3",
+        "invokestatic # // Method indexesOf:([DDID)Ljava/util/BitSet;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.BitSet indexesOf(float[], float);",
+      [
+        "aload_0",
+        "fload_1",
+        "iconst_0",
+        "invokestatic # // Method indexesOf:([FFI)Ljava/util/BitSet;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.BitSet indexesOf(int[], int);",
+      [
+        "aload_0",
+        "iload_1",
+        "iconst_0",
+        "invokestatic # // Method indexesOf:([III)Ljava/util/BitSet;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.BitSet indexesOf(long[], long);",
+      [
+        "aload_0",
+        "lload_1",
+        "iconst_0",
+        "invokestatic # // Method indexesOf:([JJI)Ljava/util/BitSet;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.BitSet indexesOf(java.lang.Object[], java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "invokestatic # // Method indexesOf:([Ljava/lang/Object;Ljava/lang/Object;I)Ljava/util/BitSet;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.BitSet indexesOf(short[], short);",
+      [
+        "aload_0",
+        "iload_1",
+        "iconst_0",
+        "invokestatic # // Method indexesOf:([SSI)Ljava/util/BitSet;",
+        "areturn"
       ]
     ],
     [
@@ -1832,6 +1944,222 @@
         "getstatic # // Field EMPTY_STRING_ARRAY:[Ljava/lang/String;",
         "invokestatic # // Method nullTo:([Ljava/lang/Object;[Ljava/lang/Object;)[Ljava/lang/Object;",
         "checkcast # // class \"[Ljava/lang/String;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static boolean[] removeAllOccurences(boolean[], boolean);",
+      [
+        "aload_0",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method indexesOf:([ZZ)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[Z\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] removeAllOccurences(byte[], byte);",
+      [
+        "aload_0",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method indexesOf:([BB)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static char[] removeAllOccurences(char[], char);",
+      [
+        "aload_0",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method indexesOf:([CC)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[C\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static double[] removeAllOccurences(double[], double);",
+      [
+        "aload_0",
+        "aload_0",
+        "dload_1",
+        "invokestatic # // Method indexesOf:([DD)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[D\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static float[] removeAllOccurences(float[], float);",
+      [
+        "aload_0",
+        "aload_0",
+        "fload_1",
+        "invokestatic # // Method indexesOf:([FF)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[F\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static int[] removeAllOccurences(int[], int);",
+      [
+        "aload_0",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method indexesOf:([II)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[I\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static long[] removeAllOccurences(long[], long);",
+      [
+        "aload_0",
+        "aload_0",
+        "lload_1",
+        "invokestatic # // Method indexesOf:([JJ)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[J\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static short[] removeAllOccurences(short[], short);",
+      [
+        "aload_0",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method indexesOf:([SS)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[S\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static <T> T[] removeAllOccurences(T[], T);",
+      [
+        "aload_0",
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method indexesOf:([Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[Ljava/lang/Object;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static boolean[] removeAllOccurrences(boolean[], boolean);",
+      [
+        "aload_0",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method indexesOf:([ZZ)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[Z\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] removeAllOccurrences(byte[], byte);",
+      [
+        "aload_0",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method indexesOf:([BB)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[B\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static char[] removeAllOccurrences(char[], char);",
+      [
+        "aload_0",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method indexesOf:([CC)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[C\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static double[] removeAllOccurrences(double[], double);",
+      [
+        "aload_0",
+        "aload_0",
+        "dload_1",
+        "invokestatic # // Method indexesOf:([DD)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[D\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static float[] removeAllOccurrences(float[], float);",
+      [
+        "aload_0",
+        "aload_0",
+        "fload_1",
+        "invokestatic # // Method indexesOf:([FF)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[F\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static int[] removeAllOccurrences(int[], int);",
+      [
+        "aload_0",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method indexesOf:([II)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[I\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static long[] removeAllOccurrences(long[], long);",
+      [
+        "aload_0",
+        "aload_0",
+        "lload_1",
+        "invokestatic # // Method indexesOf:([JJ)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[J\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static short[] removeAllOccurrences(short[], short);",
+      [
+        "aload_0",
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method indexesOf:([SS)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[S\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static <T> T[] removeAllOccurrences(T[], T);",
+      [
+        "aload_0",
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method indexesOf:([Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/BitSet;",
+        "invokestatic # // Method removeAt:(Ljava/lang/Object;Ljava/util/BitSet;)Ljava/lang/Object;",
+        "checkcast # // class \"[Ljava/lang/Object;\"",
         "areturn"
       ]
     ],
@@ -2459,6 +2787,249 @@
         "arraylength",
         "iload_1",
         "invokestatic # // Method shift:([SIII)V",
+        "return"
+      ]
+    ],
+    [
+      "public static void shuffle(boolean[], java.util.Random);",
+      [
+        "aload_0",
+        "ifnull 35",
+        "aload_1",
+        "ifnull 35",
+        "aload_0",
+        "arraylength",
+        "istore_2",
+        "iload_2",
+        "iconst_1",
+        "if_icmple 35",
+        "aload_0",
+        "iload_2",
+        "iconst_1",
+        "isub",
+        "aload_1",
+        "iload_2",
+        "invokevirtual # // Method java/util/Random.nextInt:(I)I",
+        "iconst_1",
+        "invokestatic # // Method swap:([ZIII)V",
+        "iinc 2, -1",
+        "goto 11",
+        "return"
+      ]
+    ],
+    [
+      "public static void shuffle(byte[], java.util.Random);",
+      [
+        "aload_0",
+        "ifnull 35",
+        "aload_1",
+        "ifnull 35",
+        "aload_0",
+        "arraylength",
+        "istore_2",
+        "iload_2",
+        "iconst_1",
+        "if_icmple 35",
+        "aload_0",
+        "iload_2",
+        "iconst_1",
+        "isub",
+        "aload_1",
+        "iload_2",
+        "invokevirtual # // Method java/util/Random.nextInt:(I)I",
+        "iconst_1",
+        "invokestatic # // Method swap:([BIII)V",
+        "iinc 2, -1",
+        "goto 11",
+        "return"
+      ]
+    ],
+    [
+      "public static void shuffle(char[], java.util.Random);",
+      [
+        "aload_0",
+        "ifnull 35",
+        "aload_1",
+        "ifnull 35",
+        "aload_0",
+        "arraylength",
+        "istore_2",
+        "iload_2",
+        "iconst_1",
+        "if_icmple 35",
+        "aload_0",
+        "iload_2",
+        "iconst_1",
+        "isub",
+        "aload_1",
+        "iload_2",
+        "invokevirtual # // Method java/util/Random.nextInt:(I)I",
+        "iconst_1",
+        "invokestatic # // Method swap:([CIII)V",
+        "iinc 2, -1",
+        "goto 11",
+        "return"
+      ]
+    ],
+    [
+      "public static void shuffle(double[], java.util.Random);",
+      [
+        "aload_0",
+        "ifnull 35",
+        "aload_1",
+        "ifnull 35",
+        "aload_0",
+        "arraylength",
+        "istore_2",
+        "iload_2",
+        "iconst_1",
+        "if_icmple 35",
+        "aload_0",
+        "iload_2",
+        "iconst_1",
+        "isub",
+        "aload_1",
+        "iload_2",
+        "invokevirtual # // Method java/util/Random.nextInt:(I)I",
+        "iconst_1",
+        "invokestatic # // Method swap:([DIII)V",
+        "iinc 2, -1",
+        "goto 11",
+        "return"
+      ]
+    ],
+    [
+      "public static void shuffle(float[], java.util.Random);",
+      [
+        "aload_0",
+        "ifnull 35",
+        "aload_1",
+        "ifnull 35",
+        "aload_0",
+        "arraylength",
+        "istore_2",
+        "iload_2",
+        "iconst_1",
+        "if_icmple 35",
+        "aload_0",
+        "iload_2",
+        "iconst_1",
+        "isub",
+        "aload_1",
+        "iload_2",
+        "invokevirtual # // Method java/util/Random.nextInt:(I)I",
+        "iconst_1",
+        "invokestatic # // Method swap:([FIII)V",
+        "iinc 2, -1",
+        "goto 11",
+        "return"
+      ]
+    ],
+    [
+      "public static void shuffle(int[], java.util.Random);",
+      [
+        "aload_0",
+        "ifnull 35",
+        "aload_1",
+        "ifnull 35",
+        "aload_0",
+        "arraylength",
+        "istore_2",
+        "iload_2",
+        "iconst_1",
+        "if_icmple 35",
+        "aload_0",
+        "iload_2",
+        "iconst_1",
+        "isub",
+        "aload_1",
+        "iload_2",
+        "invokevirtual # // Method java/util/Random.nextInt:(I)I",
+        "iconst_1",
+        "invokestatic # // Method swap:([IIII)V",
+        "iinc 2, -1",
+        "goto 11",
+        "return"
+      ]
+    ],
+    [
+      "public static void shuffle(long[], java.util.Random);",
+      [
+        "aload_0",
+        "ifnull 35",
+        "aload_1",
+        "ifnull 35",
+        "aload_0",
+        "arraylength",
+        "istore_2",
+        "iload_2",
+        "iconst_1",
+        "if_icmple 35",
+        "aload_0",
+        "iload_2",
+        "iconst_1",
+        "isub",
+        "aload_1",
+        "iload_2",
+        "invokevirtual # // Method java/util/Random.nextInt:(I)I",
+        "iconst_1",
+        "invokestatic # // Method swap:([JIII)V",
+        "iinc 2, -1",
+        "goto 11",
+        "return"
+      ]
+    ],
+    [
+      "public static void shuffle(java.lang.Object[], java.util.Random);",
+      [
+        "aload_0",
+        "ifnull 35",
+        "aload_1",
+        "ifnull 35",
+        "aload_0",
+        "arraylength",
+        "istore_2",
+        "iload_2",
+        "iconst_1",
+        "if_icmple 35",
+        "aload_0",
+        "iload_2",
+        "iconst_1",
+        "isub",
+        "aload_1",
+        "iload_2",
+        "invokevirtual # // Method java/util/Random.nextInt:(I)I",
+        "iconst_1",
+        "invokestatic # // Method swap:([Ljava/lang/Object;III)V",
+        "iinc 2, -1",
+        "goto 11",
+        "return"
+      ]
+    ],
+    [
+      "public static void shuffle(short[], java.util.Random);",
+      [
+        "aload_0",
+        "ifnull 35",
+        "aload_1",
+        "ifnull 35",
+        "aload_0",
+        "arraylength",
+        "istore_2",
+        "iload_2",
+        "iconst_1",
+        "if_icmple 35",
+        "aload_0",
+        "iload_2",
+        "iconst_1",
+        "isub",
+        "aload_1",
+        "iload_2",
+        "invokevirtual # // Method java/util/Random.nextInt:(I)I",
+        "iconst_1",
+        "invokestatic # // Method swap:([SIII)V",
+        "iinc 2, -1",
+        "goto 11",
         "return"
       ]
     ],
@@ -3558,6 +4129,41 @@
         "invokespecial # // Method java/lang/Object.\"<init>\":()V",
         "return"
       ]
+    ],
+    [
+      "static java.nio.charset.Charset toCharset(java.nio.charset.Charset);",
+      [
+        "aload_0",
+        "ifnonnull 10",
+        "invokestatic # // Method java/nio/charset/Charset.defaultCharset:()Ljava/nio/charset/Charset;",
+        "goto 11",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "static java.nio.charset.Charset toCharset(java.lang.String);",
+      [
+        "aload_0",
+        "ifnonnull 10",
+        "invokestatic # // Method java/nio/charset/Charset.defaultCharset:()Ljava/nio/charset/Charset;",
+        "goto 14",
+        "aload_0",
+        "invokestatic # // Method java/nio/charset/Charset.forName:(Ljava/lang/String;)Ljava/nio/charset/Charset;",
+        "areturn"
+      ]
+    ],
+    [
+      "static java.lang.String toCharsetName(java.lang.String);",
+      [
+        "aload_0",
+        "ifnonnull 13",
+        "invokestatic # // Method java/nio/charset/Charset.defaultCharset:()Ljava/nio/charset/Charset;",
+        "invokevirtual # // Method java/nio/charset/Charset.name:()Ljava/lang/String;",
+        "goto 14",
+        "aload_0",
+        "areturn"
+      ]
     ]
   ],
   "org.apache.commons.lang3.ClassUtils$1": [
@@ -3840,9 +4446,67 @@
         "invokespecial # // Method java/lang/Object.\"<init>\":()V",
         "return"
       ]
+    ],
+    [
+      "private static java.util.Iterator lambda$hierarchy$0(java.lang.Class);",
+      [
+        "new # // class java/util/concurrent/atomic/AtomicReference",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method java/util/concurrent/atomic/AtomicReference.\"<init>\":(Ljava/lang/Object;)V",
+        "astore_1",
+        "new # // class org/apache/commons/lang3/ClassUtils$1",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/lang3/ClassUtils$1.\"<init>\":(Ljava/util/concurrent/atomic/AtomicReference;)V",
+        "areturn"
+      ]
     ]
   ],
   "org.apache.commons.lang3.LocaleUtils": [
+    [
+      "public static java.util.List<java.util.Locale> availableLocaleList();",
+      [
+        "getstatic # // Field org/apache/commons/lang3/LocaleUtils$SyncAvoid.AVAILABLE_LOCALE_ULIST:Ljava/util/List;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.Set<java.util.Locale> availableLocaleSet();",
+      [
+        "getstatic # // Field org/apache/commons/lang3/LocaleUtils$SyncAvoid.AVAILABLE_LOCALE_USET:Ljava/util/Set;",
+        "areturn"
+      ]
+    ],
+    [
+      "private static boolean hasCountry(java.util.Locale);",
+      [
+        "aload_0",
+        "invokevirtual # // Method java/util/Locale.getCountry:()Ljava/lang/String;",
+        "invokevirtual # // Method java/lang/String.isEmpty:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static java.util.List<java.util.Locale> localeLookupList(java.util.Locale);",
+      [
+        "aload_0",
+        "aload_0",
+        "invokestatic # // Method localeLookupList:(Ljava/util/Locale;Ljava/util/Locale;)Ljava/util/List;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.Locale toLocale(java.util.Locale);",
+      [
+        "aload_0",
+        "ifnull 8",
+        "aload_0",
+        "goto 11",
+        "invokestatic # // Method java/util/Locale.getDefault:()Ljava/util/Locale;",
+        "areturn"
+      ]
+    ],
     [
       "public org.apache.commons.lang3.LocaleUtils();",
       [
@@ -4037,6 +4701,23 @@
         "aload_1",
         "invokestatic # // Method java/util/Objects.equals:(Ljava/lang/Object;Ljava/lang/Object;)Z",
         "ireturn"
+      ]
+    ],
+    [
+      "public static <T> T getFirstNonNull(java.util.function.Supplier<T>...);",
+      [
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/lang3/stream/Streams.of:([Ljava/lang/Object;)Ljava/util/stream/Stream;",
+        "invokedynamic #, 0 // InvokeDynamic #:test:()Ljava/util/function/Predicate;",
+        "invokeinterface #, 2 // InterfaceMethod java/util/stream/Stream.filter:(Ljava/util/function/Predicate;)Ljava/util/stream/Stream;",
+        "invokedynamic #, 0 // InvokeDynamic #:apply:()Ljava/util/function/Function;",
+        "invokeinterface #, 2 // InterfaceMethod java/util/stream/Stream.map:(Ljava/util/function/Function;)Ljava/util/stream/Stream;",
+        "invokedynamic #, 0 // InvokeDynamic #:test:()Ljava/util/function/Predicate;",
+        "invokeinterface #, 2 // InterfaceMethod java/util/stream/Stream.filter:(Ljava/util/function/Predicate;)Ljava/util/stream/Stream;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/stream/Stream.findFirst:()Ljava/util/Optional;",
+        "aconst_null",
+        "invokevirtual # // Method java/util/Optional.orElse:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn"
       ]
     ],
     [
@@ -4413,6 +5094,106 @@
   ],
   "org.apache.commons.lang3.RegExUtils": [
     [
+      "public static java.util.regex.Matcher dotAllMatcher(java.lang.String, java.lang.CharSequence);",
+      [
+        "aload_0",
+        "invokestatic # // Method dotAll:(Ljava/lang/String;)Ljava/util/regex/Pattern;",
+        "aload_1",
+        "invokevirtual # // Method java/util/regex/Pattern.matcher:(Ljava/lang/CharSequence;)Ljava/util/regex/Matcher;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.regex.Matcher dotAllMatcher(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "invokestatic # // Method dotAll:(Ljava/lang/String;)Ljava/util/regex/Pattern;",
+        "aload_1",
+        "invokevirtual # // Method java/util/regex/Pattern.matcher:(Ljava/lang/CharSequence;)Ljava/util/regex/Matcher;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String replaceAll(java.lang.CharSequence, java.util.regex.Pattern, java.lang.String);",
+      [
+        "iconst_3",
+        "anewarray # // class java/lang/Object",
+        "dup",
+        "iconst_0",
+        "aload_0",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "aload_1",
+        "aastore",
+        "dup",
+        "iconst_2",
+        "aload_2",
+        "aastore",
+        "invokestatic # // Method org/apache/commons/lang3/ObjectUtils.anyNull:([Ljava/lang/Object;)Z",
+        "ifeq 27",
+        "aload_0",
+        "invokestatic # // Method toStringOrNull:(Ljava/lang/CharSequence;)Ljava/lang/String;",
+        "areturn",
+        "aload_1",
+        "aload_0",
+        "invokevirtual # // Method java/util/regex/Pattern.matcher:(Ljava/lang/CharSequence;)Ljava/util/regex/Matcher;",
+        "aload_2",
+        "invokevirtual # // Method java/util/regex/Matcher.replaceAll:(Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String replaceFirst(java.lang.CharSequence, java.util.regex.Pattern, java.lang.String);",
+      [
+        "aload_0",
+        "ifnull 12",
+        "aload_1",
+        "ifnull 12",
+        "aload_2",
+        "ifnonnull 17",
+        "aload_0",
+        "invokestatic # // Method toStringOrNull:(Ljava/lang/CharSequence;)Ljava/lang/String;",
+        "areturn",
+        "aload_1",
+        "aload_0",
+        "invokevirtual # // Method java/util/regex/Pattern.matcher:(Ljava/lang/CharSequence;)Ljava/util/regex/Matcher;",
+        "aload_2",
+        "invokevirtual # // Method java/util/regex/Matcher.replaceFirst:(Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String replacePattern(java.lang.CharSequence, java.lang.String, java.lang.String);",
+      [
+        "iconst_3",
+        "anewarray # // class java/lang/Object",
+        "dup",
+        "iconst_0",
+        "aload_0",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "aload_1",
+        "aastore",
+        "dup",
+        "iconst_2",
+        "aload_2",
+        "aastore",
+        "invokestatic # // Method org/apache/commons/lang3/ObjectUtils.anyNull:([Ljava/lang/Object;)Z",
+        "ifeq 27",
+        "aload_0",
+        "invokestatic # // Method toStringOrNull:(Ljava/lang/CharSequence;)Ljava/lang/String;",
+        "areturn",
+        "aload_1",
+        "aload_0",
+        "invokestatic # // Method dotAllMatcher:(Ljava/lang/String;Ljava/lang/CharSequence;)Ljava/util/regex/Matcher;",
+        "aload_2",
+        "invokevirtual # // Method java/util/regex/Matcher.replaceAll:(Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public org.apache.commons.lang3.RegExUtils();",
       [
         "aload_0",
@@ -4451,6 +5232,32 @@
     ]
   ],
   "org.apache.commons.lang3.SerializationUtils": [
+    [
+      "public static <T extends java.io.Serializable> T roundtrip(T);",
+      [
+        "aload_0",
+        "invokestatic # // Method serialize:(Ljava/io/Serializable;)[B",
+        "invokestatic # // Method deserialize:([B)Ljava/lang/Object;",
+        "checkcast # // class java/io/Serializable",
+        "areturn"
+      ]
+    ],
+    [
+      "public static byte[] serialize(java.io.Serializable);",
+      [
+        "new # // class java/io/ByteArrayOutputStream",
+        "dup",
+        "sipush 512",
+        "invokespecial # // Method java/io/ByteArrayOutputStream.\"<init>\":(I)V",
+        "astore_1",
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method serialize:(Ljava/io/Serializable;Ljava/io/OutputStream;)V",
+        "aload_1",
+        "invokevirtual # // Method java/io/ByteArrayOutputStream.toByteArray:()[B",
+        "areturn"
+      ]
+    ],
     [
       "public org.apache.commons.lang3.SerializationUtils();",
       [
@@ -7115,6 +7922,23 @@
       ]
     ],
     [
+      "public static void matchesPattern(java.lang.CharSequence, java.lang.String, java.lang.String, java.lang.Object...);",
+      [
+        "aload_1",
+        "aload_0",
+        "invokestatic # // Method java/util/regex/Pattern.matches:(Ljava/lang/String;Ljava/lang/CharSequence;)Z",
+        "ifne 21",
+        "new # // class java/lang/IllegalArgumentException",
+        "dup",
+        "aload_2",
+        "aload_3",
+        "invokestatic # // Method getMessage:(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;",
+        "invokespecial # // Method java/lang/IllegalArgumentException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "return"
+      ]
+    ],
+    [
       "private static java.util.function.Supplier<java.lang.String> toSupplier(java.lang.String, java.lang.Object...);",
       [
         "aload_0",
@@ -9455,6 +10279,16 @@
   ],
   "org.apache.commons.lang3.exception.ExceptionUtils": [
     [
+      "public static void forEach(java.lang.Throwable, java.util.function.Consumer<java.lang.Throwable>);",
+      [
+        "aload_0",
+        "invokestatic # // Method stream:(Ljava/lang/Throwable;)Ljava/util/stream/Stream;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/stream/Stream.forEach:(Ljava/util/function/Consumer;)V",
+        "return"
+      ]
+    ],
+    [
       "public static java.lang.Throwable getCause(java.lang.Throwable);",
       [
         "aload_0",
@@ -9554,6 +10388,15 @@
         "iconst_1",
         "invokestatic # // Method indexOf:(Ljava/lang/Throwable;Ljava/lang/Class;IZ)I",
         "ireturn"
+      ]
+    ],
+    [
+      "public static void printRootCauseStackTrace(java.lang.Throwable);",
+      [
+        "aload_0",
+        "getstatic # // Field java/lang/System.err:Ljava/io/PrintStream;",
+        "invokestatic # // Method printRootCauseStackTrace:(Ljava/lang/Throwable;Ljava/io/PrintStream;)V",
+        "return"
       ]
     ],
     [
@@ -9758,6 +10601,14 @@
       [
         "aload_0",
         "invokedynamic #, 0 // InvokeDynamic #:test:(Lorg/apache/commons/lang3/function/FailableBiPredicate;)Ljava/util/function/BiPredicate;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static <V> java.util.concurrent.Callable<V> asCallable(org.apache.commons.lang3.function.FailableCallable<V, ?>);",
+      [
+        "aload_0",
+        "invokedynamic #, 0 // InvokeDynamic #:call:(Lorg/apache/commons/lang3/function/FailableCallable;)Ljava/util/concurrent/Callable;",
         "areturn"
       ]
     ],
@@ -10176,6 +11027,28 @@
         "lload_2",
         "invokestatic # // Method java/lang/Long.compare:(JJ)I",
         "ireturn"
+      ]
+    ],
+    [
+      "public static java.math.BigDecimal createBigDecimal(java.lang.String);",
+      [
+        "aload_0",
+        "ifnonnull 6",
+        "aconst_null",
+        "areturn",
+        "aload_0",
+        "invokestatic # // Method org/apache/commons/lang3/StringUtils.isBlank:(Ljava/lang/CharSequence;)Z",
+        "ifeq 23",
+        "new # // class java/lang/NumberFormatException",
+        "dup",
+        "ldc # // String A blank string is not a valid number",
+        "invokespecial # // Method java/lang/NumberFormatException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "new # // class java/math/BigDecimal",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method java/math/BigDecimal.\"<init>\":(Ljava/lang/String;)V",
+        "areturn"
       ]
     ],
     [
@@ -10636,6 +11509,27 @@
         "istore_0",
         "iload_0",
         "ireturn"
+      ]
+    ],
+    [
+      "public static double toDouble(java.math.BigDecimal);",
+      [
+        "aload_0",
+        "dconst_0",
+        "invokestatic # // Method toDouble:(Ljava/math/BigDecimal;D)D",
+        "dreturn"
+      ]
+    ],
+    [
+      "public static double toDouble(java.math.BigDecimal, double);",
+      [
+        "aload_0",
+        "ifnonnull 8",
+        "dload_1",
+        "goto 12",
+        "aload_0",
+        "invokevirtual # // Method java/math/BigDecimal.doubleValue:()D",
+        "dreturn"
       ]
     ],
     [
@@ -11154,6 +12048,24 @@
   ],
   "org.apache.commons.lang3.stream.IntStreams": [
     [
+      "public static java.util.stream.IntStream range(int);",
+      [
+        "iconst_0",
+        "iload_0",
+        "invokestatic # // InterfaceMethod java/util/stream/IntStream.range:(II)Ljava/util/stream/IntStream;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.stream.IntStream rangeClosed(int);",
+      [
+        "iconst_0",
+        "iload_0",
+        "invokestatic # // InterfaceMethod java/util/stream/IntStream.rangeClosed:(II)Ljava/util/stream/IntStream;",
+        "areturn"
+      ]
+    ],
+    [
       "public org.apache.commons.lang3.stream.IntStreams();",
       [
         "aload_0",
@@ -11197,6 +12109,27 @@
     ]
   ],
   "org.apache.commons.lang3.stream.LangCollectors": [
+    [
+      "public static <T, R, A> R collect(java.util.stream.Collector<? super T, A, R>, T...);",
+      [
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/lang3/stream/Streams.of:([Ljava/lang/Object;)Ljava/util/stream/Stream;",
+        "aload_0",
+        "invokeinterface #, 2 // InterfaceMethod java/util/stream/Stream.collect:(Ljava/util/stream/Collector;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.util.stream.Collector<java.lang.Object, ?, java.lang.String> joining(java.lang.CharSequence, java.lang.CharSequence, java.lang.CharSequence);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokedynamic #, 0 // InvokeDynamic #:apply:()Ljava/util/function/Function;",
+        "invokestatic # // Method joining:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;Ljava/lang/CharSequence;Ljava/util/function/Function;)Ljava/util/stream/Collector;",
+        "areturn"
+      ]
+    ],
     [
       "private org.apache.commons.lang3.stream.LangCollectors();",
       [
@@ -11253,6 +12186,43 @@
   ],
   "org.apache.commons.lang3.stream.Streams$FailableStream": [
     [
+      "public org.apache.commons.lang3.stream.Streams$FailableStream(java.util.stream.Stream<T>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field stream:Ljava/util/stream/Stream;",
+        "return"
+      ]
+    ],
+    [
+      "public boolean allMatch(org.apache.commons.lang3.function.FailablePredicate<T, ?>);",
+      [
+        "aload_0",
+        "invokevirtual # // Method assertNotTerminated:()V",
+        "aload_0",
+        "invokevirtual # // Method stream:()Ljava/util/stream/Stream;",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/lang3/function/Failable.asPredicate:(Lorg/apache/commons/lang3/function/FailablePredicate;)Ljava/util/function/Predicate;",
+        "invokeinterface #, 2 // InterfaceMethod java/util/stream/Stream.allMatch:(Ljava/util/function/Predicate;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean anyMatch(org.apache.commons.lang3.function.FailablePredicate<T, ?>);",
+      [
+        "aload_0",
+        "invokevirtual # // Method assertNotTerminated:()V",
+        "aload_0",
+        "invokevirtual # // Method stream:()Ljava/util/stream/Stream;",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/lang3/function/Failable.asPredicate:(Lorg/apache/commons/lang3/function/FailablePredicate;)Ljava/util/function/Predicate;",
+        "invokeinterface #, 2 // InterfaceMethod java/util/stream/Stream.anyMatch:(Ljava/util/function/Predicate;)Z",
+        "ireturn"
+      ]
+    ],
+    [
       "protected void assertNotTerminated();",
       [
         "aload_0",
@@ -11267,6 +12237,47 @@
       ]
     ],
     [
+      "public <A, R> R collect(java.util.stream.Collector<? super T, A, R>);",
+      [
+        "aload_0",
+        "invokevirtual # // Method makeTerminated:()V",
+        "aload_0",
+        "invokevirtual # // Method stream:()Ljava/util/stream/Stream;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/stream/Stream.collect:(Ljava/util/stream/Collector;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.stream.Streams$FailableStream<T> filter(org.apache.commons.lang3.function.FailablePredicate<T, ?>);",
+      [
+        "aload_0",
+        "invokevirtual # // Method assertNotTerminated:()V",
+        "aload_0",
+        "aload_0",
+        "getfield # // Field stream:Ljava/util/stream/Stream;",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/lang3/function/Failable.asPredicate:(Lorg/apache/commons/lang3/function/FailablePredicate;)Ljava/util/function/Predicate;",
+        "invokeinterface #, 2 // InterfaceMethod java/util/stream/Stream.filter:(Ljava/util/function/Predicate;)Ljava/util/stream/Stream;",
+        "putfield # // Field stream:Ljava/util/stream/Stream;",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public void forEach(org.apache.commons.lang3.function.FailableConsumer<T, ?>);",
+      [
+        "aload_0",
+        "invokevirtual # // Method makeTerminated:()V",
+        "aload_0",
+        "invokevirtual # // Method stream:()Ljava/util/stream/Stream;",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/lang3/function/Failable.asConsumer:(Lorg/apache/commons/lang3/function/FailableConsumer;)Ljava/util/function/Consumer;",
+        "invokeinterface #, 2 // InterfaceMethod java/util/stream/Stream.forEach:(Ljava/util/function/Consumer;)V",
+        "return"
+      ]
+    ],
+    [
       "protected void makeTerminated();",
       [
         "aload_0",
@@ -11276,9 +12287,76 @@
         "putfield # // Field terminated:Z",
         "return"
       ]
+    ],
+    [
+      "public <R> org.apache.commons.lang3.stream.Streams$FailableStream<R> map(org.apache.commons.lang3.function.FailableFunction<T, R, ?>);",
+      [
+        "aload_0",
+        "invokevirtual # // Method assertNotTerminated:()V",
+        "new # // class org/apache/commons/lang3/stream/Streams$FailableStream",
+        "dup",
+        "aload_0",
+        "getfield # // Field stream:Ljava/util/stream/Stream;",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/lang3/function/Failable.asFunction:(Lorg/apache/commons/lang3/function/FailableFunction;)Ljava/util/function/Function;",
+        "invokeinterface #, 2 // InterfaceMethod java/util/stream/Stream.map:(Ljava/util/function/Function;)Ljava/util/stream/Stream;",
+        "invokespecial # // Method \"<init>\":(Ljava/util/stream/Stream;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.util.stream.Stream<T> stream();",
+      [
+        "aload_0",
+        "getfield # // Field stream:Ljava/util/stream/Stream;",
+        "areturn"
+      ]
     ]
   ],
   "org.apache.commons.lang3.stream.Streams": [
+    [
+      "public static <T> org.apache.commons.lang3.stream.Streams$FailableStream<T> failableStream(java.util.stream.Stream<T>);",
+      [
+        "new # // class org/apache/commons/lang3/stream/Streams$FailableStream",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/lang3/stream/Streams$FailableStream.\"<init>\":(Ljava/util/stream/Stream;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "private static <E> java.util.stream.Stream<E> of(java.util.stream.Stream<E>);",
+      [
+        "aload_0",
+        "ifnonnull 10",
+        "invokestatic # // InterfaceMethod java/util/stream/Stream.empty:()Ljava/util/stream/Stream;",
+        "goto 11",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public static <T> java.util.stream.Stream<T> of(T...);",
+      [
+        "aload_0",
+        "ifnonnull 10",
+        "invokestatic # // InterfaceMethod java/util/stream/Stream.empty:()Ljava/util/stream/Stream;",
+        "goto 14",
+        "aload_0",
+        "invokestatic # // InterfaceMethod java/util/stream/Stream.of:([Ljava/lang/Object;)Ljava/util/stream/Stream;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static <T> java.util.stream.Collector<T, java.util.List<T>, T[]> toArray(java.lang.Class<T>);",
+      [
+        "new # // class org/apache/commons/lang3/stream/Streams$ArrayCollector",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/lang3/stream/Streams$ArrayCollector.\"<init>\":(Ljava/lang/Class;)V",
+        "areturn"
+      ]
+    ],
     [
       "public org.apache.commons.lang3.stream.Streams();",
       [
@@ -11289,6 +12367,17 @@
     ]
   ],
   "org.apache.commons.lang3.text.StrBuilder$StrBuilderReader": [
+    [
+      "org.apache.commons.lang3.text.StrBuilder$StrBuilderReader(org.apache.commons.lang3.text.StrBuilder);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field this$0:Lorg/apache/commons/lang3/text/StrBuilder;",
+        "aload_0",
+        "invokespecial # // Method java/io/Reader.\"<init>\":()V",
+        "return"
+      ]
+    ],
     [
       "public void close();",
       [
@@ -11402,6 +12491,16 @@
         "aload_1",
         "aconst_null",
         "invokevirtual # // Method appendSeparator:(Ljava/lang/String;Ljava/lang/String;)Lorg/apache/commons/lang3/text/StrBuilder;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.io.Reader asReader();",
+      [
+        "new # // class org/apache/commons/lang3/text/StrBuilder$StrBuilderReader",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/lang3/text/StrBuilder$StrBuilderReader.\"<init>\":(Lorg/apache/commons/lang3/text/StrBuilder;)V",
         "areturn"
       ]
     ],
@@ -13621,6 +14720,51 @@
       ]
     ],
     [
+      "public static byte[] uuidToByteArray(java.util.UUID, byte[], int, int);",
+      [
+        "iconst_0",
+        "iload_3",
+        "if_icmpne 7",
+        "aload_1",
+        "areturn",
+        "iload_3",
+        "bipush 16",
+        "if_icmple 23",
+        "new # // class java/lang/IllegalArgumentException",
+        "dup",
+        "ldc # // String nBytes > 16",
+        "invokespecial # // Method java/lang/IllegalArgumentException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "invokevirtual # // Method java/util/UUID.getMostSignificantBits:()J",
+        "iconst_0",
+        "aload_1",
+        "iload_2",
+        "iload_3",
+        "bipush 8",
+        "invokestatic # // Method java/lang/Math.min:(II)I",
+        "invokestatic # // Method longToByteArray:(JI[BII)[B",
+        "pop",
+        "iload_3",
+        "bipush 8",
+        "if_icmplt 64",
+        "aload_0",
+        "invokevirtual # // Method java/util/UUID.getLeastSignificantBits:()J",
+        "iconst_0",
+        "aload_1",
+        "iload_2",
+        "bipush 8",
+        "iadd",
+        "iload_3",
+        "bipush 8",
+        "isub",
+        "invokestatic # // Method longToByteArray:(JI[BII)[B",
+        "pop",
+        "aload_1",
+        "areturn"
+      ]
+    ],
+    [
       "public org.apache.commons.lang3.Conversion();",
       [
         "aload_0",
@@ -13991,6 +15135,87 @@
       ]
     ],
     [
+      "public java.lang.String next(int, char...);",
+      [
+        "aload_2",
+        "ifnonnull 18",
+        "iload_1",
+        "iconst_0",
+        "iconst_0",
+        "iconst_0",
+        "iconst_0",
+        "aconst_null",
+        "aload_0",
+        "invokevirtual # // Method random:()Ljava/util/Random;",
+        "invokestatic # // Method random:(IIIZZ[CLjava/util/Random;)Ljava/lang/String;",
+        "areturn",
+        "iload_1",
+        "iconst_0",
+        "aload_2",
+        "arraylength",
+        "iconst_0",
+        "iconst_0",
+        "aload_2",
+        "aload_0",
+        "invokevirtual # // Method random:()Ljava/util/Random;",
+        "invokestatic # // Method random:(IIIZZ[CLjava/util/Random;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String next(int, int, int, boolean, boolean);",
+      [
+        "iload_1",
+        "iload_2",
+        "iload_3",
+        "iload 4",
+        "iload 5",
+        "aconst_null",
+        "aload_0",
+        "invokevirtual # // Method random:()Ljava/util/Random;",
+        "invokestatic # // Method random:(IIIZZ[CLjava/util/Random;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String next(int, int, int, boolean, boolean, char...);",
+      [
+        "iload_1",
+        "iload_2",
+        "iload_3",
+        "iload 4",
+        "iload 5",
+        "aload 6",
+        "aload_0",
+        "invokevirtual # // Method random:()Ljava/util/Random;",
+        "invokestatic # // Method random:(IIIZZ[CLjava/util/Random;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String next(int, java.lang.String);",
+      [
+        "aload_2",
+        "ifnonnull 18",
+        "iload_1",
+        "iconst_0",
+        "iconst_0",
+        "iconst_0",
+        "iconst_0",
+        "aconst_null",
+        "aload_0",
+        "invokevirtual # // Method random:()Ljava/util/Random;",
+        "invokestatic # // Method random:(IIIZZ[CLjava/util/Random;)Ljava/lang/String;",
+        "areturn",
+        "aload_0",
+        "iload_1",
+        "aload_2",
+        "invokevirtual # // Method java/lang/String.toCharArray:()[C",
+        "invokevirtual # // Method next:(I[C)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public java.lang.String nextAlphabetic(int);",
       [
         "aload_0",
@@ -14139,6 +15364,15 @@
         "invokevirtual # // Method nextPrint:(I)Ljava/lang/String;",
         "areturn"
       ]
+    ],
+    [
+      "private java.util.Random random();",
+      [
+        "aload_0",
+        "invokevirtual # // Method randomUtils:()Lorg/apache/commons/lang3/RandomUtils;",
+        "invokevirtual # // Method org/apache/commons/lang3/RandomUtils.random:()Ljava/util/Random;",
+        "areturn"
+      ]
     ]
   ],
   "org.apache.commons.lang3.RandomUtils": [
@@ -14260,6 +15494,63 @@
         "invokespecial # // Method \"<init>\":(Ljava/util/function/Supplier;)V",
         "return"
       ]
+    ],
+    [
+      "private org.apache.commons.lang3.RandomUtils(java.util.function.Supplier<java.util.Random>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field random:Ljava/util/function/Supplier;",
+        "return"
+      ]
+    ],
+    [
+      "java.util.Random random();",
+      [
+        "aload_0",
+        "getfield # // Field random:Ljava/util/function/Supplier;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/function/Supplier.get:()Ljava/lang/Object;",
+        "checkcast # // class java/util/Random",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean randomBoolean();",
+      [
+        "aload_0",
+        "invokevirtual # // Method random:()Ljava/util/Random;",
+        "invokevirtual # // Method java/util/Random.nextBoolean:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "private long randomLong(long);",
+      [
+        "aload_0",
+        "invokevirtual # // Method random:()Ljava/util/Random;",
+        "invokevirtual # // Method java/util/Random.nextLong:()J",
+        "iconst_1",
+        "lushr",
+        "lstore_3",
+        "lload_3",
+        "lload_1",
+        "lrem",
+        "lstore 5",
+        "lload_3",
+        "lload 5",
+        "lsub",
+        "lload_1",
+        "ladd",
+        "lconst_1",
+        "lsub",
+        "lconst_0",
+        "lcmp",
+        "iflt 0",
+        "lload 5",
+        "lreturn"
+      ]
     ]
   ],
   "org.apache.commons.lang3.RuntimeEnvironment": [
@@ -14291,6 +15582,15 @@
       ]
     ],
     [
+      "static java.lang.String[] split(java.lang.String);",
+      [
+        "getstatic # // Field org/apache/commons/lang3/RegExUtils.VERSION_SPLIT_PATTERN:Ljava/util/regex/Pattern;",
+        "aload_0",
+        "invokevirtual # // Method java/util/regex/Pattern.split:(Ljava/lang/CharSequence;)[Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public java.lang.String toString();",
       [
         "aload_0",
@@ -14300,6 +15600,46 @@
     ]
   ],
   "org.apache.commons.lang3.SystemUtils": [
+    [
+      "public static java.io.File getJavaHome();",
+      [
+        "new # // class java/io/File",
+        "dup",
+        "invokestatic # // Method org/apache/commons/lang3/SystemProperties.getJavaHome:()Ljava/lang/String;",
+        "invokespecial # // Method java/io/File.\"<init>\":(Ljava/lang/String;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.nio.file.Path getJavaHomePath();",
+      [
+        "invokestatic # // Method org/apache/commons/lang3/SystemProperties.getJavaHome:()Ljava/lang/String;",
+        "iconst_0",
+        "anewarray # // class java/lang/String",
+        "invokestatic # // Method java/nio/file/Paths.get:(Ljava/lang/String;[Ljava/lang/String;)Ljava/nio/file/Path;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.io.File getJavaIoTmpDir();",
+      [
+        "new # // class java/io/File",
+        "dup",
+        "invokestatic # // Method org/apache/commons/lang3/SystemProperties.getJavaIoTmpdir:()Ljava/lang/String;",
+        "invokespecial # // Method java/io/File.\"<init>\":(Ljava/lang/String;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.nio.file.Path getJavaIoTmpDirPath();",
+      [
+        "invokestatic # // Method org/apache/commons/lang3/SystemProperties.getJavaIoTmpdir:()Ljava/lang/String;",
+        "iconst_0",
+        "anewarray # // class java/lang/String",
+        "invokestatic # // Method java/nio/file/Paths.get:(Ljava/lang/String;[Ljava/lang/String;)Ljava/nio/file/Path;",
+        "areturn"
+      ]
+    ],
     [
       "private static boolean getJavaVersionMatches(java.lang.String);",
       [
@@ -14327,6 +15667,46 @@
         "aload_0",
         "invokestatic # // Method isOsNameMatch:(Ljava/lang/String;Ljava/lang/String;)Z",
         "ireturn"
+      ]
+    ],
+    [
+      "public static java.io.File getUserDir();",
+      [
+        "new # // class java/io/File",
+        "dup",
+        "invokestatic # // Method org/apache/commons/lang3/SystemProperties.getUserDir:()Ljava/lang/String;",
+        "invokespecial # // Method java/io/File.\"<init>\":(Ljava/lang/String;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.nio.file.Path getUserDirPath();",
+      [
+        "invokestatic # // Method org/apache/commons/lang3/SystemProperties.getUserDir:()Ljava/lang/String;",
+        "iconst_0",
+        "anewarray # // class java/lang/String",
+        "invokestatic # // Method java/nio/file/Paths.get:(Ljava/lang/String;[Ljava/lang/String;)Ljava/nio/file/Path;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.io.File getUserHome();",
+      [
+        "new # // class java/io/File",
+        "dup",
+        "invokestatic # // Method org/apache/commons/lang3/SystemProperties.getUserHome:()Ljava/lang/String;",
+        "invokespecial # // Method java/io/File.\"<init>\":(Ljava/lang/String;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.nio.file.Path getUserHomePath();",
+      [
+        "invokestatic # // Method org/apache/commons/lang3/SystemProperties.getUserHome:()Ljava/lang/String;",
+        "iconst_0",
+        "anewarray # // class java/lang/String",
+        "invokestatic # // Method java/nio/file/Paths.get:(Ljava/lang/String;[Ljava/lang/String;)Ljava/nio/file/Path;",
+        "areturn"
       ]
     ],
     [
@@ -15016,6 +16396,17 @@
       []
     ],
     [
+      "public boolean isOpen();",
+      [
+        "aload_0",
+        "getfield # // Field state:Ljava/util/concurrent/atomic/AtomicReference;",
+        "invokevirtual # // Method java/util/concurrent/atomic/AtomicReference.get:()Ljava/lang/Object;",
+        "checkcast # // class org/apache/commons/lang3/concurrent/AbstractCircuitBreaker$State",
+        "invokestatic # // Method isOpen:(Lorg/apache/commons/lang3/concurrent/AbstractCircuitBreaker$State;)Z",
+        "ireturn"
+      ]
+    ],
+    [
       "public void open();",
       [
         "aload_0",
@@ -15049,6 +16440,49 @@
     [
       "public abstract void open();",
       []
+    ]
+  ],
+  "org.apache.commons.lang3.concurrent.AbstractFutureProxy": [
+    [
+      "public org.apache.commons.lang3.concurrent.AbstractFutureProxy(java.util.concurrent.Future<V>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String future",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class java/util/concurrent/Future",
+        "putfield # // Field future:Ljava/util/concurrent/Future;",
+        "return"
+      ]
+    ],
+    [
+      "public boolean cancel(boolean);",
+      [
+        "aload_0",
+        "getfield # // Field future:Ljava/util/concurrent/Future;",
+        "iload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/concurrent/Future.cancel:(Z)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.util.concurrent.Future<V> getFuture();",
+      [
+        "aload_0",
+        "getfield # // Field future:Ljava/util/concurrent/Future;",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isDone();",
+      [
+        "aload_0",
+        "getfield # // Field future:Ljava/util/concurrent/Future;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/concurrent/Future.isDone:()Z",
+        "ireturn"
+      ]
     ]
   ],
   "org.apache.commons.lang3.concurrent.BasicThreadFactory$Builder": [
@@ -15152,6 +16586,15 @@
         "getfield # // Field priority:Ljava/lang/Integer;",
         "areturn"
       ]
+    ],
+    [
+      "public long getThreadCount();",
+      [
+        "aload_0",
+        "getfield # // Field threadCounter:Ljava/util/concurrent/atomic/AtomicLong;",
+        "invokevirtual # // Method java/util/concurrent/atomic/AtomicLong.get:()J",
+        "lreturn"
+      ]
     ]
   ],
   "org.apache.commons.lang3.concurrent.AbstractConcurrentInitializer$AbstractBuilder": [
@@ -15247,10 +16690,65 @@
       ]
     ],
     [
+      "public synchronized java.util.concurrent.Future<T> getFuture();",
+      [
+        "aload_0",
+        "getfield # // Field future:Ljava/util/concurrent/Future;",
+        "ifnonnull 17",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String start() must be called first.",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "aload_0",
+        "getfield # // Field future:Ljava/util/concurrent/Future;",
+        "areturn"
+      ]
+    ],
+    [
       "protected int getTaskCount();",
       [
         "iconst_1",
         "ireturn"
+      ]
+    ],
+    [
+      "public synchronized boolean isInitialized();",
+      [
+        "aload_0",
+        "getfield # // Field future:Ljava/util/concurrent/Future;",
+        "ifnull 19",
+        "aload_0",
+        "getfield # // Field future:Ljava/util/concurrent/Future;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/concurrent/Future.isDone:()Z",
+        "ifne 21",
+        "iconst_0",
+        "ireturn",
+        "aload_0",
+        "getfield # // Field future:Ljava/util/concurrent/Future;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/concurrent/Future.get:()Ljava/lang/Object;",
+        "pop",
+        "iconst_1",
+        "ireturn",
+        "astore_1",
+        "iconst_0",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.lang3.concurrent.CallableBackgroundInitializer": [
+    [
+      "public org.apache.commons.lang3.concurrent.CallableBackgroundInitializer(java.util.concurrent.Callable<T>);",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/lang3/concurrent/BackgroundInitializer.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method checkCallable:(Ljava/util/concurrent/Callable;)V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field callable:Ljava/util/concurrent/Callable;",
+        "return"
       ]
     ]
   ],
@@ -15333,6 +16831,14 @@
       ]
     ],
     [
+      "public T get(long, java.util.concurrent.TimeUnit);",
+      [
+        "aload_0",
+        "getfield # // Field value:Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
       "public boolean isCancelled();",
       [
         "iconst_0",
@@ -15363,6 +16869,29 @@
         "invokestatic # // Method org/apache/commons/lang3/Validate.isTrue:(ZLjava/lang/String;[Ljava/lang/Object;)V",
         "aload_0",
         "areturn"
+      ]
+    ],
+    [
+      "public static <T> java.util.concurrent.Future<T> constantFuture(T);",
+      [
+        "new # // class org/apache/commons/lang3/concurrent/ConcurrentUtils$ConstantFuture",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/lang3/concurrent/ConcurrentUtils$ConstantFuture.\"<init>\":(Ljava/lang/Object;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static void handleCauseUnchecked(java.util.concurrent.ExecutionException);",
+      [
+        "aload_0",
+        "invokestatic # // Method extractCauseUnchecked:(Ljava/util/concurrent/ExecutionException;)Lorg/apache/commons/lang3/concurrent/ConcurrentRuntimeException;",
+        "astore_1",
+        "aload_1",
+        "ifnull 11",
+        "aload_1",
+        "athrow",
+        "return"
       ]
     ],
     [
@@ -15538,12 +17067,55 @@
       ]
     ],
     [
+      "public org.apache.commons.lang3.concurrent.EventCountCircuitBreaker(int, long, java.util.concurrent.TimeUnit);",
+      [
+        "aload_0",
+        "iload_1",
+        "lload_2",
+        "aload 4",
+        "iload_1",
+        "invokespecial # // Method \"<init>\":(IJLjava/util/concurrent/TimeUnit;I)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.concurrent.EventCountCircuitBreaker(int, long, java.util.concurrent.TimeUnit, int);",
+      [
+        "aload_0",
+        "iload_1",
+        "lload_2",
+        "aload 4",
+        "iload 5",
+        "lload_2",
+        "aload 4",
+        "invokespecial # // Method \"<init>\":(IJLjava/util/concurrent/TimeUnit;IJLjava/util/concurrent/TimeUnit;)V",
+        "return"
+      ]
+    ],
+    [
       "public boolean checkState();",
       [
         "aload_0",
         "iconst_0",
         "invokevirtual # // Method performStateCheck:(I)Z",
         "ireturn"
+      ]
+    ],
+    [
+      "public void close();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/lang3/concurrent/AbstractCircuitBreaker.close:()V",
+        "aload_0",
+        "getfield # // Field checkIntervalData:Ljava/util/concurrent/atomic/AtomicReference;",
+        "new # // class org/apache/commons/lang3/concurrent/EventCountCircuitBreaker$CheckIntervalData",
+        "dup",
+        "iconst_0",
+        "aload_0",
+        "invokevirtual # // Method nanoTime:()J",
+        "invokespecial # // Method org/apache/commons/lang3/concurrent/EventCountCircuitBreaker$CheckIntervalData.\"<init>\":(IJ)V",
+        "invokevirtual # // Method java/util/concurrent/atomic/AtomicReference.set:(Ljava/lang/Object;)V",
+        "return"
       ]
     ],
     [
@@ -15628,6 +17200,23 @@
         "astore 6",
         "aload 6",
         "areturn"
+      ]
+    ],
+    [
+      "public void open();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/lang3/concurrent/AbstractCircuitBreaker.open:()V",
+        "aload_0",
+        "getfield # // Field checkIntervalData:Ljava/util/concurrent/atomic/AtomicReference;",
+        "new # // class org/apache/commons/lang3/concurrent/EventCountCircuitBreaker$CheckIntervalData",
+        "dup",
+        "iconst_0",
+        "aload_0",
+        "invokevirtual # // Method nanoTime:()J",
+        "invokespecial # // Method org/apache/commons/lang3/concurrent/EventCountCircuitBreaker$CheckIntervalData.\"<init>\":(IJ)V",
+        "invokevirtual # // Method java/util/concurrent/atomic/AtomicReference.set:(Ljava/lang/Object;)V",
+        "return"
       ]
     ]
   ],
@@ -18080,13 +19669,25 @@
   ],
   "org.apache.commons.lang3.time.DateParser": [
     [
+      "public abstract java.util.Locale getLocale();",
+      []
+    ],
+    [
       "public abstract java.lang.String getPattern();",
       []
     ]
   ],
   "org.apache.commons.lang3.time.DatePrinter": [
     [
+      "public abstract java.lang.String format(java.util.Date);",
+      []
+    ],
+    [
       "public abstract java.lang.String format(long);",
+      []
+    ],
+    [
+      "public abstract java.util.Locale getLocale();",
       []
     ],
     [
@@ -18134,12 +19735,31 @@
       ]
     ],
     [
+      "public java.lang.String format(java.util.Date);",
+      [
+        "aload_0",
+        "getfield # // Field printer:Lorg/apache/commons/lang3/time/FastDatePrinter;",
+        "aload_1",
+        "invokevirtual # // Method org/apache/commons/lang3/time/FastDatePrinter.format:(Ljava/util/Date;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
       "public java.lang.String format(long);",
       [
         "aload_0",
         "getfield # // Field printer:Lorg/apache/commons/lang3/time/FastDatePrinter;",
         "lload_1",
         "invokevirtual # // Method org/apache/commons/lang3/time/FastDatePrinter.format:(J)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.util.Locale getLocale();",
+      [
+        "aload_0",
+        "getfield # // Field printer:Lorg/apache/commons/lang3/time/FastDatePrinter;",
+        "invokevirtual # // Method org/apache/commons/lang3/time/FastDatePrinter.getLocale:()Ljava/util/Locale;",
         "areturn"
       ]
     ],
@@ -18242,6 +19862,16 @@
     ]
   ],
   "org.apache.commons.lang3.time.FastDateParser$PatternStrategy": [
+    [
+      "void createPattern(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method java/util/regex/Pattern.compile:(Ljava/lang/String;)Ljava/util/regex/Pattern;",
+        "putfield # // Field pattern:Ljava/util/regex/Pattern;",
+        "return"
+      ]
+    ],
     [
       "void createPattern(java.lang.StringBuilder);",
       [
@@ -18393,6 +20023,14 @@
         "bipush 100",
         "iadd",
         "ireturn"
+      ]
+    ],
+    [
+      "public java.util.Locale getLocale();",
+      [
+        "aload_0",
+        "getfield # // Field locale:Ljava/util/Locale;",
+        "areturn"
       ]
     ],
     [
@@ -18721,6 +20359,14 @@
   ],
   "org.apache.commons.lang3.time.FastDatePrinter": [
     [
+      "public java.util.Locale getLocale();",
+      [
+        "aload_0",
+        "getfield # // Field locale:Ljava/util/Locale;",
+        "areturn"
+      ]
+    ],
+    [
       "public int getMaxLengthEstimate();",
       [
         "aload_0",
@@ -18847,6 +20493,13 @@
         "getfield # // Field zoneId:Ljava/lang/String;",
         "aastore",
         "invokestatic # // Method java/util/Objects.hash:([Ljava/lang/Object;)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean inDaylightTime(java.util.Date);",
+      [
+        "iconst_0",
         "ireturn"
       ]
     ],
@@ -19314,6 +20967,168 @@
         "aload_1",
         "putfield # // Field right:Ljava/lang/Object;",
         "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.lang3.util.FluentBitSet": [
+    [
+      "public org.apache.commons.lang3.util.FluentBitSet();",
+      [
+        "aload_0",
+        "new # // class java/util/BitSet",
+        "dup",
+        "invokespecial # // Method java/util/BitSet.\"<init>\":()V",
+        "invokespecial # // Method \"<init>\":(Ljava/util/BitSet;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.util.FluentBitSet(java.util.BitSet);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "ldc # // String set",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class java/util/BitSet",
+        "putfield # // Field bitSet:Ljava/util/BitSet;",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.util.FluentBitSet(int);",
+      [
+        "aload_0",
+        "new # // class java/util/BitSet",
+        "dup",
+        "iload_1",
+        "invokespecial # // Method java/util/BitSet.\"<init>\":(I)V",
+        "invokespecial # // Method \"<init>\":(Ljava/util/BitSet;)V",
+        "return"
+      ]
+    ],
+    [
+      "public java.util.BitSet bitSet();",
+      [
+        "aload_0",
+        "getfield # // Field bitSet:Ljava/util/BitSet;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int cardinality();",
+      [
+        "aload_0",
+        "getfield # // Field bitSet:Ljava/util/BitSet;",
+        "invokevirtual # // Method java/util/BitSet.cardinality:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.util.FluentBitSet clear();",
+      [
+        "aload_0",
+        "getfield # // Field bitSet:Ljava/util/BitSet;",
+        "invokevirtual # // Method java/util/BitSet.clear:()V",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.util.FluentBitSet clear(int);",
+      [
+        "aload_0",
+        "getfield # // Field bitSet:Ljava/util/BitSet;",
+        "iload_1",
+        "invokevirtual # // Method java/util/BitSet.clear:(I)V",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean equals(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "if_acmpne 7",
+        "iconst_1",
+        "ireturn",
+        "aload_1",
+        "instanceof # // class org/apache/commons/lang3/util/FluentBitSet",
+        "ifne 16",
+        "iconst_0",
+        "ireturn",
+        "aload_1",
+        "checkcast # // class org/apache/commons/lang3/util/FluentBitSet",
+        "astore_2",
+        "aload_0",
+        "getfield # // Field bitSet:Ljava/util/BitSet;",
+        "aload_2",
+        "getfield # // Field bitSet:Ljava/util/BitSet;",
+        "invokestatic # // Method java/util/Objects.equals:(Ljava/lang/Object;Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean get(int);",
+      [
+        "aload_0",
+        "getfield # // Field bitSet:Ljava/util/BitSet;",
+        "iload_1",
+        "invokevirtual # // Method java/util/BitSet.get:(I)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int length();",
+      [
+        "aload_0",
+        "getfield # // Field bitSet:Ljava/util/BitSet;",
+        "invokevirtual # // Method java/util/BitSet.length:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int nextSetBit(int);",
+      [
+        "aload_0",
+        "getfield # // Field bitSet:Ljava/util/BitSet;",
+        "iload_1",
+        "invokevirtual # // Method java/util/BitSet.nextSetBit:(I)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.util.FluentBitSet set(int);",
+      [
+        "aload_0",
+        "getfield # // Field bitSet:Ljava/util/BitSet;",
+        "iload_1",
+        "invokevirtual # // Method java/util/BitSet.set:(I)V",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.util.FluentBitSet set(int, boolean);",
+      [
+        "aload_0",
+        "getfield # // Field bitSet:Ljava/util/BitSet;",
+        "iload_1",
+        "iload_2",
+        "invokevirtual # // Method java/util/BitSet.set:(IZ)V",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public int size();",
+      [
+        "aload_0",
+        "getfield # // Field bitSet:Ljava/util/BitSet;",
+        "invokevirtual # // Method java/util/BitSet.size:()I",
+        "ireturn"
       ]
     ]
   ],
