@@ -140,6 +140,12 @@ const ACC_ENUM = 0x4000;
 
 /** A primitive type descriptor (JVMS Table 4.3-A), plus void's "V" (method returns). */
 export type PrimitiveDescriptor = "B" | "C" | "D" | "F" | "I" | "J" | "S" | "Z" | "V";
+/** A generic signature (JVMS 4.7.9): a JavaTypeSignature, MethodSignature or ClassSignature. */
+type JvmSignature = Brand<string, "JvmSignature">;
+/** A bytecode offset into a method's Code array (captured from code.length). */
+type Pc = Brand<number, "Pc">;
+/** A local-variable slot index (JVMS 2.6.1; long/double occupy two). */
+type Slot = Brand<number, "Slot">;
 /** A computational numeric category (JVMS 2.11.1): what the JVM computes in. */
 type NumericCat = "I" | "J" | "F" | "D";
 /** A field/return type descriptor (JVMS 4.3.2): primitive, `L<internal>;`, or `[<descriptor>`. */
@@ -780,7 +786,7 @@ function buildClassAttributes(
   name?: InternalName,
   nestMembers?: Map<string, InternalName[]>,
   // ClassSignature (JVMS 4.7.9) for a generic class/interface declaration.
-  signature?: string,
+  signature?: JvmSignature,
 ): { buffer: ByteBuffer; count: number } {
   const buffer = new ByteBuffer();
   let count = 0;
@@ -1399,29 +1405,31 @@ function typeUsesGenerics(typeNode: TypeNode | undefined, program: Program): boo
 
 // JavaTypeSignature for a written type: like descriptorOf, but a type variable
 // stays `TName;` and type arguments are kept (`Ljava/util/List<TT;>;`).
-function signatureOfType(typeNode: TypeNode, program: Program): string {
+function signatureOfType(typeNode: TypeNode, program: Program): JvmSignature {
   switch (typeNode.kind) {
     case SyntaxKind.PrimitiveType: {
       const keyword = tokenToString((typeNode as { keyword: SyntaxKind }).keyword) ?? "int";
-      return primitiveDescriptor(keyword) ?? "I";
+      return (primitiveDescriptor(keyword) ?? "I") as string as JvmSignature;
     }
     case SyntaxKind.ArrayType:
-      return `[${signatureOfType((typeNode as AstArrayType).elementType, program)}`;
+      return `[${signatureOfType((typeNode as AstArrayType).elementType, program)}` as JvmSignature;
     case SyntaxKind.TypeReference: {
       const ref = typeNode as TypeReference;
       const symbol = resolveTypeEntityName(ref.typeName, typeNode, program);
       if (symbol && symbol.flags & SymbolFlags.TypeParameter) {
-        return `T${symbol.escapedName};`;
+        return `T${symbol.escapedName};` as JvmSignature;
       }
       const name = symbol
         ? binaryName(symbol)
         : (entityNameToString(ref.typeName).replaceAll(".", "/") as InternalName);
-      if (!ref.typeArguments || ref.typeArguments.length === 0) return descOf(name);
+      // a descriptor is also a valid signature for a non-generic reference
+      if (!ref.typeArguments || ref.typeArguments.length === 0)
+        return descOf(name) as string as JvmSignature;
       const args = ref.typeArguments.map(a => signatureOfTypeArgument(a, program)).join("");
-      return `L${name}<${args}>;`;
+      return `L${name}<${args}>;` as JvmSignature;
     }
     default:
-      return OBJECT_DESC;
+      return OBJECT_DESC as string as JvmSignature;
   }
 }
 
@@ -1468,7 +1476,7 @@ function typeParamsSignature(
 function methodSignatureOf(
   method: MethodDeclaration | ConstructorDeclaration,
   program: Program,
-): string | undefined {
+): JvmSignature | undefined {
   const returnType = (method as MethodDeclaration).returnType;
   const generic =
     (method.typeParameters?.length ?? 0) > 0 ||
@@ -1483,7 +1491,7 @@ function methodSignatureOf(
     })
     .join("");
   const ret = returnType ? signatureOfType(returnType, program) : "V";
-  return `${typeParamsSignature(method.typeParameters, program)}(${params})${ret}`;
+  return `${typeParamsSignature(method.typeParameters, program)}(${params})${ret}` as JvmSignature;
 }
 
 // ClassSignature, or undefined for a non-generic declaration. An enum has no
@@ -1491,7 +1499,7 @@ function methodSignatureOf(
 function classSignatureOf(
   declaration: ClassDeclaration | InterfaceDeclaration | EnumDeclaration,
   program: Program,
-): string | undefined {
+): JvmSignature | undefined {
   const extendsType = (declaration as ClassDeclaration).extendsType;
   const typeParameters = (declaration as ClassDeclaration).typeParameters;
   const supers = [
@@ -1505,7 +1513,7 @@ function classSignatureOf(
   if (!generic) return undefined;
   const sup = extendsType ? signatureOfType(extendsType, program) : OBJECT_DESC;
   const ifaces = supers.map(t => signatureOfType(t, program)).join("");
-  return `${typeParamsSignature(typeParameters, program)}${sup}${ifaces}`;
+  return `${typeParamsSignature(typeParameters, program)}${sup}${ifaces}` as JvmSignature;
 }
 
 // One slot per value, two for long/double (JVMS 2.6.1).
@@ -1591,16 +1599,16 @@ interface FieldInfo {
 // A local variable / parameter slot and its descriptor (long/double take two
 // slots but one entry).
 interface LocalSlot {
-  slot: number;
+  slot: Slot;
   descriptor: Descriptor;
 }
 
 // One Code-attribute exception_table entry (JVMS 4.7.3). catchType 0 is a
 // catch-all (used for finally).
 interface ExceptionTableEntry {
-  start: number;
-  end: number;
-  handler: number;
+  start: Pc;
+  end: Pc;
+  handler: Pc;
   /** Class cp entry of the caught type, or the literal 0 for a catch-all. */
   catchType: CpIndex | 0;
 }
@@ -1766,7 +1774,7 @@ function generateBody(
   let reachable = true; // is the next instruction reachable by fall-through?
   let nextSlot = isStatic ? 0 : 1;
   if (!isStatic) {
-    activeLocals.push({ slot: 0, descriptor: descOf(thisInternalName) });
+    activeLocals.push({ slot: 0 as Slot, descriptor: descOf(thisInternalName) });
     assigned.add(0);
   }
   // Parameters: a lambda impl's captures + own params, or the method's params.
@@ -1793,8 +1801,8 @@ function generateBody(
           })),
         ];
   for (const p of params) {
-    if (p.symbol) locals.set(p.symbol, { slot: nextSlot, descriptor: p.descriptor });
-    activeLocals.push({ slot: nextSlot, descriptor: p.descriptor });
+    if (p.symbol) locals.set(p.symbol, { slot: nextSlot as Slot, descriptor: p.descriptor });
+    activeLocals.push({ slot: nextSlot as Slot, descriptor: p.descriptor });
     assigned.add(nextSlot);
     nextSlot += slotsOf(p.descriptor);
   }
@@ -1805,7 +1813,7 @@ function generateBody(
   // stack traces carry source lines. The source file is found lazily from the
   // first real statement's parent chain (synthetic wrapper bodies have no
   // positions of their own, but the statements inside them do).
-  const lineNumbers: { pc: number; line: number }[] = [];
+  const lineNumbers: { pc: Pc; line: number }[] = [];
   let lineSource: { text: string; starts: readonly number[] } | null | undefined;
   const recordLine = (node: Node): void => {
     if (typeof node.pos !== "number" || node.pos < 0 || node.end <= node.pos) return; // synthetic
@@ -1825,7 +1833,7 @@ function generateBody(
       last.line = line; // previous entry emitted no code yet
     else if (last && last.line === line)
       return; // the same line continues
-    else lineNumbers.push({ pc: code.length, line });
+    else lineNumbers.push({ pc: code.length as Pc, line });
   };
 
   // Run `body` in a nested local scope: locals it declares are dropped (and their
@@ -1851,7 +1859,7 @@ function generateBody(
 
   // --- labels, branches and stack-map frames ---------------------------------------
   interface Label {
-    offset: number; // resolved when placed
+    offset: Pc; // resolved when placed (-1 until then)
     targetStack?: Descriptor[]; // operand stack as seen at the branch target (recorded by branchTo)
     assignedAtTarget?: Set<number>; // slots assigned on every branch path to here
   }
@@ -1859,13 +1867,13 @@ function generateBody(
     locals: Descriptor[];
     stack: Descriptor[];
   }
-  const frameAt = new Map<number, Frame>(); // offset -> frame snapshot
-  const fixups: { at: number; from: number; label: Label }[] = []; // u2 branch offsets
-  const wideFixups: { at: number; from: number; label: Label }[] = []; // u4 switch offsets
+  const frameAt = new Map<Pc, Frame>(); // offset -> frame snapshot
+  const fixups: { at: Pc; from: Pc; label: Label }[] = []; // u2 branch offsets
+  const wideFixups: { at: Pc; from: Pc; label: Label }[] = []; // u4 switch offsets
   // try/catch handlers: exception_table entries and the handler offsets that
   // also need a stack-map frame (entered with the exception on the stack).
   const exceptionTable: ExceptionTableEntry[] = [];
-  const handlerOffsets: number[] = [];
+  const handlerOffsets: Pc[] = [];
   // break/continue carry the finally depth at the loop/switch, so a jump out of
   // a try runs the intervening finally blocks first.
   // names: the labels of an enclosing labeled statement (JLS 14.7), so a
@@ -1880,13 +1888,13 @@ function generateBody(
   // out: either a user `finally` block (JLS 14.20.2) or the close() of a
   // try-with-resources resource (JLS 14.20.3). Innermost last.
   const finallyStack: FinallyAction[] = [];
-  const newLabel = (): Label => ({ offset: -1 });
+  const newLabel = (): Label => ({ offset: -1 as Pc }); // -1: not placed yet
   // A branch target's frame is defined by the operand stack on the branch-taken
   // path, which can differ from the live stack at the label site (e.g. when the
   // fall-through arrives after a terminator). branchTo records it; placeLabel
   // prefers it, falling back to the live stack for fall-through-only labels.
   const placeLabel = (label: Label): void => {
-    label.offset = code.length;
+    label.offset = code.length as Pc;
     // Assignment state here: the branches' intersection, further intersected
     // with the fall-through state when the previous instruction can fall in.
     const here =
@@ -1909,9 +1917,9 @@ function generateBody(
     frameAt.set(label.offset, { locals: frameLocals(here), stack: frameStack });
   };
   const branchTo = (op: number, label: Label): void => {
-    const from = code.length;
+    const from = code.length as Pc;
     code.u1(op);
-    const at = code.length;
+    const at = code.length as Pc;
     code.u2(0); // placeholder offset, backpatched below
     fixups.push({ at, from, label });
     if (label.targetStack === undefined) label.targetStack = [...stack];
@@ -3374,7 +3382,7 @@ function generateBody(
           const desc = descriptorOf(io.type, program);
           const internal = classOperand(desc);
           const xDesc = emitExpr(io.expression);
-          const tmp = nextSlot;
+          const tmp = nextSlot as Slot;
           nextSlot += slotsOf(xDesc);
           if (nextSlot > maxLocals) maxLocals = nextSlot;
           activeLocals.push({ slot: tmp, descriptor: xDesc });
@@ -3387,7 +3395,7 @@ function generateBody(
           push("I");
           pop(); // consumed by the branch
           branchTo(OP_IFEQ, label); // no match -> branch
-          const tSlot = nextSlot;
+          const tSlot = nextSlot as Slot;
           nextSlot += slotsOf(desc);
           if (nextSlot > maxLocals) maxLocals = nextSlot;
           activeLocals.push({ slot: tSlot, descriptor: desc });
@@ -3940,7 +3948,7 @@ function generateBody(
   // 4-byte boundary from the method's code start; offsets are relative to the
   // opcode. The choice mirrors javac's density heuristic (Gen.visitSwitch).
   const emitSwitchInstr = (cases: { value: number; label: Label }[], defaultLabel: Label): void => {
-    const from = code.length; // opcode address; switch offsets are relative to it
+    const from = code.length as Pc; // opcode address; switch offsets are relative to it
     const n = cases.length;
     const lo = n ? cases[0]!.value : 0;
     const hi = n ? cases[n - 1]!.value : 0;
@@ -3948,7 +3956,7 @@ function generateBody(
     const lookupCost = 3 + 2 * n + 3 * n;
     const useTable = n > 0 && tableCost <= lookupCost;
     const wide = (label: Label): void => {
-      wideFixups.push({ at: code.length, from, label });
+      wideFixups.push({ at: code.length as Pc, from, label });
       code.u4(0); // placeholder, backpatched
       // Record the switch-entry state for this target (like branchTo does).
       if (label.targetStack === undefined) label.targetStack = [...stack];
@@ -4023,7 +4031,7 @@ function generateBody(
     if (isString) {
       const selDesc = STRING_DESC;
       emitExpr(selector);
-      const tmp = nextSlot;
+      const tmp = nextSlot as Slot;
       nextSlot += 1;
       if (nextSlot > maxLocals) maxLocals = nextSlot;
       activeLocals.push({ slot: tmp, descriptor: selDesc });
@@ -4197,8 +4205,8 @@ function generateBody(
   // top (descriptor valueDesc). A type pattern binds its variable (with a runtime
   // checkcast on reference narrowing); a nested record pattern tests + recurses;
   // an unnamed '_' discards. A failed nested instanceof branches to failLabel.
-  const allocSlot = (desc: Descriptor): number => {
-    const slot = nextSlot;
+  const allocSlot = (desc: Descriptor): Slot => {
+    const slot = nextSlot as Slot;
     nextSlot += slotsOf(desc);
     if (nextSlot > maxLocals) maxLocals = nextSlot;
     activeLocals.push({ slot, descriptor: desc });
@@ -4322,7 +4330,7 @@ function generateBody(
     resultDesc?: Descriptor,
   ): boolean => {
     const selDesc = emitExpr(selector);
-    const tmpSlot = nextSlot;
+    const tmpSlot = nextSlot as Slot;
     nextSlot += slotsOf(selDesc);
     if (nextSlot > maxLocals) maxLocals = nextSlot;
     activeLocals.push({ slot: tmpSlot, descriptor: selDesc });
@@ -4399,7 +4407,7 @@ function generateBody(
       push("I");
       pop();
       branchTo(OP_IFEQ, nextL);
-      const pSlot = nextSlot;
+      const pSlot = nextSlot as Slot;
       nextSlot += slotsOf(desc);
       if (nextSlot > maxLocals) maxLocals = nextSlot;
       activeLocals.push({ slot: pSlot, descriptor: desc });
@@ -4516,9 +4524,9 @@ function generateBody(
     primarySlot: number,
   ): void => {
     const exc = THROWABLE_DESC;
-    const bStart = code.length;
+    const bStart = code.length as Pc;
     emitResourceClose(a);
-    const bEnd = code.length;
+    const bEnd = code.length as Pc;
     const rethrowL = newLabel();
     branchTo(OP_GOTO, rethrowL); // close succeeded -> rethrow the primary unchanged
     // Handler for an exception out of close(): suppress it into the primary.
@@ -4532,7 +4540,7 @@ function generateBody(
     placeLabel(h2);
     handlerOffsets.push(h2.offset);
     exceptionTable.push({ start: bStart, end: bEnd, handler: h2.offset, catchType: 0 });
-    const sSlot = nextSlot;
+    const sSlot = nextSlot as Slot;
     nextSlot += 1;
     if (nextSlot > maxLocals) maxLocals = nextSlot;
     activeLocals.push({ slot: sSlot, descriptor: exc });
@@ -4569,7 +4577,7 @@ function generateBody(
     const tryStartAssigned = new Set(assigned);
     // Code ranges covered by the finally catch-all (the try body and each catch
     // body, but NOT the inline finally copies between them).
-    const protectedRanges: { start: number; end: number }[] = [];
+    const protectedRanges: { start: Pc; end: Pc }[] = [];
     const setEntryState = (): void => {
       setStack([]);
       assigned.clear();
@@ -4585,11 +4593,11 @@ function generateBody(
       branchTo(OP_GOTO, endL);
     };
 
-    const tryStart = code.length;
+    const tryStart = code.length as Pc;
     if (fin) finallyStack.push(fin);
     const tryTerm = emitBody();
     if (fin) finallyStack.pop();
-    protectedRanges.push({ start: tryStart, end: code.length });
+    protectedRanges.push({ start: tryStart, end: code.length as Pc });
     if (!tryTerm) completeNormally();
 
     for (const cc of catchClauses) {
@@ -4609,10 +4617,10 @@ function generateBody(
           catchType: cp.classInfo(classOperand(d)),
         });
       }
-      const bodyStart = code.length;
+      const bodyStart = code.length as Pc;
       if (fin) finallyStack.push(fin);
       const handlerTerm = inScope(() => {
-        const slot = nextSlot;
+        const slot = nextSlot as Slot;
         nextSlot += slotsOf(excDesc);
         if (nextSlot > maxLocals) maxLocals = nextSlot;
         activeLocals.push({ slot, descriptor: excDesc });
@@ -4623,7 +4631,7 @@ function generateBody(
         return term;
       });
       if (fin) finallyStack.pop();
-      protectedRanges.push({ start: bodyStart, end: code.length });
+      protectedRanges.push({ start: bodyStart, end: code.length as Pc });
       if (!handlerTerm) completeNormally();
     }
 
@@ -4646,7 +4654,7 @@ function generateBody(
           catchType: 0,
         });
       }
-      const slot = nextSlot;
+      const slot = nextSlot as Slot;
       nextSlot += 1;
       if (nextSlot > maxLocals) maxLocals = nextSlot;
       activeLocals.push({ slot, descriptor: exc });
@@ -4696,7 +4704,7 @@ function generateBody(
           const descriptor = isVar
             ? typeDescriptor(checker.getTypeOfExpression(declarator.initializer!))
             : descriptorOf(decl.type, program);
-          const slot = nextSlot;
+          const slot = nextSlot as Slot;
           nextSlot += slotsOf(descriptor);
           if (nextSlot > maxLocals) maxLocals = nextSlot;
           if (declarator.symbol) locals.set(declarator.symbol, { slot, descriptor });
@@ -4732,7 +4740,7 @@ function generateBody(
         // value is stashed in a temp across them (finally code uses the stack).
         if (finallyStack.length > 0) {
           if (returnDescriptor !== "V") {
-            const slot = nextSlot;
+            const slot = nextSlot as Slot;
             nextSlot += slotsOf(returnDescriptor);
             if (nextSlot > maxLocals) maxLocals = nextSlot;
             activeLocals.push({ slot, descriptor: returnDescriptor });
@@ -4834,8 +4842,8 @@ function generateBody(
         const s = stmt as ForEachStatement;
         const iterableType = checker.getTypeOfExpression(s.expression);
         const param = s.parameter;
-        const reserve = (descriptor: Descriptor): number => {
-          const slot = nextSlot;
+        const reserve = (descriptor: Descriptor): Slot => {
+          const slot = nextSlot as Slot;
           nextSlot += slotsOf(descriptor);
           if (nextSlot > maxLocals) maxLocals = nextSlot;
           activeLocals.push({ slot, descriptor });
@@ -5024,7 +5032,7 @@ function generateBody(
           const ownerInternal = desc.slice(1, -1) as InternalName;
           // Open the resource before the protected region: if the initializer
           // throws there is nothing to close.
-          const slot = nextSlot;
+          const slot = nextSlot as Slot;
           nextSlot += slotsOf(desc);
           if (nextSlot > maxLocals) maxLocals = nextSlot;
           activeLocals.push({ slot, descriptor: desc });
@@ -5053,7 +5061,7 @@ function generateBody(
       case SyntaxKind.SynchronizedStatement: {
         const s = stmt as SynchronizedStatement;
         const monDesc = OBJECT_DESC;
-        const monSlot = nextSlot;
+        const monSlot = nextSlot as Slot;
         nextSlot += 1;
         if (nextSlot > maxLocals) maxLocals = nextSlot;
         activeLocals.push({ slot: monSlot, descriptor: monDesc });
@@ -5676,7 +5684,7 @@ function writeCodeAttribute(
   info: ByteBuffer,
   cp: ConstantPool,
   body: MethodBody,
-  signature?: string,
+  signature?: JvmSignature,
 ): void {
   const smt = body.stackMapTable;
   const smtBytes = smt ? 6 + smt.length : 0;
@@ -5721,7 +5729,11 @@ function writeCodeAttribute(
 }
 
 // A Signature attribute (JVMS 4.7.9): just a Utf8 index to the signature string.
-function writeSignatureAttribute(info: ByteBuffer, cp: ConstantPool, signature: string): void {
+function writeSignatureAttribute(
+  info: ByteBuffer,
+  cp: ConstantPool,
+  signature: JvmSignature,
+): void {
   const index = cp.utf8(signature);
   info.u2(cp.utf8("Signature"));
   info.u4(2);
