@@ -19,6 +19,8 @@ import {
   ErrorCodes,
   type InitializeParams,
   type InitializeResult,
+  type InlayHint,
+  InlayHintKind,
   type Location,
   MarkupKind,
   type Range,
@@ -58,6 +60,7 @@ import {
   SyntaxKind,
 } from "./types.ts";
 import { enclosingCall, getHoverText } from "./hover.ts";
+import { DEFAULT_INLAY_HINTS, getInlayHints, type InlayHintsSettings } from "./inlayHints.ts";
 import { isValidIdentifier, skipTrivia } from "./utilities.ts";
 import { loadJavaFiles, uriToPath } from "./workspace.ts";
 
@@ -68,7 +71,20 @@ const program = createProgram();
 loadJdkStub(program);
 const checker = createChecker(program);
 
+// Inlay-hint configuration: seeded from initializationOptions.inlayHints and
+// updatable via workspace/didChangeConfiguration ({ javalsp: { inlayHints } }).
+let inlayHintSettings: InlayHintsSettings = { ...DEFAULT_INLAY_HINTS };
+function applyInlayHintSettings(raw: unknown): void {
+  if (typeof raw !== "object" || raw === null) return;
+  const o = raw as { parameterNames?: unknown; varTypes?: unknown };
+  if (typeof o.parameterNames === "boolean") inlayHintSettings.parameterNames = o.parameterNames;
+  if (typeof o.varTypes === "boolean") inlayHintSettings.varTypes = o.varTypes;
+}
+
 connection.onInitialize((params: InitializeParams): InitializeResult => {
+  applyInlayHintSettings(
+    (params.initializationOptions as { inlayHints?: unknown } | undefined)?.inlayHints,
+  );
   // Scan workspace folders for .java files so cross-file resolution works
   // before any file is opened. Open documents later override these.
   const roots =
@@ -94,6 +110,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       renameProvider: { prepareProvider: true },
       codeActionProvider: true,
       workspaceSymbolProvider: true,
+      inlayHintProvider: true,
     },
   };
 });
@@ -408,6 +425,35 @@ connection.onWorkspaceSymbol((params): SymbolInformation[] => {
     if (results.length >= 256) break;
   }
   return results;
+});
+
+connection.onDidChangeConfiguration(params => {
+  applyInlayHintSettings(
+    (params.settings as { javalsp?: { inlayHints?: unknown } } | undefined)?.javalsp?.inlayHints,
+  );
+});
+
+connection.languages.inlayHint.on((params): InlayHint[] => {
+  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  if (!sourceFile) return [];
+  const lineStarts = computeLineStarts(sourceFile.text);
+  const start = getPositionOfLineAndCharacter(
+    lineStarts,
+    params.range.start.line,
+    params.range.start.character,
+  );
+  const end = getPositionOfLineAndCharacter(
+    lineStarts,
+    params.range.end.line,
+    params.range.end.character,
+  );
+  return getInlayHints(checker, sourceFile, start, end, inlayHintSettings).map(h => ({
+    position: getLineAndCharacterOfPosition(lineStarts, h.offset),
+    label: h.label,
+    kind: h.kind === "parameter" ? InlayHintKind.Parameter : InlayHintKind.Type,
+    // `count: <arg>` reads with a gap after the name; `x: String` sticks to x.
+    ...(h.kind === "parameter" ? { paddingRight: true } : {}),
+  }));
 });
 
 connection.onHover((params): Hover | null => {
