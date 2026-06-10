@@ -13,7 +13,10 @@ import {
   type Diagnostic as LspDiagnostic,
   DiagnosticSeverity,
   DidChangeWatchedFilesNotification,
+  type DocumentHighlight,
+  DocumentHighlightKind,
   FileChangeType,
+  type FoldingRange,
   type DocumentSymbol,
   type Hover,
   ErrorCodes,
@@ -51,14 +54,18 @@ import { createProgram } from "./program.ts";
 import { findReferences, getDeclarationNameNode, getSourceFileOfNode } from "./resolver.ts";
 import {
   type CallExpression,
+  type AssignmentExpression,
   DiagnosticCategory,
   type Diagnostic as JavaDiagnostic,
   type Identifier,
   type Node,
+  type PrefixUnaryExpression,
   type SourceFile,
   type Symbol,
   SyntaxKind,
 } from "./types.ts";
+import { type ArrayType, type ClassType, TypeKind } from "./checkerTypes.ts";
+import { forEachChild } from "./parser.ts";
 import { enclosingCall, getHoverText } from "./hover.ts";
 import { DEFAULT_INLAY_HINTS, getInlayHints, type InlayHintsSettings } from "./inlayHints.ts";
 import { isValidIdentifier, skipTrivia } from "./utilities.ts";
@@ -111,6 +118,9 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       codeActionProvider: true,
       workspaceSymbolProvider: true,
       inlayHintProvider: true,
+      documentHighlightProvider: true,
+      foldingRangeProvider: true,
+      typeDefinitionProvider: true,
     },
   };
 });
@@ -425,6 +435,96 @@ connection.onWorkspaceSymbol((params): SymbolInformation[] => {
     if (results.length >= 256) break;
   }
   return results;
+});
+
+// In-file occurrences of the symbol under the cursor; an assignment target or
+// an in/decrement operand counts as a write.
+connection.onDocumentHighlight((params): DocumentHighlight[] | null => {
+  const identifier = identifierAt(params.textDocument.uri, params.position);
+  if (!identifier) return null;
+  const symbol = checker.resolveName(identifier);
+  if (!symbol) return null;
+  const isWrite = (node: Node): boolean => {
+    const parent = node.parent;
+    if (!parent) return false;
+    if (
+      parent.kind === SyntaxKind.AssignmentExpression &&
+      (parent as AssignmentExpression).left === node
+    ) {
+      return true;
+    }
+    return (
+      parent.kind === SyntaxKind.PostfixUnaryExpression ||
+      (parent.kind === SyntaxKind.PrefixUnaryExpression &&
+        ((parent as PrefixUnaryExpression).operator === SyntaxKind.PlusPlusToken ||
+          (parent as PrefixUnaryExpression).operator === SyntaxKind.MinusMinusToken))
+    );
+  };
+  return findReferences(symbol, program, checker.resolveName)
+    .filter(node => getSourceFileOfNode(node).fileName === params.textDocument.uri)
+    .map(node => ({
+      range: rangeOf(node),
+      kind: isWrite(node) ? DocumentHighlightKind.Write : DocumentHighlightKind.Read,
+    }));
+});
+
+// Foldable regions: type/method/constructor/initializer bodies (keeping the
+// closing-brace line visible) and the import list.
+connection.onFoldingRanges((params): FoldingRange[] | null => {
+  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  if (!sourceFile) return null;
+  const lineStarts = computeLineStarts(sourceFile.text);
+  const lineAt = (offset: number): number =>
+    getLineAndCharacterOfPosition(lineStarts, offset).line;
+  const ranges: FoldingRange[] = [];
+  const FOLDABLE = new Set<SyntaxKind>([
+    SyntaxKind.ClassDeclaration,
+    SyntaxKind.InterfaceDeclaration,
+    SyntaxKind.EnumDeclaration,
+    SyntaxKind.RecordDeclaration,
+    SyntaxKind.AnnotationTypeDeclaration,
+    SyntaxKind.MethodDeclaration,
+    SyntaxKind.ConstructorDeclaration,
+    SyntaxKind.CompactConstructorDeclaration,
+    SyntaxKind.InitializerBlock,
+  ]);
+  const visit = (node: Node): void => {
+    if (FOLDABLE.has(node.kind)) {
+      const startLine = lineAt(skipTrivia(sourceFile.text, node.pos));
+      const endLine = lineAt(node.end) - 1; // keep the closing brace visible
+      if (endLine > startLine) ranges.push({ startLine, endLine });
+    }
+    forEachChild(node, child => {
+      visit(child);
+      return undefined;
+    });
+  };
+  visit(sourceFile);
+  if (sourceFile.imports.length > 1) {
+    const first = sourceFile.imports[0]!;
+    const last = sourceFile.imports[sourceFile.imports.length - 1]!;
+    const startLine = lineAt(skipTrivia(sourceFile.text, first.pos));
+    const endLine = lineAt(last.end);
+    if (endLine > startLine) ranges.push({ startLine, endLine, kind: "imports" });
+  }
+  return ranges;
+});
+
+// Go to the declaration of the expression's TYPE (the class of a variable,
+// not the variable itself).
+connection.onTypeDefinition((params): Definition | null => {
+  const identifier = identifierAt(params.textDocument.uri, params.position);
+  if (!identifier) return null;
+  const type = checker.getTypeOfExpression(identifier);
+  const classSymbol =
+    type.kind === TypeKind.Class
+      ? (type as ClassType).symbol
+      : type.kind === TypeKind.Array && (type as ArrayType).elementType.kind === TypeKind.Class
+        ? ((type as ArrayType).elementType as ClassType).symbol
+        : undefined;
+  if (!classSymbol) return null;
+  const name = getDeclarationNameNode(classSymbol);
+  return name ? locationOf(name) : null;
 });
 
 connection.onDidChangeConfiguration(params => {
