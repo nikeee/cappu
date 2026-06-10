@@ -126,3 +126,5 @@ no timestamps were captured.
 - 2026-06-10 19:30 — ConstantPool still has some missed opportunities for branded types. e.g. utf8(). Also make the parameters use a branded type as well, so we can get more type-safe across the entire emitting process
 - 2026-06-10 19:43 — go through all comments and check if they correctly describe the behaviour they are next to. Then do the brand candidates 1-4
 - 2026-06-11 00:36 — the vscode lsp extension currently does not start. fix it.
+- 2026-06-11 00:36 — you don't have to use template string literal types. this may be correct, but too impractical for our use. maybe a simple branded type suffices
+- 2026-06-11 00:36 — also use a string literal union for primitive descriptors

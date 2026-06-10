@@ -133,8 +133,24 @@ const ACC_SYNTHETIC = 0x1000;
 const ACC_VARARGS = 0x0080;
 const ACC_ENUM = 0x4000;
 
-// Primitive field descriptors (JVMS 4.3.2).
-const PRIMITIVE_DESCRIPTOR: Record<string, string> = {
+// The three string domains of the class-file format, branded so an internal
+// name cannot land where a descriptor belongs (and vice versa). Trusted
+// literals ("java/lang/Object", "()V") are cast where they are written down;
+// computed values are branded by their producer (binaryName, descriptorOf, ...).
+
+/** A primitive type descriptor (JVMS Table 4.3-A), plus void's "V" (method returns). */
+export type PrimitiveDescriptor = "B" | "C" | "D" | "F" | "I" | "J" | "S" | "Z" | "V";
+/** A computational numeric category (JVMS 2.11.1): what the JVM computes in. */
+type NumericCat = "I" | "J" | "F" | "D";
+/** A field/return type descriptor (JVMS 4.3.2): primitive, `L<internal>;`, or `[<descriptor>`. */
+export type Descriptor = PrimitiveDescriptor | Brand<string, "Descriptor">;
+/** A method descriptor (JVMS 4.3.3), e.g. "(ILjava/lang/String;)V". */
+export type MethodDescriptor = Brand<string, "MethodDescriptor">;
+/** An internal (slash-separated) binary class name (JVMS 4.2.1), e.g. "java/lang/String". */
+export type InternalName = Brand<string, "InternalName">;
+
+// Primitive field descriptors (JVMS 4.3.2) by source keyword.
+const PRIMITIVE_DESCRIPTOR = {
   byte: "B",
   char: "C",
   double: "D",
@@ -144,7 +160,29 @@ const PRIMITIVE_DESCRIPTOR: Record<string, string> = {
   short: "S",
   boolean: "Z",
   void: "V",
-};
+} as const satisfies Record<string, PrimitiveDescriptor>;
+
+/** The primitive descriptor for a source keyword, if it is a primitive keyword. */
+function primitiveDescriptor(keyword: string): PrimitiveDescriptor | undefined {
+  return PRIMITIVE_DESCRIPTOR[keyword as keyof typeof PRIMITIVE_DESCRIPTOR];
+}
+
+const OBJECT_DESC = "Ljava/lang/Object;" as Descriptor;
+const STRING_DESC = "Ljava/lang/String;" as Descriptor;
+const THROWABLE_DESC = "Ljava/lang/Throwable;" as Descriptor;
+const ITERATOR_DESC = "Ljava/util/Iterator;" as Descriptor;
+
+/** The object descriptor `L<name>;` for a class given by its internal name. */
+function descOf(internal: InternalName): Descriptor {
+  return `L${internal};` as Descriptor;
+}
+
+// The CONSTANT_Class operand for a reference type given by its descriptor:
+// array classes are named by the descriptor itself, others by the internal
+// name inside `L...;` (JVMS 4.4.1).
+function classOperand(descriptor: Descriptor): InternalName | Descriptor {
+  return descriptor[0] === "[" ? descriptor : (descriptor.slice(1, -1) as InternalName);
+}
 
 // Constant pool tags (JVMS 4.4, Table 4.4-A).
 const CONSTANT_Utf8 = 1;
@@ -168,22 +206,22 @@ const REF_newInvokeSpecial = 8;
 const REF_invokeInterface = 9;
 
 // java.lang.invoke.StringConcatFactory.makeConcatWithConstants bootstrap (JLS 15.18.1).
-const STRING_CONCAT_FACTORY = "java/lang/invoke/StringConcatFactory";
+const STRING_CONCAT_FACTORY = "java/lang/invoke/StringConcatFactory" as InternalName;
 const MAKE_CONCAT = "makeConcatWithConstants";
 const MAKE_CONCAT_BSM_DESCRIPTOR =
-  "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;";
+  "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;" as MethodDescriptor;
 // java.lang.invoke.LambdaMetafactory.metafactory bootstrap (JLS 15.27 lambdas).
-const LAMBDA_METAFACTORY = "java/lang/invoke/LambdaMetafactory";
+const LAMBDA_METAFACTORY = "java/lang/invoke/LambdaMetafactory" as InternalName;
 const LAMBDA_METAFACTORY_BSM_DESCRIPTOR =
-  "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;";
+  "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;" as MethodDescriptor;
 // java.lang.runtime.ObjectMethods.bootstrap (record equals/hashCode/toString).
 const OBJECT_METHODS_BSM_DESCRIPTOR =
-  "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/TypeDescriptor;Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/invoke/MethodHandle;)Ljava/lang/Object;";
+  "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/TypeDescriptor;Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/invoke/MethodHandle;)Ljava/lang/Object;" as MethodDescriptor;
 const OP_INVOKEDYNAMIC = 0xba;
 
 // Boxing/unboxing (JLS 5.1.7/5.1.8): primitive descriptor -> wrapper internal
 // name (Xxx.valueOf), and wrapper internal name -> [unboxing method, primitive].
-const WRAPPER: Record<string, string> = {
+const WRAPPER = {
   Z: "java/lang/Boolean",
   B: "java/lang/Byte",
   S: "java/lang/Short",
@@ -192,8 +230,12 @@ const WRAPPER: Record<string, string> = {
   J: "java/lang/Long",
   F: "java/lang/Float",
   D: "java/lang/Double",
-};
-const UNBOX: Record<string, readonly [string, string]> = {
+} as const satisfies Record<string, string>;
+/** The wrapper class for a primitive descriptor (JLS 5.1.7 boxing). */
+function wrapperOf(prim: string): InternalName | undefined {
+  return WRAPPER[prim as keyof typeof WRAPPER] as InternalName | undefined;
+}
+const UNBOX = {
   "java/lang/Boolean": ["booleanValue", "Z"],
   "java/lang/Byte": ["byteValue", "B"],
   "java/lang/Short": ["shortValue", "S"],
@@ -202,7 +244,11 @@ const UNBOX: Record<string, readonly [string, string]> = {
   "java/lang/Long": ["longValue", "J"],
   "java/lang/Float": ["floatValue", "F"],
   "java/lang/Double": ["doubleValue", "D"],
-};
+} as const satisfies Record<string, readonly [string, PrimitiveDescriptor]>;
+/** The unboxing method and its primitive for a wrapper's internal name (JLS 5.1.8). */
+function unboxOf(internal: string): readonly [string, PrimitiveDescriptor] | undefined {
+  return UNBOX[internal as keyof typeof UNBOX];
+}
 
 // Opcodes (JVMS 6.5) used so far.
 const OP_ACONST_NULL = 0x01;
@@ -415,7 +461,9 @@ class ConstantPool {
     });
   }
 
-  classInfo(internalName: string): CpIndex {
+  // also accepts a Descriptor: checkcast/anewarray name array CLASSES by
+  // their descriptor (JVMS 4.4.1)
+  classInfo(internalName: InternalName | Descriptor): CpIndex {
     const nameIndex = this.utf8(internalName);
     return this.intern(`c:${internalName}`, b => {
       b.u1(CONSTANT_Class);
@@ -423,7 +471,7 @@ class ConstantPool {
     });
   }
 
-  nameAndType(name: string, descriptor: string): CpIndex {
+  nameAndType(name: string, descriptor: Descriptor | MethodDescriptor): CpIndex {
     const nameIndex = this.utf8(name);
     const descIndex = this.utf8(descriptor);
     return this.intern(`nt:${name}:${descriptor}`, b => {
@@ -433,7 +481,13 @@ class ConstantPool {
     });
   }
 
-  methodref(internalClass: string, name: string, descriptor: string): CpIndex {
+  // the class may be an array class, named by its descriptor (JVMS 4.4.2):
+  // e.g. int[].clone()
+  methodref(
+    internalClass: InternalName | Descriptor,
+    name: string,
+    descriptor: MethodDescriptor,
+  ): CpIndex {
     const classIndex = this.classInfo(internalClass);
     const ntIndex = this.nameAndType(name, descriptor);
     return this.intern(`m:${internalClass}:${name}:${descriptor}`, b => {
@@ -443,7 +497,11 @@ class ConstantPool {
     });
   }
 
-  interfaceMethodref(internalClass: string, name: string, descriptor: string): CpIndex {
+  interfaceMethodref(
+    internalClass: InternalName,
+    name: string,
+    descriptor: MethodDescriptor,
+  ): CpIndex {
     const classIndex = this.classInfo(internalClass);
     const ntIndex = this.nameAndType(name, descriptor);
     return this.intern(`im:${internalClass}:${name}:${descriptor}`, b => {
@@ -453,7 +511,7 @@ class ConstantPool {
     });
   }
 
-  fieldref(internalClass: string, name: string, descriptor: string): CpIndex {
+  fieldref(internalClass: InternalName, name: string, descriptor: Descriptor): CpIndex {
     const classIndex = this.classInfo(internalClass);
     const ntIndex = this.nameAndType(name, descriptor);
     return this.intern(`f:${internalClass}:${name}:${descriptor}`, b => {
@@ -535,7 +593,10 @@ class ConstantPool {
     const recipeIndex = this.string(recipe);
     const bootstrapIndex = this.bootstraps.length;
     this.bootstraps.push({ handle, args: [recipeIndex] });
-    const nt = this.nameAndType(MAKE_CONCAT, `(${dynamicArgsDescriptor})Ljava/lang/String;`);
+    const nt = this.nameAndType(
+      MAKE_CONCAT,
+      `(${dynamicArgsDescriptor})Ljava/lang/String;` as MethodDescriptor,
+    );
     return this.intern(`indy:${bootstrapIndex}:${dynamicArgsDescriptor}`, b => {
       b.u1(CONSTANT_InvokeDynamic);
       b.u2(bootstrapIndex);
@@ -550,14 +611,18 @@ class ConstantPool {
    */
   invokeDynamicObjectMethod(
     methodName: string,
-    descriptor: string,
-    recordInternal: string,
+    descriptor: MethodDescriptor,
+    recordInternal: InternalName,
     names: string,
-    getters: { name: string; descriptor: string }[],
+    getters: { name: string; descriptor: MethodDescriptor }[],
   ): CpIndex {
     const bsmHandle = this.methodHandle(
       REF_invokeStatic,
-      this.methodref("java/lang/runtime/ObjectMethods", "bootstrap", OBJECT_METHODS_BSM_DESCRIPTOR),
+      this.methodref(
+        "java/lang/runtime/ObjectMethods" as InternalName,
+        "bootstrap",
+        OBJECT_METHODS_BSM_DESCRIPTOR,
+      ),
     );
     const args = [
       this.classInfo(recordInternal),
@@ -576,7 +641,7 @@ class ConstantPool {
     });
   }
 
-  private methodType(descriptor: string): CpIndex {
+  private methodType(descriptor: MethodDescriptor): CpIndex {
     const descIndex = this.utf8(descriptor);
     return this.intern(`mt:${descriptor}`, b => {
       b.u1(CONSTANT_MethodType);
@@ -593,13 +658,13 @@ class ConstantPool {
    */
   invokeDynamicLambda(
     samName: string,
-    indyDescriptor: string,
-    samErased: string,
+    indyDescriptor: MethodDescriptor,
+    samErased: MethodDescriptor,
     implRefKind: number,
-    implOwner: string,
+    implOwner: InternalName,
     implName: string,
-    implDescriptor: string,
-    instantiated: string,
+    implDescriptor: MethodDescriptor,
+    instantiated: MethodDescriptor,
     implIsInterface = false,
   ): CpIndex {
     const bsmHandle = this.methodHandle(
@@ -704,17 +769,16 @@ function sourceNameOf(node: Node): string | undefined {
 // The class-level attributes shared by classes and enums: SourceFile and (when
 // any invokedynamic was emitted) BootstrapMethods. Must run before the constant
 // pool is written so the attribute name Utf8s are interned.
-// TODO: emit the attributes javac writes that we omit, needed for closer
-// byte-equivalence: InnerClasses (JVMS 4.7.6) and NestHost/NestMembers (4.7.28/
-// 4.7.29) for nested types, Signature (4.7.9) for generic signatures, and the
-// per-method LineNumberTable (4.7.12) and LocalVariableTable (4.7.13).
+// TODO: emit the attributes javac writes that we still omit, needed for closer
+// byte-equivalence: InnerClasses (JVMS 4.7.6) and the per-method
+// LocalVariableTable (4.7.13).
 function buildClassAttributes(
   cp: ConstantPool,
   sourceName: string | undefined,
   // This class's binary name and the nest grouping (host -> all member names),
   // used to emit NestHost / NestMembers so nestmates share private access.
-  name?: string,
-  nestMembers?: Map<string, string[]>,
+  name?: InternalName,
+  nestMembers?: Map<string, InternalName[]>,
   // ClassSignature (JVMS 4.7.9) for a generic class/interface declaration.
   signature?: string,
 ): { buffer: ByteBuffer; count: number } {
@@ -738,8 +802,9 @@ function buildClassAttributes(
     count++;
   }
   if (name && nestMembers) {
-    // The nest host is the top-level type (the name up to the first '$').
-    const host = name.replace(/\$.*/, "");
+    // The nest host is the top-level type (the name up to the first '$'),
+    // itself an internal name.
+    const host = name.replace(/\$.*/, "") as InternalName;
     if (name === host) {
       const members = (nestMembers.get(host) ?? []).filter(n => n !== host);
       if (members.length > 0) {
@@ -764,11 +829,11 @@ function buildClassAttributes(
 export function computeNestMembers(
   sourceFile: SourceFile,
   program: Program,
-): Map<string, string[]> {
+): Map<string, InternalName[]> {
   program.getGlobalIndex();
-  const byHost = new Map<string, string[]>();
-  const add = (n: string): void => {
-    const host = n.replace(/\$.*/, "");
+  const byHost = new Map<string, InternalName[]>();
+  const add = (n: InternalName): void => {
+    const host = n.replace(/\$.*/, "") as InternalName;
     const list = byHost.get(host);
     if (list) list.push(n);
     else byHost.set(host, [n]);
@@ -777,7 +842,7 @@ export function computeNestMembers(
     if (node.kind === SyntaxKind.ClassDeclaration) {
       const d = node as ClassDeclaration;
       if (d.symbol) add(binaryName(d.symbol));
-      else if (d.name) add(d.name.text);
+      else if (d.name) add(d.name.text as InternalName); // unbound: bare name, default package
     } else if (
       node.kind === SyntaxKind.InterfaceDeclaration ||
       node.kind === SyntaxKind.EnumDeclaration ||
@@ -806,7 +871,7 @@ export function computeNestMembers(
 // and enums.
 function collectFieldInits(
   members: readonly Node[],
-  ownerName: string,
+  ownerName: InternalName,
   program: Program,
 ): { instanceInits: FieldInit[]; staticInits: FieldInit[] } {
   const instanceInits: FieldInit[] = [];
@@ -888,22 +953,20 @@ const TYPE_DECL_KINDS = new Set([
 // Field/parameter descriptor of a checker Type (erasing type variables and
 // wildcards to Object). Module-level twin of generateBody's typeDescriptor, for
 // capture analysis which runs outside that closure.
-function typeToDescriptor(type: Type, depth = 0): string {
+function typeToDescriptor(type: Type, depth = 0): Descriptor {
   switch (type.kind) {
     case TypeKind.Primitive:
-      return PRIMITIVE_DESCRIPTOR[type.name] ?? "I";
+      return primitiveDescriptor(type.name) ?? "I";
     case TypeKind.Class:
-      return `L${binaryName(type.symbol)};`;
+      return `L${binaryName(type.symbol)};` as Descriptor;
     case TypeKind.Array:
-      return `[${typeToDescriptor(type.elementType, depth)}`;
+      return `[${typeToDescriptor(type.elementType, depth)}` as Descriptor;
     case TypeKind.TypeVariable:
       // Erasure to the leftmost bound (JLS 4.6); the depth guard caps a
       // (malformed) `T extends U, U extends T` chain.
-      return type.bound && depth < 8
-        ? typeToDescriptor(type.bound, depth + 1)
-        : "Ljava/lang/Object;";
+      return type.bound && depth < 8 ? typeToDescriptor(type.bound, depth + 1) : OBJECT_DESC;
     default:
-      return "Ljava/lang/Object;";
+      return OBJECT_DESC;
   }
 }
 
@@ -912,7 +975,7 @@ function typeToDescriptor(type: Type, depth = 0): string {
 interface LocalCapture {
   symbol: Symbol;
   fieldName: string;
-  descriptor: string;
+  descriptor: Descriptor;
 }
 
 // The enclosing locals a local class captures, in first-use order. Both the class
@@ -983,7 +1046,7 @@ function outerThisInfo(
   parent: Node | undefined,
   program: Program,
   checker: Checker,
-): { enclosingInternal: string } | undefined {
+): { enclosingInternal: InternalName } | undefined {
   let typeSym: Symbol | undefined;
   for (let n = parent; n; n = n.parent) {
     // A static enclosing method has no enclosing instance.
@@ -1078,7 +1141,7 @@ function localOuterThis(
   decl: ClassDeclaration,
   program: Program,
   checker: Checker,
-): { enclosingInternal: string } | undefined {
+): { enclosingInternal: InternalName } | undefined {
   return isSynthesizableLocalClass(decl)
     ? outerThisInfo(decl.members, decl.parent, program, checker)
     : undefined;
@@ -1104,7 +1167,7 @@ function memberInnerThis0(
   decl: ClassDeclaration,
   program: Program,
   checker: Checker,
-): { enclosingInternal: string } | undefined {
+): { enclosingInternal: InternalName } | undefined {
   if (!decl.parent || !TYPE_DECL_KINDS.has(decl.parent.kind)) return undefined;
   if (isStaticDeclaration(decl)) return undefined;
   const ctors = decl.members.filter(
@@ -1114,7 +1177,7 @@ function memberInnerThis0(
   return outerThisInfo(decl.members, decl.parent, program, checker);
 }
 
-function binaryName(symbol: Symbol): string {
+function binaryName(symbol: Symbol): InternalName {
   const names = [symbol.escapedName];
   let parent = symbol.parent;
   while (parent && parent.flags & SymbolFlags.Type) {
@@ -1131,22 +1194,22 @@ function binaryName(symbol: Symbol): string {
     const decl = symbol.valueDeclaration ?? symbol.declarations?.[0];
     let node = decl?.parent;
     while (node && !TYPE_DECL_KINDS.has(node.kind)) node = node.parent;
-    if (node?.symbol) return `${binaryName(node.symbol)}$${symbol.escapedName}`;
+    if (node?.symbol) return `${binaryName(node.symbol)}$${symbol.escapedName}` as InternalName;
   }
   const nested = names.join("$");
-  return pkg ? `${pkg.replace(/\./g, "/")}/${nested}` : nested;
+  return (pkg ? `${pkg.replaceAll(".", "/")}/${nested}` : nested) as InternalName;
 }
 
 // Field/return type descriptor (JVMS 4.3.2). Type references are resolved to a
 // binary name; an unresolved name falls back to its written form (best effort).
-function descriptorOf(typeNode: TypeNode, program: Program, seenParams?: Set<Symbol>): string {
+function descriptorOf(typeNode: TypeNode, program: Program, seenParams?: Set<Symbol>): Descriptor {
   switch (typeNode.kind) {
     case SyntaxKind.PrimitiveType: {
       const keyword = tokenToString((typeNode as { keyword: SyntaxKind }).keyword) ?? "int";
-      return PRIMITIVE_DESCRIPTOR[keyword] ?? "I";
+      return primitiveDescriptor(keyword) ?? "I";
     }
     case SyntaxKind.ArrayType:
-      return `[${descriptorOf((typeNode as AstArrayType).elementType, program, seenParams)}`;
+      return `[${descriptorOf((typeNode as AstArrayType).elementType, program, seenParams)}` as Descriptor;
     case SyntaxKind.TypeReference: {
       const ref = typeNode as TypeReference;
       const symbol = resolveTypeEntityName(ref.typeName, typeNode, program);
@@ -1154,22 +1217,22 @@ function descriptorOf(typeNode: TypeNode, program: Program, seenParams?: Set<Sym
       // (JLS 4.6). Method/field descriptors are always over erased types. The
       // seen-set guards `U extends T` chains against a (malformed) cycle.
       if (symbol && symbol.flags & SymbolFlags.TypeParameter) {
-        if (seenParams?.has(symbol)) return "Ljava/lang/Object;";
+        if (seenParams?.has(symbol)) return OBJECT_DESC;
         const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
         const constraint =
           declaration?.kind === SyntaxKind.TypeParameter
             ? (declaration as AstTypeParameter).constraint?.[0]
             : undefined;
-        if (!constraint) return "Ljava/lang/Object;";
+        if (!constraint) return OBJECT_DESC;
         return descriptorOf(constraint, program, (seenParams ?? new Set()).add(symbol));
       }
       const name = symbol
         ? binaryName(symbol)
-        : entityNameToString(ref.typeName).replace(/\./g, "/");
-      return `L${name};`;
+        : (entityNameToString(ref.typeName).replaceAll(".", "/") as InternalName);
+      return descOf(name) as Descriptor;
     }
     default:
-      return "Ljava/lang/Object;";
+      return OBJECT_DESC;
   }
 }
 
@@ -1232,10 +1295,7 @@ function isConstantValueField(
     return false;
   }
   const descriptor = descriptorOf(field.type, program);
-  if (
-    descriptor === "Ljava/lang/String;" &&
-    declarator.initializer.kind === SyntaxKind.StringLiteral
-  ) {
+  if (descriptor === STRING_DESC && declarator.initializer.kind === SyntaxKind.StringLiteral) {
     return true;
   }
   return (
@@ -1254,7 +1314,7 @@ function constantValueIndex(
   if (!isConstantValueField(field, declarator, program)) return undefined;
   const init = declarator.initializer!;
   const descriptor = descriptorOf(field.type, program);
-  if (descriptor === "Ljava/lang/String;") {
+  if (descriptor === STRING_DESC) {
     return cp.string((init as LiteralExpression).value);
   }
   const folded = foldConstant(init)!;
@@ -1304,14 +1364,14 @@ function methodAccessFlags(method: MethodDeclaration | ConstructorDeclaration): 
   return flags;
 }
 
-function paramDescriptor(parameter: Parameter, program: Program): string {
+function paramDescriptor(parameter: Parameter, program: Program): Descriptor {
   const base = descriptorOf(parameter.type, program);
-  return parameter.isVarArgs ? `[${base}` : base; // T... is T[] at the bytecode level
+  return parameter.isVarArgs ? (`[${base}` as Descriptor) : base; // T... is T[] at the bytecode level
 }
 
-function methodDescriptor(method: MethodDeclaration, program: Program): string {
+function methodDescriptor(method: MethodDeclaration, program: Program): MethodDescriptor {
   const params = method.parameters.map(p => paramDescriptor(p as Parameter, program)).join("");
-  return `(${params})${descriptorOf(method.returnType, program)}`;
+  return `(${params})${descriptorOf(method.returnType, program)}` as MethodDescriptor;
 }
 
 // --- generic signatures (JVMS 4.7.9) -----------------------------------------
@@ -1343,7 +1403,7 @@ function signatureOfType(typeNode: TypeNode, program: Program): string {
   switch (typeNode.kind) {
     case SyntaxKind.PrimitiveType: {
       const keyword = tokenToString((typeNode as { keyword: SyntaxKind }).keyword) ?? "int";
-      return PRIMITIVE_DESCRIPTOR[keyword] ?? "I";
+      return primitiveDescriptor(keyword) ?? "I";
     }
     case SyntaxKind.ArrayType:
       return `[${signatureOfType((typeNode as AstArrayType).elementType, program)}`;
@@ -1355,13 +1415,13 @@ function signatureOfType(typeNode: TypeNode, program: Program): string {
       }
       const name = symbol
         ? binaryName(symbol)
-        : entityNameToString(ref.typeName).replace(/\./g, "/");
-      if (!ref.typeArguments || ref.typeArguments.length === 0) return `L${name};`;
+        : (entityNameToString(ref.typeName).replaceAll(".", "/") as InternalName);
+      if (!ref.typeArguments || ref.typeArguments.length === 0) return descOf(name);
       const args = ref.typeArguments.map(a => signatureOfTypeArgument(a, program)).join("");
       return `L${name}<${args}>;`;
     }
     default:
-      return "Ljava/lang/Object;";
+      return OBJECT_DESC;
   }
 }
 
@@ -1443,20 +1503,20 @@ function classSignatureOf(
     typeUsesGenerics(extendsType, program) ||
     supers.some(t => typeUsesGenerics(t, program));
   if (!generic) return undefined;
-  const sup = extendsType ? signatureOfType(extendsType, program) : "Ljava/lang/Object;";
+  const sup = extendsType ? signatureOfType(extendsType, program) : OBJECT_DESC;
   const ifaces = supers.map(t => signatureOfType(t, program)).join("");
   return `${typeParamsSignature(typeParameters, program)}${sup}${ifaces}`;
 }
 
 // One slot per value, two for long/double (JVMS 2.6.1).
-function slotsOf(descriptor: string): number {
+function slotsOf(descriptor: Descriptor): number {
   return descriptor === "J" || descriptor === "D" ? 2 : 1;
 }
 
 // Placeholder body: return the default value for the return type. Real statement
 // code generation replaces this in the next milestone; this keeps every emitted
 // method verifiable in the meantime.
-function defaultReturnBody(returnDescriptor: string): { code: ByteBuffer; maxStack: number } {
+function defaultReturnBody(returnDescriptor: Descriptor): { code: ByteBuffer; maxStack: number } {
   const code = new ByteBuffer();
   switch (returnDescriptor[0]) {
     case "V":
@@ -1487,15 +1547,20 @@ function defaultReturnBody(returnDescriptor: string): { code: ByteBuffer; maxSta
 }
 
 // Split a method descriptor's parameter list into individual descriptors.
-function parseParamDescriptors(methodDescriptor: string): string[] {
-  const params: string[] = [];
+/** What follows the `)` of a method descriptor: the return descriptor (or "V"). */
+function returnDescriptorOf(descriptor: MethodDescriptor): Descriptor {
+  return descriptor.slice(descriptor.lastIndexOf(")") + 1) as Descriptor;
+}
+
+function parseParamDescriptors(methodDescriptor: MethodDescriptor): Descriptor[] {
+  const params: Descriptor[] = [];
   let i = methodDescriptor.indexOf("(") + 1;
   while (methodDescriptor[i] !== ")") {
     const start = i;
     while (methodDescriptor[i] === "[") i++;
     if (methodDescriptor[i] === "L") i = methodDescriptor.indexOf(";", i) + 1;
     else i++;
-    params.push(methodDescriptor.slice(start, i));
+    params.push(methodDescriptor.slice(start, i) as Descriptor);
   }
   return params;
 }
@@ -1517,9 +1582,9 @@ function findConstructor(typeSymbol: Symbol, argCount: number): ConstructorDecla
 
 // A resolved field/enum-constant reference: where it lives and its descriptor.
 interface FieldInfo {
-  owner: string;
+  owner: InternalName;
   name: string;
-  descriptor: string;
+  descriptor: Descriptor;
   isStatic: boolean;
 }
 
@@ -1527,7 +1592,7 @@ interface FieldInfo {
 // slots but one entry).
 interface LocalSlot {
   slot: number;
-  descriptor: string;
+  descriptor: Descriptor;
 }
 
 // One Code-attribute exception_table entry (JVMS 4.7.3). catchType 0 is a
@@ -1548,7 +1613,7 @@ type FinallyAction =
   | {
       kind: "resource";
       slot: number;
-      ownerInternal: string;
+      ownerInternal: InternalName;
       isInterface: boolean;
       // Emit an `if (r != null)` guard around close() (JLS 14.20.3.1). Elided when
       // the resource is definitely non-null (a `new` initializer), as javac does.
@@ -1562,9 +1627,9 @@ interface FieldInit {
   isStatic: boolean;
   // A field initializer (owner/name/descriptor/init), or an initializer block
   // (JLS 8.6 / 8.7) that runs its statements in place, interleaved by source order.
-  owner?: string;
+  owner?: InternalName;
   name?: string;
-  descriptor?: string;
+  descriptor?: Descriptor;
   init?: Node;
   block?: Block;
 }
@@ -1574,8 +1639,8 @@ interface FieldInit {
 // private instance method (the lambda captured `this`); otherwise private static.
 interface LambdaImpl {
   name: string;
-  params: { symbol: Symbol; descriptor: string }[];
-  returnDescriptor: string;
+  params: { symbol: Symbol; descriptor: Descriptor }[];
+  returnDescriptor: Descriptor;
   body: Node;
   isInstance: boolean;
 }
@@ -1583,15 +1648,15 @@ interface LambdaImpl {
 // The data the enum <clinit> needs: how to construct each constant and the
 // $VALUES array of all of them.
 interface EnumClinit {
-  enumInternal: string;
-  selfDesc: string; // L<enum>;
-  arrayDesc: string; // [L<enum>;
+  enumInternal: InternalName;
+  selfDesc: Descriptor; // L<enum>;
+  arrayDesc: Descriptor; // [L<enum>;
   valuesField: string; // synthetic $VALUES field name
   constants: {
     name: string;
     ordinal: number;
-    ctorDescriptor: string; // (Ljava/lang/String;I<userparams>)V
-    userParamDescs: string[];
+    ctorDescriptor: MethodDescriptor; // (Ljava/lang/String;I<userparams>)V
+    userParamDescs: Descriptor[];
     args: Node[];
   }[];
 }
@@ -1601,10 +1666,10 @@ function generateBody(
   cp: ConstantPool,
   program: Program,
   checker: Checker,
-  thisInternalName: string,
+  thisInternalName: InternalName,
   // For constructors: the super class's internal name; an implicit super.<init>()
   // call is emitted before the body (explicit super()/this() is not yet handled).
-  ctorSuper?: string,
+  ctorSuper?: InternalName,
   // Field initializers run in the prologue: instance fields after super() in a
   // constructor, static fields at the top of <clinit>.
   fieldInits: FieldInit[] = [],
@@ -1616,8 +1681,8 @@ function generateBody(
   // params (captures, then the lambda's own params) and return type are given,
   // and `body` is the lambda's expression or block.
   lambdaSpec?: {
-    params: { symbol: Symbol; descriptor: string }[];
-    returnDescriptor: string;
+    params: { symbol: Symbol; descriptor: Descriptor }[];
+    returnDescriptor: Descriptor;
     body: Node;
     isInstance: boolean;
   },
@@ -1629,40 +1694,45 @@ function generateBody(
   enumClinit?: EnumClinit,
   // <clinit> of a class that uses `assert` (JLS 14.10): initialize the synthetic
   // $assertionsDisabled field from this class's desiredAssertionStatus() first.
-  assertionsOwner?: string,
+  assertionsOwner?: InternalName,
   // For a local class (JLS 14.3): enclosing locals it captures, read from the
   // synthetic `val$x` fields rather than as locals.
   captureFields: Map<
     Symbol,
-    { ownerInternal: string; fieldName: string; descriptor: string }
+    { ownerInternal: InternalName; fieldName: string; descriptor: Descriptor }
   > = new Map(),
   // For a local/anonymous class accessing the enclosing instance: its class name,
   // so implicit-this access to an enclosing-class member routes through this$0.
-  outerThis?: { enclosingInternal: string },
+  outerThis?: { enclosingInternal: InternalName },
   // Synthesized constructor of a capturing/anonymous class: emit the prologue
   // (store this$0, call super with its args, store the captures) before the
   // instance field initializers. The prologue values arrive as leading synthetic
   // parameters (this$0, captures, super-args, in that order).
   ctorPrologue?: {
-    this0Descriptor?: string;
+    this0Descriptor?: Descriptor;
     captures: LocalCapture[];
-    superInternal: string;
-    superParamDescs: string[];
+    superInternal: InternalName;
+    superParamDescs: Descriptor[];
   },
   // A synthesized constructor whose parameters are given explicitly (with their
   // declaration symbols, so the body resolves them as locals) rather than read
   // from method.parameters - used for a record's canonical/compact constructor,
   // where the parameters are the record components.
-  paramSymbols?: { symbol: Symbol; descriptor: string }[],
+  paramSymbols?: { symbol: Symbol; descriptor: Descriptor }[],
   // Field stores emitted at the end of the constructor body (after it, before the
   // closing return) - a record compact constructor assigns each component field
   // from its (possibly reassigned) parameter once the body completes.
-  ctorTrailingStores?: { owner: string; name: string; descriptor: string; slot: number }[],
+  ctorTrailingStores?: {
+    owner: InternalName;
+    name: string;
+    descriptor: Descriptor;
+    slot: number;
+  }[],
   // A declared constructor of a non-static member inner class or a capturing local
   // class: the enclosing instance (this$0, stored before super) and/or the captured
   // locals (val$ fields, stored after super) arrive as leading synthetic parameters
   // - this$0 first, then the captures - ahead of the user parameters.
-  ctorLeading?: { this0Descriptor?: string; captures: LocalCapture[] },
+  ctorLeading?: { this0Descriptor?: Descriptor; captures: LocalCapture[] },
 ): MethodBody {
   const isConstructor = !lambdaSpec && method.kind === SyntaxKind.ConstructorDeclaration;
   const isStatic = lambdaSpec
@@ -1687,7 +1757,7 @@ function generateBody(
   // Locals currently in scope, in slot order, for stack-map frames (this, then
   // params, then declared locals; long/double = one entry). Each carries its
   // slot so frames can mark a not-yet-assigned local as `top` (see `assigned`).
-  const TOP = " top"; // sentinel descriptor for an unassigned slot
+  const TOP = " top" as Descriptor; // sentinel pseudo-descriptor for an unassigned slot
   const activeLocals: LocalSlot[] = [];
   // Slots that are definitely assigned at the current point (JLS 16). A frame
   // lists the real type for an assigned slot and `top` otherwise; the set is
@@ -1696,24 +1766,24 @@ function generateBody(
   let reachable = true; // is the next instruction reachable by fall-through?
   let nextSlot = isStatic ? 0 : 1;
   if (!isStatic) {
-    activeLocals.push({ slot: 0, descriptor: `L${thisInternalName};` });
+    activeLocals.push({ slot: 0, descriptor: descOf(thisInternalName) });
     assigned.add(0);
   }
   // Parameters: a lambda impl's captures + own params, or the method's params.
   // An enum constructor has two synthetic leading parameters (name, ordinal).
-  const prologueParams: { descriptor: string }[] = ctorPrologue
+  const prologueParams: { descriptor: Descriptor }[] = ctorPrologue
     ? [
         ...(ctorPrologue.this0Descriptor ? [{ descriptor: ctorPrologue.this0Descriptor }] : []),
         ...ctorPrologue.captures.map(c => ({ descriptor: c.descriptor })),
         ...ctorPrologue.superParamDescs.map(d => ({ descriptor: d })),
       ]
     : [];
-  const params: { symbol?: Symbol; descriptor: string }[] = lambdaSpec
+  const params: { symbol?: Symbol; descriptor: Descriptor }[] = lambdaSpec
     ? lambdaSpec.params
     : paramSymbols
       ? paramSymbols
       : [
-          ...(enumCtor ? [{ descriptor: "Ljava/lang/String;" }, { descriptor: "I" }] : []),
+          ...(enumCtor ? [{ descriptor: STRING_DESC }, { descriptor: "I" as Descriptor }] : []),
           ...prologueParams,
           ...(ctorLeading?.this0Descriptor ? [{ descriptor: ctorLeading.this0Descriptor }] : []),
           ...(ctorLeading?.captures ?? []).map(c => ({ descriptor: c.descriptor })),
@@ -1773,7 +1843,7 @@ function generateBody(
 
   // The frame's locals: in-scope locals with their type, or `top` if the slot is
   // not in `assignedSet`. Trailing tops are trimmed (the javac convention).
-  const frameLocals = (assignedSet: Set<number>): string[] => {
+  const frameLocals = (assignedSet: Set<number>): Descriptor[] => {
     const out = activeLocals.map(e => (assignedSet.has(e.slot) ? e.descriptor : TOP));
     while (out.length > 0 && out.at(-1) === TOP) out.pop();
     return out;
@@ -1782,12 +1852,12 @@ function generateBody(
   // --- labels, branches and stack-map frames ---------------------------------------
   interface Label {
     offset: number; // resolved when placed
-    targetStack?: string[]; // operand stack as seen at the branch target (recorded by branchTo)
+    targetStack?: Descriptor[]; // operand stack as seen at the branch target (recorded by branchTo)
     assignedAtTarget?: Set<number>; // slots assigned on every branch path to here
   }
   interface Frame {
-    locals: string[];
-    stack: string[];
+    locals: Descriptor[];
+    stack: Descriptor[];
   }
   const frameAt = new Map<number, Frame>(); // offset -> frame snapshot
   const fixups: { at: number; from: number; label: Label }[] = []; // u2 branch offsets
@@ -1805,7 +1875,7 @@ function generateBody(
   // Labels declared just above a loop, consumed by that loop's targets.
   const pendingLabels: string[] = [];
   const takePending = (): string[] => pendingLabels.splice(0, pendingLabels.length);
-  const yieldTargets: { label: Label; desc: string }[] = []; // enclosing switch-expression ends
+  const yieldTargets: { label: Label; desc: Descriptor }[] = []; // enclosing switch-expression ends
   // Pending cleanup an abrupt exit (return/break/continue) must run on its way
   // out: either a user `finally` block (JLS 14.20.2) or the close() of a
   // try-with-resources resource (JLS 14.20.3). Innermost last.
@@ -1854,49 +1924,50 @@ function generateBody(
 
   // Typed operand stack: one descriptor per value (top last). Drives max_stack and
   // the stack-map frames snapshotted at branch targets.
-  const stack: string[] = [];
+  const stack: Descriptor[] = [];
   let maxStack = 0;
-  const push = (descriptor: string): void => {
+  const push = (descriptor: Descriptor): void => {
     stack.push(descriptor);
     const slots = stack.reduce((n, d) => n + slotsOf(d), 0);
     if (slots > maxStack) maxStack = slots;
   };
-  const pushRef = (descriptor = "Ljava/lang/Object;"): void => push(descriptor);
+  const pushRef = (descriptor = OBJECT_DESC): void => push(descriptor);
   // Pop `count` operand VALUES (not slots).
   const pop = (count = 1): void => {
     for (let i = 0; i < count; i++) stack.pop();
   };
   // Replace the live stack (e.g. at a switch clause boundary, where the previous
   // clause may have ended on a terminator and left dead values behind).
-  const setStack = (to: string[]): void => {
+  const setStack = (to: Descriptor[]): void => {
     stack.length = 0;
     stack.push(...to);
   };
 
   // Numeric category of a descriptor: I (byte/char/short/boolean/int), J, F, D,
   // or A (reference). Used for promotion and conversion.
-  const category = (descriptor: string): string => {
+  const category = (descriptor: Descriptor): NumericCat | "A" => {
     const c = descriptor[0];
     return c === "J" || c === "D" || c === "F" ? c : c === "L" || c === "[" ? "A" : "I";
   };
 
   // Box a primitive (already on the stack) to its wrapper: Xxx.valueOf.
   const box = (prim: string): void => {
-    const w = WRAPPER[prim];
+    const w = wrapperOf(prim);
     if (!w) return;
     code.u1(OP_INVOKESTATIC);
-    code.u2(cp.methodref(w, "valueOf", `(${prim})L${w};`));
+    code.u2(cp.methodref(w, "valueOf", `(${prim})L${w};` as MethodDescriptor));
     pop();
-    push(`L${w};`);
+    push(`L${w};` as Descriptor);
   };
   // Unbox a wrapper reference (already on the stack) to its primitive, returning
   // that primitive's descriptor (or undefined if `from` is not a wrapper).
-  const unbox = (from: string): string | undefined => {
+  const unbox = (from: string): PrimitiveDescriptor | undefined => {
     if (from[0] !== "L") return undefined;
-    const um = UNBOX[from.slice(1, -1)];
+    const wrapper = from.slice(1, -1) as InternalName;
+    const um = unboxOf(wrapper);
     if (!um) return undefined;
     code.u1(OP_INVOKEVIRTUAL);
-    code.u2(cp.methodref(from.slice(1, -1), um[0], `()${um[1]}`));
+    code.u2(cp.methodref(wrapper, um[0], `()${um[1]}` as MethodDescriptor));
     pop();
     push(um[1]);
     return um[1];
@@ -1904,7 +1975,7 @@ function generateBody(
 
   // Convert the value on top of the stack from `from` to `to` (JLS 5.1.2 widening,
   // 5.1.7 boxing, 5.1.8 unboxing), used for assignment, return and arguments.
-  const coerce = (from: string, to: string): void => {
+  const coerce = (from: Descriptor, to: Descriptor): void => {
     if (from === to) return;
     const a = category(from);
     const b = category(to);
@@ -1937,7 +2008,7 @@ function generateBody(
     if (op === undefined) return; // narrowing / reference: nothing to insert here
     code.u1(op);
     pop(); // replace the converted value on the typed stack
-    push(b);
+    push(b as PrimitiveDescriptor); // op defined => numeric, never "A"
   };
 
   const ldc = (index: CpIndex): void => {
@@ -1981,7 +2052,7 @@ function generateBody(
       code.u2(cp.double(value));
     }
   };
-  const loadVar = (varSlot: number, descriptor: string): void => {
+  const loadVar = (varSlot: number, descriptor: Descriptor): void => {
     const kind = category(descriptor);
     const full = { I: OP_ILOAD, J: OP_LLOAD, F: OP_FLOAD, D: OP_DLOAD, A: OP_ALOAD }[kind]!;
     const short0 = {
@@ -1997,7 +2068,7 @@ function generateBody(
       code.u1(varSlot);
     }
   };
-  const storeVar = (varSlot: number, descriptor: string): void => {
+  const storeVar = (varSlot: number, descriptor: Descriptor): void => {
     const kind = category(descriptor);
     const full = { I: OP_ISTORE, J: OP_LSTORE, F: OP_FSTORE, D: OP_DSTORE, A: OP_ASTORE }[kind]!;
     const short0 = {
@@ -2027,7 +2098,7 @@ function generateBody(
     // enum itself.
     if (symbol.flags & SymbolFlags.EnumConstant) {
       const owner = binaryName(symbol.parent);
-      return { owner, name: symbol.escapedName, descriptor: `L${owner};`, isStatic: true };
+      return { owner, name: symbol.escapedName, descriptor: descOf(owner), isStatic: true };
     }
     // A record component is a private final instance field of the record.
     if (symbol.valueDeclaration?.kind === SyntaxKind.RecordComponent) {
@@ -2056,7 +2127,7 @@ function generateBody(
 
   // Read a field: getstatic, or emit the receiver then getfield. `emitReceiver`
   // is only invoked for instance fields (skipped for statics, like javac).
-  const emitFieldRead = (info: FieldInfo, emitReceiver: () => void): string => {
+  const emitFieldRead = (info: FieldInfo, emitReceiver: () => void): Descriptor => {
     if (info.isStatic) {
       code.u1(OP_GETSTATIC);
     } else {
@@ -2077,17 +2148,17 @@ function generateBody(
   // already on the stack. The descriptors only differ when the declared type
   // mentions a type variable (substitution replaces nothing else), so this fires
   // exactly at erasure sites.
-  const erasedCheckcast = (node: Node, descriptor: string): string => {
+  const erasedCheckcast = (node: Node, descriptor: Descriptor): Descriptor => {
     if (descriptor[0] !== "L" && descriptor[0] !== "[") return descriptor;
     const actual = checker.getTypeOfExpression(node);
     const actualDesc = typeDescriptor(actual);
     if (
       actualDesc !== descriptor &&
-      actualDesc !== "Ljava/lang/Object;" &&
+      actualDesc !== OBJECT_DESC &&
       (actual.kind === TypeKind.Class || actual.kind === TypeKind.Array)
     ) {
       code.u1(OP_CHECKCAST);
-      code.u2(cp.classInfo(actualDesc[0] === "[" ? actualDesc : actualDesc.slice(1, -1)));
+      code.u2(cp.classInfo(classOperand(actualDesc)));
       pop();
       push(actualDesc);
       return actualDesc;
@@ -2097,14 +2168,14 @@ function generateBody(
 
   // The receiver for an implicit-`this` member access: `this`, or - for a local/
   // anonymous class reaching an enclosing-instance member - `this.this$0`.
-  const emitImplicitReceiver = (ownerInternal: string): void => {
+  const emitImplicitReceiver = (ownerInternal: InternalName): void => {
     if (outerThis && ownerInternal === outerThis.enclosingInternal) {
       code.u1(OP_ALOAD_0);
-      pushRef(`L${thisInternalName};`);
+      pushRef(descOf(thisInternalName));
       code.u1(OP_GETFIELD);
-      code.u2(cp.fieldref(thisInternalName, "this$0", `L${outerThis.enclosingInternal};`));
+      code.u2(cp.fieldref(thisInternalName, "this$0", descOf(outerThis.enclosingInternal)));
       pop();
-      pushRef(`L${outerThis.enclosingInternal};`);
+      pushRef(descOf(outerThis.enclosingInternal));
       return;
     }
     // A member of an enclosing class (thisInternalName is Owner$...) with no this$0
@@ -2117,7 +2188,7 @@ function generateBody(
     pushRef();
   };
 
-  const emitExpr = (node: Node): string => {
+  const emitExpr = (node: Node): Descriptor => {
     // Fold compile-time constant expressions (JLS 15.28), as javac does, so e.g.
     // 6 * 7 emits `bipush 42`. Only composite expressions are folded here; plain
     // literals fall through to their own (identical) emission below.
@@ -2186,8 +2257,8 @@ function generateBody(
       case SyntaxKind.StringLiteral:
       case SyntaxKind.TextBlockLiteral:
         ldc(cp.string((node as LiteralExpression).value));
-        pushRef("Ljava/lang/String;");
-        return "Ljava/lang/String;";
+        pushRef(STRING_DESC);
+        return STRING_DESC;
       case SyntaxKind.CharacterLiteral:
         intConst((node as LiteralExpression).value.charCodeAt(0));
         push("I");
@@ -2203,7 +2274,7 @@ function generateBody(
       case SyntaxKind.NullKeyword:
         code.u1(OP_ACONST_NULL);
         pushRef();
-        return "Ljava/lang/Object;";
+        return OBJECT_DESC;
       case SyntaxKind.ThisExpression: {
         // Qualified `Outer.this` is the enclosing instance, reached through this$0.
         const qualifier = (node as { qualifier?: Node }).qualifier;
@@ -2212,19 +2283,19 @@ function generateBody(
           if (qType.kind !== TypeKind.Class) throw new UnsupportedEmit();
           const qInternal = binaryName(qType.symbol);
           emitImplicitReceiver(qInternal);
-          return `L${qInternal};`;
+          return descOf(qInternal);
         }
         code.u1(OP_ALOAD_0);
-        pushRef(`L${thisInternalName};`);
-        return `L${thisInternalName};`;
+        pushRef(descOf(thisInternalName));
+        return descOf(thisInternalName);
       }
       case SyntaxKind.SuperExpression:
         // `super` as a field-access receiver: the current instance. Field access is
         // non-virtual, so super.f reads the superclass field off `this` (the
         // resolved field already names the superclass owner).
         code.u1(OP_ALOAD_0);
-        pushRef(`L${thisInternalName};`);
-        return `L${thisInternalName};`;
+        pushRef(descOf(thisInternalName));
+        return descOf(thisInternalName);
       case SyntaxKind.Identifier: {
         const symbol = checker.resolveName(node as Identifier);
         const local = symbol ? locals.get(symbol) : undefined;
@@ -2334,14 +2405,14 @@ function generateBody(
     DJ: OP_D2L,
     DF: OP_D2F,
   };
-  const convertPrimitive = (fromCat: string, targetDescriptor: string): void => {
+  const convertPrimitive = (fromCat: NumericCat | "A", targetDescriptor: Descriptor): void => {
     const targetCat = category(targetDescriptor); // B/C/S/Z/I all collapse to I
     if (fromCat !== targetCat) {
       const op = PRIMITIVE_CONVERSION[`${fromCat}${targetCat}`];
       if (op === undefined) throw new UnsupportedEmit();
       code.u1(op);
       pop();
-      push(targetCat);
+      push(targetCat as NumericCat); // a defined op never targets "A"
     }
     if (targetDescriptor === "B") code.u1(OP_I2B);
     else if (targetDescriptor === "C") code.u1(OP_I2C);
@@ -2352,7 +2423,7 @@ function generateBody(
    * A cast expression (JLS 15.16): a primitive cast is a narrowing/widening
    * conversion (JLS 5.5, 5.1.3); a reference cast is a `checkcast`.
    */
-  const emitCast = (node: CastExpression): string => {
+  const emitCast = (node: CastExpression): Descriptor => {
     const targetDescriptor = descriptorOf(node.type, program);
     const c = targetDescriptor[0]!;
     if ("BCDFIJSZ".includes(c)) {
@@ -2364,14 +2435,13 @@ function generateBody(
     }
     // Reference cast: checkcast to the target class/array (no stack-size change).
     emitExpr(node.expression);
-    const klass = c === "[" ? targetDescriptor : targetDescriptor.slice(1, -1);
     code.u1(OP_CHECKCAST);
-    code.u2(cp.classInfo(klass));
+    code.u2(cp.classInfo(classOperand(targetDescriptor)));
     return targetDescriptor;
   };
 
   /** The `instanceof` operator (JLS 15.20.2) -> the `instanceof` instruction. */
-  const emitInstanceof = (node: InstanceofExpression): string => {
+  const emitInstanceof = (node: InstanceofExpression): Descriptor => {
     // A type-pattern binding `x instanceof T t` as a plain value (not the matched
     // condition of an if/&&) is unsupported here; emitBranch handles the common
     // matched-condition case (JLS 14.30.1) and binds `t`.
@@ -2380,7 +2450,7 @@ function generateBody(
     if (node.name || node.pattern || !node.type) throw new UnsupportedEmit();
     emitExpr(node.expression);
     const descriptor = descriptorOf(node.type, program);
-    const klass = descriptor[0] === "[" ? descriptor : descriptor.slice(1, -1);
+    const klass = classOperand(descriptor);
     code.u1(OP_INSTANCEOF);
     code.u2(cp.classInfo(klass));
     pop(1); // objectref
@@ -2391,7 +2461,7 @@ function generateBody(
   // The implicit static enum methods E.values() / E.valueOf(String), which have
   // no source declaration. Returns the result descriptor, or undefined if the
   // call is not one of them.
-  const emitEnumStaticCall = (call: CallExpression): string | undefined => {
+  const emitEnumStaticCall = (call: CallExpression): Descriptor | undefined => {
     const callee = call.expression;
     if (callee.kind !== SyntaxKind.PropertyAccessExpression) return undefined;
     const access = callee as PropertyAccessExpression;
@@ -2402,17 +2472,23 @@ function generateBody(
     const mname = access.name.text;
     if (mname === "values" && call.arguments.length === 0) {
       code.u1(OP_INVOKESTATIC);
-      code.u2(cp.methodref(enumInternal, "values", `()[L${enumInternal};`));
-      push(`[L${enumInternal};`);
-      return `[L${enumInternal};`;
+      code.u2(cp.methodref(enumInternal, "values", `()[L${enumInternal};` as MethodDescriptor));
+      push(`[L${enumInternal};` as Descriptor);
+      return `[L${enumInternal};` as Descriptor;
     }
     if (mname === "valueOf" && call.arguments.length === 1) {
-      coerce(emitExpr(call.arguments[0]!), "Ljava/lang/String;");
+      coerce(emitExpr(call.arguments[0]!), STRING_DESC);
       code.u1(OP_INVOKESTATIC);
-      code.u2(cp.methodref(enumInternal, "valueOf", `(Ljava/lang/String;)L${enumInternal};`));
+      code.u2(
+        cp.methodref(
+          enumInternal,
+          "valueOf",
+          `(Ljava/lang/String;)L${enumInternal};` as MethodDescriptor,
+        ),
+      );
       pop(1);
-      push(`L${enumInternal};`);
-      return `L${enumInternal};`;
+      push(descOf(enumInternal) as Descriptor);
+      return descOf(enumInternal);
     }
     return undefined;
   };
@@ -2423,7 +2499,7 @@ function generateBody(
    * parameter types (JLS 5.3) and an erased generic return gets a synthetic
    * checkcast (JLS 5.2).
    */
-  const emitCall = (call: CallExpression): string => {
+  const emitCall = (call: CallExpression): Descriptor => {
     // The synthesized enum statics values()/valueOf(String) take precedence over
     // the inherited Enum.valueOf(Class, String) that resolveCall would otherwise
     // pick (it ignores the arity mismatch).
@@ -2444,9 +2520,9 @@ function generateBody(
           // clone() is declared to return Object even on an array; cast back to the
           // array type, as javac does.
           code.u1(OP_INVOKEVIRTUAL);
-          code.u2(cp.methodref(arrDesc, "clone", "()Ljava/lang/Object;"));
+          code.u2(cp.methodref(arrDesc, "clone", "()Ljava/lang/Object;" as MethodDescriptor));
           pop();
-          push("Ljava/lang/Object;");
+          push(OBJECT_DESC);
           code.u1(OP_CHECKCAST);
           code.u2(cp.classInfo(arrDesc));
           pop();
@@ -2472,7 +2548,7 @@ function generateBody(
     if (!staticCall) {
       if (isSuperCall) {
         code.u1(OP_ALOAD_0);
-        pushRef(`L${thisInternalName};`);
+        pushRef(descOf(thisInternalName));
       } else if (callee.kind === SyntaxKind.PropertyAccessExpression) {
         emitExpr((callee as PropertyAccessExpression).expression);
       } else if (callee.kind === SyntaxKind.Identifier) {
@@ -2507,7 +2583,7 @@ function generateBody(
         pushedValues = paramDescs.length;
       } else {
         for (let i = 0; i < fixedCount; i++) coerce(emitExpr(call.arguments[i]!), paramDescs[i]!);
-        packVarargs(varargsArrayDesc.slice(1), call.arguments.slice(fixedCount));
+        packVarargs(varargsArrayDesc.slice(1) as Descriptor, call.arguments.slice(fixedCount));
         pushedValues = fixedCount + 1;
       }
     } else {
@@ -2520,7 +2596,7 @@ function generateBody(
     }
 
     const argSlots = paramDescs.reduce((n, d) => n + slotsOf(d), 0);
-    const returnDesc = descriptor.slice(descriptor.lastIndexOf(")") + 1);
+    const returnDesc = returnDescriptorOf(descriptor);
     if (staticCall) {
       code.u1(OP_INVOKESTATIC);
       // A static method declared in an interface must reference an
@@ -2556,7 +2632,7 @@ function generateBody(
 
   // new T(args): new; dup; <args>; invokespecial T.<init>:(...)V -> leaves the ref.
   /** Class instance creation `new T(args)` (JLS 15.9): new, dup, invokespecial. */
-  const emitNew = (node: Node): string => {
+  const emitNew = (node: Node): Descriptor => {
     const oc = node as ObjectCreationExpression;
     // An anonymous class implementing an interface (JLS 15.9.5): instantiate the
     // synthetic Outer$N class, passing the captured enclosing locals.
@@ -2566,9 +2642,9 @@ function generateBody(
       const anonName = anonymousClassName(oc, program);
       const captures = collectCaptures(oc.classBody, oc.pos, oc.end, program, checker);
       const outerThis = outerThisInfo(oc.classBody, oc.parent, program, checker);
-      const this0Desc = outerThis ? `L${outerThis.enclosingInternal};` : undefined;
+      const this0Desc = outerThis ? descOf(outerThis.enclosingInternal) : undefined;
       const args = oc.arguments ?? [];
-      const ref = `L${anonName};`;
+      const ref = descOf(anonName);
       code.u1(OP_NEW);
       code.u2(cp.classInfo(anonName));
       pushRef(ref);
@@ -2591,7 +2667,7 @@ function generateBody(
         ...(this0Desc ? [this0Desc] : []),
         ...captures.map(c => c.descriptor),
         ...target.superParamDescs,
-      ].join("")})V`;
+      ].join("")})V` as MethodDescriptor;
       code.u1(OP_INVOKESPECIAL);
       code.u2(cp.methodref(anonName, "<init>", ctorDesc));
       pop(1 + (this0Desc ? 1 : 0) + captures.length + args.length);
@@ -2612,7 +2688,7 @@ function generateBody(
     const localThis0 = isLocal
       ? localOuterThis(createdDecl as ClassDeclaration, program, checker)
       : undefined;
-    const this0Desc = localThis0 ? `L${localThis0.enclosingInternal};` : undefined;
+    const this0Desc = localThis0 ? descOf(localThis0.enclosingInternal) : undefined;
     if (captures.length > 0 || this0Desc) {
       // A declared constructor's user parameters follow this$0 and the captures;
       // a class with no declared ctor has a synthesized one taking no user args.
@@ -2621,7 +2697,7 @@ function generateBody(
       const userParamDescs = localCtor
         ? localCtor.parameters.map(p => paramDescriptor(p as Parameter, program))
         : [];
-      const ref = `L${owner};`;
+      const ref = descOf(owner);
       code.u1(OP_NEW);
       code.u2(cp.classInfo(owner));
       pushRef(ref);
@@ -2645,7 +2721,7 @@ function generateBody(
         ...(this0Desc ? [this0Desc] : []),
         ...captures.map(c => c.descriptor),
         ...userParamDescs,
-      ].join("")})V`;
+      ].join("")})V` as MethodDescriptor;
       code.u1(OP_INVOKESPECIAL);
       code.u2(cp.methodref(owner, "<init>", ctorDesc));
       pop(1 + (this0Desc ? 1 : 0) + captures.length + args.length);
@@ -2663,8 +2739,8 @@ function generateBody(
       const ctorParams = innerCtor
         ? innerCtor.parameters.map(p => paramDescriptor(p as Parameter, program))
         : [];
-      const this0Desc = `L${memberThis0.enclosingInternal};`;
-      const ref = `L${owner};`;
+      const this0Desc = descOf(memberThis0.enclosingInternal);
+      const ref = descOf(owner);
       code.u1(OP_NEW);
       code.u2(cp.classInfo(owner));
       pushRef(ref);
@@ -2676,7 +2752,9 @@ function generateBody(
         if (i < ctorParams.length) coerce(d, ctorParams[i]!);
       });
       code.u1(OP_INVOKESPECIAL);
-      code.u2(cp.methodref(owner, "<init>", `(${this0Desc}${ctorParams.join("")})V`));
+      code.u2(
+        cp.methodref(owner, "<init>", `(${this0Desc}${ctorParams.join("")})V` as MethodDescriptor),
+      );
       pop(1 + 1 + args.length); // dup'd ref + this$0 + args
       return ref;
     }
@@ -2693,9 +2771,9 @@ function generateBody(
         ? recordDecl.recordComponents.map(c => descriptorOf(c.type, program))
         : [];
     if (!ctor && !recordDecl && args.length > 0) throw new UnsupportedEmit(); // unknown constructor
-    const ctorDescriptor = `(${ctorParams.join("")})V`;
+    const ctorDescriptor = `(${ctorParams.join("")})V` as MethodDescriptor;
 
-    const ref = `L${owner};`;
+    const ref = descOf(owner);
     code.u1(OP_NEW);
     code.u2(cp.classInfo(owner));
     pushRef(ref);
@@ -2748,22 +2826,22 @@ function generateBody(
 
   // Allocate a one-dimensional array whose element descriptor is `elem`; the
   // length is already on the stack. Leaves the array reference.
-  const allocArray = (elem: string): string => {
+  const allocArray = (elem: Descriptor): Descriptor => {
     if (NEWARRAY_ATYPE[elem] !== undefined) {
       code.u1(OP_NEWARRAY);
       code.u1(NEWARRAY_ATYPE[elem]!);
     } else {
       code.u1(OP_ANEWARRAY);
-      code.u2(cp.classInfo(elem[0] === "[" ? elem : elem.slice(1, -1)));
+      code.u2(cp.classInfo(classOperand(elem)));
     }
     pop();
-    push(`[${elem}`);
-    return `[${elem}`;
+    push(`[${elem}` as Descriptor);
+    return `[${elem}` as Descriptor;
   };
 
   // Build a one-dimensional array of `elem` from a brace initializer (nested
   // initializers recurse for multidimensional arrays).
-  const arrayInitializer = (init: ArrayInitializer, elem: string): string => {
+  const arrayInitializer = (init: ArrayInitializer, elem: Descriptor): Descriptor => {
     intConst(init.elements.length);
     push("I");
     const arrDesc = allocArray(elem);
@@ -2773,7 +2851,7 @@ function generateBody(
       intConst(i);
       push("I");
       if (el.kind === SyntaxKind.ArrayInitializer) {
-        arrayInitializer(el as ArrayInitializer, elem.slice(1));
+        arrayInitializer(el as ArrayInitializer, elem.slice(1) as Descriptor);
       } else {
         coerce(emitExpr(el), elem);
       }
@@ -2785,7 +2863,7 @@ function generateBody(
 
   // Pack the trailing arguments of a varargs call into a fresh `elem[]` (JLS
   // 15.12.4.2), leaving the array reference on the stack.
-  const packVarargs = (elem: string, args: readonly Node[]): string => {
+  const packVarargs = (elem: Descriptor, args: readonly Node[]): Descriptor => {
     intConst(args.length);
     push("I");
     const arrDesc = allocArray(elem);
@@ -2802,13 +2880,14 @@ function generateBody(
   };
 
   // new T[n] / new T[m][n] / new T[]{ ... } (JLS 15.10).
-  const emitArrayCreation = (node: ArrayCreationExpression): string => {
+  const emitArrayCreation = (node: ArrayCreationExpression): Descriptor => {
     const elementType = descriptorOf(node.elementType, program);
-    const arrDesc = "[".repeat(node.dimensions.length + node.additionalRank) + elementType;
-    if (node.initializer) return arrayInitializer(node.initializer, arrDesc.slice(1));
+    const arrDesc = ("[".repeat(node.dimensions.length + node.additionalRank) +
+      elementType) as Descriptor;
+    if (node.initializer) return arrayInitializer(node.initializer, arrDesc.slice(1) as Descriptor);
     if (node.dimensions.length === 1) {
       coerce(emitExpr(node.dimensions[0]!), "I");
-      return allocArray(arrDesc.slice(1));
+      return allocArray(arrDesc.slice(1) as Descriptor);
     }
     // Several given dimensions: multianewarray.
     for (const dim of node.dimensions) coerce(emitExpr(dim), "I");
@@ -2821,9 +2900,9 @@ function generateBody(
   };
 
   /** Array access read a[i] (JLS 15.10.3): array, index, then xaload. */
-  const emitElementAccess = (node: ElementAccessExpression): string => {
+  const emitElementAccess = (node: ElementAccessExpression): Descriptor => {
     const arrDesc = emitExpr(node.expression);
-    const elem = arrDesc[0] === "[" ? arrDesc.slice(1) : "Ljava/lang/Object;";
+    const elem = arrDesc[0] === "[" ? (arrDesc.slice(1) as Descriptor) : OBJECT_DESC;
     coerce(emitExpr(node.argumentExpression), "I");
     code.u1(OP_IALOAD + arrayElemOffset(elem));
     pop(2); // array, index -> element
@@ -2833,7 +2912,7 @@ function generateBody(
 
   // Numeric category of an expression's static type, or undefined for anything
   // non-numeric (references, String -> concatenation, unknown).
-  const numericCategory = (type: Type): string | undefined => {
+  const numericCategory = (type: Type): NumericCat | undefined => {
     if (type.kind !== TypeKind.Primitive) return undefined;
     switch (type.name) {
       case "long":
@@ -2854,18 +2933,18 @@ function generateBody(
   };
   // Like numericCategory, but a boxed wrapper type yields its primitive category
   // (the operand is unboxed in numeric contexts, JLS 5.6).
-  const numericCat = (type: Type): string | undefined => {
+  const numericCat = (type: Type): NumericCat | undefined => {
     const c = numericCategory(type);
     if (c) return c;
     if (type.kind === TypeKind.Class) {
-      const um = UNBOX[binaryName(type.symbol)];
+      const um = unboxOf(binaryName(type.symbol));
       if (um) return um[1] === "J" || um[1] === "F" || um[1] === "D" ? um[1] : "I";
     }
     return undefined;
   };
   const TYPE_OFFSET: Record<string, number> = { I: 0, J: 1, F: 2, D: 3 };
   // Binary numeric promotion (JLS 5.6.2): the wider of the two operand categories.
-  const promote = (a: string, b: string): string =>
+  const promote = (a: NumericCat, b: NumericCat): NumericCat =>
     a === "D" || b === "D"
       ? "D"
       : a === "F" || b === "F"
@@ -2891,7 +2970,7 @@ function generateBody(
 
   // Emit an operand promoted to `targetCat`. An int literal promoted to long is
   // folded to a long constant (as javac does: 1 -> lconst_1, not iconst_1; i2l).
-  const emitOperand = (node: Node, targetCat: string): void => {
+  const emitOperand = (node: Node, targetCat: NumericCat): void => {
     if (targetCat === "J" && node.kind === SyntaxKind.NumericLiteral) {
       const text = (node as LiteralExpression).value.replace(/_/g, "");
       if (!/[.eEfFdDlL]/.test(text)) {
@@ -2909,7 +2988,7 @@ function generateBody(
   // String concatenation a + b + ... -> invokedynamic makeConcatWithConstants
   // (JLS 15.18.1). Every operand is a dynamic argument (recipe of  markers);
   // operand types drive the indy descriptor (so char appends a char, not its code).
-  const emitStringConcat = (node: BinaryExpression): string => {
+  const emitStringConcat = (node: BinaryExpression): Descriptor => {
     const operands: Node[] = [];
     const flatten = (n: Node): void => {
       if (
@@ -2934,8 +3013,8 @@ function generateBody(
     code.u2(cp.invokeDynamicConcat(String.fromCharCode(1).repeat(operands.length), descriptor));
     code.u2(0);
     pop(operands.length);
-    push("Ljava/lang/String;");
-    return "Ljava/lang/String;";
+    push(STRING_DESC);
+    return STRING_DESC;
   };
 
   /**
@@ -2943,7 +3022,7 @@ function generateBody(
    * shift (15.19), and bitwise (15.22), with binary numeric promotion (5.6.2)
    * and operand unboxing (5.1.8). Comparisons and && / || go through emitBranch.
    */
-  const emitBinary = (node: BinaryExpression): string => {
+  const emitBinary = (node: BinaryExpression): Descriptor => {
     const op = node.operatorToken;
     const lc = numericCat(checker.getTypeOfExpression(node.left));
     const rc = numericCat(checker.getTypeOfExpression(node.right));
@@ -2984,7 +3063,7 @@ function generateBody(
   };
 
   /** Unary +, -, ~ (JLS 15.15.3-15.15.5); logical ! goes through emitBoolean. */
-  const emitPrefixUnary = (node: PrefixUnaryExpression): string => {
+  const emitPrefixUnary = (node: PrefixUnaryExpression): Descriptor => {
     const op = node.operator;
     if (op === SyntaxKind.PlusToken) return emitExpr(node.operand); // unary plus: no-op
     const c = numericCategory(checker.getTypeOfExpression(node.operand));
@@ -3062,7 +3141,7 @@ function generateBody(
 
   // For `target op= rhs`, with the current target value already on the stack,
   // combine it with rhs (JLS 15.26.2: implicit narrowing back to the target).
-  const combineCompound = (targetDesc: string, baseOp: SyntaxKind, rhsNode: Node): void => {
+  const combineCompound = (targetDesc: Descriptor, baseOp: SyntaxKind, rhsNode: Node): void => {
     const tcat = category(targetDesc);
     if (tcat === "A") {
       // String concatenation: the current string is on the stack, append rhs.
@@ -3071,7 +3150,7 @@ function generateBody(
       code.u2(cp.invokeDynamicConcat(String.fromCharCode(1).repeat(2), `${targetDesc}${rhsDesc}`));
       code.u2(0);
       pop(2);
-      push("Ljava/lang/String;");
+      push(STRING_DESC);
       return;
     }
     const shift = SHIFTS[baseOp];
@@ -3106,7 +3185,7 @@ function generateBody(
   const emitStore = (
     target: Node,
     needsCurrent: boolean,
-    emitValue: (descriptor: string, loadCurrent: () => void) => void,
+    emitValue: (descriptor: Descriptor, loadCurrent: () => void) => void,
   ): void => {
     const writeField = (info: FieldInfo, emitReceiver: () => void): void => {
       const ref = (): void => code.u2(cp.fieldref(info.owner, info.name, info.descriptor));
@@ -3161,7 +3240,7 @@ function generateBody(
           },
           () => {
             code.u1(OP_ALOAD_0);
-            pushRef(`L${thisInternalName};`);
+            pushRef(descOf(thisInternalName));
           },
         );
         return;
@@ -3193,7 +3272,7 @@ function generateBody(
     if (target.kind === SyntaxKind.ElementAccessExpression) {
       const access = target as ElementAccessExpression;
       const arrDesc = emitExpr(access.expression);
-      const elem = arrDesc[0] === "[" ? arrDesc.slice(1) : "Ljava/lang/Object;";
+      const elem = arrDesc[0] === "[" ? (arrDesc.slice(1) as Descriptor) : OBJECT_DESC;
       coerce(emitExpr(access.argumentExpression), "I");
       if (needsCurrent) {
         code.u1(OP_DUP2); // array, index for the read and the write
@@ -3268,7 +3347,7 @@ function generateBody(
         if (io.pattern && !whenTrue) {
           const desc = descriptorOf(io.pattern.type, program);
           if (desc[0] !== "L") throw new UnsupportedEmit();
-          const internal = desc.slice(1, -1);
+          const internal = classOperand(desc);
           const xDesc = emitExpr(io.expression);
           const tmp = allocSlot(xDesc);
           storeVar(tmp, xDesc);
@@ -3293,7 +3372,7 @@ function generateBody(
         }
         if (io.name?.symbol && io.type && !whenTrue) {
           const desc = descriptorOf(io.type, program);
-          const internal = desc[0] === "[" ? desc : desc.slice(1, -1);
+          const internal = classOperand(desc);
           const xDesc = emitExpr(io.expression);
           const tmp = nextSlot;
           nextSlot += slotsOf(xDesc);
@@ -3315,7 +3394,7 @@ function generateBody(
           locals.set(io.name.symbol, { slot: tSlot, descriptor: desc });
           loadVar(tmp, xDesc);
           push(xDesc);
-          if (desc !== "Ljava/lang/Object;") {
+          if (desc !== OBJECT_DESC) {
             code.u1(OP_CHECKCAST);
             code.u2(cp.classInfo(internal));
             pop();
@@ -3423,7 +3502,7 @@ function generateBody(
 
   // Materialize a boolean expression as an int 0/1 on the stack, via the standard
   // branch-and-push pattern. The merge label carries one int on the stack.
-  const emitBoolean = (expr: Node): string => {
+  const emitBoolean = (expr: Node): Descriptor => {
     const trueL = newLabel();
     const contL = newLabel();
     emitBranch(expr, trueL, true);
@@ -3441,7 +3520,7 @@ function generateBody(
   // Conditional expression c ? a : b (JLS 15.25). Both arms are promoted to the
   // result type; numeric promotion is computed from the arms (the same rule as
   // binary), otherwise the checker supplies the reference type.
-  const emitConditional = (node: ConditionalExpression): string => {
+  const emitConditional = (node: ConditionalExpression): Descriptor => {
     const tt = checker.getTypeOfExpression(node.whenTrue);
     const ft = checker.getTypeOfExpression(node.whenFalse);
     const lc = numericCategory(tt);
@@ -3450,8 +3529,8 @@ function generateBody(
     // arms. For numerics that is binary promotion; for references, the shared
     // type of the arms (a null arm yields Object, so defer to the other arm),
     // else the checker's computed type.
-    const OBJ = "Ljava/lang/Object;";
-    const refDesc = (): string => {
+    const OBJ = OBJECT_DESC;
+    const refDesc = (): Descriptor => {
       const dt = typeDescriptor(tt);
       const df = typeDescriptor(ft);
       if (dt === df) return dt;
@@ -3487,9 +3566,9 @@ function generateBody(
   // the receiver is the first dynamic argument (REF_invokeSpecial).
   const isVoidType = (t: Type): boolean =>
     t.kind === TypeKind.Primitive && (t as { name: string }).name === "void";
-  const descOf = (t: Type): string => (isVoidType(t) ? "V" : typeDescriptor(t));
+  const descOfType = (t: Type): Descriptor => (isVoidType(t) ? "V" : typeDescriptor(t));
 
-  const emitLambda = (node: LambdaExpression): string => {
+  const emitLambda = (node: LambdaExpression): Descriptor => {
     const info = checker.getLambdaInfo(node);
     if (!info) throw new UnsupportedEmit();
 
@@ -3545,9 +3624,10 @@ function generateBody(
     if (needsThis && isStatic) throw new UnsupportedEmit(); // no enclosing instance to capture
 
     const instParamDescs = info.instParams.map(t => typeDescriptor(t));
-    const instReturnDesc = descOf(info.instReturn);
-    const samErased = `(${info.erasedParams.map(t => typeDescriptor(t)).join("")})${descOf(info.erasedReturn)}`;
-    const instantiated = `(${instParamDescs.join("")})${instReturnDesc}`;
+    const instReturnDesc = descOfType(info.instReturn);
+    const samErased =
+      `(${info.erasedParams.map(t => typeDescriptor(t)).join("")})${descOfType(info.erasedReturn)}` as MethodDescriptor;
+    const instantiated = `(${instParamDescs.join("")})${instReturnDesc}` as MethodDescriptor;
 
     const captureParams = captures.map(s => ({ symbol: s, descriptor: locals.get(s)!.descriptor }));
     const ownParams = node.parameters.map((p, i) => {
@@ -3557,7 +3637,8 @@ function generateBody(
     });
     const implParams = [...captureParams, ...ownParams];
     const implName = `lambda$${enclosingName}$${lambdaCounter++}`;
-    const implDescriptor = `(${implParams.map(p => p.descriptor).join("")})${instReturnDesc}`;
+    const implDescriptor =
+      `(${implParams.map(p => p.descriptor).join("")})${instReturnDesc}` as MethodDescriptor;
     // Emit the body method eagerly: if it cannot be compiled, the exception
     // propagates and this whole enclosing method falls back (no dangling indy).
     lambdaMethods.push(
@@ -3578,7 +3659,7 @@ function generateBody(
     );
 
     // invokedynamic: push the receiver (if captured), then the captured locals.
-    const thisDesc = `L${thisInternalName};`;
+    const thisDesc = descOf(thisInternalName);
     if (needsThis) {
       code.u1(OP_ALOAD_0);
       push(thisDesc);
@@ -3589,7 +3670,7 @@ function generateBody(
     }
     const interfaceDesc = typeDescriptor(info.interfaceType);
     const dynamicArgs = (needsThis ? thisDesc : "") + captureParams.map(c => c.descriptor).join("");
-    const indyDescriptor = `(${dynamicArgs})${interfaceDesc}`;
+    const indyDescriptor = `(${dynamicArgs})${interfaceDesc}` as MethodDescriptor;
     const idx = cp.invokeDynamicLambda(
       info.samName,
       indyDescriptor,
@@ -3612,13 +3693,15 @@ function generateBody(
   // directly at the referenced method/constructor (no synthetic body). For a
   // bound reference (expr::m) the receiver is evaluated and captured; static,
   // unbound (Type::m), and constructor (Type::new) references capture nothing.
-  const emitMethodRef = (node: Node): string => {
+  const emitMethodRef = (node: Node): Descriptor => {
     const info = checker.getMethodRefInfo(node);
     if (!info) throw new UnsupportedEmit();
     const ref = node as MethodReferenceExpression;
     const instParamDescs = info.instParams.map(t => typeDescriptor(t));
-    const samErased = `(${info.erasedParams.map(t => typeDescriptor(t)).join("")})${descOf(info.erasedReturn)}`;
-    const instantiated = `(${instParamDescs.join("")})${descOf(info.instReturn)}`;
+    const samErased =
+      `(${info.erasedParams.map(t => typeDescriptor(t)).join("")})${descOfType(info.erasedReturn)}` as MethodDescriptor;
+    const instantiated =
+      `(${instParamDescs.join("")})${descOfType(info.instReturn)}` as MethodDescriptor;
     const interfaceDesc = typeDescriptor(info.interfaceType);
 
     // T[]::new (JLS 15.13.3): bind a synthetic `(int) -> new T[len]` helper.
@@ -3628,12 +3711,12 @@ function generateBody(
       lambdaMethods.push(emitArrayCtorRefMethod(cp, implName, arrayDesc));
       const idx = cp.invokeDynamicLambda(
         info.samName,
-        `()${interfaceDesc}`,
+        `()${interfaceDesc}` as MethodDescriptor,
         samErased,
         REF_invokeStatic,
         thisInternalName,
         implName,
-        `(I)${arrayDesc}`,
+        `(I)${arrayDesc}` as MethodDescriptor,
         instantiated,
       );
       code.u1(OP_INVOKEDYNAMIC);
@@ -3648,7 +3731,7 @@ function generateBody(
 
     let refKind: number;
     let implName: string;
-    let implDescriptor: string;
+    let implDescriptor: MethodDescriptor;
     let dynamicArgs = "";
     if (info.kind === "constructor") {
       refKind = REF_newInvokeSpecial;
@@ -3657,7 +3740,7 @@ function generateBody(
       const ctorParams = ctor
         ? ctor.parameters.map(p => paramDescriptor(p as Parameter, program))
         : [];
-      implDescriptor = `(${ctorParams.join("")})V`;
+      implDescriptor = `(${ctorParams.join("")})V` as MethodDescriptor;
     } else {
       const decl = info.target!;
       implName = decl.name.text;
@@ -3674,7 +3757,7 @@ function generateBody(
     }
     const idx = cp.invokeDynamicLambda(
       info.samName,
-      `(${dynamicArgs})${interfaceDesc}`,
+      `(${dynamicArgs})${interfaceDesc}` as MethodDescriptor,
       samErased,
       refKind,
       ownerInternal,
@@ -3701,12 +3784,10 @@ function generateBody(
       code.u1(OP_DUP);
       pushRef(ec.selfDesc);
       ldc(cp.string(c.name));
-      pushRef("Ljava/lang/String;");
+      pushRef(STRING_DESC);
       intConst(c.ordinal);
       push("I");
-      c.args.forEach((arg, j) =>
-        coerce(emitExpr(arg), c.userParamDescs[j] ?? "Ljava/lang/Object;"),
-      );
+      c.args.forEach((arg, j) => coerce(emitExpr(arg), c.userParamDescs[j] ?? OBJECT_DESC));
       code.u1(OP_INVOKESPECIAL);
       code.u2(cp.methodref(ec.enumInternal, "<init>", c.ctorDescriptor));
       pop(1 + 2 + c.args.length); // dup'd ref + name + ordinal + args
@@ -3743,7 +3824,7 @@ function generateBody(
   // A local-variable target uses iinc (int) or load/op/store (wide, with a dup to
   // keep the result); other targets are read-modify-written via emitStore and only
   // in statement position (a value-producing field/array in/decrement degrades).
-  const emitIncDec = (expr: Node, result: "discard" | "old" | "new"): string => {
+  const emitIncDec = (expr: Node, result: "discard" | "old" | "new"): Descriptor => {
     const u = expr as unknown as { operator: SyntaxKind; operand: Node };
     if (u.operator !== SyntaxKind.PlusPlusToken && u.operator !== SyntaxKind.MinusMinusToken) {
       throw new UnsupportedEmit();
@@ -3907,7 +3988,7 @@ function generateBody(
     // For an exhaustive switch expression with no default clause, the no-match
     // path must throw rather than fall through without a value.
     throwOnNoMatch = false,
-  ): { clauseLabels: Label[]; endL: Label; base: string[] } => {
+  ): { clauseLabels: Label[]; endL: Label; base: Descriptor[] } => {
     if (clauses.some(cl => cl.guard !== undefined)) throw new UnsupportedEmit();
     const selType = checker.getTypeOfExpression(selector);
     const isString = isStringType(selType);
@@ -3940,7 +4021,7 @@ function generateBody(
     });
 
     if (isString) {
-      const selDesc = "Ljava/lang/String;";
+      const selDesc = STRING_DESC;
       emitExpr(selector);
       const tmp = nextSlot;
       nextSlot += 1;
@@ -3955,7 +4036,13 @@ function generateBody(
           ldc(cp.string((lab as LiteralExpression).value));
           push(selDesc);
           code.u1(OP_INVOKEVIRTUAL);
-          code.u2(cp.methodref("java/lang/String", "equals", "(Ljava/lang/Object;)Z"));
+          code.u2(
+            cp.methodref(
+              "java/lang/String" as InternalName,
+              "equals",
+              "(Ljava/lang/Object;)Z" as MethodDescriptor,
+            ),
+          );
           pop(2);
           push("I");
           pop();
@@ -3967,7 +4054,9 @@ function generateBody(
       if (enumSym) {
         emitExpr(selector);
         code.u1(OP_INVOKEVIRTUAL);
-        code.u2(cp.methodref("java/lang/Enum", "ordinal", "()I"));
+        code.u2(
+          cp.methodref("java/lang/Enum" as InternalName, "ordinal", "()I" as MethodDescriptor),
+        );
         pop();
         push("I");
       } else {
@@ -3992,14 +4081,14 @@ function generateBody(
       // at runtime, but every path must produce a value or throw to verify).
       setStack(base);
       placeLabel(throwL);
-      const err = "java/lang/IncompatibleClassChangeError";
+      const err = "java/lang/IncompatibleClassChangeError" as InternalName;
       code.u1(OP_NEW);
       code.u2(cp.classInfo(err));
-      pushRef(`L${err};`);
+      pushRef(descOf(err));
       code.u1(OP_DUP);
-      pushRef(`L${err};`);
+      pushRef(descOf(err));
       code.u1(OP_INVOKESPECIAL);
-      code.u2(cp.methodref(err, "<init>", "()V"));
+      code.u2(cp.methodref(err, "<init>", "()V" as MethodDescriptor));
       pop(1);
       code.u1(OP_ATHROW);
       pop(1);
@@ -4009,7 +4098,7 @@ function generateBody(
 
   // The result type of a switch expression, from its arrow-expression and yield
   // values: binary promotion when all are numeric, otherwise a shared reference.
-  const switchResultDesc = (clauses: readonly SwitchClause[]): string => {
+  const switchResultDesc = (clauses: readonly SwitchClause[]): Descriptor => {
     const types: Type[] = [];
     const collectYields = (n: Node): void => {
       if (n.kind === SyntaxKind.YieldStatement) {
@@ -4031,19 +4120,19 @@ function generateBody(
       else for (const st of cl.statements) collectYields(st);
     }
     const cats = types.map(t => numericCategory(t));
-    if (cats.length > 0 && cats.every((c): c is string => c !== undefined)) {
+    if (cats.length > 0 && cats.every((c): c is NumericCat => c !== undefined)) {
       return cats.reduce((a, b) => promote(a, b));
     }
     for (const t of types) {
       const d = typeDescriptor(t);
-      if (d !== "Ljava/lang/Object;") return d;
+      if (d !== OBJECT_DESC) return d;
     }
-    return "Ljava/lang/Object;";
+    return OBJECT_DESC;
   };
 
   // A switch expression (JLS 14.11.2): like a switch statement, but every arm
   // yields a value (arrow `case L -> v` or `yield v`), left on the stack at the end.
-  const emitSwitchExpression = (node: SwitchExpression): string => {
+  const emitSwitchExpression = (node: SwitchExpression): Descriptor => {
     const resultDesc = switchResultDesc(node.clauses);
     if (isPatternSwitch(node.clauses)) {
       emitPatternSwitch(node.expression, node.clauses, resultDesc);
@@ -4092,7 +4181,7 @@ function generateBody(
   // deconstruction patterns. Returns undefined if it is not a known record.
   const recordComponentsOf = (
     typeNode: TypeNode,
-  ): { name: string; descriptor: string }[] | undefined => {
+  ): { name: string; descriptor: Descriptor }[] | undefined => {
     if (typeNode.kind !== SyntaxKind.TypeReference) return undefined;
     const sym = resolveTypeEntityName((typeNode as TypeReference).typeName, typeNode, program);
     const decl = sym?.valueDeclaration ?? sym?.declarations?.[0];
@@ -4108,14 +4197,14 @@ function generateBody(
   // top (descriptor valueDesc). A type pattern binds its variable (with a runtime
   // checkcast on reference narrowing); a nested record pattern tests + recurses;
   // an unnamed '_' discards. A failed nested instanceof branches to failLabel.
-  const allocSlot = (desc: string): number => {
+  const allocSlot = (desc: Descriptor): number => {
     const slot = nextSlot;
     nextSlot += slotsOf(desc);
     if (nextSlot > maxLocals) maxLocals = nextSlot;
     activeLocals.push({ slot, descriptor: desc });
     return slot;
   };
-  const bindComponent = (pattern: Node, valueDesc: string, failLabel: Label): void => {
+  const bindComponent = (pattern: Node, valueDesc: Descriptor, failLabel: Label): void => {
     if (pattern.kind === SyntaxKind.MatchAllPattern) {
       code.u1(slotsOf(valueDesc) === 2 ? OP_POP2 : OP_POP);
       pop();
@@ -4133,7 +4222,7 @@ function generateBody(
       // A narrowing reference pattern needs a runtime instanceof + checkcast into a
       // fresh slot; otherwise the stashed slot already holds the binding value.
       if ((desc[0] === "L" || desc[0] === "[") && desc !== valueDesc) {
-        const internal = desc[0] === "[" ? desc : desc.slice(1, -1);
+        const internal = classOperand(desc);
         loadVar(rawSlot, valueDesc);
         push(valueDesc);
         code.u1(OP_INSTANCEOF);
@@ -4160,7 +4249,7 @@ function generateBody(
       const rp = pattern as RecordPattern;
       const desc = descriptorOf(rp.type, program);
       if (desc[0] !== "L") throw new UnsupportedEmit();
-      const internal = desc.slice(1, -1);
+      const internal = classOperand(desc);
       loadVar(rawSlot, valueDesc);
       push(valueDesc);
       code.u1(OP_INSTANCEOF);
@@ -4189,33 +4278,33 @@ function generateBody(
   const emitDeconstruct = (
     recordTypeNode: TypeNode,
     objSlot: number,
-    objDesc: string,
+    objDesc: Descriptor,
     patterns: readonly Node[],
     failLabel: Label,
   ): void => {
     const comps = recordComponentsOf(recordTypeNode);
     if (!comps || comps.length !== patterns.length) throw new UnsupportedEmit();
-    const recordInternal = objDesc.slice(1, -1);
+    const recordInternal = classOperand(objDesc);
     patterns.forEach((p, i) => {
       const comp = comps[i]!;
       loadVar(objSlot, objDesc);
       push(objDesc);
       code.u1(OP_INVOKEVIRTUAL);
-      code.u2(cp.methodref(recordInternal, comp.name, `()${comp.descriptor}`));
+      code.u2(cp.methodref(recordInternal, comp.name, `()${comp.descriptor}` as MethodDescriptor));
       pop();
       push(comp.descriptor);
       bindComponent(p, comp.descriptor, failLabel);
     });
   };
 
-  const throwNew = (internal: string): void => {
+  const throwNew = (internal: InternalName): void => {
     code.u1(OP_NEW);
     code.u2(cp.classInfo(internal));
-    pushRef(`L${internal};`);
+    pushRef(descOf(internal));
     code.u1(OP_DUP);
-    pushRef(`L${internal};`);
+    pushRef(descOf(internal));
     code.u1(OP_INVOKESPECIAL);
-    code.u2(cp.methodref(internal, "<init>", "()V"));
+    code.u2(cp.methodref(internal, "<init>", "()V" as MethodDescriptor));
     pop(1);
     code.u1(OP_ATHROW);
     pop(1);
@@ -4230,7 +4319,7 @@ function generateBody(
   const emitPatternSwitch = (
     selector: Node,
     clauses: readonly SwitchClause[],
-    resultDesc?: string,
+    resultDesc?: Descriptor,
   ): boolean => {
     const selDesc = emitExpr(selector);
     const tmpSlot = nextSlot;
@@ -4288,7 +4377,7 @@ function generateBody(
     pop();
     branchTo(OP_IFNONNULL, afterNull);
     if (nullClause) emitArm(nullClause);
-    else throwNew("java/lang/NullPointerException");
+    else throwNew("java/lang/NullPointerException" as InternalName);
     placeLabel(afterNull);
 
     for (const cl of clauses) {
@@ -4300,7 +4389,7 @@ function generateBody(
       const patternType = (label as TypePattern | RecordPattern).type;
       const desc = descriptorOf(patternType, program);
       if (desc[0] !== "L" && desc[0] !== "[") throw new UnsupportedEmit();
-      const internal = desc[0] === "[" ? desc : desc.slice(1, -1);
+      const internal = classOperand(desc);
       const nextL = newLabel();
       loadVar(tmpSlot, selDesc);
       push(selDesc);
@@ -4321,7 +4410,7 @@ function generateBody(
       }
       loadVar(tmpSlot, selDesc);
       push(selDesc);
-      if (desc !== "Ljava/lang/Object;") {
+      if (desc !== OBJECT_DESC) {
         code.u1(OP_CHECKCAST);
         code.u2(cp.classInfo(internal));
         pop();
@@ -4339,7 +4428,8 @@ function generateBody(
     }
 
     if (defaultClause) emitArm(defaultClause);
-    else if (resultDesc !== undefined) throwNew("java/lang/IncompatibleClassChangeError");
+    else if (resultDesc !== undefined)
+      throwNew("java/lang/IncompatibleClassChangeError" as InternalName);
 
     if (resultDesc !== undefined) yieldTargets.pop();
     else breakTargets.pop();
@@ -4359,7 +4449,7 @@ function generateBody(
   // `if (r != null)` guard. No suppression here (callers handle the in-flight
   // exception); used on both the normal and exceptional close paths.
   const emitResourceClose = (a: Extract<FinallyAction, { kind: "resource" }>): void => {
-    const desc = `L${a.ownerInternal};`;
+    const desc = descOf(a.ownerInternal);
     let skip: Label | undefined;
     if (a.guarded) {
       loadVar(a.slot, desc);
@@ -4372,12 +4462,12 @@ function generateBody(
     push(desc);
     if (a.isInterface) {
       code.u1(OP_INVOKEINTERFACE);
-      code.u2(cp.interfaceMethodref(a.ownerInternal, "close", "()V"));
+      code.u2(cp.interfaceMethodref(a.ownerInternal, "close", "()V" as MethodDescriptor));
       code.u1(1);
       code.u1(0);
     } else {
       code.u1(OP_INVOKEVIRTUAL);
-      code.u2(cp.methodref(a.ownerInternal, "close", "()V"));
+      code.u2(cp.methodref(a.ownerInternal, "close", "()V" as MethodDescriptor));
     }
     pop(1);
     if (skip) placeLabel(skip);
@@ -4390,8 +4480,8 @@ function generateBody(
       return false;
     }
     if (a.kind === "monitor") {
-      loadVar(a.slot, "Ljava/lang/Object;");
-      push("Ljava/lang/Object;");
+      loadVar(a.slot, OBJECT_DESC);
+      push(OBJECT_DESC);
       code.u1(OP_MONITOREXIT);
       pop(1);
       return false;
@@ -4425,7 +4515,7 @@ function generateBody(
     a: Extract<FinallyAction, { kind: "resource" }>,
     primarySlot: number,
   ): void => {
-    const exc = "Ljava/lang/Throwable;";
+    const exc = THROWABLE_DESC;
     const bStart = code.length;
     emitResourceClose(a);
     const bEnd = code.length;
@@ -4452,7 +4542,13 @@ function generateBody(
     loadVar(sSlot, exc);
     push(exc);
     code.u1(OP_INVOKEVIRTUAL);
-    code.u2(cp.methodref("java/lang/Throwable", "addSuppressed", "(Ljava/lang/Throwable;)V"));
+    code.u2(
+      cp.methodref(
+        "java/lang/Throwable" as InternalName,
+        "addSuppressed",
+        "(Ljava/lang/Throwable;)V" as MethodDescriptor,
+      ),
+    );
     pop(2);
     placeLabel(rethrowL); // reached by the goto and by the addSuppressed fall-through
   };
@@ -4499,9 +4595,7 @@ function generateBody(
     for (const cc of catchClauses) {
       setEntryState();
       const excDesc =
-        cc.catchTypes.length === 1
-          ? descriptorOf(cc.catchTypes[0]!, program)
-          : "Ljava/lang/Throwable;";
+        cc.catchTypes.length === 1 ? descriptorOf(cc.catchTypes[0]!, program) : THROWABLE_DESC;
       push(excDesc); // the JVM pushes the caught exception onto an empty stack
       const handlerL = newLabel();
       placeLabel(handlerL); // frame: locals = try entry, stack = [exc]
@@ -4512,7 +4606,7 @@ function generateBody(
           start: tryStart,
           end: protectedRanges[0]!.end, // the try body only
           handler: handlerL.offset,
-          catchType: cp.classInfo(d[0] === "[" ? d : d.slice(1, -1)),
+          catchType: cp.classInfo(classOperand(d)),
         });
       }
       const bodyStart = code.length;
@@ -4539,7 +4633,7 @@ function generateBody(
     // exception into the in-flight one (JLS 14.20.3).
     if (fin) {
       setEntryState();
-      const exc = "Ljava/lang/Throwable;";
+      const exc = THROWABLE_DESC;
       push(exc);
       const catchAllL = newLabel();
       placeLabel(catchAllL);
@@ -4614,7 +4708,10 @@ function generateBody(
               declarator.initializer.kind === SyntaxKind.ArrayInitializer &&
               descriptor[0] === "["
             ) {
-              arrayInitializer(declarator.initializer as ArrayInitializer, descriptor.slice(1));
+              arrayInitializer(
+                declarator.initializer as ArrayInitializer,
+                descriptor.slice(1) as Descriptor,
+              );
             } else {
               coerce(emitExpr(declarator.initializer), descriptor);
             }
@@ -4737,7 +4834,7 @@ function generateBody(
         const s = stmt as ForEachStatement;
         const iterableType = checker.getTypeOfExpression(s.expression);
         const param = s.parameter;
-        const reserve = (descriptor: string): number => {
+        const reserve = (descriptor: Descriptor): number => {
           const slot = nextSlot;
           nextSlot += slotsOf(descriptor);
           if (nextSlot > maxLocals) maxLocals = nextSlot;
@@ -4754,7 +4851,7 @@ function generateBody(
           return inScope(() => {
             // for (T x : a) -> int $i = 0; while ($i < $a.length) { x = $a[$i]; body; $i++; }
             const arrDesc = emitExpr(s.expression);
-            const elem = arrDesc[0] === "[" ? arrDesc.slice(1) : "Ljava/lang/Object;";
+            const elem = arrDesc[0] === "[" ? (arrDesc.slice(1) as Descriptor) : OBJECT_DESC;
             const arrSlot = reserve(arrDesc);
             storeVar(arrSlot, arrDesc);
             const idxSlot = reserve("I");
@@ -4804,56 +4901,60 @@ function generateBody(
         return inScope(() => {
           // for (T x : it) -> Iterator $i = it.iterator();
           //   while ($i.hasNext()) { T x = (T) $i.next(); body; }
-          const ITER = "java/util/Iterator";
+          const ITER = "java/util/Iterator" as InternalName;
           emitExpr(s.expression);
           code.u1(OP_INVOKEINTERFACE);
           code.u2(
-            cp.interfaceMethodref("java/lang/Iterable", "iterator", "()Ljava/util/Iterator;"),
+            cp.interfaceMethodref(
+              "java/lang/Iterable" as InternalName,
+              "iterator",
+              "()Ljava/util/Iterator;" as MethodDescriptor,
+            ),
           );
           code.u1(1);
           code.u1(0);
           pop();
-          push("Ljava/util/Iterator;");
-          const itSlot = reserve("Ljava/util/Iterator;");
-          storeVar(itSlot, "Ljava/util/Iterator;");
+          push(ITERATOR_DESC);
+          const itSlot = reserve(ITERATOR_DESC);
+          storeVar(itSlot, ITERATOR_DESC);
           const varSlot = reserve(varDesc);
           if (param.symbol) locals.set(param.symbol, { slot: varSlot, descriptor: varDesc });
           const startL = newLabel();
           const endL = newLabel();
           placeLabel(startL);
-          loadVar(itSlot, "Ljava/util/Iterator;");
-          push("Ljava/util/Iterator;");
+          loadVar(itSlot, ITERATOR_DESC);
+          push(ITERATOR_DESC);
           code.u1(OP_INVOKEINTERFACE);
-          code.u2(cp.interfaceMethodref(ITER, "hasNext", "()Z"));
+          code.u2(cp.interfaceMethodref(ITER, "hasNext", "()Z" as MethodDescriptor));
           code.u1(1);
           code.u1(0);
           pop();
           push("I");
           pop();
           branchTo(OP_IFEQ, endL); // !hasNext -> exit
-          loadVar(itSlot, "Ljava/util/Iterator;");
-          push("Ljava/util/Iterator;");
+          loadVar(itSlot, ITERATOR_DESC);
+          push(ITERATOR_DESC);
           code.u1(OP_INVOKEINTERFACE);
-          code.u2(cp.interfaceMethodref(ITER, "next", "()Ljava/lang/Object;"));
+          code.u2(cp.interfaceMethodref(ITER, "next", "()Ljava/lang/Object;" as MethodDescriptor));
           code.u1(1);
           code.u1(0);
           pop();
-          push("Ljava/lang/Object;");
+          push(OBJECT_DESC);
           // (T) next(): a reference cast, or unbox via the wrapper for a primitive.
           if (category(varDesc) === "A") {
-            if (varDesc !== "Ljava/lang/Object;") {
+            if (varDesc !== OBJECT_DESC) {
               code.u1(OP_CHECKCAST);
-              code.u2(cp.classInfo(varDesc[0] === "[" ? varDesc : varDesc.slice(1, -1)));
+              code.u2(cp.classInfo(classOperand(varDesc)));
               pop();
               push(varDesc);
             }
           } else {
-            const w = WRAPPER[varDesc]!;
+            const w = wrapperOf(varDesc)!;
             code.u1(OP_CHECKCAST);
             code.u2(cp.classInfo(w));
             pop();
-            push(`L${w};`);
-            coerce(`L${w};`, varDesc);
+            push(`L${w};` as Descriptor);
+            coerce(descOf(w), varDesc);
           }
           storeVar(varSlot, varDesc);
           const names = takePending();
@@ -4898,7 +4999,7 @@ function generateBody(
           // Two forms (JLS 14.20.3): a declaration `try (T r = init)` and the
           // SE9 variable-access form `try (existingVar)`. Both materialize the
           // resource value into a fresh slot used for close().
-          let desc: string;
+          let desc: Descriptor;
           let isInterface: boolean;
           let valueExpr: Node;
           if (res.type && res.name && res.initializer) {
@@ -4920,7 +5021,7 @@ function generateBody(
             throw new UnsupportedEmit();
           }
           if (desc[0] !== "L") throw new UnsupportedEmit();
-          const ownerInternal = desc.slice(1, -1);
+          const ownerInternal = desc.slice(1, -1) as InternalName;
           // Open the resource before the protected region: if the initializer
           // throws there is nothing to close.
           const slot = nextSlot;
@@ -4951,7 +5052,7 @@ function generateBody(
       // the exception path via the catch-all monitorexit + rethrow).
       case SyntaxKind.SynchronizedStatement: {
         const s = stmt as SynchronizedStatement;
-        const monDesc = "Ljava/lang/Object;";
+        const monDesc = OBJECT_DESC;
         const monSlot = nextSlot;
         nextSlot += 1;
         if (nextSlot > maxLocals) maxLocals = nextSlot;
@@ -5074,20 +5175,20 @@ function generateBody(
         branchTo(OP_IFEQ + 1, endL); // ifne: assertions disabled -> skip
         emitBranch(s.condition, endL, true); // condition true -> skip (no error)
         code.u1(OP_NEW);
-        code.u2(cp.classInfo("java/lang/AssertionError"));
-        pushRef("Ljava/lang/AssertionError;");
+        code.u2(cp.classInfo("java/lang/AssertionError" as InternalName));
+        pushRef("Ljava/lang/AssertionError;" as Descriptor);
         code.u1(OP_DUP);
-        pushRef("Ljava/lang/AssertionError;");
-        let ctorDesc = "()V";
+        pushRef("Ljava/lang/AssertionError;" as Descriptor);
+        let ctorDesc = "()V" as MethodDescriptor;
         if (s.message) {
           // The detail message: AssertionError(Object) (the message is boxed if a
           // primitive). javac uses type-specific ctors; (Object) is equivalent.
           const md = emitExpr(s.message);
-          coerce(md, "Ljava/lang/Object;");
-          ctorDesc = "(Ljava/lang/Object;)V";
+          coerce(md, OBJECT_DESC);
+          ctorDesc = "(Ljava/lang/Object;)V" as MethodDescriptor;
         }
         code.u1(OP_INVOKESPECIAL);
-        code.u2(cp.methodref("java/lang/AssertionError", "<init>", ctorDesc));
+        code.u2(cp.methodref("java/lang/AssertionError" as InternalName, "<init>", ctorDesc));
         pop(s.message ? 2 : 1);
         code.u1(OP_ATHROW);
         pop(1);
@@ -5159,7 +5260,7 @@ function generateBody(
     // permitted by the verifier).
     if (leadThis0Slot !== undefined) {
       code.u1(OP_ALOAD_0);
-      pushRef(`L${thisInternalName};`);
+      pushRef(descOf(thisInternalName));
       loadVar(leadThis0Slot, ctorLeading!.this0Descriptor!);
       push(ctorLeading!.this0Descriptor!);
       code.u1(OP_PUTFIELD);
@@ -5171,11 +5272,17 @@ function generateBody(
       code.u1(OP_ALOAD_0);
       pushRef();
       code.u1(OP_ALOAD_0 + 1); // aload_1 (name)
-      pushRef("Ljava/lang/String;");
+      pushRef(STRING_DESC);
       code.u1(OP_ILOAD_0 + 2); // iload_2 (ordinal)
       push("I");
       code.u1(OP_INVOKESPECIAL);
-      code.u2(cp.methodref("java/lang/Enum", "<init>", "(Ljava/lang/String;I)V"));
+      code.u2(
+        cp.methodref(
+          "java/lang/Enum" as InternalName,
+          "<init>",
+          "(Ljava/lang/String;I)V" as MethodDescriptor,
+        ),
+      );
       pop(3);
     } else if (isConstructor && explicitInvocation) {
       // Explicit super(args)/this(args) (JLS 8.8.7.1). Resolve the target ctor for
@@ -5202,7 +5309,7 @@ function generateBody(
       pushRef();
       args.forEach((arg, i) => coerce(emitExpr(arg), paramDescs[i]!));
       code.u1(OP_INVOKESPECIAL);
-      code.u2(cp.methodref(owner, "<init>", `(${paramDescs.join("")})V`));
+      code.u2(cp.methodref(owner, "<init>", `(${paramDescs.join("")})V` as MethodDescriptor));
       pop(1 + args.length);
     } else if (isConstructor && ctorPrologue) {
       // Synthesized ctor: store this$0 (before super, as javac does), call super
@@ -5240,7 +5347,7 @@ function generateBody(
         cp.methodref(
           ctorPrologue.superInternal,
           "<init>",
-          `(${ctorPrologue.superParamDescs.join("")})V`,
+          `(${ctorPrologue.superParamDescs.join("")})V` as MethodDescriptor,
         ),
       );
       pop(1 + ctorPrologue.superParamDescs.length);
@@ -5258,14 +5365,14 @@ function generateBody(
       code.u1(OP_ALOAD_0);
       pushRef();
       code.u1(OP_INVOKESPECIAL);
-      code.u2(cp.methodref(ctorSuper, "<init>", "()V"));
+      code.u2(cp.methodref(ctorSuper, "<init>", "()V" as MethodDescriptor));
       pop(1);
     }
     // Captured locals (val$ fields) are stored after super(), from their leading
     // synthetic parameters - the declared-constructor counterpart of emitSynthCtor.
     (ctorLeading?.captures ?? []).forEach((c, i) => {
       code.u1(OP_ALOAD_0);
-      pushRef(`L${thisInternalName};`);
+      pushRef(descOf(thisInternalName));
       loadVar(leadCaptureSlots[i]!, c.descriptor);
       push(c.descriptor);
       code.u1(OP_PUTFIELD);
@@ -5276,9 +5383,15 @@ function generateBody(
     if (assertionsOwner) {
       // $assertionsDisabled = !ThisClass.class.desiredAssertionStatus(); (JLS 14.10)
       ldc(cp.classInfo(assertionsOwner));
-      push("Ljava/lang/Class;");
+      push("Ljava/lang/Class;" as Descriptor);
       code.u1(OP_INVOKEVIRTUAL);
-      code.u2(cp.methodref("java/lang/Class", "desiredAssertionStatus", "()Z"));
+      code.u2(
+        cp.methodref(
+          "java/lang/Class" as InternalName,
+          "desiredAssertionStatus",
+          "()Z" as MethodDescriptor,
+        ),
+      );
       pop(1);
       push("I");
       const enabledL = newLabel();
@@ -5373,7 +5486,7 @@ function generateBody(
   ].sort((a, b) => a - b);
   let stackMapTable: ByteBuffer | undefined;
   if (targetOffsets.length > 0) {
-    const writeVerification = (buf: ByteBuffer, descriptor: string): void => {
+    const writeVerification = (buf: ByteBuffer, descriptor: Descriptor): void => {
       if (descriptor === TOP) {
         buf.u1(ITEM_Top);
         return;
@@ -5384,7 +5497,7 @@ function generateBody(
       else if (c === "D") buf.u1(ITEM_Double);
       else if (c === "J") buf.u1(ITEM_Long);
       else {
-        const internal = descriptor[0] === "[" ? descriptor : descriptor.slice(1, -1);
+        const internal = classOperand(descriptor);
         buf.u1(ITEM_Object);
         buf.u2(cp.classInfo(internal));
       }
@@ -5412,7 +5525,7 @@ function emitMethod(
   cp: ConstantPool,
   program: Program,
   checker: Checker,
-  thisInternalName: string,
+  thisInternalName: InternalName,
   lambdaMethods: ByteBuffer[],
   // Implicit flags for interface members (public, and abstract for no-body
   // methods), which carry no explicit modifiers.
@@ -5420,10 +5533,10 @@ function emitMethod(
   // For a local class: enclosing locals captured into synthetic val$ fields.
   captureFields: Map<
     Symbol,
-    { ownerInternal: string; fieldName: string; descriptor: string }
+    { ownerInternal: InternalName; fieldName: string; descriptor: Descriptor }
   > = new Map(),
   // For a local/anonymous class accessing the enclosing instance via this$0.
-  outerThis?: { enclosingInternal: string },
+  outerThis?: { enclosingInternal: InternalName },
 ): ByteBuffer {
   const flags = methodAccessFlags(method) | extraFlags;
   const descriptor = methodDescriptor(method, program);
@@ -5467,7 +5580,7 @@ function emitMethod(
     const argsSize =
       (isStatic ? 0 : 1) +
       method.parameters.reduce((n, p) => n + slotsOf(paramDescriptor(p as Parameter, program)), 0);
-    const returnDescriptor = descriptor.slice(descriptor.lastIndexOf(")") + 1);
+    const returnDescriptor = returnDescriptorOf(descriptor);
     const fallback = defaultReturnBody(returnDescriptor);
     body = { code: fallback.code, maxStack: fallback.maxStack, maxLocals: argsSize };
   }
@@ -5484,7 +5597,7 @@ function emitLambdaMethod(
   cp: ConstantPool,
   program: Program,
   checker: Checker,
-  thisInternalName: string,
+  thisInternalName: InternalName,
   lambdaMethods: ByteBuffer[],
 ): ByteBuffer {
   const descriptor = `(${impl.params.map(p => p.descriptor).join("")})${impl.returnDescriptor}`;
@@ -5527,7 +5640,7 @@ const NEWARRAY_ATYPE_BY_DESC: Record<string, number> = {
   J: 11,
 };
 function emitArrayCtorRefMethod(cp: ConstantPool, name: string, arrayDesc: string): ByteBuffer {
-  const elem = arrayDesc.slice(1); // element descriptor
+  const elem = arrayDesc.slice(1) as Descriptor; // element descriptor
   const code = new ByteBuffer();
   code.u1(OP_ILOAD_0); // the requested length
   const atype = NEWARRAY_ATYPE_BY_DESC[elem];
@@ -5536,7 +5649,7 @@ function emitArrayCtorRefMethod(cp: ConstantPool, name: string, arrayDesc: strin
     code.u1(atype);
   } else {
     code.u1(OP_ANEWARRAY);
-    code.u2(cp.classInfo(elem[0] === "[" ? elem : elem.slice(1, -1)));
+    code.u2(cp.classInfo(classOperand(elem)));
   }
   code.u1(OP_ARETURN);
   const info = new ByteBuffer();
@@ -5621,24 +5734,24 @@ function emitConstructorMethod(
   cp: ConstantPool,
   program: Program,
   checker: Checker,
-  thisInternalName: string,
-  superInternalName: string,
+  thisInternalName: InternalName,
+  superInternalName: InternalName,
   instanceInits: FieldInit[],
   lambdaMethods: ByteBuffer[],
   // For a non-static member inner class or a capturing local class: the leading
   // synthetic parameters (this$0 and/or captured locals) prepended to the declared
   // ones. outerThis routes the body's enclosing-member access through this$0.
   leading?: {
-    this0Descriptor?: string;
+    this0Descriptor?: Descriptor;
     captures: LocalCapture[];
-    outerThis?: { enclosingInternal: string };
+    outerThis?: { enclosingInternal: InternalName };
   },
 ): ByteBuffer {
   const userParams = ctor.parameters.map(p => paramDescriptor(p as Parameter, program)).join("");
   const leadParams = leading
     ? `${leading.this0Descriptor ?? ""}${leading.captures.map(c => c.descriptor).join("")}`
     : "";
-  const descriptor = `(${leadParams}${userParams})V`;
+  const descriptor = `(${leadParams}${userParams})V` as MethodDescriptor;
   const info = new ByteBuffer();
   info.u2(flags);
   info.u2(cp.utf8("<init>"));
@@ -5689,7 +5802,7 @@ function emitConstructorMethod(
     const code = new ByteBuffer();
     code.u1(OP_ALOAD_0);
     code.u1(OP_INVOKESPECIAL);
-    code.u2(cp.methodref(superInternalName, "<init>", "()V"));
+    code.u2(cp.methodref(superInternalName, "<init>", "()V" as MethodDescriptor));
     code.u1(OP_RETURN);
     body = { code, maxStack: 1, maxLocals: argsSize };
   }
@@ -5713,11 +5826,13 @@ function resolveInternalName(
   typeNode: TypeNode | undefined,
   from: Node,
   program: Program,
-): string | undefined {
+): InternalName | undefined {
   if (!typeNode || typeNode.kind !== SyntaxKind.TypeReference) return undefined;
   const ref = typeNode as TypeReference;
   const symbol = resolveTypeEntityName(ref.typeName, from, program);
-  return symbol ? binaryName(symbol) : entityNameToString(ref.typeName).replace(/\./g, "/");
+  return symbol
+    ? binaryName(symbol)
+    : (entityNameToString(ref.typeName).replaceAll(".", "/") as InternalName);
 }
 
 // Whether the class's own code uses `assert` (JLS 14.10), so it needs the
@@ -5745,7 +5860,7 @@ function classUsesAssert(declaration: ClassDeclaration): boolean {
 // The synthesized constructor of a capturing local class: super(), then store
 // each captured value (a leading parameter) into its val$ field. Used only when
 // the class declares no constructor and has no instance field initializers.
-function loadByDescriptor(code: ByteBuffer, descriptor: string, slot: number): void {
+function loadByDescriptor(code: ByteBuffer, descriptor: Descriptor, slot: number): void {
   const ch = descriptor[0];
   const op =
     ch === "J"
@@ -5767,13 +5882,13 @@ function loadByDescriptor(code: ByteBuffer, descriptor: string, slot: number): v
 // then super-args; the `new` site pushes them in the same order.
 function emitSynthCtor(
   cp: ConstantPool,
-  name: string,
-  superInternal: string,
-  superParamDescs: string[],
+  name: InternalName,
+  superInternal: InternalName,
+  superParamDescs: Descriptor[],
   captures: LocalCapture[],
   // Enclosing-instance descriptor (L<enclosing>;) when the class captures this$0;
   // it is the first constructor parameter, stored into the this$0 field.
-  this0Descriptor?: string,
+  this0Descriptor?: Descriptor,
 ): ByteBuffer {
   const code = new ByteBuffer();
   let slot = 1;
@@ -5805,7 +5920,9 @@ function emitSynthCtor(
   code.u1(OP_ALOAD_0);
   superParamDescs.forEach((d, i) => loadByDescriptor(code, d, superSlots[i]!));
   code.u1(OP_INVOKESPECIAL);
-  code.u2(cp.methodref(superInternal, "<init>", `(${superParamDescs.join("")})V`));
+  code.u2(
+    cp.methodref(superInternal, "<init>", `(${superParamDescs.join("")})V` as MethodDescriptor),
+  );
   maxStack = Math.max(maxStack, 1 + superParamDescs.reduce((n, d) => n + slotsOf(d), 0));
   captures.forEach((c, i) => {
     code.u1(OP_ALOAD_0);
@@ -5833,14 +5950,14 @@ function emitSynthCtor(
 // its own fields. The prologue + field-init code is generated by generateBody.
 function emitSynthCtorWithInits(
   cp: ConstantPool,
-  name: string,
+  name: InternalName,
   program: Program,
   checker: Checker,
   prologue: {
-    this0Descriptor?: string;
+    this0Descriptor?: Descriptor;
     captures: LocalCapture[];
-    superInternal: string;
-    superParamDescs: string[];
+    superInternal: InternalName;
+    superParamDescs: Descriptor[];
   },
   instanceInits: FieldInit[],
   lambdaMethods: ByteBuffer[],
@@ -5857,7 +5974,7 @@ function emitSynthCtorWithInits(
     ]),
   );
   const outerThis = prologue.this0Descriptor
-    ? { enclosingInternal: prologue.this0Descriptor.slice(1, -1) }
+    ? { enclosingInternal: classOperand(prologue.this0Descriptor) as InternalName }
     : undefined;
   let body: MethodBody;
   try {
@@ -5909,16 +6026,19 @@ export function emitClass(
   declaration: ClassDeclaration,
   program: Program,
   checker: Checker,
-  nestMembers?: Map<string, string[]>,
+  nestMembers?: Map<string, InternalName[]>,
 ): EmittedClass {
   // Ensure the global index is built so symbols carry their package parent.
   program.getGlobalIndex();
-  const name = declaration.symbol ? binaryName(declaration.symbol) : declaration.name.text;
+  const name = declaration.symbol
+    ? binaryName(declaration.symbol)
+    : (declaration.name.text as InternalName); // unbound: bare name, default package
   const superInternalName =
-    resolveInternalName(declaration.extendsType, declaration, program) ?? "java/lang/Object";
+    resolveInternalName(declaration.extendsType, declaration, program) ??
+    ("java/lang/Object" as InternalName);
   const interfaceNames = (declaration.implementsTypes ?? [])
     .map(t => resolveInternalName(t, declaration, program))
-    .filter((n): n is string => n !== undefined);
+    .filter((n): n is InternalName => n !== undefined);
 
   const accessFlags = classAccessFlags(declaration);
   const cp = new ConstantPool();
@@ -5947,7 +6067,7 @@ export function emitClass(
   const outerThis =
     localOuterThis(declaration, program, checker) ??
     memberInnerThis0(declaration, program, checker);
-  const this0Descriptor = outerThis ? `L${outerThis.enclosingInternal};` : undefined;
+  const this0Descriptor = outerThis ? descOf(outerThis.enclosingInternal) : undefined;
   if (this0Descriptor) {
     emitFieldInfo(fields.buffer, cp, ACC_FINAL | ACC_SYNTHETIC, "this$0", this0Descriptor);
     fields.count++;
@@ -5984,7 +6104,7 @@ export function emitClass(
       this0Descriptor,
       captures: localCaptures,
       superInternal: superInternalName,
-      superParamDescs: [] as string[],
+      superParamDescs: [] as Descriptor[],
     };
     methods.append(
       instanceInits.length > 0
@@ -6157,13 +6277,15 @@ export function emitInterface(
   declaration: InterfaceDeclaration,
   program: Program,
   checker: Checker,
-  nestMembers?: Map<string, string[]>,
+  nestMembers?: Map<string, InternalName[]>,
 ): EmittedClass {
   program.getGlobalIndex();
-  const name = declaration.symbol ? binaryName(declaration.symbol) : declaration.name.text;
+  const name = declaration.symbol
+    ? binaryName(declaration.symbol)
+    : (declaration.name.text as InternalName); // unbound: bare name, default package
   const interfaceNames = (declaration.extendsTypes ?? [])
     .map(t => resolveInternalName(t, declaration, program))
-    .filter((n): n is string => n !== undefined);
+    .filter((n): n is InternalName => n !== undefined);
   let accessFlags = ACC_INTERFACE | ACC_ABSTRACT;
   if ((declaration.modifiers ?? []).some(m => m.kind === SyntaxKind.PublicKeyword)) {
     accessFlags |= ACC_PUBLIC;
@@ -6171,7 +6293,7 @@ export function emitInterface(
 
   const cp = new ConstantPool();
   const thisClassIndex = cp.classInfo(name);
-  const superClassIndex = cp.classInfo("java/lang/Object");
+  const superClassIndex = cp.classInfo("java/lang/Object" as InternalName);
   const interfaceIndices = interfaceNames.map(n => cp.classInfo(n));
 
   // Fields: interface fields are implicitly public static final. We emit those
@@ -6187,7 +6309,7 @@ export function emitInterface(
       const init = d.initializer;
       let constIndex: CpIndex | undefined;
       if (init) {
-        if (descriptor === "Ljava/lang/String;" && init.kind === SyntaxKind.StringLiteral) {
+        if (descriptor === STRING_DESC && init.kind === SyntaxKind.StringLiteral) {
           constIndex = cp.string((init as LiteralExpression).value);
         } else {
           const folded = foldConstant(init);
@@ -6262,7 +6384,7 @@ export function emitInterface(
 // The binary name of an anonymous class: the enclosing top-level type plus its
 // 1-based position among anonymous-class sites in that type (Outer$N). Computed
 // the same way by the class emission and the `new` site so they agree.
-function anonymousClassName(node: ObjectCreationExpression, program: Program): string {
+function anonymousClassName(node: ObjectCreationExpression, program: Program): InternalName {
   program.getGlobalIndex();
   let top: Node | undefined;
   for (let n: Node | undefined = node.parent; n; n = n.parent) {
@@ -6283,13 +6405,13 @@ function anonymousClassName(node: ObjectCreationExpression, program: Program): s
     });
   };
   count(top ?? node);
-  return `${base}$${index}`;
+  return `${base}$${index}` as InternalName;
 }
 
 interface AnonymousTarget {
-  superInternal: string;
-  interfaceInternal?: string;
-  superParamDescs: string[];
+  superInternal: InternalName;
+  interfaceInternal?: InternalName;
+  superParamDescs: Descriptor[];
 }
 
 // If `node` is an anonymous class we can emit - body is methods only (no fields
@@ -6319,7 +6441,7 @@ function anonymousTarget(
   if (sym.flags & SymbolFlags.Interface) {
     if (args.length > 0) return undefined;
     return {
-      superInternal: "java/lang/Object",
+      superInternal: "java/lang/Object" as InternalName,
       interfaceInternal: binaryName(sym),
       superParamDescs: [],
     };
@@ -6338,7 +6460,7 @@ export function emitAnonymousClassIfPossible(
   node: ObjectCreationExpression,
   program: Program,
   checker: Checker,
-  nestMembers?: Map<string, string[]>,
+  nestMembers?: Map<string, InternalName[]>,
 ): EmittedClass | undefined {
   const target = anonymousTarget(node, program);
   if (!target) return undefined;
@@ -6351,7 +6473,7 @@ export function emitAnonymousClassIfPossible(
   const interfaceIndices = target.interfaceInternal ? [cp.classInfo(target.interfaceInternal)] : [];
 
   const outerThis = outerThisInfo(node.classBody!, node.parent, program, checker);
-  const this0Descriptor = outerThis ? `L${outerThis.enclosingInternal};` : undefined;
+  const this0Descriptor = outerThis ? descOf(outerThis.enclosingInternal) : undefined;
 
   const fields = new ByteBuffer();
   let fieldCount = 0;
@@ -6481,7 +6603,7 @@ function emitFieldInfo(
   cp: ConstantPool,
   flags: number,
   name: string,
-  descriptor: string,
+  descriptor: Descriptor,
 ): void {
   buffer.u2(flags);
   buffer.u2(cp.utf8(name));
@@ -6492,9 +6614,9 @@ function emitFieldInfo(
 // public static E[] values() { return (E[]) $VALUES.clone(); }
 function emitValuesMethod(
   cp: ConstantPool,
-  name: string,
+  name: InternalName,
   valuesField: string,
-  arrayDesc: string,
+  arrayDesc: Descriptor,
 ): ByteBuffer {
   const info = new ByteBuffer();
   info.u2(ACC_PUBLIC | ACC_STATIC);
@@ -6504,7 +6626,7 @@ function emitValuesMethod(
   code.u1(OP_GETSTATIC);
   code.u2(cp.fieldref(name, valuesField, arrayDesc));
   code.u1(OP_INVOKEVIRTUAL);
-  code.u2(cp.methodref(arrayDesc, "clone", "()Ljava/lang/Object;"));
+  code.u2(cp.methodref(arrayDesc, "clone", "()Ljava/lang/Object;" as MethodDescriptor));
   code.u1(OP_CHECKCAST);
   code.u2(cp.classInfo(arrayDesc));
   code.u1(OP_ARETURN);
@@ -6513,7 +6635,7 @@ function emitValuesMethod(
 }
 
 // public static E valueOf(String name) { return (E) Enum.valueOf(E.class, name); }
-function emitValueOfMethod(cp: ConstantPool, name: string, selfDesc: string): ByteBuffer {
+function emitValueOfMethod(cp: ConstantPool, name: InternalName, selfDesc: Descriptor): ByteBuffer {
   const info = new ByteBuffer();
   info.u2(ACC_PUBLIC | ACC_STATIC);
   info.u2(cp.utf8("valueOf"));
@@ -6525,9 +6647,9 @@ function emitValueOfMethod(cp: ConstantPool, name: string, selfDesc: string): By
   code.u1(OP_INVOKESTATIC);
   code.u2(
     cp.methodref(
-      "java/lang/Enum",
+      "java/lang/Enum" as InternalName,
       "valueOf",
-      "(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/Enum;",
+      "(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/Enum;" as MethodDescriptor,
     ),
   );
   code.u1(OP_CHECKCAST);
@@ -6544,7 +6666,7 @@ function emitEnumConstructor(
   cp: ConstantPool,
   program: Program,
   checker: Checker,
-  name: string,
+  name: InternalName,
   instanceInits: FieldInit[],
   lambdaMethods: ByteBuffer[],
 ): ByteBuffer {
@@ -6562,7 +6684,7 @@ function emitEnumConstructor(
       program,
       checker,
       name,
-      "java/lang/Enum",
+      "java/lang/Enum" as InternalName,
       instanceInits,
       lambdaMethods,
       undefined,
@@ -6579,7 +6701,13 @@ function emitEnumConstructor(
     code.u1(OP_ALOAD_0 + 1);
     code.u1(OP_ILOAD_0 + 2);
     code.u1(OP_INVOKESPECIAL);
-    code.u2(cp.methodref("java/lang/Enum", "<init>", "(Ljava/lang/String;I)V"));
+    code.u2(
+      cp.methodref(
+        "java/lang/Enum" as InternalName,
+        "<init>",
+        "(Ljava/lang/String;I)V" as MethodDescriptor,
+      ),
+    );
     code.u1(OP_RETURN);
     body = { code, maxStack: 3, maxLocals: argsSize };
   }
@@ -6587,7 +6715,7 @@ function emitEnumConstructor(
   return info;
 }
 
-function returnOp(descriptor: string): number {
+function returnOp(descriptor: Descriptor): number {
   const ch = descriptor[0];
   return ch === "J"
     ? OP_LRETURN
@@ -6611,16 +6739,18 @@ export function emitRecord(
   declaration: RecordDeclaration,
   program: Program,
   checker: Checker,
-  nestMembers?: Map<string, string[]>,
+  nestMembers?: Map<string, InternalName[]>,
 ): EmittedClass {
   program.getGlobalIndex();
-  const name = declaration.symbol ? binaryName(declaration.symbol) : declaration.name.text;
+  const name = declaration.symbol
+    ? binaryName(declaration.symbol)
+    : (declaration.name.text as InternalName); // unbound: bare name, default package
   const isPublic = (declaration.modifiers ?? []).some(m => m.kind === SyntaxKind.PublicKeyword);
   let accessFlags = ACC_SUPER | ACC_FINAL;
   if (isPublic) accessFlags |= ACC_PUBLIC;
   const interfaceNames = (declaration.implementsTypes ?? [])
     .map(t => resolveInternalName(t, declaration, program))
-    .filter((n): n is string => n !== undefined);
+    .filter((n): n is InternalName => n !== undefined);
   const components = (declaration.recordComponents as readonly RecordComponent[]).map(c => ({
     name: c.name.text,
     descriptor: descriptorOf(c.type, program),
@@ -6628,7 +6758,7 @@ export function emitRecord(
 
   const cp = new ConstantPool();
   const thisClassIndex = cp.classInfo(name);
-  const superClassIndex = cp.classInfo("java/lang/Record");
+  const superClassIndex = cp.classInfo("java/lang/Record" as InternalName);
   const interfaceIndices = interfaceNames.map(n => cp.classInfo(n));
 
   // A private final field per component, then any declared (static) fields.
@@ -6651,12 +6781,12 @@ export function emitRecord(
   // stores; a full explicit canonical constructor (parameters matching the
   // components) and alternate `this(...)`-delegating constructors are emitted as
   // ordinary constructors over java/lang/Record.
-  const ctorDescriptor = `(${components.map(c => c.descriptor).join("")})V`;
+  const ctorDescriptor = `(${components.map(c => c.descriptor).join("")})V` as MethodDescriptor;
   const emitImplicitCanonicalCtor = (): ByteBuffer => {
     const code = new ByteBuffer();
     code.u1(OP_ALOAD_0);
     code.u1(OP_INVOKESPECIAL);
-    code.u2(cp.methodref("java/lang/Record", "<init>", "()V"));
+    code.u2(cp.methodref("java/lang/Record" as InternalName, "<init>", "()V" as MethodDescriptor));
     let slot = 1;
     let maxStack = 1;
     for (const c of components) {
@@ -6716,7 +6846,7 @@ export function emitRecord(
         program,
         checker,
         name,
-        "java/lang/Record",
+        "java/lang/Record" as InternalName,
         [],
         lambdaMethods,
         undefined,
@@ -6755,7 +6885,7 @@ export function emitRecord(
         program,
         checker,
         name,
-        "java/lang/Record",
+        "java/lang/Record" as InternalName,
         [],
         lambdaMethods,
       ),
@@ -6786,17 +6916,24 @@ export function emitRecord(
   }
 
   // equals / hashCode / toString via the ObjectMethods bootstrap.
-  const self = `L${name};`;
+  const self = descOf(name);
   const names = components.map(c => c.name).join(";");
-  const getters = components.map(c => ({ name: c.name, descriptor: `()${c.descriptor}` }));
-  const emitObjectMethod = (mName: string, methodDesc: string, indyDesc: string): void => {
+  const getters = components.map(c => ({
+    name: c.name,
+    descriptor: `()${c.descriptor}` as MethodDescriptor,
+  }));
+  const emitObjectMethod = (
+    mName: string,
+    methodDesc: MethodDescriptor,
+    indyDesc: MethodDescriptor,
+  ): void => {
     const code = new ByteBuffer();
     code.u1(OP_ALOAD_0);
     if (mName === "equals") code.u1(OP_ALOAD_0 + 1);
     code.u1(OP_INVOKEDYNAMIC);
     code.u2(cp.invokeDynamicObjectMethod(mName, indyDesc, name, names, getters));
     code.u2(0);
-    code.u1(returnOp(methodDesc.slice(methodDesc.lastIndexOf(")") + 1)));
+    code.u1(returnOp(returnDescriptorOf(methodDesc)));
     const info = new ByteBuffer();
     info.u2(ACC_PUBLIC | ACC_FINAL);
     info.u2(cp.utf8(mName));
@@ -6809,9 +6946,17 @@ export function emitRecord(
     methods.append(info);
     methodCount++;
   };
-  emitObjectMethod("equals", "(Ljava/lang/Object;)Z", `(${self}Ljava/lang/Object;)Z`);
-  emitObjectMethod("hashCode", "()I", `(${self})I`);
-  emitObjectMethod("toString", "()Ljava/lang/String;", `(${self})Ljava/lang/String;`);
+  emitObjectMethod(
+    "equals",
+    "(Ljava/lang/Object;)Z" as MethodDescriptor,
+    `(${self}Ljava/lang/Object;)Z` as MethodDescriptor,
+  );
+  emitObjectMethod("hashCode", "()I" as MethodDescriptor, `(${self})I` as MethodDescriptor);
+  emitObjectMethod(
+    "toString",
+    "()Ljava/lang/String;" as MethodDescriptor,
+    `(${self})Ljava/lang/String;` as MethodDescriptor,
+  );
 
   // Declared methods.
   for (const member of declaration.members) {
@@ -6870,17 +7015,19 @@ export function emitEnum(
   declaration: EnumDeclaration,
   program: Program,
   checker: Checker,
-  nestMembers?: Map<string, string[]>,
+  nestMembers?: Map<string, InternalName[]>,
 ): EmittedClass {
   program.getGlobalIndex();
-  const name = declaration.symbol ? binaryName(declaration.symbol) : declaration.name.text;
-  const selfDesc = `L${name};`;
-  const arrayDesc = `[${selfDesc}`;
+  const name = declaration.symbol
+    ? binaryName(declaration.symbol)
+    : (declaration.name.text as InternalName); // unbound: bare name, default package
+  const selfDesc = descOf(name);
+  const arrayDesc = `[${selfDesc}` as Descriptor;
   const VALUES = "$VALUES";
-  const superInternalName = "java/lang/Enum";
+  const superInternalName = "java/lang/Enum" as InternalName;
   const interfaceNames = (declaration.implementsTypes ?? [])
     .map(t => resolveInternalName(t, declaration, program))
-    .filter((n): n is string => n !== undefined);
+    .filter((n): n is InternalName => n !== undefined);
   const isPublic = (declaration.modifiers ?? []).some(m => m.kind === SyntaxKind.PublicKeyword);
   const accessFlags = ACC_SUPER | ACC_ENUM | ACC_FINAL | (isPublic ? ACC_PUBLIC : 0);
 
@@ -6952,7 +7099,7 @@ export function emitEnum(
     return {
       name: c.name.text,
       ordinal: i,
-      ctorDescriptor: `(Ljava/lang/String;I${userParamDescs.join("")})V`,
+      ctorDescriptor: `(Ljava/lang/String;I${userParamDescs.join("")})V` as MethodDescriptor,
       userParamDescs,
       args,
     };
