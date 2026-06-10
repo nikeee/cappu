@@ -76,8 +76,10 @@ import { DEFAULT_INLAY_HINTS, getInlayHints, type InlayHintsSettings } from "./i
 import { getSemanticTokens, TOKEN_MODIFIERS, TOKEN_TYPES } from "./semanticTokens.ts";
 import { getCodeLenses } from "./codeLens.ts";
 import { declarationName, findMethodImplementations, getSubtypeIndex } from "./subtypes.ts";
+import { loadConfiguredPaths } from "./compiler.ts";
+import type { CappuConfig } from "./config.ts";
 import { isValidIdentifier, skipTrivia } from "./utilities.ts";
-import { loadJavaFiles, uriToPath } from "./workspace.ts";
+import { isSyntheticUri, loadJavaFiles, uriToPath } from "./workspace.ts";
 
 // Communicate over stdio (the standard transport for editor language clients).
 const connection = createConnection(process.stdin, process.stdout);
@@ -427,7 +429,7 @@ connection.onWorkspaceSymbol((params): SymbolInformation[] => {
   if (!query) return []; // an empty query would dump every declaration
   const results: SymbolInformation[] = [];
   for (const uri of program.getAllUris()) {
-    if (uri.startsWith("jdk:")) continue;
+    if (isSyntheticUri(uri)) continue;
     const sourceFile = program.getSourceFile(uri);
     if (!sourceFile) continue;
     const lineStarts = computeLineStarts(sourceFile.text);
@@ -653,8 +655,16 @@ connection.onHover((params): Hover | null => {
  * Begin serving: attach the document manager and start reading JSON-RPC from
  * stdin. The handlers above are registered at module load, but nothing is read
  * until this is called, so importing this module has no observable effect.
+ *
+ * A cappu.config.json contributes the classpath/source paths (types resolve
+ * but are not workspace files) and the lspOptions base settings; client
+ * initializationOptions and didChangeConfiguration still override the latter.
  */
-export function startServer(): void {
+export function startServer(config?: CappuConfig): void {
+  if (config) {
+    applyInlayHintSettings(config.lspOptions.inlayHints);
+    loadConfiguredPaths(program, config);
+  }
   documents.listen(connection);
   connection.listen();
 }

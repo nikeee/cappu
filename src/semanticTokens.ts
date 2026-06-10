@@ -14,6 +14,7 @@ import {
   SyntaxKind,
 } from "./types.ts";
 import { skipTrivia } from "./utilities.ts";
+import { isSyntheticUri } from "./workspace.ts";
 
 // The legend the server advertises; indexes below refer into these arrays.
 export const TOKEN_TYPES = [
@@ -85,7 +86,7 @@ function modifiersOf(symbol: Symbol, isDeclarationName: boolean): number {
     }
   }
   const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
-  if (declaration && getSourceFileOfNode(declaration).fileName.startsWith("jdk:")) {
+  if (declaration && isSyntheticUri(getSourceFileOfNode(declaration).fileName)) {
     bits |= MOD_BIT["defaultLibrary"]!;
   }
   return bits;

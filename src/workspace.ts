@@ -15,6 +15,14 @@ export function pathToUri(path: string): string {
   return pathToFileURL(path).href;
 }
 
+/**
+ * A synthetic stub uri (jdk:/// hand stub or classpath:/// generated stub):
+ * not openable by a client, and its types can never reference user code.
+ */
+export function isSyntheticUri(uri: string): boolean {
+  return uri.startsWith("jdk:") || uri.startsWith("classpath:");
+}
+
 /** Recursively collect .java file paths under a directory, skipping build dirs. */
 export function findJavaFiles(dir: string): string[] {
   const result: string[] = [];

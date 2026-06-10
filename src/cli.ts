@@ -7,13 +7,20 @@
 import { parseArgs } from "node:util";
 
 import { runCompile } from "./compiler.ts";
+import { loadConfig } from "./config.ts";
 import pkg from "../package.json" with { type: "json" };
 
 const USAGE = `cappu ${pkg.version}
 
 Usage:
-  cappu lsp                          Start the Java language server (JSON-RPC over stdio)
+  cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
   cappu compile [options] <file...>  Compile .java files to .class bytecode
+
+Options:
+  -c, --config <file>   Project config (default: ./cappu.config.json, JSONC).
+                        Sections: "compilerOptions" (classPath, sourcePaths,
+                        outDir, quiet, failOnDegrade) and "lspOptions"
+                        (inlayHints). Command-line flags take precedence.
 
 Compile options:
   -d, --out-dir <dir>   Output root for the package tree (default: current directory)
@@ -31,9 +38,12 @@ async function main(argv: string[]): Promise<void> {
     args: argv,
     allowPositionals: true,
     options: {
+      config: { type: "string", short: "c" },
       "out-dir": { type: "string", short: "d" },
-      quiet: { type: "boolean", short: "q", default: false },
-      "fail-on-degrade": { type: "boolean", default: false },
+      // No defaults: an absent flag must stay undefined so cappu.config.json
+      // can supply the value (an explicit flag always wins).
+      quiet: { type: "boolean", short: "q" },
+      "fail-on-degrade": { type: "boolean" },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", default: false },
     },
@@ -50,12 +60,20 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
 
+  let config;
+  try {
+    config = loadConfig(values.config);
+  } catch (e) {
+    process.stderr.write(`cappu: ${(e as Error).message}\n`);
+    process.exit(2);
+  }
+
   switch (command) {
     case "lsp": {
       // Imported lazily so `cappu compile` never loads the LSP transport stack.
       // startServer() begins reading stdin and keeps the process alive; no exit.
       const { startServer } = await import("./server.ts");
-      startServer();
+      startServer(config);
       return;
     }
     case "compile":
@@ -64,6 +82,7 @@ async function main(argv: string[]): Promise<void> {
           outDir: values["out-dir"],
           quiet: values.quiet,
           failOnDegrade: values["fail-on-degrade"],
+          config,
         }),
       );
     default:

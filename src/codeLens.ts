@@ -9,6 +9,7 @@ import type { Checker } from "./checker.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import { declarationName, findMethodImplementations, getSubtypeIndex } from "./subtypes.ts";
+import { isSyntheticUri } from "./workspace.ts";
 import {
   type ClassDeclaration,
   type Identifier,
@@ -110,7 +111,7 @@ export function getCodeLenses(
   // names a target counts, except the declaration's own name. Stub files cannot
   // reference user code.
   for (const uri of program.getAllUris()) {
-    if (uri.startsWith("jdk:")) continue;
+    if (isSyntheticUri(uri)) continue;
     const file = program.getSourceFile(uri);
     if (!file) continue;
     const visit = (node: Node): void => {

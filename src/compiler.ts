@@ -9,16 +9,40 @@ import { dirname, join } from "node:path";
 
 import { setDegradeListener } from "./bytecode.ts";
 import { createChecker } from "./checker.ts";
+import { type CappuConfig, resolveConfigPath } from "./config.ts";
+import { loadClassPath } from "./classfileReader.ts";
 import { emitSourceFile } from "./emitter.ts";
 import { loadJdkStub } from "./jdkStub.ts";
-import { createProgram } from "./program.ts";
-import { pathToUri } from "./workspace.ts";
+import { createProgram, type Program } from "./program.ts";
+import { loadJavaFiles, pathToUri } from "./workspace.ts";
 
 export interface CompileOptions {
   outDir?: string;
   quiet?: boolean;
   /** Treat degraded (placeholder) method bodies as a build failure. */
   failOnDegrade?: boolean;
+  /** Project configuration (cappu.config.json); CLI flags take precedence. */
+  config?: CappuConfig;
+}
+
+/**
+ * Register the config's classPath (.class stubs) and sourcePaths (.java
+ * sources, for resolution only - they are not compiled) into a program.
+ */
+export function loadConfiguredPaths(program: Program, config: CappuConfig): void {
+  loadClassPath(
+    program,
+    config.compilerOptions.classPath.map(p => resolveConfigPath(config, p)),
+  );
+  for (const dir of config.compilerOptions.sourcePaths) {
+    try {
+      for (const { uri, text } of loadJavaFiles(resolveConfigPath(config, dir))) {
+        program.addProjectFile(uri, text);
+      }
+    } catch {
+      // a missing source path entry never breaks the build
+    }
+  }
 }
 
 export function runCompile(files: string[], options: CompileOptions = {}): number {
@@ -26,10 +50,16 @@ export function runCompile(files: string[], options: CompileOptions = {}): numbe
     process.stderr.write("usage: compile [-d <outdir>] <file.java> ...\n");
     return 2;
   }
+  const quiet = options.quiet ?? options.config?.compilerOptions.quiet ?? false;
+  const failOnDegrade =
+    options.failOnDegrade ?? options.config?.compilerOptions.failOnDegrade ?? false;
+  const outDir = options.outDir ?? options.config?.compilerOptions.outDir;
 
-  // One program over all inputs (+ the JDK stub) so type descriptors resolve.
+  // One program over all inputs (+ the JDK stub + the configured classpath and
+  // source paths) so type descriptors resolve.
   const program = createProgram();
   loadJdkStub(program);
+  if (options.config) loadConfiguredPaths(program, options.config);
   for (const file of files) program.addProjectFile(pathToUri(file), readFileSync(file, "utf8"));
   const checker = createChecker(program);
 
@@ -42,7 +72,7 @@ export function runCompile(files: string[], options: CompileOptions = {}): numbe
 
   try {
     // Single output root so every class lands in one coherent package tree.
-    const target = options.outDir ?? ".";
+    const target = outDir ?? ".";
     for (const file of files) {
       const sourceFile = program.getSourceFile(pathToUri(file))!;
       if (sourceFile.parseDiagnostics.length > 0) {
@@ -56,7 +86,7 @@ export function runCompile(files: string[], options: CompileOptions = {}): numbe
         const out = join(target, `${cls.name}.class`);
         mkdirSync(dirname(out), { recursive: true });
         writeFileSync(out, cls.bytes);
-        if (!options.quiet) process.stdout.write(`${out}\n`);
+        if (!quiet) process.stdout.write(`${out}\n`);
       }
     }
   } finally {
@@ -66,7 +96,7 @@ export function runCompile(files: string[], options: CompileOptions = {}): numbe
   for (const entry of degraded) {
     process.stderr.write(`warning: ${entry}: unsupported construct, emitted a placeholder body\n`);
   }
-  if (degraded.length > 0 && options.failOnDegrade) {
+  if (degraded.length > 0 && failOnDegrade) {
     process.stderr.write(`error: ${degraded.length} method(s) degraded (--fail-on-degrade)\n`);
     return 1;
   }

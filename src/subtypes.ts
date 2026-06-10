@@ -6,6 +6,7 @@
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import { resolveTypeEntityName } from "./resolver.ts";
+import { isSyntheticUri } from "./workspace.ts";
 import {
   type Identifier,
   type MethodDeclaration,
@@ -52,7 +53,7 @@ export function getSubtypeIndex(program: Program): SubtypeIndex {
 
   const direct = new Map<Symbol, Symbol[]>();
   for (const uri of program.getAllUris()) {
-    if (uri.startsWith("jdk:")) continue; // stub types never extend user code
+    if (isSyntheticUri(uri)) continue; // stub types never extend user code
     const sourceFile = program.getSourceFile(uri);
     if (!sourceFile) continue;
     const visit = (node: Node): void => {
