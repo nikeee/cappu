@@ -3,7 +3,12 @@ import { test } from "node:test";
 import { expect } from "expect";
 
 import { createChecker } from "./checker.ts";
-import { classFileToStub } from "./classfileReader.ts";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+
+import { classFileToStub, loadClassPath } from "./classfileReader.ts";
 import { emitSourceFile } from "./emitter.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
@@ -86,4 +91,108 @@ test("nested classes are skipped (not expressible as top-level stubs)", () => {
   const classes = emitSourceFile(program.getSourceFile("file:///Outer.java")!, program, checker);
   const inner = classes.find(c => c.name === "Outer$In")!;
   expect(classFileToStub(inner.bytes)).toBeUndefined();
+});
+
+function hasJarTool(): boolean {
+  try {
+    execFileSync("jar", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("a .jar classpath entry loads its classes", { skip: hasJarTool() ? false : "no jar tool" }, () => {
+  const bytes = emitClass(
+    "Util",
+    "package lib;\npublic class Util { public static int triple(int x) { return x * 3; } }",
+  );
+  const dir = mkdtempSync(join(tmpdir(), "jar-"));
+  const classFile = join(dir, "lib", "Util.class");
+  mkdirSync(dirname(classFile), { recursive: true });
+  writeFileSync(classFile, bytes);
+  execFileSync("jar", ["cf", join(dir, "util.jar"), "-C", dir, "lib/Util.class"]);
+
+  const program = createProgram();
+  loadJdkStub(program);
+  const loaded = loadClassPath(program, [join(dir, "util.jar")]);
+  expect(loaded).toBe(1);
+  expect(program.getGlobalIndex().getType("lib.Util")).toBeDefined();
+});
+
+test("generic signatures survive the stub roundtrip", () => {
+  const bytes = emitClass(
+    "Box",
+    [
+      "package lib;",
+      "import java.util.List;",
+      "public class Box<T extends CharSequence> implements Comparable<Box<T>> {",
+      "  public T value;",
+      "  public T get() { return value; }",
+      "  public <U extends Comparable<U>> U pick(U a, List<? extends U> rest) { return a; }",
+      "  public int compareTo(Box<T> o) { return 0; }",
+      "}",
+    ].join("\n"),
+  );
+  const stub = classFileToStub(bytes)!;
+  expect(stub.source).toContain("class Box<T extends java.lang.CharSequence>");
+  expect(stub.source).toContain("implements java.lang.Comparable<lib.Box<T>>");
+  expect(stub.source).toContain("public T value;");
+  expect(stub.source).toContain("public T get()");
+  expect(stub.source).toContain(
+    "<U extends java.lang.Comparable<U>> U pick(U p0, java.util.List<? extends U> p1)",
+  );
+
+  // A consumer resolves the stub generically: Box<String>.get() types as String.
+  const program = createProgram();
+  loadJdkStub(program);
+  program.addProjectFile("classpath:///lib/Box.java", stub.source);
+  program.setOpenDocument(
+    "file:///App.java",
+    'import lib.Box;\nclass App { int m(Box<String> b) { return b.get().length(); } }',
+    1,
+  );
+  const checker = createChecker(program);
+  const classes = emitSourceFile(program.getSourceFile("file:///App.java")!, program, checker);
+  expect(classes).toHaveLength(1);
+});
+
+test("nested classes group into their outer stub and resolve from a consumer", () => {
+  const program1 = createProgram();
+  loadJdkStub(program1);
+  program1.setOpenDocument(
+    "file:///Outer.java",
+    [
+      "package lib;",
+      "public class Outer {",
+      "  public static class Builder { public int knobs; public Builder set(int x){ knobs = x; return this; } }",
+      "  public int run() { Runnable r = new Runnable(){ public void run(){} }; return 5; }",
+      "}",
+    ].join("\n"),
+    1,
+  );
+  const checker1 = createChecker(program1);
+  const classes = emitSourceFile(program1.getSourceFile("file:///Outer.java")!, program1, checker1);
+  const dir = mkdtempSync(join(tmpdir(), "nested-"));
+  for (const c of classes) {
+    const file = join(dir, `${c.name}.class`);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, c.bytes);
+  }
+
+  const program = createProgram();
+  loadJdkStub(program);
+  expect(loadClassPath(program, [dir])).toBe(1); // one top-level stub
+  const stub = program.getSourceFile("classpath:///lib/Outer.java")!.text;
+  expect(stub).toContain("public static class Builder");
+  expect(stub).not.toContain("$1"); // the anonymous class never appears
+
+  program.setOpenDocument(
+    "file:///App.java",
+    "import lib.Outer;\nclass App { int m() { return new Outer.Builder().set(3).knobs; } }",
+    1,
+  );
+  const checker = createChecker(program);
+  const out = emitSourceFile(program.getSourceFile("file:///App.java")!, program, checker);
+  expect(out).toHaveLength(1);
 });
