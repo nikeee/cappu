@@ -115,6 +115,10 @@ export interface Checker {
   signatureOfSymbol(symbol: Symbol): string | undefined;
   /** Signature of a specific method/constructor declaration (e.g. a chosen overload). */
   signatureOfDeclaration(declaration: Node): string | undefined;
+  /** Every overload declaration a call could bind to (for signature help). */
+  resolveCallCandidates(call: CallExpression): MethodDeclaration[];
+  /** The source text of each parameter of a method/constructor declaration. */
+  parameterLabelsOf(declaration: Node): string[];
   /**
    * The Javadoc comment attached to a symbol's declaration, cleaned to plain
    * text, or undefined. Parsed lazily from the source on demand (not retained on
@@ -783,6 +787,16 @@ export function createChecker(program: Program): Checker {
     return declaration ? signatureOfDeclaration(declaration) : undefined;
   }
 
+  function parameterLabelsOf(declaration: Node): string[] {
+    if (
+      declaration.kind !== SyntaxKind.MethodDeclaration &&
+      declaration.kind !== SyntaxKind.ConstructorDeclaration
+    ) {
+      return [];
+    }
+    return (declaration as MethodDeclaration).parameters.map(nodeSourceText);
+  }
+
   function signatureOfDeclaration(declaration: Node): string | undefined {
     if (
       declaration.kind !== SyntaxKind.MethodDeclaration &&
@@ -1316,6 +1330,28 @@ export function createChecker(program: Program): Checker {
     return resolveCallInfo(call)?.decl;
   }
 
+  // Every overload declaration a call could bind to (for signature help): the
+  // same candidate gathering as resolveCallInfoWorker, without picking a winner.
+  function resolveCallCandidates(call: CallExpression): MethodDeclaration[] {
+    const callee = call.expression;
+    if (callee.kind === SyntaxKind.PropertyAccessExpression) {
+      const access = callee as PropertyAccessExpression;
+      const receiver = receiverClassType(getTypeOfExpression(access.expression));
+      if (receiver) return collectTypedOverloads(receiver, access.name.text).map(c => c.decl);
+      const symbol = resolveMemberAccess(access);
+      return (symbol?.declarations ?? []).filter(
+        d => d.kind === SyntaxKind.MethodDeclaration,
+      ) as MethodDeclaration[];
+    }
+    if (callee.kind === SyntaxKind.Identifier) {
+      const symbol = resolveIdentifier(callee as Identifier, program);
+      return (symbol?.declarations ?? []).filter(
+        d => d.kind === SyntaxKind.MethodDeclaration,
+      ) as MethodDeclaration[];
+    }
+    return [];
+  }
+
   // The method type-parameter symbols a generic method declares (its own <T>).
   function methodTypeParameters(decl: MethodDeclaration): Set<Symbol> {
     const out = new Set<Symbol>();
@@ -1664,6 +1700,8 @@ export function createChecker(program: Program): Checker {
     resolveName,
     isAssignableTo,
     resolveCall,
+    resolveCallCandidates,
+    parameterLabelsOf,
     typeStringOfSymbol,
     signatureOfSymbol,
     signatureOfDeclaration,

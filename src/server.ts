@@ -21,6 +21,8 @@ import {
   MarkupKind,
   type Range,
   ResponseError,
+  type SignatureHelp,
+  type SignatureInformation,
   type TextEdit,
   TextDocuments,
   TextDocumentSyncKind,
@@ -38,7 +40,7 @@ import {
   getLineAndCharacterOfPosition,
   getPositionOfLineAndCharacter,
 } from "./lineMap.ts";
-import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
+import { getIdentifierAtPosition, getNodeAtPosition } from "./nodeAtPosition.ts";
 import { createProgram } from "./program.ts";
 import { findReferences, getDeclarationNameNode, getSourceFileOfNode } from "./resolver.ts";
 import {
@@ -85,6 +87,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       referencesProvider: true,
       hoverProvider: true,
       completionProvider: { triggerCharacters: ["."] },
+      signatureHelpProvider: { triggerCharacters: ["(", ","] },
       renameProvider: { prepareProvider: true },
       codeActionProvider: true,
     },
@@ -298,6 +301,63 @@ function enclosingCall(identifier: Identifier): CallExpression | undefined {
   }
   return undefined;
 }
+
+// The innermost call whose argument list contains the offset (the cursor sits
+// after the callee, between the parentheses), for signature help.
+function callAt(uri: string, position: { line: number; character: number }): CallExpression | undefined {
+  const sourceFile = program.getSourceFile(uri);
+  if (!sourceFile) return undefined;
+  const offset = getPositionOfLineAndCharacter(
+    computeLineStarts(sourceFile.text),
+    position.line,
+    position.character,
+  );
+  // The cursor right after `(` in an unclosed call sits at the recovered call's
+  // end, which getNodeAtPosition treats as outside; retry one position left,
+  // like getIdentifierAtPosition does.
+  for (const at of [offset, offset - 1]) {
+    let node: Node | undefined = getNodeAtPosition(sourceFile, at);
+    for (; node; node = node.parent) {
+      if (node.kind !== SyntaxKind.CallExpression) continue;
+      const call = node as CallExpression;
+      if (offset > call.expression.end && offset <= call.end) return call;
+    }
+  }
+  return undefined;
+}
+
+connection.onSignatureHelp((params): SignatureHelp | null => {
+  const call = callAt(params.textDocument.uri, params.position);
+  if (!call) return null;
+  const candidates = checker.resolveCallCandidates(call);
+  if (candidates.length === 0) return null;
+
+  const signatures: SignatureInformation[] = candidates.flatMap(decl => {
+    const label = checker.signatureOfDeclaration(decl);
+    if (!label) return [];
+    const doc = checker.getDocumentationOfNode(decl);
+    return [
+      {
+        label,
+        parameters: checker.parameterLabelsOf(decl).map(p => ({ label: p })),
+        ...(doc ? { documentation: doc } : {}),
+      },
+    ];
+  });
+  if (signatures.length === 0) return null;
+
+  const resolved = checker.resolveCall(call);
+  const activeSignature = Math.max(0, candidates.findIndex(d => d === resolved));
+  // The argument the cursor is in: count the arguments that end before it.
+  const sourceFile = program.getSourceFile(params.textDocument.uri)!;
+  const offset = getPositionOfLineAndCharacter(
+    computeLineStarts(sourceFile.text),
+    params.position.line,
+    params.position.character,
+  );
+  const activeParameter = call.arguments.filter(a => a.end < offset).length;
+  return { signatures, activeSignature, activeParameter };
+});
 
 connection.onHover((params): Hover | null => {
   const identifier = identifierAt(params.textDocument.uri, params.position);
