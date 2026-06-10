@@ -34,6 +34,10 @@ const LspOptionsSchema = z.object({
 });
 
 export const MAVEN_CENTRAL = "https://repo.maven.apache.org/maven2";
+export const GOOGLE_MAVEN = "https://maven.google.com";
+export const GRADLE_PLUGIN_PORTAL = "https://plugins.gradle.org/m2";
+/** The repositories Maven and Gradle resolve from out of the box. */
+export const DEFAULT_PACKAGE_SOURCES = [MAVEN_CENTRAL, GOOGLE_MAVEN, GRADLE_PLUGIN_PORTAL];
 
 const ConfigFileSchema = z.object({
   // prefault (not default): the empty object is parsed through the section
@@ -41,7 +45,7 @@ const ConfigFileSchema = z.object({
   compilerOptions: CompilerOptionsSchema.prefault({}),
   lspOptions: LspOptionsSchema.prefault({}),
   /** Package repositories dependencies are resolved from, in order. */
-  packageSources: z.array(z.string()).default([MAVEN_CENTRAL]),
+  packageSources: z.array(z.string()).default(DEFAULT_PACKAGE_SOURCES),
 });
 
 export type CompilerConfig = z.infer<typeof CompilerOptionsSchema>;
@@ -96,9 +100,13 @@ export const CONFIG_TEMPLATE = `
     },
   },
 
-  // Package repositories dependencies are resolved from, in order.
-  // Default if unset: maven central.
-  // "packageSources": ["https://repo.maven.apache.org/maven2"],
+  // Package repositories dependencies are resolved from, in order. Default if
+  // unset: Maven Central, Google Maven and the Gradle Plugin Portal.
+  // "packageSources": [
+  //   "https://repo.maven.apache.org/maven2",
+  //   "https://maven.google.com",
+  //   "https://plugins.gradle.org/m2",
+  // ],
 }
 `.trimStart();
 

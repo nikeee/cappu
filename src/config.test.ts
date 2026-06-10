@@ -67,7 +67,11 @@ test("unknown keys are ignored, comment-json metadata does not leak", () => {
     "lspOptions",
     "packageSources",
   ]);
-  expect(config.packageSources).toEqual(["https://repo.maven.apache.org/maven2"]);
+  expect(config.packageSources).toEqual([
+    "https://repo.maven.apache.org/maven2",
+    "https://maven.google.com",
+    "https://plugins.gradle.org/m2",
+  ]);
 });
 
 test("the init template parses and validates against the schema", () => {
