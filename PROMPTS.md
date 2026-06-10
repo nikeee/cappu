@@ -111,3 +111,4 @@ no timestamps were captured.
 - 2026-06-10 14:00 — continue
 - 2026-06-10 14:30 — do 1. then 2 (inlay hints for parameters passed an expression; var hints, configurable). 3 and 4 sound good, too.
 - 2026-06-10 15:10 — add support for code lenses, which show the number of references to the method or class. are there other meaningful items to put in a code lens?
+- 2026-06-10 15:30 — add "N implementations"

@@ -545,13 +545,14 @@ connection.onCodeLens((params): CodeLens[] => {
   if (!sourceFile) return [];
   return getCodeLenses(program, checker, sourceFile).map(entry => {
     const range = rangeOf(entry.name);
-    const n = entry.references.length;
+    const n = entry.sites.length;
+    const noun = entry.kind === "references" ? "reference" : "implementation";
     return {
       range,
       command: {
-        title: n === 1 ? "1 reference" : `${n} references`,
+        title: `${n} ${noun}${n === 1 ? "" : "s"}`,
         command: "editor.action.showReferences",
-        arguments: [params.textDocument.uri, range.start, entry.references.map(locationOf)],
+        arguments: [params.textDocument.uri, range.start, entry.sites.map(locationOf)],
       },
     };
   });

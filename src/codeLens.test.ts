@@ -16,7 +16,8 @@ function lenses(files: Record<string, string>, lensFile: string) {
   const sourceFile = program.getSourceFile(`file:///${lensFile}`)!;
   return getCodeLenses(program, checker, sourceFile).map(e => ({
     name: e.name.text,
-    count: e.references.length,
+    kind: e.kind,
+    count: e.sites.length,
   }));
 }
 
@@ -39,10 +40,10 @@ test("types and methods get cross-file reference counts", () => {
     },
     "Pet.java",
   );
-  const byName = new Map(out.map(e => [e.name, e.count]));
-  expect(byName.get("Pet")).toBe(2); // two parameter types in Keeper
-  expect(byName.get("legs")).toBe(2); // two calls
-  expect(byName.get("unused")).toBe(0); // the declaration itself never counts
+  const refs = new Map(out.filter(e => e.kind === "references").map(e => [e.name, e.count]));
+  expect(refs.get("Pet")).toBe(2); // two parameter types in Keeper
+  expect(refs.get("legs")).toBe(2); // two calls
+  expect(refs.get("unused")).toBe(0); // the declaration itself never counts
 });
 
 test("in-file references count too, declarations excluded", () => {
@@ -57,7 +58,55 @@ test("in-file references count too, declarations excluded", () => {
     },
     "C.java",
   );
-  const byName = new Map(out.map(e => [e.name, e.count]));
-  expect(byName.get("twice")).toBe(2);
-  expect(byName.get("m")).toBe(0);
+  const refs = new Map(out.filter(e => e.kind === "references").map(e => [e.name, e.count]));
+  expect(refs.get("twice")).toBe(2);
+  expect(refs.get("m")).toBe(0);
+});
+
+test("interfaces and their abstract methods count implementations", () => {
+  const out = lenses(
+    {
+      "Shape.java": [
+        "package geo;",
+        "public interface Shape {",
+        "  double area();",
+        "  default String label() { return \"shape\"; }",
+        "}",
+      ].join("\n"),
+      "Impls.java": [
+        "package geo;",
+        "class Circle implements Shape { public double area() { return 3.14; } }",
+        "class Square implements Shape { public double area() { return 1.0; } }",
+        "interface Polygon extends Shape {}",
+      ].join("\n"),
+    },
+    "Shape.java",
+  );
+  const impls = new Map(
+    out.filter(e => e.kind === "implementations").map(e => [e.name, e.count]),
+  );
+  expect(impls.get("Shape")).toBe(3); // Circle, Square, Polygon
+  expect(impls.get("area")).toBe(2); // the two concrete bodies
+  expect(impls.has("label")).toBe(false); // default methods get no implementations lens
+});
+
+test("abstract classes count subclasses and abstract-method overrides", () => {
+  const out = lenses(
+    {
+      "Base.java": [
+        "abstract class Base {",
+        "  abstract int weight();",
+        "  int common() { return 0; }",
+        "}",
+        "class Heavy extends Base { int weight() { return 100; } }",
+      ].join("\n"),
+    },
+    "Base.java",
+  );
+  const impls = new Map(
+    out.filter(e => e.kind === "implementations").map(e => [e.name, e.count]),
+  );
+  expect(impls.get("Base")).toBe(1);
+  expect(impls.get("weight")).toBe(1);
+  expect(impls.has("common")).toBe(false); // concrete methods get no implementations lens
 });
