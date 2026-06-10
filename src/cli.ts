@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 
-// Unified entry point: `cappu lsp` runs the language server over stdio;
-// `cappu compile` runs the javac-lite bytecode compiler. Argument parsing uses
-// Node's built-in util.parseArgs (no third-party dependency).
+// Unified entry point: `cappu init` bootstraps a config, `cappu lsp` runs the
+// language server (stdio or --port socket), `cappu compile` runs the
+// javac-lite bytecode compiler. Argument parsing uses Node's built-in
+// util.parseArgs; the whole script runs as top-level await.
 
+import { once } from "node:events";
 import { existsSync, writeFileSync } from "node:fs";
+import type { Socket } from "node:net";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -41,102 +44,94 @@ Global:
       --version         Show the version
 `;
 
-async function main(argv: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: {
-      config: { type: "string", short: "c" },
-      port: { type: "string", short: "p" },
-      "out-dir": { type: "string", short: "d" },
-      // No defaults: an absent flag must stay undefined so cappu.json
-      // can supply the value (an explicit flag always wins).
-      quiet: { type: "boolean", short: "q" },
-      "fail-on-degrade": { type: "boolean" },
-      help: { type: "boolean", short: "h", default: false },
-      version: { type: "boolean", default: false },
-    },
-  });
+const { values, positionals } = parseArgs({
+  args: process.argv.slice(2),
+  allowPositionals: true,
+  options: {
+    config: { type: "string", short: "c" },
+    port: { type: "string", short: "p" },
+    "out-dir": { type: "string", short: "d" },
+    // No defaults: an absent flag must stay undefined so cappu.json
+    // can supply the value (an explicit flag always wins).
+    quiet: { type: "boolean", short: "q" },
+    "fail-on-degrade": { type: "boolean" },
+    help: { type: "boolean", short: "h", default: false },
+    version: { type: "boolean", default: false },
+  },
+});
 
-  if (values.version) {
-    process.stdout.write(`${pkg.version}\n`);
-    return;
-  }
-  const [command, ...files] = positionals;
-  if (values.help || command === undefined) {
-    process.stdout.write(USAGE);
-    process.exitCode = values.help ? 0 : 2;
-    return;
-  }
+const [command, ...files] = positionals;
 
-  // init runs before loadConfig: bootstrapping must not depend on (or be
-  // blocked by) an existing, possibly broken config.
-  if (command === "init") {
-    const target = resolve(values.config ?? DEFAULT_CONFIG_NAME);
-    if (existsSync(target)) {
-      process.stderr.write(`cappu: ${target} already exists, not overwriting\n`);
-      process.exit(1);
-    }
-    writeFileSync(target, CONFIG_TEMPLATE);
-    process.stdout.write(`${target}\n`);
-    return;
-  }
-
-  let config;
-  try {
-    config = loadConfig(values.config);
-  } catch (e) {
-    process.stderr.write(`cappu: ${(e as Error).message}\n`);
-    process.exit(2);
-  }
-
-  switch (command) {
-    case "lsp": {
-      if (values.port !== undefined) {
-        const port = Number(values.port);
-        if (!Number.isInteger(port) || port < 0 || port > 65535) {
-          process.stderr.write(`cappu: invalid port '${values.port}'\n`);
-          process.exit(2);
-        }
-        // Socket mode: listen, hand the first accepted connection to the
-        // server (configured before the lazy import, since server.ts creates
-        // its JSON-RPC connection at module load), exit when it disconnects.
-        const { createServer } = await import("node:net");
-        const tcp = createServer();
-        tcp.once("connection", socket => {
-          tcp.close(); // one session per process, like other socket-mode servers
-          socket.once("close", () => process.exit(0));
-          void import("./serverTransport.ts")
-            .then(({ setTransport }) => setTransport(socket, socket))
-            .then(() => import("./server.ts"))
-            .then(({ startServer }) => startServer(config));
-        });
-        tcp.listen(port, () => {
-          const address = tcp.address();
-          const bound = typeof address === "object" && address ? address.port : port;
-          process.stderr.write(`cappu lsp listening on port ${bound}\n`);
-        });
-        return;
-      }
-      // Imported lazily so `cappu compile` never loads the LSP transport stack.
-      // startServer() begins reading stdin and keeps the process alive; no exit.
-      const { startServer } = await import("./server.ts");
-      startServer(config);
-      return;
-    }
-    case "compile":
-      process.exit(
-        runCompile(files, {
-          outDir: values["out-dir"],
-          quiet: values.quiet,
-          failOnDegrade: values["fail-on-degrade"],
-          config,
-        }),
-      );
-    default:
-      process.stderr.write(`cappu: unknown command '${command}'\n\n${USAGE}`);
-      process.exit(2);
-  }
+if (values.version) {
+  process.stdout.write(`${pkg.version}\n`);
+  process.exit(0);
+}
+if (values.help || command === undefined) {
+  process.stdout.write(USAGE);
+  process.exit(values.help ? 0 : 2);
 }
 
-await main(process.argv.slice(2));
+// init runs before loadConfig: bootstrapping must not depend on (or be
+// blocked by) an existing, possibly broken config.
+if (command === "init") {
+  const target = resolve(values.config ?? DEFAULT_CONFIG_NAME);
+  if (existsSync(target)) {
+    process.stderr.write(`cappu: ${target} already exists, not overwriting\n`);
+    process.exit(1);
+  }
+  writeFileSync(target, CONFIG_TEMPLATE);
+  process.stdout.write(`${target}\n`);
+  process.exit(0);
+}
+
+let config;
+try {
+  config = loadConfig(values.config);
+} catch (e) {
+  process.stderr.write(`cappu: ${(e as Error).message}\n`);
+  process.exit(2);
+}
+
+switch (command) {
+  case "lsp": {
+    if (values.port !== undefined) {
+      const port = Number(values.port);
+      if (!Number.isInteger(port) || port < 0 || port > 65535) {
+        process.stderr.write(`cappu: invalid port '${values.port}'\n`);
+        process.exit(2);
+      }
+      // Socket mode: listen, hand the first accepted connection to the server
+      // (configured before the lazy import, since server.ts creates its
+      // JSON-RPC connection at module load), exit when it disconnects.
+      const { createServer } = await import("node:net");
+      const tcp = createServer().listen(port);
+      await once(tcp, "listening");
+      const address = tcp.address();
+      const bound = typeof address === "object" && address ? address.port : port;
+      process.stderr.write(`cappu lsp listening on port ${bound}\n`);
+
+      const [socket] = (await once(tcp, "connection")) as [Socket];
+      tcp.close(); // one session per process, like other socket-mode servers
+      socket.once("close", () => process.exit(0));
+      const { setTransport } = await import("./serverTransport.ts");
+      setTransport(socket, socket);
+    }
+    // Imported lazily so `cappu compile` never loads the LSP transport stack.
+    // startServer() begins reading the transport and keeps the process alive.
+    const { startServer } = await import("./server.ts");
+    startServer(config);
+    break;
+  }
+  case "compile":
+    process.exit(
+      runCompile(files, {
+        outDir: values["out-dir"],
+        quiet: values.quiet,
+        failOnDegrade: values["fail-on-degrade"],
+        config,
+      }),
+    );
+  default:
+    process.stderr.write(`cappu: unknown command '${command}'\n\n${USAGE}`);
+    process.exit(2);
+}
