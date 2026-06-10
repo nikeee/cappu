@@ -123,15 +123,34 @@ switch (command) {
     startServer(config);
     break;
   }
-  case "compile":
-    process.exit(
-      runCompile(files, {
-        outDir: values["out-dir"],
-        quiet: values.quiet,
-        failOnDegrade: values["fail-on-degrade"],
-        config,
-      }),
-    );
+  case "compile": {
+    if (files.length === 0) {
+      process.stderr.write("usage: cappu compile [-d <outdir>] <file.java> ...\n");
+      process.exit(2);
+    }
+    const result = runCompile(files, {
+      outDir: values["out-dir"],
+      failOnDegrade: values["fail-on-degrade"],
+      config,
+    });
+    // runCompile is print-free; render its outcome here.
+    const quiet = values.quiet ?? config.compilerOptions.quiet ?? false;
+    if (!quiet) for (const out of result.written) process.stdout.write(`${out}\n`);
+    for (const entry of result.degraded) {
+      process.stderr.write(
+        `warning: ${entry}: unsupported construct, emitted a placeholder body\n`,
+      );
+    }
+    if (!result.success) {
+      for (const d of result.diagnostics) {
+        const location = d.file ? `${d.file}:${d.line}:${d.column}: ` : "";
+        const code = d.code !== undefined ? ` ${d.code}` : "";
+        process.stderr.write(`${location}${d.severity}${code}: ${d.message}\n`);
+      }
+      process.exit(1);
+    }
+    process.exit(0);
+  }
   default:
     process.stderr.write(`cappu: unknown command '${command}'\n\n${USAGE}`);
     process.exit(2);

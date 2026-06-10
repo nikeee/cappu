@@ -3,6 +3,9 @@
 // each class's package as a directory path (com.app.Foo -> com/app/Foo.class) so
 // the tree can be packed straight into a jar. Output root defaults to the cwd.
 // Code generation is at an early stage - see emitter.ts. Invoked via cli.ts.
+//
+// runCompile never prints: it returns what was written, what degraded and the
+// diagnostics; the caller decides how to render them.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -13,17 +16,42 @@ import { loadClassPath } from "./classfileReader.ts";
 import { type CappuConfig, resolveConfigPath } from "./config.ts";
 import { emitSourceFile } from "./emitter.ts";
 import { loadJdkStub } from "./jdkStub.ts";
+import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
 import { createProgram, type Program } from "./program.ts";
+import { type Diagnostic, DiagnosticCategory, type SourceFile } from "./types.ts";
 import { loadJavaFiles, pathToUri } from "./workspace.ts";
 
 export interface CompileOptions {
   outDir?: string;
-  quiet?: boolean;
   /** Treat degraded (placeholder) method bodies as a build failure. */
   failOnDegrade?: boolean;
-  /** Project configuration (cappu.json); CLI flags take precedence. */
+  /** Run the type checker over the inputs and fail on semantic errors. Default: true. */
+  typeCheck?: boolean;
+  /** Project configuration (cappu.json); explicit options take precedence. */
   config: CappuConfig;
 }
+
+/** A source diagnostic located for display (1-based line/column). */
+export interface CompileDiagnostic {
+  severity: "error" | "warning";
+  /** The input file the diagnostic belongs to, if it has one. */
+  file?: string;
+  line?: number;
+  column?: number;
+  code?: number;
+  message: string;
+}
+
+interface CompileOutput {
+  /** Paths of the .class files written, in emission order. */
+  written: string[];
+  /** Members emitted with a placeholder body (binary name + member). */
+  degraded: string[];
+}
+
+export type CompileResult =
+  | ({ success: true } & CompileOutput)
+  | ({ success: false; diagnostics: CompileDiagnostic[] } & CompileOutput);
 
 /**
  * Register the config's classPath (.class stubs) and sourcePaths (.java
@@ -45,21 +73,29 @@ export function loadConfiguredPaths(program: Program, config: CappuConfig): void
   }
 }
 
-type TODO = any; // TODO proper diagnostics
-export type CompileResult = { success: true } | { success: false; diagnostics: TODO[] };
-export function runCompile(files: string[], options: CompileOptions): CompileResult {
-  if (files.length === 0) {
-    process.stderr.write("usage: compile [-d <outdir>] <file.java> ...\n");
-    return {
-      success: false,
-      diagnostics: ["no input files"], // TODO: Proper diagnostic?
-    };
-  }
+function toCompileDiagnostic(d: Diagnostic, file: string, sourceFile: SourceFile): CompileDiagnostic {
+  const { line, character } = getLineAndCharacterOfPosition(computeLineStarts(sourceFile.text), d.pos);
+  return {
+    severity: d.category === DiagnosticCategory.Error ? "error" : "warning",
+    file,
+    line: line + 1,
+    column: character + 1,
+    code: d.code,
+    message: d.messageText,
+  };
+}
 
-  const quiet = options.quiet ?? options.config?.compilerOptions.quiet ?? false;
+/**
+ * Compile `files` (the caller has already checked the list is non-empty).
+ * Parser, binder and - unless `typeCheck` is disabled - checker diagnostics of
+ * every input are collected first; any error among them fails the build before
+ * anything is written.
+ */
+export function runCompile(files: string[], options: CompileOptions): CompileResult {
   const failOnDegrade =
     options.failOnDegrade ?? options.config?.compilerOptions.failOnDegrade ?? false;
-  const outDir = options.outDir ?? options.config?.compilerOptions.outDir;
+  const outDir = options.outDir ?? options.config?.compilerOptions.outDir ?? ".";
+  const typeCheck = options.typeCheck ?? true;
 
   // One program over all inputs (+ the JDK stub + the configured classpath and
   // source paths) so type descriptors resolve.
@@ -69,6 +105,21 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
   for (const file of files) program.addProjectFile(pathToUri(file), readFileSync(file, "utf8"));
   const checker = createChecker(program);
 
+  // All diagnostics over all inputs before emitting anything (as javac does).
+  const diagnostics: CompileDiagnostic[] = [];
+  for (const file of files) {
+    const sourceFile = program.getSourceFile(pathToUri(file))!;
+    const fileDiagnostics = [
+      ...sourceFile.parseDiagnostics,
+      ...(sourceFile.bindDiagnostics ?? []),
+      ...(typeCheck ? checker.getSemanticDiagnostics(sourceFile) : []),
+    ];
+    diagnostics.push(...fileDiagnostics.map(d => toCompileDiagnostic(d, file, sourceFile)));
+  }
+  if (diagnostics.some(d => d.severity === "error")) {
+    return { success: false, diagnostics, written: [], degraded: [] };
+  }
+
   // A degraded body still produces a verifiable class, but silently behaves as
   // a stub; surface every one so the build is honest about what it emitted.
   const degraded: string[] = [];
@@ -76,42 +127,36 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
     degraded.push(`${className.replaceAll("/", ".")}.${member}`);
   });
 
+  const written: string[] = [];
   try {
     // Single output root so every class lands in one coherent package tree.
-    const target = outDir;
     for (const file of files) {
       const sourceFile = program.getSourceFile(pathToUri(file))!;
-      if (sourceFile.parseDiagnostics.length > 0) {
-        for (const d of sourceFile.parseDiagnostics) {
-          process.stderr.write(`${file}: error ${d.code}: ${d.messageText}\n`);
-        }
-
-        return {
-          success: false,
-          diagnostics: sourceFile.parseDiagnostics,
-        };
-      }
       for (const cls of emitSourceFile(sourceFile, program, checker)) {
         // cls.name is the internal name (com/app/Foo); mirror it as a directory path.
-        const out = join(target, `${cls.name}.class`);
+        const out = join(outDir, `${cls.name}.class`);
         mkdirSync(dirname(out), { recursive: true });
         writeFileSync(out, cls.bytes);
-        if (!quiet) process.stdout.write(`${out}\n`);
+        written.push(out);
       }
     }
   } finally {
     setDegradeListener(undefined);
   }
 
-  for (const entry of degraded) {
-    process.stderr.write(`warning: ${entry}: unsupported construct, emitted a placeholder body\n`);
-  }
   if (degraded.length > 0 && failOnDegrade) {
-    process.stderr.write(`error: ${degraded.length} method(s) degraded (--fail-on-degrade)\n`);
     return {
       success: false,
-      diagnostics: degraded, // TODO: Proper diagnostic?
+      diagnostics: [
+        ...diagnostics,
+        {
+          severity: "error" as const,
+          message: `${degraded.length} method(s) degraded to a placeholder body (--fail-on-degrade)`,
+        },
+      ],
+      written,
+      degraded,
     };
   }
-  return { success: true };
+  return { success: true, written, degraded };
 }
