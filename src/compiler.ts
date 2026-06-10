@@ -45,11 +45,17 @@ export function loadConfiguredPaths(program: Program, config: CappuConfig): void
   }
 }
 
-export function runCompile(files: string[], options: CompileOptions): number {
+type TODO = any; // TODO proper diagnostics
+export type CompileResult = { success: true } | { success: false; diagnostics: TODO[] };
+export function runCompile(files: string[], options: CompileOptions): CompileResult {
   if (files.length === 0) {
     process.stderr.write("usage: compile [-d <outdir>] <file.java> ...\n");
-    return 2;
+    return {
+      success: false,
+      diagnostics: ["no input files"], // TODO: Proper diagnostic?
+    };
   }
+
   const quiet = options.quiet ?? options.config?.compilerOptions.quiet ?? false;
   const failOnDegrade =
     options.failOnDegrade ?? options.config?.compilerOptions.failOnDegrade ?? false;
@@ -79,7 +85,11 @@ export function runCompile(files: string[], options: CompileOptions): number {
         for (const d of sourceFile.parseDiagnostics) {
           process.stderr.write(`${file}: error ${d.code}: ${d.messageText}\n`);
         }
-        return 1;
+
+        return {
+          success: false,
+          diagnostics: sourceFile.parseDiagnostics,
+        };
       }
       for (const cls of emitSourceFile(sourceFile, program, checker)) {
         // cls.name is the internal name (com/app/Foo); mirror it as a directory path.
@@ -98,7 +108,10 @@ export function runCompile(files: string[], options: CompileOptions): number {
   }
   if (degraded.length > 0 && failOnDegrade) {
     process.stderr.write(`error: ${degraded.length} method(s) degraded (--fail-on-degrade)\n`);
-    return 1;
+    return {
+      success: false,
+      diagnostics: degraded, // TODO: Proper diagnostic?
+    };
   }
-  return 0;
+  return { success: true };
 }
