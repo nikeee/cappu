@@ -1,8 +1,9 @@
-// Shared test helper: normalized disassembly via `javap -c -p`, used to compare
-// our emitted bytecode against javac's. Constant-pool indices are stripped so
-// only mnemonics + symbolic operands remain (stable across compilers); this is
-// the form checked into the *-baselines fixtures. Not part of the shipped
-// compiler - imported only by the *.test.ts files.
+// Normalized disassembly via `javap -c -p`, used to compare our emitted
+// bytecode against javac's. Constant-pool indices are stripped so only
+// mnemonics + symbolic operands remain (stable across compilers); this is the
+// form checked into the *-baselines fixtures and what `cappu compile
+// --validate` compares (validateJavac.ts). Imported by the *.test.ts files
+// and the validator.
 
 import { execFileSync } from "node:child_process";
 
@@ -13,8 +14,8 @@ export interface Disasm {
 
 // Disassemble one or more class files in a SINGLE javap invocation, keyed by the
 // (binary) class name javap prints.
-export function disasmFiles(classFiles: string[]): Map<string, Disasm> {
-  const out = execFileSync("javap", ["-c", "-p", ...classFiles], {
+export function disasmFiles(classFiles: string[], javapBin = "javap"): Map<string, Disasm> {
+  const out = execFileSync(javapBin, ["-c", "-p", ...classFiles], {
     encoding: "utf8",
     maxBuffer: 256 * 1024 * 1024, // large projects produce a lot of disassembly
   });

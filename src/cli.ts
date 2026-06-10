@@ -39,6 +39,9 @@ Compile options:
   -q, --quiet           Do not print the path of each emitted .class file
       --fail-on-degrade Fail when a method body degrades to a placeholder
                         (an unsupported construct); degradations always warn
+      --validate        Also compile with javac (config "compilerOptions.javac",
+                        default from $PATH) and fail unless the normalized
+                        bytecode matches
 
 Global:
   -h, --help            Show this help
@@ -56,6 +59,7 @@ const { values, positionals } = parseArgs({
     // can supply the value (an explicit flag always wins).
     quiet: { type: "boolean", short: "q" },
     "fail-on-degrade": { type: "boolean" },
+    validate: { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
     version: { type: "boolean", default: false },
   },
@@ -153,6 +157,25 @@ switch (command) {
         process.stderr.write(`${location}${d.severity}${code}: ${d.message}\n`);
       }
       process.exit(1);
+    }
+    if (values.validate) {
+      const { validateAgainstJavac } = await import("./validateJavac.ts");
+      const validation = validateAgainstJavac(files, result.written, config.compilerOptions.javac);
+      if (!validation.ok) {
+        if ("error" in validation) {
+          process.stderr.write(`cappu: --validate: ${validation.error}\n`);
+        } else {
+          for (const m of validation.mismatches) {
+            process.stderr.write(
+              `error: ${m.className}: bytecode differs from javac: ${m.detail}\n`,
+            );
+          }
+        }
+        process.exit(1);
+      }
+      if (!quiet) {
+        process.stderr.write(`--validate: ${validation.compared} class(es) match javac\n`);
+      }
     }
     process.exit(0);
   }

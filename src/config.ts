@@ -25,6 +25,8 @@ const CompilerOptionsSchema = z.object({
   outDir: z.string().default("./build"),
   quiet: z.boolean().optional(),
   failOnDegrade: z.boolean().optional(),
+  /** The javac binary `--validate` compiles the reference output with. */
+  javac: z.string().default("javac"),
 });
 
 const LspOptionsSchema = z.object({
@@ -80,6 +82,10 @@ export const CONFIG_TEMPLATE = `
     // Fail the build when a method body degrades to a placeholder because of
     // an unsupported construct (degradations always print a warning).
     "failOnDegrade": false,
+
+    // The javac binary used by \`cappu compile --validate\` (default: "javac"
+    // from $PATH).
+    // "javac": "javac",
   },
   "lspOptions": {
     "inlayHints": {

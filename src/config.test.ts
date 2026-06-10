@@ -63,6 +63,7 @@ test("unknown keys are ignored, comment-json metadata does not leak", () => {
   expect(Object.keys(config).sort()).toEqual([
     "baseDir",
     "compilerOptions",
+    "fromFile",
     "lspOptions",
     "packageSources",
   ]);
