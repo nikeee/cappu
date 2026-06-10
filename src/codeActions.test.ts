@@ -6,12 +6,13 @@ import { createChecker } from "./checker.ts";
 import { getCodeActions, type CodeActionResult } from "./codeActions.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
+import { type Uri } from "./workspace.ts";
 
 function setup(text: string, extra: Record<string, string> = {}) {
   const program = createProgram();
   loadJdkStub(program);
-  for (const [uri, t] of Object.entries(extra)) program.addProjectFile(uri, t);
-  program.setOpenDocument("file:///T.java", text, 1);
+  for (const [uri, t] of Object.entries(extra)) program.addProjectFile(uri as Uri, t);
+  program.setOpenDocument("file:///T.java" as Uri, text, 1);
   return { program, checker: createChecker(program), text };
 }
 
@@ -30,7 +31,7 @@ function actionsAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {
   return getCodeActions(
     ctx.program,
     ctx.checker,
-    ctx.program.getSourceFile("file:///T.java")!,
+    ctx.program.getSourceFile("file:///T.java" as Uri)!,
     offset,
     offset,
   );
@@ -113,7 +114,7 @@ test("no organize action when imports are already minimal and sorted", () => {
 function extractAction(ctx: ReturnType<typeof setup>, exprText: string, occ = 1) {
   let start = -1;
   for (let i = 0; i < occ; i++) start = ctx.text.indexOf(exprText, start + 1);
-  const sf = ctx.program.getSourceFile("file:///T.java")!;
+  const sf = ctx.program.getSourceFile("file:///T.java" as Uri)!;
   return getCodeActions(ctx.program, ctx.checker, sf, start, start + exprText.length).find(
     a => a.kind === "refactor.extract",
   );
@@ -170,7 +171,7 @@ test("no extract for an expression outside a block (field initializer)", () => {
 function inlineAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {
   let offset = -1;
   for (let i = 0; i < occ; i++) offset = ctx.text.indexOf(needle, offset + 1);
-  const sf = ctx.program.getSourceFile("file:///T.java")!;
+  const sf = ctx.program.getSourceFile("file:///T.java" as Uri)!;
   return getCodeActions(ctx.program, ctx.checker, sf, offset, offset).find(
     a => a.kind === "refactor.inline",
   );
@@ -238,7 +239,7 @@ test("no inline for a local without an initializer", () => {
 function rewriteAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {
   let offset = -1;
   for (let i = 0; i < occ; i++) offset = ctx.text.indexOf(needle, offset + 1);
-  const sf = ctx.program.getSourceFile("file:///T.java")!;
+  const sf = ctx.program.getSourceFile("file:///T.java" as Uri)!;
   return getCodeActions(ctx.program, ctx.checker, sf, offset, offset).find(
     a => a.kind === "refactor.rewrite",
   );

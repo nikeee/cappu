@@ -6,15 +6,16 @@ import { createChecker } from "./checker.ts";
 import { getCodeLenses } from "./codeLens.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
+import { type Uri } from "./workspace.ts";
 
 function lenses(files: Record<string, string>, lensFile: string) {
   const program = createProgram();
   loadJdkStub(program);
   for (const [name, text] of Object.entries(files)) {
-    program.addProjectFile(`file:///${name}`, text);
+    program.addProjectFile(`file:///${name}` as Uri, text);
   }
   const checker = createChecker(program);
-  const sourceFile = program.getSourceFile(`file:///${lensFile}`)!;
+  const sourceFile = program.getSourceFile(`file:///${lensFile}` as Uri)!;
   return getCodeLenses(program, checker, sourceFile).map(e => ({
     name: e.name.text,
     kind: e.kind,

@@ -15,6 +15,7 @@ import {
   SyntaxKind,
 } from "./types.ts";
 import { entityNameToString } from "./utilities.ts";
+import { type Uri } from "./workspace.ts";
 
 /** Cross-file lookup of top-level types by package and fully-qualified name. */
 /** The program mutation counter derived caches key their memo on. */
@@ -52,17 +53,17 @@ interface CacheEntry {
 
 export interface Program {
   /** Record (or update) an open editor document; overrides any project file. */
-  setOpenDocument(uri: string, text: string, version: number): void;
-  closeDocument(uri: string): void;
+  setOpenDocument(uri: Uri, text: string, version: number): void;
+  closeDocument(uri: Uri): void;
   /** Register a workspace file read from disk (open documents take precedence). */
-  addProjectFile(uri: string, text: string): void;
+  addProjectFile(uri: Uri, text: string): void;
   /** Forget a project file deleted from disk (an open document for it survives). */
-  removeProjectFile(uri: string): void;
+  removeProjectFile(uri: Uri): void;
   /** Parse + bind the file for a uri (cached), or undefined if unknown. */
-  getSourceFile(uri: string): SourceFile | undefined;
-  getOpenUris(): string[];
+  getSourceFile(uri: Uri): SourceFile | undefined;
+  getOpenUris(): Uri[];
   /** All known uris (open documents + project files). */
-  getAllUris(): string[];
+  getAllUris(): Uri[];
   /** Cross-file type index over all current files (rebuilt when files change). */
   getGlobalIndex(): GlobalIndex;
   /**
@@ -81,12 +82,12 @@ interface VersionedCacheEntry extends CacheEntry {
 }
 
 export function createProgram(): Program {
-  const openDocuments = new Map<string, OpenDocument>();
-  const projectFiles = new Map<string, string>();
-  const cache = new Map<string, VersionedCacheEntry>();
+  const openDocuments = new Map<Uri, OpenDocument>();
+  const projectFiles = new Map<Uri, string>();
+  const cache = new Map<Uri, VersionedCacheEntry>();
 
   // Effective text + cache key for a uri; open documents win over project files.
-  function resolveSource(uri: string): { text: string; key: string } | undefined {
+  function resolveSource(uri: Uri): { text: string; key: string } | undefined {
     const open = openDocuments.get(uri);
     if (open) return { text: open.text, key: `o${open.version}` };
     const text = projectFiles.get(uri);
@@ -94,7 +95,7 @@ export function createProgram(): Program {
     return undefined;
   }
 
-  function getSourceFile(uri: string): SourceFile | undefined {
+  function getSourceFile(uri: Uri): SourceFile | undefined {
     const source = resolveSource(uri);
     if (!source) return undefined;
 
@@ -109,7 +110,7 @@ export function createProgram(): Program {
     return sourceFile;
   }
 
-  function allUris(): string[] {
+  function allUris(): Uri[] {
     return [...new Set([...projectFiles.keys(), ...openDocuments.keys()])];
   }
 
@@ -122,8 +123,8 @@ export function createProgram(): Program {
     simpleName: string;
     symbol: Symbol;
   }
-  const fileTypes = new Map<string, TypeEntry[]>();
-  const dirty = new Set<string>();
+  const fileTypes = new Map<Uri, TypeEntry[]>();
+  const dirty = new Set<Uri>();
   let indexBuilt = false;
 
   const packages = new Map<string, SymbolTable>();
@@ -133,7 +134,7 @@ export function createProgram(): Program {
   // though only "java.util" holds types), mapping to a package symbol.
   const packagesByName = new Map<string, Symbol>();
 
-  function extractTypes(uri: string): TypeEntry[] {
+  function extractTypes(uri: Uri): TypeEntry[] {
     const sourceFile = getSourceFile(uri);
     if (!sourceFile) return [];
     const packageName = sourceFile.packageDeclaration

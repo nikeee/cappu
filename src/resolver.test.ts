@@ -10,8 +10,8 @@ import { type Identifier, type Symbol, SymbolFlags } from "./types.ts";
 // Resolve the name at the nth occurrence of `needle` in `text`.
 function resolveAt(text: string, needle: string, occurrence = 1): Symbol | undefined {
   const program = createProgram();
-  program.setOpenDocument("file:///T.java", text, 1);
-  const sf = program.getSourceFile("file:///T.java")!;
+  program.setOpenDocument("file:///T.java" as Uri, text, 1);
+  const sf = program.getSourceFile("file:///T.java" as Uri)!;
   let offset = -1;
   for (let i = 0; i < occurrence; i++) offset = text.indexOf(needle, offset + 1);
   const id = getIdentifierAtPosition(sf, offset);
@@ -74,16 +74,17 @@ test("an unresolved name returns undefined", () => {
 import { createProgram as _cp } from "./program.ts";
 import { findReferences } from "./resolver.ts";
 import type { Program } from "./program.ts";
+import { type Uri } from "./workspace.ts";
 
 function programOf(files: Record<string, string>): Program {
   const program = _cp();
-  for (const [uri, text] of Object.entries(files)) program.setOpenDocument(uri, text, 1);
+  for (const [uri, text] of Object.entries(files)) program.setOpenDocument(uri as Uri, text, 1);
   return program;
 }
 
 function resolveInFile(
   program: Program,
-  uri: string,
+  uri: Uri,
   needle: string,
   occurrence = 1,
 ): Symbol | undefined {
@@ -99,7 +100,7 @@ test("same-package type resolves across files", () => {
     "file:///A.java": "package p;\nclass A extends B {}",
     "file:///B.java": "package p;\nclass B {}",
   });
-  const sym = resolveInFile(program, "file:///A.java", "B");
+  const sym = resolveInFile(program, "file:///A.java" as Uri, "B");
   expect(sym?.flags).toBe(SymbolFlags.Class);
   expect(sym).toBe(program.getGlobalIndex().getType("p.B"));
 });
@@ -109,7 +110,7 @@ test("single-type import resolves a type from another package", () => {
     "file:///A.java": "package p;\nimport q.B;\nclass A extends B {}",
     "file:///B.java": "package q;\npublic class B {}",
   });
-  expect(resolveInFile(program, "file:///A.java", "B", 2)).toBe(
+  expect(resolveInFile(program, "file:///A.java" as Uri, "B", 2)).toBe(
     program.getGlobalIndex().getType("q.B"),
   );
 });
@@ -119,7 +120,7 @@ test("on-demand import resolves a type", () => {
     "file:///A.java": "package p;\nimport q.*;\nclass A extends B {}",
     "file:///B.java": "package q;\npublic class B {}",
   });
-  expect(resolveInFile(program, "file:///A.java", "B", 1)).toBe(
+  expect(resolveInFile(program, "file:///A.java" as Uri, "B", 1)).toBe(
     program.getGlobalIndex().getType("q.B"),
   );
 });
@@ -130,7 +131,7 @@ test("fully-qualified type name resolves via the global index", () => {
     "file:///B.java": "package q;\npublic class B {}",
   });
   // click the 'B' tail of q.B
-  expect(resolveInFile(program, "file:///A.java", "B", 1)).toBe(
+  expect(resolveInFile(program, "file:///A.java" as Uri, "B", 1)).toBe(
     program.getGlobalIndex().getType("q.B"),
   );
 });
@@ -140,14 +141,14 @@ test("inherited field resolves to the super class member", () => {
     "file:///Base.java": "package p;\nclass Base { int f; }",
     "file:///Sub.java": "package p;\nclass Sub extends Base { void m() { f = 1; } }",
   });
-  const sym = resolveInFile(program, "file:///Sub.java", "f", 1);
+  const sym = resolveInFile(program, "file:///Sub.java" as Uri, "f", 1);
   expect(sym?.flags).toBe(SymbolFlags.Field);
   expect(sym).toBe(program.getGlobalIndex().getType("p.Base")!.members!.get("f"));
 });
 
 test("findReferences returns the declaration and all uses", () => {
   const program = programOf({ "file:///C.java": "class C { int x; void m() { x = x + 1; } }" });
-  const sym = resolveInFile(program, "file:///C.java", "x", 2); // a use
+  const sym = resolveInFile(program, "file:///C.java" as Uri, "x", 2); // a use
   const refs = findReferences(sym!, program);
   expect(refs.length).toBe(3); // declaration + 2 uses
 });
@@ -158,7 +159,7 @@ test("findReferences for a local variable stays within its file", () => {
     // a same-named local in another file must not be picked up
     "file:///B.java": "package p;\nclass B { void m() { int local = 2; use(local); } }",
   });
-  const sym = resolveInFile(program, "file:///A.java", "local", 1);
+  const sym = resolveInFile(program, "file:///A.java" as Uri, "local", 1);
   expect(sym?.flags).toBe(SymbolFlags.LocalVariable);
   const refs = findReferences(sym!, program);
   expect(refs.length).toBe(2); // declaration + 1 use, only in A.java

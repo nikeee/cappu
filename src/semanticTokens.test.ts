@@ -6,13 +6,14 @@ import { createChecker } from "./checker.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
 import { getSemanticTokens, TOKEN_MODIFIERS, TOKEN_TYPES } from "./semanticTokens.ts";
+import { type Uri } from "./workspace.ts";
 
 function tokens(source: string) {
   const program = createProgram();
   loadJdkStub(program);
-  program.setOpenDocument("file:///T.java", source, 1);
+  program.setOpenDocument("file:///T.java" as Uri, source, 1);
   const checker = createChecker(program);
-  const sourceFile = program.getSourceFile("file:///T.java")!;
+  const sourceFile = program.getSourceFile("file:///T.java" as Uri)!;
   return getSemanticTokens(checker, sourceFile).map(t => ({
     text: source.slice(t.offset, t.offset + t.length),
     type: TOKEN_TYPES[t.tokenType]!,

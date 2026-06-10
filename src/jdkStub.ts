@@ -9,6 +9,7 @@
 // type we do not model (e.g. streams) are intentionally omitted.
 
 import type { Program } from "./program.ts";
+import { type Uri } from "./workspace.ts";
 
 const JAVA_LANG = `package java.lang;
 
@@ -1086,20 +1087,20 @@ enum ElementType { TYPE, FIELD, METHOD, PARAMETER, CONSTRUCTOR, LOCAL_VARIABLE, 
 @interface Repeatable { Class value(); }
 `;
 
-export const JDK_STUB_FILES: ReadonlyArray<{ uri: string; text: string }> = [
-  { uri: "jdk:///java/lang.java", text: JAVA_LANG },
-  { uri: "jdk:///java/io.java", text: JAVA_IO },
-  { uri: "jdk:///java/util.java", text: JAVA_UTIL },
-  { uri: "jdk:///java/util/function.java", text: JAVA_UTIL_FUNCTION },
-  { uri: "jdk:///java/util/stream.java", text: JAVA_UTIL_STREAM },
-  { uri: "jdk:///java/util/regex.java", text: JAVA_UTIL_REGEX },
-  { uri: "jdk:///java/util/concurrent.java", text: JAVA_UTIL_CONCURRENT },
-  { uri: "jdk:///java/util/concurrent/atomic.java", text: JAVA_UTIL_CONCURRENT_ATOMIC },
-  { uri: "jdk:///java/nio.java", text: JAVA_NIO },
-  { uri: "jdk:///java/nio/charset.java", text: JAVA_NIO_CHARSET },
-  { uri: "jdk:///java/nio/file.java", text: JAVA_NIO_FILE },
-  { uri: "jdk:///java/math.java", text: JAVA_MATH },
-  { uri: "jdk:///java/lang/annotation.java", text: JAVA_LANG_ANNOTATION },
+export const JDK_STUB_FILES: ReadonlyArray<{ uri: Uri; text: string }> = [
+  { uri: "jdk:///java/lang.java" as Uri, text: JAVA_LANG },
+  { uri: "jdk:///java/io.java" as Uri, text: JAVA_IO },
+  { uri: "jdk:///java/util.java" as Uri, text: JAVA_UTIL },
+  { uri: "jdk:///java/util/function.java" as Uri, text: JAVA_UTIL_FUNCTION },
+  { uri: "jdk:///java/util/stream.java" as Uri, text: JAVA_UTIL_STREAM },
+  { uri: "jdk:///java/util/regex.java" as Uri, text: JAVA_UTIL_REGEX },
+  { uri: "jdk:///java/util/concurrent.java" as Uri, text: JAVA_UTIL_CONCURRENT },
+  { uri: "jdk:///java/util/concurrent/atomic.java" as Uri, text: JAVA_UTIL_CONCURRENT_ATOMIC },
+  { uri: "jdk:///java/nio.java" as Uri, text: JAVA_NIO },
+  { uri: "jdk:///java/nio/charset.java" as Uri, text: JAVA_NIO_CHARSET },
+  { uri: "jdk:///java/nio/file.java" as Uri, text: JAVA_NIO_FILE },
+  { uri: "jdk:///java/math.java" as Uri, text: JAVA_MATH },
+  { uri: "jdk:///java/lang/annotation.java" as Uri, text: JAVA_LANG_ANNOTATION },
 ];
 
 /** Register the synthetic JDK stub into a program. */

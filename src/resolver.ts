@@ -7,6 +7,7 @@
 // expression (a.b) needs the checker (P5) and is deferred.
 
 import { forEachChild } from "./parser.ts";
+import { type Uri } from "./workspace.ts";
 import type { GlobalIndex, Program } from "./program.ts";
 import {
   type ClassDeclaration,
@@ -391,10 +392,11 @@ function forEachDescendant(node: Node, cb: (n: Node) => void): void {
 const FILE_LOCAL_FLAGS =
   SymbolFlags.LocalVariable | SymbolFlags.Parameter | SymbolFlags.TypeParameter;
 
-function candidateUris(symbol: Symbol, program: Program): string[] {
+function candidateUris(symbol: Symbol, program: Program): Uri[] {
   if (symbol.flags & FILE_LOCAL_FLAGS) {
     const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
-    if (declaration) return [getSourceFileOfNode(declaration).fileName];
+    // a SourceFile's fileName is the uri it was registered under
+    if (declaration) return [getSourceFileOfNode(declaration).fileName as Uri];
   }
   return program.getAllUris();
 }

@@ -8,12 +8,17 @@ import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
 import { createProgram } from "./program.ts";
 import { resolveIdentifier } from "./resolver.ts";
 import { type Identifier, type Symbol, SymbolFlags } from "./types.ts";
+import { type Uri } from "./workspace.ts";
 
 function ctxOf(text: string) {
   const program = createProgram();
   loadJdkStub(program);
-  program.setOpenDocument("file:///T.java", text, 1);
-  return { program, checker: createChecker(program), sf: program.getSourceFile("file:///T.java")! };
+  program.setOpenDocument("file:///T.java" as Uri, text, 1);
+  return {
+    program,
+    checker: createChecker(program),
+    sf: program.getSourceFile("file:///T.java" as Uri)!,
+  };
 }
 
 function resolveAt(text: string, needle: string, occurrence: number): Symbol | undefined {

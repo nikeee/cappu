@@ -6,15 +6,16 @@ import { createChecker } from "./checker.ts";
 import { CompletionItemKind, getCompletions } from "./completions.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
+import { type Uri } from "./workspace.ts";
 
 function complete(text: string, marker = "/*|*/") {
   const offset = text.indexOf(marker);
   const clean = text.replace(marker, "");
   const program = createProgram();
   loadJdkStub(program);
-  program.setOpenDocument("file:///T.java", clean, 1);
+  program.setOpenDocument("file:///T.java" as Uri, clean, 1);
   const checker = createChecker(program);
-  const sf = program.getSourceFile("file:///T.java")!;
+  const sf = program.getSourceFile("file:///T.java" as Uri)!;
   return getCompletions(program, checker, sf, offset);
 }
 

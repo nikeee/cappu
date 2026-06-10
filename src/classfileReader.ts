@@ -7,6 +7,7 @@ import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Program } from "./program.ts";
+import { type Uri } from "./workspace.ts";
 import { readZipEntries } from "./zipReader.ts";
 
 const UTF8 = new TextDecoder();
@@ -541,7 +542,7 @@ export function loadClassPath(program: Program, entries: readonly string[]): num
   }
   const stubs = buildStubs(collected);
   for (const stub of stubs) {
-    program.addProjectFile(`classpath:///${stub.name}.java`, stub.source);
+    program.addProjectFile(`classpath:///${stub.name}.java` as Uri, stub.source);
   }
   return stubs.length;
 }

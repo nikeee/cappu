@@ -7,6 +7,7 @@ import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
 import { createProgram } from "./program.ts";
 import { lookupMember, Meaning, resolveIdentifier } from "./resolver.ts";
 import { type Identifier, SymbolFlags } from "./types.ts";
+import { type Uri } from "./workspace.ts";
 
 test("stub files parse without diagnostics", () => {
   const program = createProgram();
@@ -28,8 +29,8 @@ test("stub types are in the global index", () => {
 test("a user type resolves String via implicit java.lang", () => {
   const program = createProgram();
   loadJdkStub(program);
-  program.setOpenDocument("file:///C.java", "class C { String name; }", 1);
-  const sf = program.getSourceFile("file:///C.java")!;
+  program.setOpenDocument("file:///C.java" as Uri, "class C { String name; }", 1);
+  const sf = program.getSourceFile("file:///C.java" as Uri)!;
   const id = getIdentifierAtPosition(sf, sf.text.indexOf("String"));
   const sym = resolveIdentifier(id as Identifier, program);
   expect(sym).toBe(program.getGlobalIndex().getType("java.lang.String"));

@@ -8,12 +8,13 @@ import { loadJdkStub } from "./jdkStub.ts";
 import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
 import { createProgram } from "./program.ts";
 import { type Identifier, type VariableDeclarator } from "./types.ts";
+import { type Uri } from "./workspace.ts";
 
 function setup(text: string) {
   const program = createProgram();
   loadJdkStub(program);
-  program.setOpenDocument("file:///T.java", text, 1);
-  return { checker: createChecker(program), sf: program.getSourceFile("file:///T.java")! };
+  program.setOpenDocument("file:///T.java" as Uri, text, 1);
+  return { checker: createChecker(program), sf: program.getSourceFile("file:///T.java" as Uri)! };
 }
 
 function sym(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {

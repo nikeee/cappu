@@ -6,13 +6,14 @@ import { createChecker } from "./checker.ts";
 import { DEFAULT_INLAY_HINTS, getInlayHints, type InlayHintsSettings } from "./inlayHints.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
+import { type Uri } from "./workspace.ts";
 
 function hints(source: string, settings?: InlayHintsSettings) {
   const program = createProgram();
   loadJdkStub(program);
-  program.setOpenDocument("file:///T.java", source, 1);
+  program.setOpenDocument("file:///T.java" as Uri, source, 1);
   const checker = createChecker(program);
-  const sourceFile = program.getSourceFile("file:///T.java")!;
+  const sourceFile = program.getSourceFile("file:///T.java" as Uri)!;
   return getInlayHints(checker, sourceFile, 0, source.length, settings).map(h => ({
     label: h.label,
     kind: h.kind,

@@ -20,6 +20,7 @@ import { emitSourceFile } from "./emitter.ts";
 import { type Disasm, disasmFiles } from "./javapNormalize.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
+import { type Uri } from "./workspace.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const baselinesDir = join(here, "..", "test-fixtures", "emitter", "emit-baselines");
@@ -193,7 +194,7 @@ function expectMatchesJavac(ours: Disasm | undefined, reference: Disasm): void {
 function emit(name: string, source: string): Uint8Array {
   const program = createProgram();
   loadJdkStub(program);
-  const uri = `file:///${name}.java`;
+  const uri = `file:///${name}.java` as Uri;
   program.setOpenDocument(uri, source, 1);
   const classes = emitSourceFile(program.getSourceFile(uri)!, program, createChecker(program));
   const cls = classes.find(c => c.name === name);
@@ -206,7 +207,7 @@ function emit(name: string, source: string): Uint8Array {
 function emitClasses(mainClass: string, source: string): { name: string; bytes: Uint8Array }[] {
   const program = createProgram();
   loadJdkStub(program);
-  const uri = `file:///${mainClass}.java`;
+  const uri = `file:///${mainClass}.java` as Uri;
   program.setOpenDocument(uri, source, 1);
   return emitSourceFile(program.getSourceFile(uri)!, program, createChecker(program));
 }
@@ -420,13 +421,13 @@ test(
     const program = createProgram();
     loadJdkStub(program);
     for (const [file, text] of Object.entries(sources)) {
-      program.addProjectFile(`file:///${file}`, text);
+      program.addProjectFile(`file:///${file}` as Uri, text);
     }
     const checker = createChecker(program);
     const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
     for (const file of Object.keys(sources)) {
       for (const cls of emitSourceFile(
-        program.getSourceFile(`file:///${file}`)!,
+        program.getSourceFile(`file:///${file}` as Uri)!,
         program,
         checker,
       )) {

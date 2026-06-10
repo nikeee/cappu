@@ -7,6 +7,7 @@ import { loadJdkStub } from "./jdkStub.ts";
 import { getNodeAtPosition } from "./nodeAtPosition.ts";
 import { createProgram } from "./program.ts";
 import { type CallExpression, type Node, SyntaxKind } from "./types.ts";
+import { type Uri } from "./workspace.ts";
 
 // The checker-side pieces signature help builds on: resolveCallCandidates (every
 // overload a call could bind to), parameterLabelsOf, and signatureOfDeclaration.
@@ -17,9 +18,9 @@ function callAtMarker(text: string, marker = "/*|*/") {
   const clean = text.replace(marker, "");
   const program = createProgram();
   loadJdkStub(program);
-  program.setOpenDocument("file:///T.java", clean, 1);
+  program.setOpenDocument("file:///T.java" as Uri, clean, 1);
   const checker = createChecker(program);
-  const sf = program.getSourceFile("file:///T.java")!;
+  const sf = program.getSourceFile("file:///T.java" as Uri)!;
   // Mirrors the server's callAt, including the retry one position left for a
   // cursor sitting at the recovered end of an unclosed call.
   for (const at of [offset, offset - 1]) {

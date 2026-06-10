@@ -17,16 +17,16 @@ import {
   type VariableDeclarator,
 } from "./types.ts";
 
-function setup(text: string): { program: Program; checker: Checker; uri: string } {
+function setup(text: string): { program: Program; checker: Checker; uri: Uri } {
   const program = createProgram();
   loadJdkStub(program);
-  const uri = "file:///T.java";
+  const uri = "file:///T.java" as Uri;
   program.setOpenDocument(uri, text, 1);
   return { program, checker: createChecker(program), uri };
 }
 
 function identifierAt(
-  { program, uri }: { program: Program; uri: string },
+  { program, uri }: { program: Program; uri: Uri },
   needle: string,
   occurrence = 1,
 ): Identifier {
@@ -78,6 +78,7 @@ test("unknown expressions degrade to <error>, never throw", () => {
 // P6: assignability
 
 import { nullType } from "./checkerTypes.ts";
+import { type Uri } from "./workspace.ts";
 
 test("assignability: widening, boxing, subtyping, arrays, null", () => {
   const ctx = setup(

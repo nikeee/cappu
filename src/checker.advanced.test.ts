@@ -6,13 +6,16 @@ import { createChecker } from "./checker.ts";
 import { Diagnostics } from "./diagnostics.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
+import { type Uri } from "./workspace.ts";
 
 function diagnose(text: string): number[] {
   const program = createProgram();
   loadJdkStub(program);
-  program.setOpenDocument("file:///T.java", text, 1);
+  program.setOpenDocument("file:///T.java" as Uri, text, 1);
   const checker = createChecker(program);
-  return checker.getSemanticDiagnostics(program.getSourceFile("file:///T.java")!).map(d => d.code);
+  return checker
+    .getSemanticDiagnostics(program.getSourceFile("file:///T.java" as Uri)!)
+    .map(d => d.code);
 }
 
 const OVERRIDE = Diagnostics.Method_does_not_override_a_supertype_method.code;

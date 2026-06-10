@@ -12,15 +12,20 @@ import { classFileToStub, loadClassPath } from "./classfileReader.ts";
 import { emitSourceFile } from "./emitter.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
+import { type Uri } from "./workspace.ts";
 
 // Emit with OUR compiler, read the bytes back as a stub - a self-contained
 // roundtrip with no JDK needed.
 function emitClass(name: string, source: string): Uint8Array {
   const program = createProgram();
   loadJdkStub(program);
-  program.setOpenDocument(`file:///${name}.java`, source, 1);
+  program.setOpenDocument(`file:///${name}.java` as Uri, source, 1);
   const checker = createChecker(program);
-  const classes = emitSourceFile(program.getSourceFile(`file:///${name}.java`)!, program, checker);
+  const classes = emitSourceFile(
+    program.getSourceFile(`file:///${name}.java` as Uri)!,
+    program,
+    checker,
+  );
   return classes.find(c => c.name.endsWith(name))!.bytes;
 }
 
@@ -51,14 +56,18 @@ test("a compiled class reads back as a resolvable stub", () => {
   // The stub resolves through the normal pipeline: a caller compiles cleanly.
   const program = createProgram();
   loadJdkStub(program);
-  program.addProjectFile("classpath:///lib/Greeter.java", stub.source);
+  program.addProjectFile("classpath:///lib/Greeter.java" as Uri, stub.source);
   program.setOpenDocument(
-    "file:///App.java",
+    "file:///App.java" as Uri,
     'import lib.Greeter;\nclass App { String m() { return Greeter.greet("x"); } }',
     1,
   );
   const checker = createChecker(program);
-  const classes = emitSourceFile(program.getSourceFile("file:///App.java")!, program, checker);
+  const classes = emitSourceFile(
+    program.getSourceFile("file:///App.java" as Uri)!,
+    program,
+    checker,
+  );
   expect(classes).toHaveLength(1);
 });
 
@@ -83,12 +92,16 @@ test("nested classes are skipped (not expressible as top-level stubs)", () => {
   const program = createProgram();
   loadJdkStub(program);
   program.setOpenDocument(
-    "file:///Outer.java",
+    "file:///Outer.java" as Uri,
     "public class Outer { public static class In {} }",
     1,
   );
   const checker = createChecker(program);
-  const classes = emitSourceFile(program.getSourceFile("file:///Outer.java")!, program, checker);
+  const classes = emitSourceFile(
+    program.getSourceFile("file:///Outer.java" as Uri)!,
+    program,
+    checker,
+  );
   const inner = classes.find(c => c.name === "Outer$In")!;
   expect(classFileToStub(inner.bytes)).toBeUndefined();
 });
@@ -150,14 +163,18 @@ test("generic signatures survive the stub roundtrip", () => {
   // A consumer resolves the stub generically: Box<String>.get() types as String.
   const program = createProgram();
   loadJdkStub(program);
-  program.addProjectFile("classpath:///lib/Box.java", stub.source);
+  program.addProjectFile("classpath:///lib/Box.java" as Uri, stub.source);
   program.setOpenDocument(
-    "file:///App.java",
+    "file:///App.java" as Uri,
     "import lib.Box;\nclass App { int m(Box<String> b) { return b.get().length(); } }",
     1,
   );
   const checker = createChecker(program);
-  const classes = emitSourceFile(program.getSourceFile("file:///App.java")!, program, checker);
+  const classes = emitSourceFile(
+    program.getSourceFile("file:///App.java" as Uri)!,
+    program,
+    checker,
+  );
   expect(classes).toHaveLength(1);
 });
 
@@ -165,7 +182,7 @@ test("nested classes group into their outer stub and resolve from a consumer", (
   const program1 = createProgram();
   loadJdkStub(program1);
   program1.setOpenDocument(
-    "file:///Outer.java",
+    "file:///Outer.java" as Uri,
     [
       "package lib;",
       "public class Outer {",
@@ -176,7 +193,11 @@ test("nested classes group into their outer stub and resolve from a consumer", (
     1,
   );
   const checker1 = createChecker(program1);
-  const classes = emitSourceFile(program1.getSourceFile("file:///Outer.java")!, program1, checker1);
+  const classes = emitSourceFile(
+    program1.getSourceFile("file:///Outer.java" as Uri)!,
+    program1,
+    checker1,
+  );
   const dir = mkdtempSync(join(tmpdir(), "nested-"));
   for (const c of classes) {
     const file = join(dir, `${c.name}.class`);
@@ -187,16 +208,16 @@ test("nested classes group into their outer stub and resolve from a consumer", (
   const program = createProgram();
   loadJdkStub(program);
   expect(loadClassPath(program, [dir])).toBe(1); // one top-level stub
-  const stub = program.getSourceFile("classpath:///lib/Outer.java")!.text;
+  const stub = program.getSourceFile("classpath:///lib/Outer.java" as Uri)!.text;
   expect(stub).toContain("public static class Builder");
   expect(stub).not.toContain("$1"); // the anonymous class never appears
 
   program.setOpenDocument(
-    "file:///App.java",
+    "file:///App.java" as Uri,
     "import lib.Outer;\nclass App { int m() { return new Outer.Builder().set(3).knobs; } }",
     1,
   );
   const checker = createChecker(program);
-  const out = emitSourceFile(program.getSourceFile("file:///App.java")!, program, checker);
+  const out = emitSourceFile(program.getSourceFile("file:///App.java" as Uri)!, program, checker);
   expect(out).toHaveLength(1);
 });

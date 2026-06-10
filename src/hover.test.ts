@@ -8,18 +8,19 @@ import { loadJdkStub } from "./jdkStub.ts";
 import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
 import { createProgram } from "./program.ts";
 import { type CallExpression, type Identifier } from "./types.ts";
+import { type Uri } from "./workspace.ts";
 
 function setup(text: string) {
   const program = createProgram();
   loadJdkStub(program);
-  program.setOpenDocument("file:///T.java", text, 1);
+  program.setOpenDocument("file:///T.java" as Uri, text, 1);
   return { program, checker: createChecker(program), text };
 }
 
 function symbolAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {
   let offset = -1;
   for (let i = 0; i < occ; i++) offset = ctx.text.indexOf(needle, offset + 1);
-  const sf = ctx.program.getSourceFile("file:///T.java")!;
+  const sf = ctx.program.getSourceFile("file:///T.java" as Uri)!;
   return ctx.checker.resolveName(getIdentifierAtPosition(sf, offset) as Identifier)!;
 }
 
@@ -116,7 +117,7 @@ test("getDocumentation reads a class Javadoc", () => {
 function callSignatureAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {
   let offset = -1;
   for (let i = 0; i < occ; i++) offset = ctx.text.indexOf(needle, offset + 1);
-  const sf = ctx.program.getSourceFile("file:///T.java")!;
+  const sf = ctx.program.getSourceFile("file:///T.java" as Uri)!;
   const id = getIdentifierAtPosition(sf, offset) as Identifier;
   const call = id.parent as CallExpression;
   const decl = ctx.checker.resolveCall(call)!;

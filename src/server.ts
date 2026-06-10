@@ -83,12 +83,16 @@ import {
 } from "./types.ts";
 import { getTransport } from "./serverTransport.ts";
 import { isValidIdentifier, skipTrivia } from "./utilities.ts";
-import { isSyntheticUri, loadJavaFiles, uriToPath } from "./workspace.ts";
+import { type Uri, isSyntheticUri, loadJavaFiles, uriToPath } from "./workspace.ts";
 
 // The transport is stdio (the standard for editor clients) unless the CLI
 // configured a socket via setTransport() before importing this module.
 const transport = getTransport();
 const connection = createConnection(transport.reader, transport.writer);
+// The LSP protocol types carry DocumentUri as a plain string; brand it once
+// at the boundary.
+const asUri = (uri: string): Uri => uri as Uri;
+
 const documents = new TextDocuments(TextDocument);
 const program = createProgram();
 loadJdkStub(program);
@@ -114,7 +118,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
     params.workspaceFolders?.map(f => f.uri) ?? (params.rootUri ? [params.rootUri] : []);
   for (const root of roots) {
     try {
-      for (const { uri, text } of loadJavaFiles(uriToPath(root))) {
+      for (const { uri, text } of loadJavaFiles(uriToPath(asUri(root)))) {
         program.addProjectFile(uri, text);
       }
     } catch {
@@ -200,15 +204,15 @@ connection.onInitialized(() => {
 connection.onDidChangeWatchedFiles(params => {
   for (const event of params.changes) {
     if (event.type === FileChangeType.Deleted) {
-      program.removeProjectFile(event.uri);
+      program.removeProjectFile(asUri(event.uri));
       continue;
     }
     try {
       // Created or Changed: (re-)read from disk. An open editor document still
       // wins inside the Program; updating the disk copy keeps didClose honest.
-      program.addProjectFile(event.uri, readFileSync(uriToPath(event.uri), "utf8"));
+      program.addProjectFile(asUri(event.uri), readFileSync(uriToPath(asUri(event.uri)), "utf8"));
     } catch {
-      program.removeProjectFile(event.uri); // unreadable: treat as gone
+      program.removeProjectFile(asUri(event.uri)); // unreadable: treat as gone
     }
   }
   // Cross-file resolution may have changed for everything that is open.
@@ -220,19 +224,20 @@ connection.onDidChangeWatchedFiles(params => {
 
 // TextDocuments fires onDidChangeContent on both open and change.
 documents.onDidChangeContent(change => {
-  const { uri, version } = change.document;
+  const { version } = change.document;
+  const uri = asUri(change.document.uri);
   program.setOpenDocument(uri, change.document.getText(), version);
   const sourceFile = program.getSourceFile(uri);
   if (sourceFile) validate(uri, sourceFile);
 });
 
 documents.onDidClose(event => {
-  program.closeDocument(event.document.uri);
+  program.closeDocument(asUri(event.document.uri));
   connection.sendDiagnostics({ uri: event.document.uri, diagnostics: [] });
 });
 
 connection.onDocumentSymbol((params): DocumentSymbol[] => {
-  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
   if (!sourceFile) return [];
   return getDocumentSymbols(sourceFile, computeLineStarts(sourceFile.text));
 });
@@ -260,7 +265,7 @@ function isStubSymbol(symbol: Symbol): boolean {
 }
 
 function identifierAt(
-  uri: string,
+  uri: Uri,
   position: { line: number; character: number },
 ): Identifier | undefined {
   const sourceFile = program.getSourceFile(uri);
@@ -274,7 +279,7 @@ function identifierAt(
 }
 
 connection.onReferences((params): Location[] | null => {
-  const identifier = identifierAt(params.textDocument.uri, params.position);
+  const identifier = identifierAt(asUri(params.textDocument.uri), params.position);
   if (!identifier) return null;
   const symbol = checker.resolveName(identifier);
   if (!symbol) return null;
@@ -284,7 +289,7 @@ connection.onReferences((params): Location[] | null => {
 // Validate the cursor position before the editor shows its rename box: returns
 // the identifier range if it names a renameable (non-JDK) symbol, else null.
 connection.onPrepareRename((params): Range | null => {
-  const identifier = identifierAt(params.textDocument.uri, params.position);
+  const identifier = identifierAt(asUri(params.textDocument.uri), params.position);
   if (!identifier) return null;
   const symbol = checker.resolveName(identifier);
   if (!symbol || isStubSymbol(symbol)) return null;
@@ -292,7 +297,7 @@ connection.onPrepareRename((params): Range | null => {
 });
 
 connection.onRenameRequest((params): WorkspaceEdit | null => {
-  const identifier = identifierAt(params.textDocument.uri, params.position);
+  const identifier = identifierAt(asUri(params.textDocument.uri), params.position);
   if (!identifier) return null;
   const symbol = checker.resolveName(identifier);
   if (!symbol) return null;
@@ -319,7 +324,7 @@ connection.onRenameRequest((params): WorkspaceEdit | null => {
 });
 
 connection.onDefinition((params): Definition | null => {
-  const identifier = identifierAt(params.textDocument.uri, params.position);
+  const identifier = identifierAt(asUri(params.textDocument.uri), params.position);
   if (!identifier) return null;
   const symbol = checker.resolveName(identifier);
   if (!symbol) return null;
@@ -328,7 +333,7 @@ connection.onDefinition((params): Definition | null => {
 });
 
 connection.onCompletion((params): CompletionItem[] => {
-  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
   if (!sourceFile) return [];
   const offset = getPositionOfLineAndCharacter(
     computeLineStarts(sourceFile.text),
@@ -339,7 +344,7 @@ connection.onCompletion((params): CompletionItem[] => {
 });
 
 connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
-  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
   if (!sourceFile) return [];
   const lineStarts = computeLineStarts(sourceFile.text);
   const start = getPositionOfLineAndCharacter(
@@ -372,7 +377,7 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
 // The innermost call whose argument list contains the offset (the cursor sits
 // after the callee, between the parentheses), for signature help.
 function callAt(
-  uri: string,
+  uri: Uri,
   position: { line: number; character: number },
 ): CallExpression | undefined {
   const sourceFile = program.getSourceFile(uri);
@@ -397,7 +402,7 @@ function callAt(
 }
 
 connection.onSignatureHelp((params): SignatureHelp | null => {
-  const call = callAt(params.textDocument.uri, params.position);
+  const call = callAt(asUri(params.textDocument.uri), params.position);
   if (!call) return null;
   const candidates = checker.resolveCallCandidates(call);
   if (candidates.length === 0) return null;
@@ -422,7 +427,7 @@ connection.onSignatureHelp((params): SignatureHelp | null => {
     candidates.findIndex(d => d === resolved),
   );
   // The argument the cursor is in: count the arguments that end before it.
-  const sourceFile = program.getSourceFile(params.textDocument.uri)!;
+  const sourceFile = program.getSourceFile(asUri(params.textDocument.uri))!;
   const offset = getPositionOfLineAndCharacter(
     computeLineStarts(sourceFile.text),
     params.position.line,
@@ -468,7 +473,7 @@ connection.onWorkspaceSymbol((params): SymbolInformation[] => {
 // In-file occurrences of the symbol under the cursor; an assignment target or
 // an in/decrement operand counts as a write.
 connection.onDocumentHighlight((params): DocumentHighlight[] | null => {
-  const identifier = identifierAt(params.textDocument.uri, params.position);
+  const identifier = identifierAt(asUri(params.textDocument.uri), params.position);
   if (!identifier) return null;
   const symbol = checker.resolveName(identifier);
   if (!symbol) return null;
@@ -499,7 +504,7 @@ connection.onDocumentHighlight((params): DocumentHighlight[] | null => {
 // Foldable regions: type/method/constructor/initializer bodies (keeping the
 // closing-brace line visible) and the import list.
 connection.onFoldingRanges((params): FoldingRange[] | null => {
-  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
   if (!sourceFile) return null;
   const lineStarts = computeLineStarts(sourceFile.text);
   const lineAt = (offset: number): number => getLineAndCharacterOfPosition(lineStarts, offset).line;
@@ -540,7 +545,7 @@ connection.onFoldingRanges((params): FoldingRange[] | null => {
 // Go to the declaration of the expression's TYPE (the class of a variable,
 // not the variable itself).
 connection.onTypeDefinition((params): Definition | null => {
-  const identifier = identifierAt(params.textDocument.uri, params.position);
+  const identifier = identifierAt(asUri(params.textDocument.uri), params.position);
   if (!identifier) return null;
   const type = checker.getTypeOfExpression(identifier);
   const classSymbol =
@@ -558,7 +563,7 @@ connection.onTypeDefinition((params): Definition | null => {
 // transitive subtypes from the subtype index, or the concrete method bodies
 // matching an abstract method by name and arity.
 connection.onImplementation((params): Definition | null => {
-  const identifier = identifierAt(params.textDocument.uri, params.position);
+  const identifier = identifierAt(asUri(params.textDocument.uri), params.position);
   if (!identifier) return null;
   const symbol = checker.resolveName(identifier);
   if (!symbol) return null;
@@ -584,7 +589,7 @@ connection.onImplementation((params): Definition | null => {
 // the editor.action.showReferences convention (VS Code peeks the locations);
 // clients without it still render the count as plain text.
 connection.onCodeLens((params): CodeLens[] => {
-  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
   if (!sourceFile) return [];
   return getCodeLenses(program, checker, sourceFile).map(entry => {
     const range = rangeOf(entry.name);
@@ -602,7 +607,7 @@ connection.onCodeLens((params): CodeLens[] => {
 });
 
 connection.languages.semanticTokens.on((params): SemanticTokens => {
-  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
   if (!sourceFile) return { data: [] };
   const lineStarts = computeLineStarts(sourceFile.text);
   const builder = new SemanticTokensBuilder();
@@ -620,7 +625,7 @@ connection.onDidChangeConfiguration(params => {
 });
 
 connection.languages.inlayHint.on((params): InlayHint[] => {
-  const sourceFile = program.getSourceFile(params.textDocument.uri);
+  const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
   if (!sourceFile) return [];
   const lineStarts = computeLineStarts(sourceFile.text);
   const start = getPositionOfLineAndCharacter(
@@ -643,7 +648,7 @@ connection.languages.inlayHint.on((params): InlayHint[] => {
 });
 
 connection.onHover((params): Hover | null => {
-  const identifier = identifierAt(params.textDocument.uri, params.position);
+  const identifier = identifierAt(asUri(params.textDocument.uri), params.position);
   if (!identifier) return null;
   const symbol = checker.resolveName(identifier);
   if (!symbol) return null;

@@ -16,6 +16,7 @@ import { createChecker } from "./checker.ts";
 import { type CompletionItem, CompletionItemKind, getCompletions } from "./completions.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
+import { type Uri } from "./workspace.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixturesDir = join(here, "..", "test-fixtures", "language-service", "fourslash");
@@ -74,7 +75,7 @@ for (const fixture of fixtures) {
 
     const program = createProgram();
     loadJdkStub(program);
-    const uri = `file:///${fixture}`;
+    const uri = `file:///${fixture}` as Uri;
     program.setOpenDocument(uri, clean, 1);
     const checker = createChecker(program);
     const sourceFile = program.getSourceFile(uri)!;
