@@ -5,7 +5,7 @@ import { test } from "node:test";
 
 import { expect } from "expect";
 
-import { runCompile } from "./compiler.ts";
+import { missingConfiguredPaths, runCompile } from "./compiler.ts";
 import { loadConfig } from "./config.ts";
 
 function inTempDir(
@@ -89,4 +89,32 @@ test("failOnDegrade turns placeholder bodies into a failing result", () => {
     if (result.degraded.length === 0) return; // construct became supported; nothing to assert
     expect(result.success).toBe(false);
   });
+});
+
+test("missing configured dirs warn only when a cappu.json is present", () => {
+  inTempDir({ "cappu.json": '{ "compilerOptions": { "classPath": ["./no-such-dir"] } }' }, dir => {
+    const fromFile = loadConfig(undefined, dir);
+    const missing = missingConfiguredPaths(fromFile);
+    expect(missing).toContain(join(dir, "no-such-dir"));
+    // the default sourcePaths entry is also absent in the temp dir
+    expect(missing).toContain(join(dir, "src/main/java"));
+  });
+  inTempDir({}, dir => {
+    // no cappu.json: defaults may be absent without a warning
+    expect(missingConfiguredPaths(loadConfig(undefined, dir))).toEqual([]);
+  });
+});
+
+test("compiling with absent configured dirs does not throw", () => {
+  inTempDir(
+    {
+      "cappu.json": '{ "compilerOptions": { "classPath": ["./nope"], "sourcePaths": ["./nada"] } }',
+      "A.java": "class A { }",
+    },
+    (dir, paths) => {
+      const config = loadConfig(undefined, dir);
+      const result = runCompile([paths[1]!], { outDir: dir, config });
+      expect(result.success).toBe(true);
+    },
+  );
 });

@@ -48,6 +48,8 @@ export type LspConfig = z.infer<typeof LspOptionsSchema>;
 export interface CappuConfig extends z.infer<typeof ConfigFileSchema> {
   /** Directory the config file lives in; relative paths resolve against it. */
   baseDir: string;
+  /** Whether an actual cappu.json was read (false: pure defaults). */
+  fromFile: boolean;
 }
 
 export const DEFAULT_CONFIG_NAME = "cappu.json";
@@ -95,7 +97,7 @@ export const CONFIG_TEMPLATE = `
 `.trimStart();
 
 function emptyConfig(baseDir: string): CappuConfig {
-  return { ...ConfigFileSchema.parse({}), baseDir };
+  return { ...ConfigFileSchema.parse({}), baseDir, fromFile: false };
 }
 
 /**
@@ -115,7 +117,7 @@ export function loadConfig(explicitPath?: string, cwd = process.cwd()): CappuCon
   if (!result.success) {
     throw new Error(`invalid ${path}:\n${z.prettifyError(result.error)}`);
   }
-  return { ...result.data, baseDir };
+  return { ...result.data, baseDir, fromFile: true };
 }
 
 /** Resolve a (possibly relative) config path entry against the config's directory. */

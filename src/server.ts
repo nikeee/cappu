@@ -49,7 +49,7 @@ import { createChecker } from "./checker.ts";
 import { type ArrayType, type ClassType, TypeKind } from "./checkerTypes.ts";
 import { getCodeActions } from "./codeActions.ts";
 import { getCodeLenses } from "./codeLens.ts";
-import { loadConfiguredPaths } from "./compiler.ts";
+import { loadConfiguredPaths, missingConfiguredPaths } from "./compiler.ts";
 import { type CompletionItem, getCompletions } from "./completions.ts";
 import type { CappuConfig } from "./config.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
@@ -679,6 +679,11 @@ connection.onHover((params): Hover | null => {
 export function startServer(config?: CappuConfig): void {
   if (config) {
     applyInlayHintSettings(config.lspOptions.inlayHints);
+    // A missing configured directory is treated as empty; only worth a warning
+    // when an actual cappu.json configured it.
+    for (const path of missingConfiguredPaths(config)) {
+      connection.console.warn(`configured path not found (treated as empty): ${path}`);
+    }
     loadConfiguredPaths(program, config);
   }
   documents.listen(connection);

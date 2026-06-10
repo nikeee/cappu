@@ -11,7 +11,7 @@ import type { Socket } from "node:net";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-import { runCompile } from "./compiler.ts";
+import { missingConfiguredPaths, runCompile } from "./compiler.ts";
 import { CONFIG_TEMPLATE, DEFAULT_CONFIG_NAME, loadConfig } from "./config.ts";
 import pkg from "../package.json" with { type: "json" };
 
@@ -127,6 +127,11 @@ switch (command) {
     if (files.length === 0) {
       process.stderr.write("usage: cappu compile [-d <outdir>] <file.java> ...\n");
       process.exit(2);
+    }
+    // Missing configured dirs are treated as empty; warn only when they come
+    // from an actual cappu.json.
+    for (const path of missingConfiguredPaths(config)) {
+      process.stderr.write(`warning: configured path not found (treated as empty): ${path}\n`);
     }
     const result = runCompile(files, {
       outDir: values["out-dir"],

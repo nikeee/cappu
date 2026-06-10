@@ -7,7 +7,7 @@
 // runCompile never prints: it returns what was written, what degraded and the
 // diagnostics; the caller decides how to render them.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { setDegradeListener } from "./bytecode.ts";
@@ -54,8 +54,22 @@ export type CompileResult =
   | ({ success: false; diagnostics: CompileDiagnostic[] } & CompileOutput);
 
 /**
+ * Configured classPath/sourcePaths entries that do not exist on disk. They are
+ * treated as empty everywhere; this is only for warning the user, and only
+ * when the paths come from an actual cappu.json (the built-in defaults are
+ * allowed to be absent silently).
+ */
+export function missingConfiguredPaths(config: CappuConfig): string[] {
+  if (!config.fromFile) return [];
+  return [...config.compilerOptions.classPath, ...config.compilerOptions.sourcePaths]
+    .map(p => resolveConfigPath(config, p))
+    .filter(p => !existsSync(p));
+}
+
+/**
  * Register the config's classPath (.class stubs) and sourcePaths (.java
- * sources, for resolution only - they are not compiled) into a program.
+ * sources, for resolution only - they are not compiled) into a program. A
+ * missing entry contributes nothing (see missingConfiguredPaths).
  */
 export function loadConfiguredPaths(program: Program, config: CappuConfig): void {
   loadClassPath(
