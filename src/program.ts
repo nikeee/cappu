@@ -5,6 +5,7 @@
 // milestones.
 
 import { bindSourceFile } from "./binder.ts";
+import { type Brand } from "./brand.ts";
 import { parseSourceFile } from "./parser.ts";
 import {
   type Node,
@@ -17,6 +18,9 @@ import {
 import { entityNameToString } from "./utilities.ts";
 
 /** Cross-file lookup of top-level types by package and fully-qualified name. */
+/** The program mutation counter derived caches key their memo on. */
+export type Generation = Brand<number, "Generation">;
+
 export interface GlobalIndex {
   /** Type symbol for a fully-qualified name (e.g. "java.util.List" or, in the default package, "C"). */
   getType(fqn: string): Symbol | undefined;
@@ -66,7 +70,7 @@ export interface Program {
    * Monotonically increasing counter, bumped on every file mutation. Derived
    * caches (subtype index, ...) key their memo on it to invalidate cheaply.
    */
-  getGeneration(): number;
+  getGeneration(): Generation;
 }
 
 function named(node: Node): string | undefined {
@@ -246,6 +250,6 @@ export function createProgram(): Program {
       refreshIndex();
       return globalIndex;
     },
-    getGeneration: () => generation,
+    getGeneration: () => generation as Generation,
   };
 }

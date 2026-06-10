@@ -78,6 +78,7 @@ import {
   type YieldStatement,
   type WhileStatement,
 } from "./types.ts";
+import { type Brand } from "./brand.ts";
 import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
 
 // Line starts per source file, for LineNumberTable entries (computed once).
@@ -383,20 +384,24 @@ class ByteBuffer {
   }
 }
 
+/** An index into a class's constant pool (branded: ldc and u2 refs only ever
+ * receive real pool indices, never an arbitrary number). */
+export type CpIndex = Brand<number, "CpIndex">;
+
 // Builds the constant pool, interning entries so each appears once. Indices are
 // 1-based (JVMS 4.1: the pool is indexed 1..count-1).
 class ConstantPool {
   private entries = new ByteBuffer();
   private count = 0; // number of entries (next index is count + 1)
-  private cache = new Map<string, number>();
+  private cache = new Map<string, CpIndex>();
   // BootstrapMethods entries (JVMS 4.7.23): bootstrap MethodHandle + static args.
-  private bootstraps: { handle: number; args: number[] }[] = [];
+  private bootstraps: { handle: CpIndex; args: CpIndex[] }[] = [];
 
-  private intern(key: string, write: (b: ByteBuffer) => void, wide = false): number {
+  private intern(key: string, write: (b: ByteBuffer) => void, wide = false): CpIndex {
     const existing = this.cache.get(key);
     if (existing !== undefined) return existing;
     write(this.entries);
-    const index = ++this.count;
+    const index = ++this.count as CpIndex; // the single producing cast
     if (wide) this.count++; // long/double occupy a second, unusable slot (JVMS 4.4.5)
     this.cache.set(key, index);
     return index;
@@ -410,7 +415,7 @@ class ConstantPool {
     });
   }
 
-  classInfo(internalName: string): number {
+  classInfo(internalName: string): CpIndex {
     const nameIndex = this.utf8(internalName);
     return this.intern(`c:${internalName}`, b => {
       b.u1(CONSTANT_Class);
@@ -418,7 +423,7 @@ class ConstantPool {
     });
   }
 
-  nameAndType(name: string, descriptor: string): number {
+  nameAndType(name: string, descriptor: string): CpIndex {
     const nameIndex = this.utf8(name);
     const descIndex = this.utf8(descriptor);
     return this.intern(`nt:${name}:${descriptor}`, b => {
@@ -428,7 +433,7 @@ class ConstantPool {
     });
   }
 
-  methodref(internalClass: string, name: string, descriptor: string): number {
+  methodref(internalClass: string, name: string, descriptor: string): CpIndex {
     const classIndex = this.classInfo(internalClass);
     const ntIndex = this.nameAndType(name, descriptor);
     return this.intern(`m:${internalClass}:${name}:${descriptor}`, b => {
@@ -438,7 +443,7 @@ class ConstantPool {
     });
   }
 
-  interfaceMethodref(internalClass: string, name: string, descriptor: string): number {
+  interfaceMethodref(internalClass: string, name: string, descriptor: string): CpIndex {
     const classIndex = this.classInfo(internalClass);
     const ntIndex = this.nameAndType(name, descriptor);
     return this.intern(`im:${internalClass}:${name}:${descriptor}`, b => {
@@ -448,7 +453,7 @@ class ConstantPool {
     });
   }
 
-  fieldref(internalClass: string, name: string, descriptor: string): number {
+  fieldref(internalClass: string, name: string, descriptor: string): CpIndex {
     const classIndex = this.classInfo(internalClass);
     const ntIndex = this.nameAndType(name, descriptor);
     return this.intern(`f:${internalClass}:${name}:${descriptor}`, b => {
@@ -458,7 +463,7 @@ class ConstantPool {
     });
   }
 
-  string(value: string): number {
+  string(value: string): CpIndex {
     const utf8Index = this.utf8(value);
     return this.intern(`s:${value}`, b => {
       b.u1(CONSTANT_String);
@@ -466,14 +471,14 @@ class ConstantPool {
     });
   }
 
-  integer(value: number): number {
+  integer(value: number): CpIndex {
     return this.intern(`i:${value}`, b => {
       b.u1(CONSTANT_Integer);
       b.u4(value);
     });
   }
 
-  long(value: bigint): number {
+  long(value: bigint): CpIndex {
     // Long occupies two pool entries (JVMS 4.4.5).
     return this.intern(
       `l:${value}`,
@@ -486,7 +491,7 @@ class ConstantPool {
     );
   }
 
-  float(value: number): number {
+  float(value: number): CpIndex {
     const view = new DataView(new ArrayBuffer(4));
     view.setFloat32(0, value);
     return this.intern(`f:${view.getUint32(0)}`, b => {
@@ -495,7 +500,7 @@ class ConstantPool {
     });
   }
 
-  double(value: number): number {
+  double(value: number): CpIndex {
     const view = new DataView(new ArrayBuffer(8));
     view.setFloat64(0, value);
     return this.intern(
@@ -509,7 +514,7 @@ class ConstantPool {
     );
   }
 
-  private methodHandle(referenceKind: number, referenceIndex: number): number {
+  private methodHandle(referenceKind: number, referenceIndex: CpIndex): CpIndex {
     return this.intern(`mh:${referenceKind}:${referenceIndex}`, b => {
       b.u1(CONSTANT_MethodHandle);
       b.u1(referenceKind);
@@ -522,7 +527,7 @@ class ConstantPool {
    * recipe and dynamic-argument descriptor. Registers the bootstrap method and
    * returns the CONSTANT_InvokeDynamic index.
    */
-  invokeDynamicConcat(recipe: string, dynamicArgsDescriptor: string): number {
+  invokeDynamicConcat(recipe: string, dynamicArgsDescriptor: string): CpIndex {
     const handle = this.methodHandle(
       REF_invokeStatic,
       this.methodref(STRING_CONCAT_FACTORY, MAKE_CONCAT, MAKE_CONCAT_BSM_DESCRIPTOR),
@@ -549,7 +554,7 @@ class ConstantPool {
     recordInternal: string,
     names: string,
     getters: { name: string; descriptor: string }[],
-  ): number {
+  ): CpIndex {
     const bsmHandle = this.methodHandle(
       REF_invokeStatic,
       this.methodref("java/lang/runtime/ObjectMethods", "bootstrap", OBJECT_METHODS_BSM_DESCRIPTOR),
@@ -571,7 +576,7 @@ class ConstantPool {
     });
   }
 
-  private methodType(descriptor: string): number {
+  private methodType(descriptor: string): CpIndex {
     const descIndex = this.utf8(descriptor);
     return this.intern(`mt:${descriptor}`, b => {
       b.u1(CONSTANT_MethodType);
@@ -596,7 +601,7 @@ class ConstantPool {
     implDescriptor: string,
     instantiated: string,
     implIsInterface = false,
-  ): number {
+  ): CpIndex {
     const bsmHandle = this.methodHandle(
       REF_invokeStatic,
       this.methodref(LAMBDA_METAFACTORY, "metafactory", LAMBDA_METAFACTORY_BSM_DESCRIPTOR),
@@ -622,7 +627,7 @@ class ConstantPool {
   }
 
   get bootstrapMethodCount(): number {
-    return this.bootstraps.length;
+    return this.bootstraps.length; // a count, not a pool index
   }
 
   /** The BootstrapMethods attribute body (num_bootstrap_methods + entries). */
@@ -1940,7 +1945,7 @@ function generateBody(
     push(b);
   };
 
-  const ldc = (index: number): void => {
+  const ldc = (index: CpIndex): void => {
     if (index <= 0xff) {
       code.u1(OP_LDC);
       code.u1(index);

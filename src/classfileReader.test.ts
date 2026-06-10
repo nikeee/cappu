@@ -102,23 +102,27 @@ function hasJarTool(): boolean {
   }
 }
 
-test("a .jar classpath entry loads its classes", { skip: hasJarTool() ? false : "no jar tool" }, () => {
-  const bytes = emitClass(
-    "Util",
-    "package lib;\npublic class Util { public static int triple(int x) { return x * 3; } }",
-  );
-  const dir = mkdtempSync(join(tmpdir(), "jar-"));
-  const classFile = join(dir, "lib", "Util.class");
-  mkdirSync(dirname(classFile), { recursive: true });
-  writeFileSync(classFile, bytes);
-  execFileSync("jar", ["cf", join(dir, "util.jar"), "-C", dir, "lib/Util.class"]);
+test(
+  "a .jar classpath entry loads its classes",
+  { skip: hasJarTool() ? false : "no jar tool" },
+  () => {
+    const bytes = emitClass(
+      "Util",
+      "package lib;\npublic class Util { public static int triple(int x) { return x * 3; } }",
+    );
+    const dir = mkdtempSync(join(tmpdir(), "jar-"));
+    const classFile = join(dir, "lib", "Util.class");
+    mkdirSync(dirname(classFile), { recursive: true });
+    writeFileSync(classFile, bytes);
+    execFileSync("jar", ["cf", join(dir, "util.jar"), "-C", dir, "lib/Util.class"]);
 
-  const program = createProgram();
-  loadJdkStub(program);
-  const loaded = loadClassPath(program, [join(dir, "util.jar")]);
-  expect(loaded).toBe(1);
-  expect(program.getGlobalIndex().getType("lib.Util")).toBeDefined();
-});
+    const program = createProgram();
+    loadJdkStub(program);
+    const loaded = loadClassPath(program, [join(dir, "util.jar")]);
+    expect(loaded).toBe(1);
+    expect(program.getGlobalIndex().getType("lib.Util")).toBeDefined();
+  },
+);
 
 test("generic signatures survive the stub roundtrip", () => {
   const bytes = emitClass(
@@ -149,7 +153,7 @@ test("generic signatures survive the stub roundtrip", () => {
   program.addProjectFile("classpath:///lib/Box.java", stub.source);
   program.setOpenDocument(
     "file:///App.java",
-    'import lib.Box;\nclass App { int m(Box<String> b) { return b.get().length(); } }',
+    "import lib.Box;\nclass App { int m(Box<String> b) { return b.get().length(); } }",
     1,
   );
   const checker = createChecker(program);

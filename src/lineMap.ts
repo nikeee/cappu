@@ -2,6 +2,15 @@
 // line/character positions (0-based, UTF-16 code units - which match JS string
 // indices). Mirrors the TS compiler's computeLineStarts / getLineAndCharacter.
 
+import { type Brand } from "./brand.ts";
+
+/**
+ * A character offset into a source text (what Node.pos/end and the scanner
+ * use), as opposed to a line/character pair - the two number spaces this
+ * module converts between and that must never be mixed.
+ */
+export type Offset = Brand<number, "Offset">;
+
 export interface LineAndCharacter {
   readonly line: number;
   readonly character: number;
@@ -56,8 +65,8 @@ export function getPositionOfLineAndCharacter(
   lineStarts: readonly number[],
   line: number,
   character: number,
-): number {
-  if (line < 0) return 0;
-  if (line >= lineStarts.length) return lineStarts[lineStarts.length - 1]!;
-  return lineStarts[line]! + character;
+): Offset {
+  if (line < 0) return 0 as Offset;
+  if (line >= lineStarts.length) return lineStarts[lineStarts.length - 1]! as Offset;
+  return (lineStarts[line]! + character) as Offset;
 }
