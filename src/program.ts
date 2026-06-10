@@ -17,20 +17,24 @@ import {
 import { entityNameToString } from "./utilities.ts";
 import { type Uri } from "./workspace.ts";
 
-/** Cross-file lookup of top-level types by package and fully-qualified name. */
 /** The program mutation counter derived caches key their memo on. */
 export type Generation = Brand<number, "Generation">;
+/** A dotted fully-qualified type name ("java.util.List"; bare in the default package). */
+export type Fqn = Brand<string, "Fqn">;
+/** A dotted package name ("" for the default package). */
+export type PackageName = Brand<string, "PackageName">;
 
+// Cross-file lookup of top-level types by package and fully-qualified name.
 export interface GlobalIndex {
   /** Type symbol for a fully-qualified name (e.g. "java.util.List" or, in the default package, "C"). */
-  getType(fqn: string): Symbol | undefined;
+  getType(fqn: Fqn): Symbol | undefined;
   /** simpleName -> type symbol for all top-level types in a package. */
-  getPackageTypes(packageName: string): SymbolTable | undefined;
-  getPackageSymbol(packageName: string): Symbol | undefined;
+  getPackageTypes(packageName: PackageName): SymbolTable | undefined;
+  getPackageSymbol(packageName: PackageName): Symbol | undefined;
   /** Fully-qualified names of all top-level types with the given simple name (for import suggestions). */
-  findFqnsBySimpleName(simpleName: string): string[];
+  findFqnsBySimpleName(simpleName: string): Fqn[];
   /** A package symbol for an exact package or any prefix of one (e.g. "java" or "java.util"). */
-  getPackageByName(name: string): Symbol | undefined;
+  getPackageByName(name: PackageName): Symbol | undefined;
 }
 
 const TYPE_DECLARATION_KINDS = new Set<SyntaxKind>([
@@ -119,7 +123,7 @@ export function createProgram(): Program {
   // are rebuilt cheaply from those cached per-file lists. A single edit therefore
   // re-binds only the edited file, not the whole workspace.
   interface TypeEntry {
-    packageName: string;
+    packageName: PackageName;
     simpleName: string;
     symbol: Symbol;
   }
@@ -127,19 +131,19 @@ export function createProgram(): Program {
   const dirty = new Set<Uri>();
   let indexBuilt = false;
 
-  const packages = new Map<string, SymbolTable>();
-  const packageSymbols = new Map<string, Symbol>();
-  const typesByFqn = new Map<string, Symbol>();
+  const packages = new Map<PackageName, SymbolTable>();
+  const packageSymbols = new Map<PackageName, Symbol>();
+  const typesByFqn = new Map<Fqn, Symbol>();
   // Every package name plus every dotted prefix of one (so "java" resolves even
   // though only "java.util" holds types), mapping to a package symbol.
-  const packagesByName = new Map<string, Symbol>();
+  const packagesByName = new Map<PackageName, Symbol>();
 
   function extractTypes(uri: Uri): TypeEntry[] {
     const sourceFile = getSourceFile(uri);
     if (!sourceFile) return [];
-    const packageName = sourceFile.packageDeclaration
-      ? entityNameToString(sourceFile.packageDeclaration.name)
-      : "";
+    const packageName = (
+      sourceFile.packageDeclaration ? entityNameToString(sourceFile.packageDeclaration.name) : ""
+    ) as PackageName;
     const entries: TypeEntry[] = [];
     for (const statement of sourceFile.statements) {
       if (!TYPE_DECLARATION_KINDS.has(statement.kind) || !statement.symbol) continue;
@@ -166,7 +170,7 @@ export function createProgram(): Program {
     packages.clear();
     packageSymbols.clear();
     typesByFqn.clear();
-    const packageSymbolFor = (packageName: string): Symbol => {
+    const packageSymbolFor = (packageName: PackageName): Symbol => {
       let symbol = packageSymbols.get(packageName);
       if (!symbol) {
         symbol = { flags: SymbolFlags.Package, escapedName: packageName, members: new Map() };
@@ -180,7 +184,7 @@ export function createProgram(): Program {
         const packageSymbol = packageSymbolFor(packageName);
         symbol.parent = packageSymbol;
         packageSymbol.members!.set(simpleName, symbol);
-        typesByFqn.set(packageName ? `${packageName}.${simpleName}` : simpleName, symbol);
+        typesByFqn.set((packageName ? `${packageName}.${simpleName}` : simpleName) as Fqn, symbol);
       }
     }
 
@@ -191,7 +195,7 @@ export function createProgram(): Program {
     for (const name of packageSymbols.keys()) {
       const segments = name.split(".");
       for (let i = 1; i < segments.length; i++) {
-        const prefix = segments.slice(0, i).join(".");
+        const prefix = segments.slice(0, i).join(".") as PackageName;
         if (!packagesByName.has(prefix)) {
           packagesByName.set(prefix, {
             flags: SymbolFlags.Package,
@@ -208,7 +212,7 @@ export function createProgram(): Program {
     getPackageTypes: packageName => packages.get(packageName),
     getPackageSymbol: packageName => packageSymbols.get(packageName),
     findFqnsBySimpleName: simpleName => {
-      const result: string[] = [];
+      const result: Fqn[] = [];
       for (const fqn of typesByFqn.keys()) {
         const dot = fqn.lastIndexOf(".");
         if ((dot < 0 ? fqn : fqn.slice(dot + 1)) === simpleName) result.push(fqn);

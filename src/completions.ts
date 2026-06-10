@@ -7,7 +7,7 @@
 import type { Checker } from "./checker.ts";
 import { type ClassType, TypeKind } from "./checkerTypes.ts";
 import { getNodeAtPosition } from "./nodeAtPosition.ts";
-import type { Program } from "./program.ts";
+import type { Fqn, PackageName, Program } from "./program.ts";
 import { getDirectSuperTypeSymbols, getSourceFileOfNode } from "./resolver.ts";
 import {
   type Node,
@@ -109,17 +109,17 @@ function collectScopeSymbols(node: Node, program: Program): Map<string, Symbol> 
   // file-level: same package, java.lang, single-type imports
   const sourceFile = getSourceFileOfNode(node);
   const index = program.getGlobalIndex();
-  const pkg = sourceFile.packageDeclaration
-    ? entityNameToString(sourceFile.packageDeclaration.name)
-    : "";
+  const pkg = (
+    sourceFile.packageDeclaration ? entityNameToString(sourceFile.packageDeclaration.name) : ""
+  ) as PackageName;
   addAll(index.getPackageTypes(pkg), result);
-  addAll(index.getPackageTypes("java.lang"), result);
+  addAll(index.getPackageTypes("java.lang" as PackageName), result);
   for (const imp of sourceFile.imports) {
     if (imp.isStatic) continue;
     if (imp.isOnDemand) {
-      addAll(index.getPackageTypes(entityNameToString(imp.name)), result);
+      addAll(index.getPackageTypes(entityNameToString(imp.name) as PackageName), result);
     } else {
-      const fqn = entityNameToString(imp.name);
+      const fqn = entityNameToString(imp.name) as Fqn;
       const type = index.getType(fqn);
       if (type) result.set(fqn.slice(fqn.lastIndexOf(".") + 1), type);
     }

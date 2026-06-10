@@ -5,22 +5,19 @@ let client;
 
 function activate(context) {
   const repoRoot = path.join(__dirname, "..");
-  const serverModule = path.join(repoRoot, "dist", "server.mjs");
+  // Run the TypeScript source directly via the repo's tsx: a bundled
+  // dist/server.mjs silently goes stale whenever the source changes, which is
+  // exactly the failure mode a test client must not have.
+  const tsx = path.join(repoRoot, "node_modules", ".bin", "tsx");
+  const serverMain = path.join(repoRoot, "src", "serverMain.ts");
 
-  const serverOptions = {
-    run: {
-      command: "node",
-      args: [serverModule],
-      options: { cwd: repoRoot },
-      transport: TransportKind.stdio,
-    },
-    debug: {
-      command: "node",
-      args: [serverModule],
-      options: { cwd: repoRoot },
-      transport: TransportKind.stdio,
-    },
+  const run = {
+    command: tsx,
+    args: [serverMain],
+    options: { cwd: repoRoot },
+    transport: TransportKind.stdio,
   };
+  const serverOptions = { run, debug: run };
 
   const clientOptions = {
     documentSelector: [{ scheme: "file", language: "java" }],

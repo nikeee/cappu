@@ -21,7 +21,7 @@ import {
 } from "./checkerTypes.ts";
 import { createDiagnostic, Diagnostics } from "./diagnostics.ts";
 import { forEachChild } from "./parser.ts";
-import type { Program } from "./program.ts";
+import type { Fqn, PackageName, Program } from "./program.ts";
 import {
   getDirectSuperTypeSymbols,
   getSourceFileOfNode,
@@ -215,8 +215,9 @@ export function createChecker(program: Program): Checker {
     return objectSymbol()?.members?.get(name);
   }
 
+  // The trusted dotted-name boundary: literal JDK names and BOX entries enter here.
   function classTypeByFqn(fqn: string): Type {
-    const symbol = program.getGlobalIndex().getType(fqn);
+    const symbol = program.getGlobalIndex().getType(fqn as Fqn);
     return symbol ? classType(symbol) : errorType;
   }
 
@@ -719,7 +720,7 @@ export function createChecker(program: Program): Checker {
   function elementTypeOf(iterable: Type): Type {
     if (iterable.kind === TypeKind.Array) return iterable.elementType;
     if (iterable.kind === TypeKind.Class) {
-      const iterableSymbol = program.getGlobalIndex().getType("java.lang.Iterable");
+      const iterableSymbol = program.getGlobalIndex().getType("java.lang.Iterable" as Fqn);
       if (iterableSymbol) {
         const instance = asInstanceOf(iterable as ClassType, iterableSymbol);
         if (instance && instance.typeArguments.length > 0) return instance.typeArguments[0]!;
@@ -932,7 +933,7 @@ export function createChecker(program: Program): Checker {
     const prefix = qualifiedPrefix(identifier);
     if (!prefix) return undefined;
     const index = program.getGlobalIndex();
-    return index.getType(prefix) ?? index.getPackageByName(prefix);
+    return index.getType(prefix as Fqn) ?? index.getPackageByName(prefix as PackageName);
   }
 
   function numericLiteralType(value: string): Type {
@@ -1103,7 +1104,7 @@ export function createChecker(program: Program): Checker {
   }
 
   function objectSymbol(): Symbol | undefined {
-    return program.getGlobalIndex().getType("java.lang.Object");
+    return program.getGlobalIndex().getType("java.lang.Object" as Fqn);
   }
 
   // source's class symbol is a subtype of target's (incl. implicit Object).
@@ -1582,7 +1583,7 @@ export function createChecker(program: Program): Checker {
 
     if (search(enclosing)) return "ok";
     // Every type implicitly extends Object; require it to be known to decide.
-    const objectSymbol = program.getGlobalIndex().getType("java.lang.Object");
+    const objectSymbol = program.getGlobalIndex().getType("java.lang.Object" as Fqn);
     if (!objectSymbol) return "unknown";
     if (declaresMethod(objectSymbol)) return "ok";
     return incomplete ? "unknown" : "missing";

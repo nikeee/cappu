@@ -136,3 +136,5 @@ no timestamps were captured.
 - 2026-06-11 01:09 — Implement an internal api that is not connected to any of the remaining code base. it can be in a sub-directory of "src" that only contains source for that matter. it should be able to resolve and search dependencies from a set of package sources. It should be able to resolve the transitive dependencies. Add tests.
 - 2026-06-11 01:09 — add other common repository sources to the default sources. maybe the ones of gradle and maven
 - 2026-06-11 01:09 — keep in mind to use branded types in new code as well
+- 2026-06-11 01:17 — search for more opportunities to use branded types. for example, in the parser or checker.
+- 2026-06-11 01:17 — fix stuff that broke during the last feature additions and refactorings. for example, the vscode-extension broke. make sure you've got everything. be strict

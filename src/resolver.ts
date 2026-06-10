@@ -8,7 +8,7 @@
 
 import { forEachChild } from "./parser.ts";
 import { type Uri } from "./workspace.ts";
-import type { GlobalIndex, Program } from "./program.ts";
+import type { Fqn, GlobalIndex, PackageName, Program } from "./program.ts";
 import {
   type ClassDeclaration,
   type EntityName,
@@ -73,10 +73,10 @@ export function getSourceFileOfNode(node: Node): SourceFile {
   return current as SourceFile;
 }
 
-function packageNameOf(sourceFile: SourceFile): string {
-  return sourceFile.packageDeclaration
-    ? entityNameToString(sourceFile.packageDeclaration.name)
-    : "";
+function packageNameOf(sourceFile: SourceFile): PackageName {
+  return (
+    sourceFile.packageDeclaration ? entityNameToString(sourceFile.packageDeclaration.name) : ""
+  ) as PackageName;
 }
 
 function lastSegment(qualified: string): string {
@@ -121,7 +121,7 @@ function superTypeSymbols(typeSymbol: Symbol, program: Program): Symbol[] {
     // An enum implicitly extends java.lang.Enum (JLS 8.9): name(), ordinal(),
     // compareTo(), etc.
     if (declaration.kind === SyntaxKind.EnumDeclaration) {
-      const enumSymbol = program.getGlobalIndex().getType("java.lang.Enum");
+      const enumSymbol = program.getGlobalIndex().getType("java.lang.Enum" as Fqn);
       if (enumSymbol) result.push(enumSymbol);
     }
     for (const typeNode of superTypeNodes(declaration)) {
@@ -210,7 +210,7 @@ function resolveTypeNameCrossFile(
   // single-type imports
   for (const imp of sourceFile.imports) {
     if (!imp.isStatic && !imp.isOnDemand) {
-      const fqn = entityNameToString(imp.name);
+      const fqn = entityNameToString(imp.name) as Fqn;
       if (lastSegment(fqn) === name) {
         const type = index.getType(fqn);
         if (type) return type;
@@ -223,12 +223,12 @@ function resolveTypeNameCrossFile(
   // on-demand imports
   for (const imp of sourceFile.imports) {
     if (!imp.isStatic && imp.isOnDemand) {
-      const type = index.getPackageTypes(entityNameToString(imp.name))?.get(name);
+      const type = index.getPackageTypes(entityNameToString(imp.name) as PackageName)?.get(name);
       if (type) return type;
     }
   }
   // implicit java.lang.*
-  return index.getPackageTypes("java.lang")?.get(name);
+  return index.getPackageTypes("java.lang" as PackageName)?.get(name);
 }
 
 // A value/method imported via `import static T.member` or `import static T.*`
@@ -241,13 +241,13 @@ function resolveStaticImport(
   const index = program.getGlobalIndex();
   for (const imp of sourceFile.imports) {
     if (!imp.isStatic) continue;
-    const fqn = entityNameToString(imp.name);
+    const fqn = entityNameToString(imp.name) as Fqn;
     if (imp.isOnDemand) {
       const type = index.getType(fqn);
       const member = type && lookupMember(type, name, Meaning.Any, program);
       if (member) return member;
     } else if (lastSegment(fqn) === name) {
-      const type = index.getType(fqn.slice(0, fqn.lastIndexOf(".")));
+      const type = index.getType(fqn.slice(0, fqn.lastIndexOf(".")) as Fqn);
       const member = type && lookupMember(type, name, Meaning.Any, program);
       if (member) return member;
     }
@@ -287,7 +287,7 @@ function resolveTypeEntityNameWorker(
   if (name.kind === SyntaxKind.Identifier) {
     return resolveTypeName((name as Identifier).text, fromNode, program);
   }
-  const fqn = entityNameToString(name);
+  const fqn = entityNameToString(name) as Fqn;
   const byFqn = program.getGlobalIndex().getType(fqn);
   if (byFqn) return byFqn;
   // nested type: resolve the left as a type, then look up the right member type

@@ -75,6 +75,7 @@ import { createProgram as _cp } from "./program.ts";
 import { findReferences } from "./resolver.ts";
 import type { Program } from "./program.ts";
 import { type Uri } from "./workspace.ts";
+import type { Fqn } from "./program.ts";
 
 function programOf(files: Record<string, string>): Program {
   const program = _cp();
@@ -102,7 +103,7 @@ test("same-package type resolves across files", () => {
   });
   const sym = resolveInFile(program, "file:///A.java" as Uri, "B");
   expect(sym?.flags).toBe(SymbolFlags.Class);
-  expect(sym).toBe(program.getGlobalIndex().getType("p.B"));
+  expect(sym).toBe(program.getGlobalIndex().getType("p.B" as Fqn));
 });
 
 test("single-type import resolves a type from another package", () => {
@@ -111,7 +112,7 @@ test("single-type import resolves a type from another package", () => {
     "file:///B.java": "package q;\npublic class B {}",
   });
   expect(resolveInFile(program, "file:///A.java" as Uri, "B", 2)).toBe(
-    program.getGlobalIndex().getType("q.B"),
+    program.getGlobalIndex().getType("q.B" as Fqn),
   );
 });
 
@@ -121,7 +122,7 @@ test("on-demand import resolves a type", () => {
     "file:///B.java": "package q;\npublic class B {}",
   });
   expect(resolveInFile(program, "file:///A.java" as Uri, "B", 1)).toBe(
-    program.getGlobalIndex().getType("q.B"),
+    program.getGlobalIndex().getType("q.B" as Fqn),
   );
 });
 
@@ -132,7 +133,7 @@ test("fully-qualified type name resolves via the global index", () => {
   });
   // click the 'B' tail of q.B
   expect(resolveInFile(program, "file:///A.java" as Uri, "B", 1)).toBe(
-    program.getGlobalIndex().getType("q.B"),
+    program.getGlobalIndex().getType("q.B" as Fqn),
   );
 });
 
@@ -143,7 +144,12 @@ test("inherited field resolves to the super class member", () => {
   });
   const sym = resolveInFile(program, "file:///Sub.java" as Uri, "f", 1);
   expect(sym?.flags).toBe(SymbolFlags.Field);
-  expect(sym).toBe(program.getGlobalIndex().getType("p.Base")!.members!.get("f"));
+  expect(sym).toBe(
+    program
+      .getGlobalIndex()
+      .getType("p.Base" as Fqn)!
+      .members!.get("f"),
+  );
 });
 
 test("findReferences returns the declaration and all uses", () => {
@@ -172,7 +178,7 @@ test("findReferences for a cross-file type spans the workspace", () => {
     "file:///A.java": "package p;\nclass A extends Base {}",
     "file:///B.java": "package p;\nclass B extends Base {}",
   });
-  const sym = program.getGlobalIndex().getType("p.Base")!;
+  const sym = program.getGlobalIndex().getType("p.Base" as Fqn)!;
   const refs = findReferences(sym, program);
   // declaration name in Base.java + the two extends uses
   expect(refs.length).toBe(3);

@@ -13,6 +13,7 @@ import { emitSourceFile } from "./emitter.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
 import { type Uri } from "./workspace.ts";
+import type { Fqn } from "./program.ts";
 
 // Emit with OUR compiler, read the bytes back as a stub - a self-contained
 // roundtrip with no JDK needed.
@@ -133,7 +134,7 @@ test(
     loadJdkStub(program);
     const loaded = loadClassPath(program, [join(dir, "util.jar")]);
     expect(loaded).toBe(1);
-    expect(program.getGlobalIndex().getType("lib.Util")).toBeDefined();
+    expect(program.getGlobalIndex().getType("lib.Util" as Fqn)).toBeDefined();
   },
 );
 

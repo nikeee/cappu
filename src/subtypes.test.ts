@@ -6,6 +6,7 @@ import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
 import { getSubtypeIndex } from "./subtypes.ts";
 import { type Uri } from "./workspace.ts";
+import type { Fqn } from "./program.ts";
 
 test("direct and transitive subtypes resolve across files; memo invalidates on change", () => {
   const program = createProgram();
@@ -14,8 +15,8 @@ test("direct and transitive subtypes resolve across files; memo invalidates on c
   program.addProjectFile("file:///A.java" as Uri, "class A implements I {}");
   program.addProjectFile("file:///B.java" as Uri, "class B extends A {}");
 
-  const i = program.getGlobalIndex().getType("I")!;
-  const a = program.getGlobalIndex().getType("A")!;
+  const i = program.getGlobalIndex().getType("I" as Fqn)!;
+  const a = program.getGlobalIndex().getType("A" as Fqn)!;
   let index = getSubtypeIndex(program);
   expect(index.directSubtypesOf(i).map(s => s.escapedName)).toEqual(["A"]);
   expect(
@@ -29,5 +30,5 @@ test("direct and transitive subtypes resolve across files; memo invalidates on c
   // The memo is generation-keyed: a new subtype shows up after a file change.
   program.addProjectFile("file:///C.java" as Uri, "class C implements I {}");
   index = getSubtypeIndex(program);
-  expect(index.allSubtypesOf(program.getGlobalIndex().getType("I")!).length).toBe(3);
+  expect(index.allSubtypesOf(program.getGlobalIndex().getType("I" as Fqn)!).length).toBe(3);
 });
