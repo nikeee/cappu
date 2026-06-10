@@ -407,7 +407,7 @@ class ConstantPool {
     return index;
   }
 
-  utf8(value: string): number {
+  utf8(value: string): CpIndex {
     return this.intern(`u:${value}`, b => {
       b.u1(CONSTANT_Utf8);
       b.u2(b.utf8Length(value));
@@ -848,9 +848,9 @@ function collectFieldInits(
 function assembleClassFile(parts: {
   cp: ConstantPool;
   accessFlags: number;
-  thisClassIndex: number;
-  superClassIndex: number;
-  interfaceIndices: number[];
+  thisClassIndex: CpIndex;
+  superClassIndex: CpIndex;
+  interfaceIndices: CpIndex[];
   fields: ByteBuffer;
   fieldCount: number;
   methods: ByteBuffer;
@@ -1251,7 +1251,7 @@ function constantValueIndex(
   declarator: VariableDeclarator,
   cp: ConstantPool,
   program: Program,
-): number | undefined {
+): CpIndex | undefined {
   if (!isConstantValueField(field, declarator, program)) return undefined;
   const init = declarator.initializer!;
   const descriptor = descriptorOf(field.type, program);
@@ -1537,7 +1537,8 @@ interface ExceptionTableEntry {
   start: number;
   end: number;
   handler: number;
-  catchType: number;
+  /** Class cp entry of the caught type, or the literal 0 for a catch-all. */
+  catchType: CpIndex | 0;
 }
 
 // Cleanup that an abrupt exit must run on the way out (see finallyStack). A
@@ -6185,7 +6186,7 @@ export function emitInterface(
     for (const declarator of field.declarators) {
       const d = declarator as VariableDeclarator;
       const init = d.initializer;
-      let constIndex: number | undefined;
+      let constIndex: CpIndex | undefined;
       if (init) {
         if (descriptor === "Ljava/lang/String;" && init.kind === SyntaxKind.StringLiteral) {
           constIndex = cp.string((init as LiteralExpression).value);

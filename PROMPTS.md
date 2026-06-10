@@ -123,3 +123,4 @@ no timestamps were captured.
 - 2026-06-10 18:40 — use top-level await in cli.ts; tcp.once -> await once from node events
 - 2026-06-10 18:55 — introduce branded types pattern; make a list of usage opportunities
 - 2026-06-10 19:27 — after applying the branded types pattern, go through the entire source and look for patterns that can be replaced by node's APIs (like the once-eventemitter-helper from before). Maybe consider looking at the node.js 26 docs for that.
+- 2026-06-10 19:30 — ConstantPool still has some missed opportunities for branded types. e.g. utf8(). Also make the parameters use a branded type as well, so we can get more type-safe across the entire emitting process
