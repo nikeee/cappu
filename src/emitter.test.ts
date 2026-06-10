@@ -2670,3 +2670,30 @@ test(
     );
   },
 );
+
+test(
+  "stack traces carry source line numbers (LineNumberTable)",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "TraceLines",
+      [
+        "public class TraceLines {", // line 1
+        "  static void boom() {", // 2
+        "    int x = 1;", // 3
+        "    if (x > 0) {", // 4
+        '      throw new RuntimeException("here");', // 5
+        "    }",
+        "  }",
+        "  public static void main(String[] a) {",
+        "    try { boom(); } catch (RuntimeException e) {",
+        "      StackTraceElement top = e.getStackTrace()[0];",
+        '      System.out.println(top.getMethodName() + ":" + top.getLineNumber());',
+        "    }",
+        "  }",
+        "}",
+      ].join("\n"),
+      "boom:5\n",
+    );
+  },
+);

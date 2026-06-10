@@ -105,3 +105,4 @@ no timestamps were captured.
 - 2026-06-10 09:40 — check if you can do some performance optimizations. keep in mind that the architecture of the code has to be similar to the one that typescripts compiler uses
 - 2026-06-10 10:10 — continue
 - 2026-06-10 10:45 — continue (corpus regen after erasure/Signature)
+- 2026-06-10 11:20 — continue / check whats missing in the jdk stub

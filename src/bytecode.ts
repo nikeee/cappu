@@ -13,7 +13,8 @@ import { foldConstant } from "./constfold.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import { resolveIdentifier, resolveTypeEntityName } from "./resolver.ts";
-import { entityNameToString, tokenToString } from "./utilities.ts";
+import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
+import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
 import {
   type ArrayType as AstArrayType,
   type TypeParameter as AstTypeParameter,
@@ -78,6 +79,17 @@ import {
   type YieldStatement,
   type WhileStatement,
 } from "./types.ts";
+
+// Line starts per source file, for LineNumberTable entries (computed once).
+const lineStartsCache = new WeakMap<SourceFile, readonly number[]>();
+function lineStartsOf(sourceFile: SourceFile): readonly number[] {
+  let starts = lineStartsCache.get(sourceFile);
+  if (!starts) {
+    starts = computeLineStarts(sourceFile.text);
+    lineStartsCache.set(sourceFile, starts);
+  }
+  return starts;
+}
 
 // Thrown when a construct is not yet handled by code generation; the caller
 // falls back to a verifiable placeholder body so output is always valid. It is
@@ -1697,6 +1709,29 @@ function generateBody(
   }
   let maxLocals = nextSlot;
   const code = new ByteBuffer();
+
+  // LineNumberTable entries (JVMS 4.7.12), recorded at each statement start so
+  // stack traces carry source lines. The source file is found lazily from the
+  // first real statement's parent chain (synthetic wrapper bodies have no
+  // positions of their own, but the statements inside them do).
+  const lineNumbers: { pc: number; line: number }[] = [];
+  let lineSource: { text: string; starts: readonly number[] } | null | undefined;
+  const recordLine = (node: Node): void => {
+    if (typeof node.pos !== "number" || node.pos < 0 || node.end <= node.pos) return; // synthetic
+    if (lineSource === undefined) {
+      let p: Node | undefined = node;
+      while (p && p.kind !== SyntaxKind.SourceFile) p = p.parent;
+      lineSource = p ? { text: (p as SourceFile).text, starts: lineStartsOf(p as SourceFile) } : null;
+    }
+    if (!lineSource) return;
+    const start = skipTrivia(lineSource.text, node.pos); // pos includes leading trivia
+    if (start >= lineSource.text.length) return;
+    const line = getLineAndCharacterOfPosition(lineSource.starts, start).line + 1; // 1-based
+    const last = lineNumbers[lineNumbers.length - 1];
+    if (last && last.pc === code.length) last.line = line; // previous entry emitted no code yet
+    else if (last && last.line === line) return; // the same line continues
+    else lineNumbers.push({ pc: code.length, line });
+  };
 
   // Run `body` in a nested local scope: locals it declares are dropped (and their
   // slots reusable) afterwards, so a stack-map frame at a later label lists only
@@ -4504,6 +4539,7 @@ function generateBody(
 
   // Returns true if the statement is a definite terminator (return).
   const emitStmt = (stmt: Node): boolean => {
+    recordLine(stmt);
     switch (stmt.kind) {
       case SyntaxKind.Block: {
         return inScope(() => {
@@ -5329,7 +5365,7 @@ function generateBody(
     }
   }
 
-  return { code, maxStack, maxLocals, stackMapTable, exceptionTable };
+  return { code, maxStack, maxLocals, stackMapTable, exceptionTable, lineNumbers };
 }
 
 function emitMethod(
@@ -5474,6 +5510,8 @@ interface MethodBody {
   maxLocals: number;
   stackMapTable?: ByteBuffer;
   exceptionTable?: ExceptionTableEntry[];
+  /** LineNumberTable entries (JVMS 4.7.12): 1-based source line per code offset. */
+  lineNumbers?: { pc: number; line: number }[];
 }
 
 // Append the Code attribute (with an optional StackMapTable sub-attribute) and,
@@ -5486,11 +5524,13 @@ function writeCodeAttribute(
 ): void {
   const smt = body.stackMapTable;
   const smtBytes = smt ? 6 + smt.length : 0;
+  const lines = body.lineNumbers ?? [];
+  const lntBytes = lines.length > 0 ? 6 + 2 + 4 * lines.length : 0;
   const handlers = body.exceptionTable ?? [];
 
   const codeAttr = new ByteBuffer();
   codeAttr.u2(cp.utf8("Code"));
-  codeAttr.u4(12 + body.code.length + handlers.length * 8 + smtBytes);
+  codeAttr.u4(12 + body.code.length + handlers.length * 8 + lntBytes + smtBytes);
   codeAttr.u2(body.maxStack);
   codeAttr.u2(body.maxLocals);
   codeAttr.u4(body.code.length);
@@ -5502,7 +5542,17 @@ function writeCodeAttribute(
     codeAttr.u2(h.handler);
     codeAttr.u2(h.catchType);
   }
-  codeAttr.u2(smt ? 1 : 0); // attributes_count
+  codeAttr.u2((lines.length > 0 ? 1 : 0) + (smt ? 1 : 0)); // attributes_count
+  if (lines.length > 0) {
+    // LineNumberTable (JVMS 4.7.12), before StackMapTable as javac orders them.
+    codeAttr.u2(cp.utf8("LineNumberTable"));
+    codeAttr.u4(2 + 4 * lines.length);
+    codeAttr.u2(lines.length);
+    for (const l of lines) {
+      codeAttr.u2(l.pc);
+      codeAttr.u2(l.line);
+    }
+  }
   if (smt) {
     codeAttr.u2(cp.utf8("StackMapTable"));
     codeAttr.u4(smt.length);

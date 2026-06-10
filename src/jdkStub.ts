@@ -273,7 +273,13 @@ class Throwable {
   public void printStackTrace() {}
   public StackTraceElement[] getStackTrace() { return null; }
 }
-class StackTraceElement {}
+class StackTraceElement {
+  public String getClassName() { return null; }
+  public String getMethodName() { return null; }
+  public String getFileName() { return null; }
+  public int getLineNumber() { return 0; }
+  public String toString() { return null; }
+}
 class Error extends Throwable { public Error() {} public Error(String m) {} }
 class AssertionError extends Error { public AssertionError() {} public AssertionError(Object m) {} }
 class Exception extends Throwable {

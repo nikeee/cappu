@@ -192,7 +192,10 @@ These do not affect correctness but widen the diff vs javac's output.
       when synthetic this$0/capture params were spliced in), and fields. The
       strings byte-match javac's (javap reprints `T get();` etc. identically).
       Records and synthetic members (lambda impls, accessors) are not covered.
-- [ ] `LineNumberTable` (JVMS 4.7.12) and `LocalVariableTable` (4.7.13).
+- [x] `LineNumberTable` (JVMS 4.7.12): an entry per statement start (1-based,
+      trivia-skipped), so stack traces carry source lines - verified equal to
+      javac's at runtime via getStackTrace(). Synthetic bodies (no positions)
+      simply emit no table. `LocalVariableTable` (4.7.13) remains.
 - [ ] `RuntimeVisibleAnnotations` (JVMS 4.7.16).
 
 ## Done (recent)
