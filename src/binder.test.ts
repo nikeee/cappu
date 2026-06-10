@@ -1,8 +1,9 @@
 import { test } from "node:test";
+
 import { expect } from "expect";
 
-import { forEachChild, parseSourceFile } from "./parser.ts";
 import { bindSourceFile } from "./binder.ts";
+import { forEachChild, parseSourceFile } from "./parser.ts";
 import {
   type ClassDeclaration,
   type MethodDeclaration,

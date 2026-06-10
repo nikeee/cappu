@@ -1,4 +1,5 @@
 import { test } from "node:test";
+
 import { expect } from "expect";
 
 import { createChecker } from "./checker.ts";
@@ -78,7 +79,11 @@ test("settings disable each hint family independently", () => {
     "  void m() { var n = twice(21); }",
     "}",
   ].join("\n");
-  expect(hints(source).map(h => h.kind).sort()).toEqual(["parameter", "type"]);
+  expect(
+    hints(source)
+      .map(h => h.kind)
+      .sort(),
+  ).toEqual(["parameter", "type"]);
   expect(hints(source, { ...DEFAULT_INLAY_HINTS, parameterNames: false }).map(h => h.kind)).toEqual(
     ["type"],
   );

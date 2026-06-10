@@ -6,7 +6,6 @@
 
 import { bindSourceFile } from "./binder.ts";
 import { parseSourceFile } from "./parser.ts";
-import { entityNameToString } from "./utilities.ts";
 import {
   type Node,
   type SourceFile,
@@ -15,6 +14,7 @@ import {
   type SymbolTable,
   SyntaxKind,
 } from "./types.ts";
+import { entityNameToString } from "./utilities.ts";
 
 /** Cross-file lookup of top-level types by package and fully-qualified name. */
 export interface GlobalIndex {

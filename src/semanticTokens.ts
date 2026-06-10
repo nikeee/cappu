@@ -33,9 +33,7 @@ export const TOKEN_TYPES = [
 
 export const TOKEN_MODIFIERS = ["declaration", "static", "readonly", "defaultLibrary"] as const;
 
-const TYPE_INDEX: Record<string, number> = Object.fromEntries(
-  TOKEN_TYPES.map((t, i) => [t, i]),
-);
+const TYPE_INDEX: Record<string, number> = Object.fromEntries(TOKEN_TYPES.map((t, i) => [t, i]));
 const MOD_BIT: Record<string, number> = Object.fromEntries(
   TOKEN_MODIFIERS.map((m, i) => [m, 1 << i]),
 );
@@ -103,7 +101,9 @@ export function getSemanticTokens(checker: Checker, sourceFile: SourceFile): Sem
         const length = node.end - start;
         if (length > 0) {
           const isDeclarationName =
-            !!node.parent && node.parent.symbol === symbol && (node.parent as { name?: Node }).name === node;
+            !!node.parent &&
+            node.parent.symbol === symbol &&
+            (node.parent as { name?: Node }).name === node;
           entries.push({
             offset: start,
             length,

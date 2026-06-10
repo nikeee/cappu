@@ -84,7 +84,8 @@ function typeParameterBounds(symbol: Symbol): string | undefined {
  */
 export function getHoverText(checker: Checker, symbol: Symbol, atNode?: Node): string {
   if (symbol.flags & (SymbolFlags.Method | SymbolFlags.Constructor)) {
-    const call = atNode?.kind === SyntaxKind.Identifier ? enclosingCall(atNode as Identifier) : undefined;
+    const call =
+      atNode?.kind === SyntaxKind.Identifier ? enclosingCall(atNode as Identifier) : undefined;
     const instantiated = call ? checker.instantiatedSignatureOfCall(call) : undefined;
     if (instantiated) return instantiated;
     const signature = checker.signatureOfSymbol(symbol);

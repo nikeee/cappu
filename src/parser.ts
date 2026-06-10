@@ -9,15 +9,9 @@
 // milestones; everything else is recovered as "declaration or statement
 // expected" without aborting.
 
-import { createScanner } from "./scanner.ts";
 import { createDiagnostic } from "./diagnostics.ts";
 import { Diagnostics } from "./diagnostics.ts";
-import {
-  isAssignmentOperator,
-  isModifierKeyword,
-  isPrimitiveTypeKeyword,
-  tokenToString,
-} from "./utilities.ts";
+import { createScanner } from "./scanner.ts";
 import {
   type Annotation,
   type AnnotationArgument,
@@ -112,6 +106,12 @@ import {
   type WhileStatement,
   type WildcardType,
 } from "./types.ts";
+import {
+  isAssignmentOperator,
+  isModifierKeyword,
+  isPrimitiveTypeKeyword,
+  tokenToString,
+} from "./utilities.ts";
 
 type Mutable<T> = { -readonly [P in keyof T]: T[P] };
 

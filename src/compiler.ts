@@ -9,8 +9,8 @@ import { dirname, join } from "node:path";
 
 import { setDegradeListener } from "./bytecode.ts";
 import { createChecker } from "./checker.ts";
-import { type CappuConfig, resolveConfigPath } from "./config.ts";
 import { loadClassPath } from "./classfileReader.ts";
+import { type CappuConfig, resolveConfigPath } from "./config.ts";
 import { emitSourceFile } from "./emitter.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram, type Program } from "./program.ts";

@@ -1,13 +1,14 @@
 import { test } from "node:test";
+
 import { expect } from "expect";
 
 import { createChecker } from "./checker.ts";
+import { type Checker } from "./checker.ts";
 import { typeToString } from "./checkerTypes.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { getIdentifierAtPosition, getNodeAtPosition } from "./nodeAtPosition.ts";
 import { createProgram } from "./program.ts";
 import type { Program } from "./program.ts";
-import { type Checker } from "./checker.ts";
 import {
   type Identifier,
   type Node,

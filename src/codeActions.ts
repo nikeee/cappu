@@ -8,7 +8,6 @@ import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import { findReferences, getSourceFileOfNode } from "./resolver.ts";
-import { entityNameToString, skipTrivia } from "./utilities.ts";
 import {
   type AssignmentExpression,
   type CallExpression,
@@ -23,6 +22,7 @@ import {
   SyntaxKind,
   type VariableDeclarator,
 } from "./types.ts";
+import { entityNameToString, skipTrivia } from "./utilities.ts";
 
 function forEachDescendant(node: Node, cb: (n: Node) => void): void {
   cb(node);

@@ -1,5 +1,3 @@
-import { test } from "node:test";
-import { expect } from "expect";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -11,7 +9,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { expect } from "expect";
 
 import { setDegradeListener } from "./bytecode.ts";
 import { createChecker } from "./checker.ts";
@@ -123,14 +124,14 @@ const FIXTURES: Record<string, string> = {
     "class BoundErasure<T extends CharSequence> { T v; T get() { return v; } int len() { return v.length(); } static <U extends Comparable<U>> int cmp(U a, U b) { return a.compareTo(b); } static <V> V id(V x) { return x; } }",
   // Constant loads: iconst_m1.._5, bipush, sipush, ldc (int/long/float/double/String).
   Constants:
-    "class Constants { int zero() { return 0; } int five() { return 5; } int m1() { return -1; } int bp() { return 100; } int sp() { return 1000; } int big() { return 100000; } long lone() { return 1L; } long lbig() { return 10000000000L; } float fz() { return 0f; } double dz() { return 0.0; } String s() { return \"x\"; } }",
+    'class Constants { int zero() { return 0; } int five() { return 5; } int m1() { return -1; } int bp() { return 100; } int sp() { return 1000; } int big() { return 100000; } long lone() { return 1L; } long lbig() { return 10000000000L; } float fz() { return 0f; } double dz() { return 0.0; } String s() { return "x"; } }',
   // The return instruction for each type (ireturn/lreturn/freturn/dreturn/areturn/return).
   Returns:
     "class Returns { int i() { return 7; } long l() { return 7L; } float f() { return 1.5f; } double d() { return 2.5; } boolean b() { return true; } char c() { return 'Z'; } byte by() { return 3; } short sh() { return 300; } String s() { return \"hi\"; } Object o() { return null; } void v() {} }",
   // Varargs call packing: the trailing args become a fresh array (matching javac's
   // anewarray/dup/iconst/astore sequence exactly), JLS 15.12.4.2.
   VarargsPack:
-    "class VarargsPack { static int sum(int... xs) { return xs.length; } static String join(String sep, Object... ps) { return sep; } int callPrim() { return sum(1, 2, 3); } int callEmpty() { return sum(); } String callMixed() { return join(\"-\", \"a\", \"b\"); } }",
+    'class VarargsPack { static int sum(int... xs) { return xs.length; } static String join(String sep, Object... ps) { return sep; } int callPrim() { return sum(1, 2, 3); } int callEmpty() { return sum(); } String callMixed() { return join("-", "a", "b"); } }',
 };
 
 // Fixtures with a runnable main and the output they must print.
@@ -219,7 +220,9 @@ function runsLikeJavac(mainClass: string, source: string, expectedStdout: string
     const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
     writeFileSync(join(ref, `${mainClass}.java`), source);
     execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${mainClass}.java`)]);
-    expect(execFileSync("java", ["-cp", ref, mainClass], { encoding: "utf8" })).toBe(expectedStdout);
+    expect(execFileSync("java", ["-cp", ref, mainClass], { encoding: "utf8" })).toBe(
+      expectedStdout,
+    );
   }
 
   const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
@@ -238,7 +241,9 @@ function runsLikeJavac(mainClass: string, source: string, expectedStdout: string
 function loadJavacRef(fixtureName: string, source: string): Map<string, Disasm> | undefined {
   const file = join(javacRefDir, `${fixtureName}.json`);
   if (!shouldUpdate && existsSync(file)) {
-    return new Map(Object.entries(JSON.parse(readFileSync(file, "utf8")) as Record<string, Disasm>));
+    return new Map(
+      Object.entries(JSON.parse(readFileSync(file, "utf8")) as Record<string, Disasm>),
+    );
   }
   if (!(HAS_JAVAC && HAS_JAVA)) return undefined;
   const dir = mkdtempSync(join(tmpdir(), "javac-ref-"));
@@ -320,7 +325,9 @@ for (const [name, source] of Object.entries(MULTI_FIXTURES)) {
       if (!ref) return;
       // We must emit exactly the classes javac does (each nested class as its own
       // Outer$Inner.class), and each must match javac's disassembly.
-      const emitted = emitClasses(name, source).map(c => c.name).sort();
+      const emitted = emitClasses(name, source)
+        .map(c => c.name)
+        .sort();
       expect(emitted).toEqual([...ref.keys()].sort());
       for (const cn of emitted) expectMatchesJavac(oursDisasm().get(cn), ref.get(cn)!);
     },
@@ -353,41 +360,37 @@ test(
   },
 );
 
-test(
-  "casts and instanceof run identically to javac",
-  { skip: HAS_JAVA ? false : "no JDK" },
-  () => {
-    const name = "Cast";
-    const src = [
-      "public class Cast {",
-      "  public static void main(String[] args) {",
-      "    long big = 300L;",
-      "    int i = (int) big;",
-      "    byte b = (byte) i;",
-      "    int t = (int) (i * 2);",
-      "    System.out.println(i);",
-      "    System.out.println(b);",
-      "    System.out.println(t);",
-      '    Object o = "hello";',
-      "    String s = (String) o;",
-      "    System.out.println(s);",
-      "    System.out.println(o instanceof String);",
-      "    System.out.println(o instanceof Integer);",
-      "  }",
-      "}",
-    ].join("\n");
-    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-    writeFileSync(join(ref, `${name}.java`), src);
-    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
-    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+test("casts and instanceof run identically to javac", { skip: HAS_JAVA ? false : "no JDK" }, () => {
+  const name = "Cast";
+  const src = [
+    "public class Cast {",
+    "  public static void main(String[] args) {",
+    "    long big = 300L;",
+    "    int i = (int) big;",
+    "    byte b = (byte) i;",
+    "    int t = (int) (i * 2);",
+    "    System.out.println(i);",
+    "    System.out.println(b);",
+    "    System.out.println(t);",
+    '    Object o = "hello";',
+    "    String s = (String) o;",
+    "    System.out.println(s);",
+    "    System.out.println(o instanceof String);",
+    "    System.out.println(o instanceof Integer);",
+    "  }",
+    "}",
+  ].join("\n");
+  const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
+  writeFileSync(join(ref, `${name}.java`), src);
+  execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
+  const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
 
-    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
-    writeFileSync(join(ours, `${name}.class`), emit(name, src));
-    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
-    expect(ourOut).toBe(refOut);
-    expect(refOut).toBe("300\n44\n600\nhello\ntrue\nfalse\n");
-  },
-);
+  const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+  writeFileSync(join(ours, `${name}.class`), emit(name, src));
+  const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+  expect(ourOut).toBe(refOut);
+  expect(refOut).toBe("300\n44\n600\nhello\ntrue\nfalse\n");
+});
 
 test(
   "inheritance, interfaces and packages run identically to javac",
@@ -624,26 +627,22 @@ test(
   },
 );
 
-test(
-  "throw statements run identically to javac",
-  { skip: HAS_JAVA ? false : "no JDK" },
-  () => {
-    runsLikeJavac(
-      "Tw",
-      [
-        "public class Tw {",
-        '  static int checked(int n){ if (n < 0) throw new IllegalArgumentException("neg"); return n * 2; }',
-        "  static int half(int n){ if (n == 0) throw new RuntimeException(); return 100 / n; }",
-        "  public static void main(String[] a){",
-        "    System.out.println(checked(5));",
-        "    System.out.println(half(4));",
-        "  }",
-        "}",
-      ].join("\n"),
-      "10\n25\n",
-    );
-  },
-);
+test("throw statements run identically to javac", { skip: HAS_JAVA ? false : "no JDK" }, () => {
+  runsLikeJavac(
+    "Tw",
+    [
+      "public class Tw {",
+      '  static int checked(int n){ if (n < 0) throw new IllegalArgumentException("neg"); return n * 2; }',
+      "  static int half(int n){ if (n == 0) throw new RuntimeException(); return 100 / n; }",
+      "  public static void main(String[] a){",
+      "    System.out.println(checked(5));",
+      "    System.out.println(half(4));",
+      "  }",
+      "}",
+    ].join("\n"),
+    "10\n25\n",
+  );
+});
 
 test(
   "explicit super(args)/this(args) constructor invocations run identically to javac",
@@ -665,9 +664,9 @@ test(
         "  }",
         "  public static void main(String[] a){",
         "    Derived p = new Derived(5);",
-        "    System.out.println(p.b + \" \" + p.d + \" \" + p.sum());",
+        '    System.out.println(p.b + " " + p.d + " " + p.sum());',
         "    Derived q = new Derived();",
-        "    System.out.println(q.b + \" \" + q.d + \" \" + q.sum());",
+        '    System.out.println(q.b + " " + q.d + " " + q.sum());',
         "  }",
         "}",
       ].join("\n"),
@@ -708,10 +707,10 @@ test(
   () => {
     const src = [
       "public class Asrt {",
-      "  static int checked(int n){ assert n > 0 : \"bad \" + n; return n; }",
+      '  static int checked(int n){ assert n > 0 : "bad " + n; return n; }',
       "  public static void main(String[] a){",
       "    try { System.out.println(checked(-1)); }",
-      "    catch (AssertionError e) { System.out.println(\"caught \" + e.getMessage()); }",
+      '    catch (AssertionError e) { System.out.println("caught " + e.getMessage()); }',
       "  }",
       "}",
     ].join("\n");
@@ -1032,36 +1031,32 @@ test(
   },
 );
 
-test(
-  "enum declarations run identically to javac",
-  { skip: HAS_JAVA ? false : "no JDK" },
-  () => {
-    runsLikeJavac(
-      "En",
-      [
-        "public class En {",
-        "  enum Color { RED, GREEN, BLUE }",
-        "  enum Planet {",
-        "    EARTH(5.976e24), MARS(6.421e23);",
-        "    private final double mass;",
-        "    Planet(double mass){ this.mass = mass; }",
-        "    double getMass(){ return mass; }",
-        "  }",
-        "  public static void main(String[] a){",
-        '    System.out.println(Color.RED.name() + " " + Color.RED.ordinal());',
-        "    System.out.println(Color.BLUE.ordinal());",
-        '    System.out.println(Color.valueOf("GREEN").name());', // synthesized valueOf + inherited name()
-        "    System.out.println(Planet.EARTH.getMass());", // constant with constructor arg
-        "    System.out.println(Planet.MARS.name());",
-        "    System.out.println(Color.RED == Color.RED);", // identity
-        "    System.out.println(Color.RED == Color.BLUE);",
-        "  }",
-        "}",
-      ].join("\n"),
-      "RED 0\n2\nGREEN\n5.976E24\nMARS\ntrue\nfalse\n",
-    );
-  },
-);
+test("enum declarations run identically to javac", { skip: HAS_JAVA ? false : "no JDK" }, () => {
+  runsLikeJavac(
+    "En",
+    [
+      "public class En {",
+      "  enum Color { RED, GREEN, BLUE }",
+      "  enum Planet {",
+      "    EARTH(5.976e24), MARS(6.421e23);",
+      "    private final double mass;",
+      "    Planet(double mass){ this.mass = mass; }",
+      "    double getMass(){ return mass; }",
+      "  }",
+      "  public static void main(String[] a){",
+      '    System.out.println(Color.RED.name() + " " + Color.RED.ordinal());',
+      "    System.out.println(Color.BLUE.ordinal());",
+      '    System.out.println(Color.valueOf("GREEN").name());', // synthesized valueOf + inherited name()
+      "    System.out.println(Planet.EARTH.getMass());", // constant with constructor arg
+      "    System.out.println(Planet.MARS.name());",
+      "    System.out.println(Color.RED == Color.RED);", // identity
+      "    System.out.println(Color.RED == Color.BLUE);",
+      "  }",
+      "}",
+    ].join("\n"),
+    "RED 0\n2\nGREEN\n5.976E24\nMARS\ntrue\nfalse\n",
+  );
+});
 
 test(
   "autoboxing and unboxing run identically to javac",
@@ -1421,32 +1416,28 @@ for (const [name, { source: src, stdout }] of Object.entries(CONTROL)) {
 
 // Test cases extracted from the corpus projects (algorithms-java, commons-lang,
 // json-java) exercising constructs the targeted suite did not cover in isolation.
-test(
-  "bit manipulation runs identically to javac",
-  { skip: HAS_JAVA ? false : "no JDK" },
-  () => {
-    runsLikeJavac(
-      "Bits",
-      [
-        "public class Bits {",
-        "  static int setBit(int x, int i){ return x | (1 << i); }",
-        "  static int clearBit(int x, int i){ return x & ~(1 << i); }",
-        "  static boolean isSet(int x, int i){ return (x & (1 << i)) != 0; }",
-        "  static int countOnes(int x){ int c = 0; while (x != 0) { c += x & 1; x >>>= 1; } return c; }",
-        "  static long mix(long a, int s){ return (a << s) ^ (a >>> s) | (a & 0xFFL); }",
-        "  public static void main(String[] a){",
-        "    System.out.println(setBit(0, 3));",
-        "    System.out.println(clearBit(15, 1));",
-        "    System.out.println(isSet(8, 3));",
-        "    System.out.println(countOnes(-1));",
-        "    System.out.println(mix(123456789L, 5));",
-        "  }",
-        "}",
-      ].join("\n"),
-      "8\n13\ntrue\n32\n3947068637\n",
-    );
-  },
-);
+test("bit manipulation runs identically to javac", { skip: HAS_JAVA ? false : "no JDK" }, () => {
+  runsLikeJavac(
+    "Bits",
+    [
+      "public class Bits {",
+      "  static int setBit(int x, int i){ return x | (1 << i); }",
+      "  static int clearBit(int x, int i){ return x & ~(1 << i); }",
+      "  static boolean isSet(int x, int i){ return (x & (1 << i)) != 0; }",
+      "  static int countOnes(int x){ int c = 0; while (x != 0) { c += x & 1; x >>>= 1; } return c; }",
+      "  static long mix(long a, int s){ return (a << s) ^ (a >>> s) | (a & 0xFFL); }",
+      "  public static void main(String[] a){",
+      "    System.out.println(setBit(0, 3));",
+      "    System.out.println(clearBit(15, 1));",
+      "    System.out.println(isSet(8, 3));",
+      "    System.out.println(countOnes(-1));",
+      "    System.out.println(mix(123456789L, 5));",
+      "  }",
+      "}",
+    ].join("\n"),
+    "8\n13\ntrue\n32\n3947068637\n",
+  );
+});
 
 test(
   "multidimensional arrays run identically to javac",
@@ -1535,30 +1526,26 @@ test(
   },
 );
 
-test(
-  "recursion runs identically to javac",
-  { skip: HAS_JAVA ? false : "no JDK" },
-  () => {
-    runsLikeJavac(
-      "Rec",
-      [
-        "public class Rec {",
-        "  static long fact(int n){ return n <= 1 ? 1L : n * fact(n - 1); }",
-        "  static int fib(int n){ return n < 2 ? n : fib(n - 1) + fib(n - 2); }",
-        "  static boolean even(int n){ return n == 0 ? true : odd(n - 1); }",
-        "  static boolean odd(int n){ return n == 0 ? false : even(n - 1); }",
-        "  public static void main(String[] a){",
-        "    System.out.println(fact(10));",
-        "    System.out.println(fib(15));",
-        "    System.out.println(even(10));",
-        "    System.out.println(odd(7));",
-        "  }",
-        "}",
-      ].join("\n"),
-      "3628800\n610\ntrue\ntrue\n",
-    );
-  },
-);
+test("recursion runs identically to javac", { skip: HAS_JAVA ? false : "no JDK" }, () => {
+  runsLikeJavac(
+    "Rec",
+    [
+      "public class Rec {",
+      "  static long fact(int n){ return n <= 1 ? 1L : n * fact(n - 1); }",
+      "  static int fib(int n){ return n < 2 ? n : fib(n - 1) + fib(n - 2); }",
+      "  static boolean even(int n){ return n == 0 ? true : odd(n - 1); }",
+      "  static boolean odd(int n){ return n == 0 ? false : even(n - 1); }",
+      "  public static void main(String[] a){",
+      "    System.out.println(fact(10));",
+      "    System.out.println(fib(15));",
+      "    System.out.println(even(10));",
+      "    System.out.println(odd(7));",
+      "  }",
+      "}",
+    ].join("\n"),
+    "3628800\n610\ntrue\ntrue\n",
+  );
+});
 
 test(
   "do-while with break and continue runs identically to javac",
@@ -1925,32 +1912,28 @@ test(
   },
 );
 
-test(
-  "record declarations run identically to javac",
-  { skip: HAS_JAVA ? false : "no JDK" },
-  () => {
-    runsLikeJavac(
-      "RecMain",
-      [
-        "record Point(int x, int y) {",
-        "  int sum(){ return x + y; }",
-        "}",
-        "public class RecMain {",
-        "  public static void main(String[] a){",
-        "    Point p = new Point(3, 4);",
-        '    System.out.println(p.x() + "," + p.y());',
-        "    System.out.println(p);",
-        "    System.out.println(p.sum());",
-        "    System.out.println(p.equals(new Point(3, 4)));",
-        "    System.out.println(p.equals(new Point(3, 5)));",
-        "    System.out.println(p.hashCode() == new Point(3, 4).hashCode());",
-        "  }",
-        "}",
-      ].join("\n"),
-      "3,4\nPoint[x=3, y=4]\n7\ntrue\nfalse\ntrue\n",
-    );
-  },
-);
+test("record declarations run identically to javac", { skip: HAS_JAVA ? false : "no JDK" }, () => {
+  runsLikeJavac(
+    "RecMain",
+    [
+      "record Point(int x, int y) {",
+      "  int sum(){ return x + y; }",
+      "}",
+      "public class RecMain {",
+      "  public static void main(String[] a){",
+      "    Point p = new Point(3, 4);",
+      '    System.out.println(p.x() + "," + p.y());',
+      "    System.out.println(p);",
+      "    System.out.println(p.sum());",
+      "    System.out.println(p.equals(new Point(3, 4)));",
+      "    System.out.println(p.equals(new Point(3, 5)));",
+      "    System.out.println(p.hashCode() == new Point(3, 4).hashCode());",
+      "  }",
+      "}",
+    ].join("\n"),
+    "3,4\nPoint[x=3, y=4]\n7\ntrue\nfalse\ntrue\n",
+  );
+});
 
 test(
   "record deconstruction patterns in switch run identically to javac",
@@ -1964,11 +1947,11 @@ test(
         "public class RecPat {",
         "  static String f(Object o) {",
         "    return switch (o) {",
-        "      case Line(Point(int x1, int y1), Point(int x2, int y2)) -> \"line:\" + (x1+y1+x2+y2);",
-        "      case Point(int x, int y) when x == y -> \"diag:\" + x;",
-        "      case Point(int x, int y) -> \"pt:\" + (x+y);",
-        "      case String s -> \"str:\" + s;",
-        "      default -> \"other\";",
+        '      case Line(Point(int x1, int y1), Point(int x2, int y2)) -> "line:" + (x1+y1+x2+y2);',
+        '      case Point(int x, int y) when x == y -> "diag:" + x;',
+        '      case Point(int x, int y) -> "pt:" + (x+y);',
+        '      case String s -> "str:" + s;',
+        '      default -> "other";',
         "    };",
         "  }",
         "  public static void main(String[] a){",
@@ -2293,8 +2276,8 @@ test(
       [
         "public class Varargs {",
         "  static int sum(int... xs){ int s = 0; for (int v : xs) s += v; return s; }",
-        '  static String join(String sep, String... parts){',
-        '    StringBuilder b = new StringBuilder();',
+        "  static String join(String sep, String... parts){",
+        "    StringBuilder b = new StringBuilder();",
         "    for (int i = 0; i < parts.length; i++){ if (i > 0) b.append(sep); b.append(parts[i]); }",
         "    return b.toString();",
         "  }",
@@ -2312,56 +2295,48 @@ test(
   },
 );
 
-test(
-  "super.method() calls run identically to javac",
-  { skip: HAS_JAVA ? false : "no JDK" },
-  () => {
-    runsLikeJavac(
-      "SuperCall",
-      [
-        "class Base {",
-        "  int f() { return 1; }",
-        "  int g(int x) { return x * 2; }",
-        "}",
-        "public class SuperCall extends Base {",
-        "  int f() { return super.f() + 10; }", // 11
-        "  int h() { return super.g(super.f()); }", // g(1) = 2
-        "  public static void main(String[] a){",
-        "    SuperCall s = new SuperCall();",
-        "    System.out.println(s.f());",
-        "    System.out.println(s.h());",
-        "    System.out.println(s.g(5));", // inherited, virtual -> 10
-        "  }",
-        "}",
-      ].join("\n"),
-      "11\n2\n10\n",
-    );
-  },
-);
+test("super.method() calls run identically to javac", { skip: HAS_JAVA ? false : "no JDK" }, () => {
+  runsLikeJavac(
+    "SuperCall",
+    [
+      "class Base {",
+      "  int f() { return 1; }",
+      "  int g(int x) { return x * 2; }",
+      "}",
+      "public class SuperCall extends Base {",
+      "  int f() { return super.f() + 10; }", // 11
+      "  int h() { return super.g(super.f()); }", // g(1) = 2
+      "  public static void main(String[] a){",
+      "    SuperCall s = new SuperCall();",
+      "    System.out.println(s.f());",
+      "    System.out.println(s.h());",
+      "    System.out.println(s.g(5));", // inherited, virtual -> 10
+      "  }",
+      "}",
+    ].join("\n"),
+    "11\n2\n10\n",
+  );
+});
 
-test(
-  "super field access runs identically to javac",
-  { skip: HAS_JAVA ? false : "no JDK" },
-  () => {
-    runsLikeJavac(
-      "SuperField",
-      [
-        "class B { int x = 5; }",
-        "public class SuperField extends B {",
-        "  int x = 99;",
-        "  int hidden() { return super.x; }", // 5 (field access is non-virtual)
-        "  int own() { return x; }", // 99
-        "  public static void main(String[] a){",
-        "    SuperField s = new SuperField();",
-        "    System.out.println(s.hidden());",
-        "    System.out.println(s.own());",
-        "  }",
-        "}",
-      ].join("\n"),
-      "5\n99\n",
-    );
-  },
-);
+test("super field access runs identically to javac", { skip: HAS_JAVA ? false : "no JDK" }, () => {
+  runsLikeJavac(
+    "SuperField",
+    [
+      "class B { int x = 5; }",
+      "public class SuperField extends B {",
+      "  int x = 99;",
+      "  int hidden() { return super.x; }", // 5 (field access is non-virtual)
+      "  int own() { return x; }", // 99
+      "  public static void main(String[] a){",
+      "    SuperField s = new SuperField();",
+      "    System.out.println(s.hidden());",
+      "    System.out.println(s.own());",
+      "  }",
+      "}",
+    ].join("\n"),
+    "5\n99\n",
+  );
+});
 
 test(
   "switch over a boxed Integer selector runs identically to javac",
@@ -2503,16 +2478,16 @@ test(
         "    int i = 5;",
         "    int j = i++;", // j=5, i=6
         "    int k = ++i;", // k=7, i=7
-        "    System.out.println(i + \" \" + j + \" \" + k);", // 7 5 7
+        '    System.out.println(i + " " + j + " " + k);', // 7 5 7
         "    int[] arr = new int[3];",
         "    int n = 0;",
         "    arr[n++] = 10; arr[n++] = 20;", // arr={10,20,0}, n=2
-        "    System.out.println(arr[0] + \" \" + arr[1] + \" \" + n);", // 10 20 2
-        "    System.out.println(id(n--) + \" \" + n);", // id(2)=2, n=1
+        '    System.out.println(arr[0] + " " + arr[1] + " " + n);', // 10 20 2
+        '    System.out.println(id(n--) + " " + n);', // id(2)=2, n=1
         "    long p = 100; long q = p--;", // q=100, p=99
-        "    System.out.println(p + \" \" + q);", // 99 100
+        '    System.out.println(p + " " + q);', // 99 100
         "    double d = 1.5; double e = ++d;", // e=2.5, d=2.5
-        "    System.out.println(d + \" \" + e);", // 2.5 2.5
+        '    System.out.println(d + " " + e);', // 2.5 2.5
         "  }",
         "}",
       ].join("\n"),
@@ -2631,7 +2606,7 @@ test(
         "class Box<T> { T v; Box(T t){ v = t; } T get(){ return v; } }",
         "public class GenericErasure {",
         "  public static void main(String[] a){",
-        "    Box<String> b = new Box<>(\"hello\");",
+        '    Box<String> b = new Box<>("hello");',
         "    System.out.println(b.v.length());", // field read: getfield Object -> checkcast String
         "    System.out.println(b.get().length());", // method return: erased Object -> checkcast String
         "  }",

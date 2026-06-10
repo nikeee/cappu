@@ -1,4 +1,5 @@
 import { test } from "node:test";
+
 import { expect } from "expect";
 
 import { getIdentifierAtPosition, getNodeAtPosition } from "./nodeAtPosition.ts";

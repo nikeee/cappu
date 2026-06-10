@@ -4,9 +4,6 @@
 // hover and as the base for assignability/overloads/inference (P6-P8).
 // Everything unknown degrades to errorType.
 
-import { createDiagnostic, Diagnostics } from "./diagnostics.ts";
-import { forEachChild } from "./parser.ts";
-import type { Program } from "./program.ts";
 import {
   type ArrayType,
   arrayType,
@@ -22,6 +19,9 @@ import {
   typeVariable,
   type WildcardType,
 } from "./checkerTypes.ts";
+import { createDiagnostic, Diagnostics } from "./diagnostics.ts";
+import { forEachChild } from "./parser.ts";
+import type { Program } from "./program.ts";
 import {
   getDirectSuperTypeSymbols,
   getSourceFileOfNode,
@@ -30,7 +30,6 @@ import {
   resolveIdentifier,
   resolveTypeEntityName,
 } from "./resolver.ts";
-import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
 import {
   type Annotation,
   type ArrayCreationExpression,
@@ -67,6 +66,7 @@ import {
   type VariableDeclarator,
   type WildcardType as AstWildcardType,
 } from "./types.ts";
+import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
 
 /** What the emitter needs to lower a lambda expression (see getLambdaInfo). */
 export interface LambdaInfo {
@@ -954,7 +954,8 @@ export function createChecker(program: Program): Checker {
     const order = ["int", "long", "float", "double"];
     const rank = (t: Type) => {
       if (t.kind !== TypeKind.Primitive) return -1;
-      const promoted = t.name === "byte" || t.name === "short" || t.name === "char" ? "int" : t.name;
+      const promoted =
+        t.name === "byte" || t.name === "short" || t.name === "char" ? "int" : t.name;
       return order.indexOf(promoted);
     };
     const ra = rank(a);

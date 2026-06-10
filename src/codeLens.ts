@@ -9,7 +9,6 @@ import type { Checker } from "./checker.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import { declarationName, findMethodImplementations, getSubtypeIndex } from "./subtypes.ts";
-import { isSyntheticUri } from "./workspace.ts";
 import {
   type ClassDeclaration,
   type Identifier,
@@ -19,6 +18,7 @@ import {
   type Symbol,
   SyntaxKind,
 } from "./types.ts";
+import { isSyntheticUri } from "./workspace.ts";
 
 const LENS_DECLARATIONS = new Set<SyntaxKind>([
   SyntaxKind.ClassDeclaration,

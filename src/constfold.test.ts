@@ -1,4 +1,5 @@
 import { test } from "node:test";
+
 import { expect } from "expect";
 
 import { type ConstValue, foldConstant } from "./constfold.ts";

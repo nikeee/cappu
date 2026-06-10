@@ -10,6 +10,7 @@
 // tokens. reScanGreaterToken merges it into '>>', '>>>', '>=', '>>=' or '>>>='
 // on demand when parsing expressions.
 
+import { Diagnostics } from "./diagnostics.ts";
 import {
   type DiagnosticMessage,
   type ErrorCallback,
@@ -17,7 +18,6 @@ import {
   SyntaxKind,
   TokenFlags,
 } from "./types.ts";
-import { Diagnostics } from "./diagnostics.ts";
 import { textToKeyword } from "./utilities.ts";
 
 const enum Char {

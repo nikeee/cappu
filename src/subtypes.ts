@@ -6,7 +6,6 @@
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import { resolveTypeEntityName } from "./resolver.ts";
-import { isSyntheticUri } from "./workspace.ts";
 import {
   type Identifier,
   type MethodDeclaration,
@@ -16,6 +15,7 @@ import {
   type TypeNode,
   type TypeReference,
 } from "./types.ts";
+import { isSyntheticUri } from "./workspace.ts";
 
 const TYPE_DECLARATIONS = new Set<SyntaxKind>([
   SyntaxKind.ClassDeclaration,

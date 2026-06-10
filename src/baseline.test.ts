@@ -7,15 +7,15 @@
 //   UPDATE_BASELINES=1 node --run test
 // then review the diff before committing.
 
-import { test } from "node:test";
-import { expect } from "expect";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { expect } from "expect";
 
 import { bindSourceFile } from "./binder.ts";
 import { forEachChild, parseSourceFile } from "./parser.ts";
-import { syntaxKindToString } from "./utilities.ts";
 import {
   type Diagnostic,
   type Identifier,
@@ -24,6 +24,7 @@ import {
   NodeFlags,
   SyntaxKind,
 } from "./types.ts";
+import { syntaxKindToString } from "./utilities.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const casesDir = join(here, "..", "test-fixtures", "parser", "cases");

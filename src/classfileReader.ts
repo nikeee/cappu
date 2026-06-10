@@ -165,7 +165,10 @@ function typeAt(descriptor: string, at: number): { text: string; next: number } 
   let base: string;
   if (descriptor[at] === "L") {
     const end = descriptor.indexOf(";", at);
-    base = descriptor.slice(at + 1, end).replace(/\//g, ".").replace(/\$/g, ".");
+    base = descriptor
+      .slice(at + 1, end)
+      .replace(/\//g, ".")
+      .replace(/\$/g, ".");
     at = end + 1;
   } else {
     base = PRIMITIVES[descriptor[at]!] ?? "java.lang.Object";

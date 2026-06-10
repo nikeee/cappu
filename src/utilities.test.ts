@@ -1,9 +1,10 @@
 import { test } from "node:test";
+
 import { expect } from "expect";
 
 import { forEachChild, parseSourceFile } from "./parser.ts";
-import { isValidIdentifier, skipTrivia } from "./utilities.ts";
 import { type Identifier, type Node, SyntaxKind } from "./types.ts";
+import { isValidIdentifier, skipTrivia } from "./utilities.ts";
 
 test("isValidIdentifier accepts names and rejects keywords/garbage", () => {
   expect(isValidIdentifier("foo")).toBe(true);

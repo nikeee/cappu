@@ -5,6 +5,9 @@
 //
 // Run with: node --run lsp  (the client speaks JSON-RPC over stdio).
 
+import { readFileSync } from "node:fs";
+
+import { TextDocument } from "vscode-languageserver-textdocument";
 import {
   type CodeAction,
   type CodeActionParams,
@@ -39,13 +42,17 @@ import {
   TextDocumentSyncKind,
   type WorkspaceEdit,
 } from "vscode-languageserver/node";
-import { TextDocument } from "vscode-languageserver-textdocument";
-import { readFileSync } from "node:fs";
 
 import { createChecker } from "./checker.ts";
+import { type ArrayType, type ClassType, TypeKind } from "./checkerTypes.ts";
 import { getCodeActions } from "./codeActions.ts";
+import { getCodeLenses } from "./codeLens.ts";
+import { loadConfiguredPaths } from "./compiler.ts";
 import { type CompletionItem, getCompletions } from "./completions.ts";
+import type { CappuConfig } from "./config.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
+import { enclosingCall, getHoverText } from "./hover.ts";
+import { DEFAULT_INLAY_HINTS, getInlayHints, type InlayHintsSettings } from "./inlayHints.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import {
   computeLineStarts,
@@ -53,8 +60,11 @@ import {
   getPositionOfLineAndCharacter,
 } from "./lineMap.ts";
 import { getIdentifierAtPosition, getNodeAtPosition } from "./nodeAtPosition.ts";
+import { forEachChild } from "./parser.ts";
 import { createProgram } from "./program.ts";
 import { findReferences, getDeclarationNameNode, getSourceFileOfNode } from "./resolver.ts";
+import { getSemanticTokens, TOKEN_MODIFIERS, TOKEN_TYPES } from "./semanticTokens.ts";
+import { declarationName, findMethodImplementations, getSubtypeIndex } from "./subtypes.ts";
 import {
   type CallExpression,
   type AssignmentExpression,
@@ -69,15 +79,6 @@ import {
   SymbolFlags,
   SyntaxKind,
 } from "./types.ts";
-import { type ArrayType, type ClassType, TypeKind } from "./checkerTypes.ts";
-import { forEachChild } from "./parser.ts";
-import { enclosingCall, getHoverText } from "./hover.ts";
-import { DEFAULT_INLAY_HINTS, getInlayHints, type InlayHintsSettings } from "./inlayHints.ts";
-import { getSemanticTokens, TOKEN_MODIFIERS, TOKEN_TYPES } from "./semanticTokens.ts";
-import { getCodeLenses } from "./codeLens.ts";
-import { declarationName, findMethodImplementations, getSubtypeIndex } from "./subtypes.ts";
-import { loadConfiguredPaths } from "./compiler.ts";
-import type { CappuConfig } from "./config.ts";
 import { isValidIdentifier, skipTrivia } from "./utilities.ts";
 import { isSyntheticUri, loadJavaFiles, uriToPath } from "./workspace.ts";
 
@@ -365,7 +366,10 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
 
 // The innermost call whose argument list contains the offset (the cursor sits
 // after the callee, between the parentheses), for signature help.
-function callAt(uri: string, position: { line: number; character: number }): CallExpression | undefined {
+function callAt(
+  uri: string,
+  position: { line: number; character: number },
+): CallExpression | undefined {
   const sourceFile = program.getSourceFile(uri);
   if (!sourceFile) return undefined;
   const offset = getPositionOfLineAndCharacter(
@@ -408,7 +412,10 @@ connection.onSignatureHelp((params): SignatureHelp | null => {
   if (signatures.length === 0) return null;
 
   const resolved = checker.resolveCall(call);
-  const activeSignature = Math.max(0, candidates.findIndex(d => d === resolved));
+  const activeSignature = Math.max(
+    0,
+    candidates.findIndex(d => d === resolved),
+  );
   // The argument the cursor is in: count the arguments that end before it.
   const sourceFile = program.getSourceFile(params.textDocument.uri)!;
   const offset = getPositionOfLineAndCharacter(
@@ -490,8 +497,7 @@ connection.onFoldingRanges((params): FoldingRange[] | null => {
   const sourceFile = program.getSourceFile(params.textDocument.uri);
   if (!sourceFile) return null;
   const lineStarts = computeLineStarts(sourceFile.text);
-  const lineAt = (offset: number): number =>
-    getLineAndCharacterOfPosition(lineStarts, offset).line;
+  const lineAt = (offset: number): number => getLineAndCharacterOfPosition(lineStarts, offset).line;
   const ranges: FoldingRange[] = [];
   const FOLDABLE = new Set<SyntaxKind>([
     SyntaxKind.ClassDeclaration,

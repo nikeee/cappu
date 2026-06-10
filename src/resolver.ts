@@ -8,7 +8,6 @@
 
 import { forEachChild } from "./parser.ts";
 import type { GlobalIndex, Program } from "./program.ts";
-import { entityNameToString } from "./utilities.ts";
 import {
   type ClassDeclaration,
   type EntityName,
@@ -25,6 +24,7 @@ import {
   type TypeNode,
   type TypeReference,
 } from "./types.ts";
+import { entityNameToString } from "./utilities.ts";
 
 export const enum Meaning {
   Any,

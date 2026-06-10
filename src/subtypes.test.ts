@@ -1,4 +1,5 @@
 import { test } from "node:test";
+
 import { expect } from "expect";
 
 import { loadJdkStub } from "./jdkStub.ts";
@@ -16,7 +17,12 @@ test("direct and transitive subtypes resolve across files; memo invalidates on c
   const a = program.getGlobalIndex().getType("A")!;
   let index = getSubtypeIndex(program);
   expect(index.directSubtypesOf(i).map(s => s.escapedName)).toEqual(["A"]);
-  expect(index.allSubtypesOf(i).map(s => s.escapedName).sort()).toEqual(["A", "B"]);
+  expect(
+    index
+      .allSubtypesOf(i)
+      .map(s => s.escapedName)
+      .sort(),
+  ).toEqual(["A", "B"]);
   expect(index.directSubtypesOf(a).map(s => s.escapedName)).toEqual(["B"]);
 
   // The memo is generation-keyed: a new subtype shows up after a file change.

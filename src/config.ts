@@ -4,6 +4,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+
 import { parse } from "comment-json";
 
 import type { InlayHintsSettings } from "./inlayHints.ts";

@@ -1,4 +1,5 @@
 import { test } from "node:test";
+
 import { expect } from "expect";
 
 import { JDK_STUB_FILES, loadJdkStub } from "./jdkStub.ts";

@@ -12,9 +12,9 @@ import {
   emitInterface,
   emitRecord,
 } from "./bytecode.ts";
+import type { Checker } from "./checker.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
-import type { Checker } from "./checker.ts";
 import {
   type ClassDeclaration,
   type EnumDeclaration,

@@ -1,4 +1,5 @@
 import { test } from "node:test";
+
 import { expect } from "expect";
 
 import { createChecker } from "./checker.ts";
@@ -70,7 +71,7 @@ test("interfaces and their abstract methods count implementations", () => {
         "package geo;",
         "public interface Shape {",
         "  double area();",
-        "  default String label() { return \"shape\"; }",
+        '  default String label() { return "shape"; }',
         "}",
       ].join("\n"),
       "Impls.java": [
@@ -82,9 +83,7 @@ test("interfaces and their abstract methods count implementations", () => {
     },
     "Shape.java",
   );
-  const impls = new Map(
-    out.filter(e => e.kind === "implementations").map(e => [e.name, e.count]),
-  );
+  const impls = new Map(out.filter(e => e.kind === "implementations").map(e => [e.name, e.count]));
   expect(impls.get("Shape")).toBe(3); // Circle, Square, Polygon
   expect(impls.get("area")).toBe(2); // the two concrete bodies
   expect(impls.has("label")).toBe(false); // default methods get no implementations lens
@@ -103,9 +102,7 @@ test("abstract classes count subclasses and abstract-method overrides", () => {
     },
     "Base.java",
   );
-  const impls = new Map(
-    out.filter(e => e.kind === "implementations").map(e => [e.name, e.count]),
-  );
+  const impls = new Map(out.filter(e => e.kind === "implementations").map(e => [e.name, e.count]));
   expect(impls.get("Base")).toBe(1);
   expect(impls.get("weight")).toBe(1);
   expect(impls.has("common")).toBe(false); // concrete methods get no implementations lens
@@ -120,9 +117,7 @@ test("implementation counts are transitive through intermediate types", () => {
     },
     "I.java",
   );
-  const impls = new Map(
-    out.filter(e => e.kind === "implementations").map(e => [e.name, e.count]),
-  );
+  const impls = new Map(out.filter(e => e.kind === "implementations").map(e => [e.name, e.count]));
   expect(impls.get("I")).toBe(2); // Mid (direct) and Leaf (via Mid)
   expect(impls.get("f")).toBe(1); // Leaf's concrete body
 });

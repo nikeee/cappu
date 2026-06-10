@@ -1,6 +1,8 @@
 import { test } from "node:test";
+
 import { expect } from "expect";
 
+import { createDiagnostic, Diagnostics, formatMessage } from "./diagnostics.ts";
 import { SyntaxKind } from "./types.ts";
 import {
   isKeyword,
@@ -9,7 +11,6 @@ import {
   textToKeyword,
   tokenToString,
 } from "./utilities.ts";
-import { createDiagnostic, Diagnostics, formatMessage } from "./diagnostics.ts";
 
 test("range markers are ordered", () => {
   expect(SyntaxKind.FirstLiteralToken <= SyntaxKind.LastLiteralToken).toBe(true);

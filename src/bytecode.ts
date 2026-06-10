@@ -10,11 +10,10 @@
 import type { Checker } from "./checker.ts";
 import { type ClassType, type Type, TypeKind } from "./checkerTypes.ts";
 import { foldConstant } from "./constfold.ts";
+import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import { resolveIdentifier, resolveTypeEntityName } from "./resolver.ts";
-import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
-import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
 import {
   type ArrayType as AstArrayType,
   type TypeParameter as AstTypeParameter,
@@ -79,6 +78,7 @@ import {
   type YieldStatement,
   type WhileStatement,
 } from "./types.ts";
+import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
 
 // Line starts per source file, for LineNumberTable entries (computed once).
 const lineStartsCache = new WeakMap<SourceFile, readonly number[]>();
@@ -95,9 +95,7 @@ function lineStartsOf(sourceFile: SourceFile): readonly number[] {
 // verifiable placeholder. The compiler driver surfaces these as warnings (and
 // fails the build under --fail-on-degrade); unset, degradation stays silent.
 let degradeListener: ((className: string, member: string) => void) | undefined;
-export function setDegradeListener(
-  listener?: (className: string, member: string) => void,
-): void {
+export function setDegradeListener(listener?: (className: string, member: string) => void): void {
   degradeListener = listener;
 }
 
@@ -813,7 +811,10 @@ function collectFieldInits(
     // interleaved with the field initializers.
     if (member.kind === SyntaxKind.InitializerBlock) {
       const blk = member as InitializerBlock;
-      (blk.isStatic ? staticInits : instanceInits).push({ isStatic: blk.isStatic, block: blk.body });
+      (blk.isStatic ? staticInits : instanceInits).push({
+        isStatic: blk.isStatic,
+        block: blk.body,
+      });
       continue;
     }
     if (member.kind !== SyntaxKind.FieldDeclaration) continue;
@@ -893,7 +894,9 @@ function typeToDescriptor(type: Type, depth = 0): string {
     case TypeKind.TypeVariable:
       // Erasure to the leftmost bound (JLS 4.6); the depth guard caps a
       // (malformed) `T extends U, U extends T` chain.
-      return type.bound && depth < 8 ? typeToDescriptor(type.bound, depth + 1) : "Ljava/lang/Object;";
+      return type.bound && depth < 8
+        ? typeToDescriptor(type.bound, depth + 1)
+        : "Ljava/lang/Object;";
     default:
       return "Ljava/lang/Object;";
   }
@@ -1624,7 +1627,10 @@ function generateBody(
   assertionsOwner?: string,
   // For a local class (JLS 14.3): enclosing locals it captures, read from the
   // synthetic `val$x` fields rather than as locals.
-  captureFields: Map<Symbol, { ownerInternal: string; fieldName: string; descriptor: string }> = new Map(),
+  captureFields: Map<
+    Symbol,
+    { ownerInternal: string; fieldName: string; descriptor: string }
+  > = new Map(),
   // For a local/anonymous class accessing the enclosing instance: its class name,
   // so implicit-this access to an enclosing-class member routes through this$0.
   outerThis?: { enclosingInternal: string },
@@ -1731,15 +1737,19 @@ function generateBody(
     if (lineSource === undefined) {
       let p: Node | undefined = node;
       while (p && p.kind !== SyntaxKind.SourceFile) p = p.parent;
-      lineSource = p ? { text: (p as SourceFile).text, starts: lineStartsOf(p as SourceFile) } : null;
+      lineSource = p
+        ? { text: (p as SourceFile).text, starts: lineStartsOf(p as SourceFile) }
+        : null;
     }
     if (!lineSource) return;
     const start = skipTrivia(lineSource.text, node.pos); // pos includes leading trivia
     if (start >= lineSource.text.length) return;
     const line = getLineAndCharacterOfPosition(lineSource.starts, start).line + 1; // 1-based
     const last = lineNumbers[lineNumbers.length - 1];
-    if (last && last.pc === code.length) last.line = line; // previous entry emitted no code yet
-    else if (last && last.line === line) return; // the same line continues
+    if (last && last.pc === code.length)
+      last.line = line; // previous entry emitted no code yet
+    else if (last && last.line === line)
+      return; // the same line continues
     else lineNumbers.push({ pc: code.length, line });
   };
 
@@ -2237,7 +2247,10 @@ function generateBody(
         // A field or enum constant by its simple name: implicit `this.f` or a static.
         if (symbol && symbol.flags & (SymbolFlags.Field | SymbolFlags.EnumConstant)) {
           const fi = fieldInfoOf(symbol);
-          return erasedCheckcast(node, emitFieldRead(fi, () => emitImplicitReceiver(fi.owner)));
+          return erasedCheckcast(
+            node,
+            emitFieldRead(fi, () => emitImplicitReceiver(fi.owner)),
+          );
         }
         throw new UnsupportedEmit();
       }
@@ -2278,7 +2291,10 @@ function generateBody(
         const symbol = checker.resolveName(access.name);
         if (!symbol || !(symbol.flags & (SymbolFlags.Field | SymbolFlags.EnumConstant)))
           throw new UnsupportedEmit();
-        return erasedCheckcast(node, emitFieldRead(fieldInfoOf(symbol), () => emitExpr(access.expression)));
+        return erasedCheckcast(
+          node,
+          emitFieldRead(fieldInfoOf(symbol), () => emitExpr(access.expression)),
+        );
       }
       case SyntaxKind.ArrayCreationExpression:
         return emitArrayCreation(node as ArrayCreationExpression);
@@ -2415,7 +2431,10 @@ function generateBody(
     if (enumStatic) return enumStatic;
     // Array clone() (JLS 10.7): invokevirtual on the array type itself, with the
     // covariant array return type - no source declaration to resolve.
-    if (call.expression.kind === SyntaxKind.PropertyAccessExpression && call.arguments.length === 0) {
+    if (
+      call.expression.kind === SyntaxKind.PropertyAccessExpression &&
+      call.arguments.length === 0
+    ) {
       const pa = call.expression as PropertyAccessExpression;
       if (pa.name.text === "clone") {
         const recvType = checker.getTypeOfExpression(pa.expression);
@@ -2481,9 +2500,7 @@ function generateBody(
         lastArg !== undefined &&
         (() => {
           const argDesc = typeDescriptor(checker.getTypeOfExpression(lastArg));
-          return (
-            argDesc === varargsArrayDesc || (refArray(argDesc) && refArray(varargsArrayDesc))
-          );
+          return argDesc === varargsArrayDesc || (refArray(argDesc) && refArray(varargsArrayDesc));
         })();
       if (exactArray) {
         call.arguments.forEach((arg, i) => coerce(emitExpr(arg), paramDescs[i]!));
@@ -2666,7 +2683,10 @@ function generateBody(
 
     const ctor = findConstructor(created.symbol, args.length);
     // A record's implicit canonical constructor takes its components in order.
-    const recordDecl = createdDecl?.kind === SyntaxKind.RecordDeclaration ? (createdDecl as RecordDeclaration) : undefined;
+    const recordDecl =
+      createdDecl?.kind === SyntaxKind.RecordDeclaration
+        ? (createdDecl as RecordDeclaration)
+        : undefined;
     const ctorParams = ctor
       ? ctor.parameters.map(p => paramDescriptor(p as Parameter, program))
       : recordDecl && !recordDecl.members.some(m => m.kind === SyntaxKind.ConstructorDeclaration)
@@ -3133,7 +3153,12 @@ function generateBody(
       const capture = symbol ? captureFields.get(symbol) : undefined;
       if (capture) {
         writeField(
-          { owner: capture.ownerInternal, name: capture.fieldName, descriptor: capture.descriptor, isStatic: false },
+          {
+            owner: capture.ownerInternal,
+            name: capture.fieldName,
+            descriptor: capture.descriptor,
+            isStatic: false,
+          },
           () => {
             code.u1(OP_ALOAD_0);
             pushRef(`L${thisInternalName};`);
@@ -4520,7 +4545,12 @@ function generateBody(
       placeLabel(catchAllL);
       handlerOffsets.push(catchAllL.offset);
       for (const r of protectedRanges) {
-        exceptionTable.push({ start: r.start, end: r.end, handler: catchAllL.offset, catchType: 0 });
+        exceptionTable.push({
+          start: r.start,
+          end: r.end,
+          handler: catchAllL.offset,
+          catchType: 0,
+        });
       }
       const slot = nextSlot;
       nextSlot += 1;
@@ -4530,7 +4560,8 @@ function generateBody(
       // The finally runs on the exceptional path too; if it completes abruptly
       // (a return/break inside it) the in-flight exception is discarded and the
       // rethrow is unreachable (JLS 14.20.2).
-      const finallyAborted = fin.kind === "resource" ? (emitSuppressedClose(fin, slot), false) : emitFinallyInline();
+      const finallyAborted =
+        fin.kind === "resource" ? (emitSuppressedClose(fin, slot), false) : emitFinallyInline();
       if (!finallyAborted) {
         loadVar(slot, exc);
         push(exc);
@@ -4931,11 +4962,10 @@ function generateBody(
         storeVar(monSlot, monDesc);
         code.u1(OP_MONITORENTER);
         pop(1);
-        return emitTryConstruct(
-          () => inScope(() => emitStmt(s.body)),
-          [],
-          { kind: "monitor", slot: monSlot },
-        );
+        return emitTryConstruct(() => inScope(() => emitStmt(s.body)), [], {
+          kind: "monitor",
+          slot: monSlot,
+        });
       }
       case SyntaxKind.YieldStatement: {
         const target = yieldTargets.at(-1);
@@ -4994,8 +5024,7 @@ function generateBody(
         breakTargets.push({ label: endL, finallyDepth: finallyStack.length, names });
         const term = inScope(() => emitStmt(body));
         breakTargets.pop();
-        const used =
-          fixups.some(f => f.label === endL) || wideFixups.some(f => f.label === endL);
+        const used = fixups.some(f => f.label === endL) || wideFixups.some(f => f.label === endL);
         if (used) {
           placeLabel(endL);
           return false;
@@ -5389,7 +5418,10 @@ function emitMethod(
   // methods), which carry no explicit modifiers.
   extraFlags = 0,
   // For a local class: enclosing locals captured into synthetic val$ fields.
-  captureFields: Map<Symbol, { ownerInternal: string; fieldName: string; descriptor: string }> = new Map(),
+  captureFields: Map<
+    Symbol,
+    { ownerInternal: string; fieldName: string; descriptor: string }
+  > = new Map(),
   // For a local/anonymous class accessing the enclosing instance via this$0.
   outerThis?: { enclosingInternal: string },
 ): ByteBuffer {
@@ -5638,7 +5670,9 @@ function emitConstructorMethod(
       undefined,
       undefined,
       undefined,
-      leading ? { this0Descriptor: leading.this0Descriptor, captures: leading.captures } : undefined,
+      leading
+        ? { this0Descriptor: leading.this0Descriptor, captures: leading.captures }
+        : undefined,
     );
   } catch (e) {
     if (!(e instanceof UnsupportedEmit)) throw e;
@@ -6158,7 +6192,8 @@ export function emitInterface(
         } else {
           const folded = foldConstant(init);
           if (folded && ["J", "Z", "I", "S", "B", "C"].includes(descriptor)) {
-            const intValue = folded.kind === "boolean" ? (folded.value ? 1 : 0) : Number(folded.value);
+            const intValue =
+              folded.kind === "boolean" ? (folded.value ? 1 : 0) : Number(folded.value);
             constIndex =
               descriptor === "J"
                 ? cp.long(folded.kind === "boolean" ? BigInt(intValue) : (folded.value as bigint))
@@ -6236,7 +6271,10 @@ function anonymousClassName(node: ObjectCreationExpression, program: Program): s
   const base = top?.symbol ? binaryName(top.symbol) : "Anonymous";
   let index = 0;
   const count = (n: Node): void => {
-    if (n.kind === SyntaxKind.ObjectCreationExpression && (n as ObjectCreationExpression).classBody) {
+    if (
+      n.kind === SyntaxKind.ObjectCreationExpression &&
+      (n as ObjectCreationExpression).classBody
+    ) {
       if (n.pos <= node.pos) index++;
     }
     forEachChild(n, c => {
@@ -6280,7 +6318,11 @@ function anonymousTarget(
   const args = node.arguments ?? [];
   if (sym.flags & SymbolFlags.Interface) {
     if (args.length > 0) return undefined;
-    return { superInternal: "java/lang/Object", interfaceInternal: binaryName(sym), superParamDescs: [] };
+    return {
+      superInternal: "java/lang/Object",
+      interfaceInternal: binaryName(sym),
+      superParamDescs: [],
+    };
   }
   // Extending a class: resolve the matching super constructor for its params.
   const ctor = findConstructor(sym, args.length);
@@ -6322,7 +6364,11 @@ export function emitAnonymousClassIfPossible(
     fieldCount++;
   }
   // The anonymous class's own instance fields (declared in its body).
-  const declaredFields = emitFields({ members: node.classBody! } as unknown as ClassDeclaration, cp, program);
+  const declaredFields = emitFields(
+    { members: node.classBody! } as unknown as ClassDeclaration,
+    cp,
+    program,
+  );
   fields.append(declaredFields.buffer);
   fieldCount += declaredFields.count;
   const { instanceInits } = collectFieldInits(node.classBody!, name, program);
@@ -6375,7 +6421,12 @@ export function emitAnonymousClassIfPossible(
     const descriptor = descriptorOf(field.type, program);
     for (const d of field.declarators) {
       const sym = (d as VariableDeclarator).symbol;
-      if (sym) captureMap.set(sym, { ownerInternal: name, fieldName: (d as VariableDeclarator).name.text, descriptor });
+      if (sym)
+        captureMap.set(sym, {
+          ownerInternal: name,
+          fieldName: (d as VariableDeclarator).name.text,
+          descriptor,
+        });
     }
   }
   for (const member of node.classBody!) {
@@ -6634,7 +6685,9 @@ export function emitRecord(
   // one (it assigns the fields itself); otherwise the canonical ctor is implicit
   // or compact, and declared ctors are alternates that delegate via this(...).
   const hasDeclaredCanonical = declaredCtors.some(
-    c => c.parameters.map(p => paramDescriptor(p as Parameter, program)).join("") === components.map(x => x.descriptor).join(""),
+    c =>
+      c.parameters.map(p => paramDescriptor(p as Parameter, program)).join("") ===
+      components.map(x => x.descriptor).join(""),
   );
   if (compact) {
     const synth = {
@@ -6748,7 +6801,11 @@ export function emitRecord(
     info.u2(ACC_PUBLIC | ACC_FINAL);
     info.u2(cp.utf8(mName));
     info.u2(cp.utf8(methodDesc));
-    writeCodeAttribute(info, cp, { code, maxStack: mName === "equals" ? 2 : 1, maxLocals: mName === "equals" ? 2 : 1 });
+    writeCodeAttribute(info, cp, {
+      code,
+      maxStack: mName === "equals" ? 2 : 1,
+      maxLocals: mName === "equals" ? 2 : 1,
+    });
     methods.append(info);
     methodCount++;
   };
@@ -6759,7 +6816,9 @@ export function emitRecord(
   // Declared methods.
   for (const member of declaration.members) {
     if (member.kind !== SyntaxKind.MethodDeclaration) continue;
-    methods.append(emitMethod(member as MethodDeclaration, cp, program, checker, name, lambdaMethods));
+    methods.append(
+      emitMethod(member as MethodDeclaration, cp, program, checker, name, lambdaMethods),
+    );
     methodCount++;
   }
   for (const impl of lambdaMethods) {

@@ -9,8 +9,6 @@
 //
 //   git submodule update --init
 
-import { test } from "node:test";
-import { expect } from "expect";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -23,7 +21,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { expect } from "expect";
 
 import { createChecker } from "./checker.ts";
 import { emitSourceFile } from "./emitter.ts";
@@ -206,10 +207,14 @@ function generateBaseline(project: { files: string[] }): Map<string, ClassCode> 
     }
     const produced = classFilesIn(dir);
     if (produced.length === 0) continue;
-    for (const [cn, jc] of disasmFiles(produced)) if (!javacByClass.has(cn)) javacByClass.set(cn, jc);
+    for (const [cn, jc] of disasmFiles(produced))
+      if (!javacByClass.has(cn)) javacByClass.set(cn, jc);
   }
   // Keep the per-method instruction streams where our emitted code matches javac.
-  const ours = disasmSelected(bytes, [...javacByClass.keys()].filter(cn => bytes.has(cn)));
+  const ours = disasmSelected(
+    bytes,
+    [...javacByClass.keys()].filter(cn => bytes.has(cn)),
+  );
   const ref = new Map<string, ClassCode>();
   for (const [cn, jc] of javacByClass) {
     const ourCode = new Map(ours.get(cn)?.code ?? []);
@@ -226,32 +231,35 @@ for (const project of projects) {
   const file = join(baselineDir, `${project.name}.json`);
   const canGenerate = shouldUpdate && HAS_JAVAC && HAS_JAVA;
   if (!existsSync(file) && !canGenerate) continue; // nothing to compare, cannot generate
-  test(`corpus bytecode matches javac: ${project.name}`, { skip: HAS_JAVA ? false : "no JDK" }, () => {
-    let ref: Map<string, ClassCode>;
-    if (canGenerate) {
-      ref = generateBaseline(project);
-      mkdirSync(baselineDir, { recursive: true });
-      writeFileSync(file, `${JSON.stringify(Object.fromEntries(ref), null, 2)}\n`);
-    } else {
-      ref = new Map(Object.entries(JSON.parse(readFileSync(file, "utf8")) as Record<string, ClassCode>));
-    }
-    if (ref.size === 0) return;
-    const ours = disasmSelected(
-      emitProjectBytes(project),
-      [...ref.keys()],
-    );
-    let matched = 0;
-    const divergences: string[] = [];
-    for (const [cn, code] of ref) {
-      const ourCode = new Map(ours.get(cn)?.code ?? []);
-      for (const [sig, instrs] of code) {
-        const o = ourCode.get(sig);
-        if (o === undefined) divergences.push(`${cn} ${sig}: not emitted`);
-        else if (sameCode(o, instrs)) matched++;
-        else divergences.push(`${cn} ${sig}: ours=[${o.join(" ")}] javac=[${instrs.join(" ")}]`);
+  test(
+    `corpus bytecode matches javac: ${project.name}`,
+    { skip: HAS_JAVA ? false : "no JDK" },
+    () => {
+      let ref: Map<string, ClassCode>;
+      if (canGenerate) {
+        ref = generateBaseline(project);
+        mkdirSync(baselineDir, { recursive: true });
+        writeFileSync(file, `${JSON.stringify(Object.fromEntries(ref), null, 2)}\n`);
+      } else {
+        ref = new Map(
+          Object.entries(JSON.parse(readFileSync(file, "utf8")) as Record<string, ClassCode>),
+        );
       }
-    }
-    expect(divergences).toEqual([]); // a baselined method must still match javac
-    expect(matched).toBeGreaterThan(0);
-  });
+      if (ref.size === 0) return;
+      const ours = disasmSelected(emitProjectBytes(project), [...ref.keys()]);
+      let matched = 0;
+      const divergences: string[] = [];
+      for (const [cn, code] of ref) {
+        const ourCode = new Map(ours.get(cn)?.code ?? []);
+        for (const [sig, instrs] of code) {
+          const o = ourCode.get(sig);
+          if (o === undefined) divergences.push(`${cn} ${sig}: not emitted`);
+          else if (sameCode(o, instrs)) matched++;
+          else divergences.push(`${cn} ${sig}: ours=[${o.join(" ")}] javac=[${instrs.join(" ")}]`);
+        }
+      }
+      expect(divergences).toEqual([]); // a baselined method must still match javac
+      expect(matched).toBeGreaterThan(0);
+    },
+  );
 }

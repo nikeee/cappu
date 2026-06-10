@@ -1,8 +1,9 @@
-import { test } from "node:test";
-import { expect } from "expect";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { test } from "node:test";
+
+import { expect } from "expect";
 
 import { DEFAULT_CONFIG_NAME, loadConfig, resolveConfigPath } from "./config.ts";
 

@@ -9,7 +9,6 @@ import { type ClassType, TypeKind } from "./checkerTypes.ts";
 import { getNodeAtPosition } from "./nodeAtPosition.ts";
 import type { Program } from "./program.ts";
 import { getDirectSuperTypeSymbols, getSourceFileOfNode } from "./resolver.ts";
-import { entityNameToString } from "./utilities.ts";
 import {
   type Node,
   type SourceFile,
@@ -18,6 +17,7 @@ import {
   type SymbolTable,
   SyntaxKind,
 } from "./types.ts";
+import { entityNameToString } from "./utilities.ts";
 
 // Mirrors a subset of LSP CompletionItemKind (numeric values match the protocol).
 export const enum CompletionItemKind {

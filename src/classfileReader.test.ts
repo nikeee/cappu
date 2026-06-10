@@ -1,8 +1,9 @@
 import { test } from "node:test";
+
 import { expect } from "expect";
 
-import { classFileToStub } from "./classfileReader.ts";
 import { createChecker } from "./checker.ts";
+import { classFileToStub } from "./classfileReader.ts";
 import { emitSourceFile } from "./emitter.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";

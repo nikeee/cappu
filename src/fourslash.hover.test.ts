@@ -5,11 +5,12 @@
 // Regenerate after intentional changes:
 //   UPDATE_BASELINES=1 node --run test
 
-import { test } from "node:test";
-import { expect } from "expect";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { expect } from "expect";
 
 import { createChecker } from "./checker.ts";
 import { getHoverText } from "./hover.ts";

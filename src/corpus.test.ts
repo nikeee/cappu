@@ -9,19 +9,20 @@
 // corpus includes intentionally malformed compiler-test inputs. When the corpus
 // is absent the suite is skipped, so CI without it still passes.
 
-import { test } from "node:test";
-import { expect } from "expect";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { expect } from "expect";
 
 import { bindSourceFile } from "./binder.ts";
 import { createChecker } from "./checker.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { forEachChild, parseSourceFile } from "./parser.ts";
 import { createProgram } from "./program.ts";
-import { pathToUri } from "./workspace.ts";
 import { type Identifier, type Node, SyntaxKind } from "./types.ts";
+import { pathToUri } from "./workspace.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const corpusDir =
