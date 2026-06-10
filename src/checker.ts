@@ -139,15 +139,15 @@ export interface Checker {
 }
 
 // Primitive widening (JLS 5.1.2) and boxing (JLS 5.1.7).
-const WIDENING: Record<string, readonly string[]> = {
+const WIDENING = {
   byte: ["short", "int", "long", "float", "double"],
   short: ["int", "long", "float", "double"],
   char: ["int", "long", "float", "double"],
   int: ["long", "float", "double"],
   long: ["float", "double"],
   float: ["double"],
-};
-const BOX: Record<string, string> = {
+} as const satisfies Record<string, readonly string[]>;
+const BOX = {
   boolean: "java.lang.Boolean",
   byte: "java.lang.Byte",
   short: "java.lang.Short",
@@ -156,13 +156,14 @@ const BOX: Record<string, string> = {
   long: "java.lang.Long",
   float: "java.lang.Float",
   double: "java.lang.Double",
-};
+} as const satisfies Record<string, string>;
 const UNBOX: Record<string, string> = Object.fromEntries(
   Object.entries(BOX).map(([prim, fqn]) => [fqn, prim]),
 );
 
 function primitiveWidens(from: string, to: string): boolean {
-  return from === to || (WIDENING[from]?.includes(to) ?? false);
+  const wider: readonly string[] | undefined = WIDENING[from as keyof typeof WIDENING];
+  return from === to || (wider?.includes(to) ?? false);
 }
 
 const COMPARISON_OPERATORS = new Set<SyntaxKind>([
@@ -1166,7 +1167,7 @@ export function createChecker(program: Program): Checker {
         return true;
       case TypeKind.Primitive: {
         if (!allowBoxing) return false;
-        const boxed = BOX[source.name];
+        const boxed = BOX[source.name as keyof typeof BOX];
         return boxed ? isAssignableToClass(classTypeByFqn(boxed), target, true) : false;
       }
       case TypeKind.Class:
@@ -1401,7 +1402,7 @@ export function createChecker(program: Program): Checker {
   // types), so box it - id(1) infers T = Integer, matching JLS 18.
   function boxIfPrimitive(type: Type): Type {
     if (type.kind === TypeKind.Primitive) {
-      const boxed = BOX[type.name];
+      const boxed = BOX[type.name as keyof typeof BOX];
       if (boxed) return classTypeByFqn(boxed);
     }
     return type;

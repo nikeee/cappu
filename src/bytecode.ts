@@ -2399,7 +2399,7 @@ function generateBody(
   };
 
   // Numeric conversion from one category to another, for primitive casts.
-  const PRIMITIVE_CONVERSION: Record<string, number | undefined> = {
+  const PRIMITIVE_CONVERSION = {
     IJ: OP_I2L,
     IF: OP_I2F,
     ID: OP_I2D,
@@ -2412,11 +2412,12 @@ function generateBody(
     DI: OP_D2I,
     DJ: OP_D2L,
     DF: OP_D2F,
-  };
+  } as const satisfies Record<string, number>;
   const convertPrimitive = (fromCat: NumericCat | "A", targetDescriptor: Descriptor): void => {
     const targetCat = category(targetDescriptor); // B/C/S/Z/I all collapse to I
     if (fromCat !== targetCat) {
-      const op = PRIMITIVE_CONVERSION[`${fromCat}${targetCat}`];
+      const op =
+        PRIMITIVE_CONVERSION[`${fromCat}${targetCat}` as keyof typeof PRIMITIVE_CONVERSION];
       if (op === undefined) throw new UnsupportedEmit();
       code.u1(op);
       pop();
@@ -2821,7 +2822,7 @@ function generateBody(
         return 0; // int
     }
   };
-  const NEWARRAY_ATYPE: Record<string, number> = {
+  const NEWARRAY_ATYPE = {
     Z: 4,
     C: 5,
     F: 6,
@@ -2830,14 +2831,16 @@ function generateBody(
     S: 9,
     I: 10,
     J: 11,
-  };
+  } as const satisfies Partial<Record<Descriptor, number>>;
+  const newarrayAtype = (elem: Descriptor): number | undefined =>
+    NEWARRAY_ATYPE[elem as keyof typeof NEWARRAY_ATYPE];
 
   // Allocate a one-dimensional array whose element descriptor is `elem`; the
   // length is already on the stack. Leaves the array reference.
   const allocArray = (elem: Descriptor): Descriptor => {
-    if (NEWARRAY_ATYPE[elem] !== undefined) {
+    if (newarrayAtype(elem) !== undefined) {
       code.u1(OP_NEWARRAY);
-      code.u1(NEWARRAY_ATYPE[elem]!);
+      code.u1(newarrayAtype(elem)!);
     } else {
       code.u1(OP_ANEWARRAY);
       code.u2(cp.classInfo(classOperand(elem)));
@@ -2950,7 +2953,7 @@ function generateBody(
     }
     return undefined;
   };
-  const TYPE_OFFSET: Record<string, number> = { I: 0, J: 1, F: 2, D: 3 };
+  const TYPE_OFFSET = { I: 0, J: 1, F: 2, D: 3 } as const satisfies Record<NumericCat, number>;
   // Binary numeric promotion (JLS 5.6.2): the wider of the two operand categories.
   const promote = (a: NumericCat, b: NumericCat): NumericCat =>
     a === "D" || b === "D"
@@ -2960,7 +2963,7 @@ function generateBody(
         : a === "J" || b === "J"
           ? "J"
           : "I";
-  const ARITHMETIC: Record<number, number> = {
+  const ARITHMETIC = {
     [SyntaxKind.PlusToken]: OP_IADD,
     [SyntaxKind.MinusToken]: OP_ISUB,
     [SyntaxKind.AsteriskToken]: OP_IMUL,
@@ -2969,12 +2972,15 @@ function generateBody(
     [SyntaxKind.AmpersandToken]: OP_IAND,
     [SyntaxKind.BarToken]: OP_IOR,
     [SyntaxKind.CaretToken]: OP_IXOR,
-  };
-  const SHIFTS: Record<number, number> = {
+  } as const satisfies Partial<Record<SyntaxKind, number>>;
+  const arithmeticOp = (op: SyntaxKind): number | undefined =>
+    ARITHMETIC[op as keyof typeof ARITHMETIC];
+  const SHIFTS = {
     [SyntaxKind.LessThanLessThanToken]: OP_ISHL,
     [SyntaxKind.GreaterThanGreaterThanToken]: OP_ISHR,
     [SyntaxKind.GreaterThanGreaterThanGreaterThanToken]: OP_IUSHR,
-  };
+  } as const satisfies Partial<Record<SyntaxKind, number>>;
+  const shiftOp = (op: SyntaxKind): number | undefined => SHIFTS[op as keyof typeof SHIFTS];
 
   // Emit an operand promoted to `targetCat`. An int literal promoted to long is
   // folded to a long constant (as javac does: 1 -> lconst_1, not iconst_1; i2l).
@@ -3040,7 +3046,7 @@ function generateBody(
     // and String `+` is handled by emitStringConcat (JLS 15.18.1).
     if (!lc || !rc) throw new UnsupportedEmit();
 
-    const shift = SHIFTS[op];
+    const shift = shiftOp(op);
     if (shift !== undefined) {
       // The shift opcode takes an int distance; the result type is the promoted
       // left operand only (JLS 15.19), so a long/wider distance is narrowed with
@@ -3055,7 +3061,7 @@ function generateBody(
       return longShift ? "J" : "I";
     }
 
-    const base = ARITHMETIC[op];
+    const base = arithmeticOp(op);
     if (base === undefined) throw new UnsupportedEmit();
     const bitwise = base === OP_IAND || base === OP_IOR || base === OP_IXOR;
     if (bitwise && (lc === "F" || lc === "D" || rc === "F" || rc === "D")) {
@@ -3161,7 +3167,7 @@ function generateBody(
       push(STRING_DESC);
       return;
     }
-    const shift = SHIFTS[baseOp];
+    const shift = shiftOp(baseOp);
     if (shift !== undefined) {
       // The shift distance is an int; narrow a long/wider distance with l2i etc.
       const rcat = numericCat(checker.getTypeOfExpression(rhsNode)) ?? "I";
@@ -3172,7 +3178,7 @@ function generateBody(
       convertPrimitive(tcat, targetDesc); // narrow for byte/char/short
       return;
     }
-    const base = ARITHMETIC[baseOp];
+    const base = arithmeticOp(baseOp);
     if (base === undefined) throw new UnsupportedEmit();
     const rcat = numericCategory(checker.getTypeOfExpression(rhsNode)) ?? "I";
     const p = promote(tcat, rcat);
@@ -3317,14 +3323,16 @@ function generateBody(
   };
 
   // Comparison operator -> offset into the if_icmp<cond> family (eq,ne,lt,ge,gt,le).
-  const COMPARE_OFFSET: Record<number, number> = {
+  const COMPARE_OFFSET = {
     [SyntaxKind.EqualsEqualsToken]: 0,
     [SyntaxKind.ExclamationEqualsToken]: 1,
     [SyntaxKind.LessThanToken]: 2,
     [SyntaxKind.GreaterThanEqualsToken]: 3,
     [SyntaxKind.GreaterThanToken]: 4,
     [SyntaxKind.LessThanEqualsToken]: 5,
-  };
+  } as const satisfies Partial<Record<SyntaxKind, number>>;
+  const compareOffset = (op: SyntaxKind): number | undefined =>
+    COMPARE_OFFSET[op as keyof typeof COMPARE_OFFSET];
   const NEGATED = [1, 0, 3, 2, 5, 4]; // negation of each comparison offset
 
   // Emit a branch to `label` taken when `expr` is true (whenTrue) or false.
@@ -3440,7 +3448,7 @@ function generateBody(
           }
           return;
         }
-        const offset = COMPARE_OFFSET[op];
+        const offset = compareOffset(op);
         if (offset !== undefined) {
           const isEquality =
             op === SyntaxKind.EqualsEqualsToken || op === SyntaxKind.ExclamationEqualsToken;
@@ -3506,7 +3514,7 @@ function generateBody(
   const isBooleanOperator = (op: SyntaxKind): boolean =>
     op === SyntaxKind.AmpersandAmpersandToken ||
     op === SyntaxKind.BarBarToken ||
-    COMPARE_OFFSET[op] !== undefined;
+    compareOffset(op) !== undefined;
 
   // Materialize a boolean expression as an int 0/1 on the stack, via the standard
   // branch-and-push pattern. The merge label carries one int on the stack.
@@ -3838,8 +3846,8 @@ function generateBody(
       throw new UnsupportedEmit();
     }
     const isInc = u.operator === SyntaxKind.PlusPlusToken;
-    const addOp = (cat: string): number =>
-      ARITHMETIC[isInc ? SyntaxKind.PlusToken : SyntaxKind.MinusToken]! + TYPE_OFFSET[cat]!;
+    const addOp = (cat: NumericCat): number =>
+      arithmeticOp(isInc ? SyntaxKind.PlusToken : SyntaxKind.MinusToken)! + TYPE_OFFSET[cat];
     const pushOne = (cat: string): void => {
       if (cat === "J") longConst(1n);
       else if (cat === "F") floatConst(1);
@@ -5637,7 +5645,7 @@ function emitLambdaMethod(
 // (JLS 15.13.3): `(int len) -> new <elem>[len]`, a private static helper the
 // invokedynamic binds via LambdaMetafactory. `arrayDesc` is the array type, e.g.
 // "[I" or "[Ljava/lang/String;".
-const NEWARRAY_ATYPE_BY_DESC: Record<string, number> = {
+const NEWARRAY_ATYPE_BY_DESC = {
   Z: 4,
   C: 5,
   F: 6,
@@ -5646,12 +5654,12 @@ const NEWARRAY_ATYPE_BY_DESC: Record<string, number> = {
   S: 9,
   I: 10,
   J: 11,
-};
-function emitArrayCtorRefMethod(cp: ConstantPool, name: string, arrayDesc: string): ByteBuffer {
+} as const satisfies Partial<Record<Descriptor, number>>;
+function emitArrayCtorRefMethod(cp: ConstantPool, name: string, arrayDesc: Descriptor): ByteBuffer {
   const elem = arrayDesc.slice(1) as Descriptor; // element descriptor
   const code = new ByteBuffer();
   code.u1(OP_ILOAD_0); // the requested length
-  const atype = NEWARRAY_ATYPE_BY_DESC[elem];
+  const atype = NEWARRAY_ATYPE_BY_DESC[elem as keyof typeof NEWARRAY_ATYPE_BY_DESC];
   if (atype !== undefined) {
     code.u1(OP_NEWARRAY);
     code.u1(atype);

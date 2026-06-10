@@ -161,7 +161,7 @@ function parseClassFile(bytes: Uint8Array): ClassInfo {
 
 // --- descriptor -> source type --------------------------------------------------
 
-const PRIMITIVES: Record<string, string> = {
+const PRIMITIVES = {
   B: "byte",
   C: "char",
   D: "double",
@@ -171,7 +171,12 @@ const PRIMITIVES: Record<string, string> = {
   S: "short",
   Z: "boolean",
   V: "void",
-};
+} as const satisfies Record<string, string>;
+
+/** The source keyword for a primitive descriptor character, if it is one. */
+function primitiveName(c: string): string | undefined {
+  return PRIMITIVES[c as keyof typeof PRIMITIVES];
+}
 
 function typeAt(descriptor: string, at: number): { text: string; next: number } {
   let arrays = 0;
@@ -188,7 +193,7 @@ function typeAt(descriptor: string, at: number): { text: string; next: number } 
       .replaceAll("$", ".");
     at = end + 1;
   } else {
-    base = PRIMITIVES[descriptor[at]!] ?? "java.lang.Object";
+    base = primitiveName(descriptor[at]!) ?? "java.lang.Object";
     at++;
   }
   return { text: base + "[]".repeat(arrays), next: at };
@@ -244,9 +249,10 @@ class SignatureReader {
   /** JavaTypeSignature: a primitive or a ReferenceTypeSignature. */
   javaType(): string {
     const c = this.peek();
-    if (PRIMITIVES[c]) {
+    const primitive = primitiveName(c);
+    if (primitive) {
       this.take();
-      return PRIMITIVES[c]!;
+      return primitive;
     }
     return this.referenceType();
   }

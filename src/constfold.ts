@@ -59,14 +59,14 @@ function foldPrefix(node: PrefixUnaryExpression): ConstValue | undefined {
   }
 }
 
-const COMPARE: Partial<Record<SyntaxKind, (a: bigint, b: bigint) => boolean>> = {
+const COMPARE = {
   [SyntaxKind.LessThanToken]: (a, b) => a < b,
   [SyntaxKind.LessThanEqualsToken]: (a, b) => a <= b,
   [SyntaxKind.GreaterThanToken]: (a, b) => a > b,
   [SyntaxKind.GreaterThanEqualsToken]: (a, b) => a >= b,
   [SyntaxKind.EqualsEqualsToken]: (a, b) => a === b,
   [SyntaxKind.ExclamationEqualsToken]: (a, b) => a !== b,
-};
+} as const satisfies Partial<Record<SyntaxKind, (a: bigint, b: bigint) => boolean>>;
 
 function foldBinary(node: BinaryExpression): ConstValue | undefined {
   const left = foldConstant(node.left);
@@ -97,7 +97,7 @@ function foldBinary(node: BinaryExpression): ConstValue | undefined {
   const b = num(right);
   if (!a || !b) return undefined;
 
-  const compare = COMPARE[op];
+  const compare = COMPARE[op as keyof typeof COMPARE];
   if (compare) return { kind: "boolean", value: compare(a.value, b.value) };
 
   const kind = a.kind === "long" || b.kind === "long" ? "long" : "int";

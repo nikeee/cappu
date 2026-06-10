@@ -128,3 +128,4 @@ no timestamps were captured.
 - 2026-06-11 00:36 — the vscode lsp extension currently does not start. fix it.
 - 2026-06-11 00:36 — you don't have to use template string literal types. this may be correct, but too impractical for our use. maybe a simple branded type suffices
 - 2026-06-11 00:36 — also use a string literal union for primitive descriptors
+- 2026-06-11 00:53 — you've got some type annotations like: const WRAPPER: Record<string, string> = ... Dont do that. use TS's "satisfies" or "as const" operator, so the type checker can do better code elimination

@@ -33,10 +33,8 @@ export const TOKEN_TYPES = [
 
 export const TOKEN_MODIFIERS = ["declaration", "static", "readonly", "defaultLibrary"] as const;
 
-const TYPE_INDEX: Record<string, number> = Object.fromEntries(TOKEN_TYPES.map((t, i) => [t, i]));
-const MOD_BIT: Record<string, number> = Object.fromEntries(
-  TOKEN_MODIFIERS.map((m, i) => [m, 1 << i]),
-);
+const TYPE_INDEX = Object.fromEntries(TOKEN_TYPES.map((t, i) => [t, i]));
+const MOD_BIT = Object.fromEntries(TOKEN_MODIFIERS.map((m, i) => [m, 1 << i]));
 
 export interface SemanticTokenEntry {
   readonly offset: number;
