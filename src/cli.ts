@@ -15,7 +15,8 @@ import { runCompile } from "./compiler.ts";
 import { CONFIG_TEMPLATE, DEFAULT_CONFIG_NAME, loadConfig } from "./config.ts";
 import pkg from "../package.json" with { type: "json" };
 
-const USAGE = `cappu ${pkg.version}
+const USAGE = `
+cappu ${pkg.version}
 
 Usage:
   cappu init                         Write a starter cappu.json (commented, all options)
@@ -42,7 +43,7 @@ Compile options:
 Global:
   -h, --help            Show this help
       --version         Show the version
-`;
+`.trimStart();
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
