@@ -1,7 +1,9 @@
 // Java language server. The LSP protocol/transport is handled by
 // vscode-languageserver; everything semantic comes from this project's
 // scanner/parser/binder via the Program (which caches parse+bind per document
-// version). Currently serves syntax diagnostics and documentSymbol (outline).
+// version). Serves diagnostics plus the navigation/editing features listed in
+// the initialize capabilities (hover, completion, references, code lenses,
+// inlay hints, semantic tokens, ...).
 //
 // Run with: node --run lsp  (the client speaks JSON-RPC over stdio).
 

@@ -3,11 +3,11 @@
 // pos/end and error flags, and list parsing (parseList/parseDelimitedList) with
 // context-aware error recovery that always makes forward progress.
 //
-// This file holds the parser CORE (M3): scanning helpers, node construction,
-// diagnostics, the list infrastructure, forEachChild, and a parseSourceFile that
-// so far only recognizes EmptyStatement (";"). Grammar is layered on in later
-// milestones; everything else is recovered as "declaration or statement
-// expected" without aborting.
+// This file holds the parser core (scanning helpers, node construction,
+// diagnostics, the list infrastructure, forEachChild) plus the full Java
+// grammar: type declarations and members, statements, expressions, patterns,
+// and module declarations. Unrecognized input is recovered as "declaration or
+// statement expected" without aborting.
 
 import { createDiagnostic } from "./diagnostics.ts";
 import { Diagnostics } from "./diagnostics.ts";

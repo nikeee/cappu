@@ -1047,13 +1047,12 @@ function outerThisInfo(
   return used ? { enclosingInternal: binaryName(typeSym) } : undefined;
 }
 
-// Captures we actually support emitting for a local class: only the clean case
-// (no declared constructor and no instance field initializers), where we
-// synthesize a constructor `<init>(captures...)`. Otherwise returns [] so the
-// class emits without capture support (methods using captures degrade). Both
-// emitClass and emitNew use this, so they agree.
-// A local class whose constructor we can synthesize: declared in a block, with
-// no declared constructor and no instance field initializers.
+// A local class whose constructor handling we support emitting: declared in a
+// block, with no this(...)-delegating constructor (declared constructors get
+// the capture/this$0 stores spliced in as leading synthetic parameters; a
+// missing one is synthesized). When this is false, effectiveLocalCaptures
+// returns [] so the class emits without capture support (methods using
+// captures degrade). Both emitClass and emitNew use this, so they agree.
 function isSynthesizableLocalClass(decl: ClassDeclaration): boolean {
   if (decl.parent?.kind !== SyntaxKind.Block) return false;
   // A declared constructor gets the capture/this$0 stores spliced in (leading

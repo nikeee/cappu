@@ -1,8 +1,7 @@
 // The multi-file project model. Holds the set of source files (open editor
-// documents now; a workspace scan is layered on in P3), parses and binds them
+// documents overlaying workspace-scanned project files), parses and binds them
 // lazily, and caches the result per (uri, version) so repeated LSP requests do
-// not re-parse. Cross-file indexing and the checker hang off this in later
-// milestones.
+// not re-parse. The cross-file GlobalIndex and the checker hang off this.
 
 import { bindSourceFile } from "./binder.ts";
 import { type Brand } from "./brand.ts";
