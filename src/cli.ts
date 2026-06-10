@@ -4,15 +4,18 @@
 // `cappu compile` runs the javac-lite bytecode compiler. Argument parsing uses
 // Node's built-in util.parseArgs (no third-party dependency).
 
+import { existsSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import { runCompile } from "./compiler.ts";
-import { loadConfig } from "./config.ts";
+import { CONFIG_TEMPLATE, DEFAULT_CONFIG_NAME, loadConfig } from "./config.ts";
 import pkg from "../package.json" with { type: "json" };
 
 const USAGE = `cappu ${pkg.version}
 
 Usage:
+  cappu init                         Write a starter cappu.json (commented, all options)
   cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
   cappu compile [options] <file...>  Compile .java files to .class bytecode
 
@@ -57,6 +60,19 @@ async function main(argv: string[]): Promise<void> {
   if (values.help || command === undefined) {
     process.stdout.write(USAGE);
     process.exitCode = values.help ? 0 : 2;
+    return;
+  }
+
+  // init runs before loadConfig: bootstrapping must not depend on (or be
+  // blocked by) an existing, possibly broken config.
+  if (command === "init") {
+    const target = resolve(values.config ?? DEFAULT_CONFIG_NAME);
+    if (existsSync(target)) {
+      process.stderr.write(`cappu: ${target} already exists, not overwriting\n`);
+      process.exit(1);
+    }
+    writeFileSync(target, CONFIG_TEMPLATE);
+    process.stdout.write(`${target}\n`);
     return;
   }
 

@@ -5,7 +5,7 @@ import { test } from "node:test";
 
 import { expect } from "expect";
 
-import { DEFAULT_CONFIG_NAME, loadConfig, resolveConfigPath } from "./config.ts";
+import { CONFIG_TEMPLATE, DEFAULT_CONFIG_NAME, loadConfig, resolveConfigPath } from "./config.ts";
 
 test("JSONC parses with comments and trailing commas; sections map", () => {
   const dir = mkdtempSync(join(tmpdir(), "cfg-"));
@@ -61,4 +61,13 @@ test("unknown keys are ignored, comment-json metadata does not leak", () => {
   const config = loadConfig(undefined, dir);
   expect(config.compilerOptions.outDir).toBe("o");
   expect(Object.keys(config).sort()).toEqual(["baseDir", "compilerOptions", "lspOptions"]);
+});
+
+test("the init template parses and validates against the schema", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cfg-"));
+  writeFileSync(join(dir, DEFAULT_CONFIG_NAME), CONFIG_TEMPLATE);
+  const config = loadConfig(undefined, dir);
+  expect(config.compilerOptions.classPath).toEqual([]);
+  expect(config.compilerOptions.quiet).toBe(false);
+  expect(config.lspOptions.inlayHints).toEqual({ parameterNames: true, varTypes: true });
 });

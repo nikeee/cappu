@@ -47,6 +47,39 @@ export interface CappuConfig extends z.infer<typeof ConfigFileSchema> {
 
 export const DEFAULT_CONFIG_NAME = "cappu.json";
 
+/**
+ * The starter config `cappu init` writes: every option present, commented, and
+ * valid JSONC (a test parses it against the schema so the two stay in sync).
+ */
+export const CONFIG_TEMPLATE = `{
+  // Project configuration for the cappu compiler and language server (JSONC:
+  // comments and trailing commas are fine). Relative paths resolve against
+  // this file's directory.
+  "compilerOptions": {
+    // Compiled dependencies: directories of .class files, or .jar files.
+    // Types resolve against them but are not compiled.
+    "classPath": [],
+    // Additional source directories whose .java files resolve (not compiled).
+    "sourcePaths": [],
+    // Output root for the emitted package tree (default: current directory).
+    // "outDir": "build",
+    // Do not print the path of each emitted .class file.
+    "quiet": false,
+    // Fail the build when a method body degrades to a placeholder because of
+    // an unsupported construct (degradations always print a warning).
+    "failOnDegrade": false,
+  },
+  "lspOptions": {
+    "inlayHints": {
+      // \`count:\` hints before call arguments that are not plain variables.
+      "parameterNames": true,
+      // \`: String\` hints after \`var\` declarations.
+      "varTypes": true,
+    },
+  },
+}
+`;
+
 function emptyConfig(baseDir: string): CappuConfig {
   return { ...ConfigFileSchema.parse({}), baseDir };
 }
