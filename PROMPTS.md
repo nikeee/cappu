@@ -174,3 +174,4 @@ no timestamps were captured.
 - 2026-06-11 21:03 — resolve https://github.com/nikeee/cappu/issues/2 maybe use a different checksum or something
 - 2026-06-11 21:09 — resolve https://github.com/nikeee/cappu/issues/1 after that
 - 2026-06-11 21:16 — find consellations that could lead to infinite loops and fix them. add a regression test.
+- 2026-06-12 00:58 — add tests for that

@@ -250,4 +250,11 @@ test("corrupted descriptors and signatures terminate and still stub", () => {
   expect(sigAt).toBeGreaterThan(0);
   sig.set(Buffer.from("<T:<T:<T:<T:<T:<T:<T:<T:<T:<T:<T"), sigAt);
   expect(() => classFileToStub(new Uint8Array(sig))).not.toThrow();
+
+  // method signature "(TT;)TT;" -> truncated T-refs and unclosed type args
+  const methodSig = Buffer.from(original);
+  const methodSigAt = methodSig.indexOf(Buffer.from("(TT;)TT;"));
+  expect(methodSigAt).toBeGreaterThan(0);
+  methodSig.set(Buffer.from("(TT;)LC<"), methodSigAt);
+  expect(() => classFileToStub(new Uint8Array(methodSig))).not.toThrow();
 });
