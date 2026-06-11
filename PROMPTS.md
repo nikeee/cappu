@@ -149,3 +149,4 @@ no timestamps were captured.
 - 2026-06-11 13:20 — add a cli command to cappu that looks like this: `cappu add implementation com.google.code.gson:gson@2.14.0`. That command should add the entry to the respective dependencies entry and download the dependency (and the respective dependencies) using the same algorithm as `cappu install`
 - 2026-06-11 13:35 — add support for when the user does not add a version number to the cappu add command. Or a partial version number. it sould take the latest possible version that is compatible with the already installed dependencies. Maybe we'd need a lock file? i dont know you tell me
 - 2026-06-11 13:39 — cappu install should only respect the cappu.lock.json
+- 2026-06-11 13:39 — dont wirte the schema file on cappu init. add a flag to the cappu init: --with-schema that writes that file

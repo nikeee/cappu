@@ -18,7 +18,8 @@ const USAGE = `
 cappu ${pkg.version}
 
 Usage:
-  cappu init                         Write a starter cappu.json (commented, all options)
+  cappu init [--with-schema]         Write a starter cappu.json (commented, all options);
+                                     --with-schema also writes cappu.schema.json
   cappu install                      Download the cappu.json dependencies (transitively)
                                      into lib/classes
   cappu add <configuration> <coord>  Add group:artifact[@version] to the dependencies
@@ -64,6 +65,7 @@ const { values, positionals } = parseArgs({
     // can supply the value (an explicit flag always wins).
     quiet: { type: "boolean", short: "q" },
     "fail-on-degrade": { type: "boolean" },
+    "with-schema": { type: "boolean", default: false },
     validate: { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
     version: { type: "boolean", default: false },
@@ -83,7 +85,7 @@ if (values.help || command === undefined) {
 
 // init runs before loadConfig: bootstrapping must not depend on (or be
 // blocked by) an existing, possibly broken config.
-if (command === "init") runInit(values.config);
+if (command === "init") runInit(values.config, values["with-schema"]);
 
 let config;
 try {
