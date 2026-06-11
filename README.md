@@ -1,5 +1,27 @@
 # cappu
-A Java compiler, lsp and toolchain.
+A Java compiler, lsp and toolchain. Favors convention over configuration.
+
+## Usage
+```sh
+# create a new project with cappu.json in $PWD (similar to npm init)
+cappu init
+
+# install some dependency and add it to cappu.json
+# cappu add <configuration> <group:artifact[@version]>
+cappu add implementation com.google.code.gson:gson@2.14.0
+
+# install dependencies from the lockfile (similar to npm ci)
+cappu install
+
+# build project
+cappu compile
+```
+
+### LSP Server
+```sh
+cappu lsp
+# optional --port if you need LSP via TCP
+```
 
 ```diff
 - warning -
