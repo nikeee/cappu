@@ -12,6 +12,9 @@ export async function runInstall(
   if (result.fromLock) {
     process.stderr.write("using cappu-lock.json\n");
   }
+  if (result.fromStore.length > 0) {
+    process.stderr.write(`${result.fromStore.length} package(s) from the local store\n`);
+  }
   if (result.lockStale) {
     process.stderr.write(
       "warning: cappu.json's dependencies changed since cappu-lock.json was written;\n" +

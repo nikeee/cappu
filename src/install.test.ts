@@ -6,12 +6,16 @@ import { test } from "node:test";
 import { expect } from "expect";
 
 import { loadConfig } from "./config.ts";
-import { installDependencies, LOCKFILE_NAME, pickAddVersion } from "./install.ts";
+import { installDependencies, LOCKFILE_NAME, pickAddVersion, storePathFor } from "./install.ts";
 import {
   InMemoryPackageSource,
   MavenRepositorySource,
   type PackageMetadata,
 } from "./packages/index.ts";
+
+// Every test runs against an isolated package store - never the user's real
+// XDG cache (the store test below swaps in its own).
+process.env.CAPPU_PACKAGE_STORE = mkdtempSync(join(tmpdir(), "cappu-store-shared-"));
 
 const POM_GSON = `<project>
   <dependencies>
@@ -128,6 +132,9 @@ test("install writes a lockfile and reuses it while the dependencies match", asy
     expect(fetchedPoms).toEqual([]);
 
     // A tampered artifact (bytes differing from the locked SHA-256) is refused.
+    // The store would mask the tampered repository (a cache hit IS the honest
+    // bytes), so it is emptied first to force the download path.
+    rmSync(process.env.CAPPU_PACKAGE_STORE!, { recursive: true, force: true });
     const tamperedRepo = new MavenRepositorySource(
       "https://repo.test/m2",
       () => Promise.resolve(undefined),
@@ -221,5 +228,63 @@ test("pickAddVersion takes the newest matching version that resolves conflict-fr
     expect(await pickAddVersion(empty, "org.x:lib", "9", [versionedSource()])).toBeUndefined();
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the package store serves repeat installs and rejects unsafe segments", async () => {
+  const store = mkdtempSync(join(tmpdir(), "cappu-store-"));
+  const dirA = mkdtempSync(join(tmpdir(), "cappu-install-"));
+  const dirB = mkdtempSync(join(tmpdir(), "cappu-install-"));
+  const previousStore = process.env.CAPPU_PACKAGE_STORE;
+  process.env.CAPPU_PACKAGE_STORE = store;
+  try {
+    const json =
+      '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }';
+    writeFileSync(join(dirA, "cappu.json"), json);
+    const first = await installDependencies(loadConfig(undefined, dirA), [fakeRepo()]);
+    expect(first.fromStore).toEqual([]);
+    // maven2 layout under the store keeps a.b:c and a.b.c:d apart
+    expect(
+      readFileSync(
+        join(store, "com", "google", "code", "gson", "gson", "2.14.0", "gson-2.14.0.jar"),
+        "utf8",
+      ),
+    ).toBe("gson-bytes");
+
+    // A second project with a repo that can only answer metadata: the jars
+    // come from the store.
+    writeFileSync(join(dirB, "cappu.json"), json);
+    const metadataOnly = new MavenRepositorySource(
+      "https://repo.test/m2",
+      url =>
+        Promise.resolve(
+          url.endsWith("gson-2.14.0.pom")
+            ? POM_GSON
+            : url.endsWith("base-1.0.pom")
+              ? POM_BASE
+              : undefined,
+        ),
+      () => Promise.resolve(undefined),
+    );
+    const second = await installDependencies(loadConfig(undefined, dirB), [metadataOnly]);
+    expect(second.installed).toHaveLength(2);
+    expect(second.fromStore).toEqual(["com.google.code.gson:gson:2.14.0", "org.example:base:1.0"]);
+
+    // A poisoned store entry fails the locked install like any tampered jar.
+    writeFileSync(
+      join(store, "com", "google", "code", "gson", "gson", "2.14.0", "gson-2.14.0.jar"),
+      "evil-bytes",
+    );
+    const poisoned = await installDependencies(loadConfig(undefined, dirB), [metadataOnly]);
+    expect(poisoned.integrityFailures).toEqual(["com.google.code.gson:gson:2.14.0"]);
+
+    // Unsafe coordinate segments never map into the store.
+    expect(storePathFor({ groupId: "../../etc", artifactId: "x", version: "1" })).toBeUndefined();
+    expect(storePathFor({ groupId: "a..b", artifactId: "x", version: "1" })).toBeUndefined();
+    expect(storePathFor({ groupId: "a.b", artifactId: "x/y", version: "1" })).toBeUndefined();
+  } finally {
+    if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
+    else process.env.CAPPU_PACKAGE_STORE = previousStore;
+    for (const d of [store, dirA, dirB]) rmSync(d, { recursive: true, force: true });
   }
 });

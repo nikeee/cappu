@@ -16,7 +16,8 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 
 import { type CappuConfig, resolveConfigPath } from "./config.ts";
 import {
@@ -30,6 +31,38 @@ import {
 } from "./packages/index.ts";
 
 export const LOCKFILE_NAME = "cappu-lock.json";
+
+// --- global package store ----------------------------------------------------
+// Downloaded jars are cached per user so other projects copy instead of
+// re-downloading. It is a CACHE, so it follows XDG_CACHE_HOME (~/.cache/cappu/
+// packages), not a config dir; CAPPU_PACKAGE_STORE overrides (tests, CI).
+// The layout is maven2's - group segments as directories, then artifact, then
+// version: a/b/c/1/c-1.jar vs a/b/c/d/1/d-1.jar - which is what keeps
+// "a.b:c@1" and "a.b.c:d@1" apart; flattening group and artifact into one
+// dotted path would collide them.
+
+function packageStoreDir(): string {
+  return (
+    process.env.CAPPU_PACKAGE_STORE ??
+    join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "cappu", "packages")
+  );
+}
+
+// One conservative charset for every path segment: anything else (path
+// separators, "..", empty segments) bypasses the store entirely rather than
+// risking a write outside it.
+const STORE_SEGMENT = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$/;
+
+/** The store path for exact coordinates, or undefined for unsafe segments. */
+export function storePathFor(coordinates: Coordinates): string | undefined {
+  const segments = [...coordinates.groupId.split("."), coordinates.artifactId, coordinates.version];
+  if (segments.some(segment => !STORE_SEGMENT.test(segment))) return undefined;
+  return join(
+    packageStoreDir(),
+    ...segments,
+    `${coordinates.artifactId}-${coordinates.version}.jar`,
+  );
+}
 
 interface LockedPackage {
   coordinates: Coordinates;
@@ -64,6 +97,8 @@ export interface InstallResult {
   lockStale: boolean;
   /** Locked packages whose downloaded jar did not match its locked SHA-256. */
   integrityFailures: string[];
+  /** Packages served from the local package store instead of a download. */
+  fromStore: string[];
 }
 
 /** "group:artifact" -> version entries of one configuration, as Coordinates. */
@@ -106,7 +141,18 @@ async function artifactFrom(
   sources: readonly PackageSource[],
   preferred: string,
   coordinates: Coordinates,
-): Promise<Uint8Array | undefined> {
+): Promise<{ bytes: Uint8Array; cached: boolean } | undefined> {
+  // The store first: a hit needs no network at all. Locked installs verify
+  // the SHA-256 afterwards either way, so a poisoned store entry is refused
+  // exactly like a tampered download.
+  const storePath = storePathFor(coordinates);
+  if (storePath && existsSync(storePath)) {
+    try {
+      return { bytes: readFileSync(storePath), cached: true };
+    } catch {
+      // unreadable store entry: fall through to the sources
+    }
+  }
   // Prefer the source that resolved the package; fall back to the others (the
   // configured source list may have changed since the lock was written).
   const ordered = [
@@ -115,7 +161,17 @@ async function artifactFrom(
   ];
   for (const source of ordered) {
     const bytes = await source.getArtifact?.(coordinates);
-    if (bytes) return bytes;
+    if (bytes) {
+      if (storePath) {
+        try {
+          mkdirSync(dirname(storePath), { recursive: true });
+          writeFileSync(storePath, bytes);
+        } catch {
+          // a read-only or full store never fails the install
+        }
+      }
+      return { bytes, cached: false };
+    }
   }
   return undefined;
 }
@@ -148,22 +204,24 @@ export async function installDependencies(
   const installed: string[] = [];
   const noArtifact: string[] = [];
   const integrityFailures: string[] = [];
+  const fromStore: string[] = [];
   const locked: LockedPackage[] = [];
   if (toInstall.length > 0) mkdirSync(targetDir, { recursive: true });
   for (const pkg of toInstall) {
-    const bytes = await artifactFrom(sources, pkg.source, pkg.coordinates);
-    if (!bytes) {
+    const artifact = await artifactFrom(sources, pkg.source, pkg.coordinates);
+    if (!artifact) {
       noArtifact.push(coordinatesToString(pkg.coordinates));
       continue;
     }
-    const digest = sha256Of(bytes);
+    const digest = sha256Of(artifact.bytes);
     if (pkg.sha256 !== undefined && pkg.sha256 !== digest) {
       // A locked install must produce the locked bytes: do not write the jar.
       integrityFailures.push(coordinatesToString(pkg.coordinates));
       continue;
     }
+    if (artifact.cached) fromStore.push(coordinatesToString(pkg.coordinates));
     const file = join(targetDir, `${pkg.coordinates.artifactId}-${pkg.coordinates.version}.jar`);
-    writeFileSync(file, bytes);
+    writeFileSync(file, artifact.bytes);
     installed.push(file);
     locked.push({ coordinates: pkg.coordinates, source: pkg.source, sha256: digest });
   }
@@ -174,7 +232,16 @@ export async function installDependencies(
     const newLock: Lockfile = { version: 2, roots: config.dependencies, packages: locked };
     writeFileSync(lockfilePath(config), `${JSON.stringify(newLock, null, 2)}\n`);
   }
-  return { installed, noArtifact, resolution, targetDir, fromLock, lockStale, integrityFailures };
+  return {
+    installed,
+    noArtifact,
+    resolution,
+    targetDir,
+    fromLock,
+    lockStale,
+    integrityFailures,
+    fromStore,
+  };
 }
 
 export interface PickedVersion {
