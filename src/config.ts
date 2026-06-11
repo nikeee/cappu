@@ -16,11 +16,14 @@ const InlayHintsSchema = z.object({
   varTypes: z.boolean().optional(),
 });
 
+export const DEFAULT_CLASS_PATH = "./lib/classes";
+export const DEFAULT_SOURCE_PATH = "./src/main/java";
+
 const CompilerOptionsSchema = z.object({
   /** Directories or .jar files scanned for .class files (resolution only). */
-  classPath: z.array(z.string()).default(["./lib/classes"]),
+  classPath: z.array(z.string()).default([DEFAULT_CLASS_PATH]),
   /** Directories scanned recursively for .java sources (resolution only). */
-  sourcePaths: z.array(z.string()).default(["./src/main/java"]),
+  sourcePaths: z.array(z.string()).default([DEFAULT_SOURCE_PATH]),
   /** Output root for the emitted package tree. */
   outDir: z.string().default("./build"),
   quiet: z.boolean().optional(),
