@@ -1284,15 +1284,36 @@ function binaryName(symbol: Symbol): InternalName {
   }
   const pkg = parent && parent.flags & SymbolFlags.Package ? parent.escapedName : "";
   // A local class's symbol-parent chain stops at the enclosing method/block (not a
-  // type), so no type prefix was collected. Recover it from the AST so the class
-  // is named Outer$Counter rather than a bare, top-level-looking name. TODO: javac
-  // disambiguates with a sequence number (Outer$1Counter); we omit it, so two
-  // local classes of the same simple name in one top-level type would collide.
+  // type), so no type prefix was collected. Recover the enclosing type from the
+  // AST and number the class as javac does: Outer$<k><Name>, where k counts the
+  // same-named local classes of the enclosing type in source order (nested types
+  // keep their own counter, so the walk does not descend into them - which also
+  // means a same-named local nested inside another LOCAL class is not counted).
   if (!pkg && names.length === 1) {
     const decl = symbol.valueDeclaration ?? symbol.declarations?.[0];
     let node = decl?.parent;
     while (node && !TYPE_DECL_KINDS.has(node.kind)) node = node.parent;
-    if (node?.symbol) return `${binaryName(node.symbol)}$${symbol.escapedName}` as InternalName;
+    if (node?.symbol && decl) {
+      let index = 1;
+      const count = (n: Node): void => {
+        if (
+          n.kind === SyntaxKind.ClassDeclaration &&
+          n !== decl &&
+          n.parent?.kind === SyntaxKind.Block &&
+          (n as ClassDeclaration).name?.text === symbol.escapedName &&
+          n.pos < decl.pos
+        ) {
+          index++;
+        }
+        if (n !== node && TYPE_DECL_KINDS.has(n.kind)) return;
+        forEachChild(n, c => {
+          count(c);
+          return undefined;
+        });
+      };
+      count(node);
+      return `${binaryName(node.symbol)}$${index}${symbol.escapedName}` as InternalName;
+    }
   }
   const nested = names.join("$");
   return (pkg ? `${pkg.replaceAll(".", "/")}/${nested}` : nested) as InternalName;
@@ -6633,27 +6654,35 @@ export function emitInterface(
 // The binary name of an anonymous class: the enclosing top-level type plus its
 // 1-based position among anonymous-class sites in that type (Outer$N). Computed
 // the same way by the class emission and the `new` site so they agree.
+// javac names anonymous classes <EnclosingType>$<n>, numbering them per
+// immediately enclosing type in source order (A2$1; A2$Inner$1) - nested types
+// keep their own counter, so the walk does not descend into them.
 function anonymousClassName(node: ObjectCreationExpression, program: Program): InternalName {
   program.getGlobalIndex();
-  let top: Node | undefined;
+  let enclosing: Node | undefined;
   for (let n: Node | undefined = node.parent; n; n = n.parent) {
-    if (TYPE_DECL_KINDS.has(n.kind)) top = n;
+    if (TYPE_DECL_KINDS.has(n.kind)) {
+      enclosing = n;
+      break;
+    }
   }
-  const base = top?.symbol ? binaryName(top.symbol) : "Anonymous";
+  const base = enclosing?.symbol ? binaryName(enclosing.symbol) : ("Anonymous" as InternalName);
   let index = 0;
   const count = (n: Node): void => {
     if (
       n.kind === SyntaxKind.ObjectCreationExpression &&
-      (n as ObjectCreationExpression).classBody
+      (n as ObjectCreationExpression).classBody &&
+      n.pos <= node.pos
     ) {
-      if (n.pos <= node.pos) index++;
+      index++;
     }
+    if (n !== enclosing && TYPE_DECL_KINDS.has(n.kind)) return; // own counter
     forEachChild(n, c => {
       count(c);
       return undefined;
     });
   };
-  count(top ?? node);
+  count(enclosing ?? node);
   return `${base}$${index}` as InternalName;
 }
 

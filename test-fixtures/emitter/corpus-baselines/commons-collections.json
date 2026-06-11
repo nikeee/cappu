@@ -102,6 +102,26 @@
   ],
   "org.apache.commons.collections4.CollectionUtils$CardinalityHelper": [
     [
+      "org.apache.commons.collections4.CollectionUtils$CardinalityHelper(java.lang.Iterable<? extends O>, java.lang.Iterable<? extends O>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class org/apache/commons/collections4/bag/HashBag",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/collections4/bag/HashBag.\"<init>\":(Ljava/lang/Iterable;)V",
+        "putfield # // Field cardinalityA:Lorg/apache/commons/collections4/Bag;",
+        "aload_0",
+        "new # // class org/apache/commons/collections4/bag/HashBag",
+        "dup",
+        "aload_2",
+        "invokespecial # // Method org/apache/commons/collections4/bag/HashBag.\"<init>\":(Ljava/lang/Iterable;)V",
+        "putfield # // Field cardinalityB:Lorg/apache/commons/collections4/Bag;",
+        "return"
+      ]
+    ],
+    [
       "public int freqA(java.lang.Object);",
       [
         "aload_0",
@@ -893,6 +913,15 @@
         "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
         "return"
       ]
+    ],
+    [
+      "public org.apache.commons.collections4.FunctorException(java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/Throwable;)V",
+        "return"
+      ]
     ]
   ],
   "org.apache.commons.collections4.IterableUtils$1": [
@@ -1352,6 +1381,16 @@
         "dup",
         "aload_0",
         "invokespecial # // Method org/apache/commons/collections4/iterators/IteratorChain.\"<init>\":(Ljava/util/Collection;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public static <E> java.util.Iterator<E> chainedIterator(java.util.Iterator<? extends E>...);",
+      [
+        "new # // class org/apache/commons/collections4/iterators/IteratorChain",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/collections4/iterators/IteratorChain.\"<init>\":([Ljava/util/Iterator;)V",
         "areturn"
       ]
     ],
@@ -3216,6 +3255,20 @@
     ]
   ],
   "org.apache.commons.collections4.comparators.ComparatorChain": [
+    [
+      "public org.apache.commons.collections4.comparators.ComparatorChain();",
+      [
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "new # // class java/util/BitSet",
+        "dup",
+        "invokespecial # // Method java/util/BitSet.\"<init>\":()V",
+        "invokespecial # // Method \"<init>\":(Ljava/util/List;Ljava/util/BitSet;)V",
+        "return"
+      ]
+    ],
     [
       "public org.apache.commons.collections4.comparators.ComparatorChain(java.util.Comparator<E>);",
       [
@@ -5644,6 +5697,42 @@
     ]
   ],
   "org.apache.commons.collections4.iterators.CollatingIterator": [
+    [
+      "public org.apache.commons.collections4.iterators.CollatingIterator();",
+      [
+        "aload_0",
+        "aconst_null",
+        "iconst_2",
+        "invokespecial # // Method \"<init>\":(Ljava/util/Comparator;I)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.iterators.CollatingIterator(java.util.Comparator<? super E>);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_2",
+        "invokespecial # // Method \"<init>\":(Ljava/util/Comparator;I)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.iterators.CollatingIterator(java.util.Comparator<? super E>, java.util.Iterator<? extends E>, java.util.Iterator<? extends E>);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_2",
+        "invokespecial # // Method \"<init>\":(Ljava/util/Comparator;I)V",
+        "aload_0",
+        "aload_2",
+        "invokevirtual # // Method addIterator:(Ljava/util/Iterator;)V",
+        "aload_0",
+        "aload_3",
+        "invokevirtual # // Method addIterator:(Ljava/util/Iterator;)V",
+        "return"
+      ]
+    ],
     [
       "private boolean anyValueSet(java.util.BitSet);",
       [
@@ -8251,6 +8340,17 @@
       ]
     ],
     [
+      "public static <E> org.apache.commons.collections4.list.LazyList<E> lazyList(java.util.List<E>, org.apache.commons.collections4.Transformer<java.lang.Integer, ? extends E>);",
+      [
+        "new # // class org/apache/commons/collections4/list/LazyList",
+        "dup",
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method \"<init>\":(Ljava/util/List;Lorg/apache/commons/collections4/Transformer;)V",
+        "areturn"
+      ]
+    ],
+    [
       "protected org.apache.commons.collections4.list.LazyList(java.util.List<E>, org.apache.commons.collections4.Factory<? extends E>);",
       [
         "aload_0",
@@ -10198,6 +10298,28 @@
       []
     ]
   ],
+  "org.apache.commons.collections4.bloomfilter.IndexExtractor$1Indices": [
+    [
+      "int[] toArray();",
+      [
+        "aload_0",
+        "getfield # // Field size:I",
+        "aload_0",
+        "getfield # // Field data:[I",
+        "arraylength",
+        "if_icmpne 19",
+        "aload_0",
+        "getfield # // Field data:[I",
+        "goto 30",
+        "aload_0",
+        "getfield # // Field data:[I",
+        "aload_0",
+        "getfield # // Field size:I",
+        "invokestatic # // Method java/util/Arrays.copyOf:([II)[I",
+        "areturn"
+      ]
+    ]
+  ],
   "org.apache.commons.collections4.bloomfilter.IndexExtractor$2": [
     [
       "public int[] asIndexArray();",
@@ -10582,6 +10704,16 @@
       [
         "iconst_0",
         "ireturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.bloomfilter.SimpleBloomFilter copy();",
+      [
+        "new # // class org/apache/commons/collections4/bloomfilter/SimpleBloomFilter",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method \"<init>\":(Lorg/apache/commons/collections4/bloomfilter/SimpleBloomFilter;)V",
+        "areturn"
       ]
     ],
     [
@@ -11207,6 +11339,16 @@
       ]
     ],
     [
+      "public org.apache.commons.collections4.bloomfilter.SparseBloomFilter copy();",
+      [
+        "new # // class org/apache/commons/collections4/bloomfilter/SparseBloomFilter",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method \"<init>\":(Lorg/apache/commons/collections4/bloomfilter/SparseBloomFilter;)V",
+        "areturn"
+      ]
+    ],
+    [
       "public org.apache.commons.collections4.bloomfilter.Shape getShape();",
       [
         "aload_0",
@@ -11614,6 +11756,70 @@
   ],
   "org.apache.commons.collections4.keyvalue.MultiKey": [
     [
+      "public org.apache.commons.collections4.keyvalue.MultiKey(K, K);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokestatic # // Method newArray:(Ljava/lang/Object;Ljava/lang/Object;)[Ljava/lang/Object;",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":([Ljava/lang/Object;Z)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.keyvalue.MultiKey(K, K, K);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "aload_3",
+        "invokestatic # // Method newArray:(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)[Ljava/lang/Object;",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":([Ljava/lang/Object;Z)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.keyvalue.MultiKey(K, K, K, K);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "aload_3",
+        "aload 4",
+        "invokestatic # // Method newArray:(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)[Ljava/lang/Object;",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":([Ljava/lang/Object;Z)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.keyvalue.MultiKey(K, K, K, K, K);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "aload_3",
+        "aload 4",
+        "aload 5",
+        "invokestatic # // Method newArray:(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)[Ljava/lang/Object;",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":([Ljava/lang/Object;Z)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.keyvalue.MultiKey(K[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_1",
+        "invokespecial # // Method \"<init>\":([Ljava/lang/Object;Z)V",
+        "return"
+      ]
+    ],
+    [
       "public K getKey(int);",
       [
         "aload_0",
@@ -11663,6 +11869,16 @@
     ]
   ],
   "org.apache.commons.collections4.list.GrowthList": [
+    [
+      "public static <E> org.apache.commons.collections4.list.GrowthList<E> growthList(java.util.List<E>);",
+      [
+        "new # // class org/apache/commons/collections4/list/GrowthList",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method \"<init>\":(Ljava/util/List;)V",
+        "areturn"
+      ]
+    ],
     [
       "public org.apache.commons.collections4.list.GrowthList();",
       [
@@ -12855,6 +13071,15 @@
       ]
     ],
     [
+      "public org.apache.commons.collections4.map.CaseInsensitiveMap(java.util.Map<? extends K, ? extends V>);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractHashedMap.\"<init>\":(Ljava/util/Map;)V",
+        "return"
+      ]
+    ],
+    [
       "public org.apache.commons.collections4.map.CaseInsensitiveMap<K, V> clone();",
       [
         "aload_0",
@@ -13685,6 +13910,15 @@
       ]
     ],
     [
+      "public org.apache.commons.collections4.map.HashedMap(java.util.Map<? extends K, ? extends V>);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractHashedMap.\"<init>\":(Ljava/util/Map;)V",
+        "return"
+      ]
+    ],
+    [
       "public org.apache.commons.collections4.map.HashedMap<K, V> clone();",
       [
         "aload_0",
@@ -13734,6 +13968,15 @@
     ]
   ],
   "org.apache.commons.collections4.map.PassiveExpiringMap": [
+    [
+      "public org.apache.commons.collections4.map.PassiveExpiringMap();",
+      [
+        "aload_0",
+        "ldc2_w # // long -1l",
+        "invokespecial # // Method \"<init>\":(J)V",
+        "return"
+      ]
+    ],
     [
       "public org.apache.commons.collections4.map.PassiveExpiringMap(org.apache.commons.collections4.map.PassiveExpiringMap$ExpirationPolicy<K, V>);",
       [
@@ -13791,6 +14034,39 @@
         "invokespecial # // Method org/apache/commons/collections4/map/PassiveExpiringMap$ConstantTimeToLiveExpirationPolicy.\"<init>\":(J)V",
         "aload_3",
         "invokespecial # // Method \"<init>\":(Lorg/apache/commons/collections4/map/PassiveExpiringMap$ExpirationPolicy;Ljava/util/Map;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.PassiveExpiringMap(long, java.util.concurrent.TimeUnit);",
+      [
+        "aload_0",
+        "lload_1",
+        "aload_3",
+        "invokestatic # // Method validateAndConvertToMillis:(JLjava/util/concurrent/TimeUnit;)J",
+        "invokespecial # // Method \"<init>\":(J)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.PassiveExpiringMap(long, java.util.concurrent.TimeUnit, java.util.Map<K, V>);",
+      [
+        "aload_0",
+        "lload_1",
+        "aload_3",
+        "invokestatic # // Method validateAndConvertToMillis:(JLjava/util/concurrent/TimeUnit;)J",
+        "aload 4",
+        "invokespecial # // Method \"<init>\":(JLjava/util/Map;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.PassiveExpiringMap(java.util.Map<K, V>);",
+      [
+        "aload_0",
+        "ldc2_w # // long -1l",
+        "aload_1",
+        "invokespecial # // Method \"<init>\":(JLjava/util/Map;)V",
         "return"
       ]
     ],
@@ -15325,6 +15601,65 @@
   ],
   "org.apache.commons.collections4.map.CompositeMap": [
     [
+      "public org.apache.commons.collections4.map.CompositeMap();",
+      [
+        "aload_0",
+        "iconst_0",
+        "anewarray # // class java/util/Map",
+        "aconst_null",
+        "invokespecial # // Method \"<init>\":([Ljava/util/Map;Lorg/apache/commons/collections4/map/CompositeMap$MapMutator;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.CompositeMap(java.util.Map<K, V>...);",
+      [
+        "aload_0",
+        "aload_1",
+        "aconst_null",
+        "invokespecial # // Method \"<init>\":([Ljava/util/Map;Lorg/apache/commons/collections4/map/CompositeMap$MapMutator;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.CompositeMap(java.util.Map<K, V>, java.util.Map<K, V>);",
+      [
+        "aload_0",
+        "iconst_2",
+        "anewarray # // class java/util/Map",
+        "dup",
+        "iconst_0",
+        "aload_1",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "aload_2",
+        "aastore",
+        "aconst_null",
+        "invokespecial # // Method \"<init>\":([Ljava/util/Map;Lorg/apache/commons/collections4/map/CompositeMap$MapMutator;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.CompositeMap(java.util.Map<K, V>, java.util.Map<K, V>, org.apache.commons.collections4.map.CompositeMap$MapMutator<K, V>);",
+      [
+        "aload_0",
+        "iconst_2",
+        "anewarray # // class java/util/Map",
+        "dup",
+        "iconst_0",
+        "aload_1",
+        "aastore",
+        "dup",
+        "iconst_1",
+        "aload_2",
+        "aastore",
+        "aload_3",
+        "invokespecial # // Method \"<init>\":([Ljava/util/Map;Lorg/apache/commons/collections4/map/CompositeMap$MapMutator;)V",
+        "return"
+      ]
+    ],
+    [
       "public V put(K, V);",
       [
         "aload_0",
@@ -15603,6 +15938,15 @@
         "iload_1",
         "fload_2",
         "invokespecial # // Method org/apache/commons/collections4/map/AbstractHashedMap.\"<init>\":(IF)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.collections4.map.IdentityMap(java.util.Map<K, V>);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/collections4/map/AbstractHashedMap.\"<init>\":(Ljava/util/Map;)V",
         "return"
       ]
     ],

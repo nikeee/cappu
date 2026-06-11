@@ -479,6 +479,18 @@
       ]
     ],
     [
+      "public org.json.JSONArray put(java.util.Collection<?>);",
+      [
+        "aload_0",
+        "new # // class org/json/JSONArray",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method \"<init>\":(Ljava/util/Collection;)V",
+        "invokevirtual # // Method put:(Ljava/lang/Object;)Lorg/json/JSONArray;",
+        "areturn"
+      ]
+    ],
+    [
       "public org.json.JSONArray put(int);",
       [
         "aload_0",
@@ -494,6 +506,18 @@
         "aload_0",
         "lload_1",
         "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+        "invokevirtual # // Method put:(Ljava/lang/Object;)Lorg/json/JSONArray;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray put(java.util.Map<?, ?>);",
+      [
+        "aload_0",
+        "new # // class org/json/JSONObject",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONObject.\"<init>\":(Ljava/util/Map;)V",
         "invokevirtual # // Method put:(Ljava/lang/Object;)Lorg/json/JSONArray;",
         "areturn"
       ]
@@ -837,6 +861,24 @@
         "getfield # // Field map:Ljava/util/Map;",
         "invokeinterface #, 1 // InterfaceMethod java/util/Map.isEmpty:()Z",
         "ireturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray names();",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.isEmpty:()Z",
+        "ifeq 14",
+        "aconst_null",
+        "areturn",
+        "new # // class org/json/JSONArray",
+        "dup",
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.keySet:()Ljava/util/Set;",
+        "invokespecial # // Method org/json/JSONArray.\"<init>\":(Ljava/util/Collection;)V",
+        "areturn"
       ]
     ],
     [
@@ -1485,6 +1527,17 @@
         "putfield # // Field refTokens:Ljava/util/List;",
         "return"
       ]
+    ],
+    [
+      "public org.json.JSONPointer build();",
+      [
+        "new # // class org/json/JSONPointer",
+        "dup",
+        "aload_0",
+        "getfield # // Field refTokens:Ljava/util/List;",
+        "invokespecial # // Method org/json/JSONPointer.\"<init>\":(Ljava/util/List;)V",
+        "areturn"
+      ]
     ]
   ],
   "org.json.JSONPointer": [
@@ -1560,6 +1613,33 @@
         "new # // class org/json/JSONParserConfiguration",
         "dup",
         "invokespecial # // Method org/json/JSONParserConfiguration.\"<init>\":()V",
+        "invokespecial # // Method \"<init>\":(Ljava/io/Reader;Lorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONTokener(java.io.InputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "new # // class org/json/JSONParserConfiguration",
+        "dup",
+        "invokespecial # // Method org/json/JSONParserConfiguration.\"<init>\":()V",
+        "invokespecial # // Method \"<init>\":(Ljava/io/InputStream;Lorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONTokener(java.io.InputStream, org.json.JSONParserConfiguration);",
+      [
+        "aload_0",
+        "new # // class java/io/InputStreamReader",
+        "dup",
+        "aload_1",
+        "ldc # // String UTF-8",
+        "invokestatic # // Method java/nio/charset/Charset.forName:(Ljava/lang/String;)Ljava/nio/charset/Charset;",
+        "invokespecial # // Method java/io/InputStreamReader.\"<init>\":(Ljava/io/InputStream;Ljava/nio/charset/Charset;)V",
+        "aload_2",
         "invokespecial # // Method \"<init>\":(Ljava/io/Reader;Lorg/json/JSONParserConfiguration;)V",
         "return"
       ]
@@ -1832,6 +1912,17 @@
       [
         "aload_0",
         "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.HTTPTokener": [
+    [
+      "public org.json.HTTPTokener(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONTokener.\"<init>\":(Ljava/lang/String;)V",
         "return"
       ]
     ]
@@ -2118,6 +2209,18 @@
         "aload_0",
         "aload_1",
         "invokespecial # // Method org/json/JSONTokener.\"<init>\":(Ljava/io/Reader;)V",
+        "aload_0",
+        "getstatic # // Field org/json/XMLParserConfiguration.ORIGINAL:Lorg/json/XMLParserConfiguration;",
+        "putfield # // Field configuration:Lorg/json/XMLParserConfiguration;",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.XMLTokener(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONTokener.\"<init>\":(Ljava/lang/String;)V",
         "aload_0",
         "getstatic # // Field org/json/XMLParserConfiguration.ORIGINAL:Lorg/json/XMLParserConfiguration;",
         "putfield # // Field configuration:Lorg/json/XMLParserConfiguration;",

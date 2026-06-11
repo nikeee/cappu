@@ -503,6 +503,17 @@
       ]
     ],
     [
+      "private static org.apache.commons.io.filefilter.SuffixFileFilter toSuffixFileFilter(java.lang.String...);",
+      [
+        "new # // class org/apache/commons/io/filefilter/SuffixFileFilter",
+        "dup",
+        "aload_0",
+        "invokestatic # // Method toSuffixes:([Ljava/lang/String;)[Ljava/lang/String;",
+        "invokespecial # // Method org/apache/commons/io/filefilter/SuffixFileFilter.\"<init>\":([Ljava/lang/String;)V",
+        "areturn"
+      ]
+    ],
+    [
       "public org.apache.commons.io.FileUtils();",
       [
         "aload_0",
@@ -1128,6 +1139,21 @@
         "aload_0",
         "arraylength",
         "ireturn"
+      ]
+    ],
+    [
+      "public static org.apache.commons.io.LineIterator lineIterator(java.io.InputStream, java.nio.charset.Charset);",
+      [
+        "new # // class org/apache/commons/io/LineIterator",
+        "dup",
+        "new # // class java/io/InputStreamReader",
+        "dup",
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/io/Charsets.toCharset:(Ljava/nio/charset/Charset;)Ljava/nio/charset/Charset;",
+        "invokespecial # // Method java/io/InputStreamReader.\"<init>\":(Ljava/io/InputStream;Ljava/nio/charset/Charset;)V",
+        "invokespecial # // Method org/apache/commons/io/LineIterator.\"<init>\":(Ljava/io/Reader;)V",
+        "areturn"
       ]
     ],
     [
@@ -2585,6 +2611,46 @@
   ],
   "org.apache.commons.io.filefilter.AndFileFilter": [
     [
+      "public org.apache.commons.io.filefilter.AndFileFilter();",
+      [
+        "aload_0",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":(I)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.filefilter.AndFileFilter(org.apache.commons.io.filefilter.IOFileFilter...);",
+      [
+        "aload_0",
+        "aload_1",
+        "ldc # // String fileFilters",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/io/filefilter/IOFileFilter;\"",
+        "arraylength",
+        "invokespecial # // Method \"<init>\":(I)V",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method addFileFilter:([Lorg/apache/commons/io/filefilter/IOFileFilter;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.filefilter.AndFileFilter(org.apache.commons.io.filefilter.IOFileFilter, org.apache.commons.io.filefilter.IOFileFilter);",
+      [
+        "aload_0",
+        "iconst_2",
+        "invokespecial # // Method \"<init>\":(I)V",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method addFileFilter:(Lorg/apache/commons/io/filefilter/IOFileFilter;)V",
+        "aload_0",
+        "aload_2",
+        "invokevirtual # // Method addFileFilter:(Lorg/apache/commons/io/filefilter/IOFileFilter;)V",
+        "return"
+      ]
+    ],
+    [
       "public void addFileFilter(org.apache.commons.io.filefilter.IOFileFilter...);",
       [
         "aload_1",
@@ -2762,6 +2828,46 @@
   ],
   "org.apache.commons.io.filefilter.OrFileFilter": [
     [
+      "public org.apache.commons.io.filefilter.OrFileFilter();",
+      [
+        "aload_0",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":(I)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.filefilter.OrFileFilter(org.apache.commons.io.filefilter.IOFileFilter...);",
+      [
+        "aload_0",
+        "aload_1",
+        "ldc # // String fileFilters",
+        "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/apache/commons/io/filefilter/IOFileFilter;\"",
+        "arraylength",
+        "invokespecial # // Method \"<init>\":(I)V",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method addFileFilter:([Lorg/apache/commons/io/filefilter/IOFileFilter;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.filefilter.OrFileFilter(org.apache.commons.io.filefilter.IOFileFilter, org.apache.commons.io.filefilter.IOFileFilter);",
+      [
+        "aload_0",
+        "iconst_2",
+        "invokespecial # // Method \"<init>\":(I)V",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method addFileFilter:(Lorg/apache/commons/io/filefilter/IOFileFilter;)V",
+        "aload_0",
+        "aload_2",
+        "invokevirtual # // Method addFileFilter:(Lorg/apache/commons/io/filefilter/IOFileFilter;)V",
+        "return"
+      ]
+    ],
+    [
       "public void addFileFilter(org.apache.commons.io.filefilter.IOFileFilter...);",
       [
         "aload_1",
@@ -2793,6 +2899,26 @@
         "aload_1",
         "getstatic # // Field org/apache/commons/io/IOCase.SENSITIVE:Lorg/apache/commons/io/IOCase;",
         "invokespecial # // Method \"<init>\":(Ljava/util/List;Lorg/apache/commons/io/IOCase;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.filefilter.SuffixFileFilter(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "getstatic # // Field org/apache/commons/io/IOCase.SENSITIVE:Lorg/apache/commons/io/IOCase;",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/String;Lorg/apache/commons/io/IOCase;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.filefilter.SuffixFileFilter(java.lang.String...);",
+      [
+        "aload_0",
+        "aload_1",
+        "getstatic # // Field org/apache/commons/io/IOCase.SENSITIVE:Lorg/apache/commons/io/IOCase;",
+        "invokespecial # // Method \"<init>\":([Ljava/lang/String;Lorg/apache/commons/io/IOCase;)V",
         "return"
       ]
     ],
@@ -4182,6 +4308,18 @@
       ]
     ]
   ],
+  "org.apache.commons.io.input.QueueInputStream$Builder": [
+    [
+      "public org.apache.commons.io.input.QueueInputStream get();",
+      [
+        "new # // class org/apache/commons/io/input/QueueInputStream",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/apache/commons/io/input/QueueInputStream.\"<init>\":(Lorg/apache/commons/io/input/QueueInputStream$Builder;)V",
+        "areturn"
+      ]
+    ]
+  ],
   "org.apache.commons.io.input.QueueInputStream": [
     [
       "public static org.apache.commons.io.input.QueueInputStream$Builder builder();",
@@ -4468,6 +4606,18 @@
     [
       "public abstract java.io.InputStream toInputStream();",
       []
+    ],
+    [
+      "public void write(byte[]);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "aload_1",
+        "arraylength",
+        "invokevirtual # // Method write:([BII)V",
+        "return"
+      ]
     ],
     [
       "public abstract void write(byte[], int, int);",
@@ -5609,6 +5759,15 @@
   ],
   "org.apache.commons.io.input.MarkShieldInputStream": [
     [
+      "public org.apache.commons.io.input.MarkShieldInputStream(java.io.InputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/input/ProxyInputStream.\"<init>\":(Ljava/io/InputStream;)V",
+        "return"
+      ]
+    ],
+    [
       "public void mark(int);",
       [
         "return"
@@ -5682,6 +5841,18 @@
         "dup",
         "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
         "invokespecial # // Method \"<init>\":(Ljava/io/InputStream;Ljava/util/List;)V",
+        "return"
+      ]
+    ],
+    [
+      "private org.apache.commons.io.input.ObservableInputStream(java.io.InputStream, java.util.List<org.apache.commons.io.input.ObservableInputStream$Observer>);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/input/ProxyInputStream.\"<init>\":(Ljava/io/InputStream;)V",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field observers:Ljava/util/List;",
         "return"
       ]
     ],
@@ -5951,6 +6122,15 @@
   ],
   "org.apache.commons.io.input.CountingInputStream": [
     [
+      "public org.apache.commons.io.input.CountingInputStream(java.io.InputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/input/ProxyInputStream.\"<init>\":(Ljava/io/InputStream;)V",
+        "return"
+      ]
+    ],
+    [
       "org.apache.commons.io.input.CountingInputStream(java.io.InputStream, org.apache.commons.io.input.ProxyInputStream$AbstractBuilder<?, ?>);",
       [
         "aload_0",
@@ -6180,6 +6360,18 @@
         "dup",
         "invokespecial # // Method org/apache/commons/io/monitor/FileAlterationObserver$Builder.\"<init>\":()V",
         "areturn"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.monitor.FileAlterationObserver(java.lang.String);",
+      [
+        "aload_0",
+        "new # // class java/io/File",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method java/io/File.\"<init>\":(Ljava/lang/String;)V",
+        "invokespecial # // Method \"<init>\":(Ljava/io/File;)V",
+        "return"
       ]
     ],
     [
@@ -6476,6 +6668,15 @@
         "invokespecial # // Method \"<init>\":(Ljava/io/OutputStream;)V",
         "areturn"
       ]
+    ],
+    [
+      "public org.apache.commons.io.output.CloseShieldOutputStream(java.io.OutputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/output/ProxyOutputStream.\"<init>\":(Ljava/io/OutputStream;)V",
+        "return"
+      ]
     ]
   ],
   "org.apache.commons.io.output.ClosedOutputStream": [
@@ -6542,6 +6743,15 @@
   ],
   "org.apache.commons.io.output.CountingOutputStream": [
     [
+      "public org.apache.commons.io.output.CountingOutputStream(java.io.OutputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/output/ProxyOutputStream.\"<init>\":(Ljava/io/OutputStream;)V",
+        "return"
+      ]
+    ],
+    [
       "protected synchronized void beforeWrite(int);",
       [
         "aload_0",
@@ -6560,6 +6770,20 @@
         "aload_0",
         "getfield # // Field count:J",
         "lreturn"
+      ]
+    ]
+  ],
+  "org.apache.commons.io.output.TeeOutputStream": [
+    [
+      "public org.apache.commons.io.output.TeeOutputStream(java.io.OutputStream, java.io.OutputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/output/ProxyOutputStream.\"<init>\":(Ljava/io/OutputStream;)V",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field branch:Ljava/io/OutputStream;",
+        "return"
       ]
     ]
   ],
@@ -6613,6 +6837,15 @@
         "invokespecial # // Method org/apache/commons/io/output/FilterCollectionWriter.\"<init>\":(Ljava/util/Collection;)V",
         "return"
       ]
+    ],
+    [
+      "public org.apache.commons.io.output.ProxyCollectionWriter(java.io.Writer...);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/output/FilterCollectionWriter.\"<init>\":([Ljava/io/Writer;)V",
+        "return"
+      ]
     ]
   ],
   "org.apache.commons.io.output.TeeWriter": [
@@ -6622,6 +6855,15 @@
         "aload_0",
         "aload_1",
         "invokespecial # // Method org/apache/commons/io/output/ProxyCollectionWriter.\"<init>\":(Ljava/util/Collection;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.io.output.TeeWriter(java.io.Writer...);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/io/output/ProxyCollectionWriter.\"<init>\":([Ljava/io/Writer;)V",
         "return"
       ]
     ]

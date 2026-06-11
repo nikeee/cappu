@@ -37,6 +37,15 @@
         "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
         "return"
       ]
+    ],
+    [
+      "public org.apache.commons.codec.DecoderException(java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/Throwable;)V",
+        "return"
+      ]
     ]
   ],
   "org.apache.commons.codec.EncoderException": [
@@ -64,6 +73,15 @@
         "aload_1",
         "aload_2",
         "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.codec.EncoderException(java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/Throwable;)V",
         "return"
       ]
     ]

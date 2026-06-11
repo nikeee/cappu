@@ -5229,6 +5229,15 @@
         "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
         "return"
       ]
+    ],
+    [
+      "public org.apache.commons.lang3.SerializationException(java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/Throwable;)V",
+        "return"
+      ]
     ]
   ],
   "org.apache.commons.lang3.SerializationUtils": [
@@ -9534,6 +9543,15 @@
       ]
     ],
     [
+      "public org.apache.commons.lang3.builder.ReflectionToStringBuilder(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/apache/commons/lang3/builder/ToStringBuilder.\"<init>\":(Ljava/lang/Object;)V",
+        "return"
+      ]
+    ],
+    [
       "public org.apache.commons.lang3.builder.ReflectionToStringBuilder(java.lang.Object, org.apache.commons.lang3.builder.ToStringStyle);",
       [
         "aload_0",
@@ -10275,6 +10293,15 @@
         "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
         "return"
       ]
+    ],
+    [
+      "public org.apache.commons.lang3.exception.CloneFailedException(java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/Throwable;)V",
+        "return"
+      ]
     ]
   ],
   "org.apache.commons.lang3.exception.ExceptionUtils": [
@@ -10480,6 +10507,17 @@
       [
         "aload_0",
         "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.apache.commons.lang3.exception.UncheckedException": [
+    [
+      "public org.apache.commons.lang3.exception.UncheckedException(java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/Throwable;)V",
         "return"
       ]
     ]
@@ -13725,6 +13763,20 @@
       ]
     ],
     [
+      "public org.apache.commons.lang3.text.StrTokenizer(char[], org.apache.commons.lang3.text.StrMatcher, org.apache.commons.lang3.text.StrMatcher);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method \"<init>\":([CLorg/apache/commons/lang3/text/StrMatcher;)V",
+        "aload_0",
+        "aload_3",
+        "invokevirtual # // Method setQuoteMatcher:(Lorg/apache/commons/lang3/text/StrMatcher;)Lorg/apache/commons/lang3/text/StrTokenizer;",
+        "pop",
+        "return"
+      ]
+    ],
+    [
       "public org.apache.commons.lang3.text.StrTokenizer(java.lang.String);",
       [
         "aload_0",
@@ -13754,6 +13806,73 @@
         "aload_0",
         "aconst_null",
         "putfield # // Field chars:[C",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.text.StrTokenizer(java.lang.String, char);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/String;)V",
+        "aload_0",
+        "iload_2",
+        "invokevirtual # // Method setDelimiterChar:(C)Lorg/apache/commons/lang3/text/StrTokenizer;",
+        "pop",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.text.StrTokenizer(java.lang.String, char, char);",
+      [
+        "aload_0",
+        "aload_1",
+        "iload_2",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/String;C)V",
+        "aload_0",
+        "iload_3",
+        "invokevirtual # // Method setQuoteChar:(C)Lorg/apache/commons/lang3/text/StrTokenizer;",
+        "pop",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.text.StrTokenizer(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/String;)V",
+        "aload_0",
+        "aload_2",
+        "invokevirtual # // Method setDelimiterString:(Ljava/lang/String;)Lorg/apache/commons/lang3/text/StrTokenizer;",
+        "pop",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.text.StrTokenizer(java.lang.String, org.apache.commons.lang3.text.StrMatcher);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/String;)V",
+        "aload_0",
+        "aload_2",
+        "invokevirtual # // Method setDelimiterMatcher:(Lorg/apache/commons/lang3/text/StrMatcher;)Lorg/apache/commons/lang3/text/StrTokenizer;",
+        "pop",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.text.StrTokenizer(java.lang.String, org.apache.commons.lang3.text.StrMatcher, org.apache.commons.lang3.text.StrMatcher);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/String;Lorg/apache/commons/lang3/text/StrMatcher;)V",
+        "aload_0",
+        "aload_3",
+        "invokevirtual # // Method setQuoteMatcher:(Lorg/apache/commons/lang3/text/StrMatcher;)Lorg/apache/commons/lang3/text/StrTokenizer;",
+        "pop",
         "return"
       ]
     ],
@@ -14886,6 +15005,16 @@
         "aload_2",
         "aconst_null",
         "invokespecial # // Method \"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.NotImplementedException(java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "aconst_null",
+        "invokespecial # // Method \"<init>\":(Ljava/lang/Throwable;Ljava/lang/String;)V",
         "return"
       ]
     ],
@@ -16713,6 +16842,16 @@
       ]
     ],
     [
+      "protected java.lang.Exception getTypedException(java.lang.Exception);",
+      [
+        "new # // class java/lang/Exception",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/Throwable;)V",
+        "areturn"
+      ]
+    ],
+    [
       "public synchronized boolean isInitialized();",
       [
         "aload_0",
@@ -16750,6 +16889,16 @@
         "putfield # // Field callable:Ljava/util/concurrent/Callable;",
         "return"
       ]
+    ],
+    [
+      "protected java.lang.Exception getTypedException(java.lang.Exception);",
+      [
+        "new # // class java/lang/Exception",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/Throwable;)V",
+        "areturn"
+      ]
     ]
   ],
   "org.apache.commons.lang3.concurrent.ConcurrentException": [
@@ -16780,6 +16929,16 @@
         "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
         "return"
       ]
+    ],
+    [
+      "public org.apache.commons.lang3.concurrent.ConcurrentException(java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/lang3/concurrent/ConcurrentUtils.checkedException:(Ljava/lang/Throwable;)Ljava/lang/Throwable;",
+        "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/Throwable;)V",
+        "return"
+      ]
     ]
   ],
   "org.apache.commons.lang3.concurrent.ConcurrentRuntimeException": [
@@ -16799,6 +16958,16 @@
         "aload_2",
         "invokestatic # // Method org/apache/commons/lang3/concurrent/ConcurrentUtils.checkedException:(Ljava/lang/Throwable;)Ljava/lang/Throwable;",
         "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.concurrent.ConcurrentRuntimeException(java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method org/apache/commons/lang3/concurrent/ConcurrentUtils.checkedException:(Ljava/lang/Throwable;)Ljava/lang/Throwable;",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/Throwable;)V",
         "return"
       ]
     ]
@@ -16928,6 +17097,15 @@
         "aload_1",
         "aload_2",
         "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.concurrent.CircuitBreakingException(java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/Throwable;)V",
         "return"
       ]
     ]
@@ -21212,6 +21390,15 @@
         "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
         "return"
       ]
+    ],
+    [
+      "public org.apache.commons.lang3.exception.CustomCheckedException(java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/Exception.\"<init>\":(Ljava/lang/Throwable;)V",
+        "return"
+      ]
     ]
   ],
   "org.apache.commons.lang3.exception.CustomUncheckedException": [
@@ -21239,6 +21426,15 @@
         "aload_1",
         "aload_2",
         "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.apache.commons.lang3.exception.CustomUncheckedException(java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/Throwable;)V",
         "return"
       ]
     ]

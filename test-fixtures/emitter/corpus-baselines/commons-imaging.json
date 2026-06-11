@@ -1164,6 +1164,40 @@
       ]
     ],
     [
+      "public static int check(int);",
+      [
+        "iload_0",
+        "getstatic # // Field LIMIT:I",
+        "if_icmple 19",
+        "new # // class org/apache/commons/imaging/common/AllocationRequestException",
+        "dup",
+        "getstatic # // Field LIMIT:I",
+        "iload_0",
+        "invokespecial # // Method org/apache/commons/imaging/common/AllocationRequestException.\"<init>\":(II)V",
+        "athrow",
+        "iload_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static int check(long, int);",
+      [
+        "lload_0",
+        "invokestatic # // Method java/lang/Math.toIntExact:(J)I",
+        "iload_2",
+        "invokestatic # // Method check:(II)I",
+        "ireturn",
+        "astore_3",
+        "new # // class org/apache/commons/imaging/common/AllocationRequestException",
+        "dup",
+        "getstatic # // Field LIMIT:I",
+        "lload_0",
+        "aload_3",
+        "invokespecial # // Method org/apache/commons/imaging/common/AllocationRequestException.\"<init>\":(IJLjava/lang/Throwable;)V",
+        "athrow"
+      ]
+    ],
+    [
       "private org.apache.commons.imaging.common.Allocator();",
       [
         "aload_0",

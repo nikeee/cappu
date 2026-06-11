@@ -5,7 +5,7 @@ import { expect } from "expect";
 import { createChecker } from "./checker.ts";
 import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
 import { createProgram } from "./program.ts";
-import { findReferences } from "./resolver.ts";
+import { findReferences, getSourceFileOfNode } from "./resolver.ts";
 import { type Identifier } from "./types.ts";
 import { type Uri } from "./workspace.ts";
 
@@ -77,4 +77,53 @@ test("renaming a method matches its qualified call site", () => {
   const run = symbolAt(ctx, "file:///D.java" as Uri, "run");
   const refs = findReferences(run, ctx.program, ctx.checker.resolveName);
   expect(refs.length).toBe(2); // declaration + d.run()
+});
+
+// Rename is findReferences + an edit per occurrence (see server.onRenameRequest).
+// These stress the cross-file shape the WorkspaceEdit is built from.
+function renameEdits(
+  ctx: ReturnType<typeof setup>,
+  uri: Uri,
+  needle: string,
+  occ = 1,
+): Map<string, number> {
+  const symbol = symbolAt(ctx, uri, needle, occ);
+  const perFile = new Map<string, number>();
+  for (const node of findReferences(symbol, ctx.program, ctx.checker.resolveName)) {
+    const file = getSourceFileOfNode(node).fileName;
+    perFile.set(file, (perFile.get(file) ?? 0) + 1);
+  }
+  return perFile;
+}
+
+test("renaming a class hits its declaration and every cross-file use", () => {
+  const ctx = setup({
+    "file:///P.java": "class P { }",
+    "file:///UseA.java": "class UseA { P p = new P(); P make() { return new P(); } }",
+    "file:///UseB.java": "class UseB extends P { }",
+  });
+  const edits = renameEdits(ctx, "file:///P.java" as Uri, "P");
+  expect(edits.get("file:///P.java")).toBe(1); // the declaration
+  expect(edits.get("file:///UseA.java")).toBe(4); // field type, two news, return type
+  expect(edits.get("file:///UseB.java")).toBe(1); // extends clause
+});
+
+test("renaming a method spans files but not same-named methods of other types", () => {
+  const ctx = setup({
+    "file:///S.java": "class S { void go() { } }",
+    "file:///T.java": "class T { void go() { } void m(S s) { s.go(); go(); } }",
+  });
+  const edits = renameEdits(ctx, "file:///S.java" as Uri, "go");
+  expect(edits.get("file:///S.java")).toBe(1); // declaration
+  expect(edits.get("file:///T.java")).toBe(1); // s.go() only - the bare go() is T's
+});
+
+test("renaming a field used through this, a receiver and statically-typed chains", () => {
+  const ctx = setup({
+    "file:///H.java": "class H { int count; int bump() { return this.count + count; } }",
+    "file:///K.java": "class K { int read(H h) { return h.count; } }",
+  });
+  const edits = renameEdits(ctx, "file:///H.java" as Uri, "count");
+  expect(edits.get("file:///H.java")).toBe(3); // declaration + this.count + count
+  expect(edits.get("file:///K.java")).toBe(1); // h.count
 });
