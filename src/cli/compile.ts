@@ -1,16 +1,20 @@
 // `cappu compile`: run the print-free compile pipeline and render its result.
 // With no files, this is a project build over the configured sourcePaths.
 
-import { missingConfiguredPaths, runCompile } from "../compiler/compiler.ts";
+import { missingConfiguredPaths, type OutputKind, runCompile } from "../compiler/compiler.ts";
 import { type CappuConfig, resolveConfigPath } from "../config.ts";
 import { findJavaFiles } from "../workspace.ts";
 
 export interface CompileFlags {
   outDir?: string;
+  /** Raw --output value; validated here. */
+  output?: string;
   quiet?: boolean;
   failOnDegrade?: boolean;
   validate: boolean;
 }
+
+const OUTPUT_KINDS: readonly OutputKind[] = ["classes", "jar", "fat-jar"];
 
 export async function runCompileCommand(
   files: string[],
@@ -37,8 +41,19 @@ export async function runCompileCommand(
   for (const path of missingConfiguredPaths(config)) {
     process.stderr.write(`warning: configured path not found (treated as empty): ${path}\n`);
   }
+  const output = OUTPUT_KINDS.find(k => k === flags.output);
+  if (flags.output !== undefined && output === undefined) {
+    process.stderr.write(`cappu: invalid --output '${flags.output}' (classes, jar, fat-jar)\n`);
+    process.exit(2);
+  }
+  const effectiveOutput = output ?? config.compilerOptions.output;
+  if (flags.validate && effectiveOutput !== "classes") {
+    process.stderr.write("cappu: --validate requires --output classes (javap reads class files)\n");
+    process.exit(2);
+  }
   const result = runCompile(inputs, {
     outDir: flags.outDir,
+    output,
     failOnDegrade: flags.failOnDegrade,
     config,
   });

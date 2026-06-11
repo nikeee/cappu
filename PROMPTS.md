@@ -169,3 +169,4 @@ no timestamps were captured.
 - 2026-06-11 13:39 — dont wirte the schema file on cappu init. add a flag to the cappu init: --with-schema that writes that file
 - 2026-06-11 20:00 — add a code lens support for cappu.json's dependencies. check if each dependency has a newer version available. if so, display the new version above the dependency.
 - 2026-06-11 20:28 — resolve https://github.com/nikeee/cappu/issues/3
+- 2026-06-11 20:37 — resolve https://github.com/nikeee/cappu/issues/5

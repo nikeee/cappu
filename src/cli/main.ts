@@ -41,7 +41,11 @@ Lsp options:
                         disconnects)
 
 Compile options:
-  -d, --out-dir <dir>   Output root for the package tree (default: current directory)
+  -d, --out-dir <dir>   Output root for the build artifacts (default:
+                        compilerOptions.outDir, then ./dist)
+  -o, --output <kind>   What to produce in the output root: "classes" (a
+                        package tree usable as java -cp <dir>), "jar", or
+                        "fat-jar" (includes the dependency jars' contents)
   -q, --quiet           Do not print the path of each emitted .class file
       --fail-on-degrade Fail when a method body degrades to a placeholder
                         (an unsupported construct); degradations always warn
@@ -61,6 +65,7 @@ const { values, positionals } = parseArgs({
     config: { type: "string", short: "c" },
     port: { type: "string", short: "p" },
     "out-dir": { type: "string", short: "d" },
+    output: { type: "string", short: "o" },
     // No defaults: an absent flag must stay undefined so cappu.json
     // can supply the value (an explicit flag always wins).
     quiet: { type: "boolean", short: "q" },
@@ -110,6 +115,7 @@ switch (command) {
       files,
       {
         outDir: values["out-dir"],
+        output: values.output,
         quiet: values.quiet,
         failOnDegrade: values["fail-on-degrade"],
         validate: values.validate,

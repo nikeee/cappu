@@ -24,8 +24,10 @@ const CompilerOptionsSchema = z.object({
   classPath: z.array(z.string()).default([DEFAULT_CLASS_PATH]),
   /** Directories scanned recursively for .java sources (resolution only). */
   sourcePaths: z.array(z.string()).default([DEFAULT_SOURCE_PATH]),
-  /** Output root for the emitted package tree. */
-  outDir: z.string().default("./build"),
+  /** Output root for the build artifacts. */
+  outDir: z.string().default("./dist"),
+  /** What `cappu compile` produces in outDir (nikeee/cappu#5). */
+  output: z.enum(["classes", "jar", "fat-jar"]).default("classes"),
   quiet: z.boolean().optional(),
   failOnDegrade: z.boolean().optional(),
   /** The javac binary `--validate` compiles the reference output with. */
@@ -104,8 +106,13 @@ export const CONFIG_TEMPLATE = `
     // Additional source directories whose .java files resolve (not compiled). Default if unset: ["./src/main/java"].
     // "sourcePaths": ["./src/main/java"],
 
-    // Output root for the emitted package tree (default if unset: "./build").
-    // "outDir": "./build",
+    // Output root for the build artifacts (default if unset: "./dist").
+    // "outDir": "./dist",
+
+    // What \`cappu compile\` produces in outDir: "classes" (a package tree
+    // usable directly as \`java -cp <outDir>\`), "jar", or "fat-jar" (the jar
+    // plus the contents of every dependency jar on the classPath).
+    // "output": "classes",
 
     // Do not print the path of each emitted .class file.
     "quiet": false,

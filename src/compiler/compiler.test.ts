@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -7,6 +7,8 @@ import { expect } from "expect";
 
 import { missingConfiguredPaths, runCompile } from "./compiler.ts";
 import { loadConfig } from "../config.ts";
+import { readZipEntries } from "./zipReader.ts";
+import { writeZip } from "./zipWriter.ts";
 
 function inTempDir(
   files: Record<string, string>,
@@ -117,4 +119,49 @@ test("compiling with absent configured dirs does not throw", () => {
       expect(result.success).toBe(true);
     },
   );
+});
+
+test("output jar packs the classes behind a manifest, named after the project dir", () => {
+  inTempDir({ "A.java": "package app; class A { }" }, (dir, paths) => {
+    const result = runCompile(paths, {
+      outDir: join(dir, "dist"),
+      output: "jar",
+      config: defaultConfig(dir),
+    });
+    expect(result.success).toBe(true);
+    const jar = result.written[0]!;
+    expect(jar.endsWith(".jar")).toBe(true);
+    const entries = readZipEntries(readFileSync(jar))!.map(e => e.name);
+    expect(entries).toEqual(["META-INF/MANIFEST.MF", "app/A.class"]);
+  });
+});
+
+test("output fat-jar merges dependency jar contents, own classes win", () => {
+  inTempDir({ "B.java": "package app; class B { }" }, (dir, paths) => {
+    // a dependency jar in the default classPath location
+    mkdirSync(join(dir, "lib", "classes"), { recursive: true });
+    writeFileSync(
+      join(dir, "lib", "classes", "dep.jar"),
+      writeZip([
+        { name: "META-INF/MANIFEST.MF", bytes: new Uint8Array([1]) }, // must not leak
+        { name: "org/dep/D.class", bytes: new Uint8Array([7]) },
+        { name: "app/B.class", bytes: new Uint8Array([9]) }, // loses to ours
+      ]),
+    );
+    writeFileSync(join(dir, "cappu.json"), "{}"); // baseDir = the temp dir
+    const result = runCompile(paths, {
+      outDir: join(dir, "dist"),
+      output: "fat-jar",
+      config: loadConfig(undefined, dir),
+    });
+    expect(result.success).toBe(true);
+    const entries = readZipEntries(readFileSync(result.written[0]!))!;
+    expect(entries.map(e => e.name)).toEqual([
+      "META-INF/MANIFEST.MF",
+      "app/B.class",
+      "org/dep/D.class",
+    ]);
+    // our compiled B.class, not the dependency's one-byte fake
+    expect(entries[1]!.read().length).toBeGreaterThan(9);
+  });
 });
