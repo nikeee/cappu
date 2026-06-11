@@ -1,0 +1,28 @@
+=== count ===
+  (field) int count
+=== local ===
+  (local variable) int local
+=== total ===
+  int total()
+=== paramDecl ===
+  (parameter) String arg
+=== paramUse ===
+  (parameter) String arg
+=== Tref ===
+  (type parameter) T
+=== valueField ===
+  (field) T value
+=== Container ===
+  class Container
+=== Shape ===
+  interface Shape
+=== Color ===
+  enum Color
+=== RED ===
+  (enum constant) Color RED
+=== Point ===
+  record Point
+=== List ===
+  interface List
+=== Box ===
+  class Box

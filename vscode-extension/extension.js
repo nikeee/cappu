@@ -9,7 +9,7 @@ function activate(context) {
   // dist/server.mjs silently goes stale whenever the source changes, which is
   // exactly the failure mode a test client must not have.
   const tsx = path.join(repoRoot, "node_modules", ".bin", "tsx");
-  const serverMain = path.join(repoRoot, "src", "serverMain.ts");
+  const serverMain = path.join(repoRoot, "src", "services", "serverMain.ts");
 
   const run = {
     command: tsx,

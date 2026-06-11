@@ -63,11 +63,11 @@ node --run test            # all src/**/*.test.ts
 
 ### Run a single file or a single test
 ```bash
-node_modules/.bin/tsx --test ./src/emitter.test.ts
-node_modules/.bin/tsx --test --test-name-pattern="synchronized" ./src/emitter.test.ts
+node_modules/.bin/tsx --test ./src/compiler/emitter.test.ts
+node_modules/.bin/tsx --test --test-name-pattern="synchronized" ./src/compiler/emitter.test.ts
 ```
 
-### The emitter backend tests (`src/emitter.ts` / `src/bytecode.ts`)
+### The emitter backend tests (`src/compiler/emitter.ts` / `src/compiler/bytecode.ts`)
 
 These validate emitted JVM bytecode three ways. Two need a JDK on PATH
 (`java`, `javap`); the heavy `javac` step is only needed when regenerating
@@ -88,7 +88,7 @@ baselines:
 When an intentional change alters emitted bytecode, regenerate both baseline
 kinds. This requires `javac`, `java`, and `javap` on PATH:
 ```bash
-UPDATE_BASELINES=1 node_modules/.bin/tsx --test ./src/emitter.test.ts
+UPDATE_BASELINES=1 node_modules/.bin/tsx --test ./src/compiler/emitter.test.ts
 ```
 This rewrites the binary `.class` baselines and the `emitter/javac-baselines/*.json`
 references (recompiling each fixture with `javac --release 21`), and re-runs
@@ -97,7 +97,7 @@ stdout still matches. Commit the regenerated fixtures. Without the flag, a
 missing baseline is auto-created (when a JDK is present) but existing ones are
 asserted against, never overwritten.
 
-### Corpus robustness tests (`src/emit-corpus.test.ts`)
+### Corpus robustness tests (`src/compiler/emit-corpus.test.ts`)
 
 Auto-discovers every git submodule under `test-fixtures/emitter/corpus/` and asserts the emitter
 produces class bytes for every `.java` file without throwing (degrading to a

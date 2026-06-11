@@ -1,0 +1,115 @@
+#!/usr/bin/env node
+
+// Unified entry point: parses arguments with Node's built-in util.parseArgs
+// and dispatches to one command module per subcommand (init.ts, install.ts,
+// lsp.ts, compile.ts). The whole script runs as top-level await.
+
+import { parseArgs } from "node:util";
+
+import { loadConfig } from "../config.ts";
+import { runCompileCommand } from "./compile.ts";
+import { runInit } from "./init.ts";
+import { runInstall } from "./install.ts";
+import { runLsp } from "./lsp.ts";
+import pkg from "../../package.json" with { type: "json" };
+
+const USAGE = `
+cappu ${pkg.version}
+
+Usage:
+  cappu init                         Write a starter cappu.json (commented, all options)
+  cappu install                      Download the cappu.json dependencies (transitively)
+                                     into lib/classes
+  cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
+  cappu compile [options] [file...]  Compile .java files to .class bytecode; with no
+                                     files, compile everything under the configured
+                                     sourcePaths (a project build)
+
+Options:
+  -c, --config <file>   Project config (default: ./cappu.json, JSONC).
+                        Sections: "compilerOptions" (classPath, sourcePaths,
+                        outDir, quiet, failOnDegrade) and "lspOptions"
+                        (inlayHints). Command-line flags take precedence.
+
+Lsp options:
+  -p, --port <port>     Listen on a TCP port instead of stdio; the first client
+                        to connect gets the session (the server exits when it
+                        disconnects)
+
+Compile options:
+  -d, --out-dir <dir>   Output root for the package tree (default: current directory)
+  -q, --quiet           Do not print the path of each emitted .class file
+      --fail-on-degrade Fail when a method body degrades to a placeholder
+                        (an unsupported construct); degradations always warn
+      --validate        Also compile with javac (config "compilerOptions.javac",
+                        default from $PATH) and fail unless the normalized
+                        bytecode matches
+
+Global:
+  -h, --help            Show this help
+      --version         Show the version
+`.trimStart();
+
+const { values, positionals } = parseArgs({
+  args: process.argv.slice(2),
+  allowPositionals: true,
+  options: {
+    config: { type: "string", short: "c" },
+    port: { type: "string", short: "p" },
+    "out-dir": { type: "string", short: "d" },
+    // No defaults: an absent flag must stay undefined so cappu.json
+    // can supply the value (an explicit flag always wins).
+    quiet: { type: "boolean", short: "q" },
+    "fail-on-degrade": { type: "boolean" },
+    validate: { type: "boolean", default: false },
+    help: { type: "boolean", short: "h", default: false },
+    version: { type: "boolean", default: false },
+  },
+});
+
+const [command, ...files] = positionals;
+
+if (values.version) {
+  process.stdout.write(`${pkg.version}\n`);
+  process.exit(0);
+}
+if (values.help || command === undefined) {
+  process.stdout.write(USAGE);
+  process.exit(values.help ? 0 : 2);
+}
+
+// init runs before loadConfig: bootstrapping must not depend on (or be
+// blocked by) an existing, possibly broken config.
+if (command === "init") runInit(values.config);
+
+let config;
+try {
+  config = loadConfig(values.config);
+} catch (e) {
+  process.stderr.write(`cappu: ${(e as Error).message}\n`);
+  process.exit(2);
+}
+
+switch (command) {
+  case "install":
+    await runInstall(config);
+    break;
+  case "lsp":
+    await runLsp(config, values.port);
+    break;
+  case "compile":
+    await runCompileCommand(
+      files,
+      {
+        outDir: values["out-dir"],
+        quiet: values.quiet,
+        failOnDegrade: values["fail-on-degrade"],
+        validate: values.validate,
+      },
+      config,
+    );
+    break;
+  default:
+    process.stderr.write(`cappu: unknown command '${command}'\n\n${USAGE}`);
+    process.exit(2);
+}
