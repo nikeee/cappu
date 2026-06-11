@@ -39,6 +39,16 @@ export const GRADLE_PLUGIN_PORTAL = "https://plugins.gradle.org/m2";
 /** The repositories Maven and Gradle resolve from out of the box. */
 export const DEFAULT_PACKAGE_SOURCES = [MAVEN_CENTRAL, GOOGLE_MAVEN, GRADLE_PLUGIN_PORTAL];
 
+/** "group:artifact" -> version, per configuration (gradle-style). */
+const DependencyMapSchema = z.record(z.string(), z.string());
+
+const DependenciesSchema = z.object({
+  /** Dependencies that are part of this project's public API. */
+  api: DependencyMapSchema.default({}),
+  /** Dependencies internal to the implementation. */
+  implementation: DependencyMapSchema.default({}),
+});
+
 const ConfigFileSchema = z.object({
   // prefault (not default): the empty object is parsed through the section
   // schema, so the inner defaults (classPath: [], ...) apply.
@@ -46,6 +56,8 @@ const ConfigFileSchema = z.object({
   lspOptions: LspOptionsSchema.prefault({}),
   /** Package repositories dependencies are resolved from, in order. */
   packageSources: z.array(z.string()).default(DEFAULT_PACKAGE_SOURCES),
+  /** What `cappu install` resolves and downloads, keyed by configuration. */
+  dependencies: DependenciesSchema.prefault({}),
 });
 
 export type CompilerConfig = z.infer<typeof CompilerOptionsSchema>;
@@ -59,6 +71,16 @@ export interface CappuConfig extends z.infer<typeof ConfigFileSchema> {
 }
 
 export const DEFAULT_CONFIG_NAME = "cappu.json";
+export const SCHEMA_FILE_NAME = "cappu.schema.json";
+
+/**
+ * JSON Schema for cappu.json, generated from the zod schema so the two cannot
+ * drift. `cappu init` writes it next to the config; the template's $schema
+ * entry points editors at it (loadConfig ignores the unknown key).
+ */
+export function configJsonSchema(): string {
+  return `${JSON.stringify(z.toJSONSchema(ConfigFileSchema, { io: "input" }), null, 2)}\n`;
+}
 
 /**
  * The starter config `cappu init` writes: every option present, commented, and
@@ -69,6 +91,8 @@ export const CONFIG_TEMPLATE = `
   // Project configuration for the cappu compiler and language server (JSONC:
   // comments and trailing commas are fine). Relative paths resolve against
   // this file's directory.
+  "$schema": "./cappu.schema.json",
+
   "compilerOptions": {
     // Compiled dependencies: directories of .class files, or .jar files.
     // Types resolve against them but are not compiled. Default if unset: ["./lib/classes"].
@@ -107,6 +131,15 @@ export const CONFIG_TEMPLATE = `
   //   "https://maven.google.com",
   //   "https://plugins.gradle.org/m2",
   // ],
+
+  // Dependencies \`cappu install\` resolves (transitively) and downloads into
+  // the classPath, keyed by configuration as in gradle.
+  "dependencies": {
+    "api": {},
+    "implementation": {
+      // "com.google.code.gson:gson": "2.13.2",
+    },
+  },
 }
 `.trimStart();
 

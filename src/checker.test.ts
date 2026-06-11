@@ -102,7 +102,9 @@ test("primitive assignments: widening and fitting constants pass, the rest error
 });
 
 test("C-style array brackets after the name add rank (char buf[])", () => {
-  const ctx = setup("class C { char buf[]; int grid[][]; void m(int xs[]) { buf = new char[1]; } }");
+  const ctx = setup(
+    "class C { char buf[]; int grid[][]; void m(int xs[]) { buf = new char[1]; } }",
+  );
   const bufSym = ctx.checker.resolveName(identifierAt(ctx, "buf"))!;
   expect(typeToString(ctx.checker.getTypeOfSymbol(bufSym))).toBe("char[]");
   const gridSym = ctx.checker.resolveName(identifierAt(ctx, "grid"))!;

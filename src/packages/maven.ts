@@ -13,10 +13,17 @@ import {
 
 /** Returns the body for a url, or undefined for a 404-ish miss. */
 export type FetchText = (url: string) => Promise<string | undefined>;
+/** Returns the bytes for a url, or undefined for a 404-ish miss. */
+export type FetchBytes = (url: string) => Promise<Uint8Array | undefined>;
 
 const defaultFetchText: FetchText = async url => {
   const response = await fetch(url);
   return response.ok ? response.text() : undefined;
+};
+
+const defaultFetchBytes: FetchBytes = async url => {
+  const response = await fetch(url);
+  return response.ok ? new Uint8Array(await response.arrayBuffer()) : undefined;
 };
 
 function elementText(xml: string, tag: string): string | undefined {
@@ -83,6 +90,7 @@ export class MavenRepositorySource implements PackageSource {
   constructor(
     private readonly baseUrl: string,
     private readonly fetchText: FetchText = defaultFetchText,
+    private readonly fetchBytes: FetchBytes = defaultFetchBytes,
   ) {
     this.name = baseUrl;
   }
@@ -106,5 +114,11 @@ export class MavenRepositorySource implements PackageSource {
     const dir = `${this.artifactDir(groupId, artifactId)}/${version}`;
     const pom = await this.fetchText(`${dir}/${artifactId}-${version}.pom`);
     return pom ? parsePom(pom, coordinates) : undefined;
+  }
+
+  getArtifact(coordinates: Coordinates): Promise<Uint8Array | undefined> {
+    const { groupId, artifactId, version } = coordinates;
+    const dir = `${this.artifactDir(groupId, artifactId)}/${version}`;
+    return this.fetchBytes(`${dir}/${artifactId}-${version}.jar`);
   }
 }

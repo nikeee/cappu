@@ -141,3 +141,6 @@ no timestamps were captured.
 - 2026-06-11 08:10 — review the entire code until now. is there anything that could be more compliant to the JLS? maybe do a refactoring of duplicate code. keep in mind that some duplication is good
 - 2026-06-11 08:12 — check if we can do some things simpler. use latest node.js' APIs as well es javascript features and APIs if meaningful.
 - 2026-06-11 09:22 — do 2, 3 and 5. well do package management later
+- 2026-06-11 13:01 — would it be good to have sourcePaths compile the sources, instead of just building them? Would be the option for the cli argument.
+- 2026-06-11 13:01 — now that we can search and download dependencies, add a section to cappu.json for dependencies. the keys under dependencies sould be similar to what gradle supports: { "dependencies": { "api": {}, "implementation": { "com.google.code.gson:gson": "2.14.0" } } }
+- 2026-06-11 13:01 — now that we can search and download dependencies and have a dependencies section in the cappu.json, add the command `cappu install` that downloads all dependencies (and transitive dependencies) in the dependencies array. we only support "implementation" and "api" for now. Put the jars into the default lib/classes directory.

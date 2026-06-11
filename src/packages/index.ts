@@ -12,9 +12,12 @@ export {
   searchPackages,
   type VersionConflict,
 } from "./resolver.ts";
+export { coordinatesToString, packageKey } from "./types.ts";
 export type {
+  CoordinateString,
   Coordinates,
   DependencyDeclaration,
+  PackageKey,
   PackageMetadata,
   PackageSource,
 } from "./types.ts";

@@ -12,7 +12,15 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import { missingConfiguredPaths, runCompile } from "./compiler.ts";
-import { CONFIG_TEMPLATE, DEFAULT_CONFIG_NAME, loadConfig } from "./config.ts";
+import { findJavaFiles } from "./workspace.ts";
+import {
+  CONFIG_TEMPLATE,
+  configJsonSchema,
+  DEFAULT_CONFIG_NAME,
+  loadConfig,
+  resolveConfigPath,
+  SCHEMA_FILE_NAME,
+} from "./config.ts";
 import pkg from "../package.json" with { type: "json" };
 
 const USAGE = `
@@ -20,8 +28,12 @@ cappu ${pkg.version}
 
 Usage:
   cappu init                         Write a starter cappu.json (commented, all options)
+  cappu install                      Download the cappu.json dependencies (transitively)
+                                     into lib/classes
   cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
-  cappu compile [options] <file...>  Compile .java files to .class bytecode
+  cappu compile [options] [file...]  Compile .java files to .class bytecode; with no
+                                     files, compile everything under the configured
+                                     sourcePaths (a project build)
 
 Options:
   -c, --config <file>   Project config (default: ./cappu.json, JSONC).
@@ -88,7 +100,11 @@ if (command === "init") {
     process.stderr.write(`cappu: ${target} already exists, not overwriting\n`);
     process.exit(1);
   }
-  process.stdout.write(`${target}\n`);
+  // The schema the template's $schema entry points at; regenerated freely
+  // (it is derived from the zod schema, not user-edited).
+  const schemaTarget = resolve(target, "..", SCHEMA_FILE_NAME);
+  writeFileSync(schemaTarget, configJsonSchema());
+  process.stdout.write(`${target}\n${schemaTarget}\n`);
   process.exit(0);
 }
 
@@ -101,6 +117,29 @@ try {
 }
 
 switch (command) {
+  case "install": {
+    const { installDependencies } = await import("./install.ts");
+    const result = await installDependencies(config);
+    for (const file of result.installed) process.stdout.write(`${file}\n`);
+    for (const c of result.resolution.conflicts) {
+      process.stderr.write(
+        `warning: ${c.key}: version ${c.rejected} (via ${c.rejectedBy.artifactId}) loses to ${c.selected}\n`,
+      );
+    }
+    let failed = false;
+    for (const m of result.resolution.missing) {
+      const via = m.requestedBy ? ` (required by ${m.requestedBy.artifactId})` : "";
+      process.stderr.write(
+        `error: ${m.coordinates.groupId}:${m.coordinates.artifactId}:${m.coordinates.version}: not found in any package source${via}\n`,
+      );
+      failed = true;
+    }
+    for (const c of result.noArtifact) {
+      process.stderr.write(`error: ${c}: source provided no jar\n`);
+      failed = true;
+    }
+    process.exit(failed ? 1 : 0);
+  }
   case "lsp": {
     if (values.port !== undefined) {
       const port = Number(values.port);
@@ -131,8 +170,19 @@ switch (command) {
     break;
   }
   case "compile": {
-    if (files.length === 0) {
-      process.stderr.write("usage: cappu compile [-d <outdir>] <file.java> ...\n");
+    // No explicit files: a project build - compile the configured sourcePaths
+    // (they are resolution-only context when explicit files are given).
+    const inputs =
+      files.length > 0
+        ? files
+        : config.compilerOptions.sourcePaths.flatMap(p =>
+            findJavaFiles(resolveConfigPath(config, p)),
+          );
+    if (inputs.length === 0) {
+      process.stderr.write(
+        "usage: cappu compile [-d <outdir>] <file.java> ...\n" +
+          "(no files given and the configured sourcePaths contain no .java files)\n",
+      );
       process.exit(2);
     }
     // Missing configured dirs are treated as empty; warn only when they come
@@ -140,7 +190,7 @@ switch (command) {
     for (const path of missingConfiguredPaths(config)) {
       process.stderr.write(`warning: configured path not found (treated as empty): ${path}\n`);
     }
-    const result = runCompile(files, {
+    const result = runCompile(inputs, {
       outDir: values["out-dir"],
       failOnDegrade: values["fail-on-degrade"],
       config,

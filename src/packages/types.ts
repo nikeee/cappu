@@ -39,6 +39,8 @@ export interface PackageSource {
   listVersions(groupId: string, artifactId: string): Promise<string[]>;
   /** Metadata (including declared dependencies), or undefined if unknown here. */
   getMetadata(coordinates: Coordinates): Promise<PackageMetadata | undefined>;
+  /** The package's jar bytes, or undefined if this source cannot provide them. */
+  getArtifact?(coordinates: Coordinates): Promise<Uint8Array | undefined>;
 }
 
 /** "group:artifact:version" - one exact package version. */

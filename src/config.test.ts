@@ -5,7 +5,13 @@ import { test } from "node:test";
 
 import { expect } from "expect";
 
-import { CONFIG_TEMPLATE, DEFAULT_CONFIG_NAME, loadConfig, resolveConfigPath } from "./config.ts";
+import {
+  configJsonSchema,
+  CONFIG_TEMPLATE,
+  DEFAULT_CONFIG_NAME,
+  loadConfig,
+  resolveConfigPath,
+} from "./config.ts";
 
 test("JSONC parses with comments and trailing commas; sections map", () => {
   const dir = mkdtempSync(join(tmpdir(), "cfg-"));
@@ -63,6 +69,7 @@ test("unknown keys are ignored, comment-json metadata does not leak", () => {
   expect(Object.keys(config).sort()).toEqual([
     "baseDir",
     "compilerOptions",
+    "dependencies",
     "fromFile",
     "lspOptions",
     "packageSources",
@@ -81,4 +88,18 @@ test("the init template parses and validates against the schema", () => {
   expect(config.compilerOptions.classPath).toEqual(["./lib/classes"]);
   expect(config.compilerOptions.quiet).toBe(false);
   expect(config.lspOptions.inlayHints).toEqual({ parameterNames: true, varTypes: true });
+});
+
+test("the generated JSON schema mirrors the config shape", () => {
+  const schema = JSON.parse(configJsonSchema()) as {
+    type: string;
+    properties: Record<string, unknown>;
+  };
+  expect(schema.type).toBe("object");
+  expect(Object.keys(schema.properties).sort()).toEqual([
+    "compilerOptions",
+    "dependencies",
+    "lspOptions",
+    "packageSources",
+  ]);
 });
