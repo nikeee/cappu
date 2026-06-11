@@ -2,6 +2,7 @@ import { test } from "node:test";
 
 import { expect } from "expect";
 
+import { createChecker } from "./checker.ts";
 import { JDK_STUB_FILES, loadJdkStub } from "./jdkStub.ts";
 import { getIdentifierAtPosition } from "../services/nodeAtPosition.ts";
 import { createProgram } from "./program.ts";
@@ -44,4 +45,61 @@ test("inherited member is found through the stub hierarchy (List -> Collection)"
   // size() is declared on Collection, inherited by List
   const size = lookupMember(list, "size", Meaning.Value, program);
   expect(size?.flags).toBe(SymbolFlags.Method);
+});
+
+test("the members from nikeee/cappu#1 resolve", () => {
+  // One use per symbol the issue reported as unresolved.
+  const source = `
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+class Issue1 {
+  void members(List<String> list, Map<String, Integer> map, Set<Map.Entry<String, Integer>> entries,
+               Optional<String> opt, File file, Path path, Class<?> klass, String[] array) throws Exception {
+    list.stream();
+    entries.stream();
+    list.sort(Comparator.comparing(Function.identity()));
+    map.forEach((k, v) -> {});
+    map.computeIfAbsent("k", k -> 1);
+    map.merge("k", 1, (a, b) -> a);
+    Map<String, String> em = Collections.emptyMap();
+    Set<String> us = Collections.unmodifiableSet(Collections.emptySet());
+    Map<String, Integer> um = Collections.unmodifiableMap(map);
+    opt.map(v -> v);
+    opt.ifPresent(v -> {});
+    Arrays.stream(array);
+    File abs = file.getAbsoluteFile();
+    klass.getConstructor();
+    klass.getPackage();
+    BufferedReader r = Files.newBufferedReader(path);
+    BufferedWriter w = Files.newBufferedWriter(path);
+    list.stream().collect(Collectors.counting());
+    list.stream().collect(Collectors.groupingBy(v -> v));
+    list.stream().collect(Collectors.groupingBy(v -> v, Collectors.mapping(v -> v, Collectors.toList())));
+    list.stream().collect(Collectors.toMap(v -> v, v -> v));
+  }
+}
+`;
+  const program = createProgram();
+  loadJdkStub(program);
+  program.addProjectFile("file:///Issue1.java" as Uri, source);
+  const checker = createChecker(program);
+  const sourceFile = program.getSourceFile("file:///Issue1.java" as Uri)!;
+  expect(sourceFile.parseDiagnostics).toHaveLength(0);
+  const unresolved = checker
+    .getSemanticDiagnostics(sourceFile)
+    .filter(d => d.messageText.includes("Cannot resolve symbol"));
+  expect(unresolved.map(d => d.messageText)).toEqual([]);
 });

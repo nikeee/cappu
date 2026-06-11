@@ -42,6 +42,12 @@ class Class<T> {
   public String getSimpleName() { return null; }
   public boolean isInstance(Object o) { return false; }
   public boolean desiredAssertionStatus() { return false; }
+  public java.lang.reflect.Constructor<T> getConstructor(Class<?>... parameterTypes) { return null; }
+  public Package getPackage() { return null; }
+}
+
+class Package {
+  public String getName() { return null; }
 }
 
 class Enum<E> implements Comparable<E> {
@@ -372,6 +378,7 @@ class File implements Serializable, java.lang.Comparable<File> {
   public String getPath() { return null; }
   public String getAbsolutePath() { return null; }
   public File getParentFile() { return null; }
+  public File getAbsoluteFile() { return null; }
   public String getParent() { return null; }
   public boolean exists() { return false; }
   public boolean isFile() { return false; }
@@ -466,9 +473,14 @@ interface Iterator<E> {
 
 interface Comparator<T> {
   int compare(T a, T b);
+  default Comparator<T> reversed() { return null; }
+  default Comparator<T> thenComparing(Comparator<? super T> other) { return null; }
+  static <T, U extends java.lang.Comparable<U>> Comparator<T> comparing(java.util.function.Function<? super T, ? extends U> keyExtractor) { return null; }
+  static <T> Comparator<T> naturalOrder() { return null; }
 }
 
 interface Collection<E> extends Iterable<E> {
+  java.util.stream.Stream<E> stream();
   int size();
   boolean isEmpty();
   boolean contains(Object o);
@@ -480,6 +492,7 @@ interface Collection<E> extends Iterable<E> {
 }
 
 interface List<E> extends Collection<E> {
+  void sort(Comparator<? super E> c);
   E get(int index);
   E set(int index, E element);
   void add(int index, E element);
@@ -511,6 +524,10 @@ interface Map<K, V> {
   Set<K> keySet();
   Collection<V> values();
   Set<Map.Entry<K, V>> entrySet();
+  void forEach(java.util.function.BiConsumer<? super K, ? super V> action);
+  V computeIfAbsent(K key, java.util.function.Function<? super K, ? extends V> mappingFunction);
+  V computeIfPresent(K key, java.util.function.BiFunction<? super K, ? super V, ? extends V> remappingFunction);
+  V merge(K key, V value, java.util.function.BiFunction<? super V, ? super V, ? extends V> remappingFunction);
   interface Entry<K, V> {
     K getKey();
     V getValue();
@@ -623,6 +640,10 @@ class Optional<T> {
   public boolean isPresent() { return false; }
   public boolean isEmpty() { return false; }
   public T orElse(T other) { return null; }
+  public T orElseGet(java.util.function.Supplier<? extends T> supplier) { return null; }
+  public <U> Optional<U> map(java.util.function.Function<? super T, ? extends U> mapper) { return null; }
+  public Optional<T> filter(java.util.function.Predicate<? super T> predicate) { return null; }
+  public void ifPresent(java.util.function.Consumer<? super T> action) {}
 }
 
 class Objects {
@@ -638,6 +659,8 @@ class Objects {
 
 class Arrays {
   public static <T> List<T> asList(T... a) { return null; }
+  public static <T> java.util.stream.Stream<T> stream(T[] array) { return null; }
+  public static java.util.stream.IntStream stream(int[] array) { return null; }
   public static String toString(Object[] a) { return null; }
   public static String toString(int[] a) { return null; }
   public static String toString(long[] a) { return null; }
@@ -666,8 +689,11 @@ class Arrays {
 class Collections {
   public static <T> List<T> emptyList() { return null; }
   public static <T> Set<T> emptySet() { return null; }
+  public static <K, V> Map<K, V> emptyMap() { return null; }
   public static <T> void sort(List<T> list) {}
   public static <T> List<T> unmodifiableList(List<? extends T> list) { return null; }
+  public static <T> Set<T> unmodifiableSet(Set<? extends T> set) { return null; }
+  public static <K, V> Map<K, V> unmodifiableMap(Map<? extends K, ? extends V> map) { return null; }
 }
 
 class NoSuchElementException extends java.lang.RuntimeException {}
@@ -753,7 +779,10 @@ class BitSet {
 
 const JAVA_UTIL_FUNCTION = `package java.util.function;
 
-interface Function<T, R> { R apply(T t); }
+interface Function<T, R> {
+  R apply(T t);
+  static <T> Function<T, T> identity() { return null; }
+}
 interface BiFunction<T, U, R> { R apply(T t, U u); }
 interface Supplier<T> { T get(); }
 interface Consumer<T> { void accept(T t); }
@@ -782,6 +811,8 @@ interface Stream<T> extends java.lang.AutoCloseable {
   boolean allMatch(java.util.function.Predicate<T> predicate);
   boolean noneMatch(java.util.function.Predicate<T> predicate);
   Stream<T> sorted();
+  Stream<T> sorted(java.util.Comparator<? super T> comparator);
+  <R> Stream<R> flatMap(java.util.function.Function<? super T, ? extends Stream<? extends R>> mapper);
   Stream<T> distinct();
   Stream<T> limit(long maxSize);
   Stream<T> skip(long n);
@@ -813,6 +844,25 @@ class Collectors {
   public static <T> Collector<T, ?, java.util.Set<T>> toSet() { return null; }
   public static Collector<CharSequence, ?, String> joining() { return null; }
   public static Collector<CharSequence, ?, String> joining(CharSequence delimiter) { return null; }
+  public static <T> Collector<T, ?, Long> counting() { return null; }
+  public static <T, K> Collector<T, ?, java.util.Map<K, java.util.List<T>>> groupingBy(java.util.function.Function<? super T, ? extends K> classifier) { return null; }
+  public static <T, K, A, D> Collector<T, ?, java.util.Map<K, D>> groupingBy(java.util.function.Function<? super T, ? extends K> classifier, Collector<? super T, A, D> downstream) { return null; }
+  public static <T, U, A, R> Collector<T, ?, R> mapping(java.util.function.Function<? super T, ? extends U> mapper, Collector<? super U, A, R> downstream) { return null; }
+  public static <T, K, U> Collector<T, ?, java.util.Map<K, U>> toMap(java.util.function.Function<? super T, ? extends K> keyMapper, java.util.function.Function<? super T, ? extends U> valueMapper) { return null; }
+}
+`;
+
+const JAVA_LANG_REFLECT = `package java.lang.reflect;
+
+class Constructor<T> {
+  public T newInstance(Object... initargs) { return null; }
+  public String getName() { return null; }
+  public Class<?>[] getParameterTypes() { return null; }
+}
+
+class Method {
+  public String getName() { return null; }
+  public Object invoke(Object obj, Object... args) { return null; }
 }
 `;
 
@@ -989,7 +1039,15 @@ class Paths {
   public static Path get(String first, String... more) { return null; }
 }
 
+interface OpenOption {}
+
+enum StandardOpenOption implements OpenOption {
+  READ, WRITE, APPEND, TRUNCATE_EXISTING, CREATE, CREATE_NEW, DELETE_ON_CLOSE;
+}
+
 class Files {
+  public static java.io.BufferedReader newBufferedReader(Path path) { return null; }
+  public static java.io.BufferedWriter newBufferedWriter(Path path, OpenOption... options) { return null; }
   public static boolean exists(Path path) { return false; }
   public static boolean isDirectory(Path path) { return false; }
   public static boolean isRegularFile(Path path) { return false; }
@@ -1093,6 +1151,7 @@ export const JDK_STUB_FILES: ReadonlyArray<{ uri: Uri; text: string }> = [
   { uri: "jdk:///java/util.java" as Uri, text: JAVA_UTIL },
   { uri: "jdk:///java/util/function.java" as Uri, text: JAVA_UTIL_FUNCTION },
   { uri: "jdk:///java/util/stream.java" as Uri, text: JAVA_UTIL_STREAM },
+  { uri: "jdk:///java/lang/reflect.java" as Uri, text: JAVA_LANG_REFLECT },
   { uri: "jdk:///java/util/regex.java" as Uri, text: JAVA_UTIL_REGEX },
   { uri: "jdk:///java/util/concurrent.java" as Uri, text: JAVA_UTIL_CONCURRENT },
   { uri: "jdk:///java/util/concurrent/atomic.java" as Uri, text: JAVA_UTIL_CONCURRENT_ATOMIC },
