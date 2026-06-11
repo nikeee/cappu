@@ -5,9 +5,10 @@
 //
 // cappu.lock.json (next to cappu.json) pins the outcome: it records the
 // dependencies section it was resolved from plus the full resolved package
-// set. While the section is unchanged, install downloads exactly the locked
-// set without consulting any POM again - reproducible and fast; when the
-// section changed, install re-resolves and rewrites the lock.
+// set. `cappu install` only respects the lock: an existing lock is installed
+// exactly as written (a drifted cappu.json merely warns), and resolution runs
+// only to bootstrap a missing lock - or when `cappu add` explicitly asks for
+// the lock to be rewritten (updateLock).
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -43,6 +44,8 @@ export interface InstallResult {
   targetDir: string;
   /** True when the locked package set was reused (no resolution ran). */
   fromLock: boolean;
+  /** True when the lock was used although cappu.json's dependencies changed. */
+  lockStale: boolean;
 }
 
 /** "group:artifact" -> version entries of one configuration, as Coordinates. */
@@ -104,13 +107,17 @@ export async function installDependencies(
   sources: readonly PackageSource[] = config.packageSources.map(
     url => new MavenRepositorySource(url),
   ),
+  // `cappu add` changed the dependencies section: re-resolve and rewrite the
+  // lock instead of consuming the (now outdated) one.
+  options: { updateLock?: boolean } = {},
 ): Promise<InstallResult> {
-  const lock = readLockfile(config);
-  const fromLock = lock !== undefined && lockMatches(lock, config);
+  const lock = options.updateLock ? undefined : readLockfile(config);
+  const fromLock = lock !== undefined;
+  const lockStale = lock !== undefined && !lockMatches(lock, config);
 
   let resolution: Resolution;
   let toInstall: { coordinates: Coordinates; source: string }[];
-  if (fromLock) {
+  if (lock) {
     resolution = { packages: [], conflicts: [], missing: [] };
     toInstall = lock.packages;
   } else {
@@ -136,7 +143,7 @@ export async function installDependencies(
     writeFileSync(file, bytes);
     installed.push(file);
   }
-  return { installed, noArtifact, resolution, targetDir, fromLock };
+  return { installed, noArtifact, resolution, targetDir, fromLock, lockStale };
 }
 
 export interface PickedVersion {

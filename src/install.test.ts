@@ -118,13 +118,28 @@ test("install writes a lockfile and reuses it while the dependencies match", asy
     expect(second.installed).toHaveLength(2);
     expect(fetchedPoms).toEqual([]);
 
-    // Changed section: the lock no longer matches and resolution runs again.
+    // Changed section: install ONLY respects the lock - the locked set is
+    // installed anyway, flagged stale; updateLock (what `cappu add` passes)
+    // re-resolves and rewrites it.
     writeFileSync(
       join(dir, "cappu.json"),
       '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0", "org.example:base": "1.0" } } }',
     );
     const third = await installDependencies(loadConfig(undefined, dir), [fakeRepo()]);
-    expect(third.fromLock).toBe(false);
+    expect(third.fromLock).toBe(true);
+    expect(third.lockStale).toBe(true);
+    const fourth = await installDependencies(loadConfig(undefined, dir), [fakeRepo()], {
+      updateLock: true,
+    });
+    expect(fourth.fromLock).toBe(false);
+    expect(fourth.lockStale).toBe(false);
+    const rewritten = JSON.parse(readFileSync(join(dir, LOCKFILE_NAME), "utf8")) as {
+      roots: { implementation: Record<string, string> };
+    };
+    expect(Object.keys(rewritten.roots.implementation).sort()).toEqual([
+      "com.google.code.gson:gson",
+      "org.example:base",
+    ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

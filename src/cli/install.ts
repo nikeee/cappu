@@ -4,10 +4,20 @@
 import type { CappuConfig } from "../config.ts";
 import { installDependencies } from "../install.ts";
 
-export async function runInstall(config: CappuConfig): Promise<never> {
-  const result = await installDependencies(config);
+export async function runInstall(
+  config: CappuConfig,
+  options: { updateLock?: boolean } = {},
+): Promise<never> {
+  const result = await installDependencies(config, undefined, options);
   if (result.fromLock) {
-    process.stderr.write("using cappu.lock.json (dependencies unchanged)\n");
+    process.stderr.write("using cappu.lock.json\n");
+  }
+  if (result.lockStale) {
+    process.stderr.write(
+      "warning: cappu.json's dependencies changed since cappu.lock.json was written;\n" +
+        "         the locked set was installed anyway. Use `cappu add` (or delete the\n" +
+        "         lock file) to re-resolve.\n",
+    );
   }
   for (const file of result.installed) process.stdout.write(`${file}\n`);
   for (const c of result.resolution.conflicts) {

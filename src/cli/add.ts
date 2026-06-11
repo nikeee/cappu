@@ -114,7 +114,7 @@ export async function runAdd(
   );
   process.stderr.write(`added ${configuration} ${coordinate.key}@${version}\n`);
 
-  // Re-read so install sees exactly what was written, then install everything
-  // (the new entry plus whatever was already configured) like `cappu install`.
-  return runInstall(loadConfig(configPath));
+  // Re-read so install sees exactly what was written, then re-resolve and
+  // rewrite the lock - install alone only ever consumes the existing lock.
+  return runInstall(loadConfig(configPath), { updateLock: true });
 }
