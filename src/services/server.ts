@@ -49,9 +49,11 @@ import { createChecker } from "../compiler/checker.ts";
 import { type ArrayType, type ClassType, TypeKind } from "../compiler/checkerTypes.ts";
 import { getCodeActions } from "./codeActions.ts";
 import { getCodeLenses } from "./codeLens.ts";
+import { dependencyLenses } from "./dependencyLens.ts";
 import { loadConfiguredPaths, missingConfiguredPaths } from "../compiler/compiler.ts";
 import { type CompletionItem, getCompletions } from "./completions.ts";
-import type { CappuConfig } from "../config.ts";
+import { type CappuConfig, DEFAULT_CONFIG_NAME, DEFAULT_PACKAGE_SOURCES } from "../config.ts";
+import { latestVersion, MavenRepositorySource, type PackageSource } from "../packages/index.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
 import { enclosingCall, getHoverText } from "./hover.ts";
 import { DEFAULT_INLAY_HINTS, getInlayHints, type InlayHintsSettings } from "./inlayHints.ts";
@@ -226,8 +228,13 @@ connection.onDidChangeWatchedFiles(params => {
   }
 });
 
+// The client also syncs cappu.json (for the dependency code lenses); only
+// .java documents belong to the Java program model.
+const isJavaUri = (uri: string): boolean => uri.endsWith(".java");
+
 // TextDocuments fires onDidChangeContent on both open and change.
 documents.onDidChangeContent(change => {
+  if (!isJavaUri(change.document.uri)) return;
   const { version } = change.document;
   const uri = asUri(change.document.uri);
   program.setOpenDocument(uri, change.document.getText(), version);
@@ -236,6 +243,7 @@ documents.onDidChangeContent(change => {
 });
 
 documents.onDidClose(event => {
+  if (!isJavaUri(event.document.uri)) return;
   program.closeDocument(asUri(event.document.uri));
   connection.sendDiagnostics({ uri: event.document.uri, diagnostics: [] });
 });
@@ -586,7 +594,49 @@ connection.onImplementation((params): Definition | null => {
 // A "N references" lens above every type and method declaration. The command is
 // the editor.action.showReferences convention (VS Code peeks the locations);
 // clients without it still render the count as plain text.
-connection.onCodeLens((params): CodeLens[] => {
+// Package repositories for the cappu.json dependency lenses (startServer
+// swaps in the configured list). The newest-version lookups go to the
+// network, so results are cached briefly per group:artifact.
+let packageSourceUrls: readonly string[] = DEFAULT_PACKAGE_SOURCES;
+let packageSources: PackageSource[] | undefined;
+const latestCache = new Map<string, { value: string | undefined; at: number }>();
+const LATEST_TTL_MS = 5 * 60_000;
+async function cachedLatestVersion(
+  groupId: string,
+  artifactId: string,
+): Promise<string | undefined> {
+  const key = `${groupId}:${artifactId}`;
+  const cached = latestCache.get(key);
+  if (cached && Date.now() - cached.at < LATEST_TTL_MS) return cached.value;
+  packageSources ??= packageSourceUrls.map(url => new MavenRepositorySource(url));
+  let value: string | undefined;
+  try {
+    value = await latestVersion(groupId, artifactId, packageSources);
+  } catch {
+    value = undefined; // offline: no lenses rather than an error
+  }
+  latestCache.set(key, { value, at: Date.now() });
+  return value;
+}
+
+// `cappu.json` documents get dependency lenses instead of Java ones.
+async function dependencyCodeLenses(uri: string): Promise<CodeLens[]> {
+  const document = documents.get(uri);
+  if (!document) return [];
+  const lenses = await dependencyLenses(document.getText(), cachedLatestVersion);
+  return lenses.map(({ entry, title }) => ({
+    range: {
+      start: { line: entry.line, character: entry.startCharacter },
+      end: { line: entry.line, character: entry.endCharacter },
+    },
+    command: { title, command: "" },
+  }));
+}
+
+connection.onCodeLens(async (params): Promise<CodeLens[]> => {
+  if (params.textDocument.uri.endsWith(`/${DEFAULT_CONFIG_NAME}`)) {
+    return dependencyCodeLenses(params.textDocument.uri);
+  }
   const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
   if (!sourceFile) return [];
   return getCodeLenses(program, checker, sourceFile).map(entry => {
@@ -676,6 +726,7 @@ connection.onHover((params): Hover | null => {
  */
 export function startServer(config?: CappuConfig): void {
   if (config) {
+    packageSourceUrls = config.packageSources;
     applyInlayHintSettings(config.lspOptions.inlayHints);
     // A missing configured directory is treated as empty; only worth a warning
     // when an actual cappu.json configured it.

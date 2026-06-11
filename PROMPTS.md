@@ -167,3 +167,4 @@ no timestamps were captured.
 - 2026-06-11 13:35 — add support for when the user does not add a version number to the cappu add command. Or a partial version number. it sould take the latest possible version that is compatible with the already installed dependencies. Maybe we'd need a lock file? i dont know you tell me
 - 2026-06-11 13:39 — cappu install should only respect the cappu.lock.json
 - 2026-06-11 13:39 — dont wirte the schema file on cappu init. add a flag to the cappu init: --with-schema that writes that file
+- 2026-06-11 20:00 — add a code lens support for cappu.json's dependencies. check if each dependency has a newer version available. if so, display the new version above the dependency.

@@ -20,7 +20,13 @@ function activate(context) {
   const serverOptions = { run, debug: run };
 
   const clientOptions = {
-    documentSelector: [{ scheme: "file", language: "java" }],
+    documentSelector: [
+      { scheme: "file", language: "java" },
+      // cappu.json is synced for the dependency code lenses (VS Code may
+      // classify it as json or jsonc depending on settings).
+      { scheme: "file", language: "json", pattern: "**/cappu.json" },
+      { scheme: "file", language: "jsonc", pattern: "**/cappu.json" },
+    ],
   };
 
   client = new LanguageClient("javalsp", "javalsp", serverOptions, clientOptions);
