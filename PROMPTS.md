@@ -140,3 +140,4 @@ no timestamps were captured.
 - 2026-06-11 01:17 — fix stuff that broke during the last feature additions and refactorings. for example, the vscode-extension broke. make sure you've got everything. be strict
 - 2026-06-11 08:10 — review the entire code until now. is there anything that could be more compliant to the JLS? maybe do a refactoring of duplicate code. keep in mind that some duplication is good
 - 2026-06-11 08:12 — check if we can do some things simpler. use latest node.js' APIs as well es javascript features and APIs if meaningful.
+- 2026-06-11 09:22 — do 2, 3 and 5. well do package management later

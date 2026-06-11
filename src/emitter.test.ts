@@ -2689,3 +2689,60 @@ test("the degrade listener reports placeholder bodies by class and member", () =
   }
   expect(degraded).toEqual(["Deg.bad"]);
 });
+
+test("explicit this(...) forwards this$0 and captures like javac", { skip: !HAS_JAVA }, () => {
+  runsLikeJavac(
+    "Delegate",
+    [
+      "public class Delegate {",
+      "  int base = 40;",
+      "  class Inner {",
+      "    int v;",
+      "    Inner() { this(2); }",
+      "    Inner(int x) { v = base + x; }",
+      "  }",
+      "  int run() { return new Inner().v; }",
+      "  public static void main(String[] args) {",
+      "    System.out.println(new Delegate().run());",
+      "    final int cap = 5;",
+      "    class L {",
+      "      int v;",
+      "      L() { this(10); }",
+      "      L(int x) { v = cap + x; }",
+      "    }",
+      "    System.out.println(new L().v);",
+      "  }",
+      "}",
+    ].join("\n"),
+    "42\n15\n",
+  );
+});
+
+test("same-arity constructor overloads pick by argument type", { skip: !HAS_JAVA }, () => {
+  runsLikeJavac(
+    "CtorOverload",
+    [
+      "public class CtorOverload {",
+      "  static class A {",
+      '    A(int x) { System.out.println("int"); }',
+      '    A(String s) { System.out.println("str"); }',
+      "  }",
+      "  static class B extends A {",
+      '    B() { super("s"); }',
+      "  }",
+      "  public static void main(String[] args) {",
+      "    new B();",
+      "    new A(1);",
+      "  }",
+      "}",
+    ].join("\n"),
+    "str\nint\n",
+  );
+});
+
+test("nested classes carry an InnerClasses attribute", () => {
+  const [cls] = emitClasses("Outer", "class Outer { static class S { } void m() { new S(); } }");
+  const bytes = cls!.bytes;
+  const needle = Buffer.from("InnerClasses", "utf8");
+  expect(Buffer.from(bytes).includes(needle)).toBe(true);
+});

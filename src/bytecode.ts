@@ -467,9 +467,13 @@ class ConstantPool {
     });
   }
 
+  /** Every class named by a CONSTANT_Class entry so far, in interning order. */
+  readonly referencedClasses: (InternalName | Descriptor)[] = [];
+
   // also accepts a Descriptor: checkcast/anewarray name array CLASSES by
   // their descriptor (JVMS 4.4.1)
   classInfo(internalName: InternalName | Descriptor): CpIndex {
+    if (!this.cache.has(`c:${internalName}`)) this.referencedClasses.push(internalName);
     const nameIndex = this.utf8(internalName);
     return this.intern(`c:${internalName}`, b => {
       b.u1(CONSTANT_Class);
@@ -775,9 +779,9 @@ function sourceNameOf(node: Node): string | undefined {
 // The class-level attributes shared by classes and enums: SourceFile and (when
 // any invokedynamic was emitted) BootstrapMethods. Must run before the constant
 // pool is written so the attribute name Utf8s are interned.
-// TODO: emit the attributes javac writes that we still omit, needed for closer
-// byte-equivalence: InnerClasses (JVMS 4.7.6) and the per-method
-// LocalVariableTable (4.7.13).
+// The per-method LocalVariableTable (4.7.13) is deliberately NOT emitted:
+// javac only writes it under -g, so emitting it would diverge from the
+// default-flags javac output we compare against.
 function buildClassAttributes(
   cp: ConstantPool,
   sourceName: string | undefined,
@@ -787,6 +791,8 @@ function buildClassAttributes(
   nestMembers?: Map<string, InternalName[]>,
   // ClassSignature (JVMS 4.7.9) for a generic class/interface declaration.
   signature?: JvmSignature,
+  // Nested classes known from source, for the InnerClasses attribute.
+  innerClasses?: Map<InternalName, InnerClassRecord>,
 ): { buffer: ByteBuffer; count: number } {
   const buffer = new ByteBuffer();
   let count = 0;
@@ -824,6 +830,35 @@ function buildClassAttributes(
       buffer.u2(cp.utf8("NestHost"));
       buffer.u4(2);
       buffer.u2(cp.classInfo(host));
+      count++;
+    }
+  }
+  if (innerClasses && innerClasses.size > 0) {
+    // One inner_classes entry per referenced nested class known from source
+    // (JVMS 4.7.6; javac does the same over its symbol table). An entry interns
+    // its outer class, which may itself be nested, so the loop runs to a
+    // fixpoint over the growing referenced-classes list.
+    const entries: { inner: CpIndex; outer: CpIndex | 0; name: CpIndex | 0; flags: number }[] = [];
+    for (let i = 0; i < cp.referencedClasses.length; i++) {
+      const record = innerClasses.get(cp.referencedClasses[i] as InternalName);
+      if (!record) continue;
+      entries.push({
+        inner: cp.classInfo(cp.referencedClasses[i]!),
+        outer: record.outer ? cp.classInfo(record.outer) : 0,
+        name: record.simpleName ? cp.utf8(record.simpleName) : 0,
+        flags: record.flags,
+      });
+    }
+    if (entries.length > 0) {
+      buffer.u2(cp.utf8("InnerClasses"));
+      buffer.u4(2 + 8 * entries.length);
+      buffer.u2(entries.length);
+      for (const entry of entries) {
+        buffer.u2(entry.inner);
+        buffer.u2(entry.outer);
+        buffer.u2(entry.name);
+        buffer.u2(entry.flags);
+      }
       count++;
     }
   }
@@ -869,6 +904,78 @@ export function computeNestMembers(
   };
   visit(sourceFile);
   return byHost;
+}
+
+/** One inner_classes entry (JVMS 4.7.6) for a nested class known from source. */
+export interface InnerClassRecord {
+  /** Immediately enclosing class; undefined for local and anonymous classes. */
+  outer?: InternalName;
+  /** Source simple name; undefined for anonymous classes. */
+  simpleName?: string;
+  /** inner_class_access_flags: the source-level modifiers. */
+  flags: number;
+}
+
+// The InnerClasses access flags of a nested declaration: source modifiers plus
+// the implicit ones (member interfaces/enums/records are static, interfaces
+// are abstract). ACC_SUPER is a class-file flag, not an InnerClasses flag.
+function innerClassFlags(node: Node): number {
+  const decl = node as ClassDeclaration;
+  let flags = memberAccessFlags(decl.modifiers);
+  switch (node.kind) {
+    case SyntaxKind.InterfaceDeclaration:
+      flags |= ACC_INTERFACE | ACC_ABSTRACT | ACC_STATIC;
+      break;
+    case SyntaxKind.EnumDeclaration:
+      // final like the class itself (no constant-body subclassing is emitted)
+      flags |= ACC_ENUM | ACC_STATIC | ACC_FINAL;
+      break;
+    case SyntaxKind.RecordDeclaration:
+      flags |= ACC_FINAL | ACC_STATIC;
+      break;
+    default:
+      break;
+  }
+  return flags;
+}
+
+/**
+ * Every nested class declared in the file, keyed by binary name - the data an
+ * InnerClasses entry needs (JVMS 4.7.6). Nested classes from the classpath or
+ * the JDK stub are not covered: their original access flags are not modeled.
+ */
+export function computeInnerClassInfo(
+  sourceFile: SourceFile,
+  program: Program,
+): Map<InternalName, InnerClassRecord> {
+  program.getGlobalIndex();
+  const info = new Map<InternalName, InnerClassRecord>();
+  const visit = (node: Node): void => {
+    if (TYPE_DECL_KINDS.has(node.kind) && node.symbol) {
+      const decl = node as ClassDeclaration;
+      const name = binaryName(node.symbol);
+      if (name.includes("$")) {
+        const memberOfType = decl.parent && TYPE_DECL_KINDS.has(decl.parent.kind);
+        info.set(name, {
+          outer: memberOfType ? binaryName(decl.parent!.symbol!) : undefined,
+          simpleName: decl.name?.text,
+          flags: innerClassFlags(node),
+        });
+      }
+    } else if (
+      node.kind === SyntaxKind.ObjectCreationExpression &&
+      (node as ObjectCreationExpression).classBody &&
+      anonymousTarget(node as ObjectCreationExpression, program)
+    ) {
+      info.set(anonymousClassName(node as ObjectCreationExpression, program), { flags: 0 });
+    }
+    forEachChild(node, c => {
+      visit(c);
+      return undefined;
+    });
+  };
+  visit(sourceFile);
+  return info;
 }
 
 // Field initializers split by static-ness: instance ones run in each
@@ -1117,21 +1224,12 @@ function outerThisInfo(
 }
 
 // A local class whose constructor handling we support emitting: declared in a
-// block, with no this(...)-delegating constructor (declared constructors get
-// the capture/this$0 stores spliced in as leading synthetic parameters; a
-// missing one is synthesized). When this is false, effectiveLocalCaptures
-// returns [] so the class emits without capture support (methods using
-// captures degrade). Both emitClass and emitNew use this, so they agree.
+// block. Declared constructors get the capture/this$0 stores spliced in as
+// leading synthetic parameters (a missing one is synthesized); a
+// this(...)-delegating constructor forwards them to its sibling. Both
+// emitClass and emitNew use this, so they agree.
 function isSynthesizableLocalClass(decl: ClassDeclaration): boolean {
-  if (decl.parent?.kind !== SyntaxKind.Block) return false;
-  // A declared constructor gets the capture/this$0 stores spliced in (leading
-  // synthetic parameters); instance field initializers run via the body emitter.
-  // A this(...)-delegating constructor would have to forward the captures, which
-  // is not handled, so such a class is not synthesizable (its captures degrade).
-  const ctors = decl.members.filter(
-    m => m.kind === SyntaxKind.ConstructorDeclaration,
-  ) as ConstructorDeclaration[];
-  return !ctors.some(delegatesToThis);
+  return decl.parent?.kind === SyntaxKind.Block;
 }
 
 function effectiveLocalCaptures(
@@ -1154,21 +1252,10 @@ function localOuterThis(
 }
 
 // A leading `this(...)` constructor invocation (delegation to a sibling ctor).
-function delegatesToThis(ctor: ConstructorDeclaration): boolean {
-  const first = (ctor.body as Block | undefined)?.statements?.[0];
-  return (
-    first?.kind === SyntaxKind.ExpressionStatement &&
-    (first as ExpressionStatement).expression.kind === SyntaxKind.CallExpression &&
-    ((first as ExpressionStatement).expression as CallExpression).expression.kind ===
-      SyntaxKind.ThisExpression
-  );
-}
-
 // The enclosing instance (this$0) a non-static member inner class captures, or
 // undefined. Like a local class, this$0 is added only when the body actually uses
-// the enclosing instance. A this(...)-delegating constructor is not yet handled
-// with this$0 (it would have to forward the enclosing instance), so such a class
-// gets no this$0 and its enclosing-member access degrades.
+// the enclosing instance. A this(...)-delegating constructor forwards this$0
+// to its sibling, which stores it.
 function memberInnerThis0(
   decl: ClassDeclaration,
   program: Program,
@@ -1176,10 +1263,6 @@ function memberInnerThis0(
 ): { enclosingInternal: InternalName } | undefined {
   if (!decl.parent || !TYPE_DECL_KINDS.has(decl.parent.kind)) return undefined;
   if (isStaticDeclaration(decl)) return undefined;
-  const ctors = decl.members.filter(
-    m => m.kind === SyntaxKind.ConstructorDeclaration,
-  ) as ConstructorDeclaration[];
-  if (ctors.some(delegatesToThis)) return undefined;
   return outerThisInfo(decl.members, decl.parent, program, checker);
 }
 
@@ -1578,14 +1661,78 @@ function isStaticDeclaration(declaration: { modifiers?: readonly Node[] }): bool
 }
 
 // A declared constructor of `typeSymbol` taking `argCount` parameters, if any.
-function findConstructor(typeSymbol: Symbol, argCount: number): ConstructorDeclaration | undefined {
+// Primitive widening targets (JLS 5.1.2), for constructor-argument matching.
+const WIDENS_TO = {
+  B: "SIJFD",
+  S: "IJFD",
+  C: "IJFD",
+  I: "JFD",
+  J: "FD",
+  F: "D",
+} as const satisfies Partial<Record<PrimitiveDescriptor, string>>;
+
+/**
+ * The constructor of `typeSymbol` applicable to the arguments. Arity filters
+ * first; when overloads share the arity, the argument descriptors disambiguate:
+ * exact descriptor match, then the unique candidate every argument widens or
+ * conforms to (references conform to references - precise reference
+ * applicability is the checker's job). An unresolved ambiguity returns
+ * undefined so the caller degrades instead of emitting a call to the wrong
+ * overload (which would not verify).
+ */
+function findConstructor(
+  typeSymbol: Symbol,
+  argCount: number,
+  program?: Program,
+  argDescs?: readonly Descriptor[],
+  // Reference applicability (JLS 5.3) for same-arity reference overloads:
+  // descriptors alone cannot tell StringReader -> Reader from -> InputStream.
+  refs?: { checker: Checker; argTypes: readonly Type[] },
+): ConstructorDeclaration | undefined {
   const declaration = typeSymbol.valueDeclaration ?? typeSymbol.declarations?.[0];
   const members = (declaration as { members?: readonly Node[] } | undefined)?.members ?? [];
-  return members.find(
+  const candidates = members.filter(
     m =>
       m.kind === SyntaxKind.ConstructorDeclaration &&
       (m as ConstructorDeclaration).parameters.length === argCount,
-  ) as ConstructorDeclaration | undefined;
+  ) as ConstructorDeclaration[];
+  if (candidates.length <= 1 || !argDescs || !program) return candidates[0];
+  const paramsOf = (c: ConstructorDeclaration): Descriptor[] =>
+    c.parameters.map(p => paramDescriptor(p as Parameter, program));
+  const exact = candidates.find(c => paramsOf(c).every((d, i) => d === argDescs[i]));
+  if (exact) return exact;
+  // Kind conformance: a reference argument fits any reference parameter, a
+  // primitive one only its widening targets. This filters the overloads
+  // descriptors alone can decide.
+  const kindConforms = (arg: Descriptor, param: Descriptor): boolean => {
+    if (arg === param) return true;
+    const argRef = arg[0] === "L" || arg[0] === "[";
+    const paramRef = param[0] === "L" || param[0] === "[";
+    if (argRef || paramRef) return argRef && paramRef;
+    return (WIDENS_TO[arg as keyof typeof WIDENS_TO] ?? "").includes(param);
+  };
+  const conforming = candidates.filter(c =>
+    paramsOf(c).every((d, i) => kindConforms(argDescs[i]!, d)),
+  );
+  if (conforming.length <= 1) return conforming[0];
+  // Several reference overloads remain: prefer one the checker can PROVE
+  // applicable (JLS 5.3). An unproven candidate is not disqualified - the
+  // checker's subtyping is only as complete as the stubbed types - so when
+  // nothing is provable, declaration order decides (as it alone did before
+  // type-aware selection existed).
+  if (refs) {
+    const proven = conforming.find(c =>
+      paramsOf(c).every((d, i) => {
+        if (argDescs[i] === d) return true;
+        const argType = refs.argTypes[i]!;
+        const paramType = refs.checker.resolveType((c.parameters[i] as Parameter).type, c);
+        if (argType.kind === TypeKind.Error || paramType.kind === TypeKind.Error) return false;
+        return refs.checker.isAssignableTo(argType, paramType);
+      }),
+    );
+    if (proven) return proven;
+  }
+  return conforming[0];
 }
 
 // A resolved field/enum-constant reference: where it lives and its descriptor.
@@ -2099,6 +2246,11 @@ function generateBody(
   // Same mapping as the module-level twin (which capture analysis needs outside
   // this closure); aliased here so the logic lives in one place.
   const typeDescriptor = typeToDescriptor;
+  // Argument types + descriptors for constructor-overload disambiguation.
+  const ctorArgInfo = (args: readonly Node[]): { descs: Descriptor[]; types: Type[] } => {
+    const types = args.map(a => checker.getTypeOfExpression(a));
+    return { descs: types.map(t => typeDescriptor(t)), types };
+  };
 
   const fieldInfoOf = (symbol: Symbol): FieldInfo => {
     if (!symbol.parent) throw new UnsupportedEmit();
@@ -2701,7 +2853,16 @@ function generateBody(
     if (captures.length > 0 || this0Desc) {
       // A declared constructor's user parameters follow this$0 and the captures;
       // a class with no declared ctor has a synthesized one taking no user args.
-      const localCtor = findConstructor(created.symbol, args.length);
+      const localCtor = findConstructor(
+        created.symbol,
+        args.length,
+        program,
+        ctorArgInfo(args).descs,
+        {
+          checker,
+          argTypes: ctorArgInfo(args).types,
+        },
+      );
       if (!localCtor && args.length > 0) throw new UnsupportedEmit();
       const userParamDescs = localCtor
         ? localCtor.parameters.map(p => paramDescriptor(p as Parameter, program))
@@ -2743,7 +2904,16 @@ function generateBody(
       ? memberInnerThis0(createdDecl as ClassDeclaration, program, checker)
       : undefined;
     if (memberThis0) {
-      const innerCtor = findConstructor(created.symbol, args.length);
+      const innerCtor = findConstructor(
+        created.symbol,
+        args.length,
+        program,
+        ctorArgInfo(args).descs,
+        {
+          checker,
+          argTypes: ctorArgInfo(args).types,
+        },
+      );
       if (!innerCtor && args.length > 0) throw new UnsupportedEmit();
       const ctorParams = innerCtor
         ? innerCtor.parameters.map(p => paramDescriptor(p as Parameter, program))
@@ -2768,7 +2938,10 @@ function generateBody(
       return ref;
     }
 
-    const ctor = findConstructor(created.symbol, args.length);
+    const ctor = findConstructor(created.symbol, args.length, program, ctorArgInfo(args).descs, {
+      checker,
+      argTypes: ctorArgInfo(args).types,
+    });
     // A record's implicit canonical constructor takes its components in order.
     const recordDecl =
       createdDecl?.kind === SyntaxKind.RecordDeclaration
@@ -3752,7 +3925,13 @@ function generateBody(
     if (info.kind === "constructor") {
       refKind = REF_newInvokeSpecial;
       implName = "<init>";
-      const ctor = findConstructor(info.ownerSymbol!, info.instParams.length);
+      const ctor = findConstructor(
+        info.ownerSymbol!,
+        info.instParams.length,
+        program,
+        info.instParams.map(t => typeToDescriptor(t)),
+        { checker, argTypes: info.instParams },
+      );
       const ctorParams = ctor
         ? ctor.parameters.map(p => paramDescriptor(p as Parameter, program))
         : [];
@@ -5270,11 +5449,11 @@ function generateBody(
       leadSlot += slotsOf(c.descriptor);
       return s;
     });
-    if (ctorLeading && isThisCall) throw new UnsupportedEmit();
     // The enclosing instance is stored into this$0 before calling super, as javac
     // does (assigning the current class's own field on the uninitialized `this` is
-    // permitted by the verifier).
-    if (leadThis0Slot !== undefined) {
+    // permitted by the verifier). A this(...) delegation instead forwards the
+    // leading synthetics to the sibling constructor, which stores them.
+    if (leadThis0Slot !== undefined && !isThisCall) {
       code.u1(OP_ALOAD_0);
       pushRef(descOf(thisInternalName));
       loadVar(leadThis0Slot, ctorLeading!.this0Descriptor!);
@@ -5316,17 +5495,48 @@ function generateBody(
           : undefined;
       const owner = isThisCall ? thisInternalName : ctorSuper;
       const args = explicitInvocation.arguments ?? [];
-      const target = targetSymbol && findConstructor(targetSymbol, args.length);
+      const target =
+        targetSymbol &&
+        findConstructor(targetSymbol, args.length, program, ctorArgInfo(args).descs, {
+          checker,
+          argTypes: ctorArgInfo(args).types,
+        });
       const paramDescs = target
         ? target.parameters.map(p => paramDescriptor(p as Parameter, program))
         : undefined;
       if (!owner || !paramDescs) throw new UnsupportedEmit();
+      // Every constructor of this class carries the same leading synthetics
+      // (this$0 and/or captures); a this(...) call forwards them to the sibling
+      // ahead of the user arguments, as javac does.
+      const leadDescs =
+        isThisCall && ctorLeading
+          ? [
+              ...(ctorLeading.this0Descriptor ? [ctorLeading.this0Descriptor] : []),
+              ...ctorLeading.captures.map(c => c.descriptor),
+            ]
+          : [];
       code.u1(OP_ALOAD_0);
       pushRef();
+      if (isThisCall && ctorLeading) {
+        if (leadThis0Slot !== undefined) {
+          loadVar(leadThis0Slot, ctorLeading.this0Descriptor!);
+          push(ctorLeading.this0Descriptor!);
+        }
+        ctorLeading.captures.forEach((c, i) => {
+          loadVar(leadCaptureSlots[i]!, c.descriptor);
+          push(c.descriptor);
+        });
+      }
       args.forEach((arg, i) => coerce(emitExpr(arg), paramDescs[i]!));
       code.u1(OP_INVOKESPECIAL);
-      code.u2(cp.methodref(owner, "<init>", `(${paramDescs.join("")})V` as MethodDescriptor));
-      pop(1 + args.length);
+      code.u2(
+        cp.methodref(
+          owner,
+          "<init>",
+          `(${[...leadDescs, ...paramDescs].join("")})V` as MethodDescriptor,
+        ),
+      );
+      pop(1 + leadDescs.length + args.length);
     } else if (isConstructor && ctorPrologue) {
       // Synthesized ctor: store this$0 (before super, as javac does), call super
       // with its trailing args, then store the captures - mirroring emitSynthCtor
@@ -5386,7 +5596,8 @@ function generateBody(
     }
     // Captured locals (val$ fields) are stored after super(), from their leading
     // synthetic parameters - the declared-constructor counterpart of emitSynthCtor.
-    (ctorLeading?.captures ?? []).forEach((c, i) => {
+    // A this(...) delegation forwards them instead (above); the sibling stores.
+    (isThisCall ? [] : (ctorLeading?.captures ?? [])).forEach((c, i) => {
       code.u1(OP_ALOAD_0);
       pushRef(descOf(thisInternalName));
       loadVar(leadCaptureSlots[i]!, c.descriptor);
@@ -6047,6 +6258,7 @@ export function emitClass(
   program: Program,
   checker: Checker,
   nestMembers?: Map<string, InternalName[]>,
+  innerClasses?: Map<InternalName, InnerClassRecord>,
 ): EmittedClass {
   // Ensure the global index is built so symbols carry their package parent.
   program.getGlobalIndex();
@@ -6269,6 +6481,7 @@ export function emitClass(
     name,
     nestMembers,
     classSignatureOf(declaration, program),
+    innerClasses,
   );
 
   return {
@@ -6298,6 +6511,7 @@ export function emitInterface(
   program: Program,
   checker: Checker,
   nestMembers?: Map<string, InternalName[]>,
+  innerClasses?: Map<InternalName, InnerClassRecord>,
 ): EmittedClass {
   program.getGlobalIndex();
   const name = declaration.symbol
@@ -6382,6 +6596,8 @@ export function emitInterface(
     sourceNameOf(declaration),
     name,
     nestMembers,
+    undefined,
+    innerClasses,
   );
   return {
     name,
@@ -6481,6 +6697,7 @@ export function emitAnonymousClassIfPossible(
   program: Program,
   checker: Checker,
   nestMembers?: Map<string, InternalName[]>,
+  innerClasses?: Map<InternalName, InnerClassRecord>,
 ): EmittedClass | undefined {
   const target = anonymousTarget(node, program);
   if (!target) return undefined;
@@ -6598,6 +6815,8 @@ export function emitAnonymousClassIfPossible(
     sourceNameOf(node),
     name,
     nestMembers,
+    undefined,
+    innerClasses,
   );
   return {
     name,
@@ -6760,6 +6979,7 @@ export function emitRecord(
   program: Program,
   checker: Checker,
   nestMembers?: Map<string, InternalName[]>,
+  innerClasses?: Map<InternalName, InnerClassRecord>,
 ): EmittedClass {
   program.getGlobalIndex();
   const name = declaration.symbol
@@ -7005,6 +7225,8 @@ export function emitRecord(
     sourceNameOf(declaration),
     name,
     nestMembers,
+    undefined,
+    innerClasses,
   );
   classAttributes.u2(cp.utf8("Record"));
   classAttributes.u4(recordAttr.length);
@@ -7036,6 +7258,7 @@ export function emitEnum(
   program: Program,
   checker: Checker,
   nestMembers?: Map<string, InternalName[]>,
+  innerClasses?: Map<InternalName, InnerClassRecord>,
 ): EmittedClass {
   program.getGlobalIndex();
   const name = declaration.symbol
@@ -7228,6 +7451,7 @@ export function emitEnum(
     name,
     nestMembers,
     classSignatureOf(declaration, program),
+    innerClasses,
   );
 
   return {
