@@ -264,10 +264,11 @@ function isStubSymbol(symbol: Symbol): boolean {
   return !!declaration && getSourceFileOfNode(declaration).fileName.startsWith("jdk:///");
 }
 
-function identifierAt(
+// The (sourceFile, offset) prologue every position-based handler starts with.
+function sourceAndOffset(
   uri: Uri,
   position: { line: number; character: number },
-): Identifier | undefined {
+): { sourceFile: SourceFile; offset: number } | undefined {
   const sourceFile = program.getSourceFile(uri);
   if (!sourceFile) return undefined;
   const offset = getPositionOfLineAndCharacter(
@@ -275,7 +276,15 @@ function identifierAt(
     position.line,
     position.character,
   );
-  return getIdentifierAtPosition(sourceFile, offset) as Identifier | undefined;
+  return { sourceFile, offset };
+}
+
+function identifierAt(
+  uri: Uri,
+  position: { line: number; character: number },
+): Identifier | undefined {
+  const at = sourceAndOffset(uri, position);
+  return at && (getIdentifierAtPosition(at.sourceFile, at.offset) as Identifier | undefined);
 }
 
 connection.onReferences((params): Location[] | null => {
@@ -333,14 +342,8 @@ connection.onDefinition((params): Definition | null => {
 });
 
 connection.onCompletion((params): CompletionItem[] => {
-  const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
-  if (!sourceFile) return [];
-  const offset = getPositionOfLineAndCharacter(
-    computeLineStarts(sourceFile.text),
-    params.position.line,
-    params.position.character,
-  );
-  return getCompletions(program, checker, sourceFile, offset);
+  const at = sourceAndOffset(asUri(params.textDocument.uri), params.position);
+  return at ? getCompletions(program, checker, at.sourceFile, at.offset) : [];
 });
 
 connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
@@ -380,13 +383,9 @@ function callAt(
   uri: Uri,
   position: { line: number; character: number },
 ): CallExpression | undefined {
-  const sourceFile = program.getSourceFile(uri);
-  if (!sourceFile) return undefined;
-  const offset = getPositionOfLineAndCharacter(
-    computeLineStarts(sourceFile.text),
-    position.line,
-    position.character,
-  );
+  const at = sourceAndOffset(uri, position);
+  if (!at) return undefined;
+  const { sourceFile, offset } = at;
   // The cursor right after `(` in an unclosed call sits at the recovered call's
   // end, which getNodeAtPosition treats as outside; retry one position left,
   // like getIdentifierAtPosition does.
@@ -427,12 +426,7 @@ connection.onSignatureHelp((params): SignatureHelp | null => {
     candidates.findIndex(d => d === resolved),
   );
   // The argument the cursor is in: count the arguments that end before it.
-  const sourceFile = program.getSourceFile(asUri(params.textDocument.uri))!;
-  const offset = getPositionOfLineAndCharacter(
-    computeLineStarts(sourceFile.text),
-    params.position.line,
-    params.position.character,
-  );
+  const { offset } = sourceAndOffset(asUri(params.textDocument.uri), params.position)!;
   const activeParameter = call.arguments.filter(a => a.end < offset).length;
   return { signatures, activeSignature, activeParameter };
 });

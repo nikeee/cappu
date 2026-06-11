@@ -952,6 +952,15 @@ export function createChecker(program: Program): Checker {
 
   // Binary numeric promotion (JLS 5.6.2): byte/short/char promote to int, then the
   // result is the wider of the two operand types.
+  // Unary numeric promotion (JLS 5.6.1): byte/short/char promote to int; other
+  // types (numeric or not) pass through - the caller decides what an error is.
+  function unaryPromoted(type: Type): Type {
+    return type.kind === TypeKind.Primitive &&
+      (type.name === "byte" || type.name === "short" || type.name === "char")
+      ? intType
+      : type;
+  }
+
   function widerNumeric(a: Type, b: Type): Type {
     const order = ["int", "long", "float", "double"];
     const rank = (t: Type) => {
@@ -1043,9 +1052,15 @@ export function createChecker(program: Program): Checker {
         return booleanType;
       case SyntaxKind.PrefixUnaryExpression: {
         const u = node as PrefixUnaryExpression;
-        return u.operator === SyntaxKind.ExclamationToken
-          ? booleanType
-          : getTypeOfExpression(u.operand);
+        if (u.operator === SyntaxKind.ExclamationToken) return booleanType;
+        const operand = getTypeOfExpression(u.operand);
+        // Unary +/-/~ apply unary numeric promotion (JLS 15.15.3-5): -byte is
+        // an int. ++/-- keep the variable's type (JLS 15.15.1/2).
+        return u.operator === SyntaxKind.PlusToken ||
+          u.operator === SyntaxKind.MinusToken ||
+          u.operator === SyntaxKind.TildeToken
+          ? unaryPromoted(operand)
+          : operand;
       }
       case SyntaxKind.PostfixUnaryExpression:
         return getTypeOfExpression((node as unknown as { operand: Node }).operand);

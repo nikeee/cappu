@@ -138,3 +138,4 @@ no timestamps were captured.
 - 2026-06-11 01:09 — keep in mind to use branded types in new code as well
 - 2026-06-11 01:17 — search for more opportunities to use branded types. for example, in the parser or checker.
 - 2026-06-11 01:17 — fix stuff that broke during the last feature additions and refactorings. for example, the vscode-extension broke. make sure you've got everything. be strict
+- 2026-06-11 08:10 — review the entire code until now. is there anything that could be more compliant to the JLS? maybe do a refactoring of duplicate code. keep in mind that some duplication is good

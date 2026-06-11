@@ -71,6 +71,16 @@ test("expression typing: arithmetic, string concat, comparison", () => {
   expect(initializerType("class C { void m() { var x = new C(); } }", "x")).toBe("C");
 });
 
+test("unary +/-/~ apply unary numeric promotion; ++/-- keep the variable's type", () => {
+  // JLS 5.6.1 / 15.15.3-5: -byte is an int (javac picks f(int) for f(-b)).
+  expect(initializerType("class C { void m() { byte b = 1; var x = -b; } }", "x")).toBe("int");
+  expect(initializerType("class C { void m() { char c = 'a'; var x = ~c; } }", "x")).toBe("int");
+  expect(initializerType("class C { void m() { short s = 1; var x = +s; } }", "x")).toBe("int");
+  expect(initializerType("class C { void m() { long l = 1L; var x = -l; } }", "x")).toBe("long");
+  // JLS 15.15.1: prefix increment has the type of the variable.
+  expect(initializerType("class C { void m() { byte b = 1; var x = ++b; } }", "x")).toBe("byte");
+});
+
 test("unknown expressions degrade to <error>, never throw", () => {
   expect(initializerType("class C { void m() { var x = mystery(); } }", "x")).toBe("<error>");
 });
