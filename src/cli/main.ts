@@ -22,8 +22,9 @@ Usage:
                                      --with-schema also writes cappu.schema.json
   cappu install                      Download the cappu.json dependencies (transitively)
                                      into lib/classes
-  cappu add <configuration> <coord>  Add group:artifact[@version] to the dependencies
-                                     section (api or implementation) and install it
+  cappu add <configuration> <coord...>  Add one or more group:artifact[@version] to the
+                                     dependencies section (api or implementation) and
+                                     install them
   cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
   cappu compile [options] [file...]  Compile .java files to .class bytecode; with no
                                      files, compile everything under the configured
@@ -102,7 +103,7 @@ try {
 
 switch (command) {
   case "add":
-    await runAdd(files[0], files[1], values.config, config);
+    await runAdd(files[0], files.slice(1), values.config, config);
     break;
   case "install":
     await runInstall(config);

@@ -65,18 +65,20 @@ export function addDependencyToJsonc(
 
 export async function runAdd(
   configurationArg: string | undefined,
-  spec: string | undefined,
+  specs: readonly string[],
   configPathArg: string | undefined,
   config: CappuConfig,
   // Injectable for tests; defaults to the configured remote repositories.
   sources?: readonly PackageSource[],
 ): Promise<never> {
   const configuration = CONFIGURATIONS.find(c => c === configurationArg);
-  const coordinate = spec === undefined ? undefined : parseAddCoordinate(spec);
-  if (!configuration || !coordinate) {
+  const coordinates = specs.map(parseAddCoordinate);
+  const invalid = specs.filter((_, i) => coordinates[i] === undefined);
+  if (!configuration || coordinates.length === 0 || invalid.length > 0) {
+    for (const spec of invalid) process.stderr.write(`cappu: not a coordinate: '${spec}'\n`);
     process.stderr.write(
-      "usage: cappu add <api|implementation> <group:artifact[@version]>\n" +
-        "e.g.:  cappu add implementation com.google.code.gson:gson@2.14.0\n",
+      "usage: cappu add <api|implementation> <group:artifact[@version]> [more...]\n" +
+        "e.g.:  cappu add implementation com.google.code.gson:gson@2.14.0 org.slf4j:slf4j-api\n",
     );
     process.exit(2);
   }
@@ -85,36 +87,48 @@ export async function runAdd(
     process.exit(1);
   }
 
-  let version = coordinate.version;
-  if (!looksExact(version)) {
-    const resolvedSources =
-      sources ?? config.packageSources.map(url => new MavenRepositorySource(url));
-    const picked = await pickAddVersion(config, coordinate.key, version, resolvedSources);
-    if (picked === undefined) {
-      const wanted = version === undefined ? "" : ` matching '${version}'`;
-      process.stderr.write(
-        `cappu: no published version of ${coordinate.key}${wanted} found in any package source\n`,
-      );
-      process.exit(1);
-    }
-    if (!picked.compatible) {
-      process.stderr.write(
-        `warning: every matching version of ${coordinate.key} conflicts with the configured dependencies; using ${picked.version}\n`,
-      );
-    }
-    version = picked.version;
-  }
-
   const configPath = configPathArg
     ? resolve(configPathArg)
     : join(config.baseDir, DEFAULT_CONFIG_NAME);
-  writeFileSync(
-    configPath,
-    addDependencyToJsonc(readFileSync(configPath, "utf8"), configuration, coordinate.key, version),
-  );
-  process.stderr.write(`added ${configuration} ${coordinate.key}@${version}\n`);
+  const resolvedSources =
+    sources ?? config.packageSources.map(url => new MavenRepositorySource(url));
 
-  // Re-read so install sees exactly what was written, then re-resolve and
-  // rewrite the lock - install alone only ever consumes the existing lock.
-  return runInstall(loadConfig(configPath), { updateLock: true });
+  // Sequential on purpose: each entry is written before the next is picked
+  // (and the config re-read), so later picks see the earlier additions and
+  // stay compatible with them, not just with the pre-existing dependencies.
+  let current = config;
+  for (const coordinate of coordinates as AddCoordinate[]) {
+    let version = coordinate.version;
+    if (!looksExact(version)) {
+      const picked = await pickAddVersion(current, coordinate.key, version, resolvedSources);
+      if (picked === undefined) {
+        const wanted = version === undefined ? "" : ` matching '${version}'`;
+        process.stderr.write(
+          `cappu: no published version of ${coordinate.key}${wanted} found in any package source\n`,
+        );
+        process.exit(1);
+      }
+      if (!picked.compatible) {
+        process.stderr.write(
+          `warning: every matching version of ${coordinate.key} conflicts with the configured dependencies; using ${picked.version}\n`,
+        );
+      }
+      version = picked.version;
+    }
+    writeFileSync(
+      configPath,
+      addDependencyToJsonc(
+        readFileSync(configPath, "utf8"),
+        configuration,
+        coordinate.key,
+        version,
+      ),
+    );
+    process.stderr.write(`added ${configuration} ${coordinate.key}@${version}\n`);
+    current = loadConfig(configPath);
+  }
+
+  // `current` is exactly what was written; re-resolve and rewrite the lock -
+  // install alone only ever consumes the existing lock.
+  return runInstall(current, { updateLock: true });
 }
