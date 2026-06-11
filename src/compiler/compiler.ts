@@ -193,12 +193,14 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
   const written: string[] = [];
   try {
     const classes: ZipEntryInput[] = [];
+    const mainClasses: string[] = [];
     for (const file of files) {
       const sourceFile = program.getSourceFile(pathToUri(file))!;
       for (const cls of emitSourceFile(sourceFile, program, checker)) {
         // cls.name is the internal name (com/app/Foo); as a path it mirrors
         // the package tree.
         classes.push({ name: `${cls.name}.class`, bytes: cls.bytes });
+        if (cls.hasMainMethod) mainClasses.push(cls.name.replaceAll("/", "."));
       }
     }
     if (output === "classes") {
@@ -210,9 +212,16 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
         written.push(out);
       }
     } else {
+      // Main-Class makes `java -jar` work (nikeee/cappu#11): the configured one
+      // wins; otherwise the single detected main(String[]) entry point.
+      const mainClass =
+        options.config.compilerOptions.mainClass ??
+        (mainClasses.length === 1 ? mainClasses[0] : undefined);
       const manifest: ZipEntryInput = {
         name: "META-INF/MANIFEST.MF",
-        bytes: new TextEncoder().encode("Manifest-Version: 1.0\r\n\r\n"),
+        bytes: new TextEncoder().encode(
+          `Manifest-Version: 1.0\r\n${mainClass ? `Main-Class: ${mainClass}\r\n` : ""}\r\n`,
+        ),
       };
       const entries = [manifest, ...classes];
       if (output === "fat-jar") {

@@ -32,6 +32,8 @@ const CompilerOptionsSchema = z.object({
   failOnDegrade: z.boolean().optional(),
   /** The javac binary `--validate` compiles the reference output with. */
   javac: z.string().default("javac"),
+  /** Main-Class for jar outputs; default: the only main(String[]) found. */
+  mainClass: z.string().optional(),
 });
 
 const LspOptionsSchema = z.object({
@@ -121,6 +123,10 @@ export const CONFIG_TEMPLATE = `
 
     // The javac binary used by \`cappu compile --validate\` (default: "javac" from $PATH).
     // "javac": "javac",
+
+    // Main-Class of jar outputs (java -jar). Default if unset: the single
+    // class declaring public static void main(String[]), if exactly one.
+    // "mainClass": "com.example.Main",
   },
 
   "lspOptions": {

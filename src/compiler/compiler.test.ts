@@ -136,6 +136,49 @@ test("output jar packs the classes behind a manifest, named after the project di
   });
 });
 
+test("jar manifests carry Main-Class for the unique entry point (#11)", () => {
+  const decode = (jar: string): string =>
+    new TextDecoder().decode(readZipEntries(readFileSync(jar))![0]!.read());
+  // unique main -> detected
+  inTempDir(
+    { "M.java": "package app; public class M { public static void main(String[] a) {} }" },
+    (dir, paths) => {
+      const result = runCompile(paths, { outDir: dir, output: "jar", config: defaultConfig(dir) });
+      expect(result.success).toBe(true);
+      expect(decode(result.written[0]!)).toBe("Manifest-Version: 1.0\r\nMain-Class: app.M\r\n\r\n");
+    },
+  );
+  // two mains, nothing configured -> no Main-Class attribute
+  inTempDir(
+    {
+      "A.java": "public class A { public static void main(String[] a) {} }",
+      "B.java": "public class B { public static void main(String... a) {} }",
+    },
+    (dir, paths) => {
+      const result = runCompile(paths, { outDir: dir, output: "jar", config: defaultConfig(dir) });
+      expect(result.success).toBe(true);
+      expect(decode(result.written[0]!)).toBe("Manifest-Version: 1.0\r\n\r\n");
+    },
+  );
+  // configured mainClass wins over detection
+  inTempDir(
+    {
+      "cappu.json": '{ "compilerOptions": { "mainClass": "B" } }',
+      "A.java": "public class A { public static void main(String[] a) {} }",
+      "B.java": "public class B { public static void main(String[] a) {} }",
+    },
+    (dir, paths) => {
+      const result = runCompile(paths.slice(1), {
+        outDir: dir,
+        output: "jar",
+        config: loadConfig(undefined, dir),
+      });
+      expect(result.success).toBe(true);
+      expect(decode(result.written[0]!)).toBe("Manifest-Version: 1.0\r\nMain-Class: B\r\n\r\n");
+    },
+  );
+});
+
 test("output fat-jar merges dependency jar contents, own classes win", () => {
   inTempDir({ "B.java": "package app; class B { }" }, (dir, paths) => {
     // a dependency jar in the default classPath location

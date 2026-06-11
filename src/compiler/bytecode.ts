@@ -6083,6 +6083,8 @@ export interface EmittedClass {
   /** Internal/binary name, e.g. "com/app/Foo" (becomes <name>.class under outdir). */
   readonly name: string;
   readonly bytes: Uint8Array;
+  /** Declares `public static void main(String[])` (set by the emitter driver). */
+  readonly hasMainMethod?: boolean;
 }
 
 // Resolve a type reference to its internal name, falling back to its written
