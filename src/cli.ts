@@ -6,7 +6,7 @@
 // util.parseArgs; the whole script runs as top-level await.
 
 import { once } from "node:events";
-import { existsSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import type { Socket } from "node:net";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -80,11 +80,14 @@ if (values.help || command === undefined) {
 // blocked by) an existing, possibly broken config.
 if (command === "init") {
   const target = resolve(values.config ?? DEFAULT_CONFIG_NAME);
-  if (existsSync(target)) {
+  try {
+    // wx: create only if absent - atomic, no exists/write race
+    writeFileSync(target, CONFIG_TEMPLATE, { flag: "wx" });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
     process.stderr.write(`cappu: ${target} already exists, not overwriting\n`);
     process.exit(1);
   }
-  writeFileSync(target, CONFIG_TEMPLATE);
   process.stdout.write(`${target}\n`);
   process.exit(0);
 }

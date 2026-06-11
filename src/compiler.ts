@@ -18,7 +18,7 @@ import { emitSourceFile } from "./emitter.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
 import { createProgram, type Program } from "./program.ts";
-import { type Diagnostic, DiagnosticCategory, type SourceFile } from "./types.ts";
+import { type Diagnostic, DiagnosticCategory } from "./types.ts";
 import { loadJavaFiles, pathToUri } from "./workspace.ts";
 
 export interface CompileOptions {
@@ -90,12 +90,9 @@ export function loadConfiguredPaths(program: Program, config: CappuConfig): void
 function toCompileDiagnostic(
   d: Diagnostic,
   file: string,
-  sourceFile: SourceFile,
+  lineStarts: readonly number[],
 ): CompileDiagnostic {
-  const { line, character } = getLineAndCharacterOfPosition(
-    computeLineStarts(sourceFile.text),
-    d.pos,
-  );
+  const { line, character } = getLineAndCharacterOfPosition(lineStarts, d.pos);
   return {
     severity: d.category === DiagnosticCategory.Error ? "error" : "warning",
     file,
@@ -135,7 +132,8 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
       ...(sourceFile.bindDiagnostics ?? []),
       ...(typeCheck ? checker.getSemanticDiagnostics(sourceFile) : []),
     ];
-    diagnostics.push(...fileDiagnostics.map(d => toCompileDiagnostic(d, file, sourceFile)));
+    const lineStarts = computeLineStarts(sourceFile.text); // once per file, not per diagnostic
+    diagnostics.push(...fileDiagnostics.map(d => toCompileDiagnostic(d, file, lineStarts)));
   }
   if (diagnostics.some(d => d.severity === "error")) {
     return { success: false, diagnostics, written: [], degraded: [] };
