@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -206,5 +207,59 @@ test("output fat-jar merges dependency jar contents, own classes win", () => {
     ]);
     // our compiled B.class, not the dependency's one-byte fake
     expect(entries[1]!.read().length).toBeGreaterThan(9);
+  });
+});
+
+const HAS_JAVAC = (() => {
+  try {
+    execFileSync("javac", ["-version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+test("--use-javac compiles with javac only", { skip: !HAS_JAVAC }, () => {
+  inTempDir(
+    { "M.java": "package app; public class M { public static void main(String[] a) {} }" },
+    (dir, paths) => {
+      const result = runCompile(paths, {
+        outDir: join(dir, "dist"),
+        useJavac: true,
+        config: defaultConfig(dir),
+      });
+      expect(result.success).toBe(true);
+      expect(result.written).toEqual([join(dir, "dist", "app", "M.class")]);
+      const bytes = readFileSync(result.written[0]!);
+      expect(bytes.readUInt32BE(0)).toBe(0xcafebabe);
+
+      // jar output detects Main-Class from javac's class BYTES
+      const jar = runCompile(paths, {
+        outDir: join(dir, "dist2"),
+        output: "jar",
+        useJavac: true,
+        config: defaultConfig(dir),
+      });
+      expect(jar.success).toBe(true);
+      const manifest = new TextDecoder().decode(
+        readZipEntries(readFileSync(jar.written[0]!))![0]!.read(),
+      );
+      expect(manifest).toContain("Main-Class: app.M");
+    },
+  );
+});
+
+test("--use-javac surfaces javac's located diagnostics", { skip: !HAS_JAVAC }, () => {
+  inTempDir({ "B.java": 'class B { void m() { int x = "s"; } }' }, (dir, paths) => {
+    const result = runCompile(paths, {
+      outDir: dir,
+      useJavac: true,
+      config: defaultConfig(dir),
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.diagnostics[0]!.file).toBe(paths[0]);
+    expect(result.diagnostics[0]!.line).toBe(1);
+    expect(result.diagnostics[0]!.message).toContain("incompatible types");
   });
 });

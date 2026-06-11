@@ -499,6 +499,21 @@ function buildStubs(classes: ClassInfo[]): { name: string; source: string }[] {
   return stubs;
 }
 
+/** Whether compiled class bytes declare `public static void main(String[])`. */
+export function classDeclaresMain(bytes: Uint8Array): boolean {
+  try {
+    const info = parseClassFile(bytes);
+    return info.methods.some(
+      m =>
+        m.name === "main" &&
+        m.descriptor === "([Ljava/lang/String;)V" &&
+        (m.flags & (ACC_PUBLIC | ACC_STATIC)) === (ACC_PUBLIC | ACC_STATIC),
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The Java stub source for a single parsed class, or undefined when the class
  * cannot be expressed standalone (nested classes, annotations, module-info).

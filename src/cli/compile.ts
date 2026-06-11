@@ -9,6 +9,7 @@ export interface CompileFlags {
   outDir?: string;
   /** Raw --output value; validated here. */
   output?: string;
+  useJavac?: boolean;
   quiet?: boolean;
   failOnDegrade?: boolean;
   validate: boolean;
@@ -51,9 +52,15 @@ export async function runCompileCommand(
     process.stderr.write("cappu: --validate requires --output classes (javap reads class files)\n");
     process.exit(2);
   }
+  const useJavac = flags.useJavac ?? config.compilerOptions.useJavac ?? false;
+  if (flags.validate && useJavac) {
+    process.stderr.write("cappu: --validate compares against javac; --use-javac IS javac\n");
+    process.exit(2);
+  }
   const result = runCompile(inputs, {
     outDir: flags.outDir,
     output,
+    useJavac: flags.useJavac,
     failOnDegrade: flags.failOnDegrade,
     config,
   });
@@ -65,7 +72,9 @@ export async function runCompileCommand(
   }
   if (!result.success) {
     for (const d of result.diagnostics) {
-      const location = d.file ? `${d.file}:${d.line}:${d.column}: ` : "";
+      const location = d.file
+        ? `${d.file}:${d.line}${d.column !== undefined ? `:${d.column}` : ""}: `
+        : "";
       const code = d.code !== undefined ? ` ${d.code}` : "";
       process.stderr.write(`${location}${d.severity}${code}: ${d.message}\n`);
     }

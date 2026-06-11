@@ -7,12 +7,22 @@
 // runCompile never prints: it returns what was written, what degraded and the
 // diagnostics; the caller decides how to render them.
 
-import { existsSync, globSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  globSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 
 import { setDegradeListener } from "./bytecode.ts";
 import { createChecker } from "./checker.ts";
-import { loadClassPath } from "./classfileReader.ts";
+import { classDeclaresMain, loadClassPath } from "./classfileReader.ts";
 import { type CappuConfig, resolveConfigPath } from "../config.ts";
 import { emitSourceFile } from "./emitter.ts";
 import { loadJdkStub } from "./jdkStub.ts";
@@ -29,6 +39,8 @@ export interface CompileOptions {
   outDir?: string;
   /** What to produce in outDir (nikeee/cappu#5). Default: the config's, then "classes". */
   output?: OutputKind;
+  /** Delegate compilation entirely to the configured javac. */
+  useJavac?: boolean;
   /** Treat degraded (placeholder) method bodies as a build failure. */
   failOnDegrade?: boolean;
   /** Run the type checker over the inputs and fail on semantic errors. Default: true. */
@@ -157,6 +169,9 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
     options.failOnDegrade ?? options.config?.compilerOptions.failOnDegrade ?? false;
   const outDir = options.outDir ?? options.config?.compilerOptions.outDir ?? ".";
   const output = options.output ?? options.config?.compilerOptions.output ?? "classes";
+  if (options.useJavac ?? options.config?.compilerOptions.useJavac ?? false) {
+    return runJavacCompile(files, outDir, output, options.config);
+  }
   const typeCheck = options.typeCheck ?? true;
 
   // One program over all inputs (+ the JDK stub + the configured classpath and
@@ -257,4 +272,121 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
     };
   }
   return { success: true, written, degraded };
+}
+
+// javac's "path:line: error: message" diagnostics, located like our own; any
+// unmatched stderr tail becomes one unlocated error.
+function parseJavacDiagnostics(stderr: string): CompileDiagnostic[] {
+  const diagnostics: CompileDiagnostic[] = [];
+  const leftovers: string[] = [];
+  for (const line of stderr.split("\n")) {
+    const match = /^(.+?):(\d+): (error|warning): (.*)$/.exec(line);
+    if (match) {
+      diagnostics.push({
+        severity: match[3] === "warning" ? "warning" : "error",
+        file: match[1]!,
+        line: Number(match[2]),
+        message: match[4]!,
+      });
+    } else if (line.trim() && !/^\s/.test(line) && !/^\d+ (error|warning)s?$/.test(line)) {
+      leftovers.push(line);
+    }
+  }
+  if (diagnostics.length === 0 && leftovers.length > 0) {
+    diagnostics.push({ severity: "error", message: leftovers.join(" ") });
+  }
+  return diagnostics;
+}
+
+/**
+ * `cappu compile --use-javac`: the configured javac compiles and emits; none
+ * of cappu's own pipeline runs. The configured classPath/sourcePaths become
+ * -cp/-sourcepath, and the output kinds reuse the same packaging - with
+ * Main-Class detected from javac's CLASS BYTES (via the class-file reader),
+ * not from source.
+ */
+function runJavacCompile(
+  files: string[],
+  outDir: string,
+  output: OutputKind,
+  config: CappuConfig,
+): CompileResult {
+  const javacBin = config.compilerOptions.javac;
+  const tmp = mkdtempSync(join(tmpdir(), "cappu-javac-"));
+  try {
+    const classPath = config.compilerOptions.classPath
+      .map(p => resolveConfigPath(config, p))
+      .filter(p => existsSync(p));
+    const sourcePaths = config.compilerOptions.sourcePaths
+      .map(p => resolveConfigPath(config, p))
+      .filter(p => existsSync(p));
+    const args = [
+      "-d",
+      tmp,
+      ...(classPath.length > 0 ? ["-cp", classPath.join(delimiter)] : []),
+      ...(sourcePaths.length > 0 ? ["-sourcepath", sourcePaths.join(delimiter)] : []),
+      ...files,
+    ];
+    try {
+      execFileSync(javacBin, args, { stdio: ["ignore", "pipe", "pipe"] });
+    } catch (error) {
+      const stderr = (error as { stderr?: Buffer }).stderr?.toString() ?? "";
+      const diagnostics = parseJavacDiagnostics(stderr);
+      return {
+        success: false,
+        diagnostics: diagnostics.length
+          ? diagnostics
+          : [{ severity: "error", message: `${javacBin} failed: ${(error as Error).message}` }],
+        written: [],
+        degraded: [],
+      };
+    }
+
+    const classFiles = globSync("**/*.class", { cwd: tmp });
+    const written: string[] = [];
+    if (output === "classes") {
+      for (const relative of classFiles) {
+        const target = join(outDir, relative);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, readFileSync(join(tmp, relative)));
+        written.push(target);
+      }
+    } else {
+      const classes: ZipEntryInput[] = [];
+      const mainClasses: string[] = [];
+      for (const relative of classFiles) {
+        const bytes = readFileSync(join(tmp, relative));
+        classes.push({ name: relative, bytes });
+        if (classDeclaresMain(bytes)) {
+          mainClasses.push(relative.replace(/\.class$/, "").replaceAll("/", "."));
+        }
+      }
+      const mainClass =
+        config.compilerOptions.mainClass ?? (mainClasses.length === 1 ? mainClasses[0] : undefined);
+      const entries: ZipEntryInput[] = [
+        {
+          name: "META-INF/MANIFEST.MF",
+          bytes: new TextEncoder().encode(
+            `Manifest-Version: 1.0\r\n${mainClass ? `Main-Class: ${mainClass}\r\n` : ""}\r\n`,
+          ),
+        },
+        ...classes,
+      ];
+      if (output === "fat-jar") {
+        const have = new Set(entries.map(e => e.name));
+        for (const entry of classPathEntries(config)) {
+          if (have.has(entry.name)) continue;
+          have.add(entry.name);
+          entries.push(entry);
+        }
+      }
+      const jar = join(outDir, `${basename(resolve(config.baseDir))}.jar`);
+      mkdirSync(outDir, { recursive: true });
+      writeFileSync(jar, writeZip(entries));
+      written.push(jar);
+    }
+    return { success: true, written, degraded: [] };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }

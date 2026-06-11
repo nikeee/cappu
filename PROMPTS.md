@@ -182,3 +182,4 @@ no timestamps were captured.
 - 2026-06-12 01:18 — after that, resolve https://github.com/nikeee/cappu/issues/11
 - 2026-06-12 01:20 — after that, resolve https://github.com/nikeee/cappu/issues/10
 - 2026-06-12 01:26 — after that, resolve https://github.com/nikeee/cappu/issues/9
+- 2026-06-12 01:30 — add a mode/flag to `cappu compile` that uses the configured javac exclusively for compilation and emit. No compilation using our own compiler.

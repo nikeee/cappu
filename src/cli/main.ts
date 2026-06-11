@@ -53,6 +53,8 @@ Compile options:
       --validate        Also compile with javac (config "compilerOptions.javac",
                         default from $PATH) and fail unless the normalized
                         bytecode matches
+      --use-javac       Compile with the configured javac exclusively; none of
+                        cappu's own compiler runs
 
 Global:
   -h, --help            Show this help
@@ -73,6 +75,7 @@ const { values, positionals } = parseArgs({
     "fail-on-degrade": { type: "boolean" },
     "with-schema": { type: "boolean", default: false },
     validate: { type: "boolean", default: false },
+    "use-javac": { type: "boolean" },
     help: { type: "boolean", short: "h", default: false },
     version: { type: "boolean", default: false },
   },
@@ -119,6 +122,7 @@ switch (command) {
         output: values.output,
         quiet: values.quiet,
         failOnDegrade: values["fail-on-degrade"],
+        useJavac: values["use-javac"],
         validate: values.validate,
       },
       config,

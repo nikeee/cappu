@@ -34,6 +34,8 @@ const CompilerOptionsSchema = z.object({
   javac: z.string().default("javac"),
   /** Main-Class for jar outputs; default: the only main(String[]) found. */
   mainClass: z.string().optional(),
+  /** Compile with the configured javac instead of cappu's own compiler. */
+  useJavac: z.boolean().optional(),
 });
 
 const LspOptionsSchema = z.object({
@@ -127,6 +129,10 @@ export const CONFIG_TEMPLATE = `
     // Main-Class of jar outputs (java -jar). Default if unset: the single
     // class declaring public static void main(String[]), if exactly one.
     // "mainClass": "com.example.Main",
+
+    // Compile with the configured javac instead of cappu's own compiler
+    // (same as \`cappu compile --use-javac\`).
+    // "useJavac": false,
   },
 
   "lspOptions": {
