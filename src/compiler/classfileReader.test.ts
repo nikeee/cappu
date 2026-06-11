@@ -222,3 +222,32 @@ test("nested classes group into their outer stub and resolve from a consumer", (
   const out = emitSourceFile(program.getSourceFile("file:///App.java" as Uri)!, program, checker);
   expect(out).toHaveLength(1);
 });
+
+// nikeee/cappu#70-hunt: a hostile or truncated jar entry must never hang the
+// reader. Both corruptions below previously looped (the descriptor scan until
+// a 2^32 RangeError, the signature scan forever).
+test("corrupted descriptors and signatures terminate and still stub", () => {
+  const program = createProgram();
+  loadJdkStub(program);
+  program.addProjectFile(
+    "file:///G.java" as Uri,
+    "public class G<T extends Comparable<T>> { public void m(int x) { } public T id(T t) { return t; } }",
+  );
+  const checker = createChecker(program);
+  const [cls] = emitSourceFile(program.getSourceFile("file:///G.java" as Uri)!, program, checker);
+  const original = Buffer.from(cls!.bytes);
+
+  // descriptor "(I)V" -> "(IIV": the ')' the parameter scan looks for is gone
+  const desc = Buffer.from(original);
+  const descAt = desc.indexOf(Buffer.from("(I)V"));
+  expect(descAt).toBeGreaterThan(0);
+  desc.set(Buffer.from("(IIV"), descAt);
+  expect(classFileToStub(new Uint8Array(desc))).toBeDefined();
+
+  // class signature -> same-length colon soup with no closing '>'
+  const sig = Buffer.from(original);
+  const sigAt = sig.indexOf(Buffer.from("<T::Ljava/lang/Comparable<TT;>;>"));
+  expect(sigAt).toBeGreaterThan(0);
+  sig.set(Buffer.from("<T:<T:<T:<T:<T:<T:<T:<T:<T:<T:<T"), sigAt);
+  expect(() => classFileToStub(new Uint8Array(sig))).not.toThrow();
+});

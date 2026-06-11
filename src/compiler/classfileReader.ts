@@ -186,12 +186,14 @@ function typeAt(descriptor: string, at: number): { text: string; next: number } 
   }
   let base: string;
   if (descriptor[at] === "L") {
+    // A truncated descriptor (no ';') consumes the rest: at must never move
+    // backwards, or the caller's scan would not terminate.
     const end = descriptor.indexOf(";", at);
     base = descriptor
-      .slice(at + 1, end)
+      .slice(at + 1, end < 0 ? descriptor.length : end)
       .replaceAll("/", ".")
       .replaceAll("$", ".");
-    at = end + 1;
+    at = end < 0 ? descriptor.length : end + 1;
   } else {
     base = primitiveName(descriptor[at]!) ?? "java.lang.Object";
     at++;
@@ -202,7 +204,7 @@ function typeAt(descriptor: string, at: number): { text: string; next: number } 
 function methodTypes(descriptor: string): { params: string[]; returns: string } {
   const params: string[] = [];
   let at = 1; // past '('
-  while (descriptor[at] !== ")") {
+  while (descriptor[at] !== ")" && at < descriptor.length) {
     const { text, next } = typeAt(descriptor, at);
     params.push(text);
     at = next;
@@ -229,8 +231,9 @@ class SignatureReader {
     if (this.peek() !== "<") return "";
     this.take();
     const params: string[] = [];
-    while (this.peek() !== ">") {
+    while (this.peek() !== ">" && this.at < this.text.length) {
       const colon = this.text.indexOf(":", this.at);
+      if (colon < 0) break; // truncated signature
       const name = this.text.slice(this.at, colon);
       this.at = colon;
       const bounds: string[] = [];
@@ -262,8 +265,8 @@ class SignatureReader {
     if (c === "T") {
       this.take();
       const semi = this.text.indexOf(";", this.at);
-      const name = this.text.slice(this.at, semi);
-      this.at = semi + 1;
+      const name = this.text.slice(this.at, semi < 0 ? this.text.length : semi);
+      this.at = semi < 0 ? this.text.length : semi + 1;
       return name;
     }
     if (c === "[") {
@@ -275,7 +278,7 @@ class SignatureReader {
     let out = "";
     for (;;) {
       const ch = this.take();
-      if (ch === ";") break;
+      if (ch === ";" || ch === "") break; // "": ran off a truncated signature
       if (ch === "/") out += ".";
       else if (ch === "$") out += ".";
       else if (ch === "<") {
@@ -289,7 +292,7 @@ class SignatureReader {
 
   private typeArguments(): string {
     const args: string[] = [];
-    while (this.peek() !== ">") {
+    while (this.peek() !== ">" && this.at < this.text.length) {
       const c = this.peek();
       if (c === "*") {
         this.take();
