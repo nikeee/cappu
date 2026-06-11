@@ -109,9 +109,10 @@ export const CONFIG_TEMPLATE = `
     // Output root for the build artifacts (default if unset: "./dist").
     // "outDir": "./dist",
 
-    // What \`cappu compile\` produces in outDir: "classes" (a package tree
-    // usable directly as \`java -cp <outDir>\`), "jar", or "fat-jar" (the jar
-    // plus the contents of every dependency jar on the classPath).
+    // What \`cappu compile\` produces in outDir:
+    // - "classes" (a package tree usable directly as \`java -cp <outDir>\`),
+    // - "jar": same as "classes", but as a jar
+    // - "fat-jar" (the jar plus the contents of every dependency jar on the classPath)
     // "output": "classes",
 
     // Do not print the path of each emitted .class file.
