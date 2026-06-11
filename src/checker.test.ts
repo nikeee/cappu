@@ -81,6 +81,37 @@ test("unary +/-/~ apply unary numeric promotion; ++/-- keep the variable's type"
   expect(initializerType("class C { void m() { byte b = 1; var x = ++b; } }", "x")).toBe("byte");
 });
 
+test("primitive assignments: widening and fitting constants pass, the rest errors", () => {
+  const errs = (text: string): number => {
+    const ctx = setup(text);
+    return ctx.checker.getSemanticDiagnostics(ctx.program.getSourceFile(ctx.uri)!).length;
+  };
+  // identity / widening / fitting constants (JLS 5.2)
+  expect(errs("class C { void m() { long l = 1; double d = l; byte b = 1; } }")).toBe(0);
+  expect(errs("class C { void m() { short s = 1 + 2; char c = 65; } }")).toBe(0);
+  // unfoldable values in the constant-narrowing position stay silent: they may
+  // be constant variables, which constfold does not resolve
+  expect(errs("class C { void m(int p) { final int k = 1; byte b = k; } }")).toBe(0);
+  // definite errors
+  expect(errs("class C { void m() { byte b = 128; } }")).toBe(1);
+  expect(errs("class C { void m() { char c = -1; } }")).toBe(1);
+  expect(errs("class C { void m(long p) { int i = p; } }")).toBe(1);
+  expect(errs("class C { void m() { float f = 1.5; } }")).toBe(1);
+  expect(errs("class C { void m() { int x = 1; boolean y = x; } }")).toBe(1);
+  expect(errs("class C { void m() { boolean t = true; int z = t; } }")).toBe(1);
+});
+
+test("C-style array brackets after the name add rank (char buf[])", () => {
+  const ctx = setup("class C { char buf[]; int grid[][]; void m(int xs[]) { buf = new char[1]; } }");
+  const bufSym = ctx.checker.resolveName(identifierAt(ctx, "buf"))!;
+  expect(typeToString(ctx.checker.getTypeOfSymbol(bufSym))).toBe("char[]");
+  const gridSym = ctx.checker.resolveName(identifierAt(ctx, "grid"))!;
+  expect(typeToString(ctx.checker.getTypeOfSymbol(gridSym))).toBe("int[][]");
+  const xsSym = ctx.checker.resolveName(identifierAt(ctx, "xs"))!;
+  expect(typeToString(ctx.checker.getTypeOfSymbol(xsSym))).toBe("int[]");
+  expect(ctx.checker.getSemanticDiagnostics(ctx.program.getSourceFile(ctx.uri)!)).toHaveLength(0);
+});
+
 test("unknown expressions degrade to <error>, never throw", () => {
   expect(initializerType("class C { void m() { var x = mystery(); } }", "x")).toBe("<error>");
 });

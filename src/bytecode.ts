@@ -178,6 +178,11 @@ const STRING_DESC = "Ljava/lang/String;" as Descriptor;
 const THROWABLE_DESC = "Ljava/lang/Throwable;" as Descriptor;
 const ITERATOR_DESC = "Ljava/util/Iterator;" as Descriptor;
 
+/** C-style array brackets after the name (int a[]) add rank per declarator (JLS 10.2). */
+function withRank(descriptor: Descriptor, rank: number): Descriptor {
+  return rank > 0 ? (("[".repeat(rank) + descriptor) as Descriptor) : descriptor;
+}
+
 /** The object descriptor `L<name>;` for a class given by its internal name. */
 function descOf(internal: InternalName): Descriptor {
   return `L${internal};` as Descriptor;
@@ -1003,8 +1008,12 @@ function collectFieldInits(
     if (member.kind !== SyntaxKind.FieldDeclaration) continue;
     const field = member as FieldDeclaration;
     const isStatic = isStaticDeclaration(field);
-    const descriptor = descriptorOf(field.type, program);
+    const baseDescriptor = descriptorOf(field.type, program);
     for (const declarator of field.declarators) {
+      const descriptor = withRank(
+        baseDescriptor,
+        (declarator as VariableDeclarator).arrayRankAfterName,
+      );
       const d = declarator as VariableDeclarator;
       if (!d.initializer) continue;
       if (isStatic && isConstantValueField(field, d, program)) continue;
@@ -1339,7 +1348,7 @@ function emitFields(
   for (const member of declaration.members) {
     if (member.kind !== SyntaxKind.FieldDeclaration) continue;
     const field = member as FieldDeclaration;
-    const descriptor = descriptorOf(field.type, program);
+    const baseDescriptor = descriptorOf(field.type, program);
     const flags = memberAccessFlags(field.modifiers);
     // A generic-typed field carries its un-erased type in a Signature attribute.
     const signature = typeUsesGenerics(field.type, program)
@@ -1347,6 +1356,7 @@ function emitFields(
       : undefined;
     for (const declarator of field.declarators) {
       const d = declarator as VariableDeclarator;
+      const descriptor = withRank(baseDescriptor, d.arrayRankAfterName);
       buffer.u2(flags);
       buffer.u2(cp.utf8(d.name.text));
       buffer.u2(cp.utf8(descriptor));
@@ -1454,7 +1464,7 @@ function methodAccessFlags(method: MethodDeclaration | ConstructorDeclaration): 
 }
 
 function paramDescriptor(parameter: Parameter, program: Program): Descriptor {
-  const base = descriptorOf(parameter.type, program);
+  const base = withRank(descriptorOf(parameter.type, program), parameter.arrayRankAfterName);
   return parameter.isVarArgs ? (`[${base}` as Descriptor) : base; // T... is T[] at the bytecode level
 }
 
@@ -2280,7 +2290,10 @@ function generateBody(
     return {
       owner: binaryName(symbol.parent),
       name: symbol.escapedName,
-      descriptor: descriptorOf(field.type, program),
+      descriptor: withRank(
+        descriptorOf(field.type, program),
+        (declarator as VariableDeclarator).arrayRankAfterName,
+      ),
       isStatic: isStaticDeclaration(field) || inInterface,
     };
   };
@@ -4890,7 +4903,7 @@ function generateBody(
           if (isVar && !declarator.initializer) throw new UnsupportedEmit();
           const descriptor = isVar
             ? typeDescriptor(checker.getTypeOfExpression(declarator.initializer!))
-            : descriptorOf(decl.type, program);
+            : withRank(descriptorOf(decl.type, program), declarator.arrayRankAfterName);
           const slot = nextSlot as Slot;
           nextSlot += slotsOf(descriptor);
           if (nextSlot > maxLocals) maxLocals = nextSlot;

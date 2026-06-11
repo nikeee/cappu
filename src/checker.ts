@@ -3,6 +3,7 @@
 // declared types, the common expression forms and member typing - enough for
 // hover and as the base for assignability/overloads/inference (P6-P8).
 // Everything unknown degrades to errorType.
+import { foldConstant } from "./constfold.ts";
 
 import {
   type ArrayType,
@@ -529,6 +530,10 @@ export function createChecker(program: Program): Checker {
           ) {
             type = arrayType(type);
           }
+          // C-style array brackets after the name (char buf[]) add rank the
+          // type node does not carry (JLS 10.2).
+          let rank = (declared.from as { arrayRankAfterName?: number }).arrayRankAfterName ?? 0;
+          while (rank-- > 0) type = arrayType(type);
         }
       } else {
         // A concise lambda parameter (x -> ...) has no written type; infer it
@@ -1635,11 +1640,13 @@ export function createChecker(program: Program): Checker {
       if (!isConcrete(targetType)) return;
       const valueType = getTypeOfExpression(valueNode);
       if (!isConcrete(valueType)) return;
-      // High-precision scope: only the primitive<->reference boundary, where an
-      // incompatibility is unambiguous (e.g. int x = "s"). Primitive-to-primitive
-      // is skipped because constant narrowing (JLS 5.2) is legal without a cast,
-      // and reference-to-reference / generic cases depend on subtyping precision
-      // we do not fully model yet. These are broadened in P11.
+      // High-precision scope: the primitive<->reference boundary (int x = "s"),
+      // and primitive-to-primitive below. Reference-to-reference / generic cases
+      // depend on subtyping precision we do not fully model yet.
+      if (targetType.kind === TypeKind.Primitive && valueType.kind === TypeKind.Primitive) {
+        checkPrimitiveAssignment(valueNode, valueType.name, targetType.name);
+        return;
+      }
       const oneIsPrimitive =
         (targetType.kind === TypeKind.Primitive) !== (valueType.kind === TypeKind.Primitive);
       if (!oneIsPrimitive) return;
@@ -1654,6 +1661,46 @@ export function createChecker(program: Program): Checker {
           ),
         );
       }
+    };
+
+    // Assignment between primitives (JLS 5.2): identity and widening are fine;
+    // a byte/short/char target also takes a CONSTANT byte/short/char/int that
+    // fits. constfold does not resolve constant variables (final x = ...), so an
+    // unfoldable value in the constant-narrowing position stays silent rather
+    // than risking a false positive; everything else is a definite error.
+    const NARROWING_RANGE: Record<string, readonly [bigint, bigint]> = {
+      byte: [-128n, 127n],
+      short: [-32768n, 32767n],
+      char: [0n, 65535n],
+    };
+    const checkPrimitiveAssignment = (valueNode: Node, value: string, target: string): void => {
+      if (value === target || primitiveWidens(value, target)) return;
+      // A call to an OVERLOADED method: overload resolution is best-effort, so
+      // the picked return type is not reliable evidence for an error (e.g.
+      // IOUtils.copy has int- and long-returning overloads).
+      if (
+        valueNode.kind === SyntaxKind.CallExpression &&
+        (resolveCall(valueNode as CallExpression)?.symbol?.declarations?.length ?? 0) > 1
+      ) {
+        return;
+      }
+      const range = NARROWING_RANGE[target];
+      const constNarrowable =
+        range !== undefined && ["byte", "short", "char", "int"].includes(value);
+      if (constNarrowable) {
+        const folded = foldConstant(valueNode);
+        if (!folded) return; // possibly a constant variable: no false positives
+        if (folded.kind === "int" && folded.value >= range[0] && folded.value <= range[1]) return;
+      }
+      diagnostics.push(
+        createDiagnostic(
+          valueNode.pos,
+          valueNode.end - valueNode.pos,
+          Diagnostics.Incompatible_types_0_1,
+          value,
+          target,
+        ),
+      );
     };
 
     const visit = (node: Node): void => {
