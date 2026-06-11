@@ -114,6 +114,51 @@ test("C-style array brackets after the name add rank (char buf[])", () => {
   expect(ctx.checker.getSemanticDiagnostics(ctx.program.getSourceFile(ctx.uri)!)).toHaveLength(0);
 });
 
+test("calls with an impossible argument count are reported (1304)", () => {
+  const arity = (text: string): string[] => {
+    const ctx = setup(text);
+    return ctx.checker
+      .getSemanticDiagnostics(ctx.program.getSourceFile(ctx.uri)!)
+      .filter(d => d.code === 1304)
+      .map(d => d.messageText);
+  };
+  // the reported case: lol(String[]) called with no arguments
+  expect(arity("class Main { static void lol(String[] a) {} static void m() { lol(); } }")).toEqual(
+    ["Invalid number of arguments: expected 1, got 0."],
+  );
+  // member call through a receiver
+  expect(arity("class C { int f(int a, int b) { return 0; } void m(C c) { c.f(1); } }")).toEqual([
+    "Invalid number of arguments: expected 2, got 1.",
+  ]);
+  // overloads: no overload takes three
+  expect(arity("class C { void f() {} void f(int a) {} void m() { f(1, 2, 3); } }")).toEqual([
+    "Invalid number of arguments: expected 0 or 1, got 3.",
+  ]);
+  // varargs accept the fixed prefix and up
+  expect(
+    arity('class C { void f(int a, String... s) {} void m() { f(1); f(1, "x", "y"); } }'),
+  ).toEqual([]);
+  expect(arity("class C { void f(int a, String... s) {} void m() { f(); } }")).toEqual([
+    "Invalid number of arguments: expected 1+, got 0.",
+  ]);
+  // constructors: declared, implicit default, record canonical
+  expect(arity("class A { A(int x) {} } class B { void m() { new A(); } }")).toEqual([
+    "Invalid number of arguments: expected 1, got 0.",
+  ]);
+  expect(arity("class A { } class B { void m() { new A(1); } }")).toEqual([
+    "Invalid number of arguments: expected 0, got 1.",
+  ]);
+  expect(arity("record R(int a, String b) {} class C { void m() { new R(1); } }")).toEqual([
+    "Invalid number of arguments: expected 2, got 1.",
+  ]);
+  // matching calls stay silent
+  expect(
+    arity(
+      "class A { A(int x) {} } record R(int a) {} class C { void f(int a) {} void m() { f(1); new A(2); new R(3); } }",
+    ),
+  ).toEqual([]);
+});
+
 test("unknown expressions degrade to <error>, never throw", () => {
   expect(initializerType("class C { void m() { var x = mystery(); } }", "x")).toBe("<error>");
 });

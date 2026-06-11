@@ -66,6 +66,9 @@ import {
   type TypeReference,
   type VariableDeclarator,
   type WildcardType as AstWildcardType,
+  type ClassDeclaration,
+  type ConstructorDeclaration,
+  type RecordDeclaration,
 } from "./types.ts";
 import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
 
@@ -1703,6 +1706,147 @@ export function createChecker(program: Program): Checker {
       );
     };
 
+    // --- call arity (JLS 15.12.2.1 applicability by arity) ---------------------
+    // High-precision: report only when the COMPLETE overload set is provably
+    // known and none of it can accept the argument count. The JDK stub and
+    // classpath stubs are incomplete by design (the real types have more
+    // overloads), so any hierarchy that leaves project source aborts the check
+    // - except java.lang.Object as the implicit terminal.
+    const arityAccepts = (parameters: readonly Node[], argc: number): boolean => {
+      const last = parameters.at(-1) as Parameter | undefined;
+      return last?.isVarArgs ? argc >= parameters.length - 1 : argc === parameters.length;
+    };
+    const isProjectSymbol = (typeSymbol: Symbol): boolean => {
+      const declaration = typeSymbol.valueDeclaration ?? typeSymbol.declarations?.[0];
+      if (!declaration) return false;
+      const fileName = getSourceFileOfNode(declaration).fileName;
+      return !fileName.startsWith("jdk:") && !fileName.startsWith("classpath:");
+    };
+    // Every overload of `name` across the hierarchy of `start`, or undefined
+    // when the hierarchy is not fully project-known (or declares no such
+    // method at all - a bare call may target an ENCLOSING type instead).
+    const projectOverloads = (start: Symbol, name: string): MethodDeclaration[] | undefined => {
+      const overloads: MethodDeclaration[] = [];
+      const seen = new Set<Symbol>();
+      const queue = [start];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        if (seen.has(current)) continue;
+        seen.add(current);
+        if (current === program.getGlobalIndex().getType("java.lang.Object" as Fqn)) {
+          // implicit terminal: its stub is complete for its own members
+          continue;
+        }
+        if (!isProjectSymbol(current)) return undefined;
+        const member = current.members?.get(name);
+        for (const declaration of member?.declarations ?? []) {
+          if (declaration.kind === SyntaxKind.MethodDeclaration) {
+            overloads.push(declaration as MethodDeclaration);
+          }
+        }
+        // Every WRITTEN supertype must resolve: one that does not (outside the
+        // stub, a typo, ...) may carry the overload that would have accepted
+        // the call - silence instead of a false positive.
+        const declaration = current.valueDeclaration ?? current.declarations?.[0];
+        if (!declaration) return undefined;
+        for (const typeNode of superTypeNodesOf(declaration)) {
+          if (typeNode.kind !== SyntaxKind.TypeReference) return undefined;
+          const superSymbol = resolveTypeEntityName(
+            (typeNode as TypeReference).typeName,
+            declaration,
+            program,
+          );
+          if (!superSymbol) return undefined;
+          queue.push(superSymbol);
+        }
+      }
+      return overloads.length > 0 ? overloads : undefined;
+    };
+    const describeArities = (parameterLists: readonly (readonly Node[])[]): string => {
+      const arities = new Set<string>();
+      for (const parameters of parameterLists) {
+        const last = parameters.at(-1) as Parameter | undefined;
+        arities.add(last?.isVarArgs ? `${parameters.length - 1}+` : `${parameters.length}`);
+      }
+      return [...arities].sort((a, b) => parseInt(a) - parseInt(b)).join(" or ");
+    };
+    const reportArity = (after: Node, end: number, expected: string, argc: number): void => {
+      diagnostics.push(
+        createDiagnostic(
+          after.end,
+          Math.max(1, end - after.end),
+          Diagnostics.Invalid_number_of_arguments_expected_0_got_1,
+          expected,
+          String(argc),
+        ),
+      );
+    };
+
+    const checkCallArity = (call: CallExpression): void => {
+      const callee = call.expression;
+      const nameNode =
+        callee.kind === SyntaxKind.Identifier
+          ? (callee as Identifier)
+          : callee.kind === SyntaxKind.PropertyAccessExpression
+            ? (callee as PropertyAccessExpression).name
+            : undefined; // super()/this() and friends resolve elsewhere
+      if (!nameNode) return;
+      const symbol = resolveName(nameNode);
+      if (!symbol || !(symbol.flags & SymbolFlags.Method)) return;
+      // The overload set starts at the receiver's static type for a member
+      // call, and at the enclosing type for a bare call (a subtype may add
+      // overloads the declaring type does not have).
+      let start: Symbol | undefined;
+      if (callee.kind === SyntaxKind.PropertyAccessExpression) {
+        const receiver = getTypeOfExpression((callee as PropertyAccessExpression).expression);
+        start = receiver.kind === TypeKind.Class ? (receiver as ClassType).symbol : undefined;
+      } else {
+        start = enclosingTypeSymbol(call);
+      }
+      if (!start) return;
+      const overloads = projectOverloads(start, nameNode.text);
+      if (!overloads) return;
+      const argc = call.arguments.length;
+      if (overloads.some(o => arityAccepts(o.parameters, argc))) return;
+      reportArity(callee, call.end, describeArities(overloads.map(o => o.parameters)), argc);
+    };
+
+    const checkCreationArity = (node: ObjectCreationExpression): void => {
+      if (node.type.kind !== SyntaxKind.TypeReference) return;
+      const symbol = resolveTypeEntityName((node.type as TypeReference).typeName, node, program);
+      if (!symbol || !isProjectSymbol(symbol)) return; // stubs are incomplete by design
+      const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+      if (!declaration) return;
+      const argc = (node.arguments ?? []).length;
+      if (declaration.kind === SyntaxKind.ClassDeclaration) {
+        const ctors = (declaration as ClassDeclaration).members.filter(
+          m => m.kind === SyntaxKind.ConstructorDeclaration,
+        ) as ConstructorDeclaration[];
+        // no declared constructor: the implicit default takes no arguments
+        const ok =
+          ctors.length === 0 ? argc === 0 : ctors.some(c => arityAccepts(c.parameters, argc));
+        if (!ok) {
+          reportArity(
+            node.type,
+            node.classBody ? (node.arguments?.at(-1)?.end ?? node.type.end) : node.end,
+            ctors.length === 0 ? "0" : describeArities(ctors.map(c => c.parameters)),
+            argc,
+          );
+        }
+      } else if (declaration.kind === SyntaxKind.RecordDeclaration) {
+        const record = declaration as RecordDeclaration;
+        const hasDeclaredCtor = record.members.some(
+          m => m.kind === SyntaxKind.ConstructorDeclaration,
+        );
+        // a compact constructor's effective arity is the component count, which
+        // the declaration node does not carry - only the ctor-less case is safe
+        if (hasDeclaredCtor) return;
+        if (argc !== record.recordComponents.length) {
+          reportArity(node.type, node.end, String(record.recordComponents.length), argc);
+        }
+      }
+    };
+
     const visit = (node: Node): void => {
       switch (node.kind) {
         case SyntaxKind.VariableDeclarator: {
@@ -1719,6 +1863,15 @@ export function createChecker(program: Program): Checker {
           }
           break;
         }
+        case SyntaxKind.CallExpression:
+          // A recovered parse has unreliable call shapes: no arity judgments.
+          if (sourceFile.parseDiagnostics.length === 0) checkCallArity(node as CallExpression);
+          break;
+        case SyntaxKind.ObjectCreationExpression:
+          if (sourceFile.parseDiagnostics.length === 0) {
+            checkCreationArity(node as ObjectCreationExpression);
+          }
+          break;
         case SyntaxKind.ReturnStatement: {
           const r = node as ReturnStatement;
           if (r.expression) {

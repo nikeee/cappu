@@ -82,6 +82,11 @@ export const Diagnostics = {
     "Cannot_resolve_member_0_in_1",
     "Cannot resolve symbol '{0}' in type '{1}'.",
   ),
+  Invalid_number_of_arguments_expected_0_got_1: diag(
+    1304,
+    "Invalid_number_of_arguments_expected_0_got_1",
+    "Invalid number of arguments: expected {0}, got {1}.",
+  ),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */

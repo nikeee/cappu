@@ -177,3 +177,4 @@ no timestamps were captured.
 - 2026-06-12 00:58 — add tests for that
 - 2026-06-12 00:59 — in the next commit: rename cappu.lock.json -> cappu-lock.json. also make the lockfile use plain JSON.parse/stringify, not jsonc. its generated and not meanto to be edited by hand
 - 2026-06-12 01:01 — next: add tests with cyclic inheritance and cyclic generics (direct and indirect). the tests should verify that we dont get infinite loops. test for hovers, checker and resolver.
+- 2026-06-12 01:11 — in the next commit: there is no diagnostic when calling a method without parameters: [sora/Main lol() example] the () in lol() should be reported as invalid number of parameters. look out for similar issues
