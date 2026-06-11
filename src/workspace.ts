@@ -4,7 +4,7 @@
 // expected (and vice versa): pathToUri/uriToPath convert, the LSP boundary and
 // synthetic-stub registrations cast.
 
-import { globSync, readFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -35,9 +35,21 @@ export function isSyntheticUri(uri: string): boolean {
 
 /** Recursively collect .java file paths under a directory, skipping build dirs. */
 export function findJavaFiles(dir: string): FsPath[] {
-  // exclude() prunes matching directories before descent (it also sees plain
-  // file names, but none of those can end in .java, so that is harmless).
-  return globSync("**/*.java", { cwd: dir, exclude: name => SKIP_DIRS.has(name) }) //
+  // Bun's fs.globSync (the compiled cappu binaries run under Bun) throws
+  // ENOENT for a missing cwd where Node returns [] - a missing directory is
+  // always "empty" here. It also ignores the exclude option entirely, hence
+  // the re-filter below; under Node, exclude() still prunes the walk early
+  // (it also sees plain file names, but none of those can end in .java, so
+  // that is harmless).
+  if (!existsSync(dir)) return [];
+  let matches: string[];
+  try {
+    matches = globSync("**/*.java", { cwd: dir, exclude: name => SKIP_DIRS.has(name) });
+  } catch {
+    return []; // unreadable directory: also treated as empty
+  }
+  return matches
+    .filter(relative => !relative.split(/[\\/]/).some(segment => SKIP_DIRS.has(segment)))
     .map(relative => join(dir, relative) as FsPath);
 }
 
