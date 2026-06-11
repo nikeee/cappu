@@ -2,19 +2,36 @@
 // implementation, transitively) against the configured packageSources and
 // download every jar into the classPath's default lib/classes directory, where
 // loadClassPath already picks them up. Print-free; the cli renders the result.
+//
+// cappu.lock.json (next to cappu.json) pins the outcome: it records the
+// dependencies section it was resolved from plus the full resolved package
+// set. While the section is unchanged, install downloads exactly the locked
+// set without consulting any POM again - reproducible and fast; when the
+// section changed, install re-resolves and rewrites the lock.
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { type CappuConfig, resolveConfigPath } from "./config.ts";
 import {
   type Coordinates,
   coordinatesToString,
+  matchingVersions,
   MavenRepositorySource,
   type PackageSource,
   type Resolution,
   resolveTransitive,
 } from "./packages/index.ts";
+
+export const LOCKFILE_NAME = "cappu.lock.json";
+
+interface Lockfile {
+  version: 1;
+  /** The dependencies section this lock was resolved from. */
+  roots: CappuConfig["dependencies"];
+  /** The resolved set, in install order. */
+  packages: { coordinates: Coordinates; source: string }[];
+}
 
 export interface InstallResult {
   /** Jar paths written, in resolution order. */
@@ -24,6 +41,8 @@ export interface InstallResult {
   resolution: Resolution;
   /** The directory the jars were written to. */
   targetDir: string;
+  /** True when the locked package set was reused (no resolution ran). */
+  fromLock: boolean;
 }
 
 /** "group:artifact" -> version entries of one configuration, as Coordinates. */
@@ -34,6 +53,51 @@ function rootsOf(entries: Record<string, string>): Coordinates[] {
   });
 }
 
+/** Every configured dependency as coordinates (api + implementation alike). */
+export function configuredRoots(config: CappuConfig): Coordinates[] {
+  // Only the api and implementation configurations exist so far; both are
+  // needed at compile time, so install treats them alike.
+  return [...rootsOf(config.dependencies.api), ...rootsOf(config.dependencies.implementation)];
+}
+
+function lockfilePath(config: CappuConfig): string {
+  return join(config.baseDir, LOCKFILE_NAME);
+}
+
+function readLockfile(config: CappuConfig): Lockfile | undefined {
+  const path = lockfilePath(config);
+  if (!existsSync(path)) return undefined;
+  try {
+    const lock = JSON.parse(readFileSync(path, "utf8")) as Lockfile;
+    return lock.version === 1 && Array.isArray(lock.packages) ? lock : undefined;
+  } catch {
+    return undefined; // a corrupt lock is ignored, not fatal: install re-resolves
+  }
+}
+
+/** Whether the lock was resolved from exactly this dependencies section. */
+function lockMatches(lock: Lockfile, config: CappuConfig): boolean {
+  return JSON.stringify(lock.roots) === JSON.stringify(config.dependencies);
+}
+
+async function artifactFrom(
+  sources: readonly PackageSource[],
+  preferred: string,
+  coordinates: Coordinates,
+): Promise<Uint8Array | undefined> {
+  // Prefer the source that resolved the package; fall back to the others (the
+  // configured source list may have changed since the lock was written).
+  const ordered = [
+    ...sources.filter(s => s.name === preferred),
+    ...sources.filter(s => s.name !== preferred),
+  ];
+  for (const source of ordered) {
+    const bytes = await source.getArtifact?.(coordinates);
+    if (bytes) return bytes;
+  }
+  return undefined;
+}
+
 export async function installDependencies(
   config: CappuConfig,
   // Injectable for tests; defaults to the configured remote repositories.
@@ -41,21 +105,29 @@ export async function installDependencies(
     url => new MavenRepositorySource(url),
   ),
 ): Promise<InstallResult> {
-  // Only the api and implementation configurations exist so far; both are
-  // needed at compile time, so install treats them alike.
-  const roots = [
-    ...rootsOf(config.dependencies.api),
-    ...rootsOf(config.dependencies.implementation),
-  ];
-  const resolution = await resolveTransitive(roots, sources);
+  const lock = readLockfile(config);
+  const fromLock = lock !== undefined && lockMatches(lock, config);
+
+  let resolution: Resolution;
+  let toInstall: { coordinates: Coordinates; source: string }[];
+  if (fromLock) {
+    resolution = { packages: [], conflicts: [], missing: [] };
+    toInstall = lock.packages;
+  } else {
+    resolution = await resolveTransitive(configuredRoots(config), sources);
+    toInstall = resolution.packages.map(p => ({ coordinates: p.coordinates, source: p.source }));
+    if (config.fromFile && resolution.missing.length === 0) {
+      const newLock: Lockfile = { version: 1, roots: config.dependencies, packages: toInstall };
+      writeFileSync(lockfilePath(config), `${JSON.stringify(newLock, null, 2)}\n`);
+    }
+  }
 
   const targetDir = resolveConfigPath(config, "./lib/classes");
   const installed: string[] = [];
   const noArtifact: string[] = [];
-  if (resolution.packages.length > 0) mkdirSync(targetDir, { recursive: true });
-  for (const pkg of resolution.packages) {
-    const source = sources.find(s => s.name === pkg.source);
-    const bytes = await source?.getArtifact?.(pkg.coordinates);
+  if (toInstall.length > 0) mkdirSync(targetDir, { recursive: true });
+  for (const pkg of toInstall) {
+    const bytes = await artifactFrom(sources, pkg.source, pkg.coordinates);
     if (!bytes) {
       noArtifact.push(coordinatesToString(pkg.coordinates));
       continue;
@@ -64,5 +136,54 @@ export async function installDependencies(
     writeFileSync(file, bytes);
     installed.push(file);
   }
-  return { installed, noArtifact, resolution, targetDir };
+  return { installed, noArtifact, resolution, targetDir, fromLock };
+}
+
+export interface PickedVersion {
+  version: string;
+  /** False when no candidate resolved conflict-free and the newest match won. */
+  compatible: boolean;
+}
+
+// Trying a candidate means a full transitive resolution (network in the real
+// case), so the newest-first search is capped; in practice the first
+// candidate usually wins.
+const PICK_ATTEMPTS = 5;
+
+/**
+ * The version `cappu add` should pick for `key` given an absent or partial
+ * spec: the newest published version matching the spec whose transitive
+ * resolution - together with everything already configured - is free of
+ * version conflicts and missing packages. When no candidate is clean, the
+ * newest match is returned flagged incompatible (the caller warns; install's
+ * nearest-wins still produces a usable tree).
+ */
+export async function pickAddVersion(
+  config: CappuConfig,
+  key: string,
+  spec: string | undefined,
+  sources: readonly PackageSource[],
+): Promise<PickedVersion | undefined> {
+  const [groupId = "", artifactId = ""] = key.split(":");
+  let published: string[] = [];
+  for (const source of sources) {
+    published = await source.listVersions(groupId, artifactId);
+    if (published.length > 0) break;
+  }
+  const candidates = matchingVersions(published, spec);
+  if (candidates.length === 0) return undefined;
+
+  // The new dependency joins the existing roots (any previous entry for the
+  // same key is superseded by the candidate).
+  const existing = configuredRoots(config).filter(c => `${c.groupId}:${c.artifactId}` !== key);
+  for (const version of candidates.slice(0, PICK_ATTEMPTS)) {
+    const resolution = await resolveTransitive(
+      [...existing, { groupId, artifactId, version }],
+      sources,
+    );
+    if (resolution.conflicts.length === 0 && resolution.missing.length === 0) {
+      return { version, compatible: true };
+    }
+  }
+  return { version: candidates[0]!, compatible: false };
 }

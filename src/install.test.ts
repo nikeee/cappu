@@ -6,8 +6,12 @@ import { test } from "node:test";
 import { expect } from "expect";
 
 import { loadConfig } from "./config.ts";
-import { installDependencies } from "./install.ts";
-import { MavenRepositorySource } from "./packages/index.ts";
+import { installDependencies, LOCKFILE_NAME, pickAddVersion } from "./install.ts";
+import {
+  InMemoryPackageSource,
+  MavenRepositorySource,
+  type PackageMetadata,
+} from "./packages/index.ts";
 
 const POM_GSON = `<project>
   <dependencies>
@@ -77,6 +81,106 @@ test("an unknown dependency surfaces as missing, nothing is written for it", asy
       artifactId: "gone",
       version: "9",
     });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("install writes a lockfile and reuses it while the dependencies match", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cappu-install-"));
+  try {
+    writeFileSync(
+      join(dir, "cappu.json"),
+      '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
+    );
+    const config = loadConfig(undefined, dir);
+    const first = await installDependencies(config, [fakeRepo()]);
+    expect(first.fromLock).toBe(false);
+    const lock = JSON.parse(readFileSync(join(dir, LOCKFILE_NAME), "utf8")) as {
+      roots: unknown;
+      packages: unknown[];
+    };
+    expect(lock.packages).toHaveLength(2); // gson + its transitive base
+
+    // Unchanged section: the locked set installs without any POM fetch.
+    const fetchedPoms: string[] = [];
+    const countingRepo = new MavenRepositorySource(
+      "https://repo.test/m2",
+      url => {
+        fetchedPoms.push(url);
+        return Promise.resolve(undefined);
+      },
+      url =>
+        Promise.resolve(url.endsWith(".jar") ? new TextEncoder().encode("jar-bytes") : undefined),
+    );
+    const second = await installDependencies(loadConfig(undefined, dir), [countingRepo]);
+    expect(second.fromLock).toBe(true);
+    expect(second.installed).toHaveLength(2);
+    expect(fetchedPoms).toEqual([]);
+
+    // Changed section: the lock no longer matches and resolution runs again.
+    writeFileSync(
+      join(dir, "cappu.json"),
+      '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0", "org.example:base": "1.0" } } }',
+    );
+    const third = await installDependencies(loadConfig(undefined, dir), [fakeRepo()]);
+    expect(third.fromLock).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function versionedSource(): InMemoryPackageSource {
+  const pkg = (g: string, a: string, v: string, deps: PackageMetadata["dependencies"] = []) => ({
+    coordinates: { groupId: g, artifactId: a, version: v },
+    dependencies: deps,
+  });
+  return new InMemoryPackageSource("versions", [
+    pkg("org.x", "base", "1.0"),
+    pkg("org.x", "base", "2.0"),
+    // lib@1 sits on base 1, lib@2.0/2.1 sit on base 2
+    pkg("org.x", "lib", "1.5", [{ groupId: "org.x", artifactId: "base", version: "1.0" }]),
+    pkg("org.x", "lib", "2.0", [{ groupId: "org.x", artifactId: "base", version: "2.0" }]),
+    pkg("org.x", "lib", "2.1", [{ groupId: "org.x", artifactId: "base", version: "2.0" }]),
+  ]);
+}
+
+function configWith(dir: string, json: string): ReturnType<typeof loadConfig> {
+  writeFileSync(join(dir, "cappu.json"), json);
+  return loadConfig(undefined, dir);
+}
+
+test("pickAddVersion takes the newest matching version that resolves conflict-free", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cappu-pick-"));
+  try {
+    // Nothing configured: the newest published version wins outright.
+    const empty = configWith(dir, "{}");
+    expect(await pickAddVersion(empty, "org.x:lib", undefined, [versionedSource()])).toEqual({
+      version: "2.1",
+      compatible: true,
+    });
+    // A partial spec restricts the candidates.
+    expect(await pickAddVersion(empty, "org.x:lib", "1", [versionedSource()])).toEqual({
+      version: "1.5",
+      compatible: true,
+    });
+    // base 1.0 already configured: lib 2.x would conflict over base, so the
+    // newest COMPATIBLE version is the 1.x line.
+    const pinned = configWith(
+      dir,
+      '{ "dependencies": { "implementation": { "org.x:base": "1.0" } } }',
+    );
+    expect(await pickAddVersion(pinned, "org.x:lib", undefined, [versionedSource()])).toEqual({
+      version: "1.5",
+      compatible: true,
+    });
+    // A spec that ONLY matches conflicting versions falls back, flagged.
+    expect(await pickAddVersion(pinned, "org.x:lib", "2", [versionedSource()])).toEqual({
+      version: "2.1",
+      compatible: false,
+    });
+    // No matching published version at all.
+    expect(await pickAddVersion(empty, "org.x:lib", "9", [versionedSource()])).toBeUndefined();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

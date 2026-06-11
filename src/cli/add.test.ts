@@ -37,7 +37,7 @@ test("adding a dependency preserves the JSONC comments around it", () => {
   const out = addDependencyToJsonc(text, "implementation", "com.google.code.gson:gson", "2.14.0");
   expect(out).toContain("// keep me");
   expect(out).toContain("// and me");
-  const parsed = parse(out) as {
+  const parsed = parse(out) as unknown as {
     dependencies: { implementation: Record<string, string> };
     compilerOptions: { outDir: string };
   };
@@ -51,7 +51,7 @@ test("adding a dependency preserves the JSONC comments around it", () => {
 test("a missing dependencies section (or configuration) is created", () => {
   const out = addDependencyToJsonc("{}\n", "api", "org.x:y", "3");
   expect(
-    (parse(out) as { dependencies: { api: Record<string, string> } }).dependencies.api,
+    (parse(out) as unknown as { dependencies: { api: Record<string, string> } }).dependencies.api,
   ).toEqual({ "org.x:y": "3" });
 });
 
@@ -59,7 +59,7 @@ test("adding an existing key overwrites its version", () => {
   const once = addDependencyToJsonc("{}\n", "implementation", "org.x:y", "1");
   const twice = addDependencyToJsonc(once, "implementation", "org.x:y", "2");
   expect(
-    (parse(twice) as { dependencies: { implementation: Record<string, string> } }).dependencies
-      .implementation,
+    (parse(twice) as unknown as { dependencies: { implementation: Record<string, string> } })
+      .dependencies.implementation,
   ).toEqual({ "org.x:y": "2" });
 });

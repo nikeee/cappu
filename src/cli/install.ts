@@ -6,6 +6,9 @@ import { installDependencies } from "../install.ts";
 
 export async function runInstall(config: CappuConfig): Promise<never> {
   const result = await installDependencies(config);
+  if (result.fromLock) {
+    process.stderr.write("using cappu.lock.json (dependencies unchanged)\n");
+  }
   for (const file of result.installed) process.stdout.write(`${file}\n`);
   for (const c of result.resolution.conflicts) {
     process.stderr.write(

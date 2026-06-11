@@ -1,7 +1,9 @@
 // `cappu add <configuration> <group:artifact[@version]>`: write the entry into
 // the cappu.json dependencies section (preserving comments - the file is
 // JSONC) and then download it and its transitive dependencies exactly like
-// `cappu install`. Without @version, the newest published version is used.
+// `cappu install`. An absent or partial @version ("@2", "@2.10") picks the
+// newest matching version whose transitive resolution is conflict-free
+// against the already-configured dependencies.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -9,7 +11,8 @@ import { join, resolve } from "node:path";
 import { parse, stringify } from "comment-json";
 
 import { type CappuConfig, DEFAULT_CONFIG_NAME, loadConfig } from "../config.ts";
-import { latestVersion, MavenRepositorySource } from "../packages/index.ts";
+import { pickAddVersion } from "../install.ts";
+import { MavenRepositorySource, type PackageSource } from "../packages/index.ts";
 import { runInstall } from "./install.ts";
 
 const CONFIGURATIONS = ["api", "implementation"] as const;
@@ -31,6 +34,13 @@ export function parseAddCoordinate(spec: string): AddCoordinate | undefined {
   const segments = key.split(":");
   if (segments.length !== 2 || segments.some(s => s === "")) return undefined;
   return { key, version };
+}
+
+/** Whether the written spec is already exact enough to skip the picker. */
+function looksExact(version: string | undefined): version is string {
+  // Heuristic: two dots (or a dash qualifier) is a full maven version; "2" or
+  // "2.10" are prefixes to complete against the published list.
+  return version !== undefined && (version.split(".").length >= 3 || version.includes("-"));
 }
 
 /**
@@ -58,6 +68,8 @@ export async function runAdd(
   spec: string | undefined,
   configPathArg: string | undefined,
   config: CappuConfig,
+  // Injectable for tests; defaults to the configured remote repositories.
+  sources?: readonly PackageSource[],
 ): Promise<never> {
   const configuration = CONFIGURATIONS.find(c => c === configurationArg);
   const coordinate = spec === undefined ? undefined : parseAddCoordinate(spec);
@@ -74,16 +86,23 @@ export async function runAdd(
   }
 
   let version = coordinate.version;
-  if (version === undefined) {
-    const [groupId = "", artifactId = ""] = coordinate.key.split(":");
-    const sources = config.packageSources.map(url => new MavenRepositorySource(url));
-    version = await latestVersion(groupId, artifactId, sources);
-    if (version === undefined) {
+  if (!looksExact(version)) {
+    const resolvedSources =
+      sources ?? config.packageSources.map(url => new MavenRepositorySource(url));
+    const picked = await pickAddVersion(config, coordinate.key, version, resolvedSources);
+    if (picked === undefined) {
+      const wanted = version === undefined ? "" : ` matching '${version}'`;
       process.stderr.write(
-        `cappu: no published version of ${coordinate.key} found in any package source\n`,
+        `cappu: no published version of ${coordinate.key}${wanted} found in any package source\n`,
       );
       process.exit(1);
     }
+    if (!picked.compatible) {
+      process.stderr.write(
+        `warning: every matching version of ${coordinate.key} conflicts with the configured dependencies; using ${picked.version}\n`,
+      );
+    }
+    version = picked.version;
   }
 
   const configPath = configPathArg
