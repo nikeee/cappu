@@ -1,4 +1,5 @@
 const path = require("node:path");
+const vscode = require("vscode");
 const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
 
 let client;
@@ -32,6 +33,23 @@ function activate(context) {
   client = new LanguageClient("javalsp", "javalsp", serverOptions, clientOptions);
   client.start();
   context.subscriptions.push(client);
+
+  // The server's code lenses carry LSP-shaped arguments (string uri,
+  // {line, character} positions). editor.action.showReferences silently does
+  // nothing with those - it wants vscode.Uri/Position/Location - so the lens
+  // command converts here, on the client.
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cappu.showReferences", (uri, position, locations) => {
+      const toRange = r =>
+        new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character);
+      return vscode.commands.executeCommand(
+        "editor.action.showReferences",
+        vscode.Uri.parse(uri),
+        new vscode.Position(position.line, position.character),
+        locations.map(l => new vscode.Location(vscode.Uri.parse(l.uri), toRange(l.range))),
+      );
+    }),
+  );
 }
 
 function deactivate() {

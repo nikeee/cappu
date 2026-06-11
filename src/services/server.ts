@@ -591,9 +591,12 @@ connection.onImplementation((params): Definition | null => {
   return null;
 });
 
-// A "N references" lens above every type and method declaration. The command is
-// the editor.action.showReferences convention (VS Code peeks the locations);
-// clients without it still render the count as plain text.
+// A "N references" lens above every type and method declaration. The command
+// is cappu.showReferences, which the vscode extension implements by converting
+// the LSP-shaped arguments (string uri, {line, character} positions) into
+// vscode.Uri/Position/Location and delegating to editor.action.showReferences
+// - handing that builtin raw JSON arguments fails silently (nikeee/cappu#10).
+// Clients without the command still render the count as plain text.
 // Package repositories for the cappu.json dependency lenses (startServer
 // swaps in the configured list). The newest-version lookups go to the
 // network, so results are cached briefly per group:artifact.
@@ -647,7 +650,7 @@ connection.onCodeLens(async (params): Promise<CodeLens[]> => {
       range,
       command: {
         title: `${n} ${noun}${n === 1 ? "" : "s"}`,
-        command: "editor.action.showReferences",
+        command: "cappu.showReferences",
         arguments: [params.textDocument.uri, range.start, entry.sites.map(locationOf)],
       },
     };
