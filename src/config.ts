@@ -11,9 +11,9 @@ import { z } from "zod";
 
 const InlayHintsSchema = z.object({
   /** Hints like `count:` before call arguments that are not plain variables. */
-  parameterNames: z.boolean().optional(),
+  parameterNames: z.boolean().default(true),
   /** Hints like `: String` after a `var` declaration's name. */
-  varTypes: z.boolean().optional(),
+  varTypes: z.boolean().default(true),
 });
 
 export const DEFAULT_CLASS_PATH = "./lib/classes";
@@ -93,9 +93,6 @@ export function configJsonSchema(): string {
  */
 export const CONFIG_TEMPLATE = `
 {
-  // Project configuration for the cappu compiler and language server (JSONC:
-  // comments and trailing commas are fine). Relative paths resolve against
-  // this file's directory.
   "$schema": "./cappu.schema.json",
 
   "compilerOptions": {
@@ -103,16 +100,16 @@ export const CONFIG_TEMPLATE = `
     // Types resolve against them but are not compiled. Default if unset: ["./lib/classes"].
     // "classPath": ["./lib/classes"],
 
-    // Additional source directories whose .java files resolve (not compiled). Default if unset: ["./src/main/java"].
+    // Sources to be compiled. Default if unset: ["./src/main/java"].
     // "sourcePaths": ["./src/main/java"],
 
     // Output root for the build artifacts (default if unset: "./dist").
     // "outDir": "./dist",
 
     // What \`cappu compile\` produces in outDir:
-    // - "classes" (a package tree usable directly as \`java -cp <outDir>\`),
+    // - "classes": a package tree usable directly as \`java -cp <outDir>\`
     // - "jar": same as "classes", but as a jar
-    // - "fat-jar" (the jar plus the contents of every dependency jar on the classPath)
+    // - "fat-jar": the jar plus the contents of every dependency jar on the classPath
     // "output": "classes",
 
     // Do not print the path of each emitted .class file.
@@ -122,29 +119,24 @@ export const CONFIG_TEMPLATE = `
     // an unsupported construct (degradations always print a warning).
     "failOnDegrade": false,
 
-    // The javac binary used by \`cappu compile --validate\` (default: "javac"
-    // from $PATH).
+    // The javac binary used by \`cappu compile --validate\` (default: "javac" from $PATH).
     // "javac": "javac",
   },
+
   "lspOptions": {
-    "inlayHints": {
-      // \`count:\` hints before call arguments that are not plain variables.
-      "parameterNames": true,
-      // \`: String\` hints after \`var\` declarations.
-      "varTypes": true,
-    },
+    // "inlayHints": {
+    //   "parameterNames": true,
+    //   "varTypes": true,
+    // },
   },
 
-  // Package repositories dependencies are resolved from, in order. Default if
-  // unset: Maven Central, Google Maven and the Gradle Plugin Portal.
+  // Package repositories dependencies are resolved from, in order. Default if unset:
   // "packageSources": [
   //   "https://repo.maven.apache.org/maven2",
   //   "https://maven.google.com",
   //   "https://plugins.gradle.org/m2",
   // ],
 
-  // Dependencies \`cappu install\` resolves (transitively) and downloads into
-  // the classPath, keyed by configuration as in gradle.
   "dependencies": {
     "api": {},
     "implementation": {
