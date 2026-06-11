@@ -35,7 +35,8 @@ test("JSONC parses with comments and trailing commas; sections map", () => {
   expect(config.compilerOptions.sourcePaths).toEqual(["src/main/java"]);
   expect(config.compilerOptions.outDir).toBe("build");
   expect(config.compilerOptions.failOnDegrade).toBe(true);
-  expect(config.lspOptions.inlayHints).toEqual({ varTypes: false });
+  // the omitted parameterNames falls back to its schema default
+  expect(config.lspOptions.inlayHints).toEqual({ parameterNames: true, varTypes: false });
   // Relative entries resolve against the config's directory.
   expect(resolveConfigPath(config, "lib/classes")).toBe(join(dir, "lib/classes"));
 });
@@ -87,7 +88,8 @@ test("the init template parses and validates against the schema", () => {
   const config = loadConfig(undefined, dir);
   expect(config.compilerOptions.classPath).toEqual(["./lib/classes"]);
   expect(config.compilerOptions.quiet).toBe(false);
-  expect(config.lspOptions.inlayHints).toEqual({ parameterNames: true, varTypes: true });
+  // the template only documents inlayHints (commented out); defaults apply downstream
+  expect(config.lspOptions.inlayHints).toBeUndefined();
 });
 
 test("the generated JSON schema mirrors the config shape", () => {
