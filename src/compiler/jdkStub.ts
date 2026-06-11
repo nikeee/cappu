@@ -507,6 +507,8 @@ interface Set<E> extends Collection<E> {}
 interface Queue<E> extends Collection<E> {
   E peek();
   E poll();
+  E remove();
+  E element();
   boolean offer(E e);
 }
 
@@ -630,6 +632,15 @@ class TreeMap<K, V> implements Map<K, V> {
   public Set<K> keySet() { return null; }
   public Collection<V> values() { return null; }
   public Set<Map.Entry<K, V>> entrySet() { return null; }
+}
+
+class OptionalInt {
+  public static OptionalInt of(int value) { return null; }
+  public static OptionalInt empty() { return null; }
+  public int getAsInt() { return 0; }
+  public boolean isPresent() { return false; }
+  public boolean isEmpty() { return false; }
+  public int orElse(int other) { return 0; }
 }
 
 class Optional<T> {
@@ -803,6 +814,7 @@ interface Collector<T, A, R> {}
 interface Stream<T> extends java.lang.AutoCloseable {
   Stream<T> filter(java.util.function.Predicate<T> predicate);
   <R> Stream<R> map(java.util.function.Function<T, R> mapper);
+  IntStream mapToInt(java.util.function.ToIntFunction<? super T> mapper);
   void forEach(java.util.function.Consumer<T> action);
   <R> R collect(Collector<T, ?, R> collector);
   java.util.List<T> toList();
@@ -828,6 +840,8 @@ interface Stream<T> extends java.lang.AutoCloseable {
 interface IntStream extends java.lang.AutoCloseable {
   int sum();
   long count();
+  java.util.OptionalInt max();
+  java.util.OptionalInt min();
   IntStream filter(java.util.function.IntPredicate predicate);
   IntStream map(java.util.function.IntUnaryOperator mapper);
   <U> Stream<U> mapToObj(java.util.function.IntFunction<U> mapper);

@@ -1929,8 +1929,13 @@ function parseExpressionSuffixes(start: Expression): Expression {
           parseExpected(SyntaxKind.CloseBracketToken);
           rank++;
         }
-        parseExpected(SyntaxKind.DotToken);
-        parseExpected(SyntaxKind.ClassKeyword);
+        // Foo[].class (array class literal) or Foo[]::new (array constructor
+        // reference, JLS 15.13). Both carry the array TYPE; the `::` is left
+        // for the method-reference suffix below.
+        if (token() !== SyntaxKind.ColonColonToken) {
+          parseExpected(SyntaxKind.DotToken);
+          parseExpected(SyntaxKind.ClassKeyword);
+        }
         const entity =
           expressionToEntityName(expr) ??
           createMissingNode<Identifier>(SyntaxKind.Identifier, false);

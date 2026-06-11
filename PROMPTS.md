@@ -181,3 +181,4 @@ no timestamps were captured.
 - 2026-06-12 01:14 — in the next commit (or multiple): introduce a global package store in the users home dir or xdg config dir (whatever fits best). Some ~/.cappu/packages where the dependencies will be downloaded into. install command checks if they are already there and just copes them from there. dir layout can be something like ~/.cappu/packages/com/google/code/gson/gson/2.14.0.jar for com.google.code.gson:gson@2.14.0. maybe this doesnt work because it can contian invalid path chars or stuff like a.b:c@1 conflicts with a.b.c:d@1
 - 2026-06-12 01:18 — after that, resolve https://github.com/nikeee/cappu/issues/11
 - 2026-06-12 01:20 — after that, resolve https://github.com/nikeee/cappu/issues/10
+- 2026-06-12 01:26 — after that, resolve https://github.com/nikeee/cappu/issues/9

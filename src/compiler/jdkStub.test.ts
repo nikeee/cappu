@@ -103,3 +103,31 @@ class Issue1 {
     .filter(d => d.messageText.includes("Cannot resolve symbol"));
   expect(unresolved.map(d => d.messageText)).toEqual([]);
 });
+
+test("the members from nikeee/cappu#9 resolve and type correctly", () => {
+  const source = `
+import java.util.Map;
+import java.util.Queue;
+
+class Issue9 {
+  String take(Queue<String> q) {
+    q.element();
+    return q.remove(); // E remove(), not Collection's boolean remove(Object)
+  }
+  int count(Map<Object, String> nodeIdMap) {
+    return nodeIdMap.values().stream()
+      .map(s -> s)
+      .mapToInt(i -> 1).max().orElse(-1);
+  }
+}
+`;
+  const program = createProgram();
+  loadJdkStub(program);
+  program.addProjectFile("file:///Issue9.java" as Uri, source);
+  const checker = createChecker(program);
+  const sourceFile = program.getSourceFile("file:///Issue9.java" as Uri)!;
+  expect(sourceFile.parseDiagnostics).toHaveLength(0);
+  // no unresolved members and, critically, no boolean-vs-String false positive
+  // from Collection.remove(Object) shadowing Queue's E remove()
+  expect(checker.getSemanticDiagnostics(sourceFile).map(d => d.messageText)).toEqual([]);
+});

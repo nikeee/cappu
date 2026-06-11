@@ -1112,3 +1112,19 @@ test("modifiers not followed by a declaration -> Declaration expected (1020)", (
 test("malformed parameter list -> Parameter declaration expected (1021)", () => {
   expect(codes("class C { void m( { } }")).toContain(1021);
 });
+
+test("array constructor references parse without diagnostics (nikeee/cappu#9)", () => {
+  const sf = parseSourceFile(
+    "T.java",
+    [
+      "class T {",
+      "  Object[] m(java.util.stream.Stream<Object> s) {",
+      "    return s.toArray(Object[]::new);",
+      "  }",
+      "  Class<?> c() { return String[].class; } // the class-literal form stays intact",
+      "  java.util.function.IntFunction<String[][]> g() { return String[][]::new; }",
+      "}",
+    ].join("\n"),
+  );
+  expect(sf.parseDiagnostics).toHaveLength(0);
+});
