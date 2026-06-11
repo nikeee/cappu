@@ -7,6 +7,8 @@ I wanted to know how far I can get by steering an LLM under certain conditions.
 
 Plus I was annoyed by the Java LSP plugin for VSC. :(
 ```
+## Why?
+I was annoyed by the Java extension for VSC that everyone uses. So I vibed my own LSP server. And then added a compiler and package manager because why not?
 
 ## Usage
 ```sh
@@ -36,7 +38,6 @@ I didn't want to just say "build a java compiler and LSP server". You can see mo
 The result is a Java-compatible compiler as well as an LSP server built on the same foundation, just like the TypeScript compiler. `.class` file baselines are verified by comparing to actual `javac` output.
 
 You probalby shouldn't use this. **This readme is the only file that wasn't edited by AI.**
-
 
 ### Legal Notice
 This project is not affiliated with Java, Oracle or similar entities.
