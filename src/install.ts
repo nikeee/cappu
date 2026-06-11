@@ -3,7 +3,7 @@
 // download every jar into the classPath's default lib/classes directory, where
 // loadClassPath already picks them up. Print-free; the cli renders the result.
 //
-// cappu.lock.json (next to cappu.json) pins the outcome: it records the
+// cappu-lock.json (next to cappu.json) pins the outcome: it records the
 // dependencies section it was resolved from plus the full resolved package
 // set, each with the SHA-256 of the jar that was actually downloaded when the
 // lock was written (nikeee/cappu#2) - hashing our own bytes pins the
@@ -29,7 +29,7 @@ import {
   resolveTransitive,
 } from "./packages/index.ts";
 
-export const LOCKFILE_NAME = "cappu.lock.json";
+export const LOCKFILE_NAME = "cappu-lock.json";
 
 interface LockedPackage {
   coordinates: Coordinates;

@@ -10,11 +10,11 @@ export async function runInstall(
 ): Promise<never> {
   const result = await installDependencies(config, undefined, options);
   if (result.fromLock) {
-    process.stderr.write("using cappu.lock.json\n");
+    process.stderr.write("using cappu-lock.json\n");
   }
   if (result.lockStale) {
     process.stderr.write(
-      "warning: cappu.json's dependencies changed since cappu.lock.json was written;\n" +
+      "warning: cappu.json's dependencies changed since cappu-lock.json was written;\n" +
         "         the locked set was installed anyway. Use `cappu add` (or delete the\n" +
         "         lock file) to re-resolve.\n",
     );
@@ -39,7 +39,7 @@ export async function runInstall(
   }
   for (const c of result.integrityFailures) {
     process.stderr.write(
-      `error: ${c}: downloaded jar does not match the SHA-256 in cappu.lock.json\n`,
+      `error: ${c}: downloaded jar does not match the SHA-256 in cappu-lock.json\n`,
     );
     failed = true;
   }
