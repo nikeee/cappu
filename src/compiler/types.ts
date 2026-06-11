@@ -695,6 +695,8 @@ export interface ObjectCreationExpression extends Expression {
   readonly type: TypeNode;
   readonly arguments: NodeArray<Expression>;
   readonly classBody?: NodeArray<Node>;
+  /** Qualified creation `outer.new Inner(...)` (JLS 15.9.1): the enclosing instance. */
+  readonly qualifier?: Expression;
 }
 
 export interface ArrayCreationExpression extends Expression {

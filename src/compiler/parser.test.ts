@@ -1128,3 +1128,21 @@ test("array constructor references parse without diagnostics (nikeee/cappu#9)", 
   );
   expect(sf.parseDiagnostics).toHaveLength(0);
 });
+
+test("lambdas as intersection-cast operands and qualified new parse cleanly", () => {
+  const sf = parseSourceFile(
+    "T.java",
+    [
+      "class T {",
+      "  class Inner {}",
+      "  Object a(java.util.function.Function<String, String> f) {",
+      "    return (java.util.function.Function<String, String> & java.io.Serializable) p -> null;",
+      "  }",
+      "  Object b(T t) { return t.new Inner(); }",
+      "  Object c(T t) { return t.new Inner() { }; } // with a body",
+      "  int d(Object x, int b) { return (int) -b; } // (a) - b ambiguity intact",
+      "}",
+    ].join("\n"),
+  );
+  expect(sf.parseDiagnostics).toHaveLength(0);
+});

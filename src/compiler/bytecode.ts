@@ -2829,6 +2829,9 @@ function generateBody(
   /** Class instance creation `new T(args)` (JLS 15.9): new, dup, invokespecial. */
   const emitNew = (node: Node): Descriptor => {
     const oc = node as ObjectCreationExpression;
+    // A qualified creation (outer.new Inner(...)) parses, but threading the
+    // explicit enclosing instance through the constructor is not emitted yet.
+    if (oc.qualifier) throw new UnsupportedEmit();
     // An anonymous class implementing an interface (JLS 15.9.5): instantiate the
     // synthetic Outer$N class, passing the captured enclosing locals.
     if (oc.classBody) {

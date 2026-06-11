@@ -1759,7 +1759,10 @@ function parseCastExpression(): CastExpression {
     bounds = createNodeArray(list, boundsPos);
   }
   parseExpected(SyntaxKind.CloseParenToken);
-  const expression = parseUnaryExpression();
+  // The operand of a reference cast may be a lambda or method reference
+  // (JLS 15.16): (Function<A, B> & Serializable) p -> ... - method refs fall
+  // out of parseUnaryExpression already, lambdas need the explicit check.
+  const expression = isLambdaStart() ? parseLambdaExpression() : parseUnaryExpression();
   const node = createNode<CastExpression>(SyntaxKind.CastExpression, pos);
   node.type = type;
   node.bounds = bounds;
@@ -1883,6 +1886,23 @@ function parseExpressionSuffixes(start: Expression): Expression {
         const typeNode = finishNode(typeRef, exprPos);
         const node = createNode<ClassLiteralExpression>(SyntaxKind.ClassLiteralExpression, exprPos);
         node.type = typeNode;
+        expr = finishNode(node, exprPos);
+        continue;
+      }
+      // Qualified class instance creation: outer.new Inner(args) (JLS 15.9).
+      if (token() === SyntaxKind.NewKeyword) {
+        nextToken();
+        const type = parseNonArrayType();
+        const args = parseArgumentList();
+        const classBody = token() === SyntaxKind.OpenBraceToken ? parseClassBody() : undefined;
+        const node = createNode<ObjectCreationExpression>(
+          SyntaxKind.ObjectCreationExpression,
+          exprPos,
+        );
+        node.qualifier = expr;
+        node.type = type;
+        node.arguments = args;
+        node.classBody = classBody;
         expr = finishNode(node, exprPos);
         continue;
       }
@@ -3058,6 +3078,7 @@ export function forEachChild<T>(
     case SyntaxKind.ObjectCreationExpression: {
       const n = node as ObjectCreationExpression;
       return (
+        visitNode(cbNode, n.qualifier) ||
         visitNode(cbNode, n.type) ||
         visitNodes(cbNode, cbNodes, n.arguments) ||
         visitNodes(cbNode, cbNodes, n.classBody)
