@@ -1,5 +1,12 @@
 # cappu
 A Java compiler, lsp and toolchain. Favors convention over configuration.
+```diff
+- warning -
+This is an entirely vibe-coded project that acts as an experiment.
+I wanted to know how far I can get by steering an LLM under certain conditions.
+
+Plus I was annoyed by the Java LSP plugin for VSC. :(
+```
 
 ## Usage
 ```sh
@@ -21,14 +28,6 @@ cappu compile
 ```sh
 cappu lsp
 # optional --port if you need LSP via TCP
-```
-
-```diff
-- warning -
-This is an entirely vibe-coded project that acts as an experiment.
-I wanted to know how far I can get by steering an LLM under certain conditions.
-
-Plus I was annoyed by the Java LSP plugin for VSC. :(
 ```
 
 #### The Process
