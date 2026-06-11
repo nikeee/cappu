@@ -97,10 +97,14 @@ test("install writes a lockfile and reuses it while the dependencies match", asy
     const first = await installDependencies(config, [fakeRepo()]);
     expect(first.fromLock).toBe(false);
     const lock = JSON.parse(readFileSync(join(dir, LOCKFILE_NAME), "utf8")) as {
+      version: number;
       roots: unknown;
-      packages: unknown[];
+      packages: { sha256: string }[];
     };
+    expect(lock.version).toBe(2);
     expect(lock.packages).toHaveLength(2); // gson + its transitive base
+    // every artifact is pinned by the hash of its downloaded bytes (#2)
+    for (const pkg of lock.packages) expect(pkg.sha256).toMatch(/^[0-9a-f]{64}$/);
 
     // Unchanged section: the locked set installs without any POM fetch.
     const fetchedPoms: string[] = [];
@@ -110,13 +114,32 @@ test("install writes a lockfile and reuses it while the dependencies match", asy
         fetchedPoms.push(url);
         return Promise.resolve(undefined);
       },
-      url =>
-        Promise.resolve(url.endsWith(".jar") ? new TextEncoder().encode("jar-bytes") : undefined),
+      url => {
+        // the same bytes the lock was written from - a locked install verifies
+        const file = url.split("/").at(-1)!;
+        const body = file.startsWith("gson-") ? "gson-bytes" : "base-bytes";
+        return Promise.resolve(url.endsWith(".jar") ? new TextEncoder().encode(body) : undefined);
+      },
     );
     const second = await installDependencies(loadConfig(undefined, dir), [countingRepo]);
     expect(second.fromLock).toBe(true);
     expect(second.installed).toHaveLength(2);
+    expect(second.integrityFailures).toEqual([]);
     expect(fetchedPoms).toEqual([]);
+
+    // A tampered artifact (bytes differing from the locked SHA-256) is refused.
+    const tamperedRepo = new MavenRepositorySource(
+      "https://repo.test/m2",
+      () => Promise.resolve(undefined),
+      url =>
+        Promise.resolve(url.endsWith(".jar") ? new TextEncoder().encode("evil-bytes") : undefined),
+    );
+    const tampered = await installDependencies(loadConfig(undefined, dir), [tamperedRepo]);
+    expect(tampered.integrityFailures).toEqual([
+      "com.google.code.gson:gson:2.14.0",
+      "org.example:base:1.0",
+    ]);
+    expect(tampered.installed).toEqual([]);
 
     // Changed section: install ONLY respects the lock - the locked set is
     // installed anyway, flagged stale; updateLock (what `cappu add` passes)

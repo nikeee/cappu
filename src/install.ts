@@ -5,11 +5,16 @@
 //
 // cappu.lock.json (next to cappu.json) pins the outcome: it records the
 // dependencies section it was resolved from plus the full resolved package
-// set. `cappu install` only respects the lock: an existing lock is installed
-// exactly as written (a drifted cappu.json merely warns), and resolution runs
-// only to bootstrap a missing lock - or when `cappu add` explicitly asks for
-// the lock to be rewritten (updateLock).
+// set, each with the SHA-256 of the jar that was actually downloaded when the
+// lock was written (nikeee/cappu#2) - hashing our own bytes pins the
+// artifact; a repository-served checksum file would only prove transport
+// integrity against the same server. `cappu install` only respects the lock:
+// an existing lock is installed exactly as written and every download is
+// verified against its locked hash (a mismatch fails the install); resolution
+// runs only to bootstrap a missing lock - or when `cappu add` explicitly asks
+// for the lock to be rewritten (updateLock).
 
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -26,12 +31,23 @@ import {
 
 export const LOCKFILE_NAME = "cappu.lock.json";
 
+interface LockedPackage {
+  coordinates: Coordinates;
+  source: string;
+  /** Hex SHA-256 of the jar downloaded when the lock was written. */
+  sha256: string;
+}
+
 interface Lockfile {
-  version: 1;
+  version: 2;
   /** The dependencies section this lock was resolved from. */
   roots: CappuConfig["dependencies"];
   /** The resolved set, in install order. */
-  packages: { coordinates: Coordinates; source: string }[];
+  packages: LockedPackage[];
+}
+
+function sha256Of(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 export interface InstallResult {
@@ -46,6 +62,8 @@ export interface InstallResult {
   fromLock: boolean;
   /** True when the lock was used although cappu.json's dependencies changed. */
   lockStale: boolean;
+  /** Locked packages whose downloaded jar did not match its locked SHA-256. */
+  integrityFailures: string[];
 }
 
 /** "group:artifact" -> version entries of one configuration, as Coordinates. */
@@ -72,7 +90,8 @@ function readLockfile(config: CappuConfig): Lockfile | undefined {
   if (!existsSync(path)) return undefined;
   try {
     const lock = JSON.parse(readFileSync(path, "utf8")) as Lockfile;
-    return lock.version === 1 && Array.isArray(lock.packages) ? lock : undefined;
+    // Older versions carry no hashes; re-resolving rewrites them as v2.
+    return lock.version === 2 && Array.isArray(lock.packages) ? lock : undefined;
   } catch {
     return undefined; // a corrupt lock is ignored, not fatal: install re-resolves
   }
@@ -116,22 +135,20 @@ export async function installDependencies(
   const lockStale = lock !== undefined && !lockMatches(lock, config);
 
   let resolution: Resolution;
-  let toInstall: { coordinates: Coordinates; source: string }[];
+  let toInstall: { coordinates: Coordinates; source: string; sha256?: string }[];
   if (lock) {
     resolution = { packages: [], conflicts: [], missing: [] };
     toInstall = lock.packages;
   } else {
     resolution = await resolveTransitive(configuredRoots(config), sources);
     toInstall = resolution.packages.map(p => ({ coordinates: p.coordinates, source: p.source }));
-    if (config.fromFile && resolution.missing.length === 0) {
-      const newLock: Lockfile = { version: 1, roots: config.dependencies, packages: toInstall };
-      writeFileSync(lockfilePath(config), `${JSON.stringify(newLock, null, 2)}\n`);
-    }
   }
 
   const targetDir = resolveConfigPath(config, "./lib/classes");
   const installed: string[] = [];
   const noArtifact: string[] = [];
+  const integrityFailures: string[] = [];
+  const locked: LockedPackage[] = [];
   if (toInstall.length > 0) mkdirSync(targetDir, { recursive: true });
   for (const pkg of toInstall) {
     const bytes = await artifactFrom(sources, pkg.source, pkg.coordinates);
@@ -139,11 +156,25 @@ export async function installDependencies(
       noArtifact.push(coordinatesToString(pkg.coordinates));
       continue;
     }
+    const digest = sha256Of(bytes);
+    if (pkg.sha256 !== undefined && pkg.sha256 !== digest) {
+      // A locked install must produce the locked bytes: do not write the jar.
+      integrityFailures.push(coordinatesToString(pkg.coordinates));
+      continue;
+    }
     const file = join(targetDir, `${pkg.coordinates.artifactId}-${pkg.coordinates.version}.jar`);
     writeFileSync(file, bytes);
     installed.push(file);
+    locked.push({ coordinates: pkg.coordinates, source: pkg.source, sha256: digest });
   }
-  return { installed, noArtifact, resolution, targetDir, fromLock, lockStale };
+
+  // The lock pins what was VERIFIABLY materialized, so it is written after the
+  // downloads - and only when the whole set arrived.
+  if (!fromLock && config.fromFile && resolution.missing.length === 0 && noArtifact.length === 0) {
+    const newLock: Lockfile = { version: 2, roots: config.dependencies, packages: locked };
+    writeFileSync(lockfilePath(config), `${JSON.stringify(newLock, null, 2)}\n`);
+  }
+  return { installed, noArtifact, resolution, targetDir, fromLock, lockStale, integrityFailures };
 }
 
 export interface PickedVersion {

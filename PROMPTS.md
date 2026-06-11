@@ -171,3 +171,4 @@ no timestamps were captured.
 - 2026-06-11 20:28 — resolve https://github.com/nikeee/cappu/issues/3
 - 2026-06-11 20:37 — resolve https://github.com/nikeee/cappu/issues/5
 - 2026-06-11 20:39 — after that, resolve https://github.com/nikeee/cappu/issues/4
+- 2026-06-11 21:03 — resolve https://github.com/nikeee/cappu/issues/2 maybe use a different checksum or something

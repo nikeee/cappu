@@ -37,5 +37,11 @@ export async function runInstall(
     process.stderr.write(`error: ${c}: source provided no jar\n`);
     failed = true;
   }
+  for (const c of result.integrityFailures) {
+    process.stderr.write(
+      `error: ${c}: downloaded jar does not match the SHA-256 in cappu.lock.json\n`,
+    );
+    failed = true;
+  }
   process.exit(failed ? 1 : 0);
 }
