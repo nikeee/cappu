@@ -37,6 +37,27 @@ function actionsAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {
   );
 }
 
+// --- remove unused import ------------------------------------------------------------
+
+test("remove unused import deletes the whole line", () => {
+  const text =
+    "import java.util.List;\nimport java.util.Map;\n\nclass T { Map<String, String> m; }\n";
+  const ctx = setup(text);
+  const actions = actionsAt(ctx, "java.util.List").filter(a => a.kind === "quickfix");
+  expect(actions.map(a => a.title)).toEqual(["Remove unused import 'java.util.List'"]);
+  expect(apply(text, actions[0]!)).toBe(
+    "import java.util.Map;\n\nclass T { Map<String, String> m; }\n",
+  );
+});
+
+test("no removal is offered for a used import or outside the import", () => {
+  const text = "import java.util.Map;\n\nclass T { Map<String, String> m; }\n";
+  const ctx = setup(text);
+  expect(actionsAt(ctx, "java.util.Map").filter(a => a.kind === "quickfix")).toEqual([]);
+  const unusedElsewhere = setup("import java.util.List;\n\nclass T { int x; }\n");
+  expect(actionsAt(unusedElsewhere, "int x").filter(a => a.kind === "quickfix")).toEqual([]);
+});
+
 // --- add missing import ------------------------------------------------------------
 
 test("offers an import for an unresolved type that exists in the index", () => {

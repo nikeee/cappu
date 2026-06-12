@@ -7,8 +7,13 @@
 
 import { type Diagnostic, DiagnosticCategory, type DiagnosticMessage } from "./types.ts";
 
-function diag(code: number, key: string, message: string): DiagnosticMessage {
-  return { code, key, category: DiagnosticCategory.Error, message };
+function diag(
+  code: number,
+  key: string,
+  message: string,
+  category: DiagnosticCategory = DiagnosticCategory.Error,
+): DiagnosticMessage {
+  return { code, key, category, message };
 }
 
 export const Diagnostics = {
@@ -86,6 +91,12 @@ export const Diagnostics = {
     1304,
     "Invalid_number_of_arguments_expected_0_got_1",
     "Invalid number of arguments: expected {0}, got {1}.",
+  ),
+  Unused_import_0: diag(
+    1305,
+    "Unused_import_0",
+    "Unused import '{0}'.",
+    DiagnosticCategory.Warning,
   ),
 } as const;
 

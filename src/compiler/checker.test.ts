@@ -114,6 +114,24 @@ test("C-style array brackets after the name add rank (char buf[])", () => {
   expect(ctx.checker.getSemanticDiagnostics(ctx.program.getSourceFile(ctx.uri)!)).toHaveLength(0);
 });
 
+test("unused single-type imports are flagged (1305)", () => {
+  const unused = (text: string): string[] => {
+    const ctx = setup(text);
+    return ctx.checker
+      .getSemanticDiagnostics(ctx.program.getSourceFile(ctx.uri)!)
+      .filter(d => d.code === 1305)
+      .map(d => d.messageText);
+  };
+  expect(unused("import java.util.List;\nclass C {}")).toEqual(["Unused import 'java.util.List'."]);
+  expect(unused("import java.util.List;\nclass C { List<String> l; }")).toEqual([]);
+  // any identifier occurrence counts as a use (conservative)
+  expect(unused("import java.util.List;\nclass C { void m() { int List = 1; } }")).toEqual([]);
+  // static and on-demand imports are never judged
+  expect(unused("import java.util.*;\nimport static java.util.List.of;\nclass C {}")).toEqual([]);
+  // a recovered parse stays silent
+  expect(unused("import java.util.List;\nclass C { void m() { int = ; } }")).toEqual([]);
+});
+
 test("argument types against the single arity-matching overload (1300)", () => {
   const args = (text: string): string[] => {
     const ctx = setup(text);

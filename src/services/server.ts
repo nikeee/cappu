@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import {
   type CodeAction,
+  DiagnosticTag,
   type CodeActionParams,
   type CodeLens,
   createConnection,
@@ -172,6 +173,8 @@ function toSeverity(category: DiagnosticCategory): DiagnosticSeverity {
 
 function toLspDiagnostic(d: JavaDiagnostic, lineStarts: readonly number[]): LspDiagnostic {
   return {
+    // editors fade out ranges tagged Unnecessary (unused imports)
+    ...(d.code === 1305 ? { tags: [DiagnosticTag.Unnecessary] } : {}),
     severity: toSeverity(d.category),
     range: {
       start: getLineAndCharacterOfPosition(lineStarts, d.pos),

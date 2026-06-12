@@ -3,7 +3,7 @@
 // pure and testable; the server maps them to LSP WorkspaceEdits. Actions are
 // offered for a [start, end) selection range in one source file.
 
-import type { Checker } from "../compiler/checker.ts";
+import { type Checker, findUnusedImports } from "../compiler/checker.ts";
 import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
 import { forEachChild } from "../compiler/parser.ts";
 import type { Program } from "../compiler/program.ts";
@@ -399,6 +399,30 @@ function removeUnusedParameter(
   return [{ title: `Remove unused parameter '${name}'`, kind: "refactor.rewrite", changes }];
 }
 
+// --- remove unused import ----------------------------------------------------
+
+function removeUnusedImport(
+  sourceFile: SourceFile,
+  start: number,
+  end: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return []; // same gate as the diagnostic
+  return findUnusedImports(sourceFile)
+    .filter(imp => skipTrivia(sourceFile.text, imp.pos) <= end && start <= imp.end)
+    .map(imp => {
+      const importStart = skipTrivia(sourceFile.text, imp.pos);
+      // take the trailing line break with the import
+      let removeEnd = imp.end;
+      if (sourceFile.text[removeEnd] === "\r") removeEnd++;
+      if (sourceFile.text[removeEnd] === "\n") removeEnd++;
+      return {
+        title: `Remove unused import '${entityNameToString(imp.name)}'`,
+        kind: "quickfix",
+        changes: [{ start: importStart, end: removeEnd, newText: "" }],
+      };
+    });
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
@@ -412,5 +436,6 @@ export function getCodeActions(
     ...extractLocalVariable(sourceFile, start, end),
     ...inlineLocalVariable(program, checker, sourceFile, start),
     ...removeUnusedParameter(program, checker, sourceFile, start),
+    ...removeUnusedImport(sourceFile, start, end),
   ];
 }

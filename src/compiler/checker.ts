@@ -44,6 +44,7 @@ import {
   type ElementAccessExpression,
   type EnumDeclaration,
   type Identifier,
+  type ImportDeclaration,
   type LambdaExpression,
   type LiteralExpression,
   type MethodDeclaration,
@@ -198,6 +199,30 @@ function enclosingTypeSymbol(node: Node): Symbol | undefined {
     current = current.parent;
   }
   return undefined;
+}
+
+/**
+ * Single-type imports (non-static, non-on-demand) whose simple name never
+ * appears in the file body. Conservative: ANY identifier occurrence counts as
+ * a use, so a used import is never flagged (the same rule "Organize imports"
+ * applies when dropping imports).
+ */
+export function findUnusedImports(sourceFile: SourceFile): ImportDeclaration[] {
+  const candidates = sourceFile.imports.filter(imp => !imp.isStatic && !imp.isOnDemand);
+  if (candidates.length === 0) return [];
+  const used = new Set<string>();
+  const collect = (node: Node): void => {
+    if (node.kind === SyntaxKind.Identifier) used.add((node as Identifier).text);
+    forEachChild(node, child => {
+      collect(child);
+      return undefined;
+    });
+  };
+  for (const statement of sourceFile.statements) collect(statement);
+  return candidates.filter(imp => {
+    const fqn = entityNameToString(imp.name);
+    return !used.has(fqn.slice(fqn.lastIndexOf(".") + 1));
+  });
 }
 
 export function createChecker(program: Program): Checker {
@@ -1978,6 +2003,22 @@ export function createChecker(program: Program): Checker {
     };
 
     visit(sourceFile);
+
+    // Unused imports (warnings). A recovered parse may have dropped the very
+    // identifiers that would prove an import used - judge clean parses only.
+    if (sourceFile.parseDiagnostics.length === 0) {
+      for (const imp of findUnusedImports(sourceFile)) {
+        const start = skipTrivia(sourceFile.text, imp.pos);
+        diagnostics.push(
+          createDiagnostic(
+            start,
+            imp.end - start,
+            Diagnostics.Unused_import_0,
+            entityNameToString(imp.name),
+          ),
+        );
+      }
+    }
     return diagnostics;
   }
 
