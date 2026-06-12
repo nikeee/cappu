@@ -21,7 +21,16 @@ function complete(text: string, marker = "/*|*/") {
 
 test("member completion lists the type's members", () => {
   const items = complete("class P { int age; String name; } class U { void m(P p) { p./*|*/ } }");
-  expect(items.map(i => i.label).sort()).toEqual(["age", "name"]);
+  // declared members plus what every class inherits from java.lang.Object
+  expect(items.map(i => i.label).sort()).toEqual([
+    "age",
+    "clone",
+    "equals",
+    "getClass",
+    "hashCode",
+    "name",
+    "toString",
+  ]);
 });
 
 test("member completion works on incomplete code (no trailing token)", () => {

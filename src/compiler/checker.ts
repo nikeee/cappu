@@ -630,13 +630,18 @@ export function createChecker(program: Program): Checker {
         ? resolveType((n as MethodDeclaration).returnType, n)
         : undefined;
     }
-    // m(() -> ...)  -> the resolved method's parameter type at the lambda's index.
+    // m(() -> ...)  -> the resolved method's parameter type at the lambda's
+    // index, instantiated with the receiver's type arguments (so the lambda
+    // passed to Map<String, Integer>.forEach sees BiConsumer<? super String,
+    // ? super Integer>, not the declared K/V).
     if (parent.kind === SyntaxKind.CallExpression) {
       const call = parent as CallExpression;
       const index = call.arguments.indexOf(lambda);
-      const decl = index >= 0 ? resolveCall(call) : undefined;
-      const param = decl?.parameters[index] as { type?: TypeNode } | undefined;
-      return param?.type ? resolveType(param.type, decl!) : undefined;
+      const info = index >= 0 ? resolveCallInfo(call) : undefined;
+      const param = info?.decl.parameters[index] as { type?: TypeNode } | undefined;
+      return param?.type
+        ? substitute(resolveType(param.type, info!.decl), info!.receiverSubst)
+        : undefined;
     }
     return undefined;
   }
@@ -681,10 +686,20 @@ export function createChecker(program: Program): Checker {
     if (!sam) return undefined;
     const fi = functionalInfo(target, sam);
 
-    const asType = (e: Node): Symbol | undefined =>
-      e.kind === SyntaxKind.Identifier
-        ? resolveTypeEntityName(e as Identifier, e, program)
-        : undefined;
+    const asType = (e: Node): Symbol | undefined => {
+      if (e.kind === SyntaxKind.Identifier) {
+        return resolveTypeEntityName(e as Identifier, e, program);
+      }
+      // Outer.Nested::m (e.g. Map.Entry::getKey): the qualifier parses as a
+      // property access, but names a nested type.
+      if (e.kind === SyntaxKind.PropertyAccessExpression) {
+        const access = e as PropertyAccessExpression;
+        const outer = asType(access.expression);
+        const nested = outer && lookupMember(outer, access.name.text, Meaning.Type, program);
+        return nested && nested.flags & SymbolFlags.Type ? nested : undefined;
+      }
+      return undefined;
+    };
     const overloads = (typeSymbol: Symbol, name: string): MethodDeclaration[] => {
       const m = lookupMember(typeSymbol, name, Meaning.Value, program);
       return (m?.declarations?.filter(d => d.kind === SyntaxKind.MethodDeclaration) ??
@@ -740,7 +755,11 @@ export function createChecker(program: Program): Checker {
     const sam = functionalMethod(target.symbol);
     if (!sam || index >= sam.parameters.length) return errorType;
     const paramType = resolveType(sam.parameters[index]!.type, sam);
-    return substitute(paramType, substitutionFor(target.symbol, target.typeArguments));
+    const substituted = substitute(paramType, substitutionFor(target.symbol, target.typeArguments));
+    // A wildcard target argument (BiConsumer<? super String, ...>): the lambda
+    // parameter takes the wildcard's bound (JLS 18.5.3 descriptor inference).
+    if (substituted.kind === TypeKind.Wildcard && substituted.bound) return substituted.bound;
+    return substituted;
   }
 
   // Infer the type of a `var` declaration: from the initializer for a local, or

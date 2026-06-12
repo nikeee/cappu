@@ -1,4 +1,9 @@
 === member ===
   field value
+  method clone
+  method equals
   method get
+  method getClass
+  method hashCode
   method set
+  method toString

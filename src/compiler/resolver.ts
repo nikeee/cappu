@@ -134,6 +134,17 @@ function superTypeSymbols(typeSymbol: Symbol, program: Program): Symbol[] {
         if (symbol) result.push(symbol);
       }
     }
+    // Every class without an extends clause (and every record) implicitly
+    // extends java.lang.Object (JLS 8.1.4); an interface's members include
+    // Object's public ones (JLS 9.2). Without this, bare calls to inherited
+    // Object methods (getClass(), hashCode(), ...) never resolve.
+    const hasClassSuper =
+      declaration.kind === SyntaxKind.ClassDeclaration &&
+      (declaration as ClassDeclaration).extendsType !== undefined;
+    if (!hasClassSuper) {
+      const objectSymbol = program.getGlobalIndex().getType("java.lang.Object" as Fqn);
+      if (objectSymbol && objectSymbol !== typeSymbol) result.push(objectSymbol);
+    }
     return result;
   } finally {
     resolvingSupertypes.delete(typeSymbol);

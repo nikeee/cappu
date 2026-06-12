@@ -1,13 +1,17 @@
 === here ===
   method charAt
+  method clone
   method compareTo
   method compareToIgnoreCase
   method concat
   method contains
   method endsWith
+  method equals
   method equalsIgnoreCase
   method format
   method getBytes
+  method getClass
+  method hashCode
   method indexOf
   method isBlank
   method isEmpty

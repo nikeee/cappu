@@ -2766,6 +2766,47 @@ test(
   },
 );
 
+// Constructs from nikeee/cappu#15 that used to degrade to placeholder bodies:
+// bare calls to inherited Object methods, lambda parameters typed through
+// wildcard type arguments, collection copy/capacity constructors, SortedMap,
+// and Outer.Nested::method references.
+test("issue #15 constructs emit without degrading", () => {
+  const sources: [string, string][] = [
+    [
+      "GetClassBare",
+      "class GetClassBare { boolean same(Object o) { return getClass() == o.getClass(); } }",
+    ],
+    [
+      "ForEachConcat",
+      "import java.util.*; class ForEachConcat { String m(Map<String, Integer> map) { StringBuilder sb = new StringBuilder(); map.forEach((k, v) -> sb.append(k + v)); return sb.toString(); } }",
+    ],
+    [
+      "SortedChain",
+      'import java.util.*; class SortedChain { void m() { SortedMap<String, Set<String>> map = new TreeMap<>(); map.computeIfAbsent("k", __ -> new LinkedHashSet<>()).add("v"); } }',
+    ],
+    [
+      "CopyCtors",
+      "import java.util.*; class CopyCtors { List<String> m(Collection<String> c) { Map<String, Integer> capacity = new LinkedHashMap<>(16); Set<String> copy = new HashSet<>(c); return new ArrayList<>(c); } }",
+    ],
+    [
+      "EntryRef",
+      "import java.util.*; class EntryRef { void m(Map<String, Integer> map, List<Map.Entry<String, Integer>> out) { out.sort(Comparator.comparing(Map.Entry::getKey)); } }",
+    ],
+    [
+      "IterForEach",
+      "import java.util.*; class IterForEach { void m(List<String> l, StringBuilder sb) { l.forEach(s -> sb.append(s)); } }",
+    ],
+  ];
+  const degraded: string[] = [];
+  setDegradeListener((cls, member) => degraded.push(`${cls}.${member}`));
+  try {
+    for (const [name, source] of sources) emitClasses(name, source);
+  } finally {
+    setDegradeListener(undefined);
+  }
+  expect(degraded).toEqual([]);
+});
+
 test("the degrade listener reports placeholder bodies by class and member", () => {
   const degraded: string[] = [];
   setDegradeListener((cls, member) => degraded.push(`${cls}.${member}`));

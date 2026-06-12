@@ -31,7 +31,10 @@ interface CharSequence {
 
 interface Comparable<T> { int compareTo(T o); }
 
-interface Iterable<T> { java.util.Iterator<T> iterator(); }
+interface Iterable<T> {
+  java.util.Iterator<T> iterator();
+  void forEach(java.util.function.Consumer<? super T> action);
+}
 
 interface Runnable { void run(); }
 
@@ -538,6 +541,9 @@ interface Map<K, V> {
 }
 
 class ArrayList<E> implements List<E> {
+  public ArrayList() {}
+  public ArrayList(int initialCapacity) {}
+  public ArrayList(Collection<? extends E> c) {}
   public int size() { return 0; }
   public boolean isEmpty() { return false; }
   public boolean contains(Object o) { return false; }
@@ -557,6 +563,8 @@ class ArrayList<E> implements List<E> {
 }
 
 class LinkedList<E> implements List<E>, Queue<E> {
+  public LinkedList() {}
+  public LinkedList(Collection<? extends E> c) {}
   public int size() { return 0; }
   public boolean isEmpty() { return false; }
   public boolean contains(Object o) { return false; }
@@ -579,6 +587,9 @@ class LinkedList<E> implements List<E>, Queue<E> {
 }
 
 class HashSet<E> implements Set<E> {
+  public HashSet() {}
+  public HashSet(int initialCapacity) {}
+  public HashSet(Collection<? extends E> c) {}
   public int size() { return 0; }
   public boolean isEmpty() { return false; }
   public boolean contains(Object o) { return false; }
@@ -590,7 +601,31 @@ class HashSet<E> implements Set<E> {
   public java.util.Iterator<E> iterator() { return null; }
 }
 
-class TreeSet<E> implements Set<E> {
+class LinkedHashSet<E> implements Set<E> {
+  public LinkedHashSet() {}
+  public LinkedHashSet(int initialCapacity) {}
+  public LinkedHashSet(Collection<? extends E> c) {}
+  public int size() { return 0; }
+  public boolean isEmpty() { return false; }
+  public boolean contains(Object o) { return false; }
+  public boolean add(E e) { return false; }
+  public boolean remove(Object o) { return false; }
+  public boolean addAll(Collection<? extends E> c) { return false; }
+  public void clear() {}
+  public Object[] toArray() { return null; }
+  public java.util.Iterator<E> iterator() { return null; }
+}
+
+interface SortedSet<E> extends Set<E> {
+  E first();
+  E last();
+  SortedSet<E> headSet(E toElement);
+  SortedSet<E> tailSet(E fromElement);
+  SortedSet<E> subSet(E fromElement, E toElement);
+  java.util.Comparator<? super E> comparator();
+}
+
+class TreeSet<E> implements SortedSet<E> {
   public int size() { return 0; }
   public boolean isEmpty() { return false; }
   public boolean contains(Object o) { return false; }
@@ -603,6 +638,9 @@ class TreeSet<E> implements Set<E> {
 }
 
 class HashMap<K, V> implements Map<K, V> {
+  public HashMap() {}
+  public HashMap(int initialCapacity) {}
+  public HashMap(Map<? extends K, ? extends V> m) {}
   public int size() { return 0; }
   public boolean isEmpty() { return false; }
   public V get(Object key) { return null; }
@@ -618,7 +656,35 @@ class HashMap<K, V> implements Map<K, V> {
   public Set<Map.Entry<K, V>> entrySet() { return null; }
 }
 
-class TreeMap<K, V> implements Map<K, V> {
+class LinkedHashMap<K, V> implements Map<K, V> {
+  public LinkedHashMap() {}
+  public LinkedHashMap(int initialCapacity) {}
+  public LinkedHashMap(Map<? extends K, ? extends V> m) {}
+  public int size() { return 0; }
+  public boolean isEmpty() { return false; }
+  public V get(Object key) { return null; }
+  public V getOrDefault(Object key, V defaultValue) { return null; }
+  public V put(K key, V value) { return null; }
+  public V putIfAbsent(K key, V value) { return null; }
+  public V remove(Object key) { return null; }
+  public boolean containsKey(Object key) { return false; }
+  public boolean containsValue(Object value) { return false; }
+  public void clear() {}
+  public Set<K> keySet() { return null; }
+  public Collection<V> values() { return null; }
+  public Set<Map.Entry<K, V>> entrySet() { return null; }
+}
+
+interface SortedMap<K, V> extends Map<K, V> {
+  K firstKey();
+  K lastKey();
+  SortedMap<K, V> headMap(K toKey);
+  SortedMap<K, V> tailMap(K fromKey);
+  SortedMap<K, V> subMap(K fromKey, K toKey);
+  java.util.Comparator<? super K> comparator();
+}
+
+class TreeMap<K, V> implements SortedMap<K, V> {
   public int size() { return 0; }
   public boolean isEmpty() { return false; }
   public V get(Object key) { return null; }

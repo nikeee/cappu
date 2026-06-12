@@ -53,7 +53,12 @@
   interface Comparable
   interface Iterable
   interface Runnable
+  method clone
+  method equals
+  method getClass
+  method hashCode
   method helper
   method m
+  method toString
   variable local
   variable param
