@@ -384,6 +384,9 @@ function runJavacCompile(
       tmp,
       "-encoding",
       "UTF-8",
+      ...(config.compilerOptions.release !== undefined
+        ? ["--release", String(config.compilerOptions.release)]
+        : []),
       ...(processors.length > 0
         ? ["-processorpath", processors.join(delimiter), "-s", generatedSourcesDir(config)]
         : []),

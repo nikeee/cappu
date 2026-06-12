@@ -199,3 +199,5 @@ no timestamps were captured.
 - 2026-06-12 21:04 — phase d: https://github.com/nikeee/cappu/issues/16. You dont have to implement it in this plan, but you can take it into account for the future
 - 2026-06-13 00:52 — when youre done: check the source and hoist any inline-require or imports. every import has to be at the top of the file. Also, no CJS. only ESM.
 - 2026-06-13 01:16 — now implement cappu test. also include an example in the examples dir. also end-to-end-test the example
+- 2026-06-13 01:30 — after that, add a compilerOptions.release flag. maybe that is not the best name and there is a better one
+- 2026-06-13 01:30 — make a plan for cappu test first

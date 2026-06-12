@@ -306,6 +306,17 @@ test("the default compile delegates to javac", { skip: !HAS_JAVAC }, () => {
   );
 });
 
+test("compilerOptions.release targets an older class-file version", { skip: !HAS_JAVAC }, () => {
+  inTempDir({ "R.java": "class R {}" }, (dir, paths) => {
+    writeFileSync(join(dir, "cappu.json"), '{ "compilerOptions": { "release": 17 } }');
+    const result = runCompile(paths, { outDir: dir, config: loadConfig(undefined, dir) });
+    expect(result.success).toBe(true);
+    // class file major version: Java 17 -> 61, at offset 6
+    const bytes = readFileSync(result.written[0]!);
+    expect(bytes.readUInt16BE(6)).toBe(61);
+  });
+});
+
 test("the default compile surfaces javac's located diagnostics", { skip: !HAS_JAVAC }, () => {
   inTempDir({ "B.java": 'class B { void m() { int x = "s"; } }' }, (dir, paths) => {
     const result = runCompile(paths, {

@@ -130,6 +130,9 @@ export function procOnlyArgs(
     out.classes,
     "-encoding",
     "UTF-8",
+    ...(config.compilerOptions.release !== undefined
+      ? ["--release", String(config.compilerOptions.release)]
+      : []),
     ...(classPath.length > 0 ? ["-cp", classPath.join(delimiter)] : []),
     ...(sourcePaths.length > 0 ? ["-sourcepath", sourcePaths.join(delimiter)] : []),
     ...files,

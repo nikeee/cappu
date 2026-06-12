@@ -42,6 +42,8 @@ const CompilerOptionsSchema = z.object({
   failOnDegrade: z.boolean().optional(),
   /** The javac binary compiles use (a provisioned "jdk" entry wins). */
   javac: z.string().default("javac"),
+  /** Java release to target (javac --release); e.g. 21. Unset: javac's own. */
+  release: z.number().int().min(8).optional(),
   /** Main-Class for jar outputs; default: the only main(String[]) found. */
   mainClass: z.string().optional(),
   /** Compile with cappu's own (experimental) compiler instead of javac. */
@@ -148,6 +150,11 @@ export const CONFIG_TEMPLATE = `
     // The javac binary compiles run with (default: "javac" from $PATH; a
     // provisioned "jdk" entry wins).
     // "javac": "javac",
+
+    // Java release to compile FOR (javac --release): language level and class
+    // file version, e.g. 21 even under a newer JDK. Default if unset: the
+    // javac binary's own release. Same name as Maven/Gradle use.
+    // "release": 21,
 
     // Main-Class of jar outputs (java -jar). Default if unset: the single
     // class declaring public static void main(String[]), if exactly one.

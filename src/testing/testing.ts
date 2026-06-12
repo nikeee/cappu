@@ -78,6 +78,9 @@ export function compileTestsArgs(config: CappuConfig, sources: readonly string[]
     testClassesDir(config),
     "-encoding",
     "UTF-8",
+    ...(config.compilerOptions.release !== undefined
+      ? ["--release", String(config.compilerOptions.release)]
+      : []),
     "-cp",
     dependencyClassPath(config).join(delimiter),
     ...sources,
