@@ -147,6 +147,20 @@ const RUNS: Record<string, string> = {
 // streams compare exactly (field ++ lowers to getfield/iconst_1/iadd/putfield,
 // matching javac).
 const MULTI_FIXTURES: Record<string, string> = {
+  QualifiedAnon: [
+    "public class QualifiedAnon {",
+    "  int x = 7;",
+    "  class Inner {",
+    "    int v;",
+    "    Inner(int a) { v = a; }",
+    "    int get() { return v + x; }",
+    "  }",
+    "  static int use(QualifiedAnon outer) {",
+    "    QualifiedAnon.Inner i = outer.new Inner(5) { int get() { return v + 100; } };",
+    "    return i.get();",
+    "  }",
+    "}",
+  ].join("\n"),
   ICast: [
     "public class ICast {",
     "  interface A { int a(); }",
@@ -2255,6 +2269,37 @@ test(
       ].join("\n"),
       // bump(): base = 10 + 5 = 15; sum(): v(5) + base(15) = 20
       "20\n",
+    );
+  },
+);
+
+test(
+  "qualified anonymous outer.new Inner(){...} runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "QAnon",
+      [
+        "public class QAnon {",
+        "  int x;",
+        "  QAnon(int x) { this.x = x; }",
+        "  class Inner {",
+        "    int v;",
+        "    Inner(int a) { v = a; }",
+        "    int get() { return v + x; }",
+        "  }",
+        "  public static void main(String[] a) {",
+        "    QAnon one = new QAnon(10);",
+        "    QAnon two = new QAnon(20);",
+        "    QAnon.Inner plain = one.new Inner(1);",
+        "    QAnon.Inner anon = two.new Inner(2) { int get() { return v * 100; } };",
+        "    System.out.println(plain.get());",
+        "    System.out.println(anon.get());",
+        "  }",
+        "}",
+      ].join("\n"),
+      // plain: 1 + 10; anonymous override ignores x: 2 * 100
+      "11\n200\n",
     );
   },
 );

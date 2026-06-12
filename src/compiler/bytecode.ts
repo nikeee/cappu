@@ -2319,6 +2319,18 @@ function generateBody(
     };
   };
 
+  // The fieldref owner for an implicit-this access: javac references an
+  // INHERITED instance field through the current class (the receiver's static
+  // type), not the declaring superclass. Enclosing-class members (reached via
+  // this$0, or about to degrade) and statics keep their declaring owner.
+  const implicitRefOwner = (info: FieldInfo): InternalName =>
+    !info.isStatic &&
+    info.owner !== thisInternalName &&
+    !(outerThis && info.owner === outerThis.enclosingInternal) &&
+    !thisInternalName.startsWith(`${info.owner}$`)
+      ? thisInternalName
+      : info.owner;
+
   // Read a field: getstatic, or emit the receiver then getfield. `emitReceiver`
   // is only invoked for instance fields (skipped for statics, like javac).
   const emitFieldRead = (info: FieldInfo, emitReceiver: () => void): Descriptor => {
@@ -2514,7 +2526,9 @@ function generateBody(
           const fi = fieldInfoOf(symbol);
           return erasedCheckcast(
             node,
-            emitFieldRead(fi, () => emitImplicitReceiver(fi.owner)),
+            emitFieldRead({ ...fi, owner: implicitRefOwner(fi) }, () =>
+              emitImplicitReceiver(fi.owner),
+            ),
           );
         }
         throw new UnsupportedEmit();
@@ -2839,7 +2853,49 @@ function generateBody(
     // is the explicit enclosing instance, passed as the leading this$0
     // constructor argument after javac's Objects.requireNonNull check.
     if (oc.qualifier) {
-      if (oc.classBody) throw new UnsupportedEmit(); // qualified anonymous class
+      // Qualified ANONYMOUS creation (outer.new Inner(...) { ... }): the
+      // synthetic class extends the member class and its constructor forwards
+      // the qualifier to super's <init>. Only the simple shape is emitted
+      // (no captures, no this$0 of the creating context - javac's layout).
+      if (oc.classBody) {
+        const target = anonymousTarget(oc, program);
+        if (!target?.superThis0Desc) throw new UnsupportedEmit();
+        // Our member-class emission only gives the constructor a leading
+        // enclosing-instance parameter when this$0 is actually used; the
+        // anonymous super call must agree with that emitted shape.
+        if (!superTakesThis0(target, program, checker)) throw new UnsupportedEmit();
+        const captures = collectCaptures(oc.classBody, oc.pos, oc.end, program, checker);
+        const outerThis = outerThisInfo(oc.classBody, oc.parent, program, checker);
+        if (captures.length > 0 || outerThis) throw new UnsupportedEmit();
+        const anonName = anonymousClassName(oc, program);
+        const args = oc.arguments ?? [];
+        const ref = descOf(anonName);
+        code.u1(OP_NEW);
+        code.u2(cp.classInfo(anonName));
+        pushRef(ref);
+        code.u1(OP_DUP);
+        pushRef(ref);
+        emitExpr(oc.qualifier);
+        code.u1(OP_DUP);
+        pushRef(target.superThis0Desc);
+        code.u1(OP_INVOKESTATIC);
+        code.u2(
+          cp.methodref(
+            "java/util/Objects" as InternalName,
+            "requireNonNull",
+            "(Ljava/lang/Object;)Ljava/lang/Object;" as MethodDescriptor,
+          ),
+        );
+        code.u1(OP_POP);
+        pop(1);
+        args.forEach((arg, i) => coerce(emitExpr(arg), target.superParamDescs[i]!));
+        const ctorDesc =
+          `(${target.superThis0Desc}${target.superParamDescs.join("")})V` as MethodDescriptor;
+        code.u1(OP_INVOKESPECIAL);
+        code.u2(cp.methodref(anonName, "<init>", ctorDesc));
+        pop(1 + 1 + args.length); // dup'd ref + enclosing instance + args
+        return ref;
+      }
       const created = checker.getTypeOfExpression(node);
       if (created.kind !== TypeKind.Class) throw new UnsupportedEmit();
       const createdDecl = created.symbol.valueDeclaration ?? created.symbol.declarations?.[0];
@@ -2893,6 +2949,10 @@ function generateBody(
     if (oc.classBody) {
       const target = anonymousTarget(oc, program);
       if (!target) throw new UnsupportedEmit();
+      // An unqualified anonymous subclass of a member class would need the
+      // implicit enclosing instance threaded to super's <init> - not emitted
+      // yet (previously this produced a super call with the wrong descriptor).
+      if (target.superThis0Desc) throw new UnsupportedEmit();
       const anonName = anonymousClassName(oc, program);
       const captures = collectCaptures(oc.classBody, oc.pos, oc.end, program, checker);
       const outerThis = outerThisInfo(oc.classBody, oc.parent, program, checker);
@@ -3530,7 +3590,7 @@ function generateBody(
       // write without a this$0 route rather than emitting a wrong-typed aload_0.
       if (symbol && symbol.flags & SymbolFlags.Field) {
         const fi = fieldInfoOf(symbol);
-        writeField(fi, () => {
+        writeField({ ...fi, owner: implicitRefOwner(fi) }, () => {
           if (fi.isStatic) return;
           emitImplicitReceiver(fi.owner);
         });
@@ -6198,8 +6258,14 @@ function loadByDescriptor(code: ByteBuffer, descriptor: Descriptor, slot: number
           : ch === "L" || ch === "["
             ? OP_ALOAD
             : OP_ILOAD;
-  code.u1(op);
-  code.u1(slot);
+  if (slot <= 3) {
+    // xload_<n> short form (JVMS 6.5): the families are contiguous blocks of
+    // four starting at iload_0, in the same order as the base opcodes.
+    code.u1(OP_ILOAD_0 + (op - OP_ILOAD) * 4 + slot);
+  } else {
+    code.u1(op);
+    code.u1(slot);
+  }
 }
 
 // The synthesized constructor for a capturing local/anonymous class: call super
@@ -6215,9 +6281,18 @@ function emitSynthCtor(
   // Enclosing-instance descriptor (L<enclosing>;) when the class captures this$0;
   // it is the first constructor parameter, stored into the this$0 field.
   this0Descriptor?: Descriptor,
+  // The super class's enclosing instance (a non-static member class as the
+  // supertype): the first parameter, null-checked and forwarded to super's
+  // <init> - never combined with this0Descriptor/captures (callers degrade).
+  superThis0Descriptor?: Descriptor,
 ): ByteBuffer {
   const code = new ByteBuffer();
   let slot = 1;
+  let superThis0Slot = 0;
+  if (superThis0Descriptor) {
+    superThis0Slot = slot;
+    slot += 1;
+  }
   let this0Slot = 0;
   if (this0Descriptor) {
     this0Slot = slot;
@@ -6244,12 +6319,29 @@ function emitSynthCtor(
     maxStack = Math.max(maxStack, 2);
   }
   code.u1(OP_ALOAD_0);
+  if (superThis0Descriptor) {
+    // javac's shape: load the enclosing instance, null-check it in place
+    // (dup; requireNonNull; pop), then pass it as super's first argument.
+    loadByDescriptor(code, superThis0Descriptor, superThis0Slot);
+    code.u1(OP_DUP);
+    code.u1(OP_INVOKESTATIC);
+    code.u2(
+      cp.methodref(
+        "java/util/Objects" as InternalName,
+        "requireNonNull",
+        "(Ljava/lang/Object;)Ljava/lang/Object;" as MethodDescriptor,
+      ),
+    );
+    code.u1(OP_POP);
+  }
   superParamDescs.forEach((d, i) => loadByDescriptor(code, d, superSlots[i]!));
+  const superDescs = [...(superThis0Descriptor ? [superThis0Descriptor] : []), ...superParamDescs];
   code.u1(OP_INVOKESPECIAL);
-  code.u2(
-    cp.methodref(superInternal, "<init>", `(${superParamDescs.join("")})V` as MethodDescriptor),
+  code.u2(cp.methodref(superInternal, "<init>", `(${superDescs.join("")})V` as MethodDescriptor));
+  maxStack = Math.max(
+    maxStack,
+    1 + (superThis0Descriptor ? 2 : 0) + superParamDescs.reduce((n, d) => n + slotsOf(d), 0),
   );
-  maxStack = Math.max(maxStack, 1 + superParamDescs.reduce((n, d) => n + slotsOf(d), 0));
   captures.forEach((c, i) => {
     code.u1(OP_ALOAD_0);
     loadByDescriptor(code, c.descriptor, captureSlots[i]!);
@@ -6262,6 +6354,7 @@ function emitSynthCtor(
   info.u2(0); // package-private synthetic-ish constructor
   info.u2(cp.utf8("<init>"));
   const descs = [
+    ...(superThis0Descriptor ? [superThis0Descriptor] : []),
     ...(this0Descriptor ? [this0Descriptor] : []),
     ...captures.map(c => c.descriptor),
     ...superParamDescs,
@@ -6751,6 +6844,24 @@ interface AnonymousTarget {
   superInternal: InternalName;
   interfaceInternal?: InternalName;
   superParamDescs: Descriptor[];
+  /**
+   * Set when the extended class is a non-static member class: its constructor
+   * takes the enclosing instance as a leading argument, which the anonymous
+   * class's synthetic constructor must accept and forward.
+   */
+  superThis0Desc?: Descriptor;
+  /** The extended class's declaration, when it is a project-source class. */
+  superDecl?: ClassDeclaration;
+}
+
+// Whether OUR emission of the extended member class gives its constructor the
+// leading enclosing-instance parameter (it does only when the class actually
+// uses this$0; javac always does - those super classes degrade for now).
+function superTakesThis0(target: AnonymousTarget, program: Program, checker: Checker): boolean {
+  return (
+    target.superDecl !== undefined &&
+    memberInnerThis0(target.superDecl, program, checker) !== undefined
+  );
 }
 
 // If `node` is an anonymous class we can emit - body is methods only (no fields
@@ -6791,7 +6902,26 @@ function anonymousTarget(
   const superParamDescs = ctor
     ? ctor.parameters.map(p => paramDescriptor(p as Parameter, program))
     : [];
-  return { superInternal: binaryName(sym), superParamDescs };
+  // A non-static member class as the supertype: its <init> takes the
+  // enclosing instance first, so the synthetic constructor must forward one.
+  const declaration = sym.valueDeclaration ?? sym.declarations?.[0];
+  const superThis0Desc =
+    declaration?.kind === SyntaxKind.ClassDeclaration &&
+    declaration.parent &&
+    TYPE_DECL_KINDS.has(declaration.parent.kind) &&
+    !isStaticDeclaration(declaration as ClassDeclaration) &&
+    declaration.parent.symbol
+      ? descOf(binaryName(declaration.parent.symbol))
+      : undefined;
+  return {
+    superInternal: binaryName(sym),
+    superParamDescs,
+    superThis0Desc,
+    superDecl:
+      declaration?.kind === SyntaxKind.ClassDeclaration
+        ? (declaration as ClassDeclaration)
+        : undefined,
+  };
 }
 
 // Emit an anonymous interface-implementing class, or undefined if unsupported.
@@ -6814,6 +6944,16 @@ export function emitAnonymousClassIfPossible(
 
   const outerThis = outerThisInfo(node.classBody!, node.parent, program, checker);
   const this0Descriptor = outerThis ? descOf(outerThis.enclosingInternal) : undefined;
+
+  // A member-class supertype needs its enclosing instance forwarded through
+  // the synthetic constructor; only the simple shape (no captures, no this$0
+  // of the creating context, no field initializers) is emitted.
+  if (
+    target.superThis0Desc &&
+    (captures.length > 0 || this0Descriptor || !superTakesThis0(target, program, checker))
+  ) {
+    return undefined;
+  }
 
   const fields = new ByteBuffer();
   let fieldCount = 0;
@@ -6841,6 +6981,7 @@ export function emitAnonymousClassIfPossible(
   // With field initializers the constructor must run them after the super/capture
   // prologue (generated via generateBody); otherwise the lighter emitSynthCtor
   // produces the identical prologue-only constructor.
+  if (target.superThis0Desc && instanceInits.length > 0) return undefined;
   methods.append(
     instanceInits.length > 0
       ? emitSynthCtorWithInits(
@@ -6864,6 +7005,7 @@ export function emitAnonymousClassIfPossible(
           target.superParamDescs,
           captures,
           this0Descriptor,
+          target.superThis0Desc,
         ),
   );
   methodCount++;
@@ -6901,7 +7043,9 @@ export function emitAnonymousClassIfPossible(
         checker,
         name,
         lambdaMethods,
-        ACC_PUBLIC,
+        // implementing an interface forces public; a class-extending body
+        // keeps its declared (package-private) access, as javac does
+        target.interfaceInternal ? ACC_PUBLIC : 0,
         captureMap,
         outerThis,
       ),

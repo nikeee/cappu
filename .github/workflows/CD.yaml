@@ -48,8 +48,8 @@ jobs:
     needs: test
 
     permissions:
-        contents: read
-        packages: write
+      contents: read
+      packages: write
 
     steps:
       - uses: docker/setup-qemu-action@v4

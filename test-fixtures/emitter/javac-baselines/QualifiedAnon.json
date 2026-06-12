@@ -1,0 +1,106 @@
+{
+  "QualifiedAnon$1": {
+    "members": [
+      "QualifiedAnon$1(QualifiedAnon, int);",
+      "int get();"
+    ],
+    "code": [
+      [
+        "QualifiedAnon$1(QualifiedAnon, int);",
+        [
+          "aload_0",
+          "aload_1",
+          "dup",
+          "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+          "pop",
+          "iload_2",
+          "invokespecial # // Method QualifiedAnon$Inner.\"<init>\":(LQualifiedAnon;I)V",
+          "return"
+        ]
+      ],
+      [
+        "int get();",
+        [
+          "aload_0",
+          "getfield # // Field v:I",
+          "bipush 100",
+          "iadd",
+          "ireturn"
+        ]
+      ]
+    ]
+  },
+  "QualifiedAnon$Inner": {
+    "members": [
+      "QualifiedAnon$Inner(QualifiedAnon, int);",
+      "final QualifiedAnon this$0;",
+      "int get();",
+      "int v;"
+    ],
+    "code": [
+      [
+        "QualifiedAnon$Inner(QualifiedAnon, int);",
+        [
+          "aload_0",
+          "aload_1",
+          "putfield # // Field this$0:LQualifiedAnon;",
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "aload_0",
+          "iload_2",
+          "putfield # // Field v:I",
+          "return"
+        ]
+      ],
+      [
+        "int get();",
+        [
+          "aload_0",
+          "getfield # // Field v:I",
+          "aload_0",
+          "getfield # // Field this$0:LQualifiedAnon;",
+          "getfield # // Field QualifiedAnon.x:I",
+          "iadd",
+          "ireturn"
+        ]
+      ]
+    ]
+  },
+  "QualifiedAnon": {
+    "members": [
+      "int x;",
+      "public QualifiedAnon();",
+      "static int use(QualifiedAnon);"
+    ],
+    "code": [
+      [
+        "public QualifiedAnon();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "aload_0",
+          "bipush 7",
+          "putfield # // Field x:I",
+          "return"
+        ]
+      ],
+      [
+        "static int use(QualifiedAnon);",
+        [
+          "new # // class QualifiedAnon$1",
+          "dup",
+          "aload_0",
+          "dup",
+          "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+          "pop",
+          "iconst_5",
+          "invokespecial # // Method QualifiedAnon$1.\"<init>\":(LQualifiedAnon;I)V",
+          "astore_1",
+          "aload_1",
+          "invokevirtual # // Method QualifiedAnon$Inner.get:()I",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}
