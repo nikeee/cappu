@@ -18,12 +18,20 @@ const InlayHintsSchema = z.object({
 
 export const DEFAULT_CLASS_PATH = "./lib/classes";
 export const DEFAULT_SOURCE_PATH = "./src/main/java";
+export const DEFAULT_RESOURCE_PATH = "./src/main/resources";
+// Created by `cappu init` for the planned `cappu test` (nikeee/cappu#16):
+// test sources/resources and the directory test-only dependencies install to.
+export const DEFAULT_TEST_SOURCE_PATH = "./src/test/java";
+export const DEFAULT_TEST_RESOURCE_PATH = "./src/test/resources";
+export const DEFAULT_TEST_CLASS_PATH = "./lib/test-classes";
 
 const CompilerOptionsSchema = z.object({
   /** Directories or .jar files scanned for .class files (resolution only). */
   classPath: z.array(z.string()).default([DEFAULT_CLASS_PATH]),
   /** Directories scanned recursively for .java sources (resolution only). */
   sourcePaths: z.array(z.string()).default([DEFAULT_SOURCE_PATH]),
+  /** Directories whose files are copied verbatim into the build output. */
+  resourcePaths: z.array(z.string()).default([DEFAULT_RESOURCE_PATH]),
   /** Output root for the build artifacts. */
   outDir: z.string().default("./dist"),
   /** What `cappu compile` produces in outDir (nikeee/cappu#5). */
@@ -108,6 +116,10 @@ export const CONFIG_TEMPLATE = `
 
     // Sources to be compiled. Default if unset: ["./src/main/java"].
     // "sourcePaths": ["./src/main/java"],
+
+    // Resource directories: their files are copied verbatim into the build
+    // output (the classes tree / the jar). Default if unset: ["./src/main/resources"].
+    // "resourcePaths": ["./src/main/resources"],
 
     // Output root for the build artifacts (default if unset: "./dist").
     // "outDir": "./dist",

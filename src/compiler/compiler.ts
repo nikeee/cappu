@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, delimiter, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, relative, resolve } from "node:path";
 
 import { setDegradeListener } from "./bytecode.ts";
 import { createChecker } from "./checker.ts";
@@ -103,6 +103,31 @@ function classPathEntries(config: CappuConfig): ZipEntryInput[] {
     for (const relative of matches) {
       if (relative.endsWith(".jar")) addJar(join(root, relative));
       else entries.push({ name: relative, bytes: readFileSync(join(root, relative)) });
+    }
+  }
+  return entries;
+}
+
+// Every file under the configured resourcePaths, as archive entries whose
+// names mirror the path relative to the resource root (Maven's layout:
+// src/main/resources/a/b.txt -> a/b.txt). A missing resource directory is
+// simply empty - projects without resources stay warning-free.
+function resourceEntries(config: CappuConfig): ZipEntryInput[] {
+  const entries: ZipEntryInput[] = [];
+  for (const configured of config.compilerOptions.resourcePaths) {
+    const root = resolveConfigPath(config, configured);
+    if (!existsSync(root)) continue;
+    let matches: string[];
+    try {
+      matches = globSync("**/*", { cwd: root, withFileTypes: true })
+        .filter(d => d.isFile())
+        .map(d => relative(root, join(d.parentPath, d.name)));
+    } catch {
+      continue;
+    }
+    for (const rel of matches) {
+      // zip entry names use forward slashes whatever the platform
+      entries.push({ name: rel.replaceAll("\\", "/"), bytes: readFileSync(join(root, rel)) });
     }
   }
   return entries;
@@ -218,12 +243,17 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
         if (cls.hasMainMethod) mainClasses.push(cls.name.replaceAll("/", "."));
       }
     }
+    // Resources are copied verbatim next to the classes (Maven-style), so
+    // Class.getResource works the same from the tree and from the jar; our
+    // class files win on a name collision.
+    const haveNames = new Set(classes.map(c => c.name));
+    const resources = resourceEntries(options.config).filter(r => !haveNames.has(r.name));
     if (output === "classes") {
       // A package tree directly under outDir: outDir is a valid `java -cp` root.
-      for (const cls of classes) {
-        const out = join(outDir, cls.name);
+      for (const entry of [...classes, ...resources]) {
+        const out = join(outDir, entry.name);
         mkdirSync(dirname(out), { recursive: true });
-        writeFileSync(out, cls.bytes);
+        writeFileSync(out, entry.bytes);
         written.push(out);
       }
     } else {
@@ -238,7 +268,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
           `Manifest-Version: 1.0\r\n${mainClass ? `Main-Class: ${mainClass}\r\n` : ""}\r\n`,
         ),
       };
-      const entries = [manifest, ...classes];
+      const entries = [manifest, ...classes, ...resources];
       if (output === "fat-jar") {
         const have = new Set(entries.map(e => e.name));
         for (const entry of options.config ? classPathEntries(options.config) : []) {

@@ -12,9 +12,22 @@ import {
   configJsonSchema,
   DEFAULT_CLASS_PATH,
   DEFAULT_CONFIG_NAME,
+  DEFAULT_RESOURCE_PATH,
   DEFAULT_SOURCE_PATH,
+  DEFAULT_TEST_CLASS_PATH,
+  DEFAULT_TEST_RESOURCE_PATH,
+  DEFAULT_TEST_SOURCE_PATH,
   SCHEMA_FILE_NAME,
 } from "../config.ts";
+
+// What `cappu init` puts into a fresh .gitignore: everything cappu itself
+// (re)generates - installed dependencies and build output (nikeee/cappu#12).
+const GITIGNORE_TEMPLATE = `# dependencies installed by \`cappu install\`
+/lib/
+
+# build output of \`cappu compile\`
+/dist/
+`;
 
 export function runInit(configPath: string | undefined, withSchema: boolean): never {
   const target = resolve(configPath ?? DEFAULT_CONFIG_NAME);
@@ -26,10 +39,24 @@ export function runInit(configPath: string | undefined, withSchema: boolean): ne
     process.stderr.write(`cappu: ${target} already exists, not overwriting\n`);
     process.exit(1);
   }
-  // The default classPath and sourcePaths directories (nikeee/cappu#3), so a
-  // fresh project compiles without "configured path not found" warnings.
-  for (const dir of [DEFAULT_CLASS_PATH, DEFAULT_SOURCE_PATH]) {
+  // The standard project layout (nikeee/cappu#3, #12): dependency and source
+  // directories plus their resource/test counterparts, so a fresh project
+  // compiles warning-free and the layout is visible from the start.
+  for (const dir of [
+    DEFAULT_CLASS_PATH,
+    DEFAULT_TEST_CLASS_PATH,
+    DEFAULT_SOURCE_PATH,
+    DEFAULT_RESOURCE_PATH,
+    DEFAULT_TEST_SOURCE_PATH,
+    DEFAULT_TEST_RESOURCE_PATH,
+  ]) {
     mkdirSync(resolve(target, "..", dir), { recursive: true });
+  }
+  // A .gitignore covering what cappu generates; an existing one is left alone.
+  try {
+    writeFileSync(resolve(target, "..", ".gitignore"), GITIGNORE_TEMPLATE, { flag: "wx" });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
   }
   process.stdout.write(`${target}\n`);
   if (withSchema) {

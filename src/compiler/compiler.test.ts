@@ -137,6 +137,30 @@ test("output jar packs the classes behind a manifest, named after the project di
   });
 });
 
+test("resourcePaths files are copied into the classes tree and the jar (#12)", () => {
+  inTempDir({ "A.java": "package app; class A { }" }, (dir, paths) => {
+    mkdirSync(join(dir, "src", "main", "resources", "conf"), { recursive: true });
+    writeFileSync(join(dir, "src", "main", "resources", "conf", "app.properties"), "k=v\n");
+    writeFileSync(join(dir, "src", "main", "resources", "top.txt"), "hi");
+
+    const out = join(dir, "dist");
+    const result = runCompile(paths, { outDir: out, config: defaultConfig(dir) });
+    expect(result.success).toBe(true);
+    expect(readFileSync(join(out, "conf", "app.properties"), "utf8")).toBe("k=v\n");
+    expect(readFileSync(join(out, "top.txt"), "utf8")).toBe("hi");
+
+    const jarred = runCompile(paths, { outDir: out, output: "jar", config: defaultConfig(dir) });
+    expect(jarred.success).toBe(true);
+    const entries = readZipEntries(readFileSync(jarred.written[0]!))!.map(e => e.name);
+    expect(entries.sort()).toEqual([
+      "META-INF/MANIFEST.MF",
+      "app/A.class",
+      "conf/app.properties",
+      "top.txt",
+    ]);
+  });
+});
+
 test("jar manifests carry Main-Class for the unique entry point (#11)", () => {
   const decode = (jar: string): string =>
     new TextDecoder().decode(readZipEntries(readFileSync(jar))![0]!.read());
