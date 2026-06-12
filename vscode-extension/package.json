@@ -25,10 +25,19 @@
           ".java"
         ]
       }
+    ],
+    "commands": [
+      {
+        "command": "cappu.showReferences",
+        "title": "Show References",
+        "category": "Cappu",
+        "enablement": "false"
+      }
     ]
   },
   "activationEvents": [
-    "onLanguage:java"
+    "onLanguage:java",
+    "workspaceContains:cappu.json"
   ],
   "engines": {
     "vscode": "^1.80.0"
