@@ -33,7 +33,7 @@ const defaultFetchText: FetchText = async url => {
 
 const defaultFetchBytes: FetchBytes = async url => {
   const response = await fetch(url);
-  return response.ok ? new Uint8Array(await response.arrayBuffer()) : undefined;
+  return response.ok ? response.bytes() : undefined;
 };
 
 const xml = new XMLParser({
@@ -149,7 +149,7 @@ function interpolate(
 // child first in a chain: child values must win, so assign parent-last-first
 function mergedProperties(chain: readonly RawPom[]): Record<string, string> {
   const properties: Record<string, string> = {};
-  for (const pom of [...chain].reverse()) Object.assign(properties, pom.properties);
+  for (const pom of chain.toReversed()) Object.assign(properties, pom.properties);
   return properties;
 }
 
@@ -167,7 +167,7 @@ export function effectiveMetadata(
   const properties = mergedProperties(chain);
 
   const managed = new Map<string, string>(imported);
-  for (const pom of [...chain].reverse()) {
+  for (const pom of chain.toReversed()) {
     for (const [key, version] of pom.managed) managed.set(key, version);
   }
 
@@ -333,7 +333,7 @@ export class MavenRepositorySource implements PackageSource {
         // the BOM's managed entries, interpolated in the BOM's own context
         const bomProperties = mergedProperties(bomChain);
         const bomManaged = new Map<string, string>();
-        for (const bomPom of [...bomChain].reverse()) {
+        for (const bomPom of bomChain.toReversed()) {
           for (const [managedKey, raw] of bomPom.managed) {
             const version = interpolate(raw, bomProperties, bom);
             if (!version.includes("${")) bomManaged.set(managedKey, version);

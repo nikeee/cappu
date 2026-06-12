@@ -2646,7 +2646,7 @@ function generateBody(
     // An intersection cast (A & B) checkcasts every bound, last written first,
     // ending on the erasure A - the order javac emits.
     emitExpr(node.expression);
-    for (const bound of [...(node.bounds ?? [])].reverse()) {
+    for (const bound of (node.bounds ?? []).toReversed()) {
       code.u1(OP_CHECKCAST);
       code.u2(cp.classInfo(classOperand(descriptorOf(bound, program))));
     }

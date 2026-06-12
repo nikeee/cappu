@@ -19,7 +19,7 @@ function setup(text: string, extra: Record<string, string> = {}) {
 // Apply a single-file action's changes to the source text (offsets are in T.java).
 function apply(text: string, action: CodeActionResult): string {
   let out = text;
-  for (const c of [...action.changes].sort((a, b) => b.start - a.start)) {
+  for (const c of action.changes.toSorted((a, b) => b.start - a.start)) {
     out = out.slice(0, c.start) + c.newText + out.slice(c.end);
   }
   return out;

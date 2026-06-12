@@ -139,7 +139,7 @@ function organizeImports(sourceFile: SourceFile): CodeActionResult[] {
   });
 
   // Non-static group first, then static; alphabetical within each.
-  const sorted = [...kept].sort((a, b) => {
+  const sorted = kept.toSorted((a, b) => {
     if (a.isStatic !== b.isStatic) return a.isStatic ? 1 : -1;
     const ta = importText(a);
     const tb = importText(b);

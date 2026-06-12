@@ -15,6 +15,6 @@ export function matchesVersionSpec(spec: string, version: string): boolean {
  */
 export function matchingVersions(versions: readonly string[], spec?: string): string[] {
   const matching =
-    spec === undefined ? [...versions] : versions.filter(v => matchesVersionSpec(spec, v));
-  return matching.reverse();
+    spec === undefined ? versions : versions.filter(v => matchesVersionSpec(spec, v));
+  return matching.toReversed();
 }

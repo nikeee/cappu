@@ -14,7 +14,7 @@
 // runs only to bootstrap a missing lock - or when `cappu add` explicitly asks
 // for the lock to be rewritten (updateLock).
 
-import { createHash } from "node:crypto";
+import { hash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -155,7 +155,7 @@ interface Lockfile {
 }
 
 function sha256Of(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
+  return hash("sha256", bytes, "hex");
 }
 
 export interface InstallResult {
