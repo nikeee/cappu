@@ -12,5 +12,7 @@ java -jar dist/gson-app.jar
 - **gson-app** - a one-file project using Gson from Maven Central.
 - **mapstruct-app** - MapStruct's annotation processor generates the
   mapper implementation during `cappu compile` (#7).
+- **junit-app** - `cappu test` compiles src/test/java and runs the JUnit
+  Platform console launcher over it (#16).
 
 `src/examples.test.ts` builds and runs both end-to-end.

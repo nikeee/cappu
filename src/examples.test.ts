@@ -36,7 +36,11 @@ function javaBin(): string {
   }
 }
 
-function runExample(name: string): string {
+// CI's "experimental" matrix leg sets this to cover cappu's own compiler
+// against real Maven Central dependencies.
+const EXPERIMENTAL = process.env.CAPPU_EXAMPLES_EXPERIMENTAL === "1";
+
+function runExample(name: string, command: string[] = ["compile"]): string {
   const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
   const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
   // the fat jar is named after the project directory: keep the example's name
@@ -48,7 +52,14 @@ function runExample(name: string): string {
     }
     const env = { ...process.env, CAPPU_PACKAGE_STORE: store };
     execFileSync(tsx, [cli, "install"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
-    execFileSync(tsx, [cli, "compile"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
+    const flags = EXPERIMENTAL && command[0] === "compile" ? ["--experimental-compiler"] : [];
+    const output = execFileSync(tsx, [cli, ...command, ...flags], {
+      cwd: work,
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (command[0] !== "compile") return output;
     return execFileSync(javaBin(), ["-jar", join(work, "dist", `${name}.jar`)], {
       encoding: "utf8",
     });
@@ -62,6 +73,19 @@ test("examples/gson-app builds and runs", { skip: !HAS_JAVAC }, () => {
   expect(runExample("gson-app")).toBe('{"x":1,"y":2}\n');
 });
 
-test("examples/mapstruct-app builds and runs (annotation processor)", { skip: !HAS_JAVAC }, () => {
-  expect(runExample("mapstruct-app")).toBe("Wartburg 353 / 50 hp\n");
+// In experimental mode MapStruct's generated code would run through the
+// best-effort emitter; degraded bodies must not flake CI, so this example is
+// javac-mode only.
+test(
+  "examples/mapstruct-app builds and runs (annotation processor)",
+  { skip: !HAS_JAVAC || EXPERIMENTAL },
+  () => {
+    expect(runExample("mapstruct-app")).toBe("Wartburg 353 / 50 hp\n");
+  },
+);
+
+test("examples/junit-app runs its tests with cappu test", { skip: !HAS_JAVAC }, () => {
+  const output = runExample("junit-app", ["test"]);
+  expect(output).toContain("2 tests successful");
+  expect(output).toContain("0 tests failed");
 });
