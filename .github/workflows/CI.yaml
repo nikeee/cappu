@@ -1,8 +1,3 @@
-# Test matrix: the suite must be green both WITH a JDK on PATH (javac/javap
-# comparison and run-equivalence tests execute) and WITHOUT one (those tests
-# skip; everything else still has to pass). Ubuntu runners preinstall a JDK,
-# so both legs run in a plain node container and only one installs Java.
-
 name: CI
 
 on:
