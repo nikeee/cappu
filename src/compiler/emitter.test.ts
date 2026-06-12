@@ -146,6 +146,14 @@ const RUNS: Record<string, string> = {
 // streams compare exactly (field ++ lowers to getfield/iconst_1/iadd/putfield,
 // matching javac).
 const MULTI_FIXTURES: Record<string, string> = {
+  ClassLit: [
+    "public class ClassLit {",
+    "  Class<?> ref() { return ClassLit.class; }",
+    "  Class<?> str() { return String.class; }",
+    "  Class<?> prim() { return int.class; }",
+    "  Class<?> arr() { return String[].class; }",
+    "}",
+  ].join("\n"),
   QualifiedAnon: [
     "public class QualifiedAnon {",
     "  int x = 7;",
@@ -2794,6 +2802,28 @@ test("issue #15 constructs emit without degrading", () => {
     [
       "IterForEach",
       "import java.util.*; class IterForEach { void m(List<String> l, StringBuilder sb) { l.forEach(s -> sb.append(s)); } }",
+    ],
+    // generic METHOD type parameters inferred from context (Collectors, toArray)
+    [
+      "GroupBy",
+      "import java.util.*; import java.util.stream.*; class GroupBy { Map<String, List<String>> m(List<String> l) { return l.stream().collect(Collectors.groupingBy(s -> s.toUpperCase())); } }",
+    ],
+    [
+      "ToMap",
+      "import java.util.*; import java.util.stream.*; class ToMap { Map<String, Integer> m(Map<String, Integer> map) { return map.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue() + 1)); } }",
+    ],
+    [
+      "ToArray",
+      "import java.util.*; import java.util.stream.*; class ToArray { String[] m(List<String> l) { return l.stream().toArray(String[]::new); } }",
+    ],
+    // a lambda as a CONSTRUCTOR argument gets its target from the ctor parameter
+    [
+      "CtorLambda",
+      'import java.util.function.Supplier; class CtorLambda { static class Lazy<T> { final Supplier<T> f; Lazy(Supplier<T> factory) { f = factory; } } static String make() { return "x"; } static final Lazy<String> one = new Lazy<>(() -> make()); }',
+    ],
+    [
+      "MergeRef",
+      "import java.util.*; class MergeRef { void m(Map<String, Integer> occurrences, String key) { occurrences.merge(key, 1, Integer::sum); } }",
     ],
   ];
   const degraded: string[] = [];

@@ -1,0 +1,49 @@
+{
+  "ClassLit": {
+    "members": [
+      "java.lang.Class<?> arr();",
+      "java.lang.Class<?> prim();",
+      "java.lang.Class<?> ref();",
+      "java.lang.Class<?> str();",
+      "public ClassLit();"
+    ],
+    "code": [
+      [
+        "public ClassLit();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "java.lang.Class<?> ref();",
+        [
+          "ldc # // class ClassLit",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.Class<?> str();",
+        [
+          "ldc # // class java/lang/String",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.Class<?> prim();",
+        [
+          "getstatic # // Field java/lang/Integer.TYPE:Ljava/lang/Class;",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.Class<?> arr();",
+        [
+          "ldc # // class \"[Ljava/lang/String;\"",
+          "areturn"
+        ]
+      ]
+    ]
+  }
+}

@@ -610,6 +610,122 @@ export function createChecker(program: Program): Checker {
 
   // The functional-interface type a lambda is being assigned/converted to
   // (JLS 15.27.3 - assignment, return, and invocation contexts).
+  // --- method-level type-argument inference (a pragmatic JLS 18 subset) ------
+  // A generic METHOD's type parameters (Collectors.toMap's T, Stream.toArray's
+  // A) are not bound by the receiver substitution, so the lambdas and method
+  // references of stream pipelines never got parameter types. Bindings come
+  // from structurally unifying (1) each non-functional argument's declared
+  // parameter type against its actual type and (2) the declared return type
+  // against the call's context type (outer call parameter, assigned variable,
+  // enclosing return). Whatever does not unify stays unbound - never a guess.
+
+  function methodTypeParamSymbols(decl: MethodDeclaration): Set<Symbol> | undefined {
+    if (!decl.typeParameters || decl.typeParameters.length === 0) return undefined;
+    const out = new Set<Symbol>();
+    for (const p of decl.typeParameters) if (p.symbol) out.add(p.symbol);
+    return out.size > 0 ? out : undefined;
+  }
+
+  function unifyInto(
+    pattern: Type,
+    actual: Type,
+    vars: ReadonlySet<Symbol>,
+    bindings: Map<Symbol, Type>,
+  ): void {
+    // wildcards on either side: their bounds carry the information
+    if (pattern.kind === TypeKind.Wildcard) {
+      if (pattern.bound) unifyInto(pattern.bound, actual, vars, bindings);
+      return;
+    }
+    if (actual.kind === TypeKind.Wildcard) {
+      if (actual.bound) unifyInto(pattern, actual.bound, vars, bindings);
+      return;
+    }
+    if (pattern.kind === TypeKind.TypeVariable && vars.has(pattern.symbol)) {
+      if (!bindings.has(pattern.symbol) && isConcrete(actual)) bindings.set(pattern.symbol, actual);
+      return;
+    }
+    if (
+      pattern.kind === TypeKind.Class &&
+      actual.kind === TypeKind.Class &&
+      pattern.symbol === actual.symbol
+    ) {
+      const shared = Math.min(pattern.typeArguments.length, actual.typeArguments.length);
+      for (let i = 0; i < shared; i++) {
+        unifyInto(pattern.typeArguments[i]!, actual.typeArguments[i]!, vars, bindings);
+      }
+      return;
+    }
+    if (pattern.kind === TypeKind.Array && actual.kind === TypeKind.Array) {
+      unifyInto(pattern.elementType, actual.elementType, vars, bindings);
+    }
+  }
+
+  // The type the call's RESULT flows into, as far as it is locally evident.
+  function contextualTypeOfCall(call: CallExpression): Type | undefined {
+    const parent = call.parent;
+    if (parent.kind === SyntaxKind.VariableDeclarator && parent.symbol) {
+      return getTypeOfSymbol(parent.symbol);
+    }
+    if (parent.kind === SyntaxKind.ReturnStatement) {
+      let n: Node | undefined = parent.parent;
+      while (
+        n &&
+        n.kind !== SyntaxKind.MethodDeclaration &&
+        n.kind !== SyntaxKind.LambdaExpression
+      ) {
+        n = n.parent;
+      }
+      return n && n.kind === SyntaxKind.MethodDeclaration
+        ? resolveType((n as MethodDeclaration).returnType, n)
+        : undefined;
+    }
+    if (parent.kind === SyntaxKind.CallExpression) {
+      const outer = parent as CallExpression;
+      const index = outer.arguments.indexOf(call);
+      if (index < 0) return undefined;
+      const info = resolveCallInfo(outer);
+      const param = info?.decl.parameters[index] as { type?: TypeNode } | undefined;
+      return param?.type
+        ? substitute(resolveType(param.type, info!.decl), info!.receiverSubst)
+        : undefined;
+    }
+    return undefined;
+  }
+
+  function inferredMethodSubst(call: CallExpression, info: CallInfo): Map<Symbol, Type> {
+    const bindings = new Map<Symbol, Type>();
+    const vars = methodTypeParamSymbols(info.decl);
+    if (!vars) return bindings;
+    call.arguments.forEach((argument, i) => {
+      // functional arguments depend on this very inference: no constraints
+      if (
+        argument.kind === SyntaxKind.LambdaExpression ||
+        argument.kind === SyntaxKind.MethodReferenceExpression
+      ) {
+        return;
+      }
+      const param = info.decl.parameters[i] as { type?: TypeNode } | undefined;
+      if (!param?.type) return;
+      unifyInto(
+        substitute(resolveType(param.type, info.decl), info.receiverSubst),
+        getTypeOfExpression(argument),
+        vars,
+        bindings,
+      );
+    });
+    const expected = contextualTypeOfCall(call);
+    if (expected) {
+      unifyInto(
+        substitute(resolveType(info.decl.returnType, info.decl), info.receiverSubst),
+        expected,
+        vars,
+        bindings,
+      );
+    }
+    return bindings;
+  }
+
   function lambdaTargetType(lambda: Node): Type | undefined {
     const parent = lambda.parent;
     // T f = () -> ...;
@@ -630,6 +746,30 @@ export function createChecker(program: Program): Checker {
         ? resolveType((n as MethodDeclaration).returnType, n)
         : undefined;
     }
+    // new T(() -> ...) -> the matching constructor's parameter type,
+    // instantiated with the created type's arguments.
+    if (parent.kind === SyntaxKind.ObjectCreationExpression) {
+      const creation = parent as ObjectCreationExpression;
+      const args = creation.arguments ?? [];
+      const index = args.indexOf(lambda);
+      if (index < 0) return undefined;
+      const created = getTypeOfExpression(creation);
+      if (created.kind !== TypeKind.Class) return undefined;
+      const declaration = declarationOf(created.symbol);
+      if (!declaration || declaration.kind !== SyntaxKind.ClassDeclaration) return undefined;
+      const ctors = (declaration as ClassDeclaration).members.filter(
+        m => m.kind === SyntaxKind.ConstructorDeclaration,
+      ) as ConstructorDeclaration[];
+      const ctor =
+        ctors.find(c => c.parameters.length === args.length) ??
+        (ctors.length === 1 ? ctors[0] : undefined);
+      const param = ctor?.parameters[index] as { type?: TypeNode } | undefined;
+      if (!ctor || !param?.type) return undefined;
+      return substitute(
+        resolveType(param.type, ctor),
+        substitutionFor(created.symbol, (created as ClassType).typeArguments),
+      );
+    }
     // m(() -> ...)  -> the resolved method's parameter type at the lambda's
     // index, instantiated with the receiver's type arguments (so the lambda
     // passed to Map<String, Integer>.forEach sees BiConsumer<? super String,
@@ -639,9 +779,12 @@ export function createChecker(program: Program): Checker {
       const index = call.arguments.indexOf(lambda);
       const info = index >= 0 ? resolveCallInfo(call) : undefined;
       const param = info?.decl.parameters[index] as { type?: TypeNode } | undefined;
-      return param?.type
-        ? substitute(resolveType(param.type, info!.decl), info!.receiverSubst)
-        : undefined;
+      if (!param?.type) return undefined;
+      const declared = substitute(resolveType(param.type, info!.decl), info!.receiverSubst);
+      // generic METHOD (Collectors.toMap, Stream.toArray, ...): bind its type
+      // parameters from the sibling arguments and the call's context
+      const methodSubst = inferredMethodSubst(call, info!);
+      return methodSubst.size > 0 ? substitute(declared, methodSubst) : declared;
     }
     return undefined;
   }

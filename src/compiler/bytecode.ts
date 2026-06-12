@@ -2591,6 +2591,8 @@ function generateBody(
         return emitCall(node as CallExpression);
       case SyntaxKind.CastExpression:
         return emitCast(node as CastExpression);
+      case SyntaxKind.ClassLiteralExpression:
+        return emitClassLiteral(node as ClassLiteralExpression);
       case SyntaxKind.InstanceofExpression:
         return emitInstanceof(node as InstanceofExpression);
       default:
@@ -2653,6 +2655,24 @@ function generateBody(
     code.u1(OP_CHECKCAST);
     code.u2(cp.classInfo(classOperand(targetDescriptor)));
     return targetDescriptor;
+  };
+
+  // T.class (JLS 15.8.2): a loadable CONSTANT_Class for reference and array
+  // types; a primitive's literal is the wrapper's static TYPE field.
+  const CLASS_DESC = "Ljava/lang/Class;" as Descriptor;
+  const emitClassLiteral = (node: ClassLiteralExpression): Descriptor => {
+    const descriptor = descriptorOf(node.type, program);
+    const c = descriptor[0]!;
+    if ("BCDFIJSZ".includes(c) || descriptor === "V") {
+      const wrapper = descriptor === "V" ? ("java/lang/Void" as InternalName) : wrapperOf(c);
+      if (!wrapper) throw new UnsupportedEmit();
+      code.u1(OP_GETSTATIC);
+      code.u2(cp.fieldref(wrapper, "TYPE", CLASS_DESC));
+    } else {
+      ldc(cp.classInfo(classOperand(descriptor)));
+    }
+    push(CLASS_DESC);
+    return CLASS_DESC;
   };
 
   /** The `instanceof` operator (JLS 15.20.2) -> the `instanceof` instruction. */

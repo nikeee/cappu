@@ -40,6 +40,11 @@ interface Runnable { void run(); }
 
 interface AutoCloseable { void close(); }
 
+class ClassLoader {
+  public static ClassLoader getSystemClassLoader() { return null; }
+  public Class<?> loadClass(String name) throws ClassNotFoundException { return null; }
+}
+
 class Class<T> {
   public String getName() { return null; }
   public String getSimpleName() { return null; }
@@ -147,6 +152,9 @@ class Boolean implements Comparable<Boolean> {
 class Integer extends Number implements Comparable<Integer> {
   public static final int MAX_VALUE = 2147483647;
   public static final int MIN_VALUE = -2147483648;
+  public static int sum(int a, int b) { return 0; }
+  public static int max(int a, int b) { return 0; }
+  public static int min(int a, int b) { return 0; }
   public int compareTo(Integer o) { return 0; }
   public static int parseInt(String s) { return 0; }
   public static int parseInt(String s, int radix) { return 0; }
@@ -168,6 +176,7 @@ class Integer extends Number implements Comparable<Integer> {
 }
 
 class Long extends Number implements Comparable<Long> {
+  public static long sum(long a, long b) { return 0L; }
   public static final long MAX_VALUE = 9223372036854775807L;
   public static final long MIN_VALUE = -9223372036854775808L;
   public int compareTo(Long o) { return 0; }
@@ -183,6 +192,7 @@ class Long extends Number implements Comparable<Long> {
 }
 
 class Double extends Number implements Comparable<Double> {
+  public static double sum(double a, double b) { return 0.0; }
   public int compareTo(Double o) { return 0; }
   public static double parseDouble(String s) { return 0; }
   public static Double valueOf(double d) { return null; }
@@ -878,6 +888,7 @@ const JAVA_UTIL_STREAM = `package java.util.stream;
 interface Collector<T, A, R> {}
 
 interface Stream<T> extends java.lang.AutoCloseable {
+  <A> A[] toArray(java.util.function.IntFunction<A[]> generator);
   Stream<T> filter(java.util.function.Predicate<T> predicate);
   <R> Stream<R> map(java.util.function.Function<T, R> mapper);
   IntStream mapToInt(java.util.function.ToIntFunction<? super T> mapper);
