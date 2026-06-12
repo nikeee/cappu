@@ -188,3 +188,5 @@ no timestamps were captured.
 - 2026-06-12 09:46 — for the pom resolution, add tests that test the cases you've done above (guava, httpclient5 etc) in a separate commit
 - 2026-06-12 09:51 — use URL and URLSearchParams to build a request URL. Change that for every http request that is made. except the ones that only have a static url
 - 2026-06-12 14:23 — do 1, 2, 4 and resolve this issue https://github.com/nikeee/cappu/issues/15. Use commits for every bite
+- 2026-06-12 15:26 — add a colorful, modern-looking progress bar for downloading in `cappu install`. You can use a popular library for that.
+- 2026-06-12 15:26 — use the new node.js api for styling ansi terminal text (from utils package) instead of picocolors

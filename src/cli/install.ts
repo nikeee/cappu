@@ -1,14 +1,45 @@
 // `cappu install`: render the print-free installDependencies result - jars
-// written, version conflicts (warnings), unresolvable packages (errors).
+// written, version conflicts (warnings), unresolvable packages (errors) -
+// with a progress bar on the way (TTY only; piped output stays plain).
+
+import { styleText } from "node:util";
+
+import { SingleBar } from "cli-progress";
 
 import type { CappuConfig } from "../config.ts";
 import { installDependencies } from "../install.ts";
+
+// One animated bar on stderr while packages download (stdout stays the plain
+// list of written jars, so piping it remains useful).
+function progressBar(): SingleBar | undefined {
+  if (!process.stderr.isTTY) return undefined;
+  return new SingleBar({
+    format: `${styleText("cyan", "{bar}")} ${styleText("bold", "{value}/{total}")} ${styleText("dim", "{package}")}`,
+    barCompleteChar: "█",
+    barIncompleteChar: "░",
+    hideCursor: true,
+    clearOnComplete: true,
+    stream: process.stderr,
+  });
+}
 
 export async function runInstall(
   config: CappuConfig,
   options: { updateLock?: boolean } = {},
 ): Promise<never> {
-  const result = await installDependencies(config, undefined, options);
+  let bar: SingleBar | undefined;
+  const result = await installDependencies(config, undefined, {
+    ...options,
+    onProgress: (done, total, current) => {
+      bar ??= (() => {
+        const created = progressBar();
+        created?.start(total, 0, { package: "" });
+        return created;
+      })();
+      bar?.update(done, { package: current });
+    },
+  });
+  bar?.stop();
   if (result.fromLock) {
     process.stderr.write("using cappu-lock.json\n");
   }

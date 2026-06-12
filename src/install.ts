@@ -27,6 +27,7 @@ import {
 } from "./config.ts";
 import {
   type Coordinates,
+  type CoordinateString,
   coordinatesToString,
   matchingVersions,
   MavenRepositorySource,
@@ -255,8 +256,13 @@ export async function installDependencies(
   // Injectable for tests; defaults to the configured remote repositories.
   sources: readonly PackageSource[] = configuredSources(config),
   // `cappu add` changed the dependencies section: re-resolve and rewrite the
-  // lock instead of consuming the (now outdated) one.
-  options: { updateLock?: boolean } = {},
+  // lock instead of consuming the (now outdated) one. onProgress is notified
+  // per materialized package (the CLI renders a progress bar from it);
+  // installDependencies itself never prints.
+  options: {
+    updateLock?: boolean;
+    onProgress?: (done: number, total: number, current: CoordinateString) => void;
+  } = {},
 ): Promise<InstallResult> {
   const lock = options.updateLock ? undefined : readLockfile(config);
   const fromLock = lock !== undefined;
@@ -279,7 +285,9 @@ export async function installDependencies(
   const fromStore: string[] = [];
   const locked: LockedPackage[] = [];
   if (toInstall.length > 0) mkdirSync(targetDir, { recursive: true });
+  let progressed = 0;
   for (const pkg of toInstall) {
+    options.onProgress?.(progressed++, toInstall.length, coordinatesToString(pkg.coordinates));
     const artifact = await artifactFrom(sources, pkg.source, pkg.coordinates);
     if (!artifact) {
       noArtifact.push(coordinatesToString(pkg.coordinates));
@@ -296,6 +304,10 @@ export async function installDependencies(
     writeFileSync(file, artifact.bytes);
     installed.push(file);
     locked.push({ coordinates: pkg.coordinates, source: pkg.source, sha256: digest });
+  }
+
+  if (toInstall.length > 0) {
+    options.onProgress?.(toInstall.length, toInstall.length, "" as CoordinateString);
   }
 
   // The lock pins what was VERIFIABLY materialized, so it is written after the
