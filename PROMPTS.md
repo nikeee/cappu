@@ -191,3 +191,4 @@ no timestamps were captured.
 - 2026-06-12 15:26 — add a colorful, modern-looking progress bar for downloading in `cappu install`. You can use a popular library for that.
 - 2026-06-12 15:26 — use the new node.js api for styling ansi terminal text (from utils package) instead of picocolors
 - 2026-06-12 15:32 — add support for NO_COLOR env var that disables color output as well as progress bars
+- 2026-06-12 15:40 — take a step back and go through every file. check if there is code that uses outdated node.js/js patterns that can be replaces by some builtin. validate the architecture.
