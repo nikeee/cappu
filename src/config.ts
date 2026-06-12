@@ -38,12 +38,12 @@ const CompilerOptionsSchema = z.object({
   output: z.enum(["classes", "jar", "fat-jar"]).default("classes"),
   quiet: z.boolean().optional(),
   failOnDegrade: z.boolean().optional(),
-  /** The javac binary `--validate` compiles the reference output with. */
+  /** The javac binary compiles use (a provisioned "jdk" entry wins). */
   javac: z.string().default("javac"),
   /** Main-Class for jar outputs; default: the only main(String[]) found. */
   mainClass: z.string().optional(),
-  /** Compile with the configured javac instead of cappu's own compiler. */
-  useJavac: z.boolean().optional(),
+  /** Compile with cappu's own (experimental) compiler instead of javac. */
+  experimentalCompiler: z.boolean().optional(),
 });
 
 const LspOptionsSchema = z.object({
@@ -139,16 +139,17 @@ export const CONFIG_TEMPLATE = `
     // an unsupported construct (degradations always print a warning).
     "failOnDegrade": false,
 
-    // The javac binary used by \`cappu compile --validate\` (default: "javac" from $PATH).
+    // The javac binary compiles run with (default: "javac" from $PATH; a
+    // provisioned "jdk" entry wins).
     // "javac": "javac",
 
     // Main-Class of jar outputs (java -jar). Default if unset: the single
     // class declaring public static void main(String[]), if exactly one.
     // "mainClass": "com.example.Main",
 
-    // Compile with the configured javac instead of cappu's own compiler
-    // (same as \`cappu compile --use-javac\`).
-    // "useJavac": false,
+    // Compile with cappu's own (experimental) compiler instead of javac
+    // (same as \`cappu compile --experimental-compiler\`).
+    // "experimentalCompiler": false,
   },
 
   "lspOptions": {

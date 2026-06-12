@@ -9,7 +9,7 @@ export interface CompileFlags {
   outDir?: string;
   /** Raw --output value; validated here. */
   output?: string;
-  useJavac?: boolean;
+  experimentalCompiler?: boolean;
   quiet?: boolean;
   failOnDegrade?: boolean;
   validate: boolean;
@@ -52,15 +52,27 @@ export async function runCompileCommand(
     process.stderr.write("cappu: --validate requires --output classes (javap reads class files)\n");
     process.exit(2);
   }
-  const useJavac = flags.useJavac ?? config.compilerOptions.useJavac ?? false;
-  if (flags.validate && useJavac) {
-    process.stderr.write("cappu: --validate compares against javac; --use-javac IS javac\n");
+  const experimental =
+    flags.experimentalCompiler ?? config.compilerOptions.experimentalCompiler ?? false;
+  // --validate compares OUR bytecode against javac's; --fail-on-degrade is
+  // about OUR placeholder bodies - both only mean something with the
+  // experimental compiler (the default IS javac).
+  if (flags.validate && !experimental) {
+    process.stderr.write(
+      "cappu: --validate requires --experimental-compiler (javac is the default)\n",
+    );
+    process.exit(2);
+  }
+  if (flags.failOnDegrade && !experimental) {
+    process.stderr.write(
+      "cappu: --fail-on-degrade requires --experimental-compiler (javac never degrades)\n",
+    );
     process.exit(2);
   }
   const result = runCompile(inputs, {
     outDir: flags.outDir,
     output,
-    useJavac: flags.useJavac,
+    experimentalCompiler: flags.experimentalCompiler,
     failOnDegrade: flags.failOnDegrade,
     config,
   });

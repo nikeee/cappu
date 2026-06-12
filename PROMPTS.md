@@ -194,3 +194,6 @@ no timestamps were captured.
 - 2026-06-12 15:40 — take a step back and go through every file. check if there is code that uses outdated node.js/js patterns that can be replaces by some builtin. validate the architecture.
 - 2026-06-12 19:24 — commit and then resolve issue https://github.com/nikeee/cappu/issues/8
 - 2026-06-12 19:24 — https://github.com/nikeee/cappu/issues/15 re-surfaced. fix it. even if it means that you have to add a new feature
+- 2026-06-12 19:53 — this is a big one: https://github.com/nikeee/cappu/issues/7 make a plan beforehand and giv esome architctual decisions. split things into packages to keep domains separateed
+- 2026-06-12 21:04 — ignore lombok,we dont support that. maybe implement https://github.com/nikeee/cappu/issues/17 before this. add an example directory with several example projects that use cappu. for example, some 1-file project that uses gson and mapstruct.verify that the example works end-to-end. maybe even add this as a test
+- 2026-06-12 21:04 — phase d: https://github.com/nikeee/cappu/issues/16. You dont have to implement it in this plan, but you can take it into account for the future

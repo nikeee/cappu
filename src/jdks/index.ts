@@ -8,6 +8,7 @@ export {
   jdkDownloadUrl,
   parseJdkSpec,
   projectJdkDir,
+  provisionedJavac,
   type ProvisionResult,
   provisionJdk,
 } from "./jdks.ts";

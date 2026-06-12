@@ -72,6 +72,21 @@ export function projectJdkDir(config: CappuConfig, spec: string): string {
   return resolveConfigPath(config, join(".cappu", "jdks", spec));
 }
 
+/**
+ * The provisioned JDK's javac for config's "jdk" entry, or undefined when no
+ * jdk is configured or it has not been unpacked yet (callers fall back to
+ * compilerOptions.javac from PATH).
+ */
+export function provisionedJavac(config: CappuConfig): string | undefined {
+  if (config.jdk === undefined) return undefined;
+  const javac = join(
+    projectJdkDir(config, config.jdk),
+    "bin",
+    process.platform === "win32" ? "javac.exe" : "javac",
+  );
+  return existsSync(javac) ? javac : undefined;
+}
+
 export interface ProvisionResult {
   /** The unpacked JDK root (contains bin/, lib/, ...). */
   jdkDir: string;

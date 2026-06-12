@@ -25,6 +25,7 @@ import { createChecker } from "./checker.ts";
 import { classDeclaresMain, loadClassPath } from "./classfileReader.ts";
 import { type CappuConfig, resolveConfigPath } from "../config.ts";
 import { emitSourceFile } from "./emitter.ts";
+import { provisionedJavac } from "../jdks/index.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
 import { createProgram, type Program } from "./program.ts";
@@ -39,8 +40,8 @@ export interface CompileOptions {
   outDir?: string;
   /** What to produce in outDir (nikeee/cappu#5). Default: the config's, then "classes". */
   output?: OutputKind;
-  /** Delegate compilation entirely to the configured javac. */
-  useJavac?: boolean;
+  /** Compile with cappu's own (experimental) compiler instead of javac. */
+  experimentalCompiler?: boolean;
   /** Treat degraded (placeholder) method bodies as a build failure. */
   failOnDegrade?: boolean;
   /** Run the type checker over the inputs and fail on semantic errors. Default: true. */
@@ -194,7 +195,11 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
     options.failOnDegrade ?? options.config?.compilerOptions.failOnDegrade ?? false;
   const outDir = options.outDir ?? options.config?.compilerOptions.outDir ?? ".";
   const output = options.output ?? options.config?.compilerOptions.output ?? "classes";
-  if (options.useJavac ?? options.config?.compilerOptions.useJavac ?? false) {
+  // javac is the default compiler (nikeee/cappu#17); cappu's own pipeline
+  // runs only when explicitly requested (--experimental-compiler).
+  const experimental =
+    options.experimentalCompiler ?? options.config?.compilerOptions.experimentalCompiler ?? false;
+  if (!experimental) {
     return runJavacCompile(files, outDir, output, options.config);
   }
   const typeCheck = options.typeCheck ?? true;
@@ -341,7 +346,9 @@ function runJavacCompile(
   output: OutputKind,
   config: CappuConfig,
 ): CompileResult {
-  const javacBin = config.compilerOptions.javac;
+  // The provisioned JDK's javac (config "jdk", nikeee/cappu#8) wins over the
+  // configured/PATH binary.
+  const javacBin = provisionedJavac(config) ?? config.compilerOptions.javac;
   const tmp = mkdtempSync(join(tmpdir(), "cappu-javac-"));
   try {
     const classPath = config.compilerOptions.classPath

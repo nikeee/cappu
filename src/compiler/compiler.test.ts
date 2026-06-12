@@ -35,7 +35,11 @@ function defaultConfig(dir: string): ReturnType<typeof loadConfig> {
 
 test("a clean compile returns the written class files and prints nothing", () => {
   inTempDir({ "A.java": "class A { int x = 1; }" }, (dir, paths) => {
-    const result = runCompile(paths, { outDir: dir, config: defaultConfig(dir) });
+    const result = runCompile(paths, {
+      experimentalCompiler: true,
+      outDir: dir,
+      config: defaultConfig(dir),
+    });
     expect(result.success).toBe(true);
     expect(result.written).toEqual([join(dir, "A.class")]);
     expect(result.degraded).toEqual([]);
@@ -44,7 +48,11 @@ test("a clean compile returns the written class files and prints nothing", () =>
 
 test("a parse error fails with a located diagnostic and writes nothing", () => {
   inTempDir({ "Broken.java": "class Broken {" }, (dir, paths) => {
-    const result = runCompile(paths, { outDir: dir, config: defaultConfig(dir) });
+    const result = runCompile(paths, {
+      experimentalCompiler: true,
+      outDir: dir,
+      config: defaultConfig(dir),
+    });
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.written).toEqual([]);
@@ -60,13 +68,18 @@ test("a parse error fails with a located diagnostic and writes nothing", () => {
 test("checker diagnostics fail the build by default; typeCheck: false skips them", () => {
   const source = 'class C { int x = "s"; }'; // type mismatch (semantic, not syntactic)
   inTempDir({ "C.java": source }, (dir, paths) => {
-    const checked = runCompile(paths, { outDir: dir, config: defaultConfig(dir) });
+    const checked = runCompile(paths, {
+      experimentalCompiler: true,
+      outDir: dir,
+      config: defaultConfig(dir),
+    });
     expect(checked.success).toBe(false);
     if (!checked.success) {
       expect(checked.diagnostics.some(d => d.severity === "error")).toBe(true);
     }
 
     const unchecked = runCompile(paths, {
+      experimentalCompiler: true,
       outDir: dir,
       typeCheck: false,
       config: defaultConfig(dir),
@@ -85,6 +98,7 @@ test("failOnDegrade turns placeholder bodies into a failing result", () => {
   const source = "class D { D() { this(1); } D(int x) { } }";
   inTempDir({ "D.java": source }, (dir, paths) => {
     const result = runCompile(paths, {
+      experimentalCompiler: true,
       outDir: dir,
       failOnDegrade: true,
       config: defaultConfig(dir),
@@ -116,7 +130,7 @@ test("compiling with absent configured dirs does not throw", () => {
     },
     (dir, paths) => {
       const config = loadConfig(undefined, dir);
-      const result = runCompile([paths[1]!], { outDir: dir, config });
+      const result = runCompile([paths[1]!], { experimentalCompiler: true, outDir: dir, config });
       expect(result.success).toBe(true);
     },
   );
@@ -125,6 +139,7 @@ test("compiling with absent configured dirs does not throw", () => {
 test("output jar packs the classes behind a manifest, named after the project dir", () => {
   inTempDir({ "A.java": "package app; class A { }" }, (dir, paths) => {
     const result = runCompile(paths, {
+      experimentalCompiler: true,
       outDir: join(dir, "dist"),
       output: "jar",
       config: defaultConfig(dir),
@@ -144,12 +159,21 @@ test("resourcePaths files are copied into the classes tree and the jar (#12)", (
     writeFileSync(join(dir, "src", "main", "resources", "top.txt"), "hi");
 
     const out = join(dir, "dist");
-    const result = runCompile(paths, { outDir: out, config: defaultConfig(dir) });
+    const result = runCompile(paths, {
+      experimentalCompiler: true,
+      outDir: out,
+      config: defaultConfig(dir),
+    });
     expect(result.success).toBe(true);
     expect(readFileSync(join(out, "conf", "app.properties"), "utf8")).toBe("k=v\n");
     expect(readFileSync(join(out, "top.txt"), "utf8")).toBe("hi");
 
-    const jarred = runCompile(paths, { outDir: out, output: "jar", config: defaultConfig(dir) });
+    const jarred = runCompile(paths, {
+      experimentalCompiler: true,
+      outDir: out,
+      output: "jar",
+      config: defaultConfig(dir),
+    });
     expect(jarred.success).toBe(true);
     const entries = readZipEntries(readFileSync(jarred.written[0]!))!.map(e => e.name);
     expect(entries.sort()).toEqual([
@@ -168,7 +192,12 @@ test("jar manifests carry Main-Class for the unique entry point (#11)", () => {
   inTempDir(
     { "M.java": "package app; public class M { public static void main(String[] a) {} }" },
     (dir, paths) => {
-      const result = runCompile(paths, { outDir: dir, output: "jar", config: defaultConfig(dir) });
+      const result = runCompile(paths, {
+        experimentalCompiler: true,
+        outDir: dir,
+        output: "jar",
+        config: defaultConfig(dir),
+      });
       expect(result.success).toBe(true);
       expect(decode(result.written[0]!)).toBe("Manifest-Version: 1.0\r\nMain-Class: app.M\r\n\r\n");
     },
@@ -180,7 +209,12 @@ test("jar manifests carry Main-Class for the unique entry point (#11)", () => {
       "B.java": "public class B { public static void main(String... a) {} }",
     },
     (dir, paths) => {
-      const result = runCompile(paths, { outDir: dir, output: "jar", config: defaultConfig(dir) });
+      const result = runCompile(paths, {
+        experimentalCompiler: true,
+        outDir: dir,
+        output: "jar",
+        config: defaultConfig(dir),
+      });
       expect(result.success).toBe(true);
       expect(decode(result.written[0]!)).toBe("Manifest-Version: 1.0\r\n\r\n");
     },
@@ -218,6 +252,7 @@ test("output fat-jar merges dependency jar contents, own classes win", () => {
     );
     writeFileSync(join(dir, "cappu.json"), "{}"); // baseDir = the temp dir
     const result = runCompile(paths, {
+      experimentalCompiler: true,
       outDir: join(dir, "dist"),
       output: "fat-jar",
       config: loadConfig(undefined, dir),
@@ -243,13 +278,12 @@ const HAS_JAVAC = (() => {
   }
 })();
 
-test("--use-javac compiles with javac only", { skip: !HAS_JAVAC }, () => {
+test("the default compile delegates to javac", { skip: !HAS_JAVAC }, () => {
   inTempDir(
     { "M.java": "package app; public class M { public static void main(String[] a) {} }" },
     (dir, paths) => {
       const result = runCompile(paths, {
         outDir: join(dir, "dist"),
-        useJavac: true,
         config: defaultConfig(dir),
       });
       expect(result.success).toBe(true);
@@ -261,7 +295,6 @@ test("--use-javac compiles with javac only", { skip: !HAS_JAVAC }, () => {
       const jar = runCompile(paths, {
         outDir: join(dir, "dist2"),
         output: "jar",
-        useJavac: true,
         config: defaultConfig(dir),
       });
       expect(jar.success).toBe(true);
@@ -273,11 +306,10 @@ test("--use-javac compiles with javac only", { skip: !HAS_JAVAC }, () => {
   );
 });
 
-test("--use-javac surfaces javac's located diagnostics", { skip: !HAS_JAVAC }, () => {
+test("the default compile surfaces javac's located diagnostics", { skip: !HAS_JAVAC }, () => {
   inTempDir({ "B.java": 'class B { void m() { int x = "s"; } }' }, (dir, paths) => {
     const result = runCompile(paths, {
       outDir: dir,
-      useJavac: true,
       config: defaultConfig(dir),
     });
     expect(result.success).toBe(false);
