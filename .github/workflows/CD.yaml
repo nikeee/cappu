@@ -46,5 +46,21 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: cappu
-          path: dist/cappu-*
+          name: cappu-linux-x64
+          path: dist/linux-x64/cappu
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cappu-linux-arm64
+          path: dist/linux-arm64/cappu
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cappu-darwin-x64
+          path: dist/darwin-x64/cappu
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cappu-darwin-arm64
+          path: dist/darwin-arm64/cappu
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cappu-windows-x64
+          path: dist/windows-x64/cappu.exe
