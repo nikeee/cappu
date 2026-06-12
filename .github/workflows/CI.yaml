@@ -1,0 +1,38 @@
+# Test matrix: the suite must be green both WITH a JDK on PATH (javac/javap
+# comparison and run-equivalence tests execute) and WITHOUT one (those tests
+# skip; everything else still has to pass). Ubuntu runners preinstall a JDK,
+# so both legs run in a plain node container and only one installs Java.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    name: Test (${{ matrix.jdk == 'none' && 'no JDK' || format('JDK {0}', matrix.jdk) }})
+    runs-on: ubuntu-latest
+    container: node:26
+    strategy:
+      fail-fast: false
+      matrix:
+        jdk: ["none", "21", "25"]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        if: matrix.jdk != 'none'
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.jdk }}
+
+      - run: npm ci --no-audit
+      - run: node --run ci
+      - run: node --run typecheck
+      # The corpus submodules stay uninitialized here: their tests skip, and
+      # cloning five upstream projects is not worth the CI minutes per run.
+      - run: node --run test
