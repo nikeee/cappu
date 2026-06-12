@@ -2829,9 +2829,59 @@ function generateBody(
   /** Class instance creation `new T(args)` (JLS 15.9): new, dup, invokespecial. */
   const emitNew = (node: Node): Descriptor => {
     const oc = node as ObjectCreationExpression;
-    // A qualified creation (outer.new Inner(...)) parses, but threading the
-    // explicit enclosing instance through the constructor is not emitted yet.
-    if (oc.qualifier) throw new UnsupportedEmit();
+    // A qualified creation (outer.new Inner(...), JLS 15.9.2): the qualifier
+    // is the explicit enclosing instance, passed as the leading this$0
+    // constructor argument after javac's Objects.requireNonNull check.
+    if (oc.qualifier) {
+      if (oc.classBody) throw new UnsupportedEmit(); // qualified anonymous class
+      const created = checker.getTypeOfExpression(node);
+      if (created.kind !== TypeKind.Class) throw new UnsupportedEmit();
+      const createdDecl = created.symbol.valueDeclaration ?? created.symbol.declarations?.[0];
+      if (createdDecl?.kind !== SyntaxKind.ClassDeclaration) throw new UnsupportedEmit();
+      const inner = memberInnerThis0(createdDecl as ClassDeclaration, program, checker);
+      if (!inner) throw new UnsupportedEmit(); // not a non-static member class
+      const owner = binaryName(created.symbol);
+      const args = oc.arguments ?? [];
+      const ctor = findConstructor(created.symbol, args.length, program, ctorArgInfo(args).descs, {
+        checker,
+        argTypes: ctorArgInfo(args).types,
+      });
+      if (!ctor && args.length > 0) throw new UnsupportedEmit();
+      const ctorParams = ctor
+        ? ctor.parameters.map(p => paramDescriptor(p as Parameter, program))
+        : [];
+      const this0Desc = descOf(inner.enclosingInternal);
+      const ref = descOf(owner);
+      code.u1(OP_NEW);
+      code.u2(cp.classInfo(owner));
+      pushRef(ref);
+      code.u1(OP_DUP);
+      pushRef(ref);
+      emitExpr(oc.qualifier);
+      // javac null-checks the enclosing instance: dup; requireNonNull; pop.
+      code.u1(OP_DUP);
+      pushRef(this0Desc);
+      code.u1(OP_INVOKESTATIC);
+      code.u2(
+        cp.methodref(
+          "java/util/Objects" as InternalName,
+          "requireNonNull",
+          "(Ljava/lang/Object;)Ljava/lang/Object;" as MethodDescriptor,
+        ),
+      );
+      code.u1(OP_POP);
+      pop(1);
+      args.forEach((arg, i) => {
+        const d = emitExpr(arg);
+        if (i < ctorParams.length) coerce(d, ctorParams[i]!);
+      });
+      code.u1(OP_INVOKESPECIAL);
+      code.u2(
+        cp.methodref(owner, "<init>", `(${this0Desc}${ctorParams.join("")})V` as MethodDescriptor),
+      );
+      pop(1 + 1 + args.length); // dup'd ref + this$0 + args
+      return ref;
+    }
     // An anonymous class implementing an interface (JLS 15.9.5): instantiate the
     // synthetic Outer$N class, passing the captured enclosing locals.
     if (oc.classBody) {

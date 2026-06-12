@@ -147,6 +147,13 @@ const RUNS: Record<string, string> = {
 // streams compare exactly (field ++ lowers to getfield/iconst_1/iadd/putfield,
 // matching javac).
 const MULTI_FIXTURES: Record<string, string> = {
+  QualifiedNew: [
+    "public class QualifiedNew {",
+    "  int x = 7;",
+    "  class Inner { int v; Inner(int a) { v = a; } int sum() { return v + x; } }",
+    "  static int make(QualifiedNew outer) { return outer.new Inner(5).v; }",
+    "}",
+  ].join("\n"),
   Nest: [
     "public class Nest {",
     "  static class Point { int x, y; Point(int x, int y){ this.x=x; this.y=y; } int sum(){ return x+y; } }",
@@ -2238,6 +2245,35 @@ test(
       ].join("\n"),
       // bump(): base = 10 + 5 = 15; sum(): v(5) + base(15) = 20
       "20\n",
+    );
+  },
+);
+
+test(
+  "qualified outer.new Inner() runs identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "QNew",
+      [
+        "public class QNew {",
+        "  int x;",
+        "  QNew(int x) { this.x = x; }",
+        "  class Inner {",
+        "    int v;",
+        "    Inner(int a) { v = a; }",
+        "    int sum() { return v + x; }",
+        "  }",
+        "  public static void main(String[] a) {",
+        "    QNew one = new QNew(10);",
+        "    QNew two = new QNew(20);",
+        "    System.out.println(one.new Inner(1).sum());",
+        "    System.out.println(two.new Inner(2).sum());",
+        "  }",
+        "}",
+      ].join("\n"),
+      // each Inner is bound to ITS qualifier's enclosing instance
+      "11\n22\n",
     );
   },
 );

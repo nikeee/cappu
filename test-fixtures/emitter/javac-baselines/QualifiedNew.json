@@ -1,0 +1,73 @@
+{
+  "QualifiedNew$Inner": {
+    "members": [
+      "QualifiedNew$Inner(QualifiedNew, int);",
+      "final QualifiedNew this$0;",
+      "int sum();",
+      "int v;"
+    ],
+    "code": [
+      [
+        "QualifiedNew$Inner(QualifiedNew, int);",
+        [
+          "aload_0",
+          "aload_1",
+          "putfield # // Field this$0:LQualifiedNew;",
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "aload_0",
+          "iload_2",
+          "putfield # // Field v:I",
+          "return"
+        ]
+      ],
+      [
+        "int sum();",
+        [
+          "aload_0",
+          "getfield # // Field v:I",
+          "aload_0",
+          "getfield # // Field this$0:LQualifiedNew;",
+          "getfield # // Field QualifiedNew.x:I",
+          "iadd",
+          "ireturn"
+        ]
+      ]
+    ]
+  },
+  "QualifiedNew": {
+    "members": [
+      "int x;",
+      "public QualifiedNew();",
+      "static int make(QualifiedNew);"
+    ],
+    "code": [
+      [
+        "public QualifiedNew();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "aload_0",
+          "bipush 7",
+          "putfield # // Field x:I",
+          "return"
+        ]
+      ],
+      [
+        "static int make(QualifiedNew);",
+        [
+          "new # // class QualifiedNew$Inner",
+          "dup",
+          "aload_0",
+          "dup",
+          "invokestatic # // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;",
+          "pop",
+          "iconst_5",
+          "invokespecial # // Method QualifiedNew$Inner.\"<init>\":(LQualifiedNew;I)V",
+          "getfield # // Field QualifiedNew$Inner.v:I",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}
