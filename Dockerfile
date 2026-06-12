@@ -15,6 +15,6 @@ FROM node:alpine AS build
 
 FROM alpine:latest
     RUN apk add --no-cache libstdc++
-    COPY --from=build /app/dist/cappu /cappu
+    COPY --from=build /app/dist/native/cappu /cappu
 
     CMD ["/cappu"]
