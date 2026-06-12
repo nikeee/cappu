@@ -19,7 +19,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { type CappuConfig, resolveConfigPath } from "./config.ts";
+import {
+  type CappuConfig,
+  MAVEN_CENTRAL,
+  MAVEN_CENTRAL_SEARCH,
+  resolveConfigPath,
+} from "./config.ts";
 import {
   type Coordinates,
   coordinatesToString,
@@ -29,6 +34,19 @@ import {
   type Resolution,
   resolveTransitive,
 } from "./packages/index.ts";
+
+/** The configured packageSources as PackageSource instances (Central searchable). */
+export function configuredSources(config: CappuConfig): PackageSource[] {
+  return config.packageSources.map(
+    url =>
+      new MavenRepositorySource(
+        url,
+        undefined,
+        undefined,
+        url === MAVEN_CENTRAL ? MAVEN_CENTRAL_SEARCH : undefined,
+      ),
+  );
+}
 
 export const LOCKFILE_NAME = "cappu-lock.json";
 
@@ -179,9 +197,7 @@ async function artifactFrom(
 export async function installDependencies(
   config: CappuConfig,
   // Injectable for tests; defaults to the configured remote repositories.
-  sources: readonly PackageSource[] = config.packageSources.map(
-    url => new MavenRepositorySource(url),
-  ),
+  sources: readonly PackageSource[] = configuredSources(config),
   // `cappu add` changed the dependencies section: re-resolve and rewrite the
   // lock instead of consuming the (now outdated) one.
   options: { updateLock?: boolean } = {},

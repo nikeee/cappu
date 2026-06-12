@@ -206,22 +206,45 @@ export class MavenRepositorySource implements PackageSource {
     private readonly baseUrl: string,
     private readonly fetchText: FetchText = defaultFetchText,
     private readonly fetchBytes: FetchBytes = defaultFetchBytes,
+    /** A solr index service (search.maven.org style); repositories have none. */
+    private readonly searchUrl?: string,
   ) {
     this.name = baseUrl;
   }
 
-  private artifactDir(groupId: string, artifactId: string): string {
-    return `${this.baseUrl.replace(/\/$/, "")}/${groupId.replaceAll(".", "/")}/${artifactId}`;
+  /** The repository url for a path under the maven2 layout root. */
+  private repositoryUrl(...segments: string[]): string {
+    // the trailing slash keeps URL resolution relative to the layout root
+    const base = this.baseUrl.endsWith("/") ? this.baseUrl : `${this.baseUrl}/`;
+    return new URL(segments.join("/"), base).href;
   }
 
-  /** A maven2 repository has no search endpoint; searching needs an index service. */
-  search(): Promise<Coordinates[]> {
-    return Promise.resolve([]);
+  private artifactPath(groupId: string, artifactId: string): string {
+    return `${groupId.replaceAll(".", "/")}/${artifactId}`;
+  }
+
+  /** Free-text search via the index service; empty without one (or on errors). */
+  async search(query: string): Promise<Coordinates[]> {
+    if (this.searchUrl === undefined) return [];
+    const url = new URL(this.searchUrl);
+    url.search = new URLSearchParams({ q: query, rows: "20", wt: "json" }).toString();
+    const text = await this.fetchText(url.href);
+    if (text === undefined) return [];
+    try {
+      const doc = JSON.parse(text) as {
+        response?: { docs?: { g?: string; a?: string; latestVersion?: string }[] };
+      };
+      return (doc.response?.docs ?? [])
+        .filter(d => d.g && d.a && d.latestVersion)
+        .map(d => ({ groupId: d.g!, artifactId: d.a!, version: d.latestVersion! }));
+    } catch {
+      return []; // a broken index answer must not fail the command
+    }
   }
 
   async listVersions(groupId: string, artifactId: string): Promise<string[]> {
     const text = await this.fetchText(
-      `${this.artifactDir(groupId, artifactId)}/maven-metadata.xml`,
+      this.repositoryUrl(this.artifactPath(groupId, artifactId), "maven-metadata.xml"),
     );
     return text ? parseMetadataVersions(text) : [];
   }
@@ -231,8 +254,13 @@ export class MavenRepositorySource implements PackageSource {
     const cached = this.pomCache.get(key);
     if (cached !== undefined) return cached ?? undefined;
     const { groupId, artifactId, version } = coordinates;
-    const dir = `${this.artifactDir(groupId, artifactId)}/${version}`;
-    const text = await this.fetchText(`${dir}/${artifactId}-${version}.pom`);
+    const text = await this.fetchText(
+      this.repositoryUrl(
+        this.artifactPath(groupId, artifactId),
+        version,
+        `${artifactId}-${version}.pom`,
+      ),
+    );
     const parsed = text === undefined ? null : parseRawPom(text);
     this.pomCache.set(key, parsed);
     return parsed ?? undefined;
@@ -263,7 +291,12 @@ export class MavenRepositorySource implements PackageSource {
 
   getArtifact(coordinates: Coordinates): Promise<Uint8Array | undefined> {
     const { groupId, artifactId, version } = coordinates;
-    const dir = `${this.artifactDir(groupId, artifactId)}/${version}`;
-    return this.fetchBytes(`${dir}/${artifactId}-${version}.jar`);
+    return this.fetchBytes(
+      this.repositoryUrl(
+        this.artifactPath(groupId, artifactId),
+        version,
+        `${artifactId}-${version}.jar`,
+      ),
+    );
   }
 }

@@ -43,6 +43,8 @@ const LspOptionsSchema = z.object({
 });
 
 export const MAVEN_CENTRAL = "https://repo.maven.apache.org/maven2";
+/** Central's index service; a maven2 repository itself has no search endpoint. */
+export const MAVEN_CENTRAL_SEARCH = "https://search.maven.org/solrsearch/select";
 export const GOOGLE_MAVEN = "https://maven.google.com";
 export const GRADLE_PLUGIN_PORTAL = "https://plugins.gradle.org/m2";
 /** The repositories Maven and Gradle resolve from out of the box. */

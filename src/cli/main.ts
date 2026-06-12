@@ -12,6 +12,7 @@ import { runCompileCommand } from "./compile.ts";
 import { runInit } from "./init.ts";
 import { runInstall } from "./install.ts";
 import { runLsp } from "./lsp.ts";
+import { runSearch } from "./search.ts";
 import pkg from "../../package.json" with { type: "json" };
 
 const USAGE = `
@@ -25,6 +26,8 @@ Usage:
   cappu add <configuration> <coord...>  Add one or more group:artifact[@version] to the
                                      dependencies section (api or implementation) and
                                      install them
+  cappu search <query>               Search the configured package sources; prints
+                                     group:artifact@latest-version per match
   cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
   cappu compile [options] [file...]  Compile .java files to .class bytecode; with no
                                      files, compile everything under the configured
@@ -111,6 +114,15 @@ switch (command) {
   case "install":
     await runInstall(config);
     break;
+  case "search": {
+    const query = files.join(" ").trim();
+    if (query === "") {
+      process.stderr.write("cappu: search needs a query, e.g. `cappu search gson`\n");
+      process.exit(2);
+    }
+    await runSearch(query, config);
+    break;
+  }
   case "lsp":
     await runLsp(config, values.port);
     break;

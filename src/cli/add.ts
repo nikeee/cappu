@@ -11,8 +11,8 @@ import { join, resolve } from "node:path";
 import { parse, stringify } from "comment-json";
 
 import { type CappuConfig, DEFAULT_CONFIG_NAME, loadConfig } from "../config.ts";
-import { pickAddVersion } from "../install.ts";
-import { MavenRepositorySource, type PackageSource } from "../packages/index.ts";
+import { configuredSources, pickAddVersion } from "../install.ts";
+import { type PackageSource } from "../packages/index.ts";
 import { runInstall } from "./install.ts";
 
 const CONFIGURATIONS = ["api", "implementation"] as const;
@@ -90,8 +90,7 @@ export async function runAdd(
   const configPath = configPathArg
     ? resolve(configPathArg)
     : join(config.baseDir, DEFAULT_CONFIG_NAME);
-  const resolvedSources =
-    sources ?? config.packageSources.map(url => new MavenRepositorySource(url));
+  const resolvedSources = sources ?? configuredSources(config);
 
   // Sequential on purpose: each entry is written before the next is picked
   // (and the config re-read), so later picks see the earlier additions and

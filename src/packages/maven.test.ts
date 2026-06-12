@@ -110,7 +110,37 @@ test("the repository source builds maven2 layout urls and parses the answers", a
   expect(metadata?.dependencies.length).toBe(3);
 
   expect(await source.getMetadata({ ...COORDS, version: "0.404" })).toBeUndefined();
-  expect(await source.search()).toEqual([]);
+  // no searchUrl configured: this repository is not searchable
+  expect(await source.search("gson")).toEqual([]);
+});
+
+test("search queries the index service and tolerates broken answers", async () => {
+  const fetched: string[] = [];
+  let answer = JSON.stringify({
+    response: {
+      docs: [
+        { g: "com.google.code.gson", a: "gson", latestVersion: "2.13.1" },
+        { g: "org.partial", a: "no-version" }, // dropped: no latestVersion
+      ],
+    },
+  });
+  const source = new MavenRepositorySource(
+    "https://repo.example/maven2",
+    async url => {
+      fetched.push(url);
+      return answer;
+    },
+    undefined,
+    "https://search.example/solrsearch/select",
+  );
+
+  expect(await source.search("gso n")).toEqual([
+    { groupId: "com.google.code.gson", artifactId: "gson", version: "2.13.1" },
+  ]);
+  expect(fetched[0]).toBe("https://search.example/solrsearch/select?q=gso+n&rows=20&wt=json");
+
+  answer = "not json at all";
+  expect(await source.search("gson")).toEqual([]);
 });
 
 test("locally defined properties interpolate into dependency versions", () => {
