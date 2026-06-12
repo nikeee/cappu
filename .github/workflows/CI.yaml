@@ -1,3 +1,9 @@
+# Test matrix: the suite must be green WITHOUT a JDK (javac-dependent tests
+# skip), WITH preinstalled JDKs (21/25), with a JDK that cappu PROVISIONED
+# itself (#8 - also the only javac in that container), and with the
+# experimental compiler driving the example builds end-to-end. The plain
+# node container masks Ubuntu's preinstalled JDK.
+
 name: CI
 
 on:
@@ -8,26 +14,41 @@ on:
 
 jobs:
   test:
-    name: Test (${{ matrix.jdk == 'none' && 'no JDK' || format('JDK {0}', matrix.jdk) }})
+    name: Test (${{ matrix.jdk }})
     runs-on: ubuntu-latest
     container: node:26
     strategy:
       fail-fast: false
       matrix:
-        jdk: ["none", "21", "25"]
+        jdk: ["none", "21", "25", "provisioned", "experimental"]
 
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-java@v5
-        if: matrix.jdk != 'none'
+        if: matrix.jdk == '21' || matrix.jdk == '25' || matrix.jdk == 'experimental'
         with:
           distribution: temurin
-          java-version: ${{ matrix.jdk }}
+          java-version: ${{ matrix.jdk == 'experimental' && '21' || matrix.jdk }}
 
       - run: npm ci --no-audit
+
+      # cappu provisions its own JDK (#8); its bin/ becomes the only
+      # javac/java this leg has.
+      - name: Provision a JDK through cappu
+        if: matrix.jdk == 'provisioned'
+        run: |
+          mkdir /tmp/jdk-project
+          echo '{"jdk": "temurin-21"}' > /tmp/jdk-project/cappu.json
+          (cd /tmp/jdk-project && "$GITHUB_WORKSPACE/node_modules/.bin/tsx" "$GITHUB_WORKSPACE/src/cli/main.ts" install)
+          echo "/tmp/jdk-project/.cappu/jdks/temurin-21/bin" >> "$GITHUB_PATH"
+
       - run: node --run ci
       - run: node --run typecheck
       # The corpus submodules stay uninitialized here: their tests skip, and
       # cloning five upstream projects is not worth the CI minutes per run.
       - run: node --run test
+        env:
+          # the experimental leg compiles the examples with cappu's own
+          # compiler instead of javac
+          CAPPU_EXAMPLES_EXPERIMENTAL: ${{ matrix.jdk == 'experimental' && '1' || '' }}
