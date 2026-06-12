@@ -70,6 +70,8 @@ const DependenciesSchema = z.object({
   implementation: DependencyMapSchema.default({}),
   /** JSR-269 annotation processors (resolved separately into lib/processors). */
   annotationProcessor: DependencyMapSchema.default({}),
+  /** Test-only dependencies (resolved separately into lib/test-classes). */
+  testImplementation: DependencyMapSchema.default({}),
 });
 
 const ConfigFileSchema = z.object({
@@ -182,6 +184,10 @@ export const CONFIG_TEMPLATE = `
     // JSR-269 annotation processors; \`cappu compile\` runs them via javac.
     "annotationProcessor": {
       // "org.mapstruct:mapstruct-processor": "1.6.3",
+    },
+    // Test-only dependencies for \`cappu test\` (src/test/java).
+    "testImplementation": {
+      // "org.junit.jupiter:junit-jupiter": "5.12.2",
     },
   },
 }

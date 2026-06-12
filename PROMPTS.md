@@ -198,3 +198,4 @@ no timestamps were captured.
 - 2026-06-12 21:04 — ignore lombok,we dont support that. maybe implement https://github.com/nikeee/cappu/issues/17 before this. add an example directory with several example projects that use cappu. for example, some 1-file project that uses gson and mapstruct.verify that the example works end-to-end. maybe even add this as a test
 - 2026-06-12 21:04 — phase d: https://github.com/nikeee/cappu/issues/16. You dont have to implement it in this plan, but you can take it into account for the future
 - 2026-06-13 00:52 — when youre done: check the source and hoist any inline-require or imports. every import has to be at the top of the file. Also, no CJS. only ESM.
+- 2026-06-13 01:16 — now implement cappu test. also include an example in the examples dir. also end-to-end-test the example

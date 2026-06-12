@@ -8,6 +8,7 @@ export {
   jdkDownloadUrl,
   parseJdkSpec,
   projectJdkDir,
+  provisionedJava,
   provisionedJavac,
   type ProvisionResult,
   provisionJdk,

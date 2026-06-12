@@ -13,6 +13,7 @@ import { runInit } from "./init.ts";
 import { runInstall } from "./install.ts";
 import { runLsp } from "./lsp.ts";
 import { runSearch } from "./search.ts";
+import { runTestCommand } from "./test.ts";
 import pkg from "../../package.json" with { type: "json" };
 
 const USAGE = `
@@ -28,6 +29,8 @@ Usage:
                                      install them
   cappu search <query>               Search the configured package sources; prints
                                      group:artifact@latest-version per match
+  cappu test                         Compile src/test/java and run the JUnit
+                                     Platform console launcher over it
   cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
   cappu compile [options] [file...]  Compile .java files to .class bytecode; with no
                                      files, compile everything under the configured
@@ -126,6 +129,9 @@ switch (command) {
   }
   case "lsp":
     await runLsp(config, values.port);
+    break;
+  case "test":
+    await runTestCommand(config);
     break;
   case "compile":
     await runCompileCommand(

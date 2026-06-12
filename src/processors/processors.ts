@@ -20,6 +20,7 @@ import {
 import { delimiter, dirname, join } from "node:path";
 
 import { type CompileDiagnostic, parseJavacDiagnostics } from "../compiler/javacDiagnostics.ts";
+import { expandedClassPath } from "../compiler/javacPaths.ts";
 import { readZipEntries } from "../compiler/zipReader.ts";
 import { type CappuConfig, DEFAULT_PROCESSOR_PATH, resolveConfigPath } from "../config.ts";
 import { provisionedJavac } from "../jdks/index.ts";
@@ -109,28 +110,6 @@ export interface ProcessingResult {
 // The -proc:only generation arguments (experimental-compiler mode): all
 // rounds run, generated sources land in out.sources, Filer CLASS_OUTPUT in
 // out.classes; no project class files are emitted.
-// javac's -cp treats a DIRECTORY entry as a .class tree only; the dependency
-// jars cappu install puts inside it must be listed individually.
-function expandedClassPath(config: CappuConfig): string[] {
-  const out: string[] = [];
-  for (const configured of config.compilerOptions.classPath) {
-    const root = resolveConfigPath(config, configured);
-    if (!existsSync(root)) continue;
-    out.push(root);
-    if (root.endsWith(".jar")) continue;
-    try {
-      out.push(
-        ...globSync("*.jar", { cwd: root })
-          .toSorted()
-          .map(jar => join(root, jar)),
-      );
-    } catch {
-      // unreadable directories contribute only themselves
-    }
-  }
-  return out;
-}
-
 export function procOnlyArgs(
   config: CappuConfig,
   files: readonly string[],

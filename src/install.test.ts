@@ -238,6 +238,30 @@ test("annotationProcessor deps resolve independently into lib/processors", async
   }
 });
 
+test("testImplementation deps resolve independently into lib/test-classes", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cappu-install-"));
+  try {
+    writeFileSync(
+      join(dir, "cappu.json"),
+      JSON.stringify({ dependencies: { testImplementation: { "org.example:base": "1.0" } } }),
+    );
+    const config = loadConfig(undefined, dir);
+    const result = await installDependencies(config, [fakeRepo()]);
+    expect(result.installed).toEqual([join(dir, "lib", "test-classes", "base-1.0.jar")]);
+    const lock = JSON.parse(readFileSync(join(dir, LOCKFILE_NAME), "utf8")) as {
+      packages: unknown[];
+      testPackages: unknown[];
+    };
+    expect(lock.packages).toHaveLength(0);
+    expect(lock.testPackages).toHaveLength(1);
+    const again = await installDependencies(config, [fakeRepo()]);
+    expect(again.fromLock).toBe(true);
+    expect(again.installed).toEqual([join(dir, "lib", "test-classes", "base-1.0.jar")]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("locks written before the annotationProcessor configuration stay fresh", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cappu-install-"));
   try {

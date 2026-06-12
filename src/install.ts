@@ -23,6 +23,7 @@ import {
   type CappuConfig,
   DEFAULT_CLASS_PATH,
   DEFAULT_PROCESSOR_PATH,
+  DEFAULT_TEST_CLASS_PATH,
   MAVEN_CENTRAL,
   MAVEN_CENTRAL_SEARCH,
   resolveConfigPath,
@@ -156,6 +157,8 @@ interface Lockfile {
   packages: LockedPackage[];
   /** The separately resolved annotationProcessor set (absent when none). */
   processorPackages?: LockedPackage[];
+  /** The separately resolved testImplementation set (absent when none). */
+  testPackages?: LockedPackage[];
 }
 
 function sha256Of(bytes: Uint8Array): string {
@@ -200,6 +203,11 @@ export function configuredRoots(config: CappuConfig): Coordinates[] {
 /** The annotationProcessor configuration's roots (resolved independently). */
 export function processorRoots(config: CappuConfig): Coordinates[] {
   return rootsOf(config.dependencies.annotationProcessor);
+}
+
+/** The testImplementation configuration's roots (resolved independently). */
+export function testRoots(config: CappuConfig): Coordinates[] {
+  return rootsOf(config.dependencies.testImplementation);
 }
 
 function lockfilePath(config: CappuConfig): string {
@@ -297,26 +305,32 @@ export async function installDependencies(
   // The compile set (api + implementation) and the annotationProcessor set
   // resolve INDEPENDENTLY and install to different directories - a processor's
   // transitive closure must not version-mediate against the app's.
+  const NONE: Resolution = { packages: [], conflicts: [], missing: [] };
   let resolution: Resolution;
   let toInstall: PendingPackage[];
   let processorInstall: PendingPackage[];
+  let testInstall: PendingPackage[];
   if (lock) {
-    resolution = { packages: [], conflicts: [], missing: [] };
+    resolution = NONE;
     toInstall = lock.packages;
     processorInstall = lock.processorPackages ?? [];
+    testInstall = lock.testPackages ?? [];
   } else {
     const main = await resolveTransitive(configuredRoots(config), sources);
     const processors =
       processorRoots(config).length > 0
         ? await resolveTransitive(processorRoots(config), sources)
-        : { packages: [], conflicts: [], missing: [] };
+        : NONE;
+    const tests =
+      testRoots(config).length > 0 ? await resolveTransitive(testRoots(config), sources) : NONE;
     resolution = {
-      packages: [...main.packages, ...processors.packages],
-      conflicts: [...main.conflicts, ...processors.conflicts],
-      missing: [...main.missing, ...processors.missing],
+      packages: [...main.packages, ...processors.packages, ...tests.packages],
+      conflicts: [...main.conflicts, ...processors.conflicts, ...tests.conflicts],
+      missing: [...main.missing, ...processors.missing, ...tests.missing],
     };
     toInstall = pending(main);
     processorInstall = pending(processors);
+    testInstall = pending(tests);
   }
 
   const targetDir = resolveConfigPath(config, DEFAULT_CLASS_PATH);
@@ -324,7 +338,7 @@ export async function installDependencies(
   const noArtifact: string[] = [];
   const integrityFailures: string[] = [];
   const fromStore: string[] = [];
-  const total = toInstall.length + processorInstall.length;
+  const total = toInstall.length + processorInstall.length + testInstall.length;
   let progressed = 0;
   const materialize = async (set: PendingPackage[], dir: string): Promise<LockedPackage[]> => {
     const locked: LockedPackage[] = [];
@@ -355,6 +369,10 @@ export async function installDependencies(
     processorInstall,
     resolveConfigPath(config, DEFAULT_PROCESSOR_PATH),
   );
+  const lockedTests = await materialize(
+    testInstall,
+    resolveConfigPath(config, DEFAULT_TEST_CLASS_PATH),
+  );
 
   if (total > 0) {
     options.onProgress?.(total, total, "" as CoordinateString);
@@ -368,6 +386,7 @@ export async function installDependencies(
       roots: config.dependencies,
       packages: locked,
       ...(lockedProcessors.length > 0 ? { processorPackages: lockedProcessors } : {}),
+      ...(lockedTests.length > 0 ? { testPackages: lockedTests } : {}),
     };
     writeFileSync(lockfilePath(config), `${JSON.stringify(newLock, null, 2)}\n`);
   }
