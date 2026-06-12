@@ -37,15 +37,71 @@ import {
 
 /** The configured packageSources as PackageSource instances (Central searchable). */
 export function configuredSources(config: CappuConfig): PackageSource[] {
-  return config.packageSources.map(
-    url =>
+  return config.packageSources.map(url =>
+    withVersionListCache(
       new MavenRepositorySource(
         url,
         undefined,
         undefined,
         url === MAVEN_CENTRAL ? MAVEN_CENTRAL_SEARCH : undefined,
       ),
+    ),
   );
+}
+
+// --- version-list cache --------------------------------------------------------
+// listVersions answers (maven-metadata.xml) are cached in the package store
+// for a short while: `cappu add` resolves the same artifacts repeatedly and
+// the dependency code lenses poll for newer versions. Only non-empty answers
+// are cached, the TTL keeps new releases visible, and a read-only or missing
+// store silently degrades to live fetches.
+
+const VERSION_CACHE_TTL_MS = 60 * 60 * 1000;
+
+function versionCachePath(
+  sourceName: string,
+  groupId: string,
+  artifactId: string,
+): string | undefined {
+  const segments = [...groupId.split("."), artifactId];
+  if (segments.some(segment => !STORE_SEGMENT.test(segment))) return undefined;
+  // one directory per source: different repositories see different versions
+  const sourceDir = sourceName.replace(/[^A-Za-z0-9._-]+/g, "_");
+  return join(packageStoreDir(), "_metadata", sourceDir, ...segments, "versions.json");
+}
+
+export function withVersionListCache(source: PackageSource): PackageSource {
+  const listVersions = async (groupId: string, artifactId: string): Promise<string[]> => {
+    const cacheFile = versionCachePath(source.name, groupId, artifactId);
+    if (cacheFile && existsSync(cacheFile)) {
+      try {
+        const cached = JSON.parse(readFileSync(cacheFile, "utf8")) as {
+          fetchedAt: number;
+          versions: string[];
+        };
+        if (Date.now() - cached.fetchedAt < VERSION_CACHE_TTL_MS) return cached.versions;
+      } catch {
+        // corrupt cache entry: fall through to a live fetch (and rewrite it)
+      }
+    }
+    const versions = await source.listVersions(groupId, artifactId);
+    if (cacheFile && versions.length > 0) {
+      try {
+        mkdirSync(dirname(cacheFile), { recursive: true });
+        writeFileSync(cacheFile, JSON.stringify({ fetchedAt: Date.now(), versions }));
+      } catch {
+        // a read-only store never fails the lookup
+      }
+    }
+    return versions;
+  };
+  return {
+    name: source.name,
+    search: query => source.search(query),
+    listVersions,
+    getMetadata: coordinates => source.getMetadata(coordinates),
+    ...(source.getArtifact ? { getArtifact: c => source.getArtifact!(c) } : {}),
+  };
 }
 
 export const LOCKFILE_NAME = "cappu-lock.json";

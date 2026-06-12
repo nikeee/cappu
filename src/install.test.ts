@@ -6,7 +6,13 @@ import { test } from "node:test";
 import { expect } from "expect";
 
 import { loadConfig } from "./config.ts";
-import { installDependencies, LOCKFILE_NAME, pickAddVersion, storePathFor } from "./install.ts";
+import {
+  installDependencies,
+  LOCKFILE_NAME,
+  pickAddVersion,
+  storePathFor,
+  withVersionListCache,
+} from "./install.ts";
 import {
   InMemoryPackageSource,
   MavenRepositorySource,
@@ -228,6 +234,51 @@ test("pickAddVersion takes the newest matching version that resolves conflict-fr
     expect(await pickAddVersion(empty, "org.x:lib", "9", [versionedSource()])).toBeUndefined();
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("listVersions answers are cached in the package store with a TTL", async () => {
+  const store = mkdtempSync(join(tmpdir(), "cappu-store-"));
+  const previousStore = process.env.CAPPU_PACKAGE_STORE;
+  process.env.CAPPU_PACKAGE_STORE = store;
+  try {
+    let fetches = 0;
+    const source = withVersionListCache({
+      name: "https://repo.test/m2",
+      search: () => Promise.resolve([]),
+      listVersions: () => {
+        fetches++;
+        return Promise.resolve(["1.0", "1.1"]);
+      },
+      getMetadata: () => Promise.resolve(undefined),
+    });
+
+    expect(await source.listVersions("org.example", "thing")).toEqual(["1.0", "1.1"]);
+    expect(await source.listVersions("org.example", "thing")).toEqual(["1.0", "1.1"]);
+    expect(fetches).toBe(1); // second answer came from the store
+
+    // an expired entry is refetched and rewritten
+    const cacheFile = join(
+      store,
+      "_metadata",
+      "https_repo.test_m2",
+      "org",
+      "example",
+      "thing",
+      "versions.json",
+    );
+    writeFileSync(cacheFile, JSON.stringify({ fetchedAt: 0, versions: ["stale"] }));
+    expect(await source.listVersions("org.example", "thing")).toEqual(["1.0", "1.1"]);
+    expect(fetches).toBe(2);
+
+    // unsafe segments bypass the cache entirely
+    expect(await source.listVersions("org/../evil", "thing")).toEqual(["1.0", "1.1"]);
+    expect(await source.listVersions("org/../evil", "thing")).toEqual(["1.0", "1.1"]);
+    expect(fetches).toBe(4);
+  } finally {
+    if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
+    else process.env.CAPPU_PACKAGE_STORE = previousStore;
+    rmSync(store, { recursive: true, force: true });
   }
 });
 
