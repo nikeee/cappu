@@ -3,6 +3,7 @@
 
 import { missingConfiguredPaths, type OutputKind, runCompile } from "../compiler/compiler.ts";
 import { type CappuConfig, resolveConfigPath } from "../config.ts";
+import { validateAgainstJavac } from "../compiler/validateJavac.ts";
 import { findJavaFiles } from "../workspace.ts";
 
 export interface CompileFlags {
@@ -93,7 +94,6 @@ export async function runCompileCommand(
     process.exit(1);
   }
   if (flags.validate) {
-    const { validateAgainstJavac } = await import("../compiler/validateJavac.ts");
     // `inputs`, not `files`: a project build validates the sourcePaths sources.
     const validation = validateAgainstJavac(inputs, result.written, config.compilerOptions.javac);
     if (!validation.ok) {

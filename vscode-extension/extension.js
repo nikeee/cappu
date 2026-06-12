@@ -1,11 +1,12 @@
-const path = require("node:path");
-const vscode = require("vscode");
-const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
+import path from "node:path";
+
+import * as vscode from "vscode";
+import { LanguageClient, TransportKind } from "vscode-languageclient/node";
 
 let client;
 
-function activate(context) {
-  const repoRoot = path.join(__dirname, "..");
+export function activate(context) {
+  const repoRoot = path.join(import.meta.dirname, "..");
   // Run the TypeScript source directly via the repo's tsx: a bundled
   // dist/server.mjs silently goes stale whenever the source changes, which is
   // exactly the failure mode a test client must not have.
@@ -52,8 +53,6 @@ function activate(context) {
   );
 }
 
-function deactivate() {
+export function deactivate() {
   return client?.stop();
 }
-
-module.exports = { activate, deactivate };

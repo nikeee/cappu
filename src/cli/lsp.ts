@@ -1,11 +1,12 @@
 // `cappu lsp`: start the language server over stdio, or - with --port - over
-// the first accepted TCP connection. The server stack is imported lazily so
-// the other commands never load the LSP transport.
+// the first accepted TCP connection (the transport is passed into
+// startServer; nothing speaks JSON-RPC at module load).
 
 import { once } from "node:events";
-import type { Socket } from "node:net";
+import { createServer, type Socket } from "node:net";
 
 import type { CappuConfig } from "../config.ts";
+import { startServer } from "../services/server.ts";
 
 export async function runLsp(config: CappuConfig, portArg: string | undefined): Promise<void> {
   if (portArg !== undefined) {
@@ -14,10 +15,8 @@ export async function runLsp(config: CappuConfig, portArg: string | undefined): 
       process.stderr.write(`cappu: invalid port '${portArg}'\n`);
       process.exit(2);
     }
-    // Socket mode: listen, hand the first accepted connection to the server
-    // (configured before the lazy import, since server.ts creates its
-    // JSON-RPC connection at module load), exit when it disconnects.
-    const { createServer } = await import("node:net");
+    // Socket mode: listen, hand the first accepted connection to the server,
+    // exit when it disconnects (one session per process).
     const tcp = createServer().listen(port);
     await once(tcp, "listening");
     const address = tcp.address();
@@ -25,12 +24,11 @@ export async function runLsp(config: CappuConfig, portArg: string | undefined): 
     process.stderr.write(`cappu lsp listening on port ${bound}\n`);
 
     const [socket] = (await once(tcp, "connection")) as [Socket];
-    tcp.close(); // one session per process, like other socket-mode servers
+    tcp.close();
     socket.once("close", () => process.exit(0));
-    const { setTransport } = await import("../services/serverTransport.ts");
-    setTransport(socket, socket);
+    startServer(config, { reader: socket, writer: socket });
+    return;
   }
-  // startServer() begins reading the transport and keeps the process alive.
-  const { startServer } = await import("../services/server.ts");
+  // stdio: startServer's default transport; it keeps the process alive.
   startServer(config);
 }

@@ -7,6 +7,7 @@
   "categories": [
     "Programming Languages"
   ],
+  "type": "module",
   "main": "./extension.js",
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
@@ -40,6 +41,6 @@
     "workspaceContains:cappu.json"
   ],
   "engines": {
-    "vscode": "^1.80.0"
+    "vscode": "^1.94.0"
   }
 }
