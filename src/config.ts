@@ -24,6 +24,8 @@ export const DEFAULT_RESOURCE_PATH = "./src/main/resources";
 export const DEFAULT_TEST_SOURCE_PATH = "./src/test/java";
 export const DEFAULT_TEST_RESOURCE_PATH = "./src/test/resources";
 export const DEFAULT_TEST_CLASS_PATH = "./lib/test-classes";
+/** Where annotation-processor jars install to - never the compile classpath. */
+export const DEFAULT_PROCESSOR_PATH = "./lib/processors";
 
 const CompilerOptionsSchema = z.object({
   /** Directories or .jar files scanned for .class files (resolution only). */
@@ -66,6 +68,8 @@ const DependenciesSchema = z.object({
   api: DependencyMapSchema.default({}),
   /** Dependencies internal to the implementation. */
   implementation: DependencyMapSchema.default({}),
+  /** JSR-269 annotation processors (resolved separately into lib/processors). */
+  annotationProcessor: DependencyMapSchema.default({}),
 });
 
 const ConfigFileSchema = z.object({
@@ -174,6 +178,10 @@ export const CONFIG_TEMPLATE = `
     "api": {},
     "implementation": {
       // "com.google.code.gson:gson": "2.13.2",
+    },
+    // JSR-269 annotation processors; \`cappu compile\` runs them via javac.
+    "annotationProcessor": {
+      // "org.mapstruct:mapstruct-processor": "1.6.3",
     },
   },
 }

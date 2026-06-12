@@ -201,6 +201,69 @@ function configWith(dir: string, json: string): ReturnType<typeof loadConfig> {
   return loadConfig(undefined, dir);
 }
 
+test("annotationProcessor deps resolve independently into lib/processors", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cappu-install-"));
+  try {
+    writeFileSync(
+      join(dir, "cappu.json"),
+      JSON.stringify({
+        dependencies: {
+          implementation: { "com.google.code.gson:gson": "2.14.0" },
+          annotationProcessor: { "org.example:base": "1.0" },
+        },
+      }),
+    );
+    const config = loadConfig(undefined, dir);
+    const result = await installDependencies(config, [fakeRepo()]);
+    // compile deps in lib/classes, the processor in lib/processors
+    expect(result.installed).toContain(join(dir, "lib", "classes", "gson-2.14.0.jar"));
+    expect(result.installed).toContain(join(dir, "lib", "processors", "base-1.0.jar"));
+    // the processor dir holds ONLY the processor closure (gson stays out)
+    expect(readdirSync(join(dir, "lib", "processors"))).toEqual(["base-1.0.jar"]);
+
+    const lock = JSON.parse(readFileSync(join(dir, LOCKFILE_NAME), "utf8")) as {
+      packages: unknown[];
+      processorPackages: unknown[];
+    };
+    expect(lock.packages).toHaveLength(2); // gson + transitive base
+    expect(lock.processorPackages).toHaveLength(1);
+
+    // the locked sets install again without resolution
+    const again = await installDependencies(config, [fakeRepo()]);
+    expect(again.fromLock).toBe(true);
+    expect(again.lockStale).toBe(false);
+    expect(again.installed).toContain(join(dir, "lib", "processors", "base-1.0.jar"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("locks written before the annotationProcessor configuration stay fresh", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cappu-install-"));
+  try {
+    writeFileSync(
+      join(dir, "cappu.json"),
+      '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
+    );
+    const config = loadConfig(undefined, dir);
+    await installDependencies(config, [fakeRepo()]);
+    // simulate a lock from BEFORE the schema knew annotationProcessor: its
+    // roots lack the (empty) configuration entirely
+    const lock = JSON.parse(readFileSync(join(dir, LOCKFILE_NAME), "utf8")) as {
+      roots: Record<string, unknown>;
+    };
+    delete lock.roots.annotationProcessor;
+    delete (lock.roots as { api?: unknown }).api; // empty sections may be absent too
+    writeFileSync(join(dir, LOCKFILE_NAME), JSON.stringify(lock));
+
+    const again = await installDependencies(config, [fakeRepo()]);
+    expect(again.fromLock).toBe(true);
+    expect(again.lockStale).toBe(false); // empty configurations are normalized away
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pickAddVersion takes the newest matching version that resolves conflict-free", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cappu-pick-"));
   try {

@@ -25,7 +25,14 @@ import { createChecker } from "./checker.ts";
 import { classDeclaresMain, loadClassPath } from "./classfileReader.ts";
 import { type CappuConfig, resolveConfigPath } from "../config.ts";
 import { emitSourceFile } from "./emitter.ts";
+import { type CompileDiagnostic, parseJavacDiagnostics } from "./javacDiagnostics.ts";
 import { provisionedJavac } from "../jdks/index.ts";
+import {
+  generatedClassesDir,
+  generatedSourcesDir,
+  processorJars,
+  runAnnotationProcessing,
+} from "../processors/index.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
 import { createProgram, type Program } from "./program.ts";
@@ -50,16 +57,7 @@ export interface CompileOptions {
   config: CappuConfig;
 }
 
-/** A source diagnostic located for display (1-based line/column). */
-export interface CompileDiagnostic {
-  severity: "error" | "warning";
-  /** The input file the diagnostic belongs to, if it has one. */
-  file?: string;
-  line?: number;
-  column?: number;
-  code?: number;
-  message: string;
-}
+export { type CompileDiagnostic } from "./javacDiagnostics.ts";
 
 interface CompileOutput {
   /** Paths of the .class files written, in emission order. */
@@ -134,6 +132,25 @@ function resourceEntries(config: CappuConfig): ZipEntryInput[] {
   return entries;
 }
 
+// Filer CLASS_OUTPUT of the last annotation-processing pass (generated
+// resources such as META-INF/services), as archive entries.
+function generatedClassEntries(config: CappuConfig): ZipEntryInput[] {
+  const root = generatedClassesDir(config);
+  if (!existsSync(root)) return [];
+  let matches: string[];
+  try {
+    matches = globSync("**/*", { cwd: root, withFileTypes: true })
+      .filter(d => d.isFile())
+      .map(d => relative(root, join(d.parentPath, d.name)));
+  } catch {
+    return [];
+  }
+  return matches.map(rel => ({
+    name: rel.replaceAll("\\", "/"),
+    bytes: readFileSync(join(root, rel)),
+  }));
+}
+
 /**
  * Configured classPath/sourcePaths entries that do not exist on disk. They are
  * treated as empty everywhere; this is only for warning the user, and only
@@ -157,9 +174,15 @@ export function loadConfiguredPaths(program: Program, config: CappuConfig): void
     program,
     config.compilerOptions.classPath.map(p => resolveConfigPath(config, p)),
   );
-  for (const dir of config.compilerOptions.sourcePaths) {
+  // .cappu/generated-sources/sources (annotation-processor output, #7) is an
+  // implicit extra source path; absent until the first processing compile.
+  const sourceDirs = [
+    ...config.compilerOptions.sourcePaths.map(p => resolveConfigPath(config, p)),
+    generatedSourcesDir(config),
+  ];
+  for (const dir of sourceDirs) {
     try {
-      for (const { uri, text } of loadJavaFiles(resolveConfigPath(config, dir))) {
+      for (const { uri, text } of loadJavaFiles(dir)) {
         program.addProjectFile(uri, text);
       }
     } catch {
@@ -204,17 +227,30 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
   }
   const typeCheck = options.typeCheck ?? true;
 
+  // Annotation processors (nikeee/cappu#7): generation is javac's job even in
+  // experimental mode (-proc:only); our compiler then compiles original +
+  // generated sources. A processing error fails the build before anything
+  // else runs; nothing happens at all when no processor jars are installed.
+  let inputs = files;
+  if (options.config) {
+    const processing = runAnnotationProcessing(options.config, files);
+    if (processing.diagnostics.some(d => d.severity === "error")) {
+      return { success: false, diagnostics: processing.diagnostics, written: [], degraded: [] };
+    }
+    if (processing.ran) inputs = [...files, ...processing.generatedFiles];
+  }
+
   // One program over all inputs (+ the JDK stub + the configured classpath and
   // source paths) so type descriptors resolve.
   const program = createProgram();
   loadJdkStub(program);
   if (options.config) loadConfiguredPaths(program, options.config);
-  for (const file of files) program.addProjectFile(pathToUri(file), readFileSync(file, "utf8"));
+  for (const file of inputs) program.addProjectFile(pathToUri(file), readFileSync(file, "utf8"));
   const checker = createChecker(program);
 
   // All diagnostics over all inputs before emitting anything (as javac does).
   const diagnostics: CompileDiagnostic[] = [];
-  for (const file of files) {
+  for (const file of inputs) {
     const sourceFile = program.getSourceFile(pathToUri(file))!;
     const fileDiagnostics = [
       ...sourceFile.parseDiagnostics,
@@ -239,7 +275,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
   try {
     const classes: ZipEntryInput[] = [];
     const mainClasses: string[] = [];
-    for (const file of files) {
+    for (const file of inputs) {
       const sourceFile = program.getSourceFile(pathToUri(file))!;
       for (const cls of emitSourceFile(sourceFile, program, checker)) {
         // cls.name is the internal name (com/app/Foo); as a path it mirrors
@@ -252,7 +288,11 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
     // Class.getResource works the same from the tree and from the jar; our
     // class files win on a name collision.
     const haveNames = new Set(classes.map(c => c.name));
-    const resources = resourceEntries(options.config).filter(r => !haveNames.has(r.name));
+    const resources = [
+      ...resourceEntries(options.config),
+      // Filer CLASS_OUTPUT of the processing pass (generated resources)
+      ...generatedClassEntries(options.config),
+    ].filter(r => !haveNames.has(r.name) && (haveNames.add(r.name), true));
     if (output === "classes") {
       // A package tree directly under outDir: outDir is a valid `java -cp` root.
       for (const entry of [...classes, ...resources]) {
@@ -311,28 +351,6 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
 
 // javac's "path:line: error: message" diagnostics, located like our own; any
 // unmatched stderr tail becomes one unlocated error.
-function parseJavacDiagnostics(stderr: string): CompileDiagnostic[] {
-  const diagnostics: CompileDiagnostic[] = [];
-  const leftovers: string[] = [];
-  for (const line of stderr.split("\n")) {
-    const match = /^(.+?):(\d+): (error|warning): (.*)$/.exec(line);
-    if (match) {
-      diagnostics.push({
-        severity: match[3] === "warning" ? "warning" : "error",
-        file: match[1]!,
-        line: Number(match[2]),
-        message: match[4]!,
-      });
-    } else if (line.trim() && !/^\s/.test(line) && !/^\d+ (error|warning)s?$/.test(line)) {
-      leftovers.push(line);
-    }
-  }
-  if (diagnostics.length === 0 && leftovers.length > 0) {
-    diagnostics.push({ severity: "error", message: leftovers.join(" ") });
-  }
-  return diagnostics;
-}
-
 /**
  * `cappu compile --use-javac`: the configured javac compiles and emits; none
  * of cappu's own pipeline runs. The configured classPath/sourcePaths become
@@ -357,9 +375,19 @@ function runJavacCompile(
     const sourcePaths = config.compilerOptions.sourcePaths
       .map(p => resolveConfigPath(config, p))
       .filter(p => existsSync(p));
+    // Annotation processors (nikeee/cappu#7): javac discovers and runs them
+    // from -processorpath in this same invocation; generated sources go to
+    // .cappu/generated-sources/sources so the LSP sees them too.
+    const processors = processorJars(config);
+    if (processors.length > 0) mkdirSync(generatedSourcesDir(config), { recursive: true });
     const args = [
       "-d",
       tmp,
+      "-encoding",
+      "UTF-8",
+      ...(processors.length > 0
+        ? ["-processorpath", processors.join(delimiter), "-s", generatedSourcesDir(config)]
+        : []),
       ...(classPath.length > 0 ? ["-cp", classPath.join(delimiter)] : []),
       ...(sourcePaths.length > 0 ? ["-sourcepath", sourcePaths.join(delimiter)] : []),
       ...files,
@@ -379,23 +407,42 @@ function runJavacCompile(
       };
     }
 
-    const classFiles = globSync("**/*.class", { cwd: tmp });
+    // Everything javac (and Filer CLASS_OUTPUT: generated resources like
+    // META-INF/services) wrote, not just .class files.
+    const outputFiles = globSync("**/*", { cwd: tmp, withFileTypes: true })
+      .filter(d => d.isFile())
+      .map(d => relative(tmp, join(d.parentPath, d.name)));
+    // Project resources (#12) ship in the default mode too; javac's own
+    // outputs win on a collision.
+    const haveNames = new Set(outputFiles.map(f => f.replaceAll("\\", "/")));
+    const resources = resourceEntries(config).filter(r => !haveNames.has(r.name));
     const written: string[] = [];
     if (output === "classes") {
-      for (const relative of classFiles) {
-        const target = join(outDir, relative);
+      for (const rel of outputFiles) {
+        const target = join(outDir, rel);
         mkdirSync(dirname(target), { recursive: true });
-        writeFileSync(target, readFileSync(join(tmp, relative)));
+        writeFileSync(target, readFileSync(join(tmp, rel)));
+        written.push(target);
+      }
+      for (const entry of resources) {
+        const target = join(outDir, entry.name);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, entry.bytes);
         written.push(target);
       }
     } else {
       const classes: ZipEntryInput[] = [];
       const mainClasses: string[] = [];
-      for (const relative of classFiles) {
-        const bytes = readFileSync(join(tmp, relative));
-        classes.push({ name: relative, bytes });
-        if (classDeclaresMain(bytes)) {
-          mainClasses.push(relative.replace(/\.class$/, "").replaceAll("/", "."));
+      for (const rel of outputFiles) {
+        const bytes = readFileSync(join(tmp, rel));
+        classes.push({ name: rel.replaceAll("\\", "/"), bytes });
+        if (rel.endsWith(".class") && classDeclaresMain(bytes)) {
+          mainClasses.push(
+            rel
+              .replace(/\.class$/, "")
+              .replaceAll("/", ".")
+              .replaceAll("\\", "."),
+          );
         }
       }
       const mainClass =
@@ -408,6 +455,7 @@ function runJavacCompile(
           ),
         },
         ...classes,
+        ...resources,
       ];
       if (output === "fat-jar") {
         const have = new Set(entries.map(e => e.name));

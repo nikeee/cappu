@@ -21,6 +21,8 @@ import { dirname, join } from "node:path";
 
 import {
   type CappuConfig,
+  DEFAULT_CLASS_PATH,
+  DEFAULT_PROCESSOR_PATH,
   MAVEN_CENTRAL,
   MAVEN_CENTRAL_SEARCH,
   resolveConfigPath,
@@ -150,8 +152,10 @@ interface Lockfile {
   version: 2;
   /** The dependencies section this lock was resolved from. */
   roots: CappuConfig["dependencies"];
-  /** The resolved set, in install order. */
+  /** The resolved compile set (api + implementation), in install order. */
   packages: LockedPackage[];
+  /** The separately resolved annotationProcessor set (absent when none). */
+  processorPackages?: LockedPackage[];
 }
 
 function sha256Of(bytes: Uint8Array): string {
@@ -184,11 +188,18 @@ function rootsOf(entries: Record<string, string>): Coordinates[] {
   });
 }
 
-/** Every configured dependency as coordinates (api + implementation alike). */
+/** Every COMPILE dependency as coordinates (api + implementation alike). */
 export function configuredRoots(config: CappuConfig): Coordinates[] {
-  // Only the api and implementation configurations exist so far; both are
-  // needed at compile time, so install treats them alike.
+  // api and implementation are both needed at compile time; the
+  // annotationProcessor configuration deliberately stays out (it resolves
+  // independently - processor classpaths must not version-mediate against
+  // the app classpath).
   return [...rootsOf(config.dependencies.api), ...rootsOf(config.dependencies.implementation)];
+}
+
+/** The annotationProcessor configuration's roots (resolved independently). */
+export function processorRoots(config: CappuConfig): Coordinates[] {
+  return rootsOf(config.dependencies.annotationProcessor);
 }
 
 function lockfilePath(config: CappuConfig): string {
@@ -207,9 +218,20 @@ function readLockfile(config: CappuConfig): Lockfile | undefined {
   }
 }
 
-/** Whether the lock was resolved from exactly this dependencies section. */
+/**
+ * Whether the lock was resolved from exactly this dependencies section.
+ * Empty configurations are dropped before comparing, so locks written before
+ * a new configuration existed (e.g. annotationProcessor) do not all turn
+ * stale when the schema grows.
+ */
 function lockMatches(lock: Lockfile, config: CappuConfig): boolean {
-  return JSON.stringify(lock.roots) === JSON.stringify(config.dependencies);
+  const normalized = (roots: CappuConfig["dependencies"]): string =>
+    JSON.stringify(
+      Object.fromEntries(
+        Object.entries(roots ?? {}).filter(([, entries]) => Object.keys(entries).length > 0),
+      ),
+    );
+  return normalized(lock.roots) === normalized(config.dependencies);
 }
 
 async function artifactFrom(
@@ -268,52 +290,85 @@ export async function installDependencies(
   const fromLock = lock !== undefined;
   const lockStale = lock !== undefined && !lockMatches(lock, config);
 
+  type PendingPackage = { coordinates: Coordinates; source: string; sha256?: string };
+  const pending = (resolved: Resolution): PendingPackage[] =>
+    resolved.packages.map(p => ({ coordinates: p.coordinates, source: p.source }));
+
+  // The compile set (api + implementation) and the annotationProcessor set
+  // resolve INDEPENDENTLY and install to different directories - a processor's
+  // transitive closure must not version-mediate against the app's.
   let resolution: Resolution;
-  let toInstall: { coordinates: Coordinates; source: string; sha256?: string }[];
+  let toInstall: PendingPackage[];
+  let processorInstall: PendingPackage[];
   if (lock) {
     resolution = { packages: [], conflicts: [], missing: [] };
     toInstall = lock.packages;
+    processorInstall = lock.processorPackages ?? [];
   } else {
-    resolution = await resolveTransitive(configuredRoots(config), sources);
-    toInstall = resolution.packages.map(p => ({ coordinates: p.coordinates, source: p.source }));
+    const main = await resolveTransitive(configuredRoots(config), sources);
+    const processors =
+      processorRoots(config).length > 0
+        ? await resolveTransitive(processorRoots(config), sources)
+        : { packages: [], conflicts: [], missing: [] };
+    resolution = {
+      packages: [...main.packages, ...processors.packages],
+      conflicts: [...main.conflicts, ...processors.conflicts],
+      missing: [...main.missing, ...processors.missing],
+    };
+    toInstall = pending(main);
+    processorInstall = pending(processors);
   }
 
-  const targetDir = resolveConfigPath(config, "./lib/classes");
+  const targetDir = resolveConfigPath(config, DEFAULT_CLASS_PATH);
   const installed: string[] = [];
   const noArtifact: string[] = [];
   const integrityFailures: string[] = [];
   const fromStore: string[] = [];
-  const locked: LockedPackage[] = [];
-  if (toInstall.length > 0) mkdirSync(targetDir, { recursive: true });
+  const total = toInstall.length + processorInstall.length;
   let progressed = 0;
-  for (const pkg of toInstall) {
-    options.onProgress?.(progressed++, toInstall.length, coordinatesToString(pkg.coordinates));
-    const artifact = await artifactFrom(sources, pkg.source, pkg.coordinates);
-    if (!artifact) {
-      noArtifact.push(coordinatesToString(pkg.coordinates));
-      continue;
+  const materialize = async (set: PendingPackage[], dir: string): Promise<LockedPackage[]> => {
+    const locked: LockedPackage[] = [];
+    if (set.length > 0) mkdirSync(dir, { recursive: true });
+    for (const pkg of set) {
+      options.onProgress?.(progressed++, total, coordinatesToString(pkg.coordinates));
+      const artifact = await artifactFrom(sources, pkg.source, pkg.coordinates);
+      if (!artifact) {
+        noArtifact.push(coordinatesToString(pkg.coordinates));
+        continue;
+      }
+      const digest = sha256Of(artifact.bytes);
+      if (pkg.sha256 !== undefined && pkg.sha256 !== digest) {
+        // A locked install must produce the locked bytes: do not write the jar.
+        integrityFailures.push(coordinatesToString(pkg.coordinates));
+        continue;
+      }
+      if (artifact.cached) fromStore.push(coordinatesToString(pkg.coordinates));
+      const file = join(dir, `${pkg.coordinates.artifactId}-${pkg.coordinates.version}.jar`);
+      writeFileSync(file, artifact.bytes);
+      installed.push(file);
+      locked.push({ coordinates: pkg.coordinates, source: pkg.source, sha256: digest });
     }
-    const digest = sha256Of(artifact.bytes);
-    if (pkg.sha256 !== undefined && pkg.sha256 !== digest) {
-      // A locked install must produce the locked bytes: do not write the jar.
-      integrityFailures.push(coordinatesToString(pkg.coordinates));
-      continue;
-    }
-    if (artifact.cached) fromStore.push(coordinatesToString(pkg.coordinates));
-    const file = join(targetDir, `${pkg.coordinates.artifactId}-${pkg.coordinates.version}.jar`);
-    writeFileSync(file, artifact.bytes);
-    installed.push(file);
-    locked.push({ coordinates: pkg.coordinates, source: pkg.source, sha256: digest });
-  }
+    return locked;
+  };
+  const locked = await materialize(toInstall, targetDir);
+  const lockedProcessors = await materialize(
+    processorInstall,
+    resolveConfigPath(config, DEFAULT_PROCESSOR_PATH),
+  );
 
-  if (toInstall.length > 0) {
-    options.onProgress?.(toInstall.length, toInstall.length, "" as CoordinateString);
+  if (total > 0) {
+    options.onProgress?.(total, total, "" as CoordinateString);
   }
 
   // The lock pins what was VERIFIABLY materialized, so it is written after the
   // downloads - and only when the whole set arrived.
   if (!fromLock && config.fromFile && resolution.missing.length === 0 && noArtifact.length === 0) {
-    const newLock: Lockfile = { version: 2, roots: config.dependencies, packages: locked };
+    const newLock: Lockfile = {
+      version: 2,
+      roots: config.dependencies,
+      packages: locked,
+      ...(lockedProcessors.length > 0 ? { processorPackages: lockedProcessors } : {}),
+    };
     writeFileSync(lockfilePath(config), `${JSON.stringify(newLock, null, 2)}\n`);
   }
   return {
