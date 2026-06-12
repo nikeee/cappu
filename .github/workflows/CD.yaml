@@ -8,7 +8,7 @@ on:
 jobs:
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
 
     steps:
       - uses: actions/checkout@v6
@@ -21,6 +21,36 @@ jobs:
       - run: node --run ci
       - run: node --run build
 
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cappu-linux-x64
+          path: dist/linux-x64/cappu
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cappu-linux-arm64
+          path: dist/linux-arm64/cappu
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cappu-darwin-x64
+          path: dist/darwin-x64/cappu
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cappu-darwin-arm64
+          path: dist/darwin-arm64/cappu
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cappu-windows-x64
+          path: dist/windows-x64/cappu.exe
+
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+
+    permissions:
+        contents: read
+        packages: write
+
+    steps:
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
 
@@ -44,24 +74,3 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: cappu-linux-x64
-          path: dist/linux-x64/cappu
-      - uses: actions/upload-artifact@v7
-        with:
-          name: cappu-linux-arm64
-          path: dist/linux-arm64/cappu
-      - uses: actions/upload-artifact@v7
-        with:
-          name: cappu-darwin-x64
-          path: dist/darwin-x64/cappu
-      - uses: actions/upload-artifact@v7
-        with:
-          name: cappu-darwin-arm64
-          path: dist/darwin-arm64/cappu
-      - uses: actions/upload-artifact@v7
-        with:
-          name: cappu-windows-x64
-          path: dist/windows-x64/cappu.exe
