@@ -208,8 +208,7 @@ function enclosingTypeSymbol(node: Node): Symbol | undefined {
  * applies when dropping imports).
  */
 export function findUnusedImports(sourceFile: SourceFile): ImportDeclaration[] {
-  const candidates = sourceFile.imports.filter(imp => !imp.isStatic && !imp.isOnDemand);
-  if (candidates.length === 0) return [];
+  if (sourceFile.imports.length === 0) return [];
   const used = new Set<string>();
   const collect = (node: Node): void => {
     if (node.kind === SyntaxKind.Identifier) used.add((node as Identifier).text);
@@ -219,10 +218,25 @@ export function findUnusedImports(sourceFile: SourceFile): ImportDeclaration[] {
     });
   };
   for (const statement of sourceFile.statements) collect(statement);
-  return candidates.filter(imp => {
+
+  const unused: ImportDeclaration[] = [];
+  const seen = new Set<string>();
+  for (const imp of sourceFile.imports) {
     const fqn = entityNameToString(imp.name);
-    return !used.has(fqn.slice(fqn.lastIndexOf(".") + 1));
-  });
+    // An exact repeat of an earlier import is redundant whatever the usage.
+    const key = `${imp.isStatic ? "static " : ""}${fqn}${imp.isOnDemand ? ".*" : ""}`;
+    if (seen.has(key)) {
+      unused.push(imp);
+      continue;
+    }
+    seen.add(key);
+    // On-demand imports stay unjudged: what they contribute is open-ended.
+    // For single imports the simple name is what becomes referencable - the
+    // type name, or the member name for a static import.
+    if (imp.isOnDemand) continue;
+    if (!used.has(fqn.slice(fqn.lastIndexOf(".") + 1))) unused.push(imp);
+  }
+  return unused;
 }
 
 export function createChecker(program: Program): Checker {

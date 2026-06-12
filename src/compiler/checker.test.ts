@@ -126,8 +126,21 @@ test("unused single-type imports are flagged (1305)", () => {
   expect(unused("import java.util.List;\nclass C { List<String> l; }")).toEqual([]);
   // any identifier occurrence counts as a use (conservative)
   expect(unused("import java.util.List;\nclass C { void m() { int List = 1; } }")).toEqual([]);
-  // static and on-demand imports are never judged
-  expect(unused("import java.util.*;\nimport static java.util.List.of;\nclass C {}")).toEqual([]);
+  // a static single import is judged by its member name
+  expect(unused("import static java.util.List.of;\nclass C {}")).toEqual([
+    "Unused import 'java.util.List.of'.",
+  ]);
+  expect(
+    unused("import static java.util.List.of;\nclass C { Object m() { return of(1); } }"),
+  ).toEqual([]);
+  // on-demand imports are never judged for usage
+  expect(unused("import java.util.*;\nclass C {}")).toEqual([]);
+  // an exact repeat of an earlier import is redundant whatever the usage
+  expect(
+    unused(
+      "import java.util.List;\nimport java.util.List;\nimport java.util.*;\nimport java.util.*;\nclass C { List<String> l; }",
+    ),
+  ).toEqual(["Unused import 'java.util.List'.", "Unused import 'java.util'."]);
   // a recovered parse stays silent
   expect(unused("import java.util.List;\nclass C { void m() { int = ; } }")).toEqual([]);
 });
