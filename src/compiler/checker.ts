@@ -1643,6 +1643,26 @@ export function createChecker(program: Program): Checker {
       if (!isConcrete(targetType)) return;
       const valueType = getTypeOfExpression(valueNode);
       if (!isConcrete(valueType)) return;
+      // A call whose resolution is not trustworthy: an OVERLOADED method (the
+      // picked return type is best-effort, e.g. IOUtils.copy has int- and
+      // long-returning overloads), or a declaration whose arity does not even
+      // match the call (the name walk found a sibling overload, e.g. a bare
+      // toString() landing on toString(boolean, StringBuilder) while the real
+      // target is Object.toString()).
+      if (valueNode.kind === SyntaxKind.CallExpression) {
+        const call = valueNode as CallExpression;
+        const declarations = resolveCall(call)?.symbol?.declarations ?? [];
+        if (declarations.length > 1) return;
+        const declaration = declarations[0];
+        if (declaration?.kind === SyntaxKind.MethodDeclaration) {
+          const parameters = (declaration as MethodDeclaration).parameters;
+          const last = parameters.at(-1) as Parameter | undefined;
+          const accepts = last?.isVarArgs
+            ? call.arguments.length >= parameters.length - 1
+            : call.arguments.length === parameters.length;
+          if (!accepts) return;
+        }
+      }
       // High-precision scope: the primitive<->reference boundary (int x = "s"),
       // and primitive-to-primitive below. Reference-to-reference / generic cases
       // depend on subtyping precision we do not fully model yet.
@@ -1678,15 +1698,6 @@ export function createChecker(program: Program): Checker {
     };
     const checkPrimitiveAssignment = (valueNode: Node, value: string, target: string): void => {
       if (value === target || primitiveWidens(value, target)) return;
-      // A call to an OVERLOADED method: overload resolution is best-effort, so
-      // the picked return type is not reliable evidence for an error (e.g.
-      // IOUtils.copy has int- and long-returning overloads).
-      if (
-        valueNode.kind === SyntaxKind.CallExpression &&
-        (resolveCall(valueNode as CallExpression)?.symbol?.declarations?.length ?? 0) > 1
-      ) {
-        return;
-      }
       const range = NARROWING_RANGE[target];
       const constNarrowable =
         range !== undefined && ["byte", "short", "char", "int"].includes(value);
@@ -1807,8 +1818,28 @@ export function createChecker(program: Program): Checker {
       const overloads = projectOverloads(start, nameNode.text);
       if (!overloads) return;
       const argc = call.arguments.length;
-      if (overloads.some(o => arityAccepts(o.parameters, argc))) return;
-      reportArity(callee, call.end, describeArities(overloads.map(o => o.parameters)), argc);
+      const applicable = overloads.filter(o => arityAccepts(o.parameters, argc));
+      if (applicable.length === 0) {
+        reportArity(callee, call.end, describeArities(overloads.map(o => o.parameters)), argc);
+        return;
+      }
+      // With exactly one arity-surviving overload there is nothing to choose
+      // between: every argument must convert to its declared parameter type.
+      if (applicable.length === 1) checkArgumentTypes(call.arguments, applicable[0]!.parameters);
+    };
+
+    // Argument types against the single applicable signature. The same
+    // high-precision rules as checkAssignment apply (only the primitive
+    // boundary is judged), so a target-typed or unresolved argument stays
+    // silent; the trailing varargs position is skipped (array vs component).
+    const checkArgumentTypes = (args: readonly Node[], parameters: readonly Node[]): void => {
+      const last = parameters.at(-1) as Parameter | undefined;
+      const fixed = last?.isVarArgs ? parameters.length - 1 : parameters.length;
+      for (let i = 0; i < Math.min(args.length, fixed); i++) {
+        const parameter = parameters[i] as Parameter;
+        if (!parameter.symbol) continue;
+        checkAssignment(args[i]!, getTypeOfSymbol(parameter.symbol));
+      }
     };
 
     const checkCreationArity = (node: ObjectCreationExpression): void => {
@@ -1823,8 +1854,8 @@ export function createChecker(program: Program): Checker {
           m => m.kind === SyntaxKind.ConstructorDeclaration,
         ) as ConstructorDeclaration[];
         // no declared constructor: the implicit default takes no arguments
-        const ok =
-          ctors.length === 0 ? argc === 0 : ctors.some(c => arityAccepts(c.parameters, argc));
+        const applicable = ctors.filter(c => arityAccepts(c.parameters, argc));
+        const ok = ctors.length === 0 ? argc === 0 : applicable.length > 0;
         if (!ok) {
           reportArity(
             node.type,
@@ -1832,6 +1863,10 @@ export function createChecker(program: Program): Checker {
             ctors.length === 0 ? "0" : describeArities(ctors.map(c => c.parameters)),
             argc,
           );
+        } else if (applicable.length === 1 && !node.classBody) {
+          // an anonymous body changes nothing about ctor argument conversion,
+          // but stay conservative and only judge the plain creation
+          checkArgumentTypes(node.arguments ?? [], applicable[0]!.parameters);
         }
       } else if (declaration.kind === SyntaxKind.RecordDeclaration) {
         const record = declaration as RecordDeclaration;

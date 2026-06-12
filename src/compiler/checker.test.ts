@@ -114,6 +114,52 @@ test("C-style array brackets after the name add rank (char buf[])", () => {
   expect(ctx.checker.getSemanticDiagnostics(ctx.program.getSourceFile(ctx.uri)!)).toHaveLength(0);
 });
 
+test("argument types against the single arity-matching overload (1300)", () => {
+  const args = (text: string): string[] => {
+    const ctx = setup(text);
+    return ctx.checker
+      .getSemanticDiagnostics(ctx.program.getSourceFile(ctx.uri)!)
+      .filter(d => d.code === 1300)
+      .map(d => d.messageText);
+  };
+  // a primitive argument against a reference parameter (and vice versa)
+  expect(args("class C { void f(String s) {} void m() { f(1); } }")).toEqual([
+    "Incompatible types: 'int' cannot be converted to 'String'.",
+  ]);
+  expect(args('class C { void f(int a) {} void m() { f("x"); } }')).toEqual([
+    "Incompatible types: 'String' cannot be converted to 'int'.",
+  ]);
+  // widening and identity are fine; lossy primitive conversion is not
+  expect(args("class C { void f(long a) {} void m() { f(1); } }")).toEqual([]);
+  expect(args("class C { void f(int a) {} void m(long x) { f(x); } }")).toEqual([
+    "Incompatible types: 'long' cannot be converted to 'int'.",
+  ]);
+  // two overloads, exactly one matches the arity: that one is judged
+  expect(args('class C { void f(int a) {} void f(int a, int b) {} void m() { f("s"); } }')).toEqual(
+    ["Incompatible types: 'String' cannot be converted to 'int'."],
+  );
+  // two overloads with the SAME arity: choosing is overload resolution - silent
+  expect(args("class C { void f(int a) {} void f(String s) {} void m() { f(true); } }")).toEqual(
+    [],
+  );
+  // varargs: the fixed prefix is judged, the variable tail is not
+  expect(args('class C { void f(int a, String... s) {} void m() { f("x", "y"); } }')).toEqual([
+    "Incompatible types: 'String' cannot be converted to 'int'.",
+  ]);
+  expect(args('class C { void f(int a, String... s) {} void m() { f(1, "y"); } }')).toEqual([]);
+  // constructor arguments behave like calls
+  expect(args('class P { P(int a) {} } class Main { void m() { P p = new P("s"); } }')).toEqual([
+    "Incompatible types: 'String' cannot be converted to 'int'.",
+  ]);
+  // a bare call landing on a wrong-arity sibling overload must not be judged
+  // (the real target is Object.toString(): the resolution is untrustworthy)
+  expect(
+    args(
+      "class C { void toString(boolean b, StringBuilder sb) {} void m() { String s = toString(); } }",
+    ),
+  ).toEqual([]);
+});
+
 test("calls with an impossible argument count are reported (1304)", () => {
   const arity = (text: string): string[] => {
     const ctx = setup(text);
