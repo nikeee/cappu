@@ -358,6 +358,28 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
  * Main-Class detected from javac's CLASS BYTES (via the class-file reader),
  * not from source.
  */
+// javac's -cp treats a DIRECTORY entry as a .class tree only; the dependency
+// jars cappu install puts inside it must be listed individually.
+function expandedClassPath(config: CappuConfig): string[] {
+  const out: string[] = [];
+  for (const configured of config.compilerOptions.classPath) {
+    const root = resolveConfigPath(config, configured);
+    if (!existsSync(root)) continue;
+    out.push(root);
+    if (root.endsWith(".jar")) continue;
+    try {
+      out.push(
+        ...globSync("*.jar", { cwd: root })
+          .toSorted()
+          .map(jar => join(root, jar)),
+      );
+    } catch {
+      // unreadable directories contribute only themselves
+    }
+  }
+  return out;
+}
+
 function runJavacCompile(
   files: string[],
   outDir: string,
@@ -369,9 +391,7 @@ function runJavacCompile(
   const javacBin = provisionedJavac(config) ?? config.compilerOptions.javac;
   const tmp = mkdtempSync(join(tmpdir(), "cappu-javac-"));
   try {
-    const classPath = config.compilerOptions.classPath
-      .map(p => resolveConfigPath(config, p))
-      .filter(p => existsSync(p));
+    const classPath = expandedClassPath(config);
     const sourcePaths = config.compilerOptions.sourcePaths
       .map(p => resolveConfigPath(config, p))
       .filter(p => existsSync(p));

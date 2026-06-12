@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "output": "fat-jar",
+    "mainClass": "example.Main",
+    "quiet": true
+  },
+  "dependencies": {
+    "implementation": {
+      "com.google.code.gson:gson": "2.13.1"
+    }
+  }
+}
