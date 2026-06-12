@@ -187,3 +187,4 @@ no timestamps were captured.
 - 2026-06-12 09:36 — ok. do the test matrix for 1. then do 2, but you should probably use a proper xml parser now (like fast-xml-parser) instead of regexes.. Then do 3 with capu search and cappu add (no cappu update for now). Then 4, 5 and 6. All in separate commits
 - 2026-06-12 09:46 — for the pom resolution, add tests that test the cases you've done above (guava, httpclient5 etc) in a separate commit
 - 2026-06-12 09:51 — use URL and URLSearchParams to build a request URL. Change that for every http request that is made. except the ones that only have a static url
+- 2026-06-12 14:23 — do 1, 2, 4 and resolve this issue https://github.com/nikeee/cappu/issues/15. Use commits for every bite

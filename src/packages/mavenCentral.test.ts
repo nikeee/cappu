@@ -81,10 +81,22 @@ test("commons-io: only test-scoped dependencies, none of them compile/runtime", 
     artifactId: "commons-io",
     version: "2.19.0",
   });
-  // versions managed by commons-parent resolve; the remainder (managed via
-  // BOM imports we do not follow) is dropped and flagged, not invented
-  expect(metadata?.dependencies.length).toBe(8);
+  // versions come from commons-parent's dependencyManagement and the junit
+  // BOM it imports (scope=import) - every declared dependency resolves
+  expect(metadata?.dependencies.length).toBe(9);
   expect(metadata?.dependencies.every(d => d.scope === "test")).toBe(true);
-  expect(metadata?.incomplete).toBe(true);
+  expect(metadata?.incomplete).toBe(false);
   expect(await compileDependencies("commons-io", "commons-io", "2.19.0")).toEqual([]);
+});
+
+test("every snapshot artifact resolves all declared dependencies (BOMs followed)", async () => {
+  for (const [groupId, artifactId, version] of [
+    ["com.fasterxml.jackson.core", "jackson-databind", "2.18.3"],
+    ["org.apache.httpcomponents.client5", "httpclient5", "5.4.3"],
+    ["com.google.guava", "guava", "33.4.8-jre"],
+    ["com.google.code.gson", "gson", "2.13.1"],
+  ] as const) {
+    const metadata = await source.getMetadata({ groupId, artifactId, version });
+    expect(metadata?.incomplete).toBe(false);
+  }
 });

@@ -220,6 +220,49 @@ test("getMetadata resolves versions through the parent chain", async () => {
   expect(fetched.length).toBe(before);
 });
 
+test("scope=import BOMs are followed for managed versions", async () => {
+  const poms = new Map([
+    [
+      "/org/example/app/1.0/app-1.0.pom",
+      `<project>
+        <properties><bom.version>3</bom.version></properties>
+        <dependencyManagement><dependencies>
+          <dependency><groupId>g</groupId><artifactId>both</artifactId><version>0.1</version></dependency>
+          <dependency><groupId>org.example</groupId><artifactId>bom</artifactId><version>\${bom.version}</version><type>pom</type><scope>import</scope></dependency>
+        </dependencies></dependencyManagement>
+        <dependencies>
+          <dependency><groupId>g</groupId><artifactId>from-bom</artifactId></dependency>
+          <dependency><groupId>g</groupId><artifactId>both</artifactId></dependency>
+        </dependencies>
+      </project>`,
+    ],
+    [
+      "/org/example/bom/3/bom-3.pom",
+      `<project>
+        <properties><lib.version>7.5</lib.version></properties>
+        <dependencyManagement><dependencies>
+          <dependency><groupId>g</groupId><artifactId>from-bom</artifactId><version>\${lib.version}</version></dependency>
+          <dependency><groupId>g</groupId><artifactId>both</artifactId><version>9.9</version></dependency>
+          <dependency><groupId>org.example</groupId><artifactId>bom</artifactId><version>3</version><scope>import</scope></dependency>
+        </dependencies></dependencyManagement>
+      </project>`,
+    ],
+  ]);
+  const source = new MavenRepositorySource("https://repo.example/maven2", async url =>
+    poms.get(url.replace("https://repo.example/maven2", "")),
+  );
+
+  const metadata = await source.getMetadata(COORDS);
+  expect(metadata?.incomplete).toBe(false);
+  expect(metadata?.dependencies).toEqual([
+    // managed in the imported BOM, interpolated with the BOM's own properties
+    { groupId: "g", artifactId: "from-bom", version: "7.5", scope: undefined, optional: false },
+    // the importing chain's own dependencyManagement wins over the BOM
+    { groupId: "g", artifactId: "both", version: "0.1", scope: undefined, optional: false },
+  ]);
+  // the BOM importing itself (a cycle) terminated via the seen-set
+});
+
 test("a cyclic or missing parent chain terminates and reports incomplete", async () => {
   const poms = new Map([
     [

@@ -73,6 +73,8 @@ export interface RawPom {
   dependencies: RawDependency[];
   /** group:artifact -> raw version from <dependencyManagement>. */
   managed: Map<string, string>;
+  /** scope=import entries in <dependencyManagement>: BOMs to merge in. */
+  bomImports: RawDependency[];
   description?: string;
 }
 
@@ -103,10 +105,11 @@ export function parseRawPom(text: string): RawPom {
       ?.dependency ?? []) as RawDependency[];
 
   const managed = new Map<string, string>();
+  const bomImports: RawDependency[] = [];
   for (const dep of dependencyList(project.dependencyManagement)) {
-    if (dep.groupId && dep.artifactId && asText(dep.version) && dep.scope !== "import") {
-      managed.set(`${dep.groupId}:${dep.artifactId}`, dep.version!);
-    }
+    if (!dep.groupId || !dep.artifactId || !asText(dep.version)) continue;
+    if (dep.scope === "import") bomImports.push(dep);
+    else managed.set(`${dep.groupId}:${dep.artifactId}`, dep.version!);
   }
 
   return {
@@ -114,6 +117,7 @@ export function parseRawPom(text: string): RawPom {
     properties,
     dependencies: dependencyList(project),
     managed,
+    bomImports,
     description: asText(project.description),
   };
 }
@@ -142,20 +146,27 @@ function interpolate(
   return current;
 }
 
+// child first in a chain: child values must win, so assign parent-last-first
+function mergedProperties(chain: readonly RawPom[]): Record<string, string> {
+  const properties: Record<string, string> = {};
+  for (const pom of [...chain].reverse()) Object.assign(properties, pom.properties);
+  return properties;
+}
+
 /**
  * The effective dependency list of a POM chain (child first, then its
  * parents): properties merged child-over-parent, versions interpolated and
- * filled from <dependencyManagement>.
+ * filled from <dependencyManagement> - the chain's own entries first, then
+ * `imported` ones (BOMs pulled in via scope=import).
  */
 export function effectiveMetadata(
   chain: readonly RawPom[],
   coordinates: Coordinates,
+  imported: ReadonlyMap<string, string> = new Map(),
 ): PackageMetadata & { incomplete: boolean } {
-  // child first in `chain`: child values must win, so assign parent-last-first
-  const properties: Record<string, string> = {};
-  for (const pom of [...chain].reverse()) Object.assign(properties, pom.properties);
+  const properties = mergedProperties(chain);
 
-  const managed = new Map<string, string>();
+  const managed = new Map<string, string>(imported);
   for (const pom of [...chain].reverse()) {
     for (const [key, version] of pom.managed) managed.set(key, version);
   }
@@ -170,7 +181,7 @@ export function effectiveMetadata(
     const raw = asText(dep.version) ?? managed.get(`${groupId}:${artifactId}`);
     const version = raw === undefined ? undefined : interpolate(raw, properties, coordinates);
     if (version === undefined || version.includes("${")) {
-      incomplete = true; // unmanaged or beyond our property model (BOM import, ...)
+      incomplete = true; // unmanaged or beyond our property model
       continue;
     }
     dependencies.push({
@@ -266,14 +277,13 @@ export class MavenRepositorySource implements PackageSource {
     return parsed ?? undefined;
   }
 
-  async getMetadata(
-    coordinates: Coordinates,
-  ): Promise<(PackageMetadata & { incomplete: boolean }) | undefined> {
+  // The parent chain of one POM, child first. The coordinates in <parent>
+  // are always literal. A missing parent just stops the walk: the effective
+  // view degrades to whatever the fetched poms provide, and `incomplete`
+  // reports the rest.
+  private async chainFor(coordinates: Coordinates): Promise<RawPom[] | undefined> {
     const child = await this.rawPom(coordinates);
     if (!child) return undefined;
-    // Walk the parent chain (coordinates in <parent> are always literal). A
-    // missing parent just stops the walk: the effective view degrades to
-    // whatever the fetched poms provide, and `incomplete` reports the rest.
     const chain: RawPom[] = [child];
     const seen = new Set<string>([coordinatesToString(coordinates)]);
     let parent = child.parent;
@@ -286,7 +296,63 @@ export class MavenRepositorySource implements PackageSource {
       chain.push(pom);
       parent = pom.parent;
     }
-    return effectiveMetadata(chain, coordinates);
+    return chain;
+  }
+
+  // The managed versions a chain pulls in via scope=import BOMs, fully
+  // interpolated. A BOM is itself a POM: its own parent chain and its own
+  // imports apply (recursion bounded by `seen`). Precedence is Maven's:
+  // a nearer import wins over a later/nested one, and the caller overlays
+  // the chain's own <dependencyManagement> on top of all of it.
+  private async importedManaged(
+    chain: readonly RawPom[],
+    coordinates: Coordinates,
+    seen: Set<string>,
+  ): Promise<Map<string, string>> {
+    const properties = mergedProperties(chain);
+    const result = new Map<string, string>();
+    const absorb = (entries: ReadonlyMap<string, string>): void => {
+      for (const [key, version] of entries) {
+        if (!result.has(key)) result.set(key, version);
+      }
+    };
+    for (const pom of chain) {
+      for (const imp of pom.bomImports) {
+        if (!imp.groupId || !imp.artifactId || !asText(imp.version)) continue;
+        const bom: Coordinates = {
+          groupId: interpolate(imp.groupId, properties, coordinates),
+          artifactId: interpolate(imp.artifactId, properties, coordinates),
+          version: interpolate(imp.version!, properties, coordinates),
+        };
+        if (`${bom.groupId}${bom.artifactId}${bom.version}`.includes("${")) continue;
+        const key = coordinatesToString(bom);
+        if (seen.has(key)) continue; // import cycles must not loop
+        seen.add(key);
+        const bomChain = await this.chainFor(bom);
+        if (!bomChain) continue;
+        // the BOM's managed entries, interpolated in the BOM's own context
+        const bomProperties = mergedProperties(bomChain);
+        const bomManaged = new Map<string, string>();
+        for (const bomPom of [...bomChain].reverse()) {
+          for (const [managedKey, raw] of bomPom.managed) {
+            const version = interpolate(raw, bomProperties, bom);
+            if (!version.includes("${")) bomManaged.set(managedKey, version);
+          }
+        }
+        absorb(bomManaged);
+        absorb(await this.importedManaged(bomChain, bom, seen));
+      }
+    }
+    return result;
+  }
+
+  async getMetadata(
+    coordinates: Coordinates,
+  ): Promise<(PackageMetadata & { incomplete: boolean }) | undefined> {
+    const chain = await this.chainFor(coordinates);
+    if (!chain) return undefined;
+    const imported = await this.importedManaged(chain, coordinates, new Set());
+    return effectiveMetadata(chain, coordinates, imported);
   }
 
   getArtifact(coordinates: Coordinates): Promise<Uint8Array | undefined> {
