@@ -8,6 +8,7 @@ import { SingleBar } from "cli-progress";
 
 import type { CappuConfig } from "../config.ts";
 import { installDependencies } from "../install.ts";
+import { provisionJdk } from "../jdks/index.ts";
 
 /**
  * Whether the animated progress bar may render: stderr must be a terminal,
@@ -56,6 +57,36 @@ export async function runInstall(
     },
   });
   bar?.stop();
+
+  // JDK provisioning (nikeee/cappu#8): the configured "jdk" entry is
+  // downloaded once into the per-user cache and unpacked into .cappu/jdks.
+  let jdkFailed = false;
+  if (config.jdk !== undefined) {
+    let jdkBar: SingleBar | undefined;
+    try {
+      const jdk = await provisionJdk(config, config.jdk, (received, total) => {
+        if (total === undefined) return;
+        jdkBar ??= (() => {
+          const created = progressBar();
+          created?.start(Math.round(total / 1024 / 1024), 0, { package: config.jdk });
+          return created;
+        })();
+        jdkBar?.update(Math.round(received / 1024 / 1024), { package: `${config.jdk} (MiB)` });
+      });
+      jdkBar?.stop();
+      if (jdk.alreadyProvisioned) {
+        process.stderr.write(`jdk ${config.jdk}: already provisioned\n`);
+      } else {
+        if (jdk.fromCache)
+          process.stderr.write(`jdk ${config.jdk}: archive from the local cache\n`);
+        process.stdout.write(`${jdk.jdkDir}\n`);
+      }
+    } catch (e) {
+      jdkBar?.stop();
+      process.stderr.write(`error: jdk ${config.jdk}: ${(e as Error).message}\n`);
+      jdkFailed = true;
+    }
+  }
   if (result.fromLock) {
     process.stderr.write("using cappu-lock.json\n");
   }
@@ -93,5 +124,5 @@ export async function runInstall(
     );
     failed = true;
   }
-  process.exit(failed ? 1 : 0);
+  process.exit(failed || jdkFailed ? 1 : 0);
 }

@@ -25,6 +25,9 @@ import {
 const GITIGNORE_TEMPLATE = `# dependencies installed by \`cappu install\`
 /lib/
 
+# provisioned JDKs and other local state
+/.cappu/
+
 # build output of \`cappu compile\`
 /dist/
 `;

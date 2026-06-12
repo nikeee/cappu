@@ -101,6 +101,7 @@ test("the generated JSON schema mirrors the config shape", () => {
   expect(Object.keys(schema.properties).sort()).toEqual([
     "compilerOptions",
     "dependencies",
+    "jdk",
     "lspOptions",
     "packageSources",
   ]);

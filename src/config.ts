@@ -77,6 +77,8 @@ const ConfigFileSchema = z.object({
   packageSources: z.array(z.string()).default(DEFAULT_PACKAGE_SOURCES),
   /** What `cappu install` resolves and downloads, keyed by configuration. */
   dependencies: DependenciesSchema.prefault({}),
+  /** JDK to provision into .cappu/jdks on install, e.g. "temurin-21". */
+  jdk: z.string().optional(),
 });
 
 export type CompilerConfig = z.infer<typeof CompilerOptionsSchema>;
@@ -162,6 +164,10 @@ export const CONFIG_TEMPLATE = `
   //   "https://maven.google.com",
   //   "https://plugins.gradle.org/m2",
   // ],
+
+  // JDK provisioned by \`cappu install\` into ./.cappu/jdks/<spec>.
+  // Supported distributions: temurin, corretto.
+  // "jdk": "temurin-21",
 
   "dependencies": {
     "api": {},
