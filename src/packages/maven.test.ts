@@ -112,3 +112,116 @@ test("the repository source builds maven2 layout urls and parses the answers", a
   expect(await source.getMetadata({ ...COORDS, version: "0.404" })).toBeUndefined();
   expect(await source.search()).toEqual([]);
 });
+
+test("locally defined properties interpolate into dependency versions", () => {
+  const pom = `<project>
+    <properties><lib.version>2.5</lib.version></properties>
+    <dependencies>
+      <dependency><groupId>g</groupId><artifactId>lib</artifactId><version>\${lib.version}</version></dependency>
+      <dependency><groupId>\${project.groupId}</groupId><artifactId>sibling</artifactId><version>\${project.version}</version></dependency>
+    </dependencies>
+  </project>`;
+  const metadata = parsePom(pom, COORDS);
+  expect(metadata.incomplete).toBe(false);
+  expect(metadata.dependencies).toEqual([
+    { groupId: "g", artifactId: "lib", version: "2.5", scope: undefined, optional: false },
+    {
+      groupId: "org.example",
+      artifactId: "sibling",
+      version: "1.0",
+      scope: undefined,
+      optional: false,
+    },
+  ]);
+});
+
+// the multi-module pattern Central actually serves (jackson, httpclient5, ...):
+// versions live in parent properties and grandparent dependencyManagement
+test("getMetadata resolves versions through the parent chain", async () => {
+  const poms = new Map([
+    [
+      "/org/example/app/1.0/app-1.0.pom",
+      `<project>
+        <parent><groupId>org.example</groupId><artifactId>parent</artifactId><version>7</version></parent>
+        <properties><lib.version>3.1</lib.version></properties>
+        <dependencies>
+          <dependency><groupId>g</groupId><artifactId>from-prop</artifactId><version>\${lib.version}</version></dependency>
+          <dependency><groupId>g</groupId><artifactId>from-mgmt</artifactId></dependency>
+          <dependency><groupId>g</groupId><artifactId>unmanaged</artifactId></dependency>
+        </dependencies>
+      </project>`,
+    ],
+    [
+      "/org/example/parent/7/parent-7.pom",
+      `<project>
+        <parent><groupId>org.example</groupId><artifactId>grandparent</artifactId><version>1</version></parent>
+        <properties><lib.version>9.9</lib.version><mgmt.version>4.2</mgmt.version></properties>
+      </project>`,
+    ],
+    [
+      "/org/example/grandparent/1/grandparent-1.pom",
+      `<project>
+        <dependencyManagement><dependencies>
+          <dependency><groupId>g</groupId><artifactId>from-mgmt</artifactId><version>\${mgmt.version}</version></dependency>
+          <dependency><groupId>bom</groupId><artifactId>imported</artifactId><version>1</version><scope>import</scope></dependency>
+        </dependencies></dependencyManagement>
+      </project>`,
+    ],
+  ]);
+  const fetched: string[] = [];
+  const source = new MavenRepositorySource("https://repo.example/maven2", async url => {
+    fetched.push(url);
+    return poms.get(url.replace("https://repo.example/maven2", ""));
+  });
+
+  const metadata = await source.getMetadata(COORDS);
+  expect(metadata?.dependencies).toEqual([
+    // the child's own property wins over the parent's value for lib.version
+    { groupId: "g", artifactId: "from-prop", version: "3.1", scope: undefined, optional: false },
+    // managed in the grandparent, interpolated with the parent's property
+    { groupId: "g", artifactId: "from-mgmt", version: "4.2", scope: undefined, optional: false },
+  ]);
+  // `unmanaged` has no version anywhere; scope=import entries are not followed
+  expect(metadata?.incomplete).toBe(true);
+
+  // parent poms are cached: a second resolve fetches nothing new
+  const before = fetched.length;
+  await source.getMetadata(COORDS);
+  expect(fetched.length).toBe(before);
+});
+
+test("a cyclic or missing parent chain terminates and reports incomplete", async () => {
+  const poms = new Map([
+    [
+      "/g/a/1/a-1.pom",
+      `<project>
+        <parent><groupId>g</groupId><artifactId>b</artifactId><version>1</version></parent>
+        <dependencies><dependency><groupId>g</groupId><artifactId>dep</artifactId></dependency></dependencies>
+      </project>`,
+    ],
+    [
+      "/g/b/1/b-1.pom",
+      `<project>
+        <parent><groupId>g</groupId><artifactId>a</artifactId><version>1</version></parent>
+      </project>`,
+    ],
+    [
+      "/g/orphan/1/orphan-1.pom",
+      `<project>
+        <parent><groupId>g</groupId><artifactId>gone</artifactId><version>1</version></parent>
+        <dependencies><dependency><groupId>g</groupId><artifactId>dep</artifactId></dependency></dependencies>
+      </project>`,
+    ],
+  ]);
+  const source = new MavenRepositorySource("https://repo.example/maven2", async url =>
+    poms.get(url.replace("https://repo.example/maven2", "")),
+  );
+
+  const cyclic = await source.getMetadata({ groupId: "g", artifactId: "a", version: "1" });
+  expect(cyclic?.dependencies).toEqual([]);
+  expect(cyclic?.incomplete).toBe(true);
+
+  const orphan = await source.getMetadata({ groupId: "g", artifactId: "orphan", version: "1" });
+  expect(orphan?.dependencies).toEqual([]);
+  expect(orphan?.incomplete).toBe(true);
+});
