@@ -190,3 +190,4 @@ no timestamps were captured.
 - 2026-06-12 14:23 — do 1, 2, 4 and resolve this issue https://github.com/nikeee/cappu/issues/15. Use commits for every bite
 - 2026-06-12 15:26 — add a colorful, modern-looking progress bar for downloading in `cappu install`. You can use a popular library for that.
 - 2026-06-12 15:26 — use the new node.js api for styling ansi terminal text (from utils package) instead of picocolors
+- 2026-06-12 15:32 — add support for NO_COLOR env var that disables color output as well as progress bars

@@ -9,12 +9,28 @@ import { SingleBar } from "cli-progress";
 import type { CappuConfig } from "../config.ts";
 import { installDependencies } from "../install.ts";
 
+/**
+ * Whether the animated progress bar may render: stderr must be a terminal,
+ * and NO_COLOR (https://no-color.org - set and non-empty) turns the bar off
+ * entirely, not just its colors.
+ */
+export function progressEnabled(
+  isTTY: boolean | undefined = process.stderr.isTTY,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isTTY === true && !env.NO_COLOR;
+}
+
 // One animated bar on stderr while packages download (stdout stays the plain
 // list of written jars, so piping it remains useful).
 function progressBar(): SingleBar | undefined {
-  if (!process.stderr.isTTY) return undefined;
+  if (!progressEnabled()) return undefined;
+  // styleText validates against the stream the bar writes to, so colors also
+  // drop out for a terminal that reports no color support
+  const style = (format: Parameters<typeof styleText>[0], text: string): string =>
+    styleText(format, text, { stream: process.stderr });
   return new SingleBar({
-    format: `${styleText("cyan", "{bar}")} ${styleText("bold", "{value}/{total}")} ${styleText("dim", "{package}")}`,
+    format: `${style("cyan", "{bar}")} ${style("bold", "{value}/{total}")} ${style("dim", "{package}")}`,
     barCompleteChar: "█",
     barIncompleteChar: "░",
     hideCursor: true,
