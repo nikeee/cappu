@@ -2629,7 +2629,13 @@ function generateBody(
       return targetDescriptor;
     }
     // Reference cast: checkcast to the target class/array (no stack-size change).
+    // An intersection cast (A & B) checkcasts every bound, last written first,
+    // ending on the erasure A - the order javac emits.
     emitExpr(node.expression);
+    for (const bound of [...(node.bounds ?? [])].reverse()) {
+      code.u1(OP_CHECKCAST);
+      code.u2(cp.classInfo(classOperand(descriptorOf(bound, program))));
+    }
     code.u1(OP_CHECKCAST);
     code.u2(cp.classInfo(classOperand(targetDescriptor)));
     return targetDescriptor;

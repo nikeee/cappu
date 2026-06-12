@@ -147,6 +147,16 @@ const RUNS: Record<string, string> = {
 // streams compare exactly (field ++ lowers to getfield/iconst_1/iadd/putfield,
 // matching javac).
 const MULTI_FIXTURES: Record<string, string> = {
+  ICast: [
+    "public class ICast {",
+    "  interface A { int a(); }",
+    "  interface B { int b(); }",
+    "  static int use(Object o) {",
+    "    A x = (A & B) o;",
+    "    return x.a();",
+    "  }",
+    "}",
+  ].join("\n"),
   QualifiedNew: [
     "public class QualifiedNew {",
     "  int x = 7;",

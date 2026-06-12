@@ -1,0 +1,52 @@
+{
+  "ICast$A": {
+    "members": [
+      "public abstract int a();"
+    ],
+    "code": [
+      [
+        "public abstract int a();",
+        []
+      ]
+    ]
+  },
+  "ICast$B": {
+    "members": [
+      "public abstract int b();"
+    ],
+    "code": [
+      [
+        "public abstract int b();",
+        []
+      ]
+    ]
+  },
+  "ICast": {
+    "members": [
+      "public ICast();",
+      "static int use(java.lang.Object);"
+    ],
+    "code": [
+      [
+        "public ICast();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "static int use(java.lang.Object);",
+        [
+          "aload_0",
+          "checkcast # // class ICast$B",
+          "checkcast # // class ICast$A",
+          "astore_1",
+          "aload_1",
+          "invokeinterface #, 1 // InterfaceMethod ICast$A.a:()I",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}
