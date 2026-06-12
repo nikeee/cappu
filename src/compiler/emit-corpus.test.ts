@@ -22,7 +22,6 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 
 import { expect } from "expect";
 
@@ -33,7 +32,7 @@ import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
 import { pathToUri } from "../workspace.ts";
 
-const here = dirname(fileURLToPath(import.meta.url));
+const here = import.meta.dirname;
 const corpusRoot = join(here, "..", "..", "test-fixtures", "emitter", "corpus");
 const baselineDir = join(here, "..", "..", "test-fixtures", "emitter", "corpus-baselines");
 const shouldUpdate = process.env.UPDATE_BASELINES === "1";

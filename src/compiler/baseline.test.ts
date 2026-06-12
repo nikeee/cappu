@@ -8,9 +8,8 @@
 // then review the diff before committing.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 
 import { expect } from "expect";
 
@@ -26,7 +25,7 @@ import {
 } from "./types.ts";
 import { syntaxKindToString } from "./utilities.ts";
 
-const here = dirname(fileURLToPath(import.meta.url));
+const here = import.meta.dirname;
 const casesDir = join(here, "..", "..", "test-fixtures", "parser", "cases");
 const baselinesDir = join(here, "..", "..", "test-fixtures", "parser", "baselines");
 const shouldUpdate = process.env.UPDATE_BASELINES === "1";

@@ -6,9 +6,8 @@
 //   UPDATE_BASELINES=1 node --run test
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 
 import { expect } from "expect";
 
@@ -18,7 +17,7 @@ import { loadJdkStub } from "../compiler/jdkStub.ts";
 import { createProgram } from "../compiler/program.ts";
 import { type Uri } from "../workspace.ts";
 
-const here = dirname(fileURLToPath(import.meta.url));
+const here = import.meta.dirname;
 const fixturesDir = join(here, "..", "..", "test-fixtures", "language-service", "fourslash");
 const baselinesDir = join(
   here,

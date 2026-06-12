@@ -1,13 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { expect } from "expect";
 
-const here = dirname(fileURLToPath(import.meta.url));
+const here = import.meta.dirname;
 const cli = join(here, "main.ts");
 const tsx = join(here, "..", "..", "node_modules", ".bin", "tsx");
 

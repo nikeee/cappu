@@ -10,7 +10,6 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 
 import { expect } from "expect";
 
@@ -22,7 +21,7 @@ import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
 import { type Uri } from "../workspace.ts";
 
-const here = dirname(fileURLToPath(import.meta.url));
+const here = import.meta.dirname;
 const baselinesDir = join(here, "..", "..", "test-fixtures", "emitter", "emit-baselines");
 // Normalized javac disassembly, checked in as plain-text JSON so the byte-match
 // tests do not have to run javac on every test run (only when regenerating).

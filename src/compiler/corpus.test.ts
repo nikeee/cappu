@@ -10,9 +10,8 @@
 // is absent the suite is skipped, so CI without it still passes.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 
 import { expect } from "expect";
 
@@ -24,7 +23,7 @@ import { createProgram } from "./program.ts";
 import { type Identifier, type Node, SyntaxKind } from "./types.ts";
 import { pathToUri } from "../workspace.ts";
 
-const here = dirname(fileURLToPath(import.meta.url));
+const here = import.meta.dirname;
 const corpusDir =
   process.env.JAVA_CORPUS_DIR ?? join(here, "..", "..", "test-fixtures", "parser", "corpus");
 
