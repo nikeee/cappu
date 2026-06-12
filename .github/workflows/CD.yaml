@@ -28,7 +28,7 @@ jobs:
         with:
           images: "ghcr.io/nikeee/cappu"
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - uses: docker/login-action@v4
         if: ${{ github.event_name != 'pull_request' }}
