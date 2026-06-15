@@ -274,6 +274,8 @@ export function verifyInstalled(config: CappuConfig): VerifyResult {
 export interface InstallResult {
   /** Jar paths written, in resolution order. */
   installed: string[];
+  /** The written jar paths split by configuration group, for per-category summaries. */
+  installedByCategory: { compile: string[]; processor: string[]; test: string[] };
   /** Resolved packages whose source could not provide a jar. */
   noArtifact: string[];
   resolution: Resolution;
@@ -505,20 +507,27 @@ export async function installDependencies(
     materialize(processorInstall, resolveConfigPath(config, DEFAULT_PROCESSOR_PATH)),
     materialize(testInstall, resolveConfigPath(config, DEFAULT_TEST_CLASS_PATH)),
   ]);
-  const assemble = (outcomes: Outcome[]): LockedPackage[] => {
+  const assemble = (outcomes: Outcome[]): { locked: LockedPackage[]; installed: string[] } => {
     const locked: LockedPackage[] = [];
+    const groupInstalled: string[] = [];
     for (const o of outcomes) {
       if (o.noArtifact) noArtifact.push(o.noArtifact);
       if (o.integrity) integrityFailures.push(o.integrity);
       if (o.fromStore) fromStore.push(o.fromStore);
-      if (o.installed) installed.push(o.installed);
+      if (o.installed) {
+        installed.push(o.installed);
+        groupInstalled.push(o.installed);
+      }
       if (o.locked) locked.push(o.locked);
     }
-    return locked;
+    return { locked, installed: groupInstalled };
   };
-  const locked = assemble(mainOut);
-  const lockedProcessors = assemble(procOut);
-  const lockedTests = assemble(testOut);
+  const main = assemble(mainOut);
+  const processors = assemble(procOut);
+  const tests = assemble(testOut);
+  const locked = main.locked;
+  const lockedProcessors = processors.locked;
+  const lockedTests = tests.locked;
 
   if (total > 0) {
     options.onProgress?.(total, total, "" as CoordinateString);
@@ -538,6 +547,11 @@ export async function installDependencies(
   }
   return {
     installed,
+    installedByCategory: {
+      compile: main.installed,
+      processor: processors.installed,
+      test: tests.installed,
+    },
     noArtifact,
     resolution,
     targetDir,

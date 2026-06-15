@@ -26,8 +26,9 @@ cappu ${pkg.version}
 Usage:
   cappu init [--with-schema]         Write a starter cappu.json (commented, all options);
                                      --with-schema also writes cappu.schema.json
-  cappu install                      Download the cappu.json dependencies (transitively)
-                                     into .cappu/lib/classes
+  cappu install [-v]                 Download the cappu.json dependencies (transitively)
+                                     into .cappu/lib/classes; prints a per-category
+                                     count, or each jar path with -v/--verbose
   cappu verify                       Check the installed lib jars against the
                                      SHA-256 sums in cappu-lock.json
   cappu audit                        Scan resolved dependencies for known
@@ -95,6 +96,7 @@ const { values, positionals } = (() => {
         // No defaults: an absent flag must stay undefined so cappu.json
         // can supply the value (an explicit flag always wins).
         quiet: { type: "boolean", short: "q" },
+        verbose: { type: "boolean", short: "v" },
         "fail-on-degrade": { type: "boolean" },
         "with-schema": { type: "boolean", default: false },
         validate: { type: "boolean", default: false },
@@ -147,7 +149,7 @@ switch (command) {
     await runAdd(files[0], files.slice(1), values.config, config);
     break;
   case "install":
-    await runInstall(config);
+    await runInstall(config, { verbose: values.verbose });
     break;
   case "audit":
     await runAudit(config);

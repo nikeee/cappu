@@ -36,7 +36,7 @@ function progressBar(): SingleBar | undefined {
 
 export async function runInstall(
   config: CappuConfig,
-  options: { updateLock?: boolean } = {},
+  options: { updateLock?: boolean; verbose?: boolean } = {},
 ): Promise<never> {
   let bar: SingleBar | undefined;
   // Resolving (no lockfile) fetches a POM per package with no known total, so
@@ -108,7 +108,19 @@ export async function runInstall(
         "         lock file) to re-resolve.\n",
     );
   }
-  for (const file of result.installed) process.stdout.write(`${file}\n`);
+  // --verbose lists every written jar; the default is a per-category count.
+  if (options.verbose) {
+    for (const file of result.installed) process.stdout.write(`${file}\n`);
+  } else {
+    const { compile, processor, test } = result.installedByCategory;
+    const categories = [
+      { n: compile.length, one: "compile dependency", many: "compile dependencies" },
+      { n: processor.length, one: "annotation processor", many: "annotation processors" },
+      { n: test.length, one: "test dependency", many: "test dependencies" },
+    ];
+    const parts = categories.filter(c => c.n > 0).map(c => `${c.n} ${c.n === 1 ? c.one : c.many}`);
+    process.stdout.write(`${parts.length > 0 ? parts.join(", ") : "no packages"} installed\n`);
+  }
   for (const c of result.resolution.conflicts) {
     process.stderr.write(
       `warning: ${c.key}: version ${c.rejected} (via ${c.rejectedBy.artifactId}) loses to ${c.selected}\n`,
