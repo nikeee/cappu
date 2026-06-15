@@ -42,10 +42,10 @@ test("test sources come from src/test/java; a missing dir means none", () => {
 test("test compile and run classpaths are ordered and jar-expanded", () => {
   const dir = tempProject();
   try {
-    mkdirSync(join(dir, "lib", "classes"), { recursive: true });
-    mkdirSync(join(dir, "lib", "test-classes"), { recursive: true });
-    writeFileSync(join(dir, "lib", "classes", "dep.jar"), "x");
-    writeFileSync(join(dir, "lib", "test-classes", "junit.jar"), "x");
+    mkdirSync(join(dir, ".cappu", "lib", "classes"), { recursive: true });
+    mkdirSync(join(dir, ".cappu", "lib", "test-classes"), { recursive: true });
+    writeFileSync(join(dir, ".cappu", "lib", "classes", "dep.jar"), "x");
+    writeFileSync(join(dir, ".cappu", "lib", "test-classes", "junit.jar"), "x");
     const config = loadConfig(undefined, dir);
 
     const args = compileTestsArgs(config, ["/t/ATest.java"]);
@@ -53,10 +53,10 @@ test("test compile and run classpaths are ordered and jar-expanded", () => {
     expect(args[args.indexOf("-d") + 1]).toBe(join(dir, ".cappu", "test-build", "test-classes"));
     expect(cp.split(delimiter)).toEqual([
       mainClassesDir(config),
-      join(dir, "lib", "classes"),
-      join(dir, "lib", "classes", "dep.jar"),
-      join(dir, "lib", "test-classes"),
-      join(dir, "lib", "test-classes", "junit.jar"),
+      join(dir, ".cappu", "lib", "classes"),
+      join(dir, ".cappu", "lib", "classes", "dep.jar"),
+      join(dir, ".cappu", "lib", "test-classes"),
+      join(dir, ".cappu", "lib", "test-classes", "junit.jar"),
     ]);
 
     const run = testRunArgs(config, "/store/launcher.jar");

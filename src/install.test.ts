@@ -60,15 +60,17 @@ test("cappu install resolves transitively and writes jars into lib/classes", asy
     const config = loadConfig(undefined, dir);
     const result = await installDependencies(config, [fakeRepo()]);
 
-    expect(result.targetDir).toBe(join(dir, "lib/classes"));
+    expect(result.targetDir).toBe(join(dir, ".cappu", "lib", "classes"));
     expect(result.installed).toEqual([
-      join(dir, "lib/classes", "gson-2.14.0.jar"), // the root
-      join(dir, "lib/classes", "base-1.0.jar"), // its transitive dependency
+      join(dir, ".cappu", "lib", "classes", "gson-2.14.0.jar"), // the root
+      join(dir, ".cappu", "lib", "classes", "base-1.0.jar"), // its transitive dependency
     ]);
     expect(result.noArtifact).toEqual([]);
     expect(result.resolution.missing).toEqual([]);
-    expect(readFileSync(join(dir, "lib/classes", "gson-2.14.0.jar"), "utf8")).toBe("gson-bytes");
-    expect(readdirSync(join(dir, "lib/classes")).sort()).toEqual([
+    expect(readFileSync(join(dir, ".cappu", "lib", "classes", "gson-2.14.0.jar"), "utf8")).toBe(
+      "gson-bytes",
+    );
+    expect(readdirSync(join(dir, ".cappu", "lib", "classes")).sort()).toEqual([
       "base-1.0.jar",
       "gson-2.14.0.jar",
     ]);
@@ -218,10 +220,10 @@ test("annotationProcessor deps resolve independently into lib/processors", async
     const config = loadConfig(undefined, dir);
     const result = await installDependencies(config, [fakeRepo()]);
     // compile deps in lib/classes, the processor in lib/processors
-    expect(result.installed).toContain(join(dir, "lib", "classes", "gson-2.14.0.jar"));
-    expect(result.installed).toContain(join(dir, "lib", "processors", "base-1.0.jar"));
+    expect(result.installed).toContain(join(dir, ".cappu", "lib", "classes", "gson-2.14.0.jar"));
+    expect(result.installed).toContain(join(dir, ".cappu", "lib", "processors", "base-1.0.jar"));
     // the processor dir holds ONLY the processor closure (gson stays out)
-    expect(readdirSync(join(dir, "lib", "processors"))).toEqual(["base-1.0.jar"]);
+    expect(readdirSync(join(dir, ".cappu", "lib", "processors"))).toEqual(["base-1.0.jar"]);
 
     const lock = JSON.parse(readFileSync(join(dir, LOCKFILE_NAME), "utf8")) as {
       packages: unknown[];
@@ -234,7 +236,7 @@ test("annotationProcessor deps resolve independently into lib/processors", async
     const again = await installDependencies(config, [fakeRepo()]);
     expect(again.fromLock).toBe(true);
     expect(again.lockStale).toBe(false);
-    expect(again.installed).toContain(join(dir, "lib", "processors", "base-1.0.jar"));
+    expect(again.installed).toContain(join(dir, ".cappu", "lib", "processors", "base-1.0.jar"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -249,7 +251,7 @@ test("testImplementation deps resolve independently into lib/test-classes", asyn
     );
     const config = loadConfig(undefined, dir);
     const result = await installDependencies(config, [fakeRepo()]);
-    expect(result.installed).toEqual([join(dir, "lib", "test-classes", "base-1.0.jar")]);
+    expect(result.installed).toEqual([join(dir, ".cappu", "lib", "test-classes", "base-1.0.jar")]);
     const lock = JSON.parse(readFileSync(join(dir, LOCKFILE_NAME), "utf8")) as {
       packages: unknown[];
       testPackages: unknown[];
@@ -258,7 +260,7 @@ test("testImplementation deps resolve independently into lib/test-classes", asyn
     expect(lock.testPackages).toHaveLength(1);
     const again = await installDependencies(config, [fakeRepo()]);
     expect(again.fromLock).toBe(true);
-    expect(again.installed).toEqual([join(dir, "lib", "test-classes", "base-1.0.jar")]);
+    expect(again.installed).toEqual([join(dir, ".cappu", "lib", "test-classes", "base-1.0.jar")]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -425,11 +427,11 @@ test("verifyInstalled checks lib jars against the lockfile sums", async () => {
     expect(clean.ok).toContain("com.google.code.gson:gson:2.14.0");
 
     // tamper one jar on disk -> modified
-    writeFileSync(join(dir, "lib", "classes", "gson-2.14.0.jar"), "corrupted");
+    writeFileSync(join(dir, ".cappu", "lib", "classes", "gson-2.14.0.jar"), "corrupted");
     expect(verifyInstalled(installed).modified).toContain("com.google.code.gson:gson:2.14.0");
 
     // delete another -> missing
-    rmSync(join(dir, "lib", "classes", "base-1.0.jar"));
+    rmSync(join(dir, ".cappu", "lib", "classes", "base-1.0.jar"));
     expect(verifyInstalled(installed).missing).toContain("org.example:base:1.0");
   } finally {
     if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;

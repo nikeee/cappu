@@ -213,3 +213,4 @@ no timestamps were captured.
 - 2026-06-15 23:04 — is there a source for CVEs of java artifacts? We want to build something similar to "npm audit" (without fix). Also build an internal API for that (in a separate folder).
 - 2026-06-15 23:04 — group severity similar to npm, with colors
 - 2026-06-15 23:12 — can we make "install" or "add" use more parallelism for downloads? Maybe take benefit of the lockfile?
+- 2026-06-15 23:19 — next, move the default lib/classes dir for the dependencies to the .cappu dir

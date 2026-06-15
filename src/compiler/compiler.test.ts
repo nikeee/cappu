@@ -261,9 +261,9 @@ test("a jar with several mains and no configured mainClass warns (#11)", () => {
 test("output fat-jar merges dependency jar contents, own classes win", () => {
   inTempDir({ "B.java": "package app; class B { }" }, (dir, paths) => {
     // a dependency jar in the default classPath location
-    mkdirSync(join(dir, "lib", "classes"), { recursive: true });
+    mkdirSync(join(dir, ".cappu", "lib", "classes"), { recursive: true });
     writeFileSync(
-      join(dir, "lib", "classes", "dep.jar"),
+      join(dir, ".cappu", "lib", "classes", "dep.jar"),
       writeZip([
         { name: "META-INF/MANIFEST.MF", bytes: new Uint8Array([1]) }, // must not leak
         { name: "org/dep/D.class", bytes: new Uint8Array([7]) },

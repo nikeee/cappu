@@ -1,5 +1,5 @@
 // `cappu init`: write the starter cappu.json and create the default project
-// directories (lib/classes for dependencies, src/main/java for sources);
+// directories (.cappu/lib/classes for dependencies, src/main/java for sources);
 // --with-schema also writes the JSON schema the $schema entry points at. Runs
 // before loadConfig - bootstrapping must not depend on (or be blocked by) an
 // existing, possibly broken config.
@@ -22,10 +22,7 @@ import {
 
 // What `cappu init` puts into a fresh .gitignore: everything cappu itself
 // (re)generates - installed dependencies and build output (nikeee/cappu#12).
-const GITIGNORE_TEMPLATE = `# dependencies installed by \`cappu install\`
-/lib/
-
-# provisioned JDKs and other local state
+const GITIGNORE_TEMPLATE = `# installed dependencies, provisioned JDKs, generated sources, local state
 /.cappu/
 
 # build output of \`cappu compile\`
@@ -56,14 +53,14 @@ export function runInit(configPath: string | undefined, withSchema: boolean): ne
     mkdirSync(resolve(target, "..", dir), { recursive: true });
   }
   // A .gitignore covering what cappu generates; an existing one is left alone
-  // but flagged, so the user knows cappu's ignores (/lib/, /dist/, /.cappu/)
-  // were not added and build output could otherwise get committed.
+  // but flagged, so the user knows cappu's ignores (/.cappu/, /dist/) were
+  // not added and downloaded deps / build output could otherwise get committed.
   try {
     writeFileSync(resolve(target, "..", ".gitignore"), GITIGNORE_TEMPLATE, { flag: "wx" });
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
     process.stderr.write(
-      ".gitignore already exists, left unchanged - add /lib/, /dist/ and /.cappu/ if missing\n",
+      ".gitignore already exists, left unchanged - add /.cappu/ and /dist/ if missing\n",
     );
   }
   process.stdout.write(`${target}\n`);

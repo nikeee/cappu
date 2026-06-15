@@ -27,7 +27,7 @@ Usage:
   cappu init [--with-schema]         Write a starter cappu.json (commented, all options);
                                      --with-schema also writes cappu.schema.json
   cappu install                      Download the cappu.json dependencies (transitively)
-                                     into lib/classes
+                                     into .cappu/lib/classes
   cappu verify                       Check the installed lib jars against the
                                      SHA-256 sums in cappu-lock.json
   cappu audit                        Scan resolved dependencies for known

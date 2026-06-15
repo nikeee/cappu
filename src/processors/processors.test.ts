@@ -66,13 +66,13 @@ test("processor jars come from lib/processors, sorted; absence means none", () =
   try {
     const config = loadConfig(undefined, project);
     expect(processorJars(config)).toEqual([]);
-    mkdirSync(join(project, "lib", "processors"), { recursive: true });
-    writeFileSync(join(project, "lib", "processors", "b.jar"), encode("b"));
-    writeFileSync(join(project, "lib", "processors", "a.jar"), encode("a"));
-    writeFileSync(join(project, "lib", "processors", "notes.txt"), encode("x"));
+    mkdirSync(join(project, ".cappu", "lib", "processors"), { recursive: true });
+    writeFileSync(join(project, ".cappu", "lib", "processors", "b.jar"), encode("b"));
+    writeFileSync(join(project, ".cappu", "lib", "processors", "a.jar"), encode("a"));
+    writeFileSync(join(project, ".cappu", "lib", "processors", "notes.txt"), encode("x"));
     expect(processorJars(config)).toEqual([
-      join(project, "lib", "processors", "a.jar"),
-      join(project, "lib", "processors", "b.jar"),
+      join(project, ".cappu", "lib", "processors", "a.jar"),
+      join(project, ".cappu", "lib", "processors", "b.jar"),
     ]);
   } finally {
     rmSync(project, { recursive: true, force: true });
@@ -82,7 +82,7 @@ test("processor jars come from lib/processors, sorted; absence means none", () =
 test("proc-only argument building", () => {
   const project = mkdtempSync(join(tmpdir(), "cappu-proc-"));
   try {
-    mkdirSync(join(project, "lib", "classes"), { recursive: true });
+    mkdirSync(join(project, ".cappu", "lib", "classes"), { recursive: true });
     const config = loadConfig(undefined, project);
     const args = procOnlyArgs(config, ["/p/A.java"], ["/p/proc.jar", "/p/extra.jar"], {
       sources: "/out/sources",
@@ -99,7 +99,7 @@ test("proc-only argument building", () => {
       "-encoding",
       "UTF-8",
       "-cp",
-      join(project, "lib", "classes"),
+      join(project, ".cappu", "lib", "classes"),
       // no -sourcepath: ./src/main/java does not exist in this project
       "/p/A.java",
     ]);
@@ -124,8 +124,8 @@ test("without processor jars nothing runs at all", () => {
 test("failure modes map to diagnostics; success keeps located warnings only", () => {
   const project = mkdtempSync(join(tmpdir(), "cappu-proc-"));
   try {
-    mkdirSync(join(project, "lib", "processors"), { recursive: true });
-    jarWithServices(join(project, "lib", "processors"), "p.jar", "com.example.P\n");
+    mkdirSync(join(project, ".cappu", "lib", "processors"), { recursive: true });
+    jarWithServices(join(project, ".cappu", "lib", "processors"), "p.jar", "com.example.P\n");
     const config = loadConfig(undefined, project);
 
     // located error from a failed run
@@ -222,9 +222,9 @@ function buildProcessorJar(into: string): void {
 test("a real processor generates a source both compile modes pick up", { skip: !HAS_JAVAC }, () => {
   const project = mkdtempSync(join(tmpdir(), "cappu-proce2e-"));
   try {
-    mkdirSync(join(project, "lib", "processors"), { recursive: true });
+    mkdirSync(join(project, ".cappu", "lib", "processors"), { recursive: true });
     mkdirSync(join(project, "src", "main", "java"), { recursive: true });
-    buildProcessorJar(join(project, "lib", "processors", "gen.jar"));
+    buildProcessorJar(join(project, ".cappu", "lib", "processors", "gen.jar"));
     const main = join(project, "src", "main", "java", "Main.java");
     writeFileSync(
       main,

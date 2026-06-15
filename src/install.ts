@@ -1,6 +1,6 @@
 // `cappu install`: resolve the cappu.json dependencies section (api +
 // implementation, transitively) against the configured packageSources and
-// download every jar into the classPath's default lib/classes directory, where
+// download every jar into the classPath's default .cappu/lib/classes directory,
 // loadClassPath already picks them up. Print-free; the cli renders the result.
 //
 // cappu-lock.json (next to cappu.json) pins the outcome: it records the

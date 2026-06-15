@@ -16,16 +16,18 @@ const InlayHintsSchema = z.object({
   varTypes: z.boolean().default(true),
 });
 
-export const DEFAULT_CLASS_PATH = "./lib/classes";
+// Downloaded dependency jars live under .cappu/ - cappu-managed, gitignored
+// state alongside the provisioned JDKs and generated sources, not checked in.
+export const DEFAULT_CLASS_PATH = "./.cappu/lib/classes";
 export const DEFAULT_SOURCE_PATH = "./src/main/java";
 export const DEFAULT_RESOURCE_PATH = "./src/main/resources";
 // Created by `cappu init` for the planned `cappu test` (nikeee/cappu#16):
 // test sources/resources and the directory test-only dependencies install to.
 export const DEFAULT_TEST_SOURCE_PATH = "./src/test/java";
 export const DEFAULT_TEST_RESOURCE_PATH = "./src/test/resources";
-export const DEFAULT_TEST_CLASS_PATH = "./lib/test-classes";
+export const DEFAULT_TEST_CLASS_PATH = "./.cappu/lib/test-classes";
 /** Where annotation-processor jars install to - never the compile classpath. */
-export const DEFAULT_PROCESSOR_PATH = "./lib/processors";
+export const DEFAULT_PROCESSOR_PATH = "./.cappu/lib/processors";
 
 const CompilerOptionsSchema = z.object({
   /** Directories or .jar files scanned for .class files (resolution only). */
@@ -121,8 +123,9 @@ export const CONFIG_TEMPLATE = `
 
   "compilerOptions": {
     // Compiled dependencies: directories of .class files, or .jar files.
-    // Types resolve against them but are not compiled. Default if unset: ["./lib/classes"].
-    // "classPath": ["./lib/classes"],
+    // Types resolve against them but are not compiled. Default if unset:
+    // ["./.cappu/lib/classes"] (where cappu install downloads them).
+    // "classPath": ["./.cappu/lib/classes"],
 
     // Sources to be compiled. Default if unset: ["./src/main/java"].
     // "sourcePaths": ["./src/main/java"],

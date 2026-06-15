@@ -44,7 +44,7 @@ test("JSONC parses with comments and trailing commas; sections map", () => {
 test("a missing default config yields the empty config; a missing explicit one throws", () => {
   const dir = mkdtempSync(join(tmpdir(), "cfg-"));
   const config = loadConfig(undefined, dir);
-  expect(config.compilerOptions.classPath).toEqual(["./lib/classes"]);
+  expect(config.compilerOptions.classPath).toEqual(["./.cappu/lib/classes"]);
   expect(config.lspOptions).toEqual({});
   expect(() => loadConfig("nope.json", dir)).toThrow(/not found/);
 });
@@ -86,7 +86,7 @@ test("the init template parses and validates against the schema", () => {
   const dir = mkdtempSync(join(tmpdir(), "cfg-"));
   writeFileSync(join(dir, DEFAULT_CONFIG_NAME), CONFIG_TEMPLATE);
   const config = loadConfig(undefined, dir);
-  expect(config.compilerOptions.classPath).toEqual(["./lib/classes"]);
+  expect(config.compilerOptions.classPath).toEqual(["./.cappu/lib/classes"]);
   expect(config.compilerOptions.quiet).toBe(false);
   // the template only documents inlayHints (commented out); defaults apply downstream
   expect(config.lspOptions.inlayHints).toBeUndefined();
