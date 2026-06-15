@@ -6,8 +6,6 @@ export {
   compileTestsArgs,
   CONSOLE_LAUNCHER,
   consoleLauncherJar,
-  type Exec,
-  type ExecResult,
   findTestSources,
   mainClassesDir,
   resolveJava,

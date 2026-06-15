@@ -2,9 +2,10 @@
 // With no files, this is a project build over the configured sourcePaths.
 
 import { missingConfiguredPaths, type OutputKind, runCompile } from "../compiler/compiler.ts";
-import { type CappuConfig, resolveConfigPath } from "../config.ts";
+import type { CappuConfig } from "../config.ts";
 import { validateAgainstJavac } from "../compiler/validateJavac.ts";
-import { findJavaFiles } from "../workspace.ts";
+import { renderDiagnostics } from "./renderDiagnostics.ts";
+import { findSourceJavaFiles } from "../workspace.ts";
 
 export interface CompileFlags {
   outDir?: string;
@@ -25,12 +26,7 @@ export async function runCompileCommand(
 ): Promise<never> {
   // No explicit files: a project build - compile the configured sourcePaths
   // (they are resolution-only context when explicit files are given).
-  const inputs =
-    files.length > 0
-      ? files
-      : config.compilerOptions.sourcePaths.flatMap(p =>
-          findJavaFiles(resolveConfigPath(config, p)),
-        );
+  const inputs = files.length > 0 ? files : findSourceJavaFiles(config);
   if (inputs.length === 0) {
     process.stderr.write(
       "usage: cappu compile [-d <outdir>] <file.java> ...\n" +
@@ -84,13 +80,7 @@ export async function runCompileCommand(
     process.stderr.write(`warning: ${entry}: unsupported construct, emitted a placeholder body\n`);
   }
   if (!result.success) {
-    for (const d of result.diagnostics) {
-      const location = d.file
-        ? `${d.file}:${d.line}${d.column !== undefined ? `:${d.column}` : ""}: `
-        : "";
-      const code = d.code !== undefined ? ` ${d.code}` : "";
-      process.stderr.write(`${location}${d.severity}${code}: ${d.message}\n`);
-    }
+    renderDiagnostics(result.diagnostics);
     process.exit(1);
   }
   if (flags.validate) {

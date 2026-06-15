@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { type Brand } from "./brand.ts";
+import { type CappuConfig, resolveConfigPath } from "./config.ts";
 
 /** A document uri (file://, or synthetic jdk:/// / classpath:///). */
 export type Uri = Brand<string, "Uri">;
@@ -83,4 +84,11 @@ export function loadJavaFiles(rootDir: string): Array<{ uri: Uri; text: string }
     uri: pathToUri(path),
     text: readFileSync(path, "utf8"),
   }));
+}
+
+/** Every .java file under the configured sourcePaths (a project build's inputs). */
+export function findSourceJavaFiles(config: CappuConfig): FsPath[] {
+  return config.compilerOptions.sourcePaths.flatMap(p =>
+    findJavaFiles(resolveConfigPath(config, p)),
+  );
 }

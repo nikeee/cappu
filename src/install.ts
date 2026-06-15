@@ -16,8 +16,9 @@
 
 import { hash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+
+import { cacheDir } from "./cacheDir.ts";
 
 import {
   type CappuConfig,
@@ -120,10 +121,7 @@ export const LOCKFILE_NAME = "cappu-lock.json";
 // dotted path would collide them.
 
 function packageStoreDir(): string {
-  return (
-    process.env.CAPPU_PACKAGE_STORE ??
-    join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "cappu", "packages")
-  );
+  return cacheDir("packages", process.env.CAPPU_PACKAGE_STORE);
 }
 
 // One conservative charset for every path segment: anything else (path

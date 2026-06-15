@@ -6,11 +6,11 @@
 
 import { spawnSync } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
+import { cacheDir } from "../cacheDir.ts";
 import type { CappuConfig } from "../config.ts";
 import { resolveConfigPath } from "../config.ts";
 
@@ -61,10 +61,7 @@ export function jdkDownloadUrl(
 // The per-user archive cache. A CACHE (XDG_CACHE_HOME), like the package
 // store; CAPPU_JDK_STORE overrides (tests, CI).
 function jdkStoreDir(): string {
-  return (
-    process.env.CAPPU_JDK_STORE ??
-    join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "cappu", "jdks")
-  );
+  return cacheDir("jdks", process.env.CAPPU_JDK_STORE);
 }
 
 /** Where a provisioned spec lives inside the project: .cappu/jdks/<spec>. */

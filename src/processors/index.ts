@@ -3,8 +3,6 @@
 
 export {
   discoverProcessors,
-  type Exec,
-  type ExecResult,
   GENERATED_ROOT,
   generatedClassesDir,
   generatedRoot,

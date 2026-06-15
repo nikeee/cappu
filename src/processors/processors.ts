@@ -6,7 +6,6 @@
 // generated sources itself. Self-contained, mirroring src/packages/: nothing
 // here prints, `exec` is injectable for tests; the CLI renders diagnostics.
 
-import { spawnSync } from "node:child_process";
 import {
   existsSync,
   globSync,
@@ -23,6 +22,7 @@ import { type CompileDiagnostic, parseJavacDiagnostics } from "../compiler/javac
 import { expandedClassPath } from "../compiler/javacPaths.ts";
 import { readZipEntries } from "../compiler/zipReader.ts";
 import { type CappuConfig, DEFAULT_PROCESSOR_PATH, resolveConfigPath } from "../config.ts";
+import { defaultExec, type Exec } from "../exec.ts";
 import { provisionedJavac } from "../jdks/index.ts";
 
 // Generated output is a derived artifact under .cappu/ (gitignored):
@@ -83,21 +83,6 @@ export function discoverProcessors(jarPaths: readonly string[]): string[] {
   }
   return processors;
 }
-
-export interface ExecResult {
-  /** null when the binary could not be spawned at all. */
-  status: number | null;
-  stderr: string;
-  /** Set when spawning failed (ENOENT and friends). */
-  error?: Error;
-}
-
-export type Exec = (bin: string, args: string[]) => ExecResult;
-
-const defaultExec: Exec = (bin, args) => {
-  const result = spawnSync(bin, args, { stdio: ["ignore", "ignore", "pipe"] });
-  return { status: result.status, stderr: result.stderr?.toString() ?? "", error: result.error };
-};
 
 export interface ProcessingResult {
   /** False when no processor jars are installed (nothing was executed). */

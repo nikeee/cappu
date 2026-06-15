@@ -3,9 +3,8 @@
 
 import { spawnSync } from "node:child_process";
 
-import { type CompileDiagnostic, runCompile } from "../compiler/compiler.ts";
+import { runCompile } from "../compiler/compiler.ts";
 import type { CappuConfig } from "../config.ts";
-import { resolveConfigPath } from "../config.ts";
 import {
   compileTests,
   consoleLauncherJar,
@@ -14,14 +13,8 @@ import {
   resolveJava,
   testRunArgs,
 } from "../testing/index.ts";
-import { findJavaFiles } from "../workspace.ts";
-
-function renderDiagnostics(diagnostics: readonly CompileDiagnostic[]): void {
-  for (const d of diagnostics) {
-    const location = d.file !== undefined && d.line !== undefined ? `${d.file}:${d.line}: ` : "";
-    process.stderr.write(`${location}${d.severity}: ${d.message}\n`);
-  }
-}
+import { findSourceJavaFiles } from "../workspace.ts";
+import { renderDiagnostics } from "./renderDiagnostics.ts";
 
 export async function runTestCommand(config: CappuConfig): Promise<never> {
   const testSources = findTestSources(config);
@@ -32,9 +25,7 @@ export async function runTestCommand(config: CappuConfig): Promise<never> {
 
   // 1. main classes (annotation processors and resources included), into the
   // derived .cappu/test-build/classes tree
-  const mainSources = config.compilerOptions.sourcePaths.flatMap(p =>
-    findJavaFiles(resolveConfigPath(config, p)),
-  );
+  const mainSources = findSourceJavaFiles(config);
   if (mainSources.length > 0) {
     const main = runCompile(mainSources, {
       outDir: mainClassesDir(config),

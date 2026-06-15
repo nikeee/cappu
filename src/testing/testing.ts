@@ -4,11 +4,11 @@
 // nothing here prints and `exec` is injectable; the CLI streams the actual
 // JUnit run (live output is the point of a test runner).
 
-import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 
 import { type CompileDiagnostic, parseJavacDiagnostics } from "../compiler/javacDiagnostics.ts";
+import { defaultExec, type Exec } from "../exec.ts";
 import { expandedJarDirs } from "../compiler/javacPaths.ts";
 import {
   type CappuConfig,
@@ -57,19 +57,6 @@ export function testRuntimeClassPath(config: CappuConfig): string[] {
     ...(existsSync(testResources) ? [testResources] : []),
   ];
 }
-
-export interface ExecResult {
-  status: number | null;
-  stderr: string;
-  error?: Error;
-}
-
-export type Exec = (bin: string, args: string[]) => ExecResult;
-
-const defaultExec: Exec = (bin, args) => {
-  const result = spawnSync(bin, args, { stdio: ["ignore", "ignore", "pipe"] });
-  return { status: result.status, stderr: result.stderr?.toString() ?? "", error: result.error };
-};
 
 /** The javac arguments compiling the test sources. */
 export function compileTestsArgs(config: CappuConfig, sources: readonly string[]): string[] {
