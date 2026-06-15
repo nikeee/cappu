@@ -4,7 +4,15 @@
 // nothing here prints and `exec` is injectable; the CLI streams the actual
 // JUnit run (live output is the point of a test runner).
 
-import { accessSync, constants, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 
 import { type CompileDiagnostic, parseJavacDiagnostics } from "../compiler/javacDiagnostics.ts";
@@ -80,7 +88,12 @@ export function compileTests(
   sources: readonly string[],
   exec: Exec = defaultExec,
 ): CompileDiagnostic[] {
-  mkdirSync(testClassesDir(config), { recursive: true });
+  // Wipe first: the launcher runs with --scan-class-path, so a .class left
+  // over from a since-deleted or renamed test would still be discovered and
+  // "pass". A clean dir each run means only the current tests exist.
+  const dir = testClassesDir(config);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
   const javac = provisionedJavac(config) ?? config.compilerOptions.javac;
   const result = exec(javac, compileTestsArgs(config, sources));
   if (result.error || result.status === null) {

@@ -32,6 +32,7 @@ export async function runTestCommand(config: CappuConfig): Promise<never> {
       output: "classes",
       config,
     });
+    for (const w of main.warnings ?? []) process.stderr.write(`warning: ${w}\n`);
     if (!main.success) {
       renderDiagnostics(main.diagnostics);
       process.exit(1);

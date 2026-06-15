@@ -79,6 +79,7 @@ export async function runCompileCommand(
   for (const entry of result.degraded) {
     process.stderr.write(`warning: ${entry}: unsupported construct, emitted a placeholder body\n`);
   }
+  for (const w of result.warnings ?? []) process.stderr.write(`warning: ${w}\n`);
   if (!result.success) {
     renderDiagnostics(result.diagnostics);
     process.exit(1);

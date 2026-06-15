@@ -73,25 +73,35 @@ Global:
       --version         Show the version
 `.trimStart();
 
-const { values, positionals } = parseArgs({
-  args: process.argv.slice(2),
-  allowPositionals: true,
-  options: {
-    config: { type: "string", short: "c" },
-    port: { type: "string", short: "p" },
-    "out-dir": { type: "string", short: "d" },
-    output: { type: "string", short: "o" },
-    // No defaults: an absent flag must stay undefined so cappu.json
-    // can supply the value (an explicit flag always wins).
-    quiet: { type: "boolean", short: "q" },
-    "fail-on-degrade": { type: "boolean" },
-    "with-schema": { type: "boolean", default: false },
-    validate: { type: "boolean", default: false },
-    "experimental-compiler": { type: "boolean" },
-    help: { type: "boolean", short: "h", default: false },
-    version: { type: "boolean", default: false },
-  },
-});
+let values: ReturnType<typeof parseArgs>["values"];
+let positionals: string[];
+try {
+  ({ values, positionals } = parseArgs({
+    args: process.argv.slice(2),
+    allowPositionals: true,
+    options: {
+      config: { type: "string", short: "c" },
+      port: { type: "string", short: "p" },
+      "out-dir": { type: "string", short: "d" },
+      output: { type: "string", short: "o" },
+      // No defaults: an absent flag must stay undefined so cappu.json
+      // can supply the value (an explicit flag always wins).
+      quiet: { type: "boolean", short: "q" },
+      "fail-on-degrade": { type: "boolean" },
+      "with-schema": { type: "boolean", default: false },
+      validate: { type: "boolean", default: false },
+      "experimental-compiler": { type: "boolean" },
+      help: { type: "boolean", short: "h", default: false },
+      version: { type: "boolean", default: false },
+    },
+  }));
+} catch (e) {
+  // parseArgs throws on an unknown flag or a value that looks like a flag
+  // (e.g. --port=-1); turn its message into a friendly one rather than a
+  // bundled-source stack trace.
+  process.stderr.write(`cappu: ${(e as Error).message}\nRun \`cappu --help\` for usage.\n`);
+  process.exit(2);
+}
 
 const [command, ...files] = positionals;
 
@@ -104,10 +114,12 @@ if (values.help || command === undefined) {
   process.exit(values.help ? 0 : 2);
 }
 
-// init and cache run before loadConfig: neither depends on (nor should be
-// blocked by) an existing, possibly broken project config.
+// init, cache and self-upgrade run before loadConfig: none depends on (nor
+// should be blocked by) an existing, possibly broken project config -
+// self-upgrade is global and must work even when the cwd's cappu.json is bad.
 if (command === "init") runInit(values.config, values["with-schema"]);
 if (command === "cache") runCacheCommand(files);
+if (command === "self-upgrade") await runSelfUpgrade();
 
 let config;
 try {
@@ -138,9 +150,6 @@ switch (command) {
     break;
   case "test":
     await runTestCommand(config);
-    break;
-  case "self-upgrade":
-    await runSelfUpgrade();
     break;
   case "compile":
     await runCompileCommand(

@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -366,6 +366,43 @@ test("listVersions answers are cached in the package store with a TTL", async ()
     if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
     else process.env.CAPPU_PACKAGE_STORE = previousStore;
     rmSync(store, { recursive: true, force: true });
+  }
+});
+
+test("a SHA-256 mismatch evicts the bad jar from the store (#2)", async () => {
+  const store = mkdtempSync(join(tmpdir(), "cappu-store-"));
+  const dir = mkdtempSync(join(tmpdir(), "cappu-install-"));
+  const previousStore = process.env.CAPPU_PACKAGE_STORE;
+  process.env.CAPPU_PACKAGE_STORE = store;
+  try {
+    writeFileSync(
+      join(dir, "cappu.json"),
+      '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
+    );
+    const config = loadConfig(undefined, dir);
+    // first install populates the store + a correct lock
+    await installDependencies(config, [fakeRepo()]);
+    const gson = { groupId: "com.google.code.gson", artifactId: "gson", version: "2.14.0" };
+    expect(existsSync(storePathFor(gson)!)).toBe(true);
+
+    // tamper the lock's hash so the (correct) stored jar fails verification
+    const lockPath = join(dir, LOCKFILE_NAME);
+    const lock = JSON.parse(readFileSync(lockPath, "utf8")) as {
+      packages: { coordinates: { artifactId: string }; sha256: string }[];
+    };
+    for (const p of lock.packages)
+      if (p.coordinates.artifactId === "gson") p.sha256 = "0".repeat(64);
+    writeFileSync(lockPath, JSON.stringify(lock));
+
+    const result = await installDependencies(config, [fakeRepo()]);
+    expect(result.integrityFailures).toContain("com.google.code.gson:gson:2.14.0");
+    // the poisoned store entry is gone, so a later good install can re-download
+    expect(existsSync(storePathFor(gson)!)).toBe(false);
+  } finally {
+    if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
+    else process.env.CAPPU_PACKAGE_STORE = previousStore;
+    rmSync(store, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

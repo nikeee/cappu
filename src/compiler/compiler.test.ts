@@ -239,6 +239,25 @@ test("jar manifests carry Main-Class for the unique entry point (#11)", () => {
   );
 });
 
+test("a jar with several mains and no configured mainClass warns (#11)", () => {
+  inTempDir(
+    {
+      "A.java": "public class A { public static void main(String[] a) {} }",
+      "B.java": "public class B { public static void main(String[] a) {} }",
+    },
+    (dir, paths) => {
+      const result = runCompile(paths, {
+        experimentalCompiler: true,
+        outDir: join(dir, "dist"),
+        output: "jar",
+        config: defaultConfig(dir),
+      });
+      expect(result.success).toBe(true);
+      expect(result.warnings?.some(w => w.includes("several classes declare main"))).toBe(true);
+    },
+  );
+});
+
 test("output fat-jar merges dependency jar contents, own classes win", () => {
   inTempDir({ "B.java": "package app; class B { }" }, (dir, paths) => {
     // a dependency jar in the default classPath location

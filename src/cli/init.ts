@@ -55,11 +55,16 @@ export function runInit(configPath: string | undefined, withSchema: boolean): ne
   ]) {
     mkdirSync(resolve(target, "..", dir), { recursive: true });
   }
-  // A .gitignore covering what cappu generates; an existing one is left alone.
+  // A .gitignore covering what cappu generates; an existing one is left alone
+  // but flagged, so the user knows cappu's ignores (/lib/, /dist/, /.cappu/)
+  // were not added and build output could otherwise get committed.
   try {
     writeFileSync(resolve(target, "..", ".gitignore"), GITIGNORE_TEMPLATE, { flag: "wx" });
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    process.stderr.write(
+      ".gitignore already exists, left unchanged - add /lib/, /dist/ and /.cappu/ if missing\n",
+    );
   }
   process.stdout.write(`${target}\n`);
   if (withSchema) {

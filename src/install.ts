@@ -15,7 +15,7 @@
 // for the lock to be rewritten (updateLock).
 
 import { hash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { cacheDir } from "./cacheDir.ts";
@@ -393,7 +393,12 @@ export async function installDependencies(
       }
       const digest = sha256Of(artifact.bytes);
       if (pkg.sha256 !== undefined && pkg.sha256 !== digest) {
-        // A locked install must produce the locked bytes: do not write the jar.
+        // A locked install must produce the locked bytes: do not write the jar,
+        // and evict the bad copy from the global store (it is store-first, so a
+        // poisoned entry would otherwise re-fail every install until a manual
+        // `cappu cache clean`).
+        const stored = storePathFor(pkg.coordinates);
+        if (stored) rmSync(stored, { force: true });
         integrityFailures.push(coordinatesToString(pkg.coordinates));
         continue;
       }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
@@ -14,6 +14,7 @@ import {
   consoleLauncherJar,
   findTestSources,
   mainClassesDir,
+  testClassesDir,
   testRunArgs,
 } from "./testing.ts";
 
@@ -63,6 +64,22 @@ test("test compile and run classpaths are ordered and jar-expanded", () => {
     const runCp = run[run.indexOf("--class-path") + 1]!;
     expect(runCp.split(delimiter)[0]).toBe(join(dir, ".cappu", "test-build", "test-classes"));
     expect(run.at(-1)).toBe("--scan-class-path");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("compileTests wipes stale class files first (no phantom tests)", () => {
+  const dir = tempProject();
+  try {
+    const config = loadConfig(undefined, dir);
+    const classes = testClassesDir(config);
+    mkdirSync(join(classes, "old"), { recursive: true });
+    writeFileSync(join(classes, "old", "GoneTest.class"), "stale");
+    // a no-op javac (status 0) still triggers the pre-compile wipe
+    const diagnostics = compileTests(config, ["/t/ATest.java"], () => ({ status: 0, stderr: "" }));
+    expect(diagnostics).toEqual([]);
+    expect(existsSync(join(classes, "old", "GoneTest.class"))).toBe(false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

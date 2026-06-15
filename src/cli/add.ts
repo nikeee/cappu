@@ -92,14 +92,17 @@ export async function runAdd(
     : join(config.baseDir, DEFAULT_CONFIG_NAME);
   const resolvedSources = sources ?? configuredSources(config);
 
-  // Sequential on purpose: each entry is written before the next is picked
-  // (and the config re-read), so later picks see the earlier additions and
-  // stay compatible with them, not just with the pre-existing dependencies.
-  let current = config;
+  // Pick every version FIRST, against an in-memory config that accumulates the
+  // earlier additions, so later picks stay compatible with them - but write
+  // nothing to disk until all picks succeed. A failure mid-way (an
+  // unresolvable coordinate) then leaves cappu.json untouched rather than
+  // partially mutated.
+  let working = config;
+  const picks: { key: string; version: string }[] = [];
   for (const coordinate of coordinates as AddCoordinate[]) {
     let version = coordinate.version;
     if (!looksExact(version)) {
-      const picked = await pickAddVersion(current, coordinate.key, version, resolvedSources);
+      const picked = await pickAddVersion(working, coordinate.key, version, resolvedSources);
       if (picked === undefined) {
         const wanted = version === undefined ? "" : ` matching '${version}'`;
         process.stderr.write(
@@ -114,20 +117,27 @@ export async function runAdd(
       }
       version = picked.version;
     }
-    writeFileSync(
-      configPath,
-      addDependencyToJsonc(
-        readFileSync(configPath, "utf8"),
-        configuration,
-        coordinate.key,
-        version,
-      ),
-    );
-    process.stderr.write(`added ${configuration} ${coordinate.key}@${version}\n`);
-    current = loadConfig(configPath);
+    picks.push({ key: coordinate.key, version });
+    // thread the addition into the in-memory config for the next pick
+    working = {
+      ...working,
+      dependencies: {
+        ...working.dependencies,
+        [configuration]: { ...working.dependencies[configuration], [coordinate.key]: version },
+      },
+    };
   }
 
-  // `current` is exactly what was written; re-resolve and rewrite the lock -
-  // install alone only ever consumes the existing lock.
-  return runInstall(current, { updateLock: true });
+  // All picks resolved: now write them in one go and install.
+  let text = readFileSync(configPath, "utf8");
+  for (const { key, version } of picks) {
+    text = addDependencyToJsonc(text, configuration, key, version);
+  }
+  writeFileSync(configPath, text);
+  for (const { key, version } of picks) {
+    process.stderr.write(`added ${configuration} ${key}@${version}\n`);
+  }
+
+  // Re-resolve and rewrite the lock - install alone only consumes the lock.
+  return runInstall(loadConfig(configPath), { updateLock: true });
 }

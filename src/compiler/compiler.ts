@@ -65,6 +65,23 @@ interface CompileOutput {
   written: string[];
   /** Members emitted with a placeholder body (binary name + member). */
   degraded: string[];
+  /** Non-fatal advisories the CLI prints (e.g. an ambiguous Main-Class). */
+  warnings?: string[];
+}
+
+// The jar's Main-Class advisory (nikeee/cappu#11): a jar with several main
+// methods and no configured mainClass gets NO Main-Class entry, so `java -jar`
+// later fails with "no main manifest attribute" - say so at build time.
+function mainClassWarning(
+  mainClasses: readonly string[],
+  configured: string | undefined,
+): string[] {
+  return configured === undefined && mainClasses.length > 1
+    ? [
+        `several classes declare main(String[]) (${mainClasses.join(", ")}); ` +
+          `the jar has no Main-Class - set compilerOptions.mainClass to pick one`,
+      ]
+    : [];
 }
 
 export type CompileResult =
@@ -255,6 +272,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
   });
 
   const written: string[] = [];
+  const warnings: string[] = [];
   try {
     const classes: ZipEntryInput[] = [];
     const mainClasses: string[] = [];
@@ -290,6 +308,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
       const mainClass =
         options.config.compilerOptions.mainClass ??
         (mainClasses.length === 1 ? mainClasses[0] : undefined);
+      warnings.push(...mainClassWarning(mainClasses, options.config.compilerOptions.mainClass));
       const manifest: ZipEntryInput = {
         name: "META-INF/MANIFEST.MF",
         bytes: new TextEncoder().encode(
@@ -329,7 +348,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
       degraded,
     };
   }
-  return { success: true, written, degraded };
+  return { success: true, written, degraded, warnings };
 }
 
 // javac's "path:line: error: message" diagnostics, located like our own; any
@@ -399,6 +418,7 @@ function runJavacCompile(
     const haveNames = new Set(outputFiles.map(f => f.replaceAll("\\", "/")));
     const resources = resourceEntries(config).filter(r => !haveNames.has(r.name));
     const written: string[] = [];
+    const warnings: string[] = [];
     if (output === "classes") {
       for (const rel of outputFiles) {
         const target = join(outDir, rel);
@@ -429,6 +449,7 @@ function runJavacCompile(
       }
       const mainClass =
         config.compilerOptions.mainClass ?? (mainClasses.length === 1 ? mainClasses[0] : undefined);
+      warnings.push(...mainClassWarning(mainClasses, config.compilerOptions.mainClass));
       const entries: ZipEntryInput[] = [
         {
           name: "META-INF/MANIFEST.MF",
@@ -452,7 +473,7 @@ function runJavacCompile(
       writeFileSync(jar, writeZip(entries));
       written.push(jar);
     }
-    return { success: true, written, degraded: [] };
+    return { success: true, written, degraded: [], warnings };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

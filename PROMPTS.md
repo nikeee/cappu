@@ -208,3 +208,4 @@ no timestamps were captured.
 - 2026-06-15 17:59 — when there is no lock-file, there is no progress bar or other indicator that something is happening on cappu install. I think its in the resolving stage. maybe add some indicator(or even a progress bar?) do indicate that
 - 2026-06-15 18:19 — add a "cappu cache clean" command that nukes the local global cache store
 - 2026-06-15 22:17 — then do the pom caching
+- 2026-06-15 22:40 — fix 1,2,3,4,5,6,8. after that we check the rest
