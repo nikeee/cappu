@@ -45,9 +45,22 @@ export async function runInstall(
   options: { updateLock?: boolean } = {},
 ): Promise<never> {
   let bar: SingleBar | undefined;
+  // Resolving (no lockfile) fetches a POM per package with no known total, so
+  // it gets a count-up line rather than a bar; cleared once downloads start.
+  let resolved = 0;
   const result = await installDependencies(config, undefined, {
     ...options,
+    onResolve: current => {
+      if (!progressEnabled()) return;
+      resolved++;
+      const label = `${styleText("cyan", "resolving")} ${styleText("bold", String(resolved))} ${styleText("dim", current)}`;
+      process.stderr.write(`\r\x1b[2K${label}`); // carriage return + clear line
+    },
     onProgress: (done, total, current) => {
+      if (resolved > 0) {
+        process.stderr.write("\r\x1b[2K"); // wipe the resolving line before the bar
+        resolved = 0;
+      }
       bar ??= (() => {
         const created = progressBar();
         created?.start(total, 0, { package: "" });
@@ -56,6 +69,7 @@ export async function runInstall(
       bar?.update(done, { package: current });
     },
   });
+  if (resolved > 0) process.stderr.write("\r\x1b[2K"); // nothing to download after resolve
   bar?.stop();
 
   // JDK provisioning (nikeee/cappu#8): the configured "jdk" entry is

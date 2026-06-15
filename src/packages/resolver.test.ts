@@ -46,6 +46,25 @@ test("a transitive chain resolves depth-first packages in breadth-first order", 
   expect(resolution.missing).toEqual([]);
 });
 
+test("onResolve fires once per resolved package, in discovery order", async () => {
+  const source = new InMemoryPackageSource("test", [
+    pkg("org.a:a:1", ["org.b:b:1", "org.c:c:1"]),
+    pkg("org.b:b:1", ["org.c:c:1"]), // c reached twice but resolved once
+    pkg("org.c:c:1"),
+    pkg("org.x:x:1"), // a missing dep is still reported (we attempt it)
+  ]);
+  const seen: string[] = [];
+  const resolution = await resolveTransitive(
+    [c("org.a:a:1"), c("org.missing:m:1")],
+    [source],
+    coordinates => seen.push(coordinatesToString(coordinates)),
+  );
+  // one notification per UNIQUE package (c only once), including the missing one
+  expect(seen).toEqual(["org.a:a:1", "org.missing:m:1", "org.b:b:1", "org.c:c:1"]);
+  // and it matches what actually got resolved + attempted
+  expect(seen.length).toBe(resolution.packages.length + resolution.missing.length);
+});
+
 test("nearest version wins a diamond conflict; the loser is recorded", async () => {
   const source = new InMemoryPackageSource("test", [
     pkg("org.a:a:1", ["org.b:b:1", "org.c:c:1"]),

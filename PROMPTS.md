@@ -205,3 +205,4 @@ no timestamps were captured.
 - 2026-06-15 16:09 — bun does not support this option: fs.glob does not support options.withFileTypes yet [...] maybe we need to find a workaround
 - 2026-06-15 16:09 — make comimt closing the issue / same for https://github.com/nikeee/cappu/issues/16
 - 2026-06-15 16:57 — implement the self-upgrade. use the build artifacts from the latest CD.yaml run on github. we dont need any release support for now
+- 2026-06-15 17:59 — when there is no lock-file, there is no progress bar or other indicator that something is happening on cappu install. I think its in the resolving stage. maybe add some indicator(or even a progress bar?) do indicate that

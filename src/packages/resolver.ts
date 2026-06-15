@@ -63,6 +63,10 @@ async function metadataFrom(
 export async function resolveTransitive(
   roots: readonly Coordinates[],
   sources: readonly PackageSource[],
+  // Notified once per package as it is about to be fetched: resolution makes a
+  // network call per package and the total is unknown until it finishes, so
+  // the CLI shows a count-up rather than a bar.
+  onResolve?: (coordinates: Coordinates) => void,
 ): Promise<Resolution> {
   const packages: ResolvedPackage[] = [];
   const conflicts: VersionConflict[] = [];
@@ -89,6 +93,7 @@ export async function resolveTransitive(
         }
         continue; // already resolved (or conflicting): never descend twice
       }
+      onResolve?.(coordinates);
       const found = await metadataFrom(sources, coordinates);
       if (!found) {
         selected.set(key, coordinates.version); // do not retry / re-report

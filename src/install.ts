@@ -292,6 +292,9 @@ export async function installDependencies(
   options: {
     updateLock?: boolean;
     onProgress?: (done: number, total: number, current: CoordinateString) => void;
+    // Notified once per package while resolving (no lockfile): the set is not
+    // yet known, so the CLI shows a count-up indicator.
+    onResolve?: (current: CoordinateString) => void;
   } = {},
 ): Promise<InstallResult> {
   const lock = options.updateLock ? undefined : readLockfile(config);
@@ -316,13 +319,18 @@ export async function installDependencies(
     processorInstall = lock.processorPackages ?? [];
     testInstall = lock.testPackages ?? [];
   } else {
-    const main = await resolveTransitive(configuredRoots(config), sources);
+    const onResolve = options.onResolve
+      ? (c: Coordinates) => options.onResolve!(coordinatesToString(c))
+      : undefined;
+    const main = await resolveTransitive(configuredRoots(config), sources, onResolve);
     const processors =
       processorRoots(config).length > 0
-        ? await resolveTransitive(processorRoots(config), sources)
+        ? await resolveTransitive(processorRoots(config), sources, onResolve)
         : NONE;
     const tests =
-      testRoots(config).length > 0 ? await resolveTransitive(testRoots(config), sources) : NONE;
+      testRoots(config).length > 0
+        ? await resolveTransitive(testRoots(config), sources, onResolve)
+        : NONE;
     resolution = {
       packages: [...main.packages, ...processors.packages, ...tests.packages],
       conflicts: [...main.conflicts, ...processors.conflicts, ...tests.conflicts],
