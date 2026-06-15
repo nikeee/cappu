@@ -198,6 +198,47 @@ function sha256Of(bytes: Uint8Array): string {
   return hash("sha256", bytes, "hex");
 }
 
+// Which lib directory each locked configuration installs into.
+const LOCK_TARGETS = [
+  { key: "packages", dir: DEFAULT_CLASS_PATH },
+  { key: "processorPackages", dir: DEFAULT_PROCESSOR_PATH },
+  { key: "testPackages", dir: DEFAULT_TEST_CLASS_PATH },
+] as const satisfies { key: keyof Lockfile; dir: string }[];
+
+export interface VerifyResult {
+  /** False when there is no cappu-lock.json to verify against. */
+  fromLock: boolean;
+  /** Coordinate strings whose installed jar matches its locked SHA-256. */
+  ok: string[];
+  /** Installed, but the bytes do not match the lock (tampered or corrupt). */
+  modified: string[];
+  /** Locked but absent from the lib directory. */
+  missing: string[];
+}
+
+/**
+ * Check the jars currently in the lib directories against the SHA-256 sums in
+ * cappu-lock.json. Read-only: nothing is downloaded, written or removed.
+ */
+export function verifyInstalled(config: CappuConfig): VerifyResult {
+  const lock = readLockfile(config);
+  if (!lock) return { fromLock: false, ok: [], modified: [], missing: [] };
+  const result: VerifyResult = { fromLock: true, ok: [], modified: [], missing: [] };
+  for (const { key, dir } of LOCK_TARGETS) {
+    for (const pkg of lock[key] ?? []) {
+      const id = coordinatesToString(pkg.coordinates);
+      const file = join(
+        resolveConfigPath(config, dir),
+        `${pkg.coordinates.artifactId}-${pkg.coordinates.version}.jar`,
+      );
+      if (!existsSync(file)) result.missing.push(id);
+      else if (sha256Of(readFileSync(file)) === pkg.sha256) result.ok.push(id);
+      else result.modified.push(id);
+    }
+  }
+  return result;
+}
+
 export interface InstallResult {
   /** Jar paths written, in resolution order. */
   installed: string[];

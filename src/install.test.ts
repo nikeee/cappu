@@ -11,6 +11,7 @@ import {
   LOCKFILE_NAME,
   pickAddVersion,
   storePathFor,
+  verifyInstalled,
   withMetadataCache,
 } from "./install.ts";
 import {
@@ -366,6 +367,44 @@ test("listVersions answers are cached in the package store with a TTL", async ()
     if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
     else process.env.CAPPU_PACKAGE_STORE = previousStore;
     rmSync(store, { recursive: true, force: true });
+  }
+});
+
+test("verifyInstalled checks lib jars against the lockfile sums", async () => {
+  const store = mkdtempSync(join(tmpdir(), "cappu-store-"));
+  const dir = mkdtempSync(join(tmpdir(), "cappu-install-"));
+  const previousStore = process.env.CAPPU_PACKAGE_STORE;
+  process.env.CAPPU_PACKAGE_STORE = store;
+  try {
+    const config = loadConfig(undefined, dir);
+    // no lockfile yet
+    expect(verifyInstalled(config).fromLock).toBe(false);
+
+    writeFileSync(
+      join(dir, "cappu.json"),
+      '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
+    );
+    const installed = loadConfig(undefined, dir);
+    await installDependencies(installed, [fakeRepo()]);
+
+    // fresh install: every locked jar matches
+    const clean = verifyInstalled(installed);
+    expect(clean.modified).toEqual([]);
+    expect(clean.missing).toEqual([]);
+    expect(clean.ok).toContain("com.google.code.gson:gson:2.14.0");
+
+    // tamper one jar on disk -> modified
+    writeFileSync(join(dir, "lib", "classes", "gson-2.14.0.jar"), "corrupted");
+    expect(verifyInstalled(installed).modified).toContain("com.google.code.gson:gson:2.14.0");
+
+    // delete another -> missing
+    rmSync(join(dir, "lib", "classes", "base-1.0.jar"));
+    expect(verifyInstalled(installed).missing).toContain("org.example:base:1.0");
+  } finally {
+    if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
+    else process.env.CAPPU_PACKAGE_STORE = previousStore;
+    rmSync(store, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
