@@ -1980,7 +1980,7 @@ export function createChecker(program: Program): Checker {
         const last = parameters.at(-1) as Parameter | undefined;
         arities.add(last?.isVarArgs ? `${parameters.length - 1}+` : `${parameters.length}`);
       }
-      return [...arities].sort((a, b) => parseInt(a) - parseInt(b)).join(" or ");
+      return [...arities].sort((a, b) => Number.parseInt(a) - Number.parseInt(b)).join(" or ");
     };
     const reportArity = (after: Node, end: number, expected: string, argc: number): void => {
       diagnostics.push(

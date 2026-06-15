@@ -47,7 +47,7 @@ function hasAbstractModifier(node: { modifiers?: readonly Node[] }): boolean {
 }
 
 /** The abstract methods of an interface or abstract class declaration. */
-export function abstractMethodsOf(declaration: Node): MethodDeclaration[] {
+function abstractMethodsOf(declaration: Node): MethodDeclaration[] {
   const members = (declaration as { members?: readonly Node[] }).members ?? [];
   const isInterface = declaration.kind === SyntaxKind.InterfaceDeclaration;
   return members.filter(

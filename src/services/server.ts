@@ -555,7 +555,7 @@ export function startServer(
     visit(sourceFile);
     if (sourceFile.imports.length > 1) {
       const first = sourceFile.imports[0]!;
-      const last = sourceFile.imports[sourceFile.imports.length - 1]!;
+      const last = sourceFile.imports.at(-1)!;
       const startLine = lineAt(skipTrivia(sourceFile.text, first.pos));
       const endLine = lineAt(last.end);
       if (endLine > startLine) ranges.push({ startLine, endLine, kind: "imports" });

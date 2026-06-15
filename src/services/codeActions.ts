@@ -68,7 +68,7 @@ function singleTypeImportFqns(sourceFile: SourceFile): Set<string> {
 // existing import, else after the package declaration, else at the file start.
 function importInsertion(sourceFile: SourceFile, statement: string): TextChange {
   if (sourceFile.imports.length > 0) {
-    const last = sourceFile.imports[sourceFile.imports.length - 1]!;
+    const last = sourceFile.imports.at(-1)!;
     return { start: last.end, end: last.end, newText: `\n${statement}` };
   }
   if (sourceFile.packageDeclaration) {

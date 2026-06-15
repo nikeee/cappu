@@ -2800,7 +2800,7 @@ function generateBody(
     if (isVarargs) {
       const varargsArrayDesc = paramDescs.at(-1)!;
       const fixedCount = paramDescs.length - 1;
-      const lastArg = call.arguments[call.arguments.length - 1];
+      const lastArg = call.arguments.at(-1);
       // The single-array (exact) invocation form: the last argument is itself an
       // array assignable to the varargs parameter, so it is passed without
       // re-wrapping. Reference arrays are covariant (Observer[] -> Object[]); the
