@@ -11,7 +11,7 @@ import {
   LOCKFILE_NAME,
   pickAddVersion,
   storePathFor,
-  withVersionListCache,
+  withMetadataCache,
 } from "./install.ts";
 import {
   InMemoryPackageSource,
@@ -330,7 +330,7 @@ test("listVersions answers are cached in the package store with a TTL", async ()
   process.env.CAPPU_PACKAGE_STORE = store;
   try {
     let fetches = 0;
-    const source = withVersionListCache({
+    const source = withMetadataCache({
       name: "https://repo.test/m2",
       search: () => Promise.resolve([]),
       listVersions: () => {
@@ -361,6 +361,55 @@ test("listVersions answers are cached in the package store with a TTL", async ()
     // unsafe segments bypass the cache entirely
     expect(await source.listVersions("org/../evil", "thing")).toEqual(["1.0", "1.1"]);
     expect(await source.listVersions("org/../evil", "thing")).toEqual(["1.0", "1.1"]);
+    expect(fetches).toBe(4);
+  } finally {
+    if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
+    else process.env.CAPPU_PACKAGE_STORE = previousStore;
+    rmSync(store, { recursive: true, force: true });
+  }
+});
+
+test("getMetadata answers (resolved POMs) are cached forever in the store", async () => {
+  const store = mkdtempSync(join(tmpdir(), "cappu-store-"));
+  const previousStore = process.env.CAPPU_PACKAGE_STORE;
+  process.env.CAPPU_PACKAGE_STORE = store;
+  try {
+    let fetches = 0;
+    const metadata = {
+      coordinates: { groupId: "org.example", artifactId: "thing", version: "1.0" },
+      dependencies: [{ groupId: "org.dep", artifactId: "dep", version: "2.0" }],
+    };
+    const source = withMetadataCache({
+      name: "https://repo.test/m2",
+      search: () => Promise.resolve([]),
+      listVersions: () => Promise.resolve([]),
+      getMetadata: () => {
+        fetches++;
+        return Promise.resolve(metadata);
+      },
+    });
+    const coords = { groupId: "org.example", artifactId: "thing", version: "1.0" };
+
+    expect(await source.getMetadata(coords)).toEqual(metadata);
+    expect(await source.getMetadata(coords)).toEqual(metadata); // from the store, no TTL
+    expect(fetches).toBe(1);
+
+    // a different version is a different entry (immutable per version)
+    await source.getMetadata({ ...coords, version: "1.1" });
+    expect(fetches).toBe(2);
+
+    // a not-found answer is not cached (re-fetched each time)
+    const empty = withMetadataCache({
+      name: "https://repo.test/m2",
+      search: () => Promise.resolve([]),
+      listVersions: () => Promise.resolve([]),
+      getMetadata: () => {
+        fetches++;
+        return Promise.resolve(undefined);
+      },
+    });
+    await empty.getMetadata({ groupId: "org.missing", artifactId: "x", version: "1" });
+    await empty.getMetadata({ groupId: "org.missing", artifactId: "x", version: "1" });
     expect(fetches).toBe(4);
   } finally {
     if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;

@@ -35,6 +35,7 @@ import {
   coordinatesToString,
   matchingVersions,
   MavenRepositorySource,
+  type PackageMetadata,
   type PackageSource,
   type Resolution,
   resolveTransitive,
@@ -43,7 +44,7 @@ import {
 /** The configured packageSources as PackageSource instances (Central searchable). */
 export function configuredSources(config: CappuConfig): PackageSource[] {
   return config.packageSources.map(url =>
-    withVersionListCache(
+    withMetadataCache(
       new MavenRepositorySource(
         url,
         undefined,
@@ -54,30 +55,38 @@ export function configuredSources(config: CappuConfig): PackageSource[] {
   );
 }
 
-// --- version-list cache --------------------------------------------------------
-// listVersions answers (maven-metadata.xml) are cached in the package store
-// for a short while: `cappu add` resolves the same artifacts repeatedly and
-// the dependency code lenses poll for newer versions. Only non-empty answers
-// are cached, the TTL keeps new releases visible, and a read-only or missing
-// store silently degrades to live fetches.
+// --- metadata cache ------------------------------------------------------------
+// Fetched metadata is cached in the package store so re-resolves and repeated
+// `cappu add` runs avoid the network:
+//  - listVersions (maven-metadata.xml): a short TTL, because "latest" moves.
+//  - getMetadata (a released version's effective POM): cached forever, since
+//    a published POM is immutable; this is what makes lockfile-less resolves
+//    fast (no parent/BOM chain re-fetch).
+// Only successful answers are cached; a read-only or missing store silently
+// degrades to live fetches.
 
 const VERSION_CACHE_TTL_MS = 60 * 60 * 1000;
 
-function versionCachePath(
+// <store>/_metadata/<source>/<group dirs>/<artifact>[/<version>]/<file>, or
+// undefined when a segment is not store-safe (then caching is skipped).
+function metadataCachePath(
   sourceName: string,
-  groupId: string,
-  artifactId: string,
+  segments: readonly string[],
+  file: string,
 ): string | undefined {
-  const segments = [...groupId.split("."), artifactId];
   if (segments.some(segment => !STORE_SEGMENT.test(segment))) return undefined;
-  // one directory per source: different repositories see different versions
+  // one directory per source: different repositories see different metadata
   const sourceDir = sourceName.replace(/[^A-Za-z0-9._-]+/g, "_");
-  return join(packageStoreDir(), "_metadata", sourceDir, ...segments, "versions.json");
+  return join(packageStoreDir(), "_metadata", sourceDir, ...segments, file);
 }
 
-export function withVersionListCache(source: PackageSource): PackageSource {
+export function withMetadataCache(source: PackageSource): PackageSource {
   const listVersions = async (groupId: string, artifactId: string): Promise<string[]> => {
-    const cacheFile = versionCachePath(source.name, groupId, artifactId);
+    const cacheFile = metadataCachePath(
+      source.name,
+      [...groupId.split("."), artifactId],
+      "versions.json",
+    );
     if (cacheFile && existsSync(cacheFile)) {
       try {
         const cached = JSON.parse(readFileSync(cacheFile, "utf8")) as {
@@ -100,11 +109,37 @@ export function withVersionListCache(source: PackageSource): PackageSource {
     }
     return versions;
   };
+
+  const getMetadata = async (coordinates: Coordinates): Promise<PackageMetadata | undefined> => {
+    const cacheFile = metadataCachePath(
+      source.name,
+      [...coordinates.groupId.split("."), coordinates.artifactId, coordinates.version],
+      "metadata.json",
+    );
+    if (cacheFile && existsSync(cacheFile)) {
+      try {
+        return JSON.parse(readFileSync(cacheFile, "utf8")) as PackageMetadata;
+      } catch {
+        // corrupt entry: fall through to a live fetch (and rewrite it)
+      }
+    }
+    const metadata = await source.getMetadata(coordinates);
+    if (cacheFile && metadata) {
+      try {
+        mkdirSync(dirname(cacheFile), { recursive: true });
+        writeFileSync(cacheFile, JSON.stringify(metadata));
+      } catch {
+        // a read-only store never fails the lookup
+      }
+    }
+    return metadata;
+  };
+
   return {
     name: source.name,
     search: query => source.search(query),
     listVersions,
-    getMetadata: coordinates => source.getMetadata(coordinates),
+    getMetadata,
     ...(source.getArtifact ? { getArtifact: c => source.getArtifact!(c) } : {}),
   };
 }
