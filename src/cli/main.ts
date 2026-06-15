@@ -13,6 +13,7 @@ import { runInit } from "./init.ts";
 import { runInstall } from "./install.ts";
 import { runLsp } from "./lsp.ts";
 import { runSearch } from "./search.ts";
+import { runCacheCommand } from "./cache.ts";
 import { runSelfUpgrade } from "./selfUpgrade.ts";
 import { runTestCommand } from "./test.ts";
 import pkg from "../../package.json" with { type: "json" };
@@ -34,6 +35,7 @@ Usage:
                                      Platform console launcher over it
   cappu self-upgrade                 Replace this binary with the latest CD build
                                      (needs GITHUB_TOKEN or \`gh auth login\`)
+  cappu cache clean                  Remove the global download cache
   cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
   cappu compile [options] [file...]  Compile .java files to .class bytecode; with no
                                      files, compile everything under the configured
@@ -102,9 +104,10 @@ if (values.help || command === undefined) {
   process.exit(values.help ? 0 : 2);
 }
 
-// init runs before loadConfig: bootstrapping must not depend on (or be
-// blocked by) an existing, possibly broken config.
+// init and cache run before loadConfig: neither depends on (nor should be
+// blocked by) an existing, possibly broken project config.
 if (command === "init") runInit(values.config, values["with-schema"]);
+if (command === "cache") runCacheCommand(files);
 
 let config;
 try {
