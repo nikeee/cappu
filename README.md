@@ -32,6 +32,8 @@ cappu compile
 cappu audit
 
 cappu verify # check installed dependencies against their checksum, reinstall if mismatch
+
+cappu self-upgrade # upgrade cappu binary to latest version
 ```
 
 ### LSP Server
