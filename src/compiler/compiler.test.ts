@@ -228,6 +228,7 @@ test("jar manifests carry Main-Class for the unique entry point (#11)", () => {
     },
     (dir, paths) => {
       const result = runCompile(paths.slice(1), {
+        experimentalCompiler: true,
         outDir: dir,
         output: "jar",
         config: loadConfig(undefined, dir),
