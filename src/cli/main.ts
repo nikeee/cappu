@@ -79,35 +79,38 @@ Global:
       --version         Show the version
 `.trimStart();
 
-let values: ReturnType<typeof parseArgs>["values"];
-let positionals: string[];
-try {
-  ({ values, positionals } = parseArgs({
-    args: process.argv.slice(2),
-    allowPositionals: true,
-    options: {
-      config: { type: "string", short: "c" },
-      port: { type: "string", short: "p" },
-      "out-dir": { type: "string", short: "d" },
-      output: { type: "string", short: "o" },
-      // No defaults: an absent flag must stay undefined so cappu.json
-      // can supply the value (an explicit flag always wins).
-      quiet: { type: "boolean", short: "q" },
-      "fail-on-degrade": { type: "boolean" },
-      "with-schema": { type: "boolean", default: false },
-      validate: { type: "boolean", default: false },
-      "experimental-compiler": { type: "boolean" },
-      help: { type: "boolean", short: "h", default: false },
-      version: { type: "boolean", default: false },
-    },
-  }));
-} catch (e) {
-  // parseArgs throws on an unknown flag or a value that looks like a flag
-  // (e.g. --port=-1); turn its message into a friendly one rather than a
-  // bundled-source stack trace.
-  process.stderr.write(`cappu: ${(e as Error).message}\nRun \`cappu --help\` for usage.\n`);
-  process.exit(2);
-}
+// The IIFE keeps parseArgs's precise inferred result type (the catch path is
+// `never`); a top-level `let` annotation would widen `values` to the generic
+// union and lose the per-option string/boolean types.
+const { values, positionals } = (() => {
+  try {
+    return parseArgs({
+      args: process.argv.slice(2),
+      allowPositionals: true,
+      options: {
+        config: { type: "string", short: "c" },
+        port: { type: "string", short: "p" },
+        "out-dir": { type: "string", short: "d" },
+        output: { type: "string", short: "o" },
+        // No defaults: an absent flag must stay undefined so cappu.json
+        // can supply the value (an explicit flag always wins).
+        quiet: { type: "boolean", short: "q" },
+        "fail-on-degrade": { type: "boolean" },
+        "with-schema": { type: "boolean", default: false },
+        validate: { type: "boolean", default: false },
+        "experimental-compiler": { type: "boolean" },
+        help: { type: "boolean", short: "h", default: false },
+        version: { type: "boolean", default: false },
+      },
+    });
+  } catch (e) {
+    // parseArgs throws on an unknown flag or a value that looks like a flag
+    // (e.g. --port=-1); turn its message into a friendly one rather than a
+    // bundled-source stack trace.
+    process.stderr.write(`cappu: ${(e as Error).message}\nRun \`cappu --help\` for usage.\n`);
+    process.exit(2);
+  }
+})();
 
 const [command, ...files] = positionals;
 
@@ -135,15 +138,16 @@ try {
   process.exit(2);
 }
 
+// verify needs config but returns `never`, so it runs here (not in the switch,
+// where a never-returning case makes the break unreachable).
+if (command === "verify") runVerify(config);
+
 switch (command) {
   case "add":
     await runAdd(files[0], files.slice(1), values.config, config);
     break;
   case "install":
     await runInstall(config);
-    break;
-  case "verify":
-    runVerify(config);
     break;
   case "audit":
     await runAudit(config);

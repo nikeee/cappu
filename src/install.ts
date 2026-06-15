@@ -198,6 +198,28 @@ function sha256Of(bytes: Uint8Array): string {
   return hash("sha256", bytes, "hex");
 }
 
+// How many jars to download/verify at once. Bounded so a large tree does not
+// open hundreds of sockets; the network, not the CPU, is the limit here.
+const DOWNLOAD_CONCURRENCY = 12;
+
+// Run `fn` over `items` with at most `limit` in flight; results in input order.
+async function mapPool<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+  return results;
+}
+
 // Which lib directory each locked configuration installs into.
 const LOCK_TARGETS = [
   { key: "packages", dir: DEFAULT_CLASS_PATH },
@@ -432,44 +454,71 @@ export async function installDependencies(
   const fromStore: string[] = [];
   const total = toInstall.length + processorInstall.length + testInstall.length;
   let progressed = 0;
-  const materialize = async (set: PendingPackage[], dir: string): Promise<LockedPackage[]> => {
+
+  interface Outcome {
+    locked?: LockedPackage;
+    installed?: string;
+    noArtifact?: string;
+    integrity?: string;
+    fromStore?: string;
+  }
+
+  // Download, verify and write one package. Each is independent, so the set is
+  // fetched with bounded concurrency below (the lockfile - or a completed
+  // resolution - gives the whole set up front, so every download starts at once
+  // instead of one-at-a-time).
+  const fetchOne = async (pkg: PendingPackage, dir: string): Promise<Outcome> => {
+    const id = coordinatesToString(pkg.coordinates);
+    const artifact = await artifactFrom(sources, pkg.source, pkg.coordinates);
+    options.onProgress?.(++progressed, total, id);
+    if (!artifact) return { noArtifact: id };
+    const digest = sha256Of(artifact.bytes);
+    if (pkg.sha256 !== undefined && pkg.sha256 !== digest) {
+      // A locked install must produce the locked bytes: do not write the jar,
+      // and evict the bad copy from the global store (it is store-first, so a
+      // poisoned entry would otherwise re-fail every install until a manual
+      // `cappu cache clean`).
+      const stored = storePathFor(pkg.coordinates);
+      if (stored) rmSync(stored, { force: true });
+      return { integrity: id };
+    }
+    const file = join(dir, `${pkg.coordinates.artifactId}-${pkg.coordinates.version}.jar`);
+    writeFileSync(file, artifact.bytes);
+    return {
+      locked: { coordinates: pkg.coordinates, source: pkg.source, sha256: digest },
+      installed: file,
+      ...(artifact.cached ? { fromStore: id } : {}),
+    };
+  };
+
+  const materialize = (set: PendingPackage[], dir: string): Promise<Outcome[]> => {
+    if (set.length === 0) return Promise.resolve([]);
+    mkdirSync(dir, { recursive: true });
+    return mapPool(set, DOWNLOAD_CONCURRENCY, pkg => fetchOne(pkg, dir));
+  };
+
+  // The three sets download concurrently; their outcomes are assembled in a
+  // fixed group order (compile, processor, test) and input order within each,
+  // so the lock and the result lists stay deterministic whatever finishes first.
+  const [mainOut, procOut, testOut] = await Promise.all([
+    materialize(toInstall, targetDir),
+    materialize(processorInstall, resolveConfigPath(config, DEFAULT_PROCESSOR_PATH)),
+    materialize(testInstall, resolveConfigPath(config, DEFAULT_TEST_CLASS_PATH)),
+  ]);
+  const assemble = (outcomes: Outcome[]): LockedPackage[] => {
     const locked: LockedPackage[] = [];
-    if (set.length > 0) mkdirSync(dir, { recursive: true });
-    for (const pkg of set) {
-      options.onProgress?.(progressed++, total, coordinatesToString(pkg.coordinates));
-      const artifact = await artifactFrom(sources, pkg.source, pkg.coordinates);
-      if (!artifact) {
-        noArtifact.push(coordinatesToString(pkg.coordinates));
-        continue;
-      }
-      const digest = sha256Of(artifact.bytes);
-      if (pkg.sha256 !== undefined && pkg.sha256 !== digest) {
-        // A locked install must produce the locked bytes: do not write the jar,
-        // and evict the bad copy from the global store (it is store-first, so a
-        // poisoned entry would otherwise re-fail every install until a manual
-        // `cappu cache clean`).
-        const stored = storePathFor(pkg.coordinates);
-        if (stored) rmSync(stored, { force: true });
-        integrityFailures.push(coordinatesToString(pkg.coordinates));
-        continue;
-      }
-      if (artifact.cached) fromStore.push(coordinatesToString(pkg.coordinates));
-      const file = join(dir, `${pkg.coordinates.artifactId}-${pkg.coordinates.version}.jar`);
-      writeFileSync(file, artifact.bytes);
-      installed.push(file);
-      locked.push({ coordinates: pkg.coordinates, source: pkg.source, sha256: digest });
+    for (const o of outcomes) {
+      if (o.noArtifact) noArtifact.push(o.noArtifact);
+      if (o.integrity) integrityFailures.push(o.integrity);
+      if (o.fromStore) fromStore.push(o.fromStore);
+      if (o.installed) installed.push(o.installed);
+      if (o.locked) locked.push(o.locked);
     }
     return locked;
   };
-  const locked = await materialize(toInstall, targetDir);
-  const lockedProcessors = await materialize(
-    processorInstall,
-    resolveConfigPath(config, DEFAULT_PROCESSOR_PATH),
-  );
-  const lockedTests = await materialize(
-    testInstall,
-    resolveConfigPath(config, DEFAULT_TEST_CLASS_PATH),
-  );
+  const locked = assemble(mainOut);
+  const lockedProcessors = assemble(procOut);
+  const lockedTests = assemble(testOut);
 
   if (total > 0) {
     options.onProgress?.(total, total, "" as CoordinateString);
