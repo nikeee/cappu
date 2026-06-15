@@ -24,12 +24,17 @@ cappu install
 
 # build project
 cappu compile
+
+# run tests, see examples/junit-app
+cappu test
 ```
 
 ### Other Stuff
 ```sh
 # check dependencies for known CVEs
 cappu audit
+
+cappu search # look up a maven package
 
 cappu verify # check installed dependencies against their checksum, reinstall if mismatch
 
