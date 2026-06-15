@@ -217,6 +217,16 @@ export interface VerifyResult {
 }
 
 /**
+ * Every coordinate the lockfile pins (compile + processor + test sets), or
+ * undefined when there is no lockfile. The resolved truth `cappu audit` scans.
+ */
+export function lockedCoordinates(config: CappuConfig): Coordinates[] | undefined {
+  const lock = readLockfile(config);
+  if (!lock) return undefined;
+  return LOCK_TARGETS.flatMap(({ key }) => (lock[key] ?? []).map(p => p.coordinates));
+}
+
+/**
  * Check the jars currently in the lib directories against the SHA-256 sums in
  * cappu-lock.json. Read-only: nothing is downloaded, written or removed.
  */

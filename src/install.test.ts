@@ -10,6 +10,7 @@ import {
   installDependencies,
   LOCKFILE_NAME,
   pickAddVersion,
+  lockedCoordinates,
   storePathFor,
   verifyInstalled,
   withMetadataCache,
@@ -367,6 +368,36 @@ test("listVersions answers are cached in the package store with a TTL", async ()
     if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
     else process.env.CAPPU_PACKAGE_STORE = previousStore;
     rmSync(store, { recursive: true, force: true });
+  }
+});
+
+test("lockedCoordinates flattens every locked set, undefined without a lock", async () => {
+  const store = mkdtempSync(join(tmpdir(), "cappu-store-"));
+  const dir = mkdtempSync(join(tmpdir(), "cappu-install-"));
+  const previousStore = process.env.CAPPU_PACKAGE_STORE;
+  process.env.CAPPU_PACKAGE_STORE = store;
+  try {
+    expect(lockedCoordinates(loadConfig(undefined, dir))).toBeUndefined();
+    writeFileSync(
+      join(dir, "cappu.json"),
+      JSON.stringify({
+        dependencies: {
+          implementation: { "com.google.code.gson:gson": "2.14.0" },
+          testImplementation: { "org.example:base": "1.0" },
+        },
+      }),
+    );
+    const config = loadConfig(undefined, dir);
+    await installDependencies(config, [fakeRepo()]);
+    const coords = lockedCoordinates(config)!.map(c => `${c.groupId}:${c.artifactId}:${c.version}`);
+    // gson + its transitive base (compile set) and the test-set base
+    expect(coords).toContain("com.google.code.gson:gson:2.14.0");
+    expect(coords.filter(c => c === "org.example:base:1.0").length).toBeGreaterThanOrEqual(1);
+  } finally {
+    if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
+    else process.env.CAPPU_PACKAGE_STORE = previousStore;
+    rmSync(store, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

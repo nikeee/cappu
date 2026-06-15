@@ -15,6 +15,7 @@ import { runLsp } from "./lsp.ts";
 import { runSearch } from "./search.ts";
 import { runCacheCommand } from "./cache.ts";
 import { runSelfUpgrade } from "./selfUpgrade.ts";
+import { runAudit } from "./audit.ts";
 import { runVerify } from "./verify.ts";
 import { runTestCommand } from "./test.ts";
 import pkg from "../../package.json" with { type: "json" };
@@ -29,6 +30,8 @@ Usage:
                                      into lib/classes
   cappu verify                       Check the installed lib jars against the
                                      SHA-256 sums in cappu-lock.json
+  cappu audit                        Scan resolved dependencies for known
+                                     vulnerabilities (OSV); no fixing
   cappu add <configuration> <coord...>  Add one or more group:artifact[@version] to the
                                      dependencies section (api or implementation) and
                                      install them
@@ -141,6 +144,9 @@ switch (command) {
     break;
   case "verify":
     runVerify(config);
+    break;
+  case "audit":
+    await runAudit(config);
     break;
   case "search": {
     const query = files.join(" ").trim();

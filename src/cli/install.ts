@@ -9,17 +9,11 @@ import { SingleBar } from "cli-progress";
 import type { CappuConfig } from "../config.ts";
 import { installDependencies } from "../install.ts";
 import { provisionJdk } from "../jdks/index.ts";
+import { colorEnabled } from "./color.ts";
 
-/**
- * Whether the animated progress bar may render: stderr must be a terminal,
- * and NO_COLOR (https://no-color.org - set and non-empty) turns the bar off
- * entirely, not just its colors.
- */
-export function progressEnabled(
-  isTTY: boolean | undefined = process.stderr.isTTY,
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return isTTY === true && !env.NO_COLOR;
+/** Whether the install progress bar / resolving indicator may render. */
+function progressEnabled(): boolean {
+  return colorEnabled(process.stderr.isTTY);
 }
 
 // One animated bar on stderr while packages download (stdout stays the plain
