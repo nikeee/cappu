@@ -204,3 +204,4 @@ no timestamps were captured.
 - 2026-06-15 16:09 — is https://github.com/nikeee/cappu/issues/7 solved? double-check and review corresponding code
 - 2026-06-15 16:09 — bun does not support this option: fs.glob does not support options.withFileTypes yet [...] maybe we need to find a workaround
 - 2026-06-15 16:09 — make comimt closing the issue / same for https://github.com/nikeee/cappu/issues/16
+- 2026-06-15 16:57 — implement the self-upgrade. use the build artifacts from the latest CD.yaml run on github. we dont need any release support for now

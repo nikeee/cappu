@@ -13,6 +13,7 @@ import { runInit } from "./init.ts";
 import { runInstall } from "./install.ts";
 import { runLsp } from "./lsp.ts";
 import { runSearch } from "./search.ts";
+import { runSelfUpgrade } from "./selfUpgrade.ts";
 import { runTestCommand } from "./test.ts";
 import pkg from "../../package.json" with { type: "json" };
 
@@ -31,6 +32,8 @@ Usage:
                                      group:artifact@latest-version per match
   cappu test                         Compile src/test/java and run the JUnit
                                      Platform console launcher over it
+  cappu self-upgrade                 Replace this binary with the latest CD build
+                                     (needs GITHUB_TOKEN or \`gh auth login\`)
   cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
   cappu compile [options] [file...]  Compile .java files to .class bytecode; with no
                                      files, compile everything under the configured
@@ -132,6 +135,9 @@ switch (command) {
     break;
   case "test":
     await runTestCommand(config);
+    break;
+  case "self-upgrade":
+    await runSelfUpgrade();
     break;
   case "compile":
     await runCompileCommand(
