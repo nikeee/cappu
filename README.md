@@ -26,6 +26,14 @@ cappu install
 cappu compile
 ```
 
+### Other Stuff
+```sh
+# check dependencies for known CVEs
+cappu audit
+
+cappu verify # check installed dependencies against their checksum, reinstall if mismatch
+```
+
 ### LSP Server
 ```sh
 cappu lsp
