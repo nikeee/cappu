@@ -4,7 +4,7 @@
 // expected (and vice versa): pathToUri/uriToPath convert, the LSP boundary and
 // synthetic-stub registrations cast.
 
-import { existsSync, globSync, readFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -51,6 +51,30 @@ export function findJavaFiles(dir: string): FsPath[] {
   return matches
     .filter(relative => !relative.split(/[\\/]/).some(segment => SKIP_DIRS.has(segment)))
     .map(relative => join(dir, relative) as FsPath);
+}
+
+/**
+ * Every regular file under `dir`, as paths relative to it. The glob's
+ * withFileTypes option would filter directories in one call, but Bun (the
+ * compiled cappu binaries run under it) does not support it yet, so the
+ * directories `**` matches are pruned with statSync instead. A missing or
+ * unreadable directory is empty.
+ */
+export function findFilesRelative(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  let matches: string[];
+  try {
+    matches = globSync("**/*", { cwd: dir });
+  } catch {
+    return [];
+  }
+  return matches.filter(rel => {
+    try {
+      return statSync(join(dir, rel)).isFile();
+    } catch {
+      return false;
+    }
+  });
 }
 
 /** Load every .java file under a root directory as [uri, text] pairs. */

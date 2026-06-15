@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, delimiter, dirname, join, relative, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 
 import { setDegradeListener } from "./bytecode.ts";
 import { createChecker } from "./checker.ts";
@@ -38,7 +38,7 @@ import { loadJdkStub } from "./jdkStub.ts";
 import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
 import { createProgram, type Program } from "./program.ts";
 import { type Diagnostic, DiagnosticCategory } from "./types.ts";
-import { loadJavaFiles, pathToUri } from "../workspace.ts";
+import { findFilesRelative, loadJavaFiles, pathToUri } from "../workspace.ts";
 import { readZipEntries } from "./zipReader.ts";
 import { writeZip, type ZipEntryInput } from "./zipWriter.ts";
 
@@ -116,16 +116,7 @@ function resourceEntries(config: CappuConfig): ZipEntryInput[] {
   const entries: ZipEntryInput[] = [];
   for (const configured of config.compilerOptions.resourcePaths) {
     const root = resolveConfigPath(config, configured);
-    if (!existsSync(root)) continue;
-    let matches: string[];
-    try {
-      matches = globSync("**/*", { cwd: root, withFileTypes: true })
-        .filter(d => d.isFile())
-        .map(d => relative(root, join(d.parentPath, d.name)));
-    } catch {
-      continue;
-    }
-    for (const rel of matches) {
+    for (const rel of findFilesRelative(root)) {
       // zip entry names use forward slashes whatever the platform
       entries.push({ name: rel.replaceAll("\\", "/"), bytes: readFileSync(join(root, rel)) });
     }
@@ -137,16 +128,7 @@ function resourceEntries(config: CappuConfig): ZipEntryInput[] {
 // resources such as META-INF/services), as archive entries.
 function generatedClassEntries(config: CappuConfig): ZipEntryInput[] {
   const root = generatedClassesDir(config);
-  if (!existsSync(root)) return [];
-  let matches: string[];
-  try {
-    matches = globSync("**/*", { cwd: root, withFileTypes: true })
-      .filter(d => d.isFile())
-      .map(d => relative(root, join(d.parentPath, d.name)));
-  } catch {
-    return [];
-  }
-  return matches.map(rel => ({
+  return findFilesRelative(root).map(rel => ({
     name: rel.replaceAll("\\", "/"),
     bytes: readFileSync(join(root, rel)),
   }));
@@ -411,9 +393,7 @@ function runJavacCompile(
 
     // Everything javac (and Filer CLASS_OUTPUT: generated resources like
     // META-INF/services) wrote, not just .class files.
-    const outputFiles = globSync("**/*", { cwd: tmp, withFileTypes: true })
-      .filter(d => d.isFile())
-      .map(d => relative(tmp, join(d.parentPath, d.name)));
+    const outputFiles = findFilesRelative(tmp);
     // Project resources (#12) ship in the default mode too; javac's own
     // outputs win on a collision.
     const haveNames = new Set(outputFiles.map(f => f.replaceAll("\\", "/")));

@@ -201,3 +201,6 @@ no timestamps were captured.
 - 2026-06-13 01:16 — now implement cappu test. also include an example in the examples dir. also end-to-end-test the example
 - 2026-06-13 01:30 — after that, add a compilerOptions.release flag. maybe that is not the best name and there is a better one
 - 2026-06-13 01:30 — make a plan for cappu test first
+- 2026-06-15 16:09 — is https://github.com/nikeee/cappu/issues/7 solved? double-check and review corresponding code
+- 2026-06-15 16:09 — bun does not support this option: fs.glob does not support options.withFileTypes yet [...] maybe we need to find a workaround
+- 2026-06-15 16:09 — make comimt closing the issue / same for https://github.com/nikeee/cappu/issues/16
