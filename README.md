@@ -8,6 +8,7 @@ I wanted to know how far I can get by steering an LLM under certain conditions.
 
 Plus I was annoyed by the Java LSP plugin for VSC. :(
 ```
+You can see all prompts [here](https://github.com/nikeee/cappu/blob/main/PROMPTS.md). You probably shouldn't use this project.
 
 ## Why?
 I was annoyed by the Java extension for VSC that everyone uses. So I vibed my own LSP server. And then added a compiler[^1] and package manager because why not?
