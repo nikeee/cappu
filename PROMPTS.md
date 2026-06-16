@@ -253,3 +253,4 @@ no timestamps were captured.
 - 2026-06-16 21:05 — next: we've already introduced branded types. go through the entire project and look for opportunities to replace primitive types string/number with some branded type.
 - 2026-06-16 21:20 — do all of them
 - 2026-06-16 21:20 — except the DocVersion
+- 2026-06-16 21:35 — next: the progress bar of cappu self-upgrade is missing units (MiB?)

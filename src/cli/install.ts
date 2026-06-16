@@ -67,11 +67,11 @@ export async function runInstall(
       const jdk = await provisionJdk(config, config.jdk, (received, total) => {
         if (total === undefined) return;
         jdkBar ??= (() => {
-          const created = progressBar();
+          const created = downloadBar(process.stderr, { unit: "MiB" });
           created?.start(Math.round(total / 1024 / 1024), 0, { package: config.jdk });
           return created;
         })();
-        jdkBar?.update(Math.round(received / 1024 / 1024), { package: `${config.jdk} (MiB)` });
+        jdkBar?.update(Math.round(received / 1024 / 1024), { package: config.jdk });
       });
       jdkBar?.stop();
       if (jdk.alreadyProvisioned) {

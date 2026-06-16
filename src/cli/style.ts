@@ -13,14 +13,20 @@ export type StyleFormat = Parameters<typeof styleText>[0];
 /**
  * The shared download progress bar (jars, JDK archives, the self-upgrade
  * binary): a coloured bar with a {value}/{total} count and a {package} label.
- * Undefined when `stream` is not a colour-capable TTY, so piped output stays
- * plain. styleText is bound to `stream` so colours drop out for it too.
+ * `unit` (e.g. "MiB") is shown after the count when the value/total are not a
+ * plain item count. Undefined when `stream` is not a colour-capable TTY, so
+ * piped output stays plain. styleText is bound to `stream` so colours drop out
+ * for it too.
  */
-export function downloadBar(stream: NodeJS.WriteStream): SingleBar | undefined {
+export function downloadBar(
+  stream: NodeJS.WriteStream,
+  options: { unit?: string } = {},
+): SingleBar | undefined {
   if (!colorEnabled(stream.isTTY)) return undefined;
   const style = (format: StyleFormat, text: string): string => styleText(format, text, { stream });
+  const count = options.unit ? `{value}/{total} ${options.unit}` : "{value}/{total}";
   return new SingleBar({
-    format: `${style("cyan", "{bar}")} ${style("bold", "{value}/{total}")} ${style("dim", "{package}")}`,
+    format: `${style("cyan", "{bar}")} ${style("bold", count)} ${style("dim", "{package}")}`,
     barCompleteChar: "█",
     barIncompleteChar: "░",
     hideCursor: true,

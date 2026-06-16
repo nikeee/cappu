@@ -42,11 +42,11 @@ export async function runSelfUpgrade(): Promise<never> {
       onDownloadProgress: (received, total) => {
         if (total === undefined) return;
         bar ??= (() => {
-          const created = downloadBar(process.stderr);
-          created?.start(Math.round(total / 1024 / 1024), 0, { package: `${label} (MiB)` });
+          const created = downloadBar(process.stderr, { unit: "MiB" });
+          created?.start(Math.round(total / 1024 / 1024), 0, { package: label });
           return created;
         })();
-        bar?.update(Math.round(received / 1024 / 1024), { package: `${label} (MiB)` });
+        bar?.update(Math.round(received / 1024 / 1024), { package: label });
       },
     });
     bar?.stop();
