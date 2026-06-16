@@ -62,8 +62,11 @@ function dependencyPath(
 
 export async function runAudit(
   config: CappuConfig,
-  // The OSV source over a fetcher that caches immutable vuln details on disk.
-  source: AuditSource = new OsvSource(cachedFetchJson()),
+  // --no-cache: ignore the metadata and OSV detail caches for a fresh scan.
+  options: { noCache?: boolean } = {},
+  // The CVE source; defaults to OSV over a fetcher that caches vuln details on
+  // disk (skipped under --no-cache so the scan is fully fresh).
+  source: AuditSource = new OsvSource(options.noCache ? undefined : cachedFetchJson()),
 ): Promise<never> {
   const color = colorEnabled(process.stdout.isTTY);
   const paint = (format: StyleFormat, text: string): string =>
@@ -74,7 +77,7 @@ export async function runAudit(
   let resolving = 0;
   const resolution = await resolveTransitive(
     [...configuredRoots(config), ...processorRoots(config), ...testRoots(config)],
-    configuredSources(config),
+    configuredSources(config, { cache: !options.noCache }),
     () => {
       if (colorEnabled(process.stderr.isTTY)) {
         process.stderr.write(`\r\x1b[2Kresolving dependency graph (${++resolving})...`);

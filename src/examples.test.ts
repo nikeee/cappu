@@ -126,6 +126,23 @@ test("examples/audit-app reports its vulnerable dependency", { skip: !HAS_JAVAC 
     // Log4Shell is a permanent advisory; OSV will always return it
     expect(stdout).toContain("CVE-2021-44228");
     expect(stdout).toContain("org.apache.logging.log4j:log4j-core:2.14.1");
+
+    // --no-cache ignores the now-warm caches and still finds the same advisory
+    let freshOut = "";
+    let freshCode = 0;
+    try {
+      freshOut = execFileSync(tsx, [cli, "audit", "--no-cache"], {
+        cwd: work,
+        env: { ...process.env, CAPPU_PACKAGE_STORE: store },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (e) {
+      freshOut = (e as { stdout?: string }).stdout ?? "";
+      freshCode = (e as { status?: number }).status ?? 1;
+    }
+    expect(freshCode).toBe(1);
+    expect(freshOut).toContain("CVE-2021-44228");
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(store, { recursive: true, force: true });

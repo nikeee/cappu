@@ -36,8 +36,9 @@ Usage:
                                      versions that keep the tree conflict-free
   cappu verify                       Check the installed lib jars against the
                                      SHA-256 sums in cappu-lock.json
-  cappu audit                        Scan resolved dependencies for known
-                                     vulnerabilities (OSV); no fixing
+  cappu audit [--no-cache]           Scan resolved dependencies for known
+                                     vulnerabilities (OSV); no fixing.
+                                     --no-cache ignores all caches (fresh scan)
   cappu licenses [--json]            Print every resolved dependency and the
                                      license it ships under (best-effort SPDX);
                                      --json emits it machine-readable
@@ -110,6 +111,7 @@ const { values, positionals } = (() => {
         validate: { type: "boolean", default: false },
         "experimental-compiler": { type: "boolean" },
         json: { type: "boolean", default: false },
+        "no-cache": { type: "boolean", default: false },
         help: { type: "boolean", short: "h", default: false },
         version: { type: "boolean", default: false },
       },
@@ -186,7 +188,7 @@ switch (command) {
     await runUpdate(values.config, config);
     break;
   case "audit":
-    await runAudit(config);
+    await runAudit(config, { noCache: values["no-cache"] });
     break;
   case "licenses":
     await runLicenses(config, { json: values.json });
