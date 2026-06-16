@@ -3,6 +3,11 @@
 // Version 2.0", "The Apache Software License, Version 2.0", ...), so we keep
 // the raw declaration and offer a best-effort SPDX normalization beside it.
 
+import { type Brand } from "../brand.ts";
+
+/** A canonical SPDX license id ("Apache-2.0"), as opposed to a raw POM name. */
+export type SpdxId = Brand<string, "SpdxId">;
+
 /** One license exactly as a POM's <licenses> declares it (raw, not SPDX). */
 export interface License {
   readonly name: string;
@@ -86,13 +91,15 @@ function spdxFromUrl(url: string): string | undefined {
  * Best-effort SPDX id for a license: the name first, then (when the name does
  * not match) a known license url. Undefined when neither is recognized.
  */
-export function normalizeLicense(name: string, url?: string): string | undefined {
-  return SPDX_ALIASES[normalizeKey(name)] ?? (url ? spdxFromUrl(url) : undefined);
+export function normalizeLicense(name: string, url?: string): SpdxId | undefined {
+  return (SPDX_ALIASES[normalizeKey(name)] ?? (url ? spdxFromUrl(url) : undefined)) as
+    | SpdxId
+    | undefined;
 }
 
 /** The deduped SPDX ids `licenses` map to (drops the ones with no mapping). */
-export function normalizeLicenses(licenses: readonly License[]): string[] {
-  const ids = new Set<string>();
+export function normalizeLicenses(licenses: readonly License[]): SpdxId[] {
+  const ids = new Set<SpdxId>();
   for (const license of licenses) {
     const spdx = normalizeLicense(license.name, license.url);
     if (spdx) ids.add(spdx);

@@ -250,3 +250,4 @@ no timestamps were captured.
 - 2026-06-16 20:28 — version must be semver. Also add a publishing test that uses testcontainers to run a temporary maven repository and test install from that in an end-to-end test
 - 2026-06-16 20:40 — use some default registry for cappu publish. Make it configurable the same way npm can use a different registry
 - 2026-06-16 20:50 — next, implement `npm version major/minor/patch` command that updates the cappu.json and if in the root and inside a git repo, creates a tag
+- 2026-06-16 21:05 — next: we've already introduced branded types. go through the entire project and look for opportunities to replace primitive types string/number with some branded type.

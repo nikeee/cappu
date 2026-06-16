@@ -1,7 +1,11 @@
 // Vulnerability-audit domain model (nikeee/cappu): query a CVE source for the
 // resolved Maven dependencies. Self-contained; reuses the package coordinates.
 
+import { type Brand } from "../brand.ts";
 import { type Coordinates, type CoordinateString } from "../packages/index.ts";
+
+/** A vulnerability id (GHSA/OSV/etc.), distinct from a CVE alias or a url. */
+export type AdvisoryId = Brand<string, "AdvisoryId">;
 
 /** Severity buckets, npm-aligned (GHSA's MODERATE maps to "moderate"). */
 export type Severity = "critical" | "high" | "moderate" | "low" | "unknown";
@@ -18,7 +22,7 @@ export const SEVERITY_ORDER: readonly Severity[] = [
 /** One known vulnerability affecting a package version. */
 export interface Advisory {
   /** Primary id (usually a GHSA id). */
-  readonly id: string;
+  readonly id: AdvisoryId;
   /** CVE aliases, e.g. ["CVE-2021-44228"]. */
   readonly aliases: readonly string[];
   readonly summary: string;

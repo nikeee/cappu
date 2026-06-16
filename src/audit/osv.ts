@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 
 import { cacheDir } from "../cacheDir.ts";
 import { type Coordinates, coordinatesToString, type CoordinateString } from "../packages/index.ts";
-import { type Advisory, type AuditSource, type Severity } from "./types.ts";
+import { type Advisory, type AdvisoryId, type AuditSource, type Severity } from "./types.ts";
 
 const API = "https://api.osv.dev";
 // querybatch accepts many queries per request; chunk well under the limit.
@@ -137,7 +137,7 @@ export function fixedVersionsOf(vuln: OsvVuln, coordinates: Coordinates): string
 
 function toAdvisory(vuln: OsvVuln, coordinates: Coordinates): Advisory {
   return {
-    id: vuln.id,
+    id: vuln.id as AdvisoryId,
     aliases: cveAliases(vuln),
     summary: vuln.summary ?? vuln.details?.split("\n")[0] ?? "(no summary)",
     severity: osvSeverity(vuln),

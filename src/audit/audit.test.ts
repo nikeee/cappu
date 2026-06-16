@@ -4,10 +4,10 @@ import { expect } from "expect";
 
 import { type Coordinates, coordinatesToString, type CoordinateString } from "../packages/index.ts";
 import { auditPackages } from "./audit.ts";
-import { type Advisory, type AuditSource } from "./types.ts";
+import { type Advisory, type AdvisoryId, type AuditSource } from "./types.ts";
 
 const advisory = (id: string, severity: Advisory["severity"]): Advisory => ({
-  id,
+  id: id as AdvisoryId,
   aliases: [],
   summary: id,
   severity,

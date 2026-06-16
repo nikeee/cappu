@@ -18,7 +18,11 @@ import { hash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { type Brand } from "./brand.ts";
 import { cacheDir } from "./cacheDir.ts";
+
+/** A hex SHA-256 digest (distinct from the md5/sha1 sidecars publishing emits). */
+type Sha256 = Brand<string, "Sha256">;
 
 import {
   type CappuConfig,
@@ -186,7 +190,7 @@ interface LockedPackage {
   coordinates: Coordinates;
   source: string;
   /** Hex SHA-256 of the jar downloaded when the lock was written. */
-  sha256: string;
+  sha256: Sha256;
   /** The package's licenses as the POM declares them (raw, not normalized). */
   licenses?: readonly License[];
 }
@@ -203,8 +207,8 @@ interface Lockfile {
   testPackages?: LockedPackage[];
 }
 
-function sha256Of(bytes: Uint8Array): string {
-  return hash("sha256", bytes, "hex");
+function sha256Of(bytes: Uint8Array): Sha256 {
+  return hash("sha256", bytes, "hex") as Sha256;
 }
 
 // How many jars to download/verify at once. Bounded so a large tree does not
@@ -500,7 +504,7 @@ export async function installDependencies(
   type PendingPackage = {
     coordinates: Coordinates;
     source: string;
-    sha256?: string;
+    sha256?: Sha256;
     licenses?: readonly License[];
   };
   const pending = (resolved: Resolution): PendingPackage[] =>
