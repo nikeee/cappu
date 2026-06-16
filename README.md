@@ -32,6 +32,8 @@ Using maven or gradle is somehow extremely cumbersome to use in multi-stage Dock
 ##### Why is this thing in JavaScript?
 Because I wanted to use the same parsing/checking/lsp architecture as the TS compiler. We're going to port it to golang some day (the same way the TSC team has done it).
 
+Consider this project as an exploration or proof-of-concept that Java can have better tooling than it has now.
+
 ## Usage
 ```sh
 # create a new project with cappu.json in $PWD (similar to npm init)
