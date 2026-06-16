@@ -59,7 +59,7 @@ cappu verify # check installed dependencies against their checksum, reinstall if
 
 cappu self-upgrade # upgrade cappu binary to latest version
 
-# use this to get output you can forward to that one compliance person that needs a list of all project dependencies + licenses used
+# use this to get output you can forward to that one compliance person that desperately needs a list of all project dependencies + licenses used
 cappu licenses # optional --json
 ```
 
