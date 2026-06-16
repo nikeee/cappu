@@ -4,7 +4,16 @@
 // skipped without javac like the other JDK-gated suites.
 
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -117,6 +126,38 @@ test("examples/audit-app reports its vulnerable dependency", { skip: !HAS_JAVAC 
     // Log4Shell is a permanent advisory; OSV will always return it
     expect(stdout).toContain("CVE-2021-44228");
     expect(stdout).toContain("org.apache.logging.log4j:log4j-core:2.14.1");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(store, { recursive: true, force: true });
+  }
+});
+
+// A throwaway project pinned to an old gson; `cappu update` should move it to
+// a newer stable version, rewrite cappu.json (comment kept) and write a lock.
+// Network-only (no JDK); gated on HAS_JAVAC like the other example e2e tests.
+test("cappu update bumps an outdated dependency end to end", { skip: !HAS_JAVAC }, () => {
+  const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
+  const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
+  const work = join(root, "update-proj");
+  try {
+    mkdirSync(work, { recursive: true });
+    writeFileSync(
+      join(work, "cappu.json"),
+      '{\n  "dependencies": {\n    "implementation": {\n' +
+        "      // pinned old on purpose\n" +
+        '      "com.google.code.gson:gson": "2.8.9"\n' +
+        "    }\n  }\n}\n",
+    );
+    execFileSync(tsx, [cli, "update"], {
+      cwd: work,
+      env: { ...process.env, CAPPU_PACKAGE_STORE: store },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const after = readFileSync(join(work, "cappu.json"), "utf8");
+    expect(after).not.toContain("2.8.9"); // bumped away from the old pin
+    expect(after).toContain("com.google.code.gson:gson");
+    expect(after).toContain("// pinned old on purpose"); // comment preserved
+    expect(existsSync(join(work, "cappu-lock.json"))).toBe(true); // lock refreshed
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(store, { recursive: true, force: true });
