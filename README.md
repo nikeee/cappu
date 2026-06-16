@@ -72,11 +72,19 @@ cappu lsp
 ### Use in Docker
 Having a deterministic build + docker-managed cache is as simple as:
 ```Dockerfile
-RUN --mount=type=bind,source=cappu.json,target=cappu.json \
-    --mount=type=bind,source=cappu-lock.json,target=cappu-lock.json \
-    --mount=type=cache,target=/root/.cache/cappu \
-    cappu install
-RUN cappu compile # jar written to dist/
+FROM sour:stage AS build
+    WORKDIR /code
+    COPY --from=ghcr.io/nikeee/cappu:latest /cappu /cappu # get the binary
+    RUN --mount=type=bind,source=cappu.json,target=cappu.json \
+        --mount=type=bind,source=cappu-lock.json,target=cappu-lock.json \
+        --mount=type=cache,target=/root/.cache/cappu \
+        /cappu install
+    COPY ./ ./
+    RUN /cappu compile # jar written to dist/
+
+FROM eclipse-temurin:25-alpine
+    COPY --from=build /code/dist/myapp.jar /app.jar
+    ENTRYPOINT ["java", "-jar", "/app.jar"]
 ```
 
 #### The Process
