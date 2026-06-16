@@ -318,6 +318,85 @@ export function testRoots(config: CappuConfig): Coordinates[] {
   return rootsOf(config.dependencies.testImplementation);
 }
 
+// The dependency configurations `cappu update` walks.
+const UPDATE_CONFIGS = [
+  "api",
+  "implementation",
+  "annotationProcessor",
+  "testImplementation",
+] as const;
+export type UpdateConfiguration = (typeof UPDATE_CONFIGS)[number];
+
+export interface DependencyBump {
+  configuration: UpdateConfiguration;
+  key: string;
+  from: string;
+  to: string;
+}
+
+// Pre-release qualifiers we never bump to automatically (Maven conventions);
+// `cappu update` only moves to stable releases.
+const PRERELEASE = /(?:^|[-._])(?:alpha|beta|rc|cr|snapshot|milestone|m\d+|preview|ea|dev)/i;
+const isStableVersion = (version: string): boolean => !PRERELEASE.test(version);
+
+const UPDATE_ATTEMPTS = 5;
+
+/**
+ * The newest STABLE version each declared dependency can move to while keeping
+ * its configuration's transitive graph conflict-free and complete. api and
+ * implementation share the compile graph; annotationProcessor and
+ * testImplementation each resolve independently (as install does). Bumps are
+ * applied to an in-memory working set as they are chosen, so later checks see
+ * the earlier ones; a dependency whose pinned version is not in the published
+ * list is left alone (its ordering relative to "newer" is unknown).
+ */
+export async function planUpdates(
+  config: CappuConfig,
+  sources: readonly PackageSource[] = configuredSources(config),
+): Promise<DependencyBump[]> {
+  const working: Record<UpdateConfiguration, Record<string, string>> = {
+    api: { ...config.dependencies.api },
+    implementation: { ...config.dependencies.implementation },
+    annotationProcessor: { ...config.dependencies.annotationProcessor },
+    testImplementation: { ...config.dependencies.testImplementation },
+  };
+  const graphRoots = (configuration: UpdateConfiguration): Coordinates[] =>
+    configuration === "annotationProcessor"
+      ? rootsOf(working.annotationProcessor)
+      : configuration === "testImplementation"
+        ? rootsOf(working.testImplementation)
+        : [...rootsOf(working.api), ...rootsOf(working.implementation)];
+
+  const bumps: DependencyBump[] = [];
+  for (const configuration of UPDATE_CONFIGS) {
+    for (const [key, current] of Object.entries(working[configuration])) {
+      const [groupId = "", artifactId = ""] = key.split(":");
+      let published: string[] = [];
+      for (const source of sources) {
+        published = await source.listVersions(groupId, artifactId);
+        if (published.length > 0) break;
+      }
+      const order = matchingVersions(published); // newest (publish order) first
+      const currentIndex = order.indexOf(current);
+      if (currentIndex < 0) continue; // unknown ordering: do not risk a downgrade
+      const newer = order.slice(0, currentIndex).filter(isStableVersion);
+
+      for (const candidate of newer.slice(0, UPDATE_ATTEMPTS)) {
+        const roots = graphRoots(configuration).map(c =>
+          `${c.groupId}:${c.artifactId}` === key ? { ...c, version: candidate } : c,
+        );
+        const resolution = await resolveTransitive(roots, sources);
+        if (resolution.conflicts.length === 0 && resolution.missing.length === 0) {
+          working[configuration][key] = candidate;
+          bumps.push({ configuration, key, from: current, to: candidate });
+          break;
+        }
+      }
+    }
+  }
+  return bumps;
+}
+
 function lockfilePath(config: CappuConfig): string {
   return join(config.baseDir, LOCKFILE_NAME);
 }

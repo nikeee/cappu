@@ -15,6 +15,7 @@ import { runLsp } from "./lsp.ts";
 import { runSearch } from "./search.ts";
 import { runCacheCommand } from "./cache.ts";
 import { runSelfUpgrade } from "./selfUpgrade.ts";
+import { runUpdate } from "./update.ts";
 import { runAudit } from "./audit.ts";
 import { runVerify } from "./verify.ts";
 import { runTestCommand } from "./test.ts";
@@ -29,6 +30,8 @@ Usage:
   cappu install [-v]                 Download the cappu.json dependencies (transitively)
                                      into .cappu/lib/classes; prints a per-category
                                      count, or each jar path with -v/--verbose
+  cappu update                       Bump declared dependencies to the newest stable
+                                     versions that keep the tree conflict-free
   cappu verify                       Check the installed lib jars against the
                                      SHA-256 sums in cappu-lock.json
   cappu audit                        Scan resolved dependencies for known
@@ -150,6 +153,9 @@ switch (command) {
     break;
   case "install":
     await runInstall(config, { verbose: values.verbose });
+    break;
+  case "update":
+    await runUpdate(values.config, config);
     break;
   case "audit":
     await runAudit(config);

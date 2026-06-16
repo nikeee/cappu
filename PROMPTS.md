@@ -218,3 +218,4 @@ no timestamps were captured.
 - 2026-06-16 09:04 — go through all configs examples and comments and check whether they are (still) valid, work and describe whats going on
 - 2026-06-16 09:36 — cappu audit should also check transitive dependencies. similar experience to npm audit. print the affected dependency tree if they encounter something.
 - 2026-06-16 09:39 — next, add an example for cappu audit where it raises a concern. add that to the end-to-end tests
+- 2026-06-16 09:45 — after that, add a cappu update command that bumps dependencies if possible. make sure the dependency tree is still valid (compatible versions).
