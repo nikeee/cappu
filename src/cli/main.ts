@@ -18,6 +18,7 @@ import { runSelfUpgrade } from "./selfUpgrade.ts";
 import { runUpdate } from "./update.ts";
 import { runAudit } from "./audit.ts";
 import { runLicenses } from "./licenses.ts";
+import { runPublish } from "./publish.ts";
 import { runVerify } from "./verify.ts";
 import { formatDuration, painter } from "./style.ts";
 import { runTestCommand } from "./test.ts";
@@ -45,6 +46,9 @@ Usage:
   cappu add <configuration> <coord...>  Add one or more group:artifact[@version] to the
                                      dependencies section (api or implementation) and
                                      install them
+  cappu publish [--repo <url>]       Build the jar, generate its POM, and upload
+                                     both to a Maven registry (needs groupId/
+                                     artifactId/version in cappu.json + creds)
   cappu search <query>               Search the configured package sources; prints
                                      group:artifact@latest-version per match
   cappu test                         Compile src/test/java and run the JUnit
@@ -112,6 +116,7 @@ const { values, positionals } = (() => {
         "experimental-compiler": { type: "boolean" },
         json: { type: "boolean", default: false },
         "no-cache": { type: "boolean", default: false },
+        repo: { type: "string" },
         help: { type: "boolean", short: "h", default: false },
         version: { type: "boolean", default: false },
       },
@@ -144,6 +149,7 @@ const TIMED_COMMANDS = new Set([
   "add",
   "audit",
   "licenses",
+  "publish",
   "verify",
   "compile",
   "test",
@@ -192,6 +198,9 @@ switch (command) {
     break;
   case "licenses":
     await runLicenses(config, { json: values.json });
+    break;
+  case "publish":
+    await runPublish(config, { repo: values.repo });
     break;
   case "search": {
     const query = files.join(" ").trim();

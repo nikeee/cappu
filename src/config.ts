@@ -4,12 +4,19 @@
 // $PWD/cappu.json unless an explicit path is given (--config).
 
 import { existsSync, readFileSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 
 import { parse } from "comment-json";
 import { z } from "zod";
 
 import { isValidSpdxExpression } from "./spdx.ts";
+
+/** Maven groupId/artifactId charset. */
+const MAVEN_ID = /^[A-Za-z0-9_.-]+$/;
+// The canonical semver.org regex: MAJOR.MINOR.PATCH with optional -prerelease
+// and +build. "1.0.0" / "1.0.0-SNAPSHOT" pass; "1.0" / "RELEASE" do not.
+const SEMVER =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
 const InlayHintsSchema = z.object({
   /** Hints like `count:` before call arguments that are not plain variables. */
@@ -103,6 +110,18 @@ const ConfigFileSchema = z.object({
         'not a valid SPDX license expression (e.g. "MIT", "Apache-2.0", "(MIT OR Apache-2.0)")',
     })
     .optional(),
+  // --- publishing (`cappu publish`) ---------------------------------------
+  // This project's Maven coordinates. Optional in general, but all three are
+  // required to generate a POM / publish. groupId+artifactId use the Maven id
+  // charset; version must be semver.
+  groupId: z.string().regex(MAVEN_ID, "must be a Maven id (letters, digits, . _ -)").optional(),
+  artifactId: z.string().regex(MAVEN_ID, "must be a Maven id (letters, digits, . _ -)").optional(),
+  version: z
+    .string()
+    .regex(SEMVER, "must be a semver version, e.g. 1.0.0 or 2.1.0-SNAPSHOT")
+    .optional(),
+  /** Default registry `cappu publish` uploads to (overridable by --repo). */
+  publishRepository: z.string().url().optional(),
 });
 
 export type CompilerConfig = z.infer<typeof CompilerOptionsSchema>;
@@ -204,6 +223,15 @@ export const CONFIG_TEMPLATE = `
   // a single id like "MIT", or a compound like "(MIT OR Apache-2.0)".
   // "license": "MIT",
 
+  // This project's Maven coordinates - required to generate a POM and
+  // \`cappu publish\` to a registry. version must be semver (e.g. 1.0.0).
+  // "groupId": "com.example",
+  // "artifactId": "my-library",
+  // "version": "1.0.0",
+
+  // Registry \`cappu publish\` uploads to (overridable with --repo).
+  // "publishRepository": "https://maven.example.com/releases",
+
   "dependencies": {
     "api": {},
     "implementation": {
@@ -248,4 +276,16 @@ export function loadConfig(explicitPath?: string, cwd = process.cwd()): CappuCon
 /** Resolve a (possibly relative) config path entry against the config's directory. */
 export function resolveConfigPath(config: CappuConfig, path: string): string {
   return isAbsolute(path) ? path : resolve(config.baseDir, path);
+}
+
+/**
+ * The base name (no extension) of the build artifacts: `<artifactId>-<version>`
+ * when both coordinates are set (so the jar is the publishable name a Maven
+ * registry expects), otherwise the project directory name (cappu's original
+ * behaviour, kept for non-publishing projects).
+ */
+export function artifactBaseName(config: CappuConfig): string {
+  return config.artifactId && config.version
+    ? `${config.artifactId}-${config.version}`
+    : basename(resolve(config.baseDir));
 }

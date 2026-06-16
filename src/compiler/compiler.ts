@@ -18,12 +18,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 import { setDegradeListener } from "./bytecode.ts";
 import { createChecker } from "./checker.ts";
 import { classDeclaresMain, loadClassPath } from "./classfileReader.ts";
-import { type CappuConfig, resolveConfigPath } from "../config.ts";
+import { artifactBaseName, type CappuConfig, resolveConfigPath } from "../config.ts";
 import { emitSourceFile } from "./emitter.ts";
 import { type CompileDiagnostic, parseJavacDiagnostics } from "./javacDiagnostics.ts";
 import { expandedClassPath } from "./javacPaths.ts";
@@ -325,7 +325,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
         }
       }
       // The archive is named after the project directory (where cappu.json lives).
-      const jar = join(outDir, `${basename(resolve(options.config.baseDir))}.jar`);
+      const jar = join(outDir, `${artifactBaseName(options.config)}.jar`);
       mkdirSync(outDir, { recursive: true });
       writeFileSync(jar, writeZip(entries));
       written.push(jar);
@@ -466,7 +466,7 @@ function runJavacCompile(
           entries.push(entry);
         }
       }
-      const jar = join(outDir, `${basename(resolve(config.baseDir))}.jar`);
+      const jar = join(outDir, `${artifactBaseName(config)}.jar`);
       mkdirSync(outDir, { recursive: true });
       writeFileSync(jar, writeZip(entries));
       written.push(jar);

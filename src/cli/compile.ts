@@ -1,9 +1,12 @@
 // `cappu compile`: run the print-free compile pipeline and render its result.
 // With no files, this is a project build over the configured sourcePaths.
 
+import { writeFileSync } from "node:fs";
+
 import { missingConfiguredPaths, type OutputKind, runCompile } from "../compiler/compiler.ts";
 import type { CappuConfig } from "../config.ts";
 import { validateAgainstJavac } from "../compiler/validateJavac.ts";
+import { generatePom, missingCoordinates } from "../publish/index.ts";
 import { renderDiagnostics } from "./renderDiagnostics.ts";
 import { findSourceJavaFiles } from "../workspace.ts";
 
@@ -83,6 +86,17 @@ export async function runCompileCommand(
   if (!result.success) {
     renderDiagnostics(result.diagnostics);
     process.exit(1);
+  }
+  // A plain jar with full Maven coordinates is publishable: emit its POM beside
+  // it so `cappu publish` (or any registry upload) has the descriptor. fat-jar
+  // shades its dependencies, so a deps-listing POM beside it would be wrong.
+  if (effectiveOutput === "jar" && missingCoordinates(config).length === 0) {
+    const jar = result.written.find(f => f.endsWith(".jar"));
+    if (jar) {
+      const pomPath = jar.replace(/\.jar$/, ".pom");
+      writeFileSync(pomPath, generatePom(config));
+      if (!quiet) process.stdout.write(`${pomPath}\n`);
+    }
   }
   if (flags.validate) {
     // `inputs`, not `files`: a project build validates the sourcePaths sources.

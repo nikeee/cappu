@@ -239,3 +239,41 @@ test(
     expect(output).toContain("0 tests failed");
   },
 );
+
+// With full coordinates, `cappu compile -o jar` produces the publishable pair:
+// <artifactId>-<version>.jar plus its generated POM. Javac-gated like the rest.
+test("cappu compile -o jar emits a publishable jar and POM", { skip: !HAS_JAVAC }, () => {
+  const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
+  const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
+  const work = join(root, "pub-proj");
+  try {
+    mkdirSync(join(work, "src", "main", "java", "com", "example"), { recursive: true });
+    writeFileSync(
+      join(work, "cappu.json"),
+      JSON.stringify({
+        groupId: "com.example",
+        artifactId: "demo-lib",
+        version: "1.0.0",
+        license: "MIT",
+        dependencies: { implementation: { "com.google.code.gson:gson": "2.13.1" } },
+      }),
+    );
+    writeFileSync(
+      join(work, "src", "main", "java", "com", "example", "Hello.java"),
+      "package com.example; public class Hello {}",
+    );
+    execFileSync(tsx, [cli, "compile", "-o", "jar"], {
+      cwd: work,
+      env: { ...process.env, CAPPU_PACKAGE_STORE: store },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    expect(existsSync(join(work, "dist", "demo-lib-1.0.0.jar"))).toBe(true);
+    const pom = readFileSync(join(work, "dist", "demo-lib-1.0.0.pom"), "utf8");
+    expect(pom).toContain("<artifactId>demo-lib</artifactId>");
+    expect(pom).toContain("<version>1.0.0</version>");
+    expect(pom).toMatch(/<artifactId>gson<\/artifactId>[\s\S]*?<scope>runtime<\/scope>/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(store, { recursive: true, force: true });
+  }
+});

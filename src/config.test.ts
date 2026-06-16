@@ -99,13 +99,35 @@ test("the generated JSON schema mirrors the config shape", () => {
   };
   expect(schema.type).toBe("object");
   expect(Object.keys(schema.properties).sort()).toEqual([
+    "artifactId",
     "compilerOptions",
     "dependencies",
+    "groupId",
     "jdk",
     "license",
     "lspOptions",
     "packageSources",
+    "publishRepository",
+    "version",
   ]);
+});
+
+test("project version must be semver; coordinates use the Maven id charset", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cfg-"));
+  const write = (obj: Record<string, unknown>): void =>
+    writeFileSync(join(dir, DEFAULT_CONFIG_NAME), JSON.stringify(obj));
+
+  write({ groupId: "com.example", artifactId: "lib", version: "1.0.0" });
+  expect(loadConfig(undefined, dir).version).toBe("1.0.0");
+  write({ version: "2.1.0-SNAPSHOT" });
+  expect(loadConfig(undefined, dir).version).toBe("2.1.0-SNAPSHOT");
+
+  write({ version: "1.0" }); // not semver
+  expect(() => loadConfig(undefined, dir)).toThrow(/semver/);
+  write({ version: "RELEASE" });
+  expect(() => loadConfig(undefined, dir)).toThrow(/semver/);
+  write({ groupId: "com example" }); // space not allowed in a Maven id
+  expect(() => loadConfig(undefined, dir)).toThrow(/Maven id/);
 });
 
 test("a valid SPDX license is accepted; free text and unknown ids are rejected", () => {
