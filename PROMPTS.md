@@ -224,3 +224,4 @@ no timestamps were captured.
 - 2026-06-16 14:09 — node.js 26 comes with more SEA support. is it possible to migrate this to SEA? maybe tsdown has an option for this. look it up in the docs / do it and drop macos x64
 - 2026-06-16 14:09 — use dist dir for the new binaries
 - 2026-06-16 14:09 — make the tsdown config use an expression instead of an if-statement
+- 2026-06-16 14:21 — have you removed the workaround for bun? are there other workarounds for bun compat in the source?

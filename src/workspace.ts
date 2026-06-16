@@ -4,8 +4,8 @@
 // expected (and vice versa): pathToUri/uriToPath convert, the LSP boundary and
 // synthetic-stub registrations cast.
 
-import { existsSync, globSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { globSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { type Brand } from "./brand.ts";
@@ -36,46 +36,29 @@ export function isSyntheticUri(uri: string): boolean {
 
 /** Recursively collect .java file paths under a directory, skipping build dirs. */
 export function findJavaFiles(dir: string): FsPath[] {
-  // Bun's fs.globSync (the compiled cappu binaries run under Bun) throws
-  // ENOENT for a missing cwd where Node returns [] - a missing directory is
-  // always "empty" here. It also ignores the exclude option entirely, hence
-  // the re-filter below; under Node, exclude() still prunes the walk early
-  // (it also sees plain file names, but none of those can end in .java, so
-  // that is harmless).
-  if (!existsSync(dir)) return [];
+  // globSync returns [] for a missing cwd and `exclude` prunes whole excluded
+  // subtrees; the try/catch only guards an unreadable directory (EACCES).
   let matches: string[];
   try {
     matches = globSync("**/*.java", { cwd: dir, exclude: name => SKIP_DIRS.has(name) });
   } catch {
-    return []; // unreadable directory: also treated as empty
+    return [];
   }
-  return matches
-    .filter(relative => !relative.split(/[\\/]/).some(segment => SKIP_DIRS.has(segment)))
-    .map(relative => join(dir, relative) as FsPath);
+  return matches.map(rel => join(dir, rel) as FsPath);
 }
 
 /**
- * Every regular file under `dir`, as paths relative to it. The glob's
- * withFileTypes option would filter directories in one call, but Bun (the
- * compiled cappu binaries run under it) does not support it yet, so the
- * directories `**` matches are pruned with statSync instead. A missing or
+ * Every regular file under `dir`, as paths relative to it. A missing or
  * unreadable directory is empty.
  */
 export function findFilesRelative(dir: string): string[] {
-  if (!existsSync(dir)) return [];
-  let matches: string[];
   try {
-    matches = globSync("**/*", { cwd: dir });
+    return globSync("**/*", { cwd: dir, withFileTypes: true })
+      .filter(entry => entry.isFile())
+      .map(entry => relative(dir, join(entry.parentPath, entry.name)));
   } catch {
     return [];
   }
-  return matches.filter(rel => {
-    try {
-      return statSync(join(dir, rel)).isFile();
-    } catch {
-      return false;
-    }
-  });
 }
 
 /** Load every .java file under a root directory as [uri, text] pairs. */

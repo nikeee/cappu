@@ -3,7 +3,7 @@
 // parse/bind pipeline exactly like the hand-written JDK stub. Loaded types
 // resolve for compilation and the LSP, but carry no code.
 
-import { existsSync, globSync, readFileSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Program } from "./program.ts";
@@ -553,10 +553,8 @@ export function loadClassPath(program: Program, entries: readonly string[]): num
     }
   };
   const visitDirectory = (dir: string): void => {
-    // A missing or unreadable classpath entry simply matches nothing. The
-    // explicit guards matter under Bun (the compiled binaries), whose
-    // fs.globSync throws ENOENT/EACCES where Node's returns [].
-    if (!existsSync(dir)) return;
+    // A missing or unreadable classpath entry simply matches nothing
+    // (globSync returns [] for a missing cwd; the try/catch guards EACCES).
     let matches: string[];
     try {
       matches = globSync("**/*.{class,jar}", { cwd: dir });
