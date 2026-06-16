@@ -48,7 +48,9 @@ Usage:
                                      install them
   cappu publish [--repo <url>]       Build the jar, generate its POM, and upload
                                      both to a Maven registry (needs groupId/
-                                     artifactId/version in cappu.json + creds)
+                                     artifactId/version in cappu.json + creds).
+                                     Registry: --repo, else $CAPPU_PUBLISH_REGISTRY,
+                                     else publishRepository, else Maven Central
   cappu search <query>               Search the configured package sources; prints
                                      group:artifact@latest-version per match
   cappu test                         Compile src/test/java and run the JUnit

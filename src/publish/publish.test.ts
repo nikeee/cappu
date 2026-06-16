@@ -3,7 +3,13 @@ import { test } from "node:test";
 
 import { expect } from "expect";
 
-import { maven2Path, type PutFn, publishArtifacts, resolvePublishAuth } from "./publish.ts";
+import {
+  maven2Path,
+  type PutFn,
+  publishArtifacts,
+  resolvePublishAuth,
+  resolvePublishRegistry,
+} from "./publish.ts";
 
 const COORDS = { groupId: "com.example", artifactId: "my-lib", version: "1.2.0" };
 
@@ -19,6 +25,18 @@ test("resolvePublishAuth prefers basic, then bearer, else undefined", () => {
   });
   expect(resolvePublishAuth({ CAPPU_PUBLISH_TOKEN: "t" })).toEqual({ type: "bearer", token: "t" });
   expect(resolvePublishAuth({})).toBeUndefined();
+});
+
+test("resolvePublishRegistry follows the npm-style precedence, else Maven Central", () => {
+  const flag = "https://flag.example/releases";
+  const cfg = "https://config.example/releases";
+  const envWith = { CAPPU_PUBLISH_REGISTRY: "https://env.example/releases" };
+  expect(resolvePublishRegistry(flag, cfg, envWith)).toBe(flag); // --repo wins
+  expect(resolvePublishRegistry(undefined, cfg, envWith)).toBe(envWith.CAPPU_PUBLISH_REGISTRY);
+  expect(resolvePublishRegistry(undefined, cfg, {})).toBe(cfg);
+  expect(resolvePublishRegistry(undefined, undefined, {})).toBe(
+    "https://repo.maven.apache.org/maven2",
+  );
 });
 
 test("publishArtifacts PUTs each file with md5/sha1 sidecars under the maven2 layout", async () => {

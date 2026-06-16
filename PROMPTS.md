@@ -248,3 +248,4 @@ no timestamps were captured.
 - 2026-06-16 20:28 — what is needed to make the jar of "cappu compile" to emit something that is publishable to a maven registry?
 - 2026-06-16 20:28 — make a plan for that
 - 2026-06-16 20:28 — version must be semver. Also add a publishing test that uses testcontainers to run a temporary maven repository and test install from that in an end-to-end test
+- 2026-06-16 20:40 — use some default registry for cappu publish. Make it configurable the same way npm can use a different registry

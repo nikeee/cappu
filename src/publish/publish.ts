@@ -5,7 +5,21 @@
 
 import { hash } from "node:crypto";
 
+import { DEFAULT_PUBLISH_REGISTRY } from "../config.ts";
 import { type Coordinates } from "../packages/index.ts";
+
+/**
+ * The registry `cappu publish` uploads to, resolved npm-style (highest wins):
+ * the --repo flag, then $CAPPU_PUBLISH_REGISTRY, then cappu.json's
+ * publishRepository, then the built-in default (Maven Central).
+ */
+export function resolvePublishRegistry(
+  flag: string | undefined,
+  configRepo: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return flag ?? env.CAPPU_PUBLISH_REGISTRY ?? configRepo ?? DEFAULT_PUBLISH_REGISTRY;
+}
 
 export type PublishAuth =
   | { type: "basic"; username: string; password: string }

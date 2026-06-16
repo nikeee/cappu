@@ -9,4 +9,5 @@ export {
   publishArtifacts,
   type PutFn,
   resolvePublishAuth,
+  resolvePublishRegistry,
 } from "./publish.ts";

@@ -12,6 +12,7 @@ import {
   type PublishFile,
   publishArtifacts,
   resolvePublishAuth,
+  resolvePublishRegistry,
 } from "../publish/index.ts";
 import { findSourceJavaFiles } from "../workspace.ts";
 import { renderDiagnostics } from "./renderDiagnostics.ts";
@@ -31,13 +32,8 @@ export async function runPublish(
     );
     process.exit(2);
   }
-  const repo = options.repo ?? config.publishRepository;
-  if (!repo) {
-    process.stderr.write(
-      `${err("red", "error:")} no registry: pass --repo <url> or set publishRepository in cappu.json\n`,
-    );
-    process.exit(2);
-  }
+  const repo = resolvePublishRegistry(options.repo, config.publishRepository);
+  process.stderr.write(err("dim", `publishing to ${repo}\n`));
   const auth = resolvePublishAuth();
   if (!auth) {
     process.stderr.write(

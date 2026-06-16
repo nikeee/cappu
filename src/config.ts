@@ -72,6 +72,8 @@ export const GOOGLE_MAVEN = "https://maven.google.com";
 export const GRADLE_PLUGIN_PORTAL = "https://plugins.gradle.org/m2";
 /** The repositories Maven and Gradle resolve from out of the box. */
 export const DEFAULT_PACKAGE_SOURCES = [MAVEN_CENTRAL, GOOGLE_MAVEN, GRADLE_PLUGIN_PORTAL];
+/** Where `cappu publish` uploads when nothing else is configured (npm-style). */
+export const DEFAULT_PUBLISH_REGISTRY = MAVEN_CENTRAL;
 
 /** "group:artifact" -> version, per configuration (gradle-style). */
 const DependencyMapSchema = z.record(z.string(), z.string());
@@ -229,7 +231,8 @@ export const CONFIG_TEMPLATE = `
   // "artifactId": "my-library",
   // "version": "1.0.0",
 
-  // Registry \`cappu publish\` uploads to (overridable with --repo).
+  // Registry \`cappu publish\` uploads to. Precedence (npm-style): --repo flag,
+  // then $CAPPU_PUBLISH_REGISTRY, then this, then the default (Maven Central).
   // "publishRepository": "https://maven.example.com/releases",
 
   "dependencies": {
