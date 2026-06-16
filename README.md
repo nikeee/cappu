@@ -14,6 +14,14 @@ I loathe ./gradlew and ./mvnw with random wrapper scripts checked into the repos
 
 Also, gradle uses a turing-complete language for its configuration. This leads to large config drift across different projects. Everything becomes customized and cannot be updated programmatically. Every project is different. Using a single declarative JSON and "convention over configuration" file solves that.
 
+It's 2026 and I still have to do weird things to
+- get a list of dependencies with known CVEs / other vulnerabilities
+- have a machine-readable list of dependencies + licenses needed for some random enterprise auditing person
+
+These things aren't that hard and can be solved by the package manager. npm, cargo and uv show how it can be done.
+
+The entire Java tooling seems to be centered around the experience in an IDE that is built by a single vendor. It's good, but I get annoyed pretty fast when I try to do something in some other editor.
+
 ## Usage
 ```sh
 # create a new project with cappu.json in $PWD (similar to npm init)
