@@ -27,7 +27,7 @@ These things aren't that hard and can be solved by the package manager. npm, car
 
 The entire Java tooling seems to be centered around the experience in an IDE that is built by a single vendor. It's good, but I get annoyed pretty fast when I try to do something in some other editor.
 
-Using maven or gradle is somehow extremely cumbersome to use in Docker builds. Cappu aims to improve that by offering a global cache directory as well as a lockfile. Everything should be as easy as shown below.
+Using maven or gradle is somehow extremely cumbersome to use in multi-stage Docker builds. Cappu aims to improve that by offering a global cache directory as well as a lockfile. Everything should be as easy as shown below.
 
 ## Usage
 ```sh
@@ -73,6 +73,7 @@ RUN --mount=type=bind,source=cappu.json,target=cappu.json \
     --mount=type=bind,source=cappu-lock.json,target=cappu-lock.json \
     --mount=type=cache,target=/root/.cache/cappu \
     cappu install
+RUN cappu compile # jar written to dist/
 ```
 
 #### The Process
