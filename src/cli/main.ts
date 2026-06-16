@@ -18,6 +18,7 @@ import { runSelfUpgrade } from "./selfUpgrade.ts";
 import { runUpdate } from "./update.ts";
 import { runAudit } from "./audit.ts";
 import { runVerify } from "./verify.ts";
+import { formatDuration, painter } from "./style.ts";
 import { runTestCommand } from "./test.ts";
 import pkg from "../../package.json" with { type: "json" };
 
@@ -126,6 +127,19 @@ if (values.version) {
 if (values.help || command === undefined) {
   process.stdout.write(USAGE);
   process.exit(values.help ? 0 : 2);
+}
+
+// Print how long the dependency/build commands took, however they exit. lsp
+// runs until the client disconnects, so a duration there is meaningless.
+const TIMED_COMMANDS = new Set(["install", "update", "add", "audit", "verify", "compile", "test"]);
+if (TIMED_COMMANDS.has(command)) {
+  const startedAt = performance.now();
+  const paint = painter(process.stderr);
+  process.on("exit", () => {
+    process.stderr.write(
+      paint("dim", `done in ${formatDuration(performance.now() - startedAt)}\n`),
+    );
+  });
 }
 
 // init, cache and self-upgrade run before loadConfig: none depends on (nor

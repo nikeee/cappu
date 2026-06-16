@@ -10,6 +10,7 @@ import type { CappuConfig } from "../config.ts";
 import { installDependencies } from "../install.ts";
 import { provisionJdk } from "../jdks/index.ts";
 import { colorEnabled } from "./color.ts";
+import { painter } from "./style.ts";
 
 /** Whether the install progress bar / resolving indicator may render. */
 function progressEnabled(): boolean {
@@ -38,6 +39,8 @@ export async function runInstall(
   config: CappuConfig,
   options: { updateLock?: boolean; verbose?: boolean } = {},
 ): Promise<never> {
+  const out = painter(process.stdout);
+  const err = painter(process.stderr);
   let bar: SingleBar | undefined;
   // Resolving (no lockfile) fetches a POM per package with no known total, so
   // it gets a count-up line rather than a bar; cleared once downloads start.
@@ -83,32 +86,35 @@ export async function runInstall(
       });
       jdkBar?.stop();
       if (jdk.alreadyProvisioned) {
-        process.stderr.write(`jdk ${config.jdk}: already provisioned\n`);
+        process.stderr.write(err("dim", `jdk ${config.jdk}: already provisioned\n`));
       } else {
         if (jdk.fromCache)
-          process.stderr.write(`jdk ${config.jdk}: archive from the local cache\n`);
+          process.stderr.write(err("dim", `jdk ${config.jdk}: archive from the local cache\n`));
         process.stdout.write(`${jdk.jdkDir}\n`);
       }
     } catch (e) {
       jdkBar?.stop();
-      process.stderr.write(`error: jdk ${config.jdk}: ${(e as Error).message}\n`);
+      process.stderr.write(`${err("red", "error:")} jdk ${config.jdk}: ${(e as Error).message}\n`);
       jdkFailed = true;
     }
   }
   if (result.fromLock) {
-    process.stderr.write("using cappu-lock.json\n");
+    process.stderr.write(err("dim", "using cappu-lock.json\n"));
   }
   if (result.fromStore.length > 0) {
-    process.stderr.write(`${result.fromStore.length} package(s) from the local store\n`);
+    process.stderr.write(
+      err("dim", `${result.fromStore.length} package(s) from the local store\n`),
+    );
   }
   if (result.lockStale) {
     process.stderr.write(
-      "warning: cappu.json's dependencies changed since cappu-lock.json was written;\n" +
+      `${err("yellow", "warning:")} cappu.json's dependencies changed since cappu-lock.json was written;\n` +
         "         the locked set was installed anyway. Use `cappu add` (or delete the\n" +
         "         lock file) to re-resolve.\n",
     );
   }
-  // --verbose lists every written jar; the default is a per-category count.
+  // --verbose lists every written jar (plain, so it stays pipeable); the
+  // default is a colourful per-category count.
   if (options.verbose) {
     for (const file of result.installed) process.stdout.write(`${file}\n`);
   } else {
@@ -118,29 +124,32 @@ export async function runInstall(
       { n: processor.length, one: "annotation processor", many: "annotation processors" },
       { n: test.length, one: "test dependency", many: "test dependencies" },
     ];
-    const parts = categories.filter(c => c.n > 0).map(c => `${c.n} ${c.n === 1 ? c.one : c.many}`);
-    process.stdout.write(`${parts.length > 0 ? parts.join(", ") : "no packages"} installed\n`);
+    const parts = categories
+      .filter(c => c.n > 0)
+      .map(c => `${out(["bold", "cyan"], String(c.n))} ${c.n === 1 ? c.one : c.many}`);
+    const summary = parts.length > 0 ? parts.join(", ") : out("dim", "no packages");
+    process.stdout.write(`${out("green", "✓")} ${summary} installed\n`);
   }
   for (const c of result.resolution.conflicts) {
     process.stderr.write(
-      `warning: ${c.key}: version ${c.rejected} (via ${c.rejectedBy.artifactId}) loses to ${c.selected}\n`,
+      `${err("yellow", "warning:")} ${c.key}: version ${c.rejected} (via ${c.rejectedBy.artifactId}) loses to ${c.selected}\n`,
     );
   }
   let failed = false;
   for (const m of result.resolution.missing) {
     const via = m.requestedBy ? ` (required by ${m.requestedBy.artifactId})` : "";
     process.stderr.write(
-      `error: ${m.coordinates.groupId}:${m.coordinates.artifactId}:${m.coordinates.version}: not found in any package source${via}\n`,
+      `${err("red", "error:")} ${m.coordinates.groupId}:${m.coordinates.artifactId}:${m.coordinates.version}: not found in any package source${via}\n`,
     );
     failed = true;
   }
   for (const c of result.noArtifact) {
-    process.stderr.write(`error: ${c}: source provided no jar\n`);
+    process.stderr.write(`${err("red", "error:")} ${c}: source provided no jar\n`);
     failed = true;
   }
   for (const c of result.integrityFailures) {
     process.stderr.write(
-      `error: ${c}: downloaded jar does not match the SHA-256 in cappu-lock.json\n`,
+      `${err("red", "error:")} ${c}: downloaded jar does not match the SHA-256 in cappu-lock.json\n`,
     );
     failed = true;
   }
