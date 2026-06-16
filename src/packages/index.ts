@@ -2,6 +2,7 @@
 // Resolve and search dependencies - including transitive ones - from an
 // ordered set of package sources.
 
+export { type License, normalizeLicense, normalizeLicenses } from "./license.ts";
 export { MavenRepositorySource, parseMetadataVersions, parsePom } from "./maven.ts";
 export {
   InMemoryPackageSource,

@@ -17,6 +17,7 @@ import { runCacheCommand } from "./cache.ts";
 import { runSelfUpgrade } from "./selfUpgrade.ts";
 import { runUpdate } from "./update.ts";
 import { runAudit } from "./audit.ts";
+import { runLicenses } from "./licenses.ts";
 import { runVerify } from "./verify.ts";
 import { formatDuration, painter } from "./style.ts";
 import { runTestCommand } from "./test.ts";
@@ -37,6 +38,9 @@ Usage:
                                      SHA-256 sums in cappu-lock.json
   cappu audit                        Scan resolved dependencies for known
                                      vulnerabilities (OSV); no fixing
+  cappu licenses [--json]            Print every resolved dependency and the
+                                     license it ships under (best-effort SPDX);
+                                     --json emits it machine-readable
   cappu add <configuration> <coord...>  Add one or more group:artifact[@version] to the
                                      dependencies section (api or implementation) and
                                      install them
@@ -105,6 +109,7 @@ const { values, positionals } = (() => {
         "with-schema": { type: "boolean", default: false },
         validate: { type: "boolean", default: false },
         "experimental-compiler": { type: "boolean" },
+        json: { type: "boolean", default: false },
         help: { type: "boolean", short: "h", default: false },
         version: { type: "boolean", default: false },
       },
@@ -131,7 +136,16 @@ if (values.help || command === undefined) {
 
 // Print how long the dependency/build commands took, however they exit. lsp
 // runs until the client disconnects, so a duration there is meaningless.
-const TIMED_COMMANDS = new Set(["install", "update", "add", "audit", "verify", "compile", "test"]);
+const TIMED_COMMANDS = new Set([
+  "install",
+  "update",
+  "add",
+  "audit",
+  "licenses",
+  "verify",
+  "compile",
+  "test",
+]);
 if (TIMED_COMMANDS.has(command)) {
   const startedAt = performance.now();
   const paint = painter(process.stderr);
@@ -173,6 +187,9 @@ switch (command) {
     break;
   case "audit":
     await runAudit(config);
+    break;
+  case "licenses":
+    await runLicenses(config, { json: values.json });
     break;
   case "search": {
     const query = files.join(" ").trim();

@@ -13,6 +13,7 @@
 
 import { XMLParser } from "fast-xml-parser";
 
+import { type License, normalizeLicenses } from "./license.ts";
 import {
   type Coordinates,
   coordinatesToString,
@@ -41,7 +42,9 @@ const xml = new XMLParser({
   // a single list entry must come back as the same shape as many; plain
   // <version> elements (dependency/parent/project) stay scalar
   isArray: (_name, jpath) =>
-    String(jpath).endsWith("dependencies.dependency") || String(jpath).endsWith("versions.version"),
+    String(jpath).endsWith("dependencies.dependency") ||
+    String(jpath).endsWith("versions.version") ||
+    String(jpath).endsWith("licenses.license"),
   parseTagValue: false, // versions like "1.0" stay strings
 });
 
@@ -76,6 +79,8 @@ export interface RawPom {
   /** scope=import entries in <dependencyManagement>: BOMs to merge in. */
   bomImports: RawDependency[];
   description?: string;
+  /** <licenses> as written; empty when the POM declares none (then inherited). */
+  licenses: License[];
 }
 
 export function parseRawPom(text: string): RawPom {
@@ -112,6 +117,15 @@ export function parseRawPom(text: string): RawPom {
     else managed.set(`${dep.groupId}:${dep.artifactId}`, dep.version!);
   }
 
+  const licenseNodes =
+    (project.licenses as { license?: { name?: unknown; url?: unknown }[] } | undefined)?.license ??
+    [];
+  const licenses: License[] = [];
+  for (const node of licenseNodes) {
+    const name = asText(node.name);
+    if (name) licenses.push({ name, ...(asText(node.url) ? { url: asText(node.url)! } : {}) });
+  }
+
   return {
     parent,
     properties,
@@ -119,6 +133,7 @@ export function parseRawPom(text: string): RawPom {
     managed,
     bomImports,
     description: asText(project.description),
+    licenses,
   };
 }
 
@@ -192,7 +207,19 @@ export function effectiveMetadata(
       optional: dep.optional === "true" || dep.optional === true,
     });
   }
-  return { coordinates, description: child?.description, dependencies, incomplete };
+  // Maven does not merge <licenses>: a child's list replaces the parent's, so
+  // the effective licenses are the nearest chain entry (child first) that
+  // declares any.
+  const licenses = chain.find(pom => pom.licenses.length > 0)?.licenses ?? [];
+  const licenseNormalized = normalizeLicenses(licenses);
+  return {
+    coordinates,
+    description: child?.description,
+    dependencies,
+    incomplete,
+    ...(licenses.length > 0 ? { licenses } : {}),
+    ...(licenseNormalized.length > 0 ? { licenseNormalized } : {}),
+  };
 }
 
 /**

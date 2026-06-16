@@ -23,6 +23,7 @@ import {
   resolveTransitive,
 } from "../packages/index.ts";
 import { colorEnabled } from "./color.ts";
+import { warnUnmappedLicenses } from "./licenses.ts";
 
 type StyleFormat = Parameters<typeof styleText>[0];
 
@@ -82,6 +83,7 @@ export async function runAudit(
   const byKey = new Map<string, ResolvedPackage>();
   for (const p of resolution.packages) byKey.set(packageKey(p.coordinates), p);
   const coordinates = resolution.packages.map(p => p.coordinates);
+  warnUnmappedLicenses(resolution.packages);
 
   let report: AuditReport;
   try {

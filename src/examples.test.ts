@@ -132,6 +132,40 @@ test("examples/audit-app reports its vulnerable dependency", { skip: !HAS_JAVAC 
   }
 });
 
+// licenses resolves the graph (no JDK) and prints each dependency's license;
+// gson declares Apache-2.0, which maps cleanly to an SPDX id. Networked-leg
+// gated on HAS_JAVAC like the other example e2e tests.
+test("examples/gson-app reports dependency licenses (human + --json)", { skip: !HAS_JAVAC }, () => {
+  const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
+  const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
+  const work = join(root, "gson-app");
+  try {
+    cpSync(join(examplesDir, "gson-app", "cappu.json"), join(work, "cappu.json"));
+    const env = { ...process.env, CAPPU_PACKAGE_STORE: store };
+    const human = execFileSync(tsx, [cli, "licenses"], {
+      cwd: work,
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    expect(human).toContain("com.google.code.gson:gson:2.13.1");
+    expect(human).toContain("Apache-2.0");
+
+    const json = execFileSync(tsx, [cli, "licenses", "--json"], {
+      cwd: work,
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const rows = JSON.parse(json) as { coordinate: string; spdx: string[] }[];
+    const gson = rows.find(r => r.coordinate === "com.google.code.gson:gson:2.13.1");
+    expect(gson?.spdx).toContain("Apache-2.0");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(store, { recursive: true, force: true });
+  }
+});
+
 // A throwaway project pinned to an old gson; `cappu update` should move it to
 // a newer stable version, rewrite cappu.json (comment kept) and write a lock.
 // Network-only (no JDK); gated on HAS_JAVAC like the other example e2e tests.

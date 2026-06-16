@@ -87,6 +87,52 @@ test("pom dependencies parse with scope/optional; managed and property versions 
   expect(metadata.incomplete).toBe(true); // the \${prop.version} dependency was dropped
 });
 
+test("licenses parse with raw names and best-effort SPDX normalization", () => {
+  const pom = `<project>
+    <groupId>org.example</groupId><artifactId>app</artifactId><version>1.0</version>
+    <licenses>
+      <license>
+        <name>The Apache Software License, Version 2.0</name>
+        <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      </license>
+      <license><name>Public Domain</name></license>
+    </licenses>
+  </project>`;
+  const metadata = parsePom(pom, COORDS);
+  expect(metadata.licenses).toEqual([
+    {
+      name: "The Apache Software License, Version 2.0",
+      url: "https://www.apache.org/licenses/LICENSE-2.0.txt",
+    },
+    { name: "Public Domain" },
+  ]);
+  // Public Domain has no SPDX id, so only the Apache license normalizes
+  expect(metadata.licenseNormalized).toEqual(["Apache-2.0"]);
+});
+
+test("licenses are inherited from the nearest parent that declares any", async () => {
+  const poms = new Map([
+    [
+      "/org/example/app/1.0/app-1.0.pom",
+      `<project>
+        <parent><groupId>org.example</groupId><artifactId>parent</artifactId><version>7</version></parent>
+      </project>`,
+    ],
+    [
+      "/org/example/parent/7/parent-7.pom",
+      `<project>
+        <licenses><license><name>MIT License</name></license></licenses>
+      </project>`,
+    ],
+  ]);
+  const source = new MavenRepositorySource("https://repo.example/maven2", async url =>
+    poms.get(url.replace("https://repo.example/maven2", "")),
+  );
+  const metadata = await source.getMetadata(COORDS);
+  expect(metadata?.licenses).toEqual([{ name: "MIT License" }]);
+  expect(metadata?.licenseNormalized).toEqual(["MIT"]);
+});
+
 test("the repository source builds maven2 layout urls and parses the answers", async () => {
   const fetched: string[] = [];
   const source = new MavenRepositorySource("https://repo.example/maven2/", async url => {

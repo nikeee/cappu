@@ -10,6 +10,7 @@ import type { CappuConfig } from "../config.ts";
 import { installDependencies } from "../install.ts";
 import { provisionJdk } from "../jdks/index.ts";
 import { colorEnabled } from "./color.ts";
+import { warnUnmappedLicenses } from "./licenses.ts";
 import { painter } from "./style.ts";
 
 /** Whether the install progress bar / resolving indicator may render. */
@@ -130,6 +131,7 @@ export async function runInstall(
     const summary = parts.length > 0 ? parts.join(", ") : out("dim", "no packages");
     process.stdout.write(`${out("green", "✓")} ${summary} installed\n`);
   }
+  warnUnmappedLicenses(result.resolution.packages);
   for (const c of result.resolution.conflicts) {
     process.stderr.write(
       `${err("yellow", "warning:")} ${c.key}: version ${c.rejected} (via ${c.rejectedBy.artifactId}) loses to ${c.selected}\n`,

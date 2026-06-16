@@ -233,3 +233,8 @@ no timestamps were captured.
 - 2026-06-16 14:51 — is it possible to add the license of the package to the metadata?
 - 2026-06-16 14:51 — is it an spdx identifier?
 - 2026-06-16 14:51 — Consolidate the three comment-audit Explore agents' findings (stale/wrong + redundant comments), apply the fixes, run lint/typecheck/tests, and commit.
+- 2026-06-16 15:08 — implement license field like #1. Add a best-effort-mapping to a separate field "licenseNormalized". Always log licenses if they could not be mapped to an spdx identifier
+- 2026-06-16 15:08 — draw in the most common packages and parse their licenses, add them to the default mapping
+- 2026-06-16 15:08 — when you are done, add tests for the common cases, including end-to-end
+- 2026-06-16 15:08 — after that, add a command `cappu licenses` that prints all used dependencies and their used license. Also add a --json flag that prints it machine readable
+- 2026-06-16 15:08 — also take common license URLs into account for normalization

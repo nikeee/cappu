@@ -3,6 +3,7 @@
 // eventually be turned into PackageSource instances).
 
 import { type Brand } from "../brand.ts";
+import { type License } from "./license.ts";
 
 /** Exact maven-style coordinates of one package version. */
 export interface Coordinates {
@@ -23,6 +24,10 @@ export interface PackageMetadata {
   readonly coordinates: Coordinates;
   readonly description?: string;
   readonly dependencies: readonly DependencyDeclaration[];
+  /** Licenses as the POM declares them (free text), absent when none. */
+  readonly licenses?: readonly License[];
+  /** Best-effort SPDX ids the licenses map to (the unmapped ones are dropped). */
+  readonly licenseNormalized?: readonly string[];
 }
 
 /**
