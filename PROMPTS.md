@@ -241,3 +241,4 @@ no timestamps were captured.
 - 2026-06-16 15:20 — add a progress bar to the self-upgrade. also make it colorful
 - 2026-06-16 15:28 — next, add a license field to cappu.json similar to the spdx-license of npm's package.json. Only support spdx.
 - 2026-06-16 15:34 — cappu audit is a little slow. can we cache something here?
+- 2026-06-16 15:40 — is the vuln store really immutable? i think there can be new vulns at a later time. maybe we'd want to add a ttl of one day? check this

@@ -31,6 +31,11 @@ const defaultFetchJson: FetchJson = async (url, body) => {
 // OSV ids are GHSA-..., CVE-..., GO-..., etc. - safe filename characters.
 const VULN_ID = /^[A-Za-z0-9._-]+$/;
 
+// A day. Advisory details are NOT immutable - OSV records carry a `modified`
+// timestamp because severity, affected ranges and fixed-versions get revised -
+// so the detail cache is time-bounded rather than permanent.
+const VULN_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
 // <store>/_audit/osv/<id>.json, or undefined when the id is not store-safe.
 function vulnCachePath(id: string): string | undefined {
   if (!VULN_ID.test(id)) return undefined;
@@ -38,11 +43,12 @@ function vulnCachePath(id: string): string | undefined {
 }
 
 /**
- * defaultFetchJson with the immutable vuln-detail GETs (/v1/vulns/{id}) cached
- * forever in the package store: re-hydrating known advisories is the slow part
- * of a repeat `cappu audit`, and an advisory's content does not change. The
- * querybatch lookup (which advisories affect a version - which DOES change as
- * new ones publish) is never cached, so audit still surfaces fresh findings.
+ * defaultFetchJson with the vuln-detail GETs (/v1/vulns/{id}) cached in the
+ * package store with a one-day TTL: re-hydrating known advisories is the slow
+ * part of a repeat `cappu audit`, but their details can be revised, so the
+ * cache is refreshed daily. The querybatch lookup (which advisories affect a
+ * version - new ones publish and old ones are withdrawn) is never cached, so
+ * audit always surfaces fresh findings.
  */
 export function cachedFetchJson(inner: FetchJson = defaultFetchJson): FetchJson {
   return async (url, body) => {
@@ -50,7 +56,11 @@ export function cachedFetchJson(inner: FetchJson = defaultFetchJson): FetchJson 
     const cacheFile = id ? vulnCachePath(id) : undefined;
     if (cacheFile && existsSync(cacheFile)) {
       try {
-        return JSON.parse(readFileSync(cacheFile, "utf8"));
+        const cached = JSON.parse(readFileSync(cacheFile, "utf8")) as {
+          fetchedAt: number;
+          body: unknown;
+        };
+        if (Date.now() - cached.fetchedAt < VULN_CACHE_TTL_MS) return cached.body;
       } catch {
         // corrupt entry: fall through to a live fetch (and rewrite it)
       }
@@ -59,7 +69,7 @@ export function cachedFetchJson(inner: FetchJson = defaultFetchJson): FetchJson 
     if (cacheFile && result !== undefined) {
       try {
         mkdirSync(dirname(cacheFile), { recursive: true });
-        writeFileSync(cacheFile, JSON.stringify(result));
+        writeFileSync(cacheFile, JSON.stringify({ fetchedAt: Date.now(), body: result }));
       } catch {
         // a read-only store never fails the lookup
       }
