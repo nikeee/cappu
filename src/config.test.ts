@@ -102,7 +102,24 @@ test("the generated JSON schema mirrors the config shape", () => {
     "compilerOptions",
     "dependencies",
     "jdk",
+    "license",
     "lspOptions",
     "packageSources",
   ]);
+});
+
+test("a valid SPDX license is accepted; free text and unknown ids are rejected", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cfg-"));
+  const write = (license: string): void =>
+    writeFileSync(join(dir, DEFAULT_CONFIG_NAME), JSON.stringify({ license }));
+
+  write("Apache-2.0");
+  expect(loadConfig(undefined, dir).license).toBe("Apache-2.0");
+  write("(MIT OR Apache-2.0)");
+  expect(loadConfig(undefined, dir).license).toBe("(MIT OR Apache-2.0)");
+
+  write("The Apache Software License, Version 2.0"); // free text
+  expect(() => loadConfig(undefined, dir)).toThrow(/SPDX/);
+  write("Definitely-Not-A-License"); // SPDX-shaped but unknown
+  expect(() => loadConfig(undefined, dir)).toThrow(/SPDX/);
 });

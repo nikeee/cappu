@@ -9,6 +9,8 @@ import { isAbsolute, join, resolve } from "node:path";
 import { parse } from "comment-json";
 import { z } from "zod";
 
+import { isValidSpdxExpression } from "./spdx.ts";
+
 const InlayHintsSchema = z.object({
   /** Hints like `count:` before call arguments that are not plain variables. */
   parameterNames: z.boolean().default(true),
@@ -89,6 +91,18 @@ const ConfigFileSchema = z.object({
   dependencies: DependenciesSchema.prefault({}),
   /** JDK to provision into .cappu/jdks on install, e.g. "temurin-21". */
   jdk: z.string().optional(),
+  /**
+   * This project's own license, as an SPDX expression (npm-style): a single id
+   * like "MIT" or a compound like "(MIT OR Apache-2.0)". SPDX only - a
+   * free-text license name is rejected.
+   */
+  license: z
+    .string()
+    .refine(isValidSpdxExpression, {
+      message:
+        'not a valid SPDX license expression (e.g. "MIT", "Apache-2.0", "(MIT OR Apache-2.0)")',
+    })
+    .optional(),
 });
 
 export type CompilerConfig = z.infer<typeof CompilerOptionsSchema>;
@@ -185,6 +199,10 @@ export const CONFIG_TEMPLATE = `
   // JDK provisioned by \`cappu install\` into ./.cappu/jdks/<spec>.
   // Supported distributions: temurin, corretto.
   // "jdk": "temurin-21",
+
+  // This project's own license, as an SPDX expression (SPDX only):
+  // a single id like "MIT", or a compound like "(MIT OR Apache-2.0)".
+  // "license": "MIT",
 
   "dependencies": {
     "api": {},

@@ -74,6 +74,11 @@ export async function runLicenses(
   }
 
   const out = painter(process.stdout);
+  if (config.license) {
+    process.stdout.write(
+      `${out("dim", "this project:")} ${out(["bold", "cyan"], config.license)}\n`,
+    );
+  }
   const width = rows.reduce((w, r) => Math.max(w, r.coordinate.length), 0);
   for (const r of rows) {
     const label =
