@@ -86,7 +86,7 @@ FROM eclipse-temurin:25-alpine
     COPY --from=build /code/dist/myapp.jar /app.jar
     ENTRYPOINT ["java", "-jar", "/app.jar"]
 ```
-Don't formget to `.dockerignore` the `.cappu` dir.
+Don't forget to `.dockerignore` the `.cappu` dir.
 
 #### The Process
 I didn't want to just say "build a java compiler and LSP server, make no mistakes". You can see most of my prompts in PROMPTS.md.
