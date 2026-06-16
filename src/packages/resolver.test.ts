@@ -8,7 +8,12 @@ import {
   resolveTransitive,
   searchPackages,
 } from "./resolver.ts";
-import { type Coordinates, coordinatesToString, type PackageMetadata } from "./types.ts";
+import {
+  type Coordinates,
+  coordinatesToString,
+  type PackageMetadata,
+  toCoordinates,
+} from "./types.ts";
 
 function pkg(
   spec: string,
@@ -16,7 +21,7 @@ function pkg(
 ): PackageMetadata {
   const parse = (s: string): Coordinates => {
     const [groupId, artifactId, version] = s.split(":");
-    return { groupId: groupId!, artifactId: artifactId!, version: version! };
+    return toCoordinates(groupId!, artifactId!, version!);
   };
   return {
     coordinates: parse(spec),

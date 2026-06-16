@@ -5,7 +5,7 @@ import { test } from "node:test";
 
 import { expect } from "expect";
 
-import { coordinatesToString } from "../packages/index.ts";
+import { coordinatesToString, toCoordinates } from "../packages/index.ts";
 import {
   cachedFetchJson,
   cveAliases,
@@ -70,9 +70,9 @@ test("OsvSource maps batch ids back to coordinates and hydrates once", async () 
   const source = new OsvSource(counting);
 
   const coords = [
-    { groupId: "org.foo", artifactId: "foo", version: "1.2" },
-    { groupId: "org.bar", artifactId: "bar", version: "2.0" },
-    { groupId: "org.clean", artifactId: "clean", version: "9.0" },
+    toCoordinates("org.foo", "foo", "1.2"),
+    toCoordinates("org.bar", "bar", "2.0"),
+    toCoordinates("org.clean", "clean", "9.0"),
   ];
   const result = await source.findVulnerabilities(coords);
 
@@ -135,7 +135,7 @@ test("severity, aliases and fixed-version extraction", () => {
           { package: { name: "other:x" }, ranges: [{ events: [{ fixed: "9" }] }] },
         ],
       },
-      { groupId: "g", artifactId: "a", version: "1.5" },
+      toCoordinates("g", "a", "1.5"),
     ),
   ).toEqual(["2"]); // only the matching package's fix
 });

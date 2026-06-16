@@ -5,11 +5,18 @@
 import { type Brand } from "../brand.ts";
 import { type License, type SpdxId } from "./license.ts";
 
+/** A Maven groupId ("org.apache.commons"), distinct from an artifactId. */
+export type GroupId = Brand<string, "GroupId">;
+/** A Maven artifactId ("commons-lang3"), distinct from a groupId. */
+export type ArtifactId = Brand<string, "ArtifactId">;
+/** A Maven version ("2.13.1"), distinct from a version spec/range or a groupId. */
+export type Version = Brand<string, "Version">;
+
 /** Exact maven-style coordinates of one package version. */
 export interface Coordinates {
-  readonly groupId: string;
-  readonly artifactId: string;
-  readonly version: string;
+  readonly groupId: GroupId;
+  readonly artifactId: ArtifactId;
+  readonly version: Version;
 }
 
 /** A dependency as declared by a package (before resolution). */
@@ -52,6 +59,11 @@ export interface PackageSource {
 export type CoordinateString = Brand<string, "CoordinateString">;
 /** "group:artifact" - all versions of a package; the version-conflict key. */
 export type PackageKey = Brand<string, "PackageKey">;
+
+/** Build coordinates from raw strings - the single cast boundary for the ids. */
+export function toCoordinates(groupId: string, artifactId: string, version: string): Coordinates {
+  return { groupId, artifactId, version } as Coordinates;
+}
 
 export function coordinatesToString(c: Coordinates): CoordinateString {
   return `${c.groupId}:${c.artifactId}:${c.version}` as CoordinateString;

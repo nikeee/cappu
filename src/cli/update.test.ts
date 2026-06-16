@@ -12,12 +12,13 @@ import {
   type DependencyDeclaration,
   InMemoryPackageSource,
   type PackageMetadata,
+  toCoordinates,
 } from "../packages/index.ts";
 import { applyBumpsToJsonc } from "./update.ts";
 
 function coord(spec: string): Coordinates {
   const [groupId = "", artifactId = "", version = ""] = spec.split(":");
-  return { groupId, artifactId, version };
+  return toCoordinates(groupId, artifactId, version);
 }
 function pkg(spec: string, deps: string[] = []): PackageMetadata {
   return {

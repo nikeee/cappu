@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 
 import { runCompile } from "../compiler/compiler.ts";
 import { artifactBaseName, type CappuConfig } from "../config.ts";
+import { toCoordinates } from "../packages/index.ts";
 import {
   generatePom,
   missingCoordinates,
@@ -59,11 +60,7 @@ export async function runPublish(
   const jarPath = result.written.find(f => f.endsWith(".jar"))!;
 
   const base = artifactBaseName(config);
-  const coordinates = {
-    groupId: config.groupId!,
-    artifactId: config.artifactId!,
-    version: config.version!,
-  };
+  const coordinates = toCoordinates(config.groupId!, config.artifactId!, config.version!);
   const files: PublishFile[] = [
     { filename: `${base}.jar`, bytes: readFileSync(jarPath) },
     { filename: `${base}.pom`, bytes: new TextEncoder().encode(generatePom(config)) },

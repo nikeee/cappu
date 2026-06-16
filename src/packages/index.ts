@@ -14,12 +14,15 @@ export {
   type VersionConflict,
 } from "./resolver.ts";
 export { matchesVersionSpec, matchingVersions } from "./versions.ts";
-export { coordinatesToString, packageKey } from "./types.ts";
+export { coordinatesToString, packageKey, toCoordinates } from "./types.ts";
 export type {
+  ArtifactId,
   CoordinateString,
   Coordinates,
   DependencyDeclaration,
+  GroupId,
   PackageKey,
   PackageMetadata,
   PackageSource,
+  Version,
 } from "./types.ts";

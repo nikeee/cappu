@@ -27,7 +27,7 @@ import {
 } from "../config.ts";
 import { configuredSources, storePathFor } from "../install.ts";
 import { provisionedJava, provisionedJavac } from "../jdks/index.ts";
-import type { Coordinates, PackageSource } from "../packages/index.ts";
+import { type Coordinates, type PackageSource, toCoordinates } from "../packages/index.ts";
 import { findJavaFiles } from "../workspace.ts";
 
 // Derived build state, like .cappu/generated-sources (gitignored via /.cappu/).
@@ -121,11 +121,11 @@ export function compileTests(
 // The JUnit Platform Console Launcher: a TOOL, not a project dependency - it
 // never appears in cappu.json or the lockfile. Pinned; bundles the platform
 // and the jupiter/vintage engines, so projects only declare junit-jupiter.
-export const CONSOLE_LAUNCHER: Coordinates = {
-  groupId: "org.junit.platform",
-  artifactId: "junit-platform-console-standalone",
-  version: "1.12.2",
-};
+export const CONSOLE_LAUNCHER: Coordinates = toCoordinates(
+  "org.junit.platform",
+  "junit-platform-console-standalone",
+  "1.12.2",
+);
 
 /**
  * The launcher jar's path in the global package store, downloading it there

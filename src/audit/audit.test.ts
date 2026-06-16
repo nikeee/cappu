@@ -2,7 +2,12 @@ import { test } from "node:test";
 
 import { expect } from "expect";
 
-import { type Coordinates, coordinatesToString, type CoordinateString } from "../packages/index.ts";
+import {
+  type Coordinates,
+  coordinatesToString,
+  type CoordinateString,
+  toCoordinates,
+} from "../packages/index.ts";
 import { auditPackages } from "./audit.ts";
 import { type Advisory, type AdvisoryId, type AuditSource } from "./types.ts";
 
@@ -32,10 +37,10 @@ function source(map: Record<string, Advisory[]>): AuditSource {
 
 test("auditPackages tallies counts, dedupes coordinates and sorts worst-first", async () => {
   const coords: Coordinates[] = [
-    { groupId: "org", artifactId: "low", version: "1" },
-    { groupId: "org", artifactId: "crit", version: "1" },
-    { groupId: "org", artifactId: "crit", version: "1" }, // duplicate (e.g. main + test)
-    { groupId: "org", artifactId: "clean", version: "1" },
+    toCoordinates("org", "low", "1"),
+    toCoordinates("org", "crit", "1"),
+    toCoordinates("org", "crit", "1"), // duplicate (e.g. main + test)
+    toCoordinates("org", "clean", "1"),
   ];
   const report = await auditPackages(
     coords,
@@ -52,10 +57,7 @@ test("auditPackages tallies counts, dedupes coordinates and sorts worst-first", 
 });
 
 test("auditPackages reports nothing for a clean set", async () => {
-  const report = await auditPackages(
-    [{ groupId: "org", artifactId: "clean", version: "1" }],
-    source({}),
-  );
+  const report = await auditPackages([toCoordinates("org", "clean", "1")], source({}));
   expect(report.vulnerable).toEqual([]);
   expect(report.scanned).toBe(1);
 });

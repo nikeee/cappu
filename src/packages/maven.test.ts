@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { expect } from "expect";
 
 import { MavenRepositorySource, parseMetadataVersions, parsePom } from "./maven.ts";
+import { toCoordinates } from "./types.ts";
 
 const METADATA = `<?xml version="1.0" encoding="UTF-8"?>
 <metadata>
@@ -58,7 +59,7 @@ const POM = `<?xml version="1.0"?>
   </dependencies>
 </project>`;
 
-const COORDS = { groupId: "org.example", artifactId: "app", version: "1.0" };
+const COORDS = toCoordinates("org.example", "app", "1.0");
 
 test("maven-metadata.xml versions parse in document order", () => {
   expect(parseMetadataVersions(METADATA)).toEqual(["3.12.0", "3.13.0", "3.14.0"]);
@@ -155,7 +156,9 @@ test("the repository source builds maven2 layout urls and parses the answers", a
   expect(fetched[1]).toBe("https://repo.example/maven2/org/example/app/1.0/app-1.0.pom");
   expect(metadata?.dependencies.length).toBe(3);
 
-  expect(await source.getMetadata({ ...COORDS, version: "0.404" })).toBeUndefined();
+  expect(
+    await source.getMetadata(toCoordinates(COORDS.groupId, COORDS.artifactId, "0.404")),
+  ).toBeUndefined();
   // no searchUrl configured: this repository is not searchable
   expect(await source.search("gson")).toEqual([]);
 });
@@ -336,11 +339,11 @@ test("a cyclic or missing parent chain terminates and reports incomplete", async
     poms.get(url.replace("https://repo.example/maven2", "")),
   );
 
-  const cyclic = await source.getMetadata({ groupId: "g", artifactId: "a", version: "1" });
+  const cyclic = await source.getMetadata(toCoordinates("g", "a", "1"));
   expect(cyclic?.dependencies).toEqual([]);
   expect(cyclic?.incomplete).toBe(true);
 
-  const orphan = await source.getMetadata({ groupId: "g", artifactId: "orphan", version: "1" });
+  const orphan = await source.getMetadata(toCoordinates("g", "orphan", "1"));
   expect(orphan?.dependencies).toEqual([]);
   expect(orphan?.incomplete).toBe(true);
 });

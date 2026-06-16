@@ -19,6 +19,7 @@ import {
   InMemoryPackageSource,
   MavenRepositorySource,
   type PackageMetadata,
+  toCoordinates,
 } from "./packages/index.ts";
 
 // Every test runs against an isolated package store - never the user's real
@@ -224,16 +225,16 @@ test("install writes a lockfile and reuses it while the dependencies match", asy
 
 function versionedSource(): InMemoryPackageSource {
   const pkg = (g: string, a: string, v: string, deps: PackageMetadata["dependencies"] = []) => ({
-    coordinates: { groupId: g, artifactId: a, version: v },
+    coordinates: toCoordinates(g, a, v),
     dependencies: deps,
   });
   return new InMemoryPackageSource("versions", [
     pkg("org.x", "base", "1.0"),
     pkg("org.x", "base", "2.0"),
     // lib@1 sits on base 1, lib@2.0/2.1 sit on base 2
-    pkg("org.x", "lib", "1.5", [{ groupId: "org.x", artifactId: "base", version: "1.0" }]),
-    pkg("org.x", "lib", "2.0", [{ groupId: "org.x", artifactId: "base", version: "2.0" }]),
-    pkg("org.x", "lib", "2.1", [{ groupId: "org.x", artifactId: "base", version: "2.0" }]),
+    pkg("org.x", "lib", "1.5", [toCoordinates("org.x", "base", "1.0")]),
+    pkg("org.x", "lib", "2.0", [toCoordinates("org.x", "base", "2.0")]),
+    pkg("org.x", "lib", "2.1", [toCoordinates("org.x", "base", "2.0")]),
   ]);
 }
 
@@ -491,7 +492,7 @@ test("a SHA-256 mismatch evicts the bad jar from the store (#2)", async () => {
     const config = loadConfig(undefined, dir);
     // first install populates the store + a correct lock
     await installDependencies(config, [fakeRepo()]);
-    const gson = { groupId: "com.google.code.gson", artifactId: "gson", version: "2.14.0" };
+    const gson = toCoordinates("com.google.code.gson", "gson", "2.14.0");
     expect(existsSync(storePathFor(gson)!)).toBe(true);
 
     // tamper the lock's hash so the (correct) stored jar fails verification
@@ -522,8 +523,8 @@ test("getMetadata answers (resolved POMs) are cached forever in the store", asyn
   try {
     let fetches = 0;
     const metadata = {
-      coordinates: { groupId: "org.example", artifactId: "thing", version: "1.0" },
-      dependencies: [{ groupId: "org.dep", artifactId: "dep", version: "2.0" }],
+      coordinates: toCoordinates("org.example", "thing", "1.0"),
+      dependencies: [toCoordinates("org.dep", "dep", "2.0")],
     };
     const source = withMetadataCache({
       name: "https://repo.test/m2",
@@ -534,14 +535,14 @@ test("getMetadata answers (resolved POMs) are cached forever in the store", asyn
         return Promise.resolve(metadata);
       },
     });
-    const coords = { groupId: "org.example", artifactId: "thing", version: "1.0" };
+    const coords = toCoordinates("org.example", "thing", "1.0");
 
     expect(await source.getMetadata(coords)).toEqual(metadata);
     expect(await source.getMetadata(coords)).toEqual(metadata); // from the store, no TTL
     expect(fetches).toBe(1);
 
     // a different version is a different entry (immutable per version)
-    await source.getMetadata({ ...coords, version: "1.1" });
+    await source.getMetadata(toCoordinates(coords.groupId, coords.artifactId, "1.1"));
     expect(fetches).toBe(2);
 
     // a not-found answer is not cached (re-fetched each time)
@@ -554,8 +555,8 @@ test("getMetadata answers (resolved POMs) are cached forever in the store", asyn
         return Promise.resolve(undefined);
       },
     });
-    await empty.getMetadata({ groupId: "org.missing", artifactId: "x", version: "1" });
-    await empty.getMetadata({ groupId: "org.missing", artifactId: "x", version: "1" });
+    await empty.getMetadata(toCoordinates("org.missing", "x", "1"));
+    await empty.getMetadata(toCoordinates("org.missing", "x", "1"));
     expect(fetches).toBe(4);
   } finally {
     if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
@@ -612,9 +613,9 @@ test("the package store serves repeat installs and rejects unsafe segments", asy
     expect(poisoned.integrityFailures).toEqual(["com.google.code.gson:gson:2.14.0"]);
 
     // Unsafe coordinate segments never map into the store.
-    expect(storePathFor({ groupId: "../../etc", artifactId: "x", version: "1" })).toBeUndefined();
-    expect(storePathFor({ groupId: "a..b", artifactId: "x", version: "1" })).toBeUndefined();
-    expect(storePathFor({ groupId: "a.b", artifactId: "x/y", version: "1" })).toBeUndefined();
+    expect(storePathFor(toCoordinates("../../etc", "x", "1"))).toBeUndefined();
+    expect(storePathFor(toCoordinates("a..b", "x", "1"))).toBeUndefined();
+    expect(storePathFor(toCoordinates("a.b", "x/y", "1"))).toBeUndefined();
   } finally {
     if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
     else process.env.CAPPU_PACKAGE_STORE = previousStore;

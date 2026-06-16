@@ -12,6 +12,7 @@ import { test } from "node:test";
 import { expect } from "expect";
 
 import { MavenRepositorySource } from "./maven.ts";
+import { toCoordinates } from "./types.ts";
 
 const BASE = "https://central.example/maven2";
 const FIXTURES = join(import.meta.dirname, "../../test-fixtures/packages/central-poms");
@@ -23,7 +24,7 @@ const source = new MavenRepositorySource(BASE, async url => {
 
 /** The dependencies `cappu install` would follow: non-optional compile/runtime. */
 async function compileDependencies(groupId: string, artifactId: string, version: string) {
-  const metadata = await source.getMetadata({ groupId, artifactId, version });
+  const metadata = await source.getMetadata(toCoordinates(groupId, artifactId, version));
   expect(metadata).toBeDefined();
   return metadata!.dependencies
     .filter(
@@ -54,11 +55,9 @@ test("httpclient5: versions come from httpclient5-parent properties", async () =
 });
 
 test("guava: literal versions resolve completely", async () => {
-  const metadata = await source.getMetadata({
-    groupId: "com.google.guava",
-    artifactId: "guava",
-    version: "33.4.8-jre",
-  });
+  const metadata = await source.getMetadata(
+    toCoordinates("com.google.guava", "guava", "33.4.8-jre"),
+  );
   expect(metadata?.incomplete).toBe(false);
   expect(await compileDependencies("com.google.guava", "guava", "33.4.8-jre")).toEqual([
     "com.google.guava:failureaccess@1.0.3",
@@ -76,11 +75,7 @@ test("gson: compile dependencies resolve through gson-parent", async () => {
 });
 
 test("commons-io: only test-scoped dependencies, none of them compile/runtime", async () => {
-  const metadata = await source.getMetadata({
-    groupId: "commons-io",
-    artifactId: "commons-io",
-    version: "2.19.0",
-  });
+  const metadata = await source.getMetadata(toCoordinates("commons-io", "commons-io", "2.19.0"));
   // versions come from commons-parent's dependencyManagement and the junit
   // BOM it imports (scope=import) - every declared dependency resolves
   expect(metadata?.dependencies.length).toBe(9);
@@ -96,7 +91,7 @@ test("every snapshot artifact resolves all declared dependencies (BOMs followed)
     ["com.google.guava", "guava", "33.4.8-jre"],
     ["com.google.code.gson", "gson", "2.13.1"],
   ] as const) {
-    const metadata = await source.getMetadata({ groupId, artifactId, version });
+    const metadata = await source.getMetadata(toCoordinates(groupId, artifactId, version));
     expect(metadata?.incomplete).toBe(false);
   }
 });

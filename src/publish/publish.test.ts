@@ -10,8 +10,9 @@ import {
   resolvePublishAuth,
   resolvePublishRegistry,
 } from "./publish.ts";
+import { toCoordinates } from "../packages/index.ts";
 
-const COORDS = { groupId: "com.example", artifactId: "my-lib", version: "1.2.0" };
+const COORDS = toCoordinates("com.example", "my-lib", "1.2.0");
 
 test("maven2Path lays group dots out as directories", () => {
   expect(maven2Path(COORDS, "my-lib-1.2.0.jar")).toBe("com/example/my-lib/1.2.0/my-lib-1.2.0.jar");

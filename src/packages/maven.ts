@@ -20,6 +20,7 @@ import {
   type DependencyDeclaration,
   type PackageMetadata,
   type PackageSource,
+  toCoordinates,
 } from "./types.ts";
 
 /** Returns the body for a url, or undefined for a 404-ish miss. */
@@ -92,11 +93,11 @@ export function parseRawPom(text: string): RawPom {
     asText(parentNode.groupId) &&
     asText(parentNode.artifactId) &&
     asText(parentNode.version)
-      ? {
-          groupId: asText(parentNode.groupId)!,
-          artifactId: asText(parentNode.artifactId)!,
-          version: asText(parentNode.version)!,
-        }
+      ? toCoordinates(
+          asText(parentNode.groupId)!,
+          asText(parentNode.artifactId)!,
+          asText(parentNode.version)!,
+        )
       : undefined;
 
   const properties: Record<string, string> = {};
@@ -200,9 +201,7 @@ export function effectiveMetadata(
       continue;
     }
     dependencies.push({
-      groupId,
-      artifactId,
-      version,
+      ...toCoordinates(groupId, artifactId, version),
       scope: asText(dep.scope),
       optional: dep.optional === "true" || dep.optional === true,
     });
@@ -274,7 +273,7 @@ export class MavenRepositorySource implements PackageSource {
       };
       return (doc.response?.docs ?? [])
         .filter(d => d.g && d.a && d.latestVersion)
-        .map(d => ({ groupId: d.g!, artifactId: d.a!, version: d.latestVersion! }));
+        .map(d => toCoordinates(d.g!, d.a!, d.latestVersion!));
     } catch {
       return []; // a broken index answer must not fail the command
     }
@@ -346,11 +345,11 @@ export class MavenRepositorySource implements PackageSource {
     for (const pom of chain) {
       for (const imp of pom.bomImports) {
         if (!imp.groupId || !imp.artifactId || !asText(imp.version)) continue;
-        const bom: Coordinates = {
-          groupId: interpolate(imp.groupId, properties, coordinates),
-          artifactId: interpolate(imp.artifactId, properties, coordinates),
-          version: interpolate(imp.version!, properties, coordinates),
-        };
+        const bom: Coordinates = toCoordinates(
+          interpolate(imp.groupId, properties, coordinates),
+          interpolate(imp.artifactId, properties, coordinates),
+          interpolate(imp.version!, properties, coordinates),
+        );
         if (`${bom.groupId}${bom.artifactId}${bom.version}`.includes("${")) continue;
         const key = coordinatesToString(bom);
         if (seen.has(key)) continue; // import cycles must not loop

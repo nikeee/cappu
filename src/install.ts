@@ -44,6 +44,8 @@ import {
   type PackageSource,
   type Resolution,
   resolveTransitive,
+  toCoordinates,
+  type Version,
 } from "./packages/index.ts";
 
 /**
@@ -308,7 +310,7 @@ export interface InstallResult {
 function rootsOf(entries: Record<string, string>): Coordinates[] {
   return Object.entries(entries).map(([key, version]) => {
     const [groupId = "", artifactId = ""] = key.split(":");
-    return { groupId, artifactId, version };
+    return toCoordinates(groupId, artifactId, version);
   });
 }
 
@@ -396,7 +398,7 @@ export async function planUpdates(
 
       for (const candidate of newer.slice(0, UPDATE_ATTEMPTS)) {
         const roots = graphRoots(configuration).map(c =>
-          `${c.groupId}:${c.artifactId}` === key ? { ...c, version: candidate } : c,
+          `${c.groupId}:${c.artifactId}` === key ? { ...c, version: candidate as Version } : c,
         );
         const resolution = await resolveTransitive(roots, sources);
         if (resolution.conflicts.length === 0 && resolution.missing.length === 0) {
@@ -707,7 +709,7 @@ export async function pickAddVersion(
   const existing = configuredRoots(config).filter(c => `${c.groupId}:${c.artifactId}` !== key);
   for (const version of candidates.slice(0, PICK_ATTEMPTS)) {
     const resolution = await resolveTransitive(
-      [...existing, { groupId, artifactId, version }],
+      [...existing, toCoordinates(groupId, artifactId, version)],
       sources,
     );
     if (resolution.conflicts.length === 0 && resolution.missing.length === 0) {
