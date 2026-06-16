@@ -214,3 +214,4 @@ no timestamps were captured.
 - 2026-06-15 23:04 — group severity similar to npm, with colors
 - 2026-06-15 23:12 — can we make "install" or "add" use more parallelism for downloads? Maybe take benefit of the lockfile?
 - 2026-06-15 23:19 — next, move the default lib/classes dir for the dependencies to the .cappu dir
+- 2026-06-16 08:58 — only print the installed dependencies when using --verbose. Otherwise, just print the number of installed packages per caterogy
