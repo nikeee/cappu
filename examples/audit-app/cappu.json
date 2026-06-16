@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "mainClass": "example.Main",
+    "quiet": true
+  },
+  "dependencies": {
+    "implementation": {
+      // deliberately an old, famously-vulnerable version (Log4Shell) so
+      // `cappu audit` has advisories to report
+      "org.apache.logging.log4j:log4j-core": "2.14.1"
+    }
+  }
+}

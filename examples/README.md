@@ -26,4 +26,13 @@ Each directory is a self-contained cappu project. Dependencies install into
   cappu test
   ```
 
-`src/examples.test.ts` builds and runs all three end-to-end.
+- **audit-app** - pinned to a deliberately old, vulnerable Log4j so
+  `cappu audit` has advisories to report; it scans the transitive graph
+  (OSV.dev) and prints the dependency tree that pulls each one in:
+
+  ```sh
+  cd audit-app
+  cappu audit                   # exits non-zero, lists the advisories
+  ```
+
+`src/examples.test.ts` builds, runs and audits all four end-to-end.

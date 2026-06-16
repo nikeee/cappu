@@ -89,3 +89,36 @@ test("examples/junit-app runs its tests with cappu test", { skip: !HAS_JAVAC }, 
   expect(output).toContain("2 tests successful");
   expect(output).toContain("0 tests failed");
 });
+
+// audit needs network (Maven resolve + OSV), not a JDK; gated on HAS_JAVAC
+// only so it runs in the same networked legs as the other example e2e tests
+// and skips on the hermetic no-JDK leg. The findings exit non-zero, which
+// execFileSync surfaces as a throw whose stdout we read.
+test("examples/audit-app reports its vulnerable dependency", { skip: !HAS_JAVAC }, () => {
+  const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
+  const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
+  const work = join(root, "audit-app");
+  try {
+    cpSync(join(examplesDir, "audit-app", "cappu.json"), join(work, "cappu.json"));
+    let stdout: string;
+    let code = 0;
+    try {
+      stdout = execFileSync(tsx, [cli, "audit"], {
+        cwd: work,
+        env: { ...process.env, CAPPU_PACKAGE_STORE: store },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (e) {
+      stdout = (e as { stdout?: string }).stdout ?? "";
+      code = (e as { status?: number }).status ?? 1;
+    }
+    expect(code).toBe(1); // findings -> non-zero exit
+    // Log4Shell is a permanent advisory; OSV will always return it
+    expect(stdout).toContain("CVE-2021-44228");
+    expect(stdout).toContain("org.apache.logging.log4j:log4j-core:2.14.1");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(store, { recursive: true, force: true });
+  }
+});
