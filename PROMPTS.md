@@ -242,3 +242,6 @@ no timestamps were captured.
 - 2026-06-16 15:28 — next, add a license field to cappu.json similar to the spdx-license of npm's package.json. Only support spdx.
 - 2026-06-16 15:34 — cappu audit is a little slow. can we cache something here?
 - 2026-06-16 15:40 — is the vuln store really immutable? i think there can be new vulns at a later time. maybe we'd want to add a ttl of one day? check this
+- 2026-06-16 19:30 — add the licenses of a package to the lock file. dont use the best-effort normalized, but the raw one
+- 2026-06-16 19:30 — add a flag to the auditing to skip all cached data and do a fresh scan
+- 2026-06-16 19:30 — continue

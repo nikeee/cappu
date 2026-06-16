@@ -26,6 +26,12 @@ import {
 process.env.CAPPU_PACKAGE_STORE = mkdtempSync(join(tmpdir(), "cappu-store-shared-"));
 
 const POM_GSON = `<project>
+  <licenses>
+    <license>
+      <name>The Apache Software License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+    </license>
+  </licenses>
   <dependencies>
     <dependency>
       <groupId>org.example</groupId><artifactId>base</artifactId><version>1.0</version>
@@ -74,6 +80,37 @@ test("cappu install resolves transitively and writes jars into lib/classes", asy
       "base-1.0.jar",
       "gson-2.14.0.jar",
     ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the lockfile records each package's raw (not normalized) licenses", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cappu-install-"));
+  try {
+    writeFileSync(
+      join(dir, "cappu.json"),
+      '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
+    );
+    const config = loadConfig(undefined, dir);
+    await installDependencies(config, [fakeRepo()]);
+    const lock = JSON.parse(readFileSync(join(dir, LOCKFILE_NAME), "utf8")) as {
+      packages: {
+        coordinates: { artifactId: string };
+        licenses?: { name: string; url?: string }[];
+      }[];
+    };
+    const gson = lock.packages.find(p => p.coordinates.artifactId === "gson")!;
+    // raw POM name, NOT the best-effort SPDX id ("Apache-2.0")
+    expect(gson.licenses).toEqual([
+      {
+        name: "The Apache Software License, Version 2.0",
+        url: "https://www.apache.org/licenses/LICENSE-2.0.txt",
+      },
+    ]);
+    // base declares no license: no licenses key at all
+    const base = lock.packages.find(p => p.coordinates.artifactId === "base")!;
+    expect(base.licenses).toBeUndefined();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

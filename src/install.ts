@@ -33,6 +33,7 @@ import {
   type Coordinates,
   type CoordinateString,
   coordinatesToString,
+  type License,
   matchingVersions,
   MavenRepositorySource,
   type PackageMetadata,
@@ -41,18 +42,24 @@ import {
   resolveTransitive,
 } from "./packages/index.ts";
 
-/** The configured packageSources as PackageSource instances (Central searchable). */
-export function configuredSources(config: CappuConfig): PackageSource[] {
-  return config.packageSources.map(url =>
-    withMetadataCache(
-      new MavenRepositorySource(
-        url,
-        undefined,
-        undefined,
-        url === MAVEN_CENTRAL ? MAVEN_CENTRAL_SEARCH : undefined,
-      ),
-    ),
-  );
+/**
+ * The configured packageSources as PackageSource instances (Central
+ * searchable). `cache: false` skips the on-disk metadata cache, for a fresh
+ * resolve that ignores everything cached (e.g. `cappu audit --no-cache`).
+ */
+export function configuredSources(
+  config: CappuConfig,
+  options: { cache?: boolean } = {},
+): PackageSource[] {
+  return config.packageSources.map(url => {
+    const source = new MavenRepositorySource(
+      url,
+      undefined,
+      undefined,
+      url === MAVEN_CENTRAL ? MAVEN_CENTRAL_SEARCH : undefined,
+    );
+    return options.cache === false ? source : withMetadataCache(source);
+  });
 }
 
 // --- metadata cache ------------------------------------------------------------
@@ -180,6 +187,8 @@ interface LockedPackage {
   source: string;
   /** Hex SHA-256 of the jar downloaded when the lock was written. */
   sha256: string;
+  /** The package's licenses as the POM declares them (raw, not normalized). */
+  licenses?: readonly License[];
 }
 
 interface Lockfile {
@@ -488,9 +497,18 @@ export async function installDependencies(
   const fromLock = lock !== undefined;
   const lockStale = lock !== undefined && !lockMatches(lock, config);
 
-  type PendingPackage = { coordinates: Coordinates; source: string; sha256?: string };
+  type PendingPackage = {
+    coordinates: Coordinates;
+    source: string;
+    sha256?: string;
+    licenses?: readonly License[];
+  };
   const pending = (resolved: Resolution): PendingPackage[] =>
-    resolved.packages.map(p => ({ coordinates: p.coordinates, source: p.source }));
+    resolved.packages.map(p => ({
+      coordinates: p.coordinates,
+      source: p.source,
+      ...(p.metadata.licenses ? { licenses: p.metadata.licenses } : {}),
+    }));
 
   // The compile set (api + implementation) and the annotationProcessor set
   // resolve INDEPENDENTLY and install to different directories - a processor's
@@ -566,7 +584,12 @@ export async function installDependencies(
     const file = join(dir, `${pkg.coordinates.artifactId}-${pkg.coordinates.version}.jar`);
     writeFileSync(file, artifact.bytes);
     return {
-      locked: { coordinates: pkg.coordinates, source: pkg.source, sha256: digest },
+      locked: {
+        coordinates: pkg.coordinates,
+        source: pkg.source,
+        sha256: digest,
+        ...(pkg.licenses ? { licenses: pkg.licenses } : {}),
+      },
       installed: file,
       ...(artifact.cached ? { fromStore: id } : {}),
     };
