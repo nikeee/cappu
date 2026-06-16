@@ -99,6 +99,9 @@ Tired of clicking through an IDE to configure some JDKs? Configure your JDK of c
 ```
 `cappu install` will download and store the JDK to a global cache dir and use it for compilation. If you don't do that, cappu will use whatever `javac` in your `PATH` points to.
 
+#### GitHub Actions
+TODO: setup-cappu
+
 #### The History behind this Project
 I didn't want to just say "build a java compiler and LSP server, make no mistakes". You can see most of my prompts in PROMPTS.md.
 
