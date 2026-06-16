@@ -64,10 +64,12 @@ cappu licenses # optional --json
 ```
 
 ### LSP Server
+Run this in the root of your project (so that it sees `src/main/java` under exactly that path).
 ```sh
 cappu lsp
 # optional --port if you need LSP via TCP
 ```
+You don't have to have a `cappu.json` config as long as your project uses the common paths. However, if you want the LSP server to be able to resolve your dependencies, you should probably add a config file. You can also configure the LSP server in that config file.
 
 ### Use in Docker
 Having a deterministic build + docker-managed cache is as simple as:
