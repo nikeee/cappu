@@ -11,7 +11,7 @@ import { installDependencies } from "../install.ts";
 import { provisionJdk } from "../jdks/index.ts";
 import { colorEnabled } from "./color.ts";
 import { warnUnmappedLicenses } from "./licenses.ts";
-import { painter } from "./style.ts";
+import { downloadBar, painter } from "./style.ts";
 
 /** Whether the install progress bar / resolving indicator may render. */
 function progressEnabled(): boolean {
@@ -21,19 +21,7 @@ function progressEnabled(): boolean {
 // One animated bar on stderr while packages download (stdout stays the plain
 // list of written jars, so piping it remains useful).
 function progressBar(): SingleBar | undefined {
-  if (!progressEnabled()) return undefined;
-  // styleText validates against the stream the bar writes to, so colors also
-  // drop out for a terminal that reports no color support
-  const style = (format: Parameters<typeof styleText>[0], text: string): string =>
-    styleText(format, text, { stream: process.stderr });
-  return new SingleBar({
-    format: `${style("cyan", "{bar}")} ${style("bold", "{value}/{total}")} ${style("dim", "{package}")}`,
-    barCompleteChar: "█",
-    barIncompleteChar: "░",
-    hideCursor: true,
-    clearOnComplete: true,
-    stream: process.stderr,
-  });
+  return downloadBar(process.stderr);
 }
 
 export async function runInstall(

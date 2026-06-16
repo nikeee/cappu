@@ -100,6 +100,25 @@ test("the binary is extracted from the artifact zip", async () => {
   expect((await downloadBinary(9, "cappu", () => Promise.resolve(wrong))).length).toBe(1);
 });
 
+test("downloadBinary forwards the progress callback to the fetcher", async () => {
+  const zip = writeZip([{ name: "cappu", bytes: new TextEncoder().encode("x") }]);
+  const calls: [number, number | undefined][] = [];
+  await downloadBinary(
+    9,
+    "cappu",
+    (_url, onProgress) => {
+      onProgress?.(50, 100);
+      onProgress?.(100, 100);
+      return Promise.resolve(zip);
+    },
+    (received, total) => calls.push([received, total]),
+  );
+  expect(calls).toEqual([
+    [50, 100],
+    [100, 100],
+  ]);
+});
+
 test("replaceBinary swaps the file in place and keeps it executable", () => {
   const dir = mkdtempSync(join(tmpdir(), "cappu-upgrade-"));
   try {

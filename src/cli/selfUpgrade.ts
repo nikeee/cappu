@@ -4,7 +4,10 @@
 
 import { basename } from "node:path";
 
-import { resolveToken, selfUpgrade } from "../selfupgrade/index.ts";
+import { SingleBar } from "cli-progress";
+
+import { platformTarget, resolveToken, selfUpgrade } from "../selfupgrade/index.ts";
+import { downloadBar, painter } from "./style.ts";
 
 export async function runSelfUpgrade(): Promise<never> {
   // CAPPU_UPGRADE_TARGET overrides the replaced path (tests / unusual installs).
@@ -27,17 +30,35 @@ export async function runSelfUpgrade(): Promise<never> {
     process.exit(2);
   }
 
+  const err = painter(process.stderr);
+  const out = painter(process.stdout);
+  const label = platformTarget()?.artifact ?? "cappu";
+  let bar: SingleBar | undefined;
   try {
-    process.stderr.write("fetching the latest CD build...\n");
-    const result = await selfUpgrade({ targetPath, token });
+    process.stderr.write(err(["bold", "cyan"], "fetching the latest CD build...\n"));
+    const result = await selfUpgrade({
+      targetPath,
+      token,
+      onDownloadProgress: (received, total) => {
+        if (total === undefined) return;
+        bar ??= (() => {
+          const created = downloadBar(process.stderr);
+          created?.start(Math.round(total / 1024 / 1024), 0, { package: `${label} (MiB)` });
+          return created;
+        })();
+        bar?.update(Math.round(received / 1024 / 1024), { package: `${label} (MiB)` });
+      },
+    });
+    bar?.stop();
     const sha = result.artifact.runSha.slice(0, 7);
     process.stdout.write(
-      `upgraded ${result.targetPath} to ${result.target.artifact} ` +
-        `(${sha}, built ${result.artifact.runCreatedAt})\n`,
+      `${out("green", "✓")} upgraded ${result.targetPath} to ${out("bold", result.target.artifact)} ` +
+        `(${out("cyan", sha)}, built ${result.artifact.runCreatedAt})\n`,
     );
     process.exit(0);
   } catch (e) {
-    process.stderr.write(`cappu: self-upgrade failed: ${(e as Error).message}\n`);
+    bar?.stop();
+    process.stderr.write(`${err("red", "error:")} self-upgrade failed: ${(e as Error).message}\n`);
     process.exit(1);
   }
 }

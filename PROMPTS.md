@@ -238,3 +238,4 @@ no timestamps were captured.
 - 2026-06-16 15:08 — when you are done, add tests for the common cases, including end-to-end
 - 2026-06-16 15:08 — after that, add a command `cappu licenses` that prints all used dependencies and their used license. Also add a --json flag that prints it machine readable
 - 2026-06-16 15:08 — also take common license URLs into account for normalization
+- 2026-06-16 15:20 — add a progress bar to the self-upgrade. also make it colorful

@@ -39,7 +39,8 @@ export function platformTarget(
 }
 
 export type FetchJson = (url: string) => Promise<unknown>;
-export type FetchBytes = (url: string) => Promise<Uint8Array>;
+export type DownloadProgress = (received: number, total: number | undefined) => void;
+export type FetchBytes = (url: string, onProgress?: DownloadProgress) => Promise<Uint8Array>;
 
 /** The build artifact to upgrade from, with the run it came from. */
 export interface ArtifactRef {
@@ -82,9 +83,11 @@ export async function downloadBinary(
   artifactId: number,
   binaryName: string,
   fetchBytes: FetchBytes,
+  onProgress?: DownloadProgress,
 ): Promise<Uint8Array> {
   const zip = await fetchBytes(
     `${API}/repos/${REPO.owner}/${REPO.name}/actions/artifacts/${artifactId}/zip`,
+    onProgress,
   );
   const entries = readZipEntries(zip);
   if (!entries) throw new Error("the downloaded artifact is not a valid zip");
@@ -152,10 +155,30 @@ function githubFetchers(token: string): { fetchJson: FetchJson; fetchBytes: Fetc
       if (!response.ok) throw new Error(`GitHub API ${response.status} for ${url}`);
       return response.json();
     },
-    fetchBytes: async url => {
+    fetchBytes: async (url, onProgress) => {
       const response = await fetch(url, { headers });
-      if (!response.ok) throw new Error(`download failed: HTTP ${response.status} for ${url}`);
-      return response.bytes();
+      if (!response.ok || !response.body) {
+        throw new Error(`download failed: HTTP ${response.status} for ${url}`);
+      }
+      const length = response.headers.get("content-length");
+      const total = length ? Number(length) : undefined;
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let received = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.byteLength;
+        onProgress?.(received, total);
+      }
+      const out = new Uint8Array(received);
+      let offset = 0;
+      for (const chunk of chunks) {
+        out.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return out;
     },
   };
 }
@@ -178,6 +201,7 @@ export async function selfUpgrade(options: {
   arch?: string;
   fetchJson?: FetchJson;
   fetchBytes?: FetchBytes;
+  onDownloadProgress?: DownloadProgress;
 }): Promise<UpgradeResult> {
   const target = platformTarget(options.platform, options.arch);
   if (!target) {
@@ -192,7 +216,12 @@ export async function selfUpgrade(options: {
     ({ fetchJson, fetchBytes } = githubFetchers(options.token));
   }
   const artifact = await latestArtifact(target, fetchJson);
-  const bytes = await downloadBinary(artifact.id, target.binaryName, fetchBytes);
+  const bytes = await downloadBinary(
+    artifact.id,
+    target.binaryName,
+    fetchBytes,
+    options.onDownloadProgress,
+  );
   const targetPath = options.targetPath ?? process.execPath;
   replaceBinary(targetPath, bytes);
   return { target, artifact, targetPath };
