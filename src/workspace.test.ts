@@ -7,11 +7,11 @@ import { expect } from "expect";
 
 import { findJavaFiles } from "./workspace.ts";
 
-test("a missing directory is empty, never a throw (Bun's globSync ENOENTs)", () => {
+test("a missing directory yields no files instead of throwing", () => {
   expect(findJavaFiles("/definitely/not/here")).toEqual([]);
 });
 
-test("build directories are skipped even when globSync's exclude is ignored", () => {
+test("build directories (node_modules, ...) are skipped", () => {
   const dir = mkdtempSync(join(tmpdir(), "cappu-ws-"));
   try {
     mkdirSync(join(dir, "node_modules", "x"), { recursive: true });

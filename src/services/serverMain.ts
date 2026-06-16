@@ -1,5 +1,5 @@
-// Standalone stdio entry point for the bundled language server: this is what
-// dist/server.mjs (run by the vscode test extension) executes. The cli
+// Standalone stdio entry point for the language server - run directly via tsx
+// by the vscode test extension (and also bundled to dist/server.mjs). The cli
 // (`cappu lsp`) stays the configurable entry; here the config is picked up
 // from the working directory, and a broken cappu.json must not prevent the
 // server from starting (the LSP session is more useful than the error).

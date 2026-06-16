@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // Unified entry point: parses arguments with Node's built-in util.parseArgs
-// and dispatches to one command module per subcommand (init.ts, install.ts,
-// lsp.ts, compile.ts). The whole script runs as top-level await.
+// and dispatches each subcommand to its own module under cli/ (one file per
+// command). The whole script runs as top-level await.
 
 import { parseArgs } from "node:util";
 
