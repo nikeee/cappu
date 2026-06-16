@@ -11,13 +11,13 @@ Plus I was annoyed by the Java LSP plugin for VSC. :(
 You can see all prompts [here](https://github.com/nikeee/cappu/blob/main/PROMPTS.md). You probably shouldn't use this project.
 
 ## Why?
-I was annoyed by the Java extension for VSC that everyone uses. So I vibed my own LSP server. And then added a compiler[^1] and package manager because why not?
+I was annoyed by the Java extension for VSC that everyone uses. So I vibed my own LSP server. And then added a compiler[^1] and package manager because why not? Now I've got an LSP server, a package management solution and build system.
 
 [^1]: Entirely opt-in, disabled by default. We're using standard `javac`.
 
-I loathe ./gradlew and ./mvnw with random wrapper scripts checked into the repository. Why can't we just use a tool where everyone just runs the latest version?
+I loathe ./gradlew and ./mvnw with random wrapper scripts checked into the repository. Why can't we just use a tool that everyone just runs the latest version of?
 
-Also, gradle uses a turing-complete language for its configuration. This leads to large config drift across different projects. Everything becomes customized and cannot be updated programmatically. Every project is different. Using a single declarative JSON and "convention over configuration" file solves that.
+Also, gradle uses a turing-complete language for its configuration. This leads to large config drift across different projects. Eventually everything becomes customized and cannot be updated programmatically. Every project is different. Using a single declarative JSON and "convention over configuration" file solves that.
 
 It's 2026 and I still have to do weird things to
 - get a list of dependencies with known CVEs / other vulnerabilities
