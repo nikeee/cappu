@@ -90,7 +90,16 @@ FROM eclipse-temurin:25-alpine
 ```
 Don't forget to `.dockerignore` the `.cappu` dir.
 
-#### The Process
+#### Configure JDK
+Tired of clicking through an IDE to configure some JDKs? Configure your JDK of choice in `cappu.json`:
+```jsonc
+{
+    "jdk": "temurin-21", // supports temurin-X and corretto-X
+}
+```
+`cappu install` will download and store the JDK to a global cache dir and use it for compilation.
+
+#### The History behind this Project
 I didn't want to just say "build a java compiler and LSP server, make no mistakes". You can see most of my prompts in PROMPTS.md.
 
 The result is a Java LSP server. Also a compiler built on the same foundation, just like the TypeScript compiler. The compiler is entirely optional and an even crazier experiment than this toolchain itself.
