@@ -11,9 +11,14 @@ import { type Brand } from "../brand.ts";
  */
 export type Offset = Brand<number, "Offset">;
 
+/** A 0-based LSP line number, distinct from a character/column or an offset. */
+export type Line = Brand<number, "Line">;
+/** A 0-based LSP character (UTF-16 code unit) within a line, distinct from a line. */
+export type Character = Brand<number, "Character">;
+
 export interface LineAndCharacter {
-  readonly line: number;
-  readonly character: number;
+  readonly line: Line;
+  readonly character: Character;
 }
 
 const enum Ch {
@@ -58,13 +63,13 @@ export function getLineAndCharacterOfPosition(
   offset: number,
 ): LineAndCharacter {
   const line = lineIndexOf(lineStarts, offset);
-  return { line, character: offset - lineStarts[line]! };
+  return { line: line as Line, character: (offset - lineStarts[line]!) as Character };
 }
 
 export function getPositionOfLineAndCharacter(
   lineStarts: readonly number[],
-  line: number,
-  character: number,
+  line: Line,
+  character: Character,
 ): Offset {
   if (line < 0) return 0 as Offset;
   if (line >= lineStarts.length) return lineStarts.at(-1)! as Offset;

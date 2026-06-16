@@ -60,9 +60,11 @@ import { enclosingCall, getHoverText } from "./hover.ts";
 import { DEFAULT_INLAY_HINTS, getInlayHints, type InlayHintsSettings } from "./inlayHints.ts";
 import { loadJdkStub } from "../compiler/jdkStub.ts";
 import {
+  type Character,
   computeLineStarts,
   getLineAndCharacterOfPosition,
   getPositionOfLineAndCharacter,
+  type Line,
 } from "../compiler/lineMap.ts";
 import { getIdentifierAtPosition, getNodeAtPosition } from "./nodeAtPosition.ts";
 import { forEachChild } from "../compiler/parser.ts";
@@ -299,8 +301,8 @@ export function startServer(
     if (!sourceFile) return undefined;
     const offset = getPositionOfLineAndCharacter(
       computeLineStarts(sourceFile.text),
-      position.line,
-      position.character,
+      position.line as Line,
+      position.character as Character,
     );
     return { sourceFile, offset };
   }
@@ -378,13 +380,13 @@ export function startServer(
     const lineStarts = computeLineStarts(sourceFile.text);
     const start = getPositionOfLineAndCharacter(
       lineStarts,
-      params.range.start.line,
-      params.range.start.character,
+      params.range.start.line as Line,
+      params.range.start.character as Character,
     );
     const end = getPositionOfLineAndCharacter(
       lineStarts,
-      params.range.end.line,
-      params.range.end.character,
+      params.range.end.line as Line,
+      params.range.end.character as Character,
     );
     return getCodeActions(program, checker, sourceFile, start, end).map(action => ({
       title: action.title,
@@ -696,13 +698,13 @@ export function startServer(
     const lineStarts = computeLineStarts(sourceFile.text);
     const start = getPositionOfLineAndCharacter(
       lineStarts,
-      params.range.start.line,
-      params.range.start.character,
+      params.range.start.line as Line,
+      params.range.start.character as Character,
     );
     const end = getPositionOfLineAndCharacter(
       lineStarts,
-      params.range.end.line,
-      params.range.end.character,
+      params.range.end.line as Line,
+      params.range.end.character as Character,
     );
     return getInlayHints(checker, sourceFile, start, end, inlayHintSettings).map(h => ({
       position: getLineAndCharacterOfPosition(lineStarts, h.offset),
