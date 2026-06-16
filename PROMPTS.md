@@ -227,3 +227,9 @@ no timestamps were captured.
 - 2026-06-16 14:21 — have you removed the workaround for bun? are there other workarounds for bun compat in the source?
 - 2026-06-16 14:24 — what about the resources directory? for tests and application? Add a test that uses these with cappu test and cappu compile to the end-to-end-tests in the example directory
 - 2026-06-16 14:31 — next, look at every comment and check if its still valid. Also check if it is unnecessary and can be removed
+- 2026-06-16 14:51 — where does the cached metadata reside on disk?
+- 2026-06-16 14:51 — show my my local metadata
+- 2026-06-16 14:51 — ive run cappu install in the examples/audit-app and there is no metadata
+- 2026-06-16 14:51 — is it possible to add the license of the package to the metadata?
+- 2026-06-16 14:51 — is it an spdx identifier?
+- 2026-06-16 14:51 — Consolidate the three comment-audit Explore agents' findings (stale/wrong + redundant comments), apply the fixes, run lint/typecheck/tests, and commit.

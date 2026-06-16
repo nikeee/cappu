@@ -351,10 +351,8 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
   return { success: true, written, degraded, warnings };
 }
 
-// javac's "path:line: error: message" diagnostics, located like our own; any
-// unmatched stderr tail becomes one unlocated error.
 /**
- * `cappu compile --use-javac`: the configured javac compiles and emits; none
+ * `cappu compile` (the default): the configured javac compiles and emits; none
  * of cappu's own pipeline runs. The configured classPath/sourcePaths become
  * -cp/-sourcepath, and the output kinds reuse the same packaging - with
  * Main-Class detected from javac's CLASS BYTES (via the class-file reader),

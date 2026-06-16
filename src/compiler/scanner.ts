@@ -576,7 +576,7 @@ export function createScanner(textInitial = "", onErrorInitial?: ErrorCallback):
 
   function scanStringOrTextBlock(): SyntaxKind {
     // Text block: three double quotes. Full incidental-whitespace handling is
-    // deferred (M12); here we tokenize it and store the raw inner text.
+    // deferred; here we tokenize it and store the raw inner text.
     if (
       text.charCodeAt(pos + 1) === Char.DoubleQuote &&
       text.charCodeAt(pos + 2) === Char.DoubleQuote
