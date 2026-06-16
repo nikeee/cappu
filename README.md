@@ -59,7 +59,7 @@ cappu verify # check installed dependencies against their checksum, reinstall if
 
 cappu self-upgrade # upgrade cappu binary to latest version
 
-# use this to get output you can forward to that one compliance person that desperately needs a list of all project dependencies + licenses used
+# get something you can forward to that one compliance person that desperately needs a list of all project dependencies + licenses
 cappu licenses # optional --json
 ```
 
@@ -72,7 +72,7 @@ cappu lsp
 ### Use in Docker
 Having a deterministic build + docker-managed cache is as simple as:
 ```Dockerfile
-FROM sour:stage AS build
+FROM your:base AS build
     WORKDIR /code
     COPY --from=ghcr.io/nikeee/cappu:latest /cappu /cappu # get the binary
     RUN --mount=type=bind,source=cappu.json,target=cappu.json \
