@@ -19,6 +19,7 @@ import { runUpdate } from "./update.ts";
 import { runAudit } from "./audit.ts";
 import { runLicenses } from "./licenses.ts";
 import { runPublish } from "./publish.ts";
+import { runVersion } from "./version.ts";
 import { runVerify } from "./verify.ts";
 import { formatDuration, painter } from "./style.ts";
 import { runTestCommand } from "./test.ts";
@@ -35,6 +36,8 @@ Usage:
                                      count, or each jar path with -v/--verbose
   cappu update                       Bump declared dependencies to the newest stable
                                      versions that keep the tree conflict-free
+  cappu version <major|minor|patch>  Bump the project version in cappu.json; at a
+                                     git repo root, also commit it and tag v<version>
   cappu verify                       Check the installed lib jars against the
                                      SHA-256 sums in cappu-lock.json
   cappu audit [--no-cache]           Scan resolved dependencies for known
@@ -194,6 +197,9 @@ switch (command) {
     break;
   case "update":
     await runUpdate(values.config, config);
+    break;
+  case "version":
+    await runVersion(files[0], values.config, config);
     break;
   case "audit":
     await runAudit(config, { noCache: values["no-cache"] });
