@@ -114,5 +114,8 @@ The result is a Java LSP server. Also a compiler built on the same foundation, j
 
 You probably shouldn't use this. I haven't read most of the source, since this is an experiment. **This readme is the only file that wasn't edited by AI.**
 
+### Contributing
+I'm happy to accept contributions in the form of issues, ideas, bugs+reproductions. I won't take PRs, since they probably will be vibe-coded anyways (which is what I am going to do with your issue). **In this project** (not in my other projects), I don't really care if your issues are LLM-generated. Let's explore together how far we can get with 2026 LLM slop.
+
 ### Legal Notice
 This project is not affiliated with Java, Oracle or similar entities.
