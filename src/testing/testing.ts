@@ -1,5 +1,5 @@
 // `cappu test` (nikeee/cappu#16): compile src/test/java against the main
-// classes plus lib/classes and lib/test-classes, then run the JUnit Platform
+// classes plus .cappu/lib/classes and .cappu/lib/test-classes, then run the JUnit
 // Console Launcher over the result. Self-contained, mirroring src/packages/:
 // nothing here prints and `exec` is injectable; the CLI streams the actual
 // JUnit run (live output is the point of a test runner).

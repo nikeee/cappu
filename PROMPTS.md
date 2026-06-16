@@ -215,3 +215,4 @@ no timestamps were captured.
 - 2026-06-15 23:12 — can we make "install" or "add" use more parallelism for downloads? Maybe take benefit of the lockfile?
 - 2026-06-15 23:19 — next, move the default lib/classes dir for the dependencies to the .cappu dir
 - 2026-06-16 08:58 — only print the installed dependencies when using --verbose. Otherwise, just print the number of installed packages per caterogy
+- 2026-06-16 09:04 — go through all configs examples and comments and check whether they are (still) valid, work and describe whats going on

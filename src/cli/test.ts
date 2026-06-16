@@ -39,7 +39,7 @@ export async function runTestCommand(config: CappuConfig): Promise<never> {
     }
   }
 
-  // 2. test classes against main + lib/classes + lib/test-classes
+  // 2. test classes against main + .cappu/lib/classes + .cappu/lib/test-classes
   const diagnostics = compileTests(config, testSources);
   if (diagnostics.length > 0) {
     renderDiagnostics(diagnostics);

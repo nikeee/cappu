@@ -1,5 +1,5 @@
 // Annotation-processing API (self-contained, like src/packages/): discover
-// JSR-269 processors in lib/processors jars and run javac's generation pass.
+// JSR-269 processors in .cappu/lib/processors jars and run javac's generation pass.
 
 export {
   discoverProcessors,

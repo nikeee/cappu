@@ -44,7 +44,7 @@ export function generatedClassesDir(config: CappuConfig): string {
   return join(generatedRoot(config), "classes");
 }
 
-/** The processor jars installed under lib/processors, if any. */
+/** The processor jars installed under .cappu/lib/processors, if any. */
 export function processorJars(config: CappuConfig): string[] {
   const dir = resolveConfigPath(config, DEFAULT_PROCESSOR_PATH);
   if (!existsSync(dir)) return [];
