@@ -10,6 +10,10 @@ Plus I was annoyed by the Java LSP plugin for VSC. :(
 ## Why?
 I was annoyed by the Java extension for VSC that everyone uses. So I vibed my own LSP server. And then added a compiler and package manager because why not?
 
+I loathe ./gradlew and ./mvnw with random wrapper scripts checked into the repository. Why can't we just use a tool where everyone just runs the latest version?
+
+Also, gradle uses a turing-complete language for its configuration. This leads to large config drift across different projects. Everything becomes customized and cannot be updated programmatically. Every project is different. Using a single declarative JSON and "convention over configuration" file solves that.
+
 ## Usage
 ```sh
 # create a new project with cappu.json in $PWD (similar to npm init)
