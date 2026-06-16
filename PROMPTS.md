@@ -225,3 +225,4 @@ no timestamps were captured.
 - 2026-06-16 14:09 — use dist dir for the new binaries
 - 2026-06-16 14:09 — make the tsdown config use an expression instead of an if-statement
 - 2026-06-16 14:21 — have you removed the workaround for bun? are there other workarounds for bun compat in the source?
+- 2026-06-16 14:24 — what about the resources directory? for tests and application? Add a test that uses these with cappu test and cappu compile to the end-to-end-tests in the example directory

@@ -35,4 +35,8 @@ Each directory is a self-contained cappu project. Dependencies install into
   cappu audit                   # exits non-zero, lists the advisories
   ```
 
-`src/examples.test.ts` builds, runs and audits all four end-to-end.
+- **resources-app** - reads a `src/main/resources` file at runtime (bundled
+  into the fat jar by `cappu compile`) and a `src/test/resources` file from a
+  test (on the `cappu test` classpath).
+
+`src/examples.test.ts` builds, runs, tests and audits all five end-to-end.

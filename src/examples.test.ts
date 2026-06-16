@@ -163,3 +163,28 @@ test("cappu update bumps an outdated dependency end to end", { skip: !HAS_JAVAC 
     rmSync(store, { recursive: true, force: true });
   }
 });
+
+// src/main/resources is bundled into the build output and read at runtime; the
+// emitter may degrade the resource-reading main, so the compile/run check is
+// javac-only (EXPERIMENTAL skips it). cappu test always uses javac.
+test(
+  "examples/resources-app bundles main resources into the jar",
+  {
+    skip: !HAS_JAVAC || EXPERIMENTAL,
+  },
+  () => {
+    expect(runExample("resources-app")).toBe("hello from main resources\n");
+  },
+);
+
+test(
+  "examples/resources-app reads main and test resources under cappu test",
+  {
+    skip: !HAS_JAVAC,
+  },
+  () => {
+    const output = runExample("resources-app", ["test"]);
+    expect(output).toContain("2 tests successful");
+    expect(output).toContain("0 tests failed");
+  },
+);
