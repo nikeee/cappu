@@ -1,6 +1,7 @@
-// `cappu audit`: scan the resolved dependencies for known vulnerabilities
-// (OSV.dev), grouped by severity and coloured like npm. No fixing. Exits
-// non-zero when anything is found.
+// `cappu audit`: scan the resolved dependencies (transitive included) for
+// known vulnerabilities (OSV.dev), grouped by severity and coloured like npm.
+// For every finding it prints the dependency tree path that pulls the
+// vulnerable package in. No fixing. Exits non-zero when anything is found.
 
 import { styleText } from "node:util";
 
@@ -13,14 +14,14 @@ import {
   auditPackages,
 } from "../audit/index.ts";
 import { type CappuConfig } from "../config.ts";
+import { configuredRoots, configuredSources, processorRoots, testRoots } from "../install.ts";
 import {
-  configuredRoots,
-  configuredSources,
-  lockedCoordinates,
-  processorRoots,
-  testRoots,
-} from "../install.ts";
-import { type Coordinates, coordinatesToString, resolveTransitive } from "../packages/index.ts";
+  type Coordinates,
+  coordinatesToString,
+  packageKey,
+  type ResolvedPackage,
+  resolveTransitive,
+} from "../packages/index.ts";
 import { colorEnabled } from "./color.ts";
 
 type StyleFormat = Parameters<typeof styleText>[0];
@@ -34,6 +35,29 @@ const SEVERITY_STYLE: Record<Severity, StyleFormat> = {
   unknown: "dim",
 };
 
+/**
+ * The chain of coordinates from a declared root down to `target`, following
+ * each resolved package's `requestedBy` edge (nearest-wins records one parent
+ * per package). Returns [root, ..., target]; just [target] for a direct
+ * dependency, and is cycle-guarded.
+ */
+function dependencyPath(
+  byKey: ReadonlyMap<string, ResolvedPackage>,
+  target: Coordinates,
+): Coordinates[] {
+  const path: Coordinates[] = [];
+  const seen = new Set<string>();
+  let current: Coordinates | undefined = target;
+  while (current) {
+    const key = packageKey(current);
+    if (seen.has(key)) break;
+    seen.add(key);
+    path.unshift(current);
+    current = byKey.get(key)?.requestedBy;
+  }
+  return path;
+}
+
 export async function runAudit(
   config: CappuConfig,
   source: AuditSource = new OsvSource(),
@@ -42,15 +66,22 @@ export async function runAudit(
   const paint = (format: StyleFormat, text: string): string =>
     color ? styleText(format, text, { stream: process.stdout }) : text;
 
-  // The locked set is the resolved truth; without a lock, resolve on the fly
-  // so audit works before the first install.
-  let coordinates = lockedCoordinates(config);
-  if (coordinates === undefined) {
-    process.stderr.write("no cappu-lock.json; resolving dependencies to audit...\n");
-    const roots = [...configuredRoots(config), ...processorRoots(config), ...testRoots(config)];
-    const resolution = await resolveTransitive(roots, configuredSources(config));
-    coordinates = resolution.packages.map(p => p.coordinates) as Coordinates[];
-  }
+  // Resolve the whole graph (not just the locked coordinate list): the
+  // requestedBy edges are what let us show why a transitive package is here.
+  let resolving = 0;
+  const resolution = await resolveTransitive(
+    [...configuredRoots(config), ...processorRoots(config), ...testRoots(config)],
+    configuredSources(config),
+    () => {
+      if (colorEnabled(process.stderr.isTTY)) {
+        process.stderr.write(`\r\x1b[2Kresolving dependency graph (${++resolving})...`);
+      }
+    },
+  );
+  if (resolving > 0) process.stderr.write("\r\x1b[2K");
+  const byKey = new Map<string, ResolvedPackage>();
+  for (const p of resolution.packages) byKey.set(packageKey(p.coordinates), p);
+  const coordinates = resolution.packages.map(p => p.coordinates);
 
   let report: AuditReport;
   try {
@@ -67,6 +98,17 @@ export async function runAudit(
     process.exit(0);
   }
 
+  // The dependency path that introduces a vulnerable package, as an indented
+  // tree branch (root at the left, the vulnerable package deepest).
+  const printTree = (target: Coordinates): void => {
+    const path = dependencyPath(byKey, target);
+    path.forEach((c, i) => {
+      const label = coordinatesToString(c);
+      const line = i === path.length - 1 ? paint(["bold", "red"], label) : paint("dim", label);
+      process.stdout.write(`    ${"  ".repeat(i)}${line}\n`);
+    });
+  };
+
   // Grouped worst-first: a severity header, then its findings.
   for (const severity of SEVERITY_ORDER) {
     const inBucket = report.vulnerable.flatMap(p =>
@@ -80,7 +122,8 @@ export async function runAudit(
       const cve = a.aliases.length > 0 ? ` (${a.aliases.join(", ")})` : "";
       const fixed = a.fixedVersions.length > 0 ? `  [fixed in: ${a.fixedVersions.join(", ")}]` : "";
       process.stdout.write(`  ${coordinatesToString(c)}  ${a.id}${cve} - ${a.summary}${fixed}\n`);
-      process.stdout.write(`    ${a.url}\n`);
+      process.stdout.write(`    ${paint("dim", a.url)}\n`);
+      printTree(c);
     }
   }
 
