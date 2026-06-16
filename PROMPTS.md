@@ -221,3 +221,6 @@ no timestamps were captured.
 - 2026-06-16 09:45 — after that, add a cappu update command that bumps dependencies if possible. make sure the dependency tree is still valid (compatible versions).
 - 2026-06-16 09:49 — after that, print the time taken at cappu install, verify, add, etc / make the output of cappu install more colorful
 - 2026-06-16 11:42 — add an end-to-end test for cappu update
+- 2026-06-16 14:09 — node.js 26 comes with more SEA support. is it possible to migrate this to SEA? maybe tsdown has an option for this. look it up in the docs / do it and drop macos x64
+- 2026-06-16 14:09 — use dist dir for the new binaries
+- 2026-06-16 14:09 — make the tsdown config use an expression instead of an if-statement

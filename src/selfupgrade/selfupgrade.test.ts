@@ -33,8 +33,9 @@ test("platform targets match the CD artifact names", () => {
     artifact: "cappu-windows-x64",
     binaryName: "cappu.exe",
   });
-  // CD builds no windows-arm64 and no other platforms
+  // CD builds no windows-arm64, no macOS x64 (Node SEA limitation), no other platforms
   expect(platformTarget("win32", "arm64")).toBeUndefined();
+  expect(platformTarget("darwin", "x64")).toBeUndefined();
   expect(platformTarget("freebsd", "x64")).toBeUndefined();
 });
 

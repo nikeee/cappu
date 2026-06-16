@@ -30,8 +30,11 @@ export function platformTarget(
   const os = { linux: "linux", darwin: "darwin", win32: "windows" }[platform as string];
   const cpu = { x64: "x64", arm64: "arm64" }[arch];
   if (!os || !cpu) return undefined;
-  // CD builds windows for x64 only (see .github/workflows/CD.yaml)
+  // CD's Node-SEA targets (see .github/workflows/CD.yaml / tsdown.config.ts):
+  // windows x64 only, and macOS arm64 only - Node SEA does not support
+  // macOS x64.
   if (os === "windows" && cpu !== "x64") return undefined;
+  if (os === "darwin" && cpu !== "arm64") return undefined;
   return { artifact: `cappu-${os}-${cpu}`, binaryName: os === "windows" ? "cappu.exe" : "cappu" };
 }
 
