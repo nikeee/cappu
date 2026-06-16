@@ -1,9 +1,19 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { expect } from "expect";
 
 import { coordinatesToString } from "../packages/index.ts";
-import { cveAliases, fixedVersionsOf, OsvSource, osvSeverity } from "./osv.ts";
+import {
+  cachedFetchJson,
+  cveAliases,
+  type FetchJson,
+  fixedVersionsOf,
+  OsvSource,
+  osvSeverity,
+} from "./osv.ts";
 
 const VULNS: Record<string, unknown> = {
   "GHSA-aaaa": {
@@ -81,6 +91,34 @@ test("OsvSource maps batch ids back to coordinates and hydrates once", async () 
   expect(foo.aliases).toEqual(["CVE-2021-1"]); // only CVE aliases
   expect(foo.fixedVersions).toEqual(["1.5"]);
   expect(foo.url).toBe("https://osv.dev/vulnerability/GHSA-aaaa");
+});
+
+test("cachedFetchJson caches vuln details but never the querybatch lookup", async () => {
+  const store = mkdtempSync(join(tmpdir(), "cappu-osv-"));
+  const previous = process.env.CAPPU_PACKAGE_STORE;
+  process.env.CAPPU_PACKAGE_STORE = store;
+  try {
+    let calls = 0;
+    const inner: FetchJson = (_url, body) => {
+      calls++;
+      return Promise.resolve(body === undefined ? { id: "GHSA-x", summary: "s" } : { results: [] });
+    };
+    const cached = cachedFetchJson(inner);
+
+    const first = await cached("https://api.osv.dev/v1/vulns/GHSA-x");
+    const second = await cached("https://api.osv.dev/v1/vulns/GHSA-x");
+    expect(second).toEqual(first);
+    expect(calls).toBe(1); // the second read came from disk
+
+    // the affected-version lookup is never cached: fresh findings must surface
+    await cached("https://api.osv.dev/v1/querybatch", { queries: [] });
+    await cached("https://api.osv.dev/v1/querybatch", { queries: [] });
+    expect(calls).toBe(3);
+  } finally {
+    if (previous === undefined) delete process.env.CAPPU_PACKAGE_STORE;
+    else process.env.CAPPU_PACKAGE_STORE = previous;
+    rmSync(store, { recursive: true, force: true });
+  }
 });
 
 test("severity, aliases and fixed-version extraction", () => {

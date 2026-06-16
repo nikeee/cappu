@@ -3,6 +3,10 @@
 // ids affecting each {package, version}, then each id is hydrated once for its
 // details. Injectable fetchJson keeps it testable without a network.
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+import { cacheDir } from "../cacheDir.ts";
 import { type Coordinates, coordinatesToString, type CoordinateString } from "../packages/index.ts";
 import { type Advisory, type AuditSource, type Severity } from "./types.ts";
 
@@ -23,6 +27,46 @@ const defaultFetchJson: FetchJson = async (url, body) => {
   if (!response.ok) throw new Error(`OSV ${response.status} for ${url}`);
   return response.json();
 };
+
+// OSV ids are GHSA-..., CVE-..., GO-..., etc. - safe filename characters.
+const VULN_ID = /^[A-Za-z0-9._-]+$/;
+
+// <store>/_audit/osv/<id>.json, or undefined when the id is not store-safe.
+function vulnCachePath(id: string): string | undefined {
+  if (!VULN_ID.test(id)) return undefined;
+  return join(cacheDir("packages", process.env.CAPPU_PACKAGE_STORE), "_audit", "osv", `${id}.json`);
+}
+
+/**
+ * defaultFetchJson with the immutable vuln-detail GETs (/v1/vulns/{id}) cached
+ * forever in the package store: re-hydrating known advisories is the slow part
+ * of a repeat `cappu audit`, and an advisory's content does not change. The
+ * querybatch lookup (which advisories affect a version - which DOES change as
+ * new ones publish) is never cached, so audit still surfaces fresh findings.
+ */
+export function cachedFetchJson(inner: FetchJson = defaultFetchJson): FetchJson {
+  return async (url, body) => {
+    const id = body === undefined ? url.split("/v1/vulns/")[1] : undefined;
+    const cacheFile = id ? vulnCachePath(id) : undefined;
+    if (cacheFile && existsSync(cacheFile)) {
+      try {
+        return JSON.parse(readFileSync(cacheFile, "utf8"));
+      } catch {
+        // corrupt entry: fall through to a live fetch (and rewrite it)
+      }
+    }
+    const result = await inner(url, body);
+    if (cacheFile && result !== undefined) {
+      try {
+        mkdirSync(dirname(cacheFile), { recursive: true });
+        writeFileSync(cacheFile, JSON.stringify(result));
+      } catch {
+        // a read-only store never fails the lookup
+      }
+    }
+    return result;
+  };
+}
 
 interface OsvVuln {
   id: string;
@@ -125,11 +169,14 @@ export class OsvSource implements AuditSource {
       });
     }
 
-    // 2. hydrate each distinct vuln once
+    // 2. hydrate each distinct vuln once (concurrently; cached ones resolve
+    // from disk, the rest fetch in parallel rather than one after another)
     const vulns = new Map<string, OsvVuln>();
-    for (const id of wantedIds) {
-      vulns.set(id, (await this.fetchJson(`${API}/v1/vulns/${id}`)) as OsvVuln);
-    }
+    await Promise.all(
+      [...wantedIds].map(async id => {
+        vulns.set(id, (await this.fetchJson(`${API}/v1/vulns/${id}`)) as OsvVuln);
+      }),
+    );
 
     // 3. attach advisories to their coordinates
     for (const c of coordinates) {

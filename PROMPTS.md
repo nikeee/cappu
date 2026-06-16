@@ -240,3 +240,4 @@ no timestamps were captured.
 - 2026-06-16 15:08 — also take common license URLs into account for normalization
 - 2026-06-16 15:20 — add a progress bar to the self-upgrade. also make it colorful
 - 2026-06-16 15:28 — next, add a license field to cappu.json similar to the spdx-license of npm's package.json. Only support spdx.
+- 2026-06-16 15:34 — cappu audit is a little slow. can we cache something here?

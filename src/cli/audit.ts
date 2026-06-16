@@ -12,6 +12,7 @@ import {
   type Severity,
   SEVERITY_ORDER,
   auditPackages,
+  cachedFetchJson,
 } from "../audit/index.ts";
 import { type CappuConfig } from "../config.ts";
 import { configuredRoots, configuredSources, processorRoots, testRoots } from "../install.ts";
@@ -61,7 +62,8 @@ function dependencyPath(
 
 export async function runAudit(
   config: CappuConfig,
-  source: AuditSource = new OsvSource(),
+  // The OSV source over a fetcher that caches immutable vuln details on disk.
+  source: AuditSource = new OsvSource(cachedFetchJson()),
 ): Promise<never> {
   const color = colorEnabled(process.stdout.isTTY);
   const paint = (format: StyleFormat, text: string): string =>
