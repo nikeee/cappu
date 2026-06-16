@@ -50,7 +50,7 @@ cappu test
 
 ### Other Stuff
 ```sh
-# check dependencies for known CVEs
+# check dependencies for known CVEs. Exits with != 0 if there are some. You can use that in CI
 cappu audit
 
 cappu search # look up a maven package
@@ -58,6 +58,9 @@ cappu search # look up a maven package
 cappu verify # check installed dependencies against their checksum, reinstall if mismatch
 
 cappu self-upgrade # upgrade cappu binary to latest version
+
+# use this to get output you can forward to that one compliance person that needs a list of all project dependencies + licenses used
+cappu licenses # optional --json
 ```
 
 ### LSP Server
