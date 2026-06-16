@@ -29,6 +29,9 @@ The entire Java tooling seems to be centered around the experience in an IDE tha
 
 Using maven or gradle is somehow extremely cumbersome to use in multi-stage Docker builds. Cappu aims to improve that by offering a global cache directory as well as a lockfile. Everything should be as easy as shown below.
 
+##### Why is this thing in JavaScript?
+Because I wanted to use the same parsing/checking/lsp architecture as the TS compiler. We're going to port it to golang some day (the same wy the TSC team has done it).
+
 ## Usage
 ```sh
 # create a new project with cappu.json in $PWD (similar to npm init)
