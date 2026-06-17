@@ -6,6 +6,7 @@
 import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { type Descriptor, type InternalName } from "./bytecode.ts";
 import type { Program } from "./program.ts";
 import { type Uri } from "../workspace.ts";
 import { readZipEntries } from "./zipReader.ts";
@@ -27,7 +28,7 @@ const ACC_ENUM = 0x4000;
 interface MemberInfo {
   flags: number;
   name: string;
-  descriptor: string;
+  descriptor: Descriptor;
   /** Generic signature (JVMS 4.7.9), when the declaration was generic. */
   signature?: string;
 }
@@ -35,9 +36,9 @@ interface MemberInfo {
 interface ClassInfo {
   flags: number;
   /** Binary name, e.g. "com/app/Foo". */
-  name: string;
-  superName?: string;
-  interfaces: string[];
+  name: InternalName;
+  superName?: InternalName;
+  interfaces: InternalName[];
   fields: MemberInfo[];
   methods: MemberInfo[];
   signature?: string;
@@ -108,9 +109,9 @@ function parseClassFile(bytes: Uint8Array): ClassInfo {
         throw new ClassFileError(`unknown constant pool tag ${tag}`);
     }
   }
-  const className = (index: number): string | undefined => {
+  const className = (index: number): InternalName | undefined => {
     const nameIndex = classNameIndex[index];
-    return nameIndex === undefined ? undefined : utf8[nameIndex];
+    return nameIndex === undefined ? undefined : (utf8[nameIndex] as InternalName | undefined);
   };
 
   const flags = u2();
@@ -119,7 +120,7 @@ function parseClassFile(bytes: Uint8Array): ClassInfo {
   const superIndex = u2();
   const superName = superIndex === 0 ? undefined : className(superIndex);
   const interfaceCount = u2();
-  const interfaces: string[] = [];
+  const interfaces: InternalName[] = [];
   for (let i = 0; i < interfaceCount; i++) {
     const n = className(u2());
     if (n) interfaces.push(n);
@@ -147,7 +148,7 @@ function parseClassFile(bytes: Uint8Array): ClassInfo {
     for (let i = 0; i < count; i++) {
       const memberFlags = u2();
       const memberName = utf8[u2()] ?? "";
-      const descriptor = utf8[u2()] ?? "";
+      const descriptor = (utf8[u2()] ?? "") as Descriptor;
       const signature = readAttributes();
       members.push({ flags: memberFlags, name: memberName, descriptor, signature });
     }

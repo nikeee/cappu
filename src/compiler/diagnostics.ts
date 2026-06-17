@@ -5,7 +5,13 @@
 // Messages use {0}, {1}, ... placeholders filled by formatMessage. Codes are
 // arbitrary but stable within this project (no relation to javac/tsc codes).
 
-import { type Diagnostic, DiagnosticCategory, type DiagnosticMessage } from "./types.ts";
+import {
+  type Diagnostic,
+  DiagnosticCategory,
+  type DiagnosticCode,
+  type DiagnosticKey,
+  type DiagnosticMessage,
+} from "./types.ts";
 
 function diag(
   code: number,
@@ -13,7 +19,8 @@ function diag(
   message: string,
   category: DiagnosticCategory = DiagnosticCategory.Error,
 ): DiagnosticMessage {
-  return { code, key, category, message };
+  // The single brand boundary: the table literals stay plain number/string.
+  return { code: code as DiagnosticCode, key: key as DiagnosticKey, category, message };
 }
 
 export const Diagnostics = {

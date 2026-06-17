@@ -11,6 +11,8 @@
 // keyword range - they are scanned as Identifier and recognized positionally,
 // matching how the TS compiler treats its contextual keywords.
 
+import { type Brand } from "../brand.ts";
+
 // A plain (non-const) enum so the numeric kind can be mapped back to its name at
 // runtime (SyntaxKind[kind]) - used by syntaxKindToString for debug output and
 // AST baselines. Usage is identical to a const enum.
@@ -924,16 +926,21 @@ export const enum DiagnosticCategory {
   Message,
 }
 
+/** A diagnostic message's stable machine identifier (e.g. "Identifier_expected"). */
+export type DiagnosticKey = Brand<string, "DiagnosticKey">;
+/** A diagnostic's stable numeric code, distinct from a source offset or line. */
+export type DiagnosticCode = Brand<number, "DiagnosticCode">;
+
 export interface DiagnosticMessage {
-  readonly key: string;
-  readonly code: number;
+  readonly key: DiagnosticKey;
+  readonly code: DiagnosticCode;
   readonly category: DiagnosticCategory;
   readonly message: string;
 }
 
 /** A diagnostic produced by the parser, located by an offset range in the source text. */
 export interface Diagnostic extends ReadonlyTextRange {
-  readonly code: number;
+  readonly code: DiagnosticCode;
   readonly category: DiagnosticCategory;
   readonly messageText: string;
 }
