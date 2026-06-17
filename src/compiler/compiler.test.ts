@@ -122,6 +122,15 @@ test("missing configured dirs warn only when a cappu.json is present", () => {
   });
 });
 
+test("the default Maven/Gradle classPath dirs never warn when absent", () => {
+  inTempDir({ "cappu.json": "{}" }, dir => {
+    const missing = missingConfiguredPaths(loadConfig(undefined, dir));
+    for (const ext of ["target/dependency", "build/libs", "lib", "libs"]) {
+      expect(missing).not.toContain(join(dir, ext));
+    }
+  });
+});
+
 test("compiling with absent configured dirs does not throw", () => {
   inTempDir(
     {

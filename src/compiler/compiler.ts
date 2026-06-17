@@ -23,7 +23,12 @@ import { delimiter, dirname, join } from "node:path";
 import { setDegradeListener } from "./bytecode.ts";
 import { createChecker } from "./checker.ts";
 import { classDeclaresMain, loadClassPath } from "./classfileReader.ts";
-import { artifactBaseName, type CappuConfig, resolveConfigPath } from "../config.ts";
+import {
+  artifactBaseName,
+  type CappuConfig,
+  EXTERNAL_CLASS_PATHS,
+  resolveConfigPath,
+} from "../config.ts";
 import { emitSourceFile } from "./emitter.ts";
 import { type CompileDiagnostic, parseJavacDiagnostics } from "./javacDiagnostics.ts";
 import { expandedClassPath } from "./javacPaths.ts";
@@ -159,12 +164,15 @@ function generatedClassEntries(config: CappuConfig): ZipEntryInput[] {
 /**
  * Configured classPath/sourcePaths entries that do not exist on disk. They are
  * treated as empty everywhere; this is only for warning the user, and only
- * when the paths come from an actual cappu.json (the built-in defaults are
- * allowed to be absent silently).
+ * when the paths come from an actual cappu.json. The built-in Maven/Gradle
+ * classPath defaults (target/dependency, build/libs, ...) are best-effort and
+ * usually absent, so they never warn.
  */
 export function missingConfiguredPaths(config: CappuConfig): string[] {
+  const external = new Set<string>(EXTERNAL_CLASS_PATHS);
   if (!config.fromFile) return [];
   return [...config.compilerOptions.classPath, ...config.compilerOptions.sourcePaths]
+    .filter(p => !external.has(p))
     .map(p => resolveConfigPath(config, p))
     .filter(p => !existsSync(p));
 }
