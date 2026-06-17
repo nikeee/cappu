@@ -17,6 +17,7 @@ test("spelling, spacing and punctuation variants map to the same SPDX id", () =>
   expect(normalizeLicense("The MIT License")).toBe("MIT");
   expect(normalizeLicense("Eclipse Public License - v 1.0")).toBe("EPL-1.0");
   expect(normalizeLicense("EPL 2.0")).toBe("EPL-2.0");
+  expect(normalizeLicense("New BSD License")).toBe("BSD-3-Clause");
 });
 
 // The exact <license><name> strings declared by common Maven Central packages

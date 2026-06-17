@@ -565,6 +565,41 @@ test("getMetadata answers (resolved POMs) are cached forever in the store", asyn
   }
 });
 
+test("a metadata entry from an older cappu (no schema version) is ignored and re-fetched", async () => {
+  const store = mkdtempSync(join(tmpdir(), "cappu-store-"));
+  const previousStore = process.env.CAPPU_PACKAGE_STORE;
+  process.env.CAPPU_PACKAGE_STORE = store;
+  try {
+    let fetches = 0;
+    const metadata = { coordinates: toCoordinates("org.x", "y", "1.0"), dependencies: [] };
+    const source = withMetadataCache({
+      name: "https://repo.test/m2",
+      search: () => Promise.resolve([]),
+      listVersions: () => Promise.resolve([]),
+      getMetadata: () => {
+        fetches++;
+        return Promise.resolve(metadata);
+      },
+    });
+    const coords = toCoordinates("org.x", "y", "1.0");
+    await source.getMetadata(coords); // writes a current-schema entry
+    expect(fetches).toBe(1);
+
+    // overwrite it with the bare PackageMetadata an older cappu would have stored
+    const rel = (readdirSync(store, { recursive: true }) as string[]).find(f =>
+      f.endsWith("metadata.json"),
+    );
+    writeFileSync(join(store, rel!), JSON.stringify(metadata));
+
+    await source.getMetadata(coords); // stale schema -> re-fetched, not served
+    expect(fetches).toBe(2);
+  } finally {
+    if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
+    else process.env.CAPPU_PACKAGE_STORE = previousStore;
+    rmSync(store, { recursive: true, force: true });
+  }
+});
+
 test("the package store serves repeat installs and rejects unsafe segments", async () => {
   const store = mkdtempSync(join(tmpdir(), "cappu-store-"));
   const dirA = mkdtempSync(join(tmpdir(), "cappu-install-"));

@@ -37,6 +37,8 @@ const SPDX_ALIASES: Record<string, string> = {
   "bsd 2 clause": "BSD-2-Clause",
   "bsd 3 clause": "BSD-3-Clause",
   "bsd license 3": "BSD-3-Clause",
+  "new bsd license": "BSD-3-Clause", // the common name for the 3-clause BSD license
+  "the new bsd license": "BSD-3-Clause",
   "cddl gplv2 with classpath exception": "CDDL-1.1 OR GPL-2.0-with-classpath-exception",
   "gpl2 w cpe": "GPL-2.0-with-classpath-exception",
   "eclipse public license 1 0": "EPL-1.0",

@@ -254,3 +254,5 @@ no timestamps were captured.
 - 2026-06-16 21:20 — do all of them
 - 2026-06-16 21:20 — except the DocVersion
 - 2026-06-16 21:35 — next: the progress bar of cappu self-upgrade is missing units (MiB?)
+- 2026-06-16 21:50 — next: cappu licenses lists a lot of "no license declared". e.g. junit:junit:4.13. is that due to missing spdx mappings? fall back to the raw license
+- 2026-06-16 21:50 — add spdx identifier "New BSD License" that maps to "BSD-3-Clause" if it is correct

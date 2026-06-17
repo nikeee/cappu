@@ -80,6 +80,11 @@ export function configuredSources(
 
 const VERSION_CACHE_TTL_MS = 60 * 60 * 1000;
 
+// Bumped when PackageMetadata's shape grows, so entries from an older cappu
+// (e.g. before licenses were parsed) are ignored and re-fetched rather than
+// served stale. v1 was the bare PackageMetadata; v2 adds licenses.
+const METADATA_CACHE_VERSION = 2;
+
 // <store>/_metadata/<source>/<group dirs>/<artifact>[/<version>]/<file>, or
 // undefined when a segment is not store-safe (then caching is skipped).
 function metadataCachePath(
@@ -131,7 +136,12 @@ export function withMetadataCache(source: PackageSource): PackageSource {
     );
     if (cacheFile && existsSync(cacheFile)) {
       try {
-        return JSON.parse(readFileSync(cacheFile, "utf8")) as PackageMetadata;
+        const cached = JSON.parse(readFileSync(cacheFile, "utf8")) as {
+          v?: number;
+          metadata?: PackageMetadata;
+        };
+        // older/unknown schema (e.g. a pre-licenses entry): re-fetch and rewrite
+        if (cached.v === METADATA_CACHE_VERSION && cached.metadata) return cached.metadata;
       } catch {
         // corrupt entry: fall through to a live fetch (and rewrite it)
       }
@@ -140,7 +150,7 @@ export function withMetadataCache(source: PackageSource): PackageSource {
     if (cacheFile && metadata) {
       try {
         mkdirSync(dirname(cacheFile), { recursive: true });
-        writeFileSync(cacheFile, JSON.stringify(metadata));
+        writeFileSync(cacheFile, JSON.stringify({ v: METADATA_CACHE_VERSION, metadata }));
       } catch {
         // a read-only store never fails the lookup
       }
