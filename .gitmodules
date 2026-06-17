@@ -50,3 +50,6 @@
 	path = test-fixtures/emitter/corpus/commons-imaging
 	url = https://github.com/apache/commons-imaging.git
 	shallow = true
+[submodule "TypeScript-Go"]
+	path = TypeScript-Go
+	url = git@github.com:microsoft/typescript-go.git
