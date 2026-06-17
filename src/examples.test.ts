@@ -61,8 +61,20 @@ function runExample(name: string, command: string[] = ["compile"]): string {
     }
     const env = { ...process.env, CAPPU_PACKAGE_STORE: store };
     execFileSync(tsx, [cli, "install"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
-    const flags = EXPERIMENTAL && command[0] === "compile" ? ["--experimental-compiler"] : [];
-    const output = execFileSync(tsx, [cli, ...command, ...flags], {
+    // The experimental compiler is enabled via cappu.json (no CLI flag); tolerate
+    // degraded bodies so best-effort emission doesn't fail the build.
+    if (EXPERIMENTAL && command[0] === "compile") {
+      const cfgPath = join(work, "cappu.json");
+      const cfg = JSON.parse(readFileSync(cfgPath, "utf8")) as {
+        compilerOptions?: Record<string, unknown>;
+      };
+      cfg.compilerOptions = {
+        ...cfg.compilerOptions,
+        experimentalCompiler: { enabled: true, failOnDegrade: false },
+      };
+      writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    }
+    const output = execFileSync(tsx, [cli, ...command], {
       cwd: work,
       env,
       encoding: "utf8",

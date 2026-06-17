@@ -15,10 +15,7 @@ export interface CompileFlags {
   output?: string;
   /** --artifact: jar base name override (steers the output jar, e.g. for Docker). */
   artifact?: string;
-  experimentalCompiler?: boolean;
   quiet?: boolean;
-  failOnDegrade?: boolean;
-  validate?: boolean;
 }
 
 const OUTPUT_KINDS: readonly OutputKind[] = ["classes", "jar", "fat-jar"];
@@ -49,36 +46,21 @@ export async function runCompileCommand(
     process.exit(2);
   }
   const effectiveOutput = output ?? config.compilerOptions.output;
-  const experimental =
-    flags.experimentalCompiler ?? config.compilerOptions.experimentalCompiler.enabled;
-  // --validate compares OUR bytecode against javac's; --fail-on-degrade is
-  // about OUR placeholder bodies - both only mean something with the
-  // experimental compiler (the default IS javac), so explicit flags require it.
-  if (flags.validate && !experimental) {
-    process.stderr.write(
-      "cappu: --validate requires the experimental compiler (javac is the default)\n",
-    );
-    process.exit(2);
-  }
-  if (flags.failOnDegrade && !experimental) {
-    process.stderr.write(
-      "cappu: --fail-on-degrade requires the experimental compiler (javac never degrades)\n",
-    );
-    process.exit(2);
-  }
-  // validate runs only under the experimental compiler; the flag or the config
-  // (experimentalCompiler.validate) turns it on.
-  const validate =
-    experimental && (flags.validate ?? config.compilerOptions.experimentalCompiler.validate);
+  // The experimental compiler and its validate / fail-on-degrade settings live
+  // only in cappu.json (compilerOptions.experimentalCompiler), not on the CLI.
+  const experimental = config.compilerOptions.experimentalCompiler.enabled;
+  // validate (compare our bytecode against javac's) runs only under the
+  // experimental compiler and needs a class tree for javap to read.
+  const validate = experimental && config.compilerOptions.experimentalCompiler.validate;
   if (validate && effectiveOutput !== "classes") {
-    process.stderr.write("cappu: validate requires output classes (javap reads class files)\n");
+    process.stderr.write(
+      'cappu: experimentalCompiler.validate needs "output": "classes" (javap reads class files)\n',
+    );
     process.exit(2);
   }
   const result = runCompile(inputs, {
     output,
     artifactName: flags.artifact?.replace(/\.jar$/, ""),
-    experimentalCompiler: flags.experimentalCompiler,
-    failOnDegrade: flags.failOnDegrade,
     config,
   });
   // runCompile is print-free; render its outcome here.

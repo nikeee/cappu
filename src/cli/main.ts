@@ -89,14 +89,9 @@ Compile options:
       --artifact <name> Jar base name in ./dist (e.g. "app" -> dist/app.jar);
                         default <artifactId>-<version> or the project dir name
   -q, --quiet           Do not print the path of each emitted .class file
-      --fail-on-degrade Fail when a method body degrades to a placeholder
-                        (an unsupported construct; needs --experimental-compiler)
-      --validate        Also compile with javac and fail unless the normalized
-                        bytecode matches (needs --experimental-compiler)
-      --experimental-compiler
-                        Compile with cappu's own compiler instead of javac
-                        (the default delegates to the configured/provisioned
-                        javac entirely)
+
+  (cappu's experimental compiler and its failOnDegrade / validate options are
+  configured in cappu.json under compilerOptions.experimentalCompiler.)
 
 Global:
   -h, --help            Show this help
@@ -120,11 +115,8 @@ const { values, positionals } = (() => {
         // can supply the value (an explicit flag always wins).
         quiet: { type: "boolean", short: "q" },
         verbose: { type: "boolean", short: "v" },
-        "fail-on-degrade": { type: "boolean" },
         "with-schema": { type: "boolean", default: false },
         yes: { type: "boolean", short: "y", default: false },
-        validate: { type: "boolean" },
-        "experimental-compiler": { type: "boolean" },
         json: { type: "boolean", default: false },
         "no-cache": { type: "boolean", default: false },
         repo: { type: "string" },
@@ -250,9 +242,6 @@ switch (command) {
         output: values.output,
         artifact: values.artifact,
         quiet: values.quiet,
-        failOnDegrade: values["fail-on-degrade"],
-        experimentalCompiler: values["experimental-compiler"],
-        validate: values.validate,
       },
       config,
     );
