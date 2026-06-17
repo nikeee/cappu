@@ -39,4 +39,16 @@ Each directory is a self-contained cappu project. Dependencies install into
   into the fat jar by `cappu compile`) and a `src/test/resources` file from a
   test (on the `cappu test` classpath).
 
-`src/examples.test.ts` builds, runs, tests and audits all five end-to-end.
+- **spring-boot-app** - a minimal Spring Boot app (latest Spring Boot). cappu
+  resolves the whole starter dependency tree and compiles it; it runs from a
+  classpath of the individual jars (not a fat jar - Spring relies on each jar's
+  separate `META-INF` for auto-configuration):
+
+  ```sh
+  cd spring-boot-app
+  cappu install                 # the spring-boot-starter tree into .cappu/lib/classes
+  cappu compile -o classes      # app classes into dist/
+  java -cp "dist:.cappu/lib/classes/*" com.example.App
+  ```
+
+`src/examples.test.ts` builds, runs, tests and audits every example end-to-end.

@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 
 import { expect } from "expect";
@@ -237,6 +237,43 @@ test(
     const output = runExample("resources-app", ["test"]);
     expect(output).toContain("2 tests successful");
     expect(output).toContain("0 tests failed");
+  },
+);
+
+// A minimal Spring Boot app: cappu resolves the whole starter tree and compiles
+// it, then it runs from a classpath of the individual jars (NOT a fat jar -
+// Spring auto-config needs each jar's separate META-INF). Networked + JDK-gated;
+// java expands the `<dir>/*` classpath entry itself, so no shell is involved.
+test(
+  "examples/spring-boot-app boots Spring Boot from a classpath build",
+  {
+    skip: !HAS_JAVAC,
+  },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
+    const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
+    const work = join(root, "spring-boot-app");
+    try {
+      for (const entry of ["cappu.json", "cappu-lock.json", "src", ".gitignore"]) {
+        cpSync(join(examplesDir, "spring-boot-app", entry), join(work, entry), { recursive: true });
+      }
+      const env = { ...process.env, CAPPU_PACKAGE_STORE: store };
+      execFileSync(tsx, [cli, "install"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
+      execFileSync(tsx, [cli, "compile", "-o", "classes"], {
+        cwd: work,
+        env,
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      const classpath = `${join(work, "dist")}${delimiter}${join(work, ".cappu", "lib", "classes")}/*`;
+      const output = execFileSync(javaBin(), ["-cp", classpath, "com.example.App"], {
+        encoding: "utf8",
+      });
+      expect(output).toContain("Spring Boot"); // the startup banner
+      expect(output).toContain("Started App"); // the context booted
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(store, { recursive: true, force: true });
+    }
   },
 );
 
