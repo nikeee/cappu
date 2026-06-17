@@ -28,6 +28,15 @@ const InlayHintsSchema = z.object({
 // Downloaded dependency jars live under .cappu/ - cappu-managed, gitignored
 // state alongside the provisioned JDKs and generated sources, not checked in.
 export const DEFAULT_CLASS_PATH = "./.cappu/lib/classes";
+// Conventional dirs where Maven/Gradle (or a manual setup) leave dependency
+// jars, added to the default classPath so the language server resolves types
+// from tool-managed jars without manual config. Missing dirs are simply ignored.
+export const EXTERNAL_CLASS_PATHS = [
+  "./target/dependency", // Maven: `mvn dependency:copy-dependencies`
+  "./build/libs", // Gradle build output
+  "./lib", // a commonly used manually-managed jar folder
+  "./libs",
+];
 export const DEFAULT_SOURCE_PATH = "./src/main/java";
 export const DEFAULT_RESOURCE_PATH = "./src/main/resources";
 // Created by `cappu init` and used by `cappu test` (nikeee/cappu#16): test
@@ -40,7 +49,7 @@ export const DEFAULT_PROCESSOR_PATH = "./.cappu/lib/processors";
 
 const CompilerOptionsSchema = z.object({
   /** Directories or .jar files scanned for .class files (resolution only). */
-  classPath: z.array(z.string()).default([DEFAULT_CLASS_PATH]),
+  classPath: z.array(z.string()).default([DEFAULT_CLASS_PATH, ...EXTERNAL_CLASS_PATHS]),
   /** Directories scanned recursively for .java sources (resolution only). */
   sourcePaths: z.array(z.string()).default([DEFAULT_SOURCE_PATH]),
   /** Directories whose files are copied verbatim into the build output. */
@@ -158,7 +167,10 @@ export const CONFIG_TEMPLATE = `
   "compilerOptions": {
     // Compiled dependencies: directories of .class files, or .jar files.
     // Types resolve against them but are not compiled. Default if unset:
-    // ["./.cappu/lib/classes"] (where cappu install downloads them).
+    // ["./.cappu/lib/classes"] (where cappu install downloads them) plus the
+    // conventional Maven/Gradle dirs ./target/dependency, ./build/libs, ./lib,
+    // ./libs - so the language server also sees tool-managed jars. Missing dirs
+    // are ignored.
     // "classPath": ["./.cappu/lib/classes"],
 
     // Sources to be compiled. Default if unset: ["./src/main/java"].
