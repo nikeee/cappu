@@ -5,8 +5,12 @@
 
 import { hash } from "node:crypto";
 
+import { type Brand } from "../brand.ts";
 import { DEFAULT_PUBLISH_REGISTRY } from "../config.ts";
 import { type Coordinates } from "../packages/index.ts";
+
+/** A registry bearer token (a credential), distinct from arbitrary strings. */
+export type BearerToken = Brand<string, "BearerToken">;
 
 /**
  * The registry `cappu publish` uploads to, resolved npm-style (highest wins):
@@ -23,7 +27,7 @@ export function resolvePublishRegistry(
 
 export type PublishAuth =
   | { type: "basic"; username: string; password: string }
-  | { type: "bearer"; token: string };
+  | { type: "bearer"; token: BearerToken };
 
 /** The maven2 path for a file: group dots become directories. */
 export function maven2Path(coordinates: Coordinates, filename: string): string {
@@ -43,7 +47,8 @@ export function resolvePublishAuth(env: NodeJS.ProcessEnv = process.env): Publis
   const username = env.CAPPU_PUBLISH_USERNAME;
   const password = env.CAPPU_PUBLISH_PASSWORD;
   if (username && password) return { type: "basic", username, password };
-  if (env.CAPPU_PUBLISH_TOKEN) return { type: "bearer", token: env.CAPPU_PUBLISH_TOKEN };
+  if (env.CAPPU_PUBLISH_TOKEN)
+    return { type: "bearer", token: env.CAPPU_PUBLISH_TOKEN as BearerToken };
   return undefined;
 }
 

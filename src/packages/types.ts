@@ -11,6 +11,8 @@ export type GroupId = Brand<string, "GroupId">;
 export type ArtifactId = Brand<string, "ArtifactId">;
 /** A Maven version ("2.13.1"), distinct from a version spec/range or a groupId. */
 export type Version = Brand<string, "Version">;
+/** A Maven dependency scope ("compile", "runtime", "test", "provided", "import"). */
+export type MavenScope = Brand<string, "MavenScope">;
 
 /** Exact maven-style coordinates of one package version. */
 export interface Coordinates {
@@ -22,7 +24,7 @@ export interface Coordinates {
 /** A dependency as declared by a package (before resolution). */
 export interface DependencyDeclaration extends Coordinates {
   /** Maven scope; only "compile" and "runtime" propagate transitively. */
-  readonly scope?: string;
+  readonly scope?: MavenScope;
   /** Optional dependencies do not propagate to consumers. */
   readonly optional?: boolean;
 }

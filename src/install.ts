@@ -40,6 +40,7 @@ import {
   type License,
   matchingVersions,
   MavenRepositorySource,
+  type PackageKey,
   type PackageMetadata,
   type PackageSource,
   type Resolution,
@@ -354,7 +355,7 @@ export type UpdateConfiguration = (typeof UPDATE_CONFIGS)[number];
 
 export interface DependencyBump {
   configuration: UpdateConfiguration;
-  key: string;
+  key: PackageKey;
   from: string;
   to: string;
 }
@@ -422,7 +423,7 @@ export async function planUpdates(
         const resolution = await resolveTransitive(roots, sources);
         if (resolution.conflicts.length === 0 && resolution.missing.length === 0) {
           working[configuration][key] = candidate;
-          bumps.push({ configuration, key, from: current, to: candidate });
+          bumps.push({ configuration, key: key as PackageKey, from: current, to: candidate });
           break;
         }
       }

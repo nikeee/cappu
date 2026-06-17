@@ -18,6 +18,7 @@ import {
   type Coordinates,
   coordinatesToString,
   type DependencyDeclaration,
+  type MavenScope,
   type PackageMetadata,
   type PackageSource,
   toCoordinates,
@@ -202,7 +203,7 @@ export function effectiveMetadata(
     }
     dependencies.push({
       ...toCoordinates(groupId, artifactId, version),
-      scope: asText(dep.scope),
+      scope: asText(dep.scope) as MavenScope | undefined,
       optional: dep.optional === "true" || dep.optional === true,
     });
   }

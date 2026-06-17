@@ -13,7 +13,7 @@ import { parse, stringify } from "comment-json";
 
 import { type CappuConfig, DEFAULT_CONFIG_NAME, loadConfig } from "../config.ts";
 import { configuredSources, pickAddVersion } from "../install.ts";
-import { type PackageSource } from "../packages/index.ts";
+import { type PackageKey, type PackageSource } from "../packages/index.ts";
 import { runInstall } from "./install.ts";
 
 const CONFIGURATIONS = [
@@ -26,7 +26,7 @@ type Configuration = (typeof CONFIGURATIONS)[number];
 
 export interface AddCoordinate {
   /** "group:artifact" - the dependencies-section key. */
-  key: string;
+  key: PackageKey;
   /** Explicit version, or undefined to use the newest published one. */
   version?: string;
 }
@@ -38,8 +38,9 @@ export interface AddCoordinate {
 export function parseAddCoordinate(spec: string): AddCoordinate | undefined {
   const segments = spec.split(":");
   if (segments.some(s => s === "")) return undefined;
-  if (segments.length === 2) return { key: spec };
-  if (segments.length === 3) return { key: `${segments[0]}:${segments[1]}`, version: segments[2] };
+  if (segments.length === 2) return { key: spec as PackageKey };
+  if (segments.length === 3)
+    return { key: `${segments[0]}:${segments[1]}` as PackageKey, version: segments[2] };
   return undefined;
 }
 

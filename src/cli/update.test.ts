@@ -11,6 +11,7 @@ import {
   type Coordinates,
   type DependencyDeclaration,
   InMemoryPackageSource,
+  type PackageKey,
   type PackageMetadata,
   toCoordinates,
 } from "../packages/index.ts";
@@ -96,8 +97,8 @@ test("applyBumpsToJsonc overwrites versions and keeps comments", () => {
 }
 `;
   const out = applyBumpsToJsonc(text, [
-    { configuration: "implementation", key: "g:a", from: "1.0", to: "1.5" },
-    { configuration: "testImplementation", key: "g:t", from: "3.0", to: "3.1" },
+    { configuration: "implementation", key: "g:a" as PackageKey, from: "1.0", to: "1.5" },
+    { configuration: "testImplementation", key: "g:t" as PackageKey, from: "3.0", to: "3.1" },
   ]);
   expect(out).toContain("// my deps");
   expect(out).toContain("// pin");

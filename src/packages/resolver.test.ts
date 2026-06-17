@@ -11,6 +11,7 @@ import {
 import {
   type Coordinates,
   coordinatesToString,
+  type MavenScope,
   type PackageMetadata,
   toCoordinates,
 } from "./types.ts";
@@ -26,7 +27,9 @@ function pkg(
   return {
     coordinates: parse(spec),
     dependencies: dependencies.map(d =>
-      typeof d === "string" ? parse(d) : { ...parse(d.spec), scope: d.scope, optional: d.optional },
+      typeof d === "string"
+        ? parse(d)
+        : { ...parse(d.spec), scope: d.scope as MavenScope | undefined, optional: d.optional },
     ),
   };
 }

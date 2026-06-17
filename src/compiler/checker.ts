@@ -3,6 +3,7 @@
 // declared types, the common expression forms and member typing - enough for
 // hover and as the base for assignability/overloads/inference (P6-P8).
 // Everything unknown degrades to errorType.
+import { type Brand } from "../brand.ts";
 import { foldConstant } from "./constfold.ts";
 
 import {
@@ -73,12 +74,15 @@ import {
 } from "./types.ts";
 import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
 
+/** A single abstract method's name (the invokedynamic call name for a lambda). */
+export type SamName = Brand<string, "SamName">;
+
 /** What the emitter needs to lower a lambda expression (see getLambdaInfo). */
 export interface LambdaInfo {
   /** The target functional interface (a Class type). */
   readonly interfaceType: Type;
   /** The single abstract method's name (the invokedynamic call name). */
-  readonly samName: string;
+  readonly samName: SamName;
   /** SAM parameter/return types unsubstituted (type variables erase to Object). */
   readonly erasedParams: readonly Type[];
   readonly erasedReturn: Type;
@@ -791,7 +795,7 @@ export function createChecker(program: Program): Checker {
     const erasedReturn = resolveType(sam.returnType, sam);
     return {
       interfaceType: target,
-      samName: sam.name.text,
+      samName: sam.name.text as SamName,
       erasedParams,
       erasedReturn,
       instParams: erasedParams.map(t => substitute(t, subst)),
