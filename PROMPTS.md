@@ -276,3 +276,20 @@ no timestamps were captured.
 - 2026-06-17 12:10 — can the artifact be overwritten in cappu-compile via cli? useful to steer output jar for docker builds
 - 2026-06-17 12:25 — next: make cappu init ask some questions: groupId, artifactId, etc; add a -y parameter that fills in defaults (like npm init); make default output to fat-jar; ask output on init (library (jar) / application (fat-jar) / classes). use inquirer.
 - 2026-06-17 12:35 — remove all experimental compiler options from the cli options. they should only be in the cappu.json
+- 2026-06-17 15:27 — doing a new session for better contexts.   Handoff for the fresh session — TODO #2–#4 (all in TODO.md, all experimental-compiler bytecode):
+
+  - #2 InnerClasses (JVMS 4.7.6) — start here. The NestHost/NestMembers work is already done and is the closest pattern to mirror (same nested/local/anon class enumeration;
+  different attribute shape + access flags + inner-name).
+  - #3 RuntimeVisibleAnnotations (4.7.16) — needs annotation element-value encoding (likely the largest).
+  - #4 LocalVariableTable (4.7.13) — the emitter already tracks Slots and has the LineNumberTable pattern to follow.
+
+  Each is one focused effort: implement → UPDATE_BASELINES=1 …emitter.test.ts to regenerate the javac byte-match baselines (needs javac/javap) → commit the regenerated
+  fixtures.
+
+  Two notes from this session worth carrying over:
+  - The experimentalCompiler config is now nested (compilerOptions.experimentalCompiler.{enabled,failOnDegrade,validate}) and there are no longer any experimental CLI flags
+  — enable it via cappu.json.
+  - node --run typecheck populates the vendored TypeScript-Go submodule, after which repo-wide node --run lint/format also scan it and warn; use oxlint src/ to lint just our
+  code.
+
+- 2026-06-17 15:28 — plan issue https://github.com/nikeee/cappu/issues/18

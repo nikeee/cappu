@@ -801,6 +801,11 @@ function buildClassAttributes(
 ): { buffer: ByteBuffer; count: number } {
   const buffer = new ByteBuffer();
   let count = 0;
+  // CONSTANT_Class entries interned by actual code/descriptors/signatures so
+  // far (before any class-level attribute adds more): javac's InnerClasses puts
+  // these "referenced during writing" classes ahead of the ones it only pulls
+  // in for the attribute itself. NestMembers (below) interns the rest.
+  const refCountBeforeAttrs = cp.referencedClasses.length;
   if (signature !== undefined) {
     writeSignatureAttribute(buffer, cp, signature);
     count++;
@@ -839,30 +844,23 @@ function buildClassAttributes(
     }
   }
   if (innerClasses && innerClasses.size > 0) {
-    // One inner_classes entry per referenced nested class known from source
-    // (JVMS 4.7.6; javac does the same over its symbol table). An entry interns
-    // its outer class, which may itself be nested, so the loop runs to a
-    // fixpoint over the growing referenced-classes list.
-    const entries: { inner: CpIndex; outer: CpIndex | 0; name: CpIndex | 0; flags: number }[] = [];
-    for (let i = 0; i < cp.referencedClasses.length; i++) {
-      const record = innerClasses.get(cp.referencedClasses[i] as InternalName);
-      if (!record) continue;
-      entries.push({
-        inner: cp.classInfo(cp.referencedClasses[i]!),
-        outer: record.outer ? cp.classInfo(record.outer) : 0,
-        name: record.simpleName ? cp.utf8(record.simpleName) : 0,
-        flags: record.flags,
-      });
-    }
-    if (entries.length > 0) {
+    const order = innerClassOrder(
+      name,
+      cp.referencedClasses,
+      refCountBeforeAttrs,
+      innerClasses,
+      cp.bootstrapMethodCount > 0,
+    );
+    if (order.length > 0) {
       buffer.u2(cp.utf8("InnerClasses"));
-      buffer.u4(2 + 8 * entries.length);
-      buffer.u2(entries.length);
-      for (const entry of entries) {
-        buffer.u2(entry.inner);
-        buffer.u2(entry.outer);
-        buffer.u2(entry.name);
-        buffer.u2(entry.flags);
+      buffer.u4(2 + 8 * order.length);
+      buffer.u2(order.length);
+      for (const n of order) {
+        const record = innerClasses.get(n)!;
+        buffer.u2(cp.classInfo(n));
+        buffer.u2(record.outer ? cp.classInfo(record.outer) : 0);
+        buffer.u2(record.simpleName ? cp.utf8(record.simpleName) : 0);
+        buffer.u2(record.flags);
       }
       count++;
     }
@@ -927,6 +925,9 @@ export interface InnerClassRecord {
 function innerClassFlags(node: Node): number {
   const decl = node as ClassDeclaration;
   let flags = memberAccessFlags(decl.modifiers);
+  // A type declared inside an interface is implicitly public and static (JLS
+  // 9.5), which javac reflects in the InnerClasses access flags.
+  if (decl.parent?.kind === SyntaxKind.InterfaceDeclaration) flags |= ACC_PUBLIC | ACC_STATIC;
   switch (node.kind) {
     case SyntaxKind.InterfaceDeclaration:
       flags |= ACC_INTERFACE | ACC_ABSTRACT | ACC_STATIC;
@@ -981,6 +982,81 @@ export function computeInnerClassInfo(
   };
   visit(sourceFile);
   return info;
+}
+
+const LOOKUP_NAME = "java/lang/invoke/MethodHandles$Lookup" as InternalName;
+
+/**
+ * The order javac writes InnerClasses entries (JVMS 4.7.6). Classes referenced
+ * while writing the class body (code, descriptors, signatures) come first, in
+ * intern order; then this class's declared-member tree breadth-first, each
+ * level in reverse-declaration order. Every entry is preceded by its enclosing
+ * class's entry (javac enters the enclosing class first). A class that uses
+ * invokedynamic also lists MethodHandles$Lookup, which the bootstrap mechanism
+ * references; javac appends it last.
+ */
+function innerClassOrder(
+  thisName: InternalName | undefined,
+  referencedClasses: readonly (InternalName | Descriptor)[],
+  refCountBeforeAttrs: number,
+  innerClasses: Map<InternalName, InnerClassRecord>,
+  hasBootstrap: boolean,
+): InternalName[] {
+  if (hasBootstrap && !innerClasses.has(LOOKUP_NAME)) {
+    innerClasses.set(LOOKUP_NAME, {
+      outer: "java/lang/invoke/MethodHandles" as InternalName,
+      simpleName: "Lookup",
+      flags: ACC_PUBLIC | ACC_STATIC | ACC_FINAL,
+    });
+  }
+  const result: InternalName[] = [];
+  const seen = new Set<InternalName>();
+  const enter = (n: InternalName): void => {
+    if (seen.has(n)) return;
+    const record = innerClasses.get(n);
+    if (!record) return; // not a known nested class: no InnerClasses entry
+    if (record.outer && innerClasses.has(record.outer)) enter(record.outer);
+    if (seen.has(n)) return;
+    seen.add(n);
+    result.push(n);
+  };
+  // Pass 1: classes referenced while writing the class body, in intern order.
+  // javac writes fields and methods before this_class, so a class referenced in
+  // the body precedes the class's own entry; we intern this_class first, so
+  // defer it (it still gets pulled ahead when it is some referenced class's
+  // enclosing class, via the enclosing-first rule in enter()).
+  const limit = Math.min(refCountBeforeAttrs, referencedClasses.length);
+  for (let i = 0; i < limit; i++) {
+    const n = referencedClasses[i] as InternalName;
+    if (n !== thisName) enter(n);
+  }
+  if (thisName) enter(thisName);
+  // Pass 2: the declared-member tree rooted at this class, breadth-first, each
+  // level in reverse-declaration order (the map iterates in declaration order,
+  // so members of an owner are read back-to-front). A class always lists its
+  // own direct members (so getDeclaredClasses works), even unreferenced ones;
+  // deeper descendants appear only when referenced (e.g. via the host's
+  // NestMembers).
+  const referenced = new Set(referencedClasses as InternalName[]);
+  const childrenReverse = (owner: InternalName | undefined): InternalName[] => {
+    const kids: InternalName[] = [];
+    for (const [name, record] of innerClasses) {
+      if (record.outer === owner) kids.push(name);
+    }
+    return kids.reverse();
+  };
+  const queue: { n: InternalName; depth: number }[] = childrenReverse(thisName).map(n => ({
+    n,
+    depth: 1,
+  }));
+  while (queue.length > 0) {
+    const { n, depth } = queue.shift()!;
+    if (depth === 1 || referenced.has(n)) enter(n);
+    for (const c of childrenReverse(n)) queue.push({ n: c, depth: depth + 1 });
+  }
+  // The invokedynamic-bootstrap Lookup entry comes last.
+  if (hasBootstrap) enter(LOOKUP_NAME);
+  return result;
 }
 
 // Field initializers split by static-ness: instance ones run in each

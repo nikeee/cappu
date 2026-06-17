@@ -2907,3 +2907,128 @@ test("nested classes carry an InnerClasses attribute", () => {
   const needle = Buffer.from("InnerClasses", "utf8");
   expect(Buffer.from(bytes).includes(needle)).toBe(true);
 });
+
+// The InnerClasses attribute (JVMS 4.7.6) is invisible to `javap -c -p`, so the
+// byte-match harness above cannot see it. These fixtures pin its exact contents
+// AND order against javac: each class's normalized InnerClasses section (pool
+// indices stripped, flags + names kept) must equal javac's, stored per fixture
+// under innerclasses-baselines.json. UPDATE_BASELINES regenerates the reference
+// from a live javac; a normal run reads the JSON and disassembles only our own
+// output (javap), so no javac is needed at test time.
+const innerClassFixtures: Record<string, string> = {
+  // Every nested form in one file: static/inner/interface/enum/record members,
+  // a member-of-member (Deep), an anonymous class and a local class.
+  IcAll: [
+    "class IcAll {",
+    "  static class S { int v; }",
+    "  class Inner { void g(){ new Deep(); } class Deep {} }",
+    "  interface I { void h(); }",
+    "  enum E { A, B }",
+    "  record R(int x) {}",
+    "  void m() {",
+    "    new S();",
+    '    Object o = new Object() { public String toString(){ return "x"; } };',
+    "    class Local {}",
+    "    new Local();",
+    "  }",
+    "}",
+  ].join("\n"),
+  // Breadth-first member ordering: a member-of-member (Y) is listed after all of
+  // the direct members, and the lambda/concat pull in MethodHandles$Lookup.
+  IcMany: [
+    "class IcMany {",
+    "  interface A {} interface B {} interface C {}",
+    "  static class X { static class Y {} }",
+    "  Runnable r = () -> {};",
+    '  String c(int n){ return "v=" + n; }',
+    "  void m(){ Object o1 = new Object(){}; Object o2 = new Object(){}; new X(); }",
+    "}",
+  ].join("\n"),
+  // Enclosing-first when a class references another branch's nested class: B's
+  // own entry follows A and A$Deep, which its body references.
+  IcCross: [
+    "class IcCross {",
+    "  static class A { static class Deep {} }",
+    "  static class B { Object x = new A.Deep(); }",
+    "  void m(){ new B(); }",
+    "}",
+  ].join("\n"),
+  // Types nested in an interface are implicitly public + static (JLS 9.5).
+  IcIface: [
+    "interface IcIface {",
+    "  class Impl implements IcIface { }",
+    "  static class K {}",
+    "}",
+  ].join("\n"),
+};
+
+const innerClassBaselineFile = join(javacRefDir, "..", "innerclasses-baselines.json");
+
+// One class's InnerClasses section, pool indices stripped, keyed lines kept in
+// order: "<flags> <inner=...of...>" - stable across compilers, like the
+// disassembly baselines.
+function innerClassesSection(dir: string, className: string): string[] {
+  const out = execFileSync("javap", ["-v", "-p", "-cp", dir, className], { encoding: "utf8" });
+  const lines = out.split("\n");
+  const start = lines.findIndex(l => l.trim() === "InnerClasses:");
+  if (start < 0) return [];
+  const result: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!line.includes("//")) break; // section ends at the first non-entry line
+    const flags = line
+      .slice(0, line.indexOf("//"))
+      .replace(/#\d+=?/g, "")
+      .replace(/of\s*$/, "")
+      .replace(/;.*/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const comment = line.slice(line.indexOf("//") + 2).trim();
+    result.push(flags ? `${flags} ${comment}` : comment);
+  }
+  return result;
+}
+
+// Compile a fixture and read every emitted class's InnerClasses section, keyed
+// by binary class name.
+function innerClassesOfDir(dir: string, classNames: string[]): Record<string, string[]> {
+  const map: Record<string, string[]> = {};
+  for (const name of classNames.sort()) map[name] = innerClassesSection(dir, name);
+  return map;
+}
+
+test(
+  "InnerClasses contents and order match javac",
+  { skip: HAS_JAVA ? false : "no JDK (javap)" },
+  () => {
+    let baseline: Record<string, Record<string, string[]>> | undefined;
+    if (!shouldUpdate && existsSync(innerClassBaselineFile)) {
+      baseline = JSON.parse(readFileSync(innerClassBaselineFile, "utf8"));
+    } else if (HAS_JAVAC) {
+      // Regenerate the reference from a live javac.
+      baseline = {};
+      for (const [name, source] of Object.entries(innerClassFixtures)) {
+        const dir = mkdtempSync(join(tmpdir(), "ic-javac-"));
+        writeFileSync(join(dir, `${name}.java`), source);
+        execFileSync("javac", ["--release", "21", "-d", dir, join(dir, `${name}.java`)]);
+        const classNames = readdirSync(dir)
+          .filter(f => f.endsWith(".class"))
+          .map(f => f.slice(0, -6));
+        baseline[name] = innerClassesOfDir(dir, classNames);
+      }
+      writeFileSync(innerClassBaselineFile, `${JSON.stringify(baseline, null, 2)}\n`);
+    } else {
+      return; // no baseline and no javac: nothing to compare
+    }
+
+    for (const [name, source] of Object.entries(innerClassFixtures)) {
+      const dir = mkdtempSync(join(tmpdir(), "ic-ours-"));
+      const classNames: string[] = [];
+      for (const c of emitClasses(name, source)) {
+        writeFileSync(join(dir, `${c.name}.class`), c.bytes);
+        classNames.push(c.name);
+      }
+      expect(innerClassesOfDir(dir, classNames)).toEqual(baseline![name]);
+    }
+  },
+);

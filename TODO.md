@@ -188,8 +188,16 @@ These do not affect correctness but widen the diff vs javac's output.
       emits NestMembers listing its nested/local/anonymous classes, and each of
       those emits NestHost - so nestmates share private access (an inner class
       reading a private outer field, etc.).
-- [ ] `InnerClasses` (JVMS 4.7.6) for reflection (getEnclosingClass /
-      isAnonymousClass); not required for access control under nestmates.
+- [x] `InnerClasses` (JVMS 4.7.6) for reflection (getEnclosingClass /
+      isAnonymousClass); not required for access control under nestmates. Each
+      class lists the nested classes referenced while writing its body (intern
+      order) followed by its declared-member tree breadth-first (each level in
+      reverse-declaration order), every entry preceded by its enclosing class's
+      entry, and `MethodHandles$Lookup` appended when the class uses
+      invokedynamic - byte-matching javac's order (verified by
+      `innerclasses-baselines.json`). Types nested in an interface get the
+      implicit public+static flags. An enum with constant bodies is not matched
+      (the per-constant `E$N` subclass is not emitted yet).
 - [x] `Signature` (JVMS 4.7.9): emitted for generic classes/interfaces/enums
       (type parameters with class/interface bounds, generic supertypes), methods
       and constructors (own type params or generic param/return types; skipped
