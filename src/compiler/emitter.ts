@@ -12,6 +12,7 @@ import {
   emitEnum,
   emitInterface,
   emitRecord,
+  setEmitDebugInfo,
 } from "./bytecode.ts";
 import type { Checker } from "./checker.ts";
 import { forEachChild } from "./parser.ts";
@@ -72,6 +73,7 @@ export function emitSourceFile(
   sourceFile: SourceFile,
   program: Program,
   checker: Checker,
+  options?: { debugInfo?: boolean },
 ): EmittedClass[] {
   const result: EmittedClass[] = [];
   // Nest grouping (host -> members) so each class gets NestHost / NestMembers,
@@ -79,6 +81,8 @@ export function emitSourceFile(
   const nest = computeNestMembers(sourceFile, program);
   // Nested-class records for the InnerClasses attribute (JVMS 4.7.6).
   const inner = computeInnerClassInfo(sourceFile, program);
+  // -g-equivalent debug info (LocalVariableTable); restored after this file.
+  const previousDebugInfo = setEmitDebugInfo(options?.debugInfo ?? false);
   const visit = (node: Node): void => {
     if (node.kind === SyntaxKind.ClassDeclaration) {
       const decl = node as ClassDeclaration;
@@ -113,5 +117,6 @@ export function emitSourceFile(
     });
   };
   visit(sourceFile);
+  setEmitDebugInfo(previousDebugInfo);
   return result;
 }

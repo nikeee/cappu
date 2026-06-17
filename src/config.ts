@@ -56,6 +56,8 @@ const ExperimentalCompilerSchema = z.object({
   failOnDegrade: z.boolean().default(true),
   /** Also compile with javac and fail unless the normalized bytecode matches. */
   validate: z.boolean().default(false),
+  /** Emit debug info (LocalVariableTable) like `javac -g`. Off matches default javac. */
+  debugInfo: z.boolean().default(false),
 });
 
 const CompilerOptionsSchema = z.object({
@@ -216,6 +218,7 @@ export const CONFIG_TEMPLATE = `
     //   "enabled": false,        // use cappu's compiler (cappu compile --experimental-compiler)
     //   "failOnDegrade": true,   // fail if a method body degrades to a placeholder
     //   "validate": false,       // also compile with javac and require matching bytecode
+    //   "debugInfo": false,      // emit LocalVariableTable (like javac -g)
     // },
   },
 

@@ -240,6 +240,9 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
     options.experimentalCompiler ??
     options.config?.compilerOptions.experimentalCompiler.enabled ??
     false;
+  // -g-equivalent debug info (LocalVariableTable); config-only, off by default
+  // so the output matches default-flags javac.
+  const debugInfo = options.config?.compilerOptions.experimentalCompiler.debugInfo ?? false;
   if (!experimental) {
     return runJavacCompile(files, outDir, output, options.config, jarName);
   }
@@ -296,7 +299,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
     const mainClasses: string[] = [];
     for (const file of inputs) {
       const sourceFile = program.getSourceFile(pathToUri(file))!;
-      for (const cls of emitSourceFile(sourceFile, program, checker)) {
+      for (const cls of emitSourceFile(sourceFile, program, checker, { debugInfo })) {
         // cls.name is the internal name (com/app/Foo); as a path it mirrors
         // the package tree.
         classes.push({ name: `${cls.name}.class`, bytes: cls.bytes });

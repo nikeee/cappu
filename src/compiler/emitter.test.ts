@@ -250,6 +250,20 @@ function emitClasses(mainClass: string, source: string): { name: string; bytes: 
   return emitSourceFile(program.getSourceFile(uri)!, program, createChecker(program));
 }
 
+// Like emitClasses, but with -g-equivalent debug info (LocalVariableTable).
+function emitClassesDebug(
+  mainClass: string,
+  source: string,
+): { name: string; bytes: Uint8Array }[] {
+  const program = createProgram();
+  loadJdkStub(program);
+  const uri = `file:///${mainClass}.java` as Uri;
+  program.setOpenDocument(uri, source, 1);
+  return emitSourceFile(program.getSourceFile(uri)!, program, createChecker(program), {
+    debugInfo: true,
+  });
+}
+
 // Run our emitted main class under `java` and assert its stdout equals the
 // expected text. The expected text IS the javac reference (verified once when the
 // baseline was written); to re-confirm it against a live javac, run with
@@ -3032,3 +3046,124 @@ test(
     }
   },
 );
+
+// LocalVariableTable (JVMS 4.7.13) is debug info: javac emits it only under -g,
+// so the emitter omits it by default (keeping byte-equivalence with default
+// javac) and emits it when debugInfo is on. Where our bytecode already matches
+// javac, the table matches `javac -g` exactly; these fixtures avoid constructs
+// whose codegen diverges from javac so the comparison is meaningful.
+const lvtFixtures: Record<string, string> = {
+  // Blocks, a for-loop, slot reuse (y and i share slot 4) and out-of-scope
+  // ordering (inner scopes close first; ties by slot).
+  LvtScopes: [
+    "class LvtScopes {",
+    "  static int f(int a, long b) {",
+    "    int x = a + 1;",
+    "    { int y = x * 2; x = y; }",
+    "    for (int i = 0; i < a; i++) { int z = i; x += z; }",
+    "    return x;",
+    "  }",
+    "}",
+  ].join("\n"),
+  // `this` plus parameters span the whole method; a local enters scope after its
+  // store.
+  LvtParams: [
+    "class LvtParams {",
+    "  int add(int a, int b) { int s = a + b; return s; }",
+    "  static long pick(long p, long q) { long r = p; return r; }",
+    "}",
+  ].join("\n"),
+};
+
+const lvtBaselineFile = join(javacRefDir, "..", "localvariabletable-baselines.json");
+
+function localVarTable(dir: string, className: string): string[] {
+  const out = execFileSync("javap", ["-c", "-p", "-l", "-cp", dir, className], {
+    encoding: "utf8",
+  });
+  const lines = out.split("\n");
+  const rows: string[] = [];
+  let inTable = false;
+  for (const line of lines) {
+    const t = line.trim();
+    if (t === "LocalVariableTable:") {
+      inTable = true;
+      continue;
+    }
+    if (!inTable) continue;
+    if (t.startsWith("Start") || t === "") {
+      if (t === "") inTable = false;
+      continue;
+    }
+    if (/^\d/.test(t)) rows.push(t.replace(/\s+/g, " "));
+    else inTable = false; // a non-row line ends this method's table
+  }
+  return rows;
+}
+
+function lvtOfDir(dir: string, classNames: string[]): Record<string, string[]> {
+  const map: Record<string, string[]> = {};
+  for (const name of classNames.sort()) map[name] = localVarTable(dir, name);
+  return map;
+}
+
+test(
+  "LocalVariableTable matches javac -g (debug info)",
+  { skip: HAS_JAVA ? false : "no JDK (javap)" },
+  () => {
+    let baseline: Record<string, Record<string, string[]>> | undefined;
+    if (!shouldUpdate && existsSync(lvtBaselineFile)) {
+      baseline = JSON.parse(readFileSync(lvtBaselineFile, "utf8"));
+    } else if (HAS_JAVAC) {
+      baseline = {};
+      for (const [name, source] of Object.entries(lvtFixtures)) {
+        const dir = mkdtempSync(join(tmpdir(), "lvt-javac-"));
+        writeFileSync(join(dir, `${name}.java`), source);
+        execFileSync("javac", ["-g", "--release", "21", "-d", dir, join(dir, `${name}.java`)]);
+        const classNames = readdirSync(dir)
+          .filter(f => f.endsWith(".class"))
+          .map(f => f.slice(0, -6));
+        baseline[name] = lvtOfDir(dir, classNames);
+      }
+      writeFileSync(lvtBaselineFile, `${JSON.stringify(baseline, null, 2)}\n`);
+    } else {
+      return;
+    }
+
+    for (const [name, source] of Object.entries(lvtFixtures)) {
+      const dir = mkdtempSync(join(tmpdir(), "lvt-ours-"));
+      const classNames: string[] = [];
+      for (const c of emitClassesDebug(name, source)) {
+        writeFileSync(join(dir, `${c.name}.class`), c.bytes);
+        classNames.push(c.name);
+      }
+      expect(lvtOfDir(dir, classNames)).toEqual(baseline![name]);
+    }
+  },
+);
+
+test("LocalVariableTable is omitted by default and runs under -g", () => {
+  const source = [
+    "public class LvtRun {",
+    "  public static void main(String[] args) {",
+    "    int n = 3;",
+    "    int sum = 0;",
+    "    for (int i = 0; i < n; i++) { int sq = i * i; sum += sq; }",
+    "    System.out.println(sum);",
+    "  }",
+    "}",
+  ].join("\n");
+  const needle = Buffer.from("LocalVariableTable", "utf8");
+
+  // Default emission carries no LocalVariableTable (matches default-flags javac).
+  const [plain] = emitClasses("LvtRun", source);
+  expect(Buffer.from(plain!.bytes).includes(needle)).toBe(false);
+
+  // With debug info it does, and the JVM accepts the table at run time.
+  const debug = emitClassesDebug("LvtRun", source);
+  expect(Buffer.from(debug.find(c => c.name === "LvtRun")!.bytes).includes(needle)).toBe(true);
+  if (!HAS_JAVA) return;
+  const dir = mkdtempSync(join(tmpdir(), "lvt-run-"));
+  for (const c of debug) writeFileSync(join(dir, `${c.name}.class`), c.bytes);
+  expect(execFileSync("java", ["-cp", dir, "LvtRun"], { encoding: "utf8" })).toBe("5\n");
+});

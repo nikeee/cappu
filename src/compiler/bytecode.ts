@@ -100,6 +100,16 @@ export function setDegradeListener(listener?: (className: string, member: string
   degradeListener = listener;
 }
 
+// When set, method bodies emit a LocalVariableTable (JVMS 4.7.13) like `javac
+// -g`; off (the default) matches default-flags javac, which omits it. Scoped
+// to one emitSourceFile run by the emitter (set/reset around the emit loop).
+let emitDebugInfo = false;
+export function setEmitDebugInfo(on: boolean): boolean {
+  const previous = emitDebugInfo;
+  emitDebugInfo = on;
+  return previous;
+}
+
 // Thrown when a construct is not yet handled by code generation; the caller
 // falls back to a verifiable placeholder body so output is always valid. It is
 // pure control flow thrown on every degraded method, so it deliberately does
@@ -784,9 +794,9 @@ function sourceNameOf(node: Node): string | undefined {
 // The class-level attributes shared by classes and enums: SourceFile and (when
 // any invokedynamic was emitted) BootstrapMethods. Must run before the constant
 // pool is written so the attribute name Utf8s are interned.
-// The per-method LocalVariableTable (4.7.13) is deliberately NOT emitted:
-// javac only writes it under -g, so emitting it would diverge from the
-// default-flags javac output we compare against.
+// The per-method LocalVariableTable (4.7.13) is emitted only under
+// `emitDebugInfo` (the -g-equivalent), since javac omits it by default; see
+// writeCodeAttribute.
 function buildClassAttributes(
   cp: ConstantPool,
   sourceName: string | undefined,
@@ -1855,6 +1865,12 @@ interface FieldInfo {
 interface LocalSlot {
   slot: Slot;
   descriptor: Descriptor;
+  // Debug info (LocalVariableTable, JVMS 4.7.13), only populated under
+  // `emitDebugInfo`: the source name and the pc at which the variable enters
+  // scope (after its initializing store; 0 for `this`/parameters). A synthetic
+  // slot has no name and gets no entry, matching javac.
+  name?: string;
+  lvtStart?: Pc;
 }
 
 // One Code-attribute exception_table entry (JVMS 4.7.3). catchType 0 is a
@@ -2028,7 +2044,12 @@ function generateBody(
   let reachable = true; // is the next instruction reachable by fall-through?
   let nextSlot = isStatic ? 0 : 1;
   if (!isStatic) {
-    activeLocals.push({ slot: 0 as Slot, descriptor: descOf(thisInternalName) });
+    activeLocals.push({
+      slot: 0 as Slot,
+      descriptor: descOf(thisInternalName),
+      name: emitDebugInfo ? "this" : undefined,
+      lvtStart: 0 as Pc,
+    });
     assigned.add(0);
   }
   // Parameters: a lambda impl's captures + own params, or the method's params.
@@ -2056,7 +2077,15 @@ function generateBody(
         ];
   for (const p of params) {
     if (p.symbol) locals.set(p.symbol, { slot: nextSlot as Slot, descriptor: p.descriptor });
-    activeLocals.push({ slot: nextSlot as Slot, descriptor: p.descriptor });
+    activeLocals.push({
+      slot: nextSlot as Slot,
+      descriptor: p.descriptor,
+      // A parameter is in scope for the whole method (start pc 0); a synthetic
+      // parameter (this$0, captures, enum name/ordinal) has no symbol and so no
+      // LocalVariableTable entry, as it has no source name.
+      name: emitDebugInfo && p.symbol ? p.symbol.escapedName : undefined,
+      lvtStart: 0 as Pc,
+    });
     assigned.add(nextSlot);
     nextSlot += slotsOf(p.descriptor);
   }
@@ -2090,6 +2119,26 @@ function generateBody(
     else lineNumbers.push({ pc: code.length as Pc, line });
   };
 
+  // LocalVariableTable entries (JVMS 4.7.13), collected under `emitDebugInfo` as
+  // each scope closes; the variable's length runs to the closing pc. Emitted
+  // sorted by (close pc, slot), which reproduces javac's ordering (inner scopes
+  // close first; ties by slot).
+  const localVars: LocalVarEntry[] = [];
+  const closeLocals = (entries: LocalSlot[]): void => {
+    if (!emitDebugInfo) return;
+    const end = code.length;
+    for (const e of entries) {
+      if (e.name === undefined || e.lvtStart === undefined) continue;
+      localVars.push({
+        startPc: e.lvtStart,
+        length: end - e.lvtStart,
+        name: e.name,
+        descriptor: e.descriptor,
+        slot: e.slot,
+      });
+    }
+  };
+
   // Run `body` in a nested local scope: locals it declares are dropped (and their
   // slots reusable) afterwards, so a stack-map frame at a later label lists only
   // the locals actually in scope there.
@@ -2097,6 +2146,7 @@ function generateBody(
     const savedActive = activeLocals.length;
     const savedSlot = nextSlot;
     const terminated = body();
+    closeLocals(activeLocals.slice(savedActive)); // locals declared in this scope
     activeLocals.length = savedActive;
     for (const slot of [...assigned]) if (slot >= savedSlot) assigned.delete(slot); // freed slots
     nextSlot = savedSlot;
@@ -5144,7 +5194,8 @@ function generateBody(
           nextSlot += slotsOf(descriptor);
           if (nextSlot > maxLocals) maxLocals = nextSlot;
           if (declarator.symbol) locals.set(declarator.symbol, { slot, descriptor });
-          activeLocals.push({ slot, descriptor });
+          const entry: LocalSlot = { slot, descriptor };
+          activeLocals.push(entry);
           if (declarator.initializer) {
             // A bare brace initializer (int[] a = {1,2,3}) gets its element type
             // from the declared type rather than from the expression.
@@ -5160,6 +5211,13 @@ function generateBody(
               coerce(emitExpr(declarator.initializer), descriptor);
             }
             storeVar(slot, descriptor);
+          }
+          // The variable enters scope after its initializing store (javac's
+          // start pc); its LocalVariableTable entry is flushed when the scope
+          // closes (closeLocals).
+          if (emitDebugInfo) {
+            entry.name = declarator.name.text;
+            entry.lvtStart = code.length as Pc;
           }
         }
         return false;
@@ -5993,7 +6051,22 @@ function generateBody(
     }
   }
 
-  return { code, maxStack, maxLocals, stackMapTable, exceptionTable, lineNumbers };
+  // Close the method scope: parameters, `this` and any still-active locals run
+  // to the final pc. Sorting by (close pc, slot) reproduces javac's order.
+  closeLocals(activeLocals);
+  const localVariables = emitDebugInfo
+    ? localVars.sort((a, b) => a.startPc + a.length - (b.startPc + b.length) || a.slot - b.slot)
+    : undefined;
+
+  return {
+    code,
+    maxStack,
+    maxLocals,
+    stackMapTable,
+    exceptionTable,
+    lineNumbers,
+    localVariables,
+  };
 }
 
 function emitMethod(
@@ -6144,6 +6217,17 @@ interface MethodBody {
   exceptionTable?: ExceptionTableEntry[];
   /** LineNumberTable entries (JVMS 4.7.12): 1-based source line per code offset. */
   lineNumbers?: { pc: number; line: number }[];
+  /** LocalVariableTable entries (JVMS 4.7.13), emitted only under `emitDebugInfo`. */
+  localVariables?: LocalVarEntry[];
+}
+
+/** One LocalVariableTable entry (JVMS 4.7.13). */
+interface LocalVarEntry {
+  startPc: number;
+  length: number;
+  name: string;
+  descriptor: Descriptor;
+  slot: number;
 }
 
 // Append the Code attribute (with an optional StackMapTable sub-attribute) and,
@@ -6158,11 +6242,13 @@ function writeCodeAttribute(
   const smtBytes = smt ? 6 + smt.length : 0;
   const lines = body.lineNumbers ?? [];
   const lntBytes = lines.length > 0 ? 6 + 2 + 4 * lines.length : 0;
+  const locals = body.localVariables ?? [];
+  const lvtBytes = locals.length > 0 ? 6 + 2 + 10 * locals.length : 0;
   const handlers = body.exceptionTable ?? [];
 
   const codeAttr = new ByteBuffer();
   codeAttr.u2(cp.utf8("Code"));
-  codeAttr.u4(12 + body.code.length + handlers.length * 8 + lntBytes + smtBytes);
+  codeAttr.u4(12 + body.code.length + handlers.length * 8 + lntBytes + lvtBytes + smtBytes);
   codeAttr.u2(body.maxStack);
   codeAttr.u2(body.maxLocals);
   codeAttr.u4(body.code.length);
@@ -6174,15 +6260,30 @@ function writeCodeAttribute(
     codeAttr.u2(h.handler);
     codeAttr.u2(h.catchType);
   }
-  codeAttr.u2((lines.length > 0 ? 1 : 0) + (smt ? 1 : 0)); // attributes_count
+  // attributes_count
+  codeAttr.u2((lines.length > 0 ? 1 : 0) + (locals.length > 0 ? 1 : 0) + (smt ? 1 : 0));
   if (lines.length > 0) {
-    // LineNumberTable (JVMS 4.7.12), before StackMapTable as javac orders them.
+    // LineNumberTable (JVMS 4.7.12), before LocalVariableTable/StackMapTable as
+    // javac orders them.
     codeAttr.u2(cp.utf8("LineNumberTable"));
     codeAttr.u4(2 + 4 * lines.length);
     codeAttr.u2(lines.length);
     for (const l of lines) {
       codeAttr.u2(l.pc);
       codeAttr.u2(l.line);
+    }
+  }
+  if (locals.length > 0) {
+    // LocalVariableTable (JVMS 4.7.13), emitted under -g-equivalent debug info.
+    codeAttr.u2(cp.utf8("LocalVariableTable"));
+    codeAttr.u4(2 + 10 * locals.length);
+    codeAttr.u2(locals.length);
+    for (const v of locals) {
+      codeAttr.u2(v.startPc);
+      codeAttr.u2(v.length);
+      codeAttr.u2(cp.utf8(v.name));
+      codeAttr.u2(cp.utf8(v.descriptor));
+      codeAttr.u2(v.slot);
     }
   }
   if (smt) {

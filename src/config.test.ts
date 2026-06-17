@@ -41,6 +41,7 @@ test("JSONC parses with comments and trailing commas; sections map", () => {
     enabled: true,
     failOnDegrade: true,
     validate: false,
+    debugInfo: false,
   });
   // the omitted parameterNames falls back to its schema default
   expect(config.lspOptions.inlayHints).toEqual({ parameterNames: true, varTypes: false });

@@ -207,7 +207,18 @@ These do not affect correctness but widen the diff vs javac's output.
 - [x] `LineNumberTable` (JVMS 4.7.12): an entry per statement start (1-based,
       trivia-skipped), so stack traces carry source lines - verified equal to
       javac's at runtime via getStackTrace(). Synthetic bodies (no positions)
-      simply emit no table. `LocalVariableTable` (4.7.13) remains.
+      simply emit no table.
+- [x] `LocalVariableTable` (JVMS 4.7.13): javac emits it only under `-g`, so it
+      is gated behind `compilerOptions.experimentalCompiler.debugInfo` (off by
+      default, keeping the output byte-identical to default-flags javac). When
+      on, each parameter/`this` spans the whole method and each local enters
+      scope after its initializing store; entries are ordered by (scope-close
+      pc, slot), which reproduces javac's order. Where our bytecode already
+      matches javac the table byte-matches `javac -g`
+      (`localvariabletable-baselines.json`); where codegen diverges (e.g. string
+      concat) the table stays internally correct and JVM-valid. Synthetic
+      parameters (this$0/captures/enum name+ordinal) get no entry (no source
+      name); `LocalVariableTypeTable` for generic locals is not emitted.
 - [ ] `RuntimeVisibleAnnotations` (JVMS 4.7.16).
 
 ## Done (recent)
