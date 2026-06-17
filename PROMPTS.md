@@ -268,3 +268,4 @@ no timestamps were captured.
 - 2026-06-17 11:10 — next, add --json for cappu audit if not yet present
 - 2026-06-17 11:20 — after that: support testImplementation and other dependencies (especially in cappu add)
 - 2026-06-17 11:20 — after that: chage artifact coordinates in "cappu add" to be without @ but with : for the version instead, so a user can just copy a line from some build.gradle and prepend `cappu add`
+- 2026-06-17 11:25 — when you're done: lsp: when accessing a classpath resource, so getResourceAsStream is called on a "class" type (or simlar), we want to provide auto completion for the string value passed. The user should be offered a list of all valid classpath resources that we can see.

@@ -1,8 +1,12 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { expect } from "expect";
 
 import { createChecker } from "../compiler/checker.ts";
+import { loadConfig } from "../config.ts";
 import { CompletionItemKind, getCompletions } from "./completions.ts";
 import { loadJdkStub } from "../compiler/jdkStub.ts";
 import { createProgram } from "../compiler/program.ts";
@@ -72,6 +76,31 @@ test("scope completion still works inside broken code", () => {
   const labels = complete("class C { void m(int p) { int x = ; /*|*/ } }").map(i => i.label);
   expect(labels).toContain("p");
   expect(labels).toContain("x");
+});
+
+test("classpath resources complete inside a getResourceAsStream string", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cappu-res-"));
+  try {
+    writeFileSync(join(dir, "cappu.json"), "{}\n");
+    mkdirSync(join(dir, "src", "main", "resources", "db"), { recursive: true });
+    writeFileSync(join(dir, "src", "main", "resources", "messages.properties"), "x=1");
+    writeFileSync(join(dir, "src", "main", "resources", "db", "schema.sql"), "create");
+    const config = loadConfig(undefined, dir);
+
+    const src =
+      'class C { void m() throws Exception { getClass().getResourceAsStream("/*|*/"); } }';
+    const offset = src.indexOf("/*|*/");
+    const program = createProgram();
+    program.setOpenDocument("file:///C.java" as Uri, src.replace("/*|*/", ""), 1);
+    const checker = createChecker(program);
+    const sf = program.getSourceFile("file:///C.java" as Uri)!;
+
+    const items = getCompletions(program, checker, sf, offset, config);
+    expect(items.map(i => i.label).sort()).toEqual(["/db/schema.sql", "/messages.properties"]);
+    expect(items[0]!.kind).toBe(CompletionItemKind.File);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("completion kinds are classified", () => {

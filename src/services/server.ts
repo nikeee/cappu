@@ -405,7 +405,7 @@ export function startServer(
 
   connection.onCompletion((params): CompletionItem[] => {
     const at = sourceAndOffset(asUri(params.textDocument.uri), params.position);
-    return at ? getCompletions(program, checker, at.sourceFile, at.offset) : [];
+    return at ? getCompletions(program, checker, at.sourceFile, at.offset, config) : [];
   });
 
   connection.onCodeAction((params: CodeActionParams): CodeAction[] => {

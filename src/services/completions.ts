@@ -10,7 +10,9 @@ import { getNodeAtPosition } from "./nodeAtPosition.ts";
 import type { Fqn, PackageName, Program } from "../compiler/program.ts";
 import { getDirectSuperTypeSymbols, getSourceFileOfNode } from "../compiler/resolver.ts";
 import {
+  type CallExpression,
   type Node,
+  type PropertyAccessExpression,
   type SourceFile,
   type Symbol,
   SymbolFlags,
@@ -18,6 +20,8 @@ import {
   SyntaxKind,
 } from "../compiler/types.ts";
 import { entityNameToString } from "../compiler/utilities.ts";
+import { type CappuConfig, resolveConfigPath } from "../config.ts";
+import { findFilesRelative } from "../workspace.ts";
 
 // Mirrors a subset of LSP CompletionItemKind (numeric values match the protocol).
 export const enum CompletionItemKind {
@@ -27,6 +31,7 @@ export const enum CompletionItemKind {
   Class = 7,
   Interface = 8,
   Enum = 10,
+  File = 17,
   EnumMember = 20,
   TypeParameter = 25,
 }
@@ -137,16 +142,61 @@ function isTypeDeclaration(kind: SyntaxKind): boolean {
   );
 }
 
+// --- classpath-resource completion ----------------------------------------------------
+// Inside the string argument of getResource / getResourceAsStream, offer the
+// classpath resources we can see (the files under the configured resourcePaths),
+// as absolute paths ("/foo.txt") - the form Class.getResourceAsStream expects.
+
+const RESOURCE_METHODS = new Set(["getResource", "getResourceAsStream"]);
+
+// The string literal the cursor sits in, if any (a StringLiteral is a leaf, so
+// the node at the cursor is the literal itself).
+function enclosingStringLiteral(node: Node | undefined): Node | undefined {
+  return node?.kind === SyntaxKind.StringLiteral ? node : undefined;
+}
+
+function isResourceArgument(str: Node): boolean {
+  const call = str.parent;
+  if (!call || call.kind !== SyntaxKind.CallExpression) return false;
+  const callee = (call as CallExpression).expression;
+  return (
+    callee.kind === SyntaxKind.PropertyAccessExpression &&
+    RESOURCE_METHODS.has((callee as PropertyAccessExpression).name.text)
+  );
+}
+
+function classpathResources(config: CappuConfig): CompletionItem[] {
+  const seen = new Set<string>();
+  for (const root of config.compilerOptions.resourcePaths) {
+    for (const rel of findFilesRelative(resolveConfigPath(config, root))) {
+      seen.add(`/${rel.replaceAll("\\", "/")}`);
+    }
+  }
+  return [...seen].map(label => ({ label, kind: CompletionItemKind.File }));
+}
+
 // --- entry point ----------------------------------------------------------------------
 
-/** Completions at an offset. Member completion after '.', otherwise scope names. */
+/**
+ * Completions at an offset: classpath resources inside a getResource(AsStream)
+ * string, member completion after '.', otherwise scope names. `config` enables
+ * the resource completion (the resourcePaths are read from it).
+ */
 export function getCompletions(
   program: Program,
   checker: Checker,
   sourceFile: SourceFile,
   offset: number,
+  config?: CappuConfig,
 ): CompletionItem[] {
   const text = sourceFile.text;
+
+  // Resource-string completion must run before the '.' check: a resource path
+  // ("app.properties") contains dots that would otherwise look like a member access.
+  if (config) {
+    const str = enclosingStringLiteral(getNodeAtPosition(sourceFile, offset > 0 ? offset - 1 : 0));
+    if (str && isResourceArgument(str)) return classpathResources(config);
+  }
 
   // Member access? Look back past any partial member name already being typed
   // (`recv.par|tial`), then whitespace, to a '.'. Without skipping the partial
