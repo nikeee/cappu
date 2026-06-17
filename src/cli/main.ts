@@ -72,7 +72,7 @@ Usage:
 Options:
   -c, --config <file>   Project config (default: ./cappu.json, JSONC).
                         Sections: "compilerOptions" (classPath, sourcePaths,
-                        quiet, failOnDegrade) and "lspOptions"
+                        quiet, experimentalCompiler) and "lspOptions"
                         (inlayHints). Command-line flags take precedence.
 
 Lsp options:
@@ -117,7 +117,7 @@ const { values, positionals } = (() => {
         verbose: { type: "boolean", short: "v" },
         "fail-on-degrade": { type: "boolean" },
         "with-schema": { type: "boolean", default: false },
-        validate: { type: "boolean", default: false },
+        validate: { type: "boolean" },
         "experimental-compiler": { type: "boolean" },
         json: { type: "boolean", default: false },
         "no-cache": { type: "boolean", default: false },

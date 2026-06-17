@@ -47,6 +47,17 @@ export const DEFAULT_TEST_CLASS_PATH = "./.cappu/lib/test-classes";
 /** Where annotation-processor jars install to - never the compile classpath. */
 export const DEFAULT_PROCESSOR_PATH = "./.cappu/lib/processors";
 
+// cappu's own compiler is experimental (the default delegates to javac). All
+// its knobs live here so they stay together and out of the normal flow.
+const ExperimentalCompilerSchema = z.object({
+  /** Compile with cappu's own compiler instead of javac. */
+  enabled: z.boolean().default(false),
+  /** Fail the build when a method body degrades to a placeholder. */
+  failOnDegrade: z.boolean().default(true),
+  /** Also compile with javac and fail unless the normalized bytecode matches. */
+  validate: z.boolean().default(false),
+});
+
 const CompilerOptionsSchema = z.object({
   /** Directories or .jar files scanned for .class files (resolution only). */
   classPath: z.array(z.string()).default([DEFAULT_CLASS_PATH, ...EXTERNAL_CLASS_PATHS]),
@@ -54,19 +65,17 @@ const CompilerOptionsSchema = z.object({
   sourcePaths: z.array(z.string()).default([DEFAULT_SOURCE_PATH]),
   /** Directories whose files are copied verbatim into the build output. */
   resourcePaths: z.array(z.string()).default([DEFAULT_RESOURCE_PATH]),
-  /** Output root for the build artifacts. */
   /** What `cappu compile` produces in ./dist (nikeee/cappu#5). */
   output: z.enum(["classes", "jar", "fat-jar"]).default("classes"),
   quiet: z.boolean().optional(),
-  failOnDegrade: z.boolean().optional(),
   /** The javac binary compiles use (a provisioned "jdk" entry wins). */
   javac: z.string().default("javac"),
   /** Java release to target (javac --release); e.g. 21. Unset: javac's own. */
   release: z.number().int().min(8).optional(),
   /** Main-Class for jar outputs; default: the only main(String[]) found. */
   mainClass: z.string().optional(),
-  /** Compile with cappu's own (experimental) compiler instead of javac. */
-  experimentalCompiler: z.boolean().optional(),
+  /** cappu's own (experimental) compiler and its options. */
+  experimentalCompiler: ExperimentalCompilerSchema.prefault({}),
 });
 
 const LspOptionsSchema = z.object({
@@ -189,10 +198,6 @@ export const CONFIG_TEMPLATE = `
     // Do not print the path of each emitted .class file.
     "quiet": false,
 
-    // Fail the build when a method body degrades to a placeholder because of
-    // an unsupported construct (degradations always print a warning).
-    "failOnDegrade": false,
-
     // The javac binary compiles run with (default: "javac" from $PATH; a
     // provisioned "jdk" entry wins).
     // "javac": "javac",
@@ -206,9 +211,12 @@ export const CONFIG_TEMPLATE = `
     // class declaring public static void main(String[]), if exactly one.
     // "mainClass": "com.example.Main",
 
-    // Compile with cappu's own (experimental) compiler instead of javac
-    // (same as \`cappu compile --experimental-compiler\`).
-    // "experimentalCompiler": false,
+    // cappu's own (experimental) compiler instead of javac, with its options.
+    // "experimentalCompiler": {
+    //   "enabled": false,        // use cappu's compiler (cappu compile --experimental-compiler)
+    //   "failOnDegrade": true,   // fail if a method body degrades to a placeholder
+    //   "validate": false,       // also compile with javac and require matching bytecode
+    // },
   },
 
   "lspOptions": {

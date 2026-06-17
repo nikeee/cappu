@@ -16,7 +16,7 @@ export interface CompileFlags {
   experimentalCompiler?: boolean;
   quiet?: boolean;
   failOnDegrade?: boolean;
-  validate: boolean;
+  validate?: boolean;
 }
 
 const OUTPUT_KINDS: readonly OutputKind[] = ["classes", "jar", "fat-jar"];
@@ -47,25 +47,29 @@ export async function runCompileCommand(
     process.exit(2);
   }
   const effectiveOutput = output ?? config.compilerOptions.output;
-  if (flags.validate && effectiveOutput !== "classes") {
-    process.stderr.write("cappu: --validate requires --output classes (javap reads class files)\n");
-    process.exit(2);
-  }
   const experimental =
-    flags.experimentalCompiler ?? config.compilerOptions.experimentalCompiler ?? false;
+    flags.experimentalCompiler ?? config.compilerOptions.experimentalCompiler.enabled;
   // --validate compares OUR bytecode against javac's; --fail-on-degrade is
   // about OUR placeholder bodies - both only mean something with the
-  // experimental compiler (the default IS javac).
+  // experimental compiler (the default IS javac), so explicit flags require it.
   if (flags.validate && !experimental) {
     process.stderr.write(
-      "cappu: --validate requires --experimental-compiler (javac is the default)\n",
+      "cappu: --validate requires the experimental compiler (javac is the default)\n",
     );
     process.exit(2);
   }
   if (flags.failOnDegrade && !experimental) {
     process.stderr.write(
-      "cappu: --fail-on-degrade requires --experimental-compiler (javac never degrades)\n",
+      "cappu: --fail-on-degrade requires the experimental compiler (javac never degrades)\n",
     );
+    process.exit(2);
+  }
+  // validate runs only under the experimental compiler; the flag or the config
+  // (experimentalCompiler.validate) turns it on.
+  const validate =
+    experimental && (flags.validate ?? config.compilerOptions.experimentalCompiler.validate);
+  if (validate && effectiveOutput !== "classes") {
+    process.stderr.write("cappu: validate requires output classes (javap reads class files)\n");
     process.exit(2);
   }
   const result = runCompile(inputs, {
@@ -96,7 +100,7 @@ export async function runCompileCommand(
       if (!quiet) process.stdout.write(`${pomPath}\n`);
     }
   }
-  if (flags.validate) {
+  if (validate) {
     // `inputs`, not `files`: a project build validates the sourcePaths sources.
     const validation = validateAgainstJavac(inputs, result.written, config.compilerOptions.javac);
     if (!validation.ok) {

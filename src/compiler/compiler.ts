@@ -217,13 +217,17 @@ function toCompileDiagnostic(
  */
 export function runCompile(files: string[], options: CompileOptions): CompileResult {
   const failOnDegrade =
-    options.failOnDegrade ?? options.config?.compilerOptions.failOnDegrade ?? false;
+    options.failOnDegrade ??
+    options.config?.compilerOptions.experimentalCompiler.failOnDegrade ??
+    true;
   const outDir = options.outDir ?? "dist";
   const output = options.output ?? options.config?.compilerOptions.output ?? "classes";
   // javac is the default compiler (nikeee/cappu#17); cappu's own pipeline
   // runs only when explicitly requested (--experimental-compiler).
   const experimental =
-    options.experimentalCompiler ?? options.config?.compilerOptions.experimentalCompiler ?? false;
+    options.experimentalCompiler ??
+    options.config?.compilerOptions.experimentalCompiler.enabled ??
+    false;
   if (!experimental) {
     return runJavacCompile(files, outDir, output, options.config);
   }

@@ -27,7 +27,7 @@ test("JSONC parses with comments and trailing commas; sections map", () => {
       '  "compilerOptions": {',
       '    "classPath": ["lib/classes",],',
       '    "sourcePaths": ["src/main/java"],',
-      '    "failOnDegrade": true,',
+      '    "experimentalCompiler": { "enabled": true },',
       "  },",
       '  "lspOptions": { "inlayHints": { "varTypes": false } },',
       "}",
@@ -36,7 +36,12 @@ test("JSONC parses with comments and trailing commas; sections map", () => {
   const config = loadConfig(undefined, dir);
   expect(config.compilerOptions.classPath).toEqual(["lib/classes"]);
   expect(config.compilerOptions.sourcePaths).toEqual(["src/main/java"]);
-  expect(config.compilerOptions.failOnDegrade).toBe(true);
+  // nested experimentalCompiler: the set field plus its defaults
+  expect(config.compilerOptions.experimentalCompiler).toEqual({
+    enabled: true,
+    failOnDegrade: true,
+    validate: false,
+  });
   // the omitted parameterNames falls back to its schema default
   expect(config.lspOptions.inlayHints).toEqual({ parameterNames: true, varTypes: false });
   // Relative entries resolve against the config's directory.
