@@ -6,6 +6,9 @@
   "keywords": [],
   "license": "MIT",
   "author": "Niklas Mollenhauer <nikeee@outlook.com>",
+  "bugs": {
+    "url": "https://github.com/nikeee/cappu/issues"
+  },
   "type": "module",
   "main": "index.js",
   "scripts": {
