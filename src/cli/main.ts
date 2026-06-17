@@ -15,6 +15,7 @@ import { runLsp } from "./lsp.ts";
 import { runSearch } from "./search.ts";
 import { runCacheCommand } from "./cache.ts";
 import { runSelfUpgrade } from "./selfUpgrade.ts";
+import { runRage } from "./rage.ts";
 import { runUpdate } from "./update.ts";
 import { runAudit } from "./audit.ts";
 import { runLicenses } from "./licenses.ts";
@@ -60,6 +61,7 @@ Usage:
                                      Platform console launcher over it
   cappu self-upgrade                 Replace this binary with the latest CD build
                                      (needs GITHUB_TOKEN or \`gh auth login\`)
+  cappu rage                         Open the issue tracker in your default browser
   cappu cache clean                  Remove the global download cache
   cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
   cappu compile [options] [file...]  Compile .java files to .class bytecode; with no
@@ -169,12 +171,24 @@ if (TIMED_COMMANDS.has(command)) {
   });
 }
 
-// init, cache and self-upgrade run before loadConfig: none depends on (nor
-// should be blocked by) an existing, possibly broken project config -
+// init, cache, self-upgrade and rage run before loadConfig: none depends on
+// (nor should be blocked by) an existing, possibly broken project config -
 // self-upgrade is global and must work even when the cwd's cappu.json is bad.
-if (command === "init") runInit(values.config, values["with-schema"]);
-if (command === "cache") runCacheCommand(files);
-if (command === "self-upgrade") await runSelfUpgrade();
+// Each handler exits the process, so control never falls through to loadConfig.
+switch (command) {
+  case "init":
+    runInit(values.config, values["with-schema"]);
+  // falls through: runInit exits the process (never returns)
+  case "cache":
+    runCacheCommand(files);
+  // falls through: runCacheCommand exits the process (never returns)
+  case "self-upgrade":
+    await runSelfUpgrade();
+    break;
+  case "rage":
+    await runRage();
+    break;
+}
 
 let config;
 try {

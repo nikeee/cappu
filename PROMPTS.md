@@ -258,3 +258,7 @@ no timestamps were captured.
 - 2026-06-16 21:50 — add spdx identifier "New BSD License" that maps to "BSD-3-Clause" if it is correct
 - 2026-06-17 09:15 — next: create an example application that starts a basic spring boot project. use latest spring boot. maybe plan before
 - 2026-06-17 10:30 — lsp: "var" is not clickable to go to definition. variables defined with `var` do not count as references on some occasions
+- 2026-06-17 09:32 — these spdx mappings are missing: warning: org.danilopianini:gson-extras:0.2.1: license "Apache License 2.0" has no SPDX mapping [...full warning list...]
+- 2026-06-17 09:32 — `cappu rage` should open the issue tracker in your default browser
+- 2026-06-17 09:32 — use ebug url from package.json. if there is non, add it
+- 2026-06-17 09:32 — use switch for pre-loadCOnfig commands
