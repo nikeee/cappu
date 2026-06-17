@@ -370,13 +370,16 @@ const majorOf = (version: string): string => version.split(/[.+-]/, 1)[0]!;
 const UPDATE_ATTEMPTS = 5;
 
 /**
- * The newest STABLE version each declared dependency can move to while keeping
- * its configuration's transitive graph conflict-free and complete. api and
- * implementation share the compile graph; annotationProcessor and
- * testImplementation each resolve independently (as install does). Bumps are
- * applied to an in-memory working set as they are chosen, so later checks see
- * the earlier ones; a dependency whose pinned version is not in the published
- * list is left alone (its ordering relative to "newer" is unknown).
+ * The newest STABLE version each declared dependency can move to **within its
+ * current major version** (no major-version bumps - those are breaking and are
+ * left to the user) while keeping its configuration's transitive graph
+ * conflict-free and complete; the re-resolved tree then carries the matching
+ * transitive versions into the lock. api and implementation share the compile
+ * graph; annotationProcessor and testImplementation each resolve independently
+ * (as install does). Bumps are applied to an in-memory working set as they are
+ * chosen, so later checks see the earlier ones; a dependency whose pinned
+ * version is not in the published list is left alone (its ordering relative to
+ * "newer" is unknown).
  */
 export async function planUpdates(
   config: CappuConfig,
@@ -407,7 +410,10 @@ export async function planUpdates(
       const order = matchingVersions(published); // newest (publish order) first
       const currentIndex = order.indexOf(current);
       if (currentIndex < 0) continue; // unknown ordering: do not risk a downgrade
-      const newer = order.slice(0, currentIndex).filter(isStableVersion);
+      // newer, stable, and the same major (a 2.x dep never auto-bumps to 3.x).
+      const newer = order
+        .slice(0, currentIndex)
+        .filter(v => isStableVersion(v) && majorOf(v) === majorOf(current));
 
       for (const candidate of newer.slice(0, UPDATE_ATTEMPTS)) {
         const roots = graphRoots(configuration).map(c =>

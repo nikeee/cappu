@@ -271,3 +271,5 @@ no timestamps were captured.
 - 2026-06-17 11:25 — when you're done: lsp: when accessing a classpath resource, so getResourceAsStream is called on a "class" type (or simlar), we want to provide auto completion for the string value passed. The user should be offered a list of all valid classpath resources that we can see.
 - 2026-06-17 11:35 — next: if not already done, add default mvn/gradle lib paths to cappu config paths, so the lsp can pick up the jars managed by them
 - 2026-06-17 11:45 — after that: move all flags related to the internal/own compiler to a `experimentalCompiler` key: enabled (default false), failOnDegrade (default true), the javac-comparison validate mode, and whatever falls under this category
+- 2026-06-17 11:55 — after that: cappu update should check for updates on transitive dependencies that satisfy the version ranges and update them in the lockfile
+- 2026-06-17 11:55 — (clarified) 2, but do not bump major versions

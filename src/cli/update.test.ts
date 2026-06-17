@@ -63,6 +63,25 @@ test("update picks the newest conflict-free stable version per dependency", asyn
   }
 });
 
+test("update stays within the current major version", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cappu-update-"));
+  try {
+    writeFileSync(
+      join(dir, "cappu.json"),
+      JSON.stringify({ dependencies: { implementation: { "g:d": "1.0" } } }),
+    );
+    // 2.0 is a clean, conflict-free bump, but a major jump - it must be skipped
+    // in favour of the newest within major 1 (1.4).
+    const src = new InMemoryPackageSource("mem", [pkg("g:d:1.0"), pkg("g:d:1.4"), pkg("g:d:2.0")]);
+    const bumps = await planUpdates(loadConfig(undefined, dir), [src]);
+    expect(bumps).toEqual([
+      { configuration: "implementation", key: "g:d", from: "1.0", to: "1.4" },
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("applyBumpsToJsonc overwrites versions and keeps comments", () => {
   const text = `{
   // my deps
