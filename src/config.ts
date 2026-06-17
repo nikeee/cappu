@@ -12,10 +12,10 @@ import { z } from "zod";
 import { isValidSpdxExpression } from "./spdx.ts";
 
 /** Maven groupId/artifactId charset. */
-const MAVEN_ID = /^[A-Za-z0-9_.-]+$/;
+export const MAVEN_ID = /^[A-Za-z0-9_.-]+$/;
 // The canonical semver.org regex: MAJOR.MINOR.PATCH with optional -prerelease
 // and +build. "1.0.0" / "1.0.0-SNAPSHOT" pass; "1.0" / "RELEASE" do not.
-const SEMVER =
+export const SEMVER =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
 const InlayHintsSchema = z.object({

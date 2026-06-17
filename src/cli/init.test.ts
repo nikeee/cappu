@@ -11,8 +11,9 @@ const cli = join(here, "main.ts");
 const tsx = join(here, "..", "..", "node_modules", ".bin", "tsx");
 
 // runInit ends the process, so it is exercised through a real cli invocation.
+// -y skips the interactive prompts (no TTY in the test) and takes the defaults.
 function runInit(dir: string, ...args: string[]): string {
-  return execFileSync(tsx, [cli, "init", ...args], { cwd: dir, encoding: "utf8" });
+  return execFileSync(tsx, [cli, "init", "-y", ...args], { cwd: dir, encoding: "utf8" });
 }
 
 test("cappu init creates the default project directories (nikeee/cappu#3)", () => {
@@ -50,6 +51,32 @@ test("cappu init writes a .gitignore but never overwrites an existing one (#12)"
     expect(readFileSync(join(existing, ".gitignore"), "utf8")).toBe("# mine\n");
   } finally {
     rmSync(existing, { recursive: true, force: true });
+  }
+});
+
+test("cappu init -y writes coordinates and defaults the output to a fat jar", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cappu-init-"));
+  try {
+    runInit(dir);
+    const config = JSON.parse(readFileSync(join(dir, "cappu.json"), "utf8")) as {
+      groupId: string;
+      artifactId: string;
+      version: string;
+      compilerOptions: { output: string };
+      dependencies: Record<string, unknown>;
+    };
+    expect(config.groupId).toBe("com.example");
+    expect(config.version).toBe("1.0.0");
+    expect(config.artifactId.length).toBeGreaterThan(0);
+    expect(config.compilerOptions.output).toBe("fat-jar");
+    expect(Object.keys(config.dependencies).sort()).toEqual([
+      "annotationProcessor",
+      "api",
+      "implementation",
+      "testImplementation",
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

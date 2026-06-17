@@ -22,6 +22,7 @@
     "test": "tsx --test \"./src/**/*.test.ts\""
   },
   "dependencies": {
+    "@inquirer/prompts": "^8.5.2",
     "cli-progress": "^3.12.0",
     "comment-json": "^5.0.0",
     "fast-xml-parser": "^5.8.0",

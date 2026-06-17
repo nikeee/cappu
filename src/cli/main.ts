@@ -30,8 +30,10 @@ const USAGE = `
 cappu ${pkg.version}
 
 Usage:
-  cappu init [--with-schema]         Write a starter cappu.json (commented, all options);
-                                     --with-schema also writes cappu.schema.json
+  cappu init [-y] [--with-schema]    Scaffold a project: ask for the coordinates
+                                     and build output and write cappu.json (-y/--yes
+                                     takes defaults); --with-schema also writes
+                                     cappu.schema.json
   cappu install [-v]                 Download the cappu.json dependencies (transitively)
                                      into .cappu/lib/classes; prints a per-category
                                      count, or each jar path with -v/--verbose
@@ -120,6 +122,7 @@ const { values, positionals } = (() => {
         verbose: { type: "boolean", short: "v" },
         "fail-on-degrade": { type: "boolean" },
         "with-schema": { type: "boolean", default: false },
+        yes: { type: "boolean", short: "y", default: false },
         validate: { type: "boolean" },
         "experimental-compiler": { type: "boolean" },
         json: { type: "boolean", default: false },
@@ -178,8 +181,8 @@ if (TIMED_COMMANDS.has(command)) {
 // Each handler exits the process, so control never falls through to loadConfig.
 switch (command) {
   case "init":
-    runInit(values.config, values["with-schema"]);
-  // falls through: runInit exits the process (never returns)
+    await runInit(values.config, values["with-schema"], { yes: values.yes });
+    break; // runInit exits; break keeps the (async) case from "falling through"
   case "cache":
     runCacheCommand(files);
   // falls through: runCacheCommand exits the process (never returns)

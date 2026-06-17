@@ -274,3 +274,4 @@ no timestamps were captured.
 - 2026-06-17 11:55 — after that: cappu update should check for updates on transitive dependencies that satisfy the version ranges and update them in the lockfile
 - 2026-06-17 11:55 — (clarified) 2, but do not bump major versions
 - 2026-06-17 12:10 — can the artifact be overwritten in cappu-compile via cli? useful to steer output jar for docker builds
+- 2026-06-17 12:25 — next: make cappu init ask some questions: groupId, artifactId, etc; add a -y parameter that fills in defaults (like npm init); make default output to fat-jar; ask output on init (library (jar) / application (fat-jar) / classes). use inquirer.
