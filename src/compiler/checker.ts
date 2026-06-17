@@ -668,17 +668,7 @@ export function createChecker(program: Program): Checker {
       return getTypeOfSymbol(parent.symbol);
     }
     if (parent.kind === SyntaxKind.ReturnStatement) {
-      let n: Node | undefined = parent.parent;
-      while (
-        n &&
-        n.kind !== SyntaxKind.MethodDeclaration &&
-        n.kind !== SyntaxKind.LambdaExpression
-      ) {
-        n = n.parent;
-      }
-      return n && n.kind === SyntaxKind.MethodDeclaration
-        ? resolveType((n as MethodDeclaration).returnType, n)
-        : undefined;
+      return enclosingReturnType(parent);
     }
     if (parent.kind === SyntaxKind.CallExpression) {
       const outer = parent as CallExpression;
@@ -732,19 +722,10 @@ export function createChecker(program: Program): Checker {
     if (parent.kind === SyntaxKind.VariableDeclarator && parent.symbol) {
       return getTypeOfSymbol(parent.symbol);
     }
-    // return () -> ...;  -> the enclosing method's declared return type.
+    // return () -> ...;  -> the enclosing method's return type, or (when the
+    // lambda is itself returned from another lambda) that lambda's SAM return.
     if (parent.kind === SyntaxKind.ReturnStatement) {
-      let n: Node | undefined = parent.parent;
-      while (
-        n &&
-        n.kind !== SyntaxKind.MethodDeclaration &&
-        n.kind !== SyntaxKind.LambdaExpression
-      ) {
-        n = n.parent;
-      }
-      return n && n.kind === SyntaxKind.MethodDeclaration
-        ? resolveType((n as MethodDeclaration).returnType, n)
-        : undefined;
+      return enclosingReturnType(parent);
     }
     // new T(() -> ...) -> the matching constructor's parameter type,
     // instantiated with the created type's arguments.
@@ -1744,10 +1725,9 @@ export function createChecker(program: Program): Checker {
       if (current.kind === SyntaxKind.MethodDeclaration) {
         return resolveType((current as MethodDeclaration).returnType, current);
       }
-      // TODO: a `return` inside a lambda targets the SAM's return type (JLS 15.27.2
-      // / 9.8). We bail to undefined instead of inferring it from the lambda's
-      // target functional interface.
-      if (current.kind === SyntaxKind.LambdaExpression) return undefined;
+      // A `return` inside a lambda targets the SAM's return type (JLS 15.27.2 /
+      // 9.8), instantiated with the target's type arguments.
+      if (current.kind === SyntaxKind.LambdaExpression) return getLambdaInfo(current)?.instReturn;
       current = current.parent;
     }
     return undefined;

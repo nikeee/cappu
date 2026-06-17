@@ -167,8 +167,12 @@ verifiable placeholder, never a crash.
 
 ## Checker
 
-- [ ] A `return` inside a lambda is not typed against the SAM's return type
-      (JLS 15.27.2 / 9.8).
+- [x] A `return` inside a lambda is typed against the SAM's return type (JLS
+      15.27.2 / 9.8): `enclosingReturnType` resolves the nearest enclosing
+      lambda's instantiated SAM return type (not the outer method's), so a value
+      or nested lambda returned from a lambda body is target-typed by the
+      functional interface. (Target-typed *inference* of a bare generic call
+      from that type - JLS 18.5.2 - is still a separate gap.)
 - [x] Type variables erase to their leftmost bound (JLS 4.6): descriptors use the
       bound (`<T extends CharSequence>` -> `Ljava/lang/CharSequence;`), member
       lookup on a type-variable receiver resolves via the bound (JLS 4.4), and the

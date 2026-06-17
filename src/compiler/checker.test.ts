@@ -36,6 +36,20 @@ function identifierAt(
   return getIdentifierAtPosition(sf, offset) as Identifier;
 }
 
+test("a value returned from a lambda body is typed against the SAM return type", () => {
+  const ctx = setup(
+    "class C { interface Sup<T> { T get(); } interface Run { void go(); }" +
+      " void m() { Sup<Run> s = () -> { return () -> {}; }; } }",
+  );
+  // The inner lambda is returned from the outer one, so its target functional
+  // interface is the outer SAM's return type (Run) - previously this resolved to
+  // undefined because the return was not typed against the SAM (JLS 15.27.2).
+  const sf = ctx.program.getSourceFile(ctx.uri)!;
+  let node: Node | undefined = getNodeAtPosition(sf, sf.text.indexOf("() -> {}"));
+  while (node && node.kind !== SyntaxKind.LambdaExpression) node = node.parent;
+  expect(typeToString(ctx.checker.getLambdaInfo(node!)!.interfaceType)).toBe("Run");
+});
+
 test("declared types of fields and methods", () => {
   const ctx = setup("class C { String name; int count() { return 0; } }");
   const nameSym = ctx.checker.resolveName(identifierAt(ctx, "name"))!;
