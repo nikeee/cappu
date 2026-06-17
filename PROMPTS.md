@@ -293,3 +293,8 @@ no timestamps were captured.
   code.
 
 - 2026-06-17 15:28 — plan issue https://github.com/nikeee/cappu/issues/18
+- 2026-06-18 00:21 — next: scan all ts files and look for more branded types opportunities
+- 2026-06-18 00:36 — also update CLAUDE.md so it includes instructions for the to-go codebase. Also add that every feature should be implemented in both code bases. And when editing both code bases, always look out for diverging behaviour
+- 2026-06-18 00:36 — then continue with next milestone
+- 2026-06-18 00:36 — commit. just use go fmt standard tooling. rename to-go dir to togo (its simpler)
+- 2026-06-18 00:36 — dont branch. there is some work going on in the ts version

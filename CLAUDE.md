@@ -52,6 +52,40 @@ For multi-step tasks, state a brief plan:
 3. [Step] → verify: [check]
 ```
 
+## Two codebases: TypeScript (`src/`) + Go port (`togo/`)
+
+This repo holds two implementations of cappu. The TypeScript build under `src/`
+is the original and the reference. The Go build under `togo/` is an in-progress
+port (issue #18) that produces a single statically linked binary. `GO-PATTERNS.md`
+at the repo root records the migration patterns (branded types, JSONC editing,
+static linking, library mapping) - read it before working in `togo/`, and
+**amend it whenever you discover a new pattern**.
+
+**Every feature lives in BOTH codebases.** When you add or change a command,
+config field, validation rule, or behaviour:
+- Implement it in `src/` (TypeScript) AND `togo/` (Go), with tests in both.
+- If a command is too large to port now (e.g. the compiler, lsp), it stays a
+  stub in `togo/internal/cli/stubs.go` - but new work on already-ported
+  commands must land in both.
+- **Watch for diverging behaviour.** The two builds must behave identically:
+  same flags, same exit codes, same stdout/stderr text, same config defaults and
+  validation. When editing one side, diff it against the other and reconcile any
+  drift. The Go ports carry `// Port of src/...` comments pointing at their TS
+  source - keep those accurate.
+
+### Go build commands (run inside `togo/`)
+```bash
+go test ./...                                              # all Go tests
+go build ./...                                             # compile
+go vet ./...
+make fmt           # gofmt -w .   (format)
+make lint          # golangci-lint run
+make build         # static host binary -> dist/cappu (CGO_ENABLED=0, stripped)
+make build-all     # cross-compile every release target
+```
+The Go CI (`.github/workflows/CI-go.yaml`) runs parallel to the Node CI; both
+must stay green.
+
 ## Testing
 
 Tests use the Node test runner via `tsx` (TypeScript sources run directly).
