@@ -23,7 +23,6 @@ test("JSONC parses with comments and trailing commas; sections map", () => {
       '  "compilerOptions": {',
       '    "classPath": ["lib/classes",],',
       '    "sourcePaths": ["src/main/java"],',
-      '    "outDir": "build",',
       '    "failOnDegrade": true,',
       "  },",
       '  "lspOptions": { "inlayHints": { "varTypes": false } },',
@@ -33,7 +32,6 @@ test("JSONC parses with comments and trailing commas; sections map", () => {
   const config = loadConfig(undefined, dir);
   expect(config.compilerOptions.classPath).toEqual(["lib/classes"]);
   expect(config.compilerOptions.sourcePaths).toEqual(["src/main/java"]);
-  expect(config.compilerOptions.outDir).toBe("build");
   expect(config.compilerOptions.failOnDegrade).toBe(true);
   // the omitted parameterNames falls back to its schema default
   expect(config.lspOptions.inlayHints).toEqual({ parameterNames: true, varTypes: false });
@@ -63,10 +61,10 @@ test("unknown keys are ignored, comment-json metadata does not leak", () => {
   const dir = mkdtempSync(join(tmpdir(), "cfg-"));
   writeFileSync(
     join(dir, DEFAULT_CONFIG_NAME),
-    '{ /* note */ "futureOption": true, "compilerOptions": { "outDir": "o" } }',
+    '{ /* note */ "futureOption": true, "compilerOptions": { "quiet": true } }',
   );
   const config = loadConfig(undefined, dir);
-  expect(config.compilerOptions.outDir).toBe("o");
+  expect(config.compilerOptions.quiet).toBe(true);
   expect(Object.keys(config).sort()).toEqual([
     "baseDir",
     "compilerOptions",

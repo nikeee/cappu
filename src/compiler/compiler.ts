@@ -45,8 +45,10 @@ import { writeZip, type ZipEntryInput } from "./zipWriter.ts";
 export type OutputKind = "classes" | "jar" | "fat-jar";
 
 export interface CompileOptions {
+  /** Output root. `cappu compile` always uses ./dist; only `cappu test`
+   * overrides this (to its private test-build directory). */
   outDir?: string;
-  /** What to produce in outDir (nikeee/cappu#5). Default: the config's, then "classes". */
+  /** What to produce in the output root (nikeee/cappu#5). Default: "classes". */
   output?: OutputKind;
   /** Compile with cappu's own (experimental) compiler instead of javac. */
   experimentalCompiler?: boolean;
@@ -216,7 +218,7 @@ function toCompileDiagnostic(
 export function runCompile(files: string[], options: CompileOptions): CompileResult {
   const failOnDegrade =
     options.failOnDegrade ?? options.config?.compilerOptions.failOnDegrade ?? false;
-  const outDir = options.outDir ?? options.config?.compilerOptions.outDir ?? ".";
+  const outDir = options.outDir ?? "dist";
   const output = options.output ?? options.config?.compilerOptions.output ?? "classes";
   // javac is the default compiler (nikeee/cappu#17); cappu's own pipeline
   // runs only when explicitly requested (--experimental-compiler).

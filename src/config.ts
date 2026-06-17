@@ -46,8 +46,7 @@ const CompilerOptionsSchema = z.object({
   /** Directories whose files are copied verbatim into the build output. */
   resourcePaths: z.array(z.string()).default([DEFAULT_RESOURCE_PATH]),
   /** Output root for the build artifacts. */
-  outDir: z.string().default("./dist"),
-  /** What `cappu compile` produces in outDir (nikeee/cappu#5). */
+  /** What `cappu compile` produces in ./dist (nikeee/cappu#5). */
   output: z.enum(["classes", "jar", "fat-jar"]).default("classes"),
   quiet: z.boolean().optional(),
   failOnDegrade: z.boolean().optional(),
@@ -169,11 +168,8 @@ export const CONFIG_TEMPLATE = `
     // output (the classes tree / the jar). Default if unset: ["./src/main/resources"].
     // "resourcePaths": ["./src/main/resources"],
 
-    // Output root for the build artifacts (default if unset: "./dist").
-    // "outDir": "./dist",
-
-    // What \`cappu compile\` produces in outDir:
-    // - "classes": a package tree usable directly as \`java -cp <outDir>\`
+    // What \`cappu compile\` produces in ./dist (the build output is always dist):
+    // - "classes": a package tree usable directly as \`java -cp ./dist\`
     // - "jar": same as "classes", but as a jar
     // - "fat-jar": the jar plus the contents of every dependency jar on the classPath
     // "output": "classes",

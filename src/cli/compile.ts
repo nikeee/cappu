@@ -11,7 +11,6 @@ import { renderDiagnostics } from "./renderDiagnostics.ts";
 import { findSourceJavaFiles } from "../workspace.ts";
 
 export interface CompileFlags {
-  outDir?: string;
   /** Raw --output value; validated here. */
   output?: string;
   experimentalCompiler?: boolean;
@@ -70,7 +69,6 @@ export async function runCompileCommand(
     process.exit(2);
   }
   const result = runCompile(inputs, {
-    outDir: flags.outDir,
     output,
     experimentalCompiler: flags.experimentalCompiler,
     failOnDegrade: flags.failOnDegrade,

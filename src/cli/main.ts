@@ -71,7 +71,7 @@ Usage:
 Options:
   -c, --config <file>   Project config (default: ./cappu.json, JSONC).
                         Sections: "compilerOptions" (classPath, sourcePaths,
-                        outDir, quiet, failOnDegrade) and "lspOptions"
+                        quiet, failOnDegrade) and "lspOptions"
                         (inlayHints). Command-line flags take precedence.
 
 Lsp options:
@@ -80,9 +80,7 @@ Lsp options:
                         disconnects)
 
 Compile options:
-  -d, --out-dir <dir>   Output root for the build artifacts (default:
-                        compilerOptions.outDir, then ./dist)
-  -o, --output <kind>   What to produce in the output root: "classes" (a
+  -o, --output <kind>   What to produce in ./dist: "classes" (a
                         package tree usable as java -cp <dir>), "jar", or
                         "fat-jar" (includes the dependency jars' contents)
   -q, --quiet           Do not print the path of each emitted .class file
@@ -111,7 +109,6 @@ const { values, positionals } = (() => {
       options: {
         config: { type: "string", short: "c" },
         port: { type: "string", short: "p" },
-        "out-dir": { type: "string", short: "d" },
         output: { type: "string", short: "o" },
         // No defaults: an absent flag must stay undefined so cappu.json
         // can supply the value (an explicit flag always wins).
@@ -243,7 +240,6 @@ switch (command) {
     await runCompileCommand(
       files,
       {
-        outDir: values["out-dir"],
         output: values.output,
         quiet: values.quiet,
         failOnDegrade: values["fail-on-degrade"],
