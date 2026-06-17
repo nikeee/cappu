@@ -262,3 +262,4 @@ no timestamps were captured.
 - 2026-06-17 09:32 — `cappu rage` should open the issue tracker in your default browser
 - 2026-06-17 09:32 — use ebug url from package.json. if there is non, add it
 - 2026-06-17 09:32 — use switch for pre-loadCOnfig commands
+- 2026-06-17 10:45 — lsp: in methods of a class, instance variables are not offered for completion if we're not qualifying using "this.". there is also no auto completion when dotting into on a member without "this."

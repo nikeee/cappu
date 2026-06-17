@@ -148,8 +148,11 @@ export function getCompletions(
 ): CompletionItem[] {
   const text = sourceFile.text;
 
-  // Is the cursor positioned after a '.' (member access)?
+  // Member access? Look back past any partial member name already being typed
+  // (`recv.par|tial`), then whitespace, to a '.'. Without skipping the partial
+  // name, completion would stop working as soon as the first letter is typed.
   let i = offset - 1;
+  while (i >= 0 && /[A-Za-z0-9_$]/.test(text[i]!)) i--;
   while (i >= 0 && /\s/.test(text[i]!)) i--;
   if (i >= 0 && text[i] === ".") {
     const dot = i;

@@ -44,6 +44,18 @@ test("member completion on an unknown receiver returns nothing (no guesses)", ()
   expect(complete("class U { void m() { mystery./*|*/ } }")).toHaveLength(0);
 });
 
+test("member completion keeps working once a partial member name is typed", () => {
+  // the cursor is no longer right after '.', so the '.' must be found past the
+  // partial identifier - otherwise completion vanishes as soon as you type.
+  expect(complete("class U { void m(String s) { s.sub/*|*/ } }").map(i => i.label)).toContain(
+    "substring",
+  );
+  // a bare instance field receiver (no `this.`), mid-token
+  expect(
+    complete("class C { String name; void m() { name.len/*|*/ } }").map(i => i.label),
+  ).toContain("length");
+});
+
 test("scope completion offers locals, params, fields, enclosing type and stub types", () => {
   const labels = complete(
     "class Box { int field; void m(int param) { int local = 0; /*|*/ } }",
