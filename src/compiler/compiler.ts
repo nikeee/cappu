@@ -50,6 +50,9 @@ export interface CompileOptions {
   outDir?: string;
   /** What to produce in the output root (nikeee/cappu#5). Default: "classes". */
   output?: OutputKind;
+  /** Jar base name override (no extension), e.g. "app" -> dist/app.jar. Default:
+   * <artifactId>-<version> or the project directory name. */
+  artifactName?: string;
   /** Compile with cappu's own (experimental) compiler instead of javac. */
   experimentalCompiler?: boolean;
   /** Treat degraded (placeholder) method bodies as a build failure. */
@@ -222,6 +225,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
     true;
   const outDir = options.outDir ?? "dist";
   const output = options.output ?? options.config?.compilerOptions.output ?? "classes";
+  const jarName = options.artifactName ?? artifactBaseName(options.config);
   // javac is the default compiler (nikeee/cappu#17); cappu's own pipeline
   // runs only when explicitly requested (--experimental-compiler).
   const experimental =
@@ -229,7 +233,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
     options.config?.compilerOptions.experimentalCompiler.enabled ??
     false;
   if (!experimental) {
-    return runJavacCompile(files, outDir, output, options.config);
+    return runJavacCompile(files, outDir, output, options.config, jarName);
   }
   const typeCheck = options.typeCheck ?? true;
 
@@ -331,7 +335,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
         }
       }
       // The archive is named after the project directory (where cappu.json lives).
-      const jar = join(outDir, `${artifactBaseName(options.config)}.jar`);
+      const jar = join(outDir, `${jarName}.jar`);
       mkdirSync(outDir, { recursive: true });
       writeFileSync(jar, writeZip(entries));
       written.push(jar);
@@ -369,6 +373,7 @@ function runJavacCompile(
   outDir: string,
   output: OutputKind,
   config: CappuConfig,
+  jarName: string,
 ): CompileResult {
   // The provisioned JDK's javac (config "jdk", nikeee/cappu#8) wins over the
   // configured/PATH binary.
@@ -472,7 +477,7 @@ function runJavacCompile(
           entries.push(entry);
         }
       }
-      const jar = join(outDir, `${artifactBaseName(config)}.jar`);
+      const jar = join(outDir, `${jarName}.jar`);
       mkdirSync(outDir, { recursive: true });
       writeFileSync(jar, writeZip(entries));
       written.push(jar);

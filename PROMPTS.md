@@ -273,3 +273,4 @@ no timestamps were captured.
 - 2026-06-17 11:45 — after that: move all flags related to the internal/own compiler to a `experimentalCompiler` key: enabled (default false), failOnDegrade (default true), the javac-comparison validate mode, and whatever falls under this category
 - 2026-06-17 11:55 — after that: cappu update should check for updates on transitive dependencies that satisfy the version ranges and update them in the lockfile
 - 2026-06-17 11:55 — (clarified) 2, but do not bump major versions
+- 2026-06-17 12:10 — can the artifact be overwritten in cappu-compile via cli? useful to steer output jar for docker builds

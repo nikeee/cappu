@@ -84,6 +84,8 @@ Compile options:
   -o, --output <kind>   What to produce in ./dist: "classes" (a
                         package tree usable as java -cp <dir>), "jar", or
                         "fat-jar" (includes the dependency jars' contents)
+      --artifact <name> Jar base name in ./dist (e.g. "app" -> dist/app.jar);
+                        default <artifactId>-<version> or the project dir name
   -q, --quiet           Do not print the path of each emitted .class file
       --fail-on-degrade Fail when a method body degrades to a placeholder
                         (an unsupported construct; needs --experimental-compiler)
@@ -111,6 +113,7 @@ const { values, positionals } = (() => {
         config: { type: "string", short: "c" },
         port: { type: "string", short: "p" },
         output: { type: "string", short: "o" },
+        artifact: { type: "string" },
         // No defaults: an absent flag must stay undefined so cappu.json
         // can supply the value (an explicit flag always wins).
         quiet: { type: "boolean", short: "q" },
@@ -242,6 +245,7 @@ switch (command) {
       files,
       {
         output: values.output,
+        artifact: values.artifact,
         quiet: values.quiet,
         failOnDegrade: values["fail-on-degrade"],
         experimentalCompiler: values["experimental-compiler"],

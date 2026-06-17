@@ -13,6 +13,8 @@ import { findSourceJavaFiles } from "../workspace.ts";
 export interface CompileFlags {
   /** Raw --output value; validated here. */
   output?: string;
+  /** --artifact: jar base name override (steers the output jar, e.g. for Docker). */
+  artifact?: string;
   experimentalCompiler?: boolean;
   quiet?: boolean;
   failOnDegrade?: boolean;
@@ -74,6 +76,7 @@ export async function runCompileCommand(
   }
   const result = runCompile(inputs, {
     output,
+    artifactName: flags.artifact?.replace(/\.jar$/, ""),
     experimentalCompiler: flags.experimentalCompiler,
     failOnDegrade: flags.failOnDegrade,
     config,

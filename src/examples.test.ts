@@ -275,6 +275,32 @@ test(
   },
 );
 
+// --artifact steers the output jar's name (predictable name for Docker builds).
+// No dependencies, so javac-only (no network).
+test("cappu compile --artifact steers the output jar name", { skip: !HAS_JAVAC }, () => {
+  const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
+  const work = join(root, "p");
+  try {
+    mkdirSync(join(work, "src", "main", "java", "x"), { recursive: true });
+    writeFileSync(
+      join(work, "cappu.json"),
+      '{ "compilerOptions": { "mainClass": "x.M", "quiet": true } }',
+    );
+    writeFileSync(
+      join(work, "src", "main", "java", "x", "M.java"),
+      "package x; public class M { public static void main(String[] a) {} }",
+    );
+    execFileSync(tsx, [cli, "compile", "-o", "jar", "--artifact", "app"], {
+      cwd: work,
+      env: { ...process.env, CAPPU_PACKAGE_STORE: mkdtempSync(join(tmpdir(), "cappu-store-")) },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    expect(existsSync(join(work, "dist", "app.jar"))).toBe(true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // A minimal Spring Boot app: cappu resolves the whole starter tree and compiles
 // it, then it runs from a classpath of the individual jars (NOT a fat jar -
 // Spring auto-config needs each jar's separate META-INF). Networked + JDK-gated;
