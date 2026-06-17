@@ -364,6 +364,9 @@ export interface DependencyBump {
 const PRERELEASE = /(?:^|[-._])(?:alpha|beta|rc|cr|snapshot|milestone|m\d+|preview|ea|dev)/i;
 const isStableVersion = (version: string): boolean => !PRERELEASE.test(version);
 
+// The leading (major) component, for the no-major-bump rule below.
+const majorOf = (version: string): string => version.split(/[.+-]/, 1)[0]!;
+
 const UPDATE_ATTEMPTS = 5;
 
 /**
