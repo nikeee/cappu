@@ -30,6 +30,7 @@ function normalizeKey(name: string): string {
 // netty, postgresql, ...); add new variants here as they are encountered.
 const SPDX_ALIASES: Record<string, string> = {
   "apache 2 0": "Apache-2.0",
+  "apache license 2 0": "Apache-2.0",
   "apache license version 2 0": "Apache-2.0",
   "apache software license version 2 0": "Apache-2.0",
   "the apache license version 2 0": "Apache-2.0",
@@ -48,9 +49,11 @@ const SPDX_ALIASES: Record<string, string> = {
   "eclipse public license version 2 0": "EPL-2.0",
   "epl 2 0": "EPL-2.0",
   "gnu lesser general public license": "LGPL-2.1",
+  "gnu lesser public license": "LGPL-2.1",
   mit: "MIT",
   "mit license": "MIT",
   "the mit license": "MIT",
+  "mozilla public license version 1 0": "MPL-1.0",
   "mpl 2 0": "MPL-2.0",
 };
 
