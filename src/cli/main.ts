@@ -48,9 +48,9 @@ Usage:
   cappu licenses [--json]            Print every resolved dependency and the
                                      license it ships under (best-effort SPDX);
                                      --json emits it machine-readable
-  cappu add <configuration> <coord...>  Add one or more group:artifact[@version] to the
-                                     dependencies section (api or implementation) and
-                                     install them
+  cappu add <configuration> <coord...>  Add one or more group:artifact[:version] to the
+                                     dependencies section (api, implementation,
+                                     annotationProcessor or testImplementation) and install them
   cappu publish [--repo <url>]       Build the jar, generate its POM, and upload
                                      both to a Maven registry (needs groupId/
                                      artifactId/version in cappu.json + creds).

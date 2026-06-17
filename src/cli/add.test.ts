@@ -5,8 +5,9 @@ import { parse } from "comment-json";
 
 import { addDependencyToJsonc, parseAddCoordinate } from "./add.ts";
 
-test("coordinates parse as group:artifact with an optional @version", () => {
-  expect(parseAddCoordinate("com.google.code.gson:gson@2.14.0")).toEqual({
+test("coordinates parse as Gradle-style group:artifact[:version]", () => {
+  // a line copied straight from a build.gradle
+  expect(parseAddCoordinate("com.google.code.gson:gson:2.14.0")).toEqual({
     key: "com.google.code.gson:gson",
     version: "2.14.0",
   });
@@ -14,11 +15,24 @@ test("coordinates parse as group:artifact with an optional @version", () => {
     key: "org.example:thing",
     version: undefined,
   });
-  // not that shape: missing artifact, empty segment, dangling @, extra segment
+  // not that shape: bare name, empty segment, dangling version, classifier (4 parts)
   expect(parseAddCoordinate("gson")).toBeUndefined();
-  expect(parseAddCoordinate(":gson@1")).toBeUndefined();
-  expect(parseAddCoordinate("a:b@")).toBeUndefined();
-  expect(parseAddCoordinate("a:b:c@1")).toBeUndefined();
+  expect(parseAddCoordinate(":gson:1")).toBeUndefined();
+  expect(parseAddCoordinate("a:b:")).toBeUndefined();
+  expect(parseAddCoordinate("a:b:c:d")).toBeUndefined();
+});
+
+test("a dependency can be added to any configuration section", () => {
+  const out = addDependencyToJsonc(
+    "{}\n",
+    "testImplementation",
+    "org.junit.jupiter:junit-jupiter",
+    "5.12.2",
+  );
+  expect(
+    (parse(out) as unknown as { dependencies: { testImplementation: Record<string, string> } })
+      .dependencies.testImplementation,
+  ).toEqual({ "org.junit.jupiter:junit-jupiter": "5.12.2" });
 });
 
 test("adding a dependency preserves the JSONC comments around it", () => {

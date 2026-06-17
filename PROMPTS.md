@@ -266,3 +266,5 @@ no timestamps were captured.
 - 2026-06-17 10:50 — add an example to examples/ that uses org.immutables
 - 2026-06-17 11:05 — remove ability to configure output dir. it is always dist.
 - 2026-06-17 11:10 — next, add --json for cappu audit if not yet present
+- 2026-06-17 11:20 — after that: support testImplementation and other dependencies (especially in cappu add)
+- 2026-06-17 11:20 — after that: chage artifact coordinates in "cappu add" to be without @ but with : for the version instead, so a user can just copy a line from some build.gradle and prepend `cappu add`

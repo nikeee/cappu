@@ -1,9 +1,10 @@
-// `cappu add <configuration> <group:artifact[@version]>`: write the entry into
+// `cappu add <configuration> <group:artifact[:version]>`: write the entry into
 // the cappu.json dependencies section (preserving comments - the file is
 // JSONC) and then download it and its transitive dependencies exactly like
-// `cappu install`. An absent or partial @version ("@2", "@2.10") picks the
-// newest matching version whose transitive resolution is conflict-free
-// against the already-configured dependencies.
+// `cappu install`. The Gradle/Maven `group:artifact:version` form is used as-is,
+// so a coordinate copied from a build.gradle just works. An absent or partial
+// version ("2", "2.10") picks the newest matching version whose transitive
+// resolution is conflict-free against the already-configured dependencies.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -15,7 +16,12 @@ import { configuredSources, pickAddVersion } from "../install.ts";
 import { type PackageSource } from "../packages/index.ts";
 import { runInstall } from "./install.ts";
 
-const CONFIGURATIONS = ["api", "implementation"] as const;
+const CONFIGURATIONS = [
+  "api",
+  "implementation",
+  "annotationProcessor",
+  "testImplementation",
+] as const;
 type Configuration = (typeof CONFIGURATIONS)[number];
 
 export interface AddCoordinate {
@@ -25,15 +31,16 @@ export interface AddCoordinate {
   version?: string;
 }
 
-/** Parse "group:artifact[@version]", or undefined if it is not that shape. */
+/**
+ * Parse the Gradle/Maven "group:artifact[:version]" form (so a coordinate
+ * copied from a build file works as-is). Undefined if it is not that shape.
+ */
 export function parseAddCoordinate(spec: string): AddCoordinate | undefined {
-  const at = spec.indexOf("@");
-  const key = at < 0 ? spec : spec.slice(0, at);
-  const version = at < 0 ? undefined : spec.slice(at + 1);
-  if (at >= 0 && !version) return undefined;
-  const segments = key.split(":");
-  if (segments.length !== 2 || segments.some(s => s === "")) return undefined;
-  return { key, version };
+  const segments = spec.split(":");
+  if (segments.some(s => s === "")) return undefined;
+  if (segments.length === 2) return { key: spec };
+  if (segments.length === 3) return { key: `${segments[0]}:${segments[1]}`, version: segments[2] };
+  return undefined;
 }
 
 /** Whether the written spec is already exact enough to skip the picker. */
@@ -77,8 +84,8 @@ export async function runAdd(
   if (!configuration || coordinates.length === 0 || invalid.length > 0) {
     for (const spec of invalid) process.stderr.write(`cappu: not a coordinate: '${spec}'\n`);
     process.stderr.write(
-      "usage: cappu add <api|implementation> <group:artifact[@version]> [more...]\n" +
-        "e.g.:  cappu add implementation com.google.code.gson:gson@2.14.0 org.slf4j:slf4j-api\n",
+      `usage: cappu add <${CONFIGURATIONS.join("|")}> <group:artifact[:version]> [more...]\n` +
+        "e.g.:  cappu add implementation com.google.code.gson:gson:2.14.0 org.slf4j:slf4j-api\n",
     );
     process.exit(2);
   }
@@ -135,7 +142,7 @@ export async function runAdd(
   }
   writeFileSync(configPath, text);
   for (const { key, version } of picks) {
-    process.stderr.write(`added ${configuration} ${key}@${version}\n`);
+    process.stderr.write(`added ${configuration} ${key}:${version}\n`);
   }
 
   // Re-resolve and rewrite the lock - install alone only consumes the lock.
