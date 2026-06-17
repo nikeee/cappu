@@ -265,3 +265,4 @@ no timestamps were captured.
 - 2026-06-17 10:45 — lsp: in methods of a class, instance variables are not offered for completion if we're not qualifying using "this.". there is also no auto completion when dotting into on a member without "this."
 - 2026-06-17 10:50 — add an example to examples/ that uses org.immutables
 - 2026-06-17 11:05 — remove ability to configure output dir. it is always dist.
+- 2026-06-17 11:10 — next, add --json for cappu audit if not yet present

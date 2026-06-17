@@ -153,6 +153,31 @@ test("examples/audit-app reports its vulnerable dependency", { skip: !HAS_JAVAC 
     }
     expect(freshCode).toBe(1);
     expect(freshOut).toContain("CVE-2021-44228");
+
+    // --json emits machine-readable findings (still exit 1)
+    let jsonOut = "";
+    let jsonCode = 0;
+    try {
+      jsonOut = execFileSync(tsx, [cli, "audit", "--json"], {
+        cwd: work,
+        env: { ...process.env, CAPPU_PACKAGE_STORE: store },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (e) {
+      jsonOut = (e as { stdout?: string }).stdout ?? "";
+      jsonCode = (e as { status?: number }).status ?? 1;
+    }
+    expect(jsonCode).toBe(1);
+    const report = JSON.parse(jsonOut) as {
+      vulnerable: { coordinate: string; path: string[]; advisories: { aliases: string[] }[] }[];
+    };
+    const log4j = report.vulnerable.find(v =>
+      v.coordinate.startsWith("org.apache.logging.log4j:log4j-core:"),
+    );
+    expect(log4j).toBeDefined();
+    expect(log4j!.advisories.flatMap(a => a.aliases)).toContain("CVE-2021-44228");
+    expect(log4j!.path.at(-1)).toBe(log4j!.coordinate); // path ends at the vulnerable pkg
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(store, { recursive: true, force: true });

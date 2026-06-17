@@ -63,7 +63,8 @@ function dependencyPath(
 export async function runAudit(
   config: CappuConfig,
   // --no-cache: ignore the metadata and OSV detail caches for a fresh scan.
-  options: { noCache?: boolean } = {},
+  // --json: emit the findings machine-readable instead of the coloured report.
+  options: { noCache?: boolean; json?: boolean } = {},
   // The CVE source; defaults to OSV over a fetcher that caches vuln details on
   // disk (skipped under --no-cache so the scan is fully fresh).
   source: AuditSource = new OsvSource(options.noCache ? undefined : cachedFetchJson()),
@@ -96,6 +97,27 @@ export async function runAudit(
   } catch (e) {
     process.stderr.write(`cappu: audit failed: ${(e as Error).message}\n`);
     process.exit(2);
+  }
+
+  if (options.json) {
+    const output = {
+      scanned: report.scanned,
+      counts: report.counts,
+      vulnerable: report.vulnerable.map(p => ({
+        coordinate: coordinatesToString(p.coordinates),
+        path: dependencyPath(byKey, p.coordinates).map(coordinatesToString),
+        advisories: p.advisories.map(a => ({
+          id: a.id,
+          aliases: a.aliases,
+          severity: a.severity,
+          summary: a.summary,
+          fixedVersions: a.fixedVersions,
+          url: a.url,
+        })),
+      })),
+    };
+    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+    process.exit(report.vulnerable.length > 0 ? 1 : 0);
   }
 
   if (report.vulnerable.length === 0) {

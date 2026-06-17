@@ -41,9 +41,10 @@ Usage:
                                      git repo root, also commit it and tag v<version>
   cappu verify                       Check the installed lib jars against the
                                      SHA-256 sums in cappu-lock.json
-  cappu audit [--no-cache]           Scan resolved dependencies for known
+  cappu audit [--no-cache] [--json]  Scan resolved dependencies for known
                                      vulnerabilities (OSV); no fixing.
-                                     --no-cache ignores all caches (fresh scan)
+                                     --no-cache ignores all caches (fresh scan);
+                                     --json emits the findings machine-readable
   cappu licenses [--json]            Print every resolved dependency and the
                                      license it ships under (best-effort SPDX);
                                      --json emits it machine-readable
@@ -213,7 +214,7 @@ switch (command) {
     await runVersion(files[0], values.config, config);
     break;
   case "audit":
-    await runAudit(config, { noCache: values["no-cache"] });
+    await runAudit(config, { noCache: values["no-cache"], json: values.json });
     break;
   case "licenses":
     await runLicenses(config, { json: values.json });
