@@ -17,6 +17,10 @@ Each directory is a self-contained cappu project. Dependencies install into
   `.cappu/lib/processors`) generates the mapper implementation during
   `cappu compile` (#7). Same install / compile / `java -jar dist/mapstruct-app.jar` flow.
 
+- **immutables-app** - the Immutables annotation processor generates
+  `ImmutableAnimal` (a builder + value type) from a `@Value.Immutable` interface
+  during `cappu compile`. Same install / compile / `java -jar dist/immutables-app.jar` flow.
+
 - **junit-app** - `cappu test` compiles `src/test/java` and runs the JUnit
   Platform console launcher over it (#16):
 

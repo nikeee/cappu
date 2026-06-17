@@ -1,0 +1,47 @@
+{
+  "version": 2,
+  "roots": {
+    "api": {},
+    "implementation": {
+      "org.immutables:value": "2.12.2"
+    },
+    "annotationProcessor": {
+      "org.immutables:value": "2.12.2"
+    },
+    "testImplementation": {}
+  },
+  "packages": [
+    {
+      "coordinates": {
+        "groupId": "org.immutables",
+        "artifactId": "value",
+        "version": "2.12.2"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "fa9582d54d079bae233f3e580b5a1241417fcdd3e7049ece9f8ca85c8edd49e1",
+      "licenses": [
+        {
+          "name": "The Apache Software License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    }
+  ],
+  "processorPackages": [
+    {
+      "coordinates": {
+        "groupId": "org.immutables",
+        "artifactId": "value",
+        "version": "2.12.2"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "fa9582d54d079bae233f3e580b5a1241417fcdd3e7049ece9f8ca85c8edd49e1",
+      "licenses": [
+        {
+          "name": "The Apache Software License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    }
+  ]
+}

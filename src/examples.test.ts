@@ -93,6 +93,16 @@ test(
   },
 );
 
+// Like mapstruct, the Immutables processor generates code that the experimental
+// emitter would run through best-effort, so this example is javac-mode only.
+test(
+  "examples/immutables-app builds and runs (annotation processor)",
+  { skip: !HAS_JAVAC || EXPERIMENTAL },
+  () => {
+    expect(runExample("immutables-app")).toBe("Ant has 6 legs\n");
+  },
+);
+
 test("examples/junit-app runs its tests with cappu test", { skip: !HAS_JAVAC }, () => {
   const output = runExample("junit-app", ["test"]);
   expect(output).toContain("2 tests successful");
