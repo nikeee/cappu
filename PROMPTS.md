@@ -257,3 +257,4 @@ no timestamps were captured.
 - 2026-06-16 21:50 — next: cappu licenses lists a lot of "no license declared". e.g. junit:junit:4.13. is that due to missing spdx mappings? fall back to the raw license
 - 2026-06-16 21:50 — add spdx identifier "New BSD License" that maps to "BSD-3-Clause" if it is correct
 - 2026-06-17 09:15 — next: create an example application that starts a basic spring boot project. use latest spring boot. maybe plan before
+- 2026-06-17 10:30 — lsp: "var" is not clickable to go to definition. variables defined with `var` do not count as references on some occasions

@@ -315,6 +315,30 @@ export function startServer(
     return at && (getIdentifierAtPosition(at.sourceFile, at.offset) as Identifier | undefined);
   }
 
+  // The declaration of an expression's (inferred) type: its class, or an
+  // array's element class. Powers go-to-type-definition and clicking `var`.
+  function typeDefinitionOf(expr: Identifier): Definition | null {
+    const type = checker.getTypeOfExpression(expr);
+    const classSymbol =
+      type.kind === TypeKind.Class
+        ? (type as ClassType).symbol
+        : type.kind === TypeKind.Array && (type as ArrayType).elementType.kind === TypeKind.Class
+          ? ((type as ArrayType).elementType as ClassType).symbol
+          : undefined;
+    if (!classSymbol) return null;
+    const name = getDeclarationNameNode(classSymbol);
+    return name ? locationOf(name) : null;
+  }
+
+  // The variable name a `var` type node infers its type from: a single-declarator
+  // local-variable statement, or a parameter (for-each / lambda) binding.
+  function varInferredFrom(varType: Node): Identifier | undefined {
+    const parent = varType.parent as
+      | (Node & { name?: Identifier; declarators?: { name: Identifier }[] })
+      | undefined;
+    return parent?.name ?? parent?.declarators?.[0]?.name;
+  }
+
   connection.onReferences((params): Location[] | null => {
     const identifier = identifierAt(asUri(params.textDocument.uri), params.position);
     if (!identifier) return null;
@@ -361,12 +385,22 @@ export function startServer(
   });
 
   connection.onDefinition((params): Definition | null => {
-    const identifier = identifierAt(asUri(params.textDocument.uri), params.position);
-    if (!identifier) return null;
-    const symbol = checker.resolveName(identifier);
-    if (!symbol) return null;
-    const nameNode = getDeclarationNameNode(symbol);
-    return nameNode ? locationOf(nameNode) : null;
+    const at = sourceAndOffset(asUri(params.textDocument.uri), params.position);
+    if (!at) return null;
+    const identifier = getIdentifierAtPosition(at.sourceFile, at.offset) as Identifier | undefined;
+    if (identifier) {
+      const symbol = checker.resolveName(identifier);
+      if (!symbol) return null;
+      const nameNode = getDeclarationNameNode(symbol);
+      return nameNode ? locationOf(nameNode) : null;
+    }
+    // On the `var` keyword: navigate to the inferred type's declaration.
+    const node = getNodeAtPosition(at.sourceFile, at.offset);
+    if (node?.kind === SyntaxKind.VarType) {
+      const nameId = varInferredFrom(node);
+      return nameId ? typeDefinitionOf(nameId) : null;
+    }
+    return null;
   });
 
   connection.onCompletion((params): CompletionItem[] => {
@@ -569,17 +603,7 @@ export function startServer(
   // not the variable itself).
   connection.onTypeDefinition((params): Definition | null => {
     const identifier = identifierAt(asUri(params.textDocument.uri), params.position);
-    if (!identifier) return null;
-    const type = checker.getTypeOfExpression(identifier);
-    const classSymbol =
-      type.kind === TypeKind.Class
-        ? (type as ClassType).symbol
-        : type.kind === TypeKind.Array && (type as ArrayType).elementType.kind === TypeKind.Class
-          ? ((type as ArrayType).elementType as ClassType).symbol
-          : undefined;
-    if (!classSymbol) return null;
-    const name = getDeclarationNameNode(classSymbol);
-    return name ? locationOf(name) : null;
+    return identifier ? typeDefinitionOf(identifier) : null;
   });
 
   // Implementations of the interface/abstract class or method under the cursor:
