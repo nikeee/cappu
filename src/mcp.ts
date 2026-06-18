@@ -3,7 +3,10 @@
 // disk freshness and transport live in mcpServer.ts. Locations are 1-based and
 // use filesystem paths so agents can act on them directly.
 
+import type { DocumentSymbol } from "vscode-languageserver-types";
+
 import type { Checker } from "./checker.ts";
+import { getDocumentSymbols } from "./documentSymbols.ts";
 import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
 import type { Program } from "./program.ts";
 import { getSourceFileOfNode } from "./resolver.ts";
@@ -80,6 +83,8 @@ function formatDiagnostic(
 
 export interface McpTools {
   diagnostics(args: { files?: string[] }): { diagnostics: McpDiagnostic[] };
+  outline(args: { file: string }): { symbols: DocumentSymbol[] };
+  searchSymbols(args: { query: string }): { matches: string[] };
 }
 
 export function createMcpTools(program: Program, checker: Checker): McpTools {
@@ -100,5 +105,20 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
     return { diagnostics: out };
   }
 
-  return { diagnostics };
+  function outline(args: { file: string }): { symbols: DocumentSymbol[] } {
+    const sourceFile = program.getSourceFile(pathToUri(args.file));
+    if (!sourceFile) return { symbols: [] };
+    return { symbols: getDocumentSymbols(sourceFile, computeLineStarts(sourceFile.text)) };
+  }
+
+  function searchSymbols(args: { query: string }): { matches: string[] } {
+    const q = args.query.toLowerCase();
+    const matches = program
+      .getGlobalIndex()
+      .getAllTypeFqns()
+      .filter(fqn => fqn.toLowerCase().includes(q));
+    return { matches };
+  }
+
+  return { diagnostics, outline, searchSymbols };
 }

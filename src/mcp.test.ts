@@ -36,3 +36,23 @@ test("diagnostics honors an explicit file path filter", () => {
   const { diagnostics } = tools.diagnostics({ files: ["/Ok.java"] });
   expect(diagnostics).toEqual([]);
 });
+
+test("outline returns the top-level types of a file", () => {
+  const tools = toolsFor({ "file:///Foo.java": "class Foo { int x; void m() {} }" });
+  const { symbols } = tools.outline({ file: "/Foo.java" });
+  expect(symbols).toHaveLength(1);
+  expect(symbols[0].name).toBe("Foo");
+});
+
+test("outline is empty for an unknown file", () => {
+  const tools = toolsFor({ "file:///Foo.java": "class Foo {}" });
+  expect(tools.outline({ file: "/Missing.java" }).symbols).toEqual([]);
+});
+
+test("searchSymbols matches type fqns case-insensitively by substring", () => {
+  const tools = toolsFor({
+    "file:///UserService.java": "package app; class UserService {}",
+    "file:///Repo.java": "package app; class Repo {}",
+  });
+  expect(tools.searchSymbols({ query: "service" }).matches).toEqual(["app.UserService"]);
+});
