@@ -58,11 +58,18 @@ func ParseSourceFile(fileName, text string) *Node {
 		pkg = p.parsePackageDeclaration()
 	}
 	imports := p.parseImportDeclarations()
-	// module declarations and type declarations arrive with later grammar slices.
-	statements := p.parseList(ctxSourceElements, p.parseSourceElement)
+
+	var module *Node
+	var statements *NodeArray
+	if (p.isContextualKeyword("open") || p.isContextualKeyword("module")) && pkg == nil {
+		module = p.parseModuleDeclaration()
+		statements = p.createNodeArray(nil, p.getNodePos(), -1)
+	} else {
+		statements = p.parseList(ctxSourceElements, p.parseSourceElement)
+	}
 	eof := p.parseExpectedToken(EndOfFileToken, nil)
 
-	sf := p.factory.NewSourceFile(pkg, imports, statements, eof, nil)
+	sf := p.factory.NewSourceFile(pkg, imports, statements, eof, module)
 	p.finishNode(sf, pos, -1)
 	data := sf.AsSourceFile()
 	data.FileName = p.fileName
@@ -236,6 +243,8 @@ func (p *Parser) isListElement(context ParsingContext) bool {
 	case ctxArrayInitializerElements, ctxAnnotationValues:
 		// element values may be expressions, { ... } arrays or @annotations
 		return p.token() == OpenBraceToken || p.token() == AtToken || p.isStartOfExpression()
+	case ctxModuleDirectives:
+		return p.isModuleDirectiveStart()
 	default:
 		return false
 	}

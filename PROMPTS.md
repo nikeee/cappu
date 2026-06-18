@@ -309,3 +309,4 @@ no timestamps were captured.
 - 2026-06-18 14:26 — build the lsp first. start with the scanner, then parser, binder, checker and then the rest. do the language service features last. also port each individual test on each step
 - 2026-06-18 14:26 — dont forget to follow the same pattern for porting the code as TypeSript-Go did
 - 2026-06-18 20:22 — continue
+- 2026-06-18 21:36 — continue
