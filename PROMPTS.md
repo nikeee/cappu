@@ -304,3 +304,4 @@ no timestamps were captured.
 - 2026-06-18 09:33 — is it a good idea to no commit the generated easyjson files?
 - 2026-06-18 09:42 — since we now have a generate step, consider doing a shcema-based pom-parser using some codegen, too. But proceed with what you were doing
 - 2026-06-18 09:51 — before continuing with the next milestone (but after this one): Is there a cool library for cli argument parsing? that handwritten loop looks weird. Since we now have codegen, can we use a library that builds on top of that? Maybe we also dont have to write the entire help page manually
+- 2026-06-18 09:57 — continue (milestone 5: audit)

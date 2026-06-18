@@ -142,7 +142,13 @@ type auditCmd struct {
 	JSON    bool `name:"json" help:"Emit findings machine-readable"`
 }
 
-func (*auditCmd) Run(*appState) error { return exit(cli.Stub("audit")) }
+func (c *auditCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		return err
+	}
+	return exit(cli.RunAudit(cfg, c.NoCache, c.JSON))
+}
 
 type licensesCmd struct {
 	JSON bool `name:"json" help:"Emit machine-readable"`
