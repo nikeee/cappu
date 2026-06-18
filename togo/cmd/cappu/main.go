@@ -179,7 +179,13 @@ type publishCmd struct {
 	Repo string `placeholder:"<url>" help:"Target Maven registry"`
 }
 
-func (*publishCmd) Run(*appState) error { return exit(cli.Stub("publish")) }
+func (c *publishCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		return err
+	}
+	return exit(cli.RunPublish(cfg, c.Repo))
+}
 
 type searchCmd struct {
 	Query []string `arg:"" optional:"" help:"Search terms"`

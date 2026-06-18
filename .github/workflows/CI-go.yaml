@@ -26,6 +26,13 @@ jobs:
           go-version: "1.26"
           cache-dependency-path: togo/go.sum
 
+      # javac lets the publish testcontainers e2e build a real jar (Docker is
+      # available on GitHub-hosted runners); without it the e2e skips itself.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
       - name: Format check (gofmt)
         run: test -z "$(gofmt -l .)" || { echo "unformatted files:"; gofmt -l .; exit 1; }
 

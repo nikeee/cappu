@@ -188,3 +188,17 @@ func (c *Config) ResolvePath(path string) string {
 	}
 	return filepath.Join(c.BaseDir, path)
 }
+
+// ArtifactBaseName is the base name (no extension) of the build artifacts:
+// "<artifactId>-<version>" when both coordinates are set (the publishable name
+// a Maven registry expects), otherwise the project directory name.
+func (c *Config) ArtifactBaseName() string {
+	if c.ArtifactID != "" && c.Version != "" {
+		return c.ArtifactID + "-" + c.Version
+	}
+	abs, err := filepath.Abs(c.BaseDir)
+	if err != nil {
+		abs = c.BaseDir
+	}
+	return filepath.Base(abs)
+}

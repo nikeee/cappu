@@ -21,6 +21,10 @@ const (
 	MavenCentralSearch = "https://search.maven.org/solrsearch/select"
 	GoogleMaven        = "https://maven.google.com"
 	GradlePluginPortal = "https://plugins.gradle.org/m2"
+
+	// DefaultPublishRegistry is where `cappu publish` uploads when nothing else
+	// is configured (npm-style).
+	DefaultPublishRegistry = MavenCentral
 )
 
 // ExternalClassPaths are the conventional Maven/Gradle dirs added to the

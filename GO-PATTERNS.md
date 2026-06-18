@@ -179,8 +179,20 @@ amd64/arm64, darwin arm64, windows amd64 - see `Makefile` `build-all`.
   (`_tools/customlint`) are dropped - they are TypeScript-AST specific.
 - **Vet**: `go vet ./...`.
 - **Test**: `go test ./...`, table-driven; every Node `*.test.ts` gets a Go
-  equivalent. Network is faked with `httptest` (see `packages/maven_test.go`);
-  `testcontainers-go` arrives with the commands that need it.
+  equivalent. Network is faked with `httptest` (see `packages/maven_test.go`).
+  `testcontainers-go` mirrors the Node testcontainers e2e: `publish`'s
+  round-trip (`internal/publish/e2e_test.go`) spins a Reposilite container,
+  publishes a javac-built jar, and installs it back. It self-skips when Docker
+  or javac is missing, so CI without them still passes; the Go CI installs both.
+
+## javac-delegation jar build (internal/build)
+
+`cappu publish` (and later `cappu compile`'s default path) build a jar by
+delegating to `javac` and zipping the `.class` output with `archive/zip` and a
+minimal manifest - the Node build's non-experimental compile path. It lives in
+`internal/build` (`BuildJar`/`SourceJavaFiles`) so the eventual `compile` port
+extends it rather than duplicating it. Requires javac on PATH; the experimental
+in-house compiler is a separate, later effort.
 
 ## Patterns to fill in later (compiler / LSP milestones)
 
