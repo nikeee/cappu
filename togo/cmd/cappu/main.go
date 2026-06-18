@@ -231,7 +231,7 @@ func main() {
 	var cli CLI
 	ctx := kong.Parse(&cli,
 		kong.Name("cappu"),
-		kong.Description("A Java language server, compiler and package manager."),
+		kong.Description("The Java language server, package manager and build toolchain of your dreams."),
 		kong.UsageOnError(),
 		kong.Vars{"version": meta.Version},
 	)
