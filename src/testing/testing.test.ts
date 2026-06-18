@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { expect } from "expect";
 
 import { loadConfig } from "../config.ts";
-import { InMemoryPackageSource } from "../packages/index.ts";
+import { InMemoryPackageSource, type SourceName } from "../packages/index.ts";
 import {
   compileTests,
   compileTestsArgs,
@@ -113,7 +113,7 @@ test("the console launcher is fetched once into the package store", async () => 
     const config = loadConfig(undefined, dir);
     let downloads = 0;
     const source = {
-      name: "mem",
+      name: "mem" as SourceName,
       search: () => Promise.resolve([]),
       listVersions: () => Promise.resolve([]),
       getMetadata: () => Promise.resolve(undefined),

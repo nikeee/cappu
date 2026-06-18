@@ -21,8 +21,10 @@ export type {
   Coordinates,
   DependencyDeclaration,
   GroupId,
+  MavenScope,
   PackageKey,
   PackageMetadata,
   PackageSource,
+  SourceName,
   Version,
 } from "./types.ts";

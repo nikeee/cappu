@@ -11,6 +11,7 @@ import {
   type PackageMetadata,
   type PackageSource,
   packageKey,
+  type SourceName,
 } from "./types.ts";
 
 export interface ResolvedPackage {
@@ -21,7 +22,7 @@ export interface ResolvedPackage {
   /** Which package declared it (undefined for a root). */
   readonly requestedBy?: Coordinates;
   /** The source that provided the metadata. */
-  readonly source: string;
+  readonly source: SourceName;
 }
 
 export interface VersionConflict {
@@ -48,7 +49,7 @@ function propagates(d: { scope?: string; optional?: boolean }): boolean {
 async function metadataFrom(
   sources: readonly PackageSource[],
   coordinates: Coordinates,
-): Promise<{ metadata: PackageMetadata; source: string } | undefined> {
+): Promise<{ metadata: PackageMetadata; source: SourceName } | undefined> {
   for (const source of sources) {
     const metadata = await source.getMetadata(coordinates);
     if (metadata) return { metadata, source: source.name };
@@ -162,11 +163,10 @@ export async function latestVersion(
 /** An in-memory source: fixtures in tests, local overrides later. */
 export class InMemoryPackageSource implements PackageSource {
   private readonly byKey = new Map<PackageKey, PackageMetadata[]>();
+  readonly name: SourceName;
 
-  constructor(
-    readonly name: string,
-    packages: readonly PackageMetadata[],
-  ) {
+  constructor(name: string, packages: readonly PackageMetadata[]) {
+    this.name = name as SourceName;
     for (const pkg of packages) {
       const key = packageKey(pkg.coordinates);
       const list = this.byKey.get(key);

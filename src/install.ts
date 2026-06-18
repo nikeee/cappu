@@ -45,6 +45,7 @@ import {
   type PackageSource,
   type Resolution,
   resolveTransitive,
+  type SourceName,
   toCoordinates,
   type Version,
 } from "./packages/index.ts";
@@ -201,7 +202,7 @@ export function storePathFor(coordinates: Coordinates): string | undefined {
 
 interface LockedPackage {
   coordinates: Coordinates;
-  source: string;
+  source: SourceName;
   /** Hex SHA-256 of the jar downloaded when the lock was written. */
   sha256: Sha256;
   /** The package's licenses as the POM declares them (raw, not normalized). */
@@ -525,7 +526,7 @@ export async function installDependencies(
 
   type PendingPackage = {
     coordinates: Coordinates;
-    source: string;
+    source: SourceName;
     sha256?: Sha256;
     licenses?: readonly License[];
   };

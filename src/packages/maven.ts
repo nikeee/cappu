@@ -21,6 +21,7 @@ import {
   type MavenScope,
   type PackageMetadata,
   type PackageSource,
+  type SourceName,
   toCoordinates,
 } from "./types.ts";
 
@@ -236,7 +237,7 @@ export function parsePom(
 const PARENT_CHAIN_LIMIT = 16; // generous; real chains are 2-4 deep
 
 export class MavenRepositorySource implements PackageSource {
-  readonly name: string;
+  readonly name: SourceName;
   /** Fetched+parsed POMs (null: known miss), keyed by coordinates. */
   private readonly pomCache = new Map<string, RawPom | null>();
 
@@ -247,7 +248,7 @@ export class MavenRepositorySource implements PackageSource {
     /** A solr index service (search.maven.org style); repositories have none. */
     private readonly searchUrl?: string,
   ) {
-    this.name = baseUrl;
+    this.name = baseUrl as SourceName;
   }
 
   /** The repository url for a path under the maven2 layout root. */

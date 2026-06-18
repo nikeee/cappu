@@ -19,6 +19,7 @@ import {
   InMemoryPackageSource,
   MavenRepositorySource,
   type PackageMetadata,
+  type SourceName,
   toCoordinates,
 } from "./packages/index.ts";
 
@@ -373,7 +374,7 @@ test("listVersions answers are cached in the package store with a TTL", async ()
   try {
     let fetches = 0;
     const source = withMetadataCache({
-      name: "https://repo.test/m2",
+      name: "https://repo.test/m2" as SourceName,
       search: () => Promise.resolve([]),
       listVersions: () => {
         fetches++;
@@ -527,7 +528,7 @@ test("getMetadata answers (resolved POMs) are cached forever in the store", asyn
       dependencies: [toCoordinates("org.dep", "dep", "2.0")],
     };
     const source = withMetadataCache({
-      name: "https://repo.test/m2",
+      name: "https://repo.test/m2" as SourceName,
       search: () => Promise.resolve([]),
       listVersions: () => Promise.resolve([]),
       getMetadata: () => {
@@ -547,7 +548,7 @@ test("getMetadata answers (resolved POMs) are cached forever in the store", asyn
 
     // a not-found answer is not cached (re-fetched each time)
     const empty = withMetadataCache({
-      name: "https://repo.test/m2",
+      name: "https://repo.test/m2" as SourceName,
       search: () => Promise.resolve([]),
       listVersions: () => Promise.resolve([]),
       getMetadata: () => {
@@ -573,7 +574,7 @@ test("a metadata entry from an older cappu (no schema version) is ignored and re
     let fetches = 0;
     const metadata = { coordinates: toCoordinates("org.x", "y", "1.0"), dependencies: [] };
     const source = withMetadataCache({
-      name: "https://repo.test/m2",
+      name: "https://repo.test/m2" as SourceName,
       search: () => Promise.resolve([]),
       listVersions: () => Promise.resolve([]),
       getMetadata: () => {

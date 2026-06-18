@@ -13,6 +13,8 @@ export type ArtifactId = Brand<string, "ArtifactId">;
 export type Version = Brand<string, "Version">;
 /** A Maven dependency scope ("compile", "runtime", "test", "provided", "import"). */
 export type MavenScope = Brand<string, "MavenScope">;
+/** A package source's stable identity (its repository url / name), used as a lock key. */
+export type SourceName = Brand<string, "SourceName">;
 
 /** Exact maven-style coordinates of one package version. */
 export interface Coordinates {
@@ -46,7 +48,7 @@ export interface PackageMetadata {
  */
 export interface PackageSource {
   /** A stable display name (e.g. the repository url). */
-  readonly name: string;
+  readonly name: SourceName;
   /** Free-text search; implementations may return an empty list if unsupported. */
   search(query: string): Promise<Coordinates[]>;
   /** All published versions of group:artifact, oldest first. */
