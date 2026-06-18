@@ -41,13 +41,6 @@ func (p *Parser) isStartOfParameter() bool {
 	return p.token() == AtToken || p.token() == FinalKeyword || p.isStartOfType()
 }
 
-// isStartOfClassMember is scoped off until the member grammar lands; class/enum
-// bodies therefore parse empty (any content is recovered).
-func (p *Parser) isStartOfClassMember() bool { return false }
-
-// parseClassMember is unreachable until isStartOfClassMember is widened.
-func (p *Parser) parseClassMember() *Node { return p.parseEmptyStatement() }
-
 // --- types -------------------------------------------------------------------
 
 func (p *Parser) parseType() *Node {
@@ -244,12 +237,15 @@ func (p *Parser) parseEnumConstant() *Node {
 	pos := p.getNodePos()
 	annotations := p.parseAnnotations()
 	name := p.parseIdentifier()
-	// argument lists / class bodies on constants arrive with later slices.
+	var args *NodeArray
+	if p.token() == OpenParenToken {
+		args = p.parseArgumentList()
+	}
 	var classBody *NodeArray
 	if p.token() == OpenBraceToken {
 		classBody = p.parseClassBody()
 	}
-	return p.finishNode(p.factory.NewEnumConstantDeclaration(annotations, name, nil, classBody), pos, -1)
+	return p.finishNode(p.factory.NewEnumConstantDeclaration(annotations, name, args, classBody), pos, -1)
 }
 
 func (p *Parser) parseEnumBody() (enumConstants, members *NodeArray) {

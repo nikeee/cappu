@@ -2,21 +2,11 @@ package compiler
 
 import "testing"
 
-// parseExpr parses text as a single expression. (The Node build's tests parse
-// expressions inside method bodies; until the statement/member grammar lands,
-// this drives parseExpression directly - same assertions, different harness.)
+// parseExpr parses text as an expression in statement position, through a real
+// method body (matching the Node build's `expr` helper).
 func parseExpr(t *testing.T, text string) *Node {
 	t.Helper()
-	p := &Parser{sourceText: text, currentToken: Unknown}
-	p.scanner = NewScanner(text, func(m DiagnosticMessage, pos, length int) {
-		p.parseErrorAtPosition(pos, length, m)
-	})
-	p.nextToken()
-	e := p.parseExpression()
-	if len(p.parseDiagnostics) != 0 {
-		t.Fatalf("unexpected diagnostics for %q: %v", text, p.parseDiagnostics)
-	}
-	return e
+	return exprStmt(t, text)
 }
 
 func TestExpressionStatements(t *testing.T) {

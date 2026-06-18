@@ -229,6 +229,12 @@ func (p *Parser) isListElement(context ParsingContext) bool {
 		return p.isStartOfParameter()
 	case ctxArgumentExpressions:
 		return p.isStartOfExpression()
+	case ctxBlockStatements:
+		return p.isStartOfStatementToken()
+	case ctxSwitchClauses:
+		return p.token() == CaseKeyword || p.token() == DefaultKeyword
+	case ctxArrayInitializerElements:
+		return p.token() == OpenBraceToken || p.token() == AtToken || p.isStartOfExpression()
 	default:
 		return false
 	}
