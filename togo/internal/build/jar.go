@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -37,42 +38,92 @@ var skipDirs = map[string]struct{}{
 	"node_modules": {}, ".git": {}, "target": {}, "build": {}, "out": {}, "bin": {},
 }
 
-// SourceJavaFiles collects every .java file under the configured sourcePaths,
-// skipping build/VCS directories. Port of findSourceJavaFiles.
+// JavaFilesIn collects every .java file under dir, skipping build/VCS
+// directories. A missing/unreadable dir is empty.
+func JavaFilesIn(dir string) []string {
+	var files []string
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil //nolint:nilerr // a missing/unreadable dir is simply empty
+		}
+		if d.IsDir() {
+			if _, skip := skipDirs[d.Name()]; skip {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(path, ".java") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files
+}
+
+// SourceJavaFiles collects every .java file under the configured sourcePaths.
+// Port of findSourceJavaFiles.
 func SourceJavaFiles(cfg *config.Config) []string {
 	var files []string
 	for _, sp := range cfg.CompilerOptions.SourcePaths {
-		root := cfg.ResolvePath(sp)
-		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return nil //nolint:nilerr // a missing/unreadable source dir is simply empty
-			}
-			if d.IsDir() {
-				if _, skip := skipDirs[d.Name()]; skip {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if strings.HasSuffix(path, ".java") {
-				files = append(files, path)
-			}
-			return nil
-		})
+		files = append(files, JavaFilesIn(cfg.ResolvePath(sp))...)
 	}
 	return files
 }
 
-// classpath joins the existing entries of the configured classPath (dirs and
-// jars) with the OS path separator; missing entries are ignored.
-func classpath(cfg *config.Config) string {
-	var entries []string
-	for _, cp := range cfg.CompilerOptions.ClassPath {
-		resolved := cfg.ResolvePath(cp)
-		if _, err := os.Stat(resolved); err == nil {
-			entries = append(entries, resolved)
+// ExpandJarDirs returns each existing root plus the jars directly inside it
+// (jars pass through). javac's -cp treats a directory as a .class tree only, so
+// dependency jars must be listed individually. Port of expandedJarDirs.
+func ExpandJarDirs(roots []string) []string {
+	var out []string
+	for _, root := range roots {
+		if _, err := os.Stat(root); err != nil {
+			continue
 		}
+		out = append(out, root)
+		if strings.HasSuffix(root, ".jar") {
+			continue
+		}
+		jars, _ := filepath.Glob(filepath.Join(root, "*.jar"))
+		sort.Strings(jars)
+		out = append(out, jars...)
 	}
-	return strings.Join(entries, string(os.PathListSeparator))
+	return out
+}
+
+// ClassPath is the configured classPath, resolved and jar-expanded.
+func ClassPath(cfg *config.Config) []string {
+	resolved := make([]string, len(cfg.CompilerOptions.ClassPath))
+	for i, cp := range cfg.CompilerOptions.ClassPath {
+		resolved[i] = cfg.ResolvePath(cp)
+	}
+	return ExpandJarDirs(resolved)
+}
+
+// Compile runs javac over sources into outDir with the given classpath entries.
+// Returns javac's stderr as the error on failure.
+func Compile(cfg *config.Config, sources []string, outDir string, classpath []string) error {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+	args := []string{"-d", outDir, "-encoding", "UTF-8"}
+	if cfg.CompilerOptions.Release != nil {
+		args = append(args, "--release", strconv.Itoa(*cfg.CompilerOptions.Release))
+	}
+	if len(classpath) > 0 {
+		args = append(args, "-cp", strings.Join(classpath, string(os.PathListSeparator)))
+	}
+	args = append(args, sources...)
+	cmd := exec.Command(Javac(cfg), args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("javac failed: %s", msg)
+	}
+	return nil
 }
 
 // BuildJar compiles the configured sources with javac and packages the .class
@@ -90,24 +141,8 @@ func BuildJar(cfg *config.Config) (string, error) {
 	}
 	defer func() { _ = os.RemoveAll(classesDir) }()
 
-	args := []string{"-d", classesDir}
-	if cfg.CompilerOptions.Release != nil {
-		args = append(args, "--release", strconv.Itoa(*cfg.CompilerOptions.Release))
-	}
-	if cp := classpath(cfg); cp != "" {
-		args = append(args, "-cp", cp)
-	}
-	args = append(args, sources...)
-
-	cmd := exec.Command(Javac(cfg), args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return "", fmt.Errorf("javac failed: %s", msg)
+	if err := Compile(cfg, sources, classesDir, ClassPath(cfg)); err != nil {
+		return "", err
 	}
 
 	distDir := cfg.ResolvePath("./dist")

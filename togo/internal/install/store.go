@@ -25,10 +25,10 @@ func packageStoreDir() string {
 // risking a write outside it.
 var storeSegment = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`)
 
-// storePathFor is the store path for exact coordinates, or ok=false for unsafe
+// StorePathFor is the store path for exact coordinates, or ok=false for unsafe
 // segments. The layout is maven2's (group segments as directories), which keeps
 // "a.b:c" and "a.b.c:d" apart.
-func storePathFor(c packages.Coordinates) (string, bool) {
+func StorePathFor(c packages.Coordinates) (string, bool) {
 	segments := append(strings.Split(string(c.GroupID), "."), string(c.ArtifactID), string(c.Version))
 	for _, seg := range segments {
 		if !storeSegment.MatchString(seg) {

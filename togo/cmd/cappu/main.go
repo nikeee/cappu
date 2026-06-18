@@ -206,7 +206,13 @@ func (c *searchCmd) Run(a *appState) error {
 
 type testCmd struct{}
 
-func (*testCmd) Run(*appState) error { return exit(cli.Stub("test")) }
+func (c *testCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		return err
+	}
+	return exit(cli.RunTest(cfg))
+}
 
 type selfUpgradeCmd struct{}
 

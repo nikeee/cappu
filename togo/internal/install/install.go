@@ -125,7 +125,7 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 			// A locked install must produce the locked bytes: do not write, and
 			// evict the bad copy from the store (store-first, so it would
 			// otherwise re-fail every install).
-			if stored, ok := storePathFor(pkg.coordinates); ok {
+			if stored, ok := StorePathFor(pkg.coordinates); ok {
 				_ = os.Remove(stored)
 			}
 			return outcome{integrity: id}
@@ -219,7 +219,7 @@ func (r *Result) assemble(outcomes []outcome, groupInstalled *[]string) []lockfi
 // artifactFrom returns a package's jar bytes: the store first (no network),
 // then the sources (the one that resolved it first). cached reports a store hit.
 func artifactFrom(srcs []packages.PackageSource, preferred string, c packages.Coordinates) (bytes []byte, cached bool, found bool) {
-	storePath, storeOK := storePathFor(c)
+	storePath, storeOK := StorePathFor(c)
 	if storeOK {
 		if data, err := os.ReadFile(storePath); err == nil {
 			return data, true, true
