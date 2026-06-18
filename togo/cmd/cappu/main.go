@@ -210,7 +210,7 @@ func (*testCmd) Run(*appState) error { return exit(cli.Stub("test")) }
 
 type selfUpgradeCmd struct{}
 
-func (*selfUpgradeCmd) Run(*appState) error { return exit(cli.Stub("self-upgrade")) }
+func (*selfUpgradeCmd) Run(*appState) error { return exit(cli.RunSelfUpgrade()) }
 
 type rageCmd struct{}
 
