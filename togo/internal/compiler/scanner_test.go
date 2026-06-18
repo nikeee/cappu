@@ -126,7 +126,7 @@ func TestLeadingDotFloat(t *testing.T) {
 }
 
 func TestStringEscapes(t *testing.T) {
-	tokens, _ := tokenize(`"a\tb\n\"cA"`)
+	tokens, _ := tokenize(`"a\tb\n\"c\u0041"`)
 	eq(t, "kind", tokens[0].kind, StringLiteral)
 	eq(t, "value", tokens[0].value, "a\tb\n\"cA")
 }
@@ -191,7 +191,7 @@ func TestLookAheadRestores(t *testing.T) {
 }
 
 func TestUnicodeEscapesAndUnderscores(t *testing.T) {
-	tokens, _ := tokenize(`"AB" 0xFF_FF 0b1010_1010 1_000_000L`)
+	tokens, _ := tokenize(`"\u0041\u0042" 0xFF_FF 0b1010_1010 1_000_000L`)
 	eq(t, "AB", tokens[0].value, "AB")
 	if tokens[1].flags&HexSpecifier == 0 || tokens[1].flags&ContainsUnderscore == 0 {
 		t.Error("hex/underscore flags missing")
@@ -207,7 +207,7 @@ func TestCRLFLineBreak(t *testing.T) {
 }
 
 func TestCharOctalUnicodeEscapes(t *testing.T) {
-	tokens, _ := tokenize(`'\101' 'A'`)
+	tokens, _ := tokenize(`'\101' '\u0041'`)
 	eq(t, "octal A", tokens[0].value, "A")
 	eq(t, "unicode A", tokens[1].value, "A")
 }
