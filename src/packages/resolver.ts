@@ -147,6 +147,29 @@ export async function searchPackages(
   return result;
 }
 
+/**
+ * The chain of coordinates from a declared root down to `target`, following
+ * each resolved package's `requestedBy` edge (nearest-wins records one parent
+ * per package). Returns [root, ..., target]; just [target] for a direct
+ * dependency, and is cycle-guarded.
+ */
+export function dependencyPath(
+  byKey: ReadonlyMap<string, ResolvedPackage>,
+  target: Coordinates,
+): Coordinates[] {
+  const path: Coordinates[] = [];
+  const seen = new Set<string>();
+  let current: Coordinates | undefined = target;
+  while (current) {
+    const key = packageKey(current);
+    if (seen.has(key)) break;
+    seen.add(key);
+    path.unshift(current);
+    current = byKey.get(key)?.requestedBy;
+  }
+  return path;
+}
+
 /** The newest published version of group:artifact across the sources. */
 export async function latestVersion(
   groupId: string,
