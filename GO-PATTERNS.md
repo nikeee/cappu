@@ -137,13 +137,26 @@ zod does parse-time defaults + refinements. In Go:
 - Do NOT set `DisallowUnknownFields`: an unknown key (e.g. `$schema`) is
   ignored, matching zod.
 
-## CLI: per-command exit codes, not process.exit
+## CLI: kong (declarative) + per-command exit codes
 
-The Node code calls `process.exit` inside handlers. In Go, each `RunX` returns
-an `int` exit code and `main` calls `os.Exit` once (`cmd/cappu/main.go`). Arg
-parsing is a small hand-rolled parser that interleaves flags and positionals
-like Node's `util.parseArgs`; error messages mirror parseArgs for parity (hence
-capitalized strings, ST1005 disabled for the package).
+Arg parsing is **kong** (`alecthomas/kong`): the whole command surface is one
+`CLI` struct in `cmd/cappu/main.go`, one field per subcommand, flags/args/help
+as struct tags. kong parses `os.Args` into it and generates `--help`/`--version`,
+so neither a parse loop nor a `USAGE` string is hand-maintained. There is no
+good *codegen* CLI parser in Go; declarative struct tags are the idiomatic
+"schema-based" equivalent (reflection at startup, negligible for a CLI).
+
+The Node handlers call `process.exit` with specific codes (0/1/2). Here each
+`cli.RunX` still returns an `int`; a command's `Run` wraps a non-zero code in a
+`cmdErr` so `main` can recover it with `errors.As` (kong wraps the returned
+error, so a bare type assertion misses it) and `os.Exit` with the right code.
+Config loads lazily via `appState.config()` so the pre-config commands (init,
+cache, self-upgrade, rage) never touch a possibly-broken cappu.json.
+
+Accepted divergences from the Node CLI (we let kong own formatting): `--help`
+layout differs, and kong exits usage errors with its own code (80) rather than
+the Node build's 2. Command behaviour, stdout, and the 0/1/2 codes our own
+handlers return are unchanged.
 
 ## Static linking / build
 
