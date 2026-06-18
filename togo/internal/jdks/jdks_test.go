@@ -13,6 +13,7 @@ func TestParseSpec(t *testing.T) {
 		{"temurin", false, "", ""},
 		{"unknown-21", false, "", ""},
 		{"temurin-lts", false, "", ""},
+		{"temurin-21.0.1", false, "", ""}, // only a bare major version is accepted
 	}
 	for _, c := range cases {
 		got, ok := ParseSpec(c.spec)

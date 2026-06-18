@@ -23,6 +23,11 @@ func project(t *testing.T) *config.Config {
 }
 
 func TestFindTestSources(t *testing.T) {
+	// A project with no src/test/java yields no test sources.
+	if got := FindTestSources(project(t)); len(got) != 0 {
+		t.Errorf("missing test dir should yield none, got %v", got)
+	}
+
 	cfg := project(t)
 	src := filepath.Join(cfg.BaseDir, config.DefaultTestSourcePath, "com", "example")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -44,8 +49,12 @@ func TestRunArgsStructure(t *testing.T) {
 		t.Errorf("prefix = %v", args[:3])
 	}
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "--scan-class-path") || !strings.Contains(joined, "--class-path") {
-		t.Errorf("missing scan/class-path flags: %v", args)
+	if !strings.Contains(joined, "--class-path") {
+		t.Errorf("missing class-path flag: %v", args)
+	}
+	// --scan-class-path must be the last argument (matches the TS run.at(-1)).
+	if args[len(args)-1] != "--scan-class-path" {
+		t.Errorf("last arg = %q, want --scan-class-path", args[len(args)-1])
 	}
 	// the compiled test classes must be the first runtime classpath entry
 	if !strings.Contains(args[4], TestClassesDir(cfg)) {

@@ -15,7 +15,7 @@ func TestBump(t *testing.T) {
 		{"0.0.0", Patch, "0.0.1"},
 		// pre-release / build metadata is dropped (a release is a clean version)
 		{"1.2.3-SNAPSHOT", Patch, "1.2.4"},
-		{"1.2.3-rc.1+build", Minor, "1.3.0"},
+		{"2.0.0-rc.1+build.7", Minor, "2.1.0"},
 	}
 	for _, c := range cases {
 		got, err := Bump(c.version, c.release)
@@ -29,7 +29,10 @@ func TestBump(t *testing.T) {
 }
 
 func TestBumpRejectsNonSemver(t *testing.T) {
-	if _, err := Bump("RELEASE", Patch); err == nil {
-		t.Error("expected an error for a non-semver version")
+	// TS rejects a partial version ("1.2", fewer than 3 components).
+	for _, v := range []string{"1.2", "RELEASE"} {
+		if _, err := Bump(v, Patch); err == nil {
+			t.Errorf("expected an error for non-semver version %q", v)
+		}
 	}
 }
