@@ -167,7 +167,11 @@ func run(argv []string) int {
 		return cli.RunLicenses(cfg, values["json"] != "")
 	case "install":
 		return cli.RunInstall(cfg, values["verbose"] != "")
-	case "add", "update", "audit", "publish", "lsp", "test", "compile":
+	case "add":
+		return cli.RunAdd(first(files), rest(files), values["config"], cfg)
+	case "update":
+		return cli.RunUpdate(values["config"], cfg)
+	case "audit", "publish", "lsp", "test", "compile":
 		return cli.Stub(command)
 	default:
 		fmt.Fprintf(os.Stderr, "cappu: unknown command '%s'\n\n", command)
@@ -189,4 +193,11 @@ func first(s []string) string {
 		return ""
 	}
 	return s[0]
+}
+
+func rest(s []string) []string {
+	if len(s) <= 1 {
+		return nil
+	}
+	return s[1:]
 }

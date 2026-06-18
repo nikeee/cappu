@@ -302,3 +302,4 @@ no timestamps were captured.
 - 2026-06-18 09:25 — continue (milestone 3: install)
 - 2026-06-18 09:25 — since we're knowing the schema of our lockfile, can we use an json parser that uses codegen to use a specialized parser? For perf reasons and better maintainability?
 - 2026-06-18 09:33 — is it a good idea to no commit the generated easyjson files?
+- 2026-06-18 09:42 — since we now have a generate step, consider doing a shcema-based pom-parser using some codegen, too. But proceed with what you were doing

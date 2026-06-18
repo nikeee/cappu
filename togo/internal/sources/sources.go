@@ -27,11 +27,11 @@ func Configured(cfg *config.Config) []packages.PackageSource {
 	return result
 }
 
-// rootsOf turns a "group:artifact" -> version map into coordinates. Go map
+// RootsOf turns a "group:artifact" -> version map into coordinates. Go map
 // iteration is unordered, so the keys are sorted for a deterministic resolution
 // order (the Node build relies on cappu.json's object-key order, which JSON
 // decoding into a map cannot preserve).
-func rootsOf(entries map[string]string) []packages.Coordinates {
+func RootsOf(entries map[string]string) []packages.Coordinates {
 	keys := make([]string, 0, len(entries))
 	for key := range entries {
 		keys = append(keys, key)
@@ -49,15 +49,15 @@ func rootsOf(entries map[string]string) []packages.Coordinates {
 // annotationProcessor configuration deliberately stays out - processor
 // classpaths must not version-mediate against the app classpath.
 func CompileRoots(cfg *config.Config) []packages.Coordinates {
-	return append(rootsOf(cfg.Dependencies.API), rootsOf(cfg.Dependencies.Implementation)...)
+	return append(RootsOf(cfg.Dependencies.API), RootsOf(cfg.Dependencies.Implementation)...)
 }
 
 // ProcessorRoots are the annotationProcessor configuration's roots.
 func ProcessorRoots(cfg *config.Config) []packages.Coordinates {
-	return rootsOf(cfg.Dependencies.AnnotationProcessor)
+	return RootsOf(cfg.Dependencies.AnnotationProcessor)
 }
 
 // TestRoots are the testImplementation configuration's roots.
 func TestRoots(cfg *config.Config) []packages.Coordinates {
-	return rootsOf(cfg.Dependencies.TestImplementation)
+	return RootsOf(cfg.Dependencies.TestImplementation)
 }

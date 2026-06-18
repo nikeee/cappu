@@ -11,16 +11,20 @@ import (
 	"github.com/nikeee/cappu/internal/packages"
 )
 
-// fakeSource serves metadata and jar bytes from in-memory maps.
+// fakeSource serves metadata, jar bytes and version lists from in-memory maps.
 type fakeSource struct {
-	name string
-	meta map[packages.CoordinateString]packages.PackageMetadata
-	jars map[packages.CoordinateString][]byte
+	name     string
+	meta     map[packages.CoordinateString]packages.PackageMetadata
+	jars     map[packages.CoordinateString][]byte
+	versions map[string][]string // "group:artifact" -> versions, oldest first
 }
 
 func (s *fakeSource) Name() string                                  { return s.name }
 func (s *fakeSource) Search(string) ([]packages.Coordinates, error) { return nil, nil }
-func (s *fakeSource) ListVersions(string, string) ([]string, error) { return nil, nil }
+
+func (s *fakeSource) ListVersions(groupID, artifactID string) ([]string, error) {
+	return s.versions[groupID+":"+artifactID], nil
+}
 
 func (s *fakeSource) GetMetadata(c packages.Coordinates) (*packages.PackageMetadata, error) {
 	if m, ok := s.meta[c.String()]; ok {

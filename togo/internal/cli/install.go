@@ -17,12 +17,19 @@ import (
 // JDK provisioning (the config "jdk" entry) is NOT yet ported; install prints a
 // notice and otherwise proceeds. See internal/jdks in the Node build.
 func RunInstall(cfg *config.Config, verbose bool) int {
+	return runInstallWith(cfg, verbose, false)
+}
+
+// runInstallWith is the shared install renderer; updateLock re-resolves and
+// rewrites the lock (used after `cappu add`/`update` change the dependencies).
+func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 	out := painter(os.Stdout)
 	errp := painter(os.Stderr)
 	showProgress := ColorEnabled(isTTY(os.Stderr), os.Getenv("NO_COLOR"))
 
 	resolving := 0
 	result, err := install.Dependencies(cfg, nil, install.Options{
+		UpdateLock: updateLock,
 		OnResolve: func(current packages.CoordinateString) {
 			if showProgress {
 				resolving++

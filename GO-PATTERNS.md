@@ -56,6 +56,14 @@ and leaves the surrounding bytes - comments included - intact. See
 `version` bump. This works for the flat top-level edits cappu makes
 (`version`, dependency map entries); a structural rewrite would need a real CST.
 
+Known divergence: sjson *replaces* existing values in place (formatting kept),
+but *inserts* a new key compactly (`,"k":"v"}` with no surrounding whitespace).
+So `cappu add`'s newly-added dependency line is not re-indented like the Node
+build's comment-json output - it stays valid JSONC with comments intact, just
+compact. `cappu update` (which only overwrites existing values) is unaffected.
+Pretty-printing a freshly inserted key would require reimplementing
+comment-json's CST, which is deferred.
+
 ## Branded types -> Go named types (NOT aliases)
 
 The TS code uses type-only brands (`type GroupId = string & {__brand}`). Issue
@@ -109,6 +117,13 @@ Rules:
   struct change without a matching regenerate cannot land.
 - This is reserved for fixed schemas we own. cappu.json stays on stdlib +
   tidwall/jsonc (it needs comment-tolerant reading and sjson edits, not speed).
+
+Considered and deferred: codegen for the POM parser. There is no easyjson-style
+codegen marshaler for XML in common use (`encoding/xml` is reflection-based; the
+XSD->struct generators emit structs, not faster parsers). Generating from the
+Maven POM XSD would bloat a struct with hundreds of fields when we read ~8, and
+POM parsing is network-bound cold-path - so it would hurt maintainability for no
+perf gain. The hand-written subset in `maven.go` stays.
 
 ## Config: zod schema -> struct + manual defaults/validation
 
