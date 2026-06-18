@@ -6,6 +6,14 @@ package compiler
 // remaining kinds are added as the parser reaches them. Port of the node
 // interfaces in types.ts + their forEachChild in parser.ts.
 
+// tokenData backs leaf token nodes (EOF, punctuation/keyword tokens parsed as
+// nodes); they have no children.
+type tokenData struct{}
+
+func (tokenData) forEachChild(Visitor) bool { return false }
+
+func (f *NodeFactory) newToken(kind SyntaxKind) *Node { return f.newNode(kind, tokenData{}) }
+
 // --- names -------------------------------------------------------------------
 
 // IdentifierData is an Identifier's payload.

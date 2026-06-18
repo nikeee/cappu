@@ -59,3 +59,38 @@ var textToKeyword = map[string]SyntaxKind{
 	"false":        FalseKeyword,
 	"null":         NullKeyword,
 }
+
+// punctuationText is the canonical spelling of each punctuation/operator token.
+var punctuationText = map[SyntaxKind]string{
+	OpenBraceToken: "{", CloseBraceToken: "}", OpenParenToken: "(", CloseParenToken: ")",
+	OpenBracketToken: "[", CloseBracketToken: "]", DotToken: ".", DotDotDotToken: "...",
+	SemicolonToken: ";", CommaToken: ",", AtToken: "@", ColonColonToken: "::", ArrowToken: "->",
+	LessThanToken: "<", GreaterThanToken: ">", LessThanEqualsToken: "<=", GreaterThanEqualsToken: ">=",
+	EqualsEqualsToken: "==", ExclamationEqualsToken: "!=", AmpersandAmpersandToken: "&&", BarBarToken: "||",
+	ExclamationToken: "!", AmpersandToken: "&", BarToken: "|", CaretToken: "^", TildeToken: "~",
+	LessThanLessThanToken: "<<", GreaterThanGreaterThanToken: ">>", GreaterThanGreaterThanGreaterThanToken: ">>>",
+	PlusToken: "+", MinusToken: "-", AsteriskToken: "*", SlashToken: "/", PercentToken: "%",
+	PlusPlusToken: "++", MinusMinusToken: "--", EqualsToken: "=", PlusEqualsToken: "+=", MinusEqualsToken: "-=",
+	AsteriskEqualsToken: "*=", SlashEqualsToken: "/=", PercentEqualsToken: "%=", AmpersandEqualsToken: "&=",
+	BarEqualsToken: "|=", CaretEqualsToken: "^=", LessThanLessThanEqualsToken: "<<=",
+	GreaterThanGreaterThanEqualsToken: ">>=", GreaterThanGreaterThanGreaterThanEqualsToken: ">>>=",
+	QuestionToken: "?", ColonToken: ":",
+}
+
+// keywordText is the reverse of textToKeyword (kind -> spelling).
+var keywordText = func() map[SyntaxKind]string {
+	m := make(map[SyntaxKind]string, len(textToKeyword))
+	for text, kind := range textToKeyword {
+		m[kind] = text
+	}
+	return m
+}()
+
+// tokenToString is the canonical spelling of a punctuation or keyword token, or
+// "" for others (identifiers, literals, EOF). Port of utilities.ts tokenToString.
+func tokenToString(kind SyntaxKind) string {
+	if s, ok := punctuationText[kind]; ok {
+		return s
+	}
+	return keywordText[kind]
+}
