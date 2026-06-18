@@ -42,6 +42,7 @@ type CLI struct {
 	Rage        rageCmd        `cmd:"" help:"Open the issue tracker in your default browser"`
 	Cache       cacheCmd       `cmd:"" help:"Manage the global download cache"`
 	Lsp         lspCmd         `cmd:"" help:"Start the Java language server (JSON-RPC)"`
+	Mcp         mcpCmd         `cmd:"" help:"Start the MCP server for agents (over stdio)"`
 	Compile     compileCmd     `cmd:"" help:"Compile .java files to .class bytecode"`
 }
 
@@ -235,6 +236,12 @@ type lspCmd struct {
 }
 
 func (*lspCmd) Run(*appState) error { return exit(cli.Stub("lsp")) }
+
+// The MCP server (cli/mcp.ts, services/mcpServer.ts) is TS-only for now; the Go
+// build carries it as a stub so `cappu --help` and dispatch stay in sync.
+type mcpCmd struct{}
+
+func (*mcpCmd) Run(*appState) error { return exit(cli.Stub("mcp")) }
 
 type compileCmd struct {
 	Output   string   `short:"o" placeholder:"<kind>" help:"classes | jar | fat-jar"`
