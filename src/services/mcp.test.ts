@@ -103,3 +103,34 @@ test("findReferences reports ambiguity instead of guessing", () => {
   expect(result.candidates).toBe(2);
   expect(result.references).toEqual([]);
 });
+
+test("findImplementations lists the implementers of an interface", () => {
+  const tools = toolsFor({
+    "file:///Shape.java": "package a; interface Shape {}",
+    "file:///Circle.java": "package a; class Circle implements Shape {}",
+    "file:///Square.java": "package a; class Square implements Shape {}",
+  });
+  const { implementations } = tools.findImplementations({ ref: "a.Shape" });
+  expect(implementations.map(i => i.label).sort()).toEqual(["class Circle", "class Square"]);
+});
+
+test("findImplementations lists method overrides", () => {
+  const tools = toolsFor({
+    "file:///Animal.java": "package a; abstract class Animal { abstract String sound(); }",
+    "file:///Dog.java": 'package a; class Dog extends Animal { String sound() { return "woof"; } }',
+  });
+  const { implementations } = tools.findImplementations({ ref: "a.Animal#sound" });
+  expect(implementations).toHaveLength(1);
+  expect(implementations[0].label).toContain("sound");
+  expect(implementations[0].definition?.file).toBe("/Dog.java");
+});
+
+test("findImplementations reports ambiguity for a bare name", () => {
+  const tools = toolsFor({
+    "file:///a/Shape.java": "package a; interface Shape {}",
+    "file:///b/Shape.java": "package b; interface Shape {}",
+  });
+  const result = tools.findImplementations({ ref: "Shape" });
+  expect(result.ambiguous).toBe(true);
+  expect(result.candidates).toBe(2);
+});

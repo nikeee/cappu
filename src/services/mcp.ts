@@ -10,12 +10,20 @@ import { computeLineStarts, getLineAndCharacterOfPosition } from "../compiler/li
 import type { Program } from "../compiler/program.ts";
 import { getSourceFileOfNode } from "../compiler/resolver.ts";
 import { findReferences, getDeclarationNameNode } from "../compiler/resolver.ts";
-import { DiagnosticCategory, type Diagnostic, type Node, type Symbol } from "../compiler/types.ts";
+import {
+  DiagnosticCategory,
+  type Diagnostic,
+  type MethodDeclaration,
+  type Node,
+  type Symbol,
+  SymbolFlags,
+} from "../compiler/types.ts";
 import { skipTrivia } from "../compiler/utilities.ts";
 import { isSyntheticUri, pathToUri, type Uri, uriToPath } from "../workspace.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
 import { getHoverText, symbolKindWord } from "./hover.ts";
 import { resolveSymbolRef } from "./mcpResolve.ts";
+import { findMethodImplementations, getSubtypeIndex } from "./subtypes.ts";
 
 export interface McpLocation {
   file: string;
@@ -103,6 +111,9 @@ export interface McpTools {
   findReferences(args: {
     ref: string;
   }): { references: McpLocation[]; ambiguous?: boolean; candidates?: number };
+  findImplementations(args: {
+    ref: string;
+  }): { implementations: McpMatch[]; ambiguous?: boolean; candidates?: number };
 }
 
 export function createMcpTools(program: Program, checker: Checker): McpTools {
@@ -178,6 +189,33 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
     return { references };
   }
 
+  // For a type: its transitive subtypes (who implements/extends it). For a
+  // method: the concrete overrides in those subtypes.
+  function findImplementations(args: {
+    ref: string;
+  }): { implementations: McpMatch[]; ambiguous?: boolean; candidates?: number } {
+    const symbols = resolveSymbolRef(args.ref, program.getGlobalIndex());
+    if (symbols.length === 0) return { implementations: [] };
+    if (symbols.length > 1) {
+      return { implementations: [], ambiguous: true, candidates: symbols.length };
+    }
+    const symbol = symbols[0];
+    const impls: Symbol[] = [];
+    if (symbol.flags & (SymbolFlags.Method | SymbolFlags.Constructor)) {
+      const declaration = (symbol.valueDeclaration ?? symbol.declarations?.[0]) as
+        | MethodDeclaration
+        | undefined;
+      if (declaration) {
+        for (const override of findMethodImplementations(declaration, program)) {
+          if (override.symbol) impls.push(override.symbol);
+        }
+      }
+    } else {
+      impls.push(...getSubtypeIndex(program).allSubtypesOf(symbol));
+    }
+    return { implementations: impls.map(describe) };
+  }
+
   return {
     diagnostics,
     outline,
@@ -185,5 +223,6 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
     describeSymbol,
     findDefinition,
     findReferences: findReferencesTool,
+    findImplementations,
   };
 }

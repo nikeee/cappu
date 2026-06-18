@@ -134,5 +134,18 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
     },
   );
 
+  server.registerTool(
+    "find_implementations",
+    {
+      description:
+        "For an interface/class: its subtypes. For a method: the overrides in those subtypes. `ref` as in describe_symbol.",
+      inputSchema: { ref: z.string() },
+    },
+    async args => {
+      refresh();
+      return ok(tools.findImplementations(args));
+    },
+  );
+
   await server.connect(new StdioServerTransport());
 }
