@@ -37,7 +37,7 @@ or common library. Current decisions:
 |---|---|---|
 | `comment-json` (round-trip edit) | `tidwall/sjson` (write) + `tidwall/jsonc` (read) | done (M1) |
 | `zod` (validate + JSON-Schema gen) | `encoding/json` + struct defaults + hand validation; `invopop/jsonschema` for schema gen | M1 (schema gen deferred with `init`) |
-| `fast-xml-parser` (POM / maven-metadata) | `encoding/xml` (stdlib) | later (Maven resolve) |
+| `fast-xml-parser` (POM / maven-metadata) | `encoding/xml` (stdlib) | done (M2) |
 | `cli-progress` | `schollz/progressbar/v3` | later (install) |
 | `@inquirer/prompts` | `charmbracelet/huh` | later (`init`) |
 | `vscode-languageserver` | TBD (`go.lsp.dev/protocol` vs roll-our-own like tsgo) | later (lsp) |
@@ -74,6 +74,22 @@ tsgo uses aliases because its "brands" are *semantic groupings of one shared
 `Node` type* (Expression/Statement are all `*ast.Node`), where a named type
 would break assignability. Our brands wrap distinct primitives, so named types
 fit. Reach for tsgo's alias pattern only when porting the compiler AST.
+
+## XML: fast-xml-parser -> encoding/xml (+ custom map unmarshal)
+
+POMs parse into Go structs with `xml:"..."` tags matching local element names
+(namespaces ignored). The one place stdlib `encoding/xml` cannot map directly is
+`<properties>`, whose child element names are arbitrary keys: implement
+`UnmarshalXML` on a `map[string]string` named type that walks tokens and
+`DecodeElement`s each child into the map. See `internal/packages/maven.go`
+(`xmlProperties`). The effective-POM logic (parent-chain merge, `${...}`
+interpolation, `<dependencyManagement>` fill, scope=import BOMs) ports
+straight across as plain Go - see `effectiveMetadata` / `importedManaged`.
+
+Determinism note: Go `map` iteration is unordered, so anything whose output
+order is observable sorts its keys first - `sources.rootsOf` sorts dependency
+keys, and `InMemoryPackageSource` keeps an insertion-order key slice for
+`Search` (the Node build relied on `Map`/object insertion order).
 
 ## Config: zod schema -> struct + manual defaults/validation
 

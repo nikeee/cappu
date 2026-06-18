@@ -163,7 +163,9 @@ func run(argv []string) int {
 			return 2
 		}
 		return cli.RunSearch(query, cfg)
-	case "add", "install", "update", "audit", "licenses", "publish", "lsp", "test", "compile":
+	case "licenses":
+		return cli.RunLicenses(cfg, values["json"] != "")
+	case "add", "install", "update", "audit", "publish", "lsp", "test", "compile":
 		return cli.Stub(command)
 	default:
 		fmt.Fprintf(os.Stderr, "cappu: unknown command '%s'\n\n", command)

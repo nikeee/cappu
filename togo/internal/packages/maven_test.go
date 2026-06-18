@@ -61,3 +61,9 @@ type stubSource struct{ hits []Coordinates }
 func (s stubSource) Name() string { return "stub" }
 
 func (s stubSource) Search(string) ([]Coordinates, error) { return s.hits, nil }
+
+func (s stubSource) ListVersions(string, string) ([]string, error) { return nil, nil }
+
+func (s stubSource) GetMetadata(Coordinates) (*PackageMetadata, error) { return nil, nil }
+
+func (s stubSource) GetArtifact(Coordinates) ([]byte, error) { return nil, nil }

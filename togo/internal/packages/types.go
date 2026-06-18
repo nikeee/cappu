@@ -22,6 +22,9 @@ type CoordinateString string
 // PackageKey is "group:artifact" - all versions of a package; the conflict key.
 type PackageKey string
 
+// MavenScope is a Maven dependency scope ("compile", "runtime", "test", ...).
+type MavenScope string
+
 // Coordinates are the exact maven-style coordinates of one package version.
 type Coordinates struct {
 	GroupID    GroupID
@@ -45,13 +48,40 @@ func NewCoordinates(groupID, artifactID, version string) Coordinates {
 	return Coordinates{GroupID: GroupID(groupID), ArtifactID: ArtifactID(artifactID), Version: Version(version)}
 }
 
+// DependencyDeclaration is a dependency as declared by a package (before
+// resolution).
+type DependencyDeclaration struct {
+	Coordinates
+	// Scope is the Maven scope; only "compile" and "runtime" propagate.
+	Scope MavenScope
+	// Optional dependencies do not propagate to consumers.
+	Optional bool
+}
+
+// PackageMetadata is the effective view of one package version: its declared
+// dependencies and licenses.
+type PackageMetadata struct {
+	Coordinates  Coordinates
+	Description  string
+	Dependencies []DependencyDeclaration
+	// Licenses as the POM declares them (free text), empty when none.
+	Licenses []License
+	// LicenseNormalized are the best-effort SPDX ids the licenses map to.
+	LicenseNormalized []SpdxID
+}
+
 // PackageSource is one repository packages are searched and resolved from.
-// Milestone 1 implements only the search-capable Maven Central source; the
-// resolution methods (listVersions/getMetadata/getArtifact) arrive with the
-// install command.
+// Implementations: MavenRepositorySource (remote repository layout) and
+// InMemoryPackageSource (tests, local overrides).
 type PackageSource interface {
 	// Name is a stable display name (e.g. the repository url).
 	Name() string
 	// Search runs a free-text query; an unsupported source returns nil.
 	Search(query string) ([]Coordinates, error)
+	// ListVersions returns all published versions of group:artifact, oldest first.
+	ListVersions(groupID, artifactID string) ([]string, error)
+	// GetMetadata returns the effective metadata, or nil if unknown here.
+	GetMetadata(c Coordinates) (*PackageMetadata, error)
+	// GetArtifact returns the package's jar bytes, or nil if unavailable here.
+	GetArtifact(c Coordinates) ([]byte, error)
 }
