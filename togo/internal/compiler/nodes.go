@@ -621,6 +621,8 @@ func (f *NodeFactory) NewThisExpression(qualifier *Node) *Node {
 	return f.newNode(ThisExpression, &ThisExpressionData{Qualifier: qualifier})
 }
 
+func (n *Node) AsThisExpression() *ThisExpressionData { return n.data.(*ThisExpressionData) }
+
 // SuperExpressionData is `super` or `Qualifier.super`.
 type SuperExpressionData struct{ Qualifier *Node }
 
@@ -629,6 +631,8 @@ func (d *SuperExpressionData) forEachChild(v Visitor) bool { return visit(v, d.Q
 func (f *NodeFactory) NewSuperExpression(qualifier *Node) *Node {
 	return f.newNode(SuperExpression, &SuperExpressionData{Qualifier: qualifier})
 }
+
+func (n *Node) AsSuperExpression() *SuperExpressionData { return n.data.(*SuperExpressionData) }
 
 // BinaryExpressionData is `left op right`.
 type BinaryExpressionData struct {
