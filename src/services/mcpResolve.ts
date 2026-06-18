@@ -3,11 +3,11 @@
 // "com.foo.Bar" or a bare simple name "Bar") or a member "Type#member". Only
 // declared members are resolved; inherited members are out of scope for now.
 
-import type { GlobalIndex } from "./program.ts";
-import type { Symbol } from "./types.ts";
+import type { Fqn, GlobalIndex } from "../compiler/program.ts";
+import type { Symbol } from "../compiler/types.ts";
 
 function resolveType(typeRef: string, index: GlobalIndex): Symbol[] {
-  const direct = index.getType(typeRef);
+  const direct = index.getType(typeRef as Fqn);
   if (direct) return [direct];
   return index
     .findFqnsBySimpleName(typeRef)

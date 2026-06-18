@@ -1,13 +1,14 @@
 import { test } from "node:test";
 import { expect } from "expect";
 
-import { createProgram } from "./program.ts";
+import { createProgram } from "../compiler/program.ts";
+import { SymbolFlags } from "../compiler/types.ts";
+import { type Uri } from "../workspace.ts";
 import { resolveSymbolRef } from "./mcpResolve.ts";
-import { SymbolFlags } from "./types.ts";
 
 function indexFor(files: Record<string, string>) {
   const program = createProgram();
-  for (const [uri, text] of Object.entries(files)) program.addProjectFile(uri, text);
+  for (const [uri, text] of Object.entries(files)) program.addProjectFile(uri as Uri, text);
   return program.getGlobalIndex();
 }
 

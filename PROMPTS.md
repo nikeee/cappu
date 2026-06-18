@@ -309,3 +309,7 @@ no timestamps were captured.
 - 2026-06-18 14:26 — build the lsp first. start with the scanner, then parser, binder, checker and then the rest. do the language service features last. also port each individual test on each step
 - 2026-06-18 14:26 — dont forget to follow the same pattern for porting the code as TypeSript-Go did
 - 2026-06-18 20:22 — continue
+- 2026-06-18 21:37 — explore https://github.com/nikeee/cappu/issues/19
+- 2026-06-18 21:37 — plan it. only for the ts version of cappu, not togo
+- 2026-06-18 21:37 — 2 (execute the plan inline)
+- 2026-06-18 21:37 — i merged main into current branch. maybe something is broken. but there is now a lot more functionality / re-evaluate methods to implement for the MCP server. Align code architecture and patterns with the merged update / continue

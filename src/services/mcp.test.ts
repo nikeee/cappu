@@ -1,13 +1,14 @@
 import { test } from "node:test";
 import { expect } from "expect";
 
-import { createChecker } from "./checker.ts";
-import { createProgram } from "./program.ts";
+import { createChecker } from "../compiler/checker.ts";
+import { createProgram } from "../compiler/program.ts";
+import { type Uri } from "../workspace.ts";
 import { createMcpTools } from "./mcp.ts";
 
 function toolsFor(files: Record<string, string>) {
   const program = createProgram();
-  for (const [uri, text] of Object.entries(files)) program.addProjectFile(uri, text);
+  for (const [uri, text] of Object.entries(files)) program.addProjectFile(uri as Uri, text);
   const checker = createChecker(program);
   return createMcpTools(program, checker);
 }

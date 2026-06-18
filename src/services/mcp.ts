@@ -5,16 +5,17 @@
 
 import type { DocumentSymbol } from "vscode-languageserver-types";
 
-import type { Checker } from "./checker.ts";
+import type { Checker } from "../compiler/checker.ts";
+import { computeLineStarts, getLineAndCharacterOfPosition } from "../compiler/lineMap.ts";
+import type { Program } from "../compiler/program.ts";
+import { getSourceFileOfNode } from "../compiler/resolver.ts";
+import { findReferences, getDeclarationNameNode } from "../compiler/resolver.ts";
+import { DiagnosticCategory, type Diagnostic, type Node, type Symbol } from "../compiler/types.ts";
+import { skipTrivia } from "../compiler/utilities.ts";
+import { isSyntheticUri, pathToUri, type Uri, uriToPath } from "../workspace.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
 import { getHoverText, symbolKindWord } from "./hover.ts";
-import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
 import { resolveSymbolRef } from "./mcpResolve.ts";
-import type { Program } from "./program.ts";
-import { findReferences, getDeclarationNameNode, getSourceFileOfNode } from "./resolver.ts";
-import { DiagnosticCategory, type Diagnostic, type Node, type Symbol } from "./types.ts";
-import { skipTrivia } from "./utilities.ts";
-import { pathToUri, uriToPath } from "./workspace.ts";
 
 export interface McpLocation {
   file: string;
@@ -48,6 +49,12 @@ function severityOf(category: DiagnosticCategory): McpDiagnostic["severity"] {
   }
 }
 
+// Synthetic stub uris (jdk:///, classpath:///) are not real files; keep them
+// verbatim. Everything else is a file:// uri we surface as a plain path.
+function displayFile(uri: string): string {
+  return isSyntheticUri(uri) ? uri : uriToPath(uri as Uri);
+}
+
 // node.pos includes leading trivia; advance to the token's real start so the
 // reported location points at the name, mirroring server.ts:rangeOf.
 export function nodeLocation(node: Node): McpLocation {
@@ -56,7 +63,7 @@ export function nodeLocation(node: Node): McpLocation {
   const start = getLineAndCharacterOfPosition(lineStarts, skipTrivia(file.text, node.pos));
   const end = getLineAndCharacterOfPosition(lineStarts, node.end);
   return {
-    file: uriToPath(file.fileName),
+    file: displayFile(file.fileName),
     line: start.line + 1,
     column: start.character + 1,
     endLine: end.line + 1,
@@ -64,15 +71,11 @@ export function nodeLocation(node: Node): McpLocation {
   };
 }
 
-function formatDiagnostic(
-  uri: string,
-  d: Diagnostic,
-  lineStarts: readonly number[],
-): McpDiagnostic {
+function formatDiagnostic(uri: Uri, d: Diagnostic, lineStarts: readonly number[]): McpDiagnostic {
   const start = getLineAndCharacterOfPosition(lineStarts, d.pos);
   const end = getLineAndCharacterOfPosition(lineStarts, d.end);
   return {
-    file: uriToPath(uri),
+    file: displayFile(uri),
     severity: severityOf(d.category),
     code: d.code,
     message: d.messageText,
