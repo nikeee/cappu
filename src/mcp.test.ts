@@ -56,3 +56,49 @@ test("searchSymbols matches type fqns case-insensitively by substring", () => {
   });
   expect(tools.searchSymbols({ query: "service" }).matches).toEqual(["app.UserService"]);
 });
+
+test("describeSymbol returns kind, label and definition for a type", () => {
+  const tools = toolsFor({ "file:///Foo.java": "package a; class Foo {}" });
+  const { matches } = tools.describeSymbol({ ref: "a.Foo" });
+  expect(matches).toHaveLength(1);
+  expect(matches[0].kind).toBe("class");
+  expect(matches[0].label).toBe("class Foo");
+  expect(matches[0].definition?.file).toBe("/Foo.java");
+});
+
+test("describeSymbol resolves a method member and includes a signature", () => {
+  const tools = toolsFor({
+    "file:///Foo.java": "package a; class Foo { int add(int x) { return x; } }",
+  });
+  const { matches } = tools.describeSymbol({ ref: "a.Foo#add" });
+  expect(matches).toHaveLength(1);
+  expect(matches[0].kind).toBe("method");
+  expect(matches[0].signature).toContain("add");
+});
+
+test("findDefinition returns the declaration location", () => {
+  const tools = toolsFor({ "file:///Foo.java": "package a; class Foo {}" });
+  const { definitions } = tools.findDefinition({ ref: "a.Foo" });
+  expect(definitions).toHaveLength(1);
+  expect(definitions[0].file).toBe("/Foo.java");
+  expect(definitions[0].line).toBe(1);
+});
+
+test("findReferences returns every use of a field", () => {
+  const tools = toolsFor({
+    "file:///Foo.java": "package a; class Foo { int f; void m() { f = f + 1; } }",
+  });
+  const { references } = tools.findReferences({ ref: "a.Foo#f" });
+  expect(references.length).toBe(3);
+});
+
+test("findReferences reports ambiguity instead of guessing", () => {
+  const tools = toolsFor({
+    "file:///a/Foo.java": "package a; class Foo {}",
+    "file:///b/Foo.java": "package b; class Foo {}",
+  });
+  const result = tools.findReferences({ ref: "Foo" });
+  expect(result.ambiguous).toBe(true);
+  expect(result.candidates).toBe(2);
+  expect(result.references).toEqual([]);
+});

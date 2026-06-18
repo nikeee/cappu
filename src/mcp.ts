@@ -7,10 +7,12 @@ import type { DocumentSymbol } from "vscode-languageserver-types";
 
 import type { Checker } from "./checker.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
+import { getHoverText, symbolKindWord } from "./hover.ts";
 import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
+import { resolveSymbolRef } from "./mcpResolve.ts";
 import type { Program } from "./program.ts";
-import { getSourceFileOfNode } from "./resolver.ts";
-import { DiagnosticCategory, type Diagnostic, type Node } from "./types.ts";
+import { findReferences, getDeclarationNameNode, getSourceFileOfNode } from "./resolver.ts";
+import { DiagnosticCategory, type Diagnostic, type Node, type Symbol } from "./types.ts";
 import { skipTrivia } from "./utilities.ts";
 import { pathToUri, uriToPath } from "./workspace.ts";
 
@@ -81,10 +83,23 @@ function formatDiagnostic(
   };
 }
 
+export interface McpMatch {
+  kind: string;
+  label: string;
+  signature?: string;
+  documentation?: string;
+  definition?: McpLocation;
+}
+
 export interface McpTools {
   diagnostics(args: { files?: string[] }): { diagnostics: McpDiagnostic[] };
   outline(args: { file: string }): { symbols: DocumentSymbol[] };
   searchSymbols(args: { query: string }): { matches: string[] };
+  describeSymbol(args: { ref: string }): { matches: McpMatch[] };
+  findDefinition(args: { ref: string }): { definitions: McpLocation[] };
+  findReferences(args: {
+    ref: string;
+  }): { references: McpLocation[]; ambiguous?: boolean; candidates?: number };
 }
 
 export function createMcpTools(program: Program, checker: Checker): McpTools {
@@ -120,5 +135,52 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
     return { matches };
   }
 
-  return { diagnostics, outline, searchSymbols };
+  function describe(symbol: Symbol): McpMatch {
+    const declaration = getDeclarationNameNode(symbol);
+    const signature = checker.signatureOfSymbol(symbol);
+    const documentation = checker.getDocumentation(symbol);
+    return {
+      kind: symbolKindWord(symbol.flags),
+      label: getHoverText(checker, symbol),
+      ...(signature ? { signature } : {}),
+      ...(documentation ? { documentation } : {}),
+      ...(declaration ? { definition: nodeLocation(declaration) } : {}),
+    };
+  }
+
+  function describeSymbol(args: { ref: string }): { matches: McpMatch[] } {
+    const symbols = resolveSymbolRef(args.ref, program.getGlobalIndex());
+    return { matches: symbols.map(describe) };
+  }
+
+  function findDefinition(args: { ref: string }): { definitions: McpLocation[] } {
+    const symbols = resolveSymbolRef(args.ref, program.getGlobalIndex());
+    const definitions: McpLocation[] = [];
+    for (const symbol of symbols) {
+      const declaration = getDeclarationNameNode(symbol);
+      if (declaration) definitions.push(nodeLocation(declaration));
+    }
+    return { definitions };
+  }
+
+  function findReferencesTool(args: {
+    ref: string;
+  }): { references: McpLocation[]; ambiguous?: boolean; candidates?: number } {
+    const symbols = resolveSymbolRef(args.ref, program.getGlobalIndex());
+    if (symbols.length === 0) return { references: [] };
+    if (symbols.length > 1) {
+      return { references: [], ambiguous: true, candidates: symbols.length };
+    }
+    const references = findReferences(symbols[0], program, checker.resolveName).map(nodeLocation);
+    return { references };
+  }
+
+  return {
+    diagnostics,
+    outline,
+    searchSymbols,
+    describeSymbol,
+    findDefinition,
+    findReferences: findReferencesTool,
+  };
 }
