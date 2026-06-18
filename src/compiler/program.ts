@@ -32,6 +32,7 @@ export interface GlobalIndex {
   getPackageTypes(packageName: PackageName): SymbolTable | undefined;
   getPackageSymbol(packageName: PackageName): Symbol | undefined;
   /** Fully-qualified names of all top-level types with the given simple name (for import suggestions). */
+  getAllTypeFqns(): string[];
   findFqnsBySimpleName(simpleName: string): Fqn[];
   /** A package symbol for an exact package or any prefix of one (e.g. "java" or "java.util"). */
   getPackageByName(name: PackageName): Symbol | undefined;
@@ -219,6 +220,7 @@ export function createProgram(): Program {
       }
       return result;
     },
+    getAllTypeFqns: () => [...typesByFqn.keys()],
     getPackageByName: name => packagesByName.get(name),
   };
 

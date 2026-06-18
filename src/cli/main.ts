@@ -12,6 +12,7 @@ import { runCompileCommand } from "./compile.ts";
 import { runInit } from "./init.ts";
 import { runInstall } from "./install.ts";
 import { runLsp } from "./lsp.ts";
+import { runMcp } from "./mcp.ts";
 import { runSearch } from "./search.ts";
 import { runCacheCommand } from "./cache.ts";
 import { runSelfUpgrade } from "./selfUpgrade.ts";
@@ -67,6 +68,9 @@ Usage:
   cappu rage                         Open the issue tracker in your default browser
   cappu cache clean                  Remove the global download cache
   cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
+  cappu mcp                          Start the MCP server for agents: name-addressed
+                                     semantic tools (diagnostics, outline, describe/
+                                     find symbols) over stdio
   cappu compile [options] [file...]  Compile .java files to .class bytecode; with no
                                      files, compile everything under the configured
                                      sourcePaths (a project build)
@@ -231,6 +235,9 @@ switch (command) {
   }
   case "lsp":
     await runLsp(config, values.port);
+    break;
+  case "mcp":
+    await runMcp(config);
     break;
   case "test":
     await runTestCommand(config);
