@@ -25,6 +25,8 @@ export interface GlobalIndex {
   getPackageSymbol(packageName: string): Symbol | undefined;
   /** Fully-qualified names of all top-level types with the given simple name (for import suggestions). */
   findFqnsBySimpleName(simpleName: string): string[];
+  /** Fully-qualified names of every indexed top-level type. */
+  getAllTypeFqns(): string[];
   /** A package symbol for an exact package or any prefix of one (e.g. "java" or "java.util"). */
   getPackageByName(name: string): Symbol | undefined;
 }
@@ -204,6 +206,7 @@ export function createProgram(): Program {
       }
       return result;
     },
+    getAllTypeFqns: () => [...typesByFqn.keys()],
     getPackageByName: name => packagesByName.get(name),
   };
 

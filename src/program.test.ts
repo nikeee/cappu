@@ -89,3 +89,13 @@ test("closing a document removes only its types from the index", () => {
   expect(index.getType("p.B")).toBeUndefined();
   expect(index.getType("p.A")).toBeDefined();
 });
+
+test("getAllTypeFqns lists every top-level type fqn", () => {
+  const program = createProgram();
+  program.addProjectFile("file:///a/Foo.java", "package a; class Foo {}");
+  program.addProjectFile("file:///b/Bar.java", "package a.b; class Bar {} class Baz {}");
+  const index = program.getGlobalIndex();
+  expect(new Set(index.getAllTypeFqns())).toEqual(
+    new Set(["a.Foo", "a.b.Bar", "a.b.Baz"]),
+  );
+});
