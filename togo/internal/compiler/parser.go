@@ -215,18 +215,21 @@ func (p *Parser) isListTerminator(context ParsingContext) bool {
 	}
 }
 
-// isStartOfStatement reports whether the current token begins a top-level
-// statement. Scoped to ';' for now; type-declaration starts are added with the
-// type-declaration grammar.
-func (p *Parser) isStartOfStatement() bool {
-	return p.token() == SemicolonToken
-}
-
 func (p *Parser) isListElement(context ParsingContext) bool {
-	if context == ctxSourceElements {
+	switch context {
+	case ctxSourceElements:
 		return p.isStartOfStatement()
+	case ctxClassMembers:
+		return p.isStartOfClassMember()
+	case ctxTypeArguments:
+		return p.isStartOfType()
+	case ctxTypeParameters:
+		return p.token() == Identifier || p.token() == AtToken
+	case ctxParameters:
+		return p.isStartOfParameter()
+	default:
+		return false
 	}
-	return false
 }
 
 func (p *Parser) isInSomeParsingContext() bool {
@@ -272,6 +275,42 @@ func (p *Parser) parseList(context ParsingContext, parseElement func() *Node) *N
 		if p.isListElement(context) {
 			list = append(list, parseElement())
 			continue
+		}
+		if p.abortParsingListOrMoveToNextToken(context) {
+			break
+		}
+	}
+
+	p.parsingContext = saveParsingContext
+	return p.createNodeArray(list, listPos, -1)
+}
+
+// parseDelimitedList parses a comma-separated list, with the "skip a token if no
+// progress" guard so malformed input cannot loop. Port of parseDelimitedList.
+func (p *Parser) parseDelimitedList(context ParsingContext, parseElement func() *Node) *NodeArray {
+	saveParsingContext := p.parsingContext
+	p.parsingContext |= 1 << context
+	var list []*Node
+	listPos := p.getNodePos()
+
+	for {
+		if p.isListElement(context) {
+			startPos := p.scanner.TokenFullStart()
+			list = append(list, parseElement())
+			if p.parseOptional(CommaToken) {
+				continue
+			}
+			if p.isListTerminator(context) {
+				break
+			}
+			p.parseExpected(CommaToken, nil)
+			if startPos == p.scanner.TokenFullStart() {
+				p.nextToken()
+			}
+			continue
+		}
+		if p.isListTerminator(context) {
+			break
 		}
 		if p.abortParsingListOrMoveToNextToken(context) {
 			break
@@ -342,9 +381,7 @@ func (p *Parser) parseSourceElement() *Node {
 	if p.token() == SemicolonToken {
 		return p.parseEmptyStatement()
 	}
-	// Type declarations arrive with the type-declaration grammar; until then
-	// isStartOfStatement never routes other tokens here.
-	return p.parseEmptyStatement()
+	return p.parseTypeDeclaration()
 }
 
 func (p *Parser) parseEmptyStatement() *Node {

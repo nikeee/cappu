@@ -106,6 +106,41 @@ func (f *NodeFactory) NewWildcardType(hasExtends, hasSuper bool, typ *Node) *Nod
 
 func (n *Node) AsWildcardType() *WildcardTypeData { return n.data.(*WildcardTypeData) }
 
+// TypeParameterData is `<@A T extends X & Y>`.
+type TypeParameterData struct {
+	Annotations *NodeArray
+	Name        *Node      // Identifier
+	Constraint  *NodeArray // bounds (TypeNode), optional
+}
+
+func (d *TypeParameterData) forEachChild(v Visitor) bool {
+	return visitNodes(v, d.Annotations) || visit(v, d.Name) || visitNodes(v, d.Constraint)
+}
+
+func (f *NodeFactory) NewTypeParameter(annotations *NodeArray, name *Node, constraint *NodeArray) *Node {
+	return f.newNode(TypeParameter, &TypeParameterData{Annotations: annotations, Name: name, Constraint: constraint})
+}
+
+func (n *Node) AsTypeParameter() *TypeParameterData { return n.data.(*TypeParameterData) }
+
+// --- annotations -------------------------------------------------------------
+
+// AnnotationData is `@TypeName(args?)`.
+type AnnotationData struct {
+	TypeName *Node      // EntityName
+	Args     *NodeArray // AnnotationArgument, optional
+}
+
+func (d *AnnotationData) forEachChild(v Visitor) bool {
+	return visit(v, d.TypeName) || visitNodes(v, d.Args)
+}
+
+func (f *NodeFactory) NewAnnotation(typeName *Node, args *NodeArray) *Node {
+	return f.newNode(Annotation, &AnnotationData{TypeName: typeName, Args: args})
+}
+
+func (n *Node) AsAnnotation() *AnnotationData { return n.data.(*AnnotationData) }
+
 // --- compilation unit --------------------------------------------------------
 
 // SourceFileData is the root of a parsed file.
@@ -213,6 +248,136 @@ func (f *NodeFactory) NewClassDeclaration(modifiers *NodeArray, name *Node, type
 }
 
 func (n *Node) AsClassDeclaration() *ClassDeclarationData { return n.data.(*ClassDeclarationData) }
+
+// InterfaceDeclarationData is an interface declaration.
+type InterfaceDeclarationData struct {
+	Modifiers      *NodeArray
+	Name           *Node
+	TypeParameters *NodeArray
+	ExtendsTypes   *NodeArray
+	PermitsTypes   *NodeArray
+	Members        *NodeArray
+}
+
+func (d *InterfaceDeclarationData) forEachChild(v Visitor) bool {
+	return visitNodes(v, d.Modifiers) || visit(v, d.Name) || visitNodes(v, d.TypeParameters) ||
+		visitNodes(v, d.ExtendsTypes) || visitNodes(v, d.PermitsTypes) || visitNodes(v, d.Members)
+}
+
+func (f *NodeFactory) NewInterfaceDeclaration(modifiers *NodeArray, name *Node, typeParameters, extendsTypes, permitsTypes, members *NodeArray) *Node {
+	return f.newNode(InterfaceDeclaration, &InterfaceDeclarationData{
+		Modifiers: modifiers, Name: name, TypeParameters: typeParameters,
+		ExtendsTypes: extendsTypes, PermitsTypes: permitsTypes, Members: members,
+	})
+}
+
+func (n *Node) AsInterfaceDeclaration() *InterfaceDeclarationData {
+	return n.data.(*InterfaceDeclarationData)
+}
+
+// EnumDeclarationData is an enum declaration.
+type EnumDeclarationData struct {
+	Modifiers       *NodeArray
+	Name            *Node
+	ImplementsTypes *NodeArray
+	EnumConstants   *NodeArray
+	Members         *NodeArray
+}
+
+func (d *EnumDeclarationData) forEachChild(v Visitor) bool {
+	return visitNodes(v, d.Modifiers) || visit(v, d.Name) || visitNodes(v, d.ImplementsTypes) ||
+		visitNodes(v, d.EnumConstants) || visitNodes(v, d.Members)
+}
+
+func (f *NodeFactory) NewEnumDeclaration(modifiers *NodeArray, name *Node, implementsTypes, enumConstants, members *NodeArray) *Node {
+	return f.newNode(EnumDeclaration, &EnumDeclarationData{
+		Modifiers: modifiers, Name: name, ImplementsTypes: implementsTypes,
+		EnumConstants: enumConstants, Members: members,
+	})
+}
+
+func (n *Node) AsEnumDeclaration() *EnumDeclarationData { return n.data.(*EnumDeclarationData) }
+
+// AnnotationTypeDeclarationData is `@interface Name { ... }`.
+type AnnotationTypeDeclarationData struct {
+	Modifiers *NodeArray
+	Name      *Node
+	Members   *NodeArray
+}
+
+func (d *AnnotationTypeDeclarationData) forEachChild(v Visitor) bool {
+	return visitNodes(v, d.Modifiers) || visit(v, d.Name) || visitNodes(v, d.Members)
+}
+
+func (f *NodeFactory) NewAnnotationTypeDeclaration(modifiers *NodeArray, name *Node, members *NodeArray) *Node {
+	return f.newNode(AnnotationTypeDeclaration, &AnnotationTypeDeclarationData{Modifiers: modifiers, Name: name, Members: members})
+}
+
+func (n *Node) AsAnnotationTypeDeclaration() *AnnotationTypeDeclarationData {
+	return n.data.(*AnnotationTypeDeclarationData)
+}
+
+// RecordComponentData is one component of a record header.
+type RecordComponentData struct {
+	Annotations *NodeArray
+	Type        *Node
+	IsVarArgs   bool
+	Name        *Node
+}
+
+func (d *RecordComponentData) forEachChild(v Visitor) bool {
+	return visitNodes(v, d.Annotations) || visit(v, d.Type) || visit(v, d.Name)
+}
+
+func (f *NodeFactory) NewRecordComponent(annotations *NodeArray, typ *Node, isVarArgs bool, name *Node) *Node {
+	return f.newNode(RecordComponent, &RecordComponentData{Annotations: annotations, Type: typ, IsVarArgs: isVarArgs, Name: name})
+}
+
+func (n *Node) AsRecordComponent() *RecordComponentData { return n.data.(*RecordComponentData) }
+
+// RecordDeclarationData is a record declaration.
+type RecordDeclarationData struct {
+	Modifiers        *NodeArray
+	Name             *Node
+	TypeParameters   *NodeArray
+	RecordComponents *NodeArray
+	ImplementsTypes  *NodeArray
+	Members          *NodeArray
+}
+
+func (d *RecordDeclarationData) forEachChild(v Visitor) bool {
+	return visitNodes(v, d.Modifiers) || visit(v, d.Name) || visitNodes(v, d.TypeParameters) ||
+		visitNodes(v, d.RecordComponents) || visitNodes(v, d.ImplementsTypes) || visitNodes(v, d.Members)
+}
+
+func (f *NodeFactory) NewRecordDeclaration(modifiers *NodeArray, name *Node, typeParameters, recordComponents, implementsTypes, members *NodeArray) *Node {
+	return f.newNode(RecordDeclaration, &RecordDeclarationData{
+		Modifiers: modifiers, Name: name, TypeParameters: typeParameters,
+		RecordComponents: recordComponents, ImplementsTypes: implementsTypes, Members: members,
+	})
+}
+
+func (n *Node) AsRecordDeclaration() *RecordDeclarationData { return n.data.(*RecordDeclarationData) }
+
+// EnumConstantDeclarationData is one enum constant.
+type EnumConstantDeclarationData struct {
+	Modifiers *NodeArray // annotations
+	Name      *Node
+	Arguments *NodeArray
+	ClassBody *NodeArray
+}
+
+func (d *EnumConstantDeclarationData) forEachChild(v Visitor) bool {
+	return visitNodes(v, d.Modifiers) || visit(v, d.Name) || visitNodes(v, d.Arguments) || visitNodes(v, d.ClassBody)
+}
+
+func (f *NodeFactory) NewEnumConstantDeclaration(modifiers *NodeArray, name *Node, arguments, classBody *NodeArray) *Node {
+	return f.newNode(EnumConstantDeclaration, &EnumConstantDeclarationData{Modifiers: modifiers, Name: name, Arguments: arguments, ClassBody: classBody})
+}
+
+func (n *Node) AsEnumConstantDeclaration() *EnumConstantDeclarationData {
+	return n.data.(*EnumConstantDeclarationData)
+}
 
 // FieldDeclarationData is one or more declarators of a type.
 type FieldDeclarationData struct {
