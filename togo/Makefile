@@ -2,7 +2,7 @@
 GOBIN := $(shell go env GOPATH)/bin
 LDFLAGS := -s -w
 
-.PHONY: help fmt fmt-check lint vet test build build-all clean tools
+.PHONY: help fmt fmt-check lint vet test build build-all clean tools generate generate-check
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/'
@@ -18,6 +18,14 @@ lint: ## Run golangci-lint
 
 vet: ## Run go vet
 	go vet ./...
+
+generate: ## Regenerate code (easyjson marshalers); commit the result
+	go generate ./...
+
+generate-check: ## Fail if committed generated code is stale (CI drift guard)
+	go generate ./...
+	@test -z "$$(git status --porcelain -- '*_easyjson.go')" || \
+		{ echo "generated code is stale - run 'make generate' and commit:"; git --no-pager diff -- '*_easyjson.go'; exit 1; }
 
 test: ## Run all tests
 	go test ./...
@@ -35,5 +43,6 @@ build-all: ## Cross-build static binaries for all release targets
 clean: ## Remove build output
 	rm -rf dist
 
-tools: ## Install the dev tools (golangci-lint; gofmt ships with Go)
+tools: ## Install the dev tools (golangci-lint, easyjson; gofmt ships with Go)
 	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	go install github.com/mailru/easyjson/easyjson@latest

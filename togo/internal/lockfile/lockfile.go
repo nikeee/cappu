@@ -1,7 +1,13 @@
 // Package lockfile reads and writes cappu-lock.json and verifies installed jars
 // against the SHA-256 sums it pins. Port of the lockfile parts of
 // src/install.ts (the install orchestration lives in internal/install).
+//
+// The on-disk types carry easyjson-generated, reflection-free marshalers
+// (lockfile_easyjson.go); regenerate with `go generate ./...` after changing
+// any of the //easyjson:json-tagged types below.
 package lockfile
+
+//go:generate easyjson lockfile.go
 
 import (
 	"crypto/sha256"
@@ -23,6 +29,8 @@ const Name = "cappu-lock.json"
 type Sha256 string
 
 // LockedPackage pins one resolved package to the exact bytes installed.
+//
+//easyjson:json
 type LockedPackage struct {
 	Coordinates coordinates        `json:"coordinates"`
 	Source      string             `json:"source"`
@@ -40,6 +48,8 @@ func (p LockedPackage) Coords() packages.Coordinates { return p.Coordinates.toDo
 
 // coordinates is the on-disk JSON shape of packages.Coordinates (the lockfile
 // stores plain lowercase keys).
+//
+//easyjson:json
 type coordinates struct {
 	GroupID    string `json:"groupId"`
 	ArtifactID string `json:"artifactId"`
@@ -55,6 +65,8 @@ func (c coordinates) toDomain() packages.Coordinates {
 }
 
 // Lockfile is the cappu-lock.json document (only version 2 is honored).
+//
+//easyjson:json
 type Lockfile struct {
 	Version int `json:"version"`
 	// Roots is the dependencies section this lock was resolved from.
