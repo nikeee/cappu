@@ -24,6 +24,10 @@ type Node struct {
 	End    int
 	Flags  NodeFlags
 	Parent *Node
+	// Symbol is the declaration symbol attached by the binder (M9).
+	Symbol *Symbol
+	// Locals is this node's block/parameter scope, when it is a container.
+	Locals SymbolTable
 	data   nodeData
 }
 
