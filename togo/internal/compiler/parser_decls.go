@@ -193,14 +193,31 @@ func (p *Parser) parseModifiers() *NodeArray {
 	return p.createNodeArray(list, pos, -1)
 }
 
-// parseAnnotation parses `@TypeName`. Argument lists (`@Foo(...)`) need the
-// expression grammar and arrive with it; no marker/type-use annotation in the
-// current slices has arguments.
+// parseAnnotationArgument parses one element value, optionally named (`name =`).
+func (p *Parser) parseAnnotationArgument() *Node {
+	pos := p.getNodePos()
+	var name *Node
+	// NormalAnnotation pair: Identifier = ElementValue.
+	if p.token() == Identifier && parserLookAhead(p, func() bool { p.nextToken(); return p.token() == EqualsToken }) {
+		name = p.parseIdentifier()
+		p.parseExpected(EqualsToken, nil)
+	}
+	value := p.parseElementValue()
+	return p.finishNode(p.factory.NewAnnotationArgument(name, value), pos, -1)
+}
+
+// parseAnnotation parses `@TypeName` with an optional argument list `(...)`.
 func (p *Parser) parseAnnotation() *Node {
 	pos := p.getNodePos()
 	p.parseExpected(AtToken, nil)
 	typeName := p.parseEntityName()
-	return p.finishNode(p.factory.NewAnnotation(typeName, nil), pos, -1)
+	var args *NodeArray
+	if p.token() == OpenParenToken {
+		p.parseExpected(OpenParenToken, nil)
+		args = p.parseDelimitedList(ctxAnnotationValues, p.parseAnnotationArgument)
+		p.parseExpected(CloseParenToken, nil)
+	}
+	return p.finishNode(p.factory.NewAnnotation(typeName, args), pos, -1)
 }
 
 func (p *Parser) parseAnnotations() *NodeArray {

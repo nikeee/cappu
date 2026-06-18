@@ -58,8 +58,66 @@ const relationalPrecedence = 7
 
 func (p *Parser) parseExpression() *Node { return p.parseAssignmentExpression() }
 
+// isLambdaStart detects "x ->" (concise) or "( ... ) ->".
+func (p *Parser) isLambdaStart() bool {
+	if p.token() == Identifier {
+		return parserLookAhead(p, func() bool { p.nextToken(); return p.token() == ArrowToken })
+	}
+	if p.token() == OpenParenToken {
+		return parserLookAhead(p, func() bool {
+			p.nextToken() // '('
+			depth := 1
+			for depth > 0 && p.token() != EndOfFileToken {
+				switch p.token() {
+				case OpenParenToken:
+					depth++
+				case CloseParenToken:
+					depth--
+				}
+				p.nextToken()
+			}
+			return p.token() == ArrowToken
+		})
+	}
+	return false
+}
+
+func (p *Parser) parseLambdaParameter() *Node {
+	// Inferred parameter: a bare identifier followed by ',' or ')'.
+	if p.token() == Identifier && parserLookAhead(p, func() bool {
+		p.nextToken()
+		return p.token() == CommaToken || p.token() == CloseParenToken
+	}) {
+		return p.parseIdentifier()
+	}
+	return p.parseParameter()
+}
+
+func (p *Parser) parseLambdaExpression() *Node {
+	pos := p.getNodePos()
+	var parameters *NodeArray
+	if p.token() == OpenParenToken {
+		p.parseExpected(OpenParenToken, nil)
+		parameters = p.parseDelimitedList(ctxParameters, p.parseLambdaParameter)
+		p.parseExpected(CloseParenToken, nil)
+	} else {
+		paramsPos := p.getNodePos()
+		parameters = p.createNodeArray([]*Node{p.parseIdentifier()}, paramsPos, -1)
+	}
+	p.parseExpected(ArrowToken, nil)
+	var body *Node
+	if p.token() == OpenBraceToken {
+		body = p.parseBlock()
+	} else {
+		body = p.parseExpression()
+	}
+	return p.finishNode(p.factory.NewLambdaExpression(parameters, body), pos, -1)
+}
+
 func (p *Parser) parseAssignmentExpression() *Node {
-	// lambda detection arrives with the lambda slice.
+	if p.isLambdaStart() {
+		return p.parseLambdaExpression()
+	}
 	pos := p.getNodePos()
 	left := p.parseConditionalExpression()
 	p.reScanGreaterIfNeeded()
@@ -98,9 +156,19 @@ func (p *Parser) parseBinaryExpressionRest(left *Node, minPrecedence, pos int) *
 			}
 			p.nextToken()
 			typ := p.parseType()
+			// SE21 record deconstruction: o instanceof Point(int x, int y). The
+			// pattern owns the type so each node has one parent.
+			if p.token() == OpenParenToken {
+				patPos := typ.Pos
+				p.parseExpected(OpenParenToken, nil)
+				patterns := p.parseDelimitedList(ctxParameters, p.parseComponentPattern)
+				p.parseExpected(CloseParenToken, nil)
+				pattern := p.finishNode(p.factory.NewRecordPattern(typ, patterns), patPos, -1)
+				left = p.finishNode(p.factory.NewInstanceofExpression(left, nil, nil, pattern), pos, -1)
+				continue
+			}
 			var name *Node
-			// SE16 type pattern: o instanceof String s. (Record patterns arrive
-			// with the pattern slice.)
+			// SE16 type pattern: o instanceof String s.
 			if p.token() == Identifier {
 				name = p.parseIdentifier()
 			}
@@ -188,7 +256,13 @@ func (p *Parser) parseCastExpression() *Node {
 		bounds = p.createNodeArray(list, boundsPos, -1)
 	}
 	p.parseExpected(CloseParenToken, nil)
-	expression := p.parseUnaryExpression()
+	// The operand of a reference cast may be a lambda (JLS 15.16).
+	var expression *Node
+	if p.isLambdaStart() {
+		expression = p.parseLambdaExpression()
+	} else {
+		expression = p.parseUnaryExpression()
+	}
 	return p.finishNode(p.factory.NewCastExpression(typ, bounds, expression), pos, -1)
 }
 
@@ -227,17 +301,93 @@ func (p *Parser) parseAtom() *Node {
 		expression := p.parseExpression()
 		p.parseExpected(CloseParenToken, nil)
 		return p.finishNode(p.factory.NewParenthesizedExpression(expression), pos, -1)
+	case NewKeyword:
+		return p.parseNewExpression()
+	case SwitchKeyword:
+		return p.parseSwitchExpression()
 	case Identifier:
 		return p.parseIdentifier()
 	default:
-		// new / switch-expression / primitive class literal arrive with later
-		// slices; recover as a missing identifier for now.
+		if isPrimitiveTypeKeyword(p.token()) || p.token() == VoidKeyword {
+			// Primitive class literal: int.class, void.class.
+			typ := p.parseType()
+			p.parseExpected(DotToken, nil)
+			p.parseExpected(ClassKeyword, nil)
+			return p.finishNode(p.factory.NewClassLiteralExpression(typ), pos, -1)
+		}
 		return p.createMissingNode(Identifier, false, &Diagnostics.ExpressionExpected)
 	}
 }
 
+func (p *Parser) parseNewExpression() *Node {
+	pos := p.getNodePos()
+	p.parseExpected(NewKeyword, nil)
+	typ := p.parseNonArrayType()
+	if p.token() == OpenBracketToken {
+		return p.parseArrayCreationRest(pos, typ)
+	}
+	args := p.parseArgumentList()
+	var classBody *NodeArray
+	if p.token() == OpenBraceToken {
+		classBody = p.parseClassBody()
+	}
+	return p.finishNode(p.factory.NewObjectCreationExpression(typ, args, classBody, nil), pos, -1)
+}
+
+func (p *Parser) parseArrayCreationRest(pos int, elementType *Node) *Node {
+	var dims []*Node
+	dimsPos := p.getNodePos()
+	additionalRank := 0
+	for p.token() == OpenBracketToken {
+		p.nextToken()
+		if p.token() == CloseBracketToken {
+			additionalRank++
+			p.nextToken()
+		} else {
+			dims = append(dims, p.parseExpression())
+			p.parseExpected(CloseBracketToken, nil)
+		}
+	}
+	var initializer *Node
+	if p.token() == OpenBraceToken {
+		initializer = p.parseArrayInitializer()
+	}
+	return p.finishNode(p.factory.NewArrayCreationExpression(elementType, p.createNodeArray(dims, dimsPos, -1), additionalRank, initializer), pos, -1)
+}
+
+func (p *Parser) parseSwitchExpression() *Node {
+	pos := p.getNodePos()
+	p.parseExpected(SwitchKeyword, nil)
+	p.parseExpected(OpenParenToken, nil)
+	expression := p.parseExpression()
+	p.parseExpected(CloseParenToken, nil)
+	return p.finishNode(p.factory.NewSwitchExpression(expression, p.parseSwitchBlock()), pos, -1)
+}
+
 func (p *Parser) makePropertyAccess(expr, name *Node) *Node {
 	return p.finishNode(p.factory.NewPropertyAccessExpression(expr, name), expr.Pos, -1)
+}
+
+// expressionToEntityName converts a name/property-access chain to an EntityName
+// (for class literals), or nil when the expression is not a plain dotted name.
+func (p *Parser) expressionToEntityName(expr *Node) *Node {
+	switch expr.Kind {
+	case Identifier:
+		return expr
+	case PropertyAccessExpression:
+		access := expr.AsPropertyAccessExpression()
+		if left := p.expressionToEntityName(access.Expression); left != nil {
+			return p.makeQualifiedName(left, access.Name)
+		}
+	}
+	return nil
+}
+
+func (p *Parser) entityNameOrMissing(expr *Node) *Node {
+	if entity := p.expressionToEntityName(expr); entity != nil {
+		return entity
+	}
+	return p.createMissingNode(Identifier, false, nil)
 }
 
 func (p *Parser) parseArgumentList() *NodeArray {
@@ -256,6 +406,33 @@ func (p *Parser) parseExpressionSuffixes(start *Node) *Node {
 		exprPos := expr.Pos
 		if p.token() == DotToken {
 			p.nextToken()
+			if p.token() == ClassKeyword {
+				p.nextToken()
+				typeNode := p.finishNode(p.factory.NewTypeReference(p.entityNameOrMissing(expr), nil), exprPos, -1)
+				expr = p.finishNode(p.factory.NewClassLiteralExpression(typeNode), exprPos, -1)
+				continue
+			}
+			if p.token() == NewKeyword { // qualified creation: outer.new Inner(args)
+				p.nextToken()
+				typ := p.parseNonArrayType()
+				args := p.parseArgumentList()
+				var classBody *NodeArray
+				if p.token() == OpenBraceToken {
+					classBody = p.parseClassBody()
+				}
+				expr = p.finishNode(p.factory.NewObjectCreationExpression(typ, args, classBody, expr), exprPos, -1)
+				continue
+			}
+			if p.token() == ThisKeyword { // Outer.this
+				p.nextToken()
+				expr = p.finishNode(p.factory.NewThisExpression(expr), exprPos, -1)
+				continue
+			}
+			if p.token() == SuperKeyword { // Type.super
+				p.nextToken()
+				expr = p.finishNode(p.factory.NewSuperExpression(expr), exprPos, -1)
+				continue
+			}
 			var typeArguments *NodeArray
 			if p.token() == LessThanToken {
 				typeArguments = p.parseTypeArguments()
@@ -271,6 +448,26 @@ func (p *Parser) parseExpressionSuffixes(start *Node) *Node {
 			continue
 		}
 		if p.token() == OpenBracketToken {
+			// Empty brackets are an array class literal (Foo[].class / Foo[]::new);
+			// non-empty brackets are an element access.
+			if parserLookAhead(p, func() bool { p.nextToken(); return p.token() == CloseBracketToken }) {
+				rank := 0
+				for p.token() == OpenBracketToken && parserLookAhead(p, func() bool { p.nextToken(); return p.token() == CloseBracketToken }) {
+					p.nextToken()
+					p.parseExpected(CloseBracketToken, nil)
+					rank++
+				}
+				if p.token() != ColonColonToken {
+					p.parseExpected(DotToken, nil)
+					p.parseExpected(ClassKeyword, nil)
+				}
+				typeNode := p.finishNode(p.factory.NewTypeReference(p.entityNameOrMissing(expr), nil), exprPos, -1)
+				for i := 0; i < rank; i++ {
+					typeNode = p.finishNode(p.factory.NewArrayType(typeNode), exprPos, -1)
+				}
+				expr = p.finishNode(p.factory.NewClassLiteralExpression(typeNode), exprPos, -1)
+				continue
+			}
 			p.nextToken()
 			argumentExpression := p.parseExpression()
 			p.parseExpected(CloseBracketToken, nil)
@@ -280,6 +477,22 @@ func (p *Parser) parseExpressionSuffixes(start *Node) *Node {
 		if p.token() == OpenParenToken {
 			args := p.parseArgumentList()
 			expr = p.finishNode(p.factory.NewCallExpression(expr, nil, args), exprPos, -1)
+			continue
+		}
+		if p.token() == ColonColonToken { // SE8 method reference
+			p.nextToken()
+			var typeArguments *NodeArray
+			if p.token() == LessThanToken {
+				typeArguments = p.parseTypeArguments()
+			}
+			isConstructorRef := false
+			var name *Node
+			if p.parseOptional(NewKeyword) {
+				isConstructorRef = true
+			} else {
+				name = p.parseIdentifier()
+			}
+			expr = p.finishNode(p.factory.NewMethodReferenceExpression(expr, typeArguments, name, isConstructorRef), exprPos, -1)
 			continue
 		}
 		break

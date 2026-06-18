@@ -233,7 +233,8 @@ func (p *Parser) isListElement(context ParsingContext) bool {
 		return p.isStartOfStatementToken()
 	case ctxSwitchClauses:
 		return p.token() == CaseKeyword || p.token() == DefaultKeyword
-	case ctxArrayInitializerElements:
+	case ctxArrayInitializerElements, ctxAnnotationValues:
+		// element values may be expressions, { ... } arrays or @annotations
 		return p.token() == OpenBraceToken || p.token() == AtToken || p.isStartOfExpression()
 	default:
 		return false

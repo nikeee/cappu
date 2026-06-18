@@ -180,6 +180,10 @@ func (p *Parser) parseClassMember() *Node {
 	}
 
 	typeParameters := p.parseTypeParameters()
+	// Record compact constructor: Name { ... } (no parameter list).
+	if p.token() == Identifier && parserLookAhead(p, func() bool { p.nextToken(); return p.token() == OpenBraceToken }) {
+		return p.parseCompactConstructor(pos, modifiers)
+	}
 	if p.isConstructorDeclaration() {
 		return p.parseConstructorDeclaration(pos, modifiers, typeParameters)
 	}
@@ -189,4 +193,10 @@ func (p *Parser) parseClassMember() *Node {
 		return p.parseMethodDeclaration(pos, modifiers, typeParameters, typ, name)
 	}
 	return p.parseFieldDeclaration(pos, modifiers, typ, name)
+}
+
+func (p *Parser) parseCompactConstructor(pos int, modifiers *NodeArray) *Node {
+	name := p.parseIdentifier()
+	body := p.parseBlock()
+	return p.finishNode(p.factory.NewCompactConstructorDeclaration(modifiers, name, body), pos, -1)
 }

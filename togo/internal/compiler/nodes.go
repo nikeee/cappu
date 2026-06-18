@@ -141,6 +141,25 @@ func (f *NodeFactory) NewAnnotation(typeName *Node, args *NodeArray) *Node {
 
 func (n *Node) AsAnnotation() *AnnotationData { return n.data.(*AnnotationData) }
 
+// AnnotationArgumentData is one `name = value` pair (or a bare value for the
+// single-element form).
+type AnnotationArgumentData struct {
+	Name  *Node // Identifier, optional
+	Value *Node
+}
+
+func (d *AnnotationArgumentData) forEachChild(v Visitor) bool {
+	return visit(v, d.Name) || visit(v, d.Value)
+}
+
+func (f *NodeFactory) NewAnnotationArgument(name, value *Node) *Node {
+	return f.newNode(AnnotationArgument, &AnnotationArgumentData{Name: name, Value: value})
+}
+
+func (n *Node) AsAnnotationArgument() *AnnotationArgumentData {
+	return n.data.(*AnnotationArgumentData)
+}
+
 // --- compilation unit --------------------------------------------------------
 
 // SourceFileData is the root of a parsed file.

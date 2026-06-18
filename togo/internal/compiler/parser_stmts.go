@@ -378,9 +378,50 @@ func (p *Parser) parseTryStatement() *Node {
 
 // --- switch (constant/default labels; patterns arrive with the pattern slice) -
 
+// isPatternStart: after a type, a case label is a pattern (not a constant) when
+// followed by a binding identifier or a '(' record deconstruction.
+func (p *Parser) isPatternStart() bool {
+	return parserLookAhead(p, func() bool {
+		p.parseModifiers() // final / annotations on a type pattern
+		p.parseTypeOrVar()
+		return p.token() == Identifier || p.token() == OpenParenToken
+	})
+}
+
+func (p *Parser) parseComponentPattern() *Node {
+	// Unnamed pattern '_'
+	if p.isContextualKeyword("_") && parserLookAhead(p, func() bool {
+		p.nextToken()
+		return p.token() == CommaToken || p.token() == CloseParenToken
+	}) {
+		pos := p.getNodePos()
+		p.nextToken()
+		return p.finishNode(p.factory.NewMatchAllPattern(), pos, -1)
+	}
+	return p.parsePattern()
+}
+
+func (p *Parser) parsePattern() *Node {
+	pos := p.getNodePos()
+	p.parseModifiers() // optional 'final' / annotations on a type pattern
+	typ := p.parseTypeOrVar()
+	if p.token() == OpenParenToken {
+		p.parseExpected(OpenParenToken, nil)
+		patterns := p.parseDelimitedList(ctxParameters, p.parseComponentPattern)
+		p.parseExpected(CloseParenToken, nil)
+		return p.finishNode(p.factory.NewRecordPattern(typ, patterns), pos, -1)
+	}
+	name := p.parseIdentifier()
+	return p.finishNode(p.factory.NewTypePattern(typ, name), pos, -1)
+}
+
 func (p *Parser) parseCaseLabelElement() *Node {
+	// 'case null, default' allows the default keyword inside the label list.
 	if p.token() == DefaultKeyword {
 		return p.parseTokenNode()
+	}
+	if p.isPatternStart() {
+		return p.parsePattern()
 	}
 	return p.parseConditionalExpression()
 }
