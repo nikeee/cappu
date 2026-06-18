@@ -306,3 +306,5 @@ no timestamps were captured.
 - 2026-06-18 09:51 — before continuing with the next milestone (but after this one): Is there a cool library for cli argument parsing? that handwritten loop looks weird. Since we now have codegen, can we use a library that builds on top of that? Maybe we also dont have to write the entire help page manually
 - 2026-06-18 09:57 — continue (milestone 5: audit)
 - 2026-06-18 10:07 — continue (milestone 6: publish)
+- 2026-06-18 14:26 — build the lsp first. start with the scanner, then parser, binder, checker and then the rest. do the language service features last. also port each individual test on each step
+- 2026-06-18 14:26 — dont forget to follow the same pattern for porting the code as TypeSript-Go did

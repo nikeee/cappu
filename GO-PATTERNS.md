@@ -194,12 +194,32 @@ minimal manifest - the Node build's non-experimental compile path. It lives in
 extends it rather than duplicating it. Requires javac on PATH; the experimental
 in-house compiler is a separate, later effort.
 
-## Patterns to fill in later (compiler / LSP milestones)
+## Compiler front end (internal/compiler)
+
+The Java front end (scanner → parser → binder → checker → services) is ported
+step by step, each step with its tests. Patterns in use:
+
+- **SyntaxKind**: `type SyntaxKind int` + `iota` in the exact order of
+  `src/compiler/types.ts`, so numeric values (and baselines) match the Node
+  build. stringer can't be used because the `First*/Last*` range markers alias
+  real kinds (duplicate values), so `String()` reads a hand-written name table
+  (`syntaxKindNames`, markers excluded); a test asserts `len == kindCount`.
+- **Scanner** (tsgo structure): a `Scanner` struct with methods (the TS original
+  is a closure), reporting via an `ErrorCallback` rather than panicking.
+  `LookAhead`/`TryScan` are generic free functions (`func[T any](*Scanner, func() T) T`)
+  since Go methods can't be generic; `TryScan` restores on a falsy (zero) result.
+- **Positions are byte offsets** (tsgo's model), not the TS scanner's UTF-16
+  `charCodeAt` units. All fixtures are ASCII, so they match the Node build's
+  offsets; `charCodeAt(i)` returns -1 past end (mirroring JS NaN comparisons).
+  Non-ASCII identifier bytes (>0x7f) all pass `isIdentifierStart`, so UTF-8
+  identifiers scan correctly; the UTF-16 boundary (if ever needed) is an LSP
+  concern, as in tsgo.
+
+## Patterns to fill in later (parser / checker)
 
 Seeded from tsgo; not yet exercised here.
 
-- **Enums / SyntaxKind**: `type Kind int16` + `iota`, `//go:generate stringer`
-  for `String()`. tsgo: `internal/ast/kind_generated.go`.
+- **Enums / SyntaxKind**: see above (done for the front end).
 - **Tagged unions**: one `Node` struct with a `Kind` discriminator + an
   interface `data` field + generated `As*()` casts; union "types" as aliases to
   the base struct. tsgo: `internal/ast/ast.go`, `ast_generated.go`.
