@@ -28,6 +28,16 @@ func isAssignmentOperator(kind SyntaxKind) bool {
 	}
 }
 
+// entityNameToString renders an EntityName (Identifier or QualifiedName) as a
+// dotted string. Port of src/compiler/utilities.ts.
+func entityNameToString(name *Node) string {
+	if name.Kind == Identifier {
+		return name.AsIdentifier().Text
+	}
+	q := name.AsQualifiedName()
+	return entityNameToString(q.Left) + "." + q.Right.AsIdentifier().Text
+}
+
 // isPrimitiveTypeKeyword reports whether kind is a primitive type keyword.
 func isPrimitiveTypeKeyword(kind SyntaxKind) bool {
 	switch kind {
