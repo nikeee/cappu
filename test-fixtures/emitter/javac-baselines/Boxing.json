@@ -1,0 +1,107 @@
+{
+  "Boxing": {
+    "members": [
+      "Boxing();",
+      "boolean uz(java.lang.Boolean);",
+      "double ud(java.lang.Double);",
+      "int ui(java.lang.Integer);",
+      "java.lang.Boolean bz(boolean);",
+      "java.lang.Character bc(char);",
+      "java.lang.Double bd(double);",
+      "java.lang.Float bf(float);",
+      "java.lang.Integer bi(int);",
+      "java.lang.Long bl(long);",
+      "long ul(java.lang.Long);"
+    ],
+    "code": [
+      [
+        "Boxing();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "java.lang.Integer bi(int);",
+        [
+          "iload_1",
+          "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.Long bl(long);",
+        [
+          "lload_1",
+          "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.Double bd(double);",
+        [
+          "dload_1",
+          "invokestatic # // Method java/lang/Double.valueOf:(D)Ljava/lang/Double;",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.Float bf(float);",
+        [
+          "fload_1",
+          "invokestatic # // Method java/lang/Float.valueOf:(F)Ljava/lang/Float;",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.Boolean bz(boolean);",
+        [
+          "iload_1",
+          "invokestatic # // Method java/lang/Boolean.valueOf:(Z)Ljava/lang/Boolean;",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.Character bc(char);",
+        [
+          "iload_1",
+          "invokestatic # // Method java/lang/Character.valueOf:(C)Ljava/lang/Character;",
+          "areturn"
+        ]
+      ],
+      [
+        "int ui(java.lang.Integer);",
+        [
+          "aload_1",
+          "invokevirtual # // Method java/lang/Integer.intValue:()I",
+          "ireturn"
+        ]
+      ],
+      [
+        "long ul(java.lang.Long);",
+        [
+          "aload_1",
+          "invokevirtual # // Method java/lang/Long.longValue:()J",
+          "lreturn"
+        ]
+      ],
+      [
+        "double ud(java.lang.Double);",
+        [
+          "aload_1",
+          "invokevirtual # // Method java/lang/Double.doubleValue:()D",
+          "dreturn"
+        ]
+      ],
+      [
+        "boolean uz(java.lang.Boolean);",
+        [
+          "aload_1",
+          "invokevirtual # // Method java/lang/Boolean.booleanValue:()Z",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}

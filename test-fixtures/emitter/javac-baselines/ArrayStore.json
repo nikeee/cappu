@@ -1,0 +1,105 @@
+{
+  "ArrayStore": {
+    "members": [
+      "ArrayStore();",
+      "void b(byte[], int, byte);",
+      "void c(char[], int, char);",
+      "void d(double[], int, double);",
+      "void f(float[], int, float);",
+      "void i(int[], int, int);",
+      "void l(long[], int, long);",
+      "void o(java.lang.Object[], int, java.lang.Object);",
+      "void s(short[], int, short);"
+    ],
+    "code": [
+      [
+        "ArrayStore();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "void i(int[], int, int);",
+        [
+          "aload_1",
+          "iload_2",
+          "iload_3",
+          "iastore",
+          "return"
+        ]
+      ],
+      [
+        "void l(long[], int, long);",
+        [
+          "aload_1",
+          "iload_2",
+          "lload_3",
+          "lastore",
+          "return"
+        ]
+      ],
+      [
+        "void f(float[], int, float);",
+        [
+          "aload_1",
+          "iload_2",
+          "fload_3",
+          "fastore",
+          "return"
+        ]
+      ],
+      [
+        "void d(double[], int, double);",
+        [
+          "aload_1",
+          "iload_2",
+          "dload_3",
+          "dastore",
+          "return"
+        ]
+      ],
+      [
+        "void b(byte[], int, byte);",
+        [
+          "aload_1",
+          "iload_2",
+          "iload_3",
+          "bastore",
+          "return"
+        ]
+      ],
+      [
+        "void c(char[], int, char);",
+        [
+          "aload_1",
+          "iload_2",
+          "iload_3",
+          "castore",
+          "return"
+        ]
+      ],
+      [
+        "void s(short[], int, short);",
+        [
+          "aload_1",
+          "iload_2",
+          "iload_3",
+          "sastore",
+          "return"
+        ]
+      ],
+      [
+        "void o(java.lang.Object[], int, java.lang.Object);",
+        [
+          "aload_1",
+          "iload_2",
+          "aload_3",
+          "aastore",
+          "return"
+        ]
+      ]
+    ]
+  }
+}

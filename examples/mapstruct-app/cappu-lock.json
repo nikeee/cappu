@@ -1,0 +1,34 @@
+{
+  "version": 2,
+  "roots": {
+    "api": {},
+    "implementation": {
+      "org.mapstruct:mapstruct": "1.6.3"
+    },
+    "annotationProcessor": {
+      "org.mapstruct:mapstruct-processor": "1.6.3"
+    }
+  },
+  "packages": [
+    {
+      "coordinates": {
+        "groupId": "org.mapstruct",
+        "artifactId": "mapstruct",
+        "version": "1.6.3"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "00b52467f31d482f8673b0b74306f4be0a305cdce31e587bc1b3d7bf779f1dbf"
+    }
+  ],
+  "processorPackages": [
+    {
+      "coordinates": {
+        "groupId": "org.mapstruct",
+        "artifactId": "mapstruct-processor",
+        "version": "1.6.3"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "0305b6e2eee678974cde0c4e87e09d66926290b640173ec3ca5a81dedbc56bff"
+    }
+  ]
+}

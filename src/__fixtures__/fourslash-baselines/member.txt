@@ -1,4 +1,0 @@
-=== member ===
-  field age
-  field name
-  method greet

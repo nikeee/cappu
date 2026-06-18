@@ -1,0 +1,15 @@
+{
+  "groupId": "com.example",
+  "artifactId": "spring-boot-app",
+  "version": "1.0.0",
+  "compilerOptions": {
+    "mainClass": "com.example.App",
+    "release": 17,
+    "quiet": true
+  },
+  "dependencies": {
+    "implementation": {
+      "org.springframework.boot:spring-boot-starter": "4.1.0"
+    }
+  }
+}

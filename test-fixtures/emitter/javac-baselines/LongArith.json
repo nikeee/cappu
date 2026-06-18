@@ -1,0 +1,146 @@
+{
+  "LongArith": {
+    "members": [
+      "LongArith();",
+      "long add(long, long);",
+      "long and(long, long);",
+      "long div(long, long);",
+      "long mul(long, long);",
+      "long neg(long);",
+      "long not(long);",
+      "long or(long, long);",
+      "long rem(long, long);",
+      "long shl(long, int);",
+      "long shr(long, int);",
+      "long sub(long, long);",
+      "long ushr(long, int);",
+      "long xor(long, long);"
+    ],
+    "code": [
+      [
+        "LongArith();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "long add(long, long);",
+        [
+          "lload_1",
+          "lload_3",
+          "ladd",
+          "lreturn"
+        ]
+      ],
+      [
+        "long sub(long, long);",
+        [
+          "lload_1",
+          "lload_3",
+          "lsub",
+          "lreturn"
+        ]
+      ],
+      [
+        "long mul(long, long);",
+        [
+          "lload_1",
+          "lload_3",
+          "lmul",
+          "lreturn"
+        ]
+      ],
+      [
+        "long div(long, long);",
+        [
+          "lload_1",
+          "lload_3",
+          "ldiv",
+          "lreturn"
+        ]
+      ],
+      [
+        "long rem(long, long);",
+        [
+          "lload_1",
+          "lload_3",
+          "lrem",
+          "lreturn"
+        ]
+      ],
+      [
+        "long neg(long);",
+        [
+          "lload_1",
+          "lneg",
+          "lreturn"
+        ]
+      ],
+      [
+        "long and(long, long);",
+        [
+          "lload_1",
+          "lload_3",
+          "land",
+          "lreturn"
+        ]
+      ],
+      [
+        "long or(long, long);",
+        [
+          "lload_1",
+          "lload_3",
+          "lor",
+          "lreturn"
+        ]
+      ],
+      [
+        "long xor(long, long);",
+        [
+          "lload_1",
+          "lload_3",
+          "lxor",
+          "lreturn"
+        ]
+      ],
+      [
+        "long shl(long, int);",
+        [
+          "lload_1",
+          "iload_3",
+          "lshl",
+          "lreturn"
+        ]
+      ],
+      [
+        "long shr(long, int);",
+        [
+          "lload_1",
+          "iload_3",
+          "lshr",
+          "lreturn"
+        ]
+      ],
+      [
+        "long ushr(long, int);",
+        [
+          "lload_1",
+          "iload_3",
+          "lushr",
+          "lreturn"
+        ]
+      ],
+      [
+        "long not(long);",
+        [
+          "lload_1",
+          "ldc2_w # // long -1l",
+          "lxor",
+          "lreturn"
+        ]
+      ]
+    ]
+  }
+}

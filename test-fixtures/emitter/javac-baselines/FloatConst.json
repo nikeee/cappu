@@ -1,0 +1,97 @@
+{
+  "FloatConst": {
+    "members": [
+      "FloatConst();",
+      "double e();",
+      "double pi();",
+      "float a();",
+      "float b();",
+      "float big();",
+      "float c();",
+      "float d();",
+      "float fo();",
+      "float ft();",
+      "float fz();"
+    ],
+    "code": [
+      [
+        "FloatConst();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "float a();",
+        [
+          "ldc # // float 0.1f",
+          "freturn"
+        ]
+      ],
+      [
+        "float b();",
+        [
+          "ldc # // float 3.14159f",
+          "freturn"
+        ]
+      ],
+      [
+        "float c();",
+        [
+          "ldc # // float 1.0E10f",
+          "freturn"
+        ]
+      ],
+      [
+        "float d();",
+        [
+          "ldc # // float 0.3f",
+          "freturn"
+        ]
+      ],
+      [
+        "float big();",
+        [
+          "ldc # // float 1.6777216E7f",
+          "freturn"
+        ]
+      ],
+      [
+        "double e();",
+        [
+          "ldc2_w # // double 0.1d",
+          "dreturn"
+        ]
+      ],
+      [
+        "double pi();",
+        [
+          "ldc2_w # // double 3.141592653589793d",
+          "dreturn"
+        ]
+      ],
+      [
+        "float fz();",
+        [
+          "fconst_0",
+          "freturn"
+        ]
+      ],
+      [
+        "float fo();",
+        [
+          "fconst_1",
+          "freturn"
+        ]
+      ],
+      [
+        "float ft();",
+        [
+          "fconst_2",
+          "freturn"
+        ]
+      ]
+    ]
+  }
+}

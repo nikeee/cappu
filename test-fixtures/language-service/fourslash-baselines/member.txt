@@ -1,0 +1,9 @@
+=== member ===
+  field age
+  field name
+  method clone
+  method equals
+  method getClass
+  method greet
+  method hashCode
+  method toString

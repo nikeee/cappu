@@ -1,0 +1,72 @@
+{
+  "ReturnLiterals": {
+    "members": [
+      "ReturnLiterals();",
+      "boolean b();",
+      "int big();",
+      "int echo(int);",
+      "int i();",
+      "java.lang.String s();",
+      "long l();",
+      "void v();"
+    ],
+    "code": [
+      [
+        "ReturnLiterals();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "int i();",
+        [
+          "bipush 42",
+          "ireturn"
+        ]
+      ],
+      [
+        "long l();",
+        [
+          "ldc2_w # // long 7l",
+          "lreturn"
+        ]
+      ],
+      [
+        "boolean b();",
+        [
+          "iconst_1",
+          "ireturn"
+        ]
+      ],
+      [
+        "java.lang.String s();",
+        [
+          "ldc # // String hi",
+          "areturn"
+        ]
+      ],
+      [
+        "int big();",
+        [
+          "ldc # // int 1000000",
+          "ireturn"
+        ]
+      ],
+      [
+        "int echo(int);",
+        [
+          "iload_1",
+          "ireturn"
+        ]
+      ],
+      [
+        "void v();",
+        [
+          "return"
+        ]
+      ]
+    ]
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "Returns": {
+    "members": [
+      "Returns();",
+      "boolean b();",
+      "byte by();",
+      "char c();",
+      "double d();",
+      "float f();",
+      "int i();",
+      "java.lang.Object o();",
+      "java.lang.String s();",
+      "long l();",
+      "short sh();",
+      "void v();"
+    ],
+    "code": [
+      [
+        "Returns();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "int i();",
+        [
+          "bipush 7",
+          "ireturn"
+        ]
+      ],
+      [
+        "long l();",
+        [
+          "ldc2_w # // long 7l",
+          "lreturn"
+        ]
+      ],
+      [
+        "float f();",
+        [
+          "ldc # // float 1.5f",
+          "freturn"
+        ]
+      ],
+      [
+        "double d();",
+        [
+          "ldc2_w # // double 2.5d",
+          "dreturn"
+        ]
+      ],
+      [
+        "boolean b();",
+        [
+          "iconst_1",
+          "ireturn"
+        ]
+      ],
+      [
+        "char c();",
+        [
+          "bipush 90",
+          "ireturn"
+        ]
+      ],
+      [
+        "byte by();",
+        [
+          "iconst_3",
+          "ireturn"
+        ]
+      ],
+      [
+        "short sh();",
+        [
+          "sipush 300",
+          "ireturn"
+        ]
+      ],
+      [
+        "java.lang.String s();",
+        [
+          "ldc # // String hi",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.Object o();",
+        [
+          "aconst_null",
+          "areturn"
+        ]
+      ],
+      [
+        "void v();",
+        [
+          "return"
+        ]
+      ]
+    ]
+  }
+}

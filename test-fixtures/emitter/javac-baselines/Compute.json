@@ -1,0 +1,41 @@
+{
+  "Compute": {
+    "members": [
+      "public Compute();",
+      "public static void main(java.lang.String[]);",
+      "static int v();"
+    ],
+    "code": [
+      [
+        "public Compute();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "static int v();",
+        [
+          "bipush 42",
+          "ireturn"
+        ]
+      ],
+      [
+        "public static void main(java.lang.String[]);",
+        [
+          "invokestatic # // Method v:()I",
+          "istore_1",
+          "iload_1",
+          "iconst_2",
+          "isub",
+          "istore_2",
+          "getstatic # // Field java/lang/System.out:Ljava/io/PrintStream;",
+          "iload_2",
+          "invokevirtual # // Method java/io/PrintStream.println:(I)V",
+          "return"
+        ]
+      ]
+    ]
+  }
+}

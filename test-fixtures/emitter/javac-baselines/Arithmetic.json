@@ -1,0 +1,114 @@
+{
+  "Arithmetic": {
+    "members": [
+      "Arithmetic();",
+      "double dm(double, int);",
+      "int add(int, int);",
+      "int bits(int, int);",
+      "int neg(int);",
+      "int not(int);",
+      "int poly(int, int, int);",
+      "int rem(int, int);",
+      "int shift(int, int);",
+      "long mix(int, long);"
+    ],
+    "code": [
+      [
+        "Arithmetic();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "int add(int, int);",
+        [
+          "iload_1",
+          "iload_2",
+          "iadd",
+          "ireturn"
+        ]
+      ],
+      [
+        "int poly(int, int, int);",
+        [
+          "iload_1",
+          "iload_2",
+          "imul",
+          "iload_3",
+          "iadd",
+          "ireturn"
+        ]
+      ],
+      [
+        "long mix(int, long);",
+        [
+          "iload_1",
+          "i2l",
+          "lload_2",
+          "ladd",
+          "lreturn"
+        ]
+      ],
+      [
+        "double dm(double, int);",
+        [
+          "dload_1",
+          "iload_3",
+          "i2d",
+          "dmul",
+          "dreturn"
+        ]
+      ],
+      [
+        "int shift(int, int);",
+        [
+          "iload_1",
+          "iload_2",
+          "ishl",
+          "ireturn"
+        ]
+      ],
+      [
+        "int bits(int, int);",
+        [
+          "iload_1",
+          "iload_2",
+          "iand",
+          "iload_1",
+          "iload_2",
+          "ixor",
+          "ior",
+          "ireturn"
+        ]
+      ],
+      [
+        "int neg(int);",
+        [
+          "iload_1",
+          "ineg",
+          "ireturn"
+        ]
+      ],
+      [
+        "int not(int);",
+        [
+          "iload_1",
+          "iconst_m1",
+          "ixor",
+          "ireturn"
+        ]
+      ],
+      [
+        "int rem(int, int);",
+        [
+          "iload_1",
+          "iload_2",
+          "irem",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}

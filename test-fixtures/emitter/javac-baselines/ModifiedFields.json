@@ -1,0 +1,20 @@
+{
+  "ModifiedFields": {
+    "members": [
+      "private static final long y;",
+      "protected java.lang.String z;",
+      "public ModifiedFields();",
+      "public int x;"
+    ],
+    "code": [
+      [
+        "public ModifiedFields();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ]
+    ]
+  }
+}

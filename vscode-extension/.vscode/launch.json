@@ -7,7 +7,7 @@
       "request": "launch",
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}",
-        "${workspaceFolder}/../src/__fixtures__/cases"
+        "${workspaceFolder}/../test-fixtures"
       ]
     }
   ]

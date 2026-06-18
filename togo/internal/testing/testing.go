@@ -1,0 +1,132 @@
+// Package testing implements `cappu test` (nikeee/cappu#16): compile
+// src/test/java against the main classes plus the lib/test-classes, then run the
+// JUnit Console Launcher over the result. Print-free; the CLI streams the JUnit
+// run. Port of src/testing/.
+package testing
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+
+	"github.com/nikeee/cappu/internal/build"
+	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/install"
+	"github.com/nikeee/cappu/internal/jdks"
+	"github.com/nikeee/cappu/internal/packages"
+	"github.com/nikeee/cappu/internal/sources"
+)
+
+// testBuildRoot is derived build state under .cappu (gitignored via /.cappu/).
+const testBuildRoot = ".cappu/test-build"
+
+// MainClassesDir is where the project's main classes compile to for a test run.
+func MainClassesDir(cfg *config.Config) string {
+	return cfg.ResolvePath(filepath.Join(testBuildRoot, "classes"))
+}
+
+// TestClassesDir is where the compiled test classes go.
+func TestClassesDir(cfg *config.Config) string {
+	return cfg.ResolvePath(filepath.Join(testBuildRoot, "test-classes"))
+}
+
+// FindTestSources lists all .java files under src/test/java.
+func FindTestSources(cfg *config.Config) []string {
+	return build.JavaFilesIn(cfg.ResolvePath(config.DefaultTestSourcePath))
+}
+
+// dependencyClassPath is what test sources compile against: the main classes,
+// the compile deps and the test deps (jar-expanded).
+func dependencyClassPath(cfg *config.Config) []string {
+	cp := []string{MainClassesDir(cfg)}
+	cp = append(cp, build.ClassPath(cfg)...)
+	cp = append(cp, build.ExpandJarDirs([]string{cfg.ResolvePath(config.DefaultTestClassPath)})...)
+	return cp
+}
+
+// TestRuntimeClassPath is the classpath the JUnit launcher runs with.
+func TestRuntimeClassPath(cfg *config.Config) []string {
+	cp := []string{TestClassesDir(cfg)}
+	cp = append(cp, dependencyClassPath(cfg)...)
+	testResources := cfg.ResolvePath(config.DefaultTestResourcePath)
+	if _, err := os.Stat(testResources); err == nil {
+		cp = append(cp, testResources)
+	}
+	return cp
+}
+
+// CompileTests compiles src/test/java; a non-nil error reports failure. The
+// test-classes dir is wiped first so a since-deleted test cannot still be
+// discovered by --scan-class-path.
+func CompileTests(cfg *config.Config, testSources []string) error {
+	dir := TestClassesDir(cfg)
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	return build.Compile(cfg, testSources, dir, dependencyClassPath(cfg))
+}
+
+// consoleLauncher is the pinned JUnit Platform Console Launcher: a TOOL, never a
+// project dependency, so it never appears in cappu.json or the lockfile.
+var consoleLauncher = packages.NewCoordinates("org.junit.platform", "junit-platform-console-standalone", "1.12.2")
+
+// ConsoleLauncherJar returns the launcher jar's path in the global store,
+// downloading it there on first use.
+func ConsoleLauncherJar(cfg *config.Config) (string, error) {
+	path, ok := install.StorePathFor(consoleLauncher)
+	if !ok {
+		return "", fmt.Errorf("unreachable: launcher coordinates are store-safe")
+	}
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	}
+	for _, source := range sources.Configured(cfg) {
+		bytes, err := source.GetArtifact(consoleLauncher)
+		if err != nil {
+			return "", err
+		}
+		if bytes == nil {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(path, bytes, 0o644); err != nil {
+			return "", err
+		}
+		return path, nil
+	}
+	return "", fmt.Errorf("could not download %s from any package source", consoleLauncher.String())
+}
+
+// TestRunArgs are the java arguments running the launcher over the tests.
+func TestRunArgs(cfg *config.Config, launcherJar string) []string {
+	return []string{
+		"-jar", launcherJar, "execute",
+		"--class-path", strings.Join(TestRuntimeClassPath(cfg), string(os.PathListSeparator)),
+		"--scan-class-path",
+	}
+}
+
+// ResolveJava is the java launcher tests run under: the provisioned JDK's, else
+// the sibling of the resolved javac (so a PATH skew cannot cause
+// UnsupportedClassVersionError), else plain "java".
+func ResolveJava(cfg *config.Config) string {
+	if java := jdks.ProvisionedJava(cfg); java != "" {
+		return java
+	}
+	javac := build.Javac(cfg)
+	if strings.ContainsAny(javac, `/\`) {
+		name := "java"
+		if runtime.GOOS == "windows" {
+			name = "java.exe"
+		}
+		sibling := filepath.Join(filepath.Dir(javac), name)
+		if _, err := os.Stat(sibling); err == nil {
+			return sibling
+		}
+	}
+	return "java"
+}

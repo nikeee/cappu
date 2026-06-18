@@ -1,0 +1,87 @@
+{
+  "Concat": {
+    "members": [
+      "Concat();",
+      "java.lang.String is(int, java.lang.String);",
+      "java.lang.String sb(java.lang.String, boolean);",
+      "java.lang.String sc(java.lang.String, char);",
+      "java.lang.String sd(java.lang.String, double);",
+      "java.lang.String si(java.lang.String, int);",
+      "java.lang.String sl(java.lang.String, long);",
+      "java.lang.String ss(java.lang.String, java.lang.String);"
+    ],
+    "code": [
+      [
+        "Concat();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "java.lang.String si(java.lang.String, int);",
+        [
+          "aload_1",
+          "iload_2",
+          "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(Ljava/lang/String;I)Ljava/lang/String;",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.String is(int, java.lang.String);",
+        [
+          "iload_1",
+          "aload_2",
+          "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(ILjava/lang/String;)Ljava/lang/String;",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.String ss(java.lang.String, java.lang.String);",
+        [
+          "aload_1",
+          "aload_2",
+          "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.String sl(java.lang.String, long);",
+        [
+          "aload_1",
+          "lload_2",
+          "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(Ljava/lang/String;J)Ljava/lang/String;",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.String sd(java.lang.String, double);",
+        [
+          "aload_1",
+          "dload_2",
+          "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(Ljava/lang/String;D)Ljava/lang/String;",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.String sb(java.lang.String, boolean);",
+        [
+          "aload_1",
+          "iload_2",
+          "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(Ljava/lang/String;Z)Ljava/lang/String;",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.String sc(java.lang.String, char);",
+        [
+          "aload_1",
+          "iload_2",
+          "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(Ljava/lang/String;C)Ljava/lang/String;",
+          "areturn"
+        ]
+      ]
+    ]
+  }
+}

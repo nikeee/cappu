@@ -1,0 +1,25 @@
+{
+  "LvtScopes": {
+    "LvtScopes": [
+      "0 5 0 this LLvtScopes;",
+      "9 3 4 y I",
+      "25 5 5 z I",
+      "15 21 4 i I",
+      "0 38 0 a I",
+      "0 38 1 b J",
+      "4 34 3 x I"
+    ]
+  },
+  "LvtParams": {
+    "LvtParams": [
+      "0 5 0 this LLvtParams;",
+      "0 6 0 this LLvtParams;",
+      "0 6 1 a I",
+      "0 6 2 b I",
+      "4 2 3 s I",
+      "0 6 0 p J",
+      "0 6 2 q J",
+      "3 3 4 r J"
+    ]
+  }
+}

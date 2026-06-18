@@ -1,0 +1,2204 @@
+// Type checker. Resolves AST type nodes to the Type model, computes the type of
+// expressions, and resolves member access (a.b). This milestone (P5) covers
+// declared types, the common expression forms and member typing - enough for
+// hover and as the base for assignability/overloads/inference (P6-P8).
+// Everything unknown degrades to errorType.
+import { type Brand } from "../brand.ts";
+import { foldConstant } from "./constfold.ts";
+
+import {
+  type ArrayType,
+  arrayType,
+  type ClassType,
+  classType,
+  errorType,
+  isError,
+  nullType,
+  primitiveType,
+  type Type,
+  TypeKind,
+  typeToString,
+  typeVariable,
+  type WildcardType,
+} from "./checkerTypes.ts";
+import { createDiagnostic, Diagnostics } from "./diagnostics.ts";
+import { forEachChild } from "./parser.ts";
+import type { Fqn, PackageName, Program } from "./program.ts";
+import {
+  getDirectSuperTypeSymbols,
+  getSourceFileOfNode,
+  lookupMember,
+  Meaning,
+  resolveIdentifier,
+  resolveTypeEntityName,
+} from "./resolver.ts";
+import {
+  type Annotation,
+  type ArrayCreationExpression,
+  type ArrayType as AstArrayType,
+  type AssignmentExpression,
+  type BinaryExpression,
+  type CallExpression,
+  type CastExpression,
+  type ConditionalExpression,
+  type Diagnostic,
+  type ElementAccessExpression,
+  type EnumDeclaration,
+  type Identifier,
+  type ImportDeclaration,
+  type LambdaExpression,
+  type LiteralExpression,
+  type MethodDeclaration,
+  type MethodReferenceExpression,
+  type Node,
+  type ObjectCreationExpression,
+  type ParenthesizedExpression,
+  type PrefixUnaryExpression,
+  type PropertyAccessExpression,
+  type QualifiedName,
+  type ReturnStatement,
+  type SourceFile,
+  type SwitchExpression,
+  type Parameter,
+  type Symbol,
+  SymbolFlags,
+  SyntaxKind,
+  type TypeNode,
+  type TypeParameter,
+  type TypeReference,
+  type VariableDeclarator,
+  type WildcardType as AstWildcardType,
+  type ClassDeclaration,
+  type ConstructorDeclaration,
+  type RecordDeclaration,
+} from "./types.ts";
+import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
+
+/** A single abstract method's name (the invokedynamic call name for a lambda). */
+export type SamName = Brand<string, "SamName">;
+
+/** What the emitter needs to lower a lambda expression (see getLambdaInfo). */
+export interface LambdaInfo {
+  /** The target functional interface (a Class type). */
+  readonly interfaceType: Type;
+  /** The single abstract method's name (the invokedynamic call name). */
+  readonly samName: SamName;
+  /** SAM parameter/return types unsubstituted (type variables erase to Object). */
+  readonly erasedParams: readonly Type[];
+  readonly erasedReturn: Type;
+  /** SAM parameter/return types with the target's type arguments substituted. */
+  readonly instParams: readonly Type[];
+  readonly instReturn: Type;
+}
+
+/** Method-reference lowering info: the SAM info plus the referenced method. */
+export interface MethodRefInfo extends LambdaInfo {
+  readonly kind: "static" | "bound" | "unbound" | "constructor" | "arrayConstructor";
+  /** The type declaring the referenced method (or the constructed type). Absent
+   * for an array constructor reference `T[]::new`, which has no class. */
+  readonly ownerSymbol?: Symbol;
+  /** The referenced method declaration (undefined for a constructor reference). */
+  readonly target?: MethodDeclaration;
+}
+
+export interface Checker {
+  resolveType(typeNode: TypeNode, fromNode: Node): Type;
+  /** Lambda lowering info (target interface, SAM, erased + instantiated types). */
+  getLambdaInfo(lambda: Node): LambdaInfo | undefined;
+  /** Method-reference lowering info (kind, target method), or undefined. */
+  getMethodRefInfo(node: Node): MethodRefInfo | undefined;
+  getTypeOfSymbol(symbol: Symbol): Type;
+  getTypeOfExpression(node: Node): Type;
+  /** Resolve a name use OR a member access (a.b) to its symbol. */
+  resolveName(identifier: Identifier): Symbol | undefined;
+  /** JLS assignment conversion: can a value of `source` be assigned to `target`? */
+  isAssignableTo(source: Type, target: Type): boolean;
+  /** The chosen overload for a call (JLS 15.12.2), or undefined if unresolved. */
+  resolveCall(call: CallExpression): MethodDeclaration | undefined;
+  /**
+   * Display string for a symbol's type (for hover). Falls back to the written
+   * type syntax when the type cannot be resolved (e.g. a JDK type outside the
+   * stub) instead of rendering the unhelpful "<error>".
+   */
+  typeStringOfSymbol(symbol: Symbol): string;
+  /** Full signature of a method/constructor symbol (for hover), or undefined. */
+  signatureOfSymbol(symbol: Symbol): string | undefined;
+  /** Signature of a specific method/constructor declaration (e.g. a chosen overload). */
+  signatureOfDeclaration(declaration: Node): string | undefined;
+  /** Every overload declaration a call could bind to (for signature help). */
+  resolveCallCandidates(call: CallExpression): MethodDeclaration[];
+  /**
+   * The resolved overload's signature with the receiver's type arguments (and
+   * inferred method type arguments) substituted in - `String get(int index)` for
+   * a call on a List<String> - or undefined when nothing instantiates.
+   */
+  instantiatedSignatureOfCall(call: CallExpression): string | undefined;
+  /** The source text of each parameter of a method/constructor declaration. */
+  parameterLabelsOf(declaration: Node): string[];
+  /**
+   * The Javadoc comment attached to a symbol's declaration, cleaned to plain
+   * text, or undefined. Parsed lazily from the source on demand (not retained on
+   * nodes), so it costs nothing until a hover asks for it.
+   */
+  getDocumentation(symbol: Symbol): string | undefined;
+  /** The Javadoc comment attached to a specific declaration node. */
+  getDocumentationOfNode(node: Node): string | undefined;
+  /** High-precision semantic diagnostics (type mismatches between known types). */
+  getSemanticDiagnostics(sourceFile: SourceFile): Diagnostic[];
+}
+
+// Primitive widening (JLS 5.1.2) and boxing (JLS 5.1.7).
+const WIDENING = {
+  byte: ["short", "int", "long", "float", "double"],
+  short: ["int", "long", "float", "double"],
+  char: ["int", "long", "float", "double"],
+  int: ["long", "float", "double"],
+  long: ["float", "double"],
+  float: ["double"],
+} as const satisfies Record<string, readonly string[]>;
+const BOX = {
+  boolean: "java.lang.Boolean",
+  byte: "java.lang.Byte",
+  short: "java.lang.Short",
+  char: "java.lang.Character",
+  int: "java.lang.Integer",
+  long: "java.lang.Long",
+  float: "java.lang.Float",
+  double: "java.lang.Double",
+} as const satisfies Record<string, string>;
+const UNBOX: Record<string, string> = Object.fromEntries(
+  Object.entries(BOX).map(([prim, fqn]) => [fqn, prim]),
+);
+
+function primitiveWidens(from: string, to: string): boolean {
+  const wider: readonly string[] | undefined = WIDENING[from as keyof typeof WIDENING];
+  return from === to || (wider?.includes(to) ?? false);
+}
+
+const COMPARISON_OPERATORS = new Set<SyntaxKind>([
+  SyntaxKind.LessThanToken,
+  SyntaxKind.GreaterThanToken,
+  SyntaxKind.LessThanEqualsToken,
+  SyntaxKind.GreaterThanEqualsToken,
+  SyntaxKind.EqualsEqualsToken,
+  SyntaxKind.ExclamationEqualsToken,
+  SyntaxKind.AmpersandAmpersandToken,
+  SyntaxKind.BarBarToken,
+]);
+
+function isTypeDeclarationKind(kind: SyntaxKind): boolean {
+  return (
+    kind === SyntaxKind.ClassDeclaration ||
+    kind === SyntaxKind.InterfaceDeclaration ||
+    kind === SyntaxKind.EnumDeclaration ||
+    kind === SyntaxKind.AnnotationTypeDeclaration ||
+    kind === SyntaxKind.RecordDeclaration
+  );
+}
+
+function enclosingTypeSymbol(node: Node): Symbol | undefined {
+  let current: Node | undefined = node;
+  while (current) {
+    if (isTypeDeclarationKind(current.kind) && current.symbol) return current.symbol;
+    current = current.parent;
+  }
+  return undefined;
+}
+
+/**
+ * Single-type imports (non-static, non-on-demand) whose simple name never
+ * appears in the file body. Conservative: ANY identifier occurrence counts as
+ * a use, so a used import is never flagged (the same rule "Organize imports"
+ * applies when dropping imports).
+ */
+export function findUnusedImports(sourceFile: SourceFile): ImportDeclaration[] {
+  if (sourceFile.imports.length === 0) return [];
+  const used = new Set<string>();
+  const collect = (node: Node): void => {
+    if (node.kind === SyntaxKind.Identifier) used.add((node as Identifier).text);
+    forEachChild(node, child => {
+      collect(child);
+      return undefined;
+    });
+  };
+  for (const statement of sourceFile.statements) collect(statement);
+
+  const unused: ImportDeclaration[] = [];
+  const seen = new Set<string>();
+  for (const imp of sourceFile.imports) {
+    const fqn = entityNameToString(imp.name);
+    // An exact repeat of an earlier import is redundant whatever the usage.
+    const key = `${imp.isStatic ? "static " : ""}${fqn}${imp.isOnDemand ? ".*" : ""}`;
+    if (seen.has(key)) {
+      unused.push(imp);
+      continue;
+    }
+    seen.add(key);
+    // On-demand imports stay unjudged: what they contribute is open-ended.
+    // For single imports the simple name is what becomes referencable - the
+    // type name, or the member name for a static import.
+    if (imp.isOnDemand) continue;
+    if (!used.has(fqn.slice(fqn.lastIndexOf(".") + 1))) unused.push(imp);
+  }
+  return unused;
+}
+
+export function createChecker(program: Program): Checker {
+  const symbolTypes = new WeakMap<Symbol, Type>();
+  const expressionTypes = new WeakMap<Node, Type>();
+
+  const booleanType = primitiveType("boolean");
+  const intType = primitiveType("int");
+  const charType = primitiveType("char");
+
+  // Synthetic symbol for the implicit `length` field of every array (JLS 10.7).
+  const arrayLengthSymbol: Symbol = { flags: SymbolFlags.Field, escapedName: "length" };
+  symbolTypes.set(arrayLengthSymbol, intType);
+
+  // Members accessible on an array value: the implicit `length`, plus everything
+  // inherited from Object (clone, equals, hashCode, getClass, toString).
+  function arrayMember(name: string): Symbol | undefined {
+    if (name === "length") return arrayLengthSymbol;
+    return objectSymbol()?.members?.get(name);
+  }
+
+  // The trusted dotted-name boundary: literal JDK names and BOX entries enter here.
+  function classTypeByFqn(fqn: string): Type {
+    const symbol = program.getGlobalIndex().getType(fqn as Fqn);
+    return symbol ? classType(symbol) : errorType;
+  }
+
+  // --- type-variable substitution (JLS 4.5, 18) --------------------------------------
+
+  function declarationOf(symbol: Symbol): Node | undefined {
+    return symbol.valueDeclaration ?? symbol.declarations?.[0];
+  }
+
+  // The type-parameter symbols a generic class/interface declares, in order.
+  function classTypeParameters(symbol: Symbol): Symbol[] {
+    const declaration = declarationOf(symbol) as
+      | { typeParameters?: readonly { symbol?: Symbol }[] }
+      | undefined;
+    const out: Symbol[] = [];
+    for (const tp of declaration?.typeParameters ?? []) if (tp.symbol) out.push(tp.symbol);
+    return out;
+  }
+
+  // Map a generic type's parameters to the arguments it was instantiated with.
+  function substitutionFor(symbol: Symbol, args: readonly Type[]): Map<Symbol, Type> {
+    const params = classTypeParameters(symbol);
+    const map = new Map<Symbol, Type>();
+    params.forEach((p, i) => {
+      if (i < args.length) map.set(p, args[i]!);
+    });
+    return map;
+  }
+
+  // Replace type variables in `type` according to `map` (identity if empty).
+  function substitute(type: Type, map: Map<Symbol, Type>): Type {
+    if (map.size === 0) return type;
+    switch (type.kind) {
+      case TypeKind.TypeVariable:
+        return map.get(type.symbol) ?? type;
+      case TypeKind.Class:
+        return type.typeArguments.length === 0
+          ? type
+          : classType(
+              type.symbol,
+              type.typeArguments.map(a => substitute(a, map)),
+            );
+      case TypeKind.Array:
+        return arrayType(substitute(type.elementType, map));
+      case TypeKind.Wildcard:
+        return type.bound ? { ...type, bound: substitute(type.bound, map) } : type;
+      case TypeKind.Intersection:
+        return { kind: TypeKind.Intersection, types: type.types.map(t => substitute(t, map)) };
+      default:
+        return type;
+    }
+  }
+
+  // Direct super-type references of a type declaration (class extends/implements,
+  // interface extends, enum/record implements). Read generically to avoid
+  // importing every declaration interface.
+  function superTypeNodesOf(declaration: Node): TypeNode[] {
+    const d = declaration as {
+      extendsType?: TypeNode;
+      extendsTypes?: readonly TypeNode[];
+      implementsTypes?: readonly TypeNode[];
+    };
+    const out: TypeNode[] = [];
+    if (d.extendsType) out.push(d.extendsType);
+    if (d.extendsTypes) out.push(...d.extendsTypes);
+    if (d.implementsTypes) out.push(...d.implementsTypes);
+    return out;
+  }
+
+  interface TypedMember {
+    readonly symbol: Symbol;
+    // Substitution that maps the declaring type's parameters to concrete arguments.
+    readonly subst: Map<Symbol, Type>;
+  }
+
+  // Member lookup that also yields the substitution to apply to the member's
+  // declared type, threading type arguments through the inheritance chain so that
+  // e.g. ArrayList<String>.iterator() resolves Iterator<E> to Iterator<String>.
+  function lookupTypedMember(
+    receiver: ClassType,
+    name: string,
+    seen = new Set<Symbol>(),
+  ): TypedMember | undefined {
+    const symbol = receiver.symbol;
+    if (seen.has(symbol)) return undefined;
+    seen.add(symbol);
+    const subst = substitutionFor(symbol, receiver.typeArguments);
+    const own = symbol.members?.get(name);
+    if (own) return { symbol: own, subst };
+    const declaration = declarationOf(symbol);
+    if (declaration) {
+      for (const typeNode of superTypeNodesOf(declaration)) {
+        if (typeNode.kind !== SyntaxKind.TypeReference) continue;
+        const superType = substitute(resolveType(typeNode, declaration), subst);
+        if (superType.kind === TypeKind.Class) {
+          const found = lookupTypedMember(superType as ClassType, name, seen);
+          if (found) return found;
+        }
+      }
+      // An enum implicitly extends java.lang.Enum (JLS 8.9): name(), ordinal(), ...
+      if (declaration.kind === SyntaxKind.EnumDeclaration) {
+        const enumType = classTypeByFqn("java.lang.Enum");
+        if (enumType.kind === TypeKind.Class) {
+          const found = lookupTypedMember(enumType as ClassType, name, seen);
+          if (found) return found;
+        }
+      }
+    }
+    // Every type implicitly extends java.lang.Object (JLS 8.1.4), so its members
+    // are inherited even without an explicit `extends`.
+    const object = objectSymbol();
+    if (object && symbol !== object) {
+      const inherited = object.members?.get(name);
+      if (inherited) return { symbol: inherited, subst: new Map() };
+    }
+    return undefined;
+  }
+
+  // All method declarations named `name` reachable from `receiver` (its own
+  // members plus every super type / Object), each paired with the substitution
+  // for the type that declares it. Unlike lookupTypedMember this gathers every
+  // overload across the hierarchy, so e.g. List.add(int,E) does not hide the
+  // inherited Collection.add(E).
+  function collectTypedOverloads(
+    receiver: ClassType,
+    name: string,
+    seen = new Set<Symbol>(),
+    out: { decl: MethodDeclaration; subst: Map<Symbol, Type> }[] = [],
+    // Erased parameter signatures already collected. A more-derived type's members
+    // are visited first, so a supertype method with the same signature is an
+    // overridden method (JLS 8.4.8.1) and is dropped - it is not a separate
+    // overload (e.g. String.length() hides the inherited CharSequence.length()).
+    sigs = new Set<string>(),
+  ): { decl: MethodDeclaration; subst: Map<Symbol, Type> }[] {
+    const symbol = receiver.symbol;
+    if (seen.has(symbol)) return out;
+    seen.add(symbol);
+    const subst = substitutionFor(symbol, receiver.typeArguments);
+    const add = (sym: Symbol | undefined, s: Map<Symbol, Type>): void => {
+      for (const d of sym?.declarations ?? []) {
+        if (d.kind !== SyntaxKind.MethodDeclaration) continue;
+        const sig = methodParams(d as MethodDeclaration)
+          .map(p => typeToString(substitute(paramSlotType(p), s)))
+          .join(",");
+        if (sigs.has(sig)) continue;
+        sigs.add(sig);
+        out.push({ decl: d as MethodDeclaration, subst: s });
+      }
+    };
+    add(symbol.members?.get(name), subst);
+    const declaration = declarationOf(symbol);
+    if (declaration) {
+      for (const typeNode of superTypeNodesOf(declaration)) {
+        if (typeNode.kind !== SyntaxKind.TypeReference) continue;
+        const superType = substitute(resolveType(typeNode, declaration), subst);
+        if (superType.kind === TypeKind.Class)
+          collectTypedOverloads(superType as ClassType, name, seen, out, sigs);
+      }
+      if (declaration.kind === SyntaxKind.EnumDeclaration) {
+        const e = classTypeByFqn("java.lang.Enum");
+        if (e.kind === TypeKind.Class) collectTypedOverloads(e as ClassType, name, seen, out, sigs);
+      }
+    }
+    const object = objectSymbol();
+    if (object && symbol !== object) add(object.members?.get(name), new Map());
+    return out;
+  }
+
+  // A class type is "closed" when its full member set is known: it and every
+  // transitive super type resolve to a declaration we modeled. Enums and records
+  // are excluded because the compiler synthesizes members (values/valueOf,
+  // component accessors) we do not bind. Only closed types are eligible for the
+  // unresolved-member diagnostic, so an unmodeled super type never yields a false
+  // positive.
+  function isClosedType(type: ClassType): boolean {
+    if (type.symbol.flags & (SymbolFlags.Enum | SymbolFlags.Record | SymbolFlags.Annotation)) {
+      return false;
+    }
+    const supertypesResolve = (symbol: Symbol, seen: Set<Symbol>): boolean => {
+      if (seen.has(symbol)) return true;
+      seen.add(symbol);
+      const declaration = declarationOf(symbol);
+      if (!declaration) return false;
+      for (const typeNode of superTypeNodesOf(declaration)) {
+        if (typeNode.kind !== SyntaxKind.TypeReference) return false;
+        const superSymbol = resolveTypeEntityName(
+          (typeNode as TypeReference).typeName,
+          declaration,
+          program,
+        );
+        if (!superSymbol || !supertypesResolve(superSymbol, seen)) return false;
+      }
+      return true;
+    };
+    return supertypesResolve(type.symbol, new Set());
+  }
+
+  function resolveType(typeNode: TypeNode, fromNode: Node): Type {
+    switch (typeNode.kind) {
+      case SyntaxKind.PrimitiveType:
+        return primitiveType(
+          tokenToString((typeNode as { keyword: SyntaxKind }).keyword) ?? "<error>",
+        );
+      case SyntaxKind.ArrayType:
+        return arrayType(resolveType((typeNode as AstArrayType).elementType, fromNode));
+      case SyntaxKind.WildcardType: {
+        const w = typeNode as AstWildcardType;
+        return {
+          kind: TypeKind.Wildcard,
+          isExtends: w.hasExtends,
+          isSuper: w.hasSuper,
+          bound: w.type ? resolveType(w.type, fromNode) : undefined,
+        };
+      }
+      case SyntaxKind.VarType:
+        return errorType; // 'var' inference is P8
+      case SyntaxKind.TypeReference: {
+        const ref = typeNode as TypeReference;
+        const symbol = resolveTypeEntityName(ref.typeName, fromNode, program);
+        if (!symbol) return errorType;
+        // Through getTypeOfSymbol so the variable carries its bound (cached once).
+        if (symbol.flags & SymbolFlags.TypeParameter) return getTypeOfSymbol(symbol);
+        const args = ref.typeArguments?.map(a => resolveType(a as TypeNode, fromNode)) ?? [];
+        return classType(symbol, args);
+      }
+      default:
+        return errorType;
+    }
+  }
+
+  function declaredTypeNodeOf(symbol: Symbol): { typeNode: TypeNode; from: Node } | undefined {
+    const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+    if (!declaration) return undefined;
+    switch (declaration.kind) {
+      case SyntaxKind.VariableDeclarator: {
+        const parent = declaration.parent as { type?: TypeNode };
+        return parent.type ? { typeNode: parent.type, from: declaration } : undefined;
+      }
+      case SyntaxKind.Parameter:
+      case SyntaxKind.RecordComponent:
+      case SyntaxKind.TypePattern: {
+        // TypePattern: a pattern binding variable, e.g. `case Circle(double r)`.
+        const t = (declaration as { type?: TypeNode }).type;
+        return t ? { typeNode: t, from: declaration } : undefined;
+      }
+      case SyntaxKind.MethodDeclaration:
+        return { typeNode: (declaration as MethodDeclaration).returnType, from: declaration };
+      case SyntaxKind.Resource: {
+        // A try-with-resources resource carries its type on the node itself.
+        const t = (declaration as { type?: TypeNode }).type;
+        return t ? { typeNode: t, from: declaration } : undefined;
+      }
+      case SyntaxKind.Identifier: {
+        const parent = declaration.parent as {
+          kind: SyntaxKind;
+          catchTypes?: readonly TypeNode[];
+          type?: TypeNode;
+        };
+        // A catch parameter `catch (E e)`: its type is the (first) catch type.
+        if (parent.kind === SyntaxKind.CatchClause && parent.catchTypes?.length) {
+          return { typeNode: parent.catchTypes[0]!, from: declaration };
+        }
+        // A type-pattern binding `x instanceof T t`: its type is the pattern type.
+        if (parent.kind === SyntaxKind.InstanceofExpression && parent.type) {
+          return { typeNode: parent.type, from: declaration };
+        }
+        return undefined;
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  function getTypeOfSymbol(symbol: Symbol): Type {
+    const cached = symbolTypes.get(symbol);
+    if (cached) return cached;
+
+    let type: Type = errorType;
+    if (symbol.flags & SymbolFlags.TypeParameter) {
+      const tv = typeVariable(symbol);
+      // Cache before resolving the bound: `T extends Comparable<T>` mentions T,
+      // so the nested resolution must see the (still unbounded) variable instead
+      // of recursing forever. The bound is patched onto the cached object.
+      symbolTypes.set(symbol, tv);
+      const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+      const constraint =
+        declaration?.kind === SyntaxKind.TypeParameter
+          ? (declaration as TypeParameter).constraint?.[0]
+          : undefined;
+      if (constraint) tv.bound = resolveType(constraint, declaration!);
+      return tv;
+    } else if (symbol.flags & SymbolFlags.Type) {
+      type = classType(symbol);
+    } else if (symbol.flags & SymbolFlags.EnumConstant) {
+      type = symbol.parent ? classType(symbol.parent) : errorType;
+    } else {
+      const declared = declaredTypeNodeOf(symbol);
+      if (declared) {
+        if (declared.typeNode.kind === SyntaxKind.VarType) {
+          // Break cycles like `var x = x;` while inferring from the initializer.
+          symbolTypes.set(symbol, errorType);
+          type = inferVarType(declared.from);
+        } else {
+          type = resolveType(declared.typeNode, declared.from);
+          // A varargs parameter `T... x` has type `T[]` (the written node is `T`).
+          if (
+            declared.from.kind === SyntaxKind.Parameter &&
+            (declared.from as { isVarArgs?: boolean }).isVarArgs
+          ) {
+            type = arrayType(type);
+          }
+          // C-style array brackets after the name (char buf[]) add rank the
+          // type node does not carry (JLS 10.2).
+          let rank = (declared.from as { arrayRankAfterName?: number }).arrayRankAfterName ?? 0;
+          while (rank-- > 0) type = arrayType(type);
+        }
+      } else {
+        // A concise lambda parameter (x -> ...) has no written type; infer it
+        // from the target functional interface.
+        type = inferLambdaParameterType(symbol);
+      }
+    }
+    symbolTypes.set(symbol, type);
+    return type;
+  }
+
+  // The single abstract method of a functional interface (its SAM), searched
+  // through inherited interfaces.
+  function functionalMethod(
+    typeSymbol: Symbol,
+    seen = new Set<Symbol>(),
+  ): MethodDeclaration | undefined {
+    if (seen.has(typeSymbol)) return undefined;
+    seen.add(typeSymbol);
+    for (const member of typeSymbol.members?.values() ?? []) {
+      if (member.flags & SymbolFlags.Method) {
+        const decl = member.declarations?.find(d => d.kind === SyntaxKind.MethodDeclaration);
+        if (decl) return decl as MethodDeclaration;
+      }
+    }
+    for (const superSymbol of getDirectSuperTypeSymbols(typeSymbol, program)) {
+      const found = functionalMethod(superSymbol, seen);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  // The functional-interface type a lambda is being assigned/converted to
+  // (JLS 15.27.3 - assignment, return, and invocation contexts).
+  // --- method-level type-argument inference (a pragmatic JLS 18 subset) ------
+  // A generic METHOD's type parameters (Collectors.toMap's T, Stream.toArray's
+  // A) are not bound by the receiver substitution, so the lambdas and method
+  // references of stream pipelines never got parameter types. Bindings come
+  // from structurally unifying (1) each non-functional argument's declared
+  // parameter type against its actual type and (2) the declared return type
+  // against the call's context type (outer call parameter, assigned variable,
+  // enclosing return). Whatever does not unify stays unbound - never a guess.
+
+  function methodTypeParamSymbols(decl: MethodDeclaration): Set<Symbol> | undefined {
+    if (!decl.typeParameters || decl.typeParameters.length === 0) return undefined;
+    const out = new Set<Symbol>();
+    for (const p of decl.typeParameters) if (p.symbol) out.add(p.symbol);
+    return out.size > 0 ? out : undefined;
+  }
+
+  function unifyInto(
+    pattern: Type,
+    actual: Type,
+    vars: ReadonlySet<Symbol>,
+    bindings: Map<Symbol, Type>,
+  ): void {
+    // wildcards on either side: their bounds carry the information
+    if (pattern.kind === TypeKind.Wildcard) {
+      if (pattern.bound) unifyInto(pattern.bound, actual, vars, bindings);
+      return;
+    }
+    if (actual.kind === TypeKind.Wildcard) {
+      if (actual.bound) unifyInto(pattern, actual.bound, vars, bindings);
+      return;
+    }
+    if (pattern.kind === TypeKind.TypeVariable && vars.has(pattern.symbol)) {
+      if (!bindings.has(pattern.symbol) && isConcrete(actual)) bindings.set(pattern.symbol, actual);
+      return;
+    }
+    if (
+      pattern.kind === TypeKind.Class &&
+      actual.kind === TypeKind.Class &&
+      pattern.symbol === actual.symbol
+    ) {
+      const shared = Math.min(pattern.typeArguments.length, actual.typeArguments.length);
+      for (let i = 0; i < shared; i++) {
+        unifyInto(pattern.typeArguments[i]!, actual.typeArguments[i]!, vars, bindings);
+      }
+      return;
+    }
+    if (pattern.kind === TypeKind.Array && actual.kind === TypeKind.Array) {
+      unifyInto(pattern.elementType, actual.elementType, vars, bindings);
+    }
+  }
+
+  // The type the call's RESULT flows into, as far as it is locally evident.
+  function contextualTypeOfCall(call: CallExpression): Type | undefined {
+    const parent = call.parent;
+    if (parent.kind === SyntaxKind.VariableDeclarator && parent.symbol) {
+      return getTypeOfSymbol(parent.symbol);
+    }
+    if (parent.kind === SyntaxKind.ReturnStatement) {
+      return enclosingReturnType(parent);
+    }
+    if (parent.kind === SyntaxKind.CallExpression) {
+      const outer = parent as CallExpression;
+      const index = outer.arguments.indexOf(call);
+      if (index < 0) return undefined;
+      const info = resolveCallInfo(outer);
+      const param = info?.decl.parameters[index] as { type?: TypeNode } | undefined;
+      return param?.type
+        ? substitute(resolveType(param.type, info!.decl), info!.receiverSubst)
+        : undefined;
+    }
+    return undefined;
+  }
+
+  function inferredMethodSubst(call: CallExpression, info: CallInfo): Map<Symbol, Type> {
+    const bindings = new Map<Symbol, Type>();
+    const vars = methodTypeParamSymbols(info.decl);
+    if (!vars) return bindings;
+    call.arguments.forEach((argument, i) => {
+      // functional arguments depend on this very inference: no constraints
+      if (
+        argument.kind === SyntaxKind.LambdaExpression ||
+        argument.kind === SyntaxKind.MethodReferenceExpression
+      ) {
+        return;
+      }
+      const param = info.decl.parameters[i] as { type?: TypeNode } | undefined;
+      if (!param?.type) return;
+      unifyInto(
+        substitute(resolveType(param.type, info.decl), info.receiverSubst),
+        getTypeOfExpression(argument),
+        vars,
+        bindings,
+      );
+    });
+    const expected = contextualTypeOfCall(call);
+    if (expected) {
+      unifyInto(
+        substitute(resolveType(info.decl.returnType, info.decl), info.receiverSubst),
+        expected,
+        vars,
+        bindings,
+      );
+    }
+    return bindings;
+  }
+
+  function lambdaTargetType(lambda: Node): Type | undefined {
+    const parent = lambda.parent;
+    // T f = () -> ...;
+    if (parent.kind === SyntaxKind.VariableDeclarator && parent.symbol) {
+      return getTypeOfSymbol(parent.symbol);
+    }
+    // return () -> ...;  -> the enclosing method's return type, or (when the
+    // lambda is itself returned from another lambda) that lambda's SAM return.
+    if (parent.kind === SyntaxKind.ReturnStatement) {
+      return enclosingReturnType(parent);
+    }
+    // new T(() -> ...) -> the matching constructor's parameter type,
+    // instantiated with the created type's arguments.
+    if (parent.kind === SyntaxKind.ObjectCreationExpression) {
+      const creation = parent as ObjectCreationExpression;
+      const args = creation.arguments ?? [];
+      const index = args.indexOf(lambda);
+      if (index < 0) return undefined;
+      const created = getTypeOfExpression(creation);
+      if (created.kind !== TypeKind.Class) return undefined;
+      const declaration = declarationOf(created.symbol);
+      if (!declaration || declaration.kind !== SyntaxKind.ClassDeclaration) return undefined;
+      const ctors = (declaration as ClassDeclaration).members.filter(
+        m => m.kind === SyntaxKind.ConstructorDeclaration,
+      ) as ConstructorDeclaration[];
+      const ctor =
+        ctors.find(c => c.parameters.length === args.length) ??
+        (ctors.length === 1 ? ctors[0] : undefined);
+      const param = ctor?.parameters[index] as { type?: TypeNode } | undefined;
+      if (!ctor || !param?.type) return undefined;
+      return substitute(
+        resolveType(param.type, ctor),
+        substitutionFor(created.symbol, (created as ClassType).typeArguments),
+      );
+    }
+    // m(() -> ...)  -> the resolved method's parameter type at the lambda's
+    // index, instantiated with the receiver's type arguments (so the lambda
+    // passed to Map<String, Integer>.forEach sees BiConsumer<? super String,
+    // ? super Integer>, not the declared K/V).
+    if (parent.kind === SyntaxKind.CallExpression) {
+      const call = parent as CallExpression;
+      const index = call.arguments.indexOf(lambda);
+      const info = index >= 0 ? resolveCallInfo(call) : undefined;
+      const param = info?.decl.parameters[index] as { type?: TypeNode } | undefined;
+      if (!param?.type) return undefined;
+      const declared = substitute(resolveType(param.type, info!.decl), info!.receiverSubst);
+      // generic METHOD (Collectors.toMap, Stream.toArray, ...): bind its type
+      // parameters from the sibling arguments and the call's context
+      const methodSubst = inferredMethodSubst(call, info!);
+      return methodSubst.size > 0 ? substitute(declared, methodSubst) : declared;
+    }
+    return undefined;
+  }
+
+  // Everything the emitter needs to lower a lambda: the target functional
+  // interface, its SAM, and the SAM's parameter/return types both unsubstituted
+  // (for the erased SAM method type) and instantiated with the target's type
+  // arguments (for the lambda's own signature). Undefined when the target type
+  // or its SAM cannot be resolved (the emitter then falls back).
+  function getLambdaInfo(lambda: Node): LambdaInfo | undefined {
+    if (lambda.kind !== SyntaxKind.LambdaExpression) return undefined;
+    const target = lambdaTargetType(lambda);
+    if (!target || target.kind !== TypeKind.Class) return undefined;
+    const sam = functionalMethod(target.symbol);
+    return sam ? functionalInfo(target, sam) : undefined;
+  }
+
+  // Build the SAM info (erased + instantiated parameter/return types) for a
+  // functional interface, shared by lambdas and method references.
+  function functionalInfo(target: ClassType, sam: MethodDeclaration): LambdaInfo {
+    const subst = substitutionFor(target.symbol, target.typeArguments);
+    const erasedParams = sam.parameters.map(p => resolveType((p as { type: TypeNode }).type, sam));
+    const erasedReturn = resolveType(sam.returnType, sam);
+    return {
+      interfaceType: target,
+      samName: sam.name.text as SamName,
+      erasedParams,
+      erasedReturn,
+      instParams: erasedParams.map(t => substitute(t, subst)),
+      instReturn: substitute(erasedReturn, subst),
+    };
+  }
+
+  // A method reference (JLS 15.13): the target functional-interface info plus
+  // the referenced method's kind, declaring type, and declaration.
+  function getMethodRefInfo(node: Node): MethodRefInfo | undefined {
+    if (node.kind !== SyntaxKind.MethodReferenceExpression) return undefined;
+    const ref = node as MethodReferenceExpression;
+    const target = lambdaTargetType(node);
+    if (!target || target.kind !== TypeKind.Class) return undefined;
+    const sam = functionalMethod(target.symbol);
+    if (!sam) return undefined;
+    const fi = functionalInfo(target, sam);
+
+    const asType = (e: Node): Symbol | undefined => {
+      if (e.kind === SyntaxKind.Identifier) {
+        return resolveTypeEntityName(e as Identifier, e, program);
+      }
+      // Outer.Nested::m (e.g. Map.Entry::getKey): the qualifier parses as a
+      // property access, but names a nested type.
+      if (e.kind === SyntaxKind.PropertyAccessExpression) {
+        const access = e as PropertyAccessExpression;
+        const outer = asType(access.expression);
+        const nested = outer && lookupMember(outer, access.name.text, Meaning.Type, program);
+        return nested && nested.flags & SymbolFlags.Type ? nested : undefined;
+      }
+      return undefined;
+    };
+    const overloads = (typeSymbol: Symbol, name: string): MethodDeclaration[] => {
+      const m = lookupMember(typeSymbol, name, Meaning.Value, program);
+      return (m?.declarations?.filter(d => d.kind === SyntaxKind.MethodDeclaration) ??
+        []) as MethodDeclaration[];
+    };
+    const isStaticDecl = (d: Node): boolean =>
+      ((d as { modifiers?: readonly Node[] }).modifiers ?? []).some(
+        m => m.kind === SyntaxKind.StaticKeyword,
+      );
+    const arity = fi.instParams.length;
+
+    // Type::new (and T[]::new, an array constructor reference, JLS 15.13.3).
+    if (ref.isConstructorRef) {
+      if (ref.expression.kind === SyntaxKind.ClassLiteralExpression) {
+        const t = (ref.expression as { type?: TypeNode }).type;
+        if (t?.kind === SyntaxKind.ArrayType) return { ...fi, kind: "arrayConstructor" };
+      }
+      const owner = asType(ref.expression);
+      return owner ? { ...fi, kind: "constructor", ownerSymbol: owner } : undefined;
+    }
+    const name = ref.name!.text;
+    // Type::method - a static method (arity == SAM arity) or an unbound instance
+    // method (the SAM's first parameter is the receiver, so arity == SAM-1).
+    const typeSym = asType(ref.expression);
+    if (typeSym) {
+      const cands = overloads(typeSym, name);
+      const staticM = cands.find(d => isStaticDecl(d) && d.parameters.length === arity);
+      if (staticM) return { ...fi, kind: "static", ownerSymbol: typeSym, target: staticM };
+      const unbound =
+        cands.find(d => !isStaticDecl(d) && d.parameters.length === arity - 1) ??
+        (cands.length === 1 ? cands[0] : undefined);
+      return unbound
+        ? { ...fi, kind: "unbound", ownerSymbol: typeSym, target: unbound }
+        : undefined;
+    }
+    // expr::method - bound to the value of `expr` (arity == SAM arity).
+    const recv = getTypeOfExpression(ref.expression);
+    if (recv.kind !== TypeKind.Class) return undefined;
+    const cands = overloads(recv.symbol, name);
+    const decl =
+      cands.find(d => d.parameters.length === arity) ?? (cands.length === 1 ? cands[0] : undefined);
+    return decl ? { ...fi, kind: "bound", ownerSymbol: recv.symbol, target: decl } : undefined;
+  }
+
+  function inferLambdaParameterType(symbol: Symbol): Type {
+    const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+    if (!declaration || declaration.kind !== SyntaxKind.Identifier) return errorType;
+    const lambda = declaration.parent;
+    if (!lambda || lambda.kind !== SyntaxKind.LambdaExpression) return errorType;
+    const index = (lambda as LambdaExpression).parameters.indexOf(declaration);
+    const target = lambdaTargetType(lambda);
+    if (index < 0 || !target || target.kind !== TypeKind.Class) return errorType;
+    const sam = functionalMethod(target.symbol);
+    if (!sam || index >= sam.parameters.length) return errorType;
+    const paramType = resolveType(sam.parameters[index]!.type, sam);
+    const substituted = substitute(paramType, substitutionFor(target.symbol, target.typeArguments));
+    // A wildcard target argument (BiConsumer<? super String, ...>): the lambda
+    // parameter takes the wildcard's bound (JLS 18.5.3 descriptor inference).
+    if (substituted.kind === TypeKind.Wildcard && substituted.bound) return substituted.bound;
+    return substituted;
+  }
+
+  // Infer the type of a `var` declaration: from the initializer for a local, or
+  // from the iterable's element type for an enhanced-for variable.
+  function inferVarType(declaration: Node): Type {
+    if (declaration.kind === SyntaxKind.VariableDeclarator) {
+      const init = (declaration as VariableDeclarator).initializer;
+      return init ? getTypeOfExpression(init) : errorType;
+    }
+    if (
+      declaration.kind === SyntaxKind.Parameter &&
+      declaration.parent.kind === SyntaxKind.ForEachStatement
+    ) {
+      const iterable = getTypeOfExpression(
+        (declaration.parent as unknown as { expression: Node }).expression,
+      );
+      return elementTypeOf(iterable);
+    }
+    return errorType;
+  }
+
+  // The element type of an array, or the E of Iterable<E> (threading type
+  // arguments through the inheritance chain), else errorType.
+  function elementTypeOf(iterable: Type): Type {
+    if (iterable.kind === TypeKind.Array) return iterable.elementType;
+    if (iterable.kind === TypeKind.Class) {
+      const iterableSymbol = program.getGlobalIndex().getType("java.lang.Iterable" as Fqn);
+      if (iterableSymbol) {
+        const instance = asInstanceOf(iterable as ClassType, iterableSymbol);
+        if (instance && instance.typeArguments.length > 0) return instance.typeArguments[0]!;
+      }
+    }
+    return errorType;
+  }
+
+  // The instantiation of `targetSymbol` that `receiver` is a subtype of, with
+  // type arguments substituted along the way (e.g. how ArrayList<String> sees
+  // Iterable<String>), or undefined if `receiver` is not such a subtype.
+  function asInstanceOf(
+    receiver: ClassType,
+    targetSymbol: Symbol,
+    seen = new Set<Symbol>(),
+  ): ClassType | undefined {
+    if (receiver.symbol === targetSymbol) return receiver;
+    if (seen.has(receiver.symbol)) return undefined;
+    seen.add(receiver.symbol);
+    const declaration = declarationOf(receiver.symbol);
+    if (!declaration) return undefined;
+    const subst = substitutionFor(receiver.symbol, receiver.typeArguments);
+    for (const typeNode of superTypeNodesOf(declaration)) {
+      if (typeNode.kind !== SyntaxKind.TypeReference) continue;
+      const superType = substitute(resolveType(typeNode, declaration), subst);
+      if (superType.kind === TypeKind.Class) {
+        const found = asInstanceOf(superType as ClassType, targetSymbol, seen);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  }
+
+  function typeOfMemberAccess(access: PropertyAccessExpression): Type {
+    const receiver = getTypeOfExpression(access.expression);
+    if (receiver.kind === TypeKind.Array) {
+      const member = arrayMember(access.name.text);
+      return member ? getTypeOfSymbol(member) : errorType;
+    }
+    if (receiver.kind !== TypeKind.Class) return errorType;
+    const found = lookupTypedMember(receiver as ClassType, access.name.text);
+    if (!found) return errorType;
+    return substitute(getTypeOfSymbol(found.symbol), found.subst);
+  }
+
+  function nodeSourceText(node: Node): string {
+    const text = getSourceFileOfNode(node).text;
+    // Start at the token, not node.pos, which includes leading trivia (e.g. a
+    // Javadoc comment before the return type would otherwise be captured).
+    return text.slice(skipTrivia(text, node.pos), node.end).trim().replace(/\s+/g, " ");
+  }
+
+  function typeStringOfSymbol(symbol: Symbol): string {
+    // For a symbol declared with explicit type syntax, show that syntax: it is
+    // always correct and clean, and never degrades to "<error>" when a type
+    // (or a type argument) lies outside the modeled set - the common case for
+    // JDK types the stub does not include.
+    const declared = declaredTypeNodeOf(symbol);
+    if (declared && declared.typeNode.kind !== SyntaxKind.VarType) {
+      const text = nodeSourceText(declared.typeNode);
+      if (text) return text;
+    }
+    // No written type (var, enum constant, ...): use the computed type, which
+    // also surfaces var inference (var x = "s" -> String).
+    const type = getTypeOfSymbol(symbol);
+    if (!isError(type)) return typeToString(type);
+    if (declared && declared.typeNode.kind === SyntaxKind.VarType) return "var";
+    return typeToString(type);
+  }
+
+  function signatureOfSymbol(symbol: Symbol): string | undefined {
+    const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+    return declaration ? signatureOfDeclaration(declaration) : undefined;
+  }
+
+  function instantiatedSignatureOfCall(call: CallExpression): string | undefined {
+    const info = resolveCallInfo(call);
+    if (!info) return undefined;
+    const decl = info.decl;
+    // Substitutions, in typeOfCall's order: the receiver's type arguments, then
+    // the method's own inferred type arguments.
+    const methodSubst = (() => {
+      const vars = methodTypeParameters(decl);
+      if (vars.size === 0) return undefined;
+      const argTypes = call.arguments.map(getTypeOfExpression);
+      return inferMethodTypeArguments(decl, argTypes, info.receiverSubst, vars);
+    })();
+    const renderType = (typeNode: TypeNode | undefined): string => {
+      if (!typeNode) return "?";
+      let t = substitute(resolveType(typeNode, decl), info.receiverSubst);
+      if (methodSubst) t = substitute(t, methodSubst);
+      // An unresolvable type (outside the stub) keeps its written form rather
+      // than rendering "<error>"; a still-bare variable also reads fine as-is.
+      return isError(t) ? nodeSourceText(typeNode) : typeToString(t);
+    };
+    const params = decl.parameters
+      .map(p => {
+        const param = p as Parameter;
+        const name = param.name ? ` ${param.name.text}` : "";
+        return `${renderType(param.type)}${param.isVarArgs ? "..." : ""}${name}`;
+      })
+      .join(", ");
+    return `${renderType(decl.returnType)} ${decl.name.text}(${params})`;
+  }
+
+  function parameterLabelsOf(declaration: Node): string[] {
+    if (
+      declaration.kind !== SyntaxKind.MethodDeclaration &&
+      declaration.kind !== SyntaxKind.ConstructorDeclaration
+    ) {
+      return [];
+    }
+    return (declaration as MethodDeclaration).parameters.map(nodeSourceText);
+  }
+
+  function signatureOfDeclaration(declaration: Node): string | undefined {
+    if (
+      declaration.kind !== SyntaxKind.MethodDeclaration &&
+      declaration.kind !== SyntaxKind.ConstructorDeclaration
+    ) {
+      return undefined;
+    }
+    const m = declaration as MethodDeclaration;
+    const parts: string[] = [];
+    if (m.typeParameters && m.typeParameters.length > 0) {
+      parts.push(`<${m.typeParameters.map(nodeSourceText).join(", ")}>`);
+    }
+    if (declaration.kind === SyntaxKind.MethodDeclaration) parts.push(nodeSourceText(m.returnType));
+    const params = m.parameters.map(nodeSourceText).join(", ");
+    let signature = `${parts.join(" ")}${parts.length > 0 ? " " : ""}${m.name.text}(${params})`;
+    if (m.throws && m.throws.length > 0) {
+      signature += ` throws ${m.throws.map(nodeSourceText).join(", ")}`;
+    }
+    return signature;
+  }
+
+  // Clean a raw `/** ... */` block to plain text: drop the delimiters and the
+  // leading "* " on each line, collapse the blank edges.
+  function cleanJavadoc(raw: string): string {
+    const body = raw.slice(3, -2); // strip "/**" and "*/"
+    return body
+      .split("\n")
+      .map(line => line.replace(/^\s*\*? ?/, "").trimEnd())
+      .join("\n")
+      .trim();
+  }
+
+  function getDocumentationOfNode(node: Node): string | undefined {
+    const text = getSourceFileOfNode(node).text;
+    // The doc comment sits in the declaration's leading trivia: [pos, tokenStart).
+    const leading = text.slice(node.pos, skipTrivia(text, node.pos));
+    const blocks = leading.match(/\/\*\*[\s\S]*?\*\//g);
+    if (!blocks) return undefined;
+    const doc = cleanJavadoc(blocks.at(-1)!); // nearest to the declaration
+    return doc.length > 0 ? doc : undefined;
+  }
+
+  function getDocumentation(symbol: Symbol): string | undefined {
+    const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+    return declaration ? getDocumentationOfNode(declaration) : undefined;
+  }
+
+  // The class type a member access on `type` resolves against: the type itself,
+  // or - for a type variable - its leftmost bound (JLS 4.4: the members of T are
+  // the members of its bound), unwrapped recursively for `U extends T` chains.
+  function receiverClassType(type: Type, depth = 0): ClassType | undefined {
+    if (type.kind === TypeKind.Class) return type as ClassType;
+    if (type.kind === TypeKind.TypeVariable && type.bound && depth < 8) {
+      return receiverClassType(type.bound, depth + 1);
+    }
+    return undefined;
+  }
+
+  function resolveMemberAccess(access: PropertyAccessExpression): Symbol | undefined {
+    const targetType = getTypeOfExpression(access.expression);
+    if (targetType.kind === TypeKind.Array) return arrayMember(access.name.text);
+    const receiver = receiverClassType(targetType);
+    if (!receiver) return undefined;
+    return lookupMember(receiver.symbol, access.name.text, Meaning.Any, program);
+  }
+
+  function resolveName(identifier: Identifier): Symbol | undefined {
+    const parent = identifier.parent;
+    if (
+      parent &&
+      parent.kind === SyntaxKind.PropertyAccessExpression &&
+      (parent as PropertyAccessExpression).name === identifier
+    ) {
+      return resolveMemberAccess(parent as PropertyAccessExpression);
+    }
+    const direct = resolveIdentifier(identifier, program);
+    if (direct) return direct;
+    // Fallback: a segment of a qualified name (java.util.List) - resolve it as
+    // the type it names, or as a package / package prefix.
+    return resolveQualifiedSegment(identifier);
+  }
+
+  // The dotted prefix a qualified-name segment denotes: the whole left..id chain
+  // when id is the `right`, or just id when it is the leftmost root.
+  function qualifiedPrefix(identifier: Identifier): string | undefined {
+    const parent = identifier.parent;
+    if (!parent || parent.kind !== SyntaxKind.QualifiedName) return undefined;
+    const qn = parent as QualifiedName;
+    if (qn.right === identifier) return entityNameToString(qn);
+    if (qn.left === identifier) return identifier.text;
+    return undefined;
+  }
+
+  function resolveQualifiedSegment(identifier: Identifier): Symbol | undefined {
+    const prefix = qualifiedPrefix(identifier);
+    if (!prefix) return undefined;
+    const index = program.getGlobalIndex();
+    return index.getType(prefix as Fqn) ?? index.getPackageByName(prefix as PackageName);
+  }
+
+  function numericLiteralType(value: string): Type {
+    const v = value.replace(/_/g, "");
+    // In hex/binary integer literals the letters a-f are digits, not type
+    // suffixes; only a trailing L counts (and a 'p' marks a hex float).
+    if (/^0[xXbB]/.test(v)) {
+      if (/[pP]/.test(v)) return primitiveType("double");
+      return /[lL]$/.test(v) ? primitiveType("long") : intType;
+    }
+    if (/[lL]$/.test(v)) return primitiveType("long");
+    if (/[fF]$/.test(v)) return primitiveType("float");
+    if (/[dD]$/.test(v) || /[.eE]/.test(v)) return primitiveType("double");
+    return intType;
+  }
+
+  // Binary numeric promotion (JLS 5.6.2): byte/short/char promote to int, then the
+  // result is the wider of the two operand types.
+  // Unary numeric promotion (JLS 5.6.1): byte/short/char promote to int; other
+  // types (numeric or not) pass through - the caller decides what an error is.
+  function unaryPromoted(type: Type): Type {
+    return type.kind === TypeKind.Primitive &&
+      (type.name === "byte" || type.name === "short" || type.name === "char")
+      ? intType
+      : type;
+  }
+
+  function widerNumeric(a: Type, b: Type): Type {
+    const order = ["int", "long", "float", "double"];
+    const rank = (t: Type) => {
+      if (t.kind !== TypeKind.Primitive) return -1;
+      const promoted =
+        t.name === "byte" || t.name === "short" || t.name === "char" ? "int" : t.name;
+      return order.indexOf(promoted);
+    };
+    const ra = rank(a);
+    const rb = rank(b);
+    if (ra < 0 && rb < 0) return errorType;
+    return primitiveType(order[Math.max(ra, rb)]!);
+  }
+
+  function isString(type: Type, stringType: Type): boolean {
+    return (
+      type.kind === TypeKind.Class &&
+      stringType.kind === TypeKind.Class &&
+      type.symbol === stringType.symbol
+    );
+  }
+
+  function getTypeOfExpression(node: Node): Type {
+    const cached = expressionTypes.get(node);
+    if (cached) return cached;
+    const type = computeExpressionType(node);
+    expressionTypes.set(node, type);
+    return type;
+  }
+
+  function computeExpressionType(node: Node): Type {
+    switch (node.kind) {
+      case SyntaxKind.NumericLiteral:
+        return numericLiteralType((node as LiteralExpression).value);
+      case SyntaxKind.StringLiteral:
+      case SyntaxKind.TextBlockLiteral:
+        return classTypeByFqn("java.lang.String");
+      case SyntaxKind.CharacterLiteral:
+        return charType;
+      case SyntaxKind.TrueKeyword:
+      case SyntaxKind.FalseKeyword:
+        return booleanType;
+      case SyntaxKind.NullKeyword:
+        return nullType;
+      case SyntaxKind.Identifier: {
+        const symbol = resolveIdentifier(node as Identifier, program);
+        return symbol ? getTypeOfSymbol(symbol) : errorType;
+      }
+      case SyntaxKind.ThisExpression: {
+        // Qualified `Outer.this` has the type of the named enclosing class.
+        const qualifier = (node as { qualifier?: Node }).qualifier;
+        if (qualifier) return getTypeOfExpression(qualifier);
+        const enclosing = enclosingTypeSymbol(node);
+        return enclosing ? classType(enclosing) : errorType;
+      }
+      case SyntaxKind.SuperExpression: {
+        // `super` has the type of the enclosing class's direct superclass, so a
+        // member lookup on it finds the inherited (overridden) member.
+        const enclosing = enclosingTypeSymbol(node);
+        const decl = enclosing?.valueDeclaration ?? enclosing?.declarations?.[0];
+        const ext = decl ? (decl as { extendsType?: TypeNode }).extendsType : undefined;
+        if (ext) {
+          const base = resolveType(ext, decl!);
+          if (base.kind === TypeKind.Class) return base;
+        }
+        return classTypeByFqn("java.lang.Object");
+      }
+      case SyntaxKind.ParenthesizedExpression:
+        return getTypeOfExpression((node as ParenthesizedExpression).expression);
+      case SyntaxKind.CastExpression:
+        return resolveType((node as CastExpression).type, node);
+      case SyntaxKind.PropertyAccessExpression:
+        return typeOfMemberAccess(node as PropertyAccessExpression);
+      case SyntaxKind.CallExpression:
+        return typeOfCall(node as CallExpression);
+      case SyntaxKind.ObjectCreationExpression:
+        return resolveType((node as ObjectCreationExpression).type, node);
+      case SyntaxKind.ArrayCreationExpression: {
+        const n = node as ArrayCreationExpression;
+        let t = resolveType(n.elementType, node);
+        for (let i = 0; i < n.dimensions.length + n.additionalRank; i++) t = arrayType(t);
+        return t;
+      }
+      case SyntaxKind.ElementAccessExpression: {
+        const target = getTypeOfExpression((node as ElementAccessExpression).expression);
+        return target.kind === TypeKind.Array ? target.elementType : errorType;
+      }
+      case SyntaxKind.InstanceofExpression:
+        return booleanType;
+      case SyntaxKind.PrefixUnaryExpression: {
+        const u = node as PrefixUnaryExpression;
+        if (u.operator === SyntaxKind.ExclamationToken) return booleanType;
+        const operand = getTypeOfExpression(u.operand);
+        // Unary +/-/~ apply unary numeric promotion (JLS 15.15.3-5): -byte is
+        // an int. ++/-- keep the variable's type (JLS 15.15.1/2).
+        return u.operator === SyntaxKind.PlusToken ||
+          u.operator === SyntaxKind.MinusToken ||
+          u.operator === SyntaxKind.TildeToken
+          ? unaryPromoted(operand)
+          : operand;
+      }
+      case SyntaxKind.PostfixUnaryExpression:
+        return getTypeOfExpression((node as unknown as { operand: Node }).operand);
+      case SyntaxKind.ConditionalExpression: {
+        // The conditional's type (JLS 15.25): binary numeric promotion for numeric
+        // arms, otherwise a simplified reference lub (the more general arm, or a
+        // null arm yields the other, else java.lang.Object).
+        const t = getTypeOfExpression((node as ConditionalExpression).whenTrue);
+        const f = getTypeOfExpression((node as ConditionalExpression).whenFalse);
+        if (t.kind === TypeKind.Error) return f;
+        if (f.kind === TypeKind.Error) return t;
+        if (t.kind === TypeKind.Null) return f;
+        if (f.kind === TypeKind.Null) return t;
+        const num = widerNumeric(t, f);
+        if (num.kind !== TypeKind.Error) return num;
+        if (isAssignableTo(f, t, false)) return t;
+        if (isAssignableTo(t, f, false)) return f;
+        return classTypeByFqn("java.lang.Object");
+      }
+      case SyntaxKind.BinaryExpression: {
+        const b = node as BinaryExpression;
+        if (COMPARISON_OPERATORS.has(b.operatorToken)) return booleanType;
+        const left = getTypeOfExpression(b.left);
+        const right = getTypeOfExpression(b.right);
+        if (b.operatorToken === SyntaxKind.PlusToken) {
+          const stringType = classTypeByFqn("java.lang.String");
+          if (isString(left, stringType) || isString(right, stringType)) return stringType;
+        }
+        // A shift's type is the unary-promoted LEFT operand; the distance never
+        // widens the result (JLS 15.19), so `int << long` is int, not long.
+        if (
+          b.operatorToken === SyntaxKind.LessThanLessThanToken ||
+          b.operatorToken === SyntaxKind.GreaterThanGreaterThanToken ||
+          b.operatorToken === SyntaxKind.GreaterThanGreaterThanGreaterThanToken
+        ) {
+          return widerNumeric(left, intType);
+        }
+        // `&`, `|`, `^` on boolean operands are the boolean logical operators and
+        // yield boolean (JLS 15.22.2); on integral operands they are bitwise.
+        const isBool = (t: Type): boolean =>
+          t.kind === TypeKind.Primitive && (t as { name: string }).name === "boolean";
+        if (
+          (b.operatorToken === SyntaxKind.AmpersandToken ||
+            b.operatorToken === SyntaxKind.BarToken ||
+            b.operatorToken === SyntaxKind.CaretToken) &&
+          isBool(left) &&
+          isBool(right)
+        ) {
+          return booleanType;
+        }
+        return widerNumeric(left, right);
+      }
+      default:
+        return errorType;
+    }
+  }
+
+  function objectSymbol(): Symbol | undefined {
+    return program.getGlobalIndex().getType("java.lang.Object" as Fqn);
+  }
+
+  // source's class symbol is a subtype of target's (incl. implicit Object).
+  function isClassSubtype(sourceSym: Symbol, targetSym: Symbol): boolean {
+    if (sourceSym === targetSym) return true;
+    if (targetSym === objectSymbol()) return true;
+    const seen = new Set<Symbol>();
+    const queue: Symbol[] = [sourceSym];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (current === targetSym) return true;
+      if (seen.has(current)) continue;
+      seen.add(current);
+      queue.push(...getDirectSuperTypeSymbols(current, program));
+    }
+    return false;
+  }
+
+  function typesEqual(a: Type, b: Type): boolean {
+    if (a.kind !== b.kind) return false;
+    switch (a.kind) {
+      case TypeKind.Primitive:
+        return a.name === (b as { name: string }).name;
+      case TypeKind.Class: {
+        const bc = b as ClassType;
+        return (
+          a.symbol === bc.symbol &&
+          a.typeArguments.length === bc.typeArguments.length &&
+          a.typeArguments.every((t, i) => typesEqual(t, bc.typeArguments[i]!))
+        );
+      }
+      case TypeKind.Array:
+        return typesEqual(a.elementType, (b as ArrayType).elementType);
+      case TypeKind.TypeVariable:
+        return a.symbol === (b as { symbol: Symbol }).symbol;
+      default:
+        return true;
+    }
+  }
+
+  // Type-argument compatibility for two invocations of the same generic type,
+  // honouring wildcard variance (JLS 4.5.1, 4.10.2).
+  function typeArgumentsCompatible(srcArgs: readonly Type[], tgtArgs: readonly Type[]): boolean {
+    if (srcArgs.length === 0 || tgtArgs.length === 0) return true; // raw type involved
+    if (srcArgs.length !== tgtArgs.length) return true;
+    return tgtArgs.every((tgt, i) => {
+      const src = srcArgs[i]!;
+      if (tgt.kind === TypeKind.Wildcard) {
+        const w = tgt as WildcardType;
+        if (w.isExtends && w.bound) return isAssignableTo(src, w.bound);
+        if (w.isSuper && w.bound) return isAssignableTo(w.bound, src);
+        return true; // unbounded ?
+      }
+      return typesEqual(src, tgt);
+    });
+  }
+
+  function isAssignableToClass(source: Type, target: ClassType, allowBoxing: boolean): boolean {
+    switch (source.kind) {
+      case TypeKind.Null:
+        return true;
+      case TypeKind.Primitive: {
+        if (!allowBoxing) return false;
+        const boxed = BOX[source.name as keyof typeof BOX];
+        return boxed ? isAssignableToClass(classTypeByFqn(boxed), target, true) : false;
+      }
+      case TypeKind.Class:
+        if (source.symbol === target.symbol) {
+          return typeArgumentsCompatible(source.typeArguments, target.typeArguments);
+        }
+        return isClassSubtype(source.symbol, target.symbol);
+      case TypeKind.Array:
+        return target.symbol === objectSymbol();
+      case TypeKind.TypeVariable:
+        return target.symbol === objectSymbol();
+      default:
+        return false;
+    }
+  }
+
+  function isAssignableToPrimitive(
+    source: Type,
+    target: { name: string },
+    allowBoxing: boolean,
+  ): boolean {
+    if (source.kind === TypeKind.Primitive) return primitiveWidens(source.name, target.name);
+    // unboxing then widening (Integer -> int -> long)
+    if (allowBoxing && source.kind === TypeKind.Class) {
+      const unboxed = UNBOX[fqnOf(source)];
+      if (unboxed) return primitiveWidens(unboxed, target.name);
+    }
+    return false;
+  }
+
+  function fqnOf(type: ClassType): string {
+    const parts: string[] = [type.symbol.escapedName];
+    let parent = type.symbol.parent;
+    while (parent && parent.escapedName) {
+      parts.unshift(parent.escapedName);
+      parent = parent.parent;
+    }
+    return parts.join(".");
+  }
+
+  function isAssignableTo(source: Type, target: Type, allowBoxing = true): boolean {
+    if (isError(source) || isError(target)) return true; // degrade, never a false error
+    if (source === target) return true;
+    switch (target.kind) {
+      case TypeKind.Primitive:
+        return isAssignableToPrimitive(source, target, allowBoxing);
+      case TypeKind.Class:
+        return isAssignableToClass(source, target, allowBoxing);
+      case TypeKind.Array:
+        if (source.kind === TypeKind.Null) return true;
+        if (source.kind !== TypeKind.Array) return false;
+        // primitive element arrays are invariant; reference element arrays covariant
+        if (
+          source.elementType.kind === TypeKind.Primitive ||
+          target.elementType.kind === TypeKind.Primitive
+        ) {
+          return typesEqual(source.elementType, target.elementType);
+        }
+        return isAssignableTo(source.elementType, target.elementType);
+      case TypeKind.TypeVariable:
+        // A value is assignable to a type-variable target when inference can bind
+        // it (we do not run full inference, so accept any reference/boxable value
+        // - lenient, never a false error). This also makes a generic parameter
+        // applicable during overload resolution, e.g. List.add(E) for add("x").
+        return source.kind !== TypeKind.Primitive || allowBoxing;
+      default:
+        return source.kind === TypeKind.Null || isError(source);
+    }
+  }
+
+  // --- overload resolution (JLS 15.12.2) ---------------------------------------------
+
+  interface ParamInfo {
+    type: Type;
+    isVarArgs: boolean;
+  }
+
+  function methodParams(decl: MethodDeclaration): ParamInfo[] {
+    return decl.parameters.map(p => ({
+      type: resolveType(p.type, decl),
+      isVarArgs: !!p.isVarArgs,
+    }));
+  }
+
+  function paramSlotType(p: ParamInfo): Type {
+    return p.isVarArgs ? arrayType(p.type) : p.type;
+  }
+
+  function applicable(
+    params: ParamInfo[],
+    args: Type[],
+    allowBoxing: boolean,
+    varargs: boolean,
+  ): boolean {
+    if (!varargs) {
+      if (params.length !== args.length) return false;
+      return params.every((p, i) => isAssignableTo(args[i]!, paramSlotType(p), allowBoxing));
+    }
+    if (params.length === 0) return false;
+    const last = params.at(-1)!;
+    if (!last.isVarArgs) return false;
+    if (args.length < params.length - 1) return false;
+    for (let i = 0; i < params.length - 1; i++) {
+      if (!isAssignableTo(args[i]!, params[i]!.type, true)) return false;
+    }
+    for (let i = params.length - 1; i < args.length; i++) {
+      if (!isAssignableTo(args[i]!, last.type, true)) return false;
+    }
+    return true;
+  }
+
+  function moreSpecific(a: MethodDeclaration, b: MethodDeclaration): boolean {
+    const pa = methodParams(a);
+    const pb = methodParams(b);
+    if (pa.length !== pb.length) return false;
+    return pa.every((p, i) => isAssignableTo(paramSlotType(p), paramSlotType(pb[i]!), true));
+  }
+
+  function chooseOverload(decls: MethodDeclaration[], args: Type[]): MethodDeclaration {
+    const phases: ReadonlyArray<readonly [boolean, boolean]> = [
+      [false, false], // strict
+      [true, false], // boxing
+      [true, true], // varargs
+    ];
+    for (const [allowBoxing, varargs] of phases) {
+      const ok = decls.filter(d => applicable(methodParams(d), args, allowBoxing, varargs));
+      if (ok.length > 0) {
+        // Most-specific (JLS 15.12.2.5). Candidates are ordered most-derived-first
+        // (a type's own members before inherited ones), so only a *strictly* more
+        // specific method displaces the current best; equally-specific methods
+        // (e.g. an override and the method it overrides - String.length() vs
+        // CharSequence.length()) keep the more-derived one already chosen.
+        let best = ok[0]!;
+        for (const d of ok.slice(1)) if (moreSpecific(d, best)) best = d;
+        return best;
+      }
+    }
+    return decls[0]!;
+  }
+
+  interface CallInfo {
+    readonly decl: MethodDeclaration;
+    // Substitution from the receiver's type arguments (for instance calls).
+    readonly receiverSubst: Map<Symbol, Type>;
+  }
+
+  // Overload resolution is deterministic per node, and the emitter asks for the
+  // same call's target at least twice (once to dispatch, once for its type), so
+  // memoize like getTypeOfExpression does. `null` = resolved to nothing.
+  const callInfoCache = new WeakMap<CallExpression, CallInfo | null>();
+
+  function resolveCallInfo(call: CallExpression): CallInfo | undefined {
+    const cached = callInfoCache.get(call);
+    if (cached !== undefined) return cached ?? undefined;
+    const result = resolveCallInfoWorker(call);
+    callInfoCache.set(call, result ?? null);
+    return result;
+  }
+
+  function resolveCallInfoWorker(call: CallExpression): CallInfo | undefined {
+    const callee = call.expression;
+    let symbol: Symbol | undefined;
+    let receiverSubst = new Map<Symbol, Type>();
+    if (callee.kind === SyntaxKind.Identifier) {
+      symbol = resolveIdentifier(callee as Identifier, program);
+    } else if (callee.kind === SyntaxKind.PropertyAccessExpression) {
+      const access = callee as PropertyAccessExpression;
+      // A type-variable receiver resolves members against its bound (JLS 4.4).
+      const receiver = receiverClassType(getTypeOfExpression(access.expression));
+      if (receiver) {
+        // Gather overloads across the whole hierarchy and pick by applicability,
+        // so an override/overload in a subtype does not hide inherited ones.
+        const cands = collectTypedOverloads(receiver, access.name.text);
+        if (cands.length === 0) return undefined;
+        const decl =
+          cands.length === 1
+            ? cands[0]!.decl
+            : chooseOverload(
+                cands.map(c => c.decl),
+                call.arguments.map(getTypeOfExpression),
+              );
+        return { decl, receiverSubst: cands.find(c => c.decl === decl)!.subst };
+      }
+      symbol = resolveMemberAccess(access);
+    }
+    if (!symbol) return undefined;
+    const decls = (symbol.declarations ?? []).filter(
+      d => d.kind === SyntaxKind.MethodDeclaration,
+    ) as MethodDeclaration[];
+    if (decls.length === 0) return undefined;
+    const decl =
+      decls.length === 1
+        ? decls[0]!
+        : chooseOverload(decls, call.arguments.map(getTypeOfExpression));
+    return { decl, receiverSubst };
+  }
+
+  function resolveCall(call: CallExpression): MethodDeclaration | undefined {
+    return resolveCallInfo(call)?.decl;
+  }
+
+  // Every overload declaration a call could bind to (for signature help): the
+  // same candidate gathering as resolveCallInfoWorker, without picking a winner.
+  function resolveCallCandidates(call: CallExpression): MethodDeclaration[] {
+    const callee = call.expression;
+    if (callee.kind === SyntaxKind.PropertyAccessExpression) {
+      const access = callee as PropertyAccessExpression;
+      const receiver = receiverClassType(getTypeOfExpression(access.expression));
+      if (receiver) return collectTypedOverloads(receiver, access.name.text).map(c => c.decl);
+      const symbol = resolveMemberAccess(access);
+      return (symbol?.declarations ?? []).filter(
+        d => d.kind === SyntaxKind.MethodDeclaration,
+      ) as MethodDeclaration[];
+    }
+    if (callee.kind === SyntaxKind.Identifier) {
+      const symbol = resolveIdentifier(callee as Identifier, program);
+      return (symbol?.declarations ?? []).filter(
+        d => d.kind === SyntaxKind.MethodDeclaration,
+      ) as MethodDeclaration[];
+    }
+    return [];
+  }
+
+  // The method type-parameter symbols a generic method declares (its own <T>).
+  function methodTypeParameters(decl: MethodDeclaration): Set<Symbol> {
+    const out = new Set<Symbol>();
+    for (const tp of decl.typeParameters ?? []) if (tp.symbol) out.add(tp.symbol);
+    return out;
+  }
+
+  // A primitive argument can never bind a type variable (those are reference
+  // types), so box it - id(1) infers T = Integer, matching JLS 18.
+  function boxIfPrimitive(type: Type): Type {
+    if (type.kind === TypeKind.Primitive) {
+      const boxed = BOX[type.name as keyof typeof BOX];
+      if (boxed) return classTypeByFqn(boxed);
+    }
+    return type;
+  }
+
+  // Collect bindings for `vars` by matching a parameter type against an argument
+  // type (JLS 18, pragmatic): first binding wins, gaps stay unbound.
+  function unify(param: Type, arg: Type, vars: Set<Symbol>, out: Map<Symbol, Type>): void {
+    switch (param.kind) {
+      case TypeKind.TypeVariable:
+        if (
+          vars.has(param.symbol) &&
+          !out.has(param.symbol) &&
+          !isError(arg) &&
+          arg.kind !== TypeKind.Null
+        ) {
+          out.set(param.symbol, arg);
+        }
+        return;
+      case TypeKind.Class:
+        if (arg.kind === TypeKind.Class && param.symbol === arg.symbol) {
+          param.typeArguments.forEach((pa, i) =>
+            unify(pa, arg.typeArguments[i] ?? errorType, vars, out),
+          );
+        }
+        return;
+      case TypeKind.Array:
+        if (arg.kind === TypeKind.Array) unify(param.elementType, arg.elementType, vars, out);
+        return;
+      default:
+        return;
+    }
+  }
+
+  function inferMethodTypeArguments(
+    decl: MethodDeclaration,
+    argTypes: Type[],
+    receiverSubst: Map<Symbol, Type>,
+    vars: Set<Symbol>,
+  ): Map<Symbol, Type> {
+    const out = new Map<Symbol, Type>();
+    decl.parameters.forEach((p, i) => {
+      if (i >= argTypes.length) return;
+      const paramType = substitute(resolveType(p.type, decl), receiverSubst);
+      unify(paramType, boxIfPrimitive(argTypes[i]!), vars, out);
+    });
+    return out;
+  }
+
+  // The type of the synthesized enum statics E.values() (E[]) and
+  // E.valueOf(String) (E), which have no source declaration.
+  function enumStaticCallType(call: CallExpression): Type | undefined {
+    const callee = call.expression;
+    if (callee.kind !== SyntaxKind.PropertyAccessExpression) return undefined;
+    const access = callee as PropertyAccessExpression;
+    if (access.expression.kind !== SyntaxKind.Identifier) return undefined;
+    const sym = resolveTypeEntityName(access.expression as Identifier, access.expression, program);
+    if (!sym || !(sym.flags & SymbolFlags.Enum)) return undefined;
+    const t = classType(sym);
+    if (access.name.text === "values" && call.arguments.length === 0) return arrayType(t);
+    if (access.name.text === "valueOf" && call.arguments.length === 1) return t;
+    return undefined;
+  }
+
+  function typeOfCall(call: CallExpression): Type {
+    // An array's clone() is covariant (JLS 10.7): it returns the array's type.
+    const callee = call.expression;
+    if (callee.kind === SyntaxKind.PropertyAccessExpression && call.arguments.length === 0) {
+      const pa = callee as PropertyAccessExpression;
+      if (pa.name.text === "clone") {
+        const recv = getTypeOfExpression(pa.expression);
+        if (recv.kind === TypeKind.Array) return recv;
+      }
+    }
+    // values()/valueOf(String) take precedence over the inherited Enum.valueOf.
+    const enumType = enumStaticCallType(call);
+    if (enumType) return enumType;
+    const info = resolveCallInfo(call);
+    if (!info) return errorType;
+    let returnType = substitute(resolveType(info.decl.returnType, info.decl), info.receiverSubst);
+    const vars = methodTypeParameters(info.decl);
+    if (vars.size > 0) {
+      const argTypes = call.arguments.map(getTypeOfExpression);
+      returnType = substitute(
+        returnType,
+        inferMethodTypeArguments(info.decl, argTypes, info.receiverSubst, vars),
+      );
+    }
+    return returnType;
+  }
+
+  // --- semantic diagnostics ----------------------------------------------------------
+
+  // Only types we can fully reason about are checked, so a mismatch is never a
+  // false positive: no error type and no type variable / wildcard / intersection
+  // anywhere (those need substitution/inference we do not perform yet).
+  function isConcrete(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Primitive:
+      case TypeKind.Null:
+        return true;
+      case TypeKind.Class:
+        return (type as ClassType).typeArguments.every(isConcrete);
+      case TypeKind.Array:
+        return isConcrete((type as ArrayType).elementType);
+      default:
+        return false;
+    }
+  }
+
+  function enclosingReturnType(node: Node): Type | undefined {
+    let current: Node | undefined = node;
+    while (current) {
+      if (current.kind === SyntaxKind.MethodDeclaration) {
+        return resolveType((current as MethodDeclaration).returnType, current);
+      }
+      // A `return` inside a lambda targets the SAM's return type (JLS 15.27.2 /
+      // 9.8), instantiated with the target's type arguments.
+      if (current.kind === SyntaxKind.LambdaExpression) return getLambdaInfo(current)?.instReturn;
+      current = current.parent;
+    }
+    return undefined;
+  }
+
+  // --- @Override (JLS 9.6.4.4) -------------------------------------------------------
+
+  function hasOverrideAnnotation(decl: MethodDeclaration): boolean {
+    for (const modifier of decl.modifiers ?? []) {
+      if (modifier.kind !== SyntaxKind.Annotation) continue;
+      const name = entityNameToString((modifier as Annotation).typeName);
+      if (name === "Override" || name.endsWith(".Override")) return true;
+    }
+    return false;
+  }
+
+  // "ok" if some supertype (incl. Object) declares a method of the same name,
+  // "missing" if the whole hierarchy is known and none does, "unknown" if any
+  // supertype is unresolved (so we never flag on incomplete information).
+  function overrideStatus(decl: MethodDeclaration): "ok" | "missing" | "unknown" {
+    const enclosing = enclosingTypeSymbol(decl);
+    if (!enclosing) return "unknown";
+    const name = decl.name.text;
+    const seen = new Set<Symbol>();
+    let incomplete = false;
+
+    const declaresMethod = (typeSymbol: Symbol): boolean => {
+      const member = typeSymbol.members?.get(name);
+      return !!member && (member.flags & SymbolFlags.Method) !== 0;
+    };
+    const search = (typeSymbol: Symbol): boolean => {
+      if (seen.has(typeSymbol)) return false;
+      seen.add(typeSymbol);
+      const declaration = declarationOf(typeSymbol);
+      if (!declaration) {
+        incomplete = true;
+        return false;
+      }
+      for (const typeNode of superTypeNodesOf(declaration)) {
+        if (typeNode.kind !== SyntaxKind.TypeReference) {
+          incomplete = true;
+          continue;
+        }
+        const superSymbol = resolveTypeEntityName(
+          (typeNode as TypeReference).typeName,
+          declaration,
+          program,
+        );
+        if (!superSymbol) {
+          incomplete = true;
+          continue;
+        }
+        if (declaresMethod(superSymbol) || search(superSymbol)) return true;
+      }
+      return false;
+    };
+
+    if (search(enclosing)) return "ok";
+    // Every type implicitly extends Object; require it to be known to decide.
+    const objectSymbol = program.getGlobalIndex().getType("java.lang.Object" as Fqn);
+    if (!objectSymbol) return "unknown";
+    if (declaresMethod(objectSymbol)) return "ok";
+    return incomplete ? "unknown" : "missing";
+  }
+
+  // --- switch-expression exhaustiveness over enums (JLS 14.11.1.1) -------------------
+
+  function missingEnumLabels(sw: SwitchExpression): string[] | undefined {
+    const selector = getTypeOfExpression(sw.expression);
+    if (selector.kind !== TypeKind.Class || !(selector.symbol.flags & SymbolFlags.Enum)) {
+      return undefined;
+    }
+    const declaration = declarationOf(selector.symbol);
+    if (!declaration || declaration.kind !== SyntaxKind.EnumDeclaration) return undefined;
+    const constants = (declaration as EnumDeclaration).enumConstants.map(c => c.name.text);
+    if (constants.length === 0) return undefined;
+
+    const covered = new Set<string>();
+    for (const clause of sw.clauses) {
+      if (clause.isDefault || clause.guard) return undefined; // default / guard: do not reason
+      for (const label of clause.labels ?? []) {
+        if (label.kind !== SyntaxKind.Identifier) return undefined; // non-constant label
+        covered.add((label as Identifier).text);
+      }
+    }
+    return constants.filter(c => !covered.has(c));
+  }
+
+  function getSemanticDiagnostics(sourceFile: SourceFile): Diagnostic[] {
+    const diagnostics: Diagnostic[] = [];
+
+    const checkAssignment = (valueNode: Node, targetType: Type): void => {
+      if (targetType.kind === TypeKind.Primitive && targetType.name === "void") return;
+      if (!isConcrete(targetType)) return;
+      const valueType = getTypeOfExpression(valueNode);
+      if (!isConcrete(valueType)) return;
+      // A call whose resolution is not trustworthy: an OVERLOADED method (the
+      // picked return type is best-effort, e.g. IOUtils.copy has int- and
+      // long-returning overloads), or a declaration whose arity does not even
+      // match the call (the name walk found a sibling overload, e.g. a bare
+      // toString() landing on toString(boolean, StringBuilder) while the real
+      // target is Object.toString()).
+      if (valueNode.kind === SyntaxKind.CallExpression) {
+        const call = valueNode as CallExpression;
+        const declarations = resolveCall(call)?.symbol?.declarations ?? [];
+        if (declarations.length > 1) return;
+        const declaration = declarations[0];
+        if (declaration?.kind === SyntaxKind.MethodDeclaration) {
+          const parameters = (declaration as MethodDeclaration).parameters;
+          const last = parameters.at(-1) as Parameter | undefined;
+          const accepts = last?.isVarArgs
+            ? call.arguments.length >= parameters.length - 1
+            : call.arguments.length === parameters.length;
+          if (!accepts) return;
+        }
+      }
+      // High-precision scope: the primitive<->reference boundary (int x = "s"),
+      // and primitive-to-primitive below. Reference-to-reference / generic cases
+      // depend on subtyping precision we do not fully model yet.
+      if (targetType.kind === TypeKind.Primitive && valueType.kind === TypeKind.Primitive) {
+        checkPrimitiveAssignment(valueNode, valueType.name, targetType.name);
+        return;
+      }
+      const oneIsPrimitive =
+        (targetType.kind === TypeKind.Primitive) !== (valueType.kind === TypeKind.Primitive);
+      if (!oneIsPrimitive) return;
+      if (!isAssignableTo(valueType, targetType)) {
+        diagnostics.push(
+          createDiagnostic(
+            valueNode.pos,
+            valueNode.end - valueNode.pos,
+            Diagnostics.Incompatible_types_0_1,
+            typeToString(valueType),
+            typeToString(targetType),
+          ),
+        );
+      }
+    };
+
+    // Assignment between primitives (JLS 5.2): identity and widening are fine;
+    // a byte/short/char target also takes a CONSTANT byte/short/char/int that
+    // fits. constfold does not resolve constant variables (final x = ...), so an
+    // unfoldable value in the constant-narrowing position stays silent rather
+    // than risking a false positive; everything else is a definite error.
+    const NARROWING_RANGE: Record<string, readonly [bigint, bigint]> = {
+      byte: [-128n, 127n],
+      short: [-32768n, 32767n],
+      char: [0n, 65535n],
+    };
+    const checkPrimitiveAssignment = (valueNode: Node, value: string, target: string): void => {
+      if (value === target || primitiveWidens(value, target)) return;
+      const range = NARROWING_RANGE[target];
+      const constNarrowable =
+        range !== undefined && ["byte", "short", "char", "int"].includes(value);
+      if (constNarrowable) {
+        const folded = foldConstant(valueNode);
+        if (!folded) return; // possibly a constant variable: no false positives
+        if (folded.kind === "int" && folded.value >= range[0] && folded.value <= range[1]) return;
+      }
+      diagnostics.push(
+        createDiagnostic(
+          valueNode.pos,
+          valueNode.end - valueNode.pos,
+          Diagnostics.Incompatible_types_0_1,
+          value,
+          target,
+        ),
+      );
+    };
+
+    // --- call arity (JLS 15.12.2.1 applicability by arity) ---------------------
+    // High-precision: report only when the COMPLETE overload set is provably
+    // known and none of it can accept the argument count. The JDK stub and
+    // classpath stubs are incomplete by design (the real types have more
+    // overloads), so any hierarchy that leaves project source aborts the check
+    // - except java.lang.Object as the implicit terminal.
+    const arityAccepts = (parameters: readonly Node[], argc: number): boolean => {
+      const last = parameters.at(-1) as Parameter | undefined;
+      return last?.isVarArgs ? argc >= parameters.length - 1 : argc === parameters.length;
+    };
+    const isProjectSymbol = (typeSymbol: Symbol): boolean => {
+      const declaration = typeSymbol.valueDeclaration ?? typeSymbol.declarations?.[0];
+      if (!declaration) return false;
+      const fileName = getSourceFileOfNode(declaration).fileName;
+      return !fileName.startsWith("jdk:") && !fileName.startsWith("classpath:");
+    };
+    // Every overload of `name` across the hierarchy of `start`, or undefined
+    // when the hierarchy is not fully project-known (or declares no such
+    // method at all - a bare call may target an ENCLOSING type instead).
+    const projectOverloads = (start: Symbol, name: string): MethodDeclaration[] | undefined => {
+      const overloads: MethodDeclaration[] = [];
+      const seen = new Set<Symbol>();
+      const queue = [start];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        if (seen.has(current)) continue;
+        seen.add(current);
+        if (current === program.getGlobalIndex().getType("java.lang.Object" as Fqn)) {
+          // implicit terminal: its stub is complete for its own members
+          continue;
+        }
+        if (!isProjectSymbol(current)) return undefined;
+        const member = current.members?.get(name);
+        for (const declaration of member?.declarations ?? []) {
+          if (declaration.kind === SyntaxKind.MethodDeclaration) {
+            overloads.push(declaration as MethodDeclaration);
+          }
+        }
+        // Every WRITTEN supertype must resolve: one that does not (outside the
+        // stub, a typo, ...) may carry the overload that would have accepted
+        // the call - silence instead of a false positive.
+        const declaration = current.valueDeclaration ?? current.declarations?.[0];
+        if (!declaration) return undefined;
+        for (const typeNode of superTypeNodesOf(declaration)) {
+          if (typeNode.kind !== SyntaxKind.TypeReference) return undefined;
+          const superSymbol = resolveTypeEntityName(
+            (typeNode as TypeReference).typeName,
+            declaration,
+            program,
+          );
+          if (!superSymbol) return undefined;
+          queue.push(superSymbol);
+        }
+      }
+      return overloads.length > 0 ? overloads : undefined;
+    };
+    const describeArities = (parameterLists: readonly (readonly Node[])[]): string => {
+      const arities = new Set<string>();
+      for (const parameters of parameterLists) {
+        const last = parameters.at(-1) as Parameter | undefined;
+        arities.add(last?.isVarArgs ? `${parameters.length - 1}+` : `${parameters.length}`);
+      }
+      return [...arities].sort((a, b) => Number.parseInt(a) - Number.parseInt(b)).join(" or ");
+    };
+    const reportArity = (after: Node, end: number, expected: string, argc: number): void => {
+      diagnostics.push(
+        createDiagnostic(
+          after.end,
+          Math.max(1, end - after.end),
+          Diagnostics.Invalid_number_of_arguments_expected_0_got_1,
+          expected,
+          String(argc),
+        ),
+      );
+    };
+
+    const checkCallArity = (call: CallExpression): void => {
+      const callee = call.expression;
+      const nameNode =
+        callee.kind === SyntaxKind.Identifier
+          ? (callee as Identifier)
+          : callee.kind === SyntaxKind.PropertyAccessExpression
+            ? (callee as PropertyAccessExpression).name
+            : undefined; // super()/this() and friends resolve elsewhere
+      if (!nameNode) return;
+      const symbol = resolveName(nameNode);
+      if (!symbol || !(symbol.flags & SymbolFlags.Method)) return;
+      // The overload set starts at the receiver's static type for a member
+      // call, and at the enclosing type for a bare call (a subtype may add
+      // overloads the declaring type does not have).
+      let start: Symbol | undefined;
+      if (callee.kind === SyntaxKind.PropertyAccessExpression) {
+        const receiver = getTypeOfExpression((callee as PropertyAccessExpression).expression);
+        start = receiver.kind === TypeKind.Class ? (receiver as ClassType).symbol : undefined;
+      } else {
+        start = enclosingTypeSymbol(call);
+      }
+      if (!start) return;
+      const overloads = projectOverloads(start, nameNode.text);
+      if (!overloads) return;
+      const argc = call.arguments.length;
+      const applicable = overloads.filter(o => arityAccepts(o.parameters, argc));
+      if (applicable.length === 0) {
+        reportArity(callee, call.end, describeArities(overloads.map(o => o.parameters)), argc);
+        return;
+      }
+      // With exactly one arity-surviving overload there is nothing to choose
+      // between: every argument must convert to its declared parameter type.
+      if (applicable.length === 1) checkArgumentTypes(call.arguments, applicable[0]!.parameters);
+    };
+
+    // Argument types against the single applicable signature. The same
+    // high-precision rules as checkAssignment apply (only the primitive
+    // boundary is judged), so a target-typed or unresolved argument stays
+    // silent; the trailing varargs position is skipped (array vs component).
+    const checkArgumentTypes = (args: readonly Node[], parameters: readonly Node[]): void => {
+      const last = parameters.at(-1) as Parameter | undefined;
+      const fixed = last?.isVarArgs ? parameters.length - 1 : parameters.length;
+      for (let i = 0; i < Math.min(args.length, fixed); i++) {
+        const parameter = parameters[i] as Parameter;
+        if (!parameter.symbol) continue;
+        checkAssignment(args[i]!, getTypeOfSymbol(parameter.symbol));
+      }
+    };
+
+    const checkCreationArity = (node: ObjectCreationExpression): void => {
+      if (node.type.kind !== SyntaxKind.TypeReference) return;
+      const symbol = resolveTypeEntityName((node.type as TypeReference).typeName, node, program);
+      if (!symbol || !isProjectSymbol(symbol)) return; // stubs are incomplete by design
+      const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+      if (!declaration) return;
+      const argc = (node.arguments ?? []).length;
+      if (declaration.kind === SyntaxKind.ClassDeclaration) {
+        const ctors = (declaration as ClassDeclaration).members.filter(
+          m => m.kind === SyntaxKind.ConstructorDeclaration,
+        ) as ConstructorDeclaration[];
+        // no declared constructor: the implicit default takes no arguments
+        const applicable = ctors.filter(c => arityAccepts(c.parameters, argc));
+        const ok = ctors.length === 0 ? argc === 0 : applicable.length > 0;
+        if (!ok) {
+          reportArity(
+            node.type,
+            node.classBody ? (node.arguments?.at(-1)?.end ?? node.type.end) : node.end,
+            ctors.length === 0 ? "0" : describeArities(ctors.map(c => c.parameters)),
+            argc,
+          );
+        } else if (applicable.length === 1 && !node.classBody) {
+          // an anonymous body changes nothing about ctor argument conversion,
+          // but stay conservative and only judge the plain creation
+          checkArgumentTypes(node.arguments ?? [], applicable[0]!.parameters);
+        }
+      } else if (declaration.kind === SyntaxKind.RecordDeclaration) {
+        const record = declaration as RecordDeclaration;
+        const hasDeclaredCtor = record.members.some(
+          m => m.kind === SyntaxKind.ConstructorDeclaration,
+        );
+        // a compact constructor's effective arity is the component count, which
+        // the declaration node does not carry - only the ctor-less case is safe
+        if (hasDeclaredCtor) return;
+        if (argc !== record.recordComponents.length) {
+          reportArity(node.type, node.end, String(record.recordComponents.length), argc);
+        }
+      }
+    };
+
+    const visit = (node: Node): void => {
+      switch (node.kind) {
+        case SyntaxKind.VariableDeclarator: {
+          const d = node as VariableDeclarator;
+          if (d.initializer && d.symbol && d.initializer.kind !== SyntaxKind.ArrayInitializer) {
+            checkAssignment(d.initializer, getTypeOfSymbol(d.symbol));
+          }
+          break;
+        }
+        case SyntaxKind.AssignmentExpression: {
+          const a = node as AssignmentExpression;
+          if (a.operatorToken === SyntaxKind.EqualsToken) {
+            checkAssignment(a.right, getTypeOfExpression(a.left));
+          }
+          break;
+        }
+        case SyntaxKind.CallExpression:
+          // A recovered parse has unreliable call shapes: no arity judgments.
+          if (sourceFile.parseDiagnostics.length === 0) checkCallArity(node as CallExpression);
+          break;
+        case SyntaxKind.ObjectCreationExpression:
+          if (sourceFile.parseDiagnostics.length === 0) {
+            checkCreationArity(node as ObjectCreationExpression);
+          }
+          break;
+        case SyntaxKind.ReturnStatement: {
+          const r = node as ReturnStatement;
+          if (r.expression) {
+            const ret = enclosingReturnType(node);
+            if (ret) checkAssignment(r.expression, ret);
+          }
+          break;
+        }
+        case SyntaxKind.MethodDeclaration: {
+          const m = node as MethodDeclaration;
+          if (hasOverrideAnnotation(m) && overrideStatus(m) === "missing") {
+            diagnostics.push(
+              createDiagnostic(
+                m.name.pos,
+                m.name.end - m.name.pos,
+                Diagnostics.Method_does_not_override_a_supertype_method,
+              ),
+            );
+          }
+          break;
+        }
+        case SyntaxKind.PropertyAccessExpression: {
+          const access = node as PropertyAccessExpression;
+          // super.* is modeled imprecisely (super resolves to Object), so skip it
+          // to avoid false positives on inherited members.
+          if (access.expression.kind !== SyntaxKind.SuperExpression) {
+            const receiver = getTypeOfExpression(access.expression);
+            if (
+              receiver.kind === TypeKind.Class &&
+              isClosedType(receiver as ClassType) &&
+              !lookupTypedMember(receiver as ClassType, access.name.text)
+            ) {
+              const start = skipTrivia(getSourceFileOfNode(access.name).text, access.name.pos);
+              diagnostics.push(
+                createDiagnostic(
+                  start,
+                  access.name.end - start,
+                  Diagnostics.Cannot_resolve_member_0_in_1,
+                  access.name.text,
+                  typeToString(receiver),
+                ),
+              );
+            }
+          }
+          break;
+        }
+        case SyntaxKind.SwitchExpression: {
+          const sw = node as SwitchExpression;
+          const missing = missingEnumLabels(sw);
+          if (missing && missing.length > 0) {
+            diagnostics.push(
+              createDiagnostic(
+                sw.expression.pos,
+                sw.expression.end - sw.expression.pos,
+                Diagnostics.Switch_expression_not_exhaustive_0,
+                typeToString(getTypeOfExpression(sw.expression)),
+              ),
+            );
+          }
+          break;
+        }
+        default:
+          break;
+      }
+      forEachChild(node, child => {
+        visit(child);
+        return undefined;
+      });
+    };
+
+    visit(sourceFile);
+
+    // Unused imports (warnings). A recovered parse may have dropped the very
+    // identifiers that would prove an import used - judge clean parses only.
+    if (sourceFile.parseDiagnostics.length === 0) {
+      for (const imp of findUnusedImports(sourceFile)) {
+        const start = skipTrivia(sourceFile.text, imp.pos);
+        diagnostics.push(
+          createDiagnostic(
+            start,
+            imp.end - start,
+            Diagnostics.Unused_import_0,
+            entityNameToString(imp.name),
+          ),
+        );
+      }
+    }
+    return diagnostics;
+  }
+
+  return {
+    resolveType,
+    getLambdaInfo,
+    getMethodRefInfo,
+    getTypeOfSymbol,
+    getTypeOfExpression,
+    resolveName,
+    isAssignableTo,
+    resolveCall,
+    resolveCallCandidates,
+    instantiatedSignatureOfCall,
+    parameterLabelsOf,
+    typeStringOfSymbol,
+    signatureOfSymbol,
+    signatureOfDeclaration,
+    getDocumentation,
+    getDocumentationOfNode,
+    getSemanticDiagnostics,
+  };
+}

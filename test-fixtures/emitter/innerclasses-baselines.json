@@ -1,0 +1,108 @@
+{
+  "IcAll": {
+    "IcAll": [
+      "static of S=class IcAll$S of class IcAll",
+      "class IcAll$1",
+      "Local=class IcAll$1Local",
+      "static final of R=class IcAll$R of class IcAll",
+      "static final of E=class IcAll$E of class IcAll",
+      "static of I=class IcAll$I of class IcAll",
+      "of Inner=class IcAll$Inner of class IcAll",
+      "of Deep=class IcAll$Inner$Deep of class IcAll$Inner"
+    ],
+    "IcAll$1": [
+      "class IcAll$1"
+    ],
+    "IcAll$1Local": [
+      "Local=class IcAll$1Local"
+    ],
+    "IcAll$E": [
+      "static final of E=class IcAll$E of class IcAll"
+    ],
+    "IcAll$I": [
+      "static of I=class IcAll$I of class IcAll"
+    ],
+    "IcAll$Inner": [
+      "of Inner=class IcAll$Inner of class IcAll",
+      "of Deep=class IcAll$Inner$Deep of class IcAll$Inner"
+    ],
+    "IcAll$Inner$Deep": [
+      "of Inner=class IcAll$Inner of class IcAll",
+      "of Deep=class IcAll$Inner$Deep of class IcAll$Inner"
+    ],
+    "IcAll$R": [
+      "static final of R=class IcAll$R of class IcAll",
+      "public static final of Lookup=class java/lang/invoke/MethodHandles$Lookup of class java/lang/invoke/MethodHandles"
+    ],
+    "IcAll$S": [
+      "static of S=class IcAll$S of class IcAll"
+    ]
+  },
+  "IcMany": {
+    "IcMany": [
+      "class IcMany$1",
+      "class IcMany$2",
+      "static of X=class IcMany$X of class IcMany",
+      "static of C=class IcMany$C of class IcMany",
+      "static of B=class IcMany$B of class IcMany",
+      "static of A=class IcMany$A of class IcMany",
+      "static of Y=class IcMany$X$Y of class IcMany$X",
+      "public static final of Lookup=class java/lang/invoke/MethodHandles$Lookup of class java/lang/invoke/MethodHandles"
+    ],
+    "IcMany$1": [
+      "class IcMany$1"
+    ],
+    "IcMany$2": [
+      "class IcMany$2"
+    ],
+    "IcMany$A": [
+      "static of A=class IcMany$A of class IcMany"
+    ],
+    "IcMany$B": [
+      "static of B=class IcMany$B of class IcMany"
+    ],
+    "IcMany$C": [
+      "static of C=class IcMany$C of class IcMany"
+    ],
+    "IcMany$X": [
+      "static of X=class IcMany$X of class IcMany",
+      "static of Y=class IcMany$X$Y of class IcMany$X"
+    ],
+    "IcMany$X$Y": [
+      "static of X=class IcMany$X of class IcMany",
+      "static of Y=class IcMany$X$Y of class IcMany$X"
+    ]
+  },
+  "IcCross": {
+    "IcCross": [
+      "static of B=class IcCross$B of class IcCross",
+      "static of A=class IcCross$A of class IcCross",
+      "static of Deep=class IcCross$A$Deep of class IcCross$A"
+    ],
+    "IcCross$A": [
+      "static of A=class IcCross$A of class IcCross",
+      "static of Deep=class IcCross$A$Deep of class IcCross$A"
+    ],
+    "IcCross$A$Deep": [
+      "static of A=class IcCross$A of class IcCross",
+      "static of Deep=class IcCross$A$Deep of class IcCross$A"
+    ],
+    "IcCross$B": [
+      "static of A=class IcCross$A of class IcCross",
+      "static of Deep=class IcCross$A$Deep of class IcCross$A",
+      "static of B=class IcCross$B of class IcCross"
+    ]
+  },
+  "IcIface": {
+    "IcIface": [
+      "public static of K=class IcIface$K of class IcIface",
+      "public static of Impl=class IcIface$Impl of class IcIface"
+    ],
+    "IcIface$Impl": [
+      "public static of Impl=class IcIface$Impl of class IcIface"
+    ],
+    "IcIface$K": [
+      "public static of K=class IcIface$K of class IcIface"
+    ]
+  }
+}

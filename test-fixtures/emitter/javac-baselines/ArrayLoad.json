@@ -1,0 +1,116 @@
+{
+  "ArrayLoad": {
+    "members": [
+      "ArrayLoad();",
+      "boolean z(boolean[], int);",
+      "byte b(byte[], int);",
+      "char c(char[], int);",
+      "double d(double[], int);",
+      "float f(float[], int);",
+      "int i(int[], int);",
+      "int len(int[]);",
+      "java.lang.Object o(java.lang.Object[], int);",
+      "long l(long[], int);",
+      "short s(short[], int);"
+    ],
+    "code": [
+      [
+        "ArrayLoad();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "int i(int[], int);",
+        [
+          "aload_1",
+          "iload_2",
+          "iaload",
+          "ireturn"
+        ]
+      ],
+      [
+        "long l(long[], int);",
+        [
+          "aload_1",
+          "iload_2",
+          "laload",
+          "lreturn"
+        ]
+      ],
+      [
+        "float f(float[], int);",
+        [
+          "aload_1",
+          "iload_2",
+          "faload",
+          "freturn"
+        ]
+      ],
+      [
+        "double d(double[], int);",
+        [
+          "aload_1",
+          "iload_2",
+          "daload",
+          "dreturn"
+        ]
+      ],
+      [
+        "byte b(byte[], int);",
+        [
+          "aload_1",
+          "iload_2",
+          "baload",
+          "ireturn"
+        ]
+      ],
+      [
+        "char c(char[], int);",
+        [
+          "aload_1",
+          "iload_2",
+          "caload",
+          "ireturn"
+        ]
+      ],
+      [
+        "short s(short[], int);",
+        [
+          "aload_1",
+          "iload_2",
+          "saload",
+          "ireturn"
+        ]
+      ],
+      [
+        "boolean z(boolean[], int);",
+        [
+          "aload_1",
+          "iload_2",
+          "baload",
+          "ireturn"
+        ]
+      ],
+      [
+        "java.lang.Object o(java.lang.Object[], int);",
+        [
+          "aload_1",
+          "iload_2",
+          "aaload",
+          "areturn"
+        ]
+      ],
+      [
+        "int len(int[]);",
+        [
+          "aload_1",
+          "arraylength",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}

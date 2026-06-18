@@ -1,0 +1,55 @@
+[submodule "test-corpus/graph-engine"]
+	path = test-fixtures/emitter/corpus/graph-engine
+	url = https://github.com/nikeee/graph-engine
+	shallow = true
+[submodule "test-corpus/algorithms-java"]
+	path = test-fixtures/emitter/corpus/algorithms-java
+	url = https://github.com/TheAlgorithms/Java.git
+	shallow = true
+[submodule "test-corpus/commons-lang"]
+	path = test-fixtures/emitter/corpus/commons-lang
+	url = https://github.com/apache/commons-lang.git
+	shallow = true
+[submodule "TypeScript"]
+	path = TypeScript
+	url = https://github.com/microsoft/TypeScript/
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/json-java"]
+	path = test-fixtures/emitter/corpus/json-java
+	url = https://github.com/stleary/JSON-java.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/commons-io"]
+	path = test-fixtures/emitter/corpus/commons-io
+	url = https://github.com/apache/commons-io.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/commons-collections"]
+	path = test-fixtures/emitter/corpus/commons-collections
+	url = https://github.com/apache/commons-collections.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/commons-codec"]
+	path = test-fixtures/emitter/corpus/commons-codec
+	url = https://github.com/apache/commons-codec.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/gson"]
+	path = test-fixtures/emitter/corpus/gson
+	url = https://github.com/google/gson.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/commons-csv"]
+	path = test-fixtures/emitter/corpus/commons-csv
+	url = https://github.com/apache/commons-csv.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/commons-cli"]
+	path = test-fixtures/emitter/corpus/commons-cli
+	url = https://github.com/apache/commons-cli.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/classgraph"]
+	path = test-fixtures/emitter/corpus/classgraph
+	url = https://github.com/classgraph/classgraph.git
+	shallow = true
+[submodule "test-fixtures/emitter/corpus/commons-imaging"]
+	path = test-fixtures/emitter/corpus/commons-imaging
+	url = https://github.com/apache/commons-imaging.git
+	shallow = true
+[submodule "TypeScript-Go"]
+	path = TypeScript-Go
+	url = https://github.com/microsoft/typescript-go.git

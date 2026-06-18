@@ -1,0 +1,85 @@
+{
+  "VarargsPack": {
+    "members": [
+      "VarargsPack();",
+      "int callEmpty();",
+      "int callPrim();",
+      "java.lang.String callMixed();",
+      "static int sum(int...);",
+      "static java.lang.String join(java.lang.String, java.lang.Object...);"
+    ],
+    "code": [
+      [
+        "VarargsPack();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "static int sum(int...);",
+        [
+          "aload_0",
+          "arraylength",
+          "ireturn"
+        ]
+      ],
+      [
+        "static java.lang.String join(java.lang.String, java.lang.Object...);",
+        [
+          "aload_0",
+          "areturn"
+        ]
+      ],
+      [
+        "int callPrim();",
+        [
+          "iconst_3",
+          "newarray int",
+          "dup",
+          "iconst_0",
+          "iconst_1",
+          "iastore",
+          "dup",
+          "iconst_1",
+          "iconst_2",
+          "iastore",
+          "dup",
+          "iconst_2",
+          "iconst_3",
+          "iastore",
+          "invokestatic # // Method sum:([I)I",
+          "ireturn"
+        ]
+      ],
+      [
+        "int callEmpty();",
+        [
+          "iconst_0",
+          "newarray int",
+          "invokestatic # // Method sum:([I)I",
+          "ireturn"
+        ]
+      ],
+      [
+        "java.lang.String callMixed();",
+        [
+          "ldc # // String -",
+          "iconst_2",
+          "anewarray # // class java/lang/Object",
+          "dup",
+          "iconst_0",
+          "ldc # // String a",
+          "aastore",
+          "dup",
+          "iconst_1",
+          "ldc # // String b",
+          "aastore",
+          "invokestatic # // Method join:(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;",
+          "areturn"
+        ]
+      ]
+    ]
+  }
+}

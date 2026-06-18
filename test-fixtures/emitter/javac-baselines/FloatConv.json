@@ -1,0 +1,89 @@
+{
+  "FloatConv": {
+    "members": [
+      "FloatConv();",
+      "double widenFloat(float);",
+      "double widenLong(long);",
+      "float fromInt(int);",
+      "float fromLong(long);",
+      "float narrowDouble(double);",
+      "int toInt(double);",
+      "int truncFloat(float);",
+      "long toLong(double);"
+    ],
+    "code": [
+      [
+        "FloatConv();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "int toInt(double);",
+        [
+          "dload_1",
+          "d2i",
+          "ireturn"
+        ]
+      ],
+      [
+        "long toLong(double);",
+        [
+          "dload_1",
+          "d2l",
+          "lreturn"
+        ]
+      ],
+      [
+        "double widenLong(long);",
+        [
+          "lload_1",
+          "l2d",
+          "dreturn"
+        ]
+      ],
+      [
+        "float fromLong(long);",
+        [
+          "lload_1",
+          "l2f",
+          "freturn"
+        ]
+      ],
+      [
+        "float fromInt(int);",
+        [
+          "iload_1",
+          "i2f",
+          "freturn"
+        ]
+      ],
+      [
+        "double widenFloat(float);",
+        [
+          "fload_1",
+          "f2d",
+          "dreturn"
+        ]
+      ],
+      [
+        "int truncFloat(float);",
+        [
+          "fload_1",
+          "f2i",
+          "ireturn"
+        ]
+      ],
+      [
+        "float narrowDouble(double);",
+        [
+          "dload_1",
+          "d2f",
+          "freturn"
+        ]
+      ]
+    ]
+  }
+}

@@ -1,0 +1,252 @@
+#!/usr/bin/env node
+
+// Unified entry point: parses arguments with Node's built-in util.parseArgs
+// and dispatches each subcommand to its own module under cli/ (one file per
+// command). The whole script runs as top-level await.
+
+import { parseArgs } from "node:util";
+
+import { loadConfig } from "../config.ts";
+import { runAdd } from "./add.ts";
+import { runCompileCommand } from "./compile.ts";
+import { runInit } from "./init.ts";
+import { runInstall } from "./install.ts";
+import { runLsp } from "./lsp.ts";
+import { runSearch } from "./search.ts";
+import { runCacheCommand } from "./cache.ts";
+import { runSelfUpgrade } from "./selfUpgrade.ts";
+import { runRage } from "./rage.ts";
+import { runUpdate } from "./update.ts";
+import { runAudit } from "./audit.ts";
+import { runLicenses } from "./licenses.ts";
+import { runPublish } from "./publish.ts";
+import { runVersion } from "./version.ts";
+import { runVerify } from "./verify.ts";
+import { formatDuration, painter } from "./style.ts";
+import { runTestCommand } from "./test.ts";
+import pkg from "../../package.json" with { type: "json" };
+
+const USAGE = `
+cappu ${pkg.version}
+
+Usage:
+  cappu init [-y] [--with-schema]    Scaffold a project: ask for the coordinates
+                                     and build output and write cappu.json (-y/--yes
+                                     takes defaults); --with-schema also writes
+                                     cappu.schema.json
+  cappu install [-v]                 Download the cappu.json dependencies (transitively)
+                                     into .cappu/lib/classes; prints a per-category
+                                     count, or each jar path with -v/--verbose
+  cappu update                       Bump declared dependencies to the newest stable
+                                     versions that keep the tree conflict-free
+  cappu version <major|minor|patch>  Bump the project version in cappu.json; at a
+                                     git repo root, also commit it and tag v<version>
+  cappu verify                       Check the installed lib jars against the
+                                     SHA-256 sums in cappu-lock.json
+  cappu audit [--no-cache] [--json]  Scan resolved dependencies for known
+                                     vulnerabilities (OSV); no fixing.
+                                     --no-cache ignores all caches (fresh scan);
+                                     --json emits the findings machine-readable
+  cappu licenses [--json]            Print every resolved dependency and the
+                                     license it ships under (best-effort SPDX);
+                                     --json emits it machine-readable
+  cappu add <configuration> <coord...>  Add one or more group:artifact[:version] to the
+                                     dependencies section (api, implementation,
+                                     annotationProcessor or testImplementation) and install them
+  cappu publish [--repo <url>]       Build the jar, generate its POM, and upload
+                                     both to a Maven registry (needs groupId/
+                                     artifactId/version in cappu.json + creds).
+                                     Registry: --repo, else $CAPPU_PUBLISH_REGISTRY,
+                                     else publishRepository, else Maven Central
+  cappu search <query>               Search the configured package sources; prints
+                                     group:artifact@latest-version per match
+  cappu test                         Compile src/test/java and run the JUnit
+                                     Platform console launcher over it
+  cappu self-upgrade                 Replace this binary with the latest CD build
+                                     (needs GITHUB_TOKEN or \`gh auth login\`)
+  cappu rage                         Open the issue tracker in your default browser
+  cappu cache clean                  Remove the global download cache
+  cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
+  cappu compile [options] [file...]  Compile .java files to .class bytecode; with no
+                                     files, compile everything under the configured
+                                     sourcePaths (a project build)
+
+Options:
+  -c, --config <file>   Project config (default: ./cappu.json, JSONC).
+                        Sections: "compilerOptions" (classPath, sourcePaths,
+                        quiet, experimentalCompiler) and "lspOptions"
+                        (inlayHints). Command-line flags take precedence.
+
+Lsp options:
+  -p, --port <port>     Listen on a TCP port instead of stdio; the first client
+                        to connect gets the session (the server exits when it
+                        disconnects)
+
+Compile options:
+  -o, --output <kind>   What to produce in ./dist: "classes" (a
+                        package tree usable as java -cp <dir>), "jar", or
+                        "fat-jar" (includes the dependency jars' contents)
+      --artifact <name> Jar base name in ./dist (e.g. "app" -> dist/app.jar);
+                        default <artifactId>-<version> or the project dir name
+  -q, --quiet           Do not print the path of each emitted .class file
+
+  (cappu's experimental compiler and its failOnDegrade / validate options are
+  configured in cappu.json under compilerOptions.experimentalCompiler.)
+
+Global:
+  -h, --help            Show this help
+      --version         Show the version
+`.trimStart();
+
+// The IIFE keeps parseArgs's precise inferred result type (the catch path is
+// `never`); a top-level `let` annotation would widen `values` to the generic
+// union and lose the per-option string/boolean types.
+const { values, positionals } = (() => {
+  try {
+    return parseArgs({
+      args: process.argv.slice(2),
+      allowPositionals: true,
+      options: {
+        config: { type: "string", short: "c" },
+        port: { type: "string", short: "p" },
+        output: { type: "string", short: "o" },
+        artifact: { type: "string" },
+        // No defaults: an absent flag must stay undefined so cappu.json
+        // can supply the value (an explicit flag always wins).
+        quiet: { type: "boolean", short: "q" },
+        verbose: { type: "boolean", short: "v" },
+        "with-schema": { type: "boolean", default: false },
+        yes: { type: "boolean", short: "y", default: false },
+        json: { type: "boolean", default: false },
+        "no-cache": { type: "boolean", default: false },
+        repo: { type: "string" },
+        help: { type: "boolean", short: "h", default: false },
+        version: { type: "boolean", default: false },
+      },
+    });
+  } catch (e) {
+    // parseArgs throws on an unknown flag or a value that looks like a flag
+    // (e.g. --port=-1); turn its message into a friendly one rather than a
+    // bundled-source stack trace.
+    process.stderr.write(`cappu: ${(e as Error).message}\nRun \`cappu --help\` for usage.\n`);
+    process.exit(2);
+  }
+})();
+
+const [command, ...files] = positionals;
+
+if (values.version) {
+  process.stdout.write(`${pkg.version}\n`);
+  process.exit(0);
+}
+if (values.help || command === undefined) {
+  process.stdout.write(USAGE);
+  process.exit(values.help ? 0 : 2);
+}
+
+// Print how long the dependency/build commands took, however they exit. lsp
+// runs until the client disconnects, so a duration there is meaningless.
+const TIMED_COMMANDS = new Set([
+  "install",
+  "update",
+  "add",
+  "audit",
+  "licenses",
+  "publish",
+  "verify",
+  "compile",
+  "test",
+]);
+if (TIMED_COMMANDS.has(command)) {
+  const startedAt = performance.now();
+  const paint = painter(process.stderr);
+  process.on("exit", () => {
+    process.stderr.write(
+      paint("dim", `done in ${formatDuration(performance.now() - startedAt)}\n`),
+    );
+  });
+}
+
+// init, cache, self-upgrade and rage run before loadConfig: none depends on
+// (nor should be blocked by) an existing, possibly broken project config -
+// self-upgrade is global and must work even when the cwd's cappu.json is bad.
+// Each handler exits the process, so control never falls through to loadConfig.
+switch (command) {
+  case "init":
+    await runInit(values.config, values["with-schema"], { yes: values.yes });
+    break; // runInit exits; break keeps the (async) case from "falling through"
+  case "cache":
+    runCacheCommand(files);
+  // falls through: runCacheCommand exits the process (never returns)
+  case "self-upgrade":
+    await runSelfUpgrade();
+    break;
+  case "rage":
+    await runRage();
+    break;
+}
+
+let config;
+try {
+  config = loadConfig(values.config);
+} catch (e) {
+  process.stderr.write(`cappu: ${(e as Error).message}\n`);
+  process.exit(2);
+}
+
+// verify needs config but returns `never`, so it runs here (not in the switch,
+// where a never-returning case makes the break unreachable).
+if (command === "verify") runVerify(config);
+
+switch (command) {
+  case "add":
+    await runAdd(files[0], files.slice(1), values.config, config);
+    break;
+  case "install":
+    await runInstall(config, { verbose: values.verbose });
+    break;
+  case "update":
+    await runUpdate(values.config, config);
+    break;
+  case "version":
+    await runVersion(files[0], values.config, config);
+    break;
+  case "audit":
+    await runAudit(config, { noCache: values["no-cache"], json: values.json });
+    break;
+  case "licenses":
+    await runLicenses(config, { json: values.json });
+    break;
+  case "publish":
+    await runPublish(config, { repo: values.repo });
+    break;
+  case "search": {
+    const query = files.join(" ").trim();
+    if (query === "") {
+      process.stderr.write("cappu: search needs a query, e.g. `cappu search gson`\n");
+      process.exit(2);
+    }
+    await runSearch(query, config);
+    break;
+  }
+  case "lsp":
+    await runLsp(config, values.port);
+    break;
+  case "test":
+    await runTestCommand(config);
+    break;
+  case "compile":
+    await runCompileCommand(
+      files,
+      {
+        output: values.output,
+        artifact: values.artifact,
+        quiet: values.quiet,
+      },
+      config,
+    );
+    break;
+  default:
+    process.stderr.write(`cappu: unknown command '${command}'\n\n${USAGE}`);
+    process.exit(2);
+}

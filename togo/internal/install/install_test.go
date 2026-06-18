@@ -1,0 +1,160 @@
+package install
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/lockfile"
+	"github.com/nikeee/cappu/internal/packages"
+)
+
+// fakeSource serves metadata, jar bytes and version lists from in-memory maps.
+type fakeSource struct {
+	name     string
+	meta     map[packages.CoordinateString]packages.PackageMetadata
+	jars     map[packages.CoordinateString][]byte
+	versions map[string][]string // "group:artifact" -> versions, oldest first
+}
+
+func (s *fakeSource) Name() string                                  { return s.name }
+func (s *fakeSource) Search(string) ([]packages.Coordinates, error) { return nil, nil }
+
+func (s *fakeSource) ListVersions(groupID, artifactID string) ([]string, error) {
+	return s.versions[groupID+":"+artifactID], nil
+}
+
+func (s *fakeSource) GetMetadata(c packages.Coordinates) (*packages.PackageMetadata, error) {
+	if m, ok := s.meta[c.String()]; ok {
+		return &m, nil
+	}
+	return nil, nil
+}
+
+func (s *fakeSource) GetArtifact(c packages.Coordinates) ([]byte, error) {
+	return s.jars[c.String()], nil
+}
+
+func coord(spec string) packages.Coordinates {
+	p := strings.Split(spec, ":")
+	return packages.NewCoordinates(p[0], p[1], p[2])
+}
+
+func meta(spec string, deps ...string) packages.PackageMetadata {
+	decls := make([]packages.DependencyDeclaration, 0, len(deps))
+	for _, d := range deps {
+		decls = append(decls, packages.DependencyDeclaration{Coordinates: coord(d)})
+	}
+	return packages.PackageMetadata{Coordinates: coord(spec), Dependencies: decls}
+}
+
+// project writes a cappu.json with the given implementation deps and isolates
+// the package store under a temp dir.
+func project(t *testing.T, body string) *config.Config {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("CAPPU_PACKAGE_STORE", filepath.Join(t.TempDir(), "store"))
+	if err := os.WriteFile(filepath.Join(dir, config.DefaultConfigName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func source() *fakeSource {
+	return &fakeSource{
+		name: "test",
+		meta: map[packages.CoordinateString]packages.PackageMetadata{
+			"org.a:a:1": meta("org.a:a:1", "org.b:b:1"),
+			"org.b:b:1": meta("org.b:b:1"),
+		},
+		jars: map[packages.CoordinateString][]byte{
+			"org.a:a:1": []byte("jar-a"),
+			"org.b:b:1": []byte("jar-b"),
+		},
+	}
+}
+
+func TestInstallResolvesDownloadsAndWritesLock(t *testing.T) {
+	cfg := project(t, `{"dependencies":{"implementation":{"org.a:a":"1"}}}`)
+	res, err := Dependencies(cfg, []packages.PackageSource{source()}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FromLock {
+		t.Error("first install should not be from a lock")
+	}
+	if len(res.InstalledByCategory.Compile) != 2 {
+		t.Errorf("installed %d compile jars, want 2", len(res.InstalledByCategory.Compile))
+	}
+	for _, name := range []string{"a-1.jar", "b-1.jar"} {
+		if _, err := os.Stat(filepath.Join(cfg.ResolvePath(config.DefaultClassPath), name)); err != nil {
+			t.Errorf("expected %s installed: %v", name, err)
+		}
+	}
+	lock := lockfile.Read(cfg)
+	if lock == nil || len(lock.Packages) != 2 {
+		t.Fatalf("lockfile not written with 2 packages: %+v", lock)
+	}
+	if lock.Packages[0].Sha256 != lockfile.Sha256Of([]byte("jar-a")) {
+		t.Errorf("locked sha mismatch for a")
+	}
+}
+
+func TestInstallFromLockReused(t *testing.T) {
+	cfg := project(t, `{"dependencies":{"implementation":{"org.a:a":"1"}}}`)
+	if _, err := Dependencies(cfg, []packages.PackageSource{source()}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Dependencies(cfg, []packages.PackageSource{source()}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.FromLock {
+		t.Error("second install should reuse the lock")
+	}
+	if len(res.IntegrityFailures) != 0 {
+		t.Errorf("unexpected integrity failures: %v", res.IntegrityFailures)
+	}
+}
+
+func TestInstallIntegrityFailure(t *testing.T) {
+	cfg := project(t, `{"dependencies":{"implementation":{"org.a:a":"1"}}}`)
+	if _, err := Dependencies(cfg, []packages.PackageSource{source()}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	// Corrupt the locked sha for one package, then reinstall: the download no
+	// longer matches the lock.
+	lock := lockfile.Read(cfg)
+	lock.Packages[0].Sha256 = "deadbeef"
+	if err := lockfile.Write(cfg, lock); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Dependencies(cfg, []packages.PackageSource{source()}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.IntegrityFailures) != 1 {
+		t.Errorf("expected 1 integrity failure, got %v", res.IntegrityFailures)
+	}
+}
+
+func TestInstallMissingDependencyNoLock(t *testing.T) {
+	cfg := project(t, `{"dependencies":{"implementation":{"org.gone:gone":"9"}}}`)
+	res, err := Dependencies(cfg, []packages.PackageSource{source()}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Resolution.Missing) != 1 {
+		t.Errorf("expected 1 missing, got %v", res.Resolution.Missing)
+	}
+	// resolution incomplete -> no lockfile written
+	if lockfile.Read(cfg) != nil {
+		t.Error("lockfile should not be written when resolution is incomplete")
+	}
+}

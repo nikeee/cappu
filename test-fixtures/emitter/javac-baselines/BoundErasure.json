@@ -1,0 +1,55 @@
+{
+  "BoundErasure": {
+    "members": [
+      "BoundErasure();",
+      "T get();",
+      "T v;",
+      "int len();",
+      "static <U extends java.lang.Comparable<U>> int cmp(U, U);",
+      "static <V> V id(V);"
+    ],
+    "code": [
+      [
+        "BoundErasure();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "T get();",
+        [
+          "aload_0",
+          "getfield # // Field v:Ljava/lang/CharSequence;",
+          "areturn"
+        ]
+      ],
+      [
+        "int len();",
+        [
+          "aload_0",
+          "getfield # // Field v:Ljava/lang/CharSequence;",
+          "invokeinterface #, 1 // InterfaceMethod java/lang/CharSequence.length:()I",
+          "ireturn"
+        ]
+      ],
+      [
+        "static <U extends java.lang.Comparable<U>> int cmp(U, U);",
+        [
+          "aload_0",
+          "aload_1",
+          "invokeinterface #, 2 // InterfaceMethod java/lang/Comparable.compareTo:(Ljava/lang/Object;)I",
+          "ireturn"
+        ]
+      ],
+      [
+        "static <V> V id(V);",
+        [
+          "aload_0",
+          "areturn"
+        ]
+      ]
+    ]
+  }
+}

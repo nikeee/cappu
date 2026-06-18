@@ -1,0 +1,52 @@
+{
+  "CastInstance": {
+    "members": [
+      "CastInstance();",
+      "boolean isStr(java.lang.Object);",
+      "int[] arr(java.lang.Object);",
+      "java.lang.CharSequence up(java.lang.String);",
+      "java.lang.String down(java.lang.Object);"
+    ],
+    "code": [
+      [
+        "CastInstance();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "java.lang.String down(java.lang.Object);",
+        [
+          "aload_1",
+          "checkcast # // class java/lang/String",
+          "areturn"
+        ]
+      ],
+      [
+        "java.lang.CharSequence up(java.lang.String);",
+        [
+          "aload_1",
+          "areturn"
+        ]
+      ],
+      [
+        "boolean isStr(java.lang.Object);",
+        [
+          "aload_1",
+          "instanceof # // class java/lang/String",
+          "ireturn"
+        ]
+      ],
+      [
+        "int[] arr(java.lang.Object);",
+        [
+          "aload_1",
+          "checkcast # // class \"[I\"",
+          "areturn"
+        ]
+      ]
+    ]
+  }
+}

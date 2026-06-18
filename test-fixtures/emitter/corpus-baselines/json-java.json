@@ -1,0 +1,3386 @@
+{
+  "org.json.CDL": [
+    [
+      "public org.json.CDL();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public static java.lang.String rowToString(org.json.JSONArray);",
+      [
+        "aload_0",
+        "bipush 44",
+        "invokestatic # // Method rowToString:(Lorg/json/JSONArray;C)Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.JSONArray": [
+    [
+      "public org.json.JSONArray();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONArray(java.util.Collection<?>);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "new # // class org/json/JSONParserConfiguration",
+        "dup",
+        "invokespecial # // Method org/json/JSONParserConfiguration.\"<init>\":()V",
+        "invokespecial # // Method \"<init>\":(Ljava/util/Collection;ILorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONArray(java.util.Collection<?>, org.json.JSONParserConfiguration);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "aload_2",
+        "invokespecial # // Method \"<init>\":(Ljava/util/Collection;ILorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONArray(java.lang.Iterable<?>);",
+      [
+        "aload_0",
+        "invokespecial # // Method \"<init>\":()V",
+        "aload_1",
+        "ifnonnull 9",
+        "return",
+        "aload_0",
+        "aload_1",
+        "iconst_1",
+        "invokevirtual # // Method addAll:(Ljava/lang/Iterable;Z)V",
+        "return"
+      ]
+    ],
+    [
+      "public java.util.Iterator<java.lang.Object> iterator();",
+      [
+        "aload_0",
+        "getfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "invokevirtual # // Method java/util/ArrayList.iterator:()Ljava/util/Iterator;",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isNull(int);",
+      [
+        "getstatic # // Field org/json/JSONObject.NULL:Ljava/lang/Object;",
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method opt:(I)Ljava/lang/Object;",
+        "invokevirtual # // Method java/lang/Object.equals:(Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int length();",
+      [
+        "aload_0",
+        "getfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "invokevirtual # // Method java/util/ArrayList.size:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void clear();",
+      [
+        "aload_0",
+        "getfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "invokevirtual # // Method java/util/ArrayList.clear:()V",
+        "return"
+      ]
+    ],
+    [
+      "public boolean optBoolean(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "iconst_0",
+        "invokevirtual # // Method optBoolean:(IZ)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean optBoolean(int, boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method getBoolean:(I)Z",
+        "ireturn",
+        "astore_3",
+        "iload_2",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.Boolean optBooleanObject(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "iconst_0",
+        "invokestatic # // Method java/lang/Boolean.valueOf:(Z)Ljava/lang/Boolean;",
+        "invokevirtual # // Method optBooleanObject:(ILjava/lang/Boolean;)Ljava/lang/Boolean;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Boolean optBooleanObject(int, java.lang.Boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method getBoolean:(I)Z",
+        "invokestatic # // Method java/lang/Boolean.valueOf:(Z)Ljava/lang/Boolean;",
+        "areturn",
+        "astore_3",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public double optDouble(int, double);",
+      [
+        "aload_0",
+        "iload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(ILjava/lang/Number;)Ljava/lang/Number;",
+        "astore 4",
+        "aload 4",
+        "ifnonnull 15",
+        "dload_2",
+        "dreturn",
+        "aload 4",
+        "invokevirtual # // Method java/lang/Number.doubleValue:()D",
+        "dreturn"
+      ]
+    ],
+    [
+      "public java.lang.Double optDoubleObject(int, java.lang.Double);",
+      [
+        "aload_0",
+        "iload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(ILjava/lang/Number;)Ljava/lang/Number;",
+        "astore_3",
+        "aload_3",
+        "ifnonnull 13",
+        "aload_2",
+        "areturn",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Number.doubleValue:()D",
+        "invokestatic # // Method java/lang/Double.valueOf:(D)Ljava/lang/Double;",
+        "areturn"
+      ]
+    ],
+    [
+      "public float optFloat(int, float);",
+      [
+        "aload_0",
+        "iload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(ILjava/lang/Number;)Ljava/lang/Number;",
+        "astore_3",
+        "aload_3",
+        "ifnonnull 13",
+        "fload_2",
+        "freturn",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Number.floatValue:()F",
+        "freturn"
+      ]
+    ],
+    [
+      "public java.lang.Float optFloatObject(int, java.lang.Float);",
+      [
+        "aload_0",
+        "iload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(ILjava/lang/Number;)Ljava/lang/Number;",
+        "astore_3",
+        "aload_3",
+        "ifnonnull 13",
+        "aload_2",
+        "areturn",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Number.floatValue:()F",
+        "invokestatic # // Method java/lang/Float.valueOf:(F)Ljava/lang/Float;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int optInt(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "iconst_0",
+        "invokevirtual # // Method optInt:(II)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int optInt(int, int);",
+      [
+        "aload_0",
+        "iload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(ILjava/lang/Number;)Ljava/lang/Number;",
+        "astore_3",
+        "aload_3",
+        "ifnonnull 13",
+        "iload_2",
+        "ireturn",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Number.intValue:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.Integer optIntegerObject(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "iconst_0",
+        "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
+        "invokevirtual # // Method optIntegerObject:(ILjava/lang/Integer;)Ljava/lang/Integer;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Integer optIntegerObject(int, java.lang.Integer);",
+      [
+        "aload_0",
+        "iload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(ILjava/lang/Number;)Ljava/lang/Number;",
+        "astore_3",
+        "aload_3",
+        "ifnonnull 13",
+        "aload_2",
+        "areturn",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Number.intValue:()I",
+        "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.math.BigInteger optBigInteger(int, java.math.BigInteger);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method opt:(I)Ljava/lang/Object;",
+        "astore_3",
+        "aload_3",
+        "aload_2",
+        "invokestatic # // Method org/json/JSONObject.objectToBigInteger:(Ljava/lang/Object;Ljava/math/BigInteger;)Ljava/math/BigInteger;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.math.BigDecimal optBigDecimal(int, java.math.BigDecimal);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method opt:(I)Ljava/lang/Object;",
+        "astore_3",
+        "aload_3",
+        "aload_2",
+        "invokestatic # // Method org/json/JSONObject.objectToBigDecimal:(Ljava/lang/Object;Ljava/math/BigDecimal;)Ljava/math/BigDecimal;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray optJSONArray(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "aconst_null",
+        "invokevirtual # // Method optJSONArray:(ILorg/json/JSONArray;)Lorg/json/JSONArray;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray optJSONArray(int, org.json.JSONArray);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method opt:(I)Ljava/lang/Object;",
+        "astore_3",
+        "aload_3",
+        "instanceof # // class org/json/JSONArray",
+        "ifeq 20",
+        "aload_3",
+        "checkcast # // class org/json/JSONArray",
+        "goto 21",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONObject optJSONObject(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "aconst_null",
+        "invokevirtual # // Method optJSONObject:(ILorg/json/JSONObject;)Lorg/json/JSONObject;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONObject optJSONObject(int, org.json.JSONObject);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method opt:(I)Ljava/lang/Object;",
+        "astore_3",
+        "aload_3",
+        "instanceof # // class org/json/JSONObject",
+        "ifeq 20",
+        "aload_3",
+        "checkcast # // class org/json/JSONObject",
+        "goto 21",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public long optLong(int, long);",
+      [
+        "aload_0",
+        "iload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(ILjava/lang/Number;)Ljava/lang/Number;",
+        "astore 4",
+        "aload 4",
+        "ifnonnull 15",
+        "lload_2",
+        "lreturn",
+        "aload 4",
+        "invokevirtual # // Method java/lang/Number.longValue:()J",
+        "lreturn"
+      ]
+    ],
+    [
+      "public java.lang.Long optLongObject(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "lconst_0",
+        "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+        "invokevirtual # // Method optLongObject:(ILjava/lang/Long;)Ljava/lang/Long;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Long optLongObject(int, java.lang.Long);",
+      [
+        "aload_0",
+        "iload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(ILjava/lang/Number;)Ljava/lang/Number;",
+        "astore_3",
+        "aload_3",
+        "ifnonnull 13",
+        "aload_2",
+        "areturn",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Number.longValue:()J",
+        "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Number optNumber(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(ILjava/lang/Number;)Ljava/lang/Number;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Number optNumber(int, java.lang.Number);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method opt:(I)Ljava/lang/Object;",
+        "astore_3",
+        "getstatic # // Field org/json/JSONObject.NULL:Ljava/lang/Object;",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Object.equals:(Ljava/lang/Object;)Z",
+        "ifeq 18",
+        "aload_2",
+        "areturn",
+        "aload_3",
+        "instanceof # // class java/lang/Number",
+        "ifeq 30",
+        "aload_3",
+        "checkcast # // class java/lang/Number",
+        "areturn",
+        "aload_3",
+        "instanceof # // class java/lang/String",
+        "ifeq 49",
+        "aload_3",
+        "checkcast # // class java/lang/String",
+        "invokestatic # // Method org/json/JSONObject.stringToNumber:(Ljava/lang/String;)Ljava/lang/Number;",
+        "areturn",
+        "astore 4",
+        "aload_2",
+        "areturn",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String optString(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "ldc_w # // String",
+        "invokevirtual # // Method optString:(ILjava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String optString(int, java.lang.String);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method opt:(I)Ljava/lang/Object;",
+        "astore_3",
+        "getstatic # // Field org/json/JSONObject.NULL:Ljava/lang/Object;",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Object.equals:(Ljava/lang/Object;)Z",
+        "ifeq 20",
+        "aload_2",
+        "goto 24",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Object.toString:()Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray put(java.util.Collection<?>);",
+      [
+        "aload_0",
+        "new # // class org/json/JSONArray",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method \"<init>\":(Ljava/util/Collection;)V",
+        "invokevirtual # // Method put:(Ljava/lang/Object;)Lorg/json/JSONArray;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray put(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
+        "invokevirtual # // Method put:(Ljava/lang/Object;)Lorg/json/JSONArray;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray put(long);",
+      [
+        "aload_0",
+        "lload_1",
+        "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+        "invokevirtual # // Method put:(Ljava/lang/Object;)Lorg/json/JSONArray;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray put(java.util.Map<?, ?>);",
+      [
+        "aload_0",
+        "new # // class org/json/JSONObject",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONObject.\"<init>\":(Ljava/util/Map;)V",
+        "invokevirtual # // Method put:(Ljava/lang/Object;)Lorg/json/JSONArray;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray put(java.lang.Object);",
+      [
+        "aload_1",
+        "invokestatic # // Method org/json/JSONObject.testValidity:(Ljava/lang/Object;)V",
+        "aload_0",
+        "getfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "aload_1",
+        "invokevirtual # // Method java/util/ArrayList.add:(Ljava/lang/Object;)Z",
+        "pop",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray putAll(java.util.Collection<?>);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "invokevirtual # // Method addAll:(Ljava/lang/Iterable;Z)V",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray putAll(java.lang.Iterable<?>);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "invokevirtual # // Method addAll:(Ljava/lang/Iterable;Z)V",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray putAll(org.json.JSONArray);",
+      [
+        "aload_0",
+        "getfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "aload_1",
+        "getfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "invokevirtual # // Method java/util/ArrayList.addAll:(Ljava/util/Collection;)Z",
+        "pop",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Object query(java.lang.String);",
+      [
+        "aload_0",
+        "new # // class org/json/JSONPointer",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONPointer.\"<init>\":(Ljava/lang/String;)V",
+        "invokevirtual # // Method query:(Lorg/json/JSONPointer;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Object query(org.json.JSONPointer);",
+      [
+        "aload_1",
+        "aload_0",
+        "invokevirtual # // Method org/json/JSONPointer.queryFrom:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Object optQuery(java.lang.String);",
+      [
+        "aload_0",
+        "new # // class org/json/JSONPointer",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONPointer.\"<init>\":(Ljava/lang/String;)V",
+        "invokevirtual # // Method optQuery:(Lorg/json/JSONPointer;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Object optQuery(org.json.JSONPointer);",
+      [
+        "aload_1",
+        "aload_0",
+        "invokevirtual # // Method org/json/JSONPointer.queryFrom:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn",
+        "astore_2",
+        "aconst_null",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "iconst_0",
+        "invokevirtual # // Method toString:(I)Ljava/lang/String;",
+        "areturn",
+        "astore_1",
+        "aconst_null",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isEmpty();",
+      [
+        "aload_0",
+        "getfield # // Field myArrayList:Ljava/util/ArrayList;",
+        "invokevirtual # // Method java/util/ArrayList.isEmpty:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "private void addAll(java.lang.Iterable<?>, boolean);",
+      [
+        "iload_2",
+        "ifeq 44",
+        "aload_1",
+        "invokeinterface #, 1 // InterfaceMethod java/lang/Iterable.iterator:()Ljava/util/Iterator;",
+        "astore_3",
+        "aload_3",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ifeq 41",
+        "aload_3",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;",
+        "astore 4",
+        "aload_0",
+        "aload 4",
+        "invokestatic # // Method org/json/JSONObject.wrap:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "invokevirtual # // Method put:(Ljava/lang/Object;)Lorg/json/JSONArray;",
+        "pop",
+        "goto 11",
+        "goto 78",
+        "aload_1",
+        "invokeinterface #, 1 // InterfaceMethod java/lang/Iterable.iterator:()Ljava/util/Iterator;",
+        "astore_3",
+        "aload_3",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.hasNext:()Z",
+        "ifeq 78",
+        "aload_3",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;",
+        "astore 4",
+        "aload_0",
+        "aload 4",
+        "invokevirtual # // Method put:(Ljava/lang/Object;)Lorg/json/JSONArray;",
+        "pop",
+        "goto 51",
+        "return"
+      ]
+    ],
+    [
+      "private void addAll(java.lang.Object, boolean, int);",
+      [
+        "aload_0",
+        "aload_1",
+        "iload_2",
+        "iload_3",
+        "new # // class org/json/JSONParserConfiguration",
+        "dup",
+        "invokespecial # // Method org/json/JSONParserConfiguration.\"<init>\":()V",
+        "invokevirtual # // Method addAll:(Ljava/lang/Object;ZILorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.JSONException": [
+    [
+      "public org.json.JSONException(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONException(java.lang.String, java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONException(java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method java/lang/Throwable.getMessage:()Ljava/lang/String;",
+        "aload_1",
+        "invokespecial # // Method java/lang/RuntimeException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.JSONObject$Null": [
+    [
+      "public int hashCode();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "ldc # // String null",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.JSONObject": [
+    [
+      "public org.json.JSONObject();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/HashMap",
+        "dup",
+        "invokespecial # // Method java/util/HashMap.\"<init>\":()V",
+        "putfield # // Field map:Ljava/util/Map;",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONObject(java.util.Map<?, ?>);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "new # // class org/json/JSONParserConfiguration",
+        "dup",
+        "invokespecial # // Method org/json/JSONParserConfiguration.\"<init>\":()V",
+        "invokespecial # // Method \"<init>\":(Ljava/util/Map;ILorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONObject(java.util.Map<?, ?>, org.json.JSONParserConfiguration);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "aload_2",
+        "invokespecial # // Method \"<init>\":(Ljava/util/Map;ILorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONObject(java.lang.Object);",
+      [
+        "aload_0",
+        "invokespecial # // Method \"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "new # // class org/json/JSONParserConfiguration",
+        "dup",
+        "invokespecial # // Method org/json/JSONParserConfiguration.\"<init>\":()V",
+        "invokevirtual # // Method populateMap:(Ljava/lang/Object;Lorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONObject(java.lang.Object, org.json.JSONParserConfiguration);",
+      [
+        "aload_0",
+        "invokespecial # // Method \"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokevirtual # // Method populateMap:(Ljava/lang/Object;Lorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "private org.json.JSONObject(java.lang.Object, java.util.Set<java.lang.Object>);",
+      [
+        "aload_0",
+        "invokespecial # // Method \"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "new # // class org/json/JSONParserConfiguration",
+        "dup",
+        "invokespecial # // Method org/json/JSONParserConfiguration.\"<init>\":()V",
+        "invokevirtual # // Method populateMap:(Ljava/lang/Object;Ljava/util/Set;Lorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "public boolean has(java.lang.String);",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Map.containsKey:(Ljava/lang/Object;)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.util.Set<java.lang.String> keySet();",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.keySet:()Ljava/util/Set;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int length();",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.size:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void clear();",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.clear:()V",
+        "return"
+      ]
+    ],
+    [
+      "public boolean isEmpty();",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.isEmpty:()Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray names();",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.isEmpty:()Z",
+        "ifeq 14",
+        "aconst_null",
+        "areturn",
+        "new # // class org/json/JSONArray",
+        "dup",
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "invokeinterface #, 1 // InterfaceMethod java/util/Map.keySet:()Ljava/util/Set;",
+        "invokespecial # // Method org/json/JSONArray.\"<init>\":(Ljava/util/Collection;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Object opt(java.lang.String);",
+      [
+        "aload_1",
+        "ifnonnull 8",
+        "aconst_null",
+        "goto 18",
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Map.get:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean optBoolean(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "invokevirtual # // Method optBoolean:(Ljava/lang/String;Z)Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean optBoolean(java.lang.String, boolean);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method opt:(Ljava/lang/String;)Ljava/lang/Object;",
+        "astore_3",
+        "getstatic # // Field NULL:Ljava/lang/Object;",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Object.equals:(Ljava/lang/Object;)Z",
+        "ifeq 18",
+        "iload_2",
+        "ireturn",
+        "aload_3",
+        "instanceof # // class java/lang/Boolean",
+        "ifeq 33",
+        "aload_3",
+        "checkcast # // class java/lang/Boolean",
+        "invokevirtual # // Method java/lang/Boolean.booleanValue:()Z",
+        "ireturn",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method getBoolean:(Ljava/lang/String;)Z",
+        "ireturn",
+        "astore 4",
+        "iload_2",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.Boolean optBooleanObject(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "invokestatic # // Method java/lang/Boolean.valueOf:(Z)Ljava/lang/Boolean;",
+        "invokevirtual # // Method optBooleanObject:(Ljava/lang/String;Ljava/lang/Boolean;)Ljava/lang/Boolean;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Boolean optBooleanObject(java.lang.String, java.lang.Boolean);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method opt:(Ljava/lang/String;)Ljava/lang/Object;",
+        "astore_3",
+        "getstatic # // Field NULL:Ljava/lang/Object;",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Object.equals:(Ljava/lang/Object;)Z",
+        "ifeq 18",
+        "aload_2",
+        "areturn",
+        "aload_3",
+        "instanceof # // class java/lang/Boolean",
+        "ifeq 36",
+        "aload_3",
+        "checkcast # // class java/lang/Boolean",
+        "invokevirtual # // Method java/lang/Boolean.booleanValue:()Z",
+        "invokestatic # // Method java/lang/Boolean.valueOf:(Z)Ljava/lang/Boolean;",
+        "areturn",
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method getBoolean:(Ljava/lang/String;)Z",
+        "invokestatic # // Method java/lang/Boolean.valueOf:(Z)Ljava/lang/Boolean;",
+        "areturn",
+        "astore 4",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.math.BigDecimal optBigDecimal(java.lang.String, java.math.BigDecimal);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method opt:(Ljava/lang/String;)Ljava/lang/Object;",
+        "astore_3",
+        "aload_3",
+        "aload_2",
+        "invokestatic # // Method objectToBigDecimal:(Ljava/lang/Object;Ljava/math/BigDecimal;)Ljava/math/BigDecimal;",
+        "areturn"
+      ]
+    ],
+    [
+      "static java.math.BigDecimal objectToBigDecimal(java.lang.Object, java.math.BigDecimal);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_1",
+        "invokestatic # // Method objectToBigDecimal:(Ljava/lang/Object;Ljava/math/BigDecimal;Z)Ljava/math/BigDecimal;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.math.BigInteger optBigInteger(java.lang.String, java.math.BigInteger);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method opt:(Ljava/lang/String;)Ljava/lang/Object;",
+        "astore_3",
+        "aload_3",
+        "aload_2",
+        "invokestatic # // Method objectToBigInteger:(Ljava/lang/Object;Ljava/math/BigInteger;)Ljava/math/BigInteger;",
+        "areturn"
+      ]
+    ],
+    [
+      "public double optDouble(java.lang.String, double);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method optNumber:(Ljava/lang/String;)Ljava/lang/Number;",
+        "astore 4",
+        "aload 4",
+        "ifnonnull 14",
+        "dload_2",
+        "dreturn",
+        "aload 4",
+        "invokevirtual # // Method java/lang/Number.doubleValue:()D",
+        "dreturn"
+      ]
+    ],
+    [
+      "public java.lang.Double optDoubleObject(java.lang.String, java.lang.Double);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method optNumber:(Ljava/lang/String;)Ljava/lang/Number;",
+        "astore_3",
+        "aload_3",
+        "ifnonnull 12",
+        "aload_2",
+        "areturn",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Number.doubleValue:()D",
+        "invokestatic # // Method java/lang/Double.valueOf:(D)Ljava/lang/Double;",
+        "areturn"
+      ]
+    ],
+    [
+      "public float optFloat(java.lang.String, float);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method optNumber:(Ljava/lang/String;)Ljava/lang/Number;",
+        "astore_3",
+        "aload_3",
+        "ifnonnull 12",
+        "fload_2",
+        "freturn",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Number.floatValue:()F",
+        "freturn"
+      ]
+    ],
+    [
+      "public java.lang.Float optFloatObject(java.lang.String, java.lang.Float);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method optNumber:(Ljava/lang/String;)Ljava/lang/Number;",
+        "astore_3",
+        "aload_3",
+        "ifnonnull 12",
+        "aload_2",
+        "areturn",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Number.floatValue:()F",
+        "invokestatic # // Method java/lang/Float.valueOf:(F)Ljava/lang/Float;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int optInt(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "invokevirtual # // Method optInt:(Ljava/lang/String;I)I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int optInt(java.lang.String, int);",
+      [
+        "aload_0",
+        "aload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(Ljava/lang/String;Ljava/lang/Number;)Ljava/lang/Number;",
+        "astore_3",
+        "aload_3",
+        "ifnonnull 13",
+        "iload_2",
+        "ireturn",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Number.intValue:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public java.lang.Integer optIntegerObject(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
+        "invokevirtual # // Method optIntegerObject:(Ljava/lang/String;Ljava/lang/Integer;)Ljava/lang/Integer;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Integer optIntegerObject(java.lang.String, java.lang.Integer);",
+      [
+        "aload_0",
+        "aload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(Ljava/lang/String;Ljava/lang/Number;)Ljava/lang/Number;",
+        "astore_3",
+        "aload_3",
+        "ifnonnull 13",
+        "aload_2",
+        "areturn",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Number.intValue:()I",
+        "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray optJSONArray(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "aconst_null",
+        "invokevirtual # // Method optJSONArray:(Ljava/lang/String;Lorg/json/JSONArray;)Lorg/json/JSONArray;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONArray optJSONArray(java.lang.String, org.json.JSONArray);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method opt:(Ljava/lang/String;)Ljava/lang/Object;",
+        "astore_3",
+        "aload_3",
+        "instanceof # // class org/json/JSONArray",
+        "ifeq 20",
+        "aload_3",
+        "checkcast # // class org/json/JSONArray",
+        "goto 21",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONObject optJSONObject(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "aconst_null",
+        "invokevirtual # // Method optJSONObject:(Ljava/lang/String;Lorg/json/JSONObject;)Lorg/json/JSONObject;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONObject optJSONObject(java.lang.String, org.json.JSONObject);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method opt:(Ljava/lang/String;)Ljava/lang/Object;",
+        "astore_3",
+        "aload_3",
+        "instanceof # // class org/json/JSONObject",
+        "ifeq 20",
+        "aload_3",
+        "checkcast # // class org/json/JSONObject",
+        "goto 21",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public long optLong(java.lang.String, long);",
+      [
+        "aload_0",
+        "aload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(Ljava/lang/String;Ljava/lang/Number;)Ljava/lang/Number;",
+        "astore 4",
+        "aload 4",
+        "ifnonnull 15",
+        "lload_2",
+        "lreturn",
+        "aload 4",
+        "invokevirtual # // Method java/lang/Number.longValue:()J",
+        "lreturn"
+      ]
+    ],
+    [
+      "public java.lang.Long optLongObject(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "lconst_0",
+        "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+        "invokevirtual # // Method optLongObject:(Ljava/lang/String;Ljava/lang/Long;)Ljava/lang/Long;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Long optLongObject(java.lang.String, java.lang.Long);",
+      [
+        "aload_0",
+        "aload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(Ljava/lang/String;Ljava/lang/Number;)Ljava/lang/Number;",
+        "astore_3",
+        "aload_3",
+        "ifnonnull 13",
+        "aload_2",
+        "areturn",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Number.longValue:()J",
+        "invokestatic # // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Number optNumber(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "aconst_null",
+        "invokevirtual # // Method optNumber:(Ljava/lang/String;Ljava/lang/Number;)Ljava/lang/Number;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Number optNumber(java.lang.String, java.lang.Number);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method opt:(Ljava/lang/String;)Ljava/lang/Object;",
+        "astore_3",
+        "getstatic # // Field NULL:Ljava/lang/Object;",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Object.equals:(Ljava/lang/Object;)Z",
+        "ifeq 18",
+        "aload_2",
+        "areturn",
+        "aload_3",
+        "instanceof # // class java/lang/Number",
+        "ifeq 30",
+        "aload_3",
+        "checkcast # // class java/lang/Number",
+        "areturn",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Object.toString:()Ljava/lang/String;",
+        "invokestatic # // Method stringToNumber:(Ljava/lang/String;)Ljava/lang/Number;",
+        "areturn",
+        "astore 4",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String optString(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "ldc_w # // String",
+        "invokevirtual # // Method optString:(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String optString(java.lang.String, java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokevirtual # // Method opt:(Ljava/lang/String;)Ljava/lang/Object;",
+        "astore_3",
+        "getstatic # // Field NULL:Ljava/lang/Object;",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Object.equals:(Ljava/lang/Object;)Z",
+        "ifeq 20",
+        "aload_2",
+        "goto 24",
+        "aload_3",
+        "invokevirtual # // Method java/lang/Object.toString:()Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Object query(java.lang.String);",
+      [
+        "aload_0",
+        "new # // class org/json/JSONPointer",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONPointer.\"<init>\":(Ljava/lang/String;)V",
+        "invokevirtual # // Method query:(Lorg/json/JSONPointer;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Object query(org.json.JSONPointer);",
+      [
+        "aload_1",
+        "aload_0",
+        "invokevirtual # // Method org/json/JSONPointer.queryFrom:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Object optQuery(java.lang.String);",
+      [
+        "aload_0",
+        "new # // class org/json/JSONPointer",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONPointer.\"<init>\":(Ljava/lang/String;)V",
+        "invokevirtual # // Method optQuery:(Lorg/json/JSONPointer;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Object optQuery(org.json.JSONPointer);",
+      [
+        "aload_1",
+        "aload_0",
+        "invokevirtual # // Method org/json/JSONPointer.queryFrom:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn",
+        "astore_2",
+        "aconst_null",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String quote(java.lang.String);",
+      [
+        "aload_0",
+        "ifnull 11",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.isEmpty:()Z",
+        "ifeq 15",
+        "ldc_w # // String \\\"\\\"",
+        "areturn",
+        "new # // class org/json/StringBuilderWriter",
+        "dup",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "iconst_2",
+        "iadd",
+        "invokespecial # // Method org/json/StringBuilderWriter.\"<init>\":(I)V",
+        "astore_1",
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method quote:(Ljava/lang/String;Ljava/io/Writer;)Ljava/io/Writer;",
+        "invokevirtual # // Method java/lang/Object.toString:()Ljava/lang/String;",
+        "areturn",
+        "astore_2",
+        "ldc_w # // String",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Object remove(java.lang.String);",
+      [
+        "aload_0",
+        "getfield # // Field map:Ljava/util/Map;",
+        "aload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/Map.remove:(Ljava/lang/Object;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "iconst_0",
+        "invokevirtual # // Method toString:(I)Ljava/lang/String;",
+        "areturn",
+        "astore_1",
+        "aconst_null",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.Object wrap(java.lang.Object);",
+      [
+        "aload_0",
+        "aconst_null",
+        "invokestatic # // Method wrap:(Ljava/lang/Object;Ljava/util/Set;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "static java.lang.Object wrap(java.lang.Object, int, org.json.JSONParserConfiguration);",
+      [
+        "aload_0",
+        "aconst_null",
+        "iload_1",
+        "aload_2",
+        "invokestatic # // Method wrap:(Ljava/lang/Object;Ljava/util/Set;ILorg/json/JSONParserConfiguration;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "private static java.lang.Object wrap(java.lang.Object, java.util.Set<java.lang.Object>);",
+      [
+        "aload_0",
+        "aload_1",
+        "iconst_0",
+        "new # // class org/json/JSONParserConfiguration",
+        "dup",
+        "invokespecial # // Method org/json/JSONParserConfiguration.\"<init>\":()V",
+        "invokestatic # // Method wrap:(Ljava/lang/Object;Ljava/util/Set;ILorg/json/JSONParserConfiguration;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.JSONParserConfiguration": [
+    [
+      "public org.json.JSONParserConfiguration();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/json/ParserConfiguration.\"<init>\":()V",
+        "aload_0",
+        "iconst_0",
+        "putfield # // Field overwriteDuplicateKey:Z",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONParserConfiguration withOverwriteDuplicateKey(boolean);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/JSONParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "iload_1",
+        "putfield # // Field overwriteDuplicateKey:Z",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONParserConfiguration withUseNativeNulls(boolean);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/JSONParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "iload_1",
+        "putfield # // Field useNativeNulls:Z",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONParserConfiguration withStrictMode();",
+      [
+        "aload_0",
+        "iconst_1",
+        "invokevirtual # // Method withStrictMode:(Z)Lorg/json/JSONParserConfiguration;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONParserConfiguration withStrictMode(boolean);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/JSONParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "iload_1",
+        "putfield # // Field strictMode:Z",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isOverwriteDuplicateKey();",
+      [
+        "aload_0",
+        "getfield # // Field overwriteDuplicateKey:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isUseNativeNulls();",
+      [
+        "aload_0",
+        "getfield # // Field useNativeNulls:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isStrictMode();",
+      [
+        "aload_0",
+        "getfield # // Field strictMode:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.json.JSONPointer$Builder": [
+    [
+      "public org.json.JSONPointer$Builder();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class java/util/ArrayList",
+        "dup",
+        "invokespecial # // Method java/util/ArrayList.\"<init>\":()V",
+        "putfield # // Field refTokens:Ljava/util/List;",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONPointer build();",
+      [
+        "new # // class org/json/JSONPointer",
+        "dup",
+        "aload_0",
+        "getfield # // Field refTokens:Ljava/util/List;",
+        "invokespecial # // Method org/json/JSONPointer.\"<init>\":(Ljava/util/List;)V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.JSONPointer": [
+    [
+      "public static org.json.JSONPointer$Builder builder();",
+      [
+        "new # // class org/json/JSONPointer$Builder",
+        "dup",
+        "invokespecial # // Method org/json/JSONPointer$Builder.\"<init>\":()V",
+        "areturn"
+      ]
+    ],
+    [
+      "private static java.lang.String unescape(java.lang.String);",
+      [
+        "aload_0",
+        "ldc # // String ~1",
+        "ldc # // String /",
+        "invokevirtual # // Method java/lang/String.replace:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+        "ldc # // String ~0",
+        "ldc # // String ~",
+        "invokevirtual # // Method java/lang/String.replace:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "private static java.lang.String escape(java.lang.String);",
+      [
+        "aload_0",
+        "ldc # // String ~",
+        "ldc # // String ~0",
+        "invokevirtual # // Method java/lang/String.replace:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+        "ldc # // String /",
+        "ldc # // String ~1",
+        "invokevirtual # // Method java/lang/String.replace:(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.JSONPointerException": [
+    [
+      "public org.json.JSONPointerException(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONException.\"<init>\":(Ljava/lang/String;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONPointerException(java.lang.String, java.lang.Throwable);",
+      [
+        "aload_0",
+        "aload_1",
+        "aload_2",
+        "invokespecial # // Method org/json/JSONException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.JSONString": [
+    [
+      "public abstract java.lang.String toJSONString();",
+      []
+    ]
+  ],
+  "org.json.JSONTokener": [
+    [
+      "public org.json.JSONTokener(java.io.Reader);",
+      [
+        "aload_0",
+        "aload_1",
+        "new # // class org/json/JSONParserConfiguration",
+        "dup",
+        "invokespecial # // Method org/json/JSONParserConfiguration.\"<init>\":()V",
+        "invokespecial # // Method \"<init>\":(Ljava/io/Reader;Lorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONTokener(java.io.InputStream);",
+      [
+        "aload_0",
+        "aload_1",
+        "new # // class org/json/JSONParserConfiguration",
+        "dup",
+        "invokespecial # // Method org/json/JSONParserConfiguration.\"<init>\":()V",
+        "invokespecial # // Method \"<init>\":(Ljava/io/InputStream;Lorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONTokener(java.io.InputStream, org.json.JSONParserConfiguration);",
+      [
+        "aload_0",
+        "new # // class java/io/InputStreamReader",
+        "dup",
+        "aload_1",
+        "ldc # // String UTF-8",
+        "invokestatic # // Method java/nio/charset/Charset.forName:(Ljava/lang/String;)Ljava/nio/charset/Charset;",
+        "invokespecial # // Method java/io/InputStreamReader.\"<init>\":(Ljava/io/InputStream;Ljava/nio/charset/Charset;)V",
+        "aload_2",
+        "invokespecial # // Method \"<init>\":(Ljava/io/Reader;Lorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONTokener(java.lang.String);",
+      [
+        "aload_0",
+        "new # // class java/io/StringReader",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method java/io/StringReader.\"<init>\":(Ljava/lang/String;)V",
+        "invokespecial # // Method \"<init>\":(Ljava/io/Reader;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONTokener(java.lang.String, org.json.JSONParserConfiguration);",
+      [
+        "aload_0",
+        "new # // class java/io/StringReader",
+        "dup",
+        "aload_1",
+        "invokespecial # // Method java/io/StringReader.\"<init>\":(Ljava/lang/String;)V",
+        "aload_2",
+        "invokespecial # // Method \"<init>\":(Ljava/io/Reader;Lorg/json/JSONParserConfiguration;)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONParserConfiguration getJsonParserConfiguration();",
+      [
+        "aload_0",
+        "getfield # // Field jsonParserConfiguration:Lorg/json/JSONParserConfiguration;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void setJsonParserConfiguration(org.json.JSONParserConfiguration);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field jsonParserConfiguration:Lorg/json/JSONParserConfiguration;",
+        "return"
+      ]
+    ],
+    [
+      "private void decrementIndexes();",
+      [
+        "aload_0",
+        "dup",
+        "getfield # // Field index:J",
+        "lconst_1",
+        "lsub",
+        "putfield # // Field index:J",
+        "aload_0",
+        "getfield # // Field previous:C",
+        "bipush 13",
+        "if_icmpeq 28",
+        "aload_0",
+        "getfield # // Field previous:C",
+        "bipush 10",
+        "if_icmpne 49",
+        "aload_0",
+        "dup",
+        "getfield # // Field line:J",
+        "lconst_1",
+        "lsub",
+        "putfield # // Field line:J",
+        "aload_0",
+        "aload_0",
+        "getfield # // Field characterPreviousLine:J",
+        "putfield # // Field character:J",
+        "goto 68",
+        "aload_0",
+        "getfield # // Field character:J",
+        "lconst_0",
+        "lcmp",
+        "ifle 68",
+        "aload_0",
+        "dup",
+        "getfield # // Field character:J",
+        "lconst_1",
+        "lsub",
+        "putfield # // Field character:J",
+        "return"
+      ]
+    ],
+    [
+      "protected char getPrevious();",
+      [
+        "aload_0",
+        "getfield # // Field previous:C",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.json.JSONException syntaxError(java.lang.String);",
+      [
+        "new # // class org/json/JSONException",
+        "dup",
+        "aload_1",
+        "aload_0",
+        "invokevirtual # // Method toString:()Ljava/lang/String;",
+        "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+        "invokespecial # // Method org/json/JSONException.\"<init>\":(Ljava/lang/String;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.JSONException syntaxError(java.lang.String, java.lang.Throwable);",
+      [
+        "new # // class org/json/JSONException",
+        "dup",
+        "aload_1",
+        "aload_0",
+        "invokevirtual # // Method toString:()Ljava/lang/String;",
+        "invokedynamic #, 0 // InvokeDynamic #:makeConcatWithConstants:(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+        "aload_2",
+        "invokespecial # // Method org/json/JSONException.\"<init>\":(Ljava/lang/String;Ljava/lang/Throwable;)V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.ParserConfiguration": [
+    [
+      "protected org.json.ParserConfiguration(boolean, int);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field keepStrings:Z",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field maxNestingDepth:I",
+        "return"
+      ]
+    ],
+    [
+      "protected org.json.ParserConfiguration clone();",
+      [
+        "new # // class org/json/ParserConfiguration",
+        "dup",
+        "aload_0",
+        "getfield # // Field keepStrings:Z",
+        "aload_0",
+        "getfield # // Field maxNestingDepth:I",
+        "invokespecial # // Method \"<init>\":(ZI)V",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isKeepStrings();",
+      [
+        "aload_0",
+        "getfield # // Field keepStrings:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public int getMaxNestingDepth();",
+      [
+        "aload_0",
+        "getfield # // Field maxNestingDepth:I",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.json.StringBuilderWriter": [
+    [
+      "public void write(int);",
+      [
+        "aload_0",
+        "getfield # // Field builder:Ljava/lang/StringBuilder;",
+        "iload_1",
+        "i2c",
+        "invokevirtual # // Method java/lang/StringBuilder.append:(C)Ljava/lang/StringBuilder;",
+        "pop",
+        "return"
+      ]
+    ],
+    [
+      "public void write(java.lang.String);",
+      [
+        "aload_0",
+        "getfield # // Field builder:Ljava/lang/StringBuilder;",
+        "aload_1",
+        "invokevirtual # // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+        "pop",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.StringBuilderWriter append(java.lang.CharSequence);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokestatic # // Method java/lang/String.valueOf:(Ljava/lang/Object;)Ljava/lang/String;",
+        "invokevirtual # // Method write:(Ljava/lang/String;)V",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.StringBuilderWriter append(java.lang.CharSequence, int, int);",
+      [
+        "aload_1",
+        "ifnonnull 7",
+        "ldc # // String null",
+        "astore_1",
+        "aload_0",
+        "aload_1",
+        "iload_2",
+        "iload_3",
+        "invokeinterface #, 3 // InterfaceMethod java/lang/CharSequence.subSequence:(II)Ljava/lang/CharSequence;",
+        "invokevirtual # // Method append:(Ljava/lang/CharSequence;)Lorg/json/StringBuilderWriter;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.StringBuilderWriter append(char);",
+      [
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method write:(I)V",
+        "aload_0",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "getfield # // Field builder:Ljava/lang/StringBuilder;",
+        "invokevirtual # // Method java/lang/StringBuilder.toString:()Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void flush();",
+      [
+        "return"
+      ]
+    ]
+  ],
+  "org.json.Cookie": [
+    [
+      "public org.json.Cookie();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.CookieList": [
+    [
+      "public org.json.CookieList();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.HTTP": [
+    [
+      "public org.json.HTTP();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.HTTPTokener": [
+    [
+      "public org.json.HTTPTokener(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONTokener.\"<init>\":(Ljava/lang/String;)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.JSONML": [
+    [
+      "public org.json.JSONML();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.JSONMLParserConfiguration": [
+    [
+      "protected org.json.JSONMLParserConfiguration(boolean, int);",
+      [
+        "aload_0",
+        "iload_1",
+        "iload_2",
+        "invokespecial # // Method org/json/ParserConfiguration.\"<init>\":(ZI)V",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.XML": [
+    [
+      "public org.json.XML();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "private static java.lang.Iterable<java.lang.Integer> codePointIterator(java.lang.String);",
+      [
+        "new # // class org/json/XML$1",
+        "dup",
+        "aload_0",
+        "invokespecial # // Method org/json/XML$1.\"<init>\":(Ljava/lang/String;)V",
+        "areturn"
+      ]
+    ],
+    [
+      "private static boolean isStringAllWhiteSpace(java.lang.String);",
+      [
+        "iconst_0",
+        "istore_1",
+        "iload_1",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "if_icmpge 31",
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
+        "istore_2",
+        "iload_2",
+        "invokestatic # // Method java/lang/Character.isWhitespace:(C)Z",
+        "ifne 25",
+        "iconst_0",
+        "ireturn",
+        "iinc 1, 1",
+        "goto 2",
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "public static java.lang.Object stringToValue(java.lang.String, org.json.XMLXsiTypeConverter<?>);",
+      [
+        "aload_1",
+        "ifnull 12",
+        "aload_1",
+        "aload_0",
+        "invokeinterface #, 2 // InterfaceMethod org/json/XMLXsiTypeConverter.convert:(Ljava/lang/String;)Ljava/lang/Object;",
+        "areturn",
+        "aload_0",
+        "invokestatic # // Method stringToValue:(Ljava/lang/String;)Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String toString(java.lang.Object, java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "getstatic # // Field org/json/XMLParserConfiguration.ORIGINAL:Lorg/json/XMLParserConfiguration;",
+        "invokestatic # // Method toString:(Ljava/lang/Object;Ljava/lang/String;Lorg/json/XMLParserConfiguration;)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String toString(java.lang.Object, int);",
+      [
+        "aload_0",
+        "aconst_null",
+        "getstatic # // Field org/json/XMLParserConfiguration.ORIGINAL:Lorg/json/XMLParserConfiguration;",
+        "iload_1",
+        "invokestatic # // Method toString:(Ljava/lang/Object;Ljava/lang/String;Lorg/json/XMLParserConfiguration;I)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public static java.lang.String toString(java.lang.Object, java.lang.String, int);",
+      [
+        "aload_0",
+        "aload_1",
+        "getstatic # // Field org/json/XMLParserConfiguration.ORIGINAL:Lorg/json/XMLParserConfiguration;",
+        "iload_2",
+        "invokestatic # // Method toString:(Ljava/lang/Object;Ljava/lang/String;Lorg/json/XMLParserConfiguration;I)Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "private static final java.lang.String indent(int);",
+      [
+        "new # // class java/lang/StringBuilder",
+        "dup",
+        "invokespecial # // Method java/lang/StringBuilder.\"<init>\":()V",
+        "astore_1",
+        "iconst_0",
+        "istore_2",
+        "iload_2",
+        "iload_0",
+        "if_icmpge 28",
+        "aload_1",
+        "bipush 32",
+        "invokevirtual # // Method java/lang/StringBuilder.append:(C)Ljava/lang/StringBuilder;",
+        "pop",
+        "iinc 2, 1",
+        "goto 10",
+        "aload_1",
+        "invokevirtual # // Method java/lang/StringBuilder.toString:()Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.XMLParserConfiguration": [
+    [
+      "public org.json.XMLParserConfiguration(boolean);",
+      [
+        "aload_0",
+        "iload_1",
+        "ldc # // String content",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":(ZLjava/lang/String;Z)V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.XMLParserConfiguration(java.lang.String);",
+      [
+        "aload_0",
+        "iconst_0",
+        "aload_1",
+        "iconst_0",
+        "invokespecial # // Method \"<init>\":(ZLjava/lang/String;Z)V",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.String getcDataTagName();",
+      [
+        "aload_0",
+        "getfield # // Field cDataTagName:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isKeepNumberAsString();",
+      [
+        "aload_0",
+        "getfield # // Field keepNumberAsString:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean isKeepBooleanAsString();",
+      [
+        "aload_0",
+        "getfield # // Field keepBooleanAsString:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.json.XMLParserConfiguration withcDataTagName(java.lang.String);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/XMLParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "aload_1",
+        "putfield # // Field cDataTagName:Ljava/lang/String;",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isConvertNilAttributeToNull();",
+      [
+        "aload_0",
+        "getfield # // Field convertNilAttributeToNull:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.json.XMLParserConfiguration withConvertNilAttributeToNull(boolean);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/XMLParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "iload_1",
+        "putfield # // Field convertNilAttributeToNull:Z",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.util.Map<java.lang.String, org.json.XMLXsiTypeConverter<?>> getXsiTypeMap();",
+      [
+        "aload_0",
+        "getfield # // Field xsiTypeMap:Ljava/util/Map;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.util.Set<java.lang.String> getForceList();",
+      [
+        "aload_0",
+        "getfield # // Field forceList:Ljava/util/Set;",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.XMLParserConfiguration withCloseEmptyTag(boolean);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/XMLParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "iload_1",
+        "putfield # // Field closeEmptyTag:Z",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public org.json.XMLParserConfiguration withShouldTrimWhitespace(boolean);",
+      [
+        "aload_0",
+        "invokevirtual # // Method clone:()Lorg/json/XMLParserConfiguration;",
+        "astore_2",
+        "aload_2",
+        "iload_1",
+        "putfield # // Field shouldTrimWhiteSpace:Z",
+        "aload_2",
+        "areturn"
+      ]
+    ],
+    [
+      "public boolean isCloseEmptyTag();",
+      [
+        "aload_0",
+        "getfield # // Field closeEmptyTag:Z",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean shouldTrimWhiteSpace();",
+      [
+        "aload_0",
+        "getfield # // Field shouldTrimWhiteSpace:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.json.XMLTokener": [
+    [
+      "public org.json.XMLTokener(java.io.Reader);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONTokener.\"<init>\":(Ljava/io/Reader;)V",
+        "aload_0",
+        "getstatic # // Field org/json/XMLParserConfiguration.ORIGINAL:Lorg/json/XMLParserConfiguration;",
+        "putfield # // Field configuration:Lorg/json/XMLParserConfiguration;",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.XMLTokener(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONTokener.\"<init>\":(Ljava/lang/String;)V",
+        "aload_0",
+        "getstatic # // Field org/json/XMLParserConfiguration.ORIGINAL:Lorg/json/XMLParserConfiguration;",
+        "putfield # // Field configuration:Lorg/json/XMLParserConfiguration;",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.XMLTokener(java.io.Reader, org.json.XMLParserConfiguration);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/json/JSONTokener.\"<init>\":(Ljava/io/Reader;)V",
+        "aload_0",
+        "getstatic # // Field org/json/XMLParserConfiguration.ORIGINAL:Lorg/json/XMLParserConfiguration;",
+        "putfield # // Field configuration:Lorg/json/XMLParserConfiguration;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field configuration:Lorg/json/XMLParserConfiguration;",
+        "return"
+      ]
+    ],
+    [
+      "private static boolean isValidHex(java.lang.String);",
+      [
+        "aload_0",
+        "ifnull 11",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.isEmpty:()Z",
+        "ifeq 13",
+        "iconst_0",
+        "ireturn",
+        "iconst_0",
+        "istore_1",
+        "iload_1",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "if_icmpge 73",
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
+        "istore_2",
+        "iload_2",
+        "bipush 48",
+        "if_icmplt 41",
+        "iload_2",
+        "bipush 57",
+        "if_icmple 67",
+        "iload_2",
+        "bipush 97",
+        "if_icmplt 53",
+        "iload_2",
+        "bipush 102",
+        "if_icmple 67",
+        "iload_2",
+        "bipush 65",
+        "if_icmplt 65",
+        "iload_2",
+        "bipush 70",
+        "if_icmple 67",
+        "iconst_0",
+        "ireturn",
+        "iinc 1, 1",
+        "goto 15",
+        "iconst_1",
+        "ireturn"
+      ]
+    ],
+    [
+      "private static boolean isValidDecimal(java.lang.String);",
+      [
+        "aload_0",
+        "ifnull 11",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.isEmpty:()Z",
+        "ifeq 13",
+        "iconst_0",
+        "ireturn",
+        "iconst_0",
+        "istore_1",
+        "iload_1",
+        "aload_0",
+        "invokevirtual # // Method java/lang/String.length:()I",
+        "if_icmpge 49",
+        "aload_0",
+        "iload_1",
+        "invokevirtual # // Method java/lang/String.charAt:(I)C",
+        "istore_2",
+        "iload_2",
+        "bipush 48",
+        "if_icmplt 41",
+        "iload_2",
+        "bipush 57",
+        "if_icmple 43",
+        "iconst_0",
+        "ireturn",
+        "iinc 1, 1",
+        "goto 15",
+        "iconst_1",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.json.XMLXsiTypeConverter": [
+    [
+      "public abstract T convert(java.lang.String);",
+      []
+    ]
+  ],
+  "org.json.Property": [
+    [
+      "public org.json.Property();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.BrokenToString": [
+    [
+      "public org.json.junit.data.BrokenToString();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String Something went horribly wrong!",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow"
+      ]
+    ]
+  ],
+  "org.json.junit.data.CustomClass": [
+    [
+      "public org.json.junit.data.CustomClass();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.CustomClass(int, java.lang.String, java.lang.Long);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field number:I",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field name:Ljava/lang/String;",
+        "aload_0",
+        "aload_3",
+        "putfield # // Field longNumber:Ljava/lang/Long;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.CustomClassA": [
+    [
+      "public org.json.junit.data.CustomClassA();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.CustomClassA(java.math.BigInteger);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field largeInt:Ljava/math/BigInteger;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.CustomClassB": [
+    [
+      "public org.json.junit.data.CustomClassB();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.CustomClassB(int, org.json.junit.data.CustomClassC);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "iload_1",
+        "putfield # // Field number:I",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field classC:Lorg/json/junit/data/CustomClassC;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.CustomClassC": [
+    [
+      "public org.json.junit.data.CustomClassC();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.CustomClassC(java.lang.String, java.lang.Long);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field stringName:Ljava/lang/String;",
+        "aload_0",
+        "aload_2",
+        "putfield # // Field longNumber:Ljava/lang/Long;",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.JSONObject toJSON();",
+      [
+        "new # // class org/json/JSONObject",
+        "dup",
+        "invokespecial # // Method org/json/JSONObject.\"<init>\":()V",
+        "astore_1",
+        "aload_1",
+        "ldc # // String stringName",
+        "aload_0",
+        "getfield # // Field stringName:Ljava/lang/String;",
+        "invokevirtual # // Method org/json/JSONObject.put:(Ljava/lang/String;Ljava/lang/Object;)Lorg/json/JSONObject;",
+        "pop",
+        "aload_1",
+        "ldc # // String longNumber",
+        "aload_0",
+        "getfield # // Field longNumber:Ljava/lang/Long;",
+        "invokevirtual # // Method org/json/JSONObject.put:(Ljava/lang/String;Ljava/lang/Object;)Lorg/json/JSONObject;",
+        "pop",
+        "aload_1",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.junit.data.CustomClassD": [
+    [
+      "public org.json.junit.data.CustomClassD();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.CustomClassD(java.util.List<java.lang.String>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field stringList:Ljava/util/List;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.CustomClassE": [
+    [
+      "public org.json.junit.data.CustomClassE();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.CustomClassE(java.util.List<org.json.junit.data.CustomClassC>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field listClassC:Ljava/util/List;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.CustomClassF": [
+    [
+      "public org.json.junit.data.CustomClassF();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.CustomClassF(java.util.List<java.util.List<java.lang.String>>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field listOfString:Ljava/util/List;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.CustomClassG": [
+    [
+      "public org.json.junit.data.CustomClassG();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.CustomClassG(java.util.Map<java.lang.String, java.lang.String>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field dataList:Ljava/util/Map;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.CustomClassH": [
+    [
+      "public org.json.junit.data.CustomClassH();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.CustomClassH(java.util.Map<java.lang.String, java.util.List<java.lang.Integer>>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field integerMap:Ljava/util/Map;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.CustomClassI": [
+    [
+      "public org.json.junit.data.CustomClassI();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.CustomClassI(java.util.Map<java.lang.String, java.util.Map<java.lang.String, java.lang.Integer>>);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field integerMap:Ljava/util/Map;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.CustomClassJ": [
+    [
+      "public org.json.junit.data.CustomClassJ();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.ExceptionalBean$MyCloseable": [
+    [
+      "public org.json.junit.data.ExceptionalBean$MyCloseable();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.String getString();",
+      [
+        "ldc # // String Yup, it\\'s closeable",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.junit.data.ExceptionalBean": [
+    [
+      "public org.json.junit.data.ExceptionalBean();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public java.io.Closeable getCloseable();",
+      [
+        "new # // class org/json/junit/data/ExceptionalBean$MyCloseable",
+        "dup",
+        "invokespecial # // Method org/json/junit/data/ExceptionalBean$MyCloseable.\"<init>\":()V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.junit.data.Fraction": [
+    [
+      "public org.json.junit.data.Fraction(long, long);",
+      [
+        "aload_0",
+        "lload_1",
+        "invokestatic # // Method java/math/BigInteger.valueOf:(J)Ljava/math/BigInteger;",
+        "lload_3",
+        "invokestatic # // Method java/math/BigInteger.valueOf:(J)Ljava/math/BigInteger;",
+        "invokespecial # // Method \"<init>\":(Ljava/math/BigInteger;Ljava/math/BigInteger;)V",
+        "return"
+      ]
+    ],
+    [
+      "public java.math.BigDecimal bigDecimalValue();",
+      [
+        "aload_0",
+        "getfield # // Field bigDecimal:Ljava/math/BigDecimal;",
+        "areturn"
+      ]
+    ],
+    [
+      "public double doubleValue();",
+      [
+        "aload_0",
+        "getfield # // Field bigDecimal:Ljava/math/BigDecimal;",
+        "invokevirtual # // Method java/math/BigDecimal.doubleValue:()D",
+        "dreturn"
+      ]
+    ],
+    [
+      "public float floatValue();",
+      [
+        "aload_0",
+        "getfield # // Field bigDecimal:Ljava/math/BigDecimal;",
+        "invokevirtual # // Method java/math/BigDecimal.floatValue:()F",
+        "freturn"
+      ]
+    ],
+    [
+      "public java.math.BigInteger getDenominator();",
+      [
+        "aload_0",
+        "getfield # // Field denominator:Ljava/math/BigInteger;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.math.BigInteger getNumerator();",
+      [
+        "aload_0",
+        "getfield # // Field numerator:Ljava/math/BigInteger;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int intValue();",
+      [
+        "aload_0",
+        "getfield # // Field bigDecimal:Ljava/math/BigDecimal;",
+        "invokevirtual # // Method java/math/BigDecimal.intValue:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public long longValue();",
+      [
+        "aload_0",
+        "getfield # // Field bigDecimal:Ljava/math/BigDecimal;",
+        "invokevirtual # // Method java/math/BigDecimal.longValue:()J",
+        "lreturn"
+      ]
+    ]
+  ],
+  "org.json.junit.data.GenericBean": [
+    [
+      "public T getGenericValue();",
+      [
+        "aload_0",
+        "dup",
+        "getfield # // Field genericGetCounter:I",
+        "iconst_1",
+        "iadd",
+        "putfield # // Field genericGetCounter:I",
+        "aload_0",
+        "getfield # // Field genericValue:Ljava/lang/Number;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void setGenericValue(T);",
+      [
+        "aload_0",
+        "dup",
+        "getfield # // Field genericSetCounter:I",
+        "iconst_1",
+        "iadd",
+        "putfield # // Field genericSetCounter:I",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field genericValue:Ljava/lang/Number;",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.Integer getIntKey();",
+      [
+        "bipush 42",
+        "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Double getDoubleKey();",
+      [
+        "ldc2_w # // double 4.2d",
+        "invokestatic # // Method java/lang/Double.valueOf:(D)Ljava/lang/Double;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getStringKey();",
+      [
+        "ldc # // String MyString Key",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getEscapeStringKey();",
+      [
+        "ldc # // String \\\"My String with \\\"s",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.io.StringReader getStringReaderKey();",
+      [
+        "new # // class java/io/StringReader",
+        "dup",
+        "ldc # // String Some String Value in a reader",
+        "invokespecial # // Method java/io/StringReader.\"<init>\":(Ljava/lang/String;)V",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.junit.data.MyBean": [
+    [
+      "public abstract java.lang.Integer getIntKey();",
+      []
+    ],
+    [
+      "public abstract java.lang.Double getDoubleKey();",
+      []
+    ],
+    [
+      "public abstract java.lang.String getStringKey();",
+      []
+    ],
+    [
+      "public abstract java.lang.String getEscapeStringKey();",
+      []
+    ],
+    [
+      "public abstract java.lang.Boolean isTrueKey();",
+      []
+    ],
+    [
+      "public abstract java.lang.Boolean isFalseKey();",
+      []
+    ],
+    [
+      "public abstract java.io.StringReader getStringReaderKey();",
+      []
+    ]
+  ],
+  "org.json.junit.data.GenericBeanInt": [
+    [
+      "public boolean getable();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean get();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean is();",
+      [
+        "iconst_0",
+        "ireturn"
+      ]
+    ],
+    [
+      "public org.json.junit.data.GenericBeanInt(java.lang.Integer);",
+      [
+        "aload_0",
+        "aload_1",
+        "invokespecial # // Method org/json/junit/data/GenericBean.\"<init>\":(Ljava/lang/Number;)V",
+        "aload_0",
+        "bipush 65",
+        "putfield # // Field a:C",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.Integer getGenericValue();",
+      [
+        "aload_0",
+        "invokespecial # // Method org/json/junit/data/GenericBean.getGenericValue:()Ljava/lang/Number;",
+        "checkcast # // class java/lang/Integer",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.junit.data.MyBigNumberBean": [
+    [
+      "public abstract java.math.BigInteger getBigInteger();",
+      []
+    ],
+    [
+      "public abstract java.math.BigDecimal getBigDecimal();",
+      []
+    ]
+  ],
+  "org.json.junit.data.MyEnum": [
+    [
+      "public static org.json.junit.data.MyEnum[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/json/junit/data/MyEnum;",
+        "invokevirtual # // Method \"[Lorg/json/junit/data/MyEnum;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/json/junit/data/MyEnum;\"",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.junit.data.MyEnumClass": [
+    [
+      "public org.json.junit.data.MyEnumClass();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.MyEnum getMyEnum();",
+      [
+        "aload_0",
+        "getfield # // Field myEnum:Lorg/json/junit/data/MyEnum;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void setMyEnum(org.json.junit.data.MyEnum);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field myEnum:Lorg/json/junit/data/MyEnum;",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.MyEnumField getMyEnumField();",
+      [
+        "aload_0",
+        "getfield # // Field myEnumField:Lorg/json/junit/data/MyEnumField;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void setMyEnumField(org.json.junit.data.MyEnumField);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field myEnumField:Lorg/json/junit/data/MyEnumField;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.MyEnumField": [
+    [
+      "public static org.json.junit.data.MyEnumField[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/json/junit/data/MyEnumField;",
+        "invokevirtual # // Method \"[Lorg/json/junit/data/MyEnumField;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/json/junit/data/MyEnumField;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String getValue();",
+      [
+        "aload_0",
+        "getfield # // Field value:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Integer getIntVal();",
+      [
+        "aload_0",
+        "getfield # // Field intVal:Ljava/lang/Integer;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "getfield # // Field value:Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.junit.data.MyJsonString": [
+    [
+      "public org.json.junit.data.MyJsonString();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.String toJSONString();",
+      [
+        "ldc # // String my string",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.junit.data.MyLocaleBean": [
+    [
+      "public org.json.junit.data.MyLocaleBean();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "ldc # // String beanId",
+        "putfield # // Field id:Ljava/lang/String;",
+        "aload_0",
+        "ldc # // String beanI",
+        "putfield # // Field i:Ljava/lang/String;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.MyNumber": [
+    [
+      "public java.lang.Number getNumber();",
+      [
+        "aload_0",
+        "getfield # // Field number:Ljava/lang/Number;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int intValue();",
+      [
+        "aload_0",
+        "invokevirtual # // Method getNumber:()Ljava/lang/Number;",
+        "invokevirtual # // Method java/lang/Number.intValue:()I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public long longValue();",
+      [
+        "aload_0",
+        "invokevirtual # // Method getNumber:()Ljava/lang/Number;",
+        "invokevirtual # // Method java/lang/Number.longValue:()J",
+        "lreturn"
+      ]
+    ],
+    [
+      "public float floatValue();",
+      [
+        "aload_0",
+        "invokevirtual # // Method getNumber:()Ljava/lang/Number;",
+        "invokevirtual # // Method java/lang/Number.floatValue:()F",
+        "freturn"
+      ]
+    ],
+    [
+      "public double doubleValue();",
+      [
+        "aload_0",
+        "invokevirtual # // Method getNumber:()Ljava/lang/Number;",
+        "invokevirtual # // Method java/lang/Number.doubleValue:()D",
+        "dreturn"
+      ]
+    ],
+    [
+      "public java.lang.String toString();",
+      [
+        "aload_0",
+        "invokevirtual # // Method getNumber:()Ljava/lang/Number;",
+        "invokevirtual # // Method java/lang/Object.toString:()Ljava/lang/String;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.junit.data.MyNumberContainer": [
+    [
+      "public org.json.junit.data.MyNumberContainer();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "new # // class org/json/junit/data/MyNumber",
+        "dup",
+        "invokespecial # // Method org/json/junit/data/MyNumber.\"<init>\":()V",
+        "putfield # // Field myNumber:Lorg/json/junit/data/MyNumber;",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.Number getMyNumber();",
+      [
+        "aload_0",
+        "getfield # // Field myNumber:Lorg/json/junit/data/MyNumber;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.junit.data.MyPublicClass": [
+    [
+      "public org.json.junit.data.MyPublicClass();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "bipush 42",
+        "invokestatic # // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;",
+        "putfield # // Field publicInt:Ljava/lang/Integer;",
+        "aload_0",
+        "ldc # // String abc",
+        "putfield # // Field publicString:Ljava/lang/String;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.PersonRecord": [
+    [
+      "public org.json.junit.data.PersonRecord(java.lang.String, int, boolean);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field name:Ljava/lang/String;",
+        "aload_0",
+        "iload_2",
+        "putfield # // Field age:I",
+        "aload_0",
+        "iload_3",
+        "putfield # // Field active:Z",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.String name();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int age();",
+      [
+        "aload_0",
+        "getfield # // Field age:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public boolean active();",
+      [
+        "aload_0",
+        "getfield # // Field active:Z",
+        "ireturn"
+      ]
+    ]
+  ],
+  "org.json.junit.data.RecursiveBean": [
+    [
+      "public java.lang.String getName();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Object getRef();",
+      [
+        "aload_0",
+        "getfield # // Field reference:Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Object getRef2();",
+      [
+        "aload_0",
+        "getfield # // Field reference2:Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void setRef(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field reference:Ljava/lang/Object;",
+        "return"
+      ]
+    ],
+    [
+      "public void setRef2(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field reference2:Ljava/lang/Object;",
+        "return"
+      ]
+    ],
+    [
+      "public org.json.junit.data.RecursiveBean(java.lang.String);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field name:Ljava/lang/String;",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field reference:Ljava/lang/Object;",
+        "aload_0",
+        "aconst_null",
+        "putfield # // Field reference2:Ljava/lang/Object;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.RecursiveBeanEquals": [
+    [
+      "public org.json.junit.data.RecursiveBeanEquals(java.lang.String);",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "aload_0",
+        "aload_1",
+        "putfield # // Field name:Ljava/lang/String;",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.String getName();",
+      [
+        "aload_0",
+        "getfield # // Field name:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public java.lang.Object getRef();",
+      [
+        "aload_0",
+        "getfield # // Field reference:Ljava/lang/Object;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void setRef(java.lang.Object);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field reference:Ljava/lang/Object;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.Singleton": [
+    [
+      "public static final org.json.junit.data.Singleton getInstance();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/json/junit/data/Singleton;",
+        "areturn"
+      ]
+    ],
+    [
+      "private org.json.junit.data.Singleton();",
+      [
+        "aload_0",
+        "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+        "getstatic # // Field INSTANCE:Lorg/json/junit/data/Singleton;",
+        "ifnull 20",
+        "new # // class java/lang/IllegalStateException",
+        "dup",
+        "ldc # // String Already instantiated",
+        "invokespecial # // Method java/lang/IllegalStateException.\"<init>\":(Ljava/lang/String;)V",
+        "athrow",
+        "return"
+      ]
+    ],
+    [
+      "public int getSomeInt();",
+      [
+        "aload_0",
+        "getfield # // Field someInt:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void setSomeInt(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field someInt:I",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.String getSomeString();",
+      [
+        "aload_0",
+        "getfield # // Field someString:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void setSomeString(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field someString:Ljava/lang/String;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.SingletonEnum": [
+    [
+      "public static org.json.junit.data.SingletonEnum[] values();",
+      [
+        "getstatic # // Field $VALUES:[Lorg/json/junit/data/SingletonEnum;",
+        "invokevirtual # // Method \"[Lorg/json/junit/data/SingletonEnum;\".clone:()Ljava/lang/Object;",
+        "checkcast # // class \"[Lorg/json/junit/data/SingletonEnum;\"",
+        "areturn"
+      ]
+    ],
+    [
+      "public static final org.json.junit.data.SingletonEnum getInstance();",
+      [
+        "getstatic # // Field INSTANCE:Lorg/json/junit/data/SingletonEnum;",
+        "areturn"
+      ]
+    ],
+    [
+      "public int getSomeInt();",
+      [
+        "aload_0",
+        "getfield # // Field someInt:I",
+        "ireturn"
+      ]
+    ],
+    [
+      "public void setSomeInt(int);",
+      [
+        "aload_0",
+        "iload_1",
+        "putfield # // Field someInt:I",
+        "return"
+      ]
+    ],
+    [
+      "public java.lang.String getSomeString();",
+      [
+        "aload_0",
+        "getfield # // Field someString:Ljava/lang/String;",
+        "areturn"
+      ]
+    ],
+    [
+      "public void setSomeString(java.lang.String);",
+      [
+        "aload_0",
+        "aload_1",
+        "putfield # // Field someString:Ljava/lang/String;",
+        "return"
+      ]
+    ]
+  ],
+  "org.json.junit.data.StringsResourceBundle": [
+    [
+      "public java.lang.Object[][] getContents();",
+      [
+        "getstatic # // Field contents:[[Ljava/lang/Object;",
+        "areturn"
+      ]
+    ]
+  ],
+  "org.json.junit.data.WeirdList": [
+    [
+      "public java.lang.Integer get(int);",
+      [
+        "aload_0",
+        "getfield # // Field list:Ljava/util/List;",
+        "iload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;",
+        "checkcast # // class java/lang/Integer",
+        "areturn"
+      ]
+    ],
+    [
+      "public int getInt(int);",
+      [
+        "aload_0",
+        "getfield # // Field list:Ljava/util/List;",
+        "iload_1",
+        "invokeinterface #, 2 // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;",
+        "checkcast # // class java/lang/Integer",
+        "invokevirtual # // Method java/lang/Integer.intValue:()I",
+        "ireturn"
+      ]
+    ]
+  ]
+}

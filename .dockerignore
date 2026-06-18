@@ -1,0 +1,10 @@
+/node_modules/
+/test-fixtures/
+/dist/
+/TypeScript/
+/vscode-extension/
+/.github/
+/.claude/
+/.vscode/
+/.git
+*.md

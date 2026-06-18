@@ -1,0 +1,14 @@
+// Annotation-processing API (self-contained, like src/packages/): discover
+// JSR-269 processors in .cappu/lib/processors jars and run javac's generation pass.
+
+export {
+  discoverProcessors,
+  GENERATED_ROOT,
+  generatedClassesDir,
+  generatedRoot,
+  generatedSourcesDir,
+  procOnlyArgs,
+  type ProcessingResult,
+  processorJars,
+  runAnnotationProcessing,
+} from "./processors.ts";
