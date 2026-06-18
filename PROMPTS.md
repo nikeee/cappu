@@ -299,3 +299,5 @@ no timestamps were captured.
 - 2026-06-18 00:36 — commit. just use go fmt standard tooling. rename to-go dir to togo (its simpler)
 - 2026-06-18 00:36 — dont branch. there is some work going on in the ts version
 - 2026-06-18 09:15 — continue (milestone 2: Maven resolution engine + licenses)
+- 2026-06-18 09:25 — continue (milestone 3: install)
+- 2026-06-18 09:25 — since we're knowing the schema of our lockfile, can we use an json parser that uses codegen to use a specialized parser? For perf reasons and better maintainability?

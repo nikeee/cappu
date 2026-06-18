@@ -1,6 +1,6 @@
-// Package lockfile reads cappu-lock.json and verifies installed jars against
-// the SHA-256 sums it pins. Port of the lockfile/verify parts of
-// src/install.ts; resolution and install land with the install command.
+// Package lockfile reads and writes cappu-lock.json and verifies installed jars
+// against the SHA-256 sums it pins. Port of the lockfile parts of
+// src/install.ts (the install orchestration lives in internal/install).
 package lockfile
 
 import (
@@ -24,10 +24,19 @@ type Sha256 string
 
 // LockedPackage pins one resolved package to the exact bytes installed.
 type LockedPackage struct {
-	Coordinates coordinates `json:"coordinates"`
-	Source      string      `json:"source"`
-	Sha256      Sha256      `json:"sha256"`
+	Coordinates coordinates        `json:"coordinates"`
+	Source      string             `json:"source"`
+	Sha256      Sha256             `json:"sha256"`
+	Licenses    []packages.License `json:"licenses,omitempty"`
 }
+
+// NewLockedPackage builds a locked package from domain coordinates.
+func NewLockedPackage(c packages.Coordinates, source string, sha Sha256, licenses []packages.License) LockedPackage {
+	return LockedPackage{Coordinates: newCoordinates(c), Source: source, Sha256: sha, Licenses: licenses}
+}
+
+// Coords returns the package's domain coordinates.
+func (p LockedPackage) Coords() packages.Coordinates { return p.Coordinates.toDomain() }
 
 // coordinates is the on-disk JSON shape of packages.Coordinates (the lockfile
 // stores plain lowercase keys).
@@ -37,17 +46,22 @@ type coordinates struct {
 	Version    string `json:"version"`
 }
 
+func newCoordinates(c packages.Coordinates) coordinates {
+	return coordinates{GroupID: string(c.GroupID), ArtifactID: string(c.ArtifactID), Version: string(c.Version)}
+}
+
 func (c coordinates) toDomain() packages.Coordinates {
 	return packages.NewCoordinates(c.GroupID, c.ArtifactID, c.Version)
 }
 
 // Lockfile is the cappu-lock.json document (only version 2 is honored).
 type Lockfile struct {
-	Version           int             `json:"version"`
-	Roots             json.RawMessage `json:"roots"`
-	Packages          []LockedPackage `json:"packages"`
-	ProcessorPackages []LockedPackage `json:"processorPackages,omitempty"`
-	TestPackages      []LockedPackage `json:"testPackages,omitempty"`
+	Version int `json:"version"`
+	// Roots is the dependencies section this lock was resolved from.
+	Roots             config.Dependencies `json:"roots"`
+	Packages          []LockedPackage     `json:"packages"`
+	ProcessorPackages []LockedPackage     `json:"processorPackages,omitempty"`
+	TestPackages      []LockedPackage     `json:"testPackages,omitempty"`
 }
 
 // lockTarget maps each locked configuration to the lib directory it installs
@@ -75,11 +89,15 @@ type VerifyResult struct {
 	Missing []string
 }
 
-// read loads and validates the lockfile, or returns nil when absent/corrupt (a
+// Path is the lockfile location next to cappu.json.
+func Path(cfg *config.Config) string {
+	return filepath.Join(cfg.BaseDir, Name)
+}
+
+// Read loads and validates the lockfile, or returns nil when absent/corrupt (a
 // corrupt lock is ignored, not fatal: install re-resolves).
-func read(cfg *config.Config) *Lockfile {
-	path := filepath.Join(cfg.BaseDir, Name)
-	raw, err := os.ReadFile(path)
+func Read(cfg *config.Config) *Lockfile {
+	raw, err := os.ReadFile(Path(cfg))
 	if err != nil {
 		return nil
 	}
@@ -93,11 +111,44 @@ func read(cfg *config.Config) *Lockfile {
 	return &lock
 }
 
+// Write serializes the lockfile next to cappu.json (2-space indent, trailing
+// newline - matching the Node build).
+func Write(cfg *config.Config, lock *Lockfile) error {
+	data, err := json.MarshalIndent(lock, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(Path(cfg), append(data, '\n'), 0o644)
+}
+
+// Matches reports whether the lock was resolved from exactly this dependencies
+// section. Empty configurations are dropped before comparing, so locks written
+// before a configuration existed do not turn stale when the schema grows.
+func (l *Lockfile) Matches(cfg *config.Config) bool {
+	return normalizeDeps(l.Roots) == normalizeDeps(cfg.Dependencies)
+}
+
+func normalizeDeps(d config.Dependencies) string {
+	m := map[string]map[string]string{}
+	for name, entries := range map[string]map[string]string{
+		"api":                 d.API,
+		"implementation":      d.Implementation,
+		"annotationProcessor": d.AnnotationProcessor,
+		"testImplementation":  d.TestImplementation,
+	} {
+		if len(entries) > 0 {
+			m[name] = entries
+		}
+	}
+	b, _ := json.Marshal(m) // json.Marshal sorts map keys: deterministic
+	return string(b)
+}
+
 // VerifyInstalled checks the jars currently in the lib directories against the
 // SHA-256 sums in cappu-lock.json. Read-only: nothing is downloaded, written or
 // removed. Port of verifyInstalled.
 func VerifyInstalled(cfg *config.Config) VerifyResult {
-	lock := read(cfg)
+	lock := Read(cfg)
 	if lock == nil {
 		return VerifyResult{}
 	}
@@ -132,6 +183,11 @@ func sha256File(path string) (Sha256, error) {
 	if err != nil {
 		return "", err
 	}
+	return Sha256Of(bytes), nil
+}
+
+// Sha256Of is the hex SHA-256 of bytes.
+func Sha256Of(bytes []byte) Sha256 {
 	sum := sha256.Sum256(bytes)
-	return Sha256(hex.EncodeToString(sum[:])), nil
+	return Sha256(hex.EncodeToString(sum[:]))
 }
