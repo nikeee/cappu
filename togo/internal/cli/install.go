@@ -6,6 +6,7 @@ import (
 
 	"github.com/nikeee/cappu/internal/config"
 	"github.com/nikeee/cappu/internal/install"
+	"github.com/nikeee/cappu/internal/jdks"
 	"github.com/nikeee/cappu/internal/packages"
 )
 
@@ -45,10 +46,7 @@ func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 		return 1
 	}
 
-	if cfg.JDK != "" {
-		fmt.Fprintf(os.Stderr, "%s jdk %q: provisioning is not yet ported to the Go build\n",
-			errp("yellow", "warning:"), cfg.JDK)
-	}
+	jdkFailed := provisionJDK(cfg, errp)
 	if result.FromLock {
 		fmt.Fprint(os.Stderr, errp("dim", "using cappu-lock.json\n"))
 	}
@@ -92,10 +90,34 @@ func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 		fmt.Fprintf(os.Stderr, "%s %s: downloaded jar does not match the SHA-256 in cappu-lock.json\n", errp("red", "error:"), c)
 		failed = true
 	}
-	if failed {
+	if failed || jdkFailed {
 		return 1
 	}
 	return 0
+}
+
+// provisionJDK provisions cfg's "jdk" entry (nikeee/cappu#8) into .cappu/jdks,
+// rendering progress and the outcome. Returns true on failure. A no-jdk config
+// is a no-op.
+func provisionJDK(cfg *config.Config, errp func(format, text string) string) bool {
+	if cfg.JDK == "" {
+		return false
+	}
+	result, err := jdks.Provision(cfg, cfg.JDK, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s jdk %s: %s\n", errp("red", "error:"), cfg.JDK, err)
+		return true
+	}
+	switch {
+	case result.AlreadyProvisioned:
+		fmt.Fprint(os.Stderr, errp("dim", fmt.Sprintf("jdk %s: already provisioned\n", cfg.JDK)))
+	default:
+		if result.FromCache {
+			fmt.Fprint(os.Stderr, errp("dim", fmt.Sprintf("jdk %s: archive from the local cache\n", cfg.JDK)))
+		}
+		fmt.Fprintf(os.Stdout, "%s\n", result.JdkDir)
+	}
+	return false
 }
 
 // summary is the colourful per-category count (e.g. "3 compile dependencies, 1

@@ -91,7 +91,7 @@ type initCmd struct {
 	WithSchema bool `name:"with-schema" help:"Also write cappu.schema.json"`
 }
 
-func (*initCmd) Run(*appState) error { return exit(cli.Stub("init")) }
+func (c *initCmd) Run(a *appState) error { return exit(cli.RunInit(a.configPath, c.WithSchema, c.Yes)) }
 
 type installCmd struct {
 	Verbose bool `short:"v" help:"List every installed jar"`

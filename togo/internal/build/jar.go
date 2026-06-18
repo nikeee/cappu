@@ -17,7 +17,20 @@ import (
 	"strings"
 
 	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/jdks"
 )
+
+// Javac is the compiler binary to use: the provisioned JDK's javac when a "jdk"
+// is configured and unpacked, else compilerOptions.javac (default "javac").
+func Javac(cfg *config.Config) string {
+	if provisioned := jdks.ProvisionedJavac(cfg); provisioned != "" {
+		return provisioned
+	}
+	if cfg.CompilerOptions.Javac != "" {
+		return cfg.CompilerOptions.Javac
+	}
+	return "javac"
+}
 
 // skipDirs are build/VCS directories never scanned for sources.
 var skipDirs = map[string]struct{}{
@@ -86,11 +99,7 @@ func BuildJar(cfg *config.Config) (string, error) {
 	}
 	args = append(args, sources...)
 
-	javac := cfg.CompilerOptions.Javac
-	if javac == "" {
-		javac = "javac"
-	}
-	cmd := exec.Command(javac, args...)
+	cmd := exec.Command(Javac(cfg), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
