@@ -19,6 +19,7 @@ import { configuredRoots, configuredSources, processorRoots, testRoots } from ".
 import {
   type Coordinates,
   coordinatesToString,
+  dependencyPath,
   packageKey,
   type ResolvedPackage,
   resolveTransitive,
@@ -36,29 +37,6 @@ const SEVERITY_STYLE: Record<Severity, StyleFormat> = {
   low: "cyan",
   unknown: "dim",
 };
-
-/**
- * The chain of coordinates from a declared root down to `target`, following
- * each resolved package's `requestedBy` edge (nearest-wins records one parent
- * per package). Returns [root, ..., target]; just [target] for a direct
- * dependency, and is cycle-guarded.
- */
-function dependencyPath(
-  byKey: ReadonlyMap<string, ResolvedPackage>,
-  target: Coordinates,
-): Coordinates[] {
-  const path: Coordinates[] = [];
-  const seen = new Set<string>();
-  let current: Coordinates | undefined = target;
-  while (current) {
-    const key = packageKey(current);
-    if (seen.has(key)) break;
-    seen.add(key);
-    path.unshift(current);
-    current = byKey.get(key)?.requestedBy;
-  }
-  return path;
-}
 
 export async function runAudit(
   config: CappuConfig,

@@ -5,6 +5,7 @@
 export { type License, normalizeLicense, normalizeLicenses, type SpdxId } from "./license.ts";
 export { MavenRepositorySource, parseMetadataVersions, parsePom } from "./maven.ts";
 export {
+  dependencyPath,
   InMemoryPackageSource,
   latestVersion,
   type Resolution,
