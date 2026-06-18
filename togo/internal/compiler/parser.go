@@ -227,6 +227,8 @@ func (p *Parser) isListElement(context ParsingContext) bool {
 		return p.token() == Identifier || p.token() == AtToken
 	case ctxParameters:
 		return p.isStartOfParameter()
+	case ctxArgumentExpressions:
+		return p.isStartOfExpression()
 	default:
 		return false
 	}

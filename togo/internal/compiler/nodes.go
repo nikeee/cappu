@@ -468,6 +468,149 @@ func (n *Node) AsLiteralExpression() *LiteralExpressionData {
 	return n.data.(*LiteralExpressionData)
 }
 
+// PrefixUnaryExpressionData is `op operand` (e.g. -x, !b, ++i).
+type PrefixUnaryExpressionData struct {
+	Operator SyntaxKind
+	Operand  *Node
+}
+
+func (d *PrefixUnaryExpressionData) forEachChild(v Visitor) bool { return visit(v, d.Operand) }
+
+func (f *NodeFactory) NewPrefixUnaryExpression(operator SyntaxKind, operand *Node) *Node {
+	return f.newNode(PrefixUnaryExpression, &PrefixUnaryExpressionData{Operator: operator, Operand: operand})
+}
+
+func (n *Node) AsPrefixUnaryExpression() *PrefixUnaryExpressionData {
+	return n.data.(*PrefixUnaryExpressionData)
+}
+
+// PostfixUnaryExpressionData is `operand op` (i++, i--).
+type PostfixUnaryExpressionData struct {
+	Operand  *Node
+	Operator SyntaxKind
+}
+
+func (d *PostfixUnaryExpressionData) forEachChild(v Visitor) bool { return visit(v, d.Operand) }
+
+func (f *NodeFactory) NewPostfixUnaryExpression(operand *Node, operator SyntaxKind) *Node {
+	return f.newNode(PostfixUnaryExpression, &PostfixUnaryExpressionData{Operand: operand, Operator: operator})
+}
+
+func (n *Node) AsPostfixUnaryExpression() *PostfixUnaryExpressionData {
+	return n.data.(*PostfixUnaryExpressionData)
+}
+
+// ConditionalExpressionData is `condition ? whenTrue : whenFalse`.
+type ConditionalExpressionData struct {
+	Condition *Node
+	WhenTrue  *Node
+	WhenFalse *Node
+}
+
+func (d *ConditionalExpressionData) forEachChild(v Visitor) bool {
+	return visit(v, d.Condition) || visit(v, d.WhenTrue) || visit(v, d.WhenFalse)
+}
+
+func (f *NodeFactory) NewConditionalExpression(condition, whenTrue, whenFalse *Node) *Node {
+	return f.newNode(ConditionalExpression, &ConditionalExpressionData{Condition: condition, WhenTrue: whenTrue, WhenFalse: whenFalse})
+}
+
+func (n *Node) AsConditionalExpression() *ConditionalExpressionData {
+	return n.data.(*ConditionalExpressionData)
+}
+
+// AssignmentExpressionData is `left op= right`.
+type AssignmentExpressionData struct {
+	Left          *Node
+	OperatorToken SyntaxKind
+	Right         *Node
+}
+
+func (d *AssignmentExpressionData) forEachChild(v Visitor) bool {
+	return visit(v, d.Left) || visit(v, d.Right)
+}
+
+func (f *NodeFactory) NewAssignmentExpression(left *Node, op SyntaxKind, right *Node) *Node {
+	return f.newNode(AssignmentExpression, &AssignmentExpressionData{Left: left, OperatorToken: op, Right: right})
+}
+
+func (n *Node) AsAssignmentExpression() *AssignmentExpressionData {
+	return n.data.(*AssignmentExpressionData)
+}
+
+// InstanceofExpressionData is `expression instanceof type [name]` (or record pattern).
+type InstanceofExpressionData struct {
+	Expression *Node
+	Type       *Node // optional (absent for the record-pattern form)
+	Name       *Node // optional SE16 binding
+	Pattern    *Node // optional SE21 record pattern
+}
+
+func (d *InstanceofExpressionData) forEachChild(v Visitor) bool {
+	return visit(v, d.Expression) || visit(v, d.Type) || visit(v, d.Name) || visit(v, d.Pattern)
+}
+
+func (f *NodeFactory) NewInstanceofExpression(expr, typ, name, pattern *Node) *Node {
+	return f.newNode(InstanceofExpression, &InstanceofExpressionData{Expression: expr, Type: typ, Name: name, Pattern: pattern})
+}
+
+func (n *Node) AsInstanceofExpression() *InstanceofExpressionData {
+	return n.data.(*InstanceofExpressionData)
+}
+
+// CastExpressionData is `(type [& bounds]) expression`.
+type CastExpressionData struct {
+	Type       *Node
+	Bounds     *NodeArray // optional SE8 intersection cast
+	Expression *Node
+}
+
+func (d *CastExpressionData) forEachChild(v Visitor) bool {
+	return visit(v, d.Type) || visitNodes(v, d.Bounds) || visit(v, d.Expression)
+}
+
+func (f *NodeFactory) NewCastExpression(typ *Node, bounds *NodeArray, expr *Node) *Node {
+	return f.newNode(CastExpression, &CastExpressionData{Type: typ, Bounds: bounds, Expression: expr})
+}
+
+func (n *Node) AsCastExpression() *CastExpressionData { return n.data.(*CastExpressionData) }
+
+// ElementAccessExpressionData is `expression[argumentExpression]`.
+type ElementAccessExpressionData struct {
+	Expression         *Node
+	ArgumentExpression *Node
+}
+
+func (d *ElementAccessExpressionData) forEachChild(v Visitor) bool {
+	return visit(v, d.Expression) || visit(v, d.ArgumentExpression)
+}
+
+func (f *NodeFactory) NewElementAccessExpression(expr, arg *Node) *Node {
+	return f.newNode(ElementAccessExpression, &ElementAccessExpressionData{Expression: expr, ArgumentExpression: arg})
+}
+
+func (n *Node) AsElementAccessExpression() *ElementAccessExpressionData {
+	return n.data.(*ElementAccessExpressionData)
+}
+
+// ThisExpressionData is `this` or `Qualifier.this`.
+type ThisExpressionData struct{ Qualifier *Node }
+
+func (d *ThisExpressionData) forEachChild(v Visitor) bool { return visit(v, d.Qualifier) }
+
+func (f *NodeFactory) NewThisExpression(qualifier *Node) *Node {
+	return f.newNode(ThisExpression, &ThisExpressionData{Qualifier: qualifier})
+}
+
+// SuperExpressionData is `super` or `Qualifier.super`.
+type SuperExpressionData struct{ Qualifier *Node }
+
+func (d *SuperExpressionData) forEachChild(v Visitor) bool { return visit(v, d.Qualifier) }
+
+func (f *NodeFactory) NewSuperExpression(qualifier *Node) *Node {
+	return f.newNode(SuperExpression, &SuperExpressionData{Qualifier: qualifier})
+}
+
 // BinaryExpressionData is `left op right`.
 type BinaryExpressionData struct {
 	Left          *Node

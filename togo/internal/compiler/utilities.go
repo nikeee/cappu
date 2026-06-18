@@ -15,6 +15,19 @@ func isModifierKeyword(kind SyntaxKind) bool {
 	}
 }
 
+// isAssignmentOperator reports whether kind is `=` or a compound assignment.
+func isAssignmentOperator(kind SyntaxKind) bool {
+	switch kind {
+	case EqualsToken, PlusEqualsToken, MinusEqualsToken, AsteriskEqualsToken, SlashEqualsToken,
+		PercentEqualsToken, AmpersandEqualsToken, BarEqualsToken, CaretEqualsToken,
+		LessThanLessThanEqualsToken, GreaterThanGreaterThanEqualsToken,
+		GreaterThanGreaterThanGreaterThanEqualsToken:
+		return true
+	default:
+		return false
+	}
+}
+
 // isPrimitiveTypeKeyword reports whether kind is a primitive type keyword.
 func isPrimitiveTypeKeyword(kind SyntaxKind) bool {
 	switch kind {
