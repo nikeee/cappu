@@ -329,3 +329,5 @@ no timestamps were captured.
 - 2026-06-19 03:35 — continue
 - 2026-06-19 12:34 — build everything you wouldnt skip
 - 2026-06-19 12:42 — you probably have some mcp way of telling an AI to use `cappu compile` `cappu test` cli tool for things that require writing. Do that, so we don't have to implement this in MCP and the user can decide wheter they want writing operations
+- 2026-06-19 12:49 — Also add a command `cappu config-schema` that just prints the jsonschema of the config file. add a note to the mcp instructions that cappujson is the config file and that the shcema can be retrieved using `cappu config-schema`.
+- 2026-06-19 12:49 — update the instructions to talk like caveman

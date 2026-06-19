@@ -27,23 +27,24 @@ type CLI struct {
 	Config  string           `short:"c" placeholder:"<file>" help:"Project config (default: ./cappu.json, JSONC)."`
 	Version kong.VersionFlag `help:"Show the version"`
 
-	Init        initCmd        `cmd:"" help:"Scaffold a project and write cappu.json"`
-	Install     installCmd     `cmd:"" help:"Download the cappu.json dependencies"`
-	Update      updateCmd      `cmd:"" help:"Bump declared dependencies to newest stable"`
-	VersionCmd  versionCmd     `cmd:"" name:"version" help:"Bump the project version in cappu.json"`
-	Verify      verifyCmd      `cmd:"" help:"Check installed jars against cappu-lock.json"`
-	Audit       auditCmd       `cmd:"" help:"Scan resolved dependencies for vulnerabilities"`
-	Licenses    licensesCmd    `cmd:"" help:"Print every dependency and its license"`
-	Add         addCmd         `cmd:"" help:"Add dependencies and install them"`
-	Publish     publishCmd     `cmd:"" help:"Build the jar, generate its POM, and upload"`
-	Search      searchCmd      `cmd:"" help:"Search the configured package sources"`
-	Test        testCmd        `cmd:"" help:"Compile src/test/java and run JUnit"`
-	SelfUpgrade selfUpgradeCmd `cmd:"" name:"self-upgrade" help:"Replace this binary with the latest CD build"`
-	Rage        rageCmd        `cmd:"" help:"Open the issue tracker in your default browser"`
-	Cache       cacheCmd       `cmd:"" help:"Manage the global download cache"`
-	Lsp         lspCmd         `cmd:"" help:"Start the Java language server (JSON-RPC)"`
-	Mcp         mcpCmd         `cmd:"" help:"Start the MCP server for agents (over stdio)"`
-	Compile     compileCmd     `cmd:"" help:"Compile .java files to .class bytecode"`
+	Init         initCmd         `cmd:"" help:"Scaffold a project and write cappu.json"`
+	ConfigSchema configSchemaCmd `cmd:"" name:"config-schema" help:"Print the JSON Schema for cappu.json"`
+	Install      installCmd      `cmd:"" help:"Download the cappu.json dependencies"`
+	Update       updateCmd       `cmd:"" help:"Bump declared dependencies to newest stable"`
+	VersionCmd   versionCmd      `cmd:"" name:"version" help:"Bump the project version in cappu.json"`
+	Verify       verifyCmd       `cmd:"" help:"Check installed jars against cappu-lock.json"`
+	Audit        auditCmd        `cmd:"" help:"Scan resolved dependencies for vulnerabilities"`
+	Licenses     licensesCmd     `cmd:"" help:"Print every dependency and its license"`
+	Add          addCmd          `cmd:"" help:"Add dependencies and install them"`
+	Publish      publishCmd      `cmd:"" help:"Build the jar, generate its POM, and upload"`
+	Search       searchCmd       `cmd:"" help:"Search the configured package sources"`
+	Test         testCmd         `cmd:"" help:"Compile src/test/java and run JUnit"`
+	SelfUpgrade  selfUpgradeCmd  `cmd:"" name:"self-upgrade" help:"Replace this binary with the latest CD build"`
+	Rage         rageCmd         `cmd:"" help:"Open the issue tracker in your default browser"`
+	Cache        cacheCmd        `cmd:"" help:"Manage the global download cache"`
+	Lsp          lspCmd          `cmd:"" help:"Start the Java language server (JSON-RPC)"`
+	Mcp          mcpCmd          `cmd:"" help:"Start the MCP server for agents (over stdio)"`
+	Compile      compileCmd      `cmd:"" help:"Compile .java files to .class bytecode"`
 }
 
 // --- exit-code plumbing ------------------------------------------------------
@@ -222,6 +223,10 @@ func (*selfUpgradeCmd) Run(*appState) error { return exit(cli.RunSelfUpgrade()) 
 type rageCmd struct{}
 
 func (*rageCmd) Run(*appState) error { return exit(cli.RunRage()) }
+
+type configSchemaCmd struct{}
+
+func (*configSchemaCmd) Run(*appState) error { return exit(cli.RunConfigSchema()) }
 
 type cacheCmd struct {
 	Clean cacheCleanCmd `cmd:"" help:"Remove the global download cache"`

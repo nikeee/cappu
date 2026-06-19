@@ -9,6 +9,7 @@ import { parseArgs } from "node:util";
 import { loadConfig } from "../config.ts";
 import { runAdd } from "./add.ts";
 import { runCompileCommand } from "./compile.ts";
+import { runConfigSchema } from "./configSchema.ts";
 import { runInit } from "./init.ts";
 import { runInstall } from "./install.ts";
 import { runLsp } from "./lsp.ts";
@@ -35,6 +36,7 @@ Usage:
                                      and build output and write cappu.json (-y/--yes
                                      takes defaults); --with-schema also writes
                                      cappu.schema.json
+  cappu config-schema                Print the JSON Schema for cappu.json to stdout
   cappu install [-v]                 Download the cappu.json dependencies (transitively)
                                      into .cappu/lib/classes; prints a per-category
                                      count, or each jar path with -v/--verbose
@@ -191,6 +193,9 @@ switch (command) {
   case "rage":
     await runRage();
     break;
+  case "config-schema":
+    runConfigSchema();
+  // falls through: runConfigSchema exits the process (never returns)
 }
 
 let config;

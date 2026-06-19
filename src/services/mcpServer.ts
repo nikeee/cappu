@@ -61,15 +61,15 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
   // execute the JVM are left to the cappu CLI so the user stays in control of
   // when writes happen.
   const instructions = [
-    "cappu's MCP server is read-only: it analyses Java source and the project's",
-    "dependency graph but never writes files, compiles, or runs code.",
+    "cappu server read-only. Look at Java code and dependency tree. Never write file,",
+    "never compile, never run code.",
     "",
-    "For operations that write to disk or run the JVM, run the cappu CLI from the",
-    "shell instead (subject to the user's approval of shell/write access):",
-    "  - Build (.class / jar / fat-jar in ./dist):  cappu compile [files...]",
-    "  - Run the JUnit test suite:                  cappu test",
-    "Apply edits from rename_symbol yourself; the server returns them but does not",
-    "write them.",
+    "Need write disk or run JVM? Use cappu CLI in shell:",
+    "  - Build (.class / jar / fat-jar in ./dist):  cappu compile",
+    "  - Run JUnit test:                            cappu test",
+    "rename_symbol give you edits. You apply edits. Server not write them.",
+    "",
+    "Config file = cappu.json. Want schema? Run: cappu config-schema",
   ].join("\n");
 
   const server = new McpServer({ name: "cappu", version: "1.0.0" }, { instructions });
