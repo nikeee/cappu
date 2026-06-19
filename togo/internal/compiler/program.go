@@ -256,6 +256,15 @@ func (g *GlobalIndex) FindFqnsBySimpleName(simpleName string) []Fqn {
 	return result
 }
 
+// GetAllTypeFqns returns the fully-qualified names of every indexed top-level type.
+func (g *GlobalIndex) GetAllTypeFqns() []Fqn {
+	out := make([]Fqn, 0, len(g.p.typesByFqn))
+	for fqn := range g.p.typesByFqn {
+		out = append(out, fqn)
+	}
+	return out
+}
+
 // GetPackageByName returns a package symbol for an exact package or any prefix of one.
 func (g *GlobalIndex) GetPackageByName(name PackageName) *Symbol {
 	return g.p.packagesByName[name]
