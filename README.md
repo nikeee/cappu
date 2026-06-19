@@ -29,8 +29,8 @@ The entire Java tooling seems to be centered around the experience in an IDE tha
 
 Using maven or gradle is somehow extremely cumbersome to use in multi-stage Docker builds. Cappu aims to improve that by offering a global cache directory as well as a lockfile. Everything should be as easy as shown below.
 
-##### Why is this thing in JavaScript?
-Because I wanted to use the same parsing/checking/lsp architecture as the TS compiler. We're going to port it to golang some day (the same way the TSC team has done it).
+##### Why is this thing built with JavaScript?
+Because I wanted to use the same parsing/checking/lsp architecture as the TS compiler. We're in the process of porting it to golang (the same way the TSC team has done it).
 
 Consider this project as an exploration or proof-of-concept that Java can have better tooling than it has now.
 
@@ -82,6 +82,13 @@ I know you are using AI. AIs should be fairly good at writing Java due to the am
 cappu mcp
 ```
 This starts an MCP server that exposes all **read-only-LSP capabilities** as well as all **read-only package management features** like license information, auditing/CVEs and package search.
+
+### Usage without your Colleagues noticing
+Your colleagues use an IDE and you obviously dont want to migrate you project to a vibe-coded Java toolchain? Understandable.
+You can still use cappu as LSP/MCP server, configure it using `cappu.json` and exclude the config from the repository without touching any checked-in `.gitignore`:
+```sh
+echo "cappu.json" >> .git/info/exclude
+```
 
 ### Use in Docker
 Having a deterministic build + docker-managed cache is as simple as:
