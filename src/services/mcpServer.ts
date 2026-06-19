@@ -17,6 +17,7 @@ import { createProgram } from "../compiler/program.ts";
 import type { CappuConfig } from "../config.ts";
 import { findSourceJavaFiles, pathToUri } from "../workspace.ts";
 import { createMcpTools } from "./mcp.ts";
+import { createProjectTools } from "./mcpProject.ts";
 
 /**
  * Build the program/checker from the project config, register every tool, and
@@ -146,6 +147,42 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
       return ok(tools.findImplementations(args));
     },
   );
+
+  // Project tools resolve dependencies from the configured sources, so they
+  // only make sense with a loaded project config. They do not touch the Java
+  // program (no refresh()).
+  if (config) {
+    const project = createProjectTools(config);
+
+    server.registerTool(
+      "audit",
+      {
+        description:
+          "Scan the project's resolved dependencies (transitive) for known vulnerabilities (OSV).",
+        inputSchema: {},
+      },
+      async () => ok(await project.audit()),
+    );
+
+    server.registerTool(
+      "licenses",
+      {
+        description:
+          "List every resolved dependency and the license it ships under (best-effort SPDX).",
+        inputSchema: {},
+      },
+      async () => ok(await project.licenses()),
+    );
+
+    server.registerTool(
+      "search_packages",
+      {
+        description: "Search the configured package sources; returns group:artifact:version coords.",
+        inputSchema: { query: z.string() },
+      },
+      async args => ok(await project.searchPackages(args)),
+    );
+  }
 
   await server.connect(new StdioServerTransport());
 }

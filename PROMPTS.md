@@ -313,3 +313,4 @@ no timestamps were captured.
 - 2026-06-18 21:37 — plan it. only for the ts version of cappu, not togo
 - 2026-06-18 21:37 — 2 (execute the plan inline)
 - 2026-06-18 21:37 — i merged main into current branch. maybe something is broken. but there is now a lot more functionality / re-evaluate methods to implement for the MCP server. Align code architecture and patterns with the merged update / continue
+- 2026-06-19 02:25 — continue (deferred MCP project tools: audit, licenses, search_packages)

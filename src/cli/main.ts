@@ -70,7 +70,8 @@ Usage:
   cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
   cappu mcp                          Start the MCP server for agents: name-addressed
                                      semantic tools (diagnostics, outline, describe/
-                                     find symbols) over stdio
+                                     find symbols) plus project tools (audit, licenses,
+                                     search_packages) over stdio
   cappu compile [options] [file...]  Compile .java files to .class bytecode; with no
                                      files, compile everything under the configured
                                      sourcePaths (a project build)
