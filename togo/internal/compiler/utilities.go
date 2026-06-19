@@ -76,6 +76,27 @@ func SkipTrivia(text string, pos int) int { return skipTrivia(text, pos) }
 // EntityNameToString is the exported form of entityNameToString.
 func EntityNameToString(name *Node) string { return entityNameToString(name) }
 
+// IsValidIdentifier reports whether name is a legal Java identifier (JLS 3.8):
+// a letter/$/_ start, letters/digits/$/_ continue, and not a reserved keyword.
+// A simplified ASCII view of JavaLetter. Port of src/compiler/utilities.ts.
+func IsValidIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		ch := name[i]
+		ok := ch == '_' || ch == '$' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+		if i > 0 {
+			ok = ok || (ch >= '0' && ch <= '9')
+		}
+		if !ok {
+			return false
+		}
+	}
+	_, isKeyword := textToKeyword[name]
+	return !isKeyword
+}
+
 // entityNameToString renders an EntityName (Identifier or QualifiedName) as a
 // dotted string. Port of src/compiler/utilities.ts.
 func entityNameToString(name *Node) string {

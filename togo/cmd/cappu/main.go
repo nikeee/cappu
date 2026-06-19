@@ -11,6 +11,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
@@ -18,6 +19,7 @@ import (
 
 	"github.com/nikeee/cappu/internal/cli"
 	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/lspserver"
 	"github.com/nikeee/cappu/internal/meta"
 )
 
@@ -240,7 +242,36 @@ type lspCmd struct {
 	Port string `short:"p" placeholder:"<port>" help:"Listen on a TCP port instead of stdio"`
 }
 
-func (*lspCmd) Run(*appState) error { return exit(cli.Stub("lsp")) }
+func (c *lspCmd) Run(a *appState) error {
+	// Config is optional: a malformed/absent cappu.json simply means the server
+	// runs with the JDK stub and any open documents only.
+	cfg, err := a.config()
+	if err != nil {
+		cfg = nil
+	}
+	if c.Port != "" {
+		ln, lerr := net.Listen("tcp", "127.0.0.1:"+c.Port)
+		if lerr != nil {
+			fmt.Fprintln(os.Stderr, "cappu:", lerr)
+			return exit(1)
+		}
+		conn, aerr := ln.Accept()
+		if aerr != nil {
+			fmt.Fprintln(os.Stderr, "cappu:", aerr)
+			return exit(1)
+		}
+		if serr := lspserver.NewServer(cfg).Run(conn, conn); serr != nil {
+			fmt.Fprintln(os.Stderr, "cappu:", serr)
+			return exit(1)
+		}
+		return exit(0)
+	}
+	if serr := lspserver.Serve(cfg); serr != nil {
+		fmt.Fprintln(os.Stderr, "cappu:", serr)
+		return exit(1)
+	}
+	return exit(0)
+}
 
 // The MCP server (cli/mcp.ts, services/mcpServer.ts) is TS-only for now; the Go
 // build carries it as a stub so `cappu --help` and dispatch stay in sync.
