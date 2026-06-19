@@ -85,6 +85,32 @@ func declName(decl *compiler.Node) *compiler.Node {
 	}
 }
 
+// declModifiers returns the modifiers NodeArray of a declaration, or nil.
+func declModifiers(node *compiler.Node) *compiler.NodeArray {
+	switch node.Kind {
+	case compiler.MethodDeclaration:
+		return node.AsMethodDeclaration().Modifiers
+	case compiler.ConstructorDeclaration:
+		return node.AsConstructorDeclaration().Modifiers
+	case compiler.FieldDeclaration:
+		return node.AsFieldDeclaration().Modifiers
+	case compiler.LocalVariableDeclarationStatement:
+		return node.AsLocalVariableDeclarationStatement().Modifiers
+	case compiler.ClassDeclaration:
+		return node.AsClassDeclaration().Modifiers
+	case compiler.InterfaceDeclaration:
+		return node.AsInterfaceDeclaration().Modifiers
+	case compiler.EnumDeclaration:
+		return node.AsEnumDeclaration().Modifiers
+	case compiler.RecordDeclaration:
+		return node.AsRecordDeclaration().Modifiers
+	case compiler.AnnotationTypeDeclaration:
+		return node.AsAnnotationTypeDeclaration().Modifiers
+	default:
+		return nil
+	}
+}
+
 func symbolDeclaration(symbol *compiler.Symbol) *compiler.Node {
 	if symbol.ValueDeclaration != nil {
 		return symbol.ValueDeclaration
