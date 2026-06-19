@@ -70,6 +70,9 @@ func skipTrivia(text string, pos int) int {
 	return pos
 }
 
+// SkipTrivia is the exported form of skipTrivia for the language-services layer.
+func SkipTrivia(text string, pos int) int { return skipTrivia(text, pos) }
+
 // entityNameToString renders an EntityName (Identifier or QualifiedName) as a
 // dotted string. Port of src/compiler/utilities.ts.
 func entityNameToString(name *Node) string {

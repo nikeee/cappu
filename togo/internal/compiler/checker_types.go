@@ -69,6 +69,10 @@ func isError(t *Type) bool {
 	return t.Kind == TypeKindError
 }
 
+// TypeToString renders a human-readable form for hover/diagnostics (exported
+// for the language-services layer).
+func TypeToString(t *Type) string { return typeToString(t) }
+
 // typeToString renders a human-readable form for hover/diagnostics.
 func typeToString(t *Type) string {
 	switch t.Kind {

@@ -14,6 +14,12 @@ import (
 // URI identifies a document ("file:///A.java").
 type URI string
 
+// IsSyntheticURI reports whether a uri is a synthetic stub (jdk:/// hand stub or
+// classpath:/// generated stub) rather than a real workspace file.
+func IsSyntheticURI(uri URI) bool {
+	return strings.HasPrefix(string(uri), "jdk:") || strings.HasPrefix(string(uri), "classpath:")
+}
+
 // Generation is the program mutation counter derived caches key their memo on.
 type Generation int
 
