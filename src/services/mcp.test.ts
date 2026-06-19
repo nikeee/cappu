@@ -134,3 +134,62 @@ test("findImplementations reports ambiguity for a bare name", () => {
   expect(result.ambiguous).toBe(true);
   expect(result.candidates).toBe(2);
 });
+
+test("listMembers includes declared and inherited members with an inherited flag", () => {
+  const tools = toolsFor({
+    "file:///Base.java": "package a; class Base { int b() { return 0; } }",
+    "file:///Sub.java": "package a; class Sub extends Base { int s; }",
+  });
+  const { members } = tools.listMembers({ ref: "a.Sub" });
+  const field = members.find(m => m.kind === "field");
+  const method = members.find(m => m.kind === "method");
+  expect(field?.inherited).toBe(false);
+  expect(method?.inherited).toBe(true);
+});
+
+test("findCallers returns only the call sites of a method", () => {
+  const tools = toolsFor({
+    "file:///A.java": "package a; class A { void run() { helper(); helper(); } void helper() {} }",
+  });
+  const { callers } = tools.findCallers({ ref: "a.A#helper" });
+  expect(callers).toHaveLength(2);
+});
+
+test("typeHierarchy reports supertypes and subtypes", () => {
+  const tools = toolsFor({
+    "file:///I.java": "package a; interface I {}",
+    "file:///M.java": "package a; class M implements I {}",
+    "file:///N.java": "package a; class N extends M {}",
+  });
+  const { supertypes, subtypes } = tools.typeHierarchy({ ref: "a.M" });
+  expect(supertypes.map(s => s.label)).toEqual(["interface I"]);
+  expect(subtypes.map(s => s.label)).toEqual(["class N"]);
+});
+
+test("resolveImport returns fqn candidates for a simple name", () => {
+  const tools = toolsFor({
+    "file:///MyList.java": "package a.util; class MyList {}",
+    "file:///Other.java": "package b; class MyList {}",
+  });
+  expect(tools.resolveImport({ name: "MyList" }).imports.sort()).toEqual([
+    "a.util.MyList",
+    "b.MyList",
+  ]);
+});
+
+test("renameSymbol returns an edit per occurrence", () => {
+  const tools = toolsFor({
+    "file:///A.java": "package a; class A { int x; void m() { x = x + 1; } }",
+  });
+  const { edits } = tools.renameSymbol({ ref: "a.A#x", newName: "y" });
+  expect(edits).toHaveLength(3);
+  expect(edits.every(e => e.newText === "y")).toBe(true);
+  expect(edits[0].file).toBe("/A.java");
+});
+
+test("renameSymbol rejects an invalid identifier", () => {
+  const tools = toolsFor({ "file:///A.java": "package a; class A { int x; }" });
+  const r = tools.renameSymbol({ ref: "a.A#x", newName: "1bad" });
+  expect(r.error).toMatch(/valid Java identifier/);
+  expect(r.edits).toEqual([]);
+});

@@ -14,15 +14,24 @@ import {
   type Severity,
 } from "../audit/index.ts";
 import type { CappuConfig } from "../config.ts";
-import { configuredRoots, configuredSources, processorRoots, testRoots } from "../install.ts";
 import {
+  configuredRoots,
+  configuredSources,
+  planUpdates,
+  processorRoots,
+  testRoots,
+} from "../install.ts";
+import {
+  type Coordinates,
   coordinatesToString,
   dependencyPath,
+  latestVersion,
   packageKey,
   type PackageSource,
   type ResolvedPackage,
   resolveTransitive,
   searchPackages,
+  toCoordinates,
 } from "../packages/index.ts";
 
 export interface McpAdvisory {
@@ -55,10 +64,30 @@ export interface McpLicenseRow {
   spdx: string[];
 }
 
+export interface McpOutdatedDependency {
+  configuration: string;
+  /** "group:artifact". */
+  coordinate: string;
+  from: string;
+  to: string;
+}
+
+export interface McpTreeNode {
+  coordinate: string;
+  /** 0 for a declared root, deeper for transitive dependencies. */
+  depth: number;
+  /** The coordinate that pulled this one in (absent for roots). */
+  requestedBy?: string;
+}
+
 export interface ProjectTools {
   audit(): Promise<McpAuditReport>;
   licenses(): Promise<{ licenses: McpLicenseRow[] }>;
   searchPackages(args: { query: string }): Promise<{ matches: string[] }>;
+  outdated(): Promise<{ outdated: McpOutdatedDependency[] }>;
+  latestVersion(args: { coord: string }): Promise<{ coordinate: string; latest?: string }>;
+  /** Whole resolved graph, or - with `coord` - the path that introduces it. */
+  dependencyTree(args: { coord?: string }): Promise<{ packages?: McpTreeNode[]; path?: string[] }>;
 }
 
 export interface ProjectToolDeps {
@@ -127,5 +156,52 @@ export function createProjectTools(config: CappuConfig, deps: ProjectToolDeps = 
     return { matches: hits.map(coordinatesToString) };
   }
 
-  return { audit, licenses, searchPackages: search };
+  // Read-only preview of `cappu update`: the newest conflict-free stable bump
+  // for each declared dependency. Does not write cappu.json.
+  async function outdated(): Promise<{ outdated: McpOutdatedDependency[] }> {
+    const bumps = await planUpdates(config, sources);
+    return {
+      outdated: bumps.map(b => ({
+        configuration: b.configuration,
+        coordinate: b.key,
+        from: b.from,
+        to: b.to,
+      })),
+    };
+  }
+
+  async function latest(args: { coord: string }): Promise<{ coordinate: string; latest?: string }> {
+    const [groupId = "", artifactId = ""] = args.coord.split(":");
+    const version = await latestVersion(groupId, artifactId, sources);
+    return { coordinate: `${groupId}:${artifactId}`, ...(version ? { latest: version } : {}) };
+  }
+
+  async function dependencyTree(args: {
+    coord?: string;
+  }): Promise<{ packages?: McpTreeNode[]; path?: string[] }> {
+    const resolution = await resolveAll();
+    if (args.coord) {
+      const [groupId = "", artifactId = "", version = ""] = args.coord.split(":");
+      const byKey = new Map<string, ResolvedPackage>();
+      for (const p of resolution.packages) byKey.set(packageKey(p.coordinates), p);
+      const target: Coordinates = toCoordinates(groupId, artifactId, version);
+      return { path: dependencyPath(byKey, target).map(coordinatesToString) };
+    }
+    return {
+      packages: resolution.packages.map(p => ({
+        coordinate: coordinatesToString(p.coordinates),
+        depth: p.depth,
+        ...(p.requestedBy ? { requestedBy: coordinatesToString(p.requestedBy) } : {}),
+      })),
+    };
+  }
+
+  return {
+    audit,
+    licenses,
+    searchPackages: search,
+    outdated,
+    latestVersion: latest,
+    dependencyTree,
+  };
 }

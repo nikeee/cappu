@@ -148,6 +148,69 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
     },
   );
 
+  server.registerTool(
+    "list_members",
+    {
+      description:
+        "List a type's members (fields/methods/...), declared and inherited, each flagged. `ref` is a type FQN or simple name.",
+      inputSchema: { ref: z.string() },
+    },
+    async args => {
+      refresh();
+      return ok(tools.listMembers(args));
+    },
+  );
+
+  server.registerTool(
+    "find_callers",
+    {
+      description: "Find the call sites of a method (call hierarchy). `ref` as in describe_symbol.",
+      inputSchema: { ref: z.string() },
+    },
+    async args => {
+      refresh();
+      return ok(tools.findCallers(args));
+    },
+  );
+
+  server.registerTool(
+    "type_hierarchy",
+    {
+      description:
+        "Supertypes (extends/implements, walked up) and subtypes of a type. `ref` as in describe_symbol.",
+      inputSchema: { ref: z.string() },
+    },
+    async args => {
+      refresh();
+      return ok(tools.typeHierarchy(args));
+    },
+  );
+
+  server.registerTool(
+    "resolve_import",
+    {
+      description: 'Fully-qualified import candidates for an unqualified type name (e.g. "List").',
+      inputSchema: { name: z.string() },
+    },
+    async args => {
+      refresh();
+      return ok(tools.resolveImport(args));
+    },
+  );
+
+  server.registerTool(
+    "rename_symbol",
+    {
+      description:
+        "The workspace edits a rename would make (returned for you to apply; nothing is written). `ref` as in describe_symbol.",
+      inputSchema: { ref: z.string(), newName: z.string() },
+    },
+    async args => {
+      refresh();
+      return ok(tools.renameSymbol(args));
+    },
+  );
+
   // Project tools resolve dependencies from the configured sources, so they
   // only make sense with a loaded project config. They do not touch the Java
   // program (no refresh()).
@@ -177,10 +240,40 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
     server.registerTool(
       "search_packages",
       {
-        description: "Search the configured package sources; returns group:artifact:version coords.",
+        description:
+          "Search the configured package sources; returns group:artifact:version coords.",
         inputSchema: { query: z.string() },
       },
       async args => ok(await project.searchPackages(args)),
+    );
+
+    server.registerTool(
+      "outdated",
+      {
+        description:
+          "Declared dependencies with a newer conflict-free stable version available (preview of `cappu update`; writes nothing).",
+        inputSchema: {},
+      },
+      async () => ok(await project.outdated()),
+    );
+
+    server.registerTool(
+      "latest_version",
+      {
+        description: "The newest published version of a `group:artifact` across the sources.",
+        inputSchema: { coord: z.string() },
+      },
+      async args => ok(await project.latestVersion(args)),
+    );
+
+    server.registerTool(
+      "dependency_tree",
+      {
+        description:
+          "The resolved transitive dependency graph, or - with `coord` (group:artifact:version) - the path that pulls it onto the classpath.",
+        inputSchema: { coord: z.string().optional() },
+      },
+      async args => ok(await project.dependencyTree(args)),
     );
   }
 

@@ -73,7 +73,9 @@ test("licenses lists resolved packages with their SPDX ids, sorted", async () =>
     ["org.a:a:1"],
     [
       meta("org.a:a:1", {
-        dependencies: [{ groupId: "org.b", artifactId: "b", version: "1" } as unknown as Coordinates],
+        dependencies: [
+          { groupId: "org.b", artifactId: "b", version: "1" } as unknown as Coordinates,
+        ],
         licenses: [{ name: "Apache-2.0", url: "https://apache.org/licenses/LICENSE-2.0" }],
         licenseNormalized: ["Apache-2.0" as never],
       }),
@@ -92,7 +94,9 @@ test("audit reports vulnerable packages with severity counts and a dependency pa
     ["org.a:a:1"],
     [
       meta("org.a:a:1", {
-        dependencies: [{ groupId: "org.b", artifactId: "bad", version: "1" } as unknown as Coordinates],
+        dependencies: [
+          { groupId: "org.b", artifactId: "bad", version: "1" } as unknown as Coordinates,
+        ],
       }),
       meta("org.b:bad:1"),
     ],
@@ -111,4 +115,54 @@ test("audit is clean when nothing is vulnerable", async () => {
   const t = tools(["org.a:a:1"], [meta("org.a:a:1")], { auditSource: auditSource({}) });
   const report = await t.audit();
   expect(report.vulnerable).toEqual([]);
+});
+
+test("outdated lists declared deps with a newer stable version", async () => {
+  // 1.0 -> 1.1 (same major; planUpdates never auto-bumps across majors).
+  const t = tools(["org.a:a:1.0"], [meta("org.a:a:1.0"), meta("org.a:a:1.1")]);
+  const { outdated } = await t.outdated();
+  expect(outdated).toEqual([
+    { configuration: "implementation", coordinate: "org.a:a", from: "1.0", to: "1.1" },
+  ]);
+});
+
+test("latestVersion returns the newest published version of a coordinate", async () => {
+  const t = tools([], [meta("org.a:a:1.0"), meta("org.a:a:1.1")]);
+  expect(await t.latestVersion({ coord: "org.a:a" })).toEqual({
+    coordinate: "org.a:a",
+    latest: "1.1",
+  });
+});
+
+test("dependencyTree returns the resolved graph", async () => {
+  const t = tools(
+    ["org.a:a:1"],
+    [
+      meta("org.a:a:1", {
+        dependencies: [
+          { groupId: "org.b", artifactId: "b", version: "1" } as unknown as Coordinates,
+        ],
+      }),
+      meta("org.b:b:1"),
+    ],
+  );
+  const { packages } = await t.dependencyTree({});
+  expect(packages!.map(p => p.coordinate)).toEqual(["org.a:a:1", "org.b:b:1"]);
+  expect(packages![1].depth).toBe(1);
+});
+
+test("dependencyTree with a coord returns why it is on the classpath", async () => {
+  const t = tools(
+    ["org.a:a:1"],
+    [
+      meta("org.a:a:1", {
+        dependencies: [
+          { groupId: "org.b", artifactId: "b", version: "1" } as unknown as Coordinates,
+        ],
+      }),
+      meta("org.b:b:1"),
+    ],
+  );
+  const { path } = await t.dependencyTree({ coord: "org.b:b:1" });
+  expect(path).toEqual(["org.a:a:1", "org.b:b:1"]);
 });
