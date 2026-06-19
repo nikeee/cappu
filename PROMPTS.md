@@ -332,3 +332,4 @@ no timestamps were captured.
 - 2026-06-19 12:49 — Also add a command `cappu config-schema` that just prints the jsonschema of the config file. add a note to the mcp instructions that cappujson is the config file and that the shcema can be retrieved using `cappu config-schema`.
 - 2026-06-19 12:49 — update the instructions to talk like caveman
 - 2026-06-19 13:54 — port all lsp features before porting mcp
+- 2026-06-19 14:30 — port all 849 tests; port failing ones anyway
