@@ -76,6 +76,13 @@ cappu lsp
 ```
 You don't have to have a `cappu.json` config as long as your project uses the common paths. However, if you want the LSP server to be able to resolve your dependencies, you should probably add a config file. You can also configure the LSP server in that config file.
 
+### MCP Server
+I know you are using AI. AIs should be fairly good at writing Java due to the amount of code in the training set. However, interacting with Java-Code is not ideal for an AI, as most (and the best) Java tooling resides in the most popular IDE. We're here to offer an alternative. Some people like to wire up an LSP server, which you can also do. LSP is not ideal, as it it offset-based. AIs would like to work with names, so cappu also offers this:
+```
+cappu mcp
+```
+This starts an MCP server that exposes all **read-only-LSP capabilities** as well as all **read-only package management features** like license information, auditing/CVEs and package search.
+
 ### Use in Docker
 Having a deterministic build + docker-managed cache is as simple as:
 ```Dockerfile
