@@ -228,3 +228,39 @@ Seeded from tsgo; not yet exercised here.
 - **Node factory + visitor**: arena-backed factory methods with update-if-changed
   structural sharing; callback `ForEachChild`/`VisitEachChild`. tsgo:
   `internal/ast/visitor.go`. (Issue #18: no multi-threading yet.)
+
+## Binder / resolver / checker (semantic front end)
+
+- **Symbols on the Node struct**: the binder attaches `Symbol *Symbol` and
+  `Locals SymbolTable` directly to the shared `Node` struct (the TS build sets
+  `node.symbol` / `node.locals` ad hoc). `SymbolTable` is `map[string]*Symbol`;
+  `SymbolFlags` is a bitset (`type SymbolFlags int` + `1 << iota`).
+- **Module-level state -> struct or package var**: the TS binder uses module-level
+  `let file/parent/container`; ported as a `binder` struct threaded through the
+  walk. The resolver's TS module-level `WeakMap` memos and `resolvingSupertypes`
+  guard become package-level maps keyed by `*Node`/`*Symbol` (faithful to the TS
+  module scope; safe because keys are pointer-identity and reparses make fresh
+  nodes). The checker instead holds its caches on a `Checker` struct (it is
+  per-program, created by `NewChecker`).
+- **WeakMap -> map keyed by pointer**: `WeakMap<Node, X>` becomes `map[*Node]X`.
+  A "null = resolved to nothing" sentinel becomes a small `{val, computed bool}`
+  entry struct so a cached nil is distinct from "not yet computed".
+- **The Type model is a tagged union like Node**: one `Type` struct with a
+  `TypeKind` discriminator and per-kind fields (`checker_types.go`), not an
+  interface hierarchy - mirrors the AST `Node`/`data` choice. `errorType` /
+  `nullType` are shared singletons; primitives are interned in a package map.
+- **Duck-typed field reads -> explicit kind switches**: the TS checker reads
+  `declaration as {typeParameters?, extendsType?, ...}` generically; Go ports
+  these as helper funcs (`nodeTypeParameters`, `checkerSuperTypeNodes`,
+  `nodeModifiers`, `declarationParameters`) that switch on `node.Kind` and call
+  the typed `As*()` accessor.
+- **Closures returning an object -> struct with methods**: `createChecker`
+  returns an object capturing locals; ported as a `Checker` struct whose ~40
+  closures become methods, with the shared `program`/caches as fields.
+- **JDK stub**: `jdkstub.go` is generated from `jdkStub.ts` - the synthetic JDK
+  Java sources are copied verbatim into Go raw-string consts and registered as
+  project files via `LoadJdkStub`. Regenerate by re-running the conversion if the
+  TS stub changes.
+- **services/nodeAtPosition**: lives in the compiler package for now (it is a
+  pure AST utility the resolver/checker tests need); it can move when the
+  language-services layer is ported.
