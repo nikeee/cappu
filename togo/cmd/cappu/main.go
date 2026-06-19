@@ -20,6 +20,7 @@ import (
 	"github.com/nikeee/cappu/internal/cli"
 	"github.com/nikeee/cappu/internal/config"
 	"github.com/nikeee/cappu/internal/lspserver"
+	"github.com/nikeee/cappu/internal/mcp"
 	"github.com/nikeee/cappu/internal/meta"
 )
 
@@ -273,11 +274,22 @@ func (c *lspCmd) Run(a *appState) error {
 	return exit(0)
 }
 
-// The MCP server (cli/mcp.ts, services/mcpServer.ts) is TS-only for now; the Go
-// build carries it as a stub so `cappu --help` and dispatch stay in sync.
+// The MCP server (cli/mcp.ts, services/mcpServer.ts) exposes the Java semantic
+// engine to agents over stdio. A project config is optional (the project tools
+// need one; the semantic tools work with the JDK stub alone).
 type mcpCmd struct{}
 
-func (*mcpCmd) Run(*appState) error { return exit(cli.Stub("mcp")) }
+func (*mcpCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		cfg = nil
+	}
+	if serr := mcp.Serve(cfg); serr != nil {
+		fmt.Fprintln(os.Stderr, "cappu:", serr)
+		return exit(1)
+	}
+	return exit(0)
+}
 
 type compileCmd struct {
 	Output   string   `short:"o" placeholder:"<kind>" help:"classes | jar | fat-jar"`
