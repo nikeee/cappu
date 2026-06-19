@@ -70,6 +70,7 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
     "rename_symbol give you edits. You apply edits. Server not write them.",
     "",
     "Config file = cappu.json. Want schema? Run: cappu config-schema",
+    "All commands: cappu help",
   ].join("\n");
 
   const server = new McpServer({ name: "cappu", version: "1.0.0" }, { instructions });
