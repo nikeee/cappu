@@ -264,3 +264,32 @@ Seeded from tsgo; not yet exercised here.
 - **services/nodeAtPosition**: lives in the compiler package for now (it is a
   pure AST utility the resolver/checker tests need); it can move when the
   language-services layer is ported.
+
+## Language services + LSP server
+
+- **LSP types are hand-rolled** (`internal/lsp`), like tsgo - no external LSP
+  library. `protocol.go` mirrors the vscode-languageserver request/response
+  shapes with `encoding/json` struct tags; `omitempty`/pointer fields reproduce
+  the "absent vs present" distinction the TS optional properties carry.
+- **JSON-RPC connection** (`internal/lsp/conn.go`): a `Content-Length`-framed
+  reader/writer with `OnRequest`/`OnNotification` handler maps, single-threaded
+  dispatch (issue #18 defers concurrency). Handlers return `(any, *ResponseError)`;
+  a nil result marshals to JSON `null` (matching the TS `return null`).
+- **Services take the compiler types directly**: the `services` package operates
+  on `*compiler.Node` / `*compiler.Checker` / `*compiler.Program` and returns
+  offset-based, position-free results (`TextChange{Start,End,NewText}`,
+  `SemanticTokenEntry{Offset,...}`); the server converts offsets to LSP
+  line/character at the boundary via `compiler.ComputeLineStarts`. This keeps the
+  service logic pure and unit-testable, exactly as `src/services/*` split it.
+- **Closures-returning-handlers -> methods on a Server struct**: `startServer`'s
+  closure state (program, checker, config, inlay settings, dep-lens cache)
+  becomes `Server` fields; each `connection.onX` closure becomes an `onX` method
+  registered in `register()`.
+- **Ported-from-TS exports**: when a service needs an internal compiler helper
+  (`typeToString`, `skipTrivia`, `entityNameToString`, `isValidIdentifier`),
+  export a thin `PascalCase` wrapper rather than duplicating it - keeps the one
+  implementation authoritative.
+- **In-process server test**: the TS build has no server test (the services are
+  tested directly), but the Go port adds one - two `io.Pipe`s with a background
+  drain goroutine so the synchronous pipe never blocks the server's diagnostic
+  writes; it drives a real initialize/hover/completion/rename round-trip.
