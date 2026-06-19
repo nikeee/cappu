@@ -55,7 +55,24 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
     }
   }
 
-  const server = new McpServer({ name: "cappu", version: "1.0.0" });
+  // Surfaced to the host in the initialize response (and typically given to the
+  // model as system context). The server is deliberately read-only: it never
+  // compiles, runs code, or writes files. Operations that produce artifacts or
+  // execute the JVM are left to the cappu CLI so the user stays in control of
+  // when writes happen.
+  const instructions = [
+    "cappu's MCP server is read-only: it analyses Java source and the project's",
+    "dependency graph but never writes files, compiles, or runs code.",
+    "",
+    "For operations that write to disk or run the JVM, run the cappu CLI from the",
+    "shell instead (subject to the user's approval of shell/write access):",
+    "  - Build (.class / jar / fat-jar in ./dist):  cappu compile [files...]",
+    "  - Run the JUnit test suite:                  cappu test",
+    "Apply edits from rename_symbol yourself; the server returns them but does not",
+    "write them.",
+  ].join("\n");
+
+  const server = new McpServer({ name: "cappu", version: "1.0.0" }, { instructions });
 
   function ok(data: unknown) {
     return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };

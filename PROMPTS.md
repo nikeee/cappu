@@ -328,3 +328,4 @@ no timestamps were captured.
 - 2026-06-19 03:25 — continue
 - 2026-06-19 03:35 — continue
 - 2026-06-19 12:34 — build everything you wouldnt skip
+- 2026-06-19 12:42 — you probably have some mcp way of telling an AI to use `cappu compile` `cappu test` cli tool for things that require writing. Do that, so we don't have to implement this in MCP and the user can decide wheter they want writing operations
