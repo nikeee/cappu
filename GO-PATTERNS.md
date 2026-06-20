@@ -293,3 +293,28 @@ Seeded from tsgo; not yet exercised here.
   tested directly), but the Go port adds one - two `io.Pipe`s with a background
   drain goroutine so the synchronous pipe never blocks the server's diagnostic
   writes; it drives a real initialize/hover/completion/rename round-trip.
+
+## Emitter-domain library pieces (without the bytecode emitter)
+
+The bytecode emitter (`bytecode.ts`, ~294KB) stays a stub per issue #18, but its
+self-contained helpers port independently:
+
+- **Zip read/write -> `archive/zip`** (`internal/compiler/zip.go`). The TS build
+  hand-rolls stored-only entries to avoid a write-side `node:zlib` dependency;
+  Go has `archive/zip` in the standard library, so `WriteZip` uses `zip.Store`
+  (reproducible) and `ReadZipEntries` returns `nil` for non-zip bytes (the TS
+  `undefined`). Lazy `ZipEntry.Read()` mirrors the TS lazy `read()`.
+- **Classfile reader** (`internal/compiler/classfile_reader.go`, port of
+  `classfileReader.ts`): a constant-pool/header/member parser plus a
+  `signatureReader` (JVMS 4.7.9 generic signatures) that regenerates a Java stub
+  source. It depends only on the zip reader and `Program.AddProjectFile` - not on
+  emission - so it ports cleanly. The descriptor/signature scanners are written
+  with bounds-safe `charAt` (returns 0 past the end, like TS `?? ""`) so a
+  truncated/hostile signature terminates instead of looping (cappu#70).
+- **Testing emitter-domain readers with no JDK at runtime**: the TS test feeds
+  the reader bytes from *our* emitter (so no JDK). With the emitter stubbed, the
+  Go test instead reads committed `.class` fixtures compiled once with `javac`
+  into `internal/compiler/testdata/classfiles/` - the test itself needs no JDK.
+  Where the TS test re-emits a consumer to prove the stub resolves, the Go test
+  checks the stub registers in the global index and the consumer type-checks with
+  zero `GetSemanticDiagnostics` (the emitter is not involved).
