@@ -318,3 +318,40 @@ self-contained helpers port independently:
   Where the TS test re-emits a consumer to prove the stub resolves, the Go test
   checks the stub registers in the global index and the consumer type-checks with
   zero `GetSemanticDiagnostics` (the emitter is not involved).
+
+## Bytecode emitter (bytecode.ts -> bytecode.go)
+
+The 7,917-line JVM bytecode backend is ported and produces **byte-identical**
+output to the TS reference (verified against the committed `.class` baselines in
+`test-fixtures/emitter/emit-baselines`, no JDK needed).
+
+- **generateBody -> a `bodyGen` struct.** The TS `generateBody` is one giant
+  function whose ~40 nested closures share mutable state (the `code` buffer, the
+  typed operand `stack`, `locals`, `assigned`, `activeLocals`, label fixups,
+  break/continue/finally stacks). In Go that shared state becomes the fields of a
+  `bodyGen` struct and every closure becomes a method on it. A top-level
+  `generateBody(method, cp, program, checker, thisInternalName, opts)` builds the
+  struct, runs the body, backpatches branches, and serializes the StackMapTable.
+- **Optional/positional TS params -> a `bodyGenOptions` struct.** generateBody's
+  dozen optional trailing parameters (ctorSuper, fieldInits, lambdaSpec, enumCtor,
+  ctorPrologue, ctorLeading, ...) map to fields of one options struct; "" / nil /
+  false stand in for `undefined`.
+- **`throw new UnsupportedEmit()` -> `panic(unsupportedEmit{})` + recover.** The
+  degrade path (emit a verifiable placeholder for an unhandled construct) is a
+  `defer`/`recover` that only swallows `unsupportedEmit` and re-panics anything
+  else - the exact semantics of the TS `catch (e) { if (!(e instanceof ...)) throw }`.
+- **Insertion-ordered maps where javac's order is observable.** `computeInnerClassInfo`
+  returns an `innerClassMap` (slice of keys + map) because the InnerClasses
+  attribute order depends on declaration order, which a Go `map` would randomize.
+- **Float/long bit layout:** `math.Float32bits`/`Float64bits` and
+  `uint64(int64)` reinterpretation reproduce the TS `DataView.setFloat32` /
+  `BigInt.asIntN` constant-pool encoding exactly. Modified-UTF-8 iterates UTF-16
+  code units (`utf16.Encode`) to match the TS `charCodeAt` loop byte-for-byte.
+- **Synthetic AST nodes** (a `<clinit>`, a default/compact constructor) are built
+  with `&NodeFactory{}` (`NewMethodDeclaration`/`NewConstructorDeclaration`/
+  `newToken`) rather than faked - generateBody reads real `.Kind`/`.Body` fields.
+- **Name clashes with existing package symbols:** the emitter's `methodBody`,
+  `numericCat`, `isStringType` collided with test helpers / checker functions;
+  renamed to `compiledMethod`, `numericCat` (the unused brand type was removed),
+  and `exprIsString`. Access flags (`accPublic`...) are shared with
+  classfile_reader.go.
