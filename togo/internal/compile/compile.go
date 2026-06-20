@@ -369,7 +369,7 @@ func runJavacCompile(files []string, outDir, output string, cfg *config.Config, 
 	if err != nil {
 		return Result{Diagnostics: []CompileDiagnostic{{Severity: "error", Message: err.Error()}}}
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	args := []string{"-d", tmp, "-encoding", "UTF-8"}
 	if cfg.CompilerOptions.Release != nil {

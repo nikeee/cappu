@@ -336,3 +336,4 @@ no timestamps were captured.
 - 2026-06-20 16:06 — continue porting the lsp
 - 2026-06-20 16:20 — port the rest. find feature gaps. make sure you really have every test
 - 2026-06-20 22:52 — port the bytecode emitter (continue)
+- 2026-06-21 00:00 — continue (wire cappu compile)
