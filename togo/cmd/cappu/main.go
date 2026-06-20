@@ -298,7 +298,13 @@ type compileCmd struct {
 	Files    []string `arg:"" optional:"" help:"Specific .java files to compile"`
 }
 
-func (*compileCmd) Run(*appState) error { return exit(cli.Stub("compile")) }
+func (c *compileCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		return err
+	}
+	return exit(cli.RunCompile(c.Files, c.Output, c.Artifact, c.Quiet, cfg))
+}
 
 func main() {
 	var cli CLI
