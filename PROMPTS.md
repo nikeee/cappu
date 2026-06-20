@@ -333,3 +333,4 @@ no timestamps were captured.
 - 2026-06-19 12:49 — update the instructions to talk like caveman
 - 2026-06-19 13:54 — port all lsp features before porting mcp
 - 2026-06-19 14:30 — port all 849 tests; port failing ones anyway
+- 2026-06-20 16:06 — continue porting the lsp
