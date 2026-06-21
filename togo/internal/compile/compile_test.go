@@ -102,6 +102,26 @@ func TestRunCompileDebugInfoEmitsLocalVariableTable(t *testing.T) {
 	}
 }
 
+// A fully-qualified static call (gen.Greeting.text(), no import) must resolve and
+// emit, not degrade to a placeholder. Regression for the qualified-type-name
+// receiver case (nikeee/cappu CI processor e2e).
+func TestRunCompileFullyQualifiedStaticCall(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "src/main/java/gen/Greeting.java",
+		`package gen; public class Greeting { public static String text() { return "hi"; } }`)
+	main := writeFile(t, dir, "src/main/java/Main.java",
+		"public class Main { public static void main(String[] a) { System.out.println(gen.Greeting.text()); } }")
+	greeting := filepath.Join(dir, "src/main/java/gen/Greeting.java")
+	writeFile(t, dir, "cappu.json", "{}")
+	r := RunCompile([]string{main, greeting}, Options{Experimental: boolp(true), OutDir: filepath.Join(dir, "dist"), Config: loadCfg(t, dir)})
+	if !r.Success {
+		t.Fatalf("fully-qualified static call should compile, got %+v", r)
+	}
+	if len(r.Degraded) != 0 {
+		t.Errorf("Main.main should not degrade, degraded = %v", r.Degraded)
+	}
+}
+
 // TestValidateAgainstJavac ports validateJavac.test.ts (JDK-gated): our emitted
 // bytecode's normalized disassembly must match javac's.
 func TestValidateAgainstJavac(t *testing.T) {

@@ -204,7 +204,10 @@ func RunCompile(files []string, options Options) Result {
 	if !experimental {
 		return runJavacCompile(files, outDir, output, cfg, jarName)
 	}
-	failOnDegrade := cfg.CompilerOptions.ExperimentalCompiler.FailOnDegrade
+	failOnDegrade := true // zod .default(true)
+	if v := cfg.CompilerOptions.ExperimentalCompiler.FailOnDegrade; v != nil {
+		failOnDegrade = *v
+	}
 	if options.FailOnDegrade != nil {
 		failOnDegrade = *options.FailOnDegrade
 	}

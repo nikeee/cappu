@@ -46,6 +46,25 @@ test("a clean compile returns the written class files and prints nothing", () =>
   });
 });
 
+test("a fully-qualified static call resolves and emits, not degrades", () => {
+  inTempDir(
+    {
+      "Greeting.java": 'package gen; public class Greeting { public static String text() { return "hi"; } }',
+      "Main.java":
+        "public class Main { public static void main(String[] a) { System.out.println(gen.Greeting.text()); } }",
+    },
+    (dir, paths) => {
+      const result = runCompile(paths, {
+        experimentalCompiler: true,
+        outDir: dir,
+        config: defaultConfig(dir),
+      });
+      expect(result.success).toBe(true);
+      expect(result.degraded).toEqual([]);
+    },
+  );
+});
+
 test("a parse error fails with a located diagnostic and writes nothing", () => {
   inTempDir({ "Broken.java": "class Broken {" }, (dir, paths) => {
     const result = runCompile(paths, {

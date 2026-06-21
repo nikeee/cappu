@@ -49,6 +49,26 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestExperimentalCompilerFailOnDegradeDefault(t *testing.T) {
+	// Absent and present-without-the-key both default to true (zod .default(true));
+	// only an explicit false stays false.
+	ptr := func(cfg *Config) *bool { return cfg.CompilerOptions.ExperimentalCompiler.FailOnDegrade }
+	deref := func(b *bool) bool { return b != nil && *b }
+
+	absent, _ := Load(writeConfig(t, `{}`), "")
+	if !deref(ptr(absent)) {
+		t.Error("failOnDegrade should default to true when experimentalCompiler is absent")
+	}
+	noKey, _ := Load(writeConfig(t, `{ "compilerOptions": { "experimentalCompiler": { "enabled": true } } }`), "")
+	if !deref(ptr(noKey)) {
+		t.Error("failOnDegrade should default to true when the key is absent")
+	}
+	explicit, _ := Load(writeConfig(t, `{ "compilerOptions": { "experimentalCompiler": { "failOnDegrade": false } } }`), "")
+	if deref(ptr(explicit)) {
+		t.Error(`an explicit "failOnDegrade": false must be honoured`)
+	}
+}
+
 func TestLoadMissingDefaultFileIsEmptyConfig(t *testing.T) {
 	cfg, err := Load("", t.TempDir())
 	if err != nil {

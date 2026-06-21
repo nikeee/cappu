@@ -1111,6 +1111,23 @@ func (c *Checker) arrayMember(name string) *Symbol {
 	return nil
 }
 
+// dottedTypeName is the dotted name a chain of identifier/member accesses spells
+// out (gen.Greeting), or "" if any link is not a plain name.
+func dottedTypeName(node *Node) string {
+	switch node.Kind {
+	case Identifier:
+		return node.AsIdentifier().Text
+	case PropertyAccessExpression:
+		pa := node.AsPropertyAccessExpression()
+		left := dottedTypeName(pa.Expression)
+		if left == "" {
+			return ""
+		}
+		return left + "." + pa.Name.AsIdentifier().Text
+	}
+	return ""
+}
+
 func (c *Checker) typeOfMemberAccess(access *PropertyAccessExpressionData) *Type {
 	receiver := c.getTypeOfExpression(access.Expression)
 	if receiver.Kind == TypeKindArray {
@@ -1121,6 +1138,14 @@ func (c *Checker) typeOfMemberAccess(access *PropertyAccessExpressionData) *Type
 		return errorType
 	}
 	if receiver.Kind != TypeKindClass {
+		// gen.Greeting in expression position names the qualified type itself, not
+		// a member access on a value: resolve the whole dotted chain as a type so
+		// a following static access (gen.Greeting.text()) resolves.
+		if left := dottedTypeName(access.Expression); left != "" {
+			if asType := c.classTypeByFqn(left + "." + access.Name.AsIdentifier().Text); asType.Kind == TypeKindClass {
+				return asType
+			}
+		}
 		return errorType
 	}
 	found := c.lookupTypedMember(receiver, access.Name.AsIdentifier().Text, nil)

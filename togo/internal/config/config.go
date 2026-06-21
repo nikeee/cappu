@@ -23,10 +23,12 @@ type InlayHints struct {
 
 // ExperimentalCompiler holds cappu's own (experimental) compiler knobs.
 type ExperimentalCompiler struct {
-	Enabled       bool `json:"enabled"`
-	FailOnDegrade bool `json:"failOnDegrade"`
-	Validate      bool `json:"validate"`
-	DebugInfo     bool `json:"debugInfo"`
+	Enabled bool `json:"enabled"`
+	// FailOnDegrade defaults to true (zod .default(true)); a pointer so an
+	// explicit "failOnDegrade": false is distinguishable from an absent key.
+	FailOnDegrade *bool `json:"failOnDegrade"`
+	Validate      bool  `json:"validate"`
+	DebugInfo     bool  `json:"debugInfo"`
 }
 
 // CompilerOptions mirrors the "compilerOptions" section.
@@ -145,6 +147,10 @@ func (c *Config) applyDefaults() {
 	}
 	if co.Javac == "" {
 		co.Javac = "javac"
+	}
+	if co.ExperimentalCompiler.FailOnDegrade == nil {
+		t := true
+		co.ExperimentalCompiler.FailOnDegrade = &t
 	}
 	if c.PackageSources == nil {
 		c.PackageSources = append([]string(nil), DefaultPackageSources...)

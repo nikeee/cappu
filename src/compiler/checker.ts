@@ -948,13 +948,35 @@ export function createChecker(program: Program): Checker {
     return undefined;
   }
 
+  // The dotted name a chain of identifier/member accesses spells out
+  // (gen.Greeting), or undefined if any link is not a plain name.
+  function dottedTypeName(node: Node): string | undefined {
+    if (node.kind === SyntaxKind.Identifier) return (node as Identifier).text;
+    if (node.kind === SyntaxKind.PropertyAccessExpression) {
+      const pa = node as PropertyAccessExpression;
+      const left = dottedTypeName(pa.expression);
+      return left ? `${left}.${pa.name.text}` : undefined;
+    }
+    return undefined;
+  }
+
   function typeOfMemberAccess(access: PropertyAccessExpression): Type {
     const receiver = getTypeOfExpression(access.expression);
     if (receiver.kind === TypeKind.Array) {
       const member = arrayMember(access.name.text);
       return member ? getTypeOfSymbol(member) : errorType;
     }
-    if (receiver.kind !== TypeKind.Class) return errorType;
+    if (receiver.kind !== TypeKind.Class) {
+      // gen.Greeting in expression position names the qualified type itself, not
+      // a member access on a value: resolve the whole dotted chain as a type so
+      // a following static access (gen.Greeting.text()) resolves.
+      const fqn = dottedTypeName(access);
+      if (fqn) {
+        const asType = classTypeByFqn(fqn);
+        if (asType.kind === TypeKind.Class) return asType;
+      }
+      return errorType;
+    }
     const found = lookupTypedMember(receiver as ClassType, access.name.text);
     if (!found) return errorType;
     return substitute(getTypeOfSymbol(found.symbol), found.subst);
