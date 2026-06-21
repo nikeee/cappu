@@ -21,6 +21,7 @@ import {
   type MavenScope,
   type PackageMetadata,
   type PackageSource,
+  type SearchHit,
   type SourceName,
   toCoordinates,
 } from "./types.ts";
@@ -271,7 +272,7 @@ export class MavenRepositorySource implements PackageSource {
   }
 
   /** Free-text search via the index service; empty without one (or on errors). */
-  async search(query: string): Promise<Coordinates[]> {
+  async search(query: string): Promise<SearchHit[]> {
     if (this.searchUrl === undefined) return [];
     const url = new URL(this.searchUrl);
     url.search = new URLSearchParams({ q: toSolrQuery(query), rows: "20", wt: "json" }).toString();
@@ -279,11 +280,27 @@ export class MavenRepositorySource implements PackageSource {
     if (text === undefined) return [];
     try {
       const doc = JSON.parse(text) as {
-        response?: { docs?: { g?: string; a?: string; latestVersion?: string }[] };
+        response?: {
+          docs?: {
+            g?: string;
+            a?: string;
+            latestVersion?: string;
+            // The index reports packaging as `p`, the total version count and a
+            // last-published `timestamp` (epoch ms); all are best-effort extras.
+            p?: string;
+            versionCount?: number;
+            timestamp?: number;
+          }[];
+        };
       };
       return (doc.response?.docs ?? [])
         .filter(d => d.g && d.a && d.latestVersion)
-        .map(d => toCoordinates(d.g!, d.a!, d.latestVersion!));
+        .map(d => ({
+          ...toCoordinates(d.g!, d.a!, d.latestVersion!),
+          packaging: d.p,
+          versionCount: d.versionCount,
+          lastUpdated: d.timestamp,
+        }));
     } catch {
       return []; // a broken index answer must not fail the command
     }

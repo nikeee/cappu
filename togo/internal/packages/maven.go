@@ -111,6 +111,11 @@ type searchDoc struct {
 			G             string `json:"g"`
 			A             string `json:"a"`
 			LatestVersion string `json:"latestVersion"`
+			// The index reports packaging as `p`, the total version count and a
+			// last-published `timestamp` (epoch ms); all are best-effort extras.
+			P            string `json:"p"`
+			VersionCount *int   `json:"versionCount"`
+			Timestamp    *int64 `json:"timestamp"`
 		} `json:"docs"`
 	} `json:"response"`
 }
@@ -129,7 +134,7 @@ func toSolrQuery(query string) string {
 
 // Search runs a free-text query via the index service; nil without one (or on a
 // broken answer - a bad index reply must not fail the command).
-func (s *MavenRepositorySource) Search(query string) ([]Coordinates, error) {
+func (s *MavenRepositorySource) Search(query string) ([]SearchHit, error) {
 	if s.searchURL == "" {
 		return nil, nil
 	}
@@ -149,10 +154,15 @@ func (s *MavenRepositorySource) Search(query string) ([]Coordinates, error) {
 	if err := json.Unmarshal([]byte(text), &doc); err != nil {
 		return nil, nil
 	}
-	var hits []Coordinates
+	var hits []SearchHit
 	for _, d := range doc.Response.Docs {
 		if d.G != "" && d.A != "" && d.LatestVersion != "" {
-			hits = append(hits, NewCoordinates(d.G, d.A, d.LatestVersion))
+			hits = append(hits, SearchHit{
+				Coordinates:  NewCoordinates(d.G, d.A, d.LatestVersion),
+				Packaging:    d.P,
+				VersionCount: d.VersionCount,
+				LastUpdated:  d.Timestamp,
+			})
 		}
 	}
 	return hits, nil

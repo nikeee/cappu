@@ -168,7 +168,14 @@ test("search queries the index service and tolerates broken answers", async () =
   let answer = JSON.stringify({
     response: {
       docs: [
-        { g: "com.google.code.gson", a: "gson", latestVersion: "2.13.1" },
+        {
+          g: "com.google.code.gson",
+          a: "gson",
+          latestVersion: "2.13.1",
+          p: "jar",
+          versionCount: 42,
+          timestamp: 1671000000000,
+        },
         { g: "org.partial", a: "no-version" }, // dropped: no latestVersion
       ],
     },
@@ -184,7 +191,14 @@ test("search queries the index service and tolerates broken answers", async () =
   );
 
   expect(await source.search("gso n")).toEqual([
-    { groupId: "com.google.code.gson", artifactId: "gson", version: "2.13.1" },
+    {
+      groupId: "com.google.code.gson",
+      artifactId: "gson",
+      version: "2.13.1",
+      packaging: "jar",
+      versionCount: 42,
+      lastUpdated: 1671000000000,
+    },
   ]);
   expect(fetched[0]).toBe("https://search.example/solrsearch/select?q=gso+n&rows=20&wt=json");
 

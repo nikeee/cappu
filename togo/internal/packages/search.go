@@ -3,9 +3,9 @@ package packages
 // SearchPackages searches every source in order and returns the hits
 // deduplicated by group:artifact (the first source to surface a package wins).
 // Port of searchPackages in src/packages/resolver.ts.
-func SearchPackages(query string, sources []PackageSource) ([]Coordinates, error) {
+func SearchPackages(query string, sources []PackageSource) ([]SearchHit, error) {
 	seen := make(map[PackageKey]struct{})
-	var result []Coordinates
+	var result []SearchHit
 	for _, source := range sources {
 		hits, err := source.Search(query)
 		if err != nil {

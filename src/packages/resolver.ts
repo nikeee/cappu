@@ -11,6 +11,7 @@ import {
   type PackageMetadata,
   type PackageSource,
   packageKey,
+  type SearchHit,
   type SourceName,
 } from "./types.ts";
 
@@ -133,9 +134,9 @@ export async function resolveTransitive(
 export async function searchPackages(
   query: string,
   sources: readonly PackageSource[],
-): Promise<Coordinates[]> {
+): Promise<SearchHit[]> {
   const seen = new Set<PackageKey>();
-  const result: Coordinates[] = [];
+  const result: SearchHit[] = [];
   for (const source of sources) {
     for (const hit of await source.search(query)) {
       const key = packageKey(hit);
@@ -198,11 +199,14 @@ export class InMemoryPackageSource implements PackageSource {
     }
   }
 
-  search(query: string): Promise<Coordinates[]> {
+  search(query: string): Promise<SearchHit[]> {
     const q = query.toLowerCase();
-    const hits: Coordinates[] = [];
+    const hits: SearchHit[] = [];
     for (const [key, list] of this.byKey) {
-      if (key.toLowerCase().includes(q)) hits.push(list.at(-1)!.coordinates);
+      // the version count is the one extra fact an in-memory source knows
+      if (key.toLowerCase().includes(q)) {
+        hits.push({ ...list.at(-1)!.coordinates, versionCount: list.length });
+      }
     }
     return Promise.resolve(hits);
   }

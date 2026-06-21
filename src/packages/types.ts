@@ -23,6 +23,16 @@ export interface Coordinates {
   readonly version: Version;
 }
 
+/** A search match: coordinates plus whatever extra facts the index reported. */
+export interface SearchHit extends Coordinates {
+  /** Maven packaging ("jar", "pom", "aar", ...), if the index reported it. */
+  readonly packaging?: string;
+  /** Total number of published versions, if known. */
+  readonly versionCount?: number;
+  /** Last-published time as epoch ms, if the index reported it. */
+  readonly lastUpdated?: number;
+}
+
 /** A dependency as declared by a package (before resolution). */
 export interface DependencyDeclaration extends Coordinates {
   /** Maven scope; only "compile" and "runtime" propagate transitively. */
@@ -50,7 +60,7 @@ export interface PackageSource {
   /** A stable display name (e.g. the repository url). */
   readonly name: SourceName;
   /** Free-text search; implementations may return an empty list if unsupported. */
-  search(query: string): Promise<Coordinates[]>;
+  search(query: string): Promise<SearchHit[]>;
   /** All published versions of group:artifact, oldest first. */
   listVersions(groupId: string, artifactId: string): Promise<string[]>;
   /** Metadata (including declared dependencies), or undefined if unknown here. */

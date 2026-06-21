@@ -169,7 +169,7 @@ func TestSearchEncodesQueryAndToleratesBrokenAnswer(t *testing.T) {
 	source := NewMavenRepositorySourceWithFetchers("https://repo.example/maven2", "https://search.example/solrsearch/select", fetch, noBytes)
 
 	hits, _ := source.Search("gso n")
-	if !reflect.DeepEqual(hits, []Coordinates{NewCoordinates("com.google.code.gson", "gson", "2.13.1")}) {
+	if !reflect.DeepEqual(hits, []SearchHit{{Coordinates: NewCoordinates("com.google.code.gson", "gson", "2.13.1")}}) {
 		t.Errorf("hits = %+v", hits)
 	}
 	if fetched[0] != "https://search.example/solrsearch/select?q=gso+n&rows=20&wt=json" {

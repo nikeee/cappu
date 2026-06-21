@@ -13,7 +13,7 @@ func TestMavenSearchParsesSolrResponse(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"response":{"docs":[
-			{"g":"com.google.code.gson","a":"gson","latestVersion":"2.13.2"},
+			{"g":"com.google.code.gson","a":"gson","latestVersion":"2.13.2","p":"jar","versionCount":42,"timestamp":1671000000000},
 			{"g":"com.example","a":"no-version"}
 		]}}`))
 	}))
@@ -30,6 +30,11 @@ func TestMavenSearchParsesSolrResponse(t *testing.T) {
 	}
 	if hits[0].String() != "com.google.code.gson:gson:2.13.2" {
 		t.Errorf("hit = %q", hits[0].String())
+	}
+	if hits[0].Packaging != "jar" || hits[0].VersionCount == nil || *hits[0].VersionCount != 42 ||
+		hits[0].LastUpdated == nil || *hits[0].LastUpdated != 1671000000000 {
+		t.Errorf("hit extras = (%q, %v, %v), want (jar, 42, 1671000000000)",
+			hits[0].Packaging, hits[0].VersionCount, hits[0].LastUpdated)
 	}
 }
 
@@ -70,10 +75,10 @@ func TestSearchWithoutIndexReturnsNil(t *testing.T) {
 }
 
 func TestSearchPackagesDedupsByGroupArtifact(t *testing.T) {
-	dup := stubSource{hits: []Coordinates{
-		NewCoordinates("g", "a", "1"),
-		NewCoordinates("g", "a", "2"), // same key: dropped
-		NewCoordinates("g", "b", "1"),
+	dup := stubSource{hits: []SearchHit{
+		{Coordinates: NewCoordinates("g", "a", "1")},
+		{Coordinates: NewCoordinates("g", "a", "2")}, // same key: dropped
+		{Coordinates: NewCoordinates("g", "b", "1")},
 	}}
 	hits, err := SearchPackages("q", []PackageSource{dup})
 	if err != nil {
@@ -84,11 +89,11 @@ func TestSearchPackagesDedupsByGroupArtifact(t *testing.T) {
 	}
 }
 
-type stubSource struct{ hits []Coordinates }
+type stubSource struct{ hits []SearchHit }
 
 func (s stubSource) Name() string { return "stub" }
 
-func (s stubSource) Search(string) ([]Coordinates, error) { return s.hits, nil }
+func (s stubSource) Search(string) ([]SearchHit, error) { return s.hits, nil }
 
 func (s stubSource) ListVersions(string, string) ([]string, error) { return nil, nil }
 

@@ -19,8 +19,8 @@ type fakeSource struct {
 	versions map[string][]string // "group:artifact" -> versions, oldest first
 }
 
-func (s *fakeSource) Name() string                                  { return s.name }
-func (s *fakeSource) Search(string) ([]packages.Coordinates, error) { return nil, nil }
+func (s *fakeSource) Name() string                                { return s.name }
+func (s *fakeSource) Search(string) ([]packages.SearchHit, error) { return nil, nil }
 
 func (s *fakeSource) ListVersions(groupID, artifactID string) ([]string, error) {
 	return s.versions[groupID+":"+artifactID], nil

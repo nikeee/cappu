@@ -176,13 +176,15 @@ func NewInMemoryPackageSource(name string, pkgs []PackageMetadata) *InMemoryPack
 
 func (s *InMemoryPackageSource) Name() string { return s.name }
 
-func (s *InMemoryPackageSource) Search(query string) ([]Coordinates, error) {
+func (s *InMemoryPackageSource) Search(query string) ([]SearchHit, error) {
 	q := strings.ToLower(query)
-	var hits []Coordinates
+	var hits []SearchHit
 	for _, key := range s.keys {
 		if strings.Contains(strings.ToLower(string(key)), q) {
 			list := s.byKey[key]
-			hits = append(hits, list[len(list)-1].Coordinates)
+			// the version count is the one extra fact an in-memory source knows
+			count := len(list)
+			hits = append(hits, SearchHit{Coordinates: list[len(list)-1].Coordinates, VersionCount: &count})
 		}
 	}
 	return hits, nil

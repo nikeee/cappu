@@ -26,6 +26,7 @@ export type {
   PackageKey,
   PackageMetadata,
   PackageSource,
+  SearchHit,
   SourceName,
   Version,
 } from "./types.ts";

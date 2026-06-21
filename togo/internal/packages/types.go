@@ -48,6 +48,20 @@ func NewCoordinates(groupID, artifactID, version string) Coordinates {
 	return Coordinates{GroupID: GroupID(groupID), ArtifactID: ArtifactID(artifactID), Version: Version(version)}
 }
 
+// SearchHit is a search match: coordinates plus whatever extra facts the index
+// reported. Port of SearchHit in src/packages/types.ts. The optional extras use
+// pointers / "" so an absent field stays distinguishable and is omitted from
+// --json output (matching JSON.stringify dropping undefined keys).
+type SearchHit struct {
+	Coordinates
+	// Packaging is the Maven packaging ("jar", "pom", "aar", ...), "" if unknown.
+	Packaging string
+	// VersionCount is the total number of published versions, nil if unknown.
+	VersionCount *int
+	// LastUpdated is the last-published time as epoch ms, nil if unknown.
+	LastUpdated *int64
+}
+
 // DependencyDeclaration is a dependency as declared by a package (before
 // resolution).
 type DependencyDeclaration struct {
@@ -77,7 +91,7 @@ type PackageSource interface {
 	// Name is a stable display name (e.g. the repository url).
 	Name() string
 	// Search runs a free-text query; an unsupported source returns nil.
-	Search(query string) ([]Coordinates, error)
+	Search(query string) ([]SearchHit, error)
 	// ListVersions returns all published versions of group:artifact, oldest first.
 	ListVersions(groupID, artifactID string) ([]string, error)
 	// GetMetadata returns the effective metadata, or nil if unknown here.

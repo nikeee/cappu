@@ -143,6 +143,8 @@ test("search merges sources and dedupes by group:artifact", async () => {
   ]);
   const hits = await searchPackages("json", [primary, fallback]);
   expect(hits.map(coordinatesToString)).toEqual(["org.x:json-lib:2", "org.y:json-other:1"]);
+  // an in-memory source reports the one extra fact it knows: the version count
+  expect(hits.map(h => h.versionCount)).toEqual([1, 1]);
 });
 
 test("latestVersion picks the newest from the first source that knows the package", async () => {
