@@ -49,7 +49,8 @@ test("a clean compile returns the written class files and prints nothing", () =>
 test("a fully-qualified static call resolves and emits, not degrades", () => {
   inTempDir(
     {
-      "Greeting.java": 'package gen; public class Greeting { public static String text() { return "hi"; } }',
+      "Greeting.java":
+        'package gen; public class Greeting { public static String text() { return "hi"; } }',
       "Main.java":
         "public class Main { public static void main(String[] a) { System.out.println(gen.Greeting.text()); } }",
     },

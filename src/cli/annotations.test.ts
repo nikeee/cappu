@@ -31,9 +31,7 @@ test("formatAnnotation builds workflow commands with and without a location", ()
 
 test("formatAnnotation escapes data and property values", () => {
   // message (data): % \r \n
-  expect(formatAnnotation("error", "100% done\nnext\r")).toBe(
-    "::error::100%25 done%0Anext%0D",
-  );
+  expect(formatAnnotation("error", "100% done\nnext\r")).toBe("::error::100%25 done%0Anext%0D");
   // property values: additionally : and ,
   expect(formatAnnotation("error", "x", { file: "a:b,c.java", line: 1 })).toBe(
     "::error file=a%3Ab%2Cc.java,line=1::x",

@@ -1,5 +1,12 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["*.md", "index.html", "**/*.icon/*", "TypeScript/**", "TypeScript-Go/**", "test-fixtures/**"],
+  "ignorePatterns": [
+    "*.md",
+    "index.html",
+    "**/*.icon/*",
+    "TypeScript/**",
+    "TypeScript-Go/**",
+    "test-fixtures/**"
+  ],
   "arrowParens": "avoid"
 }

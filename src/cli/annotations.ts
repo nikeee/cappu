@@ -21,9 +21,7 @@ export interface AnnotationLocation {
  */
 export function annotationsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return (
-    env.GITHUB_ACTIONS === "true" ||
-    env.FORGEJO_ACTIONS === "true" ||
-    env.GITEA_ACTIONS === "true"
+    env.GITHUB_ACTIONS === "true" || env.FORGEJO_ACTIONS === "true" || env.GITEA_ACTIONS === "true"
   );
 }
 
