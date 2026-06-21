@@ -2,7 +2,9 @@ package compiler
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -75,6 +77,81 @@ func TestEmitterBaselines(t *testing.T) {
 				}
 				if !bytes.Equal(cls.Bytes, want) {
 					t.Errorf("%s: emitted bytes differ from baseline (%d vs %d bytes)%s", cls.Name, len(cls.Bytes), len(want), firstDiff(cls.Bytes, want))
+				}
+			}
+		})
+	}
+}
+
+// loadJavacBaseline parses a committed javac-baseline JSON (className -> Disasm,
+// whose code entries are [signature, [instructions]] arrays), or nil if absent.
+func loadJavacBaseline(t *testing.T, path string) map[string]*Disasm {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var parsed map[string]struct {
+		Members []string            `json:"members"`
+		Code    [][]json.RawMessage `json:"code"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	out := map[string]*Disasm{}
+	for name, cls := range parsed {
+		d := &Disasm{Members: cls.Members}
+		for _, entry := range cls.Code {
+			var sig string
+			var instrs []string
+			_ = json.Unmarshal(entry[0], &sig)
+			_ = json.Unmarshal(entry[1], &instrs)
+			d.Code = append(d.Code, DisasmMethod{Signature: sig, Instructions: instrs})
+		}
+		out[name] = d
+	}
+	return out
+}
+
+// TestEmitterJavacEquivalence is the emitter.test.ts javac tier: our normalized
+// disassembly (javap over our emitted bytes) must match javac's, read from the
+// committed javac-baselines JSON. Needs javap (skipped otherwise).
+func TestEmitterJavacEquivalence(t *testing.T) {
+	if exec.Command("javap", "-version").Run() != nil {
+		t.Skip("javap not available")
+	}
+	javacDir := filepath.Join("..", "..", "..", "test-fixtures", "emitter", "javac-baselines")
+	for name, source := range emitFixtures {
+		t.Run(name, func(t *testing.T) {
+			ref := loadJavacBaseline(t, filepath.Join(javacDir, name+".json"))
+			if ref == nil {
+				t.Skip("no javac baseline for " + name)
+			}
+			program := NewProgram()
+			LoadJdkStub(program)
+			uri := URI("file:///" + name + ".java")
+			program.SetOpenDocument(uri, source, 1)
+			checker := NewChecker(program)
+			classes := EmitSourceFile(program.GetSourceFile(uri), program, checker, false)
+			tmp := t.TempDir()
+			var files []string
+			for _, cls := range classes {
+				p := filepath.Join(tmp, cls.Name+".class")
+				if os.MkdirAll(filepath.Dir(p), 0o755) != nil || os.WriteFile(p, cls.Bytes, 0o644) != nil {
+					t.Fatalf("write %s", cls.Name)
+				}
+				files = append(files, p)
+			}
+			ours, err := DisasmFiles(files, "javap")
+			if err != nil {
+				t.Fatalf("javap: %v", err)
+			}
+			for className, ourDisasm := range ours {
+				reference, ok := ref[className]
+				if !ok {
+					continue // not in the javac reference (e.g. a degraded/extra class)
+				}
+				if detail := compareClass(ourDisasm, reference); detail != "" {
+					t.Errorf("%s: %s", className, detail)
 				}
 			}
 		})

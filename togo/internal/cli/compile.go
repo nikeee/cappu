@@ -8,6 +8,7 @@ import (
 
 	"github.com/nikeee/cappu/internal/build"
 	"github.com/nikeee/cappu/internal/compile"
+	"github.com/nikeee/cappu/internal/compiler"
 	"github.com/nikeee/cappu/internal/config"
 	"github.com/nikeee/cappu/internal/publish"
 )
@@ -80,7 +81,21 @@ func RunCompile(files []string, outputFlag, artifact string, quiet bool, cfg *co
 		}
 	}
 	if validate {
-		fmt.Fprintln(os.Stderr, "warning: experimentalCompiler.validate is not yet supported in the Go build; skipped")
+		// `inputs`, not `files`: a project build validates the sourcePaths sources.
+		v := compiler.ValidateAgainstJavac(inputs, result.Written, build.Javac(cfg))
+		if !v.OK {
+			if v.Error != "" {
+				fmt.Fprintf(os.Stderr, "cappu: --validate: %s\n", v.Error)
+			} else {
+				for _, m := range v.Mismatches {
+					fmt.Fprintf(os.Stderr, "error: %s: bytecode differs from javac: %s\n", m.ClassName, m.Detail)
+				}
+			}
+			return 1
+		}
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "--validate: %d class(es) match javac\n", v.Compared)
+		}
 	}
 	return 0
 }

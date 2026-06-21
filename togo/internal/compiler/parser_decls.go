@@ -400,6 +400,10 @@ func (p *Parser) parseTypeDeclaration() *Node {
 		if p.token() != EndOfFileToken {
 			p.nextToken()
 		}
-		return p.createMissingNode(ClassDeclaration, false, nil)
+		// An empty class declaration (not a bare token tagged ClassDeclaration):
+		// the binder/checker/emitter read its fields via As accessors, which would
+		// panic on a token payload. An empty-named class is a crash-free best
+		// effort over malformed input (TS reads undefined fields off its token).
+		return p.finishNode(p.factory.NewClassDeclaration(modifiers, p.factory.NewIdentifier(""), nil, nil, nil, nil, nil), pos, -1)
 	}
 }
