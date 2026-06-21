@@ -630,13 +630,24 @@ func (c *Checker) functionalMethod(typeSymbol *Symbol, seen map[*Symbol]bool) *N
 		return nil
 	}
 	seen[typeSymbol] = true
+	// The SAM is the single abstract instance method (JLS 9.8): a method with no
+	// body that is neither static nor private. default/static/private methods
+	// (which carry a body) are not abstract and never the SAM. The TS reference
+	// relies on the members map's declaration order to surface the abstract method
+	// first; a Go map randomizes order, so filter to abstract explicitly.
 	for _, member := range typeSymbol.Members {
-		if member.Flags&SymbolFlagsMethod != 0 {
-			for _, d := range member.Declarations {
-				if d.Kind == MethodDeclaration {
-					return d
-				}
+		if member.Flags&SymbolFlagsMethod == 0 {
+			continue
+		}
+		for _, d := range member.Declarations {
+			if d.Kind != MethodDeclaration {
+				continue
 			}
+			md := d.AsMethodDeclaration()
+			if md.Body != nil || hasModifierKind(md.Modifiers, StaticKeyword) || hasModifierKind(md.Modifiers, PrivateKeyword) {
+				continue // default / static / private: has a body, not the SAM
+			}
+			return d
 		}
 	}
 	for _, superSymbol := range GetDirectSuperTypeSymbols(typeSymbol, c.program) {
