@@ -362,3 +362,4 @@ cappu search commons-lang3
 - 2026-06-21 21:39 — investigate wether we can replace some code with commonly used libraries.
 - 2026-06-21 22:26 — make a plan. it should not impact startup performance or hog memory. maybe just lazy. or if it doesnt work good at all, just keep the stubs (and maybe extend them)
 - 2026-06-21 22:26 — yes, auto mode and use a separate branch
+- 2026-06-21 23:24 — add more tests. determine edge cases
