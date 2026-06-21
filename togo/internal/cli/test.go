@@ -32,6 +32,7 @@ func RunTest(cfg *config.Config) int {
 		})
 		for _, w := range main.Warnings {
 			fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+			emitAnnotation("warning", w, AnnotationLocation{})
 		}
 		if !main.Success {
 			renderDiagnostics(main.Diagnostics)

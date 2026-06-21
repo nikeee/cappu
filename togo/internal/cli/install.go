@@ -43,6 +43,7 @@ func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
+		emitAnnotation("error", err.Error(), AnnotationLocation{})
 		return 1
 	}
 
@@ -57,6 +58,7 @@ func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 		fmt.Fprintf(os.Stderr, "%s cappu.json's dependencies changed since cappu-lock.json was written;\n"+
 			"         the locked set was installed anyway. Use `cappu add` (or delete the\n"+
 			"         lock file) to re-resolve.\n", errp("yellow", "warning:"))
+		emitAnnotation("warning", "cappu.json's dependencies changed since cappu-lock.json was written; the locked set was installed anyway. Use `cappu add` (or delete the lock file) to re-resolve.", AnnotationLocation{})
 	}
 
 	if verbose {
@@ -71,6 +73,7 @@ func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 	for _, c := range result.Resolution.Conflicts {
 		fmt.Fprintf(os.Stderr, "%s %s: version %s (via %s) loses to %s\n",
 			errp("yellow", "warning:"), c.Key, c.Rejected, c.RejectedBy.ArtifactID, c.Selected)
+		emitAnnotation("warning", fmt.Sprintf("%s: version %s (via %s) loses to %s", c.Key, c.Rejected, c.RejectedBy.ArtifactID, c.Selected), AnnotationLocation{})
 	}
 
 	failed := false
@@ -80,14 +83,17 @@ func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 			via = fmt.Sprintf(" (required by %s)", m.RequestedBy.ArtifactID)
 		}
 		fmt.Fprintf(os.Stderr, "%s %s: not found in any package source%s\n", errp("red", "error:"), m.Coordinates.String(), via)
+		emitAnnotation("error", fmt.Sprintf("%s: not found in any package source%s", m.Coordinates.String(), via), AnnotationLocation{})
 		failed = true
 	}
 	for _, c := range result.NoArtifact {
 		fmt.Fprintf(os.Stderr, "%s %s: source provided no jar\n", errp("red", "error:"), c)
+		emitAnnotation("error", fmt.Sprintf("%s: source provided no jar", c), AnnotationLocation{})
 		failed = true
 	}
 	for _, c := range result.IntegrityFailures {
 		fmt.Fprintf(os.Stderr, "%s %s: downloaded jar does not match the SHA-256 in cappu-lock.json\n", errp("red", "error:"), c)
+		emitAnnotation("error", fmt.Sprintf("%s: downloaded jar does not match the SHA-256 in cappu-lock.json", c), AnnotationLocation{})
 		failed = true
 	}
 	if failed || jdkFailed {
@@ -106,6 +112,7 @@ func provisionJDK(cfg *config.Config, errp func(format, text string) string) boo
 	result, err := jdks.Provision(cfg, cfg.JDK, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s jdk %s: %s\n", errp("red", "error:"), cfg.JDK, err)
+		emitAnnotation("error", fmt.Sprintf("jdk %s: %s", cfg.JDK, err), AnnotationLocation{})
 		return true
 	}
 	switch {

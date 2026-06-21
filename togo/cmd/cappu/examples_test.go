@@ -45,6 +45,26 @@ func cappu(t *testing.T) string {
 	return cappuBin
 }
 
+// childEnv is os.Environ() with the GitHub-compatible CI markers stripped, plus
+// any extras. cappu emits ::error::/::warning:: workflow annotations when it
+// sees those vars; under cappu's own CI they would inherit into these spawned
+// cappu processes and leak into the CombinedOutput() captures these tests
+// assert on. Stripping them keeps the spawned cappu's output identical whether
+// or not the suite itself runs in CI.
+func childEnv(extra ...string) []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		switch {
+		case strings.HasPrefix(kv, "GITHUB_ACTIONS="),
+			strings.HasPrefix(kv, "FORGEJO_ACTIONS="),
+			strings.HasPrefix(kv, "GITEA_ACTIONS="):
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, extra...)
+}
+
 func hasJavac() bool { return exec.Command("javac", "-version").Run() == nil }
 
 func javaBin() string {
@@ -122,7 +142,7 @@ func runExample(t *testing.T, name string, command ...string) string {
 			copyTree(t, src, filepath.Join(work, entry))
 		}
 	}
-	env := append(os.Environ(), "CAPPU_PACKAGE_STORE="+store)
+	env := childEnv("CAPPU_PACKAGE_STORE=" + store)
 
 	install := exec.Command(cappu(t), "install")
 	install.Dir, install.Env = work, env
@@ -176,7 +196,7 @@ func TestExampleAuditApp(t *testing.T) {
 	_ = os.MkdirAll(work, 0o755)
 	src, _ := os.ReadFile(filepath.Join(examplesDir(), "audit-app", "cappu.json"))
 	_ = os.WriteFile(filepath.Join(work, "cappu.json"), src, 0o644)
-	env := append(os.Environ(), "CAPPU_PACKAGE_STORE="+store)
+	env := childEnv("CAPPU_PACKAGE_STORE=" + store)
 
 	audit := exec.Command(cappu(t), "audit")
 	audit.Dir, audit.Env = work, env
@@ -228,7 +248,7 @@ func TestExampleGsonLicenses(t *testing.T) {
 	_ = os.MkdirAll(work, 0o755)
 	src, _ := os.ReadFile(filepath.Join(examplesDir(), "gson-app", "cappu.json"))
 	_ = os.WriteFile(filepath.Join(work, "cappu.json"), src, 0o644)
-	env := append(os.Environ(), "CAPPU_PACKAGE_STORE="+store)
+	env := childEnv("CAPPU_PACKAGE_STORE=" + store)
 
 	human := exec.Command(cappu(t), "licenses")
 	human.Dir, human.Env = work, env
@@ -275,7 +295,7 @@ func TestExampleUpdateBumpsDependency(t *testing.T) {
 		[]byte("{\n  \"dependencies\": {\n    \"implementation\": {\n      // pinned old on purpose\n      \"com.google.code.gson:gson\": \"2.8.9\"\n    }\n  }\n}\n"), 0o644)
 	upd := exec.Command(cappu(t), "update")
 	upd.Dir = work
-	upd.Env = append(os.Environ(), "CAPPU_PACKAGE_STORE="+store)
+	upd.Env = childEnv("CAPPU_PACKAGE_STORE=" + store)
 	if out, err := upd.CombinedOutput(); err != nil {
 		t.Fatalf("update: %v\n%s", err, out)
 	}
@@ -300,7 +320,7 @@ func TestExampleCompileArtifactName(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(srcDir, "M.java"), []byte("package x; public class M { public static void main(String[] a) {} }"), 0o644)
 	c := exec.Command(cappu(t), "compile", "-o", "jar", "--artifact", "app")
 	c.Dir = work
-	c.Env = append(os.Environ(), "CAPPU_PACKAGE_STORE="+t.TempDir())
+	c.Env = childEnv("CAPPU_PACKAGE_STORE=" + t.TempDir())
 	if out, err := c.CombinedOutput(); err != nil {
 		t.Fatalf("compile: %v\n%s", err, out)
 	}
@@ -325,7 +345,7 @@ func TestExampleCompilePublishableJarAndPom(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(srcDir, "Hello.java"), []byte("package com.example; public class Hello {}"), 0o644)
 	c := exec.Command(cappu(t), "compile", "-o", "jar")
 	c.Dir = work
-	c.Env = append(os.Environ(), "CAPPU_PACKAGE_STORE="+t.TempDir())
+	c.Env = childEnv("CAPPU_PACKAGE_STORE=" + t.TempDir())
 	if out, err := c.CombinedOutput(); err != nil {
 		t.Fatalf("compile: %v\n%s", err, out)
 	}

@@ -158,6 +158,34 @@ layout differs, and kong exits usage errors with its own code (80) rather than
 the Node build's 2. Command behaviour, stdout, and the 0/1/2 codes our own
 handlers return are unchanged.
 
+## Env-gated CI annotations (GitHub workflow commands)
+
+Issue #21: when running under a GitHub-Actions-compatible runner, every
+error/warning that already goes to stderr is *also* echoed as a workflow command
+(`::error file=...,line=...::msg`) so it surfaces as an inline annotation.
+
+- **Detection is an injected env lookup, not a global read** -
+  `AnnotationsEnabled(env func(string) string)` (Go) / `annotationsEnabled(env)`
+  (TS), mirroring the existing `ColorEnabled`/`colorEnabled` split so it stays
+  unit-testable without mutating the real environment. Triggers on any of
+  `GITHUB_ACTIONS`/`FORGEJO_ACTIONS`/`GITEA_ACTIONS` == `"true"` (Forgejo/Gitea
+  Actions speak the same syntax); bare `CI=true` is deliberately not a trigger.
+- **The annotation is additive, never a replacement.** Each emission site keeps
+  its existing `Fprintf(os.Stderr, ...)` and adds one `emitAnnotation(...)` call
+  right after; the single `renderDiagnostics` chokepoint covers compile/test/
+  publish diagnostics, the rest are location-less `emitAnnotation("error"|...)`.
+- **Escaping is two-tier** (`strings.NewReplacer`): message *data* escapes
+  `% \r \n`; property *values* (file/line/col) additionally escape `: ,`.
+- **`emitAnnotation` is unexported; one exported `EmitErrorAnnotation` wrapper**
+  exists only for the config-load error path in package `main` (the lazy
+  `appState.config()` lives outside package `cli`).
+- **E2E test trap:** cappu's own CI sets `GITHUB_ACTIONS=true`, which inherits
+  into the cappu processes the example tests spawn and (since Go captures
+  `CombinedOutput()`) leaks annotation lines into exact-output assertions. The
+  fix is a `childEnv()` helper in `cmd/cappu/examples_test.go` that strips the
+  three markers from `os.Environ()` before spawning. (The TS e2e tests read only
+  stdout, where annotations never go, so no scrub is needed there.)
+
 ## Static linking / build
 
 Per issue #18 the binary must run on any platform regardless of libc. Build

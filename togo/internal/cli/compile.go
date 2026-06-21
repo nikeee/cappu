@@ -28,10 +28,12 @@ func RunCompile(files []string, outputFlag, artifact string, quiet bool, cfg *co
 	}
 	for _, p := range compile.MissingConfiguredPaths(cfg) {
 		fmt.Fprintf(os.Stderr, "warning: configured path not found (treated as empty): %s\n", p)
+		emitAnnotation("warning", fmt.Sprintf("configured path not found (treated as empty): %s", p), AnnotationLocation{})
 	}
 	validKinds := map[string]bool{"classes": true, "jar": true, "fat-jar": true}
 	if outputFlag != "" && !validKinds[outputFlag] {
 		fmt.Fprintf(os.Stderr, "cappu: invalid --output '%s' (classes, jar, fat-jar)\n", outputFlag)
+		emitAnnotation("error", fmt.Sprintf("invalid --output '%s' (classes, jar, fat-jar)", outputFlag), AnnotationLocation{})
 		return 2
 	}
 	effectiveOutput := outputFlag
@@ -42,6 +44,7 @@ func RunCompile(files []string, outputFlag, artifact string, quiet bool, cfg *co
 	validate := experimental && cfg.CompilerOptions.ExperimentalCompiler.Validate
 	if validate && effectiveOutput != "classes" {
 		fmt.Fprint(os.Stderr, "cappu: experimentalCompiler.validate needs \"output\": \"classes\" (javap reads class files)\n")
+		emitAnnotation("error", "experimentalCompiler.validate needs \"output\": \"classes\" (javap reads class files)", AnnotationLocation{})
 		return 2
 	}
 
@@ -57,9 +60,11 @@ func RunCompile(files []string, outputFlag, artifact string, quiet bool, cfg *co
 	}
 	for _, entry := range result.Degraded {
 		fmt.Fprintf(os.Stderr, "warning: %s: unsupported construct, emitted a placeholder body\n", entry)
+		emitAnnotation("warning", fmt.Sprintf("%s: unsupported construct, emitted a placeholder body", entry), AnnotationLocation{})
 	}
 	for _, w := range result.Warnings {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+		emitAnnotation("warning", w, AnnotationLocation{})
 	}
 	if !result.Success {
 		renderDiagnostics(result.Diagnostics)
@@ -86,9 +91,11 @@ func RunCompile(files []string, outputFlag, artifact string, quiet bool, cfg *co
 		if !v.OK {
 			if v.Error != "" {
 				fmt.Fprintf(os.Stderr, "cappu: --validate: %s\n", v.Error)
+				emitAnnotation("error", fmt.Sprintf("--validate: %s", v.Error), AnnotationLocation{})
 			} else {
 				for _, m := range v.Mismatches {
 					fmt.Fprintf(os.Stderr, "error: %s: bytecode differs from javac: %s\n", m.ClassName, m.Detail)
+					emitAnnotation("error", fmt.Sprintf("%s: bytecode differs from javac: %s", m.ClassName, m.Detail), AnnotationLocation{})
 				}
 			}
 			return 1
@@ -117,5 +124,6 @@ func renderDiagnostics(diagnostics []compile.CompileDiagnostic) {
 			code = " " + strconv.Itoa(d.Code)
 		}
 		fmt.Fprintf(os.Stderr, "%s%s%s: %s\n", location, d.Severity, code, d.Message)
+		emitAnnotation(d.Severity, d.Message, AnnotationLocation{File: d.File, Line: d.Line, Column: d.Column})
 	}
 }

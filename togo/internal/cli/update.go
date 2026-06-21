@@ -17,12 +17,14 @@ import (
 func RunUpdate(configPathArg string, cfg *config.Config) int {
 	if !cfg.FromFile {
 		fmt.Fprintln(os.Stderr, "cappu: no cappu.json found - run `cappu init` first")
+		emitAnnotation("error", "no cappu.json found - run `cappu init` first", AnnotationLocation{})
 		return 1
 	}
 
 	bumps, err := install.PlanUpdates(cfg, sources.Configured(cfg))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cappu: update failed: %s\n", err)
+		emitAnnotation("error", fmt.Sprintf("update failed: %s", err), AnnotationLocation{})
 		return 2
 	}
 	if len(bumps) == 0 {

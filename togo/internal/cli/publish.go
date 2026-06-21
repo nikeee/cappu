@@ -22,6 +22,7 @@ func RunPublish(cfg *config.Config, repoFlag string) int {
 
 	if missing := publish.MissingCoordinates(cfg); len(missing) > 0 {
 		fmt.Fprintf(os.Stderr, "%s cappu publish needs %s in cappu.json\n", errp("red", "error:"), strings.Join(missing, ", "))
+		emitAnnotation("error", fmt.Sprintf("cappu publish needs %s in cappu.json", strings.Join(missing, ", ")), AnnotationLocation{})
 		return 2
 	}
 	repo := publish.ResolvePublishRegistry(repoFlag, cfg.PublishRepository, os.Getenv("CAPPU_PUBLISH_REGISTRY"))
@@ -29,6 +30,7 @@ func RunPublish(cfg *config.Config, repoFlag string) int {
 	auth, ok := publish.ResolvePublishAuth(os.Getenv("CAPPU_PUBLISH_USERNAME"), os.Getenv("CAPPU_PUBLISH_PASSWORD"), os.Getenv("CAPPU_PUBLISH_TOKEN"))
 	if !ok {
 		fmt.Fprintf(os.Stderr, "%s no credentials: set CAPPU_PUBLISH_USERNAME + CAPPU_PUBLISH_PASSWORD, or CAPPU_PUBLISH_TOKEN\n", errp("red", "error:"))
+		emitAnnotation("error", "no credentials: set CAPPU_PUBLISH_USERNAME + CAPPU_PUBLISH_PASSWORD, or CAPPU_PUBLISH_TOKEN", AnnotationLocation{})
 		return 2
 	}
 
@@ -36,11 +38,13 @@ func RunPublish(cfg *config.Config, repoFlag string) int {
 	inputs := build.SourceJavaFiles(cfg)
 	if len(inputs) == 0 {
 		fmt.Fprintf(os.Stderr, "%s no sources to compile (configured sourcePaths are empty)\n", errp("red", "error:"))
+		emitAnnotation("error", "no sources to compile (configured sourcePaths are empty)", AnnotationLocation{})
 		return 2
 	}
 	result := compile.RunCompile(inputs, compile.Options{Output: "jar", Config: cfg})
 	for _, w := range result.Warnings {
 		fmt.Fprint(os.Stderr, errp("yellow", "warning: "+w+"\n"))
+		emitAnnotation("warning", w, AnnotationLocation{})
 	}
 	if !result.Success {
 		renderDiagnostics(result.Diagnostics)
@@ -78,6 +82,7 @@ func RunPublish(cfg *config.Config, repoFlag string) int {
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s publish failed: %s\n", errp("red", "error:"), err)
+		emitAnnotation("error", fmt.Sprintf("publish failed: %s", err), AnnotationLocation{})
 		return 1
 	}
 	id := string(coordinates.String())

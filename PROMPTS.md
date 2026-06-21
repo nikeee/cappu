@@ -346,3 +346,5 @@ no timestamps were captured.
 - 2026-06-21 14:05 — continue
 - 2026-06-21 18:43 — your enemy copilot ported the code from ts to go (in togo dir). Try to find things that he missed. Make sure the behaviour of both versions is exactly identical.
 - 2026-06-21 19:22 — ci.yaml fails: https://github.com/nikeee/cappu/actions/runs/27902473974/job/82565141525 find out why and fix
+
+- 2026-06-21 19:24 — resolve https://github.com/nikeee/cappu/issues/21

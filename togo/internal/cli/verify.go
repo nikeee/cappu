@@ -15,13 +15,16 @@ func RunVerify(cfg *config.Config) int {
 	result := lockfile.VerifyInstalled(cfg)
 	if !result.FromLock {
 		fmt.Fprintln(os.Stderr, "cappu: no cappu-lock.json to verify against; run `cappu install` first")
+		emitAnnotation("error", "no cappu-lock.json to verify against; run `cappu install` first", AnnotationLocation{})
 		return 1
 	}
 	for _, id := range result.Modified {
 		fmt.Fprintf(os.Stderr, "error: %s: installed jar does not match cappu-lock.json\n", id)
+		emitAnnotation("error", fmt.Sprintf("%s: installed jar does not match cappu-lock.json", id), AnnotationLocation{})
 	}
 	for _, id := range result.Missing {
 		fmt.Fprintf(os.Stderr, "error: %s: locked but not installed (run `cappu install`)\n", id)
+		emitAnnotation("error", fmt.Sprintf("%s: locked but not installed (run `cappu install`)", id), AnnotationLocation{})
 	}
 	fmt.Fprintf(os.Stderr, "%d ok, %d modified, %d missing\n",
 		len(result.OK), len(result.Modified), len(result.Missing))

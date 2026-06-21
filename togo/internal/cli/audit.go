@@ -54,6 +54,7 @@ func RunAudit(cfg *config.Config, noCache, jsonOut bool) int {
 	report, err := audit.AuditPackages(coordinates, source)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cappu: audit failed: %s\n", err)
+		emitAnnotation("error", fmt.Sprintf("audit failed: %s", err), AnnotationLocation{})
 		return 2
 	}
 

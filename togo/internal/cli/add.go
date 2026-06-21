@@ -66,6 +66,7 @@ func RunAdd(configurationArg string, specs []string, configPathArg string, cfg *
 	if configuration == "" || len(coords) == 0 || len(invalid) > 0 {
 		for _, spec := range invalid {
 			fmt.Fprintf(os.Stderr, "cappu: not a coordinate: '%s'\n", spec)
+			emitAnnotation("error", fmt.Sprintf("not a coordinate: '%s'", spec), AnnotationLocation{})
 		}
 		fmt.Fprintf(os.Stderr, "usage: cappu add <%s> <group:artifact[:version]> [more...]\n"+
 			"e.g.:  cappu add implementation com.google.code.gson:gson:2.14.0 org.slf4j:slf4j-api\n",
@@ -74,6 +75,7 @@ func RunAdd(configurationArg string, specs []string, configPathArg string, cfg *
 	}
 	if !cfg.FromFile {
 		fmt.Fprintln(os.Stderr, "cappu: no cappu.json found - run `cappu init` first")
+		emitAnnotation("error", "no cappu.json found - run `cappu init` first", AnnotationLocation{})
 		return 1
 	}
 
@@ -97,6 +99,7 @@ func RunAdd(configurationArg string, specs []string, configPathArg string, cfg *
 			picked, ok, err := install.PickAddVersion(working, coord.key, version, srcs)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
+				emitAnnotation("error", err.Error(), AnnotationLocation{})
 				return 1
 			}
 			if !ok {
@@ -105,10 +108,12 @@ func RunAdd(configurationArg string, specs []string, configPathArg string, cfg *
 					wanted = fmt.Sprintf(" matching '%s'", version)
 				}
 				fmt.Fprintf(os.Stderr, "cappu: no published version of %s%s found in any package source\n", coord.key, wanted)
+				emitAnnotation("error", fmt.Sprintf("no published version of %s%s found in any package source", coord.key, wanted), AnnotationLocation{})
 				return 1
 			}
 			if !picked.Compatible {
 				fmt.Fprintf(os.Stderr, "warning: every matching version of %s conflicts with the configured dependencies; using %s\n", coord.key, picked.Version)
+				emitAnnotation("warning", fmt.Sprintf("every matching version of %s conflicts with the configured dependencies; using %s", coord.key, picked.Version), AnnotationLocation{})
 			}
 			version = picked.Version
 		}

@@ -83,6 +83,7 @@ func (a *appState) config() (*config.Config, error) {
 		cfg, err := config.Load(a.configPath, wd)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
+			cli.EmitErrorAnnotation(err.Error())
 			return nil, cmdErr(2)
 		}
 		a.cfg, a.loaded = cfg, true
