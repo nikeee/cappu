@@ -64,9 +64,6 @@ static linking, library mapping) - read it before working in `togo/`, and
 **Every feature lives in BOTH codebases.** When you add or change a command,
 config field, validation rule, or behaviour:
 - Implement it in `src/` (TypeScript) AND `togo/` (Go), with tests in both.
-- If a command is too large to port now (e.g. the compiler, lsp), it stays a
-  stub in `togo/internal/cli/stubs.go` - but new work on already-ported
-  commands must land in both.
 - **Watch for diverging behaviour.** The two builds must behave identically:
   same flags, same exit codes, same stdout/stderr text, same config defaults and
   validation. When editing one side, diff it against the other and reconcile any
