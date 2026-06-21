@@ -1,18 +1,20 @@
 # syntax=docker/dockerfile:1
 # check=error=true
 
-FROM node:26-slim AS build
+FROM golang:alpine AS build
     WORKDIR /app
 
-    RUN --mount=type=bind,source=package.json,target=package.json \
-        --mount=type=bind,source=package-lock.json,target=package-lock.json \
-        --mount=type=cache,target=/root/.npm \
-        npm ci --no-audit
+    RUN apk add --no-cache build-base
 
-    COPY ./ /app
+    RUN --mount=type=bind,source=togo/go.sum,target=go.sum \
+        --mount=type=bind,source=togo/go.mod,target=go.mod \
+        --mount=type=bind,source=togo/Makefile,target=Makefile \
+        make tools
 
-    RUN CAPPU_SKIP_EXE=1 node --run build
+    COPY ./togo /app
 
-FROM node:26-slim
-    COPY --from=build /app/dist/cli.mjs /cappu.mjs
-    ENTRYPOINT ["node", "/cappu.mjs"]
+    RUN make generate && make build
+
+FROM scratch
+    COPY --from=build /app/dist/cappu /cappu
+    ENTRYPOINT ["/cappu"]
