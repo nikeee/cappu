@@ -40,7 +40,7 @@ import {
   processorJars,
   runAnnotationProcessing,
 } from "../processors/index.ts";
-import { loadJdkStub } from "./jdkStub.ts";
+import { installJdkTypes } from "./jdkTypes.ts";
 import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
 import { createProgram, type Program } from "./program.ts";
 import { type Diagnostic, DiagnosticCategory } from "./types.ts";
@@ -265,7 +265,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
   // One program over all inputs (+ the JDK stub + the configured classpath and
   // source paths) so type descriptors resolve.
   const program = createProgram();
-  loadJdkStub(program);
+  installJdkTypes(program, options.config);
   if (options.config) loadConfiguredPaths(program, options.config);
   for (const file of inputs) program.addProjectFile(pathToUri(file), readFileSync(file, "utf8"));
   const checker = createChecker(program);

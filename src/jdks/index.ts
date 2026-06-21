@@ -10,6 +10,7 @@ export {
   projectJdkDir,
   provisionedJava,
   provisionedJavac,
+  provisionedJdkHome,
   type ProvisionResult,
   provisionJdk,
 } from "./jdks.ts";

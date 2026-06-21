@@ -72,6 +72,13 @@ export interface Program {
   /** Cross-file type index over all current files (rebuilt when files change). */
   getGlobalIndex(): GlobalIndex;
   /**
+   * Install a lazy fallback for fully-qualified types not declared in the
+   * project - the provisioned JDK's real classes (see jdkTypes.ts). Consulted by
+   * getType only on a project miss; resolution-only, so it does not feed
+   * enumeration (completion/import suggestions).
+   */
+  setJdkTypeResolver(resolve: (fqn: Fqn) => Symbol | undefined): void;
+  /**
    * Monotonically increasing counter, bumped on every file mutation. Derived
    * caches (subtype index, ...) key their memo on it to invalidate cheaply.
    */
@@ -208,8 +215,12 @@ export function createProgram(): Program {
     }
   }
 
+  // Lazy fallback for types outside the project (the provisioned JDK). Consulted
+  // only when the project index misses, so project types always win.
+  let jdkTypeResolver: ((fqn: Fqn) => Symbol | undefined) | undefined;
+
   const globalIndex: GlobalIndex = {
-    getType: fqn => typesByFqn.get(fqn),
+    getType: fqn => typesByFqn.get(fqn) ?? jdkTypeResolver?.(fqn),
     getPackageTypes: packageName => packages.get(packageName),
     getPackageSymbol: packageName => packageSymbols.get(packageName),
     findFqnsBySimpleName: simpleName => {
@@ -255,6 +266,9 @@ export function createProgram(): Program {
     getGlobalIndex() {
       refreshIndex();
       return globalIndex;
+    },
+    setJdkTypeResolver(resolve) {
+      jdkTypeResolver = resolve;
     },
     getGeneration: () => generation as Generation,
   };

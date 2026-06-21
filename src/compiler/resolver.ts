@@ -231,15 +231,21 @@ function resolveTypeNameCrossFile(
   // same package
   const samePackage = index.getPackageTypes(packageNameOf(sourceFile))?.get(name);
   if (samePackage) return samePackage;
-  // on-demand imports
+  // on-demand imports. The package-types map only covers project/classpath
+  // types; getType also reaches the lazy JDK provider for a star-imported JDK
+  // package (e.g. `import java.util.*` -> List).
   for (const imp of sourceFile.imports) {
     if (!imp.isStatic && imp.isOnDemand) {
-      const type = index.getPackageTypes(entityNameToString(imp.name) as PackageName)?.get(name);
+      const pkg = entityNameToString(imp.name) as PackageName;
+      const type = index.getPackageTypes(pkg)?.get(name) ?? index.getType(`${pkg}.${name}` as Fqn);
       if (type) return type;
     }
   }
-  // implicit java.lang.*
-  return index.getPackageTypes("java.lang" as PackageName)?.get(name);
+  // implicit java.lang.* (getType reaches the lazy JDK provider too)
+  return (
+    index.getPackageTypes("java.lang" as PackageName)?.get(name) ??
+    index.getType(`java.lang.${name}` as Fqn)
+  );
 }
 
 // A value/method imported via `import static T.member` or `import static T.*`

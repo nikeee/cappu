@@ -12,7 +12,7 @@ import { z } from "zod";
 
 import { createChecker } from "../compiler/checker.ts";
 import { loadConfiguredPaths } from "../compiler/compiler.ts";
-import { loadJdkStub } from "../compiler/jdkStub.ts";
+import { installJdkTypes } from "../compiler/jdkTypes.ts";
 import { createProgram } from "../compiler/program.ts";
 import type { CappuConfig } from "../config.ts";
 import { findSourceJavaFiles, pathToUri } from "../workspace.ts";
@@ -26,7 +26,7 @@ import { createProjectTools } from "./mcpProject.ts";
  */
 export async function startMcpServer(config?: CappuConfig): Promise<void> {
   const program = createProgram();
-  loadJdkStub(program);
+  installJdkTypes(program, config);
   if (config) loadConfiguredPaths(program, config);
   const checker = createChecker(program);
   const tools = createMcpTools(program, checker);

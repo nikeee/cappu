@@ -360,3 +360,5 @@ cappu search commons-lang3
 - 2026-06-21 21:06 — imeplement https://github.com/nikeee/cappu/issues/20
 - 2026-06-21 21:31 — make the output of cappu search prettier and include some more info if possible
 - 2026-06-21 21:39 — investigate wether we can replace some code with commonly used libraries.
+- 2026-06-21 22:26 — make a plan. it should not impact startup performance or hog memory. maybe just lazy. or if it doesnt work good at all, just keep the stubs (and maybe extend them)
+- 2026-06-21 22:26 — yes, auto mode and use a separate branch

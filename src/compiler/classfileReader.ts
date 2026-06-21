@@ -526,6 +526,26 @@ export function classFileToStub(bytes: Uint8Array): { name: string; source: stri
 }
 
 /**
+ * The single top-level stub for a class family - an outer class plus its
+ * `Outer$Inner` nested classes (each its own `.class`) - so the nested types
+ * fold into the outer's stub and resolve as members. Malformed entries are
+ * skipped. Used by the lazy JDK provider (jdkImage gives the family per type).
+ */
+export function classFilesToStub(
+  family: readonly Uint8Array[],
+): { name: string; source: string } | undefined {
+  const infos: ClassInfo[] = [];
+  for (const bytes of family) {
+    try {
+      infos.push(parseClassFile(bytes));
+    } catch {
+      // a malformed class in the family never breaks resolution
+    }
+  }
+  return buildStubs(infos)[0];
+}
+
+/**
  * Scan classpath entries - directories (recursively) or .jar files - for
  * .class files and register each as a stub source under
  * classpath:///<binary-name>.java. Returns the number of types loaded;

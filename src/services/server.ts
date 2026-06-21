@@ -58,7 +58,7 @@ import { latestVersion, MavenRepositorySource, type PackageSource } from "../pac
 import { getDocumentSymbols } from "./documentSymbols.ts";
 import { enclosingCall, getHoverText } from "./hover.ts";
 import { DEFAULT_INLAY_HINTS, getInlayHints, type InlayHintsSettings } from "./inlayHints.ts";
-import { loadJdkStub } from "../compiler/jdkStub.ts";
+import { installJdkTypes } from "../compiler/jdkTypes.ts";
 import {
   type Character,
   computeLineStarts,
@@ -115,7 +115,7 @@ export function startServer(
 
   const documents = new TextDocuments(TextDocument);
   const program = createProgram();
-  loadJdkStub(program);
+  installJdkTypes(program, config);
   const checker = createChecker(program);
 
   // Inlay-hint configuration: seeded from initializationOptions.inlayHints and

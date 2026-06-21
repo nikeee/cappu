@@ -92,6 +92,17 @@ export function provisionedJava(config: CappuConfig): string | undefined {
   return provisionedBin(config, "java");
 }
 
+/**
+ * The provisioned JDK's home directory (the one holding bin/, lib/, jmods/), or
+ * undefined when no jdk is configured or it has not been unpacked. The type
+ * checker reads real JDK classes from its jmods/ (see compiler/jdkImage.ts).
+ */
+export function provisionedJdkHome(config: CappuConfig): string | undefined {
+  if (config.jdk === undefined) return undefined;
+  const dir = projectJdkDir(config, config.jdk);
+  return existsSync(dir) ? dir : undefined;
+}
+
 export interface ProvisionResult {
   /** The unpacked JDK root (contains bin/, lib/, ...). */
   jdkDir: string;
