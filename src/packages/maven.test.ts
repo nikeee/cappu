@@ -2,7 +2,7 @@ import { test } from "node:test";
 
 import { expect } from "expect";
 
-import { MavenRepositorySource, parseMetadataVersions, parsePom } from "./maven.ts";
+import { MavenRepositorySource, parseMetadataVersions, parsePom, toSolrQuery } from "./maven.ts";
 import { toCoordinates } from "./types.ts";
 
 const METADATA = `<?xml version="1.0" encoding="UTF-8"?>
@@ -190,6 +190,29 @@ test("search queries the index service and tolerates broken answers", async () =
 
   answer = "not json at all";
   expect(await source.search("gson")).toEqual([]);
+});
+
+test("a group:artifact query is translated to a structured solr query", async () => {
+  expect(toSolrQuery("org.apache.commons:commons-lang3")).toBe(
+    'g:"org.apache.commons" AND a:"commons-lang3"',
+  );
+  expect(toSolrQuery("commons-lang3")).toBe("commons-lang3");
+  expect(toSolrQuery("foo bar")).toBe("foo bar");
+
+  const fetched: string[] = [];
+  const source = new MavenRepositorySource(
+    "https://repo.example/maven2",
+    async url => {
+      fetched.push(url);
+      return JSON.stringify({ response: { docs: [] } });
+    },
+    undefined,
+    "https://search.example/solrsearch/select",
+  );
+  await source.search("org.apache.commons:commons-lang3");
+  expect(fetched[0]).toBe(
+    "https://search.example/solrsearch/select?q=g%3A%22org.apache.commons%22+AND+a%3A%22commons-lang3%22&rows=20&wt=json",
+  );
 });
 
 test("locally defined properties interpolate into dependency versions", () => {

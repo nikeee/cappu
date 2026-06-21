@@ -350,3 +350,8 @@ no timestamps were captured.
 - 2026-06-21 19:24 — resolve https://github.com/nikeee/cappu/issues/21
 
 - 2026-06-21 20:48 — make sure we emit a diagnostic when we cant resolve a type. i just opened the mapstruct sample and asked the mcp for diagnostics and it did not return anything. but it had to, because the method that i called could not have existed.
+- 2026-06-21 20:54 — cappu search org.apache.commons:commons-lang3
+no packages found for 'org.apache.commons:commons-lang3'
+
+but this works:
+cappu search commons-lang3

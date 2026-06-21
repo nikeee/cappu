@@ -33,6 +33,34 @@ func TestMavenSearchParsesSolrResponse(t *testing.T) {
 	}
 }
 
+func TestToSolrQueryTranslatesCoordinate(t *testing.T) {
+	cases := map[string]string{
+		"org.apache.commons:commons-lang3": `g:"org.apache.commons" AND a:"commons-lang3"`,
+		"commons-lang3":                    "commons-lang3",
+		"foo bar":                          "foo bar",
+	}
+	for in, want := range cases {
+		if got := toSolrQuery(in); got != want {
+			t.Errorf("toSolrQuery(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSearchSendsStructuredQueryForCoordinate(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("q"); got != `g:"org.apache.commons" AND a:"commons-lang3"` {
+			t.Errorf("query q = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"response":{"docs":[]}}`))
+	}))
+	defer server.Close()
+
+	source := NewMavenRepositorySource("https://repo.example/maven2", server.URL)
+	if _, err := source.Search("org.apache.commons:commons-lang3"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSearchWithoutIndexReturnsNil(t *testing.T) {
 	source := NewMavenRepositorySource("https://repo.example/maven2", "")
 	hits, err := source.Search("anything")

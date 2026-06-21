@@ -55,6 +55,14 @@ function asText(value: unknown): string | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
+// A "group:artifact" coordinate would be read by Solr as a field query (`:` is
+// its field separator), so translate it to the structured form. Anything else
+// is passed through as free text.
+export function toSolrQuery(query: string): string {
+  const m = /^([^\s:]+):([^\s:]+)$/.exec(query);
+  return m ? `g:"${m[1]}" AND a:"${m[2]}"` : query;
+}
+
 /** All versions from a maven-metadata.xml, oldest first (document order). */
 export function parseMetadataVersions(text: string): string[] {
   const doc = xml.parse(text) as {
@@ -266,7 +274,7 @@ export class MavenRepositorySource implements PackageSource {
   async search(query: string): Promise<Coordinates[]> {
     if (this.searchUrl === undefined) return [];
     const url = new URL(this.searchUrl);
-    url.search = new URLSearchParams({ q: query, rows: "20", wt: "json" }).toString();
+    url.search = new URLSearchParams({ q: toSolrQuery(query), rows: "20", wt: "json" }).toString();
     const text = await this.fetchText(url.href);
     if (text === undefined) return [];
     try {

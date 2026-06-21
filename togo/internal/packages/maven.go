@@ -115,6 +115,18 @@ type searchDoc struct {
 	} `json:"response"`
 }
 
+var coordinateQuery = regexp.MustCompile(`^([^\s:]+):([^\s:]+)$`)
+
+// toSolrQuery translates a "group:artifact" coordinate into the structured Solr
+// form, since `:` is Solr's field separator and would otherwise be misread.
+// Anything else passes through as free text. Port of toSolrQuery in src/packages/maven.ts.
+func toSolrQuery(query string) string {
+	if m := coordinateQuery.FindStringSubmatch(query); m != nil {
+		return `g:"` + m[1] + `" AND a:"` + m[2] + `"`
+	}
+	return query
+}
+
 // Search runs a free-text query via the index service; nil without one (or on a
 // broken answer - a bad index reply must not fail the command).
 func (s *MavenRepositorySource) Search(query string) ([]Coordinates, error) {
@@ -125,7 +137,7 @@ func (s *MavenRepositorySource) Search(query string) ([]Coordinates, error) {
 	if err != nil {
 		return nil, nil
 	}
-	u.RawQuery = url.Values{"q": {query}, "rows": {"20"}, "wt": {"json"}}.Encode()
+	u.RawQuery = url.Values{"q": {toSolrQuery(query)}, "rows": {"20"}, "wt": {"json"}}.Encode()
 	text, found, err := s.fetchText(u.String())
 	if err != nil {
 		return nil, err
