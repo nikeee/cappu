@@ -187,7 +187,7 @@ func RunCompile(files []string, options Options) Result {
 	cfg := options.Config
 	outDir := options.OutDir
 	if outDir == "" {
-		outDir = "dist"
+		outDir = config.DefaultOutputDir
 	}
 	output := options.Output
 	if output == "" {

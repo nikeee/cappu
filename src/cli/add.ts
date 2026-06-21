@@ -11,18 +11,18 @@ import { join, resolve } from "node:path";
 
 import { parse, stringify } from "comment-json";
 
-import { type CappuConfig, DEFAULT_CONFIG_NAME, loadConfig } from "../config.ts";
+import {
+  type CappuConfig,
+  DEFAULT_CONFIG_NAME,
+  DEPENDENCY_CONFIGURATIONS,
+  loadConfig,
+} from "../config.ts";
 import { configuredSources, pickAddVersion } from "../install.ts";
 import { type PackageKey, type PackageSource } from "../packages/index.ts";
 import { emitAnnotation } from "./annotations.ts";
 import { runInstall } from "./install.ts";
 
-const CONFIGURATIONS = [
-  "api",
-  "implementation",
-  "annotationProcessor",
-  "testImplementation",
-] as const;
+const CONFIGURATIONS = DEPENDENCY_CONFIGURATIONS;
 type Configuration = (typeof CONFIGURATIONS)[number];
 
 export interface AddCoordinate {

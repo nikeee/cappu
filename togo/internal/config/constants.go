@@ -17,6 +17,10 @@ const (
 	DefaultTestClassPath    = "./.cappu/lib/test-classes"
 	DefaultProcessorPath    = "./.cappu/lib/processors"
 
+	// DefaultOutputDir is what `cappu compile` produces its output in; the build
+	// output is always this.
+	DefaultOutputDir = "dist"
+
 	MavenCentral       = "https://repo.maven.apache.org/maven2"
 	MavenCentralSearch = "https://search.maven.org/solrsearch/select"
 	GoogleMaven        = "https://maven.google.com"
@@ -39,6 +43,10 @@ var ExternalClassPaths = []string{
 // DefaultPackageSources are the repositories Maven and Gradle resolve from out
 // of the box.
 var DefaultPackageSources = []string{MavenCentral, GoogleMaven, GradlePluginPortal}
+
+// Configurations are the dependency configurations, in resolution order. The
+// keys of the dependencies section mirror these names.
+var Configurations = []string{"api", "implementation", "annotationProcessor", "testImplementation"}
 
 // MavenID is the Maven groupId/artifactId charset.
 var MavenID = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)

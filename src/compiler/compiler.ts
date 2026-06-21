@@ -26,6 +26,7 @@ import { classDeclaresMain, loadClassPath } from "./classfileReader.ts";
 import {
   artifactBaseName,
   type CappuConfig,
+  DEFAULT_OUTPUT_DIR,
   EXTERNAL_CLASS_PATHS,
   resolveConfigPath,
 } from "../config.ts";
@@ -231,7 +232,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
     options.failOnDegrade ??
     options.config?.compilerOptions.experimentalCompiler.failOnDegrade ??
     true;
-  const outDir = options.outDir ?? "dist";
+  const outDir = options.outDir ?? DEFAULT_OUTPUT_DIR;
   const output = options.output ?? options.config?.compilerOptions.output ?? "classes";
   const jarName = options.artifactName ?? artifactBaseName(options.config);
   // javac is the default compiler (nikeee/cappu#17); cappu's own pipeline

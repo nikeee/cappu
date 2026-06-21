@@ -46,6 +46,8 @@ export const DEFAULT_TEST_RESOURCE_PATH = "./src/test/resources";
 export const DEFAULT_TEST_CLASS_PATH = "./.cappu/lib/test-classes";
 /** Where annotation-processor jars install to - never the compile classpath. */
 export const DEFAULT_PROCESSOR_PATH = "./.cappu/lib/processors";
+/** What `cappu compile` produces its output in; the build output is always this. */
+export const DEFAULT_OUTPUT_DIR = "dist";
 
 // cappu's own compiler is experimental (the default delegates to javac). All
 // its knobs live here so they stay together and out of the normal flow.
@@ -96,6 +98,18 @@ export const DEFAULT_PUBLISH_REGISTRY = MAVEN_CENTRAL;
 
 /** "group:artifact" -> version, per configuration (gradle-style). */
 const DependencyMapSchema = z.record(z.string(), z.string());
+
+/**
+ * The dependency configurations, in resolution order. The keys of
+ * `DependenciesSchema` below are these same names - kept adjacent so the list
+ * and the schema stay in sync (the schema keys cannot themselves reference this).
+ */
+export const DEPENDENCY_CONFIGURATIONS = [
+  "api",
+  "implementation",
+  "annotationProcessor",
+  "testImplementation",
+] as const;
 
 const DependenciesSchema = z.object({
   /** Dependencies that are part of this project's public API. */

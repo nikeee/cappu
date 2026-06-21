@@ -11,7 +11,7 @@ import (
 	"github.com/nikeee/cappu/internal/sources"
 )
 
-var configurations = []string{"api", "implementation", "annotationProcessor", "testImplementation"}
+var configurations = config.Configurations
 
 // addCoordinate is a parsed "group:artifact[:version]" spec.
 type addCoordinate struct {

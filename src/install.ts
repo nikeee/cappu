@@ -29,6 +29,7 @@ import {
   DEFAULT_CLASS_PATH,
   DEFAULT_PROCESSOR_PATH,
   DEFAULT_TEST_CLASS_PATH,
+  DEPENDENCY_CONFIGURATIONS,
   MAVEN_CENTRAL,
   MAVEN_CENTRAL_SEARCH,
   resolveConfigPath,
@@ -346,12 +347,7 @@ export function testRoots(config: CappuConfig): Coordinates[] {
 }
 
 // The dependency configurations `cappu update` walks.
-const UPDATE_CONFIGS = [
-  "api",
-  "implementation",
-  "annotationProcessor",
-  "testImplementation",
-] as const;
+const UPDATE_CONFIGS = DEPENDENCY_CONFIGURATIONS;
 export type UpdateConfiguration = (typeof UPDATE_CONFIGS)[number];
 
 export interface DependencyBump {

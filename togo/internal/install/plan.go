@@ -73,7 +73,7 @@ type DependencyBump struct {
 }
 
 // updateConfigs are the dependency configurations `cappu update` walks.
-var updateConfigs = []string{"api", "implementation", "annotationProcessor", "testImplementation"}
+var updateConfigs = config.Configurations
 
 // prerelease matches qualifiers `cappu update` never auto-bumps to.
 var prerelease = regexp.MustCompile(`(?i)(?:^|[-._])(?:alpha|beta|rc|cr|snapshot|milestone|m\d+|preview|ea|dev)`)
