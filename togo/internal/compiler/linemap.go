@@ -4,8 +4,18 @@ package compiler
 // line/character positions (0-based). Mirrors the TS compiler's
 // computeLineStarts / getLineAndCharacter. Port of src/compiler/lineMap.ts.
 //
-// Note: offsets here are byte offsets (the Go port's model), matching the rest
-// of the front end; for ASCII fixtures these equal the TS UTF-16 indices.
+// Offsets are byte offsets into the source (the Go port's internal model, used
+// for slicing). The character COLUMN, however, is a count of Unicode code
+// points, not bytes: the JLS treats a program as a sequence of Unicode
+// characters (JLS 3.1) and classifies tokens over code points (JLS 3.8, the
+// int-taking Character.isJavaIdentifier* methods), so a column is "how many
+// characters into the line". For ASCII this equals the byte column; for
+// multi-byte UTF-8 it counts characters (LSP utf-32 semantics). The TS build
+// reports UTF-16 code units instead (an artifact of JS string indices); the two
+// agree on the Basic Multilingual Plane and differ only for supplementary
+// characters, where the JLS code-point view is the correct one.
+
+import "unicode/utf8"
 
 // LineAndCharacter is a 0-based line + character (column) pair.
 type LineAndCharacter struct {
@@ -47,19 +57,29 @@ func lineIndexOf(lineStarts []int, offset int) int {
 	return low
 }
 
-// GetLineAndCharacterOfPosition converts an offset to a line/character pair.
-func GetLineAndCharacterOfPosition(lineStarts []int, offset int) LineAndCharacter {
+// GetLineAndCharacterOfPosition converts a byte offset to a line + character,
+// where character counts Unicode code points from the line start (JLS 3.1).
+func GetLineAndCharacterOfPosition(text string, lineStarts []int, offset int) LineAndCharacter {
+	if offset > len(text) {
+		offset = len(text)
+	}
 	line := lineIndexOf(lineStarts, offset)
-	return LineAndCharacter{Line: line, Character: offset - lineStarts[line]}
+	return LineAndCharacter{Line: line, Character: utf8.RuneCountInString(text[lineStarts[line]:offset])}
 }
 
-// GetPositionOfLineAndCharacter converts a line/character pair to an offset.
-func GetPositionOfLineAndCharacter(lineStarts []int, line, character int) int {
+// GetPositionOfLineAndCharacter converts a line + code-point character to a byte
+// offset, walking character code points forward from the start of the line.
+func GetPositionOfLineAndCharacter(text string, lineStarts []int, line, character int) int {
 	if line < 0 {
 		return 0
 	}
 	if line >= len(lineStarts) {
 		return lineStarts[len(lineStarts)-1]
 	}
-	return lineStarts[line] + character
+	b := lineStarts[line]
+	for i := 0; i < character && b < len(text); i++ {
+		_, size := utf8.DecodeRuneInString(text[b:])
+		b += size
+	}
+	return b
 }

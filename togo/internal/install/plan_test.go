@@ -125,6 +125,41 @@ func TestPlanUpdatesSkipsPrerelease(t *testing.T) {
 	}
 }
 
+// TestPlanUpdatesRejectsConflictingBump mirrors src/cli/update.test.ts test #1:
+// a's newest (2.0) drags in shared:2.0, conflicting with b's pinned shared:1.0,
+// so a moves to the newest conflict-free version (1.5); b is already newest and
+// c's only newer release is a pre-release, so neither bumps.
+func TestPlanUpdatesRejectsConflictingBump(t *testing.T) {
+	cfg := project(t, `{"dependencies":{"implementation":{"g:a":"1.0","g:b":"1.0","g:c":"1.0"}}}`)
+	src := &fakeSource{
+		name: "test",
+		meta: map[packages.CoordinateString]packages.PackageMetadata{
+			"g:shared:1.0":  meta("g:shared:1.0"),
+			"g:shared:2.0":  meta("g:shared:2.0"),
+			"g:a:1.0":       meta("g:a:1.0", "g:shared:1.0"),
+			"g:a:1.5":       meta("g:a:1.5", "g:shared:1.0"),
+			"g:a:2.0":       meta("g:a:2.0", "g:shared:2.0"),
+			"g:b:1.0":       meta("g:b:1.0", "g:shared:1.0"),
+			"g:c:1.0":       meta("g:c:1.0"),
+			"g:c:2.0-beta1": meta("g:c:2.0-beta1"),
+		},
+		versions: map[string][]string{
+			"g:shared": {"1.0", "2.0"},
+			"g:a":      {"1.0", "1.5", "2.0"},
+			"g:b":      {"1.0"},
+			"g:c":      {"1.0", "2.0-beta1"},
+		},
+	}
+	bumps, err := PlanUpdates(cfg, []packages.PackageSource{src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DependencyBump{{Configuration: "implementation", Key: "g:a", From: "1.0", To: "1.5"}}
+	if len(bumps) != 1 || bumps[0] != want[0] {
+		t.Errorf("bumps = %+v, want %+v", bumps, want)
+	}
+}
+
 func TestPlanUpdatesNoneWhenCurrent(t *testing.T) {
 	cfg := project(t, `{"dependencies":{"implementation":{"org.a:a":"1.1"}}}`)
 	src := &fakeSource{

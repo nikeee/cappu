@@ -246,7 +246,7 @@ func RunCompile(files []string, options Options) Result {
 			all = append(all, checker.GetSemanticDiagnostics(sf)...)
 		}
 		for _, d := range all {
-			diagnostics = append(diagnostics, toCompileDiagnostic(d, file, lineStarts))
+			diagnostics = append(diagnostics, toCompileDiagnostic(d, file, sfd.Text, lineStarts))
 		}
 	}
 	if hasError(diagnostics) {
@@ -340,8 +340,8 @@ func hasError(diags []CompileDiagnostic) bool {
 	return false
 }
 
-func toCompileDiagnostic(d compiler.Diagnostic, file string, lineStarts []int) CompileDiagnostic {
-	lc := compiler.GetLineAndCharacterOfPosition(lineStarts, d.Pos)
+func toCompileDiagnostic(d compiler.Diagnostic, file string, text string, lineStarts []int) CompileDiagnostic {
+	lc := compiler.GetLineAndCharacterOfPosition(text, lineStarts, d.Pos)
 	sev := "warning"
 	if d.Category == compiler.CategoryError {
 		sev = "error"

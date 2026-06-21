@@ -338,3 +338,9 @@ no timestamps were captured.
 - 2026-06-20 22:52 — port the bytecode emitter (continue)
 - 2026-06-21 00:00 — continue (wire cappu compile)
 - 2026-06-21 01:15 — do all the remaining stuff
+- 2026-06-21 13:40 — go through the entire new go (togo) code and look for logic differences to the ts version. be strict. find unsupported stuff.
+- 2026-06-21 13:40 — also check if every test case in the ts version has an equivalent in the go version. count all tests.
+- 2026-06-21 13:40 — fix all of these issues. then audit further
+- 2026-06-21 13:40 — fix all of them. regarding offsets vs code points: do what the JLS says about that.
+- 2026-06-21 14:05 — checker, then bytecode
+- 2026-06-21 14:05 — continue

@@ -81,3 +81,38 @@ func TestLoadRejectsFreeTextLicense(t *testing.T) {
 		t.Error("expected a validation error for a non-SPDX license")
 	}
 }
+
+func TestLoadRejectsInvalidOutput(t *testing.T) {
+	path := writeConfig(t, `{ "compilerOptions": { "output": "exe" } }`)
+	if _, err := Load(path, ""); err == nil {
+		t.Error("expected a validation error for an output outside the enum")
+	}
+}
+
+func TestLoadRejectsReleaseBelow8(t *testing.T) {
+	path := writeConfig(t, `{ "compilerOptions": { "release": 5 } }`)
+	if _, err := Load(path, ""); err == nil {
+		t.Error("expected a validation error for release < 8")
+	}
+}
+
+func TestLoadAcceptsRelease21(t *testing.T) {
+	path := writeConfig(t, `{ "compilerOptions": { "release": 21 } }`)
+	if _, err := Load(path, ""); err != nil {
+		t.Errorf("release 21 should validate: %v", err)
+	}
+}
+
+func TestLoadRejectsNonURLPublishRepository(t *testing.T) {
+	path := writeConfig(t, `{ "publishRepository": "not a url" }`)
+	if _, err := Load(path, ""); err == nil {
+		t.Error("expected a validation error for a non-URL publishRepository")
+	}
+}
+
+func TestLoadAcceptsURLPublishRepository(t *testing.T) {
+	path := writeConfig(t, `{ "publishRepository": "https://repo.example.com/maven2" }`)
+	if _, err := Load(path, ""); err != nil {
+		t.Errorf("a valid publishRepository URL should validate: %v", err)
+	}
+}

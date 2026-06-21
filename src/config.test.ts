@@ -153,3 +153,24 @@ test("a valid SPDX license is accepted; free text and unknown ids are rejected",
   write("Definitely-Not-A-License"); // SPDX-shaped but unknown
   expect(() => loadConfig(undefined, dir)).toThrow(/SPDX/);
 });
+
+test("compiler output is an enum, release has a floor, publishRepository is a URL", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cfg-"));
+  const write = (obj: Record<string, unknown>): void =>
+    writeFileSync(join(dir, DEFAULT_CONFIG_NAME), JSON.stringify(obj));
+
+  write({ compilerOptions: { output: "fat-jar" } });
+  expect(loadConfig(undefined, dir).compilerOptions.output).toBe("fat-jar");
+  write({ compilerOptions: { output: "exe" } }); // not in the enum
+  expect(() => loadConfig(undefined, dir)).toThrow();
+
+  write({ compilerOptions: { release: 21 } });
+  expect(loadConfig(undefined, dir).compilerOptions.release).toBe(21);
+  write({ compilerOptions: { release: 5 } }); // below the floor
+  expect(() => loadConfig(undefined, dir)).toThrow();
+
+  write({ publishRepository: "https://repo.example.com/maven2" });
+  expect(loadConfig(undefined, dir).publishRepository).toBe("https://repo.example.com/maven2");
+  write({ publishRepository: "not a url" });
+  expect(() => loadConfig(undefined, dir)).toThrow();
+});

@@ -89,8 +89,8 @@ func pathToURI(path string) compiler.URI {
 func nodeLocation(node *compiler.Node) McpLocation {
 	file := compiler.GetSourceFileOfNode(node).AsSourceFile()
 	lineStarts := compiler.ComputeLineStarts(file.Text)
-	start := compiler.GetLineAndCharacterOfPosition(lineStarts, compiler.SkipTrivia(file.Text, node.Pos))
-	end := compiler.GetLineAndCharacterOfPosition(lineStarts, node.End)
+	start := compiler.GetLineAndCharacterOfPosition(file.Text, lineStarts, compiler.SkipTrivia(file.Text, node.Pos))
+	end := compiler.GetLineAndCharacterOfPosition(file.Text, lineStarts, node.End)
 	return McpLocation{
 		File:      displayFile(file.FileName),
 		Line:      start.Line + 1,
@@ -100,9 +100,9 @@ func nodeLocation(node *compiler.Node) McpLocation {
 	}
 }
 
-func formatDiagnostic(uri string, d compiler.Diagnostic, lineStarts []int) McpDiagnostic {
-	start := compiler.GetLineAndCharacterOfPosition(lineStarts, d.Pos)
-	end := compiler.GetLineAndCharacterOfPosition(lineStarts, d.End)
+func formatDiagnostic(uri string, d compiler.Diagnostic, text string, lineStarts []int) McpDiagnostic {
+	start := compiler.GetLineAndCharacterOfPosition(text, lineStarts, d.Pos)
+	end := compiler.GetLineAndCharacterOfPosition(text, lineStarts, d.End)
 	return McpDiagnostic{
 		File:      displayFile(uri),
 		Severity:  severityOf(d.Category),
@@ -147,7 +147,7 @@ func (t *Tools) Diagnostics(files []string) []McpDiagnostic {
 		lineStarts := compiler.ComputeLineStarts(data.Text)
 		all := append(append(append([]compiler.Diagnostic{}, data.ParseDiagnostics...), data.BindDiagnostics...), t.checker.GetSemanticDiagnostics(sourceFile)...)
 		for _, d := range all {
-			out = append(out, formatDiagnostic(string(uri), d, lineStarts))
+			out = append(out, formatDiagnostic(string(uri), d, data.Text, lineStarts))
 		}
 	}
 	return out

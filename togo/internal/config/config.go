@@ -7,6 +7,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -162,9 +163,17 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-// validate enforces the regex/SPDX refinements zod applies to the coordinate
-// and license fields.
+// validate enforces the enum/range/regex/SPDX/URL refinements zod applies to
+// the compiler, coordinate, license and publish fields.
 func (c *Config) validate() error {
+	switch c.CompilerOptions.Output {
+	case "classes", "jar", "fat-jar":
+	default:
+		return fmt.Errorf(`compilerOptions.output: must be one of "classes", "jar", "fat-jar"`)
+	}
+	if r := c.CompilerOptions.Release; r != nil && *r < 8 {
+		return fmt.Errorf("compilerOptions.release: must be >= 8")
+	}
 	if c.GroupID != "" && !MavenID.MatchString(c.GroupID) {
 		return fmt.Errorf("groupId: must be a Maven id (letters, digits, . _ -)")
 	}
@@ -176,6 +185,11 @@ func (c *Config) validate() error {
 	}
 	if c.License != "" && !IsValidSpdxExpression(c.License) {
 		return fmt.Errorf(`license: not a valid SPDX license expression (e.g. "MIT", "Apache-2.0", "(MIT OR Apache-2.0)")`)
+	}
+	if c.PublishRepository != "" {
+		if u, err := url.Parse(c.PublishRepository); err != nil || u.Scheme == "" {
+			return fmt.Errorf("publishRepository: must be a valid URL")
+		}
 	}
 	return nil
 }

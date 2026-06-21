@@ -52,6 +52,28 @@ func TestMemberCompletionListsMembers(t *testing.T) {
 	}
 }
 
+// Member completion must list a type's own members in source declaration order
+// (matching the TS build's insertion-ordered SymbolTable), not the randomized
+// order of a Go map and not alphabetical.
+func TestMemberCompletionPreservesDeclarationOrder(t *testing.T) {
+	labels := labelsOf(complete("class P { int zzz; int aaa; void mmm() {} } class U { void m(P p) { p./*|*/ } }"))
+	indexOf := func(name string) int {
+		for i, l := range labels {
+			if l == name {
+				return i
+			}
+		}
+		return -1
+	}
+	z, a, m := indexOf("zzz"), indexOf("aaa"), indexOf("mmm")
+	if z < 0 || a < 0 || m < 0 {
+		t.Fatalf("missing own members in %v", labels)
+	}
+	if !(z < a && a < m) {
+		t.Errorf("own members should be in declaration order zzz,aaa,mmm; got %v", labels)
+	}
+}
+
 func TestMemberCompletionIncompleteCode(t *testing.T) {
 	labels := labelsOf(complete("class U { void m(String s) { s./*|*/ } }"))
 	if !contains(labels, "length") || !contains(labels, "substring") {

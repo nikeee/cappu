@@ -2348,7 +2348,7 @@ func (g *bodyGen) recordLine(node *Node) {
 	if start >= len(g.lineSource.text) {
 		return
 	}
-	line := GetLineAndCharacterOfPosition(g.lineSource.starts, start).Line + 1 // 1-based
+	line := GetLineAndCharacterOfPosition(g.lineSource.text, g.lineSource.starts, start).Line + 1 // 1-based
 	if n := len(g.lineNumbers); n > 0 {
 		last := &g.lineNumbers[n-1]
 		if int(last.pc) == g.code.length() {

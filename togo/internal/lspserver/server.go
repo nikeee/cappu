@@ -243,8 +243,8 @@ func applyContentChange(text string, change lsp.TextDocumentContentChangeEvent) 
 		return change.Text
 	}
 	lineStarts := compiler.ComputeLineStarts(text)
-	start := compiler.GetPositionOfLineAndCharacter(lineStarts, change.Range.Start.Line, change.Range.Start.Character)
-	end := compiler.GetPositionOfLineAndCharacter(lineStarts, change.Range.End.Line, change.Range.End.Character)
+	start := compiler.GetPositionOfLineAndCharacter(text, lineStarts, change.Range.Start.Line, change.Range.Start.Character)
+	end := compiler.GetPositionOfLineAndCharacter(text, lineStarts, change.Range.End.Line, change.Range.End.Character)
 	if start < 0 || end > len(text) || start > end {
 		return change.Text // out of range: treat as full replace, defensive
 	}
@@ -296,10 +296,10 @@ func toSeverity(category compiler.DiagnosticCategory) int {
 	}
 }
 
-func toLspDiagnostic(d compiler.Diagnostic, lineStarts []int) lsp.Diagnostic {
+func toLspDiagnostic(d compiler.Diagnostic, text string, lineStarts []int) lsp.Diagnostic {
 	out := lsp.Diagnostic{
 		Severity: toSeverity(d.Category),
-		Range:    lspRange(lineStarts, d.Pos, d.End),
+		Range:    lspRange(text, lineStarts, d.Pos, d.End),
 		Message:  d.MessageText,
 		Source:   "javalsp",
 		Code:     d.Code,
@@ -320,7 +320,7 @@ func (s *Server) validate(uri compiler.URI) {
 	var diags []lsp.Diagnostic
 	add := func(list []compiler.Diagnostic) {
 		for _, d := range list {
-			diags = append(diags, toLspDiagnostic(d, lineStarts))
+			diags = append(diags, toLspDiagnostic(d, data.Text, lineStarts))
 		}
 	}
 	add(data.ParseDiagnostics)
@@ -334,20 +334,20 @@ func (s *Server) validate(uri compiler.URI) {
 
 // --- position / range helpers -------------------------------------------------
 
-func lspPos(lineStarts []int, offset int) lsp.Position {
-	lc := compiler.GetLineAndCharacterOfPosition(lineStarts, offset)
+func lspPos(text string, lineStarts []int, offset int) lsp.Position {
+	lc := compiler.GetLineAndCharacterOfPosition(text, lineStarts, offset)
 	return lsp.Position{Line: lc.Line, Character: lc.Character}
 }
 
-func lspRange(lineStarts []int, pos, end int) lsp.Range {
-	return lsp.Range{Start: lspPos(lineStarts, pos), End: lspPos(lineStarts, end)}
+func lspRange(text string, lineStarts []int, pos, end int) lsp.Range {
+	return lsp.Range{Start: lspPos(text, lineStarts, pos), End: lspPos(text, lineStarts, end)}
 }
 
 func (s *Server) rangeOf(node *compiler.Node) lsp.Range {
 	file := compiler.GetSourceFileOfNode(node).AsSourceFile()
 	lineStarts := compiler.ComputeLineStarts(file.Text)
 	start := compiler.SkipTrivia(file.Text, node.Pos)
-	return lspRange(lineStarts, start, node.End)
+	return lspRange(file.Text, lineStarts, start, node.End)
 }
 
 func (s *Server) locationOf(node *compiler.Node) lsp.Location {
@@ -360,8 +360,9 @@ func (s *Server) sourceAndOffset(uri compiler.URI, pos lsp.Position) (*compiler.
 	if sourceFile == nil {
 		return nil, 0, false
 	}
-	lineStarts := compiler.ComputeLineStarts(sourceFile.AsSourceFile().Text)
-	offset := compiler.GetPositionOfLineAndCharacter(lineStarts, pos.Line, pos.Character)
+	text := sourceFile.AsSourceFile().Text
+	lineStarts := compiler.ComputeLineStarts(text)
+	offset := compiler.GetPositionOfLineAndCharacter(text, lineStarts, pos.Line, pos.Character)
 	return sourceFile, offset, true
 }
 

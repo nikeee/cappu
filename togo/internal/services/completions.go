@@ -106,7 +106,8 @@ func gatherTypeMembers(typeSymbol *compiler.Symbol, program *compiler.Program, i
 		return
 	}
 	seen[typeSymbol] = true
-	for name, symbol := range typeSymbol.Members {
+	for _, name := range typeSymbol.Members.OrderedKeys() {
+		symbol := typeSymbol.Members[name]
 		if !includeTypeParameters && symbol.Flags&compiler.SymbolFlagsTypeParameter != 0 {
 			continue
 		}
@@ -121,8 +122,8 @@ func gatherTypeMembers(typeSymbol *compiler.Symbol, program *compiler.Program, i
 }
 
 func addAll(table compiler.SymbolTable, into *orderedSymbols) {
-	for name, symbol := range table {
-		into.set(name, symbol)
+	for _, name := range table.OrderedKeys() {
+		into.set(name, table[name])
 	}
 }
 

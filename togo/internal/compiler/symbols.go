@@ -2,6 +2,8 @@ package compiler
 
 // Symbols (binder, M9). Port of the Symbol types in src/compiler/types.ts.
 
+import "sort"
+
 type SymbolFlags int
 
 const (
@@ -38,4 +40,37 @@ type Symbol struct {
 	Parent *Symbol
 	// ValueDeclaration is the first declaration (for hover/goto).
 	ValueDeclaration *Node
+}
+
+// symbolDeclPos is a symbol's first declaration offset, used to recover source
+// declaration order. Symbols with no declaration sort last (a large sentinel).
+func symbolDeclPos(s *Symbol) int {
+	if s.ValueDeclaration != nil {
+		return s.ValueDeclaration.Pos
+	}
+	if len(s.Declarations) > 0 {
+		return s.Declarations[0].Pos
+	}
+	return 1 << 62
+}
+
+// OrderedKeys returns the table's keys in a deterministic order: by each
+// symbol's first declaration position, then name. The TS build stores a
+// SymbolTable as an insertion-ordered Map, so iterating it yields declaration
+// order; a Go map randomizes iteration, so any order-sensitive consumer (e.g.
+// completion lists) must go through this to match the TS output and stay stable
+// run-to-run.
+func (t SymbolTable) OrderedKeys() []string {
+	keys := make([]string, 0, len(t))
+	for k := range t {
+		keys = append(keys, k)
+	}
+	sort.SliceStable(keys, func(i, j int) bool {
+		pi, pj := symbolDeclPos(t[keys[i]]), symbolDeclPos(t[keys[j]])
+		if pi != pj {
+			return pi < pj
+		}
+		return keys[i] < keys[j]
+	})
+	return keys
 }

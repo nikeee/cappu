@@ -161,14 +161,15 @@ func (s *Server) onCodeAction(params json.RawMessage) (any, *lsp.ResponseError) 
 	if sourceFile == nil {
 		return []lsp.CodeAction{}, nil
 	}
-	lineStarts := compiler.ComputeLineStarts(sourceFile.AsSourceFile().Text)
-	start := compiler.GetPositionOfLineAndCharacter(lineStarts, p.Range.Start.Line, p.Range.Start.Character)
-	end := compiler.GetPositionOfLineAndCharacter(lineStarts, p.Range.End.Line, p.Range.End.Character)
+	text := sourceFile.AsSourceFile().Text
+	lineStarts := compiler.ComputeLineStarts(text)
+	start := compiler.GetPositionOfLineAndCharacter(text, lineStarts, p.Range.Start.Line, p.Range.Start.Character)
+	end := compiler.GetPositionOfLineAndCharacter(text, lineStarts, p.Range.End.Line, p.Range.End.Character)
 	var out []lsp.CodeAction
 	for _, action := range services.GetCodeActions(s.program, s.checker, sourceFile, start, end) {
 		var edits []lsp.TextEdit
 		for _, c := range action.Changes {
-			edits = append(edits, lsp.TextEdit{Range: lspRange(lineStarts, c.Start, c.End), NewText: c.NewText})
+			edits = append(edits, lsp.TextEdit{Range: lspRange(text, lineStarts, c.Start, c.End), NewText: c.NewText})
 		}
 		out = append(out, lsp.CodeAction{
 			Title: action.Title,
@@ -346,7 +347,7 @@ func (s *Server) onFoldingRange(params json.RawMessage) (any, *lsp.ResponseError
 	}
 	text := sourceFile.AsSourceFile().Text
 	lineStarts := compiler.ComputeLineStarts(text)
-	lineAt := func(offset int) int { return compiler.GetLineAndCharacterOfPosition(lineStarts, offset).Line }
+	lineAt := func(offset int) int { return compiler.GetLineAndCharacterOfPosition(text, lineStarts, offset).Line }
 	var ranges []lsp.FoldingRange
 	var visit compiler.Visitor
 	visit = func(node *compiler.Node) bool {
@@ -420,12 +421,13 @@ func (s *Server) onInlayHint(params json.RawMessage) (any, *lsp.ResponseError) {
 	if sourceFile == nil {
 		return []lsp.InlayHint{}, nil
 	}
-	lineStarts := compiler.ComputeLineStarts(sourceFile.AsSourceFile().Text)
-	start := compiler.GetPositionOfLineAndCharacter(lineStarts, p.Range.Start.Line, p.Range.Start.Character)
-	end := compiler.GetPositionOfLineAndCharacter(lineStarts, p.Range.End.Line, p.Range.End.Character)
+	text := sourceFile.AsSourceFile().Text
+	lineStarts := compiler.ComputeLineStarts(text)
+	start := compiler.GetPositionOfLineAndCharacter(text, lineStarts, p.Range.Start.Line, p.Range.Start.Character)
+	end := compiler.GetPositionOfLineAndCharacter(text, lineStarts, p.Range.End.Line, p.Range.End.Character)
 	var out []lsp.InlayHint
 	for _, h := range services.GetInlayHints(s.checker, sourceFile, start, end, s.inlayHints) {
-		hint := lsp.InlayHint{Position: lspPos(lineStarts, h.Offset), Label: h.Label}
+		hint := lsp.InlayHint{Position: lspPos(text, lineStarts, h.Offset), Label: h.Label}
 		if h.Kind == "parameter" {
 			hint.Kind = lsp.InlayHintKindParameter
 			hint.PaddingRight = true
@@ -446,11 +448,12 @@ func (s *Server) onSemanticTokens(params json.RawMessage) (any, *lsp.ResponseErr
 	if sourceFile == nil {
 		return lsp.SemanticTokens{Data: []uint{}}, nil
 	}
-	lineStarts := compiler.ComputeLineStarts(sourceFile.AsSourceFile().Text)
+	text := sourceFile.AsSourceFile().Text
+	lineStarts := compiler.ComputeLineStarts(text)
 	var data []uint
 	prevLine, prevChar := 0, 0
 	for _, t := range services.GetSemanticTokens(s.checker, sourceFile) {
-		lc := compiler.GetLineAndCharacterOfPosition(lineStarts, t.Offset)
+		lc := compiler.GetLineAndCharacterOfPosition(text, lineStarts, t.Offset)
 		deltaLine := lc.Line - prevLine
 		deltaChar := lc.Character
 		if deltaLine == 0 {
