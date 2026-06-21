@@ -44,6 +44,7 @@ or common library. Current decisions:
 | `testcontainers` (JS) | `testcontainers-go` | later (publish e2e) |
 | in-house `zipReader.ts` / `zipWriter.ts` | `archive/zip` (stdlib) | later (compile) |
 | sha256 / glob / semver | `crypto/sha256`, `path/filepath.WalkDir`, hand semver | M1 where touched |
+| in-house `mapPool` bounded download pool | `p-limit` (TS) / `golang.org/x/sync/errgroup` `SetLimit` (Go) | done |
 
 ### comment-json has no Go equivalent
 
@@ -63,6 +64,16 @@ build's comment-json output - it stays valid JSONC with comments intact, just
 compact. `cappu update` (which only overwrites existing values) is unaffected.
 Pretty-printing a freshly inserted key would require reimplementing
 comment-json's CST, which is deferred.
+
+### semver libraries evaluated and rejected (keep the hand bump)
+
+The version bump (`internal/semver/semver.go`, `src/version.ts`) stays
+hand-rolled. npm `semver`'s `inc()` does not match our behaviour - on a
+prerelease it strips without incrementing (`inc('1.2.3-rc1','patch')` ->
+`1.2.3`), whereas we drop prerelease *and* bump (-> `1.2.4`). And
+`golang.org/x/mod/semver` has no increment function at all (parse/compare/
+canonical only), so the Go side would still hand-write the bump. Two deps for a
+behaviour change on one side and nothing on the other: not worth it.
 
 ## Branded types -> Go named types (NOT aliases)
 

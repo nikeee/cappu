@@ -3,12 +3,20 @@ package install
 import (
 	"os"
 	"path/filepath"
+	"sync"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/nikeee/cappu/internal/config"
 	"github.com/nikeee/cappu/internal/lockfile"
 	"github.com/nikeee/cappu/internal/packages"
 	"github.com/nikeee/cappu/internal/sources"
 )
+
+// How many jars to download/verify at once. Bounded so a large tree does not
+// open hundreds of sockets; the network, not the CPU, is the limit here. Port
+// of src/install.ts DOWNLOAD_CONCURRENCY.
+const downloadConcurrency = 12
 
 // Options tunes a run. OnProgress is called per materialized package; OnResolve
 // per package while resolving (no lockfile). UpdateLock forces a re-resolve and
@@ -110,13 +118,19 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 
 	result := Result{TargetDir: targetDir, FromLock: fromLock, LockStale: lockStale}
 	progressed := 0
+	// fetchOne runs concurrently (see materialize); the progress counter and the
+	// OnProgress callback (a non-reentrant CLI progress bar) are the only shared
+	// state, so serialize them.
+	var progressMu sync.Mutex
 	fetchOne := func(pkg pending, dir string) outcome {
 		id := string(pkg.coordinates.String())
 		bytes, cached, found := artifactFrom(srcs, pkg.source, pkg.coordinates)
+		progressMu.Lock()
 		progressed++
 		if opts.OnProgress != nil {
 			opts.OnProgress(progressed, total, pkg.coordinates.String())
 		}
+		progressMu.Unlock()
 		if !found {
 			return outcome{noArtifact: id}
 		}
@@ -149,10 +163,19 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, err
 		}
-		outcomes := make([]outcome, 0, len(set))
-		for _, pkg := range set {
-			outcomes = append(outcomes, fetchOne(pkg, dir))
+		// Each package is independent, so the set is fetched with bounded
+		// concurrency; results are written by index to keep input order
+		// (the lock and result lists stay deterministic). fetchOne never errors.
+		outcomes := make([]outcome, len(set))
+		var g errgroup.Group
+		g.SetLimit(downloadConcurrency)
+		for i, pkg := range set {
+			g.Go(func() error {
+				outcomes[i] = fetchOne(pkg, dir)
+				return nil
+			})
 		}
+		_ = g.Wait()
 		return outcomes, nil
 	}
 

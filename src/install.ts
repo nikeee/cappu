@@ -18,6 +18,8 @@ import { hash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import pLimit from "p-limit";
+
 import { type Brand } from "./brand.ts";
 import { cacheDir } from "./cacheDir.ts";
 
@@ -229,24 +231,6 @@ function sha256Of(bytes: Uint8Array): Sha256 {
 // How many jars to download/verify at once. Bounded so a large tree does not
 // open hundreds of sockets; the network, not the CPU, is the limit here.
 const DOWNLOAD_CONCURRENCY = 12;
-
-// Run `fn` over `items` with at most `limit` in flight; results in input order.
-async function mapPool<T, R>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < items.length) {
-      const i = next++;
-      results[i] = await fn(items[i]!);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
-  return results;
-}
 
 // Which lib directory each locked configuration installs into.
 const LOCK_TARGETS = [
@@ -621,7 +605,8 @@ export async function installDependencies(
   const materialize = (set: PendingPackage[], dir: string): Promise<Outcome[]> => {
     if (set.length === 0) return Promise.resolve([]);
     mkdirSync(dir, { recursive: true });
-    return mapPool(set, DOWNLOAD_CONCURRENCY, pkg => fetchOne(pkg, dir));
+    const limit = pLimit(DOWNLOAD_CONCURRENCY);
+    return Promise.all(set.map(pkg => limit(() => fetchOne(pkg, dir))));
   };
 
   // The three sets download concurrently; their outcomes are assembled in a

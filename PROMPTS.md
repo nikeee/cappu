@@ -359,3 +359,4 @@ cappu search commons-lang3
 - 2026-06-21 21:06 — look out for strings (or parts of strings) in the source that can be replaced by a reference to a constant, e.g. `./dist` as the default directory, so we dont diverge if they change
 - 2026-06-21 21:06 — imeplement https://github.com/nikeee/cappu/issues/20
 - 2026-06-21 21:31 — make the output of cappu search prettier and include some more info if possible
+- 2026-06-21 21:39 — investigate wether we can replace some code with commonly used libraries.
