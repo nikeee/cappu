@@ -12,7 +12,7 @@ import { classFilesToStub } from "./classfileReader.ts";
 import { emitSourceFile } from "./emitter.ts";
 import { createJdkImage } from "./jdkImage.ts";
 import { createJdkTypeResolver, installJdkTypes } from "./jdkTypes.ts";
-import { createProgram, type Fqn } from "./program.ts";
+import { createProgram, type Fqn, type PackageName } from "./program.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { type Uri } from "../workspace.ts";
 import { writeZip } from "./zipWriter.ts";
@@ -219,6 +219,23 @@ test("installJdkTypes falls back to the synthetic stub with no provisioned JDK",
   const program = createProgram();
   installJdkTypes(program, undefined);
   expect(program.getGlobalIndex().getType("java.lang.String" as Fqn)).toBeDefined();
+});
+
+test("a provisioned JDK keeps the stub for enumeration and adds image resolution", () => {
+  // The real install path loads the stub (so completion / auto-import keep
+  // enumerating) AND sets the image resolver (so stub-omitted types resolve).
+  // Mirror that composition with a synthetic image carrying an extra type.
+  const home = makeJdkHome([makeJmodEntry("lib/Extra", "package lib;\npublic class Extra {}")]);
+  const program = createProgram();
+  loadJdkStub(program);
+  program.setJdkTypeResolver(createJdkTypeResolver(createJdkImage(home)!));
+  const index = program.getGlobalIndex();
+
+  // Enumeration (completion / auto-import) still sees the stub's common types.
+  expect(index.getPackageTypes("java.lang" as PackageName)?.size ?? 0).toBeGreaterThan(0);
+  expect(index.findFqnsBySimpleName("String").length).toBeGreaterThan(0);
+  // Resolution reaches the image for types the stub does not carry.
+  expect(index.getType("lib.Extra" as Fqn)).toBeDefined();
 });
 
 // Build one synthetic jmod holding a single emitted class, named after it.

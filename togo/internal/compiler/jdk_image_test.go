@@ -259,3 +259,25 @@ func TestInstallJdkTypesFallsBackToStub(t *testing.T) {
 		t.Error("with no JDK, java.lang.String should resolve from the stub")
 	}
 }
+
+func TestProvisionedJdkKeepsStubForEnumeration(t *testing.T) {
+	// The real install path loads the stub (so completion / auto-import keep
+	// enumerating) AND sets the image resolver (so stub-omitted types resolve).
+	name, bytes := makeJmodEntry(t, "lib/Extra", "package lib;\npublic class Extra {}")
+	program := NewProgram()
+	LoadJdkStub(program)
+	program.SetJdkTypeResolver(createJdkTypeResolver(NewJdkImage(makeJdkHome(t, map[string][]byte{name: bytes}))))
+	index := program.GetGlobalIndex()
+
+	// Enumeration (completion / auto-import) still sees the stub's common types.
+	if len(index.GetPackageTypes("java.lang")) == 0 {
+		t.Error("stub should still drive java.lang enumeration")
+	}
+	if len(index.FindFqnsBySimpleName("String")) == 0 {
+		t.Error("auto-import enumeration should still find String")
+	}
+	// Resolution reaches the image for types the stub does not carry.
+	if index.GetType("lib.Extra") == nil {
+		t.Error("image should resolve types beyond the stub")
+	}
+}

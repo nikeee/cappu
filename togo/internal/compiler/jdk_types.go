@@ -80,19 +80,20 @@ func createJdkTypeResolver(image *JdkImage) func(Fqn) *Symbol {
 	}
 }
 
-// InstallJdkTypes makes JDK types resolvable for program: from the configured
-// JDK's real classes when one is provisioned, else from the synthetic stub.
-// Tolerates a nil config (the LSP can run without one).
+// InstallJdkTypes makes JDK types resolvable for program. The synthetic stub is
+// always loaded: it is the curated common-type list that completion and
+// auto-import enumerate (GetPackageTypes/FindFqnsBySimpleName/GetAllTypeFqns) -
+// the lazy image resolver feeds GetType only, not enumeration. When a JDK is
+// provisioned, the image additionally resolves whole types the stub omits
+// (streams, java.time, ...), with the stub winning for the common types it
+// already covers. Tolerates a nil config (the LSP can run without one).
 func InstallJdkTypes(program *Program, cfg *config.Config) {
-	var image *JdkImage
+	LoadJdkStub(program)
 	if cfg != nil {
 		if home := jdks.ProvisionedJdkHome(cfg); home != "" {
-			image = NewJdkImage(home)
+			if image := NewJdkImage(home); image != nil {
+				program.SetJdkTypeResolver(createJdkTypeResolver(image))
+			}
 		}
-	}
-	if image != nil {
-		program.SetJdkTypeResolver(createJdkTypeResolver(image))
-	} else {
-		LoadJdkStub(program)
 	}
 }

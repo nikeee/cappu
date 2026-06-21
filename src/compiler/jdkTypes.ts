@@ -73,16 +73,17 @@ export function createJdkTypeResolver(image: JdkImage): (fqn: Fqn) => Symbol | u
 }
 
 /**
- * Make JDK types resolvable for `program`: from the configured JDK's real
- * classes when one is provisioned, else from the synthetic stub. Tolerates a
+ * Make JDK types resolvable for `program`. The synthetic stub is always loaded:
+ * it is the curated common-type list that completion and auto-import enumerate
+ * (getPackageTypes/findFqnsBySimpleName/getAllTypeFqns) - the lazy image resolver
+ * feeds getType only, not enumeration. When a JDK is provisioned, the image
+ * additionally resolves whole types the stub omits (streams, java.time, ...),
+ * with the stub winning for the common types it already covers. Tolerates a
  * missing config (the LSP can run without one).
  */
 export function installJdkTypes(program: Program, config: CappuConfig | undefined): void {
+  loadJdkStub(program);
   const home = config && provisionedJdkHome(config);
   const image = home ? createJdkImage(home) : undefined;
-  if (image) {
-    program.setJdkTypeResolver(createJdkTypeResolver(image));
-  } else {
-    loadJdkStub(program);
-  }
+  if (image) program.setJdkTypeResolver(createJdkTypeResolver(image));
 }
