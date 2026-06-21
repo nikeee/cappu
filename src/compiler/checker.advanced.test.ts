@@ -151,6 +151,27 @@ test("enum synthetic members (values) are not flagged", () => {
   expect(diagnose("enum E { A }\nclass C { void m() { E.values(); } }")).not.toContain(NO_MEMBER);
 });
 
+test("missing method on a record is flagged (accessors are bound)", () => {
+  const code = "record R(int x) {}\nclass C { void m(R r) { r.nope(); } }";
+  expect(diagnose(code)).toContain(NO_MEMBER);
+});
+
+test("record component accessor is accepted", () => {
+  const code = "record R(int x) {}\nclass C { void m(R r) { int v = r.x(); } }";
+  expect(diagnose(code)).not.toContain(NO_MEMBER);
+});
+
+test("missing method on an enum is flagged", () => {
+  const code = "enum E { A }\nclass C { void m(E e) { e.nope(); } }";
+  expect(diagnose(code)).toContain(NO_MEMBER);
+});
+
+test("enum valueOf is not flagged", () => {
+  expect(diagnose('enum E { A }\nclass C { void m() { E.valueOf("A"); } }')).not.toContain(
+    NO_MEMBER,
+  );
+});
+
 test("inherited member through two user-defined levels is accepted", () => {
   const code =
     "class Base { int shared; }\nclass Mid extends Base {}\nclass C { void m(Mid x) { int v = x.shared; } }";

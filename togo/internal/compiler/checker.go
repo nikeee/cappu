@@ -412,9 +412,14 @@ func (c *Checker) collectTypedOverloads(receiver *Type, name string, seen map[*S
 	return out
 }
 
-// isClosedType reports whether a class type's full member set is known.
+// isClosedType reports whether a class type's full member set is known. Records
+// are closed (the binder synthesizes the component accessors; equals/hashCode/
+// toString come from Object) and so are enums (name/ordinal/... come from
+// java.lang.Enum, the constants are bound; the only synthesized members we do
+// not bind are the static values()/valueOf(), special-cased at the use site).
+// Annotations are excluded: their element methods are not modeled.
 func (c *Checker) isClosedType(t *Type) bool {
-	if t.Symbol.Flags&(SymbolFlagsEnum|SymbolFlagsRecord|SymbolFlagsAnnotation) != 0 {
+	if t.Symbol.Flags&SymbolFlagsAnnotation != 0 {
 		return false
 	}
 	var supertypesResolve func(symbol *Symbol, seen map[*Symbol]bool) bool
@@ -439,6 +444,14 @@ func (c *Checker) isClosedType(t *Type) bool {
 		return true
 	}
 	return supertypesResolve(t.Symbol, map[*Symbol]bool{})
+}
+
+// isSynthesizedEnumMember reports whether name is one of the static members the
+// compiler synthesizes for every enum (values(), valueOf(String); JLS 8.9.3).
+// These are not present in source, so the binder never records them; recognize
+// them so member checking on a closed enum does not flag them.
+func isSynthesizedEnumMember(t *Type, name string) bool {
+	return t.Symbol.Flags&SymbolFlagsEnum != 0 && (name == "values" || name == "valueOf")
 }
 
 // classTypeByFqn is the trusted dotted-name boundary: literal JDK names enter here.

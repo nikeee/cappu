@@ -686,7 +686,8 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			if access.Expression.Kind != SuperExpression {
 				receiver := c.getTypeOfExpression(access.Expression)
 				if receiver.Kind == TypeKindClass && c.isClosedType(receiver) &&
-					c.lookupTypedMember(receiver, access.Name.AsIdentifier().Text, nil) == nil {
+					c.lookupTypedMember(receiver, access.Name.AsIdentifier().Text, nil) == nil &&
+					!isSynthesizedEnumMember(receiver, access.Name.AsIdentifier().Text) {
 					text := GetSourceFileOfNode(access.Name).AsSourceFile().Text
 					start := skipTrivia(text, access.Name.Pos)
 					diagnostics = append(diagnostics, CreateDiagnostic(start, access.Name.End-start,

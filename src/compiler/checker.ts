@@ -434,13 +434,16 @@ export function createChecker(program: Program): Checker {
   }
 
   // A class type is "closed" when its full member set is known: it and every
-  // transitive super type resolve to a declaration we modeled. Enums and records
-  // are excluded because the compiler synthesizes members (values/valueOf,
-  // component accessors) we do not bind. Only closed types are eligible for the
-  // unresolved-member diagnostic, so an unmodeled super type never yields a false
-  // positive.
+  // transitive super type resolve to a declaration we modeled. Records are
+  // closed (the binder synthesizes the component accessors; equals/hashCode/
+  // toString come from Object) and so are enums (name/ordinal/... come from
+  // java.lang.Enum, the constants are bound; the only synthesized members we do
+  // not bind are the static values()/valueOf(), special-cased at the use site).
+  // Annotations are excluded: their element methods are not modeled. Only closed
+  // types are eligible for the unresolved-member diagnostic, so an unmodeled
+  // super type never yields a false positive.
   function isClosedType(type: ClassType): boolean {
-    if (type.symbol.flags & (SymbolFlags.Enum | SymbolFlags.Record | SymbolFlags.Annotation)) {
+    if (type.symbol.flags & SymbolFlags.Annotation) {
       return false;
     }
     const supertypesResolve = (symbol: Symbol, seen: Set<Symbol>): boolean => {
@@ -460,6 +463,15 @@ export function createChecker(program: Program): Checker {
       return true;
     };
     return supertypesResolve(type.symbol, new Set());
+  }
+
+  // values() and valueOf(String) are synthesized by the compiler for every enum
+  // (JLS 8.9.3) and are not present in source, so the binder never records them.
+  // Recognize them so member checking on a closed enum does not flag them.
+  function isSynthesizedEnumMember(type: ClassType, name: string): boolean {
+    return (
+      Boolean(type.symbol.flags & SymbolFlags.Enum) && (name === "values" || name === "valueOf")
+    );
   }
 
   function resolveType(typeNode: TypeNode, fromNode: Node): Type {
@@ -2144,7 +2156,8 @@ export function createChecker(program: Program): Checker {
             if (
               receiver.kind === TypeKind.Class &&
               isClosedType(receiver as ClassType) &&
-              !lookupTypedMember(receiver as ClassType, access.name.text)
+              !lookupTypedMember(receiver as ClassType, access.name.text) &&
+              !isSynthesizedEnumMember(receiver as ClassType, access.name.text)
             ) {
               const start = skipTrivia(getSourceFileOfNode(access.name).text, access.name.pos);
               diagnostics.push(

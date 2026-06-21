@@ -82,6 +82,8 @@ func TestNoMemberFlagged(t *testing.T) {
 		"class A { int f; }\nclass B { void m(A a) { a.nope(); } }",
 		"class C { void m() { System.ouu.println(\"x\"); } }",
 		"class C { void m(String s) { String t = s.trimm(); } }",
+		"record R(int x) {}\nclass C { void m(R r) { r.nope(); } }",
+		"enum E { A }\nclass C { void m(E e) { e.nope(); } }",
 	}
 	for _, code := range cases {
 		if !containsCode(diagnose(code), codeNoMember) {
@@ -99,6 +101,8 @@ func TestNoMemberAccepted(t *testing.T) {
 		"class C { void m(Unknown u) { Object x = u.whatever; } }",
 		"class C extends Frame { void m() { Object x = this.anything; } }",
 		"enum E { A }\nclass C { void m() { E.values(); } }",
+		"enum E { A }\nclass C { void m() { E.valueOf(\"A\"); } }",
+		"record R(int x) {}\nclass C { void m(R r) { int v = r.x(); } }",
 		"class Base { int shared; }\nclass Mid extends Base {}\nclass C { void m(Mid x) { int v = x.shared; } }",
 	}
 	for _, code := range cases {
