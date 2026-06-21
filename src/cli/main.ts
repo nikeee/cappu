@@ -26,6 +26,7 @@ import { runVersion } from "./version.ts";
 import { runVerify } from "./verify.ts";
 import { formatDuration, painter } from "./style.ts";
 import { emitAnnotation } from "./annotations.ts";
+import { agentEnabled } from "./agent.ts";
 import { runTestCommand } from "./test.ts";
 import pkg from "../../package.json" with { type: "json" };
 
@@ -62,8 +63,9 @@ Usage:
                                      artifactId/version in cappu.json + creds).
                                      Registry: --repo, else $CAPPU_PUBLISH_REGISTRY,
                                      else publishRepository, else Maven Central
-  cappu search <query>               Search the configured package sources; prints
-                                     group:artifact@latest-version per match
+  cappu search <query> [--json]      Search the configured package sources; prints
+                                     group:artifact@latest-version per match;
+                                     --json emits the matches machine-readable
   cappu test                         Compile src/test/java and run the JUnit
                                      Platform console launcher over it
   cappu self-upgrade                 Replace this binary with the latest CD build
@@ -106,6 +108,10 @@ Compile options:
 Global:
   -h, --help            Show this help
       --version         Show the version
+
+  When an AI agent drives cappu (AGENT, CLAUDECODE, CURSOR_AGENT, ... set), colour
+  and animations are off and --json is implied where supported (audit, licenses,
+  search).
 `.trimStart();
 
 // The IIFE keeps parseArgs's precise inferred result type (the catch path is
@@ -144,6 +150,13 @@ const { values, positionals } = (() => {
 })();
 
 const [command, ...files] = positionals;
+
+// An AI agent driving cappu implies machine-readable output, the same way it
+// implies NO_COLOR (see agentEnabled). --json stays an explicit opt-in for
+// humans; under an agent it is on by default for the commands that support it.
+// ponytail: presence-only flag, so there is no `--json=false` escape hatch under
+// an agent; add one if a consumer ever needs text output from an agent context.
+const json = values.json || agentEnabled();
 
 if (values.version) {
   process.stdout.write(`${pkg.version}\n`);
@@ -226,10 +239,10 @@ switch (command) {
     await runVersion(files[0], values.config, config);
     break;
   case "audit":
-    await runAudit(config, { noCache: values["no-cache"], json: values.json });
+    await runAudit(config, { noCache: values["no-cache"], json });
     break;
   case "licenses":
-    await runLicenses(config, { json: values.json });
+    await runLicenses(config, { json });
     break;
   case "publish":
     await runPublish(config, { repo: values.repo });
@@ -240,7 +253,7 @@ switch (command) {
       process.stderr.write("cappu: search needs a query, e.g. `cappu search gson`\n");
       process.exit(2);
     }
-    await runSearch(query, config);
+    await runSearch(query, config, { json });
     break;
   }
   case "lsp":

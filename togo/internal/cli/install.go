@@ -26,7 +26,7 @@ func RunInstall(cfg *config.Config, verbose bool) int {
 func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 	out := painter(os.Stdout)
 	errp := painter(os.Stderr)
-	showProgress := ColorEnabled(isTTY(os.Stderr), os.Getenv("NO_COLOR"))
+	showProgress := ColorEnabled(isTTY(os.Stderr), os.Getenv)
 
 	resolving := 0
 	result, err := install.Dependencies(cfg, nil, install.Options{

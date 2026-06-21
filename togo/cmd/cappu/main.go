@@ -154,7 +154,7 @@ func (c *auditCmd) Run(a *appState) error {
 	if err != nil {
 		return err
 	}
-	return exit(cli.RunAudit(cfg, c.NoCache, c.JSON))
+	return exit(cli.RunAudit(cfg, c.NoCache, c.JSON || cli.AgentEnabled(os.Getenv)))
 }
 
 type licensesCmd struct {
@@ -166,7 +166,7 @@ func (c *licensesCmd) Run(a *appState) error {
 	if err != nil {
 		return err
 	}
-	return exit(cli.RunLicenses(cfg, c.JSON))
+	return exit(cli.RunLicenses(cfg, c.JSON || cli.AgentEnabled(os.Getenv)))
 }
 
 type addCmd struct {
@@ -196,6 +196,7 @@ func (c *publishCmd) Run(a *appState) error {
 
 type searchCmd struct {
 	Query []string `arg:"" optional:"" help:"Search terms"`
+	JSON  bool     `name:"json" help:"Emit matches machine-readable"`
 }
 
 func (c *searchCmd) Run(a *appState) error {
@@ -208,7 +209,7 @@ func (c *searchCmd) Run(a *appState) error {
 		fmt.Fprintln(os.Stderr, "cappu: search needs a query, e.g. `cappu search gson`")
 		return cmdErr(2)
 	}
-	return exit(cli.RunSearch(query, cfg))
+	return exit(cli.RunSearch(query, cfg, c.JSON || cli.AgentEnabled(os.Getenv)))
 }
 
 type testCmd struct{}

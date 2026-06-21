@@ -25,7 +25,7 @@ func RunAudit(cfg *config.Config, noCache, jsonOut bool) int {
 
 	// Resolve the whole graph (not just the locked list): the requestedBy edges
 	// are what let us show why a transitive package is here.
-	showProgress := ColorEnabled(isTTY(os.Stderr), os.Getenv("NO_COLOR"))
+	showProgress := ColorEnabled(isTTY(os.Stderr), os.Getenv)
 	resolving := 0
 	roots := append(sources.CompileRoots(cfg), sources.ProcessorRoots(cfg)...)
 	roots = append(roots, sources.TestRoots(cfg)...)

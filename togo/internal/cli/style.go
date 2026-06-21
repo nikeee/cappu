@@ -21,15 +21,16 @@ var styleCodes = map[string]string{
 }
 
 // ColorEnabled reports whether coloured output may render: a TTY that has not
-// opted out via NO_COLOR (set and non-empty). Port of colorEnabled in color.ts;
-// the env lookup is split out as a parameter so it stays testable.
-func ColorEnabled(isTTY bool, noColor string) bool {
-	return isTTY && noColor == ""
+// opted out via NO_COLOR (set and non-empty) and is not being driven by an AI
+// agent. Port of colorEnabled in color.ts; the env lookup is a parameter so it
+// stays testable.
+func ColorEnabled(isTTY bool, env func(string) string) bool {
+	return isTTY && env("NO_COLOR") == "" && !AgentEnabled(env)
 }
 
 // painter returns a colour function for f: text unchanged when colour is off.
 func painter(f *os.File) func(format, text string) string {
-	on := ColorEnabled(isTTY(f), os.Getenv("NO_COLOR"))
+	on := ColorEnabled(isTTY(f), os.Getenv)
 	return func(format, text string) string {
 		code, ok := styleCodes[format]
 		if !on || !ok {

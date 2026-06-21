@@ -57,7 +57,13 @@ func TestColorEnabled(t *testing.T) {
 		{true, "", true},
 	}
 	for _, c := range cases {
-		if got := ColorEnabled(c.isTTY, c.noColor); got != c.want {
+		env := func(name string) string {
+			if name == "NO_COLOR" {
+				return c.noColor
+			}
+			return ""
+		}
+		if got := ColorEnabled(c.isTTY, env); got != c.want {
 			t.Errorf("ColorEnabled(%v, %q) = %v, want %v", c.isTTY, c.noColor, got, c.want)
 		}
 	}

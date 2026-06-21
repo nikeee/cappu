@@ -9,9 +9,20 @@ import { type PackageSource, searchPackages } from "../packages/index.ts";
 export async function runSearch(
   query: string,
   config: CappuConfig,
+  // --json: emit the hits machine-readable instead of one line per match.
+  options: { json?: boolean } = {},
   sources: readonly PackageSource[] = configuredSources(config),
 ): Promise<never> {
   const hits = await searchPackages(query, sources);
+  if (options.json) {
+    const output = hits.map(h => ({
+      groupId: h.groupId,
+      artifactId: h.artifactId,
+      version: h.version,
+    }));
+    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+    process.exit(hits.length === 0 ? 1 : 0);
+  }
   if (hits.length === 0) {
     process.stderr.write(`no packages found for '${query}'\n`);
     process.exit(1);

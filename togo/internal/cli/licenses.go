@@ -45,7 +45,7 @@ func RunLicenses(cfg *config.Config, jsonOut bool) int {
 	roots = append(roots, sources.TestRoots(cfg)...)
 
 	resolving := 0
-	showProgress := ColorEnabled(isTTY(os.Stderr), os.Getenv("NO_COLOR"))
+	showProgress := ColorEnabled(isTTY(os.Stderr), os.Getenv)
 	resolution, err := packages.ResolveTransitive(roots, sources.Configured(cfg), func(packages.Coordinates) {
 		if showProgress {
 			resolving++

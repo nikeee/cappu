@@ -13,4 +13,7 @@ test("coloured output needs a TTY and respects NO_COLOR", () => {
   expect(colorEnabled(true, { NO_COLOR: "anything" })).toBe(false);
   // ...but an empty value does not count as set
   expect(colorEnabled(true, { NO_COLOR: "" })).toBe(true);
+  // an AI agent driving cappu implies NO_COLOR
+  expect(colorEnabled(true, { CLAUDECODE: "1" })).toBe(false);
+  expect(colorEnabled(true, { AGENT: "goose" })).toBe(false);
 });
