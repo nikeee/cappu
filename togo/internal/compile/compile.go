@@ -228,7 +228,7 @@ func RunCompile(files []string, options Options) Result {
 	files = inputs
 
 	program := compiler.NewProgram()
-	compiler.LoadJdkStub(program)
+	compiler.InstallJdkTypes(program, cfg)
 	loadConfiguredPaths(program, cfg)
 	for _, file := range files {
 		b, err := os.ReadFile(file)

@@ -243,22 +243,30 @@ func resolveTypeNameCrossFile(name string, sourceFile *Node, index *GlobalIndex)
 			return samePackage
 		}
 	}
-	// on-demand imports
+	// on-demand imports. The package-types map only covers project/classpath
+	// types; GetType also reaches the lazy JDK provider for a star-imported JDK
+	// package (e.g. `import java.util.*` -> List).
 	for _, imp := range data.Imports.Nodes {
 		d := imp.AsImportDeclaration()
 		if !d.IsStatic && d.IsOnDemand {
-			if pkg := index.GetPackageTypes(PackageName(entityNameToString(d.Name))); pkg != nil {
+			pkgName := entityNameToString(d.Name)
+			if pkg := index.GetPackageTypes(PackageName(pkgName)); pkg != nil {
 				if t := pkg[name]; t != nil {
 					return t
 				}
 			}
+			if t := index.GetType(Fqn(pkgName + "." + name)); t != nil {
+				return t
+			}
 		}
 	}
-	// implicit java.lang.*
+	// implicit java.lang.* (GetType reaches the lazy JDK provider too)
 	if pkg := index.GetPackageTypes("java.lang"); pkg != nil {
-		return pkg[name]
+		if t := pkg[name]; t != nil {
+			return t
+		}
 	}
-	return nil
+	return index.GetType(Fqn("java.lang." + name))
 }
 
 // resolveStaticImport resolves a value/method imported via `import static`.

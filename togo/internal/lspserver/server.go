@@ -44,7 +44,7 @@ const latestTTL = 5 * time.Minute
 // NewServer builds a server. cfg may be nil (no project config).
 func NewServer(cfg *config.Config) *Server {
 	program := compiler.NewProgram()
-	compiler.LoadJdkStub(program)
+	compiler.InstallJdkTypes(program, cfg)
 	s := &Server{
 		program:          program,
 		checker:          compiler.NewChecker(program),

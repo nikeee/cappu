@@ -61,7 +61,7 @@ type toolDef struct {
 // NewServer builds the MCP server from the project config (may be nil).
 func NewServer(cfg *config.Config) *Server {
 	program := compiler.NewProgram()
-	compiler.LoadJdkStub(program)
+	compiler.InstallJdkTypes(program, cfg)
 	if cfg != nil {
 		loadConfiguredSources(program, cfg)
 	}

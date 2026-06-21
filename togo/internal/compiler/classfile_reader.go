@@ -757,6 +757,25 @@ func ClassFileToStub(b []byte) (classStub, bool) {
 	return stubs[0], true
 }
 
+// ClassFilesToStub returns the single top-level stub for a class family - an
+// outer class plus its Outer$Inner nested classes (each its own .class) - so the
+// nested types fold into the outer's stub and resolve as members. Malformed
+// entries are skipped. Used by the lazy JDK provider (jdk_image.go gives the
+// family per type). Port of classFilesToStub in src/compiler/classfileReader.ts.
+func ClassFilesToStub(family [][]byte) (classStub, bool) {
+	var infos []classInfo
+	for _, b := range family {
+		if info, err := parseClassFile(b); err == nil {
+			infos = append(infos, info)
+		}
+	}
+	stubs := buildStubs(infos)
+	if len(stubs) == 0 {
+		return classStub{}, false
+	}
+	return stubs[0], true
+}
+
 // LoadClassPath scans classpath entries - directories (recursively) or .jar
 // files - for .class files and registers each as a stub source under
 // classpath:///<binary-name>.java. Returns the number of types loaded;

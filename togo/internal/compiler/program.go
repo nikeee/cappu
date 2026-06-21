@@ -69,6 +69,11 @@ type Program struct {
 	typesByFqn     map[Fqn]*Symbol
 	packagesByName map[PackageName]*Symbol
 
+	// Lazy fallback for types outside the project (the provisioned JDK; see
+	// jdk_types.go). Consulted by GetType only on a project miss, so project
+	// types always win. Resolution-only - does not feed enumeration.
+	jdkTypeResolver func(Fqn) *Symbol
+
 	generation Generation
 }
 
@@ -226,8 +231,24 @@ func (p *Program) refreshIndex() {
 // GlobalIndex is the cross-file lookup of top-level types by package and FQN.
 type GlobalIndex struct{ p *Program }
 
-// GetType returns the type symbol for a fully-qualified name.
-func (g *GlobalIndex) GetType(fqn Fqn) *Symbol { return g.p.typesByFqn[fqn] }
+// GetType returns the type symbol for a fully-qualified name, falling back to
+// the lazy JDK provider when the project index misses.
+func (g *GlobalIndex) GetType(fqn Fqn) *Symbol {
+	if t := g.p.typesByFqn[fqn]; t != nil {
+		return t
+	}
+	if g.p.jdkTypeResolver != nil {
+		return g.p.jdkTypeResolver(fqn)
+	}
+	return nil
+}
+
+// SetJdkTypeResolver installs a lazy fallback for fully-qualified types not
+// declared in the project - the provisioned JDK's real classes (jdk_types.go).
+// Consulted by GetType only on a project miss; resolution-only.
+func (p *Program) SetJdkTypeResolver(resolve func(Fqn) *Symbol) {
+	p.jdkTypeResolver = resolve
+}
 
 // GetPackageTypes returns simpleName -> type symbol for all top-level types in a package.
 func (g *GlobalIndex) GetPackageTypes(packageName PackageName) SymbolTable {

@@ -96,6 +96,20 @@ func ProvisionedJavac(cfg *config.Config) string { return provisionedBin(cfg, "j
 // ProvisionedJava is the provisioned JDK's java launcher, or "".
 func ProvisionedJava(cfg *config.Config) string { return provisionedBin(cfg, "java") }
 
+// ProvisionedJdkHome is the provisioned JDK's home directory (holding bin/,
+// lib/, jmods/), or "" when no jdk is configured or it has not been unpacked.
+// The type checker reads real JDK classes from its jmods/ (jdk_image.go).
+func ProvisionedJdkHome(cfg *config.Config) string {
+	if cfg.JDK == "" {
+		return ""
+	}
+	dir := ProjectDir(cfg, cfg.JDK)
+	if _, err := os.Stat(dir); err == nil {
+		return dir
+	}
+	return ""
+}
+
 // Result reports the outcome of a provision.
 type Result struct {
 	JdkDir             string
