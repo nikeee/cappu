@@ -82,7 +82,7 @@ func RunLicenses(cfg *config.Config, jsonOut bool) int {
 
 	out := painter(os.Stdout)
 	if cfg.License != "" {
-		fmt.Fprintf(os.Stdout, "%s %s\n", out("dim", "this project:"), out("cyan", cfg.License))
+		fmt.Fprintf(os.Stdout, "%s %s\n", out("dim", "this project:"), out("bold", out("cyan", cfg.License)))
 	}
 	width := 0
 	for _, r := range rows {

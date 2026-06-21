@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/nikeee/cappu/internal/build"
+	"github.com/nikeee/cappu/internal/compile"
 	"github.com/nikeee/cappu/internal/config"
 	"github.com/nikeee/cappu/internal/packages"
 	"github.com/nikeee/cappu/internal/publish"
@@ -31,10 +32,26 @@ func RunPublish(cfg *config.Config, repoFlag string) int {
 		return 2
 	}
 
-	jarPath, err := build.BuildJar(cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s %s\n", errp("red", "error:"), err)
+	// Build the jar (default javac path) over the configured sources.
+	inputs := build.SourceJavaFiles(cfg)
+	if len(inputs) == 0 {
+		fmt.Fprintf(os.Stderr, "%s no sources to compile (configured sourcePaths are empty)\n", errp("red", "error:"))
+		return 2
+	}
+	result := compile.RunCompile(inputs, compile.Options{Output: "jar", Config: cfg})
+	for _, w := range result.Warnings {
+		fmt.Fprint(os.Stderr, errp("yellow", "warning: "+w+"\n"))
+	}
+	if !result.Success {
+		renderDiagnostics(result.Diagnostics)
 		return 1
+	}
+	jarPath := ""
+	for _, f := range result.Written {
+		if strings.HasSuffix(f, ".jar") {
+			jarPath = f
+			break
+		}
 	}
 	jarBytes, err := os.ReadFile(jarPath)
 	if err != nil {

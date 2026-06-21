@@ -69,7 +69,7 @@ func TestMemberCompletionPreservesDeclarationOrder(t *testing.T) {
 	if z < 0 || a < 0 || m < 0 {
 		t.Fatalf("missing own members in %v", labels)
 	}
-	if !(z < a && a < m) {
+	if z >= a || a >= m {
 		t.Errorf("own members should be in declaration order zzz,aaa,mmm; got %v", labels)
 	}
 }

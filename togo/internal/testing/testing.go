@@ -5,15 +5,20 @@
 package testing
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/build"
 	"github.com/nikeee/cappu/internal/config"
 	"github.com/nikeee/cappu/internal/install"
+	"github.com/nikeee/cappu/internal/javacdiag"
 	"github.com/nikeee/cappu/internal/jdks"
 	"github.com/nikeee/cappu/internal/packages"
 	"github.com/nikeee/cappu/internal/sources"
@@ -57,15 +62,47 @@ func TestRuntimeClassPath(cfg *config.Config) []string {
 	return cp
 }
 
-// CompileTests compiles src/test/java; a non-nil error reports failure. The
-// test-classes dir is wiped first so a since-deleted test cannot still be
-// discovered by --scan-class-path.
-func CompileTests(cfg *config.Config, testSources []string) error {
-	dir := TestClassesDir(cfg)
-	if err := os.RemoveAll(dir); err != nil {
-		return err
+// compileTestsArgs builds the javac arguments for the test compile. Port of
+// compileTestsArgs.
+func compileTestsArgs(cfg *config.Config, sources []string) []string {
+	args := []string{"-d", TestClassesDir(cfg), "-encoding", "UTF-8"}
+	if cfg.CompilerOptions.Release != nil {
+		args = append(args, "--release", strconv.Itoa(*cfg.CompilerOptions.Release))
 	}
-	return build.Compile(cfg, testSources, dir, dependencyClassPath(cfg))
+	args = append(args, "-cp", strings.Join(dependencyClassPath(cfg), string(os.PathListSeparator)))
+	return append(args, sources...)
+}
+
+// CompileTests compiles src/test/java; the returned diagnostics are non-empty on
+// failure (empty on success). The test-classes dir is wiped first so a
+// since-deleted test cannot still be discovered by --scan-class-path. Port of
+// compileTests.
+func CompileTests(cfg *config.Config, testSources []string) []javacdiag.CompileDiagnostic {
+	dir := TestClassesDir(cfg)
+	_ = os.RemoveAll(dir)
+	_ = os.MkdirAll(dir, 0o755)
+	javac := build.Javac(cfg)
+	cmd := exec.Command(javac, compileTestsArgs(cfg, testSources)...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return nil
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return []javacdiag.CompileDiagnostic{{Severity: "error",
+			Message: fmt.Sprintf("compiling tests needs javac: '%s' could not run (%s)", javac, err)}}
+	}
+	diagnostics := javacdiag.ParseJavacDiagnostics(stderr.String())
+	if len(diagnostics) == 0 {
+		s := strings.TrimSpace(stderr.String())
+		if len(s) > 400 {
+			s = s[len(s)-400:]
+		}
+		diagnostics = []javacdiag.CompileDiagnostic{{Severity: "error", Message: "test compilation failed: " + s}}
+	}
+	return diagnostics
 }
 
 // consoleLauncher is the pinned JUnit Platform Console Launcher: a TOOL, never a

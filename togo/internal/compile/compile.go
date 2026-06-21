@@ -264,7 +264,7 @@ func RunCompile(files []string, options Options) Result {
 	var mainClasses []string
 	for _, file := range files {
 		sf := program.GetSourceFile(pathToURI(file))
-		for _, cls := range compiler.EmitSourceFile(sf, program, checker, false) {
+		for _, cls := range compiler.EmitSourceFile(sf, program, checker, cfg.CompilerOptions.ExperimentalCompiler.DebugInfo) {
 			classes = append(classes, compiler.ZipEntryInput{Name: cls.Name + ".class", Bytes: cls.Bytes})
 			if cls.HasMainMethod {
 				mainClasses = append(mainClasses, strings.ReplaceAll(cls.Name, "/", "."))

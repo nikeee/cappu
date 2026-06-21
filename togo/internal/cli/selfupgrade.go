@@ -40,7 +40,7 @@ func RunSelfUpgrade() int {
 		return 2
 	}
 
-	fmt.Fprint(os.Stderr, errp("cyan", "fetching the latest CD build...\n"))
+	fmt.Fprint(os.Stderr, errp("bold", errp("cyan", "fetching the latest CD build...\n")))
 	result, err := selfupgrade.SelfUpgrade(selfupgrade.Options{
 		TargetPath: targetPath,
 		Token:      token,

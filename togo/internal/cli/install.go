@@ -140,7 +140,7 @@ func summary(out func(format, text string) string, cats install.Categories) stri
 		if c.n == 1 {
 			noun = c.one
 		}
-		parts = append(parts, fmt.Sprintf("%s %s", out("cyan", fmt.Sprintf("%d", c.n)), noun))
+		parts = append(parts, fmt.Sprintf("%s %s", out("bold", out("cyan", fmt.Sprintf("%d", c.n))), noun))
 	}
 	if len(parts) == 0 {
 		return out("dim", "no packages")

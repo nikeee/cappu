@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/alecthomas/kong"
 
@@ -307,15 +308,18 @@ func (c *compileCmd) Run(a *appState) error {
 }
 
 func main() {
-	var cli CLI
-	ctx := kong.Parse(&cli,
+	var root CLI
+	ctx := kong.Parse(&root,
 		kong.Name("cappu"),
 		kong.Description("The Java language server, package manager and build toolchain of your dreams."),
 		kong.UsageOnError(),
 		kong.Vars{"version": meta.Version},
 	)
-	app := &appState{configPath: cli.Config}
+	app := &appState{configPath: root.Config}
+	start := time.Now()
 	err := ctx.Run(app)
+	// Print how long the dependency/build commands took, however they exit.
+	cli.PrintDurationFooter(ctx.Command(), time.Since(start))
 	var ce cmdErr
 	if errors.As(err, &ce) {
 		os.Exit(int(ce))

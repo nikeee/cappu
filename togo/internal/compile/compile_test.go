@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -71,6 +72,33 @@ func TestRunCompileReportsErrors(t *testing.T) {
 	}
 	if !hasError(result.Diagnostics) {
 		t.Errorf("expected an error diagnostic, got %+v", result.Diagnostics)
+	}
+}
+
+// experimentalCompiler.debugInfo threads through to the emitter: with it on, a
+// method's locals produce a LocalVariableTable (like javac -g); off (the
+// default) matches default javac and emits none.
+func TestRunCompileDebugInfoEmitsLocalVariableTable(t *testing.T) {
+	compileWith := func(debugInfo bool) []byte {
+		dir := t.TempDir()
+		src := writeFile(t, dir, "L.java", "class L { int f() { int x = 1; return x; } }")
+		writeFile(t, dir, "cappu.json",
+			`{"compilerOptions":{"experimentalCompiler":{"enabled":true,"debugInfo":`+strconv.FormatBool(debugInfo)+`}}}`)
+		r := RunCompile([]string{src}, Options{OutDir: dir, Config: loadCfg(t, dir)})
+		if !r.Success {
+			t.Fatalf("compile failed: %+v", r)
+		}
+		b, err := os.ReadFile(filepath.Join(dir, "L.class"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	if on := compileWith(true); !bytes.Contains(on, []byte("LocalVariableTable")) {
+		t.Error("debugInfo:true should emit a LocalVariableTable")
+	}
+	if off := compileWith(false); bytes.Contains(off, []byte("LocalVariableTable")) {
+		t.Error("debugInfo:false (default) should not emit a LocalVariableTable")
 	}
 }
 

@@ -42,6 +42,17 @@ func TestFindTestSources(t *testing.T) {
 	}
 }
 
+// CompileTests returns located diagnostics (not a flat error). When javac cannot
+// run at all it collapses to one error diagnostic, matching compileTests in TS.
+func TestCompileTestsJavacUnavailable(t *testing.T) {
+	cfg := project(t)
+	cfg.CompilerOptions.Javac = "cappu-no-such-javac"
+	diags := CompileTests(cfg, []string{"X.java"})
+	if len(diags) != 1 || diags[0].Severity != "error" || !strings.Contains(diags[0].Message, "compiling tests needs javac") {
+		t.Errorf("diags = %+v", diags)
+	}
+}
+
 func TestRunArgsStructure(t *testing.T) {
 	cfg := project(t)
 	args := TestRunArgs(cfg, "/path/launcher.jar")

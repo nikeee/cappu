@@ -26,6 +26,7 @@ type ExperimentalCompiler struct {
 	Enabled       bool `json:"enabled"`
 	FailOnDegrade bool `json:"failOnDegrade"`
 	Validate      bool `json:"validate"`
+	DebugInfo     bool `json:"debugInfo"`
 }
 
 // CompilerOptions mirrors the "compilerOptions" section.

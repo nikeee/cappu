@@ -7,6 +7,7 @@ import (
 	"os/exec"
 
 	"github.com/nikeee/cappu/internal/build"
+	"github.com/nikeee/cappu/internal/compile"
 	"github.com/nikeee/cappu/internal/config"
 	"github.com/nikeee/cappu/internal/testing"
 )
@@ -15,26 +16,37 @@ import (
 // Platform Console Launcher run. Exits with the launcher's code. Port of
 // src/cli/test.ts.
 func RunTest(cfg *config.Config) int {
-	errp := painter(os.Stderr)
-
 	testSources := testing.FindTestSources(cfg)
 	if len(testSources) == 0 {
 		fmt.Fprintln(os.Stderr, "cappu: no tests found under ./src/test/java")
 		return 1
 	}
 
-	// 1. main classes into .cappu/test-build/classes
+	// 1. main classes (annotation processors and resources included), into the
+	// derived .cappu/test-build/classes tree
 	if mainSources := build.SourceJavaFiles(cfg); len(mainSources) > 0 {
-		if err := build.Compile(cfg, mainSources, testing.MainClassesDir(cfg), build.ClassPath(cfg)); err != nil {
-			fmt.Fprintf(os.Stderr, "%s %s\n", errp("red", "error:"), err)
+		main := compile.RunCompile(mainSources, compile.Options{
+			OutDir: testing.MainClassesDir(cfg),
+			Output: "classes",
+			Config: cfg,
+		})
+		for _, w := range main.Warnings {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+		}
+		if !main.Success {
+			renderDiagnostics(main.Diagnostics)
 			return 1
 		}
 	}
 
-	// 2. test classes against main + lib + test-classes
-	if err := testing.CompileTests(cfg, testSources); err != nil {
-		fmt.Fprintf(os.Stderr, "%s %s\n", errp("red", "error:"), err)
-		return 1
+	// 2. test classes against main + .cappu/lib/classes + .cappu/lib/test-classes
+	if diagnostics := testing.CompileTests(cfg, testSources); len(diagnostics) > 0 {
+		renderDiagnostics(diagnostics)
+		for _, d := range diagnostics {
+			if d.Severity == "error" {
+				return 1
+			}
+		}
 	}
 
 	// 3. the JUnit run, streamed (the launcher's exit code is ours)

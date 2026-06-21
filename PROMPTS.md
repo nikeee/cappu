@@ -344,3 +344,4 @@ no timestamps were captured.
 - 2026-06-21 13:40 — fix all of them. regarding offsets vs code points: do what the JLS says about that.
 - 2026-06-21 14:05 — checker, then bytecode
 - 2026-06-21 14:05 — continue
+- 2026-06-21 18:43 — your enemy copilot ported the code from ts to go (in togo dir). Try to find things that he missed. Make sure the behaviour of both versions is exactly identical.
