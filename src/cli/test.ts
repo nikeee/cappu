@@ -15,6 +15,7 @@ import {
 } from "../testing/index.ts";
 import { findSourceJavaFiles } from "../workspace.ts";
 import { renderDiagnostics } from "./renderDiagnostics.ts";
+import { emitAnnotation } from "./annotations.ts";
 
 export async function runTestCommand(config: CappuConfig): Promise<never> {
   const testSources = findTestSources(config);
@@ -32,7 +33,10 @@ export async function runTestCommand(config: CappuConfig): Promise<never> {
       output: "classes",
       config,
     });
-    for (const w of main.warnings ?? []) process.stderr.write(`warning: ${w}\n`);
+    for (const w of main.warnings ?? []) {
+      process.stderr.write(`warning: ${w}\n`);
+      emitAnnotation("warning", w);
+    }
     if (!main.success) {
       renderDiagnostics(main.diagnostics);
       process.exit(1);

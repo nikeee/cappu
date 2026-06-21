@@ -8,6 +8,7 @@ import type { CappuConfig } from "../config.ts";
 import { validateAgainstJavac } from "../compiler/validateJavac.ts";
 import { generatePom, missingCoordinates } from "../publish/index.ts";
 import { renderDiagnostics } from "./renderDiagnostics.ts";
+import { emitAnnotation } from "./annotations.ts";
 import { findSourceJavaFiles } from "../workspace.ts";
 
 export interface CompileFlags {
@@ -39,10 +40,12 @@ export async function runCompileCommand(
   // from an actual cappu.json.
   for (const path of missingConfiguredPaths(config)) {
     process.stderr.write(`warning: configured path not found (treated as empty): ${path}\n`);
+    emitAnnotation("warning", `configured path not found (treated as empty): ${path}`);
   }
   const output = OUTPUT_KINDS.find(k => k === flags.output);
   if (flags.output !== undefined && output === undefined) {
     process.stderr.write(`cappu: invalid --output '${flags.output}' (classes, jar, fat-jar)\n`);
+    emitAnnotation("error", `invalid --output '${flags.output}' (classes, jar, fat-jar)`);
     process.exit(2);
   }
   const effectiveOutput = output ?? config.compilerOptions.output;
@@ -56,6 +59,10 @@ export async function runCompileCommand(
     process.stderr.write(
       'cappu: experimentalCompiler.validate needs "output": "classes" (javap reads class files)\n',
     );
+    emitAnnotation(
+      "error",
+      'experimentalCompiler.validate needs "output": "classes" (javap reads class files)',
+    );
     process.exit(2);
   }
   const result = runCompile(inputs, {
@@ -68,8 +75,12 @@ export async function runCompileCommand(
   if (!quiet) for (const out of result.written) process.stdout.write(`${out}\n`);
   for (const entry of result.degraded) {
     process.stderr.write(`warning: ${entry}: unsupported construct, emitted a placeholder body\n`);
+    emitAnnotation("warning", `${entry}: unsupported construct, emitted a placeholder body`);
   }
-  for (const w of result.warnings ?? []) process.stderr.write(`warning: ${w}\n`);
+  for (const w of result.warnings ?? []) {
+    process.stderr.write(`warning: ${w}\n`);
+    emitAnnotation("warning", w);
+  }
   if (!result.success) {
     renderDiagnostics(result.diagnostics);
     process.exit(1);
@@ -91,9 +102,11 @@ export async function runCompileCommand(
     if (!validation.ok) {
       if ("error" in validation) {
         process.stderr.write(`cappu: --validate: ${validation.error}\n`);
+        emitAnnotation("error", `--validate: ${validation.error}`);
       } else {
         for (const m of validation.mismatches) {
           process.stderr.write(`error: ${m.className}: bytecode differs from javac: ${m.detail}\n`);
+          emitAnnotation("error", `${m.className}: bytecode differs from javac: ${m.detail}`);
         }
       }
       process.exit(1);

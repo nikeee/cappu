@@ -14,6 +14,7 @@ import { parse, stringify } from "comment-json";
 import { type CappuConfig, DEFAULT_CONFIG_NAME, loadConfig } from "../config.ts";
 import { configuredSources, pickAddVersion } from "../install.ts";
 import { type PackageKey, type PackageSource } from "../packages/index.ts";
+import { emitAnnotation } from "./annotations.ts";
 import { runInstall } from "./install.ts";
 
 const CONFIGURATIONS = [
@@ -83,7 +84,10 @@ export async function runAdd(
   const coordinates = specs.map(parseAddCoordinate);
   const invalid = specs.filter((_, i) => coordinates[i] === undefined);
   if (!configuration || coordinates.length === 0 || invalid.length > 0) {
-    for (const spec of invalid) process.stderr.write(`cappu: not a coordinate: '${spec}'\n`);
+    for (const spec of invalid) {
+      process.stderr.write(`cappu: not a coordinate: '${spec}'\n`);
+      emitAnnotation("error", `not a coordinate: '${spec}'`);
+    }
     process.stderr.write(
       `usage: cappu add <${CONFIGURATIONS.join("|")}> <group:artifact[:version]> [more...]\n` +
         "e.g.:  cappu add implementation com.google.code.gson:gson:2.14.0 org.slf4j:slf4j-api\n",
@@ -92,6 +96,7 @@ export async function runAdd(
   }
   if (!config.fromFile) {
     process.stderr.write("cappu: no cappu.json found - run `cappu init` first\n");
+    emitAnnotation("error", "no cappu.json found - run `cappu init` first");
     process.exit(1);
   }
 
@@ -116,11 +121,19 @@ export async function runAdd(
         process.stderr.write(
           `cappu: no published version of ${coordinate.key}${wanted} found in any package source\n`,
         );
+        emitAnnotation(
+          "error",
+          `no published version of ${coordinate.key}${wanted} found in any package source`,
+        );
         process.exit(1);
       }
       if (!picked.compatible) {
         process.stderr.write(
           `warning: every matching version of ${coordinate.key} conflicts with the configured dependencies; using ${picked.version}\n`,
+        );
+        emitAnnotation(
+          "warning",
+          `every matching version of ${coordinate.key} conflicts with the configured dependencies; using ${picked.version}`,
         );
       }
       version = picked.version;

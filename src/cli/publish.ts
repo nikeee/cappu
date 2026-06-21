@@ -17,6 +17,7 @@ import {
 } from "../publish/index.ts";
 import { findSourceJavaFiles } from "../workspace.ts";
 import { renderDiagnostics } from "./renderDiagnostics.ts";
+import { emitAnnotation } from "./annotations.ts";
 import { painter } from "./style.ts";
 
 export async function runPublish(
@@ -31,6 +32,7 @@ export async function runPublish(
     process.stderr.write(
       `${err("red", "error:")} cappu publish needs ${missing.join(", ")} in cappu.json\n`,
     );
+    emitAnnotation("error", `cappu publish needs ${missing.join(", ")} in cappu.json`);
     process.exit(2);
   }
   const repo = resolvePublishRegistry(options.repo, config.publishRepository);
@@ -39,6 +41,10 @@ export async function runPublish(
   if (!auth) {
     process.stderr.write(
       `${err("red", "error:")} no credentials: set CAPPU_PUBLISH_USERNAME + CAPPU_PUBLISH_PASSWORD, or CAPPU_PUBLISH_TOKEN\n`,
+    );
+    emitAnnotation(
+      "error",
+      "no credentials: set CAPPU_PUBLISH_USERNAME + CAPPU_PUBLISH_PASSWORD, or CAPPU_PUBLISH_TOKEN",
     );
     process.exit(2);
   }
@@ -49,10 +55,14 @@ export async function runPublish(
     process.stderr.write(
       `${err("red", "error:")} no sources to compile (configured sourcePaths are empty)\n`,
     );
+    emitAnnotation("error", "no sources to compile (configured sourcePaths are empty)");
     process.exit(2);
   }
   const result = runCompile(inputs, { output: "jar", config });
-  for (const w of result.warnings ?? []) process.stderr.write(err("yellow", `warning: ${w}\n`));
+  for (const w of result.warnings ?? []) {
+    process.stderr.write(err("yellow", `warning: ${w}\n`));
+    emitAnnotation("warning", w);
+  }
   if (!result.success) {
     renderDiagnostics(result.diagnostics);
     process.exit(1);
@@ -81,6 +91,7 @@ export async function runPublish(
     process.exit(0);
   } catch (e) {
     process.stderr.write(`${err("red", "error:")} publish failed: ${(e as Error).message}\n`);
+    emitAnnotation("error", `publish failed: ${(e as Error).message}`);
     process.exit(1);
   }
 }

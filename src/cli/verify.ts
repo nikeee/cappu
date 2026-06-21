@@ -4,6 +4,7 @@
 
 import type { CappuConfig } from "../config.ts";
 import { verifyInstalled } from "../install.ts";
+import { emitAnnotation } from "./annotations.ts";
 
 export function runVerify(config: CappuConfig): never {
   const result = verifyInstalled(config);
@@ -11,13 +12,16 @@ export function runVerify(config: CappuConfig): never {
     process.stderr.write(
       "cappu: no cappu-lock.json to verify against; run `cappu install` first\n",
     );
+    emitAnnotation("error", "no cappu-lock.json to verify against; run `cappu install` first");
     process.exit(1);
   }
   for (const id of result.modified) {
     process.stderr.write(`error: ${id}: installed jar does not match cappu-lock.json\n`);
+    emitAnnotation("error", `${id}: installed jar does not match cappu-lock.json`);
   }
   for (const id of result.missing) {
     process.stderr.write(`error: ${id}: locked but not installed (run \`cappu install\`)\n`);
+    emitAnnotation("error", `${id}: locked but not installed (run \`cappu install\`)`);
   }
   process.stderr.write(
     `${result.ok.length} ok, ${result.modified.length} modified, ${result.missing.length} missing\n`,

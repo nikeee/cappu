@@ -25,6 +25,7 @@ import {
   resolveTransitive,
 } from "../packages/index.ts";
 import { colorEnabled } from "./color.ts";
+import { emitAnnotation } from "./annotations.ts";
 import { warnUnmappedLicenses } from "./licenses.ts";
 
 type StyleFormat = Parameters<typeof styleText>[0];
@@ -74,6 +75,7 @@ export async function runAudit(
     report = await auditPackages(coordinates, source);
   } catch (e) {
     process.stderr.write(`cappu: audit failed: ${(e as Error).message}\n`);
+    emitAnnotation("error", `audit failed: ${(e as Error).message}`);
     process.exit(2);
   }
 

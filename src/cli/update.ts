@@ -10,6 +10,7 @@ import { parse, stringify } from "comment-json";
 import { type CappuConfig, DEFAULT_CONFIG_NAME, loadConfig } from "../config.ts";
 import { type DependencyBump, planUpdates } from "../install.ts";
 import { type PackageSource } from "../packages/index.ts";
+import { emitAnnotation } from "./annotations.ts";
 import { runInstall } from "./install.ts";
 
 /** Overwrite the bumped versions in the JSONC config text, comments intact. */
@@ -33,6 +34,7 @@ export async function runUpdate(
 ): Promise<never> {
   if (!config.fromFile) {
     process.stderr.write("cappu: no cappu.json found - run `cappu init` first\n");
+    emitAnnotation("error", "no cappu.json found - run `cappu init` first");
     process.exit(1);
   }
 
@@ -41,6 +43,7 @@ export async function runUpdate(
     bumps = await planUpdates(config, sources);
   } catch (e) {
     process.stderr.write(`cappu: update failed: ${(e as Error).message}\n`);
+    emitAnnotation("error", `update failed: ${(e as Error).message}`);
     process.exit(2);
   }
 

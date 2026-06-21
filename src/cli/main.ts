@@ -25,6 +25,7 @@ import { runPublish } from "./publish.ts";
 import { runVersion } from "./version.ts";
 import { runVerify } from "./verify.ts";
 import { formatDuration, painter } from "./style.ts";
+import { emitAnnotation } from "./annotations.ts";
 import { runTestCommand } from "./test.ts";
 import pkg from "../../package.json" with { type: "json" };
 
@@ -203,6 +204,7 @@ try {
   config = loadConfig(values.config);
 } catch (e) {
   process.stderr.write(`cappu: ${(e as Error).message}\n`);
+  emitAnnotation("error", (e as Error).message);
   process.exit(2);
 }
 
