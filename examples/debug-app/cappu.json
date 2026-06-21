@@ -1,0 +1,6 @@
+{
+  "compilerOptions": {
+    "mainClass": "example.App",
+    "quiet": true
+  }
+}

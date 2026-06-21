@@ -3,7 +3,7 @@
 // the fat jar and compare stdout exactly. Needs a JDK and network access;
 // skipped without javac like the other JDK-gated suites.
 
-import { execFileSync } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -346,6 +346,135 @@ test(
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(store, { recursive: true, force: true });
+    }
+  },
+);
+
+// A tiny DAP client: speaks the Content-Length-framed protocol to a spawned
+// `cappu dap` over its stdio, correlating responses by request_seq and letting
+// the test await named events.
+function dapFrame(msg: unknown): string {
+  const body = JSON.stringify(msg);
+  return `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`;
+}
+
+class DapDriver {
+  private buf: Buffer = Buffer.alloc(0);
+  private seq = 1;
+  private readonly responses = new Map<number, (m: any) => void>();
+  private readonly events: any[] = [];
+  private readonly eventWaiters: { event: string; resolve: (m: any) => void }[] = [];
+
+  constructor(private readonly child: ChildProcess) {
+    child.stdout!.on("data", (c: Buffer) => this.onData(c));
+  }
+
+  private onData(chunk: Buffer): void {
+    this.buf = Buffer.concat([this.buf, chunk]);
+    for (;;) {
+      const sep = this.buf.indexOf("\r\n\r\n");
+      if (sep < 0) break;
+      const len = Number(/Content-Length:\s*(\d+)/i.exec(this.buf.toString("ascii", 0, sep))![1]);
+      if (this.buf.length < sep + 4 + len) break;
+      const msg = JSON.parse(this.buf.toString("utf8", sep + 4, sep + 4 + len));
+      this.buf = this.buf.subarray(sep + 4 + len);
+      if (msg.type === "response") {
+        this.responses.get(msg.request_seq)?.(msg);
+        this.responses.delete(msg.request_seq);
+      } else if (msg.type === "event") {
+        const i = this.eventWaiters.findIndex(w => w.event === msg.event);
+        if (i >= 0) this.eventWaiters.splice(i, 1)[0].resolve(msg);
+        else this.events.push(msg);
+      }
+    }
+  }
+
+  request(command: string, args?: unknown): Promise<any> {
+    const seq = this.seq++;
+    return new Promise(resolve => {
+      this.responses.set(seq, resolve);
+      this.child.stdin!.write(dapFrame({ seq, type: "request", command, arguments: args }));
+    });
+  }
+
+  waitEvent(event: string): Promise<any> {
+    const i = this.events.findIndex(e => e.event === event);
+    if (i >= 0) return Promise.resolve(this.events.splice(i, 1)[0]);
+    return new Promise(resolve => this.eventWaiters.push({ event, resolve }));
+  }
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const guard = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout: ${label}`)), ms);
+  });
+  return Promise.race([p, guard]).finally(() => clearTimeout(timer));
+}
+
+// End-to-end debugger: spawn `cappu dap`, drive a full session over DAP, and
+// assert we stop on the breakpoint with the expected local values. No network
+// (debug-app has no dependencies), so this runs on the hermetic JDK leg too.
+test(
+  "examples/debug-app debugs over the Debug Adapter Protocol",
+  { skip: !HAS_JAVAC },
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "cappu-dap-"));
+    const work = join(root, "debug-app");
+    for (const entry of ["cappu.json", "src", ".gitignore"]) {
+      cpSync(join(examplesDir, "debug-app", entry), join(work, entry), { recursive: true });
+    }
+    const appJava = join(work, "src", "main", "java", "example", "App.java");
+    const child = spawn(tsx, [cli, "dap"], {
+      cwd: work,
+      env: { ...process.env },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const dap = new DapDriver(child);
+    const t = (label: string, p: Promise<any>) => withTimeout(p, 60_000, label);
+    try {
+      expect(
+        (await t("initialize", dap.request("initialize", { adapterID: "cappu" }))).success,
+      ).toBe(true);
+      await t("initialized", dap.waitEvent("initialized"));
+      expect((await t("launch", dap.request("launch", {}))).success).toBe(true);
+      await t(
+        "setBreakpoints",
+        dap.request("setBreakpoints", {
+          source: { path: appJava },
+          breakpoints: [{ line: 8 }], // `sum += squared;`
+        }),
+      );
+      await t("configurationDone", dap.request("configurationDone"));
+
+      const stopped = await t("stopped", dap.waitEvent("stopped"));
+      expect(stopped.body.reason).toBe("breakpoint");
+      const threadId = stopped.body.threadId;
+
+      const stack = await t("stackTrace", dap.request("stackTrace", { threadId }));
+      expect(stack.body.stackFrames[0].line).toBe(8);
+      const frameId = stack.body.stackFrames[0].id;
+
+      const scopes = await t("scopes", dap.request("scopes", { frameId }));
+      const ref = scopes.body.scopes[0].variablesReference;
+      const vars = await t("variables", dap.request("variables", { variablesReference: ref }));
+      const byName = Object.fromEntries(vars.body.variables.map((v: any) => [v.name, v.value]));
+      // First iteration: i == 1, squared == 1.
+      expect(byName.i).toBe("1");
+      expect(byName.squared).toBe("1");
+
+      // Step over one line: the step pipeline must produce another stop.
+      await t("next", dap.request("next", { threadId }));
+      const stepped = await t("stepped", dap.waitEvent("stopped"));
+      expect(stepped.body.reason).toBe("step");
+      expect(typeof stepped.body.threadId).toBe("number");
+
+      await dap.request("disconnect");
+      child.stdin!.end();
+      await t("exit", new Promise(resolve => child.once("exit", resolve)));
+    } finally {
+      child.kill();
+      rmSync(root, { recursive: true, force: true });
     }
   },
 );

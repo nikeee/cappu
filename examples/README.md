@@ -30,6 +30,32 @@ Each directory is a self-contained cappu project. Dependencies install into
   cappu test
   ```
 
+- **debug-app** - a one-file program (a loop with a couple of locals) debugged
+  over the Debug Adapter Protocol. `cappu dap` compiles the project with debug
+  info, launches its `mainClass` under JDWP, and bridges breakpoints, stepping,
+  stack frames and local variables to any DAP client:
+
+  ```sh
+  cd debug-app
+  cappu dap                     # speaks DAP over stdio (or --port <n> for TCP)
+  ```
+
+  Point an editor at it with a launch config like:
+
+  ```json
+  {
+    "type": "cappu-dap",
+    "request": "launch",
+    "name": "Debug debug-app",
+    "mainClass": "example.App"
+  }
+  ```
+
+  A client then drives the session: `initialize` -> `launch` ->
+  `setBreakpoints` (e.g. line 8 of `App.java`) -> `configurationDone`; execution
+  stops on the breakpoint, where the stack, the locals (`i`, `squared`, `sum`)
+  and stepping are all available.
+
 - **audit-app** - pinned to a deliberately old, vulnerable Log4j so
   `cappu audit` has advisories to report; it scans the transitive graph
   (OSV.dev) and prints the dependency tree that pulls each one in:

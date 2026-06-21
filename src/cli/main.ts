@@ -14,6 +14,7 @@ import { runInit } from "./init.ts";
 import { runInstall } from "./install.ts";
 import { runLsp } from "./lsp.ts";
 import { runMcp } from "./mcp.ts";
+import { runDap } from "./dap.ts";
 import { runSearch } from "./search.ts";
 import { runCacheCommand } from "./cache.ts";
 import { runSelfUpgrade } from "./selfUpgrade.ts";
@@ -73,6 +74,11 @@ Usage:
   cappu rage                         Open the issue tracker in your default browser
   cappu cache clean                  Remove the global download cache
   cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
+  cappu dap [options]                Start the debug adapter (Debug Adapter Protocol
+                                     over stdio): compile the project with debug info,
+                                     launch its mainClass under JDWP, and bridge
+                                     breakpoints, stepping, stacks and locals to a
+                                     DAP client (e.g. an editor)
   cappu mcp                          Start the MCP server for agents: name-addressed
                                      semantic tools (diagnostics, outline, describe/
                                      find symbols, members, callers, type hierarchy,
@@ -261,6 +267,9 @@ switch (command) {
     break;
   case "mcp":
     await runMcp(config);
+    break;
+  case "dap":
+    await runDap(config, values.port);
     break;
   case "test":
     await runTestCommand(config);
