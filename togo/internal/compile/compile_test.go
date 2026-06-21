@@ -436,6 +436,97 @@ func sortStrings(xs []string) {
 	}
 }
 
+// --- annotation processor e2e (port of processors.test.ts last case) --------
+
+const processorSource = `
+import java.io.Writer;
+import java.util.Set;
+import javax.annotation.processing.*;
+import javax.lang.model.SourceVersion;
+import javax.lang.model.element.TypeElement;
+
+@SupportedAnnotationTypes("*")
+@SupportedSourceVersion(SourceVersion.RELEASE_21)
+public class GenProcessor extends AbstractProcessor {
+  private boolean done;
+  @Override
+  public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment env) {
+    if (done) return false;
+    done = true;
+    try (Writer w = processingEnv.getFiler().createSourceFile("gen.Greeting").openWriter()) {
+      w.write("package gen; public class Greeting { public static String text() { return \"generated!\"; } }");
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+    return false;
+  }
+}
+`
+
+func buildProcessorJar(t *testing.T, into string) {
+	t.Helper()
+	work := t.TempDir()
+	src := filepath.Join(work, "GenProcessor.java")
+	if err := os.WriteFile(src, []byte(processorSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("javac", "-proc:none", "-d", work, src).Run(); err != nil {
+		t.Fatalf("compile processor: %v", err)
+	}
+	classBytes, err := os.ReadFile(filepath.Join(work, "GenProcessor.class"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar := compiler.WriteZip([]compiler.ZipEntryInput{
+		{Name: "META-INF/services/javax.annotation.processing.Processor", Bytes: []byte("GenProcessor\n")},
+		{Name: "GenProcessor.class", Bytes: classBytes},
+	})
+	if err := os.WriteFile(into, jar, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProcessorGeneratesSourceBothModes(t *testing.T) {
+	if !hasJDK() {
+		t.Skip("javac not available")
+	}
+	project := t.TempDir()
+	procDir := filepath.Join(project, ".cappu", "lib", "processors")
+	if err := os.MkdirAll(procDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	buildProcessorJar(t, filepath.Join(procDir, "gen.jar"))
+	main := writeFile(t, project, "src/main/java/Main.java",
+		"public class Main { public static void main(String[] a) { System.out.println(gen.Greeting.text()); } }")
+	writeFile(t, project, "cappu.json", "{}")
+	cfg := loadCfg(t, project)
+
+	hasGreeting := func(written []string) bool {
+		for _, f := range written {
+			if strings.HasSuffix(f, filepath.Join("gen", "Greeting.class")) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// default mode: one javac invocation runs the processor and compiles
+	byJavac := RunCompile([]string{main}, Options{OutDir: filepath.Join(project, "dist"), Config: cfg})
+	if !byJavac.Success || !hasGreeting(byJavac.Written) {
+		t.Fatalf("javac mode = %+v", byJavac)
+	}
+	if _, err := os.Stat(filepath.Join(project, ".cappu", "generated-sources", "sources", "gen", "Greeting.java")); err != nil {
+		t.Errorf("generated Greeting.java missing: %v", err)
+	}
+
+	// experimental mode: -proc:only generates, our compiler compiles both
+	_ = os.RemoveAll(filepath.Join(project, "dist"))
+	byOurs := RunCompile([]string{main}, Options{Experimental: boolp(true), OutDir: filepath.Join(project, "dist"), Config: cfg})
+	if !byOurs.Success || !hasGreeting(byOurs.Written) {
+		t.Fatalf("experimental mode = %+v", byOurs)
+	}
+}
+
 func TestParseJavacDiagnostics(t *testing.T) {
 	out := ParseJavacDiagnostics("A.java:3: error: cannot find symbol\n  int x = y;\n          ^\n1 error\n")
 	if len(out) != 1 {

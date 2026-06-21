@@ -13,24 +13,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/build"
 	"github.com/nikeee/cappu/internal/compiler"
 	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/javacdiag"
+	"github.com/nikeee/cappu/internal/processors"
 )
 
-// CompileDiagnostic is a source diagnostic located for display (1-based line/column).
-type CompileDiagnostic struct {
-	Severity string // "error" | "warning"
-	File     string
-	Line     int
-	Column   int
-	Code     int
-	Message  string
-}
+// CompileDiagnostic is a source diagnostic located for display (1-based
+// line/column). Aliased to the leaf javacdiag type so processors (which cannot
+// import this package, to avoid a cycle) share it.
+type CompileDiagnostic = javacdiag.CompileDiagnostic
 
 // OutputKind is what to produce: "classes", "jar" or "fat-jar".
 type OutputKind = string
@@ -55,30 +51,9 @@ type Result struct {
 	Diagnostics []CompileDiagnostic
 }
 
-var javacDiagRe = regexp.MustCompile(`^(.+?):(\d+): (error|warning): (.*)$`)
-var leadingSpaceRe = regexp.MustCompile(`^\s`)
-var summaryRe = regexp.MustCompile(`^\d+ (error|warning)s?$`)
-
 // ParseJavacDiagnostics parses javac's stderr into located diagnostics.
 func ParseJavacDiagnostics(stderr string) []CompileDiagnostic {
-	var diagnostics []CompileDiagnostic
-	var leftovers []string
-	for _, line := range strings.Split(stderr, "\n") {
-		if m := javacDiagRe.FindStringSubmatch(line); m != nil {
-			sev := "error"
-			if m[3] == "warning" {
-				sev = "warning"
-			}
-			ln, _ := strconv.Atoi(m[2])
-			diagnostics = append(diagnostics, CompileDiagnostic{Severity: sev, File: m[1], Line: ln, Message: m[4]})
-		} else if strings.TrimSpace(line) != "" && !leadingSpaceRe.MatchString(line) && !summaryRe.MatchString(line) {
-			leftovers = append(leftovers, line)
-		}
-	}
-	if len(diagnostics) == 0 && len(leftovers) > 0 {
-		diagnostics = append(diagnostics, CompileDiagnostic{Severity: "error", Message: strings.Join(leftovers, " ")})
-	}
-	return diagnostics
+	return javacdiag.ParseJavacDiagnostics(stderr)
 }
 
 // MissingConfiguredPaths returns configured classPath/sourcePaths entries that do
@@ -129,6 +104,19 @@ func resourceEntries(cfg *config.Config) []compiler.ZipEntryInput {
 			if b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))); err == nil {
 				entries = append(entries, compiler.ZipEntryInput{Name: rel, Bytes: b})
 			}
+		}
+	}
+	return entries
+}
+
+// generatedClassEntries is the Filer CLASS_OUTPUT of the last annotation-
+// processing pass (generated resources such as META-INF/services).
+func generatedClassEntries(cfg *config.Config) []compiler.ZipEntryInput {
+	root := processors.GeneratedClassesDir(cfg)
+	var entries []compiler.ZipEntryInput
+	for _, rel := range findFilesRelative(root) {
+		if b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))); err == nil {
+			entries = append(entries, compiler.ZipEntryInput{Name: rel, Bytes: b})
 		}
 	}
 	return entries
@@ -222,6 +210,20 @@ func RunCompile(files []string, options Options) Result {
 	}
 	typeCheck := options.TypeCheck == nil || *options.TypeCheck
 
+	// Annotation processors (#7): generation is javac's job even in experimental
+	// mode (-proc:only); our compiler then compiles original + generated sources.
+	// A processing error fails the build before anything else; nothing happens at
+	// all when no processor jars are installed.
+	inputs := files
+	processing := processors.RunAnnotationProcessing(cfg, files, nil)
+	if hasError(processing.Diagnostics) {
+		return Result{Success: false, Diagnostics: processing.Diagnostics}
+	}
+	if processing.Ran {
+		inputs = append(append([]string{}, files...), processing.GeneratedFiles...)
+	}
+	files = inputs
+
 	program := compiler.NewProgram()
 	compiler.LoadJdkStub(program)
 	loadConfiguredPaths(program, cfg)
@@ -274,7 +276,10 @@ func RunCompile(files []string, options Options) Result {
 		have[c.Name] = true
 	}
 	var resources []compiler.ZipEntryInput
-	for _, r := range resourceEntries(cfg) {
+	// resourcePaths files + Filer CLASS_OUTPUT of the processing pass (generated
+	// resources like META-INF/services); our class files win on a name collision.
+	resourceCandidates := append(resourceEntries(cfg), generatedClassEntries(cfg)...)
+	for _, r := range resourceCandidates {
 		if !have[r.Name] {
 			have[r.Name] = true
 			resources = append(resources, r)
@@ -352,8 +357,14 @@ func loadConfiguredPaths(program *compiler.Program, cfg *config.Config) {
 		classPaths = append(classPaths, cfg.ResolvePath(p))
 	}
 	compiler.LoadClassPath(program, classPaths)
+	// The generated .java tree (annotation-processor output) is an implicit extra
+	// source path; absent until the first processing compile.
+	sourceDirs := make([]string, 0, len(cfg.CompilerOptions.SourcePaths)+1)
 	for _, sp := range cfg.CompilerOptions.SourcePaths {
-		dir := cfg.ResolvePath(sp)
+		sourceDirs = append(sourceDirs, cfg.ResolvePath(sp))
+	}
+	sourceDirs = append(sourceDirs, processors.GeneratedSourcesDir(cfg))
+	for _, dir := range sourceDirs {
 		for _, file := range build.JavaFilesIn(dir) {
 			if b, err := os.ReadFile(file); err == nil {
 				program.AddProjectFile(pathToURI(file), string(b))
@@ -374,6 +385,14 @@ func runJavacCompile(files []string, outDir, output string, cfg *config.Config, 
 	args := []string{"-d", tmp, "-encoding", "UTF-8"}
 	if cfg.CompilerOptions.Release != nil {
 		args = append(args, "--release", strconv.Itoa(*cfg.CompilerOptions.Release))
+	}
+	// Annotation processors (#7): javac discovers and runs them from
+	// -processorpath in this same invocation; generated sources go to
+	// .cappu/generated-sources/sources so the LSP sees them too.
+	if procJars := processors.ProcessorJars(cfg); len(procJars) > 0 {
+		genSources := processors.GeneratedSourcesDir(cfg)
+		_ = os.MkdirAll(genSources, 0o755)
+		args = append(args, "-processorpath", strings.Join(procJars, string(os.PathListSeparator)), "-s", genSources)
 	}
 	classPath := build.ClassPath(cfg)
 	if len(classPath) > 0 {
