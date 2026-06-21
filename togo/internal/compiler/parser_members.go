@@ -92,12 +92,24 @@ func (p *Parser) parseThrows() *NodeArray {
 // `{ ... }` array, or a constant expression (used for method default values).
 func (p *Parser) parseElementValue() *Node {
 	if p.token() == OpenBraceToken {
-		return p.parseArrayInitializer()
+		return p.parseElementValueArrayInitializer()
 	}
 	if p.token() == AtToken && !p.isAnnotationTypeDeclarationStart() {
 		return p.parseAnnotation()
 	}
 	return p.parseConditionalExpression()
+}
+
+// parseElementValueArrayInitializer parses an annotation element-value array
+// (JLS 9.7.1) like `{@Index("a"), @Index("b")}`: each element is itself an
+// element value (recursively allowing nested annotations and arrays), unlike a
+// plain array initializer whose elements are expressions.
+func (p *Parser) parseElementValueArrayInitializer() *Node {
+	pos := p.getNodePos()
+	p.parseExpected(OpenBraceToken, nil)
+	elements := p.parseDelimitedList(ctxArrayInitializerElements, p.parseElementValue)
+	p.parseExpected(CloseBraceToken, nil)
+	return p.finishNode(p.factory.NewArrayInitializer(elements), pos, -1)
 }
 
 func (p *Parser) parseMethodDeclaration(pos int, modifiers, typeParameters *NodeArray, returnType, name *Node) *Node {
