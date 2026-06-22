@@ -10,14 +10,13 @@ package dap
 // src/services/dap/transport.ts.
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
-	"strings"
 	"sync"
+
+	"github.com/nikeee/cappu/internal/wire"
 )
 
 // Request is an incoming DAP request.
@@ -34,18 +33,26 @@ type RequestHandler func(args json.RawMessage) (any, error)
 
 // Conn is a DAP connection bound to one debug session.
 type Conn struct {
-	r        *bufio.Reader
-	w        io.Writer
-	wmu      sync.Mutex
+	framer   *wire.Framer
+	seqMu    sync.Mutex // guards seq; output-event pumps send events concurrently
 	seq      int
 	handlers map[string]RequestHandler
 }
 
 func NewConn(r io.Reader, w io.Writer) *Conn {
-	return &Conn{r: bufio.NewReader(r), w: w, seq: 1, handlers: map[string]RequestHandler{}}
+	return &Conn{framer: wire.NewFramer(r, w), seq: 1, handlers: map[string]RequestHandler{}}
 }
 
 func (c *Conn) OnRequest(command string, h RequestHandler) { c.handlers[command] = h }
+
+// nextSeq returns the next monotonic message seq, safe for concurrent senders.
+func (c *Conn) nextSeq() int {
+	c.seqMu.Lock()
+	defer c.seqMu.Unlock()
+	s := c.seq
+	c.seq++
+	return s
+}
 
 type response struct {
 	Seq        int    `json:"seq"`
@@ -66,17 +73,13 @@ type event struct {
 
 // SendEvent pushes a DAP event (stopped, output, terminated, ...) to the client.
 func (c *Conn) SendEvent(name string, body any) {
-	c.wmu.Lock()
-	seq := c.seq
-	c.seq++
-	c.wmu.Unlock()
-	_ = c.write(event{Seq: seq, Type: "event", Event: name, Body: body})
+	_ = c.write(event{Seq: c.nextSeq(), Type: "event", Event: name, Body: body})
 }
 
 // Run reads and dispatches requests until the stream closes.
 func (c *Conn) Run() error {
 	for {
-		body, err := c.readMessage()
+		body, err := c.framer.Read()
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
@@ -109,12 +112,8 @@ func (c *Conn) dispatch(req Request) {
 }
 
 func (c *Conn) respond(req Request, success bool, body any, message string) {
-	c.wmu.Lock()
-	seq := c.seq
-	c.seq++
-	c.wmu.Unlock()
 	_ = c.write(response{
-		Seq:        seq,
+		Seq:        c.nextSeq(),
 		Type:       "response",
 		RequestSeq: req.Seq,
 		Success:    success,
@@ -129,39 +128,5 @@ func (c *Conn) write(msg any) error {
 	if err != nil {
 		return err
 	}
-	c.wmu.Lock()
-	defer c.wmu.Unlock()
-	if _, err := fmt.Fprintf(c.w, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
-		return err
-	}
-	_, err = c.w.Write(body)
-	return err
-}
-
-func (c *Conn) readMessage() ([]byte, error) {
-	length := -1
-	for {
-		line, err := c.r.ReadString('\n')
-		if err != nil {
-			return nil, err
-		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			break
-		}
-		if name, value, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(name), "Content-Length") {
-			length, err = strconv.Atoi(strings.TrimSpace(value))
-			if err != nil {
-				return nil, fmt.Errorf("invalid Content-Length: %w", err)
-			}
-		}
-	}
-	if length < 0 {
-		return nil, fmt.Errorf("missing Content-Length header")
-	}
-	buf := make([]byte, length)
-	if _, err := io.ReadFull(c.r, buf); err != nil {
-		return nil, err
-	}
-	return buf, nil
+	return c.framer.Write(body)
 }

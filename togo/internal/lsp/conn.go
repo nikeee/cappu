@@ -5,14 +5,11 @@ package lsp
 // LSP library. Single-threaded request dispatch (the issue defers concurrency).
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"strconv"
-	"strings"
-	"sync"
+
+	"github.com/nikeee/cappu/internal/wire"
 )
 
 // ResponseError is a JSON-RPC error returned from a request handler.
@@ -37,9 +34,7 @@ type NotificationHandler func(params json.RawMessage)
 
 // Conn is a JSON-RPC connection.
 type Conn struct {
-	r        *bufio.Reader
-	w        io.Writer
-	wmu      sync.Mutex
+	framer   *wire.Framer
 	requests map[string]RequestHandler
 	notifs   map[string]NotificationHandler
 	nextID   int
@@ -48,8 +43,7 @@ type Conn struct {
 // NewConn creates a connection reading from r and writing to w.
 func NewConn(r io.Reader, w io.Writer) *Conn {
 	return &Conn{
-		r:        bufio.NewReader(r),
-		w:        w,
+		framer:   wire.NewFramer(r, w),
 		requests: map[string]RequestHandler{},
 		notifs:   map[string]NotificationHandler{},
 	}
@@ -110,42 +104,7 @@ func (c *Conn) write(msg any) error {
 	if err != nil {
 		return err
 	}
-	c.wmu.Lock()
-	defer c.wmu.Unlock()
-	if _, err := fmt.Fprintf(c.w, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
-		return err
-	}
-	_, err = c.w.Write(body)
-	return err
-}
-
-// readMessage reads one Content-Length-framed JSON message.
-func (c *Conn) readMessage() ([]byte, error) {
-	length := -1
-	for {
-		line, err := c.r.ReadString('\n')
-		if err != nil {
-			return nil, err
-		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			break // end of headers
-		}
-		if name, value, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(name), "Content-Length") {
-			length, err = strconv.Atoi(strings.TrimSpace(value))
-			if err != nil {
-				return nil, fmt.Errorf("invalid Content-Length: %w", err)
-			}
-		}
-	}
-	if length < 0 {
-		return nil, fmt.Errorf("missing Content-Length header")
-	}
-	buf := make([]byte, length)
-	if _, err := io.ReadFull(c.r, buf); err != nil {
-		return nil, err
-	}
-	return buf, nil
+	return c.framer.Write(body)
 }
 
 // Run reads and dispatches messages until the stream closes (io.EOF) or a read
@@ -153,7 +112,7 @@ func (c *Conn) readMessage() ([]byte, error) {
 // error; unknown notifications and client responses are ignored.
 func (c *Conn) Run() error {
 	for {
-		body, err := c.readMessage()
+		body, err := c.framer.Read()
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
