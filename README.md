@@ -78,7 +78,7 @@ You don't have to have a `cappu.json` config as long as your project uses the co
 
 ### MCP Server
 I know you are using AI. AIs should be fairly good at writing Java due to the amount of code in the training set. However, interacting with Java-Code is not ideal for an AI, as most (and the best) Java tooling resides in the most popular IDE. We're here to offer an alternative. Some people like to wire up an LSP server, which you can also do. LSP is not ideal, as it it offset-based. AIs would like to work with names, so cappu also offers this:
-```
+```sh
 cappu mcp
 ```
 This starts an MCP server that exposes all **read-only-LSP capabilities** as well as all **read-only package management features** like license information, auditing/CVEs and package search.
@@ -88,6 +88,12 @@ Your colleagues use an IDE and you obviously dont want to migrate you project to
 You can still use cappu as LSP/MCP server, configure it using `cappu.json` and exclude the config from the repository without touching any checked-in `.gitignore`:
 ```sh
 echo "cappu.json" >> .git/info/exclude
+```
+
+### DAP Server
+[DAP](https://microsoft.github.io/debug-adapter-protocol//) is like LSP, but for debuggers. Cappu comes with DAP support, so you (or your LLM) has a standardized Interface for debugging your application.
+```sh
+cappu dap
 ```
 
 ### Use in Docker
