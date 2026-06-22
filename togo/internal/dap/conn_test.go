@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func frame(msg any) string {
@@ -113,5 +114,45 @@ func TestSendEventMonotonicSeq(t *testing.T) {
 	}
 	if b["seq"].(float64) <= a["seq"].(float64) {
 		t.Fatalf("seq not increasing: %v then %v", a["seq"], b["seq"])
+	}
+}
+
+func TestRequestSplitAcrossChunks(t *testing.T) {
+	in, out, conn := pipePair(t)
+	conn.OnRequest("ping", func(args json.RawMessage) (any, error) {
+		var p struct {
+			N int `json:"n"`
+		}
+		_ = json.Unmarshal(args, &p)
+		return map[string]any{"n": p.N}, nil
+	})
+	whole := frame(map[string]any{"seq": 1, "type": "request", "command": "ping", "arguments": map[string]any{"n": 9}})
+	split := len(whole) / 2
+	go func() {
+		fmt.Fprint(in, whole[:split]) // header + part of body
+		time.Sleep(10 * time.Millisecond)
+		fmt.Fprint(in, whole[split:]) // remainder completes the frame
+	}()
+	resp, err := readFrame(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp["success"] != true || resp["body"].(map[string]any)["n"].(float64) != 9 {
+		t.Fatalf("resp %+v", resp)
+	}
+}
+
+func TestEventWithNoBodyOmitsBody(t *testing.T) {
+	_, out, conn := pipePair(t)
+	go conn.SendEvent("initialized", nil)
+	m, err := readFrame(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["event"] != "initialized" {
+		t.Fatalf("event %+v", m)
+	}
+	if _, ok := m["body"]; ok {
+		t.Fatalf("body should be omitted, got %+v", m)
 	}
 }

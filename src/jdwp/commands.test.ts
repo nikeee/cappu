@@ -3,7 +3,12 @@ import { once } from "node:events";
 import { createServer } from "node:net";
 import { test } from "node:test";
 
-import { classesBySignature, methodLineTable, threadFrames } from "./commands.ts";
+import {
+  classesBySignature,
+  methodLineTable,
+  methodVariableTable,
+  threadFrames,
+} from "./commands.ts";
 import { decodeComposite } from "./events.ts";
 import { ByteWriter, DEFAULT_ID_SIZES } from "./idCodec.ts";
 import { JdwpClient } from "./jdwpClient.ts";
@@ -178,4 +183,94 @@ test("decodeComposite reads a class-prepare sub-event", () => {
     assert.equal(ev.signature, "Lexample/App;");
     assert.equal(ev.typeId, 0xc9n);
   }
+});
+
+test("decodeComposite reads a single-step sub-event", () => {
+  const data = new ByteWriter()
+    .u1(SuspendPolicy.ALL)
+    .u4(1)
+    .u1(EventKind.SINGLE_STEP)
+    .i4(3)
+    .id(0x2n, 8)
+    .u1(TypeTag.CLASS)
+    .id(0xc1n, 8)
+    .id(0xa1n, 8)
+    .u8(9n)
+    .toBuffer();
+  const ev = decodeComposite(data, DEFAULT_ID_SIZES).events[0];
+  assert.equal(ev.kind, EventKind.SINGLE_STEP);
+  if (ev.kind === EventKind.SINGLE_STEP) {
+    assert.equal(ev.thread, 0x2n);
+    assert.equal(ev.location.index, 9n);
+  }
+});
+
+test("decodeComposite reads thread start/death and vm death", () => {
+  const data = new ByteWriter()
+    .u1(SuspendPolicy.NONE)
+    .u4(3)
+    .u1(EventKind.THREAD_START)
+    .i4(0)
+    .id(0x5n, 8)
+    .u1(EventKind.THREAD_DEATH)
+    .i4(0)
+    .id(0x6n, 8)
+    .u1(EventKind.VM_DEATH)
+    .i4(0)
+    .toBuffer();
+  const { events } = decodeComposite(data, DEFAULT_ID_SIZES);
+  assert.deepEqual(
+    events.map(e => e.kind),
+    [EventKind.THREAD_START, EventKind.THREAD_DEATH, EventKind.VM_DEATH],
+  );
+  assert.equal(events[0].kind === EventKind.THREAD_START && events[0].thread, 0x5n);
+});
+
+test("decodeComposite stops cleanly at an unknown event kind", () => {
+  const data = new ByteWriter()
+    .u1(SuspendPolicy.ALL)
+    .u4(2)
+    .u1(EventKind.BREAKPOINT)
+    .i4(1)
+    .id(0x1n, 8)
+    .u1(TypeTag.CLASS)
+    .id(0xc1n, 8)
+    .id(0xa1n, 8)
+    .u8(0n)
+    .u1(40) // METHOD_ENTRY: a kind we do not decode -> scan stops here
+    .toBuffer();
+  // Only the first (decodable) event is returned; the rest cannot be skipped.
+  const { events } = decodeComposite(data, DEFAULT_ID_SIZES);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].kind, EventKind.BREAKPOINT);
+});
+
+test("methodVariableTable decodes slots, filtering happens in the caller", async () => {
+  const body = new ByteWriter()
+    .u4(1) // argCnt (ignored)
+    .u4(2) // slot count
+    .u8(0n)
+    .string("args")
+    .string("[Ljava/lang/String;")
+    .i4(20)
+    .i4(0)
+    .u8(2n)
+    .string("sum")
+    .string("I")
+    .i4(18)
+    .i4(1)
+    .toBuffer();
+  await withCannedJvm({ "6:2": body }, async client => {
+    const slots = await methodVariableTable(client, 0xc1n, 0xa1n);
+    assert.equal(slots.length, 2);
+    assert.deepEqual(slots[0], {
+      codeIndex: 0n,
+      name: "args",
+      signature: "[Ljava/lang/String;",
+      length: 20,
+      slot: 0,
+    });
+    assert.equal(slots[1].name, "sum");
+    assert.equal(slots[1].signature, "I");
+  });
 });

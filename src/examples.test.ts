@@ -364,6 +364,8 @@ class DapDriver {
   private readonly responses = new Map<number, (m: any) => void>();
   private readonly events: any[] = [];
   private readonly eventWaiters: { event: string; resolve: (m: any) => void }[] = [];
+  /** All `output` event text, in order, so tests can assert program stdout. */
+  outputText = "";
 
   constructor(private readonly child: ChildProcess) {
     child.stdout!.on("data", (c: Buffer) => this.onData(c));
@@ -382,6 +384,7 @@ class DapDriver {
         this.responses.get(msg.request_seq)?.(msg);
         this.responses.delete(msg.request_seq);
       } else if (msg.type === "event") {
+        if (msg.event === "output") this.outputText += msg.body.output;
         const i = this.eventWaiters.findIndex(w => w.event === msg.event);
         if (i >= 0) this.eventWaiters.splice(i, 1)[0].resolve(msg);
         else this.events.push(msg);
@@ -412,9 +415,11 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([p, guard]).finally(() => clearTimeout(timer));
 }
 
-// End-to-end debugger: spawn `cappu dap`, drive a full session over DAP, and
-// assert we stop on the breakpoint with the expected local values. No network
-// (debug-app has no dependencies), so this runs on the hermetic JDK leg too.
+// End-to-end debugger: spawn `cappu dap` and drive a full session over DAP -
+// threads, a breakpoint hit on each loop iteration with the expected local
+// values, stepping, then continue-to-completion with program output and
+// termination. No network (debug-app has no dependencies), so this runs on the
+// hermetic JDK leg too.
 test(
   "examples/debug-app debugs over the Debug Adapter Protocol",
   { skip: !HAS_JAVAC },
@@ -432,6 +437,19 @@ test(
     });
     const dap = new DapDriver(child);
     const t = (label: string, p: Promise<any>) => withTimeout(p, 60_000, label);
+
+    // Read the Locals of the top frame of `threadId` as a name->value map.
+    async function locals(threadId: number): Promise<Record<string, string>> {
+      const stack = await t("stackTrace", dap.request("stackTrace", { threadId }));
+      const top = stack.body.stackFrames[0];
+      expect(top.line).toBe(8);
+      expect(top.name).toBe("example.App.main"); // class.method
+      const scopes = await t("scopes", dap.request("scopes", { frameId: top.id }));
+      const ref = scopes.body.scopes[0].variablesReference;
+      const vars = await t("variables", dap.request("variables", { variablesReference: ref }));
+      return Object.fromEntries(vars.body.variables.map((v: any) => [v.name, v.value]));
+    }
+
     try {
       expect(
         (await t("initialize", dap.request("initialize", { adapterID: "cappu" }))).success,
@@ -447,27 +465,48 @@ test(
       );
       await t("configurationDone", dap.request("configurationDone"));
 
-      const stopped = await t("stopped", dap.waitEvent("stopped"));
-      expect(stopped.body.reason).toBe("breakpoint");
-      const threadId = stopped.body.threadId;
+      // Breakpoint on line 8 (`sum += squared;`) is hit once per loop iteration,
+      // BEFORE the add runs: (i, squared, sum) = (1,1,0), (2,4,1), (3,9,5).
+      const expected = [
+        { i: "1", squared: "1", sum: "0" },
+        { i: "2", squared: "4", sum: "1" },
+        { i: "3", squared: "9", sum: "5" },
+      ];
+      let threadId = -1;
+      for (let hit = 0; hit < expected.length; hit++) {
+        const stopped = await t(`stopped#${hit}`, dap.waitEvent("stopped"));
+        expect(stopped.body.reason).toBe("breakpoint");
+        threadId = stopped.body.threadId;
 
-      const stack = await t("stackTrace", dap.request("stackTrace", { threadId }));
-      expect(stack.body.stackFrames[0].line).toBe(8);
-      const frameId = stack.body.stackFrames[0].id;
+        if (hit === 0) {
+          // The running program has a thread named "main".
+          const threads = await t("threads", dap.request("threads", {}));
+          expect(threads.body.threads.some((th: any) => th.name === "main")).toBe(true);
+        }
 
-      const scopes = await t("scopes", dap.request("scopes", { frameId }));
-      const ref = scopes.body.scopes[0].variablesReference;
-      const vars = await t("variables", dap.request("variables", { variablesReference: ref }));
-      const byName = Object.fromEntries(vars.body.variables.map((v: any) => [v.name, v.value]));
-      // First iteration: i == 1, squared == 1.
-      expect(byName.i).toBe("1");
-      expect(byName.squared).toBe("1");
+        const byName = await locals(threadId);
+        expect(byName.i).toBe(expected[hit].i);
+        expect(byName.squared).toBe(expected[hit].squared);
+        expect(byName.sum).toBe(expected[hit].sum);
+        // The main(String[] args) parameter is in scope; an object local renders
+        // as its type (the trailing @<id> is not stable, so only check the type).
+        if (hit === 0) expect(byName.args).toMatch(/^java\.lang\.String\[\]@/);
 
-      // Step over one line: the step pipeline must produce another stop.
+        if (hit < expected.length - 1) {
+          await t(`continue#${hit}`, dap.request("continue", { threadId }));
+        }
+      }
+
+      // From the last hit, step over one line and confirm the step pipeline
+      // produces another stop, then run to completion.
       await t("next", dap.request("next", { threadId }));
       const stepped = await t("stepped", dap.waitEvent("stopped"));
       expect(stepped.body.reason).toBe("step");
-      expect(typeof stepped.body.threadId).toBe("number");
+
+      await t("continue-final", dap.request("continue", { threadId }));
+      await t("terminated", dap.waitEvent("terminated"));
+      // sum = 1 + 4 + 9 = 14, printed by the program before it exits.
+      expect(dap.outputText).toContain("sum=14");
 
       await dap.request("disconnect");
       child.stdin!.end();

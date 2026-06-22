@@ -2,8 +2,64 @@ package jdwp
 
 import (
 	"bytes"
+	"math"
 	"testing"
 )
+
+func TestIDRoundTripEveryWidth(t *testing.T) {
+	for _, width := range []int{1, 2, 4, 8} {
+		var value uint64 = math.MaxUint64
+		if width < 8 {
+			value = (uint64(1) << (width * 8)) - 1 // all bits set for that width
+		}
+		w := &Writer{}
+		w.ID(value, width)
+		if len(w.Buffer()) != width {
+			t.Fatalf("width %d: len %d", width, len(w.Buffer()))
+		}
+		if got := NewReader(w.Buffer()).ID(width); got != value {
+			t.Fatalf("width %d: got %x want %x", width, got, value)
+		}
+	}
+}
+
+func TestI4SignedExtremesAndU4Max(t *testing.T) {
+	for _, n := range []int32{math.MinInt32, -1, 0, math.MaxInt32} {
+		w := &Writer{}
+		w.I4(n)
+		if got := NewReader(w.Buffer()).I4(); got != n {
+			t.Fatalf("i4 %d -> %d", n, got)
+		}
+	}
+	w := &Writer{}
+	w.U4(math.MaxUint32)
+	if got := NewReader(w.Buffer()).U4(); got != math.MaxUint32 {
+		t.Fatalf("u4 max -> %d", got)
+	}
+}
+
+func TestU8FullRange(t *testing.T) {
+	for _, n := range []uint64{0, 1, 0xdeadbeefcafef00d, math.MaxUint64} {
+		w := &Writer{}
+		w.U8(n)
+		if got := NewReader(w.Buffer()).U8(); got != n {
+			t.Fatalf("u8 %x -> %x", n, got)
+		}
+	}
+}
+
+func TestTryReadPacketChunked(t *testing.T) {
+	packet := EncodeCommandPacket(7, 1, 1, []byte{0xaa, 0xbb, 0xcc})
+	for n := 1; n < len(packet); n++ {
+		if _, _, ok := TryReadPacket(packet[:n]); ok {
+			t.Fatalf("partial %d bytes should not complete", n)
+		}
+	}
+	p, rest, ok := TryReadPacket(packet)
+	if !ok || p.ID != 7 || len(rest) != 0 {
+		t.Fatalf("full: ok=%v id=%d rest=%d", ok, p.ID, len(rest))
+	}
+}
 
 func TestWriterFixedWidthBigEndian(t *testing.T) {
 	w := &Writer{}

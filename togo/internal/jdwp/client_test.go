@@ -202,3 +202,67 @@ func TestDecodeCompositeClassPrepare(t *testing.T) {
 		t.Fatalf("event %+v", ev)
 	}
 }
+
+func TestDecodeCompositeSingleStep(t *testing.T) {
+	w := &Writer{}
+	w.U1(SuspendAll).U4(1).U1(EKSingleStep).I4(3).ID(2, 8).
+		U1(TypeTagClass).ID(0xc1, 8).ID(0xa1, 8).U8(9)
+	ev := DecodeComposite(w.Buffer(), DefaultIDSizes).Events[0]
+	if ev.Kind != EKSingleStep || ev.Thread != 2 || ev.Location.Index != 9 {
+		t.Fatalf("event %+v", ev)
+	}
+}
+
+func TestDecodeCompositeThreadAndVMDeath(t *testing.T) {
+	w := &Writer{}
+	w.U1(SuspendNone).U4(3).
+		U1(EKThreadStart).I4(0).ID(5, 8).
+		U1(EKThreadDeath).I4(0).ID(6, 8).
+		U1(EKVMDeath).I4(0)
+	comp := DecodeComposite(w.Buffer(), DefaultIDSizes)
+	if len(comp.Events) != 3 {
+		t.Fatalf("events %+v", comp.Events)
+	}
+	if comp.Events[0].Kind != EKThreadStart || comp.Events[0].Thread != 5 {
+		t.Fatalf("thread start %+v", comp.Events[0])
+	}
+	if comp.Events[2].Kind != EKVMDeath {
+		t.Fatalf("vm death %+v", comp.Events[2])
+	}
+}
+
+func TestDecodeCompositeStopsAtUnknownKind(t *testing.T) {
+	w := &Writer{}
+	w.U1(SuspendAll).U4(2).
+		U1(EKBreakpoint).I4(1).ID(1, 8).U1(TypeTagClass).ID(0xc1, 8).ID(0xa1, 8).U8(0).
+		U1(40) // METHOD_ENTRY: not decoded -> scan stops, leaving only the first event
+	comp := DecodeComposite(w.Buffer(), DefaultIDSizes)
+	if len(comp.Events) != 1 || comp.Events[0].Kind != EKBreakpoint {
+		t.Fatalf("events %+v", comp.Events)
+	}
+}
+
+func TestMethodVariableTableDecode(t *testing.T) {
+	body := &Writer{}
+	body.U4(1). // argCnt (ignored)
+			U4(2). // slot count
+			U8(0).String("args").String("[Ljava/lang/String;").I4(20).I4(0).
+			U8(2).String("sum").String("I").I4(18).I4(1)
+	c := fakeJVM(t, func(conn net.Conn, id uint32, set, cmd byte, _ []byte) {
+		if set == CSMethod && cmd == MVariableTable {
+			_, _ = conn.Write(replyPacket(id, 0, body.Buffer()))
+		} else {
+			_, _ = conn.Write(replyPacket(id, 0, nil))
+		}
+	})
+	slots, err := MethodVariableTable(c, 0xc1, 0xa1)
+	if err != nil || len(slots) != 2 {
+		t.Fatalf("slots %+v err %v", slots, err)
+	}
+	if slots[0] != (VariableSlot{CodeIndex: 0, Name: "args", Signature: "[Ljava/lang/String;", Length: 20, Slot: 0}) {
+		t.Fatalf("slot0 %+v", slots[0])
+	}
+	if slots[1].Name != "sum" || slots[1].Signature != "I" {
+		t.Fatalf("slot1 %+v", slots[1])
+	}
+}

@@ -10,6 +10,40 @@ import {
   tryReadPacket,
 } from "./protocol.ts";
 
+test("id round-trips at every JDWP width (1/2/4/8 bytes)", () => {
+  for (const width of [1, 2, 4, 8]) {
+    const value = (1n << BigInt(width * 8)) - 1n; // all bits set for that width
+    const buf = new ByteWriter().id(value, width).toBuffer();
+    assert.equal(buf.length, width);
+    assert.equal(new ByteReader(buf).id(width), value);
+  }
+});
+
+test("i4 round-trips signed extremes; u4 holds its max", () => {
+  for (const n of [-2147483648, -1, 0, 2147483647]) {
+    assert.equal(new ByteReader(new ByteWriter().i4(n).toBuffer()).i4(), n);
+  }
+  assert.equal(new ByteReader(new ByteWriter().u4(0xffffffff).toBuffer()).u4(), 0xffffffff);
+});
+
+test("u8 holds the full unsigned 64-bit range", () => {
+  for (const n of [0n, 1n, 0xdeadbeefcafef00dn, 0xffffffffffffffffn]) {
+    assert.equal(new ByteReader(new ByteWriter().u8(n).toBuffer()).u8(), n);
+  }
+});
+
+test("tryReadPacket waits for the whole packet across chunked delivery", () => {
+  const packet = encodeCommandPacket(7, 1, 1, Buffer.from([0xaa, 0xbb, 0xcc]));
+  // Feed it one byte at a time: only the final byte completes it.
+  for (let n = 1; n < packet.length; n++) {
+    assert.equal(tryReadPacket(packet.subarray(0, n)), null);
+  }
+  const got = tryReadPacket(packet);
+  assert.ok(got);
+  assert.equal(got.packet.id, 7);
+  assert.equal(got.rest.length, 0);
+});
+
 test("ByteWriter encodes fixed-width fields big-endian", () => {
   const buf = new ByteWriter().u1(0x12).u2(0x3456).u4(0x789abcde).toBuffer();
   assert.deepEqual([...buf], [0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde]);

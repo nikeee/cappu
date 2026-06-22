@@ -111,3 +111,35 @@ test("two requests arriving in one chunk are both dispatched", async () => {
   const [r1, r2] = await responses;
   assert.deepEqual([r1.body.n, r2.body.n], [1, 2]);
 });
+
+test("a request split across two chunks is reassembled and dispatched", async () => {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const conn = new DapConnection(input, output);
+  conn.onRequest("ping", (args: any) => ({ n: args.n }));
+  void conn.run();
+
+  const responses = collect(output, 1);
+  const whole = frame({ seq: 1, type: "request", command: "ping", arguments: { n: 9 } });
+  const split = Math.floor(whole.length / 2);
+  input.write(whole.slice(0, split)); // header + part of the body
+  await new Promise(r => setTimeout(r, 5));
+  input.write(whole.slice(split)); // the remainder completes the frame
+
+  const [resp] = await responses;
+  assert.equal(resp.success, true);
+  assert.equal(resp.body.n, 9);
+});
+
+test("an event with no body omits the body field", async () => {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const conn = new DapConnection(input, output);
+  void conn.run();
+
+  const messages = collect(output, 1);
+  conn.sendEvent("initialized");
+  const [a] = await messages;
+  assert.equal(a.event, "initialized");
+  assert.equal("body" in a, false);
+});
