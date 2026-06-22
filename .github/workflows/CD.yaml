@@ -12,41 +12,35 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-go@v6
         with:
-          node-version: latest
-          cache: npm
+          go-version: latest
+          cache-dependency-path: ./togo/go.sum
 
-      - run: npm ci --no-audit
-      - run: node --run ci
+      - run: make tools
+        working-directory: ./togo
+      - run: make generate
+        working-directory: ./togo
+      - run: make build-all
+        working-directory: ./togo
 
-      # @tsdown/exe extracts the Windows Node .zip with `tar`, which must be
-      # libarchive's (GNU tar cannot read zip). Shim `tar` -> `bsdtar` for the
-      # build only. macOS x64 and Alpine/musl are not built (Node SEA limits).
-      - name: Build the single-executable binaries
-        run: |
-          sudo apt-get update && sudo apt-get install -y libarchive-tools
-          mkdir -p /tmp/bin && ln -sf "$(command -v bsdtar)" /tmp/bin/tar
-          PATH="/tmp/bin:$PATH" node --run build
-
-      # The artifact names stay cappu-<os>-<arch>; the files carry tsdown's
-      # platform suffix (win, not windows, and a .exe).
+      # The artifact names stay cappu-<os>-<arch>
       - uses: actions/upload-artifact@v7
         with:
           name: cappu-linux-x64
-          path: dist/cappu-linux-x64
+          path: ./togo/dist/cappu-linux-x64
       - uses: actions/upload-artifact@v7
         with:
           name: cappu-linux-arm64
-          path: dist/cappu-linux-arm64
+          path: ./togo/dist/cappu-linux-arm64
       - uses: actions/upload-artifact@v7
         with:
           name: cappu-darwin-arm64
-          path: dist/cappu-darwin-arm64
+          path: ./togo/dist/cappu-darwin-arm64
       - uses: actions/upload-artifact@v7
         with:
           name: cappu-windows-x64
-          path: dist/cappu-win-x64.exe
+          path: ./togo/dist/cappu-win-x64.exe
 
   image:
     name: Image
