@@ -246,3 +246,61 @@ func TestDebugAppLive(t *testing.T) {
 
 	d.request(t, "disconnect", nil)
 }
+
+// startDebugApp copies examples/debug-app to a temp dir and starts an in-process
+// DAP session over pipes, returning a driver. Self-skips without a JDK.
+func startDebugApp(t *testing.T) *driver {
+	t.Helper()
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("javac not on PATH")
+	}
+	work := filepath.Join(t.TempDir(), "debug-app")
+	if err := os.CopyFS(work, os.DirFS(filepath.Join("..", "..", "..", "examples", "debug-app"))); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load("", work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	go func() { _ = Run(cfg, inR, outW) }()
+	t.Cleanup(func() { _ = inW.Close() })
+	return newDriver(inW, outR)
+}
+
+// TestDebugAppStopOnEntry launches with no breakpoints; the debugger stops on
+// the first line of main, then runs to completion. The -D vm arg proves the JVM
+// accepts caller JVM flags (the program still runs).
+func TestDebugAppStopOnEntry(t *testing.T) {
+	d := startDebugApp(t)
+	if d.request(t, "initialize", map[string]any{"adapterID": "cappu"})["success"] != true {
+		t.Fatal("initialize failed")
+	}
+	d.event(t, "initialized")
+	launch := d.request(t, "launch", map[string]any{
+		"stopOnEntry": true,
+		"vmArgs":      []string{"-Dcappu.dap=on"},
+	})
+	if launch["success"] != true {
+		t.Fatal("launch failed")
+	}
+	d.request(t, "configurationDone", nil)
+
+	stopped := d.event(t, "stopped")
+	if stopped["body"].(map[string]any)["reason"] != "entry" {
+		t.Fatalf("stop reason %v", stopped["body"])
+	}
+	threadID := int(stopped["body"].(map[string]any)["threadId"].(float64))
+	top := d.request(t, "stackTrace", map[string]any{"threadId": threadID})["body"].(map[string]any)["stackFrames"].([]any)[0].(map[string]any)
+	if top["name"] != "example.App.main" || int(top["line"].(float64)) != 5 {
+		t.Fatalf("entry frame %+v", top) // line 5: `int sum = 0;`
+	}
+
+	d.request(t, "continue", map[string]any{"threadId": threadID})
+	d.event(t, "terminated")
+	if !strings.Contains(d.output(), "sum=14") {
+		t.Fatalf("program output = %q", d.output())
+	}
+	d.request(t, "disconnect", nil)
+}

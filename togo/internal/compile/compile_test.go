@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -395,6 +396,80 @@ func TestRunCompileFatJarMergesDeps(t *testing.T) {
 	}
 	if len(entries[1].Read()) <= 9 {
 		t.Errorf("our app/B.class should win over the 1-byte dependency fake")
+	}
+}
+
+func TestRunCompileFatJarMergesDescriptors(t *testing.T) {
+	dir := t.TempDir()
+	src := writeFile(t, dir, "B.java", "package app; class B { }")
+	depDir := filepath.Join(dir, ".cappu", "lib", "classes")
+	_ = os.MkdirAll(depDir, 0o755)
+	// two dependency jars that register at the SAME META-INF paths
+	depA := compiler.WriteZip([]compiler.ZipEntryInput{
+		{Name: "META-INF/MANIFEST.MF", Bytes: []byte{1}}, // must not leak
+		{Name: "META-INF/services/com.example.Svc", Bytes: []byte("com.a.Provider\n")},
+		{Name: "META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports", Bytes: []byte("com.a.AutoConfig\n")},
+		{Name: "META-INF/spring.factories", Bytes: []byte("com.example.Listener=com.a.L1,com.a.L2\n")},
+	})
+	depB := compiler.WriteZip([]compiler.ZipEntryInput{
+		{Name: "META-INF/services/com.example.Svc", Bytes: []byte("com.b.Provider\n")},
+		{Name: "META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports", Bytes: []byte("com.b.AutoConfig\n")},
+		// same key as dep-a: a naive concat would let java.util.Properties drop one
+		{Name: "META-INF/spring.factories", Bytes: []byte("com.example.Listener=com.b.L3\n")},
+	})
+	if err := os.WriteFile(filepath.Join(depDir, "dep-a.jar"), depA, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "dep-b.jar"), depB, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "cappu.json", "{}")
+	r := RunCompile([]string{src}, Options{Experimental: boolp(true), OutDir: filepath.Join(dir, "dist"), Output: "fat-jar", Config: loadCfg(t, dir)})
+	if !r.Success {
+		t.Fatalf("compile failed: %+v", r)
+	}
+	jb, _ := os.ReadFile(r.Written[0])
+	entries := compiler.ReadZipEntries(jb)
+	find := func(name string) string {
+		for _, e := range entries {
+			if e.Name == name {
+				return string(e.Read())
+			}
+		}
+		t.Fatalf("missing entry %s", name)
+		return ""
+	}
+	sortedLines := func(s string) []string {
+		var out []string
+		for _, l := range strings.Split(strings.TrimSpace(s), "\n") {
+			if l != "" {
+				out = append(out, l)
+			}
+		}
+		slices.Sort(out)
+		return out
+	}
+	// ServiceLoader provider lists from both jars survive
+	if got := sortedLines(find("META-INF/services/com.example.Svc")); !equalStrings(got, []string{"com.a.Provider", "com.b.Provider"}) {
+		t.Errorf("services merge = %v", got)
+	}
+	// Spring Boot auto-configuration imports from both jars survive
+	if got := sortedLines(find("META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports")); !equalStrings(got, []string{"com.a.AutoConfig", "com.b.AutoConfig"}) {
+		t.Errorf("imports merge = %v", got)
+	}
+	// spring.factories: the shared key keeps every jar's values, none dropped
+	if got := strings.TrimSpace(find("META-INF/spring.factories")); got != "com.example.Listener=com.a.L1,com.a.L2,com.b.L3" {
+		t.Errorf("spring.factories merge = %q", got)
+	}
+	// a dependency manifest never leaks into ours
+	manifests := 0
+	for _, e := range entries {
+		if e.Name == "META-INF/MANIFEST.MF" {
+			manifests++
+		}
+	}
+	if manifests != 1 {
+		t.Errorf("dependency manifest leaked: %d MANIFEST.MF entries", manifests)
 	}
 }
 

@@ -25,11 +25,14 @@ function decodeValue(build: (w: ByteWriter) => void, sizes = SIZES_8): JdwpValue
 }
 
 test("readValue decodes a boolean", () => {
-  assert.deepEqual(decodeValue(w => w.u1(Tag.BOOLEAN).u1(1)), {
-    tag: Tag.BOOLEAN,
-    kind: "primitive",
-    value: true,
-  });
+  assert.deepEqual(
+    decodeValue(w => w.u1(Tag.BOOLEAN).u1(1)),
+    {
+      tag: Tag.BOOLEAN,
+      kind: "primitive",
+      value: true,
+    },
+  );
   assert.equal((decodeValue(w => w.u1(Tag.BOOLEAN).u1(0)) as { value: boolean }).value, false);
 });
 
@@ -45,12 +48,18 @@ test("readValue decodes char as an unsigned code unit", () => {
 });
 
 test("readValue decodes int including negatives", () => {
-  assert.equal((decodeValue(w => w.u1(Tag.INT).i4(-2147483648)) as { value: number }).value, -2147483648);
+  assert.equal(
+    (decodeValue(w => w.u1(Tag.INT).i4(-2147483648)) as { value: number }).value,
+    -2147483648,
+  );
   assert.equal((decodeValue(w => w.u1(Tag.INT).i4(123456)) as { value: number }).value, 123456);
 });
 
 test("readValue decodes a signed 64-bit long", () => {
-  assert.equal((decodeValue(w => w.u1(Tag.LONG).u8(0xffffffffffffffffn)) as { value: bigint }).value, -1n);
+  assert.equal(
+    (decodeValue(w => w.u1(Tag.LONG).u8(0xffffffffffffffffn)) as { value: bigint }).value,
+    -1n,
+  );
   assert.equal(
     (decodeValue(w => w.u1(Tag.LONG).u8(0x7fffffffffffffffn)) as { value: bigint }).value,
     9223372036854775807n,

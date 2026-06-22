@@ -12,6 +12,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -30,9 +31,36 @@ type Launched struct {
 	Port   int
 }
 
-func LaunchUnderJdwp(java, classPath, mainClass string, programArgs []string) (*Launched, error) {
-	args := append([]string{jdwpAgentArg, "-cp", classPath, mainClass}, programArgs...)
-	cmd := exec.Command(java, args...)
+// LaunchOptions are the caller-supplied launch-request knobs.
+type LaunchOptions struct {
+	VMArgs      []string
+	ProgramArgs []string
+	Env         map[string]string
+	Cwd         string
+}
+
+// DebuggeeJavaArgs is the full java argument vector: the JDWP agent, then the
+// caller's JVM args, then classpath and main class, then program args. Pure (no
+// spawning) so the ordering is unit-testable. Port of debuggeeJavaArgs.
+func DebuggeeJavaArgs(classPath, mainClass string, opts LaunchOptions) []string {
+	args := []string{jdwpAgentArg}
+	args = append(args, opts.VMArgs...)
+	args = append(args, "-cp", classPath, mainClass)
+	return append(args, opts.ProgramArgs...)
+}
+
+func LaunchUnderJdwp(java, classPath, mainClass string, opts LaunchOptions) (*Launched, error) {
+	cmd := exec.Command(java, DebuggeeJavaArgs(classPath, mainClass, opts)...)
+	if opts.Cwd != "" {
+		cmd.Dir = opts.Cwd
+	}
+	if len(opts.Env) > 0 {
+		env := os.Environ() // merge over the inherited environment
+		for k, v := range opts.Env {
+			env = append(env, k+"="+v)
+		}
+		cmd.Env = env
+	}
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err

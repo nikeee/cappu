@@ -16,9 +16,19 @@ Point an editor at it with a launch config like:
   "type": "cappu-dap",
   "request": "launch",
   "name": "Debug debug-app",
-  "mainClass": "example.App"
+  "mainClass": "example.App",
+  "vmArgs": ["-Xmx256m", "-Dkey=value"],
+  "args": ["program", "arguments"],
+  "env": { "FOO": "bar" },
+  "cwd": "/path/to/run/in",
+  "stopOnEntry": false
 }
 ```
+
+Supported `launch` request fields: `mainClass` (defaults to
+`compilerOptions.mainClass`), `args` (program arguments), `vmArgs` (JVM flags),
+`classPath` (extra entries), `env`, `cwd`, and `stopOnEntry` (stop on the first
+line of `main` before any user code).
 
 A client then drives the session: `initialize` -> `launch` -> `setBreakpoints`
 (e.g. line 8 of `App.java`) -> `configurationDone`; execution stops on the

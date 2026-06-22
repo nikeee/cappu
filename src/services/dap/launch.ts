@@ -26,14 +26,44 @@ export function jdwpAgentArg(): string {
   return "-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=127.0.0.1:0";
 }
 
+export interface LaunchOptions {
+  vmArgs?: string[];
+  programArgs?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+}
+
+/**
+ * The full `java` argument vector for the debuggee: the JDWP agent, then the
+ * caller's JVM args, then the classpath and main class, then the program args.
+ * Pure (no spawning) so the ordering is unit-testable.
+ */
+export function debuggeeJavaArgs(
+  classPath: string,
+  mainClass: string,
+  opts: Pick<LaunchOptions, "vmArgs" | "programArgs"> = {},
+): string[] {
+  return [
+    jdwpAgentArg(),
+    ...(opts.vmArgs ?? []),
+    "-cp",
+    classPath,
+    mainClass,
+    ...(opts.programArgs ?? []),
+  ];
+}
+
 export function launchUnderJdwp(
   java: string,
   classPath: string,
   mainClass: string,
-  programArgs: string[] = [],
+  opts: LaunchOptions = {},
 ): Promise<Launched> {
-  const child = spawn(java, [jdwpAgentArg(), "-cp", classPath, mainClass, ...programArgs], {
+  const child = spawn(java, debuggeeJavaArgs(classPath, mainClass, opts), {
     stdio: ["ignore", "pipe", "pipe"],
+    // env merges over the inherited environment; undefined inherits it as-is.
+    env: opts.env ? { ...process.env, ...opts.env } : undefined,
+    cwd: opts.cwd,
   });
   return new Promise((resolve, reject) => {
     let settled = false;

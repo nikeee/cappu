@@ -99,16 +99,27 @@ export type CompileResult =
   | ({ success: true } & CompileOutput)
   | ({ success: false; diagnostics: CompileDiagnostic[] } & CompileOutput);
 
+// A dependency jar's own manifest and signature files must not leak into our
+// fat jar: the manifest describes that jar, and a copied signature no longer
+// matches the repackaged contents. Everything else under META-INF/ (service and
+// extension descriptors, multi-release classes) is real classpath content and
+// is kept - it is what makes frameworks like Spring Boot work from a fat jar.
+function isExcludedMeta(name: string): boolean {
+  if (name === "META-INF/MANIFEST.MF") return true;
+  return /^META-INF\/[^/]+\.(SF|RSA|DSA|EC)$/i.test(name) || name.startsWith("META-INF/SIG-");
+}
+
 // The dependency class files and jar contents reachable through the
-// configured classPath, as archive entries for a fat jar. META-INF/ of the
-// dependency jars is dropped (their manifests and signatures must not leak
-// into ours); the first occurrence of a path wins.
+// configured classPath, as archive entries for a fat jar. Each jar's own
+// manifest and signatures are dropped (see isExcludedMeta); the remaining
+// META-INF/ descriptors are kept, and same-path duplicates are reconciled at
+// merge time (mergeFatJarEntries) - the first occurrence of any other path wins.
 function classPathEntries(config: CappuConfig): ZipEntryInput[] {
   const entries: ZipEntryInput[] = [];
   const addJar = (path: string): void => {
     try {
       for (const entry of readZipEntries(readFileSync(path)) ?? []) {
-        if (entry.name.startsWith("META-INF/") || entry.name.endsWith("/")) continue;
+        if (entry.name.endsWith("/") || isExcludedMeta(entry.name)) continue;
         entries.push({ name: entry.name, bytes: entry.read() });
       }
     } catch {
@@ -134,6 +145,113 @@ function classPathEntries(config: CappuConfig): ZipEntryInput[] {
     }
   }
   return entries;
+}
+
+// Some META-INF/ descriptors register services or extensions that the runtime
+// reads from EVERY jar on the classpath (the JDK ServiceLoader, Spring Boot
+// auto-configuration). Flattening many jars into one collapses each such path
+// to a single file, so copying the first jar's copy silently drops every other
+// jar's registrations. These paths must instead be merged the way the runtime
+// would see them spread across jars (cf. maven-shade's resource transformers).
+function mergeStrategy(name: string): "lines" | "properties" | undefined {
+  if (!name.startsWith("META-INF/") || name.endsWith("/")) return undefined;
+  if (name.startsWith("META-INF/services/")) return "lines"; // ServiceLoader provider lists
+  if (name.endsWith(".imports")) return "lines"; // Spring Boot AutoConfiguration.imports
+  if (name.endsWith(".factories")) return "properties"; // spring.factories / aot.factories
+  return undefined;
+}
+
+// Concatenate newline-delimited descriptors (one entry per line), de-duplicated
+// and order-preserving; blank and comment lines are dropped.
+function mergeLines(chunks: Uint8Array[]): Uint8Array {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const chunk of chunks) {
+    for (const raw of new TextDecoder().decode(chunk).split(/\r?\n/)) {
+      const line = raw.trim();
+      if (line === "" || line.startsWith("#") || seen.has(line)) continue;
+      seen.add(line);
+      out.push(line);
+    }
+  }
+  return new TextEncoder().encode(`${out.join("\n")}\n`);
+}
+
+// Properties files (key=v1,v2,...) cannot be concatenated: a key present in two
+// jars would appear twice and java.util.Properties keeps only the last, dropping
+// the other jar's values. Merge by unioning the comma-separated value list per
+// key instead. ponytail: handles only trailing-backslash line continuation, the
+// one Properties feature spring.factories uses; class-name values need no
+// unicode/escape decoding.
+function mergeProperties(chunks: Uint8Array[]): Uint8Array {
+  const order: string[] = [];
+  const values = new Map<string, string[]>();
+  const logicalLines = function* (text: string): Generator<string> {
+    let acc = "";
+    for (const raw of text.split(/\r?\n/)) {
+      acc = acc === "" ? raw : acc + raw.replace(/^\s+/, "");
+      if (/\\$/.test(acc)) acc = acc.slice(0, -1);
+      else {
+        yield acc;
+        acc = "";
+      }
+    }
+    if (acc !== "") yield acc;
+  };
+  for (const chunk of chunks) {
+    for (const logical of logicalLines(new TextDecoder().decode(chunk))) {
+      const line = logical.trim();
+      if (line === "" || line.startsWith("#") || line.startsWith("!")) continue;
+      const eq = line.indexOf("=");
+      if (eq < 0) continue;
+      const key = line.slice(0, eq).trim();
+      let list = values.get(key);
+      if (list === undefined) {
+        list = [];
+        values.set(key, list);
+        order.push(key);
+      }
+      for (const part of line.slice(eq + 1).split(",")) {
+        const value = part.trim();
+        if (value !== "" && !list.includes(value)) list.push(value);
+      }
+    }
+  }
+  const out = order.map(key => `${key}=${values.get(key)!.join(",")}`);
+  return new TextEncoder().encode(`${out.join("\n")}\n`);
+}
+
+// Fold the dependency entries into the project entries for a fat jar: our own
+// files win any path outright; mergeable descriptors (mergeStrategy) accumulate
+// across all dependency jars and are merged; every other duplicate path is
+// first-wins.
+function mergeFatJarEntries(base: ZipEntryInput[], deps: ZipEntryInput[]): ZipEntryInput[] {
+  const result = [...base];
+  const have = new Set(base.map(e => e.name));
+  const order: string[] = [];
+  const chunks = new Map<string, Uint8Array[]>();
+  for (const entry of deps) {
+    if (mergeStrategy(entry.name) !== undefined) {
+      let list = chunks.get(entry.name);
+      if (list === undefined) {
+        list = [];
+        chunks.set(entry.name, list);
+        order.push(entry.name);
+      }
+      list.push(entry.bytes);
+      continue;
+    }
+    if (have.has(entry.name)) continue; // our classes / first dependency wins
+    have.add(entry.name);
+    result.push(entry);
+  }
+  for (const name of order) {
+    if (have.has(name)) continue; // a project file at this path wins outright
+    const list = chunks.get(name)!;
+    const bytes = mergeStrategy(name) === "properties" ? mergeProperties(list) : mergeLines(list);
+    result.push({ name, bytes });
+  }
+  return result;
 }
 
 // Every file under the configured resourcePaths, as archive entries whose
@@ -337,15 +455,13 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
           `Manifest-Version: 1.0\r\n${mainClass ? `Main-Class: ${mainClass}\r\n` : ""}\r\n`,
         ),
       };
-      const entries = [manifest, ...classes, ...resources];
-      if (output === "fat-jar") {
-        const have = new Set(entries.map(e => e.name));
-        for (const entry of options.config ? classPathEntries(options.config) : []) {
-          if (have.has(entry.name)) continue; // our classes win over dependencies
-          have.add(entry.name);
-          entries.push(entry);
-        }
-      }
+      const entries =
+        output === "fat-jar"
+          ? mergeFatJarEntries(
+              [manifest, ...classes, ...resources],
+              classPathEntries(options.config),
+            )
+          : [manifest, ...classes, ...resources];
       // The archive is named after the project directory (where cappu.json lives).
       const jar = join(outDir, `${jarName}.jar`);
       mkdirSync(outDir, { recursive: true });
@@ -471,24 +587,16 @@ function runJavacCompile(
       const mainClass =
         config.compilerOptions.mainClass ?? (mainClasses.length === 1 ? mainClasses[0] : undefined);
       warnings.push(...mainClassWarning(mainClasses, config.compilerOptions.mainClass));
-      const entries: ZipEntryInput[] = [
-        {
-          name: "META-INF/MANIFEST.MF",
-          bytes: new TextEncoder().encode(
-            `Manifest-Version: 1.0\r\n${mainClass ? `Main-Class: ${mainClass}\r\n` : ""}\r\n`,
-          ),
-        },
-        ...classes,
-        ...resources,
-      ];
-      if (output === "fat-jar") {
-        const have = new Set(entries.map(e => e.name));
-        for (const entry of classPathEntries(config)) {
-          if (have.has(entry.name)) continue;
-          have.add(entry.name);
-          entries.push(entry);
-        }
-      }
+      const manifest: ZipEntryInput = {
+        name: "META-INF/MANIFEST.MF",
+        bytes: new TextEncoder().encode(
+          `Manifest-Version: 1.0\r\n${mainClass ? `Main-Class: ${mainClass}\r\n` : ""}\r\n`,
+        ),
+      };
+      const entries =
+        output === "fat-jar"
+          ? mergeFatJarEntries([manifest, ...classes, ...resources], classPathEntries(config))
+          : [manifest, ...classes, ...resources];
       const jar = join(outDir, `${jarName}.jar`);
       mkdirSync(outDir, { recursive: true });
       writeFileSync(jar, writeZip(entries));

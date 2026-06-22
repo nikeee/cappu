@@ -15,8 +15,14 @@ export interface LaunchArguments {
   mainClass?: string;
   /** Program arguments passed to the Java main(String[]). */
   args?: string[];
+  /** JVM arguments for the debuggee (e.g. -Xmx512m, -Dkey=value). */
+  vmArgs?: string[];
   /** Extra classpath entries appended to the project's runtime classpath. */
   classPath?: string[];
+  /** Environment variables for the debuggee, merged over the inherited env. */
+  env?: Record<string, string>;
+  /** Working directory for the debuggee process. */
+  cwd?: string;
   /** Stop on the first line of main before any user code runs. */
   stopOnEntry?: boolean;
   /** Launch without attaching the debugger (just run). */

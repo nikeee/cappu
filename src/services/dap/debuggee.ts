@@ -9,7 +9,7 @@
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter } from "node:path";
 
 import { type CompileDiagnostic, parseJavacDiagnostics } from "../../compiler/javacDiagnostics.ts";
 import { expandedJarDirs } from "../../compiler/javacPaths.ts";

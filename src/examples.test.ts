@@ -315,11 +315,12 @@ test("cappu compile --artifact steers the output jar name", { skip: !HAS_JAVAC }
 });
 
 // A minimal Spring Boot app: cappu resolves the whole starter tree and compiles
-// it, then it runs from a classpath of the individual jars (NOT a fat jar -
-// Spring auto-config needs each jar's separate META-INF). Networked + JDK-gated;
-// java expands the `<dir>/*` classpath entry itself, so no shell is involved.
+// it, then it runs from a single fat jar. A flat fat jar would normally break
+// Spring Boot (auto-config descriptors live at the same META-INF path in many
+// jars); cappu's `fat-jar` merges those same-path descriptors so one jar boots
+// like the classpath of separate jars would. Networked + JDK-gated.
 test(
-  "examples/spring-boot-app boots Spring Boot from a classpath build",
+  "examples/spring-boot-app boots Spring Boot from a single fat jar",
   {
     skip: !HAS_JAVAC,
   },
@@ -333,15 +334,13 @@ test(
       }
       const env = { ...process.env, CAPPU_PACKAGE_STORE: store };
       execFileSync(tsx, [cli, "install"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
-      execFileSync(tsx, [cli, "compile", "-o", "classes"], {
-        cwd: work,
-        env,
-        stdio: ["ignore", "ignore", "pipe"],
-      });
-      const classpath = `${join(work, "dist")}${delimiter}${join(work, ".cappu", "lib", "classes")}/*`;
-      const output = execFileSync(javaBin(), ["-cp", classpath, "com.example.App"], {
-        encoding: "utf8",
-      });
+      // "output": "fat-jar" is set in the example's cappu.json
+      execFileSync(tsx, [cli, "compile"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
+      const output = execFileSync(
+        javaBin(),
+        ["-jar", join(work, "dist", "spring-boot-app-1.0.0.jar")],
+        { encoding: "utf8" },
+      );
       expect(output).toContain("Spring Boot"); // the startup banner
       expect(output).toContain("Started App"); // the context booted
     } finally {
@@ -518,6 +517,47 @@ test(
     }
   },
 );
+
+// stopOnEntry + vmArgs: launch with no breakpoints; the debugger stops on the
+// first line of main, then runs to completion. The -D vm arg just proves the
+// JVM accepts caller JVM flags (the program still runs).
+test("examples/debug-app stops on entry and accepts vm args", { skip: !HAS_JAVAC }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "cappu-dap-"));
+  const work = join(root, "debug-app");
+  for (const entry of ["cappu.json", "src", ".gitignore"]) {
+    cpSync(join(examplesDir, "debug-app", entry), join(work, entry), { recursive: true });
+  }
+  const child = spawn(tsx, [cli, "dap"], { cwd: work, env: { ...process.env }, stdio: "pipe" });
+  const dap = new DapDriver(child);
+  const t = (label: string, p: Promise<any>) => withTimeout(p, 60_000, label);
+  try {
+    await t("initialize", dap.request("initialize", { adapterID: "cappu" }));
+    await t("initialized", dap.waitEvent("initialized"));
+    expect(
+      (await t("launch", dap.request("launch", { stopOnEntry: true, vmArgs: ["-Dcappu.dap=on"] })))
+        .success,
+    ).toBe(true);
+    await t("configurationDone", dap.request("configurationDone"));
+
+    const stopped = await t("entry", dap.waitEvent("stopped"));
+    expect(stopped.body.reason).toBe("entry");
+    const threadId = stopped.body.threadId;
+    const stack = await t("stackTrace", dap.request("stackTrace", { threadId }));
+    expect(stack.body.stackFrames[0].name).toBe("example.App.main");
+    expect(stack.body.stackFrames[0].line).toBe(5); // `int sum = 0;` - main's first line
+
+    await t("continue", dap.request("continue", { threadId }));
+    await t("terminated", dap.waitEvent("terminated"));
+    expect(dap.outputText).toContain("sum=14");
+
+    await dap.request("disconnect");
+    child.stdin!.end();
+    await t("exit", once(child, "exit"));
+  } finally {
+    child.kill();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 // With full coordinates, `cappu compile -o jar` produces the publishable pair:
 // <artifactId>-<version>.jar plus its generated POM. Javac-gated like the rest.

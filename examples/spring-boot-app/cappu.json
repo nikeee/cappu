@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "compilerOptions": {
     "mainClass": "com.example.App",
+    "output": "fat-jar",
     "release": 17,
     "quiet": true
   },

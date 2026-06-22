@@ -370,3 +370,5 @@ cappu search commons-lang3
 - 2026-06-22 11:50 — add more protocol tests. and an end-to-end test that uses the example
 - 2026-06-22 11:57 — i see some child.once. use the event_emitter helper once() that returns a promise. look out for similar things that could be used instead. prefer builtins
 - 2026-06-22 11:57 — next: move the example descriptions to a README.md file in every respective example directory
+- 2026-06-22 12:00 — we're now having DAP. Do we have some options that could be placed in the cappu.json config, similar to lspOptions? Do we need some options for MCP?
+- 2026-06-22 12:13 — 1

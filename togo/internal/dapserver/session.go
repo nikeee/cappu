@@ -74,6 +74,13 @@ type Session struct {
 	stepRequestID int32
 	hasStep       bool
 
+	// stopOnEntry: a one-shot breakpoint on main()'s first line; its requestID
+	// is matched in the breakpoint event to report reason "entry".
+	stopOnEntry    bool
+	mainSignature  string
+	entryRequestID int32
+	hasEntry       bool
+
 	sigCache     map[uint64]string
 	methodsCache map[uint64][]jdwp.MethodInfo
 
@@ -149,11 +156,18 @@ func (s *Session) onLaunch(raw json.RawMessage) (any, error) {
 	}
 	classPath := DebuggeeClassPath(s.cfg, args.ClassPath)
 	java := jtest.ResolveJava(s.cfg)
-	launched, err := LaunchUnderJdwp(java, classPath, mainClass, args.Args)
+	launched, err := LaunchUnderJdwp(java, classPath, mainClass, LaunchOptions{
+		VMArgs:      args.VMArgs,
+		ProgramArgs: args.Args,
+		Env:         args.Env,
+		Cwd:         args.Cwd,
+	})
 	if err != nil {
 		return nil, err
 	}
 	s.cmd = launched.Cmd
+	s.stopOnEntry = args.StopOnEntry
+	s.mainSignature = "L" + strings.ReplaceAll(mainClass, ".", "/") + ";"
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -180,6 +194,16 @@ func (s *Session) onLaunch(raw json.RawMessage) (any, error) {
 	// The VM started suspended; bind breakpoints set before the client connected.
 	for _, entry := range s.breakpoints {
 		s.bindSource(entry)
+	}
+
+	// stopOnEntry: arm a one-shot breakpoint on main(). The class may already be
+	// loaded; if not, a ClassPrepare arms it when it loads.
+	if s.stopOnEntry {
+		if classes, _ := jdwp.ClassesBySignature(client, s.mainSignature); len(classes) > 0 {
+			s.setEntryBreakpoint(s.mainSignature)
+		} else {
+			s.ensureClassPrepare(mainClass)
+		}
 	}
 	return struct{}{}, nil
 }
@@ -237,6 +261,17 @@ func (s *Session) onSetBreakpoints(raw json.RawMessage) (any, error) {
 	return dap.SetBreakpointsResponseBody{Breakpoints: out}, nil
 }
 
+// ensureClassPrepare registers a ClassPrepare request for a fully-qualified
+// class name once, so we get notified (and can bind/arm) when it loads.
+func (s *Session) ensureClassPrepare(fqcn string) {
+	if s.classPrepared[fqcn] {
+		return
+	}
+	s.classPrepared[fqcn] = true
+	_, _ = jdwp.EventRequestSet(s.client, jdwp.EKClassPrepare, jdwp.SuspendAll,
+		[]jdwp.Modifier{{Kind: jdwp.ModClassMatch, Pattern: fqcn}})
+}
+
 // bindSource resolves each requested line to a JDWP breakpoint, registering a
 // ClassPrepare request when the class is not loaded yet. Caller holds s.mu.
 func (s *Session) bindSource(entry *sourceBreakpoints) {
@@ -245,11 +280,7 @@ func (s *Session) bindSource(entry *sourceBreakpoints) {
 		return
 	}
 	if len(classes) == 0 {
-		if !s.classPrepared[entry.fqcn] {
-			s.classPrepared[entry.fqcn] = true
-			_, _ = jdwp.EventRequestSet(s.client, jdwp.EKClassPrepare, jdwp.SuspendAll,
-				[]jdwp.Modifier{{Kind: jdwp.ModClassMatch, Pattern: entry.fqcn}})
-		}
+		s.ensureClassPrepare(entry.fqcn)
 		return
 	}
 	classID := classes[0].TypeID
@@ -282,6 +313,50 @@ func (s *Session) bindSource(entry *sourceBreakpoints) {
 		bp.bound = true
 		bp.line = loc.Line
 	}
+}
+
+// setEntryBreakpoint arms a one-shot breakpoint at main()'s first line (a
+// Count:1 modifier makes it self-clearing). The breakpoint event reports
+// reason "entry". Caller holds s.mu.
+func (s *Session) setEntryBreakpoint(signature string) {
+	if s.hasEntry {
+		return
+	}
+	classes, err := jdwp.ClassesBySignature(s.client, signature)
+	if err != nil || len(classes) == 0 {
+		return
+	}
+	classID := classes[0].TypeID
+	var mainID uint64
+	found := false
+	for _, m := range s.classMethods(classID) {
+		if m.Name == "main" {
+			mainID = m.MethodID
+			found = true
+			break
+		}
+	}
+	if !found {
+		return
+	}
+	var index uint64
+	if lt, err := jdwp.MethodLineTableCmd(s.client, classID, mainID); err == nil && len(lt.Lines) > 0 {
+		index = lt.Lines[0].LineCodeIndex
+		for _, e := range lt.Lines {
+			if e.LineCodeIndex < index {
+				index = e.LineCodeIndex
+			}
+		}
+	}
+	rid, err := jdwp.EventRequestSet(s.client, jdwp.EKBreakpoint, jdwp.SuspendAll, []jdwp.Modifier{
+		{Kind: jdwp.ModLocationOnly, Location: jdwp.Location{TypeTag: jdwp.TypeTagClass, ClassID: classID, MethodID: mainID, Index: index}},
+		{Kind: jdwp.ModCount, Count: 1}, // one-shot
+	})
+	if err != nil {
+		return
+	}
+	s.entryRequestID = rid
+	s.hasEntry = true
 }
 
 func (s *Session) onThreads(json.RawMessage) (any, error) {
@@ -515,8 +590,16 @@ func (s *Session) handleJdwpEvent(data []byte) {
 	for _, ev := range comp.Events {
 		switch ev.Kind {
 		case jdwp.EKBreakpoint:
+			entry := s.hasEntry && ev.RequestID == s.entryRequestID
+			if entry {
+				s.hasEntry = false // the Count:1 request is spent
+			}
+			reason := "breakpoint"
+			if entry {
+				reason = "entry"
+			}
 			s.clearStopState()
-			s.conn.SendEvent("stopped", dap.StoppedEventBody{Reason: "breakpoint", ThreadID: s.threadDapID(ev.Thread), AllThreadsStopped: true})
+			s.conn.SendEvent("stopped", dap.StoppedEventBody{Reason: reason, ThreadID: s.threadDapID(ev.Thread), AllThreadsStopped: true})
 		case jdwp.EKSingleStep:
 			if s.hasStep {
 				_ = jdwp.EventRequestClear(s.client, jdwp.EKSingleStep, s.stepRequestID)
@@ -552,6 +635,9 @@ func (s *Session) onClassPrepare(signature string) {
 				})
 			}
 		}
+	}
+	if s.stopOnEntry && signature == s.mainSignature {
+		s.setEntryBreakpoint(signature)
 	}
 	_ = jdwp.VMResumeCmd(s.client)
 }

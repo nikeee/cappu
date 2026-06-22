@@ -318,6 +318,71 @@ test("output fat-jar merges dependency jar contents, own classes win", () => {
   });
 });
 
+test("fat-jar merges same-path service/Spring descriptors across dependency jars", () => {
+  inTempDir({ "B.java": "package app; class B { }" }, (dir, paths) => {
+    const libs = join(dir, ".cappu", "lib", "classes");
+    mkdirSync(libs, { recursive: true });
+    const enc = (s: string) => new TextEncoder().encode(s);
+    // two dependency jars that register at the SAME META-INF paths
+    writeFileSync(
+      join(libs, "dep-a.jar"),
+      writeZip([
+        { name: "META-INF/MANIFEST.MF", bytes: new Uint8Array([1]) }, // must not leak
+        { name: "META-INF/services/com.example.Svc", bytes: enc("com.a.Provider\n") },
+        {
+          name: "META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports",
+          bytes: enc("com.a.AutoConfig\n"),
+        },
+        {
+          name: "META-INF/spring.factories",
+          bytes: enc("com.example.Listener=com.a.L1,com.a.L2\n"),
+        },
+      ]),
+    );
+    writeFileSync(
+      join(libs, "dep-b.jar"),
+      writeZip([
+        { name: "META-INF/services/com.example.Svc", bytes: enc("com.b.Provider\n") },
+        {
+          name: "META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports",
+          bytes: enc("com.b.AutoConfig\n"),
+        },
+        // same key as dep-a: a naive concat would let java.util.Properties drop one
+        { name: "META-INF/spring.factories", bytes: enc("com.example.Listener=com.b.L3\n") },
+      ]),
+    );
+    writeFileSync(join(dir, "cappu.json"), "{}");
+    const result = runCompile(paths, {
+      experimentalCompiler: true,
+      outDir: join(dir, "dist"),
+      output: "fat-jar",
+      config: loadConfig(undefined, dir),
+    });
+    expect(result.success).toBe(true);
+    const entries = readZipEntries(readFileSync(result.written[0]!))!;
+    const text = (name: string) =>
+      new TextDecoder().decode(entries.find(e => e.name === name)!.read());
+    // ServiceLoader provider lists from both jars survive
+    expect(text("META-INF/services/com.example.Svc").split(/\n/).filter(Boolean).sort()).toEqual([
+      "com.a.Provider",
+      "com.b.Provider",
+    ]);
+    // Spring Boot auto-configuration imports from both jars survive
+    expect(
+      text("META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports")
+        .split(/\n/)
+        .filter(Boolean)
+        .sort(),
+    ).toEqual(["com.a.AutoConfig", "com.b.AutoConfig"]);
+    // spring.factories: the shared key keeps every jar's values, none dropped
+    expect(text("META-INF/spring.factories").trim()).toBe(
+      "com.example.Listener=com.a.L1,com.a.L2,com.b.L3",
+    );
+    // a dependency manifest never leaks into ours
+    expect(entries.filter(e => e.name === "META-INF/MANIFEST.MF").length).toBe(1);
+  });
+});
+
 const HAS_JAVAC = (() => {
   try {
     execFileSync("javac", ["-version"], { stdio: "ignore" });

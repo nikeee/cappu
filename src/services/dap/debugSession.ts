@@ -109,6 +109,11 @@ export class DebugSession {
   private readonly bpByRequest = new Map<number, number>(); // JDWP requestId -> DAP bp id
   private nextBpId = 1;
   private stepRequestId?: number;
+  // stopOnEntry: a one-shot breakpoint on main()'s first line; its requestId is
+  // matched in the breakpoint event to report reason "entry" instead.
+  private stopOnEntry = false;
+  private mainSignature?: string;
+  private entryRequestId?: number;
   // Per-class JDWP metadata caches (class structure is stable for the run).
   private readonly sigCache = new Map<bigint, string>();
   private readonly methodsCache = new Map<bigint, MethodInfo[]>();
@@ -155,8 +160,15 @@ export class DebugSession {
     const mainClass = resolveMainClass(this.config, args);
     const classPath = debuggeeClassPath(this.config, args.classPath ?? []);
     const java = resolveJava(this.config);
-    const launched = await launchUnderJdwp(java, classPath, mainClass, args.args ?? []);
+    const launched = await launchUnderJdwp(java, classPath, mainClass, {
+      vmArgs: args.vmArgs,
+      programArgs: args.args,
+      env: args.env,
+      cwd: args.cwd,
+    });
     this.child = launched.process;
+    this.stopOnEntry = args.stopOnEntry ?? false;
+    this.mainSignature = `L${mainClass.replaceAll(".", "/")};`;
 
     launched.process.stdout.on("data", (c: Buffer) =>
       this.conn.sendEvent("output", { category: "stdout", output: c.toString("utf8") }),
@@ -184,6 +196,14 @@ export class DebugSession {
     // The VM started suspended (suspend=y); bind any breakpoints set before the
     // client connected, then wait for configurationDone to resume.
     for (const entry of this.breakpoints.values()) await this.bindSource(entry);
+
+    // stopOnEntry: arm a one-shot breakpoint on main(). The class may already be
+    // loaded at this point; if not, a ClassPrepare arms it when it loads.
+    if (this.stopOnEntry && this.mainSignature) {
+      const classes = await classesBySignature(client, this.mainSignature);
+      if (classes.length > 0) await this.setEntryBreakpoint(this.mainSignature);
+      else await this.ensureClassPrepare(mainClass);
+    }
   }
 
   private async onConfigurationDone(): Promise<void> {
@@ -223,16 +243,21 @@ export class DebugSession {
   // Resolve each requested line in a source to a JDWP breakpoint. If the class
   // is not loaded yet, register a ClassPrepare request so binding happens when
   // it loads (onJdwpEvent handles the event).
+  // Register a ClassPrepare request for a fully-qualified class name once, so
+  // we get notified (and can bind/arm) when that class loads.
+  private async ensureClassPrepare(fqcn: string): Promise<void> {
+    if (this.classPrepared.has(fqcn)) return;
+    this.classPrepared.add(fqcn);
+    await eventRequestSet(this.jdwp(), EventKind.CLASS_PREPARE, SuspendPolicy.ALL, [
+      { kind: 5, pattern: fqcn },
+    ]);
+  }
+
   private async bindSource(entry: SourceBreakpoints): Promise<void> {
     const client = this.jdwp();
     const classes = await classesBySignature(client, entry.signature);
     if (classes.length === 0) {
-      if (!this.classPrepared.has(entry.fqcn)) {
-        this.classPrepared.add(entry.fqcn);
-        await eventRequestSet(client, EventKind.CLASS_PREPARE, SuspendPolicy.ALL, [
-          { kind: 5, pattern: entry.fqcn },
-        ]);
-      }
+      await this.ensureClassPrepare(entry.fqcn);
       return;
     }
     const classId = classes[0].typeId;
@@ -260,6 +285,27 @@ export class DebugSession {
       bp.bound = true;
       bp.line = loc.line;
     }
+  }
+
+  // Arm a one-shot breakpoint at main()'s first line (a Count:1 modifier makes
+  // it self-clearing). The breakpoint event reports reason "entry".
+  private async setEntryBreakpoint(signature: string): Promise<void> {
+    if (this.entryRequestId !== undefined) return;
+    const client = this.jdwp();
+    const classes = await classesBySignature(client, signature);
+    if (classes.length === 0) return;
+    const classId = classes[0].typeId;
+    const main = (await this.classMethods(classId)).find(m => m.name === "main");
+    if (!main) return;
+    const lt = await methodLineTable(client, classId, main.methodId).catch(() => null);
+    const index =
+      lt && lt.lines.length > 0
+        ? lt.lines.reduce((a, b) => (b.lineCodeIndex < a.lineCodeIndex ? b : a)).lineCodeIndex
+        : 0n;
+    this.entryRequestId = await eventRequestSet(client, EventKind.BREAKPOINT, SuspendPolicy.ALL, [
+      { kind: 7, location: { typeTag: TypeTag.CLASS, classId, methodId: main.methodId, index } },
+      { kind: 1, count: 1 }, // one-shot
+    ]);
   }
 
   private async onThreads(): Promise<{ threads: { id: number; name: string }[] }> {
@@ -383,14 +429,17 @@ export class DebugSession {
     }
     for (const ev of composite.events) {
       switch (ev.kind) {
-        case EventKind.BREAKPOINT:
+        case EventKind.BREAKPOINT: {
+          const entry = ev.requestId === this.entryRequestId;
+          if (entry) this.entryRequestId = undefined; // the Count:1 request is spent
           this.clearStopState();
           this.conn.sendEvent("stopped", {
-            reason: "breakpoint",
+            reason: entry ? "entry" : "breakpoint",
             threadId: this.threadIds.dap(ev.thread),
             allThreadsStopped: true,
           });
           break;
+        }
         case EventKind.SINGLE_STEP:
           if (this.stepRequestId !== undefined) {
             void eventRequestClear(client, EventKind.SINGLE_STEP, this.stepRequestId).catch(
@@ -442,6 +491,9 @@ export class DebugSession {
           });
         }
       }
+    }
+    if (this.stopOnEntry && signature === this.mainSignature) {
+      await this.setEntryBreakpoint(signature);
     }
     await vmResume(client);
   }

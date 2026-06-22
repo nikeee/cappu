@@ -10,11 +10,14 @@ type Capabilities struct {
 }
 
 type LaunchArguments struct {
-	MainClass   string   `json:"mainClass,omitempty"`
-	Args        []string `json:"args,omitempty"`
-	ClassPath   []string `json:"classPath,omitempty"`
-	StopOnEntry bool     `json:"stopOnEntry,omitempty"`
-	NoDebug     bool     `json:"noDebug,omitempty"`
+	MainClass   string            `json:"mainClass,omitempty"`
+	Args        []string          `json:"args,omitempty"`
+	VMArgs      []string          `json:"vmArgs,omitempty"`
+	ClassPath   []string          `json:"classPath,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	Cwd         string            `json:"cwd,omitempty"`
+	StopOnEntry bool              `json:"stopOnEntry,omitempty"`
+	NoDebug     bool              `json:"noDebug,omitempty"`
 }
 
 type Source struct {

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -122,7 +123,33 @@ func generatedClassEntries(cfg *config.Config) []compiler.ZipEntryInput {
 	return entries
 }
 
+// isExcludedMeta reports whether a dependency jar entry must not leak into our
+// fat jar: the jar's own manifest and signature files (the manifest describes
+// that jar, and a copied signature no longer matches the repackaged contents).
+// Everything else under META-INF/ (service and extension descriptors,
+// multi-release classes) is real classpath content and is kept - it is what
+// makes frameworks like Spring Boot work from a fat jar. Port of isExcludedMeta.
+func isExcludedMeta(name string) bool {
+	if name == "META-INF/MANIFEST.MF" || strings.HasPrefix(name, "META-INF/SIG-") {
+		return true
+	}
+	rest, ok := strings.CutPrefix(name, "META-INF/")
+	if !ok || strings.Contains(rest, "/") {
+		return false
+	}
+	upper := strings.ToUpper(rest)
+	for _, ext := range []string{".SF", ".RSA", ".DSA", ".EC"} {
+		if strings.HasSuffix(upper, ext) {
+			return true
+		}
+	}
+	return false
+}
+
 // classPathEntries collects the dependency class/jar contents for a fat jar.
+// Each jar's own manifest and signatures are dropped (isExcludedMeta); the
+// remaining META-INF/ descriptors are kept and same-path duplicates reconciled
+// at merge time (mergeFatJarEntries). Port of classPathEntries.
 func classPathEntries(cfg *config.Config) []compiler.ZipEntryInput {
 	var entries []compiler.ZipEntryInput
 	addJar := func(path string) {
@@ -131,7 +158,7 @@ func classPathEntries(cfg *config.Config) []compiler.ZipEntryInput {
 			return
 		}
 		for _, entry := range compiler.ReadZipEntries(data) {
-			if strings.HasPrefix(entry.Name, "META-INF/") || strings.HasSuffix(entry.Name, "/") {
+			if strings.HasSuffix(entry.Name, "/") || isExcludedMeta(entry.Name) {
 				continue
 			}
 			entries = append(entries, compiler.ZipEntryInput{Name: entry.Name, Bytes: entry.Read()})
@@ -155,6 +182,152 @@ func classPathEntries(cfg *config.Config) []compiler.ZipEntryInput {
 		}
 	}
 	return entries
+}
+
+// mergeStrategy reports how a same-path META-INF/ descriptor must be combined
+// across dependency jars: "lines" for newline-delimited provider/import lists,
+// "properties" for key=value,... files, "" for paths that are not merged (first
+// wins). These descriptors register services or extensions the runtime reads
+// from EVERY jar (ServiceLoader, Spring Boot auto-configuration); flattening
+// many jars into one would otherwise drop all but one jar's copy. Port of
+// mergeStrategy.
+func mergeStrategy(name string) string {
+	if !strings.HasPrefix(name, "META-INF/") || strings.HasSuffix(name, "/") {
+		return ""
+	}
+	switch {
+	case strings.HasPrefix(name, "META-INF/services/"): // ServiceLoader provider lists
+		return "lines"
+	case strings.HasSuffix(name, ".imports"): // Spring Boot AutoConfiguration.imports
+		return "lines"
+	case strings.HasSuffix(name, ".factories"): // spring.factories / aot.factories
+		return "properties"
+	}
+	return ""
+}
+
+// mergeLines concatenates newline-delimited descriptors, de-duplicated and
+// order-preserving; blank and comment lines are dropped. Port of mergeLines.
+func mergeLines(chunks [][]byte) []byte {
+	seen := map[string]bool{}
+	var out []string
+	for _, chunk := range chunks {
+		for _, raw := range strings.Split(strings.ReplaceAll(string(chunk), "\r\n", "\n"), "\n") {
+			line := strings.TrimSpace(raw)
+			if line == "" || strings.HasPrefix(line, "#") || seen[line] {
+				continue
+			}
+			seen[line] = true
+			out = append(out, line)
+		}
+	}
+	return []byte(strings.Join(out, "\n") + "\n")
+}
+
+// propertyLogicalLines joins trailing-backslash continuation lines into logical
+// lines. ponytail: only the line-continuation feature of java.util.Properties is
+// handled, the one spring.factories uses; class-name values need no escape
+// decoding.
+func propertyLogicalLines(text string) []string {
+	var out []string
+	acc := ""
+	started := false
+	for _, raw := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		if started {
+			acc += strings.TrimLeft(raw, " \t")
+		} else {
+			acc = raw
+			started = true
+		}
+		if strings.HasSuffix(acc, "\\") {
+			acc = acc[:len(acc)-1]
+		} else {
+			out = append(out, acc)
+			acc, started = "", false
+		}
+	}
+	if started {
+		out = append(out, acc)
+	}
+	return out
+}
+
+// mergeProperties merges key=v1,v2,... descriptors by unioning the value list
+// per key: concatenation would let java.util.Properties keep only the last copy
+// of a key present in two jars, dropping the other jar's values. Port of
+// mergeProperties.
+func mergeProperties(chunks [][]byte) []byte {
+	var order []string
+	values := map[string][]string{}
+	for _, chunk := range chunks {
+		for _, logical := range propertyLogicalLines(string(chunk)) {
+			line := strings.TrimSpace(logical)
+			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
+				continue
+			}
+			eq := strings.IndexByte(line, '=')
+			if eq < 0 {
+				continue
+			}
+			key := strings.TrimSpace(line[:eq])
+			if _, ok := values[key]; !ok {
+				order = append(order, key)
+				values[key] = []string{}
+			}
+			for _, part := range strings.Split(line[eq+1:], ",") {
+				value := strings.TrimSpace(part)
+				if value != "" && !slices.Contains(values[key], value) {
+					values[key] = append(values[key], value)
+				}
+			}
+		}
+	}
+	var out []string
+	for _, key := range order {
+		out = append(out, key+"="+strings.Join(values[key], ","))
+	}
+	return []byte(strings.Join(out, "\n") + "\n")
+}
+
+// mergeFatJarEntries folds the dependency entries into the project entries for a
+// fat jar: our own files win any path outright; mergeable descriptors
+// (mergeStrategy) accumulate across all dependency jars and are merged; every
+// other duplicate path is first-wins. Port of mergeFatJarEntries.
+func mergeFatJarEntries(base, deps []compiler.ZipEntryInput) []compiler.ZipEntryInput {
+	result := append([]compiler.ZipEntryInput{}, base...)
+	have := map[string]bool{}
+	for _, e := range base {
+		have[e.Name] = true
+	}
+	var order []string
+	chunks := map[string][][]byte{}
+	for _, e := range deps {
+		if mergeStrategy(e.Name) != "" {
+			if _, ok := chunks[e.Name]; !ok {
+				order = append(order, e.Name)
+			}
+			chunks[e.Name] = append(chunks[e.Name], e.Bytes)
+			continue
+		}
+		if have[e.Name] { // our classes / first dependency wins
+			continue
+		}
+		have[e.Name] = true
+		result = append(result, e)
+	}
+	for _, name := range order {
+		if have[name] { // a project file at this path wins outright
+			continue
+		}
+		var b []byte
+		if mergeStrategy(name) == "properties" {
+			b = mergeProperties(chunks[name])
+		} else {
+			b = mergeLines(chunks[name])
+		}
+		result = append(result, compiler.ZipEntryInput{Name: name, Bytes: b})
+	}
+	return result
 }
 
 // mainClassWarning advises when a jar has several main methods and no configured mainClass.
@@ -308,16 +481,7 @@ func RunCompile(files []string, options Options) Result {
 		entries = append(entries, classes...)
 		entries = append(entries, resources...)
 		if output == "fat-jar" {
-			seen := map[string]bool{}
-			for _, e := range entries {
-				seen[e.Name] = true
-			}
-			for _, e := range classPathEntries(cfg) {
-				if !seen[e.Name] {
-					seen[e.Name] = true
-					entries = append(entries, e)
-				}
-			}
+			entries = mergeFatJarEntries(entries, classPathEntries(cfg))
 		}
 		jar := filepath.Join(outDir, jarName+".jar")
 		_ = os.MkdirAll(outDir, 0o755)
@@ -475,16 +639,7 @@ func runJavacCompile(files []string, outDir, output string, cfg *config.Config, 
 		entries = append(entries, classes...)
 		entries = append(entries, resources...)
 		if output == "fat-jar" {
-			seen := map[string]bool{}
-			for _, e := range entries {
-				seen[e.Name] = true
-			}
-			for _, e := range classPathEntries(cfg) {
-				if !seen[e.Name] {
-					seen[e.Name] = true
-					entries = append(entries, e)
-				}
-			}
+			entries = mergeFatJarEntries(entries, classPathEntries(cfg))
 		}
 		jar := filepath.Join(outDir, jarName+".jar")
 		_ = os.MkdirAll(outDir, 0o755)
