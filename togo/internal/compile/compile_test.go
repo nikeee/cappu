@@ -292,6 +292,23 @@ func TestRunCompileJarPacksClasses(t *testing.T) {
 	}
 }
 
+func TestRunCompileReportsMainClass(t *testing.T) {
+	// an application: a single main(String[]) entry point is detected
+	app := t.TempDir()
+	src := writeFile(t, app, "App.java", "package app; public class App { public static void main(String[] a) {} }")
+	r := RunCompile([]string{src}, Options{Experimental: boolp(true), OutDir: filepath.Join(app, "dist"), Output: "jar", Config: loadCfg(t, app)})
+	if !r.Success || r.MainClass != "app.App" {
+		t.Fatalf("app: MainClass = %q (success=%v)", r.MainClass, r.Success)
+	}
+	// a library: no main, so no Main-Class and no run hint
+	lib := t.TempDir()
+	libSrc := writeFile(t, lib, "Lib.java", "package app; public class Lib { }")
+	r = RunCompile([]string{libSrc}, Options{Experimental: boolp(true), OutDir: filepath.Join(lib, "dist"), Output: "jar", Config: loadCfg(t, lib)})
+	if !r.Success || r.MainClass != "" {
+		t.Fatalf("library: MainClass = %q (success=%v)", r.MainClass, r.Success)
+	}
+}
+
 func TestRunCompileResourcesCopied(t *testing.T) {
 	dir := t.TempDir()
 	src := writeFile(t, dir, "A.java", "package app; class A { }")

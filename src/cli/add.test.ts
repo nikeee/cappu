@@ -3,7 +3,17 @@ import { test } from "node:test";
 import { expect } from "expect";
 import { parse } from "comment-json";
 
-import { addDependencyToJsonc, parseAddCoordinate } from "./add.ts";
+import { addDependencyToJsonc, parseAddCoordinate, resolveConfiguration } from "./add.ts";
+
+test("configuration names and short aliases resolve to the canonical form", () => {
+  expect(resolveConfiguration("implementation")).toBe("implementation");
+  expect(resolveConfiguration("i")).toBe("implementation");
+  expect(resolveConfiguration("a")).toBe("api");
+  expect(resolveConfiguration("ap")).toBe("annotationProcessor");
+  expect(resolveConfiguration("ti")).toBe("testImplementation");
+  expect(resolveConfiguration("nope")).toBeUndefined();
+  expect(resolveConfiguration(undefined)).toBeUndefined();
+});
 
 test("coordinates parse as Gradle-style group:artifact[:version]", () => {
   // a line copied straight from a build.gradle

@@ -73,6 +73,63 @@ func PrintDurationFooter(command string, d time.Duration) {
 	fmt.Fprint(os.Stderr, paint("dim", "done in "+formatDuration(d)+"\n"))
 }
 
+// downloadBar is the shared CLI download progress bar (jars + JDK archives): a
+// {bar} {value}/{total} {label} line redrawn in place on stderr. newDownloadBar
+// returns nil when the stream is not a colour-capable TTY, so piped output stays
+// plain; the methods are nil-safe. Port of downloadBar in style.ts (the
+// cli-progress SingleBar), reimplemented with a plain \r redraw to avoid a
+// progress-bar dependency.
+type downloadBar struct {
+	stream *os.File
+	paint  func(format, text string) string
+	total  int
+	unit   string // "" for a plain item count, e.g. "MiB" otherwise
+}
+
+const downloadBarWidth = 40
+
+func newDownloadBar(stream *os.File, unit string) *downloadBar {
+	if !ColorEnabled(isTTY(stream), os.Getenv) {
+		return nil
+	}
+	return &downloadBar{stream: stream, paint: painter(stream), unit: unit}
+}
+
+func (b *downloadBar) start(total int) {
+	if b == nil {
+		return
+	}
+	b.total = total
+}
+
+func (b *downloadBar) update(value int, label string) {
+	if b == nil {
+		return
+	}
+	frac := 0.0
+	if b.total > 0 {
+		frac = float64(value) / float64(b.total)
+	}
+	if frac > 1 {
+		frac = 1
+	}
+	filled := int(frac * downloadBarWidth)
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", downloadBarWidth-filled)
+	count := fmt.Sprintf("%d/%d", value, b.total)
+	if b.unit != "" {
+		count += " " + b.unit
+	}
+	fmt.Fprintf(b.stream, "\r\x1b[2K%s %s %s", b.paint("cyan", bar), b.paint("bold", count), b.paint("dim", label))
+}
+
+// stop clears the bar line (cli-progress clearOnComplete).
+func (b *downloadBar) stop() {
+	if b == nil {
+		return
+	}
+	fmt.Fprint(b.stream, "\r\x1b[2K")
+}
+
 func isTTY(f *os.File) bool {
 	info, err := f.Stat()
 	if err != nil {

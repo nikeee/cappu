@@ -2,10 +2,11 @@
 // first accepted TCP connection (one session per process). Mirrors src/cli/lsp.ts.
 
 import { once } from "node:events";
-import { createServer, type Socket } from "node:net";
+import type { Socket } from "node:net";
 
 import type { CappuConfig } from "../config.ts";
 import { startDapServer } from "../services/dap/dapServer.ts";
+import { listenDisposable } from "./disposableServer.ts";
 
 export async function runDap(config: CappuConfig, portArg: string | undefined): Promise<void> {
   if (portArg !== undefined) {
@@ -14,14 +15,15 @@ export async function runDap(config: CappuConfig, portArg: string | undefined): 
       process.stderr.write(`cappu: invalid port '${portArg}'\n`);
       process.exit(2);
     }
-    const tcp = createServer().listen(port);
-    await once(tcp, "listening");
-    const address = tcp.address();
-    const bound = typeof address === "object" && address ? address.port : port;
-    process.stderr.write(`cappu dap listening on port ${bound}\n`);
-
-    const [socket] = (await once(tcp, "connection")) as [Socket];
-    tcp.close();
+    let socket: Socket;
+    {
+      using tcp = listenDisposable(port);
+      await once(tcp, "listening");
+      const address = tcp.address();
+      const bound = typeof address === "object" && address ? address.port : port;
+      process.stderr.write(`cappu dap listening on port ${bound}\n`);
+      [socket] = (await once(tcp, "connection")) as [Socket];
+    }
     socket.once("close", () => process.exit(0));
     await startDapServer(config, { reader: socket, writer: socket });
     return;

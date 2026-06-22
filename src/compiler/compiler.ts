@@ -78,6 +78,10 @@ interface CompileOutput {
   degraded: string[];
   /** Non-fatal advisories the CLI prints (e.g. an ambiguous Main-Class). */
   warnings?: string[];
+  /** The Main-Class baked into a jar/fat-jar manifest, if any. Set only for an
+   * application (a runnable artifact); undefined for a library or a classes
+   * build. The CLI uses it to print a "run it with" hint. */
+  mainClass?: string;
 }
 
 // The jar's Main-Class advisory (nikeee/cappu#11): a jar with several main
@@ -413,6 +417,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
 
   const written: string[] = [];
   const warnings: string[] = [];
+  let mainClass: string | undefined;
   try {
     const classes: ZipEntryInput[] = [];
     const mainClasses: string[] = [];
@@ -445,7 +450,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
     } else {
       // Main-Class makes `java -jar` work (nikeee/cappu#11): the configured one
       // wins; otherwise the single detected main(String[]) entry point.
-      const mainClass =
+      mainClass =
         options.config.compilerOptions.mainClass ??
         (mainClasses.length === 1 ? mainClasses[0] : undefined);
       warnings.push(...mainClassWarning(mainClasses, options.config.compilerOptions.mainClass));
@@ -486,7 +491,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
       degraded,
     };
   }
-  return { success: true, written, degraded, warnings };
+  return { success: true, written, degraded, warnings, mainClass };
 }
 
 /**
@@ -556,6 +561,7 @@ function runJavacCompile(
     const resources = resourceEntries(config).filter(r => !haveNames.has(r.name));
     const written: string[] = [];
     const warnings: string[] = [];
+    let mainClass: string | undefined;
     if (output === "classes") {
       for (const rel of outputFiles) {
         const target = join(outDir, rel);
@@ -584,7 +590,7 @@ function runJavacCompile(
           );
         }
       }
-      const mainClass =
+      mainClass =
         config.compilerOptions.mainClass ?? (mainClasses.length === 1 ? mainClasses[0] : undefined);
       warnings.push(...mainClassWarning(mainClasses, config.compilerOptions.mainClass));
       const manifest: ZipEntryInput = {
@@ -602,7 +608,7 @@ function runJavacCompile(
       writeFileSync(jar, writeZip(entries));
       written.push(jar);
     }
-    return { success: true, written, degraded: [], warnings };
+    return { success: true, written, degraded: [], warnings, mainClass };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

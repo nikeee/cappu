@@ -2,6 +2,7 @@
 // With no files, this is a project build over the configured sourcePaths.
 
 import { writeFileSync } from "node:fs";
+import { relative } from "node:path";
 
 import { missingConfiguredPaths, type OutputKind, runCompile } from "../compiler/compiler.ts";
 import type { CappuConfig } from "../config.ts";
@@ -114,6 +115,13 @@ export async function runCompileCommand(
     if (!quiet) {
       process.stderr.write(`--validate: ${validation.compared} class(es) match javac\n`);
     }
+  }
+  // DX: after building a runnable application jar, show how to start it. Only
+  // for applications - a library jar has no Main-Class, so result.mainClass is
+  // undefined and nothing is printed.
+  if (!quiet && (effectiveOutput === "jar" || effectiveOutput === "fat-jar") && result.mainClass) {
+    const jar = result.written.find(f => f.endsWith(".jar"));
+    if (jar) process.stdout.write(`\nRun it with:\n  java -jar ${relative(process.cwd(), jar)}\n`);
   }
   process.exit(0);
 }

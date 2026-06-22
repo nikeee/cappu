@@ -25,6 +25,19 @@ import { runInstall } from "./install.ts";
 const CONFIGURATIONS = DEPENDENCY_CONFIGURATIONS;
 type Configuration = (typeof CONFIGURATIONS)[number];
 
+/** Short aliases accepted in place of the full configuration name. */
+const CONFIGURATION_ALIASES: Record<string, Configuration> = {
+  a: "api",
+  i: "implementation",
+  ap: "annotationProcessor",
+  ti: "testImplementation",
+};
+
+/** Resolve a configuration name or short alias to its canonical form. */
+export function resolveConfiguration(arg: string | undefined): Configuration | undefined {
+  return CONFIGURATIONS.find(c => c === arg) ?? CONFIGURATION_ALIASES[arg ?? ""];
+}
+
 export interface AddCoordinate {
   /** "group:artifact" - the dependencies-section key. */
   key: PackageKey;
@@ -80,7 +93,7 @@ export async function runAdd(
   // Injectable for tests; defaults to the configured remote repositories.
   sources?: readonly PackageSource[],
 ): Promise<never> {
-  const configuration = CONFIGURATIONS.find(c => c === configurationArg);
+  const configuration = resolveConfiguration(configurationArg);
   const coordinates = specs.map(parseAddCoordinate);
   const invalid = specs.filter((_, i) => coordinates[i] === undefined);
   if (!configuration || coordinates.length === 0 || invalid.length > 0) {
@@ -90,6 +103,7 @@ export async function runAdd(
     }
     process.stderr.write(
       `usage: cappu add <${CONFIGURATIONS.join("|")}> <group:artifact[:version]> [more...]\n` +
+        "       aliases: a=api, i=implementation, ap=annotationProcessor, ti=testImplementation\n" +
         "e.g.:  cappu add implementation com.google.code.gson:gson:2.14.0 org.slf4j:slf4j-api\n",
     );
     process.exit(2);

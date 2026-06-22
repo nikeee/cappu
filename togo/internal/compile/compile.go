@@ -50,6 +50,10 @@ type Result struct {
 	Degraded    []string
 	Warnings    []string
 	Diagnostics []CompileDiagnostic
+	// MainClass is the Main-Class baked into a jar/fat-jar manifest, if any. Set
+	// only for an application (a runnable artifact); empty for a library or a
+	// classes build. The CLI uses it to print a "run it with" hint.
+	MainClass string
 }
 
 // ParseJavacDiagnostics parses javac's stderr into located diagnostics.
@@ -436,6 +440,7 @@ func RunCompile(files []string, options Options) Result {
 	defer compiler.SetDegradeListener(nil)
 
 	var written, warnings []string
+	var mainClass string
 	var classes []compiler.ZipEntryInput
 	var mainClasses []string
 	for _, file := range files {
@@ -472,7 +477,7 @@ func RunCompile(files []string, options Options) Result {
 			}
 		}
 	} else {
-		mainClass := cfg.CompilerOptions.MainClass
+		mainClass = cfg.CompilerOptions.MainClass
 		if mainClass == "" && len(mainClasses) == 1 {
 			mainClass = mainClasses[0]
 		}
@@ -495,7 +500,7 @@ func RunCompile(files []string, options Options) Result {
 			Message: strconv.Itoa(len(degraded)) + " method(s) degraded to a placeholder body (--fail-on-degrade)"})
 		return Result{Success: false, Diagnostics: diagnostics, Written: written, Degraded: degraded}
 	}
-	return Result{Success: true, Written: written, Degraded: degraded, Warnings: warnings}
+	return Result{Success: true, Written: written, Degraded: degraded, Warnings: warnings, MainClass: mainClass}
 }
 
 func hasError(diags []CompileDiagnostic) bool {
@@ -600,6 +605,7 @@ func runJavacCompile(files []string, outDir, output string, cfg *config.Config, 
 		}
 	}
 	var written, warnings []string
+	var mainClass string
 	if output == "classes" {
 		for _, rel := range outputFiles {
 			b, err := os.ReadFile(filepath.Join(tmp, filepath.FromSlash(rel)))
@@ -630,7 +636,7 @@ func runJavacCompile(files []string, outDir, output string, cfg *config.Config, 
 				mainClasses = append(mainClasses, strings.ReplaceAll(strings.TrimSuffix(rel, ".class"), "/", "."))
 			}
 		}
-		mainClass := cfg.CompilerOptions.MainClass
+		mainClass = cfg.CompilerOptions.MainClass
 		if mainClass == "" && len(mainClasses) == 1 {
 			mainClass = mainClasses[0]
 		}
@@ -647,5 +653,5 @@ func runJavacCompile(files []string, outDir, output string, cfg *config.Config, 
 			written = append(written, jar)
 		}
 	}
-	return Result{Success: true, Written: written, Warnings: warnings}
+	return Result{Success: true, Written: written, Warnings: warnings, MainClass: mainClass}
 }

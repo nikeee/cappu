@@ -181,6 +181,34 @@ test("output jar packs the classes behind a manifest, named after the project di
   });
 });
 
+test("a jar reports its Main-Class for an app, but not for a library (run hint)", () => {
+  // an application: a single main(String[]) entry point is detected
+  inTempDir(
+    { "App.java": "package app; public class App { public static void main(String[] a) {} }" },
+    (dir, paths) => {
+      const result = runCompile(paths, {
+        experimentalCompiler: true,
+        outDir: join(dir, "dist"),
+        output: "jar",
+        config: defaultConfig(dir),
+      });
+      expect(result.success).toBe(true);
+      expect(result.mainClass).toBe("app.App");
+    },
+  );
+  // a library: no main, so no Main-Class and no run hint
+  inTempDir({ "Lib.java": "package app; public class Lib { }" }, (dir, paths) => {
+    const result = runCompile(paths, {
+      experimentalCompiler: true,
+      outDir: join(dir, "dist"),
+      output: "jar",
+      config: defaultConfig(dir),
+    });
+    expect(result.success).toBe(true);
+    expect(result.mainClass).toBeUndefined();
+  });
+});
+
 test("resourcePaths files are copied into the classes tree and the jar (#12)", () => {
   inTempDir({ "A.java": "package app; class A { }" }, (dir, paths) => {
     mkdirSync(join(dir, "src", "main", "resources", "conf"), { recursive: true });

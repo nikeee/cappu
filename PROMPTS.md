@@ -372,3 +372,10 @@ cappu search commons-lang3
 - 2026-06-22 11:57 — next: move the example descriptions to a README.md file in every respective example directory
 - 2026-06-22 12:00 — we're now having DAP. Do we have some options that could be placed in the cappu.json config, similar to lspOptions? Do we need some options for MCP?
 - 2026-06-22 12:13 — 1
+- 2026-06-22 15:05 — fix the spring boot sample we want a single jar. or war? can we support that? Do we need another output type?
+- 2026-06-22 15:11 — add this as an e2e test
+- 2026-06-22 15:14 — add an option for always enableAssertions
+- 2026-06-22 15:21 — the go version doesnt seem to have a progress bar when downloading dependencies
+- 2026-06-22 15:37 — can we make use of the Disposable symbol and using somewhere?
+- 2026-06-22 15:20 — DX: after building something, we might want to print how to run the file. e.g. `java -jar dist/app.jar` after building the app jar. May only apply to applications and not libraries
+- 2026-06-22 15:43 — support short identifiers for cappu add; i for "implementation"

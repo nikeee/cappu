@@ -350,6 +350,63 @@ test(
   },
 );
 
+// Like spring-boot-app, but a WEB app: the fat jar must bring up embedded Tomcat
+// and serve a request. Tomcat's bootstrap is found through the merged
+// META-INF/services/jakarta.servlet.ServletContainerInitializer, so a flat fat
+// jar that dropped (or first-wins-collapsed) those descriptors would never start
+// the server. Networked + JDK-gated. ponytail: fixed port, one test run.
+const WEB_PORT = 18080;
+test(
+  "examples/spring-boot-web-app serves HTTP from a single fat jar",
+  { skip: !HAS_JAVAC },
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
+    const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
+    const work = join(root, "spring-boot-web-app");
+    let child: ChildProcess | undefined;
+    try {
+      for (const entry of ["cappu.json", "cappu-lock.json", "src", ".gitignore"]) {
+        cpSync(join(examplesDir, "spring-boot-web-app", entry), join(work, entry), {
+          recursive: true,
+        });
+      }
+      const env = { ...process.env, CAPPU_PACKAGE_STORE: store };
+      execFileSync(tsx, [cli, "install"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
+      execFileSync(tsx, [cli, "compile"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
+      child = spawn(
+        javaBin(),
+        ["-jar", join(work, "dist", "spring-boot-web-app-1.0.0.jar"), `--server.port=${WEB_PORT}`],
+        { stdio: ["ignore", "pipe", "pipe"] },
+      );
+      let log = "";
+      child.stdout?.on("data", (c: Buffer) => (log += c));
+      child.stderr?.on("data", (c: Buffer) => (log += c));
+      // Poll the endpoint until Tomcat is up (or the JVM dies / we time out).
+      const body = await withTimeout(
+        (async () => {
+          for (;;) {
+            if (child!.exitCode !== null) throw new Error(`java exited early:\n${log}`);
+            try {
+              const res = await fetch(`http://localhost:${WEB_PORT}/hello`);
+              if (res.ok) return await res.text();
+            } catch {
+              // not listening yet; retry
+            }
+            await new Promise(r => setTimeout(r, 250));
+          }
+        })(),
+        60_000,
+        `spring-boot-web-app /hello (log:\n${log})`,
+      );
+      expect(body).toBe("hello from fat jar");
+    } finally {
+      child?.kill();
+      rmSync(root, { recursive: true, force: true });
+      rmSync(store, { recursive: true, force: true });
+    }
+  },
+);
+
 // A tiny DAP client: speaks the Content-Length-framed protocol to a spawned
 // `cappu dap` over its stdio, correlating responses by request_seq and letting
 // the test await named events.

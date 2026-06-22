@@ -11,6 +11,7 @@ output goes to `dist/`.
 - [debug-app](debug-app/README.md) - debugging over the Debug Adapter Protocol
 - [audit-app](audit-app/README.md) - `cappu audit` over a vulnerable dependency
 - [resources-app](resources-app/README.md) - bundled main and test resources
-- [spring-boot-app](spring-boot-app/README.md) - booting Spring Boot from a classpath build
+- [spring-boot-app](spring-boot-app/README.md) - booting Spring Boot from a single fat jar
+- [spring-boot-web-app](spring-boot-web-app/README.md) - a Spring Boot web app (embedded Tomcat) from a single fat jar
 
 `src/examples.test.ts` builds, runs, tests and audits every example end-to-end.

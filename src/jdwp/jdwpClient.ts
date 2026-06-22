@@ -92,6 +92,10 @@ export class JdwpClient {
     this.stream.end();
   }
 
+  [Symbol.dispose](): void {
+    this.close();
+  }
+
   private waitHandshake(): Promise<void> {
     if (this.handshook) return Promise.resolve();
     return new Promise((resolve, reject) => (this.handshake = { resolve, reject }));

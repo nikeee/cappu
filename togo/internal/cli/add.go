@@ -13,6 +13,25 @@ import (
 
 var configurations = config.Configurations
 
+// configurationAliases maps short aliases to the full configuration name.
+var configurationAliases = map[string]string{
+	"a":  "api",
+	"i":  "implementation",
+	"ap": "annotationProcessor",
+	"ti": "testImplementation",
+}
+
+// resolveConfiguration resolves a configuration name or short alias to its
+// canonical form, or "" if it matches neither.
+func resolveConfiguration(arg string) string {
+	for _, c := range configurations {
+		if c == arg {
+			return c
+		}
+	}
+	return configurationAliases[arg]
+}
+
 // addCoordinate is a parsed "group:artifact[:version]" spec.
 type addCoordinate struct {
 	key     string // "group:artifact"
@@ -48,12 +67,7 @@ func looksExact(version string) bool {
 // write the entries into cappu.json (comments preserved), then download them
 // and their transitive dependencies like `cappu install`. Port of src/cli/add.ts.
 func RunAdd(configurationArg string, specs []string, configPathArg string, cfg *config.Config) int {
-	configuration := ""
-	for _, c := range configurations {
-		if c == configurationArg {
-			configuration = c
-		}
-	}
+	configuration := resolveConfiguration(configurationArg)
 	coords := make([]addCoordinate, 0, len(specs))
 	var invalid []string
 	for _, spec := range specs {
@@ -69,6 +83,7 @@ func RunAdd(configurationArg string, specs []string, configPathArg string, cfg *
 			emitAnnotation("error", fmt.Sprintf("not a coordinate: '%s'", spec), AnnotationLocation{})
 		}
 		fmt.Fprintf(os.Stderr, "usage: cappu add <%s> <group:artifact[:version]> [more...]\n"+
+			"       aliases: a=api, i=implementation, ap=annotationProcessor, ti=testImplementation\n"+
 			"e.g.:  cappu add implementation com.google.code.gson:gson:2.14.0 org.slf4j:slf4j-api\n",
 			strings.Join(configurations, "|"))
 		return 2

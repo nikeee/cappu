@@ -1,0 +1,625 @@
+{
+  "version": 2,
+  "roots": {
+    "api": {},
+    "implementation": {
+      "org.springframework.boot:spring-boot-starter-web": "4.1.0"
+    },
+    "annotationProcessor": {},
+    "testImplementation": {}
+  },
+  "packages": [
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot-starter-web",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "d2732bdc307d3628d680d32758b300972109f499ec8e023bd663cdad002c67c6",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot-starter-jackson",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "4214c534cca5c7c7e1cf92db90f178a3dffdede503fb68ac3c0dd905f331431f",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot-starter-tomcat",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "3e8cbd141ee6f4f2acfaf6320f1951307816f086de426d08eac19ef4a57d7e90",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot-http-converter",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "f82c8913ea17a60630a5d26fa006cf79f28c7d920dbbef8760f5bc7053706fea",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot-webmvc",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "ab21735a550cbfefaa4ad6ffbb1a891592580ef05ad729cd2025bc0245862b55",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot-starter",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "40352b3fc0834d5830f66d40100fc8afa8ac73e24a134c7779bd42b72f2d6506",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot-jackson",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "10b6e63a40b257168854093f413eaab8b8a9afb7e989fcc7f6732b42c3f173d1",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot-starter-tomcat-runtime",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "135fa0b7a4232c64b975f348cab39e2259d36a18e14768f5f213147a4febf68d",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot-tomcat",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "011e662eb6f9f4a80c5dacf914cfca8a25a33fcd753736ec453dcf701337dd24",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "b23951a3a7f867e38db4729b8594e1b72374516f386b1dd9cf4d5317d6d3f91f",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework",
+        "artifactId": "spring-web",
+        "version": "7.0.8"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "4d4ed7ecb0453d25d735ea27d025ea36b003c3d29cb7d006bedd6d5188a2f5c0",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot-servlet",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "5f694a7c6c357a87032bc92db0e7e0e03b64010f77892e5992c86b10f568a5ae",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework",
+        "artifactId": "spring-webmvc",
+        "version": "7.0.8"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "48f7e1e2d0d46e98ed3fa30d5a64cb1f7ed2aa339a82edcd87289ed8ff216f04",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot-starter-logging",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "73a6a42d2b6a589bd722aa107800829d0b20b731d94135f53c4b744db8beafbf",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot-autoconfigure",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "0fcaa3050ba835ca6b3879f81cd48dc590a6262f53bbf10d2a95c70bf7c048ac",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "jakarta.annotation",
+        "artifactId": "jakarta.annotation-api",
+        "version": "3.0.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "b01f55552284cfb149411e64eabca75e942d26d2e1786b32914250e4330afaa2",
+      "licenses": [
+        {
+          "name": "EPL 2.0",
+          "url": "https://www.eclipse.org/legal/epl-2.0"
+        },
+        {
+          "name": "GPL2 w/ CPE",
+          "url": "https://www.gnu.org/software/classpath/license.html"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.yaml",
+        "artifactId": "snakeyaml",
+        "version": "2.6"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "c8f7a98e7394adda02f6317249710e4d1b4c7a25aa8c7eace0c2eea52eb8bf85",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "tools.jackson.core",
+        "artifactId": "jackson-databind",
+        "version": "3.1.4"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "14034bfdf392b6ebec1b4bb6c1de29d604f0aa97251259a19d5f19af8719bb20",
+      "licenses": [
+        {
+          "name": "The Apache Software License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework.boot",
+        "artifactId": "spring-boot-web-server",
+        "version": "4.1.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "a8541ccbd29f5a8db7e6092fa83463aa4d1c002fac07b8b5babe118ad6c4a3d3",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.apache.tomcat.embed",
+        "artifactId": "tomcat-embed-core",
+        "version": "11.0.22"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "78cd7cd7c104b6b87142c1b0bd902e1ce005b0245c3cefa8a06759148947200b",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.apache.tomcat.embed",
+        "artifactId": "tomcat-embed-el",
+        "version": "11.0.22"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "1b34c33b858c141df36c501b4d809e68036c406bca3671a86facae297917c7de",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.apache.tomcat.embed",
+        "artifactId": "tomcat-embed-websocket",
+        "version": "11.0.22"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "210e0c7ab194a76cc7283df0be365276091b042369dae125fb477828ba67e922",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework",
+        "artifactId": "spring-core",
+        "version": "7.0.8"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "726ba2a5130833644bdf267a55ff26e1f52e8dcc9aa1ffa06904ca9c14619f25",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework",
+        "artifactId": "spring-context",
+        "version": "7.0.8"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "1eb7d552414ebac00e30ab3e809138d810785f6d2c4271db77cdf0181f308f19",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework",
+        "artifactId": "spring-beans",
+        "version": "7.0.8"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "6ec2e361a8872a71d8b1ff66f1bcb8cfa29fcc437931998919da7cecfb59b45b",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "io.micrometer",
+        "artifactId": "micrometer-observation",
+        "version": "1.16.6"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "4c0826d5e7c8522a8e111470b4e77f77b0a10f520eb5502ddd143fdbcedb2340",
+      "licenses": [
+        {
+          "name": "The Apache Software License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework",
+        "artifactId": "spring-aop",
+        "version": "7.0.8"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "1178f039e087884174e2affc46e484f4a8bd7f2a4e011d33dd9137709f740f80",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.springframework",
+        "artifactId": "spring-expression",
+        "version": "7.0.8"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "3c97c38ab59c77ee886e08ccf8096f6bb58a1245f68dfed7a40e93f41c435f9a",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "ch.qos.logback",
+        "artifactId": "logback-classic",
+        "version": "1.5.34"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "b65e05076a5c1aadb659b4fe4bc5fee31cb26cd70390292eb03e4a7a24cff10f",
+      "licenses": [
+        {
+          "name": "EPL-2.0",
+          "url": "https://www.eclipse.org/legal/epl-v20.html"
+        },
+        {
+          "name": "LGPL-2.1-only",
+          "url": "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.apache.logging.log4j",
+        "artifactId": "log4j-to-slf4j",
+        "version": "2.25.4"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "d7b78fc0aaaa5e8ada388b29d718b0ab187e512965bed0b259bb4ab299f13db2",
+      "licenses": [
+        {
+          "name": "Apache-2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.slf4j",
+        "artifactId": "jul-to-slf4j",
+        "version": "2.0.18"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "cbb7d1aaaa9e871eb1a06594abd911bf97027152976edf1edc315be75239204e",
+      "licenses": [
+        {
+          "name": "MIT",
+          "url": "https://opensource.org/license/mit"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-annotations",
+        "version": "2.21"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "53ca085f4a150f703f49e1aabd935bd03b43e1ea3d55d135438292af22cef56b",
+      "licenses": [
+        {
+          "name": "The Apache Software License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "tools.jackson.core",
+        "artifactId": "jackson-core",
+        "version": "3.1.4"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "3bda1cd6eff0a8d47bdfcaeae7c2bd5311d6c8ed494ef5f3e51029bb44aa9bdf",
+      "licenses": [
+        {
+          "name": "The Apache Software License, Version 2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.apache.tomcat",
+        "artifactId": "tomcat-annotations-api",
+        "version": "11.0.22"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "fbe1a2ee12ea472b773bf3a6237d95b66a002c5c4fa6d38a54e69c019558cfd4",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "commons-logging",
+        "artifactId": "commons-logging",
+        "version": "1.3.5"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "6d7a744e4027649fbb50895df9497d109f98c766a637062fe8d2eabbb3140ba4",
+      "licenses": [
+        {
+          "name": "Apache-2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.jspecify",
+        "artifactId": "jspecify",
+        "version": "1.0.0"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "1fad6e6be7557781e4d33729d49ae1cdc8fdda6fe477bb0cc68ce351eafdfbab",
+      "licenses": [
+        {
+          "name": "The Apache License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "io.micrometer",
+        "artifactId": "micrometer-commons",
+        "version": "1.16.6"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "45aff76226830db257f4bc39a5bcff83d633e572fee9dc4e45cfa12af9a0a49a",
+      "licenses": [
+        {
+          "name": "The Apache Software License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "ch.qos.logback",
+        "artifactId": "logback-core",
+        "version": "1.5.34"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "42eda264c0c650c2bec59e66151a88b708a8663dc1b49d788202d53e78b8caae",
+      "licenses": [
+        {
+          "name": "EPL-2.0",
+          "url": "https://www.eclipse.org/legal/epl-v20.html"
+        },
+        {
+          "name": "LGPL-2.1-only",
+          "url": "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.slf4j",
+        "artifactId": "slf4j-api",
+        "version": "2.0.17"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "7b751d952061954d5abfed7181c1f645d336091b679891591d63329c622eb832",
+      "licenses": [
+        {
+          "name": "MIT",
+          "url": "https://opensource.org/license/mit"
+        }
+      ]
+    },
+    {
+      "coordinates": {
+        "groupId": "org.apache.logging.log4j",
+        "artifactId": "log4j-api",
+        "version": "2.25.4"
+      },
+      "source": "https://repo.maven.apache.org/maven2",
+      "sha256": "c4b642a7f047275215de117e0e3847eb2c7711d84a0aa7433e7b3c096daf341d",
+      "licenses": [
+        {
+          "name": "Apache-2.0",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ]
+    }
+  ]
+}

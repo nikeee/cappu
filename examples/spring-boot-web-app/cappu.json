@@ -1,0 +1,16 @@
+{
+  "groupId": "com.example",
+  "artifactId": "spring-boot-web-app",
+  "version": "1.0.0",
+  "compilerOptions": {
+    "mainClass": "com.example.App",
+    "output": "fat-jar",
+    "release": 17,
+    "quiet": true
+  },
+  "dependencies": {
+    "implementation": {
+      "org.springframework.boot:spring-boot-starter-web": "4.1.0"
+    }
+  }
+}

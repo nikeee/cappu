@@ -76,13 +76,9 @@ async function withServer(
   await once(server, "listening");
   const addr = server.address();
   const port = typeof addr === "object" && addr ? addr.port : 0;
-  const client = await JdwpClient.connect("127.0.0.1", port);
-  try {
-    await fn(client);
-  } finally {
-    client.close();
-    server.close();
-  }
+  using _server = { [Symbol.dispose]: () => void server.close() };
+  using client = await JdwpClient.connect("127.0.0.1", port);
+  await fn(client);
 }
 
 test("handshake + IDSizes negotiation", async () => {

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"math"
 	"os"
 
 	"github.com/nikeee/cappu/internal/config"
@@ -29,6 +30,10 @@ func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 	showProgress := ColorEnabled(isTTY(os.Stderr), os.Getenv)
 
 	resolving := 0
+	// Resolving (no lockfile) fetches a POM per package with no known total, so
+	// it gets a count-up line; once downloads start it is wiped and replaced by
+	// the bar. Port of the onResolve/onProgress dance in install.ts.
+	var bar *downloadBar
 	result, err := install.Dependencies(cfg, nil, install.Options{
 		UpdateLock: updateLock,
 		OnResolve: func(current packages.CoordinateString) {
@@ -37,10 +42,25 @@ func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 				fmt.Fprintf(os.Stderr, "\r\x1b[2Kresolving %d %s", resolving, current)
 			}
 		},
+		OnProgress: func(done, total int, current packages.CoordinateString) {
+			if !showProgress {
+				return
+			}
+			if resolving > 0 {
+				fmt.Fprint(os.Stderr, "\r\x1b[2K") // wipe the resolving line before the bar
+				resolving = 0
+			}
+			if bar == nil {
+				bar = newDownloadBar(os.Stderr, "")
+				bar.start(total)
+			}
+			bar.update(done, string(current))
+		},
 	})
 	if resolving > 0 {
-		fmt.Fprint(os.Stderr, "\r\x1b[2K")
+		fmt.Fprint(os.Stderr, "\r\x1b[2K") // nothing to download after resolve
 	}
+	bar.stop()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
 		emitAnnotation("error", err.Error(), AnnotationLocation{})
@@ -109,7 +129,18 @@ func provisionJDK(cfg *config.Config, errp func(format, text string) string) boo
 	if cfg.JDK == "" {
 		return false
 	}
-	result, err := jdks.Provision(cfg, cfg.JDK, nil)
+	var bar *downloadBar
+	result, err := jdks.Provision(cfg, cfg.JDK, func(received, total int64) {
+		if total <= 0 {
+			return
+		}
+		if bar == nil {
+			bar = newDownloadBar(os.Stderr, "MiB")
+			bar.start(int(math.Round(float64(total) / 1024 / 1024)))
+		}
+		bar.update(int(math.Round(float64(received)/1024/1024)), cfg.JDK)
+	})
+	bar.stop()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s jdk %s: %s\n", errp("red", "error:"), cfg.JDK, err)
 		emitAnnotation("error", fmt.Sprintf("jdk %s: %s", cfg.JDK, err), AnnotationLocation{})

@@ -27,6 +27,23 @@ func TestParseAddCoordinate(t *testing.T) {
 	}
 }
 
+func TestResolveConfiguration(t *testing.T) {
+	cases := map[string]string{
+		"implementation": "implementation",
+		"i":              "implementation",
+		"a":              "api",
+		"ap":             "annotationProcessor",
+		"ti":             "testImplementation",
+		"nope":           "",
+		"":               "",
+	}
+	for arg, want := range cases {
+		if got := resolveConfiguration(arg); got != want {
+			t.Errorf("resolveConfiguration(%q) = %q, want %q", arg, got, want)
+		}
+	}
+}
+
 func TestLooksExact(t *testing.T) {
 	exact := []string{"2.14.0", "1.0.0-SNAPSHOT", "3.0.0", "2-rc1"}
 	for _, v := range exact {

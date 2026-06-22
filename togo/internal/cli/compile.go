@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -102,6 +103,24 @@ func RunCompile(files []string, outputFlag, artifact string, quiet bool, cfg *co
 		}
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "--validate: %d class(es) match javac\n", v.Compared)
+		}
+	}
+
+	// DX: after building a runnable application jar, show how to start it. Only
+	// for applications - a library jar has no Main-Class, so result.MainClass is
+	// empty and nothing is printed.
+	if !quiet && (effectiveOutput == "jar" || effectiveOutput == "fat-jar") && result.MainClass != "" {
+		for _, f := range result.Written {
+			if strings.HasSuffix(f, ".jar") {
+				rel := f
+				if cwd, err := os.Getwd(); err == nil {
+					if r, err := filepath.Rel(cwd, f); err == nil {
+						rel = r
+					}
+				}
+				fmt.Fprintf(os.Stdout, "\nRun it with:\n  java -jar %s\n", rel)
+				break
+			}
 		}
 	}
 	return 0
