@@ -368,3 +368,5 @@ cappu search commons-lang3
 - 2026-06-21 23:55 — add an example how to use it to the examples directory
 - 2026-06-22 11:38 — fix issues and find refactoring opportunities first. fan out multiple agents
 - 2026-06-22 11:50 — add more protocol tests. and an end-to-end test that uses the example
+- 2026-06-22 11:57 — i see some child.once. use the event_emitter helper once() that returns a promise. look out for similar things that could be used instead. prefer builtins
+- 2026-06-22 11:57 — next: move the example descriptions to a README.md file in every respective example directory

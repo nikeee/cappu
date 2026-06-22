@@ -1,84 +1,16 @@
 # Examples
 
-Each directory is a self-contained cappu project. Dependencies install into
-`.cappu/lib/` (cappu-managed, gitignored) and build output goes to `dist/`.
+Each directory is a self-contained cappu project with its own `README.md`.
+Dependencies install into `.cappu/lib/` (cappu-managed, gitignored) and build
+output goes to `dist/`.
 
-- **gson-app** - a one-file project using Gson from Maven Central. Build the
-  fat jar and run it:
-
-  ```sh
-  cd gson-app
-  cappu install                 # downloads gson into .cappu/lib/classes
-  cappu compile                 # builds the fat jar into dist/
-  java -jar dist/gson-app.jar
-  ```
-
-- **mapstruct-app** - MapStruct's annotation processor (resolved into
-  `.cappu/lib/processors`) generates the mapper implementation during
-  `cappu compile` (#7). Same install / compile / `java -jar dist/mapstruct-app.jar` flow.
-
-- **immutables-app** - the Immutables annotation processor generates
-  `ImmutableAnimal` (a builder + value type) from a `@Value.Immutable` interface
-  during `cappu compile`. Same install / compile / `java -jar dist/immutables-app.jar` flow.
-
-- **junit-app** - `cappu test` compiles `src/test/java` and runs the JUnit
-  Platform console launcher over it (#16):
-
-  ```sh
-  cd junit-app
-  cappu install                 # junit-jupiter into .cappu/lib/test-classes
-  cappu test
-  ```
-
-- **debug-app** - a one-file program (a loop with a couple of locals) debugged
-  over the Debug Adapter Protocol. `cappu dap` compiles the project with debug
-  info, launches its `mainClass` under JDWP, and bridges breakpoints, stepping,
-  stack frames and local variables to any DAP client:
-
-  ```sh
-  cd debug-app
-  cappu dap                     # speaks DAP over stdio (or --port <n> for TCP)
-  ```
-
-  Point an editor at it with a launch config like:
-
-  ```json
-  {
-    "type": "cappu-dap",
-    "request": "launch",
-    "name": "Debug debug-app",
-    "mainClass": "example.App"
-  }
-  ```
-
-  A client then drives the session: `initialize` -> `launch` ->
-  `setBreakpoints` (e.g. line 8 of `App.java`) -> `configurationDone`; execution
-  stops on the breakpoint, where the stack, the locals (`i`, `squared`, `sum`)
-  and stepping are all available.
-
-- **audit-app** - pinned to a deliberately old, vulnerable Log4j so
-  `cappu audit` has advisories to report; it scans the transitive graph
-  (OSV.dev) and prints the dependency tree that pulls each one in:
-
-  ```sh
-  cd audit-app
-  cappu audit                   # exits non-zero, lists the advisories
-  ```
-
-- **resources-app** - reads a `src/main/resources` file at runtime (bundled
-  into the fat jar by `cappu compile`) and a `src/test/resources` file from a
-  test (on the `cappu test` classpath).
-
-- **spring-boot-app** - a minimal Spring Boot app (latest Spring Boot). cappu
-  resolves the whole starter dependency tree and compiles it; it runs from a
-  classpath of the individual jars (not a fat jar - Spring relies on each jar's
-  separate `META-INF` for auto-configuration):
-
-  ```sh
-  cd spring-boot-app
-  cappu install                 # the spring-boot-starter tree into .cappu/lib/classes
-  cappu compile -o classes      # app classes into dist/
-  java -cp "dist:.cappu/lib/classes/*" com.example.App
-  ```
+- [gson-app](gson-app/README.md) - a fat jar using Gson from Maven Central
+- [mapstruct-app](mapstruct-app/README.md) - the MapStruct annotation processor
+- [immutables-app](immutables-app/README.md) - the Immutables annotation processor
+- [junit-app](junit-app/README.md) - `cappu test` with JUnit
+- [debug-app](debug-app/README.md) - debugging over the Debug Adapter Protocol
+- [audit-app](audit-app/README.md) - `cappu audit` over a vulnerable dependency
+- [resources-app](resources-app/README.md) - bundled main and test resources
+- [spring-boot-app](spring-boot-app/README.md) - booting Spring Boot from a classpath build
 
 `src/examples.test.ts` builds, runs, tests and audits every example end-to-end.
