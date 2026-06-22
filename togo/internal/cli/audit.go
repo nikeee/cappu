@@ -51,6 +51,14 @@ func RunAudit(cfg *config.Config, noCache, jsonOut bool) int {
 	}
 	WarnUnmappedLicenses(resolution.Packages)
 
+	// Nothing resolved means there were no declared dependencies (no cappu.json,
+	// or empty dependency configurations) - warn so a clean report here is not
+	// mistaken for "scanned and found nothing".
+	if len(coordinates) == 0 {
+		warn := painter(os.Stderr)
+		fmt.Fprintf(os.Stderr, "%s no dependencies to scan (no cappu.json or empty dependencies)\n", warn("yellow", "warning:"))
+	}
+
 	report, err := audit.AuditPackages(coordinates, source)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cappu: audit failed: %s\n", err)

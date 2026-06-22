@@ -27,6 +27,7 @@ import {
 import { colorEnabled } from "./color.ts";
 import { emitAnnotation } from "./annotations.ts";
 import { warnUnmappedLicenses } from "./licenses.ts";
+import { painter } from "./style.ts";
 
 type StyleFormat = Parameters<typeof styleText>[0];
 
@@ -69,6 +70,17 @@ export async function runAudit(
   for (const p of resolution.packages) byKey.set(packageKey(p.coordinates), p);
   const coordinates = resolution.packages.map(p => p.coordinates);
   warnUnmappedLicenses(resolution.packages);
+
+  // Nothing resolved means there were no declared dependencies (no cappu.json,
+  // or empty dependency configurations) - warn so a clean report here is not
+  // mistaken for "scanned and found nothing".
+  if (coordinates.length === 0) {
+    const warn = painter(process.stderr);
+    process.stderr.write(
+      `${warn("yellow", "warning:")} no dependencies to scan ` +
+        `(no cappu.json or empty dependencies)\n`,
+    );
+  }
 
   let report: AuditReport;
   try {

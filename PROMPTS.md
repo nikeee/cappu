@@ -379,3 +379,5 @@ cappu search commons-lang3
 - 2026-06-22 15:37 — can we make use of the Disposable symbol and using somewhere?
 - 2026-06-22 15:20 — DX: after building something, we might want to print how to run the file. e.g. `java -jar dist/app.jar` after building the app jar. May only apply to applications and not libraries
 - 2026-06-22 15:43 — support short identifiers for cappu add; i for "implementation"
+- 2026-06-22 15:48 — cappu audit did not report any issue when calling it without .cappu dir and cleaned cache???
+- 2026-06-22 15:48 — yes
