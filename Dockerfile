@@ -6,10 +6,12 @@ FROM golang:alpine AS build
 
     RUN apk add --no-cache build-base
 
-    RUN --mount=type=bind,source=togo/go.sum,target=go.sum \
-        --mount=type=bind,source=togo/go.mod,target=go.mod \
-        --mount=type=bind,source=togo/Makefile,target=Makefile \
-        make tools
+    RUN go install github.com/mailru/easyjson/easyjson@latest
+
+    # RUN --mount=type=bind,source=togo/go.sum,target=go.sum \
+    #     --mount=type=bind,source=togo/go.mod,target=go.mod \
+    #     --mount=type=bind,source=togo/Makefile,target=Makefile \
+    #     make tools
 
     COPY ./togo /app
 
