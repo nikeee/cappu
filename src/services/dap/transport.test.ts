@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { DapConnection } from "./transport.ts";
 
@@ -123,7 +124,7 @@ test("a request split across two chunks is reassembled and dispatched", async ()
   const whole = frame({ seq: 1, type: "request", command: "ping", arguments: { n: 9 } });
   const split = Math.floor(whole.length / 2);
   input.write(whole.slice(0, split)); // header + part of the body
-  await new Promise(r => setTimeout(r, 5));
+  await sleep(5);
   input.write(whole.slice(split)); // the remainder completes the frame
 
   const [resp] = await responses;

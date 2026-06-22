@@ -4,6 +4,7 @@
 // skipped without javac like the other JDK-gated suites.
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import {
   cpSync,
   existsSync,
@@ -510,7 +511,7 @@ test(
 
       await dap.request("disconnect");
       child.stdin!.end();
-      await t("exit", new Promise(resolve => child.once("exit", resolve)));
+      await t("exit", once(child, "exit"));
     } finally {
       child.kill();
       rmSync(root, { recursive: true, force: true });
