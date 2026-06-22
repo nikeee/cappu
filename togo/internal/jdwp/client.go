@@ -66,8 +66,13 @@ func Attach(conn net.Conn) (*Client, error) {
 	return c, nil
 }
 
-// OnEvent registers the callback for Event.Composite packet bodies.
-func (c *Client) OnEvent(fn func([]byte)) { c.onEvent = fn }
+// OnEvent registers the callback for Event.Composite packet bodies. Guarded by
+// the mutex because the read goroutine reads onEvent concurrently in handle.
+func (c *Client) OnEvent(fn func([]byte)) {
+	c.mu.Lock()
+	c.onEvent = fn
+	c.mu.Unlock()
+}
 
 // Send issues a command and returns the reply body (an *Error on a non-zero code).
 func (c *Client) Send(set, cmd byte, data []byte) ([]byte, error) {
@@ -151,8 +156,13 @@ func (c *Client) handle(p Packet) {
 		}
 		return
 	}
-	if p.CommandSet == CSEvent && p.Command == EVComposite && c.onEvent != nil {
-		c.onEvent(p.Data)
+	if p.CommandSet == CSEvent && p.Command == EVComposite {
+		c.mu.Lock()
+		fn := c.onEvent
+		c.mu.Unlock()
+		if fn != nil {
+			fn(p.Data)
+		}
 	}
 }
 

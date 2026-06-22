@@ -366,3 +366,4 @@ cappu search commons-lang3
 - 2026-06-21 23:55 — cappu already has LSP and MCP. How about support debug adapter protocol? would it make sense?
 - 2026-06-21 23:55 — do you mean this by java-debug? https://github.com/microsoft/vscode-java-debug maybe we can use some unit test cases from there to test our own implementation
 - 2026-06-21 23:55 — add an example how to use it to the examples directory
+- 2026-06-22 11:38 — fix issues and find refactoring opportunities first. fan out multiple agents

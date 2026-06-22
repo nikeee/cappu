@@ -169,7 +169,15 @@ export class DebugSession {
       this.conn.sendEvent("terminated");
     });
 
-    const client = await JdwpClient.connect("127.0.0.1", launched.port);
+    // If attaching the debugger fails, the JVM is already running (and
+    // suspended); kill it so a failed launch does not leak a frozen process.
+    let client: JdwpClient;
+    try {
+      client = await JdwpClient.connect("127.0.0.1", launched.port);
+    } catch (e) {
+      launched.process.kill();
+      throw e;
+    }
     client.onEvent(data => this.onJdwpEvent(data));
     this.client = client;
 
@@ -362,9 +370,18 @@ export class DebugSession {
   }
 
   private onJdwpEvent(data: Buffer): void {
-    const client = this.jdwp();
-    const { events } = decodeComposite(data, client.idSizes);
-    for (const ev of events) {
+    // Runs on the JDWP stream's data callback: guard against a teardown race
+    // (client gone) and a malformed composite, neither of which should throw
+    // out of the event emitter.
+    const client = this.client;
+    if (!client) return;
+    let composite: ReturnType<typeof decodeComposite>;
+    try {
+      composite = decodeComposite(data, client.idSizes);
+    } catch {
+      return; // an undecodable event is not fatal
+    }
+    for (const ev of composite.events) {
       switch (ev.kind) {
         case EventKind.BREAKPOINT:
           this.clearStopState();

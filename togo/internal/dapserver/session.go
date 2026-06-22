@@ -13,6 +13,7 @@ package dapserver
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -76,7 +77,15 @@ type Session struct {
 	sigCache     map[uint64]string
 	methodsCache map[uint64][]jdwp.MethodInfo
 
-	eventCh chan []byte
+	// JDWP events are queued (unbounded) and drained by processEvents under mu.
+	// An unbounded queue is required: the JDWP read goroutine delivers events,
+	// and if it could block on a full channel while a request handler holds mu
+	// awaiting a JDWP reply, the reply (delivered by that same read goroutine)
+	// would never arrive - a deadlock. Enqueue never blocks.
+	evMu     sync.Mutex
+	evCond   *sync.Cond
+	evQueue  [][]byte
+	evClosed bool
 }
 
 func NewSession(conn *dap.Conn, cfg *config.Config) *Session {
@@ -96,8 +105,8 @@ func NewSession(conn *dap.Conn, cfg *config.Config) *Session {
 		nextBpID:      1,
 		sigCache:      map[uint64]string{},
 		methodsCache:  map[uint64][]jdwp.MethodInfo{},
-		eventCh:       make(chan []byte, 256),
 	}
+	s.evCond = sync.NewCond(&s.evMu)
 	conn.OnRequest("initialize", s.onInitialize)
 	conn.OnRequest("launch", s.onLaunch)
 	conn.OnRequest("setBreakpoints", s.onSetBreakpoints)
@@ -159,9 +168,12 @@ func (s *Session) onLaunch(raw json.RawMessage) (any, error) {
 
 	client, err := jdwp.Connect("127.0.0.1", launched.Port)
 	if err != nil {
+		// The JVM is running (and suspended); kill it so a failed launch does
+		// not leak a frozen process.
+		_ = launched.Cmd.Process.Kill()
 		return nil, err
 	}
-	client.OnEvent(func(data []byte) { s.eventCh <- data })
+	client.OnEvent(s.enqueueEvent)
 	s.client = client
 	go s.processEvents()
 
@@ -346,7 +358,7 @@ func (s *Session) onVariables(raw json.RawMessage) (any, error) {
 		return dap.VariablesResponseBody{Variables: []dap.Variable{}}, nil
 	}
 	frame, ok := s.frames[frameID]
-	if !ok {
+	if !ok || s.client == nil {
 		return dap.VariablesResponseBody{Variables: []dap.Variable{}}, nil
 	}
 	slots, err := jdwp.MethodVariableTable(s.client, frame.location.ClassID, frame.location.MethodID)
@@ -382,10 +394,17 @@ func (s *Session) onVariables(raw json.RawMessage) (any, error) {
 	return dap.VariablesResponseBody{Variables: vars}, nil
 }
 
+// errNotLaunched is returned when a request that drives the VM arrives before a
+// successful launch (mirrors the TS jdwp() guard that throws "not launched").
+var errNotLaunched = errors.New("not launched")
+
 // Resume is whole-VM (breakpoints suspend all threads).
 func (s *Session) onContinue(json.RawMessage) (any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.client == nil {
+		return nil, errNotLaunched
+	}
 	s.clearStopState()
 	if err := jdwp.VMResumeCmd(s.client); err != nil {
 		return nil, err
@@ -398,6 +417,9 @@ func (s *Session) onStep(raw json.RawMessage, depth int32) (any, error) {
 	_ = json.Unmarshal(raw, &args)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.client == nil {
+		return nil, errNotLaunched
+	}
 	jid, ok := s.threadJdwp[args.ThreadID]
 	if !ok {
 		return nil, fmt.Errorf("unknown thread %d", args.ThreadID)
@@ -421,6 +443,9 @@ func (s *Session) onPause(raw json.RawMessage) (any, error) {
 	_ = json.Unmarshal(raw, &args)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.client == nil {
+		return nil, errNotLaunched
+	}
 	if err := jdwp.VMSuspendCmd(s.client); err != nil {
 		return nil, err
 	}
@@ -438,13 +463,48 @@ func (s *Session) onDisconnect(json.RawMessage) (any, error) {
 	if s.cmd != nil && s.cmd.Process != nil {
 		_ = s.cmd.Process.Kill()
 	}
+	s.stopEvents() // let the processEvents goroutine exit instead of leaking
 	return struct{}{}, nil
 }
 
+// enqueueEvent is the JDWP event callback; it runs on the JDWP read goroutine
+// and must never block (see the evQueue comment), so it only appends.
+func (s *Session) enqueueEvent(data []byte) {
+	s.evMu.Lock()
+	s.evQueue = append(s.evQueue, data)
+	s.evMu.Unlock()
+	s.evCond.Signal()
+}
+
+// stopEvents wakes processEvents so it can exit (called on disconnect).
+func (s *Session) stopEvents() {
+	s.evMu.Lock()
+	s.evClosed = true
+	s.evMu.Unlock()
+	s.evCond.Signal()
+}
+
 func (s *Session) processEvents() {
-	for data := range s.eventCh {
+	for {
+		s.evMu.Lock()
+		for len(s.evQueue) == 0 && !s.evClosed {
+			s.evCond.Wait()
+		}
+		if len(s.evQueue) == 0 && s.evClosed {
+			s.evMu.Unlock()
+			return
+		}
+		data := s.evQueue[0]
+		s.evQueue = s.evQueue[1:]
+		s.evMu.Unlock()
+
 		s.mu.Lock()
-		s.handleJdwpEvent(data)
+		// A malformed event must not panic this goroutine and kill event
+		// handling; the byte-reader codec panics on a truncated packet.
+		func() {
+			defer func() { _ = recover() }()
+			s.handleJdwpEvent(data)
+		}()
 		s.mu.Unlock()
 	}
 }

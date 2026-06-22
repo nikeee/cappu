@@ -51,7 +51,12 @@ export class JdwpClient {
   /** Connect over TCP, handshake, and negotiate ID sizes. */
   static async connect(host: string, port: number): Promise<JdwpClient> {
     const socket: Socket = connect({ host, port });
-    await once(socket, "connect");
+    try {
+      await once(socket, "connect");
+    } catch (e) {
+      socket.destroy();
+      throw e;
+    }
     return JdwpClient.attach(socket);
   }
 
@@ -59,8 +64,13 @@ export class JdwpClient {
   static async attach(stream: Duplex): Promise<JdwpClient> {
     const client = new JdwpClient(stream);
     stream.write(Buffer.from(HANDSHAKE, "ascii"));
-    await client.waitHandshake();
-    await client.negotiateIdSizes();
+    try {
+      await client.waitHandshake();
+      await client.negotiateIdSizes();
+    } catch (e) {
+      stream.destroy(); // do not leak the socket when the handshake fails
+      throw e;
+    }
     return client;
   }
 
@@ -130,7 +140,14 @@ export class JdwpClient {
       return;
     }
     if (p.commandSet === CommandSet.Event && p.command === EventCmd.Composite) {
-      this.eventListener?.(p.data);
+      // The listener runs on the socket's data callback; a throw here (e.g. a
+      // malformed event) would be an uncaught exception that tears the process
+      // down, so swallow it - one bad event must not kill the session.
+      try {
+        this.eventListener?.(p.data);
+      } catch {
+        // ignore: a single undecodable event is not fatal
+      }
     }
   }
 
