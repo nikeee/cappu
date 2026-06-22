@@ -49,6 +49,12 @@ type LspOptions struct {
 	InlayHints *InlayHints `json:"inlayHints,omitempty"`
 }
 
+// DapOptions mirrors the "dapOptions" section.
+type DapOptions struct {
+	// EnableAssertions passes -ea to every debuggee launched by `cappu dap`.
+	EnableAssertions bool `json:"enableAssertions"`
+}
+
 // Dependencies are the "dependencies" section, keyed by configuration. Each
 // map is "group:artifact" -> version.
 type Dependencies struct {
@@ -62,6 +68,7 @@ type Dependencies struct {
 type Config struct {
 	CompilerOptions   CompilerOptions `json:"compilerOptions"`
 	LspOptions        LspOptions      `json:"lspOptions"`
+	DapOptions        DapOptions      `json:"dapOptions"`
 	PackageSources    []string        `json:"packageSources"`
 	Dependencies      Dependencies    `json:"dependencies"`
 	JDK               string          `json:"jdk,omitempty"`

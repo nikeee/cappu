@@ -41,7 +41,12 @@ import {
   Tag,
   TypeTag,
 } from "../../jdwp/protocol.ts";
-import { compileForDebug, debuggeeClassPath, resolveMainClass } from "./debuggee.ts";
+import {
+  compileForDebug,
+  debuggeeClassPath,
+  debuggeeVmArgs,
+  resolveMainClass,
+} from "./debuggee.ts";
 import { type DebuggeeProcess, launchUnderJdwp } from "./launch.ts";
 import { resolveLine } from "./lineMapping.ts";
 import type {
@@ -161,7 +166,7 @@ export class DebugSession {
     const classPath = debuggeeClassPath(this.config, args.classPath ?? []);
     const java = resolveJava(this.config);
     const launched = await launchUnderJdwp(java, classPath, mainClass, {
-      vmArgs: args.vmArgs,
+      vmArgs: debuggeeVmArgs(this.config, args),
       programArgs: args.args,
       env: args.env,
       cwd: args.cwd,

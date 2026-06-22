@@ -86,6 +86,15 @@ const LspOptionsSchema = z.object({
   inlayHints: InlayHintsSchema.optional(),
 });
 
+const DapOptionsSchema = z.object({
+  /**
+   * Pass -ea to every debuggee launched by `cappu dap`, so assertions run while
+   * debugging. A project-wide default; a launch request's own vmArgs still
+   * apply (a -da there overrides it).
+   */
+  enableAssertions: z.boolean().default(false),
+});
+
 export const MAVEN_CENTRAL = "https://repo.maven.apache.org/maven2";
 /** Central's index service; a maven2 repository itself has no search endpoint. */
 export const MAVEN_CENTRAL_SEARCH = "https://search.maven.org/solrsearch/select";
@@ -127,6 +136,7 @@ const ConfigFileSchema = z.object({
   // schema, so the inner defaults (classPath: [], ...) apply.
   compilerOptions: CompilerOptionsSchema.prefault({}),
   lspOptions: LspOptionsSchema.prefault({}),
+  dapOptions: DapOptionsSchema.prefault({}),
   /** Package repositories dependencies are resolved from, in order. */
   packageSources: z.array(z.string()).default(DEFAULT_PACKAGE_SOURCES),
   /** What `cappu install` resolves and downloads, keyed by configuration. */
@@ -161,6 +171,7 @@ const ConfigFileSchema = z.object({
 
 export type CompilerConfig = z.infer<typeof CompilerOptionsSchema>;
 export type LspConfig = z.infer<typeof LspOptionsSchema>;
+export type DapConfig = z.infer<typeof DapOptionsSchema>;
 
 export interface CappuConfig extends z.infer<typeof ConfigFileSchema> {
   /** Directory the config file lives in; relative paths resolve against it. */

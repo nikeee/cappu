@@ -68,6 +68,16 @@ export function debuggeeClassPath(config: CappuConfig, extra: string[] = []): st
   return [debugClassesDir(config), ...libClassPath(config), ...extra].join(delimiter);
 }
 
+/**
+ * The debuggee's JVM args: the project-wide defaults (e.g. -ea from
+ * dapOptions.enableAssertions) first, then the launch request's own vmArgs, so
+ * a launch request can still override (a trailing -da disables assertions).
+ */
+export function debuggeeVmArgs(config: CappuConfig, args: LaunchArguments): string[] {
+  const defaults = config.dapOptions.enableAssertions ? ["-ea"] : [];
+  return [...defaults, ...(args.vmArgs ?? [])];
+}
+
 export function resolveMainClass(config: CappuConfig, args: LaunchArguments): string {
   const mainClass = args.mainClass ?? config.compilerOptions.mainClass;
   if (!mainClass) {

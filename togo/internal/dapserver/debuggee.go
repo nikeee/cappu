@@ -70,6 +70,18 @@ func DebuggeeClassPath(cfg *config.Config, extra []string) string {
 	return strings.Join(cp, string(os.PathListSeparator))
 }
 
+// DebuggeeVMArgs is the debuggee's JVM args: the project-wide defaults (e.g.
+// -ea from dapOptions.enableAssertions) first, then the launch request's own
+// vmArgs, so a launch request can still override (a trailing -da disables
+// assertions).
+func DebuggeeVMArgs(cfg *config.Config, args dap.LaunchArguments) []string {
+	var out []string
+	if cfg.DapOptions.EnableAssertions {
+		out = append(out, "-ea")
+	}
+	return append(out, args.VMArgs...)
+}
+
 func ResolveMainClass(cfg *config.Config, args dap.LaunchArguments) (string, error) {
 	mc := args.MainClass
 	if mc == "" {

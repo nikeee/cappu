@@ -30,6 +30,13 @@ Supported `launch` request fields: `mainClass` (defaults to
 `classPath` (extra entries), `env`, `cwd`, and `stopOnEntry` (stop on the first
 line of `main` before any user code).
 
+To enable assertions for every debug run project-wide, set it in `cappu.json`
+(a launch request's `vmArgs` still apply, so a `-da` there overrides it):
+
+```jsonc
+{ "dapOptions": { "enableAssertions": true } }
+```
+
 A client then drives the session: `initialize` -> `launch` -> `setBreakpoints`
 (e.g. line 8 of `App.java`) -> `configurationDone`; execution stops on the
 breakpoint, where the stack, the locals (`i`, `squared`, `sum`) and stepping are

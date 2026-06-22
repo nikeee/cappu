@@ -78,6 +78,7 @@ test("unknown keys are ignored, comment-json metadata does not leak", () => {
   expect(Object.keys(config).sort()).toEqual([
     "baseDir",
     "compilerOptions",
+    "dapOptions",
     "dependencies",
     "fromFile",
     "lspOptions",
@@ -109,6 +110,7 @@ test("the generated JSON schema mirrors the config shape", () => {
   expect(Object.keys(schema.properties).sort()).toEqual([
     "artifactId",
     "compilerOptions",
+    "dapOptions",
     "dependencies",
     "groupId",
     "jdk",

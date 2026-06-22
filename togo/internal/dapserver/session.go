@@ -157,7 +157,7 @@ func (s *Session) onLaunch(raw json.RawMessage) (any, error) {
 	classPath := DebuggeeClassPath(s.cfg, args.ClassPath)
 	java := jtest.ResolveJava(s.cfg)
 	launched, err := LaunchUnderJdwp(java, classPath, mainClass, LaunchOptions{
-		VMArgs:      args.VMArgs,
+		VMArgs:      DebuggeeVMArgs(s.cfg, args),
 		ProgramArgs: args.Args,
 		Env:         args.Env,
 		Cwd:         args.Cwd,

@@ -3,7 +3,28 @@ package dapserver
 import (
 	"slices"
 	"testing"
+
+	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/dap"
 )
+
+func TestDebuggeeVMArgs(t *testing.T) {
+	on := &config.Config{DapOptions: config.DapOptions{EnableAssertions: true}}
+	off := &config.Config{}
+	if got := DebuggeeVMArgs(on, dap.LaunchArguments{VMArgs: []string{"-Xmx32m"}}); !slices.Equal(got, []string{"-ea", "-Xmx32m"}) {
+		t.Fatalf("enabled: %v", got)
+	}
+	if got := DebuggeeVMArgs(on, dap.LaunchArguments{}); !slices.Equal(got, []string{"-ea"}) {
+		t.Fatalf("enabled, no vmArgs: %v", got)
+	}
+	if got := DebuggeeVMArgs(off, dap.LaunchArguments{VMArgs: []string{"-Xmx32m"}}); !slices.Equal(got, []string{"-Xmx32m"}) {
+		t.Fatalf("disabled: %v", got)
+	}
+	// The project -ea precedes launch vmArgs so a launch -da overrides it.
+	if got := DebuggeeVMArgs(on, dap.LaunchArguments{VMArgs: []string{"-da"}}); !slices.Equal(got, []string{"-ea", "-da"}) {
+		t.Fatalf("override: %v", got)
+	}
+}
 
 func TestDebuggeeJavaArgsOrdering(t *testing.T) {
 	got := DebuggeeJavaArgs("/cp", "example.App", LaunchOptions{
