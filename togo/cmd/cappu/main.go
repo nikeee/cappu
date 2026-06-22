@@ -20,6 +20,7 @@ import (
 
 	"github.com/nikeee/cappu/internal/cli"
 	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/dapserver"
 	"github.com/nikeee/cappu/internal/lspserver"
 	"github.com/nikeee/cappu/internal/mcp"
 	"github.com/nikeee/cappu/internal/meta"
@@ -48,6 +49,7 @@ type CLI struct {
 	Cache        cacheCmd        `cmd:"" help:"Manage the global download cache"`
 	Lsp          lspCmd          `cmd:"" help:"Start the Java language server (JSON-RPC)"`
 	Mcp          mcpCmd          `cmd:"" help:"Start the MCP server for agents (over stdio)"`
+	Dap          dapCmd          `cmd:"" help:"Start the debug adapter (Debug Adapter Protocol over stdio)"`
 	Compile      compileCmd      `cmd:"" help:"Compile .java files to .class bytecode"`
 }
 
@@ -288,6 +290,42 @@ func (*mcpCmd) Run(a *appState) error {
 		cfg = nil
 	}
 	if serr := mcp.Serve(cfg); serr != nil {
+		fmt.Fprintln(os.Stderr, "cappu:", serr)
+		return exit(1)
+	}
+	return exit(0)
+}
+
+// The debug adapter (cli/dap.ts, services/dap/) compiles the project with debug
+// info, launches its mainClass under JDWP, and bridges the Debug Adapter
+// Protocol to JDWP over stdio (or --port TCP). Mirrors lspCmd.
+type dapCmd struct {
+	Port string `short:"p" placeholder:"<port>" help:"Listen on a TCP port instead of stdio"`
+}
+
+func (c *dapCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		cfg = nil
+	}
+	if c.Port != "" {
+		ln, lerr := net.Listen("tcp", "127.0.0.1:"+c.Port)
+		if lerr != nil {
+			fmt.Fprintln(os.Stderr, "cappu:", lerr)
+			return exit(1)
+		}
+		conn, aerr := ln.Accept()
+		if aerr != nil {
+			fmt.Fprintln(os.Stderr, "cappu:", aerr)
+			return exit(1)
+		}
+		if serr := dapserver.Run(cfg, conn, conn); serr != nil {
+			fmt.Fprintln(os.Stderr, "cappu:", serr)
+			return exit(1)
+		}
+		return exit(0)
+	}
+	if serr := dapserver.Serve(cfg); serr != nil {
 		fmt.Fprintln(os.Stderr, "cappu:", serr)
 		return exit(1)
 	}

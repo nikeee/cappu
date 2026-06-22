@@ -148,22 +148,32 @@ func TestRunArgs(cfg *config.Config, launcherJar string) []string {
 }
 
 // ResolveJava is the java launcher tests run under: the provisioned JDK's, else
-// the sibling of the resolved javac (so a PATH skew cannot cause
-// UnsupportedClassVersionError), else plain "java".
+// the sibling of the resolved javac (so a PATH skew between javac and java
+// cannot cause UnsupportedClassVersionError), else plain "java". A bare javac
+// name is looked up on PATH and symlink-resolved first, matching the TS
+// resolveJava, so e.g. a /usr/bin/javac that points at JDK 25 picks that JDK's
+// java rather than a different default `java` on PATH.
 func ResolveJava(cfg *config.Config) string {
 	if java := jdks.ProvisionedJava(cfg); java != "" {
 		return java
 	}
 	javac := build.Javac(cfg)
-	if strings.ContainsAny(javac, `/\`) {
-		name := "java"
-		if runtime.GOOS == "windows" {
-			name = "java.exe"
+	path := javac
+	if !strings.ContainsAny(javac, `/\`) {
+		if p, err := exec.LookPath(javac); err == nil {
+			path = p
 		}
-		sibling := filepath.Join(filepath.Dir(javac), name)
-		if _, err := os.Stat(sibling); err == nil {
-			return sibling
-		}
+	}
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	name := "java"
+	if runtime.GOOS == "windows" {
+		name = "java.exe"
+	}
+	sibling := filepath.Join(filepath.Dir(path), name)
+	if _, err := os.Stat(sibling); err == nil {
+		return sibling
 	}
 	return "java"
 }

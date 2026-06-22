@@ -1,0 +1,628 @@
+package dapserver
+
+// The DAP<->JDWP bridge: one debug session per `cappu dap` connection. It
+// answers DAP requests by driving a jdwp.Client and turns JDWP events into DAP
+// events. v1 scope: launch, breakpoints (with line->codeIndex mapping and
+// ClassPrepare deferral), continue, stepping, and read-only locals (primitives
+// + strings). The VM is driven all-threads-at-once (breakpoints suspend all).
+//
+// DAP requests run on the connection's read goroutine; JDWP events run on a
+// dedicated goroutine fed by a buffered channel. A single mutex serializes both
+// against the shared session state, matching the single-threaded TS reference.
+// Port of src/services/dap/debugSession.ts.
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/dap"
+	"github.com/nikeee/cappu/internal/jdwp"
+	jtest "github.com/nikeee/cappu/internal/testing"
+)
+
+type frameHandle struct {
+	threadID uint64
+	frameID  uint64
+	location jdwp.Location
+}
+
+type requestedBp struct {
+	line  int32
+	id    int
+	bound bool
+}
+
+type sourceBreakpoints struct {
+	fqcn       string
+	signature  string
+	requested  []*requestedBp
+	requestIDs []int32
+}
+
+// Session is a single DAP debug session.
+type Session struct {
+	conn *dap.Conn
+	cfg  *config.Config
+	mu   sync.Mutex
+
+	client *jdwp.Client
+	cmd    *exec.Cmd
+
+	threadDap  map[uint64]int
+	threadJdwp map[int]uint64
+	nextThread int
+
+	frames      map[int]frameHandle
+	nextFrameID int
+	varNodes    map[int]int
+	nextVarRef  int
+
+	breakpoints   map[string]*sourceBreakpoints
+	classPrepared map[string]bool
+	bpByRequest   map[int32]int
+	nextBpID      int
+	stepRequestID int32
+	hasStep       bool
+
+	sigCache     map[uint64]string
+	methodsCache map[uint64][]jdwp.MethodInfo
+
+	eventCh chan []byte
+}
+
+func NewSession(conn *dap.Conn, cfg *config.Config) *Session {
+	s := &Session{
+		conn:          conn,
+		cfg:           cfg,
+		threadDap:     map[uint64]int{},
+		threadJdwp:    map[int]uint64{},
+		nextThread:    1,
+		frames:        map[int]frameHandle{},
+		nextFrameID:   1,
+		varNodes:      map[int]int{},
+		nextVarRef:    1,
+		breakpoints:   map[string]*sourceBreakpoints{},
+		classPrepared: map[string]bool{},
+		bpByRequest:   map[int32]int{},
+		nextBpID:      1,
+		sigCache:      map[uint64]string{},
+		methodsCache:  map[uint64][]jdwp.MethodInfo{},
+		eventCh:       make(chan []byte, 256),
+	}
+	conn.OnRequest("initialize", s.onInitialize)
+	conn.OnRequest("launch", s.onLaunch)
+	conn.OnRequest("setBreakpoints", s.onSetBreakpoints)
+	conn.OnRequest("configurationDone", s.onConfigurationDone)
+	conn.OnRequest("threads", s.onThreads)
+	conn.OnRequest("stackTrace", s.onStackTrace)
+	conn.OnRequest("scopes", s.onScopes)
+	conn.OnRequest("variables", s.onVariables)
+	conn.OnRequest("continue", s.onContinue)
+	conn.OnRequest("next", func(r json.RawMessage) (any, error) { return s.onStep(r, jdwp.StepDepthOver) })
+	conn.OnRequest("stepIn", func(r json.RawMessage) (any, error) { return s.onStep(r, jdwp.StepDepthIn) })
+	conn.OnRequest("stepOut", func(r json.RawMessage) (any, error) { return s.onStep(r, jdwp.StepDepthOut) })
+	conn.OnRequest("pause", s.onPause)
+	conn.OnRequest("disconnect", s.onDisconnect)
+	conn.OnRequest("terminate", s.onDisconnect)
+	return s
+}
+
+func (s *Session) onInitialize(json.RawMessage) (any, error) {
+	// The initialized event must follow the initialize response; emit it from a
+	// goroutine so the synchronous response write goes first.
+	go s.conn.SendEvent("initialized", nil)
+	return dap.Capabilities{SupportsConfigurationDoneRequest: true, SupportsTerminateRequest: true}, nil
+}
+
+func (s *Session) onLaunch(raw json.RawMessage) (any, error) {
+	var args dap.LaunchArguments
+	_ = json.Unmarshal(raw, &args)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, d := range CompileForDebug(s.cfg) {
+		if d.Severity == "error" {
+			return nil, fmt.Errorf("debug build failed: %s", d.Message)
+		}
+	}
+	mainClass, err := ResolveMainClass(s.cfg, args)
+	if err != nil {
+		return nil, err
+	}
+	classPath := DebuggeeClassPath(s.cfg, args.ClassPath)
+	java := jtest.ResolveJava(s.cfg)
+	launched, err := LaunchUnderJdwp(java, classPath, mainClass, args.Args)
+	if err != nil {
+		return nil, err
+	}
+	s.cmd = launched.Cmd
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); s.pumpOutput(launched.Stdout, "stdout") }()
+	go func() { defer wg.Done(); s.pumpOutput(launched.Stderr, "stderr") }()
+	go func() {
+		wg.Wait()
+		_ = launched.Cmd.Wait()
+		s.conn.SendEvent("exited", dap.ExitedEventBody{ExitCode: launched.Cmd.ProcessState.ExitCode()})
+		s.conn.SendEvent("terminated", nil)
+	}()
+
+	client, err := jdwp.Connect("127.0.0.1", launched.Port)
+	if err != nil {
+		return nil, err
+	}
+	client.OnEvent(func(data []byte) { s.eventCh <- data })
+	s.client = client
+	go s.processEvents()
+
+	// The VM started suspended; bind breakpoints set before the client connected.
+	for _, entry := range s.breakpoints {
+		s.bindSource(entry)
+	}
+	return struct{}{}, nil
+}
+
+func (s *Session) onConfigurationDone(json.RawMessage) (any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.client != nil {
+		_ = jdwp.VMResumeCmd(s.client)
+	}
+	return struct{}{}, nil
+}
+
+func (s *Session) onSetBreakpoints(raw json.RawMessage) (any, error) {
+	var args dap.SetBreakpointsArguments
+	_ = json.Unmarshal(raw, &args)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if args.Source.Path == "" {
+		return dap.SetBreakpointsResponseBody{Breakpoints: []dap.Breakpoint{}}, nil
+	}
+	var lines []int32
+	if len(args.Breakpoints) > 0 {
+		for _, b := range args.Breakpoints {
+			lines = append(lines, int32(b.Line))
+		}
+	} else {
+		for _, l := range args.Lines {
+			lines = append(lines, int32(l))
+		}
+	}
+
+	if prev, ok := s.breakpoints[args.Source.Path]; ok && s.client != nil {
+		for _, requestID := range prev.requestIDs {
+			_ = jdwp.EventRequestClear(s.client, jdwp.EKBreakpoint, requestID)
+		}
+	}
+
+	fqcn, signature := classSignatureForSource(args.Source.Path)
+	entry := &sourceBreakpoints{fqcn: fqcn, signature: signature}
+	for _, line := range lines {
+		entry.requested = append(entry.requested, &requestedBp{line: line, id: s.nextBpID})
+		s.nextBpID++
+	}
+	s.breakpoints[args.Source.Path] = entry
+
+	if s.client != nil {
+		s.bindSource(entry)
+	}
+	out := make([]dap.Breakpoint, len(entry.requested))
+	for i, r := range entry.requested {
+		out[i] = dap.Breakpoint{ID: r.id, Verified: r.bound, Line: int(r.line)}
+	}
+	return dap.SetBreakpointsResponseBody{Breakpoints: out}, nil
+}
+
+// bindSource resolves each requested line to a JDWP breakpoint, registering a
+// ClassPrepare request when the class is not loaded yet. Caller holds s.mu.
+func (s *Session) bindSource(entry *sourceBreakpoints) {
+	classes, err := jdwp.ClassesBySignature(s.client, entry.signature)
+	if err != nil {
+		return
+	}
+	if len(classes) == 0 {
+		if !s.classPrepared[entry.fqcn] {
+			s.classPrepared[entry.fqcn] = true
+			_, _ = jdwp.EventRequestSet(s.client, jdwp.EKClassPrepare, jdwp.SuspendAll,
+				[]jdwp.Modifier{{Kind: jdwp.ModClassMatch, Pattern: entry.fqcn}})
+		}
+		return
+	}
+	classID := classes[0].TypeID
+	methods := s.classMethods(classID)
+	var methodLines []MethodLines
+	for _, m := range methods {
+		lt, err := jdwp.MethodLineTableCmd(s.client, classID, m.MethodID)
+		if err != nil {
+			continue
+		}
+		methodLines = append(methodLines, MethodLines{MethodID: m.MethodID, Lines: lt.Lines})
+	}
+	for _, bp := range entry.requested {
+		if bp.bound {
+			continue
+		}
+		loc, ok := ResolveLine(methodLines, bp.line)
+		if !ok {
+			continue
+		}
+		requestID, err := jdwp.EventRequestSet(s.client, jdwp.EKBreakpoint, jdwp.SuspendAll,
+			[]jdwp.Modifier{{Kind: jdwp.ModLocationOnly, Location: jdwp.Location{
+				TypeTag: jdwp.TypeTagClass, ClassID: classID, MethodID: loc.MethodID, Index: loc.Index,
+			}}})
+		if err != nil {
+			continue
+		}
+		entry.requestIDs = append(entry.requestIDs, requestID)
+		s.bpByRequest[requestID] = bp.id
+		bp.bound = true
+		bp.line = loc.Line
+	}
+}
+
+func (s *Session) onThreads(json.RawMessage) (any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.client == nil {
+		return dap.ThreadsResponseBody{Threads: []dap.Thread{}}, nil
+	}
+	ids, err := jdwp.AllThreads(s.client)
+	if err != nil {
+		return nil, err
+	}
+	threads := make([]dap.Thread, 0, len(ids))
+	for _, jid := range ids {
+		name, _ := jdwp.ThreadName(s.client, jid)
+		threads = append(threads, dap.Thread{ID: s.threadDapID(jid), Name: name})
+	}
+	return dap.ThreadsResponseBody{Threads: threads}, nil
+}
+
+func (s *Session) onStackTrace(raw json.RawMessage) (any, error) {
+	var args dap.StackTraceArguments
+	_ = json.Unmarshal(raw, &args)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	jid, ok := s.threadJdwp[args.ThreadID]
+	if !ok || s.client == nil {
+		return nil, fmt.Errorf("unknown thread %d", args.ThreadID)
+	}
+	frames, err := jdwp.ThreadFrames(s.client, jid, 0, -1)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dap.StackFrame, 0, len(frames))
+	for _, f := range frames {
+		id := s.nextFrameID
+		s.nextFrameID++
+		s.frames[id] = frameHandle{threadID: jid, frameID: f.FrameID, location: f.Location}
+		fqcn := SignatureToType(s.classSignature(f.Location.ClassID))
+		methodName := s.methodName(f.Location.ClassID, f.Location.MethodID)
+		var src *dap.Source
+		if path := s.sourcePathForClass(fqcn); path != "" {
+			src = &dap.Source{Name: filepath.Base(path), Path: path}
+		}
+		out = append(out, dap.StackFrame{
+			ID:     id,
+			Name:   fqcn + "." + methodName,
+			Source: src,
+			Line:   int(s.lineForLocation(f.Location)),
+			Column: 0,
+		})
+	}
+	return dap.StackTraceResponseBody{StackFrames: out, TotalFrames: len(out)}, nil
+}
+
+func (s *Session) onScopes(raw json.RawMessage) (any, error) {
+	var args dap.ScopesArguments
+	_ = json.Unmarshal(raw, &args)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ref := s.nextVarRef
+	s.nextVarRef++
+	s.varNodes[ref] = args.FrameID
+	return dap.ScopesResponseBody{Scopes: []dap.Scope{{Name: "Locals", VariablesReference: ref, Expensive: false}}}, nil
+}
+
+func (s *Session) onVariables(raw json.RawMessage) (any, error) {
+	var args dap.VariablesArguments
+	_ = json.Unmarshal(raw, &args)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	frameID, ok := s.varNodes[args.VariablesReference]
+	if !ok {
+		return dap.VariablesResponseBody{Variables: []dap.Variable{}}, nil
+	}
+	frame, ok := s.frames[frameID]
+	if !ok {
+		return dap.VariablesResponseBody{Variables: []dap.Variable{}}, nil
+	}
+	slots, err := jdwp.MethodVariableTable(s.client, frame.location.ClassID, frame.location.MethodID)
+	if err != nil {
+		return dap.VariablesResponseBody{Variables: []dap.Variable{}}, nil
+	}
+	var visible []jdwp.VariableSlot
+	for _, sl := range slots {
+		if frame.location.Index >= sl.CodeIndex && frame.location.Index < sl.CodeIndex+uint64(sl.Length) {
+			visible = append(visible, sl)
+		}
+	}
+	if len(visible) == 0 {
+		return dap.VariablesResponseBody{Variables: []dap.Variable{}}, nil
+	}
+	reqSlots := make([]jdwp.Slot, len(visible))
+	for i, sl := range visible {
+		reqSlots[i] = jdwp.Slot{Slot: sl.Slot, SigByte: SignatureTagByte(sl.Signature)}
+	}
+	values, err := jdwp.StackFrameGetValues(s.client, frame.threadID, frame.frameID, reqSlots)
+	if err != nil {
+		return nil, err
+	}
+	vars := make([]dap.Variable, len(visible))
+	for i, sl := range visible {
+		vars[i] = dap.Variable{
+			Name:               sl.Name,
+			Type:               SignatureToType(sl.Signature),
+			Value:              s.renderValue(values[i], sl.Signature),
+			VariablesReference: 0,
+		}
+	}
+	return dap.VariablesResponseBody{Variables: vars}, nil
+}
+
+// Resume is whole-VM (breakpoints suspend all threads).
+func (s *Session) onContinue(json.RawMessage) (any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clearStopState()
+	if err := jdwp.VMResumeCmd(s.client); err != nil {
+		return nil, err
+	}
+	return dap.ContinueResponseBody{AllThreadsContinued: true}, nil
+}
+
+func (s *Session) onStep(raw json.RawMessage, depth int32) (any, error) {
+	var args dap.ThreadArgument
+	_ = json.Unmarshal(raw, &args)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	jid, ok := s.threadJdwp[args.ThreadID]
+	if !ok {
+		return nil, fmt.Errorf("unknown thread %d", args.ThreadID)
+	}
+	requestID, err := jdwp.EventRequestSet(s.client, jdwp.EKSingleStep, jdwp.SuspendAll,
+		[]jdwp.Modifier{{Kind: jdwp.ModStep, ThreadID: jid, StepSize: jdwp.StepSizeLine, StepDepth: depth}})
+	if err != nil {
+		return nil, err
+	}
+	s.stepRequestID = requestID
+	s.hasStep = true
+	s.clearStopState()
+	if err := jdwp.VMResumeCmd(s.client); err != nil {
+		return nil, err
+	}
+	return struct{}{}, nil
+}
+
+func (s *Session) onPause(raw json.RawMessage) (any, error) {
+	var args dap.ThreadArgument
+	_ = json.Unmarshal(raw, &args)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := jdwp.VMSuspendCmd(s.client); err != nil {
+		return nil, err
+	}
+	s.conn.SendEvent("stopped", dap.StoppedEventBody{Reason: "pause", ThreadID: args.ThreadID, AllThreadsStopped: true})
+	return struct{}{}, nil
+}
+
+func (s *Session) onDisconnect(json.RawMessage) (any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.client != nil {
+		_ = jdwp.VMExitCmd(s.client, 0)
+		s.client.Close()
+	}
+	if s.cmd != nil && s.cmd.Process != nil {
+		_ = s.cmd.Process.Kill()
+	}
+	return struct{}{}, nil
+}
+
+func (s *Session) processEvents() {
+	for data := range s.eventCh {
+		s.mu.Lock()
+		s.handleJdwpEvent(data)
+		s.mu.Unlock()
+	}
+}
+
+// handleJdwpEvent dispatches a decoded composite. Caller holds s.mu.
+func (s *Session) handleJdwpEvent(data []byte) {
+	comp := jdwp.DecodeComposite(data, s.client.IDSizes)
+	for _, ev := range comp.Events {
+		switch ev.Kind {
+		case jdwp.EKBreakpoint:
+			s.clearStopState()
+			s.conn.SendEvent("stopped", dap.StoppedEventBody{Reason: "breakpoint", ThreadID: s.threadDapID(ev.Thread), AllThreadsStopped: true})
+		case jdwp.EKSingleStep:
+			if s.hasStep {
+				_ = jdwp.EventRequestClear(s.client, jdwp.EKSingleStep, s.stepRequestID)
+				s.hasStep = false
+			}
+			s.clearStopState()
+			s.conn.SendEvent("stopped", dap.StoppedEventBody{Reason: "step", ThreadID: s.threadDapID(ev.Thread), AllThreadsStopped: true})
+		case jdwp.EKClassPrepare:
+			s.onClassPrepare(ev.Signature)
+		case jdwp.EKThreadStart:
+			s.conn.SendEvent("thread", dap.ThreadEventBody{Reason: "started", ThreadID: s.threadDapID(ev.Thread)})
+		case jdwp.EKThreadDeath:
+			s.conn.SendEvent("thread", dap.ThreadEventBody{Reason: "exited", ThreadID: s.threadDapID(ev.Thread)})
+		case jdwp.EKVMDeath:
+			s.conn.SendEvent("terminated", nil)
+		}
+	}
+}
+
+// onClassPrepare binds deferred breakpoints for a freshly-loaded class and
+// resumes (the ClassPrepare request suspended all threads). Caller holds s.mu.
+func (s *Session) onClassPrepare(signature string) {
+	for _, entry := range s.breakpoints {
+		if entry.signature != signature {
+			continue
+		}
+		s.bindSource(entry)
+		for _, bp := range entry.requested {
+			if bp.bound {
+				s.conn.SendEvent("breakpoint", dap.BreakpointEventBody{
+					Reason:     "changed",
+					Breakpoint: dap.Breakpoint{ID: bp.id, Verified: true, Line: int(bp.line)},
+				})
+			}
+		}
+	}
+	_ = jdwp.VMResumeCmd(s.client)
+}
+
+func (s *Session) clearStopState() {
+	s.frames = map[int]frameHandle{}
+	s.varNodes = map[int]int{}
+	s.nextFrameID = 1
+	s.nextVarRef = 1
+}
+
+func (s *Session) threadDapID(jdwpID uint64) int {
+	if id, ok := s.threadDap[jdwpID]; ok {
+		return id
+	}
+	id := s.nextThread
+	s.nextThread++
+	s.threadDap[jdwpID] = id
+	s.threadJdwp[id] = jdwpID
+	return id
+}
+
+func (s *Session) classSignature(classID uint64) string {
+	if sig, ok := s.sigCache[classID]; ok {
+		return sig
+	}
+	sig, _ := jdwp.ReferenceTypeSignature(s.client, classID)
+	s.sigCache[classID] = sig
+	return sig
+}
+
+func (s *Session) classMethods(classID uint64) []jdwp.MethodInfo {
+	if m, ok := s.methodsCache[classID]; ok {
+		return m
+	}
+	methods, _ := jdwp.ReferenceTypeMethods(s.client, classID)
+	s.methodsCache[classID] = methods
+	return methods
+}
+
+func (s *Session) methodName(classID, methodID uint64) string {
+	for _, m := range s.classMethods(classID) {
+		if m.MethodID == methodID {
+			return m.Name
+		}
+	}
+	return "<unknown>"
+}
+
+func (s *Session) lineForLocation(loc jdwp.Location) int32 {
+	lt, err := jdwp.MethodLineTableCmd(s.client, loc.ClassID, loc.MethodID)
+	if err != nil {
+		return 0
+	}
+	var line int32
+	var bestIndex uint64
+	found := false
+	for _, e := range lt.Lines {
+		if e.LineCodeIndex <= loc.Index && (!found || e.LineCodeIndex > bestIndex) {
+			bestIndex = e.LineCodeIndex
+			line = e.LineNumber
+			found = true
+		}
+	}
+	return line
+}
+
+func (s *Session) renderValue(v jdwp.Value, signature string) string {
+	if v.Object {
+		if v.ObjectID == 0 {
+			return "null"
+		}
+		if v.Tag == jdwp.TagString {
+			str, _ := jdwp.StringValue(s.client, v.ObjectID)
+			return strconv.Quote(str)
+		}
+		return fmt.Sprintf("%s@%x", SignatureToType(signature), v.ObjectID)
+	}
+	switch v.Tag {
+	case jdwp.TagBoolean:
+		return strconv.FormatBool(v.Bool)
+	case jdwp.TagChar:
+		return fmt.Sprintf("'%c'", rune(v.Int))
+	case jdwp.TagFloat, jdwp.TagDouble:
+		return strconv.FormatFloat(v.Float, 'g', -1, 64)
+	default:
+		return strconv.FormatInt(v.Int, 10)
+	}
+}
+
+func (s *Session) pumpOutput(r io.Reader, category string) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			s.conn.SendEvent("output", dap.OutputEventBody{Category: category, Output: string(buf[:n])})
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+var packageRe = regexp.MustCompile(`(?m)^\s*package\s+([\w.]+)\s*;`)
+
+// classSignatureForSource derives the JDWP class signature for a source file
+// from its package declaration and file name.
+func classSignatureForSource(path string) (fqcn, signature string) {
+	pkg := ""
+	if data, err := os.ReadFile(path); err == nil {
+		if m := packageRe.FindSubmatch(data); m != nil {
+			pkg = string(m[1])
+		}
+	}
+	typeName := strings.TrimSuffix(filepath.Base(path), ".java")
+	if pkg != "" {
+		fqcn = pkg + "." + typeName
+	} else {
+		fqcn = typeName
+	}
+	return fqcn, "L" + strings.ReplaceAll(fqcn, ".", "/") + ";"
+}
+
+func (s *Session) sourcePathForClass(fqcn string) string {
+	top := strings.SplitN(fqcn, "$", 2)[0]
+	rel := strings.ReplaceAll(top, ".", "/") + ".java"
+	for _, sp := range s.cfg.CompilerOptions.SourcePaths {
+		p := s.cfg.ResolvePath(filepath.Join(sp, rel))
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}

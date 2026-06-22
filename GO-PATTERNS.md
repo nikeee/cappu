@@ -394,3 +394,48 @@ output to the TS reference (verified against the committed `.class` baselines in
   renamed to `compiledMethod`, `numericCat` (the unused brand type was removed),
   and `exprIsString`. Access flags (`accPublic`...) are shared with
   classfile_reader.go.
+
+## Debug adapter: JDWP client + DAP server (services/dap -> internal/dapserver)
+
+`cappu dap` bridges the Debug Adapter Protocol to JDWP (the JVM debugger wire
+protocol). Both wire protocols are hand-rolled on both sides (no
+`@vscode/debugadapter`, no `google/go-dap`, no JDWP library) so the two builds
+stay byte-comparable, like the LSP pair.
+
+- **8-byte binary IDs: TS `bigint` -> Go `uint64`.** JDWP sizes its reference IDs
+  (objectID/methodID/...) per the VM's `IDSizes` reply (up to 8 bytes). The TS
+  codec reads them as `bigint`; Go uses `uint64` (simpler, no boxing). The
+  ID-size-aware reader/writer (`internal/jdwp/idcodec.go`) loops byte-by-byte
+  rather than `binary.BigEndian.Uint64` because the width is dynamic.
+- **DAP transport = the LSP transport.** `internal/dap/conn.go` is
+  `internal/lsp/conn.go` retyped to DAP's envelope (`seq`/`type`/`request_seq`/
+  `command`/`event` instead of JSON-RPC `id`/`jsonrpc`); same `Content-Length`
+  framer and `readMessage`. Handlers return `(any, error)`; a returned error
+  becomes a `success:false` response carrying `err.Error()`.
+- **TS single event loop -> Go mutex + event goroutine (the key concurrency
+  trap).** In TS, DAP request handlers and JDWP event callbacks both run on the
+  one event loop, so they never race. In Go they run on different goroutines (the
+  DAP read loop vs the JDWP read goroutine). Serialize them with one `sync.Mutex`
+  on the `Session` **plus** a buffered event channel: the JDWP `OnEvent` callback
+  only does `s.eventCh <- data` (never takes the lock), and a dedicated
+  `processEvents` goroutine drains the channel and handles each event under the
+  mutex. This avoids the deadlock where a request handler holds the lock while
+  awaiting a JDWP reply and the JDWP read goroutine blocks in a lock-taking event
+  callback (so the reply is never delivered). The channel decouples them.
+- **`initialized` after the response:** the DAP `initialize` reply must precede
+  the `initialized` event. TS used `setImmediate`; Go uses `go s.conn.SendEvent(...)`
+  so the synchronous response write wins the connection write-lock first.
+- **`StdoutPipe`/`Wait` ordering:** the debuggee's stdout/stderr are pumped to DAP
+  `output` events by two goroutines; a `sync.WaitGroup` waits for both to hit EOF
+  **before** `cmd.Wait()` (Go forbids `Wait` before pipe reads complete).
+- **`ResolveJava` parity fix.** The Go `testing.ResolveJava` only matched the
+  javac sibling when javac contained a slash; the TS `resolveJava` realpaths a
+  bare `javac` via PATH first. Reconciled (PATH lookup + `EvalSymlinks` + sibling
+  `java`) so a system whose `javac` (JDK 25) and default `java` (JDK 21) differ
+  runs the debuggee with the compiling JDK - otherwise the JVM throws a
+  `LinkageError`/`UnsupportedClassVersionError`. The debugger surfaced a latent
+  `cappu test` divergence.
+- **JDWP "Listening" line is on stdout, not stderr.** `-agentlib:jdwp=...,server=y`
+  prints `Listening for transport dt_socket at address: NNNNN` to **stdout**; both
+  `launch.go`s parse it off stdout, then forward the rest of stdout as program
+  output (safe because `suspend=y` means no program output until resumed).
