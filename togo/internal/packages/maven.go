@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
-	"time"
+
+	"github.com/nikeee/cappu/internal/httpx"
 )
 
 // A PackageSource over a maven2 repository layout (Maven Central, ...):
@@ -41,8 +41,7 @@ type MavenRepositorySource struct {
 // NewMavenRepositorySource builds a source for baseURL using HTTP fetchers.
 // searchURL is the solr index endpoint, or "" for a repository without one.
 func NewMavenRepositorySource(baseURL, searchURL string) *MavenRepositorySource {
-	client := &http.Client{Timeout: 30 * time.Second}
-	return NewMavenRepositorySourceWithFetchers(baseURL, searchURL, httpFetchText(client), httpFetchBytes(client))
+	return NewMavenRepositorySourceWithFetchers(baseURL, searchURL, httpFetchText(httpx.Client), httpFetchBytes(httpx.Client))
 }
 
 // NewMavenRepositorySourceWithFetchers builds a source with injected fetchers
@@ -87,7 +86,7 @@ func httpGet(client *http.Client, u string) ([]byte, bool, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, false, nil // a non-2xx (incl. 404) is a miss, not an error
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := httpx.ReadAllCapped(resp.Body)
 	if err != nil {
 		return nil, false, err
 	}

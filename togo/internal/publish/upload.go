@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/httpx"
 	"github.com/nikeee/cappu/internal/packages"
 )
 
@@ -82,7 +83,7 @@ func defaultPut(url string, body []byte, authorization string) error {
 	if authorization != "" {
 		req.Header.Set("authorization", authorization)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpx.Client.Do(req)
 	if err != nil {
 		return err
 	}

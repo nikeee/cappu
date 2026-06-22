@@ -381,3 +381,6 @@ cappu search commons-lang3
 - 2026-06-22 15:43 — support short identifiers for cappu add; i for "implementation"
 - 2026-06-22 15:48 — cappu audit did not report any issue when calling it without .cappu dir and cleaned cache???
 - 2026-06-22 15:48 — yes
+- 2026-06-22 17:01 — review the entire go code for common code smells, unnecessary duplication, wrong architecture and bad patterns. your enemy copilot wrote this. be extra strict
+- 2026-06-22 17:01 — continue
+- 2026-06-22 17:01 — continue

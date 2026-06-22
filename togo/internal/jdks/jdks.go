@@ -7,7 +7,6 @@ package jdks
 import (
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/nikeee/cappu/internal/cache"
 	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/httpx"
 )
 
 var distributions = map[string]struct{}{"temurin": {}, "corretto": {}}
@@ -160,7 +160,7 @@ func Provision(cfg *config.Config, specText string, onProgress func(received, to
 
 // downloadTo streams url (following redirects) to file, reporting byte progress.
 func downloadTo(url, file string, onProgress func(received, total int64)) error {
-	resp, err := http.Get(url) //nolint:gosec,noctx // a fixed vendor download url
+	resp, err := httpx.Client.Get(url) //nolint:gosec,noctx // a fixed vendor download url
 	if err != nil {
 		return err
 	}
@@ -177,7 +177,7 @@ func downloadTo(url, file string, onProgress func(received, total int64)) error 
 		return err
 	}
 	total := resp.ContentLength
-	_, copyErr := io.Copy(out, &progressReader{r: resp.Body, total: total, onProgress: onProgress})
+	_, copyErr := io.Copy(out, &httpx.ProgressReader{R: resp.Body, Total: total, OnProgress: onProgress})
 	closeErr := out.Close()
 	if copyErr != nil {
 		return copyErr
@@ -186,22 +186,6 @@ func downloadTo(url, file string, onProgress func(received, total int64)) error 
 		return closeErr
 	}
 	return os.Rename(part, file)
-}
-
-type progressReader struct {
-	r          io.Reader
-	received   int64
-	total      int64
-	onProgress func(received, total int64)
-}
-
-func (p *progressReader) Read(b []byte) (int, error) {
-	n, err := p.r.Read(b)
-	p.received += int64(n)
-	if p.onProgress != nil {
-		p.onProgress(p.received, p.total)
-	}
-	return n, err
 }
 
 // unpack uses the system tar (bsdtar on win/mac, GNU tar on linux - both handle

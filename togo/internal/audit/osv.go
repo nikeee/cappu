@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/nikeee/cappu/internal/cache"
+	"github.com/nikeee/cappu/internal/httpx"
 	"github.com/nikeee/cappu/internal/packages"
 )
 
@@ -50,7 +51,7 @@ func defaultFetchJSON(url string, body any) ([]byte, error) {
 	if body != nil {
 		req.Header.Set("content-type", "application/json")
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpx.Client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +59,7 @@ func defaultFetchJSON(url string, body any) ([]byte, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("OSV %d for %s", resp.StatusCode, url)
 	}
-	return io.ReadAll(resp.Body)
+	return httpx.ReadAllCapped(resp.Body)
 }
 
 // osvVulnID matches OSV ids (GHSA-/CVE-/GO-...) - safe filename characters.

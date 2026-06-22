@@ -10,12 +10,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/nikeee/cappu/internal/httpx"
 )
 
 const (
@@ -148,7 +149,7 @@ func DownloadBinary(artifactID int64, binaryName string, fetchBytes FetchBytes, 
 		return nil, err
 	}
 	defer rc.Close()
-	return io.ReadAll(rc)
+	return httpx.ReadAllCapped(rc)
 }
 
 // ReplaceBinary replaces targetPath with bytes, executable. POSIX renames over

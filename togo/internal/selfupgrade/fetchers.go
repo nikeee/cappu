@@ -3,8 +3,9 @@ package selfupgrade
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
+
+	"github.com/nikeee/cappu/internal/httpx"
 )
 
 // githubFetchers builds authenticated GitHub API fetchers. The artifact-zip
@@ -25,7 +26,7 @@ func githubFetchers(token string) (FetchJSON, FetchBytes) {
 			return nil, err
 		}
 		header(req, "application/vnd.github+json")
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := httpx.Client.Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -33,7 +34,7 @@ func githubFetchers(token string) (FetchJSON, FetchBytes) {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("GitHub API %d for %s", resp.StatusCode, url)
 		}
-		return io.ReadAll(resp.Body)
+		return httpx.ReadAllCapped(resp.Body)
 	}
 	fetchBytes := func(url string, onProgress DownloadProgress) ([]byte, error) {
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
@@ -41,7 +42,7 @@ func githubFetchers(token string) (FetchJSON, FetchBytes) {
 			return nil, err
 		}
 		header(req, "")
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := httpx.Client.Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -49,25 +50,7 @@ func githubFetchers(token string) (FetchJSON, FetchBytes) {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("download failed: HTTP %d for %s", resp.StatusCode, url)
 		}
-		buf := &progressBuffer{total: resp.ContentLength, onProgress: onProgress}
-		if _, err := io.Copy(buf, resp.Body); err != nil {
-			return nil, err
-		}
-		return buf.data, nil
+		return httpx.ReadAllCapped(&httpx.ProgressReader{R: resp.Body, Total: resp.ContentLength, OnProgress: onProgress})
 	}
 	return fetchJSON, fetchBytes
-}
-
-type progressBuffer struct {
-	data       []byte
-	total      int64
-	onProgress DownloadProgress
-}
-
-func (p *progressBuffer) Write(b []byte) (int, error) {
-	p.data = append(p.data, b...)
-	if p.onProgress != nil {
-		p.onProgress(int64(len(p.data)), p.total)
-	}
-	return len(b), nil
 }
