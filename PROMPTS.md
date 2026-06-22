@@ -384,3 +384,9 @@ cappu search commons-lang3
 - 2026-06-22 17:01 — review the entire go code for common code smells, unnecessary duplication, wrong architecture and bad patterns. your enemy copilot wrote this. be extra strict
 - 2026-06-22 17:01 — continue
 - 2026-06-22 17:01 — continue
+- 2026-06-22 16:46 — cappu licenses has different output from --json as without
+- 2026-06-22 16:46 — couldnt you just add the dependencie's raw licenses?
+- 2026-06-22 16:46 — how about "licenses": [{"name":"MIT", "spdx": "MIT"}]
+- 2026-06-22 16:46 — yes
+- 2026-06-22 17:05 — i merged. continue
+- 2026-06-22 17:20 — continue
