@@ -222,9 +222,12 @@ test("examples/gson-app reports dependency licenses (human + --json)", { skip: !
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const rows = JSON.parse(json) as { coordinate: string; spdx: string[] }[];
+    const rows = JSON.parse(json) as {
+      coordinate: string;
+      licenses: { name: string; spdx: string | null }[];
+    }[];
     const gson = rows.find(r => r.coordinate === "com.google.code.gson:gson:2.13.1");
-    expect(gson?.spdx).toContain("Apache-2.0");
+    expect(gson?.licenses.map(l => l.spdx)).toContain("Apache-2.0");
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(store, { recursive: true, force: true });

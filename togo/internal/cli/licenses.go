@@ -29,10 +29,36 @@ func WarnUnmappedLicenses(pkgs []packages.ResolvedPackage) {
 	}
 }
 
+// licenseEntry is a raw POM license plus its best-effort SPDX id (null when the
+// name/url maps to nothing).
+type licenseEntry struct {
+	Name string  `json:"name"`
+	URL  string  `json:"url,omitempty"`
+	Spdx *string `json:"spdx"`
+}
+
 type licenseRow struct {
-	Coordinate string             `json:"coordinate"`
-	Licenses   []packages.License `json:"licenses"`
-	Spdx       []string           `json:"spdx"`
+	Coordinate string         `json:"coordinate"`
+	Licenses   []licenseEntry `json:"licenses"`
+}
+
+// newLicenseEntry builds a licenseEntry, filling spdx with the best-effort SPDX
+// id (nil when name/url maps to nothing).
+func newLicenseEntry(name, url string) licenseEntry {
+	e := licenseEntry{Name: name, URL: url}
+	if id, ok := packages.NormalizeLicense(name, url); ok {
+		s := string(id)
+		e.Spdx = &s
+	}
+	return e
+}
+
+func licenseEntries(ls []packages.License) []licenseEntry {
+	out := make([]licenseEntry, len(ls))
+	for i, l := range ls {
+		out[i] = newLicenseEntry(l.Name, l.URL)
+	}
+	return out
 }
 
 // RunLicenses handles `cappu licenses`: resolve the full dependency graph
@@ -62,21 +88,25 @@ func RunLicenses(cfg *config.Config, jsonOut bool) int {
 
 	rows := make([]licenseRow, 0, len(resolution.Packages))
 	for _, p := range resolution.Packages {
-		spdx := make([]string, 0, len(p.Metadata.LicenseNormalized))
-		for _, id := range p.Metadata.LicenseNormalized {
-			spdx = append(spdx, string(id))
-		}
 		rows = append(rows, licenseRow{
 			Coordinate: string(p.Coordinates.String()),
-			Licenses:   p.Metadata.Licenses,
-			Spdx:       spdx,
+			Licenses:   licenseEntries(p.Metadata.Licenses),
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Coordinate < rows[j].Coordinate })
 
 	if jsonOut {
-		out, _ := json.MarshalIndent(rows, "", "  ")
-		fmt.Fprintf(os.Stdout, "%s\n", out)
+		// The project's own license appears in the human output; include it here
+		// too (as a leading row) so --json carries the same information.
+		out := rows
+		if cfg.License != "" {
+			out = append([]licenseRow{{
+				Coordinate: "this project",
+				Licenses:   []licenseEntry{newLicenseEntry(cfg.License, "")},
+			}}, rows...)
+		}
+		buf, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Fprintf(os.Stdout, "%s\n", buf)
 		return 0
 	}
 
@@ -91,10 +121,18 @@ func RunLicenses(cfg *config.Config, jsonOut bool) int {
 		}
 	}
 	for _, r := range rows {
+		var spdx []string
+		seen := map[string]bool{}
+		for _, l := range r.Licenses {
+			if l.Spdx != nil && !seen[*l.Spdx] {
+				seen[*l.Spdx] = true
+				spdx = append(spdx, *l.Spdx)
+			}
+		}
 		var label string
 		switch {
-		case len(r.Spdx) > 0:
-			label = out("cyan", strings.Join(r.Spdx, ", "))
+		case len(spdx) > 0:
+			label = out("cyan", strings.Join(spdx, ", "))
 		case len(r.Licenses) > 0:
 			raw := make([]string, len(r.Licenses))
 			for i, l := range r.Licenses {

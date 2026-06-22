@@ -34,10 +34,9 @@ export function warnUnmappedLicenses(
 
 interface LicenseRow {
   coordinate: string;
-  /** Raw licenses as declared in the POM. */
-  licenses: { name: string; url?: string }[];
-  /** The best-effort SPDX ids those map to (unmapped names dropped). */
-  spdx: string[];
+  /** Raw licenses as declared in the POM, each with its best-effort SPDX id
+   * (null when the name/url maps to nothing). */
+  licenses: { name: string; url?: string; spdx: string | null }[];
 }
 
 export async function runLicenses(
@@ -63,13 +62,24 @@ export async function runLicenses(
       licenses: (p.metadata.licenses ?? []).map(l => ({
         name: l.name,
         ...(l.url ? { url: l.url } : {}),
+        spdx: normalizeLicense(l.name, l.url) ?? null,
       })),
-      spdx: [...(p.metadata.licenseNormalized ?? [])],
     }))
     .sort((a, b) => a.coordinate.localeCompare(b.coordinate));
 
   if (options.json) {
-    process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+    // The project's own license appears in the human output; include it here too
+    // (as a leading row) so --json carries the same information.
+    const json: LicenseRow[] = config.license
+      ? [
+          {
+            coordinate: "this project",
+            licenses: [{ name: config.license, spdx: normalizeLicense(config.license) ?? null }],
+          },
+          ...rows,
+        ]
+      : rows;
+    process.stdout.write(`${JSON.stringify(json, null, 2)}\n`);
     process.exit(0);
   }
 
@@ -81,9 +91,10 @@ export async function runLicenses(
   }
   const width = rows.reduce((w, r) => Math.max(w, r.coordinate.length), 0);
   for (const r of rows) {
+    const spdx = [...new Set(r.licenses.map(l => l.spdx).filter((s): s is string => s !== null))];
     const label =
-      r.spdx.length > 0
-        ? out("cyan", r.spdx.join(", "))
+      spdx.length > 0
+        ? out("cyan", spdx.join(", "))
         : r.licenses.length > 0
           ? out("yellow", `${r.licenses.map(l => l.name).join(", ")} (no SPDX id)`)
           : out("dim", "no license declared");
