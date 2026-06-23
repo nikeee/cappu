@@ -150,7 +150,7 @@ func encodeAnnotation(cp *constantPool, ann *AnnotationData, from *Node, program
 // value's form.
 func tagFromDescriptor(desc descriptor) string {
 	s := string(desc)
-	if len(s) == 1 && strings.Contains("BSCIJFDZ", s) {
+	if len(s) == 1 && strings.IndexByte("BSCIJFDZ", s[0]) >= 0 {
 		return s
 	}
 	if s == "Ljava/lang/String;" {
@@ -283,7 +283,7 @@ func encodeConstElementValue(cp *constantPool, value *Node, tag string, buf *byt
 		inferred = "J"
 	}
 	t := inferred
-	if len(tag) == 1 && strings.Contains("BSCIJFDZ", tag) {
+	if len(tag) == 1 && strings.IndexByte("BSCIJFDZ", tag[0]) >= 0 {
 		t = tag
 	}
 	sign := 1.0
