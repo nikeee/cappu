@@ -1,16 +1,15 @@
 // Self-upgrade API (self-contained, like src/packages/): replace the running
-// cappu binary with the latest CD build artifact for this platform.
+// cappu binary with the latest published release asset for this platform.
 
 export {
-  type ArtifactRef,
   downloadBinary,
   type FetchBytes,
   type FetchJson,
-  latestArtifact,
+  latestRelease,
   platformTarget,
+  type ReleaseRef,
   replaceBinary,
-  resolveToken,
+  sameVersion,
   selfUpgrade,
   type UpgradeResult,
-  type UpgradeTarget,
 } from "./selfupgrade.ts";

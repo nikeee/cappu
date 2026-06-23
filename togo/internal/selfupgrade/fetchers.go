@@ -8,12 +8,11 @@ import (
 	"github.com/nikeee/cappu/internal/httpx"
 )
 
-// githubFetchers builds authenticated GitHub API fetchers. The artifact-zip
-// download follows a 302 to blob storage; Go's http client drops the
-// Authorization header on the cross-host redirect, which the signed URL wants.
-func githubFetchers(token string) (FetchJSON, FetchBytes) {
+// githubFetchers builds public GitHub API fetchers (no auth - the repo and its
+// release assets are public). GitHub requires a User-Agent. The asset download
+// follows a 302 to blob storage on its own.
+func githubFetchers() (FetchJSON, FetchBytes) {
 	header := func(req *http.Request, accept string) {
-		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("User-Agent", "cappu-self-upgrade")
 		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 		if accept != "" {

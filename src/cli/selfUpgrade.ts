@@ -1,12 +1,13 @@
 // `cappu self-upgrade`: replace the running compiled binary with the latest
-// CD build. Refuses to run from a dev launcher (tsx/node), where execPath is
-// the runtime, not cappu.
+// published release. Refuses to run from a dev launcher (tsx/node), where
+// execPath is the runtime, not cappu.
 
 import { basename } from "node:path";
 
 import { SingleBar } from "cli-progress";
 
-import { platformTarget, resolveToken, selfUpgrade } from "../selfupgrade/index.ts";
+import pkg from "../../package.json" with { type: "json" };
+import { platformTarget, selfUpgrade } from "../selfupgrade/index.ts";
 import { downloadBar, painter } from "./style.ts";
 
 export async function runSelfUpgrade(): Promise<never> {
@@ -21,24 +22,15 @@ export async function runSelfUpgrade(): Promise<never> {
     process.exit(2);
   }
 
-  const token = resolveToken();
-  if (!token) {
-    process.stderr.write(
-      "cappu: self-upgrade needs a GitHub token to read CD build artifacts.\n" +
-        "       Set GITHUB_TOKEN (or run `gh auth login`).\n",
-    );
-    process.exit(2);
-  }
-
   const err = painter(process.stderr);
   const out = painter(process.stdout);
-  const label = platformTarget()?.artifact ?? "cappu";
+  const label = platformTarget() ?? "cappu";
   let bar: SingleBar | undefined;
   try {
-    process.stderr.write(err(["bold", "cyan"], "fetching the latest CD build...\n"));
+    process.stderr.write(err(["bold", "cyan"], "fetching the latest release...\n"));
     const result = await selfUpgrade({
       targetPath,
-      token,
+      currentVersion: pkg.version,
       onDownloadProgress: (received, total) => {
         if (total === undefined) return;
         bar ??= (() => {
@@ -50,10 +42,15 @@ export async function runSelfUpgrade(): Promise<never> {
       },
     });
     bar?.stop();
-    const sha = result.artifact.runSha.slice(0, 7);
+    if (result.upToDate) {
+      process.stdout.write(
+        `${out("green", "✓")} already on the latest version (${out("cyan", result.release.tag)})\n`,
+      );
+      process.exit(0);
+    }
     process.stdout.write(
-      `${out("green", "✓")} upgraded ${result.targetPath} to ${out("bold", result.target.artifact)} ` +
-        `(${out("cyan", sha)}, built ${result.artifact.runCreatedAt})\n`,
+      `${out("green", "✓")} upgraded ${result.targetPath} to ${out("bold", result.assetName)} ` +
+        `(${out("cyan", result.release.tag)}, published ${result.release.publishedAt})\n`,
     );
     process.exit(0);
   } catch (e) {

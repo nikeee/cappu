@@ -393,3 +393,5 @@ cappu search commons-lang3
 - 2026-06-23 09:08 — any idea what would be good for this project?
 - 2026-06-23 10:41 — commit on main. then next feature
 - 2026-06-23 10:41 — continue
+- 2026-06-23 10:47 — we want to make the repository public. cappu self-upgrade should check for the latest public github tag/release instead of CI run. Remove GH token. Add CD step and release creation and stuff
+- 2026-06-23 10:48 — do it in a separate worktree in ../javalsp-publish
