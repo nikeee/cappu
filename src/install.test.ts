@@ -1,6 +1,5 @@
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import TempDir from "./TempDir.ts";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -26,7 +25,7 @@ import {
 
 // Every test runs against an isolated package store - never the user's real
 // XDG cache (the store test below swaps in its own).
-process.env.CAPPU_PACKAGE_STORE = mkdtempSync(join(tmpdir(), "cappu-store-shared-"));
+process.env.CAPPU_PACKAGE_STORE = TempDir.create("cappu-store-shared-").path;
 
 const POM_GSON = `<project>
   <licenses>
@@ -61,168 +60,152 @@ function fakeRepo(): MavenRepositorySource {
 
 test("cappu install resolves transitively and writes jars into lib/classes", async () => {
   using dir = TempDir.create("cappu-install-");
-  try {
-    writeFileSync(
-      join(dir.path, "cappu.json"),
-      '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
-    );
-    const config = loadConfig(undefined, dir.path);
-    const result = await installDependencies(config, [fakeRepo()]);
+  writeFileSync(
+    join(dir.path, "cappu.json"),
+    '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
+  );
+  const config = loadConfig(undefined, dir.path);
+  const result = await installDependencies(config, [fakeRepo()]);
 
-    expect(result.targetDir).toBe(join(dir.path, ".cappu", "lib", "classes"));
-    expect(result.installed).toEqual([
-      join(dir.path, ".cappu", "lib", "classes", "gson-2.14.0.jar"), // the root
-      join(dir.path, ".cappu", "lib", "classes", "base-1.0.jar"), // its transitive dependency
-    ]);
-    expect(result.noArtifact).toEqual([]);
-    expect(result.resolution.missing).toEqual([]);
-    expect(readFileSync(join(dir.path, ".cappu", "lib", "classes", "gson-2.14.0.jar"), "utf8")).toBe(
-      "gson-bytes",
-    );
-    expect(readdirSync(join(dir.path, ".cappu", "lib", "classes")).sort()).toEqual([
-      "base-1.0.jar",
-      "gson-2.14.0.jar",
-    ]);
-  } finally {
-    rmSync(dir.path, { recursive: true, force: true });
-  }
+  expect(result.targetDir).toBe(join(dir.path, ".cappu", "lib", "classes"));
+  expect(result.installed).toEqual([
+    join(dir.path, ".cappu", "lib", "classes", "gson-2.14.0.jar"), // the root
+    join(dir.path, ".cappu", "lib", "classes", "base-1.0.jar"), // its transitive dependency
+  ]);
+  expect(result.noArtifact).toEqual([]);
+  expect(result.resolution.missing).toEqual([]);
+  expect(readFileSync(join(dir.path, ".cappu", "lib", "classes", "gson-2.14.0.jar"), "utf8")).toBe(
+    "gson-bytes",
+  );
+  expect(readdirSync(join(dir.path, ".cappu", "lib", "classes")).sort()).toEqual([
+    "base-1.0.jar",
+    "gson-2.14.0.jar",
+  ]);
 });
 
 test("the lockfile records each package's raw (not normalized) licenses", async () => {
   using dir = TempDir.create("cappu-install-");
-  try {
-    writeFileSync(
-      join(dir.path, "cappu.json"),
-      '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
-    );
-    const config = loadConfig(undefined, dir.path);
-    await installDependencies(config, [fakeRepo()]);
-    const lock = JSON.parse(readFileSync(join(dir.path, LOCKFILE_NAME), "utf8")) as {
-      packages: {
-        coordinates: { artifactId: string };
-        licenses?: { name: string; url?: string }[];
-      }[];
-    };
-    const gson = lock.packages.find(p => p.coordinates.artifactId === "gson")!;
-    // raw POM name, NOT the best-effort SPDX id ("Apache-2.0")
-    expect(gson.licenses).toEqual([
-      {
-        name: "The Apache Software License, Version 2.0",
-        url: "https://www.apache.org/licenses/LICENSE-2.0.txt",
-      },
-    ]);
-    // base declares no license: no licenses key at all
-    const base = lock.packages.find(p => p.coordinates.artifactId === "base")!;
-    expect(base.licenses).toBeUndefined();
-  } finally {
-    rmSync(dir.path, { recursive: true, force: true });
-  }
+  writeFileSync(
+    join(dir.path, "cappu.json"),
+    '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
+  );
+  const config = loadConfig(undefined, dir.path);
+  await installDependencies(config, [fakeRepo()]);
+  const lock = JSON.parse(readFileSync(join(dir.path, LOCKFILE_NAME), "utf8")) as {
+    packages: {
+      coordinates: { artifactId: string };
+      licenses?: { name: string; url?: string }[];
+    }[];
+  };
+  const gson = lock.packages.find(p => p.coordinates.artifactId === "gson")!;
+  // raw POM name, NOT the best-effort SPDX id ("Apache-2.0")
+  expect(gson.licenses).toEqual([
+    {
+      name: "The Apache Software License, Version 2.0",
+      url: "https://www.apache.org/licenses/LICENSE-2.0.txt",
+    },
+  ]);
+  // base declares no license: no licenses key at all
+  const base = lock.packages.find(p => p.coordinates.artifactId === "base")!;
+  expect(base.licenses).toBeUndefined();
 });
 
 test("an unknown dependency surfaces as missing, nothing is written for it", async () => {
   using dir = TempDir.create("cappu-install-");
-  try {
-    writeFileSync(
-      join(dir.path, "cappu.json"),
-      '{ "dependencies": { "api": { "org.gone:gone": "9" } } }',
-    );
-    const config = loadConfig(undefined, dir.path);
-    const result = await installDependencies(config, [fakeRepo()]);
-    expect(result.installed).toEqual([]);
-    expect(result.resolution.missing).toHaveLength(1);
-    expect(result.resolution.missing[0]!.coordinates).toEqual({
-      groupId: "org.gone",
-      artifactId: "gone",
-      version: "9",
-    });
-  } finally {
-    rmSync(dir.path, { recursive: true, force: true });
-  }
+  writeFileSync(
+    join(dir.path, "cappu.json"),
+    '{ "dependencies": { "api": { "org.gone:gone": "9" } } }',
+  );
+  const config = loadConfig(undefined, dir.path);
+  const result = await installDependencies(config, [fakeRepo()]);
+  expect(result.installed).toEqual([]);
+  expect(result.resolution.missing).toHaveLength(1);
+  expect(result.resolution.missing[0]!.coordinates).toEqual({
+    groupId: "org.gone",
+    artifactId: "gone",
+    version: "9",
+  });
 });
 
 test("install writes a lockfile and reuses it while the dependencies match", async () => {
   using dir = TempDir.create("cappu-install-");
-  try {
-    writeFileSync(
-      join(dir.path, "cappu.json"),
-      '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
-    );
-    const config = loadConfig(undefined, dir.path);
-    const first = await installDependencies(config, [fakeRepo()]);
-    expect(first.fromLock).toBe(false);
-    const lock = JSON.parse(readFileSync(join(dir.path, LOCKFILE_NAME), "utf8")) as {
-      version: number;
-      roots: unknown;
-      packages: { sha256: string }[];
-    };
-    expect(lock.version).toBe(2);
-    expect(lock.packages).toHaveLength(2); // gson + its transitive base
-    // every artifact is pinned by the hash of its downloaded bytes (#2)
-    for (const pkg of lock.packages) expect(pkg.sha256).toMatch(/^[0-9a-f]{64}$/);
+  writeFileSync(
+    join(dir.path, "cappu.json"),
+    '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
+  );
+  const config = loadConfig(undefined, dir.path);
+  const first = await installDependencies(config, [fakeRepo()]);
+  expect(first.fromLock).toBe(false);
+  const lock = JSON.parse(readFileSync(join(dir.path, LOCKFILE_NAME), "utf8")) as {
+    version: number;
+    roots: unknown;
+    packages: { sha256: string }[];
+  };
+  expect(lock.version).toBe(2);
+  expect(lock.packages).toHaveLength(2); // gson + its transitive base
+  // every artifact is pinned by the hash of its downloaded bytes (#2)
+  for (const pkg of lock.packages) expect(pkg.sha256).toMatch(/^[0-9a-f]{64}$/);
 
-    // Unchanged section: the locked set installs without any POM fetch.
-    const fetchedPoms: string[] = [];
-    const countingRepo = new MavenRepositorySource(
-      "https://repo.test/m2",
-      url => {
-        fetchedPoms.push(url);
-        return Promise.resolve(undefined);
-      },
-      url => {
-        // the same bytes the lock was written from - a locked install verifies
-        const file = url.split("/").at(-1)!;
-        const body = file.startsWith("gson-") ? "gson-bytes" : "base-bytes";
-        return Promise.resolve(url.endsWith(".jar") ? new TextEncoder().encode(body) : undefined);
-      },
-    );
-    const second = await installDependencies(loadConfig(undefined, dir.path), [countingRepo]);
-    expect(second.fromLock).toBe(true);
-    expect(second.installed).toHaveLength(2);
-    expect(second.integrityFailures).toEqual([]);
-    expect(fetchedPoms).toEqual([]);
+  // Unchanged section: the locked set installs without any POM fetch.
+  const fetchedPoms: string[] = [];
+  const countingRepo = new MavenRepositorySource(
+    "https://repo.test/m2",
+    url => {
+      fetchedPoms.push(url);
+      return Promise.resolve(undefined);
+    },
+    url => {
+      // the same bytes the lock was written from - a locked install verifies
+      const file = url.split("/").at(-1)!;
+      const body = file.startsWith("gson-") ? "gson-bytes" : "base-bytes";
+      return Promise.resolve(url.endsWith(".jar") ? new TextEncoder().encode(body) : undefined);
+    },
+  );
+  const second = await installDependencies(loadConfig(undefined, dir.path), [countingRepo]);
+  expect(second.fromLock).toBe(true);
+  expect(second.installed).toHaveLength(2);
+  expect(second.integrityFailures).toEqual([]);
+  expect(fetchedPoms).toEqual([]);
 
-    // A tampered artifact (bytes differing from the locked SHA-256) is refused.
-    // The store would mask the tampered repository (a cache hit IS the honest
-    // bytes), so it is emptied first to force the download path.
-    rmSync(process.env.CAPPU_PACKAGE_STORE!, { recursive: true, force: true });
-    const tamperedRepo = new MavenRepositorySource(
-      "https://repo.test/m2",
-      () => Promise.resolve(undefined),
-      url =>
-        Promise.resolve(url.endsWith(".jar") ? new TextEncoder().encode("evil-bytes") : undefined),
-    );
-    const tampered = await installDependencies(loadConfig(undefined, dir.path), [tamperedRepo]);
-    expect(tampered.integrityFailures).toEqual([
-      "com.google.code.gson:gson:2.14.0",
-      "org.example:base:1.0",
-    ]);
-    expect(tampered.installed).toEqual([]);
+  // A tampered artifact (bytes differing from the locked SHA-256) is refused.
+  // The store would mask the tampered repository (a cache hit IS the honest
+  // bytes), so it is emptied first to force the download path.
+  rmSync(process.env.CAPPU_PACKAGE_STORE!, { recursive: true, force: true });
+  const tamperedRepo = new MavenRepositorySource(
+    "https://repo.test/m2",
+    () => Promise.resolve(undefined),
+    url =>
+      Promise.resolve(url.endsWith(".jar") ? new TextEncoder().encode("evil-bytes") : undefined),
+  );
+  const tampered = await installDependencies(loadConfig(undefined, dir.path), [tamperedRepo]);
+  expect(tampered.integrityFailures).toEqual([
+    "com.google.code.gson:gson:2.14.0",
+    "org.example:base:1.0",
+  ]);
+  expect(tampered.installed).toEqual([]);
 
-    // Changed section: install ONLY respects the lock - the locked set is
-    // installed anyway, flagged stale; updateLock (what `cappu add` passes)
-    // re-resolves and rewrites it.
-    writeFileSync(
-      join(dir.path, "cappu.json"),
-      '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0", "org.example:base": "1.0" } } }',
-    );
-    const third = await installDependencies(loadConfig(undefined, dir.path), [fakeRepo()]);
-    expect(third.fromLock).toBe(true);
-    expect(third.lockStale).toBe(true);
-    const fourth = await installDependencies(loadConfig(undefined, dir.path), [fakeRepo()], {
-      updateLock: true,
-    });
-    expect(fourth.fromLock).toBe(false);
-    expect(fourth.lockStale).toBe(false);
-    const rewritten = JSON.parse(readFileSync(join(dir.path, LOCKFILE_NAME), "utf8")) as {
-      roots: { implementation: Record<string, string> };
-    };
-    expect(Object.keys(rewritten.roots.implementation).sort()).toEqual([
-      "com.google.code.gson:gson",
-      "org.example:base",
-    ]);
-  } finally {
-    rmSync(dir.path, { recursive: true, force: true });
-  }
+  // Changed section: install ONLY respects the lock - the locked set is
+  // installed anyway, flagged stale; updateLock (what `cappu add` passes)
+  // re-resolves and rewrites it.
+  writeFileSync(
+    join(dir.path, "cappu.json"),
+    '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0", "org.example:base": "1.0" } } }',
+  );
+  const third = await installDependencies(loadConfig(undefined, dir.path), [fakeRepo()]);
+  expect(third.fromLock).toBe(true);
+  expect(third.lockStale).toBe(true);
+  const fourth = await installDependencies(loadConfig(undefined, dir.path), [fakeRepo()], {
+    updateLock: true,
+  });
+  expect(fourth.fromLock).toBe(false);
+  expect(fourth.lockStale).toBe(false);
+  const rewritten = JSON.parse(readFileSync(join(dir.path, LOCKFILE_NAME), "utf8")) as {
+    roots: { implementation: Record<string, string> };
+  };
+  expect(Object.keys(rewritten.roots.implementation).sort()).toEqual([
+    "com.google.code.gson:gson",
+    "org.example:base",
+  ]);
 });
 
 function versionedSource(): InMemoryPackageSource {
@@ -247,125 +230,112 @@ function configWith(dir: string, json: string): ReturnType<typeof loadConfig> {
 
 test("annotationProcessor deps resolve independently into lib/processors", async () => {
   using dir = TempDir.create("cappu-install-");
-  try {
-    writeFileSync(
-      join(dir.path, "cappu.json"),
-      JSON.stringify({
-        dependencies: {
-          implementation: { "com.google.code.gson:gson": "2.14.0" },
-          annotationProcessor: { "org.example:base": "1.0" },
-        },
-      }),
-    );
-    const config = loadConfig(undefined, dir.path);
-    const result = await installDependencies(config, [fakeRepo()]);
-    // compile deps in lib/classes, the processor in lib/processors
-    expect(result.installed).toContain(join(dir.path, ".cappu", "lib", "classes", "gson-2.14.0.jar"));
-    expect(result.installed).toContain(join(dir.path, ".cappu", "lib", "processors", "base-1.0.jar"));
-    // the processor dir holds ONLY the processor closure (gson stays out)
-    expect(readdirSync(join(dir.path, ".cappu", "lib", "processors"))).toEqual(["base-1.0.jar"]);
+  writeFileSync(
+    join(dir.path, "cappu.json"),
+    JSON.stringify({
+      dependencies: {
+        implementation: { "com.google.code.gson:gson": "2.14.0" },
+        annotationProcessor: { "org.example:base": "1.0" },
+      },
+    }),
+  );
+  const config = loadConfig(undefined, dir.path);
+  const result = await installDependencies(config, [fakeRepo()]);
+  // compile deps in lib/classes, the processor in lib/processors
+  expect(result.installed).toContain(join(dir.path, ".cappu", "lib", "classes", "gson-2.14.0.jar"));
+  expect(result.installed).toContain(join(dir.path, ".cappu", "lib", "processors", "base-1.0.jar"));
+  // the processor dir holds ONLY the processor closure (gson stays out)
+  expect(readdirSync(join(dir.path, ".cappu", "lib", "processors"))).toEqual(["base-1.0.jar"]);
 
-    const lock = JSON.parse(readFileSync(join(dir.path, LOCKFILE_NAME), "utf8")) as {
-      packages: unknown[];
-      processorPackages: unknown[];
-    };
-    expect(lock.packages).toHaveLength(2); // gson + transitive base
-    expect(lock.processorPackages).toHaveLength(1);
+  const lock = JSON.parse(readFileSync(join(dir.path, LOCKFILE_NAME), "utf8")) as {
+    packages: unknown[];
+    processorPackages: unknown[];
+  };
+  expect(lock.packages).toHaveLength(2); // gson + transitive base
+  expect(lock.processorPackages).toHaveLength(1);
 
-    // the locked sets install again without resolution
-    const again = await installDependencies(config, [fakeRepo()]);
-    expect(again.fromLock).toBe(true);
-    expect(again.lockStale).toBe(false);
-    expect(again.installed).toContain(join(dir.path, ".cappu", "lib", "processors", "base-1.0.jar"));
-  } finally {
-    rmSync(dir.path, { recursive: true, force: true });
-  }
+  // the locked sets install again without resolution
+  const again = await installDependencies(config, [fakeRepo()]);
+  expect(again.fromLock).toBe(true);
+  expect(again.lockStale).toBe(false);
+  expect(again.installed).toContain(join(dir.path, ".cappu", "lib", "processors", "base-1.0.jar"));
 });
 
 test("testImplementation deps resolve independently into lib/test-classes", async () => {
   using dir = TempDir.create("cappu-install-");
-  try {
-    writeFileSync(
-      join(dir.path, "cappu.json"),
-      JSON.stringify({ dependencies: { testImplementation: { "org.example:base": "1.0" } } }),
-    );
-    const config = loadConfig(undefined, dir.path);
-    const result = await installDependencies(config, [fakeRepo()]);
-    expect(result.installed).toEqual([join(dir.path, ".cappu", "lib", "test-classes", "base-1.0.jar")]);
-    const lock = JSON.parse(readFileSync(join(dir.path, LOCKFILE_NAME), "utf8")) as {
-      packages: unknown[];
-      testPackages: unknown[];
-    };
-    expect(lock.packages).toHaveLength(0);
-    expect(lock.testPackages).toHaveLength(1);
-    const again = await installDependencies(config, [fakeRepo()]);
-    expect(again.fromLock).toBe(true);
-    expect(again.installed).toEqual([join(dir.path, ".cappu", "lib", "test-classes", "base-1.0.jar")]);
-  } finally {
-    rmSync(dir.path, { recursive: true, force: true });
-  }
+  writeFileSync(
+    join(dir.path, "cappu.json"),
+    JSON.stringify({ dependencies: { testImplementation: { "org.example:base": "1.0" } } }),
+  );
+  const config = loadConfig(undefined, dir.path);
+  const result = await installDependencies(config, [fakeRepo()]);
+  expect(result.installed).toEqual([
+    join(dir.path, ".cappu", "lib", "test-classes", "base-1.0.jar"),
+  ]);
+  const lock = JSON.parse(readFileSync(join(dir.path, LOCKFILE_NAME), "utf8")) as {
+    packages: unknown[];
+    testPackages: unknown[];
+  };
+  expect(lock.packages).toHaveLength(0);
+  expect(lock.testPackages).toHaveLength(1);
+  const again = await installDependencies(config, [fakeRepo()]);
+  expect(again.fromLock).toBe(true);
+  expect(again.installed).toEqual([
+    join(dir.path, ".cappu", "lib", "test-classes", "base-1.0.jar"),
+  ]);
 });
 
 test("locks written before the annotationProcessor configuration stay fresh", async () => {
   using dir = TempDir.create("cappu-install-");
-  try {
-    writeFileSync(
-      join(dir.path, "cappu.json"),
-      '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
-    );
-    const config = loadConfig(undefined, dir.path);
-    await installDependencies(config, [fakeRepo()]);
-    // simulate a lock from BEFORE the schema knew annotationProcessor: its
-    // roots lack the (empty) configuration entirely
-    const lock = JSON.parse(readFileSync(join(dir.path, LOCKFILE_NAME), "utf8")) as {
-      roots: Record<string, unknown>;
-    };
-    delete lock.roots.annotationProcessor;
-    delete (lock.roots as { api?: unknown }).api; // empty sections may be absent too
-    writeFileSync(join(dir.path, LOCKFILE_NAME), JSON.stringify(lock));
+  writeFileSync(
+    join(dir.path, "cappu.json"),
+    '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
+  );
+  const config = loadConfig(undefined, dir.path);
+  await installDependencies(config, [fakeRepo()]);
+  // simulate a lock from BEFORE the schema knew annotationProcessor: its
+  // roots lack the (empty) configuration entirely
+  const lock = JSON.parse(readFileSync(join(dir.path, LOCKFILE_NAME), "utf8")) as {
+    roots: Record<string, unknown>;
+  };
+  delete lock.roots.annotationProcessor;
+  delete (lock.roots as { api?: unknown }).api; // empty sections may be absent too
+  writeFileSync(join(dir.path, LOCKFILE_NAME), JSON.stringify(lock));
 
-    const again = await installDependencies(config, [fakeRepo()]);
-    expect(again.fromLock).toBe(true);
-    expect(again.lockStale).toBe(false); // empty configurations are normalized away
-  } finally {
-    rmSync(dir.path, { recursive: true, force: true });
-  }
+  const again = await installDependencies(config, [fakeRepo()]);
+  expect(again.fromLock).toBe(true);
+  expect(again.lockStale).toBe(false);
 });
 
 test("pickAddVersion takes the newest matching version that resolves conflict-free", async () => {
   using dir = TempDir.create("cappu-pick-");
-  try {
-    // Nothing configured: the newest published version wins outright.
-    const empty = configWith(dir.path, "{}");
-    expect(await pickAddVersion(empty, "org.x:lib", undefined, [versionedSource()])).toEqual({
-      version: "2.1",
-      compatible: true,
-    });
-    // A partial spec restricts the candidates.
-    expect(await pickAddVersion(empty, "org.x:lib", "1", [versionedSource()])).toEqual({
-      version: "1.5",
-      compatible: true,
-    });
-    // base 1.0 already configured: lib 2.x would conflict over base, so the
-    // newest COMPATIBLE version is the 1.x line.
-    const pinned = configWith(
-      dir.path,
-      '{ "dependencies": { "implementation": { "org.x:base": "1.0" } } }',
-    );
-    expect(await pickAddVersion(pinned, "org.x:lib", undefined, [versionedSource()])).toEqual({
-      version: "1.5",
-      compatible: true,
-    });
-    // A spec that ONLY matches conflicting versions falls back, flagged.
-    expect(await pickAddVersion(pinned, "org.x:lib", "2", [versionedSource()])).toEqual({
-      version: "2.1",
-      compatible: false,
-    });
-    // No matching published version at all.
-    expect(await pickAddVersion(empty, "org.x:lib", "9", [versionedSource()])).toBeUndefined();
-  } finally {
-    rmSync(dir.path, { recursive: true, force: true });
-  }
+  const empty = configWith(dir.path, "{}");
+  expect(await pickAddVersion(empty, "org.x:lib", undefined, [versionedSource()])).toEqual({
+    version: "2.1",
+    compatible: true,
+  });
+  // A partial spec restricts the candidates.
+  expect(await pickAddVersion(empty, "org.x:lib", "1", [versionedSource()])).toEqual({
+    version: "1.5",
+    compatible: true,
+  });
+  // base 1.0 already configured: lib 2.x would conflict over base, so the
+  // newest COMPATIBLE version is the 1.x line.
+  const pinned = configWith(
+    dir.path,
+    '{ "dependencies": { "implementation": { "org.x:base": "1.0" } } }',
+  );
+  expect(await pickAddVersion(pinned, "org.x:lib", undefined, [versionedSource()])).toEqual({
+    version: "1.5",
+    compatible: true,
+  });
+  // A spec that ONLY matches conflicting versions falls back, flagged.
+  expect(await pickAddVersion(pinned, "org.x:lib", "2", [versionedSource()])).toEqual({
+    version: "2.1",
+    compatible: false,
+  });
+  // No matching published version at all.
+  expect(await pickAddVersion(empty, "org.x:lib", "9", [versionedSource()])).toBeUndefined();
 });
 
 test("listVersions answers are cached in the package store with a TTL", async () => {

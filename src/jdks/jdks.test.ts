@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
 import TempDir from "../TempDir.ts";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 

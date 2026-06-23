@@ -6,7 +6,6 @@ import { expect } from "expect";
 import { createChecker } from "./checker.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { classFileToStub, loadClassPath } from "./classfileReader.ts";

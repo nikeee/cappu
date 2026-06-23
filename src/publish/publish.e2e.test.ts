@@ -7,12 +7,12 @@
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import { expect } from "expect";
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers";
+import TempDir from "../TempDir.ts";
 
 const here = import.meta.dirname;
 const tsx = join(here, "..", "..", "node_modules", ".bin", "tsx");

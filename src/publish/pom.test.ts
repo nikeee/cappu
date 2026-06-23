@@ -1,6 +1,5 @@
-import { rmSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import TempDir from "../TempDir.ts";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -11,12 +10,8 @@ import { generatePom, missingCoordinates } from "./pom.ts";
 
 function configFrom(obj: Record<string, unknown>): CappuConfig {
   using dir = TempDir.create("cappu-pom-");
-  try {
-    writeFileSync(join(dir.path, "cappu.json"), JSON.stringify(obj));
-    return loadConfig(undefined, dir.path);
-  } finally {
-    rmSync(dir.path, { recursive: true, force: true });
-  }
+  writeFileSync(join(dir.path, "cappu.json"), JSON.stringify(obj));
+  return loadConfig(undefined, dir.path);
 }
 
 test("generatePom emits coordinates, packaging, license and scoped dependencies", () => {

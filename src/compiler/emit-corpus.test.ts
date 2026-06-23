@@ -10,15 +10,7 @@
 //   git submodule update --init
 
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 
@@ -30,6 +22,7 @@ import { type Disasm, disasmFiles } from "./javapNormalize.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
 import { pathToUri } from "../workspace.ts";
+import TempDir from "../TempDir.ts";
 
 const here = import.meta.dirname;
 const corpusRoot = join(here, "..", "..", "test-fixtures", "emitter", "corpus");

@@ -1,6 +1,5 @@
-import { chmodSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import TempDir from "../TempDir.ts";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -122,42 +121,34 @@ test("downloadBinary forwards the progress callback to the fetcher", async () =>
 
 test("replaceBinary swaps the file in place and keeps it executable", () => {
   using dir = TempDir.create("cappu-upgrade-");
-  try {
-    const target = join(dir.path, "cappu");
-    writeFileSync(target, "old");
-    chmodSync(target, 0o755);
-    replaceBinary(target, new TextEncoder().encode("new binary"));
-    expect(readFileSync(target, "utf8")).toBe("new binary");
-    expect(statSync(target).mode & 0o111).not.toBe(0); // still executable
-  } finally {
-    rmSync(dir.path, { recursive: true, force: true });
-  }
+  const target = join(dir.path, "cappu");
+  writeFileSync(target, "old");
+  chmodSync(target, 0o755);
+  replaceBinary(target, new TextEncoder().encode("new binary"));
+  expect(readFileSync(target, "utf8")).toBe("new binary");
+  expect(statSync(target).mode & 0o111).not.toBe(0);
 });
 
 test("selfUpgrade downloads and replaces the target binary end to end", async () => {
   using dir = TempDir.create("cappu-upgrade-");
-  try {
-    const target = join(dir.path, "cappu");
-    writeFileSync(target, "v1");
-    const zip = writeZip([{ name: "cappu", bytes: new TextEncoder().encode("v2") }]);
+  const target = join(dir.path, "cappu");
+  writeFileSync(target, "v1");
+  const zip = writeZip([{ name: "cappu", bytes: new TextEncoder().encode("v2") }]);
 
-    const result = await selfUpgrade({
-      targetPath: target,
-      platform: "linux",
-      arch: "x64",
-      fetchJson: fakeJson(
-        { workflow_runs: [{ id: 5, head_sha: "deadbee", created_at: "2026-06-13T12:00:00Z" }] },
-        { artifacts: [{ id: 3, name: "cappu-linux-x64", expired: false }] },
-      ),
-      fetchBytes: () => Promise.resolve(zip),
-    });
+  const result = await selfUpgrade({
+    targetPath: target,
+    platform: "linux",
+    arch: "x64",
+    fetchJson: fakeJson(
+      { workflow_runs: [{ id: 5, head_sha: "deadbee", created_at: "2026-06-13T12:00:00Z" }] },
+      { artifacts: [{ id: 3, name: "cappu-linux-x64", expired: false }] },
+    ),
+    fetchBytes: () => Promise.resolve(zip),
+  });
 
-    expect(readFileSync(target, "utf8")).toBe("v2");
-    expect(result.artifact.runSha).toBe("deadbee");
-    expect(result.targetPath).toBe(target);
-  } finally {
-    rmSync(dir.path, { recursive: true, force: true });
-  }
+  expect(readFileSync(target, "utf8")).toBe("v2");
+  expect(result.artifact.runSha).toBe("deadbee");
+  expect(result.targetPath).toBe(target);
 });
 
 test("an unbuilt platform fails before any fetch", async () => {

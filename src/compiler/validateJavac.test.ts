@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
 import TempDir from "../TempDir.ts";
-import { rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -24,16 +23,12 @@ const jdk = hasJdk();
 
 function inTempDir(files: Record<string, string>, body: (dir: string, paths: string[]) => void) {
   using dir = TempDir.create("cappu-validate-test-");
-  try {
-    const paths = Object.entries(files).map(([name, text]) => {
-      const p = join(dir.path, name);
-      writeFileSync(p, text);
-      return p;
-    });
-    body(dir.path, paths);
-  } finally {
-    rmSync(dir.path, { recursive: true, force: true });
-  }
+  const paths = Object.entries(files).map(([name, text]) => {
+    const p = join(dir.path, name);
+    writeFileSync(p, text);
+    return p;
+  });
+  body(dir.path, paths);
 }
 
 test("a clean class validates against javac", { skip: !jdk }, () => {

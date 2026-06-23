@@ -5,7 +5,6 @@ import { expect } from "expect";
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { createChecker } from "./checker.ts";
@@ -49,11 +48,11 @@ function makeJmod(classes: { binaryName: string; bytes: Uint8Array }[]): Uint8Ar
 // A throwaway JDK home: <tmp>/jmods/<each file>. Auto-removed at process exit.
 const tempHomes: string[] = [];
 function makeJdkHome(jmods: { name: string; bytes: Uint8Array }[]): string {
-  using home = TempDir.create("jdkhome-");
-  tempHomes.push(home.path);
-  mkdirSync(join(home.path, "jmods"));
-  for (const m of jmods) writeFileSync(join(home.path, "jmods", m.name), m.bytes);
-  return home.path;
+  const home = TempDir.create("jdkhome-").path;
+  tempHomes.push(home);
+  mkdirSync(join(home, "jmods"));
+  for (const m of jmods) writeFileSync(join(home, "jmods", m.name), m.bytes);
+  return home;
 }
 process.on("exit", () => {
   for (const home of tempHomes) rmSync(home, { recursive: true, force: true });

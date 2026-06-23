@@ -1,6 +1,5 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import TempDir from "../TempDir.ts";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -81,27 +80,22 @@ test("scope completion still works inside broken code", () => {
 
 test("classpath resources complete inside a getResourceAsStream string", () => {
   using dir = TempDir.create("cappu-res-");
-  try {
-    writeFileSync(join(dir.path, "cappu.json"), "{}\n");
-    mkdirSync(join(dir.path, "src", "main", "resources", "db"), { recursive: true });
-    writeFileSync(join(dir.path, "src", "main", "resources", "messages.properties"), "x=1");
-    writeFileSync(join(dir.path, "src", "main", "resources", "db", "schema.sql"), "create");
-    const config = loadConfig(undefined, dir.path);
+  writeFileSync(join(dir.path, "cappu.json"), "{}\n");
+  mkdirSync(join(dir.path, "src", "main", "resources", "db"), { recursive: true });
+  writeFileSync(join(dir.path, "src", "main", "resources", "messages.properties"), "x=1");
+  writeFileSync(join(dir.path, "src", "main", "resources", "db", "schema.sql"), "create");
+  const config = loadConfig(undefined, dir.path);
 
-    const src =
-      'class C { void m() throws Exception { getClass().getResourceAsStream("/*|*/"); } }';
-    const offset = src.indexOf("/*|*/");
-    const program = createProgram();
-    program.setOpenDocument("file:///C.java" as Uri, src.replace("/*|*/", ""), 1);
-    const checker = createChecker(program);
-    const sf = program.getSourceFile("file:///C.java" as Uri)!;
+  const src = 'class C { void m() throws Exception { getClass().getResourceAsStream("/*|*/"); } }';
+  const offset = src.indexOf("/*|*/");
+  const program = createProgram();
+  program.setOpenDocument("file:///C.java" as Uri, src.replace("/*|*/", ""), 1);
+  const checker = createChecker(program);
+  const sf = program.getSourceFile("file:///C.java" as Uri)!;
 
-    const items = getCompletions(program, checker, sf, offset, config);
-    expect(items.map(i => i.label).sort()).toEqual(["/db/schema.sql", "/messages.properties"]);
-    expect(items[0]!.kind).toBe(CompletionItemKind.File);
-  } finally {
-    rmSync(dir.path, { recursive: true, force: true });
-  }
+  const items = getCompletions(program, checker, sf, offset, config);
+  expect(items.map(i => i.label).sort()).toEqual(["/db/schema.sql", "/messages.properties"]);
+  expect(items[0]!.kind).toBe(CompletionItemKind.File);
 });
 
 test("completion kinds are classified", () => {

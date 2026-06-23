@@ -14,11 +14,11 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 import { expect } from "expect";
+import TempDir from "./TempDir.ts";
 
 const here = import.meta.dirname;
 const examplesDir = join(here, "..", "examples");
@@ -54,40 +54,34 @@ function runExample(name: string, command: string[] = ["compile"]): string {
   using store = TempDir.create("cappu-example-store-");
   // the fat jar is named after the project directory: keep the example's name
   const work = join(root.path, name);
-  try {
-    // only the committed files; lib/dist/.cappu from local runs stay behind
-    for (const entry of ["cappu.json", "cappu-lock.json", "src", ".gitignore"]) {
-      cpSync(join(examplesDir, name, entry), join(work, entry), { recursive: true });
-    }
-    const env = { ...process.env, CAPPU_PACKAGE_STORE: store.path };
-    execFileSync(tsx, [cli, "install"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
-    // The experimental compiler is enabled via cappu.json (no CLI flag); tolerate
-    // degraded bodies so best-effort emission doesn't fail the build.
-    if (EXPERIMENTAL && command[0] === "compile") {
-      const cfgPath = join(work, "cappu.json");
-      const cfg = JSON.parse(readFileSync(cfgPath, "utf8")) as {
-        compilerOptions?: Record<string, unknown>;
-      };
-      cfg.compilerOptions = {
-        ...cfg.compilerOptions,
-        experimentalCompiler: { enabled: true, failOnDegrade: false },
-      };
-      writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
-    }
-    const output = execFileSync(tsx, [cli, ...command], {
-      cwd: work,
-      env,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    if (command[0] !== "compile") return output;
-    return execFileSync(javaBin(), ["-jar", join(work, "dist", `${name}.jar`)], {
-      encoding: "utf8",
-    });
-  } finally {
-    rmSync(root.path, { recursive: true, force: true });
-    rmSync(store.path, { recursive: true, force: true });
+  for (const entry of ["cappu.json", "cappu-lock.json", "src", ".gitignore"]) {
+    cpSync(join(examplesDir, name, entry), join(work, entry), { recursive: true });
   }
+  const env = { ...process.env, CAPPU_PACKAGE_STORE: store.path };
+  execFileSync(tsx, [cli, "install"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
+  // The experimental compiler is enabled via cappu.json (no CLI flag); tolerate
+  // degraded bodies so best-effort emission doesn't fail the build.
+  if (EXPERIMENTAL && command[0] === "compile") {
+    const cfgPath = join(work, "cappu.json");
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8")) as {
+      compilerOptions?: Record<string, unknown>;
+    };
+    cfg.compilerOptions = {
+      ...cfg.compilerOptions,
+      experimentalCompiler: { enabled: true, failOnDegrade: false },
+    };
+    writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+  }
+  const output = execFileSync(tsx, [cli, ...command], {
+    cwd: work,
+    env,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (command[0] !== "compile") return output;
+  return execFileSync(javaBin(), ["-jar", join(work, "dist", `${name}.jar`)], {
+    encoding: "utf8",
+  });
 }
 
 test("examples/gson-app builds and runs", { skip: !HAS_JAVAC }, () => {
@@ -129,71 +123,66 @@ test("examples/audit-app reports its vulnerable dependency", { skip: !HAS_JAVAC 
   using root = TempDir.create("cappu-example-");
   using store = TempDir.create("cappu-example-store-");
   const work = join(root.path, "audit-app");
+  cpSync(join(examplesDir, "audit-app", "cappu.json"), join(work, "cappu.json"));
+  let stdout: string;
+  let code = 0;
   try {
-    cpSync(join(examplesDir, "audit-app", "cappu.json"), join(work, "cappu.json"));
-    let stdout: string;
-    let code = 0;
-    try {
-      stdout = execFileSync(tsx, [cli, "audit"], {
-        cwd: work,
-        env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (e) {
-      stdout = (e as { stdout?: string }).stdout ?? "";
-      code = (e as { status?: number }).status ?? 1;
-    }
-    expect(code).toBe(1); // findings -> non-zero exit
-    // Log4Shell is a permanent advisory; OSV will always return it
-    expect(stdout).toContain("CVE-2021-44228");
-    expect(stdout).toContain("org.apache.logging.log4j:log4j-core:2.14.1");
-
-    // --no-cache ignores the now-warm caches and still finds the same advisory
-    let freshOut = "";
-    let freshCode = 0;
-    try {
-      freshOut = execFileSync(tsx, [cli, "audit", "--no-cache"], {
-        cwd: work,
-        env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (e) {
-      freshOut = (e as { stdout?: string }).stdout ?? "";
-      freshCode = (e as { status?: number }).status ?? 1;
-    }
-    expect(freshCode).toBe(1);
-    expect(freshOut).toContain("CVE-2021-44228");
-
-    // --json emits machine-readable findings (still exit 1)
-    let jsonOut = "";
-    let jsonCode = 0;
-    try {
-      jsonOut = execFileSync(tsx, [cli, "audit", "--json"], {
-        cwd: work,
-        env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (e) {
-      jsonOut = (e as { stdout?: string }).stdout ?? "";
-      jsonCode = (e as { status?: number }).status ?? 1;
-    }
-    expect(jsonCode).toBe(1);
-    const report = JSON.parse(jsonOut) as {
-      vulnerable: { coordinate: string; path: string[]; advisories: { aliases: string[] }[] }[];
-    };
-    const log4j = report.vulnerable.find(v =>
-      v.coordinate.startsWith("org.apache.logging.log4j:log4j-core:"),
-    );
-    expect(log4j).toBeDefined();
-    expect(log4j!.advisories.flatMap(a => a.aliases)).toContain("CVE-2021-44228");
-    expect(log4j!.path.at(-1)).toBe(log4j!.coordinate); // path ends at the vulnerable pkg
-  } finally {
-    rmSync(root.path, { recursive: true, force: true });
-    rmSync(store.path, { recursive: true, force: true });
+    stdout = execFileSync(tsx, [cli, "audit"], {
+      cwd: work,
+      env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (e) {
+    stdout = (e as { stdout?: string }).stdout ?? "";
+    code = (e as { status?: number }).status ?? 1;
   }
+  expect(code).toBe(1); // findings -> non-zero exit
+  // Log4Shell is a permanent advisory; OSV will always return it
+  expect(stdout).toContain("CVE-2021-44228");
+  expect(stdout).toContain("org.apache.logging.log4j:log4j-core:2.14.1");
+
+  // --no-cache ignores the now-warm caches and still finds the same advisory
+  let freshOut = "";
+  let freshCode = 0;
+  try {
+    freshOut = execFileSync(tsx, [cli, "audit", "--no-cache"], {
+      cwd: work,
+      env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (e) {
+    freshOut = (e as { stdout?: string }).stdout ?? "";
+    freshCode = (e as { status?: number }).status ?? 1;
+  }
+  expect(freshCode).toBe(1);
+  expect(freshOut).toContain("CVE-2021-44228");
+
+  // --json emits machine-readable findings (still exit 1)
+  let jsonOut = "";
+  let jsonCode = 0;
+  try {
+    jsonOut = execFileSync(tsx, [cli, "audit", "--json"], {
+      cwd: work,
+      env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (e) {
+    jsonOut = (e as { stdout?: string }).stdout ?? "";
+    jsonCode = (e as { status?: number }).status ?? 1;
+  }
+  expect(jsonCode).toBe(1);
+  const report = JSON.parse(jsonOut) as {
+    vulnerable: { coordinate: string; path: string[]; advisories: { aliases: string[] }[] }[];
+  };
+  const log4j = report.vulnerable.find(v =>
+    v.coordinate.startsWith("org.apache.logging.log4j:log4j-core:"),
+  );
+  expect(log4j).toBeDefined();
+  expect(log4j!.advisories.flatMap(a => a.aliases)).toContain("CVE-2021-44228");
+  expect(log4j!.path.at(-1)).toBe(log4j!.coordinate);
 });
 
 // licenses resolves the graph (no JDK) and prints each dependency's license;
@@ -203,34 +192,29 @@ test("examples/gson-app reports dependency licenses (human + --json)", { skip: !
   using root = TempDir.create("cappu-example-");
   using store = TempDir.create("cappu-example-store-");
   const work = join(root.path, "gson-app");
-  try {
-    cpSync(join(examplesDir, "gson-app", "cappu.json"), join(work, "cappu.json"));
-    const env = { ...process.env, CAPPU_PACKAGE_STORE: store.path };
-    const human = execFileSync(tsx, [cli, "licenses"], {
-      cwd: work,
-      env,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    expect(human).toContain("com.google.code.gson:gson:2.13.1");
-    expect(human).toContain("Apache-2.0");
+  cpSync(join(examplesDir, "gson-app", "cappu.json"), join(work, "cappu.json"));
+  const env = { ...process.env, CAPPU_PACKAGE_STORE: store.path };
+  const human = execFileSync(tsx, [cli, "licenses"], {
+    cwd: work,
+    env,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  expect(human).toContain("com.google.code.gson:gson:2.13.1");
+  expect(human).toContain("Apache-2.0");
 
-    const json = execFileSync(tsx, [cli, "licenses", "--json"], {
-      cwd: work,
-      env,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const rows = JSON.parse(json) as {
-      coordinate: string;
-      licenses: { name: string; spdx: string | null }[];
-    }[];
-    const gson = rows.find(r => r.coordinate === "com.google.code.gson:gson:2.13.1");
-    expect(gson?.licenses.map(l => l.spdx)).toContain("Apache-2.0");
-  } finally {
-    rmSync(root.path, { recursive: true, force: true });
-    rmSync(store.path, { recursive: true, force: true });
-  }
+  const json = execFileSync(tsx, [cli, "licenses", "--json"], {
+    cwd: work,
+    env,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const rows = JSON.parse(json) as {
+    coordinate: string;
+    licenses: { name: string; spdx: string | null }[];
+  }[];
+  const gson = rows.find(r => r.coordinate === "com.google.code.gson:gson:2.13.1");
+  expect(gson?.licenses.map(l => l.spdx)).toContain("Apache-2.0");
 });
 
 // A throwaway project pinned to an old gson; `cappu update` should move it to
@@ -240,29 +224,24 @@ test("cappu update bumps an outdated dependency end to end", { skip: !HAS_JAVAC 
   using root = TempDir.create("cappu-example-");
   using store = TempDir.create("cappu-example-store-");
   const work = join(root.path, "update-proj");
-  try {
-    mkdirSync(work, { recursive: true });
-    writeFileSync(
-      join(work, "cappu.json"),
-      '{\n  "dependencies": {\n    "implementation": {\n' +
-        "      // pinned old on purpose\n" +
-        '      "com.google.code.gson:gson": "2.8.9"\n' +
-        "    }\n  }\n}\n",
-    );
-    execFileSync(tsx, [cli, "update"], {
-      cwd: work,
-      env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const after = readFileSync(join(work, "cappu.json"), "utf8");
-    expect(after).not.toContain("2.8.9"); // bumped away from the old pin
-    expect(after).toContain("com.google.code.gson:gson");
-    expect(after).toContain("// pinned old on purpose"); // comment preserved
-    expect(existsSync(join(work, "cappu-lock.json"))).toBe(true); // lock refreshed
-  } finally {
-    rmSync(root.path, { recursive: true, force: true });
-    rmSync(store.path, { recursive: true, force: true });
-  }
+  mkdirSync(work, { recursive: true });
+  writeFileSync(
+    join(work, "cappu.json"),
+    '{\n  "dependencies": {\n    "implementation": {\n' +
+      "      // pinned old on purpose\n" +
+      '      "com.google.code.gson:gson": "2.8.9"\n' +
+      "    }\n  }\n}\n",
+  );
+  execFileSync(tsx, [cli, "update"], {
+    cwd: work,
+    env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const after = readFileSync(join(work, "cappu.json"), "utf8");
+  expect(after).not.toContain("2.8.9"); // bumped away from the old pin
+  expect(after).toContain("com.google.code.gson:gson");
+  expect(after).toContain("// pinned old on purpose"); // comment preserved
+  expect(existsSync(join(work, "cappu-lock.json"))).toBe(true);
 });
 
 // src/main/resources is bundled into the build output and read at runtime; the
@@ -294,26 +273,23 @@ test(
 // No dependencies, so javac-only (no network).
 test("cappu compile --artifact steers the output jar name", { skip: !HAS_JAVAC }, () => {
   using root = TempDir.create("cappu-example-");
+  using store = TempDir.create("cappu-store-");
   const work = join(root.path, "p");
-  try {
-    mkdirSync(join(work, "src", "main", "java", "x"), { recursive: true });
-    writeFileSync(
-      join(work, "cappu.json"),
-      '{ "compilerOptions": { "mainClass": "x.M", "quiet": true } }',
-    );
-    writeFileSync(
-      join(work, "src", "main", "java", "x", "M.java"),
-      "package x; public class M { public static void main(String[] a) {} }",
-    );
-    execFileSync(tsx, [cli, "compile", "-o", "jar", "--artifact", "app"], {
-      cwd: work,
-      env: { ...process.env, CAPPU_PACKAGE_STORE: mkdtempSync(join(tmpdir(), "cappu-store-")) },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    expect(existsSync(join(work, "dist", "app.jar"))).toBe(true);
-  } finally {
-    rmSync(root.path, { recursive: true, force: true });
-  }
+  mkdirSync(join(work, "src", "main", "java", "x"), { recursive: true });
+  writeFileSync(
+    join(work, "cappu.json"),
+    '{ "compilerOptions": { "mainClass": "x.M", "quiet": true } }',
+  );
+  writeFileSync(
+    join(work, "src", "main", "java", "x", "M.java"),
+    "package x; public class M { public static void main(String[] a) {} }",
+  );
+  execFileSync(tsx, [cli, "compile", "-o", "jar", "--artifact", "app"], {
+    cwd: work,
+    env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  expect(existsSync(join(work, "dist", "app.jar"))).toBe(true);
 });
 
 // A minimal Spring Boot app: cappu resolves the whole starter tree and compiles
@@ -330,25 +306,20 @@ test(
     using root = TempDir.create("cappu-example-");
     using store = TempDir.create("cappu-example-store-");
     const work = join(root.path, "spring-boot-app");
-    try {
-      for (const entry of ["cappu.json", "cappu-lock.json", "src", ".gitignore"]) {
-        cpSync(join(examplesDir, "spring-boot-app", entry), join(work, entry), { recursive: true });
-      }
-      const env = { ...process.env, CAPPU_PACKAGE_STORE: store.path };
-      execFileSync(tsx, [cli, "install"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
-      // "output": "fat-jar" is set in the example's cappu.json
-      execFileSync(tsx, [cli, "compile"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
-      const output = execFileSync(
-        javaBin(),
-        ["-jar", join(work, "dist", "spring-boot-app-1.0.0.jar")],
-        { encoding: "utf8" },
-      );
-      expect(output).toContain("Spring Boot"); // the startup banner
-      expect(output).toContain("Started App"); // the context booted
-    } finally {
-      rmSync(root.path, { recursive: true, force: true });
-      rmSync(store.path, { recursive: true, force: true });
+    for (const entry of ["cappu.json", "cappu-lock.json", "src", ".gitignore"]) {
+      cpSync(join(examplesDir, "spring-boot-app", entry), join(work, entry), { recursive: true });
     }
+    const env = { ...process.env, CAPPU_PACKAGE_STORE: store.path };
+    execFileSync(tsx, [cli, "install"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
+    // "output": "fat-jar" is set in the example's cappu.json
+    execFileSync(tsx, [cli, "compile"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
+    const output = execFileSync(
+      javaBin(),
+      ["-jar", join(work, "dist", "spring-boot-app-1.0.0.jar")],
+      { encoding: "utf8" },
+    );
+    expect(output).toContain("Spring Boot"); // the startup banner
+    expect(output).toContain("Started App");
   },
 );
 
@@ -624,34 +595,29 @@ test("cappu compile -o jar emits a publishable jar and POM", { skip: !HAS_JAVAC 
   using root = TempDir.create("cappu-example-");
   using store = TempDir.create("cappu-example-store-");
   const work = join(root.path, "pub-proj");
-  try {
-    mkdirSync(join(work, "src", "main", "java", "com", "example"), { recursive: true });
-    writeFileSync(
-      join(work, "cappu.json"),
-      JSON.stringify({
-        groupId: "com.example",
-        artifactId: "demo-lib",
-        version: "1.0.0",
-        license: "MIT",
-        dependencies: { implementation: { "com.google.code.gson:gson": "2.13.1" } },
-      }),
-    );
-    writeFileSync(
-      join(work, "src", "main", "java", "com", "example", "Hello.java"),
-      "package com.example; public class Hello {}",
-    );
-    execFileSync(tsx, [cli, "compile", "-o", "jar"], {
-      cwd: work,
-      env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    expect(existsSync(join(work, "dist", "demo-lib-1.0.0.jar"))).toBe(true);
-    const pom = readFileSync(join(work, "dist", "demo-lib-1.0.0.pom"), "utf8");
-    expect(pom).toContain("<artifactId>demo-lib</artifactId>");
-    expect(pom).toContain("<version>1.0.0</version>");
-    expect(pom).toMatch(/<artifactId>gson<\/artifactId>[\s\S]*?<scope>runtime<\/scope>/);
-  } finally {
-    rmSync(root.path, { recursive: true, force: true });
-    rmSync(store.path, { recursive: true, force: true });
-  }
+  mkdirSync(join(work, "src", "main", "java", "com", "example"), { recursive: true });
+  writeFileSync(
+    join(work, "cappu.json"),
+    JSON.stringify({
+      groupId: "com.example",
+      artifactId: "demo-lib",
+      version: "1.0.0",
+      license: "MIT",
+      dependencies: { implementation: { "com.google.code.gson:gson": "2.13.1" } },
+    }),
+  );
+  writeFileSync(
+    join(work, "src", "main", "java", "com", "example", "Hello.java"),
+    "package com.example; public class Hello {}",
+  );
+  execFileSync(tsx, [cli, "compile", "-o", "jar"], {
+    cwd: work,
+    env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  expect(existsSync(join(work, "dist", "demo-lib-1.0.0.jar"))).toBe(true);
+  const pom = readFileSync(join(work, "dist", "demo-lib-1.0.0.pom"), "utf8");
+  expect(pom).toContain("<artifactId>demo-lib</artifactId>");
+  expect(pom).toContain("<version>1.0.0</version>");
+  expect(pom).toMatch(/<artifactId>gson<\/artifactId>[\s\S]*?<scope>runtime<\/scope>/);
 });

@@ -1,7 +1,5 @@
 import { rmSync } from "node:fs";
 import TempDir from "../TempDir.ts";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { test } from "node:test";
 
 import { expect } from "expect";

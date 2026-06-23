@@ -1,13 +1,6 @@
 import { execFileSync } from "node:child_process";
 import TempDir from "../TempDir.ts";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
@@ -284,7 +277,9 @@ function runsLikeJavac(mainClass: string, source: string, expectedStdout: string
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, c.bytes);
   }
-  expect(execFileSync("java", ["-cp", ours.path, mainClass], { encoding: "utf8" })).toBe(expectedStdout);
+  expect(execFileSync("java", ["-cp", ours.path, mainClass], { encoding: "utf8" })).toBe(
+    expectedStdout,
+  );
 }
 
 // javac's normalized disassembly for a fixture's classes, keyed by class name.
@@ -318,7 +313,8 @@ function oursDisasm(): Map<string, Disasm> {
   if (oursDisasmCache) return oursDisasmCache;
   using dir = TempDir.create("emit-ours-all-");
   for (const [name, src] of [...Object.entries(FIXTURES), ...Object.entries(MULTI_FIXTURES)]) {
-    for (const c of emitClasses(name, src)) writeFileSync(join(dir.path, `${c.name}.class`), c.bytes);
+    for (const c of emitClasses(name, src))
+      writeFileSync(join(dir.path, `${c.name}.class`), c.bytes);
   }
   const files = readdirSync(dir.path)
     .filter(f => f.endsWith(".class"))
