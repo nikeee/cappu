@@ -81,14 +81,17 @@ func annotationInfo(ann *AnnotationData, from *Node, program *Program) (internal
 		return "", retentionClass
 	}
 	internal := binaryName(symbol)
+	// The JDK table is authoritative for the annotations it lists: their retention
+	// is fixed by the spec even though the JDK stub models them without their own
+	// @Retention meta-annotation (which a source-first read would misclassify).
+	if r, ok := jdkRetention[internal]; ok {
+		return internal, r
+	}
 	for _, d := range symbol.Declarations {
 		if d.Kind == AnnotationTypeDeclaration {
 			ret, _ := retentionFromMeta(d.AsAnnotationTypeDeclaration().Modifiers)
 			return internal, ret
 		}
-	}
-	if r, ok := jdkRetention[internal]; ok {
-		return internal, r
 	}
 	return internal, retentionClass
 }
@@ -437,6 +440,21 @@ func parameterAnnotationsBody(cp *constantPool, parameters *NodeArray, visible b
 		body.appendBuf(b)
 	}
 	return body
+}
+
+// annotationDefaultAttribute returns the AnnotationDefault attribute (JVMS
+// 4.7.22) for an annotation element's default value, or nil when it cannot be
+// encoded.
+func annotationDefaultAttribute(cp *constantPool, value, elementType *Node, from *Node, program *Program) *byteBuffer {
+	ev := encodeElementValue(cp, value, elementType, from, program)
+	if ev == nil {
+		return nil
+	}
+	attr := &byteBuffer{}
+	attr.u2(int(cp.utf8("AnnotationDefault")))
+	attr.u4(ev.length())
+	attr.appendBuf(ev)
+	return attr
 }
 
 // methodAnnotationAttributes returns the method-level annotation attributes

@@ -506,20 +506,26 @@ const ANN_FIXTURES: Record<string, { source: string; classes: string[] }> = {
       '  @Rt("m") public int m(@Rt("p") int p, @Cl(x=1) int q) { return p + q; }',
       "}",
     ].join("\n"),
-    classes: ["AnnAll"],
+    // The @interface types are now emitted too (with their elements'
+    // AnnotationDefault values), so all three classes are checked.
+    classes: ["AnnAll", "Cl", "Rt"],
   },
 };
 
-// The annotation attribute headers + element-value trees (constant-pool indices
-// stripped) javap prints for a class file - stable across compilers.
+// The annotation attribute headers + element-value trees + AnnotationDefault
+// values (constant-pool indices stripped) javap prints for a class file - stable
+// across compilers. Covers Runtime{Visible,Invisible}[Parameter]Annotations and
+// the AnnotationDefault (4.7.22) default_value of each annotation element.
 function annotationTrees(classFile: string): string[] {
   const out = execFileSync("javap", ["-v", "-p", classFile], { encoding: "utf8" });
   const result: string[] = [];
   for (const raw of out.split("\n")) {
     const t = raw.trim();
     if (/^Runtime(Visible|Invisible)(Parameter)?Annotations:$/.test(t)) result.push(t);
+    else if (t === "AnnotationDefault:") result.push(t);
     else if (/^parameter \d+:$/.test(t)) result.push(t);
     else if (/^\d+: #/.test(t)) result.push(t.replace(/#\d+/g, "#").replace(/\s+/g, ""));
+    else if (/^default_value: /.test(t)) result.push(t.replace(/#\d+/g, "#").replace(/\s+/g, ""));
   }
   return result;
 }

@@ -727,13 +727,26 @@ func emitMethod(method *Node, cp *constantPool, program *Program, checker *Check
 
 	// Method + parameter annotations (after Code/Signature, javac's order).
 	annBuf, annCount := methodAnnotationAttributes(cp, method.AsMethodDeclaration(), method, program)
+	// AnnotationDefault (JVMS 4.7.22): an annotation element with a `default` value.
+	var defaultAttr *byteBuffer
+	if dv := method.AsMethodDeclaration().DefaultValue; dv != nil {
+		defaultAttr = annotationDefaultAttribute(cp, dv, method.AsMethodDeclaration().ReturnType, method, program)
+	}
 
 	if flags&(accAbstract|accNative) != 0 || method.AsMethodDeclaration().Body == nil {
 		nAttr := annCount
 		if hasSignature {
 			nAttr++
 		}
+		if defaultAttr != nil {
+			nAttr++
+		}
 		info.u2(nAttr)
+		// javac's order for an annotation element is AnnotationDefault, then
+		// Signature, then annotations.
+		if defaultAttr != nil {
+			info.appendBuf(defaultAttr)
+		}
 		if hasSignature {
 			writeSignatureAttribute(info, cp, signature)
 		}
@@ -1488,6 +1501,54 @@ func emitInterface(declaration *Node, program *Program, checker *Checker, nestMe
 	}
 
 	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, "", false, innerClasses, "", permittedSubclassesOf(declaration.AsInterfaceDeclaration().PermitsTypes, declaration, program), &annotationSource{modifiers: declaration.AsInterfaceDeclaration().Modifiers, from: declaration, program: program})
+	return EmittedClass{
+		Name:  string(name),
+		Bytes: assembleClassFile(cp, accessFlags, thisClassIndex, superClassIndex, interfaceIndices, fields, fieldCount, methods, methodCount, attrs.buffer, attrs.count),
+	}
+}
+
+// emitAnnotationType emits a user-declared annotation type (JLS 9.6)
+// `@interface Name { ... }`: ACC_ANNOTATION|ACC_INTERFACE|ACC_ABSTRACT, super
+// java/lang/Object, implementing java/lang/annotation/Annotation. Each element is
+// a public abstract method carrying an AnnotationDefault when it has a default.
+func emitAnnotationType(declaration *Node, program *Program, checker *Checker, nestMembers map[string][]internalName, innerClasses *innerClassMap) EmittedClass {
+	program.GetGlobalIndex()
+	da := declaration.AsAnnotationTypeDeclaration()
+	var name internalName
+	if declaration.Symbol != nil {
+		name = binaryName(declaration.Symbol)
+	} else {
+		name = internalName(da.Name.AsIdentifier().Text)
+	}
+	accessFlags := accAnnotation | accInterface | accAbstract
+	if hasModifierKind(da.Modifiers, PublicKeyword) {
+		accessFlags |= accPublic
+	}
+
+	cp := newConstantPool()
+	thisClassIndex := cp.classInfo(string(name))
+	superClassIndex := cp.classInfo("java/lang/Object")
+	interfaceIndices := []cpIndex{cp.classInfo("java/lang/annotation/Annotation")}
+
+	// Constant fields (implicitly public static final) - rare in an @interface.
+	fields, fieldCount := emitFields(declaration, cp, program)
+
+	methods := &byteBuffer{}
+	methodCount := 0
+	var lambdaMethods []*byteBuffer
+	for _, member := range arrayNodes(da.Members) {
+		if member.Kind != MethodDeclaration {
+			continue
+		}
+		methods.appendBuf(emitMethod(member, cp, program, checker, name, &lambdaMethods, accPublic|accAbstract, nil, ""))
+		methodCount++
+	}
+	for _, impl := range lambdaMethods {
+		methods.appendBuf(impl)
+		methodCount++
+	}
+
+	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, "", false, innerClasses, "", nil, &annotationSource{modifiers: da.Modifiers, from: declaration, program: program})
 	return EmittedClass{
 		Name:  string(name),
 		Bytes: assembleClassFile(cp, accessFlags, thisClassIndex, superClassIndex, interfaceIndices, fields, fieldCount, methods, methodCount, attrs.buffer, attrs.count),

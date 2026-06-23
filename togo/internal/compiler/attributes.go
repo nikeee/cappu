@@ -263,7 +263,7 @@ func computeNestMembers(sourceFile *Node, program *Program) map[string][]interna
 			} else if d.Name != nil {
 				add(internalName(d.Name.AsIdentifier().Text))
 			}
-		case node.Kind == InterfaceDeclaration || node.Kind == EnumDeclaration || node.Kind == RecordDeclaration:
+		case node.Kind == InterfaceDeclaration || node.Kind == EnumDeclaration || node.Kind == RecordDeclaration || node.Kind == AnnotationTypeDeclaration:
 			if node.Symbol != nil {
 				add(binaryName(node.Symbol))
 			}

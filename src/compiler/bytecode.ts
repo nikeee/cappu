@@ -144,6 +144,7 @@ const ACC_ABSTRACT = 0x0400;
 const ACC_STRICT = 0x0800;
 const ACC_SYNTHETIC = 0x1000;
 const ACC_VARARGS = 0x0080;
+const ACC_ANNOTATION = 0x2000;
 const ACC_ENUM = 0x4000;
 
 // The three string domains of the class-file format, branded so an internal
@@ -854,11 +855,15 @@ function annotationInfo(
   const symbol = resolveTypeEntityName(ann.typeName, from, program);
   if (!symbol) return undefined;
   const internal = binaryName(symbol);
+  // The JDK table is authoritative for the annotations it lists: their retention
+  // is fixed by the spec even though the JDK stub models them without their own
+  // @Retention meta-annotation (which a source-first read would misclassify).
+  const jdk = JDK_RETENTION[internal];
+  if (jdk !== undefined) return { internal, retention: jdk };
   const decl = (symbol.declarations ?? []).find(
     d => d.kind === SyntaxKind.AnnotationTypeDeclaration,
   ) as AnnotationTypeDeclaration | undefined;
-  if (decl) return { internal, retention: retentionFromMeta(decl.modifiers) ?? "class" };
-  return { internal, retention: JDK_RETENTION[internal] ?? "class" };
+  return { internal, retention: decl ? (retentionFromMeta(decl.modifiers) ?? "class") : "class" };
 }
 
 // The element (method) return-type nodes of a source @interface, by element name,
@@ -1196,6 +1201,24 @@ function methodAnnotationAttributes(
   return { buffer, count };
 }
 
+// The AnnotationDefault attribute (JVMS 4.7.22) carrying an annotation element's
+// `default` value, or undefined when the value cannot be encoded.
+function annotationDefaultAttribute(
+  cp: ConstantPool,
+  value: Node,
+  elementType: TypeNode | undefined,
+  from: Node,
+  program: Program,
+): ByteBuffer | undefined {
+  const ev = encodeElementValue(cp, value, elementType, from, program);
+  if (!ev) return undefined;
+  const attr = new ByteBuffer();
+  attr.u2(cp.utf8("AnnotationDefault"));
+  attr.u4(ev.length);
+  attr.append(ev);
+  return attr;
+}
+
 // The class-level attributes shared by classes and enums: SourceFile and (when
 // any invokedynamic was emitted) BootstrapMethods. Must run before the constant
 // pool is written so the attribute name Utf8s are interned.
@@ -1339,7 +1362,8 @@ export function computeNestMembers(
     } else if (
       node.kind === SyntaxKind.InterfaceDeclaration ||
       node.kind === SyntaxKind.EnumDeclaration ||
-      node.kind === SyntaxKind.RecordDeclaration
+      node.kind === SyntaxKind.RecordDeclaration ||
+      node.kind === SyntaxKind.AnnotationTypeDeclaration
     ) {
       if (node.symbol) add(binaryName(node.symbol));
       // An enum constant with a body (CONST {...}) is emitted as its own
@@ -1387,6 +1411,9 @@ function innerClassFlags(node: Node): number {
   switch (node.kind) {
     case SyntaxKind.InterfaceDeclaration:
       flags |= ACC_INTERFACE | ACC_ABSTRACT | ACC_STATIC;
+      break;
+    case SyntaxKind.AnnotationTypeDeclaration:
+      flags |= ACC_ANNOTATION | ACC_INTERFACE | ACC_ABSTRACT | ACC_STATIC;
       break;
     case SyntaxKind.EnumDeclaration:
       // final like the class itself (no constant-body subclassing is emitted)
@@ -6580,10 +6607,19 @@ function emitMethod(
 
   // Method + parameter annotations (after Code/Signature, javac's order).
   const ann = methodAnnotationAttributes(cp, method, program);
+  // AnnotationDefault (JVMS 4.7.22): an annotation element with a `default` value.
+  const defaultAttr =
+    method.defaultValue !== undefined
+      ? annotationDefaultAttribute(cp, method.defaultValue, method.returnType, method, program)
+      : undefined;
 
-  // abstract / native methods carry no Code attribute.
+  // abstract / native methods carry no Code attribute. javac's order for an
+  // annotation element is AnnotationDefault, then Signature, then annotations.
   if (flags & (ACC_ABSTRACT | ACC_NATIVE) || !method.body) {
-    info.u2((signature !== undefined ? 1 : 0) + ann.count); // attributes_count
+    info.u2(
+      (signature !== undefined ? 1 : 0) + ann.count + (defaultAttr ? 1 : 0),
+    ); // attributes_count
+    if (defaultAttr) info.append(defaultAttr);
     if (signature !== undefined) writeSignatureAttribute(info, cp, signature);
     info.append(ann.buffer);
     return info;
@@ -7507,6 +7543,90 @@ export function emitInterface(
       interfaceIndices,
       fields,
       fieldCount,
+      methods,
+      methodCount,
+      attributes: classAttributes,
+      attributeCount: classAttributeCount,
+    }),
+  };
+}
+
+// Emit a user-declared annotation type (JLS 9.6) `@interface Name { ... }`: a
+// class file with ACC_ANNOTATION | ACC_INTERFACE | ACC_ABSTRACT, super
+// java/lang/Object, implementing java/lang/annotation/Annotation. Each element is
+// a public abstract method, carrying an AnnotationDefault attribute when it has a
+// `default` value. The type's own meta-annotations (@Retention/@Target/...) are
+// emitted as class-level annotation attributes.
+export function emitAnnotationType(
+  declaration: AnnotationTypeDeclaration,
+  program: Program,
+  checker: Checker,
+  nestMembers?: Map<string, InternalName[]>,
+  innerClasses?: Map<InternalName, InnerClassRecord>,
+): EmittedClass {
+  program.getGlobalIndex();
+  const name = declaration.symbol
+    ? binaryName(declaration.symbol)
+    : (declaration.name.text as InternalName);
+  let accessFlags = ACC_ANNOTATION | ACC_INTERFACE | ACC_ABSTRACT;
+  if ((declaration.modifiers ?? []).some(m => m.kind === SyntaxKind.PublicKeyword)) {
+    accessFlags |= ACC_PUBLIC;
+  }
+
+  const cp = new ConstantPool();
+  const thisClassIndex = cp.classInfo(name);
+  const superClassIndex = cp.classInfo("java/lang/Object" as InternalName);
+  const interfaceIndices = [cp.classInfo("java/lang/annotation/Annotation" as InternalName)];
+
+  // Constant fields (implicitly public static final) - rare in an @interface.
+  const userFields = emitFields(declaration as unknown as ClassDeclaration, cp, program);
+
+  const methods = new ByteBuffer();
+  let methodCount = 0;
+  const lambdaMethods: ByteBuffer[] = [];
+  for (const member of declaration.members) {
+    if (member.kind !== SyntaxKind.MethodDeclaration) continue;
+    // Each element is public abstract; emitMethod emits its AnnotationDefault from
+    // the method's `default` value.
+    methods.append(
+      emitMethod(
+        member as MethodDeclaration,
+        cp,
+        program,
+        checker,
+        name,
+        lambdaMethods,
+        ACC_PUBLIC | ACC_ABSTRACT,
+      ),
+    );
+    methodCount++;
+  }
+  for (const impl of lambdaMethods) {
+    methods.append(impl);
+    methodCount++;
+  }
+
+  const { buffer: classAttributes, count: classAttributeCount } = buildClassAttributes(
+    cp,
+    sourceNameOf(declaration),
+    name,
+    nestMembers,
+    undefined,
+    innerClasses,
+    undefined,
+    undefined,
+    { modifiers: declaration.modifiers, from: declaration, program },
+  );
+  return {
+    name,
+    bytes: assembleClassFile({
+      cp,
+      accessFlags,
+      thisClassIndex,
+      superClassIndex,
+      interfaceIndices,
+      fields: userFields.buffer,
+      fieldCount: userFields.count,
       methods,
       methodCount,
       attributes: classAttributes,

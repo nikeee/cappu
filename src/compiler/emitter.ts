@@ -7,6 +7,7 @@ import {
   type EmittedClass,
   computeInnerClassInfo,
   computeNestMembers,
+  emitAnnotationType,
   emitAnonymousClassIfPossible,
   emitClass,
   emitEnum,
@@ -19,6 +20,7 @@ import { forEachChild } from "./parser.ts";
 import { entityNameToString } from "./utilities.ts";
 import type { Program } from "./program.ts";
 import {
+  type AnnotationTypeDeclaration,
   type ClassDeclaration,
   type EnumDeclaration,
   type InterfaceDeclaration,
@@ -100,6 +102,10 @@ export function emitSourceFile(
       result.push(...emitEnum(node as EnumDeclaration, program, checker, nest, inner));
     } else if (node.kind === SyntaxKind.RecordDeclaration) {
       result.push(emitRecord(node as RecordDeclaration, program, checker, nest, inner));
+    } else if (node.kind === SyntaxKind.AnnotationTypeDeclaration) {
+      result.push(
+        emitAnnotationType(node as AnnotationTypeDeclaration, program, checker, nest, inner),
+      );
     } else if (node.kind === SyntaxKind.ObjectCreationExpression) {
       // Anonymous class (new T(){...}): emitted as its own Outer$N when supported.
       const anon = emitAnonymousClassIfPossible(

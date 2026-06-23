@@ -66,6 +66,8 @@ func EmitSourceFile(sourceFile *Node, program *Program, checker *Checker, debugI
 			result = append(result, emitEnum(node, program, checker, nest, inner)...)
 		case RecordDeclaration:
 			result = append(result, emitRecord(node, program, checker, nest, inner))
+		case AnnotationTypeDeclaration:
+			result = append(result, emitAnnotationType(node, program, checker, nest, inner))
 		case ObjectCreationExpression:
 			if anon, ok := emitAnonymousClassIfPossible(node, program, checker, nest, inner); ok {
 				result = append(result, anon)

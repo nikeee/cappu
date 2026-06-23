@@ -253,8 +253,16 @@ These do not affect correctness but widen the diff vs javac's output.
       and arrays), evaluated from the constant-expression arguments. An annotation
       whose element value cannot be encoded is dropped (not emitted malformed).
       Verified equal to javac's element-value trees and byte-identical across the
-      TS and Go builds. `@interface` *type* declarations are not themselves emitted
-      yet (no `AnnotationDefault`), only the attributes on annotated declarations.
+      TS and Go builds.
+- [x] Annotation type declarations (JLS 9.6) `@interface Name { ... }` are emitted
+      as a class file (`ACC_ANNOTATION|ACC_INTERFACE|ACC_ABSTRACT`, super Object,
+      implementing `java/lang/annotation/Annotation`); each element is a public
+      abstract method, carrying an `AnnotationDefault` attribute (JVMS 4.7.22) for
+      its `default` value (encoded via the element_value encoder above), and the
+      type's own meta-annotations (`@Retention`/`@Target`/...) are emitted as
+      class-level annotation attributes. The retention of a known JDK annotation is
+      taken from a built-in table (authoritative even though the JDK stub models it
+      without its own `@Retention`).
 
 ## Done (recent)
 

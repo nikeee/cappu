@@ -165,6 +165,8 @@ func innerClassFlags(node *Node) int {
 	switch node.Kind {
 	case InterfaceDeclaration:
 		flags |= accInterface | accAbstract | accStatic
+	case AnnotationTypeDeclaration:
+		flags |= accAnnotation | accInterface | accAbstract | accStatic
 	case EnumDeclaration:
 		flags |= accEnum | accStatic | accFinal
 	case RecordDeclaration:
