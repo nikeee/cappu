@@ -237,8 +237,11 @@ These do not affect correctness but widen the diff vs javac's output.
 - [x] `EnclosingMethod` (JVMS 4.7.7): emitted on enum constant body classes
       (`E$N`), pointing at the enclosing enum with method_index 0.
 - [x] `PermittedSubclasses` (JVMS 4.7.31): emitted on an enum with constant
-      bodies (implicitly sealed over its `E$N`, declaration order). General
-      `sealed`/`permits` on ordinary classes is parsed but not yet emitted.
+      bodies (implicitly sealed over its `E$N`), and on a `sealed ... permits A, B`
+      class or interface from its explicit `permits` clause (declaration order).
+      `sealed` carries no class flag of its own. Implicit permits (a `sealed` type
+      with no `permits` clause, subclasses inferred from the compilation unit) is
+      not inferred yet.
 - [x] `RuntimeVisibleAnnotations` (JVMS 4.7.16) / `RuntimeInvisibleAnnotations`
       (4.7.17) and the parameter variants (4.7.18 / 4.7.19): annotations on
       classes, fields, methods and parameters are emitted, bucketed by the

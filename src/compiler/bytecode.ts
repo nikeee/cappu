@@ -7113,6 +7113,21 @@ function emitSynthCtorWithInits(
   return info;
 }
 
+// The PermittedSubclasses (JVMS 4.7.31) of a `sealed ... permits A, B` type:
+// the explicitly listed types resolved to internal names (declaration order).
+// Implicit permits (a sealed type with no `permits` clause) is not inferred yet.
+function permittedSubclassesOf(
+  permitsTypes: readonly TypeNode[] | undefined,
+  from: Node,
+  program: Program,
+): InternalName[] | undefined {
+  if (!permitsTypes || permitsTypes.length === 0) return undefined;
+  const names = permitsTypes
+    .map(t => resolveInternalName(t, from, program))
+    .filter((n): n is InternalName => n !== undefined);
+  return names.length > 0 ? names : undefined;
+}
+
 export function emitClass(
   declaration: ClassDeclaration,
   program: Program,
@@ -7343,7 +7358,7 @@ export function emitClass(
     classSignatureOf(declaration, program),
     innerClasses,
     undefined,
-    undefined,
+    permittedSubclassesOf(declaration.permitsTypes, declaration, program),
     { modifiers: declaration.modifiers, from: declaration, program },
   );
 
@@ -7462,7 +7477,7 @@ export function emitInterface(
     undefined,
     innerClasses,
     undefined,
-    undefined,
+    permittedSubclassesOf(declaration.permitsTypes, declaration, program),
     { modifiers: declaration.modifiers, from: declaration, program },
   );
   return {

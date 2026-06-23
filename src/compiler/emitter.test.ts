@@ -147,6 +147,16 @@ const MULTI_FIXTURES: Record<string, string> = {
     "  Class<?> arr() { return String[].class; }",
     "}",
   ].join("\n"),
+  // A sealed class + interface emit a PermittedSubclasses attribute (4.7.31)
+  // listing the `permits` types; `sealed`/`non-sealed`/`final` carry no class
+  // flag of their own, so the disassembly still byte-matches javac.
+  Sealed: [
+    "public sealed class Sealed permits SubA, SubB {}",
+    "final class SubA extends Sealed {}",
+    "non-sealed class SubB extends Sealed {}",
+    "sealed interface SealedI permits SubC {}",
+    "final class SubC implements SealedI {}",
+  ].join("\n"),
   QualifiedAnon: [
     "public class QualifiedAnon {",
     "  int x = 7;",
@@ -529,6 +539,39 @@ for (const [name, { source: src, classes }] of Object.entries(ANN_FIXTURES)) {
     },
   );
 }
+
+// The PermittedSubclasses entries javap prints for a class file (names only).
+function permittedSubclasses(classFile: string): string[] {
+  const out = execFileSync("javap", ["-v", "-p", classFile], { encoding: "utf8" });
+  const lines = out.split("\n");
+  const start = lines.findIndex(l => l.trim() === "PermittedSubclasses:");
+  if (start < 0) return [];
+  const result: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const t = lines[i]!.trim();
+    if (!t || t.includes(":")) break;
+    result.push(t);
+  }
+  return result;
+}
+
+test(
+  "sealed types emit PermittedSubclasses matching javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/javap)" },
+  () => {
+    const src = MULTI_FIXTURES.Sealed!;
+    using jdir = TempDir.create("sealed-javac-");
+    writeFileSync(join(jdir.path, "Sealed.java"), src);
+    execFileSync("javac", ["--release", "21", "-d", jdir.path, join(jdir.path, "Sealed.java")]);
+    using odir = TempDir.create("sealed-ours-");
+    for (const c of emitClasses("Sealed", src)) writeFileSync(join(odir.path, `${c.name}.class`), c.bytes);
+    for (const cn of ["Sealed", "SealedI"]) {
+      expect(permittedSubclasses(join(odir.path, `${cn}.class`))).toEqual(
+        permittedSubclasses(join(jdir.path, `${cn}.class`)),
+      );
+    }
+  },
+);
 
 function source(name: string): string {
   return FIXTURES[name]!;

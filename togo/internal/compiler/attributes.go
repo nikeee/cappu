@@ -231,6 +231,19 @@ func buildClassAttributes(cp *constantPool, sourceName string, name internalName
 	return classAttributes{buffer: buffer, count: count}
 }
 
+// permittedSubclassesOf returns the PermittedSubclasses (JVMS 4.7.31) of a
+// `sealed ... permits A, B` type: the listed types resolved to internal names
+// (declaration order). Implicit permits is not inferred yet.
+func permittedSubclassesOf(permitsTypes *NodeArray, from *Node, program *Program) []internalName {
+	var names []internalName
+	for _, t := range arrayNodes(permitsTypes) {
+		if n := resolveInternalName(t, from, program); n != "" {
+			names = append(names, n)
+		}
+	}
+	return names
+}
+
 // computeNestMembers is the nest grouping of a source file: host binary name ->
 // every member of that nest (including the host).
 func computeNestMembers(sourceFile *Node, program *Program) map[string][]internalName {

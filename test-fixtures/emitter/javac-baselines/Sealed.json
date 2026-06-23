@@ -1,0 +1,66 @@
+{
+  "Sealed": {
+    "members": [
+      "public Sealed();"
+    ],
+    "code": [
+      [
+        "public Sealed();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ]
+    ]
+  },
+  "SealedI": {
+    "members": [],
+    "code": []
+  },
+  "SubA": {
+    "members": [
+      "SubA();"
+    ],
+    "code": [
+      [
+        "SubA();",
+        [
+          "aload_0",
+          "invokespecial # // Method Sealed.\"<init>\":()V",
+          "return"
+        ]
+      ]
+    ]
+  },
+  "SubB": {
+    "members": [
+      "SubB();"
+    ],
+    "code": [
+      [
+        "SubB();",
+        [
+          "aload_0",
+          "invokespecial # // Method Sealed.\"<init>\":()V",
+          "return"
+        ]
+      ]
+    ]
+  },
+  "SubC": {
+    "members": [
+      "SubC();"
+    ],
+    "code": [
+      [
+        "SubC();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ]
+    ]
+  }
+}

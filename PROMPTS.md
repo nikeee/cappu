@@ -393,3 +393,5 @@ cappu search commons-lang3
 - 2026-06-23 09:08 — any idea what would be good for this project?
 - 2026-06-23 10:41 — commit on main. then next feature
 - 2026-06-23 10:41 — continue
+- 2026-06-23 10:52 — anything else?
+- 2026-06-23 10:52 — do them step by step. commit automatically.
