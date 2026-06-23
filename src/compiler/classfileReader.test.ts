@@ -1,10 +1,11 @@
 import { test } from "node:test";
+import TempDir from "../TempDir.ts";
 
 import { expect } from "expect";
 
 import { createChecker } from "./checker.ts";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -124,15 +125,15 @@ test(
       "Util",
       "package lib;\npublic class Util { public static int triple(int x) { return x * 3; } }",
     );
-    const dir = mkdtempSync(join(tmpdir(), "jar-"));
-    const classFile = join(dir, "lib", "Util.class");
+    using dir = TempDir.create("jar-");
+    const classFile = join(dir.path, "lib", "Util.class");
     mkdirSync(dirname(classFile), { recursive: true });
     writeFileSync(classFile, bytes);
-    execFileSync("jar", ["cf", join(dir, "util.jar"), "-C", dir, "lib/Util.class"]);
+    execFileSync("jar", ["cf", join(dir.path, "util.jar"), "-C", dir.path, "lib/Util.class"]);
 
     const program = createProgram();
     loadJdkStub(program);
-    const loaded = loadClassPath(program, [join(dir, "util.jar")]);
+    const loaded = loadClassPath(program, [join(dir.path, "util.jar")]);
     expect(loaded).toBe(1);
     expect(program.getGlobalIndex().getType("lib.Util" as Fqn)).toBeDefined();
   },
@@ -199,16 +200,16 @@ test("nested classes group into their outer stub and resolve from a consumer", (
     program1,
     checker1,
   );
-  const dir = mkdtempSync(join(tmpdir(), "nested-"));
+  using dir = TempDir.create("nested-");
   for (const c of classes) {
-    const file = join(dir, `${c.name}.class`);
+    const file = join(dir.path, `${c.name}.class`);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, c.bytes);
   }
 
   const program = createProgram();
   loadJdkStub(program);
-  expect(loadClassPath(program, [dir])).toBe(1); // one top-level stub
+  expect(loadClassPath(program, [dir.path])).toBe(1); // one top-level stub
   const stub = program.getSourceFile("classpath:///lib/Outer.java" as Uri)!.text;
   expect(stub).toContain("public static class Builder");
   expect(stub).not.toContain("$1"); // the anonymous class never appears

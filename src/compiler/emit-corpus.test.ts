@@ -13,7 +13,6 @@ import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   statSync,
@@ -148,13 +147,13 @@ function emitProjectBytes(project: { files: string[] }): Map<string, Uint8Array>
 // Disassemble just the named classes from a bytes map (one javap invocation),
 // so large projects do not javap hundreds of irrelevant classes.
 function disasmSelected(bytes: Map<string, Uint8Array>, wanted: string[]): Map<string, Disasm> {
-  const dir = mkdtempSync(join(tmpdir(), "corpus-ours-"));
+  using dir = TempDir.create("corpus-ours-");
   const paths: string[] = [];
   let i = 0;
   for (const cn of wanted) {
     const b = bytes.get(cn);
     if (b) {
-      const p = join(dir, `c${i++}.class`); // javap reads the class name from the bytes
+      const p = join(dir.path, `c${i++}.class`); // javap reads the class name from the bytes
       writeFileSync(p, b);
       paths.push(p);
     }
@@ -196,15 +195,15 @@ function generateBaseline(project: { files: string[] }): Map<string, ClassCode> 
   // files (the class + any same-project deps pulled in via -sourcepath).
   const javacByClass = new Map<string, Disasm>();
   for (const f of eligible) {
-    const dir = mkdtempSync(join(tmpdir(), "corpus-ref-"));
+    using dir = TempDir.create("corpus-ref-");
     try {
-      execFileSync("javac", ["--release", "21", "-d", dir, "-sourcepath", sourcepath, f], {
+      execFileSync("javac", ["--release", "21", "-d", dir.path, "-sourcepath", sourcepath, f], {
         stdio: "ignore",
       });
     } catch {
       continue; // needs deps beyond the JDK
     }
-    const produced = classFilesIn(dir);
+    const produced = classFilesIn(dir.path);
     if (produced.length === 0) continue;
     for (const [cn, jc] of disasmFiles(produced))
       if (!javacByClass.has(cn)) javacByClass.set(cn, jc);

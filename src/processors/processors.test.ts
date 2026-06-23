@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import TempDir from "../TempDir.ts";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
@@ -40,16 +41,16 @@ function jarWithServices(dir: string, name: string, services: string): string {
 }
 
 test("processor classes are discovered from META-INF/services", () => {
-  const dir = mkdtempSync(join(tmpdir(), "cappu-proc-"));
+  using dir = TempDir.create("cappu-proc-");
   try {
     const a = jarWithServices(
-      dir,
+      dir.path,
       "a.jar",
       "# comment\ncom.example.AProcessor\n\ncom.example.BProcessor # trailing\n",
     );
-    const plain = join(dir, "plain.jar");
+    const plain = join(dir.path, "plain.jar");
     writeFileSync(plain, writeZip([{ name: "com/example/X.class", bytes: encode("x") }]));
-    const corrupt = join(dir, "corrupt.jar");
+    const corrupt = join(dir.path, "corrupt.jar");
     writeFileSync(corrupt, encode("not a zip"));
 
     expect(discoverProcessors([a, plain, corrupt])).toEqual([
@@ -57,33 +58,33 @@ test("processor classes are discovered from META-INF/services", () => {
       "com.example.BProcessor",
     ]);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir.path, { recursive: true, force: true });
   }
 });
 
 test("processor jars come from lib/processors, sorted; absence means none", () => {
-  const project = mkdtempSync(join(tmpdir(), "cappu-proc-"));
+  using project = TempDir.create("cappu-proc-");
   try {
-    const config = loadConfig(undefined, project);
+    const config = loadConfig(undefined, project.path);
     expect(processorJars(config)).toEqual([]);
-    mkdirSync(join(project, ".cappu", "lib", "processors"), { recursive: true });
-    writeFileSync(join(project, ".cappu", "lib", "processors", "b.jar"), encode("b"));
-    writeFileSync(join(project, ".cappu", "lib", "processors", "a.jar"), encode("a"));
-    writeFileSync(join(project, ".cappu", "lib", "processors", "notes.txt"), encode("x"));
+    mkdirSync(join(project.path, ".cappu", "lib", "processors"), { recursive: true });
+    writeFileSync(join(project.path, ".cappu", "lib", "processors", "b.jar"), encode("b"));
+    writeFileSync(join(project.path, ".cappu", "lib", "processors", "a.jar"), encode("a"));
+    writeFileSync(join(project.path, ".cappu", "lib", "processors", "notes.txt"), encode("x"));
     expect(processorJars(config)).toEqual([
-      join(project, ".cappu", "lib", "processors", "a.jar"),
-      join(project, ".cappu", "lib", "processors", "b.jar"),
+      join(project.path, ".cappu", "lib", "processors", "a.jar"),
+      join(project.path, ".cappu", "lib", "processors", "b.jar"),
     ]);
   } finally {
-    rmSync(project, { recursive: true, force: true });
+    rmSync(project.path, { recursive: true, force: true });
   }
 });
 
 test("proc-only argument building", () => {
-  const project = mkdtempSync(join(tmpdir(), "cappu-proc-"));
+  using project = TempDir.create("cappu-proc-");
   try {
-    mkdirSync(join(project, ".cappu", "lib", "classes"), { recursive: true });
-    const config = loadConfig(undefined, project);
+    mkdirSync(join(project.path, ".cappu", "lib", "classes"), { recursive: true });
+    const config = loadConfig(undefined, project.path);
     const args = procOnlyArgs(config, ["/p/A.java"], ["/p/proc.jar", "/p/extra.jar"], {
       sources: "/out/sources",
       classes: "/out/classes",
@@ -99,34 +100,34 @@ test("proc-only argument building", () => {
       "-encoding",
       "UTF-8",
       "-cp",
-      join(project, ".cappu", "lib", "classes"),
+      join(project.path, ".cappu", "lib", "classes"),
       // no -sourcepath: ./src/main/java does not exist in this project
       "/p/A.java",
     ]);
   } finally {
-    rmSync(project, { recursive: true, force: true });
+    rmSync(project.path, { recursive: true, force: true });
   }
 });
 
 test("without processor jars nothing runs at all", () => {
-  const project = mkdtempSync(join(tmpdir(), "cappu-proc-"));
+  using project = TempDir.create("cappu-proc-");
   try {
-    const config = loadConfig(undefined, project);
+    const config = loadConfig(undefined, project.path);
     const result = runAnnotationProcessing(config, ["/p/A.java"], () => {
       throw new Error("exec must not be called");
     });
     expect(result).toEqual({ ran: false, generatedFiles: [], diagnostics: [] });
   } finally {
-    rmSync(project, { recursive: true, force: true });
+    rmSync(project.path, { recursive: true, force: true });
   }
 });
 
 test("failure modes map to diagnostics; success keeps located warnings only", () => {
-  const project = mkdtempSync(join(tmpdir(), "cappu-proc-"));
+  using project = TempDir.create("cappu-proc-");
   try {
-    mkdirSync(join(project, ".cappu", "lib", "processors"), { recursive: true });
-    jarWithServices(join(project, ".cappu", "lib", "processors"), "p.jar", "com.example.P\n");
-    const config = loadConfig(undefined, project);
+    mkdirSync(join(project.path, ".cappu", "lib", "processors"), { recursive: true });
+    jarWithServices(join(project.path, ".cappu", "lib", "processors"), "p.jar", "com.example.P\n");
+    const config = loadConfig(undefined, project.path);
 
     // located error from a failed run
     const failed = runAnnotationProcessing(config, ["/p/A.java"], () => ({
@@ -166,7 +167,7 @@ test("failure modes map to diagnostics; success keeps located warnings only", ()
     ]);
     expect(existsSync(generatedSourcesDir(config))).toBe(true);
   } finally {
-    rmSync(project, { recursive: true, force: true });
+    rmSync(project.path, { recursive: true, force: true });
   }
 });
 
@@ -198,10 +199,10 @@ public class GenProcessor extends AbstractProcessor {
 `;
 
 function buildProcessorJar(into: string): void {
-  const work = mkdtempSync(join(tmpdir(), "cappu-procbuild-"));
+  using work = TempDir.create("cappu-procbuild-");
   try {
-    writeFileSync(join(work, "GenProcessor.java"), PROCESSOR_SOURCE);
-    execFileSync("javac", ["-proc:none", "-d", work, join(work, "GenProcessor.java")], {
+    writeFileSync(join(work.path, "GenProcessor.java"), PROCESSOR_SOURCE);
+    execFileSync("javac", ["-proc:none", "-d", work.path, join(work.path, "GenProcessor.java")], {
       stdio: "ignore",
     });
     writeFileSync(
@@ -211,44 +212,44 @@ function buildProcessorJar(into: string): void {
           name: "META-INF/services/javax.annotation.processing.Processor",
           bytes: encode("GenProcessor\n"),
         },
-        { name: "GenProcessor.class", bytes: readFileSync(join(work, "GenProcessor.class")) },
+        { name: "GenProcessor.class", bytes: readFileSync(join(work.path, "GenProcessor.class")) },
       ]),
     );
   } finally {
-    rmSync(work, { recursive: true, force: true });
+    rmSync(work.path, { recursive: true, force: true });
   }
 }
 
 test("a real processor generates a source both compile modes pick up", { skip: !HAS_JAVAC }, () => {
-  const project = mkdtempSync(join(tmpdir(), "cappu-proce2e-"));
+  using project = TempDir.create("cappu-proce2e-");
   try {
-    mkdirSync(join(project, ".cappu", "lib", "processors"), { recursive: true });
-    mkdirSync(join(project, "src", "main", "java"), { recursive: true });
-    buildProcessorJar(join(project, ".cappu", "lib", "processors", "gen.jar"));
-    const main = join(project, "src", "main", "java", "Main.java");
+    mkdirSync(join(project.path, ".cappu", "lib", "processors"), { recursive: true });
+    mkdirSync(join(project.path, "src", "main", "java"), { recursive: true });
+    buildProcessorJar(join(project.path, ".cappu", "lib", "processors", "gen.jar"));
+    const main = join(project.path, "src", "main", "java", "Main.java");
     writeFileSync(
       main,
       "public class Main { public static void main(String[] a) { System.out.println(gen.Greeting.text()); } }",
     );
-    writeFileSync(join(project, "cappu.json"), "{}");
-    const config = loadConfig(undefined, project);
+    writeFileSync(join(project.path, "cappu.json"), "{}");
+    const config = loadConfig(undefined, project.path);
 
     // default mode: one javac invocation runs the processor and compiles
-    const byJavac = runCompile([main], { outDir: join(project, "dist"), config });
+    const byJavac = runCompile([main], { outDir: join(project.path, "dist"), config });
     expect(byJavac.success).toBe(true);
     expect(byJavac.written.some(f => f.endsWith(join("gen", "Greeting.class")))).toBe(true);
     expect(existsSync(join(generatedSourcesDir(config), "gen", "Greeting.java"))).toBe(true);
 
     // experimental mode: -proc:only generates, our compiler compiles both
-    rmSync(join(project, "dist"), { recursive: true, force: true });
+    rmSync(join(project.path, "dist"), { recursive: true, force: true });
     const byOurs = runCompile([main], {
       experimentalCompiler: true,
-      outDir: join(project, "dist"),
+      outDir: join(project.path, "dist"),
       config,
     });
     expect(byOurs.success).toBe(true);
     expect(byOurs.written.some(f => f.endsWith(join("gen", "Greeting.class")))).toBe(true);
   } finally {
-    rmSync(project, { recursive: true, force: true });
+    rmSync(project.path, { recursive: true, force: true });
   }
 });

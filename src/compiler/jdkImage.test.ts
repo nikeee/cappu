@@ -1,9 +1,10 @@
 import { test } from "node:test";
+import TempDir from "../TempDir.ts";
 
 import { expect } from "expect";
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -48,11 +49,11 @@ function makeJmod(classes: { binaryName: string; bytes: Uint8Array }[]): Uint8Ar
 // A throwaway JDK home: <tmp>/jmods/<each file>. Auto-removed at process exit.
 const tempHomes: string[] = [];
 function makeJdkHome(jmods: { name: string; bytes: Uint8Array }[]): string {
-  const home = mkdtempSync(join(tmpdir(), "jdkhome-"));
-  tempHomes.push(home);
-  mkdirSync(join(home, "jmods"));
-  for (const m of jmods) writeFileSync(join(home, "jmods", m.name), m.bytes);
-  return home;
+  using home = TempDir.create("jdkhome-");
+  tempHomes.push(home.path);
+  mkdirSync(join(home.path, "jmods"));
+  for (const m of jmods) writeFileSync(join(home.path, "jmods", m.name), m.bytes);
+  return home.path;
 }
 process.on("exit", () => {
   for (const home of tempHomes) rmSync(home, { recursive: true, force: true });
@@ -128,9 +129,9 @@ test("a consumer resolves JDK types the synthetic stub omits", { skip }, () => {
 
 test("createJdkImage returns undefined when there is nothing to read", () => {
   // No jmods/ directory at all.
-  const noJmods = mkdtempSync(join(tmpdir(), "nojmods-"));
-  tempHomes.push(noJmods);
-  expect(createJdkImage(noJmods)).toBeUndefined();
+  using noJmods = TempDir.create("nojmods-");
+  tempHomes.push(noJmods.path);
+  expect(createJdkImage(noJmods.path)).toBeUndefined();
   // A jmods/ directory with no .jmod files in it.
   expect(createJdkImage(makeJdkHome([]))).toBeUndefined();
 });

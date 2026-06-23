@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
+import TempDir from "../TempDir.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -9,12 +10,12 @@ import { type CappuConfig, loadConfig } from "../config.ts";
 import { generatePom, missingCoordinates } from "./pom.ts";
 
 function configFrom(obj: Record<string, unknown>): CappuConfig {
-  const dir = mkdtempSync(join(tmpdir(), "cappu-pom-"));
+  using dir = TempDir.create("cappu-pom-");
   try {
-    writeFileSync(join(dir, "cappu.json"), JSON.stringify(obj));
-    return loadConfig(undefined, dir);
+    writeFileSync(join(dir.path, "cappu.json"), JSON.stringify(obj));
+    return loadConfig(undefined, dir.path);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir.path, { recursive: true, force: true });
   }
 }
 

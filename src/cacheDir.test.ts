@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import TempDir from "./TempDir.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -12,33 +13,33 @@ test("cacheRoot follows XDG_CACHE_HOME", () => {
 });
 
 test("cleanCache removes the cache root and reports what it deleted", () => {
-  const xdg = mkdtempSync(join(tmpdir(), "cappu-xdg-"));
+  using xdg = TempDir.create("cappu-xdg-");
   try {
-    const root = join(xdg, "cappu");
+    const root = join(xdg.path, "cappu");
     mkdirSync(join(root, "packages", "g"), { recursive: true });
     writeFileSync(join(root, "packages", "g", "a.jar"), "x");
     // env is fully controlled - never touches the developer's real cache
-    const removed = cleanCache({ XDG_CACHE_HOME: xdg });
+    const removed = cleanCache({ XDG_CACHE_HOME: xdg.path });
     expect(removed).toEqual([root]);
     expect(existsSync(root)).toBe(false);
     // a second clean has nothing to do
-    expect(cleanCache({ XDG_CACHE_HOME: xdg })).toEqual([]);
+    expect(cleanCache({ XDG_CACHE_HOME: xdg.path })).toEqual([]);
   } finally {
-    rmSync(xdg, { recursive: true, force: true });
+    rmSync(xdg.path, { recursive: true, force: true });
   }
 });
 
 test("cleanCache also clears env-override stores outside the root", () => {
-  const xdg = mkdtempSync(join(tmpdir(), "cappu-xdg-"));
-  const pkg = mkdtempSync(join(tmpdir(), "cappu-pkg-"));
+  using xdg = TempDir.create("cappu-xdg-");
+  using pkg = TempDir.create("cappu-pkg-");
   try {
-    mkdirSync(join(xdg, "cappu"), { recursive: true });
-    writeFileSync(join(pkg, "a.jar"), "x");
-    const removed = cleanCache({ XDG_CACHE_HOME: xdg, CAPPU_PACKAGE_STORE: pkg });
-    expect(removed).toEqual([join(xdg, "cappu"), pkg]);
-    expect(existsSync(pkg)).toBe(false);
+    mkdirSync(join(xdg.path, "cappu"), { recursive: true });
+    writeFileSync(join(pkg.path, "a.jar"), "x");
+    const removed = cleanCache({ XDG_CACHE_HOME: xdg.path, CAPPU_PACKAGE_STORE: pkg.path });
+    expect(removed).toEqual([join(xdg.path, "cappu"), pkg.path]);
+    expect(existsSync(pkg.path)).toBe(false);
   } finally {
-    rmSync(xdg, { recursive: true, force: true });
-    rmSync(pkg, { recursive: true, force: true });
+    rmSync(xdg.path, { recursive: true, force: true });
+    rmSync(pkg.path, { recursive: true, force: true });
   }
 });

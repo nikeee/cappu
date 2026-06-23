@@ -9,7 +9,6 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -51,16 +50,16 @@ function javaBin(): string {
 const EXPERIMENTAL = process.env.CAPPU_EXAMPLES_EXPERIMENTAL === "1";
 
 function runExample(name: string, command: string[] = ["compile"]): string {
-  const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
-  const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
+  using root = TempDir.create("cappu-example-");
+  using store = TempDir.create("cappu-example-store-");
   // the fat jar is named after the project directory: keep the example's name
-  const work = join(root, name);
+  const work = join(root.path, name);
   try {
     // only the committed files; lib/dist/.cappu from local runs stay behind
     for (const entry of ["cappu.json", "cappu-lock.json", "src", ".gitignore"]) {
       cpSync(join(examplesDir, name, entry), join(work, entry), { recursive: true });
     }
-    const env = { ...process.env, CAPPU_PACKAGE_STORE: store };
+    const env = { ...process.env, CAPPU_PACKAGE_STORE: store.path };
     execFileSync(tsx, [cli, "install"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
     // The experimental compiler is enabled via cappu.json (no CLI flag); tolerate
     // degraded bodies so best-effort emission doesn't fail the build.
@@ -86,8 +85,8 @@ function runExample(name: string, command: string[] = ["compile"]): string {
       encoding: "utf8",
     });
   } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(store, { recursive: true, force: true });
+    rmSync(root.path, { recursive: true, force: true });
+    rmSync(store.path, { recursive: true, force: true });
   }
 }
 
@@ -127,9 +126,9 @@ test("examples/junit-app runs its tests with cappu test", { skip: !HAS_JAVAC }, 
 // and skips on the hermetic no-JDK leg. The findings exit non-zero, which
 // execFileSync surfaces as a throw whose stdout we read.
 test("examples/audit-app reports its vulnerable dependency", { skip: !HAS_JAVAC }, () => {
-  const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
-  const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
-  const work = join(root, "audit-app");
+  using root = TempDir.create("cappu-example-");
+  using store = TempDir.create("cappu-example-store-");
+  const work = join(root.path, "audit-app");
   try {
     cpSync(join(examplesDir, "audit-app", "cappu.json"), join(work, "cappu.json"));
     let stdout: string;
@@ -137,7 +136,7 @@ test("examples/audit-app reports its vulnerable dependency", { skip: !HAS_JAVAC 
     try {
       stdout = execFileSync(tsx, [cli, "audit"], {
         cwd: work,
-        env: { ...process.env, CAPPU_PACKAGE_STORE: store },
+        env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -156,7 +155,7 @@ test("examples/audit-app reports its vulnerable dependency", { skip: !HAS_JAVAC 
     try {
       freshOut = execFileSync(tsx, [cli, "audit", "--no-cache"], {
         cwd: work,
-        env: { ...process.env, CAPPU_PACKAGE_STORE: store },
+        env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -173,7 +172,7 @@ test("examples/audit-app reports its vulnerable dependency", { skip: !HAS_JAVAC 
     try {
       jsonOut = execFileSync(tsx, [cli, "audit", "--json"], {
         cwd: work,
-        env: { ...process.env, CAPPU_PACKAGE_STORE: store },
+        env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -192,8 +191,8 @@ test("examples/audit-app reports its vulnerable dependency", { skip: !HAS_JAVAC 
     expect(log4j!.advisories.flatMap(a => a.aliases)).toContain("CVE-2021-44228");
     expect(log4j!.path.at(-1)).toBe(log4j!.coordinate); // path ends at the vulnerable pkg
   } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(store, { recursive: true, force: true });
+    rmSync(root.path, { recursive: true, force: true });
+    rmSync(store.path, { recursive: true, force: true });
   }
 });
 
@@ -201,12 +200,12 @@ test("examples/audit-app reports its vulnerable dependency", { skip: !HAS_JAVAC 
 // gson declares Apache-2.0, which maps cleanly to an SPDX id. Networked-leg
 // gated on HAS_JAVAC like the other example e2e tests.
 test("examples/gson-app reports dependency licenses (human + --json)", { skip: !HAS_JAVAC }, () => {
-  const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
-  const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
-  const work = join(root, "gson-app");
+  using root = TempDir.create("cappu-example-");
+  using store = TempDir.create("cappu-example-store-");
+  const work = join(root.path, "gson-app");
   try {
     cpSync(join(examplesDir, "gson-app", "cappu.json"), join(work, "cappu.json"));
-    const env = { ...process.env, CAPPU_PACKAGE_STORE: store };
+    const env = { ...process.env, CAPPU_PACKAGE_STORE: store.path };
     const human = execFileSync(tsx, [cli, "licenses"], {
       cwd: work,
       env,
@@ -229,8 +228,8 @@ test("examples/gson-app reports dependency licenses (human + --json)", { skip: !
     const gson = rows.find(r => r.coordinate === "com.google.code.gson:gson:2.13.1");
     expect(gson?.licenses.map(l => l.spdx)).toContain("Apache-2.0");
   } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(store, { recursive: true, force: true });
+    rmSync(root.path, { recursive: true, force: true });
+    rmSync(store.path, { recursive: true, force: true });
   }
 });
 
@@ -238,9 +237,9 @@ test("examples/gson-app reports dependency licenses (human + --json)", { skip: !
 // a newer stable version, rewrite cappu.json (comment kept) and write a lock.
 // Network-only (no JDK); gated on HAS_JAVAC like the other example e2e tests.
 test("cappu update bumps an outdated dependency end to end", { skip: !HAS_JAVAC }, () => {
-  const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
-  const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
-  const work = join(root, "update-proj");
+  using root = TempDir.create("cappu-example-");
+  using store = TempDir.create("cappu-example-store-");
+  const work = join(root.path, "update-proj");
   try {
     mkdirSync(work, { recursive: true });
     writeFileSync(
@@ -252,7 +251,7 @@ test("cappu update bumps an outdated dependency end to end", { skip: !HAS_JAVAC 
     );
     execFileSync(tsx, [cli, "update"], {
       cwd: work,
-      env: { ...process.env, CAPPU_PACKAGE_STORE: store },
+      env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
       stdio: ["ignore", "pipe", "pipe"],
     });
     const after = readFileSync(join(work, "cappu.json"), "utf8");
@@ -261,8 +260,8 @@ test("cappu update bumps an outdated dependency end to end", { skip: !HAS_JAVAC 
     expect(after).toContain("// pinned old on purpose"); // comment preserved
     expect(existsSync(join(work, "cappu-lock.json"))).toBe(true); // lock refreshed
   } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(store, { recursive: true, force: true });
+    rmSync(root.path, { recursive: true, force: true });
+    rmSync(store.path, { recursive: true, force: true });
   }
 });
 
@@ -294,8 +293,8 @@ test(
 // --artifact steers the output jar's name (predictable name for Docker builds).
 // No dependencies, so javac-only (no network).
 test("cappu compile --artifact steers the output jar name", { skip: !HAS_JAVAC }, () => {
-  const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
-  const work = join(root, "p");
+  using root = TempDir.create("cappu-example-");
+  const work = join(root.path, "p");
   try {
     mkdirSync(join(work, "src", "main", "java", "x"), { recursive: true });
     writeFileSync(
@@ -313,7 +312,7 @@ test("cappu compile --artifact steers the output jar name", { skip: !HAS_JAVAC }
     });
     expect(existsSync(join(work, "dist", "app.jar"))).toBe(true);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root.path, { recursive: true, force: true });
   }
 });
 
@@ -328,14 +327,14 @@ test(
     skip: !HAS_JAVAC,
   },
   () => {
-    const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
-    const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
-    const work = join(root, "spring-boot-app");
+    using root = TempDir.create("cappu-example-");
+    using store = TempDir.create("cappu-example-store-");
+    const work = join(root.path, "spring-boot-app");
     try {
       for (const entry of ["cappu.json", "cappu-lock.json", "src", ".gitignore"]) {
         cpSync(join(examplesDir, "spring-boot-app", entry), join(work, entry), { recursive: true });
       }
-      const env = { ...process.env, CAPPU_PACKAGE_STORE: store };
+      const env = { ...process.env, CAPPU_PACKAGE_STORE: store.path };
       execFileSync(tsx, [cli, "install"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
       // "output": "fat-jar" is set in the example's cappu.json
       execFileSync(tsx, [cli, "compile"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
@@ -347,8 +346,8 @@ test(
       expect(output).toContain("Spring Boot"); // the startup banner
       expect(output).toContain("Started App"); // the context booted
     } finally {
-      rmSync(root, { recursive: true, force: true });
-      rmSync(store, { recursive: true, force: true });
+      rmSync(root.path, { recursive: true, force: true });
+      rmSync(store.path, { recursive: true, force: true });
     }
   },
 );
@@ -363,9 +362,9 @@ test(
   "examples/spring-boot-web-app serves HTTP from a single fat jar",
   { skip: !HAS_JAVAC },
   async () => {
-    const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
-    const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
-    const work = join(root, "spring-boot-web-app");
+    using root = TempDir.create("cappu-example-");
+    using store = TempDir.create("cappu-example-store-");
+    const work = join(root.path, "spring-boot-web-app");
     let child: ChildProcess | undefined;
     try {
       for (const entry of ["cappu.json", "cappu-lock.json", "src", ".gitignore"]) {
@@ -373,7 +372,7 @@ test(
           recursive: true,
         });
       }
-      const env = { ...process.env, CAPPU_PACKAGE_STORE: store };
+      const env = { ...process.env, CAPPU_PACKAGE_STORE: store.path };
       execFileSync(tsx, [cli, "install"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
       execFileSync(tsx, [cli, "compile"], { cwd: work, env, stdio: ["ignore", "ignore", "pipe"] });
       child = spawn(
@@ -404,8 +403,8 @@ test(
       expect(body).toBe("hello from fat jar");
     } finally {
       child?.kill();
-      rmSync(root, { recursive: true, force: true });
-      rmSync(store, { recursive: true, force: true });
+      rmSync(root.path, { recursive: true, force: true });
+      rmSync(store.path, { recursive: true, force: true });
     }
   },
 );
@@ -484,8 +483,8 @@ test(
   "examples/debug-app debugs over the Debug Adapter Protocol",
   { skip: !HAS_JAVAC },
   async () => {
-    const root = mkdtempSync(join(tmpdir(), "cappu-dap-"));
-    const work = join(root, "debug-app");
+    using root = TempDir.create("cappu-dap-");
+    const work = join(root.path, "debug-app");
     for (const entry of ["cappu.json", "src", ".gitignore"]) {
       cpSync(join(examplesDir, "debug-app", entry), join(work, entry), { recursive: true });
     }
@@ -573,7 +572,7 @@ test(
       await t("exit", once(child, "exit"));
     } finally {
       child.kill();
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root.path, { recursive: true, force: true });
     }
   },
 );
@@ -582,8 +581,8 @@ test(
 // first line of main, then runs to completion. The -D vm arg just proves the
 // JVM accepts caller JVM flags (the program still runs).
 test("examples/debug-app stops on entry and accepts vm args", { skip: !HAS_JAVAC }, async () => {
-  const root = mkdtempSync(join(tmpdir(), "cappu-dap-"));
-  const work = join(root, "debug-app");
+  using root = TempDir.create("cappu-dap-");
+  const work = join(root.path, "debug-app");
   for (const entry of ["cappu.json", "src", ".gitignore"]) {
     cpSync(join(examplesDir, "debug-app", entry), join(work, entry), { recursive: true });
   }
@@ -615,16 +614,16 @@ test("examples/debug-app stops on entry and accepts vm args", { skip: !HAS_JAVAC
     await t("exit", once(child, "exit"));
   } finally {
     child.kill();
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root.path, { recursive: true, force: true });
   }
 });
 
 // With full coordinates, `cappu compile -o jar` produces the publishable pair:
 // <artifactId>-<version>.jar plus its generated POM. Javac-gated like the rest.
 test("cappu compile -o jar emits a publishable jar and POM", { skip: !HAS_JAVAC }, () => {
-  const root = mkdtempSync(join(tmpdir(), "cappu-example-"));
-  const store = mkdtempSync(join(tmpdir(), "cappu-example-store-"));
-  const work = join(root, "pub-proj");
+  using root = TempDir.create("cappu-example-");
+  using store = TempDir.create("cappu-example-store-");
+  const work = join(root.path, "pub-proj");
   try {
     mkdirSync(join(work, "src", "main", "java", "com", "example"), { recursive: true });
     writeFileSync(
@@ -643,7 +642,7 @@ test("cappu compile -o jar emits a publishable jar and POM", { skip: !HAS_JAVAC 
     );
     execFileSync(tsx, [cli, "compile", "-o", "jar"], {
       cwd: work,
-      env: { ...process.env, CAPPU_PACKAGE_STORE: store },
+      env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
       stdio: ["ignore", "pipe", "pipe"],
     });
     expect(existsSync(join(work, "dist", "demo-lib-1.0.0.jar"))).toBe(true);
@@ -652,7 +651,7 @@ test("cappu compile -o jar emits a publishable jar and POM", { skip: !HAS_JAVAC 
     expect(pom).toContain("<version>1.0.0</version>");
     expect(pom).toMatch(/<artifactId>gson<\/artifactId>[\s\S]*?<scope>runtime<\/scope>/);
   } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(store, { recursive: true, force: true });
+    rmSync(root.path, { recursive: true, force: true });
+    rmSync(store.path, { recursive: true, force: true });
   }
 });

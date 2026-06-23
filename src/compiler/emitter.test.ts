@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
+import TempDir from "../TempDir.ts";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   writeFileSync,
@@ -270,21 +270,21 @@ function emitClassesDebug(
 // UPDATE_BASELINES=1, which recompiles and asserts javac still prints it.
 function runsLikeJavac(mainClass: string, source: string, expectedStdout: string): void {
   if (shouldUpdate && HAS_JAVAC && HAS_JAVA) {
-    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-    writeFileSync(join(ref, `${mainClass}.java`), source);
-    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${mainClass}.java`)]);
-    expect(execFileSync("java", ["-cp", ref, mainClass], { encoding: "utf8" })).toBe(
+    using ref = TempDir.create("emit-ref-");
+    writeFileSync(join(ref.path, `${mainClass}.java`), source);
+    execFileSync("javac", ["--release", "21", "-d", ref.path, join(ref.path, `${mainClass}.java`)]);
+    expect(execFileSync("java", ["-cp", ref.path, mainClass], { encoding: "utf8" })).toBe(
       expectedStdout,
     );
   }
 
-  const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+  using ours = TempDir.create("emit-ours-");
   for (const c of emitClasses(mainClass, source)) {
-    const out = join(ours, `${c.name}.class`);
+    const out = join(ours.path, `${c.name}.class`);
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, c.bytes);
   }
-  expect(execFileSync("java", ["-cp", ours, mainClass], { encoding: "utf8" })).toBe(expectedStdout);
+  expect(execFileSync("java", ["-cp", ours.path, mainClass], { encoding: "utf8" })).toBe(expectedStdout);
 }
 
 // javac's normalized disassembly for a fixture's classes, keyed by class name.
@@ -299,12 +299,12 @@ function loadJavacRef(fixtureName: string, source: string): Map<string, Disasm> 
     );
   }
   if (!(HAS_JAVAC && HAS_JAVA)) return undefined;
-  const dir = mkdtempSync(join(tmpdir(), "javac-ref-"));
-  writeFileSync(join(dir, `${fixtureName}.java`), source);
-  execFileSync("javac", ["--release", "21", "-d", dir, join(dir, `${fixtureName}.java`)]);
-  const classFiles = readdirSync(dir)
+  using dir = TempDir.create("javac-ref-");
+  writeFileSync(join(dir.path, `${fixtureName}.java`), source);
+  execFileSync("javac", ["--release", "21", "-d", dir.path, join(dir.path, `${fixtureName}.java`)]);
+  const classFiles = readdirSync(dir.path)
     .filter(f => f.endsWith(".class"))
-    .map(f => join(dir, f));
+    .map(f => join(dir.path, f));
   const map = disasmFiles(classFiles);
   mkdirSync(javacRefDir, { recursive: true });
   writeFileSync(file, `${JSON.stringify(Object.fromEntries(map), null, 2)}\n`);
@@ -316,13 +316,13 @@ function loadJavacRef(fixtureName: string, source: string): Map<string, Disasm> 
 let oursDisasmCache: Map<string, Disasm> | undefined;
 function oursDisasm(): Map<string, Disasm> {
   if (oursDisasmCache) return oursDisasmCache;
-  const dir = mkdtempSync(join(tmpdir(), "emit-ours-all-"));
+  using dir = TempDir.create("emit-ours-all-");
   for (const [name, src] of [...Object.entries(FIXTURES), ...Object.entries(MULTI_FIXTURES)]) {
-    for (const c of emitClasses(name, src)) writeFileSync(join(dir, `${c.name}.class`), c.bytes);
+    for (const c of emitClasses(name, src)) writeFileSync(join(dir.path, `${c.name}.class`), c.bytes);
   }
-  const files = readdirSync(dir)
+  const files = readdirSync(dir.path)
     .filter(f => f.endsWith(".class"))
-    .map(f => join(dir, f));
+    .map(f => join(dir.path, f));
   oursDisasmCache = disasmFiles(files);
   return oursDisasmCache;
 }
@@ -351,9 +351,9 @@ for (const [name, source] of Object.entries(FIXTURES)) {
 
 for (const [name, expected] of Object.entries(RUNS)) {
   test(`runs and prints: ${name}`, { skip: HAS_JAVA ? false : "no JDK" }, () => {
-    const dir = mkdtempSync(join(tmpdir(), "emit-run-"));
-    writeFileSync(join(dir, `${name}.class`), emit(name, source(name)));
-    const out = execFileSync("java", ["-cp", dir, name], { encoding: "utf8" });
+    using dir = TempDir.create("emit-run-");
+    writeFileSync(join(dir.path, `${name}.class`), emit(name, source(name)));
+    const out = execFileSync("java", ["-cp", dir.path, name], { encoding: "utf8" });
     expect(out).toBe(expected);
   });
 }
@@ -450,11 +450,11 @@ for (const [name, { source, classes }] of Object.entries(ENUM_MULTI_FIXTURES)) {
   });
 
   test(`enum-body runs like javac: ${name}`, { skip: HAS_JAVA ? false : "no JDK" }, () => {
-    const dir = mkdtempSync(join(tmpdir(), "emit-enum-"));
+    using dir = TempDir.create("emit-enum-");
     for (const c of emitClasses(name, source)) {
-      writeFileSync(join(dir, `${c.name}.class`), c.bytes);
+      writeFileSync(join(dir.path, `${c.name}.class`), c.bytes);
     }
-    const out = execFileSync("java", ["-cp", dir, name], { encoding: "utf8" });
+    const out = execFileSync("java", ["-cp", dir.path, name], { encoding: "utf8" });
     expect(out).toBe(ENUM_RUNS[name]);
   });
 }
@@ -532,14 +532,14 @@ test("casts and instanceof run identically to javac", { skip: HAS_JAVA ? false :
     "  }",
     "}",
   ].join("\n");
-  const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-  writeFileSync(join(ref, `${name}.java`), src);
-  execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
-  const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+  using ref = TempDir.create("emit-ref-");
+  writeFileSync(join(ref.path, `${name}.java`), src);
+  execFileSync("javac", ["--release", "21", "-d", ref.path, join(ref.path, `${name}.java`)]);
+  const refOut = execFileSync("java", ["-cp", ref.path, name], { encoding: "utf8" });
 
-  const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
-  writeFileSync(join(ours, `${name}.class`), emit(name, src));
-  const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+  using ours = TempDir.create("emit-ours-");
+  writeFileSync(join(ours.path, `${name}.class`), emit(name, src));
+  const ourOut = execFileSync("java", ["-cp", ours.path, name], { encoding: "utf8" });
   expect(ourOut).toBe(refOut);
   expect(refOut).toBe("300\n44\n600\nhello\ntrue\nfalse\n");
 });
@@ -557,16 +557,16 @@ test(
     };
 
     // javac reference.
-    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-    for (const [file, text] of Object.entries(sources)) writeFileSync(join(ref, file), text);
+    using ref = TempDir.create("emit-ref-");
+    for (const [file, text] of Object.entries(sources)) writeFileSync(join(ref.path, file), text);
     execFileSync("javac", [
       "--release",
       "21",
       "-d",
-      ref,
-      ...Object.keys(sources).map(f => join(ref, f)),
+      ref.path,
+      ...Object.keys(sources).map(f => join(ref.path, f)),
     ]);
-    const refOut = execFileSync("java", ["-cp", ref, "com.app.Main"], { encoding: "utf8" });
+    const refOut = execFileSync("java", ["-cp", ref.path, "com.app.Main"], { encoding: "utf8" });
 
     // Ours: one program over all sources; write each class to its package path.
     const program = createProgram();
@@ -575,19 +575,19 @@ test(
       program.addProjectFile(`file:///${file}` as Uri, text);
     }
     const checker = createChecker(program);
-    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
+    using ours = TempDir.create("emit-ours-");
     for (const file of Object.keys(sources)) {
       for (const cls of emitSourceFile(
         program.getSourceFile(`file:///${file}` as Uri)!,
         program,
         checker,
       )) {
-        const out = join(ours, `${cls.name}.class`);
+        const out = join(ours.path, `${cls.name}.class`);
         mkdirSync(dirname(out), { recursive: true });
         writeFileSync(out, cls.bytes);
       }
     }
-    const ourOut = execFileSync("java", ["-cp", ours, "com.app.Main"], { encoding: "utf8" });
+    const ourOut = execFileSync("java", ["-cp", ours.path, "com.app.Main"], { encoding: "utf8" });
 
     expect(ourOut).toBe(refOut);
     expect(refOut).toBe("woof\n");
@@ -611,14 +611,14 @@ test(
       "  }",
       "}",
     ].join("\n");
-    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-    writeFileSync(join(ref, `${name}.java`), src);
-    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
-    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+    using ref = TempDir.create("emit-ref-");
+    writeFileSync(join(ref.path, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref.path, join(ref.path, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref.path, name], { encoding: "utf8" });
 
-    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
-    writeFileSync(join(ours, `${name}.class`), emit(name, src));
-    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+    using ours = TempDir.create("emit-ours-");
+    writeFileSync(join(ours.path, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours.path, name], { encoding: "utf8" });
     expect(ourOut).toBe(refOut);
     expect(refOut).toBe("Hello, world!\nn = 42, twice = 84\nchar: X bool: true\n3 items\n");
   },
@@ -648,14 +648,14 @@ test(
       "  }",
       "}",
     ].join("\n");
-    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-    writeFileSync(join(ref, `${name}.java`), src);
-    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
-    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+    using ref = TempDir.create("emit-ref-");
+    writeFileSync(join(ref.path, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref.path, join(ref.path, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref.path, name], { encoding: "utf8" });
 
-    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
-    writeFileSync(join(ours, `${name}.class`), emit(name, src));
-    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+    using ours = TempDir.create("emit-ours-");
+    writeFileSync(join(ours.path, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours.path, name], { encoding: "utf8" });
     expect(ourOut).toBe(refOut);
     expect(refOut).toBe("5\n15\n100\n42\n1000\n");
   },
@@ -684,14 +684,14 @@ test(
       "  }",
       "}",
     ].join("\n");
-    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-    writeFileSync(join(ref, `${name}.java`), src);
-    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
-    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+    using ref = TempDir.create("emit-ref-");
+    writeFileSync(join(ref.path, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref.path, join(ref.path, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref.path, name], { encoding: "utf8" });
 
-    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
-    writeFileSync(join(ours, `${name}.class`), emit(name, src));
-    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+    using ours = TempDir.create("emit-ours-");
+    writeFileSync(join(ours.path, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours.path, name], { encoding: "utf8" });
 
     expect(ourOut).toBe(refOut);
     expect(refOut).toBe("42\n7\n2\n");
@@ -866,12 +866,12 @@ test(
       "  }",
       "}",
     ].join("\n");
-    const dir = mkdtempSync(join(tmpdir(), "emit-assert-"));
-    for (const c of emitClasses("Asrt", src)) writeFileSync(join(dir, `${c.name}.class`), c.bytes);
+    using dir = TempDir.create("emit-assert-");
+    for (const c of emitClasses("Asrt", src)) writeFileSync(join(dir.path, `${c.name}.class`), c.bytes);
     // Assertions disabled (default): the assert is a no-op, checked(-1) returns -1.
-    expect(execFileSync("java", ["-cp", dir, "Asrt"], { encoding: "utf8" })).toBe("-1\n");
+    expect(execFileSync("java", ["-cp", dir.path, "Asrt"], { encoding: "utf8" })).toBe("-1\n");
     // Assertions enabled (-ea): the false assert throws AssertionError with the message.
-    expect(execFileSync("java", ["-ea", "-cp", dir, "Asrt"], { encoding: "utf8" })).toBe(
+    expect(execFileSync("java", ["-ea", "-cp", dir.path, "Asrt"], { encoding: "utf8" })).toBe(
       "caught bad -1\n",
     );
   },
@@ -1460,14 +1460,14 @@ test(
       "  }",
       "}",
     ].join("\n");
-    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-    writeFileSync(join(ref, `${name}.java`), src);
-    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
-    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+    using ref = TempDir.create("emit-ref-");
+    writeFileSync(join(ref.path, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref.path, join(ref.path, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref.path, name], { encoding: "utf8" });
 
-    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
-    writeFileSync(join(ours, `${name}.class`), emit(name, src));
-    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+    using ours = TempDir.create("emit-ours-");
+    writeFileSync(join(ours.path, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours.path, name], { encoding: "utf8" });
 
     expect(ourOut).toBe(refOut);
     expect(refOut).toBe("Mon\nmidweek\nmidweek\nSun\nother\n100\n205\n5\n-1\n1\n2\n3\n0\n");
@@ -1496,14 +1496,14 @@ test(
       "  }",
       "}",
     ].join("\n");
-    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-    writeFileSync(join(ref, `${name}.java`), src);
-    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
-    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+    using ref = TempDir.create("emit-ref-");
+    writeFileSync(join(ref.path, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref.path, join(ref.path, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref.path, name], { encoding: "utf8" });
 
-    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
-    writeFileSync(join(ours, `${name}.class`), emit(name, src));
-    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+    using ours = TempDir.create("emit-ours-");
+    writeFileSync(join(ours.path, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours.path, name], { encoding: "utf8" });
 
     expect(ourOut).toBe(refOut);
     expect(refOut).toBe("4.0\n12.56636\ntrue\ntrue\n9\n");
@@ -1532,14 +1532,14 @@ test(
       "  }",
       "}",
     ].join("\n");
-    const ref = mkdtempSync(join(tmpdir(), "emit-ref-"));
-    writeFileSync(join(ref, `${name}.java`), src);
-    execFileSync("javac", ["--release", "21", "-d", ref, join(ref, `${name}.java`)]);
-    const refOut = execFileSync("java", ["-cp", ref, name], { encoding: "utf8" });
+    using ref = TempDir.create("emit-ref-");
+    writeFileSync(join(ref.path, `${name}.java`), src);
+    execFileSync("javac", ["--release", "21", "-d", ref.path, join(ref.path, `${name}.java`)]);
+    const refOut = execFileSync("java", ["-cp", ref.path, name], { encoding: "utf8" });
 
-    const ours = mkdtempSync(join(tmpdir(), "emit-ours-"));
-    writeFileSync(join(ours, `${name}.class`), emit(name, src));
-    const ourOut = execFileSync("java", ["-cp", ours, name], { encoding: "utf8" });
+    using ours = TempDir.create("emit-ours-");
+    writeFileSync(join(ours.path, `${name}.class`), emit(name, src));
+    const ourOut = execFileSync("java", ["-cp", ours.path, name], { encoding: "utf8" });
 
     expect(ourOut).toBe(refOut);
     expect(refOut).toBe("7\n5.0\n2.5\nneg\nzero\npos\n8\n");
@@ -1558,10 +1558,10 @@ for (const [name, { source: src, stdout }] of Object.entries(CONTROL)) {
   });
 
   test(`control flow verifies and runs: ${name}`, { skip: HAS_JAVA ? false : "no JDK" }, () => {
-    const dir = mkdtempSync(join(tmpdir(), "emit-cf-"));
-    writeFileSync(join(dir, `${name}.class`), emit(name, src));
+    using dir = TempDir.create("emit-cf-");
+    writeFileSync(join(dir.path, `${name}.class`), emit(name, src));
     // The JVM verifier checks our StackMapTable on load; a wrong frame -> VerifyError.
-    const out = execFileSync("java", ["-cp", dir, name], { encoding: "utf8" });
+    const out = execFileSync("java", ["-cp", dir.path, name], { encoding: "utf8" });
     expect(out).toBe(stdout);
   });
 }
@@ -3131,13 +3131,13 @@ test(
       // Regenerate the reference from a live javac.
       baseline = {};
       for (const [name, source] of Object.entries(innerClassFixtures)) {
-        const dir = mkdtempSync(join(tmpdir(), "ic-javac-"));
-        writeFileSync(join(dir, `${name}.java`), source);
-        execFileSync("javac", ["--release", "21", "-d", dir, join(dir, `${name}.java`)]);
-        const classNames = readdirSync(dir)
+        using dir = TempDir.create("ic-javac-");
+        writeFileSync(join(dir.path, `${name}.java`), source);
+        execFileSync("javac", ["--release", "21", "-d", dir.path, join(dir.path, `${name}.java`)]);
+        const classNames = readdirSync(dir.path)
           .filter(f => f.endsWith(".class"))
           .map(f => f.slice(0, -6));
-        baseline[name] = innerClassesOfDir(dir, classNames);
+        baseline[name] = innerClassesOfDir(dir.path, classNames);
       }
       writeFileSync(innerClassBaselineFile, `${JSON.stringify(baseline, null, 2)}\n`);
     } else {
@@ -3145,13 +3145,13 @@ test(
     }
 
     for (const [name, source] of Object.entries(innerClassFixtures)) {
-      const dir = mkdtempSync(join(tmpdir(), "ic-ours-"));
+      using dir = TempDir.create("ic-ours-");
       const classNames: string[] = [];
       for (const c of emitClasses(name, source)) {
-        writeFileSync(join(dir, `${c.name}.class`), c.bytes);
+        writeFileSync(join(dir.path, `${c.name}.class`), c.bytes);
         classNames.push(c.name);
       }
-      expect(innerClassesOfDir(dir, classNames)).toEqual(baseline![name]);
+      expect(innerClassesOfDir(dir.path, classNames)).toEqual(baseline![name]);
     }
   },
 );
@@ -3226,13 +3226,13 @@ test(
     } else if (HAS_JAVAC) {
       baseline = {};
       for (const [name, source] of Object.entries(lvtFixtures)) {
-        const dir = mkdtempSync(join(tmpdir(), "lvt-javac-"));
-        writeFileSync(join(dir, `${name}.java`), source);
-        execFileSync("javac", ["-g", "--release", "21", "-d", dir, join(dir, `${name}.java`)]);
-        const classNames = readdirSync(dir)
+        using dir = TempDir.create("lvt-javac-");
+        writeFileSync(join(dir.path, `${name}.java`), source);
+        execFileSync("javac", ["-g", "--release", "21", "-d", dir.path, join(dir.path, `${name}.java`)]);
+        const classNames = readdirSync(dir.path)
           .filter(f => f.endsWith(".class"))
           .map(f => f.slice(0, -6));
-        baseline[name] = lvtOfDir(dir, classNames);
+        baseline[name] = lvtOfDir(dir.path, classNames);
       }
       writeFileSync(lvtBaselineFile, `${JSON.stringify(baseline, null, 2)}\n`);
     } else {
@@ -3240,13 +3240,13 @@ test(
     }
 
     for (const [name, source] of Object.entries(lvtFixtures)) {
-      const dir = mkdtempSync(join(tmpdir(), "lvt-ours-"));
+      using dir = TempDir.create("lvt-ours-");
       const classNames: string[] = [];
       for (const c of emitClassesDebug(name, source)) {
-        writeFileSync(join(dir, `${c.name}.class`), c.bytes);
+        writeFileSync(join(dir.path, `${c.name}.class`), c.bytes);
         classNames.push(c.name);
       }
-      expect(lvtOfDir(dir, classNames)).toEqual(baseline![name]);
+      expect(lvtOfDir(dir.path, classNames)).toEqual(baseline![name]);
     }
   },
 );
@@ -3272,7 +3272,7 @@ test("LocalVariableTable is omitted by default and runs under -g", () => {
   const debug = emitClassesDebug("LvtRun", source);
   expect(Buffer.from(debug.find(c => c.name === "LvtRun")!.bytes).includes(needle)).toBe(true);
   if (!HAS_JAVA) return;
-  const dir = mkdtempSync(join(tmpdir(), "lvt-run-"));
-  for (const c of debug) writeFileSync(join(dir, `${c.name}.class`), c.bytes);
-  expect(execFileSync("java", ["-cp", dir, "LvtRun"], { encoding: "utf8" })).toBe("5\n");
+  using dir = TempDir.create("lvt-run-");
+  for (const c of debug) writeFileSync(join(dir.path, `${c.name}.class`), c.bytes);
+  expect(execFileSync("java", ["-cp", dir.path, "LvtRun"], { encoding: "utf8" })).toBe("5\n");
 });

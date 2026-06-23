@@ -6,7 +6,7 @@
 // either is missing.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -41,7 +41,7 @@ test(
   { skip: !HAS_DOCKER || !HAS_JAVAC, timeout: 300_000 },
   async () => {
     let container: StartedTestContainer | undefined;
-    const root = mkdtempSync(join(tmpdir(), "cappu-publish-e2e-"));
+    using root = TempDir.create("cappu-publish-e2e-");
     try {
       // The image entrypoint forwards $REPOSILITE_OPTS (not CMD args); --token
       // mints a temporary all-permissions token, and releases is public-read.
@@ -54,7 +54,7 @@ test(
       const repo = `http://${container.getHost()}:${container.getMappedPort(8080)}/releases`;
 
       // 1. Publish a tiny library to the registry.
-      const pub = join(root, "lib-proj");
+      const pub = join(root.path, "lib-proj");
       mkdirSync(join(pub, "src", "main", "java", "com", "example"), { recursive: true });
       writeFileSync(
         join(pub, "cappu.json"),
@@ -73,7 +73,7 @@ test(
         cwd: pub,
         env: {
           ...process.env,
-          CAPPU_PACKAGE_STORE: join(root, "store-pub"),
+          CAPPU_PACKAGE_STORE: join(root.path, "store-pub"),
           CAPPU_PUBLISH_USERNAME: "deployer",
           CAPPU_PUBLISH_PASSWORD: "secret",
         },
@@ -81,7 +81,7 @@ test(
       });
 
       // 2. A consumer resolves and installs it from that same registry.
-      const app = join(root, "app-proj");
+      const app = join(root.path, "app-proj");
       mkdirSync(app, { recursive: true });
       writeFileSync(
         join(app, "cappu.json"),
@@ -92,7 +92,7 @@ test(
       );
       execFileSync(tsx, [cli, "install"], {
         cwd: app,
-        env: { ...process.env, CAPPU_PACKAGE_STORE: join(root, "store-app") },
+        env: { ...process.env, CAPPU_PACKAGE_STORE: join(root.path, "store-app") },
         stdio: ["ignore", "pipe", "pipe"],
       });
 
@@ -103,7 +103,7 @@ test(
       expect(lock).toContain("demo-lib");
     } finally {
       await container?.stop();
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root.path, { recursive: true, force: true });
     }
   },
 );

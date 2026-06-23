@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
+import TempDir from "../TempDir.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -45,41 +46,41 @@ function source(): InMemoryPackageSource {
 }
 
 test("update picks the newest conflict-free stable version per dependency", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "cappu-update-"));
+  using dir = TempDir.create("cappu-update-");
   try {
     writeFileSync(
-      join(dir, "cappu.json"),
+      join(dir.path, "cappu.json"),
       JSON.stringify({
         dependencies: { implementation: { "g:a": "1.0", "g:b": "1.0", "g:c": "1.0" } },
       }),
     );
-    const bumps = await planUpdates(loadConfig(undefined, dir), [source()]);
+    const bumps = await planUpdates(loadConfig(undefined, dir.path), [source()]);
     // a -> 1.5 (2.0 would force shared 2.0, conflicting with b's shared 1.0);
     // b is already newest; c's only newer release is a pre-release -> skipped
     expect(bumps).toEqual([
       { configuration: "implementation", key: "g:a", from: "1.0", to: "1.5" },
     ]);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir.path, { recursive: true, force: true });
   }
 });
 
 test("update stays within the current major version", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "cappu-update-"));
+  using dir = TempDir.create("cappu-update-");
   try {
     writeFileSync(
-      join(dir, "cappu.json"),
+      join(dir.path, "cappu.json"),
       JSON.stringify({ dependencies: { implementation: { "g:d": "1.0" } } }),
     );
     // 2.0 is a clean, conflict-free bump, but a major jump - it must be skipped
     // in favour of the newest within major 1 (1.4).
     const src = new InMemoryPackageSource("mem", [pkg("g:d:1.0"), pkg("g:d:1.4"), pkg("g:d:2.0")]);
-    const bumps = await planUpdates(loadConfig(undefined, dir), [src]);
+    const bumps = await planUpdates(loadConfig(undefined, dir.path), [src]);
     expect(bumps).toEqual([
       { configuration: "implementation", key: "g:d", from: "1.0", to: "1.4" },
     ]);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir.path, { recursive: true, force: true });
   }
 });
 

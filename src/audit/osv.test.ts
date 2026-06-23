@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
+import TempDir from "../TempDir.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -94,9 +95,9 @@ test("OsvSource maps batch ids back to coordinates and hydrates once", async () 
 });
 
 test("cachedFetchJson caches vuln details but never the querybatch lookup", async () => {
-  const store = mkdtempSync(join(tmpdir(), "cappu-osv-"));
+  using store = TempDir.create("cappu-osv-");
   const previous = process.env.CAPPU_PACKAGE_STORE;
-  process.env.CAPPU_PACKAGE_STORE = store;
+  process.env.CAPPU_PACKAGE_STORE = store.path;
   try {
     let calls = 0;
     const inner: FetchJson = (_url, body) => {
@@ -117,7 +118,7 @@ test("cachedFetchJson caches vuln details but never the querybatch lookup", asyn
   } finally {
     if (previous === undefined) delete process.env.CAPPU_PACKAGE_STORE;
     else process.env.CAPPU_PACKAGE_STORE = previous;
-    rmSync(store, { recursive: true, force: true });
+    rmSync(store.path, { recursive: true, force: true });
   }
 });
 

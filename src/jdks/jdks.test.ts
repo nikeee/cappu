@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import TempDir from "../TempDir.ts";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -36,37 +37,37 @@ test("download urls target the right distribution endpoints", () => {
 });
 
 test("a cached archive provisions without any network", async () => {
-  const store = mkdtempSync(join(tmpdir(), "cappu-jdkstore-"));
-  const project = mkdtempSync(join(tmpdir(), "cappu-jdkproj-"));
+  using store = TempDir.create("cappu-jdkstore-");
+  using project = TempDir.create("cappu-jdkproj-");
   const previous = process.env.CAPPU_JDK_STORE;
-  process.env.CAPPU_JDK_STORE = store;
+  process.env.CAPPU_JDK_STORE = store.path;
   try {
     // a minimal fake JDK archive: <top>/bin/java, as real JDK tarballs ship
-    const stage = mkdtempSync(join(tmpdir(), "cappu-jdkstage-"));
-    mkdirSync(join(stage, "jdk-21.0.1+10", "bin"), { recursive: true });
-    writeFileSync(join(stage, "jdk-21.0.1+10", "bin", "java"), "#!/bin/sh\n");
-    const archive = join(store, `temurin-21-${process.platform}-${process.arch}.tar.gz`);
-    execFileSync("tar", ["-czf", archive, "-C", stage, "jdk-21.0.1+10"]);
-    rmSync(stage, { recursive: true, force: true });
+    using stage = TempDir.create("cappu-jdkstage-");
+    mkdirSync(join(stage.path, "jdk-21.0.1+10", "bin"), { recursive: true });
+    writeFileSync(join(stage.path, "jdk-21.0.1+10", "bin", "java"), "#!/bin/sh\n");
+    const archive = join(store.path, `temurin-21-${process.platform}-${process.arch}.tar.gz`);
+    execFileSync("tar", ["-czf", archive, "-C", stage.path, "jdk-21.0.1+10"]);
+    rmSync(stage.path, { recursive: true, force: true });
 
-    const config = loadConfig(undefined, project);
+    const config = loadConfig(undefined, project.path);
     const first = await provisionJdk(config, "temurin-21");
     expect(first.fromCache).toBe(true);
     expect(first.alreadyProvisioned).toBe(false);
     // the top-level archive directory is stripped: bin/java sits directly
     // under .cappu/jdks/temurin-21
-    expect(first.jdkDir).toBe(join(project, ".cappu", "jdks", "temurin-21"));
+    expect(first.jdkDir).toBe(join(project.path, ".cappu", "jdks", "temurin-21"));
     expect(readFileSync(join(first.jdkDir, "bin", "java"), "utf8")).toBe("#!/bin/sh\n");
 
     const second = await provisionJdk(config, "temurin-21");
     expect(second.alreadyProvisioned).toBe(true);
 
     await expect(provisionJdk(config, "not-a-jdk")).rejects.toThrow("unknown jdk");
-    expect(existsSync(join(project, ".cappu", "jdks", "not-a-jdk"))).toBe(false);
+    expect(existsSync(join(project.path, ".cappu", "jdks", "not-a-jdk"))).toBe(false);
   } finally {
     if (previous === undefined) delete process.env.CAPPU_JDK_STORE;
     else process.env.CAPPU_JDK_STORE = previous;
-    rmSync(store, { recursive: true, force: true });
-    rmSync(project, { recursive: true, force: true });
+    rmSync(store.path, { recursive: true, force: true });
+    rmSync(project.path, { recursive: true, force: true });
   }
 });

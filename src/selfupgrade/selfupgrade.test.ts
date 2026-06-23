@@ -1,4 +1,5 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import TempDir from "../TempDir.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -120,23 +121,23 @@ test("downloadBinary forwards the progress callback to the fetcher", async () =>
 });
 
 test("replaceBinary swaps the file in place and keeps it executable", () => {
-  const dir = mkdtempSync(join(tmpdir(), "cappu-upgrade-"));
+  using dir = TempDir.create("cappu-upgrade-");
   try {
-    const target = join(dir, "cappu");
+    const target = join(dir.path, "cappu");
     writeFileSync(target, "old");
     chmodSync(target, 0o755);
     replaceBinary(target, new TextEncoder().encode("new binary"));
     expect(readFileSync(target, "utf8")).toBe("new binary");
     expect(statSync(target).mode & 0o111).not.toBe(0); // still executable
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir.path, { recursive: true, force: true });
   }
 });
 
 test("selfUpgrade downloads and replaces the target binary end to end", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "cappu-upgrade-"));
+  using dir = TempDir.create("cappu-upgrade-");
   try {
-    const target = join(dir, "cappu");
+    const target = join(dir.path, "cappu");
     writeFileSync(target, "v1");
     const zip = writeZip([{ name: "cappu", bytes: new TextEncoder().encode("v2") }]);
 
@@ -155,7 +156,7 @@ test("selfUpgrade downloads and replaces the target binary end to end", async ()
     expect(result.artifact.runSha).toBe("deadbee");
     expect(result.targetPath).toBe(target);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir.path, { recursive: true, force: true });
   }
 });
 

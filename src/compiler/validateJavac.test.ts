@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import TempDir from "../TempDir.ts";
+import { rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -22,16 +23,16 @@ function hasJdk(): boolean {
 const jdk = hasJdk();
 
 function inTempDir(files: Record<string, string>, body: (dir: string, paths: string[]) => void) {
-  const dir = mkdtempSync(join(tmpdir(), "cappu-validate-test-"));
+  using dir = TempDir.create("cappu-validate-test-");
   try {
     const paths = Object.entries(files).map(([name, text]) => {
-      const p = join(dir, name);
+      const p = join(dir.path, name);
       writeFileSync(p, text);
       return p;
     });
-    body(dir, paths);
+    body(dir.path, paths);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir.path, { recursive: true, force: true });
   }
 }
 
