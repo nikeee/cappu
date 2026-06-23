@@ -3285,13 +3285,30 @@ function generateBody(
   // call is not one of them.
   const emitEnumStaticCall = (call: CallExpression): Descriptor | undefined => {
     const callee = call.expression;
-    if (callee.kind !== SyntaxKind.PropertyAccessExpression) return undefined;
-    const access = callee as PropertyAccessExpression;
-    if (access.expression.kind !== SyntaxKind.Identifier) return undefined;
-    const recv = resolveTypeEntityName(access.expression as Identifier, access.expression, program);
-    if (!recv || !(recv.flags & SymbolFlags.Enum)) return undefined;
-    const enumInternal = binaryName(recv);
-    const mname = access.name.text;
+    let enumInternal: InternalName | undefined;
+    let mname: string | undefined;
+    if (callee.kind === SyntaxKind.Identifier) {
+      // Unqualified values()/valueOf(...) inside the enum's own body.
+      const enumDecl = enclosingEnumDecl(call);
+      if (enumDecl?.symbol) {
+        enumInternal = binaryName(enumDecl.symbol);
+        mname = (callee as Identifier).text;
+      }
+    } else if (callee.kind === SyntaxKind.PropertyAccessExpression) {
+      const access = callee as PropertyAccessExpression;
+      if (access.expression.kind === SyntaxKind.Identifier) {
+        const recv = resolveTypeEntityName(
+          access.expression as Identifier,
+          access.expression,
+          program,
+        );
+        if (recv && recv.flags & SymbolFlags.Enum) {
+          enumInternal = binaryName(recv);
+          mname = access.name.text;
+        }
+      }
+    }
+    if (enumInternal === undefined || mname === undefined) return undefined;
     if (mname === "values" && call.arguments.length === 0) {
       code.u1(OP_INVOKESTATIC);
       code.u2(cp.methodref(enumInternal, "values", `()[L${enumInternal};` as MethodDescriptor));
@@ -7549,6 +7566,18 @@ function anonymousClassName(node: ObjectCreationExpression, program: Program): I
 // The Outer$N binary name of an enum constant body (CONST {...}).
 function enumBodyClassName(node: EnumConstantDeclaration, program: Program): InternalName {
   return bodyClassName(node, program);
+}
+
+// The innermost enclosing type declaration if it is an enum, else undefined - so
+// an unqualified values()/valueOf() resolves to the enum's synthetic statics only
+// inside the enum's own body.
+function enclosingEnumDecl(node: Node): EnumDeclaration | undefined {
+  for (let n: Node | undefined = node.parent; n; n = n.parent) {
+    if (TYPE_DECL_KINDS.has(n.kind)) {
+      return n.kind === SyntaxKind.EnumDeclaration ? (n as EnumDeclaration) : undefined;
+    }
+  }
+  return undefined;
 }
 
 interface AnonymousTarget {

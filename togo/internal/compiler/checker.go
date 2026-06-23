@@ -1895,8 +1895,40 @@ func (c *Checker) inferMethodTypeArguments(decl *Node, argTypes []*Type, receive
 	return out
 }
 
+// enclosingEnumSymbol returns the symbol of the innermost enclosing type
+// declaration if it is an enum, else nil - so unqualified values()/valueOf()
+// resolve only inside the enum's own body (not a nested class).
+func enclosingEnumSymbol(node *Node) *Symbol {
+	for n := node.Parent; n != nil; n = n.Parent {
+		switch n.Kind {
+		case EnumDeclaration:
+			return n.Symbol
+		case ClassDeclaration, InterfaceDeclaration, RecordDeclaration, AnnotationTypeDeclaration:
+			return nil
+		}
+	}
+	return nil
+}
+
 func (c *Checker) enumStaticCallType(call *Node) *Type {
 	callee := call.AsCallExpression().Expression
+	argc := nodeArrayLen(call.AsCallExpression().Arguments)
+	// Unqualified values()/valueOf(...) inside an enum's own body.
+	if callee.Kind == Identifier {
+		name := callee.AsIdentifier().Text
+		wantsValues := name == "values" && argc == 0
+		wantsValueOf := name == "valueOf" && argc == 1
+		if wantsValues || wantsValueOf {
+			if enumSym := enclosingEnumSymbol(call); enumSym != nil {
+				t := classType(enumSym, nil)
+				if wantsValues {
+					return arrayType(t)
+				}
+				return t
+			}
+		}
+		return nil
+	}
 	if callee.Kind != PropertyAccessExpression {
 		return nil
 	}
@@ -1909,7 +1941,6 @@ func (c *Checker) enumStaticCallType(call *Node) *Type {
 		return nil
 	}
 	t := classType(sym, nil)
-	argc := nodeArrayLen(call.AsCallExpression().Arguments)
 	name := access.Name.AsIdentifier().Text
 	if name == "values" && argc == 0 {
 		return arrayType(t)

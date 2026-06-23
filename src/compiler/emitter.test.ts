@@ -433,11 +433,28 @@ const ENUM_MULTI_FIXTURES: Record<string, { source: string; classes: string[] }>
     ].join("\n"),
     classes: ["EnumAbstract", "EnumAbstract$1", "EnumAbstract$2"],
   },
+  // Unqualified values()/valueOf(...) inside the enum's own body resolve to the
+  // synthetic statics (previously degraded; only the E.values() form worked).
+  EnumUnqualified: {
+    source: [
+      "enum EnumUnqualified {",
+      "  A, B, C;",
+      "  public static void main(String[] args) {",
+      "    System.out.println(values().length);",
+      '    System.out.println(valueOf("B").ordinal());',
+      "    for (EnumUnqualified v : values()) System.out.print(v.name());",
+      "    System.out.println();",
+      "  }",
+      "}",
+    ].join("\n"),
+    classes: ["EnumUnqualified"],
+  },
 };
 
 const ENUM_RUNS: Record<string, string> = {
   EnumMixed: "PLUS+13\nTIMES*42\nIDENT=6\n",
   EnumAbstract: "LOW1\nHIGH9\n",
+  EnumUnqualified: "3\n1\nABC\n",
 };
 
 for (const [name, { source, classes }] of Object.entries(ENUM_MULTI_FIXTURES)) {

@@ -395,3 +395,4 @@ cappu search commons-lang3
 - 2026-06-23 10:41 — continue
 - 2026-06-23 10:52 — anything else?
 - 2026-06-23 10:52 — do them step by step. commit automatically.
+- 2026-06-23 10:59 — after all that: can the LSP/language services/checker benefit from what youve built in this session?

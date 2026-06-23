@@ -333,19 +333,27 @@ func (g *bodyGen) emitInstanceof(node *Node) descriptor {
 func (g *bodyGen) emitEnumStaticCall(call *Node) (descriptor, bool) {
 	c := call.AsCallExpression()
 	callee := c.Expression
-	if callee.Kind != PropertyAccessExpression {
+	var enumInternal internalName
+	var mname string
+	switch callee.Kind {
+	case Identifier:
+		// Unqualified values()/valueOf(...) inside the enum's own body.
+		if enumDecl := enclosingEnumDecl(call); enumDecl != nil && enumDecl.Symbol != nil {
+			enumInternal = binaryName(enumDecl.Symbol)
+			mname = callee.AsIdentifier().Text
+		}
+	case PropertyAccessExpression:
+		access := callee.AsPropertyAccessExpression()
+		if access.Expression.Kind == Identifier {
+			if recv := ResolveTypeEntityName(access.Expression, access.Expression, g.program); recv != nil && recv.Flags&SymbolFlagsEnum != 0 {
+				enumInternal = binaryName(recv)
+				mname = access.Name.AsIdentifier().Text
+			}
+		}
+	}
+	if enumInternal == "" || mname == "" {
 		return "", false
 	}
-	access := callee.AsPropertyAccessExpression()
-	if access.Expression.Kind != Identifier {
-		return "", false
-	}
-	recv := ResolveTypeEntityName(access.Expression, access.Expression, g.program)
-	if recv == nil || recv.Flags&SymbolFlagsEnum == 0 {
-		return "", false
-	}
-	enumInternal := binaryName(recv)
-	mname := access.Name.AsIdentifier().Text
 	args := arrayNodes(c.Arguments)
 	if mname == "values" && len(args) == 0 {
 		g.code.u1(opInvokestatic)
@@ -362,6 +370,21 @@ func (g *bodyGen) emitEnumStaticCall(call *Node) (descriptor, bool) {
 		return descOf(enumInternal), true
 	}
 	return "", false
+}
+
+// enclosingEnumDecl returns the innermost enclosing type declaration if it is an
+// enum, else nil - so an unqualified values()/valueOf() resolves to the enum's
+// synthetic statics only inside the enum's own body.
+func enclosingEnumDecl(node *Node) *Node {
+	for n := node.Parent; n != nil; n = n.Parent {
+		if isTypeDeclarationKind(n.Kind) {
+			if n.Kind == EnumDeclaration {
+				return n
+			}
+			return nil
+		}
+	}
+	return nil
 }
 
 // --- anonymous class targeting -----------------------------------------------

@@ -1696,10 +1696,45 @@ export function createChecker(program: Program): Checker {
     return out;
   }
 
+  // The symbol of the innermost enclosing type declaration if it is an enum,
+  // else undefined - so unqualified values()/valueOf() resolve only inside the
+  // enum's own body (not a nested class).
+  function enclosingEnumSymbol(node: Node): Symbol | undefined {
+    for (let n: Node | undefined = node.parent; n; n = n.parent) {
+      switch (n.kind) {
+        case SyntaxKind.EnumDeclaration:
+          return n.symbol;
+        case SyntaxKind.ClassDeclaration:
+        case SyntaxKind.InterfaceDeclaration:
+        case SyntaxKind.RecordDeclaration:
+        case SyntaxKind.AnnotationTypeDeclaration:
+          return undefined;
+        default:
+          break;
+      }
+    }
+    return undefined;
+  }
+
   // The type of the synthesized enum statics E.values() (E[]) and
   // E.valueOf(String) (E), which have no source declaration.
   function enumStaticCallType(call: CallExpression): Type | undefined {
     const callee = call.expression;
+    // Unqualified values()/valueOf(...) inside an enum's own body resolve to the
+    // enclosing enum's synthetic statics (the innermost enclosing type is the enum).
+    if (callee.kind === SyntaxKind.Identifier) {
+      const name = (callee as Identifier).text;
+      const wantsValues = name === "values" && call.arguments.length === 0;
+      const wantsValueOf = name === "valueOf" && call.arguments.length === 1;
+      if (wantsValues || wantsValueOf) {
+        const enumSym = enclosingEnumSymbol(call);
+        if (enumSym) {
+          const t = classType(enumSym);
+          return wantsValues ? arrayType(t) : t;
+        }
+      }
+      return undefined;
+    }
     if (callee.kind !== SyntaxKind.PropertyAccessExpression) return undefined;
     const access = callee as PropertyAccessExpression;
     if (access.expression.kind !== SyntaxKind.Identifier) return undefined;
