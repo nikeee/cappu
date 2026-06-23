@@ -399,3 +399,6 @@ cappu search commons-lang3
 - 2026-06-23 10:52 — do them step by step. commit automatically.
 - 2026-06-23 10:59 — after all that: can the LSP/language services/checker benefit from what youve built in this session?
 - 2026-06-23 14:48 — make sure the versions on the release are the go version, not the node version
+- 2026-06-23 19:21 — also add finding deprecated uses to the MCP
+- 2026-06-23 19:21 — excplicitly add a command that the MCP can use to get deprecated uses. you can add more information on deprecated uses. for example, the deprecation message, deprecated symbol etc
+- 2026-06-23 19:21 — are there other features similar to deprecated uses that an LLM could make use of?

@@ -119,6 +119,19 @@ func (s *Server) registerTools() {
 		},
 	})
 	s.registry = append(s.registry, toolDef{
+		name:        "deprecated_uses",
+		description: "Find uses of @Deprecated methods and types, with each declaration's since/forRemoval. Omit `files` to scan the whole workspace.",
+		inputSchema: objSchema(map[string]any{"files": strArray}),
+		usesProgram: true,
+		handler: func(args json.RawMessage) (any, error) {
+			var a struct {
+				Files []string `json:"files"`
+			}
+			sj(args, &a)
+			return map[string]any{"deprecatedUses": s.tools.DeprecatedUses(a.Files)}, nil
+		},
+	})
+	s.registry = append(s.registry, toolDef{
 		name:        "outline",
 		description: "Top-level type/member outline of one Java file.",
 		inputSchema: objSchema(map[string]any{"file": str}, "file"),

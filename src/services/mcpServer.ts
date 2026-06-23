@@ -93,6 +93,19 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
   );
 
   server.registerTool(
+    "deprecated_uses",
+    {
+      description:
+        "Find uses of @Deprecated methods and types, with each declaration's since/forRemoval. Omit `files` to scan the whole workspace.",
+      inputSchema: { files: z.array(z.string()).optional() },
+    },
+    async args => {
+      refresh();
+      return ok(tools.deprecatedUses(args));
+    },
+  );
+
+  server.registerTool(
     "outline",
     {
       description: "Top-level type/member outline of one Java file.",

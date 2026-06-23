@@ -38,6 +38,33 @@ test("diagnostics honors an explicit file path filter", () => {
   expect(diagnostics).toEqual([]);
 });
 
+test("deprecated_uses finds @Deprecated method and type uses with details", () => {
+  const tools = toolsFor({
+    "file:///Api.java": [
+      "class Api {",
+      '  @Deprecated(since="2.0", forRemoval=true) static int old() { return 1; }',
+      "  static int ok() { return 2; }",
+      "}",
+      "@Deprecated class Legacy {}",
+      "class Use {",
+      "  void m() { int a = Api.old(); int b = Api.ok(); Legacy x = null; }",
+      "}",
+    ].join("\n"),
+  });
+  const { deprecatedUses } = tools.deprecatedUses({});
+  const byName = Object.fromEntries(deprecatedUses.map(u => [u.name, u]));
+  expect(Object.keys(byName).sort()).toEqual(["Legacy", "old"]);
+  expect(byName.old).toMatchObject({ kind: "method", since: "2.0", forRemoval: true });
+  expect(byName.old.message).toContain("marked for removal");
+  expect(byName.Legacy).toMatchObject({ kind: "type", forRemoval: false });
+  expect(byName.old.line).toBeGreaterThanOrEqual(1);
+});
+
+test("deprecated_uses is empty when nothing deprecated is used", () => {
+  const tools = toolsFor({ "file:///Ok.java": "class Ok { int m() { return 1; } }" });
+  expect(tools.deprecatedUses({}).deprecatedUses).toEqual([]);
+});
+
 test("outline returns the top-level types of a file", () => {
   const tools = toolsFor({ "file:///Foo.java": "class Foo { int x; void m() {} }" });
   const { symbols } = tools.outline({ file: "/Foo.java" });

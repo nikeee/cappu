@@ -73,6 +73,7 @@ import {
   type RecordDeclaration,
 } from "./types.ts";
 import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
+import { type DeprecatedUse, readDeprecation } from "./deprecation.ts";
 
 /** A single abstract method's name (the invokedynamic call name for a lambda). */
 export type SamName = Brand<string, "SamName">;
@@ -145,6 +146,8 @@ export interface Checker {
   getDocumentationOfNode(node: Node): string | undefined;
   /** High-precision semantic diagnostics (type mismatches between known types). */
   getSemanticDiagnostics(sourceFile: SourceFile): Diagnostic[];
+  /** Every use of a @Deprecated method or type in a source file (for the MCP). */
+  getDeprecatedUses(sourceFile: SourceFile): DeprecatedUse[];
 }
 
 // Primitive widening (JLS 5.1.2) and boxing (JLS 5.1.7).
@@ -1889,6 +1892,65 @@ export function createChecker(program: Program): Checker {
     return constants.filter(c => !covered.has(c));
   }
 
+  // A use of a @Deprecated method (a call) or type (a type reference), with the
+  // referenced name's span and the annotation's since/forRemoval, or undefined.
+  function deprecatedUseAt(node: Node): DeprecatedUse | undefined {
+    if (node.kind === SyntaxKind.CallExpression) {
+      const info = resolveCallInfo(node as CallExpression);
+      const dep = info && readDeprecation(info.decl);
+      if (!dep) return undefined;
+      const callee = (node as CallExpression).expression;
+      const nameNode =
+        callee.kind === SyntaxKind.PropertyAccessExpression
+          ? (callee as PropertyAccessExpression).name
+          : callee.kind === SyntaxKind.Identifier
+            ? (callee as Identifier)
+            : undefined;
+      if (!nameNode) return undefined;
+      const text = getSourceFileOfNode(nameNode).text;
+      return {
+        pos: skipTrivia(text, nameNode.pos),
+        end: nameNode.end,
+        name: nameNode.text,
+        kind: "method",
+        since: dep.since,
+        forRemoval: dep.forRemoval,
+      };
+    }
+    if (node.kind === SyntaxKind.TypeReference) {
+      const ref = node as TypeReference;
+      const sym = resolveTypeEntityName(ref.typeName, node, program);
+      const dep = sym && readDeprecation(sym.valueDeclaration ?? sym.declarations?.[0]);
+      if (!dep) return undefined;
+      const text = getSourceFileOfNode(node).text;
+      return {
+        pos: skipTrivia(text, ref.typeName.pos),
+        end: ref.typeName.end,
+        name: entityNameToString(ref.typeName),
+        kind: "type",
+        since: dep.since,
+        forRemoval: dep.forRemoval,
+      };
+    }
+    return undefined;
+  }
+
+  // Every use of a deprecated method or type in a (cleanly parsed) source file.
+  function getDeprecatedUses(sourceFile: SourceFile): DeprecatedUse[] {
+    if (sourceFile.parseDiagnostics.length > 0) return [];
+    const uses: DeprecatedUse[] = [];
+    const walk = (node: Node): void => {
+      const use = deprecatedUseAt(node);
+      if (use) uses.push(use);
+      forEachChild(node, child => {
+        walk(child);
+        return undefined;
+      });
+    };
+    walk(sourceFile);
+    return uses;
+  }
+
   function getSemanticDiagnostics(sourceFile: SourceFile): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
 
@@ -2249,6 +2311,12 @@ export function createChecker(program: Program): Checker {
         );
       }
     }
+    // Uses of @Deprecated methods/types (warnings).
+    for (const use of getDeprecatedUses(sourceFile)) {
+      diagnostics.push(
+        createDiagnostic(use.pos, use.end - use.pos, Diagnostics._0_is_deprecated, use.name),
+      );
+    }
     return diagnostics;
   }
 
@@ -2270,5 +2338,6 @@ export function createChecker(program: Program): Checker {
     getDocumentation,
     getDocumentationOfNode,
     getSemanticDiagnostics,
+    getDeprecatedUses,
   };
 }

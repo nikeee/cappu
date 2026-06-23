@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/nikeee/cappu/internal/compiler"
@@ -51,6 +52,40 @@ func TestDiagnosticsFileFilter(t *testing.T) {
 	})
 	if d := tools.Diagnostics([]string{"/Ok.java"}); len(d) != 0 {
 		t.Errorf("expected no diagnostics for Ok.java, got %+v", d)
+	}
+}
+
+func TestDeprecatedUses(t *testing.T) {
+	tools := toolsFor(map[string]string{
+		"file:///Api.java": "class Api {\n" +
+			"  @Deprecated(since=\"2.0\", forRemoval=true) static int old() { return 1; }\n" +
+			"  static int ok() { return 2; }\n" +
+			"}\n" +
+			"@Deprecated class Legacy {}\n" +
+			"class Use {\n" +
+			"  void m() { int a = Api.old(); int b = Api.ok(); Legacy x = null; }\n" +
+			"}",
+	})
+	uses := tools.DeprecatedUses(nil)
+	byName := map[string]McpDeprecatedUse{}
+	for _, u := range uses {
+		byName[u.Name] = u
+	}
+	if len(byName) != 2 {
+		t.Fatalf("expected uses of old + Legacy, got %+v", uses)
+	}
+	if o := byName["old"]; o.Kind != "method" || o.Since != "2.0" || !o.ForRemoval || !strings.Contains(o.Message, "marked for removal") {
+		t.Errorf("old: %+v", o)
+	}
+	if l := byName["Legacy"]; l.Kind != "type" || l.ForRemoval {
+		t.Errorf("Legacy: %+v", l)
+	}
+}
+
+func TestDeprecatedUsesEmpty(t *testing.T) {
+	tools := toolsFor(map[string]string{"file:///Ok.java": "class Ok { int m() { return 1; } }"})
+	if u := tools.DeprecatedUses(nil); len(u) != 0 {
+		t.Errorf("expected no deprecated uses, got %+v", u)
 	}
 }
 

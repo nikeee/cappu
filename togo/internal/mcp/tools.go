@@ -153,6 +153,71 @@ func (t *Tools) Diagnostics(files []string) []McpDiagnostic {
 	return out
 }
 
+// McpDeprecatedUse is a use of a @Deprecated method or type.
+type McpDeprecatedUse struct {
+	File       string `json:"file"`
+	Line       int    `json:"line"`
+	Column     int    `json:"column"`
+	EndLine    int    `json:"endLine"`
+	EndColumn  int    `json:"endColumn"`
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	Since      string `json:"since,omitempty"`
+	ForRemoval bool   `json:"forRemoval"`
+	Message    string `json:"message"`
+}
+
+// DeprecatedUses finds uses of @Deprecated methods and types across the given
+// files (all files when none are named), with each declaration's since/forRemoval.
+func (t *Tools) DeprecatedUses(files []string) []McpDeprecatedUse {
+	var uris []compiler.URI
+	if len(files) > 0 {
+		for _, f := range files {
+			uris = append(uris, pathToURI(f))
+		}
+	} else {
+		uris = t.program.GetAllUris()
+	}
+	out := []McpDeprecatedUse{}
+	for _, uri := range uris {
+		sourceFile := t.program.GetSourceFile(uri)
+		if sourceFile == nil {
+			continue
+		}
+		data := sourceFile.AsSourceFile()
+		lineStarts := compiler.ComputeLineStarts(data.Text)
+		for _, u := range t.checker.GetDeprecatedUses(sourceFile) {
+			start := compiler.GetLineAndCharacterOfPosition(data.Text, lineStarts, u.Pos)
+			end := compiler.GetLineAndCharacterOfPosition(data.Text, lineStarts, u.End)
+			kindWord := "Type"
+			if u.Kind == "method" {
+				kindWord = "Method"
+			}
+			message := kindWord + " '" + u.Name + "' is deprecated"
+			if u.HasSince {
+				message += " (since " + u.Since + ")"
+			}
+			if u.ForRemoval {
+				message += "; marked for removal"
+			}
+			message += "."
+			out = append(out, McpDeprecatedUse{
+				File:       displayFile(string(uri)),
+				Line:       start.Line + 1,
+				Column:     start.Character + 1,
+				EndLine:    end.Line + 1,
+				EndColumn:  end.Character + 1,
+				Name:       u.Name,
+				Kind:       u.Kind,
+				Since:      u.Since,
+				ForRemoval: u.ForRemoval,
+				Message:    message,
+			})
+		}
+	}
+	return out
+}
+
 // Outline returns the top-level outline of a file.
 func (t *Tools) Outline(file string) []lsp.DocumentSymbol {
 	sourceFile := t.program.GetSourceFile(pathToURI(file))

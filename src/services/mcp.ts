@@ -49,6 +49,24 @@ export interface McpDiagnostic {
   endColumn: number;
 }
 
+export interface McpDeprecatedUse {
+  file: string;
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+  /** The referenced name. */
+  name: string;
+  /** What was used: a deprecated method or a deprecated type. */
+  kind: "method" | "type";
+  /** @Deprecated(since=...), when given. */
+  since?: string;
+  /** @Deprecated(forRemoval=true). */
+  forRemoval: boolean;
+  /** A human-readable summary. */
+  message: string;
+}
+
 function severityOf(category: DiagnosticCategory): McpDiagnostic["severity"] {
   switch (category) {
     case DiagnosticCategory.Error:
@@ -118,6 +136,7 @@ export interface McpEdit extends McpLocation {
 
 export interface McpTools {
   diagnostics(args: { files?: string[] }): { diagnostics: McpDiagnostic[] };
+  deprecatedUses(args: { files?: string[] }): { deprecatedUses: McpDeprecatedUse[] };
   outline(args: { file: string }): { symbols: DocumentSymbol[] };
   searchSymbols(args: { query: string }): { matches: string[] };
   describeSymbol(args: { ref: string }): { matches: McpMatch[] };
@@ -173,6 +192,38 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
       for (const d of all) out.push(formatDiagnostic(uri, d, lineStarts));
     }
     return { diagnostics: out };
+  }
+
+  // Every use of a @Deprecated method or type across the given files (or the
+  // whole project), with the declaration's since/forRemoval for triage.
+  function deprecatedUses(args: { files?: string[] }): { deprecatedUses: McpDeprecatedUse[] } {
+    const uris = args.files?.length ? args.files.map(pathToUri) : program.getAllUris();
+    const out: McpDeprecatedUse[] = [];
+    for (const uri of uris) {
+      const sourceFile = program.getSourceFile(uri);
+      if (!sourceFile) continue;
+      const lineStarts = computeLineStarts(sourceFile.text);
+      for (const u of checker.getDeprecatedUses(sourceFile)) {
+        const start = getLineAndCharacterOfPosition(lineStarts, u.pos);
+        const end = getLineAndCharacterOfPosition(lineStarts, u.end);
+        const message = `${u.kind === "method" ? "Method" : "Type"} '${u.name}' is deprecated${
+          u.since ? ` (since ${u.since})` : ""
+        }${u.forRemoval ? "; marked for removal" : ""}.`;
+        out.push({
+          file: displayFile(uri),
+          line: start.line + 1,
+          column: start.character + 1,
+          endLine: end.line + 1,
+          endColumn: end.character + 1,
+          name: u.name,
+          kind: u.kind,
+          ...(u.since !== undefined ? { since: u.since } : {}),
+          forRemoval: u.forRemoval,
+          message,
+        });
+      }
+    }
+    return { deprecatedUses: out };
   }
 
   function outline(args: { file: string }): { symbols: DocumentSymbol[] } {
@@ -379,6 +430,7 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
 
   return {
     diagnostics,
+    deprecatedUses,
     outline,
     searchSymbols,
     describeSymbol,

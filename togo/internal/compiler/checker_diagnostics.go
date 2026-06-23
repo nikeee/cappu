@@ -345,6 +345,73 @@ func FindUnusedImports(sourceFile *Node) []*Node {
 // --- semantic diagnostics ----------------------------------------------------
 
 // GetSemanticDiagnostics returns high-precision semantic diagnostics.
+// deprecatedUseAt returns a use of a @Deprecated method (a call) or type (a type
+// reference) at node, with the referenced name's span and the annotation's
+// since/forRemoval; ok is false otherwise. text is the source file's text.
+func (c *Checker) deprecatedUseAt(node *Node, text string) (DeprecatedUse, bool) {
+	switch node.Kind {
+	case CallExpression:
+		info := c.resolveCallInfo(node)
+		if info == nil || info.Decl == nil {
+			return DeprecatedUse{}, false
+		}
+		dep, ok := readDeprecation(info.Decl)
+		if !ok {
+			return DeprecatedUse{}, false
+		}
+		callee := node.AsCallExpression().Expression
+		var nameNode *Node
+		switch callee.Kind {
+		case PropertyAccessExpression:
+			nameNode = callee.AsPropertyAccessExpression().Name
+		case Identifier:
+			nameNode = callee
+		}
+		if nameNode == nil {
+			return DeprecatedUse{}, false
+		}
+		return DeprecatedUse{Pos: skipTrivia(text, nameNode.Pos), End: nameNode.End,
+			Name: nameNode.AsIdentifier().Text, Kind: "method",
+			Since: dep.Since, HasSince: dep.HasSince, ForRemoval: dep.ForRemoval}, true
+	case TypeReference:
+		ref := node.AsTypeReference()
+		sym := ResolveTypeEntityName(ref.TypeName, node, c.program)
+		if sym == nil {
+			return DeprecatedUse{}, false
+		}
+		dep, ok := readDeprecation(c.declarationOf(sym))
+		if !ok {
+			return DeprecatedUse{}, false
+		}
+		return DeprecatedUse{Pos: skipTrivia(text, ref.TypeName.Pos), End: ref.TypeName.End,
+			Name: entityNameToString(ref.TypeName), Kind: "type",
+			Since: dep.Since, HasSince: dep.HasSince, ForRemoval: dep.ForRemoval}, true
+	}
+	return DeprecatedUse{}, false
+}
+
+// GetDeprecatedUses returns every use of a deprecated method or type in a
+// (cleanly parsed) source file.
+func (c *Checker) GetDeprecatedUses(sourceFile *Node) []DeprecatedUse {
+	data := sourceFile.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	var uses []DeprecatedUse
+	var walk func(node *Node)
+	walk = func(node *Node) {
+		if use, ok := c.deprecatedUseAt(node, data.Text); ok {
+			uses = append(uses, use)
+		}
+		node.ForEachChild(func(child *Node) bool {
+			walk(child)
+			return false
+		})
+	}
+	walk(sourceFile)
+	return uses
+}
+
 func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 	data := sourceFile.AsSourceFile()
 	var diagnostics []Diagnostic
@@ -714,6 +781,11 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			diagnostics = append(diagnostics, CreateDiagnostic(start, imp.End-start,
 				Diagnostics.UnusedImport0, entityNameToString(imp.AsImportDeclaration().Name)))
 		}
+	}
+	// Uses of @Deprecated methods/types (warnings).
+	for _, u := range c.GetDeprecatedUses(sourceFile) {
+		diagnostics = append(diagnostics, CreateDiagnostic(u.Pos, u.End-u.Pos,
+			Diagnostics.Deprecated0, u.Name))
 	}
 	return diagnostics
 }

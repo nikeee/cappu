@@ -74,7 +74,7 @@ func TestMcpToolsList(t *testing.T) {
 	resp := c.request(t, "tools/list", nil)
 	result := resp["result"].(map[string]any)
 	tools := result["tools"].([]any)
-	// Without a config the project tools are absent: the 12 semantic tools remain.
+	// Without a config the project tools are absent: the 13 semantic tools remain.
 	names := map[string]bool{}
 	for _, tl := range tools {
 		names[tl.(map[string]any)["name"].(string)] = true

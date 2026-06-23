@@ -105,6 +105,12 @@ export const Diagnostics = {
     "Unused import '{0}'.",
     DiagnosticCategory.Warning,
   ),
+  _0_is_deprecated: diag(
+    1306,
+    "_0_is_deprecated",
+    "'{0}' is deprecated.",
+    DiagnosticCategory.Warning,
+  ),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */

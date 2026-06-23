@@ -69,6 +69,7 @@ var Diagnostics = struct {
 	CannotResolveMember0In1               DiagnosticMessage
 	InvalidNumberOfArgumentsExpected0Got1 DiagnosticMessage
 	UnusedImport0                         DiagnosticMessage
+	Deprecated0                           DiagnosticMessage
 }{
 	Expected0:                             diag(1001, "_0_expected", "'{0}' expected.", CategoryError),
 	IdentifierExpected:                    diag(1002, "Identifier_expected", "Identifier expected.", CategoryError),
@@ -94,6 +95,7 @@ var Diagnostics = struct {
 	CannotResolveMember0In1:               diag(1303, "Cannot_resolve_member_0_in_1", "Cannot resolve symbol '{0}' in type '{1}'.", CategoryError),
 	InvalidNumberOfArgumentsExpected0Got1: diag(1304, "Invalid_number_of_arguments_expected_0_got_1", "Invalid number of arguments: expected {0}, got {1}.", CategoryError),
 	UnusedImport0:                         diag(1305, "Unused_import_0", "Unused import '{0}'.", CategoryWarning),
+	Deprecated0:                           diag(1306, "_0_is_deprecated", "'{0}' is deprecated.", CategoryWarning),
 }
 
 var placeholderRe = regexp.MustCompile(`\{(\d+)\}`)
