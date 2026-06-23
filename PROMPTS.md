@@ -395,3 +395,4 @@ cappu search commons-lang3
 - 2026-06-23 10:41 — continue
 - 2026-06-23 10:47 — we want to make the repository public. cappu self-upgrade should check for the latest public github tag/release instead of CI run. Remove GH token. Add CD step and release creation and stuff
 - 2026-06-23 10:48 — do it in a separate worktree in ../javalsp-publish
+- 2026-06-23 14:48 — make sure the versions on the release are the go version, not the node version

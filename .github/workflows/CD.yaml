@@ -44,7 +44,9 @@ jobs:
           go-version: "1.26"
           cache-dependency-path: ./togo/go.sum
 
-      - run: make build-all
+      # Stamp the binaries with the tag version (vX.Y.Z -> X.Y.Z) so the shipped
+      # `cappu --version` matches the release.
+      - run: make build-all VERSION="${GITHUB_REF_NAME#v}"
         working-directory: ./togo
 
       - name: Create release
