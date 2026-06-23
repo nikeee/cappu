@@ -394,6 +394,23 @@ output to the TS reference (verified against the committed `.class` baselines in
   renamed to `compiledMethod`, `numericCat` (the unused brand type was removed),
   and `exprIsString`. Access flags (`accPublic`...) are shared with
   classfile_reader.go.
+- **Multi-class emit results.** Where one TS emit function returns several classes
+  (`emitEnum` now returns the enum plus one `E$N` per constant body), the Go twin
+  returns `[]EmittedClass` and the driver spreads it (`append(result, emitEnum(...)...)`).
+  Enum constant bodies reuse the anonymous-class machinery (`emitSynthCtor` with an
+  added `accessFlags` arg for the private forwarding ctor; the shared `bodyClassName`
+  numbers anonymous classes and enum bodies in one per-enclosing-type counter).
+- **Annotations (`annotations.go`).** The element-value encoder (JVMS 4.7.16.1)
+  ports directly; the only adaptations are Go-isms: reuse the existing
+  `parseIntLiteral` (returns `uint64` - wrap to `int32`/`int64` and apply the sign
+  yourself) and `lastSegment` rather than redeclaring them, and resolve an enum
+  element's type via `ResolveTypeEntityName(receiver, ...)` instead of fabricating a
+  TypeReference node. Optional TS params (the class-level `annotations?: {...}`
+  bag) become an `*annotationSource` struct passed to `buildClassAttributes`, nil
+  for synthetic classes. Element-value tags are picked from the element's declared
+  type (resolved from the source `@interface`) with a literal-form fallback, so
+  `byte`/`short`/`char` vs `int` and the enum/`Class`/annotation reference cases
+  byte-match javac. Verified by emitting the shared `AnnAll` baseline byte-for-byte.
 
 ## Debug adapter: JDWP client + DAP server (services/dap -> internal/dapserver)
 

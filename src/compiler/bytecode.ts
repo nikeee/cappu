@@ -18,6 +18,8 @@ import {
   type ArrayType as AstArrayType,
   type TypeParameter as AstTypeParameter,
   type WildcardType as AstWildcardType,
+  type Annotation,
+  type AnnotationTypeDeclaration,
   type ArrayCreationExpression,
   type ArrayInitializer,
   type ElementAccessExpression,
@@ -792,6 +794,408 @@ function sourceNameOf(node: Node): string | undefined {
   return fileName ? fileName.split("/").pop() || undefined : undefined;
 }
 
+// --- Annotations (JVMS 4.7.16 / 4.7.17 / 4.7.18 / 4.7.19) -------------------
+//
+// Annotations are read straight off the AST `modifiers` (or `annotations`) at
+// each declaration. Each annotation's runtime retention decides the attribute it
+// lands in: RUNTIME -> RuntimeVisible*, CLASS (the default) -> RuntimeInvisible*,
+// SOURCE -> dropped. The element values are the constant-expression arguments,
+// encoded per JVMS 4.7.16.1.
+
+type Retention = "runtime" | "class" | "source";
+
+// Retention of the common JDK annotations, which have no source @interface to
+// read. Anything else not declared in source defaults to CLASS (4.7.17).
+const JDK_RETENTION: Record<string, Retention> = {
+  "java/lang/Override": "source",
+  "java/lang/SuppressWarnings": "source",
+  "java/lang/Deprecated": "runtime",
+  "java/lang/SafeVarargs": "runtime",
+  "java/lang/FunctionalInterface": "runtime",
+  "java/lang/annotation/Retention": "runtime",
+  "java/lang/annotation/Target": "runtime",
+  "java/lang/annotation/Documented": "runtime",
+  "java/lang/annotation/Inherited": "runtime",
+  "java/lang/annotation/Repeatable": "runtime",
+  "java/lang/annotation/Native": "source",
+};
+
+// The RetentionPolicy named by a `@Retention(...)` meta-annotation on a source
+// @interface, lowercased; undefined when absent (-> CLASS default).
+function retentionFromMeta(modifiers: readonly Node[] | undefined): Retention | undefined {
+  for (const m of modifiers ?? []) {
+    if (m.kind !== SyntaxKind.Annotation) continue;
+    const ann = m as Annotation;
+    if (entityNameToString(ann.typeName).replace(/^.*\./, "") !== "Retention") continue;
+    const arg = ann.args?.[0];
+    if (!arg) continue;
+    // value is RetentionPolicy.RUNTIME / .CLASS / .SOURCE (or a static-imported name)
+    const v = arg.value;
+    const name =
+      v.kind === SyntaxKind.PropertyAccessExpression
+        ? (v as PropertyAccessExpression).name.text
+        : v.kind === SyntaxKind.Identifier
+          ? (v as Identifier).text
+          : undefined;
+    if (name === "RUNTIME") return "runtime";
+    if (name === "SOURCE") return "source";
+    if (name === "CLASS") return "class";
+  }
+  return undefined;
+}
+
+// The annotation type's binary name + retention. Resolves the @interface from
+// source (reading its @Retention) when available, else the JDK table / CLASS.
+function annotationInfo(
+  ann: Annotation,
+  from: Node,
+  program: Program,
+): { internal: InternalName; retention: Retention } | undefined {
+  const symbol = resolveTypeEntityName(ann.typeName, from, program);
+  if (!symbol) return undefined;
+  const internal = binaryName(symbol);
+  const decl = (symbol.declarations ?? []).find(
+    d => d.kind === SyntaxKind.AnnotationTypeDeclaration,
+  ) as AnnotationTypeDeclaration | undefined;
+  if (decl) return { internal, retention: retentionFromMeta(decl.modifiers) ?? "class" };
+  return { internal, retention: JDK_RETENTION[internal] ?? "class" };
+}
+
+// The element (method) return-type nodes of a source @interface, by element name,
+// so the encoder can pick the exact element_value tag (B/S/C/Z vs I, the enum/
+// class descriptor, etc.). Empty when the type is not a source declaration.
+function annotationElementTypes(
+  ann: Annotation,
+  from: Node,
+  program: Program,
+): Map<string, TypeNode> {
+  const types = new Map<string, TypeNode>();
+  const symbol = resolveTypeEntityName(ann.typeName, from, program);
+  for (const d of symbol?.declarations ?? []) {
+    if (d.kind !== SyntaxKind.AnnotationTypeDeclaration) continue;
+    for (const member of (d as AnnotationTypeDeclaration).members) {
+      if (member.kind === SyntaxKind.MethodDeclaration) {
+        const md = member as MethodDeclaration;
+        types.set(md.name.text, md.returnType);
+      }
+    }
+  }
+  return types;
+}
+
+// One annotation structure (4.7.16): type descriptor + name/value pairs.
+// Returns undefined if any element value cannot be encoded (the caller drops the
+// whole annotation rather than emit malformed bytes).
+function encodeAnnotation(
+  cp: ConstantPool,
+  ann: Annotation,
+  from: Node,
+  program: Program,
+): ByteBuffer | undefined {
+  const symbol = resolveTypeEntityName(ann.typeName, from, program);
+  if (!symbol) return undefined;
+  const desc = descOf(binaryName(symbol));
+  const elementTypes = annotationElementTypes(ann, from, program);
+  const args = ann.args ?? [];
+  const buf = new ByteBuffer();
+  buf.u2(cp.utf8(desc));
+  buf.u2(args.length);
+  for (const arg of args) {
+    const elemName = arg.name?.text ?? "value";
+    const value = encodeElementValue(cp, arg.value, elementTypes.get(elemName), from, program);
+    if (!value) return undefined;
+    buf.u2(cp.utf8(elemName));
+    buf.append(value);
+  }
+  return buf;
+}
+
+// The element_value tag implied by an element's declared descriptor; the L...;
+// case is resolved to 'e' (enum) or '@' (annotation) by the value's form.
+function tagFromDescriptor(desc: Descriptor | undefined): string | undefined {
+  if (!desc) return undefined;
+  if (desc.length === 1 && "BSCIJFDZ".includes(desc)) return desc;
+  if (desc === "Ljava/lang/String;") return "s";
+  if (desc === "Ljava/lang/Class;" || desc.startsWith("Ljava/lang/Class<")) return "c";
+  if (desc.startsWith("[")) return "[";
+  return undefined; // a reference type: enum or annotation, decided by the value
+}
+
+// Strip one array rank from an element type node, for an array element_value.
+function arrayElementType(type: TypeNode | undefined): TypeNode | undefined {
+  if (type && type.kind === SyntaxKind.ArrayType) {
+    return (type as unknown as { elementType: TypeNode }).elementType;
+  }
+  return undefined;
+}
+
+// One element_value (4.7.16.1). Returns undefined for an unsupported form.
+function encodeElementValue(
+  cp: ConstantPool,
+  raw: Node,
+  elementType: TypeNode | undefined,
+  from: Node,
+  program: Program,
+): ByteBuffer | undefined {
+  let value = raw;
+  while (value.kind === SyntaxKind.ParenthesizedExpression) {
+    value = (value as unknown as { expression: Node }).expression;
+  }
+  const buf = new ByteBuffer();
+  // Array: '[' num_values element_value*
+  if (value.kind === SyntaxKind.ArrayInitializer) {
+    const elems = (value as ArrayInitializer).elements;
+    buf.u1(0x5b); // '['
+    buf.u2(elems.length);
+    const elemType = arrayElementType(elementType);
+    for (const e of elems) {
+      const sub = encodeElementValue(cp, e, elemType, from, program);
+      if (!sub) return undefined;
+      buf.append(sub);
+    }
+    return buf;
+  }
+  // Nested annotation: '@' annotation
+  if (value.kind === SyntaxKind.Annotation) {
+    const sub = encodeAnnotation(cp, value as Annotation, from, program);
+    if (!sub) return undefined;
+    buf.u1(0x40); // '@'
+    buf.append(sub);
+    return buf;
+  }
+  // Class literal: 'c' class_info (a Utf8 type descriptor)
+  if (value.kind === SyntaxKind.ClassLiteralExpression) {
+    const desc = descriptorOf((value as ClassLiteralExpression).type, program);
+    buf.u1(0x63); // 'c'
+    buf.u2(cp.utf8(desc));
+    return buf;
+  }
+  // Enum constant: 'e' type_name const_name. A qualified `E.CONST` or a
+  // static-imported bare `CONST`; the enum descriptor comes from the element type
+  // when known, else the access receiver.
+  const enumConst =
+    value.kind === SyntaxKind.PropertyAccessExpression
+      ? {
+          name: (value as PropertyAccessExpression).name.text,
+          recv: (value as PropertyAccessExpression).expression,
+        }
+      : undefined;
+  const tag = tagFromDescriptor(elementType ? descriptorOf(elementType, program) : undefined);
+  if (tag === "e" || (tag === undefined && enumConst)) {
+    if (!enumConst) return undefined;
+    let enumDesc: Descriptor | undefined = elementType
+      ? descriptorOf(elementType, program)
+      : undefined;
+    if (!enumDesc || tagFromDescriptor(enumDesc) !== undefined) {
+      // element type unknown/ambiguous: resolve the receiver as a type
+      const internal = resolveInternalName(
+        { kind: SyntaxKind.TypeReference, typeName: enumConst.recv } as unknown as TypeNode,
+        from,
+        program,
+      );
+      enumDesc = internal ? descOf(internal) : undefined;
+    }
+    if (!enumDesc) return undefined;
+    buf.u1(0x65); // 'e'
+    buf.u2(cp.utf8(enumDesc));
+    buf.u2(cp.utf8(enumConst.name));
+    return buf;
+  }
+  return encodeConstElementValue(cp, value, tag, buf);
+}
+
+// A primitive / String constant element_value. `tag` is the element's declared
+// tag (B/S/C/Z/I/J/F/D/s) when known; otherwise it is inferred from the literal.
+function encodeConstElementValue(
+  cp: ConstantPool,
+  value: Node,
+  tag: string | undefined,
+  buf: ByteBuffer,
+): ByteBuffer | undefined {
+  // String
+  if (value.kind === SyntaxKind.StringLiteral || value.kind === SyntaxKind.TextBlockLiteral) {
+    buf.u1(0x73); // 's'
+    buf.u2(cp.utf8((value as LiteralExpression).value));
+    return buf;
+  }
+  if (value.kind === SyntaxKind.TrueKeyword || value.kind === SyntaxKind.FalseKeyword) {
+    buf.u1(0x5a); // 'Z'
+    buf.u2(cp.integer(value.kind === SyntaxKind.TrueKeyword ? 1 : 0));
+    return buf;
+  }
+  if (value.kind === SyntaxKind.CharacterLiteral) {
+    buf.u1(0x43); // 'C'
+    buf.u2(cp.integer((value as LiteralExpression).value.charCodeAt(0)));
+    return buf;
+  }
+  // Negative numeric: a unary minus over a numeric literal.
+  let neg = false;
+  let lit = value;
+  if (
+    lit.kind === SyntaxKind.PrefixUnaryExpression &&
+    (lit as PrefixUnaryExpression).operator === SyntaxKind.MinusToken
+  ) {
+    neg = true;
+    lit = (lit as PrefixUnaryExpression).operand;
+  }
+  if (lit.kind !== SyntaxKind.NumericLiteral) return undefined;
+  const text = (lit as LiteralExpression).value.replace(/_/g, "");
+  const isHex = /^0[xX]/.test(text);
+  const isBin = /^0[bB]/.test(text);
+  // The effective tag: declared element tag, else inferred from the literal form.
+  const inferred =
+    !isHex && !isBin && /[fF]$/.test(text)
+      ? "F"
+      : !isHex && !isBin && (/[.eE]/.test(text) || /[dD]$/.test(text))
+        ? "D"
+        : /[lL]$/.test(text)
+          ? "J"
+          : "I";
+  const t = tag && "BSCIJFDZ".includes(tag) ? tag : inferred;
+  const sign = neg ? -1 : 1;
+  switch (t) {
+    case "F": {
+      buf.u1(0x46);
+      buf.u2(cp.float(sign * parseFloat(text.replace(/[fF]$/, ""))));
+      return buf;
+    }
+    case "D": {
+      buf.u1(0x44);
+      buf.u2(cp.double(sign * parseFloat(text.replace(/[dD]$/, ""))));
+      return buf;
+    }
+    case "J": {
+      const body = text.replace(/[lL]$/, "");
+      let v =
+        isHex || isBin ? BigInt(body) : BigInt(/^0[0-7]+$/.test(body) ? parseInt(body, 8) : body);
+      if (neg) v = -v;
+      buf.u1(0x4a);
+      buf.u2(cp.long(BigInt.asIntN(64, v)));
+      return buf;
+    }
+    default: {
+      // B, S, C, Z, I all use a CONSTANT_Integer const_value.
+      const iv =
+        sign *
+        (isHex || isBin
+          ? Number(BigInt.asIntN(32, BigInt(text)))
+          : /^0[0-7]+$/.test(text)
+            ? parseInt(text, 8)
+            : Number(text));
+      buf.u1(t.charCodeAt(0));
+      buf.u2(cp.integer(iv));
+      return buf;
+    }
+  }
+}
+
+// Build a RuntimeVisible/InvisibleAnnotations attribute body (4.7.16/4.7.17) for
+// the annotations in `modifiers` that fall in the given retention bucket, or
+// undefined when none. `visible` selects RUNTIME (true) vs CLASS-default (false).
+function annotationsAttribute(
+  cp: ConstantPool,
+  modifiers: readonly Node[] | undefined,
+  visible: boolean,
+  from: Node,
+  program: Program,
+): ByteBuffer | undefined {
+  const encoded: ByteBuffer[] = [];
+  for (const m of modifiers ?? []) {
+    if (m.kind !== SyntaxKind.Annotation) continue;
+    const info = annotationInfo(m as Annotation, from, program);
+    if (!info) continue;
+    if (info.retention === "source") continue;
+    if ((info.retention === "runtime") !== visible) continue;
+    const enc = encodeAnnotation(cp, m as Annotation, from, program);
+    if (enc) encoded.push(enc);
+  }
+  if (encoded.length === 0) return undefined;
+  const body = new ByteBuffer();
+  body.u2(encoded.length);
+  for (const e of encoded) body.append(e);
+  return body;
+}
+
+// Append the Runtime{Visible,Invisible}Annotations attributes for `modifiers` to
+// an attribute buffer, returning how many attributes were written (0, 1 or 2).
+function writeAnnotationAttributes(
+  buffer: ByteBuffer,
+  cp: ConstantPool,
+  modifiers: readonly Node[] | undefined,
+  from: Node,
+  program: Program,
+): number {
+  let count = 0;
+  for (const visible of [true, false]) {
+    const body = annotationsAttribute(cp, modifiers, visible, from, program);
+    if (!body) continue;
+    buffer.u2(cp.utf8(visible ? "RuntimeVisibleAnnotations" : "RuntimeInvisibleAnnotations"));
+    buffer.u4(body.length);
+    buffer.append(body);
+    count++;
+  }
+  return count;
+}
+
+// A Runtime{Visible,Invisible}ParameterAnnotations body (4.7.18/4.7.19): a u1
+// parameter count followed by each formal parameter's annotation list (in the
+// chosen retention bucket). Returns undefined when no parameter is annotated.
+function parameterAnnotationsAttribute(
+  cp: ConstantPool,
+  parameters: readonly Parameter[],
+  visible: boolean,
+  from: Node,
+  program: Program,
+): ByteBuffer | undefined {
+  const formal = parameters.filter(p => !p.isReceiver);
+  let total = 0;
+  const perParam = formal.map(p => {
+    const encoded: ByteBuffer[] = [];
+    for (const m of p.modifiers ?? []) {
+      if (m.kind !== SyntaxKind.Annotation) continue;
+      const info = annotationInfo(m as Annotation, from, program);
+      if (!info || info.retention === "source") continue;
+      if ((info.retention === "runtime") !== visible) continue;
+      const enc = encodeAnnotation(cp, m as Annotation, from, program);
+      if (enc) encoded.push(enc);
+    }
+    total += encoded.length;
+    const b = new ByteBuffer();
+    b.u2(encoded.length);
+    for (const e of encoded) b.append(e);
+    return b;
+  });
+  if (total === 0) return undefined;
+  const body = new ByteBuffer();
+  body.u1(formal.length); // num_parameters
+  for (const b of perParam) body.append(b);
+  return body;
+}
+
+// The method-level annotation attributes (Runtime{Visible,Invisible}Annotations
+// then the parameter variants), in javac's order, as a buffer + attribute count.
+function methodAnnotationAttributes(
+  cp: ConstantPool,
+  method: MethodDeclaration,
+  program: Program,
+): { buffer: ByteBuffer; count: number } {
+  const buffer = new ByteBuffer();
+  let count = writeAnnotationAttributes(buffer, cp, method.modifiers, method, program);
+  for (const visible of [true, false]) {
+    const body = parameterAnnotationsAttribute(cp, method.parameters, visible, method, program);
+    if (!body) continue;
+    buffer.u2(
+      cp.utf8(
+        visible ? "RuntimeVisibleParameterAnnotations" : "RuntimeInvisibleParameterAnnotations",
+      ),
+    );
+    buffer.u4(body.length);
+    buffer.append(body);
+    count++;
+  }
+  return { buffer, count };
+}
+
 // The class-level attributes shared by classes and enums: SourceFile and (when
 // any invokedynamic was emitted) BootstrapMethods. Must run before the constant
 // pool is written so the attribute name Utf8s are interned.
@@ -816,6 +1220,10 @@ function buildClassAttributes(
   // PermittedSubclasses (JVMS 4.7.31): a sealed type's permitted direct
   // subclasses. An enum with constant bodies is implicitly sealed over its E$N.
   permittedSubclasses?: InternalName[],
+  // The type declaration's annotations (its `modifiers`) for the
+  // Runtime{Visible,Invisible}Annotations attributes, with the node they are
+  // resolved from. Omitted for synthetic classes (anonymous, E$N).
+  annotations?: { modifiers?: readonly Node[]; from: Node; program: Program },
 ): { buffer: ByteBuffer; count: number } {
   const buffer = new ByteBuffer();
   let count = 0;
@@ -840,6 +1248,15 @@ function buildClassAttributes(
     buffer.u4(body.length);
     buffer.append(body);
     count++;
+  }
+  if (annotations) {
+    count += writeAnnotationAttributes(
+      buffer,
+      cp,
+      annotations.modifiers,
+      annotations.from,
+      annotations.program,
+    );
   }
   if (enclosingMethod) {
     buffer.u2(cp.utf8("EnclosingMethod"));
@@ -1497,6 +1914,10 @@ function emitFields(
     const signature = typeUsesGenerics(field.type, program)
       ? signatureOfType(field.type, program)
       : undefined;
+    // Field annotations (Runtime{Visible,Invisible}Annotations) - the same for
+    // every declarator of a multi-declarator field, encoded once.
+    const annBuf = new ByteBuffer();
+    const annCount = writeAnnotationAttributes(annBuf, cp, field.modifiers, field, program);
     for (const declarator of field.declarators) {
       const d = declarator as VariableDeclarator;
       const descriptor = withRank(baseDescriptor, d.arrayRankAfterName);
@@ -1505,13 +1926,14 @@ function emitFields(
       buffer.u2(cp.utf8(descriptor));
       // static final fields with a compile-time constant carry a ConstantValue.
       const constIndex = constantValueIndex(field, d, cp, program);
-      buffer.u2((constIndex === undefined ? 0 : 1) + (signature === undefined ? 0 : 1));
+      buffer.u2((constIndex === undefined ? 0 : 1) + (signature === undefined ? 0 : 1) + annCount);
       if (constIndex !== undefined) {
         buffer.u2(cp.utf8("ConstantValue"));
         buffer.u4(2);
         buffer.u2(constIndex);
       }
       if (signature !== undefined) writeSignatureAttribute(buffer, cp, signature);
+      buffer.append(annBuf);
       count++;
     }
   }
@@ -6139,10 +6561,14 @@ function emitMethod(
   info.u2(cp.utf8(method.name.text));
   info.u2(cp.utf8(descriptor));
 
+  // Method + parameter annotations (after Code/Signature, javac's order).
+  const ann = methodAnnotationAttributes(cp, method, program);
+
   // abstract / native methods carry no Code attribute.
   if (flags & (ACC_ABSTRACT | ACC_NATIVE) || !method.body) {
-    info.u2(signature !== undefined ? 1 : 0); // attributes_count
+    info.u2((signature !== undefined ? 1 : 0) + ann.count); // attributes_count
     if (signature !== undefined) writeSignatureAttribute(info, cp, signature);
+    info.append(ann.buffer);
     return info;
   }
 
@@ -6177,7 +6603,7 @@ function emitMethod(
     body = { code: fallback.code, maxStack: fallback.maxStack, maxLocals: argsSize };
   }
 
-  writeCodeAttribute(info, cp, body, signature);
+  writeCodeAttribute(info, cp, body, signature, ann);
   return info;
 }
 
@@ -6280,6 +6706,8 @@ function writeCodeAttribute(
   cp: ConstantPool,
   body: MethodBody,
   signature?: JvmSignature,
+  // Extra method-level attributes (annotations) appended after Code/Signature.
+  extra?: { buffer: ByteBuffer; count: number },
 ): void {
   const smt = body.stackMapTable;
   const smtBytes = smt ? 6 + smt.length : 0;
@@ -6335,9 +6763,10 @@ function writeCodeAttribute(
     codeAttr.append(smt);
   }
 
-  info.u2(signature !== undefined ? 2 : 1); // attributes_count
+  info.u2((signature !== undefined ? 2 : 1) + (extra?.count ?? 0)); // attributes_count
   info.append(codeAttr);
   if (signature !== undefined) writeSignatureAttribute(info, cp, signature);
+  if (extra) info.append(extra.buffer);
 }
 
 // A Signature attribute (JVMS 4.7.9): just a Utf8 index to the signature string.
@@ -6913,6 +7342,9 @@ export function emitClass(
     nestMembers,
     classSignatureOf(declaration, program),
     innerClasses,
+    undefined,
+    undefined,
+    { modifiers: declaration.modifiers, from: declaration, program },
   );
 
   return {
@@ -7029,6 +7461,9 @@ export function emitInterface(
     nestMembers,
     undefined,
     innerClasses,
+    undefined,
+    undefined,
+    { modifiers: declaration.modifiers, from: declaration, program },
   );
   return {
     name,
@@ -7735,6 +8170,9 @@ export function emitRecord(
     nestMembers,
     undefined,
     innerClasses,
+    undefined,
+    undefined,
+    { modifiers: declaration.modifiers, from: declaration, program },
   );
   classAttributes.u2(cp.utf8("Record"));
   classAttributes.u4(recordAttr.length);
@@ -7984,6 +8422,7 @@ export function emitEnum(
     innerClasses,
     undefined,
     permitted.length > 0 ? permitted : undefined,
+    { modifiers: declaration.modifiers, from: declaration, program },
   );
 
   const result: EmittedClass[] = [
@@ -8047,11 +8486,7 @@ function emitEnumConstantBodyClass(
   // defaults (the constructor stays a prologue-only forwarder), as anonymous
   // classes do for unsupported initializers.
   const fields = new ByteBuffer();
-  const declaredFields = emitFields(
-    { members: body } as unknown as ClassDeclaration,
-    cp,
-    program,
-  );
+  const declaredFields = emitFields({ members: body } as unknown as ClassDeclaration, cp, program);
   fields.append(declaredFields.buffer);
   const fieldCount = declaredFields.count;
 
@@ -8090,7 +8525,16 @@ function emitEnumConstantBodyClass(
   for (const member of body) {
     if (member.kind !== SyntaxKind.MethodDeclaration) continue;
     methods.append(
-      emitMethod(member as MethodDeclaration, cp, program, checker, name, lambdaMethods, 0, captureMap),
+      emitMethod(
+        member as MethodDeclaration,
+        cp,
+        program,
+        checker,
+        name,
+        lambdaMethods,
+        0,
+        captureMap,
+      ),
     );
     methodCount++;
   }

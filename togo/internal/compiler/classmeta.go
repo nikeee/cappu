@@ -536,6 +536,9 @@ func emitFieldsFromMembers(members []*Node, cp *constantPool, program *Program) 
 			signature = signatureOfType(field.Type, program)
 			hasSignature = true
 		}
+		// Field annotations - the same for every declarator, encoded once.
+		annBuf := &byteBuffer{}
+		annCount := writeAnnotationAttributes(annBuf, cp, field.Modifiers, member, program)
 		for _, declarator := range arrayNodes(field.Declarators) {
 			d := declarator.AsVariableDeclarator()
 			desc := withRank(baseDescriptor, d.ArrayRankAfterName)
@@ -543,7 +546,7 @@ func emitFieldsFromMembers(members []*Node, cp *constantPool, program *Program) 
 			buffer.u2(int(cp.utf8(d.Name.AsIdentifier().Text)))
 			buffer.u2(int(cp.utf8(string(desc))))
 			constIndex, hasConst := constantValueIndex(member, declarator, cp, program)
-			nAttr := 0
+			nAttr := annCount
 			if hasConst {
 				nAttr++
 			}
@@ -559,6 +562,7 @@ func emitFieldsFromMembers(members []*Node, cp *constantPool, program *Program) 
 			if hasSignature {
 				writeSignatureAttribute(buffer, cp, signature)
 			}
+			buffer.appendBuf(annBuf)
 			count++
 		}
 	}

@@ -455,6 +455,81 @@ for (const [name, { source, classes }] of Object.entries(ENUM_MULTI_FIXTURES)) {
   });
 }
 
+// Annotation bytecode (Runtime{Visible,Invisible}[Parameter]Annotations). Each
+// fixture declares its @interface types (which cappu does not emit - only the
+// annotated class) plus the annotated class we emit. `javap -c -p` hides
+// annotations, so these are checked two ways: a binary baseline of each emitted
+// class (which the Go port matches for parity), and - when a JDK is present - the
+// `javap -v` element-value trees (constant-pool indices stripped) must equal
+// javac's for the emitted class.
+const ANN_FIXTURES: Record<string, { source: string; classes: string[] }> = {
+  AnnAll: {
+    source: [
+      "import java.lang.annotation.*;",
+      "@Retention(RetentionPolicy.RUNTIME) @interface Rt {",
+      "  String value(); int n() default 0; long l() default 0; double d() default 0;",
+      "  boolean b() default false; Class<?> c() default Object.class;",
+      "  ElementType e() default ElementType.TYPE; String[] arr() default {}; Cl nested() default @Cl(x=0);",
+      "}",
+      "@Retention(RetentionPolicy.CLASS) @interface Cl { int x(); }",
+      '@Rt(value="hi", n=5, l=9L, d=1.5, b=true, c=String.class, e=ElementType.METHOD, arr={"a","b"}, nested=@Cl(x=7))',
+      "@Cl(x=3)",
+      "public class AnnAll {",
+      '  @Rt("f") int field;',
+      '  @Rt("m") public int m(@Rt("p") int p, @Cl(x=1) int q) { return p + q; }',
+      "}",
+    ].join("\n"),
+    classes: ["AnnAll"],
+  },
+};
+
+// The annotation attribute headers + element-value trees (constant-pool indices
+// stripped) javap prints for a class file - stable across compilers.
+function annotationTrees(classFile: string): string[] {
+  const out = execFileSync("javap", ["-v", "-p", classFile], { encoding: "utf8" });
+  const result: string[] = [];
+  for (const raw of out.split("\n")) {
+    const t = raw.trim();
+    if (/^Runtime(Visible|Invisible)(Parameter)?Annotations:$/.test(t)) result.push(t);
+    else if (/^parameter \d+:$/.test(t)) result.push(t);
+    else if (/^\d+: #/.test(t)) result.push(t.replace(/#\d+/g, "#").replace(/\s+/g, ""));
+  }
+  return result;
+}
+
+for (const [name, { source: src, classes }] of Object.entries(ANN_FIXTURES)) {
+  test(`annotation binary baseline: ${name}`, () => {
+    const emitted = emitClasses(name, src);
+    expect(emitted.map(c => c.name).sort()).toEqual([...classes].sort());
+    for (const c of emitted) {
+      const baseline = join(baselinesDir, `${c.name}.class`);
+      if (shouldUpdate || !existsSync(baseline)) {
+        mkdirSync(baselinesDir, { recursive: true });
+        writeFileSync(baseline, c.bytes);
+      }
+      expect(Buffer.from(c.bytes).equals(readFileSync(baseline))).toBe(true);
+    }
+  });
+
+  test(
+    `annotations match javac: ${name}`,
+    { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/javap)" },
+    () => {
+      using jdir = TempDir.create("ann-javac-");
+      writeFileSync(join(jdir.path, `${name}.java`), src);
+      execFileSync("javac", ["--release", "21", "-d", jdir.path, join(jdir.path, `${name}.java`)]);
+      using odir = TempDir.create("ann-ours-");
+      for (const c of emitClasses(name, src))
+        writeFileSync(join(odir.path, `${c.name}.class`), c.bytes);
+      for (const cn of classes) {
+        expect(annotationTrees(join(odir.path, `${cn}.class`))).toEqual(
+          annotationTrees(join(jdir.path, `${cn}.class`)),
+        );
+      }
+    },
+  );
+}
+
 function source(name: string): string {
   return FIXTURES[name]!;
 }
@@ -481,32 +556,28 @@ test(
   },
 );
 
-test(
-  "enum constant bodies run identically to javac",
-  { skip: HAS_JAVA ? false : "no JDK" },
-  () => {
-    runsLikeJavac(
-      "EnumBody",
-      [
-        "public class EnumBody {",
-        "  enum Op {",
-        '    PLUS("+") { public int apply(int a, int b) { return a + b; } },',
-        '    TIMES("*") { public int apply(int a, int b) { return a * b; } },',
-        '    IDENT("=");', // a constant with no body shares the base implementation
-        "    private final String sym;",
-        "    Op(String sym) { this.sym = sym; }",
-        "    public int apply(int a, int b) { return a; }",
-        "    public String sym() { return sym; }",
-        "  }",
-        "  public static void main(String[] args) {",
-        "    for (Op o : Op.values()) System.out.println(o.name() + o.sym() + o.apply(6, 7));",
-        "  }",
-        "}",
-      ].join("\n"),
-      "PLUS+13\nTIMES*42\nIDENT=6\n",
-    );
-  },
-);
+test("enum constant bodies run identically to javac", { skip: HAS_JAVA ? false : "no JDK" }, () => {
+  runsLikeJavac(
+    "EnumBody",
+    [
+      "public class EnumBody {",
+      "  enum Op {",
+      '    PLUS("+") { public int apply(int a, int b) { return a + b; } },',
+      '    TIMES("*") { public int apply(int a, int b) { return a * b; } },',
+      '    IDENT("=");', // a constant with no body shares the base implementation
+      "    private final String sym;",
+      "    Op(String sym) { this.sym = sym; }",
+      "    public int apply(int a, int b) { return a; }",
+      "    public String sym() { return sym; }",
+      "  }",
+      "  public static void main(String[] args) {",
+      "    for (Op o : Op.values()) System.out.println(o.name() + o.sym() + o.apply(6, 7));",
+      "  }",
+      "}",
+    ].join("\n"),
+    "PLUS+13\nTIMES*42\nIDENT=6\n",
+  );
+});
 
 test("casts and instanceof run identically to javac", { skip: HAS_JAVA ? false : "no JDK" }, () => {
   const name = "Cast";
@@ -863,7 +934,8 @@ test(
       "}",
     ].join("\n");
     using dir = TempDir.create("emit-assert-");
-    for (const c of emitClasses("Asrt", src)) writeFileSync(join(dir.path, `${c.name}.class`), c.bytes);
+    for (const c of emitClasses("Asrt", src))
+      writeFileSync(join(dir.path, `${c.name}.class`), c.bytes);
     // Assertions disabled (default): the assert is a no-op, checked(-1) returns -1.
     expect(execFileSync("java", ["-cp", dir.path, "Asrt"], { encoding: "utf8" })).toBe("-1\n");
     // Assertions enabled (-ea): the false assert throws AssertionError with the message.
@@ -3224,7 +3296,14 @@ test(
       for (const [name, source] of Object.entries(lvtFixtures)) {
         using dir = TempDir.create("lvt-javac-");
         writeFileSync(join(dir.path, `${name}.java`), source);
-        execFileSync("javac", ["-g", "--release", "21", "-d", dir.path, join(dir.path, `${name}.java`)]);
+        execFileSync("javac", [
+          "-g",
+          "--release",
+          "21",
+          "-d",
+          dir.path,
+          join(dir.path, `${name}.java`),
+        ]);
         const classNames = readdirSync(dir.path)
           .filter(f => f.endsWith(".class"))
           .map(f => f.slice(0, -6));

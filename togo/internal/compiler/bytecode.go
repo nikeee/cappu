@@ -725,13 +725,19 @@ func emitMethod(method *Node, cp *constantPool, program *Program, checker *Check
 	info.u2(int(cp.utf8(method.AsMethodDeclaration().Name.AsIdentifier().Text)))
 	info.u2(int(cp.utf8(string(desc))))
 
+	// Method + parameter annotations (after Code/Signature, javac's order).
+	annBuf, annCount := methodAnnotationAttributes(cp, method.AsMethodDeclaration(), method, program)
+
 	if flags&(accAbstract|accNative) != 0 || method.AsMethodDeclaration().Body == nil {
+		nAttr := annCount
 		if hasSignature {
-			info.u2(1)
-			writeSignatureAttribute(info, cp, signature)
-		} else {
-			info.u2(0)
+			nAttr++
 		}
+		info.u2(nAttr)
+		if hasSignature {
+			writeSignatureAttribute(info, cp, signature)
+		}
+		info.appendBuf(annBuf)
 		return info
 	}
 
@@ -764,7 +770,7 @@ func emitMethod(method *Node, cp *constantPool, program *Program, checker *Check
 		body = compiledMethod{code: fcode, maxStack: fmax, maxLocals: argsSize}
 	}
 
-	writeCodeAttribute(info, cp, body, signature, hasSignature)
+	writeCodeAttribute(info, cp, body, signature, hasSignature, annBuf, annCount)
 	return info
 }
 
@@ -787,7 +793,7 @@ func emitLambdaMethod(impl lambdaImpl, cp *constantPool, program *Program, check
 		lambdaMethods: lambdaMethods,
 		lambdaSpec:    &lambdaSpecT{params: impl.params, returnDescriptor: impl.returnDescriptor, body: impl.body, isInstance: impl.isInstance},
 	})
-	writeCodeAttribute(info, cp, body, "", false)
+	writeCodeAttribute(info, cp, body, "", false, nil, 0)
 	return info
 }
 
@@ -808,13 +814,13 @@ func emitArrayCtorRefMethod(cp *constantPool, name string, arrayDesc descriptor)
 	info.u2(accPrivate | accStatic | accSynthetic)
 	info.u2(int(cp.utf8(name)))
 	info.u2(int(cp.utf8("(I)" + string(arrayDesc))))
-	writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: 1, maxLocals: 1}, "", false)
+	writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: 1, maxLocals: 1}, "", false, nil, 0)
 	return info
 }
 
 // writeCodeAttribute appends the Code attribute (with optional StackMapTable) and,
 // when generic, a Signature attribute (JVMS 4.7.9).
-func writeCodeAttribute(info *byteBuffer, cp *constantPool, body compiledMethod, signature jvmSignature, hasSignature bool) {
+func writeCodeAttribute(info *byteBuffer, cp *constantPool, body compiledMethod, signature jvmSignature, hasSignature bool, extra *byteBuffer, extraCount int) {
 	smt := body.stackMapTable
 	smtBytes := 0
 	if smt != nil {
@@ -884,14 +890,17 @@ func writeCodeAttribute(info *byteBuffer, cp *constantPool, body compiledMethod,
 		codeAttr.appendBuf(smt)
 	}
 
+	methodAttrs := 1 + extraCount
 	if hasSignature {
-		info.u2(2)
-	} else {
-		info.u2(1)
+		methodAttrs++
 	}
+	info.u2(methodAttrs)
 	info.appendBuf(codeAttr)
 	if hasSignature {
 		writeSignatureAttribute(info, cp, signature)
+	}
+	if extra != nil {
+		info.appendBuf(extra)
 	}
 }
 
@@ -982,7 +991,7 @@ func emitConstructorMethod(ctor *Node, flags int, cp *constantPool, program *Pro
 	if leading != nil {
 		hasSignature = false // spliced parameters: the signature no longer matches
 	}
-	writeCodeAttribute(info, cp, body, signature, hasSignature)
+	writeCodeAttribute(info, cp, body, signature, hasSignature, nil, 0)
 	return info
 }
 
@@ -1142,7 +1151,7 @@ func emitSynthCtor(cp *constantPool, name, superInternal internalName, superPara
 	}
 	descs = append(descs, superParamDescs...)
 	info.u2(int(cp.utf8("(" + joinDescs(descs) + ")V")))
-	writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: maxStack, maxLocals: sl}, "", false)
+	writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: maxStack, maxLocals: sl}, "", false, nil, 0)
 	return info
 }
 
@@ -1193,7 +1202,7 @@ func emitSynthCtorWithInits(cp *constantPool, name internalName, program *Progra
 	}
 	descs = append(descs, prologue.superParamDescs...)
 	info.u2(int(cp.utf8("(" + joinDescs(descs) + ")V")))
-	writeCodeAttribute(info, cp, body, "", false)
+	writeCodeAttribute(info, cp, body, "", false, nil, 0)
 	return info
 }
 
@@ -1346,7 +1355,7 @@ func emitClass(declaration *Node, program *Program, checker *Checker, nestMember
 			code.u1(opReturn)
 			clinitBody = compiledMethod{code: code, maxStack: 0, maxLocals: 0}
 		}
-		writeCodeAttribute(info, cp, clinitBody, "", false)
+		writeCodeAttribute(info, cp, clinitBody, "", false, nil, 0)
 		methods.appendBuf(info)
 		methodCount++
 	}
@@ -1357,7 +1366,7 @@ func emitClass(declaration *Node, program *Program, checker *Checker, nestMember
 	}
 
 	sig, hasSig := classSignatureOf(declaration, program)
-	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, sig, hasSig, innerClasses, "", nil)
+	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, sig, hasSig, innerClasses, "", nil, &annotationSource{modifiers: declaration.AsClassDeclaration().Modifiers, from: declaration, program: program})
 
 	return EmittedClass{
 		Name:  string(name),
@@ -1478,7 +1487,7 @@ func emitInterface(declaration *Node, program *Program, checker *Checker, nestMe
 		methodCount++
 	}
 
-	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, "", false, innerClasses, "", nil)
+	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, "", false, innerClasses, "", nil, &annotationSource{modifiers: declaration.AsInterfaceDeclaration().Modifiers, from: declaration, program: program})
 	return EmittedClass{
 		Name:  string(name),
 		Bytes: assembleClassFile(cp, accessFlags, thisClassIndex, superClassIndex, interfaceIndices, fields, fieldCount, methods, methodCount, attrs.buffer, attrs.count),
@@ -1579,7 +1588,7 @@ func emitAnonymousClassIfPossible(node *Node, program *Program, checker *Checker
 		methodCount++
 	}
 
-	attrs := buildClassAttributes(cp, sourceNameOf(node), name, nestMembers, "", false, innerClasses, "", nil)
+	attrs := buildClassAttributes(cp, sourceNameOf(node), name, nestMembers, "", false, innerClasses, "", nil, nil)
 	return EmittedClass{
 		Name:  string(name),
 		Bytes: assembleClassFile(cp, accSuper, thisClassIndex, superClassIndex, interfaceIndices, fields, fieldCount, methods, methodCount, attrs.buffer, attrs.count),
@@ -1600,7 +1609,7 @@ func emitValuesMethod(cp *constantPool, name internalName, valuesField string, a
 	code.u1(opCheckcast)
 	code.u2(int(cp.classInfo(string(arrayDesc))))
 	code.u1(opAreturn)
-	writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: 1, maxLocals: 0}, "", false)
+	writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: 1, maxLocals: 0}, "", false, nil, 0)
 	return info
 }
 
@@ -1619,7 +1628,7 @@ func emitValueOfMethod(cp *constantPool, name internalName, selfDesc descriptor)
 	code.u1(opCheckcast)
 	code.u2(int(cp.classInfo(string(name))))
 	code.u1(opAreturn)
-	writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: 2, maxLocals: 1}, "", false)
+	writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: 2, maxLocals: 1}, "", false, nil, 0)
 	return info
 }
 
@@ -1664,7 +1673,7 @@ func emitEnumConstructor(ctor *Node, cp *constantPool, program *Program, checker
 		code.u1(opReturn)
 		body = compiledMethod{code: code, maxStack: 3, maxLocals: argsSize}
 	}
-	writeCodeAttribute(info, cp, body, "", false)
+	writeCodeAttribute(info, cp, body, "", false, nil, 0)
 	return info
 }
 
@@ -1780,7 +1789,7 @@ func emitRecord(declaration *Node, program *Program, checker *Checker, nestMembe
 		}
 		info.u2(int(cp.utf8("<init>")))
 		info.u2(int(cp.utf8(string(ctorDescriptor))))
-		writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: maxStack, maxLocals: sl}, "", false)
+		writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: maxStack, maxLocals: sl}, "", false, nil, 0)
 		return info
 	}
 	var compact *Node
@@ -1821,7 +1830,7 @@ func emitRecord(declaration *Node, program *Program, checker *Checker, nestMembe
 		info.u2(int(cp.utf8("<init>")))
 		info.u2(int(cp.utf8(string(ctorDescriptor))))
 		if body, ok := tryGenerateBody(synth, cp, program, checker, name, bodyGenOptions{ctorSuper: "java/lang/Record", hasCtorSuper: true, lambdaMethods: &lambdaMethods, paramSymbols: compParams, ctorTrailingStores: trailing}); ok {
-			writeCodeAttribute(info, cp, body, "", false)
+			writeCodeAttribute(info, cp, body, "", false, nil, 0)
 			methods.appendBuf(info)
 		} else {
 			if degradeListener != nil {
@@ -1858,7 +1867,7 @@ func emitRecord(declaration *Node, program *Program, checker *Checker, nestMembe
 		info.u2(accPublic)
 		info.u2(int(cp.utf8(c.name)))
 		info.u2(int(cp.utf8("()" + string(c.descriptor))))
-		writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: slotsOf(c.descriptor), maxLocals: 1}, "", false)
+		writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: slotsOf(c.descriptor), maxLocals: 1}, "", false, nil, 0)
 		methods.appendBuf(info)
 		methodCount++
 	}
@@ -1889,7 +1898,7 @@ func emitRecord(declaration *Node, program *Program, checker *Checker, nestMembe
 		if mName == "equals" {
 			ms, ml = 2, 2
 		}
-		writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: ms, maxLocals: ml}, "", false)
+		writeCodeAttribute(info, cp, compiledMethod{code: code, maxStack: ms, maxLocals: ml}, "", false, nil, 0)
 		methods.appendBuf(info)
 		methodCount++
 	}
@@ -1917,7 +1926,7 @@ func emitRecord(declaration *Node, program *Program, checker *Checker, nestMembe
 		recordAttr.u2(0)
 	}
 
-	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, "", false, innerClasses, "", nil)
+	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, "", false, innerClasses, "", nil, &annotationSource{modifiers: declaration.AsRecordDeclaration().Modifiers, from: declaration, program: program})
 	attrs.buffer.u2(int(cp.utf8("Record")))
 	attrs.buffer.u4(recordAttr.length())
 	attrs.buffer.appendBuf(recordAttr)
@@ -2070,7 +2079,7 @@ func emitEnum(declaration *Node, program *Program, checker *Checker, nestMembers
 			clinitBody = generateBody(newClinitNode(), cp, program, checker, name, bodyGenOptions{lambdaMethods: &throwaway})
 		}
 	}
-	writeCodeAttribute(clinitInfo, cp, clinitBody, "", false)
+	writeCodeAttribute(clinitInfo, cp, clinitBody, "", false, nil, 0)
 	methods.appendBuf(clinitInfo)
 	methodCount++
 
@@ -2086,7 +2095,7 @@ func emitEnum(declaration *Node, program *Program, checker *Checker, nestMembers
 	for _, c := range bodied {
 		permitted = append(permitted, bodyClassNames[c])
 	}
-	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, sig, hasSig, innerClasses, "", permitted)
+	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, sig, hasSig, innerClasses, "", permitted, &annotationSource{modifiers: de.Modifiers, from: declaration, program: program})
 
 	result := []EmittedClass{{
 		Name:  string(name),
@@ -2156,7 +2165,7 @@ func emitEnumConstantBodyClass(constant *Node, name, enumInternal internalName, 
 		methodCount++
 	}
 
-	attrs := buildClassAttributes(cp, sourceNameOf(constant), name, nestMembers, "", false, innerClasses, enumInternal, nil)
+	attrs := buildClassAttributes(cp, sourceNameOf(constant), name, nestMembers, "", false, innerClasses, enumInternal, nil, nil)
 	return EmittedClass{
 		Name:  string(name),
 		Bytes: assembleClassFile(cp, accSuper|accEnum|accFinal, thisClassIndex, superClassIndex, nil, fields, fieldCount, methods, methodCount, attrs.buffer, attrs.count),

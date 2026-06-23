@@ -239,7 +239,19 @@ These do not affect correctness but widen the diff vs javac's output.
 - [x] `PermittedSubclasses` (JVMS 4.7.31): emitted on an enum with constant
       bodies (implicitly sealed over its `E$N`, declaration order). General
       `sealed`/`permits` on ordinary classes is parsed but not yet emitted.
-- [ ] `RuntimeVisibleAnnotations` (JVMS 4.7.16).
+- [x] `RuntimeVisibleAnnotations` (JVMS 4.7.16) / `RuntimeInvisibleAnnotations`
+      (4.7.17) and the parameter variants (4.7.18 / 4.7.19): annotations on
+      classes, fields, methods and parameters are emitted, bucketed by the
+      annotation type's retention - RUNTIME -> visible, CLASS (the default) ->
+      invisible, SOURCE -> dropped. Retention is read from the source `@interface`'s
+      `@Retention` when available, else a built-in table for the common JDK
+      annotations (else CLASS). Element values cover every tag (primitives via the
+      element's declared type, `String`, `Class`, enum constant, nested annotation,
+      and arrays), evaluated from the constant-expression arguments. An annotation
+      whose element value cannot be encoded is dropped (not emitted malformed).
+      Verified equal to javac's element-value trees and byte-identical across the
+      TS and Go builds. `@interface` *type* declarations are not themselves emitted
+      yet (no `AnnotationDefault`), only the attributes on annotated declarations.
 
 ## Done (recent)
 

@@ -58,6 +58,10 @@ var emitFixtures = map[string]string{
 	// (EnumMixed$1, EnumAbstract$1, ...) verify byte-parity with the TS emitter.
 	"EnumMixed":    "enum EnumMixed {\n  PLUS(\"+\") { public int apply(int a, int b) { return a + b; } },\n  TIMES(\"*\") { public int apply(int a, int b) { return a * b; } },\n  IDENT(\"=\");\n  private final String sym;\n  EnumMixed(String sym) { this.sym = sym; }\n  public int apply(int a, int b) { return a; }\n  public String sym() { return sym; }\n  public static void main(String[] args) {\n    for (EnumMixed o : EnumMixed.values()) System.out.println(o.name() + o.sym() + o.apply(6, 7));\n  }\n}",
 	"EnumAbstract": "enum EnumAbstract {\n  LOW { public int rank() { return 1; } },\n  HIGH { public int rank() { return 9; } };\n  public abstract int rank();\n  public static void main(String[] args) {\n    for (EnumAbstract e : EnumAbstract.values()) System.out.println(e.name() + e.rank());\n  }\n}",
+	// Annotations on class/field/method/parameter (Runtime{Visible,Invisible}
+	// [Parameter]Annotations); the @interface types are not emitted, only AnnAll.
+	// The baseline verifies byte-parity with the TS emitter.
+	"AnnAll": "import java.lang.annotation.*;\n@Retention(RetentionPolicy.RUNTIME) @interface Rt {\n  String value(); int n() default 0; long l() default 0; double d() default 0;\n  boolean b() default false; Class<?> c() default Object.class;\n  ElementType e() default ElementType.TYPE; String[] arr() default {}; Cl nested() default @Cl(x=0);\n}\n@Retention(RetentionPolicy.CLASS) @interface Cl { int x(); }\n@Rt(value=\"hi\", n=5, l=9L, d=1.5, b=true, c=String.class, e=ElementType.METHOD, arr={\"a\",\"b\"}, nested=@Cl(x=7))\n@Cl(x=3)\npublic class AnnAll {\n  @Rt(\"f\") int field;\n  @Rt(\"m\") public int m(@Rt(\"p\") int p, @Cl(x=1) int q) { return p + q; }\n}",
 }
 
 func TestEmitterBaselines(t *testing.T) {

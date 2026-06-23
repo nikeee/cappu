@@ -130,7 +130,16 @@ type classAttributes struct {
 // body classes (E$N), whose enclosing class is the enum.
 // permittedSubclasses (JVMS 4.7.31): a sealed type's permitted direct subclasses;
 // an enum with constant bodies is implicitly sealed over its E$N.
-func buildClassAttributes(cp *constantPool, sourceName string, name internalName, nestMembers map[string][]internalName, signature jvmSignature, hasSignature bool, innerClasses *innerClassMap, enclosingMethod internalName, permittedSubclasses []internalName) classAttributes {
+// annotationSource carries a type declaration's annotations (its modifiers) for
+// the Runtime{Visible,Invisible}Annotations attributes; nil for synthetic classes
+// (anonymous, E$N).
+type annotationSource struct {
+	modifiers *NodeArray
+	from      *Node
+	program   *Program
+}
+
+func buildClassAttributes(cp *constantPool, sourceName string, name internalName, nestMembers map[string][]internalName, signature jvmSignature, hasSignature bool, innerClasses *innerClassMap, enclosingMethod internalName, permittedSubclasses []internalName, ann *annotationSource) classAttributes {
 	buffer := &byteBuffer{}
 	count := 0
 	refCountBeforeAttrs := len(cp.referencedClasses)
@@ -150,6 +159,9 @@ func buildClassAttributes(cp *constantPool, sourceName string, name internalName
 		buffer.u4(body.length())
 		buffer.appendBuf(body)
 		count++
+	}
+	if ann != nil {
+		count += writeAnnotationAttributes(buffer, cp, ann.modifiers, ann.from, ann.program)
 	}
 	if enclosingMethod != "" {
 		buffer.u2(int(cp.utf8("EnclosingMethod")))
