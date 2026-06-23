@@ -17,6 +17,7 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "typecheck": "tsc --noEmit",
+    "version": "node scripts/sync-go-version.mjs && git add togo/internal/meta/meta.go",
     "lsp": "tsx src/cli/main.ts lsp",
     "corpus:init": "git submodule update --init && for d in test-fixtures/emitter/corpus/*/; do git -C \"$d\" sparse-checkout set --no-cone '/**/*.java' '*.java'; done",
     "test": "tsx --test \"./src/**/*.test.ts\""
