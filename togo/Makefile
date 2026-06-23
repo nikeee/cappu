@@ -1,6 +1,12 @@
 # Developer tasks for the Go build. `make help` lists targets.
 GOBIN := $(shell go env GOPATH)/bin
+# VERSION stamps the binary's reported version (cappu --version). Releases pass
+# the git tag (CD.yaml); a plain `make build` leaves the meta.go dev default.
+VERSION ?=
 LDFLAGS := -s -w
+ifneq ($(VERSION),)
+LDFLAGS += -X github.com/nikeee/cappu/internal/meta.Version=$(VERSION)
+endif
 
 .PHONY: help fmt fmt-check lint vet test build build-all clean tools generate generate-check
 

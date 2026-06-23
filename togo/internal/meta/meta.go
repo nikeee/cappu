@@ -1,11 +1,13 @@
 // Package meta holds build-wide constants the CLI reports (version, issue
-// tracker). In the Node build these come from package.json; here they are
-// compile-time constants kept in sync with it.
+// tracker). In the Node build these come from package.json.
 package meta
 
-const (
-	// Version is the cappu version (mirrors package.json "version").
-	Version = "1.0.0"
-	// IssueTracker is the bug tracker `cappu rage` opens (package.json bugs.url).
-	IssueTracker = "https://github.com/nikeee/cappu/issues"
-)
+// Version is the cappu version reported by `cappu --version`. Release binaries
+// stamp it from the git tag via `-ldflags "-X .../meta.Version=<tag>"` (see
+// togo/Makefile + .github/workflows/CD.yaml), so the shipped binary always
+// reports its own build version. The default below is the dev-build fallback,
+// kept in step with package.json "version" by the npm version hook.
+var Version = "1.0.0"
+
+// IssueTracker is the bug tracker `cappu rage` opens (package.json bugs.url).
+const IssueTracker = "https://github.com/nikeee/cappu/issues"

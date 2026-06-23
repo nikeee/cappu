@@ -1,8 +1,6 @@
 package selfupgrade
 
 import (
-	"archive/zip"
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,113 +14,91 @@ func TestPlatformTarget(t *testing.T) {
 	cases := []struct {
 		goos, goarch string
 		ok           bool
-		artifact     string
+		asset        string
 	}{
 		{"linux", "amd64", true, "cappu-linux-x64"},
 		{"linux", "arm64", true, "cappu-linux-arm64"},
 		{"darwin", "arm64", true, "cappu-darwin-arm64"},
-		{"windows", "amd64", true, "cappu-windows-x64"},
+		{"windows", "amd64", true, "cappu-win-x64.exe"},
 		{"windows", "arm64", false, ""}, // no windows-arm64
 		{"darwin", "amd64", false, ""},  // no macOS x64
 		{"freebsd", "amd64", false, ""}, // unsupported OS
 	}
 	for _, c := range cases {
 		got, ok := PlatformTarget(c.goos, c.goarch)
-		if ok != c.ok || (ok && got.Artifact != c.artifact) {
-			t.Errorf("PlatformTarget(%s,%s) = (%+v,%v)", c.goos, c.goarch, got, ok)
+		if ok != c.ok || (ok && got != c.asset) {
+			t.Errorf("PlatformTarget(%s,%s) = (%q,%v)", c.goos, c.goarch, got, ok)
 		}
 	}
-	if tgt, _ := PlatformTarget("windows", "amd64"); tgt.BinaryName != "cappu.exe" {
-		t.Errorf("windows binary = %q", tgt.BinaryName)
-	}
-	if tgt, _ := PlatformTarget("linux", "amd64"); tgt.BinaryName != "cappu" {
-		t.Errorf("linux binary = %q", tgt.BinaryName)
-	}
 }
 
-var linuxTarget = Target{Artifact: "cappu-linux-x64", BinaryName: "cappu"}
+const linuxAsset = "cappu-linux-x64"
 
-// fakeJSON serves the runs document, or the artifacts document for /artifacts.
-func fakeJSON(runs, artifacts string) FetchJSON {
-	return func(url string) ([]byte, error) {
-		if strings.HasSuffix(url, "/artifacts") {
-			return []byte(artifacts), nil
-		}
-		return []byte(runs), nil
-	}
+// fakeJSON serves the same release document for any url.
+func fakeJSON(release string) FetchJSON {
+	return func(string) ([]byte, error) { return []byte(release), nil }
 }
 
-func zipWith(t *testing.T, name string, content []byte) []byte {
-	t.Helper()
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	w, err := zw.Create(name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.Write(content); err != nil {
-		t.Fatal(err)
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buf.Bytes()
-}
-
-func TestLatestArtifactSelectsMatching(t *testing.T) {
-	ref, err := LatestArtifact(linuxTarget, fakeJSON(
-		`{"workflow_runs":[{"id":42,"head_sha":"abc1234def","created_at":"2026-06-13T00:00:00Z"}]}`,
-		`{"artifacts":[{"id":7,"name":"cappu-darwin-arm64","expired":false},{"id":9,"name":"cappu-linux-x64","expired":false}]}`,
+func TestLatestReleaseSelectsMatching(t *testing.T) {
+	ref, err := LatestRelease(linuxAsset, fakeJSON(
+		`{"tag_name":"v1.2.3","published_at":"2026-06-13T00:00:00Z","assets":[`+
+			`{"name":"cappu-darwin-arm64","browser_download_url":"https://example/darwin"},`+
+			`{"name":"cappu-linux-x64","browser_download_url":"https://example/linux"}]}`,
 	))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ArtifactRef{ID: 9, Name: "cappu-linux-x64", RunSha: "abc1234def", RunCreatedAt: "2026-06-13T00:00:00Z"}
+	want := ReleaseRef{AssetName: "cappu-linux-x64", AssetURL: "https://example/linux", Tag: "v1.2.3", PublishedAt: "2026-06-13T00:00:00Z"}
 	if ref != want {
 		t.Errorf("ref = %+v, want %+v", ref, want)
 	}
 }
 
-func TestLatestArtifactErrors(t *testing.T) {
-	cases := []struct {
-		runs, artifacts, wantErr string
-	}{
-		{`{"workflow_runs":[]}`, `{}`, "no successful CD run"},
-		{`{"workflow_runs":[{"id":1,"head_sha":"a","created_at":"t"}]}`, `{"artifacts":[]}`, "has no artifact 'cappu-linux-x64'"},
-		{`{"workflow_runs":[{"id":1,"head_sha":"a","created_at":"t"}]}`, `{"artifacts":[{"id":9,"name":"cappu-linux-x64","expired":true}]}`, "has expired"},
+func TestLatestReleaseErrors(t *testing.T) {
+	cases := []struct{ release, wantErr string }{
+		{`{}`, "no published release"},
+		{`{"tag_name":"v1.0.0","assets":[]}`, "has no asset 'cappu-linux-x64'"},
 	}
 	for _, c := range cases {
-		_, err := LatestArtifact(linuxTarget, fakeJSON(c.runs, c.artifacts))
+		_, err := LatestRelease(linuxAsset, fakeJSON(c.release))
 		if err == nil || !strings.Contains(err.Error(), c.wantErr) {
 			t.Errorf("err = %v, want containing %q", err, c.wantErr)
 		}
 	}
 }
 
-func TestDownloadBinaryExtractsZip(t *testing.T) {
-	zipBytes := zipWith(t, "cappu", []byte("ELF-ish bytes"))
-	got, err := DownloadBinary(9, "cappu", func(string, DownloadProgress) ([]byte, error) { return zipBytes, nil }, nil)
+func TestSameVersion(t *testing.T) {
+	cases := []struct {
+		tag, current string
+		want         bool
+	}{
+		{"v1.2.3", "1.2.3", true},
+		{"1.2.3", "1.2.3", true},
+		{"v1.2.4", "1.2.3", false},
+		{"v1.2.3", "", false}, // unknown current version never counts as up to date
+	}
+	for _, c := range cases {
+		if got := SameVersion(c.tag, c.current); got != c.want {
+			t.Errorf("SameVersion(%q,%q) = %v, want %v", c.tag, c.current, got, c.want)
+		}
+	}
+}
+
+func TestDownloadBinaryFromAsset(t *testing.T) {
+	got, err := DownloadBinary("https://example/linux", func(string, DownloadProgress) ([]byte, error) {
+		return []byte("ELF-ish bytes"), nil
+	}, nil)
 	if err != nil || string(got) != "ELF-ish bytes" {
-		t.Fatalf("extract = (%q, %v)", got, err)
-	}
-	// non-zip input is a clear error
-	if _, err := DownloadBinary(9, "cappu", func(string, DownloadProgress) ([]byte, error) { return []byte{1, 2}, nil }, nil); err == nil || !strings.Contains(err.Error(), "not a valid zip") {
-		t.Errorf("non-zip err = %v", err)
-	}
-	// a single non-directory entry is accepted even under a different name
-	wrong := zipWith(t, "readme.txt", []byte{1})
-	if b, err := DownloadBinary(9, "cappu", func(string, DownloadProgress) ([]byte, error) { return wrong, nil }, nil); err != nil || len(b) != 1 {
-		t.Errorf("wrong-name = (%v, %v)", b, err)
+		t.Fatalf("download = (%q, %v)", got, err)
 	}
 }
 
 func TestDownloadBinaryForwardsProgress(t *testing.T) {
-	zipBytes := zipWith(t, "cappu", []byte("x"))
 	var calls [][2]int64
-	_, err := DownloadBinary(9, "cappu", func(_ string, onProgress DownloadProgress) ([]byte, error) {
+	_, err := DownloadBinary("https://example/linux", func(_ string, onProgress DownloadProgress) ([]byte, error) {
 		onProgress(50, 100)
 		onProgress(100, 100)
-		return zipBytes, nil
+		return []byte("x"), nil
 	}, func(received, total int64) { calls = append(calls, [2]int64{received, total}) })
 	if err != nil {
 		t.Fatal(err)
@@ -157,47 +133,57 @@ func TestSelfUpgradeEndToEnd(t *testing.T) {
 	if err := os.WriteFile(target, []byte("v1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	zipBytes := zipWith(t, "cappu", []byte("v2"))
 	result, err := SelfUpgrade(Options{
 		TargetPath: target,
 		GOOS:       "linux",
 		GOARCH:     "amd64",
 		FetchJSON: fakeJSON(
-			`{"workflow_runs":[{"id":5,"head_sha":"deadbee","created_at":"2026-06-13T12:00:00Z"}]}`,
-			`{"artifacts":[{"id":3,"name":"cappu-linux-x64","expired":false}]}`,
+			`{"tag_name":"v2.0.0","published_at":"2026-06-13T12:00:00Z","assets":[` +
+				`{"name":"cappu-linux-x64","browser_download_url":"https://example/linux"}]}`,
 		),
-		FetchBytes: func(string, DownloadProgress) ([]byte, error) { return zipBytes, nil },
+		FetchBytes: func(string, DownloadProgress) ([]byte, error) { return []byte("v2"), nil },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(target)
-	if string(data) != "v2" || result.Artifact.RunSha != "deadbee" || result.TargetPath != target {
+	if string(data) != "v2" || result.Release.Tag != "v2.0.0" || result.TargetPath != target || result.UpToDate {
 		t.Errorf("result = %+v, contents=%q", result, data)
 	}
 }
 
-func TestSelfUpgradeUnbuiltPlatformFailsBeforeFetch(t *testing.T) {
-	_, err := SelfUpgrade(Options{GOOS: "windows", GOARCH: "arm64", Token: "x"})
-	if err == nil || !strings.Contains(err.Error(), "no cappu build for windows/arm64") {
-		t.Errorf("err = %v", err)
+func TestSelfUpgradeSkipsWhenUpToDate(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "cappu")
+	if err := os.WriteFile(target, []byte("v1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result, err := SelfUpgrade(Options{
+		TargetPath:     target,
+		CurrentVersion: "2.0.0",
+		GOOS:           "linux",
+		GOARCH:         "amd64",
+		FetchJSON: fakeJSON(
+			`{"tag_name":"v2.0.0","published_at":"2026-06-13T12:00:00Z","assets":[` +
+				`{"name":"cappu-linux-x64","browser_download_url":"https://example/linux"}]}`,
+		),
+		FetchBytes: func(string, DownloadProgress) ([]byte, error) {
+			t.Fatal("should not download when already up to date")
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(target)
+	if !result.UpToDate || string(data) != "v1" {
+		t.Errorf("result = %+v, contents=%q (binary should be untouched)", result, data)
 	}
 }
 
-func TestResolveTokenPrecedence(t *testing.T) {
-	cases := []struct {
-		cappu, github, gh, want string
-	}{
-		{"a", "b", "c", "a"}, // CAPPU_GITHUB_TOKEN wins
-		{"", "b", "c", "b"},  // then GITHUB_TOKEN
-		{"", "", "c", "c"},   // then GH_TOKEN
-	}
-	for _, c := range cases {
-		t.Setenv("CAPPU_GITHUB_TOKEN", c.cappu)
-		t.Setenv("GITHUB_TOKEN", c.github)
-		t.Setenv("GH_TOKEN", c.gh)
-		if got, ok := ResolveToken(); !ok || got != c.want {
-			t.Errorf("ResolveToken(%+v) = (%q,%v), want %q", c, got, ok, c.want)
-		}
+func TestSelfUpgradeUnbuiltPlatformFailsBeforeFetch(t *testing.T) {
+	_, err := SelfUpgrade(Options{GOOS: "windows", GOARCH: "arm64"})
+	if err == nil || !strings.Contains(err.Error(), "no cappu build for windows/arm64") {
+		t.Errorf("err = %v", err)
 	}
 }

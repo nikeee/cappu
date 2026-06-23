@@ -1,56 +1,46 @@
-// Package selfupgrade replaces the running binary with the freshest CD build:
-// the latest successful CD.yaml run's uploaded artifact for this platform
-// (cappu-<os>-<arch>, a zip wrapping the single binary). The GitHub artifact
-// API needs an actions:read token. Self-contained; fetchers are injectable for
-// tests. Port of src/selfupgrade/selfupgrade.ts.
+// Package selfupgrade replaces the running binary with the latest published
+// GitHub release. The release API and asset downloads are public (no token),
+// and each platform's binary is uploaded as a raw release asset named
+// cappu-<os>-<arch>. Self-contained; fetchers are injectable for tests. Port of
+// src/selfupgrade/selfupgrade.ts.
 package selfupgrade
 
 import (
-	"archive/zip"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"github.com/nikeee/cappu/internal/httpx"
 )
 
 const (
 	repoOwner = "nikeee"
 	repoName  = "cappu"
-	workflow  = "CD.yaml"
 	githubAPI = "https://api.github.com"
 )
 
-// Target is the CD artifact and the binary name inside it for a platform.
-type Target struct {
-	Artifact   string
-	BinaryName string
-}
-
-// PlatformTarget is the CD artifact matching a platform, or ok=false when none
+// PlatformTarget is the release asset name for a platform, or ok=false when none
 // is built (windows is x64-only, macOS arm64-only).
-func PlatformTarget(goos, goarch string) (Target, bool) {
+func PlatformTarget(goos, goarch string) (string, bool) {
 	os := map[string]string{"linux": "linux", "darwin": "darwin", "windows": "windows"}[goos]
 	cpu := map[string]string{"amd64": "x64", "arm64": "arm64"}[goarch]
 	if os == "" || cpu == "" {
-		return Target{}, false
+		return "", false
 	}
 	if os == "windows" && cpu != "x64" {
-		return Target{}, false
+		return "", false
 	}
 	if os == "darwin" && cpu != "arm64" {
-		return Target{}, false
+		return "", false
 	}
-	binary := "cappu"
+	// Asset names match `make build-all` output (the dist filenames), so CD can
+	// upload dist/* with no renames. Windows keeps the .exe so the downloaded
+	// asset is runnable as-is.
 	if os == "windows" {
-		binary = "cappu.exe"
+		return "cappu-win-x64.exe", true
 	}
-	return Target{Artifact: fmt.Sprintf("cappu-%s-%s", os, cpu), BinaryName: binary}, true
+	return fmt.Sprintf("cappu-%s-%s", os, cpu), true
 }
 
 // FetchJSON GETs a url and returns the body. FetchBytes GETs a (possibly large)
@@ -61,95 +51,53 @@ type (
 	FetchBytes       func(url string, onProgress DownloadProgress) ([]byte, error)
 )
 
-// ArtifactRef is the build artifact to upgrade from, with the run it came from.
-type ArtifactRef struct {
-	ID           int64
-	Name         string
-	RunSha       string
-	RunCreatedAt string
+// ReleaseRef is the release asset to upgrade from, with the release it belongs to.
+type ReleaseRef struct {
+	AssetName   string
+	AssetURL    string
+	Tag         string
+	PublishedAt string
 }
 
-// LatestArtifact is the artifact for target in the latest successful CD run on main.
-func LatestArtifact(target Target, fetchJSON FetchJSON) (ArtifactRef, error) {
-	raw, err := fetchJSON(fmt.Sprintf("%s/repos/%s/%s/actions/workflows/%s/runs?branch=main&status=success&event=push&per_page=1", githubAPI, repoOwner, repoName, workflow))
+// LatestRelease is the asset matching assetName in the latest published release.
+func LatestRelease(assetName string, fetchJSON FetchJSON) (ReleaseRef, error) {
+	raw, err := fetchJSON(fmt.Sprintf("%s/repos/%s/%s/releases/latest", githubAPI, repoOwner, repoName))
 	if err != nil {
-		return ArtifactRef{}, err
+		return ReleaseRef{}, err
 	}
-	var runs struct {
-		WorkflowRuns []struct {
-			ID        int64  `json:"id"`
-			HeadSha   string `json:"head_sha"`
-			CreatedAt string `json:"created_at"`
-		} `json:"workflow_runs"`
+	var release struct {
+		TagName     string `json:"tag_name"`
+		PublishedAt string `json:"published_at"`
+		Assets      []struct {
+			Name        string `json:"name"`
+			DownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
 	}
-	if err := json.Unmarshal(raw, &runs); err != nil {
-		return ArtifactRef{}, err
+	if err := json.Unmarshal(raw, &release); err != nil {
+		return ReleaseRef{}, err
 	}
-	if len(runs.WorkflowRuns) == 0 {
-		return ArtifactRef{}, fmt.Errorf("no successful CD run found on main")
+	if release.TagName == "" {
+		return ReleaseRef{}, fmt.Errorf("no published release found")
 	}
-	run := runs.WorkflowRuns[0]
-
-	raw, err = fetchJSON(fmt.Sprintf("%s/repos/%s/%s/actions/runs/%d/artifacts", githubAPI, repoOwner, repoName, run.ID))
-	if err != nil {
-		return ArtifactRef{}, err
-	}
-	var artifacts struct {
-		Artifacts []struct {
-			ID      int64  `json:"id"`
-			Name    string `json:"name"`
-			Expired bool   `json:"expired"`
-		} `json:"artifacts"`
-	}
-	if err := json.Unmarshal(raw, &artifacts); err != nil {
-		return ArtifactRef{}, err
-	}
-	for _, a := range artifacts.Artifacts {
-		if a.Name != target.Artifact {
-			continue
+	for _, a := range release.Assets {
+		if a.Name == assetName {
+			return ReleaseRef{AssetName: a.Name, AssetURL: a.DownloadURL, Tag: release.TagName, PublishedAt: release.PublishedAt}, nil
 		}
-		if a.Expired {
-			return ArtifactRef{}, fmt.Errorf("artifact '%s' from CD run %d has expired", target.Artifact, run.ID)
-		}
-		return ArtifactRef{ID: a.ID, Name: a.Name, RunSha: run.HeadSha, RunCreatedAt: run.CreatedAt}, nil
 	}
-	return ArtifactRef{}, fmt.Errorf("CD run %d has no artifact '%s'", run.ID, target.Artifact)
+	return ReleaseRef{}, fmt.Errorf("release %s has no asset '%s'", release.TagName, assetName)
 }
 
-// DownloadBinary downloads the artifact zip and extracts the single binary.
-func DownloadBinary(artifactID int64, binaryName string, fetchBytes FetchBytes, onProgress DownloadProgress) ([]byte, error) {
-	zipBytes, err := fetchBytes(fmt.Sprintf("%s/repos/%s/%s/actions/artifacts/%d/zip", githubAPI, repoOwner, repoName, artifactID), onProgress)
-	if err != nil {
-		return nil, err
-	}
-	zr, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
-	if err != nil {
-		return nil, fmt.Errorf("the downloaded artifact is not a valid zip")
-	}
-	var entry *zip.File
-	for _, f := range zr.File {
-		if f.Name == binaryName {
-			entry = f
-			break
-		}
-	}
-	if entry == nil {
-		for _, f := range zr.File {
-			if !strings.HasSuffix(f.Name, "/") {
-				entry = f
-				break
-			}
-		}
-	}
-	if entry == nil {
-		return nil, fmt.Errorf("the artifact did not contain %s", binaryName)
-	}
-	rc, err := entry.Open()
-	if err != nil {
-		return nil, err
-	}
-	defer rc.Close()
-	return httpx.ReadAllCapped(rc)
+// SameVersion reports whether the release tag names the running version. Tags
+// are vX.Y.Z; meta.Version is X.Y.Z. ponytail: plain equality, not a semver
+// comparison - enough to skip a redundant re-download; swap in a compare if
+// downgrade protection is ever needed.
+func SameVersion(tag, currentVersion string) bool {
+	return currentVersion != "" && strings.TrimPrefix(tag, "v") == currentVersion
+}
+
+// DownloadBinary downloads the raw binary release asset.
+func DownloadBinary(assetURL string, fetchBytes FetchBytes, onProgress DownloadProgress) ([]byte, error) {
+	return fetchBytes(assetURL, onProgress)
 }
 
 // ReplaceBinary replaces targetPath with bytes, executable. POSIX renames over
@@ -175,44 +123,29 @@ func ReplaceBinary(targetPath string, data []byte) error {
 	return os.Rename(staged, targetPath)
 }
 
-// ResolveToken returns a GitHub token from the environment, else `gh auth
-// token`. ok is false when none is available.
-func ResolveToken() (string, bool) {
-	for _, name := range []string{"CAPPU_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"} {
-		if v := os.Getenv(name); v != "" {
-			return v, true
-		}
-	}
-	out, err := exec.Command("gh", "auth", "token").Output()
-	if err == nil {
-		if token := strings.TrimSpace(string(out)); token != "" {
-			return token, true
-		}
-	}
-	return "", false
-}
-
-// Result reports a completed upgrade.
+// Result reports a completed upgrade. UpToDate is true when the running version
+// already matched the latest release and nothing was downloaded or replaced.
 type Result struct {
-	Target     Target
-	Artifact   ArtifactRef
+	AssetName  string
+	Release    ReleaseRef
 	TargetPath string
+	UpToDate   bool
 }
 
-// Options configures an upgrade. Fetchers are injectable; otherwise Token
-// builds authenticated ones.
+// Options configures an upgrade. Fetchers are injectable; otherwise the public
+// GitHub fetchers are used.
 type Options struct {
-	TargetPath string
-	Token      string
-	GOOS       string
-	GOARCH     string
-	FetchJSON  FetchJSON
-	FetchBytes FetchBytes
-	OnProgress DownloadProgress
+	TargetPath     string
+	CurrentVersion string
+	GOOS           string
+	GOARCH         string
+	FetchJSON      FetchJSON
+	FetchBytes     FetchBytes
+	OnProgress     DownloadProgress
 }
 
 // SelfUpgrade replaces the target (the running binary by default) with the
-// latest CD build for this platform.
+// latest release build for this platform, unless it is already current.
 func SelfUpgrade(opts Options) (Result, error) {
 	goos, goarch := opts.GOOS, opts.GOARCH
 	if goos == "" {
@@ -221,22 +154,15 @@ func SelfUpgrade(opts Options) (Result, error) {
 	if goarch == "" {
 		goarch = runtime.GOARCH
 	}
-	target, ok := PlatformTarget(goos, goarch)
+	assetName, ok := PlatformTarget(goos, goarch)
 	if !ok {
 		return Result{}, fmt.Errorf("no cappu build for %s/%s", goos, goarch)
 	}
 	fetchJSON, fetchBytes := opts.FetchJSON, opts.FetchBytes
 	if fetchJSON == nil || fetchBytes == nil {
-		if opts.Token == "" {
-			return Result{}, fmt.Errorf("a GitHub token is required (set GITHUB_TOKEN)")
-		}
-		fetchJSON, fetchBytes = githubFetchers(opts.Token)
+		fetchJSON, fetchBytes = githubFetchers()
 	}
-	artifact, err := LatestArtifact(target, fetchJSON)
-	if err != nil {
-		return Result{}, err
-	}
-	data, err := DownloadBinary(artifact.ID, target.BinaryName, fetchBytes, opts.OnProgress)
+	release, err := LatestRelease(assetName, fetchJSON)
 	if err != nil {
 		return Result{}, err
 	}
@@ -246,8 +172,15 @@ func SelfUpgrade(opts Options) (Result, error) {
 			targetPath = exe
 		}
 	}
+	if SameVersion(release.Tag, opts.CurrentVersion) {
+		return Result{AssetName: assetName, Release: release, TargetPath: targetPath, UpToDate: true}, nil
+	}
+	data, err := DownloadBinary(release.AssetURL, fetchBytes, opts.OnProgress)
+	if err != nil {
+		return Result{}, err
+	}
 	if err := ReplaceBinary(targetPath, data); err != nil {
 		return Result{}, err
 	}
-	return Result{Target: target, Artifact: artifact, TargetPath: targetPath}, nil
+	return Result{AssetName: assetName, Release: release, TargetPath: targetPath}, nil
 }

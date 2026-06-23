@@ -7,12 +7,13 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/nikeee/cappu/internal/meta"
 	"github.com/nikeee/cappu/internal/selfupgrade"
 )
 
 // RunSelfUpgrade handles `cappu self-upgrade`: replace the running binary with
-// the latest CD build. Refuses to run when the executable is not a cappu binary
-// (e.g. `go run` / a test harness). Port of src/cli/selfUpgrade.ts.
+// the latest published release. Refuses to run when the executable is not a
+// cappu binary (e.g. `go run` / a test harness). Port of src/cli/selfUpgrade.ts.
 func RunSelfUpgrade() int {
 	errp := painter(os.Stderr)
 	out := painter(os.Stdout)
@@ -33,29 +34,23 @@ func RunSelfUpgrade() int {
 		return 2
 	}
 
-	token, ok := selfupgrade.ResolveToken()
-	if !ok {
-		fmt.Fprintln(os.Stderr, "cappu: self-upgrade needs a GitHub token to read CD build artifacts.\n"+
-			"       Set GITHUB_TOKEN (or run `gh auth login`).")
-		return 2
-	}
-
-	fmt.Fprint(os.Stderr, errp("bold", errp("cyan", "fetching the latest CD build...\n")))
+	fmt.Fprint(os.Stderr, errp("bold", errp("cyan", "fetching the latest release...\n")))
 	result, err := selfupgrade.SelfUpgrade(selfupgrade.Options{
-		TargetPath: targetPath,
-		Token:      token,
-		GOOS:       runtime.GOOS,
-		GOARCH:     runtime.GOARCH,
+		TargetPath:     targetPath,
+		CurrentVersion: meta.Version,
+		GOOS:           runtime.GOOS,
+		GOARCH:         runtime.GOARCH,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s self-upgrade failed: %s\n", errp("red", "error:"), err)
 		return 1
 	}
-	sha := result.Artifact.RunSha
-	if len(sha) > 7 {
-		sha = sha[:7]
+	if result.UpToDate {
+		fmt.Fprintf(os.Stdout, "%s already on the latest version (%s)\n",
+			out("green", "✓"), out("cyan", result.Release.Tag))
+		return 0
 	}
-	fmt.Fprintf(os.Stdout, "%s upgraded %s to %s (%s, built %s)\n",
-		out("green", "✓"), result.TargetPath, out("bold", result.Target.Artifact), out("cyan", sha), result.Artifact.RunCreatedAt)
+	fmt.Fprintf(os.Stdout, "%s upgraded %s to %s (%s, published %s)\n",
+		out("green", "✓"), result.TargetPath, out("bold", result.AssetName), out("cyan", result.Release.Tag), result.Release.PublishedAt)
 	return 0
 }
