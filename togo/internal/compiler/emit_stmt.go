@@ -822,8 +822,15 @@ func (g *bodyGen) emitMethodRef(node *Node) descriptor {
 // emitEnumClinitPrologue constructs each enum constant and the $VALUES array.
 func (g *bodyGen) emitEnumClinitPrologue(ec *enumClinit) {
 	for _, c := range ec.constants {
+		// A constant with a body is an instance of its E$N subclass; otherwise the
+		// enum itself. The constructor descriptor (name, ordinal, user args) is the
+		// same on either (E$N forwards to the enum's matching ctor).
+		owner := ec.enumInternal
+		if c.ownerInternal != "" {
+			owner = c.ownerInternal
+		}
 		g.code.u1(opNew)
-		g.code.u2(int(g.cp.classInfo(string(ec.enumInternal))))
+		g.code.u2(int(g.cp.classInfo(string(owner))))
 		g.pushRef(ec.selfDesc)
 		g.code.u1(opDup)
 		g.pushRef(ec.selfDesc)
@@ -839,7 +846,7 @@ func (g *bodyGen) emitEnumClinitPrologue(ec *enumClinit) {
 			g.coerce(g.emitExpr(arg), pd)
 		}
 		g.code.u1(opInvokespecial)
-		g.code.u2(int(g.cp.methodref(string(ec.enumInternal), "<init>", c.ctorDescriptor)))
+		g.code.u2(int(g.cp.methodref(string(owner), "<init>", c.ctorDescriptor)))
 		g.pop(1 + 2 + len(c.args))
 		g.code.u1(opPutstatic)
 		g.code.u2(int(g.cp.fieldref(ec.enumInternal, c.name, ec.selfDesc)))

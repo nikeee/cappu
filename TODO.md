@@ -153,6 +153,20 @@ verifiable placeholder, never a crash.
 - [x] Explicit constructor invocations (JLS 8.8.7.1): a leading `super(args)` or
       `this(args)`; `this(...)` skips this constructor's field initializers. The
       target overload is resolved by argument count (as for `new`).
+- [x] Enum constant bodies (JLS 8.9.1) `CONST { ... }`: each constant with a body
+      is emitted as its anonymous-style subclass `E$N` (final, `ACC_SUPER|ACC_ENUM`,
+      extends the enum) with a private constructor forwarding the constant name,
+      ordinal and user arguments to the enum's matching `<init>`; the body's
+      methods override the enum's (abstract) methods, reusing the anonymous-class
+      machinery. The enum loses `ACC_FINAL` (it is subclassed) and gains
+      `ACC_ABSTRACT` iff it declares an abstract method. The `<clinit>` constructs
+      each such constant via `new E$N`. The enum lists the `E$N` in `InnerClasses`
+      (ACC_FINAL), `NestMembers` and `PermittedSubclasses`; each `E$N` carries
+      `EnclosingMethod`/`NestHost`. Body classes are numbered (1-based, source
+      order) in the same per-enclosing-type counter as anonymous classes. Own
+      instance-field *initializers* in a body degrade to defaults (prologue-only
+      ctor). Verified run-equivalent to javac and byte-identical across the TS and
+      Go builds (`emit-baselines`, `innerclasses-baselines.json`).
 
 ## Try-with-resources (JLS 14.20.3) - partially done
 
@@ -196,8 +210,9 @@ These do not affect correctness but widen the diff vs javac's output.
       entry, and `MethodHandles$Lookup` appended when the class uses
       invokedynamic - byte-matching javac's order (verified by
       `innerclasses-baselines.json`). Types nested in an interface get the
-      implicit public+static flags. An enum with constant bodies is not matched
-      (the per-constant `E$N` subclass is not emitted yet).
+      implicit public+static flags. An enum with constant bodies lists each
+      per-constant `E$N` subclass (ACC_FINAL, anonymous-style) - they are now
+      emitted (see below).
 - [x] `Signature` (JVMS 4.7.9): emitted for generic classes/interfaces/enums
       (type parameters with class/interface bounds, generic supertypes), methods
       and constructors (own type params or generic param/return types; skipped
@@ -219,6 +234,11 @@ These do not affect correctness but widen the diff vs javac's output.
       concat) the table stays internally correct and JVM-valid. Synthetic
       parameters (this$0/captures/enum name+ordinal) get no entry (no source
       name); `LocalVariableTypeTable` for generic locals is not emitted.
+- [x] `EnclosingMethod` (JVMS 4.7.7): emitted on enum constant body classes
+      (`E$N`), pointing at the enclosing enum with method_index 0.
+- [x] `PermittedSubclasses` (JVMS 4.7.31): emitted on an enum with constant
+      bodies (implicitly sealed over its `E$N`, declaration order). General
+      `sealed`/`permits` on ordinary classes is parsed but not yet emitted.
 - [ ] `RuntimeVisibleAnnotations` (JVMS 4.7.16).
 
 ## Done (recent)

@@ -55,6 +55,9 @@ type enumConstantClinit struct {
 	ctorDescriptor methodDescriptor // (Ljava/lang/String;I<userparams>)V
 	userParamDescs []descriptor
 	args           []*Node
+	// ownerInternal is the class to instantiate: the enum itself ("") or the
+	// constant's E$N body subclass when it has a body.
+	ownerInternal internalName
 }
 
 // enumClinit is the data the enum <clinit> needs.
@@ -122,7 +125,12 @@ type classAttributes struct {
 // enums: Signature, SourceFile, BootstrapMethods, NestHost/NestMembers and
 // InnerClasses. Must run before the constant pool is written so the attribute
 // name Utf8s are interned.
-func buildClassAttributes(cp *constantPool, sourceName string, name internalName, nestMembers map[string][]internalName, signature jvmSignature, hasSignature bool, innerClasses *innerClassMap) classAttributes {
+// enclosingMethod (JVMS 4.7.7): the immediately enclosing class of an
+// anonymous-style class (method_index 0); "" if none. Used for enum constant
+// body classes (E$N), whose enclosing class is the enum.
+// permittedSubclasses (JVMS 4.7.31): a sealed type's permitted direct subclasses;
+// an enum with constant bodies is implicitly sealed over its E$N.
+func buildClassAttributes(cp *constantPool, sourceName string, name internalName, nestMembers map[string][]internalName, signature jvmSignature, hasSignature bool, innerClasses *innerClassMap, enclosingMethod internalName, permittedSubclasses []internalName) classAttributes {
 	buffer := &byteBuffer{}
 	count := 0
 	refCountBeforeAttrs := len(cp.referencedClasses)
@@ -141,6 +149,13 @@ func buildClassAttributes(cp *constantPool, sourceName string, name internalName
 		body := cp.bootstrapMethodsBody()
 		buffer.u4(body.length())
 		buffer.appendBuf(body)
+		count++
+	}
+	if enclosingMethod != "" {
+		buffer.u2(int(cp.utf8("EnclosingMethod")))
+		buffer.u4(4)
+		buffer.u2(int(cp.classInfo(string(enclosingMethod))))
+		buffer.u2(0) // method_index 0: not enclosed by a method
 		count++
 	}
 	if name != "" && nestMembers != nil {
@@ -167,6 +182,15 @@ func buildClassAttributes(cp *constantPool, sourceName string, name internalName
 			buffer.u2(int(cp.classInfo(string(host))))
 			count++
 		}
+	}
+	if len(permittedSubclasses) > 0 {
+		buffer.u2(int(cp.utf8("PermittedSubclasses")))
+		buffer.u4(2 + 2*len(permittedSubclasses))
+		buffer.u2(len(permittedSubclasses))
+		for _, p := range permittedSubclasses {
+			buffer.u2(int(cp.classInfo(string(p))))
+		}
+		count++
 	}
 	if innerClasses != nil && innerClasses.len() > 0 {
 		order := innerClassOrder(name, cp.referencedClasses, refCountBeforeAttrs, innerClasses, cp.bootstrapMethodCount() > 0)
@@ -218,6 +242,15 @@ func computeNestMembers(sourceFile *Node, program *Program) map[string][]interna
 			if node.Symbol != nil {
 				add(binaryName(node.Symbol))
 			}
+			// An enum constant with a body (CONST {...}) is emitted as its own
+			// Outer$N nestmate.
+			if node.Kind == EnumDeclaration {
+				for _, c := range arrayNodes(node.AsEnumDeclaration().EnumConstants) {
+					if c.AsEnumConstantDeclaration().ClassBody != nil {
+						add(enumBodyClassName(c, program))
+					}
+				}
+			}
 		case node.Kind == ObjectCreationExpression && node.AsObjectCreationExpression().ClassBody != nil && anonymousTarget(node, program) != nil:
 			add(anonymousClassName(node, program))
 		}
@@ -254,6 +287,15 @@ func computeInnerClassInfo(sourceFile *Node, program *Program) *innerClassMap {
 			}
 		case node.Kind == ObjectCreationExpression && node.AsObjectCreationExpression().ClassBody != nil && anonymousTarget(node, program) != nil:
 			info.set(anonymousClassName(node, program), innerClassRecord{flags: 0})
+		}
+		// An enum constant body is an anonymous-style subclass: javac's
+		// InnerClasses entry carries ACC_FINAL only (inner_name = outer = 0).
+		if node.Kind == EnumDeclaration {
+			for _, c := range arrayNodes(node.AsEnumDeclaration().EnumConstants) {
+				if c.AsEnumConstantDeclaration().ClassBody != nil {
+					info.set(enumBodyClassName(c, program), innerClassRecord{flags: accFinal})
+				}
+			}
 		}
 		node.ForEachChild(func(c *Node) bool {
 			visit(c)

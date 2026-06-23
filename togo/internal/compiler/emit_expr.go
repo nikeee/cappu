@@ -366,7 +366,18 @@ func (g *bodyGen) emitEnumStaticCall(call *Node) (descriptor, bool) {
 
 // --- anonymous class targeting -----------------------------------------------
 
-func anonymousClassName(node *Node, program *Program) internalName {
+// isBodyClassNode reports whether a node becomes its own Outer$N class: an
+// anonymous class (new T(){...}) or an enum constant with a body (CONST {...}).
+// javac numbers both in a single per-enclosing-type counter, by source position.
+func isBodyClassNode(n *Node) bool {
+	return (n.Kind == ObjectCreationExpression && n.AsObjectCreationExpression().ClassBody != nil) ||
+		(n.Kind == EnumConstantDeclaration && n.AsEnumConstantDeclaration().ClassBody != nil)
+}
+
+// bodyClassName returns the Outer$N binary name of a body-bearing node: the
+// enclosing type's binary name plus a 1-based index over all body-class nodes in
+// that type, ordered by source position - javac's numbering.
+func bodyClassName(node *Node, program *Program) internalName {
 	program.GetGlobalIndex()
 	var enclosing *Node
 	for n := node.Parent; n != nil; n = n.Parent {
@@ -382,7 +393,7 @@ func anonymousClassName(node *Node, program *Program) internalName {
 	index := 0
 	var count func(n *Node)
 	count = func(n *Node) {
-		if n.Kind == ObjectCreationExpression && n.AsObjectCreationExpression().ClassBody != nil && n.Pos <= node.Pos {
+		if isBodyClassNode(n) && n.Pos <= node.Pos {
 			index++
 		}
 		if n != enclosing && isTypeDeclarationKind(n.Kind) {
@@ -399,6 +410,15 @@ func anonymousClassName(node *Node, program *Program) internalName {
 		count(node)
 	}
 	return internalName(fmt.Sprintf("%s$%d", base, index))
+}
+
+func anonymousClassName(node *Node, program *Program) internalName {
+	return bodyClassName(node, program)
+}
+
+// enumBodyClassName returns the Outer$N binary name of an enum constant body.
+func enumBodyClassName(node *Node, program *Program) internalName {
+	return bodyClassName(node, program)
 }
 
 // anonTarget describes the supertype an anonymous class can be emitted against.

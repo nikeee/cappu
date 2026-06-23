@@ -54,6 +54,10 @@ var emitFixtures = map[string]string{
 	"ICast":         "public class ICast {\n  interface A { int a(); }\n  interface B { int b(); }\n  static int use(Object o) {\n    A x = (A & B) o;\n    return x.a();\n  }\n}",
 	"QualifiedNew":  "public class QualifiedNew {\n  int x = 7;\n  class Inner { int v; Inner(int a) { v = a; } int sum() { return v + x; } }\n  static int make(QualifiedNew outer) { return outer.new Inner(5).v; }\n}",
 	"Nest":          "public class Nest {\n  static class Point { int x, y; Point(int x, int y){ this.x=x; this.y=y; } int sum(){ return x+y; } }\n  static class Counter { static int total; int n; void tick(){ n++; total++; } int get(){ return n; } }\n  static int helper(int a){ return a*2; }\n}",
+	// Enum constant bodies: each body becomes an Outer$N subclass; the baselines
+	// (EnumMixed$1, EnumAbstract$1, ...) verify byte-parity with the TS emitter.
+	"EnumMixed":    "enum EnumMixed {\n  PLUS(\"+\") { public int apply(int a, int b) { return a + b; } },\n  TIMES(\"*\") { public int apply(int a, int b) { return a * b; } },\n  IDENT(\"=\");\n  private final String sym;\n  EnumMixed(String sym) { this.sym = sym; }\n  public int apply(int a, int b) { return a; }\n  public String sym() { return sym; }\n  public static void main(String[] args) {\n    for (EnumMixed o : EnumMixed.values()) System.out.println(o.name() + o.sym() + o.apply(6, 7));\n  }\n}",
+	"EnumAbstract": "enum EnumAbstract {\n  LOW { public int rank() { return 1; } },\n  HIGH { public int rank() { return 9; } };\n  public abstract int rank();\n  public static void main(String[] args) {\n    for (EnumAbstract e : EnumAbstract.values()) System.out.println(e.name() + e.rank());\n  }\n}",
 }
 
 func TestEmitterBaselines(t *testing.T) {

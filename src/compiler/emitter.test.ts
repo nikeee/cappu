@@ -387,6 +387,78 @@ for (const [name, source] of Object.entries(MULTI_FIXTURES)) {
   );
 }
 
+// Enum constant bodies emit one Outer$N subclass per body. Enums diverge from
+// javac on the synthetic $values() helper, so they cannot join the byte-match
+// tier above; instead each fixture's classes get binary baselines (which the Go
+// port compares against for parity) and a run-equivalence check against javac.
+// The expected class set is asserted so a missing/extra E$N is caught.
+const ENUM_MULTI_FIXTURES: Record<string, { source: string; classes: string[] }> = {
+  // Mixed: two constants with bodies, one without; the base apply is non-abstract
+  // so the enum is neither final (it is subclassed) nor abstract.
+  EnumMixed: {
+    source: [
+      "enum EnumMixed {",
+      '  PLUS("+") { public int apply(int a, int b) { return a + b; } },',
+      '  TIMES("*") { public int apply(int a, int b) { return a * b; } },',
+      '  IDENT("=");',
+      "  private final String sym;",
+      "  EnumMixed(String sym) { this.sym = sym; }",
+      "  public int apply(int a, int b) { return a; }",
+      "  public String sym() { return sym; }",
+      "  public static void main(String[] args) {",
+      "    for (EnumMixed o : EnumMixed.values()) System.out.println(o.name() + o.sym() + o.apply(6, 7));",
+      "  }",
+      "}",
+    ].join("\n"),
+    classes: ["EnumMixed", "EnumMixed$1", "EnumMixed$2"],
+  },
+  // Abstract: every constant has a body and the method is abstract, so the enum
+  // is abstract (ACC_ABSTRACT) and sealed over both bodies.
+  EnumAbstract: {
+    source: [
+      "enum EnumAbstract {",
+      "  LOW { public int rank() { return 1; } },",
+      "  HIGH { public int rank() { return 9; } };",
+      "  public abstract int rank();",
+      "  public static void main(String[] args) {",
+      "    for (EnumAbstract e : EnumAbstract.values()) System.out.println(e.name() + e.rank());",
+      "  }",
+      "}",
+    ].join("\n"),
+    classes: ["EnumAbstract", "EnumAbstract$1", "EnumAbstract$2"],
+  },
+};
+
+const ENUM_RUNS: Record<string, string> = {
+  EnumMixed: "PLUS+13\nTIMES*42\nIDENT=6\n",
+  EnumAbstract: "LOW1\nHIGH9\n",
+};
+
+for (const [name, { source, classes }] of Object.entries(ENUM_MULTI_FIXTURES)) {
+  test(`enum-body binary baseline: ${name}`, () => {
+    const emitted = emitClasses(name, source);
+    // Exactly one Outer$N per constant body, plus the enum itself.
+    expect(emitted.map(c => c.name).sort()).toEqual([...classes].sort());
+    for (const c of emitted) {
+      const baseline = join(baselinesDir, `${c.name}.class`);
+      if (shouldUpdate || !existsSync(baseline)) {
+        mkdirSync(baselinesDir, { recursive: true });
+        writeFileSync(baseline, c.bytes);
+      }
+      expect(Buffer.from(c.bytes).equals(readFileSync(baseline))).toBe(true);
+    }
+  });
+
+  test(`enum-body runs like javac: ${name}`, { skip: HAS_JAVA ? false : "no JDK" }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "emit-enum-"));
+    for (const c of emitClasses(name, source)) {
+      writeFileSync(join(dir, `${c.name}.class`), c.bytes);
+    }
+    const out = execFileSync("java", ["-cp", dir, name], { encoding: "utf8" });
+    expect(out).toBe(ENUM_RUNS[name]);
+  });
+}
+
 function source(name: string): string {
   return FIXTURES[name]!;
 }
@@ -409,6 +481,33 @@ test(
         "}",
       ].join("\n"),
       "-2147483648\n2147483644\n-9223372036854775808\n2\n-2\n",
+    );
+  },
+);
+
+test(
+  "enum constant bodies run identically to javac",
+  { skip: HAS_JAVA ? false : "no JDK" },
+  () => {
+    runsLikeJavac(
+      "EnumBody",
+      [
+        "public class EnumBody {",
+        "  enum Op {",
+        '    PLUS("+") { public int apply(int a, int b) { return a + b; } },',
+        '    TIMES("*") { public int apply(int a, int b) { return a * b; } },',
+        '    IDENT("=");', // a constant with no body shares the base implementation
+        "    private final String sym;",
+        "    Op(String sym) { this.sym = sym; }",
+        "    public int apply(int a, int b) { return a; }",
+        "    public String sym() { return sym; }",
+        "  }",
+        "  public static void main(String[] args) {",
+        "    for (Op o : Op.values()) System.out.println(o.name() + o.sym() + o.apply(6, 7));",
+        "  }",
+        "}",
+      ].join("\n"),
+      "PLUS+13\nTIMES*42\nIDENT=6\n",
     );
   },
 );
@@ -2972,6 +3071,16 @@ const innerClassFixtures: Record<string, string> = {
     "interface IcIface {",
     "  class Impl implements IcIface { }",
     "  static class K {}",
+    "}",
+  ].join("\n"),
+  // Enum constant bodies become anonymous-style Outer$N subclasses (ACC_FINAL in
+  // InnerClasses); only the constants with a body are numbered.
+  IcEnumBody: [
+    "enum IcEnumBody {",
+    "  A { int v(){ return 1; } },",
+    "  B,",
+    "  C { int v(){ return 3; } };",
+    "  int v(){ return 0; }",
     "}",
   ].join("\n"),
 };

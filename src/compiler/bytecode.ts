@@ -33,6 +33,7 @@ import {
   type CompactConstructorDeclaration,
   type ConstructorDeclaration,
   type EnumDeclaration,
+  type EnumConstantDeclaration,
   type RecordComponent,
   type RecordDeclaration,
   type BreakStatement,
@@ -808,6 +809,13 @@ function buildClassAttributes(
   signature?: JvmSignature,
   // Nested classes known from source, for the InnerClasses attribute.
   innerClasses?: Map<InternalName, InnerClassRecord>,
+  // EnclosingMethod (JVMS 4.7.7): the immediately enclosing class of a local or
+  // anonymous-style class (method_index 0 - not enclosed by a method). Used for
+  // enum constant body classes (E$N), whose enclosing class is the enum.
+  enclosingMethod?: InternalName,
+  // PermittedSubclasses (JVMS 4.7.31): a sealed type's permitted direct
+  // subclasses. An enum with constant bodies is implicitly sealed over its E$N.
+  permittedSubclasses?: InternalName[],
 ): { buffer: ByteBuffer; count: number } {
   const buffer = new ByteBuffer();
   let count = 0;
@@ -833,6 +841,13 @@ function buildClassAttributes(
     buffer.append(body);
     count++;
   }
+  if (enclosingMethod) {
+    buffer.u2(cp.utf8("EnclosingMethod"));
+    buffer.u4(4);
+    buffer.u2(cp.classInfo(enclosingMethod));
+    buffer.u2(0); // method_index 0: not enclosed by a method
+    count++;
+  }
   if (name && nestMembers) {
     // The nest host is the top-level type (the name up to the first '$'),
     // itself an internal name.
@@ -852,6 +867,13 @@ function buildClassAttributes(
       buffer.u2(cp.classInfo(host));
       count++;
     }
+  }
+  if (permittedSubclasses && permittedSubclasses.length > 0) {
+    buffer.u2(cp.utf8("PermittedSubclasses"));
+    buffer.u4(2 + 2 * permittedSubclasses.length);
+    buffer.u2(permittedSubclasses.length);
+    for (const p of permittedSubclasses) buffer.u2(cp.classInfo(p));
+    count++;
   }
   if (innerClasses && innerClasses.size > 0) {
     const order = innerClassOrder(
@@ -903,6 +925,13 @@ export function computeNestMembers(
       node.kind === SyntaxKind.RecordDeclaration
     ) {
       if (node.symbol) add(binaryName(node.symbol));
+      // An enum constant with a body (CONST {...}) is emitted as its own
+      // Outer$N nestmate.
+      if (node.kind === SyntaxKind.EnumDeclaration) {
+        for (const c of (node as EnumDeclaration).enumConstants) {
+          if (c.classBody) add(enumBodyClassName(c, program));
+        }
+      }
     } else if (
       node.kind === SyntaxKind.ObjectCreationExpression &&
       (node as ObjectCreationExpression).classBody &&
@@ -984,6 +1013,13 @@ export function computeInnerClassInfo(
       anonymousTarget(node as ObjectCreationExpression, program)
     ) {
       info.set(anonymousClassName(node as ObjectCreationExpression, program), { flags: 0 });
+    }
+    // An enum constant body is an anonymous-style subclass: javac's InnerClasses
+    // entry carries ACC_FINAL only (inner_name = outer = 0).
+    if (node.kind === SyntaxKind.EnumDeclaration) {
+      for (const c of (node as EnumDeclaration).enumConstants) {
+        if (c.classBody) info.set(enumBodyClassName(c, program), { flags: ACC_FINAL });
+      }
     }
     forEachChild(node, c => {
       visit(c);
@@ -1936,6 +1972,9 @@ interface EnumClinit {
     ctorDescriptor: MethodDescriptor; // (Ljava/lang/String;I<userparams>)V
     userParamDescs: Descriptor[];
     args: Node[];
+    // The class to instantiate: the enum itself, or the constant's E$N body
+    // subclass when it has a body. Defaults to enumInternal.
+    ownerInternal?: InternalName;
   }[];
 }
 
@@ -4272,8 +4311,12 @@ function generateBody(
   // then the synthetic $VALUES array holding them all.
   const emitEnumClinitPrologue = (ec: EnumClinit): void => {
     for (const c of ec.constants) {
+      // A constant with a body is an instance of its E$N subclass; otherwise the
+      // enum itself. The constructor descriptor (name, ordinal, user args) is the
+      // same on either (E$N forwards to the enum's matching ctor).
+      const owner = c.ownerInternal ?? ec.enumInternal;
       code.u1(OP_NEW);
-      code.u2(cp.classInfo(ec.enumInternal));
+      code.u2(cp.classInfo(owner));
       pushRef(ec.selfDesc);
       code.u1(OP_DUP);
       pushRef(ec.selfDesc);
@@ -4283,7 +4326,7 @@ function generateBody(
       push("I");
       c.args.forEach((arg, j) => coerce(emitExpr(arg), c.userParamDescs[j] ?? OBJECT_DESC));
       code.u1(OP_INVOKESPECIAL);
-      code.u2(cp.methodref(ec.enumInternal, "<init>", c.ctorDescriptor));
+      code.u2(cp.methodref(owner, "<init>", c.ctorDescriptor));
       pop(1 + 2 + c.args.length); // dup'd ref + name + ordinal + args
       code.u1(OP_PUTSTATIC);
       code.u2(cp.fieldref(ec.enumInternal, c.name, ec.selfDesc));
@@ -6482,6 +6525,9 @@ function emitSynthCtor(
   // supertype): the first parameter, null-checked and forwarded to super's
   // <init> - never combined with this0Descriptor/captures (callers degrade).
   superThis0Descriptor?: Descriptor,
+  // Constructor access flags; defaults to package-private. Enum constant body
+  // classes use ACC_PRIVATE, as javac does.
+  accessFlags = 0,
 ): ByteBuffer {
   const code = new ByteBuffer();
   let slot = 1;
@@ -6548,7 +6594,7 @@ function emitSynthCtor(
   });
   code.u1(OP_RETURN);
   const info = new ByteBuffer();
-  info.u2(0); // package-private synthetic-ish constructor
+  info.u2(accessFlags); // package-private (anon) or ACC_PRIVATE (enum body)
   info.u2(cp.utf8("<init>"));
   const descs = [
     ...(superThis0Descriptor ? [superThis0Descriptor] : []),
@@ -7008,7 +7054,22 @@ export function emitInterface(
 // javac names anonymous classes <EnclosingType>$<n>, numbering them per
 // immediately enclosing type in source order (A2$1; A2$Inner$1) - nested types
 // keep their own counter, so the walk does not descend into them.
-function anonymousClassName(node: ObjectCreationExpression, program: Program): InternalName {
+// A node that becomes its own Outer$N class: an anonymous class (new T(){...})
+// or an enum constant with a body (CONST {...}). javac numbers both in a single
+// per-enclosing-type counter, ordered by source position.
+function isBodyClassNode(n: Node): boolean {
+  return (
+    (n.kind === SyntaxKind.ObjectCreationExpression &&
+      (n as ObjectCreationExpression).classBody !== undefined) ||
+    (n.kind === SyntaxKind.EnumConstantDeclaration &&
+      (n as EnumConstantDeclaration).classBody !== undefined)
+  );
+}
+
+// The Outer$N binary name of a body-bearing node (anonymous class or enum
+// constant body): the enclosing type's binary name plus a 1-based index over all
+// body-class nodes in that type, ordered by source position - javac's numbering.
+function bodyClassName(node: Node, program: Program): InternalName {
   program.getGlobalIndex();
   let enclosing: Node | undefined;
   for (let n: Node | undefined = node.parent; n; n = n.parent) {
@@ -7020,13 +7081,7 @@ function anonymousClassName(node: ObjectCreationExpression, program: Program): I
   const base = enclosing?.symbol ? binaryName(enclosing.symbol) : ("Anonymous" as InternalName);
   let index = 0;
   const count = (n: Node): void => {
-    if (
-      n.kind === SyntaxKind.ObjectCreationExpression &&
-      (n as ObjectCreationExpression).classBody &&
-      n.pos <= node.pos
-    ) {
-      index++;
-    }
+    if (isBodyClassNode(n) && n.pos <= node.pos) index++;
     if (n !== enclosing && TYPE_DECL_KINDS.has(n.kind)) return; // own counter
     forEachChild(n, c => {
       count(c);
@@ -7035,6 +7090,15 @@ function anonymousClassName(node: ObjectCreationExpression, program: Program): I
   };
   count(enclosing ?? node);
   return `${base}$${index}` as InternalName;
+}
+
+function anonymousClassName(node: ObjectCreationExpression, program: Program): InternalName {
+  return bodyClassName(node, program);
+}
+
+// The Outer$N binary name of an enum constant body (CONST {...}).
+function enumBodyClassName(node: EnumConstantDeclaration, program: Program): InternalName {
+  return bodyClassName(node, program);
 }
 
 interface AnonymousTarget {
@@ -7703,7 +7767,7 @@ export function emitEnum(
   checker: Checker,
   nestMembers?: Map<string, InternalName[]>,
   innerClasses?: Map<InternalName, InnerClassRecord>,
-): EmittedClass {
+): EmittedClass[] {
   program.getGlobalIndex();
   const name = declaration.symbol
     ? binaryName(declaration.symbol)
@@ -7716,7 +7780,25 @@ export function emitEnum(
     .map(t => resolveInternalName(t, declaration, program))
     .filter((n): n is InternalName => n !== undefined);
   const isPublic = (declaration.modifiers ?? []).some(m => m.kind === SyntaxKind.PublicKeyword);
-  const accessFlags = ACC_SUPER | ACC_ENUM | ACC_FINAL | (isPublic ? ACC_PUBLIC : 0);
+  // Constants with a body (CONST {...}) each become an E$N subclass; the enum is
+  // then not final (it is subclassed) and is implicitly sealed over them. It is
+  // abstract iff it declares an abstract method (javac sets the two flags
+  // independently).
+  const bodied = declaration.enumConstants.filter(c => c.classBody);
+  const bodyClassNames = new Map<EnumConstantDeclaration, InternalName>(
+    bodied.map(c => [c, enumBodyClassName(c, program)]),
+  );
+  const hasAbstractMethod = declaration.members.some(
+    m =>
+      m.kind === SyntaxKind.MethodDeclaration &&
+      ((m as MethodDeclaration).modifiers ?? []).some(x => x.kind === SyntaxKind.AbstractKeyword),
+  );
+  const accessFlags =
+    ACC_SUPER |
+    ACC_ENUM |
+    (bodied.length > 0 ? 0 : ACC_FINAL) |
+    (hasAbstractMethod ? ACC_ABSTRACT : 0) |
+    (isPublic ? ACC_PUBLIC : 0);
 
   const cp = new ConstantPool();
   const thisClassIndex = cp.classInfo(name);
@@ -7789,6 +7871,7 @@ export function emitEnum(
       ctorDescriptor: `(Ljava/lang/String;I${userParamDescs.join("")})V` as MethodDescriptor,
       userParamDescs,
       args,
+      ownerInternal: bodyClassNames.get(c),
     };
   });
 
@@ -7889,6 +7972,9 @@ export function emitEnum(
     methodCount++;
   }
 
+  // An enum with constant bodies is implicitly sealed over its E$N subclasses,
+  // in declaration order (javac's PermittedSubclasses order).
+  const permitted = bodied.map(c => bodyClassNames.get(c)!);
   const { buffer: classAttributes, count: classAttributeCount } = buildClassAttributes(
     cp,
     sourceNameOf(declaration),
@@ -7896,17 +7982,142 @@ export function emitEnum(
     nestMembers,
     classSignatureOf(declaration, program),
     innerClasses,
+    undefined,
+    permitted.length > 0 ? permitted : undefined,
+  );
+
+  const result: EmittedClass[] = [
+    {
+      name,
+      bytes: assembleClassFile({
+        cp,
+        accessFlags,
+        thisClassIndex,
+        superClassIndex,
+        interfaceIndices,
+        fields: fieldsBuf,
+        fieldCount,
+        methods,
+        methodCount,
+        attributes: classAttributes,
+        attributeCount: classAttributeCount,
+      }),
+    },
+  ];
+  // One E$N subclass per constant body.
+  for (const c of bodied) {
+    const i = declaration.enumConstants.indexOf(c);
+    result.push(
+      emitEnumConstantBodyClass(
+        c,
+        bodyClassNames.get(c)!,
+        name,
+        constants[i]!.userParamDescs,
+        program,
+        checker,
+        nestMembers,
+        innerClasses,
+      ),
+    );
+  }
+  return result;
+}
+
+// Emit an enum constant body (CONST {...}) as its anonymous-style subclass E$N:
+// final, extends the enum, with a private constructor that forwards the constant
+// name, ordinal and user arguments to the enum's matching constructor. The body's
+// methods override the enum's (abstract) methods. Mirrors the anonymous-class
+// machinery, but the supertype is the enum and the constructor is private.
+function emitEnumConstantBodyClass(
+  constant: EnumConstantDeclaration,
+  name: InternalName,
+  enumInternal: InternalName,
+  userParamDescs: Descriptor[],
+  program: Program,
+  checker: Checker,
+  nestMembers?: Map<string, InternalName[]>,
+  innerClasses?: Map<InternalName, InnerClassRecord>,
+): EmittedClass {
+  const body = constant.classBody!;
+  const cp = new ConstantPool();
+  const thisClassIndex = cp.classInfo(name);
+  const superClassIndex = cp.classInfo(enumInternal);
+
+  // The body's own instance fields (rare). Own-field *initializers* degrade to
+  // defaults (the constructor stays a prologue-only forwarder), as anonymous
+  // classes do for unsupported initializers.
+  const fields = new ByteBuffer();
+  const declaredFields = emitFields(
+    { members: body } as unknown as ClassDeclaration,
+    cp,
+    program,
+  );
+  fields.append(declaredFields.buffer);
+  const fieldCount = declaredFields.count;
+
+  const methods = new ByteBuffer();
+  let methodCount = 0;
+  const lambdaMethods: ByteBuffer[] = [];
+  // The private constructor forwards (name, ordinal, user args) to the enum's
+  // matching <init>, as javac does.
+  const superParamDescs = [STRING_DESC, "I" as Descriptor, ...userParamDescs];
+  methods.append(
+    emitSynthCtor(cp, name, enumInternal, superParamDescs, [], undefined, undefined, ACC_PRIVATE),
+  );
+  methodCount++;
+
+  // Body methods read the body's own fields through the implicit-`this` getfield
+  // path (the body is not a binder container), like anonymous classes.
+  const captureMap = new Map<
+    Symbol,
+    { ownerInternal: InternalName; fieldName: string; descriptor: Descriptor }
+  >();
+  for (const member of body) {
+    if (member.kind !== SyntaxKind.FieldDeclaration) continue;
+    const field = member as FieldDeclaration;
+    if (isStaticDeclaration(field)) continue;
+    const descriptor = descriptorOf(field.type, program);
+    for (const d of field.declarators) {
+      const sym = (d as VariableDeclarator).symbol;
+      if (sym)
+        captureMap.set(sym, {
+          ownerInternal: name,
+          fieldName: (d as VariableDeclarator).name.text,
+          descriptor,
+        });
+    }
+  }
+  for (const member of body) {
+    if (member.kind !== SyntaxKind.MethodDeclaration) continue;
+    methods.append(
+      emitMethod(member as MethodDeclaration, cp, program, checker, name, lambdaMethods, 0, captureMap),
+    );
+    methodCount++;
+  }
+  for (const impl of lambdaMethods) {
+    methods.append(impl);
+    methodCount++;
+  }
+
+  const { buffer: classAttributes, count: classAttributeCount } = buildClassAttributes(
+    cp,
+    sourceNameOf(constant),
+    name,
+    nestMembers,
+    undefined,
+    innerClasses,
+    enumInternal, // EnclosingMethod: the enum
   );
 
   return {
     name,
     bytes: assembleClassFile({
       cp,
-      accessFlags,
+      accessFlags: ACC_SUPER | ACC_ENUM | ACC_FINAL,
       thisClassIndex,
       superClassIndex,
-      interfaceIndices,
-      fields: fieldsBuf,
+      interfaceIndices: [],
+      fields,
       fieldCount,
       methods,
       methodCount,

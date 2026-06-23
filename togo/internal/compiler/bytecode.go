@@ -1055,7 +1055,7 @@ func loadByDescriptor(code *byteBuffer, d descriptor, sl int) {
 }
 
 // emitSynthCtor emits the synthesized constructor for a capturing local/anonymous class.
-func emitSynthCtor(cp *constantPool, name, superInternal internalName, superParamDescs []descriptor, captures []localCapture, this0Descriptor, superThis0Descriptor descriptor) *byteBuffer {
+func emitSynthCtor(cp *constantPool, name, superInternal internalName, superParamDescs []descriptor, captures []localCapture, this0Descriptor, superThis0Descriptor descriptor, accessFlags int) *byteBuffer {
 	code := &byteBuffer{}
 	sl := 1
 	superThis0Slot := 0
@@ -1128,7 +1128,7 @@ func emitSynthCtor(cp *constantPool, name, superInternal internalName, superPara
 	}
 	code.u1(opReturn)
 	info := &byteBuffer{}
-	info.u2(0)
+	info.u2(accessFlags) // package-private (anon) or ACC_PRIVATE (enum body)
 	info.u2(int(cp.utf8("<init>")))
 	var descs []descriptor
 	if superThis0Descriptor != "" {
@@ -1179,7 +1179,7 @@ func emitSynthCtorWithInits(cp *constantPool, name internalName, program *Progra
 		if degradeListener != nil {
 			degradeListener(string(name), "<init>")
 		}
-		return emitSynthCtor(cp, name, prologue.superInternal, prologue.superParamDescs, prologue.captures, prologue.this0Descriptor, "")
+		return emitSynthCtor(cp, name, prologue.superInternal, prologue.superParamDescs, prologue.captures, prologue.this0Descriptor, "", 0)
 	}
 	info := &byteBuffer{}
 	info.u2(0)
@@ -1289,7 +1289,7 @@ func emitClass(declaration *Node, program *Program, checker *Checker, nestMember
 		if len(instanceInits) > 0 {
 			methods.appendBuf(emitSynthCtorWithInits(cp, name, program, checker, prologue, instanceInits, &lambdaMethods))
 		} else {
-			methods.appendBuf(emitSynthCtor(cp, name, superInternalName, nil, localCaptures, this0Descriptor, ""))
+			methods.appendBuf(emitSynthCtor(cp, name, superInternalName, nil, localCaptures, this0Descriptor, "", 0))
 		}
 		methodCount++
 	case (hasThis0 || len(localCaptures) > 0) && len(declaredConstructors) > 0:
@@ -1357,7 +1357,7 @@ func emitClass(declaration *Node, program *Program, checker *Checker, nestMember
 	}
 
 	sig, hasSig := classSignatureOf(declaration, program)
-	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, sig, hasSig, innerClasses)
+	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, sig, hasSig, innerClasses, "", nil)
 
 	return EmittedClass{
 		Name:  string(name),
@@ -1478,7 +1478,7 @@ func emitInterface(declaration *Node, program *Program, checker *Checker, nestMe
 		methodCount++
 	}
 
-	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, "", false, innerClasses)
+	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, "", false, innerClasses, "", nil)
 	return EmittedClass{
 		Name:  string(name),
 		Bytes: assembleClassFile(cp, accessFlags, thisClassIndex, superClassIndex, interfaceIndices, fields, fieldCount, methods, methodCount, attrs.buffer, attrs.count),
@@ -1540,7 +1540,7 @@ func emitAnonymousClassIfPossible(node *Node, program *Program, checker *Checker
 			superInternal: target.superInternal, superParamDescs: target.superParamDescs,
 		}, instanceInits, &lambdaMethods))
 	} else {
-		methods.appendBuf(emitSynthCtor(cp, name, target.superInternal, target.superParamDescs, captures, this0Descriptor, target.superThis0Desc))
+		methods.appendBuf(emitSynthCtor(cp, name, target.superInternal, target.superParamDescs, captures, this0Descriptor, target.superThis0Desc, 0))
 	}
 	methodCount++
 
@@ -1579,7 +1579,7 @@ func emitAnonymousClassIfPossible(node *Node, program *Program, checker *Checker
 		methodCount++
 	}
 
-	attrs := buildClassAttributes(cp, sourceNameOf(node), name, nestMembers, "", false, innerClasses)
+	attrs := buildClassAttributes(cp, sourceNameOf(node), name, nestMembers, "", false, innerClasses, "", nil)
 	return EmittedClass{
 		Name:  string(name),
 		Bytes: assembleClassFile(cp, accSuper, thisClassIndex, superClassIndex, interfaceIndices, fields, fieldCount, methods, methodCount, attrs.buffer, attrs.count),
@@ -1917,7 +1917,7 @@ func emitRecord(declaration *Node, program *Program, checker *Checker, nestMembe
 		recordAttr.u2(0)
 	}
 
-	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, "", false, innerClasses)
+	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, "", false, innerClasses, "", nil)
 	attrs.buffer.u2(int(cp.utf8("Record")))
 	attrs.buffer.u4(recordAttr.length())
 	attrs.buffer.appendBuf(recordAttr)
@@ -1929,7 +1929,7 @@ func emitRecord(declaration *Node, program *Program, checker *Checker, nestMembe
 }
 
 // emitEnum emits an enum declaration (JLS 8.9).
-func emitEnum(declaration *Node, program *Program, checker *Checker, nestMembers map[string][]internalName, innerClasses *innerClassMap) EmittedClass {
+func emitEnum(declaration *Node, program *Program, checker *Checker, nestMembers map[string][]internalName, innerClasses *innerClassMap) []EmittedClass {
 	program.GetGlobalIndex()
 	de := declaration.AsEnumDeclaration()
 	var name internalName
@@ -1949,7 +1949,31 @@ func emitEnum(declaration *Node, program *Program, checker *Checker, nestMembers
 		}
 	}
 	isPublic := hasModifierKind(de.Modifiers, PublicKeyword)
-	accessFlags := accSuper | accEnum | accFinal
+	// Constants with a body (CONST {...}) each become an E$N subclass; the enum is
+	// then not final (it is subclassed) and is implicitly sealed over them. It is
+	// abstract iff it declares an abstract method (the two flags are independent).
+	var bodied []*Node
+	bodyClassNames := map[*Node]internalName{}
+	for _, c := range arrayNodes(de.EnumConstants) {
+		if c.AsEnumConstantDeclaration().ClassBody != nil {
+			bodied = append(bodied, c)
+			bodyClassNames[c] = enumBodyClassName(c, program)
+		}
+	}
+	hasAbstractMethod := false
+	for _, m := range arrayNodes(de.Members) {
+		if m.Kind == MethodDeclaration && hasModifierKind(m.AsMethodDeclaration().Modifiers, AbstractKeyword) {
+			hasAbstractMethod = true
+			break
+		}
+	}
+	accessFlags := accSuper | accEnum
+	if len(bodied) == 0 {
+		accessFlags |= accFinal
+	}
+	if hasAbstractMethod {
+		accessFlags |= accAbstract
+	}
 	if isPublic {
 		accessFlags |= accPublic
 	}
@@ -2013,6 +2037,7 @@ func emitEnum(declaration *Node, program *Program, checker *Checker, nestMembers
 			ctorDescriptor: methodDescriptor("(Ljava/lang/String;I" + joinDescs(userParamDescs) + ")V"),
 			userParamDescs: userParamDescs,
 			args:           args,
+			ownerInternal:  bodyClassNames[c],
 		})
 	}
 
@@ -2055,11 +2080,86 @@ func emitEnum(declaration *Node, program *Program, checker *Checker, nestMembers
 	}
 
 	sig, hasSig := classSignatureOf(declaration, program)
-	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, sig, hasSig, innerClasses)
+	// An enum with constant bodies is implicitly sealed over its E$N subclasses,
+	// in declaration order (javac's PermittedSubclasses order).
+	var permitted []internalName
+	for _, c := range bodied {
+		permitted = append(permitted, bodyClassNames[c])
+	}
+	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, sig, hasSig, innerClasses, "", permitted)
 
-	return EmittedClass{
+	result := []EmittedClass{{
 		Name:  string(name),
 		Bytes: assembleClassFile(cp, accessFlags, thisClassIndex, superClassIndex, interfaceIndices, fieldsBuf, fieldCount, methods, methodCount, attrs.buffer, attrs.count),
+	}}
+	// One E$N subclass per constant body.
+	for _, c := range bodied {
+		i := indexOfNode(de.EnumConstants, c)
+		result = append(result, emitEnumConstantBodyClass(c, bodyClassNames[c], name, constants[i].userParamDescs, program, checker, nestMembers, innerClasses))
+	}
+	return result
+}
+
+// emitEnumConstantBodyClass emits an enum constant body (CONST {...}) as its
+// anonymous-style subclass E$N: final, extends the enum, with a private
+// constructor that forwards the constant name, ordinal and user arguments to the
+// enum's matching constructor. Body methods override the enum's (abstract)
+// methods. Mirrors the anonymous-class machinery, but the supertype is the enum
+// and the constructor is private.
+func emitEnumConstantBodyClass(constant *Node, name, enumInternal internalName, userParamDescs []descriptor, program *Program, checker *Checker, nestMembers map[string][]internalName, innerClasses *innerClassMap) EmittedClass {
+	body := arrayNodes(constant.AsEnumConstantDeclaration().ClassBody)
+	cp := newConstantPool()
+	thisClassIndex := cp.classInfo(string(name))
+	superClassIndex := cp.classInfo(string(enumInternal))
+
+	// The body's own instance fields (rare). Own-field initializers degrade to
+	// defaults (the constructor stays a prologue-only forwarder), as anonymous
+	// classes do for unsupported initializers.
+	fields, fieldCount := emitFieldsFromMembers(body, cp, program)
+
+	methods := &byteBuffer{}
+	methodCount := 0
+	var lambdaMethods []*byteBuffer
+	// The private constructor forwards (name, ordinal, user args) to the enum's
+	// matching <init>, as javac does.
+	superParamDescs := append([]descriptor{stringDesc, "I"}, userParamDescs...)
+	methods.appendBuf(emitSynthCtor(cp, name, enumInternal, superParamDescs, nil, "", "", accPrivate))
+	methodCount++
+
+	// Body methods read the body's own fields through the implicit-`this` getfield
+	// path (the body is not a binder container), like anonymous classes.
+	captureMap := map[*Symbol]captureField{}
+	for _, member := range body {
+		if member.Kind != FieldDeclaration {
+			continue
+		}
+		field := member.AsFieldDeclaration()
+		if isStaticDeclaration(member) {
+			continue
+		}
+		desc := descriptorOf(field.Type, program, nil)
+		for _, d := range arrayNodes(field.Declarators) {
+			if d.Symbol != nil {
+				captureMap[d.Symbol] = captureField{ownerInternal: name, fieldName: d.AsVariableDeclarator().Name.AsIdentifier().Text, descriptor: desc}
+			}
+		}
+	}
+	for _, member := range body {
+		if member.Kind != MethodDeclaration {
+			continue
+		}
+		methods.appendBuf(emitMethod(member, cp, program, checker, name, &lambdaMethods, 0, captureMap, ""))
+		methodCount++
+	}
+	for _, impl := range lambdaMethods {
+		methods.appendBuf(impl)
+		methodCount++
+	}
+
+	attrs := buildClassAttributes(cp, sourceNameOf(constant), name, nestMembers, "", false, innerClasses, enumInternal, nil)
+	return EmittedClass{
+		Name:  string(name),
+		Bytes: assembleClassFile(cp, accSuper|accEnum|accFinal, thisClassIndex, superClassIndex, nil, fields, fieldCount, methods, methodCount, attrs.buffer, attrs.count),
 	}
 }
 

@@ -104,5 +104,17 @@
     "IcIface$K": [
       "public static of K=class IcIface$K of class IcIface"
     ]
+  },
+  "IcEnumBody": {
+    "IcEnumBody": [
+      "final class IcEnumBody$1",
+      "final class IcEnumBody$2"
+    ],
+    "IcEnumBody$1": [
+      "final class IcEnumBody$1"
+    ],
+    "IcEnumBody$2": [
+      "final class IcEnumBody$2"
+    ]
   }
 }

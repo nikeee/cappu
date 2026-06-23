@@ -97,7 +97,7 @@ export function emitSourceFile(
     } else if (node.kind === SyntaxKind.InterfaceDeclaration) {
       result.push(emitInterface(node as InterfaceDeclaration, program, checker, nest, inner));
     } else if (node.kind === SyntaxKind.EnumDeclaration) {
-      result.push(emitEnum(node as EnumDeclaration, program, checker, nest, inner));
+      result.push(...emitEnum(node as EnumDeclaration, program, checker, nest, inner));
     } else if (node.kind === SyntaxKind.RecordDeclaration) {
       result.push(emitRecord(node as RecordDeclaration, program, checker, nest, inner));
     } else if (node.kind === SyntaxKind.ObjectCreationExpression) {

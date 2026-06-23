@@ -63,7 +63,7 @@ func EmitSourceFile(sourceFile *Node, program *Program, checker *Checker, debugI
 		case InterfaceDeclaration:
 			result = append(result, emitInterface(node, program, checker, nest, inner))
 		case EnumDeclaration:
-			result = append(result, emitEnum(node, program, checker, nest, inner))
+			result = append(result, emitEnum(node, program, checker, nest, inner)...)
 		case RecordDeclaration:
 			result = append(result, emitRecord(node, program, checker, nest, inner))
 		case ObjectCreationExpression:
