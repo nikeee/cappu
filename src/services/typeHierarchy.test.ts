@@ -23,7 +23,11 @@ function setup(text: string) {
   const program = createProgram();
   loadJdkStub(program);
   program.setOpenDocument("file:///S.java" as Uri, text, 1);
-  return { program, checker: createChecker(program), sourceFile: program.getSourceFile("file:///S.java" as Uri)! };
+  return {
+    program,
+    checker: createChecker(program),
+    sourceFile: program.getSourceFile("file:///S.java" as Uri)!,
+  };
 }
 
 test("prepare resolves the type at the cursor", () => {

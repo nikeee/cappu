@@ -22,12 +22,7 @@ import {
   getSourceFileOfNode,
 } from "../compiler/resolver.ts";
 import { type Checker } from "../compiler/checker.ts";
-import {
-  type Identifier,
-  type SourceFile,
-  type Symbol,
-  SymbolFlags,
-} from "../compiler/types.ts";
+import { type Identifier, type SourceFile, type Symbol, SymbolFlags } from "../compiler/types.ts";
 import { skipTrivia } from "../compiler/utilities.ts";
 import { type Uri } from "../workspace.ts";
 import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
@@ -67,13 +62,22 @@ function itemOf(symbol: Symbol): TypeHierarchyItem | undefined {
     kind: symbolKindOf(symbol.flags),
     uri: file.fileName,
     range: rangeOf(file.text, lineStarts, skipTrivia(file.text, declaration.pos), declaration.end),
-    selectionRange: rangeOf(file.text, lineStarts, skipTrivia(file.text, nameNode.pos), nameNode.end),
+    selectionRange: rangeOf(
+      file.text,
+      lineStarts,
+      skipTrivia(file.text, nameNode.pos),
+      nameNode.end,
+    ),
   };
 }
 
 // Resolve the type symbol an item points at, by re-resolving the identifier at
 // its selectionRange start (the type's name).
-function typeSymbolOfItem(program: Program, checker: Checker, item: TypeHierarchyItem): Symbol | undefined {
+function typeSymbolOfItem(
+  program: Program,
+  checker: Checker,
+  item: TypeHierarchyItem,
+): Symbol | undefined {
   const sourceFile = program.getSourceFile(item.uri as Uri);
   if (!sourceFile) return undefined;
   const lineStarts = computeLineStarts(sourceFile.text);

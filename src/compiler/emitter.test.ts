@@ -611,7 +611,13 @@ test(
     const src = MULTI_FIXTURES.ImplicitSealed!;
     using jdir = TempDir.create("implicit-javac-");
     writeFileSync(join(jdir.path, "ImplicitSealed.java"), src);
-    execFileSync("javac", ["--release", "21", "-d", jdir.path, join(jdir.path, "ImplicitSealed.java")]);
+    execFileSync("javac", [
+      "--release",
+      "21",
+      "-d",
+      jdir.path,
+      join(jdir.path, "ImplicitSealed.java"),
+    ]);
     using odir = TempDir.create("implicit-ours-");
     for (const c of emitClasses("ImplicitSealed", src))
       writeFileSync(join(odir.path, `${c.name}.class`), c.bytes);

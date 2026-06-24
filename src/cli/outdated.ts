@@ -20,7 +20,11 @@ export function formatOutdated(rows: readonly OutdatedDependency[]): string {
     r.configuration,
   ]);
   const widths = header.map((h, i) => Math.max(h.length, ...cells.map(c => c[i]!.length)));
-  const line = (cols: string[]): string => cols.map((c, i) => c.padEnd(widths[i]!)).join("  ").trimEnd();
+  const line = (cols: string[]): string =>
+    cols
+      .map((c, i) => c.padEnd(widths[i]!))
+      .join("  ")
+      .trimEnd();
   return [line(header), ...cells.map(line)].join("\n") + "\n";
 }
 

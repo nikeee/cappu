@@ -66,22 +66,30 @@ function itemOfDeclaration(decl: MethodDeclaration | ConstructorDeclaration): Ca
   const lineStarts = computeLineStarts(file.text);
   const nameNode = (decl as { name?: { text?: string; pos: number; end: number } }).name;
   const name =
-    decl.kind === SyntaxKind.ConstructorDeclaration
-      ? "<init>"
-      : (nameNode?.text ?? "<anonymous>");
+    decl.kind === SyntaxKind.ConstructorDeclaration ? "<init>" : (nameNode?.text ?? "<anonymous>");
   const selection = nameNode ?? decl;
   return {
     name,
-    kind: decl.kind === SyntaxKind.ConstructorDeclaration ? SymbolKind.Constructor : SymbolKind.Method,
+    kind:
+      decl.kind === SyntaxKind.ConstructorDeclaration ? SymbolKind.Constructor : SymbolKind.Method,
     uri: file.fileName,
     range: rangeOf(file.text, lineStarts, skipTrivia(file.text, decl.pos), decl.end),
-    selectionRange: rangeOf(file.text, lineStarts, skipTrivia(file.text, selection.pos), selection.end),
+    selectionRange: rangeOf(
+      file.text,
+      lineStarts,
+      skipTrivia(file.text, selection.pos),
+      selection.end,
+    ),
   };
 }
 
 // The callable symbol an item points at, by re-resolving the identifier at its
 // selectionRange start.
-function callableSymbolOfItem(program: Program, checker: Checker, item: CallHierarchyItem): Symbol | undefined {
+function callableSymbolOfItem(
+  program: Program,
+  checker: Checker,
+  item: CallHierarchyItem,
+): Symbol | undefined {
   const sourceFile = program.getSourceFile(item.uri as Uri);
   if (!sourceFile) return undefined;
   const lineStarts = computeLineStarts(sourceFile.text);
@@ -168,7 +176,12 @@ export function callHierarchyOutgoing(
                 ? (callee as Identifier)
                 : undefined;
           if (nameNode) {
-            const range = rangeOf(file.text, lineStarts, skipTrivia(file.text, nameNode.pos), nameNode.end);
+            const range = rangeOf(
+              file.text,
+              lineStarts,
+              skipTrivia(file.text, nameNode.pos),
+              nameNode.end,
+            );
             const entry = byCallee.get(target);
             if (entry) entry.ranges.push(range);
             else byCallee.set(target, { to: itemOfDeclaration(target), ranges: [range] });

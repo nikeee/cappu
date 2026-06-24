@@ -24,7 +24,11 @@ function setup(text: string) {
   const program = createProgram();
   loadJdkStub(program);
   program.setOpenDocument("file:///C.java" as Uri, text, 1);
-  return { program, checker: createChecker(program), sourceFile: program.getSourceFile("file:///C.java" as Uri)! };
+  return {
+    program,
+    checker: createChecker(program),
+    sourceFile: program.getSourceFile("file:///C.java" as Uri)!,
+  };
 }
 
 test("prepare resolves the method at the cursor", () => {
@@ -44,7 +48,11 @@ test("incoming calls group the call sites by their enclosing method", () => {
 
 test("outgoing calls list the callees of a method", () => {
   const { program, checker, sourceFile } = setup(SRC);
-  const [caller] = prepareCallHierarchy(checker, sourceFile, SRC.indexOf("caller() { return target"))!;
+  const [caller] = prepareCallHierarchy(
+    checker,
+    sourceFile,
+    SRC.indexOf("caller() { return target"),
+  )!;
   const outgoing = callHierarchyOutgoing(program, checker, caller!);
   expect(outgoing?.map(c => c.to.name)).toEqual(["target"]);
   expect(outgoing?.[0]!.fromRanges).toHaveLength(2);

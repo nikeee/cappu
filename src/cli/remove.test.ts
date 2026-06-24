@@ -30,7 +30,11 @@ test("removing a dependency drops only that key and reports it", () => {
 });
 
 test("removing preserves the JSONC comments on the surviving entries", () => {
-  const { text } = removeDependencyFromJsonc(withDeps, "implementation", "com.google.code.gson:gson");
+  const { text } = removeDependencyFromJsonc(
+    withDeps,
+    "implementation",
+    "com.google.code.gson:gson",
+  );
   expect(text).toContain("// keep me");
   expect(text).toContain("// and me"); // the comment on the kept entry stays
 });
