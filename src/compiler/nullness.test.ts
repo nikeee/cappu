@@ -178,3 +178,86 @@ test("without a @NullMarked package-info.java the same code is not flagged", () 
   );
   expect(codes).not.toContain(NULL_INTO_NONNULL);
 });
+
+// --- additional coverage -----------------------------------------------------------
+
+test("null into a @NonNull constructor parameter is flagged", () => {
+  const code = "class Foo { Foo(@NonNull String s) {} }\nclass C { void g() { new Foo(null); } }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a non-null value into a @NonNull constructor parameter is accepted", () => {
+  const code = 'class Foo { Foo(@NonNull String s) {} }\nclass C { void g() { new Foo("a"); } }';
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("null reassigned to a @NonNull local is flagged", () => {
+  const code = 'class C { void g() { @NonNull String x = "a"; x = null; } }';
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a @Nullable field passed to a @NonNull parameter is flagged", () => {
+  const code =
+    "class C { @Nullable String fld; void f(@NonNull String s) {} void g() { f(fld); } }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a @NonNull field read passed to a @NonNull parameter is accepted", () => {
+  const code =
+    'class C { @NonNull String fld = "a"; void f(@NonNull String s) {} void g() { f(fld); } }';
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a @Nullable return initializing a @NonNull local is flagged", () => {
+  const code =
+    "class C { @Nullable String n() { return n(); } void g() { @NonNull String x = n(); } }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a varargs @NonNull parameter is not checked (array, not element)", () => {
+  const code = "class C { void f(@NonNull String... xs) {} void g() { f(null); } }";
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("an in-file @NullMarked package marks an unannotated parameter", () => {
+  const code = "@NullMarked package p;\nclass C { void f(String s) {} void g() { f(null); } }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("@NullMarked on an enclosing type marks a nested type's parameter", () => {
+  const code =
+    "@NullMarked class Outer { static class Inner { void f(String s) {} void g() { f(null); } } }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("@NullUnmarked on a type opts out of a @NullMarked package", () => {
+  const code =
+    "@NullMarked package p;\n@NullUnmarked class C { void f(String s) {} void g() { f(null); } }";
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("generic nullness is off when no options are passed", () => {
+  const code = `${BOX}class C { void g(Box<@NonNull String> b) { b.put(null); } }`;
+  expect(diagnose(code, null)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a custom @Nullable annotation list (JSR-305 @CheckForNull) is honored", () => {
+  const code =
+    "class C { @CheckForNull String n() { return n(); } void f(@NonNull String s) {} void g() { f(n()); } }";
+  const config: NullnessOptions = {
+    ...JSPECIFY,
+    nullableAnnotations: ["javax.annotation.CheckForNull"],
+  };
+  expect(diagnose(code, config)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a @NullMarked sub-package does not mark its parent package", () => {
+  const codes = diagnoseFiles(
+    {
+      "file:///a/b/package-info.java": "@NullMarked package a.b;",
+      "file:///a/C.java": "package a; class C { void f(String s) {} void g() { f(null); } }",
+    },
+    "file:///a/C.java",
+  );
+  expect(codes).not.toContain(NULL_INTO_NONNULL);
+});
