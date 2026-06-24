@@ -424,6 +424,70 @@ func removeUnusedImport(sf *compiler.Node, start, end int) []CodeActionResult {
 	return out
 }
 
+// enclosingMethod returns the method declaration enclosing a position, or nil.
+func enclosingMethod(root *compiler.Node, offset int) *compiler.Node {
+	node := compiler.GetNodeAtPosition(root, offset)
+	for node != nil && node.Kind != compiler.MethodDeclaration {
+		node = node.Parent
+	}
+	return node
+}
+
+// overrideAnnotation returns the @Override annotation among a method's modifiers,
+// or nil.
+func overrideAnnotation(method *compiler.Node) *compiler.Node {
+	mods := method.AsMethodDeclaration().Modifiers
+	if mods == nil {
+		return nil
+	}
+	for _, m := range mods.Nodes {
+		if m.Kind != compiler.Annotation {
+			continue
+		}
+		name := compiler.EntityNameToString(m.AsAnnotation().TypeName)
+		if name == "Override" || strings.HasSuffix(name, ".Override") {
+			return m
+		}
+	}
+	return nil
+}
+
+// removeRedundantOverride offers to remove an erroneous @Override from a method
+// flagged "does not override a supertype method" (1301). Port of
+// removeRedundantOverride.
+func removeRedundantOverride(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	method := enclosingMethod(sf, start)
+	if method == nil {
+		return nil
+	}
+	annotation := overrideAnnotation(method)
+	if annotation == nil {
+		return nil
+	}
+	wrong := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.MethodDoesNotOverrideASupertypeMethod.Code &&
+			d.Pos >= method.Pos && d.End <= method.End {
+			wrong = true
+			break
+		}
+	}
+	if !wrong {
+		return nil
+	}
+	from := compiler.SkipTrivia(data.Text, annotation.Pos)
+	to := compiler.SkipTrivia(data.Text, annotation.End)
+	return []CodeActionResult{{
+		Title:   "Remove redundant '@Override'",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: from, End: to, NewText: ""}},
+	}}
+}
+
 // GetCodeActions returns all code actions offered for a selection range.
 func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int) []CodeActionResult {
 	var out []CodeActionResult
@@ -433,5 +497,6 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	out = append(out, inlineLocalVariable(program, checker, sf, start)...)
 	out = append(out, removeUnusedParameter(program, checker, sf, start)...)
 	out = append(out, removeUnusedImport(sf, start, end)...)
+	out = append(out, removeRedundantOverride(checker, sf, start)...)
 	return out
 }

@@ -300,3 +300,37 @@ test("no remove-parameter for an overloaded method (ambiguous call sites)", () =
   const ctx = setup("class C { void m(int aa) {} void m(int aa, int bb) {} }");
   expect(rewriteAt(ctx, "aa")).toBeUndefined();
 });
+
+// --- remove redundant @Override --------------------------------------------------
+
+test("remove redundant @Override deletes only the wrong annotation", () => {
+  const text = [
+    "class Base { void real() {} }",
+    "class T extends Base {",
+    "  @Override void notThere() {}",
+    "  @Override void real() {}",
+    "}",
+  ].join("\n");
+  const ctx = setup(text);
+  const actions = actionsAt(ctx, "notThere").filter(a => a.kind === "quickfix");
+  expect(actions.map(a => a.title)).toEqual(["Remove redundant '@Override'"]);
+  expect(apply(text, actions[0]!)).toBe(
+    [
+      "class Base { void real() {} }",
+      "class T extends Base {",
+      "  void notThere() {}",
+      "  @Override void real() {}",
+      "}",
+    ].join("\n"),
+  );
+});
+
+test("no remove-@Override on a method that genuinely overrides", () => {
+  const text = "class Base { void real() {} }\nclass T extends Base { @Override void real() {} }";
+  const ctx = setup(text);
+  expect(
+    actionsAt(ctx, "real", 2)
+      .filter(a => a.kind === "quickfix")
+      .map(a => a.title),
+  ).toEqual([]);
+});

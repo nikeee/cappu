@@ -353,3 +353,32 @@ func TestNoRemoveForOverloadedMethod(t *testing.T) {
 		t.Error("overloaded method should offer no remove-parameter")
 	}
 }
+
+func TestRemoveRedundantOverride(t *testing.T) {
+	text := "class Base { void real() {} }\n" +
+		"class T extends Base {\n" +
+		"  @Override void notThere() {}\n" +
+		"  @Override void real() {}\n" +
+		"}"
+	ctx := actionsSetup(text, nil)
+	actions := filterKind(ctx.actionsAt("notThere", 1), "quickfix")
+	if len(actions) != 1 || actions[0].Title != "Remove redundant '@Override'" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	want := "class Base { void real() {} }\n" +
+		"class T extends Base {\n" +
+		"  void notThere() {}\n" +
+		"  @Override void real() {}\n" +
+		"}"
+	if got := apply(text, actions[0]); got != want {
+		t.Errorf("apply =\n%s", got)
+	}
+}
+
+func TestNoRemoveOverrideOnRealOverride(t *testing.T) {
+	text := "class Base { void real() {} }\nclass T extends Base { @Override void real() {} }"
+	ctx := actionsSetup(text, nil)
+	if a := filterKind(ctx.actionsAt("real", 2), "quickfix"); len(a) != 0 {
+		t.Errorf("expected no quickfix on a real override, got %+v", a)
+	}
+}

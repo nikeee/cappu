@@ -4,11 +4,13 @@
 // offered for a [start, end) selection range in one source file.
 
 import { type Checker, findUnusedImports } from "../compiler/checker.ts";
-import { getIdentifierAtPosition } from "./nodeAtPosition.ts";
+import { Diagnostics } from "../compiler/diagnostics.ts";
+import { getIdentifierAtPosition, getNodeAtPosition } from "./nodeAtPosition.ts";
 import { forEachChild } from "../compiler/parser.ts";
 import type { Program } from "../compiler/program.ts";
 import { findReferences, getSourceFileOfNode } from "../compiler/resolver.ts";
 import {
+  type Annotation,
   type AssignmentExpression,
   type CallExpression,
   type Identifier,
@@ -423,6 +425,60 @@ function removeUnusedImport(
     });
 }
 
+// --- remove a redundant @Override ----------------------------------------------
+
+// The enclosing method declaration of a position, or undefined.
+function enclosingMethod(root: Node, offset: number): MethodDeclaration | undefined {
+  let node: Node | undefined = getNodeAtPosition(root, offset);
+  while (node && node.kind !== SyntaxKind.MethodDeclaration) node = node.parent;
+  return node as MethodDeclaration | undefined;
+}
+
+// The @Override annotation among a method's modifiers, or undefined.
+function overrideAnnotation(method: MethodDeclaration): Annotation | undefined {
+  for (const m of method.modifiers ?? []) {
+    if (m.kind !== SyntaxKind.Annotation) continue;
+    if (entityNameToString((m as Annotation).typeName).replace(/^.*\./, "") === "Override") {
+      return m as Annotation;
+    }
+  }
+  return undefined;
+}
+
+// For a method flagged with "does not override a supertype method" (1301),
+// offer to remove its erroneous @Override annotation.
+function removeRedundantOverride(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  const method = enclosingMethod(sourceFile, start);
+  if (!method) return [];
+  const annotation = overrideAnnotation(method);
+  if (!annotation) return [];
+  // Only when the checker actually flagged this method's @Override as wrong.
+  const wrong = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.Method_does_not_override_a_supertype_method.code &&
+        d.pos >= method.pos &&
+        d.end <= method.end,
+    );
+  if (!wrong) return [];
+  // Delete the annotation and the whitespace up to the next token.
+  const from = skipTrivia(sourceFile.text, annotation.pos);
+  const to = skipTrivia(sourceFile.text, annotation.end);
+  return [
+    {
+      title: "Remove redundant '@Override'",
+      kind: "quickfix",
+      changes: [{ start: from, end: to, newText: "" }],
+    },
+  ];
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
@@ -437,5 +493,6 @@ export function getCodeActions(
     ...inlineLocalVariable(program, checker, sourceFile, start),
     ...removeUnusedParameter(program, checker, sourceFile, start),
     ...removeUnusedImport(sourceFile, start, end),
+    ...removeRedundantOverride(checker, sourceFile, start),
   ];
 }
