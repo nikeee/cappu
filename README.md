@@ -127,6 +127,9 @@ Tired of clicking through an IDE to configure some JDKs? Configure your JDK of c
 #### GitHub Actions
 TODO: setup-cappu
 
+#### What about Kotlin?
+We intentionally do not support Kotlin. Adding suport for it would increase this project's complexity by a huge amount. Maybe some day.
+
 #### The History behind this Project
 I didn't want to just say "build a java compiler and LSP server, make no mistakes". You can see most of my prompts in PROMPTS.md.
 
