@@ -27,6 +27,8 @@ These things aren't that hard and can be solved by the package manager. npm, car
 
 The entire Java tooling seems to be centered around the experience in an IDE that is built by a single vendor. It's good, but I get annoyed pretty fast when I try to do something in some other editor.
 
+Tried to run spotless as a pre-commit hook via CLI? Gradle needs to spawn 8 threads to figure out its configuration and needs at least 10 seconds before it even knows how to run the formatter. Even if it didn't change any formatting at all. This is simply not acceptable as as CLI tool.
+
 Using maven or gradle is somehow extremely cumbersome to use in multi-stage Docker builds. Cappu aims to improve that by offering a global cache directory as well as a lockfile. Everything should be as easy as shown below.
 
 ##### Why is this thing built with JavaScript?
