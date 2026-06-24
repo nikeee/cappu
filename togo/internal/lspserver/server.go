@@ -154,6 +154,9 @@ func (s *Server) register() {
 	c.OnRequest("textDocument/prepareTypeHierarchy", s.onPrepareTypeHierarchy)
 	c.OnRequest("typeHierarchy/supertypes", s.onTypeHierarchySupertypes)
 	c.OnRequest("typeHierarchy/subtypes", s.onTypeHierarchySubtypes)
+	c.OnRequest("textDocument/prepareCallHierarchy", s.onPrepareCallHierarchy)
+	c.OnRequest("callHierarchy/incomingCalls", s.onCallHierarchyIncoming)
+	c.OnRequest("callHierarchy/outgoingCalls", s.onCallHierarchyOutgoing)
 	c.OnRequest("shutdown", func(json.RawMessage) (any, *lsp.ResponseError) { return nil, nil })
 }
 
@@ -201,6 +204,7 @@ func (s *Server) onInitialize(params json.RawMessage) (any, *lsp.ResponseError) 
 		CodeLensProvider:       &lsp.CodeLensOptions{ResolveProvider: false},
 		ImplementationProvider: true,
 		TypeHierarchyProvider:  true,
+		CallHierarchyProvider:  true,
 	}}, nil
 }
 

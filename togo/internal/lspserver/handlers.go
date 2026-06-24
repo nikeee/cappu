@@ -451,6 +451,42 @@ func (s *Server) onTypeHierarchySubtypes(params json.RawMessage) (any, *lsp.Resp
 	return items, nil
 }
 
+// callHierarchyItemParams is the {item} payload of incoming/outgoing requests.
+type callHierarchyItemParams struct {
+	Item lsp.CallHierarchyItem `json:"item"`
+}
+
+func (s *Server) onPrepareCallHierarchy(params json.RawMessage) (any, *lsp.ResponseError) {
+	p := decode[lsp.TextDocumentPositionParams](params)
+	sourceFile, offset, ok := s.sourceAndOffset(compiler.URI(p.TextDocument.URI), p.Position)
+	if !ok {
+		return nil, nil
+	}
+	items := services.PrepareCallHierarchy(s.checker, sourceFile, offset)
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
+func (s *Server) onCallHierarchyIncoming(params json.RawMessage) (any, *lsp.ResponseError) {
+	p := decode[callHierarchyItemParams](params)
+	calls := services.CallHierarchyIncoming(s.program, s.checker, p.Item)
+	if len(calls) == 0 {
+		return nil, nil
+	}
+	return calls, nil
+}
+
+func (s *Server) onCallHierarchyOutgoing(params json.RawMessage) (any, *lsp.ResponseError) {
+	p := decode[callHierarchyItemParams](params)
+	calls := services.CallHierarchyOutgoing(s.program, s.checker, p.Item)
+	if len(calls) == 0 {
+		return nil, nil
+	}
+	return calls, nil
+}
+
 func (s *Server) onInlayHint(params json.RawMessage) (any, *lsp.ResponseError) {
 	p := decode[lsp.InlayHintParams](params)
 	sourceFile := s.program.GetSourceFile(compiler.URI(p.TextDocument.URI))

@@ -332,6 +332,13 @@ Seeded from tsgo; not yet exercised here.
   tested directly), but the Go port adds one - two `io.Pipe`s with a background
   drain goroutine so the synchronous pipe never blocks the server's diagnostic
   writes; it drives a real initialize/hover/completion/rename round-trip.
+- **Type / call hierarchy re-resolve from the item, not a data payload**: the
+  hierarchy requests are split into a pure service module (`type_hierarchy.go`,
+  `call_hierarchy.go`) like the others; rather than stashing symbol identity in
+  the LSP item's opaque `data`, the supertypes/subtypes/incoming/outgoing calls
+  re-resolve the symbol from the identifier at the item's `selectionRange` start.
+  `TypeHierarchyItem` / `CallHierarchyItem` are hand-rolled in `internal/lsp` like
+  the rest. Both backends do this identically.
 
 ## Emitter-domain library pieces (without the bytecode emitter)
 

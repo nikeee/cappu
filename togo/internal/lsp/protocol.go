@@ -92,6 +92,7 @@ type ServerCapabilities struct {
 	CodeLensProvider          *CodeLensOptions       `json:"codeLensProvider,omitempty"`
 	ImplementationProvider    bool                   `json:"implementationProvider"`
 	TypeHierarchyProvider     bool                   `json:"typeHierarchyProvider"`
+	CallHierarchyProvider     bool                   `json:"callHierarchyProvider"`
 }
 
 const TextDocumentSyncIncremental = 2

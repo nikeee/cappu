@@ -82,6 +82,11 @@ import {
   typeHierarchySupertypes,
 } from "./typeHierarchy.ts";
 import {
+  callHierarchyIncoming,
+  callHierarchyOutgoing,
+  prepareCallHierarchy,
+} from "./callHierarchy.ts";
+import {
   type CallExpression,
   type AssignmentExpression,
   DiagnosticCategory,
@@ -173,6 +178,7 @@ export function startServer(
         codeLensProvider: { resolveProvider: false },
         implementationProvider: true,
         typeHierarchyProvider: true,
+        callHierarchyProvider: true,
       },
     };
   });
@@ -649,6 +655,19 @@ export function startServer(
   );
   connection.languages.typeHierarchy.onSubtypes(params =>
     typeHierarchySubtypes(program, checker, params.item),
+  );
+
+  // Call hierarchy: prepare resolves the method/constructor at the cursor;
+  // incoming/outgoing re-resolve from the item the client hands back.
+  connection.languages.callHierarchy.onPrepare(params => {
+    const at = sourceAndOffset(asUri(params.textDocument.uri), params.position);
+    return at ? prepareCallHierarchy(checker, at.sourceFile, at.offset) : null;
+  });
+  connection.languages.callHierarchy.onIncomingCalls(params =>
+    callHierarchyIncoming(program, checker, params.item),
+  );
+  connection.languages.callHierarchy.onOutgoingCalls(params =>
+    callHierarchyOutgoing(program, checker, params.item),
   );
 
   // A "N references" lens above every type and method declaration. The command

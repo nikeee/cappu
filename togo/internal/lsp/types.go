@@ -73,3 +73,26 @@ type TypeHierarchyItem struct {
 	Range          Range      `json:"range"`
 	SelectionRange Range      `json:"selectionRange"`
 }
+
+// CallHierarchyItem is a node in a call hierarchy (LSP 3.16). Re-resolved from
+// SelectionRange on incoming/outgoing calls, like TypeHierarchyItem.
+type CallHierarchyItem struct {
+	Name           string     `json:"name"`
+	Kind           SymbolKind `json:"kind"`
+	URI            string     `json:"uri"`
+	Range          Range      `json:"range"`
+	SelectionRange Range      `json:"selectionRange"`
+}
+
+// CallHierarchyIncomingCall is a caller (From) and the call-site ranges within it.
+type CallHierarchyIncomingCall struct {
+	From       CallHierarchyItem `json:"from"`
+	FromRanges []Range           `json:"fromRanges"`
+}
+
+// CallHierarchyOutgoingCall is a callee (To) and the call-site ranges in the
+// caller that reach it.
+type CallHierarchyOutgoingCall struct {
+	To         CallHierarchyItem `json:"to"`
+	FromRanges []Range           `json:"fromRanges"`
+}
