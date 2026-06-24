@@ -20,25 +20,20 @@ const (
 	githubAPI = "https://api.github.com"
 )
 
-// PlatformTarget is the release asset name for a platform, or ok=false when none
-// is built (windows is x64-only, macOS arm64-only).
+// PlatformTarget is the release asset name for a platform, or ok=false when the
+// os/arch is unknown. Every linux/darwin/windows x amd64/arm64 combination is
+// built (see the Makefile build-all targets).
 func PlatformTarget(goos, goarch string) (string, bool) {
 	os := map[string]string{"linux": "linux", "darwin": "darwin", "windows": "windows"}[goos]
 	cpu := map[string]string{"amd64": "x64", "arm64": "arm64"}[goarch]
 	if os == "" || cpu == "" {
 		return "", false
 	}
-	if os == "windows" && cpu != "x64" {
-		return "", false
-	}
-	if os == "darwin" && cpu != "arm64" {
-		return "", false
-	}
 	// Asset names match `make build-all` output (the dist filenames), so CD can
 	// upload dist/* with no renames. Windows keeps the .exe so the downloaded
 	// asset is runnable as-is.
 	if os == "windows" {
-		return "cappu-win-x64.exe", true
+		return fmt.Sprintf("cappu-win-%s.exe", cpu), true
 	}
 	return fmt.Sprintf("cappu-%s-%s", os, cpu), true
 }

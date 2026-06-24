@@ -19,15 +19,12 @@ export function platformTarget(
   const os = { linux: "linux", darwin: "darwin", win32: "windows" }[platform as string];
   const cpu = { x64: "x64", arm64: "arm64" }[arch];
   if (!os || !cpu) return undefined;
-  // Of the platforms CD builds, windows is x64-only and macOS is arm64-only
-  // (Node SEA does not support macOS x64) - reject the combinations we never
-  // ship. See .github/workflows/CD.yaml / tsdown.config.ts.
-  if (os === "windows" && cpu !== "x64") return undefined;
-  if (os === "darwin" && cpu !== "arm64") return undefined;
+  // Every linux/darwin/windows x x64/arm64 combination is built; see the Go
+  // Makefile build-all targets and .github/workflows/CD.yaml.
   // Asset names match `make build-all` output (the dist filenames), so CD can
   // upload dist/* with no renames. Windows keeps the .exe so the downloaded
   // asset is runnable as-is.
-  return os === "windows" ? "cappu-win-x64.exe" : `cappu-${os}-${cpu}`;
+  return os === "windows" ? `cappu-win-${cpu}.exe` : `cappu-${os}-${cpu}`;
 }
 
 export type FetchJson = (url: string) => Promise<unknown>;
@@ -44,9 +41,7 @@ export interface ReleaseRef {
 
 /** The asset matching `assetName` in the latest published release. */
 export async function latestRelease(assetName: string, fetchJson: FetchJson): Promise<ReleaseRef> {
-  const release = (await fetchJson(
-    `${API}/repos/${REPO.owner}/${REPO.name}/releases/latest`,
-  )) as {
+  const release = (await fetchJson(`${API}/repos/${REPO.owner}/${REPO.name}/releases/latest`)) as {
     tag_name?: string;
     published_at?: string;
     assets?: { name: string; browser_download_url: string }[];

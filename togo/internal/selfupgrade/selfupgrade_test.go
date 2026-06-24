@@ -19,10 +19,11 @@ func TestPlatformTarget(t *testing.T) {
 		{"linux", "amd64", true, "cappu-linux-x64"},
 		{"linux", "arm64", true, "cappu-linux-arm64"},
 		{"darwin", "arm64", true, "cappu-darwin-arm64"},
+		{"darwin", "amd64", true, "cappu-darwin-x64"},
 		{"windows", "amd64", true, "cappu-win-x64.exe"},
-		{"windows", "arm64", false, ""}, // no windows-arm64
-		{"darwin", "amd64", false, ""},  // no macOS x64
+		{"windows", "arm64", true, "cappu-win-arm64.exe"},
 		{"freebsd", "amd64", false, ""}, // unsupported OS
+		{"linux", "riscv64", false, ""}, // unsupported arch
 	}
 	for _, c := range cases {
 		got, ok := PlatformTarget(c.goos, c.goarch)
@@ -182,8 +183,8 @@ func TestSelfUpgradeSkipsWhenUpToDate(t *testing.T) {
 }
 
 func TestSelfUpgradeUnbuiltPlatformFailsBeforeFetch(t *testing.T) {
-	_, err := SelfUpgrade(Options{GOOS: "windows", GOARCH: "arm64"})
-	if err == nil || !strings.Contains(err.Error(), "no cappu build for windows/arm64") {
+	_, err := SelfUpgrade(Options{GOOS: "freebsd", GOARCH: "riscv64"})
+	if err == nil || !strings.Contains(err.Error(), "no cappu build for freebsd/riscv64") {
 		t.Errorf("err = %v", err)
 	}
 }

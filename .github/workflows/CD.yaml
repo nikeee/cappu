@@ -57,7 +57,9 @@ jobs:
             togo/dist/cappu-linux-x64 \
             togo/dist/cappu-linux-arm64 \
             togo/dist/cappu-darwin-arm64 \
+            togo/dist/cappu-darwin-x64 \
             togo/dist/cappu-win-x64.exe \
+            togo/dist/cappu-win-arm64.exe \
             --generate-notes
 
   image:

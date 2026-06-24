@@ -18,11 +18,12 @@ test("platform targets match the release asset names", () => {
   expect(platformTarget("linux", "x64")).toBe("cappu-linux-x64");
   expect(platformTarget("linux", "arm64")).toBe("cappu-linux-arm64");
   expect(platformTarget("darwin", "arm64")).toBe("cappu-darwin-arm64");
+  expect(platformTarget("darwin", "x64")).toBe("cappu-darwin-x64");
   expect(platformTarget("win32", "x64")).toBe("cappu-win-x64.exe");
-  // CD builds no windows-arm64, no macOS x64 (Node SEA limitation), no other platforms
-  expect(platformTarget("win32", "arm64")).toBeUndefined();
-  expect(platformTarget("darwin", "x64")).toBeUndefined();
+  expect(platformTarget("win32", "arm64")).toBe("cappu-win-arm64.exe");
+  // Unsupported OS / arch yield no asset.
   expect(platformTarget("freebsd", "x64")).toBeUndefined();
+  expect(platformTarget("linux", "riscv64")).toBeUndefined();
 });
 
 function fakeRelease(release: unknown): (url: string) => Promise<unknown> {
@@ -144,7 +145,7 @@ test("selfUpgrade skips the download when already on the latest version", async 
 });
 
 test("an unbuilt platform fails before any fetch", async () => {
-  await expect(selfUpgrade({ platform: "win32", arch: "arm64" })).rejects.toThrow(
-    "no cappu build for win32/arm64",
+  await expect(selfUpgrade({ platform: "freebsd", arch: "riscv64" })).rejects.toThrow(
+    "no cappu build for freebsd/riscv64",
   );
 });

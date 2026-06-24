@@ -41,10 +41,12 @@ build: ## Build a static binary for the host
 
 # Statically linked binaries for every release target (no libc dependency).
 build-all: ## Cross-build static binaries for all release targets
-	CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/cappu-linux-x64    ./cmd/cappu
-	CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/cappu-linux-arm64  ./cmd/cappu
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/cappu-darwin-arm64 ./cmd/cappu
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/cappu-win-x64.exe ./cmd/cappu
+	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/cappu-linux-x64     ./cmd/cappu
+	CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/cappu-linux-arm64   ./cmd/cappu
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/cappu-darwin-arm64  ./cmd/cappu
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/cappu-darwin-x64    ./cmd/cappu
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/cappu-win-x64.exe   ./cmd/cappu
+	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/cappu-win-arm64.exe ./cmd/cappu
 
 clean: ## Remove build output
 	rm -rf dist
