@@ -412,3 +412,4 @@ cappu search commons-lang3
 - 2026-06-24 17:34 — resolve https://github.com/nikeee/cappu/issues/25
 - 2026-06-24 17:34 — are you going to put the nullability as a type flag/union similar to typescripts |null?
 - 2026-06-24 17:34 — maybe add this to the compiler options, not the lsp options. in compilation mode (and lsp), we should emit a warning diagnostic. maybe just start with lsp and do compiler later, since we only have an experimental compiler
+- 2026-06-24 22:31 — support cross-file package-info.java and generic nullness

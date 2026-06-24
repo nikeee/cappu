@@ -115,3 +115,66 @@ test("a custom non-null annotation list (JSR-305) is honored", () => {
   const config: NullnessOptions = { ...JSPECIFY, nonNullAnnotations: ["javax.annotation.Nonnull"] };
   expect(diagnose(code, config)).toContain(NULL_INTO_NONNULL);
 });
+
+// --- generic (type-argument) nullness ----------------------------------------------
+
+const BOX = "class Box<T> { void put(T t) {} T get() { return get(); } }\n";
+
+test("null into the non-null element of Box<@NonNull String>.put is flagged", () => {
+  const code = `${BOX}class C { void g(Box<@NonNull String> b) { b.put(null); } }`;
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("null into the nullable element of Box<@Nullable String>.put is accepted", () => {
+  const code = `${BOX}class C { void g(Box<@Nullable String> b) { b.put(null); } }`;
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("inside @NullMarked an unannotated Box<String> element rejects null", () => {
+  const code = `${BOX}@NullMarked class C { void g(Box<String> b) { b.put(null); } }`;
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a non-null value into Box<@NonNull String>.put is accepted", () => {
+  const code = `${BOX}class C { void g(Box<@NonNull String> b) { b.put("x"); } }`;
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a @Nullable generic element returned by get flows into a non-null parameter", () => {
+  const code = `${BOX}class C { void f(@NonNull String s) {} void g(Box<@Nullable String> b) { f(b.get()); } }`;
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+// --- cross-file package-info.java ---------------------------------------------------
+
+function diagnoseFiles(files: Record<string, string>, target: string): number[] {
+  const program = createProgram();
+  loadJdkStub(program);
+  for (const [uri, text] of Object.entries(files)) {
+    program.setOpenDocument(uri as Uri, text, 1);
+  }
+  const checker = createChecker(program, JSPECIFY);
+  return checker.getSemanticDiagnostics(program.getSourceFile(target as Uri)!).map(d => d.code);
+}
+
+test("@NullMarked in a package-info.java marks another file of the same package", () => {
+  const codes = diagnoseFiles(
+    {
+      "file:///p/package-info.java": "@NullMarked package p;",
+      "file:///p/C.java": "package p; class C { void f(String s) {} void g() { f(null); } }",
+    },
+    "file:///p/C.java",
+  );
+  expect(codes).toContain(NULL_INTO_NONNULL);
+});
+
+test("without a @NullMarked package-info.java the same code is not flagged", () => {
+  const codes = diagnoseFiles(
+    {
+      "file:///p/package-info.java": "package p;",
+      "file:///p/C.java": "package p; class C { void f(String s) {} void g() { f(null); } }",
+    },
+    "file:///p/C.java",
+  );
+  expect(codes).not.toContain(NULL_INTO_NONNULL);
+});

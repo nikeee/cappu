@@ -35,6 +35,31 @@ type Type struct {
 	IsExtends bool    // Wildcard
 	IsSuper   bool    // Wildcard
 	Types     []*Type // Intersection
+
+	// Nullness is the jspecify nullness facet (nikeee/cappu#25), attached by
+	// resolveType only when nullness checking is enabled and read only by the
+	// nullness checks - typeToString, assignability and the emitter ignore it.
+	Nullness Nullness
+}
+
+// nullnessOf returns the jspecify nullness facet of a type ("" when unknown).
+func nullnessOf(t *Type) Nullness {
+	return t.Nullness
+}
+
+// withNullness returns a copy of t with its nullness facet set (nikeee/cappu#25).
+// Only reference types carry nullness; a no-op for primitives, null, error and "".
+func withNullness(t *Type, nullness Nullness) *Type {
+	if nullness == "" {
+		return t
+	}
+	switch t.Kind {
+	case TypeKindClass, TypeKindArray, TypeKindTypeVariable:
+		clone := *t
+		clone.Nullness = nullness
+		return &clone
+	}
+	return t
 }
 
 var (

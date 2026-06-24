@@ -54,6 +54,8 @@ type Checker struct {
 
 	// jspecify nullness checking (nikeee/cappu#25); nil when disabled.
 	nullness *NullnessAnnotations
+	// Cross-file @NullMarked: whether a package's package-info.java marks it, cached.
+	packageNullMarked map[string]bool
 }
 
 type callInfoEntry struct {
@@ -70,19 +72,97 @@ func NewChecker(program *Program, nullness ...*config.Nullness) *Checker {
 		n = nullness[0]
 	}
 	c := &Checker{
-		program:         program,
-		symbolTypes:     map[*Symbol]*Type{},
-		expressionTypes: map[*Node]*Type{},
-		callInfoCache:   map[*Node]*callInfoEntry{},
-		booleanType:     primitiveType("boolean"),
-		intType:         primitiveType("int"),
-		charType:        primitiveType("char"),
-		nullness:        resolveNullnessAnnotations(n),
+		program:           program,
+		symbolTypes:       map[*Symbol]*Type{},
+		expressionTypes:   map[*Node]*Type{},
+		callInfoCache:     map[*Node]*callInfoEntry{},
+		booleanType:       primitiveType("boolean"),
+		intType:           primitiveType("int"),
+		charType:          primitiveType("char"),
+		nullness:          resolveNullnessAnnotations(n),
+		packageNullMarked: map[string]bool{},
 	}
 	// Synthetic symbol for the implicit `length` field of every array (JLS 10.7).
 	c.arrayLengthSymbol = &Symbol{Flags: SymbolFlagsField, EscapedName: "length"}
 	c.symbolTypes[c.arrayLengthSymbol] = c.intType
 	return c
+}
+
+// packageIsNullMarked reports whether a package is marked by its package-info.java
+// (a different source file). Java only allows package annotations there, so match
+// the file name exactly. Cached per package (nikeee/cappu#25).
+func (c *Checker) packageIsNullMarked(packageName string) bool {
+	if marked, ok := c.packageNullMarked[packageName]; ok {
+		return marked
+	}
+	marked := false
+	for _, uri := range c.program.GetAllUris() {
+		if !strings.HasSuffix(string(uri), "package-info.java") {
+			continue
+		}
+		sf := c.program.GetSourceFile(uri)
+		if sf == nil {
+			continue
+		}
+		pkg := sf.AsSourceFile().PackageDeclaration
+		if pkg == nil || entityNameToString(pkg.AsPackageDeclaration().Name) != packageName {
+			continue
+		}
+		if hasNullnessAnnotation(pkg, c.nullness.nullUnmarked) {
+			marked = false
+		} else if hasNullnessAnnotation(pkg, c.nullness.nullMarked) {
+			marked = true
+		}
+		break
+	}
+	c.packageNullMarked[packageName] = marked
+	return marked
+}
+
+// isNullMarked reports whether node is inside a @NullMarked scope. The nearest
+// enclosing @NullMarked / @NullUnmarked on the declaration, an enclosing type, this
+// file's package declaration, or the package's package-info.java wins.
+func (c *Checker) isNullMarked(node *Node) bool {
+	a := c.nullness
+	for n := node; n != nil; n = n.Parent {
+		if hasNullnessAnnotation(n, a.nullUnmarked) {
+			return false
+		}
+		if hasNullnessAnnotation(n, a.nullMarked) {
+			return true
+		}
+		if n.Kind == SourceFile {
+			pkg := n.AsSourceFile().PackageDeclaration
+			if hasNullnessAnnotation(pkg, a.nullUnmarked) {
+				return false
+			}
+			if hasNullnessAnnotation(pkg, a.nullMarked) {
+				return true
+			}
+			name := ""
+			if pkg != nil {
+				name = entityNameToString(pkg.AsPackageDeclaration().Name)
+			}
+			return c.packageIsNullMarked(name)
+		}
+	}
+	return false
+}
+
+// typeNodeNullness is the nullness a type node carries at a use site: an explicit
+// type-use annotation (List<@Nullable T>) wins, else a reference type in a
+// @NullMarked scope is non-null, else unknown.
+func (c *Checker) typeNodeNullness(typeNode, fromNode *Node) Nullness {
+	if explicit := typeUseNullness(typeNode, c.nullness); explicit != "" {
+		return explicit
+	}
+	if !isReferenceTypeNode(typeNode) {
+		return ""
+	}
+	if c.isNullMarked(fromNode) {
+		return NullnessNonNull
+	}
+	return ""
 }
 
 // --- primitive widening (JLS 5.1.2) and boxing (JLS 5.1.7) -------------------
@@ -286,9 +366,9 @@ func (c *Checker) substitute(t *Type, m substMap) *Type {
 		for i, a := range t.TypeArguments {
 			args[i] = c.substitute(a, m)
 		}
-		return classType(t.Symbol, args)
+		return withNullness(classType(t.Symbol, args), t.Nullness)
 	case TypeKindArray:
-		return arrayType(c.substitute(t.ElementType, m))
+		return withNullness(arrayType(c.substitute(t.ElementType, m)), t.Nullness)
 	case TypeKindWildcard:
 		if t.Bound != nil {
 			nw := *t
@@ -481,6 +561,13 @@ func (c *Checker) ResolveType(typeNode, fromNode *Node) *Type {
 }
 
 func (c *Checker) resolveType(typeNode, fromNode *Node) *Type {
+	// jspecify nullness facet (nikeee/cappu#25), attached only when enabled.
+	withTypeNullness := func(t *Type) *Type {
+		if c.nullness == nil {
+			return t
+		}
+		return withNullness(t, c.typeNodeNullness(typeNode, fromNode))
+	}
 	switch typeNode.Kind {
 	case PrimitiveType:
 		name := tokenToString(typeNode.AsPrimitiveType().Keyword)
@@ -489,7 +576,7 @@ func (c *Checker) resolveType(typeNode, fromNode *Node) *Type {
 		}
 		return primitiveType(name)
 	case ArrayType:
-		return arrayType(c.resolveType(typeNode.AsArrayType().ElementType, fromNode))
+		return withTypeNullness(arrayType(c.resolveType(typeNode.AsArrayType().ElementType, fromNode)))
 	case WildcardType:
 		w := typeNode.AsWildcardType()
 		var bound *Type
@@ -507,7 +594,7 @@ func (c *Checker) resolveType(typeNode, fromNode *Node) *Type {
 		}
 		// Through getTypeOfSymbol so the variable carries its bound (cached once).
 		if symbol.Flags&SymbolFlagsTypeParameter != 0 {
-			return c.getTypeOfSymbol(symbol)
+			return withTypeNullness(c.getTypeOfSymbol(symbol))
 		}
 		var args []*Type
 		if ref.TypeArguments != nil {
@@ -515,7 +602,7 @@ func (c *Checker) resolveType(typeNode, fromNode *Node) *Type {
 				args = append(args, c.resolveType(a, fromNode))
 			}
 		}
-		return classType(symbol, args)
+		return withTypeNullness(classType(symbol, args))
 	default:
 		return errorType
 	}
@@ -641,6 +728,11 @@ func (c *Checker) getTypeOfSymbol(symbol *Symbol) *Type {
 		} else {
 			t = c.inferLambdaParameterType(symbol)
 		}
+	}
+	// A declaration-level @Nullable/@NonNull (on the modifiers, e.g. `@NonNull
+	// String s`, not the type node) overrides the type's facet (nikeee/cappu#25).
+	if c.nullness != nil {
+		t = withNullness(t, readDeclaredNullness(c.declarationOf(symbol), c.nullness))
 	}
 	c.symbolTypes[symbol] = t
 	return t
@@ -1985,6 +2077,11 @@ func (c *Checker) typeOfCall(call *Node) *Type {
 	vars := c.methodTypeParameters(info.Decl)
 	if len(vars) > 0 {
 		returnType = c.substitute(returnType, c.inferMethodTypeArguments(info.Decl, c.argTypes(call), info.ReceiverSubst, vars))
+	}
+	// A method's @Nullable/@NonNull return annotation sits on the method modifiers,
+	// not the return type node, so merge it onto the result (nikeee/cappu#25).
+	if c.nullness != nil {
+		returnType = withNullness(returnType, readDeclaredNullness(info.Decl, c.nullness))
 	}
 	return returnType
 }

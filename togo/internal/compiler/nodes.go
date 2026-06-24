@@ -47,7 +47,11 @@ func (n *Node) AsQualifiedName() *QualifiedNameData { return n.data.(*QualifiedN
 // --- type nodes --------------------------------------------------------------
 
 // PrimitiveTypeData carries the primitive keyword kind (IntKeyword, ...).
-type PrimitiveTypeData struct{ Keyword SyntaxKind }
+// Annotations are SE8 type-use annotations written before the type (nikeee/cappu#25).
+type PrimitiveTypeData struct {
+	Keyword     SyntaxKind
+	Annotations *NodeArray
+}
 
 func (d *PrimitiveTypeData) forEachChild(Visitor) bool { return false }
 
@@ -65,9 +69,11 @@ func (d *VarTypeData) forEachChild(Visitor) bool { return false }
 func (f *NodeFactory) NewVarType() *Node { return f.newNode(VarType, &VarTypeData{}) }
 
 // TypeReferenceData is a named type with optional type arguments.
+// Annotations are SE8 type-use annotations written before the type (nikeee/cappu#25).
 type TypeReferenceData struct {
 	TypeName      *Node      // EntityName
 	TypeArguments *NodeArray // TypeNode | WildcardType
+	Annotations   *NodeArray
 }
 
 func (d *TypeReferenceData) forEachChild(v Visitor) bool {

@@ -1,27 +1,20 @@
 // Reading jspecify nullness annotations (@Nullable / @NonNull / @NullMarked /
-// @NullUnmarked, https://jspecify.dev/docs/spec/) off a declaration, and deciding
-// whether a *target* position (a parameter, return, field or local) is non-null.
-// The checker uses these to warn when a possibly-null value reaches a non-null
-// position. This is purely syntactic: declared nullness is read, never narrowed
-// (no flow analysis), and generic/array-component nullness is out of scope.
+// @NullUnmarked, https://jspecify.dev/docs/spec/) off declarations and type nodes.
+// The checker turns these into a nullness facet on the type model (see
+// checkerTypes.ts) and warns when a possibly-null value reaches a non-null position.
+// Purely syntactic: declared nullness is read, never narrowed (no flow analysis).
 
 import {
   type Annotation,
-  type FieldDeclaration,
-  type LocalVariableDeclarationStatement,
-  type MethodDeclaration,
   type ModifierLike,
   type Node,
   type NodeArray,
-  type Parameter,
-  type RecordComponent,
-  type SourceFile,
   SyntaxKind,
 } from "./types.ts";
 import { entityNameToString } from "./utilities.ts";
 
-/** The three states a target position can be in; "unknown" stays silent. */
-export type Nullness = "nonNull" | "nullable" | "unknown";
+/** The three states a position can be in; undefined/"unknown" stays silent. */
+export type Nullness = "nonNull" | "nullable";
 
 /** The nullness config (FQDN lists), as it comes from cappu.json. */
 export interface NullnessOptions {
@@ -55,13 +48,14 @@ export function resolveNullnessAnnotations(options: NullnessOptions): NullnessAn
 }
 
 // A declaration's annotations live on `.modifiers` (types, methods, params,
-// fields, locals) or on `.annotations` (package/module declarations).
+// fields, locals) or `.annotations` (record/package/module/type-use nodes).
 function annotationsOf(node: Node): readonly Node[] {
   const n = node as { modifiers?: NodeArray<ModifierLike>; annotations?: NodeArray<Annotation> };
   return n.modifiers ?? n.annotations ?? [];
 }
 
-function hasAnnotation(node: Node | undefined, names: ReadonlySet<string>): boolean {
+/** Whether `node` carries any annotation whose simple name is in `names`. */
+export function hasNullnessAnnotation(node: Node | undefined, names: ReadonlySet<string>): boolean {
   if (!node) return false;
   for (const m of annotationsOf(node)) {
     if (m.kind !== SyntaxKind.Annotation) continue;
@@ -70,61 +64,37 @@ function hasAnnotation(node: Node | undefined, names: ReadonlySet<string>): bool
   return false;
 }
 
-// The node carrying the modifiers + type for a symbol's declaration. A field or
-// local's annotation sits on the enclosing declaration, not the VariableDeclarator.
+function nullnessFrom(node: Node | undefined, a: NullnessAnnotations): Nullness | undefined {
+  if (hasNullnessAnnotation(node, a.nullable)) return "nullable";
+  if (hasNullnessAnnotation(node, a.nonNull)) return "nonNull";
+  return undefined;
+}
+
+// The node carrying the modifiers for a symbol's declaration. A field or local's
+// annotation sits on the enclosing declaration, not the VariableDeclarator.
 export function carrierOf(decl: Node | undefined): Node | undefined {
   if (decl?.kind === SyntaxKind.VariableDeclarator) return decl.parent;
   return decl;
 }
 
-function typeNodeOf(carrier: Node): Node | undefined {
-  switch (carrier.kind) {
-    case SyntaxKind.MethodDeclaration:
-      return (carrier as MethodDeclaration).returnType;
-    case SyntaxKind.Parameter:
-      return (carrier as Parameter).type;
-    case SyntaxKind.FieldDeclaration:
-      return (carrier as FieldDeclaration).type;
-    case SyntaxKind.LocalVariableDeclarationStatement:
-      return (carrier as LocalVariableDeclarationStatement).type;
-    case SyntaxKind.RecordComponent:
-      return (carrier as RecordComponent).type;
-    default:
-      return undefined;
-  }
+/** Nullness declared by a declaration's own modifiers (@Nullable String s). */
+export function readDeclaredNullness(
+  decl: Node | undefined,
+  a: NullnessAnnotations,
+): Nullness | undefined {
+  return nullnessFrom(carrierOf(decl), a);
 }
 
-// Only reference types carry nullness; a primitive (or an unresolved `var`) never
-// does. Arrays are reference types (the variable itself, not its elements).
-function isReferenceType(type: Node | undefined): boolean {
+/** Nullness written as a type-use annotation on a type node (List<@Nullable T>). */
+export function typeUseNullness(
+  typeNode: Node | undefined,
+  a: NullnessAnnotations,
+): Nullness | undefined {
+  return nullnessFrom(typeNode, a);
+}
+
+// Only reference types carry nullness; a primitive (or `var`) never does. Arrays
+// are reference types (the variable itself, not its elements).
+export function isReferenceTypeNode(type: Node | undefined): boolean {
   return type?.kind === SyntaxKind.TypeReference || type?.kind === SyntaxKind.ArrayType;
-}
-
-// Is `node` inside a @NullMarked scope? The nearest enclosing @NullMarked /
-// @NullUnmarked on the declaration, an enclosing type, or this file's package
-// declaration wins. Cross-file package-info.java is not consulted.
-function isNullMarked(node: Node, a: NullnessAnnotations): boolean {
-  for (let n: Node | undefined = node; n; n = n.parent) {
-    if (hasAnnotation(n, a.nullUnmarked)) return false;
-    if (hasAnnotation(n, a.nullMarked)) return true;
-    if (n.kind === SyntaxKind.SourceFile) {
-      const pkg = (n as SourceFile).packageDeclaration;
-      if (hasAnnotation(pkg, a.nullUnmarked)) return false;
-      if (hasAnnotation(pkg, a.nullMarked)) return true;
-    }
-  }
-  return false;
-}
-
-/**
- * The declared nullness of a target position (the carrier node holding the
- * modifiers + type). Explicit @Nullable/@NonNull wins; otherwise a reference type
- * in a @NullMarked scope is non-null; everything else is unknown (silent).
- */
-export function targetNullness(carrier: Node | undefined, a: NullnessAnnotations): Nullness {
-  if (!carrier) return "unknown";
-  if (hasAnnotation(carrier, a.nullable)) return "nullable";
-  if (hasAnnotation(carrier, a.nonNull)) return "nonNull";
-  if (!isReferenceType(typeNodeOf(carrier))) return "unknown";
-  return isNullMarked(carrier, a) ? "nonNull" : "unknown";
 }

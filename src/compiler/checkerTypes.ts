@@ -3,6 +3,7 @@
 // the null type and an error type for the unknown/unresolved (so analysis
 // degrades gracefully instead of throwing or reporting false errors).
 
+import type { Nullness } from "./nullness.ts";
 import type { Symbol } from "./types.ts";
 
 export const enum TypeKind {
@@ -21,20 +22,26 @@ export interface PrimitiveType {
   readonly name: string; // int, long, boolean, ..., void
 }
 
+// `nullness` is the jspecify nullness facet (nikeee/cappu#25), attached by
+// resolveType only when nullness checking is enabled and read only by the nullness
+// checks - typeToString, assignability and the emitter ignore it.
 export interface ClassType {
   readonly kind: TypeKind.Class;
   readonly symbol: Symbol;
   readonly typeArguments: readonly Type[];
+  readonly nullness?: Nullness;
 }
 
 export interface ArrayType {
   readonly kind: TypeKind.Array;
   readonly elementType: Type;
+  readonly nullness?: Nullness;
 }
 
 export interface TypeVariable {
   readonly kind: TypeKind.TypeVariable;
   readonly symbol: Symbol;
+  readonly nullness?: Nullness;
   /**
    * The leftmost declared bound (`T extends Comparable<T>` -> Comparable<T>),
    * the type a use of T erases to (JLS 4.6). Filled in lazily by the checker
@@ -97,6 +104,27 @@ export function arrayType(elementType: Type): ArrayType {
 
 export function typeVariable(symbol: Symbol): TypeVariable {
   return { kind: TypeKind.TypeVariable, symbol };
+}
+
+/** The jspecify nullness facet of a type, or undefined when unknown/irrelevant. */
+export function nullnessOf(type: Type): Nullness | undefined {
+  return (type as { nullness?: Nullness }).nullness;
+}
+
+/**
+ * A copy of `type` with its nullness facet set (nikeee/cappu#25). Only reference
+ * types carry nullness; a no-op for primitives, null, error and an undefined value.
+ */
+export function withNullness<T extends Type>(type: T, nullness: Nullness | undefined): T {
+  if (nullness === undefined) return type;
+  if (
+    type.kind === TypeKind.Class ||
+    type.kind === TypeKind.Array ||
+    type.kind === TypeKind.TypeVariable
+  ) {
+    return { ...type, nullness };
+  }
+  return type;
 }
 
 export function isError(type: Type): boolean {

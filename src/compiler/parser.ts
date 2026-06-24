@@ -589,16 +589,20 @@ function parseType(): TypeNode {
 
 function parseNonArrayType(): TypeNode {
   const pos = getNodePos();
-  // SE8 type-use annotations (JSR 308), e.g. @NonNull String. Consumed but not
-  // yet attached to the type node.
+  // SE8 type-use annotations (JSR 308), e.g. @NonNull String. Attached to the
+  // produced TypeReference/PrimitiveType so the nullness checker (nikeee/cappu#25)
+  // can read @Nullable/@NonNull written inside a type, e.g. List<@Nullable String>.
+  const annotations: Annotation[] = [];
   while (token() === SyntaxKind.AtToken && !isAnnotationTypeDeclarationStart()) {
-    parseAnnotation();
+    annotations.push(parseAnnotation());
   }
+  const typeAnnotations = annotations.length ? createNodeArray(annotations, pos) : undefined;
   if (isPrimitiveTypeKeyword(token()) || token() === SyntaxKind.VoidKeyword) {
     const keyword = token();
     nextToken();
     const node = createNode<PrimitiveType>(SyntaxKind.PrimitiveType, pos);
     node.keyword = keyword;
+    node.annotations = typeAnnotations;
     return finishNode(node, pos);
   }
   if (token() === SyntaxKind.QuestionToken) {
@@ -609,6 +613,7 @@ function parseNonArrayType(): TypeNode {
   const node = createNode<TypeReference>(SyntaxKind.TypeReference, pos);
   node.typeName = typeName;
   node.typeArguments = typeArguments;
+  node.annotations = typeAnnotations;
   return finishNode(node, pos);
 }
 
@@ -1264,14 +1269,14 @@ function parseTypeDeclaration(): Statement {
 
 // Compilation unit pieces
 
-function parsePackageDeclaration(): PackageDeclaration {
-  const pos = getNodePos();
+function parsePackageDeclaration(annotations?: NodeArray<Annotation>): PackageDeclaration {
+  const pos = annotations?.pos ?? getNodePos();
   parseExpected(SyntaxKind.PackageKeyword);
   const name = parseEntityName();
   parseExpected(SyntaxKind.SemicolonToken);
   const node = createNode<PackageDeclaration>(SyntaxKind.PackageDeclaration, pos);
   node.name = name;
-  node.annotations = undefined;
+  node.annotations = annotations;
   return finishNode(node, pos);
 }
 
@@ -2682,8 +2687,19 @@ export function parseSourceFile(fileNameArg: string, text: string): SourceFile {
 
   nextToken();
   const pos = getNodePos();
+  // Leading annotations belong to the package declaration only when `package`
+  // follows them (jspecify @NullMarked package, nikeee/cappu#25); otherwise they
+  // are the first type declaration's and parseSourceElement consumes them.
+  const packageAnnotations =
+    token() === SyntaxKind.AtToken &&
+    lookAhead(() => {
+      parseAnnotations();
+      return token() === SyntaxKind.PackageKeyword;
+    })
+      ? parseAnnotations()
+      : undefined;
   const packageDeclaration =
-    token() === SyntaxKind.PackageKeyword ? parsePackageDeclaration() : undefined;
+    token() === SyntaxKind.PackageKeyword ? parsePackageDeclaration(packageAnnotations) : undefined;
   const imports = parseImportDeclarations();
 
   let moduleDeclaration: ModuleDeclaration | undefined;

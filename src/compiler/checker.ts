@@ -13,6 +13,7 @@ import {
   classType,
   errorType,
   isError,
+  nullnessOf,
   nullType,
   primitiveType,
   type Type,
@@ -20,6 +21,7 @@ import {
   typeToString,
   typeVariable,
   type WildcardType,
+  withNullness,
 } from "./checkerTypes.ts";
 import { createDiagnostic, Diagnostics } from "./diagnostics.ts";
 import { forEachChild } from "./parser.ts";
@@ -75,11 +77,14 @@ import {
 import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
 import { type DeprecatedUse, readDeprecation } from "./deprecation.ts";
 import {
+  type Nullness,
   type NullnessAnnotations,
   type NullnessOptions,
-  carrierOf,
+  hasNullnessAnnotation,
+  isReferenceTypeNode,
+  readDeclaredNullness,
   resolveNullnessAnnotations,
-  targetNullness,
+  typeUseNullness,
 } from "./nullness.ts";
 
 /** A single abstract method's name (the invokedynamic call name for a lambda). */
@@ -257,10 +262,63 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
   const symbolTypes = new WeakMap<Symbol, Type>();
   const expressionTypes = new WeakMap<Node, Type>();
 
-  // jspecify nullness checking (nikeee/cappu#25); undefined when disabled.
+  // jspecify nullness checking (nikeee/cappu#25); undefined when disabled. When
+  // enabled, resolveType attaches a nullness facet to reference types and the
+  // semantic pass warns on a possibly-null value reaching a non-null position.
   const nullnessAnnotations: NullnessAnnotations | undefined = nullness?.enabled
     ? resolveNullnessAnnotations(nullness)
     : undefined;
+  // Cross-file @NullMarked: whether a package's package-info.java marks it, cached.
+  const packageNullMarked = new Map<string, boolean>();
+
+  // Whether a package is marked by its package-info.java (a different source file).
+  // Java only allows package annotations there, so match the file name exactly.
+  function packageIsNullMarked(packageName: string): boolean {
+    const a = nullnessAnnotations!;
+    let marked = packageNullMarked.get(packageName);
+    if (marked === undefined) {
+      marked = false;
+      for (const uri of program.getAllUris()) {
+        if (!uri.endsWith("package-info.java")) continue;
+        const sf = program.getSourceFile(uri);
+        const pkg = sf?.packageDeclaration;
+        if (!pkg || entityNameToString(pkg.name) !== packageName) continue;
+        if (hasNullnessAnnotation(pkg, a.nullUnmarked)) marked = false;
+        else if (hasNullnessAnnotation(pkg, a.nullMarked)) marked = true;
+        break;
+      }
+      packageNullMarked.set(packageName, marked);
+    }
+    return marked;
+  }
+
+  // Is `node` inside a @NullMarked scope? The nearest enclosing @NullMarked /
+  // @NullUnmarked on the declaration, an enclosing type, this file's package
+  // declaration, or the package's package-info.java wins.
+  function isNullMarked(node: Node): boolean {
+    const a = nullnessAnnotations!;
+    for (let n: Node | undefined = node; n; n = n.parent) {
+      if (hasNullnessAnnotation(n, a.nullUnmarked)) return false;
+      if (hasNullnessAnnotation(n, a.nullMarked)) return true;
+      if (n.kind === SyntaxKind.SourceFile) {
+        const pkg = (n as SourceFile).packageDeclaration;
+        if (hasNullnessAnnotation(pkg, a.nullUnmarked)) return false;
+        if (hasNullnessAnnotation(pkg, a.nullMarked)) return true;
+        return packageIsNullMarked(pkg ? entityNameToString(pkg.name) : "");
+      }
+    }
+    return false;
+  }
+
+  // The nullness a type node carries at a use site: an explicit type-use
+  // annotation (List<@Nullable T>) wins, else a reference type in a @NullMarked
+  // scope is non-null, else unknown.
+  function typeNodeNullness(typeNode: TypeNode, fromNode: Node): Nullness | undefined {
+    const explicit = typeUseNullness(typeNode, nullnessAnnotations!);
+    if (explicit) return explicit;
+    if (!isReferenceTypeNode(typeNode)) return undefined;
+    return isNullMarked(fromNode) ? "nonNull" : undefined;
+  }
 
   const booleanType = primitiveType("boolean");
   const intType = primitiveType("int");
@@ -318,12 +376,15 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       case TypeKind.Class:
         return type.typeArguments.length === 0
           ? type
-          : classType(
-              type.symbol,
-              type.typeArguments.map(a => substitute(a, map)),
+          : withNullness(
+              classType(
+                type.symbol,
+                type.typeArguments.map(a => substitute(a, map)),
+              ),
+              type.nullness,
             );
       case TypeKind.Array:
-        return arrayType(substitute(type.elementType, map));
+        return withNullness(arrayType(substitute(type.elementType, map)), type.nullness);
       case TypeKind.Wildcard:
         return type.bound ? { ...type, bound: substitute(type.bound, map) } : type;
       case TypeKind.Intersection:
@@ -490,13 +551,18 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
   }
 
   function resolveType(typeNode: TypeNode, fromNode: Node): Type {
+    // jspecify nullness facet (nikeee/cappu#25), attached only when enabled.
+    const withTypeNullness = <T extends Type>(type: T): T =>
+      nullnessAnnotations ? withNullness(type, typeNodeNullness(typeNode, fromNode)) : type;
     switch (typeNode.kind) {
       case SyntaxKind.PrimitiveType:
         return primitiveType(
           tokenToString((typeNode as { keyword: SyntaxKind }).keyword) ?? "<error>",
         );
       case SyntaxKind.ArrayType:
-        return arrayType(resolveType((typeNode as AstArrayType).elementType, fromNode));
+        return withTypeNullness(
+          arrayType(resolveType((typeNode as AstArrayType).elementType, fromNode)),
+        );
       case SyntaxKind.WildcardType: {
         const w = typeNode as AstWildcardType;
         return {
@@ -513,9 +579,10 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
         const symbol = resolveTypeEntityName(ref.typeName, fromNode, program);
         if (!symbol) return errorType;
         // Through getTypeOfSymbol so the variable carries its bound (cached once).
-        if (symbol.flags & SymbolFlags.TypeParameter) return getTypeOfSymbol(symbol);
+        if (symbol.flags & SymbolFlags.TypeParameter)
+          return withTypeNullness(getTypeOfSymbol(symbol));
         const args = ref.typeArguments?.map(a => resolveType(a as TypeNode, fromNode)) ?? [];
-        return classType(symbol, args);
+        return withTypeNullness(classType(symbol, args));
       }
       default:
         return errorType;
@@ -613,6 +680,12 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
         // from the target functional interface.
         type = inferLambdaParameterType(symbol);
       }
+    }
+    // A declaration-level @Nullable/@NonNull (on the modifiers, e.g. `@NonNull
+    // String s`, not the type node) overrides the type's facet (nikeee/cappu#25).
+    if (nullnessAnnotations) {
+      const decl = symbol.valueDeclaration ?? symbol.declarations?.[0];
+      type = withNullness(type, readDeclaredNullness(decl, nullnessAnnotations));
     }
     symbolTypes.set(symbol, type);
     return type;
@@ -1785,6 +1858,11 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
         inferMethodTypeArguments(info.decl, argTypes, info.receiverSubst, vars),
       );
     }
+    // A method's @Nullable/@NonNull return annotation sits on the method modifiers,
+    // not the return type node, so merge it onto the result (nikeee/cappu#25).
+    if (nullnessAnnotations) {
+      returnType = withNullness(returnType, readDeclaredNullness(info.decl, nullnessAnnotations));
+    }
     return returnType;
   }
 
@@ -1994,34 +2072,18 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
   function getSemanticDiagnostics(sourceFile: SourceFile): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
 
-    // jspecify nullness (nikeee/cappu#25). Purely syntactic: the value is treated
-    // as possibly-null only when it is the `null` literal or a use of a declared
-    // @Nullable method/field/variable; no flow narrowing.
+    // jspecify nullness (nikeee/cappu#25). The value/target nullness both come
+    // from the type model: a value is possibly-null when its type is the `null`
+    // literal or carries a @Nullable facet (incl. a @Nullable generic element via
+    // substitution); a target is non-null when its type carries @NonNull.
     const valueMayBeNull = (node: Node): boolean => {
-      if (!nullnessAnnotations) return false;
-      if (getTypeOfExpression(node).kind === TypeKind.Null) return true;
-      if (node.kind === SyntaxKind.CallExpression) {
-        const info = resolveCallInfo(node as CallExpression);
-        return !!info && targetNullness(info.decl, nullnessAnnotations) === "nullable";
-      }
-      if (
-        node.kind === SyntaxKind.Identifier ||
-        node.kind === SyntaxKind.PropertyAccessExpression
-      ) {
-        const name =
-          node.kind === SyntaxKind.PropertyAccessExpression
-            ? (node as PropertyAccessExpression).name
-            : (node as Identifier);
-        const sym = resolveName(name);
-        const decl = carrierOf(sym?.valueDeclaration ?? sym?.declarations?.[0]);
-        return !!decl && targetNullness(decl, nullnessAnnotations) === "nullable";
-      }
-      return false;
+      const t = getTypeOfExpression(node);
+      return t.kind === TypeKind.Null || nullnessOf(t) === "nullable";
     };
 
-    const checkNullness = (valueNode: Node, targetDecl: Node | undefined, name: string): void => {
+    const checkNullness = (valueNode: Node, targetType: Type, name: string): void => {
       if (!nullnessAnnotations) return;
-      if (targetNullness(carrierOf(targetDecl), nullnessAnnotations) !== "nonNull") return;
+      if (nullnessOf(targetType) !== "nonNull") return;
       if (!valueMayBeNull(valueNode)) return;
       diagnostics.push(
         createDiagnostic(
@@ -2031,6 +2093,30 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
           name,
         ),
       );
+    };
+
+    // Argument nullness against a resolved signature: each parameter type is
+    // instantiated with `subst` (the receiver's / created type's type arguments),
+    // so a null into the non-null element of List<@NonNull String>.add(E) is caught.
+    const checkParamNullness = (
+      args: readonly Node[],
+      parameters: readonly Node[],
+      subst: Map<Symbol, Type>,
+    ): void => {
+      if (!nullnessAnnotations) return;
+      const last = parameters.at(-1) as Parameter | undefined;
+      const fixed = last?.isVarArgs ? parameters.length - 1 : parameters.length;
+      for (let i = 0; i < Math.min(args.length, fixed); i++) {
+        const p = parameters[i] as Parameter;
+        if (!p.symbol) continue;
+        const targetType = substitute(getTypeOfSymbol(p.symbol), subst);
+        checkNullness(args[i]!, targetType, p.name?.text ?? `parameter ${i + 1}`);
+      }
+    };
+
+    const checkCallNullness = (call: CallExpression): void => {
+      const info = nullnessAnnotations ? resolveCallInfo(call) : undefined;
+      if (info) checkParamNullness(call.arguments, info.decl.parameters, info.receiverSubst);
     };
 
     const checkAssignment = (valueNode: Node, targetType: Type): void => {
@@ -2234,7 +2320,6 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
         const parameter = parameters[i] as Parameter;
         if (!parameter.symbol) continue;
         checkAssignment(args[i]!, getTypeOfSymbol(parameter.symbol));
-        checkNullness(args[i]!, parameter, parameter.name?.text ?? `parameter ${i + 1}`);
       }
     };
 
@@ -2263,6 +2348,12 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
           // an anonymous body changes nothing about ctor argument conversion,
           // but stay conservative and only judge the plain creation
           checkArgumentTypes(node.arguments ?? [], applicable[0]!.parameters);
+          const created = resolveType(node.type, node);
+          const subst =
+            created.kind === TypeKind.Class
+              ? substitutionFor(symbol, (created as ClassType).typeArguments)
+              : new Map<Symbol, Type>();
+          checkParamNullness(node.arguments ?? [], applicable[0]!.parameters, subst);
         }
       } else if (declaration.kind === SyntaxKind.RecordDeclaration) {
         const record = declaration as RecordDeclaration;
@@ -2284,7 +2375,7 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
           const d = node as VariableDeclarator;
           if (d.initializer && d.symbol && d.initializer.kind !== SyntaxKind.ArrayInitializer) {
             checkAssignment(d.initializer, getTypeOfSymbol(d.symbol));
-            checkNullness(d.initializer, d, d.name.text);
+            checkNullness(d.initializer, getTypeOfSymbol(d.symbol), d.name.text);
           }
           break;
         }
@@ -2298,20 +2389,16 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
                 : a.left.kind === SyntaxKind.PropertyAccessExpression
                   ? (a.left as PropertyAccessExpression).name
                   : undefined;
-            if (leftName) {
-              const sym = resolveName(leftName);
-              checkNullness(
-                a.right,
-                sym?.valueDeclaration ?? sym?.declarations?.[0],
-                leftName.text,
-              );
-            }
+            if (leftName) checkNullness(a.right, getTypeOfExpression(a.left), leftName.text);
           }
           break;
         }
         case SyntaxKind.CallExpression:
           // A recovered parse has unreliable call shapes: no arity judgments.
-          if (sourceFile.parseDiagnostics.length === 0) checkCallArity(node as CallExpression);
+          if (sourceFile.parseDiagnostics.length === 0) {
+            checkCallArity(node as CallExpression);
+            checkCallNullness(node as CallExpression);
+          }
           break;
         case SyntaxKind.ObjectCreationExpression:
           if (sourceFile.parseDiagnostics.length === 0) {
@@ -2333,7 +2420,13 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
               }
               m = m.parent;
             }
-            if (m) checkNullness(r.expression, m, (m as MethodDeclaration).name.text);
+            if (m?.symbol) {
+              checkNullness(
+                r.expression,
+                getTypeOfSymbol(m.symbol),
+                (m as MethodDeclaration).name.text,
+              );
+            }
           }
           break;
         }

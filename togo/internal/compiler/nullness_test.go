@@ -84,3 +84,61 @@ func TestNullnessCustomAnnotationList(t *testing.T) {
 		t.Error("a custom non-null annotation list (JSR-305) should be honored")
 	}
 }
+
+const boxClass = "class Box<T> { void put(T t) {} T get() { return get(); } }\n"
+
+func TestNullnessGenericFlagged(t *testing.T) {
+	cases := []struct{ name, code string }{
+		{"null into Box<@NonNull String>.put", boxClass + "class C { void g(Box<@NonNull String> b) { b.put(null); } }"},
+		{"@NullMarked Box<String> element rejects null", boxClass + "@NullMarked class C { void g(Box<String> b) { b.put(null); } }"},
+		{"@Nullable generic element from get into @NonNull param", boxClass + "class C { void f(@NonNull String s) {} void g(Box<@Nullable String> b) { f(b.get()); } }"},
+	}
+	for _, tc := range cases {
+		if !containsCode(diagnoseNullness(tc.code, jspecify()), codeNullIntoNonNull) {
+			t.Errorf("%s: expected a nullness warning for %q", tc.name, tc.code)
+		}
+	}
+}
+
+func TestNullnessGenericAccepted(t *testing.T) {
+	cases := []struct{ name, code string }{
+		{"null into Box<@Nullable String>.put", boxClass + "class C { void g(Box<@Nullable String> b) { b.put(null); } }"},
+		{"non-null value into Box<@NonNull String>.put", boxClass + "class C { void g(Box<@NonNull String> b) { b.put(\"x\"); } }"},
+	}
+	for _, tc := range cases {
+		if containsCode(diagnoseNullness(tc.code, jspecify()), codeNullIntoNonNull) {
+			t.Errorf("%s: should NOT flag %q", tc.name, tc.code)
+		}
+	}
+}
+
+func diagnoseFilesNullness(files map[string]string, target string) []int {
+	program := NewProgram()
+	LoadJdkStub(program)
+	for uri, text := range files {
+		program.SetOpenDocument(URI(uri), text, 1)
+	}
+	checker := NewChecker(program, jspecify())
+	var out []int
+	for _, d := range checker.GetSemanticDiagnostics(program.GetSourceFile(URI(target))) {
+		out = append(out, d.Code)
+	}
+	return out
+}
+
+func TestNullnessPackageInfo(t *testing.T) {
+	marked := diagnoseFilesNullness(map[string]string{
+		"file:///p/package-info.java": "@NullMarked package p;",
+		"file:///p/C.java":            "package p; class C { void f(String s) {} void g() { f(null); } }",
+	}, "file:///p/C.java")
+	if !containsCode(marked, codeNullIntoNonNull) {
+		t.Error("@NullMarked in package-info.java should mark another file of the package")
+	}
+	unmarked := diagnoseFilesNullness(map[string]string{
+		"file:///p/package-info.java": "package p;",
+		"file:///p/C.java":            "package p; class C { void f(String s) {} void g() { f(null); } }",
+	}, "file:///p/C.java")
+	if containsCode(unmarked, codeNullIntoNonNull) {
+		t.Error("without a @NullMarked package-info.java the code should not be flagged")
+	}
+}
