@@ -91,6 +91,7 @@ type ServerCapabilities struct {
 	SemanticTokensProvider    *SemanticTokensOptions `json:"semanticTokensProvider,omitempty"`
 	CodeLensProvider          *CodeLensOptions       `json:"codeLensProvider,omitempty"`
 	ImplementationProvider    bool                   `json:"implementationProvider"`
+	TypeHierarchyProvider     bool                   `json:"typeHierarchyProvider"`
 }
 
 const TextDocumentSyncIncremental = 2

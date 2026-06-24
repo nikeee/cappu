@@ -415,6 +415,42 @@ func (s *Server) onImplementation(params json.RawMessage) (any, *lsp.ResponseErr
 	return nil, nil
 }
 
+// typeHierarchyItemParams is the {item} payload of supertypes/subtypes requests.
+type typeHierarchyItemParams struct {
+	Item lsp.TypeHierarchyItem `json:"item"`
+}
+
+func (s *Server) onPrepareTypeHierarchy(params json.RawMessage) (any, *lsp.ResponseError) {
+	p := decode[lsp.TextDocumentPositionParams](params)
+	sourceFile, offset, ok := s.sourceAndOffset(compiler.URI(p.TextDocument.URI), p.Position)
+	if !ok {
+		return nil, nil
+	}
+	items := services.PrepareTypeHierarchy(s.checker, sourceFile, offset)
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
+func (s *Server) onTypeHierarchySupertypes(params json.RawMessage) (any, *lsp.ResponseError) {
+	p := decode[typeHierarchyItemParams](params)
+	items := services.TypeHierarchySupertypes(s.program, s.checker, p.Item)
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
+func (s *Server) onTypeHierarchySubtypes(params json.RawMessage) (any, *lsp.ResponseError) {
+	p := decode[typeHierarchyItemParams](params)
+	items := services.TypeHierarchySubtypes(s.program, s.checker, p.Item)
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
+}
+
 func (s *Server) onInlayHint(params json.RawMessage) (any, *lsp.ResponseError) {
 	p := decode[lsp.InlayHintParams](params)
 	sourceFile := s.program.GetSourceFile(compiler.URI(p.TextDocument.URI))

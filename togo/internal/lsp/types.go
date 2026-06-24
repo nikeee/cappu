@@ -62,3 +62,14 @@ type DocumentSymbol struct {
 	SelectionRange Range            `json:"selectionRange"`
 	Children       []DocumentSymbol `json:"children,omitempty"`
 }
+
+// TypeHierarchyItem is a node in a type hierarchy (LSP 3.17). The client hands an
+// item back on supertypes/subtypes calls; the server re-resolves the type from
+// the item's SelectionRange position, so no opaque Data payload is needed.
+type TypeHierarchyItem struct {
+	Name           string     `json:"name"`
+	Kind           SymbolKind `json:"kind"`
+	URI            string     `json:"uri"`
+	Range          Range      `json:"range"`
+	SelectionRange Range      `json:"selectionRange"`
+}

@@ -151,6 +151,9 @@ func (s *Server) register() {
 	c.OnRequest("textDocument/semanticTokens/full", s.onSemanticTokens)
 	c.OnRequest("textDocument/codeLens", s.onCodeLens)
 	c.OnRequest("textDocument/implementation", s.onImplementation)
+	c.OnRequest("textDocument/prepareTypeHierarchy", s.onPrepareTypeHierarchy)
+	c.OnRequest("typeHierarchy/supertypes", s.onTypeHierarchySupertypes)
+	c.OnRequest("typeHierarchy/subtypes", s.onTypeHierarchySubtypes)
 	c.OnRequest("shutdown", func(json.RawMessage) (any, *lsp.ResponseError) { return nil, nil })
 }
 
@@ -197,6 +200,7 @@ func (s *Server) onInitialize(params json.RawMessage) (any, *lsp.ResponseError) 
 		},
 		CodeLensProvider:       &lsp.CodeLensOptions{ResolveProvider: false},
 		ImplementationProvider: true,
+		TypeHierarchyProvider:  true,
 	}}, nil
 }
 

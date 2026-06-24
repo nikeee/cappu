@@ -77,6 +77,11 @@ import {
 import { getSemanticTokens, TOKEN_MODIFIERS, TOKEN_TYPES } from "./semanticTokens.ts";
 import { declarationName, findMethodImplementations, getSubtypeIndex } from "./subtypes.ts";
 import {
+  prepareTypeHierarchy,
+  typeHierarchySubtypes,
+  typeHierarchySupertypes,
+} from "./typeHierarchy.ts";
+import {
   type CallExpression,
   type AssignmentExpression,
   DiagnosticCategory,
@@ -167,6 +172,7 @@ export function startServer(
         },
         codeLensProvider: { resolveProvider: false },
         implementationProvider: true,
+        typeHierarchyProvider: true,
       },
     };
   });
@@ -631,6 +637,19 @@ export function startServer(
     }
     return null;
   });
+
+  // Type hierarchy: prepare resolves the type at the cursor; supertypes/subtypes
+  // re-resolve from the item the client hands back (see typeHierarchy.ts).
+  connection.languages.typeHierarchy.onPrepare(params => {
+    const at = sourceAndOffset(asUri(params.textDocument.uri), params.position);
+    return at ? prepareTypeHierarchy(checker, at.sourceFile, at.offset) : null;
+  });
+  connection.languages.typeHierarchy.onSupertypes(params =>
+    typeHierarchySupertypes(program, checker, params.item),
+  );
+  connection.languages.typeHierarchy.onSubtypes(params =>
+    typeHierarchySubtypes(program, checker, params.item),
+  );
 
   // A "N references" lens above every type and method declaration. The command
   // is cappu.showReferences, which the vscode extension implements by converting
