@@ -69,6 +69,26 @@ func TestExperimentalCompilerFailOnDegradeDefault(t *testing.T) {
 	}
 }
 
+func TestNullnessDefaults(t *testing.T) {
+	// Absent means disabled (nil pointer).
+	absent, _ := Load(writeConfig(t, `{}`), "")
+	if absent.CompilerOptions.Nullness != nil {
+		t.Error("nullness should be nil (disabled) when absent")
+	}
+	// Present but with empty annotation lists: the jspecify defaults fill in.
+	cfg, _ := Load(writeConfig(t, `{ "compilerOptions": { "nullness": { "enabled": true } } }`), "")
+	n := cfg.CompilerOptions.Nullness
+	if n == nil || !n.Enabled {
+		t.Fatal("nullness should be present and enabled")
+	}
+	if len(n.NullableAnnotations) != 1 || n.NullableAnnotations[0] != "org.jspecify.annotations.Nullable" {
+		t.Errorf("nullableAnnotations default = %v", n.NullableAnnotations)
+	}
+	if len(n.NonNullAnnotations) != 1 || n.NonNullAnnotations[0] != "org.jspecify.annotations.NonNull" {
+		t.Errorf("nonNullAnnotations default = %v", n.NonNullAnnotations)
+	}
+}
+
 func TestLoadMissingDefaultFileIsEmptyConfig(t *testing.T) {
 	cfg, err := Load("", t.TempDir())
 	if err != nil {

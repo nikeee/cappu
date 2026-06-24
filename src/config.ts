@@ -62,6 +62,19 @@ const ExperimentalCompilerSchema = z.object({
   debugInfo: z.boolean().default(false),
 });
 
+// jspecify nullness checking (nikeee/cappu#25). Off by default. A semantic check,
+// so it lives with the compiler options and is reported by both the LSP and (later)
+// `cappu compile`. The annotation lists are matched by simple name, so a project
+// using JSR-305 can point these at javax.annotation.* instead of the jspecify default.
+const NullnessSchema = z.object({
+  /** Emit a warning when a possibly-null value reaches a non-null position. */
+  enabled: z.boolean().default(false),
+  nullableAnnotations: z.array(z.string()).default(["org.jspecify.annotations.Nullable"]),
+  nonNullAnnotations: z.array(z.string()).default(["org.jspecify.annotations.NonNull"]),
+  nullMarkedAnnotations: z.array(z.string()).default(["org.jspecify.annotations.NullMarked"]),
+  nullUnmarkedAnnotations: z.array(z.string()).default(["org.jspecify.annotations.NullUnmarked"]),
+});
+
 const CompilerOptionsSchema = z.object({
   /** Directories or .jar files scanned for .class files (resolution only). */
   classPath: z.array(z.string()).default([DEFAULT_CLASS_PATH, ...EXTERNAL_CLASS_PATHS]),
@@ -80,6 +93,8 @@ const CompilerOptionsSchema = z.object({
   mainClass: z.string().optional(),
   /** cappu's own (experimental) compiler and its options. */
   experimentalCompiler: ExperimentalCompilerSchema.prefault({}),
+  /** jspecify nullness checking (nikeee/cappu#25); absent means disabled. */
+  nullness: NullnessSchema.optional(),
 });
 
 const LspOptionsSchema = z.object({
@@ -244,6 +259,17 @@ export const CONFIG_TEMPLATE = `
     //   "failOnDegrade": true,   // fail if a method body degrades to a placeholder
     //   "validate": false,       // also compile with javac and require matching bytecode
     //   "debugInfo": false,      // emit LocalVariableTable (like javac -g)
+    // },
+
+    // jspecify nullness checking: warn when a possibly-null value reaches a
+    // non-null position (@NonNull, or unannotated inside a @NullMarked scope).
+    // Annotation lists are matched by simple name; defaults are jspecify.
+    // "nullness": {
+    //   "enabled": false,
+    //   "nullableAnnotations": ["org.jspecify.annotations.Nullable"],
+    //   "nonNullAnnotations": ["org.jspecify.annotations.NonNull"],
+    //   "nullMarkedAnnotations": ["org.jspecify.annotations.NullMarked"],
+    //   "nullUnmarkedAnnotations": ["org.jspecify.annotations.NullUnmarked"],
     // },
   },
 

@@ -111,6 +111,12 @@ export const Diagnostics = {
     "'{0}' is deprecated.",
     DiagnosticCategory.Warning,
   ),
+  Possibly_null_value_assigned_to_non_null_0: diag(
+    1307,
+    "Possibly_null_value_assigned_to_non_null_0",
+    "'{0}' is non-null but the assigned value may be null.",
+    DiagnosticCategory.Warning,
+  ),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */

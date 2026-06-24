@@ -74,6 +74,13 @@ import {
 } from "./types.ts";
 import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
 import { type DeprecatedUse, readDeprecation } from "./deprecation.ts";
+import {
+  type NullnessAnnotations,
+  type NullnessOptions,
+  carrierOf,
+  resolveNullnessAnnotations,
+  targetNullness,
+} from "./nullness.ts";
 
 /** A single abstract method's name (the invokedynamic call name for a lambda). */
 export type SamName = Brand<string, "SamName">;
@@ -246,9 +253,14 @@ export function findUnusedImports(sourceFile: SourceFile): ImportDeclaration[] {
   return unused;
 }
 
-export function createChecker(program: Program): Checker {
+export function createChecker(program: Program, nullness?: NullnessOptions): Checker {
   const symbolTypes = new WeakMap<Symbol, Type>();
   const expressionTypes = new WeakMap<Node, Type>();
+
+  // jspecify nullness checking (nikeee/cappu#25); undefined when disabled.
+  const nullnessAnnotations: NullnessAnnotations | undefined = nullness?.enabled
+    ? resolveNullnessAnnotations(nullness)
+    : undefined;
 
   const booleanType = primitiveType("boolean");
   const intType = primitiveType("int");
@@ -1982,6 +1994,45 @@ export function createChecker(program: Program): Checker {
   function getSemanticDiagnostics(sourceFile: SourceFile): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
 
+    // jspecify nullness (nikeee/cappu#25). Purely syntactic: the value is treated
+    // as possibly-null only when it is the `null` literal or a use of a declared
+    // @Nullable method/field/variable; no flow narrowing.
+    const valueMayBeNull = (node: Node): boolean => {
+      if (!nullnessAnnotations) return false;
+      if (getTypeOfExpression(node).kind === TypeKind.Null) return true;
+      if (node.kind === SyntaxKind.CallExpression) {
+        const info = resolveCallInfo(node as CallExpression);
+        return !!info && targetNullness(info.decl, nullnessAnnotations) === "nullable";
+      }
+      if (
+        node.kind === SyntaxKind.Identifier ||
+        node.kind === SyntaxKind.PropertyAccessExpression
+      ) {
+        const name =
+          node.kind === SyntaxKind.PropertyAccessExpression
+            ? (node as PropertyAccessExpression).name
+            : (node as Identifier);
+        const sym = resolveName(name);
+        const decl = carrierOf(sym?.valueDeclaration ?? sym?.declarations?.[0]);
+        return !!decl && targetNullness(decl, nullnessAnnotations) === "nullable";
+      }
+      return false;
+    };
+
+    const checkNullness = (valueNode: Node, targetDecl: Node | undefined, name: string): void => {
+      if (!nullnessAnnotations) return;
+      if (targetNullness(carrierOf(targetDecl), nullnessAnnotations) !== "nonNull") return;
+      if (!valueMayBeNull(valueNode)) return;
+      diagnostics.push(
+        createDiagnostic(
+          valueNode.pos,
+          valueNode.end - valueNode.pos,
+          Diagnostics.Possibly_null_value_assigned_to_non_null_0,
+          name,
+        ),
+      );
+    };
+
     const checkAssignment = (valueNode: Node, targetType: Type): void => {
       if (targetType.kind === TypeKind.Primitive && targetType.name === "void") return;
       if (!isConcrete(targetType)) return;
@@ -2183,6 +2234,7 @@ export function createChecker(program: Program): Checker {
         const parameter = parameters[i] as Parameter;
         if (!parameter.symbol) continue;
         checkAssignment(args[i]!, getTypeOfSymbol(parameter.symbol));
+        checkNullness(args[i]!, parameter, parameter.name?.text ?? `parameter ${i + 1}`);
       }
     };
 
@@ -2232,6 +2284,7 @@ export function createChecker(program: Program): Checker {
           const d = node as VariableDeclarator;
           if (d.initializer && d.symbol && d.initializer.kind !== SyntaxKind.ArrayInitializer) {
             checkAssignment(d.initializer, getTypeOfSymbol(d.symbol));
+            checkNullness(d.initializer, d, d.name.text);
           }
           break;
         }
@@ -2239,6 +2292,20 @@ export function createChecker(program: Program): Checker {
           const a = node as AssignmentExpression;
           if (a.operatorToken === SyntaxKind.EqualsToken) {
             checkAssignment(a.right, getTypeOfExpression(a.left));
+            const leftName =
+              a.left.kind === SyntaxKind.Identifier
+                ? (a.left as Identifier)
+                : a.left.kind === SyntaxKind.PropertyAccessExpression
+                  ? (a.left as PropertyAccessExpression).name
+                  : undefined;
+            if (leftName) {
+              const sym = resolveName(leftName);
+              checkNullness(
+                a.right,
+                sym?.valueDeclaration ?? sym?.declarations?.[0],
+                leftName.text,
+              );
+            }
           }
           break;
         }
@@ -2256,6 +2323,17 @@ export function createChecker(program: Program): Checker {
           if (r.expression) {
             const ret = enclosingReturnType(node);
             if (ret) checkAssignment(r.expression, ret);
+            // Nullness of the enclosing method's return; a lambda return targets the
+            // SAM, not the method, so stop there rather than misattribute it.
+            let m: Node | undefined = node;
+            while (m && m.kind !== SyntaxKind.MethodDeclaration) {
+              if (m.kind === SyntaxKind.LambdaExpression) {
+                m = undefined;
+                break;
+              }
+              m = m.parent;
+            }
+            if (m) checkNullness(r.expression, m, (m as MethodDeclaration).name.text);
           }
           break;
         }

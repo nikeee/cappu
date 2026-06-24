@@ -9,6 +9,8 @@ package compiler
 import (
 	"regexp"
 	"strings"
+
+	"github.com/nikeee/cappu/internal/config"
 )
 
 // SamName is a single abstract method's name (the invokedynamic call name).
@@ -49,6 +51,9 @@ type Checker struct {
 
 	booleanType, intType, charType *Type
 	arrayLengthSymbol              *Symbol
+
+	// jspecify nullness checking (nikeee/cappu#25); nil when disabled.
+	nullness *NullnessAnnotations
 }
 
 type callInfoEntry struct {
@@ -56,8 +61,14 @@ type callInfoEntry struct {
 	computed bool
 }
 
-// NewChecker creates a checker over a program.
-func NewChecker(program *Program) *Checker {
+// NewChecker creates a checker over a program. An optional *config.Nullness
+// enables jspecify nullness checking (nikeee/cappu#25); omit it (or pass nil) to
+// disable it - the variadic mirrors createChecker's optional argument in the TS source.
+func NewChecker(program *Program, nullness ...*config.Nullness) *Checker {
+	var n *config.Nullness
+	if len(nullness) > 0 {
+		n = nullness[0]
+	}
 	c := &Checker{
 		program:         program,
 		symbolTypes:     map[*Symbol]*Type{},
@@ -66,6 +77,7 @@ func NewChecker(program *Program) *Checker {
 		booleanType:     primitiveType("boolean"),
 		intType:         primitiveType("int"),
 		charType:        primitiveType("char"),
+		nullness:        resolveNullnessAnnotations(n),
 	}
 	// Synthetic symbol for the implicit `length` field of every array (JLS 10.7).
 	c.arrayLengthSymbol = &Symbol{Flags: SymbolFlagsField, EscapedName: "length"}

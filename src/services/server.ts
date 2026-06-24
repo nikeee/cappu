@@ -126,7 +126,7 @@ export function startServer(
   const documents = new TextDocuments(TextDocument);
   const program = createProgram();
   installJdkTypes(program, config);
-  const checker = createChecker(program);
+  const checker = createChecker(program, config?.compilerOptions.nullness);
 
   // Inlay-hint configuration: seeded from initializationOptions.inlayHints and
   // updatable via workspace/didChangeConfiguration ({ javalsp: { inlayHints } }).

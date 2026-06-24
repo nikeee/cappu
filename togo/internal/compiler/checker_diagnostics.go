@@ -4,6 +4,7 @@ package compiler
 // Port of the remaining parts of src/compiler/checker.ts.
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
@@ -599,6 +600,47 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			Diagnostics.InvalidNumberOfArgumentsExpected0Got1, expected, strconv.Itoa(argc)))
 	}
 
+	// jspecify nullness (nikeee/cappu#25). Purely syntactic: the value is treated
+	// as possibly-null only when it is the `null` literal or a use of a declared
+	// @Nullable method/field/variable; no flow narrowing.
+	valueMayBeNull := func(node *Node) bool {
+		if c.nullness == nil {
+			return false
+		}
+		if c.getTypeOfExpression(node).Kind == TypeKindNull {
+			return true
+		}
+		switch node.Kind {
+		case CallExpression:
+			info := c.resolveCallInfo(node)
+			return info != nil && info.Decl != nil && c.nullness.targetNullness(info.Decl) == NullnessNullable
+		case Identifier, PropertyAccessExpression:
+			name := node
+			if node.Kind == PropertyAccessExpression {
+				name = node.AsPropertyAccessExpression().Name
+			}
+			sym := c.ResolveName(name)
+			if sym == nil {
+				return false
+			}
+			return c.nullness.targetNullness(carrierOf(c.declarationOf(sym))) == NullnessNullable
+		}
+		return false
+	}
+	checkNullness := func(valueNode, targetDecl *Node, name string) {
+		if c.nullness == nil {
+			return
+		}
+		if c.nullness.targetNullness(carrierOf(targetDecl)) != NullnessNonNull {
+			return
+		}
+		if !valueMayBeNull(valueNode) {
+			return
+		}
+		diagnostics = append(diagnostics, CreateDiagnostic(valueNode.Pos, valueNode.End-valueNode.Pos,
+			Diagnostics.PossiblyNullValueAssignedToNonNull0, name))
+	}
+
 	checkArgumentTypes := func(args *NodeArray, parameters *NodeArray) {
 		fixed := nodeArrayLen(parameters)
 		if last := lastNode(parameters); last != nil && last.AsParameter().IsVarArgs {
@@ -613,6 +655,12 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 				continue
 			}
 			checkAssignment(args.Nodes[i], c.getTypeOfSymbol(parameters.Nodes[i].Symbol))
+			p := parameters.Nodes[i].AsParameter()
+			pname := fmt.Sprintf("parameter %d", i+1)
+			if p.Name != nil {
+				pname = p.Name.AsIdentifier().Text
+			}
+			checkNullness(args.Nodes[i], parameters.Nodes[i], pname)
 		}
 	}
 
@@ -746,11 +794,24 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			d := node.AsVariableDeclarator()
 			if d.Initializer != nil && node.Symbol != nil && d.Initializer.Kind != ArrayInitializer {
 				checkAssignment(d.Initializer, c.getTypeOfSymbol(node.Symbol))
+				checkNullness(d.Initializer, node, d.Name.AsIdentifier().Text)
 			}
 		case AssignmentExpression:
 			a := node.AsAssignmentExpression()
 			if a.OperatorToken == EqualsToken {
 				checkAssignment(a.Right, c.getTypeOfExpression(a.Left))
+				var leftName *Node
+				switch a.Left.Kind {
+				case Identifier:
+					leftName = a.Left
+				case PropertyAccessExpression:
+					leftName = a.Left.AsPropertyAccessExpression().Name
+				}
+				if leftName != nil {
+					if sym := c.ResolveName(leftName); sym != nil {
+						checkNullness(a.Right, c.declarationOf(sym), leftName.AsIdentifier().Text)
+					}
+				}
 			}
 		case CallExpression:
 			if cleanParse {
@@ -765,6 +826,19 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			if r.Expression != nil {
 				if ret := c.enclosingReturnType(node); ret != nil {
 					checkAssignment(r.Expression, ret)
+				}
+				// Nullness of the enclosing method's return; a lambda return targets
+				// the SAM, not the method, so stop there rather than misattribute it.
+				m := node
+				for m != nil && m.Kind != MethodDeclaration {
+					if m.Kind == LambdaExpression {
+						m = nil
+						break
+					}
+					m = m.Parent
+				}
+				if m != nil {
+					checkNullness(r.Expression, m, m.AsMethodDeclaration().Name.AsIdentifier().Text)
 				}
 			}
 		case MethodDeclaration:

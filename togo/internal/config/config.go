@@ -31,6 +31,18 @@ type ExperimentalCompiler struct {
 	DebugInfo     bool  `json:"debugInfo"`
 }
 
+// Nullness configures jspecify nullness checking (nikeee/cappu#25). Absent in
+// cappu.json means undefined (disabled), so it is a pointer on CompilerOptions.
+// The annotation lists are matched by simple name, so a project using JSR-305 can
+// point them at javax.annotation.* instead of the jspecify default.
+type Nullness struct {
+	Enabled                 bool     `json:"enabled"`
+	NullableAnnotations     []string `json:"nullableAnnotations"`
+	NonNullAnnotations      []string `json:"nonNullAnnotations"`
+	NullMarkedAnnotations   []string `json:"nullMarkedAnnotations"`
+	NullUnmarkedAnnotations []string `json:"nullUnmarkedAnnotations"`
+}
+
 // CompilerOptions mirrors the "compilerOptions" section.
 type CompilerOptions struct {
 	ClassPath            []string             `json:"classPath"`
@@ -42,6 +54,7 @@ type CompilerOptions struct {
 	Release              *int                 `json:"release,omitempty"`
 	MainClass            string               `json:"mainClass,omitempty"`
 	ExperimentalCompiler ExperimentalCompiler `json:"experimentalCompiler"`
+	Nullness             *Nullness            `json:"nullness,omitempty"`
 }
 
 // LspOptions mirrors the "lspOptions" section.
@@ -158,6 +171,20 @@ func (c *Config) applyDefaults() {
 	if co.ExperimentalCompiler.FailOnDegrade == nil {
 		t := true
 		co.ExperimentalCompiler.FailOnDegrade = &t
+	}
+	if n := co.Nullness; n != nil {
+		if n.NullableAnnotations == nil {
+			n.NullableAnnotations = []string{"org.jspecify.annotations.Nullable"}
+		}
+		if n.NonNullAnnotations == nil {
+			n.NonNullAnnotations = []string{"org.jspecify.annotations.NonNull"}
+		}
+		if n.NullMarkedAnnotations == nil {
+			n.NullMarkedAnnotations = []string{"org.jspecify.annotations.NullMarked"}
+		}
+		if n.NullUnmarkedAnnotations == nil {
+			n.NullUnmarkedAnnotations = []string{"org.jspecify.annotations.NullUnmarked"}
+		}
 	}
 	if c.PackageSources == nil {
 		c.PackageSources = append([]string(nil), DefaultPackageSources...)

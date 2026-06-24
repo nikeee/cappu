@@ -41,13 +41,22 @@ type latestEntry struct {
 
 const latestTTL = 5 * time.Minute
 
+// nullnessConfig returns the jspecify nullness options from cfg, or nil when
+// there is no config (nikeee/cappu#25).
+func nullnessConfig(cfg *config.Config) *config.Nullness {
+	if cfg == nil {
+		return nil
+	}
+	return cfg.CompilerOptions.Nullness
+}
+
 // NewServer builds a server. cfg may be nil (no project config).
 func NewServer(cfg *config.Config) *Server {
 	program := compiler.NewProgram()
 	compiler.InstallJdkTypes(program, cfg)
 	s := &Server{
 		program:          program,
-		checker:          compiler.NewChecker(program),
+		checker:          compiler.NewChecker(program, nullnessConfig(cfg)),
 		config:           cfg,
 		docs:             map[compiler.URI]string{},
 		inlayHints:       services.DefaultInlayHints,
