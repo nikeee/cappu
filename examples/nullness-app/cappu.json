@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "mainClass": "example.Main",
+    "quiet": true,
+    "nullness": {
+      "enabled": true
+    }
+  },
+  "dependencies": {
+    "implementation": {
+      "org.jspecify:jspecify": "1.0.0"
+    }
+  }
+}
