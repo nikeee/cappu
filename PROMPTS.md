@@ -404,3 +404,6 @@ cappu search commons-lang3
 - 2026-06-23 19:21 — are there other features similar to deprecated uses that an LLM could make use of?
 - 2026-06-24 11:03 — 2,3,4,5
 - 2026-06-24 11:03 — continue
+- 2026-06-24 11:21 — any idea what would be good for this project?
+- 2026-06-24 11:21 — also add regression tests
+- 2026-06-24 11:21 — continue

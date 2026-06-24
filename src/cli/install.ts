@@ -35,27 +35,38 @@ export async function runInstall(
   // Resolving (no lockfile) fetches a POM per package with no known total, so
   // it gets a count-up line rather than a bar; cleared once downloads start.
   let resolved = 0;
-  const result = await installDependencies(config, undefined, {
-    ...options,
-    onResolve: current => {
-      if (!progressEnabled()) return;
-      resolved++;
-      const label = `${styleText("cyan", "resolving")} ${styleText("bold", String(resolved))} ${styleText("dim", current)}`;
-      process.stderr.write(`\r\x1b[2K${label}`); // carriage return + clear line
-    },
-    onProgress: (done, total, current) => {
-      if (resolved > 0) {
-        process.stderr.write("\r\x1b[2K"); // wipe the resolving line before the bar
-        resolved = 0;
-      }
-      bar ??= (() => {
-        const created = progressBar();
-        created?.start(total, 0, { package: "" });
-        return created;
-      })();
-      bar?.update(done, { package: current });
-    },
-  });
+  let result;
+  try {
+    result = await installDependencies(config, undefined, {
+      ...options,
+      onResolve: current => {
+        if (!progressEnabled()) return;
+        resolved++;
+        const label = `${styleText("cyan", "resolving")} ${styleText("bold", String(resolved))} ${styleText("dim", current)}`;
+        process.stderr.write(`\r\x1b[2K${label}`); // carriage return + clear line
+      },
+      onProgress: (done, total, current) => {
+        if (resolved > 0) {
+          process.stderr.write("\r\x1b[2K"); // wipe the resolving line before the bar
+          resolved = 0;
+        }
+        bar ??= (() => {
+          const created = progressBar();
+          created?.start(total, 0, { package: "" });
+          return created;
+        })();
+        bar?.update(done, { package: current });
+      },
+    });
+  } catch (e) {
+    // A transient fetch failure (e.g. a persistent 429) aborts resolution: show
+    // it as a real error, not an unhandled rejection. (nikeee/cappu#22.)
+    if (resolved > 0) process.stderr.write("\r\x1b[2K");
+    bar?.stop();
+    process.stderr.write(`${err("red", "error:")} ${(e as Error).message}\n`);
+    emitAnnotation("error", (e as Error).message);
+    process.exit(1);
+  }
   if (resolved > 0) process.stderr.write("\r\x1b[2K"); // nothing to download after resolve
   bar?.stop();
 

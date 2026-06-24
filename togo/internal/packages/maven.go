@@ -1,7 +1,6 @@
 package packages
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/xml"
 	"net/http"
@@ -62,35 +61,15 @@ func (s *MavenRepositorySource) Name() string { return s.baseURL }
 
 func httpFetchText(client *http.Client) FetchText {
 	return func(u string) (string, bool, error) {
-		body, found, err := httpGet(client, u)
+		body, found, err := httpx.Get(client, u)
 		return string(body), found, err
 	}
 }
 
 func httpFetchBytes(client *http.Client) FetchBytes {
 	return func(u string) ([]byte, bool, error) {
-		return httpGet(client, u)
+		return httpx.Get(client, u)
 	}
-}
-
-func httpGet(client *http.Client, u string) ([]byte, bool, error) {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u, nil)
-	if err != nil {
-		return nil, false, err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, false, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, false, nil // a non-2xx (incl. 404) is a miss, not an error
-	}
-	body, err := httpx.ReadAllCapped(resp.Body)
-	if err != nil {
-		return nil, false, err
-	}
-	return body, true, nil
 }
 
 // --- repository URLs ---------------------------------------------------------

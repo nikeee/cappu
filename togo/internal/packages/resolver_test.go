@@ -1,6 +1,7 @@
 package packages
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -204,6 +205,32 @@ func TestLatestVersion(t *testing.T) {
 	}
 	if v, _ := LatestVersion("org.nope", "a", []PackageSource{source}); v != "" {
 		t.Errorf("LatestVersion(missing) = %q, want empty", v)
+	}
+}
+
+// erroringSource fails GetMetadata, standing in for a source that exhausted its
+// retries on a transient HTTP failure (429/5xx).
+type erroringSource struct{ err error }
+
+func (erroringSource) Name() string                                  { return "erroring" }
+func (erroringSource) Search(string) ([]SearchHit, error)            { return nil, nil }
+func (erroringSource) ListVersions(string, string) ([]string, error) { return nil, nil }
+func (erroringSource) GetArtifact(Coordinates) ([]byte, error)       { return nil, nil }
+func (s erroringSource) GetMetadata(Coordinates) (*PackageMetadata, error) {
+	return nil, s.err
+}
+
+// Regression for nikeee/cappu#22: a transient fetch failure must abort the
+// resolve with the error, never be recorded as a missing package (which the CLI
+// would print as "not found in any package source").
+func TestResolveTransitivePropagatesFetchError(t *testing.T) {
+	boom := errors.New("repo.example: HTTP 429 after 4 attempts")
+	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:1")}, []PackageSource{erroringSource{err: boom}}, nil)
+	if err == nil {
+		t.Fatal("want the fetch error to propagate, got nil")
+	}
+	if len(res.Missing) != 0 {
+		t.Errorf("Missing = %v, want empty (a transient error is not a miss)", res.Missing)
 	}
 }
 

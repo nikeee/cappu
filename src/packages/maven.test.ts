@@ -2,7 +2,13 @@ import { test } from "node:test";
 
 import { expect } from "expect";
 
-import { MavenRepositorySource, parseMetadataVersions, parsePom, toSolrQuery } from "./maven.ts";
+import {
+  fetchWithRetry,
+  MavenRepositorySource,
+  parseMetadataVersions,
+  parsePom,
+  toSolrQuery,
+} from "./maven.ts";
 import { toCoordinates } from "./types.ts";
 
 const METADATA = `<?xml version="1.0" encoding="UTF-8"?>
@@ -383,4 +389,80 @@ test("a cyclic or missing parent chain terminates and reports incomplete", async
   const orphan = await source.getMetadata(toCoordinates("g", "orphan", "1"));
   expect(orphan?.dependencies).toEqual([]);
   expect(orphan?.incomplete).toBe(true);
+});
+
+// Regression for nikeee/cappu#22: a 429 (Central rate-limiting a burst of POM
+// fetches) must be retried, not silently treated as a 404-style miss that the
+// resolver then reports as "not found in any package source".
+//
+// stubFetch replaces global fetch with a queue of canned responses (a status,
+// optional body, optional retry-after), restoring it afterwards.
+function stubFetch(responses: { status: number; body?: string; retryAfter?: string }[]): {
+  calls: number;
+  restore: () => void;
+} {
+  const original = globalThis.fetch;
+  const state = { calls: 0, restore: () => (globalThis.fetch = original) };
+  globalThis.fetch = (() => {
+    const r = responses[Math.min(state.calls, responses.length - 1)]!;
+    state.calls++;
+    const headers = r.retryAfter ? { "retry-after": r.retryAfter } : undefined;
+    return Promise.resolve(new Response(r.body ?? "", { status: r.status, headers }));
+  }) as typeof fetch;
+  return state;
+}
+
+const noSleep = (): Promise<void> => Promise.resolve();
+
+test("fetchWithRetry retries a transient 429 then succeeds", async () => {
+  const slept: number[] = [];
+  const stub = stubFetch([{ status: 429 }, { status: 200, body: "ok" }]);
+  try {
+    const response = await fetchWithRetry("https://repo.example/maven2/a.pom", async ms => {
+      slept.push(ms);
+    });
+    expect(await response?.text()).toBe("ok");
+    expect(stub.calls).toBe(2);
+    expect(slept).toEqual([500]); // one base-backoff sleep
+  } finally {
+    stub.restore();
+  }
+});
+
+test("fetchWithRetry throws (not a miss) when the transient status persists", async () => {
+  const stub = stubFetch([{ status: 503 }]);
+  try {
+    await expect(fetchWithRetry("https://repo.example/maven2/a.pom", noSleep)).rejects.toThrow(
+      /HTTP 503 after 4 attempts/,
+    );
+    expect(stub.calls).toBe(4);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("fetchWithRetry treats a genuine 404 as a miss (no retry)", async () => {
+  const stub = stubFetch([{ status: 404 }]);
+  try {
+    expect(await fetchWithRetry("https://repo.example/maven2/a.pom", noSleep)).toBeUndefined();
+    expect(stub.calls).toBe(1);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("fetchWithRetry honors a numeric Retry-After", async () => {
+  const slept: number[] = [];
+  const stub = stubFetch([
+    { status: 429, retryAfter: "2" },
+    { status: 200, body: "ok" },
+  ]);
+  try {
+    await fetchWithRetry("https://repo.example/maven2/a.pom", async ms => {
+      slept.push(ms);
+    });
+    expect(slept).toEqual([2000]); // 2s from Retry-After, not the 500ms default
+  } finally {
+    stub.restore();
+  }
 });

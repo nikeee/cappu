@@ -31,14 +31,68 @@ export type FetchText = (url: string) => Promise<string | undefined>;
 /** Returns the bytes for a url, or undefined for a 404-ish miss. */
 export type FetchBytes = (url: string) => Promise<Uint8Array | undefined>;
 
+// Transient HTTP statuses worth retrying: a 429 rate limit (Maven Central
+// throttles per-IP after a burst of POM fetches) and the 502/503/504 gateway
+// failures. A genuine 404/410 - or any other non-ok - is a real "not here",
+// returned as a miss so the caller tries the next source. (nikeee/cappu#22:
+// without this a 429 mid-resolve was reported as "not found in any package
+// source" for every remaining package.)
+const RETRY_STATUSES = new Set([429, 502, 503, 504]);
+const MAX_FETCH_ATTEMPTS = 4;
+const BASE_BACKOFF_MS = 500;
+
+const defaultSleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+function parseRetryAfter(value: string | null): number | undefined {
+  // ponytail: only the delta-seconds form (what Maven Central sends); an
+  // HTTP-date Retry-After falls back to exponential backoff.
+  const seconds = Number.parseInt((value ?? "").trim(), 10);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * fetch with retry of transient failures (429/502/503/504) using exponential
+ * backoff that honors a numeric Retry-After. Returns the ok Response, or
+ * undefined for a genuine miss (404 etc.); throws only when a transient failure
+ * persists past MAX_FETCH_ATTEMPTS - so a rate limit surfaces as a real failure
+ * instead of a false "not found". `sleep` is injectable so tests retry without
+ * real delays.
+ */
+export async function fetchWithRetry(
+  url: string,
+  sleep: (ms: number) => Promise<void> = defaultSleep,
+): Promise<Response | undefined> {
+  let backoff = BASE_BACKOFF_MS;
+  for (let attempt = 1; ; attempt++) {
+    const response = await fetch(url);
+    if (response.ok) return response;
+    if (!RETRY_STATUSES.has(response.status)) return undefined; // genuine miss
+    if (attempt >= MAX_FETCH_ATTEMPTS) {
+      throw new Error(
+        `${hostOf(url)}: HTTP ${response.status} after ${MAX_FETCH_ATTEMPTS} attempts (rate limited or server error); try again shortly`,
+      );
+    }
+    await sleep(parseRetryAfter(response.headers.get("retry-after")) ?? backoff);
+    backoff *= 2;
+  }
+}
+
 const defaultFetchText: FetchText = async url => {
-  const response = await fetch(url);
-  return response.ok ? response.text() : undefined;
+  const response = await fetchWithRetry(url);
+  return response ? response.text() : undefined;
 };
 
 const defaultFetchBytes: FetchBytes = async url => {
-  const response = await fetch(url);
-  return response.ok ? response.bytes() : undefined;
+  const response = await fetchWithRetry(url);
+  return response ? response.bytes() : undefined;
 };
 
 const xml = new XMLParser({

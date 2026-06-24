@@ -12,10 +12,14 @@
 package httpx
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -31,6 +35,89 @@ var Client = &http.Client{
 		ExpectContinueTimeout: time.Second,
 		ForceAttemptHTTP2:     true,
 	},
+}
+
+// retryStatuses are the transient HTTP statuses worth retrying: a 429 rate
+// limit (Maven Central throttles per-IP after a burst of POM fetches) and the
+// 502/503/504 gateway failures. A genuine 404/410 - or any other non-2xx - is
+// a real "not here", returned as a miss so the caller tries the next source.
+var retryStatuses = map[int]bool{
+	http.StatusTooManyRequests:    true, // 429
+	http.StatusBadGateway:         true, // 502
+	http.StatusServiceUnavailable: true, // 503
+	http.StatusGatewayTimeout:     true, // 504
+}
+
+const (
+	maxFetchAttempts = 4
+	baseBackoff      = 500 * time.Millisecond
+)
+
+// Get fetches u, retrying transient failures (429/502/503/504) with exponential
+// backoff that honors a numeric Retry-After. found is false for a genuine miss
+// (404 etc.); an error is returned only when a transient failure persists past
+// maxFetchAttempts - so a rate limit surfaces as a real failure instead of a
+// false "not found". Used by the package fetchers (one POM at a time).
+func Get(client *http.Client, u string) (body []byte, found bool, err error) {
+	return get(client, u, time.Sleep)
+}
+
+// get is Get with an injectable sleep so tests retry without real delays.
+func get(client *http.Client, u string, sleep func(time.Duration)) ([]byte, bool, error) {
+	backoff := baseBackoff
+	for attempt := 1; ; attempt++ {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u, nil)
+		if err != nil {
+			return nil, false, err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, false, err
+		}
+		status := resp.StatusCode
+		if status >= 200 && status < 300 {
+			data, err := ReadAllCapped(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				return nil, false, err
+			}
+			return data, true, nil
+		}
+		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+		resp.Body.Close()
+		if !retryStatuses[status] {
+			return nil, false, nil // a genuine miss (404/410/...): not retryable
+		}
+		if attempt >= maxFetchAttempts {
+			return nil, false, fmt.Errorf("%s: HTTP %d after %d attempts (rate limited or server error); try again shortly", hostOf(u), status, maxFetchAttempts)
+		}
+		wait := backoff
+		if retryAfter > 0 {
+			wait = retryAfter
+		}
+		sleep(wait)
+		backoff *= 2
+	}
+}
+
+// parseRetryAfter reads the delta-seconds form of a Retry-After header.
+//
+// ponytail: only the integer-seconds form (what Maven Central sends); an
+// HTTP-date Retry-After falls back to exponential backoff. Parse the date form
+// if a repository ever uses it.
+func parseRetryAfter(v string) time.Duration {
+	if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return 0
+}
+
+// hostOf is the host of u for error messages, or u itself if it will not parse.
+func hostOf(u string) string {
+	if parsed, err := url.Parse(u); err == nil && parsed.Host != "" {
+		return parsed.Host
+	}
+	return u
 }
 
 // MaxBodyBytes caps in-memory response reads (ReadAllCapped): generous enough
