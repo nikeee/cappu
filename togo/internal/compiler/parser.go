@@ -53,9 +53,19 @@ func ParseSourceFile(fileName, text string) *Node {
 
 	p.nextToken()
 	pos := p.getNodePos()
+	// Leading annotations belong to the package declaration only when `package`
+	// follows them (jspecify @NullMarked package, nikeee/cappu#25); otherwise they
+	// are the first type declaration's and parseSourceElement consumes them.
+	var packageAnnotations *NodeArray
+	if p.token() == AtToken && parserLookAhead(p, func() bool {
+		p.parseAnnotations()
+		return p.token() == PackageKeyword
+	}) {
+		packageAnnotations = p.parseAnnotations()
+	}
 	var pkg *Node
 	if p.token() == PackageKeyword {
-		pkg = p.parsePackageDeclaration()
+		pkg = p.parsePackageDeclaration(packageAnnotations)
 	}
 	imports := p.parseImportDeclarations()
 
@@ -358,12 +368,15 @@ func (p *Parser) parseEntityName() *Node {
 
 // --- compilation unit --------------------------------------------------------
 
-func (p *Parser) parsePackageDeclaration() *Node {
+func (p *Parser) parsePackageDeclaration(annotations *NodeArray) *Node {
 	pos := p.getNodePos()
+	if annotations != nil {
+		pos = annotations.Pos
+	}
 	p.parseExpected(PackageKeyword, nil)
 	name := p.parseEntityName()
 	p.parseExpected(SemicolonToken, nil)
-	return p.finishNode(p.factory.NewPackageDeclaration(nil, name), pos, -1)
+	return p.finishNode(p.factory.NewPackageDeclaration(annotations, name), pos, -1)
 }
 
 func (p *Parser) parseImportDeclaration() *Node {

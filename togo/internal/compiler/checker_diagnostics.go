@@ -603,35 +603,19 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 	// jspecify nullness (nikeee/cappu#25). Purely syntactic: the value is treated
 	// as possibly-null only when it is the `null` literal or a use of a declared
 	// @Nullable method/field/variable; no flow narrowing.
+	// The value/target nullness both come from the type model: a value is
+	// possibly-null when its type is the `null` literal or carries a @Nullable facet
+	// (incl. a @Nullable generic element via substitution); a target is non-null when
+	// its type carries @NonNull.
 	valueMayBeNull := func(node *Node) bool {
-		if c.nullness == nil {
-			return false
-		}
-		if c.getTypeOfExpression(node).Kind == TypeKindNull {
-			return true
-		}
-		switch node.Kind {
-		case CallExpression:
-			info := c.resolveCallInfo(node)
-			return info != nil && info.Decl != nil && c.nullness.targetNullness(info.Decl) == NullnessNullable
-		case Identifier, PropertyAccessExpression:
-			name := node
-			if node.Kind == PropertyAccessExpression {
-				name = node.AsPropertyAccessExpression().Name
-			}
-			sym := c.ResolveName(name)
-			if sym == nil {
-				return false
-			}
-			return c.nullness.targetNullness(carrierOf(c.declarationOf(sym))) == NullnessNullable
-		}
-		return false
+		t := c.getTypeOfExpression(node)
+		return t.Kind == TypeKindNull || nullnessOf(t) == NullnessNullable
 	}
-	checkNullness := func(valueNode, targetDecl *Node, name string) {
+	checkNullness := func(valueNode *Node, targetType *Type, name string) {
 		if c.nullness == nil {
 			return
 		}
-		if c.nullness.targetNullness(carrierOf(targetDecl)) != NullnessNonNull {
+		if nullnessOf(targetType) != NullnessNonNull {
 			return
 		}
 		if !valueMayBeNull(valueNode) {
@@ -639,6 +623,44 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 		}
 		diagnostics = append(diagnostics, CreateDiagnostic(valueNode.Pos, valueNode.End-valueNode.Pos,
 			Diagnostics.PossiblyNullValueAssignedToNonNull0, name))
+	}
+
+	// Argument nullness against a resolved signature: each parameter type is
+	// instantiated with subst (the receiver's / created type's type arguments), so a
+	// null into the non-null element of List<@NonNull String>.add(E) is caught.
+	checkParamNullness := func(args *NodeArray, parameters *NodeArray, subst substMap) {
+		if c.nullness == nil {
+			return
+		}
+		fixed := nodeArrayLen(parameters)
+		if last := lastNode(parameters); last != nil && last.AsParameter().IsVarArgs {
+			fixed = parameters.Len() - 1
+		}
+		n := nodeArrayLen(args)
+		if fixed < n {
+			n = fixed
+		}
+		for i := 0; i < n; i++ {
+			p := parameters.Nodes[i]
+			if p.Symbol == nil {
+				continue
+			}
+			targetType := c.substitute(c.getTypeOfSymbol(p.Symbol), subst)
+			pd := p.AsParameter()
+			pname := fmt.Sprintf("parameter %d", i+1)
+			if pd.Name != nil {
+				pname = pd.Name.AsIdentifier().Text
+			}
+			checkNullness(args.Nodes[i], targetType, pname)
+		}
+	}
+	checkCallNullness := func(call *Node) {
+		if c.nullness == nil {
+			return
+		}
+		if info := c.resolveCallInfo(call); info != nil {
+			checkParamNullness(call.AsCallExpression().Arguments, info.Decl.AsMethodDeclaration().Parameters, info.ReceiverSubst)
+		}
 	}
 
 	checkArgumentTypes := func(args *NodeArray, parameters *NodeArray) {
@@ -655,12 +677,6 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 				continue
 			}
 			checkAssignment(args.Nodes[i], c.getTypeOfSymbol(parameters.Nodes[i].Symbol))
-			p := parameters.Nodes[i].AsParameter()
-			pname := fmt.Sprintf("parameter %d", i+1)
-			if p.Name != nil {
-				pname = p.Name.AsIdentifier().Text
-			}
-			checkNullness(args.Nodes[i], parameters.Nodes[i], pname)
 		}
 	}
 
@@ -768,6 +784,11 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 				reportArity(creation.Type, end, expected, argc)
 			} else if len(applicable) == 1 && creation.ClassBody == nil {
 				checkArgumentTypes(creation.Arguments, applicable[0].AsConstructorDeclaration().Parameters)
+				var subst substMap
+				if created := c.resolveType(creation.Type, node); created.Kind == TypeKindClass {
+					subst = c.substitutionFor(symbol, created.TypeArguments)
+				}
+				checkParamNullness(creation.Arguments, applicable[0].AsConstructorDeclaration().Parameters, subst)
 			}
 		} else if declaration.Kind == RecordDeclaration {
 			record := declaration.AsRecordDeclaration()
@@ -794,7 +815,7 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			d := node.AsVariableDeclarator()
 			if d.Initializer != nil && node.Symbol != nil && d.Initializer.Kind != ArrayInitializer {
 				checkAssignment(d.Initializer, c.getTypeOfSymbol(node.Symbol))
-				checkNullness(d.Initializer, node, d.Name.AsIdentifier().Text)
+				checkNullness(d.Initializer, c.getTypeOfSymbol(node.Symbol), d.Name.AsIdentifier().Text)
 			}
 		case AssignmentExpression:
 			a := node.AsAssignmentExpression()
@@ -808,14 +829,13 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 					leftName = a.Left.AsPropertyAccessExpression().Name
 				}
 				if leftName != nil {
-					if sym := c.ResolveName(leftName); sym != nil {
-						checkNullness(a.Right, c.declarationOf(sym), leftName.AsIdentifier().Text)
-					}
+					checkNullness(a.Right, c.getTypeOfExpression(a.Left), leftName.AsIdentifier().Text)
 				}
 			}
 		case CallExpression:
 			if cleanParse {
 				checkCallArity(node)
+				checkCallNullness(node)
 			}
 		case ObjectCreationExpression:
 			if cleanParse {
@@ -837,8 +857,8 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 					}
 					m = m.Parent
 				}
-				if m != nil {
-					checkNullness(r.Expression, m, m.AsMethodDeclaration().Name.AsIdentifier().Text)
+				if m != nil && m.Symbol != nil {
+					checkNullness(r.Expression, c.getTypeOfSymbol(m.Symbol), m.AsMethodDeclaration().Name.AsIdentifier().Text)
 				}
 			}
 		case MethodDeclaration:

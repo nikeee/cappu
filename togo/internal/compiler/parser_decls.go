@@ -57,14 +57,15 @@ func (p *Parser) parseType() *Node {
 
 func (p *Parser) parseNonArrayType() *Node {
 	pos := p.getNodePos()
-	// SE8 type-use annotations (consumed, not yet attached).
-	for p.token() == AtToken && !p.isAnnotationTypeDeclarationStart() {
-		p.parseAnnotation()
-	}
+	// SE8 type-use annotations, e.g. @NonNull String. Attached to the produced node
+	// so the nullness checker can read List<@Nullable String> (nikeee/cappu#25).
+	typeAnnotations := p.parseAnnotations()
 	if isPrimitiveTypeKeyword(p.token()) || p.token() == VoidKeyword {
 		keyword := p.token()
 		p.nextToken()
-		return p.finishNode(p.factory.NewPrimitiveType(keyword), pos, -1)
+		node := p.factory.NewPrimitiveType(keyword)
+		node.AsPrimitiveType().Annotations = typeAnnotations
+		return p.finishNode(node, pos, -1)
 	}
 	if p.token() == QuestionToken {
 		return p.parseWildcardType()
@@ -74,7 +75,9 @@ func (p *Parser) parseNonArrayType() *Node {
 	if p.token() == LessThanToken {
 		typeArguments = p.parseTypeArguments()
 	}
-	return p.finishNode(p.factory.NewTypeReference(typeName, typeArguments), pos, -1)
+	node := p.factory.NewTypeReference(typeName, typeArguments)
+	node.AsTypeReference().Annotations = typeAnnotations
+	return p.finishNode(node, pos, -1)
 }
 
 func (p *Parser) parseWildcardType() *Node {

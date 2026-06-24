@@ -404,12 +404,16 @@ export interface PrimitiveType extends Node {
   readonly kind: SyntaxKind.PrimitiveType;
   /** The primitive keyword kind (IntKeyword, BooleanKeyword, VoidKeyword, ...). */
   readonly keyword: SyntaxKind;
+  /** SE8 type-use annotations written before the type (nikeee/cappu#25). */
+  readonly annotations?: NodeArray<Annotation>;
 }
 
 export interface TypeReference extends Node {
   readonly kind: SyntaxKind.TypeReference;
   readonly typeName: EntityName;
   readonly typeArguments?: NodeArray<TypeNode | WildcardType>;
+  /** SE8 type-use annotations written before the type (nikeee/cappu#25). */
+  readonly annotations?: NodeArray<Annotation>;
 }
 
 export interface ArrayType extends Node {
