@@ -7,6 +7,7 @@ require (
 	github.com/invopop/jsonschema v0.14.0
 	github.com/mailru/easyjson v0.9.2
 	github.com/testcontainers/testcontainers-go v0.42.0
+	github.com/tidwall/gjson v1.14.2
 	github.com/tidwall/jsonc v0.3.3
 	github.com/tidwall/sjson v1.2.5
 	golang.org/x/sync v0.21.0
@@ -56,7 +57,6 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.3 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
-	github.com/tidwall/gjson v1.14.2 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.16 // indirect

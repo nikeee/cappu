@@ -41,6 +41,8 @@ type CLI struct {
 	Audit        auditCmd        `cmd:"" help:"Scan resolved dependencies for vulnerabilities"`
 	Licenses     licensesCmd     `cmd:"" help:"Print every dependency and its license"`
 	Add          addCmd          `cmd:"" help:"Add dependencies and install them"`
+	Remove       removeCmd       `cmd:"" help:"Remove dependencies and re-resolve"`
+	Outdated     outdatedCmd     `cmd:"" help:"List dependencies with a newer published version"`
 	Publish      publishCmd      `cmd:"" help:"Build the jar, generate its POM, and upload"`
 	Search       searchCmd       `cmd:"" help:"Search the configured package sources"`
 	Test         testCmd         `cmd:"" help:"Compile src/test/java and run JUnit"`
@@ -182,6 +184,29 @@ func (c *addCmd) Run(a *appState) error {
 		return err
 	}
 	return exit(cli.RunAdd(c.Configuration, c.Coordinates, a.configPath, cfg))
+}
+
+type removeCmd struct {
+	Configuration string   `arg:"" enum:"api,implementation,annotationProcessor,testImplementation" help:"api|implementation|annotationProcessor|testImplementation"`
+	Coordinates   []string `arg:"" name:"coord" help:"group:artifact ..."`
+}
+
+func (c *removeCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		return err
+	}
+	return exit(cli.RunRemove(c.Configuration, c.Coordinates, a.configPath, cfg))
+}
+
+type outdatedCmd struct{}
+
+func (c *outdatedCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		return err
+	}
+	return exit(cli.RunOutdated(cfg))
 }
 
 type publishCmd struct {

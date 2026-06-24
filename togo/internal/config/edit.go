@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -22,6 +23,21 @@ func SetStringField(text []byte, key, value string) ([]byte, error) {
 func SetDependency(text []byte, configuration, key, version string) ([]byte, error) {
 	path := "dependencies." + configuration + "." + escapePathKey(key)
 	return sjson.SetBytes(text, path, version)
+}
+
+// RemoveDependency deletes dependencies.<configuration>.<key> from the JSONC
+// config text, preserving comments. removed reports whether the key was present.
+// Port of removeDependencyFromJsonc.
+func RemoveDependency(text []byte, configuration, key string) ([]byte, bool, error) {
+	path := "dependencies." + configuration + "." + escapePathKey(key)
+	if !gjson.GetBytes(text, path).Exists() {
+		return text, false, nil
+	}
+	out, err := sjson.DeleteBytes(text, path)
+	if err != nil {
+		return text, false, err
+	}
+	return out, true, nil
 }
 
 // escapePathKey escapes the characters sjson treats specially in a path so a

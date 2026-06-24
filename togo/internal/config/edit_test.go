@@ -57,3 +57,50 @@ func TestSetDependencyPreservesComments(t *testing.T) {
 		t.Errorf("sibling dependency disturbed:\n%s", got)
 	}
 }
+
+func TestRemoveDependency(t *testing.T) {
+	text := []byte(`{
+  "dependencies": {
+    // app deps
+    "implementation": {
+      "org.slf4j:slf4j-api": "2.0.0",
+      "com.google.code.gson:gson": "2.14.0"
+    }
+  }
+}`)
+	updated, removed, err := RemoveDependency(text, "implementation", "com.google.code.gson:gson")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !removed {
+		t.Fatal("expected removed=true")
+	}
+	got := string(updated)
+	if strings.Contains(got, "gson") {
+		t.Errorf("gson not removed:\n%s", got)
+	}
+	if !strings.Contains(got, `"org.slf4j:slf4j-api": "2.0.0"`) {
+		t.Errorf("sibling dependency disturbed:\n%s", got)
+	}
+	if !strings.Contains(got, "// app deps") {
+		t.Errorf("comment was dropped:\n%s", got)
+	}
+}
+
+func TestRemoveDependencyAbsentIsNoOp(t *testing.T) {
+	text := []byte(`{"dependencies":{"implementation":{"org.x:y":"1.0"}}}`)
+	updated, removed, err := RemoveDependency(text, "implementation", "org.absent:z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed {
+		t.Error("expected removed=false for an absent key")
+	}
+	if string(updated) != string(text) {
+		t.Errorf("text changed on no-op: %s", updated)
+	}
+	// a missing configuration section is also a no-op
+	if _, removed, _ := RemoveDependency(text, "testImplementation", "org.x:y"); removed {
+		t.Error("expected removed=false for a missing configuration")
+	}
+}

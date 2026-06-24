@@ -148,6 +148,72 @@ func PlanUpdates(cfg *config.Config, srcs []packages.PackageSource) ([]Dependenc
 	return bumps, nil
 }
 
+// OutdatedDependency is a declared dependency with a newer published version.
+type OutdatedDependency struct {
+	Configuration string
+	Key           string
+	Current       string
+	Wanted        string // newest stable within the current major (safe update), "" if none
+	Latest        string // newest stable overall (a major bump), "" if none
+}
+
+// PlanOutdated returns every declared dependency that has a newer published
+// stable version, with the newest in-major version (Wanted) and newest overall
+// (Latest). Read-only. Port of planOutdated.
+func PlanOutdated(cfg *config.Config, srcs []packages.PackageSource) ([]OutdatedDependency, error) {
+	if srcs == nil {
+		srcs = sources.Configured(cfg)
+	}
+	sections := []struct {
+		configuration string
+		deps          map[string]string
+	}{
+		{"api", cfg.Dependencies.API},
+		{"implementation", cfg.Dependencies.Implementation},
+		{"annotationProcessor", cfg.Dependencies.AnnotationProcessor},
+		{"testImplementation", cfg.Dependencies.TestImplementation},
+	}
+	var out []OutdatedDependency
+	for _, section := range sections {
+		for _, key := range sortedKeys(section.deps) {
+			current := section.deps[key]
+			groupID, artifactID, _ := strings.Cut(key, ":")
+			published, err := listVersions(groupID, artifactID, srcs)
+			if err != nil {
+				return nil, err
+			}
+			order := packages.MatchingVersions(published, "") // newest first
+			currentIndex := indexOf(order, current)
+			if currentIndex < 0 {
+				continue // unknown ordering: do not guess
+			}
+			var newer []string
+			for _, v := range order[:currentIndex] {
+				if isStableVersion(v) {
+					newer = append(newer, v)
+				}
+			}
+			if len(newer) == 0 {
+				continue
+			}
+			row := OutdatedDependency{Configuration: section.configuration, Key: key, Current: current}
+			if latest := newer[0]; latest != current {
+				row.Latest = latest
+			}
+			for _, v := range newer {
+				if majorOf(v) == majorOf(current) {
+					if v != current {
+						row.Wanted = v
+					}
+					break
+				}
+			}
+			out = append(out, row)
+		}
+	}
+	return out, nil
+}
+
 // listVersions returns the published versions from the first source that knows
 // the package.
 func listVersions(groupID, artifactID string, srcs []packages.PackageSource) ([]string, error) {

@@ -413,6 +413,62 @@ export async function planUpdates(
   return bumps;
 }
 
+export interface OutdatedDependency {
+  configuration: UpdateConfiguration;
+  key: PackageKey;
+  current: string;
+  /** Newest stable within the current major (the safe `cappu update` target). */
+  wanted?: string;
+  /** Newest stable overall - a major bump when it differs from `wanted`. */
+  latest?: string;
+}
+
+/**
+ * Every declared dependency that has a newer published stable version, with the
+ * newest in-major version (`wanted`, what `cappu update` would move to) and the
+ * newest overall (`latest`, possibly a major bump). A dependency whose pinned
+ * version is not in the published list, or that is already newest, is omitted.
+ * Read-only - never writes the config or lock.
+ */
+export async function planOutdated(
+  config: CappuConfig,
+  sources: readonly PackageSource[] = configuredSources(config),
+): Promise<OutdatedDependency[]> {
+  const sections: [UpdateConfiguration, Record<string, string>][] = [
+    ["api", config.dependencies.api ?? {}],
+    ["implementation", config.dependencies.implementation ?? {}],
+    ["annotationProcessor", config.dependencies.annotationProcessor ?? {}],
+    ["testImplementation", config.dependencies.testImplementation ?? {}],
+  ];
+  const out: OutdatedDependency[] = [];
+  for (const [configuration, deps] of sections) {
+    for (const [key, current] of Object.entries(deps)) {
+      const [groupId = "", artifactId = ""] = key.split(":");
+      let published: string[] = [];
+      for (const source of sources) {
+        published = await source.listVersions(groupId, artifactId);
+        if (published.length > 0) break;
+      }
+      const order = matchingVersions(published); // newest (publish order) first
+      const currentIndex = order.indexOf(current);
+      if (currentIndex < 0) continue; // unknown ordering: do not guess
+      // "newer" = strictly ahead of current in the newest-first order and stable.
+      const newer = order.slice(0, currentIndex).filter(isStableVersion);
+      if (newer.length === 0) continue;
+      const latest = newer[0];
+      const wanted = newer.find(v => majorOf(v) === majorOf(current));
+      out.push({
+        configuration,
+        key: key as PackageKey,
+        current,
+        ...(wanted !== undefined && wanted !== current ? { wanted } : {}),
+        ...(latest !== undefined && latest !== current ? { latest } : {}),
+      });
+    }
+  }
+  return out;
+}
+
 function lockfilePath(config: CappuConfig): string {
   return join(config.baseDir, LOCKFILE_NAME);
 }

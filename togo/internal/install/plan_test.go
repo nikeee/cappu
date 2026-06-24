@@ -174,3 +174,37 @@ func TestPlanUpdatesNoneWhenCurrent(t *testing.T) {
 		t.Errorf("expected no bumps at newest, got %+v", bumps)
 	}
 }
+
+func TestPlanOutdatedReportsWantedAndLatest(t *testing.T) {
+	cfg := project(t, `{"dependencies":{"implementation":{"org.x:lib":"1.0","org.x:up":"3.0"}}}`)
+	src := &fakeSource{
+		name: "test",
+		versions: map[string][]string{
+			"org.x:lib": {"1.0", "1.2", "2.0"}, // 1.2 in-major (wanted), 2.0 major (latest)
+			"org.x:up":  {"2.0", "3.0"},        // already newest
+		},
+	}
+	rows, err := PlanOutdated(cfg, []packages.PackageSource{src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want one (org.x:lib)", rows)
+	}
+	got := rows[0]
+	if got.Key != "org.x:lib" || got.Current != "1.0" || got.Wanted != "1.2" || got.Latest != "2.0" {
+		t.Errorf("row = %+v, want {org.x:lib 1.0 1.2 2.0}", got)
+	}
+}
+
+func TestPlanOutdatedEmptyWhenCurrent(t *testing.T) {
+	cfg := project(t, `{"dependencies":{"api":{"org.x:lib":"2.0"}}}`)
+	src := &fakeSource{name: "test", versions: map[string][]string{"org.x:lib": {"1.0", "2.0"}}}
+	rows, err := PlanOutdated(cfg, []packages.PackageSource{src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("expected no outdated rows, got %+v", rows)
+	}
+}

@@ -8,6 +8,8 @@ import { parseArgs } from "node:util";
 
 import { loadConfig } from "../config.ts";
 import { runAdd } from "./add.ts";
+import { runRemove } from "./remove.ts";
+import { runOutdated } from "./outdated.ts";
 import { runCompileCommand } from "./compile.ts";
 import { runConfigSchema } from "./configSchema.ts";
 import { runInit } from "./init.ts";
@@ -45,6 +47,8 @@ Usage:
                                      count, or each jar path with -v/--verbose
   cappu update                       Bump declared dependencies to the newest stable
                                      versions that keep the tree conflict-free
+  cappu outdated                     List declared dependencies that have a newer
+                                     published version (current/wanted/latest)
   cappu version <major|minor|patch>  Bump the project version in cappu.json; at a
                                      git repo root, also commit it and tag v<version>
   cappu verify                       Check the installed lib jars against the
@@ -59,6 +63,8 @@ Usage:
   cappu add <configuration> <coord...>  Add one or more group:artifact[:version] to the
                                      dependencies section (api, implementation,
                                      annotationProcessor or testImplementation) and install them
+  cappu remove <configuration> <coord...>  Remove one or more group:artifact from the
+                                     named dependencies section and re-resolve
   cappu publish [--repo <url>]       Build the jar, generate its POM, and upload
                                      both to a Maven registry (needs groupId/
                                      artifactId/version in cappu.json + creds).
@@ -179,6 +185,7 @@ const TIMED_COMMANDS = new Set([
   "install",
   "update",
   "add",
+  "remove",
   "audit",
   "licenses",
   "publish",
@@ -234,6 +241,12 @@ if (command === "verify") runVerify(config);
 switch (command) {
   case "add":
     await runAdd(files[0], files.slice(1), values.config, config);
+    break;
+  case "remove":
+    await runRemove(files[0], files.slice(1), values.config, config);
+    break;
+  case "outdated":
+    await runOutdated(config);
     break;
   case "install":
     await runInstall(config, { verbose: values.verbose });
