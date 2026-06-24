@@ -27,6 +27,7 @@ import {
   type DoStatement,
   type ElementAccessExpression,
   type EntityName,
+  type ExportsDirective,
   type ExpressionStatement,
   type EnumConstantDeclaration,
   type EnumDeclaration,
@@ -45,16 +46,20 @@ import {
   type MethodDeclaration,
   type MethodReferenceExpression,
   type ModifierLike,
+  type ModuleDeclaration,
   type Node,
   type NodeArray,
   type ObjectCreationExpression,
+  type OpensDirective,
   type Parameter,
   type ParenthesizedExpression,
   type PostfixUnaryExpression,
   type PrefixUnaryExpression,
   type PropertyAccessExpression,
+  type ProvidesDirective,
   type RecordComponent,
   type RecordDeclaration,
+  type RequiresDirective,
   type Resource,
   type ReturnStatement,
   type SourceFile,
@@ -69,6 +74,7 @@ import {
   type TypeNode,
   type TypeParameter,
   type TypeReference,
+  type UsesDirective,
   type VariableDeclarator,
   type WhileStatement,
   type WildcardType,
@@ -263,19 +269,93 @@ class Printer {
     for (const g of [statics, nonStatics]) {
       if (g.length > 0) blocks.push(this.importGroup(g));
     }
+    if (sf.moduleDeclaration) {
+      blocks.push(this.moduleDeclaration(sf.moduleDeclaration));
+    }
     if (sf.statements.length > 0) {
       blocks.push(concat(this.listDocs(sf.statements, true, this.text.length)));
     }
     return join(concat([hardline, hardline]), blocks);
   }
 
-  /** Offset of the first real construct (package, import or type) in the file. */
+  /** Offset of the first real construct (package, import, type or module). */
   private firstConstructStart(sf: SourceFile): number {
     const candidates: number[] = [];
     if (sf.packageDeclaration) candidates.push(this.start(sf.packageDeclaration));
     if (sf.imports.length > 0) candidates.push(this.start(sf.imports[0]));
     if (sf.statements.length > 0) candidates.push(this.start(sf.statements[0]));
+    if (sf.moduleDeclaration) candidates.push(this.start(sf.moduleDeclaration));
     return candidates.length > 0 ? Math.min(...candidates) : this.text.length;
+  }
+
+  // module-info.java (SE9). Directives are grouped by kind with a blank line on
+  // each kind change; the `to`/`with` module lists always break, one name per
+  // line at a continuation indent. Mirrors google-java-format's module layout.
+  private moduleDeclaration(m: ModuleDeclaration): Doc {
+    const head: Doc[] = [];
+    for (const a of m.annotations ?? []) head.push(this.annotation(a), hardline);
+    if (m.isOpen) head.push("open ");
+    head.push("module ", this.entityName(m.name), " ");
+    if (m.directives.length === 0) return concat([...head, "{}"]);
+    const body: Doc[] = [];
+    m.directives.forEach((d, i) => {
+      if (i > 0) {
+        const kindChanged = d.kind !== m.directives[i - 1].kind;
+        body.push(kindChanged ? concat([hardline, hardline]) : hardline);
+      }
+      body.push(this.directive(d));
+    });
+    return concat([...head, "{", indent(concat([hardline, ...body])), hardline, "}"]);
+  }
+
+  private directive(d: Node): Doc {
+    switch (d.kind) {
+      case SyntaxKind.RequiresDirective: {
+        const r = d as RequiresDirective;
+        const mods = `${r.isTransitive ? "transitive " : ""}${r.isStatic ? "static " : ""}`;
+        return concat(["requires ", mods, this.entityName(r.name), ";"]);
+      }
+      case SyntaxKind.ExportsDirective: {
+        const e = d as ExportsDirective;
+        return this.exportsLike("exports", e.packageName, e.toModules);
+      }
+      case SyntaxKind.OpensDirective: {
+        const o = d as OpensDirective;
+        return this.exportsLike("opens", o.packageName, o.toModules);
+      }
+      case SyntaxKind.UsesDirective:
+        return concat(["uses ", this.entityName((d as UsesDirective).typeName), ";"]);
+      case SyntaxKind.ProvidesDirective: {
+        const p = d as ProvidesDirective;
+        return concat([
+          "provides ",
+          this.entityName(p.typeName),
+          " with",
+          this.moduleNameList(p.withTypes),
+          ";",
+        ]);
+      }
+      default:
+        return this.raw(d);
+    }
+  }
+
+  private exportsLike(
+    keyword: string,
+    pkg: EntityName,
+    toModules: NodeArray<EntityName> | undefined,
+  ): Doc {
+    if (!toModules || toModules.length === 0) {
+      return concat([keyword, " ", this.entityName(pkg), ";"]);
+    }
+    return concat([keyword, " ", this.entityName(pkg), " to", this.moduleNameList(toModules), ";"]);
+  }
+
+  /** A `to`/`with` module-name list: always broken, one name per continuation line. */
+  private moduleNameList(names: NodeArray<EntityName>): Doc {
+    const items = names.map(n => this.entityName(n));
+    // g-j-f indents the continuation by two units (4 spaces google / 8 aosp).
+    return indent(indent(concat([hardline, join(concat([",", hardline]), items)])));
   }
 
   private importGroup(imports: ImportDeclaration[]): Doc {
@@ -322,8 +402,16 @@ class Printer {
     const parts: Doc[] = [];
     for (const a of annotations)
       parts.push(this.annotation(a as Annotation), ownLineAnnotations ? hardline : " ");
-    for (const k of keywords) parts.push(concat([tokenToString(k.kind) ?? this.raw(k), " "]));
+    for (const k of keywords) parts.push(concat([this.modifierText(k), " "]));
     return concat(parts);
+  }
+
+  private modifierText(k: ModifierLike): string {
+    // The parser represents `non-sealed` as just the `non` identifier (the
+    // `-sealed` is consumed but not kept in the AST); `non` is a modifier only
+    // in that one context, so restore the full spelling here.
+    if (k.kind === SyntaxKind.Identifier && this.raw(k) === "non") return "non-sealed";
+    return tokenToString(k.kind) ?? this.raw(k);
   }
 
   private annotation(a: Annotation): Doc {
@@ -335,6 +423,12 @@ class Printer {
       return argName ? concat([this.raw(argName), " = ", value]) : value;
     });
     return concat([name, "(", join(", ", args), ")"]);
+  }
+
+  /** A run of annotations, each followed by a space (inline, e.g. on a component). */
+  private annotations(anns: NodeArray<Annotation> | undefined): Doc {
+    if (!anns || anns.length === 0) return "";
+    return concat(anns.map(a => concat([this.annotation(a), " "])));
   }
 
   private typeParameters(tps: NodeArray<TypeParameter> | undefined): Doc {
@@ -534,7 +628,12 @@ class Printer {
 
   private recordDeclaration(d: RecordDeclaration): Doc {
     const comps = d.recordComponents.map((rc: RecordComponent) =>
-      concat([this.type(rc.type), rc.isVarArgs ? "... " : " ", this.raw(rc.name)]),
+      concat([
+        this.annotations(rc.annotations),
+        this.type(rc.type),
+        rc.isVarArgs ? "... " : " ",
+        this.raw(rc.name),
+      ]),
     );
     const after: Doc[] = [concat(["(", join(", ", comps), ")"])];
     if (d.implementsTypes && d.implementsTypes.length > 0)
@@ -1029,7 +1128,20 @@ class Printer {
         return concat(["(", this.node((node as ParenthesizedExpression).expression), ")"]);
       case SyntaxKind.PrefixUnaryExpression: {
         const e = node as PrefixUnaryExpression;
-        return concat([tokenToString(e.operator) ?? "", this.node(e.operand)]);
+        const op = tokenToString(e.operator) ?? "";
+        // A space goes between a +/- operator and an operand that itself starts
+        // with +/- so the tokens do not merge into ++/-- (e.g. `- -1`, not `--1`).
+        const operand = e.operand;
+        const sep =
+          (e.operator === SyntaxKind.PlusToken || e.operator === SyntaxKind.MinusToken) &&
+          operand.kind === SyntaxKind.PrefixUnaryExpression &&
+          ((operand as PrefixUnaryExpression).operator === SyntaxKind.PlusToken ||
+            (operand as PrefixUnaryExpression).operator === SyntaxKind.MinusToken ||
+            (operand as PrefixUnaryExpression).operator === SyntaxKind.PlusPlusToken ||
+            (operand as PrefixUnaryExpression).operator === SyntaxKind.MinusMinusToken)
+            ? " "
+            : "";
+        return concat([op, sep, this.node(operand)]);
       }
       case SyntaxKind.PostfixUnaryExpression: {
         const e = node as PostfixUnaryExpression;
