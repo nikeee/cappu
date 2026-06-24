@@ -1,11 +1,22 @@
-// `cappu rage`: open the issue tracker in the default browser - for when a bug
-// has worn you down enough to file it.
+// `cappu rage`: print version/environment info plus the issue tracker URL - so
+// a worn-down bug filer can paste the context into a report. `--open` also opens
+// the tracker in the default browser.
 
 import { spawn } from "node:child_process";
 
 import pkg from "../../package.json" with { type: "json" };
 
 const ISSUE_TRACKER = pkg.bugs.url;
+
+// Environment block the user can paste into a bug report.
+export function rageReport(): string {
+  return (
+    `cappu ${pkg.version}\n` +
+    `runtime: node ${process.version}\n` +
+    `platform: ${process.platform} ${process.arch}\n` +
+    `\nfile an issue at ${ISSUE_TRACKER}\n`
+  );
+}
 
 // The platform's "open this with whatever's registered" launcher.
 function browserOpener(): { command: string; args: string[] } {
@@ -20,7 +31,11 @@ function browserOpener(): { command: string; args: string[] } {
   }
 }
 
-export function runRage(): Promise<never> {
+export function runRage(open: boolean): Promise<never> {
+  process.stdout.write(rageReport());
+
+  if (!open) process.exit(0);
+
   const { command, args } = browserOpener();
   const child = spawn(command, args, { stdio: "ignore", detached: true });
   // Let the launcher outlive us; we exit explicitly once it spawned or failed.

@@ -77,7 +77,8 @@ Usage:
                                      Platform console launcher over it
   cappu self-upgrade                 Replace this binary with the latest CD build
                                      (needs GITHUB_TOKEN or \`gh auth login\`)
-  cappu rage                         Open the issue tracker in your default browser
+  cappu rage [--open]                Print version/environment info and the issue
+                                     tracker URL; --open also opens it in your browser
   cappu cache clean                  Remove the global download cache
   cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
   cappu dap [options]                Start the debug adapter (Debug Adapter Protocol
@@ -148,6 +149,7 @@ const { values, positionals } = (() => {
         json: { type: "boolean", default: false },
         "no-cache": { type: "boolean", default: false },
         repo: { type: "string" },
+        open: { type: "boolean", default: false },
         help: { type: "boolean", short: "h", default: false },
         version: { type: "boolean", default: false },
       },
@@ -218,7 +220,7 @@ switch (command) {
     await runSelfUpgrade();
     break;
   case "rage":
-    await runRage();
+    await runRage(values.open);
     break;
   case "config-schema":
     runConfigSchema();

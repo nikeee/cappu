@@ -253,9 +253,11 @@ type selfUpgradeCmd struct{}
 
 func (*selfUpgradeCmd) Run(*appState) error { return exit(cli.RunSelfUpgrade()) }
 
-type rageCmd struct{}
+type rageCmd struct {
+	Open bool `help:"Also open the issue tracker in your default browser"`
+}
 
-func (*rageCmd) Run(*appState) error { return exit(cli.RunRage()) }
+func (c *rageCmd) Run(*appState) error { return exit(cli.RunRage(c.Open)) }
 
 type configSchemaCmd struct{}
 

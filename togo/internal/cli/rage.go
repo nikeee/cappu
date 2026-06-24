@@ -9,6 +9,14 @@ import (
 	"github.com/nikeee/cappu/internal/meta"
 )
 
+// rageReport is the environment block the user can paste into a bug report.
+func rageReport() string {
+	return fmt.Sprintf(
+		"cappu %s\nruntime: go %s\nplatform: %s %s\n\nfile an issue at %s\n",
+		meta.Version, runtime.Version(), runtime.GOOS, runtime.GOARCH, meta.IssueTracker,
+	)
+}
+
 // browserOpener is the platform's "open this with whatever's registered"
 // launcher for the issue tracker url.
 func browserOpener() (string, []string) {
@@ -23,9 +31,16 @@ func browserOpener() (string, []string) {
 	}
 }
 
-// RunRage opens the issue tracker in the default browser - for when a bug has
-// worn you down enough to file it. Port of src/cli/rage.ts.
-func RunRage() int {
+// RunRage prints version/environment info plus the issue tracker URL - for when
+// a bug has worn you down enough to file it. With open, it also opens the
+// tracker in the default browser. Port of src/cli/rage.ts.
+func RunRage(open bool) int {
+	fmt.Fprint(os.Stdout, rageReport())
+
+	if !open {
+		return 0
+	}
+
 	command, args := browserOpener()
 	cmd := exec.Command(command, args...)
 	// Detach: let the launcher outlive us; discard its streams.

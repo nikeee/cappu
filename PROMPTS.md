@@ -408,3 +408,4 @@ cappu search commons-lang3
 - 2026-06-24 11:21 — also add regression tests
 - 2026-06-24 11:21 — continue
 - 2026-06-24 15:59 — continue. commit automatically.
+- 2026-06-24 16:51 — resolve https://github.com/nikeee/cappu/issues/23
