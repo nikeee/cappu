@@ -1,0 +1,47 @@
+{
+  "ISA": {
+    "members": [
+      "ISA();"
+    ],
+    "code": [
+      [
+        "ISA();",
+        [
+          "aload_0",
+          "invokespecial # // Method ImplicitSealed.\"<init>\":()V",
+          "return"
+        ]
+      ]
+    ]
+  },
+  "ISB": {
+    "members": [
+      "ISB();"
+    ],
+    "code": [
+      [
+        "ISB();",
+        [
+          "aload_0",
+          "invokespecial # // Method ImplicitSealed.\"<init>\":()V",
+          "return"
+        ]
+      ]
+    ]
+  },
+  "ImplicitSealed": {
+    "members": [
+      "ImplicitSealed();"
+    ],
+    "code": [
+      [
+        "ImplicitSealed();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ]
+    ]
+  }
+}

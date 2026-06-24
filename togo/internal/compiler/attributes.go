@@ -231,16 +231,59 @@ func buildClassAttributes(cp *constantPool, sourceName string, name internalName
 	return classAttributes{buffer: buffer, count: count}
 }
 
-// permittedSubclassesOf returns the PermittedSubclasses (JVMS 4.7.31) of a
-// `sealed ... permits A, B` type: the listed types resolved to internal names
-// (declaration order). Implicit permits is not inferred yet.
-func permittedSubclassesOf(permitsTypes *NodeArray, from *Node, program *Program) []internalName {
-	var names []internalName
-	for _, t := range arrayNodes(permitsTypes) {
-		if n := resolveInternalName(t, from, program); n != "" {
-			names = append(names, n)
+// isSealed reports whether a type declaration carries the `sealed` contextual
+// modifier (parsed as an Identifier modifier with text "sealed").
+func isSealed(modifiers *NodeArray) bool {
+	for _, m := range arrayNodes(modifiers) {
+		if m.Kind == Identifier && m.AsIdentifier().Text == "sealed" {
+			return true
 		}
 	}
+	return false
+}
+
+// permittedSubclassesOf returns the PermittedSubclasses (JVMS 4.7.31) of a sealed
+// class/interface: the explicit `permits A, B` list when present (declaration
+// order), otherwise - for a `sealed` type with no `permits` clause - the direct
+// subclasses declared in the same compilation unit, in source order (javac infers
+// these implicitly). Port of permittedSubclassesOf.
+func permittedSubclassesOf(declaration *Node, permitsTypes, modifiers *NodeArray, program *Program) []internalName {
+	if permitsTypes != nil && len(permitsTypes.Nodes) > 0 {
+		var names []internalName
+		for _, t := range arrayNodes(permitsTypes) {
+			if n := resolveInternalName(t, declaration, program); n != "" {
+				names = append(names, n)
+			}
+		}
+		return names
+	}
+	if !isSealed(modifiers) || declaration.Symbol == nil {
+		return nil
+	}
+	// Implicit permits: every same-file type whose extends/implements names this
+	// sealed type, in source order.
+	self := binaryName(declaration.Symbol)
+	root := declaration
+	for root.Parent != nil {
+		root = root.Parent
+	}
+	var names []internalName
+	var visit func(node *Node)
+	visit = func(node *Node) {
+		if isTypeDeclarationKind(node.Kind) && node != declaration && node.Symbol != nil {
+			for _, t := range superTypeNodes(node) {
+				if resolveInternalName(t, node, program) == self {
+					names = append(names, binaryName(node.Symbol))
+					break
+				}
+			}
+		}
+		node.ForEachChild(func(c *Node) bool {
+			visit(c)
+			return false
+		})
+	}
+	visit(root)
 	return names
 }
 

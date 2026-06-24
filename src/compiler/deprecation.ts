@@ -21,10 +21,10 @@ export interface DeprecatedUse {
   /** Span of the referenced name in the source file. */
   readonly pos: number;
   readonly end: number;
-  /** The referenced name (method or type). */
+  /** The referenced name (method, type or field). */
   readonly name: string;
   /** What kind of declaration was used. */
-  readonly kind: "method" | "type";
+  readonly kind: "method" | "type" | "field";
   readonly since?: string;
   readonly forRemoval: boolean;
 }

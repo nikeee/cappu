@@ -82,6 +82,25 @@ func TestDeprecatedUses(t *testing.T) {
 	}
 }
 
+func TestDeprecatedUsesFields(t *testing.T) {
+	tools := toolsFor(map[string]string{
+		"file:///Api.java": "class Api {\n" +
+			"  @Deprecated(since=\"2.0\") public static int OLD = 1;\n" +
+			"  public static int OK = 2;\n" +
+			"}\n" +
+			"class Use {\n" +
+			"  int m() { return Api.OLD + Api.OK; }\n" +
+			"}",
+	})
+	uses := tools.DeprecatedUses(nil)
+	if len(uses) != 1 || uses[0].Name != "OLD" {
+		t.Fatalf("expected one field use of OLD, got %+v", uses)
+	}
+	if u := uses[0]; u.Kind != "field" || u.Since != "2.0" || !strings.Contains(u.Message, "Field 'OLD' is deprecated") {
+		t.Errorf("OLD: %+v", u)
+	}
+}
+
 func TestDeprecatedUsesEmpty(t *testing.T) {
 	tools := toolsFor(map[string]string{"file:///Ok.java": "class Ok { int m() { return 1; } }"})
 	if u := tools.DeprecatedUses(nil); len(u) != 0 {

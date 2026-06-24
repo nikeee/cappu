@@ -386,6 +386,31 @@ func (c *Checker) deprecatedUseAt(node *Node, text string) (DeprecatedUse, bool)
 		return DeprecatedUse{Pos: skipTrivia(text, ref.TypeName.Pos), End: ref.TypeName.End,
 			Name: entityNameToString(ref.TypeName), Kind: "type",
 			Since: dep.Since, HasSince: dep.HasSince, ForRemoval: dep.ForRemoval}, true
+	case PropertyAccessExpression:
+		access := node.AsPropertyAccessExpression()
+		// A call's callee (obj.m()) is the CallExpression's method use, reported
+		// above - don't also report it as a field access here.
+		if node.Parent != nil && node.Parent.Kind == CallExpression &&
+			node.Parent.AsCallExpression().Expression == node {
+			return DeprecatedUse{}, false
+		}
+		sym := c.ResolveName(access.Name)
+		if sym == nil || sym.Flags&SymbolFlagsField == 0 {
+			return DeprecatedUse{}, false
+		}
+		// A field's declaration node is the VariableDeclarator; @Deprecated sits on
+		// the enclosing FieldDeclaration, so read the annotation from there.
+		fieldDecl := c.declarationOf(sym)
+		if fieldDecl != nil && fieldDecl.Kind == VariableDeclarator {
+			fieldDecl = fieldDecl.Parent
+		}
+		dep, ok := readDeprecation(fieldDecl)
+		if !ok {
+			return DeprecatedUse{}, false
+		}
+		return DeprecatedUse{Pos: skipTrivia(text, access.Name.Pos), End: access.Name.End,
+			Name: access.Name.AsIdentifier().Text, Kind: "field",
+			Since: dep.Since, HasSince: dep.HasSince, ForRemoval: dep.ForRemoval}, true
 	}
 	return DeprecatedUse{}, false
 }

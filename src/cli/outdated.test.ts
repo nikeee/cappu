@@ -7,7 +7,12 @@ import { expect } from "expect";
 import TempDir from "../TempDir.ts";
 import { loadConfig } from "../config.ts";
 import { type OutdatedDependency, planOutdated } from "../install.ts";
-import { InMemoryPackageSource, type PackageMetadata, toCoordinates } from "../packages/index.ts";
+import {
+  InMemoryPackageSource,
+  type PackageKey,
+  type PackageMetadata,
+  toCoordinates,
+} from "../packages/index.ts";
 import { formatOutdated } from "./outdated.ts";
 
 function source(): InMemoryPackageSource {
@@ -36,9 +41,16 @@ test("planOutdated reports the in-major (wanted) and overall (latest) newer vers
     },
   });
   const rows = await planOutdated(config, [source()]);
-  expect(rows).toEqual<OutdatedDependency[]>([
-    { configuration: "implementation", key: "org.x:lib", current: "1.0", wanted: "1.2", latest: "2.0" },
-  ]);
+  const expected: OutdatedDependency[] = [
+    {
+      configuration: "implementation",
+      key: "org.x:lib" as PackageKey,
+      current: "1.0",
+      wanted: "1.2",
+      latest: "2.0",
+    },
+  ];
+  expect(rows).toEqual(expected);
 });
 
 test("planOutdated omits a dependency that is already newest", async () => {
@@ -49,7 +61,13 @@ test("planOutdated omits a dependency that is already newest", async () => {
 test("formatOutdated renders an aligned table, or empty when nothing is outdated", () => {
   expect(formatOutdated([])).toBe("");
   const out = formatOutdated([
-    { configuration: "implementation", key: "org.x:lib", current: "1.0", wanted: "1.2", latest: "2.0" },
+    {
+      configuration: "implementation",
+      key: "org.x:lib" as PackageKey,
+      current: "1.0",
+      wanted: "1.2",
+      latest: "2.0",
+    },
   ]);
   expect(out).toContain("dependency");
   expect(out).toContain("org.x:lib");

@@ -57,8 +57,8 @@ export interface McpDeprecatedUse {
   endColumn: number;
   /** The referenced name. */
   name: string;
-  /** What was used: a deprecated method or a deprecated type. */
-  kind: "method" | "type";
+  /** What was used: a deprecated method, type or field. */
+  kind: "method" | "type" | "field";
   /** @Deprecated(since=...), when given. */
   since?: string;
   /** @Deprecated(forRemoval=true). */
@@ -206,7 +206,8 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
       for (const u of checker.getDeprecatedUses(sourceFile)) {
         const start = getLineAndCharacterOfPosition(lineStarts, u.pos);
         const end = getLineAndCharacterOfPosition(lineStarts, u.end);
-        const message = `${u.kind === "method" ? "Method" : "Type"} '${u.name}' is deprecated${
+        const kindWord = { method: "Method", type: "Type", field: "Field" }[u.kind];
+        const message = `${kindWord} '${u.name}' is deprecated${
           u.since ? ` (since ${u.since})` : ""
         }${u.forRemoval ? "; marked for removal" : ""}.`;
         out.push({

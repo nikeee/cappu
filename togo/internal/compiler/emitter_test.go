@@ -56,6 +56,9 @@ var emitFixtures = map[string]string{
 	"Nest":          "public class Nest {\n  static class Point { int x, y; Point(int x, int y){ this.x=x; this.y=y; } int sum(){ return x+y; } }\n  static class Counter { static int total; int n; void tick(){ n++; total++; } int get(){ return n; } }\n  static int helper(int a){ return a*2; }\n}",
 	// Sealed class + interface: PermittedSubclasses (4.7.31) listing `permits` types.
 	"Sealed": "public sealed class Sealed permits SubA, SubB {}\nfinal class SubA extends Sealed {}\nnon-sealed class SubB extends Sealed {}\nsealed interface SealedI permits SubC {}\nfinal class SubC implements SealedI {}",
+	// Implicit permits: a sealed type with no `permits` clause infers its same-file
+	// subclasses (ISB before ISA, source order).
+	"ImplicitSealed": "sealed class ImplicitSealed {}\nfinal class ISB extends ImplicitSealed {}\nfinal class ISA extends ImplicitSealed {}",
 	// Enum constant bodies: each body becomes an Outer$N subclass; the baselines
 	// (EnumMixed$1, EnumAbstract$1, ...) verify byte-parity with the TS emitter.
 	"EnumMixed":    "enum EnumMixed {\n  PLUS(\"+\") { public int apply(int a, int b) { return a + b; } },\n  TIMES(\"*\") { public int apply(int a, int b) { return a * b; } },\n  IDENT(\"=\");\n  private final String sym;\n  EnumMixed(String sym) { this.sym = sym; }\n  public int apply(int a, int b) { return a; }\n  public String sym() { return sym; }\n  public static void main(String[] args) {\n    for (EnumMixed o : EnumMixed.values()) System.out.println(o.name() + o.sym() + o.apply(6, 7));\n  }\n}",

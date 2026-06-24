@@ -60,6 +60,24 @@ test("deprecated_uses finds @Deprecated method and type uses with details", () =
   expect(byName.old.line).toBeGreaterThanOrEqual(1);
 });
 
+test("deprecated_uses finds @Deprecated field accesses", () => {
+  const tools = toolsFor({
+    "file:///Api.java": [
+      "class Api {",
+      '  @Deprecated(since="2.0") public static int OLD = 1;',
+      "  public static int OK = 2;",
+      "}",
+      "class Use {",
+      "  int m() { return Api.OLD + Api.OK; }",
+      "}",
+    ].join("\n"),
+  });
+  const { deprecatedUses } = tools.deprecatedUses({});
+  expect(deprecatedUses.map(u => u.name)).toEqual(["OLD"]);
+  expect(deprecatedUses[0]).toMatchObject({ kind: "field", since: "2.0" });
+  expect(deprecatedUses[0].message).toContain("Field 'OLD' is deprecated");
+});
+
 test("deprecated_uses is empty when nothing deprecated is used", () => {
   const tools = toolsFor({ "file:///Ok.java": "class Ok { int m() { return 1; } }" });
   expect(tools.deprecatedUses({}).deprecatedUses).toEqual([]);

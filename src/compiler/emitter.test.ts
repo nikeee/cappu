@@ -157,6 +157,13 @@ const MULTI_FIXTURES: Record<string, string> = {
     "sealed interface SealedI permits SubC {}",
     "final class SubC implements SealedI {}",
   ].join("\n"),
+  // No `permits` clause: javac (and now cappu) infers the permitted set from the
+  // same compilation unit, in source order (ISB before ISA).
+  ImplicitSealed: [
+    "sealed class ImplicitSealed {}",
+    "final class ISB extends ImplicitSealed {}",
+    "final class ISA extends ImplicitSealed {}",
+  ].join("\n"),
   QualifiedAnon: [
     "public class QualifiedAnon {",
     "  int x = 7;",
@@ -587,12 +594,30 @@ test(
     writeFileSync(join(jdir.path, "Sealed.java"), src);
     execFileSync("javac", ["--release", "21", "-d", jdir.path, join(jdir.path, "Sealed.java")]);
     using odir = TempDir.create("sealed-ours-");
-    for (const c of emitClasses("Sealed", src)) writeFileSync(join(odir.path, `${c.name}.class`), c.bytes);
+    for (const c of emitClasses("Sealed", src))
+      writeFileSync(join(odir.path, `${c.name}.class`), c.bytes);
     for (const cn of ["Sealed", "SealedI"]) {
       expect(permittedSubclasses(join(odir.path, `${cn}.class`))).toEqual(
         permittedSubclasses(join(jdir.path, `${cn}.class`)),
       );
     }
+  },
+);
+
+test(
+  "an implicit-permits sealed type infers its same-file subclasses like javac",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/javap)" },
+  () => {
+    const src = MULTI_FIXTURES.ImplicitSealed!;
+    using jdir = TempDir.create("implicit-javac-");
+    writeFileSync(join(jdir.path, "ImplicitSealed.java"), src);
+    execFileSync("javac", ["--release", "21", "-d", jdir.path, join(jdir.path, "ImplicitSealed.java")]);
+    using odir = TempDir.create("implicit-ours-");
+    for (const c of emitClasses("ImplicitSealed", src))
+      writeFileSync(join(odir.path, `${c.name}.class`), c.bytes);
+    const ours = permittedSubclasses(join(odir.path, "ImplicitSealed.class"));
+    expect(ours).toEqual(permittedSubclasses(join(jdir.path, "ImplicitSealed.class")));
+    expect(ours).toEqual(["ISB", "ISA"]); // inferred, source order
   },
 );
 

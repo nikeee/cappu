@@ -6616,9 +6616,7 @@ function emitMethod(
   // abstract / native methods carry no Code attribute. javac's order for an
   // annotation element is AnnotationDefault, then Signature, then annotations.
   if (flags & (ACC_ABSTRACT | ACC_NATIVE) || !method.body) {
-    info.u2(
-      (signature !== undefined ? 1 : 0) + ann.count + (defaultAttr ? 1 : 0),
-    ); // attributes_count
+    info.u2((signature !== undefined ? 1 : 0) + ann.count + (defaultAttr ? 1 : 0)); // attributes_count
     if (defaultAttr) info.append(defaultAttr);
     if (signature !== undefined) writeSignatureAttribute(info, cp, signature);
     info.append(ann.buffer);
@@ -7166,18 +7164,66 @@ function emitSynthCtorWithInits(
   return info;
 }
 
-// The PermittedSubclasses (JVMS 4.7.31) of a `sealed ... permits A, B` type:
-// the explicitly listed types resolved to internal names (declaration order).
-// Implicit permits (a sealed type with no `permits` clause) is not inferred yet.
+// Whether a type declaration carries the `sealed` contextual modifier (parsed as
+// an Identifier modifier with text "sealed").
+function isSealed(declaration: ClassDeclaration | InterfaceDeclaration): boolean {
+  return (declaration.modifiers ?? []).some(
+    m => m.kind === SyntaxKind.Identifier && (m as Identifier).text === "sealed",
+  );
+}
+
+// The direct super-type references a type declaration lists (a class's extends +
+// implements, an interface's extends, a record's implements).
+function superTypeRefs(declaration: Node): TypeNode[] {
+  switch (declaration.kind) {
+    case SyntaxKind.ClassDeclaration: {
+      const d = declaration as ClassDeclaration;
+      return [...(d.extendsType ? [d.extendsType] : []), ...(d.implementsTypes ?? [])];
+    }
+    case SyntaxKind.InterfaceDeclaration:
+      return [...((declaration as InterfaceDeclaration).extendsTypes ?? [])];
+    case SyntaxKind.RecordDeclaration:
+      return [...((declaration as RecordDeclaration).implementsTypes ?? [])];
+    default:
+      return [];
+  }
+}
+
+// The PermittedSubclasses (JVMS 4.7.31) of a sealed class/interface: the explicit
+// `permits A, B` list when present (declaration order), otherwise - for a
+// `sealed` type with no `permits` clause - the direct subclasses declared in the
+// same compilation unit, in source order (javac infers these implicitly).
 function permittedSubclassesOf(
-  permitsTypes: readonly TypeNode[] | undefined,
-  from: Node,
+  declaration: ClassDeclaration | InterfaceDeclaration,
   program: Program,
 ): InternalName[] | undefined {
-  if (!permitsTypes || permitsTypes.length === 0) return undefined;
-  const names = permitsTypes
-    .map(t => resolveInternalName(t, from, program))
-    .filter((n): n is InternalName => n !== undefined);
+  if (declaration.permitsTypes && declaration.permitsTypes.length > 0) {
+    const names = declaration.permitsTypes
+      .map(t => resolveInternalName(t, declaration, program))
+      .filter((n): n is InternalName => n !== undefined);
+    return names.length > 0 ? names : undefined;
+  }
+  if (!isSealed(declaration) || !declaration.symbol) return undefined;
+
+  // Implicit permits: every same-file type whose extends/implements names this
+  // sealed type, collected in source order.
+  const self = binaryName(declaration.symbol);
+  let root: Node = declaration;
+  while (root.parent) root = root.parent;
+  const names: InternalName[] = [];
+  const visit = (node: Node): void => {
+    if (TYPE_DECL_KINDS.has(node.kind) && node !== declaration && node.symbol) {
+      const directlyExtends = superTypeRefs(node).some(
+        t => resolveInternalName(t, node, program) === self,
+      );
+      if (directlyExtends) names.push(binaryName(node.symbol));
+    }
+    forEachChild(node, c => {
+      visit(c);
+      return undefined;
+    });
+  };
+  visit(root);
   return names.length > 0 ? names : undefined;
 }
 
@@ -7411,7 +7457,7 @@ export function emitClass(
     classSignatureOf(declaration, program),
     innerClasses,
     undefined,
-    permittedSubclassesOf(declaration.permitsTypes, declaration, program),
+    permittedSubclassesOf(declaration, program),
     { modifiers: declaration.modifiers, from: declaration, program },
   );
 
@@ -7530,7 +7576,7 @@ export function emitInterface(
     undefined,
     innerClasses,
     undefined,
-    permittedSubclassesOf(declaration.permitsTypes, declaration, program),
+    permittedSubclassesOf(declaration, program),
     { modifiers: declaration.modifiers, from: declaration, program },
   );
   return {

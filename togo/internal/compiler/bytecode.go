@@ -1379,7 +1379,7 @@ func emitClass(declaration *Node, program *Program, checker *Checker, nestMember
 	}
 
 	sig, hasSig := classSignatureOf(declaration, program)
-	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, sig, hasSig, innerClasses, "", permittedSubclassesOf(declaration.AsClassDeclaration().PermitsTypes, declaration, program), &annotationSource{modifiers: declaration.AsClassDeclaration().Modifiers, from: declaration, program: program})
+	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, sig, hasSig, innerClasses, "", permittedSubclassesOf(declaration, declaration.AsClassDeclaration().PermitsTypes, declaration.AsClassDeclaration().Modifiers, program), &annotationSource{modifiers: declaration.AsClassDeclaration().Modifiers, from: declaration, program: program})
 
 	return EmittedClass{
 		Name:  string(name),
@@ -1500,7 +1500,7 @@ func emitInterface(declaration *Node, program *Program, checker *Checker, nestMe
 		methodCount++
 	}
 
-	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, "", false, innerClasses, "", permittedSubclassesOf(declaration.AsInterfaceDeclaration().PermitsTypes, declaration, program), &annotationSource{modifiers: declaration.AsInterfaceDeclaration().Modifiers, from: declaration, program: program})
+	attrs := buildClassAttributes(cp, sourceNameOf(declaration), name, nestMembers, "", false, innerClasses, "", permittedSubclassesOf(declaration, declaration.AsInterfaceDeclaration().PermitsTypes, declaration.AsInterfaceDeclaration().Modifiers, program), &annotationSource{modifiers: declaration.AsInterfaceDeclaration().Modifiers, from: declaration, program: program})
 	return EmittedClass{
 		Name:  string(name),
 		Bytes: assembleClassFile(cp, accessFlags, thisClassIndex, superClassIndex, interfaceIndices, fields, fieldCount, methods, methodCount, attrs.buffer, attrs.count),

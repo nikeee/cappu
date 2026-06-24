@@ -189,10 +189,7 @@ func (t *Tools) DeprecatedUses(files []string) []McpDeprecatedUse {
 		for _, u := range t.checker.GetDeprecatedUses(sourceFile) {
 			start := compiler.GetLineAndCharacterOfPosition(data.Text, lineStarts, u.Pos)
 			end := compiler.GetLineAndCharacterOfPosition(data.Text, lineStarts, u.End)
-			kindWord := "Type"
-			if u.Kind == "method" {
-				kindWord = "Method"
-			}
+			kindWord := map[string]string{"method": "Method", "type": "Type", "field": "Field"}[u.Kind]
 			message := kindWord + " '" + u.Name + "' is deprecated"
 			if u.HasSince {
 				message += " (since " + u.Since + ")"

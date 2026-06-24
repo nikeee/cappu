@@ -1932,6 +1932,34 @@ export function createChecker(program: Program): Checker {
         forRemoval: dep.forRemoval,
       };
     }
+    if (node.kind === SyntaxKind.PropertyAccessExpression) {
+      const access = node as PropertyAccessExpression;
+      // A call's callee (obj.m()) is the CallExpression's method use, reported
+      // above - don't also report it as a field access here.
+      if (
+        access.parent?.kind === SyntaxKind.CallExpression &&
+        (access.parent as CallExpression).expression === access
+      ) {
+        return undefined;
+      }
+      const sym = resolveName(access.name);
+      if (!sym || !(sym.flags & SymbolFlags.Field)) return undefined;
+      // A field's declaration node is the VariableDeclarator; @Deprecated sits on
+      // the enclosing FieldDeclaration, so read the annotation from there.
+      let fieldDecl = sym.valueDeclaration ?? sym.declarations?.[0];
+      if (fieldDecl?.kind === SyntaxKind.VariableDeclarator) fieldDecl = fieldDecl.parent;
+      const dep = readDeprecation(fieldDecl);
+      if (!dep) return undefined;
+      const text = getSourceFileOfNode(access.name).text;
+      return {
+        pos: skipTrivia(text, access.name.pos),
+        end: access.name.end,
+        name: access.name.text,
+        kind: "field",
+        since: dep.since,
+        forRemoval: dep.forRemoval,
+      };
+    }
     return undefined;
   }
 
