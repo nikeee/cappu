@@ -1,0 +1,6 @@
+package p;
+class C {
+  @Deprecated
+  static final public int CONST = 1;
+  @Override public String toString() { return "C"; }
+}

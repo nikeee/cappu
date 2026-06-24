@@ -1,0 +1,12 @@
+package p;
+
+import java.util.List;
+import java.util.function.Function;
+
+class C {
+  int[] xs = {1, 2, 3};
+  Function<Integer, Integer> f = x -> x + 1;
+  Runnable r = () -> System.out.println("hi");
+  List<String> names = List.of("a", "b");
+  Object ref = String::valueOf;
+}

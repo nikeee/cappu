@@ -1,0 +1,9 @@
+package p;
+
+public record Point(int x, int y) implements java.io.Serializable {
+  static final int ORIGIN = 0;
+
+  int sum() {
+    return x + y;
+  }
+}

@@ -1,0 +1,1117 @@
+// Lower a parsed Java source file to the Doc IR (doc.ts), which is then printed
+// at the configured width. The visitor regenerates all layout from the AST -
+// google-java-format does the same, discarding original whitespace - so cappu's
+// trivia-free AST is sufficient. The only thing recovered from source is whether
+// the user left a blank line between two members/statements (g-j-f preserves one).
+//
+// Node kinds not yet handled fall back to the verbatim source slice (degrade,
+// never crash), matching the emitter's discipline.
+
+import { skipTrivia, tokenToString } from "../compiler/utilities.ts";
+import { type Comment, collectComments } from "./comments.ts";
+import {
+  type Annotation,
+  type ArrayCreationExpression,
+  type ArrayInitializer,
+  type ArrayType,
+  type AssertStatement,
+  type AssignmentExpression,
+  type BinaryExpression,
+  type Block,
+  type CallExpression,
+  type CastExpression,
+  type ClassDeclaration,
+  type ClassLiteralExpression,
+  type ConditionalExpression,
+  type ConstructorDeclaration,
+  type DoStatement,
+  type ElementAccessExpression,
+  type EntityName,
+  type ExpressionStatement,
+  type EnumConstantDeclaration,
+  type EnumDeclaration,
+  type Expression,
+  type FieldDeclaration,
+  type ForEachStatement,
+  type ForStatement,
+  type IfStatement,
+  type ImportDeclaration,
+  type InitializerBlock,
+  type InstanceofExpression,
+  type InterfaceDeclaration,
+  type LabeledStatement,
+  type LambdaExpression,
+  type LocalVariableDeclarationStatement,
+  type MethodDeclaration,
+  type MethodReferenceExpression,
+  type ModifierLike,
+  type Node,
+  type NodeArray,
+  type ObjectCreationExpression,
+  type Parameter,
+  type ParenthesizedExpression,
+  type PostfixUnaryExpression,
+  type PrefixUnaryExpression,
+  type PropertyAccessExpression,
+  type RecordComponent,
+  type RecordDeclaration,
+  type Resource,
+  type ReturnStatement,
+  type SourceFile,
+  type Statement,
+  type SwitchClause,
+  type SwitchExpression,
+  type SwitchStatement,
+  type SynchronizedStatement,
+  SyntaxKind,
+  type ThrowStatement,
+  type TryStatement,
+  type TypeNode,
+  type TypeParameter,
+  type TypeReference,
+  type VariableDeclarator,
+  type WhileStatement,
+  type WildcardType,
+  type YieldStatement,
+} from "../compiler/types.ts";
+import {
+  concat,
+  type Doc,
+  group,
+  hardline,
+  indent,
+  join,
+  line,
+  printDoc,
+  softline,
+} from "./doc.ts";
+
+export interface FormatOptions {
+  style: "google" | "aosp";
+}
+
+const WIDTH = 100;
+
+/** Thrown when the formatter cannot format the input without losing information. */
+export class UnsupportedSyntaxError extends Error {}
+
+export function formatSourceFile(sf: SourceFile, options: FormatOptions): string {
+  const p = new Printer(sf);
+  const doc = p.sourceFile(sf);
+  const text = printDoc(doc, { width: WIDTH, indentUnit: options.style === "aosp" ? 4 : 2 });
+  // Safety net: the printer attaches comments at member/statement granularity.
+  // If a comment sat somewhere it does not yet handle, refuse rather than
+  // silently drop it - the CLI then leaves the file untouched.
+  if (!p.allCommentsEmitted()) {
+    throw new UnsupportedSyntaxError("comment in an unsupported position");
+  }
+  // Exactly one trailing newline, like google-java-format.
+  return text.replace(/\n*$/, "") + "\n";
+}
+
+// The canonical JLS modifier order google-java-format reorders to.
+const MODIFIER_ORDER: SyntaxKind[] = [
+  SyntaxKind.PublicKeyword,
+  SyntaxKind.ProtectedKeyword,
+  SyntaxKind.PrivateKeyword,
+  SyntaxKind.AbstractKeyword,
+  SyntaxKind.DefaultKeyword,
+  SyntaxKind.StaticKeyword,
+  SyntaxKind.FinalKeyword,
+  SyntaxKind.TransientKeyword,
+  SyntaxKind.VolatileKeyword,
+  SyntaxKind.SynchronizedKeyword,
+  SyntaxKind.NativeKeyword,
+  SyntaxKind.StrictfpKeyword,
+];
+
+class Printer {
+  private readonly text: string;
+  private readonly comments: Comment[];
+  /** Index of the next not-yet-emitted comment in `comments`. */
+  private ci = 0;
+  constructor(private readonly sf: SourceFile) {
+    this.text = sf.text;
+    this.comments = collectComments(sf.text);
+  }
+
+  /** The exact source spelling of a leaf node (identifier, literal, ...). */
+  private raw(node: Node): string {
+    return this.text.slice(skipTrivia(this.text, node.pos), node.end);
+  }
+
+  /** The offset where a node's token text actually begins (past leading trivia). */
+  private start(node: Node): number {
+    return skipTrivia(this.text, node.pos);
+  }
+
+  /** Whether >= 2 newlines separate `from` from `pos` (a blank line in source). */
+  private blankBeforePos(from: number, pos: number): boolean {
+    return (this.text.slice(from, pos).match(/\n/g)?.length ?? 0) >= 2;
+  }
+
+  /** Whether a pending comment begins before `pos` (without consuming it). */
+  private hasCommentBefore(pos: number): boolean {
+    return this.ci < this.comments.length && this.comments[this.ci].pos < pos;
+  }
+
+  /** Consume and return every pending comment whose text begins before `pos`. */
+  private commentsBefore(pos: number): Comment[] {
+    const out: Comment[] = [];
+    while (this.ci < this.comments.length && this.comments[this.ci].pos < pos) {
+      out.push(this.comments[this.ci++]);
+    }
+    return out;
+  }
+
+  /** Whether every collected comment was emitted (else we would lose one). */
+  allCommentsEmitted(): boolean {
+    return this.ci >= this.comments.length;
+  }
+
+  /**
+   * Render a member/statement list with its comments. Returns the inner docs
+   * already interleaved with hardline/blank separators; the caller supplies the
+   * leading hardline and the surrounding braces. `forced` applies the
+   * blank-line-around-methods rule (members only). `endPos` bounds the trailing
+   * "dangling" comments that sit before the closing brace.
+   */
+  private listDocs(list: readonly Node[], forced: boolean, endPos: number): Doc[] {
+    const out: Doc[] = [];
+    let first = true;
+    let prevEnd = list.length > 0 ? this.start(list[0]) : endPos;
+
+    const push = (doc: Doc, blankBefore: boolean) => {
+      if (!first) out.push(blankBefore ? concat([hardline, hardline]) : hardline);
+      out.push(doc);
+      first = false;
+    };
+
+    list.forEach((item, i) => {
+      const itemStart = this.start(item);
+      // The blank line required before this whole entry (its leading comments
+      // and the item) - g-j-f puts it before a method's doc comment, not between.
+      // Measure the source blank from the previous entry's end to the first thing
+      // here (a leading comment or the item) so comment lines are not miscounted.
+      const firstPos = this.hasCommentBefore(itemStart) ? this.comments[this.ci].pos : itemStart;
+      const entryBlank =
+        i > 0 &&
+        (this.blankBeforePos(prevEnd, firstPos) || (forced && forcedBlank(list[i - 1], item)));
+      let pushedInEntry = false;
+      const pushEntry = (doc: Doc, srcBlank: boolean) => {
+        push(doc, pushedInEntry ? srcBlank : entryBlank || srcBlank);
+        pushedInEntry = true;
+      };
+
+      for (const c of this.commentsBefore(itemStart)) {
+        if (!c.ownLine && !pushedInEntry && i > 0) {
+          // A comment after code on the same line: attach to the previous entry.
+          out[out.length - 1] = concat([out[out.length - 1], " ", c.text]);
+        } else {
+          pushEntry(c.text, this.blankBeforePos(prevEnd, c.pos));
+        }
+        prevEnd = c.end;
+      }
+
+      let itemDoc = this.node(item);
+      const trailing = this.trailingCommentAfter(item);
+      if (trailing) {
+        itemDoc = concat([itemDoc, " ", trailing.text]);
+        prevEnd = trailing.end;
+      } else {
+        prevEnd = item.end;
+      }
+      pushEntry(itemDoc, false);
+    });
+
+    for (const c of this.commentsBefore(endPos)) {
+      push(c.text, this.blankBeforePos(prevEnd, c.pos));
+      prevEnd = c.end;
+    }
+    return out;
+  }
+
+  /** A comment immediately after `node` on the same source line, if any. */
+  private trailingCommentAfter(node: Node): Comment | undefined {
+    const c = this.comments[this.ci];
+    if (!c || c.ownLine || c.pos < node.end) return undefined;
+    // Same line: no newline between the node's end and the comment.
+    if (this.text.slice(node.end, c.pos).includes("\n")) return undefined;
+    this.ci++;
+    return c;
+  }
+
+  sourceFile(sf: SourceFile): Doc {
+    // Blocks are separated by a blank line: an optional file-leading comment
+    // (a license header), package, static imports, non-static imports, then the
+    // type declarations (members separated among themselves).
+    const blocks: Doc[] = [];
+    const firstStart = this.firstConstructStart(sf);
+    const header = this.commentsBefore(firstStart);
+    if (header.length > 0)
+      blocks.push(
+        join(
+          hardline,
+          header.map(c => c.text),
+        ),
+      );
+    if (sf.packageDeclaration) {
+      blocks.push(concat(["package ", this.entityName(sf.packageDeclaration.name), ";"]));
+    }
+    const statics = sf.imports.filter(i => i.isStatic);
+    const nonStatics = sf.imports.filter(i => !i.isStatic);
+    for (const g of [statics, nonStatics]) {
+      if (g.length > 0) blocks.push(this.importGroup(g));
+    }
+    if (sf.statements.length > 0) {
+      blocks.push(concat(this.listDocs(sf.statements, true, this.text.length)));
+    }
+    return join(concat([hardline, hardline]), blocks);
+  }
+
+  /** Offset of the first real construct (package, import or type) in the file. */
+  private firstConstructStart(sf: SourceFile): number {
+    const candidates: number[] = [];
+    if (sf.packageDeclaration) candidates.push(this.start(sf.packageDeclaration));
+    if (sf.imports.length > 0) candidates.push(this.start(sf.imports[0]));
+    if (sf.statements.length > 0) candidates.push(this.start(sf.statements[0]));
+    return candidates.length > 0 ? Math.min(...candidates) : this.text.length;
+  }
+
+  private importGroup(imports: ImportDeclaration[]): Doc {
+    const sorted = [...imports].sort((a, b) => {
+      const an = this.entityName(a.name);
+      const bn = this.entityName(b.name);
+      return an < bn ? -1 : an > bn ? 1 : 0;
+    });
+    const seen = new Set<string>();
+    const lines: Doc[] = [];
+    for (const imp of sorted) {
+      const text = this.importLine(imp);
+      if (seen.has(text)) continue; // dedupe identical imports
+      seen.add(text);
+      lines.push(text);
+    }
+    return join(hardline, lines);
+  }
+
+  private importLine(imp: ImportDeclaration): string {
+    const name = this.entityName(imp.name);
+    const onDemand = imp.isOnDemand ? ".*" : "";
+    return `import ${imp.isStatic ? "static " : ""}${name}${onDemand};`;
+  }
+
+  /** Members of a type body, with comments and blank lines. */
+  private members(list: NodeArray<Node>, endPos: number): Doc[] {
+    return this.listDocs(list, true, endPos);
+  }
+
+  private entityName(name: EntityName): string {
+    if (name.kind === SyntaxKind.Identifier) return this.raw(name);
+    return `${this.entityName((name as { left: EntityName }).left)}.${this.raw((name as { right: Node }).right)}`;
+  }
+
+  // google-java-format puts each declaration annotation on its own line for
+  // methods, constructors and types, but keeps annotations inline on fields,
+  // parameters and locals. `ownLineAnnotations` selects that.
+  private modifiers(mods: NodeArray<ModifierLike> | undefined, ownLineAnnotations = false): Doc {
+    if (!mods || mods.length === 0) return "";
+    const annotations = mods.filter(m => m.kind === SyntaxKind.Annotation);
+    const keywords = mods.filter(m => m.kind !== SyntaxKind.Annotation);
+    keywords.sort((a, b) => rank(a.kind) - rank(b.kind));
+    const parts: Doc[] = [];
+    for (const a of annotations)
+      parts.push(this.annotation(a as Annotation), ownLineAnnotations ? hardline : " ");
+    for (const k of keywords) parts.push(concat([tokenToString(k.kind) ?? this.raw(k), " "]));
+    return concat(parts);
+  }
+
+  private annotation(a: Annotation): Doc {
+    const name = `@${this.entityName(a.typeName)}`;
+    if (!a.args || a.args.length === 0) return name;
+    const args = a.args.map(arg => {
+      const argName = (arg as { name?: Node }).name;
+      const value = this.node((arg as { value: Node }).value);
+      return argName ? concat([this.raw(argName), " = ", value]) : value;
+    });
+    return concat([name, "(", join(", ", args), ")"]);
+  }
+
+  private typeParameters(tps: NodeArray<TypeParameter> | undefined): Doc {
+    if (!tps || tps.length === 0) return "";
+    const params = tps.map(tp => {
+      const name = this.raw(tp.name);
+      if (!tp.constraint || tp.constraint.length === 0) return name as Doc;
+      return concat([
+        name,
+        " extends ",
+        join(
+          " & ",
+          tp.constraint.map(t => this.type(t)),
+        ),
+      ]);
+    });
+    return concat(["<", join(", ", params), ">"]);
+  }
+
+  private typeArguments(args: NodeArray<TypeNode | WildcardType> | undefined): Doc {
+    if (!args) return "";
+    if (args.length === 0) return "<>"; // diamond
+    return concat([
+      "<",
+      join(
+        ", ",
+        args.map(t => this.type(t)),
+      ),
+      ">",
+    ]);
+  }
+
+  private type(t: TypeNode | WildcardType): Doc {
+    switch (t.kind) {
+      case SyntaxKind.PrimitiveType:
+        return tokenToString((t as { keyword: SyntaxKind }).keyword) ?? this.raw(t);
+      case SyntaxKind.VarType:
+        return "var";
+      case SyntaxKind.ArrayType:
+        return concat([this.type((t as ArrayType).elementType), "[]"]);
+      case SyntaxKind.TypeReference: {
+        const tr = t as TypeReference;
+        return concat([this.entityName(tr.typeName), this.typeArguments(tr.typeArguments)]);
+      }
+      case SyntaxKind.WildcardType: {
+        const w = t as WildcardType;
+        if (w.hasExtends && w.type) return concat(["? extends ", this.type(w.type)]);
+        if (w.hasSuper && w.type) return concat(["? super ", this.type(w.type)]);
+        return "?";
+      }
+      default:
+        return this.raw(t);
+    }
+  }
+
+  // --- declarations --------------------------------------------------------
+
+  private classLike(
+    keyword: string,
+    decl: {
+      modifiers?: NodeArray<ModifierLike>;
+      name: Node;
+      typeParameters?: NodeArray<TypeParameter>;
+      members: NodeArray<Node>;
+      end: number;
+    },
+    afterName: Doc,
+  ): Doc {
+    const header = concat([
+      this.modifiers(decl.modifiers, true),
+      keyword,
+      " ",
+      this.raw(decl.name),
+      this.typeParameters(decl.typeParameters),
+      afterName,
+      " ",
+    ]);
+    return concat([header, this.body(decl.members, decl.end)]);
+  }
+
+  /** A brace-delimited member body: `{` ... `}` or `{}` when empty. `endPos` is
+   * the offset just past the closing brace, bounding trailing comments. */
+  private body(members: NodeArray<Node>, endPos: number): Doc {
+    if (members.length === 0 && !this.hasCommentBefore(endPos)) return "{}";
+    return concat([
+      "{",
+      indent(concat([hardline, ...this.members(members, endPos)])),
+      hardline,
+      "}",
+    ]);
+  }
+
+  private classDeclaration(d: ClassDeclaration): Doc {
+    const after: Doc[] = [];
+    if (d.extendsType) after.push(concat([" extends ", this.type(d.extendsType)]));
+    if (d.implementsTypes && d.implementsTypes.length > 0)
+      after.push(
+        concat([
+          " implements ",
+          join(
+            ", ",
+            d.implementsTypes.map(t => this.type(t)),
+          ),
+        ]),
+      );
+    if (d.permitsTypes && d.permitsTypes.length > 0)
+      after.push(
+        concat([
+          " permits ",
+          join(
+            ", ",
+            d.permitsTypes.map(t => this.type(t)),
+          ),
+        ]),
+      );
+    return this.classLike("class", d, concat(after));
+  }
+
+  private interfaceDeclaration(d: InterfaceDeclaration): Doc {
+    const after: Doc[] = [];
+    if (d.extendsTypes && d.extendsTypes.length > 0)
+      after.push(
+        concat([
+          " extends ",
+          join(
+            ", ",
+            d.extendsTypes.map(t => this.type(t)),
+          ),
+        ]),
+      );
+    if (d.permitsTypes && d.permitsTypes.length > 0)
+      after.push(
+        concat([
+          " permits ",
+          join(
+            ", ",
+            d.permitsTypes.map(t => this.type(t)),
+          ),
+        ]),
+      );
+    return this.classLike("interface", d, concat(after));
+  }
+
+  private enumDeclaration(d: EnumDeclaration): Doc {
+    const after: Doc[] = [];
+    if (d.implementsTypes && d.implementsTypes.length > 0)
+      after.push(
+        concat([
+          " implements ",
+          join(
+            ", ",
+            d.implementsTypes.map(t => this.type(t)),
+          ),
+        ]),
+      );
+    const header = concat([
+      this.modifiers(d.modifiers, true),
+      "enum ",
+      this.raw(d.name),
+      concat(after),
+      " ",
+    ]);
+    if (d.enumConstants.length === 0 && d.members.length === 0) return concat([header, "{}"]);
+    const constants = d.enumConstants.map(c => this.enumConstant(c));
+    // Constants share one line only when the enum is "simple": no members, and
+    // no constant carries arguments or a class body. Otherwise one per line.
+    const simple =
+      d.members.length === 0 &&
+      d.enumConstants.every(c => !c.classBody && (!c.arguments || c.arguments.length === 0));
+    const constantsDoc = simple
+      ? group(join(concat([",", line]), constants))
+      : join(concat([",", hardline]), constants);
+    const bodyParts: Doc[] = [hardline, constantsDoc];
+    if (d.members.length > 0) {
+      // A blank line separates the constant list from the member declarations.
+      bodyParts.push(";", hardline, hardline, ...this.members(d.members, d.end));
+    } else if (constants.length > 0) {
+      bodyParts.push(";");
+    }
+    return concat([header, "{", indent(concat(bodyParts)), hardline, "}"]);
+  }
+
+  private enumConstant(c: EnumConstantDeclaration): Doc {
+    const parts: Doc[] = [this.modifiers(c.modifiers), this.raw(c.name)];
+    if (c.arguments)
+      parts.push(
+        "(",
+        join(
+          ", ",
+          c.arguments.map(a => this.node(a)),
+        ),
+        ")",
+      );
+    if (c.classBody) parts.push(" ", this.body(c.classBody, c.end));
+    return concat(parts);
+  }
+
+  private recordDeclaration(d: RecordDeclaration): Doc {
+    const comps = d.recordComponents.map((rc: RecordComponent) =>
+      concat([this.type(rc.type), rc.isVarArgs ? "... " : " ", this.raw(rc.name)]),
+    );
+    const after: Doc[] = [concat(["(", join(", ", comps), ")"])];
+    if (d.implementsTypes && d.implementsTypes.length > 0)
+      after.push(
+        concat([
+          " implements ",
+          join(
+            ", ",
+            d.implementsTypes.map(t => this.type(t)),
+          ),
+        ]),
+      );
+    const header = concat([
+      this.modifiers(d.modifiers, true),
+      "record ",
+      this.raw(d.name),
+      this.typeParameters(d.typeParameters),
+      concat(after),
+      " ",
+    ]);
+    return concat([header, this.body(d.members, d.end)]);
+  }
+
+  private fieldDeclaration(d: FieldDeclaration): Doc {
+    return concat([
+      this.modifiers(d.modifiers),
+      this.type(d.type),
+      " ",
+      join(
+        ", ",
+        d.declarators.map(v => this.declarator(v)),
+      ),
+      ";",
+    ]);
+  }
+
+  private declarator(v: VariableDeclarator): Doc {
+    const name = concat([this.raw(v.name), "[]".repeat(v.arrayRankAfterName)]);
+    if (!v.initializer) return name;
+    return group(concat([name, " =", indent(concat([line, this.node(v.initializer)]))]));
+  }
+
+  private parameters(params: NodeArray<Parameter>): Doc {
+    if (params.length === 0) return "()";
+    const ps = params.map(p => this.parameter(p));
+    return group(
+      concat(["(", indent(concat([softline, join(concat([",", line]), ps)])), softline, ")"]),
+    );
+  }
+
+  private parameter(p: Parameter): Doc {
+    const parts: Doc[] = [this.modifiers(p.modifiers), this.type(p.type)];
+    if (p.isVarArgs) parts.push("...");
+    if (p.name) parts.push(" ", this.raw(p.name));
+    return concat(parts);
+  }
+
+  private methodLike(decl: {
+    modifiers?: NodeArray<ModifierLike>;
+    typeParameters?: NodeArray<TypeParameter>;
+    returnType?: TypeNode;
+    name: Node;
+    parameters: NodeArray<Parameter>;
+    throws?: NodeArray<TypeNode>;
+    body?: Block;
+  }): Doc {
+    const tp = this.typeParameters(decl.typeParameters);
+    const head: Doc[] = [this.modifiers(decl.modifiers, true)];
+    if (tp !== "") head.push(tp, " ");
+    if (decl.returnType) head.push(this.type(decl.returnType), " ");
+    head.push(this.raw(decl.name), this.parameters(decl.parameters));
+    if (decl.throws && decl.throws.length > 0)
+      head.push(
+        concat([
+          " throws ",
+          join(
+            ", ",
+            decl.throws.map(t => this.type(t)),
+          ),
+        ]),
+      );
+    if (!decl.body) return concat([...head, ";"]);
+    return concat([...head, " ", this.block(decl.body)]);
+  }
+
+  private initializerBlock(d: InitializerBlock): Doc {
+    return concat([d.isStatic ? "static " : "", this.block(d.body)]);
+  }
+
+  // --- statements ----------------------------------------------------------
+
+  private block(b: Block): Doc {
+    if (b.statements.length === 0 && !this.hasCommentBefore(b.end)) return "{}";
+    return concat([
+      "{",
+      indent(concat([hardline, ...this.statementList(b.statements, b.end)])),
+      hardline,
+      "}",
+    ]);
+  }
+
+  private statementList(list: NodeArray<Statement>, endPos: number): Doc[] {
+    return this.listDocs(list, false, endPos);
+  }
+
+  private localVar(d: LocalVariableDeclarationStatement): Doc {
+    return concat([
+      this.modifiers(d.modifiers),
+      this.type(d.type),
+      " ",
+      join(
+        ", ",
+        d.declarators.map(v => this.declarator(v)),
+      ),
+      ";",
+    ]);
+  }
+
+  private ifStatement(s: IfStatement): Doc {
+    const parts: Doc[] = [
+      group(concat(["if (", this.node(s.condition), ")"])),
+      " ",
+      this.clauseBody(s.thenStatement),
+    ];
+    if (s.elseStatement) {
+      const elseOnSameLine = s.thenStatement.kind === SyntaxKind.Block;
+      parts.push(elseOnSameLine ? " else" : concat([hardline, "else"]));
+      if (s.elseStatement.kind === SyntaxKind.IfStatement) {
+        parts.push(" ", this.node(s.elseStatement));
+      } else {
+        parts.push(" ", this.clauseBody(s.elseStatement));
+      }
+    }
+    return concat(parts);
+  }
+
+  /** The controlled statement of if/for/while; a non-block gets indented on its own line. */
+  private clauseBody(s: Statement): Doc {
+    if (s.kind === SyntaxKind.Block) return this.block(s as Block);
+    return indent(concat([hardline, this.node(s)]));
+  }
+
+  private whileStatement(s: WhileStatement): Doc {
+    return concat([
+      group(concat(["while (", this.node(s.condition), ")"])),
+      " ",
+      this.clauseBody(s.statement),
+    ]);
+  }
+
+  private doStatement(s: DoStatement): Doc {
+    return concat(["do ", this.clauseBody(s.statement), " while (", this.node(s.condition), ");"]);
+  }
+
+  private forStatement(s: ForStatement): Doc {
+    const init = s.initializer
+      ? this.forInit(s.initializer)
+      : s.initializerExpressions
+        ? join(
+            ", ",
+            s.initializerExpressions.map(e => this.node(e)),
+          )
+        : "";
+    const cond = s.condition ? this.node(s.condition) : "";
+    const upd = s.incrementors
+      ? join(
+          ", ",
+          s.incrementors.map(e => this.node(e)),
+        )
+      : "";
+    const header = group(concat(["for (", init, "; ", cond, "; ", upd, ")"]));
+    return concat([header, " ", this.clauseBody(s.statement)]);
+  }
+
+  private forInit(init: Node): Doc {
+    // A local variable declaration used as a for-init has no trailing `;`.
+    if (init.kind === SyntaxKind.LocalVariableDeclarationStatement) {
+      const d = init as LocalVariableDeclarationStatement;
+      return concat([
+        this.modifiers(d.modifiers),
+        this.type(d.type),
+        " ",
+        join(
+          ", ",
+          d.declarators.map(v => this.declarator(v)),
+        ),
+      ]);
+    }
+    return this.node(init);
+  }
+
+  private forEachStatement(s: ForEachStatement): Doc {
+    return concat([
+      group(concat(["for (", this.parameter(s.parameter), " : ", this.node(s.expression), ")"])),
+      " ",
+      this.clauseBody(s.statement),
+    ]);
+  }
+
+  private tryStatement(s: TryStatement): Doc {
+    const parts: Doc[] = ["try"];
+    if (s.resources && s.resources.length > 0) {
+      parts.push(
+        " (",
+        join(
+          concat(["; "]),
+          s.resources.map(r => this.resource(r)),
+        ),
+        ")",
+      );
+    }
+    parts.push(" ", this.block(s.tryBlock));
+    for (const c of s.catchClauses) {
+      parts.push(
+        " catch (",
+        join(
+          " | ",
+          c.catchTypes.map(t => this.type(t)),
+        ),
+        " ",
+        this.raw(c.name),
+        ") ",
+        this.block(c.block),
+      );
+    }
+    if (s.finallyBlock) parts.push(" finally ", this.block(s.finallyBlock));
+    return concat(parts);
+  }
+
+  private resource(r: Resource): Doc {
+    if (r.expression) return this.node(r.expression);
+    return concat([
+      this.modifiers(r.modifiers),
+      r.type ? concat([this.type(r.type), " "]) : "",
+      r.name ? this.raw(r.name) : "",
+      r.initializer ? concat([" = ", this.node(r.initializer)]) : "",
+    ]);
+  }
+
+  private switchLike(expr: Expression, clauses: NodeArray<SwitchClause>): Doc {
+    const body = clauses.map(c => this.switchClause(c));
+    return concat([
+      group(concat(["switch (", this.node(expr), ")"])),
+      " {",
+      indent(concat([hardline, join(hardline, body)])),
+      hardline,
+      "}",
+    ]);
+  }
+
+  private switchClause(c: SwitchClause): Doc {
+    const label = c.isDefault
+      ? "default"
+      : concat([
+          "case ",
+          join(
+            ", ",
+            (c.labels ?? []).map(l => this.node(l)),
+          ),
+        ]);
+    const guard = c.guard ? concat([" when ", this.node(c.guard)]) : "";
+    if (c.isArrow) {
+      const stmts = c.statements;
+      if (stmts.length === 1 && stmts[0].kind === SyntaxKind.Block) {
+        return concat([label, guard, " -> ", this.block(stmts[0] as Block)]);
+      }
+      return concat([
+        label,
+        guard,
+        " -> ",
+        join(
+          " ",
+          stmts.map(s => this.node(s)),
+        ),
+      ]);
+    }
+    return concat([
+      label,
+      guard,
+      ":",
+      indent(concat([hardline, ...this.statementList(c.statements, c.end)])),
+    ]);
+  }
+
+  // --- expressions ---------------------------------------------------------
+
+  private binary(e: BinaryExpression | AssignmentExpression): Doc {
+    const op = tokenToString(e.operatorToken) ?? "?";
+    return group(concat([this.node(e.left), " ", op, " ", this.node(e.right)]));
+  }
+
+  private call(e: CallExpression): Doc {
+    return concat([
+      this.node(e.expression),
+      this.typeArguments(e.typeArguments),
+      this.argList(e.arguments),
+    ]);
+  }
+
+  private argList(args: NodeArray<Expression>): Doc {
+    if (args.length === 0) return "()";
+    return group(
+      concat([
+        "(",
+        indent(
+          concat([
+            softline,
+            join(
+              concat([",", line]),
+              args.map(a => this.node(a)),
+            ),
+          ]),
+        ),
+        softline,
+        ")",
+      ]),
+    );
+  }
+
+  private objectCreation(e: ObjectCreationExpression): Doc {
+    const parts: Doc[] = [];
+    if (e.qualifier) parts.push(this.node(e.qualifier), ".");
+    parts.push("new ", this.type(e.type), this.argList(e.arguments));
+    if (e.classBody) parts.push(" ", this.body(e.classBody, e.end));
+    return concat(parts);
+  }
+
+  private arrayCreation(e: ArrayCreationExpression): Doc {
+    const dims = (e.dimensions ?? []).map(d => concat(["[", this.node(d), "]"]));
+    const extra = "[]".repeat(e.additionalRank);
+    const init = e.initializer ? concat([" ", this.arrayInitializer(e.initializer)]) : "";
+    return concat(["new ", this.type(e.elementType), concat(dims), extra, init]);
+  }
+
+  private arrayInitializer(e: ArrayInitializer): Doc {
+    if (e.elements.length === 0) return "{}";
+    return group(
+      concat([
+        "{",
+        indent(
+          concat([
+            softline,
+            join(
+              concat([",", line]),
+              e.elements.map(el => this.node(el)),
+            ),
+          ]),
+        ),
+        softline,
+        "}",
+      ]),
+    );
+  }
+
+  private lambda(e: LambdaExpression): Doc {
+    const params = e.parameters;
+    let head: Doc;
+    if (params.length === 1 && params[0].kind === SyntaxKind.Identifier) {
+      head = this.raw(params[0]);
+    } else {
+      head = concat([
+        "(",
+        join(
+          ", ",
+          params.map(pp =>
+            pp.kind === SyntaxKind.Parameter ? this.parameter(pp as Parameter) : this.raw(pp),
+          ),
+        ),
+        ")",
+      ]);
+    }
+    const body = e.body.kind === SyntaxKind.Block ? this.block(e.body as Block) : this.node(e.body);
+    return concat([head, " -> ", body]);
+  }
+
+  private conditional(e: ConditionalExpression): Doc {
+    return group(
+      concat([this.node(e.condition), " ? ", this.node(e.whenTrue), " : ", this.node(e.whenFalse)]),
+    );
+  }
+
+  private instanceOf(e: InstanceofExpression): Doc {
+    const parts: Doc[] = [this.node(e.expression), " instanceof "];
+    if (e.type) parts.push(this.type(e.type));
+    if (e.name) parts.push(" ", this.raw(e.name));
+    return concat(parts);
+  }
+
+  // --- dispatch ------------------------------------------------------------
+
+  node(node: Node): Doc {
+    switch (node.kind) {
+      case SyntaxKind.ClassDeclaration:
+        return this.classDeclaration(node as ClassDeclaration);
+      case SyntaxKind.InterfaceDeclaration:
+        return this.interfaceDeclaration(node as InterfaceDeclaration);
+      case SyntaxKind.EnumDeclaration:
+        return this.enumDeclaration(node as EnumDeclaration);
+      case SyntaxKind.RecordDeclaration:
+        return this.recordDeclaration(node as RecordDeclaration);
+      case SyntaxKind.FieldDeclaration:
+        return this.fieldDeclaration(node as FieldDeclaration);
+      case SyntaxKind.MethodDeclaration:
+        return this.methodLike(node as MethodDeclaration);
+      case SyntaxKind.ConstructorDeclaration:
+        return this.methodLike(node as ConstructorDeclaration);
+      case SyntaxKind.InitializerBlock:
+        return this.initializerBlock(node as InitializerBlock);
+
+      case SyntaxKind.Block:
+        return this.block(node as Block);
+      case SyntaxKind.EmptyStatement:
+        return ";";
+      case SyntaxKind.LocalVariableDeclarationStatement:
+        return this.localVar(node as LocalVariableDeclarationStatement);
+      case SyntaxKind.ExpressionStatement:
+        return concat([this.node((node as ExpressionStatement).expression), ";"]);
+      case SyntaxKind.IfStatement:
+        return this.ifStatement(node as IfStatement);
+      case SyntaxKind.WhileStatement:
+        return this.whileStatement(node as WhileStatement);
+      case SyntaxKind.DoStatement:
+        return this.doStatement(node as DoStatement);
+      case SyntaxKind.ForStatement:
+        return this.forStatement(node as ForStatement);
+      case SyntaxKind.ForEachStatement:
+        return this.forEachStatement(node as ForEachStatement);
+      case SyntaxKind.ReturnStatement: {
+        const r = node as ReturnStatement;
+        return r.expression ? concat(["return ", this.node(r.expression), ";"]) : "return;";
+      }
+      case SyntaxKind.ThrowStatement:
+        return concat(["throw ", this.node((node as ThrowStatement).expression), ";"]);
+      case SyntaxKind.BreakStatement: {
+        const b = node as { label?: Node };
+        return b.label ? concat(["break ", this.raw(b.label), ";"]) : "break;";
+      }
+      case SyntaxKind.ContinueStatement: {
+        const c = node as { label?: Node };
+        return c.label ? concat(["continue ", this.raw(c.label), ";"]) : "continue;";
+      }
+      case SyntaxKind.YieldStatement:
+        return concat(["yield ", this.node((node as YieldStatement).expression), ";"]);
+      case SyntaxKind.SynchronizedStatement: {
+        const s = node as SynchronizedStatement;
+        return concat(["synchronized (", this.node(s.expression), ") ", this.block(s.body)]);
+      }
+      case SyntaxKind.AssertStatement: {
+        const s = node as AssertStatement;
+        return s.message
+          ? concat(["assert ", this.node(s.condition), " : ", this.node(s.message), ";"])
+          : concat(["assert ", this.node(s.condition), ";"]);
+      }
+      case SyntaxKind.LabeledStatement: {
+        const s = node as LabeledStatement;
+        return concat([this.raw(s.label), ":", hardline, this.node(s.statement)]);
+      }
+      case SyntaxKind.TryStatement:
+        return this.tryStatement(node as TryStatement);
+      case SyntaxKind.SwitchStatement: {
+        const s = node as SwitchStatement;
+        return this.switchLike(s.expression, s.clauses);
+      }
+
+      case SyntaxKind.SwitchExpression: {
+        const s = node as SwitchExpression;
+        return this.switchLike(s.expression, s.clauses);
+      }
+      case SyntaxKind.BinaryExpression:
+        return this.binary(node as BinaryExpression);
+      case SyntaxKind.AssignmentExpression:
+        return this.binary(node as AssignmentExpression);
+      case SyntaxKind.ConditionalExpression:
+        return this.conditional(node as ConditionalExpression);
+      case SyntaxKind.CallExpression:
+        return this.call(node as CallExpression);
+      case SyntaxKind.PropertyAccessExpression: {
+        const e = node as PropertyAccessExpression;
+        return concat([this.node(e.expression), ".", this.raw(e.name)]);
+      }
+      case SyntaxKind.ElementAccessExpression: {
+        const e = node as ElementAccessExpression;
+        return concat([this.node(e.expression), "[", this.node(e.argumentExpression), "]"]);
+      }
+      case SyntaxKind.ObjectCreationExpression:
+        return this.objectCreation(node as ObjectCreationExpression);
+      case SyntaxKind.ArrayCreationExpression:
+        return this.arrayCreation(node as ArrayCreationExpression);
+      case SyntaxKind.ArrayInitializer:
+        return this.arrayInitializer(node as ArrayInitializer);
+      case SyntaxKind.ParenthesizedExpression:
+        return concat(["(", this.node((node as ParenthesizedExpression).expression), ")"]);
+      case SyntaxKind.PrefixUnaryExpression: {
+        const e = node as PrefixUnaryExpression;
+        return concat([tokenToString(e.operator) ?? "", this.node(e.operand)]);
+      }
+      case SyntaxKind.PostfixUnaryExpression: {
+        const e = node as PostfixUnaryExpression;
+        return concat([this.node(e.operand), tokenToString(e.operator) ?? ""]);
+      }
+      case SyntaxKind.CastExpression: {
+        const e = node as CastExpression;
+        const types = [this.type(e.type), ...(e.bounds ?? []).map(b => this.type(b))];
+        return concat(["(", join(" & ", types), ") ", this.node(e.expression)]);
+      }
+      case SyntaxKind.InstanceofExpression:
+        return this.instanceOf(node as InstanceofExpression);
+      case SyntaxKind.LambdaExpression:
+        return this.lambda(node as LambdaExpression);
+      case SyntaxKind.MethodReferenceExpression: {
+        const e = node as MethodReferenceExpression;
+        return concat([
+          this.node(e.expression),
+          "::",
+          e.isConstructorRef ? "new" : e.name ? this.raw(e.name) : "",
+        ]);
+      }
+      case SyntaxKind.ThisExpression:
+        return "this";
+      case SyntaxKind.SuperExpression:
+        return "super";
+      case SyntaxKind.ClassLiteralExpression:
+        return concat([this.type((node as ClassLiteralExpression).type), ".class"]);
+
+      case SyntaxKind.Identifier:
+      case SyntaxKind.NumericLiteral:
+      case SyntaxKind.StringLiteral:
+      case SyntaxKind.CharacterLiteral:
+      case SyntaxKind.TextBlockLiteral:
+      case SyntaxKind.TrueKeyword:
+      case SyntaxKind.FalseKeyword:
+      case SyntaxKind.NullKeyword:
+        return this.raw(node);
+
+      case SyntaxKind.PrimitiveType:
+      case SyntaxKind.TypeReference:
+      case SyntaxKind.ArrayType:
+      case SyntaxKind.WildcardType:
+      case SyntaxKind.VarType:
+        return this.type(node as TypeNode);
+
+      case SyntaxKind.QualifiedName:
+        return this.entityName(node as EntityName);
+      case SyntaxKind.Annotation:
+        return this.annotation(node as Annotation);
+
+      default:
+        // Degrade, do not crash: emit the verbatim source slice.
+        return this.raw(node);
+    }
+  }
+}
+
+function rank(kind: SyntaxKind): number {
+  const i = MODIFIER_ORDER.indexOf(kind);
+  return i === -1 ? MODIFIER_ORDER.length : i;
+}
+
+// A blank line is forced between two members when either is a method,
+// constructor, initializer or nested type (google-java-format); consecutive
+// fields stay together unless the user separated them (a source blank line).
+function forcedBlank(a: Node, b: Node): boolean {
+  return isBlankForcing(a.kind) || isBlankForcing(b.kind);
+}
+
+function isBlankForcing(kind: SyntaxKind): boolean {
+  switch (kind) {
+    case SyntaxKind.MethodDeclaration:
+    case SyntaxKind.ConstructorDeclaration:
+    case SyntaxKind.InitializerBlock:
+    case SyntaxKind.ClassDeclaration:
+    case SyntaxKind.InterfaceDeclaration:
+    case SyntaxKind.EnumDeclaration:
+    case SyntaxKind.RecordDeclaration:
+    case SyntaxKind.AnnotationTypeDeclaration:
+      return true;
+    default:
+      return false;
+  }
+}

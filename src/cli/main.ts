@@ -11,6 +11,7 @@ import { runAdd } from "./add.ts";
 import { runRemove } from "./remove.ts";
 import { runOutdated } from "./outdated.ts";
 import { runCompileCommand } from "./compile.ts";
+import { runFormat } from "./format.ts";
 import { runConfigSchema } from "./configSchema.ts";
 import { runInit } from "./init.ts";
 import { runInstall } from "./install.ts";
@@ -95,6 +96,11 @@ Usage:
   cappu compile [options] [file...]  Compile .java files to .class bytecode; with no
                                      files, compile everything under the configured
                                      sourcePaths (a project build)
+  cappu format [-w] [file...]        Check Java formatting (google-java-format
+                                     compatible); with no files, every file under the
+                                     configured sourcePaths. Lists unformatted files
+                                     and exits non-zero; -w/--write rewrites them in
+                                     place. Style and ignore globs: formatterOptions.
 
 Options:
   -c, --config <file>   Project config (default: ./cappu.json, JSONC).
@@ -144,6 +150,7 @@ const { values, positionals } = (() => {
         // can supply the value (an explicit flag always wins).
         quiet: { type: "boolean", short: "q" },
         verbose: { type: "boolean", short: "v" },
+        write: { type: "boolean", short: "w", default: false },
         "with-schema": { type: "boolean", default: false },
         yes: { type: "boolean", short: "y", default: false },
         json: { type: "boolean", default: false },
@@ -194,6 +201,7 @@ const TIMED_COMMANDS = new Set([
   "verify",
   "compile",
   "test",
+  "format",
 ]);
 if (TIMED_COMMANDS.has(command)) {
   const startedAt = performance.now();
@@ -299,6 +307,9 @@ switch (command) {
       },
       config,
     );
+    break;
+  case "format":
+    await runFormat(files, { write: values.write }, config);
     break;
   default:
     process.stderr.write(`cappu: unknown command '${command}'\n\n${USAGE}`);

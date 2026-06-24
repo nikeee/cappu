@@ -5,7 +5,7 @@
 // synthetic-stub registrations cast.
 
 import { globSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, matchesGlob, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { type Brand } from "./brand.ts";
@@ -74,4 +74,19 @@ export function findSourceJavaFiles(config: CappuConfig): FsPath[] {
   return config.compilerOptions.sourcePaths.flatMap(p =>
     findJavaFiles(resolveConfigPath(config, p)),
   );
+}
+
+/**
+ * The .java files `cappu format` operates on: every source file under the
+ * configured sourcePaths, minus any matching a `formatterOptions.ignore` glob.
+ * Ignore globs are matched against the path relative to the config directory.
+ */
+export function findFormattableFiles(config: CappuConfig): FsPath[] {
+  const ignore = config.formatterOptions.ignore;
+  const files = findSourceJavaFiles(config);
+  if (ignore.length === 0) return files;
+  return files.filter(p => {
+    const rel = relative(config.baseDir, p);
+    return !ignore.some(pattern => matchesGlob(rel, pattern));
+  });
 }

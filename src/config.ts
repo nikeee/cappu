@@ -101,6 +101,16 @@ const LspOptionsSchema = z.object({
   inlayHints: InlayHintsSchema.optional(),
 });
 
+// `cappu format` (nikeee/cappu#24): a google-java-format-compatible formatter.
+// Deliberately few knobs - the only choice is the indent style, matching what
+// spotless exposes (googleJavaFormat vs its AOSP variant).
+const FormatterSchema = z.object({
+  /** "google" is 2-space indent; "aosp" is the 4-space variant. */
+  style: z.enum(["google", "aosp"]).default("google"),
+  /** Glob patterns (relative to the config dir) excluded from formatting. */
+  ignore: z.array(z.string()).default([]),
+});
+
 const DapOptionsSchema = z.object({
   /**
    * Pass -ea to every debuggee launched by `cappu dap`, so assertions run while
@@ -152,6 +162,7 @@ const ConfigFileSchema = z.object({
   compilerOptions: CompilerOptionsSchema.prefault({}),
   lspOptions: LspOptionsSchema.prefault({}),
   dapOptions: DapOptionsSchema.prefault({}),
+  formatterOptions: FormatterSchema.prefault({}),
   /** Package repositories dependencies are resolved from, in order. */
   packageSources: z.array(z.string()).default(DEFAULT_PACKAGE_SOURCES),
   /** What `cappu install` resolves and downloads, keyed by configuration. */
@@ -187,6 +198,7 @@ const ConfigFileSchema = z.object({
 export type CompilerConfig = z.infer<typeof CompilerOptionsSchema>;
 export type LspConfig = z.infer<typeof LspOptionsSchema>;
 export type DapConfig = z.infer<typeof DapOptionsSchema>;
+export type FormatterConfig = z.infer<typeof FormatterSchema>;
 
 export interface CappuConfig extends z.infer<typeof ConfigFileSchema> {
   /** Directory the config file lives in; relative paths resolve against it. */
@@ -279,6 +291,12 @@ export const CONFIG_TEMPLATE = `
     //   "varTypes": true,
     // },
   },
+
+  // \`cappu format\` options (google-java-format compatible).
+  // "formatterOptions": {
+  //   "style": "google",   // "google" (2-space) or "aosp" (4-space)
+  //   "ignore": [],         // glob patterns excluded from formatting
+  // },
 
   // Package repositories dependencies are resolved from, in order. Default if unset:
   // "packageSources": [

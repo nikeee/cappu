@@ -1,0 +1,13 @@
+package com.example;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class Messy {
+    private final String name = "world";
+
+    public static void main(String[] args) {
+        List<String> xs = new ArrayList<>();
+        System.out.println("Hello, " + name);
+    }
+}

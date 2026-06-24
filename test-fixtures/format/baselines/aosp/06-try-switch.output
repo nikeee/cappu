@@ -1,0 +1,17 @@
+package p;
+
+class C {
+    int classify(int n) {
+        try {
+            return switch (n) {
+                case 0 -> 1;
+                case 1, 2 -> 2;
+                default -> 3;
+            };
+        } catch (RuntimeException e) {
+            return -1;
+        } finally {
+            System.out.println("done");
+        }
+    }
+}

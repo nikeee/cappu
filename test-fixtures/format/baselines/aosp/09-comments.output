@@ -1,0 +1,14 @@
+package p;
+
+// a class comment
+class C {
+    // leading field comment
+    int a; // trailing field
+
+    /** javadoc on method */
+    void m() {
+        int x = 1; // inline
+        // standalone before return
+        System.out.println(x);
+    }
+}

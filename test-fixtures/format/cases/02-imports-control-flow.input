@@ -1,0 +1,19 @@
+package p;
+import java.util.Map;
+import static java.lang.Math.PI;
+import java.util.List;
+import static java.lang.Math.abs;
+class C {
+  void m() {
+    List<Map> x = null;
+    double v = abs(PI);
+
+
+    int y = 1;
+    if (y > 0) {
+      y = 2;
+    } else {
+      y = 3;
+    }
+  }
+}

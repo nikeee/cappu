@@ -1,0 +1,19 @@
+package p;
+
+interface Shape {
+    double area();
+
+    default String label() {
+        return "shape";
+    }
+}
+
+enum Color implements Shape {
+    RED,
+    GREEN,
+    BLUE;
+
+    public double area() {
+        return 0.0;
+    }
+}

@@ -1,0 +1,10 @@
+package p;
+
+class C {
+    @Deprecated public static final int CONST = 1;
+
+    @Override
+    public String toString() {
+        return "C";
+    }
+}

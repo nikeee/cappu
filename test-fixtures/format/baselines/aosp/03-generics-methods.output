@@ -1,0 +1,15 @@
+package p;
+
+import java.util.List;
+
+public final class Box<T extends Comparable<T>> {
+    private T value;
+
+    public <R> R map(java.util.function.Function<T, R> f) {
+        return f.apply(value);
+    }
+
+    public static <E> List<E> of(E a, E b) {
+        return List.of(a, b);
+    }
+}
