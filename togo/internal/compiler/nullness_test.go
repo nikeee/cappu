@@ -3,6 +3,8 @@ package compiler
 // Port of src/compiler/nullness.test.ts.
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/nikeee/cappu/internal/config"
@@ -199,6 +201,77 @@ func TestNullnessCustomNullableList(t *testing.T) {
 	cfg.NullableAnnotations = []string{"javax.annotation.CheckForNull"}
 	if !containsCode(diagnoseNullness(code, cfg), codeNullIntoNonNull) {
 		t.Error("a custom @Nullable annotation list should be honored")
+	}
+}
+
+// narrowBody splices a statement body in around a @Nullable local x, with non-null sinks.
+func narrowBody(body string) string {
+	return "import java.util.Objects;\n" +
+		"class C {\n" +
+		"  void f(@NonNull String s) {}\n" +
+		"  boolean ok(@NonNull String s) { return true; }\n" +
+		"  String use(@NonNull String s) { return s; }\n" +
+		"  void h(@NonNull Object o) {}\n" +
+		"  @Nullable String src() { return src(); }\n" +
+		"  void m() { @Nullable String x = src(); " + body + " }\n" +
+		"}"
+}
+
+func TestNullnessNarrowingAccepted(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"if (x != null) guard", "if (x != null) { f(x); }"},
+		{"early-return on null", "if (x == null) return; f(x);"},
+		{"&& short-circuit", "boolean b = x != null && ok(x);"},
+		{"|| short-circuit", "boolean b = x == null || ok(x);"},
+		{"ternary whenTrue", "String r = x != null ? use(x) : \"\";"},
+		{"instanceof", "if (x instanceof String) { h(x); }"},
+		{"Objects.requireNonNull", "Objects.requireNonNull(x); f(x);"},
+		{"assert x != null", "assert x != null; f(x);"},
+		{"reassign to non-null", "x = \"y\"; f(x);"},
+	}
+	for _, tc := range cases {
+		if containsCode(diagnoseNullness(narrowBody(tc.body), jspecify()), codeNullIntoNonNull) {
+			t.Errorf("%s: narrowing should suppress the warning for %q", tc.name, tc.body)
+		}
+	}
+}
+
+func TestNullnessNarrowingFlagged(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"use before the guard", "f(x); if (x != null) {}"},
+		{"reassign to null then use", "if (x == null) return; x = null; f(x);"},
+		{"wrong branch (then of == null)", "if (x == null) { f(x); }"},
+		{"reassignment between guard and use", "if (x != null) { x = src(); f(x); }"},
+	}
+	for _, tc := range cases {
+		if !containsCode(diagnoseNullness(narrowBody(tc.body), jspecify()), codeNullIntoNonNull) {
+			t.Errorf("%s: expected a warning for %q", tc.name, tc.body)
+		}
+	}
+}
+
+func TestNullnessFieldNotNarrowed(t *testing.T) {
+	code := "class C { @Nullable String fld; void f(@NonNull String s) {} void m() { if (fld != null) { f(fld); } } }"
+	if !containsCode(diagnoseNullness(code, jspecify()), codeNullIntoNonNull) {
+		t.Error("fields must not be narrowed by a guard")
+	}
+}
+
+func TestNullnessExampleApp(t *testing.T) {
+	main, err := os.ReadFile(filepath.Join("..", "..", "..", "examples", "nullness-app",
+		"src", "main", "java", "example", "Main.java"))
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	n := 0
+	for _, c := range diagnoseNullness(string(main), jspecify()) {
+		if c == codeNullIntoNonNull {
+			n++
+		}
+	}
+	// shout(lookup("greeting")) is the single intended warning; the narrowed branch stays quiet.
+	if n != 1 {
+		t.Errorf("examples/nullness-app: expected exactly 1 nullness warning, got %d", n)
 	}
 }
 

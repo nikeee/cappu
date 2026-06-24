@@ -414,3 +414,5 @@ cappu search commons-lang3
 - 2026-06-24 17:34 — maybe add this to the compiler options, not the lsp options. in compilation mode (and lsp), we should emit a warning diagnostic. maybe just start with lsp and do compiler later, since we only have an experimental compiler
 - 2026-06-24 22:31 — support cross-file package-info.java and generic nullness
 - 2026-06-24 22:39 — add the new go tests to ts
+- 2026-06-24 23:04 — add support for flow-aware type checks. TS has some gettypeOfSymbolAtLocation. we should probably do something simiar.
+- 2026-06-24 23:04 — also add an example demonstrating the null checking in the examples/dir

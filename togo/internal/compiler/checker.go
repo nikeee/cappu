@@ -165,6 +165,21 @@ func (c *Checker) typeNodeNullness(typeNode, fromNode *Node) Nullness {
 	return ""
 }
 
+// exprNullness is the provable nullness of a value expression, used when narrowing
+// a reassignment (x = e) - the `null` literal and the intrinsically non-null forms
+// are decided syntactically; everything else falls back to the value's type facet.
+func (c *Checker) exprNullness(node *Node) Nullness {
+	switch node.Kind {
+	case NullKeyword:
+		return NullnessNullable
+	case StringLiteral, TextBlockLiteral, CharacterLiteral, NumericLiteral,
+		TrueKeyword, FalseKeyword, ObjectCreationExpression, ArrayCreationExpression, ThisExpression:
+		return NullnessNonNull
+	default:
+		return nullnessOf(c.getTypeOfExpression(node))
+	}
+}
+
 // --- primitive widening (JLS 5.1.2) and boxing (JLS 5.1.7) -------------------
 
 var widening = map[string][]string{
@@ -1443,10 +1458,20 @@ func (c *Checker) computeExpressionType(node *Node) *Type {
 		return nullType
 	case Identifier:
 		symbol := ResolveIdentifier(node, c.program)
-		if symbol != nil {
-			return c.getTypeOfSymbol(symbol)
+		if symbol == nil {
+			return errorType
 		}
-		return errorType
+		t := c.getTypeOfSymbol(symbol)
+		// Flow-aware narrowing (nikeee/cappu#25): refine a local/parameter's nullness
+		// facet from what the preceding control flow has proven at this use.
+		if c.nullness != nil && symbol.Flags&(SymbolFlagsParameter|SymbolFlagsLocalVariable) != 0 {
+			if narrowed := narrowNullnessAt(node, symbol,
+				func(n *Node) *Symbol { return ResolveIdentifier(n, c.program) },
+				c.exprNullness); narrowed != "" {
+				return withNullness(t, narrowed)
+			}
+		}
+		return t
 	case ThisExpression:
 		if qualifier := node.AsThisExpression().Qualifier; qualifier != nil {
 			return c.getTypeOfExpression(qualifier)

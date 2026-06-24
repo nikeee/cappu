@@ -86,6 +86,7 @@ import {
   resolveNullnessAnnotations,
   typeUseNullness,
 } from "./nullness.ts";
+import { narrowNullnessAt } from "./narrowing.ts";
 
 /** A single abstract method's name (the invokedynamic call name for a lambda). */
 export type SamName = Brand<string, "SamName">;
@@ -318,6 +319,28 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
     if (explicit) return explicit;
     if (!isReferenceTypeNode(typeNode)) return undefined;
     return isNullMarked(fromNode) ? "nonNull" : undefined;
+  }
+
+  // The provable nullness of a value expression, used when narrowing a reassignment
+  // (x = e) - the `null` literal and the intrinsically non-null forms are decided
+  // syntactically; everything else falls back to the value's type facet.
+  function exprNullness(node: Node): Nullness | undefined {
+    switch (node.kind) {
+      case SyntaxKind.NullKeyword:
+        return "nullable";
+      case SyntaxKind.StringLiteral:
+      case SyntaxKind.TextBlockLiteral:
+      case SyntaxKind.CharacterLiteral:
+      case SyntaxKind.NumericLiteral:
+      case SyntaxKind.TrueKeyword:
+      case SyntaxKind.FalseKeyword:
+      case SyntaxKind.ObjectCreationExpression:
+      case SyntaxKind.ArrayCreationExpression:
+      case SyntaxKind.ThisExpression:
+        return "nonNull";
+      default:
+        return nullnessOf(getTypeOfExpression(node));
+    }
   }
 
   const booleanType = primitiveType("boolean");
@@ -1323,7 +1346,23 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
         return nullType;
       case SyntaxKind.Identifier: {
         const symbol = resolveIdentifier(node as Identifier, program);
-        return symbol ? getTypeOfSymbol(symbol) : errorType;
+        if (!symbol) return errorType;
+        const type = getTypeOfSymbol(symbol);
+        // Flow-aware narrowing (nikeee/cappu#25): refine a local/parameter's nullness
+        // facet from what the preceding control flow has proven at this use.
+        if (
+          nullnessAnnotations &&
+          symbol.flags & (SymbolFlags.Parameter | SymbolFlags.LocalVariable)
+        ) {
+          const narrowed = narrowNullnessAt(
+            node,
+            symbol,
+            n => resolveIdentifier(n as Identifier, program),
+            exprNullness,
+          );
+          if (narrowed) return withNullness(type, narrowed);
+        }
+        return type;
       }
       case SyntaxKind.ThisExpression: {
         // Qualified `Outer.this` has the type of the named enclosing class.

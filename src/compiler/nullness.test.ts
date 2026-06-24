@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { expect } from "expect";
@@ -260,4 +262,90 @@ test("a @NullMarked sub-package does not mark its parent package", () => {
     "file:///a/C.java",
   );
   expect(codes).not.toContain(NULL_INTO_NONNULL);
+});
+
+// --- flow-aware narrowing ----------------------------------------------------------
+
+// A class with non-null sinks; `m`'s body is spliced in around a @Nullable local x.
+const NARROW = (body: string): string =>
+  `import java.util.Objects;
+class C {
+  void f(@NonNull String s) {}
+  boolean ok(@NonNull String s) { return true; }
+  String use(@NonNull String s) { return s; }
+  void h(@NonNull Object o) {}
+  @Nullable String src() { return src(); }
+  void m() { @Nullable String x = src(); ${body} }
+}`;
+
+test("an if (x != null) guard narrows x to non-null in the then-branch", () => {
+  expect(diagnose(NARROW("if (x != null) { f(x); }"))).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("an early-return on null narrows x for the rest of the block", () => {
+  expect(diagnose(NARROW("if (x == null) return; f(x);"))).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a && short-circuit narrows x in the right operand", () => {
+  expect(diagnose(NARROW("boolean b = x != null && ok(x);"))).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a || short-circuit narrows x in the right operand", () => {
+  expect(diagnose(NARROW("boolean b = x == null || ok(x);"))).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a ternary condition narrows x in the whenTrue arm", () => {
+  expect(diagnose(NARROW('String r = x != null ? use(x) : "";'))).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("an instanceof check narrows x to non-null", () => {
+  expect(diagnose(NARROW("if (x instanceof String) { h(x); }"))).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("Objects.requireNonNull narrows x for the rest of the block", () => {
+  expect(diagnose(NARROW("Objects.requireNonNull(x); f(x);"))).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("assert x != null narrows x for the rest of the block", () => {
+  expect(diagnose(NARROW("assert x != null; f(x);"))).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("reassigning x to a non-null value narrows it", () => {
+  expect(diagnose(NARROW('x = "y"; f(x);'))).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a use before the guard is still flagged", () => {
+  expect(diagnose(NARROW("f(x); if (x != null) {}"))).toContain(NULL_INTO_NONNULL);
+});
+
+test("reassigning x to null then using it is flagged", () => {
+  expect(diagnose(NARROW("if (x == null) return; x = null; f(x);"))).toContain(NULL_INTO_NONNULL);
+});
+
+test("the wrong branch (then of x == null) does not narrow to non-null", () => {
+  expect(diagnose(NARROW("if (x == null) { f(x); }"))).toContain(NULL_INTO_NONNULL);
+});
+
+test("a reassignment between a guard and the use invalidates the guard", () => {
+  const code = NARROW("if (x != null) { x = src(); f(x); }");
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("fields are not narrowed by a guard", () => {
+  const code =
+    "class C { @Nullable String fld; void f(@NonNull String s) {} void m() { if (fld != null) { f(fld); } } }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+// --- examples/nullness-app ---------------------------------------------------------
+
+test("examples/nullness-app flags exactly the one documented line", () => {
+  const main = readFileSync(
+    join(import.meta.dirname, "../../examples/nullness-app/src/main/java/example/Main.java"),
+    "utf8",
+  );
+  const codes = diagnose(main);
+  // shout(lookup("greeting")) is the single intended warning; the narrowed branch
+  // and everything else stay quiet.
+  expect(codes.filter(c => c === NULL_INTO_NONNULL)).toHaveLength(1);
 });
