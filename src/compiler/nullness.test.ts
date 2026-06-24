@@ -337,6 +337,51 @@ test("fields are not narrowed by a guard", () => {
   expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
 });
 
+// --- narrowing: condition forms ----------------------------------------------------
+
+const NARROWED_OK: ReadonlyArray<readonly [string, string]> = [
+  ["negation !(x == null)", "if (!(x == null)) { f(x); }"],
+  ["else of (x == null)", "if (x == null) {} else { f(x); }"],
+  ["Objects.nonNull condition", "if (Objects.nonNull(x)) { f(x); }"],
+  ["Objects.isNull else-branch", "if (Objects.isNull(x)) {} else { f(x); }"],
+  ["null on the left (null != x)", "if (null != x) { f(x); }"],
+  ["early-exit via throw", "if (x == null) throw new RuntimeException(); f(x);"],
+  ["early-exit via break", "for (;;) { if (x == null) break; f(x); }"],
+  ["early-exit via continue", "for (;;) { if (x == null) continue; f(x); }"],
+  ["block-bodied early-exit", "if (x == null) { System.out.println(); return; } f(x);"],
+  ["ternary whenFalse arm", 'String r = x == null ? "" : use(x);'],
+  ["&&-chain of three operands", "@Nullable String y = src(); boolean b = y != null && x != null && ok(x);"],
+  ["requireNonNull with a message arg", 'Objects.requireNonNull(x, "m"); f(x);'],
+  ["assert with a message", 'assert x != null : "m"; f(x);'],
+];
+
+for (const [name, body] of NARROWED_OK) {
+  test(`narrowing accepts: ${name}`, () => {
+    expect(diagnose(NARROW(body))).not.toContain(NULL_INTO_NONNULL);
+  });
+}
+
+// --- narrowing: loop conditions ----------------------------------------------------
+
+test("a while-loop condition narrows x in the body", () => {
+  expect(diagnose(NARROW("while (x != null) { f(x); break; }"))).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a for-loop condition narrows x in the body", () => {
+  expect(diagnose(NARROW("for (; x != null; ) { f(x); break; }"))).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a do-while condition does NOT narrow the body (it runs once first)", () => {
+  // The first iteration runs before the condition is tested, so narrowing here
+  // would be unsound - the warning is correct.
+  expect(diagnose(NARROW("do { f(x); break; } while (x != null);"))).toContain(NULL_INTO_NONNULL);
+});
+
+test("a reassignment inside the loop body invalidates the loop-condition narrowing", () => {
+  const code = NARROW("while (x != null) { x = src(); f(x); break; }");
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
 // --- examples/nullness-app ---------------------------------------------------------
 
 test("examples/nullness-app flags exactly the one documented line", () => {

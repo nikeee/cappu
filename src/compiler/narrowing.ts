@@ -19,6 +19,8 @@ import {
   type Block,
   type AssertStatement,
   type ExpressionStatement,
+  type WhileStatement,
+  type ForStatement,
   type Symbol,
   SyntaxKind,
 } from "./types.ts";
@@ -229,6 +231,20 @@ export function narrowNullnessAt(
           const f = conditionImplies(b.left, symbol, resolveRef).whenFalse;
           if (f) return f;
         }
+      }
+    } else if (parent.kind === SyntaxKind.WhileStatement) {
+      // The body runs only when the condition held. (A do-while body runs once
+      // before the test, so its condition is intentionally not consulted.)
+      const w = parent as WhileStatement;
+      if (node === w.statement) {
+        const f = conditionImplies(w.condition, symbol, resolveRef).whenTrue;
+        if (f) return f;
+      }
+    } else if (parent.kind === SyntaxKind.ForStatement) {
+      const fs = parent as ForStatement;
+      if (node === fs.statement && fs.condition) {
+        const f = conditionImplies(fs.condition, symbol, resolveRef).whenTrue;
+        if (f) return f;
       }
     }
   }

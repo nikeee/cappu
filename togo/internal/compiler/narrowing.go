@@ -234,6 +234,22 @@ func narrowNullnessAt(use *Node, symbol *Symbol, resolve resolveRef, exprNullnes
 					}
 				}
 			}
+		case WhileStatement:
+			// The body runs only when the condition held. (A do-while body runs once
+			// before the test, so its condition is intentionally not consulted.)
+			w := parent.AsWhileStatement()
+			if node == w.Statement {
+				if f := conditionImplies(w.Condition, symbol, resolve).whenTrue; f != "" {
+					return f
+				}
+			}
+		case ForStatement:
+			fs := parent.AsForStatement()
+			if node == fs.Statement && fs.Condition != nil {
+				if f := conditionImplies(fs.Condition, symbol, resolve).whenTrue; f != "" {
+					return f
+				}
+			}
 		}
 	}
 	return ""

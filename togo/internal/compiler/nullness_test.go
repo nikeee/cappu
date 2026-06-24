@@ -250,6 +250,50 @@ func TestNullnessNarrowingFlagged(t *testing.T) {
 	}
 }
 
+func TestNullnessNarrowingConditionForms(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"negation !(x == null)", "if (!(x == null)) { f(x); }"},
+		{"else of (x == null)", "if (x == null) {} else { f(x); }"},
+		{"Objects.nonNull condition", "if (Objects.nonNull(x)) { f(x); }"},
+		{"Objects.isNull else-branch", "if (Objects.isNull(x)) {} else { f(x); }"},
+		{"null on the left", "if (null != x) { f(x); }"},
+		{"early-exit via throw", "if (x == null) throw new RuntimeException(); f(x);"},
+		{"early-exit via break", "for (;;) { if (x == null) break; f(x); }"},
+		{"early-exit via continue", "for (;;) { if (x == null) continue; f(x); }"},
+		{"block-bodied early-exit", "if (x == null) { System.out.println(); return; } f(x);"},
+		{"ternary whenFalse arm", "String r = x == null ? \"\" : use(x);"},
+		{"&&-chain of three", "@Nullable String y = src(); boolean b = y != null && x != null && ok(x);"},
+		{"requireNonNull with message", "Objects.requireNonNull(x, \"m\"); f(x);"},
+		{"assert with message", "assert x != null : \"m\"; f(x);"},
+	}
+	for _, tc := range cases {
+		if containsCode(diagnoseNullness(narrowBody(tc.body), jspecify()), codeNullIntoNonNull) {
+			t.Errorf("%s: narrowing should suppress the warning for %q", tc.name, tc.body)
+		}
+	}
+}
+
+func TestNullnessLoopNarrowing(t *testing.T) {
+	accepted := []struct{ name, body string }{
+		{"while-loop condition", "while (x != null) { f(x); break; }"},
+		{"for-loop condition", "for (; x != null; ) { f(x); break; }"},
+	}
+	for _, tc := range accepted {
+		if containsCode(diagnoseNullness(narrowBody(tc.body), jspecify()), codeNullIntoNonNull) {
+			t.Errorf("%s: should narrow x in the body of %q", tc.name, tc.body)
+		}
+	}
+	flagged := []struct{ name, body string }{
+		{"do-while body runs once first", "do { f(x); break; } while (x != null);"},
+		{"reassignment inside loop body", "while (x != null) { x = src(); f(x); break; }"},
+	}
+	for _, tc := range flagged {
+		if !containsCode(diagnoseNullness(narrowBody(tc.body), jspecify()), codeNullIntoNonNull) {
+			t.Errorf("%s: expected a warning for %q", tc.name, tc.body)
+		}
+	}
+}
+
 func TestNullnessFieldNotNarrowed(t *testing.T) {
 	code := "class C { @Nullable String fld; void f(@NonNull String s) {} void m() { if (fld != null) { f(fld); } } }"
 	if !containsCode(diagnoseNullness(code, jspecify()), codeNullIntoNonNull) {
