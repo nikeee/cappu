@@ -435,6 +435,28 @@ test("a this-qualified access is not flagged as a dereference", () => {
   expect(diagnose("class C { String fld; void m() { this.fld.trim(); } }")).not.toContain(DEREF);
 });
 
+test("throwing a @Nullable value is flagged", () => {
+  expect(diagnose("class C { void m(@Nullable RuntimeException e) { throw e; } }")).toContain(
+    DEREF,
+  );
+});
+
+test("synchronizing on a @Nullable lock is flagged", () => {
+  expect(
+    diagnose("class C { void m(@Nullable Object lock) { synchronized (lock) {} } }"),
+  ).toContain(DEREF);
+});
+
+test("iterating a @Nullable collection in an enhanced-for is flagged", () => {
+  const code = "class C { void m(@Nullable java.util.List<String> xs) { for (String s : xs) {} } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a guard narrows a thrown @Nullable value", () => {
+  const code = "class C { void m(@Nullable RuntimeException e) { if (e != null) throw e; } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
 test("dereference checks are off when nullness is disabled", () => {
   const code = "class C { void m(@Nullable String x) { x.trim(); } }";
   expect(diagnose(code, null)).not.toContain(DEREF);

@@ -2503,6 +2503,13 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
         case SyntaxKind.ElementAccessExpression:
           checkDereference((node as ElementAccessExpression).expression);
           break;
+        // Implicit-dereference positions that unconditionally NPE on null: the
+        // thrown value, the synchronized lock, and the iterated collection.
+        case SyntaxKind.ThrowStatement:
+        case SyntaxKind.SynchronizedStatement:
+        case SyntaxKind.ForEachStatement:
+          checkDereference((node as unknown as { expression: Node }).expression);
+          break;
         case SyntaxKind.PropertyAccessExpression: {
           const access = node as PropertyAccessExpression;
           checkDereference(access.expression);

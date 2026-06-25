@@ -881,6 +881,14 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			}
 		case ElementAccessExpression:
 			checkDereference(node.AsElementAccessExpression().Expression)
+		// Implicit-dereference positions that unconditionally NPE on null: the
+		// thrown value, the synchronized lock, and the iterated collection.
+		case ThrowStatement:
+			checkDereference(node.AsThrowStatement().Expression)
+		case SynchronizedStatement:
+			checkDereference(node.AsSynchronizedStatement().Expression)
+		case ForEachStatement:
+			checkDereference(node.AsForEachStatement().Expression)
 		case PropertyAccessExpression:
 			access := node.AsPropertyAccessExpression()
 			checkDereference(access.Expression)

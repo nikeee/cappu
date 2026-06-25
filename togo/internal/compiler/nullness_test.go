@@ -324,6 +324,9 @@ func TestNullnessDereferenceFlagged(t *testing.T) {
 		{"method on @Nullable receiver", "class C { void m(@Nullable String x) { x.trim(); } }"},
 		{"field on @Nullable receiver", "class A { int v; }\nclass C { void m(@Nullable A a) { int n = a.v; } }"},
 		{"index of @Nullable array", "class C { void m(@Nullable String[] arr) { String s = arr[0]; } }"},
+		{"throw of @Nullable value", "class C { void m(@Nullable RuntimeException e) { throw e; } }"},
+		{"synchronized on @Nullable lock", "class C { void m(@Nullable Object lock) { synchronized (lock) {} } }"},
+		{"enhanced-for over @Nullable collection", "class C { void m(@Nullable java.util.List<String> xs) { for (String s : xs) {} } }"},
 	}
 	for _, tc := range cases {
 		if !containsCode(diagnoseNullness(tc.code, jspecify()), codeDeref) {
@@ -338,6 +341,7 @@ func TestNullnessDereferenceAccepted(t *testing.T) {
 		{"early-return narrows the receiver", "class C { void m(@Nullable String x) { if (x == null) return; x.trim(); } }"},
 		{"@NonNull receiver", "class C { void m(@NonNull String x) { x.trim(); } }"},
 		{"this-qualified access", "class C { String fld; void m() { this.fld.trim(); } }"},
+		{"guard narrows a thrown @Nullable value", "class C { void m(@Nullable RuntimeException e) { if (e != null) throw e; } }"},
 	}
 	for _, tc := range cases {
 		if containsCode(diagnoseNullness(tc.code, jspecify()), codeDeref) {
