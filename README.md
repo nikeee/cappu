@@ -53,6 +53,9 @@ cappu compile
 
 # run tests, see examples/junit-app
 cappu test
+
+# format all files in the project's sources without waiting 20 seconds for gradle's startup
+cappu format
 ```
 
 ### Other Stuff
