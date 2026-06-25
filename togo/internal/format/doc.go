@@ -88,6 +88,20 @@ func (t *token) width() int {
 }
 func (t *token) flat() string { return t.text }
 
+// reflowDoc is a leaf whose text is rewritten at write time given the column it
+// lands at - the generic hook the printer uses for comment reflow.
+type reflowDoc struct{ raw string }
+
+func (r *reflowDoc) width() int {
+	if strings.Contains(r.raw, "\n") {
+		return maxWidth
+	}
+	return len(r.raw)
+}
+func (r *reflowDoc) flat() string { return r.raw }
+
+func reflow(raw string) Doc { return &reflowDoc{raw: raw} }
+
 type concatDoc struct {
 	parts []Doc
 	w     int
@@ -229,6 +243,8 @@ type state struct {
 type printOptions struct {
 	width      int // hard wrap column (google-java-format: 100)
 	indentMult int // indent multiplier: 1 google (2-space), 2 aosp (4-space)
+	// commentRewriter rewrites a reflow leaf's text given the column it lands at.
+	commentRewriter func(raw string, column int) string
 }
 
 // splitByBreaks splits a Level's docs into Break-separated groups. Concats are
@@ -267,6 +283,9 @@ func computeBreaks(doc Doc, maxW, mult int, st state) state {
 		return st
 	case *levelDoc:
 		return computeLevel(n, maxW, mult, st)
+	case *reflowDoc:
+		st.column += n.width()
+		return st
 	default:
 		// A *brkDoc here would be a bug (not a direct child of a Level).
 		panic("unexpected Break outside a Level")
@@ -346,31 +365,54 @@ func computeSplit(maxW, mult int, docs []Doc, st state) state {
 
 // --- output ----------------------------------------------------------------
 
-func writeDoc(doc Doc, out *[]string) {
+// writer holds output chunks, the running column (for the reflow hook), and the
+// optional comment rewriter.
+type writer struct {
+	out     []string
+	col     int
+	rewrite func(raw string, column int) string
+}
+
+func (w *writer) push(s string) {
+	w.out = append(w.out, s)
+	if nl := strings.LastIndexByte(s, '\n'); nl >= 0 {
+		w.col = len(s) - nl - 1
+	} else {
+		w.col += len(s)
+	}
+}
+
+func writeDoc(doc Doc, w *writer) {
 	switch n := doc.(type) {
 	case *token:
-		*out = append(*out, n.text)
+		w.push(n.text)
+	case *reflowDoc:
+		if w.rewrite != nil {
+			w.push(w.rewrite(n.raw, w.col))
+		} else {
+			w.push(n.raw)
+		}
 	case *concatDoc:
 		for _, d := range n.parts {
-			writeDoc(d, out)
+			writeDoc(d, w)
 		}
 	case *levelDoc:
 		if n.oneLine {
-			*out = append(*out, n.flat())
+			w.push(n.flat())
 			return
 		}
 		for _, d := range n.splits[0] {
-			writeDoc(d, out)
+			writeDoc(d, w)
 		}
 		for i := 0; i < len(n.breaks); i++ {
 			if n.broken[i] {
-				trimTrailingSpace(out)
-				*out = append(*out, "\n"+strings.Repeat(" ", n.newIndent[i]))
+				trimTrailingSpace(&w.out)
+				w.push("\n" + strings.Repeat(" ", n.newIndent[i]))
 			} else {
-				*out = append(*out, n.breaks[i].flatText)
+				w.push(n.breaks[i].flatText)
 			}
 			for _, d := range n.splits[i+1] {
-				writeDoc(d, out)
+				writeDoc(d, w)
 			}
 		}
 	default:
@@ -385,10 +427,10 @@ func printDoc(doc Doc, options printOptions) string {
 		root = &levelDoc{plusIndt: ZERO, docs: []Doc{doc}, w: -1}
 	}
 	computeLevel(root, options.width, options.indentMult, state{})
-	var out []string
-	writeDoc(root, &out)
-	trimTrailingSpace(&out)
-	return strings.Join(out, "")
+	w := &writer{rewrite: options.commentRewriter}
+	writeDoc(root, w)
+	trimTrailingSpace(&w.out)
+	return strings.Join(w.out, "")
 }
 
 func trimTrailingSpace(out *[]string) {

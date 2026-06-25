@@ -13,27 +13,11 @@ package format
 
 import (
 	"errors"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/compiler"
 )
-
-// paramCommentRe is gjf's PARAMETER_COMMENT: an identifier (optionally a varargs
-// `...`) then `=`, inside a block comment.
-var paramCommentRe = regexp.MustCompile(`^/\*\s*([\p{L}_$][\p{L}\p{N}_$]*(?:\.\.\.)?)\s*=\s*\*/$`)
-
-// reformatParamComment normalizes a parameter-name comment `/*name=*/` to
-// `/* name= */`; other block comments are returned verbatim. Mirrors gjf's
-// reformatParameterComment.
-func reformatParamComment(text string) string {
-	m := paramCommentRe.FindStringSubmatch(text)
-	if m == nil {
-		return text
-	}
-	return "/* " + m[1] + "= */"
-}
 
 // FormatOptions selects the layout style.
 type FormatOptions struct {
@@ -63,7 +47,14 @@ func formatSourceFile(sf *compiler.Node, options FormatOptions) (string, error) 
 	}
 	p := newPrinter(sf, mult)
 	doc := p.sourceFile(sf.AsSourceFile())
-	out := printDoc(doc, printOptions{width: width, indentMult: mult})
+	out := printDoc(doc, printOptions{
+		width:      width,
+		indentMult: mult,
+		// A reflow leaf carries a raw comment; rewrite it at its column.
+		commentRewriter: func(raw string, col int) string {
+			return rewriteComment(raw, col, strings.HasPrefix(raw, "//"))
+		},
+	})
 	// Safety net: the printer attaches comments at member/statement granularity.
 	// If a comment sat somewhere it does not yet handle, refuse rather than
 	// silently drop it - the CLI then leaves the file untouched.
@@ -204,14 +195,14 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 				// A comment after code on the same line: attach to the previous entry.
 				out[len(out)-1] = concat(out[len(out)-1], text(" "), text(c.text))
 			} else {
-				pushEntry(text(c.text), p.blankBeforePos(prevEnd, c.pos))
+				pushEntry(reflow(c.text), p.blankBeforePos(prevEnd, c.pos))
 			}
 			prevEnd = c.end
 		}
 
 		itemDoc := p.node(item)
 		if inlineLead != nil {
-			itemDoc = concat(text(inlineLead.text), text(" "), itemDoc)
+			itemDoc = concat(reflow(inlineLead.text), text(" "), itemDoc)
 		}
 		if trailing, ok := p.trailingCommentAfter(item); ok {
 			itemDoc = concat(itemDoc, text(" "), text(trailing.text))
@@ -223,7 +214,7 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 	}
 
 	for _, c := range p.commentsBefore(endPos) {
-		push(text(c.text), p.blankBeforePos(prevEnd, c.pos))
+		push(reflow(c.text), p.blankBeforePos(prevEnd, c.pos))
 		prevEnd = c.end
 	}
 	return out
@@ -277,7 +268,7 @@ func (p *printer) sourceFile(sf *compiler.SourceFileData) Doc {
 	if len(header) > 0 {
 		texts := make([]Doc, len(header))
 		for i, c := range header {
-			texts[i] = text(c.text)
+			texts[i] = reflow(c.text)
 		}
 		headerDoc := join(hardline, texts)
 		// A leading comment glued to the first construct (no blank line in source)
@@ -1081,12 +1072,12 @@ func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, e
 	var body []Doc
 	for _, c := range nodes(clauses) {
 		for _, cm := range p.commentsBefore(p.start(c)) {
-			body = append(body, text(cm.text))
+			body = append(body, reflow(cm.text))
 		}
 		body = append(body, p.switchClause(c.AsSwitchClause(), c.End))
 	}
 	for _, cm := range p.commentsBefore(endPos) {
-		body = append(body, text(cm.text))
+		body = append(body, reflow(cm.text))
 	}
 	return concat(
 		group(concat(text("switch ("), p.node(expr), text(")"))),
@@ -1279,7 +1270,11 @@ func (p *printer) argList(args *compiler.NodeArray) Doc {
 			if c.line {
 				parts = append(parts, text(c.text), hardline)
 			} else {
-				parts = append(parts, text(reformatParamComment(c.text)), text(" "))
+				pc := c.text
+				if norm, ok := reformatParamComment(c.text); ok {
+					pc = norm
+				}
+				parts = append(parts, text(pc), text(" "))
 			}
 		}
 		parts = append(parts, p.node(a))
