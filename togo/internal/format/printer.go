@@ -644,8 +644,13 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 	constantsDoc := join(concat(text(","), hardline), constantDocs)
 	bodyParts := []Doc{hardline, constantsDoc}
 	if d.Members.Len() > 0 {
-		// A blank line separates the constant list from the member declarations.
-		bodyParts = append(bodyParts, text(";"), hardline, hardline)
+		// The constant list is `;`-terminated, then the members. A blank line
+		// separates them only when there are constants above (a bare leading `;`
+		// with no constants gets no blank line before the members).
+		bodyParts = append(bodyParts, text(";"), hardline)
+		if len(constantDocs) > 0 {
+			bodyParts = append(bodyParts, hardline)
+		}
 		bodyParts = append(bodyParts, p.members(d.Members, end)...)
 	} else if len(constantDocs) > 0 {
 		// A trailing `;` after the last constant is preserved from the source.

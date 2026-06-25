@@ -608,8 +608,12 @@ class Printer {
     const constantsDoc = join(concat([",", hardline]), constants);
     const bodyParts: Doc[] = [hardline, constantsDoc];
     if (d.members.length > 0) {
-      // A blank line separates the constant list from the member declarations.
-      bodyParts.push(";", hardline, hardline, ...this.members(d.members, d.end));
+      // The constant list is `;`-terminated, then the members. A blank line
+      // separates them only when there are constants above (a bare leading `;`
+      // with no constants gets no blank line before the members).
+      bodyParts.push(";", hardline);
+      if (constants.length > 0) bodyParts.push(hardline);
+      bodyParts.push(...this.members(d.members, d.end));
     } else if (constants.length > 0) {
       // A trailing `;` after the last constant is preserved from the source.
       const last = d.enumConstants[d.enumConstants.length - 1];
