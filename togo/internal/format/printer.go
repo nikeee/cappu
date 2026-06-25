@@ -191,7 +191,9 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 		var inlineLead *comment
 		if n := len(leadComments); n > 0 {
 			last := leadComments[n-1]
-			if !last.line && !strings.Contains(p.text[last.end:itemStart], "\n") {
+			// A multi-line comment/javadoc stays own-line; only a single-line
+			// block comment abutting the item attaches inline.
+			if !last.line && !strings.Contains(last.text, "\n") && !strings.Contains(p.text[last.end:itemStart], "\n") {
 				inlineLead = &last
 				leadComments = leadComments[:n-1]
 			}
