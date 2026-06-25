@@ -350,7 +350,10 @@ const NARROWED_OK: ReadonlyArray<readonly [string, string]> = [
   ["early-exit via continue", "for (;;) { if (x == null) continue; f(x); }"],
   ["block-bodied early-exit", "if (x == null) { System.out.println(); return; } f(x);"],
   ["ternary whenFalse arm", 'String r = x == null ? "" : use(x);'],
-  ["&&-chain of three operands", "@Nullable String y = src(); boolean b = y != null && x != null && ok(x);"],
+  [
+    "&&-chain of three operands",
+    "@Nullable String y = src(); boolean b = y != null && x != null && ok(x);",
+  ],
   ["requireNonNull with a message arg", 'Objects.requireNonNull(x, "m"); f(x);'],
   ["assert with a message", 'assert x != null : "m"; f(x);'],
 ];
