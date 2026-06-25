@@ -843,6 +843,33 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			if argc != record.RecordComponents.Len() {
 				reportArity(creation.Type, node.End, strconv.Itoa(record.RecordComponents.Len()), argc)
 			}
+			// The canonical constructor's parameters are the record components, so a
+			// possibly-null argument into a non-null component is caught here. Each
+			// component carries its own nullness (annotation or @NullMarked default).
+			// A dedicated loop (not checkParamNullness) since components are not Parameters.
+			if c.nullness != nil {
+				var subst substMap
+				if created := c.resolveType(creation.Type, node); created.Kind == TypeKindClass {
+					subst = c.substitutionFor(symbol, created.TypeArguments)
+				}
+				comps := record.RecordComponents
+				fixed := comps.Len()
+				if last := lastNode(comps); last != nil && last.AsRecordComponent().IsVarArgs {
+					fixed = comps.Len() - 1
+				}
+				n := nodeArrayLen(creation.Arguments)
+				if fixed < n {
+					n = fixed
+				}
+				for i := 0; i < n; i++ {
+					comp := comps.Nodes[i]
+					if comp.Symbol == nil {
+						continue
+					}
+					targetType := c.substitute(c.getTypeOfSymbol(comp.Symbol), subst)
+					checkNullness(creation.Arguments.Nodes[i], targetType, comp.AsRecordComponent().Name.AsIdentifier().Text)
+				}
+			}
 		}
 	}
 

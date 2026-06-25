@@ -1260,7 +1260,8 @@ func dottedTypeName(node *Node) string {
 	return ""
 }
 
-func (c *Checker) typeOfMemberAccess(access *PropertyAccessExpressionData) *Type {
+func (c *Checker) typeOfMemberAccess(node *Node) *Type {
+	access := node.AsPropertyAccessExpression()
 	receiver := c.getTypeOfExpression(access.Expression)
 	if receiver.Kind == TypeKindArray {
 		member := c.arrayMember(access.Name.AsIdentifier().Text)
@@ -1284,7 +1285,16 @@ func (c *Checker) typeOfMemberAccess(access *PropertyAccessExpressionData) *Type
 	if found == nil {
 		return errorType
 	}
-	return c.substitute(c.getTypeOfSymbol(found.symbol), found.subst)
+	memberType := c.substitute(c.getTypeOfSymbol(found.symbol), found.subst)
+	// Narrow a `this.f` read of a final field, the same way a bare `f` narrows in the
+	// Identifier arm. `this`-only keeps it sound: the receiver is fixed.
+	if c.nullness != nil && access.Expression.Kind == ThisExpression &&
+		found.symbol.Flags&SymbolFlagsField != 0 && c.isFinalField(found.symbol) {
+		if narrowed := narrowNullnessAt(node, found.symbol, c.resolveRefNode, c.exprNullness); narrowed != "" {
+			return withNullness(memberType, narrowed)
+		}
+	}
+	return memberType
 }
 
 var collapseWhitespace = regexp.MustCompile(`\s+`)
@@ -1444,6 +1454,42 @@ func (c *Checker) getTypeOfExpression(node *Node) *Type {
 	return t
 }
 
+// isFinalField reports whether a field can never be reassigned: a `final` field, or
+// a record component (implicitly final). Only such fields are safe to narrow - a
+// non-final field could be written by another thread or an intervening call between
+// guard and use.
+func (c *Checker) isFinalField(symbol *Symbol) bool {
+	decl := c.declarationOf(symbol)
+	if decl == nil {
+		return false
+	}
+	if decl.Kind == RecordComponent {
+		return true
+	}
+	if decl.Kind == VariableDeclarator {
+		return hasModifierKind(declModifiers(decl.Parent), FinalKeyword)
+	}
+	return false
+}
+
+// isNarrowable reports whether a symbol's nullness flow-narrows: locals and
+// parameters, plus final fields (this.f / bare f - a single, stable receiver).
+func (c *Checker) isNarrowable(symbol *Symbol) bool {
+	if symbol.Flags&(SymbolFlagsParameter|SymbolFlagsLocalVariable) != 0 {
+		return true
+	}
+	return symbol.Flags&SymbolFlagsField != 0 && c.isFinalField(symbol)
+}
+
+// resolveRefNode resolves a narrowing reference: a bare identifier or a `this.f`
+// member access.
+func (c *Checker) resolveRefNode(n *Node) *Symbol {
+	if n.Kind == PropertyAccessExpression {
+		return c.resolveMemberAccess(n.AsPropertyAccessExpression())
+	}
+	return ResolveIdentifier(n, c.program)
+}
+
 func (c *Checker) computeExpressionType(node *Node) *Type {
 	switch node.Kind {
 	case NumericLiteral:
@@ -1462,12 +1508,10 @@ func (c *Checker) computeExpressionType(node *Node) *Type {
 			return errorType
 		}
 		t := c.getTypeOfSymbol(symbol)
-		// Flow-aware narrowing (nikeee/cappu#25): refine a local/parameter's nullness
-		// facet from what the preceding control flow has proven at this use.
-		if c.nullness != nil && symbol.Flags&(SymbolFlagsParameter|SymbolFlagsLocalVariable) != 0 {
-			if narrowed := narrowNullnessAt(node, symbol,
-				func(n *Node) *Symbol { return ResolveIdentifier(n, c.program) },
-				c.exprNullness); narrowed != "" {
+		// Flow-aware narrowing (nikeee/cappu#25): refine a local/parameter/final-field's
+		// nullness facet from what the preceding control flow has proven at this use.
+		if c.nullness != nil && c.isNarrowable(symbol) {
+			if narrowed := narrowNullnessAt(node, symbol, c.resolveRefNode, c.exprNullness); narrowed != "" {
 				return withNullness(t, narrowed)
 			}
 		}
@@ -1501,7 +1545,7 @@ func (c *Checker) computeExpressionType(node *Node) *Type {
 	case CastExpression:
 		return c.resolveType(node.AsCastExpression().Type, node)
 	case PropertyAccessExpression:
-		return c.typeOfMemberAccess(node.AsPropertyAccessExpression())
+		return c.typeOfMemberAccess(node)
 	case CallExpression:
 		return c.typeOfCall(node)
 	case ObjectCreationExpression:

@@ -21,6 +21,7 @@ import {
   type ExpressionStatement,
   type WhileStatement,
   type ForStatement,
+  type TryStatement,
   type Symbol,
   SyntaxKind,
 } from "./types.ts";
@@ -39,10 +40,16 @@ interface Facts {
 
 const isNullLiteral = (n: Node): boolean => n.kind === SyntaxKind.NullKeyword;
 
-// A bare reference (`x`) to the tracked symbol. Locals/params are referenced by a
-// plain Identifier, so a qualified `this.x` (a field) is intentionally not matched.
+// A reference to the tracked symbol: a bare `x` (local/param/implicit-this field) or
+// a `this.x` member access (a final field). `this`-only by design - `obj.x` for an
+// arbitrary receiver shares the field symbol across receivers and must not narrow.
 function refersToSymbol(node: Node, symbol: Symbol, resolveRef: ResolveRef): boolean {
-  return node.kind === SyntaxKind.Identifier && resolveRef(node as Identifier) === symbol;
+  if (node.kind === SyntaxKind.Identifier) return resolveRef(node) === symbol;
+  if (node.kind === SyntaxKind.PropertyAccessExpression) {
+    const access = node as PropertyAccessExpression;
+    return access.expression.kind === SyntaxKind.ThisExpression && resolveRef(access) === symbol;
+  }
+  return false;
 }
 
 // The simple (unqualified) name of a call's callee, for Objects.requireNonNull etc.
@@ -169,6 +176,22 @@ function branchTrailingNullness(
 // state is unknown from here, so earlier facts no longer apply); undefined = keep looking.
 type StmtFact = { kind: "narrow"; nullness: Nullness } | { kind: "reset" } | undefined;
 
+// Scan statements [0, before) backward for the nearest decisive fact about `symbol`
+// (an assignment or guard); undefined when none touches it.
+function scanPrecedingFacts(
+  stmts: readonly Node[],
+  before: number,
+  symbol: Symbol,
+  resolveRef: ResolveRef,
+  exprNullness: ExprNullness,
+): StmtFact {
+  for (let i = before - 1; i >= 0; i--) {
+    const fact = precedingStatementFact(stmts[i]!, symbol, resolveRef, exprNullness);
+    if (fact) return fact;
+  }
+  return undefined;
+}
+
 function precedingStatementFact(
   stmt: Node,
   symbol: Symbol,
@@ -234,6 +257,19 @@ function precedingStatementFact(
       return { kind: "reset" };
     }
   }
+  if (stmt.kind === SyntaxKind.TryStatement) {
+    const t = stmt as TryStatement;
+    // Reaching code after a try means the try block completed normally: any thrown
+    // exception was caught and the catch did not fall through. So a fact the try body
+    // proves at its end (e.g. Objects.requireNonNull(x)) holds afterward - but only
+    // when every catch exits and a finally does not reassign the symbol.
+    if (!t.catchClauses.every(c => definitelyExits(c.block))) return undefined;
+    if (t.finallyBlock && branchAssignsSymbol(t.finallyBlock, symbol, resolveRef)) {
+      return { kind: "reset" };
+    }
+    const stmts = t.tryBlock.statements;
+    return scanPrecedingFacts(stmts, stmts.length, symbol, resolveRef, exprNullness);
+  }
   return undefined;
 }
 
@@ -255,11 +291,9 @@ export function narrowNullnessAt(
     if (parent.kind === SyntaxKind.Block) {
       const stmts = (parent as Block).statements;
       const idx = stmts.indexOf(node as never);
-      for (let i = idx - 1; i >= 0; i--) {
-        const fact = precedingStatementFact(stmts[i]!, symbol, resolveRef, exprNullness);
-        if (fact?.kind === "narrow") return fact.nullness;
-        if (fact?.kind === "reset") return undefined;
-      }
+      const fact = scanPrecedingFacts(stmts, idx, symbol, resolveRef, exprNullness);
+      if (fact?.kind === "narrow") return fact.nullness;
+      if (fact?.kind === "reset") return undefined;
       continue;
     }
     // Conditional branch position: we are inside a branch whose guard proves a fact.

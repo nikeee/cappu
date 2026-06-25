@@ -480,6 +480,93 @@ test("dereference checks are off when nullness is disabled", () => {
   expect(diagnose(code, null)).not.toContain(DEREF);
 });
 
+// --- final-field narrowing ---------------------------------------------------------
+
+test("a guard on a final @Nullable field narrows this.f for a later dereference", () => {
+  const code =
+    "class C { final @Nullable String f = null; void m() { if (this.f != null) this.f.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("a guard on a final @Nullable field narrows the bare field reference", () => {
+  const code = "class C { final @Nullable String f = null; void m() { if (f != null) f.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("a non-final @Nullable field is not narrowed by a guard (could be reassigned)", () => {
+  const code =
+    "class C { @Nullable String f = null; void m() { if (this.f != null) this.f.trim(); } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a final @Nullable field dereferenced without a guard is still flagged", () => {
+  const code = "class C { final @Nullable String f = null; void m() { this.f.trim(); } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a guard on one receiver's final field does not narrow another receiver's", () => {
+  // a.f and b.f share the field symbol; narrowing must stay this-receiver only.
+  const code =
+    "class C { final @Nullable String f = null; void m(C a, C b) { if (a.f != null) b.f.trim(); } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a final @Nullable record component is narrowed after a guard inside the record", () => {
+  const code =
+    "record R(@Nullable String name) { void m() { if (this.name != null) this.name.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+// --- record construction -----------------------------------------------------------
+
+test("new R(null) into a non-null record component is flagged", () => {
+  const code = "@NullMarked record R(String x) {}\nclass C { void m() { new R(null); } }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("new R(null) into a @Nullable record component is accepted", () => {
+  const code = "record R(@Nullable String x) {}\nclass C { void m() { new R(null); } }";
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a non-null argument into a non-null record component is accepted", () => {
+  const code = '@NullMarked record R(String x) {}\nclass C { void m() { new R("a"); } }';
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+// --- try/catch flow ----------------------------------------------------------------
+
+test("requireNonNull in a try whose catch exits narrows after the try", () => {
+  const code =
+    "class C { void m(@Nullable String x) { try { java.util.Objects.requireNonNull(x); } catch (RuntimeException e) { return; } x.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("a catch that falls through does not narrow after the try", () => {
+  const code =
+    "class C { void m(@Nullable String x) { try { java.util.Objects.requireNonNull(x); } catch (RuntimeException e) {} x.trim(); } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("an assignment in a try whose catch exits narrows after the try", () => {
+  // Reaching after the try means it completed normally, so the assignment ran.
+  const code =
+    'class C { void m(@Nullable String x) { try { x = "a"; } catch (RuntimeException e) { return; } x.trim(); } }';
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("an assignment in a try with a fall-through catch does not narrow after the try", () => {
+  const code =
+    'class C { void m(@Nullable String x) { try { x = "a"; } catch (RuntimeException e) {} x.trim(); } }';
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a guard before a try narrows inside the try body", () => {
+  const code =
+    "class C { void m(@Nullable String x) { if (x == null) return; try { x.trim(); } catch (RuntimeException e) {} } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
 // --- examples/nullness-app ---------------------------------------------------------
 
 test("examples/nullness-app flags exactly the one documented line", () => {

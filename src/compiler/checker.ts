@@ -1104,7 +1104,19 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
     }
     const found = lookupTypedMember(receiver as ClassType, access.name.text);
     if (!found) return errorType;
-    return substitute(getTypeOfSymbol(found.symbol), found.subst);
+    const memberType = substitute(getTypeOfSymbol(found.symbol), found.subst);
+    // Narrow a `this.f` read of a final field, the same way a bare `f` narrows in
+    // the Identifier arm. `this`-only keeps it sound: the receiver is fixed.
+    if (
+      nullnessAnnotations &&
+      access.expression.kind === SyntaxKind.ThisExpression &&
+      found.symbol.flags & SymbolFlags.Field &&
+      isFinalField(found.symbol)
+    ) {
+      const narrowed = narrowNullnessAt(access, found.symbol, resolveRefNode, exprNullness);
+      if (narrowed) return withNullness(memberType, narrowed);
+    }
+    return memberType;
   }
 
   function nodeSourceText(node: Node): string {
@@ -1332,6 +1344,33 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
     return type;
   }
 
+  // A field that can never be reassigned: a `final` field, or a record component
+  // (implicitly final). Only such fields are safe to narrow - a non-final field
+  // could be written by another thread or an intervening call between guard and use.
+  function isFinalField(symbol: Symbol): boolean {
+    const decl = symbol.valueDeclaration ?? symbol.declarations?.[0];
+    if (!decl) return false;
+    if (decl.kind === SyntaxKind.RecordComponent) return true;
+    if (decl.kind === SyntaxKind.VariableDeclarator) {
+      const field = decl.parent as { modifiers?: ReadonlyArray<Node> } | undefined;
+      return field?.modifiers?.some(m => m.kind === SyntaxKind.FinalKeyword) ?? false;
+    }
+    return false;
+  }
+
+  // Symbols whose nullness flow-narrows: locals and parameters, plus final fields
+  // (this.f / bare f - a single, stable receiver). See narrowNullnessAt.
+  function isNarrowable(symbol: Symbol): boolean {
+    if (symbol.flags & (SymbolFlags.Parameter | SymbolFlags.LocalVariable)) return true;
+    return Boolean(symbol.flags & SymbolFlags.Field) && isFinalField(symbol);
+  }
+
+  // Resolve a narrowing reference: a bare identifier or a `this.f` member access.
+  const resolveRefNode = (n: Node): Symbol | undefined =>
+    n.kind === SyntaxKind.PropertyAccessExpression
+      ? resolveMemberAccess(n as PropertyAccessExpression)
+      : resolveIdentifier(n as Identifier, program);
+
   function computeExpressionType(node: Node): Type {
     switch (node.kind) {
       case SyntaxKind.NumericLiteral:
@@ -1350,18 +1389,10 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
         const symbol = resolveIdentifier(node as Identifier, program);
         if (!symbol) return errorType;
         const type = getTypeOfSymbol(symbol);
-        // Flow-aware narrowing (nikeee/cappu#25): refine a local/parameter's nullness
-        // facet from what the preceding control flow has proven at this use.
-        if (
-          nullnessAnnotations &&
-          symbol.flags & (SymbolFlags.Parameter | SymbolFlags.LocalVariable)
-        ) {
-          const narrowed = narrowNullnessAt(
-            node,
-            symbol,
-            n => resolveIdentifier(n as Identifier, program),
-            exprNullness,
-          );
+        // Flow-aware narrowing (nikeee/cappu#25): refine a local/parameter/final-field's
+        // nullness facet from what the preceding control flow has proven at this use.
+        if (nullnessAnnotations && isNarrowable(symbol)) {
+          const narrowed = narrowNullnessAt(node, symbol, resolveRefNode, exprNullness);
           if (narrowed) return withNullness(type, narrowed);
         }
         return type;
@@ -2434,6 +2465,15 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
         if (argc !== record.recordComponents.length) {
           reportArity(node.type, node.end, String(record.recordComponents.length), argc);
         }
+        // The canonical constructor's parameters are the record components, so a
+        // possibly-null argument into a non-null component is caught here. Each
+        // component carries its own nullness (annotation or @NullMarked default).
+        const created = resolveType(node.type, node);
+        const subst =
+          created.kind === TypeKind.Class
+            ? substitutionFor(symbol, (created as ClassType).typeArguments)
+            : new Map<Symbol, Type>();
+        checkParamNullness(node.arguments ?? [], record.recordComponents, subst);
       }
     };
 

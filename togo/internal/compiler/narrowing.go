@@ -23,10 +23,18 @@ type facts struct {
 
 func isNullLiteral(n *Node) bool { return n.Kind == NullKeyword }
 
-// refersToSymbol reports whether node is a bare reference (`x`) to symbol. Locals and
-// params are referenced by a plain Identifier, so a qualified `this.x` is not matched.
+// refersToSymbol reports whether node references symbol: a bare `x` (local/param/
+// implicit-this field) or a `this.x` member access (a final field). `this`-only by
+// design - `obj.x` for an arbitrary receiver shares the field symbol across receivers
+// and must not narrow.
 func refersToSymbol(node *Node, symbol *Symbol, resolve resolveRef) bool {
-	return node.Kind == Identifier && resolve(node) == symbol
+	if node.Kind == Identifier {
+		return resolve(node) == symbol
+	}
+	if node.Kind == PropertyAccessExpression {
+		return node.AsPropertyAccessExpression().Expression.Kind == ThisExpression && resolve(node) == symbol
+	}
+	return false
 }
 
 // calleeName is the simple (unqualified) name of a call's callee.
@@ -142,6 +150,17 @@ type stmtFact struct {
 	nullness Nullness
 }
 
+// scanPrecedingFacts scans stmts[0:before) backward for the nearest decisive fact
+// about symbol (an assignment or guard); factNone when none touches it.
+func scanPrecedingFacts(stmts []*Node, before int, symbol *Symbol, resolve resolveRef, exprNullness exprNullnessFn) stmtFact {
+	for i := before - 1; i >= 0; i-- {
+		if fact := precedingStatementFact(stmts[i], symbol, resolve, exprNullness); fact.kind != factNone {
+			return fact
+		}
+	}
+	return stmtFact{kind: factNone}
+}
+
 func precedingStatementFact(stmt *Node, symbol *Symbol, resolve resolveRef, exprNullness exprNullnessFn) stmtFact {
 	switch stmt.Kind {
 	case ExpressionStatement:
@@ -187,6 +206,24 @@ func precedingStatementFact(stmt *Node, symbol *Symbol, resolve resolveRef, expr
 			(ifs.ElseStatement != nil && branchAssignsSymbol(ifs.ElseStatement, symbol, resolve)) {
 			return stmtFact{kind: factReset}
 		}
+	case TryStatement:
+		t := stmt.AsTryStatement()
+		// Reaching code after a try means the try block completed normally: any thrown
+		// exception was caught and the catch did not fall through. So a fact the try body
+		// proves at its end (e.g. Objects.requireNonNull(x)) holds afterward - but only
+		// when every catch exits and a finally does not reassign the symbol.
+		if t.CatchClauses != nil {
+			for _, c := range t.CatchClauses.Nodes {
+				if !definitelyExits(c.AsCatchClause().Block) {
+					return stmtFact{kind: factNone}
+				}
+			}
+		}
+		if t.FinallyBlock != nil && branchAssignsSymbol(t.FinallyBlock, symbol, resolve) {
+			return stmtFact{kind: factReset}
+		}
+		stmts := t.TryBlock.AsBlock().Statements.Nodes
+		return scanPrecedingFacts(stmts, len(stmts), symbol, resolve, exprNullness)
 	}
 	return stmtFact{kind: factNone}
 }
@@ -249,14 +286,12 @@ func narrowNullnessAt(use *Node, symbol *Symbol, resolve resolveRef, exprNullnes
 		if parent.Kind == Block {
 			stmts := parent.AsBlock().Statements
 			idx := indexOfNode(stmts, node)
-			for i := idx - 1; i >= 0; i-- {
-				fact := precedingStatementFact(stmts.Nodes[i], symbol, resolve, exprNullness)
-				if fact.kind == factNarrow {
-					return fact.nullness
-				}
-				if fact.kind == factReset {
-					return ""
-				}
+			fact := scanPrecedingFacts(stmts.Nodes, idx, symbol, resolve, exprNullness)
+			if fact.kind == factNarrow {
+				return fact.nullness
+			}
+			if fact.kind == factReset {
+				return ""
 			}
 			continue
 		}

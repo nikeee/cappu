@@ -427,3 +427,7 @@ cappu search commons-lang3
 - 2026-06-25 09:23 — what next?
 - 2026-06-25 09:23 — 1 and 4
 - 2026-06-25 09:43 — implement JEP 441 case null patterns
+- 2026-06-25 17:33 — what next?
+- 2026-06-25 17:33 — field narrowing would be cool, but is this thread-safe?
+- 2026-06-25 17:33 — do final field narrowing, method-return narrowing, try/catch flow
+- 2026-06-25 17:33 — does this feature support modern stuff like records?

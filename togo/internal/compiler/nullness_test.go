@@ -44,6 +44,7 @@ func TestNullnessFlagged(t *testing.T) {
 		{"@NullMarked unannotated parameter rejects null", "@NullMarked class C { void f(String s) {} void g() { f(null); } }"},
 		{"@NullMarked unannotated local rejects null", "@NullMarked class C { void g() { String s = null; } }"},
 		{"@Nullable return into @NonNull parameter", "class C { @Nullable String n() { return null; } void f(@NonNull String s) {} void g() { f(n()); } }"},
+		{"new R(null) into a non-null record component", "@NullMarked record R(String x) {}\nclass C { void m() { new R(null); } }"},
 	}
 	for _, tc := range cases {
 		if !containsCode(diagnoseNullness(tc.code, jspecify()), codeNullIntoNonNull) {
@@ -59,6 +60,8 @@ func TestNullnessAccepted(t *testing.T) {
 		{"@NullUnmarked method opts out", "@NullMarked class C { @NullUnmarked void f(String s) {} void g() { f(null); } }"},
 		{"plain parameter outside @NullMarked accepts null", "class C { void f(String s) {} void g() { f(null); } }"},
 		{"non-null value into @NonNull parameter", "class C { @NonNull String n() { return \"a\"; } void f(@NonNull String s) {} void g() { f(n()); } }"},
+		{"new R(null) into a @Nullable record component", "record R(@Nullable String x) {}\nclass C { void m() { new R(null); } }"},
+		{"non-null arg into a non-null record component", "@NullMarked record R(String x) {}\nclass C { void m() { new R(\"a\"); } }"},
 	}
 	for _, tc := range cases {
 		if containsCode(diagnoseNullness(tc.code, jspecify()), codeNullIntoNonNull) {
@@ -329,6 +332,11 @@ func TestNullnessDereferenceFlagged(t *testing.T) {
 		{"enhanced-for over @Nullable collection", "class C { void m(@Nullable java.util.List<String> xs) { for (String s : xs) {} } }"},
 		{"switch on @Nullable selector without case null", `class C { void m(@Nullable String x) { switch (x) { case "a" -> {} default -> {} } } }`},
 		{"switch expression on @Nullable selector without case null", `class C { int m(@Nullable String x) { return switch (x) { case "a" -> 1; default -> 0; }; } }`},
+		{"non-final @Nullable field not narrowed by a guard", "class C { @Nullable String f = null; void m() { if (this.f != null) this.f.trim(); } }"},
+		{"final @Nullable field dereferenced without a guard", "class C { final @Nullable String f = null; void m() { this.f.trim(); } }"},
+		{"guard on one receiver does not narrow another receiver's final field", "class C { final @Nullable String f = null; void m(C a, C b) { if (a.f != null) b.f.trim(); } }"},
+		{"catch falls through after requireNonNull", "class C { void m(@Nullable String x) { try { java.util.Objects.requireNonNull(x); } catch (RuntimeException e) {} x.trim(); } }"},
+		{"assignment in try with fall-through catch", `class C { void m(@Nullable String x) { try { x = "a"; } catch (RuntimeException e) {} x.trim(); } }`},
 	}
 	for _, tc := range cases {
 		if !containsCode(diagnoseNullness(tc.code, jspecify()), codeDeref) {
@@ -345,6 +353,12 @@ func TestNullnessDereferenceAccepted(t *testing.T) {
 		{"this-qualified access", "class C { String fld; void m() { this.fld.trim(); } }"},
 		{"guard narrows a thrown @Nullable value", "class C { void m(@Nullable RuntimeException e) { if (e != null) throw e; } }"},
 		{"case null (JEP 441) handles a @Nullable switch selector", `class C { void m(@Nullable String x) { switch (x) { case null -> {} case "a" -> {} default -> {} } } }`},
+		{"guard narrows a final @Nullable field via this.f", "class C { final @Nullable String f = null; void m() { if (this.f != null) this.f.trim(); } }"},
+		{"guard narrows a final @Nullable field via bare f", "class C { final @Nullable String f = null; void m() { if (f != null) f.trim(); } }"},
+		{"guard narrows a final @Nullable record component", "record R(@Nullable String name) { void m() { if (this.name != null) this.name.trim(); } }"},
+		{"requireNonNull in a try whose catch exits", "class C { void m(@Nullable String x) { try { java.util.Objects.requireNonNull(x); } catch (RuntimeException e) { return; } x.trim(); } }"},
+		{"assignment in a try whose catch exits", `class C { void m(@Nullable String x) { try { x = "a"; } catch (RuntimeException e) { return; } x.trim(); } }`},
+		{"guard before a try narrows inside the try body", "class C { void m(@Nullable String x) { if (x == null) return; try { x.trim(); } catch (RuntimeException e) {} } }"},
 	}
 	for _, tc := range cases {
 		if containsCode(diagnoseNullness(tc.code, jspecify()), codeDeref) {
