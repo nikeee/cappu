@@ -995,8 +995,15 @@ class Printer {
     ]);
   }
 
-  private switchLike(expr: Expression, clauses: NodeArray<SwitchClause>): Doc {
-    const body = clauses.map(c => this.switchClause(c));
+  private switchLike(expr: Expression, clauses: NodeArray<SwitchClause>, endPos: number): Doc {
+    // Comments before a `case`/`default` label sit on their own line at the
+    // clause indent (gjf), so consume them per clause like a member list does.
+    const body: Doc[] = [];
+    for (const c of clauses) {
+      for (const cm of this.commentsBefore(this.start(c))) body.push(cm.text);
+      body.push(this.switchClause(c));
+    }
+    for (const cm of this.commentsBefore(endPos)) body.push(cm.text);
     return concat([
       group(concat(["switch (", this.node(expr), ")"])),
       " {",
@@ -1360,12 +1367,12 @@ class Printer {
         return this.tryStatement(node as TryStatement);
       case SyntaxKind.SwitchStatement: {
         const s = node as SwitchStatement;
-        return this.switchLike(s.expression, s.clauses);
+        return this.switchLike(s.expression, s.clauses, s.end);
       }
 
       case SyntaxKind.SwitchExpression: {
         const s = node as SwitchExpression;
-        return this.switchLike(s.expression, s.clauses);
+        return this.switchLike(s.expression, s.clauses, s.end);
       }
       case SyntaxKind.BinaryExpression:
         return this.binary(node as BinaryExpression);

@@ -1075,10 +1075,18 @@ func (p *printer) resource(r *compiler.ResourceData) Doc {
 	return concat(parts...)
 }
 
-func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray) Doc {
-	body := make([]Doc, clauses.Len())
-	for i, c := range nodes(clauses) {
-		body[i] = p.switchClause(c.AsSwitchClause(), c.End)
+func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, endPos int) Doc {
+	// Comments before a `case`/`default` label sit on their own line at the
+	// clause indent (gjf), so consume them per clause like a member list does.
+	var body []Doc
+	for _, c := range nodes(clauses) {
+		for _, cm := range p.commentsBefore(p.start(c)) {
+			body = append(body, text(cm.text))
+		}
+		body = append(body, p.switchClause(c.AsSwitchClause(), c.End))
+	}
+	for _, cm := range p.commentsBefore(endPos) {
+		body = append(body, text(cm.text))
 	}
 	return concat(
 		group(concat(text("switch ("), p.node(expr), text(")"))),
@@ -1483,11 +1491,11 @@ func (p *printer) node(node *compiler.Node) Doc {
 		return p.tryStatement(node.AsTryStatement())
 	case compiler.SwitchStatement:
 		s := node.AsSwitchStatement()
-		return p.switchLike(s.Expression, s.Clauses)
+		return p.switchLike(s.Expression, s.Clauses, node.End)
 
 	case compiler.SwitchExpression:
 		s := node.AsSwitchExpression()
-		return p.switchLike(s.Expression, s.Clauses)
+		return p.switchLike(s.Expression, s.Clauses, node.End)
 	case compiler.BinaryExpression:
 		return p.binary(node)
 	case compiler.AssignmentExpression:
