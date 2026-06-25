@@ -3,8 +3,8 @@ import { expect } from "expect";
 
 import { concat, group, hardline, indent, join, line, printDoc, softline } from "./doc.ts";
 
-const print = (doc: Parameters<typeof printDoc>[0], width = 100, indentUnit = 2) =>
-  printDoc(doc, { width, indentUnit });
+const print = (doc: Parameters<typeof printDoc>[0], width = 100, indentMultiplier = 1) =>
+  printDoc(doc, { width, indentMultiplier });
 
 test("flat group stays on one line when it fits", () => {
   const doc = group(concat(["f(", join(concat([",", line]), ["a", "b", "c"]), ")"]));
@@ -28,9 +28,9 @@ test("hardline always breaks and forces the enclosing group", () => {
   expect(print(doc)).toBe("{\n  stmt;\n}");
 });
 
-test("indentUnit controls indent width", () => {
+test("indent multiplier controls indent width", () => {
   const doc = group(concat(["{", indent(concat([hardline, "x;"])), hardline, "}"]));
-  expect(print(doc, 100, 4)).toBe("{\n    x;\n}");
+  expect(print(doc, 100, 2)).toBe("{\n    x;\n}");
 });
 
 test("trailing spaces on broken lines are trimmed", () => {

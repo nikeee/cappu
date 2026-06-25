@@ -104,7 +104,7 @@ export class UnsupportedSyntaxError extends Error {}
 export function formatSourceFile(sf: SourceFile, options: FormatOptions): string {
   const p = new Printer(sf);
   const doc = p.sourceFile(sf);
-  const text = printDoc(doc, { width: WIDTH, indentUnit: options.style === "aosp" ? 4 : 2 });
+  const text = printDoc(doc, { width: WIDTH, indentMultiplier: options.style === "aosp" ? 2 : 1 });
   // Safety net: the printer attaches comments at member/statement granularity.
   // If a comment sat somewhere it does not yet handle, refuse rather than
   // silently drop it - the CLI then leaves the file untouched.
