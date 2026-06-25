@@ -649,6 +649,21 @@ test("returning a value narrowed by an early-return is accepted", () => {
   expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
 });
 
+test("assigning null to a non-null local in a branch is flagged", () => {
+  // String x is non-null under @NullMarked, so `x = null` is the violation.
+  const code =
+    '@NullMarked class C { boolean c() { return true; } void m() { String x = "foo"; if (c()) x = null; x.length(); } }';
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a conditional reassignment to null defeats an earlier non-null narrowing", () => {
+  // x is proven non-null by "foo", but the if-branch may set it null, so the
+  // later dereference is unsafe.
+  const code =
+    '@NullMarked class C { boolean c() { return true; } void m() { @Nullable String x = "foo"; if (c()) x = null; x.length(); } }';
+  expect(diagnose(code)).toContain(DEREF);
+});
+
 // --- examples/nullness-app ---------------------------------------------------------
 
 test("examples/nullness-app flags exactly the one documented line", () => {

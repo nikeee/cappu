@@ -46,6 +46,7 @@ func TestNullnessFlagged(t *testing.T) {
 		{"@Nullable return into @NonNull parameter", "class C { @Nullable String n() { return null; } void f(@NonNull String s) {} void g() { f(n()); } }"},
 		{"new R(null) into a non-null record component", "@NullMarked record R(String x) {}\nclass C { void m() { new R(null); } }"},
 		{"null assigned to a non-null field in a constructor", "@NullMarked class C { String f; C() { this.f = null; } }"},
+		{"null assigned to a non-null local in a branch", `@NullMarked class C { boolean c() { return true; } void m() { String x = "foo"; if (c()) x = null; x.length(); } }`},
 	}
 	for _, tc := range cases {
 		if !containsCode(diagnoseNullness(tc.code, jspecify()), codeNullIntoNonNull) {
@@ -345,6 +346,7 @@ func TestNullnessDereferenceFlagged(t *testing.T) {
 		{"static @Nullable field dereferenced", "@NullMarked class C { static @Nullable String F = null; void g() { F.trim(); } }"},
 		{"var that infers a @Nullable type", "@NullMarked class C { @Nullable String n() { return null; } void g() { var x = n(); x.trim(); } }"},
 		{"chained field access through a @Nullable field", "@NullMarked class C { @Nullable C a; final @Nullable String b = null; void g() { this.a.b.trim(); } }"},
+		{"conditional reassignment to null defeats an earlier narrowing", `@NullMarked class C { boolean c() { return true; } void m() { @Nullable String x = "foo"; if (c()) x = null; x.length(); } }`},
 	}
 	for _, tc := range cases {
 		if !containsCode(diagnoseNullness(tc.code, jspecify()), codeDeref) {
