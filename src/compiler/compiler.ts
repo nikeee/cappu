@@ -78,6 +78,9 @@ interface CompileOutput {
   degraded: string[];
   /** Non-fatal advisories the CLI prints (e.g. an ambiguous Main-Class). */
   warnings?: string[];
+  /** Warning-severity semantic diagnostics (e.g. nullness, deprecation) of a
+   * successful build; printed but non-fatal. Errors fail the build instead. */
+  diagnostics?: CompileDiagnostic[];
   /** The Main-Class baked into a jar/fat-jar manifest, if any. Set only for an
    * application (a runnable artifact); undefined for a library or a classes
    * build. The CLI uses it to print a "run it with" hint. */
@@ -390,7 +393,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
   installJdkTypes(program, options.config);
   if (options.config) loadConfiguredPaths(program, options.config);
   for (const file of inputs) program.addProjectFile(pathToUri(file), readFileSync(file, "utf8"));
-  const checker = createChecker(program);
+  const checker = createChecker(program, options.config?.compilerOptions.nullness);
 
   // All diagnostics over all inputs before emitting anything (as javac does).
   const diagnostics: CompileDiagnostic[] = [];
@@ -491,7 +494,7 @@ export function runCompile(files: string[], options: CompileOptions): CompileRes
       degraded,
     };
   }
-  return { success: true, written, degraded, warnings, mainClass };
+  return { success: true, written, degraded, warnings, mainClass, diagnostics };
 }
 
 /**

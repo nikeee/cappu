@@ -244,6 +244,35 @@ func TestRunCompileFailOnDegrade(t *testing.T) {
 	}
 }
 
+// Port of compiler.test.ts "the experimental compiler surfaces nullness warnings".
+func TestRunCompileNullnessWarning(t *testing.T) {
+	dir := t.TempDir()
+	src := writeFile(t, dir, "A.java", "@NullMarked class A { void f(String s) {} void g() { f(null); } }")
+	writeFile(t, dir, "cappu.json", `{"compilerOptions":{"nullness":{"enabled":true}}}`)
+	r := RunCompile([]string{src}, Options{Experimental: boolp(true), OutDir: dir, Config: loadCfg(t, dir)})
+	if !r.Success { // warnings do not fail the build
+		t.Fatalf("expected success, got %+v", r)
+	}
+	if !slices.ContainsFunc(r.Diagnostics, func(d CompileDiagnostic) bool {
+		return d.Code == 1307 && d.Severity == "warning"
+	}) {
+		t.Errorf("expected a 1307 nullness warning, got %+v", r.Diagnostics)
+	}
+}
+
+// Port of compiler.test.ts "the experimental compiler stays silent ... when off".
+func TestRunCompileNullnessOffByDefault(t *testing.T) {
+	dir := t.TempDir()
+	src := writeFile(t, dir, "A.java", "@NullMarked class A { void f(String s) {} void g() { f(null); } }")
+	r := RunCompile([]string{src}, Options{Experimental: boolp(true), OutDir: dir, Config: loadCfg(t, dir)})
+	if !r.Success {
+		t.Fatalf("expected success, got %+v", r)
+	}
+	if slices.ContainsFunc(r.Diagnostics, func(d CompileDiagnostic) bool { return d.Code == 1307 }) {
+		t.Errorf("nullness off by default should emit no 1307, got %+v", r.Diagnostics)
+	}
+}
+
 func TestMissingConfiguredPathsWarnsOnlyWithConfig(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "cappu.json", `{ "compilerOptions": { "classPath": ["./no-such-dir"] } }`)

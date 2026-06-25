@@ -71,6 +71,7 @@ var Diagnostics = struct {
 	UnusedImport0                         DiagnosticMessage
 	Deprecated0                           DiagnosticMessage
 	PossiblyNullValueAssignedToNonNull0   DiagnosticMessage
+	DereferenceOfPossiblyNullValue0       DiagnosticMessage
 }{
 	Expected0:                             diag(1001, "_0_expected", "'{0}' expected.", CategoryError),
 	IdentifierExpected:                    diag(1002, "Identifier_expected", "Identifier expected.", CategoryError),
@@ -98,6 +99,7 @@ var Diagnostics = struct {
 	UnusedImport0:                         diag(1305, "Unused_import_0", "Unused import '{0}'.", CategoryWarning),
 	Deprecated0:                           diag(1306, "_0_is_deprecated", "'{0}' is deprecated.", CategoryWarning),
 	PossiblyNullValueAssignedToNonNull0:   diag(1307, "Possibly_null_value_assigned_to_non_null_0", "'{0}' is non-null but the assigned value may be null.", CategoryWarning),
+	DereferenceOfPossiblyNullValue0:       diag(1308, "Dereference_of_possibly_null_value_0", "'{0}' may be null when dereferenced here.", CategoryWarning),
 }
 
 var placeholderRe = regexp.MustCompile(`\{(\d+)\}`)

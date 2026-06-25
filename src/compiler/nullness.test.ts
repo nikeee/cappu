@@ -20,6 +20,7 @@ const JSPECIFY: NullnessOptions = {
 };
 
 const NULL_INTO_NONNULL = Diagnostics.Possibly_null_value_assigned_to_non_null_0.code;
+const DEREF = Diagnostics.Dereference_of_possibly_null_value_0.code;
 
 // `null` (the default) means "no options passed at all", i.e. the feature off.
 function diagnose(text: string, nullness: NullnessOptions | null = JSPECIFY): number[] {
@@ -383,6 +384,82 @@ test("a do-while condition does NOT narrow the body (it runs once first)", () =>
 test("a reassignment inside the loop body invalidates the loop-condition narrowing", () => {
   const code = NARROW("while (x != null) { x = src(); f(x); break; }");
   expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+// --- narrowing: branch merge -------------------------------------------------------
+
+test("if (x == null) x = default; merges both paths to non-null", () => {
+  expect(diagnose(NARROW('if (x == null) x = "d"; f(x);'))).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("if (x == null) { x = default; } (block form) merges to non-null", () => {
+  expect(diagnose(NARROW('if (x == null) { x = "d"; } f(x);'))).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("if (x == null) x = maybeNull(); does not prove non-null (still flagged)", () => {
+  expect(diagnose(NARROW("if (x == null) x = src(); f(x);"))).toContain(NULL_INTO_NONNULL);
+});
+
+// --- dereference of a possibly-null value ------------------------------------------
+
+test("calling a method on a @Nullable receiver is flagged", () => {
+  expect(diagnose("class C { void m(@Nullable String x) { x.trim(); } }")).toContain(DEREF);
+});
+
+test("accessing a field on a @Nullable receiver is flagged", () => {
+  const code = "class A { int v; }\nclass C { void m(@Nullable A a) { int n = a.v; } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("indexing a @Nullable array is flagged", () => {
+  expect(diagnose("class C { void m(@Nullable String[] arr) { String s = arr[0]; } }")).toContain(
+    DEREF,
+  );
+});
+
+test("a guard narrows the receiver so the dereference is accepted", () => {
+  const code = "class C { void m(@Nullable String x) { if (x != null) x.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("an early-return narrows the receiver for a later dereference", () => {
+  const code = "class C { void m(@Nullable String x) { if (x == null) return; x.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("a @NonNull receiver is not flagged", () => {
+  expect(diagnose("class C { void m(@NonNull String x) { x.trim(); } }")).not.toContain(DEREF);
+});
+
+test("a this-qualified access is not flagged as a dereference", () => {
+  expect(diagnose("class C { String fld; void m() { this.fld.trim(); } }")).not.toContain(DEREF);
+});
+
+test("throwing a @Nullable value is flagged", () => {
+  expect(diagnose("class C { void m(@Nullable RuntimeException e) { throw e; } }")).toContain(
+    DEREF,
+  );
+});
+
+test("synchronizing on a @Nullable lock is flagged", () => {
+  expect(
+    diagnose("class C { void m(@Nullable Object lock) { synchronized (lock) {} } }"),
+  ).toContain(DEREF);
+});
+
+test("iterating a @Nullable collection in an enhanced-for is flagged", () => {
+  const code = "class C { void m(@Nullable java.util.List<String> xs) { for (String s : xs) {} } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a guard narrows a thrown @Nullable value", () => {
+  const code = "class C { void m(@Nullable RuntimeException e) { if (e != null) throw e; } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("dereference checks are off when nullness is disabled", () => {
+  const code = "class C { void m(@Nullable String x) { x.trim(); } }";
+  expect(diagnose(code, null)).not.toContain(DEREF);
 });
 
 // --- examples/nullness-app ---------------------------------------------------------

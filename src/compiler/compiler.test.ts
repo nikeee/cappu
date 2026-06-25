@@ -468,3 +468,40 @@ test("the default compile surfaces javac's located diagnostics", { skip: !HAS_JA
     expect(result.diagnostics[0]!.message).toContain("incompatible types");
   });
 });
+
+test("the experimental compiler surfaces nullness warnings when enabled, without failing the build", () => {
+  inTempDir(
+    { "A.java": "@NullMarked class A { void f(String s) {} void g() { f(null); } }" },
+    (dir, paths) => {
+      writeFileSync(
+        join(dir, "cappu.json"),
+        '{ "compilerOptions": { "nullness": { "enabled": true } } }',
+      );
+      const result = runCompile(paths, {
+        experimentalCompiler: true,
+        outDir: dir,
+        config: loadConfig(undefined, dir),
+      });
+      // Warnings do not fail the build.
+      expect(result.success).toBe(true);
+      expect(
+        (result.diagnostics ?? []).some(d => d.code === 1307 && d.severity === "warning"),
+      ).toBe(true);
+    },
+  );
+});
+
+test("the experimental compiler stays silent on nullness when the option is off (default)", () => {
+  inTempDir(
+    { "A.java": "@NullMarked class A { void f(String s) {} void g() { f(null); } }" },
+    (dir, paths) => {
+      const result = runCompile(paths, {
+        experimentalCompiler: true,
+        outDir: dir,
+        config: defaultConfig(dir),
+      });
+      expect(result.success).toBe(true);
+      expect((result.diagnostics ?? []).some(d => d.code === 1307)).toBe(false);
+    },
+  );
+});

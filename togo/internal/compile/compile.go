@@ -414,7 +414,11 @@ func RunCompile(files []string, options Options) Result {
 		}
 		program.AddProjectFile(pathToURI(file), string(b))
 	}
-	checker := compiler.NewChecker(program)
+	var nullness *config.Nullness
+	if cfg != nil {
+		nullness = cfg.CompilerOptions.Nullness
+	}
+	checker := compiler.NewChecker(program, nullness)
 
 	var diagnostics []CompileDiagnostic
 	for _, file := range files {
@@ -500,7 +504,9 @@ func RunCompile(files []string, options Options) Result {
 			Message: strconv.Itoa(len(degraded)) + " method(s) degraded to a placeholder body (--fail-on-degrade)"})
 		return Result{Success: false, Diagnostics: diagnostics, Written: written, Degraded: degraded}
 	}
-	return Result{Success: true, Written: written, Degraded: degraded, Warnings: warnings, MainClass: mainClass}
+	// A successful build still carries its warning-severity diagnostics (e.g.
+	// nullness, deprecation); the CLI prints them, but they do not fail the build.
+	return Result{Success: true, Written: written, Degraded: degraded, Warnings: warnings, MainClass: mainClass, Diagnostics: diagnostics}
 }
 
 func hasError(diags []CompileDiagnostic) bool {

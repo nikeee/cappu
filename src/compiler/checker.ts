@@ -2134,6 +2134,24 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       );
     };
 
+    // Dereferencing a possibly-null receiver (x.foo(), x.field, x[i]). Flow-aware:
+    // a receiver narrowed non-null by a preceding guard is not flagged.
+    const checkDereference = (receiver: Node): void => {
+      if (!nullnessAnnotations) return;
+      if (receiver.kind === SyntaxKind.SuperExpression) return;
+      if (!valueMayBeNull(receiver)) return;
+      const text = getSourceFileOfNode(receiver).text;
+      const start = skipTrivia(text, receiver.pos);
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          receiver.end - start,
+          Diagnostics.Dereference_of_possibly_null_value_0,
+          text.slice(start, receiver.end),
+        ),
+      );
+    };
+
     // Argument nullness against a resolved signature: each parameter type is
     // instantiated with `subst` (the receiver's / created type's type arguments),
     // so a null into the non-null element of List<@NonNull String>.add(E) is caught.
@@ -2482,8 +2500,19 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
           }
           break;
         }
+        case SyntaxKind.ElementAccessExpression:
+          checkDereference((node as ElementAccessExpression).expression);
+          break;
+        // Implicit-dereference positions that unconditionally NPE on null: the
+        // thrown value, the synchronized lock, and the iterated collection.
+        case SyntaxKind.ThrowStatement:
+        case SyntaxKind.SynchronizedStatement:
+        case SyntaxKind.ForEachStatement:
+          checkDereference((node as unknown as { expression: Node }).expression);
+          break;
         case SyntaxKind.PropertyAccessExpression: {
           const access = node as PropertyAccessExpression;
+          checkDereference(access.expression);
           // super.* is modeled imprecisely (super resolves to Object), so skip it
           // to avoid false positives on inherited members.
           if (access.expression.kind !== SyntaxKind.SuperExpression) {

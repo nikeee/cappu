@@ -117,6 +117,12 @@ export const Diagnostics = {
     "'{0}' is non-null but the assigned value may be null.",
     DiagnosticCategory.Warning,
   ),
+  Dereference_of_possibly_null_value_0: diag(
+    1308,
+    "Dereference_of_possibly_null_value_0",
+    "'{0}' may be null when dereferenced here.",
+    DiagnosticCategory.Warning,
+  ),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */

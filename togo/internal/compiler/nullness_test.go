@@ -11,6 +11,7 @@ import (
 )
 
 const codeNullIntoNonNull = 1307
+const codeDeref = 1308
 
 func jspecify() *config.Nullness {
 	return &config.Nullness{
@@ -294,10 +295,61 @@ func TestNullnessLoopNarrowing(t *testing.T) {
 	}
 }
 
+func TestNullnessBranchMerge(t *testing.T) {
+	accepted := []struct{ name, body string }{
+		{"if (x==null) x=default;", "if (x == null) x = \"d\"; f(x);"},
+		{"if (x==null) { x=default; }", "if (x == null) { x = \"d\"; } f(x);"},
+	}
+	for _, tc := range accepted {
+		if containsCode(diagnoseNullness(narrowBody(tc.body), jspecify()), codeNullIntoNonNull) {
+			t.Errorf("%s: branch-merge should suppress the warning for %q", tc.name, tc.body)
+		}
+	}
+	// Assigning a possibly-null value in the branch cannot prove non-null.
+	flagged := "if (x == null) x = src(); f(x);"
+	if !containsCode(diagnoseNullness(narrowBody(flagged), jspecify()), codeNullIntoNonNull) {
+		t.Errorf("expected a warning for %q", flagged)
+	}
+}
+
 func TestNullnessFieldNotNarrowed(t *testing.T) {
 	code := "class C { @Nullable String fld; void f(@NonNull String s) {} void m() { if (fld != null) { f(fld); } } }"
 	if !containsCode(diagnoseNullness(code, jspecify()), codeNullIntoNonNull) {
 		t.Error("fields must not be narrowed by a guard")
+	}
+}
+
+func TestNullnessDereferenceFlagged(t *testing.T) {
+	cases := []struct{ name, code string }{
+		{"method on @Nullable receiver", "class C { void m(@Nullable String x) { x.trim(); } }"},
+		{"field on @Nullable receiver", "class A { int v; }\nclass C { void m(@Nullable A a) { int n = a.v; } }"},
+		{"index of @Nullable array", "class C { void m(@Nullable String[] arr) { String s = arr[0]; } }"},
+		{"throw of @Nullable value", "class C { void m(@Nullable RuntimeException e) { throw e; } }"},
+		{"synchronized on @Nullable lock", "class C { void m(@Nullable Object lock) { synchronized (lock) {} } }"},
+		{"enhanced-for over @Nullable collection", "class C { void m(@Nullable java.util.List<String> xs) { for (String s : xs) {} } }"},
+	}
+	for _, tc := range cases {
+		if !containsCode(diagnoseNullness(tc.code, jspecify()), codeDeref) {
+			t.Errorf("%s: expected a dereference warning for %q", tc.name, tc.code)
+		}
+	}
+}
+
+func TestNullnessDereferenceAccepted(t *testing.T) {
+	cases := []struct{ name, code string }{
+		{"guard narrows the receiver", "class C { void m(@Nullable String x) { if (x != null) x.trim(); } }"},
+		{"early-return narrows the receiver", "class C { void m(@Nullable String x) { if (x == null) return; x.trim(); } }"},
+		{"@NonNull receiver", "class C { void m(@NonNull String x) { x.trim(); } }"},
+		{"this-qualified access", "class C { String fld; void m() { this.fld.trim(); } }"},
+		{"guard narrows a thrown @Nullable value", "class C { void m(@Nullable RuntimeException e) { if (e != null) throw e; } }"},
+	}
+	for _, tc := range cases {
+		if containsCode(diagnoseNullness(tc.code, jspecify()), codeDeref) {
+			t.Errorf("%s: should NOT flag a dereference for %q", tc.name, tc.code)
+		}
+	}
+	if containsCode(diagnoseNullness("class C { void m(@Nullable String x) { x.trim(); } }", nil), codeDeref) {
+		t.Error("dereference checks should be off when nullness is disabled")
 	}
 }
 

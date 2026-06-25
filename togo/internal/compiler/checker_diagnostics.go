@@ -625,6 +625,18 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			Diagnostics.PossiblyNullValueAssignedToNonNull0, name))
 	}
 
+	// Dereferencing a possibly-null receiver (x.foo(), x.field, x[i]). Flow-aware:
+	// a receiver narrowed non-null by a preceding guard is not flagged.
+	checkDereference := func(receiver *Node) {
+		if c.nullness == nil || receiver.Kind == SuperExpression || !valueMayBeNull(receiver) {
+			return
+		}
+		text := GetSourceFileOfNode(receiver).AsSourceFile().Text
+		start := skipTrivia(text, receiver.Pos)
+		diagnostics = append(diagnostics, CreateDiagnostic(start, receiver.End-start,
+			Diagnostics.DereferenceOfPossiblyNullValue0, text[start:receiver.End]))
+	}
+
 	// Argument nullness against a resolved signature: each parameter type is
 	// instantiated with subst (the receiver's / created type's type arguments), so a
 	// null into the non-null element of List<@NonNull String>.add(E) is caught.
@@ -867,8 +879,19 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 				diagnostics = append(diagnostics, CreateDiagnostic(name.Pos, name.End-name.Pos,
 					Diagnostics.MethodDoesNotOverrideASupertypeMethod))
 			}
+		case ElementAccessExpression:
+			checkDereference(node.AsElementAccessExpression().Expression)
+		// Implicit-dereference positions that unconditionally NPE on null: the
+		// thrown value, the synchronized lock, and the iterated collection.
+		case ThrowStatement:
+			checkDereference(node.AsThrowStatement().Expression)
+		case SynchronizedStatement:
+			checkDereference(node.AsSynchronizedStatement().Expression)
+		case ForEachStatement:
+			checkDereference(node.AsForEachStatement().Expression)
 		case PropertyAccessExpression:
 			access := node.AsPropertyAccessExpression()
+			checkDereference(access.Expression)
 			if access.Expression.Kind != SuperExpression {
 				receiver := c.getTypeOfExpression(access.Expression)
 				if receiver.Kind == TypeKindClass && c.isClosedType(receiver) &&

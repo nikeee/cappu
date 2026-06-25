@@ -86,6 +86,9 @@ export async function runCompileCommand(
     renderDiagnostics(result.diagnostics);
     process.exit(1);
   }
+  // A successful build still surfaces its warning-severity diagnostics (e.g.
+  // nullness, deprecation); they are non-fatal so the build stays green.
+  renderDiagnostics(result.diagnostics ?? []);
   // A plain jar with full Maven coordinates is publishable: emit its POM beside
   // it so `cappu publish` (or any registry upload) has the descriptor. fat-jar
   // shades its dependencies, so a deps-listing POM beside it would be wrong.

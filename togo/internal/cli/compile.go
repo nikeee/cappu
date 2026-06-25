@@ -71,6 +71,9 @@ func RunCompile(files []string, outputFlag, artifact string, quiet bool, cfg *co
 		renderDiagnostics(result.Diagnostics)
 		return 1
 	}
+	// A successful build still surfaces its warning-severity diagnostics (e.g.
+	// nullness, deprecation); they are non-fatal so the build stays green.
+	renderDiagnostics(result.Diagnostics)
 
 	// A plain jar with full Maven coordinates is publishable: emit its POM beside it.
 	if effectiveOutput == "jar" && len(publish.MissingCoordinates(cfg)) == 0 {

@@ -128,6 +128,42 @@ function definitelyExits(stmt: Node | undefined): boolean {
   }
 }
 
+// `x = <expr>` as a statement, assigning the tracked symbol.
+function assignedValue(stmt: Node, symbol: Symbol, resolveRef: ResolveRef): Node | undefined {
+  if (stmt.kind !== SyntaxKind.ExpressionStatement) return undefined;
+  const expr = (stmt as ExpressionStatement).expression as Node;
+  if (expr.kind !== SyntaxKind.AssignmentExpression) return undefined;
+  const a = expr as BinaryExpression;
+  if (a.operatorToken !== SyntaxKind.EqualsToken || !refersToSymbol(a.left, symbol, resolveRef)) {
+    return undefined;
+  }
+  return a.right;
+}
+
+// The statements of a branch (a block's, or the single statement itself).
+function branchStatements(branch: Node): readonly Node[] {
+  return branch.kind === SyntaxKind.Block ? (branch as Block).statements : [branch];
+}
+
+// Whether a branch contains a top-level assignment to the tracked symbol.
+function branchAssignsSymbol(branch: Node, symbol: Symbol, resolveRef: ResolveRef): boolean {
+  return branchStatements(branch).some(s => assignedValue(s, symbol, resolveRef));
+}
+
+// The nullness a branch leaves the symbol with when its last statement assigns it,
+// else undefined (we only reason about a trailing assignment).
+function branchTrailingNullness(
+  branch: Node,
+  symbol: Symbol,
+  resolveRef: ResolveRef,
+  exprNullness: ExprNullness,
+): Nullness | undefined {
+  const stmts = branchStatements(branch);
+  const last = stmts[stmts.length - 1];
+  const value = last && assignedValue(last, symbol, resolveRef);
+  return value ? exprNullness(value) : undefined;
+}
+
 // A `return`/`undefined` from one preceding statement: "narrow" gives a proven
 // nullness; "reset" means an assignment whose value we could not prove (the symbol's
 // state is unknown from here, so earlier facts no longer apply); undefined = keep looking.
@@ -171,15 +207,31 @@ function precedingStatementFact(
     const f = conditionImplies((stmt as AssertStatement).condition, symbol, resolveRef).whenTrue;
     return f === "nonNull" ? { kind: "narrow", nullness: "nonNull" } : undefined;
   }
-  // if (x == null) <abrupt>;  -> x is non-null on the fall-through path.
   if (stmt.kind === SyntaxKind.IfStatement) {
     const ifs = stmt as IfStatement;
+    const facts = conditionImplies(ifs.condition, symbol, resolveRef);
+    // Early-exit: if (COND) <abrupt>;  -> after the if, only the fall-through path
+    // remains, so x has whatever COND-false proves (e.g. if (x==null) return; -> non-null).
+    if (!ifs.elseStatement && definitelyExits(ifs.thenStatement) && facts.whenFalse) {
+      return { kind: "narrow", nullness: facts.whenFalse };
+    }
+    // Branch-merge: if (x == null) x = <non-null>;  -> both the then-branch (just
+    // assigned) and the fall-through (COND was false, so non-null) agree x is non-null.
     if (
       !ifs.elseStatement &&
-      conditionImplies(ifs.condition, symbol, resolveRef).whenTrue === "nullable" &&
-      definitelyExits(ifs.thenStatement)
+      facts.whenTrue === "nullable" &&
+      !definitelyExits(ifs.thenStatement) &&
+      branchTrailingNullness(ifs.thenStatement, symbol, resolveRef, exprNullness) === "nonNull"
     ) {
       return { kind: "narrow", nullness: "nonNull" };
+    }
+    // Soundness: any other assignment to x inside a branch leaves its state
+    // unprovable here, so earlier facts must not leak past this if.
+    if (
+      branchAssignsSymbol(ifs.thenStatement, symbol, resolveRef) ||
+      (ifs.elseStatement && branchAssignsSymbol(ifs.elseStatement, symbol, resolveRef))
+    ) {
+      return { kind: "reset" };
     }
   }
   return undefined;
