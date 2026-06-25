@@ -1030,8 +1030,12 @@ class Printer {
     }
     const base = this.node(cur);
     const callCount = links.filter(l => l.isCall).length;
-    if (callCount < 2) {
-      // Not a builder chain: keep it glued; nested argument lists still wrap.
+    const baseIsCall = cur.kind === SyntaxKind.CallExpression;
+    // gjf keeps a chain glued when its only dereference invocation comes after a
+    // non-invocation prefix (`myField.foo()` stays on one line). But when the
+    // receiver is itself a call (`when(x).thenReturn(y)`) the dereference still
+    // breaks, and two or more invocations are always a builder chain.
+    if (callCount === 0 || (callCount === 1 && !baseIsCall)) {
       return concat([base, ...links.map(l => l.doc)]);
     }
     const baseLen = cur.end - this.start(cur);
