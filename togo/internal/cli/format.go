@@ -96,20 +96,20 @@ func RunFormat(files []string, write bool, cfg *config.Config) int {
 	if write {
 		extra := ""
 		if skipped > 0 {
-			extra = fmt.Sprintf(", skipped %d", skipped)
+			extra = fmt.Sprintf(", %s", paint("yellow", fmt.Sprintf("skipped %d", skipped)))
 		}
-		fmt.Fprintf(os.Stderr, "cappu: formatted %d of %d file(s)%s\n", len(changed), len(targets), extra)
+		fmt.Fprintf(os.Stderr, "cappu: formatted %s file(s)%s\n", paint("green", fmt.Sprintf("%d of %d", len(changed), len(targets))), extra)
 		return 0
 	}
 
 	if len(unformatted) > 0 {
-		fmt.Fprintf(os.Stderr, "cappu: %d of %d file(s) not formatted; run `cappu format --write`\n", len(unformatted), len(targets))
+		fmt.Fprintf(os.Stderr, "cappu: %s file(s) not formatted; run %s\n", paint("red", fmt.Sprintf("%d of %d", len(unformatted), len(targets))), paint("bold", "`cappu format --write`"))
 		return 1
 	}
 	extra := ""
 	if skipped > 0 {
-		extra = fmt.Sprintf(" (skipped %d)", skipped)
+		extra = fmt.Sprintf(" (%s)", paint("yellow", fmt.Sprintf("skipped %d", skipped)))
 	}
-	fmt.Fprintf(os.Stderr, "cappu: all %d file(s) formatted%s\n", len(targets), extra)
+	fmt.Fprintf(os.Stderr, "cappu: %s%s\n", paint("green", fmt.Sprintf("all %d file(s) formatted", len(targets))), extra)
 	return 0
 }

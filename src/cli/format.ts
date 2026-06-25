@@ -79,8 +79,8 @@ export async function runFormat(
 
   if (flags.write) {
     process.stderr.write(
-      `cappu: formatted ${changed.length} of ${targets.length} file(s)${
-        skipped ? `, skipped ${skipped}` : ""
+      `cappu: formatted ${paint("green", `${changed.length} of ${targets.length}`)} file(s)${
+        skipped ? `, ${paint("yellow", `skipped ${skipped}`)}` : ""
       }\n`,
     );
     process.exit(0);
@@ -88,12 +88,14 @@ export async function runFormat(
 
   if (unformatted.length > 0) {
     process.stderr.write(
-      `cappu: ${unformatted.length} of ${targets.length} file(s) not formatted; run \`cappu format --write\`\n`,
+      `cappu: ${paint("red", `${unformatted.length} of ${targets.length}`)} file(s) not formatted; run ${paint("bold", "`cappu format --write`")}\n`,
     );
     process.exit(1);
   }
   process.stderr.write(
-    `cappu: all ${targets.length} file(s) formatted${skipped ? ` (skipped ${skipped})` : ""}\n`,
+    `cappu: ${paint("green", `all ${targets.length} file(s) formatted`)}${
+      skipped ? ` (${paint("yellow", `skipped ${skipped}`)})` : ""
+    }\n`,
   );
   process.exit(0);
 }
