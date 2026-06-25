@@ -391,17 +391,26 @@ class Printer {
     return `${this.entityName((name as { left: EntityName }).left)}.${this.raw((name as { right: Node }).right)}`;
   }
 
-  // google-java-format puts each declaration annotation on its own line for
-  // methods, constructors and types, but keeps annotations inline on fields,
-  // parameters and locals. `ownLineAnnotations` selects that.
-  private modifiers(mods: NodeArray<ModifierLike> | undefined, ownLineAnnotations = false): Doc {
+  // google-java-format's annotation placement:
+  // - "own": each declaration annotation on its own line (methods, types,
+  //   constructors, enum constants).
+  // - "var": fields and locals - an annotation with arguments goes on its own
+  //   line, a parameterless marker annotation stays inline.
+  // - "inline": always on the same line (parameters, record components).
+  private modifiers(
+    mods: NodeArray<ModifierLike> | undefined,
+    annoMode: "own" | "var" | "inline" = "inline",
+  ): Doc {
     if (!mods || mods.length === 0) return "";
-    const annotations = mods.filter(m => m.kind === SyntaxKind.Annotation);
+    const annotations = mods.filter(m => m.kind === SyntaxKind.Annotation) as Annotation[];
     const keywords = mods.filter(m => m.kind !== SyntaxKind.Annotation);
     keywords.sort((a, b) => rank(a.kind) - rank(b.kind));
     const parts: Doc[] = [];
-    for (const a of annotations)
-      parts.push(this.annotation(a as Annotation), ownLineAnnotations ? hardline : " ");
+    for (const a of annotations) {
+      const ownLine =
+        annoMode === "own" || (annoMode === "var" && a.args !== undefined && a.args.length > 0);
+      parts.push(this.annotation(a), ownLine ? hardline : " ");
+    }
     for (const k of keywords) parts.push(concat([this.modifierText(k), " "]));
     return concat(parts);
   }
@@ -416,7 +425,8 @@ class Printer {
 
   private annotation(a: Annotation): Doc {
     const name = `@${this.entityName(a.typeName)}`;
-    if (!a.args || a.args.length === 0) return name;
+    if (!a.args) return name; // no argument list in source
+    if (a.args.length === 0) return `${name}()`; // explicit empty parens are kept
     const args = a.args.map(arg => {
       const argName = (arg as { name?: Node }).name;
       const value = this.node((arg as { value: Node }).value);
@@ -498,7 +508,7 @@ class Printer {
     afterName: Doc,
   ): Doc {
     const header = concat([
-      this.modifiers(decl.modifiers, true),
+      this.modifiers(decl.modifiers, "own"),
       keyword,
       " ",
       this.raw(decl.name),
@@ -585,7 +595,7 @@ class Printer {
         ]),
       );
     const header = concat([
-      this.modifiers(d.modifiers, true),
+      this.modifiers(d.modifiers, "own"),
       "enum ",
       this.raw(d.name),
       concat(after),
@@ -593,26 +603,22 @@ class Printer {
     ]);
     if (d.enumConstants.length === 0 && d.members.length === 0) return concat([header, "{}"]);
     const constants = d.enumConstants.map(c => this.enumConstant(c));
-    // Constants share one line only when the enum is "simple": no members, and
-    // no constant carries arguments or a class body. Otherwise one per line.
-    const simple =
-      d.members.length === 0 &&
-      d.enumConstants.every(c => !c.classBody && (!c.arguments || c.arguments.length === 0));
-    const constantsDoc = simple
-      ? group(join(concat([",", line]), constants))
-      : join(concat([",", hardline]), constants);
+    // google-java-format always lays enum constants one per line.
+    const constantsDoc = join(concat([",", hardline]), constants);
     const bodyParts: Doc[] = [hardline, constantsDoc];
     if (d.members.length > 0) {
       // A blank line separates the constant list from the member declarations.
       bodyParts.push(";", hardline, hardline, ...this.members(d.members, d.end));
     } else if (constants.length > 0) {
-      bodyParts.push(";");
+      // A trailing `;` after the last constant is preserved from the source.
+      const last = d.enumConstants[d.enumConstants.length - 1];
+      if (this.text[skipTrivia(this.text, last.end)] === ";") bodyParts.push(";");
     }
     return concat([header, "{", indent(concat(bodyParts)), hardline, "}"]);
   }
 
   private enumConstant(c: EnumConstantDeclaration): Doc {
-    const parts: Doc[] = [this.modifiers(c.modifiers), this.raw(c.name)];
+    const parts: Doc[] = [this.modifiers(c.modifiers, "own"), this.raw(c.name)];
     if (c.arguments)
       parts.push(
         "(",
@@ -647,7 +653,7 @@ class Printer {
         ]),
       );
     const header = concat([
-      this.modifiers(d.modifiers, true),
+      this.modifiers(d.modifiers, "own"),
       "record ",
       this.raw(d.name),
       this.typeParameters(d.typeParameters),
@@ -659,7 +665,7 @@ class Printer {
 
   private fieldDeclaration(d: FieldDeclaration): Doc {
     return concat([
-      this.modifiers(d.modifiers),
+      this.modifiers(d.modifiers, "var"),
       this.type(d.type),
       " ",
       join(
@@ -701,7 +707,7 @@ class Printer {
     body?: Block;
   }): Doc {
     const tp = this.typeParameters(decl.typeParameters);
-    const head: Doc[] = [this.modifiers(decl.modifiers, true)];
+    const head: Doc[] = [this.modifiers(decl.modifiers, "own")];
     if (tp !== "") head.push(tp, " ");
     if (decl.returnType) head.push(this.type(decl.returnType), " ");
     head.push(this.raw(decl.name), this.parameters(decl.parameters));
@@ -741,7 +747,7 @@ class Printer {
 
   private localVar(d: LocalVariableDeclarationStatement): Doc {
     return concat([
-      this.modifiers(d.modifiers),
+      this.modifiers(d.modifiers, "var"),
       this.type(d.type),
       " ",
       join(
@@ -755,7 +761,6 @@ class Printer {
   private ifStatement(s: IfStatement): Doc {
     const parts: Doc[] = [
       group(concat(["if (", this.node(s.condition), ")"])),
-      " ",
       this.clauseBody(s.thenStatement),
     ];
     if (s.elseStatement) {
@@ -764,28 +769,36 @@ class Printer {
       if (s.elseStatement.kind === SyntaxKind.IfStatement) {
         parts.push(" ", this.node(s.elseStatement));
       } else {
-        parts.push(" ", this.clauseBody(s.elseStatement));
+        parts.push(this.clauseBody(s.elseStatement));
       }
     }
     return concat(parts);
   }
 
-  /** The controlled statement of if/for/while; a non-block gets indented on its own line. */
+  /**
+   * The controlled statement of if/for/while, with its leading separator. A
+   * block follows after a space; a single statement stays on the same line when
+   * it fits (`if (c) break;`) and otherwise breaks onto an indented line.
+   */
   private clauseBody(s: Statement): Doc {
-    if (s.kind === SyntaxKind.Block) return this.block(s as Block);
-    return indent(concat([hardline, this.node(s)]));
+    if (s.kind === SyntaxKind.Block) return concat([" ", this.block(s as Block)]);
+    return group(indent(concat([line, this.node(s)])));
   }
 
   private whileStatement(s: WhileStatement): Doc {
     return concat([
       group(concat(["while (", this.node(s.condition), ")"])),
-      " ",
       this.clauseBody(s.statement),
     ]);
   }
 
   private doStatement(s: DoStatement): Doc {
-    return concat(["do ", this.clauseBody(s.statement), " while (", this.node(s.condition), ");"]);
+    // `do` always takes a block in practice; keep the body adjacent either way.
+    const body =
+      s.statement.kind === SyntaxKind.Block
+        ? concat([" ", this.block(s.statement as Block)])
+        : this.clauseBody(s.statement);
+    return concat(["do", body, " while (", this.node(s.condition), ");"]);
   }
 
   private forStatement(s: ForStatement): Doc {
@@ -805,7 +818,7 @@ class Printer {
         )
       : "";
     const header = group(concat(["for (", init, "; ", cond, "; ", upd, ")"]));
-    return concat([header, " ", this.clauseBody(s.statement)]);
+    return concat([header, this.clauseBody(s.statement)]);
   }
 
   private forInit(init: Node): Doc {
@@ -828,7 +841,6 @@ class Printer {
   private forEachStatement(s: ForEachStatement): Doc {
     return concat([
       group(concat(["for (", this.parameter(s.parameter), " : ", this.node(s.expression), ")"])),
-      " ",
       this.clauseBody(s.statement),
     ]);
   }
@@ -1209,7 +1221,25 @@ function rank(kind: SyntaxKind): number {
 // constructor, initializer or nested type (google-java-format); consecutive
 // fields stay together unless the user separated them (a source blank line).
 function forcedBlank(a: Node, b: Node): boolean {
-  return isBlankForcing(a.kind) || isBlankForcing(b.kind);
+  return (
+    isBlankForcing(a.kind) ||
+    isBlankForcing(b.kind) ||
+    fieldSpansMultipleLines(a) ||
+    fieldSpansMultipleLines(b)
+  );
+}
+
+// google-java-format pads a field declaration with blank lines when it renders
+// across multiple lines, which happens when an annotation lands on its own line
+// (a "var"-mode annotation carrying arguments).
+function fieldSpansMultipleLines(node: Node): boolean {
+  if (node.kind !== SyntaxKind.FieldDeclaration) return false;
+  const mods = (node as FieldDeclaration).modifiers;
+  return (
+    mods?.some(
+      m => m.kind === SyntaxKind.Annotation && ((m as Annotation).args?.length ?? 0) > 0,
+    ) ?? false
+  );
 }
 
 function isBlankForcing(kind: SyntaxKind): boolean {

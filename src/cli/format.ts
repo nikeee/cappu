@@ -77,17 +77,21 @@ export async function runFormat(
 
   if (flags.write) {
     process.stderr.write(
-      `cappu: formatted ${written} file(s)${skipped ? `, skipped ${skipped}` : ""}\n`,
+      `cappu: formatted ${written} of ${targets.length} file(s)${
+        skipped ? `, skipped ${skipped}` : ""
+      }\n`,
     );
     process.exit(0);
   }
 
   if (unformatted.length > 0) {
     process.stderr.write(
-      `cappu: ${unformatted.length} file(s) not formatted; run \`cappu format --write\`\n`,
+      `cappu: ${unformatted.length} of ${targets.length} file(s) not formatted; run \`cappu format --write\`\n`,
     );
     process.exit(1);
   }
-  process.stderr.write(`cappu: all files formatted${skipped ? ` (skipped ${skipped})` : ""}\n`);
+  process.stderr.write(
+    `cappu: all ${targets.length} file(s) formatted${skipped ? ` (skipped ${skipped})` : ""}\n`,
+  );
   process.exit(0);
 }

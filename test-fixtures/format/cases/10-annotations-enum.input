@@ -1,0 +1,27 @@
+import java.lang.annotation.*;
+
+class A {
+  @Foo int marker;
+  @Bar(1) int withArgs;
+  @Override public String toString() { return "a"; }
+
+  void m(@P int a, @Q(2) int b) {
+    @Local int x = 1;
+    @Tagged(3) int y = 2;
+  }
+}
+
+enum Simple {
+  ONE,
+  TWO,
+  THREE
+}
+
+enum Annotated {
+  @A
+  ONE,
+  TWO,
+  @B
+  @C
+  THREE
+}
