@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import TempDir from "./TempDir.ts";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -55,6 +55,22 @@ test("a missing default config yields the empty config; a missing explicit one t
   expect(config.compilerOptions.classPath).toEqual(DEFAULT_CLASS_PATHS);
   expect(config.lspOptions).toEqual({});
   expect(() => loadConfig("nope.json", dir.path)).toThrow(/not found/);
+});
+
+test("the default config is discovered from a subdirectory (walks up to the project root)", () => {
+  using dir = TempDir.create("cfg-");
+  writeFileSync(
+    join(dir.path, DEFAULT_CONFIG_NAME),
+    '{ "compilerOptions": { "sourcePaths": ["src/main/java"] } }',
+  );
+  const nested = join(dir.path, "src", "main", "java");
+  mkdirSync(nested, { recursive: true });
+  const config = loadConfig(undefined, nested);
+  expect(config.fromFile).toBe(true);
+  // baseDir is the project root (where cappu.json lives), not the cwd, so
+  // relative paths still resolve against the project.
+  expect(config.baseDir).toBe(dir.path);
+  expect(config.compilerOptions.sourcePaths).toEqual(["src/main/java"]);
 });
 
 test("a shape violation throws with the offending path", () => {

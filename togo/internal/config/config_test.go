@@ -49,6 +49,33 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadDiscoversConfigFromSubdirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, DefaultConfigName),
+		[]byte(`{ "version": "1.2.3" }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(dir, "src", "main", "java")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// No explicit path, cwd is the nested dir: Load walks up to the project root.
+	cfg, err := Load("", nested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.FromFile {
+		t.Error("FromFile should be true: the parent config was found")
+	}
+	if cfg.Version != "1.2.3" {
+		t.Errorf("version = %q, want 1.2.3 (parent config not found)", cfg.Version)
+	}
+	// BaseDir is the project root, not the cwd.
+	if cfg.BaseDir != dir {
+		t.Errorf("BaseDir = %q, want %q", cfg.BaseDir, dir)
+	}
+}
+
 func TestExperimentalCompilerFailOnDegradeDefault(t *testing.T) {
 	// Absent and present-without-the-key both default to true (zod .default(true));
 	// only an explicit false stays false.

@@ -119,7 +119,11 @@ func Load(explicitPath, cwd string) (*Config, error) {
 			path = filepath.Join(cwd, explicitPath)
 		}
 	} else {
-		path = filepath.Join(cwd, DefaultConfigName)
+		found := findConfigUpward(cwd)
+		if found == "" {
+			return empty(cwd), nil // nothing found walking up
+		}
+		path = found
 	}
 
 	raw, err := os.ReadFile(path)
@@ -147,6 +151,29 @@ func Load(explicitPath, cwd string) (*Config, error) {
 	cfg.BaseDir = filepath.Dir(path)
 	cfg.FromFile = true
 	return cfg, nil
+}
+
+// findConfigUpward returns the nearest cappu.json at or above dir, or "" if none
+// exists up to the filesystem root. Mirrors how npm/cargo/uv/git locate the
+// project root, so a command run from a subdirectory still sees the project
+// config (its dir becomes BaseDir) instead of silently falling back to defaults.
+func findConfigUpward(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	dir = abs
+	for {
+		candidate := filepath.Join(dir, DefaultConfigName)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "" // reached the filesystem root
+		}
+		dir = parent
+	}
 }
 
 // empty is the all-defaults config (no file present).

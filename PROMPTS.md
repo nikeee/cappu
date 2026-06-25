@@ -438,3 +438,6 @@ cappu search commons-lang3
 - 2026-06-25 18:40 — fix false positives and negatives
 - 2026-06-25 21:49 — print the number of files formatted (including which were changed)
 - 2026-06-25 23:34 — add the equivalent of npm ls - maybe under a different name?
+- 2026-06-26 01:40 — looking from a dx perspective - were trying to create a simple tool that uses convention over configuration (like vite) and want to build a workflow that is similar to uv and npm. what can we do better? what is missing? what behaves unexpected?
+- 2026-06-26 01:40 — dont do A2
+- 2026-06-26 01:40 — track C: no alias. pick one

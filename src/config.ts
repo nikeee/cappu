@@ -4,7 +4,7 @@
 // $PWD/cappu.json unless an explicit path is given (--config).
 
 import { existsSync, readFileSync } from "node:fs";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { parse } from "comment-json";
 import { z } from "zod";
@@ -345,12 +345,31 @@ function emptyConfig(baseDir: string): CappuConfig {
 }
 
 /**
- * Load the config from `explicitPath`, or from `cwd`/cappu.json. A missing
- * default file yields the empty config; a missing explicit path, a JSONC parse
- * error or a shape violation throws with the offending path in the message.
+ * The nearest cappu.json at or above `from`, or undefined if none exists up to
+ * the filesystem root. Mirrors how npm/cargo/uv/git find their project root, so
+ * a command run from a subdirectory still sees the project config (its dir
+ * becomes baseDir) instead of silently falling back to defaults.
+ */
+function findConfigUpward(from: string): string | undefined {
+  let dir = resolve(from);
+  for (;;) {
+    const candidate = join(dir, DEFAULT_CONFIG_NAME);
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) return undefined; // reached the filesystem root
+    dir = parent;
+  }
+}
+
+/**
+ * Load the config from `explicitPath`, or the nearest cappu.json at or above
+ * `cwd`. No file anywhere up the tree yields the empty config; a missing
+ * explicit path, a JSONC parse error or a shape violation throws with the
+ * offending path in the message.
  */
 export function loadConfig(explicitPath?: string, cwd = process.cwd()): CappuConfig {
-  const path = explicitPath ? resolve(cwd, explicitPath) : join(cwd, DEFAULT_CONFIG_NAME);
+  const path = explicitPath ? resolve(cwd, explicitPath) : findConfigUpward(cwd);
+  if (path === undefined) return emptyConfig(cwd); // nothing found walking up
   if (!existsSync(path)) {
     if (explicitPath) throw new Error(`config file not found: ${path}`);
     return emptyConfig(cwd);
