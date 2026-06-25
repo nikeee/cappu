@@ -1,0 +1,8 @@
+class A {
+  void m() {
+    something.methodOneHere().methodTwoHere().methodThreeHere().methodFourHere().methodFiveHere().methodSixHere();
+    Result x = builderObject.withOne(aaaa).withTwo(bbbb).withThree(cccc).withFour(dddd).withFive(eeee).buildItNow();
+    short1.foo();
+    fits.methodOne().methodTwo();
+  }
+}

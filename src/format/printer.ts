@@ -114,9 +114,10 @@ const WIDTH = 100;
 export class UnsupportedSyntaxError extends Error {}
 
 export function formatSourceFile(sf: SourceFile, options: FormatOptions): string {
-  const p = new Printer(sf);
+  const mult = options.style === "aosp" ? 2 : 1;
+  const p = new Printer(sf, mult);
   const doc = p.sourceFile(sf);
-  const text = printDoc(doc, { width: WIDTH, indentMultiplier: options.style === "aosp" ? 2 : 1 });
+  const text = printDoc(doc, { width: WIDTH, indentMultiplier: mult });
   // Safety net: the printer attaches comments at member/statement granularity.
   // If a comment sat somewhere it does not yet handle, refuse rather than
   // silently drop it - the CLI then leaves the file untouched.
@@ -148,7 +149,13 @@ class Printer {
   private readonly comments: Comment[];
   /** Index of the next not-yet-emitted comment in `comments`. */
   private ci = 0;
-  constructor(private readonly sf: SourceFile) {
+  // The indent multiplier (1 google / 2 aosp). Most layout defers the multiplier
+  // to print time, but a few gjf decisions (e.g. the method-chain "small
+  // receiver" threshold) depend on it at build time.
+  constructor(
+    private readonly sf: SourceFile,
+    private readonly mult: number,
+  ) {
     this.text = sf.text;
     this.comments = collectComments(sf.text);
   }
@@ -985,6 +992,58 @@ class Printer {
     return concat([this.node(e.left), " ", op, level(PLUS4, [line, this.node(e.right)])]);
   }
 
+  // A dotted dereference chain (`a.b().c().d`). gjf flattens the `.`-spine and,
+  // when there are at least two method invocations (a "builder" chain), breaks
+  // before every dot at +4 (one selector per line). A chain with at most one
+  // invocation stays glued (its argument lists wrap instead). The first dot does
+  // not break when the receiver is tiny (<= indentMultiplier*4 chars).
+  // ponytail: type-name prefixes (`ImmutableList.builder()...`) and stream
+  // chains are not yet treated as units; those over-break. Add when a corpus
+  // fixture needs them.
+  private dotChain(root: Expression): Doc {
+    const links: { doc: Doc; isCall: boolean }[] = [];
+    let cur: Node = root;
+    for (;;) {
+      if (
+        cur.kind === SyntaxKind.CallExpression &&
+        (cur as CallExpression).expression.kind === SyntaxKind.PropertyAccessExpression
+      ) {
+        const callExpr = cur as CallExpression;
+        const pa = callExpr.expression as PropertyAccessExpression;
+        links.unshift({
+          doc: concat([
+            ".",
+            this.raw(pa.name),
+            this.typeArguments(callExpr.typeArguments),
+            this.argList(callExpr.arguments),
+          ]),
+          isCall: true,
+        });
+        cur = pa.expression;
+      } else if (cur.kind === SyntaxKind.PropertyAccessExpression) {
+        const pa = cur as PropertyAccessExpression;
+        links.unshift({ doc: concat([".", this.raw(pa.name)]), isCall: false });
+        cur = pa.expression;
+      } else {
+        break;
+      }
+    }
+    const base = this.node(cur);
+    const callCount = links.filter(l => l.isCall).length;
+    if (callCount < 2) {
+      // Not a builder chain: keep it glued; nested argument lists still wrap.
+      return concat([base, ...links.map(l => l.doc)]);
+    }
+    const baseLen = cur.end - this.start(cur);
+    const minLength = this.mult * 4;
+    const parts: Doc[] = [base];
+    links.forEach((l, i) => {
+      if (i > 0 || baseLen > minLength) parts.push(brk("unified", "", ZERO));
+      parts.push(l.doc);
+    });
+    return level(PLUS4, parts);
+  }
+
   private call(e: CallExpression): Doc {
     return concat([
       this.node(e.expression),
@@ -1167,10 +1226,24 @@ class Printer {
         return this.assignment(node as AssignmentExpression);
       case SyntaxKind.ConditionalExpression:
         return this.conditional(node as ConditionalExpression);
-      case SyntaxKind.CallExpression:
-        return this.call(node as CallExpression);
+      case SyntaxKind.CallExpression: {
+        const e = node as CallExpression;
+        // A method call on a `.`-access is part of a dereference chain.
+        if (e.expression.kind === SyntaxKind.PropertyAccessExpression) return this.dotChain(e);
+        return this.call(e);
+      }
       case SyntaxKind.PropertyAccessExpression: {
         const e = node as PropertyAccessExpression;
+        // Route through the chain layout only when the receiver is itself a
+        // call/access (a real chain); a plain `obj.field` stays inline.
+        const k = e.expression.kind;
+        if (
+          k === SyntaxKind.CallExpression ||
+          k === SyntaxKind.PropertyAccessExpression ||
+          k === SyntaxKind.ElementAccessExpression
+        ) {
+          return this.dotChain(e);
+        }
         return concat([this.node(e.expression), ".", this.raw(e.name)]);
       }
       case SyntaxKind.ElementAccessExpression: {
