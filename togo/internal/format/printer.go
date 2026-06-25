@@ -1068,7 +1068,9 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 			ce := cur.AsCallExpression()
 			pa := ce.Expression.AsPropertyAccessExpression()
 			links = append([]linkT{{
-				doc:    concat(text("."), text(p.raw(pa.Name)), p.typeArguments(ce.TypeArguments), p.argList(ce.Arguments)),
+				// Explicit method type arguments go between the dot and the name:
+				// `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
+				doc:    concat(text("."), p.typeArguments(ce.TypeArguments), text(p.raw(pa.Name)), p.argList(ce.Arguments)),
 				isCall: true,
 				name:   p.raw(pa.Name),
 			}}, links...)

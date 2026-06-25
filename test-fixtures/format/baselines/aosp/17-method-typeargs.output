@@ -1,0 +1,7 @@
+class A {
+    void m() {
+        obj.<String>foo(x);
+        Util.<Integer, Long>bar();
+        this.<T>baz();
+    }
+}

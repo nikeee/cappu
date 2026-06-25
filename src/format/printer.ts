@@ -1011,10 +1011,12 @@ class Printer {
         const callExpr = cur as CallExpression;
         const pa = callExpr.expression as PropertyAccessExpression;
         links.unshift({
+          // Explicit method type arguments go between the dot and the name:
+          // `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
           doc: concat([
             ".",
-            this.raw(pa.name),
             this.typeArguments(callExpr.typeArguments),
+            this.raw(pa.name),
             this.argList(callExpr.arguments),
           ]),
           isCall: true,
