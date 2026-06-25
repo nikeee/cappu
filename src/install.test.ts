@@ -7,6 +7,7 @@ import { expect } from "expect";
 
 import { loadConfig } from "./config.ts";
 import {
+  checkLocked,
   installDependencies,
   LOCKFILE_NAME,
   pickAddVersion,
@@ -125,6 +126,39 @@ test("an unknown dependency surfaces as missing, nothing is written for it", asy
     artifactId: "gone",
     version: "9",
   });
+});
+
+test("checkLocked: ok when the lock matches, stale on drift, missing when absent", async () => {
+  using dir = TempDir.create("cappu-locked-");
+  const configPath = join(dir.path, "cappu.json");
+  writeFileSync(
+    configPath,
+    '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
+  );
+  // No lock yet, but a dependency is declared -> missing.
+  expect(checkLocked(loadConfig(undefined, dir.path))).toEqual({
+    ok: false,
+    reason: expect.stringMatching(/no cappu-lock\.json/),
+  });
+
+  // Resolve to write the lock; now it matches -> ok.
+  await installDependencies(loadConfig(undefined, dir.path), [fakeRepo()]);
+  expect(checkLocked(loadConfig(undefined, dir.path))).toEqual({ ok: true });
+
+  // Change the declared dependencies: the lock is now stale.
+  writeFileSync(
+    configPath,
+    '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.13.0" } } }',
+  );
+  expect(checkLocked(loadConfig(undefined, dir.path))).toEqual({
+    ok: false,
+    reason: expect.stringMatching(/disagree/),
+  });
+
+  // A project with no declared dependencies and no lock is fine.
+  using bare = TempDir.create("cappu-locked-bare-");
+  writeFileSync(join(bare.path, "cappu.json"), "{}");
+  expect(checkLocked(loadConfig(undefined, bare.path))).toEqual({ ok: true });
 });
 
 test("install writes a lockfile and reuses it while the dependencies match", async () => {

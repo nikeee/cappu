@@ -46,6 +46,7 @@ type CLI struct {
 	Tree         treeCmd         `cmd:"" help:"Print the resolved dependency graph as a tree, per configuration"`
 	Publish      publishCmd      `cmd:"" help:"Build the jar, generate its POM, and upload"`
 	Search       searchCmd       `cmd:"" help:"Search the configured package sources"`
+	Run          runCmd          `cmd:"" help:"Compile the project and run it on the JVM"`
 	Test         testCmd         `cmd:"" help:"Compile src/test/java and run JUnit"`
 	SelfUpgrade  selfUpgradeCmd  `cmd:"" name:"self-upgrade" help:"Replace this binary with the latest CD build"`
 	Rage         rageCmd         `cmd:"" help:"Open the issue tracker in your default browser"`
@@ -108,6 +109,7 @@ func (c *initCmd) Run(a *appState) error { return exit(cli.RunInit(a.configPath,
 
 type installCmd struct {
 	Verbose bool `short:"v" help:"List every installed jar"`
+	Locked  bool `help:"Fail (without downloading) if cappu-lock.json is stale or missing"`
 }
 
 func (c *installCmd) Run(a *appState) error {
@@ -115,7 +117,7 @@ func (c *installCmd) Run(a *appState) error {
 	if err != nil {
 		return err
 	}
-	return exit(cli.RunInstall(cfg, c.Verbose))
+	return exit(cli.RunInstall(cfg, c.Verbose, c.Locked))
 }
 
 type updateCmd struct{}
@@ -261,6 +263,18 @@ func (c *testCmd) Run(a *appState) error {
 		return err
 	}
 	return exit(cli.RunTest(cfg))
+}
+
+type runCmd struct {
+	Args []string `arg:"" optional:"" passthrough:"" help:"Arguments passed to the program (after --)"`
+}
+
+func (c *runCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		return err
+	}
+	return exit(cli.RunRun(c.Args, cfg))
 }
 
 type selfUpgradeCmd struct{}

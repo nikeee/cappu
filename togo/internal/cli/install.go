@@ -18,7 +18,16 @@ import (
 //
 // JDK provisioning (the config "jdk" entry) is NOT yet ported; install prints a
 // notice and otherwise proceeds. See internal/jdks in the Node build.
-func RunInstall(cfg *config.Config, verbose bool) int {
+func RunInstall(cfg *config.Config, verbose, locked bool) int {
+	// --locked (CI): fail before downloading anything if the lock is stale or
+	// missing relative to cappu.json.
+	if locked {
+		if ok, reason := install.CheckLocked(cfg); !ok {
+			fmt.Fprintf(os.Stderr, "%s %s\n", painter(os.Stderr)("red", "error:"), reason)
+			emitAnnotation("error", reason, AnnotationLocation{})
+			return 1
+		}
+	}
 	return runInstallWith(cfg, verbose, false)
 }
 

@@ -106,6 +106,42 @@ func TestInstallResolvesDownloadsAndWritesLock(t *testing.T) {
 	}
 }
 
+func TestCheckLocked(t *testing.T) {
+	cfg := project(t, `{"dependencies":{"implementation":{"org.a:a":"1"}}}`)
+	dir := cfg.BaseDir
+	reload := func() *config.Config {
+		c, err := config.Load("", dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	// No lock yet, but a dependency is declared -> missing.
+	if ok, reason := CheckLocked(cfg); ok || !strings.Contains(reason, "no cappu-lock.json") {
+		t.Errorf("missing lock: ok=%v reason=%q", ok, reason)
+	}
+	// Resolve to write the lock; now it matches -> ok.
+	if _, err := Dependencies(reload(), []packages.PackageSource{source()}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, reason := CheckLocked(reload()); !ok {
+		t.Errorf("matching lock should be ok, got reason=%q", reason)
+	}
+	// Change the declared dependency: the lock is now stale.
+	if err := os.WriteFile(filepath.Join(dir, config.DefaultConfigName),
+		[]byte(`{"dependencies":{"implementation":{"org.a:a":"2"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ok, reason := CheckLocked(reload()); ok || !strings.Contains(reason, "disagree") {
+		t.Errorf("stale lock: ok=%v reason=%q", ok, reason)
+	}
+	// A project with no declared dependencies and no lock is fine.
+	bare := project(t, `{}`)
+	if ok, _ := CheckLocked(bare); !ok {
+		t.Error("bare project with no deps should be ok")
+	}
+}
+
 func TestInstallFromLockReused(t *testing.T) {
 	cfg := project(t, `{"dependencies":{"implementation":{"org.a:a":"1"}}}`)
 	if _, err := Dependencies(cfg, []packages.PackageSource{source()}, Options{}); err != nil {

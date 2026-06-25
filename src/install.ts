@@ -509,6 +509,26 @@ function lockMatches(lock: Lockfile, config: CappuConfig): boolean {
   return normalized(lock.roots) === normalized(config.dependencies);
 }
 
+/**
+ * Whether the lockfile is consistent with cappu.json, for `cappu install
+ * --locked` (the CI guarantee, like `uv --locked` / `cargo --locked`). Checked
+ * before any download so a stale or missing lock fails fast without touching the
+ * network: a lock that was resolved from a different dependencies section is
+ * `stale`; declared dependencies with no lock at all are `missing`.
+ */
+export function checkLocked(config: CappuConfig): { ok: true } | { ok: false; reason: string } {
+  const lock = readLockfile(config);
+  if (lock === undefined) {
+    const declared = Object.values(config.dependencies).some(m => Object.keys(m).length > 0);
+    return declared
+      ? { ok: false, reason: "no cappu-lock.json found; run `cappu install` to create it" }
+      : { ok: true };
+  }
+  return lockMatches(lock, config)
+    ? { ok: true }
+    : { ok: false, reason: "cappu.json and cappu-lock.json disagree; run `cappu install` to re-resolve" };
+}
+
 async function artifactFrom(
   sources: readonly PackageSource[],
   preferred: string,

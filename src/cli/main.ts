@@ -33,6 +33,7 @@ import { formatDuration, painter } from "./style.ts";
 import { emitAnnotation } from "./annotations.ts";
 import { agentEnabled } from "./agent.ts";
 import { runTestCommand } from "./test.ts";
+import { runRunCommand } from "./run.ts";
 import pkg from "../../package.json" with { type: "json" };
 
 const USAGE = `
@@ -44,9 +45,11 @@ Usage:
                                      takes defaults); --with-schema also writes
                                      cappu.schema.json
   cappu config-schema                Print the JSON Schema for cappu.json to stdout
-  cappu install [-v]                 Download the cappu.json dependencies (transitively)
+  cappu install [-v] [--locked]      Download the cappu.json dependencies (transitively)
                                      into .cappu/lib/classes; prints a per-category
-                                     count, or each jar path with -v/--verbose
+                                     count, or each jar path with -v/--verbose.
+                                     --locked fails (without downloading) if
+                                     cappu-lock.json is stale or missing (for CI)
   cappu update                       Bump declared dependencies to the newest stable
                                      versions that keep the tree conflict-free
   cappu outdated                     List declared dependencies that have a newer
@@ -80,6 +83,10 @@ Usage:
   cappu search <query> [--json]      Search the configured package sources; prints
                                      group:artifact@latest-version per match;
                                      --json emits the matches machine-readable
+  cappu run [-- <args>]              Compile the project and run it on the JVM:
+                                     the configured compilerOptions.mainClass, else
+                                     the single class declaring main(String[]).
+                                     Arguments after -- are passed to the program
   cappu test                         Compile src/test/java and run the JUnit
                                      Platform console launcher over it
   cappu self-upgrade                 Replace this binary with the latest CD build
@@ -156,6 +163,7 @@ const { values, positionals } = (() => {
         // can supply the value (an explicit flag always wins).
         quiet: { type: "boolean", short: "q" },
         verbose: { type: "boolean", short: "v" },
+        locked: { type: "boolean", default: false },
         write: { type: "boolean", short: "w", default: false },
         "with-schema": { type: "boolean", default: false },
         yes: { type: "boolean", short: "y", default: false },
@@ -266,7 +274,7 @@ switch (command) {
     await runOutdated(config);
     break;
   case "install":
-    await runInstall(config, { verbose: values.verbose });
+    await runInstall(config, { verbose: values.verbose, locked: values.locked });
     break;
   case "update":
     await runUpdate(values.config, config);
@@ -306,6 +314,9 @@ switch (command) {
     break;
   case "test":
     await runTestCommand(config);
+    break;
+  case "run":
+    await runRunCommand(files, config);
     break;
   case "compile":
     await runCompileCommand(

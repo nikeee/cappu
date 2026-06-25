@@ -7,7 +7,7 @@ import { styleText } from "node:util";
 import { SingleBar } from "cli-progress";
 
 import type { CappuConfig } from "../config.ts";
-import { installDependencies } from "../install.ts";
+import { checkLocked, installDependencies } from "../install.ts";
 import { provisionJdk } from "../jdks/index.ts";
 import { colorEnabled } from "./color.ts";
 import { emitAnnotation } from "./annotations.ts";
@@ -27,10 +27,20 @@ function progressBar(): SingleBar | undefined {
 
 export async function runInstall(
   config: CappuConfig,
-  options: { updateLock?: boolean; verbose?: boolean } = {},
+  options: { updateLock?: boolean; verbose?: boolean; locked?: boolean } = {},
 ): Promise<never> {
   const out = painter(process.stdout);
   const err = painter(process.stderr);
+  // --locked (CI): fail before downloading anything if the lock is stale or
+  // missing relative to cappu.json.
+  if (options.locked) {
+    const status = checkLocked(config);
+    if (!status.ok) {
+      process.stderr.write(`${err("red", "error:")} ${status.reason}\n`);
+      emitAnnotation("error", status.reason);
+      process.exit(1);
+    }
+  }
   let bar: SingleBar | undefined;
   // Resolving (no lockfile) fetches a POM per package with no known total, so
   // it gets a count-up line rather than a bar; cleared once downloads start.

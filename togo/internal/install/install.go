@@ -64,6 +64,28 @@ type outcome struct {
 	fromStore  string
 }
 
+// CheckLocked reports whether cappu-lock.json is consistent with cappu.json for
+// `cappu install --locked` (the CI guarantee, like `uv --locked` /
+// `cargo --locked`). Checked before any download: a lock resolved from a
+// different dependencies section is stale; declared dependencies with no lock at
+// all are missing. Returns ok=true (reason "") when consistent. Port of
+// checkLocked.
+func CheckLocked(cfg *config.Config) (ok bool, reason string) {
+	lock := lockfile.Read(cfg)
+	if lock == nil {
+		d := cfg.Dependencies
+		if len(d.API) > 0 || len(d.Implementation) > 0 ||
+			len(d.AnnotationProcessor) > 0 || len(d.TestImplementation) > 0 {
+			return false, "no cappu-lock.json found; run `cappu install` to create it"
+		}
+		return true, ""
+	}
+	if !lock.Matches(cfg) {
+		return false, "cappu.json and cappu-lock.json disagree; run `cappu install` to re-resolve"
+	}
+	return true, ""
+}
+
 // Dependencies resolves and downloads the cappu.json dependencies. An existing
 // lock is installed exactly as written (every download verified against its
 // locked hash); resolution runs only to bootstrap a missing lock, or when
