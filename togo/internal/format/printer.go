@@ -1057,6 +1057,7 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 	type linkT struct {
 		doc    Doc
 		isCall bool
+		name   string
 	}
 	var links []linkT
 	cur := root
@@ -1069,12 +1070,13 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 			links = append([]linkT{{
 				doc:    concat(text("."), text(p.raw(pa.Name)), p.typeArguments(ce.TypeArguments), p.argList(ce.Arguments)),
 				isCall: true,
+				name:   p.raw(pa.Name),
 			}}, links...)
 			cur = pa.Expression
 			continue
 		case cur.Kind == compiler.PropertyAccessExpression:
 			pa := cur.AsPropertyAccessExpression()
-			links = append([]linkT{{doc: concat(text("."), text(p.raw(pa.Name))), isCall: false}}, links...)
+			links = append([]linkT{{doc: concat(text("."), text(p.raw(pa.Name))), isCall: false, name: p.raw(pa.Name)}}, links...)
 			cur = pa.Expression
 			continue
 		}
@@ -1095,11 +1097,29 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 		}
 		return concat(parts...)
 	}
+	// The leading links glued to the base (no break before them): a type-name
+	// prefix (`ImmutableList.builder()` stays a unit), else just the first link
+	// when the receiver is tiny.
 	baseLen := cur.End - p.start(cur)
-	minLength := p.mult * 4
+	glue := 0
+	if baseLen <= p.mult*4 {
+		glue = 1
+	}
+	if cur.Kind == compiler.Identifier {
+		names := []string{p.raw(cur)}
+		for _, l := range links {
+			names = append(names, l.name)
+			if l.isCall {
+				break // the first method name ends the type-name prefix
+			}
+		}
+		if pfx := typePrefixLength(names); pfx >= 0 {
+			glue = pfx
+		}
+	}
 	parts := []Doc{base}
 	for i, l := range links {
-		if i > 0 || baseLen > minLength {
+		if i >= glue {
 			parts = append(parts, brk(fillUnified, "", ZERO, nil))
 		}
 		parts = append(parts, l.doc)
@@ -1488,3 +1508,107 @@ var precedenceTable = map[compiler.SyntaxKind]int{
 }
 
 func precedence(op compiler.SyntaxKind) int { return precedenceTable[op] }
+
+// caseFormat / typePrefixLength port google-java-format's TypeNameClassifier:
+// the inclusive end index of the longest leading run of nameParts that looks
+// like a type name (optionally with one trailing static member), or -1. Lets a
+// chain keep a type prefix glued (`ImmutableList.builder()` stays a unit).
+type caseFormat int
+
+const (
+	caseUpper caseFormat = iota
+	caseLower
+	caseUpperCamel
+	caseLowerCamel
+)
+
+func javaCaseFormat(name string) caseFormat {
+	firstUpper, hasUpper, hasLower, first := false, false, false, true
+	for _, c := range name {
+		isLetter := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		if !isLetter {
+			continue
+		}
+		if first {
+			firstUpper = c >= 'A' && c <= 'Z'
+			first = false
+		}
+		if c >= 'A' && c <= 'Z' {
+			hasUpper = true
+		}
+		if c >= 'a' && c <= 'z' {
+			hasLower = true
+		}
+	}
+	if firstUpper {
+		if hasLower || len(name) == 1 {
+			return caseUpperCamel
+		}
+		return caseUpper
+	}
+	if hasUpper {
+		return caseLowerCamel
+	}
+	return caseLower
+}
+
+type tyState int
+
+const (
+	tyStart tyState = iota
+	tyType
+	tyFirstStatic
+	tyAmbiguous
+	tyReject
+)
+
+func tySingleUnit(s tyState) bool { return s == tyType || s == tyFirstStatic }
+
+func tyNext(state tyState, n caseFormat) tyState {
+	switch state {
+	case tyStart:
+		switch n {
+		case caseUpper:
+			return tyAmbiguous
+		case caseLowerCamel:
+			return tyReject
+		case caseLower:
+			return tyStart
+		default: // caseUpperCamel
+			return tyType
+		}
+	case tyType:
+		if n == caseUpperCamel {
+			return tyType
+		}
+		return tyFirstStatic
+	case tyFirstStatic:
+		return tyReject
+	case tyAmbiguous:
+		switch n {
+		case caseUpper:
+			return tyAmbiguous
+		case caseUpperCamel:
+			return tyType
+		default:
+			return tyReject
+		}
+	default:
+		return tyReject
+	}
+}
+
+func typePrefixLength(nameParts []string) int {
+	state := tyStart
+	typeLength := -1
+	for i, part := range nameParts {
+		state = tyNext(state, javaCaseFormat(part))
+		if state == tyReject {
+			break
+		}
+		if tySingleUnit(state) {
+			typeLength = i
+		}
+	}
+	return typeLength
+}

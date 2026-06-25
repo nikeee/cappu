@@ -1001,7 +1001,7 @@ class Printer {
   // chains are not yet treated as units; those over-break. Add when a corpus
   // fixture needs them.
   private dotChain(root: Expression): Doc {
-    const links: { doc: Doc; isCall: boolean }[] = [];
+    const links: { doc: Doc; isCall: boolean; name: string }[] = [];
     let cur: Node = root;
     for (;;) {
       if (
@@ -1018,11 +1018,16 @@ class Printer {
             this.argList(callExpr.arguments),
           ]),
           isCall: true,
+          name: this.raw(pa.name),
         });
         cur = pa.expression;
       } else if (cur.kind === SyntaxKind.PropertyAccessExpression) {
         const pa = cur as PropertyAccessExpression;
-        links.unshift({ doc: concat([".", this.raw(pa.name)]), isCall: false });
+        links.unshift({
+          doc: concat([".", this.raw(pa.name)]),
+          isCall: false,
+          name: this.raw(pa.name),
+        });
         cur = pa.expression;
       } else {
         break;
@@ -1038,11 +1043,24 @@ class Printer {
     if (callCount === 0 || (callCount === 1 && !baseIsCall)) {
       return concat([base, ...links.map(l => l.doc)]);
     }
+    // The leading links glued to the base (no break before them): a type-name
+    // prefix (`ImmutableList.builder()` stays a unit), else just the first link
+    // when the receiver is tiny.
     const baseLen = cur.end - this.start(cur);
     const minLength = this.mult * 4;
+    let glue = baseLen <= minLength ? 1 : 0;
+    if (cur.kind === SyntaxKind.Identifier) {
+      const names = [this.raw(cur)];
+      for (const l of links) {
+        names.push(l.name);
+        if (l.isCall) break; // the first method name ends the type-name prefix
+      }
+      const p = typePrefixLength(names);
+      if (p >= 0) glue = p;
+    }
     const parts: Doc[] = [base];
     links.forEach((l, i) => {
-      if (i > 0 || baseLen > minLength) parts.push(brk("unified", "", ZERO));
+      if (i >= glue) parts.push(brk("unified", "", ZERO));
       parts.push(l.doc);
     });
     return level(PLUS4, parts);
@@ -1362,6 +1380,72 @@ const PRECEDENCE: Partial<Record<SyntaxKind, number>> = {
 
 function precedence(op: SyntaxKind): number {
   return PRECEDENCE[op] ?? 0;
+}
+
+// google-java-format's TypeNameClassifier: the inclusive end index of the
+// longest leading run of `nameParts` that looks like a type name (optionally
+// with one trailing static member), or -1. Lets a chain keep a type prefix glued
+// (`ImmutableList.builder()` stays a unit). Ported from TypeNameClassifier.java.
+type CaseFormat = "upper" | "lower" | "upperCamel" | "lowerCamel";
+
+function javaCaseFormat(name: string): CaseFormat {
+  let firstUpper = false;
+  let hasUpper = false;
+  let hasLower = false;
+  let first = true;
+  for (const c of name) {
+    if (!/[a-zA-Z]/.test(c)) continue;
+    if (first) {
+      firstUpper = c >= "A" && c <= "Z";
+      first = false;
+    }
+    if (c >= "A" && c <= "Z") hasUpper = true;
+    if (c >= "a" && c <= "z") hasLower = true;
+  }
+  if (firstUpper) return hasLower || name.length === 1 ? "upperCamel" : "upper";
+  return hasUpper ? "lowerCamel" : "lower";
+}
+
+// State machine over case formats: START/TYPE/FIRST_STATIC_MEMBER/AMBIGUOUS/REJECT.
+type TyState = "start" | "type" | "firstStatic" | "ambiguous" | "reject";
+const SINGLE_UNIT: Record<TyState, boolean> = {
+  start: false,
+  type: true,
+  firstStatic: true,
+  ambiguous: false,
+  reject: false,
+};
+
+function tyNext(state: TyState, n: CaseFormat): TyState {
+  switch (state) {
+    case "start":
+      return n === "upper"
+        ? "ambiguous"
+        : n === "lowerCamel"
+          ? "reject"
+          : n === "lower"
+            ? "start"
+            : "type";
+    case "type":
+      return n === "upperCamel" ? "type" : "firstStatic";
+    case "firstStatic":
+      return "reject";
+    case "ambiguous":
+      return n === "upper" ? "ambiguous" : n === "upperCamel" ? "type" : "reject";
+    case "reject":
+      return "reject";
+  }
+}
+
+function typePrefixLength(nameParts: string[]): number {
+  let state: TyState = "start";
+  let typeLength = -1;
+  for (let i = 0; i < nameParts.length; i++) {
+    state = tyNext(state, javaCaseFormat(nameParts[i]));
+    if (state === "reject") break;
+    if (SINGLE_UNIT[state]) typeLength = i;
+  }
+  return typeLength;
 }
 
 function rank(kind: SyntaxKind): number {
