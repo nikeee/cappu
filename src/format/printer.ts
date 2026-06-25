@@ -517,7 +517,7 @@ class Printer {
       members: NodeArray<Node>;
       end: number;
     },
-    afterName: Doc,
+    tail: Doc[],
   ): Doc {
     const header = concat([
       this.modifiers(decl.modifiers, "own"),
@@ -525,10 +525,26 @@ class Printer {
       " ",
       this.raw(decl.name),
       this.typeParameters(decl.typeParameters),
-      afterName,
+      // extends/implements/permits live in one +4 level: each clause begins with
+      // a fill break, so a long clause folds onto its own continuation line.
+      level(PLUS4, tail),
       " ",
     ]);
     return concat([header, this.body(decl.members, decl.end)]);
+  }
+
+  // A gjf class-header type list (`implements A, B, C`): a fill break before the
+  // keyword, then the keyword and the types. With more than one type the list
+  // itself indents +4 and its commas break UNIFIED (one per line); a single type
+  // stays attached.
+  private typeListClause(keyword: string, types: TypeNode[]): Doc {
+    if (types.length === 0) return "";
+    const inner: Doc[] = [keyword, " "];
+    types.forEach((t, i) => {
+      if (i > 0) inner.push(",", brk("unified", " ", ZERO));
+      inner.push(this.type(t));
+    });
+    return concat([brk("independent", " ", ZERO), level(types.length > 1 ? PLUS4 : ZERO, inner)]);
   }
 
   /** A brace-delimited member body: `{` ... `}` or `{}` when empty. `endPos` is
@@ -544,73 +560,30 @@ class Printer {
   }
 
   private classDeclaration(d: ClassDeclaration): Doc {
-    const after: Doc[] = [];
-    if (d.extendsType) after.push(concat([" extends ", this.type(d.extendsType)]));
-    if (d.implementsTypes && d.implementsTypes.length > 0)
-      after.push(
-        concat([
-          " implements ",
-          join(
-            ", ",
-            d.implementsTypes.map(t => this.type(t)),
-          ),
-        ]),
-      );
-    if (d.permitsTypes && d.permitsTypes.length > 0)
-      after.push(
-        concat([
-          " permits ",
-          join(
-            ", ",
-            d.permitsTypes.map(t => this.type(t)),
-          ),
-        ]),
-      );
-    return this.classLike("class", d, concat(after));
+    const tail: Doc[] = [];
+    // A class's `extends` is a single supertype (no list).
+    if (d.extendsType)
+      tail.push(concat([brk("independent", " ", ZERO), "extends ", this.type(d.extendsType)]));
+    if (d.implementsTypes) tail.push(this.typeListClause("implements", [...d.implementsTypes]));
+    if (d.permitsTypes) tail.push(this.typeListClause("permits", [...d.permitsTypes]));
+    return this.classLike("class", d, tail);
   }
 
   private interfaceDeclaration(d: InterfaceDeclaration): Doc {
-    const after: Doc[] = [];
-    if (d.extendsTypes && d.extendsTypes.length > 0)
-      after.push(
-        concat([
-          " extends ",
-          join(
-            ", ",
-            d.extendsTypes.map(t => this.type(t)),
-          ),
-        ]),
-      );
-    if (d.permitsTypes && d.permitsTypes.length > 0)
-      after.push(
-        concat([
-          " permits ",
-          join(
-            ", ",
-            d.permitsTypes.map(t => this.type(t)),
-          ),
-        ]),
-      );
-    return this.classLike("interface", d, concat(after));
+    const tail: Doc[] = [];
+    if (d.extendsTypes) tail.push(this.typeListClause("extends", [...d.extendsTypes]));
+    if (d.permitsTypes) tail.push(this.typeListClause("permits", [...d.permitsTypes]));
+    return this.classLike("interface", d, tail);
   }
 
   private enumDeclaration(d: EnumDeclaration): Doc {
-    const after: Doc[] = [];
-    if (d.implementsTypes && d.implementsTypes.length > 0)
-      after.push(
-        concat([
-          " implements ",
-          join(
-            ", ",
-            d.implementsTypes.map(t => this.type(t)),
-          ),
-        ]),
-      );
+    const tail: Doc[] = [];
+    if (d.implementsTypes) tail.push(this.typeListClause("implements", [...d.implementsTypes]));
     const header = concat([
       this.modifiers(d.modifiers, "own"),
       "enum ",
       this.raw(d.name),
-      concat(after),
+      level(PLUS4, tail),
       " ",
     ]);
     if (d.enumConstants.length === 0 && d.members.length === 0) return concat([header, "{}"]);
@@ -755,16 +728,12 @@ class Printer {
     if (tp !== "") head.push(tp, " ");
     if (decl.returnType) head.push(this.type(decl.returnType), " ");
     head.push(this.raw(decl.name), this.parameters(decl.parameters));
-    if (decl.throws && decl.throws.length > 0)
-      head.push(
-        concat([
-          " throws ",
-          join(
-            ", ",
-            decl.throws.map(t => this.type(t)),
-          ),
-        ]),
-      );
+    if (decl.throws && decl.throws.length > 0) {
+      // Same shape as a class header type list, wrapped in a +4 level so the
+      // `throws` keyword folds onto a continuation line (the class header gets
+      // that +4 from its own enclosing level; a method head has none).
+      head.push(level(PLUS4, [this.typeListClause("throws", [...decl.throws])]));
+    }
     if (!decl.body) return concat([...head, ";"]);
     return concat([...head, " ", this.block(decl.body)]);
   }

@@ -1,0 +1,21 @@
+class Wide
+    implements InterfaceOne,
+        InterfaceTwo,
+        InterfaceThree,
+        InterfaceFour,
+        InterfaceFive,
+        InterfaceSix {}
+
+interface Broad
+    extends BaseOne, BaseTwo, BaseThree, BaseFour, BaseFive, BaseSix, BaseSeven, BaseEight {}
+
+class Thrower {
+  void doStuff()
+      throws ExceptionOne,
+          ExceptionTwo,
+          ExceptionThree,
+          ExceptionFour,
+          ExceptionFive,
+          ExceptionSix,
+          ExceptionSeven {}
+}
