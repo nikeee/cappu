@@ -28,6 +28,7 @@ import { runLicenses } from "./licenses.ts";
 import { runPublish } from "./publish.ts";
 import { runVersion } from "./version.ts";
 import { runVerify } from "./verify.ts";
+import { runTree } from "./tree.ts";
 import { formatDuration, painter } from "./style.ts";
 import { emitAnnotation } from "./annotations.ts";
 import { agentEnabled } from "./agent.ts";
@@ -50,6 +51,11 @@ Usage:
                                      versions that keep the tree conflict-free
   cappu outdated                     List declared dependencies that have a newer
                                      published version (current/wanted/latest)
+  cappu tree [--json]                Print the resolved dependency graph as an
+                                     indented tree, one section per configuration
+                                     (api, implementation, annotationProcessor,
+                                     testImplementation); --json emits the forest
+                                     machine-readable
   cappu version <major|minor|patch>  Bump the project version in cappu.json; at a
                                      git repo root, also commit it and tag v<version>
   cappu verify                       Check the installed lib jars against the
@@ -130,7 +136,7 @@ Global:
 
   When an AI agent drives cappu (AGENT, CLAUDECODE, CURSOR_AGENT, ... set), colour
   and animations are off and --json is implied where supported (audit, licenses,
-  search).
+  tree, search).
 `.trimStart();
 
 // The IIFE keeps parseArgs's precise inferred result type (the catch path is
@@ -197,6 +203,7 @@ const TIMED_COMMANDS = new Set([
   "remove",
   "audit",
   "licenses",
+  "tree",
   "publish",
   "verify",
   "compile",
@@ -272,6 +279,9 @@ switch (command) {
     break;
   case "licenses":
     await runLicenses(config, { json });
+    break;
+  case "tree":
+    await runTree(config, { json });
     break;
   case "publish":
     await runPublish(config, { repo: values.repo });

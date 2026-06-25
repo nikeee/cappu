@@ -437,3 +437,4 @@ cappu search commons-lang3
 - 2026-06-25 17:42 — add a test where String x = "foo"; if(Random()) x = null; s.length;
 - 2026-06-25 18:40 — fix false positives and negatives
 - 2026-06-25 21:49 — print the number of files formatted (including which were changed)
+- 2026-06-25 23:34 — add the equivalent of npm ls - maybe under a different name?

@@ -330,6 +330,14 @@ export function testRoots(config: CappuConfig): Coordinates[] {
   return rootsOf(config.dependencies.testImplementation);
 }
 
+/** The declared roots of one named configuration, as coordinates. */
+export function configurationRoots(
+  config: CappuConfig,
+  configuration: UpdateConfiguration,
+): Coordinates[] {
+  return rootsOf(config.dependencies[configuration]);
+}
+
 // The dependency configurations `cappu update` walks.
 const UPDATE_CONFIGS = DEPENDENCY_CONFIGURATIONS;
 export type UpdateConfiguration = (typeof UPDATE_CONFIGS)[number];

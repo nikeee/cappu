@@ -43,6 +43,7 @@ type CLI struct {
 	Add          addCmd          `cmd:"" help:"Add dependencies and install them"`
 	Remove       removeCmd       `cmd:"" help:"Remove dependencies and re-resolve"`
 	Outdated     outdatedCmd     `cmd:"" help:"List dependencies with a newer published version"`
+	Tree         treeCmd         `cmd:"" help:"Print the resolved dependency graph as a tree, per configuration"`
 	Publish      publishCmd      `cmd:"" help:"Build the jar, generate its POM, and upload"`
 	Search       searchCmd       `cmd:"" help:"Search the configured package sources"`
 	Test         testCmd         `cmd:"" help:"Compile src/test/java and run JUnit"`
@@ -208,6 +209,18 @@ func (c *outdatedCmd) Run(a *appState) error {
 		return err
 	}
 	return exit(cli.RunOutdated(cfg))
+}
+
+type treeCmd struct {
+	JSON bool `name:"json" help:"Emit the forest machine-readable"`
+}
+
+func (c *treeCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		return err
+	}
+	return exit(cli.RunTree(cfg, c.JSON || cli.AgentEnabled(os.Getenv)))
 }
 
 type publishCmd struct {
