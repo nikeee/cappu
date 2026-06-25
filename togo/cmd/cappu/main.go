@@ -53,6 +53,7 @@ type CLI struct {
 	Mcp          mcpCmd          `cmd:"" help:"Start the MCP server for agents (over stdio)"`
 	Dap          dapCmd          `cmd:"" help:"Start the debug adapter (Debug Adapter Protocol over stdio)"`
 	Compile      compileCmd      `cmd:"" help:"Compile .java files to .class bytecode"`
+	Format       formatCmd       `cmd:"" help:"Format .java files (google-java-format compatible)"`
 }
 
 // --- exit-code plumbing ------------------------------------------------------
@@ -372,6 +373,19 @@ func (c *compileCmd) Run(a *appState) error {
 		return err
 	}
 	return exit(cli.RunCompile(c.Files, c.Output, c.Artifact, c.Quiet, cfg))
+}
+
+type formatCmd struct {
+	Write bool     `short:"w" help:"Rewrite the files in place (default: only check)"`
+	Files []string `arg:"" optional:"" help:"Specific .java files to format"`
+}
+
+func (c *formatCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		return err
+	}
+	return exit(cli.RunFormat(c.Files, c.Write, cfg))
 }
 
 func main() {

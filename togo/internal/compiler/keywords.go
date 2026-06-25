@@ -86,6 +86,9 @@ var keywordText = func() map[SyntaxKind]string {
 	return m
 }()
 
+// TokenToString exposes tokenToString to other packages (the formatter).
+func TokenToString(kind SyntaxKind) string { return tokenToString(kind) }
+
 // tokenToString is the canonical spelling of a punctuation or keyword token, or
 // "" for others (identifiers, literals, EOF). Port of utilities.ts tokenToString.
 func tokenToString(kind SyntaxKind) string {

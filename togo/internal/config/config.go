@@ -77,19 +77,29 @@ type Dependencies struct {
 	TestImplementation  map[string]string `json:"testImplementation"`
 }
 
+// FormatterOptions mirrors the "formatterOptions" section. Deliberately few
+// knobs - the only choice is the indent style.
+type FormatterOptions struct {
+	// Style is "google" (2-space) or "aosp" (4-space).
+	Style string `json:"style"`
+	// Ignore is a list of glob patterns excluded from formatting.
+	Ignore []string `json:"ignore"`
+}
+
 // Config is the parsed cappu.json plus where it came from. Mirrors CappuConfig.
 type Config struct {
-	CompilerOptions   CompilerOptions `json:"compilerOptions"`
-	LspOptions        LspOptions      `json:"lspOptions"`
-	DapOptions        DapOptions      `json:"dapOptions"`
-	PackageSources    []string        `json:"packageSources"`
-	Dependencies      Dependencies    `json:"dependencies"`
-	JDK               string          `json:"jdk,omitempty"`
-	License           string          `json:"license,omitempty"`
-	GroupID           string          `json:"groupId,omitempty"`
-	ArtifactID        string          `json:"artifactId,omitempty"`
-	Version           string          `json:"version,omitempty"`
-	PublishRepository string          `json:"publishRepository,omitempty"`
+	CompilerOptions   CompilerOptions  `json:"compilerOptions"`
+	LspOptions        LspOptions       `json:"lspOptions"`
+	DapOptions        DapOptions       `json:"dapOptions"`
+	FormatterOptions  FormatterOptions `json:"formatterOptions"`
+	PackageSources    []string         `json:"packageSources"`
+	Dependencies      Dependencies     `json:"dependencies"`
+	JDK               string           `json:"jdk,omitempty"`
+	License           string           `json:"license,omitempty"`
+	GroupID           string           `json:"groupId,omitempty"`
+	ArtifactID        string           `json:"artifactId,omitempty"`
+	Version           string           `json:"version,omitempty"`
+	PublishRepository string           `json:"publishRepository,omitempty"`
 
 	// BaseDir is the directory the config file lives in; relative paths resolve
 	// against it. FromFile reports whether an actual cappu.json was read.
@@ -186,6 +196,12 @@ func (c *Config) applyDefaults() {
 			n.NullUnmarkedAnnotations = []string{"org.jspecify.annotations.NullUnmarked"}
 		}
 	}
+	if c.FormatterOptions.Style == "" {
+		c.FormatterOptions.Style = "google"
+	}
+	if c.FormatterOptions.Ignore == nil {
+		c.FormatterOptions.Ignore = []string{}
+	}
 	if c.PackageSources == nil {
 		c.PackageSources = append([]string(nil), DefaultPackageSources...)
 	}
@@ -214,6 +230,11 @@ func (c *Config) validate() error {
 	}
 	if r := c.CompilerOptions.Release; r != nil && *r < 8 {
 		return fmt.Errorf("compilerOptions.release: must be >= 8")
+	}
+	switch c.FormatterOptions.Style {
+	case "google", "aosp":
+	default:
+		return fmt.Errorf(`formatterOptions.style: must be one of "google", "aosp"`)
 	}
 	if c.GroupID != "" && !MavenID.MatchString(c.GroupID) {
 		return fmt.Errorf("groupId: must be a Maven id (letters, digits, . _ -)")

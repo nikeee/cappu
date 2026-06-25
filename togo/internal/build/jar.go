@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -68,6 +69,67 @@ func SourceJavaFiles(cfg *config.Config) []string {
 		files = append(files, JavaFilesIn(cfg.ResolvePath(sp))...)
 	}
 	return files
+}
+
+// FormattableFiles are the .java files `cappu format` operates on: every source
+// file under the configured sourcePaths, minus any matching a
+// formatterOptions.ignore glob (matched against the path relative to the config
+// directory). Port of findFormattableFiles.
+func FormattableFiles(cfg *config.Config) []string {
+	files := SourceJavaFiles(cfg)
+	ignore := cfg.FormatterOptions.Ignore
+	if len(ignore) == 0 {
+		return files
+	}
+	var matchers []*regexp.Regexp
+	for _, pat := range ignore {
+		matchers = append(matchers, globToRegexp(pat))
+	}
+	var out []string
+	for _, f := range files {
+		rel, err := filepath.Rel(cfg.BaseDir, f)
+		if err != nil {
+			rel = f
+		}
+		rel = filepath.ToSlash(rel)
+		ignored := false
+		for _, m := range matchers {
+			if m.MatchString(rel) {
+				ignored = true
+				break
+			}
+		}
+		if !ignored {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// globToRegexp converts a glob pattern to an anchored regexp.
+// ponytail: handles *, ** and ? only (not brace/bracket classes); add those if
+// an ignore pattern ever needs them.
+func globToRegexp(pat string) *regexp.Regexp {
+	var b strings.Builder
+	b.WriteString("^")
+	for i := 0; i < len(pat); i++ {
+		c := pat[i]
+		switch c {
+		case '*':
+			if i+1 < len(pat) && pat[i+1] == '*' {
+				b.WriteString(".*") // ** matches across path separators
+				i++
+			} else {
+				b.WriteString("[^/]*") // * stays within a path segment
+			}
+		case '?':
+			b.WriteString("[^/]")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(c)))
+		}
+	}
+	b.WriteString("$")
+	return regexp.MustCompile(b.String())
 }
 
 // ExpandJarDirs returns each existing root plus the jars directly inside it

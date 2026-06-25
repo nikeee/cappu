@@ -46,6 +46,7 @@ func painter(f *os.File) func(format, text string) string {
 var timedCommands = map[string]bool{
 	"install": true, "update": true, "add": true, "audit": true,
 	"licenses": true, "publish": true, "verify": true, "compile": true, "test": true,
+	"format": true,
 }
 
 // formatDuration is a short human duration: "850ms" under a second, else "1.2s".

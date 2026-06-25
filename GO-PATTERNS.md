@@ -463,3 +463,30 @@ stay byte-comparable, like the LSP pair.
   prints `Listening for transport dt_socket at address: NNNNN` to **stdout**; both
   `launch.go`s parse it off stdout, then forward the rest of stdout as program
   output (safe because `suspend=y` means no program output until resumed).
+
+## Source formatter (src/format -> internal/format)
+
+The google-java-format-compatible formatter (nikeee/cappu#24) is a Wadler/Leijen
+Doc IR plus an AST->Doc lowering. Porting notes:
+- **Doc IR is a tagged struct, not an interface.** The TS `Doc` union includes
+  bare `string`; Go has no untagged union, so `Doc` is one struct with a `kind`
+  field and a `text()` helper wraps string literals. The printer builds many
+  small Docs, so a struct (value type, no boxing) beats an interface. `concat`
+  is variadic (`concat(a, b, c)`); a built `[]Doc` slice is spread with
+  `concat(parts...)`.
+- **JS `String.slice(from, to)` tolerates `from > to` (returns ""); Go panics.**
+  `blankBeforePos` slices `text[from:pos]`; comment-bookkeeping can leave
+  `prevEnd > pos`, which is a no-op in JS but an out-of-range panic in Go. Guard
+  with `if from >= pos { return false }`. Watch for this in every ported
+  `.slice()`/`.substring()` over computed offsets.
+- **`tokenToString` had to be exported.** The printer needs operator/keyword
+  spellings; added `compiler.TokenToString` (wrapper over the private
+  `tokenToString`). It returns `""` (not nil) for non-token kinds, so the
+  fallback is `if s := ...; s != "" { ... } else { raw }`, mirroring TS `?? raw`.
+- **Tests share the fixtures.** `internal/format/format_test.go` reads the same
+  `test-fixtures/format` golden `.input`/`.output` files as the TS suite (no JDK
+  needed at test time), so the Go port is asserted byte-identical to the
+  google-java-format baselines and to the TS build at once.
+- **Ignore globs: no glob dep.** `formatterOptions.ignore` matching uses a tiny
+  `globToRegexp` (`*`, `**`, `?`) in `internal/build/jar.go` instead of adding a
+  minimatch-style dependency for Node's `path.matchesGlob`.
