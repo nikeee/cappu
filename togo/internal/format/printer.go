@@ -519,17 +519,20 @@ func (p *printer) typeArguments(args *compiler.NodeArray) Doc {
 func (p *printer) typ(t *compiler.Node) Doc {
 	switch t.Kind {
 	case compiler.PrimitiveType:
-		if s := compiler.TokenToString(t.AsPrimitiveType().Keyword); s != "" {
-			return text(s)
+		pt := t.AsPrimitiveType()
+		keyword := compiler.TokenToString(pt.Keyword)
+		if keyword == "" {
+			keyword = p.raw(t)
 		}
-		return text(p.raw(t))
+		// SE8 type-use annotations precede the type: `@Nullable int`.
+		return concat(p.annotations(pt.Annotations), text(keyword))
 	case compiler.VarType:
 		return text("var")
 	case compiler.ArrayType:
 		return concat(p.typ(t.AsArrayType().ElementType), text("[]"))
 	case compiler.TypeReference:
 		tr := t.AsTypeReference()
-		return concat(text(p.entityName(tr.TypeName)), p.typeArguments(tr.TypeArguments))
+		return concat(p.annotations(tr.Annotations), text(p.entityName(tr.TypeName)), p.typeArguments(tr.TypeArguments))
 	case compiler.WildcardType:
 		w := t.AsWildcardType()
 		if w.HasExtends && w.Type != nil {

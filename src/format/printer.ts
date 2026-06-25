@@ -54,6 +54,7 @@ import {
   type Parameter,
   type ParenthesizedExpression,
   type PostfixUnaryExpression,
+  type PrimitiveType,
   type PrefixUnaryExpression,
   type PropertyAccessExpression,
   type ProvidesDirective,
@@ -501,15 +502,23 @@ class Printer {
 
   private type(t: TypeNode | WildcardType): Doc {
     switch (t.kind) {
-      case SyntaxKind.PrimitiveType:
-        return tokenToString((t as { keyword: SyntaxKind }).keyword) ?? this.raw(t);
+      case SyntaxKind.PrimitiveType: {
+        const pt = t as PrimitiveType;
+        const keyword = tokenToString(pt.keyword) ?? this.raw(t);
+        // SE8 type-use annotations precede the type: `@Nullable int`.
+        return concat([this.annotations(pt.annotations), keyword]);
+      }
       case SyntaxKind.VarType:
         return "var";
       case SyntaxKind.ArrayType:
         return concat([this.type((t as ArrayType).elementType), "[]"]);
       case SyntaxKind.TypeReference: {
         const tr = t as TypeReference;
-        return concat([this.entityName(tr.typeName), this.typeArguments(tr.typeArguments)]);
+        return concat([
+          this.annotations(tr.annotations),
+          this.entityName(tr.typeName),
+          this.typeArguments(tr.typeArguments),
+        ]);
       }
       case SyntaxKind.WildcardType: {
         const w = t as WildcardType;
