@@ -1178,7 +1178,10 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 		}
 	}
 	baseIsCall := cur.Kind == compiler.CallExpression
-	if callCount == 0 || (callCount == 1 && !baseIsCall) {
+	// A single dereference invocation after a non-invocation prefix stays glued
+	// (`myField.foo()`); a pure field-access chain still breaks before its last
+	// selectors when it overflows (the break path below, gated by the prefix).
+	if callCount == 1 && !baseIsCall {
 		parts := []Doc{base}
 		for _, l := range links {
 			parts = append(parts, l.doc)
