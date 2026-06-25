@@ -1,0 +1,8 @@
+class A {
+  static final String R =
+      com.some.extremely.verbose.pkg.name.R.string.some_extremely_long_resource_identifier;
+
+  int shortStaysInline() {
+    return this.x.y.z;
+  }
+}
