@@ -1,0 +1,13 @@
+public enum WithLeading {
+    ;
+    public static final String ONE = "ONE";
+}
+
+enum Normal {
+    RED,
+    GREEN;
+
+    int code() {
+        return 1;
+    }
+}
