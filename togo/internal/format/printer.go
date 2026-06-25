@@ -219,13 +219,6 @@ func (p *printer) sourceFile(sf *compiler.SourceFileData) Doc {
 	var blocks []Doc
 	firstStart := p.firstConstructStart(sf)
 	header := p.commentsBefore(firstStart)
-	if len(header) > 0 {
-		texts := make([]Doc, len(header))
-		for i, c := range header {
-			texts[i] = text(c.text)
-		}
-		blocks = append(blocks, join(hardline, texts))
-	}
 	if sf.PackageDeclaration != nil {
 		blocks = append(blocks, concat(text("package "), text(p.entityName(sf.PackageDeclaration.AsPackageDeclaration().Name)), text(";")))
 	}
@@ -247,6 +240,22 @@ func (p *printer) sourceFile(sf *compiler.SourceFileData) Doc {
 	}
 	if sf.Statements.Len() > 0 {
 		blocks = append(blocks, concat(p.listDocs(nodes(sf.Statements), true, len(p.text))...))
+	}
+	if len(header) > 0 {
+		texts := make([]Doc, len(header))
+		for i, c := range header {
+			texts[i] = text(c.text)
+		}
+		headerDoc := join(hardline, texts)
+		// A leading comment glued to the first construct (no blank line in source)
+		// is its doc comment - keep it attached. One followed by a blank line is a
+		// file header (e.g. a license), separated like other blocks.
+		glued := len(blocks) > 0 && !p.blankBeforePos(header[len(header)-1].end, firstStart)
+		if glued {
+			blocks[0] = concat(headerDoc, hardline, blocks[0])
+		} else {
+			blocks = append([]Doc{headerDoc}, blocks...)
+		}
 	}
 	return join(concat(hardline, hardline), blocks)
 }

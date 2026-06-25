@@ -273,13 +273,6 @@ class Printer {
     const blocks: Doc[] = [];
     const firstStart = this.firstConstructStart(sf);
     const header = this.commentsBefore(firstStart);
-    if (header.length > 0)
-      blocks.push(
-        join(
-          hardline,
-          header.map(c => c.text),
-        ),
-      );
     if (sf.packageDeclaration) {
       blocks.push(concat(["package ", this.entityName(sf.packageDeclaration.name), ";"]));
     }
@@ -293,6 +286,22 @@ class Printer {
     }
     if (sf.statements.length > 0) {
       blocks.push(concat(this.listDocs(sf.statements, true, this.text.length)));
+    }
+    if (header.length > 0) {
+      const headerDoc = join(
+        hardline,
+        header.map(c => c.text),
+      );
+      // A leading comment glued to the first construct (no blank line in source)
+      // is its doc comment - keep it attached. One followed by a blank line is a
+      // file header (e.g. a license), separated by a blank line like other blocks.
+      const glued =
+        blocks.length > 0 && !this.blankBeforePos(header[header.length - 1].end, firstStart);
+      if (glued) {
+        blocks[0] = concat([headerDoc, hardline, blocks[0]]);
+      } else {
+        blocks.unshift(headerDoc);
+      }
     }
     return join(concat([hardline, hardline]), blocks);
   }
