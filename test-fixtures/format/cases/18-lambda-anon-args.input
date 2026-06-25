@@ -1,0 +1,7 @@
+class A {
+  void m() {
+    list.forEach(item -> { doSomethingWith(item); });
+    register(new Listener() { public void onEvent() {} });
+    runner.run(() -> go());
+  }
+}
