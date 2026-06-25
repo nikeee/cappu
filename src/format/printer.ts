@@ -8,6 +8,7 @@
 // never crash), matching the emitter's discipline.
 
 import { skipTrivia, tokenToString } from "../compiler/utilities.ts";
+import { reformatParamComment, rewriteComment } from "./comment-rewrite.ts";
 import { type Comment, collectComments } from "./comments.ts";
 import {
   type Annotation,
@@ -94,6 +95,7 @@ import {
   level,
   line,
   printDoc,
+  reflow,
   ZERO,
 } from "./doc.ts";
 
@@ -118,7 +120,12 @@ export function formatSourceFile(sf: SourceFile, options: FormatOptions): string
   const mult = options.style === "aosp" ? 2 : 1;
   const p = new Printer(sf, mult);
   const doc = p.sourceFile(sf);
-  const text = printDoc(doc, { width: WIDTH, indentMultiplier: mult });
+  const text = printDoc(doc, {
+    width: WIDTH,
+    indentMultiplier: mult,
+    // A `reflow` leaf carries a raw comment; rewrite it at the column it lands at.
+    commentRewriter: (raw, col) => rewriteComment(raw, col, raw.startsWith("//")),
+  });
   // Safety net: the printer attaches comments at member/statement granularity.
   // If a comment sat somewhere it does not yet handle, refuse rather than
   // silently drop it - the CLI then leaves the file untouched.
@@ -248,13 +255,14 @@ class Printer {
           // A comment after code on the same line: attach to the previous entry.
           out[out.length - 1] = concat([out[out.length - 1], " ", c.text]);
         } else {
-          pushEntry(c.text, this.blankBeforePos(prevEnd, c.pos));
+          // Own-line comment: reflow it at the column it is written at.
+          pushEntry(reflow(c.text), this.blankBeforePos(prevEnd, c.pos));
         }
         prevEnd = c.end;
       }
 
       let itemDoc = this.node(item);
-      if (inlineLead) itemDoc = concat([inlineLead.text, " ", itemDoc]);
+      if (inlineLead) itemDoc = concat([reflow(inlineLead.text), " ", itemDoc]);
       const trailing = this.trailingCommentAfter(item);
       if (trailing) {
         itemDoc = concat([itemDoc, " ", trailing.text]);
@@ -266,7 +274,7 @@ class Printer {
     });
 
     for (const c of this.commentsBefore(endPos)) {
-      push(c.text, this.blankBeforePos(prevEnd, c.pos));
+      push(reflow(c.text), this.blankBeforePos(prevEnd, c.pos));
       prevEnd = c.end;
     }
     return out;
@@ -306,7 +314,7 @@ class Printer {
     if (header.length > 0) {
       const headerDoc = join(
         hardline,
-        header.map(c => c.text),
+        header.map(c => reflow(c.text)),
       );
       // A leading comment glued to the first construct (no blank line in source)
       // is its doc comment - keep it attached. One followed by a blank line is a
@@ -1000,10 +1008,10 @@ class Printer {
     // clause indent (gjf), so consume them per clause like a member list does.
     const body: Doc[] = [];
     for (const c of clauses) {
-      for (const cm of this.commentsBefore(this.start(c))) body.push(cm.text);
+      for (const cm of this.commentsBefore(this.start(c))) body.push(reflow(cm.text));
       body.push(this.switchClause(c));
     }
-    for (const cm of this.commentsBefore(endPos)) body.push(cm.text);
+    for (const cm of this.commentsBefore(endPos)) body.push(reflow(cm.text));
     return concat([
       group(concat(["switch (", this.node(expr), ")"])),
       " {",
@@ -1184,7 +1192,7 @@ class Printer {
       for (const c of this.commentsBefore(this.start(a))) {
         anyComment = true;
         if (c.line) parts.push(c.text, hardline);
-        else parts.push(reformatParamComment(c.text), " ");
+        else parts.push(reformatParamComment(c.text) ?? c.text, " ");
       }
       parts.push(this.node(a));
       // A trailing block comment on the same line attaches after the argument
@@ -1512,15 +1520,6 @@ const PRECEDENCE: Partial<Record<SyntaxKind, number>> = {
 
 function precedence(op: SyntaxKind): number {
   return PRECEDENCE[op] ?? 0;
-}
-
-// google-java-format normalizes a parameter-name comment `/*name=*/` to
-// `/* name= */` (a space after `/*` and before `*/`); other block comments are
-// left verbatim. Mirrors gjf's reformatParameterComment.
-function reformatParamComment(text: string): string {
-  // gjf's PARAMETER_COMMENT: an identifier (optionally a varargs `...`) then `=`.
-  const m = text.match(/^\/\*\s*([A-Za-z_$][\w$]*(?:\.\.\.)?)\s*=\s*\*\/$/);
-  return m ? `/* ${m[1]}= */` : text;
 }
 
 // google-java-format's TypeNameClassifier: the inclusive end index of the

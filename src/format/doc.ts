@@ -56,7 +56,25 @@ function evalIndent(i: Indent, mult: number): number {
 // --- doc nodes -------------------------------------------------------------
 // A `string` is a literal token. Compound nodes are objects with a `kind`.
 
-export type Doc = string | Concat | Level | Break;
+export type Doc = string | Concat | Level | Break | Reflow;
+
+// A leaf whose text is rewritten at write time given the column it lands at - the
+// generic hook the printer uses for comment reflow. doc.ts stays Java-agnostic:
+// it only supplies the column and writes whatever the rewriter returns.
+class Reflow {
+  readonly kind = "reflow";
+  constructor(readonly raw: string) {}
+  width(): number {
+    // Comments are emitted on their own line, so the exact width never drives a
+    // fit decision; a multi-line raw reports MAX so its level always breaks.
+    return this.raw.includes("\n") ? MAX_WIDTH : this.raw.length;
+  }
+}
+
+/** A leaf rewritten by `printDoc`'s `commentRewriter` at write time. */
+export function reflow(raw: string): Doc {
+  return new Reflow(raw);
+}
 
 class Concat {
   readonly kind = "concat";
@@ -121,7 +139,10 @@ function docWidth(doc: Doc): number {
 }
 
 function docFlat(doc: Doc): string {
-  return typeof doc === "string" ? doc : doc.kind === "break" ? doc.flatText : doc.flat();
+  if (typeof doc === "string") return doc;
+  if (doc.kind === "break") return doc.flatText;
+  if (doc.kind === "reflow") return doc.raw;
+  return doc.flat();
 }
 
 function sumWidth(docs: Doc[]): number {
@@ -206,6 +227,8 @@ interface PrintOptions {
   width: number;
   /** Indent multiplier: 1 for google (2-space), 2 for aosp (4-space). */
   indentMultiplier: number;
+  /** Rewrites a `reflow` leaf's text given the column it is written at. */
+  commentRewriter?: (raw: string, column: number) => string;
 }
 
 // Split a Level's docs into Break-separated groups. Concats are transparent and
@@ -244,6 +267,8 @@ function computeBreaks(doc: Doc, maxWidth: number, mult: number, state: State): 
     }
     case "level":
       return computeLevel(doc, maxWidth, mult, state);
+    case "reflow":
+      return { ...state, column: state.column + doc.width() };
     case "break":
       // Breaks are handled by their enclosing Level's computeBreakAndSplit; a
       // break reaching here is a bug (it was not a direct child of a Level).
@@ -326,28 +351,49 @@ function computeSplit(maxWidth: number, mult: number, docs: Doc[], state: State)
 
 // --- output ----------------------------------------------------------------
 
-function writeDoc(doc: Doc, out: string[]): void {
+// Write state: the output chunks, the running column (for the reflow hook), and
+// the optional comment rewriter.
+interface Writer {
+  out: string[];
+  col: number;
+  rewrite?: (raw: string, column: number) => string;
+}
+
+function push(w: Writer, s: string): void {
+  w.out.push(s);
+  const nl = s.lastIndexOf("\n");
+  if (nl >= 0) w.col = s.length - nl - 1;
+  else w.col += s.length;
+}
+
+function writeDoc(doc: Doc, w: Writer): void {
   if (typeof doc === "string") {
-    out.push(doc);
+    push(w, doc);
     return;
   }
   switch (doc.kind) {
     case "concat":
-      for (const d of doc.parts) writeDoc(d, out);
+      for (const d of doc.parts) writeDoc(d, w);
+      break;
+    case "reflow":
+      // Rewrite the raw text given the column it lands at (gjf's column0), then
+      // write it. The rewriter returns fully-indented multi-line text whose first
+      // line sits at the current column.
+      push(w, w.rewrite ? w.rewrite(doc.raw, w.col) : doc.raw);
       break;
     case "level":
       if (doc.oneLine) {
-        out.push(doc.flat());
+        push(w, doc.flat());
       } else {
-        for (const d of doc.splits[0]) writeDoc(d, out);
+        for (const d of doc.splits[0]) writeDoc(d, w);
         for (let i = 0; i < doc.breaks.length; i++) {
           if (doc.broken[i]) {
-            trimTrailingSpace(out);
-            out.push("\n" + " ".repeat(doc.newIndent[i]));
+            trimTrailingSpace(w.out);
+            push(w, "\n" + " ".repeat(doc.newIndent[i]));
           } else {
-            out.push(doc.breaks[i].flatText);
+            push(w, doc.breaks[i].flatText);
           }
-          for (const d of doc.splits[i + 1]) writeDoc(d, out);
+          for (const d of doc.splits[i + 1]) writeDoc(d, w);
         }
       }
       break;
@@ -366,10 +412,10 @@ export function printDoc(doc: Doc, options: PrintOptions): string {
     column: 0,
     mustBreak: false,
   });
-  const out: string[] = [];
-  writeDoc(root, out);
-  trimTrailingSpace(out);
-  return out.join("");
+  const w: Writer = { out: [], col: 0, rewrite: options.commentRewriter };
+  writeDoc(root, w);
+  trimTrailingSpace(w.out);
+  return w.out.join("");
 }
 
 function trimTrailingSpace(out: string[]): void {
