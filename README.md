@@ -42,8 +42,8 @@ Consider this project as an exploration or proof-of-concept that Java can have b
 cappu init
 
 # install some dependency and add it to cappu.json
-# cappu add <configuration> <group:artifact[@version]>
-cappu add implementation com.google.code.gson:gson@2.14.0
+# cappu add <configuration> <group:artifact:@version]>
+cappu add implementation com.google.code.gson:gson:2.14.0
 
 # install dependencies from the lockfile (similar to npm ci)
 cappu install
@@ -63,7 +63,7 @@ cappu format
 # check dependencies for known CVEs. Exits with != 0 if there are some. You can use that in CI
 cappu audit
 
-cappu search # look up a maven package
+cappu search commons-lang3 # look up a maven package
 
 cappu tree # cargo tree, npm ls, but for java
 
