@@ -896,14 +896,17 @@ class Printer {
   private tryStatement(s: TryStatement): Doc {
     const parts: Doc[] = ["try"];
     if (s.resources && s.resources.length > 0) {
-      parts.push(
-        " (",
-        join(
-          concat(["; "]),
-          s.resources.map(r => this.resource(r)),
-        ),
-        ")",
-      );
+      // The first resource stays on the `try (` line; subsequent ones break
+      // before themselves at +4 (one per line), each `;`-terminated. A trailing
+      // `;` after the last resource in source is preserved as `; )`.
+      const inner: Doc[] = [];
+      s.resources.forEach((r, i) => {
+        if (i > 0) inner.push(";", brk("unified", " ", ZERO));
+        inner.push(this.resource(r));
+      });
+      const last = s.resources[s.resources.length - 1];
+      const trailingSemi = this.text[skipTrivia(this.text, last.end)] === ";";
+      parts.push(" (", level(PLUS4, inner), trailingSemi ? "; )" : ")");
     }
     parts.push(" ", this.block(s.tryBlock));
     for (const c of s.catchClauses) {

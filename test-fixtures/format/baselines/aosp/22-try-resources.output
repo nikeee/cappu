@@ -1,0 +1,8 @@
+class A {
+    void m() throws Exception {
+        try (JimfsOutputStream out2 = newOutputStream(false);
+                BufferedOutputStream bout = new BufferedOutputStream(out2);
+                OutputStreamWriter writer = new OutputStreamWriter(bout)) {}
+        try (X x = open()) {}
+    }
+}

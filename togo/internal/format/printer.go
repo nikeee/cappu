@@ -941,11 +941,23 @@ func (p *printer) forEachStatement(s *compiler.ForEachStatementData) Doc {
 func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 	parts := []Doc{text("try")}
 	if s.Resources.Len() > 0 {
-		rs := make([]Doc, s.Resources.Len())
-		for i, r := range nodes(s.Resources) {
-			rs[i] = p.resource(r.AsResource())
+		// The first resource stays on the `try (` line; subsequent ones break
+		// before themselves at +4 (one per line), each `;`-terminated. A trailing
+		// `;` after the last resource in source is preserved as `; )`.
+		res := nodes(s.Resources)
+		var inner []Doc
+		for i, r := range res {
+			if i > 0 {
+				inner = append(inner, text(";"), brk(fillUnified, " ", ZERO, nil))
+			}
+			inner = append(inner, p.resource(r.AsResource()))
 		}
-		parts = append(parts, text(" ("), join(text("; "), rs), text(")"))
+		last := res[len(res)-1]
+		closeTok := ")"
+		if idx := compiler.SkipTrivia(p.text, last.End); idx < len(p.text) && p.text[idx] == ';' {
+			closeTok = "; )"
+		}
+		parts = append(parts, text(" ("), level(plus4, inner), text(closeTok))
 	}
 	parts = append(parts, text(" "), p.block(s.TryBlock.AsBlock(), s.TryBlock.End))
 	for _, cn := range nodes(s.CatchClauses) {
