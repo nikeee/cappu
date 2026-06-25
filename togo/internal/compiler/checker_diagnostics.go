@@ -637,6 +637,32 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			Diagnostics.DereferenceOfPossiblyNullValue0, text[start:receiver.End]))
 	}
 
+	// A switch on a null selector throws NPE - except under JEP 441, where a
+	// `case null` label handles it. The selector is dereferenced only when no
+	// such label is present.
+	switchHasNullCase := func(clauses *NodeArray) bool {
+		if clauses == nil {
+			return false
+		}
+		for _, clause := range clauses.Nodes {
+			labels := clause.AsSwitchClause().Labels
+			if labels == nil {
+				continue
+			}
+			for _, l := range labels.Nodes {
+				if l.Kind == NullKeyword {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	checkSwitchSelector := func(expr *Node, clauses *NodeArray) {
+		if !switchHasNullCase(clauses) {
+			checkDereference(expr)
+		}
+	}
+
 	// Argument nullness against a resolved signature: each parameter type is
 	// instantiated with subst (the receiver's / created type's type arguments), so a
 	// null into the non-null element of List<@NonNull String>.add(E) is caught.
@@ -817,6 +843,33 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			if argc != record.RecordComponents.Len() {
 				reportArity(creation.Type, node.End, strconv.Itoa(record.RecordComponents.Len()), argc)
 			}
+			// The canonical constructor's parameters are the record components, so a
+			// possibly-null argument into a non-null component is caught here. Each
+			// component carries its own nullness (annotation or @NullMarked default).
+			// A dedicated loop (not checkParamNullness) since components are not Parameters.
+			if c.nullness != nil {
+				var subst substMap
+				if created := c.resolveType(creation.Type, node); created.Kind == TypeKindClass {
+					subst = c.substitutionFor(symbol, created.TypeArguments)
+				}
+				comps := record.RecordComponents
+				fixed := comps.Len()
+				if last := lastNode(comps); last != nil && last.AsRecordComponent().IsVarArgs {
+					fixed = comps.Len() - 1
+				}
+				n := nodeArrayLen(creation.Arguments)
+				if fixed < n {
+					n = fixed
+				}
+				for i := 0; i < n; i++ {
+					comp := comps.Nodes[i]
+					if comp.Symbol == nil {
+						continue
+					}
+					targetType := c.substitute(c.getTypeOfSymbol(comp.Symbol), subst)
+					checkNullness(creation.Arguments.Nodes[i], targetType, comp.AsRecordComponent().Name.AsIdentifier().Text)
+				}
+			}
 		}
 	}
 
@@ -903,9 +956,14 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 						Diagnostics.CannotResolveMember0In1, access.Name.AsIdentifier().Text, typeToString(receiver)))
 				}
 			}
+		case SwitchStatement:
+			s := node.AsSwitchStatement()
+			checkSwitchSelector(s.Expression, s.Clauses)
 		case SwitchExpression:
+			se := node.AsSwitchExpression()
+			checkSwitchSelector(se.Expression, se.Clauses)
 			if missing, ok := c.missingEnumLabels(node); ok && len(missing) > 0 {
-				expr := node.AsSwitchExpression().Expression
+				expr := se.Expression
 				diagnostics = append(diagnostics, CreateDiagnostic(expr.Pos, expr.End-expr.Pos,
 					Diagnostics.SwitchExpressionNotExhaustive0, typeToString(c.getTypeOfExpression(expr))))
 			}

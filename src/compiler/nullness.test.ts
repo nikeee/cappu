@@ -452,6 +452,24 @@ test("iterating a @Nullable collection in an enhanced-for is flagged", () => {
   expect(diagnose(code)).toContain(DEREF);
 });
 
+test("switching on a @Nullable selector without a `case null` is flagged", () => {
+  const code =
+    'class C { void m(@Nullable String x) { switch (x) { case "a" -> {} default -> {} } } }';
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a `case null` label (JEP 441) handles null so the switch selector is accepted", () => {
+  const code =
+    'class C { void m(@Nullable String x) { switch (x) { case null -> {} case "a" -> {} default -> {} } } }';
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("a switch expression on a @Nullable selector without `case null` is flagged", () => {
+  const code =
+    'class C { int m(@Nullable String x) { return switch (x) { case "a" -> 1; default -> 0; }; } }';
+  expect(diagnose(code)).toContain(DEREF);
+});
+
 test("a guard narrows a thrown @Nullable value", () => {
   const code = "class C { void m(@Nullable RuntimeException e) { if (e != null) throw e; } }";
   expect(diagnose(code)).not.toContain(DEREF);
@@ -460,6 +478,190 @@ test("a guard narrows a thrown @Nullable value", () => {
 test("dereference checks are off when nullness is disabled", () => {
   const code = "class C { void m(@Nullable String x) { x.trim(); } }";
   expect(diagnose(code, null)).not.toContain(DEREF);
+});
+
+// --- final-field narrowing ---------------------------------------------------------
+
+test("a guard on a final @Nullable field narrows this.f for a later dereference", () => {
+  const code =
+    "class C { final @Nullable String f = null; void m() { if (this.f != null) this.f.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("a guard on a final @Nullable field narrows the bare field reference", () => {
+  const code = "class C { final @Nullable String f = null; void m() { if (f != null) f.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("a non-final @Nullable field is not narrowed by a guard (could be reassigned)", () => {
+  const code =
+    "class C { @Nullable String f = null; void m() { if (this.f != null) this.f.trim(); } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a final @Nullable field dereferenced without a guard is still flagged", () => {
+  const code = "class C { final @Nullable String f = null; void m() { this.f.trim(); } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a guard on one receiver's final field does not narrow another receiver's", () => {
+  // a.f and b.f share the field symbol; narrowing must stay this-receiver only.
+  const code =
+    "class C { final @Nullable String f = null; void m(C a, C b) { if (a.f != null) b.f.trim(); } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a final @Nullable record component is narrowed after a guard inside the record", () => {
+  const code =
+    "record R(@Nullable String name) { void m() { if (this.name != null) this.name.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+// --- record construction -----------------------------------------------------------
+
+test("new R(null) into a non-null record component is flagged", () => {
+  const code = "@NullMarked record R(String x) {}\nclass C { void m() { new R(null); } }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("new R(null) into a @Nullable record component is accepted", () => {
+  const code = "record R(@Nullable String x) {}\nclass C { void m() { new R(null); } }";
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a non-null argument into a non-null record component is accepted", () => {
+  const code = '@NullMarked record R(String x) {}\nclass C { void m() { new R("a"); } }';
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+// --- try/catch flow ----------------------------------------------------------------
+
+test("requireNonNull in a try whose catch exits narrows after the try", () => {
+  const code =
+    "class C { void m(@Nullable String x) { try { java.util.Objects.requireNonNull(x); } catch (RuntimeException e) { return; } x.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("a catch that falls through does not narrow after the try", () => {
+  const code =
+    "class C { void m(@Nullable String x) { try { java.util.Objects.requireNonNull(x); } catch (RuntimeException e) {} x.trim(); } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("an assignment in a try whose catch exits narrows after the try", () => {
+  // Reaching after the try means it completed normally, so the assignment ran.
+  const code =
+    'class C { void m(@Nullable String x) { try { x = "a"; } catch (RuntimeException e) { return; } x.trim(); } }';
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("an assignment in a try with a fall-through catch does not narrow after the try", () => {
+  const code =
+    'class C { void m(@Nullable String x) { try { x = "a"; } catch (RuntimeException e) {} x.trim(); } }';
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a guard before a try narrows inside the try body", () => {
+  const code =
+    "class C { void m(@Nullable String x) { if (x == null) return; try { x.trim(); } catch (RuntimeException e) {} } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+// --- more value/flow forms (regression guards) -------------------------------------
+
+test("a chained call on a @Nullable return is a dereference", () => {
+  const code =
+    "@NullMarked class C { @Nullable String n() { return null; } void g() { n().trim(); } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("reading an element of a @Nullable[] then dereferencing it is flagged", () => {
+  const code = "@NullMarked class C { void g(@Nullable String[] a) { a[0].trim(); } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("dereferencing a static @Nullable field is flagged", () => {
+  const code = "@NullMarked class C { static @Nullable String F = null; void g() { F.trim(); } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("assigning null to a non-null field in a constructor is flagged", () => {
+  const code = "@NullMarked class C { String f; C() { this.f = null; } }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a var that infers a @Nullable type is a dereference", () => {
+  const code =
+    "@NullMarked class C { @Nullable String n() { return null; } void g() { var x = n(); x.trim(); } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a chained field access through a @Nullable field is flagged", () => {
+  const code =
+    "@NullMarked class C { @Nullable C a; final @Nullable String b = null; void g() { this.a.b.trim(); } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a ternary with both arms non-null is accepted", () => {
+  const code =
+    '@NullMarked class C { void f(String s) {} void g(boolean b) { f(b ? "y" : "x"); } }';
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a var that infers @Nullable is narrowed by a guard", () => {
+  const code =
+    "@NullMarked class C { @Nullable String n() { return null; } void g() { var x = n(); if (x != null) x.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("an instanceof pattern variable is non-null", () => {
+  const code =
+    "@NullMarked class C { void g(@Nullable Object o) { if (o instanceof String s) s.length(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("Objects.isNull as an early-return guard narrows the value", () => {
+  const code =
+    "import java.util.Objects; @NullMarked class C { void g(@Nullable String x) { if (Objects.isNull(x)) return; x.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("a negated null check used as an early-return guard narrows the value", () => {
+  const code =
+    "@NullMarked class C { void g(@Nullable String x) { if (!(x != null)) return; x.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("a && chain narrows the receiver for a later operand", () => {
+  const code =
+    "@NullMarked class C { void g(@Nullable String x) { if (x != null && x.length() > 0) x.trim(); } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("string concatenation with a @Nullable value is accepted", () => {
+  const code = '@NullMarked class C { String g(@Nullable String x) { return "a" + x; } }';
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("returning a value narrowed by an early-return is accepted", () => {
+  const code =
+    '@NullMarked class C { String g(@Nullable String x) { if (x == null) return ""; return x; } }';
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("assigning null to a non-null local in a branch is flagged", () => {
+  // String x is non-null under @NullMarked, so `x = null` is the violation.
+  const code =
+    '@NullMarked class C { boolean c() { return true; } void m() { String x = "foo"; if (c()) x = null; x.length(); } }';
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a conditional reassignment to null defeats an earlier non-null narrowing", () => {
+  // x is proven non-null by "foo", but the if-branch may set it null, so the
+  // later dereference is unsafe.
+  const code =
+    '@NullMarked class C { boolean c() { return true; } void m() { @Nullable String x = "foo"; if (c()) x = null; x.length(); } }';
+  expect(diagnose(code)).toContain(DEREF);
 });
 
 // --- examples/nullness-app ---------------------------------------------------------
