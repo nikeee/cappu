@@ -13,11 +13,27 @@ package format
 
 import (
 	"errors"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/compiler"
 )
+
+// paramCommentRe is gjf's PARAMETER_COMMENT: an identifier (optionally a varargs
+// `...`) then `=`, inside a block comment.
+var paramCommentRe = regexp.MustCompile(`^/\*\s*([\p{L}_$][\p{L}\p{N}_$]*(?:\.\.\.)?)\s*=\s*\*/$`)
+
+// reformatParamComment normalizes a parameter-name comment `/*name=*/` to
+// `/* name= */`; other block comments are returned verbatim. Mirrors gjf's
+// reformatParameterComment.
+func reformatParamComment(text string) string {
+	m := paramCommentRe.FindStringSubmatch(text)
+	if m == nil {
+		return text
+	}
+	return "/* " + m[1] + "= */"
+}
 
 // FormatOptions selects the layout style.
 type FormatOptions struct {
@@ -1226,12 +1242,44 @@ func (p *printer) argList(args *compiler.NodeArray) Doc {
 	if args.Len() == 0 {
 		return text("()")
 	}
-	as := make([]Doc, args.Len())
-	for i, a := range nodes(args) {
-		as[i] = p.node(a)
+	argNodes := nodes(args)
+	anyComment := false
+	as := make([]Doc, len(argNodes))
+	for i, a := range argNodes {
+		var parts []Doc
+		// Leading comments: a block comment renders inline before the argument
+		// (`/* a= */ 1`); a line comment forces a break after itself.
+		for _, c := range p.commentsBefore(p.start(a)) {
+			anyComment = true
+			if c.line {
+				parts = append(parts, text(c.text), hardline)
+			} else {
+				parts = append(parts, text(reformatParamComment(c.text)), text(" "))
+			}
+		}
+		parts = append(parts, p.node(a))
+		// A trailing block comment on the same line, before the separating comma,
+		// attaches after the argument (`arg /* note */`). A comment after the
+		// comma is the next argument's leading comment; a line comment is left to
+		// the statement boundary (it would comment out the following `,`).
+		if p.ci < len(p.comments) {
+			t := p.comments[p.ci]
+			if !t.line && !t.ownLine && t.pos >= a.End && !strings.ContainsAny(p.text[a.End:t.pos], "\n,") {
+				p.ci++
+				anyComment = true
+				parts = append(parts, text(" "), text(t.text))
+			}
+		}
+		if len(parts) == 1 {
+			as[i] = parts[0]
+		} else {
+			as[i] = concat(parts...)
+		}
 	}
+	// gjf lays an argument list with any comment one per line (UNIFIED); a bare
+	// list fills only when every argument is short.
 	fill := fillUnified
-	if p.allShortItems(nodes(args)) {
+	if !anyComment && p.allShortItems(argNodes) {
 		fill = fillIndependent
 	}
 	return p.argsLike("(", as, ")", fill)
