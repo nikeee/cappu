@@ -168,13 +168,73 @@ func precedingStatementFact(stmt *Node, symbol *Symbol, resolve resolveRef, expr
 		}
 	case IfStatement:
 		ifs := stmt.AsIfStatement()
-		if ifs.ElseStatement == nil &&
-			conditionImplies(ifs.Condition, symbol, resolve).whenTrue == NullnessNullable &&
-			definitelyExits(ifs.ThenStatement) {
+		facts := conditionImplies(ifs.Condition, symbol, resolve)
+		// Early-exit: if (COND) <abrupt>;  -> after the if, only the fall-through
+		// path remains (e.g. if (x==null) return; -> non-null).
+		if ifs.ElseStatement == nil && definitelyExits(ifs.ThenStatement) && facts.whenFalse != "" {
+			return stmtFact{kind: factNarrow, nullness: facts.whenFalse}
+		}
+		// Branch-merge: if (x == null) x = <non-null>;  -> both the then-branch (just
+		// assigned) and the fall-through (COND false, non-null) agree x is non-null.
+		if ifs.ElseStatement == nil && facts.whenTrue == NullnessNullable &&
+			!definitelyExits(ifs.ThenStatement) &&
+			branchTrailingNullness(ifs.ThenStatement, symbol, resolve, exprNullness) == NullnessNonNull {
 			return stmtFact{kind: factNarrow, nullness: NullnessNonNull}
+		}
+		// Soundness: any other assignment to x inside a branch leaves its state
+		// unprovable here, so earlier facts must not leak past this if.
+		if branchAssignsSymbol(ifs.ThenStatement, symbol, resolve) ||
+			(ifs.ElseStatement != nil && branchAssignsSymbol(ifs.ElseStatement, symbol, resolve)) {
+			return stmtFact{kind: factReset}
 		}
 	}
 	return stmtFact{kind: factNone}
+}
+
+// assignedValue returns the RHS of `x = <expr>` as a statement, or nil.
+func assignedValue(stmt *Node, symbol *Symbol, resolve resolveRef) *Node {
+	if stmt.Kind != ExpressionStatement {
+		return nil
+	}
+	expr := stmt.AsExpressionStatement().Expression
+	if expr.Kind != AssignmentExpression {
+		return nil
+	}
+	a := expr.AsAssignmentExpression()
+	if a.OperatorToken != EqualsToken || !refersToSymbol(a.Left, symbol, resolve) {
+		return nil
+	}
+	return a.Right
+}
+
+// branchStatements is the statements of a branch (a block's, or the statement itself).
+func branchStatements(branch *Node) []*Node {
+	if branch.Kind == Block {
+		return branch.AsBlock().Statements.Nodes
+	}
+	return []*Node{branch}
+}
+
+func branchAssignsSymbol(branch *Node, symbol *Symbol, resolve resolveRef) bool {
+	for _, s := range branchStatements(branch) {
+		if assignedValue(s, symbol, resolve) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// branchTrailingNullness is the nullness a branch leaves the symbol with when its
+// last statement assigns it, else "" (we only reason about a trailing assignment).
+func branchTrailingNullness(branch *Node, symbol *Symbol, resolve resolveRef, exprNullness exprNullnessFn) Nullness {
+	stmts := branchStatements(branch)
+	if len(stmts) == 0 {
+		return ""
+	}
+	if value := assignedValue(stmts[len(stmts)-1], symbol, resolve); value != nil {
+		return exprNullness(value)
+	}
+	return ""
 }
 
 // narrowNullnessAt returns the narrowed nullness of symbol at use site `use`, or ""

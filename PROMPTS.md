@@ -417,3 +417,5 @@ cappu search commons-lang3
 - 2026-06-24 23:04 — add support for flow-aware type checks. TS has some gettypeOfSymbolAtLocation. we should probably do something simiar.
 - 2026-06-24 23:04 — also add an example demonstrating the null checking in the examples/dir
 - 2026-06-24 23:23 — do 1 and 2. add aforementioned tests beforehand
+- 2026-06-24 23:36 — merge into main. do Dereference-of-nullable and branch-merge. commit directly on main
+- 2026-06-25 08:49 — in the example/, when i do shout(found); inconditionally (with found being nullable), there is no error?
