@@ -490,6 +490,21 @@ Doc IR plus an AST->Doc lowering. Porting notes:
 - **Ignore globs: no glob dep.** `formatterOptions.ignore` matching uses a tiny
   `globToRegexp` (`*`, `**`, `?`) in `internal/build/jar.go` instead of adding a
   minimatch-style dependency for Node's `path.matchesGlob`.
+- **Javadoc reflow port (gjf's `javadoc/` package).** Faithful port of gjf's
+  comment-reflow engine to `internal/format/javadoc/` (charStream, token, lexer,
+  nestingStack, writer, formatter) plus `comment_rewrite.go`. Gotchas:
+  - **No sticky regex.** TS uses `/.../y` (sticky) to match only at the cursor;
+    Go's RE2 has no sticky flag, so `charStream.tryConsumeRegex` anchors patterns
+    with `^` and slices the input from the cursor (`input[position:]`) so `^`
+    binds there. Every lexer pattern is `^`-anchored.
+  - **No negative lookahead.** TS `MISSING_SPACE_PREFIX` uses `(?!noinspection|...)`;
+    RE2 has no lookahead, so it splits into `missingSpacePrefix` + a separate
+    `allowedNoSpace` guard checked with `&&`.
+  - **DOTALL** = `(?s)` inline flag (HTML-comment and literal patterns).
+  - The reflow hook is generic: `doc.go` gained a `reflowDoc` leaf and a
+    `commentRewriter(raw, column)` field on `printOptions`; the writer tracks the
+    running column and calls the rewriter at write time, so `doc.go` stays
+    Java/javadoc-agnostic (mirrors how gjf calls `CommentsHelper.rewrite`).
 - **Line-wrapping engine port (gjf's Doc algorithm).** When `doc.ts` was rewritten
   to gjf's Level/Break/FillMode break algorithm, the Go `Doc` became an `interface`
   with pointer concrete types (`*token`/`*concatDoc`/`*brkDoc`/`*levelDoc`) because
