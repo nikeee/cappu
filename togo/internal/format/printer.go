@@ -466,7 +466,13 @@ func (p *printer) annotation(a *compiler.AnnotationData) Doc {
 			args[i] = value
 		}
 	}
-	return concat(text(name), text("("), join(text(", "), args), text(")"))
+	// Annotation arguments wrap like a call's: break after `(` at +4 and lay one
+	// element-value pair per line (fill only when every arg is short).
+	fill := fillUnified
+	if p.allShortItems(nodes(a.Args)) {
+		fill = fillIndependent
+	}
+	return concat(text(name), p.argsLike("(", args, ")", fill))
 }
 
 // annotations renders a run of inline annotations, each followed by a space.

@@ -1,0 +1,10 @@
+@BugPattern(
+        name = "AsyncFunctionReturnsImmediate",
+        summary = SIMPLIFY,
+        category = GUAVA,
+        severity = NOT_A_PROBLEM,
+        maturity = EXPERIMENTAL)
+class A {
+    @Foo(a = 1, b = 2)
+    void shortStaysInline() {}
+}

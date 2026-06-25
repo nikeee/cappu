@@ -461,7 +461,12 @@ class Printer {
       const value = this.node((arg as { value: Node }).value);
       return argName ? concat([this.raw(argName), " = ", value]) : value;
     });
-    return concat([name, "(", join(", ", args), ")"]);
+    // Annotation arguments wrap like a call's: break after `(` at +4 and lay
+    // one element-value pair per line (fill only when every arg is short).
+    return concat([
+      name,
+      this.argsLike("(", args, ")", this.allShortItems([...a.args]) ? "independent" : "unified"),
+    ]);
   }
 
   /** A run of annotations, each followed by a space (inline, e.g. on a component). */
