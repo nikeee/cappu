@@ -65,6 +65,8 @@ cappu audit
 
 cappu search # look up a maven package
 
+cappu tree # cargo tree, npm ls, but for java
+
 cappu verify # check installed dependencies against their checksum, reinstall if mismatch
 
 cappu self-upgrade # upgrade cappu binary to latest version
