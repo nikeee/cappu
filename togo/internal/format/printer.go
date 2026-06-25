@@ -816,12 +816,21 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 		head = append(head, p.typ(returnType), text(" "))
 	}
 	hasThrows := throws.Len() > 0
-	// For an abstract/interface method with no throws clause the `;` trails the
-	// parameter list directly; put it inside the param level so the list wraps
-	// when the whole signature (incl. `;`) overflows (gjf's rest-of-line rule).
+	// The token trailing the parameter list on the same line (`;`, ` {}`, or
+	// ` {`) goes inside the param level so the list wraps when the whole
+	// signature including it overflows (gjf's rest-of-line rule). Only with no
+	// throws clause - a throws clause sits between the params and that token.
+	emptyBody := body != nil && p.blockIsEmpty(body.AsBlock(), body.End)
 	paramTrailing := ""
-	if body == nil && !hasThrows {
-		paramTrailing = ";"
+	if !hasThrows {
+		switch {
+		case body == nil:
+			paramTrailing = ";"
+		case emptyBody:
+			paramTrailing = " {}"
+		default:
+			paramTrailing = " {"
+		}
 	}
 	head = append(head, text(p.raw(name)), p.parameters(params, paramTrailing))
 	if hasThrows {
@@ -835,7 +844,16 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 		}
 		return concat(append(head, text(";"))...)
 	}
-	return concat(append(head, text(" "), p.block(body.AsBlock(), body.End))...)
+	// Body present: ` {` went into the param level -> emit the rest of the block;
+	// ` {}` -> empty body already shown; else (throws) -> whole block after a space.
+	switch paramTrailing {
+	case " {":
+		return concat(append(head, p.blockRest(body.AsBlock(), body.End))...)
+	case " {}":
+		return concat(head...)
+	default:
+		return concat(append(head, text(" "), p.block(body.AsBlock(), body.End))...)
+	}
 }
 
 func (p *printer) initializerBlock(d *compiler.InitializerBlockData) Doc {
@@ -848,12 +866,22 @@ func (p *printer) initializerBlock(d *compiler.InitializerBlockData) Doc {
 
 // --- statements ----------------------------------------------------------
 
+func (p *printer) blockIsEmpty(b *compiler.BlockData, endPos int) bool {
+	return b.Statements.Len() == 0 && !p.hasCommentBefore(endPos)
+}
+
 func (p *printer) block(b *compiler.BlockData, endPos int) Doc {
-	if b.Statements.Len() == 0 && !p.hasCommentBefore(endPos) {
+	if p.blockIsEmpty(b, endPos) {
 		return text("{}")
 	}
+	return concat(text("{"), p.blockRest(b, endPos))
+}
+
+// blockRest is a block's body after the opening `{` (the `{` is emitted by the
+// caller, so it can be placed inside another level to count toward a wrap
+// decision).
+func (p *printer) blockRest(b *compiler.BlockData, endPos int) Doc {
 	return concat(
-		text("{"),
 		indent(concat(append([]Doc{hardline}, p.listDocs(nodes(b.Statements), false, endPos)...)...)),
 		hardline,
 		text("}"),

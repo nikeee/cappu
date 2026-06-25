@@ -780,10 +780,18 @@ class Printer {
     if (tp !== "") head.push(tp, " ");
     if (decl.returnType) head.push(this.type(decl.returnType), " ");
     const hasThrows = decl.throws !== undefined && decl.throws.length > 0;
-    // For an abstract/interface method with no throws clause the `;` trails the
-    // parameter list directly; put it inside the param level so the list wraps
-    // when the whole signature (incl. `;`) overflows (gjf's rest-of-line rule).
-    const paramTrailing = !decl.body && !hasThrows ? ";" : "";
+    // The token trailing the parameter list on the same line (`;`, ` {}`, or
+    // ` {`) goes *inside* the param level so the list wraps when the whole
+    // signature including it overflows (gjf's rest-of-line rule). This only
+    // applies with no throws clause - a throws clause sits between the params
+    // and that token and carries its own break.
+    const emptyBody = decl.body !== undefined && this.blockIsEmpty(decl.body);
+    let paramTrailing = "";
+    if (!hasThrows) {
+      if (!decl.body) paramTrailing = ";";
+      else if (emptyBody) paramTrailing = " {}";
+      else paramTrailing = " {";
+    }
     head.push(this.raw(decl.name), this.parameters(decl.parameters, paramTrailing));
     if (hasThrows) {
       // Same shape as a class header type list, wrapped in a +4 level so the
@@ -792,6 +800,11 @@ class Printer {
       head.push(level(PLUS4, [this.typeListClause("throws", [...decl.throws!])]));
     }
     if (!decl.body) return concat(paramTrailing ? head : [...head, ";"]);
+    // Body present. When ` {` went into the param level, emit the rest of the
+    // block (statements + `}`); when ` {}` did, the empty body is already shown;
+    // otherwise (throws clause) emit the whole block after a space.
+    if (paramTrailing === " {") return concat([...head, this.blockRest(decl.body)]);
+    if (paramTrailing === " {}") return concat(head);
     return concat([...head, " ", this.block(decl.body)]);
   }
 
@@ -801,10 +814,19 @@ class Printer {
 
   // --- statements ----------------------------------------------------------
 
+  private blockIsEmpty(b: Block): boolean {
+    return b.statements.length === 0 && !this.hasCommentBefore(b.end);
+  }
+
   private block(b: Block): Doc {
-    if (b.statements.length === 0 && !this.hasCommentBefore(b.end)) return "{}";
+    if (this.blockIsEmpty(b)) return "{}";
+    return concat(["{", this.blockRest(b)]);
+  }
+
+  /** A block's body after the opening `{` (the `{` is emitted by the caller, so
+   * it can be placed inside another level to count toward a wrap decision). */
+  private blockRest(b: Block): Doc {
     return concat([
-      "{",
       indent(concat([hardline, ...this.statementList(b.statements, b.end)])),
       hardline,
       "}",

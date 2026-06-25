@@ -1,0 +1,9 @@
+class A {
+  void mightContainXxxxxx(
+      MyTypeName object, FunnelThing funnels, int numHashFunctions, BitsX bits) {}
+
+  void mightContainXxxxxxxxxxxx(
+      MyTypeName object, FunnelThing funnels, int numHashFunctions, Bit b) {
+    doStuff();
+  }
+}
