@@ -1,0 +1,5 @@
+interface I {
+  <T> boolean mightContain(T object, Funnel<? super T> funnels, int numHashFunctions, BitsXXXX bits);
+
+  void shortOne(int a, int b);
+}

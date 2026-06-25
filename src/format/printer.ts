@@ -714,13 +714,29 @@ class Printer {
   // continuation line if they fit. If they do not, the inter-item fill mode
   // decides: UNIFIED puts one per line, INDEPENDENT *fills* as many per line as
   // fit. The closing `)` stays attached to the last item's line.
-  private argsLike(open: string, items: Doc[], close: string, fillMode: FillMode): Doc {
+  private argsLike(
+    open: string,
+    items: Doc[],
+    close: string,
+    fillMode: FillMode,
+    trailing = "",
+  ): Doc {
     const innerParts: Doc[] = [];
     items.forEach((it, i) => {
       if (i > 0) innerParts.push(",", brk(fillMode, " ", ZERO));
       innerParts.push(it);
     });
     const inner = level(ZERO, innerParts);
+    // gjf decides the fit of a delimited list including the token that trails it
+    // on the same line (a method signature's `;`) by placing that token inside
+    // the breaking level. When a `trailing` token is given, close + trailing go
+    // inside the level so its width is counted; otherwise the close stays a
+    // sibling (the common call/annotation case is unaffected).
+    if (trailing !== "") {
+      // Open delimiter also goes inside, so the level's width (and thus the fit
+      // check at the column before `(`) spans the whole `(...)<trailing>` run.
+      return level(PLUS4, [open, brk("unified", "", ZERO), inner, close, trailing]);
+    }
     return concat([open, level(PLUS4, [brk("unified", "", ZERO), inner]), close]);
   }
 
@@ -731,14 +747,15 @@ class Printer {
     return nodes.every(n => n.end - this.start(n) < 10);
   }
 
-  private parameters(params: NodeArray<Parameter>): Doc {
-    if (params.length === 0) return "()";
+  private parameters(params: NodeArray<Parameter>, trailing = ""): Doc {
+    if (params.length === 0) return concat(["()", trailing]);
     // Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
     return this.argsLike(
       "(",
       params.map(p => this.parameter(p)),
       ")",
       "unified",
+      trailing,
     );
   }
 
@@ -762,14 +779,19 @@ class Printer {
     const head: Doc[] = [this.modifiers(decl.modifiers, "own")];
     if (tp !== "") head.push(tp, " ");
     if (decl.returnType) head.push(this.type(decl.returnType), " ");
-    head.push(this.raw(decl.name), this.parameters(decl.parameters));
-    if (decl.throws && decl.throws.length > 0) {
+    const hasThrows = decl.throws !== undefined && decl.throws.length > 0;
+    // For an abstract/interface method with no throws clause the `;` trails the
+    // parameter list directly; put it inside the param level so the list wraps
+    // when the whole signature (incl. `;`) overflows (gjf's rest-of-line rule).
+    const paramTrailing = !decl.body && !hasThrows ? ";" : "";
+    head.push(this.raw(decl.name), this.parameters(decl.parameters, paramTrailing));
+    if (hasThrows) {
       // Same shape as a class header type list, wrapped in a +4 level so the
       // `throws` keyword folds onto a continuation line (the class header gets
       // that +4 from its own enclosing level; a method head has none).
-      head.push(level(PLUS4, [this.typeListClause("throws", [...decl.throws])]));
+      head.push(level(PLUS4, [this.typeListClause("throws", [...decl.throws!])]));
     }
-    if (!decl.body) return concat([...head, ";"]);
+    if (!decl.body) return concat(paramTrailing ? head : [...head, ";"]);
     return concat([...head, " ", this.block(decl.body)]);
   }
 

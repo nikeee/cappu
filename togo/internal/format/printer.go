@@ -748,6 +748,15 @@ func (p *printer) declarator(v *compiler.VariableDeclaratorData) Doc {
 // they fit, else the fill mode decides (UNIFIED one per line, INDEPENDENT fill).
 // The closing `)` stays attached to the last item's line.
 func (p *printer) argsLike(open string, items []Doc, closeTok string, fill FillMode) Doc {
+	return p.argsLikeTrailing(open, items, closeTok, fill, "")
+}
+
+// argsLikeTrailing is argsLike with a trailing token (e.g. a method signature's
+// `;`) placed inside the breaking level so its width counts toward the fit
+// decision - gjf's rest-of-line rule. With a trailing token the open delimiter
+// also goes inside the level so the fit check at the column before `(` spans the
+// whole `(...)<trailing>` run. The empty-trailing path is the common call case.
+func (p *printer) argsLikeTrailing(open string, items []Doc, closeTok string, fill FillMode, trailing string) Doc {
 	var innerParts []Doc
 	for i, it := range items {
 		if i > 0 {
@@ -756,6 +765,9 @@ func (p *printer) argsLike(open string, items []Doc, closeTok string, fill FillM
 		innerParts = append(innerParts, it)
 	}
 	inner := level(ZERO, innerParts)
+	if trailing != "" {
+		return level(plus4, []Doc{text(open), brk(fillUnified, "", ZERO, nil), inner, text(closeTok), text(trailing)})
+	}
 	return concat(text(open), level(plus4, []Doc{brk(fillUnified, "", ZERO, nil), inner}), text(closeTok))
 }
 
@@ -770,16 +782,16 @@ func (p *printer) allShortItems(ns []*compiler.Node) bool {
 	return true
 }
 
-func (p *printer) parameters(params *compiler.NodeArray) Doc {
+func (p *printer) parameters(params *compiler.NodeArray, trailing string) Doc {
 	if params.Len() == 0 {
-		return text("()")
+		return text("()" + trailing)
 	}
 	ps := make([]Doc, params.Len())
 	for i, pp := range nodes(params) {
 		ps[i] = p.parameter(pp.AsParameter())
 	}
 	// Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
-	return p.argsLike("(", ps, ")", fillUnified)
+	return p.argsLikeTrailing("(", ps, ")", fillUnified, trailing)
 }
 
 func (p *printer) parameter(pp *compiler.ParameterData) Doc {
@@ -803,13 +815,24 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 	if returnType != nil {
 		head = append(head, p.typ(returnType), text(" "))
 	}
-	head = append(head, text(p.raw(name)), p.parameters(params))
-	if throws.Len() > 0 {
+	hasThrows := throws.Len() > 0
+	// For an abstract/interface method with no throws clause the `;` trails the
+	// parameter list directly; put it inside the param level so the list wraps
+	// when the whole signature (incl. `;`) overflows (gjf's rest-of-line rule).
+	paramTrailing := ""
+	if body == nil && !hasThrows {
+		paramTrailing = ";"
+	}
+	head = append(head, text(p.raw(name)), p.parameters(params, paramTrailing))
+	if hasThrows {
 		// Same shape as a class header type list, wrapped in a +4 level so the
 		// `throws` keyword folds onto a continuation line.
 		head = append(head, level(plus4, []Doc{p.typeListClause("throws", nodes(throws))}))
 	}
 	if body == nil {
+		if paramTrailing != "" {
+			return concat(head...)
+		}
 		return concat(append(head, text(";"))...)
 	}
 	return concat(append(head, text(" "), p.block(body.AsBlock(), body.End))...)
