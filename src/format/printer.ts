@@ -1154,12 +1154,44 @@ class Printer {
 
   private argList(args: NodeArray<Expression>): Doc {
     if (args.length === 0) return "()";
-    return this.argsLike(
-      "(",
-      args.map(a => this.node(a)),
-      ")",
-      this.allShortItems(args) ? "independent" : "unified",
-    );
+    let anyComment = false;
+    const items = args.map(a => {
+      const parts: Doc[] = [];
+      // Leading comments on the argument: a block comment renders inline before
+      // it (`/* a= */ 1`); a line comment forces a break after itself.
+      for (const c of this.commentsBefore(this.start(a))) {
+        anyComment = true;
+        if (c.line) parts.push(c.text, hardline);
+        else parts.push(reformatParamComment(c.text), " ");
+      }
+      parts.push(this.node(a));
+      // A trailing block comment on the same line attaches after the argument
+      // (`arg /* note */`). Line comments are left to the statement boundary - a
+      // trailing line comment here would comment out the following `,`.
+      const t = this.comments[this.ci];
+      if (
+        t &&
+        !t.line &&
+        !t.ownLine &&
+        t.pos >= a.end &&
+        // Same line, and before the separating comma - a comment after the comma
+        // is the next argument's leading comment, not this one's trailing.
+        !/[\n,]/.test(this.text.slice(a.end, t.pos))
+      ) {
+        this.ci++;
+        anyComment = true;
+        parts.push(" ", t.text);
+      }
+      return parts.length === 1 ? parts[0] : concat(parts);
+    });
+    // gjf lays an argument list with any comment one per line (UNIFIED); a bare
+    // list fills only when every argument is short.
+    const fill: FillMode = anyComment
+      ? "unified"
+      : this.allShortItems(args)
+        ? "independent"
+        : "unified";
+    return this.argsLike("(", items, ")", fill);
   }
 
   private objectCreation(e: ObjectCreationExpression): Doc {
@@ -1458,6 +1490,15 @@ const PRECEDENCE: Partial<Record<SyntaxKind, number>> = {
 
 function precedence(op: SyntaxKind): number {
   return PRECEDENCE[op] ?? 0;
+}
+
+// google-java-format normalizes a parameter-name comment `/*name=*/` to
+// `/* name= */` (a space after `/*` and before `*/`); other block comments are
+// left verbatim. Mirrors gjf's reformatParameterComment.
+function reformatParamComment(text: string): string {
+  // gjf's PARAMETER_COMMENT: an identifier (optionally a varargs `...`) then `=`.
+  const m = text.match(/^\/\*\s*([A-Za-z_$][\w$]*(?:\.\.\.)?)\s*=\s*\*\/$/);
+  return m ? `/* ${m[1]}= */` : text;
 }
 
 // google-java-format's TypeNameClassifier: the inclusive end index of the
