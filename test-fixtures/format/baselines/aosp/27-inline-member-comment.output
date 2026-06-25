@@ -1,0 +1,5 @@
+class A {
+    /* package */ final int x = 1;
+
+    /* visible for testing */ void helper() {}
+}

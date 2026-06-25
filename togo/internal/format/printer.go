@@ -169,9 +169,10 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 		itemStart := p.start(item)
 		// The blank line required before this whole entry (its leading comments
 		// and the item) - g-j-f puts it before a method's doc comment, not between.
+		leadComments := p.commentsBefore(itemStart)
 		firstPos := itemStart
-		if p.hasCommentBefore(itemStart) {
-			firstPos = p.comments[p.ci].pos
+		if len(leadComments) > 0 {
+			firstPos = leadComments[0].pos
 		}
 		entryBlank := i > 0 &&
 			(p.blankBeforePos(prevEnd, firstPos) || (forced && forcedBlank(list[i-1], item)))
@@ -185,7 +186,18 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 			pushedInEntry = true
 		}
 
-		for _, c := range p.commentsBefore(itemStart) {
+		// A block comment on the same line as the item attaches inline before it
+		// (`/* package */ final int x;`); the rest are own-line leading comments.
+		var inlineLead *comment
+		if n := len(leadComments); n > 0 {
+			last := leadComments[n-1]
+			if !last.line && !strings.Contains(p.text[last.end:itemStart], "\n") {
+				inlineLead = &last
+				leadComments = leadComments[:n-1]
+			}
+		}
+
+		for _, c := range leadComments {
 			if !c.ownLine && !pushedInEntry && i > 0 {
 				// A comment after code on the same line: attach to the previous entry.
 				out[len(out)-1] = concat(out[len(out)-1], text(" "), text(c.text))
@@ -196,6 +208,9 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 		}
 
 		itemDoc := p.node(item)
+		if inlineLead != nil {
+			itemDoc = concat(text(inlineLead.text), text(" "), itemDoc)
+		}
 		if trailing, ok := p.trailingCommentAfter(item); ok {
 			itemDoc = concat(itemDoc, text(" "), text(trailing.text))
 			prevEnd = trailing.end

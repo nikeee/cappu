@@ -219,7 +219,8 @@ class Printer {
       // and the item) - g-j-f puts it before a method's doc comment, not between.
       // Measure the source blank from the previous entry's end to the first thing
       // here (a leading comment or the item) so comment lines are not miscounted.
-      const firstPos = this.hasCommentBefore(itemStart) ? this.comments[this.ci].pos : itemStart;
+      const leadComments = this.commentsBefore(itemStart);
+      const firstPos = leadComments.length > 0 ? leadComments[0].pos : itemStart;
       const entryBlank =
         i > 0 &&
         (this.blankBeforePos(prevEnd, firstPos) || (forced && forcedBlank(list[i - 1], item)));
@@ -229,7 +230,15 @@ class Printer {
         pushedInEntry = true;
       };
 
-      for (const c of this.commentsBefore(itemStart)) {
+      // A block comment on the same line as the item attaches inline before it
+      // (`/* package */ final int x;`); the rest are own-line leading comments.
+      let inlineLead: Comment | undefined;
+      const lastLead = leadComments[leadComments.length - 1];
+      if (lastLead && !lastLead.line && !this.text.slice(lastLead.end, itemStart).includes("\n")) {
+        inlineLead = leadComments.pop();
+      }
+
+      for (const c of leadComments) {
         if (!c.ownLine && !pushedInEntry && i > 0) {
           // A comment after code on the same line: attach to the previous entry.
           out[out.length - 1] = concat([out[out.length - 1], " ", c.text]);
@@ -240,6 +249,7 @@ class Printer {
       }
 
       let itemDoc = this.node(item);
+      if (inlineLead) itemDoc = concat([inlineLead.text, " ", itemDoc]);
       const trailing = this.trailingCommentAfter(item);
       if (trailing) {
         itemDoc = concat([itemDoc, " ", trailing.text]);
