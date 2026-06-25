@@ -26,18 +26,28 @@ type FormatOptions struct {
 
 const width = 100
 
+// google-java-format continuation indents (columns at google scale; the style
+// multiplier is applied at print time): +2 = one indent level (block body,
+// array-initializer continuation); +4 = a continuation (broken argument /
+// parameter / type lists, operator chains).
+var (
+	plus2  = indentConst(2)
+	plus4  = indentConst(4)
+	minus2 = indentConst(-2)
+)
+
 // ErrUnsupportedSyntax is returned when the formatter cannot format the input
 // without losing information.
 var ErrUnsupportedSyntax = errors.New("unsupported syntax")
 
 func formatSourceFile(sf *compiler.Node, options FormatOptions) (string, error) {
-	p := newPrinter(sf)
-	doc := p.sourceFile(sf.AsSourceFile())
-	indentUnit := 2
+	mult := 1
 	if options.Style == "aosp" {
-		indentUnit = 4
+		mult = 2
 	}
-	out := printDoc(doc, printOptions{width: width, indentUnit: indentUnit})
+	p := newPrinter(sf, mult)
+	doc := p.sourceFile(sf.AsSourceFile())
+	out := printDoc(doc, printOptions{width: width, indentMult: mult})
 	// Safety net: the printer attaches comments at member/statement granularity.
 	// If a comment sat somewhere it does not yet handle, refuse rather than
 	// silently drop it - the CLI then leaves the file untouched.
@@ -69,11 +79,14 @@ type printer struct {
 	text     string
 	comments []comment
 	ci       int // index of the next not-yet-emitted comment
+	// mult is the indent multiplier (1 google / 2 aosp); a few gjf decisions
+	// (e.g. the method-chain "small receiver" threshold) need it at build time.
+	mult int
 }
 
-func newPrinter(sf *compiler.Node) *printer {
+func newPrinter(sf *compiler.Node, mult int) *printer {
 	text := sf.AsSourceFile().Text
-	return &printer{sf: sf, text: text, comments: collectComments(text)}
+	return &printer{sf: sf, text: text, comments: collectComments(text), mult: mult}
 }
 
 // raw is the exact source spelling of a leaf node (identifier, literal, ...).
@@ -524,17 +537,41 @@ func (p *printer) typ(t *compiler.Node) Doc {
 
 // --- declarations --------------------------------------------------------
 
-func (p *printer) classLike(keyword string, mods *compiler.NodeArray, name *compiler.Node, typeParams *compiler.NodeArray, members *compiler.NodeArray, end int, afterName Doc) Doc {
+func (p *printer) classLike(keyword string, mods *compiler.NodeArray, name *compiler.Node, typeParams *compiler.NodeArray, members *compiler.NodeArray, end int, tail []Doc) Doc {
 	header := concat(
 		p.modifiers(mods, "own"),
 		text(keyword),
 		text(" "),
 		text(p.raw(name)),
 		p.typeParameters(typeParams),
-		afterName,
+		// extends/implements/permits live in one +4 level: each clause begins with
+		// a fill break, so a long clause folds onto its own continuation line.
+		level(plus4, tail),
 		text(" "),
 	)
 	return concat(header, p.body(members, end))
+}
+
+// typeListClause is a gjf class-header type list (`implements A, B, C`): a fill
+// break before the keyword, then the keyword and the types. With more than one
+// type the list indents +4 and its commas break UNIFIED (one per line); a single
+// type stays attached.
+func (p *printer) typeListClause(keyword string, types []*compiler.Node) Doc {
+	if len(types) == 0 {
+		return text("")
+	}
+	inner := []Doc{text(keyword), text(" ")}
+	for i, t := range types {
+		if i > 0 {
+			inner = append(inner, text(","), brk(fillUnified, " ", ZERO, nil))
+		}
+		inner = append(inner, p.typ(t))
+	}
+	plus := ZERO
+	if len(types) > 1 {
+		plus = plus4
+	}
+	return concat(brk(fillIndependent, " ", ZERO, nil), level(plus, inner))
 }
 
 // body renders a brace-delimited member body. endPos is the offset just past
@@ -552,28 +589,21 @@ func (p *printer) body(members *compiler.NodeArray, endPos int) Doc {
 }
 
 func (p *printer) classDeclaration(d *compiler.ClassDeclarationData, end int) Doc {
-	var after []Doc
+	var tail []Doc
+	// A class's `extends` is a single supertype (no list).
 	if d.ExtendsType != nil {
-		after = append(after, concat(text(" extends "), p.typ(d.ExtendsType)))
+		tail = append(tail, concat(brk(fillIndependent, " ", ZERO, nil), text("extends "), p.typ(d.ExtendsType)))
 	}
-	if d.ImplementsTypes.Len() > 0 {
-		after = append(after, concat(text(" implements "), p.typeList(d.ImplementsTypes)))
-	}
-	if d.PermitsTypes.Len() > 0 {
-		after = append(after, concat(text(" permits "), p.typeList(d.PermitsTypes)))
-	}
-	return p.classLike("class", d.Modifiers, d.Name, d.TypeParameters, d.Members, end, concat(after...))
+	tail = append(tail, p.typeListClause("implements", nodes(d.ImplementsTypes)))
+	tail = append(tail, p.typeListClause("permits", nodes(d.PermitsTypes)))
+	return p.classLike("class", d.Modifiers, d.Name, d.TypeParameters, d.Members, end, tail)
 }
 
 func (p *printer) interfaceDeclaration(d *compiler.InterfaceDeclarationData, end int) Doc {
-	var after []Doc
-	if d.ExtendsTypes.Len() > 0 {
-		after = append(after, concat(text(" extends "), p.typeList(d.ExtendsTypes)))
-	}
-	if d.PermitsTypes.Len() > 0 {
-		after = append(after, concat(text(" permits "), p.typeList(d.PermitsTypes)))
-	}
-	return p.classLike("interface", d.Modifiers, d.Name, d.TypeParameters, d.Members, end, concat(after...))
+	var tail []Doc
+	tail = append(tail, p.typeListClause("extends", nodes(d.ExtendsTypes)))
+	tail = append(tail, p.typeListClause("permits", nodes(d.PermitsTypes)))
+	return p.classLike("interface", d.Modifiers, d.Name, d.TypeParameters, d.Members, end, tail)
 }
 
 func (p *printer) typeList(arr *compiler.NodeArray) Doc {
@@ -585,15 +615,12 @@ func (p *printer) typeList(arr *compiler.NodeArray) Doc {
 }
 
 func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc {
-	var after []Doc
-	if d.ImplementsTypes.Len() > 0 {
-		after = append(after, concat(text(" implements "), p.typeList(d.ImplementsTypes)))
-	}
+	tail := []Doc{p.typeListClause("implements", nodes(d.ImplementsTypes))}
 	header := concat(
 		p.modifiers(d.Modifiers, "own"),
 		text("enum "),
 		text(p.raw(d.Name)),
-		concat(after...),
+		level(plus4, tail),
 		text(" "),
 	)
 	if d.EnumConstants.Len() == 0 && d.Members.Len() == 0 {
@@ -684,7 +711,40 @@ func (p *printer) declarator(v *compiler.VariableDeclaratorData) Doc {
 	if v.Initializer == nil {
 		return name
 	}
-	return group(concat(name, text(" ="), indent(concat(line, p.node(v.Initializer)))))
+	// An array initializer hugs the `=` (its own braces break); others fold onto
+	// a +4 continuation line after `=`.
+	if v.Initializer.Kind == compiler.ArrayInitializer {
+		return concat(name, text(" = "), p.node(v.Initializer))
+	}
+	return concat(name, text(" ="), level(plus4, []Doc{line, p.node(v.Initializer)}))
+}
+
+// argsLike is a gjf parenthesized comma list. When it does not fit, a UNIFIED
+// break fires after `(` (continuation at +4) so the items always start on the
+// next line; a nested zero-indent level keeps them on one continuation line if
+// they fit, else the fill mode decides (UNIFIED one per line, INDEPENDENT fill).
+// The closing `)` stays attached to the last item's line.
+func (p *printer) argsLike(open string, items []Doc, closeTok string, fill FillMode) Doc {
+	var innerParts []Doc
+	for i, it := range items {
+		if i > 0 {
+			innerParts = append(innerParts, text(","), brk(fill, " ", ZERO, nil))
+		}
+		innerParts = append(innerParts, it)
+	}
+	inner := level(ZERO, innerParts)
+	return concat(text(open), level(plus4, []Doc{brk(fillUnified, "", ZERO, nil), inner}), text(closeTok))
+}
+
+// allShortItems reports whether every node's source text is under
+// MAX_ITEM_LENGTH_FOR_FILLING (10) chars - gjf's fill heuristic.
+func (p *printer) allShortItems(ns []*compiler.Node) bool {
+	for _, n := range ns {
+		if n.End-p.start(n) >= 10 {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *printer) parameters(params *compiler.NodeArray) Doc {
@@ -695,7 +755,8 @@ func (p *printer) parameters(params *compiler.NodeArray) Doc {
 	for i, pp := range nodes(params) {
 		ps[i] = p.parameter(pp.AsParameter())
 	}
-	return group(concat(text("("), indent(concat(softline, join(concat(text(","), line), ps))), softline, text(")")))
+	// Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
+	return p.argsLike("(", ps, ")", fillUnified)
 }
 
 func (p *printer) parameter(pp *compiler.ParameterData) Doc {
@@ -721,7 +782,9 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 	}
 	head = append(head, text(p.raw(name)), p.parameters(params))
 	if throws.Len() > 0 {
-		head = append(head, concat(text(" throws "), p.typeList(throws)))
+		// Same shape as a class header type list, wrapped in a +4 level so the
+		// `throws` keyword folds onto a continuation line.
+		head = append(head, level(plus4, []Doc{p.typeListClause("throws", nodes(throws))}))
 	}
 	if body == nil {
 		return concat(append(head, text(";"))...)
@@ -820,7 +883,7 @@ func (p *printer) forStatement(s *compiler.ForStatementData) Doc {
 	default:
 		init = text("")
 	}
-	cond := Doc{kind: docText}
+	cond := text("")
 	if s.Condition != nil {
 		cond = p.node(s.Condition)
 	}
@@ -938,12 +1001,110 @@ func (p *printer) switchClause(c *compiler.SwitchClauseData, end int) Doc {
 
 // --- expressions ---------------------------------------------------------
 
-func (p *printer) binary(left *compiler.Node, op compiler.SyntaxKind, right *compiler.Node) Doc {
-	opStr := compiler.TokenToString(op)
-	if opStr == "" {
-		opStr = "?"
+// binary lays out an operator chain. gjf collects all same-precedence operands
+// into one +4 level and breaks *before* each operator; the breaks fill when
+// every operand is short, else go one per line.
+func (p *printer) binary(node *compiler.Node) Doc {
+	b := node.AsBinaryExpression()
+	prec := precedence(b.OperatorToken)
+	var operands []*compiler.Node
+	var operators []string
+	p.walkInfix(prec, node, &operands, &operators)
+	fill := fillUnified
+	if p.allShortItems(operands) {
+		fill = fillIndependent
 	}
-	return group(concat(p.node(left), text(" "), text(opStr), text(" "), p.node(right)))
+	parts := []Doc{p.node(operands[0])}
+	for i, op := range operators {
+		parts = append(parts, brk(fill, " ", ZERO, nil), text(op), text(" "), p.node(operands[i+1]))
+	}
+	return level(plus4, parts)
+}
+
+// walkInfix flattens a left-associative chain of same-precedence binary
+// operators into a flat operand/operator list (a + b - c -> [a,b,c], [+,-]).
+func (p *printer) walkInfix(prec int, node *compiler.Node, operands *[]*compiler.Node, operators *[]string) {
+	if node.Kind == compiler.BinaryExpression && precedence(node.AsBinaryExpression().OperatorToken) == prec {
+		b := node.AsBinaryExpression()
+		p.walkInfix(prec, b.Left, operands, operators)
+		op := compiler.TokenToString(b.OperatorToken)
+		if op == "" {
+			op = "?"
+		}
+		*operators = append(*operators, op)
+		p.walkInfix(prec, b.Right, operands, operators)
+	} else {
+		*operands = append(*operands, node)
+	}
+}
+
+// assignment lays out `a = b` / `a += b`: the RHS folds onto a +4 continuation
+// line after the operator when it does not fit.
+func (p *printer) assignment(e *compiler.AssignmentExpressionData) Doc {
+	op := compiler.TokenToString(e.OperatorToken)
+	if op == "" {
+		op = "="
+	}
+	return concat(p.node(e.Left), text(" "), text(op), level(plus4, []Doc{line, p.node(e.Right)}))
+}
+
+// dotChain lays out a dotted dereference chain (`a.b().c().d`). A chain with at
+// least two method invocations (a builder chain) breaks before every dot at +4;
+// a chain with at most one invocation stays glued unless its receiver is itself
+// a call. The first dot does not break after a tiny receiver.
+// ponytail: type-name prefixes and stream chains are not yet treated as units.
+func (p *printer) dotChain(root *compiler.Node) Doc {
+	type linkT struct {
+		doc    Doc
+		isCall bool
+	}
+	var links []linkT
+	cur := root
+	for {
+		switch {
+		case cur.Kind == compiler.CallExpression &&
+			cur.AsCallExpression().Expression.Kind == compiler.PropertyAccessExpression:
+			ce := cur.AsCallExpression()
+			pa := ce.Expression.AsPropertyAccessExpression()
+			links = append([]linkT{{
+				doc:    concat(text("."), text(p.raw(pa.Name)), p.typeArguments(ce.TypeArguments), p.argList(ce.Arguments)),
+				isCall: true,
+			}}, links...)
+			cur = pa.Expression
+			continue
+		case cur.Kind == compiler.PropertyAccessExpression:
+			pa := cur.AsPropertyAccessExpression()
+			links = append([]linkT{{doc: concat(text("."), text(p.raw(pa.Name))), isCall: false}}, links...)
+			cur = pa.Expression
+			continue
+		}
+		break
+	}
+	base := p.node(cur)
+	callCount := 0
+	for _, l := range links {
+		if l.isCall {
+			callCount++
+		}
+	}
+	baseIsCall := cur.Kind == compiler.CallExpression
+	if callCount == 0 || (callCount == 1 && !baseIsCall) {
+		parts := []Doc{base}
+		for _, l := range links {
+			parts = append(parts, l.doc)
+		}
+		return concat(parts...)
+	}
+	baseLen := cur.End - p.start(cur)
+	minLength := p.mult * 4
+	parts := []Doc{base}
+	for i, l := range links {
+		if i > 0 || baseLen > minLength {
+			parts = append(parts, brk(fillUnified, "", ZERO, nil))
+		}
+		parts = append(parts, l.doc)
+	}
+	return level(plus4, parts)
 }
 
 func (p *printer) call(e *compiler.CallExpressionData) Doc {
@@ -958,12 +1119,11 @@ func (p *printer) argList(args *compiler.NodeArray) Doc {
 	for i, a := range nodes(args) {
 		as[i] = p.node(a)
 	}
-	return group(concat(
-		text("("),
-		indent(concat(softline, join(concat(text(","), line), as))),
-		softline,
-		text(")"),
-	))
+	fill := fillUnified
+	if p.allShortItems(nodes(args)) {
+		fill = fillIndependent
+	}
+	return p.argsLike("(", as, ")", fill)
 }
 
 func (p *printer) objectCreation(e *compiler.ObjectCreationExpressionData, end int) Doc {
@@ -995,16 +1155,27 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData) Doc {
 	if e.Elements.Len() == 0 {
 		return text("{}")
 	}
-	els := make([]Doc, e.Elements.Len())
-	for i, el := range nodes(e.Elements) {
-		els[i] = p.node(el)
+	// gjf: contents indent +2; when broken, elements fill (INDEPENDENT) if all
+	// short, else one per line (UNIFIED); the closing `}` goes on its own line
+	// back at the parent indent (a -2 break cancels the +2).
+	// ponytail: trailing-comma -> FORCED after-open break is not modeled.
+	fill := fillUnified
+	if p.allShortItems(nodes(e.Elements)) {
+		fill = fillIndependent
 	}
-	return group(concat(
+	var innerParts []Doc
+	for i, el := range nodes(e.Elements) {
+		if i > 0 {
+			innerParts = append(innerParts, text(","), brk(fill, " ", ZERO, nil))
+		}
+		innerParts = append(innerParts, p.node(el))
+	}
+	inner := level(ZERO, innerParts)
+	return concat(
 		text("{"),
-		indent(concat(softline, join(concat(text(","), line), els))),
-		softline,
+		level(plus2, []Doc{brk(fillUnified, "", ZERO, nil), inner, brk(fillUnified, "", minus2, nil)}),
 		text("}"),
-	))
+	)
 }
 
 func (p *printer) lambda(e *compiler.LambdaExpressionData) Doc {
@@ -1032,8 +1203,18 @@ func (p *printer) lambda(e *compiler.LambdaExpressionData) Doc {
 	return concat(head, text(" -> "), body)
 }
 
+// conditional lays out a ternary: the condition stays on the line, `?` and `:`
+// break onto +4 continuation lines (UNIFIED).
 func (p *printer) conditional(e *compiler.ConditionalExpressionData) Doc {
-	return group(concat(p.node(e.Condition), text(" ? "), p.node(e.WhenTrue), text(" : "), p.node(e.WhenFalse)))
+	return level(plus4, []Doc{
+		p.node(e.Condition),
+		brk(fillUnified, " ", ZERO, nil),
+		text("? "),
+		p.node(e.WhenTrue),
+		brk(fillUnified, " ", ZERO, nil),
+		text(": "),
+		p.node(e.WhenFalse),
+	})
 }
 
 func (p *printer) instanceOf(e *compiler.InstanceofExpressionData) Doc {
@@ -1132,17 +1313,26 @@ func (p *printer) node(node *compiler.Node) Doc {
 		s := node.AsSwitchExpression()
 		return p.switchLike(s.Expression, s.Clauses)
 	case compiler.BinaryExpression:
-		e := node.AsBinaryExpression()
-		return p.binary(e.Left, e.OperatorToken, e.Right)
+		return p.binary(node)
 	case compiler.AssignmentExpression:
-		e := node.AsAssignmentExpression()
-		return p.binary(e.Left, e.OperatorToken, e.Right)
+		return p.assignment(node.AsAssignmentExpression())
 	case compiler.ConditionalExpression:
 		return p.conditional(node.AsConditionalExpression())
 	case compiler.CallExpression:
-		return p.call(node.AsCallExpression())
+		e := node.AsCallExpression()
+		// A method call on a `.`-access is part of a dereference chain.
+		if e.Expression.Kind == compiler.PropertyAccessExpression {
+			return p.dotChain(node)
+		}
+		return p.call(e)
 	case compiler.PropertyAccessExpression:
 		e := node.AsPropertyAccessExpression()
+		// Route through the chain layout only when the receiver is itself a
+		// call/access (a real chain); a plain `obj.field` stays inline.
+		k := e.Expression.Kind
+		if k == compiler.CallExpression || k == compiler.PropertyAccessExpression || k == compiler.ElementAccessExpression {
+			return p.dotChain(node)
+		}
 		return concat(p.node(e.Expression), text("."), text(p.raw(e.Name)))
 	case compiler.ElementAccessExpression:
 		e := node.AsElementAccessExpression()
@@ -1277,5 +1467,24 @@ func nodes(a *compiler.NodeArray) []*compiler.Node {
 
 // isEmpty reports whether a Doc is the empty-string text node.
 func isEmpty(d Doc) bool {
-	return d.kind == docText && d.text == ""
+	if t, ok := d.(*token); ok {
+		return t.text == ""
+	}
+	return false
 }
+
+// precedenceTable gives Java binary-operator precedence groups (higher binds
+// tighter); operators in the same group flatten into one chain when wrapping.
+var precedenceTable = map[compiler.SyntaxKind]int{
+	compiler.AsteriskToken: 10, compiler.SlashToken: 10, compiler.PercentToken: 10,
+	compiler.PlusToken: 9, compiler.MinusToken: 9,
+	compiler.LessThanLessThanToken: 8, compiler.GreaterThanGreaterThanToken: 8,
+	compiler.GreaterThanGreaterThanGreaterThanToken: 8,
+	compiler.LessThanToken:                          7, compiler.GreaterThanToken: 7,
+	compiler.LessThanEqualsToken: 7, compiler.GreaterThanEqualsToken: 7,
+	compiler.EqualsEqualsToken: 6, compiler.ExclamationEqualsToken: 6,
+	compiler.AmpersandToken: 5, compiler.CaretToken: 4, compiler.BarToken: 3,
+	compiler.AmpersandAmpersandToken: 2, compiler.BarBarToken: 1,
+}
+
+func precedence(op compiler.SyntaxKind) int { return precedenceTable[op] }
