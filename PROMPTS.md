@@ -431,3 +431,4 @@ cappu search commons-lang3
 - 2026-06-25 17:33 — field narrowing would be cool, but is this thread-safe?
 - 2026-06-25 17:33 — do final field narrowing, method-return narrowing, try/catch flow
 - 2026-06-25 17:33 — does this feature support modern stuff like records?
+- 2026-06-25 17:40 — find more test cases. ones that shoukd adhere correct nullness and ones that shouldnt. maybe even look in some reference projects

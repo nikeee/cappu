@@ -45,6 +45,7 @@ func TestNullnessFlagged(t *testing.T) {
 		{"@NullMarked unannotated local rejects null", "@NullMarked class C { void g() { String s = null; } }"},
 		{"@Nullable return into @NonNull parameter", "class C { @Nullable String n() { return null; } void f(@NonNull String s) {} void g() { f(n()); } }"},
 		{"new R(null) into a non-null record component", "@NullMarked record R(String x) {}\nclass C { void m() { new R(null); } }"},
+		{"null assigned to a non-null field in a constructor", "@NullMarked class C { String f; C() { this.f = null; } }"},
 	}
 	for _, tc := range cases {
 		if !containsCode(diagnoseNullness(tc.code, jspecify()), codeNullIntoNonNull) {
@@ -62,6 +63,8 @@ func TestNullnessAccepted(t *testing.T) {
 		{"non-null value into @NonNull parameter", "class C { @NonNull String n() { return \"a\"; } void f(@NonNull String s) {} void g() { f(n()); } }"},
 		{"new R(null) into a @Nullable record component", "record R(@Nullable String x) {}\nclass C { void m() { new R(null); } }"},
 		{"non-null arg into a non-null record component", "@NullMarked record R(String x) {}\nclass C { void m() { new R(\"a\"); } }"},
+		{"ternary with both arms non-null", `@NullMarked class C { void f(String s) {} void g(boolean b) { f(b ? "y" : "x"); } }`},
+		{"returning a value narrowed by an early-return", `@NullMarked class C { String g(@Nullable String x) { if (x == null) return ""; return x; } }`},
 	}
 	for _, tc := range cases {
 		if containsCode(diagnoseNullness(tc.code, jspecify()), codeNullIntoNonNull) {
@@ -337,6 +340,11 @@ func TestNullnessDereferenceFlagged(t *testing.T) {
 		{"guard on one receiver does not narrow another receiver's final field", "class C { final @Nullable String f = null; void m(C a, C b) { if (a.f != null) b.f.trim(); } }"},
 		{"catch falls through after requireNonNull", "class C { void m(@Nullable String x) { try { java.util.Objects.requireNonNull(x); } catch (RuntimeException e) {} x.trim(); } }"},
 		{"assignment in try with fall-through catch", `class C { void m(@Nullable String x) { try { x = "a"; } catch (RuntimeException e) {} x.trim(); } }`},
+		{"chained call on a @Nullable return", "@NullMarked class C { @Nullable String n() { return null; } void g() { n().trim(); } }"},
+		{"element of a @Nullable[] dereferenced", "@NullMarked class C { void g(@Nullable String[] a) { a[0].trim(); } }"},
+		{"static @Nullable field dereferenced", "@NullMarked class C { static @Nullable String F = null; void g() { F.trim(); } }"},
+		{"var that infers a @Nullable type", "@NullMarked class C { @Nullable String n() { return null; } void g() { var x = n(); x.trim(); } }"},
+		{"chained field access through a @Nullable field", "@NullMarked class C { @Nullable C a; final @Nullable String b = null; void g() { this.a.b.trim(); } }"},
 	}
 	for _, tc := range cases {
 		if !containsCode(diagnoseNullness(tc.code, jspecify()), codeDeref) {
@@ -359,6 +367,12 @@ func TestNullnessDereferenceAccepted(t *testing.T) {
 		{"requireNonNull in a try whose catch exits", "class C { void m(@Nullable String x) { try { java.util.Objects.requireNonNull(x); } catch (RuntimeException e) { return; } x.trim(); } }"},
 		{"assignment in a try whose catch exits", `class C { void m(@Nullable String x) { try { x = "a"; } catch (RuntimeException e) { return; } x.trim(); } }`},
 		{"guard before a try narrows inside the try body", "class C { void m(@Nullable String x) { if (x == null) return; try { x.trim(); } catch (RuntimeException e) {} } }"},
+		{"var that infers @Nullable narrowed by a guard", "@NullMarked class C { @Nullable String n() { return null; } void g() { var x = n(); if (x != null) x.trim(); } }"},
+		{"instanceof pattern variable is non-null", "@NullMarked class C { void g(@Nullable Object o) { if (o instanceof String s) s.length(); } }"},
+		{"Objects.isNull early-return guard", "import java.util.Objects; @NullMarked class C { void g(@Nullable String x) { if (Objects.isNull(x)) return; x.trim(); } }"},
+		{"negated null check early-return guard", "@NullMarked class C { void g(@Nullable String x) { if (!(x != null)) return; x.trim(); } }"},
+		{"&& chain narrows the receiver", "@NullMarked class C { void g(@Nullable String x) { if (x != null && x.length() > 0) x.trim(); } }"},
+		{"string concatenation with a @Nullable value", `@NullMarked class C { String g(@Nullable String x) { return "a" + x; } }`},
 	}
 	for _, tc := range cases {
 		if containsCode(diagnoseNullness(tc.code, jspecify()), codeDeref) {
