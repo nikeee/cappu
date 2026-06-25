@@ -670,7 +670,8 @@ class Printer {
     if (v.initializer.kind === SyntaxKind.ArrayInitializer) {
       return concat([name, " = ", this.node(v.initializer)]);
     }
-    return group(concat([name, " =", indent(concat([line, this.node(v.initializer)]))]));
+    // gjf folds a long initializer onto a +4 continuation line after `=`.
+    return concat([name, " =", level(PLUS4, [line, this.node(v.initializer)])]);
   }
 
   // A gjf-style parenthesized comma list (`(a, b, c)`). When it does not fit, a
@@ -945,9 +946,43 @@ class Printer {
 
   // --- expressions ---------------------------------------------------------
 
-  private binary(e: BinaryExpression | AssignmentExpression): Doc {
-    const op = tokenToString(e.operatorToken) ?? "?";
-    return group(concat([this.node(e.left), " ", op, " ", this.node(e.right)]));
+  // A binary operator chain. gjf collects all operands at the same precedence
+  // into one +4 level and breaks *before* each operator; the breaks fill when
+  // every operand is short, else go one per line.
+  private binary(e: BinaryExpression): Doc {
+    const prec = precedence(e.operatorToken);
+    const operands: Expression[] = [];
+    const operators: string[] = [];
+    this.walkInfix(prec, e, operands, operators);
+    const fillMode: FillMode = this.allShortItems(operands) ? "independent" : "unified";
+    const parts: Doc[] = [this.node(operands[0])];
+    operators.forEach((op, i) => {
+      parts.push(brk(fillMode, " ", ZERO), op, " ", this.node(operands[i + 1]));
+    });
+    return level(PLUS4, parts);
+  }
+
+  // Flatten a left-associative chain of same-precedence binary operators into a
+  // flat operand/operator list (a + b - c -> [a,b,c], [+,-]).
+  private walkInfix(prec: number, node: Node, operands: Expression[], operators: string[]): void {
+    if (
+      node.kind === SyntaxKind.BinaryExpression &&
+      precedence((node as BinaryExpression).operatorToken) === prec
+    ) {
+      const b = node as BinaryExpression;
+      this.walkInfix(prec, b.left, operands, operators);
+      operators.push(tokenToString(b.operatorToken) ?? "?");
+      this.walkInfix(prec, b.right, operands, operators);
+    } else {
+      operands.push(node as Expression);
+    }
+  }
+
+  // An assignment expression (`a = b`, `a += b`): the RHS folds onto a +4
+  // continuation line after the operator when it does not fit.
+  private assignment(e: AssignmentExpression): Doc {
+    const op = tokenToString(e.operatorToken) ?? "=";
+    return concat([this.node(e.left), " ", op, level(PLUS4, [line, this.node(e.right)])]);
   }
 
   private call(e: CallExpression): Doc {
@@ -1025,10 +1060,18 @@ class Printer {
     return concat([head, " -> ", body]);
   }
 
+  // A ternary. gjf keeps the condition on the line and breaks before `?` and `:`
+  // (UNIFIED) onto +4 continuation lines.
   private conditional(e: ConditionalExpression): Doc {
-    return group(
-      concat([this.node(e.condition), " ? ", this.node(e.whenTrue), " : ", this.node(e.whenFalse)]),
-    );
+    return level(PLUS4, [
+      this.node(e.condition),
+      brk("unified", " ", ZERO),
+      "? ",
+      this.node(e.whenTrue),
+      brk("unified", " ", ZERO),
+      ": ",
+      this.node(e.whenFalse),
+    ]);
   }
 
   private instanceOf(e: InstanceofExpression): Doc {
@@ -1121,7 +1164,7 @@ class Printer {
       case SyntaxKind.BinaryExpression:
         return this.binary(node as BinaryExpression);
       case SyntaxKind.AssignmentExpression:
-        return this.binary(node as AssignmentExpression);
+        return this.assignment(node as AssignmentExpression);
       case SyntaxKind.ConditionalExpression:
         return this.conditional(node as ConditionalExpression);
       case SyntaxKind.CallExpression:
@@ -1214,6 +1257,34 @@ class Printer {
         return this.raw(node);
     }
   }
+}
+
+// Java binary-operator precedence groups (higher binds tighter). Operators in
+// the same group flatten into one chain when wrapping, matching gjf's walkInfix.
+const PRECEDENCE: Partial<Record<SyntaxKind, number>> = {
+  [SyntaxKind.AsteriskToken]: 10,
+  [SyntaxKind.SlashToken]: 10,
+  [SyntaxKind.PercentToken]: 10,
+  [SyntaxKind.PlusToken]: 9,
+  [SyntaxKind.MinusToken]: 9,
+  [SyntaxKind.LessThanLessThanToken]: 8,
+  [SyntaxKind.GreaterThanGreaterThanToken]: 8,
+  [SyntaxKind.GreaterThanGreaterThanGreaterThanToken]: 8,
+  [SyntaxKind.LessThanToken]: 7,
+  [SyntaxKind.GreaterThanToken]: 7,
+  [SyntaxKind.LessThanEqualsToken]: 7,
+  [SyntaxKind.GreaterThanEqualsToken]: 7,
+  [SyntaxKind.EqualsEqualsToken]: 6,
+  [SyntaxKind.ExclamationEqualsToken]: 6,
+  [SyntaxKind.AmpersandToken]: 5,
+  [SyntaxKind.CaretToken]: 4,
+  [SyntaxKind.BarToken]: 3,
+  [SyntaxKind.AmpersandAmpersandToken]: 2,
+  [SyntaxKind.BarBarToken]: 1,
+};
+
+function precedence(op: SyntaxKind): number {
+  return PRECEDENCE[op] ?? 0;
 }
 
 function rank(kind: SyntaxKind): number {
