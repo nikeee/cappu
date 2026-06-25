@@ -637,6 +637,32 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			Diagnostics.DereferenceOfPossiblyNullValue0, text[start:receiver.End]))
 	}
 
+	// A switch on a null selector throws NPE - except under JEP 441, where a
+	// `case null` label handles it. The selector is dereferenced only when no
+	// such label is present.
+	switchHasNullCase := func(clauses *NodeArray) bool {
+		if clauses == nil {
+			return false
+		}
+		for _, clause := range clauses.Nodes {
+			labels := clause.AsSwitchClause().Labels
+			if labels == nil {
+				continue
+			}
+			for _, l := range labels.Nodes {
+				if l.Kind == NullKeyword {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	checkSwitchSelector := func(expr *Node, clauses *NodeArray) {
+		if !switchHasNullCase(clauses) {
+			checkDereference(expr)
+		}
+	}
+
 	// Argument nullness against a resolved signature: each parameter type is
 	// instantiated with subst (the receiver's / created type's type arguments), so a
 	// null into the non-null element of List<@NonNull String>.add(E) is caught.
@@ -903,9 +929,14 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 						Diagnostics.CannotResolveMember0In1, access.Name.AsIdentifier().Text, typeToString(receiver)))
 				}
 			}
+		case SwitchStatement:
+			s := node.AsSwitchStatement()
+			checkSwitchSelector(s.Expression, s.Clauses)
 		case SwitchExpression:
+			se := node.AsSwitchExpression()
+			checkSwitchSelector(se.Expression, se.Clauses)
 			if missing, ok := c.missingEnumLabels(node); ok && len(missing) > 0 {
-				expr := node.AsSwitchExpression().Expression
+				expr := se.Expression
 				diagnostics = append(diagnostics, CreateDiagnostic(expr.Pos, expr.End-expr.Pos,
 					Diagnostics.SwitchExpressionNotExhaustive0, typeToString(c.getTypeOfExpression(expr))))
 			}

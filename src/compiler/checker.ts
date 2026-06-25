@@ -60,7 +60,9 @@ import {
   type QualifiedName,
   type ReturnStatement,
   type SourceFile,
+  type SwitchClause,
   type SwitchExpression,
+  type SwitchStatement,
   type Parameter,
   type Symbol,
   SymbolFlags,
@@ -2152,6 +2154,15 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       );
     };
 
+    // A switch on a null selector throws NPE - except under JEP 441, where a
+    // `case null` label handles it. The selector is dereferenced only when no
+    // such label is present.
+    const switchHasNullCase = (clauses: readonly SwitchClause[]): boolean =>
+      clauses.some(c => c.labels?.some(l => l.kind === SyntaxKind.NullKeyword) ?? false);
+    const checkSwitchSelector = (sw: SwitchStatement | SwitchExpression): void => {
+      if (!switchHasNullCase(sw.clauses)) checkDereference(sw.expression);
+    };
+
     // Argument nullness against a resolved signature: each parameter type is
     // instantiated with `subst` (the receiver's / created type's type arguments),
     // so a null into the non-null element of List<@NonNull String>.add(E) is caught.
@@ -2537,8 +2548,12 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
           }
           break;
         }
+        case SyntaxKind.SwitchStatement:
+          checkSwitchSelector(node as SwitchStatement);
+          break;
         case SyntaxKind.SwitchExpression: {
           const sw = node as SwitchExpression;
+          checkSwitchSelector(sw);
           const missing = missingEnumLabels(sw);
           if (missing && missing.length > 0) {
             diagnostics.push(

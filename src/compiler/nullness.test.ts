@@ -452,6 +452,24 @@ test("iterating a @Nullable collection in an enhanced-for is flagged", () => {
   expect(diagnose(code)).toContain(DEREF);
 });
 
+test("switching on a @Nullable selector without a `case null` is flagged", () => {
+  const code =
+    'class C { void m(@Nullable String x) { switch (x) { case "a" -> {} default -> {} } } }';
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a `case null` label (JEP 441) handles null so the switch selector is accepted", () => {
+  const code =
+    'class C { void m(@Nullable String x) { switch (x) { case null -> {} case "a" -> {} default -> {} } } }';
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("a switch expression on a @Nullable selector without `case null` is flagged", () => {
+  const code =
+    'class C { int m(@Nullable String x) { return switch (x) { case "a" -> 1; default -> 0; }; } }';
+  expect(diagnose(code)).toContain(DEREF);
+});
+
 test("a guard narrows a thrown @Nullable value", () => {
   const code = "class C { void m(@Nullable RuntimeException e) { if (e != null) throw e; } }";
   expect(diagnose(code)).not.toContain(DEREF);

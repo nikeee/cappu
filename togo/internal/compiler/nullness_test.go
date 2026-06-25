@@ -327,6 +327,8 @@ func TestNullnessDereferenceFlagged(t *testing.T) {
 		{"throw of @Nullable value", "class C { void m(@Nullable RuntimeException e) { throw e; } }"},
 		{"synchronized on @Nullable lock", "class C { void m(@Nullable Object lock) { synchronized (lock) {} } }"},
 		{"enhanced-for over @Nullable collection", "class C { void m(@Nullable java.util.List<String> xs) { for (String s : xs) {} } }"},
+		{"switch on @Nullable selector without case null", `class C { void m(@Nullable String x) { switch (x) { case "a" -> {} default -> {} } } }`},
+		{"switch expression on @Nullable selector without case null", `class C { int m(@Nullable String x) { return switch (x) { case "a" -> 1; default -> 0; }; } }`},
 	}
 	for _, tc := range cases {
 		if !containsCode(diagnoseNullness(tc.code, jspecify()), codeDeref) {
@@ -342,6 +344,7 @@ func TestNullnessDereferenceAccepted(t *testing.T) {
 		{"@NonNull receiver", "class C { void m(@NonNull String x) { x.trim(); } }"},
 		{"this-qualified access", "class C { String fld; void m() { this.fld.trim(); } }"},
 		{"guard narrows a thrown @Nullable value", "class C { void m(@Nullable RuntimeException e) { if (e != null) throw e; } }"},
+		{"case null (JEP 441) handles a @Nullable switch selector", `class C { void m(@Nullable String x) { switch (x) { case null -> {} case "a" -> {} default -> {} } } }`},
 	}
 	for _, tc := range cases {
 		if containsCode(diagnoseNullness(tc.code, jspecify()), codeDeref) {
