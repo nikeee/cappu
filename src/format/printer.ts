@@ -234,7 +234,12 @@ class Printer {
       // (`/* package */ final int x;`); the rest are own-line leading comments.
       let inlineLead: Comment | undefined;
       const lastLead = leadComments[leadComments.length - 1];
-      if (lastLead && !lastLead.line && !this.text.slice(lastLead.end, itemStart).includes("\n")) {
+      if (
+        lastLead &&
+        !lastLead.line &&
+        !lastLead.text.includes("\n") && // a multi-line comment/javadoc stays own-line
+        !this.text.slice(lastLead.end, itemStart).includes("\n")
+      ) {
         inlineLead = leadComments.pop();
       }
 
