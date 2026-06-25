@@ -1,0 +1,8 @@
+class A {
+  void methodName(int parameterOneLong, int parameterTwoLong, int parameterThreeLong, int parameterFourLong) {}
+
+  void caller() {
+    someMethod(argumentOneLong, argumentTwoLong, argumentThreeLong, argumentFourLong, argumentFiveLong);
+    other(argOne, argTwo, argThree, argFour, argFive, argSix, argSeven, argEight, argNine, argTenXX, argEleven);
+  }
+}

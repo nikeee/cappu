@@ -81,16 +81,28 @@ import {
   type YieldStatement,
 } from "../compiler/types.ts";
 import {
+  brk,
   concat,
   type Doc,
+  type FillMode,
   group,
   hardline,
   indent,
+  indentConst,
   join,
+  level,
   line,
   printDoc,
-  softline,
+  ZERO,
 } from "./doc.ts";
+
+// google-java-format continuation indents (columns at google scale; the printer
+// is built once and the style multiplier is applied at print time):
+//   +2 = one indent level (block body, array-initializer continuation)
+//   +4 = a continuation (broken argument/parameter/type lists, operator chains)
+const PLUS2 = indentConst(2);
+const PLUS4 = indentConst(4);
+const MINUS2 = indentConst(-2);
 
 export interface FormatOptions {
   style: "google" | "aosp";
@@ -102,9 +114,10 @@ const WIDTH = 100;
 export class UnsupportedSyntaxError extends Error {}
 
 export function formatSourceFile(sf: SourceFile, options: FormatOptions): string {
-  const p = new Printer(sf);
+  const mult = options.style === "aosp" ? 2 : 1;
+  const p = new Printer(sf, mult);
   const doc = p.sourceFile(sf);
-  const text = printDoc(doc, { width: WIDTH, indentUnit: options.style === "aosp" ? 4 : 2 });
+  const text = printDoc(doc, { width: WIDTH, indentMultiplier: mult });
   // Safety net: the printer attaches comments at member/statement granularity.
   // If a comment sat somewhere it does not yet handle, refuse rather than
   // silently drop it - the CLI then leaves the file untouched.
@@ -136,7 +149,13 @@ class Printer {
   private readonly comments: Comment[];
   /** Index of the next not-yet-emitted comment in `comments`. */
   private ci = 0;
-  constructor(private readonly sf: SourceFile) {
+  // The indent multiplier (1 google / 2 aosp). Most layout defers the multiplier
+  // to print time, but a few gjf decisions (e.g. the method-chain "small
+  // receiver" threshold) depend on it at build time.
+  constructor(
+    private readonly sf: SourceFile,
+    private readonly mult: number,
+  ) {
     this.text = sf.text;
     this.comments = collectComments(sf.text);
   }
@@ -254,13 +273,6 @@ class Printer {
     const blocks: Doc[] = [];
     const firstStart = this.firstConstructStart(sf);
     const header = this.commentsBefore(firstStart);
-    if (header.length > 0)
-      blocks.push(
-        join(
-          hardline,
-          header.map(c => c.text),
-        ),
-      );
     if (sf.packageDeclaration) {
       blocks.push(concat(["package ", this.entityName(sf.packageDeclaration.name), ";"]));
     }
@@ -274,6 +286,22 @@ class Printer {
     }
     if (sf.statements.length > 0) {
       blocks.push(concat(this.listDocs(sf.statements, true, this.text.length)));
+    }
+    if (header.length > 0) {
+      const headerDoc = join(
+        hardline,
+        header.map(c => c.text),
+      );
+      // A leading comment glued to the first construct (no blank line in source)
+      // is its doc comment - keep it attached. One followed by a blank line is a
+      // file header (e.g. a license), separated by a blank line like other blocks.
+      const glued =
+        blocks.length > 0 && !this.blankBeforePos(header[header.length - 1].end, firstStart);
+      if (glued) {
+        blocks[0] = concat([headerDoc, hardline, blocks[0]]);
+      } else {
+        blocks.unshift(headerDoc);
+      }
     }
     return join(concat([hardline, hardline]), blocks);
   }
@@ -505,7 +533,7 @@ class Printer {
       members: NodeArray<Node>;
       end: number;
     },
-    afterName: Doc,
+    tail: Doc[],
   ): Doc {
     const header = concat([
       this.modifiers(decl.modifiers, "own"),
@@ -513,10 +541,26 @@ class Printer {
       " ",
       this.raw(decl.name),
       this.typeParameters(decl.typeParameters),
-      afterName,
+      // extends/implements/permits live in one +4 level: each clause begins with
+      // a fill break, so a long clause folds onto its own continuation line.
+      level(PLUS4, tail),
       " ",
     ]);
     return concat([header, this.body(decl.members, decl.end)]);
+  }
+
+  // A gjf class-header type list (`implements A, B, C`): a fill break before the
+  // keyword, then the keyword and the types. With more than one type the list
+  // itself indents +4 and its commas break UNIFIED (one per line); a single type
+  // stays attached.
+  private typeListClause(keyword: string, types: TypeNode[]): Doc {
+    if (types.length === 0) return "";
+    const inner: Doc[] = [keyword, " "];
+    types.forEach((t, i) => {
+      if (i > 0) inner.push(",", brk("unified", " ", ZERO));
+      inner.push(this.type(t));
+    });
+    return concat([brk("independent", " ", ZERO), level(types.length > 1 ? PLUS4 : ZERO, inner)]);
   }
 
   /** A brace-delimited member body: `{` ... `}` or `{}` when empty. `endPos` is
@@ -532,73 +576,30 @@ class Printer {
   }
 
   private classDeclaration(d: ClassDeclaration): Doc {
-    const after: Doc[] = [];
-    if (d.extendsType) after.push(concat([" extends ", this.type(d.extendsType)]));
-    if (d.implementsTypes && d.implementsTypes.length > 0)
-      after.push(
-        concat([
-          " implements ",
-          join(
-            ", ",
-            d.implementsTypes.map(t => this.type(t)),
-          ),
-        ]),
-      );
-    if (d.permitsTypes && d.permitsTypes.length > 0)
-      after.push(
-        concat([
-          " permits ",
-          join(
-            ", ",
-            d.permitsTypes.map(t => this.type(t)),
-          ),
-        ]),
-      );
-    return this.classLike("class", d, concat(after));
+    const tail: Doc[] = [];
+    // A class's `extends` is a single supertype (no list).
+    if (d.extendsType)
+      tail.push(concat([brk("independent", " ", ZERO), "extends ", this.type(d.extendsType)]));
+    if (d.implementsTypes) tail.push(this.typeListClause("implements", [...d.implementsTypes]));
+    if (d.permitsTypes) tail.push(this.typeListClause("permits", [...d.permitsTypes]));
+    return this.classLike("class", d, tail);
   }
 
   private interfaceDeclaration(d: InterfaceDeclaration): Doc {
-    const after: Doc[] = [];
-    if (d.extendsTypes && d.extendsTypes.length > 0)
-      after.push(
-        concat([
-          " extends ",
-          join(
-            ", ",
-            d.extendsTypes.map(t => this.type(t)),
-          ),
-        ]),
-      );
-    if (d.permitsTypes && d.permitsTypes.length > 0)
-      after.push(
-        concat([
-          " permits ",
-          join(
-            ", ",
-            d.permitsTypes.map(t => this.type(t)),
-          ),
-        ]),
-      );
-    return this.classLike("interface", d, concat(after));
+    const tail: Doc[] = [];
+    if (d.extendsTypes) tail.push(this.typeListClause("extends", [...d.extendsTypes]));
+    if (d.permitsTypes) tail.push(this.typeListClause("permits", [...d.permitsTypes]));
+    return this.classLike("interface", d, tail);
   }
 
   private enumDeclaration(d: EnumDeclaration): Doc {
-    const after: Doc[] = [];
-    if (d.implementsTypes && d.implementsTypes.length > 0)
-      after.push(
-        concat([
-          " implements ",
-          join(
-            ", ",
-            d.implementsTypes.map(t => this.type(t)),
-          ),
-        ]),
-      );
+    const tail: Doc[] = [];
+    if (d.implementsTypes) tail.push(this.typeListClause("implements", [...d.implementsTypes]));
     const header = concat([
       this.modifiers(d.modifiers, "own"),
       "enum ",
       this.raw(d.name),
-      concat(after),
+      level(PLUS4, tail),
       " ",
     ]);
     if (d.enumConstants.length === 0 && d.members.length === 0) return concat([header, "{}"]);
@@ -679,14 +680,47 @@ class Printer {
   private declarator(v: VariableDeclarator): Doc {
     const name = concat([this.raw(v.name), "[]".repeat(v.arrayRankAfterName)]);
     if (!v.initializer) return name;
-    return group(concat([name, " =", indent(concat([line, this.node(v.initializer)]))]));
+    // An array initializer hugs the `=` (`x = {` ... `}`); its own braces break,
+    // so do not insert a break before it. (Other hugging RHS kinds - lambdas,
+    // anonymous classes - are handled with the rest of assignment RHS in phase B.)
+    if (v.initializer.kind === SyntaxKind.ArrayInitializer) {
+      return concat([name, " = ", this.node(v.initializer)]);
+    }
+    // gjf folds a long initializer onto a +4 continuation line after `=`.
+    return concat([name, " =", level(PLUS4, [line, this.node(v.initializer)])]);
+  }
+
+  // A gjf-style parenthesized comma list (`(a, b, c)`). When it does not fit, a
+  // UNIFIED break fires after `(` (continuation at +4) so the items always start
+  // on the next line; a nested zero-indent level then keeps them on one
+  // continuation line if they fit. If they do not, the inter-item fill mode
+  // decides: UNIFIED puts one per line, INDEPENDENT *fills* as many per line as
+  // fit. The closing `)` stays attached to the last item's line.
+  private argsLike(open: string, items: Doc[], close: string, fillMode: FillMode): Doc {
+    const innerParts: Doc[] = [];
+    items.forEach((it, i) => {
+      if (i > 0) innerParts.push(",", brk(fillMode, " ", ZERO));
+      innerParts.push(it);
+    });
+    const inner = level(ZERO, innerParts);
+    return concat([open, level(PLUS4, [brk("unified", "", ZERO), inner]), close]);
+  }
+
+  // gjf fills a delimited list (packs items per line) only when every item is
+  // "short" - its source text is under MAX_ITEM_LENGTH_FOR_FILLING (10) chars;
+  // otherwise items go one per line.
+  private allShortItems(nodes: readonly Node[]): boolean {
+    return nodes.every(n => n.end - this.start(n) < 10);
   }
 
   private parameters(params: NodeArray<Parameter>): Doc {
     if (params.length === 0) return "()";
-    const ps = params.map(p => this.parameter(p));
-    return group(
-      concat(["(", indent(concat([softline, join(concat([",", line]), ps)])), softline, ")"]),
+    // Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
+    return this.argsLike(
+      "(",
+      params.map(p => this.parameter(p)),
+      ")",
+      "unified",
     );
   }
 
@@ -711,16 +745,12 @@ class Printer {
     if (tp !== "") head.push(tp, " ");
     if (decl.returnType) head.push(this.type(decl.returnType), " ");
     head.push(this.raw(decl.name), this.parameters(decl.parameters));
-    if (decl.throws && decl.throws.length > 0)
-      head.push(
-        concat([
-          " throws ",
-          join(
-            ", ",
-            decl.throws.map(t => this.type(t)),
-          ),
-        ]),
-      );
+    if (decl.throws && decl.throws.length > 0) {
+      // Same shape as a class header type list, wrapped in a +4 level so the
+      // `throws` keyword folds onto a continuation line (the class header gets
+      // that +4 from its own enclosing level; a method head has none).
+      head.push(level(PLUS4, [this.typeListClause("throws", [...decl.throws])]));
+    }
     if (!decl.body) return concat([...head, ";"]);
     return concat([...head, " ", this.block(decl.body)]);
   }
@@ -932,9 +962,119 @@ class Printer {
 
   // --- expressions ---------------------------------------------------------
 
-  private binary(e: BinaryExpression | AssignmentExpression): Doc {
-    const op = tokenToString(e.operatorToken) ?? "?";
-    return group(concat([this.node(e.left), " ", op, " ", this.node(e.right)]));
+  // A binary operator chain. gjf collects all operands at the same precedence
+  // into one +4 level and breaks *before* each operator; the breaks fill when
+  // every operand is short, else go one per line.
+  private binary(e: BinaryExpression): Doc {
+    const prec = precedence(e.operatorToken);
+    const operands: Expression[] = [];
+    const operators: string[] = [];
+    this.walkInfix(prec, e, operands, operators);
+    const fillMode: FillMode = this.allShortItems(operands) ? "independent" : "unified";
+    const parts: Doc[] = [this.node(operands[0])];
+    operators.forEach((op, i) => {
+      parts.push(brk(fillMode, " ", ZERO), op, " ", this.node(operands[i + 1]));
+    });
+    return level(PLUS4, parts);
+  }
+
+  // Flatten a left-associative chain of same-precedence binary operators into a
+  // flat operand/operator list (a + b - c -> [a,b,c], [+,-]).
+  private walkInfix(prec: number, node: Node, operands: Expression[], operators: string[]): void {
+    if (
+      node.kind === SyntaxKind.BinaryExpression &&
+      precedence((node as BinaryExpression).operatorToken) === prec
+    ) {
+      const b = node as BinaryExpression;
+      this.walkInfix(prec, b.left, operands, operators);
+      operators.push(tokenToString(b.operatorToken) ?? "?");
+      this.walkInfix(prec, b.right, operands, operators);
+    } else {
+      operands.push(node as Expression);
+    }
+  }
+
+  // An assignment expression (`a = b`, `a += b`): the RHS folds onto a +4
+  // continuation line after the operator when it does not fit.
+  private assignment(e: AssignmentExpression): Doc {
+    const op = tokenToString(e.operatorToken) ?? "=";
+    return concat([this.node(e.left), " ", op, level(PLUS4, [line, this.node(e.right)])]);
+  }
+
+  // A dotted dereference chain (`a.b().c().d`). gjf flattens the `.`-spine and,
+  // when there are at least two method invocations (a "builder" chain), breaks
+  // before every dot at +4 (one selector per line). A chain with at most one
+  // invocation stays glued (its argument lists wrap instead). The first dot does
+  // not break when the receiver is tiny (<= indentMultiplier*4 chars).
+  // ponytail: type-name prefixes (`ImmutableList.builder()...`) and stream
+  // chains are not yet treated as units; those over-break. Add when a corpus
+  // fixture needs them.
+  private dotChain(root: Expression): Doc {
+    const links: { doc: Doc; isCall: boolean; name: string }[] = [];
+    let cur: Node = root;
+    for (;;) {
+      if (
+        cur.kind === SyntaxKind.CallExpression &&
+        (cur as CallExpression).expression.kind === SyntaxKind.PropertyAccessExpression
+      ) {
+        const callExpr = cur as CallExpression;
+        const pa = callExpr.expression as PropertyAccessExpression;
+        links.unshift({
+          // Explicit method type arguments go between the dot and the name:
+          // `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
+          doc: concat([
+            ".",
+            this.typeArguments(callExpr.typeArguments),
+            this.raw(pa.name),
+            this.argList(callExpr.arguments),
+          ]),
+          isCall: true,
+          name: this.raw(pa.name),
+        });
+        cur = pa.expression;
+      } else if (cur.kind === SyntaxKind.PropertyAccessExpression) {
+        const pa = cur as PropertyAccessExpression;
+        links.unshift({
+          doc: concat([".", this.raw(pa.name)]),
+          isCall: false,
+          name: this.raw(pa.name),
+        });
+        cur = pa.expression;
+      } else {
+        break;
+      }
+    }
+    const base = this.node(cur);
+    const callCount = links.filter(l => l.isCall).length;
+    const baseIsCall = cur.kind === SyntaxKind.CallExpression;
+    // gjf keeps a chain glued when its only dereference invocation comes after a
+    // non-invocation prefix (`myField.foo()` stays on one line). But when the
+    // receiver is itself a call (`when(x).thenReturn(y)`) the dereference still
+    // breaks, and two or more invocations are always a builder chain.
+    if (callCount === 0 || (callCount === 1 && !baseIsCall)) {
+      return concat([base, ...links.map(l => l.doc)]);
+    }
+    // The leading links glued to the base (no break before them): a type-name
+    // prefix (`ImmutableList.builder()` stays a unit), else just the first link
+    // when the receiver is tiny.
+    const baseLen = cur.end - this.start(cur);
+    const minLength = this.mult * 4;
+    let glue = baseLen <= minLength ? 1 : 0;
+    if (cur.kind === SyntaxKind.Identifier) {
+      const names = [this.raw(cur)];
+      for (const l of links) {
+        names.push(l.name);
+        if (l.isCall) break; // the first method name ends the type-name prefix
+      }
+      const p = typePrefixLength(names);
+      if (p >= 0) glue = p;
+    }
+    const parts: Doc[] = [base];
+    links.forEach((l, i) => {
+      if (i >= glue) parts.push(brk("unified", "", ZERO));
+      parts.push(l.doc);
+    });
+    return level(PLUS4, parts);
   }
 
   private call(e: CallExpression): Doc {
@@ -947,21 +1087,11 @@ class Printer {
 
   private argList(args: NodeArray<Expression>): Doc {
     if (args.length === 0) return "()";
-    return group(
-      concat([
-        "(",
-        indent(
-          concat([
-            softline,
-            join(
-              concat([",", line]),
-              args.map(a => this.node(a)),
-            ),
-          ]),
-        ),
-        softline,
-        ")",
-      ]),
+    return this.argsLike(
+      "(",
+      args.map(a => this.node(a)),
+      ")",
+      this.allShortItems(args) ? "independent" : "unified",
     );
   }
 
@@ -982,22 +1112,23 @@ class Printer {
 
   private arrayInitializer(e: ArrayInitializer): Doc {
     if (e.elements.length === 0) return "{}";
-    return group(
-      concat([
-        "{",
-        indent(
-          concat([
-            softline,
-            join(
-              concat([",", line]),
-              e.elements.map(el => this.node(el)),
-            ),
-          ]),
-        ),
-        softline,
-        "}",
-      ]),
-    );
+    // gjf: contents indent +2; when broken, elements fill (INDEPENDENT) if all
+    // short, else one per line (UNIFIED); the closing `}` goes on its own line
+    // back at the parent indent (a -2 break cancels the +2).
+    // ponytail: trailing-comma -> FORCED after-open break is not modeled (the
+    // parser drops the trailing comma); add when a fixture needs it.
+    const fillMode: FillMode = this.allShortItems(e.elements) ? "independent" : "unified";
+    const innerParts: Doc[] = [];
+    e.elements.forEach((el, i) => {
+      if (i > 0) innerParts.push(",", brk(fillMode, " ", ZERO));
+      innerParts.push(this.node(el));
+    });
+    const inner = level(ZERO, innerParts);
+    return concat([
+      "{",
+      level(PLUS2, [brk("unified", "", ZERO), inner, brk("unified", "", MINUS2)]),
+      "}",
+    ]);
   }
 
   private lambda(e: LambdaExpression): Doc {
@@ -1021,10 +1152,18 @@ class Printer {
     return concat([head, " -> ", body]);
   }
 
+  // A ternary. gjf keeps the condition on the line and breaks before `?` and `:`
+  // (UNIFIED) onto +4 continuation lines.
   private conditional(e: ConditionalExpression): Doc {
-    return group(
-      concat([this.node(e.condition), " ? ", this.node(e.whenTrue), " : ", this.node(e.whenFalse)]),
-    );
+    return level(PLUS4, [
+      this.node(e.condition),
+      brk("unified", " ", ZERO),
+      "? ",
+      this.node(e.whenTrue),
+      brk("unified", " ", ZERO),
+      ": ",
+      this.node(e.whenFalse),
+    ]);
   }
 
   private instanceOf(e: InstanceofExpression): Doc {
@@ -1117,13 +1256,27 @@ class Printer {
       case SyntaxKind.BinaryExpression:
         return this.binary(node as BinaryExpression);
       case SyntaxKind.AssignmentExpression:
-        return this.binary(node as AssignmentExpression);
+        return this.assignment(node as AssignmentExpression);
       case SyntaxKind.ConditionalExpression:
         return this.conditional(node as ConditionalExpression);
-      case SyntaxKind.CallExpression:
-        return this.call(node as CallExpression);
+      case SyntaxKind.CallExpression: {
+        const e = node as CallExpression;
+        // A method call on a `.`-access is part of a dereference chain.
+        if (e.expression.kind === SyntaxKind.PropertyAccessExpression) return this.dotChain(e);
+        return this.call(e);
+      }
       case SyntaxKind.PropertyAccessExpression: {
         const e = node as PropertyAccessExpression;
+        // Route through the chain layout only when the receiver is itself a
+        // call/access (a real chain); a plain `obj.field` stays inline.
+        const k = e.expression.kind;
+        if (
+          k === SyntaxKind.CallExpression ||
+          k === SyntaxKind.PropertyAccessExpression ||
+          k === SyntaxKind.ElementAccessExpression
+        ) {
+          return this.dotChain(e);
+        }
         return concat([this.node(e.expression), ".", this.raw(e.name)]);
       }
       case SyntaxKind.ElementAccessExpression: {
@@ -1210,6 +1363,100 @@ class Printer {
         return this.raw(node);
     }
   }
+}
+
+// Java binary-operator precedence groups (higher binds tighter). Operators in
+// the same group flatten into one chain when wrapping, matching gjf's walkInfix.
+const PRECEDENCE: Partial<Record<SyntaxKind, number>> = {
+  [SyntaxKind.AsteriskToken]: 10,
+  [SyntaxKind.SlashToken]: 10,
+  [SyntaxKind.PercentToken]: 10,
+  [SyntaxKind.PlusToken]: 9,
+  [SyntaxKind.MinusToken]: 9,
+  [SyntaxKind.LessThanLessThanToken]: 8,
+  [SyntaxKind.GreaterThanGreaterThanToken]: 8,
+  [SyntaxKind.GreaterThanGreaterThanGreaterThanToken]: 8,
+  [SyntaxKind.LessThanToken]: 7,
+  [SyntaxKind.GreaterThanToken]: 7,
+  [SyntaxKind.LessThanEqualsToken]: 7,
+  [SyntaxKind.GreaterThanEqualsToken]: 7,
+  [SyntaxKind.EqualsEqualsToken]: 6,
+  [SyntaxKind.ExclamationEqualsToken]: 6,
+  [SyntaxKind.AmpersandToken]: 5,
+  [SyntaxKind.CaretToken]: 4,
+  [SyntaxKind.BarToken]: 3,
+  [SyntaxKind.AmpersandAmpersandToken]: 2,
+  [SyntaxKind.BarBarToken]: 1,
+};
+
+function precedence(op: SyntaxKind): number {
+  return PRECEDENCE[op] ?? 0;
+}
+
+// google-java-format's TypeNameClassifier: the inclusive end index of the
+// longest leading run of `nameParts` that looks like a type name (optionally
+// with one trailing static member), or -1. Lets a chain keep a type prefix glued
+// (`ImmutableList.builder()` stays a unit). Ported from TypeNameClassifier.java.
+type CaseFormat = "upper" | "lower" | "upperCamel" | "lowerCamel";
+
+function javaCaseFormat(name: string): CaseFormat {
+  let firstUpper = false;
+  let hasUpper = false;
+  let hasLower = false;
+  let first = true;
+  for (const c of name) {
+    if (!/[a-zA-Z]/.test(c)) continue;
+    if (first) {
+      firstUpper = c >= "A" && c <= "Z";
+      first = false;
+    }
+    if (c >= "A" && c <= "Z") hasUpper = true;
+    if (c >= "a" && c <= "z") hasLower = true;
+  }
+  if (firstUpper) return hasLower || name.length === 1 ? "upperCamel" : "upper";
+  return hasUpper ? "lowerCamel" : "lower";
+}
+
+// State machine over case formats: START/TYPE/FIRST_STATIC_MEMBER/AMBIGUOUS/REJECT.
+type TyState = "start" | "type" | "firstStatic" | "ambiguous" | "reject";
+const SINGLE_UNIT: Record<TyState, boolean> = {
+  start: false,
+  type: true,
+  firstStatic: true,
+  ambiguous: false,
+  reject: false,
+};
+
+function tyNext(state: TyState, n: CaseFormat): TyState {
+  switch (state) {
+    case "start":
+      return n === "upper"
+        ? "ambiguous"
+        : n === "lowerCamel"
+          ? "reject"
+          : n === "lower"
+            ? "start"
+            : "type";
+    case "type":
+      return n === "upperCamel" ? "type" : "firstStatic";
+    case "firstStatic":
+      return "reject";
+    case "ambiguous":
+      return n === "upper" ? "ambiguous" : n === "upperCamel" ? "type" : "reject";
+    case "reject":
+      return "reject";
+  }
+}
+
+function typePrefixLength(nameParts: string[]): number {
+  let state: TyState = "start";
+  let typeLength = -1;
+  for (let i = 0; i < nameParts.length; i++) {
+    state = tyNext(state, javaCaseFormat(nameParts[i]));
+    if (state === "reject") break;
+    if (SINGLE_UNIT[state]) typeLength = i;
+  }
+  return typeLength;
 }
 
 function rank(kind: SyntaxKind): number {

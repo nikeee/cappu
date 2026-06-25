@@ -1,0 +1,17 @@
+class A {
+    void m() {
+        var x =
+                ImmutableList.builder()
+                        .addOneItem(aaaa)
+                        .addTwoItem(bbbb)
+                        .addThreeItem(cccc)
+                        .addFourItem(dddd)
+                        .build();
+        var y =
+                com.example.deep.Factory.create()
+                        .configureOne(a)
+                        .configureTwo(b)
+                        .configureThree(c)
+                        .done();
+    }
+}

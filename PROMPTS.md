@@ -426,6 +426,8 @@ cappu search commons-lang3
 - 2026-06-25 08:49 — in the example/, when i do shout(found); inconditionally (with found being nullable), there is no error?
 - 2026-06-25 09:23 — what next?
 - 2026-06-25 09:23 — 1 and 4
+- 2026-06-25 09:56 — what next?
+- 2026-06-25 09:56 — plan the line wrapping optimizer fpr 100% gjf compat
 - 2026-06-25 09:43 — implement JEP 441 case null patterns
 - 2026-06-25 17:33 — what next?
 - 2026-06-25 17:33 — field narrowing would be cool, but is this thread-safe?

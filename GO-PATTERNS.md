@@ -490,3 +490,16 @@ Doc IR plus an AST->Doc lowering. Porting notes:
 - **Ignore globs: no glob dep.** `formatterOptions.ignore` matching uses a tiny
   `globToRegexp` (`*`, `**`, `?`) in `internal/build/jar.go` instead of adding a
   minimatch-style dependency for Node's `path.matchesGlob`.
+- **Line-wrapping engine port (gjf's Doc algorithm).** When `doc.ts` was rewritten
+  to gjf's Level/Break/FillMode break algorithm, the Go `Doc` became an `interface`
+  with pointer concrete types (`*token`/`*concatDoc`/`*brkDoc`/`*levelDoc`) because
+  the algorithm mutates a Level's break decisions in place during compute - value
+  structs would copy. TS uses `string` as a Doc leaf; Go can't, so `text()` wraps
+  every literal in a `*token` (and `concat` stays variadic). The shared `line`/
+  `hardline` are package-level singleton `*brkDoc`s, safe to reuse only because a
+  break's per-occurrence decision lives in the controlling Level's parallel
+  `broken[]`/`newIndent[]` arrays, not on the break (gjf mints a fresh Break each
+  time). The Printer now carries the indent multiplier so the method-chain
+  "small receiver" threshold is decided at build time. The shared
+  `test-fixtures/format` golden test asserts the Go output byte-identical to the
+  TS build and to real gjf across every wrapping fixture.

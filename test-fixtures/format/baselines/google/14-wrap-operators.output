@@ -1,0 +1,36 @@
+class A {
+  void m() {
+    boolean result =
+        conditionOneLong
+            && conditionTwoLong
+            && conditionThreeLong
+            && conditionFourLong
+            && conditionFiveLong
+            && conditionSix;
+    int total =
+        valueAaaaaaaaaa
+            + valueBbbbbbbbbb
+            + valueCccccccccc
+            + valueDddddddddd
+            + valueEeeeeeeeee
+            + valueFfffffffff
+            + valueG;
+    int small = valueA + valueB + valueC;
+  }
+
+  String pick() {
+    return someConditionHoldsHereToday
+        ? theFirstAlternativeValueResult
+        : theOtherAlternativeValueGoesHereTodayXx;
+  }
+
+  int sum() {
+    return valueAaaaaaaaaa
+        + valueBbbbbbbbbb
+        + valueCccccccccc
+        + valueDddddddddd
+        + valueEeeeeeeeee
+        + valueFfffffffff
+        + valueGg;
+  }
+}

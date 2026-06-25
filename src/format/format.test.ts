@@ -6,9 +6,12 @@
 //
 // Normal runs only read the committed baselines (no JDK needed). To regenerate
 // them after an intentional change - or when adding a case - run the real
-// google-java-format jar:
+// google-java-format. Either point GJF_JAR at the all-deps jar:
 //   GJF_JAR=/path/to/google-java-format-all-deps.jar \
 //     UPDATE_BASELINES=1 node_modules/.bin/tsx --test ./src/format/format.test.ts
+// or, when only the maven repo jar is present, point GJF_CP at a resolved
+// classpath (mvn dependency:build-classpath -Dmdep.outputFile=cp.txt):
+//   GJF_CP=$(cat cp.txt) UPDATE_BASELINES=1 node_modules/.bin/tsx --test ...
 // Download the jar from https://github.com/google/google-java-format/releases.
 
 import { execFileSync } from "node:child_process";
@@ -25,6 +28,10 @@ const casesDir = join(here, "..", "..", "test-fixtures", "format", "cases");
 const baselinesDir = join(here, "..", "..", "test-fixtures", "format", "baselines");
 const shouldUpdate = process.env.UPDATE_BASELINES === "1";
 const gjfJar = process.env.GJF_JAR;
+// The maven repo jar is not all-deps; GJF_CP lets baseline regen run gjf off a
+// resolved classpath instead (mvn dependency:build-classpath > cp.txt).
+const gjfCp = process.env.GJF_CP;
+const haveGjf = gjfJar !== undefined || gjfCp !== undefined;
 
 const STYLES: FormatOptions["style"][] = ["google", "aosp"];
 
@@ -45,10 +52,10 @@ const GJF_JVM_ARGS = [
 
 function runGoogleJavaFormat(source: string, style: FormatOptions["style"]): string {
   const styleArgs = style === "aosp" ? ["--aosp"] : [];
-  return execFileSync("java", [...GJF_JVM_ARGS, "-jar", gjfJar!, ...styleArgs, "-"], {
-    input: source,
-    encoding: "utf8",
-  });
+  const launch = gjfCp
+    ? [...GJF_JVM_ARGS, "-cp", gjfCp, "com.google.googlejavaformat.java.Main", ...styleArgs, "-"]
+    : [...GJF_JVM_ARGS, "-jar", gjfJar!, ...styleArgs, "-"];
+  return execFileSync("java", launch, { input: source, encoding: "utf8" });
 }
 
 const cases = existsSync(casesDir)
@@ -66,10 +73,10 @@ for (const file of cases) {
 
     test(`format ${base} [${style}] matches google-java-format`, () => {
       if (shouldUpdate || !existsSync(baselinePath)) {
-        if (!gjfJar) {
+        if (!haveGjf) {
           throw new Error(
-            `missing baseline ${baselinePath} and GJF_JAR is not set; set GJF_JAR to the ` +
-              `google-java-format jar to (re)generate baselines (see this file's header).`,
+            `missing baseline ${baselinePath} and neither GJF_JAR nor GJF_CP is set; set one to ` +
+              `(re)generate baselines (see this file's header).`,
           );
         }
         mkdirSync(join(baselinesDir, style), { recursive: true });
