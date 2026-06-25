@@ -81,16 +81,28 @@ import {
   type YieldStatement,
 } from "../compiler/types.ts";
 import {
+  brk,
   concat,
   type Doc,
+  type FillMode,
   group,
   hardline,
   indent,
+  indentConst,
   join,
+  level,
   line,
   printDoc,
-  softline,
+  ZERO,
 } from "./doc.ts";
+
+// google-java-format continuation indents (columns at google scale; the printer
+// is built once and the style multiplier is applied at print time):
+//   +2 = one indent level (block body, array-initializer continuation)
+//   +4 = a continuation (broken argument/parameter/type lists, operator chains)
+const PLUS2 = indentConst(2);
+const PLUS4 = indentConst(4);
+const MINUS2 = indentConst(-2);
 
 export interface FormatOptions {
   style: "google" | "aosp";
@@ -679,14 +691,46 @@ class Printer {
   private declarator(v: VariableDeclarator): Doc {
     const name = concat([this.raw(v.name), "[]".repeat(v.arrayRankAfterName)]);
     if (!v.initializer) return name;
+    // An array initializer hugs the `=` (`x = {` ... `}`); its own braces break,
+    // so do not insert a break before it. (Other hugging RHS kinds - lambdas,
+    // anonymous classes - are handled with the rest of assignment RHS in phase B.)
+    if (v.initializer.kind === SyntaxKind.ArrayInitializer) {
+      return concat([name, " = ", this.node(v.initializer)]);
+    }
     return group(concat([name, " =", indent(concat([line, this.node(v.initializer)]))]));
+  }
+
+  // A gjf-style parenthesized comma list (`(a, b, c)`). When it does not fit, a
+  // UNIFIED break fires after `(` (continuation at +4) so the items always start
+  // on the next line; a nested zero-indent level then keeps them on one
+  // continuation line if they fit. If they do not, the inter-item fill mode
+  // decides: UNIFIED puts one per line, INDEPENDENT *fills* as many per line as
+  // fit. The closing `)` stays attached to the last item's line.
+  private argsLike(open: string, items: Doc[], close: string, fillMode: FillMode): Doc {
+    const innerParts: Doc[] = [];
+    items.forEach((it, i) => {
+      if (i > 0) innerParts.push(",", brk(fillMode, " ", ZERO));
+      innerParts.push(it);
+    });
+    const inner = level(ZERO, innerParts);
+    return concat([open, level(PLUS4, [brk("unified", "", ZERO), inner]), close]);
+  }
+
+  // gjf fills a delimited list (packs items per line) only when every item is
+  // "short" - its source text is under MAX_ITEM_LENGTH_FOR_FILLING (10) chars;
+  // otherwise items go one per line.
+  private allShortItems(nodes: readonly Node[]): boolean {
+    return nodes.every(n => n.end - this.start(n) < 10);
   }
 
   private parameters(params: NodeArray<Parameter>): Doc {
     if (params.length === 0) return "()";
-    const ps = params.map(p => this.parameter(p));
-    return group(
-      concat(["(", indent(concat([softline, join(concat([",", line]), ps)])), softline, ")"]),
+    // Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
+    return this.argsLike(
+      "(",
+      params.map(p => this.parameter(p)),
+      ")",
+      "unified",
     );
   }
 
@@ -947,21 +991,11 @@ class Printer {
 
   private argList(args: NodeArray<Expression>): Doc {
     if (args.length === 0) return "()";
-    return group(
-      concat([
-        "(",
-        indent(
-          concat([
-            softline,
-            join(
-              concat([",", line]),
-              args.map(a => this.node(a)),
-            ),
-          ]),
-        ),
-        softline,
-        ")",
-      ]),
+    return this.argsLike(
+      "(",
+      args.map(a => this.node(a)),
+      ")",
+      this.allShortItems(args) ? "independent" : "unified",
     );
   }
 
@@ -982,22 +1016,23 @@ class Printer {
 
   private arrayInitializer(e: ArrayInitializer): Doc {
     if (e.elements.length === 0) return "{}";
-    return group(
-      concat([
-        "{",
-        indent(
-          concat([
-            softline,
-            join(
-              concat([",", line]),
-              e.elements.map(el => this.node(el)),
-            ),
-          ]),
-        ),
-        softline,
-        "}",
-      ]),
-    );
+    // gjf: contents indent +2; when broken, elements fill (INDEPENDENT) if all
+    // short, else one per line (UNIFIED); the closing `}` goes on its own line
+    // back at the parent indent (a -2 break cancels the +2).
+    // ponytail: trailing-comma -> FORCED after-open break is not modeled (the
+    // parser drops the trailing comma); add when a fixture needs it.
+    const fillMode: FillMode = this.allShortItems(e.elements) ? "independent" : "unified";
+    const innerParts: Doc[] = [];
+    e.elements.forEach((el, i) => {
+      if (i > 0) innerParts.push(",", brk(fillMode, " ", ZERO));
+      innerParts.push(this.node(el));
+    });
+    const inner = level(ZERO, innerParts);
+    return concat([
+      "{",
+      level(PLUS2, [brk("unified", "", ZERO), inner, brk("unified", "", MINUS2)]),
+      "}",
+    ]);
   }
 
   private lambda(e: LambdaExpression): Doc {
