@@ -37,6 +37,7 @@ import {
 import {
   type Annotation,
   type ArrayCreationExpression,
+  type ArrayInitializer,
   type ArrayType as AstArrayType,
   type AssignmentExpression,
   type BinaryExpression,
@@ -46,6 +47,7 @@ import {
   type Diagnostic,
   type ElementAccessExpression,
   type EnumDeclaration,
+  type ForEachStatement,
   type Identifier,
   type ImportDeclaration,
   type LambdaExpression,
@@ -1418,8 +1420,20 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       }
       case SyntaxKind.ParenthesizedExpression:
         return getTypeOfExpression((node as ParenthesizedExpression).expression);
-      case SyntaxKind.CastExpression:
-        return resolveType((node as CastExpression).type, node);
+      case SyntaxKind.CastExpression: {
+        const cast = node as CastExpression;
+        const target = resolveType(cast.type, node);
+        // A cast does not launder nullness (nikeee/cappu#25): unless the cast type
+        // is explicitly annotated, the value keeps the operand's nullness, so
+        // `(String) null` stays possibly-null rather than the @NullMarked default.
+        if (nullnessAnnotations && !typeUseNullness(cast.type, nullnessAnnotations)) {
+          const operand = getTypeOfExpression(cast.expression);
+          if (operand.kind === TypeKind.Null || nullnessOf(operand) === "nullable") {
+            return withNullness(target, "nullable");
+          }
+        }
+        return target;
+      }
       case SyntaxKind.PropertyAccessExpression:
         return typeOfMemberAccess(node as PropertyAccessExpression);
       case SyntaxKind.CallExpression:
@@ -1458,15 +1472,24 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
         // null arm yields the other, else java.lang.Object).
         const t = getTypeOfExpression((node as ConditionalExpression).whenTrue);
         const f = getTypeOfExpression((node as ConditionalExpression).whenFalse);
-        if (t.kind === TypeKind.Error) return f;
-        if (f.kind === TypeKind.Error) return t;
-        if (t.kind === TypeKind.Null) return f;
-        if (f.kind === TypeKind.Null) return t;
-        const num = widerNumeric(t, f);
-        if (num.kind !== TypeKind.Error) return num;
-        if (isAssignableTo(f, t, false)) return t;
-        if (isAssignableTo(t, f, false)) return f;
-        return classTypeByFqn("java.lang.Object");
+        const base = ((): Type => {
+          if (t.kind === TypeKind.Error) return f;
+          if (f.kind === TypeKind.Error) return t;
+          if (t.kind === TypeKind.Null) return f;
+          if (f.kind === TypeKind.Null) return t;
+          const num = widerNumeric(t, f);
+          if (num.kind !== TypeKind.Error) return num;
+          if (isAssignableTo(f, t, false)) return t;
+          if (isAssignableTo(t, f, false)) return f;
+          return classTypeByFqn("java.lang.Object");
+        })();
+        // A null/nullable arm makes the whole conditional possibly-null (nikeee/cappu#25).
+        const mayBeNull = (x: Type): boolean =>
+          x.kind === TypeKind.Null || nullnessOf(x) === "nullable";
+        if (nullnessAnnotations && (mayBeNull(t) || mayBeNull(f))) {
+          return withNullness(base, "nullable");
+        }
+        return base;
       }
       case SyntaxKind.BinaryExpression: {
         const b = node as BinaryExpression;
@@ -2484,6 +2507,17 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
           if (d.initializer && d.symbol && d.initializer.kind !== SyntaxKind.ArrayInitializer) {
             checkAssignment(d.initializer, getTypeOfSymbol(d.symbol));
             checkNullness(d.initializer, getTypeOfSymbol(d.symbol), d.name.text);
+          } else if (d.initializer?.kind === SyntaxKind.ArrayInitializer && d.symbol) {
+            // Each element initializes a slot of the array, so a null element into a
+            // non-null element type is flagged (nikeee/cappu#25).
+            const t = getTypeOfSymbol(d.symbol);
+            if (t.kind === TypeKind.Array) {
+              for (const el of (d.initializer as ArrayInitializer).elements) {
+                if (el.kind !== SyntaxKind.ArrayInitializer) {
+                  checkNullness(el, t.elementType, d.name.text);
+                }
+              }
+            }
           }
           break;
         }
@@ -2518,23 +2552,36 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
           if (r.expression) {
             const ret = enclosingReturnType(node);
             if (ret) checkAssignment(r.expression, ret);
-            // Nullness of the enclosing method's return; a lambda return targets the
-            // SAM, not the method, so stop there rather than misattribute it.
-            let m: Node | undefined = node;
-            while (m && m.kind !== SyntaxKind.MethodDeclaration) {
-              if (m.kind === SyntaxKind.LambdaExpression) {
-                m = undefined;
-                break;
-              }
-              m = m.parent;
+            // The return targets the nearest enclosing function: a method's declared
+            // return, or (inside a lambda) the SAM's instantiated return.
+            let fn: Node | undefined = node;
+            while (
+              fn &&
+              fn.kind !== SyntaxKind.MethodDeclaration &&
+              fn.kind !== SyntaxKind.LambdaExpression
+            ) {
+              fn = fn.parent;
             }
-            if (m?.symbol) {
+            if (fn?.kind === SyntaxKind.MethodDeclaration && fn.symbol) {
               checkNullness(
                 r.expression,
-                getTypeOfSymbol(m.symbol),
-                (m as MethodDeclaration).name.text,
+                getTypeOfSymbol(fn.symbol),
+                (fn as MethodDeclaration).name.text,
               );
+            } else if (fn?.kind === SyntaxKind.LambdaExpression) {
+              const info = getLambdaInfo(fn);
+              if (info) checkNullness(r.expression, info.instReturn, info.samName);
             }
+          }
+          break;
+        }
+        case SyntaxKind.LambdaExpression: {
+          // An expression-bodied lambda (() -> e) implicitly returns e, so check it
+          // against the SAM's return nullness (block bodies go through ReturnStatement).
+          const lam = node as LambdaExpression;
+          if (nullnessAnnotations && lam.body.kind !== SyntaxKind.Block) {
+            const info = getLambdaInfo(lam);
+            if (info) checkNullness(lam.body, info.instReturn, info.samName);
           }
           break;
         }
@@ -2558,9 +2605,34 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
         // thrown value, the synchronized lock, and the iterated collection.
         case SyntaxKind.ThrowStatement:
         case SyntaxKind.SynchronizedStatement:
-        case SyntaxKind.ForEachStatement:
           checkDereference((node as unknown as { expression: Node }).expression);
           break;
+        case SyntaxKind.ForEachStatement: {
+          const fe = node as ForEachStatement;
+          checkDereference(fe.expression);
+          // The loop binds each element to the variable; a nullable element into a
+          // non-null (e.g. explicitly typed) loop variable is an unsafe binding.
+          if (nullnessAnnotations && fe.parameter.symbol) {
+            const elem = elementTypeOf(getTypeOfExpression(fe.expression));
+            const varType = getTypeOfSymbol(fe.parameter.symbol);
+            if (
+              nullnessOf(varType) === "nonNull" &&
+              (elem.kind === TypeKind.Null || nullnessOf(elem) === "nullable")
+            ) {
+              const text = getSourceFileOfNode(fe.parameter).text;
+              const start = skipTrivia(text, fe.parameter.pos);
+              diagnostics.push(
+                createDiagnostic(
+                  start,
+                  fe.parameter.end - start,
+                  Diagnostics.Possibly_null_value_assigned_to_non_null_0,
+                  fe.parameter.name?.text ?? "variable",
+                ),
+              );
+            }
+          }
+          break;
+        }
         case SyntaxKind.PropertyAccessExpression: {
           const access = node as PropertyAccessExpression;
           checkDereference(access.expression);

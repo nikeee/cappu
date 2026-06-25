@@ -47,6 +47,13 @@ func TestNullnessFlagged(t *testing.T) {
 		{"new R(null) into a non-null record component", "@NullMarked record R(String x) {}\nclass C { void m() { new R(null); } }"},
 		{"null assigned to a non-null field in a constructor", "@NullMarked class C { String f; C() { this.f = null; } }"},
 		{"null assigned to a non-null local in a branch", `@NullMarked class C { boolean c() { return true; } void m() { String x = "foo"; if (c()) x = null; x.length(); } }`},
+		{"ternary with a null arm into @NonNull param", `@NullMarked class C { void f(String s) {} void g(boolean b) { f(b ? null : "x"); } }`},
+		{"ternary with a @Nullable arm into @NonNull param", `@NullMarked class C { @Nullable String n() { return null; } void f(String s) {} void g(boolean b) { f(b ? n() : "x"); } }`},
+		{"cast of null into @NonNull param", "@NullMarked class C { void f(String s) {} void g() { f((String) null); } }"},
+		{"null element in a non-null array initializer", "@NullMarked class C { void g() { String[] a = { null }; } }"},
+		{"List<@Nullable String> into a non-null loop variable", "import java.util.List; @NullMarked class C { void g(List<@Nullable String> xs) { for (String s : xs) {} } }"},
+		{"expression-bodied lambda returning null into a non-null SAM", "import java.util.function.Supplier; @NullMarked class C { Supplier<String> s = () -> null; }"},
+		{"block-bodied lambda returning null into a non-null SAM", "import java.util.function.Supplier; @NullMarked class C { Supplier<String> s = () -> { return null; }; }"},
 	}
 	for _, tc := range cases {
 		if !containsCode(diagnoseNullness(tc.code, jspecify()), codeNullIntoNonNull) {
@@ -66,6 +73,11 @@ func TestNullnessAccepted(t *testing.T) {
 		{"non-null arg into a non-null record component", "@NullMarked record R(String x) {}\nclass C { void m() { new R(\"a\"); } }"},
 		{"ternary with both arms non-null", `@NullMarked class C { void f(String s) {} void g(boolean b) { f(b ? "y" : "x"); } }`},
 		{"returning a value narrowed by an early-return", `@NullMarked class C { String g(@Nullable String x) { if (x == null) return ""; return x; } }`},
+		{"ternary with both arms non-null as an argument", `@NullMarked class C { void f(String s) {} void g(boolean b) { f(b ? "y" : "x"); } }`},
+		{"non-null array initializer", `@NullMarked class C { void g() { String[] a = { "x", "y" }; } }`},
+		{"List<String> into a non-null loop variable", "import java.util.List; @NullMarked class C { void g(List<String> xs) { for (String s : xs) s.trim(); } }"},
+		{"lambda returning null into a @Nullable SAM element", "import java.util.function.Supplier; @NullMarked class C { Supplier<@Nullable String> s = () -> null; }"},
+		{"lambda returning a non-null value into a non-null SAM", `import java.util.function.Supplier; @NullMarked class C { Supplier<String> s = () -> "x"; }`},
 	}
 	for _, tc := range cases {
 		if containsCode(diagnoseNullness(tc.code, jspecify()), codeNullIntoNonNull) {
@@ -347,6 +359,9 @@ func TestNullnessDereferenceFlagged(t *testing.T) {
 		{"var that infers a @Nullable type", "@NullMarked class C { @Nullable String n() { return null; } void g() { var x = n(); x.trim(); } }"},
 		{"chained field access through a @Nullable field", "@NullMarked class C { @Nullable C a; final @Nullable String b = null; void g() { this.a.b.trim(); } }"},
 		{"conditional reassignment to null defeats an earlier narrowing", `@NullMarked class C { boolean c() { return true; } void m() { @Nullable String x = "foo"; if (c()) x = null; x.length(); } }`},
+		{"dereferencing a ternary whose arm is null", `@NullMarked class C { void g(boolean b) { (b ? null : "x").trim(); } }`},
+		{"without case null, selector still possibly-null in arm", `@NullMarked class C { void g(@Nullable String x) { switch (x) { case "a" -> {} default -> x.trim(); } } }`},
+		{"reassignment to null inside a switch arm", "@NullMarked class C { void g(@Nullable String x) { switch (x) { case null -> {} default -> { x = null; x.trim(); } } } }"},
 	}
 	for _, tc := range cases {
 		if !containsCode(diagnoseNullness(tc.code, jspecify()), codeDeref) {
@@ -363,6 +378,8 @@ func TestNullnessDereferenceAccepted(t *testing.T) {
 		{"this-qualified access", "class C { String fld; void m() { this.fld.trim(); } }"},
 		{"guard narrows a thrown @Nullable value", "class C { void m(@Nullable RuntimeException e) { if (e != null) throw e; } }"},
 		{"case null (JEP 441) handles a @Nullable switch selector", `class C { void m(@Nullable String x) { switch (x) { case null -> {} case "a" -> {} default -> {} } } }`},
+		{"case null narrows the selector in the default arm", "@NullMarked class C { void g(@Nullable String x) { switch (x) { case null -> {} default -> x.trim(); } } }"},
+		{"case null narrows the selector in a value-case arm", `@NullMarked class C { void g(@Nullable String x) { switch (x) { case null -> {} case "a" -> x.trim(); default -> {} } } }`},
 		{"guard narrows a final @Nullable field via this.f", "class C { final @Nullable String f = null; void m() { if (this.f != null) this.f.trim(); } }"},
 		{"guard narrows a final @Nullable field via bare f", "class C { final @Nullable String f = null; void m() { if (f != null) f.trim(); } }"},
 		{"guard narrows a final @Nullable record component", "record R(@Nullable String name) { void m() { if (this.name != null) this.name.trim(); } }"},

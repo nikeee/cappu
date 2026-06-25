@@ -664,6 +664,112 @@ test("a conditional reassignment to null defeats an earlier non-null narrowing",
   expect(diagnose(code)).toContain(DEREF);
 });
 
+// --- ternary / cast value nullness -------------------------------------------------
+
+test("a ternary with a null arm passed to a @NonNull parameter is flagged", () => {
+  const code =
+    '@NullMarked class C { void f(String s) {} void g(boolean b) { f(b ? null : "x"); } }';
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a ternary with a @Nullable arm passed to a @NonNull parameter is flagged", () => {
+  const code =
+    '@NullMarked class C { @Nullable String n() { return null; } void f(String s) {} void g(boolean b) { f(b ? n() : "x"); } }';
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a ternary with both arms non-null is accepted as an argument", () => {
+  const code =
+    '@NullMarked class C { void f(String s) {} void g(boolean b) { f(b ? "y" : "x"); } }';
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a cast of null passed to a @NonNull parameter is flagged", () => {
+  const code = "@NullMarked class C { void f(String s) {} void g() { f((String) null); } }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("dereferencing a ternary whose arm is null is flagged", () => {
+  const code = '@NullMarked class C { void g(boolean b) { (b ? null : "x").trim(); } }';
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+// --- switch-arm narrowing after `case null` ----------------------------------------
+
+test("with a `case null`, the selector is non-null in the default arm", () => {
+  const code =
+    "@NullMarked class C { void g(@Nullable String x) { switch (x) { case null -> {} default -> x.trim(); } } }";
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("with a `case null`, the selector is non-null in a value-case arm", () => {
+  const code =
+    '@NullMarked class C { void g(@Nullable String x) { switch (x) { case null -> {} case "a" -> x.trim(); default -> {} } } }';
+  expect(diagnose(code)).not.toContain(DEREF);
+});
+
+test("without a `case null`, the selector is still possibly-null in an arm", () => {
+  const code =
+    '@NullMarked class C { void g(@Nullable String x) { switch (x) { case "a" -> {} default -> x.trim(); } } }';
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+test("a reassignment to null inside a switch arm is still flagged", () => {
+  const code =
+    "@NullMarked class C { void g(@Nullable String x) { switch (x) { case null -> {} default -> { x = null; x.trim(); } } } }";
+  expect(diagnose(code)).toContain(DEREF);
+});
+
+// --- array initializer + enhanced-for binding --------------------------------------
+
+test("a null element in an array initializer of a non-null element type is flagged", () => {
+  const code = "@NullMarked class C { void g() { String[] a = { null }; } }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a non-null array initializer is accepted", () => {
+  const code = '@NullMarked class C { void g() { String[] a = { "x", "y" }; } }';
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("iterating a List<@Nullable String> into a non-null loop variable is flagged", () => {
+  const code =
+    "import java.util.List; @NullMarked class C { void g(List<@Nullable String> xs) { for (String s : xs) {} } }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("iterating a List<String> into a non-null loop variable is accepted", () => {
+  const code =
+    "import java.util.List; @NullMarked class C { void g(List<String> xs) { for (String s : xs) s.trim(); } }";
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+// --- lambda return nullness --------------------------------------------------------
+
+test("an expression-bodied lambda returning null into a non-null SAM is flagged", () => {
+  const code =
+    "import java.util.function.Supplier; @NullMarked class C { Supplier<String> s = () -> null; }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a block-bodied lambda returning null into a non-null SAM is flagged", () => {
+  const code =
+    "import java.util.function.Supplier; @NullMarked class C { Supplier<String> s = () -> { return null; }; }";
+  expect(diagnose(code)).toContain(NULL_INTO_NONNULL);
+});
+
+test("a lambda returning null into a @Nullable SAM element is accepted", () => {
+  const code =
+    "import java.util.function.Supplier; @NullMarked class C { Supplier<@Nullable String> s = () -> null; }";
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
+test("a lambda returning a non-null value into a non-null SAM is accepted", () => {
+  const code =
+    'import java.util.function.Supplier; @NullMarked class C { Supplier<String> s = () -> "x"; }';
+  expect(diagnose(code)).not.toContain(NULL_INTO_NONNULL);
+});
+
 // --- examples/nullness-app ---------------------------------------------------------
 
 test("examples/nullness-app flags exactly the one documented line", () => {

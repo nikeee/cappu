@@ -23,6 +23,31 @@ type facts struct {
 
 func isNullLiteral(n *Node) bool { return n.Kind == NullKeyword }
 
+// clauseMatchesNull reports whether a switch clause has a `case null` label.
+func clauseMatchesNull(clause *SwitchClauseData) bool {
+	if clause.Labels == nil {
+		return false
+	}
+	for _, l := range clause.Labels.Nodes {
+		if l.Kind == NullKeyword {
+			return true
+		}
+	}
+	return false
+}
+
+func switchHasNullCase(clauses *NodeArray) bool {
+	if clauses == nil {
+		return false
+	}
+	for _, c := range clauses.Nodes {
+		if clauseMatchesNull(c.AsSwitchClause()) {
+			return true
+		}
+	}
+	return false
+}
+
 // refersToSymbol reports whether node references symbol: a bare `x` (local/param/
 // implicit-this field) or a `this.x` member access (a final field). `this`-only by
 // design - `obj.x` for an arbitrary receiver shares the field symbol across receivers
@@ -343,6 +368,34 @@ func narrowNullnessAt(use *Node, symbol *Symbol, resolve resolveRef, exprNullnes
 			if node == fs.Statement && fs.Condition != nil {
 				if f := conditionImplies(fs.Condition, symbol, resolve).whenTrue; f != "" {
 					return f
+				}
+			}
+		case SwitchClause:
+			// Inside a switch arm: when the switch has a `case null` label, the selector
+			// is non-null in every other arm. A reassignment earlier in the arm wins.
+			clause := parent.AsSwitchClause()
+			var selector *Node
+			var clauses *NodeArray
+			switch sw := parent.Parent; {
+			case sw == nil:
+			case sw.Kind == SwitchStatement:
+				selector, clauses = sw.AsSwitchStatement().Expression, sw.AsSwitchStatement().Clauses
+			case sw.Kind == SwitchExpression:
+				selector, clauses = sw.AsSwitchExpression().Expression, sw.AsSwitchExpression().Clauses
+			}
+			if selector != nil && clause.Statements != nil {
+				idx := indexOfNode(clause.Statements, node)
+				if idx >= 0 && refersToSymbol(selector, symbol, resolve) {
+					fact := scanPrecedingFacts(clause.Statements.Nodes, idx, symbol, resolve, exprNullness)
+					if fact.kind == factNarrow {
+						return fact.nullness
+					}
+					if fact.kind == factReset {
+						return ""
+					}
+					if !clauseMatchesNull(clause) && switchHasNullCase(clauses) {
+						return NullnessNonNull
+					}
 				}
 			}
 		}

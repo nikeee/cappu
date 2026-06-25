@@ -22,6 +22,9 @@ import {
   type WhileStatement,
   type ForStatement,
   type TryStatement,
+  type SwitchClause,
+  type SwitchStatement,
+  type SwitchExpression,
   type Symbol,
   SyntaxKind,
 } from "./types.ts";
@@ -39,6 +42,12 @@ interface Facts {
 }
 
 const isNullLiteral = (n: Node): boolean => n.kind === SyntaxKind.NullKeyword;
+
+// A switch clause whose labels include `case null`.
+const clauseMatchesNull = (clause: SwitchClause): boolean =>
+  clause.labels?.some(l => l.kind === SyntaxKind.NullKeyword) ?? false;
+const switchHasNullCase = (clauses: readonly SwitchClause[]): boolean =>
+  clauses.some(clauseMatchesNull);
 
 // A reference to the tracked symbol: a bare `x` (local/param/implicit-this field) or
 // a `this.x` member access (a final field). `this`-only by design - `obj.x` for an
@@ -331,6 +340,22 @@ export function narrowNullnessAt(
       if (node === fs.statement && fs.condition) {
         const f = conditionImplies(fs.condition, symbol, resolveRef).whenTrue;
         if (f) return f;
+      }
+    } else if (parent.kind === SyntaxKind.SwitchClause) {
+      // Inside a switch arm: when the switch has a `case null` label, the selector
+      // is non-null in every other arm (JLS - null only matches `case null`). A
+      // reassignment earlier in the same arm still wins.
+      const clause = parent as SwitchClause;
+      const sw = clause.parent as SwitchStatement | SwitchExpression;
+      const isSwitch =
+        sw && (sw.kind === SyntaxKind.SwitchStatement || sw.kind === SyntaxKind.SwitchExpression);
+      const idx = clause.statements.indexOf(node as never);
+      if (isSwitch && idx >= 0 && refersToSymbol(sw.expression, symbol, resolveRef)) {
+        const fact = scanPrecedingFacts(clause.statements, idx, symbol, resolveRef, exprNullness);
+        if (fact?.kind === "narrow") return fact.nullness;
+        if (fact?.kind === "reset") return undefined;
+        const thisIsNullCase = clauseMatchesNull(clause);
+        if (!thisIsNullCase && switchHasNullCase(sw.clauses)) return "nonNull";
       }
     }
   }

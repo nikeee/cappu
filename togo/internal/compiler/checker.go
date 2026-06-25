@@ -1543,7 +1543,18 @@ func (c *Checker) computeExpressionType(node *Node) *Type {
 	case ParenthesizedExpression:
 		return c.getTypeOfExpression(node.AsParenthesizedExpression().Expression)
 	case CastExpression:
-		return c.resolveType(node.AsCastExpression().Type, node)
+		cast := node.AsCastExpression()
+		target := c.resolveType(cast.Type, node)
+		// A cast does not launder nullness (nikeee/cappu#25): unless the cast type is
+		// explicitly annotated, the value keeps the operand's nullness, so
+		// `(String) null` stays possibly-null rather than the @NullMarked default.
+		if c.nullness != nil && typeUseNullness(cast.Type, c.nullness) == "" {
+			operand := c.getTypeOfExpression(cast.Expression)
+			if operand.Kind == TypeKindNull || nullnessOf(operand) == NullnessNullable {
+				return withNullness(target, NullnessNullable)
+			}
+		}
+		return target
 	case PropertyAccessExpression:
 		return c.typeOfMemberAccess(node)
 	case CallExpression:
@@ -1581,29 +1592,36 @@ func (c *Checker) computeExpressionType(node *Node) *Type {
 		cond := node.AsConditionalExpression()
 		t := c.getTypeOfExpression(cond.WhenTrue)
 		f := c.getTypeOfExpression(cond.WhenFalse)
-		if t.Kind == TypeKindError {
-			return f
+		base := func() *Type {
+			if t.Kind == TypeKindError {
+				return f
+			}
+			if f.Kind == TypeKindError {
+				return t
+			}
+			if t.Kind == TypeKindNull {
+				return f
+			}
+			if f.Kind == TypeKindNull {
+				return t
+			}
+			if num := c.widerNumeric(t, f); num.Kind != TypeKindError {
+				return num
+			}
+			if c.isAssignableTo(f, t, false) {
+				return t
+			}
+			if c.isAssignableTo(t, f, false) {
+				return f
+			}
+			return c.classTypeByFqn("java.lang.Object")
+		}()
+		// A null/nullable arm makes the whole conditional possibly-null (nikeee/cappu#25).
+		mayBeNull := func(x *Type) bool { return x.Kind == TypeKindNull || nullnessOf(x) == NullnessNullable }
+		if c.nullness != nil && (mayBeNull(t) || mayBeNull(f)) {
+			return withNullness(base, NullnessNullable)
 		}
-		if f.Kind == TypeKindError {
-			return t
-		}
-		if t.Kind == TypeKindNull {
-			return f
-		}
-		if f.Kind == TypeKindNull {
-			return t
-		}
-		num := c.widerNumeric(t, f)
-		if num.Kind != TypeKindError {
-			return num
-		}
-		if c.isAssignableTo(f, t, false) {
-			return t
-		}
-		if c.isAssignableTo(t, f, false) {
-			return f
-		}
-		return c.classTypeByFqn("java.lang.Object")
+		return base
 	case BinaryExpression:
 		b := node.AsBinaryExpression()
 		if isComparisonOperator(b.OperatorToken) {

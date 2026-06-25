@@ -881,6 +881,16 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			if d.Initializer != nil && node.Symbol != nil && d.Initializer.Kind != ArrayInitializer {
 				checkAssignment(d.Initializer, c.getTypeOfSymbol(node.Symbol))
 				checkNullness(d.Initializer, c.getTypeOfSymbol(node.Symbol), d.Name.AsIdentifier().Text)
+			} else if d.Initializer != nil && d.Initializer.Kind == ArrayInitializer && node.Symbol != nil {
+				// Each element initializes a slot of the array, so a null element into a
+				// non-null element type is flagged (nikeee/cappu#25).
+				if t := c.getTypeOfSymbol(node.Symbol); t.Kind == TypeKindArray {
+					for _, el := range d.Initializer.AsArrayInitializer().Elements.Nodes {
+						if el.Kind != ArrayInitializer {
+							checkNullness(el, t.ElementType, d.Name.AsIdentifier().Text)
+						}
+					}
+				}
 			}
 		case AssignmentExpression:
 			a := node.AsAssignmentExpression()
@@ -912,18 +922,27 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 				if ret := c.enclosingReturnType(node); ret != nil {
 					checkAssignment(r.Expression, ret)
 				}
-				// Nullness of the enclosing method's return; a lambda return targets
-				// the SAM, not the method, so stop there rather than misattribute it.
-				m := node
-				for m != nil && m.Kind != MethodDeclaration {
-					if m.Kind == LambdaExpression {
-						m = nil
-						break
-					}
-					m = m.Parent
+				// The return targets the nearest enclosing function: a method's declared
+				// return, or (inside a lambda) the SAM's instantiated return.
+				fn := node
+				for fn != nil && fn.Kind != MethodDeclaration && fn.Kind != LambdaExpression {
+					fn = fn.Parent
 				}
-				if m != nil && m.Symbol != nil {
-					checkNullness(r.Expression, c.getTypeOfSymbol(m.Symbol), m.AsMethodDeclaration().Name.AsIdentifier().Text)
+				if fn != nil && fn.Kind == MethodDeclaration && fn.Symbol != nil {
+					checkNullness(r.Expression, c.getTypeOfSymbol(fn.Symbol), fn.AsMethodDeclaration().Name.AsIdentifier().Text)
+				} else if fn != nil && fn.Kind == LambdaExpression {
+					if info := c.GetLambdaInfo(fn); info != nil {
+						checkNullness(r.Expression, info.InstReturn, info.SamName)
+					}
+				}
+			}
+		case LambdaExpression:
+			// An expression-bodied lambda (() -> e) implicitly returns e, so check it
+			// against the SAM's return nullness (block bodies go through ReturnStatement).
+			lam := node.AsLambdaExpression()
+			if c.nullness != nil && lam.Body.Kind != Block {
+				if info := c.GetLambdaInfo(node); info != nil {
+					checkNullness(lam.Body, info.InstReturn, info.SamName)
 				}
 			}
 		case MethodDeclaration:
@@ -941,7 +960,25 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 		case SynchronizedStatement:
 			checkDereference(node.AsSynchronizedStatement().Expression)
 		case ForEachStatement:
-			checkDereference(node.AsForEachStatement().Expression)
+			fe := node.AsForEachStatement()
+			checkDereference(fe.Expression)
+			// The loop binds each element to the variable; a nullable element into a
+			// non-null (e.g. explicitly typed) loop variable is an unsafe binding.
+			if c.nullness != nil && fe.Parameter.Symbol != nil {
+				elem := c.elementTypeOf(c.getTypeOfExpression(fe.Expression))
+				varType := c.getTypeOfSymbol(fe.Parameter.Symbol)
+				if nullnessOf(varType) == NullnessNonNull &&
+					(elem.Kind == TypeKindNull || nullnessOf(elem) == NullnessNullable) {
+					text := GetSourceFileOfNode(fe.Parameter).AsSourceFile().Text
+					start := skipTrivia(text, fe.Parameter.Pos)
+					name := "variable"
+					if pn := fe.Parameter.AsParameter().Name; pn != nil {
+						name = pn.AsIdentifier().Text
+					}
+					diagnostics = append(diagnostics, CreateDiagnostic(start, fe.Parameter.End-start,
+						Diagnostics.PossiblyNullValueAssignedToNonNull0, name))
+				}
+			}
 		case PropertyAccessExpression:
 			access := node.AsPropertyAccessExpression()
 			checkDereference(access.Expression)
