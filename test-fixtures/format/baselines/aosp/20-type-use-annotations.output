@@ -1,0 +1,10 @@
+import java.util.List;
+
+class A {
+    @interface Nullable {}
+
+    Object first(List<@Nullable String> xs) {
+        Object ar = new @Nullable byte[] {4};
+        return ar;
+    }
+}

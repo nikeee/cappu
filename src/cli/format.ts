@@ -37,7 +37,7 @@ export async function runFormat(
 
   const paint = painter(process.stderr);
   const unformatted: string[] = [];
-  let written = 0;
+  const changed: string[] = [];
   let skipped = 0;
 
   for (const file of targets) {
@@ -66,8 +66,10 @@ export async function runFormat(
 
     if (flags.write) {
       writeFileSync(file, formatted);
-      written++;
-      process.stderr.write(paint("dim", `formatted ${rel}\n`));
+      changed.push(rel);
+      // List each rewritten file on stdout (machine-readable, like the check
+      // mode lists the unformatted ones); the count summary goes to stderr.
+      process.stdout.write(`${rel}\n`);
     } else {
       unformatted.push(rel);
       process.stdout.write(`${rel}\n`);
@@ -77,7 +79,7 @@ export async function runFormat(
 
   if (flags.write) {
     process.stderr.write(
-      `cappu: formatted ${written} of ${targets.length} file(s)${
+      `cappu: formatted ${changed.length} of ${targets.length} file(s)${
         skipped ? `, skipped ${skipped}` : ""
       }\n`,
     );

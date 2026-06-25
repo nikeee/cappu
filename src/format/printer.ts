@@ -54,6 +54,7 @@ import {
   type Parameter,
   type ParenthesizedExpression,
   type PostfixUnaryExpression,
+  type PrimitiveType,
   type PrefixUnaryExpression,
   type PropertyAccessExpression,
   type ProvidesDirective,
@@ -460,7 +461,12 @@ class Printer {
       const value = this.node((arg as { value: Node }).value);
       return argName ? concat([this.raw(argName), " = ", value]) : value;
     });
-    return concat([name, "(", join(", ", args), ")"]);
+    // Annotation arguments wrap like a call's: break after `(` at +4 and lay
+    // one element-value pair per line (fill only when every arg is short).
+    return concat([
+      name,
+      this.argsLike("(", args, ")", this.allShortItems([...a.args]) ? "independent" : "unified"),
+    ]);
   }
 
   /** A run of annotations, each followed by a space (inline, e.g. on a component). */
@@ -501,15 +507,23 @@ class Printer {
 
   private type(t: TypeNode | WildcardType): Doc {
     switch (t.kind) {
-      case SyntaxKind.PrimitiveType:
-        return tokenToString((t as { keyword: SyntaxKind }).keyword) ?? this.raw(t);
+      case SyntaxKind.PrimitiveType: {
+        const pt = t as PrimitiveType;
+        const keyword = tokenToString(pt.keyword) ?? this.raw(t);
+        // SE8 type-use annotations precede the type: `@Nullable int`.
+        return concat([this.annotations(pt.annotations), keyword]);
+      }
       case SyntaxKind.VarType:
         return "var";
       case SyntaxKind.ArrayType:
         return concat([this.type((t as ArrayType).elementType), "[]"]);
       case SyntaxKind.TypeReference: {
         const tr = t as TypeReference;
-        return concat([this.entityName(tr.typeName), this.typeArguments(tr.typeArguments)]);
+        return concat([
+          this.annotations(tr.annotations),
+          this.entityName(tr.typeName),
+          this.typeArguments(tr.typeArguments),
+        ]);
       }
       case SyntaxKind.WildcardType: {
         const w = t as WildcardType;
@@ -882,14 +896,17 @@ class Printer {
   private tryStatement(s: TryStatement): Doc {
     const parts: Doc[] = ["try"];
     if (s.resources && s.resources.length > 0) {
-      parts.push(
-        " (",
-        join(
-          concat(["; "]),
-          s.resources.map(r => this.resource(r)),
-        ),
-        ")",
-      );
+      // The first resource stays on the `try (` line; subsequent ones break
+      // before themselves at +4 (one per line), each `;`-terminated. A trailing
+      // `;` after the last resource in source is preserved as `; )`.
+      const inner: Doc[] = [];
+      s.resources.forEach((r, i) => {
+        if (i > 0) inner.push(";", brk("unified", " ", ZERO));
+        inner.push(this.resource(r));
+      });
+      const last = s.resources[s.resources.length - 1];
+      const trailingSemi = this.text[skipTrivia(this.text, last.end)] === ";";
+      parts.push(" (", level(PLUS4, inner), trailingSemi ? "; )" : ")");
     }
     parts.push(" ", this.block(s.tryBlock));
     for (const c of s.catchClauses) {

@@ -466,7 +466,13 @@ func (p *printer) annotation(a *compiler.AnnotationData) Doc {
 			args[i] = value
 		}
 	}
-	return concat(text(name), text("("), join(text(", "), args), text(")"))
+	// Annotation arguments wrap like a call's: break after `(` at +4 and lay one
+	// element-value pair per line (fill only when every arg is short).
+	fill := fillUnified
+	if p.allShortItems(nodes(a.Args)) {
+		fill = fillIndependent
+	}
+	return concat(text(name), p.argsLike("(", args, ")", fill))
 }
 
 // annotations renders a run of inline annotations, each followed by a space.
@@ -519,17 +525,20 @@ func (p *printer) typeArguments(args *compiler.NodeArray) Doc {
 func (p *printer) typ(t *compiler.Node) Doc {
 	switch t.Kind {
 	case compiler.PrimitiveType:
-		if s := compiler.TokenToString(t.AsPrimitiveType().Keyword); s != "" {
-			return text(s)
+		pt := t.AsPrimitiveType()
+		keyword := compiler.TokenToString(pt.Keyword)
+		if keyword == "" {
+			keyword = p.raw(t)
 		}
-		return text(p.raw(t))
+		// SE8 type-use annotations precede the type: `@Nullable int`.
+		return concat(p.annotations(pt.Annotations), text(keyword))
 	case compiler.VarType:
 		return text("var")
 	case compiler.ArrayType:
 		return concat(p.typ(t.AsArrayType().ElementType), text("[]"))
 	case compiler.TypeReference:
 		tr := t.AsTypeReference()
-		return concat(text(p.entityName(tr.TypeName)), p.typeArguments(tr.TypeArguments))
+		return concat(p.annotations(tr.Annotations), text(p.entityName(tr.TypeName)), p.typeArguments(tr.TypeArguments))
 	case compiler.WildcardType:
 		w := t.AsWildcardType()
 		if w.HasExtends && w.Type != nil {
@@ -932,11 +941,23 @@ func (p *printer) forEachStatement(s *compiler.ForEachStatementData) Doc {
 func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 	parts := []Doc{text("try")}
 	if s.Resources.Len() > 0 {
-		rs := make([]Doc, s.Resources.Len())
-		for i, r := range nodes(s.Resources) {
-			rs[i] = p.resource(r.AsResource())
+		// The first resource stays on the `try (` line; subsequent ones break
+		// before themselves at +4 (one per line), each `;`-terminated. A trailing
+		// `;` after the last resource in source is preserved as `; )`.
+		res := nodes(s.Resources)
+		var inner []Doc
+		for i, r := range res {
+			if i > 0 {
+				inner = append(inner, text(";"), brk(fillUnified, " ", ZERO, nil))
+			}
+			inner = append(inner, p.resource(r.AsResource()))
 		}
-		parts = append(parts, text(" ("), join(text("; "), rs), text(")"))
+		last := res[len(res)-1]
+		closeTok := ")"
+		if idx := compiler.SkipTrivia(p.text, last.End); idx < len(p.text) && p.text[idx] == ';' {
+			closeTok = "; )"
+		}
+		parts = append(parts, text(" ("), level(plus4, inner), text(closeTok))
 	}
 	parts = append(parts, text(" "), p.block(s.TryBlock.AsBlock(), s.TryBlock.End))
 	for _, cn := range nodes(s.CatchClauses) {
