@@ -436,3 +436,4 @@ cappu search commons-lang3
 - 2026-06-25 17:40 — find more test cases. ones that shoukd adhere correct nullness and ones that shouldnt. maybe even look in some reference projects
 - 2026-06-25 17:42 — add a test where String x = "foo"; if(Random()) x = null; s.length;
 
+- 2026-06-25 21:49 — print the number of files formatted (including which were changed)

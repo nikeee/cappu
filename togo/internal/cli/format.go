@@ -48,7 +48,7 @@ func RunFormat(files []string, write bool, cfg *config.Config) int {
 	paint := painter(os.Stderr)
 	cwd, _ := os.Getwd()
 	var unformatted []string
-	written := 0
+	var changed []string
 	skipped := 0
 
 	for _, file := range targets {
@@ -82,8 +82,10 @@ func RunFormat(files []string, write bool, cfg *config.Config) int {
 				fmt.Fprintf(os.Stderr, "cappu: cannot write %s: %s\n", rel, err)
 				return 2
 			}
-			written++
-			fmt.Fprint(os.Stderr, paint("dim", fmt.Sprintf("formatted %s\n", rel)))
+			changed = append(changed, rel)
+			// List each rewritten file on stdout (machine-readable, like the check
+			// mode lists the unformatted ones); the count summary goes to stderr.
+			fmt.Fprintf(os.Stdout, "%s\n", rel)
 		} else {
 			unformatted = append(unformatted, rel)
 			fmt.Fprintf(os.Stdout, "%s\n", rel)
@@ -96,7 +98,7 @@ func RunFormat(files []string, write bool, cfg *config.Config) int {
 		if skipped > 0 {
 			extra = fmt.Sprintf(", skipped %d", skipped)
 		}
-		fmt.Fprintf(os.Stderr, "cappu: formatted %d of %d file(s)%s\n", written, len(targets), extra)
+		fmt.Fprintf(os.Stderr, "cappu: formatted %d of %d file(s)%s\n", len(changed), len(targets), extra)
 		return 0
 	}
 
