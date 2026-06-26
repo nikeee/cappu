@@ -29,7 +29,7 @@ func TestFormatDuration(t *testing.T) {
 
 // The timed-command set must match main.ts's TIMED_COMMANDS (lsp/mcp excluded).
 func TestTimedCommands(t *testing.T) {
-	for _, name := range []string{"install", "update", "add", "audit", "licenses", "publish", "verify", "compile", "test"} {
+	for _, name := range []string{"install", "update", "add", "audit", "licenses", "publish", "verify", "compile", "check", "test"} {
 		if !timedCommands[name] {
 			t.Errorf("%q should be a timed command", name)
 		}

@@ -45,7 +45,7 @@ func painter(f *os.File) func(format, text string) string {
 // there is meaningless. Port of TIMED_COMMANDS in main.ts.
 var timedCommands = map[string]bool{
 	"install": true, "update": true, "add": true, "audit": true,
-	"licenses": true, "tree": true, "publish": true, "verify": true, "compile": true, "test": true,
+	"licenses": true, "tree": true, "publish": true, "verify": true, "compile": true, "check": true, "test": true,
 	"format": true,
 }
 

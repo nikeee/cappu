@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { expect } from "expect";
 
-import { missingConfiguredPaths, runCompile } from "./compiler.ts";
+import { missingConfiguredPaths, runCheck, runCompile } from "./compiler.ts";
 import { loadConfig } from "../config.ts";
 import { readZipEntries } from "./zipReader.ts";
 import { writeZip } from "./zipWriter.ts";
@@ -60,6 +60,20 @@ test("a fully-qualified static call resolves and emits, not degrades", () => {
       expect(result.degraded).toEqual([]);
     },
   );
+});
+
+test("runCheck reports a type error without writing class files", () => {
+  inTempDir({ "Bad.java": 'class Bad { int x = "no"; }' }, (dir, paths) => {
+    const diagnostics = runCheck(paths, defaultConfig(dir));
+    expect(diagnostics.some(d => d.severity === "error")).toBe(true);
+  });
+});
+
+test("runCheck returns no errors for clean code", () => {
+  inTempDir({ "A.java": "class A { int x = 1; }" }, (dir, paths) => {
+    const diagnostics = runCheck(paths, defaultConfig(dir));
+    expect(diagnostics.some(d => d.severity === "error")).toBe(false);
+  });
 });
 
 test("a parse error fails with a located diagnostic and writes nothing", () => {

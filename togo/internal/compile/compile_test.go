@@ -76,6 +76,33 @@ func TestRunCompileReportsErrors(t *testing.T) {
 	}
 }
 
+// RunCheck reports a type error without writing class files (#30).
+func TestRunCheckReportsErrors(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "Bad.java")
+	if err := os.WriteFile(src, []byte(`class Bad { int x = "no"; }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := config.Load("", dir)
+	diagnostics := RunCheck([]string{src}, cfg)
+	if !hasError(diagnostics) {
+		t.Errorf("expected an error diagnostic, got %+v", diagnostics)
+	}
+}
+
+// RunCheck returns no errors for clean code.
+func TestRunCheckClean(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "A.java")
+	if err := os.WriteFile(src, []byte("class A { int x = 1; }"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := config.Load("", dir)
+	if hasError(RunCheck([]string{src}, cfg)) {
+		t.Error("expected no errors for clean code")
+	}
+}
+
 // experimentalCompiler.debugInfo threads through to the emitter: with it on, a
 // method's locals produce a LocalVariableTable (like javac -g); off (the
 // default) matches default javac and emits none.

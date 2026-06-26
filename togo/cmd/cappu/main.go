@@ -55,6 +55,7 @@ type CLI struct {
 	Mcp          mcpCmd          `cmd:"" help:"Start the MCP server for agents (over stdio)"`
 	Dap          dapCmd          `cmd:"" help:"Start the debug adapter (Debug Adapter Protocol over stdio)"`
 	Compile      compileCmd      `cmd:"" help:"Compile .java files to .class bytecode"`
+	Check        checkCmd        `cmd:"" help:"Type-check with cappu's own checker (the LSP's diagnostics) without writing class files"`
 	Format       formatCmd       `cmd:"" help:"Format .java files (google-java-format compatible)"`
 }
 
@@ -400,6 +401,18 @@ func (c *compileCmd) Run(a *appState) error {
 		return err
 	}
 	return exit(cli.RunCompile(c.Files, c.Output, c.Artifact, c.Quiet, cfg))
+}
+
+type checkCmd struct {
+	Files []string `arg:"" optional:"" help:"Specific .java files to check"`
+}
+
+func (c *checkCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		return err
+	}
+	return exit(cli.RunCheck(c.Files, cfg))
 }
 
 type formatCmd struct {

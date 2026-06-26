@@ -347,6 +347,33 @@ function toCompileDiagnostic(
 }
 
 /**
+ * Type-check `files` with cappu's own pipeline (parser + binder + checker - the
+ * same diagnostics the LSP server emits, nikeee/cappu#30) and return them
+ * without emitting any class files. javac (`cappu compile`'s default) reports
+ * fewer; this is the way to get the LSP's diagnostics from the CLI.
+ */
+export function runCheck(files: string[], config: CappuConfig): CompileDiagnostic[] {
+  const program = createProgram();
+  installJdkTypes(program, config);
+  loadConfiguredPaths(program, config);
+  for (const file of files) program.addProjectFile(pathToUri(file), readFileSync(file, "utf8"));
+  const checker = createChecker(program, config.compilerOptions.nullness);
+
+  const diagnostics: CompileDiagnostic[] = [];
+  for (const file of files) {
+    const sourceFile = program.getSourceFile(pathToUri(file))!;
+    const fileDiagnostics = [
+      ...sourceFile.parseDiagnostics,
+      ...(sourceFile.bindDiagnostics ?? []),
+      ...checker.getSemanticDiagnostics(sourceFile),
+    ];
+    const lineStarts = computeLineStarts(sourceFile.text);
+    diagnostics.push(...fileDiagnostics.map(d => toCompileDiagnostic(d, file, lineStarts)));
+  }
+  return diagnostics;
+}
+
+/**
  * Compile `files` (the caller has already checked the list is non-empty).
  * Parser, binder and - unless `typeCheck` is disabled - checker diagnostics of
  * every input are collected first; any error among them fails the build before

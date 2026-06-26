@@ -11,6 +11,7 @@ import { runAdd } from "./add.ts";
 import { runRemove } from "./remove.ts";
 import { runOutdated } from "./outdated.ts";
 import { runCompileCommand } from "./compile.ts";
+import { runCheckCommand } from "./check.ts";
 import { runFormat } from "./format.ts";
 import { runConfigSchema } from "./configSchema.ts";
 import { runInit } from "./init.ts";
@@ -125,6 +126,11 @@ const COMMAND_GROUPS: HelpGroup[] = [
         desc: "Compile .java files to .class bytecode; with no files, compile everything under the configured sourcePaths (a project build)",
       },
       {
+        name: "check",
+        args: "[file...]",
+        desc: "Type-check with cappu's own checker (the LSP's diagnostics, more than javac emits) without writing any class files; with no files, check everything under the configured sourcePaths",
+      },
+      {
         name: "format",
         args: "[-w] [file...]",
         desc: "Check Java formatting (google-java-format compatible); with no files, every file under the configured sourcePaths. Lists unformatted files and exits non-zero; -w/--write rewrites them in place. Style and ignore globs: formatterOptions.",
@@ -134,7 +140,10 @@ const COMMAND_GROUPS: HelpGroup[] = [
         args: "[-- <args>]",
         desc: "Compile the project and run it on the JVM: the configured compilerOptions.mainClass, else the single class declaring main(String[]). Arguments after -- are passed to the program",
       },
-      { name: "test", desc: "Compile src/test/java and run the JUnit Platform console launcher over it" },
+      {
+        name: "test",
+        desc: "Compile src/test/java and run the JUnit Platform console launcher over it",
+      },
     ],
   },
   {
@@ -350,6 +359,7 @@ const TIMED_COMMANDS = new Set([
   "publish",
   "verify",
   "compile",
+  "check",
   "test",
   "format",
 ]);
@@ -394,11 +404,14 @@ try {
   process.exit(2);
 }
 
-// verify needs config but returns `never`, so it runs here (not in the switch,
-// where a never-returning case makes the break unreachable).
-if (command === "verify") runVerify(config);
+// verify and check need config but return `never`, so they run here (not in the
+// switch, where a never-returning case makes the break unreachable).
+if (command === "verify")
+if (command === "check") runCheckCommand(files, config);
 
 switch (command) {
+  case "verify":
+    runVerify(config);
   case "add":
     await runAdd(files[0], files.slice(1), values.config, config);
     break;

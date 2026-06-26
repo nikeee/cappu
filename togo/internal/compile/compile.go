@@ -359,6 +359,42 @@ func manifestBytes(mainClass string) []byte {
 	return []byte(m + "\r\n")
 }
 
+// RunCheck type-checks files with cappu's own pipeline (parser + binder +
+// checker - the same diagnostics the LSP server emits, #30) and returns them
+// without emitting any class files. javac (`cappu compile`'s default) reports
+// fewer; this is the way to get the LSP's diagnostics from the CLI.
+// Port of src/compiler/compiler.ts runCheck.
+func RunCheck(files []string, cfg *config.Config) []CompileDiagnostic {
+	program := compiler.NewProgram()
+	compiler.InstallJdkTypes(program, cfg)
+	loadConfiguredPaths(program, cfg)
+	for _, file := range files {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return []CompileDiagnostic{{Severity: "error", File: file, Message: err.Error()}}
+		}
+		program.AddProjectFile(pathToURI(file), string(b))
+	}
+	var nullness *config.Nullness
+	if cfg != nil {
+		nullness = cfg.CompilerOptions.Nullness
+	}
+	checker := compiler.NewChecker(program, nullness)
+
+	var diagnostics []CompileDiagnostic
+	for _, file := range files {
+		sf := program.GetSourceFile(pathToURI(file))
+		sfd := sf.AsSourceFile()
+		lineStarts := compiler.ComputeLineStarts(sfd.Text)
+		all := append(append([]compiler.Diagnostic{}, sfd.ParseDiagnostics...), sfd.BindDiagnostics...)
+		all = append(all, checker.GetSemanticDiagnostics(sf)...)
+		for _, d := range all {
+			diagnostics = append(diagnostics, toCompileDiagnostic(d, file, sfd.Text, lineStarts))
+		}
+	}
+	return diagnostics
+}
+
 // RunCompile compiles files (the caller has ensured the list is non-empty).
 func RunCompile(files []string, options Options) Result {
 	cfg := options.Config
