@@ -91,7 +91,7 @@ cappu mcp
 This starts an MCP server that exposes all **read-only-LSP capabilities** as well as all **read-only package management features** like license information, auditing/CVEs and package search.
 
 ### Usage without your Colleagues noticing
-Your colleagues use an IDE and you obviously dont want to migrate you project to a vibe-coded Java toolchain? Understandable.
+Your colleagues use an IDE and you obviously don't want to migrate your project to a vibe-coded Java toolchain? Understandable.
 You can still use cappu as LSP/MCP server, configure it using `cappu.json` and exclude the config from the repository without touching any checked-in `.gitignore`:
 ```sh
 echo "cappu.json" >> .git/info/exclude
