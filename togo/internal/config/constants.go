@@ -11,7 +11,12 @@ const (
 	// Downloaded dependency jars live under .cappu/ - cappu-managed, gitignored.
 	DefaultClassPath        = "./.cappu/lib/classes"
 	DefaultSourcePath       = "./src/main/java"
-	DefaultResourcePath     = "./src/main/resources"
+	// DefaultGeneratedSourcePath: some build tools (Gradle sourceSets) and code
+	// generators (sdmlib) keep generated production sources in their own root
+	// alongside the hand-written ones. It is a default source root so such
+	// projects build without extra config; a missing dir is simply ignored.
+	DefaultGeneratedSourcePath = "./src/generated/java"
+	DefaultResourcePath        = "./src/main/resources"
 	DefaultTestSourcePath   = "./src/test/java"
 	DefaultTestResourcePath = "./src/test/resources"
 	DefaultTestClassPath    = "./.cappu/lib/test-classes"
@@ -39,6 +44,10 @@ var ExternalClassPaths = []string{
 	"./lib",               // a commonly used manually-managed jar folder
 	"./libs",
 }
+
+// DefaultSourcePaths are the source roots compiled when sourcePaths is unset:
+// the hand-written tree plus the conventional generated-sources root.
+var DefaultSourcePaths = []string{DefaultSourcePath, DefaultGeneratedSourcePath}
 
 // DefaultPackageSources are the repositories Maven and Gradle resolve from out
 // of the box.

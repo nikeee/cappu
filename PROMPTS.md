@@ -441,3 +441,7 @@ cappu search commons-lang3
 - 2026-06-26 01:40 — looking from a dx perspective - were trying to create a simple tool that uses convention over configuration (like vite) and want to build a workflow that is similar to uv and npm. what can we do better? what is missing? what behaves unexpected?
 - 2026-06-26 01:40 — dont do A2
 - 2026-06-26 01:40 — track C: no alias. pick one
+- 2026-06-26 09:24 — resolve https://github.com/nikeee/cappu/issues/28
+continue
+- 2026-06-26 09:24 — are there generated sources for tests?
+- 2026-06-26 09:28 — resolve https://github.com/nikeee/cappu/issues/30

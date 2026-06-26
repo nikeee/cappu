@@ -38,6 +38,12 @@ export const EXTERNAL_CLASS_PATHS = [
   "./libs",
 ];
 export const DEFAULT_SOURCE_PATH = "./src/main/java";
+// Some build tools (Gradle sourceSets) and code generators (sdmlib) keep
+// generated production sources in their own root alongside the hand-written
+// ones. Default it onto the compile source roots so such projects build
+// without extra config; a missing dir is simply ignored.
+export const DEFAULT_GENERATED_SOURCE_PATH = "./src/generated/java";
+export const DEFAULT_SOURCE_PATHS = [DEFAULT_SOURCE_PATH, DEFAULT_GENERATED_SOURCE_PATH];
 export const DEFAULT_RESOURCE_PATH = "./src/main/resources";
 // Created by `cappu init` and used by `cappu test` (nikeee/cappu#16): test
 // sources/resources and the directory test-only dependencies install to.
@@ -79,7 +85,7 @@ const CompilerOptionsSchema = z.object({
   /** Directories or .jar files scanned for .class files (resolution only). */
   classPath: z.array(z.string()).default([DEFAULT_CLASS_PATH, ...EXTERNAL_CLASS_PATHS]),
   /** Directories scanned recursively for .java sources (resolution only). */
-  sourcePaths: z.array(z.string()).default([DEFAULT_SOURCE_PATH]),
+  sourcePaths: z.array(z.string()).default(DEFAULT_SOURCE_PATHS),
   /** Directories whose files are copied verbatim into the build output. */
   resourcePaths: z.array(z.string()).default([DEFAULT_RESOURCE_PATH]),
   /** What `cappu compile` produces in ./dist (nikeee/cappu#5). */
@@ -236,8 +242,10 @@ export const CONFIG_TEMPLATE = `
     // are ignored.
     // "classPath": ["./.cappu/lib/classes"],
 
-    // Sources to be compiled. Default if unset: ["./src/main/java"].
-    // "sourcePaths": ["./src/main/java"],
+    // Sources to be compiled. Default if unset:
+    // ["./src/main/java", "./src/generated/java"] (the second is where
+    // generators leave production sources; a missing dir is ignored).
+    // "sourcePaths": ["./src/main/java", "./src/generated/java"],
 
     // Resource directories: their files are copied verbatim into the build
     // output (the classes tree / the jar). Default if unset: ["./src/main/resources"].

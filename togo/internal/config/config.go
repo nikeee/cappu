@@ -194,7 +194,7 @@ func (c *Config) applyDefaults() {
 		co.ClassPath = append([]string{DefaultClassPath}, ExternalClassPaths...)
 	}
 	if co.SourcePaths == nil {
-		co.SourcePaths = []string{DefaultSourcePath}
+		co.SourcePaths = append([]string{}, DefaultSourcePaths...)
 	}
 	if co.ResourcePaths == nil {
 		co.ResourcePaths = []string{DefaultResourcePath}

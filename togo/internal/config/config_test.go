@@ -38,7 +38,9 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.CompilerOptions.Javac != "javac" {
 		t.Errorf("javac default = %q, want javac", cfg.CompilerOptions.Javac)
 	}
-	if len(cfg.CompilerOptions.SourcePaths) != 1 || cfg.CompilerOptions.SourcePaths[0] != DefaultSourcePath {
+	if len(cfg.CompilerOptions.SourcePaths) != 2 ||
+		cfg.CompilerOptions.SourcePaths[0] != DefaultSourcePath ||
+		cfg.CompilerOptions.SourcePaths[1] != DefaultGeneratedSourcePath {
 		t.Errorf("sourcePaths default = %v", cfg.CompilerOptions.SourcePaths)
 	}
 	if len(cfg.PackageSources) != len(DefaultPackageSources) {
