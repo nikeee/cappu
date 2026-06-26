@@ -647,9 +647,11 @@ class Printer {
     if (d.members.length > 0) {
       // The constant list is `;`-terminated, then the members. A blank line
       // separates them only when there are constants above (a bare leading `;`
-      // with no constants gets no blank line before the members).
+      // with no constants gets no blank line before the members) AND a real
+      // member follows - a trailing empty statement (`;`) gets no blank line.
+      const realMember = d.members.some(m => m.kind !== SyntaxKind.EmptyStatement);
       bodyParts.push(";", hardline);
-      if (constants.length > 0) bodyParts.push(hardline);
+      if (constants.length > 0 && realMember) bodyParts.push(hardline);
       bodyParts.push(...this.members(d.members, d.end));
     } else if (constants.length > 0) {
       // A trailing `;` after the last constant is preserved from the source.

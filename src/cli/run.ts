@@ -48,7 +48,12 @@ function detectMainClasses(written: readonly string[], outDir: string): string[]
   return written
     .filter(f => f.endsWith(".class"))
     .filter(f => classDeclaresMain(readFileSync(f)))
-    .map(f => relative(outDir, f).replace(/\.class$/, "").split(sep).join("."));
+    .map(f =>
+      relative(outDir, f)
+        .replace(/\.class$/, "")
+        .split(sep)
+        .join("."),
+    );
 }
 
 export async function runRunCommand(args: string[], config: CappuConfig): Promise<never> {

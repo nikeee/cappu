@@ -64,7 +64,11 @@ export function buildForest(resolution: Resolution): TreeNode[] {
   // Surface declared roots that nothing could resolve - otherwise they vanish.
   for (const m of resolution.missing) {
     if (m.requestedBy === undefined) {
-      forest.push({ coordinate: coordinatesToString(m.coordinates), dependencies: [], unresolved: true });
+      forest.push({
+        coordinate: coordinatesToString(m.coordinates),
+        dependencies: [],
+        unresolved: true,
+      });
     }
   }
   return forest;
@@ -90,8 +94,8 @@ function renderNodes(nodes: readonly TreeNode[], prefix: string, paint: Paint): 
 export function formatTree(sections: readonly TreeSection[], paint: Paint = plain): string {
   const nonEmpty = sections.filter(s => s.tree.length > 0);
   if (nonEmpty.length === 0) return "no dependencies declared\n";
-  const blocks = nonEmpty.map(
-    s => [paint(["bold", "cyan"], s.configuration), ...renderNodes(s.tree, "", paint)].join("\n"),
+  const blocks = nonEmpty.map(s =>
+    [paint(["bold", "cyan"], s.configuration), ...renderNodes(s.tree, "", paint)].join("\n"),
   );
   return `${blocks.join("\n")}\n`;
 }

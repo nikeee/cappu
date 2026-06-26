@@ -679,9 +679,17 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 	if d.Members.Len() > 0 {
 		// The constant list is `;`-terminated, then the members. A blank line
 		// separates them only when there are constants above (a bare leading `;`
-		// with no constants gets no blank line before the members).
+		// with no constants gets no blank line before the members) AND a real
+		// member follows - a trailing empty statement (`;`) gets no blank line.
+		realMember := false
+		for _, m := range nodes(d.Members) {
+			if m.Kind != compiler.EmptyStatement {
+				realMember = true
+				break
+			}
+		}
 		bodyParts = append(bodyParts, text(";"), hardline)
-		if len(constantDocs) > 0 {
+		if len(constantDocs) > 0 && realMember {
 			bodyParts = append(bodyParts, hardline)
 		}
 		bodyParts = append(bodyParts, p.members(d.Members, end)...)

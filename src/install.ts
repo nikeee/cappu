@@ -526,7 +526,10 @@ export function checkLocked(config: CappuConfig): { ok: true } | { ok: false; re
   }
   return lockMatches(lock, config)
     ? { ok: true }
-    : { ok: false, reason: "cappu.json and cappu-lock.json disagree; run `cappu install` to re-resolve" };
+    : {
+        ok: false,
+        reason: "cappu.json and cappu-lock.json disagree; run `cappu install` to re-resolve",
+      };
 }
 
 async function artifactFrom(
