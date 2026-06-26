@@ -689,15 +689,20 @@ class Printer {
   }
 
   private recordDeclaration(d: RecordDeclaration): Doc {
-    const comps = d.recordComponents.map((rc: RecordComponent) =>
-      concat([
+    const renderComp = (n: Node): Doc => {
+      const rc = n as RecordComponent;
+      return concat([
         this.annotations(rc.annotations),
         this.type(rc.type),
         rc.isVarArgs ? "... " : " ",
         this.raw(rc.name),
-      ]),
-    );
-    const after: Doc[] = [concat(["(", join(", ", comps), ")"])];
+      ]);
+    };
+    const recordParens =
+      d.recordComponents.length === 0
+        ? "()"
+        : this.argsLike("(", this.listItems(d.recordComponents, renderComp).items, ")", "unified");
+    const after: Doc[] = [recordParens];
     if (d.implementsTypes && d.implementsTypes.length > 0)
       after.push(
         concat([
@@ -784,16 +789,56 @@ class Printer {
     return nodes.every(n => n.end - this.start(n) < 10);
   }
 
+  // Render a delimited-list item with the comments attached to it: leading
+  // comments before the item (own-line ones get a forced break after, which also
+  // forces the whole list to break; an inline block comment stays inline), and a
+  // trailing block comment on the item's line before the separator. Returns
+  // whether any comment was consumed (callers disable filling then, like gjf).
+  private itemWithComments(node: Node, render: () => Doc): { doc: Doc; comment: boolean } {
+    const parts: Doc[] = [];
+    let comment = false;
+    for (const c of this.commentsBefore(this.start(node))) {
+      comment = true;
+      if (c.ownLine) parts.push(reflow(c.text), hardline);
+      else if (c.line) parts.push(c.text, hardline);
+      else parts.push(reformatParamComment(c.text) ?? c.text, " ");
+    }
+    parts.push(render());
+    const t = this.comments[this.ci];
+    if (
+      t &&
+      !t.line &&
+      !t.ownLine &&
+      t.pos >= node.end &&
+      !/[\n,]/.test(this.text.slice(node.end, t.pos))
+    ) {
+      this.ci++;
+      comment = true;
+      parts.push(" ", t.text);
+    }
+    return { doc: parts.length === 1 ? parts[0] : concat(parts), comment };
+  }
+
+  // Build the items of a delimited list with their comments consumed, reporting
+  // whether any item carried a comment.
+  private listItems(
+    nodes: readonly Node[],
+    render: (n: Node) => Doc,
+  ): { items: Doc[]; anyComment: boolean } {
+    let anyComment = false;
+    const items = nodes.map(n => {
+      const r = this.itemWithComments(n, () => render(n));
+      if (r.comment) anyComment = true;
+      return r.doc;
+    });
+    return { items, anyComment };
+  }
+
   private parameters(params: NodeArray<Parameter>, trailing = ""): Doc {
     if (params.length === 0) return concat(["()", trailing]);
     // Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
-    return this.argsLike(
-      "(",
-      params.map(p => this.parameter(p)),
-      ")",
-      "unified",
-      trailing,
-    );
+    const { items } = this.listItems(params, p => this.parameter(p as Parameter));
+    return this.argsLike("(", items, ")", "unified", trailing);
   }
 
   private parameter(p: Parameter): Doc {
@@ -852,7 +897,12 @@ class Printer {
   // --- statements ----------------------------------------------------------
 
   private blockIsEmpty(b: Block): boolean {
-    return b.statements.length === 0 && !this.hasCommentBefore(b.end);
+    if (b.statements.length > 0) return false;
+    // Only a comment *inside* the block (after its `{`) makes it non-empty; a
+    // pending comment before the block (e.g. an unconsumed parameter comment)
+    // must not be miscounted - blockIsEmpty can be queried before those are
+    // consumed (methodLike computes the body shape before rendering params).
+    return !(this.hasCommentBefore(b.end) && this.comments[this.ci].pos > this.start(b));
   }
 
   private block(b: Block): Doc {
@@ -1260,11 +1310,14 @@ class Printer {
     // back at the parent indent (a -2 break cancels the +2).
     // ponytail: trailing-comma -> FORCED after-open break is not modeled (the
     // parser drops the trailing comma); add when a fixture needs it.
-    const fillMode: FillMode = this.allShortItems(e.elements) ? "independent" : "unified";
+    const { items, anyComment } = this.listItems(e.elements, el => this.node(el));
+    // A comment forces one-per-line (gjf), else short items fill.
+    const fillMode: FillMode =
+      !anyComment && this.allShortItems(e.elements) ? "independent" : "unified";
     const innerParts: Doc[] = [];
-    e.elements.forEach((el, i) => {
+    items.forEach((el, i) => {
       if (i > 0) innerParts.push(",", brk(fillMode, " ", ZERO));
-      innerParts.push(this.node(el));
+      innerParts.push(el);
     });
     const inner = level(ZERO, innerParts);
     return concat([
@@ -1291,8 +1344,18 @@ class Printer {
         ")",
       ]);
     }
-    const body = e.body.kind === SyntaxKind.Block ? this.block(e.body as Block) : this.node(e.body);
-    return concat([head, " -> ", body]);
+    if (e.body.kind === SyntaxKind.Block) {
+      return concat([head, " -> ", this.block(e.body as Block)]);
+    }
+    // A comment before an expression body sits own-line at a +8 continuation
+    // indent (gjf), forcing `-> ` onto its own line; the comment forces the break.
+    if (this.hasCommentBefore(this.start(e.body))) {
+      const parts: Doc[] = [];
+      for (const c of this.commentsBefore(this.start(e.body))) parts.push(reflow(c.text), hardline);
+      parts.push(this.node(e.body));
+      return concat([head, " ->", level(PLUS4, [hardline, concat(parts)])]);
+    }
+    return concat([head, " -> ", this.node(e.body)]);
   }
 
   // A ternary. gjf keeps the condition on the line and breaks before `?` and `:`

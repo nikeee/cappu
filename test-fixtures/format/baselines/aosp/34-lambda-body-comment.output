@@ -1,0 +1,10 @@
+class A {
+    void m() {
+        var toks =
+                builder.peekTokens(
+                        getStartPosition(modifiersTree),
+                        tok ->
+                                // a comment explaining the lambda
+                                ranges.contains(tok.getPosition()) || isModifier(tok.getText()));
+    }
+}

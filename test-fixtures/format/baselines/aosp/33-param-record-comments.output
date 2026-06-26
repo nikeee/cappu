@@ -1,0 +1,20 @@
+record R(
+        /** the x */
+        int x,
+        /** the y */
+        int y) {}
+
+class A {
+    void m(
+            /** a */
+            int a,
+            /** b */
+            int b) {}
+
+    int[] xs = {
+        /** one */
+        1,
+        /** two */
+        2
+    };
+}
