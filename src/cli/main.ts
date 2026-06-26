@@ -404,14 +404,11 @@ try {
   process.exit(2);
 }
 
-// verify and check need config but return `never`, so they run here (not in the
-// switch, where a never-returning case makes the break unreachable).
-if (command === "verify")
-if (command === "check") runCheckCommand(files, config);
-
 switch (command) {
   case "verify":
     runVerify(config);
+  case "check":
+    runCheckCommand(files, config);
   case "add":
     await runAdd(files[0], files.slice(1), values.config, config);
     break;

@@ -54,10 +54,7 @@ test("a missing default config yields the empty config; a missing explicit one t
   const config = loadConfig(undefined, dir.path);
   expect(config.compilerOptions.classPath).toEqual(DEFAULT_CLASS_PATHS);
   // generated production sources (src/generated/java) are a default source root
-  expect(config.compilerOptions.sourcePaths).toEqual([
-    "./src/main/java",
-    "./src/generated/java",
-  ]);
+  expect(config.compilerOptions.sourcePaths).toEqual(["./src/main/java", "./src/generated/java"]);
   expect(config.lspOptions).toEqual({});
   expect(() => loadConfig("nope.json", dir.path)).toThrow(/not found/);
 });
