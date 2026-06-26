@@ -1,0 +1,8 @@
+enum E {
+  /** The first one. */
+  ONE,
+  /** The second one. */
+  TWO,
+  // a line comment
+  THREE;
+}

@@ -669,23 +669,42 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 		return concat(header, text("{}"))
 	}
 	consts := nodes(d.EnumConstants)
-	constantDocs := make([]Doc, len(consts))
+	// google-java-format always lays enum constants one per line. A comment
+	// before a constant stays attached to it (own-line, reflowed); a trailing
+	// comment on the constant's line is kept after it.
+	var constantParts []Doc
 	for i, c := range consts {
-		constantDocs[i] = p.enumConstant(c.AsEnumConstantDeclaration())
+		if i > 0 {
+			constantParts = append(constantParts, text(","), hardline)
+		}
+		for _, cm := range p.commentsBefore(p.start(c)) {
+			constantParts = append(constantParts, reflow(cm.text), hardline)
+		}
+		cdoc := p.enumConstant(c.AsEnumConstantDeclaration())
+		if trailing, ok := p.trailingCommentAfter(c); ok {
+			cdoc = concat(cdoc, text(" "), text(trailing.text))
+		}
+		constantParts = append(constantParts, cdoc)
 	}
-	// google-java-format always lays enum constants one per line.
-	constantsDoc := join(concat(text(","), hardline), constantDocs)
-	bodyParts := []Doc{hardline, constantsDoc}
+	bodyParts := []Doc{hardline, concat(constantParts...)}
 	if d.Members.Len() > 0 {
 		// The constant list is `;`-terminated, then the members. A blank line
 		// separates them only when there are constants above (a bare leading `;`
-		// with no constants gets no blank line before the members).
+		// with no constants gets no blank line before the members) AND a real
+		// member follows - a trailing empty statement (`;`) gets no blank line.
+		realMember := false
+		for _, m := range nodes(d.Members) {
+			if m.Kind != compiler.EmptyStatement {
+				realMember = true
+				break
+			}
+		}
 		bodyParts = append(bodyParts, text(";"), hardline)
-		if len(constantDocs) > 0 {
+		if len(consts) > 0 && realMember {
 			bodyParts = append(bodyParts, hardline)
 		}
 		bodyParts = append(bodyParts, p.members(d.Members, end)...)
-	} else if len(constantDocs) > 0 {
+	} else if len(consts) > 0 {
 		// A trailing `;` after the last constant is preserved from the source.
 		last := consts[len(consts)-1]
 		if idx := compiler.SkipTrivia(p.text, last.End); idx < len(p.text) && p.text[idx] == ';' {
