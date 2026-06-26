@@ -36,115 +36,250 @@ import { runTestCommand } from "./test.ts";
 import { runRunCommand } from "./run.ts";
 import pkg from "../../package.json" with { type: "json" };
 
-const USAGE = `
-cappu ${pkg.version}
+// Help is data-driven so it can be grouped and coloured (bun-style). Each row is
+// a command/flag, its arg syntax, and a description; descriptions are single
+// strings and word-wrapped to the terminal at render time. painter() makes the
+// colours a no-op under NO_COLOR / an agent / a pipe, so plain output is intact.
+type HelpRow = { name: string; args?: string; desc: string };
+type HelpColor = "cyan" | "green" | "magenta" | "yellow" | "blue";
+type HelpGroup = { title: string; color: HelpColor; rows?: HelpRow[]; note?: string };
 
-Usage:
-  cappu init [-y] [--with-schema]    Scaffold a project: ask for the coordinates
-                                     and build output and write cappu.json (-y/--yes
-                                     takes defaults); --with-schema also writes
-                                     cappu.schema.json
-  cappu config-schema                Print the JSON Schema for cappu.json to stdout
-  cappu install [-v] [--locked]      Download the cappu.json dependencies (transitively)
-                                     into .cappu/lib/classes; prints a per-category
-                                     count, or each jar path with -v/--verbose.
-                                     --locked fails (without downloading) if
-                                     cappu-lock.json is stale or missing (for CI)
-  cappu update                       Bump declared dependencies to the newest stable
-                                     versions that keep the tree conflict-free
-  cappu outdated                     List declared dependencies that have a newer
-                                     published version (current/wanted/latest)
-  cappu tree [--json]                Print the resolved dependency graph as an
-                                     indented tree, one section per configuration
-                                     (api, implementation, annotationProcessor,
-                                     testImplementation); --json emits the forest
-                                     machine-readable
-  cappu version <major|minor|patch>  Bump the project version in cappu.json; at a
-                                     git repo root, also commit it and tag v<version>
-  cappu verify                       Check the installed lib jars against the
-                                     SHA-256 sums in cappu-lock.json
-  cappu audit [--no-cache] [--json]  Scan resolved dependencies for known
-                                     vulnerabilities (OSV); no fixing.
-                                     --no-cache ignores all caches (fresh scan);
-                                     --json emits the findings machine-readable
-  cappu licenses [--json]            Print every resolved dependency and the
-                                     license it ships under (best-effort SPDX);
-                                     --json emits it machine-readable
-  cappu add <configuration> <coord...>  Add one or more group:artifact[:version] to the
-                                     dependencies section (api, implementation,
-                                     annotationProcessor or testImplementation) and install them
-  cappu remove <configuration> <coord...>  Remove one or more group:artifact from the
-                                     named dependencies section and re-resolve
-  cappu publish [--repo <url>]       Build the jar, generate its POM, and upload
-                                     both to a Maven registry (needs groupId/
-                                     artifactId/version in cappu.json + creds).
-                                     Registry: --repo, else $CAPPU_PUBLISH_REGISTRY,
-                                     else publishRepository, else Maven Central
-  cappu search <query> [--json]      Search the configured package sources; prints
-                                     group:artifact@latest-version per match;
-                                     --json emits the matches machine-readable
-  cappu run [-- <args>]              Compile the project and run it on the JVM:
-                                     the configured compilerOptions.mainClass, else
-                                     the single class declaring main(String[]).
-                                     Arguments after -- are passed to the program
-  cappu test                         Compile src/test/java and run the JUnit
-                                     Platform console launcher over it
-  cappu self-upgrade                 Replace this binary with the latest CD build
-                                     (needs GITHUB_TOKEN or \`gh auth login\`)
-  cappu rage [--open]                Print version/environment info and the issue
-                                     tracker URL; --open also opens it in your browser
-  cappu cache clean                  Remove the global download cache
-  cappu lsp [options]                Start the Java language server (JSON-RPC over stdio)
-  cappu dap [options]                Start the debug adapter (Debug Adapter Protocol
-                                     over stdio): compile the project with debug info,
-                                     launch its mainClass under JDWP, and bridge
-                                     breakpoints, stepping, stacks and locals to a
-                                     DAP client (e.g. an editor)
-  cappu mcp                          Start the MCP server for agents: name-addressed
-                                     semantic tools (diagnostics, outline, describe/
-                                     find symbols, members, callers, type hierarchy,
-                                     import resolution, rename) plus project tools
-                                     (audit, licenses, search/latest/outdated packages,
-                                     dependency tree) over stdio
-  cappu compile [options] [file...]  Compile .java files to .class bytecode; with no
-                                     files, compile everything under the configured
-                                     sourcePaths (a project build)
-  cappu format [-w] [file...]        Check Java formatting (google-java-format
-                                     compatible); with no files, every file under the
-                                     configured sourcePaths. Lists unformatted files
-                                     and exits non-zero; -w/--write rewrites them in
-                                     place. Style and ignore globs: formatterOptions.
+const COMMAND_GROUPS: HelpGroup[] = [
+  {
+    title: "Project",
+    color: "cyan",
+    rows: [
+      {
+        name: "init",
+        args: "[-y] [--with-schema]",
+        desc: "Scaffold a project: ask for the coordinates and build output and write cappu.json (-y/--yes takes defaults); --with-schema also writes cappu.schema.json",
+      },
+      { name: "config-schema", desc: "Print the JSON Schema for cappu.json to stdout" },
+    ],
+  },
+  {
+    title: "Dependencies",
+    color: "cyan",
+    rows: [
+      {
+        name: "install",
+        args: "[-v] [--locked]",
+        desc: "Download the cappu.json dependencies (transitively) into .cappu/lib/classes; prints a per-category count, or each jar path with -v/--verbose. --locked fails (without downloading) if cappu-lock.json is stale or missing (for CI)",
+      },
+      {
+        name: "update",
+        desc: "Bump declared dependencies to the newest stable versions that keep the tree conflict-free",
+      },
+      {
+        name: "outdated",
+        desc: "List declared dependencies that have a newer published version (current/wanted/latest)",
+      },
+      {
+        name: "tree",
+        args: "[--json]",
+        desc: "Print the resolved dependency graph as an indented tree, one section per configuration (api, implementation, annotationProcessor, testImplementation); --json emits the forest machine-readable",
+      },
+      {
+        name: "add",
+        args: "<configuration> <coord...>",
+        desc: "Add one or more group:artifact[:version] to the dependencies section (api, implementation, annotationProcessor or testImplementation) and install them",
+      },
+      {
+        name: "remove",
+        args: "<configuration> <coord...>",
+        desc: "Remove one or more group:artifact from the named dependencies section and re-resolve",
+      },
+      {
+        name: "audit",
+        args: "[--no-cache] [--json]",
+        desc: "Scan resolved dependencies for known vulnerabilities (OSV); no fixing. --no-cache ignores all caches (fresh scan); --json emits the findings machine-readable",
+      },
+      {
+        name: "licenses",
+        args: "[--json]",
+        desc: "Print every resolved dependency and the license it ships under (best-effort SPDX); --json emits it machine-readable",
+      },
+      {
+        name: "verify",
+        desc: "Check the installed lib jars against the SHA-256 sums in cappu-lock.json",
+      },
+      {
+        name: "search",
+        args: "<query> [--json]",
+        desc: "Search the configured package sources; prints group:artifact@latest-version per match; --json emits the matches machine-readable",
+      },
+      {
+        name: "publish",
+        args: "[--repo <url>]",
+        desc: "Build the jar, generate its POM, and upload both to a Maven registry (needs groupId/artifactId/version in cappu.json + creds). Registry: --repo, else $CAPPU_PUBLISH_REGISTRY, else publishRepository, else Maven Central",
+      },
+    ],
+  },
+  {
+    title: "Build & run",
+    color: "green",
+    rows: [
+      {
+        name: "compile",
+        args: "[options] [file...]",
+        desc: "Compile .java files to .class bytecode; with no files, compile everything under the configured sourcePaths (a project build)",
+      },
+      {
+        name: "format",
+        args: "[-w] [file...]",
+        desc: "Check Java formatting (google-java-format compatible); with no files, every file under the configured sourcePaths. Lists unformatted files and exits non-zero; -w/--write rewrites them in place. Style and ignore globs: formatterOptions.",
+      },
+      {
+        name: "run",
+        args: "[-- <args>]",
+        desc: "Compile the project and run it on the JVM: the configured compilerOptions.mainClass, else the single class declaring main(String[]). Arguments after -- are passed to the program",
+      },
+      { name: "test", desc: "Compile src/test/java and run the JUnit Platform console launcher over it" },
+    ],
+  },
+  {
+    title: "Servers",
+    color: "magenta",
+    rows: [
+      {
+        name: "lsp",
+        args: "[options]",
+        desc: "Start the Java language server (JSON-RPC over stdio)",
+      },
+      {
+        name: "dap",
+        args: "[options]",
+        desc: "Start the debug adapter (Debug Adapter Protocol over stdio): compile the project with debug info, launch its mainClass under JDWP, and bridge breakpoints, stepping, stacks and locals to a DAP client (e.g. an editor)",
+      },
+      {
+        name: "mcp",
+        desc: "Start the MCP server for agents: name-addressed semantic tools (diagnostics, outline, describe/find symbols, members, callers, type hierarchy, import resolution, rename) plus project tools (audit, licenses, search/latest/outdated packages, dependency tree) over stdio",
+      },
+    ],
+  },
+  {
+    title: "Maintenance",
+    color: "yellow",
+    rows: [
+      {
+        name: "version",
+        args: "<major|minor|patch>",
+        desc: "Bump the project version in cappu.json; at a git repo root, also commit it and tag v<version>",
+      },
+      {
+        name: "self-upgrade",
+        desc: "Replace this binary with the latest CD build (needs GITHUB_TOKEN or `gh auth login`)",
+      },
+      {
+        name: "rage",
+        args: "[--open]",
+        desc: "Print version/environment info and the issue tracker URL; --open also opens it in your browser",
+      },
+      { name: "cache clean", desc: "Remove the global download cache" },
+    ],
+  },
+];
 
-Options:
-  -c, --config <file>   Project config (default: ./cappu.json, JSONC).
-                        Sections: "compilerOptions" (classPath, sourcePaths,
-                        quiet, experimentalCompiler) and "lspOptions"
-                        (inlayHints). Command-line flags take precedence.
+const OPTION_GROUPS: HelpGroup[] = [
+  {
+    title: "Options",
+    color: "blue",
+    rows: [
+      {
+        name: "-c, --config <file>",
+        desc: 'Project config (default: ./cappu.json, JSONC). Sections: "compilerOptions" (classPath, sourcePaths, quiet, experimentalCompiler) and "lspOptions" (inlayHints). Command-line flags take precedence.',
+      },
+    ],
+  },
+  {
+    title: "Lsp options",
+    color: "blue",
+    rows: [
+      {
+        name: "-p, --port <port>",
+        desc: "Listen on a TCP port instead of stdio; the first client to connect gets the session (the server exits when it disconnects)",
+      },
+    ],
+  },
+  {
+    title: "Compile options",
+    color: "blue",
+    rows: [
+      {
+        name: "-o, --output <kind>",
+        desc: 'What to produce in ./dist: "classes" (a package tree usable as java -cp <dir>), "jar", or "fat-jar" (includes the dependency jars\' contents)',
+      },
+      {
+        name: "    --artifact <name>",
+        desc: 'Jar base name in ./dist (e.g. "app" -> dist/app.jar); default <artifactId>-<version> or the project dir name',
+      },
+      { name: "-q, --quiet", desc: "Do not print the path of each emitted .class file" },
+    ],
+    note: "(cappu's experimental compiler and its failOnDegrade / validate options are configured in cappu.json under compilerOptions.experimentalCompiler.)",
+  },
+  {
+    title: "Global",
+    color: "blue",
+    rows: [
+      { name: "-h, --help", desc: "Show this help" },
+      { name: "    --version", desc: "Show the version" },
+    ],
+    note: "When an AI agent drives cappu (AGENT, CLAUDECODE, CURSOR_AGENT, ... set), colour and animations are off and --json is implied where supported (audit, licenses, tree, search).",
+  },
+];
 
-Lsp options:
-  -p, --port <port>     Listen on a TCP port instead of stdio; the first client
-                        to connect gets the session (the server exits when it
-                        disconnects)
+// Word-wrap to a width; never breaks a single long token.
+function wrapText(text: string, width: number): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(" ")) {
+    if (line && line.length + 1 + word.length > width) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
 
-Compile options:
-  -o, --output <kind>   What to produce in ./dist: "classes" (a
-                        package tree usable as java -cp <dir>), "jar", or
-                        "fat-jar" (includes the dependency jars' contents)
-      --artifact <name> Jar base name in ./dist (e.g. "app" -> dist/app.jar);
-                        default <artifactId>-<version> or the project dir name
-  -q, --quiet           Do not print the path of each emitted .class file
+const HELP_NAME_COL = 30; // left column width (after the 2-space indent)
 
-  (cappu's experimental compiler and its failOnDegrade / validate options are
-  configured in cappu.json under compilerOptions.experimentalCompiler.)
+function renderUsage(stream: NodeJS.WriteStream): string {
+  const paint = painter(stream);
+  const cols = stream.columns && stream.columns > 50 ? Math.min(stream.columns, 100) : 80;
+  const descCol = 2 + HELP_NAME_COL;
+  const descWidth = Math.max(24, cols - descCol);
 
-Global:
-  -h, --help            Show this help
-      --version         Show the version
+  const renderGroup = (group: HelpGroup): string => {
+    let out = `\n${paint("bold", `${group.title}:`)}\n`;
+    for (const row of group.rows ?? []) {
+      const plainLeft = row.args ? `${row.name} ${row.args}` : row.name;
+      const left = row.args
+        ? `${paint([group.color, "bold"], row.name)} ${paint("dim", row.args)}`
+        : paint([group.color, "bold"], row.name);
+      const descLines = wrapText(row.desc, descWidth);
+      if (plainLeft.length <= HELP_NAME_COL - 1) {
+        out += `  ${left}${" ".repeat(HELP_NAME_COL - plainLeft.length)}${descLines[0]}\n`;
+        for (const l of descLines.slice(1)) out += `${" ".repeat(descCol)}${l}\n`;
+      } else {
+        out += `  ${left}\n`;
+        for (const l of descLines) out += `${" ".repeat(descCol)}${l}\n`;
+      }
+    }
+    if (group.note) {
+      out += "\n";
+      for (const l of wrapText(group.note, cols - 2)) out += `  ${paint("dim", l)}\n`;
+    }
+    return out;
+  };
 
-  When an AI agent drives cappu (AGENT, CLAUDECODE, CURSOR_AGENT, ... set), colour
-  and animations are off and --json is implied where supported (audit, licenses,
-  tree, search).
-`.trimStart();
+  let out = `${paint("bold", "cappu")} ${paint("dim", pkg.version)} - a Java toolchain: package manager, compiler, formatter, language & debug servers\n\n`;
+  out += `${paint("bold", "Usage:")} cappu ${paint("dim", "<command> [...flags] [...args]")}\n`;
+  for (const group of [...COMMAND_GROUPS, ...OPTION_GROUPS]) out += renderGroup(group);
+  return out;
+}
 
 // The IIFE keeps parseArgs's precise inferred result type (the catch path is
 // `never`); a top-level `let` annotation would widen `values` to the generic
@@ -198,7 +333,7 @@ if (values.version) {
   process.exit(0);
 }
 if (values.help || command === undefined) {
-  process.stdout.write(USAGE);
+  process.stdout.write(renderUsage(process.stdout));
   process.exit(values.help ? 0 : 2);
 }
 
@@ -333,6 +468,6 @@ switch (command) {
     await runFormat(files, { write: values.write }, config);
     break;
   default:
-    process.stderr.write(`cappu: unknown command '${command}'\n\n${USAGE}`);
+    process.stderr.write(`cappu: unknown command '${command}'\n\n${renderUsage(process.stderr)}`);
     process.exit(2);
 }

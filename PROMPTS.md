@@ -445,3 +445,5 @@ cappu search commons-lang3
 continue
 - 2026-06-26 09:24 — are there generated sources for tests?
 - 2026-06-26 09:28 — resolve https://github.com/nikeee/cappu/issues/30
+- 2026-06-26 10:03 — group the help texts of all commands. make them more colorful. similar to bun: Bun is a fast JavaScript runtime, package manager, bundler, and test runner. (1.3.14+0d9b296af) [...bun --help example...]
+- 2026-06-26 10:03 — commit on main and push when finished
