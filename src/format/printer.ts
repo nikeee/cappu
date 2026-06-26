@@ -640,10 +640,22 @@ class Printer {
       " ",
     ]);
     if (d.enumConstants.length === 0 && d.members.length === 0) return concat([header, "{}"]);
-    const constants = d.enumConstants.map(c => this.enumConstant(c));
-    // google-java-format always lays enum constants one per line.
-    const constantsDoc = join(concat([",", hardline]), constants);
-    const bodyParts: Doc[] = [hardline, constantsDoc];
+    // google-java-format always lays enum constants one per line. A comment
+    // before a constant stays attached to it (own-line, reflowed); a trailing
+    // comment on the constant's line is kept after it.
+    const constantParts: Doc[] = [];
+    d.enumConstants.forEach((c, i) => {
+      if (i > 0) constantParts.push(",", hardline);
+      for (const cm of this.commentsBefore(this.start(c))) {
+        constantParts.push(reflow(cm.text), hardline);
+      }
+      let cdoc = this.enumConstant(c);
+      const trailing = this.trailingCommentAfter(c);
+      if (trailing) cdoc = concat([cdoc, " ", trailing.text]);
+      constantParts.push(cdoc);
+    });
+    const constants = d.enumConstants;
+    const bodyParts: Doc[] = [hardline, concat(constantParts)];
     if (d.members.length > 0) {
       // The constant list is `;`-terminated, then the members. A blank line
       // separates them only when there are constants above (a bare leading `;`
