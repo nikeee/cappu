@@ -13,6 +13,7 @@ package format
 
 import (
 	"errors"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -730,16 +731,22 @@ func (p *printer) enumConstant(c *compiler.EnumConstantDeclarationData) Doc {
 }
 
 func (p *printer) recordDeclaration(d *compiler.RecordDeclarationData, end int) Doc {
-	comps := make([]Doc, d.RecordComponents.Len())
-	for i, rcn := range nodes(d.RecordComponents) {
-		rc := rcn.AsRecordComponent()
+	renderComp := func(n *compiler.Node) Doc {
+		rc := n.AsRecordComponent()
 		sep := " "
 		if rc.IsVarArgs {
 			sep = "... "
 		}
-		comps[i] = concat(p.annotations(rc.Annotations), p.typ(rc.Type), text(sep), text(p.raw(rc.Name)))
+		return concat(p.annotations(rc.Annotations), p.typ(rc.Type), text(sep), text(p.raw(rc.Name)))
 	}
-	after := []Doc{concat(text("("), join(text(", "), comps), text(")"))}
+	var recordParens Doc
+	if d.RecordComponents.Len() == 0 {
+		recordParens = text("()")
+	} else {
+		items, _ := p.listItems(nodes(d.RecordComponents), renderComp)
+		recordParens = p.argsLike("(", items, ")", fillUnified)
+	}
+	after := []Doc{recordParens}
 	if d.ImplementsTypes.Len() > 0 {
 		after = append(after, concat(text(" implements "), p.typeList(d.ImplementsTypes)))
 	}
@@ -825,16 +832,68 @@ func (p *printer) allShortItems(ns []*compiler.Node) bool {
 	return true
 }
 
+var commaOrNewline = regexp.MustCompile(`[\n,]`)
+
+// itemWithComments renders a delimited-list item with the comments attached to
+// it: leading comments before the item (own-line ones get a forced break after,
+// which also forces the whole list to break; an inline block comment stays
+// inline) and a trailing block comment on the item's line before the separator.
+func (p *printer) itemWithComments(node *compiler.Node, render func() Doc) (Doc, bool) {
+	var parts []Doc
+	comment := false
+	for _, c := range p.commentsBefore(p.start(node)) {
+		comment = true
+		switch {
+		case c.ownLine:
+			parts = append(parts, reflow(c.text), hardline)
+		case c.line:
+			parts = append(parts, text(c.text), hardline)
+		default:
+			pc := c.text
+			if norm, ok := reformatParamComment(c.text); ok {
+				pc = norm
+			}
+			parts = append(parts, text(pc), text(" "))
+		}
+	}
+	parts = append(parts, render())
+	if p.ci < len(p.comments) {
+		t := p.comments[p.ci]
+		if !t.line && !t.ownLine && t.pos >= node.End && !commaOrNewline.MatchString(p.text[node.End:t.pos]) {
+			p.ci++
+			comment = true
+			parts = append(parts, text(" "), text(t.text))
+		}
+	}
+	if len(parts) == 1 {
+		return parts[0], comment
+	}
+	return concat(parts...), comment
+}
+
+// listItems builds a delimited list's items with their comments consumed,
+// reporting whether any item carried a comment.
+func (p *printer) listItems(ns []*compiler.Node, render func(*compiler.Node) Doc) ([]Doc, bool) {
+	items := make([]Doc, len(ns))
+	anyComment := false
+	for i, n := range ns {
+		n := n
+		doc, c := p.itemWithComments(n, func() Doc { return render(n) })
+		items[i] = doc
+		if c {
+			anyComment = true
+		}
+	}
+	return items, anyComment
+}
+
 func (p *printer) parameters(params *compiler.NodeArray, trailing string) Doc {
 	if params.Len() == 0 {
 		return text("()" + trailing)
 	}
-	ps := make([]Doc, params.Len())
-	for i, pp := range nodes(params) {
-		ps[i] = p.parameter(pp.AsParameter())
-	}
 	// Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
-	return p.argsLikeTrailing("(", ps, ")", fillUnified, trailing)
+	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameter(n.AsParameter()) })
+	return p.argsLikeTrailing("(", items, ")", fillUnified, trailing)
 }
 
 func (p *printer) parameter(pp *compiler.ParameterData) Doc {
@@ -863,7 +922,7 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 	// ` {`) goes inside the param level so the list wraps when the whole
 	// signature including it overflows (gjf's rest-of-line rule). Only with no
 	// throws clause - a throws clause sits between the params and that token.
-	emptyBody := body != nil && p.blockIsEmpty(body.AsBlock(), body.End)
+	emptyBody := body != nil && p.blockIsEmpty(body.AsBlock(), p.start(body), body.End)
 	paramTrailing := ""
 	if !hasThrows {
 		switch {
@@ -909,12 +968,21 @@ func (p *printer) initializerBlock(d *compiler.InitializerBlockData) Doc {
 
 // --- statements ----------------------------------------------------------
 
-func (p *printer) blockIsEmpty(b *compiler.BlockData, endPos int) bool {
-	return b.Statements.Len() == 0 && !p.hasCommentBefore(endPos)
+func (p *printer) blockIsEmpty(b *compiler.BlockData, startPos, endPos int) bool {
+	if b.Statements.Len() > 0 {
+		return false
+	}
+	// Only a comment *inside* the block (after its `{`) makes it non-empty; a
+	// pending comment before the block (e.g. an unconsumed parameter comment)
+	// must not be miscounted - blockIsEmpty can be queried before those are
+	// consumed (methodLike computes the body shape before rendering params).
+	return !p.hasCommentBefore(endPos) || p.comments[p.ci].pos <= startPos
 }
 
 func (p *printer) block(b *compiler.BlockData, endPos int) Doc {
-	if p.blockIsEmpty(b, endPos) {
+	// Here the comment cursor is already positioned past anything preceding the
+	// block, so a pending comment before endPos is genuinely inside it.
+	if b.Statements.Len() == 0 && !p.hasCommentBefore(endPos) {
 		return text("{}")
 	}
 	return concat(text("{"), p.blockRest(b, endPos))
@@ -1357,16 +1425,18 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData) Doc {
 	// short, else one per line (UNIFIED); the closing `}` goes on its own line
 	// back at the parent indent (a -2 break cancels the +2).
 	// ponytail: trailing-comma -> FORCED after-open break is not modeled.
+	items, anyComment := p.listItems(nodes(e.Elements), func(el *compiler.Node) Doc { return p.node(el) })
+	// A comment forces one-per-line (gjf), else short items fill.
 	fill := fillUnified
-	if p.allShortItems(nodes(e.Elements)) {
+	if !anyComment && p.allShortItems(nodes(e.Elements)) {
 		fill = fillIndependent
 	}
 	var innerParts []Doc
-	for i, el := range nodes(e.Elements) {
+	for i, el := range items {
 		if i > 0 {
 			innerParts = append(innerParts, text(","), brk(fill, " ", ZERO, nil))
 		}
-		innerParts = append(innerParts, p.node(el))
+		innerParts = append(innerParts, el)
 	}
 	inner := level(ZERO, innerParts)
 	return concat(
@@ -1392,13 +1462,20 @@ func (p *printer) lambda(e *compiler.LambdaExpressionData) Doc {
 		}
 		head = concat(text("("), join(text(", "), ps), text(")"))
 	}
-	var body Doc
 	if e.Body.Kind == compiler.Block {
-		body = p.block(e.Body.AsBlock(), e.Body.End)
-	} else {
-		body = p.node(e.Body)
+		return concat(head, text(" -> "), p.block(e.Body.AsBlock(), e.Body.End))
 	}
-	return concat(head, text(" -> "), body)
+	// A comment before an expression body sits own-line at a +8 continuation
+	// indent (gjf), forcing `-> ` onto its own line; the comment forces the break.
+	if p.hasCommentBefore(p.start(e.Body)) {
+		var parts []Doc
+		for _, c := range p.commentsBefore(p.start(e.Body)) {
+			parts = append(parts, reflow(c.text), hardline)
+		}
+		parts = append(parts, p.node(e.Body))
+		return concat(head, text(" ->"), level(plus4, []Doc{hardline, concat(parts...)}))
+	}
+	return concat(head, text(" -> "), p.node(e.Body))
 }
 
 // conditional lays out a ternary: the condition stays on the line, `?` and `:`
