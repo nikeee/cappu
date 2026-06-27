@@ -1431,11 +1431,44 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 }
 
 func (p *printer) call(e *compiler.CallExpressionData) Doc {
-	return concat(p.node(e.Expression), p.typeArguments(e.TypeArguments), p.argList(e.Arguments))
+	return p.callTrailing(e, nil)
+}
+
+// statementTail emits an expression that a statement terminates with trailing
+// (a `;`), routing that token into the expression's tail delimited level (a
+// plain call or constructor argument list) so the list wraps when the whole
+// `(...);` run overflows - gjf's rest-of-line rule. Mirrors node()'s dispatch:
+// a call on a `.`-access renders via dotChain, which takes no trailing token,
+// so only a plain `foo(args)` call routes the `;` inward.
+func (p *printer) statementTail(e *compiler.Node, trailing Doc) Doc {
+	switch e.Kind {
+	case compiler.CallExpression:
+		ce := e.AsCallExpression()
+		if ce.Expression.Kind != compiler.PropertyAccessExpression {
+			return p.callTrailing(ce, trailing)
+		}
+	case compiler.ObjectCreationExpression:
+		oc := e.AsObjectCreationExpression()
+		if oc.ClassBody == nil {
+			return p.objectCreationTrailing(oc, e.End, trailing)
+		}
+	}
+	return concat(p.node(e), trailing)
+}
+
+func (p *printer) callTrailing(e *compiler.CallExpressionData, trailing Doc) Doc {
+	return concat(p.node(e.Expression), p.typeArguments(e.TypeArguments), p.argListTrailing(e.Arguments, trailing))
 }
 
 func (p *printer) argList(args *compiler.NodeArray) Doc {
+	return p.argListTrailing(args, nil)
+}
+
+func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 	if args.Len() == 0 {
+		if trailing != nil {
+			return concat(text("()"), trailing)
+		}
 		return text("()")
 	}
 	argNodes := nodes(args)
@@ -1468,17 +1501,30 @@ func (p *printer) argList(args *compiler.NodeArray) Doc {
 			as[i] = concat(parts...)
 		}
 	}
-	return p.argsLike("(", as, ")", p.fillMode(anyComment, argNodes))
+	return p.argsLikeTrailing("(", as, ")", p.fillMode(anyComment, argNodes), trailing)
 }
 
 func (p *printer) objectCreation(e *compiler.ObjectCreationExpressionData, end int) Doc {
+	return p.objectCreationTrailing(e, end, nil)
+}
+
+func (p *printer) objectCreationTrailing(e *compiler.ObjectCreationExpressionData, end int, trailing Doc) Doc {
 	var parts []Doc
 	if e.Qualifier != nil {
 		parts = append(parts, p.node(e.Qualifier), text("."))
 	}
-	parts = append(parts, text("new "), p.typ(e.Type), p.argList(e.Arguments))
+	// A trailing token only rides inside the argument list when there is no
+	// anonymous class body (otherwise it belongs after the `}`).
+	argTrailing := trailing
+	if e.ClassBody != nil {
+		argTrailing = nil
+	}
+	parts = append(parts, text("new "), p.typ(e.Type), p.argListTrailing(e.Arguments, argTrailing))
 	if e.ClassBody != nil {
 		parts = append(parts, text(" "), p.body(e.ClassBody, end))
+		if trailing != nil {
+			parts = append(parts, trailing)
+		}
 	}
 	return concat(parts...)
 }
@@ -1626,7 +1672,7 @@ func (p *printer) node(node *compiler.Node) Doc {
 	case compiler.LocalVariableDeclarationStatement:
 		return p.localVar(node.AsLocalVariableDeclarationStatement())
 	case compiler.ExpressionStatement:
-		return concat(p.node(node.AsExpressionStatement().Expression), text(";"))
+		return p.statementTail(node.AsExpressionStatement().Expression, text(";"))
 	case compiler.IfStatement:
 		return p.ifStatement(node.AsIfStatement())
 	case compiler.WhileStatement:
@@ -1640,11 +1686,11 @@ func (p *printer) node(node *compiler.Node) Doc {
 	case compiler.ReturnStatement:
 		r := node.AsReturnStatement()
 		if r.Expression != nil {
-			return concat(text("return "), p.node(r.Expression), text(";"))
+			return concat(text("return "), p.statementTail(r.Expression, text(";")))
 		}
 		return text("return;")
 	case compiler.ThrowStatement:
-		return concat(text("throw "), p.node(node.AsThrowStatement().Expression), text(";"))
+		return concat(text("throw "), p.statementTail(node.AsThrowStatement().Expression, text(";")))
 	case compiler.BreakStatement:
 		b := node.AsLabelStatement()
 		if b.Label != nil {

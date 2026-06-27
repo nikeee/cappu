@@ -1311,16 +1311,37 @@ class Printer {
     return level(PLUS4, parts);
   }
 
-  private call(e: CallExpression): Doc {
+  // Emit an expression that a statement terminates with `trailing` (a `;`),
+  // routing that token into the expression's tail delimited level (a call or
+  // constructor argument list) so the list wraps when the whole `(...);` run
+  // overflows - gjf's rest-of-line rule. Other expression shapes just append it.
+  private statementTail(e: Expression, trailing: string): Doc {
+    // Mirror node()'s dispatch: a call on a `.`-access renders via dotChain
+    // (explicit type-arg placement, chain breaking), which does not take a
+    // trailing token, so only a plain `foo(args)` call routes the `;` inward.
+    if (
+      e.kind === SyntaxKind.CallExpression &&
+      (e as CallExpression).expression.kind !== SyntaxKind.PropertyAccessExpression
+    ) {
+      return this.call(e as CallExpression, trailing);
+    }
+    if (e.kind === SyntaxKind.ObjectCreationExpression) {
+      const oc = e as ObjectCreationExpression;
+      if (!oc.classBody) return this.objectCreation(oc, trailing);
+    }
+    return concat([this.node(e), trailing]);
+  }
+
+  private call(e: CallExpression, trailing: Doc = ""): Doc {
     return concat([
       this.node(e.expression),
       this.typeArguments(e.typeArguments),
-      this.argList(e.arguments),
+      this.argList(e.arguments, trailing),
     ]);
   }
 
-  private argList(args: NodeArray<Expression>): Doc {
-    if (args.length === 0) return "()";
+  private argList(args: NodeArray<Expression>, trailing: Doc = ""): Doc {
+    if (args.length === 0) return concat(["()", trailing]);
     let anyComment = false;
     const items = args.map(a => {
       const parts: Doc[] = [];
@@ -1337,14 +1358,16 @@ class Printer {
       if (this.attachTrailingBlockComment(parts, a.end)) anyComment = true;
       return parts.length === 1 ? parts[0] : concat(parts);
     });
-    return this.argsLike("(", items, ")", this.fillMode(anyComment, args));
+    return this.argsLike("(", items, ")", this.fillMode(anyComment, args), trailing);
   }
 
-  private objectCreation(e: ObjectCreationExpression): Doc {
+  private objectCreation(e: ObjectCreationExpression, trailing: Doc = ""): Doc {
     const parts: Doc[] = [];
     if (e.qualifier) parts.push(this.node(e.qualifier), ".");
-    parts.push("new ", this.type(e.type), this.argList(e.arguments));
-    if (e.classBody) parts.push(" ", this.body(e.classBody, e.end));
+    // A trailing token only rides inside the argument list when there is no
+    // anonymous class body (otherwise it belongs after the `}`).
+    parts.push("new ", this.type(e.type), this.argList(e.arguments, e.classBody ? "" : trailing));
+    if (e.classBody) parts.push(" ", this.body(e.classBody, e.end), trailing);
     return concat(parts);
   }
 
@@ -1461,7 +1484,7 @@ class Printer {
       case SyntaxKind.LocalVariableDeclarationStatement:
         return this.localVar(node as LocalVariableDeclarationStatement);
       case SyntaxKind.ExpressionStatement:
-        return concat([this.node((node as ExpressionStatement).expression), ";"]);
+        return this.statementTail((node as ExpressionStatement).expression, ";");
       case SyntaxKind.IfStatement:
         return this.ifStatement(node as IfStatement);
       case SyntaxKind.WhileStatement:
@@ -1474,10 +1497,12 @@ class Printer {
         return this.forEachStatement(node as ForEachStatement);
       case SyntaxKind.ReturnStatement: {
         const r = node as ReturnStatement;
-        return r.expression ? concat(["return ", this.node(r.expression), ";"]) : "return;";
+        return r.expression
+          ? concat(["return ", this.statementTail(r.expression, ";")])
+          : "return;";
       }
       case SyntaxKind.ThrowStatement:
-        return concat(["throw ", this.node((node as ThrowStatement).expression), ";"]);
+        return concat(["throw ", this.statementTail((node as ThrowStatement).expression, ";")]);
       case SyntaxKind.BreakStatement: {
         const b = node as { label?: Node };
         return b.label ? concat(["break ", this.raw(b.label), ";"]) : "break;";

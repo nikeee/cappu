@@ -1,0 +1,11 @@
+package p;
+
+class C {
+  String n() {
+    return computeSomethingReasonablyLong(theFirstArgument, theSecondArgument, theThirdArgumentHere);
+  }
+
+  void p() {
+    registerHandlerForLongEventName(theFirstArgument, theSecondArgument, theThirdArgumentValue);
+  }
+}
