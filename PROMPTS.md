@@ -451,3 +451,4 @@ cappu search commons-lang3
 - 2026-06-27 13:54 — remove it form config
 - 2026-06-27 13:54 — in a similar fashion, do https://github.com/nikeee/cappu/issues/29
 - 2026-06-27 14:15 — go through the formatting code and investigate opportunities for de-duplication, refactorings and simplifications
+- 2026-06-27 21:44 — the foratter is not on par with gjf. make it 100% compatible. we're only at 40%. thats unacceptable.

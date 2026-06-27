@@ -183,6 +183,19 @@ class Printer {
     return (this.text.slice(from, pos).match(/\n/g)?.length ?? 0) >= 2;
   }
 
+  // The separator after an opening `{`, before the first body entry.
+  // google-java-format preserves one source blank line here, so emit two
+  // hardlines when the source left a blank between the brace and the first
+  // rendered thing (a leading comment if present, else the entry). `bracePos`
+  // is the offset just after `{` (a node's raw `.pos`, before its trivia);
+  // `firstItemStart` is the first entry's trivia-skipped start.
+  private braceLead(bracePos: number, firstItemStart: number): Doc {
+    const firstContent = this.hasCommentBefore(firstItemStart)
+      ? this.comments[this.ci].pos
+      : firstItemStart;
+    return this.blankBeforePos(bracePos, firstContent) ? concat([hardline, hardline]) : hardline;
+  }
+
   /** Whether a pending comment begins before `pos` (without consuming it). */
   private hasCommentBefore(pos: number): boolean {
     return this.ci < this.comments.length && this.comments[this.ci].pos < pos;
@@ -261,6 +274,10 @@ class Printer {
         prevEnd = c.end;
       }
 
+      // gjf preserves one source blank line between a leading own-line comment
+      // and the item it precedes (a "section header" comment set off from its
+      // member). Only when own-line comments were already pushed for this entry.
+      const afterComments = prevEnd;
       let itemDoc = this.node(item);
       if (inlineLead) itemDoc = concat([reflow(inlineLead.text), " ", itemDoc]);
       const trailing = this.trailingCommentAfter(item);
@@ -270,7 +287,9 @@ class Printer {
       } else {
         prevEnd = item.end;
       }
-      pushEntry(itemDoc, false);
+      const itemBlank =
+        pushedInEntry && !inlineLead && this.blankBeforePos(afterComments, itemStart);
+      pushEntry(itemDoc, itemBlank);
     });
 
     for (const c of this.commentsBefore(endPos)) {
@@ -604,12 +623,9 @@ class Printer {
    * the offset just past the closing brace, bounding trailing comments. */
   private body(members: NodeArray<Node>, endPos: number): Doc {
     if (members.length === 0 && !this.hasCommentBefore(endPos)) return "{}";
-    return concat([
-      "{",
-      indent(concat([hardline, ...this.members(members, endPos)])),
-      hardline,
-      "}",
-    ]);
+    const lead =
+      members.length > 0 ? this.braceLead(members[0].pos, this.start(members[0])) : hardline;
+    return concat(["{", indent(concat([lead, ...this.members(members, endPos)])), hardline, "}"]);
   }
 
   private classDeclaration(d: ClassDeclaration): Doc {
@@ -640,22 +656,37 @@ class Printer {
       " ",
     ]);
     if (d.enumConstants.length === 0 && d.members.length === 0) return concat([header, "{}"]);
+    // Leading blank after `{` (before any constant comment is consumed below).
+    const lead =
+      d.enumConstants.length > 0
+        ? this.braceLead(d.enumConstants[0].pos, this.start(d.enumConstants[0]))
+        : hardline;
     // google-java-format always lays enum constants one per line. A comment
     // before a constant stays attached to it (own-line, reflowed); a trailing
     // comment on the constant's line is kept after it.
     const constantParts: Doc[] = [];
+    let prevConstEnd = -1;
     d.enumConstants.forEach((c, i) => {
-      if (i > 0) constantParts.push(",", hardline);
-      for (const cm of this.commentsBefore(this.start(c))) {
-        constantParts.push(reflow(cm.text), hardline);
+      const lead = this.commentsBefore(this.start(c));
+      const firstPos = lead.length > 0 ? lead[0].pos : this.start(c);
+      if (i > 0) {
+        // gjf preserves one source blank line between enum constants.
+        const blank = this.blankBeforePos(prevConstEnd, firstPos);
+        constantParts.push(",", blank ? concat([hardline, hardline]) : hardline);
       }
+      for (const cm of lead) constantParts.push(reflow(cm.text), hardline);
       let cdoc = this.enumConstant(c);
       const trailing = this.trailingCommentAfter(c);
-      if (trailing) cdoc = concat([cdoc, " ", trailing.text]);
+      if (trailing) {
+        cdoc = concat([cdoc, " ", trailing.text]);
+        prevConstEnd = trailing.end;
+      } else {
+        prevConstEnd = c.end;
+      }
       constantParts.push(cdoc);
     });
     const constants = d.enumConstants;
-    const bodyParts: Doc[] = [hardline, concat(constantParts)];
+    const bodyParts: Doc[] = [lead, concat(constantParts)];
     if (d.members.length > 0) {
       // The constant list is `;`-terminated, then the members. A blank line
       // separates them only when there are constants above (a bare leading `;`
@@ -928,8 +959,12 @@ class Printer {
   /** A block's body after the opening `{` (the `{` is emitted by the caller, so
    * it can be placed inside another level to count toward a wrap decision). */
   private blockRest(b: Block): Doc {
+    const lead =
+      b.statements.length > 0
+        ? this.braceLead(b.statements[0].pos, this.start(b.statements[0]))
+        : hardline;
     return concat([
-      indent(concat([hardline, ...this.statementList(b.statements, b.end)])),
+      indent(concat([lead, ...this.statementList(b.statements, b.end)])),
       hardline,
       "}",
     ]);

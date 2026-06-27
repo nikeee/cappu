@@ -118,6 +118,23 @@ func (p *printer) hasCommentBefore(pos int) bool {
 	return p.ci < len(p.comments) && p.comments[p.ci].pos < pos
 }
 
+// braceLead is the separator after an opening `{`, before the first body entry.
+// google-java-format preserves one source blank line here, so emit two
+// hardlines when the source left a blank between the brace and the first
+// rendered thing (a leading comment if present, else the entry). bracePos is
+// the offset just after `{` (a node's raw .Pos, before its trivia);
+// firstItemStart is the first entry's trivia-skipped start.
+func (p *printer) braceLead(bracePos, firstItemStart int) Doc {
+	firstContent := firstItemStart
+	if p.hasCommentBefore(firstItemStart) {
+		firstContent = p.comments[p.ci].pos
+	}
+	if p.blankBeforePos(bracePos, firstContent) {
+		return concat(hardline, hardline)
+	}
+	return hardline
+}
+
 func (p *printer) commentsBefore(pos int) []comment {
 	var out []comment
 	for p.ci < len(p.comments) && p.comments[p.ci].pos < pos {
@@ -200,6 +217,10 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 			prevEnd = c.end
 		}
 
+		// gjf preserves one source blank line between a leading own-line comment
+		// and the item it precedes (a "section header" comment set off from its
+		// member). Only when own-line comments were already pushed for this entry.
+		afterComments := prevEnd
 		itemDoc := p.node(item)
 		if inlineLead != nil {
 			itemDoc = concat(reflow(inlineLead.text), text(" "), itemDoc)
@@ -210,7 +231,8 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 		} else {
 			prevEnd = item.End
 		}
-		pushEntry(itemDoc, false)
+		itemBlank := pushedInEntry && inlineLead == nil && p.blankBeforePos(afterComments, itemStart)
+		pushEntry(itemDoc, itemBlank)
 	}
 
 	for _, c := range p.commentsBefore(endPos) {
@@ -622,9 +644,13 @@ func (p *printer) body(members *compiler.NodeArray, endPos int) Doc {
 	if members.Len() == 0 && !p.hasCommentBefore(endPos) {
 		return text("{}")
 	}
+	lead := hardline
+	if members.Len() > 0 {
+		lead = p.braceLead(members.Nodes[0].Pos, p.start(members.Nodes[0]))
+	}
 	return concat(
 		text("{"),
-		indent(concat(append([]Doc{hardline}, p.members(members, endPos)...)...)),
+		indent(concat(append([]Doc{lead}, p.members(members, endPos)...)...)),
 		hardline,
 		text("}"),
 	)
@@ -669,24 +695,43 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 		return concat(header, text("{}"))
 	}
 	consts := nodes(d.EnumConstants)
+	// Leading blank after `{` (before any constant comment is consumed below).
+	lead := hardline
+	if len(consts) > 0 {
+		lead = p.braceLead(consts[0].Pos, p.start(consts[0]))
+	}
 	// google-java-format always lays enum constants one per line. A comment
 	// before a constant stays attached to it (own-line, reflowed); a trailing
 	// comment on the constant's line is kept after it.
 	var constantParts []Doc
+	prevConstEnd := -1
 	for i, c := range consts {
-		if i > 0 {
-			constantParts = append(constantParts, text(","), hardline)
+		leadComments := p.commentsBefore(p.start(c))
+		firstPos := p.start(c)
+		if len(leadComments) > 0 {
+			firstPos = leadComments[0].pos
 		}
-		for _, cm := range p.commentsBefore(p.start(c)) {
+		if i > 0 {
+			// gjf preserves one source blank line between enum constants.
+			if p.blankBeforePos(prevConstEnd, firstPos) {
+				constantParts = append(constantParts, text(","), hardline, hardline)
+			} else {
+				constantParts = append(constantParts, text(","), hardline)
+			}
+		}
+		for _, cm := range leadComments {
 			constantParts = append(constantParts, reflow(cm.text), hardline)
 		}
 		cdoc := p.enumConstant(c.AsEnumConstantDeclaration())
 		if trailing, ok := p.trailingCommentAfter(c); ok {
 			cdoc = concat(cdoc, text(" "), text(trailing.text))
+			prevConstEnd = trailing.end
+		} else {
+			prevConstEnd = c.End
 		}
 		constantParts = append(constantParts, cdoc)
 	}
-	bodyParts := []Doc{hardline, concat(constantParts...)}
+	bodyParts := []Doc{lead, concat(constantParts...)}
 	if d.Members.Len() > 0 {
 		// The constant list is `;`-terminated, then the members. A blank line
 		// separates them only when there are constants above (a bare leading `;`
@@ -1008,8 +1053,12 @@ func (p *printer) block(b *compiler.BlockData, endPos int) Doc {
 // caller, so it can be placed inside another level to count toward a wrap
 // decision).
 func (p *printer) blockRest(b *compiler.BlockData, endPos int) Doc {
+	lead := hardline
+	if b.Statements.Len() > 0 {
+		lead = p.braceLead(b.Statements.Nodes[0].Pos, p.start(b.Statements.Nodes[0]))
+	}
 	return concat(
-		indent(concat(append([]Doc{hardline}, p.listDocs(nodes(b.Statements), false, endPos)...)...)),
+		indent(concat(append([]Doc{lead}, p.listDocs(nodes(b.Statements), false, endPos)...)...)),
 		hardline,
 		text("}"),
 	)
