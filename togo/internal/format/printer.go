@@ -1000,11 +1000,13 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 		head = append(head, p.typ(returnType), text(" "))
 	}
 	hasThrows := throws.Len() > 0
-	// The token trailing the parameter list on the same line (`;`, ` {}`, or
-	// ` {`) and any `throws` clause go inside the param level so the whole
-	// signature wraps as a unit when it overflows (gjf's rest-of-line rule): the
-	// `throws` break is UNIFIED with the param-open break, so when the params go
-	// one-per-line the `throws` clause and the brace fold onto their own lines.
+	// gjf breaks a `throws` clause onto its own +4 line BEFORE it explodes the
+	// parameters: an outer group holds the `throws` break (so it fires when the
+	// whole `(...) throws X {` overflows), while the parameter list is a
+	// self-contained nested level that explodes only if the params alone do not
+	// fit. So `format(a, b, c)` keeps its params inline with `throws` wrapped, but
+	// a longer list goes one-per-line with `throws` wrapped too. With no throws
+	// clause the body-open token rides inside the param level (rest-of-line rule).
 	emptyBody := body != nil && p.blockIsEmpty(body.AsBlock(), p.start(body), body.End)
 	bodyToken := " {"
 	switch {
@@ -1013,7 +1015,7 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 	case emptyBody:
 		bodyToken = " {}"
 	}
-	var paramTrailing Doc = text(bodyToken)
+	var sig Doc
 	if hasThrows {
 		throwsParts := []Doc{text("throws ")}
 		for i, t := range nodes(throws) {
@@ -1022,15 +1024,24 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 			}
 			throwsParts = append(throwsParts, p.typ(t))
 		}
+		// Continuation throws types indent +8 (the `throws` line is already +4 from
+		// the outer break, and gjf indents the type list +4 beyond the keyword).
 		throwsIndent := ZERO
 		if throws.Len() > 1 {
-			throwsIndent = plus4
+			throwsIndent = indentConst(8)
 		}
-		paramTrailing = concat(brk(fillUnified, " ", ZERO, nil), level(throwsIndent, throwsParts), text(bodyToken))
+		sig = level(ZERO, []Doc{
+			p.parameters(params, nil),
+			brk(fillUnified, " ", plus4, nil),
+			level(throwsIndent, throwsParts),
+			text(bodyToken),
+		})
+	} else {
+		sig = p.parameters(params, text(bodyToken))
 	}
-	head = append(head, text(p.raw(name)), p.parameters(params, paramTrailing))
-	// The body-open token (and throws) already trail the params; emit the rest
-	// of the block when there is a real body, else the signature is complete.
+	head = append(head, text(p.raw(name)), sig)
+	// Emit the rest of the block when there is a real body, else the signature
+	// (with its trailing `;`/` {}`) is complete.
 	if body == nil || emptyBody {
 		return concat(head...)
 	}

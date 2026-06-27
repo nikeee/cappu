@@ -927,22 +927,36 @@ class Printer {
     // one-per-line the `throws` clause and the brace fold onto their own lines.
     const emptyBody = decl.body !== undefined && this.blockIsEmpty(decl.body);
     const bodyToken = !decl.body ? ";" : emptyBody ? " {}" : " {";
-    let paramTrailing: Doc = bodyToken;
+    let sig: Doc;
     if (hasThrows) {
+      // gjf breaks a `throws` clause onto its own +4 line BEFORE it explodes the
+      // parameters: an outer group holds the `throws` break (so it fires when the
+      // whole `(...) throws X {` overflows), while the parameter list is a
+      // self-contained nested level that explodes only if the params alone do not
+      // fit. So `format(a, b, c)` keeps its params inline with `throws` wrapped,
+      // but a longer list goes one-per-line with `throws` wrapped too.
       const throwsParts: Doc[] = ["throws "];
       decl.throws!.forEach((t, i) => {
         if (i > 0) throwsParts.push(",", brk("unified", " ", ZERO));
         throwsParts.push(this.type(t));
       });
-      paramTrailing = concat([
-        brk("unified", " ", ZERO),
-        level(decl.throws!.length > 1 ? PLUS4 : ZERO, throwsParts),
+      // Continuation throws types indent +8 (the `throws` line is already +4 from
+      // the outer break, and gjf indents the type list +4 beyond the keyword).
+      const throwsClause = level(decl.throws!.length > 1 ? indentConst(8) : ZERO, throwsParts);
+      sig = level(ZERO, [
+        this.parameters(decl.parameters),
+        brk("unified", " ", PLUS4),
+        throwsClause,
         bodyToken,
       ]);
+    } else {
+      // No throws clause: the body-open token rides inside the param level so the
+      // list wraps when the whole `(...)<token>` run overflows (rest-of-line).
+      sig = this.parameters(decl.parameters, bodyToken);
     }
-    head.push(this.raw(decl.name), this.parameters(decl.parameters, paramTrailing));
-    // The body-open token (and throws) already trail the params; emit the rest
-    // of the block when there is a real body, else the signature is complete.
+    head.push(this.raw(decl.name), sig);
+    // Emit the rest of the block when there is a real body, else the signature
+    // (with its trailing `;`/` {}`) is complete.
     if (!decl.body || emptyBody) return concat(head);
     return concat([...head, this.blockRest(decl.body)]);
   }

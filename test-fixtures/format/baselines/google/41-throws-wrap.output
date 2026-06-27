@@ -14,4 +14,9 @@ class C {
   void ok() throws Exception {
     return;
   }
+
+  static void format(final JavaInput javaInput, JavaOutput javaOutput, JavaFormatterOptions options)
+      throws FormatterException {
+    return;
+  }
 }
