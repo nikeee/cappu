@@ -1,0 +1,10 @@
+package p;
+
+public enum E {
+    ONE,
+
+    TWO,
+    THREE;
+
+    void m() {}
+}

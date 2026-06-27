@@ -13,7 +13,6 @@ package format
 
 import (
 	"errors"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -119,6 +118,23 @@ func (p *printer) hasCommentBefore(pos int) bool {
 	return p.ci < len(p.comments) && p.comments[p.ci].pos < pos
 }
 
+// braceLead is the separator after an opening `{`, before the first body entry.
+// google-java-format preserves one source blank line here, so emit two
+// hardlines when the source left a blank between the brace and the first
+// rendered thing (a leading comment if present, else the entry). bracePos is
+// the offset just after `{` (a node's raw .Pos, before its trivia);
+// firstItemStart is the first entry's trivia-skipped start.
+func (p *printer) braceLead(bracePos, firstItemStart int) Doc {
+	firstContent := firstItemStart
+	if p.hasCommentBefore(firstItemStart) {
+		firstContent = p.comments[p.ci].pos
+	}
+	if p.blankBeforePos(bracePos, firstContent) {
+		return concat(hardline, hardline)
+	}
+	return hardline
+}
+
 func (p *printer) commentsBefore(pos int) []comment {
 	var out []comment
 	for p.ci < len(p.comments) && p.comments[p.ci].pos < pos {
@@ -201,6 +217,10 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 			prevEnd = c.end
 		}
 
+		// gjf preserves one source blank line between a leading own-line comment
+		// and the item it precedes (a "section header" comment set off from its
+		// member). Only when own-line comments were already pushed for this entry.
+		afterComments := prevEnd
 		itemDoc := p.node(item)
 		if inlineLead != nil {
 			itemDoc = concat(reflow(inlineLead.text), text(" "), itemDoc)
@@ -211,7 +231,8 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 		} else {
 			prevEnd = item.End
 		}
-		pushEntry(itemDoc, false)
+		itemBlank := pushedInEntry && inlineLead == nil && p.blankBeforePos(afterComments, itemStart)
+		pushEntry(itemDoc, itemBlank)
 	}
 
 	for _, c := range p.commentsBefore(endPos) {
@@ -623,9 +644,13 @@ func (p *printer) body(members *compiler.NodeArray, endPos int) Doc {
 	if members.Len() == 0 && !p.hasCommentBefore(endPos) {
 		return text("{}")
 	}
+	lead := hardline
+	if members.Len() > 0 {
+		lead = p.braceLead(members.Nodes[0].Pos, p.start(members.Nodes[0]))
+	}
 	return concat(
 		text("{"),
-		indent(concat(append([]Doc{hardline}, p.members(members, endPos)...)...)),
+		indent(concat(append([]Doc{lead}, p.members(members, endPos)...)...)),
 		hardline,
 		text("}"),
 	)
@@ -670,24 +695,43 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 		return concat(header, text("{}"))
 	}
 	consts := nodes(d.EnumConstants)
+	// Leading blank after `{` (before any constant comment is consumed below).
+	lead := hardline
+	if len(consts) > 0 {
+		lead = p.braceLead(consts[0].Pos, p.start(consts[0]))
+	}
 	// google-java-format always lays enum constants one per line. A comment
 	// before a constant stays attached to it (own-line, reflowed); a trailing
 	// comment on the constant's line is kept after it.
 	var constantParts []Doc
+	prevConstEnd := -1
 	for i, c := range consts {
-		if i > 0 {
-			constantParts = append(constantParts, text(","), hardline)
+		leadComments := p.commentsBefore(p.start(c))
+		firstPos := p.start(c)
+		if len(leadComments) > 0 {
+			firstPos = leadComments[0].pos
 		}
-		for _, cm := range p.commentsBefore(p.start(c)) {
+		if i > 0 {
+			// gjf preserves one source blank line between enum constants.
+			if p.blankBeforePos(prevConstEnd, firstPos) {
+				constantParts = append(constantParts, text(","), hardline, hardline)
+			} else {
+				constantParts = append(constantParts, text(","), hardline)
+			}
+		}
+		for _, cm := range leadComments {
 			constantParts = append(constantParts, reflow(cm.text), hardline)
 		}
 		cdoc := p.enumConstant(c.AsEnumConstantDeclaration())
 		if trailing, ok := p.trailingCommentAfter(c); ok {
 			cdoc = concat(cdoc, text(" "), text(trailing.text))
+			prevConstEnd = trailing.end
+		} else {
+			prevConstEnd = c.End
 		}
 		constantParts = append(constantParts, cdoc)
 	}
-	bodyParts := []Doc{hardline, concat(constantParts...)}
+	bodyParts := []Doc{lead, concat(constantParts...)}
 	if d.Members.Len() > 0 {
 		// The constant list is `;`-terminated, then the members. A blank line
 		// separates them only when there are constants above (a bare leading `;`
@@ -832,7 +876,30 @@ func (p *printer) allShortItems(ns []*compiler.Node) bool {
 	return true
 }
 
-var commaOrNewline = regexp.MustCompile(`[\n,]`)
+// fillMode picks gjf's inter-item fill: one item per line (UNIFIED) when any
+// item carries a comment, else fill (INDEPENDENT) only when every item is short.
+func (p *printer) fillMode(anyComment bool, ns []*compiler.Node) FillMode {
+	if !anyComment && p.allShortItems(ns) {
+		return fillIndependent
+	}
+	return fillUnified
+}
+
+// attachTrailingBlockComment attaches a same-line trailing block comment
+// (`item /* note */`) after an item if the next pending comment is one. A line
+// comment is left to the statement boundary (it would comment out the following
+// separator). Returns the parts and whether a comment was consumed.
+func (p *printer) attachTrailingBlockComment(parts []Doc, endPos int) ([]Doc, bool) {
+	if p.ci < len(p.comments) {
+		t := p.comments[p.ci]
+		if !t.line && !t.ownLine && t.pos >= endPos && !strings.ContainsAny(p.text[endPos:t.pos], "\n,") {
+			p.ci++
+			parts = append(parts, text(" "), text(t.text))
+			return parts, true
+		}
+	}
+	return parts, false
+}
 
 // itemWithComments renders a delimited-list item with the comments attached to
 // it: leading comments before the item (own-line ones get a forced break after,
@@ -857,14 +924,8 @@ func (p *printer) itemWithComments(node *compiler.Node, render func() Doc) (Doc,
 		}
 	}
 	parts = append(parts, render())
-	if p.ci < len(p.comments) {
-		t := p.comments[p.ci]
-		if !t.line && !t.ownLine && t.pos >= node.End && !commaOrNewline.MatchString(p.text[node.End:t.pos]) {
-			p.ci++
-			comment = true
-			parts = append(parts, text(" "), text(t.text))
-		}
-	}
+	parts, attached := p.attachTrailingBlockComment(parts, node.End)
+	comment = comment || attached
 	if len(parts) == 1 {
 		return parts[0], comment
 	}
@@ -992,8 +1053,12 @@ func (p *printer) block(b *compiler.BlockData, endPos int) Doc {
 // caller, so it can be placed inside another level to count toward a wrap
 // decision).
 func (p *printer) blockRest(b *compiler.BlockData, endPos int) Doc {
+	lead := hardline
+	if b.Statements.Len() > 0 {
+		lead = p.braceLead(b.Statements.Nodes[0].Pos, p.start(b.Statements.Nodes[0]))
+	}
 	return concat(
-		indent(concat(append([]Doc{hardline}, p.listDocs(nodes(b.Statements), false, endPos)...)...)),
+		indent(concat(append([]Doc{lead}, p.listDocs(nodes(b.Statements), false, endPos)...)...)),
 		hardline,
 		text("}"),
 	)
@@ -1199,7 +1264,9 @@ func (p *printer) switchClause(c *compiler.SwitchClauseData, end int) Doc {
 		for i, st := range stmts {
 			ss[i] = p.node(st)
 		}
-		return concat(label, guard, text(" -> "), join(text(" "), ss))
+		// A non-block arrow body (an expression, throw, or yield statement) folds
+		// onto a +4 continuation line after the `->` when it does not fit (gjf).
+		return concat(label, guard, text(" ->"), level(plus4, []Doc{line, join(text(" "), ss)}))
 	}
 	return concat(label, guard, text(":"), indent(concat(append([]Doc{hardline}, p.listDocs(nodes(c.Statements), false, end)...)...)))
 }
@@ -1215,10 +1282,7 @@ func (p *printer) binary(node *compiler.Node) Doc {
 	var operands []*compiler.Node
 	var operators []string
 	p.walkInfix(prec, node, &operands, &operators)
-	fill := fillUnified
-	if p.allShortItems(operands) {
-		fill = fillIndependent
-	}
+	fill := p.fillMode(false, operands)
 	parts := []Doc{p.node(operands[0])}
 	for i, op := range operators {
 		parts = append(parts, brk(fill, " ", ZERO, nil), text(op), text(" "), p.node(operands[i+1]))
@@ -1365,31 +1429,17 @@ func (p *printer) argList(args *compiler.NodeArray) Doc {
 			}
 		}
 		parts = append(parts, p.node(a))
-		// A trailing block comment on the same line, before the separating comma,
-		// attaches after the argument (`arg /* note */`). A comment after the
-		// comma is the next argument's leading comment; a line comment is left to
-		// the statement boundary (it would comment out the following `,`).
-		if p.ci < len(p.comments) {
-			t := p.comments[p.ci]
-			if !t.line && !t.ownLine && t.pos >= a.End && !strings.ContainsAny(p.text[a.End:t.pos], "\n,") {
-				p.ci++
-				anyComment = true
-				parts = append(parts, text(" "), text(t.text))
-			}
-		}
+		// A trailing block comment on the same line attaches after the argument
+		// (`arg /* note */`).
+		parts, attached := p.attachTrailingBlockComment(parts, a.End)
+		anyComment = anyComment || attached
 		if len(parts) == 1 {
 			as[i] = parts[0]
 		} else {
 			as[i] = concat(parts...)
 		}
 	}
-	// gjf lays an argument list with any comment one per line (UNIFIED); a bare
-	// list fills only when every argument is short.
-	fill := fillUnified
-	if !anyComment && p.allShortItems(argNodes) {
-		fill = fillIndependent
-	}
-	return p.argsLike("(", as, ")", fill)
+	return p.argsLike("(", as, ")", p.fillMode(anyComment, argNodes))
 }
 
 func (p *printer) objectCreation(e *compiler.ObjectCreationExpressionData, end int) Doc {
@@ -1427,10 +1477,7 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData) Doc {
 	// ponytail: trailing-comma -> FORCED after-open break is not modeled.
 	items, anyComment := p.listItems(nodes(e.Elements), func(el *compiler.Node) Doc { return p.node(el) })
 	// A comment forces one-per-line (gjf), else short items fill.
-	fill := fillUnified
-	if !anyComment && p.allShortItems(nodes(e.Elements)) {
-		fill = fillIndependent
-	}
+	fill := p.fillMode(anyComment, nodes(e.Elements))
 	var innerParts []Doc
 	for i, el := range items {
 		if i > 0 {
@@ -1475,7 +1522,9 @@ func (p *printer) lambda(e *compiler.LambdaExpressionData) Doc {
 		parts = append(parts, p.node(e.Body))
 		return concat(head, text(" ->"), level(plus4, []Doc{hardline, concat(parts...)}))
 	}
-	return concat(head, text(" -> "), p.node(e.Body))
+	// An expression body folds onto a +4 continuation line after `->` when it
+	// does not fit (gjf), like the switch-arrow body above.
+	return concat(head, text(" ->"), level(plus4, []Doc{line, p.node(e.Body)}))
 }
 
 // conditional lays out a ternary: the condition stays on the line, `?` and `:`

@@ -20,6 +20,7 @@
     "version": "node scripts/sync-go-version.mjs && git add togo/internal/meta/meta.go",
     "lsp": "tsx src/cli/main.ts lsp",
     "corpus:init": "git submodule update --init && for d in test-fixtures/emitter/corpus/*/; do git -C \"$d\" sparse-checkout set --no-cone '/**/*.java' '*.java'; done",
+    "format:corpus": "tsx --test ./src/format/format-corpus.test.ts",
     "test": "tsx --test \"./src/**/*.test.ts\""
   },
   "dependencies": {

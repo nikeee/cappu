@@ -1,0 +1,16 @@
+package p;
+
+public class C {
+
+    private int a;
+
+    void m() {
+
+        int x = 1;
+        System.out.println(x);
+    }
+
+    // The following methods are helpers.
+
+    void helper() {}
+}
