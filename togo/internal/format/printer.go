@@ -804,8 +804,10 @@ func (p *printer) recordDeclaration(d *compiler.RecordDeclarationData, end int) 
 		recordParens = p.argsLike("(", items, ")", fillUnified)
 	}
 	after := []Doc{recordParens}
+	// The `implements` clause folds onto its own +4 continuation line when the
+	// record header overflows (gjf), same shape as a class header's clause.
 	if d.ImplementsTypes.Len() > 0 {
-		after = append(after, concat(text(" implements "), p.typeList(d.ImplementsTypes)))
+		after = append(after, level(plus4, []Doc{p.typeListClause("implements", nodes(d.ImplementsTypes))}))
 	}
 	header := concat(
 		p.modifiers(d.Modifiers, "own"),

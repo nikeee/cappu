@@ -750,16 +750,10 @@ class Printer {
         ? "()"
         : this.argsLike("(", this.listItems(d.recordComponents, renderComp).items, ")", "unified");
     const after: Doc[] = [recordParens];
+    // The `implements` clause folds onto its own +4 continuation line when the
+    // record header overflows (gjf), same shape as a class header's clause.
     if (d.implementsTypes && d.implementsTypes.length > 0)
-      after.push(
-        concat([
-          " implements ",
-          join(
-            ", ",
-            d.implementsTypes.map(t => this.type(t)),
-          ),
-        ]),
-      );
+      after.push(level(PLUS4, [this.typeListClause("implements", [...d.implementsTypes])]));
     const header = concat([
       this.modifiers(d.modifiers, "own"),
       "record ",
