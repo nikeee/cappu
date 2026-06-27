@@ -49,7 +49,6 @@ type CompilerOptions struct {
 	SourcePaths          []string             `json:"sourcePaths"`
 	ResourcePaths        []string             `json:"resourcePaths"`
 	Output               string               `json:"output"`
-	Quiet                *bool                `json:"quiet,omitempty"`
 	Javac                string               `json:"javac"`
 	Release              *int                 `json:"release,omitempty"`
 	MainClass            string               `json:"mainClass,omitempty"`

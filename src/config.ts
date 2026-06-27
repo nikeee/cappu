@@ -90,7 +90,6 @@ const CompilerOptionsSchema = z.object({
   resourcePaths: z.array(z.string()).default([DEFAULT_RESOURCE_PATH]),
   /** What `cappu compile` produces in ./dist (nikeee/cappu#5). */
   output: z.enum(["classes", "jar", "fat-jar"]).default("classes"),
-  quiet: z.boolean().optional(),
   /** The javac binary compiles use (a provisioned "jdk" entry wins). */
   javac: z.string().default("javac"),
   /** Java release to target (javac --release); e.g. 21. Unset: javac's own. */
@@ -256,9 +255,6 @@ export const CONFIG_TEMPLATE = `
     // - "jar": same as "classes", but as a jar
     // - "fat-jar": the jar plus the contents of every dependency jar on the classPath
     // "output": "classes",
-
-    // Do not print the path of each emitted .class file.
-    "quiet": false,
 
     // The javac binary compiles run with (default: "javac" from $PATH; a
     // provisioned "jdk" entry wins).

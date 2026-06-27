@@ -72,7 +72,7 @@ export async function runCompileCommand(
     config,
   });
   // runCompile is print-free; render its outcome here.
-  const quiet = flags.quiet ?? config.compilerOptions.quiet ?? false;
+  const quiet = flags.quiet ?? false;
   if (!quiet) for (const out of result.written) process.stdout.write(`${out}\n`);
   for (const entry of result.degraded) {
     process.stderr.write(`warning: ${entry}: unsupported construct, emitted a placeholder body\n`);

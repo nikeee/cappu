@@ -79,20 +79,19 @@ test("a shape violation throws with the offending path", () => {
   using dir = TempDir.create("cfg-");
   writeFileSync(
     join(dir.path, DEFAULT_CONFIG_NAME),
-    '{ "compilerOptions": { "classPath": "not-an-array", "quiet": 1 } }',
+    '{ "compilerOptions": { "classPath": "not-an-array" } }',
   );
   expect(() => loadConfig(undefined, dir.path)).toThrow(/classPath/);
-  expect(() => loadConfig(undefined, dir.path)).toThrow(/quiet/);
 });
 
 test("unknown keys are ignored, comment-json metadata does not leak", () => {
   using dir = TempDir.create("cfg-");
   writeFileSync(
     join(dir.path, DEFAULT_CONFIG_NAME),
-    '{ /* note */ "futureOption": true, "compilerOptions": { "quiet": true } }',
+    '{ /* note */ "futureOption": true, "compilerOptions": { "futureOpt": true } }',
   );
   const config = loadConfig(undefined, dir.path);
-  expect(config.compilerOptions.quiet).toBe(true);
+  expect("futureOpt" in config.compilerOptions).toBe(false);
   expect(Object.keys(config).sort()).toEqual([
     "baseDir",
     "compilerOptions",
@@ -115,7 +114,6 @@ test("the init template parses and validates against the schema", () => {
   writeFileSync(join(dir.path, DEFAULT_CONFIG_NAME), CONFIG_TEMPLATE);
   const config = loadConfig(undefined, dir.path);
   expect(config.compilerOptions.classPath).toEqual(DEFAULT_CLASS_PATHS);
-  expect(config.compilerOptions.quiet).toBe(false);
   // the template only documents inlayHints (commented out); defaults apply downstream
   expect(config.lspOptions.inlayHints).toBeUndefined();
 });
@@ -126,6 +124,9 @@ test("the generated JSON schema mirrors the config shape", () => {
     properties: Record<string, unknown>;
   };
   expect(schema.type).toBe("object");
+  // Every property has a default or is optional, so nothing is required;
+  // editors must not flag a sparse cappu.json (nikeee/cappu#29).
+  expect(JSON.stringify(schema)).not.toContain('"required"');
   expect(Object.keys(schema.properties).sort()).toEqual([
     "artifactId",
     "compilerOptions",

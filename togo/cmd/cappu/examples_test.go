@@ -314,7 +314,7 @@ func TestExampleCompileArtifactName(t *testing.T) {
 		t.Skip("needs javac")
 	}
 	work := t.TempDir()
-	_ = os.WriteFile(filepath.Join(work, "cappu.json"), []byte(`{ "compilerOptions": { "mainClass": "x.M", "quiet": true } }`), 0o644)
+	_ = os.WriteFile(filepath.Join(work, "cappu.json"), []byte(`{ "compilerOptions": { "mainClass": "x.M" } }`), 0o644)
 	srcDir := filepath.Join(work, "src", "main", "java", "x")
 	_ = os.MkdirAll(srcDir, 0o755)
 	_ = os.WriteFile(filepath.Join(srcDir, "M.java"), []byte("package x; public class M { public static void main(String[] a) {} }"), 0o644)
