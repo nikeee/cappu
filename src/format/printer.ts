@@ -1151,15 +1151,13 @@ class Printer {
       if (stmts.length === 1 && stmts[0].kind === SyntaxKind.Block) {
         return concat([label, guard, " -> ", this.block(stmts[0] as Block)]);
       }
-      return concat([
-        label,
-        guard,
-        " -> ",
-        join(
-          " ",
-          stmts.map(s => this.node(s)),
-        ),
-      ]);
+      // A non-block arrow body (an expression, throw, or yield statement) folds
+      // onto a +4 continuation line after the `->` when it does not fit (gjf).
+      const body = join(
+        " ",
+        stmts.map(s => this.node(s)),
+      );
+      return concat([label, guard, " ->", level(PLUS4, [line, body])]);
     }
     return concat([
       label,
@@ -1383,7 +1381,9 @@ class Printer {
       parts.push(this.node(e.body));
       return concat([head, " ->", level(PLUS4, [hardline, concat(parts)])]);
     }
-    return concat([head, " -> ", this.node(e.body)]);
+    // An expression body folds onto a +4 continuation line after `->` when it
+    // does not fit (gjf), like the switch-arrow body above.
+    return concat([head, " ->", level(PLUS4, [line, this.node(e.body)])]);
   }
 
   // A ternary. gjf keeps the condition on the line and breaks before `?` and `:`

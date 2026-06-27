@@ -1264,7 +1264,9 @@ func (p *printer) switchClause(c *compiler.SwitchClauseData, end int) Doc {
 		for i, st := range stmts {
 			ss[i] = p.node(st)
 		}
-		return concat(label, guard, text(" -> "), join(text(" "), ss))
+		// A non-block arrow body (an expression, throw, or yield statement) folds
+		// onto a +4 continuation line after the `->` when it does not fit (gjf).
+		return concat(label, guard, text(" ->"), level(plus4, []Doc{line, join(text(" "), ss)}))
 	}
 	return concat(label, guard, text(":"), indent(concat(append([]Doc{hardline}, p.listDocs(nodes(c.Statements), false, end)...)...)))
 }
@@ -1520,7 +1522,9 @@ func (p *printer) lambda(e *compiler.LambdaExpressionData) Doc {
 		parts = append(parts, p.node(e.Body))
 		return concat(head, text(" ->"), level(plus4, []Doc{hardline, concat(parts...)}))
 	}
-	return concat(head, text(" -> "), p.node(e.Body))
+	// An expression body folds onto a +4 continuation line after `->` when it
+	// does not fit (gjf), like the switch-arrow body above.
+	return concat(head, text(" ->"), level(plus4, []Doc{line, p.node(e.Body)}))
 }
 
 // conditional lays out a ternary: the condition stays on the line, `?` and `:`

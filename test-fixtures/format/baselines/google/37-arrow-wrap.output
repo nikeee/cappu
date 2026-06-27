@@ -1,0 +1,14 @@
+package p;
+
+class C {
+  int classify(String value) {
+    return switch (value) {
+      case "alpha" ->
+          computeResultForLongLabelUsingAFairlyDescriptiveHelperMethodName(value, value);
+      default -> 0;
+    };
+  }
+
+  java.util.function.Supplier<String> s =
+      () -> buildAStringThatIsFarTooLongToKeepOnTheSameLineAsTheArrowTokenHereAtAllReally(value);
+}
