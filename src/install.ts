@@ -689,10 +689,14 @@ export async function installDependencies(
     };
   };
 
+  // One limiter shared across all three sets: they download concurrently
+  // (Promise.all below), so a per-set limit would let the real ceiling reach
+  // 3*DOWNLOAD_CONCURRENCY and hammer the registry into rate-limiting it. The
+  // Go port serializes the sets to the same effect. (nikeee/cappu#31.)
+  const limit = pLimit(DOWNLOAD_CONCURRENCY);
   const materialize = (set: PendingPackage[], dir: string): Promise<Outcome[]> => {
     if (set.length === 0) return Promise.resolve([]);
     mkdirSync(dir, { recursive: true });
-    const limit = pLimit(DOWNLOAD_CONCURRENCY);
     return Promise.all(set.map(pkg => limit(() => fetchOne(pkg, dir))));
   };
 

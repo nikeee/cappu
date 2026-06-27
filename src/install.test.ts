@@ -663,3 +663,56 @@ test("the package store serves repeat installs and rejects unsafe segments", asy
     for (const d of [store.path, dirA.path, dirB.path]) rmSync(d, { recursive: true, force: true });
   }
 });
+
+// nikeee/cappu#31: the compile/processor/test sets download concurrently, so a
+// per-set limiter would let the real ceiling reach 3x DOWNLOAD_CONCURRENCY and
+// trip the registry's rate limiting. The limiter is shared, so the live socket
+// count never exceeds the single cap regardless of how the deps are split.
+test("downloads stay under one global concurrency cap across all sets (#31)", async () => {
+  using store = TempDir.create("cappu-store-");
+  using dir = TempDir.create("cappu-install-");
+  const previousStore = process.env.CAPPU_PACKAGE_STORE;
+  process.env.CAPPU_PACKAGE_STORE = store.path;
+  try {
+    // 20 leaf deps per set (> the cap of 12): a per-set limiter would admit up
+    // to 12 from each of the three sets at once (36 in flight).
+    const cfg = (n: number) =>
+      Object.fromEntries(Array.from({ length: n }, (_, i) => [`org.t:p${i}`, "1"]));
+    writeFileSync(
+      join(dir.path, "cappu.json"),
+      JSON.stringify({
+        dependencies: {
+          implementation: cfg(20),
+          annotationProcessor: cfg(20),
+          testImplementation: cfg(20),
+        },
+      }),
+    );
+
+    let active = 0;
+    let maxActive = 0;
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    const source = new MavenRepositorySource(
+      "https://repo.test/m2",
+      // every coordinate exists as a dependency-free POM
+      url => Promise.resolve(url.endsWith(".pom") ? "<project></project>" : undefined),
+      async url => {
+        if (!url.endsWith(".jar")) return undefined;
+        active++;
+        maxActive = Math.max(maxActive, active);
+        await sleep(10); // hold the socket so concurrent admissions pile up
+        active--;
+        return new TextEncoder().encode(url);
+      },
+    );
+
+    const result = await installDependencies(loadConfig(undefined, dir.path), [source]);
+    expect(result.installed).toHaveLength(60);
+    expect(maxActive).toBeGreaterThan(0);
+    expect(maxActive).toBeLessThanOrEqual(12); // DOWNLOAD_CONCURRENCY, shared
+  } finally {
+    if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
+    else process.env.CAPPU_PACKAGE_STORE = previousStore;
+    rmSync(store.path, { recursive: true, force: true });
+  }
+});
