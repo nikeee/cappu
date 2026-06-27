@@ -686,6 +686,17 @@ class Printer {
       constantParts.push(cdoc);
     });
     const constants = d.enumConstants;
+    // A trailing comma and/or `;` after the last constant, preserved from source
+    // (gjf keeps a trailing comma; `enum { A, B, }`).
+    let semicolonAfter = false;
+    if (constants.length > 0) {
+      let p = skipTrivia(this.text, constants[constants.length - 1].end);
+      if (this.text[p] === ",") {
+        constantParts.push(",");
+        p = skipTrivia(this.text, p + 1);
+      }
+      semicolonAfter = this.text[p] === ";";
+    }
     const bodyParts: Doc[] = [lead, concat(constantParts)];
     if (d.members.length > 0) {
       // The constant list is `;`-terminated, then the members. A blank line
@@ -696,10 +707,8 @@ class Printer {
       bodyParts.push(";", hardline);
       if (constants.length > 0 && realMember) bodyParts.push(hardline);
       bodyParts.push(...this.members(d.members, d.end));
-    } else if (constants.length > 0) {
-      // A trailing `;` after the last constant is preserved from the source.
-      const last = d.enumConstants[d.enumConstants.length - 1];
-      if (this.text[skipTrivia(this.text, last.end)] === ";") bodyParts.push(";");
+    } else if (semicolonAfter) {
+      bodyParts.push(";");
     }
     return concat([header, "{", indent(concat(bodyParts)), hardline, "}"]);
   }
@@ -1335,8 +1344,11 @@ class Printer {
     // gjf: contents indent +2; when broken, elements fill (INDEPENDENT) if all
     // short, else one per line (UNIFIED); the closing `}` goes on its own line
     // back at the parent indent (a -2 break cancels the +2).
-    // ponytail: trailing-comma -> FORCED after-open break is not modeled (the
-    // parser drops the trailing comma); add when a fixture needs it.
+    // A trailing comma in source is the author's "keep this vertical" signal:
+    // gjf preserves the comma and FORCES the braces open (newline after `{` and
+    // before `}`), but the elements themselves still fill (`{\n  1, 2, 3,\n}`).
+    const trailingComma =
+      this.text[skipTrivia(this.text, e.elements[e.elements.length - 1].end)] === ",";
     const { items, anyComment } = this.listItems(e.elements, el => this.node(el));
     // A comment forces one-per-line (gjf), else short items fill.
     const fillMode = this.fillMode(anyComment, e.elements);
@@ -1345,12 +1357,10 @@ class Printer {
       if (i > 0) innerParts.push(",", brk(fillMode, " ", ZERO));
       innerParts.push(el);
     });
+    if (trailingComma) innerParts.push(",");
     const inner = level(ZERO, innerParts);
-    return concat([
-      "{",
-      level(PLUS2, [brk("unified", "", ZERO), inner, brk("unified", "", MINUS2)]),
-      "}",
-    ]);
+    const open: FillMode = trailingComma ? "forced" : "unified";
+    return concat(["{", level(PLUS2, [brk(open, "", ZERO), inner, brk(open, "", MINUS2)]), "}"]);
   }
 
   private lambda(e: LambdaExpression): Doc {

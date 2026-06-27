@@ -731,6 +731,17 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 		}
 		constantParts = append(constantParts, cdoc)
 	}
+	// A trailing comma and/or `;` after the last constant, preserved from source
+	// (gjf keeps a trailing comma; `enum { A, B, }`).
+	semicolonAfter := false
+	if len(consts) > 0 {
+		p2 := compiler.SkipTrivia(p.text, consts[len(consts)-1].End)
+		if p2 < len(p.text) && p.text[p2] == ',' {
+			constantParts = append(constantParts, text(","))
+			p2 = compiler.SkipTrivia(p.text, p2+1)
+		}
+		semicolonAfter = p2 < len(p.text) && p.text[p2] == ';'
+	}
 	bodyParts := []Doc{lead, concat(constantParts...)}
 	if d.Members.Len() > 0 {
 		// The constant list is `;`-terminated, then the members. A blank line
@@ -749,12 +760,8 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 			bodyParts = append(bodyParts, hardline)
 		}
 		bodyParts = append(bodyParts, p.members(d.Members, end)...)
-	} else if len(consts) > 0 {
-		// A trailing `;` after the last constant is preserved from the source.
-		last := consts[len(consts)-1]
-		if idx := compiler.SkipTrivia(p.text, last.End); idx < len(p.text) && p.text[idx] == ';' {
-			bodyParts = append(bodyParts, text(";"))
-		}
+	} else if semicolonAfter {
+		bodyParts = append(bodyParts, text(";"))
 	}
 	return concat(header, text("{"), indent(concat(bodyParts...)), hardline, text("}"))
 }
@@ -1474,10 +1481,22 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData) Doc {
 	// gjf: contents indent +2; when broken, elements fill (INDEPENDENT) if all
 	// short, else one per line (UNIFIED); the closing `}` goes on its own line
 	// back at the parent indent (a -2 break cancels the +2).
-	// ponytail: trailing-comma -> FORCED after-open break is not modeled.
-	items, anyComment := p.listItems(nodes(e.Elements), func(el *compiler.Node) Doc { return p.node(el) })
+	// A trailing comma in source is the author's "keep this vertical" signal:
+	// gjf preserves the comma and FORCES one element per line.
+	els := nodes(e.Elements)
+	trailingComma := false
+	if idx := compiler.SkipTrivia(p.text, els[len(els)-1].End); idx < len(p.text) && p.text[idx] == ',' {
+		trailingComma = true
+	}
+	items, anyComment := p.listItems(els, func(el *compiler.Node) Doc { return p.node(el) })
 	// A comment forces one-per-line (gjf), else short items fill.
-	fill := p.fillMode(anyComment, nodes(e.Elements))
+	fill := p.fillMode(anyComment, els)
+	// A trailing comma forces the braces open (newline after `{` and before `}`)
+	// but elements still fill (`{\n  1, 2, 3,\n}`).
+	open := fillUnified
+	if trailingComma {
+		open = fillForced
+	}
 	var innerParts []Doc
 	for i, el := range items {
 		if i > 0 {
@@ -1485,10 +1504,13 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData) Doc {
 		}
 		innerParts = append(innerParts, el)
 	}
+	if trailingComma {
+		innerParts = append(innerParts, text(","))
+	}
 	inner := level(ZERO, innerParts)
 	return concat(
 		text("{"),
-		level(plus2, []Doc{brk(fillUnified, "", ZERO, nil), inner, brk(fillUnified, "", minus2, nil)}),
+		level(plus2, []Doc{brk(open, "", ZERO, nil), inner, brk(open, "", minus2, nil)}),
 		text("}"),
 	)
 }
