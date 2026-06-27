@@ -441,3 +441,4 @@ cappu search commons-lang3
 - 2026-06-26 01:40 — looking from a dx perspective - were trying to create a simple tool that uses convention over configuration (like vite) and want to build a workflow that is similar to uv and npm. what can we do better? what is missing? what behaves unexpected?
 - 2026-06-26 01:40 — dont do A2
 - 2026-06-26 01:40 — track C: no alias. pick one
+- 2026-06-27 12:55 — implement concurrent/parallel formatting of files. this should speed up formatting
