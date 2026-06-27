@@ -857,7 +857,7 @@ func (p *printer) declarator(v *compiler.VariableDeclaratorData) Doc {
 // they fit, else the fill mode decides (UNIFIED one per line, INDEPENDENT fill).
 // The closing `)` stays attached to the last item's line.
 func (p *printer) argsLike(open string, items []Doc, closeTok string, fill FillMode) Doc {
-	return p.argsLikeTrailing(open, items, closeTok, fill, "")
+	return p.argsLikeTrailing(open, items, closeTok, fill, nil)
 }
 
 // argsLikeTrailing is argsLike with a trailing token (e.g. a method signature's
@@ -865,7 +865,7 @@ func (p *printer) argsLike(open string, items []Doc, closeTok string, fill FillM
 // decision - gjf's rest-of-line rule. With a trailing token the open delimiter
 // also goes inside the level so the fit check at the column before `(` spans the
 // whole `(...)<trailing>` run. The empty-trailing path is the common call case.
-func (p *printer) argsLikeTrailing(open string, items []Doc, closeTok string, fill FillMode, trailing string) Doc {
+func (p *printer) argsLikeTrailing(open string, items []Doc, closeTok string, fill FillMode, trailing Doc) Doc {
 	var innerParts []Doc
 	for i, it := range items {
 		if i > 0 {
@@ -874,8 +874,8 @@ func (p *printer) argsLikeTrailing(open string, items []Doc, closeTok string, fi
 		innerParts = append(innerParts, it)
 	}
 	inner := level(ZERO, innerParts)
-	if trailing != "" {
-		return level(plus4, []Doc{text(open), brk(fillUnified, "", ZERO, nil), inner, text(closeTok), text(trailing)})
+	if trailing != nil {
+		return level(plus4, []Doc{text(open), brk(fillUnified, "", ZERO, nil), inner, text(closeTok), trailing})
 	}
 	return concat(text(open), level(plus4, []Doc{brk(fillUnified, "", ZERO, nil), inner}), text(closeTok))
 }
@@ -963,9 +963,15 @@ func (p *printer) listItems(ns []*compiler.Node, render func(*compiler.Node) Doc
 	return items, anyComment
 }
 
-func (p *printer) parameters(params *compiler.NodeArray, trailing string) Doc {
+func (p *printer) parameters(params *compiler.NodeArray, trailing Doc) Doc {
 	if params.Len() == 0 {
-		return text("()" + trailing)
+		// Even with no parameters the trailing run (a `throws` clause + brace) may
+		// carry a break, so it must sit in a +4 level to fold and indent correctly.
+		inner := []Doc{text("()")}
+		if trailing != nil {
+			inner = append(inner, trailing)
+		}
+		return level(plus4, inner)
 	}
 	// Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
 	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameter(n.AsParameter()) })
@@ -995,43 +1001,40 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 	}
 	hasThrows := throws.Len() > 0
 	// The token trailing the parameter list on the same line (`;`, ` {}`, or
-	// ` {`) goes inside the param level so the list wraps when the whole
-	// signature including it overflows (gjf's rest-of-line rule). Only with no
-	// throws clause - a throws clause sits between the params and that token.
+	// ` {`) and any `throws` clause go inside the param level so the whole
+	// signature wraps as a unit when it overflows (gjf's rest-of-line rule): the
+	// `throws` break is UNIFIED with the param-open break, so when the params go
+	// one-per-line the `throws` clause and the brace fold onto their own lines.
 	emptyBody := body != nil && p.blockIsEmpty(body.AsBlock(), p.start(body), body.End)
-	paramTrailing := ""
-	if !hasThrows {
-		switch {
-		case body == nil:
-			paramTrailing = ";"
-		case emptyBody:
-			paramTrailing = " {}"
-		default:
-			paramTrailing = " {"
+	bodyToken := " {"
+	switch {
+	case body == nil:
+		bodyToken = ";"
+	case emptyBody:
+		bodyToken = " {}"
+	}
+	var paramTrailing Doc = text(bodyToken)
+	if hasThrows {
+		throwsParts := []Doc{text("throws ")}
+		for i, t := range nodes(throws) {
+			if i > 0 {
+				throwsParts = append(throwsParts, text(","), brk(fillUnified, " ", ZERO, nil))
+			}
+			throwsParts = append(throwsParts, p.typ(t))
 		}
+		throwsIndent := ZERO
+		if throws.Len() > 1 {
+			throwsIndent = plus4
+		}
+		paramTrailing = concat(brk(fillUnified, " ", ZERO, nil), level(throwsIndent, throwsParts), text(bodyToken))
 	}
 	head = append(head, text(p.raw(name)), p.parameters(params, paramTrailing))
-	if hasThrows {
-		// Same shape as a class header type list, wrapped in a +4 level so the
-		// `throws` keyword folds onto a continuation line.
-		head = append(head, level(plus4, []Doc{p.typeListClause("throws", nodes(throws))}))
-	}
-	if body == nil {
-		if paramTrailing != "" {
-			return concat(head...)
-		}
-		return concat(append(head, text(";"))...)
-	}
-	// Body present: ` {` went into the param level -> emit the rest of the block;
-	// ` {}` -> empty body already shown; else (throws) -> whole block after a space.
-	switch paramTrailing {
-	case " {":
-		return concat(append(head, p.blockRest(body.AsBlock(), body.End))...)
-	case " {}":
+	// The body-open token (and throws) already trail the params; emit the rest
+	// of the block when there is a real body, else the signature is complete.
+	if body == nil || emptyBody {
 		return concat(head...)
-	default:
-		return concat(append(head, text(" "), p.block(body.AsBlock(), body.End))...)
 	}
+	return concat(append(head, p.blockRest(body.AsBlock(), body.End))...)
 }
 
 func (p *printer) initializerBlock(d *compiler.InitializerBlockData) Doc {

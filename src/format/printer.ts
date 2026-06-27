@@ -802,7 +802,7 @@ class Printer {
     items: Doc[],
     close: string,
     fillMode: FillMode,
-    trailing = "",
+    trailing: Doc = "",
   ): Doc {
     const innerParts: Doc[] = [];
     items.forEach((it, i) => {
@@ -890,8 +890,10 @@ class Printer {
     return { items, anyComment };
   }
 
-  private parameters(params: NodeArray<Parameter>, trailing = ""): Doc {
-    if (params.length === 0) return concat(["()", trailing]);
+  private parameters(params: NodeArray<Parameter>, trailing: Doc = ""): Doc {
+    // Even with no parameters the trailing run (a `throws` clause + brace) may
+    // carry a break, so it must sit in a +4 level to fold and indent correctly.
+    if (params.length === 0) return level(PLUS4, ["()", trailing]);
     // Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
     const { items } = this.listItems(params, p => this.parameter(p as Parameter));
     return this.argsLike("(", items, ")", "unified", trailing);
@@ -919,31 +921,30 @@ class Printer {
     if (decl.returnType) head.push(this.type(decl.returnType), " ");
     const hasThrows = decl.throws !== undefined && decl.throws.length > 0;
     // The token trailing the parameter list on the same line (`;`, ` {}`, or
-    // ` {`) goes *inside* the param level so the list wraps when the whole
-    // signature including it overflows (gjf's rest-of-line rule). This only
-    // applies with no throws clause - a throws clause sits between the params
-    // and that token and carries its own break.
+    // ` {`) and any `throws` clause go *inside* the param level so the whole
+    // signature wraps as a unit when it overflows (gjf's rest-of-line rule): the
+    // `throws` break is UNIFIED with the param-open break, so when the params go
+    // one-per-line the `throws` clause and the brace fold onto their own lines.
     const emptyBody = decl.body !== undefined && this.blockIsEmpty(decl.body);
-    let paramTrailing = "";
-    if (!hasThrows) {
-      if (!decl.body) paramTrailing = ";";
-      else if (emptyBody) paramTrailing = " {}";
-      else paramTrailing = " {";
+    const bodyToken = !decl.body ? ";" : emptyBody ? " {}" : " {";
+    let paramTrailing: Doc = bodyToken;
+    if (hasThrows) {
+      const throwsParts: Doc[] = ["throws "];
+      decl.throws!.forEach((t, i) => {
+        if (i > 0) throwsParts.push(",", brk("unified", " ", ZERO));
+        throwsParts.push(this.type(t));
+      });
+      paramTrailing = concat([
+        brk("unified", " ", ZERO),
+        level(decl.throws!.length > 1 ? PLUS4 : ZERO, throwsParts),
+        bodyToken,
+      ]);
     }
     head.push(this.raw(decl.name), this.parameters(decl.parameters, paramTrailing));
-    if (hasThrows) {
-      // Same shape as a class header type list, wrapped in a +4 level so the
-      // `throws` keyword folds onto a continuation line (the class header gets
-      // that +4 from its own enclosing level; a method head has none).
-      head.push(level(PLUS4, [this.typeListClause("throws", [...decl.throws!])]));
-    }
-    if (!decl.body) return concat(paramTrailing ? head : [...head, ";"]);
-    // Body present. When ` {` went into the param level, emit the rest of the
-    // block (statements + `}`); when ` {}` did, the empty body is already shown;
-    // otherwise (throws clause) emit the whole block after a space.
-    if (paramTrailing === " {") return concat([...head, this.blockRest(decl.body)]);
-    if (paramTrailing === " {}") return concat(head);
-    return concat([...head, " ", this.block(decl.body)]);
+    // The body-open token (and throws) already trail the params; emit the rest
+    // of the block when there is a real body, else the signature is complete.
+    if (!decl.body || emptyBody) return concat(head);
+    return concat([...head, this.blockRest(decl.body)]);
   }
 
   private initializerBlock(d: InitializerBlock): Doc {
