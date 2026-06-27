@@ -13,7 +13,6 @@ package format
 
 import (
 	"errors"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -832,7 +831,30 @@ func (p *printer) allShortItems(ns []*compiler.Node) bool {
 	return true
 }
 
-var commaOrNewline = regexp.MustCompile(`[\n,]`)
+// fillMode picks gjf's inter-item fill: one item per line (UNIFIED) when any
+// item carries a comment, else fill (INDEPENDENT) only when every item is short.
+func (p *printer) fillMode(anyComment bool, ns []*compiler.Node) FillMode {
+	if !anyComment && p.allShortItems(ns) {
+		return fillIndependent
+	}
+	return fillUnified
+}
+
+// attachTrailingBlockComment attaches a same-line trailing block comment
+// (`item /* note */`) after an item if the next pending comment is one. A line
+// comment is left to the statement boundary (it would comment out the following
+// separator). Returns the parts and whether a comment was consumed.
+func (p *printer) attachTrailingBlockComment(parts []Doc, endPos int) ([]Doc, bool) {
+	if p.ci < len(p.comments) {
+		t := p.comments[p.ci]
+		if !t.line && !t.ownLine && t.pos >= endPos && !strings.ContainsAny(p.text[endPos:t.pos], "\n,") {
+			p.ci++
+			parts = append(parts, text(" "), text(t.text))
+			return parts, true
+		}
+	}
+	return parts, false
+}
 
 // itemWithComments renders a delimited-list item with the comments attached to
 // it: leading comments before the item (own-line ones get a forced break after,
@@ -857,14 +879,8 @@ func (p *printer) itemWithComments(node *compiler.Node, render func() Doc) (Doc,
 		}
 	}
 	parts = append(parts, render())
-	if p.ci < len(p.comments) {
-		t := p.comments[p.ci]
-		if !t.line && !t.ownLine && t.pos >= node.End && !commaOrNewline.MatchString(p.text[node.End:t.pos]) {
-			p.ci++
-			comment = true
-			parts = append(parts, text(" "), text(t.text))
-		}
-	}
+	parts, attached := p.attachTrailingBlockComment(parts, node.End)
+	comment = comment || attached
 	if len(parts) == 1 {
 		return parts[0], comment
 	}
@@ -1215,10 +1231,7 @@ func (p *printer) binary(node *compiler.Node) Doc {
 	var operands []*compiler.Node
 	var operators []string
 	p.walkInfix(prec, node, &operands, &operators)
-	fill := fillUnified
-	if p.allShortItems(operands) {
-		fill = fillIndependent
-	}
+	fill := p.fillMode(false, operands)
 	parts := []Doc{p.node(operands[0])}
 	for i, op := range operators {
 		parts = append(parts, brk(fill, " ", ZERO, nil), text(op), text(" "), p.node(operands[i+1]))
@@ -1365,31 +1378,17 @@ func (p *printer) argList(args *compiler.NodeArray) Doc {
 			}
 		}
 		parts = append(parts, p.node(a))
-		// A trailing block comment on the same line, before the separating comma,
-		// attaches after the argument (`arg /* note */`). A comment after the
-		// comma is the next argument's leading comment; a line comment is left to
-		// the statement boundary (it would comment out the following `,`).
-		if p.ci < len(p.comments) {
-			t := p.comments[p.ci]
-			if !t.line && !t.ownLine && t.pos >= a.End && !strings.ContainsAny(p.text[a.End:t.pos], "\n,") {
-				p.ci++
-				anyComment = true
-				parts = append(parts, text(" "), text(t.text))
-			}
-		}
+		// A trailing block comment on the same line attaches after the argument
+		// (`arg /* note */`).
+		parts, attached := p.attachTrailingBlockComment(parts, a.End)
+		anyComment = anyComment || attached
 		if len(parts) == 1 {
 			as[i] = parts[0]
 		} else {
 			as[i] = concat(parts...)
 		}
 	}
-	// gjf lays an argument list with any comment one per line (UNIFIED); a bare
-	// list fills only when every argument is short.
-	fill := fillUnified
-	if !anyComment && p.allShortItems(argNodes) {
-		fill = fillIndependent
-	}
-	return p.argsLike("(", as, ")", fill)
+	return p.argsLike("(", as, ")", p.fillMode(anyComment, argNodes))
 }
 
 func (p *printer) objectCreation(e *compiler.ObjectCreationExpressionData, end int) Doc {
@@ -1427,10 +1426,7 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData) Doc {
 	// ponytail: trailing-comma -> FORCED after-open break is not modeled.
 	items, anyComment := p.listItems(nodes(e.Elements), func(el *compiler.Node) Doc { return p.node(el) })
 	// A comment forces one-per-line (gjf), else short items fill.
-	fill := fillUnified
-	if !anyComment && p.allShortItems(nodes(e.Elements)) {
-		fill = fillIndependent
-	}
+	fill := p.fillMode(anyComment, nodes(e.Elements))
 	var innerParts []Doc
 	for i, el := range items {
 		if i > 0 {

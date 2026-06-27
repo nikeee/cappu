@@ -789,6 +789,32 @@ class Printer {
     return nodes.every(n => n.end - this.start(n) < 10);
   }
 
+  // gjf lays a delimited list one item per line (UNIFIED) when any item carries
+  // a comment, else fills (INDEPENDENT) only when every item is short.
+  private fillMode(anyComment: boolean, nodes: readonly Node[]): FillMode {
+    return !anyComment && this.allShortItems(nodes) ? "independent" : "unified";
+  }
+
+  // Attach a same-line trailing block comment (`item /* note */`) after an item,
+  // if the next pending comment is one. A line comment is left to the statement
+  // boundary (it would comment out the following separator). Returns whether a
+  // comment was consumed.
+  private attachTrailingBlockComment(parts: Doc[], endPos: number): boolean {
+    const t = this.comments[this.ci];
+    if (
+      t &&
+      !t.line &&
+      !t.ownLine &&
+      t.pos >= endPos &&
+      !/[\n,]/.test(this.text.slice(endPos, t.pos))
+    ) {
+      this.ci++;
+      parts.push(" ", t.text);
+      return true;
+    }
+    return false;
+  }
+
   // Render a delimited-list item with the comments attached to it: leading
   // comments before the item (own-line ones get a forced break after, which also
   // forces the whole list to break; an inline block comment stays inline), and a
@@ -804,18 +830,7 @@ class Printer {
       else parts.push(reformatParamComment(c.text) ?? c.text, " ");
     }
     parts.push(render());
-    const t = this.comments[this.ci];
-    if (
-      t &&
-      !t.line &&
-      !t.ownLine &&
-      t.pos >= node.end &&
-      !/[\n,]/.test(this.text.slice(node.end, t.pos))
-    ) {
-      this.ci++;
-      comment = true;
-      parts.push(" ", t.text);
-    }
+    if (this.attachTrailingBlockComment(parts, node.end)) comment = true;
     return { doc: parts.length === 1 ? parts[0] : concat(parts), comment };
   }
 
@@ -1129,7 +1144,7 @@ class Printer {
     const operands: Expression[] = [];
     const operators: string[] = [];
     this.walkInfix(prec, e, operands, operators);
-    const fillMode: FillMode = this.allShortItems(operands) ? "independent" : "unified";
+    const fillMode = this.fillMode(false, operands);
     const parts: Doc[] = [this.node(operands[0])];
     operators.forEach((op, i) => {
       parts.push(brk(fillMode, " ", ZERO), op, " ", this.node(operands[i + 1]));
@@ -1260,32 +1275,11 @@ class Printer {
       }
       parts.push(this.node(a));
       // A trailing block comment on the same line attaches after the argument
-      // (`arg /* note */`). Line comments are left to the statement boundary - a
-      // trailing line comment here would comment out the following `,`.
-      const t = this.comments[this.ci];
-      if (
-        t &&
-        !t.line &&
-        !t.ownLine &&
-        t.pos >= a.end &&
-        // Same line, and before the separating comma - a comment after the comma
-        // is the next argument's leading comment, not this one's trailing.
-        !/[\n,]/.test(this.text.slice(a.end, t.pos))
-      ) {
-        this.ci++;
-        anyComment = true;
-        parts.push(" ", t.text);
-      }
+      // (`arg /* note */`).
+      if (this.attachTrailingBlockComment(parts, a.end)) anyComment = true;
       return parts.length === 1 ? parts[0] : concat(parts);
     });
-    // gjf lays an argument list with any comment one per line (UNIFIED); a bare
-    // list fills only when every argument is short.
-    const fill: FillMode = anyComment
-      ? "unified"
-      : this.allShortItems(args)
-        ? "independent"
-        : "unified";
-    return this.argsLike("(", items, ")", fill);
+    return this.argsLike("(", items, ")", this.fillMode(anyComment, args));
   }
 
   private objectCreation(e: ObjectCreationExpression): Doc {
@@ -1312,8 +1306,7 @@ class Printer {
     // parser drops the trailing comma); add when a fixture needs it.
     const { items, anyComment } = this.listItems(e.elements, el => this.node(el));
     // A comment forces one-per-line (gjf), else short items fill.
-    const fillMode: FillMode =
-      !anyComment && this.allShortItems(e.elements) ? "independent" : "unified";
+    const fillMode = this.fillMode(anyComment, e.elements);
     const innerParts: Doc[] = [];
     items.forEach((el, i) => {
       if (i > 0) innerParts.push(",", brk(fillMode, " ", ZERO));
