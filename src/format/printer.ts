@@ -480,7 +480,14 @@ class Printer {
     for (const a of annotations) {
       const ownLine =
         annoMode === "own" || (annoMode === "var" && a.args !== undefined && a.args.length > 0);
-      parts.push(this.annotation(a), ownLine ? hardline : " ");
+      parts.push(this.annotation(a));
+      // A comment on the same line as an own-line annotation stays with it
+      // (`@SuppressWarnings("x") // why`) instead of floating away.
+      if (ownLine) {
+        const tc = this.trailingCommentAfter(a);
+        if (tc) parts.push(" ", tc.text);
+      }
+      parts.push(ownLine ? hardline : " ");
     }
     for (const k of keywords) parts.push(concat([this.modifierText(k), " "]));
     return concat(parts);
@@ -686,6 +693,17 @@ class Printer {
       constantParts.push(cdoc);
     });
     const constants = d.enumConstants;
+    // A trailing comma and/or `;` after the last constant, preserved from source
+    // (gjf keeps a trailing comma; `enum { A, B, }`).
+    let semicolonAfter = false;
+    if (constants.length > 0) {
+      let p = skipTrivia(this.text, constants[constants.length - 1].end);
+      if (this.text[p] === ",") {
+        constantParts.push(",");
+        p = skipTrivia(this.text, p + 1);
+      }
+      semicolonAfter = this.text[p] === ";";
+    }
     const bodyParts: Doc[] = [lead, concat(constantParts)];
     if (d.members.length > 0) {
       // The constant list is `;`-terminated, then the members. A blank line
@@ -696,10 +714,8 @@ class Printer {
       bodyParts.push(";", hardline);
       if (constants.length > 0 && realMember) bodyParts.push(hardline);
       bodyParts.push(...this.members(d.members, d.end));
-    } else if (constants.length > 0) {
-      // A trailing `;` after the last constant is preserved from the source.
-      const last = d.enumConstants[d.enumConstants.length - 1];
-      if (this.text[skipTrivia(this.text, last.end)] === ";") bodyParts.push(";");
+    } else if (semicolonAfter) {
+      bodyParts.push(";");
     }
     return concat([header, "{", indent(concat(bodyParts)), hardline, "}"]);
   }
@@ -734,16 +750,10 @@ class Printer {
         ? "()"
         : this.argsLike("(", this.listItems(d.recordComponents, renderComp).items, ")", "unified");
     const after: Doc[] = [recordParens];
+    // The `implements` clause folds onto its own +4 continuation line when the
+    // record header overflows (gjf), same shape as a class header's clause.
     if (d.implementsTypes && d.implementsTypes.length > 0)
-      after.push(
-        concat([
-          " implements ",
-          join(
-            ", ",
-            d.implementsTypes.map(t => this.type(t)),
-          ),
-        ]),
-      );
+      after.push(level(PLUS4, [this.typeListClause("implements", [...d.implementsTypes])]));
     const header = concat([
       this.modifiers(d.modifiers, "own"),
       "record ",
@@ -792,7 +802,7 @@ class Printer {
     items: Doc[],
     close: string,
     fillMode: FillMode,
-    trailing = "",
+    trailing: Doc = "",
   ): Doc {
     const innerParts: Doc[] = [];
     items.forEach((it, i) => {
@@ -880,8 +890,10 @@ class Printer {
     return { items, anyComment };
   }
 
-  private parameters(params: NodeArray<Parameter>, trailing = ""): Doc {
-    if (params.length === 0) return concat(["()", trailing]);
+  private parameters(params: NodeArray<Parameter>, trailing: Doc = ""): Doc {
+    // Even with no parameters the trailing run (a `throws` clause + brace) may
+    // carry a break, so it must sit in a +4 level to fold and indent correctly.
+    if (params.length === 0) return level(PLUS4, ["()", trailing]);
     // Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
     const { items } = this.listItems(params, p => this.parameter(p as Parameter));
     return this.argsLike("(", items, ")", "unified", trailing);
@@ -909,31 +921,44 @@ class Printer {
     if (decl.returnType) head.push(this.type(decl.returnType), " ");
     const hasThrows = decl.throws !== undefined && decl.throws.length > 0;
     // The token trailing the parameter list on the same line (`;`, ` {}`, or
-    // ` {`) goes *inside* the param level so the list wraps when the whole
-    // signature including it overflows (gjf's rest-of-line rule). This only
-    // applies with no throws clause - a throws clause sits between the params
-    // and that token and carries its own break.
+    // ` {`) and any `throws` clause go *inside* the param level so the whole
+    // signature wraps as a unit when it overflows (gjf's rest-of-line rule): the
+    // `throws` break is UNIFIED with the param-open break, so when the params go
+    // one-per-line the `throws` clause and the brace fold onto their own lines.
     const emptyBody = decl.body !== undefined && this.blockIsEmpty(decl.body);
-    let paramTrailing = "";
-    if (!hasThrows) {
-      if (!decl.body) paramTrailing = ";";
-      else if (emptyBody) paramTrailing = " {}";
-      else paramTrailing = " {";
-    }
-    head.push(this.raw(decl.name), this.parameters(decl.parameters, paramTrailing));
+    const bodyToken = !decl.body ? ";" : emptyBody ? " {}" : " {";
+    let sig: Doc;
     if (hasThrows) {
-      // Same shape as a class header type list, wrapped in a +4 level so the
-      // `throws` keyword folds onto a continuation line (the class header gets
-      // that +4 from its own enclosing level; a method head has none).
-      head.push(level(PLUS4, [this.typeListClause("throws", [...decl.throws!])]));
+      // gjf breaks a `throws` clause onto its own +4 line BEFORE it explodes the
+      // parameters: an outer group holds the `throws` break (so it fires when the
+      // whole `(...) throws X {` overflows), while the parameter list is a
+      // self-contained nested level that explodes only if the params alone do not
+      // fit. So `format(a, b, c)` keeps its params inline with `throws` wrapped,
+      // but a longer list goes one-per-line with `throws` wrapped too.
+      const throwsParts: Doc[] = ["throws "];
+      decl.throws!.forEach((t, i) => {
+        if (i > 0) throwsParts.push(",", brk("unified", " ", ZERO));
+        throwsParts.push(this.type(t));
+      });
+      // Continuation throws types indent +8 (the `throws` line is already +4 from
+      // the outer break, and gjf indents the type list +4 beyond the keyword).
+      const throwsClause = level(decl.throws!.length > 1 ? indentConst(8) : ZERO, throwsParts);
+      sig = level(ZERO, [
+        this.parameters(decl.parameters),
+        brk("unified", " ", PLUS4),
+        throwsClause,
+        bodyToken,
+      ]);
+    } else {
+      // No throws clause: the body-open token rides inside the param level so the
+      // list wraps when the whole `(...)<token>` run overflows (rest-of-line).
+      sig = this.parameters(decl.parameters, bodyToken);
     }
-    if (!decl.body) return concat(paramTrailing ? head : [...head, ";"]);
-    // Body present. When ` {` went into the param level, emit the rest of the
-    // block (statements + `}`); when ` {}` did, the empty body is already shown;
-    // otherwise (throws clause) emit the whole block after a space.
-    if (paramTrailing === " {") return concat([...head, this.blockRest(decl.body)]);
-    if (paramTrailing === " {}") return concat(head);
-    return concat([...head, " ", this.block(decl.body)]);
+    head.push(this.raw(decl.name), sig);
+    // Emit the rest of the block when there is a real body, else the signature
+    // (with its trailing `;`/` {}`) is complete.
+    if (!decl.body || emptyBody) return concat(head);
+    return concat([...head, this.blockRest(decl.body)]);
   }
 
   private initializerBlock(d: InitializerBlock): Doc {
@@ -1335,8 +1360,11 @@ class Printer {
     // gjf: contents indent +2; when broken, elements fill (INDEPENDENT) if all
     // short, else one per line (UNIFIED); the closing `}` goes on its own line
     // back at the parent indent (a -2 break cancels the +2).
-    // ponytail: trailing-comma -> FORCED after-open break is not modeled (the
-    // parser drops the trailing comma); add when a fixture needs it.
+    // A trailing comma in source is the author's "keep this vertical" signal:
+    // gjf preserves the comma and FORCES the braces open (newline after `{` and
+    // before `}`), but the elements themselves still fill (`{\n  1, 2, 3,\n}`).
+    const trailingComma =
+      this.text[skipTrivia(this.text, e.elements[e.elements.length - 1].end)] === ",";
     const { items, anyComment } = this.listItems(e.elements, el => this.node(el));
     // A comment forces one-per-line (gjf), else short items fill.
     const fillMode = this.fillMode(anyComment, e.elements);
@@ -1345,12 +1373,10 @@ class Printer {
       if (i > 0) innerParts.push(",", brk(fillMode, " ", ZERO));
       innerParts.push(el);
     });
+    if (trailingComma) innerParts.push(",");
     const inner = level(ZERO, innerParts);
-    return concat([
-      "{",
-      level(PLUS2, [brk("unified", "", ZERO), inner, brk("unified", "", MINUS2)]),
-      "}",
-    ]);
+    const open: FillMode = trailingComma ? "forced" : "unified";
+    return concat(["{", level(PLUS2, [brk(open, "", ZERO), inner, brk(open, "", MINUS2)]), "}"]);
   }
 
   private lambda(e: LambdaExpression): Doc {

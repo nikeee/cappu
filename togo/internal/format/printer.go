@@ -470,10 +470,16 @@ func (p *printer) modifiers(mods *compiler.NodeArray, annoMode string) Doc {
 	for _, a := range annotations {
 		ad := a.AsAnnotation()
 		ownLine := annoMode == "own" || (annoMode == "var" && ad.Args != nil && ad.Args.Len() > 0)
+		parts = append(parts, p.annotation(ad))
+		// A comment on the same line as an own-line annotation stays with it
+		// (`@SuppressWarnings("x") // why`) instead of floating away.
 		if ownLine {
-			parts = append(parts, p.annotation(ad), hardline)
+			if tc, ok := p.trailingCommentAfter(a); ok {
+				parts = append(parts, text(" "), text(tc.text))
+			}
+			parts = append(parts, hardline)
 		} else {
-			parts = append(parts, p.annotation(ad), text(" "))
+			parts = append(parts, text(" "))
 		}
 	}
 	for _, k := range keywords {
@@ -731,6 +737,17 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 		}
 		constantParts = append(constantParts, cdoc)
 	}
+	// A trailing comma and/or `;` after the last constant, preserved from source
+	// (gjf keeps a trailing comma; `enum { A, B, }`).
+	semicolonAfter := false
+	if len(consts) > 0 {
+		p2 := compiler.SkipTrivia(p.text, consts[len(consts)-1].End)
+		if p2 < len(p.text) && p.text[p2] == ',' {
+			constantParts = append(constantParts, text(","))
+			p2 = compiler.SkipTrivia(p.text, p2+1)
+		}
+		semicolonAfter = p2 < len(p.text) && p.text[p2] == ';'
+	}
 	bodyParts := []Doc{lead, concat(constantParts...)}
 	if d.Members.Len() > 0 {
 		// The constant list is `;`-terminated, then the members. A blank line
@@ -749,12 +766,8 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 			bodyParts = append(bodyParts, hardline)
 		}
 		bodyParts = append(bodyParts, p.members(d.Members, end)...)
-	} else if len(consts) > 0 {
-		// A trailing `;` after the last constant is preserved from the source.
-		last := consts[len(consts)-1]
-		if idx := compiler.SkipTrivia(p.text, last.End); idx < len(p.text) && p.text[idx] == ';' {
-			bodyParts = append(bodyParts, text(";"))
-		}
+	} else if semicolonAfter {
+		bodyParts = append(bodyParts, text(";"))
 	}
 	return concat(header, text("{"), indent(concat(bodyParts...)), hardline, text("}"))
 }
@@ -791,8 +804,10 @@ func (p *printer) recordDeclaration(d *compiler.RecordDeclarationData, end int) 
 		recordParens = p.argsLike("(", items, ")", fillUnified)
 	}
 	after := []Doc{recordParens}
+	// The `implements` clause folds onto its own +4 continuation line when the
+	// record header overflows (gjf), same shape as a class header's clause.
 	if d.ImplementsTypes.Len() > 0 {
-		after = append(after, concat(text(" implements "), p.typeList(d.ImplementsTypes)))
+		after = append(after, level(plus4, []Doc{p.typeListClause("implements", nodes(d.ImplementsTypes))}))
 	}
 	header := concat(
 		p.modifiers(d.Modifiers, "own"),
@@ -842,7 +857,7 @@ func (p *printer) declarator(v *compiler.VariableDeclaratorData) Doc {
 // they fit, else the fill mode decides (UNIFIED one per line, INDEPENDENT fill).
 // The closing `)` stays attached to the last item's line.
 func (p *printer) argsLike(open string, items []Doc, closeTok string, fill FillMode) Doc {
-	return p.argsLikeTrailing(open, items, closeTok, fill, "")
+	return p.argsLikeTrailing(open, items, closeTok, fill, nil)
 }
 
 // argsLikeTrailing is argsLike with a trailing token (e.g. a method signature's
@@ -850,7 +865,7 @@ func (p *printer) argsLike(open string, items []Doc, closeTok string, fill FillM
 // decision - gjf's rest-of-line rule. With a trailing token the open delimiter
 // also goes inside the level so the fit check at the column before `(` spans the
 // whole `(...)<trailing>` run. The empty-trailing path is the common call case.
-func (p *printer) argsLikeTrailing(open string, items []Doc, closeTok string, fill FillMode, trailing string) Doc {
+func (p *printer) argsLikeTrailing(open string, items []Doc, closeTok string, fill FillMode, trailing Doc) Doc {
 	var innerParts []Doc
 	for i, it := range items {
 		if i > 0 {
@@ -859,8 +874,8 @@ func (p *printer) argsLikeTrailing(open string, items []Doc, closeTok string, fi
 		innerParts = append(innerParts, it)
 	}
 	inner := level(ZERO, innerParts)
-	if trailing != "" {
-		return level(plus4, []Doc{text(open), brk(fillUnified, "", ZERO, nil), inner, text(closeTok), text(trailing)})
+	if trailing != nil {
+		return level(plus4, []Doc{text(open), brk(fillUnified, "", ZERO, nil), inner, text(closeTok), trailing})
 	}
 	return concat(text(open), level(plus4, []Doc{brk(fillUnified, "", ZERO, nil), inner}), text(closeTok))
 }
@@ -948,9 +963,15 @@ func (p *printer) listItems(ns []*compiler.Node, render func(*compiler.Node) Doc
 	return items, anyComment
 }
 
-func (p *printer) parameters(params *compiler.NodeArray, trailing string) Doc {
+func (p *printer) parameters(params *compiler.NodeArray, trailing Doc) Doc {
 	if params.Len() == 0 {
-		return text("()" + trailing)
+		// Even with no parameters the trailing run (a `throws` clause + brace) may
+		// carry a break, so it must sit in a +4 level to fold and indent correctly.
+		inner := []Doc{text("()")}
+		if trailing != nil {
+			inner = append(inner, trailing)
+		}
+		return level(plus4, inner)
 	}
 	// Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
 	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameter(n.AsParameter()) })
@@ -979,44 +1000,52 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 		head = append(head, p.typ(returnType), text(" "))
 	}
 	hasThrows := throws.Len() > 0
-	// The token trailing the parameter list on the same line (`;`, ` {}`, or
-	// ` {`) goes inside the param level so the list wraps when the whole
-	// signature including it overflows (gjf's rest-of-line rule). Only with no
-	// throws clause - a throws clause sits between the params and that token.
+	// gjf breaks a `throws` clause onto its own +4 line BEFORE it explodes the
+	// parameters: an outer group holds the `throws` break (so it fires when the
+	// whole `(...) throws X {` overflows), while the parameter list is a
+	// self-contained nested level that explodes only if the params alone do not
+	// fit. So `format(a, b, c)` keeps its params inline with `throws` wrapped, but
+	// a longer list goes one-per-line with `throws` wrapped too. With no throws
+	// clause the body-open token rides inside the param level (rest-of-line rule).
 	emptyBody := body != nil && p.blockIsEmpty(body.AsBlock(), p.start(body), body.End)
-	paramTrailing := ""
-	if !hasThrows {
-		switch {
-		case body == nil:
-			paramTrailing = ";"
-		case emptyBody:
-			paramTrailing = " {}"
-		default:
-			paramTrailing = " {"
-		}
+	bodyToken := " {"
+	switch {
+	case body == nil:
+		bodyToken = ";"
+	case emptyBody:
+		bodyToken = " {}"
 	}
-	head = append(head, text(p.raw(name)), p.parameters(params, paramTrailing))
+	var sig Doc
 	if hasThrows {
-		// Same shape as a class header type list, wrapped in a +4 level so the
-		// `throws` keyword folds onto a continuation line.
-		head = append(head, level(plus4, []Doc{p.typeListClause("throws", nodes(throws))}))
-	}
-	if body == nil {
-		if paramTrailing != "" {
-			return concat(head...)
+		throwsParts := []Doc{text("throws ")}
+		for i, t := range nodes(throws) {
+			if i > 0 {
+				throwsParts = append(throwsParts, text(","), brk(fillUnified, " ", ZERO, nil))
+			}
+			throwsParts = append(throwsParts, p.typ(t))
 		}
-		return concat(append(head, text(";"))...)
+		// Continuation throws types indent +8 (the `throws` line is already +4 from
+		// the outer break, and gjf indents the type list +4 beyond the keyword).
+		throwsIndent := ZERO
+		if throws.Len() > 1 {
+			throwsIndent = indentConst(8)
+		}
+		sig = level(ZERO, []Doc{
+			p.parameters(params, nil),
+			brk(fillUnified, " ", plus4, nil),
+			level(throwsIndent, throwsParts),
+			text(bodyToken),
+		})
+	} else {
+		sig = p.parameters(params, text(bodyToken))
 	}
-	// Body present: ` {` went into the param level -> emit the rest of the block;
-	// ` {}` -> empty body already shown; else (throws) -> whole block after a space.
-	switch paramTrailing {
-	case " {":
-		return concat(append(head, p.blockRest(body.AsBlock(), body.End))...)
-	case " {}":
+	head = append(head, text(p.raw(name)), sig)
+	// Emit the rest of the block when there is a real body, else the signature
+	// (with its trailing `;`/` {}`) is complete.
+	if body == nil || emptyBody {
 		return concat(head...)
-	default:
-		return concat(append(head, text(" "), p.block(body.AsBlock(), body.End))...)
 	}
+	return concat(append(head, p.blockRest(body.AsBlock(), body.End))...)
 }
 
 func (p *printer) initializerBlock(d *compiler.InitializerBlockData) Doc {
@@ -1474,10 +1503,22 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData) Doc {
 	// gjf: contents indent +2; when broken, elements fill (INDEPENDENT) if all
 	// short, else one per line (UNIFIED); the closing `}` goes on its own line
 	// back at the parent indent (a -2 break cancels the +2).
-	// ponytail: trailing-comma -> FORCED after-open break is not modeled.
-	items, anyComment := p.listItems(nodes(e.Elements), func(el *compiler.Node) Doc { return p.node(el) })
+	// A trailing comma in source is the author's "keep this vertical" signal:
+	// gjf preserves the comma and FORCES one element per line.
+	els := nodes(e.Elements)
+	trailingComma := false
+	if idx := compiler.SkipTrivia(p.text, els[len(els)-1].End); idx < len(p.text) && p.text[idx] == ',' {
+		trailingComma = true
+	}
+	items, anyComment := p.listItems(els, func(el *compiler.Node) Doc { return p.node(el) })
 	// A comment forces one-per-line (gjf), else short items fill.
-	fill := p.fillMode(anyComment, nodes(e.Elements))
+	fill := p.fillMode(anyComment, els)
+	// A trailing comma forces the braces open (newline after `{` and before `}`)
+	// but elements still fill (`{\n  1, 2, 3,\n}`).
+	open := fillUnified
+	if trailingComma {
+		open = fillForced
+	}
 	var innerParts []Doc
 	for i, el := range items {
 		if i > 0 {
@@ -1485,10 +1526,13 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData) Doc {
 		}
 		innerParts = append(innerParts, el)
 	}
+	if trailingComma {
+		innerParts = append(innerParts, text(","))
+	}
 	inner := level(ZERO, innerParts)
 	return concat(
 		text("{"),
-		level(plus2, []Doc{brk(fillUnified, "", ZERO, nil), inner, brk(fillUnified, "", minus2, nil)}),
+		level(plus2, []Doc{brk(open, "", ZERO, nil), inner, brk(open, "", minus2, nil)}),
 		text("}"),
 	)
 }

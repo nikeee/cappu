@@ -1,0 +1,14 @@
+package p;
+
+class C {
+    private record ModifierTokens(ImmutableList<Token> tokens, Modifier modifier)
+            implements Comparable<ModifierTokens> {
+        @Override
+        public int compareTo(ModifierTokens o) {
+            return 0;
+        }
+    }
+
+    record MarkdownFencedCodeBlock(String value, String start, String end, String literal)
+            implements Token {}
+}

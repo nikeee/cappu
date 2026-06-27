@@ -454,3 +454,5 @@ cappu search commons-lang3
 - 2026-06-27 14:14 — go through the code and investigate opportunities for de-duplication, refactorings and simplifications. also check if both sources use all sensible branded types
 - 2026-06-27 14:15 — go through the formatting code and investigate opportunities for de-duplication, refactorings and simplifications
 - 2026-06-27 21:44 — the foratter is not on par with gjf. make it 100% compatible. we're only at 40%. thats unacceptable.
+- 2026-06-27 21:44 — did you port the gjf parser or do we still use our own parser?
+- 2026-06-27 21:44 — then grind.

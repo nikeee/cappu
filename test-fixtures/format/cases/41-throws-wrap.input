@@ -1,0 +1,22 @@
+package p;
+
+class C {
+  public ImmutableList<Replacement> format(
+      SnippetKind kind,
+      String source,
+      List<Range<Integer>> ranges,
+      int initialIndent,
+      boolean includeComments)
+      throws FormatterException {
+    return null;
+  }
+
+  void ok() throws Exception {
+    return;
+  }
+
+  static void format(final JavaInput javaInput, JavaOutput javaOutput, JavaFormatterOptions options)
+      throws FormatterException {
+    return;
+  }
+}
