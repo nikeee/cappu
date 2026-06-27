@@ -470,10 +470,16 @@ func (p *printer) modifiers(mods *compiler.NodeArray, annoMode string) Doc {
 	for _, a := range annotations {
 		ad := a.AsAnnotation()
 		ownLine := annoMode == "own" || (annoMode == "var" && ad.Args != nil && ad.Args.Len() > 0)
+		parts = append(parts, p.annotation(ad))
+		// A comment on the same line as an own-line annotation stays with it
+		// (`@SuppressWarnings("x") // why`) instead of floating away.
 		if ownLine {
-			parts = append(parts, p.annotation(ad), hardline)
+			if tc, ok := p.trailingCommentAfter(a); ok {
+				parts = append(parts, text(" "), text(tc.text))
+			}
+			parts = append(parts, hardline)
 		} else {
-			parts = append(parts, p.annotation(ad), text(" "))
+			parts = append(parts, text(" "))
 		}
 	}
 	for _, k := range keywords {

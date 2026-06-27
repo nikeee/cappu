@@ -480,7 +480,14 @@ class Printer {
     for (const a of annotations) {
       const ownLine =
         annoMode === "own" || (annoMode === "var" && a.args !== undefined && a.args.length > 0);
-      parts.push(this.annotation(a), ownLine ? hardline : " ");
+      parts.push(this.annotation(a));
+      // A comment on the same line as an own-line annotation stays with it
+      // (`@SuppressWarnings("x") // why`) instead of floating away.
+      if (ownLine) {
+        const tc = this.trailingCommentAfter(a);
+        if (tc) parts.push(" ", tc.text);
+      }
+      parts.push(ownLine ? hardline : " ");
     }
     for (const k of keywords) parts.push(concat([this.modifierText(k), " "]));
     return concat(parts);

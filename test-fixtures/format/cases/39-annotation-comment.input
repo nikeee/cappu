@@ -1,0 +1,7 @@
+package p;
+
+class C {
+  @SuppressWarnings("unchecked") // reflection
+  @Override
+  public void m() {}
+}
