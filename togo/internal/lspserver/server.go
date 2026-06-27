@@ -276,7 +276,7 @@ func (s *Server) onDidChangeWatchedFiles(params json.RawMessage) {
 			s.program.RemoveProjectFile(uri)
 			continue
 		}
-		text, err := os.ReadFile(uriToPath(uri))
+		text, err := os.ReadFile(string(uriToPath(uri)))
 		if err != nil {
 			s.program.RemoveProjectFile(uri)
 			continue
@@ -319,7 +319,7 @@ func toLspDiagnostic(d compiler.Diagnostic, text string, lineStarts []int) lsp.D
 		Range:    lspRange(text, lineStarts, d.Pos, d.End),
 		Message:  d.MessageText,
 		Source:   "javalsp",
-		Code:     d.Code,
+		Code:     int(d.Code),
 	}
 	if d.Code == 1305 { // unused import: editors fade it out
 		out.Tags = []int{lsp.DiagnosticTagUnnecessary}
@@ -389,11 +389,6 @@ func (s *Server) identifierAt(uri compiler.URI, pos lsp.Position) *compiler.Node
 		return nil
 	}
 	return compiler.GetIdentifierAtPosition(sourceFile, offset)
-}
-
-func isStubSymbol(symbol *compiler.Symbol) bool {
-	declaration := compiler.GetDeclarationNameNode(symbol)
-	return declaration != nil && strings.HasPrefix(compiler.GetSourceFileOfNode(declaration).AsSourceFile().FileName, "jdk:///")
 }
 
 // typeDefinitionOf returns the location of an expression's (inferred) type

@@ -106,7 +106,7 @@ func formatDiagnostic(uri string, d compiler.Diagnostic, text string, lineStarts
 	return McpDiagnostic{
 		File:      displayFile(uri),
 		Severity:  severityOf(d.Category),
-		Code:      d.Code,
+		Code:      int(d.Code),
 		Message:   d.MessageText,
 		Line:      start.Line + 1,
 		Column:    start.Character + 1,
@@ -471,11 +471,6 @@ func (t *Tools) ResolveImport(name string) []string {
 	return imports
 }
 
-func isStubSymbol(symbol *compiler.Symbol) bool {
-	declaration := compiler.GetDeclarationNameNode(symbol)
-	return declaration != nil && compiler.IsSyntheticURI(compiler.URI(compiler.GetSourceFileOfNode(declaration).AsSourceFile().FileName))
-}
-
 // RenameSymbolResult is the rename tool result.
 type RenameSymbolResult struct {
 	Edits      []McpEdit `json:"edits"`
@@ -496,7 +491,7 @@ func (t *Tools) RenameSymbol(ref, newName string) RenameSymbolResult {
 		}
 		return RenameSymbolResult{Edits: []McpEdit{}}
 	}
-	if isStubSymbol(symbol) {
+	if compiler.IsStubSymbol(symbol) {
 		return RenameSymbolResult{Edits: []McpEdit{}, Error: "Cannot rename a symbol defined by the JDK."}
 	}
 	edits := []McpEdit{}

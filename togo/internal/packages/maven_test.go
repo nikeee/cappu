@@ -91,7 +91,7 @@ func TestSearchPackagesDedupsByGroupArtifact(t *testing.T) {
 
 type stubSource struct{ hits []SearchHit }
 
-func (s stubSource) Name() string { return "stub" }
+func (s stubSource) Name() SourceName { return "stub" }
 
 func (s stubSource) Search(string) ([]SearchHit, error) { return s.hits, nil }
 

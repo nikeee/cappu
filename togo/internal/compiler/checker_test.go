@@ -165,7 +165,7 @@ func TestCStyleArrayRank(t *testing.T) {
 func (ctx *checkerCtx) diagsWithCode(code int) []string {
 	var out []string
 	for _, d := range ctx.checker.GetSemanticDiagnostics(ctx.program.GetSourceFile(ctx.uri)) {
-		if d.Code == code {
+		if int(d.Code) == code {
 			out = append(out, d.MessageText)
 		}
 	}

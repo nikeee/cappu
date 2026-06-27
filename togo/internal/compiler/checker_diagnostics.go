@@ -932,7 +932,7 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 					checkNullness(r.Expression, c.getTypeOfSymbol(fn.Symbol), fn.AsMethodDeclaration().Name.AsIdentifier().Text)
 				} else if fn != nil && fn.Kind == LambdaExpression {
 					if info := c.GetLambdaInfo(fn); info != nil {
-						checkNullness(r.Expression, info.InstReturn, info.SamName)
+						checkNullness(r.Expression, info.InstReturn, string(info.SamName))
 					}
 				}
 			}
@@ -942,7 +942,7 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			lam := node.AsLambdaExpression()
 			if c.nullness != nil && lam.Body.Kind != Block {
 				if info := c.GetLambdaInfo(node); info != nil {
-					checkNullness(lam.Body, info.InstReturn, info.SamName)
+					checkNullness(lam.Body, info.InstReturn, string(info.SamName))
 				}
 			}
 		case MethodDeclaration:

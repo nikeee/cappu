@@ -25,6 +25,9 @@ type PackageKey string
 // MavenScope is a Maven dependency scope ("compile", "runtime", "test", ...).
 type MavenScope string
 
+// SourceName is a package source's stable display name (e.g. its repository url).
+type SourceName string
+
 // Coordinates are the exact maven-style coordinates of one package version.
 type Coordinates struct {
 	GroupID    GroupID
@@ -89,7 +92,7 @@ type PackageMetadata struct {
 // InMemoryPackageSource (tests, local overrides).
 type PackageSource interface {
 	// Name is a stable display name (e.g. the repository url).
-	Name() string
+	Name() SourceName
 	// Search runs a free-text query; an unsupported source returns nil.
 	Search(query string) ([]SearchHit, error)
 	// ListVersions returns all published versions of group:artifact, oldest first.

@@ -238,3 +238,12 @@ test("renameSymbol rejects an invalid identifier", () => {
   expect(r.error).toMatch(/valid Java identifier/);
   expect(r.edits).toEqual([]);
 });
+
+test("renameSymbol refuses a symbol defined in a synthetic classpath stub", () => {
+  const tools = toolsFor({
+    "classpath:///dep/Lib.java": "package dep; public class Lib { public int x; }",
+  });
+  const r = tools.renameSymbol({ ref: "dep.Lib#x", newName: "y" });
+  expect(r.edits).toEqual([]);
+  expect(r.error).toMatch(/JDK/);
+});

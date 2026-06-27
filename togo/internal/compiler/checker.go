@@ -14,7 +14,7 @@ import (
 )
 
 // SamName is a single abstract method's name (the invokedynamic call name).
-type SamName = string
+type SamName string
 
 // LambdaInfo is what the emitter needs to lower a lambda expression.
 type LambdaInfo struct {
@@ -1021,7 +1021,7 @@ func (c *Checker) functionalInfo(target *Type, sam *Node) LambdaInfo {
 	}
 	return LambdaInfo{
 		InterfaceType: target,
-		SamName:       md.Name.AsIdentifier().Text,
+		SamName:       SamName(md.Name.AsIdentifier().Text),
 		ErasedParams:  erasedParams,
 		ErasedReturn:  erasedReturn,
 		InstParams:    instParams,

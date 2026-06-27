@@ -16,7 +16,7 @@ type scannedToken struct {
 
 func tokenize(src string) ([]scannedToken, []int) {
 	var codes []int
-	s := NewScanner(src, func(m DiagnosticMessage, pos, length int) { codes = append(codes, m.Code) })
+	s := NewScanner(src, func(m DiagnosticMessage, pos, length int) { codes = append(codes, int(m.Code)) })
 	var tokens []scannedToken
 	for kind := s.Scan(); kind != EndOfFileToken; kind = s.Scan() {
 		tokens = append(tokens, scannedToken{

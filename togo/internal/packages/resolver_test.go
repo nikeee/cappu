@@ -157,7 +157,7 @@ func TestResolveSourcesInOrder(t *testing.T) {
 	}
 	got := [][2]string{}
 	for _, p := range res.Packages {
-		got = append(got, [2]string{string(p.Coordinates.String()), p.Source})
+		got = append(got, [2]string{string(p.Coordinates.String()), string(p.Source)})
 	}
 	want := [][2]string{{"org.a:a:1", "primary"}, {"org.b:b:1", "fallback"}}
 	if !reflect.DeepEqual(got, want) {
@@ -212,7 +212,7 @@ func TestLatestVersion(t *testing.T) {
 // retries on a transient HTTP failure (429/5xx).
 type erroringSource struct{ err error }
 
-func (erroringSource) Name() string                                  { return "erroring" }
+func (erroringSource) Name() SourceName                              { return "erroring" }
 func (erroringSource) Search(string) ([]SearchHit, error)            { return nil, nil }
 func (erroringSource) ListVersions(string, string) ([]string, error) { return nil, nil }
 func (erroringSource) GetArtifact(Coordinates) ([]byte, error)       { return nil, nil }

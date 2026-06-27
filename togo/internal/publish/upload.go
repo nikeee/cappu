@@ -32,12 +32,15 @@ func ResolvePublishRegistry(flag, configRepo, envRegistry string) string {
 	return config.DefaultPublishRegistry
 }
 
+// BearerToken is a registry bearer credential, distinct from a plain string.
+type BearerToken string
+
 // Auth is publishing credentials: Basic (username+password) or Bearer (token).
 type Auth struct {
 	Basic    bool
 	Username string
 	Password string
-	Token    string
+	Token    BearerToken
 }
 
 // ResolvePublishAuth reads credentials from env: Basic when a username+password
@@ -47,7 +50,7 @@ func ResolvePublishAuth(username, password, token string) (Auth, bool) {
 		return Auth{Basic: true, Username: username, Password: password}, true
 	}
 	if token != "" {
-		return Auth{Token: token}, true
+		return Auth{Token: BearerToken(token)}, true
 	}
 	return Auth{}, false
 }
@@ -56,7 +59,7 @@ func (a Auth) header() string {
 	if a.Basic {
 		return "Basic " + base64.StdEncoding.EncodeToString([]byte(a.Username+":"+a.Password))
 	}
-	return "Bearer " + a.Token
+	return "Bearer " + string(a.Token)
 }
 
 // Maven2Path is the maven2 path for a file: group dots become directories.

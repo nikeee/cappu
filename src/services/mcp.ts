@@ -27,7 +27,7 @@ import { isValidIdentifier, skipTrivia } from "../compiler/utilities.ts";
 import { isSyntheticUri, pathToUri, type Uri, uriToPath } from "../workspace.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
 import { enclosingCall, getHoverText, symbolKindWord } from "./hover.ts";
-import { resolveSymbolRef } from "./mcpResolve.ts";
+import { ambiguityFields, isStubSymbol, resolveSingleRef, resolveSymbolRef } from "./mcpResolve.ts";
 import { findMethodImplementations, getSubtypeIndex } from "./subtypes.ts";
 
 export interface McpLocation {
@@ -275,12 +275,9 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
     ambiguous?: boolean;
     candidates?: number;
   } {
-    const symbols = resolveSymbolRef(args.ref, program.getGlobalIndex());
-    if (symbols.length === 0) return { references: [] };
-    if (symbols.length > 1) {
-      return { references: [], ambiguous: true, candidates: symbols.length };
-    }
-    const references = findReferences(symbols[0], program, checker.resolveName).map(nodeLocation);
+    const r = resolveSingleRef(args.ref, program.getGlobalIndex());
+    if (!r.ok) return { references: [], ...ambiguityFields(r) };
+    const references = findReferences(r.symbol, program, checker.resolveName).map(nodeLocation);
     return { references };
   }
 
@@ -291,12 +288,9 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
     ambiguous?: boolean;
     candidates?: number;
   } {
-    const symbols = resolveSymbolRef(args.ref, program.getGlobalIndex());
-    if (symbols.length === 0) return { implementations: [] };
-    if (symbols.length > 1) {
-      return { implementations: [], ambiguous: true, candidates: symbols.length };
-    }
-    const symbol = symbols[0];
+    const r = resolveSingleRef(args.ref, program.getGlobalIndex());
+    if (!r.ok) return { implementations: [], ...ambiguityFields(r) };
+    const symbol = r.symbol;
     const impls: Symbol[] = [];
     if (symbol.flags & (SymbolFlags.Method | SymbolFlags.Constructor)) {
       const declaration = (symbol.valueDeclaration ?? symbol.declarations?.[0]) as
@@ -334,11 +328,8 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
     ambiguous?: boolean;
     candidates?: number;
   } {
-    const symbols = resolveSymbolRef(args.ref, program.getGlobalIndex());
-    if (symbols.length === 0) return { members: [] };
-    if (symbols.length > 1) {
-      return { members: [], ambiguous: true, candidates: symbols.length };
-    }
+    const r = resolveSingleRef(args.ref, program.getGlobalIndex());
+    if (!r.ok) return { members: [], ...ambiguityFields(r) };
     const members: McpMember[] = [];
     const seenNames = new Set<string>();
     const addFrom = (type: Symbol, inherited: boolean): void => {
@@ -348,8 +339,8 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
         members.push({ ...describe(member), inherited });
       }
     };
-    addFrom(symbols[0], false);
-    for (const superType of supertypesOf(symbols[0])) addFrom(superType, true);
+    addFrom(r.symbol, false);
+    for (const superType of supertypesOf(r.symbol)) addFrom(superType, true);
     return { members };
   }
 
@@ -358,13 +349,10 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
     ambiguous?: boolean;
     candidates?: number;
   } {
-    const symbols = resolveSymbolRef(args.ref, program.getGlobalIndex());
-    if (symbols.length === 0) return { callers: [] };
-    if (symbols.length > 1) {
-      return { callers: [], ambiguous: true, candidates: symbols.length };
-    }
+    const r = resolveSingleRef(args.ref, program.getGlobalIndex());
+    if (!r.ok) return { callers: [], ...ambiguityFields(r) };
     // A reference is a caller when it is the callee identifier of a call.
-    const callers = findReferences(symbols[0], program, checker.resolveName)
+    const callers = findReferences(r.symbol, program, checker.resolveName)
       .filter(node => enclosingCall(node as Identifier) !== undefined)
       .map(nodeLocation);
     return { callers };
@@ -376,14 +364,11 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
     ambiguous?: boolean;
     candidates?: number;
   } {
-    const symbols = resolveSymbolRef(args.ref, program.getGlobalIndex());
-    if (symbols.length === 0) return { supertypes: [], subtypes: [] };
-    if (symbols.length > 1) {
-      return { supertypes: [], subtypes: [], ambiguous: true, candidates: symbols.length };
-    }
+    const r = resolveSingleRef(args.ref, program.getGlobalIndex());
+    if (!r.ok) return { supertypes: [], subtypes: [], ...ambiguityFields(r) };
     return {
-      supertypes: supertypesOf(symbols[0]).map(describe),
-      subtypes: getSubtypeIndex(program).allSubtypesOf(symbols[0]).map(describe),
+      supertypes: supertypesOf(r.symbol).map(describe),
+      subtypes: getSubtypeIndex(program).allSubtypesOf(r.symbol).map(describe),
     };
   }
 
@@ -395,11 +380,6 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
       .findFqnsBySimpleName(args.name)
       .filter(fqn => fqn.includes("."));
     return { imports };
-  }
-
-  function isStubSymbol(symbol: Symbol): boolean {
-    const declaration = getDeclarationNameNode(symbol);
-    return !!declaration && isSyntheticUri(getSourceFileOfNode(declaration).fileName);
   }
 
   // The edits a workspace rename would make - one per reference - returned for
@@ -414,15 +394,12 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
     if (!isValidIdentifier(args.newName)) {
       return { edits: [], error: `'${args.newName}' is not a valid Java identifier.` };
     }
-    const symbols = resolveSymbolRef(args.ref, program.getGlobalIndex());
-    if (symbols.length === 0) return { edits: [] };
-    if (symbols.length > 1) {
-      return { edits: [], ambiguous: true, candidates: symbols.length };
-    }
-    if (isStubSymbol(symbols[0])) {
+    const r = resolveSingleRef(args.ref, program.getGlobalIndex());
+    if (!r.ok) return { edits: [], ...ambiguityFields(r) };
+    if (isStubSymbol(r.symbol)) {
       return { edits: [], error: "Cannot rename a symbol defined by the JDK." };
     }
-    const edits = findReferences(symbols[0], program, checker.resolveName).map(node => ({
+    const edits = findReferences(r.symbol, program, checker.resolveName).map(node => ({
       ...nodeLocation(node),
       newText: args.newName,
     }));

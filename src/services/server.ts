@@ -66,6 +66,7 @@ import {
   getPositionOfLineAndCharacter,
   type Line,
 } from "../compiler/lineMap.ts";
+import { isStubSymbol } from "./mcpResolve.ts";
 import { getIdentifierAtPosition, getNodeAtPosition } from "./nodeAtPosition.ts";
 import { forEachChild } from "../compiler/parser.ts";
 import { createProgram } from "../compiler/program.ts";
@@ -96,7 +97,6 @@ import {
   type Node,
   type PrefixUnaryExpression,
   type SourceFile,
-  type Symbol,
   SymbolFlags,
   SyntaxKind,
 } from "../compiler/types.ts";
@@ -296,12 +296,6 @@ export function startServer(
 
   function locationOf(node: Node): Location {
     return { uri: getSourceFileOfNode(node).fileName, range: rangeOf(node) };
-  }
-
-  // A symbol declared in the synthetic JDK stub cannot be edited.
-  function isStubSymbol(symbol: Symbol): boolean {
-    const declaration = getDeclarationNameNode(symbol);
-    return !!declaration && getSourceFileOfNode(declaration).fileName.startsWith("jdk:///");
   }
 
   // The (sourceFile, offset) prologue every position-based handler starts with.

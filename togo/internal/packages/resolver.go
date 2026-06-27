@@ -17,7 +17,7 @@ type ResolvedPackage struct {
 	// RequestedBy is which package declared it (zero value for a root).
 	RequestedBy Coordinates
 	// Source is the source that provided the metadata.
-	Source string
+	Source SourceName
 }
 
 // VersionConflict records a same-package version clash; the nearer version won.
@@ -49,7 +49,7 @@ func propagates(d DependencyDeclaration) bool {
 	return !d.Optional && (d.Scope == "" || d.Scope == "compile" || d.Scope == "runtime")
 }
 
-func metadataFrom(sources []PackageSource, c Coordinates) (*PackageMetadata, string, error) {
+func metadataFrom(sources []PackageSource, c Coordinates) (*PackageMetadata, SourceName, error) {
 	for _, source := range sources {
 		meta, err := source.GetMetadata(c)
 		if err != nil {
@@ -174,7 +174,7 @@ func NewInMemoryPackageSource(name string, pkgs []PackageMetadata) *InMemoryPack
 	return s
 }
 
-func (s *InMemoryPackageSource) Name() string { return s.name }
+func (s *InMemoryPackageSource) Name() SourceName { return SourceName(s.name) }
 
 func (s *InMemoryPackageSource) Search(query string) ([]SearchHit, error) {
 	q := strings.ToLower(query)

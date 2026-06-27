@@ -13,6 +13,13 @@ import (
 // DiagnosticCategory is a diagnostic's severity.
 type DiagnosticCategory int
 
+// DiagnosticKey is a message's stable machine identifier (e.g. "Identifier_expected").
+type DiagnosticKey string
+
+// DiagnosticCode is a diagnostic's stable numeric code, distinct from a source
+// offset or line.
+type DiagnosticCode int
+
 const (
 	CategoryError DiagnosticCategory = iota
 	CategoryWarning
@@ -21,8 +28,8 @@ const (
 
 // DiagnosticMessage is one entry of the message table.
 type DiagnosticMessage struct {
-	Code     int
-	Key      string
+	Code     DiagnosticCode
+	Key      DiagnosticKey
 	Category DiagnosticCategory
 	Message  string
 }
@@ -31,7 +38,7 @@ type DiagnosticMessage struct {
 type Diagnostic struct {
 	Pos         int
 	End         int
-	Code        int
+	Code        DiagnosticCode
 	Category    DiagnosticCategory
 	MessageText string
 }
@@ -39,7 +46,7 @@ type Diagnostic struct {
 // ErrorCallback receives a scanner/parser error with its location.
 type ErrorCallback func(message DiagnosticMessage, pos, length int)
 
-func diag(code int, key, message string, category DiagnosticCategory) DiagnosticMessage {
+func diag(code DiagnosticCode, key DiagnosticKey, message string, category DiagnosticCategory) DiagnosticMessage {
 	return DiagnosticMessage{Code: code, Key: key, Category: category, Message: message}
 }
 

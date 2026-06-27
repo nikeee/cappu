@@ -50,7 +50,7 @@ type Categories struct {
 // pending is a package queued for download (sha256/licenses known when locked).
 type pending struct {
 	coordinates packages.Coordinates
-	source      string
+	source      packages.SourceName
 	sha256      lockfile.Sha256 // empty when not locked
 	hasSha      bool
 	licenses    []packages.License
@@ -170,7 +170,7 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 		if err := os.WriteFile(file, bytes, 0o644); err != nil {
 			return outcome{noArtifact: id}
 		}
-		locked := lockfile.NewLockedPackage(pkg.coordinates, pkg.source, digest, pkg.licenses)
+		locked := lockfile.NewLockedPackage(pkg.coordinates, string(pkg.source), digest, pkg.licenses)
 		o := outcome{locked: &locked, installed: file}
 		if cached {
 			o.fromStore = id
@@ -263,7 +263,7 @@ func (r *Result) assemble(outcomes []outcome, groupInstalled *[]string) []lockfi
 
 // artifactFrom returns a package's jar bytes: the store first (no network),
 // then the sources (the one that resolved it first). cached reports a store hit.
-func artifactFrom(srcs []packages.PackageSource, preferred string, c packages.Coordinates) (bytes []byte, cached bool, found bool) {
+func artifactFrom(srcs []packages.PackageSource, preferred packages.SourceName, c packages.Coordinates) (bytes []byte, cached bool, found bool) {
 	storePath, storeOK := StorePathFor(c)
 	if storeOK {
 		if data, err := os.ReadFile(storePath); err == nil {
@@ -285,7 +285,7 @@ func artifactFrom(srcs []packages.PackageSource, preferred string, c packages.Co
 	return nil, false, false
 }
 
-func orderPreferred(srcs []packages.PackageSource, preferred string) []packages.PackageSource {
+func orderPreferred(srcs []packages.PackageSource, preferred packages.SourceName) []packages.PackageSource {
 	ordered := make([]packages.PackageSource, 0, len(srcs))
 	for _, s := range srcs {
 		if s.Name() == preferred {
@@ -318,7 +318,7 @@ func fromResolved(pkgs []packages.ResolvedPackage) []pending {
 func fromLocked(pkgs []lockfile.LockedPackage) []pending {
 	out := make([]pending, 0, len(pkgs))
 	for _, p := range pkgs {
-		out = append(out, pending{coordinates: p.Coords(), source: p.Source, sha256: p.Sha256, hasSha: true, licenses: p.Licenses})
+		out = append(out, pending{coordinates: p.Coords(), source: packages.SourceName(p.Source), sha256: p.Sha256, hasSha: true, licenses: p.Licenses})
 	}
 	return out
 }

@@ -57,7 +57,7 @@ func NewMavenRepositorySourceWithFetchers(baseURL, searchURL string, fetchText F
 }
 
 // Name is the repository url (a stable display name).
-func (s *MavenRepositorySource) Name() string { return s.baseURL }
+func (s *MavenRepositorySource) Name() SourceName { return SourceName(s.baseURL) }
 
 func httpFetchText(client *http.Client) FetchText {
 	return func(u string) (string, bool, error) {

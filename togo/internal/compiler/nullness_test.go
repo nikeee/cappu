@@ -30,7 +30,7 @@ func diagnoseNullness(text string, nullness *config.Nullness) []int {
 	checker := NewChecker(program, nullness)
 	var out []int
 	for _, d := range checker.GetSemanticDiagnostics(program.GetSourceFile("file:///T.java")) {
-		out = append(out, d.Code)
+		out = append(out, int(d.Code))
 	}
 	return out
 }
@@ -143,7 +143,7 @@ func diagnoseFilesNullness(files map[string]string, target string) []int {
 	checker := NewChecker(program, jspecify())
 	var out []int
 	for _, d := range checker.GetSemanticDiagnostics(program.GetSourceFile(URI(target))) {
-		out = append(out, d.Code)
+		out = append(out, int(d.Code))
 	}
 	return out
 }

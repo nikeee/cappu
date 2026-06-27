@@ -8,7 +8,7 @@ import "testing"
 func codes(text string) []int {
 	out := []int{}
 	for _, d := range parse(text).AsSourceFile().ParseDiagnostics {
-		out = append(out, d.Code)
+		out = append(out, int(d.Code))
 	}
 	return out
 }

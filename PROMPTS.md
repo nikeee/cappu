@@ -451,3 +451,4 @@ cappu search commons-lang3
 - 2026-06-27 13:54 — remove it form config
 - 2026-06-27 13:54 — in a similar fashion, do https://github.com/nikeee/cappu/issues/29
 - 2026-06-27 14:06 — investigate https://github.com/nikeee/cappu/issues/31
+- 2026-06-27 14:14 — go through the code and investigate opportunities for de-duplication, refactorings and simplifications. also check if both sources use all sensible branded types

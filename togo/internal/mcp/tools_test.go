@@ -302,6 +302,16 @@ func TestMcpRenameInvalidIdentifier(t *testing.T) {
 	}
 }
 
+func TestMcpRenameRefusesClasspathStub(t *testing.T) {
+	tools := toolsFor(map[string]string{
+		"classpath:///dep/Lib.java": "package dep; public class Lib { public int x; }",
+	})
+	r := tools.RenameSymbol("dep.Lib#x", "y")
+	if !contains(r.Error, "JDK") || len(r.Edits) != 0 {
+		t.Errorf("result = %+v", r)
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

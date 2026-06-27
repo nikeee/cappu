@@ -11,7 +11,7 @@ func diagnose(text string) []int {
 	checker := NewChecker(program)
 	var out []int
 	for _, d := range checker.GetSemanticDiagnostics(program.GetSourceFile("file:///T.java")) {
-		out = append(out, d.Code)
+		out = append(out, int(d.Code))
 	}
 	return out
 }

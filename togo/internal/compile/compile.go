@@ -560,7 +560,7 @@ func toCompileDiagnostic(d compiler.Diagnostic, file string, text string, lineSt
 	if d.Category == compiler.CategoryError {
 		sev = "error"
 	}
-	return CompileDiagnostic{Severity: sev, File: file, Line: lc.Line + 1, Column: lc.Character + 1, Code: d.Code, Message: d.MessageText}
+	return CompileDiagnostic{Severity: sev, File: file, Line: lc.Line + 1, Column: lc.Character + 1, Code: int(d.Code), Message: d.MessageText}
 }
 
 // loadConfiguredPaths registers the config's classPath (.class stubs) and

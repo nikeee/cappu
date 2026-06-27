@@ -730,7 +730,7 @@ func (g *bodyGen) emitLambda(node *Node) descriptor {
 	if needsThis {
 		refKind = refInvokeSpecial
 	}
-	idx := g.cp.invokeDynamicLambda(info.SamName, indyDescriptor, samErased, refKind, g.thisInternalName, implName, implDescriptor, instantiated, false)
+	idx := g.cp.invokeDynamicLambda(string(info.SamName), indyDescriptor, samErased, refKind, g.thisInternalName, implName, implDescriptor, instantiated, false)
 	g.code.u1(opInvokeDynamic)
 	g.code.u2(int(idx))
 	g.code.u2(0)
@@ -767,7 +767,7 @@ func (g *bodyGen) emitMethodRef(node *Node) descriptor {
 		implName := fmt.Sprintf("lambda$%s$%d", g.enclosingName, g.lambdaCounter)
 		g.lambdaCounter++
 		*g.opts.lambdaMethods = append(*g.opts.lambdaMethods, emitArrayCtorRefMethod(g.cp, implName, arrayDesc))
-		idx := g.cp.invokeDynamicLambda(info.SamName, methodDescriptor("()"+string(interfaceDesc)), samErased,
+		idx := g.cp.invokeDynamicLambda(string(info.SamName), methodDescriptor("()"+string(interfaceDesc)), samErased,
 			refInvokeStatic, g.thisInternalName, implName, methodDescriptor("(I)"+string(arrayDesc)), instantiated, false)
 		g.code.u1(opInvokeDynamic)
 		g.code.u2(int(idx))
@@ -807,7 +807,7 @@ func (g *bodyGen) emitMethodRef(node *Node) descriptor {
 			dynamicArgs = g.emitExpr(ref.Expression)
 		}
 	}
-	idx := g.cp.invokeDynamicLambda(info.SamName, methodDescriptor("("+string(dynamicArgs)+")"+string(interfaceDesc)), samErased,
+	idx := g.cp.invokeDynamicLambda(string(info.SamName), methodDescriptor("("+string(dynamicArgs)+")"+string(interfaceDesc)), samErased,
 		refKind, ownerInternal, implName, implDescriptor, instantiated, isInterface)
 	g.code.u1(opInvokeDynamic)
 	g.code.u2(int(idx))

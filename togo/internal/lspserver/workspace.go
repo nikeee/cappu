@@ -13,39 +13,42 @@ import (
 	"github.com/nikeee/cappu/internal/config"
 )
 
+// FsPath is an absolute or cwd-relative filesystem path, distinct from a URI.
+type FsPath string
+
 var skipDirs = map[string]bool{
 	"node_modules": true, ".git": true, "target": true, "build": true, "out": true, "bin": true,
 }
 
 // pathToURI converts an absolute filesystem path to a file:// URI.
-func pathToURI(path string) compiler.URI {
-	abs, err := filepath.Abs(path)
+func pathToURI(path FsPath) compiler.URI {
+	abs, err := filepath.Abs(string(path))
 	if err != nil {
-		abs = path
+		abs = string(path)
 	}
 	return compiler.URI("file://" + filepath.ToSlash(abs))
 }
 
 // uriToPath converts a file:// URI back to a filesystem path.
-func uriToPath(uri compiler.URI) string {
-	return strings.TrimPrefix(string(uri), "file://")
+func uriToPath(uri compiler.URI) FsPath {
+	return FsPath(strings.TrimPrefix(string(uri), "file://"))
 }
 
 // findJavaFiles recursively collects .java file paths under dir, skipping build dirs.
-func findJavaFiles(dir string) []string {
-	var out []string
-	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+func findJavaFiles(dir FsPath) []FsPath {
+	var out []FsPath
+	_ = filepath.WalkDir(string(dir), func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 		if d.IsDir() {
-			if path != dir && skipDirs[d.Name()] {
+			if path != string(dir) && skipDirs[d.Name()] {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		if strings.HasSuffix(path, ".java") {
-			out = append(out, path)
+			out = append(out, FsPath(path))
 		}
 		return nil
 	})
@@ -53,10 +56,10 @@ func findJavaFiles(dir string) []string {
 }
 
 // loadJavaFiles loads every .java file under rootDir as (uri, text) pairs.
-func loadJavaFiles(rootDir string) [][2]string {
+func loadJavaFiles(rootDir FsPath) [][2]string {
 	var out [][2]string
 	for _, path := range findJavaFiles(rootDir) {
-		text, err := os.ReadFile(path)
+		text, err := os.ReadFile(string(path))
 		if err != nil {
 			continue
 		}
@@ -97,13 +100,13 @@ func missingConfiguredPaths(cfg *config.Config) []string {
 // loadConfiguredPaths in src/compiler/compiler.ts.
 func loadConfiguredSources(program *compiler.Program, cfg *config.Config) {
 	for _, p := range cfg.CompilerOptions.SourcePaths {
-		for _, f := range loadJavaFiles(cfg.ResolvePath(p)) {
+		for _, f := range loadJavaFiles(FsPath(cfg.ResolvePath(p))) {
 			program.AddProjectFile(compiler.URI(f[0]), f[1])
 		}
 	}
 	// .cappu/generated-sources/sources (annotation-processor output) is an
 	// implicit extra source path; absent until the first processing compile.
-	for _, f := range loadJavaFiles(cfg.ResolvePath(filepath.Join(".cappu", "generated-sources", "sources"))) {
+	for _, f := range loadJavaFiles(FsPath(cfg.ResolvePath(filepath.Join(".cappu", "generated-sources", "sources")))) {
 		program.AddProjectFile(compiler.URI(f[0]), f[1])
 	}
 }

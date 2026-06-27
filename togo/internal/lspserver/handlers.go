@@ -45,7 +45,7 @@ func (s *Server) onPrepareRename(params json.RawMessage) (any, *lsp.ResponseErro
 		return nil, nil
 	}
 	symbol := s.checker.ResolveName(identifier)
-	if symbol == nil || isStubSymbol(symbol) {
+	if symbol == nil || compiler.IsStubSymbol(symbol) {
 		return nil, nil
 	}
 	return s.rangeOf(identifier), nil
@@ -61,7 +61,7 @@ func (s *Server) onRename(params json.RawMessage) (any, *lsp.ResponseError) {
 	if symbol == nil {
 		return nil, nil
 	}
-	if isStubSymbol(symbol) {
+	if compiler.IsStubSymbol(symbol) {
 		return nil, &lsp.ResponseError{Code: lsp.ErrInvalidRequest, Message: "Cannot rename a symbol defined by the JDK."}
 	}
 	if !compiler.IsValidIdentifier(p.NewName) {

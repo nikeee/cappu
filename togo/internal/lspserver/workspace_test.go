@@ -10,7 +10,7 @@ import (
 // Port of src/workspace.test.ts (the findJavaFiles helper).
 
 func TestFindJavaFilesMissingDir(t *testing.T) {
-	if files := findJavaFiles("/definitely/not/here"); len(files) != 0 {
+	if files := findJavaFiles(FsPath("/definitely/not/here")); len(files) != 0 {
 		t.Errorf("missing dir should yield no files, got %v", files)
 	}
 }
@@ -32,9 +32,9 @@ func TestFindJavaFilesSkipsBuildDirs(t *testing.T) {
 	write(filepath.Join(dir, "src", "B.java"))
 	write(filepath.Join(dir, "node_modules", "x", "C.java"))
 
-	got := findJavaFiles(dir)
-	sort.Strings(got)
-	want := []string{filepath.Join(dir, "A.java"), filepath.Join(dir, "src", "B.java")}
+	got := findJavaFiles(FsPath(dir))
+	sort.Slice(got, func(i, j int) bool { return got[i] < got[j] })
+	want := []FsPath{FsPath(filepath.Join(dir, "A.java")), FsPath(filepath.Join(dir, "src", "B.java"))}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("findJavaFiles = %v, want %v", got, want)
 	}

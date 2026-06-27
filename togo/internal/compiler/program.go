@@ -20,6 +20,14 @@ func IsSyntheticURI(uri URI) bool {
 	return strings.HasPrefix(string(uri), "jdk:") || strings.HasPrefix(string(uri), "classpath:")
 }
 
+// IsStubSymbol reports whether a symbol is declared in a synthetic stub
+// (jdk:/// or classpath:///) and so cannot be edited - it has no real file to
+// write back to. Used to refuse rename/edits.
+func IsStubSymbol(symbol *Symbol) bool {
+	declaration := GetDeclarationNameNode(symbol)
+	return declaration != nil && IsSyntheticURI(URI(GetSourceFileOfNode(declaration).AsSourceFile().FileName))
+}
+
 // Generation is the program mutation counter derived caches key their memo on.
 type Generation int
 
