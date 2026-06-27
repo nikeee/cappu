@@ -5,17 +5,63 @@
 // syntax error, or a comment in an unsupported position) are skipped with a
 // warning and never rewritten.
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { writeFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
+import { resolve } from "node:path";
+import { Worker } from "node:worker_threads";
 
 import { type CappuConfig } from "../config.ts";
-import { formatSource, UnsupportedSyntaxError } from "../format/index.ts";
+import { type FormatOptions } from "../format/index.ts";
 import { findFormattableFiles } from "../workspace.ts";
 import { emitAnnotation } from "./annotations.ts";
+import { formatOne, type Outcome } from "./format-one.ts";
 import { painter } from "./style.ts";
 
 export interface FormatFlags {
   write?: boolean;
+}
+
+// Below this file count the worker_threads startup cost outweighs the gain, so
+// format inline on the main thread; above it, fan out across a worker pool.
+const PARALLEL_THRESHOLD = 64;
+
+// Read + format every target, in parallel across a worker pool when there are
+// enough files to amortize worker startup, else sequentially. Returns outcomes
+// in target order (workers process contiguous chunks reassembled by index).
+async function computeOutcomes(
+  targets: string[],
+  cwd: string,
+  style: FormatOptions["style"],
+): Promise<Outcome[]> {
+  const maxWorkers = Math.min(availableParallelism(), targets.length);
+  if (targets.length < PARALLEL_THRESHOLD || maxWorkers <= 1) {
+    return targets.map(f => formatOne(f, cwd, style));
+  }
+
+  const results = new Array<Outcome>(targets.length);
+  const chunkSize = Math.ceil(targets.length / maxWorkers);
+  const workers: Promise<void>[] = [];
+  for (let start = 0; start < targets.length; start += chunkSize) {
+    const files = targets.slice(start, start + chunkSize);
+    const base = start;
+    workers.push(
+      new Promise<void>((res, rej) => {
+        const worker = new Worker(new URL("./format-worker.ts", import.meta.url), {
+          workerData: { files, cwd, style },
+        });
+        worker.on("message", (out: Outcome[]) => {
+          out.forEach((o, k) => (results[base + k] = o));
+          res();
+        });
+        worker.on("error", rej);
+        worker.on("exit", code => {
+          if (code !== 0) rej(new Error(`format worker exited with code ${code}`));
+        });
+      }),
+    );
+  }
+  await Promise.all(workers);
+  return results;
 }
 
 export async function runFormat(
@@ -36,44 +82,42 @@ export async function runFormat(
   }
 
   const paint = painter(process.stderr);
+  const cwd = process.cwd();
+  const outcomes = await computeOutcomes(targets, cwd, style);
+
+  // Serial phase: emit output and apply writes in target order (deterministic,
+  // independent of which worker finished first).
   const unformatted: string[] = [];
   const changed: string[] = [];
   let skipped = 0;
 
-  for (const file of targets) {
-    const rel = relative(process.cwd(), file);
-    let source: string;
-    try {
-      source = readFileSync(file, "utf8");
-    } catch (e) {
-      process.stderr.write(`cappu: cannot read ${rel}: ${(e as Error).message}\n`);
+  for (let i = 0; i < outcomes.length; i++) {
+    const o = outcomes[i];
+    if (o.readErr) {
+      process.stderr.write(`cappu: cannot read ${o.rel}: ${o.readErr}\n`);
       process.exit(2);
     }
-
-    let formatted: string;
-    try {
-      formatted = formatSource(source, { style }, file);
-    } catch (e) {
-      if (e instanceof UnsupportedSyntaxError) {
-        skipped++;
-        process.stderr.write(paint("dim", `skipped ${rel} (${e.message})\n`));
-        continue;
-      }
-      throw e;
+    if (o.fmtErr) {
+      process.stderr.write(`cappu: ${o.fmtErr}\n`);
+      process.exit(2);
     }
-
-    if (formatted === source) continue;
+    if (o.skipped) {
+      skipped++;
+      process.stderr.write(paint("dim", `skipped ${o.rel} (unsupported syntax)\n`));
+      continue;
+    }
+    if (!o.changed) continue;
 
     if (flags.write) {
-      writeFileSync(file, formatted);
-      changed.push(rel);
+      writeFileSync(targets[i], o.formatted!);
+      changed.push(o.rel);
       // List each rewritten file on stdout (machine-readable, like the check
       // mode lists the unformatted ones); the count summary goes to stderr.
-      process.stdout.write(`${rel}\n`);
+      process.stdout.write(`${o.rel}\n`);
     } else {
-      unformatted.push(rel);
-      process.stdout.write(`${rel}\n`);
-      emitAnnotation("error", "not formatted (run `cappu format --write`)", { file: rel });
+      unformatted.push(o.rel);
+      process.stdout.write(`${o.rel}\n`);
+      emitAnnotation("error", "not formatted (run `cappu format --write`)", { file: o.rel });
     }
   }
 

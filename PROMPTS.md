@@ -442,8 +442,8 @@ cappu search commons-lang3
 - 2026-06-26 01:40 — dont do A2
 - 2026-06-26 01:40 — track C: no alias. pick one
 - 2026-06-26 09:24 — resolve https://github.com/nikeee/cappu/issues/28
-continue
 - 2026-06-26 09:24 — are there generated sources for tests?
 - 2026-06-26 09:28 — resolve https://github.com/nikeee/cappu/issues/30
 - 2026-06-26 10:03 — group the help texts of all commands. make them more colorful. similar to bun: Bun is a fast JavaScript runtime, package manager, bundler, and test runner. (1.3.14+0d9b296af) [...bun --help example...]
 - 2026-06-26 10:03 — commit on main and push when finished
+- 2026-06-27 12:55 — implement concurrent/parallel formatting of files. this should speed up formatting
