@@ -158,3 +158,72 @@ func TestSeverityAliasesFixedVersions(t *testing.T) {
 		t.Errorf("fixedVersionsOf = %v (only the matching package's fix)", got)
 	}
 }
+
+func TestOsvSeverityBuckets(t *testing.T) {
+	label := func(s string) osvVuln { v := osvVuln{}; v.DatabaseSpecific.Severity = s; return v }
+	// The database_specific.severity label wins (case-insensitive).
+	if osvSeverity(label("CRITICAL")) != SeverityCritical {
+		t.Error("CRITICAL -> critical")
+	}
+	if osvSeverity(label("low")) != SeverityLow {
+		t.Error("low -> low")
+	}
+	// No label: bucket the CVSS base score the way GHSA/npm do.
+	cvss := func(score string) osvVuln {
+		var v osvVuln
+		_ = json.Unmarshal([]byte(`{"id":"x","severity":[{"type":"CVSS_V3","score":"`+score+`"}]}`), &v)
+		return v
+	}
+	if osvSeverity(cvss("9.5")) != SeverityCritical {
+		t.Error("9.5 -> critical")
+	}
+	if osvSeverity(cvss("7.5")) != SeverityHigh {
+		t.Error("7.5 -> high")
+	}
+	if osvSeverity(cvss("4.5")) != SeverityModerate {
+		t.Error("4.5 -> moderate")
+	}
+	if osvSeverity(cvss("2.0")) != SeverityLow {
+		t.Error("2.0 -> low")
+	}
+	// A CVSS vector string (not a bare number) is not scorable -> unknown. The
+	// scan stops at the first CVSS-typed entry, mirroring TS's find().
+	if osvSeverity(cvss("CVSS:3.1/AV:N/AC:L")) != SeverityUnknown {
+		t.Error("unparsable CVSS -> unknown")
+	}
+}
+
+func TestToAdvisorySummaryFallback(t *testing.T) {
+	c := coord("g:a:1")
+	// A present summary is used verbatim.
+	if got := toAdvisory(osvVuln{ID: "GHSA-1", Summary: "explicit"}, c).Summary; got != "explicit" {
+		t.Errorf("summary = %q, want explicit", got)
+	}
+	// No summary: fall back to the first line of details.
+	if got := toAdvisory(osvVuln{ID: "GHSA-2", Details: "first line\nsecond line"}, c).Summary; got != "first line" {
+		t.Errorf("summary = %q, want first line", got)
+	}
+	// Neither: the placeholder.
+	if got := toAdvisory(osvVuln{ID: "GHSA-3"}, c).Summary; got != "(no summary)" {
+		t.Errorf("summary = %q, want (no summary)", got)
+	}
+}
+
+func TestVulnCachePathRejectsUnsafeIDs(t *testing.T) {
+	if _, ok := vulnCachePath("../etc/passwd"); ok {
+		t.Error("a path-traversal id must be rejected")
+	}
+	if _, ok := vulnCachePath("GHSA-aaaa-bbbb-cccc"); !ok {
+		t.Error("a normal advisory id must be accepted")
+	}
+}
+
+func TestNewOsvSourceDefaultsAndName(t *testing.T) {
+	s := NewOsvSource(nil) // nil -> default live HTTP fetcher
+	if s.fetchJSON == nil {
+		t.Error("nil fetcher should default to the live fetcher")
+	}
+	if s.Name() != osvAPI {
+		t.Errorf("Name() = %q, want %q", s.Name(), osvAPI)
+	}
+}

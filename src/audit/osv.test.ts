@@ -138,3 +138,45 @@ test("severity, aliases and fixed-version extraction", () => {
     ),
   ).toEqual(["2"]); // only the matching package's fix
 });
+
+test("osvSeverity buckets the label, then the CVSS base score", () => {
+  expect(osvSeverity({ id: "x", database_specific: { severity: "CRITICAL" } })).toBe("critical");
+  expect(osvSeverity({ id: "x", database_specific: { severity: "low" } })).toBe("low");
+  // No label: bucket the CVSS base score the way GHSA/npm do.
+  const cvss = (score: string) => osvSeverity({ id: "x", severity: [{ type: "CVSS_V3", score }] });
+  expect(cvss("9.5")).toBe("critical");
+  expect(cvss("7.5")).toBe("high");
+  expect(cvss("4.5")).toBe("moderate");
+  expect(cvss("2.0")).toBe("low");
+  // A CVSS vector string is not a bare numeric score -> unknown.
+  expect(cvss("CVSS:3.1/AV:N/AC:L")).toBe("unknown");
+});
+
+test("advisory summary falls back to the first line of details, then a placeholder", async () => {
+  // toAdvisory is internal; drive it through findVulnerabilities. The vuln
+  // details serve as the summary source when no summary is present.
+  const details: Record<string, unknown> = {
+    "GHSA-det": { id: "GHSA-det", details: "first line\nsecond line" },
+    "GHSA-none": { id: "GHSA-none" }, // neither summary nor details
+  };
+  const fetchJson = (url: string, body?: unknown): Promise<unknown> => {
+    if (url.endsWith("/v1/querybatch")) {
+      const queries = (body as { queries: { package: { name: string } }[] }).queries;
+      return Promise.resolve({
+        results: queries.map(q =>
+          q.package.name === "g:det"
+            ? { vulns: [{ id: "GHSA-det" }] }
+            : q.package.name === "g:none"
+              ? { vulns: [{ id: "GHSA-none" }] }
+              : {},
+        ),
+      });
+    }
+    return Promise.resolve(details[url.split("/v1/vulns/")[1]!]);
+  };
+  const source = new OsvSource(fetchJson);
+  const coords = [toCoordinates("g", "det", "1"), toCoordinates("g", "none", "1")];
+  const result = await source.findVulnerabilities(coords);
+  expect(result.get(coordinatesToString(coords[0]!))![0]!.summary).toBe("first line");
+  expect(result.get(coordinatesToString(coords[1]!))![0]!.summary).toBe("(no summary)");
+});

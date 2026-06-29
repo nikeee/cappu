@@ -460,3 +460,7 @@ cappu search commons-lang3
 - 2026-06-29 10:31 — make the cappu-lock.json deterministic. sort the entries alphabetically
 - 2026-06-29 11:13 — ci fails https://github.com/nikeee/cappu/actions/runs/28361177399
 - 2026-06-29 11:13 — commit to main
+- 2026-06-29 16:28 — add some test coverage tool to the go version. use the one that everyone uses.
+- 2026-06-29 16:28 — yes
+- 2026-06-29 16:28 — now that you have code coverage tools, use it to find untested code paths and check for their correct bahaviour. maybe even add tests that cover their branches
+- 2026-06-29 16:28 — commit between steps
