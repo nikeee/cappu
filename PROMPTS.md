@@ -466,3 +466,6 @@ cappu search commons-lang3
 - 2026-06-29 16:28 — commit between steps
 - 2026-06-29 16:28 — anything else?
 - 2026-06-29 16:28 — do the cheap ones
+- 2026-06-29 22:39 — for cappu audit and cappu licenses: are there common formats that some tools can consume? like tap for tests or lcov for coverage?
+- 2026-06-29 22:39 — yeah. implement sarif and osv for audit. well do licenses later. maybe remove "json" format form cappu audit, as it is not standardized
+- 2026-06-29 22:39 — use "--format sarif", so we dann add more later

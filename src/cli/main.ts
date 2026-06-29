@@ -92,8 +92,8 @@ const COMMAND_GROUPS: HelpGroup[] = [
       },
       {
         name: "audit",
-        args: "[--no-cache] [--json]",
-        desc: "Scan resolved dependencies for known vulnerabilities (OSV); no fixing. --no-cache ignores all caches (fresh scan); --json emits the findings machine-readable",
+        args: "[--no-cache] [--format text|sarif]",
+        desc: "Scan resolved dependencies for known vulnerabilities (OSV); no fixing. --no-cache ignores all caches (fresh scan); --format sarif emits a SARIF 2.1.0 log for code-scanning upload (default: text)",
       },
       {
         name: "licenses",
@@ -233,7 +233,7 @@ const OPTION_GROUPS: HelpGroup[] = [
       { name: "-h, --help", desc: "Show this help" },
       { name: "    --version", desc: "Show the version" },
     ],
-    note: "When an AI agent drives cappu (AGENT, CLAUDECODE, CURSOR_AGENT, ... set), colour and animations are off and --json is implied where supported (audit, licenses, tree, search).",
+    note: "When an AI agent drives cappu (AGENT, CLAUDECODE, CURSOR_AGENT, ... set), colour and animations are off and machine-readable output is implied where supported (audit emits SARIF; licenses, tree, search emit --json).",
   },
 ];
 
@@ -312,6 +312,7 @@ const { values, positionals } = (() => {
         "with-schema": { type: "boolean", default: false },
         yes: { type: "boolean", short: "y", default: false },
         json: { type: "boolean", default: false },
+        format: { type: "string" },
         "no-cache": { type: "boolean", default: false },
         repo: { type: "string" },
         open: { type: "boolean", default: false },
@@ -427,9 +428,19 @@ switch (command) {
   case "version":
     await runVersion(files[0], values.config, config);
     break;
-  case "audit":
-    await runAudit(config, { noCache: values["no-cache"], json });
+  case "audit": {
+    if (values.json) {
+      process.stderr.write("cappu: `audit` uses --format (text|sarif), not --json\n");
+      process.exit(2);
+    }
+    const format = values.format ?? (agentEnabled() ? "sarif" : "text");
+    if (format !== "text" && format !== "sarif") {
+      process.stderr.write(`cappu: unknown --format '${format}' (expected: text, sarif)\n`);
+      process.exit(2);
+    }
+    await runAudit(config, { noCache: values["no-cache"], format });
     break;
+  }
   case "licenses":
     await runLicenses(config, { json });
     break;

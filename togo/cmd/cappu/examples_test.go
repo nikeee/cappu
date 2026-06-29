@@ -209,32 +209,42 @@ func TestExampleAuditApp(t *testing.T) {
 		t.Errorf("audit output missing Log4Shell finding:\n%s", s)
 	}
 
-	jsonCmd := exec.Command(cappu(t), "audit", "--json")
-	jsonCmd.Dir, jsonCmd.Env = work, env
-	jsonOut, _ := jsonCmd.CombinedOutput()
-	var report struct {
-		Vulnerable []struct {
-			Coordinate string   `json:"coordinate"`
-			Path       []string `json:"path"`
-			Advisories []struct {
-				Aliases []string `json:"aliases"`
-			} `json:"advisories"`
-		} `json:"vulnerable"`
+	sarifCmd := exec.Command(cappu(t), "audit", "--format", "sarif")
+	sarifCmd.Dir, sarifCmd.Env = work, env
+	sarifOut, _ := sarifCmd.CombinedOutput()
+	var log struct {
+		Version string `json:"version"`
+		Runs    []struct {
+			Results []struct {
+				Message    struct{ Text string } `json:"message"`
+				Properties struct {
+					Coordinate string   `json:"coordinate"`
+					Path       []string `json:"path"`
+				} `json:"properties"`
+			} `json:"results"`
+		} `json:"runs"`
 	}
-	if err := json.Unmarshal(jsonOut, &report); err != nil {
-		t.Fatalf("audit --json: %v\n%s", err, jsonOut)
+	if err := json.Unmarshal(sarifOut, &log); err != nil {
+		t.Fatalf("audit --format sarif: %v\n%s", err, sarifOut)
 	}
-	found := false
-	for _, v := range report.Vulnerable {
-		if strings.HasPrefix(v.Coordinate, "org.apache.logging.log4j:log4j-core:") {
-			found = true
-			if len(v.Path) == 0 || v.Path[len(v.Path)-1] != v.Coordinate {
-				t.Errorf("path should end at the vulnerable pkg: %v", v.Path)
+	if log.Version != "2.1.0" || len(log.Runs) != 1 {
+		t.Fatalf("expected one SARIF 2.1.0 run, got version=%q runs=%d", log.Version, len(log.Runs))
+	}
+	// log4j-core 2.14.1 carries several advisories; one of them is Log4Shell.
+	var messages []string
+	for _, r := range log.Runs[0].Results {
+		if strings.HasPrefix(r.Properties.Coordinate, "org.apache.logging.log4j:log4j-core:") {
+			messages = append(messages, r.Message.Text)
+			if len(r.Properties.Path) == 0 || r.Properties.Path[len(r.Properties.Path)-1] != r.Properties.Coordinate {
+				t.Errorf("path should end at the vulnerable pkg: %v", r.Properties.Path)
 			}
 		}
 	}
-	if !found {
-		t.Error("audit --json did not report log4j-core")
+	if len(messages) == 0 {
+		t.Error("audit --format sarif did not report log4j-core")
+	}
+	if !strings.Contains(strings.Join(messages, "\n"), "CVE-2021-44228") {
+		t.Errorf("no log4j-core result mentioned CVE-2021-44228:\n%s", strings.Join(messages, "\n"))
 	}
 }
 

@@ -28,8 +28,13 @@ import { colorEnabled } from "./color.ts";
 import { emitAnnotation } from "./annotations.ts";
 import { warnUnmappedLicenses } from "./licenses.ts";
 import { painter } from "./style.ts";
+import pkg from "../../package.json" with { type: "json" };
 
 type StyleFormat = Parameters<typeof styleText>[0];
+
+/** Audit output formats. `text` is the human report; `sarif` is machine output
+ * for code-scanning upload. New machine formats (e.g. `osv`) slot in here. */
+export type AuditFormat = "text" | "sarif";
 
 // npm's palette; only applied when stdout is a colour-capable TTY.
 const SEVERITY_STYLE: Record<Severity, StyleFormat> = {
@@ -43,8 +48,8 @@ const SEVERITY_STYLE: Record<Severity, StyleFormat> = {
 export async function runAudit(
   config: CappuConfig,
   // --no-cache: ignore the metadata and OSV detail caches for a fresh scan.
-  // --json: emit the findings machine-readable instead of the coloured report.
-  options: { noCache?: boolean; json?: boolean } = {},
+  // format: "text" (default human report) or "sarif" (machine output).
+  options: { noCache?: boolean; format?: AuditFormat } = {},
   // The CVE source; defaults to OSV over a fetcher that caches vuln details on
   // disk (skipped under --no-cache so the scan is fully fresh).
   source: AuditSource = new OsvSource(options.noCache ? undefined : cachedFetchJson()),
@@ -91,24 +96,9 @@ export async function runAudit(
     process.exit(2);
   }
 
-  if (options.json) {
-    const output = {
-      scanned: report.scanned,
-      counts: report.counts,
-      vulnerable: report.vulnerable.map(p => ({
-        coordinate: coordinatesToString(p.coordinates),
-        path: dependencyPath(byKey, p.coordinates).map(coordinatesToString),
-        advisories: p.advisories.map(a => ({
-          id: a.id,
-          aliases: a.aliases,
-          severity: a.severity,
-          summary: a.summary,
-          fixedVersions: a.fixedVersions,
-          url: a.url,
-        })),
-      })),
-    };
-    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+  if ((options.format ?? "text") === "sarif") {
+    const sarif = buildAuditSarif(report, byKey, pkg.version);
+    process.stdout.write(`${JSON.stringify(sarif, null, 2)}\n`);
     process.exit(report.vulnerable.length > 0 ? 1 : 0);
   }
 
@@ -157,4 +147,73 @@ export async function runAudit(
       `across ${report.vulnerable.length} of ${report.scanned} packages\n`,
   );
   process.exit(1);
+}
+
+// SARIF level + GitHub "security-severity" score per bucket. We only have npm
+// severity buckets, not CVSS scores, so the scores are representative midpoints
+// (omitted for "unknown") - enough for the code-scanning Security tab to sort.
+const SARIF_SEVERITY: Record<Severity, { level: string; score?: string }> = {
+  critical: { level: "error", score: "9.0" },
+  high: { level: "error", score: "7.0" },
+  moderate: { level: "warning", score: "4.0" },
+  low: { level: "note", score: "1.0" },
+  unknown: { level: "note" },
+};
+
+/**
+ * Build a SARIF 2.1.0 log for the audit report (GitHub code-scanning ingestible):
+ * one rule per distinct advisory, one result per (package, advisory). Results
+ * point at cappu.json - a vulnerable transitive package has no source line of
+ * its own, but cappu.json is the file that (directly or transitively) declares
+ * it. The dependency path is kept in result.properties for traceability.
+ */
+export function buildAuditSarif(
+  report: AuditReport,
+  byKey: Map<string, ResolvedPackage>,
+  version: string,
+): object {
+  const rules = new Map<string, object>();
+  const results: object[] = [];
+  for (const p of report.vulnerable) {
+    const coordinate = coordinatesToString(p.coordinates);
+    const path = dependencyPath(byKey, p.coordinates).map(coordinatesToString);
+    for (const a of p.advisories) {
+      const { level, score } = SARIF_SEVERITY[a.severity];
+      if (!rules.has(a.id)) {
+        rules.set(a.id, {
+          id: a.id,
+          name: a.id,
+          shortDescription: { text: a.summary || a.id },
+          helpUri: a.url,
+          properties: { tags: ["security"], ...(score ? { "security-severity": score } : {}) },
+        });
+      }
+      const cve = a.aliases.length > 0 ? ` (${a.aliases.join(", ")})` : "";
+      const fixed = a.fixedVersions.length > 0 ? ` Fixed in: ${a.fixedVersions.join(", ")}.` : "";
+      results.push({
+        ruleId: a.id,
+        level,
+        message: { text: `${coordinate} is affected by ${a.id}${cve}: ${a.summary}.${fixed}` },
+        locations: [{ physicalLocation: { artifactLocation: { uri: "cappu.json" } } }],
+        properties: { coordinate, severity: a.severity, path },
+      });
+    }
+  }
+  return {
+    $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+    version: "2.1.0",
+    runs: [
+      {
+        tool: {
+          driver: {
+            name: "cappu",
+            informationUri: "https://github.com/nikeee/cappu",
+            version,
+            rules: [...rules.values()],
+          },
+        },
+        results,
+      },
+    ],
+  };
 }

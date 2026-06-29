@@ -159,30 +159,36 @@ test("examples/audit-app reports its vulnerable dependency", { skip: !HAS_JAVAC 
   expect(freshCode).toBe(1);
   expect(freshOut).toContain("CVE-2021-44228");
 
-  // --json emits machine-readable findings (still exit 1)
-  let jsonOut = "";
-  let jsonCode = 0;
+  // --format sarif emits a machine-readable SARIF log (still exit 1)
+  let sarifOut = "";
+  let sarifCode = 0;
   try {
-    jsonOut = execFileSync(tsx, [cli, "audit", "--json"], {
+    sarifOut = execFileSync(tsx, [cli, "audit", "--format", "sarif"], {
       cwd: work,
       env: { ...process.env, CAPPU_PACKAGE_STORE: store.path },
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (e) {
-    jsonOut = (e as { stdout?: string }).stdout ?? "";
-    jsonCode = (e as { status?: number }).status ?? 1;
+    sarifOut = (e as { stdout?: string }).stdout ?? "";
+    sarifCode = (e as { status?: number }).status ?? 1;
   }
-  expect(jsonCode).toBe(1);
-  const report = JSON.parse(jsonOut) as {
-    vulnerable: { coordinate: string; path: string[]; advisories: { aliases: string[] }[] }[];
+  expect(sarifCode).toBe(1);
+  const log = JSON.parse(sarifOut) as {
+    version: string;
+    runs: {
+      results: { message: { text: string }; properties: { coordinate: string; path: string[] } }[];
+    }[];
   };
-  const log4j = report.vulnerable.find(v =>
-    v.coordinate.startsWith("org.apache.logging.log4j:log4j-core:"),
+  expect(log.version).toBe("2.1.0");
+  expect(log.runs).toHaveLength(1);
+  // log4j-core 2.14.1 carries several advisories; one of them is Log4Shell.
+  const log4j = log.runs[0]!.results.filter(r =>
+    r.properties.coordinate.startsWith("org.apache.logging.log4j:log4j-core:"),
   );
-  expect(log4j).toBeDefined();
-  expect(log4j!.advisories.flatMap(a => a.aliases)).toContain("CVE-2021-44228");
-  expect(log4j!.path.at(-1)).toBe(log4j!.coordinate);
+  expect(log4j.length).toBeGreaterThan(0);
+  expect(log4j.map(r => r.message.text).join("\n")).toContain("CVE-2021-44228");
+  expect(log4j[0]!.properties.path.at(-1)).toBe(log4j[0]!.properties.coordinate);
 });
 
 // licenses resolves the graph (no JDK) and prints each dependency's license;

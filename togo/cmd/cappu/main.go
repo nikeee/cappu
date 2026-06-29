@@ -154,8 +154,8 @@ func (c *verifyCmd) Run(a *appState) error {
 }
 
 type auditCmd struct {
-	NoCache bool `name:"no-cache" help:"Ignore all caches (fresh scan)"`
-	JSON    bool `name:"json" help:"Emit findings machine-readable"`
+	NoCache bool   `name:"no-cache" help:"Ignore all caches (fresh scan)"`
+	Format  string `name:"format" help:"Output format: text|sarif (default: text; sarif under an AI agent)"`
 }
 
 func (c *auditCmd) Run(a *appState) error {
@@ -163,7 +163,7 @@ func (c *auditCmd) Run(a *appState) error {
 	if err != nil {
 		return err
 	}
-	return exit(cli.RunAudit(cfg, c.NoCache, c.JSON || cli.AgentEnabled(os.Getenv)))
+	return exit(cli.RunAudit(cfg, c.NoCache, c.Format))
 }
 
 type licensesCmd struct {

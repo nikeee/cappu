@@ -8,6 +8,7 @@ import (
 
 	"github.com/nikeee/cappu/internal/audit"
 	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/meta"
 	"github.com/nikeee/cappu/internal/packages"
 	"github.com/nikeee/cappu/internal/sources"
 )
@@ -16,7 +17,18 @@ import (
 // included) for known vulnerabilities (OSV.dev), grouped by severity and
 // coloured like npm, printing the dependency path that pulls each one in. No
 // fixing. Exits non-zero when anything is found. Port of src/cli/audit.ts.
-func RunAudit(cfg *config.Config, noCache, jsonOut bool) int {
+func RunAudit(cfg *config.Config, noCache bool, format string) int {
+	if format == "" {
+		format = "text"
+		if AgentEnabled(os.Getenv) {
+			format = "sarif"
+		}
+	}
+	if format != "text" && format != "sarif" {
+		fmt.Fprintf(os.Stderr, "cappu: unknown --format %q (expected: text, sarif)\n", format)
+		return 2
+	}
+
 	var fetch audit.FetchJSON
 	if !noCache {
 		fetch = audit.CachedFetchJSON(nil)
@@ -66,8 +78,8 @@ func RunAudit(cfg *config.Config, noCache, jsonOut bool) int {
 		return 2
 	}
 
-	if jsonOut {
-		return auditJSON(report, byKey)
+	if format == "sarif" {
+		return auditSarif(report, byKey)
 	}
 	return auditText(report, byKey)
 }
@@ -106,44 +118,140 @@ func pathStrings(byKey map[packages.PackageKey]packages.ResolvedPackage, target 
 	return out
 }
 
-func auditJSON(report audit.AuditReport, byKey map[packages.PackageKey]packages.ResolvedPackage) int {
-	type advisoryJSON struct {
-		ID            string   `json:"id"`
-		Aliases       []string `json:"aliases"`
-		Severity      string   `json:"severity"`
-		Summary       string   `json:"summary"`
-		FixedVersions []string `json:"fixedVersions"`
-		URL           string   `json:"url"`
+// SARIF 2.1.0 log structs (GitHub code-scanning ingestible). Only the fields we
+// populate are modelled. Port of src/cli/audit.ts buildAuditSarif.
+type sarifLog struct {
+	Schema  string     `json:"$schema"`
+	Version string     `json:"version"`
+	Runs    []sarifRun `json:"runs"`
+}
+type sarifRun struct {
+	Tool    sarifTool     `json:"tool"`
+	Results []sarifResult `json:"results"`
+}
+type sarifTool struct {
+	Driver sarifDriver `json:"driver"`
+}
+type sarifDriver struct {
+	Name           string      `json:"name"`
+	InformationURI string      `json:"informationUri"`
+	Version        string      `json:"version"`
+	Rules          []sarifRule `json:"rules"`
+}
+type sarifText struct {
+	Text string `json:"text"`
+}
+type sarifRule struct {
+	ID               string         `json:"id"`
+	Name             string         `json:"name"`
+	ShortDescription sarifText      `json:"shortDescription"`
+	HelpURI          string         `json:"helpUri"`
+	Properties       sarifRuleProps `json:"properties"`
+}
+type sarifRuleProps struct {
+	Tags             []string `json:"tags"`
+	SecuritySeverity string   `json:"security-severity,omitempty"`
+}
+type sarifResult struct {
+	RuleID     string           `json:"ruleId"`
+	Level      string           `json:"level"`
+	Message    sarifText        `json:"message"`
+	Locations  []sarifLocation  `json:"locations"`
+	Properties sarifResultProps `json:"properties"`
+}
+type sarifLocation struct {
+	PhysicalLocation sarifPhysical `json:"physicalLocation"`
+}
+type sarifPhysical struct {
+	ArtifactLocation sarifArtifact `json:"artifactLocation"`
+}
+type sarifArtifact struct {
+	URI string `json:"uri"`
+}
+type sarifResultProps struct {
+	Coordinate string   `json:"coordinate"`
+	Severity   string   `json:"severity"`
+	Path       []string `json:"path"`
+}
+
+// sarifSeverity maps an npm severity bucket to a SARIF level and a representative
+// GitHub "security-severity" score (we have buckets, not CVSS; "" for unknown).
+func sarifSeverity(s audit.Severity) (level, score string) {
+	switch s {
+	case audit.SeverityCritical:
+		return "error", "9.0"
+	case audit.SeverityHigh:
+		return "error", "7.0"
+	case audit.SeverityModerate:
+		return "warning", "4.0"
+	case audit.SeverityLow:
+		return "note", "1.0"
+	default:
+		return "note", ""
 	}
-	type packageJSON struct {
-		Coordinate string         `json:"coordinate"`
-		Path       []string       `json:"path"`
-		Advisories []advisoryJSON `json:"advisories"`
-	}
-	vulnerable := make([]packageJSON, 0, len(report.Vulnerable))
+}
+
+// buildAuditSarif builds the SARIF log: one rule per distinct advisory, one
+// result per (package, advisory). Results point at cappu.json (the file that
+// declares the dependency, directly or transitively); the dependency path is
+// kept in result.properties for traceability.
+func buildAuditSarif(report audit.AuditReport, byKey map[packages.PackageKey]packages.ResolvedPackage, version string) sarifLog {
+	seen := map[string]struct{}{}
+	rules := []sarifRule{}
+	results := []sarifResult{}
 	for _, p := range report.Vulnerable {
-		advisories := make([]advisoryJSON, 0, len(p.Advisories))
+		coordinate := string(p.Coordinates.String())
+		path := pathStrings(byKey, p.Coordinates)
 		for _, a := range p.Advisories {
-			advisories = append(advisories, advisoryJSON{
-				ID:            string(a.ID),
-				Aliases:       orEmpty(a.Aliases),
-				Severity:      string(a.Severity),
-				Summary:       a.Summary,
-				FixedVersions: orEmpty(a.FixedVersions),
-				URL:           a.URL,
+			level, score := sarifSeverity(a.Severity)
+			id := string(a.ID)
+			if _, ok := seen[id]; !ok {
+				seen[id] = struct{}{}
+				short := a.Summary
+				if short == "" {
+					short = id
+				}
+				rules = append(rules, sarifRule{
+					ID:               id,
+					Name:             id,
+					ShortDescription: sarifText{Text: short},
+					HelpURI:          a.URL,
+					Properties:       sarifRuleProps{Tags: []string{"security"}, SecuritySeverity: score},
+				})
+			}
+			cve := ""
+			if len(a.Aliases) > 0 {
+				cve = " (" + strings.Join(a.Aliases, ", ") + ")"
+			}
+			fixed := ""
+			if len(a.FixedVersions) > 0 {
+				fixed = " Fixed in: " + strings.Join(a.FixedVersions, ", ") + "."
+			}
+			results = append(results, sarifResult{
+				RuleID:    id,
+				Level:     level,
+				Message:   sarifText{Text: fmt.Sprintf("%s is affected by %s%s: %s.%s", coordinate, id, cve, a.Summary, fixed)},
+				Locations: []sarifLocation{{PhysicalLocation: sarifPhysical{ArtifactLocation: sarifArtifact{URI: "cappu.json"}}}},
+				Properties: sarifResultProps{
+					Coordinate: coordinate,
+					Severity:   string(a.Severity),
+					Path:       path,
+				},
 			})
 		}
-		vulnerable = append(vulnerable, packageJSON{
-			Coordinate: string(p.Coordinates.String()),
-			Path:       pathStrings(byKey, p.Coordinates),
-			Advisories: advisories,
-		})
 	}
-	out, _ := json.MarshalIndent(struct {
-		Scanned    int           `json:"scanned"`
-		Counts     audit.Counts  `json:"counts"`
-		Vulnerable []packageJSON `json:"vulnerable"`
-	}{report.Scanned, report.Counts, vulnerable}, "", "  ")
+	return sarifLog{
+		Schema:  "https://json.schemastore.org/sarif-2.1.0.json",
+		Version: "2.1.0",
+		Runs: []sarifRun{{
+			Tool:    sarifTool{Driver: sarifDriver{Name: "cappu", InformationURI: "https://github.com/nikeee/cappu", Version: version, Rules: rules}},
+			Results: results,
+		}},
+	}
+}
+
+func auditSarif(report audit.AuditReport, byKey map[packages.PackageKey]packages.ResolvedPackage) int {
+	out, _ := json.MarshalIndent(buildAuditSarif(report, byKey, meta.Version), "", "  ")
 	fmt.Fprintf(os.Stdout, "%s\n", out)
 	if len(report.Vulnerable) > 0 {
 		return 1
@@ -236,11 +344,4 @@ func severityPaint(paint func(format, text string) string, s audit.Severity, tex
 	default:
 		return paint("dim", text)
 	}
-}
-
-func orEmpty(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
 }

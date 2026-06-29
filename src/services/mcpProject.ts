@@ -1,9 +1,9 @@
 // MCP project tools: read-only package-management queries (audit, licenses,
 // search) over the project's resolved dependency graph. Unlike the semantic
 // tools in mcp.ts these are async and config-driven (they resolve dependencies
-// from the configured sources, not the Java program), and they mirror the
-// structured output of `cappu audit --json` / `cappu licenses --json` /
-// `cappu search`. Sources are injectable so the transport can pass real network
+// from the configured sources, not the Java program), and they return the same
+// structured findings as the `cappu audit` / `cappu licenses` / `cappu search`
+// CLI commands. Sources are injectable so the transport can pass real network
 // sources while tests pass in-memory ones.
 
 import {

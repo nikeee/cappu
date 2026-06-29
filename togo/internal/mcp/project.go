@@ -3,9 +3,9 @@ package mcp
 // MCP project tools: read-only package-management queries (audit, licenses,
 // search, outdated, latestVersion, dependencyTree) over the project's resolved
 // dependency graph. Unlike the semantic tools in tools.go these resolve
-// dependencies from the configured sources (not the Java program) and mirror the
-// structured output of `cappu audit --json` / `licenses --json` / `search`.
-// Sources are injectable so the transport passes real network sources while
+// dependencies from the configured sources (not the Java program) and return the
+// same structured findings as the `cappu audit` / `licenses` / `search` CLI
+// commands. Sources are injectable so the transport passes real network sources while
 // tests pass in-memory ones. Port of src/services/mcpProject.ts.
 
 import (
