@@ -3,6 +3,7 @@ package install
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -218,6 +219,12 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 	procLocked := result.assemble(procOut, &result.InstalledByCategory.Processor)
 	testLocked := result.assemble(testOut, &result.InstalledByCategory.Test)
 
+	// Sort each set by coordinate so the lock is deterministic regardless of
+	// install/download order, keeping diffs minimal across runs.
+	sortLocked(mainLocked)
+	sortLocked(procLocked)
+	sortLocked(testLocked)
+
 	// The lock pins what was VERIFIABLY materialized: written only when the
 	// whole set arrived and resolution was complete.
 	if !fromLock && cfg.FromFile && len(resolution.Missing) == 0 && len(result.NoArtifact) == 0 {
@@ -234,6 +241,14 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 	}
 	result.Resolution = resolution
 	return result, nil
+}
+
+// sortLocked orders a locked set by coordinate string so the lockfile is
+// deterministic regardless of download order.
+func sortLocked(pkgs []lockfile.LockedPackage) {
+	sort.Slice(pkgs, func(i, j int) bool {
+		return pkgs[i].Coords().String() < pkgs[j].Coords().String()
+	})
 }
 
 // assemble collects outcomes into the result lists and returns the locked set

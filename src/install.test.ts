@@ -173,12 +173,17 @@ test("install writes a lockfile and reuses it while the dependencies match", asy
   const lock = JSON.parse(readFileSync(join(dir.path, LOCKFILE_NAME), "utf8")) as {
     version: number;
     roots: unknown;
-    packages: { sha256: string }[];
+    packages: { sha256: string; coordinates: { groupId: string; artifactId: string } }[];
   };
   expect(lock.version).toBe(2);
   expect(lock.packages).toHaveLength(2); // gson + its transitive base
   // every artifact is pinned by the hash of its downloaded bytes (#2)
   for (const pkg of lock.packages) expect(pkg.sha256).toMatch(/^[0-9a-f]{64}$/);
+  // The set is sorted by coordinate so the lock is deterministic across runs.
+  expect(lock.packages.map(p => `${p.coordinates.groupId}:${p.coordinates.artifactId}`)).toEqual([
+    "com.google.code.gson:gson",
+    "org.example:base",
+  ]);
 
   // Unchanged section: the locked set installs without any POM fetch.
   const fetchedPoms: string[] = [];

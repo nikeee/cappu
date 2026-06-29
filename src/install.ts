@@ -734,15 +734,20 @@ export async function installDependencies(
     options.onProgress?.(total, total, "" as CoordinateString);
   }
 
+  // Sort each set by coordinate so the lock is deterministic regardless of
+  // install/download order, keeping diffs minimal across runs.
+  const byCoordinate = (a: LockedPackage, b: LockedPackage) =>
+    coordinatesToString(a.coordinates).localeCompare(coordinatesToString(b.coordinates));
+
   // The lock pins what was VERIFIABLY materialized, so it is written after the
   // downloads - and only when the whole set arrived.
   if (!fromLock && config.fromFile && resolution.missing.length === 0 && noArtifact.length === 0) {
     const newLock: Lockfile = {
       version: 2,
       roots: config.dependencies,
-      packages: locked,
-      ...(lockedProcessors.length > 0 ? { processorPackages: lockedProcessors } : {}),
-      ...(lockedTests.length > 0 ? { testPackages: lockedTests } : {}),
+      packages: [...locked].sort(byCoordinate),
+      ...(lockedProcessors.length > 0 ? { processorPackages: [...lockedProcessors].sort(byCoordinate) } : {}),
+      ...(lockedTests.length > 0 ? { testPackages: [...lockedTests].sort(byCoordinate) } : {}),
     };
     writeFileSync(lockfilePath(config), `${JSON.stringify(newLock, null, 2)}\n`);
   }

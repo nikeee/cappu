@@ -104,6 +104,10 @@ func TestInstallResolvesDownloadsAndWritesLock(t *testing.T) {
 	if lock.Packages[0].Sha256 != lockfile.Sha256Of([]byte("jar-a")) {
 		t.Errorf("locked sha mismatch for a")
 	}
+	// The set is sorted by coordinate so the lock is deterministic across runs.
+	if got := []string{string(lock.Packages[0].Coords().String()), string(lock.Packages[1].Coords().String())}; got[0] != "org.a:a:1" || got[1] != "org.b:b:1" {
+		t.Errorf("lock packages not sorted by coordinate: %v", got)
+	}
 }
 
 func TestCheckLocked(t *testing.T) {
