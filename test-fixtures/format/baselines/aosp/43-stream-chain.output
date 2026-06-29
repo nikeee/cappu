@@ -1,0 +1,9 @@
+package p;
+
+class C {
+    ImmutableList<D> f(List<Diagnostic> diagnostics) {
+        return diagnostics.stream()
+                .map(FormatterException::toFormatterDiagnostic)
+                .collect(toImmutableList());
+    }
+}
