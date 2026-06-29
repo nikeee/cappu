@@ -737,14 +737,6 @@ func (p *printer) interfaceDeclaration(d *compiler.InterfaceDeclarationData, end
 	return p.classLike("interface", d.Modifiers, d.Name, d.TypeParameters, d.Members, end, tail)
 }
 
-func (p *printer) typeList(arr *compiler.NodeArray) Doc {
-	ts := make([]Doc, arr.Len())
-	for i, t := range nodes(arr) {
-		ts[i] = p.typ(t)
-	}
-	return join(text(", "), ts)
-}
-
 func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc {
 	tail := []Doc{p.typeListClause("implements", nodes(d.ImplementsTypes))}
 	header := concat(

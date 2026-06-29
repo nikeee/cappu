@@ -458,3 +458,5 @@ cappu search commons-lang3
 - 2026-06-27 21:44 — then grind.
 - 2026-06-29 10:25 — cappu install still hangs in in the grpah engine project: git clone git@github.com:nikeee/graph-engine.git (branch cappu-test)
 - 2026-06-29 10:31 — make the cappu-lock.json deterministic. sort the entries alphabetically
+- 2026-06-29 11:13 — ci fails https://github.com/nikeee/cappu/actions/runs/28361177399
+- 2026-06-29 11:13 — commit to main
