@@ -216,6 +216,38 @@ func TestConsecutiveLessThan(t *testing.T) {
 	eq(t, "kinds", kindsOf("a < < b"), []SyntaxKind{Identifier, LessThanToken, LessThanToken, Identifier})
 }
 
+func TestStringEscapeEdgeCases(t *testing.T) {
+	// \s is a space (SE15); multiple u's may precede the 4 hex digits; an
+	// unknown escape passes the char through; \' decodes to a single quote.
+	tokens, codes := tokenize(`"a\sb\uuuu0041\q\'"`)
+	eq(t, "codes", codes, []int(nil))
+	eq(t, "value", tokens[0].value, "a bAq'")
+}
+
+func TestStringEscapeOctalCutoff(t *testing.T) {
+	// \777 exceeds 0xff, so only \77 (= 0x3f = '?') is consumed and the
+	// trailing 7 is a literal character.
+	tokens, _ := tokenize(`"\777"`)
+	eq(t, "value", tokens[0].value, "?7")
+}
+
+func TestIncompleteUnicodeEscape(t *testing.T) {
+	// Fewer than 4 hex digits after \u reports a diagnostic.
+	tokens, codes := tokenize(`"\u12"`)
+	eq(t, "kind", tokens[0].kind, StringLiteral)
+	eq(t, "codes", codes, []int{1104}) // HexadecimalDigitExpected
+}
+
+func TestTrailingBackslashAtEOF(t *testing.T) {
+	// A backslash with nothing after it decodes to a literal backslash; the
+	// string is also unterminated.
+	tokens, _ := tokenize("\"\\")
+	eq(t, "value", tokens[0].value, "\\")
+	if tokens[0].flags&Unterminated == 0 {
+		t.Error("expected Unterminated flag")
+	}
+}
+
 func TestHexFloats(t *testing.T) {
 	tokens, codes := tokenize("0x1p1023 0x1.8p-3 0x1.0p0d")
 	eq(t, "codes", codes, []int(nil))
