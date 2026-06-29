@@ -451,6 +451,21 @@ test("fetchWithRetry treats a genuine 404 as a miss (no retry)", async () => {
   }
 });
 
+test("fetchWithRetry passes an AbortSignal so a stalled response cannot hang forever", async () => {
+  const original = globalThis.fetch;
+  let signal: AbortSignal | undefined;
+  globalThis.fetch = ((_url: string, init?: RequestInit) => {
+    signal = init?.signal ?? undefined;
+    return Promise.resolve(new Response("ok", { status: 200 }));
+  }) as typeof fetch;
+  try {
+    await fetchWithRetry("https://repo.example/maven2/a.pom", noSleep);
+    expect(signal).toBeInstanceOf(AbortSignal);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("fetchWithRetry honors a numeric Retry-After", async () => {
   const slept: number[] = [];
   const stub = stubFetch([

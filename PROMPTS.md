@@ -456,3 +456,4 @@ cappu search commons-lang3
 - 2026-06-27 21:44 — the foratter is not on par with gjf. make it 100% compatible. we're only at 40%. thats unacceptable.
 - 2026-06-27 21:44 — did you port the gjf parser or do we still use our own parser?
 - 2026-06-27 21:44 — then grind.
+- 2026-06-29 10:25 — cappu install still hangs in in the grpah engine project: git clone git@github.com:nikeee/graph-engine.git (branch cappu-test)

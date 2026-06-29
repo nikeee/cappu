@@ -41,6 +41,14 @@ const RETRY_STATUSES = new Set([429, 502, 503, 504]);
 const MAX_FETCH_ATTEMPTS = 4;
 const BASE_BACKOFF_MS = 500;
 
+// Bounds only the connect/TLS/response-header phase, not the whole request:
+// fetch() resolves once headers arrive, so we clear the deadline then and let
+// the body stream unbounded (a large jar/JDK download is legitimately slow).
+// Mirrors the Go port's transport ResponseHeaderTimeout (togo/internal/httpx).
+// Without it a stalled server falls back to undici's 5-minute default, which
+// across many POM fetches + retries reads as a hang (nikeee/cappu graph-engine).
+const RESPONSE_HEADER_TIMEOUT_MS = 30_000;
+
 const defaultSleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 function parseRetryAfter(value: string | null): number | undefined {
@@ -66,13 +74,26 @@ function hostOf(url: string): string {
  * instead of a false "not found". `sleep` is injectable so tests retry without
  * real delays.
  */
+// fetch with a deadline on reaching response headers only. The controller is
+// cleared the moment headers arrive, so the returned body streams without a
+// time cap (see RESPONSE_HEADER_TIMEOUT_MS).
+async function fetchHeaders(url: string): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RESPONSE_HEADER_TIMEOUT_MS);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function fetchWithRetry(
   url: string,
   sleep: (ms: number) => Promise<void> = defaultSleep,
 ): Promise<Response | undefined> {
   let backoff = BASE_BACKOFF_MS;
   for (let attempt = 1; ; attempt++) {
-    const response = await fetch(url);
+    const response = await fetchHeaders(url);
     if (response.ok) return response;
     if (!RETRY_STATUSES.has(response.status)) return undefined; // genuine miss
     if (attempt >= MAX_FETCH_ATTEMPTS) {
