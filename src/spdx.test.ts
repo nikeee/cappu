@@ -29,3 +29,17 @@ test("free text, unknown ids and malformed expressions are rejected", () => {
   expect(isValidSpdxExpression("MIT Apache-2.0")).toBe(false); // missing operator
   expect(isValidSpdxExpression("MIT WITH Bogus-exception")).toBe(false);
 });
+
+test("WITH clauses, nesting and unbalanced parentheses", () => {
+  // an operand continues correctly after a WITH clause
+  expect(isValidSpdxExpression("MIT WITH Classpath-exception-2.0 OR Apache-2.0")).toBe(true);
+  expect(isValidSpdxExpression("(MIT OR (Apache-2.0 AND ISC))")).toBe(true);
+  expect(isValidSpdxExpression("GPL-2.0-or-later+")).toBe(true);
+
+  expect(isValidSpdxExpression("MIT WITH")).toBe(false); // WITH with no following exception
+  expect(isValidSpdxExpression("MIT WITH MIT")).toBe(false); // exception slot is a license id
+  expect(isValidSpdxExpression("AND MIT")).toBe(false); // operator where an operand is expected
+  expect(isValidSpdxExpression("MIT AND OR Apache-2.0")).toBe(false); // two operators in a row
+  expect(isValidSpdxExpression("(MIT))")).toBe(false); // extra close paren
+  expect(isValidSpdxExpression("((MIT)")).toBe(false); // unclosed group
+});
