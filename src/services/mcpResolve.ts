@@ -46,10 +46,10 @@ export function resolveSingleRef(ref: string, index: GlobalIndex): SingleRef {
 // The MCP convention for an unresolved single-ref result: report the candidate
 // count when ambiguous, nothing when simply absent. Spread into the tool's
 // otherwise-empty payload.
-export function ambiguityFields(r: {
-  ambiguous: boolean;
-  candidates: number;
-}): { ambiguous?: true; candidates?: number } {
+export function ambiguityFields(r: { ambiguous: boolean; candidates: number }): {
+  ambiguous?: true;
+  candidates?: number;
+} {
   return r.ambiguous ? { ambiguous: true, candidates: r.candidates } : {};
 }
 

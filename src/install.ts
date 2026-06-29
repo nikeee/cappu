@@ -746,7 +746,9 @@ export async function installDependencies(
       version: 2,
       roots: config.dependencies,
       packages: [...locked].sort(byCoordinate),
-      ...(lockedProcessors.length > 0 ? { processorPackages: [...lockedProcessors].sort(byCoordinate) } : {}),
+      ...(lockedProcessors.length > 0
+        ? { processorPackages: [...lockedProcessors].sort(byCoordinate) }
+        : {}),
       ...(lockedTests.length > 0 ? { testPackages: [...lockedTests].sort(byCoordinate) } : {}),
     };
     writeFileSync(lockfilePath(config), `${JSON.stringify(newLock, null, 2)}\n`);
