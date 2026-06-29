@@ -117,6 +117,8 @@ test("unary plus and bitwise complement fold; non-numeric operands do not", () =
   expect(fold("~0")).toEqual({ kind: "int", value: -1n });
   expect(fold("~5L")).toEqual({ kind: "long", value: -6n });
   expect(fold("~true")).toBeUndefined(); // complement needs a numeric operand
+  expect(fold("+true")).toBeUndefined(); // unary plus needs a numeric operand
+  expect(fold("-true")).toBeUndefined(); // unary minus needs a numeric operand
   expect(fold("!5")).toBeUndefined(); // logical NOT needs a boolean operand
 });
 

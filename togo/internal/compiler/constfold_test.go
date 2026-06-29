@@ -143,6 +143,8 @@ func TestPrefixPlusAndComplement(t *testing.T) {
 	wantLong(t, "~5L", -6)
 	// `~` and unary `-`/`+` are not constant on a boolean operand.
 	wantNil(t, "~true")
+	wantNil(t, "+true")
+	wantNil(t, "-true")
 	wantNil(t, "!5") // logical NOT requires a boolean operand
 }
 
