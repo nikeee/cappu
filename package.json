@@ -21,7 +21,8 @@
     "lsp": "tsx src/cli/main.ts lsp",
     "corpus:init": "git submodule update --init && for d in test-fixtures/emitter/corpus/*/; do git -C \"$d\" sparse-checkout set --no-cone '/**/*.java' '*.java'; done",
     "format:corpus": "tsx --test ./src/format/format-corpus.test.ts",
-    "test": "tsx --test \"./src/**/*.test.ts\""
+    "test": "tsx --test \"./src/**/*.test.ts\"",
+    "coverage": "tsx --test --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-reporter=lcov --test-reporter-destination=coverage.lcov --test-reporter=spec --test-reporter-destination=stdout \"./src/**/*.test.ts\""
   },
   "dependencies": {
     "@inquirer/prompts": "^8.5.2",

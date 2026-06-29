@@ -48,7 +48,15 @@ jobs:
           working-directory: togo
 
       - run: go vet ./...
-      - run: go test ./...
+      - run: go test -coverprofile=coverage.out ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: togo/coverage.out
+          flags: go
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   build:
     name: Build static binaries

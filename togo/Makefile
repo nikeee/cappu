@@ -8,7 +8,7 @@ ifneq ($(VERSION),)
 LDFLAGS += -X github.com/nikeee/cappu/internal/meta.Version=$(VERSION)
 endif
 
-.PHONY: help fmt fmt-check lint vet test build build-all clean tools generate generate-check
+.PHONY: help fmt fmt-check lint vet test cover cover-html build build-all clean tools generate generate-check
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/'
@@ -35,6 +35,13 @@ generate-check: ## Fail if committed generated code is stale (CI drift guard)
 
 test: ## Run all tests
 	go test ./...
+
+cover: ## Run tests with coverage and print a per-function summary
+	go test -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out
+
+cover-html: cover ## Open the coverage report in a browser
+	go tool cover -html=coverage.out
 
 build: ## Build a static binary for the host
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/cappu ./cmd/cappu

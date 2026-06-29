@@ -48,7 +48,22 @@ jobs:
       # The corpus submodules stay uninitialized here: their tests skip, and
       # cloning five upstream projects is not worth the CI minutes per run.
       - run: node --run test
+        if: matrix.jdk != '21'
         env:
           # the experimental leg compiles the examples with cappu's own
           # compiler instead of javac
           CAPPU_EXAMPLES_EXPERIMENTAL: ${{ matrix.jdk == 'experimental' && '1' || '' }}
+
+      # The '21' leg runs the suite under coverage instead and uploads it; one
+      # leg is enough, the rest just run plain `test`.
+      - run: node --run coverage
+        if: matrix.jdk == '21'
+
+      - name: Upload coverage to Codecov
+        if: matrix.jdk == '21'
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.lcov
+          flags: ts
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
