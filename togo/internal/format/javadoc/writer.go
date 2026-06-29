@@ -5,7 +5,15 @@
 
 package javadoc
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
+
+// textWidth is a token's display width in characters. The TS port (and gjf,
+// which is Java) measures line width in string units, not bytes, so multi-byte
+// UTF-8 (e.g. the `∕✱✱` gjf writes in prose) must count as one column each.
+func textWidth(s string) int { return utf8.RuneCountInString(s) }
 
 type wsKind int
 
@@ -117,7 +125,7 @@ func (w *javadocWriter) writeListItemOpen(t Token) {
 	}
 	w.writeToken(t)
 	w.continuingListItemOfInnermostList = true
-	w.continuingListItemStack.push(len(t.value))
+	w.continuingListItemStack.push(textWidth(t.value))
 }
 
 func (w *javadocWriter) writeHeaderOpen(t Token) {
@@ -242,7 +250,7 @@ func (w *javadocWriter) writeToken(t Token) {
 	if needWhitespace {
 		extra = 1
 	}
-	if !w.atStartOfLine && len(t.value)+extra > w.remainingOnLine {
+	if !w.atStartOfLine && textWidth(t.value)+extra > w.remainingOnLine {
 		w.writeNewline(true)
 	}
 	if !w.atStartOfLine && needWhitespace {
@@ -254,7 +262,7 @@ func (w *javadocWriter) writeToken(t Token) {
 	if !isStartOfLine(t.kind) {
 		w.atStartOfLine = false
 	}
-	w.remainingOnLine -= len(t.value)
+	w.remainingOnLine -= textWidth(t.value)
 	w.requestedWhitespace = wsNone
 	w.wroteAnythingSignificant = true
 }

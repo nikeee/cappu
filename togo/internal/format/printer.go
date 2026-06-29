@@ -36,6 +36,12 @@ var (
 	minus2 = indentConst(-2)
 )
 
+// google-java-format glues a dereference chain's receiver through a call to one
+// of these methods (see gjf JavaInputAstVisitor#handleStream): the call's index
+// becomes a chain-prefix boundary, so `x.stream().a().b()` keeps `x.stream()`
+// together and breaks before the rest.
+var streamPrefixMethods = map[string]bool{"stream": true, "parallelStream": true, "toBuilder": true}
+
 // ErrUnsupportedSyntax is returned when the formatter cannot format the input
 // without losing information.
 var ErrUnsupportedSyntax = errors.New("unsupported syntax")
@@ -1418,6 +1424,15 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 		}
 		if pfx := typePrefixLength(names); pfx >= 0 {
 			glue = pfx
+		}
+	}
+	// gjf glues the receiver through a `.stream()`/`.parallelStream()`/
+	// `.toBuilder()` call (its index becomes a chain-prefix boundary), so
+	// `x.stream().map(..).collect(..)` keeps `x.stream()` on the first line and
+	// breaks before the rest - rather than stranding the receiver on its own.
+	for i, l := range links {
+		if l.isCall && streamPrefixMethods[l.name] && i+1 > glue {
+			glue = i + 1
 		}
 	}
 	parts := []Doc{base}

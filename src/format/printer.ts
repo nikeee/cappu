@@ -107,6 +107,12 @@ const PLUS2 = indentConst(2);
 const PLUS4 = indentConst(4);
 const MINUS2 = indentConst(-2);
 
+// google-java-format glues a dereference chain's receiver through a call to one
+// of these methods (see gjf JavaInputAstVisitor#handleStream): the call's index
+// becomes a chain-prefix boundary, so `x.stream().a().b()` keeps `x.stream()`
+// together and breaks before the rest.
+const STREAM_PREFIX_METHODS = new Set(["stream", "parallelStream", "toBuilder"]);
+
 export interface FormatOptions {
   style: "google" | "aosp";
 }
@@ -1303,6 +1309,13 @@ class Printer {
       const p = typePrefixLength(names);
       if (p >= 0) glue = p;
     }
+    // gjf glues the receiver through a `.stream()`/`.parallelStream()`/
+    // `.toBuilder()` call (its index becomes a chain-prefix boundary), so
+    // `x.stream().map(..).collect(..)` keeps `x.stream()` on the first line and
+    // breaks before the rest - rather than stranding the receiver on its own.
+    links.forEach((l, i) => {
+      if (l.isCall && STREAM_PREFIX_METHODS.has(l.name)) glue = Math.max(glue, i + 1);
+    });
     const parts: Doc[] = [base];
     links.forEach((l, i) => {
       if (i >= glue) parts.push(brk("unified", "", ZERO));
