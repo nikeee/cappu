@@ -125,3 +125,45 @@ func TestNonConstantAndDivByZero(t *testing.T) {
 	wantNil(t, "1 / 0")
 	wantNil(t, "1.5 + 2.5")
 }
+
+func TestAllComparisonOperators(t *testing.T) {
+	wantBool(t, "5 > 3", true)
+	wantBool(t, "3 > 5", false)
+	wantBool(t, "3 <= 3", true)
+	wantBool(t, "5 == 5", true)
+	wantBool(t, "5 == 6", false)
+	wantBool(t, "5 != 3", true)
+	wantBool(t, "5 != 5", false)
+}
+
+func TestPrefixPlusAndComplement(t *testing.T) {
+	wantInt(t, "+5", 5)
+	wantInt(t, "~5", -6)
+	wantInt(t, "~0", -1)
+	wantLong(t, "~5L", -6)
+	// `~` and unary `-`/`+` are not constant on a boolean operand.
+	wantNil(t, "~true")
+	wantNil(t, "!5") // logical NOT requires a boolean operand
+}
+
+func TestBooleanBitwiseOperators(t *testing.T) {
+	wantBool(t, "true | false", true)   // BarToken on booleans
+	wantBool(t, "true & true", true)    // AmpersandToken on booleans
+	wantBool(t, "true ^ true", false)   // CaretToken on booleans
+	wantBool(t, "true ^ false", true)   //
+	wantBool(t, "true == false", false) // EqualsEqualsToken on booleans
+	wantBool(t, "true != false", true)  // ExclamationEqualsToken on booleans
+}
+
+func TestIntegerBitwiseOrAndModulo(t *testing.T) {
+	wantInt(t, "5 | 3", 7)
+	wantInt(t, "-10 % 3", -1) // Java %: result takes the sign of the dividend
+	wantInt(t, "10 % -3", 1)
+	wantInt(t, "5 << 0", 5) // shift distance of zero is a no-op
+}
+
+func TestMixedIntLongBitwisePromotes(t *testing.T) {
+	wantLong(t, "5 & 3L", 1)
+	wantLong(t, "5 | 3L", 7)
+	wantLong(t, "5 ^ 3L", 6)
+}

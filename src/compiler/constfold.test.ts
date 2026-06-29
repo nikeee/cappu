@@ -100,3 +100,44 @@ test("non-constant expressions and divide-by-zero do not fold", () => {
   expect(fold("1 / 0")).toBeUndefined(); // left for the JVM to throw at runtime
   expect(fold("1.5 + 2.5")).toBeUndefined(); // float folding not implemented
 });
+
+test("every comparison operator folds", () => {
+  expect(fold("5 > 3")).toEqual({ kind: "boolean", value: true });
+  expect(fold("3 > 5")).toEqual({ kind: "boolean", value: false });
+  expect(fold("3 <= 3")).toEqual({ kind: "boolean", value: true });
+  expect(fold("5 == 5")).toEqual({ kind: "boolean", value: true });
+  expect(fold("5 == 6")).toEqual({ kind: "boolean", value: false });
+  expect(fold("5 != 3")).toEqual({ kind: "boolean", value: true });
+  expect(fold("5 != 5")).toEqual({ kind: "boolean", value: false });
+});
+
+test("unary plus and bitwise complement fold; non-numeric operands do not", () => {
+  expect(fold("+5")).toEqual({ kind: "int", value: 5n });
+  expect(fold("~5")).toEqual({ kind: "int", value: -6n });
+  expect(fold("~0")).toEqual({ kind: "int", value: -1n });
+  expect(fold("~5L")).toEqual({ kind: "long", value: -6n });
+  expect(fold("~true")).toBeUndefined(); // complement needs a numeric operand
+  expect(fold("!5")).toBeUndefined(); // logical NOT needs a boolean operand
+});
+
+test("boolean bitwise operators fold to boolean", () => {
+  expect(fold("true | false")).toEqual({ kind: "boolean", value: true });
+  expect(fold("true & true")).toEqual({ kind: "boolean", value: true });
+  expect(fold("true ^ true")).toEqual({ kind: "boolean", value: false });
+  expect(fold("true ^ false")).toEqual({ kind: "boolean", value: true });
+  expect(fold("true == false")).toEqual({ kind: "boolean", value: false });
+  expect(fold("true != false")).toEqual({ kind: "boolean", value: true });
+});
+
+test("integer bitwise-or and signed modulo fold", () => {
+  expect(fold("5 | 3")).toEqual({ kind: "int", value: 7n });
+  expect(fold("-10 % 3")).toEqual({ kind: "int", value: -1n }); // sign of the dividend
+  expect(fold("10 % -3")).toEqual({ kind: "int", value: 1n });
+  expect(fold("5 << 0")).toEqual({ kind: "int", value: 5n }); // no-op shift
+});
+
+test("mixed int/long bitwise promotes to long", () => {
+  expect(fold("5 & 3L")).toEqual({ kind: "long", value: 1n });
+  expect(fold("5 | 3L")).toEqual({ kind: "long", value: 7n });
+  expect(fold("5 ^ 3L")).toEqual({ kind: "long", value: 6n });
+});
