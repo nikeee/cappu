@@ -126,7 +126,9 @@ func makeSingleLineIfPossible(blockIndent int, input string) string {
 
 func oneLineJavadoc(line string, blockIndent int) bool {
 	oneLinerContentLength := maxLineLength - len("/**  */") - blockIndent
-	if len(line) > oneLinerContentLength {
+	// Width in characters, not bytes: multi-byte UTF-8 in the comment (the `∕✱✱`
+	// gjf writes in prose) must count as one column each, matching the TS port.
+	if textWidth(line) > oneLinerContentLength {
 		return false
 	}
 	if strings.HasPrefix(line, "@") && line != "@hide" {

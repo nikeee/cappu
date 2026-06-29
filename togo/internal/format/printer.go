@@ -1448,9 +1448,12 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 	}
 	baseIsCall := cur.Kind == compiler.CallExpression
 	// A single dereference invocation after a non-invocation prefix stays glued
-	// (`myField.foo()`); a pure field-access chain still breaks before its last
-	// selectors when it overflows (the break path below, gated by the prefix).
-	if callCount == 1 && !baseIsCall {
+	// (`myField.foo()`); but when the receiver is itself a call or a primary
+	// expression like `new X()` (gjf's `node != null` path) the dereference still
+	// breaks. A pure field-access chain still breaks before its last selectors
+	// when it overflows (the break path below, gated by the prefix).
+	baseIsNew := cur.Kind == compiler.ObjectCreationExpression
+	if callCount == 1 && !baseIsCall && !baseIsNew {
 		parts := []Doc{base}
 		for _, l := range links {
 			parts = append(parts, l.doc)

@@ -1,0 +1,7 @@
+package p;
+
+class C {
+  String f() {
+    return new Formatter().formatSource(theSourceTextToFormatHere, theFormatterOptionsValue);
+  }
+}

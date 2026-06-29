@@ -1330,11 +1330,13 @@ class Printer {
     const baseIsCall = cur.kind === SyntaxKind.CallExpression;
     // gjf keeps a chain glued when its only dereference invocation comes after a
     // non-invocation prefix (`myField.foo()` stays on one line). But when the
-    // receiver is itself a call (`when(x).thenReturn(y)`) the dereference still
-    // breaks, and two or more invocations are always a builder chain. A pure
-    // field-access chain (no invocations) still breaks before its last selectors
-    // when it overflows (the break path below, gated by the type-name prefix).
-    if (callCount === 1 && !baseIsCall) {
+    // receiver is itself a call (`when(x).thenReturn(y)`) or a primary expression
+    // like `new X()` (gjf's `node != null` path), the dereference still breaks,
+    // and two or more invocations are always a builder chain. A pure field-access
+    // chain still breaks before its last selectors when it overflows (the break
+    // path below, gated by the type-name prefix).
+    const baseIsNew = cur.kind === SyntaxKind.ObjectCreationExpression;
+    if (callCount === 1 && !baseIsCall && !baseIsNew) {
       return concat([base, ...links.map(l => l.doc)]);
     }
     // The leading links glued to the base (no break before them): a type-name
