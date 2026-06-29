@@ -872,7 +872,7 @@ func (p *printer) recordDeclaration(d *compiler.RecordDeclarationData, end int) 
 func (p *printer) declaratorList(arr *compiler.NodeArray) Doc {
 	ds := make([]Doc, arr.Len())
 	for i, v := range nodes(arr) {
-		ds[i] = p.declarator(v.AsVariableDeclarator())
+		ds[i] = p.declarator(v.AsVariableDeclarator(), nil)
 	}
 	return join(text(", "), ds)
 }
@@ -887,17 +887,24 @@ func (p *printer) fieldDeclaration(d *compiler.FieldDeclarationData) Doc {
 	)
 }
 
-func (p *printer) declarator(v *compiler.VariableDeclaratorData) Doc {
+func (p *printer) declarator(v *compiler.VariableDeclaratorData, trailing Doc) Doc {
 	name := concat(text(p.raw(v.Name)), text(strings.Repeat("[]", v.ArrayRankAfterName)))
 	if v.Initializer == nil {
+		if trailing != nil {
+			return concat(name, trailing)
+		}
 		return name
 	}
 	// An array initializer hugs the `=` (its own braces break); others fold onto
-	// a +4 continuation line after `=`.
+	// a +4 continuation line after `=`. The statement's `;` rides into the
+	// initializer's tail call (rest-of-line).
 	if v.Initializer.Kind == compiler.ArrayInitializer {
+		if trailing != nil {
+			return concat(name, text(" = "), p.node(v.Initializer), trailing)
+		}
 		return concat(name, text(" = "), p.node(v.Initializer))
 	}
-	return concat(name, text(" ="), level(plus4, []Doc{line, p.node(v.Initializer)}))
+	return concat(name, text(" ="), level(plus4, []Doc{line, p.statementTail(v.Initializer, trailing)}))
 }
 
 // argsLike is a gjf parenthesized comma list. When it does not fit, a UNIFIED
@@ -1143,13 +1150,20 @@ func (p *printer) blockRest(b *compiler.BlockData, endPos int) Doc {
 }
 
 func (p *printer) localVar(d *compiler.LocalVariableDeclarationStatementData) Doc {
-	return concat(
-		p.modifiers(d.Modifiers, "var"),
-		p.typ(d.Type),
-		text(" "),
-		p.declaratorList(d.Declarators),
-		text(";"),
-	)
+	ds := nodes(d.Declarators)
+	parts := []Doc{p.modifiers(d.Modifiers, "var"), p.typ(d.Type), text(" ")}
+	for i, v := range ds {
+		if i > 0 {
+			parts = append(parts, text(", "))
+		}
+		// The terminating `;` rides into the last declarator's initializer.
+		var tr Doc
+		if i == len(ds)-1 {
+			tr = text(";")
+		}
+		parts = append(parts, p.declarator(v.AsVariableDeclarator(), tr))
+	}
+	return concat(parts...)
 }
 
 func (p *printer) ifStatement(s *compiler.IfStatementData) Doc {
@@ -1401,6 +1415,10 @@ func (p *printer) assignment(e *compiler.AssignmentExpressionData) Doc {
 // a call. The first dot does not break after a tiny receiver.
 // ponytail: type-name prefixes and stream chains are not yet treated as units.
 func (p *printer) dotChain(root *compiler.Node) Doc {
+	return p.dotChainTrailing(root, nil)
+}
+
+func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	type linkT struct {
 		doc    Doc
 		isCall bool
@@ -1408,16 +1426,26 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 	}
 	var links []linkT
 	cur := root
+	trailingRouted := false
 	for {
 		switch {
 		case cur.Kind == compiler.CallExpression &&
 			cur.AsCallExpression().Expression.Kind == compiler.PropertyAccessExpression:
 			ce := cur.AsCallExpression()
 			pa := ce.Expression.AsPropertyAccessExpression()
+			// The rightmost link (processed first) carries the statement's trailing
+			// token inside its argument list (rest-of-line rule).
+			var argTrailing Doc
+			if len(links) == 0 {
+				argTrailing = trailing
+				if trailing != nil {
+					trailingRouted = true
+				}
+			}
 			links = append([]linkT{{
 				// Explicit method type arguments go between the dot and the name:
 				// `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
-				doc:    concat(text("."), p.typeArguments(ce.TypeArguments), text(p.raw(pa.Name)), p.argList(ce.Arguments)),
+				doc:    concat(text("."), p.typeArguments(ce.TypeArguments), text(p.raw(pa.Name)), p.argListTrailing(ce.Arguments, argTrailing)),
 				isCall: true,
 				name:   p.raw(pa.Name),
 			}}, links...)
@@ -1432,6 +1460,14 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 		break
 	}
 	base := p.node(cur)
+	// A trailing token not routed into a rightmost call's args (chain ends in a
+	// field access) is appended after the whole chain.
+	finish := func(doc Doc) Doc {
+		if trailing == nil || trailingRouted {
+			return doc
+		}
+		return concat(doc, trailing)
+	}
 	callCount := 0
 	for _, l := range links {
 		if l.isCall {
@@ -1450,7 +1486,7 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 		for _, l := range links {
 			parts = append(parts, l.doc)
 		}
-		return concat(parts...)
+		return finish(concat(parts...))
 	}
 	// The leading links glued to the base (no break before them): a type-name
 	// prefix (`ImmutableList.builder()` stays a unit), else just the first link
@@ -1488,7 +1524,7 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 		}
 		parts = append(parts, l.doc)
 	}
-	return level(plus4, parts)
+	return finish(level(plus4, parts))
 }
 
 func (p *printer) call(e *compiler.CallExpressionData) Doc {
@@ -1505,14 +1541,29 @@ func (p *printer) statementTail(e *compiler.Node, trailing Doc) Doc {
 	switch e.Kind {
 	case compiler.CallExpression:
 		ce := e.AsCallExpression()
-		if ce.Expression.Kind != compiler.PropertyAccessExpression {
-			return p.callTrailing(ce, trailing)
+		// Mirror node()'s dispatch: a call on a `.`-access renders via dotChain.
+		if ce.Expression.Kind == compiler.PropertyAccessExpression {
+			return p.dotChainTrailing(e, trailing)
 		}
+		return p.callTrailing(ce, trailing)
+	case compiler.PropertyAccessExpression:
+		return p.dotChainTrailing(e, trailing)
 	case compiler.ObjectCreationExpression:
 		oc := e.AsObjectCreationExpression()
 		if oc.ClassBody == nil {
 			return p.objectCreationTrailing(oc, e.End, trailing)
 		}
+	case compiler.AssignmentExpression:
+		// `x = foo(...);` - the `;` rides into the assignment's RHS tail.
+		a := e.AsAssignmentExpression()
+		op := compiler.TokenToString(a.OperatorToken)
+		if op == "" {
+			op = "="
+		}
+		return concat(p.node(a.Left), text(" "), text(op), level(plus4, []Doc{line, p.statementTail(a.Right, trailing)}))
+	}
+	if trailing == nil {
+		return p.node(e)
 	}
 	return concat(p.node(e), trailing)
 }

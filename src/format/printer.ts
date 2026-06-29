@@ -827,17 +827,18 @@ class Printer {
     ]);
   }
 
-  private declarator(v: VariableDeclarator): Doc {
+  private declarator(v: VariableDeclarator, trailing = ""): Doc {
     const name = concat([this.raw(v.name), "[]".repeat(v.arrayRankAfterName)]);
-    if (!v.initializer) return name;
+    if (!v.initializer) return concat([name, trailing]);
     // An array initializer hugs the `=` (`x = {` ... `}`); its own braces break,
     // so do not insert a break before it. (Other hugging RHS kinds - lambdas,
     // anonymous classes - are handled with the rest of assignment RHS in phase B.)
     if (v.initializer.kind === SyntaxKind.ArrayInitializer) {
-      return concat([name, " = ", this.node(v.initializer)]);
+      return concat([name, " = ", this.node(v.initializer), trailing]);
     }
-    // gjf folds a long initializer onto a +4 continuation line after `=`.
-    return concat([name, " =", level(PLUS4, [line, this.node(v.initializer)])]);
+    // gjf folds a long initializer onto a +4 continuation line after `=`; the
+    // statement's `;` rides into the initializer's tail call (rest-of-line).
+    return concat([name, " =", level(PLUS4, [line, this.statementTail(v.initializer, trailing)])]);
   }
 
   // A gjf-style parenthesized comma list (`(a, b, c)`). When it does not fit, a
@@ -1049,16 +1050,14 @@ class Printer {
   }
 
   private localVar(d: LocalVariableDeclarationStatement): Doc {
-    return concat([
-      this.modifiers(d.modifiers, "var"),
-      this.type(d.type),
-      " ",
-      join(
-        ", ",
-        d.declarators.map(v => this.declarator(v)),
-      ),
-      ";",
-    ]);
+    const last = d.declarators.length - 1;
+    const parts: Doc[] = [this.modifiers(d.modifiers, "var"), this.type(d.type), " "];
+    d.declarators.forEach((v, i) => {
+      if (i > 0) parts.push(", ");
+      // The terminating `;` rides into the last declarator's initializer.
+      parts.push(this.declarator(v, i === last ? ";" : ""));
+    });
+    return concat(parts);
   }
 
   private ifStatement(s: IfStatement): Doc {
@@ -1290,9 +1289,10 @@ class Printer {
   // ponytail: type-name prefixes (`ImmutableList.builder()...`) and stream
   // chains are not yet treated as units; those over-break. Add when a corpus
   // fixture needs them.
-  private dotChain(root: Expression): Doc {
+  private dotChain(root: Expression, trailing: Doc = ""): Doc {
     const links: { doc: Doc; isCall: boolean; name: string }[] = [];
     let cur: Node = root;
+    let trailingRouted = false;
     for (;;) {
       if (
         cur.kind === SyntaxKind.CallExpression &&
@@ -1300,6 +1300,10 @@ class Printer {
       ) {
         const callExpr = cur as CallExpression;
         const pa = callExpr.expression as PropertyAccessExpression;
+        // The rightmost link (processed first) carries the statement's trailing
+        // token inside its argument list, so the call's args wrap when the whole
+        // `...(...);` run overflows (rest-of-line rule).
+        const rightmost = links.length === 0;
         links.unshift({
           // Explicit method type arguments go between the dot and the name:
           // `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
@@ -1307,11 +1311,12 @@ class Printer {
             ".",
             this.typeArguments(callExpr.typeArguments),
             this.raw(pa.name),
-            this.argList(callExpr.arguments),
+            this.argList(callExpr.arguments, rightmost ? trailing : ""),
           ]),
           isCall: true,
           name: this.raw(pa.name),
         });
+        if (rightmost && trailing !== "") trailingRouted = true;
         cur = pa.expression;
       } else if (cur.kind === SyntaxKind.PropertyAccessExpression) {
         const pa = cur as PropertyAccessExpression;
@@ -1326,6 +1331,10 @@ class Printer {
       }
     }
     const base = this.node(cur);
+    // A trailing token not routed into a rightmost call's args (e.g. the chain
+    // ends in a field access) is appended after the whole chain.
+    const finish = (doc: Doc): Doc =>
+      trailing === "" || trailingRouted ? doc : concat([doc, trailing]);
     const callCount = links.filter(l => l.isCall).length;
     const baseIsCall = cur.kind === SyntaxKind.CallExpression;
     // gjf keeps a chain glued when its only dereference invocation comes after a
@@ -1337,7 +1346,7 @@ class Printer {
     // path below, gated by the type-name prefix).
     const baseIsNew = cur.kind === SyntaxKind.ObjectCreationExpression;
     if (callCount === 1 && !baseIsCall && !baseIsNew) {
-      return concat([base, ...links.map(l => l.doc)]);
+      return finish(concat([base, ...links.map(l => l.doc)]));
     }
     // The leading links glued to the base (no break before them): a type-name
     // prefix (`ImmutableList.builder()` stays a unit), else just the first link
@@ -1366,26 +1375,39 @@ class Printer {
       if (i >= glue) parts.push(brk("unified", "", ZERO));
       parts.push(l.doc);
     });
-    return level(PLUS4, parts);
+    return finish(level(PLUS4, parts));
   }
 
-  // Emit an expression that a statement terminates with `trailing` (a `;`),
-  // routing that token into the expression's tail delimited level (a call or
-  // constructor argument list) so the list wraps when the whole `(...);` run
-  // overflows - gjf's rest-of-line rule. Other expression shapes just append it.
+  // Emit an expression that a statement (or a declarator/assignment RHS)
+  // terminates with `trailing` (a `;`), routing that token into the expression's
+  // tail delimited level (a call/constructor argument list, including the last
+  // call of a dereference chain) so the list wraps when the whole `(...);` run
+  // overflows - gjf's rest-of-line rule. Other shapes just append it.
   private statementTail(e: Expression, trailing: string): Doc {
-    // Mirror node()'s dispatch: a call on a `.`-access renders via dotChain
-    // (explicit type-arg placement, chain breaking), which does not take a
-    // trailing token, so only a plain `foo(args)` call routes the `;` inward.
-    if (
-      e.kind === SyntaxKind.CallExpression &&
-      (e as CallExpression).expression.kind !== SyntaxKind.PropertyAccessExpression
-    ) {
-      return this.call(e as CallExpression, trailing);
+    if (e.kind === SyntaxKind.CallExpression) {
+      const ce = e as CallExpression;
+      // Mirror node()'s dispatch: a call on a `.`-access renders via dotChain.
+      return ce.expression.kind === SyntaxKind.PropertyAccessExpression
+        ? this.dotChain(ce, trailing)
+        : this.call(ce, trailing);
+    }
+    if (e.kind === SyntaxKind.PropertyAccessExpression) {
+      return this.dotChain(e, trailing);
     }
     if (e.kind === SyntaxKind.ObjectCreationExpression) {
       const oc = e as ObjectCreationExpression;
       if (!oc.classBody) return this.objectCreation(oc, trailing);
+    }
+    if (e.kind === SyntaxKind.AssignmentExpression) {
+      // `x = foo(...);` - the `;` rides into the assignment's RHS tail.
+      const a = e as AssignmentExpression;
+      const op = tokenToString(a.operatorToken) ?? "=";
+      return concat([
+        this.node(a.left),
+        " ",
+        op,
+        level(PLUS4, [line, this.statementTail(a.right, trailing)]),
+      ]);
     }
     return concat([this.node(e), trailing]);
   }
