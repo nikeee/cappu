@@ -69,6 +69,8 @@ const COORDS = toCoordinates("org.example", "app", "1.0");
 
 test("maven-metadata.xml versions parse in document order", () => {
   expect(parseMetadataVersions(METADATA)).toEqual(["3.12.0", "3.13.0", "3.14.0"]);
+  // Malformed metadata yields no versions rather than throwing.
+  expect(parseMetadataVersions("not xml at all")).toEqual([]);
 });
 
 test("pom dependencies parse with scope/optional; managed and property versions are skipped", () => {

@@ -77,6 +77,8 @@ test("shift distance is masked (low 5 bits for int, 6 for long)", () => {
   expect(fold("1L << 64")).toEqual({ kind: "long", value: 1n }); // 64 & 63 == 0
   expect(fold("-8 >> 1")).toEqual({ kind: "int", value: -4n }); // arithmetic: keeps sign
   expect(fold("-8 >>> 1")).toEqual({ kind: "int", value: 2147483644n }); // logical: zero-fills
+  expect(fold("-8L >> 1")).toEqual({ kind: "long", value: -4n }); // arithmetic over 64 bits
+  expect(fold("-8L >>> 1")).toEqual({ kind: "long", value: 9223372036854775804n }); // logical, 64-bit
 });
 
 test("mixed int/long promotes to long", () => {

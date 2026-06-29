@@ -65,6 +65,10 @@ func TestParseMetadataVersions(t *testing.T) {
 	if got := parseMetadataVersions(metadataXML); !reflect.DeepEqual(got, []string{"3.12.0", "3.13.0", "3.14.0"}) {
 		t.Errorf("versions = %v", got)
 	}
+	// Malformed XML yields no versions rather than an error.
+	if got := parseMetadataVersions("not xml at all"); len(got) != 0 {
+		t.Errorf("malformed metadata = %v, want empty", got)
+	}
 }
 
 func TestParsePomDependencies(t *testing.T) {

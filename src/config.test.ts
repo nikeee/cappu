@@ -159,6 +159,19 @@ test("project version must be semver; coordinates use the Maven id charset", () 
   expect(() => loadConfig(undefined, dir.path)).toThrow(/semver/);
   write({ groupId: "com example" }); // space not allowed in a Maven id
   expect(() => loadConfig(undefined, dir.path)).toThrow(/Maven id/);
+  write({ artifactId: "my lib" }); // space not allowed in a Maven id
+  expect(() => loadConfig(undefined, dir.path)).toThrow(/Maven id/);
+});
+
+test("formatter style is restricted to the known presets", () => {
+  using dir = TempDir.create("cfg-");
+  const write = (obj: Record<string, unknown>): void =>
+    writeFileSync(join(dir.path, DEFAULT_CONFIG_NAME), JSON.stringify(obj));
+
+  write({ formatterOptions: { style: "aosp" } });
+  expect(loadConfig(undefined, dir.path).formatterOptions.style).toBe("aosp");
+  write({ formatterOptions: { style: "k&r" } }); // not a known preset
+  expect(() => loadConfig(undefined, dir.path)).toThrow();
 });
 
 test("a valid SPDX license is accepted; free text and unknown ids are rejected", () => {

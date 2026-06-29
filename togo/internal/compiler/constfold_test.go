@@ -102,6 +102,8 @@ func TestShiftDistanceMasked(t *testing.T) {
 	wantLong(t, "1L << 64", 1)
 	wantInt(t, "-8 >> 1", -4)
 	wantInt(t, "-8 >>> 1", 2147483644)
+	wantLong(t, "-8L >> 1", -4)                   // arithmetic shift keeps the sign (long)
+	wantLong(t, "-8L >>> 1", 9223372036854775804) // logical shift zero-fills over 64 bits
 }
 
 func TestMixedIntLongPromotes(t *testing.T) {

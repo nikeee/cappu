@@ -158,6 +158,22 @@ func TestLoadRejectsInvalidOutput(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsInvalidStyle(t *testing.T) {
+	path := writeConfig(t, `{ "formatterOptions": { "style": "k&r" } }`)
+	if _, err := Load(path, ""); err == nil {
+		t.Error("expected a validation error for a style outside the enum")
+	}
+}
+
+func TestLoadRejectsInvalidCoordinates(t *testing.T) {
+	if _, err := Load(writeConfig(t, `{ "groupId": "com example" }`), ""); err == nil {
+		t.Error("expected a validation error for a groupId with a space")
+	}
+	if _, err := Load(writeConfig(t, `{ "artifactId": "my lib" }`), ""); err == nil {
+		t.Error("expected a validation error for an artifactId with a space")
+	}
+}
+
 func TestLoadRejectsReleaseBelow8(t *testing.T) {
 	path := writeConfig(t, `{ "compilerOptions": { "release": 5 } }`)
 	if _, err := Load(path, ""); err == nil {
