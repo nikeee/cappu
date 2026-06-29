@@ -464,3 +464,5 @@ cappu search commons-lang3
 - 2026-06-29 16:28 — yes
 - 2026-06-29 16:28 — now that you have code coverage tools, use it to find untested code paths and check for their correct bahaviour. maybe even add tests that cover their branches
 - 2026-06-29 16:28 — commit between steps
+- 2026-06-29 16:28 — anything else?
+- 2026-06-29 16:28 — do the cheap ones
