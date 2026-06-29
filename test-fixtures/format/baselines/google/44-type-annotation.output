@@ -1,0 +1,13 @@
+package p;
+
+import org.jspecify.annotations.Nullable;
+
+class C {
+  static @Nullable ExpressionTree getMethodReceiver(MethodInvocationTree methodInvocation) {
+    return null;
+  }
+
+  @Nullable E popIfIn(Collection<E> values) {
+    return null;
+  }
+}

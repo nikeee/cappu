@@ -113,6 +113,16 @@ const MINUS2 = indentConst(-2);
 // together and breaks before the rest.
 const STREAM_PREFIX_METHODS = new Set(["stream", "parallelStream", "toBuilder"]);
 
+// Well-known nullness type annotations (gjf JavaInputAstVisitor#typeAnnotations).
+// An `@Nullable`/`@NonNull` imported from one of these is a TYPE annotation and
+// renders inline before the type rather than on its own line.
+const TYPE_ANNOTATION_FQNS = new Set([
+  "org.jspecify.annotations.NonNull",
+  "org.jspecify.annotations.Nullable",
+  "org.checkerframework.checker.nullness.qual.NonNull",
+  "org.checkerframework.checker.nullness.qual.Nullable",
+]);
+
 export interface FormatOptions {
   style: "google" | "aosp";
 }
@@ -166,12 +176,31 @@ class Printer {
   // The indent multiplier (1 google / 2 aosp). Most layout defers the multiplier
   // to print time, but a few gjf decisions (e.g. the method-chain "small
   // receiver" threshold) depend on it at build time.
+  // Simple names imported as a well-known nullness type annotation (e.g.
+  // "Nullable" when `import org.jspecify.annotations.Nullable;` is present).
+  private readonly typeAnnotationNames = new Set<string>();
+
   constructor(
     private readonly sf: SourceFile,
     private readonly mult: number,
   ) {
     this.text = sf.text;
     this.comments = collectComments(sf.text);
+    for (const imp of sf.imports) {
+      if (imp.isStatic) continue;
+      const fqn = this.entityName(imp.name);
+      if (TYPE_ANNOTATION_FQNS.has(fqn)) {
+        this.typeAnnotationNames.add(fqn.slice(fqn.lastIndexOf(".") + 1));
+      }
+    }
+  }
+
+  /** Whether `a` is a well-known type-use annotation imported in this file. */
+  private isTypeAnnotation(a: Annotation): boolean {
+    const n = a.typeName;
+    const simple =
+      n.kind === SyntaxKind.Identifier ? this.raw(n) : this.raw((n as { right: Node }).right);
+    return this.typeAnnotationNames.has(simple);
   }
 
   /** The exact source spelling of a leaf node (identifier, literal, ...). */
@@ -479,8 +508,20 @@ class Printer {
     annoMode: "own" | "var" | "inline" = "inline",
   ): Doc {
     if (!mods || mods.length === 0) return "";
-    const annotations = mods.filter(m => m.kind === SyntaxKind.Annotation) as Annotation[];
-    const keywords = mods.filter(m => m.kind !== SyntaxKind.Annotation);
+    // Peel a trailing run of well-known type-use annotations (`@Nullable` etc.):
+    // gjf renders these inline right before the type, not on their own line. The
+    // rest are declaration modifiers, placed as usual.
+    let cut = mods.length;
+    if (annoMode !== "inline") {
+      while (cut > 0) {
+        const m = mods[cut - 1];
+        if (m.kind === SyntaxKind.Annotation && this.isTypeAnnotation(m as Annotation)) cut--;
+        else break;
+      }
+    }
+    const declMods = cut === mods.length ? mods : mods.slice(0, cut);
+    const annotations = declMods.filter(m => m.kind === SyntaxKind.Annotation) as Annotation[];
+    const keywords = declMods.filter(m => m.kind !== SyntaxKind.Annotation);
     keywords.sort((a, b) => rank(a.kind) - rank(b.kind));
     const parts: Doc[] = [];
     for (const a of annotations) {
@@ -496,6 +537,8 @@ class Printer {
       parts.push(ownLine ? hardline : " ");
     }
     for (const k of keywords) parts.push(concat([this.modifierText(k), " "]));
+    // Type-use annotation suffix, inline before the type.
+    for (let i = cut; i < mods.length; i++) parts.push(this.annotation(mods[i] as Annotation), " ");
     return concat(parts);
   }
 

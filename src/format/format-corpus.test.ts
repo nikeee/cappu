@@ -27,7 +27,7 @@ const here = import.meta.dirname;
 const corpusRoot = join(here, "..", "..", "test-fixtures", "format", "corpus", "gjf", "core");
 
 // The current number of core sources we format byte-identically. Ratchet UP only.
-const RATCHET = 44;
+const RATCHET = 45;
 
 function findJavaFiles(dir: string): string[] {
   const out: string[] = [];

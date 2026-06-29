@@ -42,6 +42,16 @@ var (
 // together and breaks before the rest.
 var streamPrefixMethods = map[string]bool{"stream": true, "parallelStream": true, "toBuilder": true}
 
+// Well-known nullness type annotations (gjf JavaInputAstVisitor#typeAnnotations).
+// An `@Nullable`/`@NonNull` imported from one of these is a TYPE annotation and
+// renders inline before the type rather than on its own line.
+var typeAnnotationFQNs = map[string]bool{
+	"org.jspecify.annotations.NonNull":                    true,
+	"org.jspecify.annotations.Nullable":                   true,
+	"org.checkerframework.checker.nullness.qual.NonNull":  true,
+	"org.checkerframework.checker.nullness.qual.Nullable": true,
+}
+
 // ErrUnsupportedSyntax is returned when the formatter cannot format the input
 // without losing information.
 var ErrUnsupportedSyntax = errors.New("unsupported syntax")
@@ -95,11 +105,38 @@ type printer struct {
 	// mult is the indent multiplier (1 google / 2 aosp); a few gjf decisions
 	// (e.g. the method-chain "small receiver" threshold) need it at build time.
 	mult int
+	// typeAnnotationNames holds simple names imported as a well-known nullness
+	// type annotation (e.g. "Nullable" with `import org.jspecify...Nullable;`).
+	typeAnnotationNames map[string]bool
 }
 
 func newPrinter(sf *compiler.Node, mult int) *printer {
 	text := sf.AsSourceFile().Text
-	return &printer{sf: sf, text: text, comments: collectComments(text), mult: mult}
+	p := &printer{sf: sf, text: text, comments: collectComments(text), mult: mult, typeAnnotationNames: map[string]bool{}}
+	for _, imp := range nodes(sf.AsSourceFile().Imports) {
+		id := imp.AsImportDeclaration()
+		if id.IsStatic {
+			continue
+		}
+		fqn := p.entityName(id.Name)
+		if typeAnnotationFQNs[fqn] {
+			p.typeAnnotationNames[fqn[strings.LastIndex(fqn, ".")+1:]] = true
+		}
+	}
+	return p
+}
+
+// isTypeAnnotation reports whether a is a well-known type-use annotation
+// imported in this file.
+func (p *printer) isTypeAnnotation(a *compiler.Node) bool {
+	n := a.AsAnnotation().TypeName
+	var simple string
+	if n.Kind == compiler.Identifier {
+		simple = p.raw(n)
+	} else {
+		simple = p.raw(n.AsQualifiedName().Right)
+	}
+	return p.typeAnnotationNames[simple]
 }
 
 // raw is the exact source spelling of a leaf node (identifier, literal, ...).
@@ -461,8 +498,18 @@ func (p *printer) modifiers(mods *compiler.NodeArray, annoMode string) Doc {
 	if mods.Len() == 0 {
 		return text("")
 	}
+	all := nodes(mods)
+	// Peel a trailing run of well-known type-use annotations (`@Nullable` etc.):
+	// gjf renders these inline right before the type, not on their own line. The
+	// rest are declaration modifiers, placed as usual.
+	cut := len(all)
+	if annoMode != "inline" {
+		for cut > 0 && all[cut-1].Kind == compiler.Annotation && p.isTypeAnnotation(all[cut-1]) {
+			cut--
+		}
+	}
 	var annotations, keywords []*compiler.Node
-	for _, m := range nodes(mods) {
+	for _, m := range all[:cut] {
 		if m.Kind == compiler.Annotation {
 			annotations = append(annotations, m)
 		} else {
@@ -490,6 +537,10 @@ func (p *printer) modifiers(mods *compiler.NodeArray, annoMode string) Doc {
 	}
 	for _, k := range keywords {
 		parts = append(parts, concat(text(p.modifierText(k)), text(" ")))
+	}
+	// Type-use annotation suffix, inline before the type.
+	for _, a := range all[cut:] {
+		parts = append(parts, p.annotation(a.AsAnnotation()), text(" "))
 	}
 	return concat(parts...)
 }
