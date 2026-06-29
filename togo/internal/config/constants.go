@@ -9,18 +9,18 @@ const (
 	SchemaFileName    = "cappu.schema.json"
 
 	// Downloaded dependency jars live under .cappu/ - cappu-managed, gitignored.
-	DefaultClassPath        = "./.cappu/lib/classes"
-	DefaultSourcePath       = "./src/main/java"
+	DefaultClassPath  = "./.cappu/lib/classes"
+	DefaultSourcePath = "./src/main/java"
 	// DefaultGeneratedSourcePath: some build tools (Gradle sourceSets) and code
 	// generators (sdmlib) keep generated production sources in their own root
 	// alongside the hand-written ones. It is a default source root so such
 	// projects build without extra config; a missing dir is simply ignored.
 	DefaultGeneratedSourcePath = "./src/generated/java"
 	DefaultResourcePath        = "./src/main/resources"
-	DefaultTestSourcePath   = "./src/test/java"
-	DefaultTestResourcePath = "./src/test/resources"
-	DefaultTestClassPath    = "./.cappu/lib/test-classes"
-	DefaultProcessorPath    = "./.cappu/lib/processors"
+	DefaultTestSourcePath      = "./src/test/java"
+	DefaultTestResourcePath    = "./src/test/resources"
+	DefaultTestClassPath       = "./.cappu/lib/test-classes"
+	DefaultProcessorPath       = "./.cappu/lib/processors"
 
 	// DefaultOutputDir is what `cappu compile` produces its output in; the build
 	// output is always this.
