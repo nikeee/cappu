@@ -4,9 +4,10 @@ package compiler
 // Port of the remaining parts of src/compiler/checker.ts.
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -586,8 +587,8 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 		for a := range set {
 			arities = append(arities, a)
 		}
-		sort.Slice(arities, func(i, j int) bool {
-			return ariticInt(arities[i]) < ariticInt(arities[j])
+		slices.SortFunc(arities, func(a, b string) int {
+			return cmp.Compare(ariticInt(a), ariticInt(b))
 		})
 		return strings.Join(arities, " or ")
 	}

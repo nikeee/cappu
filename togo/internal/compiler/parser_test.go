@@ -1,6 +1,9 @@
 package compiler
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func expectNoErrors(t *testing.T, text string) *SourceFileData {
 	t.Helper()
@@ -171,15 +174,6 @@ func extendsType(text string) (*Node, int) {
 	return cls.AsClassDeclaration().ExtendsType, len(sf.AsSourceFile().ParseDiagnostics)
 }
 
-func contains(ks []SyntaxKind, want SyntaxKind) bool {
-	for _, k := range ks {
-		if k == want {
-			return true
-		}
-	}
-	return false
-}
-
 func TestClassHeader(t *testing.T) {
 	d := expectNoErrors(t, "public final class Foo<T extends Number, U> extends Bar implements A, B {}")
 	cls := d.Statements.Nodes[0]
@@ -268,7 +262,7 @@ func TestForEachChildClassHeader(t *testing.T) {
 		return false
 	})
 	for _, want := range []SyntaxKind{Identifier, TypeParameter, TypeReference} {
-		if !contains(kinds, want) {
+		if !slices.Contains(kinds, want) {
 			t.Errorf("class header children %v missing %v", kinds, want)
 		}
 	}

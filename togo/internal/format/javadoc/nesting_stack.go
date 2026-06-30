@@ -2,6 +2,8 @@
 
 package javadoc
 
+import "slices"
+
 // nestingStack is a generic nesting stack (lexer HTML/code/table contexts).
 type nestingStack[E comparable] struct {
 	stack []E
@@ -11,7 +13,7 @@ func (s *nestingStack[E]) push(value E) { s.stack = append(s.stack, value) }
 
 func (s *nestingStack[E]) popIfIn(values []E) (E, bool) {
 	var zero E
-	if len(s.stack) == 0 || !contains(values, s.stack[len(s.stack)-1]) {
+	if len(s.stack) == 0 || !slices.Contains(values, s.stack[len(s.stack)-1]) {
 		return zero, false
 	}
 	v := s.stack[len(s.stack)-1]
@@ -21,7 +23,7 @@ func (s *nestingStack[E]) popIfIn(values []E) (E, bool) {
 
 // popUntil: if the stack contains value, pop it and everything above it.
 func (s *nestingStack[E]) popUntil(value E) {
-	if !contains(s.stack, value) {
+	if !slices.Contains(s.stack, value) {
 		return
 	}
 	for {
@@ -35,7 +37,7 @@ func (s *nestingStack[E]) popUntil(value E) {
 
 func (s *nestingStack[E]) containsAny(values []E) bool {
 	for _, e := range s.stack {
-		if contains(values, e) {
+		if slices.Contains(values, e) {
 			return true
 		}
 	}
@@ -43,15 +45,6 @@ func (s *nestingStack[E]) containsAny(values []E) bool {
 }
 
 func (s *nestingStack[E]) isEmpty() bool { return len(s.stack) == 0 }
-
-func contains[E comparable](xs []E, v E) bool {
-	for _, x := range xs {
-		if x == v {
-			return true
-		}
-	}
-	return false
-}
 
 // intNestingStack tracks a running total (writer list/footer indent levels).
 type intNestingStack struct {

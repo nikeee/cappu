@@ -477,3 +477,6 @@ cappu search commons-lang3
 - 2026-06-30 14:22 — https://github.com/nikeee/cappu/issues/31 is still an issue
 - 2026-06-30 14:37 — go through the sources of the ts and go version. look for diverging behavior. fix them.
 - 2026-06-30 14:37 — commit on main
+- 2026-06-30 20:17 — look at the ts and go sources. spot refactoring or simplification opportunities. use builtins if they are obvious. assume you can use newest node.js (>26) and latest go (>1.26)
+- 2026-06-30 20:17 — aal of them
+- 2026-06-30 20:17 — continue

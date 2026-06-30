@@ -6,7 +6,8 @@ package services
 // Port of src/services/inlayHints.ts.
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"github.com/nikeee/cappu/internal/compiler"
 )
@@ -131,6 +132,6 @@ func GetInlayHints(checker *compiler.Checker, sourceFile *compiler.Node, startOf
 		return false
 	}
 	visit(sourceFile)
-	sort.SliceStable(hints, func(i, j int) bool { return hints[i].Offset < hints[j].Offset })
+	slices.SortStableFunc(hints, func(a, b InlayHintEntry) int { return cmp.Compare(a.Offset, b.Offset) })
 	return hints
 }

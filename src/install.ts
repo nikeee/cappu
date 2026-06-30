@@ -828,11 +828,11 @@ export async function installDependencies(
     const newLock: Lockfile = {
       version: 2,
       roots: config.dependencies,
-      packages: [...locked].sort(byCoordinate),
+      packages: locked.toSorted(byCoordinate),
       ...(lockedProcessors.length > 0
-        ? { processorPackages: [...lockedProcessors].sort(byCoordinate) }
+        ? { processorPackages: lockedProcessors.toSorted(byCoordinate) }
         : {}),
-      ...(lockedTests.length > 0 ? { testPackages: [...lockedTests].sort(byCoordinate) } : {}),
+      ...(lockedTests.length > 0 ? { testPackages: lockedTests.toSorted(byCoordinate) } : {}),
     };
     writeFileSync(lockfilePath(config), `${JSON.stringify(newLock, null, 2)}\n`);
   }

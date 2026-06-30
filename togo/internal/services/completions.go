@@ -10,7 +10,7 @@ package services
 import (
 	"io/fs"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/compiler"
@@ -204,7 +204,7 @@ func classpathResources(cfg *config.Config) []CompletionItem {
 	for label := range seen {
 		labels = append(labels, label)
 	}
-	sort.Strings(labels)
+	slices.Sort(labels)
 	out := make([]CompletionItem, 0, len(labels))
 	for _, label := range labels {
 		out = append(out, CompletionItem{Label: label, Kind: CompletionItemKindFile})

@@ -7,7 +7,8 @@ package services
 // Port of src/services/codeActions.ts.
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/compiler"
@@ -92,7 +93,7 @@ func addMissingImport(program *compiler.Program, checker *compiler.Checker, sf *
 			candidates = append(candidates, string(fqn))
 		}
 	}
-	sort.Strings(candidates)
+	slices.Sort(candidates)
 	var out []CodeActionResult
 	for _, fqn := range candidates {
 		out = append(out, CodeActionResult{
@@ -143,13 +144,16 @@ func organizeImports(sf *compiler.Node) []CodeActionResult {
 			kept = append(kept, imp)
 		}
 	}
-	sorted := append([]*compiler.Node{}, kept...)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		di, dj := sorted[i].AsImportDeclaration(), sorted[j].AsImportDeclaration()
-		if di.IsStatic != dj.IsStatic {
-			return !di.IsStatic
+	sorted := slices.Clone(kept)
+	slices.SortStableFunc(sorted, func(a, b *compiler.Node) int {
+		da, db := a.AsImportDeclaration(), b.AsImportDeclaration()
+		if da.IsStatic != db.IsStatic {
+			if da.IsStatic {
+				return 1
+			}
+			return -1
 		}
-		return importText(sorted[i]) < importText(sorted[j])
+		return cmp.Compare(importText(a), importText(b))
 	})
 	start := compiler.SkipTrivia(data.Text, imports.Nodes[0].Pos)
 	end := imports.Nodes[imports.Len()-1].End

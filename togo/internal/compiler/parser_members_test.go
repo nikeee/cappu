@@ -1,6 +1,9 @@
 package compiler
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // --- harness (mirrors the Node build's methodBody / firstStatement / expr) ---
 
@@ -147,7 +150,7 @@ func TestForEachChildMethod(t *testing.T) {
 		return false
 	})
 	for _, want := range []SyntaxKind{Parameter, Block} {
-		if !contains(kinds, want) {
+		if !slices.Contains(kinds, want) {
 			t.Errorf("method children %v missing %v", kinds, want)
 		}
 	}

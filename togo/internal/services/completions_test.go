@@ -3,6 +3,7 @@ package services
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -31,15 +32,6 @@ func labelsOf(items []CompletionItem) []string {
 		out = append(out, it.Label)
 	}
 	return out
-}
-
-func contains(xs []string, want string) bool {
-	for _, x := range xs {
-		if x == want {
-			return true
-		}
-	}
-	return false
 }
 
 func TestMemberCompletionListsMembers(t *testing.T) {
@@ -76,7 +68,7 @@ func TestMemberCompletionPreservesDeclarationOrder(t *testing.T) {
 
 func TestMemberCompletionIncompleteCode(t *testing.T) {
 	labels := labelsOf(complete("class U { void m(String s) { s./*|*/ } }"))
-	if !contains(labels, "length") || !contains(labels, "substring") {
+	if !slices.Contains(labels, "length") || !slices.Contains(labels, "substring") {
 		t.Errorf("expected length+substring, got %v", labels)
 	}
 }
@@ -88,10 +80,10 @@ func TestMemberCompletionUnknownReceiver(t *testing.T) {
 }
 
 func TestMemberCompletionPartialName(t *testing.T) {
-	if !contains(labelsOf(complete("class U { void m(String s) { s.sub/*|*/ } }")), "substring") {
+	if !slices.Contains(labelsOf(complete("class U { void m(String s) { s.sub/*|*/ } }")), "substring") {
 		t.Error("partial member name should still complete substring")
 	}
-	if !contains(labelsOf(complete("class C { String name; void m() { name.len/*|*/ } }")), "length") {
+	if !slices.Contains(labelsOf(complete("class C { String name; void m() { name.len/*|*/ } }")), "length") {
 		t.Error("bare field receiver mid-token should complete length")
 	}
 }
@@ -99,7 +91,7 @@ func TestMemberCompletionPartialName(t *testing.T) {
 func TestScopeCompletion(t *testing.T) {
 	labels := labelsOf(complete("class Box { int field; void m(int param) { int local = 0; /*|*/ } }"))
 	for _, want := range []string{"local", "param", "field", "Box", "String"} {
-		if !contains(labels, want) {
+		if !slices.Contains(labels, want) {
 			t.Errorf("scope completion missing %q (got %v)", want, labels)
 		}
 	}
@@ -107,7 +99,7 @@ func TestScopeCompletion(t *testing.T) {
 
 func TestScopeCompletionBrokenCode(t *testing.T) {
 	labels := labelsOf(complete("class C { void m(int p) { int x = ; /*|*/ } }"))
-	if !contains(labels, "p") || !contains(labels, "x") {
+	if !slices.Contains(labels, "p") || !slices.Contains(labels, "x") {
 		t.Errorf("broken-code scope completion missing p/x, got %v", labels)
 	}
 }

@@ -1,8 +1,9 @@
 package compiler
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"unicode/utf16"
 )
 
@@ -1206,7 +1207,7 @@ func (g *bodyGen) emitSwitchDispatch(selector *Node, clauses []*Node, throwOnNoM
 				cases = append(cases, switchCase{value: v, label: clauseLabels[i]})
 			}
 		}
-		sort.Slice(cases, func(a, b int) bool { return cases[a].value < cases[b].value })
+		slices.SortFunc(cases, func(a, b switchCase) int { return cmp.Compare(a.value, b.value) })
 		g.emitSwitchInstr(cases, defaultLabel)
 	}
 	base := append([]descriptor(nil), g.stack...)

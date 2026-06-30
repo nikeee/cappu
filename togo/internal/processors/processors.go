@@ -13,7 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/build"
@@ -52,7 +52,7 @@ func ProcessorJars(cfg *config.Config) []string {
 			jars = append(jars, filepath.Join(dir, e.Name()))
 		}
 	}
-	sort.Strings(jars)
+	slices.Sort(jars)
 	return jars
 }
 

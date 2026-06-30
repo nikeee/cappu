@@ -2,7 +2,10 @@ package compiler
 
 // Symbols (binder, M9). Port of the Symbol types in src/compiler/types.ts.
 
-import "sort"
+import (
+	"cmp"
+	"slices"
+)
 
 type SymbolFlags int
 
@@ -65,12 +68,11 @@ func (t SymbolTable) OrderedKeys() []string {
 	for k := range t {
 		keys = append(keys, k)
 	}
-	sort.SliceStable(keys, func(i, j int) bool {
-		pi, pj := symbolDeclPos(t[keys[i]]), symbolDeclPos(t[keys[j]])
-		if pi != pj {
-			return pi < pj
+	slices.SortStableFunc(keys, func(a, b string) int {
+		if c := cmp.Compare(symbolDeclPos(t[a]), symbolDeclPos(t[b])); c != 0 {
+			return c
 		}
-		return keys[i] < keys[j]
+		return cmp.Compare(a, b)
 	})
 	return keys
 }

@@ -1,9 +1,10 @@
 package install
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -256,8 +257,8 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 // sortLocked orders a locked set by coordinate string so the lockfile is
 // deterministic regardless of download order.
 func sortLocked(pkgs []lockfile.LockedPackage) {
-	sort.Slice(pkgs, func(i, j int) bool {
-		return pkgs[i].Coords().String() < pkgs[j].Coords().String()
+	slices.SortFunc(pkgs, func(a, b lockfile.LockedPackage) int {
+		return cmp.Compare(a.Coords().String(), b.Coords().String())
 	})
 }
 
