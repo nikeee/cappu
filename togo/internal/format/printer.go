@@ -1601,10 +1601,6 @@ func (p *printer) callTrailing(e *compiler.CallExpressionData, trailing Doc) Doc
 	return concat(p.node(e.Expression), p.typeArguments(e.TypeArguments), p.argListTrailing(e.Arguments, trailing))
 }
 
-func (p *printer) argList(args *compiler.NodeArray) Doc {
-	return p.argListTrailing(args, nil)
-}
-
 func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 	if args.Len() == 0 {
 		if trailing != nil {
@@ -1651,7 +1647,7 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 		(only.Kind == compiler.PropertyAccessExpression ||
 			(only.Kind == compiler.CallExpression &&
 				only.AsCallExpression().Expression.Kind == compiler.PropertyAccessExpression)) {
-		closeTok := Doc(text(")"))
+		closeTok := text(")")
 		if trailing != nil {
 			closeTok = concat(text(")"), trailing)
 		}
