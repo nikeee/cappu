@@ -1,0 +1,17 @@
+package p;
+
+class C {
+  boolean isModifier(String token) {
+    return switch (token) {
+      case "public", "protected", "private", "abstract", "static", "final", "transient", "volatile", "synchronized", "native", "strictfp", "default", "sealed", "non", "-" -> true;
+      default -> false;
+    };
+  }
+
+  Tag tag(Tree tree) {
+    return switch (tree.getKind()) {
+      case LiteralTree literal when isUnaryMinusLiteral(getSourceForNode(literal, getCurrentPath())) -> Tag.MINUS;
+      default -> null;
+    };
+  }
+}

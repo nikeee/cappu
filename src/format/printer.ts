@@ -1347,45 +1347,59 @@ class Printer {
   }
 
   private switchClause(c: SwitchClause): Doc {
-    const label = c.isDefault
-      ? "default"
-      : concat([
-          "case ",
-          join(
-            ", ",
-            (c.labels ?? []).map(l => this.node(l)),
-          ),
-        ]);
-    const guard = c.guard ? concat([" when ", this.node(c.guard)]) : "";
+    // gjf wraps a case label in a level (arrow cases at +4) so multiple labels
+    // break one-per-line and a long `when` guard folds before `when`, when the
+    // label run overflows.
+    // gjf wraps the whole case (labels, `when` guard, `->` and the arrow body) in
+    // one level (arrow cases at +4): the labels break one-per-line (UNIFIED), the
+    // guard folds before `when` (INDEPENDENT), and the body folds onto its own
+    // continuation line - all together when the run overflows.
+    const parts: Doc[] = c.isDefault
+      ? ["default"]
+      : ["case ", level(ZERO, this.caseLabelParts(c.labels ?? []))];
+    if (c.guard) parts.push(brk("independent", " ", ZERO), "when ", this.node(c.guard));
+
     if (c.isArrow) {
       const stmts = c.statements;
+      parts.push(" ->");
       if (stmts.length === 1 && stmts[0].kind === SyntaxKind.Block) {
-        return concat([label, guard, " -> ", this.block(stmts[0] as Block)]);
+        // A block body stays on the `->` line; it owns its own braces.
+        return concat([level(PLUS4, parts), " ", this.block(stmts[0] as Block)]);
       }
-      // A non-block arrow body (an expression, throw, or yield statement) folds
-      // onto a +4 continuation line after the `->` when it does not fit (gjf).
       const bodyStart = this.start(stmts[0]);
-      // A comment before the body sits own-line on that +4 continuation and
-      // forces the break, so `case X ->` keeps only the label (gjf), like the
-      // lambda-body case below.
+      // A comment before the body sits own-line on the +4 continuation, forcing
+      // the break so `case X ->` keeps only the label. Consume the comments
+      // BEFORE rendering the body (else the body would absorb them).
       if (this.hasCommentBefore(bodyStart)) {
-        const parts: Doc[] = [];
-        for (const c of this.commentsBefore(bodyStart)) parts.push(reflow(c.text), hardline);
-        parts.push(join(" ", stmts.map(s => this.node(s))));
-        return concat([label, guard, " ->", level(PLUS4, [hardline, concat(parts)])]);
+        const cparts: Doc[] = [];
+        for (const c2 of this.commentsBefore(bodyStart)) cparts.push(reflow(c2.text), hardline);
+        cparts.push(join(" ", stmts.map(s => this.node(s))));
+        parts.push(hardline, concat(cparts));
+      } else {
+        parts.push(
+          brk("unified", " ", ZERO),
+          join(
+            " ",
+            stmts.map(s => this.node(s)),
+          ),
+        );
       }
-      const body = join(
-        " ",
-        stmts.map(s => this.node(s)),
-      );
-      return concat([label, guard, " ->", level(PLUS4, [line, body])]);
+      return level(PLUS4, parts);
     }
+    parts.push(":");
     return concat([
-      label,
-      guard,
-      ":",
+      level(ZERO, parts),
       indent(concat([hardline, ...this.statementList(c.statements, c.end)])),
     ]);
+  }
+
+  private caseLabelParts(labels: readonly Node[]): Doc[] {
+    const parts: Doc[] = [];
+    labels.forEach((l, i) => {
+      if (i > 0) parts.push(",", brk("unified", " ", ZERO));
+      parts.push(this.node(l));
+    });
+    return parts;
   }
 
   // --- expressions ---------------------------------------------------------

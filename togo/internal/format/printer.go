@@ -1498,50 +1498,58 @@ func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, e
 }
 
 func (p *printer) switchClause(c *compiler.SwitchClauseData, end int) Doc {
-	var label Doc
+	// gjf wraps the whole case (labels, `when` guard, `->` and the arrow body) in
+	// one level (arrow cases at +4): the labels break one-per-line (UNIFIED), the
+	// guard folds before `when` (INDEPENDENT), and the body folds onto its own
+	// continuation line - all together when the run overflows.
+	var parts []Doc
 	if c.IsDefault {
-		label = text("default")
+		parts = []Doc{text("default")}
 	} else {
-		labels := make([]Doc, c.Labels.Len())
-		for i, l := range nodes(c.Labels) {
-			labels[i] = p.node(l)
+		ls := nodes(c.Labels)
+		var labelParts []Doc
+		for i, l := range ls {
+			if i > 0 {
+				labelParts = append(labelParts, text(","), brk(fillUnified, " ", ZERO, nil))
+			}
+			labelParts = append(labelParts, p.node(l))
 		}
-		label = concat(text("case "), join(text(", "), labels))
+		parts = []Doc{text("case "), level(ZERO, labelParts)}
 	}
-	guard := text("")
 	if c.Guard != nil {
-		guard = concat(text(" when "), p.node(c.Guard))
+		parts = append(parts, brk(fillIndependent, " ", ZERO, nil), text("when "), p.node(c.Guard))
 	}
 	if c.IsArrow {
 		stmts := nodes(c.Statements)
+		parts = append(parts, text(" ->"))
 		if len(stmts) == 1 && stmts[0].Kind == compiler.Block {
-			return concat(label, guard, text(" -> "), p.block(stmts[0].AsBlock(), stmts[0].End))
+			return concat(level(plus4, parts), text(" "), p.block(stmts[0].AsBlock(), stmts[0].End))
 		}
-		// A comment before the body sits own-line on the +4 continuation and
-		// forces the break, so `case X ->` keeps only the label (gjf), like the
-		// lambda-body case below.
 		bodyStart := p.start(stmts[0])
+		// A comment before the body sits own-line on the +4 continuation, forcing
+		// the break. Consume comments BEFORE rendering the body.
 		if p.hasCommentBefore(bodyStart) {
-			var parts []Doc
-			for _, c := range p.commentsBefore(bodyStart) {
-				parts = append(parts, reflow(c.text), hardline)
+			var cparts []Doc
+			for _, c2 := range p.commentsBefore(bodyStart) {
+				cparts = append(cparts, reflow(c2.text), hardline)
 			}
 			ss := make([]Doc, len(stmts))
 			for i, st := range stmts {
 				ss[i] = p.node(st)
 			}
-			parts = append(parts, join(text(" "), ss))
-			return concat(label, guard, text(" ->"), level(plus4, []Doc{hardline, concat(parts...)}))
+			cparts = append(cparts, join(text(" "), ss))
+			parts = append(parts, hardline, concat(cparts...))
+		} else {
+			ss := make([]Doc, len(stmts))
+			for i, st := range stmts {
+				ss[i] = p.node(st)
+			}
+			parts = append(parts, brk(fillUnified, " ", ZERO, nil), join(text(" "), ss))
 		}
-		ss := make([]Doc, len(stmts))
-		for i, st := range stmts {
-			ss[i] = p.node(st)
-		}
-		// A non-block arrow body (an expression, throw, or yield statement) folds
-		// onto a +4 continuation line after the `->` when it does not fit (gjf).
-		return concat(label, guard, text(" ->"), level(plus4, []Doc{line, join(text(" "), ss)}))
+		return level(plus4, parts)
 	}
-	return concat(label, guard, text(":"), indent(concat(append([]Doc{hardline}, p.listDocs(nodes(c.Statements), false, end)...)...)))
+	parts = append(parts, text(":"))
+	return concat(level(ZERO, parts), indent(concat(append([]Doc{hardline}, p.listDocs(nodes(c.Statements), false, end)...)...)))
 }
 
 // --- expressions ---------------------------------------------------------
