@@ -475,3 +475,5 @@ cappu search commons-lang3
 - 2026-06-30 10:14 — add cappu vache verify
 - 2026-06-30 10:14 — add _metadata to go version
 - 2026-06-30 14:22 — https://github.com/nikeee/cappu/issues/31 is still an issue
+- 2026-06-30 14:37 — go through the sources of the ts and go version. look for diverging behavior. fix them.
+- 2026-06-30 14:37 — commit on main

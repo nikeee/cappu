@@ -15,10 +15,12 @@ import (
 )
 
 // InlayHints configures the language server's inlay hints. Absent in cappu.json
-// means undefined (no hints object), so it is a pointer on LspOptions.
+// means undefined (no hints object), so it is a pointer on LspOptions. Each field
+// is a pointer so an absent key gets its zod default (true) in applyDefaults,
+// distinct from an explicit false.
 type InlayHints struct {
-	ParameterNames bool `json:"parameterNames"`
-	VarTypes       bool `json:"varTypes"`
+	ParameterNames *bool `json:"parameterNames"`
+	VarTypes       *bool `json:"varTypes"`
 }
 
 // ExperimentalCompiler holds cappu's own (experimental) compiler knobs.
@@ -220,6 +222,16 @@ func (c *Config) applyDefaults() {
 		}
 		if n.NullUnmarkedAnnotations == nil {
 			n.NullUnmarkedAnnotations = []string{"org.jspecify.annotations.NullUnmarked"}
+		}
+	}
+	if h := c.LspOptions.InlayHints; h != nil {
+		if h.ParameterNames == nil {
+			t := true
+			h.ParameterNames = &t
+		}
+		if h.VarTypes == nil {
+			t := true
+			h.VarTypes = &t
 		}
 	}
 	if c.FormatterOptions.Style == "" {

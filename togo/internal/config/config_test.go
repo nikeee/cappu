@@ -118,6 +118,27 @@ func TestNullnessDefaults(t *testing.T) {
 	}
 }
 
+func TestInlayHintsDefaults(t *testing.T) {
+	// Absent means undefined (nil pointer): the server uses its own defaults.
+	absent, _ := Load(writeConfig(t, `{}`), "")
+	if absent.LspOptions.InlayHints != nil {
+		t.Error("inlayHints should be nil when absent")
+	}
+	// Present with one key set false: the other gets its zod default (true),
+	// mirroring src/config.test.ts ({ varTypes: false } -> parameterNames true).
+	cfg, _ := Load(writeConfig(t, `{ "lspOptions": { "inlayHints": { "varTypes": false } } }`), "")
+	h := cfg.LspOptions.InlayHints
+	if h == nil {
+		t.Fatal("inlayHints should be present")
+	}
+	if h.ParameterNames == nil || !*h.ParameterNames {
+		t.Errorf("parameterNames default = %v, want true", h.ParameterNames)
+	}
+	if h.VarTypes == nil || *h.VarTypes {
+		t.Errorf("varTypes = %v, want false", h.VarTypes)
+	}
+}
+
 func TestLoadMissingDefaultFileIsEmptyConfig(t *testing.T) {
 	cfg, err := Load("", t.TempDir())
 	if err != nil {
