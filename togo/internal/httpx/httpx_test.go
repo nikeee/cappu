@@ -27,7 +27,7 @@ func TestGetRetriesTransientThenSucceeds(t *testing.T) {
 	defer server.Close()
 
 	var slept []time.Duration
-	body, found, err := get(server.Client(), server.URL, func(d time.Duration) { slept = append(slept, d) })
+	body, found, err := get(server.Client(), server.URL, func(d time.Duration) { slept = append(slept, d) }, func() float64 { return 0.5 })
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -37,8 +37,34 @@ func TestGetRetriesTransientThenSucceeds(t *testing.T) {
 	if calls != 2 {
 		t.Errorf("server calls = %d, want 2 (one retry)", calls)
 	}
-	if len(slept) != 1 || slept[0] != baseBackoff {
-		t.Errorf("backoff sleeps = %v, want one %v", slept, baseBackoff)
+	// full jitter: 0.5 * baseBackoff.
+	if len(slept) != 1 || slept[0] != baseBackoff/2 {
+		t.Errorf("backoff sleeps = %v, want one %v", slept, baseBackoff/2)
+	}
+}
+
+// nikeee/cappu#31: the fallback backoff is jittered by the rng so the many
+// concurrent retries desync instead of hammering the registry in lockstep.
+func TestGetJittersBackoffByRng(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls < 2 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	var slept []time.Duration
+	// a different rng yields a different sleep (0.1 * baseBackoff, not the fixed
+	// baseBackoff it used to be).
+	if _, _, err := get(server.Client(), server.URL, func(d time.Duration) { slept = append(slept, d) }, func() float64 { return 0.1 }); err != nil {
+		t.Fatal(err)
+	}
+	if len(slept) != 1 || slept[0] != baseBackoff/10 {
+		t.Errorf("backoff sleeps = %v, want one %v", slept, baseBackoff/10)
 	}
 }
 
@@ -50,7 +76,7 @@ func TestGetPersistentTransientIsErrorNotMiss(t *testing.T) {
 	}))
 	defer server.Close()
 
-	body, found, err := get(server.Client(), server.URL, func(time.Duration) {})
+	body, found, err := get(server.Client(), server.URL, func(time.Duration) {}, func() float64 { return 0.5 })
 	if err == nil {
 		t.Fatal("want an error after exhausting retries, got nil (would be reported as a miss)")
 	}
@@ -70,7 +96,7 @@ func TestGetGenuine404IsMiss(t *testing.T) {
 	}))
 	defer server.Close()
 
-	body, found, err := get(server.Client(), server.URL, func(time.Duration) { t.Fatal("404 must not retry") })
+	body, found, err := get(server.Client(), server.URL, func(time.Duration) { t.Fatal("404 must not retry") }, func() float64 { return 0 })
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -96,7 +122,7 @@ func TestGetHonorsRetryAfter(t *testing.T) {
 	defer server.Close()
 
 	var slept []time.Duration
-	if _, _, err := get(server.Client(), server.URL, func(d time.Duration) { slept = append(slept, d) }); err != nil {
+	if _, _, err := get(server.Client(), server.URL, func(d time.Duration) { slept = append(slept, d) }, func() float64 { return 0.5 }); err != nil {
 		t.Fatal(err)
 	}
 	if len(slept) != 1 || slept[0] != 2*time.Second {

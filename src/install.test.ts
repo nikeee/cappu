@@ -804,8 +804,8 @@ test("downloads stay under one global concurrency cap across all sets (#31)", as
   const previousStore = process.env.CAPPU_PACKAGE_STORE;
   process.env.CAPPU_PACKAGE_STORE = store.path;
   try {
-    // 20 leaf deps per set (> the cap of 12): a per-set limiter would admit up
-    // to 12 from each of the three sets at once (36 in flight).
+    // 20 leaf deps per set (> the cap of 6): a per-set limiter would admit up
+    // to 6 from each of the three sets at once (18 in flight).
     const cfg = (n: number) =>
       Object.fromEntries(Array.from({ length: n }, (_, i) => [`org.t:p${i}`, "1"]));
     writeFileSync(
@@ -839,7 +839,7 @@ test("downloads stay under one global concurrency cap across all sets (#31)", as
     const result = await installDependencies(loadConfig(undefined, dir.path), [source]);
     expect(result.installed).toHaveLength(60);
     expect(maxActive).toBeGreaterThan(0);
-    expect(maxActive).toBeLessThanOrEqual(12); // DOWNLOAD_CONCURRENCY, shared
+    expect(maxActive).toBeLessThanOrEqual(6); // DOWNLOAD_CONCURRENCY, shared
   } finally {
     if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
     else process.env.CAPPU_PACKAGE_STORE = previousStore;

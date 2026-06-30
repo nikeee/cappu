@@ -420,12 +420,33 @@ test("fetchWithRetry retries a transient 429 then succeeds", async () => {
   const slept: number[] = [];
   const stub = stubFetch([{ status: 429 }, { status: 200, body: "ok" }]);
   try {
-    const response = await fetchWithRetry("https://repo.example/maven2/a.pom", async ms => {
-      slept.push(ms);
-    });
+    const response = await fetchWithRetry(
+      "https://repo.example/maven2/a.pom",
+      async ms => {
+        slept.push(ms);
+      },
+      () => 0.5, // fixed rng: full jitter halves the base backoff
+    );
     expect(await response?.text()).toBe("ok");
     expect(stub.calls).toBe(2);
-    expect(slept).toEqual([500]); // one base-backoff sleep
+    expect(slept).toEqual([250]); // 0.5 * 500ms base backoff (jittered)
+  } finally {
+    stub.restore();
+  }
+});
+
+test("fetchWithRetry jitters the backoff by the rng (desyncs concurrent retries, #31)", async () => {
+  const slept: number[] = [];
+  const stub = stubFetch([{ status: 429 }, { status: 200, body: "ok" }]);
+  try {
+    await fetchWithRetry(
+      "https://repo.example/maven2/a.pom",
+      async ms => {
+        slept.push(ms);
+      },
+      () => 0.1, // a different rng yields a different sleep
+    );
+    expect(slept).toEqual([50]); // 0.1 * 500ms, not the fixed 500ms it used to be
   } finally {
     stub.restore();
   }
@@ -435,9 +456,9 @@ test("fetchWithRetry throws (not a miss) when the transient status persists", as
   const stub = stubFetch([{ status: 503 }]);
   try {
     await expect(fetchWithRetry("https://repo.example/maven2/a.pom", noSleep)).rejects.toThrow(
-      /HTTP 503 after 4 attempts/,
+      /HTTP 503 after 6 attempts/,
     );
-    expect(stub.calls).toBe(4);
+    expect(stub.calls).toBe(6);
   } finally {
     stub.restore();
   }

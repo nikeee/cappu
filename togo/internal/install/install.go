@@ -18,7 +18,7 @@ import (
 // How many jars to download/verify at once. Bounded so a large tree does not
 // open hundreds of sockets; the network, not the CPU, is the limit here. Port
 // of src/install.ts DOWNLOAD_CONCURRENCY.
-const downloadConcurrency = 12
+const downloadConcurrency = 6
 
 // Options tunes a run. OnProgress is called per materialized package; OnResolve
 // per package while resolving (no lockfile). UpdateLock forces a re-resolve and

@@ -474,3 +474,4 @@ cappu search commons-lang3
 - 2026-06-30 09:01 — resolve https://github.com/nikeee/cappu/issues/36
 - 2026-06-30 10:14 — add cappu vache verify
 - 2026-06-30 10:14 — add _metadata to go version
+- 2026-06-30 14:22 — https://github.com/nikeee/cappu/issues/31 is still an issue

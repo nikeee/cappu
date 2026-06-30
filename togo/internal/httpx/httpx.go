@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -49,8 +50,9 @@ var retryStatuses = map[int]bool{
 }
 
 const (
-	maxFetchAttempts = 4
+	maxFetchAttempts = 6
 	baseBackoff      = 500 * time.Millisecond
+	maxBackoff       = 20 * time.Second
 )
 
 // Get fetches u, retrying transient failures (429/502/503/504) with exponential
@@ -59,11 +61,12 @@ const (
 // maxFetchAttempts - so a rate limit surfaces as a real failure instead of a
 // false "not found". Used by the package fetchers (one POM at a time).
 func Get(client *http.Client, u string) (body []byte, found bool, err error) {
-	return get(client, u, time.Sleep)
+	return get(client, u, time.Sleep, rand.Float64)
 }
 
-// get is Get with an injectable sleep so tests retry without real delays.
-func get(client *http.Client, u string, sleep func(time.Duration)) ([]byte, bool, error) {
+// get is Get with an injectable sleep and rng so tests retry deterministically
+// without real delays.
+func get(client *http.Client, u string, sleep func(time.Duration), rng func() float64) ([]byte, bool, error) {
 	backoff := baseBackoff
 	for attempt := 1; ; attempt++ {
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u, nil)
@@ -91,9 +94,16 @@ func get(client *http.Client, u string, sleep func(time.Duration)) ([]byte, bool
 		if attempt >= maxFetchAttempts {
 			return nil, false, fmt.Errorf("%s: HTTP %d after %d attempts (rate limited or server error); try again shortly", hostOf(u), status, maxFetchAttempts)
 		}
-		wait := backoff
-		if retryAfter > 0 {
-			wait = retryAfter
+		// Honor an explicit Retry-After exactly; otherwise full jitter over the
+		// capped exponential backoff so the many concurrent retries desync
+		// instead of hammering the registry in lockstep (nikeee/cappu#31).
+		wait := retryAfter
+		if wait == 0 {
+			capped := backoff
+			if capped > maxBackoff {
+				capped = maxBackoff
+			}
+			wait = time.Duration(rng() * float64(capped))
 		}
 		sleep(wait)
 		backoff *= 2

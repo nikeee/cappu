@@ -251,7 +251,7 @@ function sha256Of(bytes: Uint8Array): Sha256 {
 
 // How many jars to download/verify at once. Bounded so a large tree does not
 // open hundreds of sockets; the network, not the CPU, is the limit here.
-const DOWNLOAD_CONCURRENCY = 12;
+const DOWNLOAD_CONCURRENCY = 6;
 
 // Which lib directory each locked configuration installs into.
 const LOCK_TARGETS = [

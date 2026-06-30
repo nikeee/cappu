@@ -38,8 +38,9 @@ export type FetchBytes = (url: string) => Promise<Uint8Array | undefined>;
 // without this a 429 mid-resolve was reported as "not found in any package
 // source" for every remaining package.)
 const RETRY_STATUSES = new Set([429, 502, 503, 504]);
-const MAX_FETCH_ATTEMPTS = 4;
+const MAX_FETCH_ATTEMPTS = 6;
 const BASE_BACKOFF_MS = 500;
+const MAX_BACKOFF_MS = 20_000;
 
 // Bounds only the connect/TLS/response-header phase, not the whole request:
 // fetch() resolves once headers arrive, so we clear the deadline then and let
@@ -90,6 +91,7 @@ async function fetchHeaders(url: string): Promise<Response> {
 export async function fetchWithRetry(
   url: string,
   sleep: (ms: number) => Promise<void> = defaultSleep,
+  random: () => number = Math.random,
 ): Promise<Response | undefined> {
   let backoff = BASE_BACKOFF_MS;
   for (let attempt = 1; ; attempt++) {
@@ -101,7 +103,11 @@ export async function fetchWithRetry(
         `${hostOf(url)}: HTTP ${response.status} after ${MAX_FETCH_ATTEMPTS} attempts (rate limited or server error); try again shortly`,
       );
     }
-    await sleep(parseRetryAfter(response.headers.get("retry-after")) ?? backoff);
+    // Honor an explicit Retry-After exactly; otherwise full jitter over the
+    // capped exponential backoff so the many concurrent retries desync instead
+    // of hammering the registry in lockstep (nikeee/cappu#31).
+    const retryAfter = parseRetryAfter(response.headers.get("retry-after"));
+    await sleep(retryAfter ?? random() * Math.min(backoff, MAX_BACKOFF_MS));
     backoff *= 2;
   }
 }
