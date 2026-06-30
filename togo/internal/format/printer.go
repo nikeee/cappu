@@ -1284,7 +1284,7 @@ func (p *printer) localVar(d *compiler.LocalVariableDeclarationStatementData) Do
 
 func (p *printer) ifStatement(s *compiler.IfStatementData) Doc {
 	parts := []Doc{
-		group(concat(text("if ("), p.node(s.Condition), text(")"))),
+		group(concat(text("if ("), p.statementTail(s.Condition, text(")")))),
 		// gjf preserves a source blank line before the then-block's `}` when an
 		// `else` follows.
 		p.clauseBodyTB(s.ThenStatement, s.ElseStatement != nil),
@@ -1320,7 +1320,7 @@ func (p *printer) clauseBodyTB(s *compiler.Node, allowTrailingBlank bool) Doc {
 }
 
 func (p *printer) whileStatement(s *compiler.WhileStatementData) Doc {
-	return concat(group(concat(text("while ("), p.node(s.Condition), text(")"))), p.clauseBody(s.Statement))
+	return concat(group(concat(text("while ("), p.statementTail(s.Condition, text(")")))), p.clauseBody(s.Statement))
 }
 
 func (p *printer) doStatement(s *compiler.DoStatementData) Doc {
@@ -1726,7 +1726,11 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	// breaks. A pure field-access chain still breaks before its last selectors
 	// when it overflows (the break path below, gated by the prefix).
 	baseIsNew := cur.Kind == compiler.ObjectCreationExpression
-	if callCount == 1 && !baseIsCall && !baseIsNew {
+	// An anonymous class receiver (`new X() {..}`) already spans multiple lines and
+	// provides its own indentation; gjf glues a single dereference onto its closing
+	// `}` (`}.scan(..)`) rather than starting a +4 chain that re-indents the body.
+	baseIsAnonClass := baseIsNew && cur.AsObjectCreationExpression().ClassBody != nil
+	if callCount == 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass) {
 		parts := []Doc{base}
 		parts = append(parts, linkDocs...)
 		return finish(concat(parts...))

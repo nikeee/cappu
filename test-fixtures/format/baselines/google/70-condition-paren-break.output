@@ -1,0 +1,15 @@
+package p;
+
+class C {
+  void m(Iterator it) {
+    if (a) {
+      if (b) {
+        while (it.hasNext()
+            && it.peek().getKind() == VARIABLE
+            && getStartPosition(it.peek()) == start) {
+          it.next();
+        }
+      }
+    }
+  }
+}

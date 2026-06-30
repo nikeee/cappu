@@ -1,0 +1,15 @@
+package p;
+
+class C {
+    void m(JCTree first) {
+        new TreeScanner() {
+            @Override
+            public void scan(JCTree tree) {
+                if (tree == null) {
+                    return;
+                }
+                formatString[0] = true;
+            }
+        }.scan((JCTree) first);
+    }
+}

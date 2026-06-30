@@ -1156,7 +1156,7 @@ class Printer {
 
   private ifStatement(s: IfStatement): Doc {
     const parts: Doc[] = [
-      group(concat(["if (", this.node(s.condition), ")"])),
+      group(concat(["if (", this.statementTail(s.condition, ")")])),
       // gjf preserves a source blank line before the then-block's `}` when an
       // `else` follows.
       this.clauseBody(s.thenStatement, s.elseStatement !== undefined),
@@ -1187,7 +1187,7 @@ class Printer {
 
   private whileStatement(s: WhileStatement): Doc {
     return concat([
-      group(concat(["while (", this.node(s.condition), ")"])),
+      group(concat(["while (", this.statementTail(s.condition, ")")])),
       this.clauseBody(s.statement),
     ]);
   }
@@ -1543,7 +1543,13 @@ class Printer {
     // chain still breaks before its last selectors when it overflows (the break
     // path below, gated by the type-name prefix).
     const baseIsNew = cur.kind === SyntaxKind.ObjectCreationExpression;
-    if (callCount === 1 && !baseIsCall && !baseIsNew) {
+    // An anonymous class receiver (`new X() {..}`) already spans multiple lines
+    // and provides its own indentation; gjf glues a single dereference onto its
+    // closing `}` (`}.scan(..)`) rather than starting a +4 chain that would
+    // re-indent the class body.
+    const baseIsAnonClass =
+      baseIsNew && (cur as ObjectCreationExpression).classBody !== undefined;
+    if (callCount === 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass)) {
       return finish(concat([base, ...linkDocs]));
     }
     // The leading links glued to the base (no break before them): a type-name
