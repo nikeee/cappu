@@ -50,6 +50,11 @@ type Indent struct {
 
 func indentConst(n int) Indent { return Indent{isConst: true, n: n} }
 
+// indentIf is a conditional indent: thenI when cond's break was taken, else elseI.
+func indentIf(cond *BreakTag, thenI, elseI Indent) Indent {
+	return Indent{cond: cond, thenI: &thenI, elseI: &elseI}
+}
+
 // ZERO is the zero indent.
 var ZERO = indentConst(0)
 

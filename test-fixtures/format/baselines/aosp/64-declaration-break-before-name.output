@@ -1,0 +1,10 @@
+package p;
+
+class C {
+    int x =
+            someVeryLongMethodNameThatForcesABreakBecauseItIsReallyQuiteLongIndeedYesVeryLong(
+                    argument);
+    private static final Constructor<DeferredDiagnosticHandler>
+            DEFERRED_DIAGNOSTIC_HANDLER_CONSTRUCTOR = getCons();
+    Map<String, SomeVeryLongTypeNameHere> shortName = aShortInit;
+}

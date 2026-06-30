@@ -900,6 +900,12 @@ func (p *printer) declaratorList(arr *compiler.NodeArray) Doc {
 }
 
 func (p *printer) fieldDeclaration(d *compiler.FieldDeclarationData) Doc {
+	if d.Declarators.Len() == 1 {
+		return concat(
+			p.modifiers(d.Modifiers, "var"),
+			p.singleDeclaration(p.typ(d.Type), nodes(d.Declarators)[0].AsVariableDeclarator(), text(";")),
+		)
+	}
 	return concat(
 		p.modifiers(d.Modifiers, "var"),
 		p.typ(d.Type),
@@ -907,6 +913,24 @@ func (p *printer) fieldDeclaration(d *compiler.FieldDeclarationData) Doc {
 		p.declaratorList(d.Declarators),
 		text(";"),
 	)
+}
+
+// singleDeclaration renders `<type> <name> = <init><trailing>` with the gjf
+// break-before-name option: when `<type> <name> =` does not fit, break after the
+// type (name onto a +4 line) so `<name> = <init>` can stay together; the
+// initializer keeps its own break-after-`=`, indented +4 (or +8 when the name
+// also broke). The break-before-name's fit check excludes the initializer (a
+// sibling level), so a long initializer alone does not trigger it.
+func (p *printer) singleDeclaration(typ Doc, v *compiler.VariableDeclaratorData, trailing Doc) Doc {
+	name := concat(text(p.raw(v.Name)), text(strings.Repeat("[]", v.ArrayRankAfterName)))
+	if v.Initializer == nil || v.Initializer.Kind == compiler.ArrayInitializer {
+		return concat(typ, text(" "), p.declarator(v, trailing))
+	}
+	nameTag := &BreakTag{}
+	return level(ZERO, []Doc{
+		level(plus4, []Doc{typ, brk(fillUnified, " ", ZERO, nameTag), name, text(" =")}),
+		level(indentIf(nameTag, indentConst(8), plus4), []Doc{line, p.statementTail(v.Initializer, trailing)}),
+	})
 }
 
 func (p *printer) declarator(v *compiler.VariableDeclaratorData, trailing Doc) Doc {
@@ -1224,6 +1248,12 @@ func (p *printer) braceTrailingComment(afterBrace int) Doc {
 
 func (p *printer) localVar(d *compiler.LocalVariableDeclarationStatementData) Doc {
 	ds := nodes(d.Declarators)
+	if len(ds) == 1 {
+		return concat(
+			p.modifiers(d.Modifiers, "var"),
+			p.singleDeclaration(p.typ(d.Type), ds[0].AsVariableDeclarator(), text(";")),
+		)
+	}
 	parts := []Doc{p.modifiers(d.Modifiers, "var"), p.typ(d.Type), text(" ")}
 	for i, v := range ds {
 		if i > 0 {

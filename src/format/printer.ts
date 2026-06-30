@@ -84,6 +84,7 @@ import {
 } from "../compiler/types.ts";
 import {
   brk,
+  BreakTag,
   concat,
   type Doc,
   type FillMode,
@@ -91,6 +92,7 @@ import {
   hardline,
   indent,
   indentConst,
+  indentIf,
   join,
   level,
   line,
@@ -829,6 +831,12 @@ class Printer {
   }
 
   private fieldDeclaration(d: FieldDeclaration): Doc {
+    if (d.declarators.length === 1) {
+      return concat([
+        this.modifiers(d.modifiers, "var"),
+        this.singleDeclaration(this.type(d.type), d.declarators[0], ";"),
+      ]);
+    }
     return concat([
       this.modifiers(d.modifiers, "var"),
       this.type(d.type),
@@ -841,7 +849,30 @@ class Printer {
     ]);
   }
 
-  private declarator(v: VariableDeclarator, trailing = ""): Doc {
+  // A single-declarator `<type> <name> = <init><trailing>` with the gjf
+  // break-before-name option: when `<type> <name> =` does not fit, break after
+  // the type (name onto a +4 line) so `<name> = <init>` can stay together; the
+  // initializer keeps its own break-after-`=`, indented +4 (or +8 when the name
+  // also broke). The break-before-name's fit check excludes the initializer
+  // (it sits in a sibling level), so a long initializer alone does not trigger it.
+  private singleDeclaration(type: Doc, v: VariableDeclarator, trailing: Doc): Doc {
+    const name = concat([this.raw(v.name), "[]".repeat(v.arrayRankAfterName)]);
+    // No initializer, or an array/hugging initializer that owns its own braces:
+    // keep the simple shape (the declarator handles the `=`).
+    if (!v.initializer || v.initializer.kind === SyntaxKind.ArrayInitializer) {
+      return concat([type, " ", this.declarator(v, trailing)]);
+    }
+    const nameTag = new BreakTag();
+    return level(ZERO, [
+      level(PLUS4, [type, brk("unified", " ", ZERO, nameTag), name, " ="]),
+      level(indentIf(nameTag, indentConst(8), PLUS4), [
+        line,
+        this.statementTail(v.initializer, trailing),
+      ]),
+    ]);
+  }
+
+  private declarator(v: VariableDeclarator, trailing: Doc = ""): Doc {
     const name = concat([this.raw(v.name), "[]".repeat(v.arrayRankAfterName)]);
     if (!v.initializer) return concat([name, trailing]);
     // An array initializer hugs the `=` (`x = {` ... `}`); its own braces break,
@@ -1097,6 +1128,12 @@ class Printer {
   }
 
   private localVar(d: LocalVariableDeclarationStatement): Doc {
+    if (d.declarators.length === 1) {
+      return concat([
+        this.modifiers(d.modifiers, "var"),
+        this.singleDeclaration(this.type(d.type), d.declarators[0], ";"),
+      ]);
+    }
     const last = d.declarators.length - 1;
     const parts: Doc[] = [this.modifiers(d.modifiers, "var"), this.type(d.type), " "];
     d.declarators.forEach((v, i) => {
