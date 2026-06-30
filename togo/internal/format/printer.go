@@ -1030,12 +1030,34 @@ func (p *printer) attachTrailingBlockComment(parts []Doc, endPos int) ([]Doc, bo
 // it: leading comments before the item (own-line ones get a forced break after,
 // which also forces the whole list to break; an inline block comment stays
 // inline) and a trailing block comment on the item's line before the separator.
+type listItem struct {
+	doc          Doc
+	comment      bool
+	leadTrailing string // "" when none
+	leadStart    int
+}
+
 func (p *printer) itemWithComments(node *compiler.Node, render func() Doc) (Doc, bool) {
+	r := p.itemWithCommentsEx(node, render, false)
+	return r.doc, r.comment
+}
+
+func (p *printer) itemWithCommentsEx(node *compiler.Node, render func() Doc, extractLeadTrailing bool) listItem {
 	var parts []Doc
 	comment := false
-	for _, c := range p.commentsBefore(p.start(node)) {
+	leadTrailing := ""
+	// Where this item's rendered content begins (its first comment, else the
+	// item) - used by callers to measure a source blank line before it.
+	leadStart := p.start(node)
+	if p.ci < len(p.comments) && p.comments[p.ci].pos < p.start(node) {
+		leadStart = p.comments[p.ci].pos
+	}
+	for i, c := range p.commentsBefore(p.start(node)) {
 		comment = true
 		switch {
+		case extractLeadTrailing && i == 0 && c.line && !c.ownLine:
+			// A line comment on the previous element's line trails THAT element.
+			leadTrailing = c.text
 		case c.ownLine:
 			parts = append(parts, reflow(c.text), hardline)
 		case c.line:
@@ -1051,26 +1073,35 @@ func (p *printer) itemWithComments(node *compiler.Node, render func() Doc) (Doc,
 	parts = append(parts, render())
 	parts, attached := p.attachTrailingBlockComment(parts, node.End)
 	comment = comment || attached
+	doc := concat(parts...)
 	if len(parts) == 1 {
-		return parts[0], comment
+		doc = parts[0]
 	}
-	return concat(parts...), comment
+	return listItem{doc: doc, comment: comment, leadTrailing: leadTrailing, leadStart: leadStart}
 }
 
 // listItems builds a delimited list's items with their comments consumed,
 // reporting whether any item carried a comment.
 func (p *printer) listItems(ns []*compiler.Node, render func(*compiler.Node) Doc) ([]Doc, bool) {
-	items := make([]Doc, len(ns))
+	rs := p.listItemsEx(ns, render, false)
+	items := make([]Doc, len(rs))
 	anyComment := false
-	for i, n := range ns {
-		n := n
-		doc, c := p.itemWithComments(n, func() Doc { return render(n) })
-		items[i] = doc
-		if c {
+	for i, r := range rs {
+		items[i] = r.doc
+		if r.comment {
 			anyComment = true
 		}
 	}
 	return items, anyComment
+}
+
+func (p *printer) listItemsEx(ns []*compiler.Node, render func(*compiler.Node) Doc, extractLeadTrailing bool) []listItem {
+	rs := make([]listItem, len(ns))
+	for i, n := range ns {
+		n := n
+		rs[i] = p.itemWithCommentsEx(n, func() Doc { return render(n) }, extractLeadTrailing)
+	}
+	return rs
 }
 
 func (p *printer) parameters(params *compiler.NodeArray, trailing Doc) Doc {
@@ -2014,24 +2045,53 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData) Doc {
 	if idx := compiler.SkipTrivia(p.text, els[len(els)-1].End); idx < len(p.text) && p.text[idx] == ',' {
 		trailingComma = true
 	}
-	items, anyComment := p.listItems(els, func(el *compiler.Node) Doc { return p.node(el) })
+	rs := p.listItemsEx(els, func(el *compiler.Node) Doc { return p.node(el) }, true)
+	anyComment := false
+	for _, r := range rs {
+		if r.comment {
+			anyComment = true
+		}
+	}
 	// A comment forces one-per-line (gjf), else short items fill.
 	fill := p.fillMode(anyComment, els)
-	// A trailing comma forces the braces open (newline after `{` and before `}`)
-	// but elements still fill (`{\n  1, 2, 3,\n}`).
-	open := fillUnified
-	if trailingComma {
-		open = fillForced
-	}
 	var innerParts []Doc
-	for i, el := range items {
+	for i, r := range rs {
 		if i > 0 {
-			innerParts = append(innerParts, text(","), brk(fill, " ", ZERO, nil))
+			innerParts = append(innerParts, text(","))
+			// gjf preserves one source blank line between elements.
+			blank := p.blankBeforePos(els[i-1].End, r.leadStart)
+			// A line comment trailing the previous element stays on its line, then
+			// forces the break before this element.
+			if r.leadTrailing != "" {
+				innerParts = append(innerParts, text(" "), text(r.leadTrailing), hardline)
+			} else {
+				innerParts = append(innerParts, brk(fill, " ", ZERO, nil))
+			}
+			if blank {
+				innerParts = append(innerParts, hardline)
+			}
 		}
-		innerParts = append(innerParts, el)
+		innerParts = append(innerParts, r.doc)
 	}
 	if trailingComma {
 		innerParts = append(innerParts, text(","))
+	}
+	// A line comment after the last element (before `}`) stays on its line.
+	closingComment := ""
+	if p.ci < len(p.comments) {
+		t := p.comments[p.ci]
+		lastEnd := els[len(els)-1].End
+		if t.line && !t.ownLine && t.pos > lastEnd && !strings.Contains(p.text[lastEnd:t.pos], "\n") {
+			p.ci++
+			closingComment = t.text
+		}
+	}
+	if closingComment != "" {
+		innerParts = append(innerParts, text(" "), text(closingComment))
+	}
+	open := fillUnified
+	if trailingComma || closingComment != "" {
+		open = fillForced
 	}
 	inner := level(ZERO, innerParts)
 	return concat(

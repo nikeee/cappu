@@ -955,33 +955,55 @@ class Printer {
   // forces the whole list to break; an inline block comment stays inline), and a
   // trailing block comment on the item's line before the separator. Returns
   // whether any comment was consumed (callers disable filling then, like gjf).
-  private itemWithComments(node: Node, render: () => Doc): { doc: Doc; comment: boolean } {
+  private itemWithComments(
+    node: Node,
+    render: () => Doc,
+    extractLeadTrailing = false,
+  ): { doc: Doc; comment: boolean; leadTrailing?: string; leadStart: number } {
     const parts: Doc[] = [];
     let comment = false;
-    for (const c of this.commentsBefore(this.start(node))) {
+    let leadTrailing: string | undefined;
+    // Where this item's rendered content begins (its first comment, else the
+    // item) - used by callers to measure a source blank line before it.
+    const firstPending = this.comments[this.ci];
+    const leadStart =
+      firstPending && firstPending.pos < this.start(node) ? firstPending.pos : this.start(node);
+    this.commentsBefore(this.start(node)).forEach((c, i) => {
       comment = true;
-      if (c.ownLine) parts.push(reflow(c.text), hardline);
+      // A line comment on the same line as the previous element (`elem, // note`)
+      // trails THAT element; the caller emits it before the inter-item break.
+      if (extractLeadTrailing && i === 0 && c.line && !c.ownLine) {
+        leadTrailing = c.text;
+      } else if (c.ownLine) parts.push(reflow(c.text), hardline);
       else if (c.line) parts.push(c.text, hardline);
       else parts.push(reformatParamComment(c.text) ?? c.text, " ");
-    }
+    });
     parts.push(render());
     if (this.attachTrailingBlockComment(parts, node.end)) comment = true;
-    return { doc: parts.length === 1 ? parts[0] : concat(parts), comment };
+    return { doc: parts.length === 1 ? parts[0] : concat(parts), comment, leadTrailing, leadStart };
   }
 
   // Build the items of a delimited list with their comments consumed, reporting
-  // whether any item carried a comment.
+  // whether any item carried a comment. `leads[i]` is a line comment that trails
+  // the PREVIOUS element on its line (`extractLeadTrailing`), for the caller to
+  // place before the separator break.
   private listItems(
     nodes: readonly Node[],
     render: (n: Node) => Doc,
-  ): { items: Doc[]; anyComment: boolean } {
+    extractLeadTrailing = false,
+  ): { items: Doc[]; leads: (string | undefined)[]; leadStarts: number[]; anyComment: boolean } {
     let anyComment = false;
-    const items = nodes.map(n => {
-      const r = this.itemWithComments(n, () => render(n));
+    const items: Doc[] = [];
+    const leads: (string | undefined)[] = [];
+    const leadStarts: number[] = [];
+    nodes.forEach(n => {
+      const r = this.itemWithComments(n, () => render(n), extractLeadTrailing);
       if (r.comment) anyComment = true;
-      return r.doc;
+      items.push(r.doc);
+      leads.push(r.leadTrailing);
+      leadStarts.push(r.leadStart);
     });
-    return { items, anyComment };
+    return { items, leads, leadStarts, anyComment };
   }
 
   private parameters(params: NodeArray<Parameter>, trailing: Doc = ""): Doc {
@@ -1753,17 +1775,39 @@ class Printer {
     // before `}`), but the elements themselves still fill (`{\n  1, 2, 3,\n}`).
     const trailingComma =
       this.text[skipTrivia(this.text, e.elements[e.elements.length - 1].end)] === ",";
-    const { items, anyComment } = this.listItems(e.elements, el => this.node(el));
+    const { items, leads, leadStarts, anyComment } = this.listItems(
+      e.elements,
+      el => this.node(el),
+      true,
+    );
     // A comment forces one-per-line (gjf), else short items fill.
     const fillMode = this.fillMode(anyComment, e.elements);
     const innerParts: Doc[] = [];
     items.forEach((el, i) => {
-      if (i > 0) innerParts.push(",", brk(fillMode, " ", ZERO));
+      if (i > 0) {
+        innerParts.push(",");
+        // gjf preserves one source blank line between elements.
+        const blank = this.blankBeforePos(e.elements[i - 1].end, leadStarts[i]);
+        // A line comment trailing the previous element stays on its line, then
+        // forces the break before this element.
+        if (leads[i] !== undefined) innerParts.push(" ", leads[i] as string, hardline);
+        else innerParts.push(brk(fillMode, " ", ZERO));
+        if (blank) innerParts.push(hardline);
+      }
       innerParts.push(el);
     });
     if (trailingComma) innerParts.push(",");
+    // A line comment after the last element (before `}`) stays on its line.
+    const lastEnd = e.elements[e.elements.length - 1].end;
+    const t = this.comments[this.ci];
+    let closingComment: string | undefined;
+    if (t && t.line && !t.ownLine && t.pos > lastEnd && !/\n/.test(this.text.slice(lastEnd, t.pos))) {
+      this.ci++;
+      closingComment = t.text;
+    }
+    if (closingComment !== undefined) innerParts.push(" ", closingComment);
     const inner = level(ZERO, innerParts);
-    const open: FillMode = trailingComma ? "forced" : "unified";
+    const open: FillMode = trailingComma || closingComment !== undefined ? "forced" : "unified";
     return concat(["{", level(PLUS2, [brk(open, "", ZERO), inner, brk(open, "", MINUS2)]), "}"]);
   }
 

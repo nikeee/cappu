@@ -1,0 +1,16 @@
+package p;
+
+class C {
+  String[][] data = {
+    {
+      // leading own-line comment
+      "first", //
+      "second"
+    },
+
+    // blank line before this element group
+    {
+      "import\\", // \\ means there is no newline here.
+    },
+  };
+}
