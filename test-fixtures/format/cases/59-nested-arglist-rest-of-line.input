@@ -1,0 +1,11 @@
+package p;
+
+class C {
+  MethodHandle make() {
+    return MethodHandles.filterArguments(
+        lookup.findVirtual(
+            JCTree.class, "getEndPosition", MethodType.methodType(int.class, END_POS_TABLE_CLASSES)),
+        1,
+        lookup.findVarHandle(JCCompilationUnit.class, "endPositions", END_POS_TABLE_CLASS));
+  }
+}

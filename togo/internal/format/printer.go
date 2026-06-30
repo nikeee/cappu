@@ -930,11 +930,17 @@ func (p *printer) argsLikeTrailing(open string, items []Doc, closeTok string, fi
 		}
 		innerParts = append(innerParts, it)
 	}
-	inner := level(ZERO, innerParts)
+	// The close delimiter (and any token trailing it on the same line, e.g. a
+	// method signature's `;` or a routed-in separator) goes INSIDE the args level
+	// so the args' own one-per-line fit check counts it: gjf breaks a delimited
+	// list when the whole `(...)<close><trailing>` run overflows, not just the
+	// bare args.
+	innerParts = append(innerParts, text(closeTok))
 	if trailing != nil {
-		return level(plus4, []Doc{text(open), brk(fillUnified, "", ZERO, nil), inner, text(closeTok), trailing})
+		innerParts = append(innerParts, trailing)
 	}
-	return concat(text(open), level(plus4, []Doc{brk(fillUnified, "", ZERO, nil), inner}), text(closeTok))
+	inner := level(ZERO, innerParts)
+	return concat(text(open), level(plus4, []Doc{brk(fillUnified, "", ZERO, nil), inner}))
 }
 
 // allShortItems reports whether every node's source text is under
@@ -1708,11 +1714,15 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 	}
 	argNodes := nodes(args)
 	anyComment := false
-	// Comment cursor before rendering: the lone dot-chain special case below
-	// re-renders its argument, so it may only fire when the argument consumed NO
-	// comment (a comment INSIDE the argument is not a leading/trailing one - it
-	// would not set anyComment - yet the re-render would drop it).
-	ciBeforeItems := p.ci
+	lastI := len(argNodes) - 1
+	// Render each argument with the token that FOLLOWS it routed into the
+	// argument's innermost delimited level: the inter-argument `,` for a non-last
+	// arg, or the closing `)` (plus any outer trailing token) for the last. gjf
+	// breaks a nested call/chain when the whole `(...)<close><sep>` run overflows,
+	// so that trailing token must count in the nested level's own fit check
+	// (rest-of-line rule); this also subsumes the lone dot-chain case. An argument
+	// carrying a same-line trailing comment cannot route - the comment must sit
+	// between the value and the separator - so it appends the token instead.
 	as := make([]Doc, len(argNodes))
 	for i, a := range argNodes {
 		var parts []Doc
@@ -1730,61 +1740,67 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 				parts = append(parts, text(pc), text(" "))
 			}
 		}
-		parts = append(parts, p.node(a))
-		// A trailing block comment on the same line attaches after the argument
-		// (`arg /* note */`).
-		parts, attached := p.attachTrailingBlockComment(parts, a.End)
-		anyComment = anyComment || attached
+		var follow Doc = text(",")
+		if i == lastI {
+			if trailing != nil {
+				follow = concat(text(")"), trailing)
+			} else {
+				follow = text(")")
+			}
+		}
+		hasTrailingComment := false
+		if p.ci < len(p.comments) {
+			t := p.comments[p.ci]
+			hasTrailingComment = !t.line && !t.ownLine && t.pos >= a.End &&
+				!strings.ContainsAny(p.text[a.End:t.pos], "\n,")
+		}
+		if hasTrailingComment {
+			parts = append(parts, p.node(a))
+			var attached bool
+			parts, attached = p.attachTrailingBlockComment(parts, a.End)
+			anyComment = anyComment || attached
+			parts = append(parts, follow)
+		} else {
+			parts = append(parts, p.statementTail(a, follow))
+		}
 		if len(parts) == 1 {
 			as[i] = parts[0]
 		} else {
 			as[i] = concat(parts...)
 		}
 	}
-	// A lone dot-chain argument (no comments): route the closing `)` into the
-	// chain so the chain's own break decision counts that `)` (rest-of-line).
-	// Otherwise the chain can sit at exactly the column limit while the trailing
-	// `)` overflows by one, where gjf would have broken the chain.
-	only := argNodes[0]
-	if len(argNodes) == 1 && p.ci == ciBeforeItems &&
-		(only.Kind == compiler.PropertyAccessExpression ||
-			(only.Kind == compiler.CallExpression &&
-				only.AsCallExpression().Expression.Kind == compiler.PropertyAccessExpression)) {
-		closeTok := text(")")
-		if trailing != nil {
-			closeTok = concat(text(")"), trailing)
-		}
-		return concat(
-			text("("),
-			level(plus4, []Doc{brk(fillUnified, "", ZERO, nil), p.dotChainTrailing(only, closeTok)}),
-		)
-	}
+	fill := p.fillMode(anyComment, argNodes)
 	// gjf's format-method layout (String.format / printf-style): when the first
 	// arg is a string-literal concatenation carrying a format specifier, it sits
 	// on its own line and the value args fill below it as a group - instead of
 	// every arg going one-per-line just because the long format string is not a
-	// "short item". Mirrors JavaInputAstVisitor.addArguments / isFormatMethod.
+	// "short item". Mirrors JavaInputAstVisitor.addArguments / isFormatMethod. The
+	// `,` after the format string and the closing `)` are already in the items.
 	if !anyComment && p.isFormatMethod(argNodes) {
-		restNodes := argNodes[1:]
-		restFill := p.fillMode(false, restNodes)
+		restFill := p.fillMode(false, argNodes[1:])
 		var restInner []Doc
 		for i, it := range as[1:] {
 			if i > 0 {
-				restInner = append(restInner, text(","), brk(restFill, " ", ZERO, nil))
+				restInner = append(restInner, brk(restFill, " ", ZERO, nil))
 			}
 			restInner = append(restInner, it)
 		}
-		inner := []Doc{
+		return concat(text("("), level(plus4, []Doc{
 			brk(fillUnified, "", ZERO, nil),
-			level(ZERO, []Doc{as[0], text(","), brk(fillUnified, " ", ZERO, nil), level(ZERO, restInner)}),
-			text(")"),
-		}
-		if trailing != nil {
-			inner = append(inner, trailing)
-		}
-		return concat(text("("), level(plus4, inner))
+			level(ZERO, []Doc{as[0], brk(fillUnified, " ", ZERO, nil), level(ZERO, restInner)}),
+		}))
 	}
-	return p.argsLikeTrailing("(", as, ")", p.fillMode(anyComment, argNodes), trailing)
+	// The inter-argument `,` and the closing `)` are routed into the items, so the
+	// inner level only joins them with fill breaks; its own fit check then counts
+	// the `)` and any outer trailing token (rest-of-line).
+	var innerParts []Doc
+	for i, it := range as {
+		if i > 0 {
+			innerParts = append(innerParts, brk(fill, " ", ZERO, nil))
+		}
+		innerParts = append(innerParts, it)
+	}
+	return concat(text("("), level(plus4, []Doc{brk(fillUnified, "", ZERO, nil), level(ZERO, innerParts)}))
 }
 
 // isFormatMethod is gjf's isFormatMethod: a call whose first argument is a

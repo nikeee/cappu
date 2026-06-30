@@ -859,18 +859,15 @@ class Printer {
       if (i > 0) innerParts.push(",", brk(fillMode, " ", ZERO));
       innerParts.push(it);
     });
+    // The close delimiter (and any token trailing it on the same line, e.g. a
+    // method signature's `;` or a routed-in separator) goes INSIDE the args level
+    // so the args' own one-per-line fit check counts it: gjf breaks a delimited
+    // list when the whole `(...)<close><trailing>` run overflows, not just the
+    // bare args.
+    innerParts.push(close);
+    if (trailing !== "") innerParts.push(trailing);
     const inner = level(ZERO, innerParts);
-    // gjf decides the fit of a delimited list including the token that trails it
-    // on the same line (a method signature's `;`) by placing that token inside
-    // the breaking level. When a `trailing` token is given, close + trailing go
-    // inside the level so its width is counted; otherwise the close stays a
-    // sibling (the common call/annotation case is unaffected).
-    if (trailing !== "") {
-      // Open delimiter also goes inside, so the level's width (and thus the fit
-      // check at the column before `(`) spans the whole `(...)<trailing>` run.
-      return level(PLUS4, [open, brk("unified", "", ZERO), inner, close, trailing]);
-    }
-    return concat([open, level(PLUS4, [brk("unified", "", ZERO), inner]), close]);
+    return concat([open, level(PLUS4, [brk("unified", "", ZERO), inner])]);
   }
 
   // gjf fills a delimited list (packs items per line) only when every item is
@@ -1478,7 +1475,7 @@ class Printer {
   // tail delimited level (a call/constructor argument list, including the last
   // call of a dereference chain) so the list wraps when the whole `(...);` run
   // overflows - gjf's rest-of-line rule. Other shapes just append it.
-  private statementTail(e: Expression, trailing: string): Doc {
+  private statementTail(e: Expression, trailing: Doc): Doc {
     if (e.kind === SyntaxKind.CallExpression) {
       const ce = e as CallExpression;
       // Mirror node()'s dispatch: a call on a `.`-access renders via dotChain.
@@ -1521,12 +1518,16 @@ class Printer {
   private argList(args: NodeArray<Expression>, trailing: Doc = ""): Doc {
     if (args.length === 0) return concat(["()", trailing]);
     let anyComment = false;
-    // Comment cursor before rendering: the lone dot-chain special case below
-    // re-renders its argument, so it may only fire when the argument consumed NO
-    // comment (a comment INSIDE the argument is not a leading/trailing one - it
-    // would not set anyComment - yet the re-render would drop it).
-    const ciBeforeItems = this.ci;
-    const items = args.map(a => {
+    const lastI = args.length - 1;
+    // Render each argument with the token that FOLLOWS it routed into the
+    // argument's innermost delimited level: the inter-argument `,` for a non-last
+    // arg, or the closing `)` (plus any outer trailing token) for the last. gjf
+    // breaks a nested call/chain when the whole `(...)<close><sep>` run overflows,
+    // so that trailing token must count in the nested level's own fit check
+    // (rest-of-line rule); this also subsumes the lone dot-chain case. An argument
+    // carrying a same-line trailing comment cannot route - the comment must sit
+    // between the value and the separator - so it appends the token instead.
+    const items = args.map((a, i) => {
       const parts: Doc[] = [];
       // Leading comments on the argument: a block comment renders inline before
       // it (`/* a= */ 1`); a line comment forces a break after itself.
@@ -1535,53 +1536,55 @@ class Printer {
         if (c.line) parts.push(c.text, hardline);
         else parts.push(reformatParamComment(c.text) ?? c.text, " ");
       }
-      parts.push(this.node(a));
-      // A trailing block comment on the same line attaches after the argument
-      // (`arg /* note */`).
-      if (this.attachTrailingBlockComment(parts, a.end)) anyComment = true;
+      const follow: Doc = i < lastI ? "," : concat([")", trailing]);
+      const t = this.comments[this.ci];
+      const hasTrailingComment =
+        t !== undefined &&
+        !t.line &&
+        !t.ownLine &&
+        t.pos >= a.end &&
+        !/[\n,]/.test(this.text.slice(a.end, t.pos));
+      if (hasTrailingComment) {
+        parts.push(this.node(a));
+        this.attachTrailingBlockComment(parts, a.end);
+        anyComment = true;
+        parts.push(follow);
+      } else {
+        parts.push(this.statementTail(a, follow));
+      }
       return parts.length === 1 ? parts[0] : concat(parts);
     });
-    // A lone dot-chain argument (no comments): route the closing `)` into the
-    // chain so the chain's own break decision counts that `)` (rest-of-line).
-    // Otherwise the chain can sit at exactly the column limit while the trailing
-    // `)` overflows by one, where gjf would have broken the chain.
-    const only = args[0];
-    if (
-      args.length === 1 &&
-      this.ci === ciBeforeItems &&
-      (only.kind === SyntaxKind.PropertyAccessExpression ||
-        (only.kind === SyntaxKind.CallExpression &&
-          (only as CallExpression).expression.kind === SyntaxKind.PropertyAccessExpression))
-    ) {
-      return concat([
-        "(",
-        level(PLUS4, [brk("unified", "", ZERO), this.dotChain(only, concat([")", trailing]))]),
-      ]);
-    }
+    const fill = this.fillMode(anyComment, args);
     // gjf's format-method layout (String.format / printf-style): when the first
     // arg is a string-literal concatenation carrying a format specifier, it sits
     // on its own line and the value args fill below it as a group - instead of
     // every arg going one-per-line just because the long format string is not a
-    // "short item". Mirrors JavaInputAstVisitor.addArguments / isFormatMethod.
+    // "short item". Mirrors JavaInputAstVisitor.addArguments / isFormatMethod. The
+    // `,` after the format string and the closing `)` are already in the items.
     if (!anyComment && this.isFormatMethod(args)) {
-      const restNodes = args.slice(1);
-      const restFill = this.fillMode(false, restNodes);
+      const restFill = this.fillMode(false, args.slice(1));
       const restInner: Doc[] = [];
       items.slice(1).forEach((it, i) => {
-        if (i > 0) restInner.push(",", brk(restFill, " ", ZERO));
+        if (i > 0) restInner.push(brk(restFill, " ", ZERO));
         restInner.push(it);
       });
       return concat([
         "(",
         level(PLUS4, [
           brk("unified", "", ZERO),
-          level(ZERO, [items[0], ",", brk("unified", " ", ZERO), level(ZERO, restInner)]),
-          ")",
-          trailing,
+          level(ZERO, [items[0], brk("unified", " ", ZERO), level(ZERO, restInner)]),
         ]),
       ]);
     }
-    return this.argsLike("(", items, ")", this.fillMode(anyComment, args), trailing);
+    // The inter-argument `,` and the closing `)` are routed into the items, so the
+    // inner level only joins them with fill breaks; its own fit check then counts
+    // the `)` and any outer trailing token (rest-of-line).
+    const innerParts: Doc[] = [];
+    items.forEach((it, i) => {
+      if (i > 0) innerParts.push(brk(fill, " ", ZERO));
+      innerParts.push(it);
+    });
+    return concat(["(", level(PLUS4, [brk("unified", "", ZERO), level(ZERO, innerParts)])]);
   }
 
   // gjf's isFormatMethod: a call whose first argument is a string-literal
