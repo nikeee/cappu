@@ -16,7 +16,7 @@ import (
 )
 
 // Current number of core sources formatted byte-identically. Ratchet UP only.
-const corpusRatchet = 59
+const corpusRatchet = 60
 
 func TestCorpusFixpoint(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "test-fixtures", "format", "corpus", "gjf", "core")
