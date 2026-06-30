@@ -1,0 +1,16 @@
+package p;
+
+class C {
+  TyParseState classify(TyParseState state) {
+    return switch (state) {
+      case UPPERCASE ->
+          // if we see an UpperCamel later, assume this was a class
+          // e.g. com.google.FOO.Bar
+          TyParseState.AMBIGUOUS;
+      case LOWERCASE ->
+          // could be a package
+          TyParseState.START;
+      default -> state;
+    };
+  }
+}

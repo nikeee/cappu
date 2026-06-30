@@ -1417,6 +1417,22 @@ func (p *printer) switchClause(c *compiler.SwitchClauseData, end int) Doc {
 		if len(stmts) == 1 && stmts[0].Kind == compiler.Block {
 			return concat(label, guard, text(" -> "), p.block(stmts[0].AsBlock(), stmts[0].End))
 		}
+		// A comment before the body sits own-line on the +4 continuation and
+		// forces the break, so `case X ->` keeps only the label (gjf), like the
+		// lambda-body case below.
+		bodyStart := p.start(stmts[0])
+		if p.hasCommentBefore(bodyStart) {
+			var parts []Doc
+			for _, c := range p.commentsBefore(bodyStart) {
+				parts = append(parts, reflow(c.text), hardline)
+			}
+			ss := make([]Doc, len(stmts))
+			for i, st := range stmts {
+				ss[i] = p.node(st)
+			}
+			parts = append(parts, join(text(" "), ss))
+			return concat(label, guard, text(" ->"), level(plus4, []Doc{hardline, concat(parts...)}))
+		}
 		ss := make([]Doc, len(stmts))
 		for i, st := range stmts {
 			ss[i] = p.node(st)

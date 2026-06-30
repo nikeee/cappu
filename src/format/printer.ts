@@ -1284,6 +1284,16 @@ class Printer {
       }
       // A non-block arrow body (an expression, throw, or yield statement) folds
       // onto a +4 continuation line after the `->` when it does not fit (gjf).
+      const bodyStart = this.start(stmts[0]);
+      // A comment before the body sits own-line on that +4 continuation and
+      // forces the break, so `case X ->` keeps only the label (gjf), like the
+      // lambda-body case below.
+      if (this.hasCommentBefore(bodyStart)) {
+        const parts: Doc[] = [];
+        for (const c of this.commentsBefore(bodyStart)) parts.push(reflow(c.text), hardline);
+        parts.push(join(" ", stmts.map(s => this.node(s))));
+        return concat([label, guard, " ->", level(PLUS4, [hardline, concat(parts)])]);
+      }
       const body = join(
         " ",
         stmts.map(s => this.node(s)),
