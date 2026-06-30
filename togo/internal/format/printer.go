@@ -1177,7 +1177,7 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 	if body == nil || emptyBody {
 		return concat(head...)
 	}
-	return concat(append(head, p.blockRest(body.AsBlock(), body.End))...)
+	return concat(append(head, p.blockRest(body.AsBlock(), body.End, false))...)
 }
 
 func (p *printer) initializerBlock(d *compiler.InitializerBlockData) Doc {
@@ -1202,18 +1202,24 @@ func (p *printer) blockIsEmpty(b *compiler.BlockData, startPos, endPos int) bool
 }
 
 func (p *printer) block(b *compiler.BlockData, endPos int) Doc {
+	return p.blockTB(b, endPos, false)
+}
+
+// blockTB is block with allowTrailingBlank: gjf preserves a source blank line
+// before the closing `}` only when a clause follows (`} else`/`catch`/`finally`).
+func (p *printer) blockTB(b *compiler.BlockData, endPos int, allowTrailingBlank bool) Doc {
 	// Here the comment cursor is already positioned past anything preceding the
 	// block, so a pending comment before endPos is genuinely inside it.
 	if b.Statements.Len() == 0 && !p.hasCommentBefore(endPos) {
 		return text("{}")
 	}
-	return concat(text("{"), p.blockRest(b, endPos))
+	return concat(text("{"), p.blockRest(b, endPos, allowTrailingBlank))
 }
 
 // blockRest is a block's body after the opening `{` (the `{` is emitted by the
 // caller, so it can be placed inside another level to count toward a wrap
 // decision).
-func (p *printer) blockRest(b *compiler.BlockData, endPos int) Doc {
+func (p *printer) blockRest(b *compiler.BlockData, endPos int, allowTrailingBlank bool) Doc {
 	// A comment on the same source line as the opening `{` stays on that line
 	// (gjf): `if (...) { // note`. Emit it before the indented body so it rides
 	// the brace line, and consume it here so listDocs does not re-emit it own-line.
@@ -1223,10 +1229,15 @@ func (p *printer) blockRest(b *compiler.BlockData, endPos int) Doc {
 		braceComment = p.braceTrailingComment(b.Statements.Nodes[0].Pos)
 		lead = p.braceLead(b.Statements.Nodes[0].Pos, p.start(b.Statements.Nodes[0]))
 	}
+	closeLead := hardline
+	if allowTrailingBlank && b.Statements.Len() > 0 &&
+		p.blankBeforePos(b.Statements.Nodes[b.Statements.Len()-1].End, endPos-1) {
+		closeLead = concat(hardline, hardline)
+	}
 	return concat(
 		braceComment,
 		indent(concat(append([]Doc{lead}, p.listDocs(nodes(b.Statements), false, endPos)...)...)),
-		hardline,
+		closeLead,
 		text("}"),
 	)
 }
@@ -1272,7 +1283,9 @@ func (p *printer) localVar(d *compiler.LocalVariableDeclarationStatementData) Do
 func (p *printer) ifStatement(s *compiler.IfStatementData) Doc {
 	parts := []Doc{
 		group(concat(text("if ("), p.node(s.Condition), text(")"))),
-		p.clauseBody(s.ThenStatement),
+		// gjf preserves a source blank line before the then-block's `}` when an
+		// `else` follows.
+		p.clauseBodyTB(s.ThenStatement, s.ElseStatement != nil),
 	}
 	if s.ElseStatement != nil {
 		elseOnSameLine := s.ThenStatement.Kind == compiler.Block
@@ -1294,8 +1307,12 @@ func (p *printer) ifStatement(s *compiler.IfStatementData) Doc {
 // separator. A block follows after a space; a single statement stays on the
 // same line when it fits and otherwise breaks onto an indented line.
 func (p *printer) clauseBody(s *compiler.Node) Doc {
+	return p.clauseBodyTB(s, false)
+}
+
+func (p *printer) clauseBodyTB(s *compiler.Node, allowTrailingBlank bool) Doc {
 	if s.Kind == compiler.Block {
-		return concat(text(" "), p.block(s.AsBlock(), s.End))
+		return concat(text(" "), p.blockTB(s.AsBlock(), s.End, allowTrailingBlank))
 	}
 	return group(indent(concat(line, p.node(s))))
 }
@@ -1390,14 +1407,18 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 			parts = append(parts, text(" ("), level(plus4, inner), text(closeTok))
 		}
 	}
-	parts = append(parts, text(" "), p.block(s.TryBlock.AsBlock(), s.TryBlock.End))
-	for _, cn := range nodes(s.CatchClauses) {
+	// gjf preserves a source blank line before a block's `}` when another clause
+	// (catch/finally) follows.
+	hasFinally := s.FinallyBlock != nil
+	catches := nodes(s.CatchClauses)
+	parts = append(parts, text(" "), p.blockTB(s.TryBlock.AsBlock(), s.TryBlock.End, len(catches) > 0 || hasFinally))
+	for i, cn := range catches {
 		c := cn.AsCatchClause()
 		ts := make([]Doc, c.CatchTypes.Len())
-		for i, t := range nodes(c.CatchTypes) {
-			ts[i] = p.typ(t)
+		for j, t := range nodes(c.CatchTypes) {
+			ts[j] = p.typ(t)
 		}
-		parts = append(parts, text(" catch ("), join(text(" | "), ts), text(" "), text(p.raw(c.Name)), text(") "), p.block(c.Block.AsBlock(), c.Block.End))
+		parts = append(parts, text(" catch ("), join(text(" | "), ts), text(" "), text(p.raw(c.Name)), text(") "), p.blockTB(c.Block.AsBlock(), c.Block.End, i < len(catches)-1 || hasFinally))
 	}
 	if s.FinallyBlock != nil {
 		parts = append(parts, text(" finally "), p.block(s.FinallyBlock.AsBlock(), s.FinallyBlock.End))

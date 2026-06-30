@@ -1087,14 +1087,16 @@ class Printer {
     return !(this.hasCommentBefore(b.end) && this.comments[this.ci].pos > this.start(b));
   }
 
-  private block(b: Block): Doc {
+  private block(b: Block, allowTrailingBlank = false): Doc {
     if (this.blockIsEmpty(b)) return "{}";
-    return concat(["{", this.blockRest(b)]);
+    return concat(["{", this.blockRest(b, allowTrailingBlank)]);
   }
 
   /** A block's body after the opening `{` (the `{` is emitted by the caller, so
-   * it can be placed inside another level to count toward a wrap decision). */
-  private blockRest(b: Block): Doc {
+   * it can be placed inside another level to count toward a wrap decision).
+   * `allowTrailingBlank` preserves a source blank line before the closing `}`,
+   * which gjf does only when a clause follows (`} else`, `} catch`, `} finally`). */
+  private blockRest(b: Block, allowTrailingBlank = false): Doc {
     // A comment on the same source line as the opening `{` stays on that line
     // (gjf): `if (...) { // note`. It must be emitted before the indented body so
     // it rides the brace line, and consumed here so listDocs does not re-emit it
@@ -1105,10 +1107,16 @@ class Printer {
       b.statements.length > 0
         ? this.braceLead(b.statements[0].pos, this.start(b.statements[0]))
         : hardline;
+    const closeLead =
+      allowTrailingBlank &&
+      b.statements.length > 0 &&
+      this.blankBeforePos(b.statements[b.statements.length - 1].end, b.end - 1)
+        ? concat([hardline, hardline])
+        : hardline;
     return concat([
       braceComment,
       indent(concat([lead, ...this.statementList(b.statements, b.end)])),
-      hardline,
+      closeLead,
       "}",
     ]);
   }
@@ -1147,7 +1155,9 @@ class Printer {
   private ifStatement(s: IfStatement): Doc {
     const parts: Doc[] = [
       group(concat(["if (", this.node(s.condition), ")"])),
-      this.clauseBody(s.thenStatement),
+      // gjf preserves a source blank line before the then-block's `}` when an
+      // `else` follows.
+      this.clauseBody(s.thenStatement, s.elseStatement !== undefined),
     ];
     if (s.elseStatement) {
       const elseOnSameLine = s.thenStatement.kind === SyntaxKind.Block;
@@ -1166,8 +1176,10 @@ class Printer {
    * block follows after a space; a single statement stays on the same line when
    * it fits (`if (c) break;`) and otherwise breaks onto an indented line.
    */
-  private clauseBody(s: Statement): Doc {
-    if (s.kind === SyntaxKind.Block) return concat([" ", this.block(s as Block)]);
+  private clauseBody(s: Statement, allowTrailingBlank = false): Doc {
+    if (s.kind === SyntaxKind.Block) {
+      return concat([" ", this.block(s as Block, allowTrailingBlank)]);
+    }
     return group(indent(concat([line, this.node(s)])));
   }
 
@@ -1260,8 +1272,11 @@ class Printer {
         parts.push(" (", level(PLUS4, inner), close);
       }
     }
-    parts.push(" ", this.block(s.tryBlock));
-    for (const c of s.catchClauses) {
+    // gjf preserves a source blank line before a block's `}` when another clause
+    // (catch/finally) follows.
+    const hasFinally = s.finallyBlock !== undefined;
+    parts.push(" ", this.block(s.tryBlock, s.catchClauses.length > 0 || hasFinally));
+    s.catchClauses.forEach((c, i) => {
       parts.push(
         " catch (",
         join(
@@ -1271,9 +1286,9 @@ class Printer {
         " ",
         this.raw(c.name),
         ") ",
-        this.block(c.block),
+        this.block(c.block, i < s.catchClauses.length - 1 || hasFinally),
       );
-    }
+    });
     if (s.finallyBlock) parts.push(" finally ", this.block(s.finallyBlock));
     return concat(parts);
   }
