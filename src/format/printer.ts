@@ -1521,6 +1521,11 @@ class Printer {
   private argList(args: NodeArray<Expression>, trailing: Doc = ""): Doc {
     if (args.length === 0) return concat(["()", trailing]);
     let anyComment = false;
+    // Comment cursor before rendering: the lone dot-chain special case below
+    // re-renders its argument, so it may only fire when the argument consumed NO
+    // comment (a comment INSIDE the argument is not a leading/trailing one - it
+    // would not set anyComment - yet the re-render would drop it).
+    const ciBeforeItems = this.ci;
     const items = args.map(a => {
       const parts: Doc[] = [];
       // Leading comments on the argument: a block comment renders inline before
@@ -1543,7 +1548,7 @@ class Printer {
     const only = args[0];
     if (
       args.length === 1 &&
-      !anyComment &&
+      this.ci === ciBeforeItems &&
       (only.kind === SyntaxKind.PropertyAccessExpression ||
         (only.kind === SyntaxKind.CallExpression &&
           (only as CallExpression).expression.kind === SyntaxKind.PropertyAccessExpression))

@@ -1,0 +1,12 @@
+package p;
+
+class C {
+    void m() {
+        add(
+                Doc.Token.make(
+                        token,
+                        RealOrImaginary.IMAGINARY,
+                        ZERO,
+                        /* breakAndIndentTrailingComment= */ Optional.empty()));
+    }
+}

@@ -1707,6 +1707,11 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 	}
 	argNodes := nodes(args)
 	anyComment := false
+	// Comment cursor before rendering: the lone dot-chain special case below
+	// re-renders its argument, so it may only fire when the argument consumed NO
+	// comment (a comment INSIDE the argument is not a leading/trailing one - it
+	// would not set anyComment - yet the re-render would drop it).
+	ciBeforeItems := p.ci
 	as := make([]Doc, len(argNodes))
 	for i, a := range argNodes {
 		var parts []Doc
@@ -1740,7 +1745,7 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 	// Otherwise the chain can sit at exactly the column limit while the trailing
 	// `)` overflows by one, where gjf would have broken the chain.
 	only := argNodes[0]
-	if len(argNodes) == 1 && !anyComment &&
+	if len(argNodes) == 1 && p.ci == ciBeforeItems &&
 		(only.Kind == compiler.PropertyAccessExpression ||
 			(only.Kind == compiler.CallExpression &&
 				only.AsCallExpression().Expression.Kind == compiler.PropertyAccessExpression)) {
