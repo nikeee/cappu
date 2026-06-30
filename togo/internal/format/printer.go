@@ -582,10 +582,25 @@ func (p *printer) annotation(a *compiler.AnnotationData) Doc {
 			args[i] = value
 		}
 	}
+	// gjf forces an annotation's element-value pairs one-per-line when there is
+	// more than one and any pair is array-valued (`name = {..}`), even if they
+	// would fit; otherwise they fill (one per line only on overflow).
+	hasArrayValue := false
+	if a.Args.Len() > 1 {
+		for _, arg := range nodes(a.Args) {
+			if arg.AsAnnotationArgument().Value.Kind == compiler.ArrayInitializer {
+				hasArrayValue = true
+				break
+			}
+		}
+	}
 	// Annotation arguments wrap like a call's: break after `(` at +4 and lay one
 	// element-value pair per line (fill only when every arg is short).
 	fill := fillUnified
-	if p.allShortItems(nodes(a.Args)) {
+	switch {
+	case hasArrayValue:
+		fill = fillForced
+	case p.allShortItems(nodes(a.Args)):
 		fill = fillIndependent
 	}
 	return concat(text(name), p.argsLike("(", args, ")", fill))

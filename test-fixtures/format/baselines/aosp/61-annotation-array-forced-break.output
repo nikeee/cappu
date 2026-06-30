@@ -1,0 +1,12 @@
+package p;
+
+@State(
+        name = "GoogleJavaFormatSettings",
+        storages = {@Storage("google-java-format.xml")})
+class C {}
+
+@Other(name = "X", value = "y")
+class D {}
+
+@Single(storages = {@Storage("z.xml")})
+class E {}

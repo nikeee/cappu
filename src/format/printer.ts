@@ -565,12 +565,20 @@ class Printer {
       const value = this.node((arg as { value: Node }).value);
       return argName ? concat([this.raw(argName), " = ", value]) : value;
     });
+    // gjf forces an annotation's element-value pairs one-per-line when there is
+    // more than one and any pair is array-valued (`name = {..}`), even if they
+    // would fit; otherwise they fill (one per line only on overflow).
+    const hasArrayValue =
+      a.args.length > 1 &&
+      a.args.some(arg => (arg as { value?: Node }).value?.kind === SyntaxKind.ArrayInitializer);
+    const fillMode: FillMode = hasArrayValue
+      ? "forced"
+      : this.allShortItems([...a.args])
+        ? "independent"
+        : "unified";
     // Annotation arguments wrap like a call's: break after `(` at +4 and lay
     // one element-value pair per line (fill only when every arg is short).
-    return concat([
-      name,
-      this.argsLike("(", args, ")", this.allShortItems([...a.args]) ? "independent" : "unified"),
-    ]);
+    return concat([name, this.argsLike("(", args, ")", fillMode)]);
   }
 
   /** A run of annotations, each followed by a space (inline, e.g. on a component). */
