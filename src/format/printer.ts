@@ -121,6 +121,12 @@ const TYPE_ANNOTATION_FQNS = new Set([
   "org.jspecify.annotations.Nullable",
   "org.checkerframework.checker.nullness.qual.NonNull",
   "org.checkerframework.checker.nullness.qual.Nullable",
+  // gjf relies on javac attaching a TYPE_USE annotation to the type it precedes;
+  // we have no symbol resolution, so we list the jetbrains nullness annotations
+  // (declared @Target(TYPE_USE)) to keep them inline before the type as javac/gjf
+  // would. They are not in gjf's own list (it does not need them).
+  "org.jetbrains.annotations.NotNull",
+  "org.jetbrains.annotations.Nullable",
 ]);
 
 export interface FormatOptions {

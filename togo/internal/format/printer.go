@@ -51,6 +51,12 @@ var typeAnnotationFQNs = map[string]bool{
 	"org.jspecify.annotations.Nullable":                   true,
 	"org.checkerframework.checker.nullness.qual.NonNull":  true,
 	"org.checkerframework.checker.nullness.qual.Nullable": true,
+	// gjf relies on javac attaching a TYPE_USE annotation to the type it
+	// precedes; we have no symbol resolution, so we list the jetbrains nullness
+	// annotations (declared @Target(TYPE_USE)) to keep them inline before the type
+	// as javac/gjf would. They are not in gjf's own list (it does not need them).
+	"org.jetbrains.annotations.NotNull":  true,
+	"org.jetbrains.annotations.Nullable": true,
 }
 
 // ErrUnsupportedSyntax is returned when the formatter cannot format the input

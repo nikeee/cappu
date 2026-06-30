@@ -1,0 +1,10 @@
+package p;
+
+import org.jetbrains.annotations.NotNull;
+
+class C {
+    @Override
+    public @NotNull Runnable processFile(@NotNull PsiFile file) {
+        return null;
+    }
+}
