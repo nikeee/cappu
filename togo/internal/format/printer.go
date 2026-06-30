@@ -1034,6 +1034,26 @@ func (p *printer) parameters(params *compiler.NodeArray, trailing Doc) Doc {
 	return p.argsLikeTrailing("(", items, ")", fillUnified, trailing)
 }
 
+// paramListChildren returns `(`, break-before-args, the param list and `)` as
+// flat children, for the throws case where they must share the signature level
+// with the throws break (gjf's open(ZERO) around visitFormals + visitThrowsClause).
+// The break before the args is INDEPENDENT so the params stay inline when they
+// fit and break to the +4 line only when they overflow.
+func (p *printer) paramListChildren(params *compiler.NodeArray) []Doc {
+	if params.Len() == 0 {
+		return []Doc{text("()")}
+	}
+	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameter(n.AsParameter()) })
+	innerParts := make([]Doc, 0, len(items)*2)
+	for i, it := range items {
+		if i > 0 {
+			innerParts = append(innerParts, text(","), brk(fillUnified, " ", ZERO, nil))
+		}
+		innerParts = append(innerParts, it)
+	}
+	return []Doc{text("("), brk(fillIndependent, "", ZERO, nil), level(ZERO, innerParts), text(")")}
+}
+
 func (p *printer) parameter(pp *compiler.ParameterData) Doc {
 	parts := []Doc{p.modifiers(pp.Modifiers, "inline"), p.typ(pp.Type)}
 	if pp.IsVarArgs {
@@ -1056,13 +1076,8 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 		head = append(head, p.typ(returnType), text(" "))
 	}
 	hasThrows := throws.Len() > 0
-	// gjf breaks a `throws` clause onto its own +4 line BEFORE it explodes the
-	// parameters: an outer group holds the `throws` break (so it fires when the
-	// whole `(...) throws X {` overflows), while the parameter list is a
-	// self-contained nested level that explodes only if the params alone do not
-	// fit. So `format(a, b, c)` keeps its params inline with `throws` wrapped, but
-	// a longer list goes one-per-line with `throws` wrapped too. With no throws
-	// clause the body-open token rides inside the param level (rest-of-line rule).
+	// With no throws clause the body-open token rides inside the param level
+	// (rest-of-line rule). With throws, see the hasThrows branch below.
 	emptyBody := body != nil && p.blockIsEmpty(body.AsBlock(), p.start(body), body.End)
 	bodyToken := " {"
 	switch {
@@ -1080,18 +1095,27 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 			}
 			throwsParts = append(throwsParts, p.typ(t))
 		}
-		// Continuation throws types indent +8 (the `throws` line is already +4 from
-		// the outer break, and gjf indents the type list +4 beyond the keyword).
+		// Throws-type continuation indents +4 beyond the `throws` line, which is
+		// itself on sig's +4 continuation -> +8 from the method (col 10).
 		throwsIndent := ZERO
 		if throws.Len() > 1 {
-			throwsIndent = indentConst(8)
+			throwsIndent = indentConst(4)
 		}
-		sig = level(ZERO, []Doc{
-			p.parameters(params, nil),
-			brk(fillUnified, " ", plus4, nil),
+		// Mirror gjf's visitMethodDeclaration: `(`, a break-before-args, the param
+		// list, `)`, the `throws` break, the throws clause, and the body token are
+		// all direct children of ONE +4 level (the indent rides the level, breaks
+		// sit at ZERO so they land at +4). Both breaks are INDEPENDENT (gjf's
+		// breakToFill): params break to their own line only when they overflow, and
+		// `) throws X {` GLUES whenever it fits after the params' rendered end
+		// column. When the params explode one-per-line, the param split's flat
+		// width overflows the +4 line, propagating mustBreak so the throws clause
+		// also breaks - matching gjf with no engine change.
+		sig = level(plus4, append(
+			p.paramListChildren(params),
+			brk(fillIndependent, " ", ZERO, nil),
 			level(throwsIndent, throwsParts),
 			text(bodyToken),
-		})
+		))
 	} else {
 		sig = p.parameters(params, text(bodyToken))
 	}
@@ -1668,7 +1692,75 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 			level(plus4, []Doc{brk(fillUnified, "", ZERO, nil), p.dotChainTrailing(only, closeTok)}),
 		)
 	}
+	// gjf's format-method layout (String.format / printf-style): when the first
+	// arg is a string-literal concatenation carrying a format specifier, it sits
+	// on its own line and the value args fill below it as a group - instead of
+	// every arg going one-per-line just because the long format string is not a
+	// "short item". Mirrors JavaInputAstVisitor.addArguments / isFormatMethod.
+	if !anyComment && p.isFormatMethod(argNodes) {
+		restNodes := argNodes[1:]
+		restFill := p.fillMode(false, restNodes)
+		var restInner []Doc
+		for i, it := range as[1:] {
+			if i > 0 {
+				restInner = append(restInner, text(","), brk(restFill, " ", ZERO, nil))
+			}
+			restInner = append(restInner, it)
+		}
+		inner := []Doc{
+			brk(fillUnified, "", ZERO, nil),
+			level(ZERO, []Doc{as[0], text(","), brk(fillUnified, " ", ZERO, nil), level(ZERO, restInner)}),
+			text(")"),
+		}
+		if trailing != nil {
+			inner = append(inner, trailing)
+		}
+		return concat(text("("), level(plus4, inner))
+	}
 	return p.argsLikeTrailing("(", as, ")", p.fillMode(anyComment, argNodes), trailing)
+}
+
+// isFormatMethod is gjf's isFormatMethod: a call whose first argument is a
+// string-literal concatenation containing a format specifier, with >= 2 args.
+func (p *printer) isFormatMethod(args []*compiler.Node) bool {
+	return len(args) >= 2 && p.isFormatStringConcat(args[0])
+}
+
+// isFormatStringConcat reports whether node is built only from string literals
+// joined by `+` and at least one literal carries a format specifier - gjf's
+// isStringConcat.
+func (p *printer) isFormatStringConcat(node *compiler.Node) bool {
+	hasSpecifier := false
+	var walk func(n *compiler.Node) bool
+	walk = func(n *compiler.Node) bool {
+		switch n.Kind {
+		case compiler.StringLiteral, compiler.TextBlockLiteral:
+			if hasFormatSpecifier(p.raw(n)) {
+				hasSpecifier = true
+			}
+			return true
+		case compiler.BinaryExpression:
+			b := n.AsBinaryExpression()
+			if b.OperatorToken == compiler.PlusToken {
+				return walk(b.Left) && walk(b.Right)
+			}
+		}
+		return false
+	}
+	return walk(node) && hasSpecifier
+}
+
+// hasFormatSpecifier matches gjf's FORMAT_SPECIFIER pattern `%|\{[0-9]\}`.
+func hasFormatSpecifier(s string) bool {
+	if strings.Contains(s, "%") {
+		return true
+	}
+	for i := 0; i+2 < len(s); i++ {
+		if s[i] == '{' && s[i+1] >= '0' && s[i+1] <= '9' && s[i+2] == '}' {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *printer) objectCreation(e *compiler.ObjectCreationExpressionData, end int) Doc {

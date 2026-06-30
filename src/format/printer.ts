@@ -949,6 +949,22 @@ class Printer {
     return this.argsLike("(", items, ")", "unified", trailing);
   }
 
+  // The `(`, break-before-args, param list and `)` as flat children, for the
+  // throws case where they must share the signature level with the throws break
+  // (gjf's open(ZERO) around visitFormals + visitThrowsClause). The break before
+  // the args is INDEPENDENT so the params stay inline when they fit and break to
+  // the +4 line only when they overflow.
+  private paramListChildren(params: NodeArray<Parameter>): Doc[] {
+    if (params.length === 0) return ["()"];
+    const { items } = this.listItems(params, p => this.parameter(p as Parameter));
+    const innerParts: Doc[] = [];
+    items.forEach((it, i) => {
+      if (i > 0) innerParts.push(",", brk("unified", " ", ZERO));
+      innerParts.push(it);
+    });
+    return ["(", brk("independent", "", ZERO), level(ZERO, innerParts), ")"];
+  }
+
   private parameter(p: Parameter): Doc {
     const parts: Doc[] = [this.modifiers(p.modifiers), this.type(p.type)];
     if (p.isVarArgs) parts.push("...");
@@ -979,23 +995,26 @@ class Printer {
     const bodyToken = !decl.body ? ";" : emptyBody ? " {}" : " {";
     let sig: Doc;
     if (hasThrows) {
-      // gjf breaks a `throws` clause onto its own +4 line BEFORE it explodes the
-      // parameters: an outer group holds the `throws` break (so it fires when the
-      // whole `(...) throws X {` overflows), while the parameter list is a
-      // self-contained nested level that explodes only if the params alone do not
-      // fit. So `format(a, b, c)` keeps its params inline with `throws` wrapped,
-      // but a longer list goes one-per-line with `throws` wrapped too.
       const throwsParts: Doc[] = ["throws "];
       decl.throws!.forEach((t, i) => {
         if (i > 0) throwsParts.push(",", brk("unified", " ", ZERO));
         throwsParts.push(this.type(t));
       });
-      // Continuation throws types indent +8 (the `throws` line is already +4 from
-      // the outer break, and gjf indents the type list +4 beyond the keyword).
-      const throwsClause = level(decl.throws!.length > 1 ? indentConst(8) : ZERO, throwsParts);
-      sig = level(ZERO, [
-        this.parameters(decl.parameters),
-        brk("unified", " ", PLUS4),
+      // Throws-type continuation indents +4 beyond the `throws` line, which is
+      // itself on sig's +4 continuation -> +8 from the method (col 10).
+      const throwsClause = level(decl.throws!.length > 1 ? indentConst(4) : ZERO, throwsParts);
+      // Mirror gjf's visitMethodDeclaration: `(`, a break-before-args, the param
+      // list, `)`, the `throws` break, the throws clause, and the body token are
+      // all direct children of ONE +4 level (the indent rides the level, breaks
+      // sit at ZERO so they land at +4). Both breaks are INDEPENDENT (gjf's
+      // breakToFill): params break to their own line only when they overflow, and
+      // `) throws X {` GLUES whenever it fits after the params' rendered end
+      // column. When the params explode one-per-line, the param split's flat
+      // width overflows the +4 line, propagating mustBreak so the throws clause
+      // also breaks - matching gjf with no engine change.
+      sig = level(PLUS4, [
+        ...this.paramListChildren(decl.parameters),
+        brk("independent", " ", ZERO),
         throwsClause,
         bodyToken,
       ]);
@@ -1494,7 +1513,57 @@ class Printer {
         level(PLUS4, [brk("unified", "", ZERO), this.dotChain(only, concat([")", trailing]))]),
       ]);
     }
+    // gjf's format-method layout (String.format / printf-style): when the first
+    // arg is a string-literal concatenation carrying a format specifier, it sits
+    // on its own line and the value args fill below it as a group - instead of
+    // every arg going one-per-line just because the long format string is not a
+    // "short item". Mirrors JavaInputAstVisitor.addArguments / isFormatMethod.
+    if (!anyComment && this.isFormatMethod(args)) {
+      const restNodes = args.slice(1);
+      const restFill = this.fillMode(false, restNodes);
+      const restInner: Doc[] = [];
+      items.slice(1).forEach((it, i) => {
+        if (i > 0) restInner.push(",", brk(restFill, " ", ZERO));
+        restInner.push(it);
+      });
+      return concat([
+        "(",
+        level(PLUS4, [
+          brk("unified", "", ZERO),
+          level(ZERO, [items[0], ",", brk("unified", " ", ZERO), level(ZERO, restInner)]),
+          ")",
+          trailing,
+        ]),
+      ]);
+    }
     return this.argsLike("(", items, ")", this.fillMode(anyComment, args), trailing);
+  }
+
+  // gjf's isFormatMethod: a call whose first argument is a string-literal
+  // concatenation containing a format specifier (`%` or `{n}`), with >= 2 args.
+  private isFormatMethod(args: NodeArray<Expression>): boolean {
+    return args.length >= 2 && this.isFormatStringConcat(args[0]);
+  }
+
+  // True when `node` is built only from string literals joined by `+` and at
+  // least one literal carries a format specifier - gjf's isStringConcat.
+  private isFormatStringConcat(node: Expression): boolean {
+    let hasSpecifier = false;
+    const walk = (n: Node): boolean => {
+      if (n.kind === SyntaxKind.StringLiteral || n.kind === SyntaxKind.TextBlockLiteral) {
+        if (/%|\{[0-9]\}/.test(this.raw(n))) hasSpecifier = true;
+        return true;
+      }
+      if (
+        n.kind === SyntaxKind.BinaryExpression &&
+        (n as BinaryExpression).operatorToken === SyntaxKind.PlusToken
+      ) {
+        const b = n as BinaryExpression;
+        return walk(b.left) && walk(b.right);
+      }
+      return false;
+    };
+    return walk(node) && hasSpecifier;
   }
 
   private objectCreation(e: ObjectCreationExpression, trailing: Doc = ""): Doc {

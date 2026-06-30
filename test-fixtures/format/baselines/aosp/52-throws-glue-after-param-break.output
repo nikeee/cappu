@@ -1,0 +1,20 @@
+package p;
+
+class C {
+    public ImmutableList<Replacement> getFormatReplacements(
+            String input, Collection<Range<Integer>> characterRanges) throws FormatterException {
+        return null;
+    }
+
+    void glueBoundaryAtColumnHundred(
+            String inputParam, Collection<Range<Integer>> charRangesXyzPaddABCDEFGH123456)
+            throws E12345 {
+        return;
+    }
+
+    void breakWhenBraceOverflows(
+            String inputParam, Collection<Range<Integer>> charRangesXyzPaddABCDEFGH1234567)
+            throws E12345 {
+        return;
+    }
+}
