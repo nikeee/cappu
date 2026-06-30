@@ -1680,7 +1680,16 @@ class Printer {
       case SyntaxKind.CastExpression: {
         const e = node as CastExpression;
         const types = [this.type(e.type), ...(e.bounds ?? []).map(b => this.type(b))];
-        return concat(["(", join(" & ", types), ") ", this.node(e.expression)]);
+        // gjf visitTypeCast: open(+4); "(" type ")" breakOp(" ") expr; close.
+        // The cast and its operand share a +4 level, so a multi-line operand
+        // breaks after the ")" instead of gluing to it.
+        return level(PLUS4, [
+          "(",
+          join(" & ", types),
+          ")",
+          brk("unified", " ", ZERO),
+          this.node(e.expression),
+        ]);
       }
       case SyntaxKind.InstanceofExpression:
         return this.instanceOf(node as InstanceofExpression);

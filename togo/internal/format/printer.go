@@ -1895,7 +1895,10 @@ func (p *printer) node(node *compiler.Node) Doc {
 		for _, b := range nodes(e.Bounds) {
 			types = append(types, p.typ(b))
 		}
-		return concat(text("("), join(text(" & "), types), text(") "), p.node(e.Expression))
+		// gjf visitTypeCast: open(+4); "(" type ")" breakOp(" ") expr; close.
+		// The cast and its operand share a +4 level, so a multi-line operand
+		// breaks after the ")" instead of gluing to it.
+		return level(plus4, []Doc{text("("), join(text(" & "), types), text(")"), brk(fillUnified, " ", ZERO, nil), p.node(e.Expression)})
 	case compiler.InstanceofExpression:
 		return p.instanceOf(node.AsInstanceofExpression())
 	case compiler.LambdaExpression:
