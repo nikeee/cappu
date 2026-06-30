@@ -472,3 +472,5 @@ cappu search commons-lang3
 - 2026-06-30 08:33 — resolve https://github.com/nikeee/cappu/issues/35
 - 2026-06-30 08:33 — I cloned bun's source to /tmp/zshtmp.J7FVfl/bun, where you can check how they are doing it
 - 2026-06-30 09:01 — resolve https://github.com/nikeee/cappu/issues/36
+- 2026-06-30 10:14 — add cappu vache verify
+- 2026-06-30 10:14 — add _metadata to go version

@@ -35,6 +35,8 @@ type MavenRepositorySource struct {
 	// pomCache holds fetched+parsed POMs (nil pom = known miss), keyed by coords.
 	pomCache map[CoordinateString]*RawPom
 	seen     map[CoordinateString]bool
+	// pomText holds the raw POM text as fetched (for GetPom), keyed by coords.
+	pomText map[CoordinateString]string
 }
 
 // NewMavenRepositorySource builds a source for baseURL using HTTP fetchers.
@@ -53,6 +55,7 @@ func NewMavenRepositorySourceWithFetchers(baseURL, searchURL string, fetchText F
 		fetchBytes: fetchBytes,
 		pomCache:   map[CoordinateString]*RawPom{},
 		seen:       map[CoordinateString]bool{},
+		pomText:    map[CoordinateString]string{},
 	}
 }
 
@@ -214,9 +217,26 @@ func (s *MavenRepositorySource) rawPom(c Coordinates) (*RawPom, error) {
 		s.pomCache[key] = nil
 		return nil, nil
 	}
+	s.pomText[key] = text
 	pom := parseRawPom(text)
 	s.pomCache[key] = pom
 	return pom, nil
+}
+
+// GetPom returns the package's own POM bytes. rawPom caches the text, so when
+// GetMetadata has already run this is served from memory without a second fetch.
+func (s *MavenRepositorySource) GetPom(c Coordinates) ([]byte, error) {
+	key := c.String()
+	if !s.seen[key] {
+		if _, err := s.rawPom(c); err != nil {
+			return nil, err
+		}
+	}
+	text, ok := s.pomText[key]
+	if !ok {
+		return nil, nil
+	}
+	return []byte(text), nil
 }
 
 // chainFor returns the parent chain of one POM, child first; nil when the child

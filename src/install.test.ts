@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import TempDir from "./TempDir.ts";
 import { join } from "node:path";
@@ -14,6 +14,7 @@ import {
   pickAddVersion,
   lockedCoordinates,
   storePathFor,
+  verifyCache,
   verifyInstalled,
   withMetadataCache,
 } from "./install.ts";
@@ -557,6 +558,56 @@ test("a downloaded jar gets a SHA-256 sidecar in the store", async () => {
     else process.env.CAPPU_PACKAGE_STORE = previousStore;
     rmSync(store.path, { recursive: true, force: true });
     rmSync(dir.path, { recursive: true, force: true });
+  }
+});
+
+test("verifyCache checks jars and poms against the hashes recorded beside them", () => {
+  using store = TempDir.create("cappu-store-");
+  const previousStore = process.env.CAPPU_PACKAGE_STORE;
+  process.env.CAPPU_PACKAGE_STORE = store.path;
+  try {
+    const sha = (s: string): string =>
+      createHash("sha256").update(new TextEncoder().encode(s)).digest("hex");
+
+    // a good jar (bytes match the sidecar)
+    const okJar = join(store.path, "org", "a", "a", "1");
+    mkdirSync(okJar, { recursive: true });
+    writeFileSync(join(okJar, "a-1.jar"), "good");
+    writeFileSync(join(okJar, "a-1.jar.sha256"), sha("good"));
+
+    // a tampered jar (sidecar records different bytes) and an orphan sidecar
+    const badJar = join(store.path, "org", "b", "b", "1");
+    mkdirSync(badJar, { recursive: true });
+    writeFileSync(join(badJar, "b-1.jar"), "tampered");
+    writeFileSync(join(badJar, "b-1.jar.sha256"), sha("original"));
+    writeFileSync(join(badJar, "ghost-1.jar.sha256"), sha("x")); // jar is gone
+
+    // a good cached POM
+    const meta = join(store.path, "_metadata", "src", "org", "c", "c", "1");
+    mkdirSync(meta, { recursive: true });
+    writeFileSync(join(meta, "c-1.pom"), "<pom/>");
+    writeFileSync(
+      join(meta, "metadata.json"),
+      JSON.stringify({
+        v: 2,
+        metadata: { coordinates: { groupId: "org.c", artifactId: "c", version: "1" } },
+        pomSha256: sha("<pom/>"),
+      }),
+    );
+
+    const result = verifyCache();
+    expect(result.ok.sort()).toEqual(
+      [
+        join("_metadata", "src", "org", "c", "c", "1", "c-1.pom"),
+        join("org", "a", "a", "1", "a-1.jar"),
+      ].sort(),
+    );
+    expect(result.modified).toEqual([join("org", "b", "b", "1", "b-1.jar")]);
+    expect(result.missing).toEqual([join("org", "b", "b", "1", "ghost-1.jar")]);
+  } finally {
+    if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
+    else process.env.CAPPU_PACKAGE_STORE = previousStore;
+    rmSync(store.path, { recursive: true, force: true });
   }
 });
 

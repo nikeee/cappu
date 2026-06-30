@@ -15,8 +15,8 @@
 // for the lock to be rewritten (updateLock).
 
 import { hash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, relative } from "node:path";
 
 import pLimit from "p-limit";
 
@@ -299,6 +299,57 @@ export function verifyInstalled(config: CappuConfig): VerifyResult {
       if (!existsSync(file)) result.missing.push(id);
       else if (sha256Of(readFileSync(file)) === pkg.sha256) result.ok.push(id);
       else result.modified.push(id);
+    }
+  }
+  return result;
+}
+
+export interface CacheVerifyResult {
+  /** Cache files whose bytes match their recorded hash (path relative to the store). */
+  ok: string[];
+  /** Present but the bytes do not match the recorded hash (corrupt or tampered). */
+  modified: string[];
+  /** A hash is recorded but the file it covers is gone. */
+  missing: string[];
+}
+
+/**
+ * Check every cached artifact in the package store against the hash recorded
+ * beside it: each jar against its `.sha256` sidecar, each cached POM against the
+ * `pomSha256` in its metadata.json. Read-only: nothing is downloaded or removed.
+ * Files with no recorded hash are skipped - there is nothing to check them
+ * against (e.g. jars cached before hashing was added).
+ */
+export function verifyCache(): CacheVerifyResult {
+  const root = packageStoreDir();
+  const result: CacheVerifyResult = { ok: [], modified: [], missing: [] };
+  if (!existsSync(root)) return result;
+  const rel = (full: string): string => relative(root, full);
+  for (const entry of readdirSync(root, { recursive: true }) as string[]) {
+    const full = join(root, entry);
+    if (entry.endsWith(".jar.sha256")) {
+      // an orphaned sidecar: its jar was deleted out from under the cache
+      const jar = full.slice(0, -".sha256".length);
+      if (!existsSync(jar)) result.missing.push(rel(jar));
+    } else if (entry.endsWith(".jar")) {
+      const sidecar = `${full}.sha256`;
+      if (!existsSync(sidecar)) continue; // unverifiable: no recorded hash
+      const want = readFileSync(sidecar, "utf8");
+      (sha256Of(readFileSync(full)) === want ? result.ok : result.modified).push(rel(full));
+    } else if (entry.endsWith("metadata.json")) {
+      let cached: { pomSha256?: Sha256 };
+      try {
+        cached = JSON.parse(readFileSync(full, "utf8"));
+      } catch {
+        continue; // a corrupt cache entry is not a verification failure
+      }
+      if (!cached.pomSha256) continue;
+      // The POM sits beside its metadata.json; the version dir and artifact dir
+      // name it (<artifact>-<version>.pom), so the lookup needs no JSON shape.
+      const dir = dirname(full);
+      const pom = join(dir, `${basename(dirname(dir))}-${basename(dir)}.pom`);
+      if (!existsSync(pom)) result.missing.push(rel(pom));
+      else (sha256Of(readFileSync(pom)) === cached.pomSha256 ? result.ok : result.modified).push(rel(pom));
     }
   }
   return result;

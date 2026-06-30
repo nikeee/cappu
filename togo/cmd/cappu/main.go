@@ -293,12 +293,17 @@ type configSchemaCmd struct{}
 func (*configSchemaCmd) Run(*appState) error { return exit(cli.RunConfigSchema()) }
 
 type cacheCmd struct {
-	Clean cacheCleanCmd `cmd:"" help:"Remove the global download cache"`
+	Clean  cacheCleanCmd  `cmd:"" help:"Remove the global download cache"`
+	Verify cacheVerifyCmd `cmd:"" help:"Check cached artifacts against the hashes recorded beside them"`
 }
 
 type cacheCleanCmd struct{}
 
 func (*cacheCleanCmd) Run(*appState) error { return exit(cli.RunCache([]string{"clean"})) }
+
+type cacheVerifyCmd struct{}
+
+func (*cacheVerifyCmd) Run(*appState) error { return exit(cli.RunCache([]string{"verify"})) }
 
 type lspCmd struct {
 	Port string `short:"p" placeholder:"<port>" help:"Listen on a TCP port instead of stdio"`

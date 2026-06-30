@@ -101,4 +101,7 @@ type PackageSource interface {
 	GetMetadata(c Coordinates) (*PackageMetadata, error)
 	// GetArtifact returns the package's jar bytes, or nil if unavailable here.
 	GetArtifact(c Coordinates) ([]byte, error)
+	// GetPom returns the package's own POM bytes (not the merged parent chain),
+	// or nil if unavailable here.
+	GetPom(c Coordinates) ([]byte, error)
 }

@@ -100,3 +100,5 @@ func (s stubSource) ListVersions(string, string) ([]string, error) { return nil,
 func (s stubSource) GetMetadata(Coordinates) (*PackageMetadata, error) { return nil, nil }
 
 func (s stubSource) GetArtifact(Coordinates) ([]byte, error) { return nil, nil }
+
+func (s stubSource) GetPom(Coordinates) ([]byte, error) { return nil, nil }

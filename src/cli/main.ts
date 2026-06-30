@@ -185,6 +185,10 @@ const COMMAND_GROUPS: HelpGroup[] = [
         desc: "Print version/environment info and the issue tracker URL; --open also opens it in your browser",
       },
       { name: "cache clean", desc: "Remove the global download cache" },
+      {
+        name: "cache verify",
+        desc: "Check cached artifacts against the hashes recorded beside them",
+      },
     ],
   },
 ];

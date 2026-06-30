@@ -216,6 +216,7 @@ func (erroringSource) Name() SourceName                              { return "e
 func (erroringSource) Search(string) ([]SearchHit, error)            { return nil, nil }
 func (erroringSource) ListVersions(string, string) ([]string, error) { return nil, nil }
 func (erroringSource) GetArtifact(Coordinates) ([]byte, error)       { return nil, nil }
+func (erroringSource) GetPom(Coordinates) ([]byte, error)            { return nil, nil }
 func (s erroringSource) GetMetadata(Coordinates) (*PackageMetadata, error) {
 	return nil, s.err
 }

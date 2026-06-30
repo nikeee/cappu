@@ -41,7 +41,11 @@ func RunAudit(cfg *config.Config, noCache bool, format string) int {
 	resolving := 0
 	roots := append(sources.CompileRoots(cfg), sources.ProcessorRoots(cfg)...)
 	roots = append(roots, sources.TestRoots(cfg)...)
-	resolution, err := packages.ResolveTransitive(roots, sources.Configured(cfg), func(packages.Coordinates) {
+	srcs := sources.Configured(cfg)
+	if noCache {
+		srcs = sources.ConfiguredUncached(cfg)
+	}
+	resolution, err := packages.ResolveTransitive(roots, srcs, func(packages.Coordinates) {
 		if showProgress {
 			resolving++
 			fmt.Fprintf(os.Stderr, "\r\x1b[2Kresolving dependency graph (%d)...", resolving)

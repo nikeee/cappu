@@ -13,16 +13,30 @@ import (
 )
 
 // Configured turns the config's packageSources into PackageSource instances
-// (only Maven Central carries a search index). The on-disk metadata cache that
-// the Node build layers on top arrives with the install command.
+// (only Maven Central carries a search index), each wrapped in the on-disk
+// metadata cache. Port of configuredSources in src/install.ts.
 func Configured(cfg *config.Config) []packages.PackageSource {
+	return configured(cfg, true)
+}
+
+// ConfiguredUncached is Configured without the on-disk metadata cache, for a
+// fresh resolve that ignores everything cached (e.g. `cappu audit --no-cache`).
+func ConfiguredUncached(cfg *config.Config) []packages.PackageSource {
+	return configured(cfg, false)
+}
+
+func configured(cfg *config.Config, useCache bool) []packages.PackageSource {
 	result := make([]packages.PackageSource, 0, len(cfg.PackageSources))
 	for _, url := range cfg.PackageSources {
 		searchURL := ""
 		if url == config.MavenCentral {
 			searchURL = config.MavenCentralSearch
 		}
-		result = append(result, packages.NewMavenRepositorySource(url, searchURL))
+		src := packages.PackageSource(packages.NewMavenRepositorySource(url, searchURL))
+		if useCache {
+			src = WithMetadataCache(src)
+		}
+		result = append(result, src)
 	}
 	return result
 }

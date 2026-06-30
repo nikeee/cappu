@@ -16,6 +16,7 @@ type fakeSource struct {
 	name     string
 	meta     map[packages.CoordinateString]packages.PackageMetadata
 	jars     map[packages.CoordinateString][]byte
+	poms     map[packages.CoordinateString][]byte
 	versions map[string][]string // "group:artifact" -> versions, oldest first
 }
 
@@ -35,6 +36,10 @@ func (s *fakeSource) GetMetadata(c packages.Coordinates) (*packages.PackageMetad
 
 func (s *fakeSource) GetArtifact(c packages.Coordinates) ([]byte, error) {
 	return s.jars[c.String()], nil
+}
+
+func (s *fakeSource) GetPom(c packages.Coordinates) ([]byte, error) {
+	return s.poms[c.String()], nil
 }
 
 func coord(spec string) packages.Coordinates {

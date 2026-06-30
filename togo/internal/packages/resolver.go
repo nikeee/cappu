@@ -212,3 +212,7 @@ func (s *InMemoryPackageSource) GetMetadata(c Coordinates) (*PackageMetadata, er
 func (s *InMemoryPackageSource) GetArtifact(Coordinates) ([]byte, error) {
 	return nil, nil
 }
+
+func (s *InMemoryPackageSource) GetPom(Coordinates) ([]byte, error) {
+	return nil, nil
+}
