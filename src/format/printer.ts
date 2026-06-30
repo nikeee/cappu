@@ -1513,7 +1513,57 @@ class Printer {
         level(PLUS4, [brk("unified", "", ZERO), this.dotChain(only, concat([")", trailing]))]),
       ]);
     }
+    // gjf's format-method layout (String.format / printf-style): when the first
+    // arg is a string-literal concatenation carrying a format specifier, it sits
+    // on its own line and the value args fill below it as a group - instead of
+    // every arg going one-per-line just because the long format string is not a
+    // "short item". Mirrors JavaInputAstVisitor.addArguments / isFormatMethod.
+    if (!anyComment && this.isFormatMethod(args)) {
+      const restNodes = args.slice(1);
+      const restFill = this.fillMode(false, restNodes);
+      const restInner: Doc[] = [];
+      items.slice(1).forEach((it, i) => {
+        if (i > 0) restInner.push(",", brk(restFill, " ", ZERO));
+        restInner.push(it);
+      });
+      return concat([
+        "(",
+        level(PLUS4, [
+          brk("unified", "", ZERO),
+          level(ZERO, [items[0], ",", brk("unified", " ", ZERO), level(ZERO, restInner)]),
+          ")",
+          trailing,
+        ]),
+      ]);
+    }
     return this.argsLike("(", items, ")", this.fillMode(anyComment, args), trailing);
+  }
+
+  // gjf's isFormatMethod: a call whose first argument is a string-literal
+  // concatenation containing a format specifier (`%` or `{n}`), with >= 2 args.
+  private isFormatMethod(args: NodeArray<Expression>): boolean {
+    return args.length >= 2 && this.isFormatStringConcat(args[0]);
+  }
+
+  // True when `node` is built only from string literals joined by `+` and at
+  // least one literal carries a format specifier - gjf's isStringConcat.
+  private isFormatStringConcat(node: Expression): boolean {
+    let hasSpecifier = false;
+    const walk = (n: Node): boolean => {
+      if (n.kind === SyntaxKind.StringLiteral || n.kind === SyntaxKind.TextBlockLiteral) {
+        if (/%|\{[0-9]\}/.test(this.raw(n))) hasSpecifier = true;
+        return true;
+      }
+      if (
+        n.kind === SyntaxKind.BinaryExpression &&
+        (n as BinaryExpression).operatorToken === SyntaxKind.PlusToken
+      ) {
+        const b = n as BinaryExpression;
+        return walk(b.left) && walk(b.right);
+      }
+      return false;
+    };
+    return walk(node) && hasSpecifier;
   }
 
   private objectCreation(e: ObjectCreationExpression, trailing: Doc = ""): Doc {

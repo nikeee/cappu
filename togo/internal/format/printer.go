@@ -1692,7 +1692,75 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 			level(plus4, []Doc{brk(fillUnified, "", ZERO, nil), p.dotChainTrailing(only, closeTok)}),
 		)
 	}
+	// gjf's format-method layout (String.format / printf-style): when the first
+	// arg is a string-literal concatenation carrying a format specifier, it sits
+	// on its own line and the value args fill below it as a group - instead of
+	// every arg going one-per-line just because the long format string is not a
+	// "short item". Mirrors JavaInputAstVisitor.addArguments / isFormatMethod.
+	if !anyComment && p.isFormatMethod(argNodes) {
+		restNodes := argNodes[1:]
+		restFill := p.fillMode(false, restNodes)
+		var restInner []Doc
+		for i, it := range as[1:] {
+			if i > 0 {
+				restInner = append(restInner, text(","), brk(restFill, " ", ZERO, nil))
+			}
+			restInner = append(restInner, it)
+		}
+		inner := []Doc{
+			brk(fillUnified, "", ZERO, nil),
+			level(ZERO, []Doc{as[0], text(","), brk(fillUnified, " ", ZERO, nil), level(ZERO, restInner)}),
+			text(")"),
+		}
+		if trailing != nil {
+			inner = append(inner, trailing)
+		}
+		return concat(text("("), level(plus4, inner))
+	}
 	return p.argsLikeTrailing("(", as, ")", p.fillMode(anyComment, argNodes), trailing)
+}
+
+// isFormatMethod is gjf's isFormatMethod: a call whose first argument is a
+// string-literal concatenation containing a format specifier, with >= 2 args.
+func (p *printer) isFormatMethod(args []*compiler.Node) bool {
+	return len(args) >= 2 && p.isFormatStringConcat(args[0])
+}
+
+// isFormatStringConcat reports whether node is built only from string literals
+// joined by `+` and at least one literal carries a format specifier - gjf's
+// isStringConcat.
+func (p *printer) isFormatStringConcat(node *compiler.Node) bool {
+	hasSpecifier := false
+	var walk func(n *compiler.Node) bool
+	walk = func(n *compiler.Node) bool {
+		switch n.Kind {
+		case compiler.StringLiteral, compiler.TextBlockLiteral:
+			if hasFormatSpecifier(p.raw(n)) {
+				hasSpecifier = true
+			}
+			return true
+		case compiler.BinaryExpression:
+			b := n.AsBinaryExpression()
+			if b.OperatorToken == compiler.PlusToken {
+				return walk(b.Left) && walk(b.Right)
+			}
+		}
+		return false
+	}
+	return walk(node) && hasSpecifier
+}
+
+// hasFormatSpecifier matches gjf's FORMAT_SPECIFIER pattern `%|\{[0-9]\}`.
+func hasFormatSpecifier(s string) bool {
+	if strings.Contains(s, "%") {
+		return true
+	}
+	for i := 0; i+2 < len(s); i++ {
+		if s[i] == '{' && s[i+1] >= '0' && s[i+1] <= '9' && s[i+2] == '}' {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *printer) objectCreation(e *compiler.ObjectCreationExpressionData, end int) Doc {

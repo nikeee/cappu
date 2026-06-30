@@ -1,0 +1,9 @@
+package p;
+
+class C {
+  String formatCall(String firstValue, String secondValue, String thirdValue) {
+    return String.format(
+        "a longer format string here with %s and %s and %s placeholders",
+        firstValue, secondValue, thirdValue);
+  }
+}
