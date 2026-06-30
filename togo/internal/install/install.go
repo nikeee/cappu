@@ -165,6 +165,7 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 			// otherwise re-fail every install).
 			if stored, ok := StorePathFor(pkg.coordinates); ok {
 				_ = os.Remove(stored)
+				_ = os.Remove(stored + ".sha256")
 			}
 			return outcome{integrity: id}
 		}
@@ -301,6 +302,9 @@ func artifactFrom(srcs []packages.PackageSource, preferred packages.SourceName, 
 			if storeOK {
 				if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err == nil {
 					_ = os.WriteFile(storePath, data, 0o644) // a read-only store never fails the install
+					// A sidecar SHA-256 of the cached jar, so a future
+					// `cappu cache verify` can check the store on disk.
+					_ = os.WriteFile(storePath+".sha256", []byte(lockfile.Sha256Of(data)), 0o644)
 				}
 			}
 			return data, false, true

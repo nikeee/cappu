@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import TempDir from "./TempDir.ts";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -508,6 +509,7 @@ test("a SHA-256 mismatch evicts the bad jar from the store (#2)", async () => {
     await installDependencies(config, [fakeRepo()]);
     const gson = toCoordinates("com.google.code.gson", "gson", "2.14.0");
     expect(existsSync(storePathFor(gson)!)).toBe(true);
+    expect(existsSync(`${storePathFor(gson)!}.sha256`)).toBe(true);
 
     // tamper the lock's hash so the (correct) stored jar fails verification
     const lockPath = join(dir.path, LOCKFILE_NAME);
@@ -520,13 +522,72 @@ test("a SHA-256 mismatch evicts the bad jar from the store (#2)", async () => {
 
     const result = await installDependencies(config, [fakeRepo()]);
     expect(result.integrityFailures).toContain("com.google.code.gson:gson:2.14.0");
-    // the poisoned store entry is gone, so a later good install can re-download
+    // the poisoned store entry (and its hash sidecar) is gone, so a later good
+    // install can re-download
     expect(existsSync(storePathFor(gson)!)).toBe(false);
+    expect(existsSync(`${storePathFor(gson)!}.sha256`)).toBe(false);
   } finally {
     if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
     else process.env.CAPPU_PACKAGE_STORE = previousStore;
     rmSync(store.path, { recursive: true, force: true });
     rmSync(dir.path, { recursive: true, force: true });
+  }
+});
+
+test("a downloaded jar gets a SHA-256 sidecar in the store", async () => {
+  using store = TempDir.create("cappu-store-");
+  using dir = TempDir.create("cappu-install-");
+  const previousStore = process.env.CAPPU_PACKAGE_STORE;
+  process.env.CAPPU_PACKAGE_STORE = store.path;
+  try {
+    writeFileSync(
+      join(dir.path, "cappu.json"),
+      '{ "dependencies": { "implementation": { "com.google.code.gson:gson": "2.14.0" } } }',
+    );
+    await installDependencies(loadConfig(undefined, dir.path), [fakeRepo()]);
+    const gson = toCoordinates("com.google.code.gson", "gson", "2.14.0");
+    const sidecar = `${storePathFor(gson)!}.sha256`;
+    expect(existsSync(sidecar)).toBe(true);
+    // the sidecar holds the hex SHA-256 of the cached jar bytes
+    expect(readFileSync(sidecar, "utf8")).toBe(
+      createHash("sha256").update(new TextEncoder().encode("gson-bytes")).digest("hex"),
+    );
+  } finally {
+    if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
+    else process.env.CAPPU_PACKAGE_STORE = previousStore;
+    rmSync(store.path, { recursive: true, force: true });
+    rmSync(dir.path, { recursive: true, force: true });
+  }
+});
+
+test("the cached metadata persists the raw POM and records its SHA-256", async () => {
+  using store = TempDir.create("cappu-store-");
+  const previousStore = process.env.CAPPU_PACKAGE_STORE;
+  process.env.CAPPU_PACKAGE_STORE = store.path;
+  try {
+    const pomBytes = new TextEncoder().encode("<project>raw pom</project>");
+    const source = withMetadataCache({
+      name: "https://repo.test/m2" as SourceName,
+      search: () => Promise.resolve([]),
+      listVersions: () => Promise.resolve([]),
+      getMetadata: () =>
+        Promise.resolve({ coordinates: toCoordinates("org.x", "y", "1.0"), dependencies: [] }),
+      getPom: () => Promise.resolve(pomBytes),
+    });
+    await source.getMetadata(toCoordinates("org.x", "y", "1.0"));
+
+    const verDir = join(store.path, "_metadata", "https_repo.test_m2", "org", "x", "y", "1.0");
+    // the raw POM is persisted next to its metadata
+    expect(readFileSync(join(verDir, "y-1.0.pom"))).toEqual(Buffer.from(pomBytes));
+    // and metadata.json records its hash
+    const entry = JSON.parse(readFileSync(join(verDir, "metadata.json"), "utf8")) as {
+      pomSha256?: string;
+    };
+    expect(entry.pomSha256).toBe(createHash("sha256").update(pomBytes).digest("hex"));
+  } finally {
+    if (previousStore === undefined) delete process.env.CAPPU_PACKAGE_STORE;
+    else process.env.CAPPU_PACKAGE_STORE = previousStore;
+    rmSync(store.path, { recursive: true, force: true });
   }
 });
 

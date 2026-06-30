@@ -110,6 +110,24 @@ func TestInstallResolvesDownloadsAndWritesLock(t *testing.T) {
 	}
 }
 
+func TestDownloadedJarGetsSha256Sidecar(t *testing.T) {
+	cfg := project(t, `{"dependencies":{"implementation":{"org.a:a":"1"}}}`)
+	if _, err := Dependencies(cfg, []packages.PackageSource{source()}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := StorePathFor(coord("org.a:a:1"))
+	if !ok {
+		t.Fatal("store path unexpectedly unsafe")
+	}
+	got, err := os.ReadFile(stored + ".sha256")
+	if err != nil {
+		t.Fatalf("expected sidecar: %v", err)
+	}
+	if string(got) != string(lockfile.Sha256Of([]byte("jar-a"))) {
+		t.Errorf("sidecar = %q, want jar hash", got)
+	}
+}
+
 func TestCheckLocked(t *testing.T) {
 	cfg := project(t, `{"dependencies":{"implementation":{"org.a:a":"1"}}}`)
 	dir := cfg.BaseDir
@@ -181,6 +199,15 @@ func TestInstallIntegrityFailure(t *testing.T) {
 	}
 	if len(res.IntegrityFailures) != 1 {
 		t.Errorf("expected 1 integrity failure, got %v", res.IntegrityFailures)
+	}
+	// The poisoned store entry and its hash sidecar are evicted so a later good
+	// install can re-download.
+	stored, _ := StorePathFor(lock.Packages[0].Coords())
+	if _, err := os.Stat(stored); !os.IsNotExist(err) {
+		t.Errorf("poisoned jar not evicted from store: %v", err)
+	}
+	if _, err := os.Stat(stored + ".sha256"); !os.IsNotExist(err) {
+		t.Errorf("poisoned jar sidecar not evicted: %v", err)
 	}
 }
 

@@ -324,6 +324,8 @@ export class MavenRepositorySource implements PackageSource {
   readonly name: SourceName;
   /** Fetched+parsed POMs (null: known miss), keyed by coordinates. */
   private readonly pomCache = new Map<string, RawPom | null>();
+  /** Raw POM text as fetched (for getPom), keyed by coordinates. */
+  private readonly pomTextCache = new Map<string, string>();
 
   constructor(
     private readonly baseUrl: string,
@@ -402,6 +404,7 @@ export class MavenRepositorySource implements PackageSource {
     );
     const parsed = text === undefined ? null : parseRawPom(text);
     this.pomCache.set(key, parsed);
+    if (text !== undefined) this.pomTextCache.set(key, text);
     return parsed ?? undefined;
   }
 
@@ -492,5 +495,14 @@ export class MavenRepositorySource implements PackageSource {
         `${artifactId}-${version}.jar`,
       ),
     );
+  }
+
+  // The package's own POM bytes. rawPom caches the text, so when getMetadata has
+  // already run this is served from memory without a second fetch.
+  async getPom(coordinates: Coordinates): Promise<Uint8Array | undefined> {
+    const key = coordinatesToString(coordinates);
+    if (!this.pomTextCache.has(key)) await this.rawPom(coordinates);
+    const text = this.pomTextCache.get(key);
+    return text === undefined ? undefined : new TextEncoder().encode(text);
   }
 }

@@ -67,6 +67,8 @@ export interface PackageSource {
   getMetadata(coordinates: Coordinates): Promise<PackageMetadata | undefined>;
   /** The package's jar bytes, or undefined if this source cannot provide them. */
   getArtifact?(coordinates: Coordinates): Promise<Uint8Array | undefined>;
+  /** The package's own POM bytes (not the merged parent chain), or undefined. */
+  getPom?(coordinates: Coordinates): Promise<Uint8Array | undefined>;
 }
 
 /** "group:artifact:version" - one exact package version. */

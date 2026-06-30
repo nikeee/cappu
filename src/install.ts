@@ -145,6 +145,7 @@ export function withMetadataCache(source: PackageSource): PackageSource {
         const cached = JSON.parse(readFileSync(cacheFile, "utf8")) as {
           v?: number;
           metadata?: PackageMetadata;
+          pomSha256?: Sha256;
         };
         // older/unknown schema (e.g. a pre-licenses entry): re-fetch and rewrite
         if (cached.v === METADATA_CACHE_VERSION && cached.metadata) return cached.metadata;
@@ -156,7 +157,25 @@ export function withMetadataCache(source: PackageSource): PackageSource {
     if (cacheFile && metadata) {
       try {
         mkdirSync(dirname(cacheFile), { recursive: true });
-        writeFileSync(cacheFile, JSON.stringify({ v: METADATA_CACHE_VERSION, metadata }));
+        // Persist the raw POM next to its metadata and record its SHA-256, so a
+        // future `cappu cache verify` can check the cached POM on disk.
+        const pom = await source.getPom?.(coordinates);
+        let pomSha256: Sha256 | undefined;
+        if (pom) {
+          pomSha256 = sha256Of(pom);
+          writeFileSync(
+            join(dirname(cacheFile), `${coordinates.artifactId}-${coordinates.version}.pom`),
+            pom,
+          );
+        }
+        writeFileSync(
+          cacheFile,
+          JSON.stringify({
+            v: METADATA_CACHE_VERSION,
+            metadata,
+            ...(pomSha256 ? { pomSha256 } : {}),
+          }),
+        );
       } catch {
         // a read-only store never fails the lookup
       }
@@ -170,6 +189,7 @@ export function withMetadataCache(source: PackageSource): PackageSource {
     listVersions,
     getMetadata,
     ...(source.getArtifact ? { getArtifact: c => source.getArtifact!(c) } : {}),
+    ...(source.getPom ? { getPom: c => source.getPom!(c) } : {}),
   };
 }
 
@@ -562,6 +582,9 @@ async function artifactFrom(
         try {
           mkdirSync(dirname(storePath), { recursive: true });
           writeFileSync(storePath, bytes);
+          // A sidecar SHA-256 of the cached jar, so a future `cappu cache verify`
+          // can check the store on disk without any project lockfile.
+          writeFileSync(`${storePath}.sha256`, sha256Of(bytes));
         } catch {
           // a read-only or full store never fails the install
         }
@@ -673,7 +696,10 @@ export async function installDependencies(
       // poisoned entry would otherwise re-fail every install until a manual
       // `cappu cache clean`).
       const stored = storePathFor(pkg.coordinates);
-      if (stored) rmSync(stored, { force: true });
+      if (stored) {
+        rmSync(stored, { force: true });
+        rmSync(`${stored}.sha256`, { force: true });
+      }
       return { integrity: id };
     }
     const file = join(dir, `${pkg.coordinates.artifactId}-${pkg.coordinates.version}.jar`);

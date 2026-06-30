@@ -471,3 +471,4 @@ cappu search commons-lang3
 - 2026-06-29 22:39 — use "--format sarif", so we dann add more later
 - 2026-06-30 08:33 — resolve https://github.com/nikeee/cappu/issues/35
 - 2026-06-30 08:33 — I cloned bun's source to /tmp/zshtmp.J7FVfl/bun, where you can check how they are doing it
+- 2026-06-30 09:01 — resolve https://github.com/nikeee/cappu/issues/36
