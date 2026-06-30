@@ -1199,16 +1199,35 @@ class Printer {
   private switchLike(expr: Expression, clauses: NodeArray<SwitchClause>, endPos: number): Doc {
     // Comments before a `case`/`default` label sit on their own line at the
     // clause indent (gjf), so consume them per clause like a member list does.
-    const body: Doc[] = [];
+    // Entries (leading comments + each clause) are separated by one hardline,
+    // but a single source blank line between clauses is preserved (gjf), so the
+    // separator before a clause becomes a double hardline when the source left a
+    // blank between the previous clause and this one's first rendered thing.
+    const entries: { doc: Doc; blank: boolean }[] = [];
+    let prevEnd = -1;
     for (const c of clauses) {
-      for (const cm of this.commentsBefore(this.start(c))) body.push(reflow(cm.text));
-      body.push(this.switchClause(c));
+      const comments = this.commentsBefore(this.start(c));
+      const start = comments.length > 0 ? comments[0].pos : this.start(c);
+      const blank = prevEnd >= 0 && this.blankBeforePos(prevEnd, start);
+      let leading = blank;
+      for (const cm of comments) {
+        entries.push({ doc: reflow(cm.text), blank: leading });
+        leading = false;
+      }
+      entries.push({ doc: this.switchClause(c), blank: leading });
+      prevEnd = c.end;
     }
-    for (const cm of this.commentsBefore(endPos)) body.push(reflow(cm.text));
+    for (const cm of this.commentsBefore(endPos))
+      entries.push({ doc: reflow(cm.text), blank: false });
+    const body: Doc[] = [];
+    entries.forEach((e, i) => {
+      if (i > 0) body.push(e.blank ? concat([hardline, hardline]) : hardline);
+      body.push(e.doc);
+    });
     return concat([
       group(concat(["switch (", this.node(expr), ")"])),
       " {",
-      indent(concat([hardline, join(hardline, body)])),
+      indent(concat([hardline, ...body])),
       hardline,
       "}",
     ]);
