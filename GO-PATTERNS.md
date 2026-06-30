@@ -211,6 +211,21 @@ CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o dist/cappu ./cmd/cappu
 executable". Cross-compile targets (mirroring the Node SEA targets): linux
 amd64/arm64, darwin arm64, windows amd64 - see `Makefile` `build-all`.
 
+## Per-OS strategy via build tags (syscalls)
+
+When a feature needs a different syscall per platform (issue #35: clonefile on
+macOS, hardlink on Linux, plain copy elsewhere), don't branch on `runtime.GOOS`
+at runtime - split the implementation across `//go:build`-tagged files so each
+binary compiles exactly one path (the Go analogue of the TS "strategy chosen at
+startup"). See `internal/copyfile`: a shared `copyfile.go` (rm-then-chmod
+wrapper + `plainCopy` fallback) plus `copyfile_darwin.go`
+(`unix.Clonefile`), `copyfile_linux.go` (`os.Link`), and `copyfile_other.go`
+(`//go:build !darwin && !linux`), each exporting the same `materializeImpl`.
+
+`golang.org/x/sys/unix` (for `Clonefile`) is pure syscall wrappers, so it stays
+`CGO_ENABLED=0`-compatible - static linking is unaffected. Adding it promotes
+`golang.org/x/sys` from indirect to a direct require (`go mod tidy`).
+
 ## Tooling
 
 - **Format**: `gofmt` (standard tooling). CI fails if `gofmt -l .` is non-empty.

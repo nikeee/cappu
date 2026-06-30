@@ -9,6 +9,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/copyfile"
 	"github.com/nikeee/cappu/internal/lockfile"
 	"github.com/nikeee/cappu/internal/packages"
 	"github.com/nikeee/cappu/internal/sources"
@@ -168,7 +169,15 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 			return outcome{integrity: id}
 		}
 		file := filepath.Join(dir, string(pkg.coordinates.ArtifactID)+"-"+string(pkg.coordinates.Version)+".jar")
-		if err := os.WriteFile(file, bytes, 0o644); err != nil {
+		// CoW-clone/hardlink from the store instead of writing a second copy
+		// (nikeee/cappu#35); fall back to the in-hand bytes when the store entry
+		// is missing (read-only or full store).
+		stored, storeOK := StorePathFor(pkg.coordinates)
+		if _, err := os.Stat(stored); storeOK && err == nil {
+			if err := copyfile.Materialize(stored, file); err != nil {
+				return outcome{noArtifact: id}
+			}
+		} else if err := os.WriteFile(file, bytes, 0o644); err != nil {
 			return outcome{noArtifact: id}
 		}
 		locked := lockfile.NewLockedPackage(pkg.coordinates, string(pkg.source), digest, pkg.licenses)

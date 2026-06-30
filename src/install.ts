@@ -22,6 +22,7 @@ import pLimit from "p-limit";
 
 import { type Brand } from "./brand.ts";
 import { cacheDir } from "./cacheDir.ts";
+import { materialize as materializeFile } from "./copyStrategy.ts";
 
 /** A hex SHA-256 digest (distinct from the md5/sha1 sidecars publishing emits). */
 type Sha256 = Brand<string, "Sha256">;
@@ -676,7 +677,12 @@ export async function installDependencies(
       return { integrity: id };
     }
     const file = join(dir, `${pkg.coordinates.artifactId}-${pkg.coordinates.version}.jar`);
-    writeFileSync(file, artifact.bytes);
+    // CoW-clone/hardlink from the store instead of writing a second copy
+    // (nikeee/cappu#35). When the store entry is missing (read-only or full
+    // store), fall back to writing the bytes we already have in hand.
+    const stored = storePathFor(pkg.coordinates);
+    if (stored && existsSync(stored)) materializeFile(stored, file);
+    else writeFileSync(file, artifact.bytes);
     return {
       locked: {
         coordinates: pkg.coordinates,

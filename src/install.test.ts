@@ -475,8 +475,11 @@ test("verifyInstalled checks lib jars against the lockfile sums", async () => {
     expect(clean.missing).toEqual([]);
     expect(clean.ok).toContain("com.google.code.gson:gson:2.14.0");
 
-    // tamper one jar on disk -> modified
-    writeFileSync(join(dir.path, ".cappu", "lib", "classes", "gson-2.14.0.jar"), "corrupted");
+    // tamper one jar on disk -> modified (materialized jars are read-only, so
+    // replace rather than overwrite in place)
+    const tampered = join(dir.path, ".cappu", "lib", "classes", "gson-2.14.0.jar");
+    rmSync(tampered, { force: true });
+    writeFileSync(tampered, "corrupted");
     expect(verifyInstalled(installed).modified).toContain("com.google.code.gson:gson:2.14.0");
 
     // delete another -> missing
@@ -651,10 +654,20 @@ test("the package store serves repeat installs and rejects unsafe segments", asy
     expect(second.fromStore).toEqual(["com.google.code.gson:gson:2.14.0", "org.example:base:1.0"]);
 
     // A poisoned store entry fails the locked install like any tampered jar.
-    writeFileSync(
-      join(store.path, "com", "google", "code", "gson", "gson", "2.14.0", "gson-2.14.0.jar"),
-      "evil-bytes",
+    // Materialized jars are read-only (hardlinks share the store inode), so
+    // tampering replaces the entry rather than writing it in place.
+    const poison = join(
+      store.path,
+      "com",
+      "google",
+      "code",
+      "gson",
+      "gson",
+      "2.14.0",
+      "gson-2.14.0.jar",
     );
+    rmSync(poison, { force: true });
+    writeFileSync(poison, "evil-bytes");
     const poisoned = await installDependencies(loadConfig(undefined, dirB.path), [metadataOnly]);
     expect(poisoned.integrityFailures).toEqual(["com.google.code.gson:gson:2.14.0"]);
 
