@@ -1251,8 +1251,10 @@ func (p *printer) forInit(init *compiler.Node) Doc {
 }
 
 func (p *printer) forEachStatement(s *compiler.ForEachStatementData) Doc {
+	// gjf visitEnhancedForLoop: "for (" open(+4) param " :" breakOp(" ") expr
+	// close ")". The iterable breaks after the ":" at +4 when it overflows.
 	return concat(
-		group(concat(text("for ("), p.parameter(s.Parameter.AsParameter()), text(" : "), p.node(s.Expression), text(")"))),
+		concat(text("for ("), level(plus4, []Doc{p.parameter(s.Parameter.AsParameter()), text(" :"), line, p.node(s.Expression)}), text(")")),
 		p.clauseBody(s.Statement),
 	)
 }

@@ -1141,8 +1141,14 @@ class Printer {
   }
 
   private forEachStatement(s: ForEachStatement): Doc {
+    // gjf visitEnhancedForLoop: "for (" open(+4) param " :" breakOp(" ") expr
+    // close ")". The iterable breaks after the ":" at +4 when it overflows.
     return concat([
-      group(concat(["for (", this.parameter(s.parameter), " : ", this.node(s.expression), ")"])),
+      concat([
+        "for (",
+        level(PLUS4, [this.parameter(s.parameter), " :", line, this.node(s.expression)]),
+        ")",
+      ]),
       this.clauseBody(s.statement),
     ]);
   }

@@ -1,0 +1,13 @@
+package p;
+
+class C {
+  void m() {
+    for (String annotationClassNameValue :
+        ImmutableList.of("a.b.NonNull", "a.b.Nullable", "c.d.NonNull")) {
+      System.out.println(annotationClassNameValue);
+    }
+    for (String s : shortList) {
+      use(s);
+    }
+  }
+}
