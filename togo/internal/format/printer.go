@@ -1315,20 +1315,47 @@ func (p *printer) resource(r *compiler.ResourceData) Doc {
 func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, endPos int) Doc {
 	// Comments before a `case`/`default` label sit on their own line at the
 	// clause indent (gjf), so consume them per clause like a member list does.
-	var body []Doc
+	// A single source blank line between clauses is preserved (gjf), so the
+	// separator before a clause becomes a double hardline when the source left a
+	// blank between the previous clause and this one's first rendered thing.
+	type entry struct {
+		doc   Doc
+		blank bool
+	}
+	var entries []entry
+	prevEnd := -1
 	for _, c := range nodes(clauses) {
-		for _, cm := range p.commentsBefore(p.start(c)) {
-			body = append(body, reflow(cm.text))
+		comments := p.commentsBefore(p.start(c))
+		start := p.start(c)
+		if len(comments) > 0 {
+			start = comments[0].pos
 		}
-		body = append(body, p.switchClause(c.AsSwitchClause(), c.End))
+		leading := prevEnd >= 0 && p.blankBeforePos(prevEnd, start)
+		for _, cm := range comments {
+			entries = append(entries, entry{reflow(cm.text), leading})
+			leading = false
+		}
+		entries = append(entries, entry{p.switchClause(c.AsSwitchClause(), c.End), leading})
+		prevEnd = c.End
 	}
 	for _, cm := range p.commentsBefore(endPos) {
-		body = append(body, reflow(cm.text))
+		entries = append(entries, entry{reflow(cm.text), false})
+	}
+	var body []Doc
+	for i, e := range entries {
+		if i > 0 {
+			if e.blank {
+				body = append(body, concat(hardline, hardline))
+			} else {
+				body = append(body, hardline)
+			}
+		}
+		body = append(body, e.doc)
 	}
 	return concat(
 		group(concat(text("switch ("), p.node(expr), text(")"))),
 		text(" {"),
-		indent(concat(hardline, join(hardline, body))),
+		indent(concat(append([]Doc{hardline}, body...)...)),
 		hardline,
 		text("}"),
 	)

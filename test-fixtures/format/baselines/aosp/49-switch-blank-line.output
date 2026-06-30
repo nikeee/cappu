@@ -1,0 +1,13 @@
+package p;
+
+class C {
+    int m(Kind k) {
+        return switch (k) {
+            case A -> 1;
+            case B -> 2;
+
+            case C -> 3;
+            case D -> 4;
+        };
+    }
+}
