@@ -1,0 +1,13 @@
+package p;
+
+class C {
+  void m() { // method trailing comment kept on the brace line
+    int x = 1;
+  }
+
+  void n(boolean cond) {
+    if (cond) { // if trailing comment
+      doThing();
+    }
+  }
+}

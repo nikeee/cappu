@@ -1053,15 +1053,32 @@ class Printer {
   /** A block's body after the opening `{` (the `{` is emitted by the caller, so
    * it can be placed inside another level to count toward a wrap decision). */
   private blockRest(b: Block): Doc {
+    // A comment on the same source line as the opening `{` stays on that line
+    // (gjf): `if (...) { // note`. It must be emitted before the indented body so
+    // it rides the brace line, and consumed here so listDocs does not re-emit it
+    // own-line.
+    const braceComment =
+      b.statements.length > 0 ? this.braceTrailingComment(b.statements[0].pos) : "";
     const lead =
       b.statements.length > 0
         ? this.braceLead(b.statements[0].pos, this.start(b.statements[0]))
         : hardline;
     return concat([
+      braceComment,
       indent(concat([lead, ...this.statementList(b.statements, b.end)])),
       hardline,
       "}",
     ]);
+  }
+
+  // Consume and return a comment that trails the opening `{` on its own line
+  // (` // note`), or "" when the next pending comment starts on a later line.
+  // `afterBrace` is the offset just past the `{` (the body's leading-trivia start).
+  private braceTrailingComment(afterBrace: number): Doc {
+    const c = this.comments[this.ci];
+    if (!c || c.pos < afterBrace || /\n/.test(this.text.slice(afterBrace, c.pos))) return "";
+    this.ci++;
+    return concat([" ", c.text]);
   }
 
   private statementList(list: NodeArray<Statement>, endPos: number): Doc[] {

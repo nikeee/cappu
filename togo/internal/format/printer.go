@@ -1162,15 +1162,36 @@ func (p *printer) block(b *compiler.BlockData, endPos int) Doc {
 // caller, so it can be placed inside another level to count toward a wrap
 // decision).
 func (p *printer) blockRest(b *compiler.BlockData, endPos int) Doc {
+	// A comment on the same source line as the opening `{` stays on that line
+	// (gjf): `if (...) { // note`. Emit it before the indented body so it rides
+	// the brace line, and consume it here so listDocs does not re-emit it own-line.
+	var braceComment Doc = text("")
 	lead := hardline
 	if b.Statements.Len() > 0 {
+		braceComment = p.braceTrailingComment(b.Statements.Nodes[0].Pos)
 		lead = p.braceLead(b.Statements.Nodes[0].Pos, p.start(b.Statements.Nodes[0]))
 	}
 	return concat(
+		braceComment,
 		indent(concat(append([]Doc{lead}, p.listDocs(nodes(b.Statements), false, endPos)...)...)),
 		hardline,
 		text("}"),
 	)
+}
+
+// braceTrailingComment consumes and returns a comment that trails the opening
+// `{` on its line (` // note`), or "" when the next pending comment starts on a
+// later line. afterBrace is the offset just past the `{`.
+func (p *printer) braceTrailingComment(afterBrace int) Doc {
+	if p.ci >= len(p.comments) {
+		return text("")
+	}
+	c := p.comments[p.ci]
+	if c.pos < afterBrace || strings.Contains(p.text[afterBrace:c.pos], "\n") {
+		return text("")
+	}
+	p.ci++
+	return concat(text(" "), text(c.text))
 }
 
 func (p *printer) localVar(d *compiler.LocalVariableDeclarationStatementData) Doc {
