@@ -1,0 +1,11 @@
+package p;
+
+class C {
+    void m() {
+        assertThat(
+                        ServiceLoader.load(Tool.class).stream()
+                                .map(ServiceLoader.Provider::get)
+                                .map(Tool::name))
+                .contains(name);
+    }
+}
