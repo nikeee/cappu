@@ -1511,7 +1511,17 @@ func (p *printer) binaryTrailing(node *compiler.Node, trailing Doc) Doc {
 	fill := p.fillMode(false, operands)
 	parts := []Doc{p.node(operands[0])}
 	for i, op := range operators {
-		parts = append(parts, brk(fill, " ", ZERO, nil), text(op), text(" "), p.node(operands[i+1]))
+		parts = append(parts, brk(fill, " ", ZERO, nil))
+		// A comment before the next operand sits on its own line before the
+		// operator (gjf), not inside the operand - so consume it here.
+		for _, c := range p.commentsBefore(p.start(operands[i+1])) {
+			if c.line {
+				parts = append(parts, text(c.text), hardline)
+			} else {
+				parts = append(parts, reflow(c.text), hardline)
+			}
+		}
+		parts = append(parts, text(op), text(" "), p.node(operands[i+1]))
 	}
 	// A statement's trailing `;` rides inside the +4 level (gjf counts it in the
 	// level width), so `a && b;` breaks when the `;` is what tips it past 100.

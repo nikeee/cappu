@@ -1,0 +1,10 @@
+package p;
+
+class C {
+    boolean isWholeFile(Request request) {
+        return ranges.size() == 1
+                && ranges.get(0).getStartOffset() == 0
+                // using greater than or equal because ranges are sometimes passed inaccurately
+                && ranges.get(0).getEndOffset() >= request.getDocumentText().length();
+    }
+}

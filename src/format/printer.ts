@@ -1349,7 +1349,13 @@ class Printer {
     const fillMode = this.fillMode(false, operands);
     const parts: Doc[] = [this.node(operands[0])];
     operators.forEach((op, i) => {
-      parts.push(brk(fillMode, " ", ZERO), op, " ", this.node(operands[i + 1]));
+      parts.push(brk(fillMode, " ", ZERO));
+      // A comment before the next operand sits on its own line before the
+      // operator (gjf), not inside the operand - so consume it here.
+      for (const c of this.commentsBefore(this.start(operands[i + 1]))) {
+        parts.push(c.line ? c.text : reflow(c.text), hardline);
+      }
+      parts.push(op, " ", this.node(operands[i + 1]));
     });
     // A statement's trailing `;` rides inside the +4 level (gjf counts it in the
     // level width), so `a && b;` breaks when the `;` is what tips it past 100.
