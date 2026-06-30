@@ -66,7 +66,7 @@ func NewServer(cfg *config.Config) *Server {
 	if cfg != nil {
 		s.packageSourceURL = cfg.PackageSources
 		if h := cfg.LspOptions.InlayHints; h != nil {
-			s.inlayHints = services.InlayHintsSettings{ParameterNames: h.ParameterNames, VarTypes: h.VarTypes}
+			s.inlayHints = services.InlayHintsSettings{ParameterNames: *h.ParameterNames, VarTypes: *h.VarTypes}
 		}
 		loadConfiguredSources(program, cfg)
 	}
