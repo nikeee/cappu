@@ -1,0 +1,7 @@
+package p;
+
+class C {
+    Optional<String> sep(int i, List<String> parameters) {
+        return i < parameters.size() - 1 ? Optional.of(",") : /* a= */ Optional.empty();
+    }
+}

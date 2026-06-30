@@ -939,7 +939,9 @@ class Printer {
       !t.line &&
       !t.ownLine &&
       t.pos >= endPos &&
-      !/[\n,]/.test(this.text.slice(endPos, t.pos))
+      // The comment must immediately trail this item - stop at a separator or a
+      // closing delimiter, so a comment past `)`/`,`/`:` is not mis-attached.
+      !/[\n,):]/.test(this.text.slice(endPos, t.pos))
     ) {
       this.ci++;
       parts.push(" ", t.text);
@@ -1809,7 +1811,13 @@ class Printer {
     } else {
       parts.push(brk("unified", " ", ZERO));
     }
-    parts.push(": ", this.node(e.whenFalse));
+    parts.push(": ");
+    // A comment before the else-branch renders inline before it (`: /* a= */ x`).
+    for (const c of this.commentsBefore(this.start(e.whenFalse))) {
+      if (c.line) parts.push(c.text, hardline);
+      else parts.push(c.text, " ");
+    }
+    parts.push(this.node(e.whenFalse));
     return level(PLUS4, parts);
   }
 

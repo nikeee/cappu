@@ -1015,7 +1015,9 @@ func (p *printer) fillMode(anyComment bool, ns []*compiler.Node) FillMode {
 func (p *printer) attachTrailingBlockComment(parts []Doc, endPos int) ([]Doc, bool) {
 	if p.ci < len(p.comments) {
 		t := p.comments[p.ci]
-		if !t.line && !t.ownLine && t.pos >= endPos && !strings.ContainsAny(p.text[endPos:t.pos], "\n,") {
+		// The comment must immediately trail this item - stop at a separator or a
+		// closing delimiter, so a comment past `)`/`,`/`:` is not mis-attached.
+		if !t.line && !t.ownLine && t.pos >= endPos && !strings.ContainsAny(p.text[endPos:t.pos], "\n,):") {
 			p.ci++
 			parts = append(parts, text(" "), text(t.text))
 			return parts, true
@@ -2090,7 +2092,16 @@ func (p *printer) conditional(e *compiler.ConditionalExpressionData) Doc {
 	} else {
 		parts = append(parts, brk(fillUnified, " ", ZERO, nil))
 	}
-	parts = append(parts, text(": "), p.node(e.WhenFalse))
+	parts = append(parts, text(": "))
+	// A comment before the else-branch renders inline before it (`: /* a= */ x`).
+	for _, c := range p.commentsBefore(p.start(e.WhenFalse)) {
+		if c.line {
+			parts = append(parts, text(c.text), hardline)
+		} else {
+			parts = append(parts, text(c.text), text(" "))
+		}
+	}
+	parts = append(parts, p.node(e.WhenFalse))
 	return level(plus4, parts)
 }
 
