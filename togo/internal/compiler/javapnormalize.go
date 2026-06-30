@@ -3,7 +3,7 @@ package compiler
 import (
 	"os/exec"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -79,7 +79,7 @@ func DisasmFiles(classFiles []string, javapBin string) (map[string]*Disasm, erro
 		}
 	}
 	for _, d := range m {
-		sort.Strings(d.Members)
+		slices.Sort(d.Members)
 	}
 	return m, nil
 }

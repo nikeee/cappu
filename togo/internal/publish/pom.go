@@ -4,7 +4,8 @@ package publish
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/config"
@@ -97,10 +98,5 @@ func GeneratePom(cfg *config.Config) (string, error) {
 // sortedKeys gives deterministic dependency order (Go maps are unordered; the
 // Node build relies on cappu.json's object-key order).
 func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(m))
 }

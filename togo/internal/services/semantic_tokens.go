@@ -6,7 +6,8 @@ package services
 // Port of src/services/semanticTokens.ts.
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"github.com/nikeee/cappu/internal/compiler"
 )
@@ -145,7 +146,7 @@ func GetSemanticTokens(checker *compiler.Checker, sourceFile *compiler.Node) []S
 		return false
 	}
 	visit(sourceFile)
-	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Offset < entries[j].Offset })
+	slices.SortStableFunc(entries, func(a, b SemanticTokenEntry) int { return cmp.Compare(a.Offset, b.Offset) })
 	return entries
 }
 

@@ -7,7 +7,7 @@ package mcp
 // Port of src/services/mcp.ts.
 
 import (
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/compiler"
@@ -233,7 +233,7 @@ func (t *Tools) SearchSymbols(query string) []string {
 			matches = append(matches, string(fqn))
 		}
 	}
-	sort.Strings(matches) // Go maps are unordered; sort for a stable result
+	slices.Sort(matches) // Go maps are unordered; sort for a stable result
 	return matches
 }
 
@@ -467,7 +467,7 @@ func (t *Tools) ResolveImport(name string) []string {
 			imports = append(imports, string(fqn))
 		}
 	}
-	sort.Strings(imports)
+	slices.Sort(imports)
 	return imports
 }
 

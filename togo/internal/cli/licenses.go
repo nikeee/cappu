@@ -1,10 +1,11 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/config"
@@ -93,7 +94,7 @@ func RunLicenses(cfg *config.Config, jsonOut bool) int {
 			Licenses:   licenseEntries(p.Metadata.Licenses),
 		})
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Coordinate < rows[j].Coordinate })
+	slices.SortFunc(rows, func(a, b licenseRow) int { return cmp.Compare(a.Coordinate, b.Coordinate) })
 
 	if jsonOut {
 		// The project's own license appears in the human output; include it here

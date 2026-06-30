@@ -5,7 +5,8 @@
 package sources
 
 import (
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/config"
@@ -46,11 +47,7 @@ func configured(cfg *config.Config, useCache bool) []packages.PackageSource {
 // order (the Node build relies on cappu.json's object-key order, which JSON
 // decoding into a map cannot preserve).
 func RootsOf(entries map[string]string) []packages.Coordinates {
-	keys := make([]string, 0, len(entries))
-	for key := range entries {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(entries))
 	roots := make([]packages.Coordinates, 0, len(entries))
 	for _, key := range keys {
 		groupID, artifactID, _ := strings.Cut(key, ":")

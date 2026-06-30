@@ -1,8 +1,9 @@
 package install
 
 import (
+	"maps"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/config"
@@ -120,7 +121,7 @@ func PlanUpdates(cfg *config.Config, srcs []packages.PackageSource) ([]Dependenc
 				return nil, err
 			}
 			order := packages.MatchingVersions(published, "") // newest (publish order) first
-			currentIndex := indexOf(order, current)
+			currentIndex := slices.Index(order, current)
 			if currentIndex < 0 {
 				continue // unknown ordering: do not risk a downgrade
 			}
@@ -183,7 +184,7 @@ func PlanOutdated(cfg *config.Config, srcs []packages.PackageSource) ([]Outdated
 				return nil, err
 			}
 			order := packages.MatchingVersions(published, "") // newest first
-			currentIndex := indexOf(order, current)
+			currentIndex := slices.Index(order, current)
 			if currentIndex < 0 {
 				continue // unknown ordering: do not guess
 			}
@@ -251,19 +252,5 @@ func clone(m map[string]string) map[string]string {
 }
 
 func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func indexOf(s []string, v string) int {
-	for i, x := range s {
-		if x == v {
-			return i
-		}
-	}
-	return -1
+	return slices.Sorted(maps.Keys(m))
 }

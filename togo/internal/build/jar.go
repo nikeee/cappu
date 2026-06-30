@@ -14,7 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -146,7 +146,7 @@ func ExpandJarDirs(roots []string) []string {
 			continue
 		}
 		jars, _ := filepath.Glob(filepath.Join(root, "*.jar"))
-		sort.Strings(jars)
+		slices.Sort(jars)
 		out = append(out, jars...)
 	}
 	return out

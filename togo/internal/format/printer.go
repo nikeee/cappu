@@ -12,8 +12,9 @@
 package format
 
 import (
+	"cmp"
 	"errors"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/compiler"
@@ -446,9 +447,9 @@ func (p *printer) moduleNameList(names *compiler.NodeArray) Doc {
 }
 
 func (p *printer) importGroup(imports []*compiler.Node) Doc {
-	sorted := append([]*compiler.Node{}, imports...)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return p.entityName(sorted[i].AsImportDeclaration().Name) < p.entityName(sorted[j].AsImportDeclaration().Name)
+	sorted := slices.Clone(imports)
+	slices.SortStableFunc(sorted, func(a, b *compiler.Node) int {
+		return cmp.Compare(p.entityName(a.AsImportDeclaration().Name), p.entityName(b.AsImportDeclaration().Name))
 	})
 	seen := map[string]bool{}
 	var lines []Doc
@@ -516,8 +517,8 @@ func (p *printer) modifiers(mods *compiler.NodeArray, annoMode string) Doc {
 			keywords = append(keywords, m)
 		}
 	}
-	sort.SliceStable(keywords, func(i, j int) bool {
-		return rank(keywords[i].Kind) < rank(keywords[j].Kind)
+	slices.SortStableFunc(keywords, func(a, b *compiler.Node) int {
+		return cmp.Compare(rank(a.Kind), rank(b.Kind))
 	})
 	var parts []Doc
 	for _, a := range annotations {

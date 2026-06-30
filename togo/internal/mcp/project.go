@@ -9,7 +9,8 @@ package mcp
 // tests pass in-memory ones. Port of src/services/mcpProject.ts.
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/audit"
@@ -182,7 +183,7 @@ func (t *ProjectTools) Licenses() ([]McpLicenseRow, error) {
 		}
 		rows = append(rows, McpLicenseRow{Coordinate: string(p.Coordinates.String()), Licenses: licenses, SPDX: spdx})
 	}
-	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Coordinate < rows[j].Coordinate })
+	slices.SortStableFunc(rows, func(a, b McpLicenseRow) int { return cmp.Compare(a.Coordinate, b.Coordinate) })
 	return rows, nil
 }
 

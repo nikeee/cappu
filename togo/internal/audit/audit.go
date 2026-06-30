@@ -1,7 +1,8 @@
 package audit
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"github.com/nikeee/cappu/internal/packages"
 )
@@ -51,13 +52,11 @@ func AuditPackages(coordinates []packages.Coordinates, source AuditSource) (Audi
 	}
 
 	// worst severity first, then by coordinate for stable output
-	sort.SliceStable(report.Vulnerable, func(i, j int) bool {
-		byWorst := severityRank(worstSeverity(report.Vulnerable[i].Advisories)) -
-			severityRank(worstSeverity(report.Vulnerable[j].Advisories))
-		if byWorst != 0 {
-			return byWorst < 0
+	slices.SortStableFunc(report.Vulnerable, func(a, b PackageAdvisories) int {
+		if byWorst := severityRank(worstSeverity(a.Advisories)) - severityRank(worstSeverity(b.Advisories)); byWorst != 0 {
+			return byWorst
 		}
-		return report.Vulnerable[i].Coordinates.String() < report.Vulnerable[j].Coordinates.String()
+		return cmp.Compare(a.Coordinates.String(), b.Coordinates.String())
 	})
 	return report, nil
 }

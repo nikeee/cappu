@@ -1,7 +1,8 @@
 package compiler
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"strings"
 )
 
@@ -643,7 +644,7 @@ func generateBody(method *Node, cp *constantPool, program *Program, checker *Che
 	for _, o := range g.handlerOffsets {
 		addOffset(o)
 	}
-	sort.Slice(targetOffsets, func(a, b int) bool { return targetOffsets[a] < targetOffsets[b] })
+	slices.Sort(targetOffsets)
 	var stackMapTable *byteBuffer
 	if len(targetOffsets) > 0 {
 		writeVerification := func(buf *byteBuffer, d descriptor) {
@@ -692,13 +693,13 @@ func generateBody(method *Node, cp *constantPool, program *Program, checker *Che
 	var localVariables []localVarEntry
 	if emitDebugInfo {
 		localVariables = g.localVars
-		sort.SliceStable(localVariables, func(a, b int) bool {
-			ea := int(localVariables[a].startPc) + localVariables[a].length
-			eb := int(localVariables[b].startPc) + localVariables[b].length
+		slices.SortStableFunc(localVariables, func(a, b localVarEntry) int {
+			ea := int(a.startPc) + a.length
+			eb := int(b.startPc) + b.length
 			if ea != eb {
-				return ea < eb
+				return cmp.Compare(ea, eb)
 			}
-			return localVariables[a].slot < localVariables[b].slot
+			return cmp.Compare(a.slot, b.slot)
 		})
 	}
 

@@ -3,6 +3,7 @@ package packages
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -104,7 +105,7 @@ func TestResolveNearestWins(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := names(res.Packages)
-	if !contains(got, "org.b:b:1") || contains(got, "org.b:b:2") {
+	if !slices.Contains(got, "org.b:b:1") || slices.Contains(got, "org.b:b:2") {
 		t.Errorf("expected b:1 selected, b:2 rejected; got %v", got)
 	}
 	want := []VersionConflict{{Key: "org.b:b", Selected: "1", Rejected: "2", RejectedBy: coord("org.c:c:1")}}
@@ -233,13 +234,4 @@ func TestResolveTransitivePropagatesFetchError(t *testing.T) {
 	if len(res.Missing) != 0 {
 		t.Errorf("Missing = %v, want empty (a transient error is not a miss)", res.Missing)
 	}
-}
-
-func contains(s []string, v string) bool {
-	for _, x := range s {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
