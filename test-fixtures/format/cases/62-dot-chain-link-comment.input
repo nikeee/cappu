@@ -1,0 +1,12 @@
+package p;
+
+class C {
+  boolean testAccess(Class<?> klass) {
+    return klass
+        .getModule()
+        // isExported returns true if the package is either open or exported. Either one is
+        // sufficient
+        // to run the code (even though the documentation specifies --add-opens).
+        .isExported(klass.getPackageName(), C.class.getClassLoader().getUnnamedModule());
+  }
+}

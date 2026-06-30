@@ -1388,6 +1388,19 @@ class Printer {
   // ponytail: type-name prefixes (`ImmutableList.builder()...`) and stream
   // chains are not yet treated as units; those over-break. Add when a corpus
   // fixture needs them.
+  // A comment sitting before a `.link` in a dereference chain (between the prior
+  // selector and this one) stays before the dereference, own-line at the chain
+  // indent (gjf), not pushed into the link's argument list. Consumes such
+  // comments (those before the link's name) and renders them with forced breaks.
+  private dotLinkLead(namePos: number): Doc {
+    if (!this.hasCommentBefore(namePos)) return "";
+    const parts: Doc[] = [];
+    for (const c of this.commentsBefore(namePos)) {
+      parts.push(c.line ? c.text : reflow(c.text), hardline);
+    }
+    return concat(parts);
+  }
+
   private dotChain(root: Expression, trailing: Doc = ""): Doc {
     // Collect the chain's links without rendering them yet: a link's argument
     // list consumes comments, and comments must be consumed in source order
@@ -1416,6 +1429,7 @@ class Printer {
           // `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
           render: () =>
             concat([
+              this.dotLinkLead(this.start(pa.name)),
               ".",
               this.typeArguments(callExpr.typeArguments),
               name,
@@ -1427,7 +1441,11 @@ class Printer {
       } else if (cur.kind === SyntaxKind.PropertyAccessExpression) {
         const pa = cur as PropertyAccessExpression;
         const name = this.raw(pa.name);
-        links.unshift({ isCall: false, name, render: () => concat([".", name]) });
+        links.unshift({
+          isCall: false,
+          name,
+          render: () => concat([this.dotLinkLead(this.start(pa.name)), ".", name]),
+        });
         cur = pa.expression;
       } else {
         break;

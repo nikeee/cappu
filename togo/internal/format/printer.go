@@ -1557,6 +1557,24 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 	return p.dotChainTrailing(root, nil)
 }
 
+// dotLinkLead renders a comment that sits before a `.link` in a dereference
+// chain (between the prior selector and this one) own-line at the chain indent
+// (gjf), not pushed into the link's argument list. Consumes such comments.
+func (p *printer) dotLinkLead(namePos int) Doc {
+	if !p.hasCommentBefore(namePos) {
+		return text("")
+	}
+	var parts []Doc
+	for _, c := range p.commentsBefore(namePos) {
+		if c.line {
+			parts = append(parts, text(c.text), hardline)
+		} else {
+			parts = append(parts, reflow(c.text), hardline)
+		}
+	}
+	return concat(parts...)
+}
+
 func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	// Collect the chain's links WITHOUT rendering them yet: a link's argument
 	// list consumes comments, and comments must be consumed in source order (left
@@ -1593,7 +1611,7 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 				// Explicit method type arguments go between the dot and the name:
 				// `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
 				render: func() Doc {
-					return concat(text("."), p.typeArguments(ce.TypeArguments), text(name), p.argListTrailing(ce.Arguments, argTrailing))
+					return concat(p.dotLinkLead(p.start(pa.Name)), text("."), p.typeArguments(ce.TypeArguments), text(name), p.argListTrailing(ce.Arguments, argTrailing))
 				},
 			}}, links...)
 			cur = pa.Expression
@@ -1601,7 +1619,9 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 		case cur.Kind == compiler.PropertyAccessExpression:
 			pa := cur.AsPropertyAccessExpression()
 			name := p.raw(pa.Name)
-			links = append([]linkT{{isCall: false, name: name, render: func() Doc { return concat(text("."), text(name)) }}}, links...)
+			links = append([]linkT{{isCall: false, name: name, render: func() Doc {
+				return concat(p.dotLinkLead(p.start(pa.Name)), text("."), text(name))
+			}}}, links...)
 			cur = pa.Expression
 			continue
 		}
