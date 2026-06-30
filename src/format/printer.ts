@@ -1313,7 +1313,7 @@ class Printer {
   // A binary operator chain. gjf collects all operands at the same precedence
   // into one +4 level and breaks *before* each operator; the breaks fill when
   // every operand is short, else go one per line.
-  private binary(e: BinaryExpression): Doc {
+  private binary(e: BinaryExpression, trailing: Doc = ""): Doc {
     const prec = precedence(e.operatorToken);
     const operands: Expression[] = [];
     const operators: string[] = [];
@@ -1323,6 +1323,9 @@ class Printer {
     operators.forEach((op, i) => {
       parts.push(brk(fillMode, " ", ZERO), op, " ", this.node(operands[i + 1]));
     });
+    // A statement's trailing `;` rides inside the +4 level (gjf counts it in the
+    // level width), so `a && b;` breaks when the `;` is what tips it past 100.
+    if (trailing !== "") parts.push(trailing);
     return level(PLUS4, parts);
   }
 
@@ -1461,6 +1464,9 @@ class Printer {
     }
     if (e.kind === SyntaxKind.PropertyAccessExpression) {
       return this.dotChain(e, trailing);
+    }
+    if (e.kind === SyntaxKind.BinaryExpression) {
+      return this.binary(e as BinaryExpression, trailing);
     }
     if (e.kind === SyntaxKind.ObjectCreationExpression) {
       const oc = e as ObjectCreationExpression;

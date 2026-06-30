@@ -1,0 +1,11 @@
+package p;
+
+class C {
+  boolean isParamComment(Tok tok) {
+    return tok.isSlashStarComment() && tok.getText().matches("\\/\\*[A-Za-z0-9\\s_\\-]+=\\s*\\*\\/");
+  }
+
+  boolean fits(Tok tok) {
+    return tok.isSlashStarComment() && tok.getText().matches("short");
+  }
+}

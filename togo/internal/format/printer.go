@@ -1450,6 +1450,10 @@ func (p *printer) switchClause(c *compiler.SwitchClauseData, end int) Doc {
 // into one +4 level and breaks *before* each operator; the breaks fill when
 // every operand is short, else go one per line.
 func (p *printer) binary(node *compiler.Node) Doc {
+	return p.binaryTrailing(node, nil)
+}
+
+func (p *printer) binaryTrailing(node *compiler.Node, trailing Doc) Doc {
 	b := node.AsBinaryExpression()
 	prec := precedence(b.OperatorToken)
 	var operands []*compiler.Node
@@ -1459,6 +1463,11 @@ func (p *printer) binary(node *compiler.Node) Doc {
 	parts := []Doc{p.node(operands[0])}
 	for i, op := range operators {
 		parts = append(parts, brk(fill, " ", ZERO, nil), text(op), text(" "), p.node(operands[i+1]))
+	}
+	// A statement's trailing `;` rides inside the +4 level (gjf counts it in the
+	// level width), so `a && b;` breaks when the `;` is what tips it past 100.
+	if trailing != nil {
+		parts = append(parts, trailing)
 	}
 	return level(plus4, parts)
 }
@@ -1629,6 +1638,8 @@ func (p *printer) statementTail(e *compiler.Node, trailing Doc) Doc {
 		return p.callTrailing(ce, trailing)
 	case compiler.PropertyAccessExpression:
 		return p.dotChainTrailing(e, trailing)
+	case compiler.BinaryExpression:
+		return p.binaryTrailing(e, trailing)
 	case compiler.ObjectCreationExpression:
 		oc := e.AsObjectCreationExpression()
 		if oc.ClassBody == nil {
