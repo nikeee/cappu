@@ -1463,6 +1463,23 @@ class Printer {
       if (this.attachTrailingBlockComment(parts, a.end)) anyComment = true;
       return parts.length === 1 ? parts[0] : concat(parts);
     });
+    // A lone dot-chain argument (no comments): route the closing `)` into the
+    // chain so the chain's own break decision counts that `)` (rest-of-line).
+    // Otherwise the chain can sit at exactly the column limit while the trailing
+    // `)` overflows by one, where gjf would have broken the chain.
+    const only = args[0];
+    if (
+      args.length === 1 &&
+      !anyComment &&
+      (only.kind === SyntaxKind.PropertyAccessExpression ||
+        (only.kind === SyntaxKind.CallExpression &&
+          (only as CallExpression).expression.kind === SyntaxKind.PropertyAccessExpression))
+    ) {
+      return concat([
+        "(",
+        level(PLUS4, [brk("unified", "", ZERO), this.dotChain(only, concat([")", trailing]))]),
+      ]);
+    }
     return this.argsLike("(", items, ")", this.fillMode(anyComment, args), trailing);
   }
 

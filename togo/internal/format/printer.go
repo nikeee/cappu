@@ -1642,6 +1642,24 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 			as[i] = concat(parts...)
 		}
 	}
+	// A lone dot-chain argument (no comments): route the closing `)` into the
+	// chain so the chain's own break decision counts that `)` (rest-of-line).
+	// Otherwise the chain can sit at exactly the column limit while the trailing
+	// `)` overflows by one, where gjf would have broken the chain.
+	only := argNodes[0]
+	if len(argNodes) == 1 && !anyComment &&
+		(only.Kind == compiler.PropertyAccessExpression ||
+			(only.Kind == compiler.CallExpression &&
+				only.AsCallExpression().Expression.Kind == compiler.PropertyAccessExpression)) {
+		closeTok := Doc(text(")"))
+		if trailing != nil {
+			closeTok = concat(text(")"), trailing)
+		}
+		return concat(
+			text("("),
+			level(plus4, []Doc{brk(fillUnified, "", ZERO, nil), p.dotChainTrailing(only, closeTok)}),
+		)
+	}
 	return p.argsLikeTrailing("(", as, ")", p.fillMode(anyComment, argNodes), trailing)
 }
 
