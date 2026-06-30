@@ -1223,7 +1223,7 @@ func (p *printer) blockRest(b *compiler.BlockData, endPos int, allowTrailingBlan
 	// A comment on the same source line as the opening `{` stays on that line
 	// (gjf): `if (...) { // note`. Emit it before the indented body so it rides
 	// the brace line, and consume it here so listDocs does not re-emit it own-line.
-	var braceComment Doc = text("")
+	var braceComment = text("")
 	lead := hardline
 	if b.Statements.Len() > 0 {
 		braceComment = p.braceTrailingComment(b.Statements.Nodes[0].Pos)
@@ -1842,7 +1842,7 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 				parts = append(parts, text(pc), text(" "))
 			}
 		}
-		var follow Doc = text(",")
+		var follow = text(",")
 		if i == lastI {
 			if trailing != nil {
 				follow = concat(text(")"), trailing)
