@@ -1,0 +1,13 @@
+package p;
+
+class C {
+    void m(String resourceName) throws Exception {
+        try (InputStream stream =
+                SomeClassWithLongName.class.getClassLoader().getResourceAsStream(resourceName)) {
+            use(stream);
+        }
+        try (InputStream s = open()) {
+            use(s);
+        }
+    }
+}
