@@ -1766,15 +1766,36 @@ class Printer {
   // A ternary. gjf keeps the condition on the line and breaks before `?` and `:`
   // (UNIFIED) onto +4 continuation lines.
   private conditional(e: ConditionalExpression): Doc {
-    return level(PLUS4, [
+    const parts: Doc[] = [
       this.node(e.condition),
       brk("unified", " ", ZERO),
       "? ",
       this.node(e.whenTrue),
-      brk("unified", " ", ZERO),
-      ": ",
-      this.node(e.whenFalse),
-    ]);
+    ];
+    // A comment trailing the then-branch on its line stays there (gjf); a line
+    // comment forces the `:` onto the next line (it would otherwise comment it out).
+    const tc = this.trailingComment(e.whenTrue.end);
+    if (tc) {
+      parts.push(" ", tc.line ? tc.text : tc.text, tc.line ? hardline : brk("unified", " ", ZERO));
+    } else {
+      parts.push(brk("unified", " ", ZERO));
+    }
+    parts.push(": ", this.node(e.whenFalse));
+    return level(PLUS4, parts);
+  }
+
+  // Consume and return a comment trailing `endPos` on the same source line (a
+  // line or block comment), or undefined if the next pending comment is on a
+  // later line. Used where a trailing comment must stay attached to a sub-part.
+  private trailingComment(endPos: number): Comment | undefined {
+    const t = this.comments[this.ci];
+    // Only whitespace (no newline, no intervening token) may separate the part
+    // from its trailing comment - else the comment belongs to something later.
+    if (t && !t.ownLine && t.pos >= endPos && /^[ \t]*$/.test(this.text.slice(endPos, t.pos))) {
+      this.ci++;
+      return t;
+    }
+    return undefined;
   }
 
   private instanceOf(e: InstanceofExpression): Doc {

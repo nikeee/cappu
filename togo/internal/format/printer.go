@@ -2043,15 +2043,48 @@ func (p *printer) lambda(e *compiler.LambdaExpressionData) Doc {
 // conditional lays out a ternary: the condition stays on the line, `?` and `:`
 // break onto +4 continuation lines (UNIFIED).
 func (p *printer) conditional(e *compiler.ConditionalExpressionData) Doc {
-	return level(plus4, []Doc{
+	parts := []Doc{
 		p.node(e.Condition),
 		brk(fillUnified, " ", ZERO, nil),
 		text("? "),
 		p.node(e.WhenTrue),
-		brk(fillUnified, " ", ZERO, nil),
-		text(": "),
-		p.node(e.WhenFalse),
-	})
+	}
+	// A comment trailing the then-branch on its line stays there (gjf); a line
+	// comment forces the `:` onto the next line (it would otherwise comment it out).
+	if tc, ok := p.trailingComment(e.WhenTrue.End); ok {
+		parts = append(parts, text(" "), text(tc.text))
+		if tc.line {
+			parts = append(parts, hardline)
+		} else {
+			parts = append(parts, brk(fillUnified, " ", ZERO, nil))
+		}
+	} else {
+		parts = append(parts, brk(fillUnified, " ", ZERO, nil))
+	}
+	parts = append(parts, text(": "), p.node(e.WhenFalse))
+	return level(plus4, parts)
+}
+
+// trailingComment consumes and returns a comment trailing endPos on the same
+// source line (only whitespace between), or ok=false otherwise.
+func (p *printer) trailingComment(endPos int) (comment, bool) {
+	if p.ci < len(p.comments) {
+		t := p.comments[p.ci]
+		if !t.ownLine && t.pos >= endPos && onlySpaces(p.text[endPos:t.pos]) {
+			p.ci++
+			return t, true
+		}
+	}
+	return comment{}, false
+}
+
+func onlySpaces(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] != ' ' && s[i] != '\t' {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *printer) instanceOf(e *compiler.InstanceofExpressionData) Doc {

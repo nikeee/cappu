@@ -1,0 +1,11 @@
+package p;
+
+class C {
+    void m(Tok t, String originalTokText) {
+        String tokText =
+                t.kind() == TokenKind.STRINGLITERAL
+                        ? t.stringVal() // Unicode escapes removed.
+                        : originalTokText;
+        int indent = token.value().isEmpty() ? 0 : 2; // No indent for Markdown
+    }
+}
