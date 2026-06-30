@@ -1,0 +1,15 @@
+package p;
+
+class C {
+    Object m() {
+        return (char[])
+                instanceFieldWithLongName
+                        .getClass()
+                        .getMethod("getRawCharacters", int.class, int.class)
+                        .invoke(instanceFieldWithLongName, beginIndex, endIndex);
+    }
+
+    Object n() {
+        return (char[]) shortOne;
+    }
+}

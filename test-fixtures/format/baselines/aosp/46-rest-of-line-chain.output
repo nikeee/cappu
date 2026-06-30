@@ -1,0 +1,11 @@
+package p;
+
+class C {
+    void m(String theInputLine) {
+        Matcher theMatcherValue =
+                theListItemStartPattern.matcher(theInputLineThatIsBeingMatchedAgainstThePattern);
+        theResultFieldValue =
+                someHelperObjectInstance.computeTheResultUsing(
+                        firstArgumentValue, theSecondArgument);
+    }
+}
