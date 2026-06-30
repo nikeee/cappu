@@ -1,0 +1,8 @@
+package p;
+
+class C {
+    String m() {
+        String name = new Pretty(/*writer*/ null, /*sourceOutput*/ true).operatorName(tag);
+        return name;
+    }
+}

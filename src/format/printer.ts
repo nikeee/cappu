@@ -1361,7 +1361,12 @@ class Printer {
   // chains are not yet treated as units; those over-break. Add when a corpus
   // fixture needs them.
   private dotChain(root: Expression, trailing: Doc = ""): Doc {
-    const links: { doc: Doc; isCall: boolean; name: string }[] = [];
+    // Collect the chain's links without rendering them yet: a link's argument
+    // list consumes comments, and comments must be consumed in source order
+    // (left to right). Rendering eagerly here would consume the OUTER call's
+    // args before the receiver's, mis-attributing a receiver-arg comment (e.g.
+    // `new Pretty(/*writer*/ null, /*sourceOutput*/ true).operatorName(tag)`).
+    const links: { isCall: boolean; name: string; render: () => Doc }[] = [];
     let cur: Node = root;
     let trailingRouted = false;
     for (;;) {
@@ -1371,37 +1376,39 @@ class Printer {
       ) {
         const callExpr = cur as CallExpression;
         const pa = callExpr.expression as PropertyAccessExpression;
-        // The rightmost link (processed first) carries the statement's trailing
-        // token inside its argument list, so the call's args wrap when the whole
-        // `...(...);` run overflows (rest-of-line rule).
+        // The rightmost link (the last in source order) carries the statement's
+        // trailing token inside its argument list, so the call's args wrap when
+        // the whole `...(...);` run overflows (rest-of-line rule).
         const rightmost = links.length === 0;
+        const name = this.raw(pa.name);
         links.unshift({
+          isCall: true,
+          name,
           // Explicit method type arguments go between the dot and the name:
           // `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
-          doc: concat([
-            ".",
-            this.typeArguments(callExpr.typeArguments),
-            this.raw(pa.name),
-            this.argList(callExpr.arguments, rightmost ? trailing : ""),
-          ]),
-          isCall: true,
-          name: this.raw(pa.name),
+          render: () =>
+            concat([
+              ".",
+              this.typeArguments(callExpr.typeArguments),
+              name,
+              this.argList(callExpr.arguments, rightmost ? trailing : ""),
+            ]),
         });
         if (rightmost && trailing !== "") trailingRouted = true;
         cur = pa.expression;
       } else if (cur.kind === SyntaxKind.PropertyAccessExpression) {
         const pa = cur as PropertyAccessExpression;
-        links.unshift({
-          doc: concat([".", this.raw(pa.name)]),
-          isCall: false,
-          name: this.raw(pa.name),
-        });
+        const name = this.raw(pa.name);
+        links.unshift({ isCall: false, name, render: () => concat([".", name]) });
         cur = pa.expression;
       } else {
         break;
       }
     }
+    // Render the base (leftmost receiver) first, then each link in source order,
+    // so comments are consumed left to right.
     const base = this.node(cur);
+    const linkDocs = links.map(l => l.render());
     // A trailing token not routed into a rightmost call's args (e.g. the chain
     // ends in a field access) is appended after the whole chain.
     const finish = (doc: Doc): Doc =>
@@ -1417,7 +1424,7 @@ class Printer {
     // path below, gated by the type-name prefix).
     const baseIsNew = cur.kind === SyntaxKind.ObjectCreationExpression;
     if (callCount === 1 && !baseIsCall && !baseIsNew) {
-      return finish(concat([base, ...links.map(l => l.doc)]));
+      return finish(concat([base, ...linkDocs]));
     }
     // The leading links glued to the base (no break before them): a type-name
     // prefix (`ImmutableList.builder()` stays a unit), else just the first link
@@ -1444,7 +1451,7 @@ class Printer {
     const parts: Doc[] = [base];
     links.forEach((l, i) => {
       if (i >= glue) parts.push(brk("unified", "", ZERO));
-      parts.push(l.doc);
+      parts.push(linkDocs[i]);
     });
     return finish(level(PLUS4, parts));
   }

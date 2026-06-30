@@ -1509,10 +1509,15 @@ func (p *printer) dotChain(root *compiler.Node) Doc {
 }
 
 func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
+	// Collect the chain's links WITHOUT rendering them yet: a link's argument
+	// list consumes comments, and comments must be consumed in source order (left
+	// to right). Rendering eagerly here would consume the OUTER call's args before
+	// the receiver's, mis-attributing a receiver-arg comment (e.g.
+	// `new Pretty(/*writer*/ null, /*sourceOutput*/ true).operatorName(tag)`).
 	type linkT struct {
-		doc    Doc
 		isCall bool
 		name   string
+		render func() Doc
 	}
 	var links []linkT
 	cur := root
@@ -1523,8 +1528,8 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 			cur.AsCallExpression().Expression.Kind == compiler.PropertyAccessExpression:
 			ce := cur.AsCallExpression()
 			pa := ce.Expression.AsPropertyAccessExpression()
-			// The rightmost link (processed first) carries the statement's trailing
-			// token inside its argument list (rest-of-line rule).
+			// The rightmost link (last in source order) carries the statement's
+			// trailing token inside its argument list (rest-of-line rule).
 			var argTrailing Doc
 			if len(links) == 0 {
 				argTrailing = trailing
@@ -1532,24 +1537,34 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 					trailingRouted = true
 				}
 			}
+			name := p.raw(pa.Name)
 			links = append([]linkT{{
+				isCall: true,
+				name:   name,
 				// Explicit method type arguments go between the dot and the name:
 				// `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
-				doc:    concat(text("."), p.typeArguments(ce.TypeArguments), text(p.raw(pa.Name)), p.argListTrailing(ce.Arguments, argTrailing)),
-				isCall: true,
-				name:   p.raw(pa.Name),
+				render: func() Doc {
+					return concat(text("."), p.typeArguments(ce.TypeArguments), text(name), p.argListTrailing(ce.Arguments, argTrailing))
+				},
 			}}, links...)
 			cur = pa.Expression
 			continue
 		case cur.Kind == compiler.PropertyAccessExpression:
 			pa := cur.AsPropertyAccessExpression()
-			links = append([]linkT{{doc: concat(text("."), text(p.raw(pa.Name))), isCall: false, name: p.raw(pa.Name)}}, links...)
+			name := p.raw(pa.Name)
+			links = append([]linkT{{isCall: false, name: name, render: func() Doc { return concat(text("."), text(name)) }}}, links...)
 			cur = pa.Expression
 			continue
 		}
 		break
 	}
+	// Render the base (leftmost receiver) first, then each link in source order,
+	// so comments are consumed left to right.
 	base := p.node(cur)
+	linkDocs := make([]Doc, len(links))
+	for i, l := range links {
+		linkDocs[i] = l.render()
+	}
 	// A trailing token not routed into a rightmost call's args (chain ends in a
 	// field access) is appended after the whole chain.
 	finish := func(doc Doc) Doc {
@@ -1573,9 +1588,7 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	baseIsNew := cur.Kind == compiler.ObjectCreationExpression
 	if callCount == 1 && !baseIsCall && !baseIsNew {
 		parts := []Doc{base}
-		for _, l := range links {
-			parts = append(parts, l.doc)
-		}
+		parts = append(parts, linkDocs...)
 		return finish(concat(parts...))
 	}
 	// The leading links glued to the base (no break before them): a type-name
@@ -1608,11 +1621,11 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 		}
 	}
 	parts := []Doc{base}
-	for i, l := range links {
+	for i := range links {
 		if i >= glue {
 			parts = append(parts, brk(fillUnified, "", ZERO, nil))
 		}
-		parts = append(parts, l.doc)
+		parts = append(parts, linkDocs[i])
 	}
 	return finish(level(plus4, parts))
 }
