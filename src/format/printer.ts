@@ -1159,14 +1159,22 @@ class Printer {
       // The first resource stays on the `try (` line; subsequent ones break
       // before themselves at +4 (one per line), each `;`-terminated. A trailing
       // `;` after the last resource in source is preserved as `; )`.
-      const inner: Doc[] = [];
-      s.resources.forEach((r, i) => {
-        if (i > 0) inner.push(";", brk("unified", " ", ZERO));
-        inner.push(this.resource(r));
-      });
       const last = s.resources[s.resources.length - 1];
       const trailingSemi = this.text[skipTrivia(this.text, last.end)] === ";";
-      parts.push(" (", level(PLUS4, inner), trailingSemi ? "; )" : ")");
+      const close = trailingSemi ? "; )" : ")";
+      if (s.resources.length === 1) {
+        // A single resource stays on the `try (` line; its own initializer level
+        // supplies the +4 continuation indent, so no extra resource-list level
+        // (which would double-indent the broken initializer to +8).
+        parts.push(" (", this.resource(s.resources[0]), close);
+      } else {
+        const inner: Doc[] = [];
+        s.resources.forEach((r, i) => {
+          if (i > 0) inner.push(";", brk("unified", " ", ZERO));
+          inner.push(this.resource(r));
+        });
+        parts.push(" (", level(PLUS4, inner), close);
+      }
     }
     parts.push(" ", this.block(s.tryBlock));
     for (const c of s.catchClauses) {
@@ -1188,12 +1196,18 @@ class Printer {
 
   private resource(r: Resource): Doc {
     if (r.expression) return this.node(r.expression);
-    return concat([
+    const head = concat([
       this.modifiers(r.modifiers),
       r.type ? concat([this.type(r.type), " "]) : "",
       r.name ? this.raw(r.name) : "",
-      r.initializer ? concat([" = ", this.node(r.initializer)]) : "",
     ]);
+    if (!r.initializer) return head;
+    // Like a variable declarator, a long initializer folds onto a +4
+    // continuation line after `=` (gjf), rather than breaking the RHS in place.
+    if (r.initializer.kind === SyntaxKind.ArrayInitializer) {
+      return concat([head, " = ", this.node(r.initializer)]);
+    }
+    return concat([head, " =", level(PLUS4, [line, this.node(r.initializer)])]);
   }
 
   private switchLike(expr: Expression, clauses: NodeArray<SwitchClause>, endPos: number): Doc {

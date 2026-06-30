@@ -1266,19 +1266,26 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 		// before themselves at +4 (one per line), each `;`-terminated. A trailing
 		// `;` after the last resource in source is preserved as `; )`.
 		res := nodes(s.Resources)
-		var inner []Doc
-		for i, r := range res {
-			if i > 0 {
-				inner = append(inner, text(";"), brk(fillUnified, " ", ZERO, nil))
-			}
-			inner = append(inner, p.resource(r.AsResource()))
-		}
 		last := res[len(res)-1]
 		closeTok := ")"
 		if idx := compiler.SkipTrivia(p.text, last.End); idx < len(p.text) && p.text[idx] == ';' {
 			closeTok = "; )"
 		}
-		parts = append(parts, text(" ("), level(plus4, inner), text(closeTok))
+		if len(res) == 1 {
+			// A single resource stays on the `try (` line; its own initializer level
+			// supplies the +4 continuation indent, so no extra resource-list level
+			// (which would double-indent the broken initializer to +8).
+			parts = append(parts, text(" ("), p.resource(res[0].AsResource()), text(closeTok))
+		} else {
+			var inner []Doc
+			for i, r := range res {
+				if i > 0 {
+					inner = append(inner, text(";"), brk(fillUnified, " ", ZERO, nil))
+				}
+				inner = append(inner, p.resource(r.AsResource()))
+			}
+			parts = append(parts, text(" ("), level(plus4, inner), text(closeTok))
+		}
 	}
 	parts = append(parts, text(" "), p.block(s.TryBlock.AsBlock(), s.TryBlock.End))
 	for _, cn := range nodes(s.CatchClauses) {
@@ -1299,17 +1306,22 @@ func (p *printer) resource(r *compiler.ResourceData) Doc {
 	if r.Expression != nil {
 		return p.node(r.Expression)
 	}
-	parts := []Doc{p.modifiers(r.Modifiers, "inline")}
+	head := []Doc{p.modifiers(r.Modifiers, "inline")}
 	if r.Type != nil {
-		parts = append(parts, concat(p.typ(r.Type), text(" ")))
+		head = append(head, concat(p.typ(r.Type), text(" ")))
 	}
 	if r.Name != nil {
-		parts = append(parts, text(p.raw(r.Name)))
+		head = append(head, text(p.raw(r.Name)))
 	}
-	if r.Initializer != nil {
-		parts = append(parts, concat(text(" = "), p.node(r.Initializer)))
+	if r.Initializer == nil {
+		return concat(head...)
 	}
-	return concat(parts...)
+	// Like a variable declarator, a long initializer folds onto a +4
+	// continuation line after `=` (gjf), rather than breaking the RHS in place.
+	if r.Initializer.Kind == compiler.ArrayInitializer {
+		return concat(concat(head...), text(" = "), p.node(r.Initializer))
+	}
+	return concat(concat(head...), text(" ="), level(plus4, []Doc{line, p.node(r.Initializer)}))
 }
 
 func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, endPos int) Doc {
