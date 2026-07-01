@@ -134,6 +134,29 @@ func TestDeprecatedModifier(t *testing.T) {
 	}
 }
 
+func TestRegexSinkTokens(t *testing.T) {
+	out := semTokens(strings.Join([]string{
+		"class C {",
+		"  void m() {",
+		`    java.util.regex.Pattern.compile("\\d+");`,
+		`    "x".matches("[a-z]");`,
+		`    "a,b".split(",");`,
+		`    String.valueOf(1);`,
+		"  }",
+		"}",
+	}, "\n"))
+	var regexps []string
+	for _, tk := range out {
+		if tk.typ == "regexp" {
+			regexps = append(regexps, tk.text)
+		}
+	}
+	want := []string{`"\\d+"`, `"[a-z]"`, `","`}
+	if strings.Join(regexps, "|") != strings.Join(want, "|") {
+		t.Errorf("regexp tokens = %v, want %v", regexps, want)
+	}
+}
+
 func TestEntriesSortedAndResolvedOnly(t *testing.T) {
 	out := semTokens("class C { void m() { unknownThing(); int x = 1; } }")
 	for _, tk := range out {

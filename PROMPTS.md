@@ -501,3 +501,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-01 19:16 — any other special markers?
 - 2026-07-01 19:16 — yes
 - 2026-07-01 19:24 — do it
+- 2026-07-01 19:36 — do 1 and continue with the rest

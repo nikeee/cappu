@@ -15,7 +15,36 @@ import (
 // TokenTypes is the semantic-token legend the server advertises.
 var TokenTypes = []string{
 	"namespace", "class", "interface", "enum", "enumMember", "typeParameter",
-	"type", "method", "property", "parameter", "variable",
+	"type", "method", "property", "parameter", "variable", "regexp",
+}
+
+// regexSinks lists standard-library methods whose named string parameters are
+// regular expressions, keyed by "OwnerSimpleName#method" -> regex arg indices.
+// A string literal passed at one of these positions is tokenized as `regexp`
+// so clients can highlight the pattern (Java has no regex literal syntax).
+var regexSinks = map[string]map[int]bool{
+	"Pattern#compile":     {0: true},
+	"Pattern#matches":     {0: true},
+	"String#matches":      {0: true},
+	"String#split":        {0: true},
+	"String#replaceAll":   {0: true},
+	"String#replaceFirst": {0: true},
+}
+
+// enclosingTypeName returns the simple name of the type declaration enclosing a
+// declaration node, or "" if there is none.
+func enclosingTypeName(node *compiler.Node) string {
+	for n := node.Parent; n != nil; n = n.Parent {
+		switch n.Kind {
+		case compiler.ClassDeclaration, compiler.InterfaceDeclaration, compiler.EnumDeclaration,
+			compiler.RecordDeclaration, compiler.AnnotationTypeDeclaration:
+			if name := declName(n); name != nil {
+				return name.AsIdentifier().Text
+			}
+			return ""
+		}
+	}
+	return ""
 }
 
 // TokenModifiers is the semantic-token modifier legend.
@@ -143,6 +172,26 @@ func GetSemanticTokens(checker *compiler.Checker, sourceFile *compiler.Node) []S
 						TokenType:      tokenType,
 						TokenModifiers: modifiersOf(symbol, isDeclarationName),
 					})
+				}
+			}
+		}
+		if node.Kind == compiler.CallExpression {
+			if method := checker.ResolveCall(node); method != nil {
+				methodName := ""
+				if mn := declName(method); mn != nil {
+					methodName = mn.AsIdentifier().Text
+				}
+				if indices, ok := regexSinks[enclosingTypeName(method)+"#"+methodName]; ok {
+					if args := node.AsCallExpression().Arguments; args != nil {
+						for i, arg := range args.Nodes {
+							if indices[i] && arg.Kind == compiler.StringLiteral {
+								start := compiler.SkipTrivia(text, arg.Pos)
+								if length := arg.End - start; length > 0 {
+									entries = append(entries, SemanticTokenEntry{Offset: start, Length: length, TokenType: typeIndex("regexp"), TokenModifiers: 0})
+								}
+							}
+						}
+					}
 				}
 			}
 		}

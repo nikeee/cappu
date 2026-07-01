@@ -7,6 +7,7 @@ import { symbolDeprecation } from "../compiler/deprecation.ts";
 import { forEachChild } from "../compiler/parser.ts";
 import { getSourceFileOfNode } from "../compiler/resolver.ts";
 import {
+  type CallExpression,
   type Identifier,
   type Node,
   type SourceFile,
@@ -30,6 +31,7 @@ export const TOKEN_TYPES = [
   "property",
   "parameter",
   "variable",
+  "regexp",
 ] as const;
 
 export const TOKEN_MODIFIERS = [
@@ -96,6 +98,34 @@ function modifiersOf(symbol: Symbol, isDeclarationName: boolean): number {
   return bits;
 }
 
+// Standard-library methods whose named string parameters are regular
+// expressions, keyed by "OwnerSimpleName#method" -> regex argument indices.
+// A string literal passed at one of these positions is tokenized as `regexp`
+// so clients can highlight the pattern (Java has no regex literal syntax).
+const REGEX_SINKS: Record<string, ReadonlySet<number>> = {
+  "Pattern#compile": new Set([0]),
+  "Pattern#matches": new Set([0]),
+  "String#matches": new Set([0]),
+  "String#split": new Set([0]),
+  "String#replaceAll": new Set([0]),
+  "String#replaceFirst": new Set([0]),
+};
+
+// The simple name of the type declaration enclosing a declaration node.
+function enclosingTypeName(node: Node): string | undefined {
+  for (let n = node.parent; n; n = n.parent) {
+    switch (n.kind) {
+      case SyntaxKind.ClassDeclaration:
+      case SyntaxKind.InterfaceDeclaration:
+      case SyntaxKind.EnumDeclaration:
+      case SyntaxKind.RecordDeclaration:
+      case SyntaxKind.AnnotationTypeDeclaration:
+        return (n as { name?: Identifier }).name?.text;
+    }
+  }
+  return undefined;
+}
+
 export function getSemanticTokens(checker: Checker, sourceFile: SourceFile): SemanticTokenEntry[] {
   const entries: SemanticTokenEntry[] = [];
   const visit = (node: Node): void => {
@@ -116,6 +146,23 @@ export function getSemanticTokens(checker: Checker, sourceFile: SourceFile): Sem
             tokenType,
             tokenModifiers: modifiersOf(symbol, isDeclarationName),
           });
+        }
+      }
+    }
+    if (node.kind === SyntaxKind.CallExpression) {
+      const call = node as CallExpression;
+      const method = checker.resolveCall(call);
+      const indices = method && REGEX_SINKS[`${enclosingTypeName(method)}#${method.name?.text}`];
+      if (indices) {
+        for (const i of indices) {
+          const arg = call.arguments[i];
+          if (arg?.kind === SyntaxKind.StringLiteral) {
+            const start = skipTrivia(sourceFile.text, arg.pos);
+            const length = arg.end - start;
+            if (length > 0) {
+              entries.push({ offset: start, length, tokenType: TYPE_INDEX["regexp"]!, tokenModifiers: 0 });
+            }
+          }
         }
       }
     }

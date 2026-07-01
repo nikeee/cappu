@@ -93,6 +93,23 @@ test("deprecated modifier flags every occurrence of a @Deprecated symbol", () =>
   for (const t of out.filter(t => t.text === "cur")) expect(t.mods).not.toContain("deprecated");
 });
 
+test("string literals passed to regex sinks are tokenized as regexp", () => {
+  const out = tokens(
+    [
+      "class C {",
+      "  void m() {",
+      '    java.util.regex.Pattern.compile("\\\\d+");',
+      '    "x".matches("[a-z]");',
+      '    "a,b".split(",");',
+      '    String.valueOf(1);', // not a regex sink
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+  const regexps = out.filter(t => t.type === "regexp").map(t => t.text);
+  expect(regexps).toEqual(['"\\\\d+"', '"[a-z]"', '","']);
+});
+
 test("entries are sorted and cover only resolved identifiers", () => {
   const out = tokens("class C { void m() { unknownThing(); int x = 1; } }");
   expect(out.some(t => t.text === "unknownThing")).toBe(false);
