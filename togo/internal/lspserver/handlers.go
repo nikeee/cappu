@@ -132,6 +132,16 @@ func (s *Server) onHover(params json.RawMessage) (any, *lsp.ResponseError) {
 		doc, _ = s.checker.GetDocumentation(symbol)
 	}
 	value := "```java\n" + text + "\n```"
+	if dep, ok := compiler.SymbolDeprecation(symbol); ok {
+		note := "**Deprecated.**"
+		if dep.ForRemoval {
+			note = "**Deprecated** (for removal)."
+		}
+		if dep.HasSince {
+			note += " Since " + dep.Since + "."
+		}
+		value += "\n\n" + note
+	}
 	if doc != "" {
 		value += "\n\n" + doc
 	}
@@ -146,7 +156,11 @@ func (s *Server) onCompletion(params json.RawMessage) (any, *lsp.ResponseError) 
 	}
 	var out []lsp.CompletionItem
 	for _, it := range services.GetCompletions(s.program, s.checker, sourceFile, offset, s.config) {
-		out = append(out, lsp.CompletionItem{Label: it.Label, Kind: int(it.Kind)})
+		item := lsp.CompletionItem{Label: it.Label, Kind: int(it.Kind)}
+		if it.Deprecated {
+			item.Tags = []int{lsp.CompletionItemTagDeprecated}
+		}
+		out = append(out, item)
 	}
 	if out == nil {
 		out = []lsp.CompletionItem{}
@@ -261,7 +275,7 @@ func (s *Server) onWorkspaceSymbol(params json.RawMessage) (any, *lsp.ResponseEr
 	flatten = func(uri string, symbols []lsp.DocumentSymbol, container string) {
 		for _, sym := range symbols {
 			if strings.Contains(strings.ToLower(sym.Name), query) {
-				info := lsp.SymbolInformation{Name: sym.Name, Kind: int(sym.Kind), Location: lsp.Location{URI: uri, Range: sym.Range}, ContainerName: container}
+				info := lsp.SymbolInformation{Name: sym.Name, Kind: int(sym.Kind), Location: lsp.Location{URI: uri, Range: sym.Range}, ContainerName: container, Tags: sym.Tags}
 				results = append(results, info)
 			}
 			if len(sym.Children) > 0 {

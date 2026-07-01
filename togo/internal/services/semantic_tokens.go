@@ -19,7 +19,7 @@ var TokenTypes = []string{
 }
 
 // TokenModifiers is the semantic-token modifier legend.
-var TokenModifiers = []string{"declaration", "static", "readonly", "defaultLibrary"}
+var TokenModifiers = []string{"declaration", "static", "readonly", "defaultLibrary", "deprecated"}
 
 func typeIndex(name string) int {
 	for i, t := range TokenTypes {
@@ -35,6 +35,7 @@ const (
 	modStatic         = 1 << 1
 	modReadonly       = 1 << 2
 	modDefaultLibrary = 1 << 3
+	modDeprecated     = 1 << 4
 )
 
 // SemanticTokenEntry is one classified identifier span.
@@ -111,6 +112,9 @@ func modifiersOf(symbol *compiler.Symbol, isDeclarationName bool) int {
 		if compiler.IsSyntheticURI(compiler.URI(compiler.GetSourceFileOfNode(declaration).AsSourceFile().FileName)) {
 			bits |= modDefaultLibrary
 		}
+	}
+	if _, ok := compiler.SymbolDeprecation(symbol); ok {
+		bits |= modDeprecated
 	}
 	return bits
 }

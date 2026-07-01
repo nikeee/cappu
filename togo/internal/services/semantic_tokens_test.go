@@ -111,6 +111,29 @@ func TestStaticFinalAndDefaultLibrary(t *testing.T) {
 	}
 }
 
+func TestDeprecatedModifier(t *testing.T) {
+	out := semTokens(strings.Join([]string{
+		"class C {",
+		"  @Deprecated int old;",
+		"  int cur;",
+		"  @Deprecated void gone() {}",
+		"  void m() { gone(); int x = old + cur; }",
+		"}",
+	}, "\n"))
+	for _, tk := range out {
+		switch tk.text {
+		case "old", "gone":
+			if !hasMod(tk.mods, "deprecated") {
+				t.Errorf("%s should be deprecated, got %v", tk.text, tk.mods)
+			}
+		case "cur":
+			if hasMod(tk.mods, "deprecated") {
+				t.Errorf("cur should not be deprecated, got %v", tk.mods)
+			}
+		}
+	}
+}
+
 func TestEntriesSortedAndResolvedOnly(t *testing.T) {
 	out := semTokens("class C { void m() { unknownThing(); int x = 1; } }")
 	for _, tk := range out {

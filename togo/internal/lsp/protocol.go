@@ -143,7 +143,12 @@ const (
 	SeverityHint        = 4
 )
 
-const DiagnosticTagUnnecessary = 1
+const (
+	DiagnosticTagUnnecessary = 1
+	DiagnosticTagDeprecated  = 2
+)
+
+const CompletionItemTagDeprecated = 1
 
 type Diagnostic struct {
 	Range    Range  `json:"range"`
@@ -175,6 +180,7 @@ type Hover struct {
 type CompletionItem struct {
 	Label string `json:"label"`
 	Kind  int    `json:"kind"`
+	Tags  []int  `json:"tags,omitempty"`
 }
 
 type TextEdit struct {
@@ -274,6 +280,7 @@ type SymbolInformation struct {
 	Kind          int      `json:"kind"`
 	Location      Location `json:"location"`
 	ContainerName string   `json:"containerName,omitempty"`
+	Tags          []int    `json:"tags,omitempty"`
 }
 
 type ReferenceParams struct {

@@ -3,6 +3,7 @@
 // position-free; the LSP server encodes the entries into the wire format.
 
 import type { Checker } from "../compiler/checker.ts";
+import { symbolDeprecation } from "../compiler/deprecation.ts";
 import { forEachChild } from "../compiler/parser.ts";
 import { getSourceFileOfNode } from "../compiler/resolver.ts";
 import {
@@ -31,7 +32,13 @@ export const TOKEN_TYPES = [
   "variable",
 ] as const;
 
-export const TOKEN_MODIFIERS = ["declaration", "static", "readonly", "defaultLibrary"] as const;
+export const TOKEN_MODIFIERS = [
+  "declaration",
+  "static",
+  "readonly",
+  "defaultLibrary",
+  "deprecated",
+] as const;
 
 const TYPE_INDEX = Object.fromEntries(TOKEN_TYPES.map((t, i) => [t, i]));
 const MOD_BIT = Object.fromEntries(TOKEN_MODIFIERS.map((m, i) => [m, 1 << i]));
@@ -85,6 +92,7 @@ function modifiersOf(symbol: Symbol, isDeclarationName: boolean): number {
   if (declaration && isSyntheticUri(getSourceFileOfNode(declaration).fileName)) {
     bits |= MOD_BIT["defaultLibrary"]!;
   }
+  if (symbolDeprecation(symbol)) bits |= MOD_BIT["deprecated"]!;
   return bits;
 }
 

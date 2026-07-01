@@ -496,3 +496,8 @@ how about:
 ```
 maybe the path should just be a directory and default to ./dist?
 - 2026-07-01 14:12 — add e2e tests that check whether a valid file is emitted
+- 2026-07-01 19:11 — in the lsp, if i use a deprecated function, is it rendered as crossed-out in the client?
+- 2026-07-01 19:11 — yes
+- 2026-07-01 19:16 — any other special markers?
+- 2026-07-01 19:16 — yes
+- 2026-07-01 19:24 — do it

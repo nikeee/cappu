@@ -24,10 +24,10 @@ type DeprecatedUse struct {
 	ForRemoval bool
 }
 
-// readDeprecation reads a @Deprecated annotation off a declaration's modifiers,
+// ReadDeprecation reads a @Deprecated annotation off a declaration's modifiers,
 // returning its since/forRemoval; ok is false when not deprecated. Matches the
 // annotation by simple name (the standard java.lang.Deprecated).
-func readDeprecation(declaration *Node) (Deprecation, bool) {
+func ReadDeprecation(declaration *Node) (Deprecation, bool) {
 	for _, m := range arrayNodes(declModifiers(declaration)) {
 		if m.Kind != Annotation {
 			continue
@@ -55,4 +55,22 @@ func readDeprecation(declaration *Node) (Deprecation, bool) {
 		return dep, true
 	}
 	return Deprecation{}, false
+}
+
+// SymbolDeprecation returns the deprecation of a symbol's declaration; ok is
+// false when not deprecated. A field's declaration node is the VariableDeclarator
+// while its @Deprecated sits on the enclosing FieldDeclaration, so read the
+// annotation from the parent in that case.
+func SymbolDeprecation(symbol *Symbol) (Deprecation, bool) {
+	if symbol == nil {
+		return Deprecation{}, false
+	}
+	decl := symbol.ValueDeclaration
+	if decl == nil && len(symbol.Declarations) > 0 {
+		decl = symbol.Declarations[0]
+	}
+	if decl != nil && decl.Kind == VariableDeclarator {
+		decl = decl.Parent
+	}
+	return ReadDeprecation(decl)
 }

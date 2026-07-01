@@ -37,6 +37,9 @@ const (
 type CompletionItem struct {
 	Label string
 	Kind  CompletionItemKind
+	// Deprecated is true when the symbol carries a @Deprecated annotation
+	// (client renders it struck out).
+	Deprecated bool
 }
 
 func completionKind(flags compiler.SymbolFlags) CompletionItemKind {
@@ -82,7 +85,9 @@ func (o *orderedSymbols) set(name string, symbol *compiler.Symbol) {
 func (o *orderedSymbols) items() []CompletionItem {
 	out := make([]CompletionItem, 0, len(o.names))
 	for _, name := range o.names {
-		out = append(out, CompletionItem{Label: name, Kind: completionKind(o.byKey[name].Flags)})
+		symbol := o.byKey[name]
+		_, deprecated := compiler.SymbolDeprecation(symbol)
+		out = append(out, CompletionItem{Label: name, Kind: completionKind(symbol.Flags), Deprecated: deprecated})
 	}
 	return out
 }

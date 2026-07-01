@@ -118,6 +118,25 @@ func TestCompletionKindsClassified(t *testing.T) {
 	}
 }
 
+func TestCompletionDeprecatedFlagged(t *testing.T) {
+	items := complete("class P { @Deprecated int old; int cur; @Deprecated String gone() { return null; } String live() { return null; } }" +
+		" class U { void m(P p) { p./*|*/ } }")
+	byLabel := map[string]bool{}
+	for _, it := range items {
+		byLabel[it.Label] = it.Deprecated
+	}
+	for _, name := range []string{"old", "gone"} {
+		if !byLabel[name] {
+			t.Errorf("%s should be deprecated", name)
+		}
+	}
+	for _, name := range []string{"cur", "live"} {
+		if byLabel[name] {
+			t.Errorf("%s should not be deprecated", name)
+		}
+	}
+}
+
 func TestClasspathResourceCompletion(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "cappu.json"), "{}\n")

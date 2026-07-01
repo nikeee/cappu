@@ -324,6 +324,9 @@ func toLspDiagnostic(d compiler.Diagnostic, text string, lineStarts []int) lsp.D
 	if d.Code == 1305 { // unused import: editors fade it out
 		out.Tags = []int{lsp.DiagnosticTagUnnecessary}
 	}
+	if d.Code == 1306 { // use of @Deprecated: editors strike it out
+		out.Tags = []int{lsp.DiagnosticTagDeprecated}
+	}
 	return out
 }
 

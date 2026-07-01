@@ -1,9 +1,10 @@
 // Builds an LSP DocumentSymbol tree (outline) from a parsed SourceFile. Kept
 // separate from the server transport so it is unit-testable.
 
-import { type DocumentSymbol, type Range, SymbolKind } from "vscode-languageserver-types";
+import { type DocumentSymbol, type Range, SymbolKind, SymbolTag } from "vscode-languageserver-types";
 
 import { getLineAndCharacterOfPosition } from "../compiler/lineMap.ts";
+import { readDeprecation } from "../compiler/deprecation.ts";
 import {
   type ClassDeclaration,
   type EnumConstantDeclaration,
@@ -35,12 +36,17 @@ function symbol(
   lineStarts: readonly number[],
   children?: DocumentSymbol[],
 ): DocumentSymbol {
+  // `node` is the declaration for every caller except fields (where it is the
+  // VariableDeclarator and @Deprecated sits on the enclosing FieldDeclaration -
+  // that branch tags the symbol itself, since parent pointers need binding).
+  const deprecated = readDeprecation(node) !== undefined;
   return {
     name: name || "<anonymous>",
     kind,
     range: range(lineStarts, node.pos, node.end),
     selectionRange: range(lineStarts, selection.pos, selection.end),
     children,
+    ...(deprecated ? { tags: [SymbolTag.Deprecated] } : {}),
   };
 }
 
@@ -76,7 +82,13 @@ function memberSymbols(node: Node, lineStarts: readonly number[]): DocumentSymbo
     }
     case SyntaxKind.FieldDeclaration: {
       const f = node as FieldDeclaration;
-      return f.declarators.map(d => symbol(d.name.text, SymbolKind.Field, d, d.name, lineStarts));
+      // @Deprecated sits on the FieldDeclaration, not the per-name declarators.
+      const deprecated = readDeprecation(f) !== undefined;
+      return f.declarators.map(d => {
+        const s = symbol(d.name.text, SymbolKind.Field, d, d.name, lineStarts);
+        if (deprecated) s.tags = [SymbolTag.Deprecated];
+        return s;
+      });
     }
     case SyntaxKind.EnumConstantDeclaration: {
       const e = node as EnumConstantDeclaration;
