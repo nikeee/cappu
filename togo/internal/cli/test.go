@@ -50,13 +50,28 @@ func RunTest(cfg *config.Config) int {
 		}
 	}
 
-	// 3. the JUnit run, streamed (the launcher's exit code is ours)
+	// 3. the JUnit run, streamed (the launcher's exit code is ours). With
+	// coverage on, also fetch the JaCoCo agent and attach it (writes jacoco.exec
+	// into reportsDir).
 	launcher, err := testing.ConsoleLauncherJar(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
 		return 1
 	}
-	cmd := exec.Command(testing.ResolveJava(cfg), testing.TestRunArgs(cfg, launcher)...)
+	agent := ""
+	if cfg.TestOptions.Coverage {
+		agent, err = testing.JacocoAgentJar(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
+			return 1
+		}
+		// the JaCoCo agent opens destfile but does not create parent dirs
+		if err := os.MkdirAll(cfg.ResolvePath(cfg.TestOptions.ReportsDir), 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
+			return 1
+		}
+	}
+	cmd := exec.Command(testing.ResolveJava(cfg), testing.TestRunArgs(cfg, launcher, agent)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		var exit *exec.ExitError

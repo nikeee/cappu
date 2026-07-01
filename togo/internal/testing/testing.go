@@ -109,18 +109,22 @@ func CompileTests(cfg *config.Config, testSources []string) []javacdiag.CompileD
 // project dependency, so it never appears in cappu.json or the lockfile.
 var consoleLauncher = packages.NewCoordinates("org.junit.platform", "junit-platform-console-standalone", "1.12.2")
 
-// ConsoleLauncherJar returns the launcher jar's path in the global store,
-// downloading it there on first use.
-func ConsoleLauncherJar(cfg *config.Config) (string, error) {
-	path, ok := install.StorePathFor(consoleLauncher)
+// jacocoAgent is the JaCoCo runtime agent, attached via -javaagent when
+// testOptions.coverage is on. Also a TOOL. The "runtime" classifier is the
+// ready-to-use jacocoagent.jar (the plain artifact only nests it as a resource).
+var jacocoAgent = packages.NewCoordinates("org.jacoco", "org.jacoco.agent", "0.8.12").WithClassifier("runtime")
+
+// downloadTool fetches a tool jar into the global store on first use.
+func downloadTool(cfg *config.Config, coordinates packages.Coordinates) (string, error) {
+	path, ok := install.StorePathFor(coordinates)
 	if !ok {
-		return "", fmt.Errorf("unreachable: launcher coordinates are store-safe")
+		return "", fmt.Errorf("unreachable: tool coordinates are store-safe")
 	}
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	}
 	for _, source := range sources.Configured(cfg) {
-		bytes, err := source.GetArtifact(consoleLauncher)
+		bytes, err := source.GetArtifact(coordinates)
 		if err != nil {
 			return "", err
 		}
@@ -135,15 +139,34 @@ func ConsoleLauncherJar(cfg *config.Config) (string, error) {
 		}
 		return path, nil
 	}
-	return "", fmt.Errorf("could not download %s from any package source", consoleLauncher.String())
+	return "", fmt.Errorf("could not download %s from any package source", coordinates.String())
 }
 
-// TestRunArgs are the java arguments running the launcher over the tests.
-func TestRunArgs(cfg *config.Config, launcherJar string) []string {
-	args := []string{
+// ConsoleLauncherJar returns the launcher jar's path in the global store,
+// downloading it there on first use.
+func ConsoleLauncherJar(cfg *config.Config) (string, error) {
+	return downloadTool(cfg, consoleLauncher)
+}
+
+// JacocoAgentJar returns the JaCoCo agent jar's store path, downloading it on
+// first use.
+func JacocoAgentJar(cfg *config.Config) (string, error) {
+	return downloadTool(cfg, jacocoAgent)
+}
+
+// TestRunArgs are the java arguments running the launcher over the tests. When
+// agentJar is non-empty (testOptions.coverage on), a -javaagent JVM arg is
+// prepended before -jar so JaCoCo writes jacoco.exec into ReportsDir.
+func TestRunArgs(cfg *config.Config, launcherJar, agentJar string) []string {
+	var args []string
+	if agentJar != "" {
+		execFile := filepath.Join(cfg.ResolvePath(cfg.TestOptions.ReportsDir), "jacoco.exec")
+		args = append(args, "-javaagent:"+agentJar+"=destfile="+execFile)
+	}
+	args = append(args,
 		"-jar", launcherJar, "execute",
 		"--class-path", strings.Join(TestRuntimeClassPath(cfg), string(os.PathListSeparator)),
-	}
+	)
 	if cfg.TestOptions.OutputFormat == "junit" {
 		args = append(args, "--reports-dir", cfg.ResolvePath(cfg.TestOptions.ReportsDir))
 	}

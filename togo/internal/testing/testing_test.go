@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/install"
 )
 
 func project(t *testing.T) *config.Config {
@@ -55,7 +56,7 @@ func TestCompileTestsJavacUnavailable(t *testing.T) {
 
 func TestRunArgsStructure(t *testing.T) {
 	cfg := project(t)
-	args := TestRunArgs(cfg, "/path/launcher.jar")
+	args := TestRunArgs(cfg, "/path/launcher.jar", "")
 	if args[0] != "-jar" || args[1] != "/path/launcher.jar" || args[2] != "execute" {
 		t.Errorf("prefix = %v", args[:3])
 	}
@@ -80,7 +81,7 @@ func TestRunArgsStructure(t *testing.T) {
 func TestRunArgsJunitReports(t *testing.T) {
 	cfg := project(t)
 	cfg.TestOptions.OutputFormat = "junit"
-	args := TestRunArgs(cfg, "/path/launcher.jar")
+	args := TestRunArgs(cfg, "/path/launcher.jar", "")
 	i := indexOf(args, "--reports-dir")
 	if i < 0 || args[i+1] != cfg.ResolvePath(config.DefaultTestReportsDir) {
 		t.Errorf("--reports-dir = %v, want %q", args, cfg.ResolvePath(config.DefaultTestReportsDir))
@@ -91,7 +92,7 @@ func TestRunArgsJunitReports(t *testing.T) {
 	}
 
 	cfg.TestOptions.ReportsDir = "./build/reports"
-	custom := TestRunArgs(cfg, "/path/launcher.jar")
+	custom := TestRunArgs(cfg, "/path/launcher.jar", "")
 	i = indexOf(custom, "--reports-dir")
 	if i < 0 || custom[i+1] != cfg.ResolvePath("./build/reports") {
 		t.Errorf("custom --reports-dir = %v", custom)
@@ -115,5 +116,34 @@ func TestRuntimeClassPathOrder(t *testing.T) {
 	}
 	if cp[1] != MainClassesDir(cfg) {
 		t.Errorf("runtime cp[1] = %q, want main classes dir", cp[1])
+	}
+}
+
+func TestRunArgsCoverageAgent(t *testing.T) {
+	cfg := project(t)
+	args := TestRunArgs(cfg, "/path/launcher.jar", "/store/jacocoagent.jar")
+	execFile := filepath.Join(cfg.ResolvePath(cfg.TestOptions.ReportsDir), "jacoco.exec")
+	want := "-javaagent:/store/jacocoagent.jar=destfile=" + execFile
+	if args[0] != want {
+		t.Errorf("args[0] = %q, want %q", args[0], want)
+	}
+	if args[1] != "-jar" || args[2] != "/path/launcher.jar" {
+		t.Errorf("after agent: %v", args[1:3])
+	}
+	if args[len(args)-1] != "--scan-class-path" {
+		t.Errorf("last arg = %q", args[len(args)-1])
+	}
+	if plain := TestRunArgs(cfg, "/path/launcher.jar", ""); plain[0] != "-jar" {
+		t.Errorf("no agent should start at -jar, got %q", plain[0])
+	}
+}
+
+func TestJacocoAgentCoordinates(t *testing.T) {
+	if jacocoAgent.Classifier != "runtime" {
+		t.Errorf("classifier = %q, want runtime", jacocoAgent.Classifier)
+	}
+	path, ok := install.StorePathFor(jacocoAgent)
+	if !ok || !strings.HasSuffix(path, "-runtime.jar") {
+		t.Errorf("store path = %q ok=%v", path, ok)
 	}
 }
