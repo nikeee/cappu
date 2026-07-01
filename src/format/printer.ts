@@ -140,6 +140,25 @@ const WIDTH = 100;
 /** Thrown when the formatter cannot format the input without losing information. */
 export class UnsupportedSyntaxError extends Error {}
 
+// gjf keeps a multi-line text block at its source indentation, but strips the
+// block's common indentation entirely (content to column 0) when any content line
+// overflows 100 columns at that indentation. `raw` is the verbatim `"""..."""`
+// source. (This models gjf's overflow de-indent; it does not re-align a block up
+// when the enclosing indentation changes - not needed for the google corpus.)
+function reindentTextBlock(raw: string): string {
+  const lines = raw.split("\n");
+  if (lines.length < 3) return raw; // single-line text block: nothing to reindent
+  const content = lines.slice(1, -1);
+  if (!content.some(l => l.trim() !== "" && l.length > WIDTH)) return raw;
+  const closing = lines[lines.length - 1];
+  const sourceIndent = closing.length - closing.trimStart().length;
+  const strip = (l: string): string => (l.length >= sourceIndent ? l.slice(sourceIndent) : l.trimStart());
+  const out = [lines[0]];
+  for (const l of content) out.push(l.trim() === "" ? "" : strip(l));
+  out.push(strip(closing));
+  return out.join("\n");
+}
+
 export function formatSourceFile(sf: SourceFile, options: FormatOptions): string {
   const mult = options.style === "aosp" ? 2 : 1;
   const p = new Printer(sf, mult);
@@ -147,8 +166,10 @@ export function formatSourceFile(sf: SourceFile, options: FormatOptions): string
   const text = printDoc(doc, {
     width: WIDTH,
     indentMultiplier: mult,
-    // A `reflow` leaf carries a raw comment; rewrite it at the column it lands at.
-    commentRewriter: (raw, col) => rewriteComment(raw, col, raw.startsWith("//")),
+    // A `reflow` leaf carries a raw comment or a multi-line text block; rewrite it
+    // at the column it lands at.
+    commentRewriter: (raw, col) =>
+      raw.startsWith('"""') ? reindentTextBlock(raw) : rewriteComment(raw, col, raw.startsWith("//")),
   });
   // Safety net: the printer attaches comments at member/statement granularity.
   // If a comment sat somewhere it does not yet handle, refuse rather than
@@ -1303,6 +1324,7 @@ class Printer {
     s.catchClauses.forEach((c, i) => {
       parts.push(
         " catch (",
+        this.modifiers(c.modifiers, "inline"),
         join(
           " | ",
           c.catchTypes.map(t => this.type(t)),
@@ -1571,7 +1593,16 @@ class Printer {
     // re-indent the class body.
     const baseIsAnonClass =
       baseIsNew && (cur as ObjectCreationExpression).classBody !== undefined;
-    if (callCount === 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass)) {
+    // A multi-line text-block receiver breaks before its dereference (gjf puts
+    // `.replace(..)` on its own +4 line after the closing `"""`).
+    const baseIsMultilineTextBlock =
+      cur.kind === SyntaxKind.TextBlockLiteral && this.raw(cur).includes("\n");
+    if (
+      callCount === 1 &&
+      !baseIsCall &&
+      (!baseIsNew || baseIsAnonClass) &&
+      !baseIsMultilineTextBlock
+    ) {
       return finish(concat([base, ...linkDocs]));
     }
     // The leading links glued to the base (no break before them): a type-name
@@ -1661,15 +1692,23 @@ class Printer {
     // (rest-of-line rule); this also subsumes the lone dot-chain case. An argument
     // carrying a same-line trailing comment cannot route - the comment must sit
     // between the value and the separator - so it appends the token instead.
+    const leads: (string | undefined)[] = [];
+    const leadStarts: number[] = [];
     const items = args.map((a, i) => {
       const parts: Doc[] = [];
+      const firstPending = this.comments[this.ci];
+      leadStarts[i] =
+        firstPending && firstPending.pos < this.start(a) ? firstPending.pos : this.start(a);
       // Leading comments on the argument: a block comment renders inline before
-      // it (`/* a= */ 1`); a line comment forces a break after itself.
-      for (const c of this.commentsBefore(this.start(a))) {
+      // it (`/* a= */ 1`); a line comment forces a break after itself. A line
+      // comment on the PREVIOUS argument's line (non-own-line) trails THAT
+      // argument - the join emits it before the inter-argument break.
+      this.commentsBefore(this.start(a)).forEach((c, ci) => {
         anyComment = true;
-        if (c.line) parts.push(c.text, hardline);
+        if (ci === 0 && i > 0 && c.line && !c.ownLine) leads[i] = c.text;
+        else if (c.line) parts.push(c.text, hardline);
         else parts.push(reformatParamComment(c.text) ?? c.text, " ");
-      }
+      });
       const follow: Doc = i < lastI ? "," : concat([")", trailing]);
       const t = this.comments[this.ci];
       const hasTrailingComment =
@@ -1712,10 +1751,22 @@ class Printer {
     }
     // The inter-argument `,` and the closing `)` are routed into the items, so the
     // inner level only joins them with fill breaks; its own fit check then counts
-    // the `)` and any outer trailing token (rest-of-line).
+    // the `)` and any outer trailing token (rest-of-line). A line comment trailing
+    // the previous argument stays on its line (before the break); gjf also
+    // preserves one source blank line between arguments.
     const innerParts: Doc[] = [];
+    // A source blank line between `(` and the first argument's leading comment is
+    // preserved (gjf preserves a blank before an own-line comment, not a bare arg).
+    if (leadStarts[0] < this.start(args[0]) && this.blankBeforePos(args[0].pos, leadStarts[0])) {
+      innerParts.push(hardline);
+    }
     items.forEach((it, i) => {
-      if (i > 0) innerParts.push(brk(fill, " ", ZERO));
+      if (i > 0) {
+        const blank = this.blankBeforePos(args[i - 1].end, leadStarts[i]);
+        if (leads[i] !== undefined) innerParts.push(" ", leads[i] as string, hardline);
+        else innerParts.push(brk(fill, " ", ZERO));
+        if (blank) innerParts.push(hardline);
+      }
       innerParts.push(it);
     });
     return concat(["(", level(PLUS4, [brk("unified", "", ZERO), level(ZERO, innerParts)])]);
@@ -2066,11 +2117,18 @@ class Printer {
       case SyntaxKind.ClassLiteralExpression:
         return concat([this.type((node as ClassLiteralExpression).type), ".class"]);
 
+      case SyntaxKind.TextBlockLiteral: {
+        const raw = this.raw(node);
+        // A multi-line text block is reflowed at write time: gjf strips the
+        // block's common indentation (down to column 0) when a content line would
+        // overflow at its current indent; otherwise it keeps the source indent.
+        return raw.includes("\n") ? reflow(raw) : raw;
+      }
+
       case SyntaxKind.Identifier:
       case SyntaxKind.NumericLiteral:
       case SyntaxKind.StringLiteral:
       case SyntaxKind.CharacterLiteral:
-      case SyntaxKind.TextBlockLiteral:
       case SyntaxKind.TrueKeyword:
       case SyntaxKind.FalseKeyword:
       case SyntaxKind.NullKeyword:

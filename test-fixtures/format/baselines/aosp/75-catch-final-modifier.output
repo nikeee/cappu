@@ -1,0 +1,13 @@
+package p;
+
+class C {
+    void m() {
+        try {
+            run();
+        } catch (final IllegalStateException | IllegalArgumentException e) {
+            handle(e);
+        } catch (final Exception e) {
+            fail(e);
+        }
+    }
+}

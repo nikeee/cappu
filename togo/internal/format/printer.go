@@ -16,6 +16,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/nikeee/cappu/internal/compiler"
 )
@@ -73,8 +74,12 @@ func formatSourceFile(sf *compiler.Node, options FormatOptions) (string, error) 
 	out := printDoc(doc, printOptions{
 		width:      width,
 		indentMult: mult,
-		// A reflow leaf carries a raw comment; rewrite it at its column.
+		// A reflow leaf carries a raw comment or a multi-line text block; rewrite it
+		// at its column.
 		commentRewriter: func(raw string, col int) string {
+			if strings.HasPrefix(raw, `"""`) {
+				return reindentTextBlock(raw)
+			}
 			return rewriteComment(raw, col, strings.HasPrefix(raw, "//"))
 		},
 	})
@@ -1451,7 +1456,7 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 		for j, t := range nodes(c.CatchTypes) {
 			ts[j] = p.typ(t)
 		}
-		parts = append(parts, text(" catch ("), join(text(" | "), ts), text(" "), text(p.raw(c.Name)), text(") "), p.blockTB(c.Block.AsBlock(), c.Block.End, i < len(catches)-1 || hasFinally))
+		parts = append(parts, text(" catch ("), p.modifiers(c.Modifiers, "inline"), join(text(" | "), ts), text(" "), text(p.raw(c.Name)), text(") "), p.blockTB(c.Block.AsBlock(), c.Block.End, i < len(catches)-1 || hasFinally))
 	}
 	if s.FinallyBlock != nil {
 		parts = append(parts, text(" finally "), p.block(s.FinallyBlock.AsBlock(), s.FinallyBlock.End))
@@ -1761,7 +1766,10 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	// provides its own indentation; gjf glues a single dereference onto its closing
 	// `}` (`}.scan(..)`) rather than starting a +4 chain that re-indents the body.
 	baseIsAnonClass := baseIsNew && cur.AsObjectCreationExpression().ClassBody != nil
-	if callCount == 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass) {
+	// A multi-line text-block receiver breaks before its dereference (gjf puts
+	// `.replace(..)` on its own +4 line after the closing `"""`).
+	baseIsMultilineTextBlock := cur.Kind == compiler.TextBlockLiteral && strings.Contains(p.raw(cur), "\n")
+	if callCount == 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass) && !baseIsMultilineTextBlock {
 		parts := []Doc{base}
 		parts = append(parts, linkDocs...)
 		return finish(concat(parts...))
@@ -1871,15 +1879,26 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 	// carrying a same-line trailing comment cannot route - the comment must sit
 	// between the value and the separator - so it appends the token instead.
 	as := make([]Doc, len(argNodes))
+	leads := make([]string, len(argNodes))
+	leadStarts := make([]int, len(argNodes))
 	for i, a := range argNodes {
 		var parts []Doc
+		leadStarts[i] = p.start(a)
+		if p.ci < len(p.comments) && p.comments[p.ci].pos < p.start(a) {
+			leadStarts[i] = p.comments[p.ci].pos
+		}
 		// Leading comments: a block comment renders inline before the argument
-		// (`/* a= */ 1`); a line comment forces a break after itself.
-		for _, c := range p.commentsBefore(p.start(a)) {
+		// (`/* a= */ 1`); a line comment forces a break after itself. A line comment
+		// on the PREVIOUS argument's line (non-own-line) trails THAT argument - the
+		// join emits it before the inter-argument break.
+		for ci, c := range p.commentsBefore(p.start(a)) {
 			anyComment = true
-			if c.line {
+			switch {
+			case ci == 0 && i > 0 && c.line && !c.ownLine:
+				leads[i] = c.text
+			case c.line:
 				parts = append(parts, text(c.text), hardline)
-			} else {
+			default:
 				pc := c.text
 				if norm, ok := reformatParamComment(c.text); ok {
 					pc = norm
@@ -1941,9 +1960,24 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 	// inner level only joins them with fill breaks; its own fit check then counts
 	// the `)` and any outer trailing token (rest-of-line).
 	var innerParts []Doc
+	// A source blank line between `(` and the first argument's leading comment is
+	// preserved (gjf preserves a blank before an own-line comment, not a bare arg).
+	if leadStarts[0] < p.start(argNodes[0]) && p.blankBeforePos(argNodes[0].Pos, leadStarts[0]) {
+		innerParts = append(innerParts, hardline)
+	}
 	for i, it := range as {
 		if i > 0 {
-			innerParts = append(innerParts, brk(fill, " ", ZERO, nil))
+			// A line comment trailing the previous argument stays on its line (before
+			// the break); gjf also preserves one source blank line between arguments.
+			blank := p.blankBeforePos(argNodes[i-1].End, leadStarts[i])
+			if leads[i] != "" {
+				innerParts = append(innerParts, text(" "), text(leads[i]), hardline)
+			} else {
+				innerParts = append(innerParts, brk(fill, " ", ZERO, nil))
+			}
+			if blank {
+				innerParts = append(innerParts, hardline)
+			}
 		}
 		innerParts = append(innerParts, it)
 	}
@@ -1954,6 +1988,46 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 // string-literal concatenation containing a format specifier, with >= 2 args.
 func (p *printer) isFormatMethod(args []*compiler.Node) bool {
 	return len(args) >= 2 && p.isFormatStringConcat(args[0])
+}
+
+// reindentTextBlock keeps a multi-line text block at its source indentation, but
+// strips the block's common indentation entirely (content to column 0) when any
+// content line would overflow 100 columns at that indentation. raw is the
+// verbatim `"""..."""` source.
+func reindentTextBlock(raw string) string {
+	lines := strings.Split(raw, "\n")
+	if len(lines) < 3 {
+		return raw
+	}
+	content := lines[1 : len(lines)-1]
+	overflow := false
+	for _, l := range content {
+		if strings.TrimSpace(l) != "" && utf8.RuneCountInString(l) > width {
+			overflow = true
+			break
+		}
+	}
+	if !overflow {
+		return raw
+	}
+	closing := lines[len(lines)-1]
+	sourceIndent := len(closing) - len(strings.TrimLeft(closing, " \t"))
+	strip := func(l string) string {
+		if len(l) >= sourceIndent {
+			return l[sourceIndent:]
+		}
+		return strings.TrimLeft(l, " \t")
+	}
+	out := []string{lines[0]}
+	for _, l := range content {
+		if strings.TrimSpace(l) == "" {
+			out = append(out, "")
+		} else {
+			out = append(out, strip(l))
+		}
+	}
+	out = append(out, strip(closing))
+	return strings.Join(out, "\n")
 }
 
 // isFormatStringConcat reports whether node is built only from string literals
@@ -2367,8 +2441,18 @@ func (p *printer) node(node *compiler.Node) Doc {
 	case compiler.ClassLiteralExpression:
 		return concat(p.typ(node.AsClassLiteralExpression().Type), text(".class"))
 
+	case compiler.TextBlockLiteral:
+		raw := p.raw(node)
+		// A multi-line text block is reflowed at write time: gjf strips the block's
+		// common indentation (to column 0) when a content line would overflow at its
+		// current indent; otherwise it keeps the source indent.
+		if strings.Contains(raw, "\n") {
+			return reflow(raw)
+		}
+		return text(raw)
+
 	case compiler.Identifier, compiler.NumericLiteral, compiler.StringLiteral,
-		compiler.CharacterLiteral, compiler.TextBlockLiteral, compiler.TrueKeyword,
+		compiler.CharacterLiteral, compiler.TrueKeyword,
 		compiler.FalseKeyword, compiler.NullKeyword:
 		return text(p.raw(node))
 

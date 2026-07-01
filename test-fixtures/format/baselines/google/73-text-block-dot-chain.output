@@ -1,0 +1,10 @@
+package p;
+
+class C {
+  String m() {
+    return """
+some text with moe in it that is quite long indeed and keeps going well past the one hundred column limit
+"""
+        .replace("moe", "MOE");
+  }
+}

@@ -859,6 +859,8 @@ export interface Resource extends Node {
 
 export interface CatchClause extends Node {
   readonly kind: SyntaxKind.CatchClause;
+  /** Modifiers on the catch parameter (`final`, type annotations). */
+  readonly modifiers?: NodeArray<ModifierLike>;
   /** Catch type, possibly a multi-catch union (A | B). */
   readonly catchTypes: NodeArray<TypeNode>;
   readonly name: Identifier;

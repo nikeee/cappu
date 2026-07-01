@@ -305,17 +305,18 @@ func (n *Node) AsResource() *ResourceData { return n.data.(*ResourceData) }
 
 // CatchClauseData is `catch (A | B e) {}`.
 type CatchClauseData struct {
+	Modifiers  *NodeArray // catch-parameter modifiers, e.g. `final`
 	CatchTypes *NodeArray
 	Name       *Node
 	Block      *Node
 }
 
 func (d *CatchClauseData) forEachChild(v Visitor) bool {
-	return visitNodes(v, d.CatchTypes) || visit(v, d.Name) || visit(v, d.Block)
+	return visitNodes(v, d.Modifiers) || visitNodes(v, d.CatchTypes) || visit(v, d.Name) || visit(v, d.Block)
 }
 
-func (f *NodeFactory) NewCatchClause(catchTypes *NodeArray, name, block *Node) *Node {
-	return f.newNode(CatchClause, &CatchClauseData{CatchTypes: catchTypes, Name: name, Block: block})
+func (f *NodeFactory) NewCatchClause(modifiers, catchTypes *NodeArray, name, block *Node) *Node {
+	return f.newNode(CatchClause, &CatchClauseData{Modifiers: modifiers, CatchTypes: catchTypes, Name: name, Block: block})
 }
 
 func (n *Node) AsCatchClause() *CatchClauseData { return n.data.(*CatchClauseData) }

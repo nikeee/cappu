@@ -1,0 +1,14 @@
+package p;
+
+class C {
+  void m() {
+    assertFormatted(
+        lines(
+
+            "class Test { int xxx = 1; int yyy = 1; }", //
+            "class Test { int xxx = 1;", //
+            "",
+            "}"),
+        "output");
+  }
+}

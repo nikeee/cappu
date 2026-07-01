@@ -2462,7 +2462,7 @@ function parseCatchClause(): CatchClause {
   const pos = getNodePos();
   parseExpected(SyntaxKind.CatchKeyword);
   parseExpected(SyntaxKind.OpenParenToken);
-  parseModifiers(); // 'final' is allowed but not retained
+  const modifiers = parseModifiers(); // e.g. `catch (final X e)`
   const typesPos = getNodePos();
   const catchTypes: TypeNode[] = [parseType()];
   while (parseOptional(SyntaxKind.BarToken)) {
@@ -2472,6 +2472,7 @@ function parseCatchClause(): CatchClause {
   parseExpected(SyntaxKind.CloseParenToken);
   const block = parseBlock();
   const node = createNode<CatchClause>(SyntaxKind.CatchClause, pos);
+  node.modifiers = modifiers;
   node.catchTypes = createNodeArray(catchTypes, typesPos);
   node.name = name;
   node.block = block;
