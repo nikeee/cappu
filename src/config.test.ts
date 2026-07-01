@@ -101,6 +101,7 @@ test("unknown keys are ignored, comment-json metadata does not leak", () => {
     "fromFile",
     "lspOptions",
     "packageSources",
+    "testOptions",
   ]);
   expect(config.packageSources).toEqual([
     "https://repo.maven.apache.org/maven2",
@@ -139,6 +140,7 @@ test("the generated JSON schema mirrors the config shape", () => {
     "lspOptions",
     "packageSources",
     "publishRepository",
+    "testOptions",
     "version",
   ]);
 });

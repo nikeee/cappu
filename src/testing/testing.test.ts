@@ -61,6 +61,23 @@ test("test compile and run classpaths are ordered and jar-expanded", () => {
   const runCp = run[run.indexOf("--class-path") + 1]!;
   expect(runCp.split(delimiter)[0]).toBe(join(dir, ".cappu", "test-build", "test-classes"));
   expect(run.at(-1)).toBe("--scan-class-path");
+  // default outputFormat is "text": no report is written
+  expect(run).not.toContain("--reports-dir");
+});
+
+test("testRunArgs writes junit reports to the resolved reportsDir only for junit", () => {
+  using project = tempProject();
+  const dir = project.path;
+  const config = loadConfig(undefined, dir);
+
+  config.testOptions.outputFormat = "junit";
+  const run = testRunArgs(config, "/store/launcher.jar");
+  expect(run[run.indexOf("--reports-dir") + 1]).toBe(join(dir, "dist", "test-results"));
+  expect(run.at(-1)).toBe("--scan-class-path"); // still last
+
+  config.testOptions.reportsDir = "./build/reports";
+  const custom = testRunArgs(config, "/store/launcher.jar");
+  expect(custom[custom.indexOf("--reports-dir") + 1]).toBe(join(dir, "build", "reports"));
 });
 
 test("compileTests wipes stale class files first (no phantom tests)", () => {

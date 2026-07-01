@@ -166,11 +166,13 @@ test("show --json carries the same data", async () => {
 test("show errors on a malformed coordinate and an unknown package", async () => {
   const config = configWith({});
   expect(await buildShowData("not-a-coord", config, [source()], auditStub())).toEqual({
-    error: "show needs group:artifact[:version], e.g. `cappu show com.google.code.gson:gson`",
+    error:
+      "show needs group:artifact[:version], e.g. `cappu show com.google.code.gson:gson`; " +
+      "search for a package with `cappu search <query>`",
     code: 2,
   });
   expect(await buildShowData("org.x:nope", config, [source()], auditStub())).toEqual({
-    error: "package not found: org.x:nope",
+    error: "package not found: org.x:nope; search for a package with `cappu search <query>`",
     code: 1,
   });
 });

@@ -71,6 +71,40 @@ func TestRunArgsStructure(t *testing.T) {
 	if !strings.Contains(args[4], TestClassesDir(cfg)) {
 		t.Errorf("test classes not on the runtime classpath: %q", args[4])
 	}
+	// default outputFormat is "text": no report is written
+	if strings.Contains(strings.Join(args, " "), "--reports-dir") {
+		t.Errorf("text format must not write reports: %v", args)
+	}
+}
+
+func TestRunArgsJunitReports(t *testing.T) {
+	cfg := project(t)
+	cfg.TestOptions.OutputFormat = "junit"
+	args := TestRunArgs(cfg, "/path/launcher.jar")
+	i := indexOf(args, "--reports-dir")
+	if i < 0 || args[i+1] != cfg.ResolvePath(config.DefaultTestReportsDir) {
+		t.Errorf("--reports-dir = %v, want %q", args, cfg.ResolvePath(config.DefaultTestReportsDir))
+	}
+	// --scan-class-path stays last
+	if args[len(args)-1] != "--scan-class-path" {
+		t.Errorf("last arg = %q, want --scan-class-path", args[len(args)-1])
+	}
+
+	cfg.TestOptions.ReportsDir = "./build/reports"
+	custom := TestRunArgs(cfg, "/path/launcher.jar")
+	i = indexOf(custom, "--reports-dir")
+	if i < 0 || custom[i+1] != cfg.ResolvePath("./build/reports") {
+		t.Errorf("custom --reports-dir = %v", custom)
+	}
+}
+
+func indexOf(s []string, v string) int {
+	for i, x := range s {
+		if x == v {
+			return i
+		}
+	}
+	return -1
 }
 
 func TestRuntimeClassPathOrder(t *testing.T) {

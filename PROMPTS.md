@@ -483,3 +483,17 @@ cappu search commons-lang3
 - 2026-07-01 09:27 — does this make sense? https://github.com/nikeee/cappu/issues/32 if so, build it and make it colorful output. it should look pretty and be informative with everything a dev usually needs to know about this dependency
 - 2026-07-01 09:27 — commit when you are done
 - 2026-07-01 19:13 — in cappu LSP and cappu check, add a diagnostic warning if string.format is getting called with the wrong number of arguments (and similar gotchas in similar methods)
+- 2026-07-01 14:12 — in `cappu test` add a default location for some test results (if they are specified; maybe default to stdout plain/colorful text). for the test results also add other output types.
+how about:
+```
+"testOptions": {
+    "outputFormat": "junit",
+    // path: default
+}
+"testOptions": {
+    "outputFormat": "tap",
+    // path: default
+}
+```
+maybe the path should just be a directory and default to ./dist?
+- 2026-07-01 14:12 — add e2e tests that check whether a valid file is emitted

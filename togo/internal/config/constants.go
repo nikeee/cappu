@@ -20,7 +20,10 @@ const (
 	DefaultTestSourcePath      = "./src/test/java"
 	DefaultTestResourcePath    = "./src/test/resources"
 	DefaultTestClassPath       = "./.cappu/lib/test-classes"
-	DefaultProcessorPath       = "./.cappu/lib/processors"
+	// DefaultTestReportsDir is where `cappu test` writes junit-XML reports when
+	// testOptions.outputFormat is "junit".
+	DefaultTestReportsDir = "./dist/test-results"
+	DefaultProcessorPath  = "./.cappu/lib/processors"
 
 	// DefaultOutputDir is what `cappu compile` produces its output in; the build
 	// output is always this.

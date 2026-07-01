@@ -87,12 +87,23 @@ type FormatterOptions struct {
 	Ignore []string `json:"ignore"`
 }
 
+// TestOptions mirrors the "testOptions" section. The JUnit launcher always
+// streams its summary to stdout; OutputFormat is additive - only "junit" also
+// writes junit-XML reports into ReportsDir. "tap" is not native to the launcher.
+type TestOptions struct {
+	// OutputFormat is "text" (stdout only) or "junit" (also write junit-XML).
+	OutputFormat string `json:"outputFormat"`
+	// ReportsDir is where junit-XML lands; used only when OutputFormat is "junit".
+	ReportsDir string `json:"reportsDir"`
+}
+
 // Config is the parsed cappu.json plus where it came from. Mirrors CappuConfig.
 type Config struct {
 	CompilerOptions   CompilerOptions  `json:"compilerOptions"`
 	LspOptions        LspOptions       `json:"lspOptions"`
 	DapOptions        DapOptions       `json:"dapOptions"`
 	FormatterOptions  FormatterOptions `json:"formatterOptions"`
+	TestOptions       TestOptions      `json:"testOptions"`
 	PackageSources    []string         `json:"packageSources"`
 	Dependencies      Dependencies     `json:"dependencies"`
 	JDK               string           `json:"jdk,omitempty"`
@@ -240,6 +251,12 @@ func (c *Config) applyDefaults() {
 	if c.FormatterOptions.Ignore == nil {
 		c.FormatterOptions.Ignore = []string{}
 	}
+	if c.TestOptions.OutputFormat == "" {
+		c.TestOptions.OutputFormat = "text"
+	}
+	if c.TestOptions.ReportsDir == "" {
+		c.TestOptions.ReportsDir = DefaultTestReportsDir
+	}
 	if c.PackageSources == nil {
 		c.PackageSources = append([]string(nil), DefaultPackageSources...)
 	}
@@ -273,6 +290,11 @@ func (c *Config) validate() error {
 	case "google", "aosp":
 	default:
 		return fmt.Errorf(`formatterOptions.style: must be one of "google", "aosp"`)
+	}
+	switch c.TestOptions.OutputFormat {
+	case "text", "junit":
+	default:
+		return fmt.Errorf(`testOptions.outputFormat: must be one of "text", "junit"`)
 	}
 	if c.GroupID != "" && !MavenID.MatchString(c.GroupID) {
 		return fmt.Errorf("groupId: must be a Maven id (letters, digits, . _ -)")

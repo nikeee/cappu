@@ -34,6 +34,10 @@ const SEVERITY_STYLE: Record<Severity, StyleFormat> = {
 
 const LABEL_WIDTH = 13;
 
+// Appended to the "bad coordinate" / "not found" errors: both mean the user
+// does not have an exact coordinate yet, and `cappu search` is how to find one.
+const SEARCH_HINT = "search for a package with `cappu search <query>`";
+
 interface ShowAdvisory {
   readonly id: string;
   readonly aliases: readonly string[];
@@ -115,7 +119,7 @@ export async function buildShowData(
   const parsed = parseCoordinate(coord);
   if (!parsed) {
     return {
-      error: "show needs group:artifact[:version], e.g. `cappu show com.google.code.gson:gson`",
+      error: `show needs group:artifact[:version], e.g. \`cappu show com.google.code.gson:gson\`; ${SEARCH_HINT}`,
       code: 2,
     };
   }
@@ -125,13 +129,13 @@ export async function buildShowData(
   const latest = versions.at(-1);
   const version = parsed.version ?? latest;
   if (version === undefined) {
-    return { error: `package not found: ${groupId}:${artifactId}`, code: 1 };
+    return { error: `package not found: ${groupId}:${artifactId}; ${SEARCH_HINT}`, code: 1 };
   }
   const coordinates = toCoordinates(groupId, artifactId, version);
 
   const metadata = await metadataAcross(coordinates, sources);
   if (metadata === undefined && versions.length === 0) {
-    return { error: `package not found: ${groupId}:${artifactId}:${version}`, code: 1 };
+    return { error: `package not found: ${groupId}:${artifactId}:${version}; ${SEARCH_HINT}`, code: 1 };
   }
 
   // OSV scan of just this version; a network failure must not sink the card.
