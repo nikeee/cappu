@@ -61,7 +61,11 @@ type DocumentSymbol struct {
 	Range          Range            `json:"range"`
 	SelectionRange Range            `json:"selectionRange"`
 	Children       []DocumentSymbol `json:"children,omitempty"`
+	Tags           []int            `json:"tags,omitempty"`
 }
+
+// SymbolTagDeprecated marks a symbol as deprecated (client renders it struck out).
+const SymbolTagDeprecated = 1
 
 // TypeHierarchyItem is a node in a type hierarchy (LSP 3.17). The client hands an
 // item back on supertypes/subtypes calls; the server re-resolves the type from

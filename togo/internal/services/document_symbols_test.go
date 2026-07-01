@@ -84,6 +84,36 @@ func TestNestedTypesOutline(t *testing.T) {
 	}
 }
 
+func hasSymbolTag(tags []int, want int) bool {
+	for _, t := range tags {
+		if t == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDeprecatedSymbolsTagged(t *testing.T) {
+	cls := outline("@Deprecated class C {\n  @Deprecated int old;\n  int cur;\n  @Deprecated void gone() {}\n  void live() {}\n}")[0]
+	if !hasSymbolTag(cls.Tags, lsp.SymbolTagDeprecated) {
+		t.Error("class C should be tagged deprecated")
+	}
+	byName := map[string][]int{}
+	for _, c := range cls.Children {
+		byName[c.Name] = c.Tags
+	}
+	for _, name := range []string{"old", "gone"} {
+		if !hasSymbolTag(byName[name], lsp.SymbolTagDeprecated) {
+			t.Errorf("%s should be tagged deprecated, got %v", name, byName[name])
+		}
+	}
+	for _, name := range []string{"cur", "live"} {
+		if hasSymbolTag(byName[name], lsp.SymbolTagDeprecated) {
+			t.Errorf("%s should not be tagged deprecated", name)
+		}
+	}
+}
+
 func TestSelectionRangeContained(t *testing.T) {
 	cls := outline("class C {\n  void method() {}\n}")[0]
 	m := cls.Children[0]

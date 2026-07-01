@@ -19,6 +19,7 @@ import {
   type SymbolTable,
   SyntaxKind,
 } from "../compiler/types.ts";
+import { symbolDeprecation } from "../compiler/deprecation.ts";
 import { entityNameToString } from "../compiler/utilities.ts";
 import { type CappuConfig, resolveConfigPath } from "../config.ts";
 import { findFilesRelative } from "../workspace.ts";
@@ -39,6 +40,8 @@ export const enum CompletionItemKind {
 export interface CompletionItem {
   readonly label: string;
   readonly kind: CompletionItemKind;
+  /** The symbol carries a @Deprecated annotation (client renders it struck out). */
+  readonly deprecated?: boolean;
 }
 
 function completionKind(flags: SymbolFlags): CompletionItemKind {
@@ -54,7 +57,11 @@ function completionKind(flags: SymbolFlags): CompletionItemKind {
 }
 
 function toItems(symbols: Map<string, Symbol>): CompletionItem[] {
-  return [...symbols].map(([label, symbol]) => ({ label, kind: completionKind(symbol.flags) }));
+  return [...symbols].map(([label, symbol]) => ({
+    label,
+    kind: completionKind(symbol.flags),
+    deprecated: symbolDeprecation(symbol) !== undefined,
+  }));
 }
 
 function isExpressionKind(kind: SyntaxKind): boolean {

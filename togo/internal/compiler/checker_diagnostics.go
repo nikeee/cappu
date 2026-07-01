@@ -357,7 +357,7 @@ func (c *Checker) deprecatedUseAt(node *Node, text string) (DeprecatedUse, bool)
 		if info == nil || info.Decl == nil {
 			return DeprecatedUse{}, false
 		}
-		dep, ok := readDeprecation(info.Decl)
+		dep, ok := ReadDeprecation(info.Decl)
 		if !ok {
 			return DeprecatedUse{}, false
 		}
@@ -381,7 +381,7 @@ func (c *Checker) deprecatedUseAt(node *Node, text string) (DeprecatedUse, bool)
 		if sym == nil {
 			return DeprecatedUse{}, false
 		}
-		dep, ok := readDeprecation(c.declarationOf(sym))
+		dep, ok := ReadDeprecation(c.declarationOf(sym))
 		if !ok {
 			return DeprecatedUse{}, false
 		}
@@ -406,7 +406,7 @@ func (c *Checker) deprecatedUseAt(node *Node, text string) (DeprecatedUse, bool)
 		if fieldDecl != nil && fieldDecl.Kind == VariableDeclarator {
 			fieldDecl = fieldDecl.Parent
 		}
-		dep, ok := readDeprecation(fieldDecl)
+		dep, ok := ReadDeprecation(fieldDecl)
 		if !ok {
 			return DeprecatedUse{}, false
 		}

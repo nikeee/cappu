@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import {
   type CodeAction,
+  CompletionItemTag,
   DiagnosticTag,
   type CodeActionParams,
   type CodeLens,
@@ -47,12 +48,13 @@ import {
 } from "vscode-languageserver/node";
 
 import { createChecker } from "../compiler/checker.ts";
+import { symbolDeprecation } from "../compiler/deprecation.ts";
 import { type ArrayType, type ClassType, TypeKind } from "../compiler/checkerTypes.ts";
 import { getCodeActions } from "./codeActions.ts";
 import { getCodeLenses } from "./codeLens.ts";
 import { dependencyLenses } from "./dependencyLens.ts";
 import { loadConfiguredPaths, missingConfiguredPaths } from "../compiler/compiler.ts";
-import { type CompletionItem, getCompletions } from "./completions.ts";
+import { getCompletions } from "./completions.ts";
 import { type CappuConfig, DEFAULT_CONFIG_NAME, DEFAULT_PACKAGE_SOURCES } from "../config.ts";
 import { latestVersion, MavenRepositorySource, type PackageSource } from "../packages/index.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
@@ -198,8 +200,10 @@ export function startServer(
 
   function toLspDiagnostic(d: JavaDiagnostic, lineStarts: readonly number[]): LspDiagnostic {
     return {
-      // editors fade out ranges tagged Unnecessary (unused imports)
+      // editors fade out ranges tagged Unnecessary (unused imports) and strike
+      // out ranges tagged Deprecated (uses of @Deprecated methods/types/fields)
       ...(d.code === 1305 ? { tags: [DiagnosticTag.Unnecessary] } : {}),
+      ...(d.code === 1306 ? { tags: [DiagnosticTag.Deprecated] } : {}),
       severity: toSeverity(d.category),
       range: {
         start: getLineAndCharacterOfPosition(lineStarts, d.pos),
@@ -409,9 +413,12 @@ export function startServer(
     return null;
   });
 
-  connection.onCompletion((params): CompletionItem[] => {
+  connection.onCompletion((params) => {
     const at = sourceAndOffset(asUri(params.textDocument.uri), params.position);
-    return at ? getCompletions(program, checker, at.sourceFile, at.offset, config) : [];
+    const items = at ? getCompletions(program, checker, at.sourceFile, at.offset, config) : [];
+    return items.map(({ deprecated, ...item }) =>
+      deprecated ? { ...item, tags: [CompletionItemTag.Deprecated] } : item,
+    );
   });
 
   connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
@@ -519,6 +526,7 @@ export function startServer(
               name: s.name,
               kind: s.kind,
               location: { uri, range: s.range },
+              ...(s.tags ? { tags: s.tags } : {}),
               ...(container ? { containerName: container } : {}),
             });
           }
@@ -787,6 +795,11 @@ export function startServer(
       : checker.getDocumentation(symbol);
 
     let value = "```java\n" + text + "\n```";
+    const dep = symbolDeprecation(symbol);
+    if (dep) {
+      const note = dep.forRemoval ? "**Deprecated** (for removal)." : "**Deprecated.**";
+      value += "\n\n" + (dep.since ? `${note} Since ${dep.since}.` : note);
+    }
     if (doc) value += "\n\n" + doc;
     return { contents: { kind: MarkupKind.Markdown, value } };
   });

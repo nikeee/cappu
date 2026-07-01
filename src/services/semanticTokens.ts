@@ -3,9 +3,11 @@
 // position-free; the LSP server encodes the entries into the wire format.
 
 import type { Checker } from "../compiler/checker.ts";
+import { symbolDeprecation } from "../compiler/deprecation.ts";
 import { forEachChild } from "../compiler/parser.ts";
 import { getSourceFileOfNode } from "../compiler/resolver.ts";
 import {
+  type CallExpression,
   type Identifier,
   type Node,
   type SourceFile,
@@ -29,9 +31,16 @@ export const TOKEN_TYPES = [
   "property",
   "parameter",
   "variable",
+  "regexp",
 ] as const;
 
-export const TOKEN_MODIFIERS = ["declaration", "static", "readonly", "defaultLibrary"] as const;
+export const TOKEN_MODIFIERS = [
+  "declaration",
+  "static",
+  "readonly",
+  "defaultLibrary",
+  "deprecated",
+] as const;
 
 const TYPE_INDEX = Object.fromEntries(TOKEN_TYPES.map((t, i) => [t, i]));
 const MOD_BIT = Object.fromEntries(TOKEN_MODIFIERS.map((m, i) => [m, 1 << i]));
@@ -85,7 +94,36 @@ function modifiersOf(symbol: Symbol, isDeclarationName: boolean): number {
   if (declaration && isSyntheticUri(getSourceFileOfNode(declaration).fileName)) {
     bits |= MOD_BIT["defaultLibrary"]!;
   }
+  if (symbolDeprecation(symbol)) bits |= MOD_BIT["deprecated"]!;
   return bits;
+}
+
+// Standard-library methods whose named string parameters are regular
+// expressions, keyed by "OwnerSimpleName#method" -> regex argument indices.
+// A string literal passed at one of these positions is tokenized as `regexp`
+// so clients can highlight the pattern (Java has no regex literal syntax).
+const REGEX_SINKS: Record<string, ReadonlySet<number>> = {
+  "Pattern#compile": new Set([0]),
+  "Pattern#matches": new Set([0]),
+  "String#matches": new Set([0]),
+  "String#split": new Set([0]),
+  "String#replaceAll": new Set([0]),
+  "String#replaceFirst": new Set([0]),
+};
+
+// The simple name of the type declaration enclosing a declaration node.
+function enclosingTypeName(node: Node): string | undefined {
+  for (let n = node.parent; n; n = n.parent) {
+    switch (n.kind) {
+      case SyntaxKind.ClassDeclaration:
+      case SyntaxKind.InterfaceDeclaration:
+      case SyntaxKind.EnumDeclaration:
+      case SyntaxKind.RecordDeclaration:
+      case SyntaxKind.AnnotationTypeDeclaration:
+        return (n as { name?: Identifier }).name?.text;
+    }
+  }
+  return undefined;
 }
 
 export function getSemanticTokens(checker: Checker, sourceFile: SourceFile): SemanticTokenEntry[] {
@@ -108,6 +146,23 @@ export function getSemanticTokens(checker: Checker, sourceFile: SourceFile): Sem
             tokenType,
             tokenModifiers: modifiersOf(symbol, isDeclarationName),
           });
+        }
+      }
+    }
+    if (node.kind === SyntaxKind.CallExpression) {
+      const call = node as CallExpression;
+      const method = checker.resolveCall(call);
+      const indices = method && REGEX_SINKS[`${enclosingTypeName(method)}#${method.name?.text}`];
+      if (indices) {
+        for (const i of indices) {
+          const arg = call.arguments[i];
+          if (arg?.kind === SyntaxKind.StringLiteral) {
+            const start = skipTrivia(sourceFile.text, arg.pos);
+            const length = arg.end - start;
+            if (length > 0) {
+              entries.push({ offset: start, length, tokenType: TYPE_INDEX["regexp"]!, tokenModifiers: 0 });
+            }
+          }
         }
       }
     }

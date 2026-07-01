@@ -6,6 +6,7 @@ import {
   type AnnotationArgument,
   type LiteralExpression,
   type Node,
+  type Symbol,
   SyntaxKind,
 } from "./types.ts";
 import { entityNameToString } from "./utilities.ts";
@@ -53,4 +54,13 @@ export function readDeprecation(declaration: Node | undefined): Deprecation | un
     return { since, forRemoval };
   }
   return undefined;
+}
+
+// Deprecation of a symbol's declaration, or undefined. A field's declaration
+// node is the VariableDeclarator while its @Deprecated sits on the enclosing
+// FieldDeclaration, so read the annotation from the parent in that case.
+export function symbolDeprecation(symbol: Symbol): Deprecation | undefined {
+  let decl = symbol.valueDeclaration ?? symbol.declarations?.[0];
+  if (decl?.kind === SyntaxKind.VariableDeclarator) decl = decl.parent;
+  return readDeprecation(decl);
 }

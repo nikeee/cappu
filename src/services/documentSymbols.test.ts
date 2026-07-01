@@ -1,7 +1,7 @@
 import { test } from "node:test";
 
 import { expect } from "expect";
-import { SymbolKind } from "vscode-languageserver-types";
+import { SymbolKind, SymbolTag } from "vscode-languageserver-types";
 
 import { getDocumentSymbols } from "./documentSymbols.ts";
 import { computeLineStarts } from "../compiler/lineMap.ts";
@@ -48,6 +48,18 @@ test("nested types nest in the outline", () => {
   const inner = outer!.children![0]!;
   expect([inner.name, inner.kind]).toEqual(["Inner", SymbolKind.Interface]);
   expect(inner.children!.map(c => c.name)).toEqual(["f"]);
+});
+
+test("@Deprecated declarations are tagged (type, method, field), fresh ones are not", () => {
+  const [cls] = outline(
+    "@Deprecated class C {\n  @Deprecated int old;\n  int cur;\n  @Deprecated void gone() {}\n  void live() {}\n}",
+  );
+  expect(cls!.tags).toEqual([SymbolTag.Deprecated]);
+  const byName = new Map(cls!.children!.map(c => [c.name, c.tags]));
+  expect(byName.get("old")).toEqual([SymbolTag.Deprecated]);
+  expect(byName.get("gone")).toEqual([SymbolTag.Deprecated]);
+  expect(byName.get("cur")).toBeUndefined();
+  expect(byName.get("live")).toBeUndefined();
 });
 
 test("selectionRange (name) is contained in range (whole declaration)", () => {

@@ -22,12 +22,20 @@ func dsSymbol(name string, kind lsp.SymbolKind, node, selection *compiler.Node, 
 	if name == "" {
 		name = "<anonymous>"
 	}
+	// `node` is the declaration for every caller except fields (where it is the
+	// VariableDeclarator and @Deprecated sits on the enclosing FieldDeclaration -
+	// that branch tags the symbol itself, since parent pointers need binding).
+	var tags []int
+	if _, ok := compiler.ReadDeprecation(node); ok {
+		tags = []int{lsp.SymbolTagDeprecated}
+	}
 	return lsp.DocumentSymbol{
 		Name:           name,
 		Kind:           kind,
 		Range:          dsRange(text, lineStarts, node.Pos, node.End),
 		SelectionRange: dsRange(text, lineStarts, selection.Pos, selection.End),
 		Children:       children,
+		Tags:           tags,
 	}
 }
 
@@ -54,10 +62,16 @@ func memberSymbols(node *compiler.Node, text string, lineStarts []int) []lsp.Doc
 		name := node.AsCompactConstructorDeclaration().Name
 		return []lsp.DocumentSymbol{dsSymbol(name.AsIdentifier().Text, lsp.SymbolKindConstructor, node, name, text, lineStarts, nil)}
 	case compiler.FieldDeclaration:
+		// @Deprecated sits on the FieldDeclaration, not the per-name declarators.
+		_, deprecated := compiler.ReadDeprecation(node)
 		var out []lsp.DocumentSymbol
 		for _, d := range node.AsFieldDeclaration().Declarators.Nodes {
 			name := d.AsVariableDeclarator().Name
-			out = append(out, dsSymbol(name.AsIdentifier().Text, lsp.SymbolKindField, d, name, text, lineStarts, nil))
+			s := dsSymbol(name.AsIdentifier().Text, lsp.SymbolKindField, d, name, text, lineStarts, nil)
+			if deprecated {
+				s.Tags = []int{lsp.SymbolTagDeprecated}
+			}
+			out = append(out, s)
 		}
 		return out
 	case compiler.EnumConstantDeclaration:

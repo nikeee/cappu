@@ -106,3 +106,15 @@ test("completion kinds are classified", () => {
   expect(byLabel.get("age")).toBe(CompletionItemKind.Field);
   expect(byLabel.get("greet")).toBe(CompletionItemKind.Method);
 });
+
+test("deprecated members are flagged (method and field, not fresh ones)", () => {
+  const items = complete(
+    "class P { @Deprecated int old; int cur; @Deprecated String gone() { return null; } String live() { return null; } }" +
+      " class U { void m(P p) { p./*|*/ } }",
+  );
+  const byLabel = new Map(items.map(i => [i.label, i.deprecated]));
+  expect(byLabel.get("old")).toBe(true);
+  expect(byLabel.get("gone")).toBe(true);
+  expect(byLabel.get("cur")).toBe(false);
+  expect(byLabel.get("live")).toBe(false);
+});
