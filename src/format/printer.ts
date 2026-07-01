@@ -1691,15 +1691,23 @@ class Printer {
     // (rest-of-line rule); this also subsumes the lone dot-chain case. An argument
     // carrying a same-line trailing comment cannot route - the comment must sit
     // between the value and the separator - so it appends the token instead.
+    const leads: (string | undefined)[] = [];
+    const leadStarts: number[] = [];
     const items = args.map((a, i) => {
       const parts: Doc[] = [];
+      const firstPending = this.comments[this.ci];
+      leadStarts[i] =
+        firstPending && firstPending.pos < this.start(a) ? firstPending.pos : this.start(a);
       // Leading comments on the argument: a block comment renders inline before
-      // it (`/* a= */ 1`); a line comment forces a break after itself.
-      for (const c of this.commentsBefore(this.start(a))) {
+      // it (`/* a= */ 1`); a line comment forces a break after itself. A line
+      // comment on the PREVIOUS argument's line (non-own-line) trails THAT
+      // argument - the join emits it before the inter-argument break.
+      this.commentsBefore(this.start(a)).forEach((c, ci) => {
         anyComment = true;
-        if (c.line) parts.push(c.text, hardline);
+        if (ci === 0 && i > 0 && c.line && !c.ownLine) leads[i] = c.text;
+        else if (c.line) parts.push(c.text, hardline);
         else parts.push(reformatParamComment(c.text) ?? c.text, " ");
-      }
+      });
       const follow: Doc = i < lastI ? "," : concat([")", trailing]);
       const t = this.comments[this.ci];
       const hasTrailingComment =
@@ -1742,10 +1750,22 @@ class Printer {
     }
     // The inter-argument `,` and the closing `)` are routed into the items, so the
     // inner level only joins them with fill breaks; its own fit check then counts
-    // the `)` and any outer trailing token (rest-of-line).
+    // the `)` and any outer trailing token (rest-of-line). A line comment trailing
+    // the previous argument stays on its line (before the break); gjf also
+    // preserves one source blank line between arguments.
     const innerParts: Doc[] = [];
+    // A source blank line between `(` and the first argument's leading comment is
+    // preserved (gjf preserves a blank before an own-line comment, not a bare arg).
+    if (leadStarts[0] < this.start(args[0]) && this.blankBeforePos(args[0].pos, leadStarts[0])) {
+      innerParts.push(hardline);
+    }
     items.forEach((it, i) => {
-      if (i > 0) innerParts.push(brk(fill, " ", ZERO));
+      if (i > 0) {
+        const blank = this.blankBeforePos(args[i - 1].end, leadStarts[i]);
+        if (leads[i] !== undefined) innerParts.push(" ", leads[i] as string, hardline);
+        else innerParts.push(brk(fill, " ", ZERO));
+        if (blank) innerParts.push(hardline);
+      }
       innerParts.push(it);
     });
     return concat(["(", level(PLUS4, [brk("unified", "", ZERO), level(ZERO, innerParts)])]);

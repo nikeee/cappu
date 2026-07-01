@@ -1879,15 +1879,26 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 	// carrying a same-line trailing comment cannot route - the comment must sit
 	// between the value and the separator - so it appends the token instead.
 	as := make([]Doc, len(argNodes))
+	leads := make([]string, len(argNodes))
+	leadStarts := make([]int, len(argNodes))
 	for i, a := range argNodes {
 		var parts []Doc
+		leadStarts[i] = p.start(a)
+		if p.ci < len(p.comments) && p.comments[p.ci].pos < p.start(a) {
+			leadStarts[i] = p.comments[p.ci].pos
+		}
 		// Leading comments: a block comment renders inline before the argument
-		// (`/* a= */ 1`); a line comment forces a break after itself.
-		for _, c := range p.commentsBefore(p.start(a)) {
+		// (`/* a= */ 1`); a line comment forces a break after itself. A line comment
+		// on the PREVIOUS argument's line (non-own-line) trails THAT argument - the
+		// join emits it before the inter-argument break.
+		for ci, c := range p.commentsBefore(p.start(a)) {
 			anyComment = true
-			if c.line {
+			switch {
+			case ci == 0 && i > 0 && c.line && !c.ownLine:
+				leads[i] = c.text
+			case c.line:
 				parts = append(parts, text(c.text), hardline)
-			} else {
+			default:
 				pc := c.text
 				if norm, ok := reformatParamComment(c.text); ok {
 					pc = norm
@@ -1949,9 +1960,24 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 	// inner level only joins them with fill breaks; its own fit check then counts
 	// the `)` and any outer trailing token (rest-of-line).
 	var innerParts []Doc
+	// A source blank line between `(` and the first argument's leading comment is
+	// preserved (gjf preserves a blank before an own-line comment, not a bare arg).
+	if leadStarts[0] < p.start(argNodes[0]) && p.blankBeforePos(argNodes[0].Pos, leadStarts[0]) {
+		innerParts = append(innerParts, hardline)
+	}
 	for i, it := range as {
 		if i > 0 {
-			innerParts = append(innerParts, brk(fill, " ", ZERO, nil))
+			// A line comment trailing the previous argument stays on its line (before
+			// the break); gjf also preserves one source blank line between arguments.
+			blank := p.blankBeforePos(argNodes[i-1].End, leadStarts[i])
+			if leads[i] != "" {
+				innerParts = append(innerParts, text(" "), text(leads[i]), hardline)
+			} else {
+				innerParts = append(innerParts, brk(fill, " ", ZERO, nil))
+			}
+			if blank {
+				innerParts = append(innerParts, hardline)
+			}
 		}
 		innerParts = append(innerParts, it)
 	}
