@@ -24,8 +24,11 @@ import {
   withNullness,
 } from "./checkerTypes.ts";
 import { createDiagnostic, Diagnostics } from "./diagnostics.ts";
+import { checkDateTimePattern } from "./dateTimePattern.ts";
 import { type ArgTypeDescriptor, conversionAccepts, parseFormatString } from "./formatString.ts";
+import { isParseableInteger, MAX_RADIX, MIN_RADIX } from "./numberParse.ts";
 import { forEachChild } from "./parser.ts";
+import { validateRegex } from "./regexValidate.ts";
 import type { Fqn, PackageName, Program } from "./program.ts";
 import {
   getDirectSuperTypeSymbols,
@@ -2513,6 +2516,8 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       ["java.io.PrintStream#printf", { fmtIsReceiver: false }],
       ["java.io.PrintWriter#format", { fmtIsReceiver: false }],
       ["java.io.PrintWriter#printf", { fmtIsReceiver: false }],
+      ["java.io.Console#format", { fmtIsReceiver: false }],
+      ["java.io.Console#printf", { fmtIsReceiver: false }],
       ["java.util.Formatter#format", { fmtIsReceiver: false }],
     ]);
     const argTypeDescriptor = (t: Type): ArgTypeDescriptor | undefined => {
@@ -2604,6 +2609,145 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       }
     };
 
+    // Shared entry for the "known JDK method with a literal argument" checks
+    // below: returns the receiver's class FQN and the method name for a member
+    // call, or undefined when the callee is not a resolvable member access.
+    const memberCallTarget = (
+      call: CallExpression,
+    ): { fqn: string; name: string; access: PropertyAccessExpression } | undefined => {
+      const callee = call.expression;
+      if (callee.kind !== SyntaxKind.PropertyAccessExpression) return undefined;
+      const access = callee as PropertyAccessExpression;
+      const receiver = receiverClassType(getTypeOfExpression(access.expression));
+      if (!receiver) return undefined;
+      return { fqn: fqnOf(receiver), name: access.name.text, access };
+    };
+
+    const literalStringArg = (call: CallExpression, index: number): LiteralExpression | undefined => {
+      const arg = call.arguments[index];
+      if (arg && (arg.kind === SyntaxKind.StringLiteral || arg.kind === SyntaxKind.TextBlockLiteral)) {
+        return arg as LiteralExpression;
+      }
+      return undefined;
+    };
+
+    // --- regex literal validation (nikeee/cappu#30) --------------------------
+    // A malformed literal regex throws PatternSyntaxException at runtime; we
+    // flag only the provably-broken ones (see validateRegex). The regex is
+    // argument 0 for every method here.
+    const REGEX_METHODS = new Set([
+      "java.util.regex.Pattern#compile",
+      "java.util.regex.Pattern#matches",
+      "java.lang.String#matches",
+      "java.lang.String#split",
+      "java.lang.String#replaceAll",
+      "java.lang.String#replaceFirst",
+    ]);
+    const checkRegexCall = (call: CallExpression): void => {
+      const target = memberCallTarget(call);
+      if (!target || !REGEX_METHODS.has(`${target.fqn}#${target.name}`)) return;
+      const arg = literalStringArg(call, 0);
+      if (!arg) return;
+      const reason = validateRegex(arg.value);
+      if (reason) {
+        diagnostics.push(
+          createDiagnostic(
+            arg.pos,
+            arg.end - arg.pos,
+            Diagnostics.Invalid_regular_expression_0,
+            reason,
+          ),
+        );
+      }
+    };
+
+    // --- date/time pattern validation ----------------------------------------
+    // DateTimeFormatter.ofPattern(pattern) - unknown letters throw, and the
+    // classic Y/D/h footguns compile but produce wrong output.
+    const checkDateTimeCall = (call: CallExpression): void => {
+      const target = memberCallTarget(call);
+      if (!target || `${target.fqn}#${target.name}` !== "java.time.format.DateTimeFormatter#ofPattern") {
+        return;
+      }
+      const arg = literalStringArg(call, 0);
+      if (!arg) return;
+      const report = checkDateTimePattern(arg.value);
+      for (const letter of report.invalidLetters) {
+        diagnostics.push(
+          createDiagnostic(
+            arg.pos,
+            arg.end - arg.pos,
+            Diagnostics.Invalid_date_time_pattern_letter_0,
+            letter,
+          ),
+        );
+      }
+      for (const f of report.footguns) {
+        diagnostics.push(
+          createDiagnostic(
+            arg.pos,
+            arg.end - arg.pos,
+            Diagnostics.Suspicious_date_time_pattern_letter_0_1_2,
+            f.letter,
+            f.meaning,
+            f.suggest,
+          ),
+        );
+      }
+    };
+
+    // --- integer parsing (Integer/Long/Short/Byte parse*/valueOf) ------------
+    // A non-parseable literal or an out-of-range radix throws
+    // NumberFormatException. The string is argument 0; a second numeric-literal
+    // argument, when present, is the radix.
+    const PARSE_METHODS = new Map<string, string>([
+      ["java.lang.Integer#parseInt", "int"],
+      ["java.lang.Integer#valueOf", "int"],
+      ["java.lang.Long#parseLong", "long"],
+      ["java.lang.Long#valueOf", "long"],
+      ["java.lang.Short#parseShort", "short"],
+      ["java.lang.Short#valueOf", "short"],
+      ["java.lang.Byte#parseByte", "byte"],
+      ["java.lang.Byte#valueOf", "byte"],
+    ]);
+    const checkNumberParseCall = (call: CallExpression): void => {
+      const target = memberCallTarget(call);
+      if (!target) return;
+      const typeName = PARSE_METHODS.get(`${target.fqn}#${target.name}`);
+      if (!typeName) return;
+      const arg = literalStringArg(call, 0);
+      if (!arg) return;
+      let radix = 10;
+      const radixArg = call.arguments[1];
+      if (radixArg) {
+        if (radixArg.kind !== SyntaxKind.NumericLiteral) return; // unknown radix: bail
+        radix = Number((radixArg as LiteralExpression).value);
+        if (!Number.isInteger(radix)) return;
+        if (radix < MIN_RADIX || radix > MAX_RADIX) {
+          diagnostics.push(
+            createDiagnostic(
+              radixArg.pos,
+              radixArg.end - radixArg.pos,
+              Diagnostics.Radix_0_out_of_range,
+              String(radix),
+            ),
+          );
+          return;
+        }
+      }
+      if (!isParseableInteger(arg.value, radix)) {
+        diagnostics.push(
+          createDiagnostic(
+            arg.pos,
+            arg.end - arg.pos,
+            Diagnostics.String_0_is_not_a_valid_1,
+            arg.value,
+            typeName,
+          ),
+        );
+      }
+    };
+
     const visit = (node: Node): void => {
       switch (node.kind) {
         case SyntaxKind.VariableDeclarator: {
@@ -2645,6 +2789,9 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
             checkCallArity(node as CallExpression);
             checkCallNullness(node as CallExpression);
             checkFormatCall(node as CallExpression);
+            checkRegexCall(node as CallExpression);
+            checkDateTimeCall(node as CallExpression);
+            checkNumberParseCall(node as CallExpression);
           }
           break;
         case SyntaxKind.ObjectCreationExpression:

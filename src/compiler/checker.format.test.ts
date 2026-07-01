@@ -6,7 +6,7 @@ import { createChecker } from "./checker.ts";
 import { Diagnostics } from "./diagnostics.ts";
 import { loadJdkStub } from "./jdkStub.ts";
 import { createProgram } from "./program.ts";
-import type { Uri } from "./program.ts";
+import type { Uri } from "../workspace.ts";
 
 const TOO_FEW = Diagnostics.Format_not_enough_arguments_0_1.code;
 const TOO_MANY = Diagnostics.Format_too_many_arguments_0_1.code;

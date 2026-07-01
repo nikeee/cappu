@@ -22,6 +22,8 @@
   method matches
   method repeat
   method replace
+  method replaceAll
+  method replaceFirst
   method split
   method startsWith
   method strip

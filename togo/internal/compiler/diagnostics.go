@@ -82,6 +82,11 @@ var Diagnostics = struct {
 	FormatNotEnoughArguments01            DiagnosticMessage
 	FormatTooManyArguments01              DiagnosticMessage
 	FormatConversionIncompatible01        DiagnosticMessage
+	InvalidRegularExpression0             DiagnosticMessage
+	InvalidDateTimePatternLetter0         DiagnosticMessage
+	SuspiciousDateTimePatternLetter012    DiagnosticMessage
+	String0IsNotAValid1                   DiagnosticMessage
+	Radix0OutOfRange                      DiagnosticMessage
 }{
 	Expected0:                             diag(1001, "_0_expected", "'{0}' expected.", CategoryError),
 	IdentifierExpected:                    diag(1002, "Identifier_expected", "Identifier expected.", CategoryError),
@@ -113,6 +118,11 @@ var Diagnostics = struct {
 	FormatNotEnoughArguments01:            diag(1309, "Format_not_enough_arguments_0_1", "Not enough arguments for format string: it references {0} but only {1} were provided.", CategoryWarning),
 	FormatTooManyArguments01:              diag(1310, "Format_too_many_arguments_0_1", "Too many arguments for format string: it uses {0} but {1} were provided.", CategoryWarning),
 	FormatConversionIncompatible01:        diag(1311, "Format_conversion_incompatible_0_1", "Format conversion '%{0}' cannot accept an argument of type '{1}'.", CategoryWarning),
+	InvalidRegularExpression0:             diag(1312, "Invalid_regular_expression_0", "Invalid regular expression: {0}.", CategoryWarning),
+	InvalidDateTimePatternLetter0:         diag(1313, "Invalid_date_time_pattern_letter_0", "Invalid date/time pattern letter '{0}'.", CategoryWarning),
+	SuspiciousDateTimePatternLetter012:    diag(1314, "Suspicious_date_time_pattern_letter_0_1_2", "Pattern letter '{0}' means {1}; did you mean '{2}'?", CategoryWarning),
+	String0IsNotAValid1:                   diag(1315, "String_0_is_not_a_valid_1", "'{0}' is not a valid {1}.", CategoryWarning),
+	Radix0OutOfRange:                      diag(1316, "Radix_0_out_of_range", "Radix {0} is out of range (must be between 2 and 36).", CategoryWarning),
 }
 
 var placeholderRe = regexp.MustCompile(`\{(\d+)\}`)

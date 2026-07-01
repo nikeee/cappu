@@ -111,6 +111,8 @@ class String implements CharSequence, Comparable<String> {
   public int lastIndexOf(String s) { return 0; }
   public boolean matches(String regex) { return false; }
   public String[] split(String regex) { return null; }
+  public String replaceAll(String regex, String replacement) { return null; }
+  public String replaceFirst(String regex, String replacement) { return null; }
   public char[] toCharArray() { return null; }
   public byte[] getBytes() { return null; }
   public boolean isBlank() { return false; }
@@ -183,7 +185,9 @@ class Long extends Number implements Comparable<Long> {
   public static final long MIN_VALUE = -9223372036854775808L;
   public int compareTo(Long o) { return 0; }
   public static long parseLong(String s) { return 0; }
+  public static long parseLong(String s, int radix) { return 0; }
   public static Long valueOf(long l) { return null; }
+  public static Long valueOf(String s) { return null; }
   public static String toHexString(long l) { return null; }
   public static String toBinaryString(long l) { return null; }
   public static long max(long a, long b) { return 0; }
@@ -206,10 +210,16 @@ class Float extends Number implements Comparable<Float> {
 
 class Short extends Number implements Comparable<Short> {
   public int compareTo(Short o) { return 0; }
+  public static short parseShort(String s) { return 0; }
+  public static short parseShort(String s, int radix) { return 0; }
+  public static Short valueOf(String s) { return null; }
 }
 
 class Byte extends Number implements Comparable<Byte> {
   public int compareTo(Byte o) { return 0; }
+  public static byte parseByte(String s) { return 0; }
+  public static byte parseByte(String s, int radix) { return 0; }
+  public static Byte valueOf(String s) { return null; }
 }
 
 class Character implements Comparable<Character> {
@@ -273,6 +283,7 @@ class System {
   public static void exit(int code) {}
   public static String getProperty(String key) { return null; }
   public static String lineSeparator() { return null; }
+  public static java.io.Console console() { return null; }
 }
 
 class Thread implements Runnable {
@@ -457,6 +468,12 @@ class PrintWriter extends Writer {
   public void println(int i) {}
   public PrintWriter printf(String format, Object... args) { return null; }
   public PrintWriter format(String format, Object... args) { return null; }
+}
+
+class Console {
+  public Console printf(String format, Object... args) { return null; }
+  public Console format(String format, Object... args) { return null; }
+  public String readLine() { return null; }
 }
 
 class ByteArrayInputStream extends InputStream {
@@ -1240,6 +1257,13 @@ enum ElementType { TYPE, FIELD, METHOD, PARAMETER, CONSTRUCTOR, LOCAL_VARIABLE, 
 @interface Repeatable { Class value(); }
 `;
 
+const JAVA_TIME_FORMAT = `package java.time.format;
+class DateTimeFormatter {
+  public static DateTimeFormatter ofPattern(String pattern) { return null; }
+  public static DateTimeFormatter ofPattern(String pattern, java.util.Locale locale) { return null; }
+}
+`;
+
 export const JDK_STUB_FILES: ReadonlyArray<{ uri: Uri; text: string }> = [
   { uri: "jdk:///java/lang.java" as Uri, text: JAVA_LANG },
   { uri: "jdk:///java/io.java" as Uri, text: JAVA_IO },
@@ -1255,6 +1279,7 @@ export const JDK_STUB_FILES: ReadonlyArray<{ uri: Uri; text: string }> = [
   { uri: "jdk:///java/nio/file.java" as Uri, text: JAVA_NIO_FILE },
   { uri: "jdk:///java/math.java" as Uri, text: JAVA_MATH },
   { uri: "jdk:///java/lang/annotation.java" as Uri, text: JAVA_LANG_ANNOTATION },
+  { uri: "jdk:///java/time/format.java" as Uri, text: JAVA_TIME_FORMAT },
 ];
 
 /** Register the synthetic JDK stub into a program. */

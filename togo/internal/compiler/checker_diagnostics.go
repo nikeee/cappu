@@ -886,6 +886,8 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 		"java.io.PrintStream#printf": true,
 		"java.io.PrintWriter#format": true,
 		"java.io.PrintWriter#printf": true,
+		"java.io.Console#format":     true,
+		"java.io.Console#printf":     true,
 		"java.util.Formatter#format": true,
 	}
 	argTypeDescriptor := func(t *Type) (ArgTypeDescriptor, bool) {
@@ -987,6 +989,131 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 		}
 	}
 
+	// Shared entry for the "known JDK method with a literal argument" checks:
+	// returns the receiver's class FQN and the method name, or ok=false when the
+	// callee is not a resolvable member access. Ports memberCallTarget /
+	// literalStringArg in src/compiler/checker.ts.
+	memberCallTarget := func(call *Node) (string, string, bool) {
+		callee := call.AsCallExpression().Expression
+		if callee.Kind != PropertyAccessExpression {
+			return "", "", false
+		}
+		access := callee.AsPropertyAccessExpression()
+		receiver := c.receiverClassType(c.getTypeOfExpression(access.Expression), 0)
+		if receiver == nil {
+			return "", "", false
+		}
+		return c.fqnOf(receiver), access.Name.AsIdentifier().Text, true
+	}
+	literalStringArg := func(call *Node, index int) *Node {
+		args := call.AsCallExpression().Arguments
+		if index >= nodeArrayLen(args) {
+			return nil
+		}
+		arg := args.Nodes[index]
+		if arg.Kind == StringLiteral || arg.Kind == TextBlockLiteral {
+			return arg
+		}
+		return nil
+	}
+
+	// Regex literal validation: a malformed literal regex throws
+	// PatternSyntaxException; the regex is argument 0 for every method here.
+	regexMethods := map[string]bool{
+		"java.util.regex.Pattern#compile": true,
+		"java.util.regex.Pattern#matches": true,
+		"java.lang.String#matches":        true,
+		"java.lang.String#split":          true,
+		"java.lang.String#replaceAll":     true,
+		"java.lang.String#replaceFirst":   true,
+	}
+	checkRegexCall := func(call *Node) {
+		fqn, name, ok := memberCallTarget(call)
+		if !ok || !regexMethods[fqn+"#"+name] {
+			return
+		}
+		arg := literalStringArg(call, 0)
+		if arg == nil {
+			return
+		}
+		if reason, bad := ValidateRegex(arg.AsLiteralExpression().Value); bad {
+			diagnostics = append(diagnostics, CreateDiagnostic(arg.Pos, arg.End-arg.Pos,
+				Diagnostics.InvalidRegularExpression0, reason))
+		}
+	}
+
+	// DateTimeFormatter.ofPattern: unknown letters throw, Y/D/h footguns run wrong.
+	checkDateTimeCall := func(call *Node) {
+		fqn, name, ok := memberCallTarget(call)
+		if !ok || fqn+"#"+name != "java.time.format.DateTimeFormatter#ofPattern" {
+			return
+		}
+		arg := literalStringArg(call, 0)
+		if arg == nil {
+			return
+		}
+		report := CheckDateTimePattern(arg.AsLiteralExpression().Value)
+		for _, letter := range report.InvalidLetters {
+			diagnostics = append(diagnostics, CreateDiagnostic(arg.Pos, arg.End-arg.Pos,
+				Diagnostics.InvalidDateTimePatternLetter0, letter))
+		}
+		for _, f := range report.Footguns {
+			diagnostics = append(diagnostics, CreateDiagnostic(arg.Pos, arg.End-arg.Pos,
+				Diagnostics.SuspiciousDateTimePatternLetter012, f.Letter, f.Meaning, f.Suggest))
+		}
+	}
+
+	// Integer parsing (Integer/Long/Short/Byte parse*/valueOf): a non-parseable
+	// literal or an out-of-range radix throws NumberFormatException. The string
+	// is argument 0; a second numeric-literal argument, if any, is the radix.
+	parseMethods := map[string]string{
+		"java.lang.Integer#parseInt": "int",
+		"java.lang.Integer#valueOf":  "int",
+		"java.lang.Long#parseLong":   "long",
+		"java.lang.Long#valueOf":     "long",
+		"java.lang.Short#parseShort": "short",
+		"java.lang.Short#valueOf":    "short",
+		"java.lang.Byte#parseByte":   "byte",
+		"java.lang.Byte#valueOf":     "byte",
+	}
+	checkNumberParseCall := func(call *Node) {
+		fqn, name, ok := memberCallTarget(call)
+		if !ok {
+			return
+		}
+		typeName, found := parseMethods[fqn+"#"+name]
+		if !found {
+			return
+		}
+		arg := literalStringArg(call, 0)
+		if arg == nil {
+			return
+		}
+		radix := 10
+		args := call.AsCallExpression().Arguments
+		if nodeArrayLen(args) > 1 {
+			radixArg := args.Nodes[1]
+			if radixArg.Kind != NumericLiteral {
+				return // unknown radix: bail
+			}
+			r, err := strconv.Atoi(radixArg.AsLiteralExpression().Value)
+			if err != nil {
+				return
+			}
+			radix = r
+			if radix < MinRadix || radix > MaxRadix {
+				diagnostics = append(diagnostics, CreateDiagnostic(radixArg.Pos, radixArg.End-radixArg.Pos,
+					Diagnostics.Radix0OutOfRange, strconv.Itoa(radix)))
+				return
+			}
+		}
+		value := arg.AsLiteralExpression().Value
+		if !IsParseableInteger(value, radix) {
+			diagnostics = append(diagnostics, CreateDiagnostic(arg.Pos, arg.End-arg.Pos,
+				Diagnostics.String0IsNotAValid1, value, typeName))
+		}
+	}
+
 	var visit func(node *Node)
 	visit = func(node *Node) {
 		switch node.Kind {
@@ -1026,6 +1153,9 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 				checkCallArity(node)
 				checkCallNullness(node)
 				checkFormatCall(node)
+				checkRegexCall(node)
+				checkDateTimeCall(node)
+				checkNumberParseCall(node)
 			}
 		case ObjectCreationExpression:
 			if cleanParse {

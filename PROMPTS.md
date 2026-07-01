@@ -497,3 +497,5 @@ how about:
 ```
 maybe the path should just be a directory and default to ./dist?
 - 2026-07-01 14:12 — add e2e tests that check whether a valid file is emitted
+- 2026-07-01 19:13 — in cappu LSP and cappu check, add a diagnostic warning if string.format is getting called with the wrong number of arguments (and similar gotchas in similar methods)
+- 2026-07-01 19:39 — commit and find other use-cases

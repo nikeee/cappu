@@ -141,6 +141,36 @@ export const Diagnostics = {
     "Format conversion '%{0}' cannot accept an argument of type '{1}'.",
     DiagnosticCategory.Warning,
   ),
+  Invalid_regular_expression_0: diag(
+    1312,
+    "Invalid_regular_expression_0",
+    "Invalid regular expression: {0}.",
+    DiagnosticCategory.Warning,
+  ),
+  Invalid_date_time_pattern_letter_0: diag(
+    1313,
+    "Invalid_date_time_pattern_letter_0",
+    "Invalid date/time pattern letter '{0}'.",
+    DiagnosticCategory.Warning,
+  ),
+  Suspicious_date_time_pattern_letter_0_1_2: diag(
+    1314,
+    "Suspicious_date_time_pattern_letter_0_1_2",
+    "Pattern letter '{0}' means {1}; did you mean '{2}'?",
+    DiagnosticCategory.Warning,
+  ),
+  String_0_is_not_a_valid_1: diag(
+    1315,
+    "String_0_is_not_a_valid_1",
+    "'{0}' is not a valid {1}.",
+    DiagnosticCategory.Warning,
+  ),
+  Radix_0_out_of_range: diag(
+    1316,
+    "Radix_0_out_of_range",
+    "Radix {0} is out of range (must be between 2 and 36).",
+    DiagnosticCategory.Warning,
+  ),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */
