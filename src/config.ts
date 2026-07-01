@@ -125,8 +125,10 @@ const FormatterSchema = z.object({
 const TestOptionsSchema = z.object({
   /** "text" (stdout only) or "junit" (also write junit-XML into reportsDir). */
   outputFormat: z.enum(["text", "junit"]).default("text"),
-  /** Directory junit-XML reports land in; only used when outputFormat is "junit". */
+  /** Directory junit-XML reports (and jacoco.exec) land in. */
   reportsDir: z.string().default(DEFAULT_TEST_REPORTS_DIR),
+  /** When true, attach the JaCoCo agent and write jacoco.exec into reportsDir. */
+  coverage: z.boolean().default(false),
 });
 
 const DapOptionsSchema = z.object({
@@ -318,10 +320,12 @@ export const CONFIG_TEMPLATE = `
   // },
 
   // \`cappu test\` output. The launcher always prints its summary to stdout;
-  // "junit" additionally writes junit-XML report files into reportsDir.
+  // "junit" additionally writes junit-XML report files into reportsDir, and
+  // "coverage" attaches the JaCoCo agent and writes jacoco.exec there too.
   // "testOptions": {
   //   "outputFormat": "text",              // "text" or "junit"
-  //   "reportsDir": "./dist/test-results",  // junit-XML target (outputFormat "junit")
+  //   "reportsDir": "./dist/test-results",  // junit-XML + jacoco.exec target
+  //   "coverage": false,                   // attach JaCoCo, emit jacoco.exec
   // },
 
   // Package repositories dependencies are resolved from, in order. Default if unset:

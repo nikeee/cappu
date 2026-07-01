@@ -212,3 +212,13 @@ test("compiler output is an enum, release has a floor, publishRepository is a UR
   write({ publishRepository: "not a url" });
   expect(() => loadConfig(undefined, dir.path)).toThrow();
 });
+
+test("testOptions.coverage defaults to false and parses true", () => {
+  using dir = TempDir.create("cfg-");
+  const write = (obj: Record<string, unknown>): void =>
+    writeFileSync(join(dir.path, DEFAULT_CONFIG_NAME), JSON.stringify(obj));
+  write({});
+  expect(loadConfig(undefined, dir.path).testOptions.coverage).toBe(false);
+  write({ testOptions: { coverage: true } });
+  expect(loadConfig(undefined, dir.path).testOptions.coverage).toBe(true);
+});
