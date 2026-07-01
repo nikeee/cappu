@@ -1040,20 +1040,14 @@ func (p *printer) attachTrailingBlockComment(parts []Doc, endPos int) ([]Doc, bo
 	return parts, false
 }
 
-// itemWithComments renders a delimited-list item with the comments attached to
-// it: leading comments before the item (own-line ones get a forced break after,
-// which also forces the whole list to break; an inline block comment stays
-// inline) and a trailing block comment on the item's line before the separator.
+// listItem is a rendered delimited-list item plus how its comments attach:
+// leadTrailing is a line comment that trails the PREVIOUS item on its line, and
+// leadStart is where this item's rendered content begins (for blank-line detection).
 type listItem struct {
 	doc          Doc
 	comment      bool
 	leadTrailing string // "" when none
 	leadStart    int
-}
-
-func (p *printer) itemWithComments(node *compiler.Node, render func() Doc) (Doc, bool) {
-	r := p.itemWithCommentsEx(node, render, false)
-	return r.doc, r.comment
 }
 
 func (p *printer) itemWithCommentsEx(node *compiler.Node, render func() Doc, extractLeadTrailing bool) listItem {
