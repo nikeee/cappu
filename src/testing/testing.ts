@@ -127,32 +127,67 @@ export const CONSOLE_LAUNCHER: Coordinates = toCoordinates(
   "1.12.2",
 );
 
-/**
- * The launcher jar's path in the global package store, downloading it there
- * on first use. Sources are injectable for tests.
- */
-export async function consoleLauncherJar(
-  config: CappuConfig,
-  sources: readonly PackageSource[] = configuredSources(config),
+// The JaCoCo runtime agent: attached via -javaagent when testOptions.coverage
+// is on, to write jacoco.exec. Like the launcher, a TOOL - never in the config
+// or lockfile. The "runtime" classifier is the ready-to-use jacocoagent.jar
+// (the plain artifact only nests it as a resource).
+export const JACOCO_AGENT: Coordinates = toCoordinates(
+  "org.jacoco",
+  "org.jacoco.agent",
+  "0.8.12",
+  "runtime",
+);
+
+// Fetch a tool jar into the global package store on first use; injectable
+// sources for tests.
+async function downloadTool(
+  coordinates: Coordinates,
+  sources: readonly PackageSource[],
 ): Promise<string> {
-  const path = storePathFor(CONSOLE_LAUNCHER);
-  if (!path) throw new Error("unreachable: launcher coordinates are store-safe");
+  const path = storePathFor(coordinates);
+  if (!path) throw new Error("unreachable: tool coordinates are store-safe");
   if (existsSync(path)) return path;
   for (const source of sources) {
-    const bytes = await source.getArtifact?.(CONSOLE_LAUNCHER);
+    const bytes = await source.getArtifact?.(coordinates);
     if (!bytes) continue;
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, bytes);
     return path;
   }
   throw new Error(
-    `could not download ${CONSOLE_LAUNCHER.groupId}:${CONSOLE_LAUNCHER.artifactId}:${CONSOLE_LAUNCHER.version} from any package source`,
+    `could not download ${coordinates.groupId}:${coordinates.artifactId}:${coordinates.version} from any package source`,
   );
 }
 
+/**
+ * The launcher jar's path in the global package store, downloading it there
+ * on first use. Sources are injectable for tests.
+ */
+export function consoleLauncherJar(
+  config: CappuConfig,
+  sources: readonly PackageSource[] = configuredSources(config),
+): Promise<string> {
+  return downloadTool(CONSOLE_LAUNCHER, sources);
+}
+
+/** The JaCoCo agent jar's store path, downloading it on first use. */
+export function jacocoAgentJar(
+  config: CappuConfig,
+  sources: readonly PackageSource[] = configuredSources(config),
+): Promise<string> {
+  return downloadTool(JACOCO_AGENT, sources);
+}
+
 /** The `java` arguments running the launcher over the compiled tests. */
-export function testRunArgs(config: CappuConfig, launcherJar: string): string[] {
+export function testRunArgs(config: CappuConfig, launcherJar: string, agentJar?: string): string[] {
   return [
+    // -javaagent is a JVM arg: it must precede -jar. Only present when the
+    // caller resolved an agent jar (i.e. testOptions.coverage is on).
+    ...(agentJar
+      ? [
+          `-javaagent:${agentJar}=destfile=${join(resolveConfigPath(config, config.testOptions.reportsDir), "jacoco.exec")}`,
+        ]
+      : []),
     "-jar",
     launcherJar,
     "execute",

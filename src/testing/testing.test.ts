@@ -13,6 +13,7 @@ import {
   CONSOLE_LAUNCHER,
   consoleLauncherJar,
   findTestSources,
+  jacocoAgentJar,
   mainClassesDir,
   testClassesDir,
   testRunArgs,
@@ -78,6 +79,41 @@ test("testRunArgs writes junit reports to the resolved reportsDir only for junit
   config.testOptions.reportsDir = "./build/reports";
   const custom = testRunArgs(config, "/store/launcher.jar");
   expect(custom[custom.indexOf("--reports-dir") + 1]).toBe(join(dir, "build", "reports"));
+});
+
+test("testRunArgs prepends the JaCoCo javaagent when an agent jar is given", () => {
+  using project = tempProject();
+  const dir = project.path;
+  const config = loadConfig(undefined, dir);
+  const exec = join(dir, "dist", "test-results", "jacoco.exec");
+
+  const run = testRunArgs(config, "/store/launcher.jar", "/store/jacocoagent.jar");
+  expect(run[0]).toBe(`-javaagent:/store/jacocoagent.jar=destfile=${exec}`);
+  expect(run.slice(1, 4)).toEqual(["-jar", "/store/launcher.jar", "execute"]);
+  expect(run.at(-1)).toBe("--scan-class-path");
+
+  // no agent jar: unchanged, java args start at -jar
+  expect(testRunArgs(config, "/store/launcher.jar")[0]).toBe("-jar");
+});
+
+test("the JaCoCo agent is fetched with its runtime classifier into the store", async () => {
+  using project = tempProject();
+  const config = loadConfig(undefined, project.path);
+  let requestedClassifier: string | undefined;
+  const source = {
+    name: "mem" as SourceName,
+    search: () => Promise.resolve([]),
+    listVersions: () => Promise.resolve([]),
+    getMetadata: () => Promise.resolve(undefined),
+    getArtifact: (c: { classifier?: string }) => {
+      requestedClassifier = c.classifier;
+      return Promise.resolve(new TextEncoder().encode("agent-bytes"));
+    },
+  };
+  const path = await jacocoAgentJar(config, [source]);
+  expect(requestedClassifier).toBe("runtime");
+  expect(path.endsWith("-runtime.jar")).toBe(true);
+  expect(path.startsWith(STORE)).toBe(true);
 });
 
 test("compileTests wipes stale class files first (no phantom tests)", () => {

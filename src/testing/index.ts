@@ -7,6 +7,7 @@ export {
   CONSOLE_LAUNCHER,
   consoleLauncherJar,
   findTestSources,
+  jacocoAgentJar,
   mainClassesDir,
   resolveJava,
   TEST_BUILD_ROOT,
