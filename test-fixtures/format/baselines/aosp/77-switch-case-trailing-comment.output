@@ -1,0 +1,13 @@
+package p;
+
+class C {
+    int m(char x) {
+        switch (x) {
+            case 'a': // fall through
+            case 'b':
+                return 1;
+            default: // fallback
+                return 0;
+        }
+    }
+}

@@ -1373,7 +1373,14 @@ class Printer {
     const entries: { doc: Doc; blank: boolean }[] = [];
     let prevEnd = -1;
     for (const c of clauses) {
-      const comments = this.commentsBefore(this.start(c));
+      let comments = this.commentsBefore(this.start(c));
+      // A line comment on the previous clause's line (`case 'a': // fall through`)
+      // trails THAT clause, not the next - append it to the previous entry.
+      if (comments.length > 0 && !comments[0].ownLine && entries.length > 0) {
+        const prev = entries[entries.length - 1];
+        prev.doc = concat([prev.doc, " ", comments[0].text]);
+        comments = comments.slice(1);
+      }
       const start = comments.length > 0 ? comments[0].pos : this.start(c);
       const blank = prevEnd >= 0 && this.blankBeforePos(prevEnd, start);
       let leading = blank;
@@ -1441,8 +1448,20 @@ class Printer {
       return level(PLUS4, parts);
     }
     parts.push(":");
+    // A comment trailing the `case X:` / `default:` label on its line stays there
+    // (`case 'a': // fall through`) rather than moving onto the next line.
+    const bound = c.statements.length > 0 ? this.start(c.statements[0]) : c.end;
+    const t = this.comments[this.ci];
+    const head: Doc[] = [level(ZERO, parts)];
+    if (t !== undefined && !t.ownLine && t.pos < bound) {
+      this.ci++;
+      head.push(" ", t.text);
+    }
+    // A fall-through case with no body is just its label; the switch body's clause
+    // separator supplies the newline to the next clause.
+    if (c.statements.length === 0) return concat(head);
     return concat([
-      level(ZERO, parts),
+      concat(head),
       indent(concat([hardline, ...this.statementList(c.statements, c.end)])),
     ]);
   }
