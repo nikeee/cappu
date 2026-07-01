@@ -1509,6 +1509,12 @@ func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, e
 	prevEnd := -1
 	for _, c := range nodes(clauses) {
 		comments := p.commentsBefore(p.start(c))
+		// A line comment on the previous clause's line (`case 'a': // fall through`)
+		// trails THAT clause, not the next - append it to the previous entry.
+		if len(comments) > 0 && !comments[0].ownLine && len(entries) > 0 {
+			entries[len(entries)-1].doc = concat(entries[len(entries)-1].doc, text(" "), text(comments[0].text))
+			comments = comments[1:]
+		}
 		start := p.start(c)
 		if len(comments) > 0 {
 			start = comments[0].pos
@@ -1609,6 +1615,11 @@ func (p *printer) switchClause(c *compiler.SwitchClauseData, end int) Doc {
 			p.ci++
 			head = concat(head, text(" "), text(t.text))
 		}
+	}
+	// A fall-through case with no body is just its label; the switch body's clause
+	// separator supplies the newline to the next clause.
+	if c.Statements.Len() == 0 {
+		return head
 	}
 	return concat(head, indent(concat(append([]Doc{hardline}, p.listDocs(nodes(c.Statements), false, end)...)...)))
 }

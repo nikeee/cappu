@@ -1,10 +1,11 @@
 package p;
 
 class C {
-    int m(int x) {
+    int m(char x) {
         switch (x) {
-            case 1: // handle one
-                return 10;
+            case 'a': // fall through
+            case 'b':
+                return 1;
             default: // fallback
                 return 0;
         }
