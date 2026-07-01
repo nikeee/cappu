@@ -46,6 +46,7 @@ type CLI struct {
 	Tree         treeCmd         `cmd:"" help:"Print the resolved dependency graph as a tree, per configuration"`
 	Publish      publishCmd      `cmd:"" help:"Build the jar, generate its POM, and upload"`
 	Search       searchCmd       `cmd:"" help:"Search the configured package sources"`
+	Show         showCmd         `cmd:"" help:"Show a detail card for one package (group:artifact[:version])"`
 	Run          runCmd          `cmd:"" help:"Compile the project and run it on the JVM"`
 	Test         testCmd         `cmd:"" help:"Compile src/test/java and run JUnit"`
 	SelfUpgrade  selfUpgradeCmd  `cmd:"" name:"self-upgrade" help:"Replace this binary with the latest CD build"`
@@ -254,6 +255,23 @@ func (c *searchCmd) Run(a *appState) error {
 		return cmdErr(2)
 	}
 	return exit(cli.RunSearch(query, cfg, c.JSON || cli.AgentEnabled(os.Getenv)))
+}
+
+type showCmd struct {
+	Coord string `arg:"" optional:"" help:"group:artifact[:version] (latest if the version is omitted)"`
+	JSON  bool   `name:"json" help:"Emit the card machine-readable"`
+}
+
+func (c *showCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		return err
+	}
+	if c.Coord == "" {
+		fmt.Fprintln(os.Stderr, "cappu: show needs a package, e.g. `cappu show com.google.code.gson:gson`")
+		return cmdErr(2)
+	}
+	return exit(cli.RunShow(c.Coord, cfg, c.JSON || cli.AgentEnabled(os.Getenv)))
 }
 
 type testCmd struct{}

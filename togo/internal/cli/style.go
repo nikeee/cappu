@@ -18,6 +18,7 @@ var styleCodes = map[string]string{
 	"dim":    "2",
 	"bold":   "1",
 	"cyan":   "36",
+	"blue":   "34",
 }
 
 // ColorEnabled reports whether coloured output may render: a TTY that has not
@@ -45,7 +46,7 @@ func painter(f *os.File) func(format, text string) string {
 // there is meaningless. Port of TIMED_COMMANDS in main.ts.
 var timedCommands = map[string]bool{
 	"install": true, "update": true, "add": true, "audit": true,
-	"licenses": true, "tree": true, "publish": true, "verify": true, "compile": true, "check": true, "test": true,
+	"licenses": true, "tree": true, "show": true, "publish": true, "verify": true, "compile": true, "check": true, "test": true,
 	"format": true,
 }
 

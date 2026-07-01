@@ -119,6 +119,26 @@ test("licenses parse with raw names and best-effort SPDX normalization", () => {
   expect(metadata.licenseNormalized).toEqual(["Apache-2.0"]);
 });
 
+test("homepage and scm parse; connection strips the leading scm:git: prefix", () => {
+  const withUrl = `<project>
+    <groupId>org.example</groupId><artifactId>app</artifactId><version>1.0</version>
+    <url>https://example.org/app</url>
+    <scm><url>https://github.com/example/app</url></scm>
+  </project>`;
+  const a = parsePom(withUrl, COORDS);
+  expect(a.homepage).toBe("https://example.org/app");
+  expect(a.scmUrl).toBe("https://github.com/example/app");
+
+  // No <scm><url>: fall back to <connection>, dropping the scm:<provider>: prefix.
+  const withConnection = `<project>
+    <groupId>org.example</groupId><artifactId>app</artifactId><version>1.0</version>
+    <scm><connection>scm:git:https://github.com/example/app.git</connection></scm>
+  </project>`;
+  const b = parsePom(withConnection, COORDS);
+  expect(b.homepage).toBeUndefined();
+  expect(b.scmUrl).toBe("https://github.com/example/app.git");
+});
+
 test("licenses are inherited from the nearest parent that declares any", async () => {
   const poms = new Map([
     [

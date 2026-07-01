@@ -89,6 +89,34 @@ func TestParsePomDependencies(t *testing.T) {
 	}
 }
 
+func TestParsePomHomepageAndScm(t *testing.T) {
+	withURL := `<project>
+    <groupId>org.example</groupId><artifactId>app</artifactId><version>1.0</version>
+    <url>https://example.org/app</url>
+    <scm><url>https://github.com/example/app</url></scm>
+  </project>`
+	a, _ := ParsePom(withURL, coordsAppV1)
+	if a.Homepage != "https://example.org/app" {
+		t.Errorf("homepage = %q", a.Homepage)
+	}
+	if a.ScmURL != "https://github.com/example/app" {
+		t.Errorf("scmUrl = %q", a.ScmURL)
+	}
+
+	// No <scm><url>: fall back to <connection>, dropping the scm:<provider>: prefix.
+	withConnection := `<project>
+    <groupId>org.example</groupId><artifactId>app</artifactId><version>1.0</version>
+    <scm><connection>scm:git:https://github.com/example/app.git</connection></scm>
+  </project>`
+	b, _ := ParsePom(withConnection, coordsAppV1)
+	if b.Homepage != "" {
+		t.Errorf("homepage = %q, want empty", b.Homepage)
+	}
+	if b.ScmURL != "https://github.com/example/app.git" {
+		t.Errorf("scmUrl = %q", b.ScmURL)
+	}
+}
+
 func TestParsePomLicenses(t *testing.T) {
 	pom := `<project>
     <groupId>org.example</groupId><artifactId>app</artifactId><version>1.0</version>

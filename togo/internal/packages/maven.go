@@ -339,6 +339,9 @@ type RawPom struct {
 	// BomImports are the scope=import entries in <dependencyManagement>.
 	BomImports  []rawDependency
 	Description string
+	// Homepage (<url>) and ScmURL (<scm>) as written.
+	Homepage string
+	ScmURL   string
 	// Licenses as written; empty when the POM declares none (then inherited).
 	Licenses []License
 }
@@ -391,8 +394,14 @@ type xmlProject struct {
 		ArtifactID string `xml:"artifactId"`
 		Version    string `xml:"version"`
 	} `xml:"parent"`
-	Properties   xmlProperties `xml:"properties"`
-	Description  string        `xml:"description"`
+	Properties  xmlProperties `xml:"properties"`
+	Description string        `xml:"description"`
+	URL         string        `xml:"url"`
+	Scm         struct {
+		URL                 string `xml:"url"`
+		Connection          string `xml:"connection"`
+		DeveloperConnection string `xml:"developerConnection"`
+	} `xml:"scm"`
 	Dependencies struct {
 		Dependency []xmlDependency `xml:"dependency"`
 	} `xml:"dependencies"`
@@ -478,8 +487,28 @@ func parseRawPom(text string) *RawPom {
 		Managed:      managed,
 		BomImports:   bomImports,
 		Description:  project.Description,
+		Homepage:     project.URL,
+		ScmURL:       scmURLOf(project.Scm.URL, project.Scm.Connection, project.Scm.DeveloperConnection),
 		Licenses:     licenses,
 	}
+}
+
+var scmPrefixRe = regexp.MustCompile(`^scm:[^:]*:`)
+
+// scmURLOf resolves a POM <scm> url: prefer <url>, else <connection> with a
+// leading `scm:<provider>:` stripped. Port of scmUrlOf in src/packages/maven.ts.
+func scmURLOf(url, connection, developerConnection string) string {
+	if url != "" {
+		return url
+	}
+	conn := connection
+	if conn == "" {
+		conn = developerConnection
+	}
+	if conn == "" {
+		return ""
+	}
+	return scmPrefixRe.ReplaceAllString(conn, "")
 }
 
 var interpolateRe = regexp.MustCompile(`\$\{([^}]+)\}`)
@@ -585,8 +614,21 @@ func effectiveMetadata(chain []*RawPom, c Coordinates, imported map[string]strin
 			break
 		}
 	}
+	// Homepage/scm: the nearest chain entry (child first) that declares one,
+	// interpolated like every other POM value.
+	nearest := func(pick func(*RawPom) string) string {
+		for _, pom := range chain {
+			if v := pick(pom); v != "" {
+				return interpolate(v, properties, c)
+			}
+		}
+		return ""
+	}
+
 	meta := PackageMetadata{
 		Coordinates:       c,
+		Homepage:          nearest(func(p *RawPom) string { return p.Homepage }),
+		ScmURL:            nearest(func(p *RawPom) string { return p.ScmURL }),
 		Dependencies:      dependencies,
 		Licenses:          licenses,
 		LicenseNormalized: NormalizeLicenses(licenses),

@@ -480,3 +480,5 @@ cappu search commons-lang3
 - 2026-06-30 20:17 — look at the ts and go sources. spot refactoring or simplification opportunities. use builtins if they are obvious. assume you can use newest node.js (>26) and latest go (>1.26)
 - 2026-06-30 20:17 — aal of them
 - 2026-06-30 20:17 — continue
+- 2026-07-01 09:27 — does this make sense? https://github.com/nikeee/cappu/issues/32 if so, build it and make it colorful output. it should look pretty and be informative with everything a dev usually needs to know about this dependency
+- 2026-07-01 09:27 — commit when you are done

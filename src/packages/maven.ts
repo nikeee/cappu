@@ -172,8 +172,20 @@ export interface RawPom {
   /** scope=import entries in <dependencyManagement>: BOMs to merge in. */
   bomImports: RawDependency[];
   description?: string;
+  /** Project homepage (<url>) and source repo (<scm>), as written. */
+  homepage?: string;
+  scmUrl?: string;
   /** <licenses> as written; empty when the POM declares none (then inherited). */
   licenses: License[];
+}
+
+/** A POM <scm> url: prefer <url>, else <connection> with a leading `scm:git:` stripped. */
+function scmUrlOf(scm: Record<string, unknown> | undefined): string | undefined {
+  if (!scm) return undefined;
+  const url = asText(scm.url);
+  if (url) return url;
+  const connection = asText(scm.connection) ?? asText(scm.developerConnection);
+  return connection ? connection.replace(/^scm:[^:]*:/, "") : undefined;
 }
 
 export function parseRawPom(text: string): RawPom {
@@ -226,6 +238,8 @@ export function parseRawPom(text: string): RawPom {
     managed,
     bomImports,
     description: asText(project.description),
+    homepage: asText(project.url),
+    scmUrl: scmUrlOf(project.scm as Record<string, unknown> | undefined),
     licenses,
   };
 }
@@ -303,9 +317,19 @@ export function effectiveMetadata(
   // declares any.
   const licenses = chain.find(pom => pom.licenses.length > 0)?.licenses ?? [];
   const licenseNormalized = normalizeLicenses(licenses);
+  // Homepage/scm: the nearest chain entry (child first) that declares one,
+  // interpolated like every other POM value (they often contain ${project.*}).
+  const nearest = (pick: (pom: RawPom) => string | undefined): string | undefined => {
+    const raw = chain.map(pick).find(v => v);
+    return raw === undefined ? undefined : interpolate(raw, properties, coordinates);
+  };
+  const homepage = nearest(pom => pom.homepage);
+  const scmUrl = nearest(pom => pom.scmUrl);
   return {
     coordinates,
     description: child?.description,
+    ...(homepage ? { homepage } : {}),
+    ...(scmUrl ? { scmUrl } : {}),
     dependencies,
     incomplete,
     ...(licenses.length > 0 ? { licenses } : {}),

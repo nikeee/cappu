@@ -78,8 +78,12 @@ type DependencyDeclaration struct {
 // PackageMetadata is the effective view of one package version: its declared
 // dependencies and licenses.
 type PackageMetadata struct {
-	Coordinates  Coordinates
-	Description  string
+	Coordinates Coordinates
+	Description string
+	// Homepage is the project homepage (POM <url>), empty when not declared.
+	Homepage string
+	// ScmURL is the source repository url (POM <scm><url>/<connection>), empty when none.
+	ScmURL       string
 	Dependencies []DependencyDeclaration
 	// Licenses as the POM declares them (free text), empty when none.
 	Licenses []License

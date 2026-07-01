@@ -20,6 +20,7 @@ import { runLsp } from "./lsp.ts";
 import { runMcp } from "./mcp.ts";
 import { runDap } from "./dap.ts";
 import { runSearch } from "./search.ts";
+import { runShow } from "./show.ts";
 import { runCacheCommand } from "./cache.ts";
 import { runSelfUpgrade } from "./selfUpgrade.ts";
 import { runRage } from "./rage.ts";
@@ -108,6 +109,11 @@ const COMMAND_GROUPS: HelpGroup[] = [
         name: "search",
         args: "<query> [--json]",
         desc: "Search the configured package sources; prints group:artifact@latest-version per match; --json emits the matches machine-readable",
+      },
+      {
+        name: "show",
+        args: "<coord> [--json]",
+        desc: "Show a detail card for one package (group:artifact[:version], latest if omitted): description, license, homepage/repo, published versions, direct dependencies, how this project depends on it, and known vulnerabilities (OSV); --json emits it machine-readable",
       },
       {
         name: "publish",
@@ -361,6 +367,7 @@ const TIMED_COMMANDS = new Set([
   "audit",
   "licenses",
   "tree",
+  "show",
   "publish",
   "verify",
   "compile",
@@ -461,6 +468,17 @@ switch (command) {
       process.exit(2);
     }
     await runSearch(query, config, { json });
+    break;
+  }
+  case "show": {
+    const coord = files[0];
+    if (coord === undefined) {
+      process.stderr.write(
+        "cappu: show needs a package, e.g. `cappu show com.google.code.gson:gson`\n",
+      );
+      process.exit(2);
+    }
+    await runShow(coord, config, { json });
     break;
   }
   case "lsp":

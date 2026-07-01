@@ -44,6 +44,10 @@ export interface DependencyDeclaration extends Coordinates {
 export interface PackageMetadata {
   readonly coordinates: Coordinates;
   readonly description?: string;
+  /** The project homepage (POM <url>), if declared. */
+  readonly homepage?: string;
+  /** The source repository url (POM <scm><url>/<connection>), if declared. */
+  readonly scmUrl?: string;
   readonly dependencies: readonly DependencyDeclaration[];
   /** Licenses as the POM declares them (free text), absent when none. */
   readonly licenses?: readonly License[];

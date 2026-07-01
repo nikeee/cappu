@@ -45,6 +45,7 @@ import {
   matchingVersions,
   MavenRepositorySource,
   type PackageKey,
+  packageKey,
   type PackageMetadata,
   type PackageSource,
   type Resolution,
@@ -349,7 +350,10 @@ export function verifyCache(): CacheVerifyResult {
       const dir = dirname(full);
       const pom = join(dir, `${basename(dirname(dir))}-${basename(dir)}.pom`);
       if (!existsSync(pom)) result.missing.push(rel(pom));
-      else (sha256Of(readFileSync(pom)) === cached.pomSha256 ? result.ok : result.modified).push(rel(pom));
+      else
+        (sha256Of(readFileSync(pom)) === cached.pomSha256 ? result.ok : result.modified).push(
+          rel(pom),
+        );
     }
   }
   return result;
@@ -551,6 +555,40 @@ export async function planOutdated(
 
 function lockfilePath(config: CappuConfig): string {
   return join(config.baseDir, LOCKFILE_NAME);
+}
+
+/** How `group:artifact` relates to the current project (for `cappu show`). */
+export interface ProjectContext {
+  /** The cappu.json configuration(s) declaring it (e.g. ["implementation"]). */
+  readonly configurations: readonly string[];
+  /** The version range declared in cappu.json, if any. */
+  readonly declared?: string;
+  /** The exact version pinned in cappu-lock.json, if locked. */
+  readonly installed?: string;
+}
+
+/** Where (if anywhere) this project depends on `group:artifact`, and at what version. */
+export function projectContext(config: CappuConfig, key: string): ProjectContext {
+  const configurations: string[] = [];
+  let declared: string | undefined;
+  for (const name of DEPENDENCY_CONFIGURATIONS) {
+    const version = config.dependencies[name][key];
+    if (version !== undefined) {
+      configurations.push(name);
+      declared ??= version;
+    }
+  }
+  let installed: string | undefined;
+  const lock = readLockfile(config);
+  if (lock) {
+    const all = [...lock.packages, ...(lock.processorPackages ?? []), ...(lock.testPackages ?? [])];
+    installed = all.find(p => packageKey(p.coordinates) === key)?.coordinates.version;
+  }
+  return {
+    configurations,
+    ...(declared !== undefined ? { declared } : {}),
+    ...(installed !== undefined ? { installed } : {}),
+  };
 }
 
 function readLockfile(config: CappuConfig): Lockfile | undefined {
