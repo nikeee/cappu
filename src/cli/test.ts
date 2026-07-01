@@ -2,13 +2,15 @@
 // Console Launcher run. Exits with the launcher's code (0 = all green).
 
 import { spawnSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
 
 import { runCompile } from "../compiler/compiler.ts";
-import type { CappuConfig } from "../config.ts";
+import { type CappuConfig, resolveConfigPath } from "../config.ts";
 import {
   compileTests,
   consoleLauncherJar,
   findTestSources,
+  jacocoAgentJar,
   mainClassesDir,
   resolveJava,
   testRunArgs,
@@ -50,15 +52,23 @@ export async function runTestCommand(config: CappuConfig): Promise<never> {
     if (diagnostics.some(d => d.severity === "error")) process.exit(1);
   }
 
-  // 3. the JUnit run, streamed (the launcher's exit code is ours)
+  // 3. the JUnit run, streamed (the launcher's exit code is ours). With
+  // coverage on, also fetch the JaCoCo agent and attach it (writes jacoco.exec
+  // into reportsDir).
   let launcher: string;
+  let agent: string | undefined;
   try {
     launcher = await consoleLauncherJar(config);
+    if (config.testOptions.coverage) {
+      agent = await jacocoAgentJar(config);
+      // the JaCoCo agent opens destfile but does not create parent dirs
+      mkdirSync(resolveConfigPath(config, config.testOptions.reportsDir), { recursive: true });
+    }
   } catch (e) {
     process.stderr.write(`cappu: ${(e as Error).message}\n`);
     process.exit(1);
   }
-  const result = spawnSync(resolveJava(config), testRunArgs(config, launcher), {
+  const result = spawnSync(resolveJava(config), testRunArgs(config, launcher, agent), {
     stdio: "inherit",
   });
   if (result.error) {

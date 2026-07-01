@@ -16,7 +16,13 @@ import { expect } from "expect";
 
 import TempDir from "../TempDir.ts";
 import { loadConfig } from "../config.ts";
-import { consoleLauncherJar, resolveJava, testClassesDir, testRunArgs } from "./testing.ts";
+import {
+  consoleLauncherJar,
+  jacocoAgentJar,
+  resolveJava,
+  testClassesDir,
+  testRunArgs,
+} from "./testing.ts";
 
 // isolate the launcher download in a throwaway store
 const STORE = TempDir.create("cappu-test-e2e-store-").path;
@@ -81,5 +87,50 @@ test(
     expect(xml).toContain('tests="1"');
     expect(xml).toContain('failures="0"');
     expect(xml).toContain("addition");
+  },
+);
+
+test(
+  "testOptions.coverage emits a valid jacoco.exec into reportsDir",
+  { skip: !HAS_JAVAC, timeout: 120_000 },
+  async () => {
+    using project = TempDir.create("cappu-cov-e2e-");
+    const dir = project.path;
+    const config = loadConfig(undefined, dir);
+    config.testOptions.coverage = true;
+    config.testOptions.reportsDir = "./dist/test-results";
+
+    // two network steps here: the launcher and the JaCoCo agent. Skip if either
+    // cannot be fetched.
+    let launcher: string;
+    let agent: string;
+    try {
+      launcher = await consoleLauncherJar(config);
+      agent = await jacocoAgentJar(config);
+    } catch {
+      return;
+    }
+
+    const classes = testClassesDir(config);
+    mkdirSync(classes, { recursive: true });
+    const src = join(dir, "SampleTest.java");
+    writeFileSync(src, SAMPLE_TEST);
+    execFileSync("javac", ["-cp", launcher, "-d", classes, src], { stdio: "ignore" });
+
+    // the CLI creates reportsDir before running; mirror that here
+    const reportsDir = join(dir, "dist", "test-results");
+    mkdirSync(reportsDir, { recursive: true });
+    const result = spawnSync(resolveJava(config), testRunArgs(config, launcher, agent), {
+      stdio: "ignore",
+    });
+    expect(result.status).toBe(0);
+
+    // jacoco.exec exists and begins with JaCoCo's header: block id 0x01 then
+    // the 0xC0 0xC0 magic number
+    const exec = join(reportsDir, "jacoco.exec");
+    expect(existsSync(exec)).toBe(true);
+    const bytes = readFileSync(exec);
+    expect(bytes.length).toBeGreaterThan(0);
+    expect([bytes[0], bytes[1], bytes[2]]).toEqual([0x01, 0xc0, 0xc0]);
   },
 );
