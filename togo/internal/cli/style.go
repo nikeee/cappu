@@ -45,7 +45,7 @@ func painter(f *os.File) func(format, text string) string {
 // when they finish. lsp/mcp run until the client disconnects, so a duration
 // there is meaningless. Port of TIMED_COMMANDS in main.ts.
 var timedCommands = map[string]bool{
-	"install": true, "update": true, "add": true, "audit": true,
+	"install": true, "update": true, "add": true, "remove": true, "audit": true,
 	"licenses": true, "tree": true, "show": true, "publish": true, "verify": true, "compile": true, "check": true, "test": true,
 	"format": true,
 }

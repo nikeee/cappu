@@ -25,7 +25,7 @@ func RunAudit(cfg *config.Config, noCache bool, format string) int {
 		}
 	}
 	if format != "text" && format != "sarif" {
-		fmt.Fprintf(os.Stderr, "cappu: unknown --format %q (expected: text, sarif)\n", format)
+		fmt.Fprintf(os.Stderr, "cappu: unknown --format '%s' (expected: text, sarif)\n", format)
 		return 2
 	}
 

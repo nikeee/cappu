@@ -133,7 +133,9 @@ func (c *updateCmd) Run(a *appState) error {
 }
 
 type versionCmd struct {
-	Release string `arg:"" enum:"major,minor,patch" help:"major|minor|patch"`
+	// No kong enum/required: RunVersion validates and exits 2 with the same
+	// message as the TS build (kong would exit 1 with its own text).
+	Release string `arg:"" optional:"" help:"major|minor|patch"`
 }
 
 func (c *versionCmd) Run(a *appState) error {
@@ -157,9 +159,15 @@ func (c *verifyCmd) Run(a *appState) error {
 type auditCmd struct {
 	NoCache bool   `name:"no-cache" help:"Ignore all caches (fresh scan)"`
 	Format  string `name:"format" help:"Output format: text|sarif (default: text; sarif under an AI agent)"`
+	JSON    bool   `name:"json" hidden:""`
 }
 
 func (c *auditCmd) Run(a *appState) error {
+	if c.JSON {
+		// Same rejection as the TS build (src/cli/main.ts): audit has --format.
+		fmt.Fprint(os.Stderr, "cappu: `audit` uses --format (text|sarif), not --json\n")
+		return exit(2)
+	}
 	cfg, err := a.config()
 	if err != nil {
 		return err
@@ -180,8 +188,10 @@ func (c *licensesCmd) Run(a *appState) error {
 }
 
 type addCmd struct {
-	Configuration string   `arg:"" enum:"api,implementation,annotationProcessor,testImplementation" help:"api|implementation|annotationProcessor|testImplementation"`
-	Coordinates   []string `arg:"" name:"coord" help:"group:artifact[:version] ..."`
+	// No kong enum/required: RunAdd resolves aliases (a, i, ap, ti) and exits 2
+	// with the same usage text as the TS build (kong would reject aliases).
+	Configuration string   `arg:"" optional:"" help:"api|implementation|annotationProcessor|testImplementation"`
+	Coordinates   []string `arg:"" optional:"" name:"coord" help:"group:artifact[:version] ..."`
 }
 
 func (c *addCmd) Run(a *appState) error {
@@ -193,8 +203,10 @@ func (c *addCmd) Run(a *appState) error {
 }
 
 type removeCmd struct {
-	Configuration string   `arg:"" enum:"api,implementation,annotationProcessor,testImplementation" help:"api|implementation|annotationProcessor|testImplementation"`
-	Coordinates   []string `arg:"" name:"coord" help:"group:artifact ..."`
+	// No kong enum/required: RunRemove resolves aliases (a, i, ap, ti) and
+	// exits 2 with the same usage text as the TS build.
+	Configuration string   `arg:"" optional:"" help:"api|implementation|annotationProcessor|testImplementation"`
+	Coordinates   []string `arg:"" optional:"" name:"coord" help:"group:artifact ..."`
 }
 
 func (c *removeCmd) Run(a *appState) error {
