@@ -9,6 +9,7 @@
   method equals
   method equalsIgnoreCase
   method format
+  method formatted
   method getBytes
   method getClass
   method hashCode

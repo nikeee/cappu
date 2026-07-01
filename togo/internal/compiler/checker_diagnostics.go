@@ -874,6 +874,119 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 		}
 	}
 
+	// --- format-string arity/type check (String.format & friends) -----------
+	// Port of checkFormatCall in src/compiler/checker.ts. The java.util.Formatter
+	// %-syntax methods take (..., String, Object...), so a wrong argument count or
+	// type is arity-valid against the declaration yet throws at runtime. When the
+	// format string is a literal we parse its specifiers and warn - staying silent
+	// on anything unprovable.
+	formatMethods := map[string]bool{
+		"java.lang.String#format":    true,
+		"java.io.PrintStream#format": true,
+		"java.io.PrintStream#printf": true,
+		"java.io.PrintWriter#format": true,
+		"java.io.PrintWriter#printf": true,
+		"java.util.Formatter#format": true,
+	}
+	argTypeDescriptor := func(t *Type) (ArgTypeDescriptor, bool) {
+		switch t.Kind {
+		case TypeKindPrimitive:
+			return ArgTypeDescriptor{Primitive: t.Name}, true
+		case TypeKindClass:
+			return ArgTypeDescriptor{Fqn: c.fqnOf(t)}, true
+		default:
+			return ArgTypeDescriptor{}, false // array / type-variable / null / error
+		}
+	}
+	checkFormatCall := func(call *Node) {
+		callee := call.AsCallExpression().Expression
+		if callee.Kind != PropertyAccessExpression {
+			return
+		}
+		access := callee.AsPropertyAccessExpression()
+		receiver := c.receiverClassType(c.getTypeOfExpression(access.Expression), 0)
+		if receiver == nil {
+			return
+		}
+		methodName := access.Name.AsIdentifier().Text
+		key := c.fqnOf(receiver) + "#" + methodName
+		fmtIsReceiver := c.fqnOf(receiver) == "java.lang.String" && methodName == "formatted"
+		if !formatMethods[key] && !fmtIsReceiver {
+			return
+		}
+
+		// Locate the format-string node and where the format arguments begin.
+		var fmtNode *Node
+		var argsStart int
+		args := call.AsCallExpression().Arguments
+		if fmtIsReceiver {
+			fmtNode = access.Expression // "text".formatted(args)
+			argsStart = 0
+		} else {
+			// The format string is the fixed parameter right before the Object...
+			// varargs; the resolved overload gives its position (handling the
+			// Locale-first String.format overload with no special-casing).
+			info := c.resolveCallInfo(call)
+			if info == nil || info.Decl == nil {
+				return
+			}
+			params := info.Decl.AsMethodDeclaration().Parameters
+			last := lastNode(params)
+			if last == nil || !last.AsParameter().IsVarArgs || params.Len() < 2 {
+				return
+			}
+			fmtPos := params.Len() - 2
+			if fmtPos >= nodeArrayLen(args) {
+				return
+			}
+			fmtNode = args.Nodes[fmtPos]
+			argsStart = params.Len() - 1
+		}
+
+		if fmtNode.Kind != StringLiteral && fmtNode.Kind != TextBlockLiteral {
+			return // non-literal format string: cannot analyze
+		}
+		parsed, ok := ParseFormatString(fmtNode.AsLiteralExpression().Value)
+		if !ok {
+			return
+		}
+
+		provided := nodeArrayLen(args) - argsStart
+		if provided < 0 {
+			return
+		}
+		span := call.End - callee.End
+		if span < 1 {
+			span = 1
+		}
+		if provided < parsed.MaxIndex {
+			diagnostics = append(diagnostics, CreateDiagnostic(callee.End, span,
+				Diagnostics.FormatNotEnoughArguments01, strconv.Itoa(parsed.MaxIndex), strconv.Itoa(provided)))
+			return // too few is the headline; a type pass would just add noise
+		}
+		if provided > parsed.MaxIndex {
+			diagnostics = append(diagnostics, CreateDiagnostic(callee.End, span,
+				Diagnostics.FormatTooManyArguments01, strconv.Itoa(parsed.MaxIndex), strconv.Itoa(provided)))
+		}
+		// Each consuming specifier against the static type of its mapped argument.
+		for _, cons := range parsed.Consumers {
+			idx := argsStart + cons.ArgIndex - 1
+			if idx < 0 || idx >= nodeArrayLen(args) {
+				continue
+			}
+			argNode := args.Nodes[idx]
+			argType := c.getTypeOfExpression(argNode)
+			desc, ok := argTypeDescriptor(argType)
+			if !ok {
+				continue
+			}
+			if ConversionAccepts(cons.Conversion, desc) == AcceptsNo {
+				diagnostics = append(diagnostics, CreateDiagnostic(argNode.Pos, argNode.End-argNode.Pos,
+					Diagnostics.FormatConversionIncompatible01, cons.Conversion, typeToString(argType)))
+			}
+		}
+	}
+
 	var visit func(node *Node)
 	visit = func(node *Node) {
 		switch node.Kind {
@@ -912,6 +1025,7 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			if cleanParse {
 				checkCallArity(node)
 				checkCallNullness(node)
+				checkFormatCall(node)
 			}
 		case ObjectCreationExpression:
 			if cleanParse {

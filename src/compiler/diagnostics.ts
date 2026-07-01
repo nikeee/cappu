@@ -123,6 +123,24 @@ export const Diagnostics = {
     "'{0}' may be null when dereferenced here.",
     DiagnosticCategory.Warning,
   ),
+  Format_not_enough_arguments_0_1: diag(
+    1309,
+    "Format_not_enough_arguments_0_1",
+    "Not enough arguments for format string: it references {0} but only {1} were provided.",
+    DiagnosticCategory.Warning,
+  ),
+  Format_too_many_arguments_0_1: diag(
+    1310,
+    "Format_too_many_arguments_0_1",
+    "Too many arguments for format string: it uses {0} but {1} were provided.",
+    DiagnosticCategory.Warning,
+  ),
+  Format_conversion_incompatible_0_1: diag(
+    1311,
+    "Format_conversion_incompatible_0_1",
+    "Format conversion '%{0}' cannot accept an argument of type '{1}'.",
+    DiagnosticCategory.Warning,
+  ),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */

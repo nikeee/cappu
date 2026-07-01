@@ -117,6 +117,8 @@ class String implements CharSequence, Comparable<String> {
   public static String valueOf(Object o) { return null; }
   public static String valueOf(int i) { return null; }
   public static String format(String fmt, Object... args) { return null; }
+  public static String format(java.util.Locale l, String fmt, Object... args) { return null; }
+  public String formatted(Object... args) { return null; }
   public static String join(CharSequence delimiter, CharSequence... elements) { return null; }
 }
 
@@ -372,6 +374,7 @@ class PrintStream extends OutputStream {
   public void println(float f) {}
   public void println(double d) {}
   public PrintStream printf(String format, Object... args) { return null; }
+  public PrintStream format(String format, Object... args) { return null; }
   public PrintStream append(CharSequence s) { return null; }
 }
 
@@ -453,6 +456,7 @@ class PrintWriter extends Writer {
   public void println(Object o) {}
   public void println(int i) {}
   public PrintWriter printf(String format, Object... args) { return null; }
+  public PrintWriter format(String format, Object... args) { return null; }
 }
 
 class ByteArrayInputStream extends InputStream {

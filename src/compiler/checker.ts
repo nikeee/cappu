@@ -24,6 +24,7 @@ import {
   withNullness,
 } from "./checkerTypes.ts";
 import { createDiagnostic, Diagnostics } from "./diagnostics.ts";
+import { type ArgTypeDescriptor, conversionAccepts, parseFormatString } from "./formatString.ts";
 import { forEachChild } from "./parser.ts";
 import type { Fqn, PackageName, Program } from "./program.ts";
 import {
@@ -2500,6 +2501,109 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       }
     };
 
+    // --- format-string arity/type check (String.format & friends) -----------
+    // The java.util.Formatter %-syntax methods take `(..., String, Object...)`,
+    // so a wrong argument count or type is arity-valid against the declaration
+    // yet throws at runtime. When the format string is a literal we parse its
+    // conversion specifiers and warn - staying silent on anything unprovable.
+    const FORMAT_METHODS = new Map<string, { fmtIsReceiver: boolean }>([
+      ["java.lang.String#format", { fmtIsReceiver: false }],
+      ["java.lang.String#formatted", { fmtIsReceiver: true }],
+      ["java.io.PrintStream#format", { fmtIsReceiver: false }],
+      ["java.io.PrintStream#printf", { fmtIsReceiver: false }],
+      ["java.io.PrintWriter#format", { fmtIsReceiver: false }],
+      ["java.io.PrintWriter#printf", { fmtIsReceiver: false }],
+      ["java.util.Formatter#format", { fmtIsReceiver: false }],
+    ]);
+    const argTypeDescriptor = (t: Type): ArgTypeDescriptor | undefined => {
+      if (t.kind === TypeKind.Primitive) return { primitive: t.name };
+      if (t.kind === TypeKind.Class) return { fqn: fqnOf(t) };
+      return undefined; // array / type-variable / null / error: unprovable
+    };
+    const checkFormatCall = (call: CallExpression): void => {
+      const callee = call.expression;
+      if (callee.kind !== SyntaxKind.PropertyAccessExpression) return;
+      const access = callee as PropertyAccessExpression;
+      const receiver = receiverClassType(getTypeOfExpression(access.expression));
+      if (!receiver) return;
+      const entry = FORMAT_METHODS.get(`${fqnOf(receiver)}#${access.name.text}`);
+      if (!entry) return;
+
+      // Locate the format-string node and where the format arguments begin.
+      let fmtNode: Node;
+      let argsStart: number;
+      if (entry.fmtIsReceiver) {
+        fmtNode = access.expression; // "text".formatted(args)
+        argsStart = 0;
+      } else {
+        // The format string is the fixed parameter right before the Object...
+        // varargs; the resolved overload gives its position (handling the
+        // Locale-first String.format overload with no special-casing).
+        const params = resolveCallInfo(call)?.decl.parameters;
+        const last = params?.at(-1) as Parameter | undefined;
+        if (!params || !last?.isVarArgs || params.length < 2) return;
+        const fmtPos = params.length - 2;
+        if (fmtPos >= call.arguments.length) return;
+        fmtNode = call.arguments[fmtPos]!;
+        argsStart = params.length - 1;
+      }
+
+      if (
+        fmtNode.kind !== SyntaxKind.StringLiteral &&
+        fmtNode.kind !== SyntaxKind.TextBlockLiteral
+      ) {
+        return; // non-literal format string: cannot analyze
+      }
+      const parsed = parseFormatString((fmtNode as LiteralExpression).value);
+      if (!parsed) return;
+
+      const provided = call.arguments.length - argsStart;
+      if (provided < 0) return;
+      const span = Math.max(1, call.end - callee.end);
+      if (provided < parsed.maxIndex) {
+        diagnostics.push(
+          createDiagnostic(
+            callee.end,
+            span,
+            Diagnostics.Format_not_enough_arguments_0_1,
+            String(parsed.maxIndex),
+            String(provided),
+          ),
+        );
+        return; // too few is the headline; a type pass would just add noise
+      }
+      if (provided > parsed.maxIndex) {
+        diagnostics.push(
+          createDiagnostic(
+            callee.end,
+            span,
+            Diagnostics.Format_too_many_arguments_0_1,
+            String(parsed.maxIndex),
+            String(provided),
+          ),
+        );
+      }
+      // Each consuming specifier against the static type of its mapped argument.
+      for (const c of parsed.consumers) {
+        const argNode = call.arguments[argsStart + c.argIndex - 1];
+        if (!argNode) continue;
+        const argType = getTypeOfExpression(argNode);
+        const desc = argTypeDescriptor(argType);
+        if (!desc) continue;
+        if (conversionAccepts(c.conversion, desc) === "no") {
+          diagnostics.push(
+            createDiagnostic(
+              argNode.pos,
+              argNode.end - argNode.pos,
+              Diagnostics.Format_conversion_incompatible_0_1,
+              c.conversion,
+              typeToString(argType),
+            ),
+          );
+        }
+      }
+    };
+
     const visit = (node: Node): void => {
       switch (node.kind) {
         case SyntaxKind.VariableDeclarator: {
@@ -2540,6 +2644,7 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
           if (sourceFile.parseDiagnostics.length === 0) {
             checkCallArity(node as CallExpression);
             checkCallNullness(node as CallExpression);
+            checkFormatCall(node as CallExpression);
           }
           break;
         case SyntaxKind.ObjectCreationExpression:
