@@ -1,0 +1,7 @@
+/*
+ * License header line one.
+ * License header line two.
+ */
+
+/** Package javadoc describing the package. */
+package com.example.foo;
