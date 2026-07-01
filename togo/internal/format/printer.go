@@ -16,6 +16,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/nikeee/cappu/internal/compiler"
 )
@@ -73,8 +74,12 @@ func formatSourceFile(sf *compiler.Node, options FormatOptions) (string, error) 
 	out := printDoc(doc, printOptions{
 		width:      width,
 		indentMult: mult,
-		// A reflow leaf carries a raw comment; rewrite it at its column.
+		// A reflow leaf carries a raw comment or a multi-line text block; rewrite it
+		// at its column.
 		commentRewriter: func(raw string, col int) string {
+			if strings.HasPrefix(raw, `"""`) {
+				return reindentTextBlock(raw)
+			}
 			return rewriteComment(raw, col, strings.HasPrefix(raw, "//"))
 		},
 	})
@@ -1956,6 +1961,46 @@ func (p *printer) isFormatMethod(args []*compiler.Node) bool {
 	return len(args) >= 2 && p.isFormatStringConcat(args[0])
 }
 
+// reindentTextBlock keeps a multi-line text block at its source indentation, but
+// strips the block's common indentation entirely (content to column 0) when any
+// content line would overflow 100 columns at that indentation. raw is the
+// verbatim `"""..."""` source.
+func reindentTextBlock(raw string) string {
+	lines := strings.Split(raw, "\n")
+	if len(lines) < 3 {
+		return raw
+	}
+	content := lines[1 : len(lines)-1]
+	overflow := false
+	for _, l := range content {
+		if strings.TrimSpace(l) != "" && utf8.RuneCountInString(l) > width {
+			overflow = true
+			break
+		}
+	}
+	if !overflow {
+		return raw
+	}
+	closing := lines[len(lines)-1]
+	sourceIndent := len(closing) - len(strings.TrimLeft(closing, " \t"))
+	strip := func(l string) string {
+		if len(l) >= sourceIndent {
+			return l[sourceIndent:]
+		}
+		return strings.TrimLeft(l, " \t")
+	}
+	out := []string{lines[0]}
+	for _, l := range content {
+		if strings.TrimSpace(l) == "" {
+			out = append(out, "")
+		} else {
+			out = append(out, strip(l))
+		}
+	}
+	out = append(out, strip(closing))
+	return strings.Join(out, "\n")
+}
+
 // isFormatStringConcat reports whether node is built only from string literals
 // joined by `+` and at least one literal carries a format specifier - gjf's
 // isStringConcat.
@@ -2367,8 +2412,18 @@ func (p *printer) node(node *compiler.Node) Doc {
 	case compiler.ClassLiteralExpression:
 		return concat(p.typ(node.AsClassLiteralExpression().Type), text(".class"))
 
+	case compiler.TextBlockLiteral:
+		raw := p.raw(node)
+		// A multi-line text block is reflowed at write time: gjf strips the block's
+		// common indentation (to column 0) when a content line would overflow at its
+		// current indent; otherwise it keeps the source indent.
+		if strings.Contains(raw, "\n") {
+			return reflow(raw)
+		}
+		return text(raw)
+
 	case compiler.Identifier, compiler.NumericLiteral, compiler.StringLiteral,
-		compiler.CharacterLiteral, compiler.TextBlockLiteral, compiler.TrueKeyword,
+		compiler.CharacterLiteral, compiler.TrueKeyword,
 		compiler.FalseKeyword, compiler.NullKeyword:
 		return text(p.raw(node))
 

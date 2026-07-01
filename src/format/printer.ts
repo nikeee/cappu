@@ -140,6 +140,25 @@ const WIDTH = 100;
 /** Thrown when the formatter cannot format the input without losing information. */
 export class UnsupportedSyntaxError extends Error {}
 
+// gjf keeps a multi-line text block at its source indentation, but strips the
+// block's common indentation entirely (content to column 0) when any content line
+// overflows 100 columns at that indentation. `raw` is the verbatim `"""..."""`
+// source. (This models gjf's overflow de-indent; it does not re-align a block up
+// when the enclosing indentation changes - not needed for the google corpus.)
+function reindentTextBlock(raw: string): string {
+  const lines = raw.split("\n");
+  if (lines.length < 3) return raw; // single-line text block: nothing to reindent
+  const content = lines.slice(1, -1);
+  if (!content.some(l => l.trim() !== "" && l.length > WIDTH)) return raw;
+  const closing = lines[lines.length - 1];
+  const sourceIndent = closing.length - closing.trimStart().length;
+  const strip = (l: string): string => (l.length >= sourceIndent ? l.slice(sourceIndent) : l.trimStart());
+  const out = [lines[0]];
+  for (const l of content) out.push(l.trim() === "" ? "" : strip(l));
+  out.push(strip(closing));
+  return out.join("\n");
+}
+
 export function formatSourceFile(sf: SourceFile, options: FormatOptions): string {
   const mult = options.style === "aosp" ? 2 : 1;
   const p = new Printer(sf, mult);
@@ -147,8 +166,10 @@ export function formatSourceFile(sf: SourceFile, options: FormatOptions): string
   const text = printDoc(doc, {
     width: WIDTH,
     indentMultiplier: mult,
-    // A `reflow` leaf carries a raw comment; rewrite it at the column it lands at.
-    commentRewriter: (raw, col) => rewriteComment(raw, col, raw.startsWith("//")),
+    // A `reflow` leaf carries a raw comment or a multi-line text block; rewrite it
+    // at the column it lands at.
+    commentRewriter: (raw, col) =>
+      raw.startsWith('"""') ? reindentTextBlock(raw) : rewriteComment(raw, col, raw.startsWith("//")),
   });
   // Safety net: the printer attaches comments at member/statement granularity.
   // If a comment sat somewhere it does not yet handle, refuse rather than
@@ -2066,11 +2087,18 @@ class Printer {
       case SyntaxKind.ClassLiteralExpression:
         return concat([this.type((node as ClassLiteralExpression).type), ".class"]);
 
+      case SyntaxKind.TextBlockLiteral: {
+        const raw = this.raw(node);
+        // A multi-line text block is reflowed at write time: gjf strips the
+        // block's common indentation (down to column 0) when a content line would
+        // overflow at its current indent; otherwise it keeps the source indent.
+        return raw.includes("\n") ? reflow(raw) : raw;
+      }
+
       case SyntaxKind.Identifier:
       case SyntaxKind.NumericLiteral:
       case SyntaxKind.StringLiteral:
       case SyntaxKind.CharacterLiteral:
-      case SyntaxKind.TextBlockLiteral:
       case SyntaxKind.TrueKeyword:
       case SyntaxKind.FalseKeyword:
       case SyntaxKind.NullKeyword:
