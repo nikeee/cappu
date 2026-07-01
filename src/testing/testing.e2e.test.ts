@@ -72,7 +72,9 @@ test(
     writeFileSync(src, SAMPLE_TEST);
     execFileSync("javac", ["-cp", launcher, "-d", classes, src], { stdio: "ignore" });
 
-    const result = spawnSync(resolveJava(config), testRunArgs(config, launcher), { stdio: "ignore" });
+    const result = spawnSync(resolveJava(config), testRunArgs(config, launcher), {
+      stdio: "ignore",
+    });
     expect(result.status).toBe(0);
 
     // a report file exists in the resolved reportsDir and is a well-formed
