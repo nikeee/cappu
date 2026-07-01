@@ -41,6 +41,7 @@ import {
   type Coordinates,
   type CoordinateString,
   coordinatesToString,
+  artifactJarName,
   type License,
   matchingVersions,
   MavenRepositorySource,
@@ -217,12 +218,9 @@ const STORE_SEGMENT = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$/;
 /** The store path for exact coordinates, or undefined for unsafe segments. */
 export function storePathFor(coordinates: Coordinates): string | undefined {
   const segments = [...coordinates.groupId.split("."), coordinates.artifactId, coordinates.version];
-  if (segments.some(segment => !STORE_SEGMENT.test(segment))) return undefined;
-  return join(
-    packageStoreDir(),
-    ...segments,
-    `${coordinates.artifactId}-${coordinates.version}.jar`,
-  );
+  const checked = coordinates.classifier ? [...segments, coordinates.classifier] : segments;
+  if (checked.some(segment => !STORE_SEGMENT.test(segment))) return undefined;
+  return join(packageStoreDir(), ...segments, artifactJarName(coordinates));
 }
 
 interface LockedPackage {

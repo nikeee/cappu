@@ -15,7 +15,7 @@ export {
   type VersionConflict,
 } from "./resolver.ts";
 export { matchesVersionSpec, matchingVersions } from "./versions.ts";
-export { coordinatesToString, packageKey, toCoordinates } from "./types.ts";
+export { artifactJarName, coordinatesToString, packageKey, toCoordinates } from "./types.ts";
 export type {
   ArtifactId,
   CoordinateString,

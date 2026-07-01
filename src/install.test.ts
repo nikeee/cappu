@@ -846,3 +846,12 @@ test("downloads stay under one global concurrency cap across all sets (#31)", as
     rmSync(store.path, { recursive: true, force: true });
   }
 });
+
+test("storePathFor appends the classifier to the jar filename", () => {
+  const plain = toCoordinates("org.jacoco", "org.jacoco.agent", "0.8.12");
+  const runtime = toCoordinates("org.jacoco", "org.jacoco.agent", "0.8.12", "runtime");
+  expect(storePathFor(plain)!.endsWith("org.jacoco.agent-0.8.12.jar")).toBe(true);
+  expect(storePathFor(runtime)!.endsWith("org.jacoco.agent-0.8.12-runtime.jar")).toBe(true);
+  // a classified artifact must not collide with the plain one of the same GAV
+  expect(storePathFor(runtime)).not.toBe(storePathFor(plain));
+});

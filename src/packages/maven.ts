@@ -15,6 +15,7 @@ import { XMLParser } from "fast-xml-parser";
 
 import { type License, normalizeLicenses } from "./license.ts";
 import {
+  artifactJarName,
   type Coordinates,
   coordinatesToString,
   type DependencyDeclaration,
@@ -522,7 +523,7 @@ export class MavenRepositorySource implements PackageSource {
       this.repositoryUrl(
         this.artifactPath(groupId, artifactId),
         version,
-        `${artifactId}-${version}.jar`,
+        artifactJarName(coordinates),
       ),
     );
   }

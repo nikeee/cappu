@@ -11,6 +11,8 @@ export type GroupId = Brand<string, "GroupId">;
 export type ArtifactId = Brand<string, "ArtifactId">;
 /** A Maven version ("2.13.1"), distinct from a version spec/range or a groupId. */
 export type Version = Brand<string, "Version">;
+/** A Maven artifact classifier ("runtime", "sources", "javadoc"). */
+export type Classifier = Brand<string, "Classifier">;
 /** A Maven dependency scope ("compile", "runtime", "test", "provided", "import"). */
 export type MavenScope = Brand<string, "MavenScope">;
 /** A package source's stable identity (its repository url / name), used as a lock key. */
@@ -21,6 +23,8 @@ export interface Coordinates {
   readonly groupId: GroupId;
   readonly artifactId: ArtifactId;
   readonly version: Version;
+  /** Optional classifier ("runtime", ...); selects a qualified artifact of the same GAV. */
+  readonly classifier?: Classifier;
 }
 
 /** A search match: coordinates plus whatever extra facts the index reported. */
@@ -81,8 +85,19 @@ export type CoordinateString = Brand<string, "CoordinateString">;
 export type PackageKey = Brand<string, "PackageKey">;
 
 /** Build coordinates from raw strings - the single cast boundary for the ids. */
-export function toCoordinates(groupId: string, artifactId: string, version: string): Coordinates {
-  return { groupId, artifactId, version } as Coordinates;
+export function toCoordinates(
+  groupId: string,
+  artifactId: string,
+  version: string,
+  classifier?: string,
+): Coordinates {
+  return { groupId, artifactId, version, classifier } as Coordinates;
+}
+
+/** The jar filename for coordinates: "artifact-version[-classifier].jar". */
+export function artifactJarName(c: Coordinates): string {
+  const suffix = c.classifier ? `-${c.classifier}` : "";
+  return `${c.artifactId}-${c.version}${suffix}.jar`;
 }
 
 export function coordinatesToString(c: Coordinates): CoordinateString {
