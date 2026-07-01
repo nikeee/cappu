@@ -395,10 +395,18 @@ class Printer {
       blocks.push(concat(this.listDocs(sf.statements, true, this.text.length)));
     }
     if (header.length > 0) {
-      const headerDoc = join(
-        hardline,
-        header.map(c => reflow(c.text)),
-      );
+      // Preserve a source blank line between consecutive leading comments (e.g. a
+      // license header and the package/type javadoc in a package-info file).
+      const headerParts: Doc[] = [];
+      header.forEach((c, i) => {
+        if (i > 0) {
+          headerParts.push(
+            this.blankBeforePos(header[i - 1].end, c.pos) ? concat([hardline, hardline]) : hardline,
+          );
+        }
+        headerParts.push(reflow(c.text));
+      });
+      const headerDoc = concat(headerParts);
       // A leading comment glued to the first construct (no blank line in source)
       // is its doc comment - keep it attached. One followed by a blank line is a
       // file header (e.g. a license), separated by a blank line like other blocks.

@@ -343,11 +343,20 @@ func (p *printer) sourceFile(sf *compiler.SourceFileData) Doc {
 		blocks = append(blocks, concat(p.listDocs(nodes(sf.Statements), true, len(p.text))...))
 	}
 	if len(header) > 0 {
-		texts := make([]Doc, len(header))
+		// Preserve a source blank line between consecutive leading comments (e.g. a
+		// license header and the package/type javadoc in a package-info file).
+		var headerParts []Doc
 		for i, c := range header {
-			texts[i] = reflow(c.text)
+			if i > 0 {
+				if p.blankBeforePos(header[i-1].end, c.pos) {
+					headerParts = append(headerParts, concat(hardline, hardline))
+				} else {
+					headerParts = append(headerParts, hardline)
+				}
+			}
+			headerParts = append(headerParts, reflow(c.text))
 		}
-		headerDoc := join(hardline, texts)
+		headerDoc := concat(headerParts...)
 		// A leading comment glued to the first construct (no blank line in source)
 		// is its doc comment - keep it attached. One followed by a blank line is a
 		// file header (e.g. a license), separated like other blocks.
