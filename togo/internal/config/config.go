@@ -93,8 +93,10 @@ type FormatterOptions struct {
 type TestOptions struct {
 	// OutputFormat is "text" (stdout only) or "junit" (also write junit-XML).
 	OutputFormat string `json:"outputFormat"`
-	// ReportsDir is where junit-XML lands; used only when OutputFormat is "junit".
+	// ReportsDir is where junit-XML and jacoco.exec land.
 	ReportsDir string `json:"reportsDir"`
+	// Coverage attaches the JaCoCo agent and writes jacoco.exec into ReportsDir.
+	Coverage bool `json:"coverage"`
 }
 
 // Config is the parsed cappu.json plus where it came from. Mirrors CappuConfig.

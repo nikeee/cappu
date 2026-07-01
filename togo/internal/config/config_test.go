@@ -222,3 +222,20 @@ func TestLoadAcceptsURLPublishRepository(t *testing.T) {
 		t.Errorf("a valid publishRepository URL should validate: %v", err)
 	}
 }
+
+func TestTestOptionsCoverageDefault(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `{ "version": "1.0.0" }`), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TestOptions.Coverage {
+		t.Error("coverage should default to false")
+	}
+	cfg, err = Load(writeConfig(t, `{ "testOptions": { "coverage": true } }`), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.TestOptions.Coverage {
+		t.Error("coverage: true should parse")
+	}
+}
