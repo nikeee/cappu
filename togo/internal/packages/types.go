@@ -28,11 +28,16 @@ type MavenScope string
 // SourceName is a package source's stable display name (e.g. its repository url).
 type SourceName string
 
+// Classifier is a Maven artifact classifier ("runtime", "sources", "javadoc").
+type Classifier string
+
 // Coordinates are the exact maven-style coordinates of one package version.
 type Coordinates struct {
 	GroupID    GroupID
 	ArtifactID ArtifactID
 	Version    Version
+	// Classifier selects a qualified artifact of the same GAV; "" when absent.
+	Classifier Classifier
 }
 
 // String returns "group:artifact:version".
@@ -49,6 +54,22 @@ func (c Coordinates) Key() PackageKey {
 // boundary for the ids (mirrors toCoordinates in the TS source).
 func NewCoordinates(groupID, artifactID, version string) Coordinates {
 	return Coordinates{GroupID: GroupID(groupID), ArtifactID: ArtifactID(artifactID), Version: Version(version)}
+}
+
+// WithClassifier returns a copy of these coordinates carrying the given
+// classifier (Go has no optional param; mirrors toCoordinates's 4th arg in TS).
+func (c Coordinates) WithClassifier(classifier string) Coordinates {
+	c.Classifier = Classifier(classifier)
+	return c
+}
+
+// ArtifactJarName is the jar filename: "artifact-version[-classifier].jar".
+func (c Coordinates) ArtifactJarName() string {
+	suffix := ""
+	if c.Classifier != "" {
+		suffix = "-" + string(c.Classifier)
+	}
+	return string(c.ArtifactID) + "-" + string(c.Version) + suffix + ".jar"
 }
 
 // SearchHit is a search match: coordinates plus whatever extra facts the index

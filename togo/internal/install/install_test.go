@@ -230,3 +230,19 @@ func TestInstallMissingDependencyNoLock(t *testing.T) {
 		t.Error("lockfile should not be written when resolution is incomplete")
 	}
 }
+
+func TestStorePathForClassifier(t *testing.T) {
+	plain := packages.NewCoordinates("org.jacoco", "org.jacoco.agent", "0.8.12")
+	runtime := plain.WithClassifier("runtime")
+	pp, _ := StorePathFor(plain)
+	rp, _ := StorePathFor(runtime)
+	if !strings.HasSuffix(pp, "org.jacoco.agent-0.8.12.jar") {
+		t.Fatalf("plain: %s", pp)
+	}
+	if !strings.HasSuffix(rp, "org.jacoco.agent-0.8.12-runtime.jar") {
+		t.Fatalf("runtime: %s", rp)
+	}
+	if pp == rp {
+		t.Fatal("classified path collides with plain")
+	}
+}

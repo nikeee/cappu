@@ -30,12 +30,16 @@ var storeSegment = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`)
 // "a.b:c" and "a.b.c:d" apart.
 func StorePathFor(c packages.Coordinates) (string, bool) {
 	segments := append(strings.Split(string(c.GroupID), "."), string(c.ArtifactID), string(c.Version))
-	for _, seg := range segments {
+	checked := segments
+	if c.Classifier != "" {
+		checked = append(append([]string{}, segments...), string(c.Classifier))
+	}
+	for _, seg := range checked {
 		if !storeSegment.MatchString(seg) {
 			return "", false
 		}
 	}
 	parts := append([]string{packageStoreDir()}, segments...)
-	parts = append(parts, string(c.ArtifactID)+"-"+string(c.Version)+".jar")
+	parts = append(parts, c.ArtifactJarName())
 	return filepath.Join(parts...), true
 }

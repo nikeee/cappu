@@ -163,7 +163,7 @@ func (s *MavenRepositorySource) GetArtifact(c Coordinates) ([]byte, error) {
 	data, found, err := s.fetchBytes(s.repositoryURL(
 		artifactPath(string(c.GroupID), string(c.ArtifactID)),
 		string(c.Version),
-		string(c.ArtifactID)+"-"+string(c.Version)+".jar",
+		c.ArtifactJarName(),
 	))
 	if err != nil || !found {
 		return nil, err
