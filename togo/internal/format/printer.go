@@ -1596,7 +1596,21 @@ func (p *printer) switchClause(c *compiler.SwitchClauseData, end int) Doc {
 		return level(plus4, parts)
 	}
 	parts = append(parts, text(":"))
-	return concat(level(ZERO, parts), indent(concat(append([]Doc{hardline}, p.listDocs(nodes(c.Statements), false, end)...)...)))
+	// A comment trailing the `case X:` / `default:` label on its line stays there
+	// (`case 'a': // fall through`) rather than moving onto the next line.
+	bound := end
+	if c.Statements.Len() > 0 {
+		bound = p.start(c.Statements.Nodes[0])
+	}
+	head := level(ZERO, parts)
+	if p.ci < len(p.comments) {
+		t := p.comments[p.ci]
+		if !t.ownLine && t.pos < bound {
+			p.ci++
+			head = concat(head, text(" "), text(t.text))
+		}
+	}
+	return concat(head, indent(concat(append([]Doc{hardline}, p.listDocs(nodes(c.Statements), false, end)...)...)))
 }
 
 // --- expressions ---------------------------------------------------------

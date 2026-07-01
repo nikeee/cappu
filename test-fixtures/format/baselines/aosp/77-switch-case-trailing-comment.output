@@ -1,0 +1,12 @@
+package p;
+
+class C {
+    int m(int x) {
+        switch (x) {
+            case 1: // handle one
+                return 10;
+            default: // fallback
+                return 0;
+        }
+    }
+}

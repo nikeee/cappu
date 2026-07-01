@@ -1441,8 +1441,17 @@ class Printer {
       return level(PLUS4, parts);
     }
     parts.push(":");
+    // A comment trailing the `case X:` / `default:` label on its line stays there
+    // (`case 'a': // fall through`) rather than moving onto the next line.
+    const bound = c.statements.length > 0 ? this.start(c.statements[0]) : c.end;
+    const t = this.comments[this.ci];
+    const head: Doc[] = [level(ZERO, parts)];
+    if (t !== undefined && !t.ownLine && t.pos < bound) {
+      this.ci++;
+      head.push(" ", t.text);
+    }
     return concat([
-      level(ZERO, parts),
+      concat(head),
       indent(concat([hardline, ...this.statementList(c.statements, c.end)])),
     ]);
   }
