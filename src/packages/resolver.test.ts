@@ -152,3 +152,42 @@ test("latestVersion picks the newest from the first source that knows the packag
   expect(await latestVersion("org.a", "a", [source])).toBe("2");
   expect(await latestVersion("org.nope", "a", [source])).toBeUndefined();
 });
+
+test("a range root resolves to the highest published version in range", async () => {
+  const source = new InMemoryPackageSource("test", [
+    pkg("org.a:a:1.0", ["org.b:b:1"]),
+    pkg("org.a:a:1.9", ["org.b:b:1"]),
+    pkg("org.a:a:2.0", ["org.b:b:1"]),
+    pkg("org.b:b:1"),
+  ]);
+  const resolution = await resolveTransitive([c("org.a:a:[1.0,2.0)")], [source]);
+  expect(resolution.packages.map(p => coordinatesToString(p.coordinates))).toEqual([
+    "org.a:a:1.9",
+    "org.b:b:1",
+  ]);
+  expect(resolution.missing).toEqual([]);
+});
+
+test("a range transitive dependency resolves to the highest match", async () => {
+  const source = new InMemoryPackageSource("test", [
+    pkg("org.a:a:1", ["org.b:b:[1.0,2.0)"]),
+    pkg("org.b:b:1.0"),
+    pkg("org.b:b:1.5"),
+    pkg("org.b:b:2.0"),
+  ]);
+  const resolution = await resolveTransitive([c("org.a:a:1")], [source]);
+  expect(resolution.packages.map(p => coordinatesToString(p.coordinates))).toEqual([
+    "org.a:a:1",
+    "org.b:b:1.5",
+  ]);
+  expect(resolution.missing).toEqual([]);
+});
+
+test("an unsatisfiable range is reported as missing", async () => {
+  const source = new InMemoryPackageSource("test", [pkg("org.a:a:1.0"), pkg("org.a:a:2.0")]);
+  const resolution = await resolveTransitive([c("org.a:a:[5.0,6.0)")], [source]);
+  expect(resolution.packages).toEqual([]);
+  expect(resolution.missing.map(m => coordinatesToString(m.coordinates))).toEqual([
+    "org.a:a:[5.0,6.0)",
+  ]);
+});

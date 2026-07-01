@@ -235,3 +235,58 @@ func TestResolveTransitivePropagatesFetchError(t *testing.T) {
 		t.Errorf("Missing = %v, want empty (a transient error is not a miss)", res.Missing)
 	}
 }
+
+func TestResolveRangeRoot(t *testing.T) {
+	source := NewInMemoryPackageSource("test", []PackageMetadata{
+		pkg("org.a:a:1.0", dep{spec: "org.b:b:1"}),
+		pkg("org.a:a:1.9", dep{spec: "org.b:b:1"}),
+		pkg("org.a:a:2.0", dep{spec: "org.b:b:1"}),
+		pkg("org.b:b:1"),
+	})
+	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:[1.0,2.0)")}, []PackageSource{source}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(res.Packages); !reflect.DeepEqual(got, []string{"org.a:a:1.9", "org.b:b:1"}) {
+		t.Errorf("packages = %v", got)
+	}
+	if len(res.Missing) != 0 {
+		t.Errorf("missing = %v", res.Missing)
+	}
+}
+
+func TestResolveRangeTransitive(t *testing.T) {
+	source := NewInMemoryPackageSource("test", []PackageMetadata{
+		pkg("org.a:a:1", dep{spec: "org.b:b:[1.0,2.0)"}),
+		pkg("org.b:b:1.0"),
+		pkg("org.b:b:1.5"),
+		pkg("org.b:b:2.0"),
+	})
+	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:1")}, []PackageSource{source}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(res.Packages); !reflect.DeepEqual(got, []string{"org.a:a:1", "org.b:b:1.5"}) {
+		t.Errorf("packages = %v", got)
+	}
+	if len(res.Missing) != 0 {
+		t.Errorf("missing = %v", res.Missing)
+	}
+}
+
+func TestResolveRangeUnsatisfiable(t *testing.T) {
+	source := NewInMemoryPackageSource("test", []PackageMetadata{
+		pkg("org.a:a:1.0"),
+		pkg("org.a:a:2.0"),
+	})
+	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:[5.0,6.0)")}, []PackageSource{source}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Packages) != 0 {
+		t.Errorf("packages = %v, want empty", names(res.Packages))
+	}
+	if len(res.Missing) != 1 || string(res.Missing[0].Coordinates.String()) != "org.a:a:[5.0,6.0)" {
+		t.Errorf("missing = %v", res.Missing)
+	}
+}

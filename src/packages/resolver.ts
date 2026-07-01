@@ -14,6 +14,7 @@ import {
   type SearchHit,
   type SourceName,
 } from "./types.ts";
+import { parseVersionSpec, selectVersion } from "./versionRange.ts";
 
 export interface ResolvedPackage {
   readonly coordinates: Coordinates;
@@ -58,6 +59,30 @@ async function metadataFrom(
   return undefined;
 }
 
+// A Maven version range (`[1.0,2.0)`, `RELEASE`, ...) declared in cappu.json or
+// a transitive POM is resolved to a concrete published version before fetch:
+// the highest published version satisfying the range (per source order - the
+// first source that lists any version wins, like latestVersion). A bare exact
+// version is returned unchanged; an unsatisfiable range yields undefined so the
+// caller records it as missing.
+// ponytail: each range resolves independently to its highest match; Maven's
+// soft/hard-requirement reconciliation across declarations is not implemented.
+async function resolveRange(
+  coordinates: Coordinates,
+  sources: readonly PackageSource[],
+): Promise<Coordinates | undefined> {
+  const spec = parseVersionSpec(coordinates.version);
+  if (!spec) return coordinates; // exact version: unchanged
+  for (const source of sources) {
+    const published = await source.listVersions(coordinates.groupId, coordinates.artifactId);
+    if (published.length === 0) continue;
+    const version = selectVersion(spec, published);
+    if (version === undefined) return undefined;
+    return { ...coordinates, version: version as Coordinates["version"] };
+  }
+  return undefined;
+}
+
 /**
  * Resolve `roots` and their transitive dependencies against `sources`
  * (consulted in order; the first source that knows a package provides it).
@@ -81,7 +106,19 @@ export async function resolveTransitive(
   );
   for (let depth = 0; frontier.length > 0; depth++) {
     const next: typeof frontier = [];
-    for (const { coordinates, requestedBy } of frontier) {
+    for (const { coordinates: declared, requestedBy } of frontier) {
+      // Resolve a version range to a concrete published version first, so the
+      // conflict/nearest-wins logic and the metadata fetch all see a real
+      // version (two ranges resolving to the same version do not conflict).
+      const coordinates = await resolveRange(declared, sources);
+      if (coordinates === undefined) {
+        const key = packageKey(declared);
+        if (!selected.has(key)) {
+          selected.set(key, declared.version); // do not retry / re-report
+          missing.push({ coordinates: declared, requestedBy });
+        }
+        continue;
+      }
       const key = packageKey(coordinates);
       const winner = selected.get(key);
       if (winner !== undefined) {

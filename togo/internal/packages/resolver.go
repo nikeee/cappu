@@ -68,6 +68,36 @@ type frontierItem struct {
 	isRoot      bool
 }
 
+// resolveRange resolves a Maven version range (`[1.0,2.0)`, `RELEASE`, ...)
+// declared in cappu.json or a transitive POM to a concrete published version:
+// the highest published version satisfying the range (the first source that
+// lists any version wins, like LatestVersion). A bare exact version is returned
+// unchanged; ok is false for an unsatisfiable range so the caller records it as
+// missing.
+// ponytail: each range resolves independently to its highest match; Maven's
+// soft/hard-requirement reconciliation across declarations is not implemented.
+func resolveRange(c Coordinates, sources []PackageSource) (Coordinates, bool, error) {
+	spec, isRange := ParseVersionSpec(string(c.Version))
+	if !isRange {
+		return c, true, nil // exact version: unchanged
+	}
+	for _, source := range sources {
+		published, err := source.ListVersions(string(c.GroupID), string(c.ArtifactID))
+		if err != nil {
+			return Coordinates{}, false, err
+		}
+		if len(published) == 0 {
+			continue
+		}
+		version := SelectVersion(spec, published)
+		if version == "" {
+			return Coordinates{}, false, nil
+		}
+		return Coordinates{GroupID: c.GroupID, ArtifactID: c.ArtifactID, Version: Version(version)}, true, nil
+	}
+	return Coordinates{}, false, nil
+}
+
 // ResolveTransitive resolves roots and their transitive dependencies against
 // sources (consulted in order; the first source that knows a package provides
 // it). onResolve, when non-nil, is called once per package as it is fetched.
@@ -84,6 +114,26 @@ func ResolveTransitive(roots []Coordinates, sources []PackageSource, onResolve f
 	for depth := 0; len(frontier) > 0; depth++ {
 		var next []frontierItem
 		for _, item := range frontier {
+			// Resolve a version range to a concrete published version first, so
+			// the conflict/nearest-wins logic and the metadata fetch all see a
+			// real version (two ranges resolving to the same version do not
+			// conflict).
+			concrete, ok, err := resolveRange(item.coordinates, sources)
+			if err != nil {
+				return res, err
+			}
+			if !ok {
+				key := item.coordinates.Key()
+				if _, seen := selected[key]; !seen {
+					selected[key] = string(item.coordinates.Version) // do not retry / re-report
+					res.Missing = append(res.Missing, MissingPackage{
+						Coordinates: item.coordinates,
+						RequestedBy: item.requestedBy,
+					})
+				}
+				continue
+			}
+			item.coordinates = concrete
 			key := item.coordinates.Key()
 			if winner, ok := selected[key]; ok {
 				if winner != string(item.coordinates.Version) {
