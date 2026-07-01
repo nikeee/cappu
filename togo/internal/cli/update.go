@@ -21,6 +21,9 @@ func RunUpdate(configPathArg string, cfg *config.Config) int {
 		return 1
 	}
 
+	errp := painter(os.Stderr)
+	fmt.Fprint(os.Stderr, errp("cyan", "checking for updates...\n"))
+
 	bumps, err := install.PlanUpdates(cfg, sources.Configured(cfg))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cappu: update failed: %s\n", err)

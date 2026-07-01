@@ -12,6 +12,7 @@ import { type DependencyBump, planUpdates } from "../install.ts";
 import { type PackageSource } from "../packages/index.ts";
 import { emitAnnotation } from "./annotations.ts";
 import { runInstall } from "./install.ts";
+import { painter } from "./style.ts";
 
 /** Overwrite the bumped versions in the JSONC config text, comments intact. */
 export function applyBumpsToJsonc(text: string, bumps: readonly DependencyBump[]): string {
@@ -37,6 +38,9 @@ export async function runUpdate(
     emitAnnotation("error", "no cappu.json found - run `cappu init` first");
     process.exit(1);
   }
+
+  const err = painter(process.stderr);
+  process.stderr.write(err("cyan", "checking for updates...\n"));
 
   let bumps: DependencyBump[];
   try {

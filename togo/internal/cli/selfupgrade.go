@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -34,13 +35,30 @@ func RunSelfUpgrade() int {
 		return 2
 	}
 
+	label, ok := selfupgrade.PlatformTarget(runtime.GOOS, runtime.GOARCH)
+	if !ok {
+		label = "cappu"
+	}
+	var bar *downloadBar
+
 	fmt.Fprint(os.Stderr, errp("bold", errp("cyan", "fetching the latest release...\n")))
 	result, err := selfupgrade.SelfUpgrade(selfupgrade.Options{
 		TargetPath:     targetPath,
 		CurrentVersion: meta.Version,
 		GOOS:           runtime.GOOS,
 		GOARCH:         runtime.GOARCH,
+		OnProgress: func(received, total int64) {
+			if total <= 0 {
+				return
+			}
+			if bar == nil {
+				bar = newDownloadBar(os.Stderr, "MiB")
+				bar.start(int(math.Round(float64(total) / 1024 / 1024)))
+			}
+			bar.update(int(math.Round(float64(received)/1024/1024)), label)
+		},
 	})
+	bar.stop()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s self-upgrade failed: %s\n", errp("red", "error:"), err)
 		return 1

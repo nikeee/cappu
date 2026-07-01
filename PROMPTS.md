@@ -505,3 +505,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-01 19:16 — yes
 - 2026-07-01 19:24 — do it
 - 2026-07-01 19:36 — do 1 and continue with the rest
+- 2026-07-01 23:29 — cappu update, self-upgrade and stuff doesnt print some status what it is actually doing. there is missing some user feedback. also no progress bar on self-upgrade
+- 2026-07-01 23:29 — continue
