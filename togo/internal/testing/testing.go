@@ -140,11 +140,14 @@ func ConsoleLauncherJar(cfg *config.Config) (string, error) {
 
 // TestRunArgs are the java arguments running the launcher over the tests.
 func TestRunArgs(cfg *config.Config, launcherJar string) []string {
-	return []string{
+	args := []string{
 		"-jar", launcherJar, "execute",
 		"--class-path", strings.Join(TestRuntimeClassPath(cfg), string(os.PathListSeparator)),
-		"--scan-class-path",
 	}
+	if cfg.TestOptions.OutputFormat == "junit" {
+		args = append(args, "--reports-dir", cfg.ResolvePath(cfg.TestOptions.ReportsDir))
+	}
+	return append(args, "--scan-class-path")
 }
 
 // ResolveJava is the java launcher tests run under: the provisioned JDK's, else

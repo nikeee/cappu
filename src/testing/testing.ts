@@ -158,6 +158,9 @@ export function testRunArgs(config: CappuConfig, launcherJar: string): string[] 
     "execute",
     "--class-path",
     testRuntimeClassPath(config).join(delimiter),
+    ...(config.testOptions.outputFormat === "junit"
+      ? ["--reports-dir", resolveConfigPath(config, config.testOptions.reportsDir)]
+      : []),
     "--scan-class-path",
   ];
 }

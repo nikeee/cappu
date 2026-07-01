@@ -50,6 +50,8 @@ export const DEFAULT_RESOURCE_PATH = "./src/main/resources";
 export const DEFAULT_TEST_SOURCE_PATH = "./src/test/java";
 export const DEFAULT_TEST_RESOURCE_PATH = "./src/test/resources";
 export const DEFAULT_TEST_CLASS_PATH = "./.cappu/lib/test-classes";
+/** Where `cappu test` writes junit-XML reports when testOptions.outputFormat is "junit". */
+export const DEFAULT_TEST_REPORTS_DIR = "./dist/test-results";
 /** Where annotation-processor jars install to - never the compile classpath. */
 export const DEFAULT_PROCESSOR_PATH = "./.cappu/lib/processors";
 /** What `cappu compile` produces its output in; the build output is always this. */
@@ -116,6 +118,17 @@ const FormatterSchema = z.object({
   ignore: z.array(z.string()).default([]),
 });
 
+// `cappu test` (nikeee/cappu#16): the JUnit launcher always streams its text
+// summary to stdout (live output is the point). outputFormat is additive - only
+// "junit" also writes report files, into reportsDir. "tap" is not native to the
+// launcher; add it here (and a converter) when a consumer needs it.
+const TestOptionsSchema = z.object({
+  /** "text" (stdout only) or "junit" (also write junit-XML into reportsDir). */
+  outputFormat: z.enum(["text", "junit"]).default("text"),
+  /** Directory junit-XML reports land in; only used when outputFormat is "junit". */
+  reportsDir: z.string().default(DEFAULT_TEST_REPORTS_DIR),
+});
+
 const DapOptionsSchema = z.object({
   /**
    * Pass -ea to every debuggee launched by `cappu dap`, so assertions run while
@@ -168,6 +181,7 @@ const ConfigFileSchema = z.object({
   lspOptions: LspOptionsSchema.prefault({}),
   dapOptions: DapOptionsSchema.prefault({}),
   formatterOptions: FormatterSchema.prefault({}),
+  testOptions: TestOptionsSchema.prefault({}),
   /** Package repositories dependencies are resolved from, in order. */
   packageSources: z.array(z.string()).default(DEFAULT_PACKAGE_SOURCES),
   /** What `cappu install` resolves and downloads, keyed by configuration. */
@@ -204,6 +218,7 @@ export type CompilerConfig = z.infer<typeof CompilerOptionsSchema>;
 export type LspConfig = z.infer<typeof LspOptionsSchema>;
 export type DapConfig = z.infer<typeof DapOptionsSchema>;
 export type FormatterConfig = z.infer<typeof FormatterSchema>;
+export type TestConfig = z.infer<typeof TestOptionsSchema>;
 
 export interface CappuConfig extends z.infer<typeof ConfigFileSchema> {
   /** Directory the config file lives in; relative paths resolve against it. */
@@ -300,6 +315,13 @@ export const CONFIG_TEMPLATE = `
   // "formatterOptions": {
   //   "style": "google",   // "google" (2-space) or "aosp" (4-space)
   //   "ignore": [],         // glob patterns excluded from formatting
+  // },
+
+  // \`cappu test\` output. The launcher always prints its summary to stdout;
+  // "junit" additionally writes junit-XML report files into reportsDir.
+  // "testOptions": {
+  //   "outputFormat": "text",              // "text" or "junit"
+  //   "reportsDir": "./dist/test-results",  // junit-XML target (outputFormat "junit")
   // },
 
   // Package repositories dependencies are resolved from, in order. Default if unset:
