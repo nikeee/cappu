@@ -1766,7 +1766,10 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	// provides its own indentation; gjf glues a single dereference onto its closing
 	// `}` (`}.scan(..)`) rather than starting a +4 chain that re-indents the body.
 	baseIsAnonClass := baseIsNew && cur.AsObjectCreationExpression().ClassBody != nil
-	if callCount == 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass) {
+	// A multi-line text-block receiver breaks before its dereference (gjf puts
+	// `.replace(..)` on its own +4 line after the closing `"""`).
+	baseIsMultilineTextBlock := cur.Kind == compiler.TextBlockLiteral && strings.Contains(p.raw(cur), "\n")
+	if callCount == 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass) && !baseIsMultilineTextBlock {
 		parts := []Doc{base}
 		parts = append(parts, linkDocs...)
 		return finish(concat(parts...))

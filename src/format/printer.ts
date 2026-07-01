@@ -1592,7 +1592,16 @@ class Printer {
     // re-indent the class body.
     const baseIsAnonClass =
       baseIsNew && (cur as ObjectCreationExpression).classBody !== undefined;
-    if (callCount === 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass)) {
+    // A multi-line text-block receiver breaks before its dereference (gjf puts
+    // `.replace(..)` on its own +4 line after the closing `"""`).
+    const baseIsMultilineTextBlock =
+      cur.kind === SyntaxKind.TextBlockLiteral && this.raw(cur).includes("\n");
+    if (
+      callCount === 1 &&
+      !baseIsCall &&
+      (!baseIsNew || baseIsAnonClass) &&
+      !baseIsMultilineTextBlock
+    ) {
       return finish(concat([base, ...linkDocs]));
     }
     // The leading links glued to the base (no break before them): a type-name
