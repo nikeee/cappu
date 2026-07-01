@@ -27,6 +27,11 @@ var severityStyle = map[audit.Severity]string{
 
 const labelWidth = 13
 
+// searchHint is appended to the "bad coordinate" / "not found" errors: both
+// mean the user does not have an exact coordinate yet, and `cappu search` is
+// how to find one. Port of SEARCH_HINT in src/cli/show.ts.
+const searchHint = "search for a package with `cappu search <query>`"
+
 var whitespaceRe = regexp.MustCompile(`\s+`)
 
 // projectShow is how group:artifact relates to the current project.
@@ -134,7 +139,7 @@ func buildShowData(coord string, cfg *config.Config, srcs []packages.PackageSour
 	groupID, artifactID, wantVersion, ok := parseCoordinate(coord)
 	if !ok {
 		return nil, &showError{
-			message: "show needs group:artifact[:version], e.g. `cappu show com.google.code.gson:gson`",
+			message: "show needs group:artifact[:version], e.g. `cappu show com.google.code.gson:gson`; " + searchHint,
 			code:    2,
 		}
 	}
@@ -149,13 +154,13 @@ func buildShowData(coord string, cfg *config.Config, srcs []packages.PackageSour
 		version = latest
 	}
 	if version == "" {
-		return nil, &showError{message: fmt.Sprintf("package not found: %s:%s", groupID, artifactID), code: 1}
+		return nil, &showError{message: fmt.Sprintf("package not found: %s:%s; %s", groupID, artifactID, searchHint), code: 1}
 	}
 	c := packages.NewCoordinates(groupID, artifactID, version)
 
 	meta := metadataAcross(c, srcs)
 	if meta == nil && len(versions) == 0 {
-		return nil, &showError{message: fmt.Sprintf("package not found: %s:%s:%s", groupID, artifactID, version), code: 1}
+		return nil, &showError{message: fmt.Sprintf("package not found: %s:%s:%s; %s", groupID, artifactID, version, searchHint), code: 1}
 	}
 
 	// OSV scan of just this version; a network failure must not sink the card.
