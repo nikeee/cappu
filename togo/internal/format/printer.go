@@ -1456,7 +1456,7 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 		for j, t := range nodes(c.CatchTypes) {
 			ts[j] = p.typ(t)
 		}
-		parts = append(parts, text(" catch ("), join(text(" | "), ts), text(" "), text(p.raw(c.Name)), text(") "), p.blockTB(c.Block.AsBlock(), c.Block.End, i < len(catches)-1 || hasFinally))
+		parts = append(parts, text(" catch ("), p.modifiers(c.Modifiers, "inline"), join(text(" | "), ts), text(" "), text(p.raw(c.Name)), text(") "), p.blockTB(c.Block.AsBlock(), c.Block.End, i < len(catches)-1 || hasFinally))
 	}
 	if s.FinallyBlock != nil {
 		parts = append(parts, text(" finally "), p.block(s.FinallyBlock.AsBlock(), s.FinallyBlock.End))

@@ -344,7 +344,7 @@ func (p *Parser) parseCatchClause() *Node {
 	pos := p.getNodePos()
 	p.parseExpected(CatchKeyword, nil)
 	p.parseExpected(OpenParenToken, nil)
-	p.parseModifiers() // 'final' allowed but not retained
+	modifiers := p.parseModifiers() // e.g. `catch (final X e)`
 	typesPos := p.getNodePos()
 	catchTypes := []*Node{p.parseType()}
 	for p.parseOptional(BarToken) {
@@ -353,7 +353,7 @@ func (p *Parser) parseCatchClause() *Node {
 	name := p.parseIdentifier()
 	p.parseExpected(CloseParenToken, nil)
 	block := p.parseBlock()
-	return p.finishNode(p.factory.NewCatchClause(p.createNodeArray(catchTypes, typesPos, -1), name, block), pos, -1)
+	return p.finishNode(p.factory.NewCatchClause(modifiers, p.createNodeArray(catchTypes, typesPos, -1), name, block), pos, -1)
 }
 
 func (p *Parser) parseTryStatement() *Node {

@@ -1324,6 +1324,7 @@ class Printer {
     s.catchClauses.forEach((c, i) => {
       parts.push(
         " catch (",
+        this.modifiers(c.modifiers, "inline"),
         join(
           " | ",
           c.catchTypes.map(t => this.type(t)),
