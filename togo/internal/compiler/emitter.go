@@ -50,6 +50,8 @@ func EmitSourceFile(sourceFile *Node, program *Program, checker *Checker, debugI
 	nest := computeNestMembers(sourceFile, program)
 	inner := computeInnerClassInfo(sourceFile, program)
 	previousDebugInfo := SetEmitDebugInfo(debugInfo)
+	// deferred so a panicking emit (unsupportedEmit) can't leak the flag into later files
+	defer SetEmitDebugInfo(previousDebugInfo)
 	var visit func(node *Node)
 	visit = func(node *Node) {
 		switch node.Kind {
@@ -79,6 +81,5 @@ func EmitSourceFile(sourceFile *Node, program *Program, checker *Checker, debugI
 		})
 	}
 	visit(sourceFile)
-	SetEmitDebugInfo(previousDebugInfo)
 	return result
 }

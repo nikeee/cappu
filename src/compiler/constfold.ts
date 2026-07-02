@@ -23,7 +23,7 @@ const int64 = (v: bigint): bigint => BigInt.asIntN(64, v);
 function parseIntLiteral(text: string): bigint | undefined {
   const t = text.replace(/_/g, "");
   try {
-    if (/^0[0-7]+$/.test(t)) return BigInt(Number.parseInt(t, 8)); // legacy octal
+    if (/^0[0-7]+$/.test(t)) return BigInt(`0o${t.slice(1)}`); // legacy octal (BigInt keeps >2^53 exact)
     return BigInt(t); // handles decimal, 0x..., 0b...
   } catch {
     return undefined;

@@ -145,3 +145,10 @@ test("mixed int/long bitwise promotes to long", () => {
   expect(fold("5 | 3L")).toEqual({ kind: "long", value: 7n });
   expect(fold("5 ^ 3L")).toEqual({ kind: "long", value: 6n });
 });
+
+test("large octal long literal folds exactly (no float round-trip)", () => {
+  // 0777777777777777777777 = 2^63 - 1; Number.parseInt would round it.
+  expect(fold("0777777777777777777777L")).toEqual({ kind: "long", value: 9223372036854775807n });
+  // 2^62 + 1: one above float53 precision, still positive in int64.
+  expect(fold("0400000000000000000001L")).toEqual({ kind: "long", value: 4611686018427387905n });
+});

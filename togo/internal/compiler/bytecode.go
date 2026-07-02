@@ -617,7 +617,11 @@ func generateBody(method *Node, cp *constantPool, program *Program, checker *Che
 		if f.label.offset < 0 {
 			panic(unsupportedEmit{})
 		}
-		g.code.patchU2(int(f.at), int(f.label.offset-f.from)&0xffff)
+		delta := int(f.label.offset - f.from)
+		if delta < -0x8000 || delta > 0x7fff {
+			panic(unsupportedEmit{}) // branch beyond s16 range
+		}
+		g.code.patchU2(int(f.at), delta&0xffff)
 	}
 	for _, f := range g.wideFixups {
 		if f.label.offset < 0 {

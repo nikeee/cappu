@@ -588,7 +588,7 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			arities = append(arities, a)
 		}
 		slices.SortFunc(arities, func(a, b string) int {
-			return cmp.Compare(ariticInt(a), ariticInt(b))
+			return cmp.Compare(arityInt(a), arityInt(b))
 		})
 		return strings.Join(arities, " or ")
 	}
@@ -1272,8 +1272,8 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 	return diagnostics
 }
 
-// ariticInt parses the leading integer of an arity label ("2" or "1+").
-func ariticInt(s string) int {
+// arityInt parses the leading integer of an arity label ("2" or "1+").
+func arityInt(s string) int {
 	s = strings.TrimSuffix(s, "+")
 	n, _ := strconv.Atoi(s)
 	return n

@@ -575,18 +575,24 @@ func (s *Session) processEvents() {
 
 		s.mu.Lock()
 		// A malformed event must not panic this goroutine and kill event
-		// handling; the byte-reader codec panics on a truncated packet.
-		func() {
-			defer func() { _ = recover() }()
-			s.handleJdwpEvent(data)
-		}()
+		// handling; the byte-reader codec panics on a truncated packet. Only
+		// the decode is guarded (like the TS build) so a real bug in the
+		// dispatch below still surfaces as a panic.
+		if comp, ok := decodeEvent(data, s.client.IDSizes); ok {
+			s.handleJdwpEvent(comp)
+		}
 		s.mu.Unlock()
 	}
 }
 
+// decodeEvent decodes a composite, absorbing the codec's truncation panic.
+func decodeEvent(data []byte, sizes jdwp.IDSizes) (comp jdwp.Composite, ok bool) {
+	defer func() { ok = recover() == nil }()
+	return jdwp.DecodeComposite(data, sizes), true
+}
+
 // handleJdwpEvent dispatches a decoded composite. Caller holds s.mu.
-func (s *Session) handleJdwpEvent(data []byte) {
-	comp := jdwp.DecodeComposite(data, s.client.IDSizes)
+func (s *Session) handleJdwpEvent(comp jdwp.Composite) {
 	for _, ev := range comp.Events {
 		switch ev.Kind {
 		case jdwp.EKBreakpoint:

@@ -474,6 +474,7 @@ class ConstantPool {
     write(this.entries);
     const index = ++this.count as CpIndex; // the single producing cast
     if (wide) this.count++; // long/double occupy a second, unusable slot (JVMS 4.4.5)
+    if (this.count > 0xfffe) throw new UnsupportedEmit(); // constant_pool_count is u2 (JVMS 4.1)
     this.cache.set(key, index);
     return index;
   }
@@ -6512,7 +6513,9 @@ function generateBody(
   // Backpatch branch offsets (signed, relative to the branch opcode address).
   for (const { at, from, label } of fixups) {
     if (label.offset < 0) throw new UnsupportedEmit(); // label never placed
-    code.patchU2(at, (label.offset - from) & 0xffff);
+    const delta = label.offset - from;
+    if (delta < -0x8000 || delta > 0x7fff) throw new UnsupportedEmit(); // branch beyond s16 range
+    code.patchU2(at, delta & 0xffff);
   }
   for (const { at, from, label } of wideFixups) {
     if (label.offset < 0) throw new UnsupportedEmit();

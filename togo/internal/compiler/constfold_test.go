@@ -171,3 +171,9 @@ func TestMixedIntLongBitwisePromotes(t *testing.T) {
 	wantLong(t, "5 | 3L", 7)
 	wantLong(t, "5 ^ 3L", 6)
 }
+
+func TestLargeOctalLongLiteralExact(t *testing.T) {
+	// Above float53 precision: a float round-trip would fold these wrong.
+	wantLong(t, "0777777777777777777777L", 9223372036854775807) // 2^63 - 1
+	wantLong(t, "0400000000000000000001L", 4611686018427387905) // 2^62 + 1
+}

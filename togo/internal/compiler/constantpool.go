@@ -42,6 +42,9 @@ func (cp *constantPool) intern(key string, write func(*byteBuffer), wide bool) c
 	if wide {
 		cp.count++ // long/double occupy a second, unusable slot (JVMS 4.4.5)
 	}
+	if cp.count > 0xfffe {
+		panic(unsupportedEmit{}) // constant_pool_count is u2 (JVMS 4.1)
+	}
 	cp.cache[key] = index
 	return index
 }

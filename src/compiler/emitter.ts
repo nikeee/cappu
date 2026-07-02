@@ -122,7 +122,10 @@ export function emitSourceFile(
       return undefined;
     });
   };
-  visit(sourceFile);
-  setEmitDebugInfo(previousDebugInfo);
+  try {
+    visit(sourceFile);
+  } finally {
+    setEmitDebugInfo(previousDebugInfo);
+  }
   return result;
 }

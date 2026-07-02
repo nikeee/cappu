@@ -25,14 +25,20 @@ type ZipEntryInput struct {
 func WriteZip(entries []ZipEntryInput) []byte {
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
+	// All writes go to an in-memory buffer and entry names are our own class
+	// paths, so errors here mean a caller bug - fail loudly, never drop entries.
 	for _, e := range entries {
 		fw, err := w.CreateHeader(&zip.FileHeader{Name: e.Name, Method: zip.Store})
 		if err != nil {
-			continue
+			panic(err)
 		}
-		_, _ = fw.Write(e.Bytes)
+		if _, err := fw.Write(e.Bytes); err != nil {
+			panic(err)
+		}
 	}
-	_ = w.Close()
+	if err := w.Close(); err != nil {
+		panic(err)
+	}
 	return buf.Bytes()
 }
 
