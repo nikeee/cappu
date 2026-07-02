@@ -336,7 +336,7 @@ func (s *Server) validate(uri compiler.URI) {
 		return
 	}
 	data := sourceFile.AsSourceFile()
-	lineStarts := compiler.ComputeLineStarts(data.Text)
+	lineStarts := data.LineStarts()
 	var diags []lsp.Diagnostic
 	add := func(list []compiler.Diagnostic) {
 		for _, d := range list {
@@ -365,7 +365,7 @@ func lspRange(text string, lineStarts []int, pos, end int) lsp.Range {
 
 func (s *Server) rangeOf(node *compiler.Node) lsp.Range {
 	file := compiler.GetSourceFileOfNode(node).AsSourceFile()
-	lineStarts := compiler.ComputeLineStarts(file.Text)
+	lineStarts := file.LineStarts()
 	start := compiler.SkipTrivia(file.Text, node.Pos)
 	return lspRange(file.Text, lineStarts, start, node.End)
 }
@@ -381,7 +381,7 @@ func (s *Server) sourceAndOffset(uri compiler.URI, pos lsp.Position) (*compiler.
 		return nil, 0, false
 	}
 	text := sourceFile.AsSourceFile().Text
-	lineStarts := compiler.ComputeLineStarts(text)
+	lineStarts := sourceFile.AsSourceFile().LineStarts()
 	offset := compiler.GetPositionOfLineAndCharacter(text, lineStarts, pos.Line, pos.Character)
 	return sourceFile, offset, true
 }

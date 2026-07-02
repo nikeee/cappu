@@ -179,6 +179,7 @@ type SourceFileData struct {
 	Text               string
 	ParseDiagnostics   []Diagnostic
 	BindDiagnostics    []Diagnostic
+	lineStarts         []int // lazily computed by LineStarts (Text is immutable after parse)
 }
 
 func (d *SourceFileData) forEachChild(v Visitor) bool {

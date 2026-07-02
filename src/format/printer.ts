@@ -502,11 +502,12 @@ class Printer {
   }
 
   private importGroup(imports: ImportDeclaration[]): Doc {
-    const sorted = [...imports].sort((a, b) => {
-      const an = this.entityName(a.name);
-      const bn = this.entityName(b.name);
-      return an < bn ? -1 : an > bn ? 1 : 0;
-    });
+    // Sort keys are precomputed: entityName rebuilds the dotted name from the
+    // source text, so keying per comparison would be O(n log n) rebuilds.
+    const sorted = imports
+      .map(imp => ({ key: this.entityName(imp.name), imp }))
+      .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+      .map(entry => entry.imp);
     const seen = new Set<string>();
     const lines: Doc[] = [];
     for (const imp of sorted) {

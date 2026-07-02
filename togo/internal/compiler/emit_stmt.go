@@ -1044,6 +1044,7 @@ func (g *bodyGen) emitSwitchInstr(cases []switchCase, defaultLabel *label) {
 	useTable := n > 0 && tableCost <= lookupCost
 	wide := func(lbl *label) {
 		g.wideFixups = append(g.wideFixups, fixup{at: pc(g.code.length()), from: from, label: lbl})
+		lbl.targeted = true
 		g.code.u4(0)
 		if !lbl.hasTargetStack {
 			lbl.targetStack = append(lbl.targetStack[:0:0], g.stack...)
@@ -1869,19 +1870,7 @@ func (g *bodyGen) reserveSlot(d descriptor) int {
 	return s
 }
 
-func (g *bodyGen) labelUsed(l *label) bool {
-	for _, f := range g.fixups {
-		if f.label == l {
-			return true
-		}
-	}
-	for _, f := range g.wideFixups {
-		if f.label == l {
-			return true
-		}
-	}
-	return false
-}
+func (g *bodyGen) labelUsed(l *label) bool { return l.targeted }
 
 func findLastTarget(targets []branchTarget, name string) *branchTarget {
 	for i := len(targets) - 1; i >= 0; i-- {

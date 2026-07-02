@@ -37,7 +37,8 @@ type frame struct {
 
 // label is a branch target, resolved when placed.
 type label struct {
-	offset              pc // -1 until placed
+	offset              pc   // -1 until placed
+	targeted            bool // some branch/switch entry jumps here (set by branchTo)
 	targetStack         []descriptor
 	hasTargetStack      bool
 	assignedAtTarget    map[int]bool
@@ -288,7 +289,7 @@ func (g *bodyGen) recordLine(node *Node) {
 		}
 		if p != nil {
 			sf := p.AsSourceFile()
-			g.lineSource = &lineSourceInfo{text: sf.Text, starts: ComputeLineStarts(sf.Text)}
+			g.lineSource = &lineSourceInfo{text: sf.Text, starts: sf.LineStarts()}
 		}
 	}
 	if g.lineSource == nil {
@@ -418,6 +419,7 @@ func (g *bodyGen) branchTo(op int, l *label) {
 	at := pc(g.code.length())
 	g.code.u2(0) // placeholder, backpatched later
 	g.fixups = append(g.fixups, fixup{at: at, from: from, label: l})
+	l.targeted = true
 	if !l.hasTargetStack {
 		l.targetStack = append(l.targetStack[:0:0], g.stack...)
 		l.hasTargetStack = true

@@ -64,12 +64,15 @@ export function createJdkImage(jdkHome: string): JdkImage | undefined {
   // first miss, then retained (strings only). The module byte buffers used to
   // build it are released; only modules we actually read classes from are kept.
   let packageToModule: Map<string, string> | undefined;
-  // module file -> its entries (holds that module's byte buffer alive).
+  // module file -> (outer binary name -> its family: the class itself and its
+  // Outer$* nested classes, in archive order). Indexed once per module so each
+  // lookup is O(family) instead of a scan over all ~6000 java.base entries;
+  // holds that module's byte buffer alive.
   // ponytail: keeps the buffers of modules we serve classes from (typically just
   // java.base); if resident memory ever matters, switch to seek-based reads.
-  const openModules = new Map<string, ZipEntry[] | null>();
+  const openModules = new Map<string, Map<string, ZipEntry[]> | null>();
 
-  function entriesFor(modFile: string): ZipEntry[] | undefined {
+  function familiesFor(modFile: string): Map<string, ZipEntry[]> | undefined {
     const cached = openModules.get(modFile);
     if (cached !== undefined) return cached ?? undefined;
     let entries: ZipEntry[] | undefined;
@@ -78,8 +81,23 @@ export function createJdkImage(jdkHome: string): JdkImage | undefined {
     } catch {
       entries = undefined;
     }
-    openModules.set(modFile, entries ?? null);
-    return entries;
+    let families: Map<string, ZipEntry[]> | undefined;
+    if (entries) {
+      families = new Map();
+      for (const entry of entries) {
+        if (!entry.name.startsWith("classes/") || !entry.name.endsWith(".class")) continue;
+        const path = entry.name.slice("classes/".length, -".class".length);
+        // The family key is the outermost class: everything before the first '$'
+        // of the simple name ("java/util/Map$Entry" files under "java/util/Map").
+        const dollar = path.indexOf("$", path.lastIndexOf("/") + 1);
+        const outer = dollar < 0 ? path : path.slice(0, dollar);
+        const family = families.get(outer);
+        if (family) family.push(entry);
+        else families.set(outer, [entry]);
+      }
+    }
+    openModules.set(modFile, families ?? null);
+    return families;
   }
 
   function buildPackageMap(): Map<string, string> {
@@ -107,7 +125,7 @@ export function createJdkImage(jdkHome: string): JdkImage | undefined {
       const pkg = slash < 0 ? "" : binaryName.slice(0, slash);
       const modFile = packageToModule.get(pkg);
       if (modFile === undefined) return undefined;
-      const entries = entriesFor(modFile);
+      const entries = familiesFor(modFile)?.get(binaryName);
       if (!entries) return undefined;
       const outerName = `classes/${binaryName}.class`;
       const outer = entries.find(e => e.name === outerName);

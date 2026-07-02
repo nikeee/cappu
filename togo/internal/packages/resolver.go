@@ -6,7 +6,10 @@ package packages
 // same group:artifact are recorded as conflicts), and only non-optional
 // compile/runtime dependencies propagate. Port of src/packages/resolver.ts.
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 // ResolvedPackage is one selected package and where it came from.
 type ResolvedPackage struct {
@@ -113,6 +116,7 @@ func ResolveTransitive(roots []Coordinates, sources []PackageSource, onResolve f
 
 	for depth := 0; len(frontier) > 0; depth++ {
 		var next []frontierItem
+		prefetchLevel(frontier, sources, selected)
 		for _, item := range frontier {
 			// Resolve a version range to a concrete published version first, so
 			// the conflict/nearest-wins logic and the metadata fetch all see a
@@ -186,6 +190,38 @@ func ResolveTransitive(roots []Coordinates, sources []PackageSource, onResolve f
 		frontier = next
 	}
 	return res, nil
+}
+
+// prefetchLevel warms the source caches for a whole BFS level concurrently
+// (bounded), so the ordered nearest-wins loop in ResolveTransitive keeps its
+// exact sequential semantics while paying one round of network latency per
+// level instead of one per package. Errors are ignored here; the sequential
+// pass re-runs the (now cached) call and reports them in declaration order.
+// The goroutines only read `selected`; the bookkeeping loop writes it after
+// Wait returns.
+func prefetchLevel(frontier []frontierItem, sources []PackageSource, selected map[PackageKey]string) {
+	if len(frontier) < 2 {
+		return
+	}
+	sem := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	for _, item := range frontier {
+		wg.Add(1)
+		go func(declared Coordinates) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			concrete, ok, err := resolveRange(declared, sources)
+			if err != nil || !ok {
+				return
+			}
+			if _, done := selected[concrete.Key()]; done {
+				return
+			}
+			_, _, _ = metadataFrom(sources, concrete)
+		}(item.coordinates)
+	}
+	wg.Wait()
 }
 
 // LatestVersion returns the newest published version of group:artifact across

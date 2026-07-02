@@ -23,6 +23,16 @@ type LineAndCharacter struct {
 	Character int
 }
 
+// LineStarts returns the file's line starts, computed once per parsed file
+// (edits produce a new SourceFile). Callers must not mutate the slice. Port of
+// lineStartsOf in src/compiler/lineMap.ts.
+func (d *SourceFileData) LineStarts() []int {
+	if d.lineStarts == nil {
+		d.lineStarts = ComputeLineStarts(d.Text)
+	}
+	return d.lineStarts
+}
+
 // ComputeLineStarts returns the offsets at which each line begins (line 0 at 0).
 func ComputeLineStarts(text string) []int {
 	result := []int{0}

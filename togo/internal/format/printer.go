@@ -467,10 +467,21 @@ func (p *printer) moduleNameList(names *compiler.NodeArray) Doc {
 }
 
 func (p *printer) importGroup(imports []*compiler.Node) Doc {
-	sorted := slices.Clone(imports)
-	slices.SortStableFunc(sorted, func(a, b *compiler.Node) int {
-		return cmp.Compare(p.entityName(a.AsImportDeclaration().Name), p.entityName(b.AsImportDeclaration().Name))
-	})
+	// Sort keys are precomputed: entityName rebuilds the dotted name from the
+	// source text, so keying per comparison would be O(n log n) rebuilds.
+	type keyed struct {
+		key string
+		imp *compiler.Node
+	}
+	entries := make([]keyed, len(imports))
+	for i, imp := range imports {
+		entries[i] = keyed{p.entityName(imp.AsImportDeclaration().Name), imp}
+	}
+	slices.SortStableFunc(entries, func(a, b keyed) int { return cmp.Compare(a.key, b.key) })
+	sorted := make([]*compiler.Node, len(entries))
+	for i, e := range entries {
+		sorted[i] = e.imp
+	}
 	seen := map[string]bool{}
 	var lines []Doc
 	for _, imp := range sorted {

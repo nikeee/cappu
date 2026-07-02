@@ -10,7 +10,7 @@
 import type { Checker } from "./checker.ts";
 import { type ClassType, type Type, TypeKind } from "./checkerTypes.ts";
 import { foldConstant } from "./constfold.ts";
-import { computeLineStarts, getLineAndCharacterOfPosition } from "./lineMap.ts";
+import { getLineAndCharacterOfPosition, lineStartsOf } from "./lineMap.ts";
 import { forEachChild } from "./parser.ts";
 import type { Program } from "./program.ts";
 import { resolveIdentifier, resolveTypeEntityName } from "./resolver.ts";
@@ -83,17 +83,6 @@ import {
 } from "./types.ts";
 import { type Brand } from "../brand.ts";
 import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
-
-// Line starts per source file, for LineNumberTable entries (computed once).
-const lineStartsCache = new WeakMap<SourceFile, readonly number[]>();
-function lineStartsOf(sourceFile: SourceFile): readonly number[] {
-  let starts = lineStartsCache.get(sourceFile);
-  if (!starts) {
-    starts = computeLineStarts(sourceFile.text);
-    lineStartsCache.set(sourceFile, starts);
-  }
-  return starts;
-}
 
 // Notified whenever a body cannot be fully compiled and degrades to a
 // verifiable placeholder. The compiler driver surfaces these as warnings (and
@@ -189,6 +178,8 @@ function primitiveDescriptor(keyword: string): PrimitiveDescriptor | undefined {
 
 const OBJECT_DESC = "Ljava/lang/Object;" as Descriptor;
 const STRING_DESC = "Ljava/lang/String;" as Descriptor;
+// Primitive descriptors that take a ConstantValue attribute (JVMS 4.7.2).
+const CONSTANT_VALUE_PRIMS: readonly string[] = ["J", "Z", "I", "S", "B", "C"];
 const THROWABLE_DESC = "Ljava/lang/Throwable;" as Descriptor;
 const ITERATOR_DESC = "Ljava/util/Iterator;" as Descriptor;
 
@@ -1992,7 +1983,7 @@ function isConstantValueField(
   }
   return (
     foldConstant(declarator.initializer) !== undefined &&
-    ["J", "Z", "I", "S", "B", "C"].includes(descriptor)
+    CONSTANT_VALUE_PRIMS.includes(descriptor)
   );
 }
 
@@ -2653,6 +2644,7 @@ function generateBody(
   // --- labels, branches and stack-map frames ---------------------------------------
   interface Label {
     offset: Pc; // resolved when placed (-1 until then)
+    targeted?: boolean; // some branch/switch entry jumps here (set by branchTo)
     targetStack?: Descriptor[]; // operand stack as seen at the branch target (recorded by branchTo)
     assignedAtTarget?: Set<number>; // slots assigned on every branch path to here
   }
@@ -2715,6 +2707,7 @@ function generateBody(
     const at = code.length as Pc;
     code.u2(0); // placeholder offset, backpatched below
     fixups.push({ at, from, label });
+    label.targeted = true;
     if (label.targetStack === undefined) label.targetStack = [...stack];
     label.assignedAtTarget =
       label.assignedAtTarget === undefined
@@ -4953,6 +4946,7 @@ function generateBody(
     const useTable = n > 0 && tableCost <= lookupCost;
     const wide = (label: Label): void => {
       wideFixups.push({ at: code.length as Pc, from, label });
+      label.targeted = true;
       code.u4(0); // placeholder, backpatched
       // Record the switch-entry state for this target (like branchTo does).
       if (label.targetStack === undefined) label.targetStack = [...stack];
@@ -6137,8 +6131,7 @@ function generateBody(
         breakTargets.push({ label: endL, finallyDepth: finallyStack.length, names });
         const term = inScope(() => emitStmt(body));
         breakTargets.pop();
-        const used = fixups.some(f => f.label === endL) || wideFixups.some(f => f.label === endL);
-        if (used) {
+        if (endL.targeted) {
           placeLabel(endL);
           return false;
         }
@@ -6171,8 +6164,7 @@ function generateBody(
         // exists, the last clause does not fall through, and nothing branches to
         // the end (a break, or a defaulting selector when no default clause).
         const hasDefault = s.clauses.some(cl => cl.isDefault);
-        const endBranched =
-          fixups.some(f => f.label === endL) || wideFixups.some(f => f.label === endL);
+        const endBranched = endL.targeted === true;
         return hasDefault && lastTerminated && !endBranched;
       }
       // The assert statement (JLS 14.10): skip when assertions are disabled, then
@@ -7527,7 +7519,7 @@ export function emitInterface(
           constIndex = cp.string((init as LiteralExpression).value);
         } else {
           const folded = foldConstant(init);
-          if (folded && ["J", "Z", "I", "S", "B", "C"].includes(descriptor)) {
+          if (folded && CONSTANT_VALUE_PRIMS.includes(descriptor)) {
             const intValue =
               folded.kind === "boolean" ? (folded.value ? 1 : 0) : Number(folded.value);
             constIndex =

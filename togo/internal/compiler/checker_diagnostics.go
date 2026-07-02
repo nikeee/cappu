@@ -439,16 +439,46 @@ func (c *Checker) GetDeprecatedUses(sourceFile *Node) []DeprecatedUse {
 	return uses
 }
 
+// Lookup tables for GetSemanticDiagnostics, hoisted so they are not rebuilt per file.
+var narrowingRange = map[string][2]int64{
+	"byte":  {-128, 127},
+	"short": {-32768, 32767},
+	"char":  {0, 65535},
+}
+var formatMethods = map[string]bool{
+	"java.lang.String#format":    true,
+	"java.io.PrintStream#format": true,
+	"java.io.PrintStream#printf": true,
+	"java.io.PrintWriter#format": true,
+	"java.io.PrintWriter#printf": true,
+	"java.io.Console#format":     true,
+	"java.io.Console#printf":     true,
+	"java.util.Formatter#format": true,
+}
+var regexMethods = map[string]bool{
+	"java.util.regex.Pattern#compile": true,
+	"java.util.regex.Pattern#matches": true,
+	"java.lang.String#matches":        true,
+	"java.lang.String#split":          true,
+	"java.lang.String#replaceAll":     true,
+	"java.lang.String#replaceFirst":   true,
+}
+var parseMethods = map[string]string{
+	"java.lang.Integer#parseInt": "int",
+	"java.lang.Integer#valueOf":  "int",
+	"java.lang.Long#parseLong":   "long",
+	"java.lang.Long#valueOf":     "long",
+	"java.lang.Short#parseShort": "short",
+	"java.lang.Short#valueOf":    "short",
+	"java.lang.Byte#parseByte":   "byte",
+	"java.lang.Byte#valueOf":     "byte",
+}
+
 func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 	data := sourceFile.AsSourceFile()
 	var diagnostics []Diagnostic
 	cleanParse := len(data.ParseDiagnostics) == 0
 
-	narrowingRange := map[string][2]int64{
-		"byte":  {-128, 127},
-		"short": {-32768, 32767},
-		"char":  {0, 65535},
-	}
 	checkPrimitiveAssignment := func(valueNode *Node, value, target string) {
 		if value == target || primitiveWidens(value, target) {
 			return
@@ -880,16 +910,6 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 	// type is arity-valid against the declaration yet throws at runtime. When the
 	// format string is a literal we parse its specifiers and warn - staying silent
 	// on anything unprovable.
-	formatMethods := map[string]bool{
-		"java.lang.String#format":    true,
-		"java.io.PrintStream#format": true,
-		"java.io.PrintStream#printf": true,
-		"java.io.PrintWriter#format": true,
-		"java.io.PrintWriter#printf": true,
-		"java.io.Console#format":     true,
-		"java.io.Console#printf":     true,
-		"java.util.Formatter#format": true,
-	}
 	argTypeDescriptor := func(t *Type) (ArgTypeDescriptor, bool) {
 		switch t.Kind {
 		case TypeKindPrimitive:
@@ -1019,14 +1039,6 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 
 	// Regex literal validation: a malformed literal regex throws
 	// PatternSyntaxException; the regex is argument 0 for every method here.
-	regexMethods := map[string]bool{
-		"java.util.regex.Pattern#compile": true,
-		"java.util.regex.Pattern#matches": true,
-		"java.lang.String#matches":        true,
-		"java.lang.String#split":          true,
-		"java.lang.String#replaceAll":     true,
-		"java.lang.String#replaceFirst":   true,
-	}
 	checkRegexCall := func(call *Node) {
 		fqn, name, ok := memberCallTarget(call)
 		if !ok || !regexMethods[fqn+"#"+name] {
@@ -1066,16 +1078,6 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 	// Integer parsing (Integer/Long/Short/Byte parse*/valueOf): a non-parseable
 	// literal or an out-of-range radix throws NumberFormatException. The string
 	// is argument 0; a second numeric-literal argument, if any, is the radix.
-	parseMethods := map[string]string{
-		"java.lang.Integer#parseInt": "int",
-		"java.lang.Integer#valueOf":  "int",
-		"java.lang.Long#parseLong":   "long",
-		"java.lang.Long#valueOf":     "long",
-		"java.lang.Short#parseShort": "short",
-		"java.lang.Short#valueOf":    "short",
-		"java.lang.Byte#parseByte":   "byte",
-		"java.lang.Byte#valueOf":     "byte",
-	}
 	checkNumberParseCall := func(call *Node) {
 		fqn, name, ok := memberCallTarget(call)
 		if !ok {

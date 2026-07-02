@@ -27,7 +27,7 @@ func enclosingCallable(node *compiler.Node) *compiler.Node {
 func callHierarchyItemOf(decl *compiler.Node) lsp.CallHierarchyItem {
 	file := compiler.GetSourceFileOfNode(decl)
 	text := file.AsSourceFile().Text
-	lineStarts := compiler.ComputeLineStarts(text)
+	lineStarts := file.AsSourceFile().LineStarts()
 	name := "<anonymous>"
 	kind := lsp.SymbolKindMethod
 	if decl.Kind == compiler.ConstructorDeclaration {
@@ -55,7 +55,7 @@ func callableSymbolOfItem(program *compiler.Program, checker *compiler.Checker, 
 		return nil
 	}
 	text := sourceFile.AsSourceFile().Text
-	lineStarts := compiler.ComputeLineStarts(text)
+	lineStarts := sourceFile.AsSourceFile().LineStarts()
 	offset := compiler.GetPositionOfLineAndCharacter(text, lineStarts, item.SelectionRange.Start.Line, item.SelectionRange.Start.Character)
 	id := compiler.GetIdentifierAtPosition(sourceFile, offset)
 	if id == nil {
@@ -115,7 +115,7 @@ func CallHierarchyIncoming(program *compiler.Program, checker *compiler.Checker,
 		}
 		file := compiler.GetSourceFileOfNode(ref)
 		text := file.AsSourceFile().Text
-		lineStarts := compiler.ComputeLineStarts(text)
+		lineStarts := file.AsSourceFile().LineStarts()
 		r := dsRange(text, lineStarts, compiler.SkipTrivia(text, ref.Pos), ref.End)
 		if entry, ok := calls[caller]; ok {
 			entry.FromRanges = append(entry.FromRanges, r)
@@ -147,7 +147,7 @@ func CallHierarchyOutgoing(program *compiler.Program, checker *compiler.Checker,
 		}
 		file := compiler.GetSourceFileOfNode(decl)
 		text := file.AsSourceFile().Text
-		lineStarts := compiler.ComputeLineStarts(text)
+		lineStarts := file.AsSourceFile().LineStarts()
 		var visit func(node *compiler.Node)
 		visit = func(node *compiler.Node) {
 			if node.Kind == compiler.CallExpression {

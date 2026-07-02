@@ -25,11 +25,13 @@ type JdkImage struct {
 	// package ("java/util") -> module file ("java.base.jmod"). Built once, on the
 	// first miss, then retained (strings only).
 	packageToModule map[string]string
-	// module file -> its entries (holds that module's data alive). Only modules we
-	// actually read classes from are kept.
+	// module file -> (outer binary name -> its family: the class itself and its
+	// Outer$* nested classes, in archive order). Indexed once per module so each
+	// lookup is O(family) instead of a scan over all ~6000 java.base entries.
+	// Only modules we actually read classes from are kept.
 	// ponytail: keeps the data of modules we serve classes from (typically just
 	// java.base); if resident memory ever matters, switch to seek-based reads.
-	openModules map[string][]ZipEntry
+	openModules map[string]map[string][]ZipEntry
 }
 
 // readJmodEntries reads a .jmod file and returns its zip entries, or nil if not
@@ -83,7 +85,7 @@ func NewJdkImage(jdkHome string) *JdkImage {
 			break
 		}
 	}
-	return &JdkImage{jmodDir: jmodDir, jmodFiles: jmodFiles, openModules: map[string][]ZipEntry{}}
+	return &JdkImage{jmodDir: jmodDir, jmodFiles: jmodFiles, openModules: map[string]map[string][]ZipEntry{}}
 }
 
 func (img *JdkImage) buildPackageMap() {
@@ -100,13 +102,35 @@ func (img *JdkImage) buildPackageMap() {
 	}
 }
 
-func (img *JdkImage) entriesFor(modFile string) []ZipEntry {
+// classPathOfEntry returns "java/util/Map$Entry" for "classes/java/util/Map$Entry.class".
+func classPathOfEntry(name string) (string, bool) {
+	if !strings.HasPrefix(name, "classes/") || !strings.HasSuffix(name, ".class") {
+		return "", false
+	}
+	return name[len("classes/") : len(name)-len(".class")], true
+}
+
+func (img *JdkImage) familiesFor(modFile string) map[string][]ZipEntry {
 	if cached, ok := img.openModules[modFile]; ok {
 		return cached
 	}
-	entries := readJmodEntries(filepath.Join(img.jmodDir, modFile))
-	img.openModules[modFile] = entries
-	return entries
+	families := map[string][]ZipEntry{}
+	for _, entry := range readJmodEntries(filepath.Join(img.jmodDir, modFile)) {
+		path, ok := classPathOfEntry(entry.Name)
+		if !ok {
+			continue
+		}
+		// The family key is the outermost class: everything before the first '$'
+		// of the simple name ("java/util/Map$Entry" files under "java/util/Map").
+		outer := path
+		slash := strings.LastIndexByte(path, '/')
+		if dollar := strings.IndexByte(path[slash+1:], '$'); dollar >= 0 {
+			outer = path[:slash+1+dollar]
+		}
+		families[outer] = append(families[outer], entry)
+	}
+	img.openModules[modFile] = families
+	return families
 }
 
 // ReadClassFamily returns the compiled bytes of binaryName (e.g. "java/util/List")
@@ -124,7 +148,7 @@ func (img *JdkImage) ReadClassFamily(binaryName string) [][]byte {
 	if !ok {
 		return nil
 	}
-	entries := img.entriesFor(modFile)
+	entries := img.familiesFor(modFile)[binaryName]
 	outerName := "classes/" + binaryName + ".class"
 	nestedPrefix := "classes/" + binaryName + "$"
 	var outer []byte

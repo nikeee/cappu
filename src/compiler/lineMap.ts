@@ -43,6 +43,18 @@ export function computeLineStarts(text: string): number[] {
   return result;
 }
 
+// Line starts per source file, computed once per parsed file object (a file's
+// text never changes after parse; edits produce a new SourceFile).
+const lineStartsCache = new WeakMap<object, readonly number[]>();
+export function lineStartsOf(sourceFile: { readonly text: string }): readonly number[] {
+  let starts = lineStartsCache.get(sourceFile);
+  if (!starts) {
+    starts = computeLineStarts(sourceFile.text);
+    lineStartsCache.set(sourceFile, starts);
+  }
+  return starts;
+}
+
 // Greatest index i with lineStarts[i] <= offset.
 function lineIndexOf(lineStarts: readonly number[], offset: number): number {
   let low = 0;

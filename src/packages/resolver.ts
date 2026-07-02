@@ -106,6 +106,23 @@ export async function resolveTransitive(
   );
   for (let depth = 0; frontier.length > 0; depth++) {
     const next: typeof frontier = [];
+    // Prefetch the whole level concurrently: ranges and POMs land in the
+    // per-source caches, so the ordered nearest-wins loop below keeps its exact
+    // sequential semantics while paying one round of network latency per level
+    // instead of one per package. Errors are swallowed here; the loop below
+    // re-runs the (now cached) call and reports them in declaration order.
+    await Promise.all(
+      frontier.map(async ({ coordinates: declared }) => {
+        try {
+          const coordinates = await resolveRange(declared, sources);
+          if (coordinates && !selected.has(packageKey(coordinates))) {
+            await metadataFrom(sources, coordinates);
+          }
+        } catch {
+          // reported by the sequential pass
+        }
+      }),
+    );
     for (const { coordinates: declared, requestedBy } of frontier) {
       // Resolve a version range to a concrete published version first, so the
       // conflict/nearest-wins logic and the metadata fetch all see a real

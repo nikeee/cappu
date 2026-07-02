@@ -533,3 +533,18 @@ Doc IR plus an AST->Doc lowering. Porting notes:
   "small receiver" threshold is decided at build time. The shared
   `test-fixtures/format` golden test asserts the Go output byte-identical to the
   TS build and to real gjf across every wrapping fixture.
+
+## Concurrency: per-level prefetch into caches (resolver)
+
+The TS build is single-threaded, so its `Promise.all` prefetch of a BFS level
+(`src/packages/resolver.ts`) is race-free by construction. The Go port mirrors
+it with bounded goroutines (`prefetchLevel` in `internal/packages/resolver.go`,
+semaphore channel, cap 8) but keeps the OUTPUT semantics identical by only
+*warming caches* concurrently: the nearest-wins bookkeeping loop stays strictly
+sequential and re-reads everything through the (now hot) caches. Anything those
+goroutines touch must be goroutine-safe: `MavenRepositorySource` guards its
+cache maps with a `sync.Mutex` (fetches happen outside the lock; a duplicate
+concurrent fetch is tolerated instead of single-flighted), and the on-disk
+metadata cache is safe because concurrent writers only ever write the same
+bytes to the same path. When porting other "loop of awaits" hot paths, prefer
+this warm-the-cache shape over restructuring the sequential logic.

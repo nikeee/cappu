@@ -357,6 +357,8 @@ export class MavenRepositorySource implements PackageSource {
   private readonly pomCache = new Map<string, RawPom | null>();
   /** Raw POM text as fetched (for getPom), keyed by coordinates. */
   private readonly pomTextCache = new Map<string, string>();
+  /** Published versions per "group:artifact" (maven-metadata.xml is fetched once). */
+  private readonly versionsCache = new Map<string, string[]>();
 
   constructor(
     private readonly baseUrl: string,
@@ -415,10 +417,15 @@ export class MavenRepositorySource implements PackageSource {
   }
 
   async listVersions(groupId: string, artifactId: string): Promise<string[]> {
+    const key = `${groupId}:${artifactId}`;
+    const cached = this.versionsCache.get(key);
+    if (cached) return cached;
     const text = await this.fetchText(
       this.repositoryUrl(this.artifactPath(groupId, artifactId), "maven-metadata.xml"),
     );
-    return text ? parseMetadataVersions(text) : [];
+    const versions = text ? parseMetadataVersions(text) : [];
+    this.versionsCache.set(key, versions);
+    return versions;
   }
 
   private async rawPom(coordinates: Coordinates): Promise<RawPom | undefined> {

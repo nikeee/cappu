@@ -63,7 +63,7 @@ import { DEFAULT_INLAY_HINTS, getInlayHints, type InlayHintsSettings } from "./i
 import { installJdkTypes } from "../compiler/jdkTypes.ts";
 import {
   type Character,
-  computeLineStarts,
+  lineStartsOf,
   getLineAndCharacterOfPosition,
   getPositionOfLineAndCharacter,
   type Line,
@@ -216,7 +216,7 @@ export function startServer(
   }
 
   function validate(uri: string, sourceFile: SourceFile): void {
-    const lineStarts = computeLineStarts(sourceFile.text);
+    const lineStarts = lineStartsOf(sourceFile);
     const diagnostics = [
       ...sourceFile.parseDiagnostics,
       ...(sourceFile.bindDiagnostics ?? []),
@@ -283,12 +283,12 @@ export function startServer(
   connection.onDocumentSymbol((params): DocumentSymbol[] => {
     const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
     if (!sourceFile) return [];
-    return getDocumentSymbols(sourceFile, computeLineStarts(sourceFile.text));
+    return getDocumentSymbols(sourceFile, lineStartsOf(sourceFile));
   });
 
   function rangeOf(node: Node): Range {
     const file = getSourceFileOfNode(node);
-    const lineStarts = computeLineStarts(file.text);
+    const lineStarts = lineStartsOf(file);
     // node.pos includes leading trivia; advance to the token's real start so the
     // highlighted range covers only the symbol name.
     const start = skipTrivia(file.text, node.pos);
@@ -310,7 +310,7 @@ export function startServer(
     const sourceFile = program.getSourceFile(uri);
     if (!sourceFile) return undefined;
     const offset = getPositionOfLineAndCharacter(
-      computeLineStarts(sourceFile.text),
+      lineStartsOf(sourceFile),
       position.line as Line,
       position.character as Character,
     );
@@ -424,7 +424,7 @@ export function startServer(
   connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
     const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
     if (!sourceFile) return [];
-    const lineStarts = computeLineStarts(sourceFile.text);
+    const lineStarts = lineStartsOf(sourceFile);
     const start = getPositionOfLineAndCharacter(
       lineStarts,
       params.range.start.line as Line,
@@ -518,7 +518,7 @@ export function startServer(
       if (isSyntheticUri(uri)) continue;
       const sourceFile = program.getSourceFile(uri);
       if (!sourceFile) continue;
-      const lineStarts = computeLineStarts(sourceFile.text);
+      const lineStarts = lineStartsOf(sourceFile);
       const flatten = (symbols: DocumentSymbol[], container?: string): void => {
         for (const s of symbols) {
           if (s.name.toLowerCase().includes(query)) {
@@ -576,7 +576,7 @@ export function startServer(
   connection.onFoldingRanges((params): FoldingRange[] | null => {
     const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
     if (!sourceFile) return null;
-    const lineStarts = computeLineStarts(sourceFile.text);
+    const lineStarts = lineStartsOf(sourceFile);
     const lineAt = (offset: number): number =>
       getLineAndCharacterOfPosition(lineStarts, offset).line;
     const ranges: FoldingRange[] = [];
@@ -741,7 +741,7 @@ export function startServer(
   connection.languages.semanticTokens.on((params): SemanticTokens => {
     const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
     if (!sourceFile) return { data: [] };
-    const lineStarts = computeLineStarts(sourceFile.text);
+    const lineStarts = lineStartsOf(sourceFile);
     const builder = new SemanticTokensBuilder();
     for (const t of getSemanticTokens(checker, sourceFile)) {
       const { line, character } = getLineAndCharacterOfPosition(lineStarts, t.offset);
@@ -759,7 +759,7 @@ export function startServer(
   connection.languages.inlayHint.on((params): InlayHint[] => {
     const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
     if (!sourceFile) return [];
-    const lineStarts = computeLineStarts(sourceFile.text);
+    const lineStarts = lineStartsOf(sourceFile);
     const start = getPositionOfLineAndCharacter(
       lineStarts,
       params.range.start.line as Line,

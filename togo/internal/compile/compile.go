@@ -385,7 +385,7 @@ func RunCheck(files []string, cfg *config.Config) []CompileDiagnostic {
 	for _, file := range files {
 		sf := program.GetSourceFile(pathToURI(file))
 		sfd := sf.AsSourceFile()
-		lineStarts := compiler.ComputeLineStarts(sfd.Text)
+		lineStarts := sfd.LineStarts()
 		all := append(append([]compiler.Diagnostic{}, sfd.ParseDiagnostics...), sfd.BindDiagnostics...)
 		all = append(all, checker.GetSemanticDiagnostics(sf)...)
 		for _, d := range all {
@@ -460,7 +460,7 @@ func RunCompile(files []string, options Options) Result {
 	for _, file := range files {
 		sf := program.GetSourceFile(pathToURI(file))
 		sfd := sf.AsSourceFile()
-		lineStarts := compiler.ComputeLineStarts(sfd.Text)
+		lineStarts := sfd.LineStarts()
 		all := append(append([]compiler.Diagnostic{}, sfd.ParseDiagnostics...), sfd.BindDiagnostics...)
 		if typeCheck {
 			all = append(all, checker.GetSemanticDiagnostics(sf)...)

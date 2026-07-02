@@ -32,7 +32,7 @@ func typeHierarchyItemOf(symbol *compiler.Symbol) (lsp.TypeHierarchyItem, bool) 
 	}
 	file := compiler.GetSourceFileOfNode(declaration)
 	text := file.AsSourceFile().Text
-	lineStarts := compiler.ComputeLineStarts(text)
+	lineStarts := file.AsSourceFile().LineStarts()
 	name := "<anonymous>"
 	if nameNode.Kind == compiler.Identifier {
 		name = nameNode.AsIdentifier().Text
@@ -54,7 +54,7 @@ func typeSymbolOfItem(program *compiler.Program, checker *compiler.Checker, item
 		return nil
 	}
 	text := sourceFile.AsSourceFile().Text
-	lineStarts := compiler.ComputeLineStarts(text)
+	lineStarts := sourceFile.AsSourceFile().LineStarts()
 	offset := compiler.GetPositionOfLineAndCharacter(text, lineStarts, item.SelectionRange.Start.Line, item.SelectionRange.Start.Character)
 	id := compiler.GetIdentifierAtPosition(sourceFile, offset)
 	if id == nil {

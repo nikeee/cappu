@@ -267,6 +267,42 @@ export function findUnusedImports(sourceFile: SourceFile): ImportDeclaration[] {
   return unused;
 }
 
+// Lookup tables for getSemanticDiagnostics, hoisted so they are not rebuilt per file.
+const NARROWING_RANGE: Record<string, readonly [bigint, bigint]> = {
+  byte: [-128n, 127n],
+  short: [-32768n, 32767n],
+  char: [0n, 65535n],
+};
+const FORMAT_METHODS = new Map<string, { fmtIsReceiver: boolean }>([
+  ["java.lang.String#format", { fmtIsReceiver: false }],
+  ["java.lang.String#formatted", { fmtIsReceiver: true }],
+  ["java.io.PrintStream#format", { fmtIsReceiver: false }],
+  ["java.io.PrintStream#printf", { fmtIsReceiver: false }],
+  ["java.io.PrintWriter#format", { fmtIsReceiver: false }],
+  ["java.io.PrintWriter#printf", { fmtIsReceiver: false }],
+  ["java.io.Console#format", { fmtIsReceiver: false }],
+  ["java.io.Console#printf", { fmtIsReceiver: false }],
+  ["java.util.Formatter#format", { fmtIsReceiver: false }],
+]);
+const REGEX_METHODS = new Set([
+  "java.util.regex.Pattern#compile",
+  "java.util.regex.Pattern#matches",
+  "java.lang.String#matches",
+  "java.lang.String#split",
+  "java.lang.String#replaceAll",
+  "java.lang.String#replaceFirst",
+]);
+const PARSE_METHODS = new Map<string, string>([
+  ["java.lang.Integer#parseInt", "int"],
+  ["java.lang.Integer#valueOf", "int"],
+  ["java.lang.Long#parseLong", "long"],
+  ["java.lang.Long#valueOf", "long"],
+  ["java.lang.Short#parseShort", "short"],
+  ["java.lang.Short#valueOf", "short"],
+  ["java.lang.Byte#parseByte", "byte"],
+  ["java.lang.Byte#valueOf", "byte"],
+]);
+
 export function createChecker(program: Program, nullness?: NullnessOptions): Checker {
   const symbolTypes = new WeakMap<Symbol, Type>();
   const expressionTypes = new WeakMap<Node, Type>();
@@ -2298,11 +2334,6 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
     // fits. constfold does not resolve constant variables (final x = ...), so an
     // unfoldable value in the constant-narrowing position stays silent rather
     // than risking a false positive; everything else is a definite error.
-    const NARROWING_RANGE: Record<string, readonly [bigint, bigint]> = {
-      byte: [-128n, 127n],
-      short: [-32768n, 32767n],
-      char: [0n, 65535n],
-    };
     const checkPrimitiveAssignment = (valueNode: Node, value: string, target: string): void => {
       if (value === target || primitiveWidens(value, target)) return;
       const range = NARROWING_RANGE[target];
@@ -2509,17 +2540,6 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
     // so a wrong argument count or type is arity-valid against the declaration
     // yet throws at runtime. When the format string is a literal we parse its
     // conversion specifiers and warn - staying silent on anything unprovable.
-    const FORMAT_METHODS = new Map<string, { fmtIsReceiver: boolean }>([
-      ["java.lang.String#format", { fmtIsReceiver: false }],
-      ["java.lang.String#formatted", { fmtIsReceiver: true }],
-      ["java.io.PrintStream#format", { fmtIsReceiver: false }],
-      ["java.io.PrintStream#printf", { fmtIsReceiver: false }],
-      ["java.io.PrintWriter#format", { fmtIsReceiver: false }],
-      ["java.io.PrintWriter#printf", { fmtIsReceiver: false }],
-      ["java.io.Console#format", { fmtIsReceiver: false }],
-      ["java.io.Console#printf", { fmtIsReceiver: false }],
-      ["java.util.Formatter#format", { fmtIsReceiver: false }],
-    ]);
     const argTypeDescriptor = (t: Type): ArgTypeDescriptor | undefined => {
       if (t.kind === TypeKind.Primitive) return { primitive: t.name };
       if (t.kind === TypeKind.Class) return { fqn: fqnOf(t) };
@@ -2635,14 +2655,6 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
     // A malformed literal regex throws PatternSyntaxException at runtime; we
     // flag only the provably-broken ones (see validateRegex). The regex is
     // argument 0 for every method here.
-    const REGEX_METHODS = new Set([
-      "java.util.regex.Pattern#compile",
-      "java.util.regex.Pattern#matches",
-      "java.lang.String#matches",
-      "java.lang.String#split",
-      "java.lang.String#replaceAll",
-      "java.lang.String#replaceFirst",
-    ]);
     const checkRegexCall = (call: CallExpression): void => {
       const target = memberCallTarget(call);
       if (!target || !REGEX_METHODS.has(`${target.fqn}#${target.name}`)) return;
@@ -2700,16 +2712,6 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
     // A non-parseable literal or an out-of-range radix throws
     // NumberFormatException. The string is argument 0; a second numeric-literal
     // argument, when present, is the radix.
-    const PARSE_METHODS = new Map<string, string>([
-      ["java.lang.Integer#parseInt", "int"],
-      ["java.lang.Integer#valueOf", "int"],
-      ["java.lang.Long#parseLong", "long"],
-      ["java.lang.Long#valueOf", "long"],
-      ["java.lang.Short#parseShort", "short"],
-      ["java.lang.Short#valueOf", "short"],
-      ["java.lang.Byte#parseByte", "byte"],
-      ["java.lang.Byte#valueOf", "byte"],
-    ]);
     const checkNumberParseCall = (call: CallExpression): void => {
       const target = memberCallTarget(call);
       if (!target) return;

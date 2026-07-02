@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/nikeee/cappu/internal/httpx"
 )
@@ -37,6 +38,12 @@ type MavenRepositorySource struct {
 	seen     map[CoordinateString]bool
 	// pomText holds the raw POM text as fetched (for GetPom), keyed by coords.
 	pomText map[CoordinateString]string
+	// mu guards the cache maps: ResolveTransitive prefetches a BFS level with
+	// concurrent goroutines, all hitting the same source.
+	mu sync.Mutex
+	// versions holds published versions per "group:artifact" (maven-metadata.xml
+	// is fetched once per coordinate).
+	versions map[string][]string
 }
 
 // NewMavenRepositorySource builds a source for baseURL using HTTP fetchers.
@@ -56,6 +63,7 @@ func NewMavenRepositorySourceWithFetchers(baseURL, searchURL string, fetchText F
 		pomCache:   map[CoordinateString]*RawPom{},
 		seen:       map[CoordinateString]bool{},
 		pomText:    map[CoordinateString]string{},
+		versions:   map[string][]string{},
 	}
 }
 
@@ -151,11 +159,25 @@ func (s *MavenRepositorySource) Search(query string) ([]SearchHit, error) {
 
 // ListVersions returns all versions from maven-metadata.xml, oldest first.
 func (s *MavenRepositorySource) ListVersions(groupID, artifactID string) ([]string, error) {
-	text, found, err := s.fetchText(s.repositoryURL(artifactPath(groupID, artifactID), "maven-metadata.xml"))
-	if err != nil || !found {
-		return nil, err
+	key := groupID + ":" + artifactID
+	s.mu.Lock()
+	cached, ok := s.versions[key]
+	s.mu.Unlock()
+	if ok {
+		return cached, nil
 	}
-	return parseMetadataVersions(text), nil
+	text, found, err := s.fetchText(s.repositoryURL(artifactPath(groupID, artifactID), "maven-metadata.xml"))
+	if err != nil {
+		return nil, err // a transport error is not cached; a retry may succeed
+	}
+	var parsed []string
+	if found {
+		parsed = parseMetadataVersions(text)
+	}
+	s.mu.Lock()
+	s.versions[key] = parsed
+	s.mu.Unlock()
+	return parsed, nil
 }
 
 // GetArtifact returns the package's jar bytes, or nil for a miss.
@@ -198,11 +220,21 @@ func (s *MavenRepositorySource) getMetadata(c Coordinates) (*PackageMetadata, bo
 
 const parentChainLimit = 16 // generous; real chains are 2-4 deep
 
+// cachedPom returns the cached parse for key, with ok=false on a cache miss.
+func (s *MavenRepositorySource) cachedPom(key CoordinateString) (*RawPom, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.seen[key] {
+		return s.pomCache[key], true
+	}
+	return nil, false
+}
+
 // rawPom fetches and parses one POM (cached; nil = known miss).
 func (s *MavenRepositorySource) rawPom(c Coordinates) (*RawPom, error) {
 	key := c.String()
-	if s.seen[key] {
-		return s.pomCache[key], nil
+	if pom, ok := s.cachedPom(key); ok {
+		return pom, nil
 	}
 	text, found, err := s.fetchText(s.repositoryURL(
 		artifactPath(string(c.GroupID), string(c.ArtifactID)),
@@ -212,6 +244,8 @@ func (s *MavenRepositorySource) rawPom(c Coordinates) (*RawPom, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.seen[key] = true
 	if !found {
 		s.pomCache[key] = nil
@@ -227,12 +261,14 @@ func (s *MavenRepositorySource) rawPom(c Coordinates) (*RawPom, error) {
 // GetMetadata has already run this is served from memory without a second fetch.
 func (s *MavenRepositorySource) GetPom(c Coordinates) ([]byte, error) {
 	key := c.String()
-	if !s.seen[key] {
+	if _, ok := s.cachedPom(key); !ok {
 		if _, err := s.rawPom(c); err != nil {
 			return nil, err
 		}
 	}
+	s.mu.Lock()
 	text, ok := s.pomText[key]
+	s.mu.Unlock()
 	if !ok {
 		return nil, nil
 	}

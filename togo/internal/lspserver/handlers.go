@@ -18,7 +18,7 @@ func (s *Server) onDocumentSymbol(params json.RawMessage) (any, *lsp.ResponseErr
 	if sourceFile == nil {
 		return []lsp.DocumentSymbol{}, nil
 	}
-	return services.GetDocumentSymbols(sourceFile, compiler.ComputeLineStarts(sourceFile.AsSourceFile().Text)), nil
+	return services.GetDocumentSymbols(sourceFile, sourceFile.AsSourceFile().LineStarts()), nil
 }
 
 func (s *Server) onReferences(params json.RawMessage) (any, *lsp.ResponseError) {
@@ -176,7 +176,7 @@ func (s *Server) onCodeAction(params json.RawMessage) (any, *lsp.ResponseError) 
 		return []lsp.CodeAction{}, nil
 	}
 	text := sourceFile.AsSourceFile().Text
-	lineStarts := compiler.ComputeLineStarts(text)
+	lineStarts := sourceFile.AsSourceFile().LineStarts()
 	start := compiler.GetPositionOfLineAndCharacter(text, lineStarts, p.Range.Start.Line, p.Range.Start.Character)
 	end := compiler.GetPositionOfLineAndCharacter(text, lineStarts, p.Range.End.Line, p.Range.End.Character)
 	var out []lsp.CodeAction
@@ -294,7 +294,7 @@ func (s *Server) onWorkspaceSymbol(params json.RawMessage) (any, *lsp.ResponseEr
 		if sourceFile == nil {
 			continue
 		}
-		lineStarts := compiler.ComputeLineStarts(sourceFile.AsSourceFile().Text)
+		lineStarts := sourceFile.AsSourceFile().LineStarts()
 		flatten(string(uri), services.GetDocumentSymbols(sourceFile, lineStarts), "")
 		if len(results) >= 256 {
 			break
@@ -360,7 +360,7 @@ func (s *Server) onFoldingRange(params json.RawMessage) (any, *lsp.ResponseError
 		return nil, nil
 	}
 	text := sourceFile.AsSourceFile().Text
-	lineStarts := compiler.ComputeLineStarts(text)
+	lineStarts := sourceFile.AsSourceFile().LineStarts()
 	lineAt := func(offset int) int { return compiler.GetLineAndCharacterOfPosition(text, lineStarts, offset).Line }
 	var ranges []lsp.FoldingRange
 	var visit compiler.Visitor
@@ -508,7 +508,7 @@ func (s *Server) onInlayHint(params json.RawMessage) (any, *lsp.ResponseError) {
 		return []lsp.InlayHint{}, nil
 	}
 	text := sourceFile.AsSourceFile().Text
-	lineStarts := compiler.ComputeLineStarts(text)
+	lineStarts := sourceFile.AsSourceFile().LineStarts()
 	start := compiler.GetPositionOfLineAndCharacter(text, lineStarts, p.Range.Start.Line, p.Range.Start.Character)
 	end := compiler.GetPositionOfLineAndCharacter(text, lineStarts, p.Range.End.Line, p.Range.End.Character)
 	var out []lsp.InlayHint
@@ -535,7 +535,7 @@ func (s *Server) onSemanticTokens(params json.RawMessage) (any, *lsp.ResponseErr
 		return lsp.SemanticTokens{Data: []uint{}}, nil
 	}
 	text := sourceFile.AsSourceFile().Text
-	lineStarts := compiler.ComputeLineStarts(text)
+	lineStarts := sourceFile.AsSourceFile().LineStarts()
 	var data []uint
 	prevLine, prevChar := 0, 0
 	for _, t := range services.GetSemanticTokens(s.checker, sourceFile) {

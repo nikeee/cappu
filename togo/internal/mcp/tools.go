@@ -88,7 +88,7 @@ func pathToURI(path string) compiler.URI {
 // nodeLocation reports a node's name location (skipping leading trivia).
 func nodeLocation(node *compiler.Node) McpLocation {
 	file := compiler.GetSourceFileOfNode(node).AsSourceFile()
-	lineStarts := compiler.ComputeLineStarts(file.Text)
+	lineStarts := file.LineStarts()
 	start := compiler.GetLineAndCharacterOfPosition(file.Text, lineStarts, compiler.SkipTrivia(file.Text, node.Pos))
 	end := compiler.GetLineAndCharacterOfPosition(file.Text, lineStarts, node.End)
 	return McpLocation{
@@ -144,7 +144,7 @@ func (t *Tools) Diagnostics(files []string) []McpDiagnostic {
 			continue
 		}
 		data := sourceFile.AsSourceFile()
-		lineStarts := compiler.ComputeLineStarts(data.Text)
+		lineStarts := data.LineStarts()
 		all := append(append(append([]compiler.Diagnostic{}, data.ParseDiagnostics...), data.BindDiagnostics...), t.checker.GetSemanticDiagnostics(sourceFile)...)
 		for _, d := range all {
 			out = append(out, formatDiagnostic(string(uri), d, data.Text, lineStarts))
@@ -185,7 +185,7 @@ func (t *Tools) DeprecatedUses(files []string) []McpDeprecatedUse {
 			continue
 		}
 		data := sourceFile.AsSourceFile()
-		lineStarts := compiler.ComputeLineStarts(data.Text)
+		lineStarts := data.LineStarts()
 		for _, u := range t.checker.GetDeprecatedUses(sourceFile) {
 			start := compiler.GetLineAndCharacterOfPosition(data.Text, lineStarts, u.Pos)
 			end := compiler.GetLineAndCharacterOfPosition(data.Text, lineStarts, u.End)
@@ -221,7 +221,7 @@ func (t *Tools) Outline(file string) []lsp.DocumentSymbol {
 	if sourceFile == nil {
 		return []lsp.DocumentSymbol{}
 	}
-	return services.GetDocumentSymbols(sourceFile, compiler.ComputeLineStarts(sourceFile.AsSourceFile().Text))
+	return services.GetDocumentSymbols(sourceFile, sourceFile.AsSourceFile().LineStarts())
 }
 
 // SearchSymbols matches type FQNs case-insensitively by substring.
