@@ -27,33 +27,37 @@ func NewFramer(r io.Reader, w io.Writer) *Framer {
 	return &Framer{r: bufio.NewReader(r), w: w}
 }
 
-// Read returns the body bytes of the next framed message.
+// Read returns the body bytes of the next framed message. A header block
+// without a (valid) Content-Length is dropped and reading resyncs on the next
+// block, matching the TS transport (and vscode-jsonrpc) instead of killing the
+// session.
 func (f *Framer) Read() ([]byte, error) {
-	length := -1
 	for {
-		line, err := f.r.ReadString('\n')
-		if err != nil {
-			return nil, err
-		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			break // end of headers
-		}
-		if name, value, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(name), "Content-Length") {
-			length, err = strconv.Atoi(strings.TrimSpace(value))
+		length := -1
+		for {
+			line, err := f.r.ReadString('\n')
 			if err != nil {
-				return nil, fmt.Errorf("invalid Content-Length: %w", err)
+				return nil, err
+			}
+			line = strings.TrimRight(line, "\r\n")
+			if line == "" {
+				break // end of headers
+			}
+			if name, value, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(name), "Content-Length") {
+				if n, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
+					length = n
+				}
 			}
 		}
+		if length < 0 {
+			continue // bad header block: resync
+		}
+		buf := make([]byte, length)
+		if _, err := io.ReadFull(f.r, buf); err != nil {
+			return nil, err
+		}
+		return buf, nil
 	}
-	if length < 0 {
-		return nil, fmt.Errorf("missing Content-Length header")
-	}
-	buf := make([]byte, length)
-	if _, err := io.ReadFull(f.r, buf); err != nil {
-		return nil, err
-	}
-	return buf, nil
 }
 
 // Write frames and writes body. Safe for concurrent callers.

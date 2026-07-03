@@ -144,3 +144,22 @@ test("an event with no body omits the body field", async () => {
   assert.equal(a.event, "initialized");
   assert.equal("body" in a, false);
 });
+
+test("a malformed frame in a chunk does not stall the valid request behind it", async () => {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const conn = new DapConnection(input, output);
+  conn.onRequest("ping", (args: any) => ({ n: args.n }));
+  void conn.run();
+
+  const responses = collect(output, 1);
+  const bad = "Content-Length: 8\r\n\r\nnot-json";
+  const noLength = "X-Other: 1\r\n\r\n";
+  input.write(
+    bad + noLength + frame({ seq: 3, type: "request", command: "ping", arguments: { n: 5 } }),
+  );
+
+  const [resp] = await responses;
+  assert.equal(resp.success, true);
+  assert.equal(resp.body.n, 5);
+});

@@ -356,7 +356,16 @@ export function runCheck(files: string[], config: CappuConfig): CompileDiagnosti
   const program = createProgram();
   installJdkTypes(program, config);
   loadConfiguredPaths(program, config);
-  for (const file of files) program.addProjectFile(pathToUri(file), readFileSync(file, "utf8"));
+  for (const file of files) {
+    let text: string;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch (e) {
+      // Match the Go build: an unreadable input is a clean diagnostic, not a crash.
+      return [{ severity: "error", file, message: (e as Error).message }];
+    }
+    program.addProjectFile(pathToUri(file), text);
+  }
   const checker = createChecker(program, config.compilerOptions.nullness);
 
   const diagnostics: CompileDiagnostic[] = [];

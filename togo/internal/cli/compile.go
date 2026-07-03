@@ -80,10 +80,19 @@ func RunCompile(files []string, outputFlag, artifact string, quiet bool, cfg *co
 		for _, f := range result.Written {
 			if strings.HasSuffix(f, ".jar") {
 				pomPath := strings.TrimSuffix(f, ".jar") + ".pom"
-				if pom, err := publish.GeneratePom(cfg); err == nil {
-					if os.WriteFile(pomPath, []byte(pom), 0o644) == nil && !quiet {
-						fmt.Fprintln(os.Stdout, pomPath)
-					}
+				pom, perr := publish.GeneratePom(cfg)
+				if perr == nil {
+					perr = os.WriteFile(pomPath, []byte(pom), 0o644)
+				}
+				if perr != nil {
+					// A missing POM beside a publishable jar must not pass
+					// silently (matches the TS build's failure here).
+					fmt.Fprintf(os.Stderr, "cappu: %s\n", perr)
+					emitAnnotation("error", perr.Error(), AnnotationLocation{})
+					return 1
+				}
+				if !quiet {
+					fmt.Fprintln(os.Stdout, pomPath)
 				}
 				break
 			}
@@ -130,12 +139,15 @@ func RunCompile(files []string, outputFlag, artifact string, quiet bool, cfg *co
 }
 
 // renderDiagnostics prints compile diagnostics to stderr as
-// `file:line:col code: severity: message`.
+// `file:line:col: severity code: message`.
 func renderDiagnostics(diagnostics []compile.CompileDiagnostic) {
 	for _, d := range diagnostics {
 		location := ""
 		if d.File != "" {
-			location = d.File + ":" + strconv.Itoa(d.Line)
+			location = d.File
+			if d.Line != 0 {
+				location += ":" + strconv.Itoa(d.Line)
+			}
 			if d.Column != 0 {
 				location += ":" + strconv.Itoa(d.Column)
 			}

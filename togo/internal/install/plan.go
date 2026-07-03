@@ -82,8 +82,13 @@ var prerelease = regexp.MustCompile(`(?i)(?:^|[-._])(?:alpha|beta|rc|cr|snapshot
 func isStableVersion(version string) bool { return !prerelease.MatchString(version) }
 
 // majorOf is the leading (major) component, for the no-major-bump rule.
+// Prefix-up-to-separator like the TS split (so "-beta" or "." yields ""),
+// never a panic on separator-only versions from a repository.
 func majorOf(version string) string {
-	return strings.FieldsFunc(version, func(r rune) bool { return r == '.' || r == '+' || r == '-' })[0]
+	if i := strings.IndexAny(version, ".+-"); i >= 0 {
+		return version[:i]
+	}
+	return version
 }
 
 // PlanUpdates returns the newest STABLE version each declared dependency can

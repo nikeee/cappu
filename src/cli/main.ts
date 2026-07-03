@@ -183,7 +183,7 @@ const COMMAND_GROUPS: HelpGroup[] = [
       },
       {
         name: "self-upgrade",
-        desc: "Replace this binary with the latest CD build (needs GITHUB_TOKEN or `gh auth login`)",
+        desc: "Replace this binary with the latest CD build",
       },
       {
         name: "rage",
@@ -206,7 +206,7 @@ const OPTION_GROUPS: HelpGroup[] = [
     rows: [
       {
         name: "-c, --config <file>",
-        desc: 'Project config (default: ./cappu.json, JSONC). Sections: "compilerOptions" (classPath, sourcePaths, quiet, experimentalCompiler) and "lspOptions" (inlayHints). Command-line flags take precedence.',
+        desc: 'Project config (default: ./cappu.json, JSONC). Sections: "compilerOptions" (classPath, sourcePaths, experimentalCompiler) and "lspOptions" (inlayHints). Command-line flags take precedence.',
       },
     ],
   },

@@ -96,7 +96,15 @@ export async function runCompileCommand(
     const jar = result.written.find(f => f.endsWith(".jar"));
     if (jar) {
       const pomPath = jar.replace(/\.jar$/, ".pom");
-      writeFileSync(pomPath, generatePom(config));
+      try {
+        writeFileSync(pomPath, generatePom(config));
+      } catch (e) {
+        // A missing POM beside a publishable jar must not crash with a stack
+        // trace (matches the Go build's clean failure here).
+        process.stderr.write(`cappu: ${(e as Error).message}\n`);
+        emitAnnotation("error", (e as Error).message);
+        process.exit(1);
+      }
       if (!quiet) process.stdout.write(`${pomPath}\n`);
     }
   }

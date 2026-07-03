@@ -15,9 +15,6 @@ import (
 // dependencies (pinned in cappu-lock.json), then render the result - jars
 // written, version conflicts (warnings), unresolvable packages (errors). Port
 // of src/cli/install.ts.
-//
-// JDK provisioning (the config "jdk" entry) is NOT yet ported; install prints a
-// notice and otherwise proceeds. See internal/jdks in the Node build.
 func RunInstall(cfg *config.Config, verbose, locked bool) int {
 	// --locked (CI): fail before downloading anything if the lock is stale or
 	// missing relative to cappu.json.
@@ -48,7 +45,8 @@ func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 		OnResolve: func(current packages.CoordinateString) {
 			if showProgress {
 				resolving++
-				fmt.Fprintf(os.Stderr, "\r\x1b[2Kresolving %d %s", resolving, current)
+				fmt.Fprintf(os.Stderr, "\r\x1b[2K%s %s %s",
+					errp("cyan", "resolving"), errp("bold", fmt.Sprintf("%d", resolving)), errp("dim", string(current)))
 			}
 		},
 		OnProgress: func(done, total int, current packages.CoordinateString) {
@@ -71,7 +69,8 @@ func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 	}
 	bar.stop()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
+		// Same rendering as the TS build's catch around installDependencies.
+		fmt.Fprintf(os.Stderr, "%s %s\n", errp("red", "error:"), err)
 		emitAnnotation("error", err.Error(), AnnotationLocation{})
 		return 1
 	}

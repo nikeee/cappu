@@ -5,6 +5,7 @@ package lspserver
 
 import (
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,18 +21,25 @@ var skipDirs = map[string]bool{
 	"node_modules": true, ".git": true, "target": true, "build": true, "out": true, "bin": true,
 }
 
-// pathToURI converts an absolute filesystem path to a file:// URI.
+// pathToURI converts an absolute filesystem path to a file:// URI,
+// percent-encoding like Node's pathToFileURL (spaces, non-ASCII).
 func pathToURI(path FsPath) compiler.URI {
 	abs, err := filepath.Abs(string(path))
 	if err != nil {
 		abs = string(path)
 	}
-	return compiler.URI("file://" + filepath.ToSlash(abs))
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}
+	return compiler.URI(u.String())
 }
 
-// uriToPath converts a file:// URI back to a filesystem path.
+// uriToPath converts a file:// URI back to a filesystem path,
+// percent-decoding like Node's fileURLToPath.
 func uriToPath(uri compiler.URI) FsPath {
-	return FsPath(strings.TrimPrefix(string(uri), "file://"))
+	u, err := url.Parse(string(uri))
+	if err != nil || u.Scheme != "file" {
+		return FsPath(strings.TrimPrefix(string(uri), "file://"))
+	}
+	return FsPath(u.Path)
 }
 
 // findJavaFiles recursively collects .java file paths under dir, skipping build dirs.

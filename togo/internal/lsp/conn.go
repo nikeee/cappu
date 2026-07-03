@@ -38,6 +38,15 @@ type Conn struct {
 	requests map[string]RequestHandler
 	notifs   map[string]NotificationHandler
 	nextID   int
+	stopped  bool
+	stopErr  error
+}
+
+// Stop makes Run return err after the current message is dispatched. Handlers
+// use it to terminate the read loop (e.g. the LSP `exit` notification).
+func (c *Conn) Stop(err error) {
+	c.stopped = true
+	c.stopErr = err
 }
 
 // NewConn creates a connection reading from r and writing to w.
@@ -131,6 +140,9 @@ func (c *Conn) Run() error {
 			c.dispatchRequest(msg)
 		} else if h, ok := c.notifs[msg.Method]; ok {
 			h(msg.Params)
+		}
+		if c.stopped {
+			return c.stopErr
 		}
 	}
 }

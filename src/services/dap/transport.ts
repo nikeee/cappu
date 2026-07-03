@@ -74,13 +74,16 @@ export class DapConnection {
     this.buffer = Buffer.concat([this.buffer, chunk]);
     for (;;) {
       const message = this.tryRead();
-      if (!message) break;
+      // null = need more bytes; "skip" = a malformed frame was consumed, so a
+      // complete message queued behind it must still be dispatched now.
+      if (message === null) break;
+      if (message === "skip") continue;
       this.dispatch(message);
     }
   }
 
   // Pull one complete Content-Length-framed message off the buffer.
-  private tryRead(): DapRequest | null {
+  private tryRead(): DapRequest | "skip" | null {
     const sep = this.buffer.indexOf("\r\n\r\n");
     if (sep < 0) return null;
     const header = this.buffer.toString("ascii", 0, sep);
@@ -88,7 +91,7 @@ export class DapConnection {
     if (!match) {
       // Unrecoverable framing: drop the bad header and resync.
       this.buffer = this.buffer.subarray(sep + 4);
-      return null;
+      return "skip";
     }
     const length = Number(match[1]);
     const start = sep + 4;
@@ -98,7 +101,7 @@ export class DapConnection {
     try {
       return JSON.parse(body) as DapRequest;
     } catch {
-      return null;
+      return "skip";
     }
   }
 

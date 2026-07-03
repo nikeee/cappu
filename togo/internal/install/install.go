@@ -65,6 +65,7 @@ type outcome struct {
 	noArtifact string
 	integrity  string
 	fromStore  string
+	err        error // transport/disk failure: fatal, like the TS build's throw
 }
 
 // CheckLocked reports whether cappu-lock.json is consistent with cappu.json for
@@ -149,13 +150,16 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 	var progressMu sync.Mutex
 	fetchOne := func(pkg pending, dir string) outcome {
 		id := string(pkg.coordinates.String())
-		bytes, cached, found := artifactFrom(srcs, pkg.source, pkg.coordinates)
+		bytes, cached, found, ferr := artifactFrom(srcs, pkg.source, pkg.coordinates)
 		progressMu.Lock()
 		progressed++
 		if opts.OnProgress != nil {
 			opts.OnProgress(progressed, total, pkg.coordinates.String())
 		}
 		progressMu.Unlock()
+		if ferr != nil {
+			return outcome{err: ferr}
+		}
 		if !found {
 			return outcome{noArtifact: id}
 		}
@@ -177,10 +181,10 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 		stored, storeOK := StorePathFor(pkg.coordinates)
 		if _, err := os.Stat(stored); storeOK && err == nil {
 			if err := copyfile.Materialize(stored, file); err != nil {
-				return outcome{noArtifact: id}
+				return outcome{err: err}
 			}
 		} else if err := os.WriteFile(file, bytes, 0o644); err != nil {
-			return outcome{noArtifact: id}
+			return outcome{err: err}
 		}
 		locked := lockfile.NewLockedPackage(pkg.coordinates, string(pkg.source), digest, pkg.licenses)
 		o := outcome{locked: &locked, installed: file}
@@ -199,7 +203,8 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 		}
 		// Each package is independent, so the set is fetched with bounded
 		// concurrency; results are written by index to keep input order
-		// (the lock and result lists stay deterministic). fetchOne never errors.
+		// (the lock and result lists stay deterministic). A transport or disk
+		// failure is fatal for the whole install, like the TS build's throw.
 		outcomes := make([]outcome, len(set))
 		var g errgroup.Group
 		g.SetLimit(downloadConcurrency)
@@ -210,6 +215,11 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 			})
 		}
 		_ = g.Wait()
+		for _, o := range outcomes {
+			if o.err != nil {
+				return nil, o.err
+			}
+		}
 		return outcomes, nil
 	}
 
@@ -288,18 +298,23 @@ func (r *Result) assemble(outcomes []outcome, groupInstalled *[]string) []lockfi
 }
 
 // artifactFrom returns a package's jar bytes: the store first (no network),
-// then the sources (the one that resolved it first). cached reports a store hit.
-func artifactFrom(srcs []packages.PackageSource, preferred packages.SourceName, c packages.Coordinates) (bytes []byte, cached bool, found bool) {
+// then the sources (the one that resolved it first). cached reports a store
+// hit. A transport error aborts immediately (the TS build's getArtifact throw
+// propagates) instead of being misreported as "source provided no jar".
+func artifactFrom(srcs []packages.PackageSource, preferred packages.SourceName, c packages.Coordinates) (bytes []byte, cached bool, found bool, err error) {
 	storePath, storeOK := StorePathFor(c)
 	if storeOK {
-		if data, err := os.ReadFile(storePath); err == nil {
-			return data, true, true
+		if data, rerr := os.ReadFile(storePath); rerr == nil {
+			return data, true, true, nil
 		}
 	}
 	ordered := orderPreferred(srcs, preferred)
 	for _, source := range ordered {
-		data, err := source.GetArtifact(c)
-		if err == nil && data != nil {
+		data, gerr := source.GetArtifact(c)
+		if gerr != nil {
+			return nil, false, false, gerr
+		}
+		if data != nil {
 			if storeOK {
 				if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err == nil {
 					_ = os.WriteFile(storePath, data, 0o644) // a read-only store never fails the install
@@ -308,10 +323,10 @@ func artifactFrom(srcs []packages.PackageSource, preferred packages.SourceName, 
 					_ = os.WriteFile(storePath+".sha256", []byte(lockfile.Sha256Of(data)), 0o644)
 				}
 			}
-			return data, false, true
+			return data, false, true, nil
 		}
 	}
-	return nil, false, false
+	return nil, false, false, nil
 }
 
 func orderPreferred(srcs []packages.PackageSource, preferred packages.SourceName) []packages.PackageSource {

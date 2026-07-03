@@ -208,3 +208,20 @@ func TestPlanOutdatedEmptyWhenCurrent(t *testing.T) {
 		t.Errorf("expected no outdated rows, got %+v", rows)
 	}
 }
+
+func TestMajorOfEdgeCases(t *testing.T) {
+	// Prefix-up-to-separator, exactly like the TS `version.split(/[.+-]/)[0]`;
+	// separator-only or leading-separator versions must not panic.
+	for _, tc := range []struct{ version, want string }{
+		{"1.2.3", "1"},
+		{"2", "2"},
+		{".", ""},
+		{"-beta", ""},
+		{"1-SNAPSHOT", "1"},
+		{"", ""},
+	} {
+		if got := majorOf(tc.version); got != tc.want {
+			t.Errorf("majorOf(%q) = %q, want %q", tc.version, got, tc.want)
+		}
+	}
+}

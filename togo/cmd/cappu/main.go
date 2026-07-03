@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,7 +51,7 @@ type CLI struct {
 	Run          runCmd          `cmd:"" help:"Compile the project and run it on the JVM"`
 	Test         testCmd         `cmd:"" help:"Compile src/test/java and run JUnit"`
 	SelfUpgrade  selfUpgradeCmd  `cmd:"" name:"self-upgrade" help:"Replace this binary with the latest CD build"`
-	Rage         rageCmd         `cmd:"" help:"Open the issue tracker in your default browser"`
+	Rage         rageCmd         `cmd:"" help:"Print version/environment info and the issue tracker URL; --open also opens it in your browser"`
 	Cache        cacheCmd        `cmd:"" help:"Manage the global download cache"`
 	Lsp          lspCmd          `cmd:"" help:"Start the Java language server (JSON-RPC)"`
 	Mcp          mcpCmd          `cmd:"" help:"Start the MCP server for agents (over stdio)"`
@@ -305,7 +306,13 @@ func (c *runCmd) Run(a *appState) error {
 	if err != nil {
 		return err
 	}
-	return exit(cli.RunRun(c.Args, cfg))
+	// kong's passthrough keeps the literal "--" separator; the TS parser
+	// (parseArgs) strips it, so drop it for arg parity with `run -- x`.
+	args := c.Args
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
+	return exit(cli.RunRun(args, cfg))
 }
 
 type selfUpgradeCmd struct{}
@@ -340,45 +347,72 @@ type lspCmd struct {
 }
 
 func (c *lspCmd) Run(a *appState) error {
-	// Config is optional: a malformed/absent cappu.json simply means the server
-	// runs with the JDK stub and any open documents only.
+	// Absent cappu.json is fine (JDK stub + open documents only); a malformed
+	// one is fatal before serving, like the TS CLI (src/cli/main.ts).
 	cfg, err := a.config()
 	if err != nil {
-		cfg = nil
+		return err
 	}
 	if c.Port != "" {
-		ln, lerr := net.Listen("tcp", "127.0.0.1:"+c.Port)
-		if lerr != nil {
-			fmt.Fprintln(os.Stderr, "cappu:", lerr)
-			return exit(1)
+		conn, cerr := acceptOne("lsp", c.Port)
+		if cerr != nil {
+			return cerr
 		}
-		conn, aerr := ln.Accept()
-		if aerr != nil {
-			fmt.Fprintln(os.Stderr, "cappu:", aerr)
-			return exit(1)
-		}
-		if serr := lspserver.NewServer(cfg).Run(conn, conn); serr != nil {
-			fmt.Fprintln(os.Stderr, "cappu:", serr)
-			return exit(1)
-		}
+		defer func() { _ = conn.Close() }()
+		return lspExit(lspserver.NewServer(cfg).Run(conn, conn))
+	}
+	return lspExit(lspserver.Serve(cfg))
+}
+
+// acceptOne validates the port like the TS build (exit 2 on a non-numeric or
+// out-of-range value), listens on all interfaces, announces the bound port on
+// stderr (so -p 0 is usable), and returns the first accepted connection (one
+// session per process). Mirrors src/cli/lsp.ts / dap.ts.
+func acceptOne(name, portArg string) (net.Conn, error) {
+	port, perr := strconv.Atoi(portArg)
+	if perr != nil || port < 0 || port > 65535 {
+		fmt.Fprintf(os.Stderr, "cappu: invalid port '%s'\n", portArg)
+		return nil, cmdErr(2)
+	}
+	ln, lerr := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if lerr != nil {
+		fmt.Fprintln(os.Stderr, "cappu:", lerr)
+		return nil, cmdErr(1)
+	}
+	fmt.Fprintf(os.Stderr, "cappu %s listening on port %d\n", name, ln.Addr().(*net.TCPAddr).Port)
+	conn, aerr := ln.Accept()
+	_ = ln.Close()
+	if aerr != nil {
+		fmt.Fprintln(os.Stderr, "cappu:", aerr)
+		return nil, cmdErr(1)
+	}
+	return conn, nil
+}
+
+// lspExit maps the server result to the LSP exit-code contract:
+// exit-after-shutdown / EOF is 0, exit-without-shutdown is a silent 1
+// (vscode-languageserver behavior), anything else prints and exits 1.
+func lspExit(err error) error {
+	if err == nil {
 		return exit(0)
 	}
-	if serr := lspserver.Serve(cfg); serr != nil {
-		fmt.Fprintln(os.Stderr, "cappu:", serr)
-		return exit(1)
+	if errors.Is(err, lspserver.ErrExitWithoutShutdown) {
+		return cmdErr(1)
 	}
-	return exit(0)
+	fmt.Fprintln(os.Stderr, "cappu:", err)
+	return cmdErr(1)
 }
 
 // The MCP server (cli/mcp.ts, services/mcpServer.ts) exposes the Java semantic
-// engine to agents over stdio. A project config is optional (the project tools
-// need one; the semantic tools work with the JDK stub alone).
+// engine to agents over stdio. An absent project config is fine (the project
+// tools need one; the semantic tools work with the JDK stub alone), but a
+// malformed one is fatal before serving, like the TS CLI.
 type mcpCmd struct{}
 
 func (*mcpCmd) Run(a *appState) error {
 	cfg, err := a.config()
 	if err != nil {
-		cfg = nil
+		return err
 	}
 	if serr := mcp.Serve(cfg); serr != nil {
 		fmt.Fprintln(os.Stderr, "cappu:", serr)
@@ -397,19 +431,14 @@ type dapCmd struct {
 func (c *dapCmd) Run(a *appState) error {
 	cfg, err := a.config()
 	if err != nil {
-		cfg = nil
+		return err
 	}
 	if c.Port != "" {
-		ln, lerr := net.Listen("tcp", "127.0.0.1:"+c.Port)
-		if lerr != nil {
-			fmt.Fprintln(os.Stderr, "cappu:", lerr)
-			return exit(1)
+		conn, cerr := acceptOne("dap", c.Port)
+		if cerr != nil {
+			return cerr
 		}
-		conn, aerr := ln.Accept()
-		if aerr != nil {
-			fmt.Fprintln(os.Stderr, "cappu:", aerr)
-			return exit(1)
-		}
+		defer func() { _ = conn.Close() }()
 		if serr := dapserver.Run(cfg, conn, conn); serr != nil {
 			fmt.Fprintln(os.Stderr, "cappu:", serr)
 			return exit(1)

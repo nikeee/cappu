@@ -7,6 +7,7 @@ package lspserver
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -31,7 +32,15 @@ type Server struct {
 	packageSourceURL []string
 	packageSources   []packages.PackageSource
 	latestCache      map[string]latestEntry
+
+	initialized      bool // initialize request seen
+	shutdownReceived bool // shutdown request seen (exit code contract)
 }
+
+// ErrExitWithoutShutdown is returned by Run when the client sends `exit`
+// without a prior `shutdown`; the process must then exit 1 (LSP spec, matching
+// vscode-languageserver in the TS build).
+var ErrExitWithoutShutdown = errors.New("exit without shutdown")
 
 type latestEntry struct {
 	value string
@@ -126,7 +135,17 @@ func decode[T any](params json.RawMessage) T {
 
 func (s *Server) register() {
 	c := s.conn
-	c.OnRequest("initialize", s.onInitialize)
+	// Requests before `initialize` are rejected with ServerNotInitialized
+	// (-32002), matching vscode-languageserver in the TS build.
+	req := func(method string, h lsp.RequestHandler) {
+		c.OnRequest(method, func(params json.RawMessage) (any, *lsp.ResponseError) {
+			if !s.initialized && method != "initialize" {
+				return nil, &lsp.ResponseError{Code: -32002, Message: "server not initialized"}
+			}
+			return h(params)
+		})
+	}
+	req("initialize", s.onInitialize)
 	c.OnNotification("initialized", func(json.RawMessage) {
 		_ = c.Request("client/registerCapability", map[string]any{
 			"registrations": []map[string]any{{
@@ -143,30 +162,42 @@ func (s *Server) register() {
 	c.OnNotification("workspace/didChangeWatchedFiles", s.onDidChangeWatchedFiles)
 	c.OnNotification("workspace/didChangeConfiguration", s.onDidChangeConfiguration)
 
-	c.OnRequest("textDocument/documentSymbol", s.onDocumentSymbol)
-	c.OnRequest("textDocument/definition", s.onDefinition)
-	c.OnRequest("textDocument/typeDefinition", s.onTypeDefinition)
-	c.OnRequest("textDocument/references", s.onReferences)
-	c.OnRequest("textDocument/hover", s.onHover)
-	c.OnRequest("textDocument/completion", s.onCompletion)
-	c.OnRequest("textDocument/signatureHelp", s.onSignatureHelp)
-	c.OnRequest("textDocument/prepareRename", s.onPrepareRename)
-	c.OnRequest("textDocument/rename", s.onRename)
-	c.OnRequest("textDocument/codeAction", s.onCodeAction)
-	c.OnRequest("workspace/symbol", s.onWorkspaceSymbol)
-	c.OnRequest("textDocument/inlayHint", s.onInlayHint)
-	c.OnRequest("textDocument/documentHighlight", s.onDocumentHighlight)
-	c.OnRequest("textDocument/foldingRange", s.onFoldingRange)
-	c.OnRequest("textDocument/semanticTokens/full", s.onSemanticTokens)
-	c.OnRequest("textDocument/codeLens", s.onCodeLens)
-	c.OnRequest("textDocument/implementation", s.onImplementation)
-	c.OnRequest("textDocument/prepareTypeHierarchy", s.onPrepareTypeHierarchy)
-	c.OnRequest("typeHierarchy/supertypes", s.onTypeHierarchySupertypes)
-	c.OnRequest("typeHierarchy/subtypes", s.onTypeHierarchySubtypes)
-	c.OnRequest("textDocument/prepareCallHierarchy", s.onPrepareCallHierarchy)
-	c.OnRequest("callHierarchy/incomingCalls", s.onCallHierarchyIncoming)
-	c.OnRequest("callHierarchy/outgoingCalls", s.onCallHierarchyOutgoing)
-	c.OnRequest("shutdown", func(json.RawMessage) (any, *lsp.ResponseError) { return nil, nil })
+	req("textDocument/documentSymbol", s.onDocumentSymbol)
+	req("textDocument/definition", s.onDefinition)
+	req("textDocument/typeDefinition", s.onTypeDefinition)
+	req("textDocument/references", s.onReferences)
+	req("textDocument/hover", s.onHover)
+	req("textDocument/completion", s.onCompletion)
+	req("textDocument/signatureHelp", s.onSignatureHelp)
+	req("textDocument/prepareRename", s.onPrepareRename)
+	req("textDocument/rename", s.onRename)
+	req("textDocument/codeAction", s.onCodeAction)
+	req("workspace/symbol", s.onWorkspaceSymbol)
+	req("textDocument/inlayHint", s.onInlayHint)
+	req("textDocument/documentHighlight", s.onDocumentHighlight)
+	req("textDocument/foldingRange", s.onFoldingRange)
+	req("textDocument/semanticTokens/full", s.onSemanticTokens)
+	req("textDocument/codeLens", s.onCodeLens)
+	req("textDocument/implementation", s.onImplementation)
+	req("textDocument/prepareTypeHierarchy", s.onPrepareTypeHierarchy)
+	req("typeHierarchy/supertypes", s.onTypeHierarchySupertypes)
+	req("typeHierarchy/subtypes", s.onTypeHierarchySubtypes)
+	req("textDocument/prepareCallHierarchy", s.onPrepareCallHierarchy)
+	req("callHierarchy/incomingCalls", s.onCallHierarchyIncoming)
+	req("callHierarchy/outgoingCalls", s.onCallHierarchyOutgoing)
+	req("shutdown", func(json.RawMessage) (any, *lsp.ResponseError) {
+		s.shutdownReceived = true
+		return nil, nil
+	})
+	// `exit` terminates the read loop; exit code 0 only after `shutdown`
+	// (LSP spec), like vscode-languageserver's exit handler in the TS build.
+	c.OnNotification("exit", func(json.RawMessage) {
+		if s.shutdownReceived {
+			c.Stop(nil)
+		} else {
+			c.Stop(ErrExitWithoutShutdown)
+		}
+	})
 }
 
 func (s *Server) onInitialize(params json.RawMessage) (any, *lsp.ResponseError) {
@@ -178,6 +209,7 @@ func (s *Server) onInitialize(params json.RawMessage) (any, *lsp.ResponseError) 
 		_ = json.Unmarshal(p.InitializationOptions, &initOpts)
 	}
 	applyInlayHintSettings(&s.inlayHints, initOpts.InlayHints)
+	s.initialized = true
 
 	var roots []string
 	for _, f := range p.WorkspaceFolders {
