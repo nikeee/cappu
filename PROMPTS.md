@@ -511,3 +511,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-01 23:40 — now that we support output formats in testOptions, what about test coverage reports?
 - 2026-07-01 23:56 — review the entire go+ts source and check for perf gaining opportunities. do refactorings. check for correctness and for surprising behaviour
 - 2026-07-02 14:28 — analyze the every sub-command and look out for unexpected, wrong or diverging behaviour. fan out agents
+- 2026-07-04 01:38 — fix them

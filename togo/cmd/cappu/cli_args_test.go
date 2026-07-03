@@ -27,6 +27,11 @@ func TestCliArgValidationParity(t *testing.T) {
 		{"version bad release", []string{"version", "bogus"}, 2, "cappu: version needs one of: major, minor, patch"},
 		{"audit rejects --json", []string{"audit", "--json"}, 2, "cappu: `audit` uses --format (text|sarif), not --json"},
 		{"audit bad format", []string{"audit", "--format", "yaml"}, 2, "cappu: unknown --format 'yaml' (expected: text, sarif)"},
+		// Parse-level failures must match the TS contract (exit 2, one-liner
+		// with the help hint on stderr), not kong's usage dump + exit 80.
+		{"unknown flag", []string{"tree", "--bogus"}, 2, "Run `cappu --help` for usage."},
+		{"unknown command", []string{"frobnicate"}, 2, "Run `cappu --help` for usage."},
+		{"no args prints usage", nil, 2, "Usage: cappu"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

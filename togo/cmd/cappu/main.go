@@ -465,15 +465,32 @@ func (c *formatCmd) Run(a *appState) error {
 
 func main() {
 	var root CLI
-	ctx := kong.Parse(&root,
+	parser, err := kong.New(&root,
 		kong.Name("cappu"),
 		kong.Description("The Java language server, package manager and build toolchain of your dreams."),
-		kong.UsageOnError(),
 		kong.Vars{"version": meta.Version},
 	)
+	if err != nil {
+		panic(err)
+	}
+	args := os.Args[1:]
+	if len(args) == 0 {
+		// Match the TS build (src/cli/main.ts): no args prints usage to
+		// stdout and exits 2.
+		parser.Exit = func(int) {}
+		_, _ = parser.Parse([]string{"--help"})
+		os.Exit(2)
+	}
+	ctx, err := parser.Parse(args)
+	if err != nil {
+		// Match the TS build's parse-error contract (exit 2, one-liner on
+		// stderr) instead of kong's usage dump on stdout + exit 80.
+		fmt.Fprintf(os.Stderr, "cappu: %s\nRun `cappu --help` for usage.\n", err)
+		os.Exit(2)
+	}
 	app := &appState{configPath: root.Config}
 	start := time.Now()
-	err := ctx.Run(app)
+	err = ctx.Run(app)
 	// Print how long the dependency/build commands took, however they exit.
 	cli.PrintDurationFooter(ctx.Command(), time.Since(start))
 	var ce cmdErr
