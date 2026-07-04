@@ -101,13 +101,14 @@ func ask(base initAnswers) initAnswers {
 		ArtifactID: prompt("artifactId", base.ArtifactID, config.MavenID, "letters, digits, '.', '_' or '-' only"),
 		Version:    prompt("version", base.Version, config.Semver, "must be semver, e.g. 1.0.0"),
 	}
-	a.Output = promptOutput()
+	// The same reader: a second bufio.Reader would lose lines the first one
+	// already buffered (piped stdin arrives in one chunk).
+	a.Output = promptOutput(r)
 	return a
 }
 
 // promptOutput asks for the build output as a numbered choice (default fat-jar).
-func promptOutput() string {
-	r := bufio.NewReader(os.Stdin)
+func promptOutput(r *bufio.Reader) string {
 	options := []struct{ label, value string }{
 		{"application (fat-jar)", "fat-jar"},
 		{"library (jar)", "jar"},
@@ -171,7 +172,11 @@ func RunInit(configPath string, withSchema, yes bool) int {
 		config.DefaultSourcePath, config.DefaultResourcePath,
 		config.DefaultTestSourcePath, config.DefaultTestResourcePath,
 	} {
-		_ = os.MkdirAll(filepath.Join(projectDir, dir), 0o755)
+		if err := os.MkdirAll(filepath.Join(projectDir, dir), 0o755); err != nil {
+			// A failed layout dir is a warning, not a failure: cappu.json is
+			// already written and usable. Same as the TS build.
+			fmt.Fprintf(os.Stderr, "warning: could not create %s: %s\n", dir, err)
+		}
 	}
 
 	if err := writeNew(filepath.Join(projectDir, ".gitignore"), []byte(gitignoreTemplate)); err != nil {

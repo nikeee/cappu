@@ -15,6 +15,7 @@ import {
 } from "../audit/index.ts";
 import type { CappuConfig } from "../config.ts";
 import {
+  compareStrings,
   configuredRoots,
   configuredSources,
   planUpdates,
@@ -147,7 +148,7 @@ export function createProjectTools(config: CappuConfig, deps: ProjectToolDeps = 
         })),
         spdx: [...(p.metadata.licenseNormalized ?? [])],
       }))
-      .sort((a, b) => a.coordinate.localeCompare(b.coordinate));
+      .sort((a, b) => compareStrings(a.coordinate, b.coordinate));
     return { licenses: rows };
   }
 

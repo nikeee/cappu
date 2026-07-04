@@ -5,7 +5,13 @@
 // the resolving commands (install, audit) use for licenses with no SPDX id.
 
 import { type CappuConfig } from "../config.ts";
-import { configuredRoots, configuredSources, processorRoots, testRoots } from "../install.ts";
+import {
+  compareStrings,
+  configuredRoots,
+  configuredSources,
+  processorRoots,
+  testRoots,
+} from "../install.ts";
 import {
   coordinatesToString,
   normalizeLicense,
@@ -65,7 +71,7 @@ export async function runLicenses(
         spdx: normalizeLicense(l.name, l.url) ?? null,
       })),
     }))
-    .sort((a, b) => a.coordinate.localeCompare(b.coordinate));
+    .sort((a, b) => compareStrings(a.coordinate, b.coordinate));
 
   if (options.json) {
     // The project's own license appears in the human output; include it here too

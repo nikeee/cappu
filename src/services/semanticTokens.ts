@@ -160,7 +160,12 @@ export function getSemanticTokens(checker: Checker, sourceFile: SourceFile): Sem
             const start = skipTrivia(sourceFile.text, arg.pos);
             const length = arg.end - start;
             if (length > 0) {
-              entries.push({ offset: start, length, tokenType: TYPE_INDEX["regexp"]!, tokenModifiers: 0 });
+              entries.push({
+                offset: start,
+                length,
+                tokenType: TYPE_INDEX["regexp"]!,
+                tokenModifiers: 0,
+              });
             }
           }
         }

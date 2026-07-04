@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -53,5 +54,28 @@ func TestCliArgValidationParity(t *testing.T) {
 				t.Errorf("output missing %q:\n%s", tc.stderr, out)
 			}
 		})
+	}
+}
+
+// Piped init answers must all be honored - a second buffered reader used to
+// swallow the build-output choice (the first reader had already buffered it).
+func TestInitPipedAnswersHonored(t *testing.T) {
+	bin := cappu(t)
+	dir := t.TempDir()
+	cmd := exec.Command(bin, "init")
+	cmd.Dir = dir
+	cmd.Env = childEnv()
+	cmd.Stdin = strings.NewReader("org.demo\nmyapp\n2.0.0\n2\n")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	cfg, err := os.ReadFile(dir + "/cappu.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"groupId": "org.demo"`, `"artifactId": "myapp"`, `"version": "2.0.0"`, `"output": "jar"`} {
+		if !strings.Contains(string(cfg), want) {
+			t.Errorf("cappu.json missing %q:\n%s", want, cfg)
+		}
 	}
 }

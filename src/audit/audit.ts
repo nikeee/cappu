@@ -1,6 +1,7 @@
 // Audit the resolved dependency set against an AuditSource. Print-free: builds
 // an AuditReport the CLI renders.
 
+import { compareStrings } from "../install.ts";
 import { type Coordinates, coordinatesToString } from "../packages/index.ts";
 import {
   type Advisory,
@@ -52,7 +53,7 @@ export async function auditPackages(
     const byWorst = rank(worstSeverity(a.advisories)) - rank(worstSeverity(b.advisories));
     return byWorst !== 0
       ? byWorst
-      : coordinatesToString(a.coordinates).localeCompare(coordinatesToString(b.coordinates));
+      : compareStrings(coordinatesToString(a.coordinates), coordinatesToString(b.coordinates));
   });
 
   return { scanned: distinct.length, vulnerable, counts };

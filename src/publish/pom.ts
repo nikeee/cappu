@@ -9,6 +9,7 @@
 // left out of the POM entirely.
 
 import { type CappuConfig } from "../config.ts";
+import { compareStrings } from "../install.ts";
 
 const SCOPED_CONFIGS = [
   { key: "api", scope: undefined }, // compile is Maven's default - no <scope>
@@ -37,7 +38,9 @@ export function generatePom(config: CappuConfig): string {
 
   const dependencies: string[] = [];
   for (const { key, scope } of SCOPED_CONFIGS) {
-    for (const [coordinate, version] of Object.entries(config.dependencies[key])) {
+    for (const [coordinate, version] of Object.entries(config.dependencies[key]).sort(([a], [b]) =>
+      compareStrings(a, b),
+    )) {
       const [groupId = "", artifactId = ""] = coordinate.split(":");
       dependencies.push(
         [

@@ -2643,9 +2643,15 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       return { fqn: fqnOf(receiver), name: access.name.text, access };
     };
 
-    const literalStringArg = (call: CallExpression, index: number): LiteralExpression | undefined => {
+    const literalStringArg = (
+      call: CallExpression,
+      index: number,
+    ): LiteralExpression | undefined => {
       const arg = call.arguments[index];
-      if (arg && (arg.kind === SyntaxKind.StringLiteral || arg.kind === SyntaxKind.TextBlockLiteral)) {
+      if (
+        arg &&
+        (arg.kind === SyntaxKind.StringLiteral || arg.kind === SyntaxKind.TextBlockLiteral)
+      ) {
         return arg as LiteralExpression;
       }
       return undefined;
@@ -2678,7 +2684,10 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
     // classic Y/D/h footguns compile but produce wrong output.
     const checkDateTimeCall = (call: CallExpression): void => {
       const target = memberCallTarget(call);
-      if (!target || `${target.fqn}#${target.name}` !== "java.time.format.DateTimeFormatter#ofPattern") {
+      if (
+        !target ||
+        `${target.fqn}#${target.name}` !== "java.time.format.DateTimeFormatter#ofPattern"
+      ) {
         return;
       }
       const arg = literalStringArg(call, 0);

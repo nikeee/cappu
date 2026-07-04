@@ -117,7 +117,9 @@ func Read(cfg *config.Config) *Lockfile {
 	if err := json.Unmarshal(raw, &lock); err != nil {
 		return nil
 	}
-	if lock.Version != 2 {
+	// The TS build also requires a `packages` array; a lock without one (e.g.
+	// a bare {"version":2}) is treated as no lock, not an empty one.
+	if lock.Version != 2 || lock.Packages == nil {
 		return nil
 	}
 	return &lock

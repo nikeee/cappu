@@ -101,7 +101,7 @@ test("string literals passed to regex sinks are tokenized as regexp", () => {
       '    java.util.regex.Pattern.compile("\\\\d+");',
       '    "x".matches("[a-z]");',
       '    "a,b".split(",");',
-      '    String.valueOf(1);', // not a regex sink
+      "    String.valueOf(1);", // not a regex sink
       "  }",
       "}",
     ].join("\n"),

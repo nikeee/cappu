@@ -6,20 +6,14 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { parse, stringify } from "comment-json";
-
 import { type CappuConfig, DEFAULT_CONFIG_NAME } from "../config.ts";
 import { bumpSemver, RELEASE_TYPES, type ReleaseType } from "../version.ts";
+import { setJsoncValue } from "./jsoncEdit.ts";
 import { painter } from "./style.ts";
 
 /** Set "version" in the JSONC config text, comments intact. */
 function setVersionInJsonc(text: string, version: string): string {
-  const root = parse(text) as Record<string, unknown> | null;
-  if (root === null || typeof root !== "object") {
-    throw new Error("the config file does not contain an object");
-  }
-  root.version = version;
-  return `${stringify(root, null, 2)}\n`;
+  return setJsoncValue(text, ["version"], version);
 }
 
 /** The git repository root containing `cwd`, or undefined when not in a repo. */

@@ -17,7 +17,7 @@ import (
 // RunCompile handles `cappu compile`: run the print-free compile pipeline and
 // render its result. With no files, this is a project build over the configured
 // sourcePaths. Port of src/cli/compile.ts.
-func RunCompile(files []string, outputFlag, artifact string, quiet bool, cfg *config.Config) int {
+func RunCompile(files []string, outputFlag *string, artifact string, quiet bool, cfg *config.Config) int {
 	inputs := files
 	if len(inputs) == 0 {
 		inputs = build.SourceJavaFiles(cfg)
@@ -32,14 +32,14 @@ func RunCompile(files []string, outputFlag, artifact string, quiet bool, cfg *co
 		emitAnnotation("warning", fmt.Sprintf("configured path not found (treated as empty): %s", p), AnnotationLocation{})
 	}
 	validKinds := map[string]bool{"classes": true, "jar": true, "fat-jar": true}
-	if outputFlag != "" && !validKinds[outputFlag] {
-		fmt.Fprintf(os.Stderr, "cappu: invalid --output '%s' (classes, jar, fat-jar)\n", outputFlag)
-		emitAnnotation("error", fmt.Sprintf("invalid --output '%s' (classes, jar, fat-jar)", outputFlag), AnnotationLocation{})
+	if outputFlag != nil && !validKinds[*outputFlag] {
+		fmt.Fprintf(os.Stderr, "cappu: invalid --output '%s' (classes, jar, fat-jar)\n", *outputFlag)
+		emitAnnotation("error", fmt.Sprintf("invalid --output '%s' (classes, jar, fat-jar)", *outputFlag), AnnotationLocation{})
 		return 2
 	}
-	effectiveOutput := outputFlag
-	if effectiveOutput == "" {
-		effectiveOutput = cfg.CompilerOptions.Output
+	effectiveOutput := cfg.CompilerOptions.Output
+	if outputFlag != nil {
+		effectiveOutput = *outputFlag
 	}
 	experimental := cfg.CompilerOptions.ExperimentalCompiler.Enabled
 	validate := experimental && cfg.CompilerOptions.ExperimentalCompiler.Validate
@@ -50,7 +50,7 @@ func RunCompile(files []string, outputFlag, artifact string, quiet bool, cfg *co
 	}
 
 	result := compile.RunCompile(inputs, compile.Options{
-		Output:       outputFlag,
+		Output:       effectiveOutput,
 		ArtifactName: strings.TrimSuffix(artifact, ".jar"),
 		Config:       cfg,
 	})

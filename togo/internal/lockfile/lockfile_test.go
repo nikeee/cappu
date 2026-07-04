@@ -92,3 +92,16 @@ func TestVerifyIgnoresWrongVersionLock(t *testing.T) {
 		t.Error("a version-1 lock should be ignored (FromLock false)")
 	}
 }
+
+func TestReadRequiresPackagesArray(t *testing.T) {
+	// {"version":2} without packages is no lock at all (TS parity), not a
+	// valid empty lock that would install nothing.
+	cfg := project(t, `{"version": 2}`)
+	if Read(cfg) != nil {
+		t.Error("a lock without a packages array should be ignored")
+	}
+	cfg = project(t, `{"version": 2, "packages": []}`)
+	if Read(cfg) == nil {
+		t.Error("a lock with an empty packages array is valid")
+	}
+}

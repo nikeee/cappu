@@ -5,26 +5,23 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { parse, stringify } from "comment-json";
-
 import { type CappuConfig, DEFAULT_CONFIG_NAME, loadConfig } from "../config.ts";
 import { type DependencyBump, planUpdates } from "../install.ts";
 import { type PackageSource } from "../packages/index.ts";
 import { emitAnnotation } from "./annotations.ts";
 import { runInstall } from "./install.ts";
+import { hasJsoncKey, setJsoncValue } from "./jsoncEdit.ts";
 import { painter } from "./style.ts";
 
 /** Overwrite the bumped versions in the JSONC config text, comments intact. */
 export function applyBumpsToJsonc(text: string, bumps: readonly DependencyBump[]): string {
-  const root = parse(text) as Record<string, Record<string, Record<string, string>>> | null;
-  if (root === null || typeof root !== "object") {
-    throw new Error("the config file does not contain an object");
-  }
   for (const bump of bumps) {
-    const section = root.dependencies?.[bump.configuration];
-    if (section) section[bump.key] = bump.to;
+    const path = ["dependencies", bump.configuration, bump.key];
+    // Only overwrite an entry that is still declared (a vanished section is
+    // skipped, never recreated).
+    if (hasJsoncKey(text, path)) text = setJsoncValue(text, path, bump.to);
   }
-  return `${stringify(root, null, 2)}\n`;
+  return text;
 }
 
 export async function runUpdate(

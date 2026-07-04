@@ -152,7 +152,8 @@ function reindentTextBlock(raw: string): string {
   if (!content.some(l => l.trim() !== "" && l.length > WIDTH)) return raw;
   const closing = lines[lines.length - 1];
   const sourceIndent = closing.length - closing.trimStart().length;
-  const strip = (l: string): string => (l.length >= sourceIndent ? l.slice(sourceIndent) : l.trimStart());
+  const strip = (l: string): string =>
+    l.length >= sourceIndent ? l.slice(sourceIndent) : l.trimStart();
   const out = [lines[0]];
   for (const l of content) out.push(l.trim() === "" ? "" : strip(l));
   out.push(strip(closing));
@@ -169,7 +170,9 @@ export function formatSourceFile(sf: SourceFile, options: FormatOptions): string
     // A `reflow` leaf carries a raw comment or a multi-line text block; rewrite it
     // at the column it lands at.
     commentRewriter: (raw, col) =>
-      raw.startsWith('"""') ? reindentTextBlock(raw) : rewriteComment(raw, col, raw.startsWith("//")),
+      raw.startsWith('"""')
+        ? reindentTextBlock(raw)
+        : rewriteComment(raw, col, raw.startsWith("//")),
   });
   // Safety net: the printer attaches comments at member/statement granularity.
   // If a comment sat somewhere it does not yet handle, refuse rather than
@@ -1435,7 +1438,12 @@ class Printer {
       if (this.hasCommentBefore(bodyStart)) {
         const cparts: Doc[] = [];
         for (const c2 of this.commentsBefore(bodyStart)) cparts.push(reflow(c2.text), hardline);
-        cparts.push(join(" ", stmts.map(s => this.node(s))));
+        cparts.push(
+          join(
+            " ",
+            stmts.map(s => this.node(s)),
+          ),
+        );
         parts.push(hardline, concat(cparts));
       } else {
         parts.push(
@@ -1619,8 +1627,7 @@ class Printer {
     // and provides its own indentation; gjf glues a single dereference onto its
     // closing `}` (`}.scan(..)`) rather than starting a +4 chain that would
     // re-indent the class body.
-    const baseIsAnonClass =
-      baseIsNew && (cur as ObjectCreationExpression).classBody !== undefined;
+    const baseIsAnonClass = baseIsNew && (cur as ObjectCreationExpression).classBody !== undefined;
     // A multi-line text-block receiver breaks before its dereference (gjf puts
     // `.replace(..)` on its own +4 line after the closing `"""`).
     const baseIsMultilineTextBlock =
@@ -1880,7 +1887,13 @@ class Printer {
     const lastEnd = e.elements[e.elements.length - 1].end;
     const t = this.comments[this.ci];
     let closingComment: string | undefined;
-    if (t && t.line && !t.ownLine && t.pos > lastEnd && !/\n/.test(this.text.slice(lastEnd, t.pos))) {
+    if (
+      t &&
+      t.line &&
+      !t.ownLine &&
+      t.pos > lastEnd &&
+      !/\n/.test(this.text.slice(lastEnd, t.pos))
+    ) {
       this.ci++;
       closingComment = t.text;
     }

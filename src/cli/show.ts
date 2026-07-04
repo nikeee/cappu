@@ -13,7 +13,12 @@ import {
   type Severity,
   SEVERITY_ORDER,
 } from "../audit/index.ts";
-import { configuredSources, type ProjectContext, projectContext } from "../install.ts";
+import {
+  compareStrings,
+  configuredSources,
+  type ProjectContext,
+  projectContext,
+} from "../install.ts";
 import {
   type Coordinates,
   type DependencyDeclaration,
@@ -135,7 +140,10 @@ export async function buildShowData(
 
   const metadata = await metadataAcross(coordinates, sources);
   if (metadata === undefined && versions.length === 0) {
-    return { error: `package not found: ${groupId}:${artifactId}:${version}; ${SEARCH_HINT}`, code: 1 };
+    return {
+      error: `package not found: ${groupId}:${artifactId}:${version}; ${SEARCH_HINT}`,
+      code: 1,
+    };
   }
 
   // OSV scan of just this version; a network failure must not sink the card.
@@ -177,7 +185,7 @@ export async function buildShowData(
     spdx,
     rawLicenses: (metadata?.licenses ?? []).map(l => l.name),
     dependencies: [...(metadata?.dependencies ?? [])].sort((a, b) =>
-      `${a.groupId}:${a.artifactId}`.localeCompare(`${b.groupId}:${b.artifactId}`),
+      compareStrings(`${a.groupId}:${a.artifactId}`, `${b.groupId}:${b.artifactId}`),
     ),
     project: projectContext(config, `${groupId}:${artifactId}`),
     vulnerabilities,

@@ -1,7 +1,12 @@
 // Builds an LSP DocumentSymbol tree (outline) from a parsed SourceFile. Kept
 // separate from the server transport so it is unit-testable.
 
-import { type DocumentSymbol, type Range, SymbolKind, SymbolTag } from "vscode-languageserver-types";
+import {
+  type DocumentSymbol,
+  type Range,
+  SymbolKind,
+  SymbolTag,
+} from "vscode-languageserver-types";
 
 import { getLineAndCharacterOfPosition } from "../compiler/lineMap.ts";
 import { readDeprecation } from "../compiler/deprecation.ts";

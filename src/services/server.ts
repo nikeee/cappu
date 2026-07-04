@@ -413,7 +413,7 @@ export function startServer(
     return null;
   });
 
-  connection.onCompletion((params) => {
+  connection.onCompletion(params => {
     const at = sourceAndOffset(asUri(params.textDocument.uri), params.position);
     const items = at ? getCompletions(program, checker, at.sourceFile, at.offset, config) : [];
     return items.map(({ deprecated, ...item }) =>

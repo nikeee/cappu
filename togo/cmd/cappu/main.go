@@ -158,9 +158,11 @@ func (c *verifyCmd) Run(a *appState) error {
 }
 
 type auditCmd struct {
-	NoCache bool   `name:"no-cache" help:"Ignore all caches (fresh scan)"`
-	Format  string `name:"format" help:"Output format: text|sarif (default: text; sarif under an AI agent)"`
-	JSON    bool   `name:"json" hidden:""`
+	NoCache bool `name:"no-cache" help:"Ignore all caches (fresh scan)"`
+	// Pointer: an explicit empty --format must be an error (like the TS
+	// build), not fall back to the default.
+	Format *string `name:"format" help:"Output format: text|sarif (default: text; sarif under an AI agent)"`
+	JSON   bool    `name:"json" hidden:""`
 }
 
 func (c *auditCmd) Run(a *appState) error {
@@ -453,7 +455,8 @@ func (c *dapCmd) Run(a *appState) error {
 }
 
 type compileCmd struct {
-	Output   string   `short:"o" placeholder:"<kind>" help:"classes | jar | fat-jar"`
+	// Pointer: an explicit empty -o must be an error (like the TS build).
+	Output   *string  `short:"o" placeholder:"<kind>" help:"classes | jar | fat-jar"`
 	Artifact string   `placeholder:"<name>" help:"Jar base name in ./dist"`
 	Quiet    bool     `short:"q" help:"Do not print each emitted .class file"`
 	Files    []string `arg:"" optional:"" help:"Specific .java files to compile"`

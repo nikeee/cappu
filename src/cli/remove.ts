@@ -7,8 +7,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { parse, stringify } from "comment-json";
-
 import {
   type CappuConfig,
   DEFAULT_CONFIG_NAME,
@@ -18,6 +16,7 @@ import {
 import { emitAnnotation } from "./annotations.ts";
 import { parseAddCoordinate, resolveConfiguration } from "./add.ts";
 import { runInstall } from "./install.ts";
+import { removeJsoncKey } from "./jsoncEdit.ts";
 
 const CONFIGURATIONS = DEPENDENCY_CONFIGURATIONS;
 type Configuration = (typeof CONFIGURATIONS)[number];
@@ -31,14 +30,7 @@ export function removeDependencyFromJsonc(
   configuration: Configuration,
   key: string,
 ): { text: string; removed: boolean } {
-  const root = parse(text) as Record<string, Record<string, Record<string, string>>> | null;
-  if (root === null || typeof root !== "object") {
-    throw new Error("the config file does not contain an object");
-  }
-  const section = root.dependencies?.[configuration];
-  if (!section || !(key in section)) return { text, removed: false };
-  delete section[key];
-  return { text: `${stringify(root, null, 2)}\n`, removed: true };
+  return removeJsoncKey(text, ["dependencies", configuration, key]);
 }
 
 export async function runRemove(

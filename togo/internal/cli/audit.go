@@ -17,12 +17,13 @@ import (
 // included) for known vulnerabilities (OSV.dev), grouped by severity and
 // coloured like npm, printing the dependency path that pulls each one in. No
 // fixing. Exits non-zero when anything is found. Port of src/cli/audit.ts.
-func RunAudit(cfg *config.Config, noCache bool, format string) int {
-	if format == "" {
-		format = "text"
-		if AgentEnabled(os.Getenv) {
-			format = "sarif"
-		}
+func RunAudit(cfg *config.Config, noCache bool, formatFlag *string) int {
+	format := "text"
+	if AgentEnabled(os.Getenv) {
+		format = "sarif"
+	}
+	if formatFlag != nil {
+		format = *formatFlag
 	}
 	if format != "text" && format != "sarif" {
 		fmt.Fprintf(os.Stderr, "cappu: unknown --format '%s' (expected: text, sarif)\n", format)

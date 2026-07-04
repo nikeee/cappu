@@ -9,8 +9,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { parse, stringify } from "comment-json";
-
 import {
   type CappuConfig,
   DEFAULT_CONFIG_NAME,
@@ -21,6 +19,7 @@ import { configuredSources, pickAddVersion } from "../install.ts";
 import { type PackageKey, type PackageSource } from "../packages/index.ts";
 import { emitAnnotation } from "./annotations.ts";
 import { runInstall } from "./install.ts";
+import { setJsoncValue } from "./jsoncEdit.ts";
 
 const CONFIGURATIONS = DEPENDENCY_CONFIGURATIONS;
 type Configuration = (typeof CONFIGURATIONS)[number];
@@ -66,8 +65,8 @@ function looksExact(version: string | undefined): version is string {
 }
 
 /**
- * Insert (or overwrite) the dependency in the JSONC config text. comment-json
- * round-trips the user's comments, which plain JSON.parse/stringify would eat.
+ * Insert (or overwrite) the dependency in the JSONC config text; only the
+ * targeted value's span changes, so the user's comments and formatting stay.
  */
 export function addDependencyToJsonc(
   text: string,
@@ -75,14 +74,7 @@ export function addDependencyToJsonc(
   key: string,
   version: string,
 ): string {
-  const root = parse(text) as Record<string, Record<string, Record<string, string>>> | null;
-  if (root === null || typeof root !== "object") {
-    throw new Error("the config file does not contain an object");
-  }
-  root.dependencies ??= {};
-  root.dependencies[configuration] ??= {};
-  root.dependencies[configuration][key] = version;
-  return `${stringify(root, null, 2)}\n`;
+  return setJsoncValue(text, ["dependencies", configuration, key], version);
 }
 
 export async function runAdd(

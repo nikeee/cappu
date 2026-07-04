@@ -47,6 +47,11 @@ func RunUpdate(configPathArg string, cfg *config.Config) int {
 		return 1
 	}
 	for _, b := range bumps {
+		// Only overwrite an entry that is still declared (a vanished section
+		// is skipped, never recreated) - same as the TS applyBumpsToJsonc.
+		if !config.HasDependency(text, b.Configuration, b.Key) {
+			continue
+		}
 		text, err = config.SetDependency(text, b.Configuration, b.Key, b.To)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "cappu: %s\n", err)

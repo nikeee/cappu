@@ -1982,8 +1982,7 @@ function isConstantValueField(
     return true;
   }
   return (
-    foldConstant(declarator.initializer) !== undefined &&
-    CONSTANT_VALUE_PRIMS.includes(descriptor)
+    foldConstant(declarator.initializer) !== undefined && CONSTANT_VALUE_PRIMS.includes(descriptor)
   );
 }
 

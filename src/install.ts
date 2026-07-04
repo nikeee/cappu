@@ -377,12 +377,21 @@ export interface InstallResult {
   fromStore: string[];
 }
 
-/** "group:artifact" -> version entries of one configuration, as Coordinates. */
+/** Plain byte-order string comparison (what the Go build's sorted maps use). */
+export const compareStrings = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * "group:artifact" -> version entries of one configuration, as Coordinates.
+ * Sorted by key so resolution order (and every listing derived from it) is
+ * deterministic and identical to the Go build's sorted map iteration.
+ */
 function rootsOf(entries: Record<string, string>): Coordinates[] {
-  return Object.entries(entries).map(([key, version]) => {
-    const [groupId = "", artifactId = ""] = key.split(":");
-    return toCoordinates(groupId, artifactId, version);
-  });
+  return Object.entries(entries)
+    .sort(([a], [b]) => compareStrings(a, b))
+    .map(([key, version]) => {
+      const [groupId = "", artifactId = ""] = key.split(":");
+      return toCoordinates(groupId, artifactId, version);
+    });
 }
 
 /** Every COMPILE dependency as coordinates (api + implementation alike). */
@@ -608,10 +617,18 @@ function readLockfile(config: CappuConfig): Lockfile | undefined {
  * stale when the schema grows.
  */
 function lockMatches(lock: Lockfile, config: CappuConfig): boolean {
+  // Key order is irrelevant on both levels (the Go build's map marshaling
+  // sorts keys); only the actual entries decide staleness.
   const normalized = (roots: CappuConfig["dependencies"]): string =>
     JSON.stringify(
       Object.fromEntries(
-        Object.entries(roots ?? {}).filter(([, entries]) => Object.keys(entries).length > 0),
+        Object.entries(roots ?? {})
+          .filter(([, entries]) => Object.keys(entries).length > 0)
+          .sort(([a], [b]) => compareStrings(a, b))
+          .map(([name, entries]) => [
+            name,
+            Object.fromEntries(Object.entries(entries).sort(([a], [b]) => compareStrings(a, b))),
+          ]),
       ),
     );
   return normalized(lock.roots) === normalized(config.dependencies);
@@ -856,14 +873,23 @@ export async function installDependencies(
   // Sort each set by coordinate so the lock is deterministic regardless of
   // install/download order, keeping diffs minimal across runs.
   const byCoordinate = (a: LockedPackage, b: LockedPackage) =>
-    coordinatesToString(a.coordinates).localeCompare(coordinatesToString(b.coordinates));
+    compareStrings(coordinatesToString(a.coordinates), coordinatesToString(b.coordinates));
+  // Inner keys sorted like the Go build's map marshaling, so the two builds
+  // write byte-identical roots for the same cappu.json.
+  const sortedSection = (entries: Record<string, string>) =>
+    Object.fromEntries(Object.entries(entries).sort(([a], [b]) => compareStrings(a, b)));
 
   // The lock pins what was VERIFIABLY materialized, so it is written after the
   // downloads - and only when the whole set arrived.
   if (!fromLock && config.fromFile && resolution.missing.length === 0 && noArtifact.length === 0) {
     const newLock: Lockfile = {
       version: 2,
-      roots: config.dependencies,
+      roots: {
+        api: sortedSection(config.dependencies.api),
+        implementation: sortedSection(config.dependencies.implementation),
+        annotationProcessor: sortedSection(config.dependencies.annotationProcessor),
+        testImplementation: sortedSection(config.dependencies.testImplementation),
+      },
       packages: locked.toSorted(byCoordinate),
       ...(lockedProcessors.length > 0
         ? { processorPackages: lockedProcessors.toSorted(byCoordinate) }

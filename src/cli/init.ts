@@ -7,6 +7,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
+import { createInterface } from "node:readline";
 
 import { input, select } from "@inquirer/prompts";
 
@@ -83,6 +84,58 @@ async function ask(base: InitAnswers): Promise<InitAnswers> {
   return { groupId, artifactId, version, output };
 }
 
+/**
+ * Line-based prompts for piped stdin (inquirer needs a TTY): prompts on
+ * stderr, one answer per line, EOF (or a blank line) takes the default.
+ * Mirrors the Go build's ask/promptOutput byte for byte.
+ */
+async function askLines(base: InitAnswers): Promise<InitAnswers> {
+  const rl = createInterface({ input: process.stdin });
+  const lines = rl[Symbol.asyncIterator]();
+  const nextLine = async (): Promise<string> => {
+    const r = await lines.next();
+    return r.done ? "" : r.value;
+  };
+  const prompt = async (label: string, def: string, valid: RegExp, hint: string) => {
+    for (;;) {
+      process.stderr.write(`${label} (${def}): `);
+      const line = (await nextLine()).trim();
+      const value = line === "" ? def : line;
+      if (valid.test(value)) return value;
+      process.stderr.write(`  ${hint}\n`);
+    }
+  };
+  const groupId = await prompt(
+    "groupId",
+    base.groupId,
+    MAVEN_ID,
+    "letters, digits, '.', '_' or '-' only",
+  );
+  const artifactId = await prompt(
+    "artifactId",
+    base.artifactId,
+    MAVEN_ID,
+    "letters, digits, '.', '_' or '-' only",
+  );
+  const version = await prompt("version", base.version, SEMVER, "must be semver, e.g. 1.0.0");
+  const choices: Record<string, OutputKind> = { "1": "fat-jar", "2": "jar", "3": "classes" };
+  let output: OutputKind = "fat-jar";
+  for (;;) {
+    process.stderr.write(
+      "build output:\n  1) application (fat-jar)\n  2) library (jar)\n  3) classes\nchoice (1): ",
+    );
+    const line = (await nextLine()).trim();
+    if (line === "") break;
+    const picked = choices[line];
+    if (picked !== undefined) {
+      output = picked;
+      break;
+    }
+  }
+  rl.close();
+  return { groupId, artifactId, version, output };
+}
+
 /** The cappu.json contents for the chosen answers. */
 export function renderInitConfig(answers: InitAnswers): string {
   const config = {
@@ -108,7 +161,9 @@ export async function runInit(
 ): Promise<never> {
   const target = resolve(configPath ?? DEFAULT_CONFIG_NAME);
   const base = defaults(resolve(target, ".."));
-  const answers = options.yes ? base : await ask(base);
+  // Piped stdin gets the line-based prompts (inquirer needs a TTY; EOF takes
+  // the defaults), same as the Go build.
+  const answers = options.yes ? base : process.stdin.isTTY ? await ask(base) : await askLines(base);
 
   try {
     // wx: create only if absent - atomic, no exists/write race
@@ -129,7 +184,13 @@ export async function runInit(
     DEFAULT_TEST_SOURCE_PATH,
     DEFAULT_TEST_RESOURCE_PATH,
   ]) {
-    mkdirSync(resolve(target, "..", dir), { recursive: true });
+    try {
+      mkdirSync(resolve(target, "..", dir), { recursive: true });
+    } catch (e) {
+      // A failed layout dir is a warning, not a crash: cappu.json is already
+      // written and usable. Same as the Go build.
+      process.stderr.write(`warning: could not create ${dir}: ${(e as Error).message}\n`);
+    }
   }
   // A .gitignore covering what cappu generates; an existing one is left alone
   // but flagged, so the user knows cappu's ignores (/.cappu/, /dist/) were not

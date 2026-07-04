@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "compilerOptions": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "classPath": {
+          "default": [
+            "./.cappu/lib/classes",
+            "./target/dependency",
+            "./build/libs",
+            "./lib",
+            "./libs"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sourcePaths": {
+          "default": ["./src/main/java", "./src/generated/java"],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "resourcePaths": {
+          "default": ["./src/main/resources"],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "output": {
+          "default": "classes",
+          "type": "string",
+          "enum": ["classes", "jar", "fat-jar"]
+        },
+        "javac": {
+          "default": "javac",
+          "type": "string"
+        },
+        "release": {
+          "type": "integer",
+          "minimum": 8,
+          "maximum": 9007199254740991
+        },
+        "mainClass": {
+          "type": "string"
+        },
+        "experimentalCompiler": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "default": false,
+              "type": "boolean"
+            },
+            "failOnDegrade": {
+              "default": true,
+              "type": "boolean"
+            },
+            "validate": {
+              "default": false,
+              "type": "boolean"
+            },
+            "debugInfo": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        },
+        "nullness": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "default": false,
+              "type": "boolean"
+            },
+            "nullableAnnotations": {
+              "default": ["org.jspecify.annotations.Nullable"],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "nonNullAnnotations": {
+              "default": ["org.jspecify.annotations.NonNull"],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "nullMarkedAnnotations": {
+              "default": ["org.jspecify.annotations.NullMarked"],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "nullUnmarkedAnnotations": {
+              "default": ["org.jspecify.annotations.NullUnmarked"],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "lspOptions": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "inlayHints": {
+          "type": "object",
+          "properties": {
+            "parameterNames": {
+              "default": true,
+              "type": "boolean"
+            },
+            "varTypes": {
+              "default": true,
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "dapOptions": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enableAssertions": {
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    },
+    "formatterOptions": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "style": {
+          "default": "google",
+          "type": "string",
+          "enum": ["google", "aosp"]
+        },
+        "ignore": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "testOptions": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "outputFormat": {
+          "default": "text",
+          "type": "string",
+          "enum": ["text", "junit"]
+        },
+        "reportsDir": {
+          "default": "./dist/test-results",
+          "type": "string"
+        },
+        "coverage": {
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    },
+    "packageSources": {
+      "default": [
+        "https://repo.maven.apache.org/maven2",
+        "https://maven.google.com",
+        "https://plugins.gradle.org/m2"
+      ],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "dependencies": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "api": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "implementation": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotationProcessor": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "testImplementation": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "jdk": {
+      "type": "string"
+    },
+    "license": {
+      "type": "string"
+    },
+    "groupId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "artifactId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+    },
+    "publishRepository": {
+      "type": "string",
+      "format": "uri"
+    }
+  }
+}
