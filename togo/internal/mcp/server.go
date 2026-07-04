@@ -21,6 +21,7 @@ import (
 
 	"github.com/nikeee/cappu/internal/compiler"
 	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/processors"
 )
 
 // instructions are surfaced to the host in the initialize response.
@@ -291,11 +292,24 @@ func (s *Server) refresh() {
 	}
 }
 
-// loadConfiguredSources registers the config's sourcePaths into a program at
-// startup (the classPath .class stubs need the unported classfile reader).
+// loadConfiguredSources registers the config's classPath (.class stubs) and
+// sourcePaths (.java sources, plus the generated-sources tree) into a program
+// at startup. Port of loadConfiguredPaths in src/compiler/compiler.ts (as used
+// by src/services/mcpServer.ts).
 func loadConfiguredSources(program *compiler.Program, cfg *config.Config) {
+	var classPaths []string
+	for _, p := range cfg.CompilerOptions.ClassPath {
+		classPaths = append(classPaths, cfg.ResolvePath(p))
+	}
+	compiler.LoadClassPath(program, classPaths)
+	// .cappu/generated-sources/sources (annotation-processor output) is an
+	// implicit extra source path; absent until the first processing compile.
+	sourceDirs := make([]string, 0, len(cfg.CompilerOptions.SourcePaths)+1)
 	for _, p := range cfg.CompilerOptions.SourcePaths {
-		base := cfg.ResolvePath(p)
+		sourceDirs = append(sourceDirs, cfg.ResolvePath(p))
+	}
+	sourceDirs = append(sourceDirs, processors.GeneratedSourcesDir(cfg))
+	for _, base := range sourceDirs {
 		_ = filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".java") {
 				return nil

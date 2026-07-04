@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/nikeee/cappu/internal/compiler"
+	"github.com/nikeee/cappu/internal/config"
 )
 
 // Port of src/workspace.test.ts (the findJavaFiles helper).
@@ -37,5 +40,21 @@ func TestFindJavaFilesSkipsBuildDirs(t *testing.T) {
 	want := []FsPath{FsPath(filepath.Join(dir, "A.java")), FsPath(filepath.Join(dir, "src", "B.java"))}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("findJavaFiles = %v, want %v", got, want)
+	}
+}
+
+func TestLoadConfiguredSourcesLoadsClassPath(t *testing.T) {
+	jar, err := filepath.Abs(filepath.Join("..", "compiler", "testdata", "classfiles", "util.jar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{BaseDir: t.TempDir()}
+	cfg.CompilerOptions.ClassPath = []string{jar}
+	cfg.CompilerOptions.SourcePaths = []string{}
+	program := compiler.NewProgram()
+	compiler.InstallJdkTypes(program, cfg)
+	loadConfiguredSources(program, cfg)
+	if program.GetGlobalIndex().GetType("lib.Util") == nil {
+		t.Error("lib.Util should resolve after loading the configured classPath")
 	}
 }

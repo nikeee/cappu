@@ -101,12 +101,15 @@ func missingConfiguredPaths(cfg *config.Config) []string {
 	return missing
 }
 
-// loadConfiguredSources registers the config's sourcePaths (.java files, for
-// resolution only) into a program. The classPath .class stubs are loaded by the
-// (unported) classfile reader; here only the source half runs, so library types
-// resolve via the JDK stub and project sources. Port of the source half of
+// loadConfiguredSources registers the config's classPath (.class stubs) and
+// sourcePaths (.java files, for resolution only) into a program. Port of
 // loadConfiguredPaths in src/compiler/compiler.ts.
 func loadConfiguredSources(program *compiler.Program, cfg *config.Config) {
+	var classPaths []string
+	for _, p := range cfg.CompilerOptions.ClassPath {
+		classPaths = append(classPaths, cfg.ResolvePath(p))
+	}
+	compiler.LoadClassPath(program, classPaths)
 	for _, p := range cfg.CompilerOptions.SourcePaths {
 		for _, f := range loadJavaFiles(FsPath(cfg.ResolvePath(p))) {
 			program.AddProjectFile(compiler.URI(f[0]), f[1])

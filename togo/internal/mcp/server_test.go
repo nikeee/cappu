@@ -4,8 +4,12 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nikeee/cappu/internal/config"
 )
 
 // An in-process newline-delimited JSON-RPC round-trip over the MCP server, to
@@ -18,11 +22,11 @@ type mcpTestClient struct {
 	id  int
 }
 
-func startMcpTestServer(t *testing.T) *mcpTestClient {
+func startMcpTestServer(t *testing.T, cfg *config.Config) *mcpTestClient {
 	t.Helper()
 	cin, sin := io.Pipe()
 	sout, cout := io.Pipe()
-	server := NewServer(nil)
+	server := NewServer(cfg)
 	go func() { _ = server.Run(cin, cout) }()
 	t.Cleanup(func() { _ = sin.Close(); _ = sout.Close() })
 	return &mcpTestClient{in: sin, out: bufio.NewReader(sout)}
@@ -51,7 +55,7 @@ func (c *mcpTestClient) request(t *testing.T, method string, params any) map[str
 }
 
 func TestMcpInitialize(t *testing.T) {
-	c := startMcpTestServer(t)
+	c := startMcpTestServer(t, nil)
 	resp := c.request(t, "initialize", map[string]any{"protocolVersion": protocolVersion})
 	result, ok := resp["result"].(map[string]any)
 	if !ok {
@@ -70,7 +74,7 @@ func TestMcpInitialize(t *testing.T) {
 }
 
 func TestMcpToolsList(t *testing.T) {
-	c := startMcpTestServer(t)
+	c := startMcpTestServer(t, nil)
 	resp := c.request(t, "tools/list", nil)
 	result := resp["result"].(map[string]any)
 	tools := result["tools"].([]any)
@@ -90,7 +94,7 @@ func TestMcpToolsList(t *testing.T) {
 }
 
 func TestMcpToolCall(t *testing.T) {
-	c := startMcpTestServer(t)
+	c := startMcpTestServer(t, nil)
 	resp := c.request(t, "tools/call", map[string]any{
 		"name":      "search_symbols",
 		"arguments": map[string]any{"query": "String"},
@@ -103,8 +107,55 @@ func TestMcpToolCall(t *testing.T) {
 	}
 }
 
+// describeSymbol calls the describe_symbol tool and returns its text content.
+func describeSymbol(t *testing.T, c *mcpTestClient, ref string) string {
+	t.Helper()
+	resp := c.request(t, "tools/call", map[string]any{
+		"name":      "describe_symbol",
+		"arguments": map[string]any{"ref": ref},
+	})
+	result, ok := resp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("no result: %v", resp)
+	}
+	content := result["content"].([]any)
+	return content[0].(map[string]any)["text"].(string)
+}
+
+func TestMcpClasspathTypesResolve(t *testing.T) {
+	jar, err := filepath.Abs(filepath.Join("..", "compiler", "testdata", "classfiles", "util.jar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{BaseDir: t.TempDir()}
+	cfg.CompilerOptions.ClassPath = []string{jar}
+	cfg.CompilerOptions.SourcePaths = []string{}
+	c := startMcpTestServer(t, cfg)
+	if text := describeSymbol(t, c, "lib.Util"); !strings.Contains(text, "classpath:///lib/Util.java") {
+		t.Errorf("describe_symbol(lib.Util) = %s, want the classpath type to resolve", text)
+	}
+}
+
+func TestMcpGeneratedSourcesLoaded(t *testing.T) {
+	dir := t.TempDir()
+	gen := filepath.Join(dir, ".cappu", "generated-sources", "sources", "pkg")
+	if err := os.MkdirAll(gen, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gen, "Gen.java"), []byte("package pkg;\npublic class Gen {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{BaseDir: dir}
+	cfg.CompilerOptions.ClassPath = []string{}
+	cfg.CompilerOptions.SourcePaths = []string{}
+	c := startMcpTestServer(t, cfg)
+	if text := describeSymbol(t, c, "pkg.Gen"); !strings.Contains(text, "class Gen") {
+		t.Errorf("describe_symbol(pkg.Gen) = %s, want the generated source to resolve", text)
+	}
+}
+
 func TestMcpUnknownTool(t *testing.T) {
-	c := startMcpTestServer(t)
+	c := startMcpTestServer(t, nil)
 	resp := c.request(t, "tools/call", map[string]any{"name": "nope", "arguments": map[string]any{}})
 	if resp["error"] == nil {
 		t.Errorf("unknown tool should error, got %v", resp)

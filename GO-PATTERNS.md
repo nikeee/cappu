@@ -354,6 +354,12 @@ Seeded from tsgo; not yet exercised here.
   re-resolve the symbol from the identifier at the item's `selectionRange` start.
   `TypeHierarchyItem` / `CallHierarchyItem` are hand-rolled in `internal/lsp` like
   the rest. Both backends do this identically.
+- **"Needs the unported X" comments rot**: when a port lands out of order, any
+  workaround written against a then-missing piece (and its comment) must be
+  revisited once that piece lands. The MCP/LSP servers skipped classpath loading
+  "because the classfile reader is unported" long after `compiler.LoadClassPath`
+  existed (issue #40). After porting a subsystem, grep for "unported" and rewire
+  the callers that degraded around it.
 
 ## Emitter-domain library pieces (without the bytecode emitter)
 
