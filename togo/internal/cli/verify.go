@@ -14,6 +14,14 @@ import (
 func RunVerify(cfg *config.Config) int {
 	result := lockfile.VerifyInstalled(cfg)
 	if !result.FromLock {
+		// A dep-free project with no lock is vacuously verified (matching
+		// `install --locked`), not an error.
+		d := cfg.Dependencies
+		if len(d.API) == 0 && len(d.Implementation) == 0 &&
+			len(d.AnnotationProcessor) == 0 && len(d.TestImplementation) == 0 {
+			fmt.Fprintln(os.Stderr, "0 ok, 0 modified, 0 missing")
+			return 0
+		}
 		fmt.Fprintln(os.Stderr, "cappu: no cappu-lock.json to verify against; run `cappu install` first")
 		emitAnnotation("error", "no cappu-lock.json to verify against; run `cappu install` first", AnnotationLocation{})
 		return 1

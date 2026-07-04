@@ -163,21 +163,38 @@ export class OsvSource implements AuditSource {
     const wantedIds = new Set<string>();
     for (let start = 0; start < coordinates.length; start += BATCH) {
       const chunk = coordinates.slice(start, start + BATCH);
-      const body = {
-        queries: chunk.map(c => ({
-          version: c.version,
-          package: { name: `${c.groupId}:${c.artifactId}`, ecosystem: "Maven" },
-        })),
-      };
-      const response = (await this.fetchJson(`${API}/v1/querybatch`, body)) as {
-        results?: { vulns?: { id: string }[] }[];
-      };
-      (response.results ?? []).forEach((entry, i) => {
-        const ids = (entry.vulns ?? []).map(v => v.id);
-        if (ids.length === 0) return;
-        idsByCoordinate.set(coordinatesToString(chunk[i]!), ids);
-        for (const id of ids) wantedIds.add(id);
-      });
+      // Follow per-result pagination (next_page_token): a version with more
+      // vulns than one page would otherwise be silently truncated.
+      let pending = chunk.map(c => ({ coordinates: c, token: undefined as string | undefined }));
+      while (pending.length > 0) {
+        const body = {
+          queries: pending.map(p => ({
+            version: p.coordinates.version,
+            package: {
+              name: `${p.coordinates.groupId}:${p.coordinates.artifactId}`,
+              ecosystem: "Maven",
+            },
+            ...(p.token ? { page_token: p.token } : {}),
+          })),
+        };
+        const response = (await this.fetchJson(`${API}/v1/querybatch`, body)) as {
+          results?: { vulns?: { id: string }[]; next_page_token?: string }[];
+        };
+        const next: typeof pending = [];
+        (response.results ?? []).forEach((entry, i) => {
+          const page = pending[i]!;
+          const ids = (entry.vulns ?? []).map(v => v.id);
+          if (ids.length > 0) {
+            const key = coordinatesToString(page.coordinates);
+            idsByCoordinate.set(key, [...(idsByCoordinate.get(key) ?? []), ...ids]);
+            for (const id of ids) wantedIds.add(id);
+          }
+          if (entry.next_page_token) {
+            next.push({ coordinates: page.coordinates, token: entry.next_page_token });
+          }
+        });
+        pending = next;
+      }
     }
 
     // 2. hydrate each distinct vuln once (concurrently; cached ones resolve

@@ -8,7 +8,8 @@ export const RELEASE_TYPES: readonly ReleaseType[] = ["major", "minor", "patch"]
 /**
  * The next version after a major/minor/patch release. The core MAJOR.MINOR.PATCH
  * is bumped and any pre-release / build metadata is dropped (a release is a
- * clean version), matching `npm version`.
+ * clean version). Unlike `npm version`, a pre-release bumps its core too:
+ * 1.2.3-SNAPSHOT -> patch -> 1.2.4 (npm would yield 1.2.3).
  */
 export function bumpSemver(version: string, release: ReleaseType): string {
   const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);

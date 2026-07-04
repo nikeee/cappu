@@ -3,6 +3,7 @@ package audit
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -225,5 +226,46 @@ func TestNewOsvSourceDefaultsAndName(t *testing.T) {
 	}
 	if s.Name() != osvAPI {
 		t.Errorf("Name() = %q, want %q", s.Name(), osvAPI)
+	}
+}
+
+// Mirror of the TS pagination test: per-result next_page_token pages are
+// followed until exhausted, so no vuln id is silently truncated.
+func TestOsvFollowsQuerybatchPagination(t *testing.T) {
+	fetch := func(url string, body any) ([]byte, error) {
+		if strings.HasSuffix(url, "/v1/querybatch") {
+			raw, _ := json.Marshal(body)
+			var b struct {
+				Queries []struct {
+					PageToken string `json:"page_token"`
+				} `json:"queries"`
+			}
+			_ = json.Unmarshal(raw, &b)
+			var results []string
+			for _, q := range b.Queries {
+				if q.PageToken == "p2" {
+					results = append(results, `{"vulns":[{"id":"GHSA-bbbb"}]}`)
+				} else {
+					results = append(results, `{"vulns":[{"id":"GHSA-aaaa"}],"next_page_token":"p2"}`)
+				}
+			}
+			return []byte(`{"results":[` + strings.Join(results, ",") + `]}`), nil
+		}
+		_, id, _ := strings.Cut(url, "/v1/vulns/")
+		return []byte(vulns[id]), nil
+	}
+	source := NewOsvSource(fetch)
+	c := packages.NewCoordinates("org.foo", "foo", "1.2")
+	found, err := source.FindVulnerabilities([]packages.Coordinates{c})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, a := range found[c.String()] {
+		ids = append(ids, string(a.ID))
+	}
+	slices.Sort(ids)
+	if !reflect.DeepEqual(ids, []string{"GHSA-aaaa", "GHSA-bbbb"}) {
+		t.Errorf("ids = %v, want both pages", ids)
 	}
 }

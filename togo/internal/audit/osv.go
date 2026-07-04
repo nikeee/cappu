@@ -264,43 +264,67 @@ func (s *OsvSource) FindVulnerabilities(coordinates []packages.Coordinates) (map
 	idsByCoordinate := map[packages.CoordinateString][]string{}
 	var wantedIDs []string
 	wanted := map[string]struct{}{}
+	type pageQuery struct {
+		coordinates packages.Coordinates
+		token       string
+	}
 	for start := 0; start < len(coordinates); start += osvBatch {
 		end := min(start+osvBatch, len(coordinates))
 		chunk := coordinates[start:end]
-		queries := make([]map[string]any, len(chunk))
+		// Follow per-result pagination (next_page_token): a version with more
+		// vulns than one page would otherwise be silently truncated.
+		pending := make([]pageQuery, len(chunk))
 		for i, c := range chunk {
-			queries[i] = map[string]any{
-				"version": string(c.Version),
-				"package": map[string]string{"name": string(c.GroupID) + ":" + string(c.ArtifactID), "ecosystem": "Maven"},
+			pending[i] = pageQuery{coordinates: c}
+		}
+		for len(pending) > 0 {
+			queries := make([]map[string]any, len(pending))
+			for i, p := range pending {
+				q := map[string]any{
+					"version": string(p.coordinates.Version),
+					"package": map[string]string{"name": string(p.coordinates.GroupID) + ":" + string(p.coordinates.ArtifactID), "ecosystem": "Maven"},
+				}
+				if p.token != "" {
+					q["page_token"] = p.token
+				}
+				queries[i] = q
 			}
-		}
-		raw, err := s.fetchJSON(osvAPI+"/v1/querybatch", map[string]any{"queries": queries})
-		if err != nil {
-			return nil, err
-		}
-		var response struct {
-			Results []struct {
-				Vulns []struct {
-					ID string `json:"id"`
-				} `json:"vulns"`
-			} `json:"results"`
-		}
-		if err := json.Unmarshal(raw, &response); err != nil {
-			return nil, err
-		}
-		for i, entry := range response.Results {
-			if i >= len(chunk) || len(entry.Vulns) == 0 {
-				continue
+			raw, err := s.fetchJSON(osvAPI+"/v1/querybatch", map[string]any{"queries": queries})
+			if err != nil {
+				return nil, err
 			}
-			ids := make([]string, len(entry.Vulns))
-			for j, v := range entry.Vulns {
-				ids[j] = v.ID
-				if _, ok := wanted[v.ID]; !ok {
-					wanted[v.ID] = struct{}{}
-					wantedIDs = append(wantedIDs, v.ID)
+			var response struct {
+				Results []struct {
+					Vulns []struct {
+						ID string `json:"id"`
+					} `json:"vulns"`
+					NextPageToken string `json:"next_page_token"`
+				} `json:"results"`
+			}
+			if err := json.Unmarshal(raw, &response); err != nil {
+				return nil, err
+			}
+			var next []pageQuery
+			for i, entry := range response.Results {
+				if i >= len(pending) {
+					continue
+				}
+				page := pending[i]
+				if len(entry.Vulns) > 0 {
+					key := page.coordinates.String()
+					for _, v := range entry.Vulns {
+						idsByCoordinate[key] = append(idsByCoordinate[key], v.ID)
+						if _, ok := wanted[v.ID]; !ok {
+							wanted[v.ID] = struct{}{}
+							wantedIDs = append(wantedIDs, v.ID)
+						}
+					}
+				}
+				if entry.NextPageToken != "" {
+					next = append(next, pageQuery{coordinates: page.coordinates, token: entry.NextPageToken})
 				}
 			}
-			idsByCoordinate[chunk[i].String()] = ids
+			pending = next
 		}
 	}
 

@@ -35,7 +35,8 @@ var corePrefix = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)`)
 
 // Bump returns the next version after a major/minor/patch release. The core
 // MAJOR.MINOR.PATCH is bumped and any pre-release / build metadata is dropped (a
-// release is a clean version), matching `npm version`.
+// release is a clean version). Unlike `npm version`, a pre-release bumps its
+// core too: 1.2.3-SNAPSHOT -> patch -> 1.2.4 (npm would yield 1.2.3).
 func Bump(version string, release ReleaseType) (string, error) {
 	m := corePrefix.FindStringSubmatch(version)
 	if m == nil {

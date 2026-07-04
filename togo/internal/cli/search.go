@@ -81,10 +81,12 @@ func RunSearch(query string, cfg *config.Config, jsonOut bool) int {
 	}
 
 	paint := painter(os.Stdout)
+	paintErr := painter(os.Stderr)
 
-	// The summary line goes to stderr so stdout stays a clean, pipeable list.
+	// The summary line goes to stderr so stdout stays a clean, pipeable list -
+	// colored by stderr's own TTY-ness, not stdout's.
 	fmt.Fprintf(os.Stderr, "found %s package(s) for '%s'\n",
-		paint("bold", paint("cyan", strconv.Itoa(len(hits)))), query)
+		paintErr("bold", paintErr("cyan", strconv.Itoa(len(hits)))), query)
 
 	// Pad the coordinate and version columns to their widest entry so the
 	// optional extra columns line up across rows.

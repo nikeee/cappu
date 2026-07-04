@@ -53,10 +53,14 @@ export async function runSearch(
   const color = colorEnabled(process.stdout.isTTY);
   const paint = (format: StyleFormat, text: string): string =>
     color ? styleText(format, text, { stream: process.stdout }) : text;
+  const errColor = colorEnabled(process.stderr.isTTY);
+  const paintErr = (format: StyleFormat, text: string): string =>
+    errColor ? styleText(format, text, { stream: process.stderr }) : text;
 
-  // The summary line goes to stderr so stdout stays a clean, pipeable list.
+  // The summary line goes to stderr so stdout stays a clean, pipeable list -
+  // colored by stderr's own TTY-ness, not stdout's.
   process.stderr.write(
-    `found ${paint(["bold", "cyan"], String(hits.length))} package(s) for '${query}'\n`,
+    `found ${paintErr(["bold", "cyan"], String(hits.length))} package(s) for '${query}'\n`,
   );
 
   // Pad the coordinate and version columns to their widest entry so the

@@ -180,3 +180,26 @@ test("advisory summary falls back to the first line of details, then a placehold
   expect(result.get(coordinatesToString(coords[0]!))![0]!.summary).toBe("first line");
   expect(result.get(coordinatesToString(coords[1]!))![0]!.summary).toBe("(no summary)");
 });
+
+test("OsvSource follows querybatch pagination (next_page_token)", async () => {
+  const fetchJson = (url: string, body?: unknown): Promise<unknown> => {
+    if (url.endsWith("/v1/querybatch")) {
+      const queries = (body as { queries: { page_token?: string }[] }).queries;
+      // First page: one id + a token; second page (token echoed): another id.
+      return Promise.resolve({
+        results: queries.map(q =>
+          q.page_token === "p2"
+            ? { vulns: [{ id: "GHSA-bbbb" }] }
+            : { vulns: [{ id: "GHSA-aaaa" }], next_page_token: "p2" },
+        ),
+      });
+    }
+    const id = url.split("/v1/vulns/")[1]!;
+    return Promise.resolve(VULNS[id]);
+  };
+  const source = new OsvSource(fetchJson);
+  const coordinates = toCoordinates("org.foo", "foo", "1.2");
+  const found = await source.findVulnerabilities([coordinates]);
+  const ids = (found.get(coordinatesToString(coordinates)) ?? []).map(a => a.id);
+  expect(ids.toSorted()).toEqual(["GHSA-aaaa", "GHSA-bbbb"]);
+});

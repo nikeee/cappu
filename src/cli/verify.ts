@@ -9,6 +9,13 @@ import { emitAnnotation } from "./annotations.ts";
 export function runVerify(config: CappuConfig): never {
   const result = verifyInstalled(config);
   if (!result.fromLock) {
+    // A dep-free project with no lock is vacuously verified (matching
+    // `install --locked`), not an error.
+    const declared = Object.values(config.dependencies).some(m => Object.keys(m).length > 0);
+    if (!declared) {
+      process.stderr.write("0 ok, 0 modified, 0 missing\n");
+      process.exit(0);
+    }
     process.stderr.write(
       "cappu: no cappu-lock.json to verify against; run `cappu install` first\n",
     );
