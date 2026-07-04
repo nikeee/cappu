@@ -102,7 +102,16 @@ func gitToplevel(cwd string) (string, bool) {
 func runGit(cwd string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = cwd
-	return cmd.Run()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// Include git's own output (the TS execFileSync error message carries
+		// it too); a bare "exit status 1" helps nobody.
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			return fmt.Errorf("%w: %s", err, msg)
+		}
+		return err
+	}
+	return nil
 }
 
 func sameDir(a, b string) bool {

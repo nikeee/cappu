@@ -22,7 +22,9 @@ export function resolvePublishRegistry(
   configRepo: string | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return flag ?? env.CAPPU_PUBLISH_REGISTRY ?? configRepo ?? DEFAULT_PUBLISH_REGISTRY;
+  // || not ??: an empty string (e.g. CAPPU_PUBLISH_REGISTRY=) means "unset",
+  // like the Go build - never a registry URL of "".
+  return flag || env.CAPPU_PUBLISH_REGISTRY || configRepo || DEFAULT_PUBLISH_REGISTRY;
 }
 
 export type PublishAuth =

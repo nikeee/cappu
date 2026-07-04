@@ -198,7 +198,9 @@ func ResolveJava(cfg *config.Config) string {
 		name = "java.exe"
 	}
 	sibling := filepath.Join(filepath.Dir(path), name)
-	if _, err := os.Stat(sibling); err == nil {
+	// Executable bit checked like the TS accessSync(X_OK): a non-executable
+	// sibling falls back to PATH instead of failing the exec later.
+	if info, err := os.Stat(sibling); err == nil && info.Mode()&0o111 != 0 {
 		return sibling
 	}
 	return "java"

@@ -23,7 +23,10 @@ func TestCleanRemovesExistingDirs(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "packages"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	removed := Clean()
+	removed, err := Clean()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(removed) != 1 || removed[0] != root {
 		t.Fatalf("Clean() = %v, want [%s]", removed, root)
 	}
@@ -31,7 +34,7 @@ func TestCleanRemovesExistingDirs(t *testing.T) {
 		t.Error("cache root should be gone after Clean")
 	}
 	// A second clean finds nothing.
-	if got := Clean(); len(got) != 0 {
-		t.Errorf("second Clean() = %v, want empty", got)
+	if got, err := Clean(); err != nil || len(got) != 0 {
+		t.Errorf("second Clean() = %v (err %v), want empty", got, err)
 	}
 }

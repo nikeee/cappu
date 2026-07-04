@@ -106,12 +106,13 @@ func FormattableFiles(cfg *config.Config) []string {
 	return out
 }
 
-// globToRegexp converts a glob pattern to an anchored regexp.
-// ponytail: handles *, ** and ? only (not brace/bracket classes); add those if
-// an ignore pattern ever needs them.
+// globToRegexp converts a glob pattern to an anchored regexp: *, **, ?,
+// {a,b} alternation and [...] character classes, matching Node's
+// path.matchesGlob used by the TS build (src/workspace.ts).
 func globToRegexp(pat string) *regexp.Regexp {
 	var b strings.Builder
 	b.WriteString("^")
+	depth := 0 // open brace groups
 	for i := 0; i < len(pat); i++ {
 		c := pat[i]
 		switch c {
@@ -124,6 +125,35 @@ func globToRegexp(pat string) *regexp.Regexp {
 			}
 		case '?':
 			b.WriteString("[^/]")
+		case '{':
+			depth++
+			b.WriteString("(?:")
+		case '}':
+			if depth > 0 {
+				depth--
+				b.WriteString(")")
+			} else {
+				b.WriteString(regexp.QuoteMeta(string(c)))
+			}
+		case ',':
+			if depth > 0 {
+				b.WriteString("|")
+			} else {
+				b.WriteString(regexp.QuoteMeta(string(c)))
+			}
+		case '[':
+			// Pass a [...] class through (with glob's ! negation); an
+			// unterminated one stays literal.
+			if end := strings.IndexByte(pat[i+1:], ']'); end >= 0 {
+				class := pat[i+1 : i+1+end]
+				if strings.HasPrefix(class, "!") {
+					class = "^" + class[1:]
+				}
+				b.WriteString("[" + class + "]")
+				i += end + 1
+			} else {
+				b.WriteString(regexp.QuoteMeta(string(c)))
+			}
 		default:
 			b.WriteString(regexp.QuoteMeta(string(c)))
 		}

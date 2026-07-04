@@ -296,8 +296,15 @@ export function verifyInstalled(config: CappuConfig): VerifyResult {
         `${pkg.coordinates.artifactId}-${pkg.coordinates.version}.jar`,
       );
       if (!existsSync(file)) result.missing.push(id);
-      else if (sha256Of(readFileSync(file)) === pkg.sha256) result.ok.push(id);
-      else result.modified.push(id);
+      else {
+        try {
+          if (sha256Of(readFileSync(file)) === pkg.sha256) result.ok.push(id);
+          else result.modified.push(id);
+        } catch {
+          // Unreadable for another reason: treat as modified (cannot confirm).
+          result.modified.push(id);
+        }
+      }
     }
   }
   return result;

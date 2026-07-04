@@ -10,5 +10,7 @@ export function colorEnabled(
   isTTY: boolean | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return isTTY === true && !env.NO_COLOR && !agentEnabled(env);
+  // TERM=dumb: styleText would refuse anyway; gate here so both builds (and
+  // the progress bar/indicator) agree.
+  return isTTY === true && !env.NO_COLOR && env.TERM !== "dumb" && !agentEnabled(env);
 }

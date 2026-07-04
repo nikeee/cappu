@@ -96,8 +96,12 @@ async function listVersionsAcross(
   sources: readonly PackageSource[],
 ): Promise<string[]> {
   for (const source of sources) {
-    const versions = await source.listVersions(groupId, artifactId);
-    if (versions.length > 0) return versions;
+    try {
+      const versions = await source.listVersions(groupId, artifactId);
+      if (versions.length > 0) return versions;
+    } catch {
+      // a failing source falls through to the next one (Go parity)
+    }
   }
   return [];
 }
@@ -108,8 +112,12 @@ async function metadataAcross(
   sources: readonly PackageSource[],
 ): Promise<PackageMetadata | undefined> {
   for (const source of sources) {
-    const metadata = await source.getMetadata(coordinates);
-    if (metadata) return metadata;
+    try {
+      const metadata = await source.getMetadata(coordinates);
+      if (metadata) return metadata;
+    } catch {
+      // a failing source falls through to the next one (Go parity)
+    }
   }
   return undefined;
 }

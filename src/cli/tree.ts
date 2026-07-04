@@ -113,13 +113,20 @@ export async function runTree(
   };
 
   const sections: TreeSection[] = [];
-  for (const configuration of DEPENDENCY_CONFIGURATIONS) {
-    const resolution = await resolveTransitive(
-      configurationRoots(config, configuration),
-      sources,
-      onResolve,
-    );
-    sections.push({ configuration, tree: buildForest(resolution) });
+  try {
+    for (const configuration of DEPENDENCY_CONFIGURATIONS) {
+      const resolution = await resolveTransitive(
+        configurationRoots(config, configuration),
+        sources,
+        onResolve,
+      );
+      sections.push({ configuration, tree: buildForest(resolution) });
+    }
+  } catch (e) {
+    // A resolution/network failure is a clean error, not a stack trace (Go parity).
+    if (resolving > 0) process.stderr.write("\r\x1b[2K");
+    process.stderr.write(`cappu: ${(e as Error).message}\n`);
+    process.exit(1);
   }
   if (resolving > 0) process.stderr.write("\r\x1b[2K");
 

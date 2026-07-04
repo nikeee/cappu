@@ -30,8 +30,9 @@ func Dir(subdir, envOverride string) string {
 
 // Clean removes the global download cache and returns the directories actually
 // removed. The per-domain env overrides, when set, are cleaned too since they
-// may point outside the cache root.
-func Clean() []string {
+// may point outside the cache root. A directory that cannot be removed is a
+// real error (the TS build's rmSync throw), not a silent "already empty".
+func Clean() ([]string, error) {
 	targets := []string{Root(), os.Getenv("CAPPU_PACKAGE_STORE"), os.Getenv("CAPPU_JDK_STORE")}
 	seen := make(map[string]struct{})
 	var removed []string
@@ -44,10 +45,11 @@ func Clean() []string {
 		}
 		seen[dir] = struct{}{}
 		if _, err := os.Stat(dir); err == nil {
-			if os.RemoveAll(dir) == nil {
-				removed = append(removed, dir)
+			if err := os.RemoveAll(dir); err != nil {
+				return removed, err
 			}
+			removed = append(removed, dir)
 		}
 	}
-	return removed
+	return removed, nil
 }

@@ -26,7 +26,7 @@ var styleCodes = map[string]string{
 // agent. Port of colorEnabled in color.ts; the env lookup is a parameter so it
 // stays testable.
 func ColorEnabled(isTTY bool, env func(string) string) bool {
-	return isTTY && env("NO_COLOR") == "" && !AgentEnabled(env)
+	return isTTY && env("NO_COLOR") == "" && env("TERM") != "dumb" && !AgentEnabled(env)
 }
 
 // painter returns a colour function for f: text unchanged when colour is off.

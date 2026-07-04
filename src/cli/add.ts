@@ -121,7 +121,16 @@ export async function runAdd(
   for (const coordinate of coordinates as AddCoordinate[]) {
     let version = coordinate.version;
     if (!looksExact(version)) {
-      const picked = await pickAddVersion(working, coordinate.key, version, resolvedSources);
+      let picked;
+      try {
+        picked = await pickAddVersion(working, coordinate.key, version, resolvedSources);
+      } catch (e) {
+        // A network failure while picking is a clean error, not a stack trace
+        // (Go parity).
+        process.stderr.write(`cappu: ${(e as Error).message}\n`);
+        emitAnnotation("error", (e as Error).message);
+        process.exit(1);
+      }
       if (picked === undefined) {
         const wanted = version === undefined ? "" : ` matching '${version}'`;
         process.stderr.write(

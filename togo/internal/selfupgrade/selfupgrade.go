@@ -103,6 +103,11 @@ func ReplaceBinary(targetPath string, data []byte) error {
 	if err := os.WriteFile(staged, data, 0o755); err != nil {
 		return err
 	}
+	// WriteFile's mode is umask-masked; chmod so the binary is 0755 like the
+	// TS build's explicit chmodSync (umask 077 would otherwise yield 0700).
+	if err := os.Chmod(staged, 0o755); err != nil {
+		return err
+	}
 	if runtime.GOOS == "windows" {
 		old := fmt.Sprintf("%s.old-%d", targetPath, os.Getpid())
 		if err := os.Rename(targetPath, old); err != nil {

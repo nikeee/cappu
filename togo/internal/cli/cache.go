@@ -13,7 +13,11 @@ import (
 // beside them). Other subcommands are rejected. Port of src/cli/cache.ts.
 func RunCache(args []string) int {
 	if len(args) == 1 && args[0] == "clean" {
-		removed := cache.Clean()
+		removed, err := cache.Clean()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
+			return 1
+		}
 		if len(removed) == 0 {
 			fmt.Fprintln(os.Stderr, "cache already empty")
 		} else {

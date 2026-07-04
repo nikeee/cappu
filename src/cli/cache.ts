@@ -7,7 +7,15 @@ import { verifyCache } from "../install.ts";
 
 export function runCacheCommand(args: readonly string[]): never {
   if (args.length === 1 && args[0] === "clean") {
-    const removed = cleanCache();
+    let removed: string[];
+    try {
+      removed = cleanCache();
+    } catch (e) {
+      // An undeletable cache dir is a real error, not a stack trace (and not
+      // the Go build's former silent success).
+      process.stderr.write(`cappu: ${(e as Error).message}\n`);
+      process.exit(1);
+    }
     if (removed.length === 0) {
       process.stderr.write("cache already empty\n");
     } else {

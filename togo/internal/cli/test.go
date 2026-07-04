@@ -76,7 +76,10 @@ func RunTest(cfg *config.Config) int {
 	if err := cmd.Run(); err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			return exit.ExitCode()
+			if code := exit.ExitCode(); code >= 0 {
+				return code
+			}
+			return 1 // signal-killed: TS's `status ?? 1`, not Go's -1 (=255)
 		}
 		fmt.Fprintf(os.Stderr, "cappu: could not run java: %s\n", err)
 		return 1

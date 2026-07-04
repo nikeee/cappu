@@ -8,11 +8,14 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -33,6 +36,10 @@ Config file = cappu.json. Want schema? Run: cappu config-schema
 All commands: cappu help`
 
 const protocolVersion = "2024-11-05"
+
+// supportedProtocolVersions are echoed back when the client asks for one of
+// them (the TS SDK negotiates the same way).
+var supportedProtocolVersions = []string{"2024-11-05", "2025-03-26", "2025-06-18"}
 
 // Server is the MCP stdio server.
 type Server struct {
@@ -334,8 +341,18 @@ func (s *Server) Run(reader io.Reader, writer io.Writer) error {
 func (s *Server) dispatch(req mcpRequest) {
 	switch req.Method {
 	case "initialize":
+		// Echo a supported client protocolVersion (the TS SDK's negotiation);
+		// anything else falls back to our default.
+		version := protocolVersion
+		var init struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		}
+		sj(req.Params, &init)
+		if slices.Contains(supportedProtocolVersions, init.ProtocolVersion) {
+			version = init.ProtocolVersion
+		}
 		s.reply(req.ID, map[string]any{
-			"protocolVersion": protocolVersion,
+			"protocolVersion": version,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "cappu", "version": "1.0.0"},
 			"instructions":    instructions,
@@ -369,6 +386,10 @@ func (s *Server) handleToolCall(req mcpRequest) {
 		if t.name != params.Name {
 			continue
 		}
+		if err := validateArgs(t, params.Arguments); err != nil {
+			s.replyError(req.ID, -32602, err.Error())
+			return
+		}
 		if t.usesProgram {
 			s.refresh()
 		}
@@ -383,9 +404,35 @@ func (s *Server) handleToolCall(req mcpRequest) {
 	s.replyError(req.ID, -32602, "unknown tool: "+params.Name)
 }
 
+// validateArgs enforces the tool's declared required fields; the TS SDK
+// zod-validates the same schemas, so a missing arg errors instead of silently
+// becoming "".
+func validateArgs(t toolDef, args json.RawMessage) error {
+	var m map[string]any
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &m); err != nil {
+			return fmt.Errorf("invalid arguments for %s: %v", t.name, err)
+		}
+	}
+	required, _ := t.inputSchema["required"].([]string)
+	for _, key := range required {
+		if _, ok := m[key]; !ok {
+			return fmt.Errorf("invalid arguments for %s: missing %s", t.name, key)
+		}
+	}
+	return nil
+}
+
 func toolText(data any, isError bool) map[string]any {
-	text, _ := json.MarshalIndent(data, "", "  ")
-	result := map[string]any{"content": []map[string]any{{"type": "text", "text": string(text)}}}
+	// Like the TS JSON.stringify: no HTML escaping (List<String>, not
+	// List\u003cString\u003e).
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(data)
+	text := strings.TrimRight(buf.String(), "\n")
+	result := map[string]any{"content": []map[string]any{{"type": "text", "text": text}}}
 	if isError {
 		result["isError"] = true
 	}

@@ -13,8 +13,28 @@ import (
 func rageReport() string {
 	return fmt.Sprintf(
 		"cappu %s\nruntime: go %s\nplatform: %s %s\n\nfile an issue at %s\n",
-		meta.Version, runtime.Version(), runtime.GOOS, runtime.GOARCH, meta.IssueTracker,
+		meta.Version, runtime.Version(), nodePlatform(runtime.GOOS), nodeArch(runtime.GOARCH), meta.IssueTracker,
 	)
+}
+
+// nodePlatform/nodeArch map Go's GOOS/GOARCH to Node's process.platform /
+// process.arch tokens, so the platform line matches the TS build.
+func nodePlatform(goos string) string {
+	if goos == "windows" {
+		return "win32"
+	}
+	return goos
+}
+
+func nodeArch(goarch string) string {
+	switch goarch {
+	case "amd64":
+		return "x64"
+	case "386":
+		return "ia32"
+	default:
+		return goarch
+	}
 }
 
 // browserOpener is the platform's "open this with whatever's registered"

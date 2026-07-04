@@ -62,5 +62,5 @@ export async function runUpdate(
   }
 
   // Re-resolve and rewrite the lock against the bumped versions.
-  return runInstall(loadConfig(configPathArg), { updateLock: true });
+  return runInstall(loadConfig(configPath), { updateLock: true });
 }

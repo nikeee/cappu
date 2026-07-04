@@ -20,14 +20,19 @@
           }
         },
         "sourcePaths": {
-          "default": ["./src/main/java", "./src/generated/java"],
+          "default": [
+            "./src/main/java",
+            "./src/generated/java"
+          ],
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "resourcePaths": {
-          "default": ["./src/main/resources"],
+          "default": [
+            "./src/main/resources"
+          ],
           "type": "array",
           "items": {
             "type": "string"
@@ -36,7 +41,11 @@
         "output": {
           "default": "classes",
           "type": "string",
-          "enum": ["classes", "jar", "fat-jar"]
+          "enum": [
+            "classes",
+            "jar",
+            "fat-jar"
+          ]
         },
         "javac": {
           "default": "javac",
@@ -80,28 +89,36 @@
               "type": "boolean"
             },
             "nullableAnnotations": {
-              "default": ["org.jspecify.annotations.Nullable"],
+              "default": [
+                "org.jspecify.annotations.Nullable"
+              ],
               "type": "array",
               "items": {
                 "type": "string"
               }
             },
             "nonNullAnnotations": {
-              "default": ["org.jspecify.annotations.NonNull"],
+              "default": [
+                "org.jspecify.annotations.NonNull"
+              ],
               "type": "array",
               "items": {
                 "type": "string"
               }
             },
             "nullMarkedAnnotations": {
-              "default": ["org.jspecify.annotations.NullMarked"],
+              "default": [
+                "org.jspecify.annotations.NullMarked"
+              ],
               "type": "array",
               "items": {
                 "type": "string"
               }
             },
             "nullUnmarkedAnnotations": {
-              "default": ["org.jspecify.annotations.NullUnmarked"],
+              "default": [
+                "org.jspecify.annotations.NullUnmarked"
+              ],
               "type": "array",
               "items": {
                 "type": "string"
@@ -147,7 +164,10 @@
         "style": {
           "default": "google",
           "type": "string",
-          "enum": ["google", "aosp"]
+          "enum": [
+            "google",
+            "aosp"
+          ]
         },
         "ignore": {
           "default": [],
@@ -165,7 +185,10 @@
         "outputFormat": {
           "default": "text",
           "type": "string",
-          "enum": ["text", "junit"]
+          "enum": [
+            "text",
+            "junit"
+          ]
         },
         "reportsDir": {
           "default": "./dist/test-results",

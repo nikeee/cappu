@@ -139,7 +139,8 @@ function toAdvisory(vuln: OsvVuln, coordinates: Coordinates): Advisory {
   return {
     id: vuln.id as AdvisoryId,
     aliases: cveAliases(vuln),
-    summary: vuln.summary ?? vuln.details?.split("\n")[0] ?? "(no summary)",
+    // || not ??: an explicit empty summary also falls back (Go parity).
+    summary: vuln.summary || vuln.details?.split("\n")[0] || "(no summary)",
     severity: osvSeverity(vuln),
     fixedVersions: fixedVersionsOf(vuln, coordinates),
     url: `https://osv.dev/vulnerability/${vuln.id}`,

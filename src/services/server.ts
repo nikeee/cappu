@@ -237,6 +237,14 @@ export function startServer(
       .catch(() => {
         // The client does not support dynamic file-watcher registration.
       });
+    // A missing configured directory is treated as empty; only worth a warning
+    // when an actual cappu.json configured it. Sent AFTER initialized (the LSP
+    // spec forbids server->client traffic before initialize; Go parity).
+    if (activeConfig) {
+      for (const path of missingConfiguredPaths(activeConfig)) {
+        connection.console.warn(`configured path not found (treated as empty): ${path}`);
+      }
+    }
   });
 
   connection.onDidChangeWatchedFiles(params => {
@@ -682,6 +690,8 @@ export function startServer(
   // swaps in the configured list). The newest-version lookups go to the
   // network, so results are cached briefly per group:artifact.
   let packageSourceUrls: readonly string[] = DEFAULT_PACKAGE_SOURCES;
+  // The startServer config, for the post-initialized missing-paths warning.
+  let activeConfig: CappuConfig | undefined;
   let packageSources: PackageSource[] | undefined;
   const latestCache = new Map<string, { value: string | undefined; at: number }>();
   const LATEST_TTL_MS = 5 * 60_000;
@@ -814,13 +824,9 @@ export function startServer(
    * initializationOptions and didChangeConfiguration still override the latter.
    */
   if (config) {
+    activeConfig = config;
     packageSourceUrls = config.packageSources;
     applyInlayHintSettings(config.lspOptions.inlayHints);
-    // A missing configured directory is treated as empty; only worth a warning
-    // when an actual cappu.json configured it.
-    for (const path of missingConfiguredPaths(config)) {
-      connection.console.warn(`configured path not found (treated as empty): ${path}`);
-    }
     loadConfiguredPaths(program, config);
   }
   documents.listen(connection);

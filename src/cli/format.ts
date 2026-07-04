@@ -109,7 +109,13 @@ export async function runFormat(
     if (!o.changed) continue;
 
     if (flags.write) {
-      writeFileSync(targets[i], o.formatted!);
+      try {
+        writeFileSync(targets[i], o.formatted!);
+      } catch (e) {
+        // Same message/exit as the Go build's write failure.
+        process.stderr.write(`cappu: cannot write ${o.rel}: ${(e as Error).message}\n`);
+        process.exit(2);
+      }
       changed.push(o.rel);
       // List each rewritten file on stdout (machine-readable, like the check
       // mode lists the unformatted ones); the count summary goes to stderr.

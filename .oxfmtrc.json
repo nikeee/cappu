@@ -6,7 +6,8 @@
     "**/*.icon/*",
     "TypeScript/**",
     "TypeScript-Go/**",
-    "test-fixtures/**"
+    "test-fixtures/**",
+    "togo/internal/config/cappu.schema.json"
   ],
   "arrowParens": "avoid"
 }
