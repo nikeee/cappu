@@ -10,9 +10,9 @@ import (
 // Port of src/packages/mavenCentral.test.ts: parent-chain resolution against
 // real Maven Central POMs snapshotted under test-fixtures/packages/central-poms
 // (same maven2 layout as the live repo), read through an injected fetcher - so
-// these run offline. The TS metadata.incomplete signal has no Go equivalent
-// (the Go PackageMetadata does not track it), so the incomplete-only assertions
-// are skipped; the dependency-resolution assertions (the real behaviour) port.
+// these run offline. The TS metadata.incomplete assertions port via the
+// unexported getMetadata, which returns the incomplete flag the exported
+// GetMetadata drops.
 
 const centralBase = "https://central.example/maven2"
 
@@ -98,6 +98,9 @@ func TestHttpclient5ParentProperties(t *testing.T) {
 
 func TestGuavaLiteralVersions(t *testing.T) {
 	src := centralSource(t)
+	if _, incomplete, err := src.getMetadata(NewCoordinates("com.google.guava", "guava", "33.4.8-jre")); err != nil || incomplete {
+		t.Errorf("incomplete = %v, err = %v, want complete", incomplete, err)
+	}
 	got := compileDependencies(t, src, "com.google.guava", "guava", "33.4.8-jre")
 	want := []string{
 		"com.google.guava:failureaccess@1.0.3",
@@ -122,9 +125,12 @@ func TestGsonParentChain(t *testing.T) {
 
 func TestCommonsIoTestScopeOnly(t *testing.T) {
 	src := centralSource(t)
-	metadata, err := src.GetMetadata(NewCoordinates("commons-io", "commons-io", "2.19.0"))
+	metadata, incomplete, err := src.getMetadata(NewCoordinates("commons-io", "commons-io", "2.19.0"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if incomplete {
+		t.Error("incomplete = true, want all dependencies resolved")
 	}
 	if metadata == nil || len(metadata.Dependencies) != 9 {
 		t.Fatalf("dependencies = %d, want 9", len(metadata.Dependencies))
@@ -140,5 +146,22 @@ func TestCommonsIoTestScopeOnly(t *testing.T) {
 }
 
 func TestSnapshotArtifactsResolveComplete(t *testing.T) {
-	t.Skip("Go PackageMetadata does not track the TS metadata.incomplete signal")
+	src := centralSource(t)
+	for _, c := range []struct{ group, artifact, version string }{
+		{"com.fasterxml.jackson.core", "jackson-databind", "2.18.3"},
+		{"org.apache.httpcomponents.client5", "httpclient5", "5.4.3"},
+		{"com.google.guava", "guava", "33.4.8-jre"},
+		{"com.google.code.gson", "gson", "2.13.1"},
+	} {
+		metadata, incomplete, err := src.getMetadata(NewCoordinates(c.group, c.artifact, c.version))
+		if err != nil {
+			t.Fatalf("getMetadata(%s:%s:%s): %v", c.group, c.artifact, c.version, err)
+		}
+		if metadata == nil {
+			t.Fatalf("getMetadata(%s:%s:%s) = nil", c.group, c.artifact, c.version)
+		}
+		if incomplete {
+			t.Errorf("%s:%s:%s resolved incomplete, want all dependencies resolved", c.group, c.artifact, c.version)
+		}
+	}
 }

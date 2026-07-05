@@ -3,9 +3,9 @@
 // experimental compiler) and writes a class tree or a jar under the output
 // root. Port of src/compiler/compiler.ts. RunCompile never prints; it returns
 // what was written, what degraded and the diagnostics, and the caller renders.
-//
-// Not yet ported (treated as absent): annotation processors (#7) and the
-// experimental-compiler --validate-against-javac check.
+// Annotation processing (internal/processors, #7) and the experimental-compiler
+// --validate-against-javac check (compiler.ValidateAgainstJavac, wired in
+// internal/cli) are ported.
 package compile
 
 import (

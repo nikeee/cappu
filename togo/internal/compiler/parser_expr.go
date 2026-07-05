@@ -6,8 +6,8 @@ package compiler
 // expression parser in src/compiler/parser.ts.
 //
 // Exotic forms - object/array creation, lambdas, method references, switch
-// expressions, class literals and record patterns - are stubbed (recovered)
-// here and arrive with their own slice; no current test exercises them.
+// expressions, class literals and record patterns - are parsed here too;
+// parser_exotic_test.go exercises them.
 
 func (p *Parser) isStartOfExpression() bool {
 	switch p.token() {
