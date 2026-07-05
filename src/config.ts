@@ -227,6 +227,8 @@ export interface CappuConfig extends z.infer<typeof ConfigFileSchema> {
   baseDir: string;
   /** Whether an actual cappu.json was read (false: pure defaults). */
   fromFile: boolean;
+  /** Absolute path of the loaded cappu.json; unset when pure defaults. */
+  configPath?: string;
 }
 
 export const DEFAULT_CONFIG_NAME = "cappu.json";
@@ -410,7 +412,7 @@ export function loadConfig(explicitPath?: string, cwd = process.cwd()): CappuCon
   if (!result.success) {
     throw new Error(`invalid ${path}:\n${z.prettifyError(result.error)}`);
   }
-  return { ...result.data, baseDir, fromFile: true };
+  return { ...result.data, baseDir, fromFile: true, configPath: path };
 }
 
 /** Resolve a (possibly relative) config path entry against the config's directory. */

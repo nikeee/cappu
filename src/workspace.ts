@@ -4,8 +4,8 @@
 // expected (and vice versa): pathToUri/uriToPath convert, the LSP boundary and
 // synthetic-stub registrations cast.
 
-import { globSync, readFileSync } from "node:fs";
-import { join, matchesGlob, relative } from "node:path";
+import { globSync, readFileSync, statSync } from "node:fs";
+import { basename, join, matchesGlob, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { type Brand } from "./brand.ts";
@@ -67,6 +67,59 @@ export function loadJavaFiles(rootDir: string): Array<{ uri: Uri; text: string }
     uri: pathToUri(path),
     text: readFileSync(path, "utf8"),
   }));
+}
+
+/**
+ * Map every .jar/.class file reachable from the config's classPath entries to
+ * its mtime - exactly the set loadClassPath reads. Map inequality means the
+ * classpath changed (add, remove, replace); directory mtimes are deliberately
+ * not used (unreliable for nested changes).
+ */
+export function classpathFingerprint(config: CappuConfig): Map<string, number> {
+  const fp = new Map<string, number>();
+  const stat = (path: string): void => {
+    try {
+      fp.set(path, statSync(path).mtimeMs);
+    } catch {
+      // vanished between listing and stat: contributes nothing
+    }
+  };
+  for (const p of config.compilerOptions.classPath) {
+    const entry = resolveConfigPath(config, p);
+    if (entry.endsWith(".jar")) {
+      stat(entry);
+      continue;
+    }
+    let matches: string[];
+    try {
+      matches = globSync("**/*.{jar,class}", { cwd: entry });
+    } catch {
+      continue;
+    }
+    for (const rel of matches) stat(join(entry, rel));
+  }
+  return fp;
+}
+
+/**
+ * The LSP client watch set: source .java files, the loaded cappu.json (by
+ * name), and every configured classPath entry (a dir as a jar/class glob, a
+ * .jar as itself). Computed once from the startup config.
+ * ponytail: a config edit that changes classPath keeps the old watch set until
+ * restart; re-register after a config reload if that ever matters. Absolute
+ * globs only fire inside the workspace folders, so classpath entries outside
+ * the root are not watched (the MCP server's per-call polling has no such
+ * limit).
+ */
+export function configWatchGlobs(config: CappuConfig | undefined): string[] {
+  const globs = ["**/*.java"];
+  if (config?.configPath === undefined) return globs;
+  globs.push("**/" + basename(config.configPath));
+  for (const p of config.compilerOptions.classPath) {
+    const entry = resolveConfigPath(config, p).replaceAll("\\", "/");
+    globs.push(entry.endsWith(".jar") ? entry : entry + "/**/*.{jar,class}");
+  }
+  return globs;
 }
 
 /** Every .java file under the configured sourcePaths (a project build's inputs). */

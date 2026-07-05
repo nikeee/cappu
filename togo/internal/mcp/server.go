@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -53,6 +54,10 @@ type Server struct {
 	w      io.Writer
 	wmu    sync.Mutex
 	mtimes map[string]int64
+	// cpFingerprint/configMtime detect classpath and cappu.json changes
+	// between tool calls (see refresh).
+	cpFingerprint map[string]int64
+	configMtime   int64
 
 	registry []toolDef
 }
@@ -68,24 +73,40 @@ type toolDef struct {
 
 // NewServer builds the MCP server from the project config (may be nil).
 func NewServer(cfg *config.Config) *Server {
-	program := compiler.NewProgram()
-	compiler.InstallJdkTypes(program, cfg)
+	s := &Server{}
+	s.rebuild(cfg)
+	s.registerTools()
+	return s
+}
+
+// rebuild replaces the whole semantic state from cfg. A classpath or config
+// change cannot be patched incrementally (LoadClassPath never removes stubs
+// for classes that disappeared), so program, checker and tools are rebuilt
+// from scratch exactly like at startup. Tool handlers read s.tools/s.project
+// at call time, so registerTools need not re-run.
+func (s *Server) rebuild(cfg *config.Config) {
+	s.config = cfg
+	s.program = compiler.NewProgram()
+	compiler.InstallJdkTypes(s.program, cfg)
 	if cfg != nil {
-		loadConfiguredSources(program, cfg)
+		loadConfiguredSources(s.program, cfg)
 	}
-	checker := compiler.NewChecker(program)
-	s := &Server{
-		program: program,
-		checker: checker,
-		tools:   NewTools(program, checker),
-		config:  cfg,
-		mtimes:  map[string]int64{},
-	}
+	s.checker = compiler.NewChecker(s.program)
+	s.tools = NewTools(s.program, s.checker)
 	if cfg != nil {
 		s.project = NewProjectTools(cfg, ProjectToolDeps{})
 	}
-	s.registerTools()
-	return s
+	s.mtimes = map[string]int64{}
+	s.cpFingerprint = nil
+	s.configMtime = 0
+	if cfg != nil {
+		s.cpFingerprint = classpathFingerprint(cfg)
+		if cfg.ConfigPath != "" {
+			if info, err := os.Stat(cfg.ConfigPath); err == nil {
+				s.configMtime = info.ModTime().UnixNano()
+			}
+		}
+	}
 }
 
 // Serve runs the MCP server over stdio.
@@ -261,11 +282,34 @@ func refArg(args json.RawMessage) string {
 	return a.Ref
 }
 
-// refresh re-reads any source .java file whose mtime changed (or that is new)
-// so tool results stay current with on-disk edits between calls.
+// refresh keeps tool results current with on-disk changes between calls.
+// A cappu.json edit reloads the config and rebuilds everything (malformed
+// edits keep the last good config, logged once); a classpath change (jar
+// added/removed/replaced, e.g. by `cappu install`) rebuilds too. Source
+// .java files are re-read individually by mtime. A config file appearing
+// (server started without one) or disappearing is deliberately not handled:
+// the tool list is a startup snapshot.
 func (s *Server) refresh() {
 	if s.config == nil {
 		return
+	}
+	if s.config.ConfigPath != "" {
+		if info, err := os.Stat(s.config.ConfigPath); err == nil {
+			if mtime := info.ModTime().UnixNano(); mtime != s.configMtime {
+				// Record first: a broken file logs once, not per call, and is
+				// retried only when it changes again.
+				s.configMtime = mtime
+				next, lerr := config.Load(s.config.ConfigPath, s.config.BaseDir)
+				if lerr != nil {
+					fmt.Fprintf(os.Stderr, "cappu: %s (keeping previous config)\n", lerr)
+				} else {
+					s.rebuild(next)
+				}
+			}
+		}
+	}
+	if fp := classpathFingerprint(s.config); !maps.Equal(fp, s.cpFingerprint) {
+		s.rebuild(s.config)
 	}
 	for _, p := range s.config.CompilerOptions.SourcePaths {
 		base := s.config.ResolvePath(p)
@@ -290,6 +334,37 @@ func (s *Server) refresh() {
 			return nil
 		})
 	}
+}
+
+// classpathFingerprint maps every .jar/.class file reachable from the
+// config's classPath entries to its mtime - exactly the set LoadClassPath
+// reads. Map inequality means the classpath changed (add, remove, replace);
+// directory mtimes are deliberately not used (unreliable for nested changes).
+// Port of src/workspace.ts classpathFingerprint.
+func classpathFingerprint(cfg *config.Config) map[string]int64 {
+	fp := map[string]int64{}
+	stat := func(path string) {
+		if info, err := os.Stat(path); err == nil {
+			fp[path] = info.ModTime().UnixNano()
+		}
+	}
+	for _, p := range cfg.CompilerOptions.ClassPath {
+		entry := cfg.ResolvePath(p)
+		if strings.HasSuffix(entry, ".jar") {
+			stat(entry)
+			continue
+		}
+		_ = filepath.WalkDir(entry, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			if strings.HasSuffix(path, ".jar") || strings.HasSuffix(path, ".class") {
+				stat(path)
+			}
+			return nil
+		})
+	}
+	return fp
 }
 
 // loadConfiguredSources registers the config's classPath (.class stubs) and

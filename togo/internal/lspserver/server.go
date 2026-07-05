@@ -8,8 +8,10 @@ package lspserver
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -28,6 +30,7 @@ type Server struct {
 	config  *config.Config
 
 	docs             map[compiler.URI]string // open document text (java + cappu.json)
+	roots            []string                // workspace root URIs (re-scanned on rebuild)
 	inlayHints       services.InlayHintsSettings
 	packageSourceURL []string
 	packageSources   []packages.PackageSource
@@ -151,7 +154,7 @@ func (s *Server) register() {
 			"registrations": []map[string]any{{
 				"id":              "watch-java",
 				"method":          "workspace/didChangeWatchedFiles",
-				"registerOptions": map[string]any{"watchers": []map[string]any{{"globPattern": "**/*.java"}}},
+				"registerOptions": map[string]any{"watchers": s.fileWatchers()},
 			}},
 		})
 		s.warnMissingConfiguredPaths()
@@ -218,6 +221,7 @@ func (s *Server) onInitialize(params json.RawMessage) (any, *lsp.ResponseError) 
 	if len(roots) == 0 && p.RootURI != "" {
 		roots = []string{p.RootURI}
 	}
+	s.roots = roots
 	for _, root := range roots {
 		for _, f := range loadJavaFiles(uriToPath(compiler.URI(root))) {
 			s.program.AddProjectFile(compiler.URI(f[0]), f[1])
@@ -300,20 +304,117 @@ func applyContentChange(text string, change lsp.TextDocumentContentChangeEvent) 
 	return text[:start] + change.Text + text[end:]
 }
 
+// fileWatchers is the watch set requested from the client: source .java
+// files, the loaded cappu.json (by name), and every configured classPath
+// entry (a dir as a jar/class glob, a .jar as itself). Computed once from the
+// startup config. Port of configWatchGlobs in src/workspace.ts.
+// ponytail: a config edit that changes classPath keeps the old watch set until
+// restart; re-register after reloadConfig if that ever matters. Absolute globs
+// only fire inside the workspace folders, so classpath entries outside the
+// root are not watched (the MCP server's per-call polling has no such limit).
+func (s *Server) fileWatchers() []map[string]any {
+	watchers := []map[string]any{{"globPattern": "**/*.java"}}
+	if s.config == nil || s.config.ConfigPath == "" {
+		return watchers
+	}
+	watchers = append(watchers, map[string]any{"globPattern": "**/" + filepath.Base(s.config.ConfigPath)})
+	for _, p := range s.config.CompilerOptions.ClassPath {
+		entry := filepath.ToSlash(s.config.ResolvePath(p))
+		if strings.HasSuffix(entry, ".jar") {
+			watchers = append(watchers, map[string]any{"globPattern": entry})
+		} else {
+			watchers = append(watchers, map[string]any{"globPattern": entry + "/**/*.{jar,class}"})
+		}
+	}
+	return watchers
+}
+
+// rebuild replaces the program and checker from the current config. A
+// classpath or config change cannot be patched incrementally (LoadClassPath
+// never removes stubs for classes that disappeared), so the workspace is
+// rebuilt from scratch exactly like at startup, then the open documents are
+// re-injected (they overlay disk state and must survive) and re-validated.
+func (s *Server) rebuild() {
+	program := compiler.NewProgram()
+	compiler.InstallJdkTypes(program, s.config)
+	if s.config != nil {
+		loadConfiguredSources(program, s.config)
+	}
+	for _, root := range s.roots {
+		for _, f := range loadJavaFiles(uriToPath(compiler.URI(root))) {
+			program.AddProjectFile(compiler.URI(f[0]), f[1])
+		}
+	}
+	for uri, text := range s.docs {
+		if isJavaURI(string(uri)) {
+			// version 0 is safe: the fresh program has no cached parses.
+			program.SetOpenDocument(uri, text, 0)
+		}
+	}
+	s.program = program
+	s.checker = compiler.NewChecker(program, nullnessConfig(s.config))
+	for _, uri := range program.GetOpenUris() {
+		s.validate(uri)
+	}
+}
+
+// reloadConfig re-reads cappu.json and reports whether it applied. A
+// malformed edit keeps the last good config (logged as a warning); the file
+// is re-read on the next watched change. A config file appearing (server
+// started without one) or disappearing is deliberately not handled.
+func (s *Server) reloadConfig() bool {
+	if s.config == nil || s.config.ConfigPath == "" {
+		return false
+	}
+	next, err := config.Load(s.config.ConfigPath, s.config.BaseDir)
+	if err != nil {
+		_ = s.conn.Notify("window/logMessage", map[string]any{
+			"type":    2, // Warning
+			"message": fmt.Sprintf("%s (keeping previous config)", err),
+		})
+		return false
+	}
+	s.config = next
+	s.packageSourceURL = next.PackageSources
+	s.packageSources = nil
+	s.latestCache = map[string]latestEntry{}
+	s.inlayHints = services.DefaultInlayHints
+	if h := next.LspOptions.InlayHints; h != nil {
+		s.inlayHints = services.InlayHintsSettings{ParameterNames: *h.ParameterNames, VarTypes: *h.VarTypes}
+	}
+	return true
+}
+
 func (s *Server) onDidChangeWatchedFiles(params json.RawMessage) {
 	p := decode[lsp.DidChangeWatchedFilesParams](params)
+	needsRebuild := false
 	for _, event := range p.Changes {
 		uri := compiler.URI(event.URI)
-		if event.Type == lsp.FileChangeDeleted {
-			s.program.RemoveProjectFile(uri)
-			continue
+		switch {
+		case isJavaURI(event.URI):
+			if event.Type == lsp.FileChangeDeleted {
+				s.program.RemoveProjectFile(uri)
+				continue
+			}
+			text, err := os.ReadFile(string(uriToPath(uri)))
+			if err != nil {
+				s.program.RemoveProjectFile(uri)
+				continue
+			}
+			s.program.AddProjectFile(uri, string(text))
+		case s.config != nil && string(uriToPath(uri)) == s.config.ConfigPath:
+			// deletes are ignored: keep the last good config
+			if event.Type != lsp.FileChangeDeleted && s.reloadConfig() {
+				needsRebuild = true
+			}
+		case strings.HasSuffix(event.URI, ".jar") || strings.HasSuffix(event.URI, ".class"):
+			needsRebuild = true
 		}
-		text, err := os.ReadFile(string(uriToPath(uri)))
-		if err != nil {
-			s.program.RemoveProjectFile(uri)
-			continue
-		}
-		s.program.AddProjectFile(uri, string(text))
+		// anything else (e.g. a nested cappu.json in a subdirectory) is ignored
+	}
+	if needsRebuild {
+		s.rebuild() // validates every open doc
+		return
 	}
 	for _, uri := range s.program.GetOpenUris() {
 		s.validate(uri)

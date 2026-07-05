@@ -513,3 +513,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-02 14:28 — analyze the every sub-command and look out for unexpected, wrong or diverging behaviour. fan out agents
 - 2026-07-04 01:38 — fix them
 - 2026-07-04 15:23 — resolve https://github.com/nikeee/cappu/issues/40
+- 2026-07-05 20:01 — can we implement a detection on when dependencies are refreshed? for example, using IPC and/or sime watcher on the classpath files/cappu.json? similar to vite detects package.json changes? is this feasable and easy to build?

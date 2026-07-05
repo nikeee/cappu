@@ -354,6 +354,11 @@ Seeded from tsgo; not yet exercised here.
   re-resolve the symbol from the identifier at the item's `selectionRange` start.
   `TypeHierarchyItem` / `CallHierarchyItem` are hand-rolled in `internal/lsp` like
   the rest. Both backends do this identically.
+- **Mutable server state: TS closures capture bindings, Go uses struct fields.**
+  For the config/classpath live reload, the Go servers rebuild by reassigning
+  `s.program`/`s.checker`; the TS mirror only needs `const` -> `let` on the same
+  bindings - every closure reads the binding at call time, so no holder object
+  or re-registration is required. Same shape both sides, one-line diff in TS.
 - **"Needs the unported X" comments rot**: when a port lands out of order, any
   workaround written against a then-missing piece (and its comment) must be
   revisited once that piece lands. The MCP/LSP servers skipped classpath loading

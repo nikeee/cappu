@@ -55,7 +55,12 @@ import { getCodeLenses } from "./codeLens.ts";
 import { dependencyLenses } from "./dependencyLens.ts";
 import { loadConfiguredPaths, missingConfiguredPaths } from "../compiler/compiler.ts";
 import { getCompletions } from "./completions.ts";
-import { type CappuConfig, DEFAULT_CONFIG_NAME, DEFAULT_PACKAGE_SOURCES } from "../config.ts";
+import {
+  type CappuConfig,
+  DEFAULT_CONFIG_NAME,
+  DEFAULT_PACKAGE_SOURCES,
+  loadConfig,
+} from "../config.ts";
 import { latestVersion, MavenRepositorySource, type PackageSource } from "../packages/index.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
 import { enclosingCall, getHoverText } from "./hover.ts";
@@ -103,7 +108,7 @@ import {
   SyntaxKind,
 } from "../compiler/types.ts";
 import { isValidIdentifier, skipTrivia } from "../compiler/utilities.ts";
-import { type Uri, isSyntheticUri, loadJavaFiles, uriToPath } from "../workspace.ts";
+import { type Uri, configWatchGlobs, isSyntheticUri, loadJavaFiles, uriToPath } from "../workspace.ts";
 
 /** The stream pair the server speaks JSON-RPC over (default: stdio). */
 export interface Transport {
@@ -126,9 +131,11 @@ export function startServer(
   const asUri = (uri: string): Uri => uri as Uri;
 
   const documents = new TextDocuments(TextDocument);
-  const program = createProgram();
+  let program = createProgram();
   installJdkTypes(program, config);
-  const checker = createChecker(program, config?.compilerOptions.nullness);
+  let checker = createChecker(program, config?.compilerOptions.nullness);
+  // Workspace root URIs from initialize, re-scanned on a workspace rebuild.
+  let workspaceRoots: string[] = [];
 
   // Inlay-hint configuration: seeded from initializationOptions.inlayHints and
   // updatable via workspace/didChangeConfiguration ({ javalsp: { inlayHints } }).
@@ -148,6 +155,7 @@ export function startServer(
     // before any file is opened. Open documents later override these.
     const roots =
       params.workspaceFolders?.map(f => f.uri) ?? (params.rootUri ? [params.rootUri] : []);
+    workspaceRoots = roots;
     for (const root of roots) {
       try {
         for (const { uri, text } of loadJavaFiles(uriToPath(asUri(root)))) {
@@ -232,7 +240,7 @@ export function startServer(
   connection.onInitialized(() => {
     void connection.client
       .register(DidChangeWatchedFilesNotification.type, {
-        watchers: [{ globPattern: "**/*.java" }],
+        watchers: configWatchGlobs(activeConfig).map(globPattern => ({ globPattern })),
       })
       .catch(() => {
         // The client does not support dynamic file-watcher registration.
@@ -247,19 +255,89 @@ export function startServer(
     }
   });
 
-  connection.onDidChangeWatchedFiles(params => {
-    for (const event of params.changes) {
-      if (event.type === FileChangeType.Deleted) {
-        program.removeProjectFile(asUri(event.uri));
-        continue;
-      }
+  // rebuildWorkspace replaces the program and checker from the current config.
+  // A classpath or config change cannot be patched incrementally (loadClassPath
+  // never removes stubs for classes that disappeared), so the workspace is
+  // rebuilt from scratch exactly like at startup, then the open documents are
+  // re-injected (they overlay disk state and must survive) and re-validated.
+  function rebuildWorkspace(): void {
+    const next = createProgram();
+    installJdkTypes(next, activeConfig);
+    if (activeConfig) loadConfiguredPaths(next, activeConfig);
+    for (const root of workspaceRoots) {
       try {
-        // Created or Changed: (re-)read from disk. An open editor document still
-        // wins inside the Program; updating the disk copy keeps didClose honest.
-        program.addProjectFile(asUri(event.uri), readFileSync(uriToPath(asUri(event.uri)), "utf8"));
+        for (const { uri, text } of loadJavaFiles(uriToPath(asUri(root)))) {
+          next.addProjectFile(uri, text);
+        }
       } catch {
-        program.removeProjectFile(asUri(event.uri)); // unreadable: treat as gone
+        // non-file root or unreadable directory: ignore
       }
+    }
+    for (const doc of documents.all()) {
+      if (isJavaUri(doc.uri)) next.setOpenDocument(asUri(doc.uri), doc.getText(), doc.version);
+    }
+    program = next;
+    checker = createChecker(program, activeConfig?.compilerOptions.nullness);
+    for (const uri of program.getOpenUris()) {
+      const sourceFile = program.getSourceFile(uri);
+      if (sourceFile) validate(uri, sourceFile);
+    }
+  }
+
+  // reloadConfig re-reads cappu.json and reports whether it applied. A
+  // malformed edit keeps the last good config (logged as a warning); the file
+  // is re-read on the next watched change. A config file appearing (server
+  // started without one) or disappearing is deliberately not handled.
+  function reloadConfig(): boolean {
+    if (activeConfig?.configPath === undefined) return false;
+    let next: CappuConfig;
+    try {
+      next = loadConfig(activeConfig.configPath);
+    } catch (e) {
+      connection.console.warn(`${(e as Error).message} (keeping previous config)`);
+      return false;
+    }
+    activeConfig = next;
+    packageSourceUrls = next.packageSources;
+    packageSources = undefined;
+    latestCache.clear();
+    inlayHintSettings = { ...DEFAULT_INLAY_HINTS };
+    applyInlayHintSettings(next.lspOptions.inlayHints);
+    return true;
+  }
+
+  connection.onDidChangeWatchedFiles(params => {
+    let needsRebuild = false;
+    for (const event of params.changes) {
+      if (isJavaUri(event.uri)) {
+        if (event.type === FileChangeType.Deleted) {
+          program.removeProjectFile(asUri(event.uri));
+          continue;
+        }
+        try {
+          // Created or Changed: (re-)read from disk. An open editor document still
+          // wins inside the Program; updating the disk copy keeps didClose honest.
+          program.addProjectFile(
+            asUri(event.uri),
+            readFileSync(uriToPath(asUri(event.uri)), "utf8"),
+          );
+        } catch {
+          program.removeProjectFile(asUri(event.uri)); // unreadable: treat as gone
+        }
+      } else if (
+        activeConfig?.configPath !== undefined &&
+        uriToPath(asUri(event.uri)) === activeConfig.configPath
+      ) {
+        // deletes are ignored: keep the last good config
+        if (event.type !== FileChangeType.Deleted && reloadConfig()) needsRebuild = true;
+      } else if (event.uri.endsWith(".jar") || event.uri.endsWith(".class")) {
+        needsRebuild = true;
+      }
+      // anything else (e.g. a nested cappu.json in a subdirectory) is ignored
+    }
+    if (needsRebuild) {
+      rebuildWorkspace(); // validates every open doc
+      return;
     }
     // Cross-file resolution may have changed for everything that is open.
     for (const uri of program.getOpenUris()) {

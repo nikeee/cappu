@@ -119,6 +119,9 @@ type Config struct {
 	// against it. FromFile reports whether an actual cappu.json was read.
 	BaseDir  string `json:"-"`
 	FromFile bool   `json:"-"`
+	// ConfigPath is the absolute path of the loaded cappu.json; empty when
+	// pure defaults. Mirrors CappuConfig.configPath.
+	ConfigPath string `json:"-"`
 }
 
 // Load reads the config from explicitPath, or from cwd/cappu.json. A missing
@@ -164,6 +167,7 @@ func Load(explicitPath, cwd string) (*Config, error) {
 	}
 	cfg.BaseDir = filepath.Dir(path)
 	cfg.FromFile = true
+	cfg.ConfigPath = path
 	return cfg, nil
 }
 

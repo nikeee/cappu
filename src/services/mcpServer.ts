@@ -8,36 +8,95 @@ import { readFileSync, statSync } from "node:fs";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { z } from "zod";
 
 import { createChecker } from "../compiler/checker.ts";
 import { loadConfiguredPaths } from "../compiler/compiler.ts";
 import { installJdkTypes } from "../compiler/jdkTypes.ts";
 import { createProgram } from "../compiler/program.ts";
-import type { CappuConfig } from "../config.ts";
-import { findSourceJavaFiles, pathToUri } from "../workspace.ts";
+import { type CappuConfig, loadConfig } from "../config.ts";
+import { classpathFingerprint, findSourceJavaFiles, pathToUri } from "../workspace.ts";
 import { createMcpTools } from "./mcp.ts";
 import { createProjectTools } from "./mcpProject.ts";
 
 /**
  * Build the program/checker from the project config, register every tool, and
- * connect a stdio transport. Returns once connected; the transport keeps the
- * process alive.
+ * connect the transport (stdio by default). Returns once connected; the
+ * transport keeps the process alive.
  */
-export async function startMcpServer(config?: CappuConfig): Promise<void> {
-  const program = createProgram();
-  installJdkTypes(program, config);
-  if (config) loadConfiguredPaths(program, config);
-  const checker = createChecker(program);
-  const tools = createMcpTools(program, checker);
-
-  // Agents edit files on disk between calls. Re-read any source .java file whose
-  // mtime changed (or that is new) before each tool call so results stay
-  // current. addProjectFile clears that file's parse/bind cache, so the next
-  // query re-parses only what is stale.
+export async function startMcpServer(
+  config?: CappuConfig,
+  transport: Transport = new StdioServerTransport(),
+): Promise<void> {
+  let program = createProgram();
+  let checker = createChecker(program);
+  let tools = createMcpTools(program, checker);
+  let project: ReturnType<typeof createProjectTools> | undefined;
   const mtimes = new Map<string, number>();
+  let cpFingerprint = new Map<string, number>();
+  let configMtime: number | undefined;
+
+  // rebuild replaces the whole semantic state from cfg. A classpath or config
+  // change cannot be patched incrementally (loadClassPath never removes stubs
+  // for classes that disappeared), so program, checker and tools are rebuilt
+  // from scratch exactly like at startup. Tool handlers read the bindings at
+  // call time, so registration need not re-run.
+  function rebuild(cfg?: CappuConfig): void {
+    config = cfg;
+    program = createProgram();
+    installJdkTypes(program, cfg);
+    if (cfg) loadConfiguredPaths(program, cfg);
+    checker = createChecker(program);
+    tools = createMcpTools(program, checker);
+    if (cfg) project = createProjectTools(cfg);
+    mtimes.clear();
+    cpFingerprint = new Map();
+    configMtime = undefined;
+    if (cfg) {
+      cpFingerprint = classpathFingerprint(cfg);
+      if (cfg.configPath !== undefined) {
+        try {
+          configMtime = statSync(cfg.configPath).mtimeMs;
+        } catch {
+          // config file unreadable: treated as unchanged until it reappears
+        }
+      }
+    }
+  }
+  rebuild(config);
+
+  // refresh keeps tool results current with on-disk changes between calls.
+  // A cappu.json edit reloads the config and rebuilds everything (malformed
+  // edits keep the last good config, logged once); a classpath change (jar
+  // added/removed/replaced, e.g. by `cappu install`) rebuilds too. Source
+  // .java files are re-read individually by mtime. A config file appearing
+  // (server started without one) or disappearing is deliberately not handled:
+  // the tool list is a startup snapshot.
   function refresh(): void {
     if (!config) return;
+    if (config.configPath !== undefined) {
+      let mtime: number | undefined;
+      try {
+        mtime = statSync(config.configPath).mtimeMs;
+      } catch {
+        // config deleted mid-run: keep the last good state
+      }
+      if (mtime !== undefined && mtime !== configMtime) {
+        // Record first: a broken file logs once, not per call, and is retried
+        // only when it changes again.
+        configMtime = mtime;
+        try {
+          rebuild(loadConfig(config.configPath));
+        } catch (e) {
+          process.stderr.write(`cappu: ${(e as Error).message} (keeping previous config)\n`);
+        }
+      }
+    }
+    const fp = classpathFingerprint(config);
+    if (fp.size !== cpFingerprint.size || [...fp].some(([k, v]) => cpFingerprint.get(k) !== v)) {
+      rebuild(config);
+    }
     for (const path of findSourceJavaFiles(config)) {
       let mtime: number;
       try {
@@ -246,8 +305,6 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
   // only make sense with a loaded project config. They do not touch the Java
   // program (no refresh()).
   if (config) {
-    const project = createProjectTools(config);
-
     server.registerTool(
       "audit",
       {
@@ -255,7 +312,7 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
           "Scan the project's resolved dependencies (transitive) for known vulnerabilities (OSV).",
         inputSchema: {},
       },
-      async () => ok(await project.audit()),
+      async () => ok(await project!.audit()),
     );
 
     server.registerTool(
@@ -265,7 +322,7 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
           "List every resolved dependency and the license it ships under (best-effort SPDX).",
         inputSchema: {},
       },
-      async () => ok(await project.licenses()),
+      async () => ok(await project!.licenses()),
     );
 
     server.registerTool(
@@ -275,7 +332,7 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
           "Search the configured package sources; returns group:artifact:version coords.",
         inputSchema: { query: z.string() },
       },
-      async args => ok(await project.searchPackages(args)),
+      async args => ok(await project!.searchPackages(args)),
     );
 
     server.registerTool(
@@ -285,7 +342,7 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
           "Declared dependencies with a newer conflict-free stable version available (preview of `cappu update`; writes nothing).",
         inputSchema: {},
       },
-      async () => ok(await project.outdated()),
+      async () => ok(await project!.outdated()),
     );
 
     server.registerTool(
@@ -294,7 +351,7 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
         description: "The newest published version of a `group:artifact` across the sources.",
         inputSchema: { coord: z.string() },
       },
-      async args => ok(await project.latestVersion(args)),
+      async args => ok(await project!.latestVersion(args)),
     );
 
     server.registerTool(
@@ -304,9 +361,9 @@ export async function startMcpServer(config?: CappuConfig): Promise<void> {
           "The resolved transitive dependency graph, or - with `coord` (group:artifact:version) - the path that pulls it onto the classpath.",
         inputSchema: { coord: z.string().optional() },
       },
-      async args => ok(await project.dependencyTree(args)),
+      async args => ok(await project!.dependencyTree(args)),
     );
   }
 
-  await server.connect(new StdioServerTransport());
+  await server.connect(transport);
 }

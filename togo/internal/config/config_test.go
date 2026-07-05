@@ -29,6 +29,9 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if !cfg.FromFile {
 		t.Error("FromFile should be true when a file was read")
 	}
+	if cfg.ConfigPath != path {
+		t.Errorf("ConfigPath = %q, want %q", cfg.ConfigPath, path)
+	}
 	if cfg.Version != "1.2.3" {
 		t.Errorf("version = %q, want 1.2.3", cfg.Version)
 	}
