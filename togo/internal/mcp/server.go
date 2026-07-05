@@ -500,7 +500,7 @@ func validateArgs(t toolDef, args json.RawMessage) error {
 	var m map[string]any
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &m); err != nil {
-			return fmt.Errorf("invalid arguments for %s: %v", t.name, err)
+			return fmt.Errorf("invalid arguments for %s: %w", t.name, err)
 		}
 	}
 	required, _ := t.inputSchema["required"].([]string)
