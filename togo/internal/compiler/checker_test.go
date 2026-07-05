@@ -390,3 +390,131 @@ func TestNoFalsePositives(t *testing.T) {
 		}
 	}
 }
+
+// Fields that can be 'final' (nikeee/cappu#38, code 1317).
+// Port of the "can be final" tests in src/compiler/checker.test.ts.
+
+func TestFieldCanBeFinalWithInitializer(t *testing.T) {
+	cases := []struct {
+		text string
+		want []string
+	}{
+		{"class C { private int x = 1; int use() { return x; } }", []string{"Field 'x' can be 'final'."}},
+		{"class C { private static String S = \"s\"; }", []string{"Field 'S' can be 'final'."}},
+		// multi-declarator: all declarators clean -> all reported
+		{"class C { private int a = 1, b = 2; }", []string{"Field 'a' can be 'final'.", "Field 'b' can be 'final'."}},
+	}
+	for _, tc := range cases {
+		got := checkerSetup(tc.text).diagsWithCode(1317)
+		if !eqStrings(got, tc.want) {
+			t.Errorf("%q -> %v, want %v", tc.text, got, tc.want)
+		}
+	}
+}
+
+func TestFieldCanBeFinalIsSuggestionOnName(t *testing.T) {
+	ctx := checkerSetup("class C { private int count = 1; }")
+	sf := ctx.program.GetSourceFile(ctx.uri)
+	for _, d := range ctx.checker.GetSemanticDiagnostics(sf) {
+		if d.Code != 1317 {
+			continue
+		}
+		if d.Category != CategorySuggestion {
+			t.Errorf("category = %v, want CategorySuggestion", d.Category)
+		}
+		if got := sf.AsSourceFile().Text[d.Pos:d.End]; got != "count" {
+			t.Errorf("range spans %q, want \"count\"", got)
+		}
+		return
+	}
+	t.Fatal("no 1317 diagnostic reported")
+}
+
+func TestFieldCanBeFinalReassignedStaysSilent(t *testing.T) {
+	cases := []string{
+		"class C { private int x = 1; void m() { x = 2; } }",
+		"class C { private int x = 1; void m() { x += 2; } }",
+		"class C { private int x = 1; void m() { x++; } }",
+		"class C { private int x = 1; void m() { --x; } }",
+		"class C { private int x = 1; void m() { this.x = 2; } }",
+		"class C { private int x = 1; void m(C o) { o.x = 2; } }",
+		// writes from a nested class or lambda in the same file count too
+		"class C { private int x = 1; class N { void m() { x = 2; } } }",
+		"class C { private int x = 1; Runnable r = () -> { x = 2; }; }",
+		// multi-declarator is all-or-nothing: one written declarator silences the field
+		"class C { private int a = 1, b = 2; void m() { b = 3; } }",
+	}
+	for _, text := range cases {
+		if got := checkerSetup(text).diagsWithCode(1317); got != nil {
+			t.Errorf("%q -> %v, want none", text, got)
+		}
+	}
+}
+
+func TestFieldCanBeFinalIneligibleModifiers(t *testing.T) {
+	cases := []string{
+		"class C { private final int x = 1; }",
+		"class C { private volatile int x = 1; }",
+		"class C { int x = 1; }",
+		"class C { public int x = 1; }",
+	}
+	for _, text := range cases {
+		if got := checkerSetup(text).diagsWithCode(1317); got != nil {
+			t.Errorf("%q -> %v, want none", text, got)
+		}
+	}
+}
+
+func TestFieldCanBeFinalCtorAssigned(t *testing.T) {
+	want := []string{"Field 'x' can be 'final'."}
+	cases := []string{
+		"class C { private int x; C(int v) { this.x = v; } }",
+		// bare-name assignment counts too
+		"class C { private int x; C() { x = 1; } }",
+		// every constructor assigns exactly once
+		"class C { private int x; C() { x = 1; } C(int v) { x = v; } }",
+		// a delegating constructor must not assign (the delegate already did)
+		"class C { private int x; C() { this(1); } C(int v) { x = v; } }",
+	}
+	for _, text := range cases {
+		if got := checkerSetup(text).diagsWithCode(1317); !eqStrings(got, want) {
+			t.Errorf("%q -> %v, want %v", text, got, want)
+		}
+	}
+}
+
+func TestFieldCanBeFinalCtorUnprovableStaysSilent(t *testing.T) {
+	cases := []string{
+		// some constructor does not assign
+		"class C { private int x; C() { x = 1; } C(int v) { } }",
+		// no constructor at all
+		"class C { private int x; }",
+		// assigned twice in one constructor
+		"class C { private int x; C() { x = 1; x = 2; } }",
+		// initializer AND constructor write would double-assign a final field
+		"class C { private int x = 1; C() { x = 2; } }",
+		// assignment nested in a conditional/loop is not a top-level statement
+		"class C { private int x; C(boolean b) { if (b) { x = 1; } } }",
+		"class C { private int x; C() { for (int i = 0; i < 2; i++) { x = i; } } }",
+		// an early return could skip the assignment
+		"class C { private int x; C(boolean b) { if (b) return; x = 1; } }",
+		// a delegating constructor that ALSO assigns would double-assign
+		"class C { private int x; C() { this(1); x = 2; } C(int v) { x = v; } }",
+		// assignment through another instance is illegal on a blank final
+		"class C { private int x; C(C o) { o.x = 1; } }",
+		// compound assignment is a read-modify-write, never valid on a blank final
+		"class C { private int x; C() { x += 1; } }",
+		// written in a method too
+		"class C { private int x; C() { x = 1; } void m() { x = 2; } }",
+		// initializer-block assignment is deferred (static and instance)
+		"class C { private static int x; static { x = 1; } }",
+		"class C { private int x; C() {} { x = 1; } }",
+		// a recovered parse stays silent
+		"class C { private int x = 1; void m() { int = ; } }",
+	}
+	for _, text := range cases {
+		if got := checkerSetup(text).diagsWithCode(1317); got != nil {
+			t.Errorf("%q -> %v, want none", text, got)
+		}
+	}
+}

@@ -439,6 +439,196 @@ func (c *Checker) GetDeprecatedUses(sourceFile *Node) []DeprecatedUse {
 	return uses
 }
 
+// getFieldsThatCanBeFinal returns the declarators of private fields that are
+// never reassigned - assigned only by their initializer, or exactly once in
+// every constructor - and can therefore be declared `final` (nikeee/cappu#38).
+// The `private` gate keeps a whole-file analysis sound: every legal write site
+// is in this compilation unit. When a write cannot be classified, stay silent -
+// the suggestion must never propose a `final` that fails to compile.
+// Port of getFieldsThatCanBeFinal in src/compiler/checker.ts.
+func (c *Checker) getFieldsThatCanBeFinal(sourceFile *Node) []*Node {
+	data := sourceFile.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+
+	var fields []*Node                        // candidate FieldDeclarations, in source order
+	writes := map[*Symbol][]*Node{}           // field symbol -> assignment target nodes
+	unresolvedWriteNames := map[string]bool{} // disqualify by name when unresolvable
+
+	recordWrite := func(target *Node) {
+		// Only a bare name or a member access writes a variable binding
+		// (a[i] = x writes the array element, not the field itself).
+		var name *Node
+		switch target.Kind {
+		case Identifier:
+			name = target
+		case PropertyAccessExpression:
+			name = target.AsPropertyAccessExpression().Name
+		default:
+			return
+		}
+		sym := c.ResolveName(name)
+		if sym == nil {
+			unresolvedWriteNames[name.AsIdentifier().Text] = true
+			return
+		}
+		writes[sym] = append(writes[sym], target)
+	}
+
+	var walk func(node *Node)
+	walk = func(node *Node) {
+		switch node.Kind {
+		case FieldDeclaration:
+			fd := node.AsFieldDeclaration()
+			if hasModifierKind(fd.Modifiers, PrivateKeyword) &&
+				!hasModifierKind(fd.Modifiers, FinalKeyword) &&
+				!hasModifierKind(fd.Modifiers, VolatileKeyword) {
+				fields = append(fields, node)
+			}
+		case AssignmentExpression:
+			recordWrite(node.AsAssignmentExpression().Left)
+		case PrefixUnaryExpression:
+			u := node.AsPrefixUnaryExpression()
+			if u.Operator == PlusPlusToken || u.Operator == MinusMinusToken {
+				recordWrite(u.Operand)
+			}
+		case PostfixUnaryExpression:
+			u := node.AsPostfixUnaryExpression()
+			if u.Operator == PlusPlusToken || u.Operator == MinusMinusToken {
+				recordWrite(u.Operand)
+			}
+		}
+		node.ForEachChild(func(child *Node) bool {
+			walk(child)
+			return false
+		})
+	}
+	walk(sourceFile)
+
+	// A write compatible with a blank final: a plain `=` to a bare name or
+	// `this.name`, forming a whole top-level statement of a constructor body.
+	ctorOfTopLevelWrite := func(target *Node) *Node {
+		if target.Kind == PropertyAccessExpression &&
+			target.AsPropertyAccessExpression().Expression.Kind != ThisExpression {
+			return nil // other.x = ... is never a legal blank-final assignment
+		}
+		assignment := target.Parent
+		if assignment == nil || assignment.Kind != AssignmentExpression {
+			return nil
+		}
+		a := assignment.AsAssignmentExpression()
+		if a.Left != target || a.OperatorToken != EqualsToken {
+			return nil
+		}
+		statement := assignment.Parent
+		if statement == nil || statement.Kind != ExpressionStatement {
+			return nil
+		}
+		block := statement.Parent
+		if block == nil || block.Kind != Block {
+			return nil
+		}
+		ctor := block.Parent
+		if ctor == nil || ctor.Kind != ConstructorDeclaration {
+			return nil
+		}
+		return ctor
+	}
+
+	delegatesToThis := func(ctor *Node) bool {
+		stmts := arrayNodes(ctor.AsConstructorDeclaration().Body.AsBlock().Statements)
+		if len(stmts) == 0 || stmts[0].Kind != ExpressionStatement {
+			return false
+		}
+		expr := stmts[0].AsExpressionStatement().Expression
+		return expr.Kind == CallExpression && expr.AsCallExpression().Expression.Kind == ThisExpression
+	}
+
+	var containsReturn func(node *Node) bool
+	containsReturn = func(node *Node) bool {
+		if node.Kind == ReturnStatement {
+			return true
+		}
+		found := false
+		node.ForEachChild(func(child *Node) bool {
+			if containsReturn(child) {
+				found = true
+				return true
+			}
+			return false
+		})
+		return found
+	}
+
+	qualifies := func(sym *Symbol, field, declarator *Node, isStatic bool) bool {
+		if unresolvedWriteNames[declarator.AsVariableDeclarator().Name.AsIdentifier().Text] {
+			return false
+		}
+		fieldWrites := writes[sym]
+		if declarator.AsVariableDeclarator().Initializer != nil {
+			return len(fieldWrites) == 0
+		}
+		// Blank field: prove exactly one assignment per construction. Static
+		// initializer blocks are out of scope - initializer-assigned only.
+		if isStatic {
+			return false
+		}
+		var ctors []*Node
+		for _, m := range membersOf(field.Parent) {
+			if m.Kind == ConstructorDeclaration {
+				ctors = append(ctors, m)
+			}
+		}
+		if len(ctors) == 0 {
+			return false
+		}
+		perCtor := map[*Node]int{}
+		for _, write := range fieldWrites {
+			ctor := ctorOfTopLevelWrite(write)
+			if ctor == nil || !slices.Contains(ctors, ctor) {
+				return false
+			}
+			perCtor[ctor]++
+		}
+		for _, ctor := range ctors {
+			assignments := perCtor[ctor]
+			// A this(...) delegate already assigned the field; assigning again would
+			// double-assign. An early return could leave a path unassigned - order-aware
+			// flow analysis is not worth it here, so any return disqualifies.
+			if delegatesToThis(ctor) {
+				if assignments != 0 {
+					return false
+				}
+			} else if assignments != 1 || containsReturn(ctor.AsConstructorDeclaration().Body) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// A multi-declarator field is all-or-nothing: one `final` covers every
+	// declarator, so a single reassigned one silences the whole declaration.
+	var result []*Node
+	for _, field := range fields {
+		fd := field.AsFieldDeclaration()
+		isStatic := hasModifierKind(fd.Modifiers, StaticKeyword)
+		declarators := arrayNodes(fd.Declarators)
+		all := true
+		for _, d := range declarators {
+			sym := c.ResolveName(d.AsVariableDeclarator().Name)
+			if sym == nil || !qualifies(sym, field, d, isStatic) {
+				all = false
+				break
+			}
+		}
+		if all {
+			result = append(result, declarators...)
+		}
+	}
+	return result
+}
+
 // Lookup tables for GetSemanticDiagnostics, hoisted so they are not rebuilt per file.
 var narrowingRange = map[string][2]int64{
 	"byte":  {-128, 127},
@@ -1265,6 +1455,13 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			diagnostics = append(diagnostics, CreateDiagnostic(start, imp.End-start,
 				Diagnostics.UnusedImport0, entityNameToString(imp.AsImportDeclaration().Name)))
 		}
+	}
+	// Private fields that could be declared final (suggestions).
+	for _, declarator := range c.getFieldsThatCanBeFinal(sourceFile) {
+		name := declarator.AsVariableDeclarator().Name
+		start := skipTrivia(data.Text, name.Pos)
+		diagnostics = append(diagnostics, CreateDiagnostic(start, name.End-start,
+			Diagnostics.Field0CanBeFinal, name.AsIdentifier().Text))
 	}
 	// Uses of @Deprecated methods/types (warnings).
 	for _, u := range c.GetDeprecatedUses(sourceFile) {

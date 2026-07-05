@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nikeee/cappu/internal/compiler"
 	"github.com/nikeee/cappu/internal/lsp"
 )
 
@@ -266,5 +267,35 @@ func TestServerIncrementalDidChange(t *testing.T) {
 	}
 	if len(syms) != 1 || len(syms[0].Children) != 1 || syms[0].Children[0].Name != "renamed" {
 		t.Errorf("after incremental change, field = %+v, want 'renamed'", syms)
+	}
+}
+
+func TestServerMakeFieldFinalCodeAction(t *testing.T) {
+	c := startTestServer(t)
+	c.request(t, "initialize", lsp.InitializeParams{})
+	src := "class C {\n  private int x = 1;\n}\n"
+	openDoc(t, c, "file:///C.java", src)
+	result := c.request(t, "textDocument/codeAction", lsp.CodeActionParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: "file:///C.java"},
+		Range:        lsp.Range{Start: lsp.Position{Line: 1, Character: 14}, End: lsp.Position{Line: 1, Character: 14}},
+	})
+	var actions []lsp.CodeAction
+	if err := json.Unmarshal(result, &actions); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, a := range actions {
+		if a.Title == "Add 'final' modifier" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an \"Add 'final' modifier\" action, got %+v", actions)
+	}
+}
+
+func TestToSeveritySuggestionIsHint(t *testing.T) {
+	if got := toSeverity(compiler.CategorySuggestion); got != lsp.SeverityHint {
+		t.Errorf("toSeverity(CategorySuggestion) = %d, want %d", got, lsp.SeverityHint)
 	}
 }

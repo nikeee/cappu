@@ -13,6 +13,7 @@ import {
   type Annotation,
   type AssignmentExpression,
   type CallExpression,
+  type FieldDeclaration,
   type Identifier,
   type ImportDeclaration,
   type LocalVariableDeclarationStatement,
@@ -479,6 +480,41 @@ function removeRedundantOverride(
   ];
 }
 
+// --- make an effectively-final field explicitly final --------------------------
+
+// For a field the checker flagged as "can be 'final'" (1317), offer to insert
+// the modifier. Inserting right before the type lands after all existing
+// modifiers/annotations, giving the conventional `private static final T` order.
+function makeFieldFinal(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.FieldDeclaration) node = node.parent;
+  if (!node) return [];
+  const field = node as FieldDeclaration;
+  // Only when the checker actually flagged this field's declarators.
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.Field_0_can_be_final.code &&
+        d.pos >= field.pos &&
+        d.end <= field.end,
+    );
+  if (!flagged) return [];
+  const at = skipTrivia(sourceFile.text, field.type.pos);
+  return [
+    {
+      title: "Add 'final' modifier",
+      kind: "quickfix",
+      changes: [{ start: at, end: at, newText: "final " }],
+    },
+  ];
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
@@ -494,5 +530,6 @@ export function getCodeActions(
     ...removeUnusedParameter(program, checker, sourceFile, start),
     ...removeUnusedImport(sourceFile, start, end),
     ...removeRedundantOverride(checker, sourceFile, start),
+    ...makeFieldFinal(checker, sourceFile, start),
   ];
 }

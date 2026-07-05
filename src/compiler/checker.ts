@@ -81,6 +81,10 @@ import {
   type ClassDeclaration,
   type ConstructorDeclaration,
   type RecordDeclaration,
+  type ExpressionStatement,
+  type FieldDeclaration,
+  type NodeArray,
+  type PostfixUnaryExpression,
 } from "./types.ts";
 import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
 import { type DeprecatedUse, readDeprecation } from "./deprecation.ts";
@@ -2204,6 +2208,181 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
     return uses;
   }
 
+  // Private fields that are never reassigned - assigned only by their initializer,
+  // or exactly once in every constructor - can be declared `final` (nikeee/cappu#38).
+  // The `private` gate keeps a whole-file analysis sound: every legal write site is
+  // in this compilation unit. When a write cannot be classified, stay silent - the
+  // suggestion must never propose a `final` that fails to compile.
+  function getFieldsThatCanBeFinal(sourceFile: SourceFile): VariableDeclarator[] {
+    if (sourceFile.parseDiagnostics.length > 0) return [];
+
+    interface Candidate {
+      readonly field: FieldDeclaration;
+      readonly declarator: VariableDeclarator;
+      readonly isStatic: boolean;
+    }
+    const candidates = new Map<Symbol, Candidate>();
+    const writes = new Map<Symbol, Node[]>(); // field symbol -> assignment target nodes
+    const unresolvedWriteNames = new Set<string>(); // disqualify by name when unresolvable
+
+    const recordWrite = (target: Node): void => {
+      // Only a bare name or a member access writes a variable binding
+      // (a[i] = x writes the array element, not the field itself).
+      const name =
+        target.kind === SyntaxKind.Identifier
+          ? (target as Identifier)
+          : target.kind === SyntaxKind.PropertyAccessExpression
+            ? (target as PropertyAccessExpression).name
+            : undefined;
+      if (!name) return;
+      const sym = resolveName(name);
+      if (!sym) {
+        unresolvedWriteNames.add(name.text);
+        return;
+      }
+      const list = writes.get(sym);
+      if (list) list.push(target);
+      else writes.set(sym, [target]);
+    };
+
+    const walk = (node: Node): void => {
+      switch (node.kind) {
+        case SyntaxKind.FieldDeclaration: {
+          const field = node as FieldDeclaration;
+          const has = (kind: SyntaxKind): boolean =>
+            field.modifiers?.some(m => m.kind === kind) ?? false;
+          if (
+            has(SyntaxKind.PrivateKeyword) &&
+            !has(SyntaxKind.FinalKeyword) &&
+            !has(SyntaxKind.VolatileKeyword)
+          ) {
+            for (const declarator of field.declarators) {
+              const sym = resolveName(declarator.name);
+              if (sym) {
+                candidates.set(sym, { field, declarator, isStatic: has(SyntaxKind.StaticKeyword) });
+              }
+            }
+          }
+          break;
+        }
+        case SyntaxKind.AssignmentExpression:
+          recordWrite((node as AssignmentExpression).left);
+          break;
+        case SyntaxKind.PrefixUnaryExpression:
+        case SyntaxKind.PostfixUnaryExpression: {
+          const unary = node as PrefixUnaryExpression | PostfixUnaryExpression;
+          if (
+            unary.operator === SyntaxKind.PlusPlusToken ||
+            unary.operator === SyntaxKind.MinusMinusToken
+          ) {
+            recordWrite(unary.operand);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+      forEachChild(node, child => {
+        walk(child);
+        return undefined;
+      });
+    };
+    walk(sourceFile);
+
+    // A write compatible with a blank final: a plain `=` to a bare name or
+    // `this.name`, forming a whole top-level statement of a constructor body.
+    const ctorOfTopLevelWrite = (target: Node): ConstructorDeclaration | undefined => {
+      if (
+        target.kind === SyntaxKind.PropertyAccessExpression &&
+        (target as PropertyAccessExpression).expression.kind !== SyntaxKind.ThisExpression
+      ) {
+        return undefined; // other.x = ... is never a legal blank-final assignment
+      }
+      const assignment = target.parent;
+      if (
+        assignment.kind !== SyntaxKind.AssignmentExpression ||
+        (assignment as AssignmentExpression).left !== target ||
+        (assignment as AssignmentExpression).operatorToken !== SyntaxKind.EqualsToken
+      ) {
+        return undefined;
+      }
+      const statement = assignment.parent;
+      if (statement.kind !== SyntaxKind.ExpressionStatement) return undefined;
+      const block = statement.parent;
+      if (block.kind !== SyntaxKind.Block) return undefined;
+      const ctor = block.parent;
+      return ctor.kind === SyntaxKind.ConstructorDeclaration
+        ? (ctor as ConstructorDeclaration)
+        : undefined;
+    };
+
+    const delegatesToThis = (ctor: ConstructorDeclaration): boolean => {
+      const first = ctor.body.statements[0];
+      if (first?.kind !== SyntaxKind.ExpressionStatement) return false;
+      const expr = (first as ExpressionStatement).expression;
+      return (
+        expr.kind === SyntaxKind.CallExpression &&
+        (expr as CallExpression).expression.kind === SyntaxKind.ThisExpression
+      );
+    };
+
+    const containsReturn = (node: Node): boolean => {
+      if (node.kind === SyntaxKind.ReturnStatement) return true;
+      let found = false;
+      forEachChild(node, child => {
+        found ||= containsReturn(child);
+        return undefined;
+      });
+      return found;
+    };
+
+    const qualifies = (symbol: Symbol, candidate: Candidate): boolean => {
+      if (unresolvedWriteNames.has(candidate.declarator.name.text)) return false;
+      const fieldWrites = writes.get(symbol) ?? [];
+      if (candidate.declarator.initializer) return fieldWrites.length === 0;
+      // Blank field: prove exactly one assignment per construction. Static
+      // initializer blocks are out of scope - initializer-assigned only.
+      if (candidate.isStatic) return false;
+      const typeDecl = candidate.field.parent as { members?: NodeArray<Node> };
+      const members: readonly Node[] = typeDecl.members ?? [];
+      const ctors = members.filter(
+        (m): m is ConstructorDeclaration => m.kind === SyntaxKind.ConstructorDeclaration,
+      );
+      if (ctors.length === 0) return false;
+      const perCtor = new Map<ConstructorDeclaration, number>();
+      for (const write of fieldWrites) {
+        const ctor = ctorOfTopLevelWrite(write);
+        if (!ctor || !ctors.includes(ctor)) return false;
+        perCtor.set(ctor, (perCtor.get(ctor) ?? 0) + 1);
+      }
+      return ctors.every(ctor => {
+        const assignments = perCtor.get(ctor) ?? 0;
+        // A this(...) delegate already assigned the field; assigning again would
+        // double-assign. An early return could leave a path unassigned - order-aware
+        // flow analysis is not worth it here, so any return disqualifies.
+        if (delegatesToThis(ctor)) return assignments === 0;
+        return assignments === 1 && !containsReturn(ctor.body);
+      });
+    };
+
+    // A multi-declarator field is all-or-nothing: one `final` covers every
+    // declarator, so a single reassigned one silences the whole declaration.
+    const byField = new Map<FieldDeclaration, { symbol: Symbol; candidate: Candidate }[]>();
+    for (const [symbol, candidate] of candidates) {
+      const list = byField.get(candidate.field);
+      if (list) list.push({ symbol, candidate });
+      else byField.set(candidate.field, [{ symbol, candidate }]);
+    }
+    const result: VariableDeclarator[] = [];
+    for (const [field, entries] of byField) {
+      if (entries.length !== field.declarators.length) continue;
+      if (entries.every(e => qualifies(e.symbol, e.candidate))) {
+        result.push(...entries.map(e => e.candidate.declarator));
+      }
+    }
+    return result;
+  }
+
   function getSemanticDiagnostics(sourceFile: SourceFile): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
 
@@ -2967,6 +3146,18 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
           ),
         );
       }
+    }
+    // Private fields that could be declared final (suggestions).
+    for (const declarator of getFieldsThatCanBeFinal(sourceFile)) {
+      const start = skipTrivia(sourceFile.text, declarator.name.pos);
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          declarator.name.end - start,
+          Diagnostics.Field_0_can_be_final,
+          declarator.name.text,
+        ),
+      );
     }
     // Uses of @Deprecated methods/types (warnings).
     for (const use of getDeprecatedUses(sourceFile)) {

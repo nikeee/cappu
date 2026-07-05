@@ -24,6 +24,9 @@ const (
 	CategoryError DiagnosticCategory = iota
 	CategoryWarning
 	CategoryMessage
+	// CategorySuggestion is appended here rather than mirroring the TS enum
+	// order; codes are the stable cross-language contract, not ordinals.
+	CategorySuggestion
 )
 
 // DiagnosticMessage is one entry of the message table.
@@ -87,6 +90,7 @@ var Diagnostics = struct {
 	SuspiciousDateTimePatternLetter012    DiagnosticMessage
 	String0IsNotAValid1                   DiagnosticMessage
 	Radix0OutOfRange                      DiagnosticMessage
+	Field0CanBeFinal                      DiagnosticMessage
 }{
 	Expected0:                             diag(1001, "_0_expected", "'{0}' expected.", CategoryError),
 	IdentifierExpected:                    diag(1002, "Identifier_expected", "Identifier expected.", CategoryError),
@@ -123,6 +127,7 @@ var Diagnostics = struct {
 	SuspiciousDateTimePatternLetter012:    diag(1314, "Suspicious_date_time_pattern_letter_0_1_2", "Pattern letter '{0}' means {1}; did you mean '{2}'?", CategoryWarning),
 	String0IsNotAValid1:                   diag(1315, "String_0_is_not_a_valid_1", "'{0}' is not a valid {1}.", CategoryWarning),
 	Radix0OutOfRange:                      diag(1316, "Radix_0_out_of_range", "Radix {0} is out of range (must be between 2 and 36).", CategoryWarning),
+	Field0CanBeFinal:                      diag(1317, "Field_0_can_be_final", "Field '{0}' can be 'final'.", CategorySuggestion),
 }
 
 var placeholderRe = regexp.MustCompile(`\{(\d+)\}`)

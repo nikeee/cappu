@@ -441,6 +441,8 @@ func toSeverity(category compiler.DiagnosticCategory) int {
 		return lsp.SeverityError
 	case compiler.CategoryWarning:
 		return lsp.SeverityWarning
+	case compiler.CategorySuggestion:
+		return lsp.SeverityHint
 	default:
 		return lsp.SeverityInformation
 	}

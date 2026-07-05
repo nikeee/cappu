@@ -171,6 +171,12 @@ export const Diagnostics = {
     "Radix {0} is out of range (must be between 2 and 36).",
     DiagnosticCategory.Warning,
   ),
+  Field_0_can_be_final: diag(
+    1317,
+    "Field_0_can_be_final",
+    "Field '{0}' can be 'final'.",
+    DiagnosticCategory.Suggestion,
+  ),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */

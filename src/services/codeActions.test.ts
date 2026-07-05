@@ -334,3 +334,56 @@ test("no remove-@Override on a method that genuinely overrides", () => {
       .map(a => a.title),
   ).toEqual([]);
 });
+
+// --- make field final (nikeee/cappu#38) ----------------------------------------------
+
+test("add 'final' to a private field with an initializer", () => {
+  const text = "class T {\n  private int x = 1;\n  int use() { return x; }\n}";
+  const ctx = setup(text);
+  const actions = actionsAt(ctx, "x = 1").filter(a => a.kind === "quickfix");
+  expect(actions.map(a => a.title)).toEqual(["Add 'final' modifier"]);
+  expect(apply(text, actions[0]!)).toBe(
+    "class T {\n  private final int x = 1;\n  int use() { return x; }\n}",
+  );
+});
+
+test("'final' lands after all existing modifiers", () => {
+  const text = "class T {\n  @Deprecated private static int N = 1;\n}";
+  const ctx = setup(text);
+  const actions = actionsAt(ctx, "N = 1").filter(a => a.kind === "quickfix");
+  expect(actions.map(a => a.title)).toEqual(["Add 'final' modifier"]);
+  expect(apply(text, actions[0]!)).toBe(
+    "class T {\n  @Deprecated private static final int N = 1;\n}",
+  );
+});
+
+test("add 'final' to a constructor-assigned private field", () => {
+  const text = "class T {\n  private int y;\n  T(int v) { this.y = v; }\n}";
+  const ctx = setup(text);
+  const actions = actionsAt(ctx, "int y").filter(a => a.kind === "quickfix");
+  expect(actions.map(a => a.title)).toEqual(["Add 'final' modifier"]);
+  expect(apply(text, actions[0]!)).toBe(
+    "class T {\n  private final int y;\n  T(int v) { this.y = v; }\n}",
+  );
+});
+
+test("no add-'final' on reassigned, already-final, or unflagged positions", () => {
+  const reassigned = setup("class T {\n  private int x = 1;\n  void m() { x = 2; }\n}");
+  expect(
+    actionsAt(reassigned, "x = 1")
+      .filter(a => a.kind === "quickfix")
+      .map(a => a.title),
+  ).toEqual([]);
+  const alreadyFinal = setup("class T {\n  private final int x = 1;\n}");
+  expect(
+    actionsAt(alreadyFinal, "x = 1")
+      .filter(a => a.kind === "quickfix")
+      .map(a => a.title),
+  ).toEqual([]);
+  const elsewhere = setup("class T {\n  private int x = 1;\n  void m() { int local = 2; }\n}");
+  expect(
+    actionsAt(elsewhere, "local")
+      .filter(a => a.kind === "quickfix")
+      .map(a => a.title),
+  ).toEqual([]);
+});

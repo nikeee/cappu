@@ -10,6 +10,7 @@ import { getIdentifierAtPosition, getNodeAtPosition } from "../services/nodeAtPo
 import { createProgram } from "./program.ts";
 import type { Program } from "./program.ts";
 import {
+  DiagnosticCategory,
   type Identifier,
   type Node,
   SymbolFlags,
@@ -381,4 +382,110 @@ test("no diagnostics when a type is unknown or generic (no false positives)", ()
   expect(semanticDiags("class C { java.util.List<String> a; void m() { a = a; } }")).toHaveLength(
     0,
   );
+});
+
+// Fields that can be 'final' (nikeee/cappu#38, code 1317)
+
+function canBeFinal(text: string): string[] {
+  const ctx = setup(text);
+  return ctx.checker
+    .getSemanticDiagnostics(ctx.program.getSourceFile(ctx.uri)!)
+    .filter(d => d.code === 1317)
+    .map(d => d.messageText);
+}
+
+test("private fields never reassigned after their initializer can be final (1317)", () => {
+  expect(canBeFinal("class C { private int x = 1; int use() { return x; } }")).toEqual([
+    "Field 'x' can be 'final'.",
+  ]);
+  expect(canBeFinal('class C { private static String S = "s"; }')).toEqual([
+    "Field 'S' can be 'final'.",
+  ]);
+  // multi-declarator: all declarators clean -> all reported
+  expect(canBeFinal("class C { private int a = 1, b = 2; }")).toEqual([
+    "Field 'a' can be 'final'.",
+    "Field 'b' can be 'final'.",
+  ]);
+});
+
+test("the 1317 diagnostic is a Suggestion spanning the declarator name", () => {
+  const ctx = setup("class C { private int count = 1; }");
+  const sf = ctx.program.getSourceFile(ctx.uri)!;
+  const d = ctx.checker.getSemanticDiagnostics(sf).find(d => d.code === 1317)!;
+  expect(d.category).toBe(DiagnosticCategory.Suggestion);
+  expect(sf.text.slice(d.pos, d.end)).toBe("count");
+});
+
+test("reassigned private fields are not suggested as final", () => {
+  expect(canBeFinal("class C { private int x = 1; void m() { x = 2; } }")).toEqual([]);
+  expect(canBeFinal("class C { private int x = 1; void m() { x += 2; } }")).toEqual([]);
+  expect(canBeFinal("class C { private int x = 1; void m() { x++; } }")).toEqual([]);
+  expect(canBeFinal("class C { private int x = 1; void m() { --x; } }")).toEqual([]);
+  expect(canBeFinal("class C { private int x = 1; void m() { this.x = 2; } }")).toEqual([]);
+  expect(canBeFinal("class C { private int x = 1; void m(C o) { o.x = 2; } }")).toEqual([]);
+  // writes from a nested class or lambda in the same file count too
+  expect(canBeFinal("class C { private int x = 1; class N { void m() { x = 2; } } }")).toEqual([]);
+  expect(canBeFinal("class C { private int x = 1; Runnable r = () -> { x = 2; }; }")).toEqual([]);
+  // multi-declarator is all-or-nothing: one written declarator silences the field
+  expect(canBeFinal("class C { private int a = 1, b = 2; void m() { b = 3; } }")).toEqual([]);
+});
+
+test("already-final, volatile, and non-private fields are not suggested", () => {
+  expect(canBeFinal("class C { private final int x = 1; }")).toEqual([]);
+  expect(canBeFinal("class C { private volatile int x = 1; }")).toEqual([]);
+  expect(canBeFinal("class C { int x = 1; }")).toEqual([]);
+  expect(canBeFinal("class C { public int x = 1; }")).toEqual([]);
+});
+
+test("constructor-assigned private fields can be final", () => {
+  expect(canBeFinal("class C { private int x; C(int v) { this.x = v; } }")).toEqual([
+    "Field 'x' can be 'final'.",
+  ]);
+  // bare-name assignment counts too
+  expect(canBeFinal("class C { private int x; C() { x = 1; } }")).toEqual([
+    "Field 'x' can be 'final'.",
+  ]);
+  // every constructor assigns exactly once
+  expect(canBeFinal("class C { private int x; C() { x = 1; } C(int v) { x = v; } }")).toEqual([
+    "Field 'x' can be 'final'.",
+  ]);
+  // a delegating constructor must not assign (the delegate already did)
+  expect(canBeFinal("class C { private int x; C() { this(1); } C(int v) { x = v; } }")).toEqual([
+    "Field 'x' can be 'final'.",
+  ]);
+});
+
+test("constructor-assigned fields stay silent when finality cannot be proven", () => {
+  // some constructor does not assign
+  expect(canBeFinal("class C { private int x; C() { x = 1; } C(int v) { } }")).toEqual([]);
+  // no constructor at all
+  expect(canBeFinal("class C { private int x; }")).toEqual([]);
+  // assigned twice in one constructor
+  expect(canBeFinal("class C { private int x; C() { x = 1; x = 2; } }")).toEqual([]);
+  // initializer AND constructor write would double-assign a final field
+  expect(canBeFinal("class C { private int x = 1; C() { x = 2; } }")).toEqual([]);
+  // assignment nested in a conditional/loop is not a top-level statement
+  expect(canBeFinal("class C { private int x; C(boolean b) { if (b) { x = 1; } } }")).toEqual([]);
+  expect(
+    canBeFinal("class C { private int x; C() { for (int i = 0; i < 2; i++) { x = i; } } }"),
+  ).toEqual([]);
+  // an early return could skip the assignment
+  expect(canBeFinal("class C { private int x; C(boolean b) { if (b) return; x = 1; } }")).toEqual(
+    [],
+  );
+  // a delegating constructor that ALSO assigns would double-assign
+  expect(
+    canBeFinal("class C { private int x; C() { this(1); x = 2; } C(int v) { x = v; } }"),
+  ).toEqual([]);
+  // assignment through another instance is illegal on a blank final
+  expect(canBeFinal("class C { private int x; C(C o) { o.x = 1; } }")).toEqual([]);
+  // compound assignment is a read-modify-write, never valid on a blank final
+  expect(canBeFinal("class C { private int x; C() { x += 1; } }")).toEqual([]);
+  // written in a method too
+  expect(canBeFinal("class C { private int x; C() { x = 1; } void m() { x = 2; } }")).toEqual([]);
+  // initializer-block assignment is deferred (static and instance)
+  expect(canBeFinal("class C { private static int x; static { x = 1; } }")).toEqual([]);
+  expect(canBeFinal("class C { private int x; C() {} { x = 1; } }")).toEqual([]);
+  // a recovered parse stays silent
+  expect(canBeFinal("class C { private int x = 1; void m() { int = ; } }")).toEqual([]);
 });

@@ -382,3 +382,60 @@ func TestNoRemoveOverrideOnRealOverride(t *testing.T) {
 		t.Errorf("expected no quickfix on a real override, got %+v", a)
 	}
 }
+
+// Port of the make-field-final tests in src/services/codeActions.test.ts
+// (nikeee/cappu#38).
+
+func TestMakeFieldFinalWithInitializer(t *testing.T) {
+	text := "class T {\n  private int x = 1;\n  int use() { return x; }\n}"
+	ctx := actionsSetup(text, nil)
+	actions := filterKind(ctx.actionsAt("x = 1", 1), "quickfix")
+	if len(actions) != 1 || actions[0].Title != "Add 'final' modifier" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	want := "class T {\n  private final int x = 1;\n  int use() { return x; }\n}"
+	if got := apply(text, actions[0]); got != want {
+		t.Errorf("apply =\n%s", got)
+	}
+}
+
+func TestMakeFieldFinalAfterAllModifiers(t *testing.T) {
+	text := "class T {\n  @Deprecated private static int N = 1;\n}"
+	ctx := actionsSetup(text, nil)
+	actions := filterKind(ctx.actionsAt("N = 1", 1), "quickfix")
+	if len(actions) != 1 || actions[0].Title != "Add 'final' modifier" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	want := "class T {\n  @Deprecated private static final int N = 1;\n}"
+	if got := apply(text, actions[0]); got != want {
+		t.Errorf("apply =\n%s", got)
+	}
+}
+
+func TestMakeFieldFinalCtorAssigned(t *testing.T) {
+	text := "class T {\n  private int y;\n  T(int v) { this.y = v; }\n}"
+	ctx := actionsSetup(text, nil)
+	actions := filterKind(ctx.actionsAt("int y", 1), "quickfix")
+	if len(actions) != 1 || actions[0].Title != "Add 'final' modifier" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	want := "class T {\n  private final int y;\n  T(int v) { this.y = v; }\n}"
+	if got := apply(text, actions[0]); got != want {
+		t.Errorf("apply =\n%s", got)
+	}
+}
+
+func TestNoMakeFieldFinalWhenNotApplicable(t *testing.T) {
+	reassigned := actionsSetup("class T {\n  private int x = 1;\n  void m() { x = 2; }\n}", nil)
+	if a := filterKind(reassigned.actionsAt("x = 1", 1), "quickfix"); len(a) != 0 {
+		t.Errorf("expected no quickfix on a reassigned field, got %+v", a)
+	}
+	alreadyFinal := actionsSetup("class T {\n  private final int x = 1;\n}", nil)
+	if a := filterKind(alreadyFinal.actionsAt("x = 1", 1), "quickfix"); len(a) != 0 {
+		t.Errorf("expected no quickfix on a final field, got %+v", a)
+	}
+	elsewhere := actionsSetup("class T {\n  private int x = 1;\n  void m() { int local = 2; }\n}", nil)
+	if a := filterKind(elsewhere.actionsAt("local", 1), "quickfix"); len(a) != 0 {
+		t.Errorf("expected no quickfix outside the field, got %+v", a)
+	}
+}

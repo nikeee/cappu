@@ -492,6 +492,42 @@ func removeRedundantOverride(checker *compiler.Checker, sf *compiler.Node, start
 	}}
 }
 
+// makeFieldFinal offers to insert `final` on a field the checker flagged as
+// "can be 'final'" (1317). Inserting right before the type lands after all
+// existing modifiers/annotations, giving the conventional `private static
+// final T` order. Port of makeFieldFinal.
+func makeFieldFinal(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.FieldDeclaration {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	// Only when the checker actually flagged this field's declarators.
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.Field0CanBeFinal.Code &&
+			d.Pos >= node.Pos && d.End <= node.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	at := compiler.SkipTrivia(data.Text, node.AsFieldDeclaration().Type.Pos)
+	return []CodeActionResult{{
+		Title:   "Add 'final' modifier",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: at, End: at, NewText: "final "}},
+	}}
+}
+
 // GetCodeActions returns all code actions offered for a selection range.
 func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int) []CodeActionResult {
 	var out []CodeActionResult
@@ -502,5 +538,6 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	out = append(out, removeUnusedParameter(program, checker, sf, start)...)
 	out = append(out, removeUnusedImport(sf, start, end)...)
 	out = append(out, removeRedundantOverride(checker, sf, start)...)
+	out = append(out, makeFieldFinal(checker, sf, start)...)
 	return out
 }
