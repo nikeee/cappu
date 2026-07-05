@@ -108,7 +108,13 @@ import {
   SyntaxKind,
 } from "../compiler/types.ts";
 import { isValidIdentifier, skipTrivia } from "../compiler/utilities.ts";
-import { type Uri, configWatchGlobs, isSyntheticUri, loadJavaFiles, uriToPath } from "../workspace.ts";
+import {
+  type Uri,
+  configWatchGlobs,
+  isSyntheticUri,
+  loadJavaFiles,
+  uriToPath,
+} from "../workspace.ts";
 
 /** The stream pair the server speaks JSON-RPC over (default: stdio). */
 export interface Transport {

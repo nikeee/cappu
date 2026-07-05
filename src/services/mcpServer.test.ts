@@ -43,7 +43,10 @@ async function describeSymbol(client: Client, ref: string): Promise<string> {
 /** Write cappu.json with the given classPath and a distinct mtime. */
 function writeConfigFile(dir: string, classPath: string, mtime: Date): void {
   const path = join(dir, "cappu.json");
-  writeFileSync(path, JSON.stringify({ compilerOptions: { classPath: [classPath], sourcePaths: [] } }));
+  writeFileSync(
+    path,
+    JSON.stringify({ compilerOptions: { classPath: [classPath], sourcePaths: [] } }),
+  );
   utimesSync(path, mtime, mtime);
 }
 
