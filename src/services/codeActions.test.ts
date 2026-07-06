@@ -741,3 +741,66 @@ test("lambda: gated on release >= 8", () => {
   expect(lambdaActions(ctx, "new Runnable", 7)).toEqual([]);
   expect(lambdaActions(ctx, "new Runnable", 8).length).toBe(1);
 });
+
+// --- convert instanceof + cast to a pattern binding --------------------------
+
+const patternTitle = "Replace cast with pattern binding";
+
+function patternActions(ctx: ReturnType<typeof setup>, release?: number) {
+  return actionsAt(ctx, "instanceof", 1, release).filter(a => a.title === patternTitle);
+}
+
+test("pattern: folds instanceof + cast into a binding", () => {
+  const text =
+    "class T {\n  void m(Object o) {\n    if (o instanceof String) {\n      String s = (String) o;\n      System.out.println(s);\n    }\n  }\n}";
+  const ctx = setup(text);
+  const actions = patternActions(ctx);
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  void m(Object o) {\n    if (o instanceof String s) {\n      System.out.println(s);\n    }\n  }\n}",
+  );
+});
+
+test("pattern: not offered when the cast type differs from the tested type", () => {
+  const text =
+    "class T {\n  void m(Object o) {\n    if (o instanceof CharSequence) {\n      String s = (String) o;\n    }\n  }\n}";
+  const ctx = setup(text);
+  expect(patternActions(ctx)).toEqual([]);
+});
+
+test("pattern: not offered when the cast operand differs", () => {
+  const text =
+    "class T {\n  void m(Object o, Object p) {\n    if (o instanceof String) {\n      String s = (String) p;\n    }\n  }\n}";
+  const ctx = setup(text);
+  expect(patternActions(ctx)).toEqual([]);
+});
+
+test("pattern: not offered when the then branch is not a block", () => {
+  const text = "class T {\n  void m(Object o) {\n    if (o instanceof String) return;\n  }\n}";
+  const ctx = setup(text);
+  expect(patternActions(ctx)).toEqual([]);
+});
+
+test("pattern: not offered when instanceof is only part of the condition", () => {
+  const text =
+    "class T {\n  void m(Object o, boolean b) {\n    if (o instanceof String && b) {\n      String s = (String) o;\n    }\n  }\n}";
+  const ctx = setup(text);
+  expect(patternActions(ctx)).toEqual([]);
+});
+
+test("pattern: not offered when it is already a pattern", () => {
+  const text =
+    "class T {\n  void m(Object o) {\n    if (o instanceof String s) {\n      System.out.println(s);\n    }\n  }\n}";
+  const ctx = setup(text);
+  expect(patternActions(ctx)).toEqual([]);
+});
+
+test("pattern: gated on release >= 16", () => {
+  const text =
+    "class T {\n  void m(Object o) {\n    if (o instanceof String) {\n      String s = (String) o;\n    }\n  }\n}";
+  const ctx = setup(text);
+  expect(patternActions(ctx, 15)).toEqual([]);
+  expect(patternActions(ctx, 16).length).toBe(1);
+});

@@ -521,3 +521,6 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-06 11:51 — you dont need to include a license for sub modules. only for the code that you actually copied/imported from somewhere
 - 2026-07-06 12:14 — issue 38 and 39 introduced some refactorings. what are other great refactorings in the same category? maybe to upgrade to use some newer java features
 - 2026-07-06 12:14 — do #1, #7 and #9. in that order. commit in between. make sure the refactoring is only offered when the java version used supports it
+- 2026-07-06 12:37 — instead of checking release > 10 and stuff, introduce a new global type/struct that holds information like "supports var" which is set once at the initialization. then just check the boolean field of that struct. do this for all language-level gated features
+- 2026-07-06 12:37 — dont forget to gate older refactorings as well (convert-to-record)
+- 2026-07-06 12:37 — in between features, also add refactoring assertions that assert that the edit proposed by the lsp are correct

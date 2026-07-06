@@ -1069,6 +1069,91 @@ func convertAnonymousClassToLambda(program *compiler.Program, sf *compiler.Node,
 	}}
 }
 
+// --- convert instanceof + cast to a pattern binding (SE16) -------------------
+
+// convertInstanceofToPattern offers to fold `if (o instanceof T) { T t = (T) o;
+// ... }` into a pattern `if (o instanceof T t) { ... }`, deleting the redundant
+// cast declaration. Strict: the instanceof must be the whole `if` condition (so
+// the binding is in scope for the block) and the first statement must be exactly
+// that cast, so the rewrite is only offered when guaranteed safe. Port of the TS
+// convertInstanceofToPattern.
+func convertInstanceofToPattern(sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.InstanceofExpression {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	instanceOf := node.AsInstanceofExpression()
+	// Must be a plain type test that is not already a pattern.
+	if instanceOf.Type == nil || instanceOf.Name != nil || instanceOf.Pattern != nil {
+		return nil
+	}
+
+	// It must be exactly the `if` condition (not negated, not a sub-term of
+	// &&/||), which keeps the pattern variable's scope trivially correct.
+	if node.Parent == nil || node.Parent.Kind != compiler.IfStatement {
+		return nil
+	}
+	ifStmt := node.Parent.AsIfStatement()
+	if ifStmt.Condition != node || ifStmt.ThenStatement.Kind != compiler.Block {
+		return nil
+	}
+	block := ifStmt.ThenStatement.AsBlock()
+	if block.Statements.Len() == 0 {
+		return nil
+	}
+	first := block.Statements.Nodes[0]
+	if first.Kind != compiler.LocalVariableDeclarationStatement {
+		return nil
+	}
+	decl := first.AsLocalVariableDeclarationStatement()
+	if (decl.Modifiers != nil && decl.Modifiers.Len() > 0) || decl.Declarators.Len() != 1 {
+		return nil
+	}
+	declarator := decl.Declarators.Nodes[0].AsVariableDeclarator()
+	if declarator.ArrayRankAfterName != 0 || declarator.Initializer == nil {
+		return nil
+	}
+	if declarator.Initializer.Kind != compiler.CastExpression {
+		return nil
+	}
+	cast := declarator.Initializer.AsCastExpression()
+	if cast.Bounds != nil && cast.Bounds.Len() > 0 { // intersection cast: not a simple binding
+		return nil
+	}
+
+	text := data.Text
+	span := func(n *compiler.Node) string { return text[compiler.SkipTrivia(text, n.Pos):n.End] }
+	// The cast must recover exactly the tested type from the tested operand.
+	if span(cast.Type) != span(instanceOf.Type) || span(cast.Expression) != span(instanceOf.Expression) {
+		return nil
+	}
+
+	name := declarator.Name.AsIdentifier().Text
+	// Insert ` name` after the tested type, and delete the whole cast-decl line
+	// (indentation through the trailing newline). The binding keeps the local's
+	// name, so every later use stays valid without a rename.
+	lineStart := strings.LastIndex(text[:compiler.SkipTrivia(text, first.Pos)], "\n") + 1
+	lineEnd := len(text)
+	if nl := strings.Index(text[first.End:], "\n"); nl >= 0 {
+		lineEnd = first.End + nl + 1
+	}
+	return []CodeActionResult{{
+		Title: "Replace cast with pattern binding",
+		Kind:  "quickfix",
+		Changes: []TextChange{
+			{Start: instanceOf.Type.End, End: instanceOf.Type.End, NewText: " " + name},
+			{Start: lineStart, End: lineEnd, NewText: ""},
+		},
+	}}
+}
+
 // GetCodeActions returns all code actions offered for a selection range. features
 // gates modern-Java rewrites to the target version that supports them.
 func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int, features LanguageFeatures) []CodeActionResult {
@@ -1092,6 +1177,9 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	}
 	if features.SupportsLambda {
 		out = append(out, convertAnonymousClassToLambda(program, sf, start)...)
+	}
+	if features.SupportsInstanceofPattern {
+		out = append(out, convertInstanceofToPattern(sf, start)...)
 	}
 	return out
 }

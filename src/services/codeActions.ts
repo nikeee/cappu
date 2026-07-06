@@ -19,12 +19,15 @@ import {
   type AssignmentExpression,
   type Block,
   type CallExpression,
+  type CastExpression,
   type ClassDeclaration,
   type ConstructorDeclaration,
   type ExpressionStatement,
   type FieldDeclaration,
   type Identifier,
+  type IfStatement,
   type ImportDeclaration,
+  type InstanceofExpression,
   type LocalVariableDeclarationStatement,
   type MethodDeclaration,
   type Node,
@@ -927,6 +930,65 @@ function convertAnonymousClassToLambda(
   ];
 }
 
+// --- convert instanceof + cast to a pattern binding (SE16) -------------------
+
+// Offer to fold `if (o instanceof T) { T t = (T) o; ... }` into a pattern
+// `if (o instanceof T t) { ... }`, deleting the now-redundant cast declaration.
+// Strict: the instanceof must be the whole `if` condition (so the binding is in
+// scope for the block) and the first statement must be exactly that cast, so the
+// rewrite is only offered when it is guaranteed safe.
+function convertInstanceofToPattern(sourceFile: SourceFile, start: number): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.InstanceofExpression) node = node.parent;
+  if (!node) return [];
+  const instanceOf = node as InstanceofExpression;
+  // Must be a plain type test that is not already a pattern.
+  if (!instanceOf.type || instanceOf.name || instanceOf.pattern) return [];
+
+  // It must be exactly the `if` condition (not negated, not a sub-term of &&/||),
+  // which keeps the pattern variable's scope trivially correct.
+  const parent = instanceOf.parent;
+  if (parent.kind !== SyntaxKind.IfStatement) return [];
+  const ifStmt = parent as IfStatement;
+  if (ifStmt.condition !== instanceOf) return [];
+  if (ifStmt.thenStatement.kind !== SyntaxKind.Block) return [];
+  const block = ifStmt.thenStatement as Block;
+  const first = block.statements[0];
+  if (!first || first.kind !== SyntaxKind.LocalVariableDeclarationStatement) return [];
+  const decl = first as LocalVariableDeclarationStatement;
+  if (decl.modifiers?.length || decl.declarators.length !== 1) return [];
+  const declarator = decl.declarators[0]!;
+  if (declarator.arrayRankAfterName || !declarator.initializer) return [];
+  if (declarator.initializer.kind !== SyntaxKind.CastExpression) return [];
+  const cast = declarator.initializer as CastExpression;
+  if (cast.bounds?.length) return []; // intersection cast: not a simple binding
+
+  const text = sourceFile.text;
+  const span = (n: Node) => text.slice(skipTrivia(text, n.pos), n.end);
+  // The cast must recover exactly the tested type from the tested operand.
+  if (span(cast.type) !== span(instanceOf.type)) return [];
+  if (span(cast.expression) !== span(instanceOf.expression)) return [];
+
+  const name = declarator.name.text;
+  // Insert ` name` after the tested type, and delete the whole cast-decl line
+  // (indentation through the trailing newline). The binding keeps the local's
+  // name, so every later use stays valid without a rename.
+  const lineStart = text.lastIndexOf("\n", skipTrivia(text, decl.pos) - 1) + 1;
+  const afterNewline = text.indexOf("\n", decl.end);
+  const lineEnd = afterNewline < 0 ? text.length : afterNewline + 1;
+  return [
+    {
+      title: "Replace cast with pattern binding",
+      kind: "quickfix",
+      changes: [
+        { start: instanceOf.type.end, end: instanceOf.type.end, newText: ` ${name}` },
+        { start: lineStart, end: lineEnd, newText: "" },
+      ],
+    },
+  ];
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
@@ -948,5 +1010,6 @@ export function getCodeActions(
     ...(features.supportsRecord ? convertClassToRecord(program, checker, sourceFile, start) : []),
     ...(features.supportsVar ? convertToVar(sourceFile, start) : []),
     ...(features.supportsLambda ? convertAnonymousClassToLambda(program, sourceFile, start) : []),
+    ...(features.supportsInstanceofPattern ? convertInstanceofToPattern(sourceFile, start) : []),
   ];
 }

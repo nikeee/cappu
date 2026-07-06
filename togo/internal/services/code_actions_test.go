@@ -858,3 +858,77 @@ func TestLambdaGatedOnRelease(t *testing.T) {
 		t.Errorf("release 8: expected 1 action, got %+v", got)
 	}
 }
+
+// --- convert instanceof + cast to a pattern binding --------------------------
+
+func patternActions(actions []CodeActionResult) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range actions {
+		if a.Title == "Replace cast with pattern binding" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestPatternFoldsInstanceofAndCast(t *testing.T) {
+	text := "class T {\n  void m(Object o) {\n    if (o instanceof String) {\n      String s = (String) o;\n      System.out.println(s);\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	actions := patternActions(ctx.actionsAt("instanceof", 1))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(Object o) {\n    if (o instanceof String s) {\n      System.out.println(s);\n    }\n  }\n}")
+}
+
+func TestPatternNotOfferedWhenTypeDiffers(t *testing.T) {
+	text := "class T {\n  void m(Object o) {\n    if (o instanceof CharSequence) {\n      String s = (String) o;\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := patternActions(ctx.actionsAt("instanceof", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestPatternNotOfferedWhenOperandDiffers(t *testing.T) {
+	text := "class T {\n  void m(Object o, Object p) {\n    if (o instanceof String) {\n      String s = (String) p;\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := patternActions(ctx.actionsAt("instanceof", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestPatternNotOfferedWhenThenNotBlock(t *testing.T) {
+	text := "class T {\n  void m(Object o) {\n    if (o instanceof String) return;\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := patternActions(ctx.actionsAt("instanceof", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestPatternNotOfferedWhenPartialCondition(t *testing.T) {
+	text := "class T {\n  void m(Object o, boolean b) {\n    if (o instanceof String && b) {\n      String s = (String) o;\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := patternActions(ctx.actionsAt("instanceof", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestPatternNotOfferedWhenAlreadyPattern(t *testing.T) {
+	text := "class T {\n  void m(Object o) {\n    if (o instanceof String s) {\n      System.out.println(s);\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := patternActions(ctx.actionsAt("instanceof", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestPatternGatedOnRelease(t *testing.T) {
+	text := "class T {\n  void m(Object o) {\n    if (o instanceof String) {\n      String s = (String) o;\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	fifteen, sixteen := 15, 16
+	if got := patternActions(ctx.actionsAt("instanceof", 1, &fifteen)); len(got) != 0 {
+		t.Errorf("release 15: expected no action, got %+v", got)
+	}
+	if got := patternActions(ctx.actionsAt("instanceof", 1, &sixteen)); len(got) != 1 {
+		t.Errorf("release 16: expected 1 action, got %+v", got)
+	}
+}
