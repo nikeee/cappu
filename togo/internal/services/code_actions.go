@@ -45,8 +45,10 @@ type CodeActionResult struct {
 // version number.
 type LanguageFeatures struct {
 	SupportsDiamond           bool // SE7
+	SupportsMultiCatch        bool // SE7
 	SupportsVar               bool // SE10
 	SupportsLambda            bool // SE8
+	SupportsArrowSwitch       bool // SE14
 	SupportsRecord            bool // SE16
 	SupportsInstanceofPattern bool // SE16
 }
@@ -58,8 +60,10 @@ func NewLanguageFeatures(release *int) LanguageFeatures {
 	at := func(min int) bool { return release == nil || *release >= min }
 	return LanguageFeatures{
 		SupportsDiamond:           at(7),
+		SupportsMultiCatch:        at(7),
 		SupportsVar:               at(10),
 		SupportsLambda:            at(8),
+		SupportsArrowSwitch:       at(14),
 		SupportsRecord:            at(16),
 		SupportsInstanceofPattern: at(16),
 	}
@@ -1357,6 +1361,311 @@ func convertToStringBuilder(program *compiler.Program, checker *compiler.Checker
 	return []CodeActionResult{{Title: "Convert to StringBuilder", Kind: "refactor.rewrite", Changes: changes}}
 }
 
+// --- convert a colon switch to an arrow switch (SE14) ------------------------
+
+func terminatesClause(stmt *compiler.Node) bool {
+	switch stmt.Kind {
+	case compiler.BreakStatement, compiler.ContinueStatement, compiler.ReturnStatement, compiler.ThrowStatement:
+		return true
+	default:
+		return false
+	}
+}
+
+func isUnlabeledBreak(stmt *compiler.Node) bool {
+	return stmt.Kind == compiler.BreakStatement && stmt.AsLabelStatement().Label == nil
+}
+
+// hasSwitchBreak reports whether stmt contains an unlabeled `break` that targets
+// the enclosing switch (i.e. not one captured by a nested loop or switch). Such a
+// break has no arrow equivalent, so its presence suppresses the rewrite.
+func hasSwitchBreak(stmt *compiler.Node) bool {
+	found := false
+	var visit func(n *compiler.Node)
+	visit = func(n *compiler.Node) {
+		if found {
+			return
+		}
+		if isUnlabeledBreak(n) {
+			found = true
+			return
+		}
+		if loopKinds[n.Kind] || n.Kind == compiler.SwitchStatement || n.Kind == compiler.SwitchExpression {
+			return // this construct captures its own breaks
+		}
+		n.ForEachChild(func(c *compiler.Node) bool {
+			visit(c)
+			return false
+		})
+	}
+	visit(stmt)
+	return found
+}
+
+type arrowGroup struct {
+	label string
+	body  []*compiler.Node
+}
+
+// convertToArrowSwitch offers to rewrite a classic colon `switch` into the SE14
+// arrow form: `case A: foo(); break;` -> `case A -> foo();`, with
+// fall-through-only labels merged (`case A: case B:` -> `case A, B ->`). Bails on
+// anything the arrow form cannot express: real fall-through, a switch-targeting
+// break inside a body, a `default` that falls through, or an SE21 `when` guard.
+// Port of the TS convertToArrowSwitch.
+func convertToArrowSwitch(sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.SwitchStatement {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	sw := node.AsSwitchStatement()
+	clauses := sw.Clauses
+	if clauses.Len() == 0 {
+		return nil
+	}
+	for _, c := range clauses.Nodes {
+		if c.AsSwitchClause().IsArrow {
+			return nil // already arrow (or mixed): leave alone
+		}
+	}
+
+	text := data.Text
+	span := func(n *compiler.Node) string { return text[compiler.SkipTrivia(text, n.Pos):n.End] }
+	labelsText := func(c *compiler.SwitchClauseData) string {
+		if c.Labels == nil {
+			return ""
+		}
+		parts := make([]string, 0, c.Labels.Len())
+		for _, l := range c.Labels.Nodes {
+			parts = append(parts, span(l))
+		}
+		return strings.Join(parts, ", ")
+	}
+
+	var groups []arrowGroup
+	var pending []string // case labels stacked by empty fall-through clauses
+	for i, cn := range clauses.Nodes {
+		c := cn.AsSwitchClause()
+		isLast := i == clauses.Len()-1
+		if c.Guard != nil {
+			return nil // SE21 guarded pattern: out of scope
+		}
+
+		if c.Statements.Len() == 0 {
+			if isLast {
+				label := "default"
+				if !c.IsDefault {
+					label = "case " + strings.Join(append(pending, labelsText(c)), ", ")
+				}
+				groups = append(groups, arrowGroup{label: label})
+				pending = nil
+			} else {
+				if c.IsDefault {
+					return nil // default cannot fall through in the arrow form
+				}
+				pending = append(pending, labelsText(c))
+			}
+			continue
+		}
+
+		stmts := c.Statements.Nodes
+		last := stmts[len(stmts)-1]
+		if !isLast && !terminatesClause(last) {
+			return nil // real fall-through with code
+		}
+		body := stmts
+		if isUnlabeledBreak(last) {
+			body = stmts[:len(stmts)-1]
+		}
+		for _, s := range body {
+			if hasSwitchBreak(s) {
+				return nil // a break that targets this switch
+			}
+		}
+		if c.IsDefault {
+			if len(pending) > 0 {
+				return nil // a case fell into default
+			}
+			groups = append(groups, arrowGroup{label: "default", body: body})
+		} else {
+			groups = append(groups, arrowGroup{label: "case " + strings.Join(append(pending, labelsText(c)), ", "), body: body})
+		}
+		pending = nil
+	}
+	if len(pending) > 0 {
+		return nil // labels with no body (defensive)
+	}
+
+	switchStart := compiler.SkipTrivia(text, node.Pos)
+	indent := indentationAt(text, switchStart)
+	caseIndent := indent + "    "
+	renderBody := func(body []*compiler.Node) string {
+		if len(body) == 0 {
+			return "{}"
+		}
+		only := body[0]
+		if len(body) == 1 && (only.Kind == compiler.ExpressionStatement || only.Kind == compiler.ThrowStatement) {
+			return span(only)
+		}
+		// Block form: reindent the original statement lines under the arrow.
+		bodyStart := compiler.SkipTrivia(text, only.Pos)
+		originalIndent := indentationAt(text, bodyStart)
+		inner := caseIndent + "    "
+		raw := text[bodyStart:body[len(body)-1].End]
+		lines := strings.Split(raw, "\n")
+		for idx, line := range lines {
+			switch {
+			case idx == 0:
+				lines[idx] = inner + line
+			case strings.HasPrefix(line, originalIndent):
+				lines[idx] = inner + line[len(originalIndent):]
+			default:
+				lines[idx] = inner + strings.TrimLeft(line, " \t")
+			}
+		}
+		return "{\n" + strings.Join(lines, "\n") + "\n" + caseIndent + "}"
+	}
+
+	out := []string{"switch (" + span(sw.Expression) + ") {"}
+	for _, g := range groups {
+		out = append(out, caseIndent+g.label+" -> "+renderBody(g.body))
+	}
+	out = append(out, indent+"}")
+
+	return []CodeActionResult{{
+		Title:   "Convert to arrow switch",
+		Kind:    "refactor.rewrite",
+		Changes: []TextChange{{Start: switchStart, End: node.End, NewText: strings.Join(out, "\n")}},
+	}}
+}
+
+// --- merge catch clauses with identical bodies into a multi-catch (SE7) -------
+
+func catchTypeSymbol(clause *compiler.CatchClauseData, program *compiler.Program) *compiler.Symbol {
+	if clause.CatchTypes.Len() != 1 {
+		return nil
+	}
+	t := clause.CatchTypes.Nodes[0]
+	if t.Kind != compiler.TypeReference {
+		return nil
+	}
+	return compiler.ResolveTypeEntityName(t.AsTypeReference().TypeName, clause.Name, program)
+}
+
+// isCatchSubtype reports whether source's class symbol is a subtype of target's
+// (walks extends/implements).
+func isCatchSubtype(sourceSym, targetSym *compiler.Symbol, program *compiler.Program) bool {
+	seen := map[*compiler.Symbol]bool{}
+	queue := []*compiler.Symbol{sourceSym}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur == targetSym {
+			return true
+		}
+		if seen[cur] {
+			continue
+		}
+		seen[cur] = true
+		queue = append(queue, compiler.GetDirectSuperTypeSymbols(cur, program)...)
+	}
+	return false
+}
+
+// mergeCatchClauses merges each maximal run of adjacent catch clauses that share
+// the same parameter (name + modifiers) and byte-identical body into one
+// `catch (A | B e)`. A union alternative may not be a subtype of another
+// (JLS 14.20), so the caught types must resolve and be pairwise unrelated -
+// otherwise that run is skipped. Port of the TS mergeCatchClauses.
+func mergeCatchClauses(program *compiler.Program, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.TryStatement {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	clauses := node.AsTryStatement().CatchClauses
+	if clauses.Len() < 2 {
+		return nil
+	}
+
+	text := data.Text
+	span := func(n *compiler.Node) string { return text[compiler.SkipTrivia(text, n.Pos):n.End] }
+	modText := func(c *compiler.CatchClauseData) string {
+		if c.Modifiers == nil || c.Modifiers.Len() == 0 {
+			return ""
+		}
+		return text[compiler.SkipTrivia(text, c.Modifiers.Nodes[0].Pos):c.Modifiers.Nodes[c.Modifiers.Len()-1].End]
+	}
+	mergeable := func(a, b *compiler.CatchClauseData) bool {
+		return a.CatchTypes.Len() == 1 && b.CatchTypes.Len() == 1 &&
+			a.Name.AsIdentifier().Text == b.Name.AsIdentifier().Text &&
+			modText(a) == modText(b) && span(a.Block) == span(b.Block)
+	}
+
+	var actions []CodeActionResult
+	i := 0
+	for i < clauses.Len() {
+		j := i + 1
+		for j < clauses.Len() && mergeable(clauses.Nodes[j-1].AsCatchClause(), clauses.Nodes[j].AsCatchClause()) {
+			j++
+		}
+		if j-i >= 2 {
+			run := clauses.Nodes[i:j]
+			syms := make([]*compiler.Symbol, len(run))
+			allResolved := true
+			for k, c := range run {
+				syms[k] = catchTypeSymbol(c.AsCatchClause(), program)
+				if syms[k] == nil {
+					allResolved = false
+				}
+			}
+			ok := allResolved
+			for a := 0; ok && a < len(syms); a++ {
+				for b := a + 1; ok && b < len(syms); b++ {
+					if isCatchSubtype(syms[a], syms[b], program) || isCatchSubtype(syms[b], syms[a], program) {
+						ok = false
+					}
+				}
+			}
+			if ok {
+				first := run[0].AsCatchClause()
+				prefix := ""
+				if m := modText(first); m != "" {
+					prefix = m + " "
+				}
+				types := make([]string, len(run))
+				for k, c := range run {
+					types[k] = span(c.AsCatchClause().CatchTypes.Nodes[0])
+				}
+				actions = append(actions, CodeActionResult{
+					Title: "Merge catch clauses",
+					Kind:  "refactor.rewrite",
+					Changes: []TextChange{{
+						Start:   compiler.SkipTrivia(text, run[0].Pos),
+						End:     run[len(run)-1].End,
+						NewText: "catch (" + prefix + strings.Join(types, " | ") + " " + first.Name.AsIdentifier().Text + ") " + span(first.Block),
+					}},
+				})
+			}
+		}
+		i = j
+	}
+	return actions
+}
+
 // GetCodeActions returns all code actions offered for a selection range. features
 // gates modern-Java rewrites to the target version that supports them.
 func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int, features LanguageFeatures) []CodeActionResult {
@@ -1386,6 +1695,12 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	}
 	if features.SupportsDiamond {
 		out = append(out, convertToDiamond(sf, start)...)
+	}
+	if features.SupportsArrowSwitch {
+		out = append(out, convertToArrowSwitch(sf, start)...)
+	}
+	if features.SupportsMultiCatch {
+		out = append(out, mergeCatchClauses(program, sf, start)...)
 	}
 	out = append(out, convertToStringBuilder(program, checker, sf, start)...)
 	return out

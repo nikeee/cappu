@@ -935,3 +935,122 @@ test("stringbuilder: not offered when the appended expression reads the variable
   const ctx = setup(text);
   expect(sbActions(ctx)).toEqual([]);
 });
+
+// --- convert a colon switch to an arrow switch -------------------------------
+
+const arrowTitle = "Convert to arrow switch";
+
+function arrowActions(ctx: ReturnType<typeof setup>, release?: number) {
+  return actionsAt(ctx, "switch", 1, release).filter(a => a.title === arrowTitle);
+}
+
+test("arrow switch: merges fall-through labels and blocks return bodies", () => {
+  const text =
+    "class T {\n  int m(int x) {\n    switch (x) {\n      case 1:\n        return 10;\n      case 2:\n      case 3:\n        return 20;\n      default:\n        return 0;\n    }\n  }\n}";
+  const ctx = setup(text);
+  const actions = arrowActions(ctx);
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  int m(int x) {\n    switch (x) {\n        case 1 -> {\n            return 10;\n        }\n        case 2, 3 -> {\n            return 20;\n        }\n        default -> {\n            return 0;\n        }\n    }\n  }\n}",
+  );
+});
+
+test("arrow switch: inlines single-statement bodies and drops break", () => {
+  const text =
+    'class T {\n  void m(int x) {\n    switch (x) {\n      case 1:\n        System.out.println("one");\n        break;\n      default:\n        System.out.println("other");\n    }\n  }\n}';
+  const ctx = setup(text);
+  const actions = arrowActions(ctx);
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    'class T {\n  void m(int x) {\n    switch (x) {\n        case 1 -> System.out.println("one");\n        default -> System.out.println("other");\n    }\n  }\n}',
+  );
+});
+
+test("arrow switch: not offered on real fall-through with code", () => {
+  const text =
+    "class T {\n  void m(int x) {\n    switch (x) {\n      case 1:\n        foo();\n      case 2:\n        bar();\n        break;\n    }\n  }\n}";
+  const ctx = setup(text);
+  expect(arrowActions(ctx)).toEqual([]);
+});
+
+test("arrow switch: not offered when a body breaks the switch conditionally", () => {
+  const text =
+    "class T {\n  void m(int x, boolean y) {\n    switch (x) {\n      case 1:\n        if (y) break;\n        foo();\n        break;\n    }\n  }\n}";
+  const ctx = setup(text);
+  expect(arrowActions(ctx)).toEqual([]);
+});
+
+test("arrow switch: not offered when it is already an arrow switch", () => {
+  const text =
+    "class T {\n  void m(int x) {\n    switch (x) {\n      case 1 -> foo();\n      default -> bar();\n    }\n  }\n}";
+  const ctx = setup(text);
+  expect(arrowActions(ctx)).toEqual([]);
+});
+
+test("arrow switch: gated on release >= 14", () => {
+  const text =
+    "class T {\n  void m(int x) {\n    switch (x) {\n      case 1:\n        foo();\n        break;\n      default:\n        bar();\n    }\n  }\n}";
+  const ctx = setup(text);
+  expect(arrowActions(ctx, 13)).toEqual([]);
+  expect(arrowActions(ctx, 14).length).toBe(1);
+});
+
+// --- merge catch clauses into a multi-catch ----------------------------------
+
+const catchTitle = "Merge catch clauses";
+
+function catchActions(ctx: ReturnType<typeof setup>, release?: number) {
+  return actionsAt(ctx, "catch", 1, release).filter(a => a.title === catchTitle);
+}
+
+test("multi-catch: merges adjacent clauses with identical bodies", () => {
+  const text =
+    "class A extends Exception {}\nclass B extends Exception {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (A e) {\n      handle(e);\n    } catch (B e) {\n      handle(e);\n    }\n  }\n}";
+  const ctx = setup(text);
+  const actions = catchActions(ctx);
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class A extends Exception {}\nclass B extends Exception {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (A | B e) {\n      handle(e);\n    }\n  }\n}",
+  );
+});
+
+test("multi-catch: merges three adjacent clauses", () => {
+  const text =
+    "class A extends Exception {}\nclass B extends Exception {}\nclass C extends Exception {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (A e) {\n      log(e);\n    } catch (B e) {\n      log(e);\n    } catch (C e) {\n      log(e);\n    }\n  }\n}";
+  const ctx = setup(text);
+  const actions = catchActions(ctx);
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class A extends Exception {}\nclass B extends Exception {}\nclass C extends Exception {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (A | B | C e) {\n      log(e);\n    }\n  }\n}",
+  );
+});
+
+test("multi-catch: not offered when bodies differ", () => {
+  const text =
+    "class A extends Exception {}\nclass B extends Exception {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (A e) {\n      handleA(e);\n    } catch (B e) {\n      handleB(e);\n    }\n  }\n}";
+  const ctx = setup(text);
+  expect(catchActions(ctx)).toEqual([]);
+});
+
+test("multi-catch: not offered when a caught type is a subtype of another", () => {
+  const text =
+    "class Base extends Exception {}\nclass Sub extends Base {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (Sub e) {\n      handle(e);\n    } catch (Base e) {\n      handle(e);\n    }\n  }\n}";
+  const ctx = setup(text);
+  expect(catchActions(ctx)).toEqual([]);
+});
+
+test("multi-catch: gated on release >= 7", () => {
+  const text =
+    "class A extends Exception {}\nclass B extends Exception {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (A e) {\n      handle(e);\n    } catch (B e) {\n      handle(e);\n    }\n  }\n}";
+  const ctx = setup(text);
+  expect(catchActions(ctx, 6)).toEqual([]);
+  expect(catchActions(ctx, 7).length).toBe(1);
+});

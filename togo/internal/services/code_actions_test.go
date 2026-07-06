@@ -1078,3 +1078,131 @@ func TestStringBuilderNotOfferedWhenAppendReadsVariable(t *testing.T) {
 		t.Errorf("expected no action, got %+v", got)
 	}
 }
+
+// --- convert a colon switch to an arrow switch -------------------------------
+
+func arrowActions(actions []CodeActionResult) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range actions {
+		if a.Title == "Convert to arrow switch" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestArrowSwitchMergesLabelsAndBlocksReturns(t *testing.T) {
+	text := "class T {\n  int m(int x) {\n    switch (x) {\n      case 1:\n        return 10;\n      case 2:\n      case 3:\n        return 20;\n      default:\n        return 0;\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	actions := arrowActions(ctx.actionsAt("switch", 1))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  int m(int x) {\n    switch (x) {\n        case 1 -> {\n            return 10;\n        }\n        case 2, 3 -> {\n            return 20;\n        }\n        default -> {\n            return 0;\n        }\n    }\n  }\n}")
+}
+
+func TestArrowSwitchInlinesAndDropsBreak(t *testing.T) {
+	text := "class T {\n  void m(int x) {\n    switch (x) {\n      case 1:\n        System.out.println(\"one\");\n        break;\n      default:\n        System.out.println(\"other\");\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	actions := arrowActions(ctx.actionsAt("switch", 1))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(int x) {\n    switch (x) {\n        case 1 -> System.out.println(\"one\");\n        default -> System.out.println(\"other\");\n    }\n  }\n}")
+}
+
+func TestArrowSwitchNotOfferedOnFallThrough(t *testing.T) {
+	text := "class T {\n  void m(int x) {\n    switch (x) {\n      case 1:\n        foo();\n      case 2:\n        bar();\n        break;\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := arrowActions(ctx.actionsAt("switch", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestArrowSwitchNotOfferedWhenBodyBreaksConditionally(t *testing.T) {
+	text := "class T {\n  void m(int x, boolean y) {\n    switch (x) {\n      case 1:\n        if (y) break;\n        foo();\n        break;\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := arrowActions(ctx.actionsAt("switch", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestArrowSwitchNotOfferedWhenAlreadyArrow(t *testing.T) {
+	text := "class T {\n  void m(int x) {\n    switch (x) {\n      case 1 -> foo();\n      default -> bar();\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := arrowActions(ctx.actionsAt("switch", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestArrowSwitchGatedOnRelease(t *testing.T) {
+	text := "class T {\n  void m(int x) {\n    switch (x) {\n      case 1:\n        foo();\n        break;\n      default:\n        bar();\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	thirteen, fourteen := 13, 14
+	if got := arrowActions(ctx.actionsAt("switch", 1, &thirteen)); len(got) != 0 {
+		t.Errorf("release 13: expected no action, got %+v", got)
+	}
+	if got := arrowActions(ctx.actionsAt("switch", 1, &fourteen)); len(got) != 1 {
+		t.Errorf("release 14: expected 1 action, got %+v", got)
+	}
+}
+
+// --- merge catch clauses into a multi-catch ----------------------------------
+
+func catchActions(actions []CodeActionResult) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range actions {
+		if a.Title == "Merge catch clauses" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestMultiCatchMergesIdenticalBodies(t *testing.T) {
+	text := "class A extends Exception {}\nclass B extends Exception {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (A e) {\n      handle(e);\n    } catch (B e) {\n      handle(e);\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	actions := catchActions(ctx.actionsAt("catch", 1))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class A extends Exception {}\nclass B extends Exception {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (A | B e) {\n      handle(e);\n    }\n  }\n}")
+}
+
+func TestMultiCatchMergesThreeClauses(t *testing.T) {
+	text := "class A extends Exception {}\nclass B extends Exception {}\nclass C extends Exception {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (A e) {\n      log(e);\n    } catch (B e) {\n      log(e);\n    } catch (C e) {\n      log(e);\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	actions := catchActions(ctx.actionsAt("catch", 1))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class A extends Exception {}\nclass B extends Exception {}\nclass C extends Exception {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (A | B | C e) {\n      log(e);\n    }\n  }\n}")
+}
+
+func TestMultiCatchNotOfferedWhenBodiesDiffer(t *testing.T) {
+	text := "class A extends Exception {}\nclass B extends Exception {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (A e) {\n      handleA(e);\n    } catch (B e) {\n      handleB(e);\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := catchActions(ctx.actionsAt("catch", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestMultiCatchNotOfferedWhenSubtype(t *testing.T) {
+	text := "class Base extends Exception {}\nclass Sub extends Base {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (Sub e) {\n      handle(e);\n    } catch (Base e) {\n      handle(e);\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := catchActions(ctx.actionsAt("catch", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestMultiCatchGatedOnRelease(t *testing.T) {
+	text := "class A extends Exception {}\nclass B extends Exception {}\nclass T {\n  void m() {\n    try {\n      work();\n    } catch (A e) {\n      handle(e);\n    } catch (B e) {\n      handle(e);\n    }\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	six, seven := 6, 7
+	if got := catchActions(ctx.actionsAt("catch", 1, &six)); len(got) != 0 {
+		t.Errorf("release 6: expected no action, got %+v", got)
+	}
+	if got := catchActions(ctx.actionsAt("catch", 1, &seven)); len(got) != 1 {
+		t.Errorf("release 7: expected 1 action, got %+v", got)
+	}
+}

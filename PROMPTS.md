@@ -527,3 +527,7 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-06 15:25 — now, check for other refactorings. for example, the string concat from above
 - 2026-07-06 15:25 — [AskUserQuestion] Which modern-Java refactorings to implement -> answer: Diamond operator; what about string builders instead of concat in a loop?
 - 2026-07-06 15:30 — make sure to add a test that asserts the applied refactoring
+
+- 2026-07-06 15:40 — resolve https://github.com/nikeee/cappu/issues/37 . you can use the globally installed "cappu" command for it. it is the togo version
+- 2026-07-06 15:37 — any other refactoring to use a newer language version?
+- 2026-07-06 15:37 — do arrow-switch, multi-catch

@@ -21,6 +21,7 @@ import {
   type Block,
   type CallExpression,
   type CastExpression,
+  type CatchClause,
   type ClassDeclaration,
   type ConstructorDeclaration,
   type ExpressionStatement,
@@ -39,10 +40,13 @@ import {
   type QualifiedName,
   type ReturnStatement,
   type SourceFile,
+  type Statement,
   type Symbol,
   SymbolFlags,
+  type SwitchStatement,
   SyntaxKind,
   type ThisExpression,
+  type TryStatement,
   type TypeNode,
   type TypeReference,
   type VariableDeclarator,
@@ -77,8 +81,10 @@ export interface CodeActionResult {
 // each modern-Java rewrite just checks a boolean instead of a version number.
 export interface LanguageFeatures {
   readonly supportsDiamond: boolean; // SE7
+  readonly supportsMultiCatch: boolean; // SE7
   readonly supportsVar: boolean; // SE10
   readonly supportsLambda: boolean; // SE8
+  readonly supportsArrowSwitch: boolean; // SE14
   readonly supportsRecord: boolean; // SE16
   readonly supportsInstanceofPattern: boolean; // SE16
 }
@@ -88,8 +94,10 @@ export function languageFeatures(release: number | undefined): LanguageFeatures 
   const at = (min: number) => release === undefined || release >= min;
   return {
     supportsDiamond: at(7),
+    supportsMultiCatch: at(7),
     supportsVar: at(10),
     supportsLambda: at(8),
+    supportsArrowSwitch: at(14),
     supportsRecord: at(16),
     supportsInstanceofPattern: at(16),
   };
@@ -1140,6 +1148,238 @@ function convertToStringBuilder(
   return [{ title: "Convert to StringBuilder", kind: "refactor.rewrite", changes }];
 }
 
+// --- convert a colon switch to an arrow switch (SE14) ------------------------
+
+function terminatesClause(stmt: Statement): boolean {
+  switch (stmt.kind) {
+    case SyntaxKind.BreakStatement:
+    case SyntaxKind.ContinueStatement:
+    case SyntaxKind.ReturnStatement:
+    case SyntaxKind.ThrowStatement:
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isUnlabeledBreak(stmt: Statement): boolean {
+  return stmt.kind === SyntaxKind.BreakStatement && !(stmt as { label?: Node }).label;
+}
+
+// True if `stmt` contains an unlabeled `break` that targets the enclosing switch
+// (i.e. not one captured by a nested loop or switch). Such a break has no arrow
+// equivalent, so its presence suppresses the rewrite.
+function hasSwitchBreak(stmt: Node): boolean {
+  let found = false;
+  const visit = (n: Node): void => {
+    if (found) return;
+    if (isUnlabeledBreak(n as Statement)) {
+      found = true;
+      return;
+    }
+    if (
+      LOOP_KINDS.has(n.kind) ||
+      n.kind === SyntaxKind.SwitchStatement ||
+      n.kind === SyntaxKind.SwitchExpression
+    ) {
+      return; // this construct captures its own breaks
+    }
+    forEachChild(n, c => {
+      visit(c);
+      return undefined;
+    });
+  };
+  visit(stmt);
+  return found;
+}
+
+// Offer to rewrite a classic colon `switch` into the SE14 arrow form:
+// `case A: foo(); break;` -> `case A -> foo();`, with fall-through-only labels
+// merged (`case A: case B:` -> `case A, B ->`). Bails on anything the arrow form
+// cannot express: real fall-through (a labeled clause with code that reaches the
+// next), a switch-targeting break inside a body, a `default` that falls through,
+// or an SE21 `when` guard.
+function convertToArrowSwitch(sourceFile: SourceFile, start: number): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.SwitchStatement) node = node.parent;
+  if (!node) return [];
+  const sw = node as SwitchStatement;
+  const clauses = sw.clauses;
+  if (clauses.length === 0) return [];
+  if (clauses.some(c => c.isArrow)) return []; // already arrow (or mixed): leave alone
+
+  const text = sourceFile.text;
+  const span = (n: Node) => text.slice(skipTrivia(text, n.pos), n.end);
+
+  type Group = { label: string; body: Statement[] };
+  const groups: Group[] = [];
+  let pending: string[] = []; // case labels stacked by empty fall-through clauses
+  for (let i = 0; i < clauses.length; i++) {
+    const c = clauses[i]!;
+    const isLast = i === clauses.length - 1;
+    if (c.guard) return []; // SE21 guarded pattern: out of scope
+    const labelText = c.isDefault ? "default" : (c.labels ?? []).map(span).join(", ");
+
+    if (c.statements.length === 0) {
+      if (isLast) {
+        groups.push({
+          label: c.isDefault ? "default" : `case ${[...pending, labelText].join(", ")}`,
+          body: [],
+        });
+        pending = [];
+      } else {
+        if (c.isDefault) return []; // default cannot fall through in the arrow form
+        pending.push(labelText);
+      }
+      continue;
+    }
+
+    const stmts = c.statements;
+    const last = stmts[stmts.length - 1]!;
+    if (!isLast && !terminatesClause(last)) return []; // real fall-through with code
+    const body = isUnlabeledBreak(last) ? stmts.slice(0, -1) : stmts.slice();
+    if (body.some(hasSwitchBreak)) return []; // a break that targets this switch
+    if (c.isDefault) {
+      if (pending.length) return []; // a case fell into default
+      groups.push({ label: "default", body });
+    } else {
+      groups.push({ label: `case ${[...pending, labelText].join(", ")}`, body });
+    }
+    pending = [];
+  }
+  if (pending.length) return []; // labels with no body (defensive)
+
+  const switchStart = skipTrivia(text, sw.pos);
+  const indent = indentationAt(text, switchStart);
+  const caseIndent = `${indent}    `;
+  const renderBody = (body: Statement[]): string => {
+    if (body.length === 0) return "{}";
+    const only = body[0]!;
+    if (
+      body.length === 1 &&
+      (only.kind === SyntaxKind.ExpressionStatement || only.kind === SyntaxKind.ThrowStatement)
+    ) {
+      return span(only);
+    }
+    // Block form: reindent the original statement lines under the arrow.
+    const bodyStart = skipTrivia(text, only.pos);
+    const originalIndent = indentationAt(text, bodyStart);
+    const inner = `${caseIndent}    `;
+    const raw = text.slice(bodyStart, body[body.length - 1]!.end);
+    const reindented = raw
+      .split("\n")
+      .map((line, idx) =>
+        idx === 0
+          ? inner + line
+          : inner +
+            (line.startsWith(originalIndent)
+              ? line.slice(originalIndent.length)
+              : line.replace(/^\s+/, "")),
+      )
+      .join("\n");
+    return `{\n${reindented}\n${caseIndent}}`;
+  };
+
+  const lines = [`switch (${span(sw.expression)}) {`];
+  for (const g of groups) lines.push(`${caseIndent}${g.label} -> ${renderBody(g.body)}`);
+  lines.push(`${indent}}`);
+
+  return [
+    {
+      title: "Convert to arrow switch",
+      kind: "refactor.rewrite",
+      changes: [{ start: switchStart, end: sw.end, newText: lines.join("\n") }],
+    },
+  ];
+}
+
+// --- merge catch clauses with identical bodies into a multi-catch (SE7) -------
+
+function catchTypeSymbol(clause: CatchClause, program: Program): Symbol | undefined {
+  const t = clause.catchTypes[0];
+  if (!t || t.kind !== SyntaxKind.TypeReference) return undefined;
+  return resolveTypeEntityName((t as TypeReference).typeName, clause, program);
+}
+
+// source's class symbol is a subtype of target's (walks extends/implements).
+function isCatchSubtype(sourceSym: Symbol, targetSym: Symbol, program: Program): boolean {
+  const seen = new Set<Symbol>();
+  const queue: Symbol[] = [sourceSym];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    if (cur === targetSym) return true;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    queue.push(...getDirectSuperTypeSymbols(cur, program));
+  }
+  return false;
+}
+
+// Merge each maximal run of adjacent catch clauses that share the same parameter
+// (name + modifiers) and byte-identical body into one `catch (A | B e)`. A union
+// alternative may not be a subtype of another (JLS 14.20), so the caught types
+// must resolve and be pairwise unrelated - otherwise that run is skipped.
+function mergeCatchClauses(
+  program: Program,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.TryStatement) node = node.parent;
+  if (!node) return [];
+  const clauses = (node as TryStatement).catchClauses;
+  if (clauses.length < 2) return [];
+
+  const text = sourceFile.text;
+  const span = (n: Node) => text.slice(skipTrivia(text, n.pos), n.end);
+  const modText = (c: CatchClause) =>
+    c.modifiers?.length
+      ? text.slice(skipTrivia(text, c.modifiers[0]!.pos), c.modifiers[c.modifiers.length - 1]!.end)
+      : "";
+  const mergeable = (a: CatchClause, b: CatchClause) =>
+    a.catchTypes.length === 1 &&
+    b.catchTypes.length === 1 &&
+    a.name.text === b.name.text &&
+    modText(a) === modText(b) &&
+    span(a.block) === span(b.block);
+
+  const actions: CodeActionResult[] = [];
+  let i = 0;
+  while (i < clauses.length) {
+    let j = i + 1;
+    while (j < clauses.length && mergeable(clauses[j - 1]!, clauses[j]!)) j++;
+    if (j - i >= 2) {
+      const run = clauses.slice(i, j);
+      const syms = run.map(c => catchTypeSymbol(c, program));
+      const related = (a: number, b: number) =>
+        isCatchSubtype(syms[a]!, syms[b]!, program) || isCatchSubtype(syms[b]!, syms[a]!, program);
+      let ok = syms.every(Boolean);
+      for (let a = 0; ok && a < syms.length; a++)
+        for (let b = a + 1; ok && b < syms.length; b++) if (related(a, b)) ok = false;
+      if (ok) {
+        const first = run[0]!;
+        const prefix = modText(first) ? `${modText(first)} ` : "";
+        const types = run.map(c => span(c.catchTypes[0]!)).join(" | ");
+        actions.push({
+          title: "Merge catch clauses",
+          kind: "refactor.rewrite",
+          changes: [
+            {
+              start: skipTrivia(text, first.pos),
+              end: run[run.length - 1]!.end,
+              newText: `catch (${prefix}${types} ${first.name.text}) ${span(first.block)}`,
+            },
+          ],
+        });
+      }
+    }
+    i = j;
+  }
+  return actions;
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
@@ -1163,6 +1403,8 @@ export function getCodeActions(
     ...(features.supportsLambda ? convertAnonymousClassToLambda(program, sourceFile, start) : []),
     ...(features.supportsInstanceofPattern ? convertInstanceofToPattern(sourceFile, start) : []),
     ...(features.supportsDiamond ? convertToDiamond(sourceFile, start) : []),
+    ...(features.supportsArrowSwitch ? convertToArrowSwitch(sourceFile, start) : []),
+    ...(features.supportsMultiCatch ? mergeCatchClauses(program, sourceFile, start) : []),
     ...convertToStringBuilder(program, checker, sourceFile, start),
   ];
 }
