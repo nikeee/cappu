@@ -25,6 +25,16 @@ function apply(text: string, action: CodeActionResult): string {
   return out;
 }
 
+// Apply the proposed edit and assert it is correct: the result equals `want` AND
+// re-parses as syntactically valid Java (no parse diagnostics), so a rewrite can
+// never silently emit broken code.
+function expectEdit(text: string, action: CodeActionResult, want: string): void {
+  const out = apply(text, action);
+  const reparsed = setup(out).program.getSourceFile("file:///T.java" as Uri)!;
+  expect(reparsed.parseDiagnostics).toEqual([]);
+  expect(out).toBe(want);
+}
+
 function actionsAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1, release?: number) {
   let offset = -1;
   for (let i = 0; i < occ; i++) offset = ctx.text.indexOf(needle, offset + 1);
@@ -614,7 +624,9 @@ test("var: offered for a constructor call", () => {
   const ctx = setup(text);
   const actions = actionsAt(ctx, "xs =").filter(a => a.title === varTitle);
   expect(actions.length).toBe(1);
-  expect(apply(text, actions[0]!)).toBe(
+  expectEdit(
+    text,
+    actions[0]!,
     "class T {\n  void m() {\n    var xs = new java.util.ArrayList<String>();\n  }\n}",
   );
 });
@@ -624,9 +636,7 @@ test("var: offered for a cast", () => {
   const ctx = setup(text);
   const actions = actionsAt(ctx, "s =").filter(a => a.title === varTitle);
   expect(actions.length).toBe(1);
-  expect(apply(text, actions[0]!)).toBe(
-    "class T {\n  void m(Object o) {\n    var s = (String) o;\n  }\n}",
-  );
+  expectEdit(text, actions[0]!, "class T {\n  void m(Object o) {\n    var s = (String) o;\n  }\n}");
 });
 
 test("var: offered for a literal, preserving a final modifier", () => {
@@ -634,7 +644,7 @@ test("var: offered for a literal, preserving a final modifier", () => {
   const ctx = setup(text);
   const actions = actionsAt(ctx, "n =").filter(a => a.title === varTitle);
   expect(actions.length).toBe(1);
-  expect(apply(text, actions[0]!)).toBe("class T {\n  void m() {\n    final var n = 42;\n  }\n}");
+  expectEdit(text, actions[0]!, "class T {\n  void m() {\n    final var n = 42;\n  }\n}");
 });
 
 test("var: not offered for a diamond new (would not compile)", () => {

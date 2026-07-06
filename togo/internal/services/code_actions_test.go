@@ -36,6 +36,23 @@ func apply(text string, action CodeActionResult) string {
 	return out
 }
 
+// expectEdit applies the proposed edit and asserts it is correct: the result
+// equals want AND re-parses as syntactically valid Java (no parse diagnostics),
+// so a rewrite can never silently emit broken code.
+func expectEdit(t *testing.T, text string, action CodeActionResult, want string) {
+	t.Helper()
+	out := apply(text, action)
+	program := compiler.NewProgram()
+	compiler.LoadJdkStub(program)
+	program.SetOpenDocument("file:///T.java", out, 1)
+	if diags := program.GetSourceFile("file:///T.java").AsSourceFile().ParseDiagnostics; len(diags) > 0 {
+		t.Errorf("edit produced invalid Java (%d parse diagnostics):\n%s", len(diags), out)
+	}
+	if out != want {
+		t.Errorf("apply =\n%s", out)
+	}
+}
+
 func (ctx *actionCtx) actionsAt(needle string, occ int, release ...*int) []CodeActionResult {
 	offset := -1
 	for i := 0; i < occ; i++ {
@@ -707,10 +724,7 @@ func TestVarOfferedForConstructorCall(t *testing.T) {
 	if len(actions) != 1 {
 		t.Fatalf("actions = %+v", actions)
 	}
-	want := "class T {\n  void m() {\n    var xs = new java.util.ArrayList<String>();\n  }\n}"
-	if got := apply(text, actions[0]); got != want {
-		t.Errorf("apply =\n%s", got)
-	}
+	expectEdit(t, text, actions[0], "class T {\n  void m() {\n    var xs = new java.util.ArrayList<String>();\n  }\n}")
 }
 
 func TestVarOfferedForCast(t *testing.T) {
@@ -720,10 +734,7 @@ func TestVarOfferedForCast(t *testing.T) {
 	if len(actions) != 1 {
 		t.Fatalf("actions = %+v", actions)
 	}
-	want := "class T {\n  void m(Object o) {\n    var s = (String) o;\n  }\n}"
-	if got := apply(text, actions[0]); got != want {
-		t.Errorf("apply =\n%s", got)
-	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(Object o) {\n    var s = (String) o;\n  }\n}")
 }
 
 func TestVarOfferedForLiteralKeepsFinal(t *testing.T) {
@@ -733,10 +744,7 @@ func TestVarOfferedForLiteralKeepsFinal(t *testing.T) {
 	if len(actions) != 1 {
 		t.Fatalf("actions = %+v", actions)
 	}
-	want := "class T {\n  void m() {\n    final var n = 42;\n  }\n}"
-	if got := apply(text, actions[0]); got != want {
-		t.Errorf("apply =\n%s", got)
-	}
+	expectEdit(t, text, actions[0], "class T {\n  void m() {\n    final var n = 42;\n  }\n}")
 }
 
 func TestVarNotOfferedForDiamond(t *testing.T) {
