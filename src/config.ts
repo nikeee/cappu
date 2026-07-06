@@ -85,7 +85,12 @@ const NullnessSchema = z.object({
 
 const CompilerOptionsSchema = z.object({
   /** Directories or .jar files scanned for .class files (resolution only). */
-  classPath: z.array(z.string()).default([DEFAULT_CLASS_PATH, ...EXTERNAL_CLASS_PATHS]),
+  classPath: z
+    .array(z.string())
+    .default([DEFAULT_CLASS_PATH, ...EXTERNAL_CLASS_PATHS])
+    // A user-supplied classPath replaces the defaults, but the cappu-managed
+    // dependency dir must stay searchable or installed jars never resolve.
+    .transform((paths) => (paths.includes(DEFAULT_CLASS_PATH) ? paths : [DEFAULT_CLASS_PATH, ...paths])),
   /** Directories scanned recursively for .java sources (resolution only). */
   sourcePaths: z.array(z.string()).default(DEFAULT_SOURCE_PATHS),
   /** Directories whose files are copied verbatim into the build output. */

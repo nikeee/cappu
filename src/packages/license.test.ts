@@ -52,6 +52,20 @@ test("the declared license names of common packages all normalize", () => {
   }
 });
 
+// The exact <license><name> strings that installing jmh and the jakarta xml
+// bind stack surfaced as "no SPDX mapping" during the Maven->cappu migration.
+test("licenses seen during real migrations normalize", () => {
+  expect(
+    normalizeLicense("GNU General Public License (GPL), version 2, with the Classpath exception"),
+  ).toBe("GPL-2.0-with-classpath-exception");
+  expect(normalizeLicense("Eclipse Distribution License - v 1.0")).toBe("BSD-3-Clause");
+  expect(normalizeLicense("EDL 1.0")).toBe("BSD-3-Clause");
+  // EDL by url (name absent/vague)
+  expect(
+    normalizeLicense("EDL", "http://www.eclipse.org/org/documents/edl-v10.php"),
+  ).toBe("BSD-3-Clause");
+});
+
 test("a known license url normalizes when the name does not", () => {
   // vague/vendor name, but a canonical deed url - the url disambiguates
   expect(

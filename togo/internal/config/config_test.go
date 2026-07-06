@@ -54,6 +54,45 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestUserClassPathKeepsManagedDir(t *testing.T) {
+	// A user-supplied classPath replaces the conventional defaults, but the
+	// cappu-managed dependency dir must stay searchable or installed jars never
+	// resolve. It is prepended when absent, and not duplicated when present.
+	cases := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{
+			"prepended when absent",
+			`{ "compilerOptions": { "classPath": ["../core/dist/app.jar"] } }`,
+			[]string{DefaultClassPath, "../core/dist/app.jar"},
+		},
+		{
+			"not duplicated when present",
+			`{ "compilerOptions": { "classPath": ["` + DefaultClassPath + `", "libs"] } }`,
+			[]string{DefaultClassPath, "libs"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Load(writeConfig(t, tc.body), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := cfg.CompilerOptions.ClassPath
+			if len(got) != len(tc.want) {
+				t.Fatalf("classPath = %v, want %v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("classPath = %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
 func TestLoadDiscoversConfigFromSubdirectory(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, DefaultConfigName),

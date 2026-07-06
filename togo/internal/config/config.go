@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/tidwall/jsonc"
 )
@@ -210,6 +211,10 @@ func (c *Config) applyDefaults() {
 	co := &c.CompilerOptions
 	if co.ClassPath == nil {
 		co.ClassPath = append([]string{DefaultClassPath}, ExternalClassPaths...)
+	} else if !slices.Contains(co.ClassPath, DefaultClassPath) {
+		// A user-supplied classPath replaces the defaults, but the cappu-managed
+		// dependency dir must stay searchable or installed jars never resolve.
+		co.ClassPath = append([]string{DefaultClassPath}, co.ClassPath...)
 	}
 	if co.SourcePaths == nil {
 		co.SourcePaths = append([]string{}, DefaultSourcePaths...)

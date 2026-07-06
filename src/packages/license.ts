@@ -42,6 +42,11 @@ const SPDX_ALIASES: Record<string, string> = {
   "the new bsd license": "BSD-3-Clause",
   "cddl gplv2 with classpath exception": "CDDL-1.1 OR GPL-2.0-with-classpath-exception",
   "gpl2 w cpe": "GPL-2.0-with-classpath-exception",
+  "gnu general public license gpl version 2 with the classpath exception":
+    "GPL-2.0-with-classpath-exception",
+  // The Eclipse Distribution License 1.0 is textually BSD-3-Clause (no distinct SPDX id).
+  "eclipse distribution license v 1 0": "BSD-3-Clause",
+  "edl 1 0": "BSD-3-Clause",
   "eclipse public license 1 0": "EPL-1.0",
   "eclipse public license v 1 0": "EPL-1.0",
   "epl 1 0": "EPL-1.0",
@@ -72,6 +77,7 @@ const SPDX_URL_PATTERNS: [needle: string, spdx: string][] = [
   ["eclipse.org/legal/epl-2.0", "EPL-2.0"],
   ["eclipse.org/legal/epl-v20", "EPL-2.0"],
   ["eclipse.org/legal/epl-v10", "EPL-1.0"],
+  ["documents/edl-v10", "BSD-3-Clause"], // Eclipse Distribution License 1.0 == BSD-3-Clause
   ["eclipse.org/legal/epl-1.0", "EPL-1.0"],
   ["opensource.org/licenses/eclipse-1.0", "EPL-1.0"],
   ["mozilla.org/en-us/mpl/2.0", "MPL-2.0"],

@@ -34,7 +34,9 @@ test("JSONC parses with comments and trailing commas; sections map", () => {
     ].join("\n"),
   );
   const config = loadConfig(undefined, dir.path);
-  expect(config.compilerOptions.classPath).toEqual(["lib/classes"]);
+  // A user-supplied classPath replaces the defaults, but the cappu-managed
+  // dependency dir is always prepended so installed jars still resolve.
+  expect(config.compilerOptions.classPath).toEqual(["./.cappu/lib/classes", "lib/classes"]);
   expect(config.compilerOptions.sourcePaths).toEqual(["src/main/java"]);
   // nested experimentalCompiler: the set field plus its defaults
   expect(config.compilerOptions.experimentalCompiler).toEqual({

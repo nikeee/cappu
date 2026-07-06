@@ -67,6 +67,15 @@ func TestNormalizeFromURL(t *testing.T) {
 	mustNormalize(t, "MIT License", "https://example.com/whatever", "MIT")
 }
 
+// The exact <license><name> strings that installing jmh and the jakarta xml
+// bind stack surfaced as "no SPDX mapping" during the Maven->cappu migration.
+func TestNormalizeMigrationLicenses(t *testing.T) {
+	mustNormalize(t, "GNU General Public License (GPL), version 2, with the Classpath exception", "", "GPL-2.0-with-classpath-exception")
+	mustNormalize(t, "Eclipse Distribution License - v 1.0", "", "BSD-3-Clause")
+	mustNormalize(t, "EDL 1.0", "", "BSD-3-Clause")
+	mustNormalize(t, "EDL", "http://www.eclipse.org/org/documents/edl-v10.php", "BSD-3-Clause")
+}
+
 func TestNormalizeUnrecognized(t *testing.T) {
 	for _, c := range []struct{ name, url string }{
 		{"Public Domain", ""},
