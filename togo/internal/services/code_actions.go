@@ -34,6 +34,9 @@ type CodeActionResult struct {
 	Title   string
 	Kind    string // LSP CodeActionKind, e.g. "quickfix" or "refactor.extract"
 	Changes []TextChange
+	// AdditionalEdits holds edits to OTHER documents, keyed by uri; nil for
+	// single-file actions.
+	AdditionalEdits map[string][]TextChange
 }
 
 func packageOf(fqn string) string {
@@ -528,6 +531,309 @@ func makeFieldFinal(checker *compiler.Checker, sf *compiler.Node, start int) []C
 	}}
 }
 
+// --- convert a class to a record ---------------------------------------------
+
+func hasKeyword(modifiers *compiler.NodeArray, kind compiler.SyntaxKind) bool {
+	if modifiers == nil {
+		return false
+	}
+	for _, m := range modifiers.Nodes {
+		if m.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAnnotation(modifiers *compiler.NodeArray) bool {
+	return hasKeyword(modifiers, compiler.Annotation)
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// getterFieldName returns the single field name a trivial getter returns
+// (`return f;` / `return this.f;`), or ("", false) if the method is not a plain
+// field accessor.
+func getterFieldName(method *compiler.Node) (string, bool) {
+	m := method.AsMethodDeclaration()
+	if m.Body == nil || m.Parameters.Len() > 0 {
+		return "", false
+	}
+	if m.TypeParameters.Len() > 0 || m.Throws.Len() > 0 {
+		return "", false
+	}
+	statements := m.Body.AsBlock().Statements
+	if statements.Len() != 1 {
+		return "", false
+	}
+	stmt := statements.Nodes[0]
+	if stmt.Kind != compiler.ReturnStatement {
+		return "", false
+	}
+	expr := stmt.AsReturnStatement().Expression
+	if expr == nil {
+		return "", false
+	}
+	if expr.Kind == compiler.Identifier {
+		return expr.AsIdentifier().Text, true
+	}
+	if expr.Kind == compiler.PropertyAccessExpression {
+		pa := expr.AsPropertyAccessExpression()
+		if pa.Expression.Kind == compiler.ThisExpression && pa.Expression.AsThisExpression().Qualifier == nil {
+			return pa.Name.AsIdentifier().Text, true
+		}
+	}
+	return "", false
+}
+
+// ctorAssignment returns the field a `this.f = p` / `f = p` statement targets
+// and the source it reads from, or ("", "", false) for any other shape.
+func ctorAssignment(stmt *compiler.Node) (field, from string, ok bool) {
+	if stmt.Kind != compiler.ExpressionStatement {
+		return "", "", false
+	}
+	expr := stmt.AsExpressionStatement().Expression
+	if expr.Kind != compiler.AssignmentExpression {
+		return "", "", false
+	}
+	assign := expr.AsAssignmentExpression()
+	if assign.OperatorToken != compiler.EqualsToken || assign.Right.Kind != compiler.Identifier {
+		return "", "", false
+	}
+	from = assign.Right.AsIdentifier().Text
+	left := assign.Left
+	if left.Kind == compiler.Identifier {
+		return left.AsIdentifier().Text, from, true
+	}
+	if left.Kind == compiler.PropertyAccessExpression &&
+		left.AsPropertyAccessExpression().Expression.Kind == compiler.ThisExpression {
+		return left.AsPropertyAccessExpression().Name.AsIdentifier().Text, from, true
+	}
+	return "", "", false
+}
+
+func isBooleanType(t *compiler.Node) bool {
+	return t.Kind == compiler.PrimitiveType && t.AsPrimitiveType().Keyword == compiler.BooleanKeyword
+}
+
+// convertClassToRecord offers to convert a POJO (final private fields + trivial
+// getters + one trivial canonical constructor) into a record, renaming accessor
+// call sites across the workspace. Strict: any member that does not fit this
+// exact shape suppresses the action, so the rewrite is only offered when it is
+// guaranteed safe. Port of src/services/codeActions.ts convertClassToRecord.
+func convertClassToRecord(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.ClassDeclaration {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	cls := node.AsClassDeclaration()
+	text := data.Text
+
+	if hasKeyword(cls.Modifiers, compiler.AbstractKeyword) || cls.ExtendsType != nil {
+		return nil
+	}
+	if node.Parent.Kind != compiler.SourceFile && !hasKeyword(cls.Modifiers, compiler.StaticKeyword) {
+		return nil
+	}
+	if node.Symbol == nil {
+		return nil
+	}
+
+	// Partition members into fields / getters / the sole constructor. Anything
+	// else disqualifies.
+	var fields []*compiler.Node
+	type getter struct {
+		method *compiler.Node
+		field  string
+	}
+	var getters []getter
+	var ctor *compiler.Node
+	for _, member := range cls.Members.Nodes {
+		switch member.Kind {
+		case compiler.FieldDeclaration:
+			field := member.AsFieldDeclaration()
+			if !hasKeyword(field.Modifiers, compiler.PrivateKeyword) ||
+				!hasKeyword(field.Modifiers, compiler.FinalKeyword) ||
+				hasKeyword(field.Modifiers, compiler.StaticKeyword) ||
+				hasAnnotation(field.Modifiers) {
+				return nil
+			}
+			if field.Declarators.Len() != 1 || field.Declarators.Nodes[0].AsVariableDeclarator().Initializer != nil {
+				return nil
+			}
+			fields = append(fields, member)
+		case compiler.MethodDeclaration:
+			if hasKeyword(member.AsMethodDeclaration().Modifiers, compiler.StaticKeyword) {
+				return nil
+			}
+			name, ok := getterFieldName(member)
+			if !ok {
+				return nil
+			}
+			getters = append(getters, getter{member, name})
+		case compiler.ConstructorDeclaration:
+			if ctor != nil {
+				return nil
+			}
+			ctor = member
+		default:
+			return nil
+		}
+	}
+	if ctor == nil || ctor.AsConstructorDeclaration().Throws.Len() > 0 {
+		return nil
+	}
+
+	fieldNames := make([]string, len(fields))
+	for i, f := range fields {
+		fieldNames[i] = f.AsFieldDeclaration().Declarators.Nodes[0].AsVariableDeclarator().Name.AsIdentifier().Text
+	}
+	typeText := func(t *compiler.Node) string { return text[compiler.SkipTrivia(text, t.Pos):t.End] }
+
+	// Constructor parameters must equal the fields in declaration order (same
+	// type text, same name), so the record's canonical constructor keeps
+	// `new C(...)` calls valid without rewriting them.
+	params := ctor.AsConstructorDeclaration().Parameters
+	if params.Len() != len(fields) {
+		return nil
+	}
+	for i, f := range fields {
+		p := params.Nodes[i].AsParameter()
+		if p.IsVarArgs || p.Name == nil || p.Name.AsIdentifier().Text != fieldNames[i] ||
+			typeText(p.Type) != typeText(f.AsFieldDeclaration().Type) {
+			return nil
+		}
+	}
+	// ... and its body must assign every field exactly once from its own parameter.
+	body := ctor.AsConstructorDeclaration().Body.AsBlock()
+	if body.Statements.Len() != len(fields) {
+		return nil
+	}
+	assigned := map[string]bool{}
+	for _, stmt := range body.Statements.Nodes {
+		field, from, ok := ctorAssignment(stmt)
+		if !ok || !slices.Contains(fieldNames, field) || from != field || assigned[field] {
+			return nil
+		}
+		assigned[field] = true
+	}
+
+	// Every getter must map to a declared field and be named getX / isX (isX only
+	// for a boolean field).
+	for _, g := range getters {
+		idx := slices.Index(fieldNames, g.field)
+		if idx < 0 {
+			return nil
+		}
+		name := g.method.AsMethodDeclaration().Name.AsIdentifier().Text
+		getName := "get" + capitalize(g.field)
+		isName := "is" + capitalize(g.field)
+		isBool := name == isName && isBooleanType(fields[idx].AsFieldDeclaration().Type)
+		if name != getName && !isBool {
+			return nil
+		}
+	}
+
+	// Records are implicitly final: bail if any class in the program extends this one.
+	for _, uri := range program.GetAllUris() {
+		other := program.GetSourceFile(uri)
+		if other == nil {
+			continue
+		}
+		extended := false
+		forEachDescendant(other, func(n *compiler.Node) {
+			if n.Kind != compiler.ClassDeclaration {
+				return
+			}
+			ext := n.AsClassDeclaration().ExtendsType
+			if ext == nil || ext.Kind != compiler.TypeReference {
+				return
+			}
+			tn := ext.AsTypeReference().TypeName
+			id := tn
+			if tn.Kind != compiler.Identifier {
+				id = tn.AsQualifiedName().Right
+			}
+			if checker.ResolveName(id) == node.Symbol {
+				extended = true
+			}
+		})
+		if extended {
+			return nil
+		}
+	}
+
+	// Build the record header, preserving leading modifiers/annotations by
+	// starting the replacement at the `class` keyword.
+	classKeywordPos := compiler.SkipTrivia(text, node.Pos)
+	if cls.Modifiers.Len() > 0 {
+		classKeywordPos = compiler.SkipTrivia(text, cls.Modifiers.Nodes[cls.Modifiers.Len()-1].End)
+	}
+	typeParams := ""
+	if cls.TypeParameters.Len() > 0 {
+		parts := make([]string, cls.TypeParameters.Len())
+		for i, tp := range cls.TypeParameters.Nodes {
+			parts[i] = typeText(tp)
+		}
+		typeParams = "<" + strings.Join(parts, ", ") + ">"
+	}
+	components := make([]string, len(fields))
+	for i, f := range fields {
+		components[i] = typeText(f.AsFieldDeclaration().Type) + " " + fieldNames[i]
+	}
+	impls := ""
+	if cls.ImplementsTypes.Len() > 0 {
+		parts := make([]string, cls.ImplementsTypes.Len())
+		for i, t := range cls.ImplementsTypes.Nodes {
+			parts[i] = typeText(t)
+		}
+		impls = " implements " + strings.Join(parts, ", ")
+	}
+	header := "record " + cls.Name.AsIdentifier().Text + typeParams + "(" + strings.Join(components, ", ") + ")" + impls + " {\n}"
+	changes := []TextChange{{Start: classKeywordPos, End: node.End, NewText: header}}
+	additionalEdits := map[string][]TextChange{}
+
+	// Rename accessor call sites getX()/isX() -> x() everywhere, skipping
+	// references inside this class (declarations, which are being deleted).
+	for _, g := range getters {
+		if g.method.Symbol == nil || len(g.method.Symbol.Declarations) != 1 {
+			return nil
+		}
+		for _, ref := range compiler.FindReferences(g.method.Symbol, program, checker.ResolveName) {
+			refFile := compiler.GetSourceFileOfNode(ref)
+			refData := refFile.AsSourceFile()
+			inThisClass := refData.FileName == data.FileName && ref.Pos >= node.Pos && ref.End <= node.End
+			if inThisClass {
+				continue
+			}
+			edit := TextChange{Start: compiler.SkipTrivia(refData.Text, ref.Pos), End: ref.End, NewText: g.field}
+			if refData.FileName == data.FileName {
+				changes = append(changes, edit)
+			} else {
+				additionalEdits[refData.FileName] = append(additionalEdits[refData.FileName], edit)
+			}
+		}
+	}
+
+	result := CodeActionResult{Title: "Convert class to record", Kind: "refactor.rewrite", Changes: changes}
+	if len(additionalEdits) > 0 {
+		result.AdditionalEdits = additionalEdits
+	}
+	return []CodeActionResult{result}
+}
+
 // GetCodeActions returns all code actions offered for a selection range.
 func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int) []CodeActionResult {
 	var out []CodeActionResult
@@ -539,5 +845,6 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	out = append(out, removeUnusedImport(sf, start, end)...)
 	out = append(out, removeRedundantOverride(checker, sf, start)...)
 	out = append(out, makeFieldFinal(checker, sf, start)...)
+	out = append(out, convertClassToRecord(program, checker, sf, start)...)
 	return out
 }

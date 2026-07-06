@@ -164,6 +164,38 @@ func TestServerCodeAction(t *testing.T) {
 	}
 }
 
+func TestServerConvertClassToRecordMultiFile(t *testing.T) {
+	c := startTestServer(t)
+	c.request(t, "initialize", lsp.InitializeParams{})
+	point := "class Point {\n  private final int x;\n  Point(int x) { this.x = x; }\n  public int getX() { return x; }\n}\n"
+	other := "class U { int m(Point p) { return p.getX(); } }\n"
+	openDoc(t, c, "file:///Point.java", point)
+	openDoc(t, c, "file:///U.java", other)
+	result := c.request(t, "textDocument/codeAction", lsp.CodeActionParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: "file:///Point.java"},
+		Range:        lsp.Range{Start: posOf(point, "class Point"), End: posOf(point, "class Point")},
+	})
+	var actions []lsp.CodeAction
+	if err := json.Unmarshal(result, &actions); err != nil {
+		t.Fatal(err)
+	}
+	var action *lsp.CodeAction
+	for i := range actions {
+		if actions[i].Title == "Convert class to record" {
+			action = &actions[i]
+		}
+	}
+	if action == nil {
+		t.Fatalf("expected a convert-to-record action, got %+v", actions)
+	}
+	if _, ok := action.Edit.Changes["file:///Point.java"]; !ok {
+		t.Error("expected an edit for Point.java")
+	}
+	if _, ok := action.Edit.Changes["file:///U.java"]; !ok {
+		t.Errorf("expected a cross-file edit for U.java, got %+v", action.Edit.Changes)
+	}
+}
+
 func TestServerSemanticTokens(t *testing.T) {
 	c := openedServer(t)
 	result := c.request(t, "textDocument/semanticTokens/full", lsp.DocumentSymbolParams{

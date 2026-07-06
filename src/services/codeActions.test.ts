@@ -387,3 +387,112 @@ test("no add-'final' on reassigned, already-final, or unflagged positions", () =
       .map(a => a.title),
   ).toEqual([]);
 });
+
+// --- convert class to record -------------------------------------------------------
+
+const POINT =
+  "class Point {\n" +
+  "  private final int x;\n" +
+  "  private final int y;\n" +
+  "  Point(int x, int y) { this.x = x; this.y = y; }\n" +
+  "  public int getX() { return x; }\n" +
+  "  public int getY() { return this.y; }\n" +
+  "}\n";
+
+function recordActions(ctx: ReturnType<typeof setup>, needle = "class Point") {
+  return actionsAt(ctx, needle).filter(a => a.title === "Convert class to record");
+}
+
+test("converts a POJO to a record", () => {
+  const ctx = setup(POINT);
+  const action = recordActions(ctx)[0]!;
+  expect(action.kind).toBe("refactor.rewrite");
+  expect(apply(POINT, action)).toBe("record Point(int x, int y) {\n}\n");
+});
+
+test("preserves modifiers, type params and implements", () => {
+  const text =
+    "public class Box<T> implements java.io.Serializable {\n" +
+    "  private final T v;\n" +
+    "  public Box(T v) { this.v = v; }\n" +
+    "  public T getV() { return v; }\n" +
+    "}\n";
+  const ctx = setup(text);
+  const action = recordActions(ctx, "class Box")[0]!;
+  expect(apply(text, action)).toBe(
+    "public record Box<T>(T v) implements java.io.Serializable {\n}\n",
+  );
+});
+
+test("supports an isX accessor on a boolean field", () => {
+  const text =
+    "class Flag {\n" +
+    "  private final boolean on;\n" +
+    "  Flag(boolean on) { this.on = on; }\n" +
+    "  public boolean isOn() { return on; }\n" +
+    "}\n";
+  const ctx = setup(text);
+  expect(apply(text, recordActions(ctx, "class Flag")[0]!)).toBe("record Flag(boolean on) {\n}\n");
+});
+
+test("renames accessor call sites in other files", () => {
+  const other = "class U { int m(Point p) { return p.getX() + p.getY(); } }\n";
+  const ctx = setup(POINT, { "file:///U.java": other });
+  const action = recordActions(ctx)[0]!;
+  const edits = action.additionalEdits?.["file:///U.java"];
+  expect(edits).toBeDefined();
+  let out = other;
+  for (const c of edits!.toSorted((a, b) => b.start - a.start)) {
+    out = out.slice(0, c.start) + c.newText + out.slice(c.end);
+  }
+  expect(out).toBe("class U { int m(Point p) { return p.x() + p.y(); } }\n");
+});
+
+test("is not offered when the shape does not fit", () => {
+  const cases: string[] = [
+    // field with an initializer
+    "class C { private final int x = 5; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+    // non-final field
+    "class C { private int x; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+    // non-private field
+    "class C { final int x; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+    // a static member present
+    "class C { static int Z; private final int x; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+    // an extra non-getter method
+    "class C { private final int x; C(int x) { this.x = x; } public int getX() { return x; } public void run() {} }\n",
+    // extends a class
+    "class C extends B { private final int x; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+    // abstract
+    "abstract class C { private final int x; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+    // ctor parameter order differs from field order
+    "class C { private final int x; private final int y; C(int y, int x) { this.x = x; this.y = y; } }\n",
+    // ctor throws
+    "class C { private final int x; C(int x) throws Exception { this.x = x; } public int getX() { return x; } }\n",
+    // ctor body does more than assign
+    "class C { private final int x; C(int x) { this.x = x; run(); } public int getX() { return x; } }\n",
+    // getter body is not a plain field return
+    "class C { private final int x; C(int x) { this.x = x; } public int getX() { return x + 1; } }\n",
+    // no constructor
+    "class C { private final int x; public int getX() { return x; } }\n",
+  ];
+  for (const text of cases) {
+    const ctx = setup(text);
+    expect(recordActions(ctx, "class C").map(a => a.title)).toEqual([]);
+  }
+});
+
+test("is not offered on a record or away from a class", () => {
+  const rec = setup("record R(int x) {}\n");
+  expect(recordActions(rec, "record R").map(a => a.title)).toEqual([]);
+  const imp = setup(
+    "import java.util.List;\nclass C { private final int x; C(int x){this.x=x;} }\n",
+  );
+  expect(recordActions(imp, "import").map(a => a.title)).toEqual([]);
+});
+
+test("is not offered when another class extends it", () => {
+  const base =
+    "class Base {\n  private final int x;\n  Base(int x) { this.x = x; }\n  public int getX() { return x; }\n}\n";
+  const ctx = setup(base, { "file:///Sub.java": "class Sub extends Base {}\n" });
+  expect(recordActions(ctx, "class Base").map(a => a.title)).toEqual([]);
+});

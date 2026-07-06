@@ -50,7 +50,7 @@ import {
 import { createChecker } from "../compiler/checker.ts";
 import { symbolDeprecation } from "../compiler/deprecation.ts";
 import { type ArrayType, type ClassType, TypeKind } from "../compiler/checkerTypes.ts";
-import { getCodeActions } from "./codeActions.ts";
+import { getCodeActions, type TextChange } from "./codeActions.ts";
 import { getCodeLenses } from "./codeLens.ts";
 import { dependencyLenses } from "./dependencyLens.ts";
 import { loadConfiguredPaths, missingConfiguredPaths } from "../compiler/compiler.ts";
@@ -527,21 +527,24 @@ export function startServer(
       params.range.end.line as Line,
       params.range.end.character as Character,
     );
-    return getCodeActions(program, checker, sourceFile, start, end).map(action => ({
-      title: action.title,
-      kind: action.kind,
-      edit: {
-        changes: {
-          [params.textDocument.uri]: action.changes.map(c => ({
-            range: {
-              start: getLineAndCharacterOfPosition(lineStarts, c.start),
-              end: getLineAndCharacterOfPosition(lineStarts, c.end),
-            },
-            newText: c.newText,
-          })),
+    const mapEdits = (ls: ReturnType<typeof lineStartsOf>, cs: readonly TextChange[]) =>
+      cs.map(c => ({
+        range: {
+          start: getLineAndCharacterOfPosition(ls, c.start),
+          end: getLineAndCharacterOfPosition(ls, c.end),
         },
-      },
-    }));
+        newText: c.newText,
+      }));
+    return getCodeActions(program, checker, sourceFile, start, end).map(action => {
+      const changes: Record<string, ReturnType<typeof mapEdits>> = {
+        [params.textDocument.uri]: mapEdits(lineStarts, action.changes),
+      };
+      for (const [uri, edits] of Object.entries(action.additionalEdits ?? {})) {
+        const other = program.getSourceFile(asUri(uri));
+        if (other) changes[uri] = mapEdits(lineStartsOf(other), edits);
+      }
+      return { title: action.title, kind: action.kind, edit: { changes } };
+    });
   });
 
   // The innermost call whose argument list contains the offset (the cursor sits

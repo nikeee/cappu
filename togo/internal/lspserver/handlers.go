@@ -185,10 +185,24 @@ func (s *Server) onCodeAction(params json.RawMessage) (any, *lsp.ResponseError) 
 		for _, c := range action.Changes {
 			edits = append(edits, lsp.TextEdit{Range: lspRange(text, lineStarts, c.Start, c.End), NewText: c.NewText})
 		}
+		changes := map[string][]lsp.TextEdit{p.TextDocument.URI: edits}
+		for uri, cs := range action.AdditionalEdits {
+			other := s.program.GetSourceFile(compiler.URI(uri))
+			if other == nil {
+				continue
+			}
+			otherText := other.AsSourceFile().Text
+			otherLineStarts := other.AsSourceFile().LineStarts()
+			var otherEdits []lsp.TextEdit
+			for _, c := range cs {
+				otherEdits = append(otherEdits, lsp.TextEdit{Range: lspRange(otherText, otherLineStarts, c.Start, c.End), NewText: c.NewText})
+			}
+			changes[uri] = otherEdits
+		}
 		out = append(out, lsp.CodeAction{
 			Title: action.Title,
 			Kind:  action.Kind,
-			Edit:  lsp.WorkspaceEdit{Changes: map[string][]lsp.TextEdit{p.TextDocument.URI: edits}},
+			Edit:  lsp.WorkspaceEdit{Changes: changes},
 		})
 	}
 	if out == nil {

@@ -12,17 +12,27 @@ import { findReferences, getSourceFileOfNode } from "../compiler/resolver.ts";
 import {
   type Annotation,
   type AssignmentExpression,
+  type Block,
   type CallExpression,
+  type ClassDeclaration,
+  type ConstructorDeclaration,
+  type ExpressionStatement,
   type FieldDeclaration,
   type Identifier,
   type ImportDeclaration,
   type LocalVariableDeclarationStatement,
   type MethodDeclaration,
   type Node,
+  type PrimitiveType,
   type PropertyAccessExpression,
+  type QualifiedName,
+  type ReturnStatement,
   type SourceFile,
   SymbolFlags,
   SyntaxKind,
+  type ThisExpression,
+  type TypeNode,
+  type TypeReference,
   type VariableDeclarator,
 } from "../compiler/types.ts";
 import { entityNameToString, skipTrivia } from "../compiler/utilities.ts";
@@ -46,6 +56,8 @@ export interface CodeActionResult {
   /** LSP CodeActionKind, e.g. "quickfix" or "refactor.extract". */
   readonly kind: string;
   readonly changes: TextChange[];
+  /** Edits to OTHER documents, keyed by uri. Unset for single-file actions. */
+  readonly additionalEdits?: Record<string, TextChange[]>;
 }
 
 function packageOf(fqn: string): string {
@@ -515,6 +527,226 @@ function makeFieldFinal(
   ];
 }
 
+// --- convert a class to a record ---------------------------------------------
+
+function hasKeyword(modifiers: readonly Node[] | undefined, kind: SyntaxKind): boolean {
+  return modifiers?.some(m => m.kind === kind) ?? false;
+}
+
+function hasAnnotation(modifiers: readonly Node[] | undefined): boolean {
+  return modifiers?.some(m => m.kind === SyntaxKind.Annotation) ?? false;
+}
+
+const capitalize = (s: string): string => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
+
+// The single field name a trivial getter returns (`return f;` / `return this.f;`),
+// or undefined if the method is not a plain field accessor.
+function getterFieldName(method: MethodDeclaration): string | undefined {
+  if (!method.body || method.parameters.length > 0) return undefined;
+  if (method.typeParameters?.length || method.throws?.length) return undefined;
+  const body = method.body as Block;
+  if (body.statements.length !== 1) return undefined;
+  const stmt = body.statements[0]!;
+  if (stmt.kind !== SyntaxKind.ReturnStatement) return undefined;
+  const expr = (stmt as ReturnStatement).expression;
+  if (!expr) return undefined;
+  if (expr.kind === SyntaxKind.Identifier) return (expr as Identifier).text;
+  if (
+    expr.kind === SyntaxKind.PropertyAccessExpression &&
+    (expr as PropertyAccessExpression).expression.kind === SyntaxKind.ThisExpression &&
+    ((expr as PropertyAccessExpression).expression as ThisExpression).qualifier === undefined
+  ) {
+    return (expr as PropertyAccessExpression).name.text;
+  }
+  return undefined;
+}
+
+// The field a `this.f = p` / `f = p` assignment targets and the source it reads
+// from, or undefined for any other statement shape.
+function ctorAssignment(stmt: Node): { field: string; from: string } | undefined {
+  if (stmt.kind !== SyntaxKind.ExpressionStatement) return undefined;
+  const expr = (stmt as ExpressionStatement).expression;
+  if (expr.kind !== SyntaxKind.AssignmentExpression) return undefined;
+  const assign = expr as AssignmentExpression;
+  if (assign.operatorToken !== SyntaxKind.EqualsToken) return undefined;
+  if (assign.right.kind !== SyntaxKind.Identifier) return undefined;
+  const from = (assign.right as Identifier).text;
+  const left = assign.left;
+  if (left.kind === SyntaxKind.Identifier) return { field: (left as Identifier).text, from };
+  if (
+    left.kind === SyntaxKind.PropertyAccessExpression &&
+    (left as PropertyAccessExpression).expression.kind === SyntaxKind.ThisExpression
+  ) {
+    return { field: (left as PropertyAccessExpression).name.text, from };
+  }
+  return undefined;
+}
+
+function isBooleanType(type: TypeNode): boolean {
+  return (
+    type.kind === SyntaxKind.PrimitiveType &&
+    (type as PrimitiveType).keyword === SyntaxKind.BooleanKeyword
+  );
+}
+
+// Offer to convert a POJO (final private fields + trivial getters + one trivial
+// canonical constructor) into a record, renaming accessor call sites across the
+// workspace. Strict: any member that does not fit this exact shape suppresses the
+// action, so the rewrite is only offered when it is guaranteed safe.
+function convertClassToRecord(
+  program: Program,
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.ClassDeclaration) node = node.parent;
+  if (!node) return [];
+  const cls = node as ClassDeclaration;
+  const text = sourceFile.text;
+
+  // Eligibility: not abstract, no superclass, a static/top-level type.
+  if (hasKeyword(cls.modifiers, SyntaxKind.AbstractKeyword)) return [];
+  if (cls.extendsType) return [];
+  const isNested = cls.parent.kind !== SyntaxKind.SourceFile;
+  if (isNested && !hasKeyword(cls.modifiers, SyntaxKind.StaticKeyword)) return [];
+  if (!cls.symbol) return [];
+
+  // Partition members into fields / getters / the sole constructor. Anything else
+  // (static member, extra method, initializer block, nested type, ...) disqualifies.
+  const fields: FieldDeclaration[] = [];
+  const getters: { method: MethodDeclaration; field: string }[] = [];
+  let ctor: ConstructorDeclaration | undefined;
+  for (const member of cls.members) {
+    switch (member.kind) {
+      case SyntaxKind.FieldDeclaration: {
+        const field = member as FieldDeclaration;
+        if (!hasKeyword(field.modifiers, SyntaxKind.PrivateKeyword)) return [];
+        if (!hasKeyword(field.modifiers, SyntaxKind.FinalKeyword)) return [];
+        if (hasKeyword(field.modifiers, SyntaxKind.StaticKeyword)) return [];
+        if (hasAnnotation(field.modifiers)) return [];
+        if (field.declarators.length !== 1) return [];
+        if (field.declarators[0]!.initializer) return [];
+        fields.push(field);
+        break;
+      }
+      case SyntaxKind.MethodDeclaration: {
+        const method = member as MethodDeclaration;
+        if (hasKeyword(method.modifiers, SyntaxKind.StaticKeyword)) return [];
+        const field = getterFieldName(method);
+        if (field === undefined) return [];
+        getters.push({ method, field });
+        break;
+      }
+      case SyntaxKind.ConstructorDeclaration: {
+        if (ctor) return []; // more than one constructor
+        ctor = member as ConstructorDeclaration;
+        break;
+      }
+      default:
+        return []; // any other member kind is unhandled
+    }
+  }
+  if (!ctor || ctor.throws?.length) return [];
+
+  const fieldNames = fields.map(f => f.declarators[0]!.name.text);
+  const typeText = (t: Node) => text.slice(skipTrivia(text, t.pos), t.end);
+
+  // Constructor parameters must equal the fields in declaration order (same type
+  // text, same name), so the record's canonical constructor keeps `new C(...)`
+  // calls valid without rewriting them.
+  if (ctor.parameters.length !== fields.length) return [];
+  for (let i = 0; i < fields.length; i++) {
+    const p = ctor.parameters[i]!;
+    if (p.isVarArgs || !p.name) return [];
+    if (p.name.text !== fieldNames[i]) return [];
+    if (typeText(p.type) !== typeText(fields[i]!.type)) return [];
+  }
+  // ... and its body must assign every field exactly once from its own parameter.
+  const body = ctor.body as Block;
+  if (body.statements.length !== fields.length) return [];
+  const assigned = new Set<string>();
+  for (const stmt of body.statements) {
+    const a = ctorAssignment(stmt);
+    if (!a || !fieldNames.includes(a.field) || a.from !== a.field || assigned.has(a.field)) {
+      return [];
+    }
+    assigned.add(a.field);
+  }
+
+  // Every getter must map to a declared field and be named getX / isX (isX only
+  // for a boolean field).
+  for (const { method, field } of getters) {
+    const idx = fieldNames.indexOf(field);
+    if (idx < 0) return [];
+    const name = method.name.text;
+    const getName = `get${capitalize(field)}`;
+    const isName = `is${capitalize(field)}`;
+    const ok = name === getName || (name === isName && isBooleanType(fields[idx]!.type));
+    if (!ok) return [];
+  }
+
+  // Records are implicitly final: bail if any class in the program extends this one.
+  for (const uri of program.getAllUris()) {
+    const other = program.getSourceFile(uri);
+    if (!other) continue;
+    let extended = false;
+    forEachDescendant(other, n => {
+      if (n.kind !== SyntaxKind.ClassDeclaration) return;
+      const ext = (n as ClassDeclaration).extendsType;
+      if (!ext || ext.kind !== SyntaxKind.TypeReference) return;
+      const tn = (ext as TypeReference).typeName;
+      const id = tn.kind === SyntaxKind.Identifier ? tn : (tn as QualifiedName).right;
+      if (checker.resolveName(id) === cls.symbol) extended = true;
+    });
+    if (extended) return [];
+  }
+
+  // Build the record header, preserving leading modifiers/annotations by starting
+  // the replacement at the `class` keyword.
+  const lastMod = cls.modifiers?.[cls.modifiers.length - 1];
+  const classKeywordPos = lastMod ? skipTrivia(text, lastMod.end) : skipTrivia(text, cls.pos);
+  const typeParams = cls.typeParameters?.length
+    ? `<${cls.typeParameters.map(typeText).join(", ")}>`
+    : "";
+  const components = fields
+    .map(f => `${typeText(f.type)} ${f.declarators[0]!.name.text}`)
+    .join(", ");
+  const impls = cls.implementsTypes?.length
+    ? ` implements ${cls.implementsTypes.map(typeText).join(", ")}`
+    : "";
+  const header = `record ${cls.name.text}${typeParams}(${components})${impls} {\n}`;
+  const changes: TextChange[] = [{ start: classKeywordPos, end: cls.end, newText: header }];
+  const additionalEdits: Record<string, TextChange[]> = {};
+
+  // Rename accessor call sites getX()/isX() -> x() everywhere, skipping references
+  // inside this class (declarations, which are being deleted).
+  for (const { method, field } of getters) {
+    if ((method.symbol?.declarations?.length ?? 0) !== 1) return [];
+    for (const ref of findReferences(method.symbol!, program, checker.resolveName)) {
+      const refFile = getSourceFileOfNode(ref);
+      const inThisClass =
+        refFile.fileName === sourceFile.fileName && ref.pos >= cls.pos && ref.end <= cls.end;
+      if (inThisClass) continue;
+      const edit: TextChange = {
+        start: skipTrivia(refFile.text, ref.pos),
+        end: ref.end,
+        newText: field,
+      };
+      if (refFile.fileName === sourceFile.fileName) changes.push(edit);
+      else (additionalEdits[refFile.fileName] ??= []).push(edit);
+    }
+  }
+
+  const result: CodeActionResult = {
+    title: "Convert class to record",
+    kind: "refactor.rewrite",
+    changes,
+  };
+  return Object.keys(additionalEdits).length > 0 ? [{ ...result, additionalEdits }] : [result];
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
@@ -531,5 +763,6 @@ export function getCodeActions(
     ...removeUnusedImport(sourceFile, start, end),
     ...removeRedundantOverride(checker, sourceFile, start),
     ...makeFieldFinal(checker, sourceFile, start),
+    ...convertClassToRecord(program, checker, sourceFile, start),
   ];
 }

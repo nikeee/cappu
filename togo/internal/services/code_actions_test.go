@@ -439,3 +439,132 @@ func TestNoMakeFieldFinalWhenNotApplicable(t *testing.T) {
 		t.Errorf("expected no quickfix outside the field, got %+v", a)
 	}
 }
+
+// --- convert class to record -------------------------------------------------------
+
+const pointSrc = "class Point {\n" +
+	"  private final int x;\n" +
+	"  private final int y;\n" +
+	"  Point(int x, int y) { this.x = x; this.y = y; }\n" +
+	"  public int getX() { return x; }\n" +
+	"  public int getY() { return this.y; }\n" +
+	"}\n"
+
+func recordAction(actions []CodeActionResult) *CodeActionResult {
+	for i := range actions {
+		if actions[i].Title == "Convert class to record" {
+			return &actions[i]
+		}
+	}
+	return nil
+}
+
+func TestConvertClassToRecord(t *testing.T) {
+	ctx := actionsSetup(pointSrc, nil)
+	action := recordAction(ctx.actionsAt("class Point", 1))
+	if action == nil {
+		t.Fatal("expected a convert-to-record action")
+	}
+	if action.Kind != "refactor.rewrite" {
+		t.Errorf("kind = %q, want refactor.rewrite", action.Kind)
+	}
+	if got := apply(pointSrc, *action); got != "record Point(int x, int y) {\n}\n" {
+		t.Errorf("apply = %q", got)
+	}
+}
+
+func TestConvertClassToRecordPreservesHeader(t *testing.T) {
+	text := "public class Box<T> implements java.io.Serializable {\n" +
+		"  private final T v;\n" +
+		"  public Box(T v) { this.v = v; }\n" +
+		"  public T getV() { return v; }\n" +
+		"}\n"
+	ctx := actionsSetup(text, nil)
+	action := recordAction(ctx.actionsAt("class Box", 1))
+	if action == nil {
+		t.Fatal("expected a convert-to-record action")
+	}
+	want := "public record Box<T>(T v) implements java.io.Serializable {\n}\n"
+	if got := apply(text, *action); got != want {
+		t.Errorf("apply = %q, want %q", got, want)
+	}
+}
+
+func TestConvertClassToRecordBooleanIsAccessor(t *testing.T) {
+	text := "class Flag {\n" +
+		"  private final boolean on;\n" +
+		"  Flag(boolean on) { this.on = on; }\n" +
+		"  public boolean isOn() { return on; }\n" +
+		"}\n"
+	ctx := actionsSetup(text, nil)
+	action := recordAction(ctx.actionsAt("class Flag", 1))
+	if action == nil {
+		t.Fatal("expected a convert-to-record action")
+	}
+	if got := apply(text, *action); got != "record Flag(boolean on) {\n}\n" {
+		t.Errorf("apply = %q", got)
+	}
+}
+
+func TestConvertClassToRecordRenamesCrossFile(t *testing.T) {
+	other := "class U { int m(Point p) { return p.getX() + p.getY(); } }\n"
+	ctx := actionsSetup(pointSrc, map[string]string{"file:///U.java": other})
+	action := recordAction(ctx.actionsAt("class Point", 1))
+	if action == nil {
+		t.Fatal("expected a convert-to-record action")
+	}
+	edits := action.AdditionalEdits["file:///U.java"]
+	if len(edits) == 0 {
+		t.Fatal("expected cross-file edits for U.java")
+	}
+	sort.SliceStable(edits, func(i, j int) bool { return edits[i].Start > edits[j].Start })
+	out := other
+	for _, c := range edits {
+		out = out[:c.Start] + c.NewText + out[c.End:]
+	}
+	if want := "class U { int m(Point p) { return p.x() + p.y(); } }\n"; out != want {
+		t.Errorf("renamed = %q, want %q", out, want)
+	}
+}
+
+func TestConvertClassToRecordNotOffered(t *testing.T) {
+	cases := []string{
+		"class C { private final int x = 5; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+		"class C { private int x; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+		"class C { final int x; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+		"class C { static int Z; private final int x; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+		"class C { private final int x; C(int x) { this.x = x; } public int getX() { return x; } public void run() {} }\n",
+		"class C extends B { private final int x; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+		"abstract class C { private final int x; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+		"class C { private final int x; private final int y; C(int y, int x) { this.x = x; this.y = y; } }\n",
+		"class C { private final int x; C(int x) throws Exception { this.x = x; } public int getX() { return x; } }\n",
+		"class C { private final int x; C(int x) { this.x = x; run(); } public int getX() { return x; } }\n",
+		"class C { private final int x; C(int x) { this.x = x; } public int getX() { return x + 1; } }\n",
+		"class C { private final int x; public int getX() { return x; } }\n",
+	}
+	for _, text := range cases {
+		ctx := actionsSetup(text, nil)
+		if a := recordAction(ctx.actionsAt("class C", 1)); a != nil {
+			t.Errorf("unexpected action for %q", text)
+		}
+	}
+}
+
+func TestConvertClassToRecordNotOnRecordOrAway(t *testing.T) {
+	rec := actionsSetup("record R(int x) {}\n", nil)
+	if a := recordAction(rec.actionsAt("record R", 1)); a != nil {
+		t.Error("unexpected action on a record")
+	}
+	imp := actionsSetup("import java.util.List;\nclass C { private final int x; C(int x){this.x=x;} }\n", nil)
+	if a := recordAction(imp.actionsAt("import", 1)); a != nil {
+		t.Error("unexpected action away from a class")
+	}
+}
+
+func TestConvertClassToRecordNotWhenExtended(t *testing.T) {
+	base := "class Base {\n  private final int x;\n  Base(int x) { this.x = x; }\n  public int getX() { return x; }\n}\n"
+	ctx := actionsSetup(base, map[string]string{"file:///Sub.java": "class Sub extends Base {}\n"})
+	if a := recordAction(ctx.actionsAt("class Base", 1)); a != nil {
+		t.Error("unexpected action for an extended class")
+	}
+}
