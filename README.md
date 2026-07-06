@@ -149,3 +149,5 @@ I'm happy to accept contributions in the form of issues, ideas, bugs+reproductio
 
 ### Legal Notice
 This project is not affiliated with Java, Oracle or similar entities.
+
+cappu is MIT-licensed. Its source formatter contains code derived from [google-java-format](https://github.com/google/google-java-format) (Apache License 2.0); see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for attribution and the full license text.
