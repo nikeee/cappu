@@ -73,6 +73,7 @@ test("configWatchGlobs covers sources, the config file, and classpath entries", 
   expect(configWatchGlobs(config)).toEqual([
     "**/*.java",
     "**/cappu.json",
+    posix + "/.cappu/lib/classes/**/*.{jar,class}",
     posix + "/lib/**/*.{jar,class}",
     posix + "/direct.jar",
   ]);
