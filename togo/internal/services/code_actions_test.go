@@ -425,6 +425,19 @@ func TestMakeFieldFinalCtorAssigned(t *testing.T) {
 	}
 }
 
+func TestMakeFieldFinalMultiDeclarator(t *testing.T) {
+	text := "class T {\n  private int a = 1, b = 2;\n}"
+	ctx := actionsSetup(text, nil)
+	actions := filterKind(ctx.actionsAt("a = 1", 1), "quickfix")
+	if len(actions) != 1 || actions[0].Title != "Add 'final' modifier" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	want := "class T {\n  private final int a = 1, b = 2;\n}"
+	if got := apply(text, actions[0]); got != want {
+		t.Errorf("apply =\n%s", got)
+	}
+}
+
 func TestNoMakeFieldFinalWhenNotApplicable(t *testing.T) {
 	reassigned := actionsSetup("class T {\n  private int x = 1;\n  void m() { x = 2; }\n}", nil)
 	if a := filterKind(reassigned.actionsAt("x = 1", 1), "quickfix"); len(a) != 0 {
@@ -541,12 +554,103 @@ func TestConvertClassToRecordNotOffered(t *testing.T) {
 		"class C { private final int x; C(int x) { this.x = x; run(); } public int getX() { return x; } }\n",
 		"class C { private final int x; C(int x) { this.x = x; } public int getX() { return x + 1; } }\n",
 		"class C { private final int x; public int getX() { return x; } }\n",
+		// getter body returns a literal, not the field
+		"class C { private final int x; C(int x) { this.x = x; } public int getX() { return 0; } }\n",
+		// getter body has more than one statement
+		"class C { private final int x; C(int x) { this.x = x; } public int getX() { log(); return x; } }\n",
+		// isX accessor on a non-boolean field
+		"class C { private final int x; C(int x) { this.x = x; } public int isX() { return x; } }\n",
+		// getter maps to no declared field
+		"class C { private final int x; C(int x) { this.x = x; } public int getZ() { return x; } }\n",
+		// getter takes a parameter
+		"class C { private final int x; C(int x) { this.x = x; } public int getX(int i) { return x; } }\n",
+		// generic getter
+		"class C { private final int x; C(int x) { this.x = x; } public <T> int getX() { return x; } }\n",
+		// getter declares throws
+		"class C { private final int x; C(int x) { this.x = x; } public int getX() throws Exception { return x; } }\n",
+		// static getter
+		"class C { private final int x; C(int x) { this.x = x; } public static int getX() { return x; } }\n",
+		// field carrying an annotation
+		"class C { @Deprecated private final int x; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+		// constructor parameter type differs from the field type
+		"class C { private final int x; C(long x) { this.x = x; } public int getX() { return x; } }\n",
+		// varargs constructor parameter
+		"class C { private final int[] x; C(int... x) { this.x = x; } public int[] getX() { return x; } }\n",
+		// more than one constructor
+		"class C { private final int x; C(int x) { this.x = x; } C() { this.x = 0; } public int getX() { return x; } }\n",
+		// a field assigned twice while another is never assigned
+		"class C { private final int x; private final int y; C(int x, int y) { this.x = x; this.x = y; } }\n",
+		// non-static inner class cannot be a record
+		"class O { class C { private final int x; C(int x) { this.x = x; } public int getX() { return x; } } }\n",
 	}
 	for _, text := range cases {
 		ctx := actionsSetup(text, nil)
 		if a := recordAction(ctx.actionsAt("class C", 1)); a != nil {
 			t.Errorf("unexpected action for %q", text)
 		}
+	}
+}
+
+func TestConvertClassToRecordFieldWithoutGetter(t *testing.T) {
+	text := "class P {\n  private final int x;\n  private final int y;\n  P(int x, int y) { this.x = x; this.y = y; }\n  public int getX() { return x; }\n}\n"
+	ctx := actionsSetup(text, nil)
+	action := recordAction(ctx.actionsAt("class P", 1))
+	if action == nil {
+		t.Fatal("expected a convert-to-record action")
+	}
+	if got := apply(text, *action); got != "record P(int x, int y) {\n}\n" {
+		t.Errorf("apply = %q", got)
+	}
+}
+
+func TestConvertClassToRecordBareNameAssignment(t *testing.T) {
+	text := "class P { private final int v; P(int v) { v = v; } public int getV() { return v; } }\n"
+	ctx := actionsSetup(text, nil)
+	action := recordAction(ctx.actionsAt("class P", 1))
+	if action == nil {
+		t.Fatal("expected a convert-to-record action")
+	}
+	if got := apply(text, *action); got != "record P(int v) {\n}\n" {
+		t.Errorf("apply = %q", got)
+	}
+}
+
+func TestConvertClassToRecordMultipleInterfaces(t *testing.T) {
+	text := "class M implements A, B { private final int x; M(int x) { this.x = x; } public int getX() { return x; } }\n"
+	ctx := actionsSetup(text, nil)
+	action := recordAction(ctx.actionsAt("class M", 1))
+	if action == nil {
+		t.Fatal("expected a convert-to-record action")
+	}
+	if got := apply(text, *action); got != "record M(int x) implements A, B {\n}\n" {
+		t.Errorf("apply = %q", got)
+	}
+}
+
+func TestConvertClassToRecordStaticNested(t *testing.T) {
+	text := "class Outer {\n  static class Inner { private final int x; Inner(int x) { this.x = x; } public int getX() { return x; } }\n}\n"
+	ctx := actionsSetup(text, nil)
+	action := recordAction(ctx.actionsAt("class Inner", 1))
+	if action == nil {
+		t.Fatal("expected a convert-to-record action")
+	}
+	want := "class Outer {\n  static record Inner(int x) {\n}\n}\n"
+	if got := apply(text, *action); got != want {
+		t.Errorf("apply = %q, want %q", got, want)
+	}
+}
+
+func TestConvertClassToRecordRenamesSameFile(t *testing.T) {
+	text := "class P { private final int x; P(int x) { this.x = x; } public int getX() { return x; } }\n" +
+		"class Q { int m(P p) { return p.getX(); } }\n"
+	ctx := actionsSetup(text, nil)
+	action := recordAction(ctx.actionsAt("class P", 1))
+	if action == nil {
+		t.Fatal("expected a convert-to-record action")
+	}
+	want := "record P(int x) {\n}\nclass Q { int m(P p) { return p.x(); } }\n"
+	if got := apply(text, *action); got != want {
+		t.Errorf("apply = %q, want %q", got, want)
 	}
 }
 

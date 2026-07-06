@@ -367,6 +367,14 @@ test("add 'final' to a constructor-assigned private field", () => {
   );
 });
 
+test("add 'final' to a multi-declarator field applies to the whole declaration", () => {
+  const text = "class T {\n  private int a = 1, b = 2;\n}";
+  const ctx = setup(text);
+  const actions = actionsAt(ctx, "a = 1").filter(a => a.kind === "quickfix");
+  expect(actions.map(a => a.title)).toEqual(["Add 'final' modifier"]);
+  expect(apply(text, actions[0]!)).toBe("class T {\n  private final int a = 1, b = 2;\n}");
+});
+
 test("no add-'final' on reassigned, already-final, or unflagged positions", () => {
   const reassigned = setup("class T {\n  private int x = 1;\n  void m() { x = 2; }\n}");
   expect(
@@ -472,13 +480,88 @@ test("is not offered when the shape does not fit", () => {
     "class C { private final int x; C(int x) { this.x = x; run(); } public int getX() { return x; } }\n",
     // getter body is not a plain field return
     "class C { private final int x; C(int x) { this.x = x; } public int getX() { return x + 1; } }\n",
-    // no constructor
-    "class C { private final int x; public int getX() { return x; } }\n",
+    // getter body returns a literal, not the field
+    "class C { private final int x; C(int x) { this.x = x; } public int getX() { return 0; } }\n",
+    // getter body has more than one statement
+    "class C { private final int x; C(int x) { this.x = x; } public int getX() { log(); return x; } }\n",
+    // an isX accessor on a non-boolean field does not match
+    "class C { private final int x; C(int x) { this.x = x; } public int isX() { return x; } }\n",
+    // a getter that maps to no declared field
+    "class C { private final int x; C(int x) { this.x = x; } public int getZ() { return x; } }\n",
+    // a getter that takes a parameter is not an accessor
+    "class C { private final int x; C(int x) { this.x = x; } public int getX(int i) { return x; } }\n",
+    // a generic getter is not a plain accessor
+    "class C { private final int x; C(int x) { this.x = x; } public <T> int getX() { return x; } }\n",
+    // a getter that declares throws
+    "class C { private final int x; C(int x) { this.x = x; } public int getX() throws Exception { return x; } }\n",
+    // a static getter
+    "class C { private final int x; C(int x) { this.x = x; } public static int getX() { return x; } }\n",
+    // a field carrying an annotation
+    "class C { @Deprecated private final int x; C(int x) { this.x = x; } public int getX() { return x; } }\n",
+    // constructor parameter type differs from the field type
+    "class C { private final int x; C(long x) { this.x = x; } public int getX() { return x; } }\n",
+    // a varargs constructor parameter
+    "class C { private final int[] x; C(int... x) { this.x = x; } public int[] getX() { return x; } }\n",
+    // more than one constructor
+    "class C { private final int x; C(int x) { this.x = x; } C() { this.x = 0; } public int getX() { return x; } }\n",
+    // a field assigned twice while another is never assigned
+    "class C { private final int x; private final int y; C(int x, int y) { this.x = x; this.x = y; } }\n",
+    // a non-static inner class cannot be a record
+    "class O { class C { private final int x; C(int x) { this.x = x; } public int getX() { return x; } } }\n",
   ];
   for (const text of cases) {
     const ctx = setup(text);
     expect(recordActions(ctx, "class C").map(a => a.title)).toEqual([]);
   }
+});
+
+test("converts a class whose fields do not all have getters", () => {
+  const text =
+    "class P {\n" +
+    "  private final int x;\n" +
+    "  private final int y;\n" +
+    "  P(int x, int y) { this.x = x; this.y = y; }\n" +
+    "  public int getX() { return x; }\n" +
+    "}\n";
+  const ctx = setup(text);
+  expect(apply(text, recordActions(ctx, "class P")[0]!)).toBe("record P(int x, int y) {\n}\n");
+});
+
+test("converts with bare-name constructor assignment", () => {
+  const text =
+    "class P { private final int v; P(int v) { v = v; } public int getV() { return v; } }\n";
+  const ctx = setup(text);
+  expect(apply(text, recordActions(ctx, "class P")[0]!)).toBe("record P(int v) {\n}\n");
+});
+
+test("preserves multiple implemented interfaces", () => {
+  const text =
+    "class M implements A, B { private final int x; M(int x) { this.x = x; } public int getX() { return x; } }\n";
+  const ctx = setup(text);
+  expect(apply(text, recordActions(ctx, "class M")[0]!)).toBe(
+    "record M(int x) implements A, B {\n}\n",
+  );
+});
+
+test("converts a static nested class", () => {
+  const text =
+    "class Outer {\n" +
+    "  static class Inner { private final int x; Inner(int x) { this.x = x; } public int getX() { return x; } }\n" +
+    "}\n";
+  const ctx = setup(text);
+  expect(apply(text, recordActions(ctx, "class Inner")[0]!)).toBe(
+    "class Outer {\n" + "  static record Inner(int x) {\n}\n" + "}\n",
+  );
+});
+
+test("renames accessor call sites elsewhere in the same file", () => {
+  const text =
+    "class P { private final int x; P(int x) { this.x = x; } public int getX() { return x; } }\n" +
+    "class Q { int m(P p) { return p.getX(); } }\n";
+  const ctx = setup(text);
+  expect(apply(text, recordActions(ctx, "class P")[0]!)).toBe(
+    "record P(int x) {\n}\n" + "class Q { int m(P p) { return p.x(); } }\n",
+  );
 });
 
 test("is not offered on a record or away from a class", () => {
