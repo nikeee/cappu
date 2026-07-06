@@ -879,3 +879,59 @@ test("diamond: gated on release >= 7", () => {
   expect(diamondActions(ctx, "xs =", 6)).toEqual([]);
   expect(diamondActions(ctx, "xs =", 7).length).toBe(1);
 });
+
+// --- convert a string accumulation to StringBuilder --------------------------
+
+const sbTitle = "Convert to StringBuilder";
+
+function sbActions(ctx: ReturnType<typeof setup>) {
+  return actionsAt(ctx, "s =").filter(a => a.title === sbTitle);
+}
+
+test("stringbuilder: converts a loop accumulation, appends, and wraps reads", () => {
+  const text =
+    'class T {\n  String m(java.util.List<String> xs) {\n    String s = "";\n    for (String x : xs) {\n      s += x;\n    }\n    return s;\n  }\n}';
+  const ctx = setup(text);
+  const actions = sbActions(ctx);
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  String m(java.util.List<String> xs) {\n    StringBuilder s = new StringBuilder();\n    for (String x : xs) {\n      s.append(x);\n    }\n    return s.toString();\n  }\n}",
+  );
+});
+
+test("stringbuilder: not offered without a loop accumulation", () => {
+  const text =
+    'class T {\n  String m() {\n    String s = "";\n    s += "a";\n    return s;\n  }\n}';
+  const ctx = setup(text);
+  expect(sbActions(ctx)).toEqual([]);
+});
+
+test("stringbuilder: not offered when the variable is reset", () => {
+  const text =
+    'class T {\n  String m(java.util.List<String> xs) {\n    String s = "";\n    for (String x : xs) s += x;\n    s = "reset";\n    return s;\n  }\n}';
+  const ctx = setup(text);
+  expect(sbActions(ctx)).toEqual([]);
+});
+
+test("stringbuilder: not offered when the variable is identity-compared", () => {
+  const text =
+    'class T {\n  String m(java.util.List<String> xs) {\n    String s = "";\n    for (String x : xs) s += x;\n    if (s == null) return "";\n    return s;\n  }\n}';
+  const ctx = setup(text);
+  expect(sbActions(ctx)).toEqual([]);
+});
+
+test("stringbuilder: not offered for a non-empty initializer", () => {
+  const text =
+    'class T {\n  String m(java.util.List<String> xs) {\n    String s = "x";\n    for (String x : xs) s += x;\n    return s;\n  }\n}';
+  const ctx = setup(text);
+  expect(sbActions(ctx)).toEqual([]);
+});
+
+test("stringbuilder: not offered when the appended expression reads the variable", () => {
+  const text =
+    'class T {\n  String m(java.util.List<String> xs) {\n    String s = "";\n    for (String x : xs) s += s;\n    return s;\n  }\n}';
+  const ctx = setup(text);
+  expect(sbActions(ctx)).toEqual([]);
+});

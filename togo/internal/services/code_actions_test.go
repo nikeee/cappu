@@ -1016,3 +1016,65 @@ func TestDiamondGatedOnRelease(t *testing.T) {
 		t.Errorf("release 7: expected 1 action, got %+v", got)
 	}
 }
+
+// --- convert a string accumulation to StringBuilder --------------------------
+
+func sbActions(actions []CodeActionResult) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range actions {
+		if a.Title == "Convert to StringBuilder" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestStringBuilderConvertsLoopAccumulation(t *testing.T) {
+	text := "class T {\n  String m(java.util.List<String> xs) {\n    String s = \"\";\n    for (String x : xs) {\n      s += x;\n    }\n    return s;\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	actions := sbActions(ctx.actionsAt("s =", 1))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  String m(java.util.List<String> xs) {\n    StringBuilder s = new StringBuilder();\n    for (String x : xs) {\n      s.append(x);\n    }\n    return s.toString();\n  }\n}")
+}
+
+func TestStringBuilderNotOfferedWithoutLoop(t *testing.T) {
+	text := "class T {\n  String m() {\n    String s = \"\";\n    s += \"a\";\n    return s;\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := sbActions(ctx.actionsAt("s =", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestStringBuilderNotOfferedWhenReset(t *testing.T) {
+	text := "class T {\n  String m(java.util.List<String> xs) {\n    String s = \"\";\n    for (String x : xs) s += x;\n    s = \"reset\";\n    return s;\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := sbActions(ctx.actionsAt("s =", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestStringBuilderNotOfferedWhenIdentityCompared(t *testing.T) {
+	text := "class T {\n  String m(java.util.List<String> xs) {\n    String s = \"\";\n    for (String x : xs) s += x;\n    if (s == null) return \"\";\n    return s;\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := sbActions(ctx.actionsAt("s =", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestStringBuilderNotOfferedForNonEmptyInit(t *testing.T) {
+	text := "class T {\n  String m(java.util.List<String> xs) {\n    String s = \"x\";\n    for (String x : xs) s += x;\n    return s;\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := sbActions(ctx.actionsAt("s =", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestStringBuilderNotOfferedWhenAppendReadsVariable(t *testing.T) {
+	text := "class T {\n  String m(java.util.List<String> xs) {\n    String s = \"\";\n    for (String x : xs) s += s;\n    return s;\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := sbActions(ctx.actionsAt("s =", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}

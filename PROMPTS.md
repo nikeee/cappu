@@ -526,3 +526,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-06 12:37 — in between features, also add refactoring assertions that assert that the edit proposed by the lsp are correct
 - 2026-07-06 15:25 — now, check for other refactorings. for example, the string concat from above
 - 2026-07-06 15:25 — [AskUserQuestion] Which modern-Java refactorings to implement -> answer: Diamond operator; what about string builders instead of concat in a loop?
+- 2026-07-06 15:30 — make sure to add a test that asserts the applied refactoring

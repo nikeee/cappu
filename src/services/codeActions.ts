@@ -17,6 +17,7 @@ import {
 import {
   type Annotation,
   type AssignmentExpression,
+  type BinaryExpression,
   type Block,
   type CallExpression,
   type CastExpression,
@@ -28,6 +29,7 @@ import {
   type IfStatement,
   type ImportDeclaration,
   type InstanceofExpression,
+  type LiteralExpression,
   type LocalVariableDeclarationStatement,
   type MethodDeclaration,
   type Node,
@@ -1038,6 +1040,106 @@ function convertToDiamond(sourceFile: SourceFile, start: number): CodeActionResu
   ];
 }
 
+// --- convert a string accumulation to StringBuilder --------------------------
+
+const LOOP_KINDS = new Set<SyntaxKind>([
+  SyntaxKind.ForStatement,
+  SyntaxKind.ForEachStatement,
+  SyntaxKind.WhileStatement,
+  SyntaxKind.DoStatement,
+]);
+
+function isInsideLoop(node: Node): boolean {
+  for (let n: Node | undefined = node.parent; n; n = n.parent) {
+    if (LOOP_KINDS.has(n.kind)) return true;
+  }
+  return false;
+}
+
+function isStringType(type: TypeNode): boolean {
+  if (type.kind !== SyntaxKind.TypeReference) return false;
+  const name = entityNameToString((type as TypeReference).typeName);
+  return name === "String" || name === "java.lang.String";
+}
+
+// Offer to convert `String s = ""; ... s += x; ...` (with an accumulation inside
+// a loop) into a StringBuilder: `s += x` becomes `s.append(x)` and every read of
+// `s` becomes `s.toString()`. Strict: every use of `s` must be either a plain
+// `s += expr` statement or a read, so the type change is always safe. Anything
+// else - a reset `s = ...`, an identity `==`, a `+=` used as a value or whose
+// right side reads `s` - suppresses the action.
+function convertToStringBuilder(
+  program: Program,
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.LocalVariableDeclarationStatement) node = node.parent;
+  if (!node) return [];
+  const decl = node as LocalVariableDeclarationStatement;
+  if (decl.declarators.length !== 1 || !isStringType(decl.type)) return [];
+  const declarator = decl.declarators[0]!;
+  const init = declarator.initializer;
+  // Empty-string init: an empty StringBuilder. (A `""` literal only assigns to
+  // java.lang.String, so this also proves the declared type.)
+  if (!init || init.kind !== SyntaxKind.StringLiteral || (init as LiteralExpression).value !== "") {
+    return [];
+  }
+  const symbol = checker.resolveName(declarator.name);
+  if (!symbol || !(symbol.flags & SymbolFlags.LocalVariable)) return [];
+
+  const refs = findReferences(symbol, program, checker.resolveName).filter(
+    n => n !== declarator.name,
+  );
+  const text = sourceFile.text;
+
+  const accumulations: AssignmentExpression[] = [];
+  const reads: Node[] = [];
+  for (const ref of refs) {
+    const parent = ref.parent;
+    if (
+      parent.kind === SyntaxKind.AssignmentExpression &&
+      (parent as AssignmentExpression).left === ref
+    ) {
+      const assign = parent as AssignmentExpression;
+      if (assign.operatorToken !== SyntaxKind.PlusEqualsToken) return []; // reset/other assign
+      if (assign.parent.kind !== SyntaxKind.ExpressionStatement) return []; // += used as a value
+      // The appended expression must not itself read `s` (avoids nested rewrites).
+      if (refs.some(r => r !== ref && r.pos >= assign.right.pos && r.end <= assign.right.end)) {
+        return [];
+      }
+      accumulations.push(assign);
+      continue;
+    }
+    if (parent.kind === SyntaxKind.BinaryExpression) {
+      const op = (parent as BinaryExpression).operatorToken;
+      if (op === SyntaxKind.EqualsEqualsToken || op === SyntaxKind.ExclamationEqualsToken)
+        return [];
+    }
+    reads.push(ref);
+  }
+  if (!accumulations.some(isInsideLoop)) return []; // the whole point is a loop
+
+  const name = declarator.name.text;
+  const changes: TextChange[] = [
+    { start: skipTrivia(text, decl.type.pos), end: decl.type.end, newText: "StringBuilder" },
+    { start: skipTrivia(text, init.pos), end: init.end, newText: "new StringBuilder()" },
+  ];
+  for (const assign of accumulations) {
+    const rhs = text.slice(skipTrivia(text, assign.right.pos), assign.right.end);
+    changes.push({
+      start: skipTrivia(text, assign.pos),
+      end: assign.end,
+      newText: `${name}.append(${rhs})`,
+    });
+  }
+  for (const ref of reads) {
+    changes.push({ start: skipTrivia(text, ref.pos), end: ref.end, newText: `${name}.toString()` });
+  }
+  return [{ title: "Convert to StringBuilder", kind: "refactor.rewrite", changes }];
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
@@ -1061,5 +1163,6 @@ export function getCodeActions(
     ...(features.supportsLambda ? convertAnonymousClassToLambda(program, sourceFile, start) : []),
     ...(features.supportsInstanceofPattern ? convertInstanceofToPattern(sourceFile, start) : []),
     ...(features.supportsDiamond ? convertToDiamond(sourceFile, start) : []),
+    ...convertToStringBuilder(program, checker, sourceFile, start),
   ];
 }

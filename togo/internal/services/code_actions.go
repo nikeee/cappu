@@ -1225,6 +1225,138 @@ func convertToDiamond(sf *compiler.Node, start int) []CodeActionResult {
 	}}
 }
 
+// --- convert a string accumulation to StringBuilder --------------------------
+
+var loopKinds = map[compiler.SyntaxKind]bool{
+	compiler.ForStatement:     true,
+	compiler.ForEachStatement: true,
+	compiler.WhileStatement:   true,
+	compiler.DoStatement:      true,
+}
+
+func isInsideLoop(node *compiler.Node) bool {
+	for n := node.Parent; n != nil; n = n.Parent {
+		if loopKinds[n.Kind] {
+			return true
+		}
+	}
+	return false
+}
+
+func isStringType(typ *compiler.Node) bool {
+	if typ.Kind != compiler.TypeReference {
+		return false
+	}
+	name := compiler.EntityNameToString(typ.AsTypeReference().TypeName)
+	return name == "String" || name == "java.lang.String"
+}
+
+// convertToStringBuilder offers to convert `String s = ""; ... s += x; ...` (with
+// an accumulation inside a loop) into a StringBuilder: `s += x` becomes
+// `s.append(x)` and every read of `s` becomes `s.toString()`. Strict: every use
+// of `s` must be either a plain `s += expr` statement or a read, so the type
+// change is always safe. Port of the TS convertToStringBuilder.
+func convertToStringBuilder(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.LocalVariableDeclarationStatement {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	decl := node.AsLocalVariableDeclarationStatement()
+	if decl.Declarators.Len() != 1 || !isStringType(decl.Type) {
+		return nil
+	}
+	declarator := decl.Declarators.Nodes[0].AsVariableDeclarator()
+	init := declarator.Initializer
+	// Empty-string init: an empty StringBuilder. (A `""` literal only assigns to
+	// java.lang.String, so this also proves the declared type.)
+	if init == nil || init.Kind != compiler.StringLiteral || init.AsLiteralExpression().Value != "" {
+		return nil
+	}
+	symbol := checker.ResolveName(declarator.Name)
+	if symbol == nil || symbol.Flags&compiler.SymbolFlagsLocalVariable == 0 {
+		return nil
+	}
+
+	var refs []*compiler.Node
+	for _, r := range compiler.FindReferences(symbol, program, checker.ResolveName) {
+		if r != declarator.Name {
+			refs = append(refs, r)
+		}
+	}
+	text := sf.AsSourceFile().Text
+
+	var accumulations []*compiler.Node // AssignmentExpression nodes
+	var reads []*compiler.Node
+	for _, ref := range refs {
+		parent := ref.Parent
+		if parent.Kind == compiler.AssignmentExpression && parent.AsAssignmentExpression().Left == ref {
+			assign := parent.AsAssignmentExpression()
+			if assign.OperatorToken != compiler.PlusEqualsToken { // reset/other assign
+				return nil
+			}
+			if parent.Parent.Kind != compiler.ExpressionStatement { // += used as a value
+				return nil
+			}
+			// The appended expression must not itself read `s`.
+			readsS := false
+			for _, r := range refs {
+				if r != ref && r.Pos >= assign.Right.Pos && r.End <= assign.Right.End {
+					readsS = true
+					break
+				}
+			}
+			if readsS {
+				return nil
+			}
+			accumulations = append(accumulations, parent)
+			continue
+		}
+		if parent.Kind == compiler.BinaryExpression {
+			op := parent.AsBinaryExpression().OperatorToken
+			if op == compiler.EqualsEqualsToken || op == compiler.ExclamationEqualsToken {
+				return nil
+			}
+		}
+		reads = append(reads, ref)
+	}
+	inLoop := false
+	for _, a := range accumulations {
+		if isInsideLoop(a) {
+			inLoop = true
+			break
+		}
+	}
+	if !inLoop { // the whole point is a loop
+		return nil
+	}
+
+	name := declarator.Name.AsIdentifier().Text
+	changes := []TextChange{
+		{Start: compiler.SkipTrivia(text, decl.Type.Pos), End: decl.Type.End, NewText: "StringBuilder"},
+		{Start: compiler.SkipTrivia(text, init.Pos), End: init.End, NewText: "new StringBuilder()"},
+	}
+	for _, node := range accumulations {
+		assign := node.AsAssignmentExpression()
+		rhs := text[compiler.SkipTrivia(text, assign.Right.Pos):assign.Right.End]
+		changes = append(changes, TextChange{
+			Start:   compiler.SkipTrivia(text, node.Pos),
+			End:     node.End,
+			NewText: name + ".append(" + rhs + ")",
+		})
+	}
+	for _, ref := range reads {
+		changes = append(changes, TextChange{
+			Start:   compiler.SkipTrivia(text, ref.Pos),
+			End:     ref.End,
+			NewText: name + ".toString()",
+		})
+	}
+	return []CodeActionResult{{Title: "Convert to StringBuilder", Kind: "refactor.rewrite", Changes: changes}}
+}
+
 // GetCodeActions returns all code actions offered for a selection range. features
 // gates modern-Java rewrites to the target version that supports them.
 func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int, features LanguageFeatures) []CodeActionResult {
@@ -1255,5 +1387,6 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	if features.SupportsDiamond {
 		out = append(out, convertToDiamond(sf, start)...)
 	}
+	out = append(out, convertToStringBuilder(program, checker, sf, start)...)
 	return out
 }
