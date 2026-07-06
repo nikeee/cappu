@@ -531,3 +531,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-06 15:40 — resolve https://github.com/nikeee/cappu/issues/37 . you can use the globally installed "cappu" command for it. it is the togo version
 - 2026-07-06 15:37 — any other refactoring to use a newer language version?
 - 2026-07-06 15:37 — do arrow-switch, multi-catch
+
+- 2026-07-06 15:40 — resolve https://github.com/nikeee/cappu/issues/37 . you can use the globally installed "cappu" command for it. it is the togo version
