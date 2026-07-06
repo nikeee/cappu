@@ -782,3 +782,79 @@ func TestVarGatedOnRelease(t *testing.T) {
 		t.Errorf("release 10: expected 1 action, got %+v", got)
 	}
 }
+
+// --- convert anonymous class to lambda ---------------------------------------
+
+func lambdaActions(actions []CodeActionResult) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range actions {
+		if a.Title == "Convert anonymous class to lambda" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestLambdaConvertsRunnable(t *testing.T) {
+	text := "class T {\n  Runnable r = new Runnable() {\n    public void run() { System.out.println(\"hi\"); }\n  };\n}"
+	ctx := actionsSetup(text, nil)
+	actions := lambdaActions(ctx.actionsAt("new Runnable", 1))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  Runnable r = () -> { System.out.println(\"hi\"); };\n}")
+}
+
+func TestLambdaConvertsComparatorIgnoringDefaultAndStatic(t *testing.T) {
+	text := "class T {\n  java.util.Comparator<String> c = new java.util.Comparator<String>() {\n    public int compare(String a, String b) { return 0; }\n  };\n}"
+	ctx := actionsSetup(text, nil)
+	actions := lambdaActions(ctx.actionsAt("new java.util.Comparator", 1))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  java.util.Comparator<String> c = (a, b) -> { return 0; };\n}")
+}
+
+func TestLambdaNotOfferedForNonFunctionalInterface(t *testing.T) {
+	text := "class T {\n  interface Two { void a(); void b(); }\n  Two t = new Two() { public void a() {} };\n}"
+	ctx := actionsSetup(text, nil)
+	if got := lambdaActions(ctx.actionsAt("new Two", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestLambdaNotOfferedWithExtraMember(t *testing.T) {
+	text := "class T {\n  Runnable r = new Runnable() {\n    int x = 1;\n    public void run() {}\n  };\n}"
+	ctx := actionsSetup(text, nil)
+	if got := lambdaActions(ctx.actionsAt("new Runnable", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestLambdaNotOfferedWhenBodyUsesThis(t *testing.T) {
+	text := "class T {\n  Runnable r = new Runnable() {\n    public void run() { this.hashCode(); }\n  };\n}"
+	ctx := actionsSetup(text, nil)
+	if got := lambdaActions(ctx.actionsAt("new Runnable", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestLambdaNotOfferedForNonInterface(t *testing.T) {
+	text := "class T {\n  abstract static class A { abstract void go(); }\n  A a = new A() { void go() {} };\n}"
+	ctx := actionsSetup(text, nil)
+	if got := lambdaActions(ctx.actionsAt("new A", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestLambdaGatedOnRelease(t *testing.T) {
+	text := "class T {\n  Runnable r = new Runnable() {\n    public void run() {}\n  };\n}"
+	ctx := actionsSetup(text, nil)
+	seven, eight := 7, 8
+	if got := lambdaActions(ctx.actionsAt("new Runnable", 1, &seven)); len(got) != 0 {
+		t.Errorf("release 7: expected no action, got %+v", got)
+	}
+	if got := lambdaActions(ctx.actionsAt("new Runnable", 1, &eight)); len(got) != 1 {
+		t.Errorf("release 8: expected 1 action, got %+v", got)
+	}
+}

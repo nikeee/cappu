@@ -8,7 +8,12 @@ import { Diagnostics } from "../compiler/diagnostics.ts";
 import { getIdentifierAtPosition, getNodeAtPosition } from "./nodeAtPosition.ts";
 import { forEachChild } from "../compiler/parser.ts";
 import type { Program } from "../compiler/program.ts";
-import { findReferences, getSourceFileOfNode } from "../compiler/resolver.ts";
+import {
+  findReferences,
+  getDirectSuperTypeSymbols,
+  getSourceFileOfNode,
+  resolveTypeEntityName,
+} from "../compiler/resolver.ts";
 import {
   type Annotation,
   type AssignmentExpression,
@@ -29,6 +34,7 @@ import {
   type QualifiedName,
   type ReturnStatement,
   type SourceFile,
+  type Symbol,
   SymbolFlags,
   SyntaxKind,
   type ThisExpression,
@@ -810,6 +816,117 @@ function convertToVar(sourceFile: SourceFile, start: number): CodeActionResult[]
   ];
 }
 
+// --- convert an anonymous class to a lambda (SE8) ----------------------------
+
+// The java.lang.Object public methods that JLS 9.8 says do NOT count toward a
+// functional interface's single abstract method, keyed by name and arity.
+function isObjectMethod(decl: MethodDeclaration): boolean {
+  const name = decl.name.text;
+  const arity = decl.parameters.length;
+  return (
+    (name === "equals" && arity === 1) ||
+    (name === "hashCode" && arity === 0) ||
+    (name === "toString" && arity === 0)
+  );
+}
+
+// A method is the abstract kind that a lambda implements only when it has no body
+// and is not a default/static/private interface method.
+function isAbstractInterfaceMethod(decl: MethodDeclaration): boolean {
+  if (decl.body) return false;
+  return !(decl.modifiers ?? []).some(
+    m =>
+      m.kind === SyntaxKind.DefaultKeyword ||
+      m.kind === SyntaxKind.StaticKeyword ||
+      m.kind === SyntaxKind.PrivateKeyword,
+  );
+}
+
+// The single abstract method of a functional interface (its SAM), searched
+// through inherited interfaces, or undefined when the type is not a genuine
+// functional interface (zero or more than one abstract method). Unlike the
+// checker's functionalMethod, this counts and excludes default/static/private
+// and java.lang.Object methods, so it is a correct SAM test.
+function functionalInterfaceSam(
+  typeSymbol: Symbol,
+  program: Program,
+): MethodDeclaration | undefined {
+  const abstracts = new Map<string, MethodDeclaration>(); // name/arity -> decl (dedup overrides)
+  const seen = new Set<Symbol>();
+  const collect = (sym: Symbol): void => {
+    if (seen.has(sym)) return;
+    seen.add(sym);
+    for (const member of sym.members?.values() ?? []) {
+      if (!(member.flags & SymbolFlags.Method)) continue;
+      const decl = member.declarations?.find(d => d.kind === SyntaxKind.MethodDeclaration) as
+        | MethodDeclaration
+        | undefined;
+      if (!decl || !isAbstractInterfaceMethod(decl) || isObjectMethod(decl)) continue;
+      abstracts.set(`${decl.name.text}/${decl.parameters.length}`, decl);
+    }
+    for (const superSymbol of getDirectSuperTypeSymbols(sym, program)) collect(superSymbol);
+  };
+  collect(typeSymbol);
+  return abstracts.size === 1 ? [...abstracts.values()][0] : undefined;
+}
+
+// Offer to convert an anonymous class implementing a functional interface into a
+// lambda. Strict: exactly one method whose body does not reference the anonymous
+// instance (this/super rebind in a lambda), a resolvable functional interface,
+// and a matching SAM - so the rewrite is only offered when it is guaranteed safe.
+function convertAnonymousClassToLambda(
+  program: Program,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.ObjectCreationExpression) node = node.parent;
+  if (!node) return [];
+  const oce = node as ObjectCreationExpression;
+  // An interface instantiation takes no constructor arguments and has a body.
+  if (!oce.classBody || oce.classBody.length !== 1 || oce.arguments.length > 0) return [];
+  const member = oce.classBody[0]!;
+  if (member.kind !== SyntaxKind.MethodDeclaration) return [];
+  const method = member as MethodDeclaration;
+  if (!method.body) return [];
+
+  if (oce.type.kind !== SyntaxKind.TypeReference) return [];
+  const typeSymbol = resolveTypeEntityName((oce.type as TypeReference).typeName, oce, program);
+  if (!typeSymbol || !(typeSymbol.flags & SymbolFlags.Interface)) return [];
+  const sam = functionalInterfaceSam(typeSymbol, program);
+  if (!sam || sam.name.text !== method.name.text) return [];
+  if (sam.parameters.length !== method.parameters.length) return [];
+
+  // Lambda parameters keep only their names (legal against the known target type).
+  const params: string[] = [];
+  for (const p of method.parameters) {
+    if (p.isReceiver || !p.name) return [];
+    params.push(p.name.text);
+  }
+
+  // Bail if the body references the anonymous instance: `this`/`super` would
+  // rebind to the enclosing instance in a lambda, changing semantics.
+  let referencesInstance = false;
+  forEachDescendant(method.body, n => {
+    if (n.kind === SyntaxKind.ThisExpression || n.kind === SyntaxKind.SuperExpression) {
+      referencesInstance = true;
+    }
+  });
+  if (referencesInstance) return [];
+
+  const text = sourceFile.text;
+  const bodyText = text.slice(skipTrivia(text, method.body.pos), method.body.end);
+  const from = skipTrivia(text, oce.pos);
+  return [
+    {
+      title: "Convert anonymous class to lambda",
+      kind: "refactor.rewrite",
+      changes: [{ start: from, end: oce.end, newText: `(${params.join(", ")}) -> ${bodyText}` }],
+    },
+  ];
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
@@ -830,5 +947,6 @@ export function getCodeActions(
     ...makeFieldFinal(checker, sourceFile, start),
     ...(features.supportsRecord ? convertClassToRecord(program, checker, sourceFile, start) : []),
     ...(features.supportsVar ? convertToVar(sourceFile, start) : []),
+    ...(features.supportsLambda ? convertAnonymousClassToLambda(program, sourceFile, start) : []),
   ];
 }

@@ -911,6 +911,164 @@ func convertToVar(sf *compiler.Node, start int) []CodeActionResult {
 	}}
 }
 
+// --- convert an anonymous class to a lambda (SE8) ----------------------------
+
+// isObjectMethod reports whether decl is one of the java.lang.Object public
+// methods that JLS 9.8 says do NOT count toward a functional interface's single
+// abstract method, matched by name and arity.
+func isObjectMethod(decl *compiler.MethodDeclarationData) bool {
+	name := decl.Name.AsIdentifier().Text
+	arity := decl.Parameters.Len()
+	return (name == "equals" && arity == 1) ||
+		(name == "hashCode" && arity == 0) ||
+		(name == "toString" && arity == 0)
+}
+
+// isAbstractInterfaceMethod reports whether decl is the abstract kind a lambda
+// implements: no body and not a default/static/private interface method.
+func isAbstractInterfaceMethod(decl *compiler.MethodDeclarationData) bool {
+	if decl.Body != nil {
+		return false
+	}
+	return !hasKeyword(decl.Modifiers, compiler.DefaultKeyword) &&
+		!hasKeyword(decl.Modifiers, compiler.StaticKeyword) &&
+		!hasKeyword(decl.Modifiers, compiler.PrivateKeyword)
+}
+
+// functionalInterfaceSam returns the single abstract method of a functional
+// interface (its SAM), searched through inherited interfaces, or nil when the
+// type is not a genuine functional interface (zero or more than one abstract
+// method). Counts and excludes default/static/private and java.lang.Object
+// methods, so it is a correct SAM test. Port of the TS functionalInterfaceSam.
+func functionalInterfaceSam(typeSymbol *compiler.Symbol, program *compiler.Program) *compiler.Node {
+	type key struct {
+		name  string
+		arity int
+	}
+	abstracts := map[key]*compiler.Node{}
+	seen := map[*compiler.Symbol]bool{}
+	var collect func(sym *compiler.Symbol)
+	collect = func(sym *compiler.Symbol) {
+		if seen[sym] {
+			return
+		}
+		seen[sym] = true
+		for _, member := range sym.Members {
+			if member.Flags&compiler.SymbolFlagsMethod == 0 {
+				continue
+			}
+			var decl *compiler.Node
+			for _, d := range member.Declarations {
+				if d.Kind == compiler.MethodDeclaration {
+					decl = d
+					break
+				}
+			}
+			if decl == nil {
+				continue
+			}
+			m := decl.AsMethodDeclaration()
+			if !isAbstractInterfaceMethod(m) || isObjectMethod(m) {
+				continue
+			}
+			abstracts[key{m.Name.AsIdentifier().Text, m.Parameters.Len()}] = decl
+		}
+		for _, superSymbol := range compiler.GetDirectSuperTypeSymbols(sym, program) {
+			collect(superSymbol)
+		}
+	}
+	collect(typeSymbol)
+	if len(abstracts) != 1 {
+		return nil
+	}
+	for _, decl := range abstracts {
+		return decl
+	}
+	return nil
+}
+
+// convertAnonymousClassToLambda offers to convert an anonymous class implementing
+// a functional interface into a lambda. Strict: exactly one method whose body
+// does not reference the anonymous instance (this/super rebind in a lambda), a
+// resolvable functional interface, and a matching SAM - so the rewrite is only
+// offered when guaranteed safe. Port of the TS convertAnonymousClassToLambda.
+func convertAnonymousClassToLambda(program *compiler.Program, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.ObjectCreationExpression {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	oce := node.AsObjectCreationExpression()
+	// An interface instantiation takes no constructor arguments and has a body.
+	if oce.ClassBody == nil || oce.ClassBody.Len() != 1 || oce.Arguments.Len() > 0 {
+		return nil
+	}
+	member := oce.ClassBody.Nodes[0]
+	if member.Kind != compiler.MethodDeclaration {
+		return nil
+	}
+	method := member.AsMethodDeclaration()
+	if method.Body == nil {
+		return nil
+	}
+
+	if oce.Type.Kind != compiler.TypeReference {
+		return nil
+	}
+	typeSymbol := compiler.ResolveTypeEntityName(oce.Type.AsTypeReference().TypeName, node, program)
+	if typeSymbol == nil || typeSymbol.Flags&compiler.SymbolFlagsInterface == 0 {
+		return nil
+	}
+	sam := functionalInterfaceSam(typeSymbol, program)
+	if sam == nil {
+		return nil
+	}
+	samData := sam.AsMethodDeclaration()
+	if samData.Name.AsIdentifier().Text != method.Name.AsIdentifier().Text {
+		return nil
+	}
+	if samData.Parameters.Len() != method.Parameters.Len() {
+		return nil
+	}
+
+	// Lambda parameters keep only their names (legal against the known target type).
+	var params []string
+	for _, p := range method.Parameters.Nodes {
+		pd := p.AsParameter()
+		if pd.IsReceiver || pd.Name == nil {
+			return nil
+		}
+		params = append(params, pd.Name.AsIdentifier().Text)
+	}
+
+	// Bail if the body references the anonymous instance: this/super would rebind
+	// to the enclosing instance in a lambda, changing semantics.
+	referencesInstance := false
+	forEachDescendant(method.Body, func(n *compiler.Node) {
+		if n.Kind == compiler.ThisExpression || n.Kind == compiler.SuperExpression {
+			referencesInstance = true
+		}
+	})
+	if referencesInstance {
+		return nil
+	}
+
+	text := data.Text
+	bodyText := text[compiler.SkipTrivia(text, method.Body.Pos):method.Body.End]
+	from := compiler.SkipTrivia(text, node.Pos)
+	return []CodeActionResult{{
+		Title:   "Convert anonymous class to lambda",
+		Kind:    "refactor.rewrite",
+		Changes: []TextChange{{Start: from, End: node.End, NewText: "(" + strings.Join(params, ", ") + ") -> " + bodyText}},
+	}}
+}
+
 // GetCodeActions returns all code actions offered for a selection range. features
 // gates modern-Java rewrites to the target version that supports them.
 func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int, features LanguageFeatures) []CodeActionResult {
@@ -931,6 +1089,9 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	}
 	if features.SupportsVar {
 		out = append(out, convertToVar(sf, start)...)
+	}
+	if features.SupportsLambda {
+		out = append(out, convertAnonymousClassToLambda(program, sf, start)...)
 	}
 	return out
 }

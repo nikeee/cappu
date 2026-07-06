@@ -672,3 +672,72 @@ test("var: gated on release >= 10", () => {
   expect(actionsAt(ctx, "s =", 1, 9).filter(a => a.title === varTitle)).toEqual([]);
   expect(actionsAt(ctx, "s =", 1, 10).filter(a => a.title === varTitle).length).toBe(1);
 });
+
+// --- convert anonymous class to lambda ---------------------------------------
+
+const lambdaTitle = "Convert anonymous class to lambda";
+
+function lambdaActions(ctx: ReturnType<typeof setup>, needle = "new Runnable", release?: number) {
+  return actionsAt(ctx, needle, 1, release).filter(a => a.title === lambdaTitle);
+}
+
+test("lambda: converts a Runnable anonymous class", () => {
+  const text =
+    'class T {\n  Runnable r = new Runnable() {\n    public void run() { System.out.println("hi"); }\n  };\n}';
+  const ctx = setup(text);
+  const actions = lambdaActions(ctx);
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    'class T {\n  Runnable r = () -> { System.out.println("hi"); };\n}',
+  );
+});
+
+test("lambda: converts a Comparator, ignoring its default and static methods", () => {
+  const text =
+    "class T {\n  java.util.Comparator<String> c = new java.util.Comparator<String>() {\n    public int compare(String a, String b) { return 0; }\n  };\n}";
+  const ctx = setup(text);
+  const actions = lambdaActions(ctx, "new java.util.Comparator");
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  java.util.Comparator<String> c = (a, b) -> { return 0; };\n}",
+  );
+});
+
+test("lambda: not offered for a non-functional interface (two abstract methods)", () => {
+  const text =
+    "class T {\n  interface Two { void a(); void b(); }\n  Two t = new Two() { public void a() {} };\n}";
+  const ctx = setup(text);
+  expect(lambdaActions(ctx, "new Two")).toEqual([]);
+});
+
+test("lambda: not offered when the body has an extra member", () => {
+  const text =
+    "class T {\n  Runnable r = new Runnable() {\n    int x = 1;\n    public void run() {}\n  };\n}";
+  const ctx = setup(text);
+  expect(lambdaActions(ctx)).toEqual([]);
+});
+
+test("lambda: not offered when the body references this", () => {
+  const text =
+    "class T {\n  Runnable r = new Runnable() {\n    public void run() { this.hashCode(); }\n  };\n}";
+  const ctx = setup(text);
+  expect(lambdaActions(ctx)).toEqual([]);
+});
+
+test("lambda: not offered for an anonymous subclass of a non-interface", () => {
+  const text =
+    "class T {\n  abstract static class A { abstract void go(); }\n  A a = new A() { void go() {} };\n}";
+  const ctx = setup(text);
+  expect(lambdaActions(ctx, "new A")).toEqual([]);
+});
+
+test("lambda: gated on release >= 8", () => {
+  const text = "class T {\n  Runnable r = new Runnable() {\n    public void run() {}\n  };\n}";
+  const ctx = setup(text);
+  expect(lambdaActions(ctx, "new Runnable", 7)).toEqual([]);
+  expect(lambdaActions(ctx, "new Runnable", 8).length).toBe(1);
+});
