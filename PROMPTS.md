@@ -517,3 +517,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-05 20:31 — find stubs or incomplete implemented stuff in the go version
 - 2026-07-05 20:36 — build this refactoring: https://github.com/nikeee/cappu/issues/38 it should add a suggestion via LSP (or whatever fits best for this)
 - 2026-07-06 10:39 — is https://github.com/nikeee/cappu/issues/38 solved? if not, do it. if it is, do https://github.com/nikeee/cappu/issues/39
+- 2026-07-06 11:51 — tihs project includes some code from other projects for testing purposes (e.g. gjf and stuff). Find their licenses and put them somewhere, so we don't vialoate anything
+- 2026-07-06 11:51 — you dont need to include a license for sub modules. only for the code that you actually copied/imported from somewhere
