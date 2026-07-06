@@ -804,3 +804,78 @@ test("pattern: gated on release >= 16", () => {
   expect(patternActions(ctx, 15)).toEqual([]);
   expect(patternActions(ctx, 16).length).toBe(1);
 });
+
+// --- use the diamond operator ------------------------------------------------
+
+const diamondTitle = "Use diamond operator";
+
+function diamondActions(ctx: ReturnType<typeof setup>, needle: string, release?: number) {
+  return actionsAt(ctx, needle, 1, release).filter(a => a.title === diamondTitle);
+}
+
+test("diamond: offered on a typed local declaration", () => {
+  const text =
+    "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList<String>();\n  }\n}";
+  const ctx = setup(text);
+  const actions = diamondActions(ctx, "xs =");
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList<>();\n  }\n}",
+  );
+});
+
+test("diamond: offered on a field declaration", () => {
+  const text =
+    "class T {\n  java.util.Map<String, Integer> m = new java.util.HashMap<String, Integer>();\n}";
+  const ctx = setup(text);
+  const actions = diamondActions(ctx, "m =");
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  java.util.Map<String, Integer> m = new java.util.HashMap<>();\n}",
+  );
+});
+
+test("diamond: not offered when the RHS has no type arguments", () => {
+  const text =
+    "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList();\n  }\n}";
+  const ctx = setup(text);
+  expect(diamondActions(ctx, "xs =")).toEqual([]);
+});
+
+test("diamond: not offered when the RHS is already a diamond", () => {
+  const text =
+    "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList<>();\n  }\n}";
+  const ctx = setup(text);
+  expect(diamondActions(ctx, "xs =")).toEqual([]);
+});
+
+test("diamond: not offered for a var declaration", () => {
+  const text = "class T {\n  void m() {\n    var xs = new java.util.ArrayList<String>();\n  }\n}";
+  const ctx = setup(text);
+  expect(diamondActions(ctx, "xs =")).toEqual([]);
+});
+
+test("diamond: not offered when the LHS type arguments differ from the RHS", () => {
+  const text = "class T {\n  void m() {\n    Object o = new java.util.ArrayList<String>();\n  }\n}";
+  const ctx = setup(text);
+  expect(diamondActions(ctx, "o =")).toEqual([]);
+});
+
+test("diamond: not offered for an anonymous class body", () => {
+  const text =
+    "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList<String>() {};\n  }\n}";
+  const ctx = setup(text);
+  expect(diamondActions(ctx, "xs =")).toEqual([]);
+});
+
+test("diamond: gated on release >= 7", () => {
+  const text =
+    "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList<String>();\n  }\n}";
+  const ctx = setup(text);
+  expect(diamondActions(ctx, "xs =", 6)).toEqual([]);
+  expect(diamondActions(ctx, "xs =", 7).length).toBe(1);
+});

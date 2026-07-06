@@ -44,6 +44,7 @@ type CodeActionResult struct {
 // GetCodeActions, so each modern-Java rewrite just checks a boolean instead of a
 // version number.
 type LanguageFeatures struct {
+	SupportsDiamond           bool // SE7
 	SupportsVar               bool // SE10
 	SupportsLambda            bool // SE8
 	SupportsRecord            bool // SE16
@@ -56,6 +57,7 @@ type LanguageFeatures struct {
 func NewLanguageFeatures(release *int) LanguageFeatures {
 	at := func(min int) bool { return release == nil || *release >= min }
 	return LanguageFeatures{
+		SupportsDiamond:           at(7),
 		SupportsVar:               at(10),
 		SupportsLambda:            at(8),
 		SupportsRecord:            at(16),
@@ -1154,6 +1156,75 @@ func convertInstanceofToPattern(sf *compiler.Node, start int) []CodeActionResult
 	}}
 }
 
+// --- use the diamond operator (SE7) ------------------------------------------
+
+// typeArgumentsText returns the explicit type arguments on a generic type
+// reference as source text (`<String, Integer>`), or "" and false when there are
+// none. Port of the TS typeArgumentsText.
+func typeArgumentsText(text string, typ *compiler.Node) (string, bool) {
+	if typ.Kind != compiler.TypeReference {
+		return "", false
+	}
+	ref := typ.AsTypeReference()
+	if ref.TypeArguments == nil || ref.TypeArguments.Len() == 0 {
+		return "", false
+	}
+	return text[ref.TypeName.End:typ.End], true
+}
+
+// convertToDiamond offers to drop redundant type arguments on a `new` whose type
+// is fixed by the declared type. Only when the RHS arguments equal the LHS
+// arguments, so `<>` infers the same type. Port of the TS convertToDiamond.
+func convertToDiamond(sf *compiler.Node, start int) []CodeActionResult {
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil &&
+		node.Kind != compiler.LocalVariableDeclarationStatement &&
+		node.Kind != compiler.FieldDeclaration {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	text := sf.AsSourceFile().Text
+	var declType *compiler.Node
+	var declarators *compiler.NodeArray
+	if node.Kind == compiler.LocalVariableDeclarationStatement {
+		d := node.AsLocalVariableDeclarationStatement()
+		declType, declarators = d.Type, d.Declarators
+	} else {
+		d := node.AsFieldDeclaration()
+		declType, declarators = d.Type, d.Declarators
+	}
+	if declarators.Len() != 1 {
+		return nil
+	}
+	lhsArgs, ok := typeArgumentsText(text, declType)
+	if !ok { // LHS is not an explicit generic type (e.g. var)
+		return nil
+	}
+	initializer := declarators.Nodes[0].AsVariableDeclarator().Initializer
+	if initializer == nil || initializer.Kind != compiler.ObjectCreationExpression {
+		return nil
+	}
+	oce := initializer.AsObjectCreationExpression()
+	if oce.ClassBody != nil { // anonymous-class diamond is SE9: stay conservative
+		return nil
+	}
+	if oce.Type.Kind != compiler.TypeReference {
+		return nil
+	}
+	rhsArgs, ok := typeArgumentsText(text, oce.Type)
+	if !ok || rhsArgs != lhsArgs { // already <> or a type change
+		return nil
+	}
+	rhs := oce.Type.AsTypeReference()
+	return []CodeActionResult{{
+		Title:   "Use diamond operator",
+		Kind:    "refactor.rewrite",
+		Changes: []TextChange{{Start: rhs.TypeName.End, End: oce.Type.End, NewText: "<>"}},
+	}}
+}
+
 // GetCodeActions returns all code actions offered for a selection range. features
 // gates modern-Java rewrites to the target version that supports them.
 func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int, features LanguageFeatures) []CodeActionResult {
@@ -1180,6 +1251,9 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	}
 	if features.SupportsInstanceofPattern {
 		out = append(out, convertInstanceofToPattern(sf, start)...)
+	}
+	if features.SupportsDiamond {
+		out = append(out, convertToDiamond(sf, start)...)
 	}
 	return out
 }

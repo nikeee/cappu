@@ -74,6 +74,7 @@ export interface CodeActionResult {
 // (from the configured javac --release) and threaded into getCodeActions, so
 // each modern-Java rewrite just checks a boolean instead of a version number.
 export interface LanguageFeatures {
+  readonly supportsDiamond: boolean; // SE7
   readonly supportsVar: boolean; // SE10
   readonly supportsLambda: boolean; // SE8
   readonly supportsRecord: boolean; // SE16
@@ -84,6 +85,7 @@ export interface LanguageFeatures {
 export function languageFeatures(release: number | undefined): LanguageFeatures {
   const at = (min: number) => release === undefined || release >= min;
   return {
+    supportsDiamond: at(7),
     supportsVar: at(10),
     supportsLambda: at(8),
     supportsRecord: at(16),
@@ -989,6 +991,53 @@ function convertInstanceofToPattern(sourceFile: SourceFile, start: number): Code
   ];
 }
 
+// --- use the diamond operator (SE7) ------------------------------------------
+
+// The explicit type arguments on a generic type reference as source text
+// (`<String, Integer>`), or undefined when there are none.
+function typeArgumentsText(sourceFile: SourceFile, type: TypeNode): string | undefined {
+  if (type.kind !== SyntaxKind.TypeReference) return undefined;
+  const ref = type as TypeReference;
+  if (!ref.typeArguments?.length) return undefined;
+  return sourceFile.text.slice(ref.typeName.end, ref.end);
+}
+
+// Offer to drop redundant type arguments on a `new` whose type is fixed by the
+// declared type: `List<String> xs = new ArrayList<String>()` -> `... <>()`. Only
+// when the RHS arguments equal the LHS arguments, so `<>` infers the same type.
+function convertToDiamond(sourceFile: SourceFile, start: number): CodeActionResult[] {
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (
+    node &&
+    node.kind !== SyntaxKind.LocalVariableDeclarationStatement &&
+    node.kind !== SyntaxKind.FieldDeclaration
+  ) {
+    node = node.parent;
+  }
+  if (!node) return [];
+  const decl = node as LocalVariableDeclarationStatement | FieldDeclaration;
+  if (decl.declarators.length !== 1) return [];
+  const lhsArgs = typeArgumentsText(sourceFile, decl.type);
+  if (lhsArgs === undefined) return []; // LHS is not an explicit generic type (e.g. var)
+
+  const initializer = decl.declarators[0]!.initializer;
+  if (!initializer || initializer.kind !== SyntaxKind.ObjectCreationExpression) return [];
+  const oce = initializer as ObjectCreationExpression;
+  if (oce.classBody) return []; // anonymous-class diamond is SE9: stay conservative
+  if (oce.type.kind !== SyntaxKind.TypeReference) return [];
+  const rhs = oce.type as TypeReference;
+  const rhsArgs = typeArgumentsText(sourceFile, rhs);
+  if (rhsArgs === undefined || rhsArgs !== lhsArgs) return []; // already <> or a type change
+
+  return [
+    {
+      title: "Use diamond operator",
+      kind: "refactor.rewrite",
+      changes: [{ start: rhs.typeName.end, end: rhs.end, newText: "<>" }],
+    },
+  ];
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
@@ -1011,5 +1060,6 @@ export function getCodeActions(
     ...(features.supportsVar ? convertToVar(sourceFile, start) : []),
     ...(features.supportsLambda ? convertAnonymousClassToLambda(program, sourceFile, start) : []),
     ...(features.supportsInstanceofPattern ? convertInstanceofToPattern(sourceFile, start) : []),
+    ...(features.supportsDiamond ? convertToDiamond(sourceFile, start) : []),
   ];
 }

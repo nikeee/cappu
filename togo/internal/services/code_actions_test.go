@@ -932,3 +932,87 @@ func TestPatternGatedOnRelease(t *testing.T) {
 		t.Errorf("release 16: expected 1 action, got %+v", got)
 	}
 }
+
+// --- use the diamond operator ------------------------------------------------
+
+func diamondActions(actions []CodeActionResult) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range actions {
+		if a.Title == "Use diamond operator" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestDiamondOfferedOnTypedLocal(t *testing.T) {
+	text := "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList<String>();\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	actions := diamondActions(ctx.actionsAt("xs =", 1))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList<>();\n  }\n}")
+}
+
+func TestDiamondOfferedOnField(t *testing.T) {
+	text := "class T {\n  java.util.Map<String, Integer> m = new java.util.HashMap<String, Integer>();\n}"
+	ctx := actionsSetup(text, nil)
+	actions := diamondActions(ctx.actionsAt("m =", 1))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  java.util.Map<String, Integer> m = new java.util.HashMap<>();\n}")
+}
+
+func TestDiamondNotOfferedWhenRhsHasNoArgs(t *testing.T) {
+	text := "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList();\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := diamondActions(ctx.actionsAt("xs =", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestDiamondNotOfferedWhenAlreadyDiamond(t *testing.T) {
+	text := "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList<>();\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := diamondActions(ctx.actionsAt("xs =", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestDiamondNotOfferedForVar(t *testing.T) {
+	text := "class T {\n  void m() {\n    var xs = new java.util.ArrayList<String>();\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := diamondActions(ctx.actionsAt("xs =", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestDiamondNotOfferedWhenArgsDiffer(t *testing.T) {
+	text := "class T {\n  void m() {\n    Object o = new java.util.ArrayList<String>();\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := diamondActions(ctx.actionsAt("o =", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestDiamondNotOfferedForAnonymousBody(t *testing.T) {
+	text := "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList<String>() {};\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := diamondActions(ctx.actionsAt("xs =", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestDiamondGatedOnRelease(t *testing.T) {
+	text := "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList<String>();\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	six, seven := 6, 7
+	if got := diamondActions(ctx.actionsAt("xs =", 1, &six)); len(got) != 0 {
+		t.Errorf("release 6: expected no action, got %+v", got)
+	}
+	if got := diamondActions(ctx.actionsAt("xs =", 1, &seven)); len(got) != 1 {
+		t.Errorf("release 7: expected 1 action, got %+v", got)
+	}
+}

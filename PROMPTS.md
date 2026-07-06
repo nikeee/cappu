@@ -524,3 +524,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-06 12:37 — instead of checking release > 10 and stuff, introduce a new global type/struct that holds information like "supports var" which is set once at the initialization. then just check the boolean field of that struct. do this for all language-level gated features
 - 2026-07-06 12:37 — dont forget to gate older refactorings as well (convert-to-record)
 - 2026-07-06 12:37 — in between features, also add refactoring assertions that assert that the edit proposed by the lsp are correct
+- 2026-07-06 15:25 — now, check for other refactorings. for example, the string concat from above
+- 2026-07-06 15:25 — [AskUserQuestion] Which modern-Java refactorings to implement -> answer: Diamond operator; what about string builders instead of concat in a loop?
