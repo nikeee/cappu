@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { expect } from "expect";
 
 import { createChecker } from "../compiler/checker.ts";
-import { getCodeActions, type CodeActionResult } from "./codeActions.ts";
+import { getCodeActions, languageFeatures, type CodeActionResult } from "./codeActions.ts";
 import { loadJdkStub } from "../compiler/jdkStub.ts";
 import { createProgram } from "../compiler/program.ts";
 import { type Uri } from "../workspace.ts";
@@ -34,7 +34,7 @@ function actionsAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1, relea
     ctx.program.getSourceFile("file:///T.java" as Uri)!,
     offset,
     offset,
-    release,
+    languageFeatures(release),
   );
 }
 
@@ -137,9 +137,14 @@ function extractAction(ctx: ReturnType<typeof setup>, exprText: string, occ = 1)
   let start = -1;
   for (let i = 0; i < occ; i++) start = ctx.text.indexOf(exprText, start + 1);
   const sf = ctx.program.getSourceFile("file:///T.java" as Uri)!;
-  return getCodeActions(ctx.program, ctx.checker, sf, start, start + exprText.length).find(
-    a => a.kind === "refactor.extract",
-  );
+  return getCodeActions(
+    ctx.program,
+    ctx.checker,
+    sf,
+    start,
+    start + exprText.length,
+    languageFeatures(undefined),
+  ).find(a => a.kind === "refactor.extract");
 }
 
 test("extracts a binary expression into a local above the statement", () => {
@@ -194,9 +199,14 @@ function inlineAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {
   let offset = -1;
   for (let i = 0; i < occ; i++) offset = ctx.text.indexOf(needle, offset + 1);
   const sf = ctx.program.getSourceFile("file:///T.java" as Uri)!;
-  return getCodeActions(ctx.program, ctx.checker, sf, offset, offset).find(
-    a => a.kind === "refactor.inline",
-  );
+  return getCodeActions(
+    ctx.program,
+    ctx.checker,
+    sf,
+    offset,
+    offset,
+    languageFeatures(undefined),
+  ).find(a => a.kind === "refactor.inline");
 }
 
 test("inlines a local into its single use and removes the declaration", () => {
@@ -262,9 +272,14 @@ function rewriteAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {
   let offset = -1;
   for (let i = 0; i < occ; i++) offset = ctx.text.indexOf(needle, offset + 1);
   const sf = ctx.program.getSourceFile("file:///T.java" as Uri)!;
-  return getCodeActions(ctx.program, ctx.checker, sf, offset, offset).find(
-    a => a.kind === "refactor.rewrite",
-  );
+  return getCodeActions(
+    ctx.program,
+    ctx.checker,
+    sf,
+    offset,
+    offset,
+    languageFeatures(undefined),
+  ).find(a => a.kind === "refactor.rewrite");
 }
 
 test("removes an unused middle parameter from the declaration and call sites", () => {
@@ -417,6 +432,14 @@ test("converts a POJO to a record", () => {
   const action = recordActions(ctx)[0]!;
   expect(action.kind).toBe("refactor.rewrite");
   expect(apply(POINT, action)).toBe("record Point(int x, int y) {\n}\n");
+});
+
+test("convert-to-record is gated on release >= 16", () => {
+  const ctx = setup(POINT);
+  const rec = (r: number) =>
+    actionsAt(ctx, "class Point", 1, r).filter(a => a.title === "Convert class to record");
+  expect(rec(15)).toEqual([]);
+  expect(rec(16).length).toBe(1);
 });
 
 test("preserves modifiers, type params and implements", () => {

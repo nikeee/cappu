@@ -61,11 +61,25 @@ export interface CodeActionResult {
   readonly additionalEdits?: Record<string, TextChange[]>;
 }
 
-// A modern-Java rewrite is only offered when the configured `release`
-// (javac --release) supports the feature. An unset release means the toolchain
-// default (a modern JDK), so everything is offered.
-function releaseSupports(release: number | undefined, min: number): boolean {
-  return release === undefined || release >= min;
+// Which language-level features the target Java version supports. Computed once
+// (from the configured javac --release) and threaded into getCodeActions, so
+// each modern-Java rewrite just checks a boolean instead of a version number.
+export interface LanguageFeatures {
+  readonly supportsVar: boolean; // SE10
+  readonly supportsLambda: boolean; // SE8
+  readonly supportsRecord: boolean; // SE16
+  readonly supportsInstanceofPattern: boolean; // SE16
+}
+
+// An unset release means the toolchain default (a modern JDK): everything on.
+export function languageFeatures(release: number | undefined): LanguageFeatures {
+  const at = (min: number) => release === undefined || release >= min;
+  return {
+    supportsVar: at(10),
+    supportsLambda: at(8),
+    supportsRecord: at(16),
+    supportsInstanceofPattern: at(16),
+  };
 }
 
 function packageOf(fqn: string): string {
@@ -802,18 +816,19 @@ export function getCodeActions(
   sourceFile: SourceFile,
   start: number,
   end: number,
-  release?: number,
+  features: LanguageFeatures,
 ): CodeActionResult[] {
   return [
     ...addMissingImport(program, checker, sourceFile, start),
     ...organizeImports(sourceFile),
-    ...extractLocalVariable(sourceFile, start, end),
+    // extract-local emits a `var` declaration (SE10).
+    ...(features.supportsVar ? extractLocalVariable(sourceFile, start, end) : []),
     ...inlineLocalVariable(program, checker, sourceFile, start),
     ...removeUnusedParameter(program, checker, sourceFile, start),
     ...removeUnusedImport(sourceFile, start, end),
     ...removeRedundantOverride(checker, sourceFile, start),
     ...makeFieldFinal(checker, sourceFile, start),
-    ...convertClassToRecord(program, checker, sourceFile, start),
-    ...(releaseSupports(release, 10) ? convertToVar(sourceFile, start) : []),
+    ...(features.supportsRecord ? convertClassToRecord(program, checker, sourceFile, start) : []),
+    ...(features.supportsVar ? convertToVar(sourceFile, start) : []),
   ];
 }

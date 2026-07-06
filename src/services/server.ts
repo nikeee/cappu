@@ -50,7 +50,7 @@ import {
 import { createChecker } from "../compiler/checker.ts";
 import { symbolDeprecation } from "../compiler/deprecation.ts";
 import { type ArrayType, type ClassType, TypeKind } from "../compiler/checkerTypes.ts";
-import { getCodeActions, type TextChange } from "./codeActions.ts";
+import { getCodeActions, languageFeatures, type TextChange } from "./codeActions.ts";
 import { getCodeLenses } from "./codeLens.ts";
 import { dependencyLenses } from "./dependencyLens.ts";
 import { loadConfiguredPaths, missingConfiguredPaths } from "../compiler/compiler.ts";
@@ -513,6 +513,8 @@ export function startServer(
     );
   });
 
+  // Language-level features are fixed by the configured release, computed once.
+  const features = languageFeatures(config?.compilerOptions.release);
   connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
     const sourceFile = program.getSourceFile(asUri(params.textDocument.uri));
     if (!sourceFile) return [];
@@ -535,14 +537,7 @@ export function startServer(
         },
         newText: c.newText,
       }));
-    return getCodeActions(
-      program,
-      checker,
-      sourceFile,
-      start,
-      end,
-      config?.compilerOptions.release,
-    ).map(action => {
+    return getCodeActions(program, checker, sourceFile, start, end, features).map(action => {
       const changes: Record<string, ReturnType<typeof mapEdits>> = {
         [params.textDocument.uri]: mapEdits(lineStarts, action.changes),
       };

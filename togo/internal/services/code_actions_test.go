@@ -46,7 +46,7 @@ func (ctx *actionCtx) actionsAt(needle string, occ int, release ...*int) []CodeA
 	if len(release) > 0 {
 		r = release[0]
 	}
-	return GetCodeActions(ctx.program, ctx.checker, sf, offset, offset, r)
+	return GetCodeActions(ctx.program, ctx.checker, sf, offset, offset, NewLanguageFeatures(r))
 }
 
 func filterKind(actions []CodeActionResult, kind string) []CodeActionResult {
@@ -201,7 +201,7 @@ func (ctx *actionCtx) extractAction(exprText string, occ int) *CodeActionResult 
 		start = strings.Index(ctx.text[start+1:], exprText) + start + 1
 	}
 	sf := ctx.program.GetSourceFile("file:///T.java")
-	return findKind(GetCodeActions(ctx.program, ctx.checker, sf, start, start+len(exprText), nil), "refactor.extract")
+	return findKind(GetCodeActions(ctx.program, ctx.checker, sf, start, start+len(exprText), NewLanguageFeatures(nil)), "refactor.extract")
 }
 
 func TestExtractBinaryExpression(t *testing.T) {
@@ -248,7 +248,7 @@ func (ctx *actionCtx) inlineAt(needle string, occ int) *CodeActionResult {
 		offset = strings.Index(ctx.text[offset+1:], needle) + offset + 1
 	}
 	sf := ctx.program.GetSourceFile("file:///T.java")
-	return findKind(GetCodeActions(ctx.program, ctx.checker, sf, offset, offset, nil), "refactor.inline")
+	return findKind(GetCodeActions(ctx.program, ctx.checker, sf, offset, offset, NewLanguageFeatures(nil)), "refactor.inline")
 }
 
 func TestInlineSingleUse(t *testing.T) {
@@ -307,7 +307,7 @@ func (ctx *actionCtx) rewriteAt(needle string, occ int) *CodeActionResult {
 		offset = strings.Index(ctx.text[offset+1:], needle) + offset + 1
 	}
 	sf := ctx.program.GetSourceFile("file:///T.java")
-	return findKind(GetCodeActions(ctx.program, ctx.checker, sf, offset, offset, nil), "refactor.rewrite")
+	return findKind(GetCodeActions(ctx.program, ctx.checker, sf, offset, offset, NewLanguageFeatures(nil)), "refactor.rewrite")
 }
 
 func TestRemoveUnusedMiddleParameter(t *testing.T) {
@@ -474,6 +474,17 @@ func recordAction(actions []CodeActionResult) *CodeActionResult {
 		}
 	}
 	return nil
+}
+
+func TestConvertClassToRecordGatedOnRelease(t *testing.T) {
+	ctx := actionsSetup(pointSrc, nil)
+	fifteen, sixteen := 15, 16
+	if got := recordAction(ctx.actionsAt("class Point", 1, &fifteen)); got != nil {
+		t.Errorf("release 15: expected no action, got %+v", got)
+	}
+	if got := recordAction(ctx.actionsAt("class Point", 1, &sixteen)); got == nil {
+		t.Error("release 16: expected a convert-to-record action")
+	}
 }
 
 func TestConvertClassToRecord(t *testing.T) {

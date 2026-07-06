@@ -39,11 +39,28 @@ type CodeActionResult struct {
 	AdditionalEdits map[string][]TextChange
 }
 
-// releaseSupports reports whether the configured release (javac --release)
-// supports a feature requiring at least min. A nil release means the toolchain
-// default (a modern JDK), so everything is offered.
-func releaseSupports(release *int, min int) bool {
-	return release == nil || *release >= min
+// LanguageFeatures records which language-level features the target Java version
+// supports. Computed once (from the configured javac --release) and threaded into
+// GetCodeActions, so each modern-Java rewrite just checks a boolean instead of a
+// version number.
+type LanguageFeatures struct {
+	SupportsVar               bool // SE10
+	SupportsLambda            bool // SE8
+	SupportsRecord            bool // SE16
+	SupportsInstanceofPattern bool // SE16
+}
+
+// NewLanguageFeatures derives the supported features from the configured release
+// (javac --release). A nil release means the toolchain default (a modern JDK):
+// everything on.
+func NewLanguageFeatures(release *int) LanguageFeatures {
+	at := func(min int) bool { return release == nil || *release >= min }
+	return LanguageFeatures{
+		SupportsVar:               at(10),
+		SupportsLambda:            at(8),
+		SupportsRecord:            at(16),
+		SupportsInstanceofPattern: at(16),
+	}
 }
 
 func packageOf(fqn string) string {
@@ -894,21 +911,25 @@ func convertToVar(sf *compiler.Node, start int) []CodeActionResult {
 	}}
 }
 
-// GetCodeActions returns all code actions offered for a selection range. release
-// is the configured javac --release (nil = the toolchain default), used to gate
-// modern-Java rewrites to versions that support them.
-func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int, release *int) []CodeActionResult {
+// GetCodeActions returns all code actions offered for a selection range. features
+// gates modern-Java rewrites to the target version that supports them.
+func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int, features LanguageFeatures) []CodeActionResult {
 	var out []CodeActionResult
 	out = append(out, addMissingImport(program, checker, sf, start)...)
 	out = append(out, organizeImports(sf)...)
-	out = append(out, extractLocalVariable(sf, start, end)...)
+	// extract-local emits a `var` declaration (SE10).
+	if features.SupportsVar {
+		out = append(out, extractLocalVariable(sf, start, end)...)
+	}
 	out = append(out, inlineLocalVariable(program, checker, sf, start)...)
 	out = append(out, removeUnusedParameter(program, checker, sf, start)...)
 	out = append(out, removeUnusedImport(sf, start, end)...)
 	out = append(out, removeRedundantOverride(checker, sf, start)...)
 	out = append(out, makeFieldFinal(checker, sf, start)...)
-	out = append(out, convertClassToRecord(program, checker, sf, start)...)
-	if releaseSupports(release, 10) {
+	if features.SupportsRecord {
+		out = append(out, convertClassToRecord(program, checker, sf, start)...)
+	}
+	if features.SupportsVar {
 		out = append(out, convertToVar(sf, start)...)
 	}
 	return out

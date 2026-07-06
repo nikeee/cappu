@@ -179,12 +179,8 @@ func (s *Server) onCodeAction(params json.RawMessage) (any, *lsp.ResponseError) 
 	lineStarts := sourceFile.AsSourceFile().LineStarts()
 	start := compiler.GetPositionOfLineAndCharacter(text, lineStarts, p.Range.Start.Line, p.Range.Start.Character)
 	end := compiler.GetPositionOfLineAndCharacter(text, lineStarts, p.Range.End.Line, p.Range.End.Character)
-	var release *int
-	if s.config != nil {
-		release = s.config.CompilerOptions.Release
-	}
 	var out []lsp.CodeAction
-	for _, action := range services.GetCodeActions(s.program, s.checker, sourceFile, start, end, release) {
+	for _, action := range services.GetCodeActions(s.program, s.checker, sourceFile, start, end, s.features) {
 		var edits []lsp.TextEdit
 		for _, c := range action.Changes {
 			edits = append(edits, lsp.TextEdit{Range: lspRange(text, lineStarts, c.Start, c.End), NewText: c.NewText})

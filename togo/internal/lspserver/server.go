@@ -29,8 +29,9 @@ type Server struct {
 	checker *compiler.Checker
 	config  *config.Config
 
-	docs             map[compiler.URI]string // open document text (java + cappu.json)
-	roots            []string                // workspace root URIs (re-scanned on rebuild)
+	features         services.LanguageFeatures // language-level features of the target release, set once
+	docs             map[compiler.URI]string   // open document text (java + cappu.json)
+	roots            []string                  // workspace root URIs (re-scanned on rebuild)
 	inlayHints       services.InlayHintsSettings
 	packageSourceURL []string
 	packageSources   []packages.PackageSource
@@ -62,6 +63,14 @@ func nullnessConfig(cfg *config.Config) *config.Nullness {
 	return cfg.CompilerOptions.Nullness
 }
 
+// releaseOf returns the configured javac --release, or nil (toolchain default).
+func releaseOf(cfg *config.Config) *int {
+	if cfg == nil {
+		return nil
+	}
+	return cfg.CompilerOptions.Release
+}
+
 // NewServer builds a server. cfg may be nil (no project config).
 func NewServer(cfg *config.Config) *Server {
 	program := compiler.NewProgram()
@@ -70,6 +79,7 @@ func NewServer(cfg *config.Config) *Server {
 		program:          program,
 		checker:          compiler.NewChecker(program, nullnessConfig(cfg)),
 		config:           cfg,
+		features:         services.NewLanguageFeatures(releaseOf(cfg)),
 		docs:             map[compiler.URI]string{},
 		inlayHints:       services.DefaultInlayHints,
 		packageSourceURL: config.DefaultPackageSources,
