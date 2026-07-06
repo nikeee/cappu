@@ -36,13 +36,17 @@ func apply(text string, action CodeActionResult) string {
 	return out
 }
 
-func (ctx *actionCtx) actionsAt(needle string, occ int) []CodeActionResult {
+func (ctx *actionCtx) actionsAt(needle string, occ int, release ...*int) []CodeActionResult {
 	offset := -1
 	for i := 0; i < occ; i++ {
 		offset = strings.Index(ctx.text[offset+1:], needle) + offset + 1
 	}
 	sf := ctx.program.GetSourceFile("file:///T.java")
-	return GetCodeActions(ctx.program, ctx.checker, sf, offset, offset)
+	var r *int
+	if len(release) > 0 {
+		r = release[0]
+	}
+	return GetCodeActions(ctx.program, ctx.checker, sf, offset, offset, r)
 }
 
 func filterKind(actions []CodeActionResult, kind string) []CodeActionResult {
@@ -197,7 +201,7 @@ func (ctx *actionCtx) extractAction(exprText string, occ int) *CodeActionResult 
 		start = strings.Index(ctx.text[start+1:], exprText) + start + 1
 	}
 	sf := ctx.program.GetSourceFile("file:///T.java")
-	return findKind(GetCodeActions(ctx.program, ctx.checker, sf, start, start+len(exprText)), "refactor.extract")
+	return findKind(GetCodeActions(ctx.program, ctx.checker, sf, start, start+len(exprText), nil), "refactor.extract")
 }
 
 func TestExtractBinaryExpression(t *testing.T) {
@@ -244,7 +248,7 @@ func (ctx *actionCtx) inlineAt(needle string, occ int) *CodeActionResult {
 		offset = strings.Index(ctx.text[offset+1:], needle) + offset + 1
 	}
 	sf := ctx.program.GetSourceFile("file:///T.java")
-	return findKind(GetCodeActions(ctx.program, ctx.checker, sf, offset, offset), "refactor.inline")
+	return findKind(GetCodeActions(ctx.program, ctx.checker, sf, offset, offset, nil), "refactor.inline")
 }
 
 func TestInlineSingleUse(t *testing.T) {
@@ -303,7 +307,7 @@ func (ctx *actionCtx) rewriteAt(needle string, occ int) *CodeActionResult {
 		offset = strings.Index(ctx.text[offset+1:], needle) + offset + 1
 	}
 	sf := ctx.program.GetSourceFile("file:///T.java")
-	return findKind(GetCodeActions(ctx.program, ctx.checker, sf, offset, offset), "refactor.rewrite")
+	return findKind(GetCodeActions(ctx.program, ctx.checker, sf, offset, offset, nil), "refactor.rewrite")
 }
 
 func TestRemoveUnusedMiddleParameter(t *testing.T) {
@@ -670,5 +674,92 @@ func TestConvertClassToRecordNotWhenExtended(t *testing.T) {
 	ctx := actionsSetup(base, map[string]string{"file:///Sub.java": "class Sub extends Base {}\n"})
 	if a := recordAction(ctx.actionsAt("class Base", 1)); a != nil {
 		t.Error("unexpected action for an extended class")
+	}
+}
+
+// --- use 'var' for a local variable ------------------------------------------
+
+func varActions(actions []CodeActionResult) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range actions {
+		if a.Title == "Use 'var' for local variable" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestVarOfferedForConstructorCall(t *testing.T) {
+	text := "class T {\n  void m() {\n    java.util.ArrayList<String> xs = new java.util.ArrayList<String>();\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	actions := varActions(ctx.actionsAt("xs =", 1))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	want := "class T {\n  void m() {\n    var xs = new java.util.ArrayList<String>();\n  }\n}"
+	if got := apply(text, actions[0]); got != want {
+		t.Errorf("apply =\n%s", got)
+	}
+}
+
+func TestVarOfferedForCast(t *testing.T) {
+	text := "class T {\n  void m(Object o) {\n    String s = (String) o;\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	actions := varActions(ctx.actionsAt("s =", 1))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	want := "class T {\n  void m(Object o) {\n    var s = (String) o;\n  }\n}"
+	if got := apply(text, actions[0]); got != want {
+		t.Errorf("apply =\n%s", got)
+	}
+}
+
+func TestVarOfferedForLiteralKeepsFinal(t *testing.T) {
+	text := "class T {\n  void m() {\n    final int n = 42;\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	actions := varActions(ctx.actionsAt("n =", 1))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	want := "class T {\n  void m() {\n    final var n = 42;\n  }\n}"
+	if got := apply(text, actions[0]); got != want {
+		t.Errorf("apply =\n%s", got)
+	}
+}
+
+func TestVarNotOfferedForDiamond(t *testing.T) {
+	text := "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList<>();\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := varActions(ctx.actionsAt("xs =", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestVarNotOfferedWhenAlreadyVar(t *testing.T) {
+	text := "class T {\n  void m() {\n    var s = (String) null;\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := varActions(ctx.actionsAt("s =", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestVarNotOfferedForMethodCall(t *testing.T) {
+	text := "class T {\n  int f() { return 1; }\n  void m() {\n    int n = f();\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	if got := varActions(ctx.actionsAt("n =", 1)); len(got) != 0 {
+		t.Errorf("expected no action, got %+v", got)
+	}
+}
+
+func TestVarGatedOnRelease(t *testing.T) {
+	text := "class T {\n  void m() {\n    String s = (String) null;\n  }\n}"
+	ctx := actionsSetup(text, nil)
+	nine, ten := 9, 10
+	if got := varActions(ctx.actionsAt("s =", 1, &nine)); len(got) != 0 {
+		t.Errorf("release 9: expected no action, got %+v", got)
+	}
+	if got := varActions(ctx.actionsAt("s =", 1, &ten)); len(got) != 1 {
+		t.Errorf("release 10: expected 1 action, got %+v", got)
 	}
 }

@@ -39,6 +39,13 @@ type CodeActionResult struct {
 	AdditionalEdits map[string][]TextChange
 }
 
+// releaseSupports reports whether the configured release (javac --release)
+// supports a feature requiring at least min. A nil release means the toolchain
+// default (a modern JDK), so everything is offered.
+func releaseSupports(release *int, min int) bool {
+	return release == nil || *release >= min
+}
+
 func packageOf(fqn string) string {
 	dot := strings.LastIndex(fqn, ".")
 	if dot < 0 {
@@ -834,8 +841,63 @@ func convertClassToRecord(program *compiler.Program, checker *compiler.Checker, 
 	return []CodeActionResult{result}
 }
 
-// GetCodeActions returns all code actions offered for a selection range.
-func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int) []CodeActionResult {
+// --- use 'var' for a local variable declaration (SE10) -----------------------
+
+// varObviousInitializers are the initializer kinds whose type is obvious from
+// the RHS, so replacing the written type with `var` neither hides it from a
+// reader nor changes it: these are standalone (non-poly) expressions, so the
+// inferred type equals the written one.
+var varObviousInitializers = map[compiler.SyntaxKind]bool{
+	compiler.ObjectCreationExpression: true,
+	compiler.ArrayCreationExpression:  true,
+	compiler.CastExpression:           true,
+	compiler.NumericLiteral:           true,
+	compiler.StringLiteral:            true,
+	compiler.TextBlockLiteral:         true,
+	compiler.CharacterLiteral:         true,
+}
+
+func convertToVar(sf *compiler.Node, start int) []CodeActionResult {
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.LocalVariableDeclarationStatement {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	decl := node.AsLocalVariableDeclarationStatement()
+	if decl.Type.Kind == compiler.VarType { // already `var`
+		return nil
+	}
+	if decl.Declarators == nil || len(decl.Declarators.Nodes) != 1 {
+		return nil
+	}
+	initializer := decl.Declarators.Nodes[0].AsVariableDeclarator().Initializer
+	if initializer == nil || !varObviousInitializers[initializer.Kind] {
+		return nil
+	}
+	// `var m = new HashMap<>()` is a compile error: bail on a diamond `new`.
+	if initializer.Kind == compiler.ObjectCreationExpression {
+		t := initializer.AsObjectCreationExpression().Type
+		if t.Kind == compiler.TypeReference {
+			ta := t.AsTypeReference().TypeArguments
+			if ta != nil && len(ta.Nodes) == 0 {
+				return nil
+			}
+		}
+	}
+	at := compiler.SkipTrivia(sf.AsSourceFile().Text, decl.Type.Pos)
+	return []CodeActionResult{{
+		Title:   "Use 'var' for local variable",
+		Kind:    "refactor.rewrite",
+		Changes: []TextChange{{Start: at, End: decl.Type.End, NewText: "var"}},
+	}}
+}
+
+// GetCodeActions returns all code actions offered for a selection range. release
+// is the configured javac --release (nil = the toolchain default), used to gate
+// modern-Java rewrites to versions that support them.
+func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int, release *int) []CodeActionResult {
 	var out []CodeActionResult
 	out = append(out, addMissingImport(program, checker, sf, start)...)
 	out = append(out, organizeImports(sf)...)
@@ -846,5 +908,8 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	out = append(out, removeRedundantOverride(checker, sf, start)...)
 	out = append(out, makeFieldFinal(checker, sf, start)...)
 	out = append(out, convertClassToRecord(program, checker, sf, start)...)
+	if releaseSupports(release, 10) {
+		out = append(out, convertToVar(sf, start)...)
+	}
 	return out
 }

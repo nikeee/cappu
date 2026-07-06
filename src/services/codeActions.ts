@@ -23,6 +23,7 @@ import {
   type LocalVariableDeclarationStatement,
   type MethodDeclaration,
   type Node,
+  type ObjectCreationExpression,
   type PrimitiveType,
   type PropertyAccessExpression,
   type QualifiedName,
@@ -58,6 +59,13 @@ export interface CodeActionResult {
   readonly changes: TextChange[];
   /** Edits to OTHER documents, keyed by uri. Unset for single-file actions. */
   readonly additionalEdits?: Record<string, TextChange[]>;
+}
+
+// A modern-Java rewrite is only offered when the configured `release`
+// (javac --release) supports the feature. An unset release means the toolchain
+// default (a modern JDK), so everything is offered.
+function releaseSupports(release: number | undefined, min: number): boolean {
+  return release === undefined || release >= min;
 }
 
 function packageOf(fqn: string): string {
@@ -747,12 +755,54 @@ function convertClassToRecord(
   return Object.keys(additionalEdits).length > 0 ? [{ ...result, additionalEdits }] : [result];
 }
 
+// --- use 'var' for a local variable declaration (SE10) -----------------------
+
+// Initializer kinds whose type is obvious from the RHS, so replacing the written
+// type with `var` neither hides it from a reader nor changes it: these are
+// standalone (non-poly) expressions, so the inferred type equals the written one.
+const VAR_OBVIOUS_INITIALIZERS = new Set<SyntaxKind>([
+  SyntaxKind.ObjectCreationExpression,
+  SyntaxKind.ArrayCreationExpression,
+  SyntaxKind.CastExpression,
+  SyntaxKind.NumericLiteral,
+  SyntaxKind.StringLiteral,
+  SyntaxKind.TextBlockLiteral,
+  SyntaxKind.CharacterLiteral,
+]);
+
+function convertToVar(sourceFile: SourceFile, start: number): CodeActionResult[] {
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.LocalVariableDeclarationStatement) node = node.parent;
+  if (!node) return [];
+  const decl = node as LocalVariableDeclarationStatement;
+  if (decl.type.kind === SyntaxKind.VarType) return []; // already `var`
+  if (decl.declarators.length !== 1) return [];
+  const initializer = decl.declarators[0]!.initializer;
+  if (!initializer || !VAR_OBVIOUS_INITIALIZERS.has(initializer.kind)) return [];
+  // `var m = new HashMap<>()` is a compile error: bail on a diamond `new`.
+  if (initializer.kind === SyntaxKind.ObjectCreationExpression) {
+    const t = (initializer as ObjectCreationExpression).type;
+    if (t.kind === SyntaxKind.TypeReference && (t as TypeReference).typeArguments?.length === 0) {
+      return [];
+    }
+  }
+  const at = skipTrivia(sourceFile.text, decl.type.pos);
+  return [
+    {
+      title: "Use 'var' for local variable",
+      kind: "refactor.rewrite",
+      changes: [{ start: at, end: decl.type.end, newText: "var" }],
+    },
+  ];
+}
+
 export function getCodeActions(
   program: Program,
   checker: Checker,
   sourceFile: SourceFile,
   start: number,
   end: number,
+  release?: number,
 ): CodeActionResult[] {
   return [
     ...addMissingImport(program, checker, sourceFile, start),
@@ -764,5 +814,6 @@ export function getCodeActions(
     ...removeRedundantOverride(checker, sourceFile, start),
     ...makeFieldFinal(checker, sourceFile, start),
     ...convertClassToRecord(program, checker, sourceFile, start),
+    ...(releaseSupports(release, 10) ? convertToVar(sourceFile, start) : []),
   ];
 }

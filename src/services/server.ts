@@ -535,7 +535,14 @@ export function startServer(
         },
         newText: c.newText,
       }));
-    return getCodeActions(program, checker, sourceFile, start, end).map(action => {
+    return getCodeActions(
+      program,
+      checker,
+      sourceFile,
+      start,
+      end,
+      config?.compilerOptions.release,
+    ).map(action => {
       const changes: Record<string, ReturnType<typeof mapEdits>> = {
         [params.textDocument.uri]: mapEdits(lineStarts, action.changes),
       };

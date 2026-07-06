@@ -519,3 +519,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-06 10:39 — is https://github.com/nikeee/cappu/issues/38 solved? if not, do it. if it is, do https://github.com/nikeee/cappu/issues/39
 - 2026-07-06 11:51 — tihs project includes some code from other projects for testing purposes (e.g. gjf and stuff). Find their licenses and put them somewhere, so we don't vialoate anything
 - 2026-07-06 11:51 — you dont need to include a license for sub modules. only for the code that you actually copied/imported from somewhere
+- 2026-07-06 12:14 — issue 38 and 39 introduced some refactorings. what are other great refactorings in the same category? maybe to upgrade to use some newer java features
+- 2026-07-06 12:14 — do #1, #7 and #9. in that order. commit in between. make sure the refactoring is only offered when the java version used supports it

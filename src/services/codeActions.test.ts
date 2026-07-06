@@ -25,7 +25,7 @@ function apply(text: string, action: CodeActionResult): string {
   return out;
 }
 
-function actionsAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {
+function actionsAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1, release?: number) {
   let offset = -1;
   for (let i = 0; i < occ; i++) offset = ctx.text.indexOf(needle, offset + 1);
   return getCodeActions(
@@ -34,6 +34,7 @@ function actionsAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {
     ctx.program.getSourceFile("file:///T.java" as Uri)!,
     offset,
     offset,
+    release,
   );
 }
 
@@ -578,4 +579,63 @@ test("is not offered when another class extends it", () => {
     "class Base {\n  private final int x;\n  Base(int x) { this.x = x; }\n  public int getX() { return x; }\n}\n";
   const ctx = setup(base, { "file:///Sub.java": "class Sub extends Base {}\n" });
   expect(recordActions(ctx, "class Base").map(a => a.title)).toEqual([]);
+});
+
+// --- use 'var' for a local variable ------------------------------------------
+
+const varTitle = "Use 'var' for local variable";
+
+test("var: offered for a constructor call", () => {
+  const text =
+    "class T {\n  void m() {\n    java.util.ArrayList<String> xs = new java.util.ArrayList<String>();\n  }\n}";
+  const ctx = setup(text);
+  const actions = actionsAt(ctx, "xs =").filter(a => a.title === varTitle);
+  expect(actions.length).toBe(1);
+  expect(apply(text, actions[0]!)).toBe(
+    "class T {\n  void m() {\n    var xs = new java.util.ArrayList<String>();\n  }\n}",
+  );
+});
+
+test("var: offered for a cast", () => {
+  const text = "class T {\n  void m(Object o) {\n    String s = (String) o;\n  }\n}";
+  const ctx = setup(text);
+  const actions = actionsAt(ctx, "s =").filter(a => a.title === varTitle);
+  expect(actions.length).toBe(1);
+  expect(apply(text, actions[0]!)).toBe(
+    "class T {\n  void m(Object o) {\n    var s = (String) o;\n  }\n}",
+  );
+});
+
+test("var: offered for a literal, preserving a final modifier", () => {
+  const text = "class T {\n  void m() {\n    final int n = 42;\n  }\n}";
+  const ctx = setup(text);
+  const actions = actionsAt(ctx, "n =").filter(a => a.title === varTitle);
+  expect(actions.length).toBe(1);
+  expect(apply(text, actions[0]!)).toBe("class T {\n  void m() {\n    final var n = 42;\n  }\n}");
+});
+
+test("var: not offered for a diamond new (would not compile)", () => {
+  const text =
+    "class T {\n  void m() {\n    java.util.List<String> xs = new java.util.ArrayList<>();\n  }\n}";
+  const ctx = setup(text);
+  expect(actionsAt(ctx, "xs =").filter(a => a.title === varTitle)).toEqual([]);
+});
+
+test("var: not offered when the type is already var", () => {
+  const text = "class T {\n  void m() {\n    var s = (String) null;\n  }\n}";
+  const ctx = setup(text);
+  expect(actionsAt(ctx, "s =").filter(a => a.title === varTitle)).toEqual([]);
+});
+
+test("var: not offered for a non-obvious initializer (method call)", () => {
+  const text = "class T {\n  int f() { return 1; }\n  void m() {\n    int n = f();\n  }\n}";
+  const ctx = setup(text);
+  expect(actionsAt(ctx, "n =").filter(a => a.title === varTitle)).toEqual([]);
+});
+
+test("var: gated on release >= 10", () => {
+  const text = "class T {\n  void m() {\n    String s = (String) null;\n  }\n}";
+  const ctx = setup(text);
+  expect(actionsAt(ctx, "s =", 1, 9).filter(a => a.title === varTitle)).toEqual([]);
+  expect(actionsAt(ctx, "s =", 1, 10).filter(a => a.title === varTitle).length).toBe(1);
 });
