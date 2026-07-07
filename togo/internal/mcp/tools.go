@@ -117,13 +117,14 @@ func formatDiagnostic(uri string, d compiler.Diagnostic, text string, lineStarts
 
 // Tools is the engine-backed MCP tool surface.
 type Tools struct {
-	program *compiler.Program
-	checker *compiler.Checker
+	program  *compiler.Program
+	checker  *compiler.Checker
+	features services.LanguageFeatures
 }
 
 // NewTools builds the tool surface over a program and checker.
-func NewTools(program *compiler.Program, checker *compiler.Checker) *Tools {
-	return &Tools{program: program, checker: checker}
+func NewTools(program *compiler.Program, checker *compiler.Checker, features services.LanguageFeatures) *Tools {
+	return &Tools{program: program, checker: checker, features: features}
 }
 
 // Diagnostics reports parse/bind/semantic diagnostics for the given files (all
@@ -499,4 +500,85 @@ func (t *Tools) RenameSymbol(ref, newName string) RenameSymbolResult {
 		edits = append(edits, McpEdit{McpLocation: nodeLocation(node), NewText: newName})
 	}
 	return RenameSymbolResult{Edits: edits}
+}
+
+// McpCodeAction is one offered code action (refactoring or quick fix), with its
+// edits as 1-based locations for the agent to apply.
+type McpCodeAction struct {
+	Title string `json:"title"`
+	// Kind is an LSP CodeActionKind, e.g. "quickfix" or "refactor.extract".
+	Kind  string    `json:"kind"`
+	Edits []McpEdit `json:"edits"`
+	// AdditionalEdits holds edits to other files, keyed by path; unset for
+	// single-file actions.
+	AdditionalEdits map[string][]McpEdit `json:"additionalEdits,omitempty"`
+}
+
+// CodeActionsResult wraps the offered actions.
+type CodeActionsResult struct {
+	Actions []McpCodeAction `json:"actions"`
+}
+
+// CodeActions returns the refactorings and quick fixes offered for a selection
+// range in a file, mirroring the LSP codeAction provider. Edits are returned for
+// the agent to apply itself; nothing is written. Positions are 1-based (as
+// elsewhere here); endLine/endColumn default to the start for a collapsed caret.
+func (t *Tools) CodeActions(file string, startLine, startColumn int, endLine, endColumn *int) CodeActionsResult {
+	sourceFile := t.program.GetSourceFile(pathToURI(file))
+	if sourceFile == nil {
+		return CodeActionsResult{Actions: []McpCodeAction{}}
+	}
+	text := sourceFile.AsSourceFile().Text
+	lineStarts := sourceFile.AsSourceFile().LineStarts()
+	el, ec := startLine, startColumn
+	if endLine != nil {
+		el = *endLine
+	}
+	if endColumn != nil {
+		ec = *endColumn
+	}
+	start := compiler.GetPositionOfLineAndCharacter(text, lineStarts, startLine-1, startColumn-1)
+	end := compiler.GetPositionOfLineAndCharacter(text, lineStarts, el-1, ec-1)
+	mapEdits := func(f, txt string, ls []int, cs []services.TextChange) []McpEdit {
+		edits := []McpEdit{}
+		for _, c := range cs {
+			s := compiler.GetLineAndCharacterOfPosition(txt, ls, c.Start)
+			e := compiler.GetLineAndCharacterOfPosition(txt, ls, c.End)
+			edits = append(edits, McpEdit{
+				McpLocation: McpLocation{
+					File:      f,
+					Line:      s.Line + 1,
+					Column:    s.Character + 1,
+					EndLine:   e.Line + 1,
+					EndColumn: e.Character + 1,
+				},
+				NewText: c.NewText,
+			})
+		}
+		return edits
+	}
+	actions := []McpCodeAction{}
+	for _, action := range services.GetCodeActions(t.program, t.checker, sourceFile, start, end, t.features) {
+		result := McpCodeAction{
+			Title: action.Title,
+			Kind:  action.Kind,
+			Edits: mapEdits(displayFile(sourceFile.AsSourceFile().FileName), text, lineStarts, action.Changes),
+		}
+		if len(action.AdditionalEdits) > 0 {
+			additional := map[string][]McpEdit{}
+			for uri, cs := range action.AdditionalEdits {
+				other := t.program.GetSourceFile(compiler.URI(uri))
+				if other == nil {
+					continue
+				}
+				path := displayFile(uri)
+				additional[path] = mapEdits(path, other.AsSourceFile().Text, other.AsSourceFile().LineStarts(), cs)
+			}
+			if len(additional) > 0 {
+				result.AdditionalEdits = additional
+			}
+		}
+		actions = append(actions, result)
+	}
+	return CodeActionsResult{Actions: actions}
 }

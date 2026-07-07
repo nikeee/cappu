@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nikeee/cappu/internal/compiler"
+	"github.com/nikeee/cappu/internal/services"
 )
 
 // Port of src/services/mcp.test.ts.
@@ -15,7 +16,7 @@ func toolsFor(files map[string]string) *Tools {
 	for uri, text := range files {
 		program.AddProjectFile(compiler.URI(uri), text)
 	}
-	return NewTools(program, compiler.NewChecker(program))
+	return NewTools(program, compiler.NewChecker(program), services.NewLanguageFeatures(nil))
 }
 
 func labels(matches []McpMatch) []string {
@@ -309,6 +310,39 @@ func TestMcpRenameRefusesClasspathStub(t *testing.T) {
 	r := tools.RenameSymbol("dep.Lib#x", "y")
 	if !contains(r.Error, "JDK") || len(r.Edits) != 0 {
 		t.Errorf("result = %+v", r)
+	}
+}
+
+func TestMcpCodeActions(t *testing.T) {
+	tools := toolsFor(map[string]string{
+		"file:///T.java": "class T {\n  private int x = 1;\n  int use() { return x; }\n}",
+	})
+	// Caret on the field name `x` (line 2, column 15, both 1-based).
+	res := tools.CodeActions("/T.java", 2, 15, nil, nil)
+	var final *McpCodeAction
+	for i := range res.Actions {
+		if res.Actions[i].Title == "Add 'final' modifier" {
+			final = &res.Actions[i]
+		}
+	}
+	if final == nil {
+		t.Fatalf("no 'Add final modifier' action; got %+v", res.Actions)
+	}
+	if final.Kind != "quickfix" {
+		t.Errorf("kind = %q, want quickfix", final.Kind)
+	}
+	if len(final.Edits) == 0 {
+		t.Fatal("no edits")
+	}
+	if final.Edits[0].File != "/T.java" || final.Edits[0].Line != 2 {
+		t.Errorf("edit = %+v, want file /T.java line 2", final.Edits[0])
+	}
+}
+
+func TestMcpCodeActionsUnknownFile(t *testing.T) {
+	tools := toolsFor(map[string]string{"file:///T.java": "class T {}"})
+	if got := tools.CodeActions("/Nope.java", 1, 1, nil, nil).Actions; len(got) != 0 {
+		t.Errorf("actions = %+v, want empty", got)
 	}
 }
 

@@ -6,7 +6,13 @@
 import type { DocumentSymbol } from "vscode-languageserver-types";
 
 import type { Checker } from "../compiler/checker.ts";
-import { computeLineStarts, getLineAndCharacterOfPosition } from "../compiler/lineMap.ts";
+import {
+  type Character,
+  computeLineStarts,
+  getLineAndCharacterOfPosition,
+  getPositionOfLineAndCharacter,
+  type Line,
+} from "../compiler/lineMap.ts";
 import type { Program } from "../compiler/program.ts";
 import {
   findReferences,
@@ -25,6 +31,7 @@ import {
 } from "../compiler/types.ts";
 import { isValidIdentifier, skipTrivia } from "../compiler/utilities.ts";
 import { isSyntheticUri, pathToUri, type Uri, uriToPath } from "../workspace.ts";
+import { getCodeActions, type LanguageFeatures, type TextChange } from "./codeActions.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
 import { enclosingCall, getHoverText, symbolKindWord } from "./hover.ts";
 import { ambiguityFields, isStubSymbol, resolveSingleRef, resolveSymbolRef } from "./mcpResolve.ts";
@@ -134,6 +141,15 @@ export interface McpEdit extends McpLocation {
   newText: string;
 }
 
+export interface McpCodeAction {
+  title: string;
+  /** LSP CodeActionKind, e.g. "quickfix" or "refactor.extract". */
+  kind: string;
+  edits: McpEdit[];
+  /** Edits to other files, keyed by path. Unset for single-file actions. */
+  additionalEdits?: Record<string, McpEdit[]>;
+}
+
 export interface McpTools {
   diagnostics(args: { files?: string[] }): { diagnostics: McpDiagnostic[] };
   deprecatedUses(args: { files?: string[] }): { deprecatedUses: McpDeprecatedUse[] };
@@ -174,9 +190,20 @@ export interface McpTools {
     ambiguous?: boolean;
     candidates?: number;
   };
+  codeActions(args: {
+    file: string;
+    startLine: number;
+    startColumn: number;
+    endLine?: number;
+    endColumn?: number;
+  }): { actions: McpCodeAction[] };
 }
 
-export function createMcpTools(program: Program, checker: Checker): McpTools {
+export function createMcpTools(
+  program: Program,
+  checker: Checker,
+  features: LanguageFeatures,
+): McpTools {
   function diagnostics(args: { files?: string[] }): { diagnostics: McpDiagnostic[] } {
     const uris = args.files?.length ? args.files.map(pathToUri) : program.getAllUris();
     const out: McpDiagnostic[] = [];
@@ -406,6 +433,68 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
     return { edits };
   }
 
+  // The code actions (refactorings + quick fixes) offered for a selection range,
+  // mirroring the LSP codeAction provider. Edits are returned for the agent to
+  // apply itself; nothing is written. Positions are 1-based (as elsewhere here),
+  // so a diagnostic's location can be fed straight in. endLine/endColumn default
+  // to the start for a collapsed caret.
+  function codeActions(args: {
+    file: string;
+    startLine: number;
+    startColumn: number;
+    endLine?: number;
+    endColumn?: number;
+  }): { actions: McpCodeAction[] } {
+    const sourceFile = program.getSourceFile(pathToUri(args.file));
+    if (!sourceFile) return { actions: [] };
+    const lineStarts = computeLineStarts(sourceFile.text);
+    const start = getPositionOfLineAndCharacter(
+      lineStarts,
+      (args.startLine - 1) as Line,
+      (args.startColumn - 1) as Character,
+    );
+    const end = getPositionOfLineAndCharacter(
+      lineStarts,
+      ((args.endLine ?? args.startLine) - 1) as Line,
+      ((args.endColumn ?? args.startColumn) - 1) as Character,
+    );
+    const mapEdits = (file: string, ls: readonly number[], cs: readonly TextChange[]): McpEdit[] =>
+      cs.map(c => {
+        const s = getLineAndCharacterOfPosition(ls, c.start);
+        const e = getLineAndCharacterOfPosition(ls, c.end);
+        return {
+          file,
+          line: s.line + 1,
+          column: s.character + 1,
+          endLine: e.line + 1,
+          endColumn: e.character + 1,
+          newText: c.newText,
+        };
+      });
+    const actions = getCodeActions(program, checker, sourceFile, start, end, features).map(
+      action => {
+        const result: McpCodeAction = {
+          title: action.title,
+          kind: action.kind,
+          edits: mapEdits(displayFile(sourceFile.fileName), lineStarts, action.changes),
+        };
+        if (action.additionalEdits) {
+          const additional: Record<string, McpEdit[]> = {};
+          for (const [uri, edits] of Object.entries(action.additionalEdits)) {
+            const other = program.getSourceFile(uri as Uri);
+            if (other) {
+              const path = displayFile(uri);
+              additional[path] = mapEdits(path, computeLineStarts(other.text), edits);
+            }
+          }
+          if (Object.keys(additional).length > 0) result.additionalEdits = additional;
+        }
+        return result;
+      },
+    );
+    return { actions };
+  }
+
   return {
     diagnostics,
     deprecatedUses,
@@ -420,5 +509,6 @@ export function createMcpTools(program: Program, checker: Checker): McpTools {
     typeHierarchy,
     resolveImport,
     renameSymbol,
+    codeActions,
   };
 }

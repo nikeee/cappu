@@ -4,13 +4,14 @@ import { expect } from "expect";
 import { createChecker } from "../compiler/checker.ts";
 import { createProgram } from "../compiler/program.ts";
 import { type Uri } from "../workspace.ts";
+import { languageFeatures } from "./codeActions.ts";
 import { createMcpTools } from "./mcp.ts";
 
 function toolsFor(files: Record<string, string>) {
   const program = createProgram();
   for (const [uri, text] of Object.entries(files)) program.addProjectFile(uri as Uri, text);
   const checker = createChecker(program);
-  return createMcpTools(program, checker);
+  return createMcpTools(program, checker, languageFeatures(undefined));
 }
 
 test("diagnostics reports a syntax error with a 1-based location", () => {
@@ -246,4 +247,25 @@ test("renameSymbol refuses a symbol defined in a synthetic classpath stub", () =
   const r = tools.renameSymbol({ ref: "dep.Lib#x", newName: "y" });
   expect(r.edits).toEqual([]);
   expect(r.error).toMatch(/JDK/);
+});
+
+test("codeActions offers a refactoring with 1-based edit positions", () => {
+  const tools = toolsFor({
+    "file:///T.java": "class T {\n  private int x = 1;\n  int use() { return x; }\n}",
+  });
+  // Caret on the field name `x` (line 2, column 15, both 1-based).
+  const { actions } = tools.codeActions({ file: "/T.java", startLine: 2, startColumn: 15 });
+  const final = actions.find(a => a.title === "Add 'final' modifier");
+  expect(final).toBeDefined();
+  expect(final!.kind).toBe("quickfix");
+  expect(final!.edits.length).toBeGreaterThan(0);
+  expect(final!.edits[0]!.file).toBe("/T.java");
+  expect(final!.edits[0]!.line).toBe(2);
+});
+
+test("codeActions is empty for an unknown file", () => {
+  const tools = toolsFor({ "file:///T.java": "class T {}" });
+  expect(tools.codeActions({ file: "/Nope.java", startLine: 1, startColumn: 1 }).actions).toEqual(
+    [],
+  );
 });

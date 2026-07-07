@@ -536,3 +536,5 @@ maybe the path should just be a directory and default to ./dist?
 
 - 2026-07-06 20:30 — do 1 and 2
 - 2026-07-06 21:42 — all tests fail. fix them
+
+- 2026-07-06 21:42 — resolve https://github.com/nikeee/cappu/issues/41

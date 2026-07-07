@@ -17,6 +17,7 @@ import { installJdkTypes } from "../compiler/jdkTypes.ts";
 import { createProgram } from "../compiler/program.ts";
 import { type CappuConfig, loadConfig } from "../config.ts";
 import { classpathFingerprint, findSourceJavaFiles, pathToUri } from "../workspace.ts";
+import { languageFeatures } from "./codeActions.ts";
 import { createMcpTools } from "./mcp.ts";
 import { createProjectTools } from "./mcpProject.ts";
 
@@ -31,7 +32,10 @@ export async function startMcpServer(
 ): Promise<void> {
   let program = createProgram();
   let checker = createChecker(program);
-  let tools = createMcpTools(program, checker);
+  // Language-level features are fixed by the configured release; recomputed on
+  // each rebuild so a cappu.json release change takes effect.
+  let features = languageFeatures(config?.compilerOptions.release);
+  let tools = createMcpTools(program, checker, features);
   let project: ReturnType<typeof createProjectTools> | undefined;
   const mtimes = new Map<string, number>();
   let cpFingerprint = new Map<string, number>();
@@ -48,7 +52,8 @@ export async function startMcpServer(
     installJdkTypes(program, cfg);
     if (cfg) loadConfiguredPaths(program, cfg);
     checker = createChecker(program);
-    tools = createMcpTools(program, checker);
+    features = languageFeatures(cfg?.compilerOptions.release);
+    tools = createMcpTools(program, checker, features);
     if (cfg) project = createProjectTools(cfg);
     mtimes.clear();
     cpFingerprint = new Map();
@@ -298,6 +303,25 @@ export async function startMcpServer(
     async args => {
       refresh();
       return ok(tools.renameSymbol(args));
+    },
+  );
+
+  server.registerTool(
+    "code_actions",
+    {
+      description:
+        "The refactorings and quick fixes offered for a selection in a file (edits returned for you to apply; nothing is written). Positions are 1-based; endLine/endColumn default to the start.",
+      inputSchema: {
+        file: z.string(),
+        startLine: z.number(),
+        startColumn: z.number(),
+        endLine: z.number().optional(),
+        endColumn: z.number().optional(),
+      },
+    },
+    async args => {
+      refresh();
+      return ok(tools.codeActions(args));
     },
   );
 

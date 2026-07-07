@@ -23,6 +23,7 @@ import (
 	"github.com/nikeee/cappu/internal/compiler"
 	"github.com/nikeee/cappu/internal/config"
 	"github.com/nikeee/cappu/internal/processors"
+	"github.com/nikeee/cappu/internal/services"
 )
 
 // instructions are surfaced to the host in the initialize response.
@@ -92,7 +93,13 @@ func (s *Server) rebuild(cfg *config.Config) {
 		loadConfiguredSources(s.program, cfg)
 	}
 	s.checker = compiler.NewChecker(s.program)
-	s.tools = NewTools(s.program, s.checker)
+	// Language-level features are fixed by the configured release; recomputed on
+	// each rebuild so a cappu.json release change takes effect.
+	var release *int
+	if cfg != nil {
+		release = cfg.CompilerOptions.Release
+	}
+	s.tools = NewTools(s.program, s.checker, services.NewLanguageFeatures(release))
 	if cfg != nil {
 		s.project = NewProjectTools(cfg, ProjectToolDeps{})
 	}
@@ -232,6 +239,24 @@ func (s *Server) registerTools() {
 			}
 			sj(args, &a)
 			return s.tools.RenameSymbol(a.Ref, a.NewName), nil
+		},
+	})
+	num := map[string]any{"type": "integer"}
+	s.registry = append(s.registry, toolDef{
+		name:        "code_actions",
+		description: "The refactorings and quick fixes offered for a selection in a file (edits returned for you to apply; nothing is written). Positions are 1-based; endLine/endColumn default to the start.",
+		inputSchema: objSchema(map[string]any{"file": str, "startLine": num, "startColumn": num, "endLine": num, "endColumn": num}, "file", "startLine", "startColumn"),
+		usesProgram: true,
+		handler: func(args json.RawMessage) (any, error) {
+			var a struct {
+				File        string `json:"file"`
+				StartLine   int    `json:"startLine"`
+				StartColumn int    `json:"startColumn"`
+				EndLine     *int   `json:"endLine"`
+				EndColumn   *int   `json:"endColumn"`
+			}
+			sj(args, &a)
+			return s.tools.CodeActions(a.File, a.StartLine, a.StartColumn, a.EndLine, a.EndColumn), nil
 		},
 	})
 
