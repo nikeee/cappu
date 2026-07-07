@@ -9,16 +9,19 @@ var (
 	footgun   = int(Diagnostics.SuspiciousDateTimePatternLetter012.Code)
 	badNumber = int(Diagnostics.String0IsNotAValid1.Code)
 	badRadix  = int(Diagnostics.Radix0OutOfRange.Code)
+
+	optionalNullCheck = int(Diagnostics.OptionalOfNullableIfPresentCanBeReplacedWithANullCheck.Code)
 )
 
 func libcallDiagnose(body string) []int {
 	program := NewProgram()
 	LoadJdkStub(program)
 	src := "import java.util.regex.Pattern; import java.time.format.DateTimeFormatter;" +
+		" import java.util.Optional;" +
 		" class C { void m() { " + body + " } }"
 	program.SetOpenDocument("file:///T.java", src, 1)
 	checker := NewChecker(program)
-	wanted := map[int]bool{badRegex: true, badLetter: true, footgun: true, badNumber: true, badRadix: true, tooFew: true}
+	wanted := map[int]bool{badRegex: true, badLetter: true, footgun: true, badNumber: true, badRadix: true, tooFew: true, optionalNullCheck: true}
 	var out []int
 	for _, d := range checker.GetSemanticDiagnostics(program.GetSourceFile("file:///T.java")) {
 		if code := int(d.Code); wanted[code] {
@@ -93,5 +96,37 @@ func TestNumberParseValidSilent(t *testing.T) {
 func TestConsoleFormat(t *testing.T) {
 	if !containsCode(libcallDiagnose(`System.console().printf("%s %s", "a");`), tooFew) {
 		t.Error("want too-few for Console.printf")
+	}
+}
+
+// --- Optional.ofNullable(x).ifPresent(...) (nikeee/cappu#42) -----------------
+
+func TestOptionalIfPresentLambdaFlagged(t *testing.T) {
+	if !containsCode(libcallDiagnose(`String s = "x"; Optional.ofNullable(s).ifPresent(v -> System.out.println(v));`), optionalNullCheck) {
+		t.Error("want optional-null-check for lambda")
+	}
+}
+
+func TestOptionalIfPresentNonVariableFlagged(t *testing.T) {
+	if !containsCode(libcallDiagnose(`String s = "x"; Optional.ofNullable(s.trim()).ifPresent(v -> System.out.println(v));`), optionalNullCheck) {
+		t.Error("want optional-null-check for non-variable argument")
+	}
+}
+
+func TestOptionalIfPresentMethodRefFlagged(t *testing.T) {
+	if !containsCode(libcallDiagnose(`String s = "x"; Optional.ofNullable(s).ifPresent(System.out::println);`), optionalNullCheck) {
+		t.Error("want optional-null-check for method reference")
+	}
+}
+
+func TestOptionalOfIfPresentSilent(t *testing.T) {
+	if got := libcallDiagnose(`String s = "x"; Optional.of(s).ifPresent(v -> System.out.println(v));`); len(got) != 0 {
+		t.Errorf("want silent for Optional.of, got %v", got)
+	}
+}
+
+func TestOptionalOfNullableWithoutIfPresentSilent(t *testing.T) {
+	if got := libcallDiagnose(`String s = "x"; Optional.ofNullable(s).map(v -> v);`); len(got) != 0 {
+		t.Errorf("want silent for map, got %v", got)
 	}
 }

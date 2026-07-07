@@ -177,6 +177,12 @@ export const Diagnostics = {
     "Field '{0}' can be 'final'.",
     DiagnosticCategory.Suggestion,
   ),
+  Optional_ofNullable_ifPresent_can_be_replaced_with_a_null_check: diag(
+    1318,
+    "Optional_ofNullable_ifPresent_can_be_replaced_with_a_null_check",
+    "'Optional.ofNullable(...).ifPresent(...)' can be replaced with a null check.",
+    DiagnosticCategory.Warning,
+  ),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */

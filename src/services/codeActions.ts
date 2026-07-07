@@ -30,11 +30,13 @@ import {
   type IfStatement,
   type ImportDeclaration,
   type InstanceofExpression,
+  type LambdaExpression,
   type LiteralExpression,
   type LocalVariableDeclarationStatement,
   type MethodDeclaration,
   type Node,
   type ObjectCreationExpression,
+  type Parameter,
   type PrimitiveType,
   type PropertyAccessExpression,
   type QualifiedName,
@@ -566,6 +568,104 @@ function makeFieldFinal(
       title: "Add 'final' modifier",
       kind: "quickfix",
       changes: [{ start: at, end: at, newText: "final " }],
+    },
+  ];
+}
+
+// --- Optional.ofNullable(x).ifPresent(lambda) -> if (x != null) ----------------
+
+// For the checker's "can be replaced with a null check" warning (1318), offer
+// the rewrite when it is provably safe: the chain is a whole statement, the
+// ofNullable argument is a plain variable (so it is evaluated once either way),
+// and the action is a lambda whose parameter can be renamed to that variable.
+function replaceOptionalIfPresentWithNullCheck(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.ExpressionStatement) node = node.parent;
+  if (!node) return [];
+  const stmt = node as ExpressionStatement;
+  // Only when the checker actually flagged this statement's chain (the FQN
+  // check against java.util.Optional lives there).
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code ===
+          Diagnostics.Optional_ofNullable_ifPresent_can_be_replaced_with_a_null_check.code &&
+        d.pos >= stmt.pos &&
+        d.end <= stmt.end,
+    );
+  if (!flagged) return [];
+  if (stmt.expression.kind !== SyntaxKind.CallExpression) return [];
+  const outer = stmt.expression as CallExpression;
+  if (outer.expression.kind !== SyntaxKind.PropertyAccessExpression) return [];
+  const receiver = (outer.expression as PropertyAccessExpression).expression;
+  if (receiver.kind !== SyntaxKind.CallExpression) return [];
+  const variableNode = (receiver as CallExpression).arguments[0];
+  if (variableNode?.kind !== SyntaxKind.Identifier) return []; // expression: warn only
+  const variable = (variableNode as Identifier).text;
+  const action = outer.arguments[0];
+  if (action?.kind !== SyntaxKind.LambdaExpression) return []; // method ref: warn only
+  const lambda = action as LambdaExpression;
+  if (lambda.parameters.length !== 1) return [];
+  const param = lambda.parameters[0]!;
+  const paramName =
+    param.kind === SyntaxKind.Identifier
+      ? (param as Identifier).text
+      : (param as Parameter).name?.text;
+  if (!paramName) return [];
+
+  // Rename lambda-parameter uses to the variable. A use is a plain identifier
+  // reference; the member name of `o.v` is not one.
+  // ponytail: ignores a shadowing redeclaration of the parameter name inside
+  // the body; resolve identifiers through the checker if that ever bites.
+  const renames: { start: number; end: number }[] = [];
+  if (paramName !== variable) {
+    const collect = (n: Node, parent: Node): void => {
+      if (
+        n.kind === SyntaxKind.Identifier &&
+        (n as Identifier).text === paramName &&
+        !(
+          parent.kind === SyntaxKind.PropertyAccessExpression &&
+          (parent as PropertyAccessExpression).name === n
+        )
+      ) {
+        renames.push({ start: skipTrivia(sourceFile.text, n.pos), end: n.end });
+      }
+      forEachChild(n, child => {
+        collect(child, n);
+        return undefined;
+      });
+    };
+    forEachChild(lambda.body, child => {
+      collect(child, lambda.body);
+      return undefined;
+    });
+  }
+  const renamed = (from: number, to: number): string => {
+    let out = "";
+    let at = from;
+    for (const r of renames) {
+      out += sourceFile.text.slice(at, r.start) + variable;
+      at = r.end;
+    }
+    return out + sourceFile.text.slice(at, to);
+  };
+  const bodyStart = skipTrivia(sourceFile.text, lambda.body.pos);
+  const body =
+    lambda.body.kind === SyntaxKind.Block
+      ? renamed(bodyStart, lambda.body.end) // keeps the `{ ... }`
+      : `{ ${renamed(bodyStart, lambda.body.end)}; }`;
+  const from = skipTrivia(sourceFile.text, stmt.pos);
+  return [
+    {
+      title: "Replace with null check",
+      kind: "quickfix",
+      changes: [{ start: from, end: stmt.end, newText: `if (${variable} != null) ${body}` }],
     },
   ];
 }
@@ -1398,6 +1498,7 @@ export function getCodeActions(
     ...removeUnusedImport(sourceFile, start, end),
     ...removeRedundantOverride(checker, sourceFile, start),
     ...makeFieldFinal(checker, sourceFile, start),
+    ...replaceOptionalIfPresentWithNullCheck(checker, sourceFile, start),
     ...(features.supportsRecord ? convertClassToRecord(program, checker, sourceFile, start) : []),
     ...(features.supportsVar ? convertToVar(sourceFile, start) : []),
     ...(features.supportsLambda ? convertAnonymousClassToLambda(program, sourceFile, start) : []),

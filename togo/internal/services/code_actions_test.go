@@ -1206,3 +1206,77 @@ func TestMultiCatchGatedOnRelease(t *testing.T) {
 		t.Errorf("release 7: expected 1 action, got %+v", got)
 	}
 }
+
+// Port of the Optional.ofNullable(x).ifPresent null-check tests in
+// src/services/codeActions.test.ts (nikeee/cappu#42).
+
+func nullCheckActions(ctx *actionCtx) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range ctx.actionsAt("ifPresent", 1) {
+		if a.Title == "Replace with null check" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestNullCheckExpressionBodyLambda(t *testing.T) {
+	text := "import java.util.Optional;\nclass T {\n  void m(String s) {\n    Optional.ofNullable(s).ifPresent(v -> System.out.println(v));\n  }\n}"
+	actions := nullCheckActions(actionsSetup(text, nil))
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0],
+		"import java.util.Optional;\nclass T {\n  void m(String s) {\n    if (s != null) { System.out.println(s); }\n  }\n}")
+}
+
+func TestNullCheckBlockBodyLambda(t *testing.T) {
+	text := "import java.util.Optional;\nclass T {\n  void m(String s) {\n    Optional.ofNullable(s).ifPresent(v -> { System.out.println(v); v.length(); });\n  }\n}"
+	actions := nullCheckActions(actionsSetup(text, nil))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0],
+		"import java.util.Optional;\nclass T {\n  void m(String s) {\n    if (s != null) { System.out.println(s); s.length(); }\n  }\n}")
+}
+
+func TestNullCheckRenamesParam(t *testing.T) {
+	text := "import java.util.Optional;\nclass T {\n  void m(String s) {\n    Optional.ofNullable(s).ifPresent(s2 -> use(s2, s2.length()));\n  }\n}"
+	actions := nullCheckActions(actionsSetup(text, nil))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0],
+		"import java.util.Optional;\nclass T {\n  void m(String s) {\n    if (s != null) { use(s, s.length()); }\n  }\n}")
+}
+
+func TestNullCheckDoesNotRenameFieldAccess(t *testing.T) {
+	text := "import java.util.Optional;\nclass T {\n  int v;\n  void m(String s, T o) {\n    Optional.ofNullable(s).ifPresent(v -> use(v, o.v));\n  }\n}"
+	actions := nullCheckActions(actionsSetup(text, nil))
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0],
+		"import java.util.Optional;\nclass T {\n  int v;\n  void m(String s, T o) {\n    if (s != null) { use(s, o.v); }\n  }\n}")
+}
+
+func TestNullCheckNotOfferedForNonVariable(t *testing.T) {
+	text := "import java.util.Optional;\nclass T {\n  void m(String s) {\n    Optional.ofNullable(s.trim()).ifPresent(v -> System.out.println(v));\n  }\n}"
+	if actions := nullCheckActions(actionsSetup(text, nil)); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}
+
+func TestNullCheckNotOfferedForMethodRef(t *testing.T) {
+	text := "import java.util.Optional;\nclass T {\n  void m(String s) {\n    Optional.ofNullable(s).ifPresent(System.out::println);\n  }\n}"
+	if actions := nullCheckActions(actionsSetup(text, nil)); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}
+
+func TestNullCheckNotOfferedOutsideStatement(t *testing.T) {
+	text := "import java.util.Optional;\nclass T {\n  Runnable r(String s) {\n    return () -> Optional.ofNullable(s).ifPresent(v -> System.out.println(v));\n  }\n}"
+	if actions := nullCheckActions(actionsSetup(text, nil)); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}

@@ -1054,3 +1054,80 @@ test("multi-catch: gated on release >= 7", () => {
   expect(catchActions(ctx, 6)).toEqual([]);
   expect(catchActions(ctx, 7).length).toBe(1);
 });
+
+// --- Optional.ofNullable(x).ifPresent -> null check (nikeee/cappu#42) -----------
+
+function nullCheckActions(ctx: ReturnType<typeof setup>) {
+  return actionsAt(ctx, "ifPresent").filter(a => a.title === "Replace with null check");
+}
+
+test("null check: rewrites an expression-body lambda", () => {
+  const text =
+    "import java.util.Optional;\nclass T {\n  void m(String s) {\n    Optional.ofNullable(s).ifPresent(v -> System.out.println(v));\n  }\n}";
+  const ctx = setup(text);
+  const actions = nullCheckActions(ctx);
+  expect(actions.length).toBe(1);
+  expect(actions[0]!.kind).toBe("quickfix");
+  expectEdit(
+    text,
+    actions[0]!,
+    "import java.util.Optional;\nclass T {\n  void m(String s) {\n    if (s != null) { System.out.println(s); }\n  }\n}",
+  );
+});
+
+test("null check: rewrites a block-body lambda", () => {
+  const text =
+    "import java.util.Optional;\nclass T {\n  void m(String s) {\n    Optional.ofNullable(s).ifPresent(v -> { System.out.println(v); v.length(); });\n  }\n}";
+  const ctx = setup(text);
+  const actions = nullCheckActions(ctx);
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "import java.util.Optional;\nclass T {\n  void m(String s) {\n    if (s != null) { System.out.println(s); s.length(); }\n  }\n}",
+  );
+});
+
+test("null check: same param and variable name needs no rename", () => {
+  const text =
+    "import java.util.Optional;\nclass T {\n  void m(String s) {\n    Optional.ofNullable(s).ifPresent(s2 -> use(s2, s2.length()));\n  }\n}";
+  const ctx = setup(text);
+  const actions = nullCheckActions(ctx);
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "import java.util.Optional;\nclass T {\n  void m(String s) {\n    if (s != null) { use(s, s.length()); }\n  }\n}",
+  );
+});
+
+test("null check: a field access with the param's name is not renamed", () => {
+  const text =
+    "import java.util.Optional;\nclass T {\n  int v;\n  void m(String s, T o) {\n    Optional.ofNullable(s).ifPresent(v -> use(v, o.v));\n  }\n}";
+  const ctx = setup(text);
+  const actions = nullCheckActions(ctx);
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "import java.util.Optional;\nclass T {\n  int v;\n  void m(String s, T o) {\n    if (s != null) { use(s, o.v); }\n  }\n}",
+  );
+});
+
+test("null check: not offered for a non-variable argument", () => {
+  const text =
+    "import java.util.Optional;\nclass T {\n  void m(String s) {\n    Optional.ofNullable(s.trim()).ifPresent(v -> System.out.println(v));\n  }\n}";
+  expect(nullCheckActions(setup(text))).toEqual([]);
+});
+
+test("null check: not offered for a method reference", () => {
+  const text =
+    "import java.util.Optional;\nclass T {\n  void m(String s) {\n    Optional.ofNullable(s).ifPresent(System.out::println);\n  }\n}";
+  expect(nullCheckActions(setup(text))).toEqual([]);
+});
+
+test("null check: not offered outside statement position", () => {
+  const text =
+    "import java.util.Optional;\nclass T {\n  Runnable r(String s) {\n    return () -> Optional.ofNullable(s).ifPresent(v -> System.out.println(v));\n  }\n}";
+  expect(nullCheckActions(setup(text))).toEqual([]);
+});

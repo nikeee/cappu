@@ -1306,6 +1306,28 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 		}
 	}
 
+	// Optional.ofNullable(x).ifPresent(...) (nikeee/cappu#42): the chain is a
+	// roundabout null check; a plain `if (x != null)` says the same thing
+	// without allocating an Optional. The matching quick fix lives in
+	// code_actions.go. Ports checkOptionalIfPresentCall in src/compiler/checker.ts.
+	checkOptionalIfPresentCall := func(call *Node) {
+		fqn, name, ok := memberCallTarget(call)
+		if !ok || fqn+"#"+name != "java.util.Optional#ifPresent" || nodeArrayLen(call.AsCallExpression().Arguments) != 1 {
+			return
+		}
+		receiver := call.AsCallExpression().Expression.AsPropertyAccessExpression().Expression
+		if receiver.Kind != CallExpression {
+			return
+		}
+		innerFqn, innerName, ok := memberCallTarget(receiver)
+		if !ok || innerFqn+"#"+innerName != "java.util.Optional#ofNullable" || nodeArrayLen(receiver.AsCallExpression().Arguments) != 1 {
+			return
+		}
+		start := SkipTrivia(sourceFile.AsSourceFile().Text, call.Pos)
+		diagnostics = append(diagnostics, CreateDiagnostic(start, call.End-start,
+			Diagnostics.OptionalOfNullableIfPresentCanBeReplacedWithANullCheck))
+	}
+
 	var visit func(node *Node)
 	visit = func(node *Node) {
 		switch node.Kind {
@@ -1348,6 +1370,7 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 				checkRegexCall(node)
 				checkDateTimeCall(node)
 				checkNumberParseCall(node)
+				checkOptionalIfPresentCall(node)
 			}
 		case ObjectCreationExpression:
 			if cleanParse {

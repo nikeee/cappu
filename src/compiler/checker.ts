@@ -2938,6 +2938,39 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       }
     };
 
+    // --- Optional.ofNullable(x).ifPresent(...) (nikeee/cappu#42) --------------
+    // The chain is a roundabout null check; a plain `if (x != null)` says the
+    // same thing without allocating an Optional. The matching quick fix lives
+    // in codeActions.ts.
+    const checkOptionalIfPresentCall = (call: CallExpression): void => {
+      const outer = memberCallTarget(call);
+      if (
+        !outer ||
+        `${outer.fqn}#${outer.name}` !== "java.util.Optional#ifPresent" ||
+        call.arguments.length !== 1
+      ) {
+        return;
+      }
+      const receiver = outer.access.expression;
+      if (receiver.kind !== SyntaxKind.CallExpression) return;
+      const inner = memberCallTarget(receiver as CallExpression);
+      if (
+        !inner ||
+        `${inner.fqn}#${inner.name}` !== "java.util.Optional#ofNullable" ||
+        (receiver as CallExpression).arguments.length !== 1
+      ) {
+        return;
+      }
+      const start = skipTrivia(sourceFile.text, call.pos);
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          call.end - start,
+          Diagnostics.Optional_ofNullable_ifPresent_can_be_replaced_with_a_null_check,
+        ),
+      );
+    };
+
     const visit = (node: Node): void => {
       switch (node.kind) {
         case SyntaxKind.VariableDeclarator: {
@@ -2982,6 +3015,7 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
             checkRegexCall(node as CallExpression);
             checkDateTimeCall(node as CallExpression);
             checkNumberParseCall(node as CallExpression);
+            checkOptionalIfPresentCall(node as CallExpression);
           }
           break;
         case SyntaxKind.ObjectCreationExpression:

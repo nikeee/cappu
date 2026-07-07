@@ -561,6 +561,126 @@ func makeFieldFinal(checker *compiler.Checker, sf *compiler.Node, start int) []C
 	}}
 }
 
+// replaceOptionalIfPresentWithNullCheck offers, for the checker's "can be
+// replaced with a null check" warning (1318), the rewrite when it is provably
+// safe: the chain is a whole statement, the ofNullable argument is a plain
+// variable (so it is evaluated once either way), and the action is a lambda
+// whose parameter can be renamed to that variable. Port of
+// replaceOptionalIfPresentWithNullCheck.
+func replaceOptionalIfPresentWithNullCheck(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.ExpressionStatement {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	stmt := node
+	// Only when the checker actually flagged this statement's chain (the FQN
+	// check against java.util.Optional lives there).
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.OptionalOfNullableIfPresentCanBeReplacedWithANullCheck.Code &&
+			d.Pos >= stmt.Pos && d.End <= stmt.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	expr := stmt.AsExpressionStatement().Expression
+	if expr.Kind != compiler.CallExpression {
+		return nil
+	}
+	outer := expr.AsCallExpression()
+	if outer.Expression.Kind != compiler.PropertyAccessExpression {
+		return nil
+	}
+	receiver := outer.Expression.AsPropertyAccessExpression().Expression
+	if receiver.Kind != compiler.CallExpression {
+		return nil
+	}
+	innerArgs := receiver.AsCallExpression().Arguments
+	if innerArgs.Len() != 1 || innerArgs.Nodes[0].Kind != compiler.Identifier {
+		return nil // expression: warn only
+	}
+	variable := innerArgs.Nodes[0].AsIdentifier().Text
+	if outer.Arguments.Len() != 1 || outer.Arguments.Nodes[0].Kind != compiler.LambdaExpression {
+		return nil // method ref: warn only
+	}
+	lambda := outer.Arguments.Nodes[0].AsLambdaExpression()
+	if lambda.Parameters.Len() != 1 {
+		return nil
+	}
+	param := lambda.Parameters.Nodes[0]
+	var paramName string
+	switch param.Kind {
+	case compiler.Identifier:
+		paramName = param.AsIdentifier().Text
+	case compiler.Parameter:
+		if param.AsParameter().Name == nil {
+			return nil
+		}
+		paramName = param.AsParameter().Name.AsIdentifier().Text
+	default:
+		return nil
+	}
+
+	// Rename lambda-parameter uses to the variable. A use is a plain identifier
+	// reference; the member name of `o.v` is not one.
+	// ponytail: ignores a shadowing redeclaration of the parameter name inside
+	// the body; resolve identifiers through the checker if that ever bites.
+	type span struct{ start, end int }
+	var renames []span
+	if paramName != variable {
+		var collect func(n, parent *compiler.Node)
+		collect = func(n, parent *compiler.Node) {
+			isMemberName := parent.Kind == compiler.PropertyAccessExpression &&
+				parent.AsPropertyAccessExpression().Name == n
+			if n.Kind == compiler.Identifier && n.AsIdentifier().Text == paramName && !isMemberName {
+				renames = append(renames, span{compiler.SkipTrivia(data.Text, n.Pos), n.End})
+			}
+			n.ForEachChild(func(child *compiler.Node) bool {
+				collect(child, n)
+				return false
+			})
+		}
+		lambda.Body.ForEachChild(func(child *compiler.Node) bool {
+			collect(child, lambda.Body)
+			return false
+		})
+	}
+	renamed := func(from, to int) string {
+		var out strings.Builder
+		at := from
+		for _, r := range renames {
+			out.WriteString(data.Text[at:r.start])
+			out.WriteString(variable)
+			at = r.end
+		}
+		out.WriteString(data.Text[at:to])
+		return out.String()
+	}
+	bodyStart := compiler.SkipTrivia(data.Text, lambda.Body.Pos)
+	var body string
+	if lambda.Body.Kind == compiler.Block {
+		body = renamed(bodyStart, lambda.Body.End) // keeps the `{ ... }`
+	} else {
+		body = "{ " + renamed(bodyStart, lambda.Body.End) + "; }"
+	}
+	from := compiler.SkipTrivia(data.Text, stmt.Pos)
+	return []CodeActionResult{{
+		Title:   "Replace with null check",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: from, End: stmt.End, NewText: "if (" + variable + " != null) " + body}},
+	}}
+}
+
 // --- convert a class to a record ---------------------------------------------
 
 func hasKeyword(modifiers *compiler.NodeArray, kind compiler.SyntaxKind) bool {
@@ -1681,6 +1801,7 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	out = append(out, removeUnusedImport(sf, start, end)...)
 	out = append(out, removeRedundantOverride(checker, sf, start)...)
 	out = append(out, makeFieldFinal(checker, sf, start)...)
+	out = append(out, replaceOptionalIfPresentWithNullCheck(checker, sf, start)...)
 	if features.SupportsRecord {
 		out = append(out, convertClassToRecord(program, checker, sf, start)...)
 	}
