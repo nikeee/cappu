@@ -61,9 +61,9 @@ test("licenses seen during real migrations normalize", () => {
   expect(normalizeLicense("Eclipse Distribution License - v 1.0")).toBe("BSD-3-Clause");
   expect(normalizeLicense("EDL 1.0")).toBe("BSD-3-Clause");
   // EDL by url (name absent/vague)
-  expect(
-    normalizeLicense("EDL", "http://www.eclipse.org/org/documents/edl-v10.php"),
-  ).toBe("BSD-3-Clause");
+  expect(normalizeLicense("EDL", "http://www.eclipse.org/org/documents/edl-v10.php")).toBe(
+    "BSD-3-Clause",
+  );
 });
 
 test("a known license url normalizes when the name does not", () => {
