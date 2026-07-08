@@ -671,6 +671,39 @@ function replaceOptionalIfPresentWithNullCheck(
   ];
 }
 
+// --- Optional.of(null) -> ofNullable (nikeee/cappu#42 follow-up) ---------------
+
+function replaceOptionalOfNull(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.CallExpression) node = node.parent;
+  if (!node) return [];
+  const call = node as CallExpression;
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.Optional_of_null_always_throws.code &&
+        d.pos >= call.pos &&
+        d.end <= call.end,
+    );
+  if (!flagged) return [];
+  if (call.expression.kind !== SyntaxKind.PropertyAccessExpression) return [];
+  const access = call.expression as PropertyAccessExpression;
+  const nameStart = skipTrivia(sourceFile.text, access.name.pos);
+  return [
+    {
+      title: "Replace with Optional.ofNullable(null)",
+      kind: "quickfix",
+      changes: [{ start: nameStart, end: access.name.end, newText: "ofNullable" }],
+    },
+  ];
+}
+
 // --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
 
 // The receiver of a zero-arg `size()`/`length()` call, or undefined. FQN
@@ -1882,6 +1915,7 @@ export function getCodeActions(
     ...removeRedundantOverride(checker, sourceFile, start),
     ...makeFieldFinal(checker, sourceFile, start),
     ...replaceOptionalIfPresentWithNullCheck(checker, sourceFile, start),
+    ...replaceOptionalOfNull(checker, sourceFile, start),
     ...replaceCountComparedToZero(checker, sourceFile, start),
     ...replaceStringEquality(checker, sourceFile, start),
     ...replaceBoxedEquality(checker, sourceFile, start),

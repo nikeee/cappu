@@ -681,6 +681,45 @@ func replaceOptionalIfPresentWithNullCheck(checker *compiler.Checker, sf *compil
 	}}
 }
 
+// --- Optional.of(null) -> ofNullable (nikeee/cappu#42 follow-up) -----------------
+
+// Port of replaceOptionalOfNull in src/services/codeActions.ts.
+func replaceOptionalOfNull(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.CallExpression {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.OptionalOfNullAlwaysThrows.Code &&
+			d.Pos >= node.Pos && d.End <= node.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	call := node.AsCallExpression()
+	if call.Expression.Kind != compiler.PropertyAccessExpression {
+		return nil
+	}
+	access := call.Expression.AsPropertyAccessExpression()
+	nameStart := compiler.SkipTrivia(data.Text, access.Name.Pos)
+	return []CodeActionResult{{
+		Title:   "Replace with Optional.ofNullable(null)",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: nameStart, End: access.Name.End, NewText: "ofNullable"}},
+	}}
+}
+
 // --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
 
 // countCallReceiver returns the receiver of a zero-arg `size()`/`length()`
@@ -2242,6 +2281,7 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	out = append(out, removeRedundantOverride(checker, sf, start)...)
 	out = append(out, makeFieldFinal(checker, sf, start)...)
 	out = append(out, replaceOptionalIfPresentWithNullCheck(checker, sf, start)...)
+	out = append(out, replaceOptionalOfNull(checker, sf, start)...)
 	out = append(out, replaceCountComparedToZero(checker, sf, start)...)
 	out = append(out, replaceStringEquality(checker, sf, start)...)
 	out = append(out, replaceBoxedEquality(checker, sf, start)...)

@@ -3031,6 +3031,20 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       }
     };
 
+    // --- Optional.of(null) -> ofNullable (nikeee/cappu#42 follow-up) -----------
+    // `Optional.of(null)` always throws NullPointerException; only a literal
+    // `null` argument is provably always-throwing, so that's the only case
+    // flagged (a nullable variable passed to `of` might be checked elsewhere).
+    const checkOptionalOfNull = (call: CallExpression): void => {
+      const target = memberCallTarget(call);
+      if (!target || `${target.fqn}#${target.name}` !== "java.util.Optional#of") return;
+      if (call.arguments.length !== 1 || call.arguments[0]!.kind !== SyntaxKind.NullKeyword) return;
+      const start = skipTrivia(sourceFile.text, call.pos);
+      diagnostics.push(
+        createDiagnostic(start, call.end - start, Diagnostics.Optional_of_null_always_throws),
+      );
+    };
+
     // --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
     // One shared rule for both `X.size() <op> N` (Collection/Map/etc) and
     // `X.length() <op> N` (String): each is a roundabout emptiness check.
@@ -3482,6 +3496,7 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
             checkOptionalGetCall(node as CallExpression);
             checkEqualsEmptyString(node as CallExpression);
             checkSelfComparisonCall(node as CallExpression);
+            checkOptionalOfNull(node as CallExpression);
           }
           break;
         case SyntaxKind.ObjectCreationExpression:

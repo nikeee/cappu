@@ -1419,3 +1419,29 @@ test("boxed ==: not offered when one side is primitive", () => {
   const text = "class T {\n  void m(Integer a, int b) {\n    if (a == b) {}\n  }\n}";
   expect(boxedEqActions(setup(text), "a == b")).toEqual([]);
 });
+
+// --- Optional.of(null) -> ofNullable (nikeee/cappu#42 follow-up) ---------------
+
+function optionalOfNullActions(ctx: ReturnType<typeof setup>, needle: string) {
+  return actionsAt(ctx, needle).filter(a => a.title === "Replace with Optional.ofNullable(null)");
+}
+
+test("Optional.of(null) rewrites to Optional.ofNullable(null)", () => {
+  const text =
+    "import java.util.Optional;\nclass T {\n  void m() {\n    Optional<String> o = Optional.of(null);\n  }\n}";
+  const ctx = setup(text);
+  const actions = optionalOfNullActions(ctx, "Optional.of");
+  expect(actions.length).toBe(1);
+  expect(actions[0]!.kind).toBe("quickfix");
+  expectEdit(
+    text,
+    actions[0]!,
+    "import java.util.Optional;\nclass T {\n  void m() {\n    Optional<String> o = Optional.ofNullable(null);\n  }\n}",
+  );
+});
+
+test("Optional.of(x) with a non-null argument is not offered a fix", () => {
+  const text =
+    'import java.util.Optional;\nclass T {\n  void m() {\n    Optional<String> o = Optional.of("x");\n  }\n}';
+  expect(optionalOfNullActions(setup(text), "Optional.of")).toEqual([]);
+});

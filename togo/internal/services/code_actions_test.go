@@ -1611,3 +1611,31 @@ func TestBoxedEqNotOfferedWithPrimitive(t *testing.T) {
 		t.Errorf("actions = %+v", actions)
 	}
 }
+
+// --- Optional.of(null) -> ofNullable (nikeee/cappu#42 follow-up) -----------------
+
+func optionalOfNullActions(ctx *actionCtx, needle string) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range ctx.actionsAt(needle, 1) {
+		if a.Title == "Replace with Optional.ofNullable(null)" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestOptionalOfNullRewrites(t *testing.T) {
+	text := "import java.util.Optional;\nclass T {\n  void m() {\n    Optional<String> o = Optional.of(null);\n  }\n}"
+	actions := optionalOfNullActions(actionsSetup(text, nil), "Optional.of")
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "import java.util.Optional;\nclass T {\n  void m() {\n    Optional<String> o = Optional.ofNullable(null);\n  }\n}")
+}
+
+func TestOptionalOfNonNullNotOffered(t *testing.T) {
+	text := "import java.util.Optional;\nclass T {\n  void m() {\n    Optional<String> o = Optional.of(\"x\");\n  }\n}"
+	if actions := optionalOfNullActions(actionsSetup(text, nil), "Optional.of"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}

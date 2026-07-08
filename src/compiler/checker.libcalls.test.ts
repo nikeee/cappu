@@ -403,3 +403,17 @@ test("a catch block with a statement is silent", () => {
 test("a catch block containing only a comment is silent (assumed intentional)", () => {
   expect(diagnose("try { m(); } catch (Exception e) { /* ignored intentionally */ }")).toEqual([]);
 });
+
+// --- Optional.of(null) -> ofNullable (nikeee/cappu#42 follow-up) ---------------
+
+test("Optional.of(null) is flagged", () => {
+  expect(diagnose("Optional.of(null);")).toContain(OPTIONAL_OF_NULL);
+});
+
+test("Optional.of(x) with a non-null literal is silent", () => {
+  expect(diagnose('Optional.of("x");')).toEqual([]);
+});
+
+test("Optional.ofNullable(null) is silent", () => {
+  expect(diagnose("Optional.ofNullable(null);")).toEqual([]);
+});

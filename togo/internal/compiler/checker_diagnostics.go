@@ -1381,6 +1381,24 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 		}
 	}
 
+	// Optional.of(null) -> ofNullable (nikeee/cappu#42 follow-up): always throws
+	// NullPointerException. Only a literal `null` argument is provably
+	// always-throwing. Ports checkOptionalOfNull in src/compiler/checker.ts.
+	checkOptionalOfNull := func(call *Node) {
+		fqn, name, ok := memberCallTarget(call)
+		if !ok || fqn+"#"+name != "java.util.Optional#of" {
+			return
+		}
+		args := call.AsCallExpression().Arguments
+		if nodeArrayLen(args) != 1 || args.Nodes[0].Kind != NullKeyword {
+			return
+		}
+		text := sourceFile.AsSourceFile().Text
+		start := SkipTrivia(text, call.Pos)
+		diagnostics = append(diagnostics, CreateDiagnostic(start, call.End-start,
+			Diagnostics.OptionalOfNullAlwaysThrows))
+	}
+
 	// size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42):
 	// one shared rule for both `X.size() <op> N` (Collection/Map/etc) and
 	// `X.length() <op> N` (String); each is a roundabout emptiness check.
@@ -1829,6 +1847,7 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 				checkOptionalGetCall(node)
 				checkEqualsEmptyString(node)
 				checkSelfComparisonCall(node)
+				checkOptionalOfNull(node)
 			}
 		case ObjectCreationExpression:
 			if cleanParse {

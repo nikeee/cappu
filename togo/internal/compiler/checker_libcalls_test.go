@@ -484,3 +484,23 @@ func TestCatchBlockWithCommentSilent(t *testing.T) {
 		t.Errorf("want silent (assumed intentional), got %v", got)
 	}
 }
+
+// --- Optional.of(null) -> ofNullable (nikeee/cappu#42 follow-up) -----------------
+
+func TestOptionalOfNullFlagged(t *testing.T) {
+	if !containsCode(libcallDiagnose(`Optional.of(null);`), optionalOfNull) {
+		t.Error("want optional-of-null")
+	}
+}
+
+func TestOptionalOfNonNullLiteralSilent(t *testing.T) {
+	if got := libcallDiagnose(`Optional.of("x");`); len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
+
+func TestOptionalOfNullableNullSilent(t *testing.T) {
+	if got := libcallDiagnose(`Optional.ofNullable(null);`); len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
