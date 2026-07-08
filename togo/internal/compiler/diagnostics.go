@@ -93,6 +93,14 @@ var Diagnostics = struct {
 	Field0CanBeFinal                      DiagnosticMessage
 
 	OptionalOfNullableIfPresentCanBeReplacedWithANullCheck DiagnosticMessage
+	OptionalGet0CalledWithoutAnIsPresentGuard              DiagnosticMessage
+	CountCheck0CanBeReplacedWith1                          DiagnosticMessage
+	StringsShouldBeComparedWithEqualsNot0                  DiagnosticMessage
+	BoxingConstructorNew0IsDeprecated                      DiagnosticMessage
+	IndexOfCheck0CanBeReplacedWith1                        DiagnosticMessage
+	NewString0CanBeReplacedWith1                           DiagnosticMessage
+	EqualsEmpty0CanBeReplacedWith1                         DiagnosticMessage
+	SuspiciousSelfComparison0                              DiagnosticMessage
 }{
 	Expected0:                             diag(1001, "_0_expected", "'{0}' expected.", CategoryError),
 	IdentifierExpected:                    diag(1002, "Identifier_expected", "Identifier expected.", CategoryError),
@@ -132,6 +140,14 @@ var Diagnostics = struct {
 	Field0CanBeFinal:                      diag(1317, "Field_0_can_be_final", "Field '{0}' can be 'final'.", CategorySuggestion),
 
 	OptionalOfNullableIfPresentCanBeReplacedWithANullCheck: diag(1318, "Optional_ofNullable_ifPresent_can_be_replaced_with_a_null_check", "'Optional.ofNullable(...).ifPresent(...)' can be replaced with a null check.", CategoryWarning),
+	OptionalGet0CalledWithoutAnIsPresentGuard:              diag(1319, "Optional_get_0_called_without_an_isPresent_guard", "'{0}.get()' is called without a preceding 'isPresent()'/'isEmpty()' check in this method.", CategoryWarning),
+	CountCheck0CanBeReplacedWith1:                          diag(1320, "Count_check_0_can_be_replaced_with_1", "'{0}' can be replaced with '{1}'.", CategoryWarning),
+	StringsShouldBeComparedWithEqualsNot0:                  diag(1321, "Strings_should_be_compared_with_equals_not_0", "Strings should be compared with 'equals()', not '{0}'.", CategoryWarning),
+	BoxingConstructorNew0IsDeprecated:                      diag(1322, "Boxing_constructor_new_0_is_deprecated", "'new {0}(...)' is deprecated; use '{0}.valueOf(...)' instead.", CategoryWarning),
+	IndexOfCheck0CanBeReplacedWith1:                        diag(1323, "IndexOf_check_0_can_be_replaced_with_1", "'{0}' can be replaced with '{1}'.", CategoryWarning),
+	NewString0CanBeReplacedWith1:                           diag(1324, "New_String_0_can_be_replaced_with_1", "'{0}' can be replaced with '{1}'.", CategoryWarning),
+	EqualsEmpty0CanBeReplacedWith1:                         diag(1325, "Equals_empty_0_can_be_replaced_with_1", "'{0}' can be replaced with '{1}'.", CategoryWarning),
+	SuspiciousSelfComparison0:                              diag(1326, "Suspicious_self_comparison_0", "'{0}' is compared to itself.", CategoryWarning),
 }
 
 var placeholderRe = regexp.MustCompile(`\{(\d+)\}`)

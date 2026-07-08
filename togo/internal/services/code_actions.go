@@ -681,6 +681,398 @@ func replaceOptionalIfPresentWithNullCheck(checker *compiler.Checker, sf *compil
 	}}
 }
 
+// --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
+
+// countCallReceiver returns the receiver of a zero-arg `size()`/`length()`
+// call, or nil. FQN isn't re-checked here: the diagnostic gate below already
+// proved it. Port of countCallReceiver in src/services/codeActions.ts.
+func countCallReceiver(n *compiler.Node) *compiler.Node {
+	if n.Kind != compiler.CallExpression {
+		return nil
+	}
+	call := n.AsCallExpression()
+	if call.Arguments.Len() != 0 || call.Expression.Kind != compiler.PropertyAccessExpression {
+		return nil
+	}
+	access := call.Expression.AsPropertyAccessExpression()
+	name := access.Name.AsIdentifier().Text
+	if name != "size" && name != "length" {
+		return nil
+	}
+	return access.Expression
+}
+
+func flipComparison(op compiler.SyntaxKind) compiler.SyntaxKind {
+	switch op {
+	case compiler.LessThanToken:
+		return compiler.GreaterThanToken
+	case compiler.GreaterThanToken:
+		return compiler.LessThanToken
+	case compiler.LessThanEqualsToken:
+		return compiler.GreaterThanEqualsToken
+	case compiler.GreaterThanEqualsToken:
+		return compiler.LessThanEqualsToken
+	default:
+		return op
+	}
+}
+
+func countCheckNegates(op compiler.SyntaxKind, literal string) (negate bool, ok bool) {
+	switch literal {
+	case "0":
+		switch op {
+		case compiler.EqualsEqualsToken:
+			return false, true
+		case compiler.ExclamationEqualsToken:
+			return true, true
+		case compiler.GreaterThanToken:
+			return true, true
+		case compiler.LessThanEqualsToken:
+			return false, true
+		}
+	case "1":
+		switch op {
+		case compiler.LessThanToken:
+			return false, true
+		case compiler.GreaterThanEqualsToken:
+			return true, true
+		}
+	}
+	return false, false
+}
+
+// Port of replaceCountComparedToZero in src/services/codeActions.ts.
+func replaceCountComparedToZero(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.BinaryExpression {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	bin := node.AsBinaryExpression()
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.CountCheck0CanBeReplacedWith1.Code &&
+			d.Pos >= node.Pos && d.End <= node.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	receiver := countCallReceiver(bin.Left)
+	var literalNode *compiler.Node
+	op := bin.OperatorToken
+	if receiver != nil && bin.Right.Kind == compiler.NumericLiteral {
+		literalNode = bin.Right
+	} else {
+		receiver = countCallReceiver(bin.Right)
+		if receiver == nil || bin.Left.Kind != compiler.NumericLiteral {
+			return nil
+		}
+		literalNode = bin.Left
+		op = flipComparison(op)
+	}
+	negate, ok := countCheckNegates(op, literalNode.AsLiteralExpression().Value)
+	if !ok {
+		return nil
+	}
+	receiverStart := compiler.SkipTrivia(data.Text, receiver.Pos)
+	receiverText := data.Text[receiverStart:receiver.End]
+	binStart := compiler.SkipTrivia(data.Text, node.Pos)
+	after := receiverText + ".isEmpty()"
+	if negate {
+		after = "!" + after
+	}
+	return []CodeActionResult{{
+		Title:   "Replace with isEmpty() check",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: binStart, End: node.End, NewText: after}},
+	}}
+}
+
+// --- == / != on Strings -> equals() (nikeee/cappu#42) --------------------------
+
+// Expression kinds that can have `.equals(` appended directly without
+// changing meaning (Java's primary/postfix expressions). Anything else (a
+// binary/unary/ternary/cast/...) must be parenthesized first.
+var safeEqualsReceiverKinds = map[compiler.SyntaxKind]bool{
+	compiler.Identifier:               true,
+	compiler.PropertyAccessExpression: true,
+	compiler.CallExpression:           true,
+	compiler.ParenthesizedExpression:  true,
+	compiler.ThisExpression:           true,
+	compiler.StringLiteral:            true,
+	compiler.TextBlockLiteral:         true,
+	compiler.ObjectCreationExpression: true,
+}
+
+// Port of replaceStringEquality in src/services/codeActions.ts.
+func replaceStringEquality(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.BinaryExpression {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	bin := node.AsBinaryExpression()
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.StringsShouldBeComparedWithEqualsNot0.Code &&
+			d.Pos >= node.Pos && d.End <= node.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	negated := bin.OperatorToken == compiler.ExclamationEqualsToken
+	leftStart := compiler.SkipTrivia(data.Text, bin.Left.Pos)
+	leftText := data.Text[leftStart:bin.Left.End]
+	rightStart := compiler.SkipTrivia(data.Text, bin.Right.Pos)
+	rightText := data.Text[rightStart:bin.Right.End]
+	receiver := leftText
+	if !safeEqualsReceiverKinds[bin.Left.Kind] {
+		receiver = "(" + leftText + ")"
+	}
+	binStart := compiler.SkipTrivia(data.Text, node.Pos)
+	newText := receiver + ".equals(" + rightText + ")"
+	if negated {
+		newText = "!" + newText
+	}
+	return []CodeActionResult{{
+		Title:   "Replace with equals()",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: binStart, End: node.End, NewText: newText}},
+	}}
+}
+
+// --- boxing constructors (`new Integer(...)`, ...) -> valueOf() (nikeee/cappu#42) ---
+
+// Port of replaceBoxingConstructor in src/services/codeActions.ts.
+func replaceBoxingConstructor(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.ObjectCreationExpression {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	creation := node.AsObjectCreationExpression()
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.BoxingConstructorNew0IsDeprecated.Code &&
+			d.Pos >= node.Pos && d.End <= node.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	if creation.Type.Kind != compiler.TypeReference {
+		return nil
+	}
+	typeName := compiler.EntityNameToString(creation.Type.AsTypeReference().TypeName)
+	from := compiler.SkipTrivia(data.Text, node.Pos)
+	return []CodeActionResult{{
+		Title:   "Replace with valueOf()",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: from, End: creation.Type.End, NewText: typeName + ".valueOf"}},
+	}}
+}
+
+// --- indexOf(...) != -1 -> contains(...) (nikeee/cappu#42) -----------------------
+
+func isNegativeOneLiteral(n *compiler.Node) bool {
+	return n.Kind == compiler.PrefixUnaryExpression &&
+		n.AsPrefixUnaryExpression().Operator == compiler.MinusToken &&
+		n.AsPrefixUnaryExpression().Operand.Kind == compiler.NumericLiteral &&
+		n.AsPrefixUnaryExpression().Operand.AsLiteralExpression().Value == "1"
+}
+
+// indexOfCallExpr returns the `indexOf(...)` call, or nil. FQN isn't
+// re-checked here: the diagnostic gate below already proved it.
+func indexOfCallExpr(n *compiler.Node) *compiler.Node {
+	if n.Kind != compiler.CallExpression {
+		return nil
+	}
+	call := n.AsCallExpression()
+	if call.Arguments.Len() != 1 || call.Expression.Kind != compiler.PropertyAccessExpression {
+		return nil
+	}
+	if call.Expression.AsPropertyAccessExpression().Name.AsIdentifier().Text != "indexOf" {
+		return nil
+	}
+	return n
+}
+
+// Port of replaceIndexOfComparedToNegativeOne in src/services/codeActions.ts.
+func replaceIndexOfComparedToNegativeOne(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.BinaryExpression {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	bin := node.AsBinaryExpression()
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.IndexOfCheck0CanBeReplacedWith1.Code &&
+			d.Pos >= node.Pos && d.End <= node.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	var call *compiler.Node
+	if isNegativeOneLiteral(bin.Right) {
+		call = indexOfCallExpr(bin.Left)
+	} else if isNegativeOneLiteral(bin.Left) {
+		call = indexOfCallExpr(bin.Right)
+	}
+	if call == nil {
+		return nil
+	}
+	access := call.AsCallExpression().Expression.AsPropertyAccessExpression()
+	receiverStart := compiler.SkipTrivia(data.Text, access.Expression.Pos)
+	receiverText := data.Text[receiverStart:access.Expression.End]
+	arg := call.AsCallExpression().Arguments.Nodes[0]
+	argStart := compiler.SkipTrivia(data.Text, arg.Pos)
+	argText := data.Text[argStart:arg.End]
+	negate := bin.OperatorToken == compiler.EqualsEqualsToken
+	binStart := compiler.SkipTrivia(data.Text, node.Pos)
+	newText := receiverText + ".contains(" + argText + ")"
+	if negate {
+		newText = "!" + newText
+	}
+	return []CodeActionResult{{
+		Title:   "Replace with contains()",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: binStart, End: node.End, NewText: newText}},
+	}}
+}
+
+// --- redundant new String(...) (nikeee/cappu#42) ---------------------------------
+
+// Port of removeRedundantNewString in src/services/codeActions.ts.
+func removeRedundantNewString(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.ObjectCreationExpression {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	creation := node.AsObjectCreationExpression()
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.NewString0CanBeReplacedWith1.Code &&
+			d.Pos >= node.Pos && d.End <= node.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	// The diagnostic already proved: 0 args -> "", or 1 String-typed arg -> unwrap it.
+	after := `""`
+	if creation.Arguments.Len() > 0 {
+		arg := creation.Arguments.Nodes[0]
+		argStart := compiler.SkipTrivia(data.Text, arg.Pos)
+		after = data.Text[argStart:arg.End]
+	}
+	from := compiler.SkipTrivia(data.Text, node.Pos)
+	return []CodeActionResult{{
+		Title:   "Remove redundant String wrapper",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: from, End: node.End, NewText: after}},
+	}}
+}
+
+// --- equals("") -> isEmpty() (nikeee/cappu#42) ------------------------------------
+
+func isEmptyStringLiteral(n *compiler.Node) bool {
+	return n.Kind == compiler.StringLiteral && n.AsLiteralExpression().Value == ""
+}
+
+// Only the `s.equals("")` direction: `"".equals(s)` is a deliberate null-safe
+// idiom whose autofix would change NPE behavior, so it is warn-only (no fix
+// offered here - the checker still flags it via the same diagnostic). Port of
+// replaceEqualsEmptyString in src/services/codeActions.ts.
+func replaceEqualsEmptyString(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.CallExpression {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	call := node.AsCallExpression()
+	if call.Expression.Kind != compiler.PropertyAccessExpression {
+		return nil
+	}
+	access := call.Expression.AsPropertyAccessExpression()
+	if access.Name.AsIdentifier().Text != "equals" || call.Arguments.Len() != 1 {
+		return nil
+	}
+	arg := call.Arguments.Nodes[0]
+	if !isEmptyStringLiteral(arg) || isEmptyStringLiteral(access.Expression) {
+		return nil
+	}
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.EqualsEmpty0CanBeReplacedWith1.Code &&
+			d.Pos >= node.Pos && d.End <= node.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	receiverStart := compiler.SkipTrivia(data.Text, access.Expression.Pos)
+	receiverText := data.Text[receiverStart:access.Expression.End]
+	callStart := compiler.SkipTrivia(data.Text, node.Pos)
+	return []CodeActionResult{{
+		Title:   "Replace with isEmpty()",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: callStart, End: node.End, NewText: receiverText + ".isEmpty()"}},
+	}}
+}
+
 // --- convert a class to a record ---------------------------------------------
 
 func hasKeyword(modifiers *compiler.NodeArray, kind compiler.SyntaxKind) bool {
@@ -1802,6 +2194,12 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	out = append(out, removeRedundantOverride(checker, sf, start)...)
 	out = append(out, makeFieldFinal(checker, sf, start)...)
 	out = append(out, replaceOptionalIfPresentWithNullCheck(checker, sf, start)...)
+	out = append(out, replaceCountComparedToZero(checker, sf, start)...)
+	out = append(out, replaceStringEquality(checker, sf, start)...)
+	out = append(out, replaceBoxingConstructor(checker, sf, start)...)
+	out = append(out, replaceIndexOfComparedToNegativeOne(checker, sf, start)...)
+	out = append(out, removeRedundantNewString(checker, sf, start)...)
+	out = append(out, replaceEqualsEmptyString(checker, sf, start)...)
 	if features.SupportsRecord {
 		out = append(out, convertClassToRecord(program, checker, sf, start)...)
 	}

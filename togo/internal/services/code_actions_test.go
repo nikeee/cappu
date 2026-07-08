@@ -1280,3 +1280,290 @@ func TestNullCheckNotOfferedOutsideStatement(t *testing.T) {
 		t.Errorf("actions = %+v", actions)
 	}
 }
+
+// --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
+
+func countCheckActions(ctx *actionCtx, needle string) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range ctx.actionsAt(needle, 1) {
+		if a.Title == "Replace with isEmpty() check" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestCountCheckSizeEqualsZeroRewrites(t *testing.T) {
+	text := "import java.util.List;\nimport java.util.ArrayList;\nclass T {\n  void m(List<String> xs) {\n    if (xs.size() == 0) {}\n  }\n}"
+	actions := countCheckActions(actionsSetup(text, nil), "size()")
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0],
+		"import java.util.List;\nimport java.util.ArrayList;\nclass T {\n  void m(List<String> xs) {\n    if (xs.isEmpty()) {}\n  }\n}")
+}
+
+func TestCountCheckSizeGreaterThanZeroRewrites(t *testing.T) {
+	text := "import java.util.List;\nclass T {\n  void m(List<String> xs) {\n    if (xs.size() > 0) {}\n  }\n}"
+	actions := countCheckActions(actionsSetup(text, nil), "size()")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0],
+		"import java.util.List;\nclass T {\n  void m(List<String> xs) {\n    if (!xs.isEmpty()) {}\n  }\n}")
+}
+
+func TestCountCheckLiteralOnLeftRewrites(t *testing.T) {
+	text := "import java.util.List;\nclass T {\n  void m(List<String> xs) {\n    if (0 == xs.size()) {}\n  }\n}"
+	actions := countCheckActions(actionsSetup(text, nil), "size()")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0],
+		"import java.util.List;\nclass T {\n  void m(List<String> xs) {\n    if (xs.isEmpty()) {}\n  }\n}")
+}
+
+func TestCountCheckStringLengthRewrites(t *testing.T) {
+	text := "class T {\n  void m(String s) {\n    if (s.length() == 0) {}\n  }\n}"
+	actions := countCheckActions(actionsSetup(text, nil), "length()")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(String s) {\n    if (s.isEmpty()) {}\n  }\n}")
+}
+
+func TestCountCheckUnrecognizedComboNotOffered(t *testing.T) {
+	text := "import java.util.List;\nclass T {\n  void m(List<String> xs) {\n    if (xs.size() == 2) {}\n  }\n}"
+	if actions := countCheckActions(actionsSetup(text, nil), "size()"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}
+
+// --- == / != on Strings -> equals() (nikeee/cappu#42) ---------------------------
+
+func stringEqActions(ctx *actionCtx, needle string) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range ctx.actionsAt(needle, 1) {
+		if strings.HasPrefix(a.Title, "Replace with") {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestStringEqSimpleIdentifiersRewrite(t *testing.T) {
+	text := "class T {\n  void m(String a, String b) {\n    if (a == b) {}\n  }\n}"
+	actions := stringEqActions(actionsSetup(text, nil), "a == b")
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(String a, String b) {\n    if (a.equals(b)) {}\n  }\n}")
+}
+
+func TestStringNotEqRewritesNegated(t *testing.T) {
+	text := "class T {\n  void m(String a, String b) {\n    if (a != b) {}\n  }\n}"
+	actions := stringEqActions(actionsSetup(text, nil), "a != b")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(String a, String b) {\n    if (!a.equals(b)) {}\n  }\n}")
+}
+
+func TestStringEqParenthesizesNonPrimaryLeft(t *testing.T) {
+	text := "class T {\n  void m(String a, String b, String c) {\n    if (a + b == c) {}\n  }\n}"
+	actions := stringEqActions(actionsSetup(text, nil), "==")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(String a, String b, String c) {\n    if ((a + b).equals(c)) {}\n  }\n}")
+}
+
+func TestStringEqNotOfferedAgainstNull(t *testing.T) {
+	text := "class T {\n  void m(String a) {\n    if (a == null) {}\n  }\n}"
+	if actions := stringEqActions(actionsSetup(text, nil), "a == null"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}
+
+func TestStringEqNotOfferedForNonString(t *testing.T) {
+	text := "class T {\n  void m(int a, int b) {\n    if (a == b) {}\n  }\n}"
+	if actions := stringEqActions(actionsSetup(text, nil), "a == b"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}
+
+// --- boxing constructors -> valueOf() (nikeee/cappu#42) --------------------------
+
+func boxingActions(ctx *actionCtx, needle string) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range ctx.actionsAt(needle, 1) {
+		if a.Title == "Replace with valueOf()" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestBoxingCtorIntegerRewrites(t *testing.T) {
+	text := "class T {\n  void m() {\n    Integer i = new Integer(5);\n  }\n}"
+	actions := boxingActions(actionsSetup(text, nil), "new Integer")
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m() {\n    Integer i = Integer.valueOf(5);\n  }\n}")
+}
+
+func TestBoxingCtorBooleanRewrites(t *testing.T) {
+	text := "class T {\n  void m() {\n    Boolean b = new Boolean(true);\n  }\n}"
+	actions := boxingActions(actionsSetup(text, nil), "new Boolean")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m() {\n    Boolean b = Boolean.valueOf(true);\n  }\n}")
+}
+
+func TestBoxingCtorNotOfferedForNonBoxing(t *testing.T) {
+	text := "import java.util.List;\nimport java.util.ArrayList;\nclass T {\n  void m() {\n    List<String> xs = new ArrayList<>();\n  }\n}"
+	if actions := boxingActions(actionsSetup(text, nil), "new ArrayList"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}
+
+// --- indexOf(...) != -1 -> contains(...) (nikeee/cappu#42) -----------------------
+
+func indexOfActions(ctx *actionCtx, needle string) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range ctx.actionsAt(needle, 1) {
+		if a.Title == "Replace with contains()" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestIndexOfNotEqualsRewrites(t *testing.T) {
+	text := `class T {
+  void m(String s) {
+    if (s.indexOf("a") != -1) {}
+  }
+}`
+	actions := indexOfActions(actionsSetup(text, nil), "indexOf")
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], `class T {
+  void m(String s) {
+    if (s.contains("a")) {}
+  }
+}`)
+}
+
+func TestIndexOfEqualsRewritesNegated(t *testing.T) {
+	text := `class T {
+  void m(String s) {
+    if (s.indexOf("a") == -1) {}
+  }
+}`
+	actions := indexOfActions(actionsSetup(text, nil), "indexOf")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], `class T {
+  void m(String s) {
+    if (!s.contains("a")) {}
+  }
+}`)
+}
+
+func TestIndexOfLiteralOnLeftRewrites(t *testing.T) {
+	text := `class T {
+  void m(String s) {
+    if (-1 != s.indexOf("a")) {}
+  }
+}`
+	actions := indexOfActions(actionsSetup(text, nil), "indexOf")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], `class T {
+  void m(String s) {
+    if (s.contains("a")) {}
+  }
+}`)
+}
+
+func TestIndexOfNotOfferedForNonNegativeOne(t *testing.T) {
+	text := `class T {
+  void m(String s) {
+    if (s.indexOf("a") != 0) {}
+  }
+}`
+	if actions := indexOfActions(actionsSetup(text, nil), "indexOf"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}
+
+// --- redundant new String(...) (nikeee/cappu#42) ---------------------------------
+
+func newStringActions(ctx *actionCtx, needle string) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range ctx.actionsAt(needle, 1) {
+		if a.Title == "Remove redundant String wrapper" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestNewStringEmptyRewrites(t *testing.T) {
+	text := "class T {\n  void m() {\n    String s = new String();\n  }\n}"
+	actions := newStringActions(actionsSetup(text, nil), "new String")
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m() {\n    String s = \"\";\n  }\n}")
+}
+
+func TestNewStringArgUnwraps(t *testing.T) {
+	text := "class T {\n  void m(String a) {\n    String b = new String(a);\n  }\n}"
+	actions := newStringActions(actionsSetup(text, nil), "new String")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(String a) {\n    String b = a;\n  }\n}")
+}
+
+func TestNewStringFromBytesNotOffered(t *testing.T) {
+	text := "class T {\n  void m(byte[] bs) {\n    String s = new String(bs);\n  }\n}"
+	if actions := newStringActions(actionsSetup(text, nil), "new String"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}
+
+// --- equals("") -> isEmpty() (nikeee/cappu#42) ------------------------------------
+
+func equalsEmptyActions(ctx *actionCtx, needle string) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range ctx.actionsAt(needle, 1) {
+		if a.Title == "Replace with isEmpty()" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestEqualsEmptyReceiverRewrites(t *testing.T) {
+	text := "class T {\n  void m(String s) {\n    if (s.equals(\"\")) {}\n  }\n}"
+	actions := equalsEmptyActions(actionsSetup(text, nil), "equals")
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(String s) {\n    if (s.isEmpty()) {}\n  }\n}")
+}
+
+func TestEqualsEmptyArgNotOffered(t *testing.T) {
+	text := "class T {\n  void m(String s) {\n    if (\"\".equals(s)) {}\n  }\n}"
+	if actions := equalsEmptyActions(actionsSetup(text, nil), "equals"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}

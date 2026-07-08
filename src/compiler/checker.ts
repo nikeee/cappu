@@ -2971,8 +2971,409 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       );
     };
 
+    // --- Optional#get() without an isPresent()/isEmpty() guard (nikeee/cappu#42) ---
+    // A syntactic heuristic: flags `x.get()` unless some `x.isPresent()` /
+    // `x.isEmpty()` check on the same variable name appears anywhere in the
+    // enclosing method. No autofix - the right guard shape is the caller's call.
+    // ponytail: name-based, not real data/control-flow; upgrade to flow analysis
+    // if this proves noisy in practice.
+    const checkOptionalGetCall = (call: CallExpression): void => {
+      const target = memberCallTarget(call);
+      if (!target || target.name !== "get" || target.fqn !== "java.util.Optional") return;
+      const receiver = target.access.expression;
+      if (receiver.kind !== SyntaxKind.Identifier) return; // unprovable: stay silent
+      const name = (receiver as Identifier).text;
+      let fn: Node | undefined = call.parent;
+      while (
+        fn &&
+        fn.kind !== SyntaxKind.MethodDeclaration &&
+        fn.kind !== SyntaxKind.ConstructorDeclaration
+      ) {
+        fn = fn.parent;
+      }
+      if (!fn) return;
+      let guarded = false;
+      const scan = (n: Node): void => {
+        if (guarded) return;
+        if (n.kind === SyntaxKind.CallExpression) {
+          const t = memberCallTarget(n as CallExpression);
+          if (
+            t &&
+            (t.name === "isPresent" || t.name === "isEmpty") &&
+            t.access.expression.kind === SyntaxKind.Identifier &&
+            (t.access.expression as Identifier).text === name
+          ) {
+            guarded = true;
+            return;
+          }
+        }
+        forEachChild(n, child => {
+          scan(child);
+          return undefined;
+        });
+      };
+      scan(fn);
+      if (!guarded) {
+        const start = skipTrivia(sourceFile.text, call.pos);
+        diagnostics.push(
+          createDiagnostic(
+            start,
+            call.end - start,
+            Diagnostics.Optional_get_0_called_without_an_isPresent_guard,
+            name,
+          ),
+        );
+      }
+    };
+
+    // --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
+    // One shared rule for both `X.size() <op> N` (Collection/Map/etc) and
+    // `X.length() <op> N` (String): each is a roundabout emptiness check.
+    const COUNT_FQNS = new Set([
+      "java.util.Collection",
+      "java.util.List",
+      "java.util.Set",
+      "java.util.Queue",
+      "java.util.SortedSet",
+      "java.util.Map",
+      "java.util.SortedMap",
+      "java.util.ArrayList",
+      "java.util.HashMap",
+      "java.util.HashSet",
+      "java.util.LinkedHashMap",
+      "java.util.LinkedHashSet",
+      "java.util.LinkedList",
+      "java.util.TreeMap",
+      "java.util.TreeSet",
+    ]);
+    // The receiver of a matching zero-arg `size()`/`length()` call, or undefined.
+    const countCallReceiver = (n: Node): Node | undefined => {
+      if (n.kind !== SyntaxKind.CallExpression) return undefined;
+      const call = n as CallExpression;
+      if (call.arguments.length !== 0) return undefined;
+      const target = memberCallTarget(call);
+      if (!target) return undefined;
+      if (target.name === "size" && COUNT_FQNS.has(target.fqn)) return target.access.expression;
+      if (target.name === "length" && target.fqn === "java.lang.String") {
+        return target.access.expression;
+      }
+      return undefined;
+    };
+    const flipComparison = (op: SyntaxKind): SyntaxKind => {
+      switch (op) {
+        case SyntaxKind.LessThanToken:
+          return SyntaxKind.GreaterThanToken;
+        case SyntaxKind.GreaterThanToken:
+          return SyntaxKind.LessThanToken;
+        case SyntaxKind.LessThanEqualsToken:
+          return SyntaxKind.GreaterThanEqualsToken;
+        case SyntaxKind.GreaterThanEqualsToken:
+          return SyntaxKind.LessThanEqualsToken;
+        default:
+          return op;
+      }
+    };
+    // For `<count> <op> <literal>` (call already on the left, comparison already
+    // normalized by the caller): true => replacement is `!isEmpty()`, false =>
+    // `isEmpty()`, undefined => not one of the recognized combos.
+    const countCheckNegates = (op: SyntaxKind, literal: string): boolean | undefined => {
+      if (literal === "0") {
+        if (op === SyntaxKind.EqualsEqualsToken) return false;
+        if (op === SyntaxKind.ExclamationEqualsToken) return true;
+        if (op === SyntaxKind.GreaterThanToken) return true;
+        if (op === SyntaxKind.LessThanEqualsToken) return false;
+      } else if (literal === "1") {
+        if (op === SyntaxKind.LessThanToken) return false;
+        if (op === SyntaxKind.GreaterThanEqualsToken) return true;
+      }
+      return undefined;
+    };
+    const checkCountComparedToZero = (bin: BinaryExpression): void => {
+      let receiver: Node | undefined;
+      let literalNode: LiteralExpression | undefined;
+      let op = bin.operatorToken;
+      receiver = countCallReceiver(bin.left);
+      if (receiver && bin.right.kind === SyntaxKind.NumericLiteral) {
+        literalNode = bin.right as LiteralExpression;
+      } else {
+        receiver = countCallReceiver(bin.right);
+        if (receiver && bin.left.kind === SyntaxKind.NumericLiteral) {
+          literalNode = bin.left as LiteralExpression;
+          op = flipComparison(op);
+        } else {
+          return;
+        }
+      }
+      const negate = countCheckNegates(op, literalNode.value);
+      if (negate === undefined) return;
+      const receiverStart = skipTrivia(sourceFile.text, receiver.pos);
+      const receiverText = sourceFile.text.slice(receiverStart, receiver.end);
+      const start = skipTrivia(sourceFile.text, bin.pos);
+      const before = sourceFile.text.slice(start, bin.end);
+      const after = `${negate ? "!" : ""}${receiverText}.isEmpty()`;
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          bin.end - start,
+          Diagnostics.Count_check_0_can_be_replaced_with_1,
+          before,
+          after,
+        ),
+      );
+    };
+
+    // --- == / != on Strings -> equals() (nikeee/cappu#42) ----------------------
+    const isStringType = (n: Node): boolean => {
+      const t = getTypeOfExpression(n);
+      return t.kind === TypeKind.Class && fqnOf(t as ClassType) === "java.lang.String";
+    };
+    const checkStringEquality = (bin: BinaryExpression): void => {
+      if (
+        bin.operatorToken !== SyntaxKind.EqualsEqualsToken &&
+        bin.operatorToken !== SyntaxKind.ExclamationEqualsToken
+      ) {
+        return;
+      }
+      if (bin.left.kind === SyntaxKind.NullKeyword || bin.right.kind === SyntaxKind.NullKeyword) {
+        return;
+      }
+      if (!isStringType(bin.left) || !isStringType(bin.right)) return;
+      const opText = bin.operatorToken === SyntaxKind.EqualsEqualsToken ? "==" : "!=";
+      const start = skipTrivia(sourceFile.text, bin.pos);
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          bin.end - start,
+          Diagnostics.Strings_should_be_compared_with_equals_not_0,
+          opText,
+        ),
+      );
+    };
+
+    // --- boxing constructors (`new Integer(...)`, ...) -> valueOf() (nikeee/cappu#42) ---
+    // All eight boxed types ship a `valueOf` factory; the stub declares no
+    // constructors for them (matching by resolved type FQN, not a resolved
+    // constructor symbol).
+    const BOXING_TYPES = new Set([
+      "java.lang.Integer",
+      "java.lang.Long",
+      "java.lang.Short",
+      "java.lang.Byte",
+      "java.lang.Double",
+      "java.lang.Float",
+      "java.lang.Boolean",
+      "java.lang.Character",
+    ]);
+    const checkBoxingConstructor = (node: ObjectCreationExpression): void => {
+      if (node.classBody || node.qualifier) return;
+      if (node.type.kind !== SyntaxKind.TypeReference) return;
+      const t = resolveType(node.type, node);
+      if (t.kind !== TypeKind.Class) return;
+      const fqn = fqnOf(t as ClassType);
+      if (!BOXING_TYPES.has(fqn)) return;
+      const typeName = fqn.slice(fqn.lastIndexOf(".") + 1);
+      const start = skipTrivia(sourceFile.text, node.pos);
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          node.end - start,
+          Diagnostics.Boxing_constructor_new_0_is_deprecated,
+          typeName,
+        ),
+      );
+    };
+
+    // --- indexOf(...) != -1 -> contains(...) (nikeee/cappu#42) -----------------
+    const INDEXOF_FQNS = new Set([
+      "java.lang.String",
+      "java.util.List",
+      "java.util.ArrayList",
+      "java.util.LinkedList",
+      "java.util.Vector",
+      "java.util.Stack",
+    ]);
+    const isNegativeOne = (n: Node): boolean =>
+      n.kind === SyntaxKind.PrefixUnaryExpression &&
+      (n as PrefixUnaryExpression).operator === SyntaxKind.MinusToken &&
+      (n as PrefixUnaryExpression).operand.kind === SyntaxKind.NumericLiteral &&
+      ((n as PrefixUnaryExpression).operand as LiteralExpression).value === "1";
+    const indexOfCall = (n: Node): CallExpression | undefined => {
+      if (n.kind !== SyntaxKind.CallExpression) return undefined;
+      const call = n as CallExpression;
+      if (call.arguments.length !== 1) return undefined;
+      const target = memberCallTarget(call);
+      if (!target || target.name !== "indexOf" || !INDEXOF_FQNS.has(target.fqn)) return undefined;
+      return call;
+    };
+    const checkIndexOfComparedToNegativeOne = (bin: BinaryExpression): void => {
+      if (
+        bin.operatorToken !== SyntaxKind.EqualsEqualsToken &&
+        bin.operatorToken !== SyntaxKind.ExclamationEqualsToken
+      ) {
+        return;
+      }
+      const call = isNegativeOne(bin.right)
+        ? indexOfCall(bin.left)
+        : isNegativeOne(bin.left)
+          ? indexOfCall(bin.right)
+          : undefined;
+      if (!call) return;
+      const target = memberCallTarget(call)!;
+      const receiverStart = skipTrivia(sourceFile.text, target.access.expression.pos);
+      const receiverText = sourceFile.text.slice(receiverStart, target.access.expression.end);
+      const arg = call.arguments[0]!;
+      const argStart = skipTrivia(sourceFile.text, arg.pos);
+      const argText = sourceFile.text.slice(argStart, arg.end);
+      const negate = bin.operatorToken === SyntaxKind.EqualsEqualsToken;
+      const start = skipTrivia(sourceFile.text, bin.pos);
+      const before = sourceFile.text.slice(start, bin.end);
+      const after = `${negate ? "!" : ""}${receiverText}.contains(${argText})`;
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          bin.end - start,
+          Diagnostics.IndexOf_check_0_can_be_replaced_with_1,
+          before,
+          after,
+        ),
+      );
+    };
+
+    // --- redundant new String(...) (nikeee/cappu#42) ---------------------------
+    const checkRedundantNewString = (node: ObjectCreationExpression): void => {
+      if (node.classBody || node.qualifier) return;
+      if (node.type.kind !== SyntaxKind.TypeReference) return;
+      const t = resolveType(node.type, node);
+      if (t.kind !== TypeKind.Class || fqnOf(t as ClassType) !== "java.lang.String") return;
+      const args = node.arguments ?? [];
+      const start = skipTrivia(sourceFile.text, node.pos);
+      const before = sourceFile.text.slice(start, node.end);
+      let after: string;
+      if (args.length === 0) {
+        after = '""';
+      } else if (args.length === 1 && isStringType(args[0]!)) {
+        const arg = args[0]!;
+        const argStart = skipTrivia(sourceFile.text, arg.pos);
+        after = sourceFile.text.slice(argStart, arg.end);
+      } else {
+        return; // byte[]/char[] conversion: a real conversion, not redundant
+      }
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          node.end - start,
+          Diagnostics.New_String_0_can_be_replaced_with_1,
+          before,
+          after,
+        ),
+      );
+    };
+
+    // --- equals("") -> isEmpty() (nikeee/cappu#42) ------------------------------
+    // `s.equals("")` autofixes (direction below); `"".equals(s)` is a
+    // deliberate null-safe idiom - warn only, no autofix, since rewriting it
+    // to `s.isEmpty()` would throw NPE on a null `s` where the original didn't.
+    const isEmptyStringLiteral = (n: Node): boolean =>
+      n.kind === SyntaxKind.StringLiteral && (n as LiteralExpression).value === "";
+    const checkEqualsEmptyString = (call: CallExpression): void => {
+      if (call.expression.kind !== SyntaxKind.PropertyAccessExpression) return;
+      const access = call.expression as PropertyAccessExpression;
+      if (access.name.text !== "equals" || call.arguments.length !== 1) return;
+      const arg = call.arguments[0]!;
+      let receiver: Node;
+      if (isEmptyStringLiteral(arg) && isStringType(access.expression)) {
+        receiver = access.expression; // s.equals("")
+      } else if (isEmptyStringLiteral(access.expression) && isStringType(arg)) {
+        receiver = arg; // "".equals(s)
+      } else {
+        return;
+      }
+      const receiverStart = skipTrivia(sourceFile.text, receiver.pos);
+      const receiverText = sourceFile.text.slice(receiverStart, receiver.end);
+      const start = skipTrivia(sourceFile.text, call.pos);
+      const before = sourceFile.text.slice(start, call.end);
+      const after = `${receiverText}.isEmpty()`;
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          call.end - start,
+          Diagnostics.Equals_empty_0_can_be_replaced_with_1,
+          before,
+          after,
+        ),
+      );
+    };
+
+    // --- self-comparison (nikeee/cappu#42) --------------------------------------
+    // Restricted to call-free "stable read" shapes (Identifier, or a
+    // this/field-access chain) so `next() == next()` - two calls that happen to
+    // read the same text but aren't provably the same value - is left alone.
+    const stableReadText = (n: Node): string | undefined => {
+      if (n.kind === SyntaxKind.Identifier) return (n as Identifier).text;
+      if (n.kind === SyntaxKind.ThisExpression) return "this";
+      if (n.kind === SyntaxKind.PropertyAccessExpression) {
+        const pa = n as PropertyAccessExpression;
+        const base = stableReadText(pa.expression);
+        return base === undefined ? undefined : `${base}.${pa.name.text}`;
+      }
+      return undefined;
+    };
+    const SELF_COMPARISON_OPS = new Set<SyntaxKind>([
+      SyntaxKind.EqualsEqualsToken,
+      SyntaxKind.ExclamationEqualsToken,
+      SyntaxKind.GreaterThanToken,
+      SyntaxKind.LessThanToken,
+      SyntaxKind.GreaterThanEqualsToken,
+      SyntaxKind.LessThanEqualsToken,
+    ]);
+    const checkSelfComparisonBinary = (bin: BinaryExpression): void => {
+      if (!SELF_COMPARISON_OPS.has(bin.operatorToken)) return;
+      const leftText = stableReadText(bin.left);
+      const rightText = stableReadText(bin.right);
+      if (leftText === undefined || leftText !== rightText) return;
+      const start = skipTrivia(sourceFile.text, bin.pos);
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          bin.end - start,
+          Diagnostics.Suspicious_self_comparison_0,
+          leftText,
+        ),
+      );
+    };
+    const checkSelfComparisonCall = (call: CallExpression): void => {
+      if (call.expression.kind !== SyntaxKind.PropertyAccessExpression) return;
+      const access = call.expression as PropertyAccessExpression;
+      if (
+        (access.name.text !== "equals" && access.name.text !== "compareTo") ||
+        call.arguments.length !== 1
+      ) {
+        return;
+      }
+      const receiverText = stableReadText(access.expression);
+      const argText = stableReadText(call.arguments[0]!);
+      if (receiverText === undefined || receiverText !== argText) return;
+      const start = skipTrivia(sourceFile.text, call.pos);
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          call.end - start,
+          Diagnostics.Suspicious_self_comparison_0,
+          receiverText,
+        ),
+      );
+    };
+
     const visit = (node: Node): void => {
       switch (node.kind) {
+        case SyntaxKind.BinaryExpression:
+          if (sourceFile.parseDiagnostics.length === 0) {
+            checkCountComparedToZero(node as BinaryExpression);
+            checkStringEquality(node as BinaryExpression);
+            checkIndexOfComparedToNegativeOne(node as BinaryExpression);
+            checkSelfComparisonBinary(node as BinaryExpression);
+          }
+          break;
         case SyntaxKind.VariableDeclarator: {
           const d = node as VariableDeclarator;
           if (d.initializer && d.symbol && d.initializer.kind !== SyntaxKind.ArrayInitializer) {
@@ -3016,11 +3417,16 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
             checkDateTimeCall(node as CallExpression);
             checkNumberParseCall(node as CallExpression);
             checkOptionalIfPresentCall(node as CallExpression);
+            checkOptionalGetCall(node as CallExpression);
+            checkEqualsEmptyString(node as CallExpression);
+            checkSelfComparisonCall(node as CallExpression);
           }
           break;
         case SyntaxKind.ObjectCreationExpression:
           if (sourceFile.parseDiagnostics.length === 0) {
             checkCreationArity(node as ObjectCreationExpression);
+            checkBoxingConstructor(node as ObjectCreationExpression);
+            checkRedundantNewString(node as ObjectCreationExpression);
           }
           break;
         case SyntaxKind.ReturnStatement: {

@@ -37,6 +37,7 @@ import {
   type Node,
   type ObjectCreationExpression,
   type Parameter,
+  type PrefixUnaryExpression,
   type PrimitiveType,
   type PropertyAccessExpression,
   type QualifiedName,
@@ -666,6 +667,345 @@ function replaceOptionalIfPresentWithNullCheck(
       title: "Replace with null check",
       kind: "quickfix",
       changes: [{ start: from, end: stmt.end, newText: `if (${variable} != null) ${body}` }],
+    },
+  ];
+}
+
+// --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
+
+// The receiver of a zero-arg `size()`/`length()` call, or undefined. FQN
+// isn't re-checked here: the diagnostic gate below already proved it.
+function countCallReceiver(n: Node): Node | undefined {
+  if (n.kind !== SyntaxKind.CallExpression) return undefined;
+  const call = n as CallExpression;
+  if (call.arguments.length !== 0 || call.expression.kind !== SyntaxKind.PropertyAccessExpression) {
+    return undefined;
+  }
+  const access = call.expression as PropertyAccessExpression;
+  if (access.name.text !== "size" && access.name.text !== "length") return undefined;
+  return access.expression;
+}
+
+function flipComparison(op: SyntaxKind): SyntaxKind {
+  switch (op) {
+    case SyntaxKind.LessThanToken:
+      return SyntaxKind.GreaterThanToken;
+    case SyntaxKind.GreaterThanToken:
+      return SyntaxKind.LessThanToken;
+    case SyntaxKind.LessThanEqualsToken:
+      return SyntaxKind.GreaterThanEqualsToken;
+    case SyntaxKind.GreaterThanEqualsToken:
+      return SyntaxKind.LessThanEqualsToken;
+    default:
+      return op;
+  }
+}
+
+function countCheckNegates(op: SyntaxKind, literal: string): boolean | undefined {
+  if (literal === "0") {
+    if (op === SyntaxKind.EqualsEqualsToken) return false;
+    if (op === SyntaxKind.ExclamationEqualsToken) return true;
+    if (op === SyntaxKind.GreaterThanToken) return true;
+    if (op === SyntaxKind.LessThanEqualsToken) return false;
+  } else if (literal === "1") {
+    if (op === SyntaxKind.LessThanToken) return false;
+    if (op === SyntaxKind.GreaterThanEqualsToken) return true;
+  }
+  return undefined;
+}
+
+function replaceCountComparedToZero(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.BinaryExpression) node = node.parent;
+  if (!node) return [];
+  const bin = node as BinaryExpression;
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.Count_check_0_can_be_replaced_with_1.code &&
+        d.pos >= bin.pos &&
+        d.end <= bin.end,
+    );
+  if (!flagged) return [];
+  let receiver = countCallReceiver(bin.left);
+  let literalNode: LiteralExpression | undefined;
+  let op = bin.operatorToken;
+  if (receiver && bin.right.kind === SyntaxKind.NumericLiteral) {
+    literalNode = bin.right as LiteralExpression;
+  } else {
+    receiver = countCallReceiver(bin.right);
+    if (!receiver || bin.left.kind !== SyntaxKind.NumericLiteral) return [];
+    literalNode = bin.left as LiteralExpression;
+    op = flipComparison(op);
+  }
+  const negate = countCheckNegates(op, literalNode.value);
+  if (negate === undefined) return [];
+  const receiverStart = skipTrivia(sourceFile.text, receiver.pos);
+  const receiverText = sourceFile.text.slice(receiverStart, receiver.end);
+  const binStart = skipTrivia(sourceFile.text, bin.pos);
+  return [
+    {
+      title: "Replace with isEmpty() check",
+      kind: "quickfix",
+      changes: [
+        {
+          start: binStart,
+          end: bin.end,
+          newText: `${negate ? "!" : ""}${receiverText}.isEmpty()`,
+        },
+      ],
+    },
+  ];
+}
+
+// --- == / != on Strings -> equals() (nikeee/cappu#42) --------------------------
+
+// Expression kinds that can have `.equals(` appended directly without
+// changing meaning (Java's primary/postfix expressions). Anything else (a
+// binary/unary/ternary/cast/...) must be parenthesized first.
+const SAFE_EQUALS_RECEIVER_KINDS = new Set<SyntaxKind>([
+  SyntaxKind.Identifier,
+  SyntaxKind.PropertyAccessExpression,
+  SyntaxKind.CallExpression,
+  SyntaxKind.ParenthesizedExpression,
+  SyntaxKind.ThisExpression,
+  SyntaxKind.StringLiteral,
+  SyntaxKind.TextBlockLiteral,
+  SyntaxKind.ObjectCreationExpression,
+]);
+
+function replaceStringEquality(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.BinaryExpression) node = node.parent;
+  if (!node) return [];
+  const bin = node as BinaryExpression;
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.Strings_should_be_compared_with_equals_not_0.code &&
+        d.pos >= bin.pos &&
+        d.end <= bin.end,
+    );
+  if (!flagged) return [];
+  const negated = bin.operatorToken === SyntaxKind.ExclamationEqualsToken;
+  const leftStart = skipTrivia(sourceFile.text, bin.left.pos);
+  const leftText = sourceFile.text.slice(leftStart, bin.left.end);
+  const rightStart = skipTrivia(sourceFile.text, bin.right.pos);
+  const rightText = sourceFile.text.slice(rightStart, bin.right.end);
+  const receiver = SAFE_EQUALS_RECEIVER_KINDS.has(bin.left.kind) ? leftText : `(${leftText})`;
+  const binStart = skipTrivia(sourceFile.text, bin.pos);
+  return [
+    {
+      title: "Replace with equals()",
+      kind: "quickfix",
+      changes: [
+        {
+          start: binStart,
+          end: bin.end,
+          newText: `${negated ? "!" : ""}${receiver}.equals(${rightText})`,
+        },
+      ],
+    },
+  ];
+}
+
+// --- boxing constructors (`new Integer(...)`, ...) -> valueOf() (nikeee/cappu#42) ---
+
+function replaceBoxingConstructor(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.ObjectCreationExpression) node = node.parent;
+  if (!node) return [];
+  const creation = node as ObjectCreationExpression;
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.Boxing_constructor_new_0_is_deprecated.code &&
+        d.pos >= creation.pos &&
+        d.end <= creation.end,
+    );
+  if (!flagged) return [];
+  if (creation.type.kind !== SyntaxKind.TypeReference) return [];
+  const typeName = entityNameToString((creation.type as TypeReference).typeName);
+  const from = skipTrivia(sourceFile.text, creation.pos);
+  return [
+    {
+      title: "Replace with valueOf()",
+      kind: "quickfix",
+      changes: [{ start: from, end: creation.type.end, newText: `${typeName}.valueOf` }],
+    },
+  ];
+}
+
+// --- indexOf(...) != -1 -> contains(...) (nikeee/cappu#42) ---------------------
+
+function isNegativeOneLiteral(n: Node): boolean {
+  return (
+    n.kind === SyntaxKind.PrefixUnaryExpression &&
+    (n as PrefixUnaryExpression).operator === SyntaxKind.MinusToken &&
+    (n as PrefixUnaryExpression).operand.kind === SyntaxKind.NumericLiteral &&
+    ((n as PrefixUnaryExpression).operand as LiteralExpression).value === "1"
+  );
+}
+
+// The `indexOf(...)` call, or undefined. FQN isn't re-checked here: the
+// diagnostic gate below already proved it.
+function indexOfCall(n: Node): CallExpression | undefined {
+  if (n.kind !== SyntaxKind.CallExpression) return undefined;
+  const call = n as CallExpression;
+  if (
+    call.arguments.length !== 1 ||
+    call.expression.kind !== SyntaxKind.PropertyAccessExpression ||
+    (call.expression as PropertyAccessExpression).name.text !== "indexOf"
+  ) {
+    return undefined;
+  }
+  return call;
+}
+
+function replaceIndexOfComparedToNegativeOne(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.BinaryExpression) node = node.parent;
+  if (!node) return [];
+  const bin = node as BinaryExpression;
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.IndexOf_check_0_can_be_replaced_with_1.code &&
+        d.pos >= bin.pos &&
+        d.end <= bin.end,
+    );
+  if (!flagged) return [];
+  const call = isNegativeOneLiteral(bin.right)
+    ? indexOfCall(bin.left)
+    : isNegativeOneLiteral(bin.left)
+      ? indexOfCall(bin.right)
+      : undefined;
+  if (!call) return [];
+  const access = call.expression as PropertyAccessExpression;
+  const receiverStart = skipTrivia(sourceFile.text, access.expression.pos);
+  const receiverText = sourceFile.text.slice(receiverStart, access.expression.end);
+  const arg = call.arguments[0]!;
+  const argStart = skipTrivia(sourceFile.text, arg.pos);
+  const argText = sourceFile.text.slice(argStart, arg.end);
+  const negate = bin.operatorToken === SyntaxKind.EqualsEqualsToken;
+  const binStart = skipTrivia(sourceFile.text, bin.pos);
+  return [
+    {
+      title: "Replace with contains()",
+      kind: "quickfix",
+      changes: [
+        {
+          start: binStart,
+          end: bin.end,
+          newText: `${negate ? "!" : ""}${receiverText}.contains(${argText})`,
+        },
+      ],
+    },
+  ];
+}
+
+// --- redundant new String(...) (nikeee/cappu#42) --------------------------------
+
+function removeRedundantNewString(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.ObjectCreationExpression) node = node.parent;
+  if (!node) return [];
+  const creation = node as ObjectCreationExpression;
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.New_String_0_can_be_replaced_with_1.code &&
+        d.pos >= creation.pos &&
+        d.end <= creation.end,
+    );
+  if (!flagged) return [];
+  // The diagnostic already proved: 0 args -> "", or 1 String-typed arg -> unwrap it.
+  const args = creation.arguments ?? [];
+  const after =
+    args.length === 0
+      ? '""'
+      : sourceFile.text.slice(skipTrivia(sourceFile.text, args[0]!.pos), args[0]!.end);
+  const from = skipTrivia(sourceFile.text, creation.pos);
+  return [
+    {
+      title: "Remove redundant String wrapper",
+      kind: "quickfix",
+      changes: [{ start: from, end: creation.end, newText: after }],
+    },
+  ];
+}
+
+// --- equals("") -> isEmpty() (nikeee/cappu#42) ----------------------------------
+
+function isEmptyStringLiteral(n: Node): boolean {
+  return n.kind === SyntaxKind.StringLiteral && (n as LiteralExpression).value === "";
+}
+
+// Only the `s.equals("")` direction: `"".equals(s)` is a deliberate null-safe
+// idiom whose autofix would change NPE behavior, so it is warn-only (no fix
+// offered here - the checker still flags it via the same diagnostic).
+function replaceEqualsEmptyString(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.CallExpression) node = node.parent;
+  if (!node) return [];
+  const call = node as CallExpression;
+  if (call.expression.kind !== SyntaxKind.PropertyAccessExpression) return [];
+  const access = call.expression as PropertyAccessExpression;
+  if (access.name.text !== "equals" || call.arguments.length !== 1) return [];
+  const arg = call.arguments[0]!;
+  if (!isEmptyStringLiteral(arg) || isEmptyStringLiteral(access.expression)) return [];
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.Equals_empty_0_can_be_replaced_with_1.code &&
+        d.pos >= call.pos &&
+        d.end <= call.end,
+    );
+  if (!flagged) return [];
+  const receiverStart = skipTrivia(sourceFile.text, access.expression.pos);
+  const receiverText = sourceFile.text.slice(receiverStart, access.expression.end);
+  const callStart = skipTrivia(sourceFile.text, call.pos);
+  return [
+    {
+      title: "Replace with isEmpty()",
+      kind: "quickfix",
+      changes: [{ start: callStart, end: call.end, newText: `${receiverText}.isEmpty()` }],
     },
   ];
 }
@@ -1499,6 +1839,12 @@ export function getCodeActions(
     ...removeRedundantOverride(checker, sourceFile, start),
     ...makeFieldFinal(checker, sourceFile, start),
     ...replaceOptionalIfPresentWithNullCheck(checker, sourceFile, start),
+    ...replaceCountComparedToZero(checker, sourceFile, start),
+    ...replaceStringEquality(checker, sourceFile, start),
+    ...replaceBoxingConstructor(checker, sourceFile, start),
+    ...replaceIndexOfComparedToNegativeOne(checker, sourceFile, start),
+    ...removeRedundantNewString(checker, sourceFile, start),
+    ...replaceEqualsEmptyString(checker, sourceFile, start),
     ...(features.supportsRecord ? convertClassToRecord(program, checker, sourceFile, start) : []),
     ...(features.supportsVar ? convertToVar(sourceFile, start) : []),
     ...(features.supportsLambda ? convertAnonymousClassToLambda(program, sourceFile, start) : []),

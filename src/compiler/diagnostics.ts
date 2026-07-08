@@ -183,6 +183,54 @@ export const Diagnostics = {
     "'Optional.ofNullable(...).ifPresent(...)' can be replaced with a null check.",
     DiagnosticCategory.Warning,
   ),
+  Optional_get_0_called_without_an_isPresent_guard: diag(
+    1319,
+    "Optional_get_0_called_without_an_isPresent_guard",
+    "'{0}.get()' is called without a preceding 'isPresent()'/'isEmpty()' check in this method.",
+    DiagnosticCategory.Warning,
+  ),
+  Count_check_0_can_be_replaced_with_1: diag(
+    1320,
+    "Count_check_0_can_be_replaced_with_1",
+    "'{0}' can be replaced with '{1}'.",
+    DiagnosticCategory.Warning,
+  ),
+  Strings_should_be_compared_with_equals_not_0: diag(
+    1321,
+    "Strings_should_be_compared_with_equals_not_0",
+    "Strings should be compared with 'equals()', not '{0}'.",
+    DiagnosticCategory.Warning,
+  ),
+  Boxing_constructor_new_0_is_deprecated: diag(
+    1322,
+    "Boxing_constructor_new_0_is_deprecated",
+    "'new {0}(...)' is deprecated; use '{0}.valueOf(...)' instead.",
+    DiagnosticCategory.Warning,
+  ),
+  IndexOf_check_0_can_be_replaced_with_1: diag(
+    1323,
+    "IndexOf_check_0_can_be_replaced_with_1",
+    "'{0}' can be replaced with '{1}'.",
+    DiagnosticCategory.Warning,
+  ),
+  New_String_0_can_be_replaced_with_1: diag(
+    1324,
+    "New_String_0_can_be_replaced_with_1",
+    "'{0}' can be replaced with '{1}'.",
+    DiagnosticCategory.Warning,
+  ),
+  Equals_empty_0_can_be_replaced_with_1: diag(
+    1325,
+    "Equals_empty_0_can_be_replaced_with_1",
+    "'{0}' can be replaced with '{1}'.",
+    DiagnosticCategory.Warning,
+  ),
+  Suspicious_self_comparison_0: diag(
+    1326,
+    "Suspicious_self_comparison_0",
+    "'{0}' is compared to itself.",
+    DiagnosticCategory.Warning,
+  ),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */

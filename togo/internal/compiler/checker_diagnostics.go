@@ -1328,9 +1328,409 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			Diagnostics.OptionalOfNullableIfPresentCanBeReplacedWithANullCheck))
 	}
 
+	// Optional#get() without an isPresent()/isEmpty() guard (nikeee/cappu#42): a
+	// syntactic heuristic that flags `x.get()` unless some `x.isPresent()` /
+	// `x.isEmpty()` check on the same variable name appears anywhere in the
+	// enclosing method. No autofix - the right guard shape is the caller's call.
+	// ponytail: name-based, not real data/control-flow; upgrade to flow analysis
+	// if this proves noisy in practice. Ports checkOptionalGetCall in
+	// src/compiler/checker.ts.
+	checkOptionalGetCall := func(call *Node) {
+		fqn, name, ok := memberCallTarget(call)
+		if !ok || name != "get" || fqn != "java.util.Optional" {
+			return
+		}
+		receiver := call.AsCallExpression().Expression.AsPropertyAccessExpression().Expression
+		if receiver.Kind != Identifier {
+			return // unprovable: stay silent
+		}
+		varName := receiver.AsIdentifier().Text
+		fn := call.Parent
+		for fn != nil && fn.Kind != MethodDeclaration && fn.Kind != ConstructorDeclaration {
+			fn = fn.Parent
+		}
+		if fn == nil {
+			return
+		}
+		guarded := false
+		var scan func(n *Node)
+		scan = func(n *Node) {
+			if guarded {
+				return
+			}
+			if n.Kind == CallExpression {
+				_, tName, tok := memberCallTarget(n)
+				if tok && (tName == "isPresent" || tName == "isEmpty") {
+					recv := n.AsCallExpression().Expression.AsPropertyAccessExpression().Expression
+					if recv.Kind == Identifier && recv.AsIdentifier().Text == varName {
+						guarded = true
+						return
+					}
+				}
+			}
+			n.ForEachChild(func(child *Node) bool {
+				scan(child)
+				return false
+			})
+		}
+		scan(fn)
+		if !guarded {
+			start := SkipTrivia(sourceFile.AsSourceFile().Text, call.Pos)
+			diagnostics = append(diagnostics, CreateDiagnostic(start, call.End-start,
+				Diagnostics.OptionalGet0CalledWithoutAnIsPresentGuard, varName))
+		}
+	}
+
+	// size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42):
+	// one shared rule for both `X.size() <op> N` (Collection/Map/etc) and
+	// `X.length() <op> N` (String); each is a roundabout emptiness check.
+	// Ports the block of the same name in src/compiler/checker.ts.
+	countFqns := map[string]bool{
+		"java.util.Collection": true, "java.util.List": true, "java.util.Set": true,
+		"java.util.Queue": true, "java.util.SortedSet": true, "java.util.Map": true,
+		"java.util.SortedMap": true, "java.util.ArrayList": true, "java.util.HashMap": true,
+		"java.util.HashSet": true, "java.util.LinkedHashMap": true, "java.util.LinkedHashSet": true,
+		"java.util.LinkedList": true, "java.util.TreeMap": true, "java.util.TreeSet": true,
+	}
+	countCallReceiver := func(n *Node) *Node {
+		if n.Kind != CallExpression || nodeArrayLen(n.AsCallExpression().Arguments) != 0 {
+			return nil
+		}
+		fqn, name, ok := memberCallTarget(n)
+		if !ok {
+			return nil
+		}
+		if name == "size" && countFqns[fqn] {
+			return n.AsCallExpression().Expression.AsPropertyAccessExpression().Expression
+		}
+		if name == "length" && fqn == "java.lang.String" {
+			return n.AsCallExpression().Expression.AsPropertyAccessExpression().Expression
+		}
+		return nil
+	}
+	flipComparison := func(op SyntaxKind) SyntaxKind {
+		switch op {
+		case LessThanToken:
+			return GreaterThanToken
+		case GreaterThanToken:
+			return LessThanToken
+		case LessThanEqualsToken:
+			return GreaterThanEqualsToken
+		case GreaterThanEqualsToken:
+			return LessThanEqualsToken
+		default:
+			return op
+		}
+	}
+	countCheckNegates := func(op SyntaxKind, literal string) (negate bool, ok bool) {
+		switch literal {
+		case "0":
+			switch op {
+			case EqualsEqualsToken:
+				return false, true
+			case ExclamationEqualsToken:
+				return true, true
+			case GreaterThanToken:
+				return true, true
+			case LessThanEqualsToken:
+				return false, true
+			}
+		case "1":
+			switch op {
+			case LessThanToken:
+				return false, true
+			case GreaterThanEqualsToken:
+				return true, true
+			}
+		}
+		return false, false
+	}
+	checkCountComparedToZero := func(bin *Node) {
+		b := bin.AsBinaryExpression()
+		receiver := countCallReceiver(b.Left)
+		var literalNode *Node
+		op := b.OperatorToken
+		if receiver != nil && b.Right.Kind == NumericLiteral {
+			literalNode = b.Right
+		} else {
+			receiver = countCallReceiver(b.Right)
+			if receiver == nil || b.Left.Kind != NumericLiteral {
+				return
+			}
+			literalNode = b.Left
+			op = flipComparison(op)
+		}
+		negate, ok := countCheckNegates(op, literalNode.AsLiteralExpression().Value)
+		if !ok {
+			return
+		}
+		text := sourceFile.AsSourceFile().Text
+		receiverStart := SkipTrivia(text, receiver.Pos)
+		receiverText := text[receiverStart:receiver.End]
+		start := SkipTrivia(text, bin.Pos)
+		before := text[start:bin.End]
+		after := receiverText + ".isEmpty()"
+		if negate {
+			after = "!" + after
+		}
+		diagnostics = append(diagnostics, CreateDiagnostic(start, bin.End-start,
+			Diagnostics.CountCheck0CanBeReplacedWith1, before, after))
+	}
+
+	// == / != on Strings -> equals() (nikeee/cappu#42). Ports checkStringEquality
+	// in src/compiler/checker.ts.
+	isStringType := func(n *Node) bool {
+		t := c.getTypeOfExpression(n)
+		return t.Kind == TypeKindClass && c.fqnOf(t) == "java.lang.String"
+	}
+	checkStringEquality := func(bin *Node) {
+		b := bin.AsBinaryExpression()
+		if b.OperatorToken != EqualsEqualsToken && b.OperatorToken != ExclamationEqualsToken {
+			return
+		}
+		if b.Left.Kind == NullKeyword || b.Right.Kind == NullKeyword {
+			return
+		}
+		if !isStringType(b.Left) || !isStringType(b.Right) {
+			return
+		}
+		opText := "!="
+		if b.OperatorToken == EqualsEqualsToken {
+			opText = "=="
+		}
+		text := sourceFile.AsSourceFile().Text
+		start := SkipTrivia(text, bin.Pos)
+		diagnostics = append(diagnostics, CreateDiagnostic(start, bin.End-start,
+			Diagnostics.StringsShouldBeComparedWithEqualsNot0, opText))
+	}
+
+	// Boxing constructors (`new Integer(...)`, ...) -> valueOf() (nikeee/cappu#42):
+	// all eight boxed types ship a `valueOf` factory; the stub declares no
+	// constructors for them (matching by resolved type FQN, not a resolved
+	// constructor symbol). Ports checkBoxingConstructor in src/compiler/checker.ts.
+	boxingTypes := map[string]bool{
+		"java.lang.Integer": true, "java.lang.Long": true, "java.lang.Short": true,
+		"java.lang.Byte": true, "java.lang.Double": true, "java.lang.Float": true,
+		"java.lang.Boolean": true, "java.lang.Character": true,
+	}
+	checkBoxingConstructor := func(node *Node) {
+		oce := node.AsObjectCreationExpression()
+		if oce.ClassBody != nil || oce.Qualifier != nil || oce.Type.Kind != TypeReference {
+			return
+		}
+		t := c.resolveType(oce.Type, node)
+		if t.Kind != TypeKindClass {
+			return
+		}
+		fqn := c.fqnOf(t)
+		if !boxingTypes[fqn] {
+			return
+		}
+		typeName := fqn
+		if i := strings.LastIndex(fqn, "."); i >= 0 {
+			typeName = fqn[i+1:]
+		}
+		text := sourceFile.AsSourceFile().Text
+		start := SkipTrivia(text, node.Pos)
+		diagnostics = append(diagnostics, CreateDiagnostic(start, node.End-start,
+			Diagnostics.BoxingConstructorNew0IsDeprecated, typeName))
+	}
+
+	// indexOf(...) != -1 -> contains(...) (nikeee/cappu#42). Ports
+	// checkIndexOfComparedToNegativeOne in src/compiler/checker.ts.
+	indexOfFqns := map[string]bool{
+		"java.lang.String": true, "java.util.List": true, "java.util.ArrayList": true,
+		"java.util.LinkedList": true, "java.util.Vector": true, "java.util.Stack": true,
+	}
+	isNegativeOne := func(n *Node) bool {
+		return n.Kind == PrefixUnaryExpression &&
+			n.AsPrefixUnaryExpression().Operator == MinusToken &&
+			n.AsPrefixUnaryExpression().Operand.Kind == NumericLiteral &&
+			n.AsPrefixUnaryExpression().Operand.AsLiteralExpression().Value == "1"
+	}
+	indexOfCall := func(n *Node) *Node {
+		if n.Kind != CallExpression || nodeArrayLen(n.AsCallExpression().Arguments) != 1 {
+			return nil
+		}
+		fqn, name, ok := memberCallTarget(n)
+		if !ok || name != "indexOf" || !indexOfFqns[fqn] {
+			return nil
+		}
+		return n
+	}
+	checkIndexOfComparedToNegativeOne := func(bin *Node) {
+		b := bin.AsBinaryExpression()
+		if b.OperatorToken != EqualsEqualsToken && b.OperatorToken != ExclamationEqualsToken {
+			return
+		}
+		var call *Node
+		if isNegativeOne(b.Right) {
+			call = indexOfCall(b.Left)
+		} else if isNegativeOne(b.Left) {
+			call = indexOfCall(b.Right)
+		}
+		if call == nil {
+			return
+		}
+		access := call.AsCallExpression().Expression.AsPropertyAccessExpression()
+		text := sourceFile.AsSourceFile().Text
+		receiverStart := SkipTrivia(text, access.Expression.Pos)
+		receiverText := text[receiverStart:access.Expression.End]
+		arg := call.AsCallExpression().Arguments.Nodes[0]
+		argStart := SkipTrivia(text, arg.Pos)
+		argText := text[argStart:arg.End]
+		negate := b.OperatorToken == EqualsEqualsToken
+		start := SkipTrivia(text, bin.Pos)
+		before := text[start:bin.End]
+		after := receiverText + ".contains(" + argText + ")"
+		if negate {
+			after = "!" + after
+		}
+		diagnostics = append(diagnostics, CreateDiagnostic(start, bin.End-start,
+			Diagnostics.IndexOfCheck0CanBeReplacedWith1, before, after))
+	}
+
+	// Redundant new String(...) (nikeee/cappu#42). Ports checkRedundantNewString
+	// in src/compiler/checker.ts.
+	checkRedundantNewString := func(node *Node) {
+		oce := node.AsObjectCreationExpression()
+		if oce.ClassBody != nil || oce.Qualifier != nil || oce.Type.Kind != TypeReference {
+			return
+		}
+		t := c.resolveType(oce.Type, node)
+		if t.Kind != TypeKindClass || c.fqnOf(t) != "java.lang.String" {
+			return
+		}
+		text := sourceFile.AsSourceFile().Text
+		start := SkipTrivia(text, node.Pos)
+		before := text[start:node.End]
+		var after string
+		switch nodeArrayLen(oce.Arguments) {
+		case 0:
+			after = `""`
+		case 1:
+			arg := oce.Arguments.Nodes[0]
+			if !isStringType(arg) {
+				return // byte[]/char[] conversion: a real conversion, not redundant
+			}
+			argStart := SkipTrivia(text, arg.Pos)
+			after = text[argStart:arg.End]
+		default:
+			return
+		}
+		diagnostics = append(diagnostics, CreateDiagnostic(start, node.End-start,
+			Diagnostics.NewString0CanBeReplacedWith1, before, after))
+	}
+
+	// equals("") -> isEmpty() (nikeee/cappu#42). `s.equals("")` autofixes
+	// (code_actions.go); `"".equals(s)` is a deliberate null-safe idiom - warn
+	// only, no autofix. Ports checkEqualsEmptyString in src/compiler/checker.ts.
+	isEmptyStringLiteral := func(n *Node) bool {
+		return n.Kind == StringLiteral && n.AsLiteralExpression().Value == ""
+	}
+	checkEqualsEmptyString := func(call *Node) {
+		ce := call.AsCallExpression()
+		if ce.Expression.Kind != PropertyAccessExpression {
+			return
+		}
+		access := ce.Expression.AsPropertyAccessExpression()
+		if access.Name.AsIdentifier().Text != "equals" || nodeArrayLen(ce.Arguments) != 1 {
+			return
+		}
+		arg := ce.Arguments.Nodes[0]
+		var receiver *Node
+		switch {
+		case isEmptyStringLiteral(arg) && isStringType(access.Expression):
+			receiver = access.Expression // s.equals("")
+		case isEmptyStringLiteral(access.Expression) && isStringType(arg):
+			receiver = arg // "".equals(s)
+		default:
+			return
+		}
+		text := sourceFile.AsSourceFile().Text
+		receiverStart := SkipTrivia(text, receiver.Pos)
+		receiverText := text[receiverStart:receiver.End]
+		start := SkipTrivia(text, call.Pos)
+		before := text[start:call.End]
+		after := receiverText + ".isEmpty()"
+		diagnostics = append(diagnostics, CreateDiagnostic(start, call.End-start,
+			Diagnostics.EqualsEmpty0CanBeReplacedWith1, before, after))
+	}
+
+	// Self-comparison (nikeee/cappu#42): restricted to call-free "stable read"
+	// shapes (Identifier, or a this/field-access chain) so `next() == next()` -
+	// two calls that happen to read the same text but aren't provably the same
+	// value - is left alone. No autofix. Ports stableReadText and the two
+	// checkSelfComparison* functions in src/compiler/checker.ts.
+	var stableReadText func(n *Node) (string, bool)
+	stableReadText = func(n *Node) (string, bool) {
+		switch n.Kind {
+		case Identifier:
+			return n.AsIdentifier().Text, true
+		case ThisExpression:
+			return "this", true
+		case PropertyAccessExpression:
+			pa := n.AsPropertyAccessExpression()
+			base, ok := stableReadText(pa.Expression)
+			if !ok {
+				return "", false
+			}
+			return base + "." + pa.Name.AsIdentifier().Text, true
+		default:
+			return "", false
+		}
+	}
+	selfComparisonOps := map[SyntaxKind]bool{
+		EqualsEqualsToken: true, ExclamationEqualsToken: true,
+		GreaterThanToken: true, LessThanToken: true,
+		GreaterThanEqualsToken: true, LessThanEqualsToken: true,
+	}
+	checkSelfComparisonBinary := func(bin *Node) {
+		b := bin.AsBinaryExpression()
+		if !selfComparisonOps[b.OperatorToken] {
+			return
+		}
+		leftText, leftOk := stableReadText(b.Left)
+		rightText, rightOk := stableReadText(b.Right)
+		if !leftOk || !rightOk || leftText != rightText {
+			return
+		}
+		text := sourceFile.AsSourceFile().Text
+		start := SkipTrivia(text, bin.Pos)
+		diagnostics = append(diagnostics, CreateDiagnostic(start, bin.End-start,
+			Diagnostics.SuspiciousSelfComparison0, leftText))
+	}
+	checkSelfComparisonCall := func(call *Node) {
+		ce := call.AsCallExpression()
+		if ce.Expression.Kind != PropertyAccessExpression {
+			return
+		}
+		access := ce.Expression.AsPropertyAccessExpression()
+		name := access.Name.AsIdentifier().Text
+		if (name != "equals" && name != "compareTo") || nodeArrayLen(ce.Arguments) != 1 {
+			return
+		}
+		receiverText, receiverOk := stableReadText(access.Expression)
+		argText, argOk := stableReadText(ce.Arguments.Nodes[0])
+		if !receiverOk || !argOk || receiverText != argText {
+			return
+		}
+		text := sourceFile.AsSourceFile().Text
+		start := SkipTrivia(text, call.Pos)
+		diagnostics = append(diagnostics, CreateDiagnostic(start, call.End-start,
+			Diagnostics.SuspiciousSelfComparison0, receiverText))
+	}
+
 	var visit func(node *Node)
 	visit = func(node *Node) {
 		switch node.Kind {
+		case BinaryExpression:
+			if cleanParse {
+				checkCountComparedToZero(node)
+				checkStringEquality(node)
+				checkIndexOfComparedToNegativeOne(node)
+				checkSelfComparisonBinary(node)
+			}
 		case VariableDeclarator:
 			d := node.AsVariableDeclarator()
 			if d.Initializer != nil && node.Symbol != nil && d.Initializer.Kind != ArrayInitializer {
@@ -1371,10 +1771,15 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 				checkDateTimeCall(node)
 				checkNumberParseCall(node)
 				checkOptionalIfPresentCall(node)
+				checkOptionalGetCall(node)
+				checkEqualsEmptyString(node)
+				checkSelfComparisonCall(node)
 			}
 		case ObjectCreationExpression:
 			if cleanParse {
 				checkCreationArity(node)
+				checkBoxingConstructor(node)
+				checkRedundantNewString(node)
 			}
 		case ReturnStatement:
 			r := node.AsReturnStatement()

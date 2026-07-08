@@ -1131,3 +1131,250 @@ test("null check: not offered outside statement position", () => {
     "import java.util.Optional;\nclass T {\n  Runnable r(String s) {\n    return () -> Optional.ofNullable(s).ifPresent(v -> System.out.println(v));\n  }\n}";
   expect(nullCheckActions(setup(text))).toEqual([]);
 });
+
+// --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
+
+function countCheckActions(ctx: ReturnType<typeof setup>, needle: string) {
+  return actionsAt(ctx, needle).filter(a => a.title === "Replace with isEmpty() check");
+}
+
+test("count check: size() == 0 rewrites to isEmpty()", () => {
+  const text =
+    "import java.util.List;\nimport java.util.ArrayList;\nclass T {\n  void m(List<String> xs) {\n    if (xs.size() == 0) {}\n  }\n}";
+  const ctx = setup(text);
+  const actions = countCheckActions(ctx, "size()");
+  expect(actions.length).toBe(1);
+  expect(actions[0]!.kind).toBe("quickfix");
+  expectEdit(
+    text,
+    actions[0]!,
+    "import java.util.List;\nimport java.util.ArrayList;\nclass T {\n  void m(List<String> xs) {\n    if (xs.isEmpty()) {}\n  }\n}",
+  );
+});
+
+test("count check: size() > 0 rewrites to !isEmpty()", () => {
+  const text =
+    "import java.util.List;\nclass T {\n  void m(List<String> xs) {\n    if (xs.size() > 0) {}\n  }\n}";
+  const ctx = setup(text);
+  const actions = countCheckActions(ctx, "size()");
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "import java.util.List;\nclass T {\n  void m(List<String> xs) {\n    if (!xs.isEmpty()) {}\n  }\n}",
+  );
+});
+
+test("count check: literal-on-left rewrites correctly", () => {
+  const text =
+    "import java.util.List;\nclass T {\n  void m(List<String> xs) {\n    if (0 == xs.size()) {}\n  }\n}";
+  const ctx = setup(text);
+  const actions = countCheckActions(ctx, "size()");
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "import java.util.List;\nclass T {\n  void m(List<String> xs) {\n    if (xs.isEmpty()) {}\n  }\n}",
+  );
+});
+
+test("count check: String.length() == 0 rewrites to isEmpty()", () => {
+  const text = "class T {\n  void m(String s) {\n    if (s.length() == 0) {}\n  }\n}";
+  const ctx = setup(text);
+  const actions = countCheckActions(ctx, "length()");
+  expect(actions.length).toBe(1);
+  expectEdit(text, actions[0]!, "class T {\n  void m(String s) {\n    if (s.isEmpty()) {}\n  }\n}");
+});
+
+test("count check: not offered for an unrecognized combo", () => {
+  const text =
+    "import java.util.List;\nclass T {\n  void m(List<String> xs) {\n    if (xs.size() == 2) {}\n  }\n}";
+  expect(countCheckActions(setup(text), "size()")).toEqual([]);
+});
+
+// --- == / != on Strings -> equals() (nikeee/cappu#42) --------------------------
+
+function stringEqActions(ctx: ReturnType<typeof setup>, needle: string) {
+  return actionsAt(ctx, needle).filter(a => a.title.startsWith("Replace with"));
+}
+
+test("string ==: simple identifiers rewrite to equals()", () => {
+  const text = "class T {\n  void m(String a, String b) {\n    if (a == b) {}\n  }\n}";
+  const ctx = setup(text);
+  const actions = stringEqActions(ctx, "a == b");
+  expect(actions.length).toBe(1);
+  expect(actions[0]!.kind).toBe("quickfix");
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  void m(String a, String b) {\n    if (a.equals(b)) {}\n  }\n}",
+  );
+});
+
+test("string !=: rewrites to negated equals()", () => {
+  const text = "class T {\n  void m(String a, String b) {\n    if (a != b) {}\n  }\n}";
+  const ctx = setup(text);
+  const actions = stringEqActions(ctx, "a != b");
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  void m(String a, String b) {\n    if (!a.equals(b)) {}\n  }\n}",
+  );
+});
+
+test("string ==: a non-primary left operand is parenthesized", () => {
+  const text =
+    "class T {\n  void m(String a, String b, String c) {\n    if (a + b == c) {}\n  }\n}";
+  const ctx = setup(text);
+  const actions = stringEqActions(ctx, "==");
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  void m(String a, String b, String c) {\n    if ((a + b).equals(c)) {}\n  }\n}",
+  );
+});
+
+test("string ==: not offered against null", () => {
+  const text = "class T {\n  void m(String a) {\n    if (a == null) {}\n  }\n}";
+  expect(stringEqActions(setup(text), "a == null")).toEqual([]);
+});
+
+test("string ==: not offered for non-String operands", () => {
+  const text = "class T {\n  void m(int a, int b) {\n    if (a == b) {}\n  }\n}";
+  expect(stringEqActions(setup(text), "a == b")).toEqual([]);
+});
+
+// --- boxing constructors -> valueOf() (nikeee/cappu#42) ------------------------
+
+function boxingActions(ctx: ReturnType<typeof setup>, needle: string) {
+  return actionsAt(ctx, needle).filter(a => a.title === "Replace with valueOf()");
+}
+
+test("boxing ctor: new Integer(5) rewrites to Integer.valueOf(5)", () => {
+  const text = "class T {\n  void m() {\n    Integer i = new Integer(5);\n  }\n}";
+  const ctx = setup(text);
+  const actions = boxingActions(ctx, "new Integer");
+  expect(actions.length).toBe(1);
+  expect(actions[0]!.kind).toBe("quickfix");
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  void m() {\n    Integer i = Integer.valueOf(5);\n  }\n}",
+  );
+});
+
+test("boxing ctor: new Boolean(true) rewrites to Boolean.valueOf(true)", () => {
+  const text = "class T {\n  void m() {\n    Boolean b = new Boolean(true);\n  }\n}";
+  const ctx = setup(text);
+  const actions = boxingActions(ctx, "new Boolean");
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  void m() {\n    Boolean b = Boolean.valueOf(true);\n  }\n}",
+  );
+});
+
+test("boxing ctor: not offered for a non-boxing type", () => {
+  const text =
+    "import java.util.List;\nimport java.util.ArrayList;\nclass T {\n  void m() {\n    List<String> xs = new ArrayList<>();\n  }\n}";
+  expect(boxingActions(setup(text), "new ArrayList")).toEqual([]);
+});
+
+// --- indexOf(...) != -1 -> contains(...) (nikeee/cappu#42) ---------------------
+
+function indexOfActions(ctx: ReturnType<typeof setup>, needle: string) {
+  return actionsAt(ctx, needle).filter(a => a.title === "Replace with contains()");
+}
+
+test("indexOf: != -1 rewrites to contains()", () => {
+  const text = 'class T {\n  void m(String s) {\n    if (s.indexOf("a") != -1) {}\n  }\n}';
+  const ctx = setup(text);
+  const actions = indexOfActions(ctx, "indexOf");
+  expect(actions.length).toBe(1);
+  expect(actions[0]!.kind).toBe("quickfix");
+  expectEdit(
+    text,
+    actions[0]!,
+    'class T {\n  void m(String s) {\n    if (s.contains("a")) {}\n  }\n}',
+  );
+});
+
+test("indexOf: == -1 rewrites to negated contains()", () => {
+  const text = 'class T {\n  void m(String s) {\n    if (s.indexOf("a") == -1) {}\n  }\n}';
+  const ctx = setup(text);
+  const actions = indexOfActions(ctx, "indexOf");
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    'class T {\n  void m(String s) {\n    if (!s.contains("a")) {}\n  }\n}',
+  );
+});
+
+test("indexOf: literal-on-left rewrites correctly", () => {
+  const text = 'class T {\n  void m(String s) {\n    if (-1 != s.indexOf("a")) {}\n  }\n}';
+  const ctx = setup(text);
+  const actions = indexOfActions(ctx, "indexOf");
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    'class T {\n  void m(String s) {\n    if (s.contains("a")) {}\n  }\n}',
+  );
+});
+
+test("indexOf: not offered against a non-negative-one literal", () => {
+  const text = 'class T {\n  void m(String s) {\n    if (s.indexOf("a") != 0) {}\n  }\n}';
+  expect(indexOfActions(setup(text), "indexOf")).toEqual([]);
+});
+
+// --- redundant new String(...) (nikeee/cappu#42) --------------------------------
+
+function newStringActions(ctx: ReturnType<typeof setup>, needle: string) {
+  return actionsAt(ctx, needle).filter(a => a.title === "Remove redundant String wrapper");
+}
+
+test("new String(): rewrites to an empty string literal", () => {
+  const text = "class T {\n  void m() {\n    String s = new String();\n  }\n}";
+  const ctx = setup(text);
+  const actions = newStringActions(ctx, "new String");
+  expect(actions.length).toBe(1);
+  expect(actions[0]!.kind).toBe("quickfix");
+  expectEdit(text, actions[0]!, 'class T {\n  void m() {\n    String s = "";\n  }\n}');
+});
+
+test("new String(x): unwraps to the argument", () => {
+  const text = "class T {\n  void m(String a) {\n    String b = new String(a);\n  }\n}";
+  const ctx = setup(text);
+  const actions = newStringActions(ctx, "new String");
+  expect(actions.length).toBe(1);
+  expectEdit(text, actions[0]!, "class T {\n  void m(String a) {\n    String b = a;\n  }\n}");
+});
+
+test("new String(bytes): not offered (real conversion)", () => {
+  const text = "class T {\n  void m(byte[] bs) {\n    String s = new String(bs);\n  }\n}";
+  expect(newStringActions(setup(text), "new String")).toEqual([]);
+});
+
+// --- equals("") -> isEmpty() (nikeee/cappu#42) ----------------------------------
+
+function equalsEmptyActions(ctx: ReturnType<typeof setup>, needle: string) {
+  return actionsAt(ctx, needle).filter(a => a.title === "Replace with isEmpty()");
+}
+
+test('equals empty: s.equals("") rewrites to s.isEmpty()', () => {
+  const text = 'class T {\n  void m(String s) {\n    if (s.equals("")) {}\n  }\n}';
+  const ctx = setup(text);
+  const actions = equalsEmptyActions(ctx, "equals");
+  expect(actions.length).toBe(1);
+  expect(actions[0]!.kind).toBe("quickfix");
+  expectEdit(text, actions[0]!, "class T {\n  void m(String s) {\n    if (s.isEmpty()) {}\n  }\n}");
+});
+
+test('equals empty: "".equals(s) is not offered an autofix (null-safety changes)', () => {
+  const text = 'class T {\n  void m(String s) {\n    if ("".equals(s)) {}\n  }\n}';
+  expect(equalsEmptyActions(setup(text), "equals")).toEqual([]);
+});
