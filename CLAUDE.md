@@ -165,6 +165,8 @@ normal run just reads the JSON and disassembles the baselined classes (seconds).
   timestamp, e.g. `- 2026-06-08 12:41 — <prompt>` (run `date "+%Y-%m-%d %H:%M"`).
 - Add the triggering prompt(s) verbatim to the bottom of every commit message,
   after a `---` separator, prefixed with `Prompt:`.
+- When a commit resolves a GitHub issue, close it via a `Resolves #<nr>` (or
+  `Closes #<nr>`) clause in the commit message, never by posting a comment.
 
 ## Final Notices
 - NEVER use the `npx` command under any circumstances. It is strictly blocked by security policies on our system.
