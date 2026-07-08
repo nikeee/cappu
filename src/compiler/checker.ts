@@ -3183,6 +3183,37 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       );
     };
 
+    // --- boxed reference == comparison -> equals() (nikeee/cappu#42 follow-up) --
+    // A classic reference-vs-value bug: two boxed values compare by identity, and
+    // only Byte/Short/Integer(-128..127)/Long(-128..127)/Character/Boolean are
+    // cached, so this often "works" in testing and breaks past that range.
+    const isBoxedType = (n: Node): boolean => {
+      const t = getTypeOfExpression(n);
+      return t.kind === TypeKind.Class && BOXING_TYPES.has(fqnOf(t as ClassType));
+    };
+    const checkBoxedEquality = (bin: BinaryExpression): void => {
+      if (
+        bin.operatorToken !== SyntaxKind.EqualsEqualsToken &&
+        bin.operatorToken !== SyntaxKind.ExclamationEqualsToken
+      ) {
+        return;
+      }
+      if (bin.left.kind === SyntaxKind.NullKeyword || bin.right.kind === SyntaxKind.NullKeyword) {
+        return;
+      }
+      if (!isBoxedType(bin.left) || !isBoxedType(bin.right)) return;
+      const opText = bin.operatorToken === SyntaxKind.EqualsEqualsToken ? "==" : "!=";
+      const start = skipTrivia(sourceFile.text, bin.pos);
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          bin.end - start,
+          Diagnostics.Boxed_types_should_be_compared_with_equals_not_0,
+          opText,
+        ),
+      );
+    };
+
     // --- indexOf(...) != -1 -> contains(...) (nikeee/cappu#42) -----------------
     const INDEXOF_FQNS = new Set([
       "java.lang.String",
@@ -3372,6 +3403,7 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
             checkStringEquality(node as BinaryExpression);
             checkIndexOfComparedToNegativeOne(node as BinaryExpression);
             checkSelfComparisonBinary(node as BinaryExpression);
+            checkBoxedEquality(node as BinaryExpression);
           }
           break;
         case SyntaxKind.VariableDeclarator: {

@@ -24,6 +24,15 @@ const INDEXOF_CHECK = Diagnostics.IndexOf_check_0_can_be_replaced_with_1.code;
 const NEW_STRING = Diagnostics.New_String_0_can_be_replaced_with_1.code;
 const EQUALS_EMPTY = Diagnostics.Equals_empty_0_can_be_replaced_with_1.code;
 const SELF_COMPARISON = Diagnostics.Suspicious_self_comparison_0.code;
+const BOXED_EQ = Diagnostics.Boxed_types_should_be_compared_with_equals_not_0.code;
+const EMPTY_CATCH = Diagnostics.Empty_catch_block_for_0.code;
+const OPTIONAL_OF_NULL = Diagnostics.Optional_of_null_always_throws.code;
+const BOOL_COMPARISON = Diagnostics.Redundant_boolean_comparison_0_can_be_replaced_with_1.code;
+const IF_ELSE_BOOL = Diagnostics.If_else_returning_booleans_0_can_be_replaced_with_1.code;
+const TERNARY_BOOL = Diagnostics.Ternary_with_boolean_literals_0_can_be_replaced_with_1.code;
+const COLLAPSIBLE_IF = Diagnostics.Nested_if_can_be_collapsed_to_if_0.code;
+const OPTIONAL_TYPE = Diagnostics._0_1_should_not_be_of_type_Optional.code;
+const INDEXED_LOOP = Diagnostics.Indexed_loop_over_0_can_be_a_for_each_loop.code;
 
 const WANTED = new Set<number>([
   BAD_REGEX,
@@ -41,6 +50,15 @@ const WANTED = new Set<number>([
   NEW_STRING,
   EQUALS_EMPTY,
   SELF_COMPARISON,
+  BOXED_EQ,
+  EMPTY_CATCH,
+  OPTIONAL_OF_NULL,
+  BOOL_COMPARISON,
+  IF_ELSE_BOOL,
+  TERNARY_BOOL,
+  COLLAPSIBLE_IF,
+  OPTIONAL_TYPE,
+  INDEXED_LOOP,
 ]);
 
 const IMPORTS =
@@ -352,4 +370,22 @@ test("calls that happen to read the same text are not flagged (unprovable)", () 
   expect(diagnoseClass("int next() { return 1; } void m() { if (next() == next()) {} }")).toEqual(
     [],
   );
+});
+
+// --- boxed reference == comparison -> equals() (nikeee/cappu#42 follow-up) -----
+
+test("Integer == Integer is flagged", () => {
+  expect(diagnose("Integer a = 1000; Integer b = 1000; if (a == b) {}")).toContain(BOXED_EQ);
+});
+
+test("Integer != Integer is flagged", () => {
+  expect(diagnose("Integer a = 1000; Integer b = 1000; if (a != b) {}")).toContain(BOXED_EQ);
+});
+
+test("Integer == int (unboxes safely) is silent", () => {
+  expect(diagnose("Integer a = 1000; int b = 1000; if (a == b) {}")).toEqual([]);
+});
+
+test("Integer == null is silent", () => {
+  expect(diagnose("Integer a = 1000; if (a == null) {}")).toEqual([]);
 });

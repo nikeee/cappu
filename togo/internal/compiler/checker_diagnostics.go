@@ -1536,6 +1536,35 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			Diagnostics.BoxingConstructorNew0IsDeprecated, typeName))
 	}
 
+	// Boxed reference == comparison -> equals() (nikeee/cappu#42 follow-up): a
+	// classic reference-vs-value bug; only some boxed values are cached, so this
+	// often "works" in testing and breaks past that range. Ports
+	// checkBoxedEquality in src/compiler/checker.ts.
+	isBoxedType := func(n *Node) bool {
+		t := c.getTypeOfExpression(n)
+		return t.Kind == TypeKindClass && boxingTypes[c.fqnOf(t)]
+	}
+	checkBoxedEquality := func(bin *Node) {
+		b := bin.AsBinaryExpression()
+		if b.OperatorToken != EqualsEqualsToken && b.OperatorToken != ExclamationEqualsToken {
+			return
+		}
+		if b.Left.Kind == NullKeyword || b.Right.Kind == NullKeyword {
+			return
+		}
+		if !isBoxedType(b.Left) || !isBoxedType(b.Right) {
+			return
+		}
+		opText := "!="
+		if b.OperatorToken == EqualsEqualsToken {
+			opText = "=="
+		}
+		text := sourceFile.AsSourceFile().Text
+		start := SkipTrivia(text, bin.Pos)
+		diagnostics = append(diagnostics, CreateDiagnostic(start, bin.End-start,
+			Diagnostics.BoxedTypesShouldBeComparedWithEqualsNot0, opText))
+	}
+
 	// indexOf(...) != -1 -> contains(...) (nikeee/cappu#42). Ports
 	// checkIndexOfComparedToNegativeOne in src/compiler/checker.ts.
 	indexOfFqns := map[string]bool{
@@ -1730,6 +1759,7 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 				checkStringEquality(node)
 				checkIndexOfComparedToNegativeOne(node)
 				checkSelfComparisonBinary(node)
+				checkBoxedEquality(node)
 			}
 		case VariableDeclarator:
 			d := node.AsVariableDeclarator()

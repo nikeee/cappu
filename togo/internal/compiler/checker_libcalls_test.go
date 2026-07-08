@@ -19,6 +19,16 @@ var (
 	newString            = int(Diagnostics.NewString0CanBeReplacedWith1.Code)
 	equalsEmpty          = int(Diagnostics.EqualsEmpty0CanBeReplacedWith1.Code)
 	selfComparison       = int(Diagnostics.SuspiciousSelfComparison0.Code)
+
+	boxedEq        = int(Diagnostics.BoxedTypesShouldBeComparedWithEqualsNot0.Code)
+	emptyCatch     = int(Diagnostics.EmptyCatchBlockFor0.Code)
+	optionalOfNull = int(Diagnostics.OptionalOfNullAlwaysThrows.Code)
+	boolComparison = int(Diagnostics.RedundantBooleanComparison0CanBeReplacedWith1.Code)
+	ifElseBool     = int(Diagnostics.IfElseReturningBooleans0CanBeReplacedWith1.Code)
+	ternaryBool    = int(Diagnostics.TernaryWithBooleanLiterals0CanBeReplacedWith1.Code)
+	collapsibleIf  = int(Diagnostics.NestedIfCanBeCollapsedToIf0.Code)
+	optionalType   = int(Diagnostics.Type01ShouldNotBeOfTypeOptional.Code)
+	indexedLoop    = int(Diagnostics.IndexedLoopOver0CanBeAForEachLoop.Code)
 )
 
 const libcallImports = "import java.util.regex.Pattern; import java.time.format.DateTimeFormatter;" +
@@ -28,6 +38,8 @@ var libcallWanted = map[int]bool{
 	badRegex: true, badLetter: true, footgun: true, badNumber: true, badRadix: true, tooFew: true,
 	optionalNullCheck: true, optionalGetUnguarded: true, countCheck: true, stringEq: true,
 	boxingCtor: true, indexOfCheck: true, newString: true, equalsEmpty: true, selfComparison: true,
+	boxedEq: true, emptyCatch: true, optionalOfNull: true, boolComparison: true, ifElseBool: true,
+	ternaryBool: true, collapsibleIf: true, optionalType: true, indexedLoop: true,
 }
 
 func libcallDiagnose(body string) []int {
@@ -420,5 +432,33 @@ func TestSelfComparisonCallsNotFlagged(t *testing.T) {
 	got := libcallDiagnoseClass(`int next() { return 1; } void m() { if (next() == next()) {} }`)
 	if len(got) != 0 {
 		t.Errorf("want silent (unprovable), got %v", got)
+	}
+}
+
+// --- boxed reference == comparison -> equals() (nikeee/cappu#42 follow-up) -------
+
+func TestBoxedEqualsFlagged(t *testing.T) {
+	got := libcallDiagnose(`Integer a = 1000; Integer b = 1000; if (a == b) {}`)
+	if !containsCode(got, boxedEq) {
+		t.Error("want boxed-eq")
+	}
+}
+
+func TestBoxedNotEqualsFlagged(t *testing.T) {
+	got := libcallDiagnose(`Integer a = 1000; Integer b = 1000; if (a != b) {}`)
+	if !containsCode(got, boxedEq) {
+		t.Error("want boxed-eq")
+	}
+}
+
+func TestBoxedEqualsWithPrimitiveSilent(t *testing.T) {
+	if got := libcallDiagnose(`Integer a = 1000; int b = 1000; if (a == b) {}`); len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
+
+func TestBoxedEqualsAgainstNullSilent(t *testing.T) {
+	if got := libcallDiagnose(`Integer a = 1000; if (a == null) {}`); len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
 	}
 }

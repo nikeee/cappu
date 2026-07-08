@@ -1378,3 +1378,44 @@ test('equals empty: "".equals(s) is not offered an autofix (null-safety changes)
   const text = 'class T {\n  void m(String s) {\n    if ("".equals(s)) {}\n  }\n}';
   expect(equalsEmptyActions(setup(text), "equals")).toEqual([]);
 });
+
+// --- boxed reference == comparison -> equals() (nikeee/cappu#42 follow-up) -----
+
+function boxedEqActions(ctx: ReturnType<typeof setup>, needle: string) {
+  return actionsAt(ctx, needle).filter(a => a.title === "Replace with equals()");
+}
+
+test("boxed ==: simple identifiers rewrite to equals()", () => {
+  const text = "class T {\n  void m(Integer a, Integer b) {\n    if (a == b) {}\n  }\n}";
+  const ctx = setup(text);
+  const actions = boxedEqActions(ctx, "a == b");
+  expect(actions.length).toBe(1);
+  expect(actions[0]!.kind).toBe("quickfix");
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  void m(Integer a, Integer b) {\n    if (a.equals(b)) {}\n  }\n}",
+  );
+});
+
+test("boxed !=: rewrites to negated equals()", () => {
+  const text = "class T {\n  void m(Integer a, Integer b) {\n    if (a != b) {}\n  }\n}";
+  const ctx = setup(text);
+  const actions = boxedEqActions(ctx, "a != b");
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  void m(Integer a, Integer b) {\n    if (!a.equals(b)) {}\n  }\n}",
+  );
+});
+
+test("boxed ==: not offered against null", () => {
+  const text = "class T {\n  void m(Integer a) {\n    if (a == null) {}\n  }\n}";
+  expect(boxedEqActions(setup(text), "a == null")).toEqual([]);
+});
+
+test("boxed ==: not offered when one side is primitive", () => {
+  const text = "class T {\n  void m(Integer a, int b) {\n    if (a == b) {}\n  }\n}";
+  expect(boxedEqActions(setup(text), "a == b")).toEqual([]);
+});

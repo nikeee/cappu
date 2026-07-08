@@ -859,6 +859,54 @@ func replaceStringEquality(checker *compiler.Checker, sf *compiler.Node, start i
 	}}
 }
 
+// --- boxed reference == comparison -> equals() (nikeee/cappu#42 follow-up) -----
+
+// Port of replaceBoxedEquality in src/services/codeActions.ts.
+func replaceBoxedEquality(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.BinaryExpression {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	bin := node.AsBinaryExpression()
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.BoxedTypesShouldBeComparedWithEqualsNot0.Code &&
+			d.Pos >= node.Pos && d.End <= node.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	negated := bin.OperatorToken == compiler.ExclamationEqualsToken
+	leftStart := compiler.SkipTrivia(data.Text, bin.Left.Pos)
+	leftText := data.Text[leftStart:bin.Left.End]
+	rightStart := compiler.SkipTrivia(data.Text, bin.Right.Pos)
+	rightText := data.Text[rightStart:bin.Right.End]
+	receiver := leftText
+	if !safeEqualsReceiverKinds[bin.Left.Kind] {
+		receiver = "(" + leftText + ")"
+	}
+	binStart := compiler.SkipTrivia(data.Text, node.Pos)
+	newText := receiver + ".equals(" + rightText + ")"
+	if negated {
+		newText = "!" + newText
+	}
+	return []CodeActionResult{{
+		Title:   "Replace with equals()",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: binStart, End: node.End, NewText: newText}},
+	}}
+}
+
 // --- boxing constructors (`new Integer(...)`, ...) -> valueOf() (nikeee/cappu#42) ---
 
 // Port of replaceBoxingConstructor in src/services/codeActions.ts.
@@ -2196,6 +2244,7 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	out = append(out, replaceOptionalIfPresentWithNullCheck(checker, sf, start)...)
 	out = append(out, replaceCountComparedToZero(checker, sf, start)...)
 	out = append(out, replaceStringEquality(checker, sf, start)...)
+	out = append(out, replaceBoxedEquality(checker, sf, start)...)
 	out = append(out, replaceBoxingConstructor(checker, sf, start)...)
 	out = append(out, replaceIndexOfComparedToNegativeOne(checker, sf, start)...)
 	out = append(out, removeRedundantNewString(checker, sf, start)...)

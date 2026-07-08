@@ -101,6 +101,15 @@ var Diagnostics = struct {
 	NewString0CanBeReplacedWith1                           DiagnosticMessage
 	EqualsEmpty0CanBeReplacedWith1                         DiagnosticMessage
 	SuspiciousSelfComparison0                              DiagnosticMessage
+	BoxedTypesShouldBeComparedWithEqualsNot0               DiagnosticMessage
+	EmptyCatchBlockFor0                                    DiagnosticMessage
+	OptionalOfNullAlwaysThrows                             DiagnosticMessage
+	RedundantBooleanComparison0CanBeReplacedWith1          DiagnosticMessage
+	IfElseReturningBooleans0CanBeReplacedWith1             DiagnosticMessage
+	TernaryWithBooleanLiterals0CanBeReplacedWith1          DiagnosticMessage
+	NestedIfCanBeCollapsedToIf0                            DiagnosticMessage
+	Type01ShouldNotBeOfTypeOptional                        DiagnosticMessage
+	IndexedLoopOver0CanBeAForEachLoop                      DiagnosticMessage
 }{
 	Expected0:                             diag(1001, "_0_expected", "'{0}' expected.", CategoryError),
 	IdentifierExpected:                    diag(1002, "Identifier_expected", "Identifier expected.", CategoryError),
@@ -148,6 +157,15 @@ var Diagnostics = struct {
 	NewString0CanBeReplacedWith1:                           diag(1324, "New_String_0_can_be_replaced_with_1", "'{0}' can be replaced with '{1}'.", CategoryWarning),
 	EqualsEmpty0CanBeReplacedWith1:                         diag(1325, "Equals_empty_0_can_be_replaced_with_1", "'{0}' can be replaced with '{1}'.", CategoryWarning),
 	SuspiciousSelfComparison0:                              diag(1326, "Suspicious_self_comparison_0", "'{0}' is compared to itself.", CategoryWarning),
+	BoxedTypesShouldBeComparedWithEqualsNot0:               diag(1327, "Boxed_types_should_be_compared_with_equals_not_0", "Boxed types should be compared with 'equals()', not '{0}'.", CategoryWarning),
+	EmptyCatchBlockFor0:                                    diag(1328, "Empty_catch_block_for_0", "The exception '{0}' is caught and silently discarded.", CategoryWarning),
+	OptionalOfNullAlwaysThrows:                             diag(1329, "Optional_of_null_always_throws", "'Optional.of(null)' always throws; use 'Optional.ofNullable(null)' or 'Optional.empty()'.", CategoryWarning),
+	RedundantBooleanComparison0CanBeReplacedWith1:          diag(1330, "Redundant_boolean_comparison_0_can_be_replaced_with_1", "'{0}' can be replaced with '{1}'.", CategoryWarning),
+	IfElseReturningBooleans0CanBeReplacedWith1:             diag(1331, "If_else_returning_booleans_0_can_be_replaced_with_1", "'{0}' can be replaced with '{1}'.", CategoryWarning),
+	TernaryWithBooleanLiterals0CanBeReplacedWith1:          diag(1332, "Ternary_with_boolean_literals_0_can_be_replaced_with_1", "'{0}' can be replaced with '{1}'.", CategoryWarning),
+	NestedIfCanBeCollapsedToIf0:                            diag(1333, "Nested_if_can_be_collapsed_to_if_0", "Nested 'if' statements can be collapsed to 'if ({0})'.", CategoryWarning),
+	Type01ShouldNotBeOfTypeOptional:                        diag(1334, "_0_1_should_not_be_of_type_Optional", "{0} '{1}' should not be of type 'Optional'; prefer a nullable type or an overload.", CategoryWarning),
+	IndexedLoopOver0CanBeAForEachLoop:                      diag(1335, "Indexed_loop_over_0_can_be_a_for_each_loop", "This indexed loop over '{0}' can be a for-each loop.", CategoryWarning),
 }
 
 var placeholderRe = regexp.MustCompile(`\{(\d+)\}`)

@@ -821,6 +821,49 @@ function replaceStringEquality(
   ];
 }
 
+// --- boxed reference == comparison -> equals() (nikeee/cappu#42 follow-up) -----
+
+function replaceBoxedEquality(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.BinaryExpression) node = node.parent;
+  if (!node) return [];
+  const bin = node as BinaryExpression;
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.Boxed_types_should_be_compared_with_equals_not_0.code &&
+        d.pos >= bin.pos &&
+        d.end <= bin.end,
+    );
+  if (!flagged) return [];
+  const negated = bin.operatorToken === SyntaxKind.ExclamationEqualsToken;
+  const leftStart = skipTrivia(sourceFile.text, bin.left.pos);
+  const leftText = sourceFile.text.slice(leftStart, bin.left.end);
+  const rightStart = skipTrivia(sourceFile.text, bin.right.pos);
+  const rightText = sourceFile.text.slice(rightStart, bin.right.end);
+  const receiver = SAFE_EQUALS_RECEIVER_KINDS.has(bin.left.kind) ? leftText : `(${leftText})`;
+  const binStart = skipTrivia(sourceFile.text, bin.pos);
+  return [
+    {
+      title: "Replace with equals()",
+      kind: "quickfix",
+      changes: [
+        {
+          start: binStart,
+          end: bin.end,
+          newText: `${negated ? "!" : ""}${receiver}.equals(${rightText})`,
+        },
+      ],
+    },
+  ];
+}
+
 // --- boxing constructors (`new Integer(...)`, ...) -> valueOf() (nikeee/cappu#42) ---
 
 function replaceBoxingConstructor(
@@ -1841,6 +1884,7 @@ export function getCodeActions(
     ...replaceOptionalIfPresentWithNullCheck(checker, sourceFile, start),
     ...replaceCountComparedToZero(checker, sourceFile, start),
     ...replaceStringEquality(checker, sourceFile, start),
+    ...replaceBoxedEquality(checker, sourceFile, start),
     ...replaceBoxingConstructor(checker, sourceFile, start),
     ...replaceIndexOfComparedToNegativeOne(checker, sourceFile, start),
     ...removeRedundantNewString(checker, sourceFile, start),

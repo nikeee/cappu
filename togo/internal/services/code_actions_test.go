@@ -1567,3 +1567,47 @@ func TestEqualsEmptyArgNotOffered(t *testing.T) {
 		t.Errorf("actions = %+v", actions)
 	}
 }
+
+// --- boxed reference == comparison -> equals() (nikeee/cappu#42 follow-up) -------
+
+func boxedEqActions(ctx *actionCtx, needle string) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range ctx.actionsAt(needle, 1) {
+		if a.Title == "Replace with equals()" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestBoxedEqSimpleIdentifiersRewrite(t *testing.T) {
+	text := "class T {\n  void m(Integer a, Integer b) {\n    if (a == b) {}\n  }\n}"
+	actions := boxedEqActions(actionsSetup(text, nil), "a == b")
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(Integer a, Integer b) {\n    if (a.equals(b)) {}\n  }\n}")
+}
+
+func TestBoxedNotEqRewritesNegated(t *testing.T) {
+	text := "class T {\n  void m(Integer a, Integer b) {\n    if (a != b) {}\n  }\n}"
+	actions := boxedEqActions(actionsSetup(text, nil), "a != b")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(Integer a, Integer b) {\n    if (!a.equals(b)) {}\n  }\n}")
+}
+
+func TestBoxedEqNotOfferedAgainstNull(t *testing.T) {
+	text := "class T {\n  void m(Integer a) {\n    if (a == null) {}\n  }\n}"
+	if actions := boxedEqActions(actionsSetup(text, nil), "a == null"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}
+
+func TestBoxedEqNotOfferedWithPrimitive(t *testing.T) {
+	text := "class T {\n  void m(Integer a, int b) {\n    if (a == b) {}\n  }\n}"
+	if actions := boxedEqActions(actionsSetup(text, nil), "a == b"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}

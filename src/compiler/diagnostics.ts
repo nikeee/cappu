@@ -231,6 +231,60 @@ export const Diagnostics = {
     "'{0}' is compared to itself.",
     DiagnosticCategory.Warning,
   ),
+  Boxed_types_should_be_compared_with_equals_not_0: diag(
+    1327,
+    "Boxed_types_should_be_compared_with_equals_not_0",
+    "Boxed types should be compared with 'equals()', not '{0}'.",
+    DiagnosticCategory.Warning,
+  ),
+  Empty_catch_block_for_0: diag(
+    1328,
+    "Empty_catch_block_for_0",
+    "The exception '{0}' is caught and silently discarded.",
+    DiagnosticCategory.Warning,
+  ),
+  Optional_of_null_always_throws: diag(
+    1329,
+    "Optional_of_null_always_throws",
+    "'Optional.of(null)' always throws; use 'Optional.ofNullable(null)' or 'Optional.empty()'.",
+    DiagnosticCategory.Warning,
+  ),
+  Redundant_boolean_comparison_0_can_be_replaced_with_1: diag(
+    1330,
+    "Redundant_boolean_comparison_0_can_be_replaced_with_1",
+    "'{0}' can be replaced with '{1}'.",
+    DiagnosticCategory.Warning,
+  ),
+  If_else_returning_booleans_0_can_be_replaced_with_1: diag(
+    1331,
+    "If_else_returning_booleans_0_can_be_replaced_with_1",
+    "'{0}' can be replaced with '{1}'.",
+    DiagnosticCategory.Warning,
+  ),
+  Ternary_with_boolean_literals_0_can_be_replaced_with_1: diag(
+    1332,
+    "Ternary_with_boolean_literals_0_can_be_replaced_with_1",
+    "'{0}' can be replaced with '{1}'.",
+    DiagnosticCategory.Warning,
+  ),
+  Nested_if_can_be_collapsed_to_if_0: diag(
+    1333,
+    "Nested_if_can_be_collapsed_to_if_0",
+    "Nested 'if' statements can be collapsed to 'if ({0})'.",
+    DiagnosticCategory.Warning,
+  ),
+  _0_1_should_not_be_of_type_Optional: diag(
+    1334,
+    "_0_1_should_not_be_of_type_Optional",
+    "{0} '{1}' should not be of type 'Optional'; prefer a nullable type or an overload.",
+    DiagnosticCategory.Warning,
+  ),
+  Indexed_loop_over_0_can_be_a_for_each_loop: diag(
+    1335,
+    "Indexed_loop_over_0_can_be_a_for_each_loop",
+    "This indexed loop over '{0}' can be a for-each loop.",
+    DiagnosticCategory.Warning,
+  ),
 } as const;
 
 /** Replace {0}, {1}, ... placeholders in a message template. */
