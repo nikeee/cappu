@@ -389,3 +389,17 @@ test("Integer == int (unboxes safely) is silent", () => {
 test("Integer == null is silent", () => {
   expect(diagnose("Integer a = 1000; if (a == null) {}")).toEqual([]);
 });
+
+// --- empty catch block (nikeee/cappu#42 follow-up) ------------------------------
+
+test("an empty catch block is flagged", () => {
+  expect(diagnose("try { m(); } catch (Exception e) {}")).toContain(EMPTY_CATCH);
+});
+
+test("a catch block with a statement is silent", () => {
+  expect(diagnose("try { m(); } catch (Exception e) { e.printStackTrace(); }")).toEqual([]);
+});
+
+test("a catch block containing only a comment is silent (assumed intentional)", () => {
+  expect(diagnose("try { m(); } catch (Exception e) { /* ignored intentionally */ }")).toEqual([]);
+});

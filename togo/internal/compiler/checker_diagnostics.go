@@ -1750,9 +1750,34 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			Diagnostics.SuspiciousSelfComparison0, receiverText))
 	}
 
+	// Empty catch block (nikeee/cappu#42 follow-up): a catch block with no
+	// statements silently discards the exception. A block containing only a
+	// comment is assumed intentional and left alone. Ports checkEmptyCatchBlocks
+	// in src/compiler/checker.ts.
+	checkEmptyCatchBlocks := func(tryStmt *Node) {
+		text := sourceFile.AsSourceFile().Text
+		for _, clause := range tryStmt.AsTryStatement().CatchClauses.Nodes {
+			cc := clause.AsCatchClause()
+			block := cc.Block.AsBlock()
+			if nodeArrayLen(block.Statements) > 0 {
+				continue
+			}
+			braceStart := SkipTrivia(text, cc.Block.Pos)
+			inner := strings.TrimSpace(text[braceStart+1 : cc.Block.End-1])
+			if inner != "" {
+				continue // a comment: assume intentional
+			}
+			start := SkipTrivia(text, clause.Pos)
+			diagnostics = append(diagnostics, CreateDiagnostic(start, clause.End-start,
+				Diagnostics.EmptyCatchBlockFor0, cc.Name.AsIdentifier().Text))
+		}
+	}
+
 	var visit func(node *Node)
 	visit = func(node *Node) {
 		switch node.Kind {
+		case TryStatement:
+			checkEmptyCatchBlocks(node)
 		case BinaryExpression:
 			if cleanParse {
 				checkCountComparedToZero(node)

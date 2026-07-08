@@ -462,3 +462,25 @@ func TestBoxedEqualsAgainstNullSilent(t *testing.T) {
 		t.Errorf("want silent, got %v", got)
 	}
 }
+
+// --- empty catch block (nikeee/cappu#42 follow-up) --------------------------------
+
+func TestEmptyCatchBlockFlagged(t *testing.T) {
+	if !containsCode(libcallDiagnose(`try { m(); } catch (Exception e) {}`), emptyCatch) {
+		t.Error("want empty-catch")
+	}
+}
+
+func TestCatchBlockWithStatementSilent(t *testing.T) {
+	got := libcallDiagnose(`try { m(); } catch (Exception e) { e.printStackTrace(); }`)
+	if len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
+
+func TestCatchBlockWithCommentSilent(t *testing.T) {
+	got := libcallDiagnose(`try { m(); } catch (Exception e) { /* ignored intentionally */ }`)
+	if len(got) != 0 {
+		t.Errorf("want silent (assumed intentional), got %v", got)
+	}
+}

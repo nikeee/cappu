@@ -85,6 +85,11 @@ import {
   type FieldDeclaration,
   type NodeArray,
   type PostfixUnaryExpression,
+  type Block,
+  type ForStatement,
+  type IfStatement,
+  type LocalVariableDeclarationStatement,
+  type TryStatement,
 } from "./types.ts";
 import { entityNameToString, skipTrivia, tokenToString } from "./utilities.ts";
 import { type DeprecatedUse, readDeprecation } from "./deprecation.ts";
@@ -3395,8 +3400,33 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       );
     };
 
+    // --- empty catch block (nikeee/cappu#42 follow-up) --------------------------
+    // A catch block with no statements silently discards the exception. A block
+    // containing only a comment is assumed intentional (the common convention
+    // for "why this is safe to ignore") and left alone.
+    const checkEmptyCatchBlocks = (tryStmt: TryStatement): void => {
+      for (const clause of tryStmt.catchClauses) {
+        if (clause.block.statements.length > 0) continue;
+        const braceStart = skipTrivia(sourceFile.text, clause.block.pos);
+        const inner = sourceFile.text.slice(braceStart + 1, clause.block.end - 1).trim();
+        if (inner.length > 0) continue; // a comment: assume intentional
+        const start = skipTrivia(sourceFile.text, clause.pos);
+        diagnostics.push(
+          createDiagnostic(
+            start,
+            clause.end - start,
+            Diagnostics.Empty_catch_block_for_0,
+            clause.name.text,
+          ),
+        );
+      }
+    };
+
     const visit = (node: Node): void => {
       switch (node.kind) {
+        case SyntaxKind.TryStatement:
+          checkEmptyCatchBlocks(node as TryStatement);
+          break;
         case SyntaxKind.BinaryExpression:
           if (sourceFile.parseDiagnostics.length === 0) {
             checkCountComparedToZero(node as BinaryExpression);
