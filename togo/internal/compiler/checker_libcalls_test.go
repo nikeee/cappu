@@ -611,3 +611,40 @@ func TestTernaryBoolNonLiteralSilent(t *testing.T) {
 		t.Errorf("want silent, got %v", got)
 	}
 }
+
+// --- collapsible nested if -> merge with && (nikeee/cappu#42 follow-up) ----------
+
+func TestCollapsibleIfBracedFlagged(t *testing.T) {
+	got := libcallDiagnose(`boolean a = true; boolean b = true; if (a) { if (b) { toString(); } }`)
+	if !containsCode(got, collapsibleIf) {
+		t.Error("want collapsible-if")
+	}
+}
+
+func TestCollapsibleIfBracelessFlagged(t *testing.T) {
+	got := libcallDiagnose(`boolean a = true; boolean b = true; if (a) if (b) toString();`)
+	if !containsCode(got, collapsibleIf) {
+		t.Error("want collapsible-if")
+	}
+}
+
+func TestCollapsibleIfInnerElseSilent(t *testing.T) {
+	got := libcallDiagnose(`boolean a = true; boolean b = true; if (a) { if (b) { toString(); } else { hashCode(); } }`)
+	if len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
+
+func TestCollapsibleIfOuterElseSilent(t *testing.T) {
+	got := libcallDiagnose(`boolean a = true; boolean b = true; if (a) { if (b) { toString(); } } else { hashCode(); }`)
+	if len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
+
+func TestCollapsibleIfExtraStatementSilent(t *testing.T) {
+	got := libcallDiagnose(`boolean a = true; boolean b = true; if (a) { if (b) { toString(); } hashCode(); }`)
+	if len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}

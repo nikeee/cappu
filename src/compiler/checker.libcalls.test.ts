@@ -491,3 +491,39 @@ test("cond ? true : true (same both times) is silent", () => {
 test("cond ? foo() : bar() (non-boolean-literal branches) is silent", () => {
   expect(diagnose("boolean a = true; Object r = a ? new Object() : new Object();")).toEqual([]);
 });
+
+// --- collapsible nested if -> merge with && (nikeee/cappu#42 follow-up) --------
+
+test("nested if with braces is flagged", () => {
+  expect(
+    diagnose("boolean a = true; boolean b = true; if (a) { if (b) { toString(); } }"),
+  ).toContain(COLLAPSIBLE_IF);
+});
+
+test("braceless nested if is flagged", () => {
+  expect(diagnose("boolean a = true; boolean b = true; if (a) if (b) toString();")).toContain(
+    COLLAPSIBLE_IF,
+  );
+});
+
+test("nested if with an inner else is silent", () => {
+  expect(
+    diagnose(
+      "boolean a = true; boolean b = true; if (a) { if (b) { toString(); } else { hashCode(); } }",
+    ),
+  ).toEqual([]);
+});
+
+test("nested if with an outer else is silent", () => {
+  expect(
+    diagnose(
+      "boolean a = true; boolean b = true; if (a) { if (b) { toString(); } } else { hashCode(); }",
+    ),
+  ).toEqual([]);
+});
+
+test("outer block with an extra statement is silent", () => {
+  expect(
+    diagnose("boolean a = true; boolean b = true; if (a) { if (b) { toString(); } hashCode(); }"),
+  ).toEqual([]);
+});

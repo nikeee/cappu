@@ -1768,3 +1768,47 @@ func TestTernaryBoolSameValueNotOffered(t *testing.T) {
 		t.Errorf("actions = %+v", actions)
 	}
 }
+
+// --- collapsible nested if -> merge with && (nikeee/cappu#42 follow-up) ----------
+
+func collapsibleIfActions(ctx *actionCtx, needle string) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range ctx.actionsAt(needle, 1) {
+		if a.Title == "Collapse nested if" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestCollapsibleIfBracedRewrites(t *testing.T) {
+	text := "class T {\n  void m(boolean a, boolean b) {\n    if (a) {\n      if (b) {\n        foo();\n      }\n    }\n  }\n}"
+	actions := collapsibleIfActions(actionsSetup(text, nil), "if (a)")
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(boolean a, boolean b) {\n    if ((a) && (b)) {\n        foo();\n      }\n  }\n}")
+}
+
+func TestCollapsibleIfBracelessRewrites(t *testing.T) {
+	text := "class T {\n  void m(boolean a, boolean b) {\n    if (a) if (b) foo();\n  }\n}"
+	actions := collapsibleIfActions(actionsSetup(text, nil), "if (a)")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(boolean a, boolean b) {\n    if ((a) && (b)) foo();\n  }\n}")
+}
+
+func TestCollapsibleIfInnerElseNotOffered(t *testing.T) {
+	text := "class T {\n  void m(boolean a, boolean b) {\n    if (a) { if (b) { foo(); } else { bar(); } }\n  }\n}"
+	if actions := collapsibleIfActions(actionsSetup(text, nil), "if (a)"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}
+
+func TestCollapsibleIfOuterElseNotOffered(t *testing.T) {
+	text := "class T {\n  void m(boolean a, boolean b) {\n    if (a) { if (b) { foo(); } } else { bar(); }\n  }\n}"
+	if actions := collapsibleIfActions(actionsSetup(text, nil), "if (a)"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}

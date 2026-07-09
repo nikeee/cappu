@@ -3565,6 +3565,41 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       );
     };
 
+    // --- collapsible nested if -> merge with && (nikeee/cappu#42 follow-up) ----
+    // `if (a) { if (b) { ... } }` -> `if (a && b) { ... }`. Both conditions are
+    // parenthesized unconditionally in the merged text: `&&` binds tighter than
+    // `||`/ternary, so a bare merge could silently reassociate a condition that
+    // contains one.
+    const singleStatementIf = (stmt: Node): IfStatement | undefined => {
+      if (stmt.kind === SyntaxKind.IfStatement) return stmt as IfStatement;
+      if (stmt.kind === SyntaxKind.Block) {
+        const statements = (stmt as Block).statements;
+        if (statements.length === 1 && statements[0]!.kind === SyntaxKind.IfStatement) {
+          return statements[0] as IfStatement;
+        }
+      }
+      return undefined;
+    };
+    const checkCollapsibleIf = (outer: IfStatement): void => {
+      if (outer.elseStatement) return;
+      const inner = singleStatementIf(outer.thenStatement);
+      if (!inner || inner.elseStatement) return;
+      const outerCondStart = skipTrivia(sourceFile.text, outer.condition.pos);
+      const outerCondText = sourceFile.text.slice(outerCondStart, outer.condition.end);
+      const innerCondStart = skipTrivia(sourceFile.text, inner.condition.pos);
+      const innerCondText = sourceFile.text.slice(innerCondStart, inner.condition.end);
+      const merged = `(${outerCondText}) && (${innerCondText})`;
+      const start = skipTrivia(sourceFile.text, outer.pos);
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          outer.end - start,
+          Diagnostics.Nested_if_can_be_collapsed_to_if_0,
+          merged,
+        ),
+      );
+    };
+
     const visit = (node: Node): void => {
       switch (node.kind) {
         case SyntaxKind.TryStatement:
@@ -3575,6 +3610,7 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
           break;
         case SyntaxKind.IfStatement:
           checkIfElseReturningBoolean(node as IfStatement);
+          checkCollapsibleIf(node as IfStatement);
           break;
         case SyntaxKind.BinaryExpression:
           if (sourceFile.parseDiagnostics.length === 0) {

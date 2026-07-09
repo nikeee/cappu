@@ -876,6 +876,65 @@ function replaceTernaryBooleanLiterals(
   ];
 }
 
+// --- collapsible nested if -> merge with && (nikeee/cappu#42 follow-up) --------
+
+// The sole `if` inside a statement, unwrapping one block layer if present, or
+// undefined otherwise.
+function singleStatementIf(stmt: Node): IfStatement | undefined {
+  if (stmt.kind === SyntaxKind.IfStatement) return stmt as IfStatement;
+  if (stmt.kind === SyntaxKind.Block) {
+    const statements = (stmt as Block).statements;
+    if (statements.length === 1 && statements[0]!.kind === SyntaxKind.IfStatement) {
+      return statements[0] as IfStatement;
+    }
+  }
+  return undefined;
+}
+
+function replaceCollapsibleIf(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.IfStatement) node = node.parent;
+  if (!node) return [];
+  const outer = node as IfStatement;
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.Nested_if_can_be_collapsed_to_if_0.code &&
+        d.pos >= outer.pos &&
+        d.end <= outer.end,
+    );
+  if (!flagged) return [];
+  if (outer.elseStatement) return [];
+  const inner = singleStatementIf(outer.thenStatement);
+  if (!inner || inner.elseStatement) return [];
+  const outerCondStart = skipTrivia(sourceFile.text, outer.condition.pos);
+  const outerCondText = sourceFile.text.slice(outerCondStart, outer.condition.end);
+  const innerCondStart = skipTrivia(sourceFile.text, inner.condition.pos);
+  const innerCondText = sourceFile.text.slice(innerCondStart, inner.condition.end);
+  const innerThenStart = skipTrivia(sourceFile.text, inner.thenStatement.pos);
+  const innerThenText = sourceFile.text.slice(innerThenStart, inner.thenStatement.end);
+  const outerStart = skipTrivia(sourceFile.text, outer.pos);
+  return [
+    {
+      title: "Collapse nested if",
+      kind: "quickfix",
+      changes: [
+        {
+          start: outerStart,
+          end: outer.end,
+          newText: `if ((${outerCondText}) && (${innerCondText})) ${innerThenText}`,
+        },
+      ],
+    },
+  ];
+}
+
 // --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
 
 // The receiver of a zero-arg `size()`/`length()` call, or undefined. FQN
@@ -2091,6 +2150,7 @@ export function getCodeActions(
     ...replaceBooleanComparison(checker, sourceFile, start),
     ...replaceIfElseReturningBoolean(checker, sourceFile, start),
     ...replaceTernaryBooleanLiterals(checker, sourceFile, start),
+    ...replaceCollapsibleIf(checker, sourceFile, start),
     ...replaceCountComparedToZero(checker, sourceFile, start),
     ...replaceStringEquality(checker, sourceFile, start),
     ...replaceBoxedEquality(checker, sourceFile, start),

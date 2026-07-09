@@ -1553,3 +1553,47 @@ test("ternary bool: not offered when both branches equal", () => {
   const text = "class T {\n  boolean m(boolean a) {\n    return a ? true : true;\n  }\n}";
   expect(ternaryBoolActions(setup(text), "a ? true")).toEqual([]);
 });
+
+// --- collapsible nested if -> merge with && (nikeee/cappu#42 follow-up) --------
+
+function collapsibleIfActions(ctx: ReturnType<typeof setup>, needle: string) {
+  return actionsAt(ctx, needle).filter(a => a.title === "Collapse nested if");
+}
+
+test("collapsible if: braced form merges conditions", () => {
+  const text =
+    "class T {\n  void m(boolean a, boolean b) {\n    if (a) {\n      if (b) {\n        foo();\n      }\n    }\n  }\n}";
+  const ctx = setup(text);
+  const actions = collapsibleIfActions(ctx, "if (a)");
+  expect(actions.length).toBe(1);
+  expect(actions[0]!.kind).toBe("quickfix");
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  void m(boolean a, boolean b) {\n    if ((a) && (b)) {\n        foo();\n      }\n  }\n}",
+  );
+});
+
+test("collapsible if: braceless form merges conditions", () => {
+  const text = "class T {\n  void m(boolean a, boolean b) {\n    if (a) if (b) foo();\n  }\n}";
+  const ctx = setup(text);
+  const actions = collapsibleIfActions(ctx, "if (a)");
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  void m(boolean a, boolean b) {\n    if ((a) && (b)) foo();\n  }\n}",
+  );
+});
+
+test("collapsible if: not offered when the inner if has an else", () => {
+  const text =
+    "class T {\n  void m(boolean a, boolean b) {\n    if (a) { if (b) { foo(); } else { bar(); } }\n  }\n}";
+  expect(collapsibleIfActions(setup(text), "if (a)")).toEqual([]);
+});
+
+test("collapsible if: not offered when the outer if has an else", () => {
+  const text =
+    "class T {\n  void m(boolean a, boolean b) {\n    if (a) { if (b) { foo(); } } else { bar(); }\n  }\n}";
+  expect(collapsibleIfActions(setup(text), "if (a)")).toEqual([]);
+});

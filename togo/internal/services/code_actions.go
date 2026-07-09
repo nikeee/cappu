@@ -929,6 +929,71 @@ func replaceTernaryBooleanLiterals(checker *compiler.Checker, sf *compiler.Node,
 	}}
 }
 
+// --- collapsible nested if -> merge with && (nikeee/cappu#42 follow-up) ----------
+
+// singleStatementIf returns the sole `if` inside a statement, unwrapping one
+// block layer if present, or nil otherwise.
+func singleStatementIf(stmt *compiler.Node) *compiler.Node {
+	if stmt.Kind == compiler.IfStatement {
+		return stmt
+	}
+	if stmt.Kind == compiler.Block {
+		statements := stmt.AsBlock().Statements
+		if statements.Len() == 1 && statements.Nodes[0].Kind == compiler.IfStatement {
+			return statements.Nodes[0]
+		}
+	}
+	return nil
+}
+
+// Port of replaceCollapsibleIf in src/services/codeActions.ts.
+func replaceCollapsibleIf(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.IfStatement {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.NestedIfCanBeCollapsedToIf0.Code &&
+			d.Pos >= node.Pos && d.End <= node.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	oi := node.AsIfStatement()
+	if oi.ElseStatement != nil {
+		return nil
+	}
+	inner := singleStatementIf(oi.ThenStatement)
+	if inner == nil || inner.AsIfStatement().ElseStatement != nil {
+		return nil
+	}
+	ii := inner.AsIfStatement()
+	outerCondStart := compiler.SkipTrivia(data.Text, oi.Condition.Pos)
+	outerCondText := data.Text[outerCondStart:oi.Condition.End]
+	innerCondStart := compiler.SkipTrivia(data.Text, ii.Condition.Pos)
+	innerCondText := data.Text[innerCondStart:ii.Condition.End]
+	innerThenStart := compiler.SkipTrivia(data.Text, ii.ThenStatement.Pos)
+	innerThenText := data.Text[innerThenStart:ii.ThenStatement.End]
+	outerStart := compiler.SkipTrivia(data.Text, node.Pos)
+	newText := "if ((" + outerCondText + ") && (" + innerCondText + ")) " + innerThenText
+	return []CodeActionResult{{
+		Title:   "Collapse nested if",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: outerStart, End: node.End, NewText: newText}},
+	}}
+}
+
 // --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
 
 // countCallReceiver returns the receiver of a zero-arg `size()`/`length()`
@@ -2494,6 +2559,7 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	out = append(out, replaceBooleanComparison(checker, sf, start)...)
 	out = append(out, replaceIfElseReturningBoolean(checker, sf, start)...)
 	out = append(out, replaceTernaryBooleanLiterals(checker, sf, start)...)
+	out = append(out, replaceCollapsibleIf(checker, sf, start)...)
 	out = append(out, replaceCountComparedToZero(checker, sf, start)...)
 	out = append(out, replaceStringEquality(checker, sf, start)...)
 	out = append(out, replaceBoxedEquality(checker, sf, start)...)

@@ -1896,6 +1896,43 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			Diagnostics.IfElseReturningBooleans0CanBeReplacedWith1, before, after))
 	}
 
+	// Collapsible nested if -> merge with && (nikeee/cappu#42 follow-up):
+	// `if (a) { if (b) { ... } }` -> `if (a && b) { ... }`. Both conditions are
+	// parenthesized unconditionally in the merged text. Ports
+	// singleStatementIf/checkCollapsibleIf in src/compiler/checker.ts.
+	singleStatementIf := func(stmt *Node) *Node {
+		if stmt.Kind == IfStatement {
+			return stmt
+		}
+		if stmt.Kind == Block {
+			statements := stmt.AsBlock().Statements
+			if nodeArrayLen(statements) == 1 && statements.Nodes[0].Kind == IfStatement {
+				return statements.Nodes[0]
+			}
+		}
+		return nil
+	}
+	checkCollapsibleIf := func(outer *Node) {
+		oi := outer.AsIfStatement()
+		if oi.ElseStatement != nil {
+			return
+		}
+		inner := singleStatementIf(oi.ThenStatement)
+		if inner == nil || inner.AsIfStatement().ElseStatement != nil {
+			return
+		}
+		ii := inner.AsIfStatement()
+		text := sourceFile.AsSourceFile().Text
+		outerCondStart := SkipTrivia(text, oi.Condition.Pos)
+		outerCondText := text[outerCondStart:oi.Condition.End]
+		innerCondStart := SkipTrivia(text, ii.Condition.Pos)
+		innerCondText := text[innerCondStart:ii.Condition.End]
+		merged := "(" + outerCondText + ") && (" + innerCondText + ")"
+		start := SkipTrivia(text, outer.Pos)
+		diagnostics = append(diagnostics, CreateDiagnostic(start, outer.End-start,
+			Diagnostics.NestedIfCanBeCollapsedToIf0, merged))
+	}
+
 	// Ternary with boolean literals (nikeee/cappu#42 follow-up): `cond ? true :
 	// false` -> `cond`; `cond ? false : true` -> `!cond`. Ports
 	// checkTernaryBooleanLiterals in src/compiler/checker.ts.
@@ -1933,6 +1970,7 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			checkTernaryBooleanLiterals(node)
 		case IfStatement:
 			checkIfElseReturningBoolean(node)
+			checkCollapsibleIf(node)
 		case BinaryExpression:
 			if cleanParse {
 				checkCountComparedToZero(node)
