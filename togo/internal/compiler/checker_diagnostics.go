@@ -1896,11 +1896,41 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			Diagnostics.IfElseReturningBooleans0CanBeReplacedWith1, before, after))
 	}
 
+	// Ternary with boolean literals (nikeee/cappu#42 follow-up): `cond ? true :
+	// false` -> `cond`; `cond ? false : true` -> `!cond`. Ports
+	// checkTernaryBooleanLiterals in src/compiler/checker.ts.
+	checkTernaryBooleanLiterals := func(expr *Node) {
+		ce := expr.AsConditionalExpression()
+		isBoolLiteral := func(n *Node) bool { return n.Kind == TrueKeyword || n.Kind == FalseKeyword }
+		if !isBoolLiteral(ce.WhenTrue) || !isBoolLiteral(ce.WhenFalse) {
+			return
+		}
+		whenTrueIsTrue := ce.WhenTrue.Kind == TrueKeyword
+		whenFalseIsTrue := ce.WhenFalse.Kind == TrueKeyword
+		if whenTrueIsTrue == whenFalseIsTrue {
+			return
+		}
+		negate := !whenTrueIsTrue
+		text := sourceFile.AsSourceFile().Text
+		start := SkipTrivia(text, expr.Pos)
+		before := text[start:expr.End]
+		condStart := SkipTrivia(text, ce.Condition.Pos)
+		condText := text[condStart:ce.Condition.End]
+		after := condText
+		if negate {
+			after = negatedText(ce.Condition, condText)
+		}
+		diagnostics = append(diagnostics, CreateDiagnostic(start, expr.End-start,
+			Diagnostics.TernaryWithBooleanLiterals0CanBeReplacedWith1, before, after))
+	}
+
 	var visit func(node *Node)
 	visit = func(node *Node) {
 		switch node.Kind {
 		case TryStatement:
 			checkEmptyCatchBlocks(node)
+		case ConditionalExpression:
+			checkTernaryBooleanLiterals(node)
 		case IfStatement:
 			checkIfElseReturningBoolean(node)
 		case BinaryExpression:

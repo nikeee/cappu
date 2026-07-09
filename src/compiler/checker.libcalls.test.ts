@@ -473,3 +473,21 @@ test("if without an else is silent", () => {
 test("if/else with non-boolean-literal returns is silent", () => {
   expect(diagnose("boolean a = true; if (a) { return foo(); } else { return bar(); }")).toEqual([]);
 });
+
+// --- ternary with boolean literals (nikeee/cappu#42 follow-up) -----------------
+
+test("cond ? true : false is flagged", () => {
+  expect(diagnose("boolean a = true; boolean r = a ? true : false;")).toContain(TERNARY_BOOL);
+});
+
+test("cond ? false : true is flagged (negated)", () => {
+  expect(diagnose("boolean a = true; boolean r = a ? false : true;")).toContain(TERNARY_BOOL);
+});
+
+test("cond ? true : true (same both times) is silent", () => {
+  expect(diagnose("boolean a = true; boolean r = a ? true : true;")).toEqual([]);
+});
+
+test("cond ? foo() : bar() (non-boolean-literal branches) is silent", () => {
+  expect(diagnose("boolean a = true; Object r = a ? new Object() : new Object();")).toEqual([]);
+});

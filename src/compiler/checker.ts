@@ -3538,10 +3538,40 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       );
     };
 
+    // --- ternary with boolean literals (nikeee/cappu#42 follow-up) -------------
+    // `cond ? true : false` -> `cond`; `cond ? false : true` -> `!cond`. Same
+    // whole-expression-replacement reasoning as the boolean-comparison rule.
+    const checkTernaryBooleanLiterals = (expr: ConditionalExpression): void => {
+      const isBoolLiteral = (n: Node) =>
+        n.kind === SyntaxKind.TrueKeyword || n.kind === SyntaxKind.FalseKeyword;
+      if (!isBoolLiteral(expr.whenTrue) || !isBoolLiteral(expr.whenFalse)) return;
+      const whenTrueIsTrue = expr.whenTrue.kind === SyntaxKind.TrueKeyword;
+      const whenFalseIsTrue = expr.whenFalse.kind === SyntaxKind.TrueKeyword;
+      if (whenTrueIsTrue === whenFalseIsTrue) return; // degenerate: both branches equal
+      const negate = !whenTrueIsTrue;
+      const start = skipTrivia(sourceFile.text, expr.pos);
+      const before = sourceFile.text.slice(start, expr.end);
+      const condStart = skipTrivia(sourceFile.text, expr.condition.pos);
+      const condText = sourceFile.text.slice(condStart, expr.condition.end);
+      const after = negate ? negatedText(expr.condition, condText) : condText;
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          expr.end - start,
+          Diagnostics.Ternary_with_boolean_literals_0_can_be_replaced_with_1,
+          before,
+          after,
+        ),
+      );
+    };
+
     const visit = (node: Node): void => {
       switch (node.kind) {
         case SyntaxKind.TryStatement:
           checkEmptyCatchBlocks(node as TryStatement);
+          break;
+        case SyntaxKind.ConditionalExpression:
+          checkTernaryBooleanLiterals(node as ConditionalExpression);
           break;
         case SyntaxKind.IfStatement:
           checkIfElseReturningBoolean(node as IfStatement);

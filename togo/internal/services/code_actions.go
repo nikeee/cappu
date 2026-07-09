@@ -876,6 +876,59 @@ func replaceIfElseReturningBoolean(checker *compiler.Checker, sf *compiler.Node,
 	}}
 }
 
+// --- ternary with boolean literals (nikeee/cappu#42 follow-up) -------------------
+
+// Port of replaceTernaryBooleanLiterals in src/services/codeActions.ts.
+func replaceTernaryBooleanLiterals(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.ConditionalExpression {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.TernaryWithBooleanLiterals0CanBeReplacedWith1.Code &&
+			d.Pos >= node.Pos && d.End <= node.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	ce := node.AsConditionalExpression()
+	isBoolLiteral := func(n *compiler.Node) bool {
+		return n.Kind == compiler.TrueKeyword || n.Kind == compiler.FalseKeyword
+	}
+	if !isBoolLiteral(ce.WhenTrue) || !isBoolLiteral(ce.WhenFalse) {
+		return nil
+	}
+	whenTrueIsTrue := ce.WhenTrue.Kind == compiler.TrueKeyword
+	whenFalseIsTrue := ce.WhenFalse.Kind == compiler.TrueKeyword
+	if whenTrueIsTrue == whenFalseIsTrue {
+		return nil
+	}
+	negate := !whenTrueIsTrue
+	condStart := compiler.SkipTrivia(data.Text, ce.Condition.Pos)
+	condText := data.Text[condStart:ce.Condition.End]
+	newText := condText
+	if negate {
+		newText = negatedText(ce.Condition, condText)
+	}
+	exprStart := compiler.SkipTrivia(data.Text, node.Pos)
+	return []CodeActionResult{{
+		Title:   "Simplify boolean ternary",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: exprStart, End: node.End, NewText: newText}},
+	}}
+}
+
 // --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
 
 // countCallReceiver returns the receiver of a zero-arg `size()`/`length()`
@@ -2440,6 +2493,7 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	out = append(out, replaceOptionalOfNull(checker, sf, start)...)
 	out = append(out, replaceBooleanComparison(checker, sf, start)...)
 	out = append(out, replaceIfElseReturningBoolean(checker, sf, start)...)
+	out = append(out, replaceTernaryBooleanLiterals(checker, sf, start)...)
 	out = append(out, replaceCountComparedToZero(checker, sf, start)...)
 	out = append(out, replaceStringEquality(checker, sf, start)...)
 	out = append(out, replaceBoxedEquality(checker, sf, start)...)

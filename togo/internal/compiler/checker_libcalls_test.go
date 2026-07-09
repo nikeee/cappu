@@ -582,3 +582,32 @@ func TestIfElseNonBooleanReturnsSilent(t *testing.T) {
 		t.Errorf("want silent, got %v", got)
 	}
 }
+
+// --- ternary with boolean literals (nikeee/cappu#42 follow-up) -------------------
+
+func TestTernaryBoolTrueFalseFlagged(t *testing.T) {
+	got := libcallDiagnose(`boolean a = true; boolean r = a ? true : false;`)
+	if !containsCode(got, ternaryBool) {
+		t.Error("want ternary-bool")
+	}
+}
+
+func TestTernaryBoolFalseTrueFlagged(t *testing.T) {
+	got := libcallDiagnose(`boolean a = true; boolean r = a ? false : true;`)
+	if !containsCode(got, ternaryBool) {
+		t.Error("want ternary-bool")
+	}
+}
+
+func TestTernaryBoolSameValueSilent(t *testing.T) {
+	if got := libcallDiagnose(`boolean a = true; boolean r = a ? true : true;`); len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
+
+func TestTernaryBoolNonLiteralSilent(t *testing.T) {
+	got := libcallDiagnose(`boolean a = true; Object r = a ? new Object() : new Object();`)
+	if len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}

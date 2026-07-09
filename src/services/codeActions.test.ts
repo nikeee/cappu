@@ -1525,3 +1525,31 @@ test("if/else bool: same boolean both times is not offered a fix", () => {
     "class T {\n  boolean m(boolean a) {\n    if (a) { return true; } else { return true; }\n  }\n}";
   expect(ifElseBoolActions(setup(text), "if (a)")).toEqual([]);
 });
+
+// --- ternary with boolean literals (nikeee/cappu#42 follow-up) -----------------
+
+function ternaryBoolActions(ctx: ReturnType<typeof setup>, needle: string) {
+  return actionsAt(ctx, needle).filter(a => a.title === "Simplify boolean ternary");
+}
+
+test("ternary bool: cond ? true : false rewrites to cond", () => {
+  const text = "class T {\n  boolean m(boolean a) {\n    return a ? true : false;\n  }\n}";
+  const ctx = setup(text);
+  const actions = ternaryBoolActions(ctx, "a ? true");
+  expect(actions.length).toBe(1);
+  expect(actions[0]!.kind).toBe("quickfix");
+  expectEdit(text, actions[0]!, "class T {\n  boolean m(boolean a) {\n    return a;\n  }\n}");
+});
+
+test("ternary bool: cond ? false : true rewrites to !cond", () => {
+  const text = "class T {\n  boolean m(boolean a) {\n    return a ? false : true;\n  }\n}";
+  const ctx = setup(text);
+  const actions = ternaryBoolActions(ctx, "a ? false");
+  expect(actions.length).toBe(1);
+  expectEdit(text, actions[0]!, "class T {\n  boolean m(boolean a) {\n    return !a;\n  }\n}");
+});
+
+test("ternary bool: not offered when both branches equal", () => {
+  const text = "class T {\n  boolean m(boolean a) {\n    return a ? true : true;\n  }\n}";
+  expect(ternaryBoolActions(setup(text), "a ? true")).toEqual([]);
+});

@@ -1731,3 +1731,40 @@ func TestIfElseBoolSameValueNotOffered(t *testing.T) {
 		t.Errorf("actions = %+v", actions)
 	}
 }
+
+// --- ternary with boolean literals (nikeee/cappu#42 follow-up) -------------------
+
+func ternaryBoolActions(ctx *actionCtx, needle string) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range ctx.actionsAt(needle, 1) {
+		if a.Title == "Simplify boolean ternary" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestTernaryBoolTrueFalseRewrites(t *testing.T) {
+	text := "class T {\n  boolean m(boolean a) {\n    return a ? true : false;\n  }\n}"
+	actions := ternaryBoolActions(actionsSetup(text, nil), "a ? true")
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  boolean m(boolean a) {\n    return a;\n  }\n}")
+}
+
+func TestTernaryBoolFalseTrueRewrites(t *testing.T) {
+	text := "class T {\n  boolean m(boolean a) {\n    return a ? false : true;\n  }\n}"
+	actions := ternaryBoolActions(actionsSetup(text, nil), "a ? false")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  boolean m(boolean a) {\n    return !a;\n  }\n}")
+}
+
+func TestTernaryBoolSameValueNotOffered(t *testing.T) {
+	text := "class T {\n  boolean m(boolean a) {\n    return a ? true : true;\n  }\n}"
+	if actions := ternaryBoolActions(actionsSetup(text, nil), "a ? true"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}

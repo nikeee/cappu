@@ -21,6 +21,7 @@ import {
   type Block,
   type CallExpression,
   type CastExpression,
+  type ConditionalExpression,
   type CatchClause,
   type ClassDeclaration,
   type ConstructorDeclaration,
@@ -830,6 +831,47 @@ function replaceIfElseReturningBoolean(
       title: "Simplify to return statement",
       kind: "quickfix",
       changes: [{ start: ifStart, end: ifStmt.end, newText }],
+    },
+  ];
+}
+
+// --- ternary with boolean literals (nikeee/cappu#42 follow-up) -----------------
+
+function replaceTernaryBooleanLiterals(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.ConditionalExpression) node = node.parent;
+  if (!node) return [];
+  const expr = node as ConditionalExpression;
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.Ternary_with_boolean_literals_0_can_be_replaced_with_1.code &&
+        d.pos >= expr.pos &&
+        d.end <= expr.end,
+    );
+  if (!flagged) return [];
+  const isBoolLiteral = (n: Node) =>
+    n.kind === SyntaxKind.TrueKeyword || n.kind === SyntaxKind.FalseKeyword;
+  if (!isBoolLiteral(expr.whenTrue) || !isBoolLiteral(expr.whenFalse)) return [];
+  const whenTrueIsTrue = expr.whenTrue.kind === SyntaxKind.TrueKeyword;
+  const whenFalseIsTrue = expr.whenFalse.kind === SyntaxKind.TrueKeyword;
+  if (whenTrueIsTrue === whenFalseIsTrue) return [];
+  const negate = !whenTrueIsTrue;
+  const condStart = skipTrivia(sourceFile.text, expr.condition.pos);
+  const condText = sourceFile.text.slice(condStart, expr.condition.end);
+  const newText = negate ? negatedText(expr.condition, condText) : condText;
+  const exprStart = skipTrivia(sourceFile.text, expr.pos);
+  return [
+    {
+      title: "Simplify boolean ternary",
+      kind: "quickfix",
+      changes: [{ start: exprStart, end: expr.end, newText }],
     },
   ];
 }
@@ -2048,6 +2090,7 @@ export function getCodeActions(
     ...replaceOptionalOfNull(checker, sourceFile, start),
     ...replaceBooleanComparison(checker, sourceFile, start),
     ...replaceIfElseReturningBoolean(checker, sourceFile, start),
+    ...replaceTernaryBooleanLiterals(checker, sourceFile, start),
     ...replaceCountComparedToZero(checker, sourceFile, start),
     ...replaceStringEquality(checker, sourceFile, start),
     ...replaceBoxedEquality(checker, sourceFile, start),
