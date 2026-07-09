@@ -1961,11 +1961,50 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			Diagnostics.TernaryWithBooleanLiterals0CanBeReplacedWith1, before, after))
 	}
 
+	// Optional as field/parameter type (nikeee/cappu#42 follow-up): discouraged
+	// by Effective Java #55. The return-type use is the recommended pattern and
+	// is deliberately not flagged here. Ports isOptionalType/
+	// checkOptionalFieldType/checkOptionalParameterType in src/compiler/checker.ts.
+	isOptionalType := func(typeNode, fromNode *Node) bool {
+		if typeNode.Kind != TypeReference {
+			return false
+		}
+		t := c.resolveType(typeNode, fromNode)
+		return t.Kind == TypeKindClass && c.fqnOf(t) == "java.util.Optional"
+	}
+	checkOptionalFieldType := func(field *Node) {
+		fd := field.AsFieldDeclaration()
+		if !isOptionalType(fd.Type, field) {
+			return
+		}
+		text := sourceFile.AsSourceFile().Text
+		for _, d := range fd.Declarators.Nodes {
+			name := d.AsVariableDeclarator().Name
+			start := SkipTrivia(text, name.Pos)
+			diagnostics = append(diagnostics, CreateDiagnostic(start, name.End-start,
+				Diagnostics.Type01ShouldNotBeOfTypeOptional, "Field", name.AsIdentifier().Text))
+		}
+	}
+	checkOptionalParameterType := func(param *Node) {
+		p := param.AsParameter()
+		if p.Name == nil || !isOptionalType(p.Type, param) {
+			return
+		}
+		text := sourceFile.AsSourceFile().Text
+		start := SkipTrivia(text, p.Name.Pos)
+		diagnostics = append(diagnostics, CreateDiagnostic(start, p.Name.End-start,
+			Diagnostics.Type01ShouldNotBeOfTypeOptional, "Parameter", p.Name.AsIdentifier().Text))
+	}
+
 	var visit func(node *Node)
 	visit = func(node *Node) {
 		switch node.Kind {
 		case TryStatement:
 			checkEmptyCatchBlocks(node)
+		case FieldDeclaration:
+			checkOptionalFieldType(node)
+		case Parameter:
+			checkOptionalParameterType(node)
 		case ConditionalExpression:
 			checkTernaryBooleanLiterals(node)
 		case IfStatement:

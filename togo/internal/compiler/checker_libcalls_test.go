@@ -648,3 +648,30 @@ func TestCollapsibleIfExtraStatementSilent(t *testing.T) {
 		t.Errorf("want silent, got %v", got)
 	}
 }
+
+// --- Optional as field/parameter type (nikeee/cappu#42 follow-up) ----------------
+
+func TestOptionalFieldFlagged(t *testing.T) {
+	if !containsCode(libcallDiagnoseClass(`Optional<String> name;`), optionalType) {
+		t.Error("want optional-type")
+	}
+}
+
+func TestOptionalParameterFlagged(t *testing.T) {
+	if !containsCode(libcallDiagnoseClass(`void m(Optional<String> name) {}`), optionalType) {
+		t.Error("want optional-type")
+	}
+}
+
+func TestOptionalReturnTypeSilent(t *testing.T) {
+	got := libcallDiagnoseClass(`Optional<String> m() { return Optional.empty(); }`)
+	if len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
+
+func TestNonOptionalFieldParamSilent(t *testing.T) {
+	if got := libcallDiagnoseClass(`String name; void m(String other) {}`); len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}

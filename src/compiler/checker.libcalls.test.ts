@@ -527,3 +527,21 @@ test("outer block with an extra statement is silent", () => {
     diagnose("boolean a = true; boolean b = true; if (a) { if (b) { toString(); } hashCode(); }"),
   ).toEqual([]);
 });
+
+// --- Optional as field/parameter type (nikeee/cappu#42 follow-up) --------------
+
+test("an Optional field is flagged", () => {
+  expect(diagnoseClass("Optional<String> name;")).toContain(OPTIONAL_TYPE);
+});
+
+test("an Optional parameter is flagged", () => {
+  expect(diagnoseClass("void m(Optional<String> name) {}")).toContain(OPTIONAL_TYPE);
+});
+
+test("an Optional return type is silent (the recommended pattern)", () => {
+  expect(diagnoseClass("Optional<String> m() { return Optional.empty(); }")).toEqual([]);
+});
+
+test("a non-Optional field/parameter is silent", () => {
+  expect(diagnoseClass("String name; void m(String other) {}")).toEqual([]);
+});

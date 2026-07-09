@@ -3600,10 +3600,55 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       );
     };
 
+    // --- Optional as field/parameter type (nikeee/cappu#42 follow-up) ----------
+    // Discouraged by Effective Java #55: a field/parameter typed `Optional`
+    // adds an extra allocation and null-check step over a plain nullable type.
+    // The RETURN-type use (Optional.empty() as "no value") is the recommended
+    // pattern and is deliberately not flagged here.
+    const isOptionalType = (type: TypeNode, fromNode: Node): boolean => {
+      if (type.kind !== SyntaxKind.TypeReference) return false;
+      const t = resolveType(type, fromNode);
+      return t.kind === TypeKind.Class && fqnOf(t as ClassType) === "java.util.Optional";
+    };
+    const checkOptionalFieldType = (field: FieldDeclaration): void => {
+      if (!isOptionalType(field.type, field)) return;
+      for (const d of field.declarators) {
+        const start = skipTrivia(sourceFile.text, d.name.pos);
+        diagnostics.push(
+          createDiagnostic(
+            start,
+            d.name.end - start,
+            Diagnostics._0_1_should_not_be_of_type_Optional,
+            "Field",
+            d.name.text,
+          ),
+        );
+      }
+    };
+    const checkOptionalParameterType = (param: Parameter): void => {
+      if (!param.name || !isOptionalType(param.type, param)) return;
+      const start = skipTrivia(sourceFile.text, param.name.pos);
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          param.name.end - start,
+          Diagnostics._0_1_should_not_be_of_type_Optional,
+          "Parameter",
+          param.name.text,
+        ),
+      );
+    };
+
     const visit = (node: Node): void => {
       switch (node.kind) {
         case SyntaxKind.TryStatement:
           checkEmptyCatchBlocks(node as TryStatement);
+          break;
+        case SyntaxKind.FieldDeclaration:
+          checkOptionalFieldType(node as FieldDeclaration);
+          break;
+        case SyntaxKind.Parameter:
+          checkOptionalParameterType(node as Parameter);
           break;
         case SyntaxKind.ConditionalExpression:
           checkTernaryBooleanLiterals(node as ConditionalExpression);
