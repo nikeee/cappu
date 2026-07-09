@@ -2052,11 +2052,12 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 		}
 		inc := fs.Incrementors.Nodes[0]
 		isLoopVarIncrement := false
-		if inc.Kind == PostfixUnaryExpression {
+		switch inc.Kind {
+		case PostfixUnaryExpression:
 			pu := inc.AsPostfixUnaryExpression()
 			isLoopVarIncrement = pu.Operator == PlusPlusToken && pu.Operand.Kind == Identifier &&
 				pu.Operand.AsIdentifier().Text == loopVar
-		} else if inc.Kind == PrefixUnaryExpression {
+		case PrefixUnaryExpression:
 			pu := inc.AsPrefixUnaryExpression()
 			isLoopVarIncrement = pu.Operator == PlusPlusToken && pu.Operand.Kind == Identifier &&
 				pu.Operand.AsIdentifier().Text == loopVar
