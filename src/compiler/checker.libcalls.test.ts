@@ -417,3 +417,27 @@ test("Optional.of(x) with a non-null literal is silent", () => {
 test("Optional.ofNullable(null) is silent", () => {
   expect(diagnose("Optional.ofNullable(null);")).toEqual([]);
 });
+
+// --- boolean literal comparison simplification (nikeee/cappu#42 follow-up) -----
+
+test("b == true is flagged", () => {
+  expect(diagnose("boolean b = true; if (b == true) {}")).toContain(BOOL_COMPARISON);
+});
+
+test("b == false, b != true, b != false are all flagged", () => {
+  for (const cmp of ["== false", "!= true", "!= false"]) {
+    expect(diagnose(`boolean b = true; if (b ${cmp}) {}`)).toContain(BOOL_COMPARISON);
+  }
+});
+
+test("boolean literal-on-left is also flagged", () => {
+  expect(diagnose("boolean b = true; if (true == b) {}")).toContain(BOOL_COMPARISON);
+});
+
+test("both sides literal is silent (degenerate, not worth it)", () => {
+  expect(diagnose("if (true == false) {}")).toEqual([]);
+});
+
+test("neither side a boolean literal is silent", () => {
+  expect(diagnose("int a = 1; int b = 2; if (a == b) {}")).toEqual([]);
+});

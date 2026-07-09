@@ -1768,6 +1768,58 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			Diagnostics.SuspiciousSelfComparison0, receiverText))
 	}
 
+	// Node kinds that can have a leading `!` applied without changing meaning
+	// (Java's primary/postfix expressions). Anything else must be
+	// parenthesized first. Shared by the boolean-comparison and
+	// boolean-ternary simplifications below.
+	safeNotOperandKinds := map[SyntaxKind]bool{
+		Identifier: true, PropertyAccessExpression: true, CallExpression: true,
+		ParenthesizedExpression: true, ThisExpression: true, StringLiteral: true,
+		TextBlockLiteral: true, ObjectCreationExpression: true,
+	}
+	negatedText := func(cond *Node, condText string) string {
+		if safeNotOperandKinds[cond.Kind] {
+			return "!" + condText
+		}
+		return "!(" + condText + ")"
+	}
+
+	// Boolean literal comparison simplification (nikeee/cappu#42 follow-up):
+	// `b == true` -> `b`, `b == false` -> `!b`, `b != true` -> `!b`,
+	// `b != false` -> `b`. Semantics-preserving including the null-unboxing
+	// case. Ports checkBooleanComparison in src/compiler/checker.ts.
+	checkBooleanComparison := func(bin *Node) {
+		b := bin.AsBinaryExpression()
+		if b.OperatorToken != EqualsEqualsToken && b.OperatorToken != ExclamationEqualsToken {
+			return
+		}
+		isBoolLiteral := func(n *Node) bool { return n.Kind == TrueKeyword || n.Kind == FalseKeyword }
+		var cond *Node
+		var literalIsTrue bool
+		switch {
+		case isBoolLiteral(b.Right) && !isBoolLiteral(b.Left):
+			cond = b.Left
+			literalIsTrue = b.Right.Kind == TrueKeyword
+		case isBoolLiteral(b.Left) && !isBoolLiteral(b.Right):
+			cond = b.Right
+			literalIsTrue = b.Left.Kind == TrueKeyword
+		default:
+			return
+		}
+		negate := literalIsTrue == (b.OperatorToken != EqualsEqualsToken)
+		text := sourceFile.AsSourceFile().Text
+		start := SkipTrivia(text, bin.Pos)
+		before := text[start:bin.End]
+		condStart := SkipTrivia(text, cond.Pos)
+		condText := text[condStart:cond.End]
+		after := condText
+		if negate {
+			after = negatedText(cond, condText)
+		}
+		diagnostics = append(diagnostics, CreateDiagnostic(start, bin.End-start,
+			Diagnostics.RedundantBooleanComparison0CanBeReplacedWith1, before, after))
+	}
+
 	// Empty catch block (nikeee/cappu#42 follow-up): a catch block with no
 	// statements silently discards the exception. A block containing only a
 	// comment is assumed intentional and left alone. Ports checkEmptyCatchBlocks
@@ -1803,6 +1855,7 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 				checkIndexOfComparedToNegativeOne(node)
 				checkSelfComparisonBinary(node)
 				checkBoxedEquality(node)
+				checkBooleanComparison(node)
 			}
 		case VariableDeclarator:
 			d := node.AsVariableDeclarator()

@@ -1445,3 +1445,43 @@ test("Optional.of(x) with a non-null argument is not offered a fix", () => {
     'import java.util.Optional;\nclass T {\n  void m() {\n    Optional<String> o = Optional.of("x");\n  }\n}';
   expect(optionalOfNullActions(setup(text), "Optional.of")).toEqual([]);
 });
+
+// --- boolean literal comparison simplification (nikeee/cappu#42 follow-up) -----
+
+function boolComparisonActions(ctx: ReturnType<typeof setup>, needle: string) {
+  return actionsAt(ctx, needle).filter(a => a.title === "Simplify boolean comparison");
+}
+
+test("bool comparison: b == true rewrites to b", () => {
+  const text = "class T {\n  void m(boolean b) {\n    if (b == true) {}\n  }\n}";
+  const ctx = setup(text);
+  const actions = boolComparisonActions(ctx, "b == true");
+  expect(actions.length).toBe(1);
+  expect(actions[0]!.kind).toBe("quickfix");
+  expectEdit(text, actions[0]!, "class T {\n  void m(boolean b) {\n    if (b) {}\n  }\n}");
+});
+
+test("bool comparison: b == false rewrites to !b", () => {
+  const text = "class T {\n  void m(boolean b) {\n    if (b == false) {}\n  }\n}";
+  const ctx = setup(text);
+  const actions = boolComparisonActions(ctx, "b == false");
+  expect(actions.length).toBe(1);
+  expectEdit(text, actions[0]!, "class T {\n  void m(boolean b) {\n    if (!b) {}\n  }\n}");
+});
+
+test("bool comparison: negated non-primary cond is parenthesized", () => {
+  const text = "class T {\n  void m(boolean a, boolean b) {\n    if ((a || b) == false) {}\n  }\n}";
+  const ctx = setup(text);
+  const actions = boolComparisonActions(ctx, "== false");
+  expect(actions.length).toBe(1);
+  expectEdit(
+    text,
+    actions[0]!,
+    "class T {\n  void m(boolean a, boolean b) {\n    if (!(a || b)) {}\n  }\n}",
+  );
+});
+
+test("bool comparison: not offered when neither side is a boolean literal", () => {
+  const text = "class T {\n  void m(int a, int b) {\n    if (a == b) {}\n  }\n}";
+  expect(boolComparisonActions(setup(text), "a == b")).toEqual([]);
+});

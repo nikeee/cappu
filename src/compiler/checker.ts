@@ -3414,6 +3414,65 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       );
     };
 
+    // Expression kinds that can have a leading `!` applied without changing
+    // meaning (Java's primary/postfix expressions). Anything else (a
+    // binary/ternary/cast/...) must be parenthesized first. Shared by the
+    // boolean-comparison and boolean-ternary simplifications below.
+    const SAFE_NOT_OPERAND_KINDS = new Set<SyntaxKind>([
+      SyntaxKind.Identifier,
+      SyntaxKind.PropertyAccessExpression,
+      SyntaxKind.CallExpression,
+      SyntaxKind.ParenthesizedExpression,
+      SyntaxKind.ThisExpression,
+      SyntaxKind.StringLiteral,
+      SyntaxKind.TextBlockLiteral,
+      SyntaxKind.ObjectCreationExpression,
+    ]);
+    const negatedText = (cond: Node, condText: string): string =>
+      SAFE_NOT_OPERAND_KINDS.has(cond.kind) ? `!${condText}` : `!(${condText})`;
+
+    // --- boolean literal comparison simplification (nikeee/cappu#42 follow-up) ---
+    // `b == true` -> `b`, `b == false` -> `!b`, `b != true` -> `!b`,
+    // `b != false` -> `b`. Semantics-preserving including the null-unboxing
+    // case: `Boolean b == true` NPEs on a null b the same way `if (b)` does.
+    const checkBooleanComparison = (bin: BinaryExpression): void => {
+      if (
+        bin.operatorToken !== SyntaxKind.EqualsEqualsToken &&
+        bin.operatorToken !== SyntaxKind.ExclamationEqualsToken
+      ) {
+        return;
+      }
+      const isBoolLiteral = (n: Node) =>
+        n.kind === SyntaxKind.TrueKeyword || n.kind === SyntaxKind.FalseKeyword;
+      let cond: Node;
+      let literalIsTrue: boolean;
+      if (isBoolLiteral(bin.right) && !isBoolLiteral(bin.left)) {
+        cond = bin.left;
+        literalIsTrue = bin.right.kind === SyntaxKind.TrueKeyword;
+      } else if (isBoolLiteral(bin.left) && !isBoolLiteral(bin.right)) {
+        cond = bin.right;
+        literalIsTrue = bin.left.kind === SyntaxKind.TrueKeyword;
+      } else {
+        return; // neither, or both (degenerate): not worth it
+      }
+      const negate =
+        bin.operatorToken === SyntaxKind.EqualsEqualsToken ? !literalIsTrue : literalIsTrue;
+      const start = skipTrivia(sourceFile.text, bin.pos);
+      const before = sourceFile.text.slice(start, bin.end);
+      const condStart = skipTrivia(sourceFile.text, cond.pos);
+      const condText = sourceFile.text.slice(condStart, cond.end);
+      const after = negate ? negatedText(cond, condText) : condText;
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          bin.end - start,
+          Diagnostics.Redundant_boolean_comparison_0_can_be_replaced_with_1,
+          before,
+          after,
+        ),
+      );
+    };
+
     // --- empty catch block (nikeee/cappu#42 follow-up) --------------------------
     // A catch block with no statements silently discards the exception. A block
     // containing only a comment is assumed intentional (the common convention
@@ -3448,6 +3507,7 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
             checkIndexOfComparedToNegativeOne(node as BinaryExpression);
             checkSelfComparisonBinary(node as BinaryExpression);
             checkBoxedEquality(node as BinaryExpression);
+            checkBooleanComparison(node as BinaryExpression);
           }
           break;
         case SyntaxKind.VariableDeclarator: {

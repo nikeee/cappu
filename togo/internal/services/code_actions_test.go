@@ -1639,3 +1639,49 @@ func TestOptionalOfNonNullNotOffered(t *testing.T) {
 		t.Errorf("actions = %+v", actions)
 	}
 }
+
+// --- boolean literal comparison simplification (nikeee/cappu#42 follow-up) -------
+
+func boolComparisonActions(ctx *actionCtx, needle string) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range ctx.actionsAt(needle, 1) {
+		if a.Title == "Simplify boolean comparison" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestBoolComparisonEqualsTrueRewrites(t *testing.T) {
+	text := "class T {\n  void m(boolean b) {\n    if (b == true) {}\n  }\n}"
+	actions := boolComparisonActions(actionsSetup(text, nil), "b == true")
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(boolean b) {\n    if (b) {}\n  }\n}")
+}
+
+func TestBoolComparisonEqualsFalseRewrites(t *testing.T) {
+	text := "class T {\n  void m(boolean b) {\n    if (b == false) {}\n  }\n}"
+	actions := boolComparisonActions(actionsSetup(text, nil), "b == false")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(boolean b) {\n    if (!b) {}\n  }\n}")
+}
+
+func TestBoolComparisonNegatedNonPrimaryParenthesized(t *testing.T) {
+	text := "class T {\n  void m(boolean a, boolean b) {\n    if ((a || b) == false) {}\n  }\n}"
+	actions := boolComparisonActions(actionsSetup(text, nil), "== false")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  void m(boolean a, boolean b) {\n    if (!(a || b)) {}\n  }\n}")
+}
+
+func TestBoolComparisonNotOfferedForNonLiteral(t *testing.T) {
+	text := "class T {\n  void m(int a, int b) {\n    if (a == b) {}\n  }\n}"
+	if actions := boolComparisonActions(actionsSetup(text, nil), "a == b"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}

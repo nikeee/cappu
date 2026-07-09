@@ -504,3 +504,38 @@ func TestOptionalOfNullableNullSilent(t *testing.T) {
 		t.Errorf("want silent, got %v", got)
 	}
 }
+
+// --- boolean literal comparison simplification (nikeee/cappu#42 follow-up) -------
+
+func TestBoolComparisonEqualsTrueFlagged(t *testing.T) {
+	if !containsCode(libcallDiagnose(`boolean b = true; if (b == true) {}`), boolComparison) {
+		t.Error("want bool-comparison")
+	}
+}
+
+func TestBoolComparisonAllCombosFlagged(t *testing.T) {
+	for _, cmp := range []string{"== false", "!= true", "!= false"} {
+		got := libcallDiagnose(`boolean b = true; if (b ` + cmp + `) {}`)
+		if !containsCode(got, boolComparison) {
+			t.Errorf("want bool-comparison for %q", cmp)
+		}
+	}
+}
+
+func TestBoolComparisonLiteralOnLeftFlagged(t *testing.T) {
+	if !containsCode(libcallDiagnose(`boolean b = true; if (true == b) {}`), boolComparison) {
+		t.Error("want bool-comparison")
+	}
+}
+
+func TestBoolComparisonBothLiteralSilent(t *testing.T) {
+	if got := libcallDiagnose(`if (true == false) {}`); len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
+
+func TestBoolComparisonNeitherLiteralSilent(t *testing.T) {
+	if got := libcallDiagnose(`int a = 1; int b = 2; if (a == b) {}`); len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}

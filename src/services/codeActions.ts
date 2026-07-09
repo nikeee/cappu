@@ -704,6 +704,79 @@ function replaceOptionalOfNull(
   ];
 }
 
+// --- boolean literal comparison simplification (nikeee/cappu#42 follow-up) -----
+
+// Expression kinds that can have a leading `!` applied without changing
+// meaning (Java's primary/postfix expressions). Anything else (a
+// binary/ternary/cast/...) must be parenthesized first. Shared by the
+// boolean-comparison and boolean-ternary quickfixes.
+const SAFE_NOT_OPERAND_KINDS = new Set<SyntaxKind>([
+  SyntaxKind.Identifier,
+  SyntaxKind.PropertyAccessExpression,
+  SyntaxKind.CallExpression,
+  SyntaxKind.ParenthesizedExpression,
+  SyntaxKind.ThisExpression,
+  SyntaxKind.StringLiteral,
+  SyntaxKind.TextBlockLiteral,
+  SyntaxKind.ObjectCreationExpression,
+]);
+
+function negatedText(cond: Node, condText: string): string {
+  return SAFE_NOT_OPERAND_KINDS.has(cond.kind) ? `!${condText}` : `!(${condText})`;
+}
+
+function replaceBooleanComparison(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.BinaryExpression) node = node.parent;
+  if (!node) return [];
+  const bin = node as BinaryExpression;
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.Redundant_boolean_comparison_0_can_be_replaced_with_1.code &&
+        d.pos >= bin.pos &&
+        d.end <= bin.end,
+    );
+  if (!flagged) return [];
+  const isBoolLiteral = (n: Node) =>
+    n.kind === SyntaxKind.TrueKeyword || n.kind === SyntaxKind.FalseKeyword;
+  let cond: Node;
+  let literalIsTrue: boolean;
+  if (isBoolLiteral(bin.right) && !isBoolLiteral(bin.left)) {
+    cond = bin.left;
+    literalIsTrue = bin.right.kind === SyntaxKind.TrueKeyword;
+  } else if (isBoolLiteral(bin.left) && !isBoolLiteral(bin.right)) {
+    cond = bin.right;
+    literalIsTrue = bin.left.kind === SyntaxKind.TrueKeyword;
+  } else {
+    return [];
+  }
+  const negate =
+    bin.operatorToken === SyntaxKind.EqualsEqualsToken ? !literalIsTrue : literalIsTrue;
+  const condStart = skipTrivia(sourceFile.text, cond.pos);
+  const condText = sourceFile.text.slice(condStart, cond.end);
+  const binStart = skipTrivia(sourceFile.text, bin.pos);
+  return [
+    {
+      title: "Simplify boolean comparison",
+      kind: "quickfix",
+      changes: [
+        {
+          start: binStart,
+          end: bin.end,
+          newText: negate ? negatedText(cond, condText) : condText,
+        },
+      ],
+    },
+  ];
+}
+
 // --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
 
 // The receiver of a zero-arg `size()`/`length()` call, or undefined. FQN
@@ -1916,6 +1989,7 @@ export function getCodeActions(
     ...makeFieldFinal(checker, sourceFile, start),
     ...replaceOptionalIfPresentWithNullCheck(checker, sourceFile, start),
     ...replaceOptionalOfNull(checker, sourceFile, start),
+    ...replaceBooleanComparison(checker, sourceFile, start),
     ...replaceCountComparedToZero(checker, sourceFile, start),
     ...replaceStringEquality(checker, sourceFile, start),
     ...replaceBoxedEquality(checker, sourceFile, start),

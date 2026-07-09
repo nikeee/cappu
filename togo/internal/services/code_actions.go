@@ -720,6 +720,84 @@ func replaceOptionalOfNull(checker *compiler.Checker, sf *compiler.Node, start i
 	}}
 }
 
+// --- boolean literal comparison simplification (nikeee/cappu#42 follow-up) -------
+
+// Node kinds that can have a leading `!` applied without changing meaning
+// (Java's primary/postfix expressions). Anything else must be parenthesized
+// first. Shared by the boolean-comparison and boolean-ternary quickfixes.
+var safeNotOperandKinds = map[compiler.SyntaxKind]bool{
+	compiler.Identifier:               true,
+	compiler.PropertyAccessExpression: true,
+	compiler.CallExpression:           true,
+	compiler.ParenthesizedExpression:  true,
+	compiler.ThisExpression:           true,
+	compiler.StringLiteral:            true,
+	compiler.TextBlockLiteral:         true,
+	compiler.ObjectCreationExpression: true,
+}
+
+func negatedText(cond *compiler.Node, condText string) string {
+	if safeNotOperandKinds[cond.Kind] {
+		return "!" + condText
+	}
+	return "!(" + condText + ")"
+}
+
+// Port of replaceBooleanComparison in src/services/codeActions.ts.
+func replaceBooleanComparison(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.BinaryExpression {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	bin := node.AsBinaryExpression()
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.RedundantBooleanComparison0CanBeReplacedWith1.Code &&
+			d.Pos >= node.Pos && d.End <= node.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	isBoolLiteral := func(n *compiler.Node) bool {
+		return n.Kind == compiler.TrueKeyword || n.Kind == compiler.FalseKeyword
+	}
+	var cond *compiler.Node
+	var literalIsTrue bool
+	switch {
+	case isBoolLiteral(bin.Right) && !isBoolLiteral(bin.Left):
+		cond = bin.Left
+		literalIsTrue = bin.Right.Kind == compiler.TrueKeyword
+	case isBoolLiteral(bin.Left) && !isBoolLiteral(bin.Right):
+		cond = bin.Right
+		literalIsTrue = bin.Left.Kind == compiler.TrueKeyword
+	default:
+		return nil
+	}
+	negate := literalIsTrue == (bin.OperatorToken != compiler.EqualsEqualsToken)
+	condStart := compiler.SkipTrivia(data.Text, cond.Pos)
+	condText := data.Text[condStart:cond.End]
+	newText := condText
+	if negate {
+		newText = negatedText(cond, condText)
+	}
+	binStart := compiler.SkipTrivia(data.Text, node.Pos)
+	return []CodeActionResult{{
+		Title:   "Simplify boolean comparison",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: binStart, End: node.End, NewText: newText}},
+	}}
+}
+
 // --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
 
 // countCallReceiver returns the receiver of a zero-arg `size()`/`length()`
@@ -2282,6 +2360,7 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	out = append(out, makeFieldFinal(checker, sf, start)...)
 	out = append(out, replaceOptionalIfPresentWithNullCheck(checker, sf, start)...)
 	out = append(out, replaceOptionalOfNull(checker, sf, start)...)
+	out = append(out, replaceBooleanComparison(checker, sf, start)...)
 	out = append(out, replaceCountComparedToZero(checker, sf, start)...)
 	out = append(out, replaceStringEquality(checker, sf, start)...)
 	out = append(out, replaceBoxedEquality(checker, sf, start)...)
