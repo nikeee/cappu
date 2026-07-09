@@ -3639,6 +3639,114 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       );
     };
 
+    // --- indexed for-loop over a List -> suggest enhanced for (nikeee/cappu#42 follow-up) ---
+    // No autofix: converting to `for (T x : xs)` risks CME/off-by-one changes
+    // that a purely syntactic pass can't rule out (e.g. the list is mutated
+    // elsewhere in the body). The scope is narrowed instead: only fires when
+    // the index is used for nothing but `xs.get(i)` and nothing else touches
+    // the receiver, so the rewrite the warning suggests is provably safe even
+    // though this rule doesn't perform it.
+    // ponytail: syntactic-only safety scan (no real data/control-flow); a
+    // shadowing redeclaration of the loop or receiver name inside the body
+    // could slip past this.
+    const INDEXED_LOOP_FQNS = new Set([
+      "java.util.List",
+      "java.util.ArrayList",
+      "java.util.LinkedList",
+      "java.util.Vector",
+      "java.util.Stack",
+    ]);
+    const checkIndexedForLoop = (forStmt: ForStatement): void => {
+      if (forStmt.initializer?.kind !== SyntaxKind.LocalVariableDeclarationStatement) return;
+      const initStmt = forStmt.initializer as LocalVariableDeclarationStatement;
+      if (initStmt.declarators.length !== 1) return;
+      const decl = initStmt.declarators[0]!;
+      if (
+        decl.initializer?.kind !== SyntaxKind.NumericLiteral ||
+        (decl.initializer as LiteralExpression).value !== "0"
+      ) {
+        return;
+      }
+      const loopVar = decl.name.text;
+
+      if (forStmt.condition?.kind !== SyntaxKind.BinaryExpression) return;
+      const cond = forStmt.condition as BinaryExpression;
+      if (cond.operatorToken !== SyntaxKind.LessThanToken) return;
+      if (cond.left.kind !== SyntaxKind.Identifier || (cond.left as Identifier).text !== loopVar) {
+        return;
+      }
+      if (cond.right.kind !== SyntaxKind.CallExpression) return;
+      const sizeTarget = memberCallTarget(cond.right as CallExpression);
+      if (!sizeTarget || sizeTarget.name !== "size" || !INDEXED_LOOP_FQNS.has(sizeTarget.fqn)) {
+        return;
+      }
+      const receiver = sizeTarget.access.expression;
+      if (receiver.kind !== SyntaxKind.Identifier) return;
+      const receiverName = (receiver as Identifier).text;
+
+      if (forStmt.incrementors?.length !== 1) return;
+      const inc = forStmt.incrementors[0]!;
+      const isLoopVarIncrement =
+        (inc.kind === SyntaxKind.PostfixUnaryExpression &&
+          (inc as PostfixUnaryExpression).operator === SyntaxKind.PlusPlusToken &&
+          (inc as PostfixUnaryExpression).operand.kind === SyntaxKind.Identifier &&
+          ((inc as PostfixUnaryExpression).operand as Identifier).text === loopVar) ||
+        (inc.kind === SyntaxKind.PrefixUnaryExpression &&
+          (inc as PrefixUnaryExpression).operator === SyntaxKind.PlusPlusToken &&
+          (inc as PrefixUnaryExpression).operand.kind === SyntaxKind.Identifier &&
+          ((inc as PrefixUnaryExpression).operand as Identifier).text === loopVar);
+      if (!isLoopVarIncrement) return;
+
+      let disqualified = false;
+      const scan = (n: Node): void => {
+        if (disqualified) return;
+        if (n.kind === SyntaxKind.Identifier && (n as Identifier).text === loopVar) {
+          const p = n.parent;
+          const isSoleGetArg =
+            p?.kind === SyntaxKind.CallExpression &&
+            (p as CallExpression).arguments.length === 1 &&
+            (p as CallExpression).arguments[0] === n &&
+            (p as CallExpression).expression.kind === SyntaxKind.PropertyAccessExpression &&
+            ((p as CallExpression).expression as PropertyAccessExpression).name.text === "get" &&
+            ((p as CallExpression).expression as PropertyAccessExpression).expression.kind ===
+              SyntaxKind.Identifier &&
+            (
+              ((p as CallExpression).expression as PropertyAccessExpression)
+                .expression as Identifier
+            ).text === receiverName;
+          if (!isSoleGetArg) {
+            disqualified = true;
+            return;
+          }
+        }
+        if (
+          n.kind === SyntaxKind.PropertyAccessExpression &&
+          (n as PropertyAccessExpression).expression.kind === SyntaxKind.Identifier &&
+          ((n as PropertyAccessExpression).expression as Identifier).text === receiverName &&
+          (n as PropertyAccessExpression).name.text !== "get"
+        ) {
+          disqualified = true;
+          return;
+        }
+        forEachChild(n, child => {
+          scan(child);
+          return undefined;
+        });
+      };
+      scan(forStmt.statement);
+      if (disqualified) return;
+
+      const start = skipTrivia(sourceFile.text, forStmt.pos);
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          forStmt.end - start,
+          Diagnostics.Indexed_loop_over_0_can_be_a_for_each_loop,
+          receiverName,
+        ),
+      );
+    };
+
     const visit = (node: Node): void => {
       switch (node.kind) {
         case SyntaxKind.TryStatement:
@@ -3649,6 +3757,9 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
           break;
         case SyntaxKind.Parameter:
           checkOptionalParameterType(node as Parameter);
+          break;
+        case SyntaxKind.ForStatement:
+          checkIndexedForLoop(node as ForStatement);
           break;
         case SyntaxKind.ConditionalExpression:
           checkTernaryBooleanLiterals(node as ConditionalExpression);

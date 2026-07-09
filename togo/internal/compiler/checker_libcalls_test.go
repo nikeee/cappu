@@ -675,3 +675,40 @@ func TestNonOptionalFieldParamSilent(t *testing.T) {
 		t.Errorf("want silent, got %v", got)
 	}
 }
+
+// --- indexed for-loop over a List -> suggest enhanced for (nikeee/cappu#42 follow-up) ---
+
+func TestIndexedForLoopFlagged(t *testing.T) {
+	got := libcallDiagnose(`List<String> xs = new ArrayList<>(); for (int i = 0; i < xs.size(); i++) { xs.get(i).toString(); }`)
+	if !containsCode(got, indexedLoop) {
+		t.Error("want indexed-loop")
+	}
+}
+
+func TestIndexedForLoopIndexUsedElsewhereSilent(t *testing.T) {
+	got := libcallDiagnose(`List<String> xs = new ArrayList<>(); for (int i = 0; i < xs.size(); i++) { System.out.println(i); }`)
+	if len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
+
+func TestIndexedForLoopMutatingCallSilent(t *testing.T) {
+	got := libcallDiagnose(`List<String> xs = new ArrayList<>(); for (int i = 0; i < xs.size(); i++) { xs.add("y"); }`)
+	if len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
+
+func TestIndexedForLoopNonZeroStartSilent(t *testing.T) {
+	got := libcallDiagnose(`List<String> xs = new ArrayList<>(); for (int i = 1; i < xs.size(); i++) { xs.get(i).toString(); }`)
+	if len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
+
+func TestIndexedForLoopReassignedIndexSilent(t *testing.T) {
+	got := libcallDiagnose(`List<String> xs = new ArrayList<>(); for (int i = 0; i < xs.size(); i++) { i++; }`)
+	if len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}

@@ -1996,6 +1996,124 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			Diagnostics.Type01ShouldNotBeOfTypeOptional, "Parameter", p.Name.AsIdentifier().Text))
 	}
 
+	// Indexed for-loop over a List -> suggest enhanced for (nikeee/cappu#42
+	// follow-up). No autofix: converting to `for (T x : xs)` risks CME/off-by-one
+	// changes a purely syntactic pass can't rule out. The scope is narrowed
+	// instead: only fires when the index is used for nothing but `xs.get(i)`
+	// and nothing else touches the receiver.
+	// ponytail: syntactic-only safety scan (no real data/control-flow); a
+	// shadowing redeclaration of the loop or receiver name inside the body
+	// could slip past this. Ports checkIndexedForLoop in src/compiler/checker.ts.
+	indexedLoopFqns := map[string]bool{
+		"java.util.List": true, "java.util.ArrayList": true, "java.util.LinkedList": true,
+		"java.util.Vector": true, "java.util.Stack": true,
+	}
+	checkIndexedForLoop := func(forStmt *Node) {
+		fs := forStmt.AsForStatement()
+		if fs.Initializer == nil || fs.Initializer.Kind != LocalVariableDeclarationStatement {
+			return
+		}
+		initStmt := fs.Initializer.AsLocalVariableDeclarationStatement()
+		if nodeArrayLen(initStmt.Declarators) != 1 {
+			return
+		}
+		decl := initStmt.Declarators.Nodes[0].AsVariableDeclarator()
+		if decl.Initializer == nil || decl.Initializer.Kind != NumericLiteral ||
+			decl.Initializer.AsLiteralExpression().Value != "0" {
+			return
+		}
+		loopVar := decl.Name.AsIdentifier().Text
+
+		if fs.Condition == nil || fs.Condition.Kind != BinaryExpression {
+			return
+		}
+		cond := fs.Condition.AsBinaryExpression()
+		if cond.OperatorToken != LessThanToken {
+			return
+		}
+		if cond.Left.Kind != Identifier || cond.Left.AsIdentifier().Text != loopVar {
+			return
+		}
+		if cond.Right.Kind != CallExpression {
+			return
+		}
+		sizeFqn, sizeName, sizeOk := memberCallTarget(cond.Right)
+		if !sizeOk || sizeName != "size" || !indexedLoopFqns[sizeFqn] {
+			return
+		}
+		receiver := cond.Right.AsCallExpression().Expression.AsPropertyAccessExpression().Expression
+		if receiver.Kind != Identifier {
+			return
+		}
+		receiverName := receiver.AsIdentifier().Text
+
+		if nodeArrayLen(fs.Incrementors) != 1 {
+			return
+		}
+		inc := fs.Incrementors.Nodes[0]
+		isLoopVarIncrement := false
+		if inc.Kind == PostfixUnaryExpression {
+			pu := inc.AsPostfixUnaryExpression()
+			isLoopVarIncrement = pu.Operator == PlusPlusToken && pu.Operand.Kind == Identifier &&
+				pu.Operand.AsIdentifier().Text == loopVar
+		} else if inc.Kind == PrefixUnaryExpression {
+			pu := inc.AsPrefixUnaryExpression()
+			isLoopVarIncrement = pu.Operator == PlusPlusToken && pu.Operand.Kind == Identifier &&
+				pu.Operand.AsIdentifier().Text == loopVar
+		}
+		if !isLoopVarIncrement {
+			return
+		}
+
+		disqualified := false
+		var scan func(n *Node)
+		scan = func(n *Node) {
+			if disqualified {
+				return
+			}
+			if n.Kind == Identifier && n.AsIdentifier().Text == loopVar {
+				p := n.Parent
+				isSoleGetArg := false
+				if p != nil && p.Kind == CallExpression {
+					pc := p.AsCallExpression()
+					if nodeArrayLen(pc.Arguments) == 1 && pc.Arguments.Nodes[0] == n &&
+						pc.Expression.Kind == PropertyAccessExpression {
+						access := pc.Expression.AsPropertyAccessExpression()
+						isSoleGetArg = access.Name.AsIdentifier().Text == "get" &&
+							access.Expression.Kind == Identifier &&
+							access.Expression.AsIdentifier().Text == receiverName
+					}
+				}
+				if !isSoleGetArg {
+					disqualified = true
+					return
+				}
+			}
+			if n.Kind == PropertyAccessExpression {
+				access := n.AsPropertyAccessExpression()
+				if access.Expression.Kind == Identifier &&
+					access.Expression.AsIdentifier().Text == receiverName &&
+					access.Name.AsIdentifier().Text != "get" {
+					disqualified = true
+					return
+				}
+			}
+			n.ForEachChild(func(child *Node) bool {
+				scan(child)
+				return false
+			})
+		}
+		scan(fs.Statement)
+		if disqualified {
+			return
+		}
+
+		text := sourceFile.AsSourceFile().Text
+		start := SkipTrivia(text, forStmt.Pos)
+		diagnostics = append(diagnostics, CreateDiagnostic(start, forStmt.End-start,
+			Diagnostics.IndexedLoopOver0CanBeAForEachLoop, receiverName))
+	}
+
 	var visit func(node *Node)
 	visit = func(node *Node) {
 		switch node.Kind {
@@ -2005,6 +2123,8 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 			checkOptionalFieldType(node)
 		case Parameter:
 			checkOptionalParameterType(node)
+		case ForStatement:
+			checkIndexedForLoop(node)
 		case ConditionalExpression:
 			checkTernaryBooleanLiterals(node)
 		case IfStatement:

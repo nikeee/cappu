@@ -545,3 +545,43 @@ test("an Optional return type is silent (the recommended pattern)", () => {
 test("a non-Optional field/parameter is silent", () => {
   expect(diagnoseClass("String name; void m(String other) {}")).toEqual([]);
 });
+
+// --- indexed for-loop over List -> suggest enhanced for (nikeee/cappu#42 follow-up) ---
+
+test("a classic indexed loop with only get(i) is flagged", () => {
+  expect(
+    diagnose(
+      "List<String> xs = new ArrayList<>(); for (int i = 0; i < xs.size(); i++) { xs.get(i).toString(); }",
+    ),
+  ).toContain(INDEXED_LOOP);
+});
+
+test("the loop index used for anything besides get(i) is silent", () => {
+  expect(
+    diagnose(
+      "List<String> xs = new ArrayList<>(); for (int i = 0; i < xs.size(); i++) { System.out.println(i); }",
+    ),
+  ).toEqual([]);
+});
+
+test("a mutating call on the receiver inside the loop is silent", () => {
+  expect(
+    diagnose(
+      'List<String> xs = new ArrayList<>(); for (int i = 0; i < xs.size(); i++) { xs.add("y"); }',
+    ),
+  ).toEqual([]);
+});
+
+test("a loop that doesn't start at 0 is silent", () => {
+  expect(
+    diagnose(
+      "List<String> xs = new ArrayList<>(); for (int i = 1; i < xs.size(); i++) { xs.get(i).toString(); }",
+    ),
+  ).toEqual([]);
+});
+
+test("reassigning the index inside the body is silent", () => {
+  expect(
+    diagnose("List<String> xs = new ArrayList<>(); for (int i = 0; i < xs.size(); i++) { i++; }"),
+  ).toEqual([]);
+});
