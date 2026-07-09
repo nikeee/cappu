@@ -798,6 +798,84 @@ func replaceBooleanComparison(checker *compiler.Checker, sf *compiler.Node, star
 	}}
 }
 
+// --- if/else returning booleans -> return cond (nikeee/cappu#42 follow-up) -------
+
+// A branch that is a single `return true;`/`return false;`, possibly wrapped
+// in a block.
+func singleReturnBoolean(stmt *compiler.Node) (value bool, ok bool) {
+	if stmt == nil {
+		return false, false
+	}
+	ret := stmt
+	if stmt.Kind == compiler.Block {
+		statements := stmt.AsBlock().Statements
+		if statements.Len() != 1 {
+			return false, false
+		}
+		ret = statements.Nodes[0]
+	}
+	if ret.Kind != compiler.ReturnStatement {
+		return false, false
+	}
+	expr := ret.AsReturnStatement().Expression
+	if expr == nil {
+		return false, false
+	}
+	switch expr.Kind {
+	case compiler.TrueKeyword:
+		return true, true
+	case compiler.FalseKeyword:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// Port of replaceIfElseReturningBoolean in src/services/codeActions.ts.
+func replaceIfElseReturningBoolean(checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
+	data := sf.AsSourceFile()
+	if len(data.ParseDiagnostics) > 0 {
+		return nil
+	}
+	node := compiler.GetNodeAtPosition(sf, start)
+	for node != nil && node.Kind != compiler.IfStatement {
+		node = node.Parent
+	}
+	if node == nil {
+		return nil
+	}
+	flagged := false
+	for _, d := range checker.GetSemanticDiagnostics(sf) {
+		if d.Code == compiler.Diagnostics.IfElseReturningBooleans0CanBeReplacedWith1.Code &&
+			d.Pos >= node.Pos && d.End <= node.End {
+			flagged = true
+			break
+		}
+	}
+	if !flagged {
+		return nil
+	}
+	is := node.AsIfStatement()
+	thenValue, thenOk := singleReturnBoolean(is.ThenStatement)
+	elseValue, elseOk := singleReturnBoolean(is.ElseStatement)
+	if !thenOk || !elseOk || thenValue == elseValue {
+		return nil
+	}
+	negate := !thenValue
+	condStart := compiler.SkipTrivia(data.Text, is.Condition.Pos)
+	condText := data.Text[condStart:is.Condition.End]
+	newText := "return " + condText + ";"
+	if negate {
+		newText = "return " + negatedText(is.Condition, condText) + ";"
+	}
+	ifStart := compiler.SkipTrivia(data.Text, node.Pos)
+	return []CodeActionResult{{
+		Title:   "Simplify to return statement",
+		Kind:    "quickfix",
+		Changes: []TextChange{{Start: ifStart, End: node.End, NewText: newText}},
+	}}
+}
+
 // --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
 
 // countCallReceiver returns the receiver of a zero-arg `size()`/`length()`
@@ -2361,6 +2439,7 @@ func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *co
 	out = append(out, replaceOptionalIfPresentWithNullCheck(checker, sf, start)...)
 	out = append(out, replaceOptionalOfNull(checker, sf, start)...)
 	out = append(out, replaceBooleanComparison(checker, sf, start)...)
+	out = append(out, replaceIfElseReturningBoolean(checker, sf, start)...)
 	out = append(out, replaceCountComparedToZero(checker, sf, start)...)
 	out = append(out, replaceStringEquality(checker, sf, start)...)
 	out = append(out, replaceBoxedEquality(checker, sf, start)...)

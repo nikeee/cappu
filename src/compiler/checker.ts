@@ -3495,10 +3495,56 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       }
     };
 
+    // --- if/else returning booleans -> return cond (nikeee/cappu#42 follow-up) ---
+    // `if (cond) return true; else return false;` -> `return cond;` (and the
+    // negated form). Both branches evaluate the condition (or not) identically
+    // either way, so this is a pure simplification.
+    const singleReturnBoolean = (
+      stmt: Node | undefined,
+    ): { value: boolean; expr: Node } | undefined => {
+      if (!stmt) return undefined;
+      let ret = stmt;
+      if (stmt.kind === SyntaxKind.Block) {
+        const statements = (stmt as Block).statements;
+        if (statements.length !== 1) return undefined;
+        ret = statements[0]!;
+      }
+      if (ret.kind !== SyntaxKind.ReturnStatement) return undefined;
+      const expr = (ret as ReturnStatement).expression;
+      if (expr?.kind === SyntaxKind.TrueKeyword) return { value: true, expr };
+      if (expr?.kind === SyntaxKind.FalseKeyword) return { value: false, expr };
+      return undefined;
+    };
+    const checkIfElseReturningBoolean = (ifStmt: IfStatement): void => {
+      const thenInfo = singleReturnBoolean(ifStmt.thenStatement);
+      const elseInfo = singleReturnBoolean(ifStmt.elseStatement);
+      if (!thenInfo || !elseInfo || thenInfo.value === elseInfo.value) return;
+      const negate = !thenInfo.value;
+      const start = skipTrivia(sourceFile.text, ifStmt.pos);
+      const before = sourceFile.text.slice(start, ifStmt.end);
+      const condStart = skipTrivia(sourceFile.text, ifStmt.condition.pos);
+      const condText = sourceFile.text.slice(condStart, ifStmt.condition.end);
+      const after = negate
+        ? `return ${negatedText(ifStmt.condition, condText)};`
+        : `return ${condText};`;
+      diagnostics.push(
+        createDiagnostic(
+          start,
+          ifStmt.end - start,
+          Diagnostics.If_else_returning_booleans_0_can_be_replaced_with_1,
+          before,
+          after,
+        ),
+      );
+    };
+
     const visit = (node: Node): void => {
       switch (node.kind) {
         case SyntaxKind.TryStatement:
           checkEmptyCatchBlocks(node as TryStatement);
+          break;
+        case SyntaxKind.IfStatement:
+          checkIfElseReturningBoolean(node as IfStatement);
           break;
         case SyntaxKind.BinaryExpression:
           if (sourceFile.parseDiagnostics.length === 0) {

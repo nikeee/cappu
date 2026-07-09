@@ -1485,3 +1485,43 @@ test("bool comparison: not offered when neither side is a boolean literal", () =
   const text = "class T {\n  void m(int a, int b) {\n    if (a == b) {}\n  }\n}";
   expect(boolComparisonActions(setup(text), "a == b")).toEqual([]);
 });
+
+// --- if/else returning booleans -> return cond (nikeee/cappu#42 follow-up) -----
+
+function ifElseBoolActions(ctx: ReturnType<typeof setup>, needle: string) {
+  return actionsAt(ctx, needle).filter(a => a.title === "Simplify to return statement");
+}
+
+test("if/else bool: true/false rewrites to return cond", () => {
+  const text =
+    "class T {\n  boolean m(boolean a) {\n    if (a) { return true; } else { return false; }\n  }\n}";
+  const ctx = setup(text);
+  const actions = ifElseBoolActions(ctx, "if (a)");
+  expect(actions.length).toBe(1);
+  expect(actions[0]!.kind).toBe("quickfix");
+  expectEdit(text, actions[0]!, "class T {\n  boolean m(boolean a) {\n    return a;\n  }\n}");
+});
+
+test("if/else bool: false/true rewrites to return !cond", () => {
+  const text =
+    "class T {\n  boolean m(boolean a) {\n    if (a) { return false; } else { return true; }\n  }\n}";
+  const ctx = setup(text);
+  const actions = ifElseBoolActions(ctx, "if (a)");
+  expect(actions.length).toBe(1);
+  expectEdit(text, actions[0]!, "class T {\n  boolean m(boolean a) {\n    return !a;\n  }\n}");
+});
+
+test("if/else bool: braceless form rewrites correctly", () => {
+  const text =
+    "class T {\n  boolean m(boolean a) {\n    if (a) return true; else return false;\n  }\n}";
+  const ctx = setup(text);
+  const actions = ifElseBoolActions(ctx, "if (a)");
+  expect(actions.length).toBe(1);
+  expectEdit(text, actions[0]!, "class T {\n  boolean m(boolean a) {\n    return a;\n  }\n}");
+});
+
+test("if/else bool: same boolean both times is not offered a fix", () => {
+  const text =
+    "class T {\n  boolean m(boolean a) {\n    if (a) { return true; } else { return true; }\n  }\n}";
+  expect(ifElseBoolActions(setup(text), "if (a)")).toEqual([]);
+});

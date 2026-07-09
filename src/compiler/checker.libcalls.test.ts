@@ -441,3 +441,35 @@ test("both sides literal is silent (degenerate, not worth it)", () => {
 test("neither side a boolean literal is silent", () => {
   expect(diagnose("int a = 1; int b = 2; if (a == b) {}")).toEqual([]);
 });
+
+// --- if/else returning booleans -> return cond (nikeee/cappu#42 follow-up) -----
+
+test("if/else returning true/false is flagged", () => {
+  expect(diagnose("boolean a = true; if (a) { return true; } else { return false; }")).toContain(
+    IF_ELSE_BOOL,
+  );
+});
+
+test("if/else returning false/true is flagged (negated)", () => {
+  expect(diagnose("boolean a = true; if (a) { return false; } else { return true; }")).toContain(
+    IF_ELSE_BOOL,
+  );
+});
+
+test("braceless if/else returning booleans is flagged", () => {
+  expect(diagnose("boolean a = true; if (a) return true; else return false;")).toContain(
+    IF_ELSE_BOOL,
+  );
+});
+
+test("if/else returning the same boolean both times is silent", () => {
+  expect(diagnose("boolean a = true; if (a) { return true; } else { return true; }")).toEqual([]);
+});
+
+test("if without an else is silent", () => {
+  expect(diagnose("boolean a = true; if (a) { return true; }")).toEqual([]);
+});
+
+test("if/else with non-boolean-literal returns is silent", () => {
+  expect(diagnose("boolean a = true; if (a) { return foo(); } else { return bar(); }")).toEqual([]);
+});

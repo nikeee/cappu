@@ -1843,11 +1843,66 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 		}
 	}
 
+	// If/else returning booleans -> return cond (nikeee/cappu#42 follow-up):
+	// `if (cond) return true; else return false;` -> `return cond;` (and the
+	// negated form). Ports singleReturnBoolean/checkIfElseReturningBoolean in
+	// src/compiler/checker.ts.
+	singleReturnBoolean := func(stmt *Node) (value bool, ok bool) {
+		if stmt == nil {
+			return false, false
+		}
+		ret := stmt
+		if stmt.Kind == Block {
+			statements := stmt.AsBlock().Statements
+			if nodeArrayLen(statements) != 1 {
+				return false, false
+			}
+			ret = statements.Nodes[0]
+		}
+		if ret.Kind != ReturnStatement {
+			return false, false
+		}
+		expr := ret.AsReturnStatement().Expression
+		if expr == nil {
+			return false, false
+		}
+		switch expr.Kind {
+		case TrueKeyword:
+			return true, true
+		case FalseKeyword:
+			return false, true
+		default:
+			return false, false
+		}
+	}
+	checkIfElseReturningBoolean := func(ifStmt *Node) {
+		is := ifStmt.AsIfStatement()
+		thenValue, thenOk := singleReturnBoolean(is.ThenStatement)
+		elseValue, elseOk := singleReturnBoolean(is.ElseStatement)
+		if !thenOk || !elseOk || thenValue == elseValue {
+			return
+		}
+		negate := !thenValue
+		text := sourceFile.AsSourceFile().Text
+		start := SkipTrivia(text, ifStmt.Pos)
+		before := text[start:ifStmt.End]
+		condStart := SkipTrivia(text, is.Condition.Pos)
+		condText := text[condStart:is.Condition.End]
+		after := "return " + condText + ";"
+		if negate {
+			after = "return " + negatedText(is.Condition, condText) + ";"
+		}
+		diagnostics = append(diagnostics, CreateDiagnostic(start, ifStmt.End-start,
+			Diagnostics.IfElseReturningBooleans0CanBeReplacedWith1, before, after))
+	}
+
 	var visit func(node *Node)
 	visit = func(node *Node) {
 		switch node.Kind {
 		case TryStatement:
 			checkEmptyCatchBlocks(node)
+		case IfStatement:
+			checkIfElseReturningBoolean(node)
 		case BinaryExpression:
 			if cleanParse {
 				checkCountComparedToZero(node)

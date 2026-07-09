@@ -777,6 +777,63 @@ function replaceBooleanComparison(
   ];
 }
 
+// --- if/else returning booleans -> return cond (nikeee/cappu#42 follow-up) -----
+
+// A branch that is a single `return true;`/`return false;`, possibly wrapped
+// in a block, or undefined otherwise.
+function singleReturnBoolean(stmt: Node | undefined): { value: boolean } | undefined {
+  if (!stmt) return undefined;
+  let ret = stmt;
+  if (stmt.kind === SyntaxKind.Block) {
+    const statements = (stmt as Block).statements;
+    if (statements.length !== 1) return undefined;
+    ret = statements[0]!;
+  }
+  if (ret.kind !== SyntaxKind.ReturnStatement) return undefined;
+  const expr = (ret as ReturnStatement).expression;
+  if (expr?.kind === SyntaxKind.TrueKeyword) return { value: true };
+  if (expr?.kind === SyntaxKind.FalseKeyword) return { value: false };
+  return undefined;
+}
+
+function replaceIfElseReturningBoolean(
+  checker: Checker,
+  sourceFile: SourceFile,
+  start: number,
+): CodeActionResult[] {
+  if (sourceFile.parseDiagnostics.length > 0) return [];
+  let node: Node | undefined = getNodeAtPosition(sourceFile, start);
+  while (node && node.kind !== SyntaxKind.IfStatement) node = node.parent;
+  if (!node) return [];
+  const ifStmt = node as IfStatement;
+  const flagged = checker
+    .getSemanticDiagnostics(sourceFile)
+    .some(
+      d =>
+        d.code === Diagnostics.If_else_returning_booleans_0_can_be_replaced_with_1.code &&
+        d.pos >= ifStmt.pos &&
+        d.end <= ifStmt.end,
+    );
+  if (!flagged) return [];
+  const thenInfo = singleReturnBoolean(ifStmt.thenStatement);
+  const elseInfo = singleReturnBoolean(ifStmt.elseStatement);
+  if (!thenInfo || !elseInfo || thenInfo.value === elseInfo.value) return [];
+  const negate = !thenInfo.value;
+  const condStart = skipTrivia(sourceFile.text, ifStmt.condition.pos);
+  const condText = sourceFile.text.slice(condStart, ifStmt.condition.end);
+  const newText = negate
+    ? `return ${negatedText(ifStmt.condition, condText)};`
+    : `return ${condText};`;
+  const ifStart = skipTrivia(sourceFile.text, ifStmt.pos);
+  return [
+    {
+      title: "Simplify to return statement",
+      kind: "quickfix",
+      changes: [{ start: ifStart, end: ifStmt.end, newText }],
+    },
+  ];
+}
+
 // --- size()/length() compared to 0/1 -> isEmpty()/!isEmpty() (nikeee/cappu#42) ---
 
 // The receiver of a zero-arg `size()`/`length()` call, or undefined. FQN
@@ -1990,6 +2047,7 @@ export function getCodeActions(
     ...replaceOptionalIfPresentWithNullCheck(checker, sourceFile, start),
     ...replaceOptionalOfNull(checker, sourceFile, start),
     ...replaceBooleanComparison(checker, sourceFile, start),
+    ...replaceIfElseReturningBoolean(checker, sourceFile, start),
     ...replaceCountComparedToZero(checker, sourceFile, start),
     ...replaceStringEquality(checker, sourceFile, start),
     ...replaceBoxedEquality(checker, sourceFile, start),

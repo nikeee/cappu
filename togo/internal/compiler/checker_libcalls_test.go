@@ -539,3 +539,46 @@ func TestBoolComparisonNeitherLiteralSilent(t *testing.T) {
 		t.Errorf("want silent, got %v", got)
 	}
 }
+
+// --- if/else returning booleans -> return cond (nikeee/cappu#42 follow-up) -------
+
+func TestIfElseBoolTrueFalseFlagged(t *testing.T) {
+	got := libcallDiagnose(`boolean a = true; if (a) { return true; } else { return false; }`)
+	if !containsCode(got, ifElseBool) {
+		t.Error("want if-else-bool")
+	}
+}
+
+func TestIfElseBoolFalseTrueFlagged(t *testing.T) {
+	got := libcallDiagnose(`boolean a = true; if (a) { return false; } else { return true; }`)
+	if !containsCode(got, ifElseBool) {
+		t.Error("want if-else-bool")
+	}
+}
+
+func TestIfElseBoolBracelessFlagged(t *testing.T) {
+	got := libcallDiagnose(`boolean a = true; if (a) return true; else return false;`)
+	if !containsCode(got, ifElseBool) {
+		t.Error("want if-else-bool")
+	}
+}
+
+func TestIfElseBoolSameValueSilent(t *testing.T) {
+	got := libcallDiagnose(`boolean a = true; if (a) { return true; } else { return true; }`)
+	if len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
+
+func TestIfNoElseSilent(t *testing.T) {
+	if got := libcallDiagnose(`boolean a = true; if (a) { return true; }`); len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}
+
+func TestIfElseNonBooleanReturnsSilent(t *testing.T) {
+	got := libcallDiagnose(`boolean a = true; if (a) { return foo(); } else { return bar(); }`)
+	if len(got) != 0 {
+		t.Errorf("want silent, got %v", got)
+	}
+}

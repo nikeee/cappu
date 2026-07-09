@@ -1685,3 +1685,49 @@ func TestBoolComparisonNotOfferedForNonLiteral(t *testing.T) {
 		t.Errorf("actions = %+v", actions)
 	}
 }
+
+// --- if/else returning booleans -> return cond (nikeee/cappu#42 follow-up) -------
+
+func ifElseBoolActions(ctx *actionCtx, needle string) []CodeActionResult {
+	var out []CodeActionResult
+	for _, a := range ctx.actionsAt(needle, 1) {
+		if a.Title == "Simplify to return statement" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestIfElseBoolTrueFalseRewrites(t *testing.T) {
+	text := "class T {\n  boolean m(boolean a) {\n    if (a) { return true; } else { return false; }\n  }\n}"
+	actions := ifElseBoolActions(actionsSetup(text, nil), "if (a)")
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  boolean m(boolean a) {\n    return a;\n  }\n}")
+}
+
+func TestIfElseBoolFalseTrueRewrites(t *testing.T) {
+	text := "class T {\n  boolean m(boolean a) {\n    if (a) { return false; } else { return true; }\n  }\n}"
+	actions := ifElseBoolActions(actionsSetup(text, nil), "if (a)")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  boolean m(boolean a) {\n    return !a;\n  }\n}")
+}
+
+func TestIfElseBoolBracelessRewrites(t *testing.T) {
+	text := "class T {\n  boolean m(boolean a) {\n    if (a) return true; else return false;\n  }\n}"
+	actions := ifElseBoolActions(actionsSetup(text, nil), "if (a)")
+	if len(actions) != 1 {
+		t.Fatalf("actions = %+v", actions)
+	}
+	expectEdit(t, text, actions[0], "class T {\n  boolean m(boolean a) {\n    return a;\n  }\n}")
+}
+
+func TestIfElseBoolSameValueNotOffered(t *testing.T) {
+	text := "class T {\n  boolean m(boolean a) {\n    if (a) { return true; } else { return true; }\n  }\n}"
+	if actions := ifElseBoolActions(actionsSetup(text, nil), "if (a)"); len(actions) != 0 {
+		t.Errorf("actions = %+v", actions)
+	}
+}
