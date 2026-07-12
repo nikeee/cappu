@@ -7,7 +7,7 @@ package meta
 // togo/Makefile + .github/workflows/CD.yaml), so the shipped binary always
 // reports its own build version. The default below is the dev-build fallback,
 // kept in step with package.json "version" by the npm version hook.
-var Version = "0.1.16"
+var Version = "0.1.17"
 
 // IssueTracker is the bug tracker `cappu rage` opens (package.json bugs.url).
 const IssueTracker = "https://github.com/nikeee/cappu/issues"
