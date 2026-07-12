@@ -1,0 +1,4 @@
+# Keep the knowledge graph to real source only - exclude test fixtures/corpora.
+test-fixtures/
+graphify-out/
+.golangci.yml
