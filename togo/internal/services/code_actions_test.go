@@ -318,6 +318,32 @@ func TestNoInlineWithoutInitializer(t *testing.T) {
 	}
 }
 
+func TestNoInlineForLoopVariable(t *testing.T) {
+	ctx := actionsSetup(strings.Join([]string{"class C {", "  void m(int n) {", "    for (int i = 1; i <= n; i++) {", "      use(i);", "    }", "  }", "}"}, "\n"), nil)
+	if ctx.inlineAt("i =", 1) != nil {
+		t.Error("for-loop variable should offer no inline")
+	}
+}
+
+func TestNoInlineWhenIncremented(t *testing.T) {
+	ctx := actionsSetup(strings.Join([]string{"class C {", "  void m() {", "    int n = 0;", "    n++;", "    use(n);", "  }", "}"}, "\n"), nil)
+	if ctx.inlineAt("n =", 1) != nil {
+		t.Error("incremented local should offer no inline")
+	}
+}
+
+func TestInlineKeepsSameLineNeighbour(t *testing.T) {
+	ctx := actionsSetup(strings.Join([]string{"class C {", "  void m() {", "    int a = 1; use(a);", "  }", "}"}, "\n"), nil)
+	action := ctx.inlineAt("a =", 1)
+	if action == nil {
+		t.Fatal("no inline action")
+	}
+	want := strings.Join([]string{"class C {", "  void m() {", "    use(1);", "  }", "}"}, "\n")
+	if got := apply(ctx.text, *action); got != want {
+		t.Errorf("apply = %q", got)
+	}
+}
+
 func (ctx *actionCtx) rewriteAt(needle string, occ int) *CodeActionResult {
 	offset := -1
 	for i := 0; i < occ; i++ {
@@ -1810,5 +1836,16 @@ func TestCollapsibleIfOuterElseNotOffered(t *testing.T) {
 	text := "class T {\n  void m(boolean a, boolean b) {\n    if (a) { if (b) { foo(); } } else { bar(); }\n  }\n}"
 	if actions := collapsibleIfActions(actionsSetup(text, nil), "if (a)"); len(actions) != 0 {
 		t.Errorf("actions = %+v", actions)
+	}
+}
+
+func TestCollapsibleIfCommentNotOffered(t *testing.T) {
+	before := "class T {\n  void m(boolean a, boolean b) {\n    if (a) {\n      // note\n      if (b) { foo(); }\n    }\n  }\n}"
+	if actions := collapsibleIfActions(actionsSetup(before, nil), "if (a)"); len(actions) != 0 {
+		t.Errorf("leading comment: actions = %+v", actions)
+	}
+	after := "class T {\n  void m(boolean a, boolean b) {\n    if (a) {\n      if (b) { foo(); }\n      // note\n    }\n  }\n}"
+	if actions := collapsibleIfActions(actionsSetup(after, nil), "if (a)"); len(actions) != 0 {
+		t.Errorf("trailing comment: actions = %+v", actions)
 	}
 }

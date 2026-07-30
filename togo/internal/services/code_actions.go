@@ -294,6 +294,21 @@ func isAssignmentTarget(use *compiler.Node) bool {
 	return use.Parent.Kind == compiler.AssignmentExpression && use.Parent.AsAssignmentExpression().Left == use
 }
 
+// isIncrementTarget reports `x++` / `--x`: a write, so inlining the initializer
+// would change semantics (and produce `0++`).
+func isIncrementTarget(use *compiler.Node) bool {
+	switch use.Parent.Kind {
+	case compiler.PostfixUnaryExpression:
+		op := use.Parent.AsPostfixUnaryExpression().Operator
+		return op == compiler.PlusPlusToken || op == compiler.MinusMinusToken
+	case compiler.PrefixUnaryExpression:
+		op := use.Parent.AsPrefixUnaryExpression().Operator
+		return op == compiler.PlusPlusToken || op == compiler.MinusMinusToken
+	default:
+		return false
+	}
+}
+
 func inlineLocalVariable(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start int) []CodeActionResult {
 	text := sf.AsSourceFile().Text
 	identifier := compiler.GetIdentifierAtPosition(sf, start)
@@ -317,6 +332,12 @@ func inlineLocalVariable(program *compiler.Program, checker *compiler.Checker, s
 		statement.AsLocalVariableDeclarationStatement().Declarators.Len() != 1 {
 		return nil
 	}
+	// A `for (int i = 0; ...)` initializer is a declaration statement too, but it
+	// is not a statement in a block: deleting its line would take the loop header
+	// with it.
+	if statement.Parent == nil || statement.Parent.Kind != compiler.Block {
+		return nil
+	}
 	declName := declarator.AsVariableDeclarator().Name
 	var uses []*compiler.Node
 	for _, node := range compiler.FindReferences(symbol, program, checker.ResolveName) {
@@ -325,7 +346,8 @@ func inlineLocalVariable(program *compiler.Program, checker *compiler.Checker, s
 		}
 	}
 	for _, use := range uses {
-		if isAssignmentTarget(use) {
+		// reassigned or incremented: inlining would change semantics
+		if isAssignmentTarget(use) || isIncrementTarget(use) {
 			return nil
 		}
 	}
@@ -338,14 +360,35 @@ func inlineLocalVariable(program *compiler.Program, checker *compiler.Checker, s
 	for _, use := range uses {
 		changes = append(changes, TextChange{Start: compiler.SkipTrivia(text, use.Pos), End: use.End, NewText: replacement})
 	}
+	// Delete the whole declaration line (indentation through the trailing
+	// newline) - but only when the declaration is alone on it, otherwise the
+	// neighbouring statements would go with it.
 	statementStart := compiler.SkipTrivia(text, statement.Pos)
 	lineStart := strings.LastIndex(text[:statementStart], "\n") + 1
-	afterNewline := strings.Index(text[statement.End:], "\n")
+	// `statement.End` stops before the terminating `;`.
+	statementEnd := statement.End
+	for statementEnd < len(text) && (text[statementEnd] == ' ' || text[statementEnd] == '\t') {
+		statementEnd++
+	}
+	if statementEnd < len(text) && text[statementEnd] == ';' {
+		statementEnd++
+	}
+	afterNewline := strings.Index(text[statementEnd:], "\n")
 	lineEnd := len(text)
 	if afterNewline >= 0 {
-		lineEnd = statement.End + afterNewline + 1
+		lineEnd = statementEnd + afterNewline + 1
 	}
-	changes = append(changes, TextChange{Start: lineStart, End: lineEnd, NewText: ""})
+	aloneOnLine := strings.TrimSpace(text[lineStart:statementStart]) == "" &&
+		strings.TrimSpace(text[statementEnd:lineEnd]) == ""
+	if aloneOnLine {
+		changes = append(changes, TextChange{Start: lineStart, End: lineEnd, NewText: ""})
+	} else {
+		end := statementEnd
+		for end < len(text) && (text[end] == ' ' || text[end] == '\t') {
+			end++
+		}
+		changes = append(changes, TextChange{Start: statementStart, End: end, NewText: ""})
+	}
 	return []CodeActionResult{{Title: "Inline local variable", Kind: "refactor.inline", Changes: changes}}
 }
 
@@ -979,6 +1022,19 @@ func replaceCollapsibleIf(checker *compiler.Checker, sf *compiler.Node, start in
 		return nil
 	}
 	ii := inner.AsIfStatement()
+	// The merged text keeps only the inner `if`'s body, so a comment sitting
+	// between the outer brace and the inner `if` (or after it) would be dropped:
+	// leave those alone rather than delete the comment.
+	if oi.ThenStatement.Kind == compiler.Block {
+		braceStart := compiler.SkipTrivia(data.Text, oi.ThenStatement.Pos)
+		innerStart := compiler.SkipTrivia(data.Text, inner.Pos)
+		if strings.TrimSpace(data.Text[braceStart+1:innerStart]) != "" {
+			return nil
+		}
+		if strings.TrimSpace(data.Text[inner.End:oi.ThenStatement.End-1]) != "" {
+			return nil
+		}
+	}
 	outerCondStart := compiler.SkipTrivia(data.Text, oi.Condition.Pos)
 	outerCondText := data.Text[outerCondStart:oi.Condition.End]
 	innerCondStart := compiler.SkipTrivia(data.Text, ii.Condition.Pos)

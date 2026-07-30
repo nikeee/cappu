@@ -276,6 +276,36 @@ test("no inline for a local without an initializer", () => {
   expect(inlineAt(ctx, "x")).toBeUndefined();
 });
 
+test("no inline for a for-loop's own variable (deleting the line kills the header)", () => {
+  const ctx = setup(
+    [
+      "class C {",
+      "  void m(int n) {",
+      "    for (int i = 1; i <= n; i++) {",
+      "      use(i);",
+      "    }",
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+  expect(inlineAt(ctx, "i =")).toBeUndefined();
+});
+
+test("no inline when the local is incremented", () => {
+  const ctx = setup(
+    ["class C {", "  void m() {", "    int n = 0;", "    n++;", "    use(n);", "  }", "}"].join(
+      "\n",
+    ),
+  );
+  expect(inlineAt(ctx, "n =")).toBeUndefined();
+});
+
+test("inlining a declaration sharing its line keeps the neighbouring statement", () => {
+  const ctx = setup(["class C {", "  void m() {", "    int a = 1; use(a);", "  }", "}"].join("\n"));
+  const action = inlineAt(ctx, "a =")!;
+  expectEdit(ctx.text, action, ["class C {", "  void m() {", "    use(1);", "  }", "}"].join("\n"));
+});
+
 // --- change signature: remove unused parameter -------------------------------------
 
 function rewriteAt(ctx: ReturnType<typeof setup>, needle: string, occ = 1) {
@@ -1596,4 +1626,13 @@ test("collapsible if: not offered when the outer if has an else", () => {
   const text =
     "class T {\n  void m(boolean a, boolean b) {\n    if (a) { if (b) { foo(); } } else { bar(); }\n  }\n}";
   expect(collapsibleIfActions(setup(text), "if (a)")).toEqual([]);
+});
+
+test("collapsible if: not offered when a comment would be dropped", () => {
+  const before =
+    "class T {\n  void m(boolean a, boolean b) {\n    if (a) {\n      // note\n      if (b) { foo(); }\n    }\n  }\n}";
+  expect(collapsibleIfActions(setup(before), "if (a)")).toEqual([]);
+  const after =
+    "class T {\n  void m(boolean a, boolean b) {\n    if (a) {\n      if (b) { foo(); }\n      // note\n    }\n  }\n}";
+  expect(collapsibleIfActions(setup(after), "if (a)")).toEqual([]);
 });

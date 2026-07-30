@@ -38,6 +38,7 @@ import {
   type Node,
   type ObjectCreationExpression,
   type Parameter,
+  type PostfixUnaryExpression,
   type PrefixUnaryExpression,
   type PrimitiveType,
   type PropertyAccessExpression,
@@ -331,6 +332,21 @@ function isAssignmentTarget(use: Node): boolean {
   );
 }
 
+// `x++` / `--x`: a write, so inlining the initializer would change semantics
+// (and produce `0++`).
+function isIncrementTarget(use: Node): boolean {
+  const p = use.parent;
+  if (p.kind === SyntaxKind.PostfixUnaryExpression) {
+    const op = (p as PostfixUnaryExpression).operator;
+    return op === SyntaxKind.PlusPlusToken || op === SyntaxKind.MinusMinusToken;
+  }
+  if (p.kind === SyntaxKind.PrefixUnaryExpression) {
+    const op = (p as PrefixUnaryExpression).operator;
+    return op === SyntaxKind.PlusPlusToken || op === SyntaxKind.MinusMinusToken;
+  }
+  return false;
+}
+
 function inlineLocalVariable(
   program: Program,
   checker: Checker,
@@ -354,11 +370,16 @@ function inlineLocalVariable(
   ) {
     return []; // multi-declarator statements are not handled
   }
+  // A `for (int i = 0; ...)` initializer is a declaration statement too, but it
+  // is not a statement in a block: deleting its line would take the loop header
+  // with it.
+  if (statement.parent.kind !== SyntaxKind.Block) return [];
 
   const uses = findReferences(symbol, program, checker.resolveName).filter(
     node => node !== declarator.name,
   );
-  if (uses.some(isAssignmentTarget)) return []; // reassigned: inlining would change semantics
+  // reassigned or incremented: inlining would change semantics
+  if (uses.some(use => isAssignmentTarget(use) || isIncrementTarget(use))) return [];
 
   const initText = sourceFile.text.slice(
     skipTrivia(sourceFile.text, initializer.pos),
@@ -372,12 +393,29 @@ function inlineLocalVariable(
     newText: replacement,
   }));
 
-  // Delete the whole declaration line (indentation through the trailing newline).
+  // Delete the whole declaration line (indentation through the trailing
+  // newline) - but only when the declaration is alone on it, otherwise the
+  // neighbouring statements would go with it.
   const statementStart = skipTrivia(sourceFile.text, statement.pos);
   const lineStart = sourceFile.text.lastIndexOf("\n", statementStart - 1) + 1;
-  const afterNewline = sourceFile.text.indexOf("\n", statement.end);
+  // `statement.end` stops before the terminating `;`.
+  let statementEnd = statement.end;
+  while (sourceFile.text[statementEnd] === " " || sourceFile.text[statementEnd] === "\t") {
+    statementEnd++;
+  }
+  if (sourceFile.text[statementEnd] === ";") statementEnd++;
+  const afterNewline = sourceFile.text.indexOf("\n", statementEnd);
   const lineEnd = afterNewline < 0 ? sourceFile.text.length : afterNewline + 1;
-  changes.push({ start: lineStart, end: lineEnd, newText: "" });
+  const aloneOnLine =
+    sourceFile.text.slice(lineStart, statementStart).trim() === "" &&
+    sourceFile.text.slice(statementEnd, lineEnd).trim() === "";
+  if (aloneOnLine) {
+    changes.push({ start: lineStart, end: lineEnd, newText: "" });
+  } else {
+    let end = statementEnd;
+    while (sourceFile.text[end] === " " || sourceFile.text[end] === "\t") end++;
+    changes.push({ start: statementStart, end, newText: "" });
+  }
 
   return [{ title: "Inline local variable", kind: "refactor.inline", changes }];
 }
@@ -913,6 +951,15 @@ function replaceCollapsibleIf(
   if (outer.elseStatement) return [];
   const inner = singleStatementIf(outer.thenStatement);
   if (!inner || inner.elseStatement) return [];
+  // The merged text keeps only the inner `if`'s body, so a comment sitting
+  // between the outer brace and the inner `if` (or after it) would be dropped:
+  // leave those alone rather than delete the comment.
+  if (outer.thenStatement.kind === SyntaxKind.Block) {
+    const braceStart = skipTrivia(sourceFile.text, outer.thenStatement.pos);
+    const innerStart = skipTrivia(sourceFile.text, inner.pos);
+    if (sourceFile.text.slice(braceStart + 1, innerStart).trim() !== "") return [];
+    if (sourceFile.text.slice(inner.end, outer.thenStatement.end - 1).trim() !== "") return [];
+  }
   const outerCondStart = skipTrivia(sourceFile.text, outer.condition.pos);
   const outerCondText = sourceFile.text.slice(outerCondStart, outer.condition.end);
   const innerCondStart = skipTrivia(sourceFile.text, inner.condition.pos);
