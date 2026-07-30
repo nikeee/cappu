@@ -4,3 +4,5 @@ node_modules
 # Local-only parser test corpus (e.g. OpenJDK sources - not committed; GPL)
 /test-fixtures/parser/corpus/
 /dist/
+
+/graphify-out
