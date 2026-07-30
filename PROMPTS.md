@@ -542,3 +542,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-09 00:42 — plan opt.get() without isPresent(), size() == 0 -> isEmpty(), == on Strings, boxing constructors, indexOf(...) != -1 -> contains(...) and other common issues
 - 2026-07-09 01:43 — keep in mind that .toList and Collectors.toList might have different semantics. Also keep attention to keep the semantics the same after a refatoring. do all of the oneys that are possible/keep semantics. commit in between. remain on main branch
 - 2026-07-30 11:16 — review the entire code and check for obvious bugs and unexpected behaviour
+- 2026-07-30 12:18 — review the entire code and check for obvious bugs and unexpected behaviour
+- 2026-07-30 12:26 — re-build graphify from the ground up, ignoring all vendored sources and submodules (like stated in .graphifyignore)
