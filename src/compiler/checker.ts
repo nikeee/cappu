@@ -3190,6 +3190,15 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       if (t.kind !== TypeKind.Class) return;
       const fqn = fqnOf(t as ClassType);
       if (!BOXING_TYPES.has(fqn)) return;
+      // `new Float(aDouble)` is legal but `Float.valueOf(aDouble)` is not: there
+      // is no valueOf(double) overload and double -> float does not widen.
+      if (fqn === "java.lang.Float" && node.arguments?.length === 1) {
+        const argType = getTypeOfExpression(node.arguments[0]!);
+        const isDouble =
+          (argType.kind === TypeKind.Primitive && argType.name === "double") ||
+          (argType.kind === TypeKind.Class && fqnOf(argType as ClassType) === "java.lang.Double");
+        if (isDouble) return;
+      }
       const typeName = fqn.slice(fqn.lastIndexOf(".") + 1);
       const start = skipTrivia(sourceFile.text, node.pos);
       diagnostics.push(
@@ -3253,6 +3262,9 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       if (call.arguments.length !== 1) return undefined;
       const target = memberCallTarget(call);
       if (!target || target.name !== "indexOf" || !INDEXOF_FQNS.has(target.fqn)) return undefined;
+      // `String.contains` takes a CharSequence, so only the `indexOf(String)`
+      // overload converts - `s.indexOf('a')` / `s.indexOf(65)` would not compile.
+      if (target.fqn === "java.lang.String" && !isStringType(call.arguments[0]!)) return undefined;
       return call;
     };
     const checkIndexOfComparedToNegativeOne = (bin: BinaryExpression): void => {
@@ -3481,6 +3493,9 @@ export function createChecker(program: Program, nullness?: NullnessOptions): Che
       for (const clause of tryStmt.catchClauses) {
         if (clause.block.statements.length > 0) continue;
         const braceStart = skipTrivia(sourceFile.text, clause.block.pos);
+        // A truncated `catch` (mid-edit, no `{}` yet) has no block text to
+        // inspect - the braces the slice below assumes are not there.
+        if (clause.block.end < braceStart + 2) continue;
         const inner = sourceFile.text.slice(braceStart + 1, clause.block.end - 1).trim();
         if (inner.length > 0) continue; // a comment: assume intentional
         const start = skipTrivia(sourceFile.text, clause.pos);

@@ -288,6 +288,12 @@ test("new ArrayList<>() (a non-boxing type) is silent", () => {
   expect(diagnose("List<String> xs = new ArrayList<>();")).toEqual([]);
 });
 
+test("new Float(aDouble) is silent (there is no Float.valueOf(double))", () => {
+  expect(diagnose("Float f = new Float(1.0d);")).toEqual([]);
+  expect(diagnose("double d = 1.0; Float f = new Float(d);")).toEqual([]);
+  expect(diagnose("Float f = new Float(1.0f);")).toContain(BOXING_CTOR);
+});
+
 // --- indexOf(...) != -1 -> contains(...) (nikeee/cappu#42) ---------------------
 
 test("String.indexOf(x) != -1 is flagged", () => {
@@ -310,6 +316,11 @@ test("literal-on-left -1 != indexOf(x) is flagged", () => {
 
 test("indexOf(x) compared to a non-negative-one literal is silent", () => {
   expect(diagnose('String s = "x"; if (s.indexOf("a") != 0) {}')).toEqual([]);
+});
+
+test("String.indexOf(char/int) is silent (contains() takes a CharSequence)", () => {
+  expect(diagnose(`String s = "x"; if (s.indexOf('a') != -1) {}`)).toEqual([]);
+  expect(diagnose('String s = "x"; if (s.indexOf(65) != -1) {}')).toEqual([]);
 });
 
 // --- redundant new String(...) (nikeee/cappu#42) -------------------------------
@@ -402,6 +413,24 @@ test("a catch block with a statement is silent", () => {
 
 test("a catch block containing only a comment is silent (assumed intentional)", () => {
   expect(diagnose("try { m(); } catch (Exception e) { /* ignored intentionally */ }")).toEqual([]);
+});
+
+test("a truncated catch mid-edit is silent (no block text to inspect)", () => {
+  // The Go port sliced the block text unguarded here and crashed the server.
+  for (const src of [
+    "class C { void m() { try {} catch",
+    "class C { void m() { try {} catch (E e)",
+    "class C { void m() { try { } catch (Exception e) {",
+  ]) {
+    const program = createProgram();
+    loadJdkStub(program);
+    const uri = "file:///T.java" as Uri;
+    program.setOpenDocument(uri, src, 1);
+    const codes = createChecker(program)
+      .getSemanticDiagnostics(program.getSourceFile(uri)!)
+      .map(d => d.code);
+    expect(codes).not.toContain(EMPTY_CATCH);
+  }
 });
 
 // --- Optional.of(null) -> ofNullable (nikeee/cappu#42 follow-up) ---------------

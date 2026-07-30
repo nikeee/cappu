@@ -1544,6 +1544,15 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 		if !boxingTypes[fqn] {
 			return
 		}
+		// `new Float(aDouble)` is legal but `Float.valueOf(aDouble)` is not: there
+		// is no valueOf(double) overload and double -> float does not widen.
+		if fqn == "java.lang.Float" && nodeArrayLen(oce.Arguments) == 1 {
+			argType := c.getTypeOfExpression(oce.Arguments.Nodes[0])
+			if (argType.Kind == TypeKindPrimitive && argType.Name == "double") ||
+				(argType.Kind == TypeKindClass && c.fqnOf(argType) == "java.lang.Double") {
+				return
+			}
+		}
 		typeName := fqn
 		if i := strings.LastIndex(fqn, "."); i >= 0 {
 			typeName = fqn[i+1:]
@@ -1601,6 +1610,11 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 		}
 		fqn, name, ok := memberCallTarget(n)
 		if !ok || name != "indexOf" || !indexOfFqns[fqn] {
+			return nil
+		}
+		// `String.contains` takes a CharSequence, so only the `indexOf(String)`
+		// overload converts - `s.indexOf('a')` / `s.indexOf(65)` would not compile.
+		if fqn == "java.lang.String" && !isStringType(n.AsCallExpression().Arguments.Nodes[0]) {
 			return nil
 		}
 		return n
@@ -1833,6 +1847,11 @@ func (c *Checker) GetSemanticDiagnostics(sourceFile *Node) []Diagnostic {
 				continue
 			}
 			braceStart := SkipTrivia(text, cc.Block.Pos)
+			// A truncated `catch` (mid-edit, no `{}` yet) has no block text to
+			// inspect - the braces the slice below assumes are not there.
+			if cc.Block.End < braceStart+2 {
+				continue
+			}
 			inner := strings.TrimSpace(text[braceStart+1 : cc.Block.End-1])
 			if inner != "" {
 				continue // a comment: assume intentional

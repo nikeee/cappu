@@ -314,6 +314,19 @@ func TestBoxingConstructorNonBoxingTypeSilent(t *testing.T) {
 	}
 }
 
+// There is no Float.valueOf(double) and double -> float does not widen.
+func TestBoxingConstructorFloatFromDoubleSilent(t *testing.T) {
+	if got := libcallDiagnose(`Float f = new Float(1.0d);`); len(got) != 0 {
+		t.Errorf("want silent for new Float(1.0d), got %v", got)
+	}
+	if got := libcallDiagnose(`double d = 1.0; Float f = new Float(d);`); len(got) != 0 {
+		t.Errorf("want silent for new Float(d), got %v", got)
+	}
+	if !containsCode(libcallDiagnose(`Float f = new Float(1.0f);`), boxingCtor) {
+		t.Error("want boxing-ctor for new Float(1.0f)")
+	}
+}
+
 // --- indexOf(...) != -1 -> contains(...) (nikeee/cappu#42) -----------------------
 
 func TestIndexOfNotEqualsNegativeOneFlagged(t *testing.T) {
@@ -344,6 +357,16 @@ func TestIndexOfLiteralOnLeftFlagged(t *testing.T) {
 func TestIndexOfNonNegativeOneSilent(t *testing.T) {
 	if got := libcallDiagnose(`String s = "x"; if (s.indexOf("a") != 0) {}`); len(got) != 0 {
 		t.Errorf("want silent, got %v", got)
+	}
+}
+
+// `String.contains` takes a CharSequence: the char/int overloads do not convert.
+func TestIndexOfCharSilent(t *testing.T) {
+	if got := libcallDiagnose(`String s = "x"; if (s.indexOf('a') != -1) {}`); len(got) != 0 {
+		t.Errorf("want silent for indexOf(char), got %v", got)
+	}
+	if got := libcallDiagnose(`String s = "x"; if (s.indexOf(65) != -1) {}`); len(got) != 0 {
+		t.Errorf("want silent for indexOf(int), got %v", got)
 	}
 }
 
@@ -482,6 +505,26 @@ func TestCatchBlockWithCommentSilent(t *testing.T) {
 	got := libcallDiagnose(`try { m(); } catch (Exception e) { /* ignored intentionally */ }`)
 	if len(got) != 0 {
 		t.Errorf("want silent (assumed intentional), got %v", got)
+	}
+}
+
+// A truncated `catch` mid-edit used to crash here: the block text was sliced
+// unguarded, so `text[braceStart+1 : block.End-1]` ran out of range.
+func TestTruncatedCatchSilent(t *testing.T) {
+	for _, src := range []string{
+		"class C { void m() { try {} catch",
+		"class C { void m() { try {} catch (E e)",
+		"class C { void m() { try { } catch (Exception e) {",
+	} {
+		program := NewProgram()
+		LoadJdkStub(program)
+		program.SetOpenDocument("file:///T.java", src, 1)
+		checker := NewChecker(program)
+		for _, d := range checker.GetSemanticDiagnostics(program.GetSourceFile("file:///T.java")) {
+			if int(d.Code) == emptyCatch {
+				t.Errorf("%q: want no empty-catch on truncated input", src)
+			}
+		}
 	}
 }
 
