@@ -1,4 +1,7 @@
-# Keep the knowledge graph to real source only - exclude test fixtures/corpora.
+# Keep the knowledge graph to real source only (src/, togo/) - exclude test
+# fixtures/corpora and the vendored TypeScript reference submodules.
 test-fixtures/
+TypeScript/
+TypeScript-Go/
 graphify-out/
 .golangci.yml
