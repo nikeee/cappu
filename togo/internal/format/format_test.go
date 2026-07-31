@@ -215,3 +215,53 @@ func TestExoticTypesAndQualifiedThisSuperRoundTrip(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", got, source)
 	}
 }
+
+// Port of src/format/format.test.ts "a trailing comment after a nested
+// initializer stays with the statement".
+func TestTrailingCommentAfterNestedInitializer(t *testing.T) {
+	source := strings.Join([]string{
+		"class T {",
+		"  void m() {",
+		"    int[][] edges = {{0, 1}, {1, 2}, {2, 3}, {3, 0}}; // Even cycle",
+		"  }",
+		"}",
+		"",
+	}, "\n")
+	got, err := FormatSource(source, FormatOptions{Style: "google"}, "input.java")
+	if err != nil {
+		t.Fatalf("FormatSource: %v", err)
+	}
+	if got != source {
+		t.Errorf("got:\n%s\nwant:\n%s", got, source)
+	}
+}
+
+// Port of src/format/format.test.ts "a leading block comment stays on its item's
+// line when the list is broken".
+func TestLeadingBlockCommentStaysWithItem(t *testing.T) {
+	source := strings.Join([]string{
+		"class T {",
+		"  Object[] m() {",
+		"    return new Object[] {",
+		"      \"for\", \"then\", \"despite\", /* of */ \"space\", \"I\", \"would\", \"be\", \"brought\", \"from\",",
+		"      \"limits\", \"far\", \"remote\", \"where\", \"thou\", \"dost\", \"stay\"",
+		"    };",
+		"  }",
+		"}",
+		"",
+	}, "\n")
+	once, err := FormatSource(source, FormatOptions{Style: "google"}, "input.java")
+	if err != nil {
+		t.Fatalf("FormatSource: %v", err)
+	}
+	if !strings.Contains(once, "/* of */ \"space\",") {
+		t.Errorf("comment detached from its item:\n%s", once)
+	}
+	twice, err := FormatSource(once, FormatOptions{Style: "google"}, "input.java")
+	if err != nil {
+		t.Fatalf("FormatSource (2nd): %v", err)
+	}
+	if twice != once {
+		t.Errorf("not idempotent:\n%s\n---\n%s", once, twice)
+	}
+}

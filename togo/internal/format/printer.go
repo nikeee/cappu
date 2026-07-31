@@ -298,6 +298,29 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 }
 
 // trailingCommentAfter returns a comment immediately after node on the same line.
+// trailsDirectly reports whether a comment at pos still trails the construct
+// ending at from: same line, with nothing but whitespace and the construct's own
+// separator (`,`, `;`) in between. Any further code in between means the comment
+// trails THAT code - without this check `{{0, 1}, {2, 3}}; // note` hung the
+// comment on the literal `1`, which forced the initializer open (differently on
+// a re-run).
+func (p *printer) trailsDirectly(from, pos int) bool {
+	if from < 0 || pos > len(p.text) || from > pos {
+		return false
+	}
+	seenSeparator := false
+	for i := from; i < pos; i++ {
+		switch {
+		case isInlineWhitespace(p.text[i]):
+		case (p.text[i] == ';' || p.text[i] == ',') && !seenSeparator:
+			seenSeparator = true
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (p *printer) trailingCommentAfter(node *compiler.Node) (comment, bool) {
 	if p.ci >= len(p.comments) {
 		return comment{}, false
@@ -306,7 +329,7 @@ func (p *printer) trailingCommentAfter(node *compiler.Node) (comment, bool) {
 	if c.ownLine || c.pos < node.End {
 		return comment{}, false
 	}
-	if strings.Contains(p.text[node.End:c.pos], "\n") {
+	if !p.trailsDirectly(node.End, c.pos) {
 		return comment{}, false
 	}
 	p.ci++
@@ -2227,7 +2250,7 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData) Doc {
 	if p.ci < len(p.comments) {
 		t := p.comments[p.ci]
 		lastEnd := els[len(els)-1].End
-		if t.line && !t.ownLine && t.pos > lastEnd && !strings.Contains(p.text[lastEnd:t.pos], "\n") {
+		if t.line && !t.ownLine && t.pos > lastEnd && p.trailsDirectly(lastEnd, t.pos) {
 			p.ci++
 			closingComment = t.text
 		}

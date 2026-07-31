@@ -38,6 +38,10 @@ export function collectComments(source: string): Comment[] {
   return comments;
 }
 
+function isInlineWhitespace(ch: number): boolean {
+  return ch === 0x20 || ch === 0x09 || ch === 0x0d || ch === 0x0c || ch === 0x0b;
+}
+
 function extractFromGap(source: string, from: number, to: number, out: Comment[]): void {
   let i = from;
   // A comment is on its own line when nothing but whitespace precedes it back to
@@ -50,7 +54,7 @@ function extractFromGap(source: string, from: number, to: number, out: Comment[]
       i++;
       continue;
     }
-    if (ch === 0x20 || ch === 0x09 || ch === 0x0d || ch === 0x0c || ch === 0x0b) {
+    if (isInlineWhitespace(ch)) {
       i++;
       continue;
     }
@@ -67,12 +71,20 @@ function extractFromGap(source: string, from: number, to: number, out: Comment[]
       let j = i + 2;
       while (j < to && !(source.charCodeAt(j) === 0x2a && source.charCodeAt(j + 1) === 0x2f)) j++;
       j = Math.min(j + 2, to);
+      // A block comment with code after it on the same line leads that code
+      // (`/* of */ "space"`) rather than standing on its own line - even when it
+      // starts the line, which it does once the list has been broken one item
+      // per line. Treating it as own-line there made formatting unstable: the
+      // second run split `/* of */ "space",` onto two lines.
+      let k = j;
+      while (k < to && isInlineWhitespace(source.charCodeAt(k))) k++;
+      const codeFollowsOnLine = k < source.length && source.charCodeAt(k) !== 0x0a;
       out.push({
         pos: i,
         end: j,
         text: source.slice(i, j),
         line: false,
-        ownLine: sawNewlineSinceCode,
+        ownLine: sawNewlineSinceCode && !codeFollowsOnLine,
       });
       i = j;
       sawNewlineSinceCode = false;

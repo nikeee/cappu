@@ -210,3 +210,36 @@ test("JSR-308 types, qualified inner types and qualified this/super survive form
   ].join("\n");
   expect(formatSource(source, { style: "google" })).toBe(source);
 });
+
+// Formatting must be a fixpoint. Both cases below changed on a second run:
+// the trailing comment was attached to the innermost literal (forcing the
+// initializer open), and a leading block comment that had come to start its
+// line was then treated as a standalone line comment.
+test("a trailing comment after a nested initializer stays with the statement", () => {
+  const source = [
+    "class T {",
+    "  void m() {",
+    "    int[][] edges = {{0, 1}, {1, 2}, {2, 3}, {3, 0}}; // Even cycle",
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+  expect(formatSource(source, { style: "google" })).toBe(source);
+});
+
+test("a leading block comment stays on its item's line when the list is broken", () => {
+  const source = [
+    "class T {",
+    "  Object[] m() {",
+    "    return new Object[] {",
+    '      "for", "then", "despite", /* of */ "space", "I", "would", "be", "brought", "from",',
+    '      "limits", "far", "remote", "where", "thou", "dost", "stay"',
+    "    };",
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+  const once = formatSource(source, { style: "google" });
+  expect(once).toContain('/* of */ "space",');
+  expect(formatSource(once, { style: "google" })).toBe(once);
+});

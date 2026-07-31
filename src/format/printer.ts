@@ -368,12 +368,22 @@ class Printer {
     return out;
   }
 
+  /**
+   * Whether a comment at `pos` still trails the construct ending at `from`: same
+   * line, with nothing but whitespace and the construct's own separator (`,`,
+   * `;`) in between. Any further code in between means the comment trails THAT
+   * code - without this check `{{0, 1}, {2, 3}}; // note` hung the comment on
+   * the literal `1`, which forced the initializer open (differently on a re-run).
+   */
+  private trailsDirectly(from: number, pos: number): boolean {
+    return /^[ \t\r\f\v]*[;,]?[ \t\r\f\v]*$/.test(this.text.slice(from, pos));
+  }
+
   /** A comment immediately after `node` on the same source line, if any. */
   private trailingCommentAfter(node: Node): Comment | undefined {
     const c = this.comments[this.ci];
     if (!c || c.ownLine || c.pos < node.end) return undefined;
-    // Same line: no newline between the node's end and the comment.
-    if (this.text.slice(node.end, c.pos).includes("\n")) return undefined;
+    if (!this.trailsDirectly(node.end, c.pos)) return undefined;
     this.ci++;
     return c;
   }
@@ -1906,13 +1916,7 @@ class Printer {
     const lastEnd = e.elements[e.elements.length - 1].end;
     const t = this.comments[this.ci];
     let closingComment: string | undefined;
-    if (
-      t &&
-      t.line &&
-      !t.ownLine &&
-      t.pos > lastEnd &&
-      !/\n/.test(this.text.slice(lastEnd, t.pos))
-    ) {
+    if (t && t.line && !t.ownLine && t.pos > lastEnd && this.trailsDirectly(lastEnd, t.pos)) {
       this.ci++;
       closingComment = t.text;
     }

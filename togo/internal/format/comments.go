@@ -47,6 +47,10 @@ func collectComments(source string) []comment {
 	return comments
 }
 
+func isInlineWhitespace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\f' || ch == '\v'
+}
+
 func extractFromGap(source string, from, to int, out *[]comment) {
 	i := from
 	// A comment is on its own line when nothing but whitespace precedes it back to
@@ -59,7 +63,7 @@ func extractFromGap(source string, from, to int, out *[]comment) {
 			i++
 			continue
 		}
-		if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\f' || ch == '\v' {
+		if isInlineWhitespace(ch) {
 			i++
 			continue
 		}
@@ -80,7 +84,17 @@ func extractFromGap(source string, from, to int, out *[]comment) {
 				j++
 			}
 			j = min(j+2, to)
-			*out = append(*out, comment{pos: i, end: j, text: source[i:j], line: false, ownLine: sawNewlineSinceCode})
+			// A block comment with code after it on the same line leads that code
+			// (`/* of */ "space"`) rather than standing on its own line - even when
+			// it starts the line, which it does once the list has been broken one
+			// item per line. Treating it as own-line there made formatting
+			// unstable: the second run split `/* of */ "space",` onto two lines.
+			k := j
+			for k < to && isInlineWhitespace(source[k]) {
+				k++
+			}
+			codeFollowsOnLine := k < len(source) && source[k] != '\n'
+			*out = append(*out, comment{pos: i, end: j, text: source[i:j], line: false, ownLine: sawNewlineSinceCode && !codeFollowsOnLine})
 			i = j
 			sawNewlineSinceCode = false
 			continue
