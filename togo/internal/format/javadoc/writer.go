@@ -7,13 +7,17 @@ package javadoc
 
 import (
 	"strings"
-	"unicode/utf8"
+	"unicode/utf16"
 )
 
 // textWidth is a token's display width in characters. The TS port (and gjf,
 // which is Java) measures line width in string units, not bytes, so multi-byte
 // UTF-8 (e.g. the `∕✱✱` gjf writes in prose) must count as one column each.
-func textWidth(s string) int { return utf8.RuneCountInString(s) }
+// textWidth counts UTF-16 code units - the TypeScript build's String.length and
+// gjf's Java chars. (Runes differ from it for astral characters.)
+func textWidth(s string) int {
+	return len(utf16.Encode([]rune(s)))
+}
 
 type wsKind int
 

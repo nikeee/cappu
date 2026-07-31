@@ -8,6 +8,7 @@ package format
 import (
 	"regexp"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/nikeee/cappu/internal/format/javadoc"
 )
@@ -119,18 +120,22 @@ func wrapLineComments(lines []string, column0 int) []string {
 			result = append(result, line)
 			continue
 		}
-		for len(line)+column0 > commentMaxLineLength {
+		// Column arithmetic runs in UTF-16 code units (the TypeScript build's
+		// string indices, gjf's Java chars): counting bytes made every comment
+		// holding a non-ASCII character wrap a few columns early.
+		units := utf16.Encode([]rune(line))
+		for len(units)+column0 > commentMaxLineLength {
 			idx := commentMaxLineLength - column0
-			for idx >= 2 && !isSpaceByte(line[idx]) {
+			for idx >= 2 && !isSpaceUnit(units[idx]) {
 				idx--
 			}
 			if idx <= 2 {
 				break
 			}
-			result = append(result, line[:idx])
-			line = "//" + line[idx:]
+			result = append(result, string(utf16.Decode(units[:idx])))
+			units = append(utf16.Encode([]rune("//")), units[idx:]...)
 		}
-		result = append(result, line)
+		result = append(result, string(utf16.Decode(units)))
 	}
 	return result
 }
@@ -156,6 +161,9 @@ func javadocShaped(lines []string) bool {
 
 func isSpaceRune(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f' || r == '\v'
+}
+func isSpaceUnit(u uint16) bool {
+	return u == ' ' || u == '\t' || u == '\n' || u == '\r' || u == '\f' || u == '\v'
 }
 func isSpaceByte(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f' || b == '\v'

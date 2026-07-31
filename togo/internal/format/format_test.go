@@ -143,3 +143,35 @@ func TestVerbatimDeclarationCommentsNotDuplicated(t *testing.T) {
 		t.Errorf("not idempotent:\n%s\n---\n%s", once, twice)
 	}
 }
+
+// Port of src/format/format.test.ts "comment wrapping counts UTF-16 units, not
+// bytes": measuring bytes wrapped every comment with a non-ASCII character a
+// few columns early, so the two builds formatted real files differently.
+func TestCommentWrapCountsUTF16Units(t *testing.T) {
+	source := strings.Join([]string{
+		"class T {",
+		"  void m() {",
+		"    // Euler is low-order \u2014 allow a small tolerance but assert it remains close for small dt + short time.",
+		"    int x = 0;",
+		"  }",
+		"}",
+		"",
+	}, "\n")
+	expected := strings.Join([]string{
+		"class T {",
+		"  void m() {",
+		"    // Euler is low-order \u2014 allow a small tolerance but assert it remains close for small dt + short",
+		"    // time.",
+		"    int x = 0;",
+		"  }",
+		"}",
+		"",
+	}, "\n")
+	got, err := FormatSource(source, FormatOptions{Style: "google"}, "input.java")
+	if err != nil {
+		t.Fatalf("FormatSource: %v", err)
+	}
+	if got != expected {
+		t.Errorf("got:\n%s\nwant:\n%s", got, expected)
+	}
+}

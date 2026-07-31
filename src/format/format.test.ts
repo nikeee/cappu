@@ -149,3 +149,29 @@ test("comments inside a verbatim-printed declaration are not duplicated", () => 
   expect(once.match(/doc\./g)).toHaveLength(1);
   expect(formatSource(once, { style: "google" })).toBe(once);
 });
+
+// A comment holding a non-ASCII character used to wrap early in the Go build,
+// which measured bytes: the column budget is UTF-16 code units (this line is
+// exactly 100 of them), so the two builds broke real files differently.
+test("comment wrapping counts UTF-16 units, not bytes", () => {
+  const source = [
+    "class T {",
+    "  void m() {",
+    "    // Euler is low-order \u2014 allow a small tolerance but assert it remains close for small dt + short time.",
+    "    int x = 0;",
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+  const expected = [
+    "class T {",
+    "  void m() {",
+    "    // Euler is low-order \u2014 allow a small tolerance but assert it remains close for small dt + short",
+    "    // time.",
+    "    int x = 0;",
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+  expect(formatSource(source, { style: "google" })).toBe(expected);
+});

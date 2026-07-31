@@ -18,6 +18,21 @@ import "strings"
 
 const maxWidth = 1000
 
+// textWidth is the printed width of a leaf in UTF-16 code units - what the
+// TypeScript build's String.length and gjf's Java chars count. Measuring bytes
+// (len) made every line holding a non-ASCII character look too long and wrap
+// early; measuring runes is still wrong for astral characters.
+func textWidth(s string) int {
+	n := 0
+	for _, r := range s {
+		n++
+		if r > 0xFFFF {
+			n++ // a surrogate pair is two UTF-16 code units
+		}
+	}
+	return n
+}
+
 // FillMode controls how a Level breaks its direct Breaks when it does not fit.
 type FillMode int
 
@@ -86,7 +101,7 @@ func (t *token) width() int {
 		if strings.Contains(t.text, "\n") {
 			t.w = maxWidth
 		} else {
-			t.w = len(t.text)
+			t.w = textWidth(t.text)
 		}
 	}
 	return t.w
@@ -101,7 +116,7 @@ func (r *reflowDoc) width() int {
 	if strings.Contains(r.raw, "\n") {
 		return maxWidth
 	}
-	return len(r.raw)
+	return textWidth(r.raw)
 }
 func (r *reflowDoc) flat() string { return r.raw }
 
