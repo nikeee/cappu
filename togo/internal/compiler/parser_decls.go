@@ -46,11 +46,26 @@ func (p *Parser) isStartOfParameter() bool {
 func (p *Parser) parseType() *Node {
 	typ := p.parseNonArrayType()
 	// '[' is an array marker only when immediately closed by ']'.
-	for p.token() == OpenBracketToken && parserLookAhead(p, func() bool { p.nextToken(); return p.token() == CloseBracketToken }) {
+	atArrayBracket := func() bool {
+		return p.token() == OpenBracketToken && parserLookAhead(p, func() bool { p.nextToken(); return p.token() == CloseBracketToken })
+	}
+	verbatim := typ.Kind == TypeReference && typ.AsTypeReference().Verbatim
+	for {
+		// JSR-308 allows annotations on each array dimension: String @A [] @B []
+		// xs (JLS 10.2). They are not modelled, so the type is marked verbatim.
+		annotated := p.token() == AtToken && parserLookAhead(p, func() bool { p.parseAnnotations(); return atArrayBracket() })
+		if !annotated && !atArrayBracket() {
+			break
+		}
+		if annotated {
+			p.parseAnnotations()
+			verbatim = true
+		}
 		pos := typ.Pos
 		p.nextToken() // '['
 		p.parseExpected(CloseBracketToken, nil)
 		typ = p.finishNode(p.factory.NewArrayType(typ), pos, -1)
+		typ.AsArrayType().Verbatim = verbatim
 	}
 	return typ
 }
@@ -70,13 +85,41 @@ func (p *Parser) parseNonArrayType() *Node {
 	if p.token() == QuestionToken {
 		return p.parseWildcardType()
 	}
-	typeName := p.parseEntityName()
+	// A dotted type name, where any segment may carry type arguments and any
+	// segment after a dot may carry JSR-308 annotations:
+	//   Outer.@A Inner, Outer<Number>.Inner, Outer.Middle<T>.Inner<U>
+	// Neither is modelled: the name is flattened (so the type resolves like the
+	// plain dotted form) and the node is marked verbatim for the formatter.
+	verbatim := false
+	typeName := p.parseIdentifier()
 	var typeArguments *NodeArray
 	if p.token() == LessThanToken {
 		typeArguments = p.parseTypeArguments()
 	}
+	// Only consume a dot followed by an identifier (or annotations and an
+	// identifier), so a ".<T>" generic call is left for the expression parser.
+	for p.token() == DotToken && parserLookAhead(p, func() bool {
+		p.nextToken()
+		p.parseAnnotations()
+		return p.token() == Identifier
+	}) {
+		p.parseExpected(DotToken, nil)
+		if p.token() == AtToken {
+			p.parseAnnotations()
+			verbatim = true
+		}
+		if typeArguments != nil {
+			verbatim = true // arguments on a non-final segment
+		}
+		typeName = p.makeQualifiedName(typeName, p.parseIdentifier())
+		typeArguments = nil
+		if p.token() == LessThanToken {
+			typeArguments = p.parseTypeArguments()
+		}
+	}
 	node := p.factory.NewTypeReference(typeName, typeArguments)
 	node.AsTypeReference().Annotations = typeAnnotations
+	node.AsTypeReference().Verbatim = verbatim
 	return p.finishNode(node, pos, -1)
 }
 

@@ -1186,3 +1186,57 @@ test("an annotated module declaration is still a module declaration", () => {
   expect(sf.moduleDeclaration?.annotations).toHaveLength(1);
   expect(sf.statements).toHaveLength(0);
 });
+
+test("JSR-308 annotations on array dimensions and qualified segments parse", () => {
+  const sf = expectNoErrors(
+    [
+      "class T {",
+      "  String @A [] @B [] arr;",
+      "  T.@A Inner inner;",
+      "  Outer.@A Middle.@B Inner1 deep;",
+      "  <@A U extends @B Object> void m(@C T this) {}",
+      "  class Inner {}",
+      "}",
+    ].join("\n"),
+  );
+  const field = (sf.statements[0] as ClassDeclaration).members[0] as FieldDeclaration;
+  // The annotations are not modelled; the type is marked for verbatim printing.
+  expect((field.type as ArrayType).verbatim).toBe(true);
+});
+
+test("qualified generic inner types parse and flatten to their dotted name", () => {
+  const sf = expectNoErrors(
+    [
+      "class T {",
+      "  Outer<Number>.B field;",
+      "  Outer.Middle<String>.Inner<Number> deep;",
+      "  static class Sub extends Outer<Number>.B {}",
+      "}",
+    ].join("\n"),
+  );
+  const field = (sf.statements[0] as ClassDeclaration).members[0] as FieldDeclaration;
+  const ref = field.type as TypeReference;
+  expect(ref.verbatim).toBe(true);
+  expect(ref.typeName.kind).toBe(SyntaxKind.QualifiedName);
+  expect(((ref.typeName as QualifiedName).right as Identifier).kind).toBe(SyntaxKind.Identifier);
+});
+
+test("a local class may carry any modifier, not just final", () => {
+  expectNoErrors(
+    [
+      "class T {",
+      "  void m(int k) {",
+      "    abstract class A {}",
+      "    final class B {}",
+      "    strictfp class C {}",
+      "    switch (k) {",
+      "      case 1:",
+      "        break;",
+      "      default:",
+      "        break;",
+      "    }",
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+});

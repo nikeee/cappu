@@ -1,6 +1,9 @@
 package compiler
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Port of the "exotic" expression cases in src/compiler/parser.test.ts:
 // creation, class literals, lambdas, method references, switch expressions,
@@ -327,4 +330,61 @@ func TestArrayClassLiteral(t *testing.T) {
 	if parseExpr(t, "a[0]").Kind != ElementAccessExpression {
 		t.Error("a[0] should be an ElementAccessExpression")
 	}
+}
+
+// Port of src/compiler/parser.test.ts "JSR-308 annotations on array dimensions
+// and qualified segments parse".
+func TestJSR308ArrayDimensionAndQualifiedAnnotations(t *testing.T) {
+	sf := expectNoErrors(t, strings.Join([]string{
+		"class T {",
+		"  String @A [] @B [] arr;",
+		"  T.@A Inner inner;",
+		"  Outer.@A Middle.@B Inner1 deep;",
+		"  <@A U extends @B Object> void m(@C T this) {}",
+		"  class Inner {}",
+		"}",
+	}, "\n"))
+	typ := sf.Statements.Nodes[0].AsClassDeclaration().Members.Nodes[0].AsFieldDeclaration().Type
+	if typ.Kind != ArrayType || !typ.AsArrayType().Verbatim {
+		t.Errorf("array type verbatim = %v (kind %v), want true", typ.Kind == ArrayType && typ.AsArrayType().Verbatim, typ.Kind)
+	}
+}
+
+// Port of src/compiler/parser.test.ts "qualified generic inner types parse and
+// flatten to their dotted name".
+func TestQualifiedGenericInnerTypes(t *testing.T) {
+	sf := expectNoErrors(t, strings.Join([]string{
+		"class T {",
+		"  Outer<Number>.B field;",
+		"  Outer.Middle<String>.Inner<Number> deep;",
+		"  static class Sub extends Outer<Number>.B {}",
+		"}",
+	}, "\n"))
+	typ := sf.Statements.Nodes[0].AsClassDeclaration().Members.Nodes[0].AsFieldDeclaration().Type
+	if typ.Kind != TypeReference || !typ.AsTypeReference().Verbatim {
+		t.Fatalf("type = %v verbatim=%v, want a verbatim TypeReference", typ.Kind, typ.Kind == TypeReference && typ.AsTypeReference().Verbatim)
+	}
+	if typ.AsTypeReference().TypeName.Kind != QualifiedName {
+		t.Errorf("type name = %v, want a flattened QualifiedName", typ.AsTypeReference().TypeName.Kind)
+	}
+}
+
+// Port of src/compiler/parser.test.ts "a local class may carry any modifier, not
+// just final".
+func TestLocalClassModifiers(t *testing.T) {
+	expectNoErrors(t, strings.Join([]string{
+		"class T {",
+		"  void m(int k) {",
+		"    abstract class A {}",
+		"    final class B {}",
+		"    strictfp class C {}",
+		"    switch (k) {",
+		"      case 1:",
+		"        break;",
+		"      default:",
+		"        break;",
+		"    }",
+		"  }",
+		"}",
+	}, "\n"))
 }

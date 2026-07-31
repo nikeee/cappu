@@ -395,6 +395,14 @@ export type EntityName = Identifier | QualifiedName;
 
 export type TypeNode = PrimitiveType | TypeReference | ArrayType | WildcardType | VarType;
 
+// A type whose source spelling carries syntax the AST does not model: JSR-308
+// annotations on an array dimension (`String @A []`) or on a qualified segment
+// (`Outer.@A Inner`), and type arguments on a non-final segment
+// (`Outer<Number>.Inner`). Those are dropped from the tree - the name is
+// flattened and the type resolves exactly like the unannotated, raw-outer form -
+// so `verbatim` marks the node for the formatter, which then prints the source
+// slice instead of reconstructing the type from the tree.
+
 /** The SE10 inferred local-variable type 'var'. */
 export interface VarType extends Node {
   readonly kind: SyntaxKind.VarType;
@@ -414,11 +422,13 @@ export interface TypeReference extends Node {
   readonly typeArguments?: NodeArray<TypeNode | WildcardType>;
   /** SE8 type-use annotations written before the type (nikeee/cappu#25). */
   readonly annotations?: NodeArray<Annotation>;
+  readonly verbatim?: boolean;
 }
 
 export interface ArrayType extends Node {
   readonly kind: SyntaxKind.ArrayType;
   readonly elementType: TypeNode;
+  readonly verbatim?: boolean;
 }
 
 export interface WildcardType extends Node {

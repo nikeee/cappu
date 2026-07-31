@@ -573,15 +573,27 @@ function parseType(): TypeNode {
   let type = parseNonArrayType();
   // In a type, '[' is only an array marker when immediately closed by ']'.
   // (matrix[i] in an expression must not be misread as an array type.)
-  while (
+  const atArrayBracket = (): boolean =>
     token() === SyntaxKind.OpenBracketToken &&
-    lookAhead(() => (nextToken(), token() === SyntaxKind.CloseBracketToken))
-  ) {
+    lookAhead(() => (nextToken(), token() === SyntaxKind.CloseBracketToken));
+  let verbatim =
+    type.kind === SyntaxKind.TypeReference && (type as TypeReference).verbatim === true;
+  while (true) {
+    // JSR-308 allows annotations on each array dimension: String @A [] @B [] xs
+    // (JLS 10.2). They are not modelled, so the type is marked verbatim.
+    const annotated =
+      token() === SyntaxKind.AtToken && lookAhead(() => (parseAnnotations(), atArrayBracket()));
+    if (!annotated && !atArrayBracket()) break;
+    if (annotated) {
+      parseAnnotations();
+      verbatim = true;
+    }
     const pos = type.pos;
     nextToken(); // '['
     parseExpected(SyntaxKind.CloseBracketToken);
     const array = createNode<ArrayType>(SyntaxKind.ArrayType, pos);
     array.elementType = type;
+    array.verbatim = verbatim || undefined;
     type = finishNode(array, pos);
   }
   return type;
@@ -608,12 +620,35 @@ function parseNonArrayType(): TypeNode {
   if (token() === SyntaxKind.QuestionToken) {
     return parseWildcardType();
   }
-  const typeName = parseEntityName();
-  const typeArguments = token() === SyntaxKind.LessThanToken ? parseTypeArguments() : undefined;
+  // A dotted type name, where any segment may carry type arguments and any
+  // segment after a dot may carry JSR-308 annotations:
+  //   Outer.@A Inner, Outer<Number>.Inner, Outer.Middle<T>.Inner<U>
+  // Neither is modelled: the name is flattened (so the type resolves like the
+  // plain dotted form) and the node is marked verbatim for the formatter.
+  let verbatim = false;
+  let typeName: EntityName = parseIdentifier();
+  let typeArguments = token() === SyntaxKind.LessThanToken ? parseTypeArguments() : undefined;
+  // Only consume a dot that is followed by an identifier (or annotations and an
+  // identifier), so a ".<T>" generic method invocation is left for the
+  // expression parser rather than eaten here.
+  while (
+    token() === SyntaxKind.DotToken &&
+    lookAhead(() => (nextToken(), parseAnnotations(), token() === SyntaxKind.Identifier))
+  ) {
+    parseExpected(SyntaxKind.DotToken);
+    if (token() === SyntaxKind.AtToken) {
+      parseAnnotations();
+      verbatim = true;
+    }
+    if (typeArguments) verbatim = true; // arguments on a non-final segment
+    typeName = makeQualifiedName(typeName, parseIdentifier());
+    typeArguments = token() === SyntaxKind.LessThanToken ? parseTypeArguments() : undefined;
+  }
   const node = createNode<TypeReference>(SyntaxKind.TypeReference, pos);
   node.typeName = typeName;
   node.typeArguments = typeArguments;
   node.annotations = typeAnnotations;
+  node.verbatim = verbatim || undefined;
   return finishNode(node, pos);
 }
 
@@ -2124,10 +2159,15 @@ function isStartOfStatementToken(): boolean {
     case SyntaxKind.InterfaceKeyword:
     case SyntaxKind.EnumKeyword:
     case SyntaxKind.AtToken:
-    case SyntaxKind.FinalKeyword:
       return true;
     default:
-      return isStartOfExpression();
+      // A local class may carry any declaration modifier ("abstract class C {}"),
+      // not just `final`. `default` is excluded: inside a switch clause it ends
+      // the statement list rather than starting one.
+      return (
+        (isModifierKeyword(token()) && token() !== SyntaxKind.DefaultKeyword) ||
+        isStartOfExpression()
+      );
   }
 }
 

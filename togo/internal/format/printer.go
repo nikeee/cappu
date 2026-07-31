@@ -650,16 +650,17 @@ func (p *printer) typeParameters(tps *compiler.NodeArray) Doc {
 	params := make([]Doc, tps.Len())
 	for i, tpn := range nodes(tps) {
 		tp := tpn.AsTypeParameter()
-		name := p.raw(tp.Name)
+		// <@A T extends ...>: the type parameter's own annotations (JSR-308).
+		name := concat(p.annotations(tp.Annotations), text(p.raw(tp.Name)))
 		if tp.Constraint.Len() == 0 {
-			params[i] = text(name)
+			params[i] = name
 			continue
 		}
 		bounds := make([]Doc, tp.Constraint.Len())
 		for j, b := range nodes(tp.Constraint) {
 			bounds[j] = p.typ(b)
 		}
-		params[i] = concat(text(name), text(" extends "), join(text(" & "), bounds))
+		params[i] = concat(name, text(" extends "), join(text(" & "), bounds))
 	}
 	return concat(text("<"), join(text(", "), params), text(">"))
 }
@@ -679,6 +680,13 @@ func (p *printer) typeArguments(args *compiler.NodeArray) Doc {
 }
 
 func (p *printer) typ(t *compiler.Node) Doc {
+	// Annotations on an array dimension or a qualified segment, and type
+	// arguments on a non-final segment, are not in the tree (see
+	// TypeReferenceData.Verbatim) - print those types from source.
+	if (t.Kind == compiler.TypeReference && t.AsTypeReference().Verbatim) ||
+		(t.Kind == compiler.ArrayType && t.AsArrayType().Verbatim) {
+		return text(p.raw(t))
+	}
 	switch t.Kind {
 	case compiler.PrimitiveType:
 		pt := t.AsPrimitiveType()
@@ -1153,7 +1161,7 @@ func (p *printer) parameters(params *compiler.NodeArray, trailing Doc) Doc {
 		return level(plus4, inner)
 	}
 	// Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
-	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameter(n.AsParameter()) })
+	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameter(n) })
 	return p.argsLikeTrailing("(", items, ")", fillUnified, trailing)
 }
 
@@ -1166,7 +1174,7 @@ func (p *printer) paramListChildren(params *compiler.NodeArray) []Doc {
 	if params.Len() == 0 {
 		return []Doc{text("()")}
 	}
-	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameter(n.AsParameter()) })
+	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameter(n) })
 	innerParts := make([]Doc, 0, len(items)*2)
 	for i, it := range items {
 		if i > 0 {
@@ -1177,7 +1185,13 @@ func (p *printer) paramListChildren(params *compiler.NodeArray) []Doc {
 	return []Doc{text("("), brk(fillIndependent, "", ZERO, nil), level(ZERO, innerParts), text(")")}
 }
 
-func (p *printer) parameter(pp *compiler.ParameterData) Doc {
+func (p *printer) parameter(n *compiler.Node) Doc {
+	pp := n.AsParameter()
+	// A receiver parameter (`@A Foo this`, `Outer.this`) has no name node and its
+	// qualifier is not kept in the tree, so print it from source.
+	if pp.IsReceiver {
+		return text(p.raw(n))
+	}
 	parts := []Doc{p.modifiers(pp.Modifiers, "inline"), p.typ(pp.Type)}
 	if pp.IsVarArgs {
 		parts = append(parts, text("..."))
@@ -1445,7 +1459,7 @@ func (p *printer) forEachStatement(s *compiler.ForEachStatementData) Doc {
 	// gjf visitEnhancedForLoop: "for (" open(+4) param " :" breakOp(" ") expr
 	// close ")". The iterable breaks after the ":" at +4 when it overflows.
 	return concat(
-		concat(text("for ("), level(plus4, []Doc{p.parameter(s.Parameter.AsParameter()), text(" :"), line, p.node(s.Expression)}), text(")")),
+		concat(text("for ("), level(plus4, []Doc{p.parameter(s.Parameter), text(" :"), line, p.node(s.Expression)}), text(")")),
 		p.clauseBody(s.Statement),
 	)
 }
@@ -2242,7 +2256,7 @@ func (p *printer) lambda(e *compiler.LambdaExpressionData) Doc {
 		ps := make([]Doc, len(params))
 		for i, pp := range params {
 			if pp.Kind == compiler.Parameter {
-				ps[i] = p.parameter(pp.AsParameter())
+				ps[i] = p.parameter(pp)
 			} else {
 				ps[i] = text(p.raw(pp))
 			}
@@ -2499,9 +2513,17 @@ func (p *printer) node(node *compiler.Node) Doc {
 			receiver = p.typ(e.Expression.AsClassLiteralExpression().Type)
 		}
 		return concat(receiver, text("::"), text(ref))
+	// Qualified forms keep their qualifier: Outer.this, Outer.super.m(), and the
+	// qualified superclass constructor call outer.super(...).
 	case compiler.ThisExpression:
+		if q := node.AsThisExpression().Qualifier; q != nil {
+			return concat(p.node(q), text(".this"))
+		}
 		return text("this")
 	case compiler.SuperExpression:
+		if q := node.AsSuperExpression().Qualifier; q != nil {
+			return concat(p.node(q), text(".super"))
+		}
 		return text("super")
 	case compiler.ClassLiteralExpression:
 		return concat(p.typ(node.AsClassLiteralExpression().Type), text(".class"))

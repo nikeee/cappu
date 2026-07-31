@@ -74,6 +74,13 @@ type TypeReferenceData struct {
 	TypeName      *Node      // EntityName
 	TypeArguments *NodeArray // TypeNode | WildcardType
 	Annotations   *NodeArray
+	// Verbatim marks a type whose source spelling carries syntax the AST does
+	// not model: JSR-308 annotations on an array dimension (`String @A []`) or
+	// on a qualified segment (`Outer.@A Inner`), and type arguments on a
+	// non-final segment (`Outer<Number>.Inner`). Those are dropped - the name is
+	// flattened and the type resolves like the plain dotted form - so the
+	// formatter prints the source slice instead of rebuilding the type.
+	Verbatim bool
 }
 
 func (d *TypeReferenceData) forEachChild(v Visitor) bool {
@@ -87,7 +94,11 @@ func (f *NodeFactory) NewTypeReference(typeName *Node, typeArguments *NodeArray)
 func (n *Node) AsTypeReference() *TypeReferenceData { return n.data.(*TypeReferenceData) }
 
 // ArrayTypeData is `elementType[]`.
-type ArrayTypeData struct{ ElementType *Node }
+type ArrayTypeData struct {
+	ElementType *Node
+	// See TypeReferenceData.Verbatim (annotated array dimensions land here).
+	Verbatim bool
+}
 
 func (d *ArrayTypeData) forEachChild(v Visitor) bool { return visit(v, d.ElementType) }
 

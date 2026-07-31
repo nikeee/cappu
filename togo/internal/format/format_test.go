@@ -175,3 +175,43 @@ func TestCommentWrapCountsUTF16Units(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", got, expected)
 	}
 }
+
+// Port of src/format/format.test.ts "JSR-308 types, qualified inner types and
+// qualified this/super survive formatting".
+func TestExoticTypesAndQualifiedThisSuperRoundTrip(t *testing.T) {
+	source := strings.Join([]string{
+		"class T {",
+		"  String @A [] @B [] arr;",
+		"  Outer<Number>.B field;",
+		"  Outer.@A Middle.@B Inner deep;",
+		"",
+		"  static class P<@A U> {",
+		"    public void receiver(@F P<U> this) {}",
+		"  }",
+		"",
+		"  class Inner {",
+		"    int outer() {",
+		"      return T.this.hashCode();",
+		"    }",
+		"",
+		"    String parent() {",
+		"      return T.super.toString();",
+		"    }",
+		"  }",
+		"",
+		"  static class Sub extends T.Inner {",
+		"    Sub(T t) {",
+		"      t.super();",
+		"    }",
+		"  }",
+		"}",
+		"",
+	}, "\n")
+	got, err := FormatSource(source, FormatOptions{Style: "google"}, "input.java")
+	if err != nil {
+		t.Fatalf("FormatSource: %v", err)
+	}
+	if got != source {
+		t.Errorf("got:\n%s\nwant:\n%s", got, source)
+	}
+}

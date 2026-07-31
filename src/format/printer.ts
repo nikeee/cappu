@@ -68,11 +68,13 @@ import {
   type Statement,
   type SwitchClause,
   type SwitchExpression,
+  type SuperExpression,
   type SwitchStatement,
   type SynchronizedStatement,
   SyntaxKind,
   type ThrowStatement,
   type TryStatement,
+  type ThisExpression,
   type TypeNode,
   type TypeParameter,
   type TypeReference,
@@ -625,8 +627,9 @@ class Printer {
   private typeParameters(tps: NodeArray<TypeParameter> | undefined): Doc {
     if (!tps || tps.length === 0) return "";
     const params = tps.map(tp => {
-      const name = this.raw(tp.name);
-      if (!tp.constraint || tp.constraint.length === 0) return name as Doc;
+      // <@A T extends ...>: the type parameter's own annotations (JSR-308).
+      const name = concat([this.annotations(tp.annotations), this.raw(tp.name)]);
+      if (!tp.constraint || tp.constraint.length === 0) return name;
       return concat([
         name,
         " extends ",
@@ -653,6 +656,10 @@ class Printer {
   }
 
   private type(t: TypeNode | WildcardType): Doc {
+    // Annotations on an array dimension or a qualified segment, and type
+    // arguments on a non-final segment, are not in the tree (see TypeNode in
+    // compiler/types.ts) - print those types from source so nothing is dropped.
+    if ((t as TypeReference | ArrayType).verbatim) return this.raw(t);
     switch (t.kind) {
       case SyntaxKind.PrimitiveType: {
         const pt = t as PrimitiveType;
@@ -1074,6 +1081,9 @@ class Printer {
   }
 
   private parameter(p: Parameter): Doc {
+    // A receiver parameter (`@A Foo this`, `Outer.this`) has no name node and
+    // its qualifier is not kept in the tree, so print it from source.
+    if (p.isReceiver) return this.raw(p);
     const parts: Doc[] = [this.modifiers(p.modifiers), this.type(p.type)];
     if (p.isVarArgs) parts.push("...");
     if (p.name) parts.push(" ", this.raw(p.name));
@@ -2167,10 +2177,16 @@ class Printer {
           e.isConstructorRef ? "new" : e.name ? this.raw(e.name) : "",
         ]);
       }
-      case SyntaxKind.ThisExpression:
-        return "this";
-      case SyntaxKind.SuperExpression:
-        return "super";
+      // Qualified forms keep their qualifier: Outer.this, Outer.super.m(),
+      // and the qualified superclass constructor call outer.super(...).
+      case SyntaxKind.ThisExpression: {
+        const q = (node as ThisExpression).qualifier;
+        return q ? concat([this.node(q), ".this"]) : "this";
+      }
+      case SyntaxKind.SuperExpression: {
+        const q = (node as SuperExpression).qualifier;
+        return q ? concat([this.node(q), ".super"]) : "super";
+      }
       case SyntaxKind.ClassLiteralExpression:
         return concat([this.type((node as ClassLiteralExpression).type), ".class"]);
 

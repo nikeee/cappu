@@ -175,3 +175,38 @@ test("comment wrapping counts UTF-16 units, not bytes", () => {
   ].join("\n");
   expect(formatSource(source, { style: "google" })).toBe(expected);
 });
+
+// Types whose spelling the AST does not model are printed from source; the
+// qualified this/super forms and receiver parameters used to lose their
+// qualifier ("o.super()" came back as "super()").
+test("JSR-308 types, qualified inner types and qualified this/super survive formatting", () => {
+  const source = [
+    "class T {",
+    "  String @A [] @B [] arr;",
+    "  Outer<Number>.B field;",
+    "  Outer.@A Middle.@B Inner deep;",
+    "",
+    "  static class P<@A U> {",
+    "    public void receiver(@F P<U> this) {}",
+    "  }",
+    "",
+    "  class Inner {",
+    "    int outer() {",
+    "      return T.this.hashCode();",
+    "    }",
+    "",
+    "    String parent() {",
+    "      return T.super.toString();",
+    "    }",
+    "  }",
+    "",
+    "  static class Sub extends T.Inner {",
+    "    Sub(T t) {",
+    "      t.super();",
+    "    }",
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+  expect(formatSource(source, { style: "google" })).toBe(source);
+});

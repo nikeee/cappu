@@ -43,10 +43,14 @@ func (p *Parser) isStartOfStatementToken() bool {
 	case SemicolonToken, OpenBraceToken, IfKeyword, WhileKeyword, DoKeyword, ForKeyword,
 		TryKeyword, SwitchKeyword, ReturnKeyword, ThrowKeyword, BreakKeyword, ContinueKeyword,
 		SynchronizedKeyword, AssertKeyword, ClassKeyword, InterfaceKeyword, EnumKeyword,
-		AtToken, FinalKeyword:
+		AtToken:
 		return true
 	default:
-		return p.isStartOfExpression()
+		// A local class may carry any declaration modifier ("abstract class C {}"),
+		// not just `final`. `default` is excluded: inside a switch clause it ends
+		// the statement list rather than starting one.
+		return (isModifierKeyword(p.token()) && p.token() != DefaultKeyword) ||
+			p.isStartOfExpression()
 	}
 }
 
