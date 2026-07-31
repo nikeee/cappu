@@ -1146,3 +1146,43 @@ test("lambdas as intersection-cast operands and qualified new parse cleanly", ()
   );
   expect(sf.parseDiagnostics).toHaveLength(0);
 });
+
+test("primitive array constructor references and primitive class literals parse cleanly", () => {
+  expectNoErrors(
+    [
+      "class T {",
+      "  int[][] m(java.util.stream.Stream<int[]> s) { return s.toArray(int[][]::new); }",
+      "  java.util.function.IntFunction<int[]> g() { return int[]::new; }",
+      "  Class<?> c() { return (Class<?>) int.class; } // a primitive class literal as cast operand",
+      "  Class<?> v() { return (Class<?>) void.class; }",
+      "}",
+    ].join("\n"),
+  );
+});
+
+test("a cast in a case label is a constant, not a record pattern", () => {
+  expectNoErrors(
+    [
+      "class T {",
+      "  void m(char c) {",
+      "    switch (c) {",
+      "      case (char) 0x00A0:",
+      "        break;",
+      "      case (char) 'a':",
+      "        break;",
+      "      default:",
+      "    }",
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+});
+
+test("an annotated module declaration is still a module declaration", () => {
+  const sf = expectNoErrors(
+    '@SuppressWarnings("requires-automatic")\nmodule com.acme.app {\n  requires java.base;\n}',
+  );
+  expect(sf.moduleDeclaration?.kind).toBe(SyntaxKind.ModuleDeclaration);
+  expect(sf.moduleDeclaration?.annotations).toHaveLength(1);
+  expect(sf.statements).toHaveLength(0);
+});

@@ -58,3 +58,19 @@ func TestModuleAsIdentifier(t *testing.T) {
 		t.Errorf("statements = %d, want 1", sf.Statements.Len())
 	}
 }
+
+// Port of src/compiler/parser.test.ts "an annotated module declaration is still
+// a module declaration".
+func TestAnnotatedModuleDeclaration(t *testing.T) {
+	sf := expectNoErrors(t, "@SuppressWarnings(\"requires-automatic\")\nmodule com.acme.app {\n  requires java.base;\n}")
+	mod := sf.ModuleDeclaration
+	if mod == nil || mod.Kind != ModuleDeclaration {
+		t.Fatalf("module declaration missing or wrong kind: %v", mod)
+	}
+	if md := mod.AsModuleDeclaration(); md.Annotations == nil || len(md.Annotations.Nodes) != 1 {
+		t.Errorf("annotations = %v, want 1", md.Annotations)
+	}
+	if sf.Statements != nil && len(sf.Statements.Nodes) != 0 {
+		t.Errorf("statements = %d, want 0", len(sf.Statements.Nodes))
+	}
+}

@@ -94,3 +94,21 @@ for (const file of cases) {
     });
   }
 }
+
+// Not derivable from a golden case file: an array constructor reference parses
+// as a class literal carrying the array type, and printing it as one produced
+// "Foo[].class::new", i.e. the formatter rewrote valid code into code that does
+// not compile.
+test("array constructor references survive formatting", () => {
+  const source = [
+    "class T {",
+    "  Object f = java.util.stream.Stream.of(1).toArray(Integer[]::new);",
+    "  Object g = String[][]::new;",
+    "  Object h = int[]::new;",
+    "  Class<?> i = Integer[].class;",
+    "  java.util.function.Function<Class<?>, String> j = Integer[].class::getName;",
+    "}",
+    "",
+  ].join("\n");
+  expect(formatSource(source, { style: "google" })).toBe(source);
+});

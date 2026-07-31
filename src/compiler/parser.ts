@@ -1746,7 +1746,8 @@ function isStartOfReferenceCastOperand(): boolean {
     case SyntaxKind.TildeToken:
       return true;
     default:
-      return false;
+      // A primitive class literal is a legal operand too: (Class<?>) int.class.
+      return isPrimitiveTypeKeyword(token()) || token() === SyntaxKind.VoidKeyword;
   }
 }
 
@@ -1832,10 +1833,14 @@ function parseAtom(): Expression {
       return parseIdentifier();
     default:
       if (isPrimitiveTypeKeyword(token()) || token() === SyntaxKind.VoidKeyword) {
-        // Primitive class literal: int.class, int[].class, void.class
+        // Primitive class literal: int.class, int[].class, void.class - or an
+        // array constructor reference int[]::new (JLS 15.13), whose '::' the
+        // suffix loop consumes off the type node (as it does for Foo[]::new).
         const type = parseType();
-        parseExpected(SyntaxKind.DotToken);
-        parseExpected(SyntaxKind.ClassKeyword);
+        if (token() !== SyntaxKind.ColonColonToken) {
+          parseExpected(SyntaxKind.DotToken);
+          parseExpected(SyntaxKind.ClassKeyword);
+        }
         const node = createNode<ClassLiteralExpression>(SyntaxKind.ClassLiteralExpression, pos);
         node.type = type;
         return finishNode(node, pos);
@@ -2508,6 +2513,10 @@ function parseIdentifierOrUnderscore(): Identifier {
 // A case label is a pattern (rather than a constant) when, after a type, it is
 // followed by a binding identifier or a '(' record deconstruction.
 function isPatternStart(): boolean {
+  // A pattern always starts with a type; '(' starts a parenthesized or cast
+  // constant - "case (char) 0x00A0:" - which parseTypeOrVar below would
+  // otherwise mistake for a record deconstruction.
+  if (token() === SyntaxKind.OpenParenToken) return false;
   return lookAhead(() => {
     parseModifiers(); // final / annotations on a type pattern
     parseTypeOrVar();
@@ -2705,7 +2714,17 @@ export function parseSourceFile(fileNameArg: string, text: string): SourceFile {
 
   let moduleDeclaration: ModuleDeclaration | undefined;
   let statements: NodeArray<Statement>;
-  if ((isContextualKeyword("open") || isContextualKeyword("module")) && !packageDeclaration) {
+  // A module declaration may carry annotations (@SuppressWarnings module m {}),
+  // which parseModuleDeclaration consumes - but only once we dispatch to it.
+  const startsModule =
+    isContextualKeyword("open") ||
+    isContextualKeyword("module") ||
+    (token() === SyntaxKind.AtToken &&
+      lookAhead(() => {
+        parseAnnotations();
+        return isContextualKeyword("open") || isContextualKeyword("module");
+      }));
+  if (startsModule && !packageDeclaration) {
     moduleDeclaration = parseModuleDeclaration();
     statements = createNodeArray<Statement>([], getNodePos());
   } else {

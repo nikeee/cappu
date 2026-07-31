@@ -67,3 +67,26 @@ func TestFormatGolden(t *testing.T) {
 		}
 	}
 }
+
+// Port of src/format/format.test.ts "array constructor references survive
+// formatting": the reference parses as a class literal carrying the array type,
+// and printing it as one produced "Foo[].class::new", which does not compile.
+func TestArrayConstructorReferenceRoundTrip(t *testing.T) {
+	source := strings.Join([]string{
+		"class T {",
+		"  Object f = java.util.stream.Stream.of(1).toArray(Integer[]::new);",
+		"  Object g = String[][]::new;",
+		"  Object h = int[]::new;",
+		"  Class<?> i = Integer[].class;",
+		"  java.util.function.Function<Class<?>, String> j = Integer[].class::getName;",
+		"}",
+		"",
+	}, "\n")
+	got, err := FormatSource(source, FormatOptions{Style: "google"}, "input.java")
+	if err != nil {
+		t.Fatalf("FormatSource: %v", err)
+	}
+	if got != source {
+		t.Errorf("got:\n%s\nwant:\n%s", got, source)
+	}
+}

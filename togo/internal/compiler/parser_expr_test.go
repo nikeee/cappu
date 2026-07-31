@@ -1,6 +1,9 @@
 package compiler
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // parseExpr parses text as an expression in statement position, through a real
 // method body (matching the Node build's `expr` helper).
@@ -97,4 +100,35 @@ func TestCastVsParenthesized(t *testing.T) {
 			t.Errorf("%q = %v, want %v", text, got, want)
 		}
 	}
+}
+
+// Port of src/compiler/parser.test.ts "primitive array constructor references
+// and primitive class literals parse cleanly".
+func TestPrimitiveArrayConstructorRefAndClassLiteralOperand(t *testing.T) {
+	expectNoErrors(t, strings.Join([]string{
+		"class T {",
+		"  int[][] m(java.util.stream.Stream<int[]> s) { return s.toArray(int[][]::new); }",
+		"  java.util.function.IntFunction<int[]> g() { return int[]::new; }",
+		"  Class<?> c() { return (Class<?>) int.class; }",
+		"  Class<?> v() { return (Class<?>) void.class; }",
+		"}",
+	}, "\n"))
+}
+
+// Port of src/compiler/parser.test.ts "a cast in a case label is a constant,
+// not a record pattern".
+func TestCastInCaseLabel(t *testing.T) {
+	expectNoErrors(t, strings.Join([]string{
+		"class T {",
+		"  void m(char c) {",
+		"    switch (c) {",
+		"      case (char) 0x00A0:",
+		"        break;",
+		"      case (char) 'a':",
+		"        break;",
+		"      default:",
+		"    }",
+		"  }",
+		"}",
+	}, "\n"))
 }

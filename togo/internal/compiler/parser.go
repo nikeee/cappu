@@ -71,7 +71,14 @@ func ParseSourceFile(fileName, text string) *Node {
 
 	var module *Node
 	var statements *NodeArray
-	if (p.isContextualKeyword("open") || p.isContextualKeyword("module")) && pkg == nil {
+	// A module declaration may carry annotations (@SuppressWarnings module m {}),
+	// which parseModuleDeclaration consumes - but only once we dispatch to it.
+	startsModule := p.isContextualKeyword("open") || p.isContextualKeyword("module") ||
+		(p.token() == AtToken && parserLookAhead(p, func() bool {
+			p.parseAnnotations()
+			return p.isContextualKeyword("open") || p.isContextualKeyword("module")
+		}))
+	if startsModule && pkg == nil {
 		module = p.parseModuleDeclaration()
 		statements = p.createNodeArray(nil, p.getNodePos(), -1)
 	} else {

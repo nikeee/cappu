@@ -2472,7 +2472,14 @@ func (p *printer) node(node *compiler.Node) Doc {
 		} else if e.Name != nil {
 			ref = p.raw(e.Name)
 		}
-		return concat(p.node(e.Expression), text("::"), text(ref))
+		// An array constructor reference (Foo[]::new, int[]::new) parses as a
+		// class literal carrying the array type, but has no ".class" to print.
+		// Only the ::new form: String.class::getName keeps its ".class".
+		receiver := p.node(e.Expression)
+		if e.IsConstructorRef && e.Expression.Kind == compiler.ClassLiteralExpression {
+			receiver = p.typ(e.Expression.AsClassLiteralExpression().Type)
+		}
+		return concat(receiver, text("::"), text(ref))
 	case compiler.ThisExpression:
 		return text("this")
 	case compiler.SuperExpression:

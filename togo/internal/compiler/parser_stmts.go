@@ -381,6 +381,12 @@ func (p *Parser) parseTryStatement() *Node {
 // isPatternStart: after a type, a case label is a pattern (not a constant) when
 // followed by a binding identifier or a '(' record deconstruction.
 func (p *Parser) isPatternStart() bool {
+	// A pattern always starts with a type; '(' starts a parenthesized or cast
+	// constant - "case (char) 0x00A0:" - which parseTypeOrVar below would
+	// otherwise mistake for a record deconstruction.
+	if p.token() == OpenParenToken {
+		return false
+	}
 	return parserLookAhead(p, func() bool {
 		p.parseModifiers() // final / annotations on a type pattern
 		p.parseTypeOrVar()

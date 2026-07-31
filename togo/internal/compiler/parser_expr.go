@@ -238,7 +238,8 @@ func (p *Parser) isStartOfReferenceCastOperand() bool {
 		NewKeyword, SwitchKeyword, ExclamationToken, TildeToken:
 		return true
 	default:
-		return false
+		// A primitive class literal is a legal operand too: (Class<?>) int.class.
+		return isPrimitiveTypeKeyword(p.token()) || p.token() == VoidKeyword
 	}
 }
 
@@ -309,10 +310,14 @@ func (p *Parser) parseAtom() *Node {
 		return p.parseIdentifier()
 	default:
 		if isPrimitiveTypeKeyword(p.token()) || p.token() == VoidKeyword {
-			// Primitive class literal: int.class, void.class.
+			// Primitive class literal: int.class, void.class - or an array
+			// constructor reference int[]::new (JLS 15.13), whose '::' the suffix
+			// loop consumes off the type node (as it does for Foo[]::new).
 			typ := p.parseType()
-			p.parseExpected(DotToken, nil)
-			p.parseExpected(ClassKeyword, nil)
+			if p.token() != ColonColonToken {
+				p.parseExpected(DotToken, nil)
+				p.parseExpected(ClassKeyword, nil)
+			}
 			return p.finishNode(p.factory.NewClassLiteralExpression(typ), pos, -1)
 		}
 		return p.createMissingNode(Identifier, false, &Diagnostics.ExpressionExpected)

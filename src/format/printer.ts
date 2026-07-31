@@ -2145,8 +2145,15 @@ class Printer {
         return this.lambda(node as LambdaExpression);
       case SyntaxKind.MethodReferenceExpression: {
         const e = node as MethodReferenceExpression;
+        // An array constructor reference (Foo[]::new, int[]::new) parses as a
+        // class literal carrying the array type, but has no ".class" to print.
+        // Only the ::new form: String.class::getName keeps its ".class".
+        const receiver =
+          e.isConstructorRef && e.expression.kind === SyntaxKind.ClassLiteralExpression
+            ? this.type((e.expression as ClassLiteralExpression).type)
+            : this.node(e.expression);
         return concat([
-          this.node(e.expression),
+          receiver,
           "::",
           e.isConstructorRef ? "new" : e.name ? this.raw(e.name) : "",
         ]);
