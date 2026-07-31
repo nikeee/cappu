@@ -546,3 +546,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-30 12:26 — re-build graphify from the ground up, ignoring all vendored sources and submodules (like stated in .graphifyignore)
 - 2026-07-31 18:27 — fix parser rejection
 - 2026-07-31 18:38 — fix Idempotence
+- 2026-07-31 22:55 — fix it
