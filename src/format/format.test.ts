@@ -243,3 +243,22 @@ test("a leading block comment stays on its item's line when the list is broken",
   expect(once).toContain('/* of */ "space",');
   expect(formatSource(once, { style: "google" })).toBe(once);
 });
+
+// The module printer consumed no comments at all, so any comment inside a
+// module-info made the whole file unformattable ("comment in an unsupported
+// position") and the CLI left it untouched.
+test("comments inside a module declaration are formatted, not refused", () => {
+  const source = [
+    '@SuppressWarnings("requires-automatic") // automatic module names',
+    "module com.acme.app {",
+    "  exports com.acme.api;",
+    "",
+    "  // Optional dependency",
+    "  requires static java.sql;",
+    "  requires java.base; // the platform module",
+    "  // dangling",
+    "}",
+    "",
+  ].join("\n");
+  expect(formatSource(source, { style: "google" })).toBe(source);
+});

@@ -451,18 +451,31 @@ class Printer {
   // line at a continuation indent. Mirrors google-java-format's module layout.
   private moduleDeclaration(m: ModuleDeclaration): Doc {
     const head: Doc[] = [];
-    for (const a of m.annotations ?? []) head.push(this.annotation(a), hardline);
+    for (const a of m.annotations ?? []) {
+      head.push(this.annotation(a));
+      const tc = this.trailingCommentAfter(a);
+      if (tc) head.push(" ", tc.text);
+      head.push(hardline);
+    }
     if (m.isOpen) head.push("open ");
     head.push("module ", this.entityName(m.name), " ");
     if (m.directives.length === 0) return concat([...head, "{}"]);
     const body: Doc[] = [];
     m.directives.forEach((d, i) => {
+      // gjf (visitModule) wants a blank line exactly where the directive kind
+      // changes, and none between directives of the same kind.
       if (i > 0) {
         const kindChanged = d.kind !== m.directives[i - 1].kind;
         body.push(kindChanged ? concat([hardline, hardline]) : hardline);
       }
-      body.push(this.directive(d));
+      // A comment before a directive stays with it, own-line and reflowed; one
+      // after it on the same line stays on that line.
+      for (const c of this.commentsBefore(this.start(d))) body.push(reflow(c.text), hardline);
+      const trailing = this.trailingCommentAfter(d);
+      body.push(trailing ? concat([this.directive(d), " ", trailing.text]) : this.directive(d));
     });
+    // Comments between the last directive and the closing brace.
+    for (const c of this.commentsBefore(m.end - 1)) body.push(hardline, reflow(c.text));
     return concat([...head, "{", indent(concat([hardline, ...body])), hardline, "}"]);
   }
 

@@ -360,7 +360,7 @@ func (p *printer) sourceFile(sf *compiler.SourceFileData) Doc {
 		}
 	}
 	if sf.ModuleDeclaration != nil {
-		blocks = append(blocks, p.moduleDeclaration(sf.ModuleDeclaration.AsModuleDeclaration()))
+		blocks = append(blocks, p.moduleDeclaration(sf.ModuleDeclaration))
 	}
 	if sf.Statements.Len() > 0 {
 		blocks = append(blocks, concat(p.listDocs(nodes(sf.Statements), true, len(p.text))...))
@@ -415,10 +415,15 @@ func (p *printer) firstConstructStart(sf *compiler.SourceFileData) int {
 }
 
 // moduleDeclaration lays out module-info.java (SE9).
-func (p *printer) moduleDeclaration(m *compiler.ModuleDeclarationData) Doc {
+func (p *printer) moduleDeclaration(node *compiler.Node) Doc {
+	m := node.AsModuleDeclaration()
 	var head []Doc
 	for _, a := range nodes(m.Annotations) {
-		head = append(head, p.annotation(a.AsAnnotation()), hardline)
+		head = append(head, p.annotation(a.AsAnnotation()))
+		if tc, ok := p.trailingCommentAfter(a); ok {
+			head = append(head, text(" "), text(tc.text))
+		}
+		head = append(head, hardline)
 	}
 	if m.IsOpen {
 		head = append(head, text("open "))
@@ -430,6 +435,8 @@ func (p *printer) moduleDeclaration(m *compiler.ModuleDeclarationData) Doc {
 	}
 	var body []Doc
 	for i, d := range dirs {
+		// gjf (visitModule) wants a blank line exactly where the directive kind
+		// changes, and none between directives of the same kind.
 		if i > 0 {
 			if d.Kind != dirs[i-1].Kind {
 				body = append(body, concat(hardline, hardline))
@@ -437,7 +444,20 @@ func (p *printer) moduleDeclaration(m *compiler.ModuleDeclarationData) Doc {
 				body = append(body, hardline)
 			}
 		}
-		body = append(body, p.directive(d))
+		// A comment before a directive stays with it, own-line and reflowed; one
+		// after it on the same line stays on that line.
+		for _, c := range p.commentsBefore(p.start(d)) {
+			body = append(body, reflow(c.text), hardline)
+		}
+		doc := p.directive(d)
+		if tc, ok := p.trailingCommentAfter(d); ok {
+			doc = concat(doc, text(" "), text(tc.text))
+		}
+		body = append(body, doc)
+	}
+	// Comments between the last directive and the closing brace.
+	for _, c := range p.commentsBefore(node.End - 1) {
+		body = append(body, hardline, reflow(c.text))
 	}
 	parts := append([]Doc{}, head...)
 	parts = append(parts, text("{"), indent(concat(append([]Doc{hardline}, body...)...)), hardline, text("}"))

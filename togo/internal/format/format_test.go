@@ -265,3 +265,27 @@ func TestLeadingBlockCommentStaysWithItem(t *testing.T) {
 		t.Errorf("not idempotent:\n%s\n---\n%s", once, twice)
 	}
 }
+
+// Port of src/format/format.test.ts "comments inside a module declaration are
+// formatted, not refused".
+func TestModuleDeclarationComments(t *testing.T) {
+	source := strings.Join([]string{
+		"@SuppressWarnings(\"requires-automatic\") // automatic module names",
+		"module com.acme.app {",
+		"  exports com.acme.api;",
+		"",
+		"  // Optional dependency",
+		"  requires static java.sql;",
+		"  requires java.base; // the platform module",
+		"  // dangling",
+		"}",
+		"",
+	}, "\n")
+	got, err := FormatSource(source, FormatOptions{Style: "google"}, "module-info.java")
+	if err != nil {
+		t.Fatalf("FormatSource: %v", err)
+	}
+	if got != source {
+		t.Errorf("got:\n%s\nwant:\n%s", got, source)
+	}
+}
