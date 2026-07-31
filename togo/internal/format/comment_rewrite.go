@@ -165,6 +165,3 @@ func isSpaceRune(r rune) bool {
 func isSpaceUnit(u uint16) bool {
 	return u == ' ' || u == '\t' || u == '\n' || u == '\r' || u == '\f' || u == '\v'
 }
-func isSpaceByte(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f' || b == '\v'
-}

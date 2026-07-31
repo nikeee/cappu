@@ -861,7 +861,8 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 	if lastTrailing != "" {
 		lastComment = concat(text(" "), text(lastTrailing))
 	}
-	if d.Members.Len() > 0 {
+	switch {
+	case d.Members.Len() > 0:
 		// The constant list is `;`-terminated, then the members. A blank line
 		// separates them only when there are constants above (a bare leading `;`
 		// with no constants gets no blank line before the members) AND a real
@@ -878,9 +879,9 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 			bodyParts = append(bodyParts, hardline)
 		}
 		bodyParts = append(bodyParts, p.members(d.Members, end)...)
-	} else if semicolonAfter {
+	case semicolonAfter:
 		bodyParts = append(bodyParts, text(";"), lastComment)
-	} else {
+	default:
 		bodyParts = append(bodyParts, lastComment)
 	}
 	return concat(header, text("{"), indent(concat(bodyParts...)), hardline, text("}"))
