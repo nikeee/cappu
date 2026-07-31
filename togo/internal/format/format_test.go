@@ -90,3 +90,56 @@ func TestArrayConstructorReferenceRoundTrip(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", got, source)
 	}
 }
+
+// Port of src/format/format.test.ts "enum constant separators stay in front of
+// a trailing comment": "A(1), // one" came back as "A(1) // one,", commenting
+// out the separator.
+func TestEnumConstantTrailingComment(t *testing.T) {
+	source := strings.Join([]string{
+		"enum T {",
+		"  A(1), // one",
+		"  B(2); // two",
+		"",
+		"  private final int n;",
+		"",
+		"  T(int n) {",
+		"    this.n = n;",
+		"  }",
+		"}",
+		"",
+	}, "\n")
+	got, err := FormatSource(source, FormatOptions{Style: "google"}, "input.java")
+	if err != nil {
+		t.Fatalf("FormatSource: %v", err)
+	}
+	if got != source {
+		t.Errorf("got:\n%s\nwant:\n%s", got, source)
+	}
+}
+
+// Port of src/format/format.test.ts "comments inside a verbatim-printed
+// declaration are not duplicated": an @interface degrades to a raw source
+// slice, and its members' comments were flushed again at the end of the file.
+func TestVerbatimDeclarationCommentsNotDuplicated(t *testing.T) {
+	source := strings.Join([]string{
+		"public @interface A {",
+		"  /** doc. */",
+		"  boolean on() default true;",
+		"}",
+		"",
+	}, "\n")
+	once, err := FormatSource(source, FormatOptions{Style: "google"}, "input.java")
+	if err != nil {
+		t.Fatalf("FormatSource: %v", err)
+	}
+	if n := strings.Count(once, "doc."); n != 1 {
+		t.Errorf("doc. appears %d times, want 1:\n%s", n, once)
+	}
+	twice, err := FormatSource(once, FormatOptions{Style: "google"}, "input.java")
+	if err != nil {
+		t.Fatalf("FormatSource (2nd): %v", err)
+	}
+	if twice != once {
+		t.Errorf("not idempotent:\n%s\n---\n%s", once, twice)
+	}
+}

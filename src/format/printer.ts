@@ -771,19 +771,25 @@ class Printer {
     // comment on the constant's line is kept after it.
     const constantParts: Doc[] = [];
     let prevConstEnd = -1;
+    // The last constant's trailing comment is held back: its separator (`,`/`;`)
+    // is only known below, and a separator printed after the comment would be
+    // commented out - "A(1) // note," does not compile.
+    let lastTrailing: string | undefined;
     d.enumConstants.forEach((c, i) => {
       const lead = this.commentsBefore(this.start(c));
       const firstPos = lead.length > 0 ? lead[0].pos : this.start(c);
       if (i > 0) {
         // gjf preserves one source blank line between enum constants.
         const blank = this.blankBeforePos(prevConstEnd, firstPos);
-        constantParts.push(",", blank ? concat([hardline, hardline]) : hardline);
+        constantParts.push(blank ? concat([hardline, hardline]) : hardline);
       }
       for (const cm of lead) constantParts.push(reflow(cm.text), hardline);
-      let cdoc = this.enumConstant(c);
+      const isLast = i === d.enumConstants.length - 1;
+      let cdoc = isLast ? this.enumConstant(c) : concat([this.enumConstant(c), ","]);
       const trailing = this.trailingCommentAfter(c);
       if (trailing) {
-        cdoc = concat([cdoc, " ", trailing.text]);
+        if (isLast) lastTrailing = trailing.text;
+        else cdoc = concat([cdoc, " ", trailing.text]);
         prevConstEnd = trailing.end;
       } else {
         prevConstEnd = c.end;
@@ -803,17 +809,20 @@ class Printer {
       semicolonAfter = this.text[p] === ";";
     }
     const bodyParts: Doc[] = [lead, concat(constantParts)];
+    const lastComment: Doc = lastTrailing ? concat([" ", lastTrailing]) : "";
     if (d.members.length > 0) {
       // The constant list is `;`-terminated, then the members. A blank line
       // separates them only when there are constants above (a bare leading `;`
       // with no constants gets no blank line before the members) AND a real
       // member follows - a trailing empty statement (`;`) gets no blank line.
       const realMember = d.members.some(m => m.kind !== SyntaxKind.EmptyStatement);
-      bodyParts.push(";", hardline);
+      bodyParts.push(";", lastComment, hardline);
       if (constants.length > 0 && realMember) bodyParts.push(hardline);
       bodyParts.push(...this.members(d.members, d.end));
     } else if (semicolonAfter) {
-      bodyParts.push(";");
+      bodyParts.push(";", lastComment);
+    } else {
+      bodyParts.push(lastComment);
     }
     return concat([header, "{", indent(concat(bodyParts)), hardline, "}"]);
   }
@@ -2194,9 +2203,16 @@ class Printer {
       case SyntaxKind.Annotation:
         return this.annotation(node as Annotation);
 
-      default:
-        // Degrade, do not crash: emit the verbatim source slice.
-        return this.raw(node);
+      default: {
+        // Degrade, do not crash: emit the verbatim source slice. Any comment
+        // inside it is part of that slice, so drop it from the pending stream:
+        // otherwise it is flushed again at the end of the file and the output
+        // grows another copy on every run (an @interface with javadoc'd
+        // members, which lands here, did exactly that).
+        const text = this.raw(node);
+        while (this.ci < this.comments.length && this.comments[this.ci]!.pos < node.end) this.ci++;
+        return text;
+      }
     }
   }
 }

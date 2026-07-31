@@ -807,6 +807,10 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 	// comment on the constant's line is kept after it.
 	var constantParts []Doc
 	prevConstEnd := -1
+	// The last constant's trailing comment is held back: its separator (`,`/`;`)
+	// is only known below, and a separator printed after the comment would be
+	// commented out - "A(1) // note," does not compile.
+	lastTrailing := ""
 	for i, c := range consts {
 		leadComments := p.commentsBefore(p.start(c))
 		firstPos := p.start(c)
@@ -816,17 +820,25 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 		if i > 0 {
 			// gjf preserves one source blank line between enum constants.
 			if p.blankBeforePos(prevConstEnd, firstPos) {
-				constantParts = append(constantParts, text(","), hardline, hardline)
+				constantParts = append(constantParts, hardline, hardline)
 			} else {
-				constantParts = append(constantParts, text(","), hardline)
+				constantParts = append(constantParts, hardline)
 			}
 		}
 		for _, cm := range leadComments {
 			constantParts = append(constantParts, reflow(cm.text), hardline)
 		}
+		isLast := i == len(consts)-1
 		cdoc := p.enumConstant(c.AsEnumConstantDeclaration())
+		if !isLast {
+			cdoc = concat(cdoc, text(","))
+		}
 		if trailing, ok := p.trailingCommentAfter(c); ok {
-			cdoc = concat(cdoc, text(" "), text(trailing.text))
+			if isLast {
+				lastTrailing = trailing.text
+			} else {
+				cdoc = concat(cdoc, text(" "), text(trailing.text))
+			}
 			prevConstEnd = trailing.end
 		} else {
 			prevConstEnd = c.End
@@ -845,6 +857,10 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 		semicolonAfter = p2 < len(p.text) && p.text[p2] == ';'
 	}
 	bodyParts := []Doc{lead, concat(constantParts...)}
+	lastComment := text("")
+	if lastTrailing != "" {
+		lastComment = concat(text(" "), text(lastTrailing))
+	}
 	if d.Members.Len() > 0 {
 		// The constant list is `;`-terminated, then the members. A blank line
 		// separates them only when there are constants above (a bare leading `;`
@@ -857,13 +873,15 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 				break
 			}
 		}
-		bodyParts = append(bodyParts, text(";"), hardline)
+		bodyParts = append(bodyParts, text(";"), lastComment, hardline)
 		if len(consts) > 0 && realMember {
 			bodyParts = append(bodyParts, hardline)
 		}
 		bodyParts = append(bodyParts, p.members(d.Members, end)...)
 	} else if semicolonAfter {
-		bodyParts = append(bodyParts, text(";"))
+		bodyParts = append(bodyParts, text(";"), lastComment)
+	} else {
+		bodyParts = append(bodyParts, lastComment)
 	}
 	return concat(header, text("{"), indent(concat(bodyParts...)), hardline, text("}"))
 }
@@ -2512,8 +2530,16 @@ func (p *printer) node(node *compiler.Node) Doc {
 		return p.annotation(node.AsAnnotation())
 
 	default:
-		// Degrade, do not crash: emit the verbatim source slice.
-		return text(p.raw(node))
+		// Degrade, do not crash: emit the verbatim source slice. Any comment
+		// inside it is part of that slice, so drop it from the pending stream:
+		// otherwise it is flushed again at the end of the file and the output
+		// grows another copy on every run (an @interface with javadoc'd
+		// members, which lands here, did exactly that).
+		raw := text(p.raw(node))
+		for p.ci < len(p.comments) && p.comments[p.ci].pos < node.End {
+			p.ci++
+		}
+		return raw
 	}
 }
 

@@ -112,3 +112,40 @@ test("array constructor references survive formatting", () => {
   ].join("\n");
   expect(formatSource(source, { style: "google" })).toBe(source);
 });
+
+// A trailing comment on an enum constant used to be printed BEFORE the
+// separator, so "A(1), // one" came back as "A(1) // one," - the comma was
+// commented out and the file no longer compiled.
+test("enum constant separators stay in front of a trailing comment", () => {
+  const source = [
+    "enum T {",
+    "  A(1), // one",
+    "  B(2); // two",
+    "",
+    "  private final int n;",
+    "",
+    "  T(int n) {",
+    "    this.n = n;",
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+  const once = formatSource(source, { style: "google" });
+  expect(once).toBe(source);
+});
+
+// A declaration the printer degrades to a verbatim source slice (an @interface)
+// carries its members' comments inside that slice. They stayed queued and were
+// flushed again at the end of the file, so every run appended another copy.
+test("comments inside a verbatim-printed declaration are not duplicated", () => {
+  const source = [
+    "public @interface A {",
+    "  /** doc. */",
+    "  boolean on() default true;",
+    "}",
+    "",
+  ].join("\n");
+  const once = formatSource(source, { style: "google" });
+  expect(once.match(/doc\./g)).toHaveLength(1);
+  expect(formatSource(once, { style: "google" })).toBe(once);
+});
