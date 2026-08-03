@@ -1423,13 +1423,33 @@ class Printer {
     const parts: Doc[] = [header, this.clauseRest(s.thenStatement, s.elseStatement !== undefined)];
     if (s.elseStatement) {
       const elseOnSameLine = s.thenStatement.kind === SyntaxKind.Block;
-      parts.push(elseOnSameLine ? " else" : concat([hardline, "else"]));
+      const lead = this.clauseKeywordLead(this.start(s.elseStatement), elseOnSameLine);
+      if (lead) parts.push(lead, "else");
+      else parts.push(elseOnSameLine ? " else" : concat([hardline, "else"]));
       if (s.elseStatement.kind === SyntaxKind.IfStatement) {
         parts.push(" ", this.node(s.elseStatement));
       } else {
         parts.push(this.clauseBody(s.elseStatement));
       }
     }
+    return concat(parts);
+  }
+
+  /**
+   * The comments between a block's `}` and the clause keyword that follows
+   * (`else`/`catch`/`finally`), with the separators around them. gjf hangs a
+   * same-line comment off the brace and puts the others on their own line; the
+   * keyword then always starts a new line. Undefined when there is no comment,
+   * so the caller keeps its usual `} else` spacing.
+   */
+  private clauseKeywordLead(bound: number, afterBlock: boolean): Doc | undefined {
+    const cs = this.commentsBefore(bound);
+    if (cs.length === 0) return undefined;
+    const parts: Doc[] = [];
+    cs.forEach((c, i) => {
+      parts.push(i === 0 && !c.ownLine && afterBlock ? " " : hardline, c.line ? c.text : reflow(c.text));
+    });
+    parts.push(hardline);
     return concat(parts);
   }
 
@@ -1576,8 +1596,9 @@ class Printer {
       parts.push(" ", this.block(s.tryBlock, tryBlank));
     }
     s.catchClauses.forEach((c, i) => {
+      const lead = this.clauseKeywordLead(this.start(c), true);
       parts.push(
-        " catch (",
+        lead ? concat([lead, "catch ("]) : " catch (",
         this.modifiers(c.modifiers, "inline"),
         join(
           " | ",
@@ -1589,7 +1610,10 @@ class Printer {
         this.block(c.block, i < s.catchClauses.length - 1 || hasFinally),
       );
     });
-    if (s.finallyBlock) parts.push(" finally ", this.block(s.finallyBlock));
+    if (s.finallyBlock) {
+      const lead = this.clauseKeywordLead(this.start(s.finallyBlock), true);
+      parts.push(lead ? concat([lead, "finally "]) : " finally ", this.block(s.finallyBlock));
+    }
     return concat(parts);
   }
 

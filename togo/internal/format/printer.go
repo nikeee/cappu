@@ -1651,9 +1651,12 @@ func (p *printer) ifStatement(s *compiler.IfStatementData) Doc {
 	}
 	if s.ElseStatement != nil {
 		elseOnSameLine := s.ThenStatement.Kind == compiler.Block
-		if elseOnSameLine {
+		switch lead, ok := p.clauseKeywordLead(p.start(s.ElseStatement), elseOnSameLine); {
+		case ok:
+			parts = append(parts, lead, text("else"))
+		case elseOnSameLine:
 			parts = append(parts, text(" else"))
-		} else {
+		default:
 			parts = append(parts, concat(hardline, text("else")))
 		}
 		if s.ElseStatement.Kind == compiler.IfStatement {
@@ -1677,6 +1680,33 @@ func (p *printer) clauseBodyTB(s *compiler.Node, allowTrailingBlank bool) Doc {
 		return concat(text(" "), p.blockTB(s.AsBlock(), s.End, allowTrailingBlank))
 	}
 	return group(indent(concat(line, p.node(s))))
+}
+
+// clauseKeywordLead returns the comments between a block's `}` and the clause
+// keyword that follows (`else`/`catch`/`finally`), with the separators around
+// them. gjf hangs a same-line comment off the brace and puts the others on
+// their own line; the keyword then always starts a new line. ok=false when
+// there is no comment, so the caller keeps its usual `} else` spacing.
+func (p *printer) clauseKeywordLead(bound int, afterBlock bool) (Doc, bool) {
+	cs := p.commentsBefore(bound)
+	if len(cs) == 0 {
+		return nil, false
+	}
+	var parts []Doc
+	for i, c := range cs {
+		if i == 0 && !c.ownLine && afterBlock {
+			parts = append(parts, text(" "))
+		} else {
+			parts = append(parts, hardline)
+		}
+		if c.line {
+			parts = append(parts, text(c.text))
+		} else {
+			parts = append(parts, reflow(c.text))
+		}
+	}
+	parts = append(parts, hardline)
+	return concat(parts...), true
 }
 
 // clauseClose is the token that closes an if/while/for header. gjf's DocBuilder
@@ -1829,10 +1859,18 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 		for j, t := range nodes(c.CatchTypes) {
 			ts[j] = p.typ(t)
 		}
-		parts = append(parts, text(" catch ("), p.modifiers(c.Modifiers, "inline"), join(text(" | "), ts), text(" "), text(p.raw(c.Name)), text(") "), p.blockTB(c.Block.AsBlock(), c.Block.End, i < len(catches)-1 || hasFinally))
+		open := text(" catch (")
+		if lead, ok := p.clauseKeywordLead(p.start(cn), true); ok {
+			open = concat(lead, text("catch ("))
+		}
+		parts = append(parts, open, p.modifiers(c.Modifiers, "inline"), join(text(" | "), ts), text(" "), text(p.raw(c.Name)), text(") "), p.blockTB(c.Block.AsBlock(), c.Block.End, i < len(catches)-1 || hasFinally))
 	}
 	if s.FinallyBlock != nil {
-		parts = append(parts, text(" finally "), p.block(s.FinallyBlock.AsBlock(), s.FinallyBlock.End))
+		open := text(" finally ")
+		if lead, ok := p.clauseKeywordLead(p.start(s.FinallyBlock), true); ok {
+			open = concat(lead, text("finally "))
+		}
+		parts = append(parts, open, p.block(s.FinallyBlock.AsBlock(), s.FinallyBlock.End))
 	}
 	return concat(parts...)
 }

@@ -1,0 +1,29 @@
+package p;
+
+class T {
+    void m(int a, int b) {
+        if (a == b) {
+            x();
+        } // a comment trailing the brace
+        else {
+            y();
+        }
+        if (a > b) {
+            x();
+        }
+        // an own-line comment before else
+        else if (a < b) {
+            y();
+        }
+        try {
+            x();
+        } // before catch
+        catch (Exception e) {
+            y();
+        }
+        // before finally
+        finally {
+            z();
+        }
+    }
+}
