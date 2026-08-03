@@ -302,6 +302,11 @@ class Printer {
       first = false;
     };
 
+    // gjf's addBodyDeclarations: a member wants a blank line before it unless it
+    // is a field without javadoc, and a member after one that wanted a blank gets
+    // one too (`lastOneGotBlankLineBefore`).
+    let prevWantsBlank = false;
+
     list.forEach((item, i) => {
       const itemStart = this.start(item);
       // The blank line required before this whole entry (its leading comments
@@ -310,9 +315,14 @@ class Printer {
       // here (a leading comment or the item) so comment lines are not miscounted.
       const leadComments = this.commentsBefore(itemStart);
       const firstPos = leadComments.length > 0 ? leadComments[0].pos : itemStart;
+      const wantsBlank =
+        forced &&
+        (isBlankForcing(item.kind) ||
+          fieldSpansMultipleLines(item) ||
+          leadComments.some(c => isJavadocComment(c)));
       const entryBlank =
-        i > 0 &&
-        (this.blankBeforePos(prevEnd, firstPos) || (forced && forcedBlank(list[i - 1], item)));
+        i > 0 && (this.blankBeforePos(prevEnd, firstPos) || wantsBlank || prevWantsBlank);
+      prevWantsBlank = wantsBlank;
       let pushedInEntry = false;
       const pushEntry = (doc: Doc, srcBlank: boolean) => {
         push(doc, pushedInEntry ? srcBlank : entryBlank || srcBlank);
@@ -2363,18 +2373,6 @@ function rank(kind: SyntaxKind): number {
 // in between. Any other comment keeps its blank.
 function isJavadocComment(c: Comment | undefined): boolean {
   return c !== undefined && !c.line && c.text.startsWith("/**");
-}
-
-// A blank line is forced between two members when either is a method,
-// constructor, initializer or nested type (google-java-format); consecutive
-// fields stay together unless the user separated them (a source blank line).
-function forcedBlank(a: Node, b: Node): boolean {
-  return (
-    isBlankForcing(a.kind) ||
-    isBlankForcing(b.kind) ||
-    fieldSpansMultipleLines(a) ||
-    fieldSpansMultipleLines(b)
-  );
 }
 
 // google-java-format pads a field declaration with blank lines when it renders

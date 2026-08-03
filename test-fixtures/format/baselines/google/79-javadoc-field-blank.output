@@ -1,0 +1,19 @@
+package p;
+
+public class B {
+  int a;
+  int b;
+
+  /** doc on c forces a blank before c and after it. */
+  int c;
+
+  int d;
+  int e;
+
+  void m() {
+    int x = 1;
+    /** a javadoc on a local forces nothing. */
+    int y = 2;
+    int z = 3;
+  }
+}

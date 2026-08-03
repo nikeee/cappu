@@ -228,6 +228,11 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 		first = false
 	}
 
+	// gjf's addBodyDeclarations: a member wants a blank line before it unless it
+	// is a field without javadoc, and a member after one that wanted a blank gets
+	// one too (`lastOneGotBlankLineBefore`).
+	prevWantsBlank := false
+
 	for i, item := range list {
 		itemStart := p.start(item)
 		// The blank line required before this whole entry (its leading comments
@@ -237,8 +242,10 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 		if len(leadComments) > 0 {
 			firstPos = leadComments[0].pos
 		}
-		entryBlank := i > 0 &&
-			(p.blankBeforePos(prevEnd, firstPos) || (forced && forcedBlank(list[i-1], item)))
+		wantsBlank := forced &&
+			(isBlankForcing(item.Kind) || fieldSpansMultipleLines(item) || anyJavadoc(leadComments))
+		entryBlank := i > 0 && (p.blankBeforePos(prevEnd, firstPos) || wantsBlank || prevWantsBlank)
+		prevWantsBlank = wantsBlank
 		pushedInEntry := false
 		pushEntry := func(doc Doc, srcBlank bool) {
 			if pushedInEntry {
@@ -2633,12 +2640,15 @@ func isJavadocComment(c *comment) bool {
 	return c != nil && !c.line && strings.HasPrefix(c.text, "/**")
 }
 
-// forcedBlank reports whether a blank line is forced between two members. A
-// method, constructor, initializer or nested type forces it; consecutive fields
-// stay together unless the user separated them (a source blank line).
-func forcedBlank(a, b *compiler.Node) bool {
-	return isBlankForcing(a.Kind) || isBlankForcing(b.Kind) ||
-		fieldSpansMultipleLines(a) || fieldSpansMultipleLines(b)
+// anyJavadoc reports whether any of the leading comments is a javadoc, which
+// makes even a field want a blank line before it (gjf's hasJavaDoc).
+func anyJavadoc(comments []comment) bool {
+	for i := range comments {
+		if isJavadocComment(&comments[i]) {
+			return true
+		}
+	}
+	return false
 }
 
 // fieldSpansMultipleLines reports whether a field renders across multiple lines,
