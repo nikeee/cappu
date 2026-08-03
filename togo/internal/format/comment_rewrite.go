@@ -36,10 +36,28 @@ func rewriteComment(text string, column0 int, isLine bool) string {
 	if pc, ok := reformatParamComment(text); ok {
 		return pc
 	}
+	var out string
 	if javadocShaped(lines) {
-		return indentJavadoc(lines, column0)
+		out = indentJavadoc(lines, column0)
+	} else {
+		out = preserveIndentation(lines, column0)
 	}
-	return preserveIndentation(lines, column0)
+	// Re-indenting pads every continuation line to column0, including the blank
+	// ones. gjf's writer drops that trailing run when it emits the line; our doc
+	// writer only trims at breaks it emits itself, so do it here.
+	return trimLineEnds(out)
+}
+
+// trimLineEnds strips trailing spaces and tabs from every line.
+func trimLineEnds(s string) string {
+	if !strings.ContainsAny(s, " \t") {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimRight(l, " \t")
+	}
+	return strings.Join(lines, "\n")
 }
 
 var paramCommentRe = regexp.MustCompile(`^/\*\s*([\p{L}_$][\p{L}\p{N}_$]*(?:\.\.\.)?)\s*=\s*\*/$`)

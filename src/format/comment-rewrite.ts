@@ -19,7 +19,13 @@ export function rewriteComment(text: string, column0: number, isLine: boolean): 
   if (isLine) return indentLineComments(lines, column0);
   const pc = reformatParamComment(text);
   if (pc !== null) return pc;
-  return javadocShaped(lines) ? indentJavadoc(lines, column0) : preserveIndentation(lines, column0);
+  const out = javadocShaped(lines)
+    ? indentJavadoc(lines, column0)
+    : preserveIndentation(lines, column0);
+  // Re-indenting pads every continuation line to `column0`, including the blank
+  // ones. gjf's writer drops that trailing run when it emits the line; our doc
+  // writer only trims at breaks it emits itself, so do it here.
+  return out.replace(/[ \t]+$/gm, "");
 }
 
 // gjf's PARAMETER_COMMENT: `/*name=*/` -> `/* name= */` (identifier, optional
