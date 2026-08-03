@@ -691,6 +691,13 @@ func (p *printer) modifiers(mods *compiler.NodeArray, annoMode string) Doc {
 				parts = append(parts, text(" "), text(tc.text))
 			}
 			parts = append(parts, hardline)
+			// An own-line comment between this annotation and whatever follows it
+			// stays where it is (`@Test` / `// why` / `public void m()`); without
+			// this it leaks past the declaration and lands inside the body.
+			// SkipTrivia is exactly the bound: the next real token.
+			for _, c := range p.commentsBefore(compiler.SkipTrivia(p.text, a.End)) {
+				parts = append(parts, reflow(c.text), hardline)
+			}
 		} else {
 			parts = append(parts, text(" "))
 		}

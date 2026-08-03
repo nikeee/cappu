@@ -679,6 +679,15 @@ class Printer {
         if (tc) parts.push(" ", tc.text);
       }
       parts.push(ownLine ? hardline : " ");
+      // An own-line comment between this annotation and whatever follows it
+      // stays where it is (`@Test` / `// why` / `public void m()`); without this
+      // it leaks past the declaration and lands inside the body. skipTrivia is
+      // exactly the bound: the next real token after the annotation.
+      if (ownLine) {
+        for (const c of this.commentsBefore(skipTrivia(this.text, a.end))) {
+          parts.push(reflow(c.text), hardline);
+        }
+      }
     }
     for (const k of keywords) parts.push(concat([this.modifierText(k), " "]));
     // Type-use annotation suffix, inline before the type.

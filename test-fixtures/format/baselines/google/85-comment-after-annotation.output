@@ -1,0 +1,16 @@
+package p;
+
+class T {
+  @Test
+  // a comment between the annotation and the keywords
+  public void m() {
+    assertEquals(0, x());
+  }
+
+  @Test
+  // no keyword follows this one
+  void n() {}
+
+  @Deprecated // a trailing comment stays on the annotation line
+  public void o() {}
+}
