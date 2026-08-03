@@ -494,8 +494,30 @@ class Printer {
     }
     const statics = sf.imports.filter(i => i.isStatic);
     const nonStatics = sf.imports.filter(i => !i.isStatic);
+    // A comment between the package declaration and the first import belongs to
+    // the imports and stays in front of them; the sorting moves the imports
+    // around it. Without this it stayed pending and surfaced after the whole
+    // import block, as a leading comment of the first type declaration.
+    let importLead: Doc = "";
+    if (sf.imports.length > 0) {
+      const importStart = this.start(sf.imports[0]);
+      const lead = this.commentsBefore(importStart);
+      const parts: Doc[] = [];
+      lead.forEach((c, i) => {
+        if (i > 0) parts.push(this.blankBeforePos(lead[i - 1].end, c.pos) ? hardline : "", hardline);
+        parts.push(reflow(c.text));
+      });
+      if (lead.length > 0) {
+        parts.push(this.blankBeforePos(lead[lead.length - 1].end, importStart) ? hardline : "");
+        parts.push(hardline);
+        importLead = concat(parts);
+      }
+    }
     for (const g of [statics, nonStatics]) {
-      if (g.length > 0) blocks.push(this.importGroup(g));
+      if (g.length > 0) {
+        blocks.push(concat([importLead, this.importGroup(g)]));
+        importLead = "";
+      }
     }
     if (sf.moduleDeclaration) {
       blocks.push(this.moduleDeclaration(sf.moduleDeclaration));

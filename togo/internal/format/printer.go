@@ -479,9 +479,40 @@ func (p *printer) sourceFile(sf *compiler.SourceFileData) Doc {
 			nonStatics = append(nonStatics, imp)
 		}
 	}
+	// A comment between the package declaration and the first import belongs to
+	// the imports and stays in front of them; the sorting moves the imports around
+	// it. Without this it stayed pending and surfaced after the whole import
+	// block, as a leading comment of the first type declaration.
+	var importLead Doc
+	if sf.Imports.Len() > 0 {
+		importStart := p.start(sf.Imports.Nodes[0])
+		lead := p.commentsBefore(importStart)
+		if len(lead) > 0 {
+			var parts []Doc
+			for i, c := range lead {
+				if i > 0 {
+					if p.blankBeforePos(lead[i-1].end, c.pos) {
+						parts = append(parts, hardline)
+					}
+					parts = append(parts, hardline)
+				}
+				parts = append(parts, reflow(c.text))
+			}
+			if p.blankBeforePos(lead[len(lead)-1].end, importStart) {
+				parts = append(parts, hardline)
+			}
+			parts = append(parts, hardline)
+			importLead = concat(parts...)
+		}
+	}
 	for _, g := range [][]*compiler.Node{statics, nonStatics} {
 		if len(g) > 0 {
-			blocks = append(blocks, p.importGroup(g))
+			if importLead != nil {
+				blocks = append(blocks, concat(importLead, p.importGroup(g)))
+				importLead = nil
+			} else {
+				blocks = append(blocks, p.importGroup(g))
+			}
 		}
 	}
 	if sf.ModuleDeclaration != nil {

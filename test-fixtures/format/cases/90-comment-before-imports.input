@@ -1,0 +1,14 @@
+package p;
+
+/*
+ * A block comment that introduces the imports.
+ */
+import java.util.HashSet;
+import java.util.List;
+
+// a line comment before the type
+
+class T {
+  HashSet<String> a;
+  List<String> b;
+}
