@@ -1413,7 +1413,7 @@ func (p *printer) parameters(params *compiler.NodeArray, trailing Doc) Doc {
 		return level(plus4, inner)
 	}
 	// Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
-	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameter(n) })
+	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameterBreak(n, true) })
 	return p.argsLikeTrailing("(", items, ")", fillUnified, trailing)
 }
 
@@ -1426,7 +1426,7 @@ func (p *printer) paramListChildren(params *compiler.NodeArray) []Doc {
 	if params.Len() == 0 {
 		return []Doc{text("()")}
 	}
-	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameter(n) })
+	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameterBreak(n, true) })
 	innerParts := make([]Doc, 0, len(items)*2)
 	for i, it := range items {
 		if i > 0 {
@@ -1438,6 +1438,15 @@ func (p *printer) paramListChildren(params *compiler.NodeArray) []Doc {
 }
 
 func (p *printer) parameter(n *compiler.Node) Doc {
+	return p.parameterBreak(n, false)
+}
+
+// parameterBreak is parameter with gjf's declareOne break between the type and
+// the name (an INDEPENDENT break, the name indented +4) for the cases that have
+// it: a method or constructor parameter list. The break is a direct child of
+// the enclosing parameter-list level, so its fit check counts the rest of the
+// line - the `)` and the body's `{`. A lambda parameter does NOT get it.
+func (p *printer) parameterBreak(n *compiler.Node, breakBeforeName bool) Doc {
 	pp := n.AsParameter()
 	// A receiver parameter (`@A Foo this`, `Outer.this`) has no name node and its
 	// qualifier is not kept in the tree, so print it from source.
@@ -1449,7 +1458,12 @@ func (p *printer) parameter(n *compiler.Node) Doc {
 		parts = append(parts, text("..."))
 	}
 	if pp.Name != nil {
-		parts = append(parts, text(" "), text(p.raw(pp.Name)))
+		if breakBeforeName {
+			parts = append(parts, brk(fillIndependent, " ", plus4, nil))
+		} else {
+			parts = append(parts, text(" "))
+		}
+		parts = append(parts, text(p.raw(pp.Name)))
 	}
 	return concat(parts...)
 }

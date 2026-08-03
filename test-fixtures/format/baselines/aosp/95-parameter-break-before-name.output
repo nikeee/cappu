@@ -1,0 +1,13 @@
+package p;
+
+class T<I, O> {
+    public SwitchTransformer(
+            final Map<? extends Predicate<? super I>, ? extends Transformer<? super I, ? extends O>>
+                    map) {
+        x(map);
+    }
+
+    void shortOne(final Map<String, String> map) {
+        consume((Input.Tok tok) -> tok.length());
+    }
+}

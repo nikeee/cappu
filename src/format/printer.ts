@@ -1245,7 +1245,7 @@ class Printer {
     // carry a break, so it must sit in a +4 level to fold and indent correctly.
     if (params.length === 0) return level(PLUS4, ["()", trailing]);
     // Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
-    const { items } = this.listItems(params, p => this.parameter(p as Parameter));
+    const { items } = this.listItems(params, p => this.parameter(p as Parameter, true));
     return this.argsLike("(", items, ")", "unified", trailing);
   }
 
@@ -1256,7 +1256,7 @@ class Printer {
   // the +4 line only when they overflow.
   private paramListChildren(params: NodeArray<Parameter>): Doc[] {
     if (params.length === 0) return ["()"];
-    const { items } = this.listItems(params, p => this.parameter(p as Parameter));
+    const { items } = this.listItems(params, p => this.parameter(p as Parameter, true));
     const innerParts: Doc[] = [];
     items.forEach((it, i) => {
       if (i > 0) innerParts.push(",", brk("unified", " ", ZERO));
@@ -1265,13 +1265,19 @@ class Printer {
     return ["(", brk("independent", "", ZERO), level(ZERO, innerParts), ")"];
   }
 
-  private parameter(p: Parameter): Doc {
+  private parameter(p: Parameter, breakBeforeName = false): Doc {
     // A receiver parameter (`@A Foo this`, `Outer.this`) has no name node and
     // its qualifier is not kept in the tree, so print it from source.
     if (p.isReceiver) return this.raw(p);
     const parts: Doc[] = [this.modifiers(p.modifiers), this.type(p.type)];
     if (p.isVarArgs) parts.push("...");
-    if (p.name) parts.push(" ", this.raw(p.name));
+    // gjf's declareOne breaks between the type and the name (an INDEPENDENT
+    // break, the name conditionally indented +4) when they do not fit together.
+    // The break is a direct child of the enclosing parameter-list level, so its
+    // fit check counts the rest of the line - the `)` and the body's `{`.
+    if (p.name) {
+      parts.push(breakBeforeName ? brk("independent", " ", PLUS4) : " ", this.raw(p.name));
+    }
     return concat(parts);
   }
 
