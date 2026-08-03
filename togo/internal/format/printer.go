@@ -351,13 +351,33 @@ func (p *printer) trailsDirectly(from, pos int) bool {
 // end, or from when there is none - i.e. where a block's rendered content
 // really stops.
 func (p *printer) lastCommentEndBefore(from, end int) int {
-	out := from
+	if c, ok := p.lastCommentBefore(from, end); ok {
+		return c.end
+	}
+	return from
+}
+
+// lastCommentBefore returns the last comment between from and end, if any.
+func (p *printer) lastCommentBefore(from, end int) (comment, bool) {
+	var out comment
+	found := false
 	for i := p.ci; i < len(p.comments) && p.comments[i].pos < end; i++ {
 		if p.comments[i].pos >= from {
-			out = p.comments[i].end
+			out = p.comments[i]
+			found = true
 		}
 	}
-	return out
+	return out, found
+}
+
+// blankAfterLastComment reports whether a blank line must be kept before the
+// closing brace at endPos-1: gjf forces one when the body ends with a comment
+// that the source separates from the brace by a blank line (OpsBuilder's
+// allowBlankAfterLastComment, which excludes javadoc), whatever the enclosing
+// construct wants.
+func (p *printer) blankAfterLastComment(from, endPos int) bool {
+	c, ok := p.lastCommentBefore(from, endPos)
+	return ok && !isJavadocComment(&c) && p.blankBeforePos(c.end, endPos-1)
 }
 
 // peekTrailingComment returns the comment that will trail node once the node
@@ -907,13 +927,21 @@ func (p *printer) body(members *compiler.NodeArray, endPos int) Doc {
 		return text("{}")
 	}
 	lead := hardline
+	from := -1
 	if members.Len() > 0 {
 		lead = p.braceLead(members.Nodes[0].Pos, p.start(members.Nodes[0]))
+		from = members.Nodes[members.Len()-1].End
+	} else if p.ci < len(p.comments) {
+		from = p.comments[p.ci].pos
+	}
+	closeLead := hardline
+	if from >= 0 && p.blankAfterLastComment(from, endPos) {
+		closeLead = concat(hardline, hardline)
 	}
 	return concat(
 		text("{"),
 		indent(concat(append([]Doc{lead}, p.members(members, endPos)...)...)),
-		hardline,
+		closeLead,
 		text("}"),
 	)
 }
@@ -1486,9 +1514,16 @@ func (p *printer) blockRest(b *compiler.BlockData, endPos int, allowTrailingBlan
 	// dangling comment after the last statement, when there is one. Measuring
 	// from the statement counts the comment's own line as the blank.
 	closeLead := hardline
-	if allowTrailingBlank && b.Statements.Len() > 0 {
-		lastEnd := p.lastCommentEndBefore(b.Statements.Nodes[b.Statements.Len()-1].End, endPos)
-		if p.blankBeforePos(lastEnd, endPos-1) {
+	from := -1
+	if b.Statements.Len() > 0 {
+		from = b.Statements.Nodes[b.Statements.Len()-1].End
+	} else if p.ci < len(p.comments) {
+		from = p.comments[p.ci].pos
+	}
+	if from >= 0 {
+		lastEnd := p.lastCommentEndBefore(from, endPos)
+		if (allowTrailingBlank && p.blankBeforePos(lastEnd, endPos-1)) ||
+			p.blankAfterLastComment(from, endPos) {
 			closeLead = concat(hardline, hardline)
 		}
 	}

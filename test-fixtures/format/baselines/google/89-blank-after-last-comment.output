@@ -1,0 +1,24 @@
+package p;
+
+class A {
+  int x;
+  // a trailing comment with a blank line after it
+
+}
+
+class B {
+  int x;
+  // a trailing comment with no blank after it
+}
+
+class C {
+  void m() {
+    int y = 1;
+    // comment then blank
+
+  }
+}
+
+class D {
+  int x;
+}

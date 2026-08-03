@@ -265,16 +265,32 @@ class Printer {
     return this.blankBeforePos(bracePos, firstContent) ? concat([hardline, hardline]) : hardline;
   }
 
+  /** The last comment between `from` and `end`, if any. */
+  private lastCommentBefore(from: number, end: number): Comment | undefined {
+    let out: Comment | undefined;
+    for (let i = this.ci; i < this.comments.length && this.comments[i].pos < end; i++) {
+      if (this.comments[i].pos >= from) out = this.comments[i];
+    }
+    return out;
+  }
+
   /**
    * The end of the last comment between `from` and `end`, or `from` when there
    * is none - i.e. where the block's rendered content really stops.
    */
   private lastCommentEndBefore(from: number, end: number): number {
-    let out = from;
-    for (let i = this.ci; i < this.comments.length && this.comments[i].pos < end; i++) {
-      if (this.comments[i].pos >= from) out = this.comments[i].end;
-    }
-    return out;
+    return this.lastCommentBefore(from, end)?.end ?? from;
+  }
+
+  /**
+   * Whether a blank line must be kept before the closing brace at `endPos - 1`:
+   * gjf forces one when the body ends with a comment that the source separates
+   * from the brace by a blank line (OpsBuilder's `allowBlankAfterLastComment`,
+   * which excludes javadoc), whatever the enclosing construct wants.
+   */
+  private blankAfterLastComment(from: number, endPos: number): boolean {
+    const c = this.lastCommentBefore(from, endPos);
+    return c !== undefined && !isJavadocComment(c) && this.blankBeforePos(c.end, endPos - 1);
   }
 
   /** Whether a pending comment begins before `pos` (without consuming it). */
@@ -854,7 +870,12 @@ class Printer {
     if (members.length === 0 && !this.hasCommentBefore(endPos)) return "{}";
     const lead =
       members.length > 0 ? this.braceLead(members[0].pos, this.start(members[0])) : hardline;
-    return concat(["{", indent(concat([lead, ...this.members(members, endPos)])), hardline, "}"]);
+    const from = members.length > 0 ? members[members.length - 1].end : this.comments[this.ci]?.pos;
+    const closeLead =
+      from !== undefined && this.blankAfterLastComment(from, endPos)
+        ? concat([hardline, hardline])
+        : hardline;
+    return concat(["{", indent(concat([lead, ...this.members(members, endPos)])), closeLead, "}"]);
   }
 
   private classDeclaration(d: ClassDeclaration): Doc {
@@ -1322,12 +1343,12 @@ class Printer {
     // The blank must be measured from the last thing actually rendered - a
     // dangling comment after the last statement, when there is one. Measuring
     // from the statement counts the comment's own line as the blank.
-    const lastEnd =
-      b.statements.length > 0
-        ? this.lastCommentEndBefore(b.statements[b.statements.length - 1].end, b.end)
-        : -1;
+    const from =
+      b.statements.length > 0 ? b.statements[b.statements.length - 1].end : this.comments[this.ci]?.pos;
+    const lastEnd = from !== undefined ? this.lastCommentEndBefore(from, b.end) : -1;
     const closeLead =
-      allowTrailingBlank && lastEnd >= 0 && this.blankBeforePos(lastEnd, b.end - 1)
+      (allowTrailingBlank && lastEnd >= 0 && this.blankBeforePos(lastEnd, b.end - 1)) ||
+      (from !== undefined && this.blankAfterLastComment(from, b.end))
         ? concat([hardline, hardline])
         : hardline;
     return concat([
