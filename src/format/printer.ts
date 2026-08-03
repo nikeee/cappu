@@ -1872,6 +1872,9 @@ class Printer {
     if (e.kind === SyntaxKind.BinaryExpression) {
       return this.binary(e as BinaryExpression, trailing);
     }
+    if (e.kind === SyntaxKind.ConditionalExpression) {
+      return this.conditional(e as ConditionalExpression, trailing);
+    }
     if (e.kind === SyntaxKind.ObjectCreationExpression) {
       const oc = e as ObjectCreationExpression;
       if (!oc.classBody) return this.objectCreation(oc, trailing);
@@ -2115,7 +2118,7 @@ class Printer {
 
   // A ternary. gjf keeps the condition on the line and breaks before `?` and `:`
   // (UNIFIED) onto +4 continuation lines.
-  private conditional(e: ConditionalExpression): Doc {
+  private conditional(e: ConditionalExpression, trailing: Doc = ""): Doc {
     const parts: Doc[] = [
       this.node(e.condition),
       brk("unified", " ", ZERO),
@@ -2136,7 +2139,9 @@ class Printer {
       if (c.line) parts.push(c.text, hardline);
       else parts.push(c.text, " ");
     }
-    parts.push(this.node(e.whenFalse));
+    // The statement's `;` (and any trailing comment) rides inside the level so
+    // the branches break when the whole rest of the line overflows.
+    parts.push(this.node(e.whenFalse), trailing);
     return level(PLUS4, parts);
   }
 

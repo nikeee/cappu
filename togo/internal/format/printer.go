@@ -2145,6 +2145,8 @@ func (p *printer) statementTail(e *compiler.Node, trailing Doc) Doc {
 		return p.dotChainTrailing(e, trailing)
 	case compiler.BinaryExpression:
 		return p.binaryTrailing(e, trailing)
+	case compiler.ConditionalExpression:
+		return p.conditionalTrailing(e.AsConditionalExpression(), trailing)
 	case compiler.ObjectCreationExpression:
 		oc := e.AsObjectCreationExpression()
 		if oc.ClassBody == nil {
@@ -2521,6 +2523,13 @@ func (p *printer) lambda(e *compiler.LambdaExpressionData) Doc {
 // conditional lays out a ternary: the condition stays on the line, `?` and `:`
 // break onto +4 continuation lines (UNIFIED).
 func (p *printer) conditional(e *compiler.ConditionalExpressionData) Doc {
+	return p.conditionalTrailing(e, nil)
+}
+
+// conditionalTrailing is conditional with the statement's `;` (and any trailing
+// comment) routed inside the level, so the branches break when the whole rest
+// of the line overflows.
+func (p *printer) conditionalTrailing(e *compiler.ConditionalExpressionData, trailing Doc) Doc {
 	parts := []Doc{
 		p.node(e.Condition),
 		brk(fillUnified, " ", ZERO, nil),
@@ -2549,6 +2558,9 @@ func (p *printer) conditional(e *compiler.ConditionalExpressionData) Doc {
 		}
 	}
 	parts = append(parts, p.node(e.WhenFalse))
+	if trailing != nil {
+		parts = append(parts, trailing)
+	}
 	return level(plus4, parts)
 }
 

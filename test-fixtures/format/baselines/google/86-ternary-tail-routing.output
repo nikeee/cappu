@@ -1,0 +1,10 @@
+package p;
+
+class T {
+  String m(java.math.BigDecimal[] parts, Node cur) {
+    String fractionalPartStr =
+        parts[1].compareTo(ZERO) > 0 ? parts[1].toPlainString().substring(2) : ""; // fraction
+    Node next = (cur.left != null) ? cur.left : cur.right; // prioritize the left child of the node
+    return next == null ? fractionalPartStr : next.toString();
+  }
+}
