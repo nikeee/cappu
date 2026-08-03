@@ -1,0 +1,12 @@
+package p;
+
+class T {
+  int m(int[] adjacent, int currentVertex) {
+    for (int i = 0; i < adjacent.length; i++) { // we are considering exploring this, recurse on it
+      threads = Math.min(4.0, Runtime.getRuntime().availableProcessors() * 0.75)
+          // Num scanning threads (higher than available processors, because threads can be blocked)
+          + 2.0;
+    }
+    return currentVertex;
+  }
+}
