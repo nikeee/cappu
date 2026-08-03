@@ -1,0 +1,11 @@
+package p;
+
+class T {
+  private final int basePoint = compute(valueOf(4), valueOf(8)); // a fixed base point comment here
+
+  int m(int current, int shift) {
+    encoded.append((char) (current > 26 ? current - 26 : current)); // 26 = number of latin letters
+    int currentPosition = currentData.getPath().get(currentData.getPath().size() - 1); // current
+    return decryptedMessage.toString().replace("\0", ""); // get rid of the padding null bytes here
+  }
+}

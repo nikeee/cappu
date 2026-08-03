@@ -359,11 +359,17 @@ class Printer {
       // and the item it precedes (a "section header" comment set off from its
       // member). Only when own-line comments were already pushed for this entry.
       const afterComments = prevEnd;
-      let itemDoc = this.node(item);
+      // A same-line trailing comment counts towards the item's own fit check, so
+      // route it into the item like the trailing `;` (see nodeWithTail). A
+      // multi-line block comment cannot: its width would force every break.
+      const peeked = this.peekTrailingComment(item);
+      const tail =
+        peeked && !peeked.text.includes("\n") ? concat([" ", peeked.text]) : undefined;
+      let itemDoc = tail ? this.nodeWithTail(item, tail) : this.node(item);
       if (inlineLead) itemDoc = concat([reflow(inlineLead.text), " ", itemDoc]);
       const trailing = this.trailingCommentAfter(item);
       if (trailing) {
-        itemDoc = concat([itemDoc, " ", trailing.text]);
+        if (!tail) itemDoc = concat([itemDoc, " ", trailing.text]);
         prevEnd = trailing.end;
       } else {
         prevEnd = item.end;
@@ -394,6 +400,47 @@ class Printer {
    */
   private trailsDirectly(from: number, pos: number): boolean {
     return /^[ \t\r\f\v]*[;,]?[ \t\r\f\v]*$/.test(this.text.slice(from, pos));
+  }
+
+  /**
+   * The comment that will trail `node` once the node itself is rendered - the
+   * same test as `trailingCommentAfter`, but looking past the comments inside
+   * `node` (which its own rendering consumes first) and consuming nothing.
+   */
+  private peekTrailingComment(node: Node): Comment | undefined {
+    let i = this.ci;
+    while (i < this.comments.length && this.comments[i].pos < node.end) i++;
+    const c = this.comments[i];
+    if (!c || c.ownLine || !this.trailsDirectly(node.end, c.pos)) return undefined;
+    return c;
+  }
+
+  /**
+   * Render `item` with `tail` - a same-line trailing comment - routed INSIDE the
+   * level that owns the item's last break, the way google-java-format's
+   * DocBuilder pulls a trailing token into its `appendLevel` ("the semicolon
+   * moves inside the inner Doc"). The comment's width then drives the item's fit
+   * check, so `foo(bar); // comment` past column 100 breaks the call instead of
+   * overflowing. Kinds that do not route their `;` just append it.
+   */
+  private nodeWithTail(item: Node, tail: Doc): Doc {
+    const semi = concat([";", tail]);
+    switch (item.kind) {
+      case SyntaxKind.ExpressionStatement:
+        return this.statementTail((item as ExpressionStatement).expression, semi);
+      case SyntaxKind.ReturnStatement: {
+        const r = item as ReturnStatement;
+        if (r.expression) return concat(["return ", this.statementTail(r.expression, semi)]);
+        break;
+      }
+      case SyntaxKind.ThrowStatement:
+        return concat(["throw ", this.statementTail((item as ThrowStatement).expression, semi)]);
+      case SyntaxKind.LocalVariableDeclarationStatement:
+        return this.localVar(item as LocalVariableDeclarationStatement, tail);
+      case SyntaxKind.FieldDeclaration:
+        return this.fieldDeclaration(item as FieldDeclaration, tail);
+    }
+    return concat([this.node(item), tail]);
   }
 
   /** A comment immediately after `node` on the same source line, if any. */
@@ -921,11 +968,11 @@ class Printer {
     return concat([header, this.body(d.members, d.end)]);
   }
 
-  private fieldDeclaration(d: FieldDeclaration): Doc {
+  private fieldDeclaration(d: FieldDeclaration, tail: Doc = ""): Doc {
     if (d.declarators.length === 1) {
       return concat([
         this.modifiers(d.modifiers, "var"),
-        this.singleDeclaration(this.type(d.type), d.declarators[0], ";"),
+        this.singleDeclaration(this.type(d.type), d.declarators[0], concat([";", tail])),
       ]);
     }
     return concat([
@@ -937,6 +984,7 @@ class Printer {
         d.declarators.map(v => this.declarator(v)),
       ),
       ";",
+      tail,
     ]);
   }
 
@@ -1253,11 +1301,11 @@ class Printer {
     return this.listDocs(list, false, endPos);
   }
 
-  private localVar(d: LocalVariableDeclarationStatement): Doc {
+  private localVar(d: LocalVariableDeclarationStatement, tail: Doc = ""): Doc {
     if (d.declarators.length === 1) {
       return concat([
         this.modifiers(d.modifiers, "var"),
-        this.singleDeclaration(this.type(d.type), d.declarators[0], ";"),
+        this.singleDeclaration(this.type(d.type), d.declarators[0], concat([";", tail])),
       ]);
     }
     const last = d.declarators.length - 1;
@@ -1265,7 +1313,7 @@ class Printer {
     d.declarators.forEach((v, i) => {
       if (i > 0) parts.push(", ");
       // The terminating `;` rides into the last declarator's initializer.
-      parts.push(this.declarator(v, i === last ? ";" : ""));
+      parts.push(this.declarator(v, i === last ? concat([";", tail]) : ""));
     });
     return concat(parts);
   }

@@ -285,12 +285,26 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 		// and the item it precedes (a "section header" comment set off from its
 		// member). Only when own-line comments were already pushed for this entry.
 		afterComments := prevEnd
-		itemDoc := p.node(item)
+		// A same-line trailing comment counts towards the item's own fit check, so
+		// route it into the item like the trailing `;` (see nodeWithTail). A
+		// multi-line block comment cannot: its width would force every break.
+		var tail Doc
+		if peeked, ok := p.peekTrailingComment(item); ok && !strings.Contains(peeked.text, "\n") {
+			tail = concat(text(" "), text(peeked.text))
+		}
+		var itemDoc Doc
+		if tail != nil {
+			itemDoc = p.nodeWithTail(item, tail)
+		} else {
+			itemDoc = p.node(item)
+		}
 		if inlineLead != nil {
 			itemDoc = concat(reflow(inlineLead.text), text(" "), itemDoc)
 		}
 		if trailing, ok := p.trailingCommentAfter(item); ok {
-			itemDoc = concat(itemDoc, text(" "), text(trailing.text))
+			if tail == nil {
+				itemDoc = concat(itemDoc, text(" "), text(trailing.text))
+			}
 			prevEnd = trailing.end
 		} else {
 			prevEnd = item.End
@@ -331,6 +345,50 @@ func (p *printer) trailsDirectly(from, pos int) bool {
 		}
 	}
 	return true
+}
+
+// peekTrailingComment returns the comment that will trail node once the node
+// itself is rendered - the same test as trailingCommentAfter, but looking past
+// the comments inside node (which its own rendering consumes first) and
+// consuming nothing.
+func (p *printer) peekTrailingComment(node *compiler.Node) (comment, bool) {
+	i := p.ci
+	for i < len(p.comments) && p.comments[i].pos < node.End {
+		i++
+	}
+	if i >= len(p.comments) {
+		return comment{}, false
+	}
+	c := p.comments[i]
+	if c.ownLine || !p.trailsDirectly(node.End, c.pos) {
+		return comment{}, false
+	}
+	return c, true
+}
+
+// nodeWithTail renders item with tail - a same-line trailing comment - routed
+// INSIDE the level that owns the item's last break, the way
+// google-java-format's DocBuilder pulls a trailing token into its appendLevel
+// ("the semicolon moves inside the inner Doc"). The comment's width then drives
+// the item's fit check, so `foo(bar); // comment` past column 100 breaks the
+// call instead of overflowing. Kinds that do not route their `;` just append it.
+func (p *printer) nodeWithTail(item *compiler.Node, tail Doc) Doc {
+	semi := concat(text(";"), tail)
+	switch item.Kind {
+	case compiler.ExpressionStatement:
+		return p.statementTail(item.AsExpressionStatement().Expression, semi)
+	case compiler.ReturnStatement:
+		if r := item.AsReturnStatement(); r.Expression != nil {
+			return concat(text("return "), p.statementTail(r.Expression, semi))
+		}
+	case compiler.ThrowStatement:
+		return concat(text("throw "), p.statementTail(item.AsThrowStatement().Expression, semi))
+	case compiler.LocalVariableDeclarationStatement:
+		return p.localVarTail(item.AsLocalVariableDeclarationStatement(), tail)
+	case compiler.FieldDeclaration:
+		return p.fieldDeclarationTail(item.AsFieldDeclaration(), tail)
+	}
+	return concat(p.node(item), tail)
 }
 
 func (p *printer) trailingCommentAfter(node *compiler.Node) (comment, bool) {
@@ -1009,10 +1067,16 @@ func (p *printer) declaratorList(arr *compiler.NodeArray) Doc {
 }
 
 func (p *printer) fieldDeclaration(d *compiler.FieldDeclarationData) Doc {
+	return p.fieldDeclarationTail(d, nil)
+}
+
+// fieldDeclarationTail is fieldDeclaration with a trailing comment routed in
+// after the `;`.
+func (p *printer) fieldDeclarationTail(d *compiler.FieldDeclarationData, tail Doc) Doc {
 	if d.Declarators.Len() == 1 {
 		return concat(
 			p.modifiers(d.Modifiers, "var"),
-			p.singleDeclaration(p.typ(d.Type), nodes(d.Declarators)[0].AsVariableDeclarator(), text(";")),
+			p.singleDeclaration(p.typ(d.Type), nodes(d.Declarators)[0].AsVariableDeclarator(), semiWithTail(tail)),
 		)
 	}
 	return concat(
@@ -1020,7 +1084,7 @@ func (p *printer) fieldDeclaration(d *compiler.FieldDeclarationData) Doc {
 		p.typ(d.Type),
 		text(" "),
 		p.declaratorList(d.Declarators),
-		text(";"),
+		semiWithTail(tail),
 	)
 }
 
@@ -1400,11 +1464,17 @@ func (p *printer) braceTrailingComment(afterBrace int) Doc {
 }
 
 func (p *printer) localVar(d *compiler.LocalVariableDeclarationStatementData) Doc {
+	return p.localVarTail(d, nil)
+}
+
+// localVarTail is localVar with a trailing comment routed in after the `;`.
+func (p *printer) localVarTail(d *compiler.LocalVariableDeclarationStatementData, tail Doc) Doc {
+	semi := semiWithTail(tail)
 	ds := nodes(d.Declarators)
 	if len(ds) == 1 {
 		return concat(
 			p.modifiers(d.Modifiers, "var"),
-			p.singleDeclaration(p.typ(d.Type), ds[0].AsVariableDeclarator(), text(";")),
+			p.singleDeclaration(p.typ(d.Type), ds[0].AsVariableDeclarator(), semi),
 		)
 	}
 	parts := []Doc{p.modifiers(d.Modifiers, "var"), p.typ(d.Type), text(" ")}
@@ -1415,11 +1485,20 @@ func (p *printer) localVar(d *compiler.LocalVariableDeclarationStatementData) Do
 		// The terminating `;` rides into the last declarator's initializer.
 		var tr Doc
 		if i == len(ds)-1 {
-			tr = text(";")
+			tr = semi
 		}
 		parts = append(parts, p.declarator(v.AsVariableDeclarator(), tr))
 	}
 	return concat(parts...)
+}
+
+// semiWithTail builds the `;` plus an optional trailing comment. Never concat a
+// nil Doc - the engine panics on one.
+func semiWithTail(tail Doc) Doc {
+	if tail == nil {
+		return text(";")
+	}
+	return concat(text(";"), tail)
 }
 
 func (p *printer) ifStatement(s *compiler.IfStatementData) Doc {
