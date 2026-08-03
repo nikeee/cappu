@@ -1,0 +1,14 @@
+package p;
+
+public final class BM25InvertedIndex {
+  private Map<String, Map<Integer, Integer>> index; // Inverted index mapping terms to document id
+  private Map<Integer, Movie> movies; // Mapping of movie document IDs to Movie objects
+
+  public static boolean millerRabin(long n, int k) { // returns true if n is probably prime, else
+    return n > 3;
+  }
+
+  void h() {
+    /* a block comment does not ride the brace */
+  }
+}

@@ -1209,7 +1209,19 @@ func (p *printer) fieldDeclarationTail(d *compiler.FieldDeclarationData, tail Do
 // sibling level), so a long initializer alone does not trigger it.
 func (p *printer) singleDeclaration(typ Doc, v *compiler.VariableDeclaratorData, trailing Doc) Doc {
 	name := concat(text(p.raw(v.Name)), text(strings.Repeat("[]", v.ArrayRankAfterName)))
-	if v.Initializer == nil || v.Initializer.Kind == compiler.ArrayInitializer {
+	// No initializer: the same declareOne break, with nothing after the name - so
+	// the `;` and any trailing comment ride inside the level and count in its fit
+	// check (`Map<String, Map<Integer, Integer>> index; // note`).
+	if v.Initializer == nil {
+		inner := []Doc{typ, brk(fillUnified, " ", ZERO, nil), name}
+		if trailing != nil {
+			inner = append(inner, trailing)
+		}
+		return level(plus4, inner)
+	}
+	// An array/hugging initializer owns its own braces: keep the simple shape
+	// (the declarator handles the `=`).
+	if v.Initializer.Kind == compiler.ArrayInitializer {
 		return concat(typ, text(" "), p.declarator(v, trailing))
 	}
 	// A `//` comment right after the `=` stays on its line and forces the break
@@ -1482,12 +1494,17 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 	// With no throws clause the body-open token rides inside the param level
 	// (rest-of-line rule). With throws, see the hasThrows branch below.
 	emptyBody := body != nil && p.blockIsEmpty(body.AsBlock(), p.start(body), body.End)
-	bodyToken := " {"
+	// A comment on the body's `{` line rides with the brace (gjf's toksAfter), so
+	// its width counts in the signature's fit check and the parameters wrap
+	// instead of the comment. See braceTrailAhead for the emitted-ahead marking.
+	var bodyToken Doc
 	switch {
 	case body == nil:
-		bodyToken = ";"
+		bodyToken = text(";")
 	case emptyBody:
-		bodyToken = " {}"
+		bodyToken = text(" {}")
+	default:
+		bodyToken = concat(text(" {"), p.braceTrailAhead(p.start(body)))
 	}
 	var sig Doc
 	if hasThrows {
@@ -1517,10 +1534,10 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 			p.paramListChildren(params),
 			brk(fillIndependent, " ", ZERO, nil),
 			level(throwsIndent, throwsParts),
-			text(bodyToken),
+			bodyToken,
 		))
 	} else {
-		sig = p.parameters(params, text(bodyToken))
+		sig = p.parameters(params, bodyToken)
 	}
 	head = append(head, text(p.raw(name)), sig)
 	// Emit the rest of the block when there is a real body, else the signature
@@ -1756,6 +1773,12 @@ func (p *printer) braceTrailAhead(blockStart int) Doc {
 			continue
 		}
 		if strings.Contains(p.text[bracePos:c.pos], "\n") {
+			return text("")
+		}
+		// Only a `//` comment rides the brace: gjf emits `{` with
+		// breakAndIndentTrailingComment, which forces a block comment onto its own
+		// indented line (`void h() { /* c */ }` -> `{`, `/* c */`, `}`).
+		if !c.line {
 			return text("")
 		}
 		p.emittedAhead[i] = true

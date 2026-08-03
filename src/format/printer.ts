@@ -1073,9 +1073,15 @@ class Printer {
   // (it sits in a sibling level), so a long initializer alone does not trigger it.
   private singleDeclaration(type: Doc, v: VariableDeclarator, trailing: Doc): Doc {
     const name = concat([this.raw(v.name), "[]".repeat(v.arrayRankAfterName)]);
-    // No initializer, or an array/hugging initializer that owns its own braces:
-    // keep the simple shape (the declarator handles the `=`).
-    if (!v.initializer || v.initializer.kind === SyntaxKind.ArrayInitializer) {
+    // No initializer: the same declareOne break, with nothing after the name -
+    // so the `;` and any trailing comment ride inside the level and count in its
+    // fit check (`Map<String, Map<Integer, Integer>> index; // note`).
+    if (!v.initializer) {
+      return level(PLUS4, [type, brk("unified", " ", ZERO), name, trailing]);
+    }
+    // An array/hugging initializer owns its own braces: keep the simple shape
+    // (the declarator handles the `=`).
+    if (v.initializer.kind === SyntaxKind.ArrayInitializer) {
       return concat([type, " ", this.declarator(v, trailing)]);
     }
     // A `//` comment right after the `=` stays on its line and forces the break
@@ -1301,7 +1307,14 @@ class Printer {
     // `throws` break is UNIFIED with the param-open break, so when the params go
     // one-per-line the `throws` clause and the brace fold onto their own lines.
     const emptyBody = decl.body !== undefined && this.blockIsEmpty(decl.body);
-    const bodyToken = !decl.body ? ";" : emptyBody ? " {}" : " {";
+    // A comment on the body's `{` line rides with the brace (gjf's toksAfter),
+    // so its width counts in the signature's fit check and the parameters wrap
+    // instead of the comment. See braceTrailAhead for the emitted-ahead marking.
+    const bodyToken: Doc = !decl.body
+      ? ";"
+      : emptyBody
+        ? " {}"
+        : concat([" {", this.braceTrailAhead(decl.body)]);
     let sig: Doc;
     if (hasThrows) {
       const throwsParts: Doc[] = ["throws "];
@@ -1496,6 +1509,10 @@ class Printer {
       const c = this.comments[i];
       if (c.pos < bracePos) continue;
       if (this.text.slice(bracePos, c.pos).includes("\n")) return "";
+      // Only a `//` comment rides the brace: gjf emits `{` with
+      // breakAndIndentTrailingComment, which forces a block comment onto its own
+      // indented line (`void h() { /* c */ }` -> `{`, `/* c */`, `}`).
+      if (!c.line) return "";
       this.emittedAhead.add(i);
       return concat([" ", reflow(c.text)]);
     }
