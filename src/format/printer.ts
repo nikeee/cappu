@@ -1663,7 +1663,7 @@ class Printer {
     if (r.initializer.kind === SyntaxKind.ArrayInitializer) {
       return concat([head, " = ", this.node(r.initializer), trailing]);
     }
-    return concat([head, " =", level(PLUS4, [line, this.node(r.initializer), trailing])]);
+    return concat([head, " =", level(PLUS4, [line, this.statementTail(r.initializer, trailing)])]);
   }
 
   private switchLike(expr: Expression, clauses: NodeArray<SwitchClause>, endPos: number): Doc {

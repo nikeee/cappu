@@ -1933,10 +1933,7 @@ func (p *printer) resourceTrailing(r *compiler.ResourceData, trailing Doc) Doc {
 	if r.Initializer.Kind == compiler.ArrayInitializer {
 		return appendTrailing(concat(concat(head...), text(" = "), p.node(r.Initializer)))
 	}
-	inner := []Doc{line, p.node(r.Initializer)}
-	if trailing != nil {
-		inner = append(inner, trailing)
-	}
+	inner := []Doc{line, p.statementTail(r.Initializer, trailing)}
 	return concat(concat(head...), text(" ="), level(plus4, inner))
 }
 

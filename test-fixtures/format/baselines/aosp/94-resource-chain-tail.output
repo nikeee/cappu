@@ -1,0 +1,13 @@
+package p;
+
+class T {
+    void m(ClassLoader overrideClassLoader) {
+        try (ScanResult r =
+                new ClassGraph()
+                        .overrideClassLoaders(overrideClassLoader)
+                        .ignoreParentClassLoaders()
+                        .scan()) {
+            use(r);
+        }
+    }
+}
