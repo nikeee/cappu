@@ -1,0 +1,30 @@
+package p;
+
+/** Javadoc on the class. */
+public final class T {
+
+    /** Javadoc on a field. */
+    int a;
+
+    // a line comment keeps its blank
+
+    int b;
+
+    /* a block comment keeps its blank */
+
+    int c;
+
+    /** Javadoc before an annotation. */
+    @Deprecated int d;
+
+    /** Javadoc on a method. */
+    void m() {
+        /** Javadoc on a local. */
+        int x = 1;
+    }
+
+    /** A javadoc followed by another comment keeps its blank. */
+
+    /** The last one glues. */
+    int z;
+}

@@ -262,12 +262,14 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 			}
 		}
 
+		var lastOwnLead *comment
 		for _, c := range leadComments {
 			if !c.ownLine && !pushedInEntry && i > 0 {
 				// A comment after code on the same line: attach to the previous entry.
 				out[len(out)-1] = concat(out[len(out)-1], text(" "), text(c.text))
 			} else {
 				pushEntry(reflow(c.text), p.blankBeforePos(prevEnd, c.pos))
+				lastOwnLead = &c
 			}
 			prevEnd = c.end
 		}
@@ -286,7 +288,10 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 		} else {
 			prevEnd = item.End
 		}
-		itemBlank := pushedInEntry && inlineLead == nil && p.blankBeforePos(afterComments, itemStart)
+		// ... but a javadoc comment documents the declaration, so gjf glues it:
+		// the source blank between `*/` and the declaration is dropped.
+		itemBlank := pushedInEntry && inlineLead == nil && !isJavadocComment(lastOwnLead) &&
+			p.blankBeforePos(afterComments, itemStart)
 		pushEntry(itemDoc, itemBlank)
 	}
 
@@ -383,7 +388,9 @@ func (p *printer) sourceFile(sf *compiler.SourceFileData) Doc {
 		// A leading comment glued to the first construct (no blank line in source)
 		// is its doc comment - keep it attached. One followed by a blank line is a
 		// file header (e.g. a license), separated like other blocks.
-		glued := len(blocks) > 0 && !p.blankBeforePos(header[len(header)-1].end, firstStart)
+		last := header[len(header)-1]
+		glued := len(blocks) > 0 &&
+			(!p.blankBeforePos(last.end, firstStart) || isJavadocComment(&last))
 		if glued {
 			blocks[0] = concat(headerDoc, hardline, blocks[0])
 		} else {
@@ -2616,6 +2623,14 @@ func rank(kind compiler.SyntaxKind) int {
 		}
 	}
 	return len(modifierOrder)
+}
+
+// isJavadocComment reports whether c is a javadoc comment. It belongs to the
+// declaration that follows it, so google-java-format emits them adjacent even
+// when the source left a blank line in between. Any other comment keeps its
+// blank.
+func isJavadocComment(c *comment) bool {
+	return c != nil && !c.line && strings.HasPrefix(c.text, "/**")
 }
 
 // forcedBlank reports whether a blank line is forced between two members. A

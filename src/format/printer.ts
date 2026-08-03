@@ -332,6 +332,7 @@ class Printer {
         inlineLead = leadComments.pop();
       }
 
+      let lastOwnLead: Comment | undefined;
       for (const c of leadComments) {
         if (!c.ownLine && !pushedInEntry && i > 0) {
           // A comment after code on the same line: attach to the previous entry.
@@ -339,6 +340,7 @@ class Printer {
         } else {
           // Own-line comment: reflow it at the column it is written at.
           pushEntry(reflow(c.text), this.blankBeforePos(prevEnd, c.pos));
+          lastOwnLead = c;
         }
         prevEnd = c.end;
       }
@@ -356,8 +358,13 @@ class Printer {
       } else {
         prevEnd = item.end;
       }
+      // ... but a javadoc comment documents the declaration, so gjf glues it:
+      // the source blank between `*/` and the declaration is dropped.
       const itemBlank =
-        pushedInEntry && !inlineLead && this.blankBeforePos(afterComments, itemStart);
+        pushedInEntry &&
+        !inlineLead &&
+        !isJavadocComment(lastOwnLead) &&
+        this.blankBeforePos(afterComments, itemStart);
       pushEntry(itemDoc, itemBlank);
     });
 
@@ -425,8 +432,10 @@ class Printer {
       // A leading comment glued to the first construct (no blank line in source)
       // is its doc comment - keep it attached. One followed by a blank line is a
       // file header (e.g. a license), separated by a blank line like other blocks.
+      const last = header[header.length - 1];
       const glued =
-        blocks.length > 0 && !this.blankBeforePos(header[header.length - 1].end, firstStart);
+        blocks.length > 0 &&
+        (!this.blankBeforePos(last.end, firstStart) || isJavadocComment(last));
       if (glued) {
         blocks[0] = concat([headerDoc, hardline, blocks[0]]);
       } else {
@@ -2347,6 +2356,13 @@ function typePrefixLength(nameParts: string[]): number {
 function rank(kind: SyntaxKind): number {
   const i = MODIFIER_ORDER.indexOf(kind);
   return i === -1 ? MODIFIER_ORDER.length : i;
+}
+
+// A javadoc comment belongs to the declaration that follows it, so
+// google-java-format emits them adjacent even when the source left a blank line
+// in between. Any other comment keeps its blank.
+function isJavadocComment(c: Comment | undefined): boolean {
+  return c !== undefined && !c.line && c.text.startsWith("/**");
 }
 
 // A blank line is forced between two members when either is a method,
