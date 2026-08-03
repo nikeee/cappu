@@ -686,6 +686,13 @@ class Printer {
     const name = `@${this.entityName(a.typeName)}`;
     if (!a.args) return name; // no argument list in source
     if (a.args.length === 0) return `${name}()`; // explicit empty parens are kept
+    // gjf's visitSingleMemberAnnotation: a lone unnamed array value hugs the
+    // parenthesis (`@CsvSource({`) - no break after `(`, no continuation indent,
+    // the initializer's own braces do the breaking.
+    const only = a.args.length === 1 ? (a.args[0] as { name?: Node; value: Node }) : undefined;
+    if (only && !only.name && only.value.kind === SyntaxKind.ArrayInitializer) {
+      return concat([name, "(", this.node(only.value), ")"]);
+    }
     const args = a.args.map(arg => {
       const argName = (arg as { name?: Node }).name;
       const value = this.node((arg as { value: Node }).value);

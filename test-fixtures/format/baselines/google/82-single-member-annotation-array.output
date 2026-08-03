@@ -1,0 +1,20 @@
+package p;
+
+class T {
+  @CsvSource({"10, 3, 2", "15, 2, 3", "20, 4, 4", "7, 1, 1", "5, 1, 1", "36, 5, 4", "9, 2, 1"})
+  void m() {}
+
+  @CsvSource({"5, 6", "7, 11"})
+  void n() {}
+
+  @SuppressWarnings({"unchecked", "rawtypes"})
+  void o() {}
+
+  @Test(expected = IllegalArgumentException.class)
+  void p() {}
+
+  @Sources(
+      value = {"a", "b"},
+      mode = Mode.STRICT)
+  void q() {}
+}

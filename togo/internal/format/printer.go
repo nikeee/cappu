@@ -712,6 +712,15 @@ func (p *printer) annotation(a *compiler.AnnotationData) Doc {
 	if a.Args.Len() == 0 {
 		return text(name + "()") // explicit empty parens are kept
 	}
+	// gjf's visitSingleMemberAnnotation: a lone unnamed array value hugs the
+	// parenthesis (`@CsvSource({`) - no break after `(`, no continuation indent,
+	// the initializer's own braces do the breaking.
+	if a.Args.Len() == 1 {
+		only := nodes(a.Args)[0].AsAnnotationArgument()
+		if only.Name == nil && only.Value.Kind == compiler.ArrayInitializer {
+			return concat(text(name), text("("), p.node(only.Value), text(")"))
+		}
+	}
 	args := make([]Doc, a.Args.Len())
 	for i, arg := range nodes(a.Args) {
 		aa := arg.AsAnnotationArgument()
