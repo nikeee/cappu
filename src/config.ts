@@ -229,7 +229,9 @@ export type DapConfig = z.infer<typeof DapOptionsSchema>;
 export type FormatterConfig = z.infer<typeof FormatterSchema>;
 export type TestConfig = z.infer<typeof TestOptionsSchema>;
 
-export interface CappuConfig extends z.infer<typeof ConfigFileSchema> {
+type ConfigFile = z.infer<typeof ConfigFileSchema>;
+
+export interface CappuConfig extends ConfigFile {
   /** Directory the config file lives in; relative paths resolve against it. */
   baseDir: string;
   /** Whether an actual cappu.json was read (false: pure defaults). */

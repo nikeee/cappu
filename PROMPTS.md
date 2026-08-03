@@ -548,3 +548,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-07-31 18:38 — fix Idempotence
 - 2026-07-31 22:55 — fix it
 - 2026-07-31 23:09 — enhance gjf compat
+- 2026-08-04 01:35 — fix ::warning file=src/config.ts,line=232,endLine=232,col=40,endColumn=45,title=import(namespace)::"infer" not found in imported namespace "./v4/classic/external.js".
