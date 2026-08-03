@@ -1,0 +1,19 @@
+package p;
+
+class T {
+  void m(boolean x, boolean y) {
+    if (x) {
+      a();
+      // the comment is the last thing; no blank line follows it
+    } else {
+      b();
+    }
+    if (y) {
+      a();
+      // this one has a source blank line after it
+
+    } else {
+      b();
+    }
+  }
+}

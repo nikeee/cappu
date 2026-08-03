@@ -347,6 +347,19 @@ func (p *printer) trailsDirectly(from, pos int) bool {
 	return true
 }
 
+// lastCommentEndBefore returns the end of the last comment between from and
+// end, or from when there is none - i.e. where a block's rendered content
+// really stops.
+func (p *printer) lastCommentEndBefore(from, end int) int {
+	out := from
+	for i := p.ci; i < len(p.comments) && p.comments[i].pos < end; i++ {
+		if p.comments[i].pos >= from {
+			out = p.comments[i].end
+		}
+	}
+	return out
+}
+
 // peekTrailingComment returns the comment that will trail node once the node
 // itself is rendered - the same test as trailingCommentAfter, but looking past
 // the comments inside node (which its own rendering consumes first) and
@@ -1444,10 +1457,15 @@ func (p *printer) blockRest(b *compiler.BlockData, endPos int, allowTrailingBlan
 		braceComment = p.braceTrailingComment(b.Statements.Nodes[0].Pos)
 		lead = p.braceLead(b.Statements.Nodes[0].Pos, p.start(b.Statements.Nodes[0]))
 	}
+	// The blank must be measured from the last thing actually rendered - a
+	// dangling comment after the last statement, when there is one. Measuring
+	// from the statement counts the comment's own line as the blank.
 	closeLead := hardline
-	if allowTrailingBlank && b.Statements.Len() > 0 &&
-		p.blankBeforePos(b.Statements.Nodes[b.Statements.Len()-1].End, endPos-1) {
-		closeLead = concat(hardline, hardline)
+	if allowTrailingBlank && b.Statements.Len() > 0 {
+		lastEnd := p.lastCommentEndBefore(b.Statements.Nodes[b.Statements.Len()-1].End, endPos)
+		if p.blankBeforePos(lastEnd, endPos-1) {
+			closeLead = concat(hardline, hardline)
+		}
 	}
 	return concat(
 		braceComment,

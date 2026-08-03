@@ -265,6 +265,18 @@ class Printer {
     return this.blankBeforePos(bracePos, firstContent) ? concat([hardline, hardline]) : hardline;
   }
 
+  /**
+   * The end of the last comment between `from` and `end`, or `from` when there
+   * is none - i.e. where the block's rendered content really stops.
+   */
+  private lastCommentEndBefore(from: number, end: number): number {
+    let out = from;
+    for (let i = this.ci; i < this.comments.length && this.comments[i].pos < end; i++) {
+      if (this.comments[i].pos >= from) out = this.comments[i].end;
+    }
+    return out;
+  }
+
   /** Whether a pending comment begins before `pos` (without consuming it). */
   private hasCommentBefore(pos: number): boolean {
     return this.ci < this.comments.length && this.comments[this.ci].pos < pos;
@@ -1280,10 +1292,15 @@ class Printer {
       b.statements.length > 0
         ? this.braceLead(b.statements[0].pos, this.start(b.statements[0]))
         : hardline;
+    // The blank must be measured from the last thing actually rendered - a
+    // dangling comment after the last statement, when there is one. Measuring
+    // from the statement counts the comment's own line as the blank.
+    const lastEnd =
+      b.statements.length > 0
+        ? this.lastCommentEndBefore(b.statements[b.statements.length - 1].end, b.end)
+        : -1;
     const closeLead =
-      allowTrailingBlank &&
-      b.statements.length > 0 &&
-      this.blankBeforePos(b.statements[b.statements.length - 1].end, b.end - 1)
+      allowTrailingBlank && lastEnd >= 0 && this.blankBeforePos(lastEnd, b.end - 1)
         ? concat([hardline, hardline])
         : hardline;
     return concat([
