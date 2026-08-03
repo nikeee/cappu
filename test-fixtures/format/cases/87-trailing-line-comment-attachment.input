@@ -1,0 +1,21 @@
+package p;
+
+class T {
+  private static final Reachable NO_REACHABLE = //
+      new Reachable(Collections.<ClassInfo>emptySet(), Collections.<ClassInfo>emptySet());
+
+  BigInteger m(BigInteger z0, BigInteger z1, BigInteger z2, int m) {
+    return z2.shiftLeft(2 * m) // z2 * 10^(2*m)
+        .add(z1.subtract(z2).subtract(z0).shiftLeft(m)) // (z1 - z2 - z0) * 10^m
+        .add(z0); // z0
+  }
+
+  void n(int major) {
+    if (major == 9 //
+        || major == 10 //
+        || major == 11) {
+      workQueue.addWorkUnit( //
+          new ClasspathEntryWorkUnit(childPath, parentElement, rawPath));
+    }
+  }
+}

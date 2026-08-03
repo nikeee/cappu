@@ -1029,11 +1029,20 @@ class Printer {
     if (!v.initializer || v.initializer.kind === SyntaxKind.ArrayInitializer) {
       return concat([type, " ", this.declarator(v, trailing)]);
     }
+    // A `//` comment right after the `=` stays on its line and forces the break
+    // (gjf hangs it off the `=` token), instead of drifting into the initializer.
+    const eq = this.lineCommentAfterAssign(v.name.end, this.start(v.initializer));
     const nameTag = new BreakTag();
     return level(ZERO, [
-      level(PLUS4, [type, brk("unified", " ", ZERO, nameTag), name, " ="]),
+      level(PLUS4, [
+        type,
+        brk("unified", " ", ZERO, nameTag),
+        name,
+        " =",
+        eq ? concat([" ", eq.text]) : "",
+      ]),
       level(indentIf(nameTag, indentConst(8), PLUS4), [
-        line,
+        eq ? hardline : line,
         this.statementTail(v.initializer, trailing),
       ]),
     ]);
@@ -1048,9 +1057,18 @@ class Printer {
     if (v.initializer.kind === SyntaxKind.ArrayInitializer) {
       return concat([name, " = ", this.node(v.initializer), trailing]);
     }
+    // A `//` comment right after the `=` stays on its line and forces the break
+    // (gjf hangs it off the `=` token); without this it drifts into the
+    // initializer and comes out inside its argument list.
+    const eq = this.lineCommentAfterAssign(v.name.end, this.start(v.initializer));
     // gjf folds a long initializer onto a +4 continuation line after `=`; the
     // statement's `;` rides into the initializer's tail call (rest-of-line).
-    return concat([name, " =", level(PLUS4, [line, this.statementTail(v.initializer, trailing)])]);
+    return concat([
+      name,
+      " =",
+      eq ? concat([" ", eq.text]) : "",
+      level(PLUS4, [eq ? hardline : line, this.statementTail(v.initializer, trailing)]),
+    ]);
   }
 
   // A gjf-style parenthesized comma list (`(a, b, c)`). When it does not fit, a
@@ -1680,7 +1698,11 @@ class Printer {
     const fillMode = this.fillMode(false, operands);
     const parts: Doc[] = [this.node(operands[0])];
     operators.forEach((op, i) => {
-      parts.push(brk(fillMode, " ", ZERO));
+      // A `//` comment on the same line as the previous operand trails IT (gjf
+      // hangs a token's toksAfter off that token, then forces the break), so it
+      // goes before the break instead of onto the operator's line.
+      const tc = this.trailingLineComment(operands[i].end);
+      parts.push(tc ? concat([" ", tc.text, hardline]) : brk(fillMode, " ", ZERO));
       // A comment before the next operand sits on its own line before the
       // operator (gjf), not inside the operand - so consume it here.
       for (const c of this.commentsBefore(this.start(operands[i + 1]))) {
@@ -1744,7 +1766,11 @@ class Printer {
     // (left to right). Rendering eagerly here would consume the OUTER call's
     // args before the receiver's, mis-attributing a receiver-arg comment (e.g.
     // `new Pretty(/*writer*/ null, /*sourceOutput*/ true).operatorName(tag)`).
-    const links: { isCall: boolean; name: string; render: () => Doc }[] = [];
+    // `trail` is a `//` comment that sits on the same line as the PREVIOUS link
+    // (`.foo() // why` / `.bar()`); gjf hangs it off that line, so it is emitted
+    // before this link's break rather than after it. Filled in during render.
+    type Link = { isCall: boolean; name: string; trail?: string; render: () => Doc };
+    const links: Link[] = [];
     let cur: Node = root;
     let trailingRouted = false;
     for (;;) {
@@ -1759,30 +1785,37 @@ class Printer {
         // the whole `...(...);` run overflows (rest-of-line rule).
         const rightmost = links.length === 0;
         const name = this.raw(pa.name);
-        links.unshift({
+        const link: Link = {
           isCall: true,
           name,
           // Explicit method type arguments go between the dot and the name:
           // `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
-          render: () =>
-            concat([
+          render: () => {
+            link.trail = this.trailingLineComment(pa.expression.end)?.text;
+            return concat([
               this.dotLinkLead(this.start(pa.name)),
               ".",
               this.typeArguments(callExpr.typeArguments),
               name,
               this.argList(callExpr.arguments, rightmost ? trailing : ""),
-            ]),
-        });
+            ]);
+          },
+        };
+        links.unshift(link);
         if (rightmost && trailing !== "") trailingRouted = true;
         cur = pa.expression;
       } else if (cur.kind === SyntaxKind.PropertyAccessExpression) {
         const pa = cur as PropertyAccessExpression;
         const name = this.raw(pa.name);
-        links.unshift({
+        const link: Link = {
           isCall: false,
           name,
-          render: () => concat([this.dotLinkLead(this.start(pa.name)), ".", name]),
-        });
+          render: () => {
+            link.trail = this.trailingLineComment(pa.expression.end)?.text;
+            return concat([this.dotLinkLead(this.start(pa.name)), ".", name]);
+          },
+        };
+        links.unshift(link);
         cur = pa.expression;
       } else {
         break;
@@ -1821,7 +1854,10 @@ class Printer {
       (!baseIsNew || baseIsAnonClass) &&
       !baseIsMultilineTextBlock
     ) {
-      return finish(concat([base, ...linkDocs]));
+      const glued = links.map((l, i) =>
+        l.trail === undefined ? linkDocs[i] : concat([" ", l.trail, hardline, linkDocs[i]]),
+      );
+      return finish(concat([base, ...glued]));
     }
     // The leading links glued to the base (no break before them): a type-name
     // prefix (`ImmutableList.builder()` stays a unit), else just the first link
@@ -1847,7 +1883,10 @@ class Printer {
     });
     const parts: Doc[] = [base];
     links.forEach((l, i) => {
-      if (i >= glue) parts.push(brk("unified", "", ZERO));
+      // A comment trailing the previous link rides that line and forces the
+      // break (gjf always breaks after a line comment).
+      if (l.trail !== undefined) parts.push(" ", l.trail, hardline);
+      else if (i >= glue) parts.push(brk("unified", "", ZERO));
       parts.push(linkDocs[i]);
     });
     return finish(level(PLUS4, parts));
@@ -1915,6 +1954,9 @@ class Printer {
     // between the value and the separator - so it appends the token instead.
     const leads: (string | undefined)[] = [];
     const leadStarts: number[] = [];
+    // A `//` comment on the `(`'s own line stays there (`foo( // why`), which
+    // also forces the break before the first argument.
+    let openTrail: string | undefined;
     const items = args.map((a, i) => {
       const parts: Doc[] = [];
       const firstPending = this.comments[this.ci];
@@ -1926,8 +1968,11 @@ class Printer {
       // argument - the join emits it before the inter-argument break.
       this.commentsBefore(this.start(a)).forEach((c, ci) => {
         anyComment = true;
-        if (ci === 0 && i > 0 && c.line && !c.ownLine) leads[i] = c.text;
-        else if (c.line) parts.push(c.text, hardline);
+        if (ci === 0 && c.line && !c.ownLine) {
+          // Trails the `(` (first argument) or the previous argument's line.
+          if (i > 0) leads[i] = c.text;
+          else openTrail = c.text;
+        } else if (c.line) parts.push(c.text, hardline);
         else parts.push(reformatParamComment(c.text) ?? c.text, " ");
       });
       const follow: Doc = i < lastI ? "," : concat([")", trailing]);
@@ -1990,7 +2035,15 @@ class Printer {
       }
       innerParts.push(it);
     });
-    return concat(["(", level(PLUS4, [brk("unified", "", ZERO), level(ZERO, innerParts)])]);
+    const open: Doc[] = ["("];
+    if (openTrail !== undefined) open.push(" ", openTrail);
+    return concat([
+      ...open,
+      level(PLUS4, [
+        openTrail === undefined ? brk("unified", "", ZERO) : hardline,
+        level(ZERO, innerParts),
+      ]),
+    ]);
   }
 
   // gjf's isFormatMethod: a call whose first argument is a string-literal
@@ -2143,6 +2196,29 @@ class Printer {
     // the branches break when the whole rest of the line overflows.
     parts.push(this.node(e.whenFalse), trailing);
     return level(PLUS4, parts);
+  }
+
+  /**
+   * Consume a `//` comment that sits between a declarator's `=` and its
+   * initializer on the `=`'s line (`X x = // why`).
+   */
+  private lineCommentAfterAssign(from: number, initStart: number): Comment | undefined {
+    const t = this.comments[this.ci];
+    if (!t || !t.line || t.ownLine || t.pos >= initStart) return undefined;
+    if (this.text.slice(from, t.pos).includes("\n")) return undefined;
+    this.ci++;
+    return t;
+  }
+
+  /**
+   * Consume a `//` comment trailing `endPos` on its line. gjf attaches such a
+   * comment to the token it follows (its `toksAfter`) and forces a break after
+   * it, so callers emit it before their own break rather than after.
+   */
+  private trailingLineComment(endPos: number): Comment | undefined {
+    const t = this.comments[this.ci];
+    if (!t || !t.line || t.ownLine) return undefined;
+    return this.trailingComment(endPos);
   }
 
   // Consume and return a comment trailing `endPos` on the same source line (a

@@ -1128,10 +1128,18 @@ func (p *printer) singleDeclaration(typ Doc, v *compiler.VariableDeclaratorData,
 	if v.Initializer == nil || v.Initializer.Kind == compiler.ArrayInitializer {
 		return concat(typ, text(" "), p.declarator(v, trailing))
 	}
+	// A `//` comment right after the `=` stays on its line and forces the break
+	// (gjf hangs it off the `=` token), instead of drifting into the initializer.
 	nameTag := &BreakTag{}
+	sig := []Doc{typ, brk(fillUnified, " ", ZERO, nameTag), name, text(" =")}
+	firstBreak := line
+	if eq, ok := p.lineCommentAfterAssign(v.Name.End, p.start(v.Initializer)); ok {
+		sig = append(sig, text(" "), text(eq.text))
+		firstBreak = hardline
+	}
 	return level(ZERO, []Doc{
-		level(plus4, []Doc{typ, brk(fillUnified, " ", ZERO, nameTag), name, text(" =")}),
-		level(indentIf(nameTag, indentConst(8), plus4), []Doc{line, p.statementTail(v.Initializer, trailing)}),
+		level(plus4, sig),
+		level(indentIf(nameTag, indentConst(8), plus4), []Doc{firstBreak, p.statementTail(v.Initializer, trailing)}),
 	})
 }
 
@@ -1152,7 +1160,17 @@ func (p *printer) declarator(v *compiler.VariableDeclaratorData, trailing Doc) D
 		}
 		return concat(name, text(" = "), p.node(v.Initializer))
 	}
-	return concat(name, text(" ="), level(plus4, []Doc{line, p.statementTail(v.Initializer, trailing)}))
+	// A `//` comment right after the `=` stays on its line and forces the break
+	// (gjf hangs it off the `=` token); without this it drifts into the
+	// initializer and comes out inside its argument list.
+	head := []Doc{name, text(" =")}
+	firstBreak := line
+	if eq, ok := p.lineCommentAfterAssign(v.Name.End, p.start(v.Initializer)); ok {
+		head = append(head, text(" "), text(eq.text))
+		firstBreak = hardline
+	}
+	head = append(head, level(plus4, []Doc{firstBreak, p.statementTail(v.Initializer, trailing)}))
+	return concat(head...)
 }
 
 // argsLike is a gjf parenthesized comma list. When it does not fit, a UNIFIED
@@ -1917,7 +1935,14 @@ func (p *printer) binaryTrailing(node *compiler.Node, trailing Doc) Doc {
 	fill := p.fillMode(false, operands)
 	parts := []Doc{p.node(operands[0])}
 	for i, op := range operators {
-		parts = append(parts, brk(fill, " ", ZERO, nil))
+		// A `//` comment on the same line as the previous operand trails IT (gjf
+		// hangs a token's toksAfter off that token, then forces the break), so it
+		// goes before the break instead of onto the operator's line.
+		if tc, ok := p.trailingLineComment(operands[i].End); ok {
+			parts = append(parts, text(" "), text(tc.text), hardline)
+		} else {
+			parts = append(parts, brk(fill, " ", ZERO, nil))
+		}
 		// A comment before the next operand sits on its own line before the
 		// operator (gjf), not inside the operand - so consume it here.
 		for _, c := range p.commentsBefore(p.start(operands[i+1])) {
@@ -1997,12 +2022,16 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	// to right). Rendering eagerly here would consume the OUTER call's args before
 	// the receiver's, mis-attributing a receiver-arg comment (e.g.
 	// `new Pretty(/*writer*/ null, /*sourceOutput*/ true).operatorName(tag)`).
+	// trail is a `//` comment on the same line as the PREVIOUS link
+	// (`.foo() // why` / `.bar()`); gjf hangs it off that line, so it is emitted
+	// before this link's break rather than after it. Filled in during render.
 	type linkT struct {
 		isCall bool
 		name   string
+		trail  *string
 		render func() Doc
 	}
-	var links []linkT
+	var links []*linkT
 	cur := root
 	trailingRouted := false
 	for {
@@ -2021,23 +2050,29 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 				}
 			}
 			name := p.raw(pa.Name)
-			links = append([]linkT{{
-				isCall: true,
-				name:   name,
-				// Explicit method type arguments go between the dot and the name:
-				// `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
-				render: func() Doc {
-					return concat(p.dotLinkLead(p.start(pa.Name)), text("."), p.typeArguments(ce.TypeArguments), text(name), p.argListTrailing(ce.Arguments, argTrailing))
-				},
-			}}, links...)
+			lk := &linkT{isCall: true, name: name}
+			// Explicit method type arguments go between the dot and the name:
+			// `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
+			lk.render = func() Doc {
+				if tc, ok := p.trailingLineComment(pa.Expression.End); ok {
+					lk.trail = &tc.text
+				}
+				return concat(p.dotLinkLead(p.start(pa.Name)), text("."), p.typeArguments(ce.TypeArguments), text(name), p.argListTrailing(ce.Arguments, argTrailing))
+			}
+			links = append([]*linkT{lk}, links...)
 			cur = pa.Expression
 			continue
 		case cur.Kind == compiler.PropertyAccessExpression:
 			pa := cur.AsPropertyAccessExpression()
 			name := p.raw(pa.Name)
-			links = append([]linkT{{isCall: false, name: name, render: func() Doc {
+			lk := &linkT{isCall: false, name: name}
+			lk.render = func() Doc {
+				if tc, ok := p.trailingLineComment(pa.Expression.End); ok {
+					lk.trail = &tc.text
+				}
 				return concat(p.dotLinkLead(p.start(pa.Name)), text("."), text(name))
-			}}}, links...)
+			}
+			links = append([]*linkT{lk}, links...)
 			cur = pa.Expression
 			continue
 		}
@@ -2080,7 +2115,12 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	baseIsMultilineTextBlock := cur.Kind == compiler.TextBlockLiteral && strings.Contains(p.raw(cur), "\n")
 	if callCount == 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass) && !baseIsMultilineTextBlock {
 		parts := []Doc{base}
-		parts = append(parts, linkDocs...)
+		for i, l := range links {
+			if l.trail != nil {
+				parts = append(parts, text(" "), text(*l.trail), hardline)
+			}
+			parts = append(parts, linkDocs[i])
+		}
 		return finish(concat(parts...))
 	}
 	// The leading links glued to the base (no break before them): a type-name
@@ -2113,8 +2153,13 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 		}
 	}
 	parts := []Doc{base}
-	for i := range links {
-		if i >= glue {
+	for i, l := range links {
+		// A comment trailing the previous link rides that line and forces the
+		// break (gjf always breaks after a line comment).
+		switch {
+		case l.trail != nil:
+			parts = append(parts, text(" "), text(*l.trail), hardline)
+		case i >= glue:
 			parts = append(parts, brk(fillUnified, "", ZERO, nil))
 		}
 		parts = append(parts, linkDocs[i])
@@ -2192,6 +2237,9 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 	as := make([]Doc, len(argNodes))
 	leads := make([]string, len(argNodes))
 	leadStarts := make([]int, len(argNodes))
+	// A `//` comment on the `(`'s own line stays there (`foo( // why`), which also
+	// forces the break before the first argument.
+	openTrail := ""
 	for i, a := range argNodes {
 		var parts []Doc
 		leadStarts[i] = p.start(a)
@@ -2205,8 +2253,13 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 		for ci, c := range p.commentsBefore(p.start(a)) {
 			anyComment = true
 			switch {
-			case ci == 0 && i > 0 && c.line && !c.ownLine:
-				leads[i] = c.text
+			case ci == 0 && c.line && !c.ownLine:
+				// Trails the `(` (first argument) or the previous argument's line.
+				if i > 0 {
+					leads[i] = c.text
+				} else {
+					openTrail = c.text
+				}
 			case c.line:
 				parts = append(parts, text(c.text), hardline)
 			default:
@@ -2292,7 +2345,14 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 		}
 		innerParts = append(innerParts, it)
 	}
-	return concat(text("("), level(plus4, []Doc{brk(fillUnified, "", ZERO, nil), level(ZERO, innerParts)}))
+	open := []Doc{text("(")}
+	firstBreak := brk(fillUnified, "", ZERO, nil)
+	if openTrail != "" {
+		open = append(open, text(" "), text(openTrail))
+		firstBreak = hardline
+	}
+	open = append(open, level(plus4, []Doc{firstBreak, level(ZERO, innerParts)}))
+	return concat(open...)
 }
 
 // isFormatMethod is gjf's isFormatMethod: a call whose first argument is a
@@ -2566,6 +2626,37 @@ func (p *printer) conditionalTrailing(e *compiler.ConditionalExpressionData, tra
 
 // trailingComment consumes and returns a comment trailing endPos on the same
 // source line (only whitespace between), or ok=false otherwise.
+// trailingLineComment consumes a `//` comment trailing endPos on its line. gjf
+// attaches such a comment to the token it follows (its toksAfter) and forces a
+// break after it, so callers emit it before their own break rather than after.
+func (p *printer) trailingLineComment(endPos int) (comment, bool) {
+	if p.ci >= len(p.comments) {
+		return comment{}, false
+	}
+	t := p.comments[p.ci]
+	if !t.line || t.ownLine {
+		return comment{}, false
+	}
+	return p.trailingComment(endPos)
+}
+
+// lineCommentAfterAssign consumes a `//` comment that sits between a
+// declarator's `=` and its initializer on the `=`'s line (`X x = // why`).
+func (p *printer) lineCommentAfterAssign(from, initStart int) (comment, bool) {
+	if p.ci >= len(p.comments) {
+		return comment{}, false
+	}
+	t := p.comments[p.ci]
+	if !t.line || t.ownLine || t.pos >= initStart {
+		return comment{}, false
+	}
+	if strings.Contains(p.text[from:t.pos], "\n") {
+		return comment{}, false
+	}
+	p.ci++
+	return t, true
+}
+
 func (p *printer) trailingComment(endPos int) (comment, bool) {
 	if p.ci < len(p.comments) {
 		t := p.comments[p.ci]
