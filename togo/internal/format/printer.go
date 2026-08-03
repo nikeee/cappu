@@ -2282,6 +2282,8 @@ func (p *printer) statementTail(e *compiler.Node, trailing Doc) Doc {
 		return p.binaryTrailing(e, trailing)
 	case compiler.ConditionalExpression:
 		return p.conditionalTrailing(e.AsConditionalExpression(), trailing)
+	case compiler.LambdaExpression:
+		return p.lambdaTrailing(e.AsLambdaExpression(), trailing)
 	case compiler.PrefixUnaryExpression:
 		// `!foo(...)` - the operator is glued, so the tail belongs to the operand.
 		u := e.AsPrefixUnaryExpression()
@@ -2651,6 +2653,20 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData) Doc {
 }
 
 func (p *printer) lambda(e *compiler.LambdaExpressionData) Doc {
+	return p.lambdaTrailing(e, nil)
+}
+
+// lambdaTrailing is lambda with the rest of the line (the argument's `,`, the
+// call's `)`, the `;`) routed inside the body's level, so it counts in the
+// body's own fit check (gjf's appendLevel); a body that only overflows because
+// of it breaks after `->`.
+func (p *printer) lambdaTrailing(e *compiler.LambdaExpressionData, trailing Doc) Doc {
+	appendTrailing := func(d Doc) Doc {
+		if trailing == nil {
+			return d
+		}
+		return concat(d, trailing)
+	}
 	params := nodes(e.Parameters)
 	var head Doc
 	if len(params) == 1 && params[0].Kind == compiler.Identifier {
@@ -2667,7 +2683,7 @@ func (p *printer) lambda(e *compiler.LambdaExpressionData) Doc {
 		head = concat(text("("), join(text(", "), ps), text(")"))
 	}
 	if e.Body.Kind == compiler.Block {
-		return concat(head, text(" -> "), p.block(e.Body.AsBlock(), e.Body.End))
+		return appendTrailing(concat(head, text(" -> "), p.block(e.Body.AsBlock(), e.Body.End)))
 	}
 	// A comment before an expression body sits own-line at a +8 continuation
 	// indent (gjf), forcing `-> ` onto its own line; the comment forces the break.
@@ -2677,11 +2693,14 @@ func (p *printer) lambda(e *compiler.LambdaExpressionData) Doc {
 			parts = append(parts, reflow(c.text), hardline)
 		}
 		parts = append(parts, p.node(e.Body))
+		if trailing != nil {
+			parts = append(parts, trailing)
+		}
 		return concat(head, text(" ->"), level(plus4, []Doc{hardline, concat(parts...)}))
 	}
 	// An expression body folds onto a +4 continuation line after `->` when it
 	// does not fit (gjf), like the switch-arrow body above.
-	return concat(head, text(" ->"), level(plus4, []Doc{line, p.node(e.Body)}))
+	return concat(head, text(" ->"), level(plus4, []Doc{line, p.statementTail(e.Body, trailing)}))
 }
 
 // conditional lays out a ternary: the condition stays on the line, `?` and `:`

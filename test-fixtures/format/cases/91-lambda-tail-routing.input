@@ -1,0 +1,16 @@
+package p;
+
+class T {
+  void m(MessageDigest md, byte[] data, String cString) {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> GitIdentifiers.treeIdBuilder(md).addFile(GitIdentifiers.FileMode.REGULAR, "..", data));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> TransformerUtils.invokerTransformer("badArgs", new Class[] {}, new Object[] {cString}));
+  }
+
+  Predicate<String> n(String bContent, boolean shouldMatch) {
+    return input -> input.length() > 0 && contains(bContent, input.charAt(0)) == shouldMatch;
+  }
+}

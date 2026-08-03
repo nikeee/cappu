@@ -1962,6 +1962,9 @@ class Printer {
     if (e.kind === SyntaxKind.ConditionalExpression) {
       return this.conditional(e as ConditionalExpression, trailing);
     }
+    if (e.kind === SyntaxKind.LambdaExpression) {
+      return this.lambda(e as LambdaExpression, trailing);
+    }
     if (e.kind === SyntaxKind.PrefixUnaryExpression) {
       // `!foo(...)` - the operator is glued, so the tail belongs to the operand.
       const u = e as PrefixUnaryExpression;
@@ -2197,7 +2200,7 @@ class Printer {
     return concat(["{", level(PLUS2, [brk(open, "", ZERO), inner, brk(open, "", MINUS2)]), "}"]);
   }
 
-  private lambda(e: LambdaExpression): Doc {
+  private lambda(e: LambdaExpression, trailing: Doc = ""): Doc {
     const params = e.parameters;
     let head: Doc;
     if (params.length === 1 && params[0].kind === SyntaxKind.Identifier) {
@@ -2215,19 +2218,22 @@ class Printer {
       ]);
     }
     if (e.body.kind === SyntaxKind.Block) {
-      return concat([head, " -> ", this.block(e.body as Block)]);
+      return concat([head, " -> ", this.block(e.body as Block), trailing]);
     }
     // A comment before an expression body sits own-line at a +8 continuation
     // indent (gjf), forcing `-> ` onto its own line; the comment forces the break.
     if (this.hasCommentBefore(this.start(e.body))) {
       const parts: Doc[] = [];
       for (const c of this.commentsBefore(this.start(e.body))) parts.push(reflow(c.text), hardline);
-      parts.push(this.node(e.body));
+      parts.push(this.node(e.body), trailing);
       return concat([head, " ->", level(PLUS4, [hardline, concat(parts)])]);
     }
     // An expression body folds onto a +4 continuation line after `->` when it
     // does not fit (gjf), like the switch-arrow body above.
-    return concat([head, " ->", level(PLUS4, [line, this.node(e.body)])]);
+    // The rest of the line (the argument's `,`, the call's `)`, the `;`) rides
+    // inside that level, so it counts in the body's own fit check (gjf's
+    // appendLevel); a body that only overflows because of it breaks after `->`.
+    return concat([head, " ->", level(PLUS4, [line, this.statementTail(e.body, trailing)])]);
   }
 
   // A ternary. gjf keeps the condition on the line and breaks before `?` and `:`
