@@ -1319,11 +1319,13 @@ class Printer {
   }
 
   private ifStatement(s: IfStatement): Doc {
+    // gjf preserves a source blank line before the then-block's `}` when an
+    // `else` follows.
+    const close = this.clauseClose(s.thenStatement);
+    const header = group(concat(["if (", this.statementTail(s.condition, close)]));
     const parts: Doc[] = [
-      group(concat(["if (", this.statementTail(s.condition, ")")])),
-      // gjf preserves a source blank line before the then-block's `}` when an
-      // `else` follows.
-      this.clauseBody(s.thenStatement, s.elseStatement !== undefined),
+      header,
+      this.clauseRest(s.thenStatement, s.elseStatement !== undefined),
     ];
     if (s.elseStatement) {
       const elseOnSameLine = s.thenStatement.kind === SyntaxKind.Block;
@@ -1335,6 +1337,25 @@ class Printer {
       }
     }
     return concat(parts);
+  }
+
+  /**
+   * The token that closes an if/while/for header. gjf's DocBuilder appends the
+   * block's opening `{` to the header's level (its `appendLevel`), so
+   * `if (cond) {` breaks the condition when the line overflows *including* the
+   * brace - the fit check must see it. Pure: consumes no comments, so the header
+   * can still be rendered before the body.
+   */
+  private clauseClose(s: Statement): Doc {
+    if (s.kind !== SyntaxKind.Block) return ")";
+    return this.blockIsEmpty(s as Block) ? ") {}" : ") {";
+  }
+
+  /** The clause body after `clauseClose` already emitted its `{`. */
+  private clauseRest(s: Statement, allowTrailingBlank = false): Doc {
+    if (s.kind !== SyntaxKind.Block) return this.clauseBody(s);
+    const b = s as Block;
+    return this.blockIsEmpty(b) ? "" : this.blockRest(b, allowTrailingBlank);
   }
 
   /**
@@ -1350,10 +1371,10 @@ class Printer {
   }
 
   private whileStatement(s: WhileStatement): Doc {
-    return concat([
-      group(concat(["while (", this.statementTail(s.condition, ")")])),
-      this.clauseBody(s.statement),
-    ]);
+    const header = group(
+      concat(["while (", this.statementTail(s.condition, this.clauseClose(s.statement))]),
+    );
+    return concat([header, this.clauseRest(s.statement)]);
   }
 
   private doStatement(s: DoStatement): Doc {
@@ -1381,8 +1402,21 @@ class Printer {
           s.incrementors.map(e => this.node(e)),
         )
       : "";
-    const header = group(concat(["for (", init, "; ", cond, "; ", upd, ")"]));
-    return concat([header, this.clauseBody(s.statement)]);
+    // gjf visitForLoop: the three clauses are direct children of one +4 level
+    // separated by UNIFIED breaks, so they go one per line together once the
+    // header (including the body's `{`) overflows.
+    const hasUpd = s.incrementors !== undefined && s.incrementors.length > 0;
+    const header = level(PLUS4, [
+      "for (",
+      init,
+      ";",
+      line,
+      cond,
+      ";",
+      hasUpd ? concat([line, upd]) : " ",
+      this.clauseClose(s.statement),
+    ]);
+    return concat([header, this.clauseRest(s.statement)]);
   }
 
   private forInit(init: Node): Doc {
@@ -1409,26 +1443,32 @@ class Printer {
       concat([
         "for (",
         level(PLUS4, [this.parameter(s.parameter), " :", line, this.node(s.expression)]),
-        ")",
+        this.clauseClose(s.statement),
       ]),
-      this.clauseBody(s.statement),
+      this.clauseRest(s.statement),
     ]);
   }
 
   private tryStatement(s: TryStatement): Doc {
     const parts: Doc[] = ["try"];
+    // gjf preserves a source blank line before a block's `}` when another clause
+    // (catch/finally) follows.
+    const hasFinally = s.finallyBlock !== undefined;
+    const tryBlank = s.catchClauses.length > 0 || hasFinally;
     if (s.resources && s.resources.length > 0) {
       // The first resource stays on the `try (` line; subsequent ones break
       // before themselves at +4 (one per line), each `;`-terminated. A trailing
-      // `;` after the last resource in source is preserved as `; )`.
+      // `;` after the last resource in source is preserved as `; )`. The block's
+      // `{` rides along so the resource list wraps when it pushes past column 100.
       const last = s.resources[s.resources.length - 1];
       const trailingSemi = this.text[skipTrivia(this.text, last.end)] === ";";
-      const close = trailingSemi ? "; )" : ")";
+      const emptyTry = this.blockIsEmpty(s.tryBlock);
+      const close = (trailingSemi ? "; )" : ")") + (emptyTry ? " {}" : " {");
       if (s.resources.length === 1) {
         // A single resource stays on the `try (` line; its own initializer level
         // supplies the +4 continuation indent, so no extra resource-list level
         // (which would double-indent the broken initializer to +8).
-        parts.push(" (", this.resource(s.resources[0]), close);
+        parts.push(" (", this.resource(s.resources[0], close));
       } else {
         const inner: Doc[] = [];
         s.resources.forEach((r, i) => {
@@ -1437,11 +1477,10 @@ class Printer {
         });
         parts.push(" (", level(PLUS4, inner), close);
       }
+      if (!emptyTry) parts.push(this.blockRest(s.tryBlock, tryBlank));
+    } else {
+      parts.push(" ", this.block(s.tryBlock, tryBlank));
     }
-    // gjf preserves a source blank line before a block's `}` when another clause
-    // (catch/finally) follows.
-    const hasFinally = s.finallyBlock !== undefined;
-    parts.push(" ", this.block(s.tryBlock, s.catchClauses.length > 0 || hasFinally));
     s.catchClauses.forEach((c, i) => {
       parts.push(
         " catch (",
@@ -1460,20 +1499,22 @@ class Printer {
     return concat(parts);
   }
 
-  private resource(r: Resource): Doc {
-    if (r.expression) return this.node(r.expression);
+  private resource(r: Resource, trailing: Doc = ""): Doc {
+    if (r.expression) return concat([this.node(r.expression), trailing]);
     const head = concat([
       this.modifiers(r.modifiers),
       r.type ? concat([this.type(r.type), " "]) : "",
       r.name ? this.raw(r.name) : "",
     ]);
-    if (!r.initializer) return head;
+    if (!r.initializer) return concat([head, trailing]);
     // Like a variable declarator, a long initializer folds onto a +4
     // continuation line after `=` (gjf), rather than breaking the RHS in place.
+    // `trailing` (the `) {` closing the resource list) rides inside that level so
+    // the break fires on the whole rest of the line.
     if (r.initializer.kind === SyntaxKind.ArrayInitializer) {
-      return concat([head, " = ", this.node(r.initializer)]);
+      return concat([head, " = ", this.node(r.initializer), trailing]);
     }
-    return concat([head, " =", level(PLUS4, [line, this.node(r.initializer)])]);
+    return concat([head, " =", level(PLUS4, [line, this.node(r.initializer), trailing])]);
   }
 
   private switchLike(expr: Expression, clauses: NodeArray<SwitchClause>, endPos: number): Doc {

@@ -1,0 +1,21 @@
+package p;
+
+class T {
+  void m(int[] points, java.util.List<String> names, Status status) {
+    if (leftmost == null || compareCandidates(status.comparator(), s, leftmost, names) < 0) {
+      leftmost = s;
+    }
+    for (firstNonCollinearIndex = firstNonEqualIndex + 1; firstNonCollinearIndex < points.length; firstNonCollinearIndex++) {
+      hull.push(points[firstNonCollinearIndex]);
+    }
+    while (leftmost == null || compareCandidates(status.comparator(), s, leftmost, names) < 0) {
+      leftmost = s;
+    }
+    try (Scanner scanner = new Scanner(Resources.getInputStream(RESOURCE_FILE), CharEncoding.UTF)) {
+      parseRules(scanner, RESOURCE_FILE, RULES, FOLDINGS);
+    }
+    for (String candidateNameOfTheThing : theListOfCandidateNamesThatWeAreIterating(names, s)) {
+      use(candidateNameOfTheThing);
+    }
+  }
+}

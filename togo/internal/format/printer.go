@@ -1502,11 +1502,12 @@ func semiWithTail(tail Doc) Doc {
 }
 
 func (p *printer) ifStatement(s *compiler.IfStatementData) Doc {
+	header := group(concat(text("if ("), p.statementTail(s.Condition, p.clauseClose(s.ThenStatement))))
 	parts := []Doc{
-		group(concat(text("if ("), p.statementTail(s.Condition, text(")")))),
+		header,
 		// gjf preserves a source blank line before the then-block's `}` when an
 		// `else` follows.
-		p.clauseBodyTB(s.ThenStatement, s.ElseStatement != nil),
+		p.clauseRest(s.ThenStatement, s.ElseStatement != nil),
 	}
 	if s.ElseStatement != nil {
 		elseOnSameLine := s.ThenStatement.Kind == compiler.Block
@@ -1538,8 +1539,36 @@ func (p *printer) clauseBodyTB(s *compiler.Node, allowTrailingBlank bool) Doc {
 	return group(indent(concat(line, p.node(s))))
 }
 
+// clauseClose is the token that closes an if/while/for header. gjf's DocBuilder
+// appends the block's opening `{` to the header's level (its appendLevel), so
+// `if (cond) {` breaks the condition when the line overflows *including* the
+// brace - the fit check must see it. Pure: consumes no comments, so the header
+// can still be rendered before the body.
+func (p *printer) clauseClose(s *compiler.Node) Doc {
+	if s.Kind != compiler.Block {
+		return text(")")
+	}
+	if p.blockIsEmpty(s.AsBlock(), p.start(s), s.End) {
+		return text(") {}")
+	}
+	return text(") {")
+}
+
+// clauseRest is the clause body after clauseClose already emitted its `{`.
+func (p *printer) clauseRest(s *compiler.Node, allowTrailingBlank bool) Doc {
+	if s.Kind != compiler.Block {
+		return p.clauseBody(s)
+	}
+	b := s.AsBlock()
+	if p.blockIsEmpty(b, p.start(s), s.End) {
+		return text("")
+	}
+	return p.blockRest(b, s.End, allowTrailingBlank)
+}
+
 func (p *printer) whileStatement(s *compiler.WhileStatementData) Doc {
-	return concat(group(concat(text("while ("), p.statementTail(s.Condition, text(")")))), p.clauseBody(s.Statement))
+	header := group(concat(text("while ("), p.statementTail(s.Condition, p.clauseClose(s.Statement))))
+	return concat(header, p.clauseRest(s.Statement, false))
 }
 
 func (p *printer) doStatement(s *compiler.DoStatementData) Doc {
@@ -1578,8 +1607,17 @@ func (p *printer) forStatement(s *compiler.ForStatementData) Doc {
 		}
 		upd = join(text(", "), es)
 	}
-	header := group(concat(text("for ("), init, text("; "), cond, text("; "), upd, text(")")))
-	return concat(header, p.clauseBody(s.Statement))
+	// gjf visitForLoop: the three clauses are direct children of one +4 level
+	// separated by UNIFIED breaks, so they go one per line together once the
+	// header (including the body's `{`) overflows.
+	updPart := text(" ")
+	if s.Incrementors.Len() > 0 {
+		updPart = concat(line, upd)
+	}
+	header := level(plus4, []Doc{
+		text("for ("), init, text(";"), line, cond, text(";"), updPart, p.clauseClose(s.Statement),
+	})
+	return concat(header, p.clauseRest(s.Statement, false))
 }
 
 func (p *printer) forInit(init *compiler.Node) Doc {
@@ -1595,28 +1633,40 @@ func (p *printer) forEachStatement(s *compiler.ForEachStatementData) Doc {
 	// gjf visitEnhancedForLoop: "for (" open(+4) param " :" breakOp(" ") expr
 	// close ")". The iterable breaks after the ":" at +4 when it overflows.
 	return concat(
-		concat(text("for ("), level(plus4, []Doc{p.parameter(s.Parameter), text(" :"), line, p.node(s.Expression)}), text(")")),
-		p.clauseBody(s.Statement),
+		concat(text("for ("), level(plus4, []Doc{p.parameter(s.Parameter), text(" :"), line, p.node(s.Expression)}), p.clauseClose(s.Statement)),
+		p.clauseRest(s.Statement, false),
 	)
 }
 
 func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 	parts := []Doc{text("try")}
+	// gjf preserves a source blank line before a block's `}` when another clause
+	// (catch/finally) follows.
+	hasFinally := s.FinallyBlock != nil
+	catches := nodes(s.CatchClauses)
+	tryBlank := len(catches) > 0 || hasFinally
 	if s.Resources.Len() > 0 {
 		// The first resource stays on the `try (` line; subsequent ones break
 		// before themselves at +4 (one per line), each `;`-terminated. A trailing
-		// `;` after the last resource in source is preserved as `; )`.
+		// `;` after the last resource in source is preserved as `; )`. The block's
+		// `{` rides along so the resource list wraps when it pushes past column 100.
 		res := nodes(s.Resources)
 		last := res[len(res)-1]
 		closeTok := ")"
 		if idx := compiler.SkipTrivia(p.text, last.End); idx < len(p.text) && p.text[idx] == ';' {
 			closeTok = "; )"
 		}
+		emptyTry := p.blockIsEmpty(s.TryBlock.AsBlock(), p.start(s.TryBlock), s.TryBlock.End)
+		if emptyTry {
+			closeTok += " {}"
+		} else {
+			closeTok += " {"
+		}
 		if len(res) == 1 {
 			// A single resource stays on the `try (` line; its own initializer level
 			// supplies the +4 continuation indent, so no extra resource-list level
 			// (which would double-indent the broken initializer to +8).
-			parts = append(parts, text(" ("), p.resource(res[0].AsResource()), text(closeTok))
+			parts = append(parts, text(" ("), p.resourceTrailing(res[0].AsResource(), text(closeTok)))
 		} else {
 			var inner []Doc
 			for i, r := range res {
@@ -1627,12 +1677,12 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 			}
 			parts = append(parts, text(" ("), level(plus4, inner), text(closeTok))
 		}
+		if !emptyTry {
+			parts = append(parts, p.blockRest(s.TryBlock.AsBlock(), s.TryBlock.End, tryBlank))
+		}
+	} else {
+		parts = append(parts, text(" "), p.blockTB(s.TryBlock.AsBlock(), s.TryBlock.End, tryBlank))
 	}
-	// gjf preserves a source blank line before a block's `}` when another clause
-	// (catch/finally) follows.
-	hasFinally := s.FinallyBlock != nil
-	catches := nodes(s.CatchClauses)
-	parts = append(parts, text(" "), p.blockTB(s.TryBlock.AsBlock(), s.TryBlock.End, len(catches) > 0 || hasFinally))
 	for i, cn := range catches {
 		c := cn.AsCatchClause()
 		ts := make([]Doc, c.CatchTypes.Len())
@@ -1648,8 +1698,21 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 }
 
 func (p *printer) resource(r *compiler.ResourceData) Doc {
+	return p.resourceTrailing(r, nil)
+}
+
+// resourceTrailing is resource with the `) {` that closes the resource list
+// routed inside the initializer's level, so the break fires on the whole rest
+// of the line.
+func (p *printer) resourceTrailing(r *compiler.ResourceData, trailing Doc) Doc {
+	appendTrailing := func(d Doc) Doc {
+		if trailing == nil {
+			return d
+		}
+		return concat(d, trailing)
+	}
 	if r.Expression != nil {
-		return p.node(r.Expression)
+		return appendTrailing(p.node(r.Expression))
 	}
 	head := []Doc{p.modifiers(r.Modifiers, "inline")}
 	if r.Type != nil {
@@ -1659,14 +1722,18 @@ func (p *printer) resource(r *compiler.ResourceData) Doc {
 		head = append(head, text(p.raw(r.Name)))
 	}
 	if r.Initializer == nil {
-		return concat(head...)
+		return appendTrailing(concat(head...))
 	}
 	// Like a variable declarator, a long initializer folds onto a +4
 	// continuation line after `=` (gjf), rather than breaking the RHS in place.
 	if r.Initializer.Kind == compiler.ArrayInitializer {
-		return concat(concat(head...), text(" = "), p.node(r.Initializer))
+		return appendTrailing(concat(concat(head...), text(" = "), p.node(r.Initializer)))
 	}
-	return concat(concat(head...), text(" ="), level(plus4, []Doc{line, p.node(r.Initializer)}))
+	inner := []Doc{line, p.node(r.Initializer)}
+	if trailing != nil {
+		inner = append(inner, trailing)
+	}
+	return concat(concat(head...), text(" ="), level(plus4, inner))
 }
 
 func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, endPos int) Doc {
