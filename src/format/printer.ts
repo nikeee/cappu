@@ -832,7 +832,7 @@ class Printer {
     // Annotations on an array dimension or a qualified segment, and type
     // arguments on a non-final segment, are not in the tree (see TypeNode in
     // compiler/types.ts) - print those types from source so nothing is dropped.
-    if ((t as TypeReference | ArrayType).verbatim) return this.raw(t);
+    if ((t as TypeReference | ArrayType | WildcardType).verbatim) return this.raw(t);
     switch (t.kind) {
       case SyntaxKind.PrimitiveType: {
         const pt = t as PrimitiveType;
@@ -1295,6 +1295,9 @@ class Printer {
     // fit check counts the rest of the line - the `)` and the body's `{`.
     if (p.name) {
       parts.push(breakBeforeName ? brk("independent", " ", PLUS4) : " ", this.raw(p.name));
+      // C-style trailing brackets belong to the parameter's type (`byte b[]`);
+      // dropping them changed the signature.
+      if (p.arrayRankAfterName > 0) parts.push("[]".repeat(p.arrayRankAfterName));
     }
     return concat(parts);
   }
@@ -1377,11 +1380,18 @@ class Printer {
 
   private blockIsEmpty(b: Block): boolean {
     if (b.statements.length > 0) return false;
-    // Only a comment *inside* the block (after its `{`) makes it non-empty; a
-    // pending comment before the block (e.g. an unconsumed parameter comment)
-    // must not be miscounted - blockIsEmpty can be queried before those are
-    // consumed (methodLike computes the body shape before rendering params).
-    return !(this.hasCommentBefore(b.end) && this.comments[this.ci].pos > this.start(b));
+    // Only a comment *inside* the block (after its `{`) makes it non-empty. The
+    // test must be positional, not cursor-based: callers ask before the
+    // surrounding construct has rendered (clauseClose runs before the
+    // condition), so `comments[ci]` can still point at a comment that lies
+    // BEFORE the block - which made a comment-only block look empty and emitted
+    // `{}` plus the comments plus a second `}`.
+    const open = this.start(b);
+    for (const c of this.comments) {
+      if (c.pos >= b.end) break;
+      if (c.pos > open) return false;
+    }
+    return true;
   }
 
   private block(b: Block, allowTrailingBlank = false): Doc {
@@ -2575,6 +2585,9 @@ class Printer {
         return concat([
           receiver,
           "::",
+          // Explicit type arguments sit between `::` and the name
+          // (`ObjectUtils::<String>median`); dropping them changed the code.
+          this.typeArguments(e.typeArguments),
           e.isConstructorRef ? "new" : e.name ? this.raw(e.name) : "",
         ]);
       }

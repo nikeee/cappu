@@ -83,6 +83,12 @@ func (p *Parser) parseNonArrayType() *Node {
 		return p.finishNode(node, pos, -1)
 	}
 	if p.token() == QuestionToken {
+		// A wildcard does not model type-use annotations, so `List<@A ?>` would lose
+		// them: mark it verbatim (and start the node before the annotations) so the
+		// formatter prints the source slice.
+		if typeAnnotations != nil && typeAnnotations.Len() > 0 {
+			return p.parseWildcardTypeFrom(pos, true)
+		}
 		return p.parseWildcardType()
 	}
 	// A dotted type name, where any segment may carry type arguments and any
@@ -124,7 +130,12 @@ func (p *Parser) parseNonArrayType() *Node {
 }
 
 func (p *Parser) parseWildcardType() *Node {
-	pos := p.getNodePos()
+	return p.parseWildcardTypeFrom(p.getNodePos(), false)
+}
+
+// parseWildcardTypeFrom parses a wildcard whose node starts at pos, marking it
+// verbatim when type-use annotations precede the `?`.
+func (p *Parser) parseWildcardTypeFrom(pos int, verbatim bool) *Node {
 	p.parseExpected(QuestionToken, nil)
 	hasExtends, hasSuper := false, false
 	var typ *Node
@@ -135,7 +146,9 @@ func (p *Parser) parseWildcardType() *Node {
 		hasSuper = true
 		typ = p.parseType()
 	}
-	return p.finishNode(p.factory.NewWildcardType(hasExtends, hasSuper, typ), pos, -1)
+	node := p.factory.NewWildcardType(hasExtends, hasSuper, typ)
+	node.AsWildcardType().Verbatim = verbatim
+	return p.finishNode(node, pos, -1)
 }
 
 func (p *Parser) parseTypeArgument() *Node {

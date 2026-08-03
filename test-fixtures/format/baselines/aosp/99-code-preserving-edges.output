@@ -1,0 +1,17 @@
+package p;
+
+import java.util.List;
+
+class T {
+    void write(final byte b[], final int off) {
+        consume(ObjectUtils::<String>median);
+    }
+
+    void wildcards(final List<@A @B ?> valueList, Map<@B ? extends @C Number, String> m) {
+        if (valueList.isEmpty()) {
+            // only a comment lives in this block
+        } else {
+            use(m);
+        }
+    }
+}

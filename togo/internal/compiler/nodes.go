@@ -113,6 +113,9 @@ type WildcardTypeData struct {
 	HasExtends bool
 	HasSuper   bool
 	Type       *Node // optional
+	// Verbatim is set when JSR-308 annotations precede the `?` (`List<@A ?>`),
+	// which the node does not model - the formatter prints the source slice.
+	Verbatim bool
 }
 
 func (d *WildcardTypeData) forEachChild(v Visitor) bool { return visit(v, d.Type) }

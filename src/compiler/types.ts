@@ -436,6 +436,9 @@ export interface WildcardType extends Node {
   readonly hasExtends: boolean;
   readonly hasSuper: boolean;
   readonly type?: TypeNode;
+  /** Set when JSR-308 annotations precede the `?` (`List<@A ?>`), which the
+   * node does not model - the formatter prints the source slice instead. */
+  readonly verbatim?: boolean;
 }
 
 export interface TypeParameter extends Node {

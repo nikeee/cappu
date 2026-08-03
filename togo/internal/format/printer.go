@@ -917,7 +917,8 @@ func (p *printer) typ(t *compiler.Node) Doc {
 	// arguments on a non-final segment, are not in the tree (see
 	// TypeReferenceData.Verbatim) - print those types from source.
 	if (t.Kind == compiler.TypeReference && t.AsTypeReference().Verbatim) ||
-		(t.Kind == compiler.ArrayType && t.AsArrayType().Verbatim) {
+		(t.Kind == compiler.ArrayType && t.AsArrayType().Verbatim) ||
+		(t.Kind == compiler.WildcardType && t.AsWildcardType().Verbatim) {
 		return text(p.raw(t))
 	}
 	switch t.Kind {
@@ -1489,6 +1490,11 @@ func (p *printer) parameterBreak(n *compiler.Node, breakBeforeName bool) Doc {
 			parts = append(parts, text(" "))
 		}
 		parts = append(parts, text(p.raw(pp.Name)))
+		// C-style trailing brackets belong to the parameter's type (`byte b[]`);
+		// dropping them changed the signature.
+		if pp.ArrayRankAfterName > 0 {
+			parts = append(parts, text(strings.Repeat("[]", pp.ArrayRankAfterName)))
+		}
 	}
 	return concat(parts...)
 }
@@ -1585,11 +1591,21 @@ func (p *printer) blockIsEmpty(b *compiler.BlockData, startPos, endPos int) bool
 	if b.Statements.Len() > 0 {
 		return false
 	}
-	// Only a comment *inside* the block (after its `{`) makes it non-empty; a
-	// pending comment before the block (e.g. an unconsumed parameter comment)
-	// must not be miscounted - blockIsEmpty can be queried before those are
-	// consumed (methodLike computes the body shape before rendering params).
-	return !p.hasCommentBefore(endPos) || p.comments[p.ci].pos <= startPos
+	// Only a comment *inside* the block (after its `{`) makes it non-empty. The
+	// test must be positional, not cursor-based: callers ask before the
+	// surrounding construct has rendered (clauseClose runs before the condition),
+	// so comments[ci] can still point at a comment that lies BEFORE the block -
+	// which made a comment-only block look empty and emitted `{}` plus the
+	// comments plus a second `}`.
+	for _, c := range p.comments {
+		if c.pos >= endPos {
+			break
+		}
+		if c.pos > startPos {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *printer) block(b *compiler.BlockData, endPos int) Doc {
@@ -3088,7 +3104,9 @@ func (p *printer) node(node *compiler.Node) Doc {
 		if e.IsConstructorRef && e.Expression.Kind == compiler.ClassLiteralExpression {
 			receiver = p.typ(e.Expression.AsClassLiteralExpression().Type)
 		}
-		return concat(receiver, text("::"), text(ref))
+		// Explicit type arguments sit between `::` and the name
+		// (`ObjectUtils::<String>median`); dropping them changed the code.
+		return concat(receiver, text("::"), p.typeArguments(e.TypeArguments), text(ref))
 	// Qualified forms keep their qualifier: Outer.this, Outer.super.m(), and the
 	// qualified superclass constructor call outer.super(...).
 	case compiler.ThisExpression:

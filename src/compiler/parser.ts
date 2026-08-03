@@ -618,7 +618,11 @@ function parseNonArrayType(): TypeNode {
     return finishNode(node, pos);
   }
   if (token() === SyntaxKind.QuestionToken) {
-    return parseWildcardType();
+    // A wildcard does not model type-use annotations, so `List<@A ?>` would
+    // lose them: mark it verbatim and the formatter prints the source slice.
+    // `pos` (before the annotations) becomes the node's start so the verbatim
+    // slice covers them.
+    return parseWildcardType(typeAnnotations === undefined ? undefined : pos);
   }
   // A dotted type name, where any segment may carry type arguments and any
   // segment after a dot may carry JSR-308 annotations:
@@ -652,8 +656,8 @@ function parseNonArrayType(): TypeNode {
   return finishNode(node, pos);
 }
 
-function parseWildcardType(): WildcardType {
-  const pos = getNodePos();
+function parseWildcardType(annotatedFrom?: number): WildcardType {
+  const pos = annotatedFrom ?? getNodePos();
   parseExpected(SyntaxKind.QuestionToken);
   let hasExtends = false;
   let hasSuper = false;
@@ -669,6 +673,7 @@ function parseWildcardType(): WildcardType {
   node.hasExtends = hasExtends;
   node.hasSuper = hasSuper;
   node.type = type;
+  node.verbatim = annotatedFrom === undefined ? undefined : true;
   return finishNode(node, pos);
 }
 
