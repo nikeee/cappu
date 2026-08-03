@@ -1708,11 +1708,16 @@ class Printer {
       for (const c of this.commentsBefore(this.start(operands[i + 1]))) {
         parts.push(c.line ? c.text : reflow(c.text), hardline);
       }
-      parts.push(op, " ", this.node(operands[i + 1]));
+      // The trailing token (`;`, `) {`, ...) rides into the LAST operand's own
+      // innermost level - gjf's appendLevel puts it there, so a call in the last
+      // operand wraps its arguments when the whole rest of the line overflows.
+      const last = i === operators.length - 1;
+      parts.push(
+        op,
+        " ",
+        last ? this.statementTail(operands[i + 1], trailing) : this.node(operands[i + 1]),
+      );
     });
-    // A statement's trailing `;` rides inside the +4 level (gjf counts it in the
-    // level width), so `a && b;` breaks when the `;` is what tips it past 100.
-    if (trailing !== "") parts.push(trailing);
     return level(PLUS4, parts);
   }
 
@@ -1913,6 +1918,19 @@ class Printer {
     }
     if (e.kind === SyntaxKind.ConditionalExpression) {
       return this.conditional(e as ConditionalExpression, trailing);
+    }
+    if (e.kind === SyntaxKind.PrefixUnaryExpression) {
+      // `!foo(...)` - the operator is glued, so the tail belongs to the operand.
+      const u = e as PrefixUnaryExpression;
+      const op = tokenToString(u.operator) ?? "";
+      if (op === "!" || op === "~") {
+        return concat([op, this.statementTail(u.operand, trailing)]);
+      }
+    }
+    if (e.kind === SyntaxKind.ParenthesizedExpression) {
+      // The closing `)` is part of the rest of the line, so it rides in too.
+      const pe = e as ParenthesizedExpression;
+      return concat(["(", this.statementTail(pe.expression, concat([")", trailing]))]);
     }
     if (e.kind === SyntaxKind.ObjectCreationExpression) {
       const oc = e as ObjectCreationExpression;

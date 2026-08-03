@@ -1,0 +1,20 @@
+package p;
+
+class T {
+  void m(String strategyClassName, String superSig, Signature superclassSignature, Parser parser) {
+    if (strategyClassName.equals("org.codehaus.plexus.classworlds.strategy.SelfFirstStrategy")
+        || strategyClassName.equals(
+            "org.codehaus.plexus.classworlds.strategy.OsgiBundleStrategy")) {
+      selfFirst = true;
+    }
+    if (superclassSignature != null
+        && !(superSig.equals("Object")
+            && superclassSignature.className.equals("java.lang.Object"))) {
+      buf.append(" extends ");
+    }
+    if (!TypeUtils.getIdentifierToken(
+        parser, /* stopAtDollarSign= */ true, /* stopAtDot= */ true)) {
+      throw new ParseException(parser, "Could not parse identifier token");
+    }
+  }
+}

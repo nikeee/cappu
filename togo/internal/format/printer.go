@@ -1952,12 +1952,14 @@ func (p *printer) binaryTrailing(node *compiler.Node, trailing Doc) Doc {
 				parts = append(parts, reflow(c.text), hardline)
 			}
 		}
-		parts = append(parts, text(op), text(" "), p.node(operands[i+1]))
-	}
-	// A statement's trailing `;` rides inside the +4 level (gjf counts it in the
-	// level width), so `a && b;` breaks when the `;` is what tips it past 100.
-	if trailing != nil {
-		parts = append(parts, trailing)
+		// The trailing token (`;`, `) {`, ...) rides into the LAST operand's own
+		// innermost level - gjf's appendLevel puts it there, so a call in the last
+		// operand wraps its arguments when the whole rest of the line overflows.
+		if i == len(operators)-1 {
+			parts = append(parts, text(op), text(" "), p.statementTail(operands[i+1], trailing))
+		} else {
+			parts = append(parts, text(op), text(" "), p.node(operands[i+1]))
+		}
 	}
 	return level(plus4, parts)
 }
@@ -2192,6 +2194,20 @@ func (p *printer) statementTail(e *compiler.Node, trailing Doc) Doc {
 		return p.binaryTrailing(e, trailing)
 	case compiler.ConditionalExpression:
 		return p.conditionalTrailing(e.AsConditionalExpression(), trailing)
+	case compiler.PrefixUnaryExpression:
+		// `!foo(...)` - the operator is glued, so the tail belongs to the operand.
+		u := e.AsPrefixUnaryExpression()
+		if op := compiler.TokenToString(u.Operator); op == "!" || op == "~" {
+			return concat(text(op), p.statementTail(u.Operand, trailing))
+		}
+	case compiler.ParenthesizedExpression:
+		// The closing `)` is part of the rest of the line, so it rides in too.
+		pe := e.AsParenthesizedExpression()
+		closeTok := text(")")
+		if trailing != nil {
+			closeTok = concat(text(")"), trailing)
+		}
+		return concat(text("("), p.statementTail(pe.Expression, closeTok))
 	case compiler.ObjectCreationExpression:
 		oc := e.AsObjectCreationExpression()
 		if oc.ClassBody == nil {
