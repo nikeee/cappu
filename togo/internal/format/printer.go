@@ -89,8 +89,30 @@ func formatSourceFile(sf *compiler.Node, options FormatOptions) (string, error) 
 	if !p.allCommentsEmitted() {
 		return "", ErrUnsupportedSyntax
 	}
-	// Exactly one trailing newline, like google-java-format.
-	return strings.TrimRight(out, "\n") + "\n", nil
+	// Exactly one trailing newline, like google-java-format, in the source's own
+	// line separator (gjf's Newlines.guessLineSeparator: the first one it sees).
+	out = strings.TrimRight(out, "\r\n") + "\n"
+	if sep := guessLineSeparator(p.text); sep != "\n" {
+		out = strings.NewReplacer("\r\n", sep, "\r", sep, "\n", sep).Replace(out)
+	}
+	return out, nil
+}
+
+// guessLineSeparator returns the first line separator in text, mirroring gjf's
+// Newlines.guessLineSeparator.
+func guessLineSeparator(text string) string {
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '\r':
+			if i+1 < len(text) && text[i+1] == '\n' {
+				return "\r\n"
+			}
+			return "\r"
+		case '\n':
+			return "\n"
+		}
+	}
+	return "\n"
 }
 
 // modifierOrder is the canonical JLS modifier order google-java-format reorders to.

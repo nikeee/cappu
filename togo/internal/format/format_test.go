@@ -289,3 +289,19 @@ func TestModuleDeclarationComments(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", got, source)
 	}
 }
+
+// TestLineSeparatorPreserved mirrors the TS test "the source's line separator
+// is preserved": gjf writes its output with the separator the source uses.
+func TestLineSeparatorPreserved(t *testing.T) {
+	lines := []string{"package p;", "", "class T {", "  int x;", "}", ""}
+	for _, sep := range []string{"\r\n", "\n"} {
+		source := strings.Join(lines, sep)
+		got, err := FormatSource(source, FormatOptions{Style: "google"}, "T.java")
+		if err != nil {
+			t.Fatalf("FormatSource: %v", err)
+		}
+		if got != source {
+			t.Errorf("sep %q: got %q, want %q", sep, got, source)
+		}
+	}
+}

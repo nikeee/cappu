@@ -262,3 +262,12 @@ test("comments inside a module declaration are formatted, not refused", () => {
   ].join("\n");
   expect(formatSource(source, { style: "google" })).toBe(source);
 });
+
+// google-java-format writes its output with the line separator the source uses
+// (Newlines.guessLineSeparator); we always emitted LF, so every line of a CRLF
+// file differed.
+test("the source's line separator is preserved", () => {
+  const lines = ["package p;", "", "class T {", "  int x;", "}", ""];
+  expect(formatSource(lines.join("\r\n"), { style: "google" })).toBe(lines.join("\r\n"));
+  expect(formatSource(lines.join("\n"), { style: "google" })).toBe(lines.join("\n"));
+});

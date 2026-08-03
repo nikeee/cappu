@@ -182,8 +182,11 @@ export function formatSourceFile(sf: SourceFile, options: FormatOptions): string
   if (!p.allCommentsEmitted()) {
     throw new UnsupportedSyntaxError("comment in an unsupported position");
   }
-  // Exactly one trailing newline, like google-java-format.
-  return text.replace(/\n*$/, "") + "\n";
+  // Exactly one trailing newline, like google-java-format, in the source's own
+  // line separator (gjf's Newlines.guessLineSeparator: the first one it sees).
+  const out = text.replace(/(\r\n|\r|\n)*$/, "") + "\n";
+  const sep = /\r\n|\r|\n/.exec(sf.text)?.[0] ?? "\n";
+  return sep === "\n" ? out : out.replace(/\r\n|\r|\n/g, sep);
 }
 
 // The canonical JLS modifier order google-java-format reorders to.
@@ -391,8 +394,7 @@ class Printer {
       // route it into the item like the trailing `;` (see nodeWithTail). A
       // multi-line block comment cannot: its width would force every break.
       const peeked = this.peekTrailingComment(item);
-      const tail =
-        peeked && !peeked.text.includes("\n") ? concat([" ", peeked.text]) : undefined;
+      const tail = peeked && !peeked.text.includes("\n") ? concat([" ", peeked.text]) : undefined;
       let itemDoc = tail ? this.nodeWithTail(item, tail) : this.node(item);
       if (inlineLead) itemDoc = concat([reflow(inlineLead.text), " ", itemDoc]);
       const trailing = this.trailingCommentAfter(item);
@@ -519,8 +521,7 @@ class Printer {
       // file header (e.g. a license), separated by a blank line like other blocks.
       const last = header[header.length - 1];
       const glued =
-        blocks.length > 0 &&
-        (!this.blankBeforePos(last.end, firstStart) || isJavadocComment(last));
+        blocks.length > 0 && (!this.blankBeforePos(last.end, firstStart) || isJavadocComment(last));
       if (glued) {
         blocks[0] = concat([headerDoc, hardline, blocks[0]]);
       } else {
@@ -1344,7 +1345,9 @@ class Printer {
     // dangling comment after the last statement, when there is one. Measuring
     // from the statement counts the comment's own line as the blank.
     const from =
-      b.statements.length > 0 ? b.statements[b.statements.length - 1].end : this.comments[this.ci]?.pos;
+      b.statements.length > 0
+        ? b.statements[b.statements.length - 1].end
+        : this.comments[this.ci]?.pos;
     const lastEnd = from !== undefined ? this.lastCommentEndBefore(from, b.end) : -1;
     const closeLead =
       (allowTrailingBlank && lastEnd >= 0 && this.blankBeforePos(lastEnd, b.end - 1)) ||
@@ -1395,10 +1398,7 @@ class Printer {
     // `else` follows.
     const close = this.clauseClose(s.thenStatement);
     const header = group(concat(["if (", this.statementTail(s.condition, close)]));
-    const parts: Doc[] = [
-      header,
-      this.clauseRest(s.thenStatement, s.elseStatement !== undefined),
-    ];
+    const parts: Doc[] = [header, this.clauseRest(s.thenStatement, s.elseStatement !== undefined)];
     if (s.elseStatement) {
       const elseOnSameLine = s.thenStatement.kind === SyntaxKind.Block;
       parts.push(elseOnSameLine ? " else" : concat([hardline, "else"]));
