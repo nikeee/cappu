@@ -1,0 +1,19 @@
+package p;
+
+import java.lang.annotation.ElementType;
+
+/** Doc. */
+@Target(ElementType.PARAMETER)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface Sized {
+  /** The minimum. */
+  int min() default 0;
+
+  int max() default Integer.MAX_VALUE;
+
+  String[] tags() default {"a", "b"};
+
+  Class<?> type();
+
+  @interface Nested {}
+}

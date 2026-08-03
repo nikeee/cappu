@@ -12,6 +12,7 @@ import { reformatParamComment, rewriteComment } from "./comment-rewrite.ts";
 import { type Comment, collectComments } from "./comments.ts";
 import {
   type Annotation,
+  type AnnotationTypeDeclaration,
   type ArrayCreationExpression,
   type ArrayInitializer,
   type ArrayType,
@@ -493,7 +494,18 @@ class Printer {
     const firstStart = this.firstConstructStart(sf);
     const header = this.commentsBefore(firstStart);
     if (sf.packageDeclaration) {
-      blocks.push(concat(["package ", this.entityName(sf.packageDeclaration.name), ";"]));
+      // A package-info.java may carry annotations; they precede the `package`
+      // keyword, one per line (gjf's visitPackage). Dropping them would delete
+      // code, not just reformat it.
+      const pkg: Doc[] = [];
+      for (const a of sf.packageDeclaration.annotations ?? []) {
+        pkg.push(this.annotation(a));
+        const tc = this.trailingCommentAfter(a);
+        if (tc) pkg.push(" ", reflow(tc.text));
+        pkg.push(hardline);
+      }
+      pkg.push("package ", this.entityName(sf.packageDeclaration.name), ";");
+      blocks.push(concat(pkg));
     }
     const statics = sf.imports.filter(i => i.isStatic);
     const nonStatics = sf.imports.filter(i => !i.isStatic);
@@ -1295,6 +1307,8 @@ class Printer {
     parameters: NodeArray<Parameter>;
     throws?: NodeArray<TypeNode>;
     body?: Block;
+    /** An annotation element's `default <value>`, which precedes the `;`. */
+    defaultValue?: Node;
   }): Doc {
     const tp = this.typeParameters(decl.typeParameters);
     const head: Doc[] = [this.modifiers(decl.modifiers, "own")];
@@ -1310,8 +1324,11 @@ class Printer {
     // A comment on the body's `{` line rides with the brace (gjf's toksAfter),
     // so its width counts in the signature's fit check and the parameters wrap
     // instead of the comment. See braceTrailAhead for the emitted-ahead marking.
+    const defaultPart: Doc = decl.defaultValue
+      ? concat([" default ", this.node(decl.defaultValue)])
+      : "";
     const bodyToken: Doc = !decl.body
-      ? ";"
+      ? concat([defaultPart, ";"])
       : emptyBody
         ? " {}"
         : concat([" {", this.braceTrailAhead(decl.body)]);
@@ -2597,6 +2614,20 @@ class Printer {
       case SyntaxKind.WildcardType:
       case SyntaxKind.VarType:
         return this.type(node as TypeNode);
+
+      case SyntaxKind.AnnotationTypeDeclaration: {
+        // Rendered like an interface: `@interface Name` plus a member body. It
+        // used to fall through to the verbatim slice below, which left an empty
+        // body as `{\n}` and skipped every other rule inside it.
+        const d = node as AnnotationTypeDeclaration;
+        return concat([
+          this.modifiers(d.modifiers, "own"),
+          "@interface ",
+          this.raw(d.name),
+          " ",
+          this.body(d.members, d.end),
+        ]);
+      }
 
       case SyntaxKind.QualifiedName:
         return this.entityName(node as EntityName);

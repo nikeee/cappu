@@ -472,7 +472,20 @@ func (p *printer) sourceFile(sf *compiler.SourceFileData) Doc {
 	firstStart := p.firstConstructStart(sf)
 	header := p.commentsBefore(firstStart)
 	if sf.PackageDeclaration != nil {
-		blocks = append(blocks, concat(text("package "), text(p.entityName(sf.PackageDeclaration.AsPackageDeclaration().Name)), text(";")))
+		// A package-info.java may carry annotations; they precede the `package`
+		// keyword, one per line (gjf's visitPackage). Dropping them would delete
+		// code, not just reformat it.
+		pd := sf.PackageDeclaration.AsPackageDeclaration()
+		var pkg []Doc
+		for _, a := range nodes(pd.Annotations) {
+			pkg = append(pkg, p.annotation(a.AsAnnotation()))
+			if tc, ok := p.trailingCommentAfter(a); ok {
+				pkg = append(pkg, text(" "), reflow(tc.text))
+			}
+			pkg = append(pkg, hardline)
+		}
+		pkg = append(pkg, text("package "), text(p.entityName(pd.Name)), text(";"))
+		blocks = append(blocks, concat(pkg...))
 	}
 	var statics, nonStatics []*compiler.Node
 	for _, imp := range nodes(sf.Imports) {
@@ -1482,6 +1495,12 @@ func (p *printer) parameterBreak(n *compiler.Node, breakBeforeName bool) Doc {
 
 // methodLike renders a method or constructor. returnType may be nil.
 func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, name *compiler.Node, params, throws *compiler.NodeArray, body *compiler.Node) Doc {
+	return p.methodLikeDefault(mods, typeParams, returnType, name, params, throws, body, nil)
+}
+
+// methodLikeDefault is methodLike with an annotation element's `default <value>`,
+// which precedes the `;`.
+func (p *printer) methodLikeDefault(mods, typeParams *compiler.NodeArray, returnType, name *compiler.Node, params, throws *compiler.NodeArray, body, defaultValue *compiler.Node) Doc {
 	tp := p.typeParameters(typeParams)
 	head := []Doc{p.modifiers(mods, "own")}
 	if !isEmpty(tp) {
@@ -1497,10 +1516,14 @@ func (p *printer) methodLike(mods, typeParams *compiler.NodeArray, returnType, n
 	// A comment on the body's `{` line rides with the brace (gjf's toksAfter), so
 	// its width counts in the signature's fit check and the parameters wrap
 	// instead of the comment. See braceTrailAhead for the emitted-ahead marking.
+	defaultPart := text("")
+	if defaultValue != nil {
+		defaultPart = concat(text(" default "), p.node(defaultValue))
+	}
 	var bodyToken Doc
 	switch {
 	case body == nil:
-		bodyToken = text(";")
+		bodyToken = concat(defaultPart, text(";"))
 	case emptyBody:
 		bodyToken = text(" {}")
 	default:
@@ -2917,7 +2940,7 @@ func (p *printer) node(node *compiler.Node) Doc {
 		return p.fieldDeclaration(node.AsFieldDeclaration())
 	case compiler.MethodDeclaration:
 		m := node.AsMethodDeclaration()
-		return p.methodLike(m.Modifiers, m.TypeParameters, m.ReturnType, m.Name, m.Parameters, m.Throws, m.Body)
+		return p.methodLikeDefault(m.Modifiers, m.TypeParameters, m.ReturnType, m.Name, m.Parameters, m.Throws, m.Body, m.DefaultValue)
 	case compiler.ConstructorDeclaration:
 		c := node.AsConstructorDeclaration()
 		return p.methodLike(c.Modifiers, c.TypeParameters, nil, c.Name, c.Parameters, c.Throws, c.Body)
@@ -3099,6 +3122,19 @@ func (p *printer) node(node *compiler.Node) Doc {
 	case compiler.PrimitiveType, compiler.TypeReference, compiler.ArrayType,
 		compiler.WildcardType, compiler.VarType:
 		return p.typ(node)
+
+	case compiler.AnnotationTypeDeclaration:
+		// Rendered like an interface: `@interface Name` plus a member body. It used
+		// to fall through to the verbatim slice, which left an empty body as `{\n}`
+		// and skipped every other rule inside it.
+		d := node.AsAnnotationTypeDeclaration()
+		return concat(
+			p.modifiers(d.Modifiers, "own"),
+			text("@interface "),
+			text(p.raw(d.Name)),
+			text(" "),
+			p.body(d.Members, node.End),
+		)
 
 	case compiler.QualifiedName:
 		return text(p.entityName(node))

@@ -1,0 +1,8 @@
+/*
+ * A license header.
+ */
+
+/** Package javadoc. */
+@PackageAnnotation
+@Nullable
+package io.github.classgraph.issues.issue107;
