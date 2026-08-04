@@ -1135,8 +1135,20 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 				constantParts = append(constantParts, hardline)
 			}
 		}
-		for _, cm := range leadComments {
+		// Blank lines between the leading comments, and between the last one and the
+		// constant, are preserved like a member list's - except after a javadoc,
+		// which glues to the declaration it documents.
+		for ci, cm := range leadComments {
+			if ci > 0 && p.blankBeforePos(leadComments[ci-1].end, cm.pos) {
+				constantParts = append(constantParts, hardline)
+			}
 			constantParts = append(constantParts, reflow(cm.text), hardline)
+		}
+		if n := len(leadComments); n > 0 {
+			last := leadComments[n-1]
+			if !isJavadocComment(&last) && p.blankBeforePos(last.end, p.start(c)) {
+				constantParts = append(constantParts, hardline)
+			}
 		}
 		isLast := i == len(consts)-1
 		cdoc := p.enumConstant(c.AsEnumConstantDeclaration())

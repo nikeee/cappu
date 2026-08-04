@@ -1,0 +1,17 @@
+package p;
+
+enum RelType {
+    // Classes:
+
+    /** Superclasses of this class, if this is a regular class. */
+    SUPERCLASSES,
+
+    // Interfaces:
+    /** No blank after this one. */
+    INTERFACES,
+
+    // a first comment
+
+    // a second comment
+    METHODS
+}

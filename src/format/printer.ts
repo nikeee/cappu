@@ -1016,7 +1016,21 @@ class Printer {
         const blank = this.blankBeforePos(prevConstEnd, firstPos);
         constantParts.push(blank ? concat([hardline, hardline]) : hardline);
       }
-      for (const cm of lead) constantParts.push(reflow(cm.text), hardline);
+      // Blank lines between the leading comments, and between the last one and
+      // the constant, are preserved like a member list's - except after a
+      // javadoc, which glues to the declaration it documents.
+      lead.forEach((cm, ci) => {
+        if (ci > 0 && this.blankBeforePos(lead[ci - 1].end, cm.pos)) constantParts.push(hardline);
+        constantParts.push(reflow(cm.text), hardline);
+      });
+      const lastLead = lead[lead.length - 1];
+      if (
+        lastLead &&
+        !isJavadocComment(lastLead) &&
+        this.blankBeforePos(lastLead.end, this.start(c))
+      ) {
+        constantParts.push(hardline);
+      }
       const isLast = i === d.enumConstants.length - 1;
       let cdoc = isLast ? this.enumConstant(c) : concat([this.enumConstant(c), ","]);
       const trailing = this.trailingCommentAfter(c);
