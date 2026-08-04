@@ -2127,13 +2127,41 @@ func (p *printer) resourceTrailing(r *compiler.ResourceData, trailing Doc) Doc {
 	if r.Initializer == nil {
 		return appendTrailing(concat(head...))
 	}
+	// A `//` comment between the name and the initializer stays on the name's line
+	// and forces the break, exactly like a declarator's. Without this it stayed
+	// pending and the initializer's dot-chain emitted it own-line-style, glued to
+	// the receiver with no space (`recycler// note`) - which then moved on the next
+	// run, so the output was not idempotent.
+	var eq *comment
+	if r.Name != nil {
+		if c, ok := p.lineCommentAfterAssign(r.Name.End, p.start(r.Initializer)); ok {
+			eq = &c
+		}
+	}
 	// Like a variable declarator, a long initializer folds onto a +4
 	// continuation line after `=` (gjf), rather than breaking the RHS in place.
 	if r.Initializer.Kind == compiler.ArrayInitializer {
 		return appendTrailing(concat(concat(head...), text(" = "), p.node(r.Initializer)))
 	}
-	inner := []Doc{line, p.statementTail(r.Initializer, trailing)}
-	return concat(concat(head...), text(" ="), level(plus4, inner))
+	// The comment stays on whichever side of the `=` the source put it: gjf hangs
+	// it off the token it follows, so `name //` keeps the `=` for the next line
+	// while `name = //` keeps the `=` up here.
+	if eq != nil && !strings.Contains(p.text[r.Name.End:eq.pos], "=") {
+		return concat(
+			concat(head...),
+			text(" "),
+			reflowNoWrap(eq.text),
+			level(plus4, []Doc{hardline, text("= "), p.statementTail(r.Initializer, trailing)}),
+		)
+	}
+	firstBreak := line
+	eqDoc := text("")
+	if eq != nil {
+		eqDoc = concat(text(" "), reflowNoWrap(eq.text))
+		firstBreak = hardline
+	}
+	inner := []Doc{firstBreak, p.statementTail(r.Initializer, trailing)}
+	return concat(concat(head...), text(" ="), eqDoc, level(plus4, inner))
 }
 
 func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, endPos int) Doc {
@@ -2636,19 +2664,34 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 				follow = text(")")
 			}
 		}
-		hasTrailingComment := false
+		// Only whitespace may separate the argument from its trailing comment: a
+		// `)` in between means the comment trails the CALL (`foo(a); // note`), and
+		// a `,` means it trails the separator, not this argument.
+		trailsThis := false
+		var t comment
 		if p.ci < len(p.comments) {
-			t := p.comments[p.ci]
-			hasTrailingComment = !t.line && !t.ownLine && t.pos >= a.End &&
-				!strings.ContainsAny(p.text[a.End:t.pos], "\n,")
+			t = p.comments[p.ci]
+			trailsThis = !t.ownLine && t.pos >= a.End &&
+				!strings.ContainsAny(p.text[a.End:t.pos], "\n,)")
 		}
-		if hasTrailingComment {
+		// A `//` comment trailing the LAST argument keeps the `)` off its line -
+		// the comment would swallow it. gjf breaks before the `)`, which then lands
+		// at the arguments' own indent.
+		switch {
+		case trailsThis && t.line && i == lastI:
+			p.ci++
+			anyComment = true
+			parts = append(parts, p.node(a), text(" "), reflowNoWrap(t.text), hardline, text(")"))
+			if trailing != nil {
+				parts = append(parts, trailing)
+			}
+		case trailsThis && !t.line:
 			parts = append(parts, p.node(a))
 			var attached bool
 			parts, attached = p.attachTrailingBlockComment(parts, a.End)
 			anyComment = anyComment || attached
 			parts = append(parts, follow)
-		} else {
+		default:
 			parts = append(parts, p.statementTail(a, follow))
 		}
 		if len(parts) == 1 {

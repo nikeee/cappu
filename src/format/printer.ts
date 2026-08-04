@@ -1810,6 +1810,14 @@ class Printer {
       return level(PLUS4, [head, rest]);
     }
     if (!r.initializer) return concat([head, trailing]);
+    // A `//` comment between the name and the initializer stays on the name's
+    // line and forces the break, exactly like a declarator's. Without this it
+    // stayed pending and the initializer's dot-chain emitted it own-line-style,
+    // glued to the receiver with no space (`recycler// note`) - which then moved
+    // on the next run, so the output was not idempotent.
+    const eq = r.name
+      ? this.lineCommentAfterAssign(r.name.end, this.start(r.initializer))
+      : undefined;
     // Like a variable declarator, a long initializer folds onto a +4
     // continuation line after `=` (gjf), rather than breaking the RHS in place.
     // `trailing` (the `) {` closing the resource list) rides inside that level so
@@ -1817,7 +1825,25 @@ class Printer {
     if (r.initializer.kind === SyntaxKind.ArrayInitializer) {
       return concat([head, " = ", this.node(r.initializer), trailing]);
     }
-    return concat([head, " =", level(PLUS4, [line, this.statementTail(r.initializer, trailing)])]);
+    // The comment stays on whichever side of the `=` the source put it: gjf hangs
+    // it off the token it follows, so `name //` keeps the `=` for the next line
+    // while `name = //` keeps the `=` up here.
+    const eqBeforeComment =
+      eq !== undefined && this.text.slice(r.name!.end, eq.pos).includes("=");
+    if (eq && !eqBeforeComment) {
+      return concat([
+        head,
+        " ",
+        reflow(eq.text, true),
+        level(PLUS4, [hardline, "= ", this.statementTail(r.initializer, trailing)]),
+      ]);
+    }
+    return concat([
+      head,
+      " =",
+      eq ? concat([" ", reflow(eq.text, true)]) : "",
+      level(PLUS4, [eq ? hardline : line, this.statementTail(r.initializer, trailing)]),
+    ]);
   }
 
   private switchLike(expr: Expression, clauses: NodeArray<SwitchClause>, endPos: number): Doc {
@@ -2250,13 +2276,24 @@ class Printer {
       });
       const follow: Doc = i < lastI ? "," : concat([")", trailing]);
       const t = this.comments[this.ci];
-      const hasTrailingComment =
+      // Only whitespace may separate the argument from its trailing comment: a
+      // `)` in between means the comment trails the CALL (`foo(a); // note`),
+      // and a `,` means it trails the separator, not this argument.
+      const trailsThis =
         t !== undefined &&
-        !t.line &&
         !t.ownLine &&
         t.pos >= a.end &&
-        !/[\n,]/.test(this.text.slice(a.end, t.pos));
-      if (hasTrailingComment) {
+        !/[\n,)]/.test(this.text.slice(a.end, t.pos));
+      const hasTrailingComment = trailsThis && !t.line;
+      // A `//` comment trailing the LAST argument keeps the `)` off its line -
+      // the comment would swallow it. gjf breaks before the `)`, which then
+      // lands at the arguments' own indent.
+      const lastLineComment = trailsThis && t.line && i === lastI;
+      if (lastLineComment) {
+        this.ci++;
+        anyComment = true;
+        parts.push(this.node(a), " ", reflow(t.text, true), hardline, ")", trailing);
+      } else if (hasTrailingComment) {
         parts.push(this.node(a));
         this.attachTrailingBlockComment(parts, a.end);
         anyComment = true;

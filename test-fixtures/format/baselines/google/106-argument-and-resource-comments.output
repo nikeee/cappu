@@ -1,0 +1,16 @@
+package p;
+
+class T {
+  void m(HuffmanCoding huffman) throws Exception {
+    IllegalArgumentException exception =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> huffman.encode("abcd") // 'd' was not in the original tree
+            );
+    try (RecycleOnClose<ModuleReaderProxy, IOException> moduleReaderProxyRecycleOnClose //
+        = moduleReaderProxyRecycler.acquireRecycleOnClose()) {
+      use(exception);
+    }
+    foo(bar); // a comment after the call trails the statement, not the argument
+  }
+}
