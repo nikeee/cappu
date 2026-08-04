@@ -1772,11 +1772,26 @@ class Printer {
 
   private resource(r: Resource, trailing: Doc = ""): Doc {
     if (r.expression) return concat([this.node(r.expression), trailing]);
+    // gjf declares a resource with fieldAnnotationDirection, so an annotation
+    // carrying arguments goes on its own line and the declaration follows at the
+    // resource's +4 continuation (a marker annotation stays inline).
+    const vertical =
+      r.modifiers?.some(
+        m => m.kind === SyntaxKind.Annotation && ((m as Annotation).args?.length ?? 0) > 0,
+      ) ?? false;
     const head = concat([
-      this.modifiers(r.modifiers),
+      this.modifiers(r.modifiers, vertical ? "var" : "inline"),
       r.type ? concat([this.type(r.type), " "]) : "",
       r.name ? this.raw(r.name) : "",
     ]);
+    if (vertical) {
+      const rest = r.initializer
+        ? r.initializer.kind === SyntaxKind.ArrayInitializer
+          ? concat([" = ", this.node(r.initializer), trailing])
+          : concat([" =", level(PLUS4, [line, this.statementTail(r.initializer, trailing)])])
+        : trailing;
+      return level(PLUS4, [head, rest]);
+    }
     if (!r.initializer) return concat([head, trailing]);
     // Like a variable declarator, a long initializer folds onto a +4
     // continuation line after `=` (gjf), rather than breaking the RHS in place.

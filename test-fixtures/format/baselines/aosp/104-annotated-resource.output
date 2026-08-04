@@ -1,0 +1,15 @@
+package p;
+
+class T {
+    void m() throws Exception {
+        try (@SuppressWarnings("resource")
+                CSVParser parser =
+                        CSV_FORMAT.parse(
+                                new InputStreamReader(pointsOfReference, StandardCharsets.UTF_8))) {
+            use(parser);
+        }
+        try (@Deprecated CSVParser p2 = f()) {
+            use(p2);
+        }
+    }
+}

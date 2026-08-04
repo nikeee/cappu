@@ -2075,12 +2075,42 @@ func (p *printer) resourceTrailing(r *compiler.ResourceData, trailing Doc) Doc {
 	if r.Expression != nil {
 		return appendTrailing(p.node(r.Expression))
 	}
-	head := []Doc{p.modifiers(r.Modifiers, "inline")}
+	// gjf declares a resource with fieldAnnotationDirection, so an annotation
+	// carrying arguments goes on its own line and the declaration follows at the
+	// resource's +4 continuation (a marker annotation stays inline).
+	vertical := false
+	for _, m := range nodes(r.Modifiers) {
+		if m.Kind == compiler.Annotation {
+			if a := m.AsAnnotation(); a.Args != nil && a.Args.Len() > 0 {
+				vertical = true
+				break
+			}
+		}
+	}
+	annoMode := "inline"
+	if vertical {
+		annoMode = "var"
+	}
+	head := []Doc{p.modifiers(r.Modifiers, annoMode)}
 	if r.Type != nil {
 		head = append(head, concat(p.typ(r.Type), text(" ")))
 	}
 	if r.Name != nil {
 		head = append(head, text(p.raw(r.Name)))
+	}
+	if vertical {
+		rest := text("")
+		switch {
+		case r.Initializer == nil:
+			if trailing != nil {
+				rest = trailing
+			}
+		case r.Initializer.Kind == compiler.ArrayInitializer:
+			rest = appendTrailing(concat(text(" = "), p.node(r.Initializer)))
+		default:
+			rest = concat(text(" ="), level(plus4, []Doc{line, p.statementTail(r.Initializer, trailing)}))
+		}
+		return level(plus4, []Doc{concat(head...), rest})
 	}
 	if r.Initializer == nil {
 		return appendTrailing(concat(head...))
