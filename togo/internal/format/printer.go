@@ -1655,6 +1655,12 @@ func (p *printer) blockTB(b *compiler.BlockData, endPos int, allowTrailingBlank 
 // caller, so it can be placed inside another level to count toward a wrap
 // decision).
 func (p *printer) blockRest(b *compiler.BlockData, endPos int, allowTrailingBlank bool) Doc {
+	// A comment already emitted with the opening brace (braceTrailAhead) must not
+	// be rendered again here - braceTrailingComment only runs when the block has
+	// statements, and a comment-only block would emit it twice.
+	for p.emittedAhead[p.ci] {
+		p.ci++
+	}
 	// A comment on the same source line as the opening `{` stays on that line
 	// (gjf): `if (...) { // note`. Emit it before the indented body so it rides
 	// the brace line, and consume it here so listDocs does not re-emit it own-line.
@@ -1765,9 +1771,14 @@ func (p *printer) ifStatement(s *compiler.IfStatementData) Doc {
 		default:
 			parts = append(parts, concat(hardline, text("else")))
 		}
-		if s.ElseStatement.Kind == compiler.IfStatement {
+		switch s.ElseStatement.Kind {
+		case compiler.IfStatement:
 			parts = append(parts, text(" "), p.node(s.ElseStatement))
-		} else {
+		case compiler.Block:
+			// The else-block owns its brace, so a comment on the brace's line rides
+			// it (`} else { // note`) instead of starting the body.
+			parts = append(parts, p.braceOpen(s.ElseStatement), p.clauseRest(s.ElseStatement, false))
+		default:
 			parts = append(parts, p.clauseBody(s.ElseStatement))
 		}
 	}
@@ -1820,10 +1831,18 @@ func (p *printer) clauseClose(s *compiler.Node) Doc {
 	if s.Kind != compiler.Block {
 		return text(")")
 	}
+	return concat(text(")"), p.braceOpen(s))
+}
+
+// braceOpen is a block's opening ` {` plus a comment that rides it, or ` {}`
+// when empty. Callers that own the brace themselves (catch/finally/else) use
+// this so the comment counts in THEIR fit check, like clauseClose does for a
+// header.
+func (p *printer) braceOpen(s *compiler.Node) Doc {
 	if p.blockIsEmpty(s.AsBlock(), p.start(s), s.End) {
-		return text(") {}")
+		return text(" {}")
 	}
-	return concat(text(") {"), p.braceTrailAhead(p.start(s)))
+	return concat(text(" {"), p.braceTrailAhead(p.start(s)))
 }
 
 // braceTrailAhead returns a comment on the same line as a clause body's `{`
@@ -1995,14 +2014,14 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 		if lead, ok := p.clauseKeywordLead(p.start(cn), true); ok {
 			open = concat(lead, text("catch ("))
 		}
-		parts = append(parts, open, p.modifiers(c.Modifiers, "inline"), join(text(" | "), ts), text(" "), text(p.raw(c.Name)), text(") "), p.blockTB(c.Block.AsBlock(), c.Block.End, i < len(catches)-1 || hasFinally))
+		parts = append(parts, open, p.modifiers(c.Modifiers, "inline"), join(text(" | "), ts), text(" "), text(p.raw(c.Name)), text(")"), p.braceOpen(c.Block), p.clauseRest(c.Block, i < len(catches)-1 || hasFinally))
 	}
 	if s.FinallyBlock != nil {
-		open := text(" finally ")
+		open := text(" finally")
 		if lead, ok := p.clauseKeywordLead(p.start(s.FinallyBlock), true); ok {
-			open = concat(lead, text("finally "))
+			open = concat(lead, text("finally"))
 		}
-		parts = append(parts, open, p.block(s.FinallyBlock.AsBlock(), s.FinallyBlock.End))
+		parts = append(parts, open, p.braceOpen(s.FinallyBlock), p.clauseRest(s.FinallyBlock, false))
 	}
 	return concat(parts...)
 }

@@ -1,0 +1,19 @@
+package p;
+
+class T {
+  Appendable m(Appendable appendable) {
+    try {
+      appendable.append("x");
+    } catch (final IOException e) { // NOPMD
+      // cannot happen
+    } finally { // always
+      done();
+    }
+    if (appendable == null) {
+      init();
+    } else { // reuse the existing one
+      reuse();
+    }
+    return appendable;
+  }
+}

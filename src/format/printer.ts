@@ -1430,6 +1430,10 @@ class Printer {
    * `allowTrailingBlank` preserves a source blank line before the closing `}`,
    * which gjf does only when a clause follows (`} else`, `} catch`, `} finally`). */
   private blockRest(b: Block, allowTrailingBlank = false): Doc {
+    // A comment already emitted with the opening brace (braceTrailAhead) must not
+    // be rendered again here - braceTrailingComment only runs when the block has
+    // statements, and a comment-only block would emit it twice.
+    while (this.emittedAhead.has(this.ci)) this.ci++;
     // A comment on the same source line as the opening `{` stays on that line
     // (gjf): `if (...) { // note`. It must be emitted before the indented body so
     // it rides the brace line, and consumed here so listDocs does not re-emit it
@@ -1510,6 +1514,11 @@ class Printer {
       else parts.push(elseOnSameLine ? " else" : concat([hardline, "else"]));
       if (s.elseStatement.kind === SyntaxKind.IfStatement) {
         parts.push(" ", this.node(s.elseStatement));
+      } else if (s.elseStatement.kind === SyntaxKind.Block) {
+        // The else-block owns its brace, so a comment on the brace's line rides
+        // it (`} else { // note`) instead of starting the body.
+        const eb = s.elseStatement as Block;
+        parts.push(this.braceOpen(eb), this.clauseRest(eb));
       } else {
         parts.push(this.clauseBody(s.elseStatement));
       }
@@ -1544,9 +1553,17 @@ class Printer {
    */
   private clauseClose(s: Statement): Doc {
     if (s.kind !== SyntaxKind.Block) return ")";
-    const b = s as Block;
-    if (this.blockIsEmpty(b)) return ") {}";
-    return concat([") {", this.braceTrailAhead(b)]);
+    return concat([")", this.braceOpen(s as Block)]);
+  }
+
+  /**
+   * A block's opening ` {` plus a comment that rides it, or ` {}` when empty.
+   * Callers that own the brace themselves (catch/finally/else) use this so the
+   * comment counts in THEIR fit check, like clauseClose does for a header.
+   */
+  private braceOpen(b: Block): Doc {
+    if (this.blockIsEmpty(b)) return " {}";
+    return concat([" {", this.braceTrailAhead(b)]);
   }
 
   /**
@@ -1715,13 +1732,18 @@ class Printer {
         ),
         " ",
         this.raw(c.name),
-        ") ",
-        this.block(c.block, i < s.catchClauses.length - 1 || hasFinally),
+        ")",
+        this.braceOpen(c.block),
+        this.clauseRest(c.block, i < s.catchClauses.length - 1 || hasFinally),
       );
     });
     if (s.finallyBlock) {
       const lead = this.clauseKeywordLead(this.start(s.finallyBlock), true);
-      parts.push(lead ? concat([lead, "finally "]) : " finally ", this.block(s.finallyBlock));
+      parts.push(
+        lead ? concat([lead, "finally"]) : " finally",
+        this.braceOpen(s.finallyBlock),
+        this.clauseRest(s.finallyBlock),
+      );
     }
     return concat(parts);
   }
