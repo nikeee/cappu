@@ -13,6 +13,7 @@ import { type Comment, collectComments } from "./comments.ts";
 import {
   type Annotation,
   type AnnotationTypeDeclaration,
+  type CompactConstructorDeclaration,
   type ArrayCreationExpression,
   type ArrayInitializer,
   type ArrayType,
@@ -2654,6 +2655,19 @@ class Printer {
       case SyntaxKind.WildcardType:
       case SyntaxKind.VarType:
         return this.type(node as TypeNode);
+
+      case SyntaxKind.CompactConstructorDeclaration: {
+        // `record R(int x) { R { validate(x); } }` - no parameter list, so the
+        // body's `{` carries any trailing comment itself. It used to fall
+        // through to the verbatim slice, leaving its body unformatted.
+        const c = node as CompactConstructorDeclaration;
+        return concat([
+          this.modifiers(c.modifiers, "own"),
+          this.raw(c.name),
+          " ",
+          this.block(c.body),
+        ]);
+      }
 
       case SyntaxKind.AnnotationTypeDeclaration: {
         // Rendered like an interface: `@interface Name` plus a member body. It

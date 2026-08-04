@@ -3171,6 +3171,18 @@ func (p *printer) node(node *compiler.Node) Doc {
 		compiler.WildcardType, compiler.VarType:
 		return p.typ(node)
 
+	case compiler.CompactConstructorDeclaration:
+		// `record R(int x) { R { validate(x); } }` - no parameter list, so the
+		// body's `{` carries any trailing comment itself. It used to fall through
+		// to the verbatim slice, leaving its body unformatted.
+		c := node.AsCompactConstructorDeclaration()
+		return concat(
+			p.modifiers(c.Modifiers, "own"),
+			text(p.raw(c.Name)),
+			text(" "),
+			p.block(c.Body.AsBlock(), c.Body.End),
+		)
+
 	case compiler.AnnotationTypeDeclaration:
 		// Rendered like an interface: `@interface Name` plus a member body. It used
 		// to fall through to the verbatim slice, which left an empty body as `{\n}`

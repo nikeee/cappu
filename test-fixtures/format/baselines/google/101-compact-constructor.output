@@ -1,0 +1,13 @@
+package p;
+
+record R(int x, int y) {
+  R {
+    if (x < 0) {
+      throw new IllegalArgumentException("neg");
+    }
+  }
+
+  R(int x) {
+    this(x, 0);
+  }
+}
