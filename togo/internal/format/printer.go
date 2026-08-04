@@ -905,6 +905,24 @@ func (p *printer) annotations(anns *compiler.NodeArray) Doc {
 }
 
 func (p *printer) typeParameters(tps *compiler.NodeArray) Doc {
+	return p.typeParametersBreak(tps, nil)
+}
+
+// classTypeParamIndent is +8 when a header clause follows the type parameters
+// (they nest inside the header's own +4 level), else +4.
+func classTypeParamIndent(hasClause bool) *Indent {
+	i := plus4
+	if hasClause {
+		i = indentConst(8)
+	}
+	return &i
+}
+
+// typeParametersBreak renders `<T, U extends V>`. breakIndent mirrors gjf's
+// typeParametersRest: a class header wraps its list onto a continuation line (a
+// break right after the `<`, the whole list in a level at that indent) when it
+// does not fit; elsewhere the list is unbreakable (nil).
+func (p *printer) typeParametersBreak(tps *compiler.NodeArray, breakIndent *Indent) Doc {
 	if tps.Len() == 0 {
 		return text("")
 	}
@@ -923,7 +941,18 @@ func (p *printer) typeParameters(tps *compiler.NodeArray) Doc {
 		}
 		params[i] = concat(name, text(" extends "), join(text(" & "), bounds))
 	}
-	return concat(text("<"), join(text(", "), params), text(">"))
+	if breakIndent == nil {
+		return concat(text("<"), join(text(", "), params), text(">"))
+	}
+	var inner []Doc
+	for i, pd := range params {
+		if i > 0 {
+			inner = append(inner, text(","), brk(fillUnified, " ", ZERO, nil))
+		}
+		inner = append(inner, pd)
+	}
+	inner = append(inner, text(">"))
+	return concat(text("<"), level(*breakIndent, []Doc{brk(fillUnified, "", ZERO, nil), level(ZERO, inner)}))
 }
 
 func (p *printer) typeArguments(args *compiler.NodeArray) Doc {
@@ -987,7 +1016,10 @@ func (p *printer) classLike(keyword string, mods *compiler.NodeArray, name *comp
 		text(keyword),
 		text(" "),
 		text(p.raw(name)),
-		p.typeParameters(typeParams),
+		// gjf opens the class header at +4 and puts the type parameters in a further
+		// +4 level when a clause follows (so they land at +8), else at the header's
+		// own indent.
+		p.typeParametersBreak(typeParams, classTypeParamIndent(len(tail) > 0)),
 		// extends/implements/permits live in one +4 level: each clause begins with
 		// a fill break, so a long clause folds onto its own continuation line.
 		level(plus4, tail),

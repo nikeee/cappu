@@ -1,0 +1,17 @@
+package p;
+
+class Outer {
+    public abstract static class AbstractBuilder<
+                    F extends FilterByteChannel<C>,
+                    C extends ByteChannel,
+                    B extends AbstractBuilder<F, C, B>>
+            extends FilterChannel.AbstractBuilder<F, C, B> {
+        void x() {}
+    }
+
+    static class ShortOne<T extends Comparable<T>, U extends Collection<T>> {
+        void y() {}
+    }
+
+    static <T extends Comparable<T>, U extends Collection<T>> void method(T t, U u) {}
+}

@@ -96,6 +96,7 @@ import {
   hardline,
   indent,
   indentConst,
+  type Indent,
   indentIf,
   join,
   level,
@@ -823,7 +824,16 @@ class Printer {
     return concat(anns.map(a => concat([this.annotation(a), " "])));
   }
 
-  private typeParameters(tps: NodeArray<TypeParameter> | undefined): Doc {
+  /**
+   * `<T, U extends V>`. `breakIndent` mirrors gjf's typeParametersRest: a class
+   * header wraps its list onto a continuation line (a break right after the `<`,
+   * the whole list in a level at that indent) when it does not fit; elsewhere
+   * the list is unbreakable.
+   */
+  private typeParameters(
+    tps: NodeArray<TypeParameter> | undefined,
+    breakIndent?: Indent,
+  ): Doc {
     if (!tps || tps.length === 0) return "";
     const params = tps.map(tp => {
       // <@A T extends ...>: the type parameter's own annotations (JSR-308).
@@ -838,7 +848,16 @@ class Printer {
         ),
       ]);
     });
-    return concat(["<", join(", ", params), ">"]);
+    if (breakIndent === undefined) return concat(["<", join(", ", params), ">"]);
+    const inner: Doc[] = [];
+    params.forEach((pd, i) => {
+      if (i > 0) inner.push(",", brk("unified", " ", ZERO));
+      inner.push(pd);
+    });
+    return concat([
+      "<",
+      level(breakIndent, [brk("unified", "", ZERO), level(ZERO, [...inner, ">"])]),
+    ]);
   }
 
   private typeArguments(args: NodeArray<TypeNode | WildcardType> | undefined): Doc {
@@ -907,7 +926,10 @@ class Printer {
       keyword,
       " ",
       this.raw(decl.name),
-      this.typeParameters(decl.typeParameters),
+      // gjf opens the class header at +4 and puts the type parameters in a
+      // further +4 level when a clause follows (so they land at +8), else at the
+      // header's own indent.
+      this.typeParameters(decl.typeParameters, tail.length > 0 ? indentConst(8) : PLUS4),
       // extends/implements/permits live in one +4 level: each clause begins with
       // a fill break, so a long clause folds onto its own continuation line.
       level(PLUS4, tail),
