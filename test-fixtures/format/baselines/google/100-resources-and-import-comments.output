@@ -1,0 +1,18 @@
+package p;
+
+import java.util.List; // NOPMD: Required by the API
+import java.util.Map;
+
+class T {
+  Map<String, String> b;
+
+  void m(List<String> a) throws Exception {
+    try (StringWriter sw = new StringWriter();
+        PrintWriter pw = new PrintWriter(sw)) {
+      dump(pw, a, b);
+    }
+    try (StringWriter only = new StringWriter()) {
+      dump(only, a, b);
+    }
+  }
+}

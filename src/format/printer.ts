@@ -213,6 +213,8 @@ class Printer {
   private ci = 0;
   /** Comment indices already emitted out of order (see `braceTrailAhead`). */
   private readonly emittedAhead = new Set<number>();
+  /** Each import's same-line trailing comment (see `importTrailingComments`). */
+  private readonly importTrailing = new Map<ImportDeclaration, string>();
   // The indent multiplier (1 google / 2 aosp). Most layout defers the multiplier
   // to print time, but a few gjf decisions (e.g. the method-chain "small
   // receiver" threshold) depend on it at build time.
@@ -528,6 +530,7 @@ class Printer {
         importLead = concat(parts);
       }
     }
+    this.importTrailingComments(sf.imports);
     for (const g of [statics, nonStatics]) {
       if (g.length > 0) {
         blocks.push(concat([importLead, this.importGroup(g)]));
@@ -670,15 +673,37 @@ class Printer {
       .map(imp => ({ key: this.entityName(imp.name), imp }))
       .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
       .map(entry => entry.imp);
-    const seen = new Set<string>();
+    const seen = new Map<string, number>();
     const lines: Doc[] = [];
     for (const imp of sorted) {
       const text = this.importLine(imp);
-      if (seen.has(text)) continue; // dedupe identical imports
-      seen.add(text);
-      lines.push(text);
+      // A trailing comment stays on its import's line (`import x; // NOPMD`).
+      // It was consumed in source order up front (importTrailingComments), since
+      // this list is sorted and the comment cursor only moves forward.
+      const comment = this.importTrailing.get(imp);
+      const at = seen.get(text);
+      if (at !== undefined) {
+        // Identical import: drop the duplicate line but keep its comment, which
+        // has already been consumed and would otherwise be lost.
+        if (comment !== undefined) lines[at] = concat([lines[at], " ", reflow(comment)]);
+        continue;
+      }
+      seen.set(text, lines.length);
+      lines.push(comment === undefined ? text : concat([text, " ", reflow(comment)]));
     }
     return join(hardline, lines);
+  }
+
+  /**
+   * Consume every import's same-line trailing comment, in SOURCE order - the
+   * comment cursor only moves forward, but `importGroup` renders the imports
+   * sorted, so they cannot be picked up there.
+   */
+  private importTrailingComments(imports: readonly ImportDeclaration[]): void {
+    for (const imp of imports) {
+      const c = this.trailingCommentAfter(imp);
+      if (c) this.importTrailing.set(imp, c.text);
+    }
   }
 
   private importLine(imp: ImportDeclaration): string {
@@ -1665,9 +1690,11 @@ class Printer {
         // (which would double-indent the broken initializer to +8).
         parts.push(" (", this.resource(s.resources[0], close));
       } else {
+        // gjf's visitTry uses a FORCED break between resources, so more than one
+        // always goes one per line even when they would fit together.
         const inner: Doc[] = [];
         s.resources.forEach((r, i) => {
-          if (i > 0) inner.push(";", brk("unified", " ", ZERO));
+          if (i > 0) inner.push(";", hardline);
           inner.push(this.resource(r));
         });
         parts.push(" (", level(PLUS4, inner), close);

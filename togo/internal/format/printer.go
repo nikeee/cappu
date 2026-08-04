@@ -139,6 +139,9 @@ type printer struct {
 	// emittedAhead holds comment indices already emitted out of order (see
 	// braceTrailAhead).
 	emittedAhead map[int]bool
+	// importTrailing holds each import's same-line trailing comment (see
+	// importTrailingComments).
+	importTrailing map[*compiler.Node]string
 	// mult is the indent multiplier (1 google / 2 aosp); a few gjf decisions
 	// (e.g. the method-chain "small receiver" threshold) need it at build time.
 	mult int
@@ -149,7 +152,7 @@ type printer struct {
 
 func newPrinter(sf *compiler.Node, mult int) *printer {
 	text := sf.AsSourceFile().Text
-	p := &printer{sf: sf, text: text, comments: collectComments(text), mult: mult, typeAnnotationNames: map[string]bool{}, emittedAhead: map[int]bool{}}
+	p := &printer{sf: sf, text: text, comments: collectComments(text), mult: mult, typeAnnotationNames: map[string]bool{}, emittedAhead: map[int]bool{}, importTrailing: map[*compiler.Node]string{}}
 	for _, imp := range nodes(sf.AsSourceFile().Imports) {
 		id := imp.AsImportDeclaration()
 		if id.IsStatic {
@@ -521,6 +524,7 @@ func (p *printer) sourceFile(sf *compiler.SourceFileData) Doc {
 			importLead = concat(parts...)
 		}
 	}
+	p.importTrailingComments(sf.Imports)
 	for _, g := range [][]*compiler.Node{statics, nonStatics} {
 		if len(g) > 0 {
 			if importLead != nil {
@@ -699,17 +703,41 @@ func (p *printer) importGroup(imports []*compiler.Node) Doc {
 	for i, e := range entries {
 		sorted[i] = e.imp
 	}
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	var lines []Doc
 	for _, imp := range sorted {
 		t := p.importLine(imp.AsImportDeclaration())
-		if seen[t] {
-			continue // dedupe identical imports
+		// A trailing comment stays on its import's line (`import x; // NOPMD`). It
+		// was consumed in source order up front (importTrailingComments), since
+		// this list is sorted and the comment cursor only moves forward.
+		comment, hasComment := p.importTrailing[imp]
+		if at, dup := seen[t]; dup {
+			// Identical import: drop the duplicate line but keep its comment, which
+			// has already been consumed and would otherwise be lost.
+			if hasComment {
+				lines[at] = concat(lines[at], text(" "), reflow(comment))
+			}
+			continue
 		}
-		seen[t] = true
-		lines = append(lines, text(t))
+		seen[t] = len(lines)
+		if hasComment {
+			lines = append(lines, concat(text(t), text(" "), reflow(comment)))
+		} else {
+			lines = append(lines, text(t))
+		}
 	}
 	return join(hardline, lines)
+}
+
+// importTrailingComments consumes every import's same-line trailing comment, in
+// SOURCE order - the comment cursor only moves forward, but importGroup renders
+// the imports sorted, so they cannot be picked up there.
+func (p *printer) importTrailingComments(imports *compiler.NodeArray) {
+	for _, imp := range nodes(imports) {
+		if c, ok := p.trailingCommentAfter(imp); ok {
+			p.importTrailing[imp] = c.text
+		}
+	}
 }
 
 func (p *printer) importLine(imp *compiler.ImportDeclarationData) string {
@@ -1940,10 +1968,12 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 			// (which would double-indent the broken initializer to +8).
 			parts = append(parts, text(" ("), p.resourceTrailing(res[0].AsResource(), text(closeTok)))
 		} else {
+			// gjf's visitTry uses a FORCED break between resources, so more than one
+			// always goes one per line even when they would fit together.
 			var inner []Doc
 			for i, r := range res {
 				if i > 0 {
-					inner = append(inner, text(";"), brk(fillUnified, " ", ZERO, nil))
+					inner = append(inner, text(";"), hardline)
 				}
 				inner = append(inner, p.resource(r.AsResource()))
 			}
