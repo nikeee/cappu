@@ -27,5 +27,20 @@ func FormatSource(text string, options FormatOptions, fileName string) (string, 
 	if len(sf.AsSourceFile().ParseDiagnostics) > 0 {
 		return "", ErrUnsupportedSyntax
 	}
-	return formatSourceFile(sf, options)
+	once, err := formatSourceFile(sf, options)
+	if err != nil {
+		return "", err
+	}
+	// google-java-format reflows over-long string literals as a post-pass over
+	// its own output and then formats again (Formatter.formatSource ->
+	// StringWrapper).
+	wrapped := wrapLongStrings(once)
+	if wrapped == once {
+		return once, nil
+	}
+	rewritten := compiler.ParseSourceFile(fileName, wrapped)
+	if len(rewritten.AsSourceFile().ParseDiagnostics) > 0 {
+		return once, nil // never ship a bad rewrite
+	}
+	return formatSourceFile(rewritten, options)
 }

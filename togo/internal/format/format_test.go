@@ -335,3 +335,65 @@ func TestTrailingCommentNotWrapped(t *testing.T) {
 		t.Errorf("not idempotent:\n1st:\n%s\n2nd:\n%s", once, twice)
 	}
 }
+
+// TestStringWrapper mirrors the TS tests for the StringWrapper post-pass: an
+// over-long literal is reflowed exactly like gjf, the result is a fixpoint, and
+// the concatenated value never changes.
+func TestStringWrapper(t *testing.T) {
+	source := strings.Join([]string{
+		"package p;",
+		"",
+		"class T {",
+		"  void m() {",
+		`    throw new IllegalArgumentException("Absolute value of Long.MIN_VALUE does not fit into signed long. Use gcdBig() for full-range support.");`,
+		"  }",
+		"}",
+		"",
+	}, "\n")
+	want := strings.Join([]string{
+		"package p;",
+		"",
+		"class T {",
+		"  void m() {",
+		"    throw new IllegalArgumentException(",
+		`        "Absolute value of Long.MIN_VALUE does not fit into signed long. Use gcdBig() for"`,
+		`            + " full-range support.");`,
+		"  }",
+		"}",
+		"",
+	}, "\n")
+	got, err := FormatSource(source, FormatOptions{Style: "google"}, "T.java")
+	if err != nil {
+		t.Fatalf("FormatSource: %v", err)
+	}
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+	twice, err := FormatSource(got, FormatOptions{Style: "google"}, "T.java")
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if twice != got {
+		t.Errorf("string reflow is not idempotent:\n%s", twice)
+	}
+}
+
+// TestStringWrapperLeavesShortLiterals is the negative case: a literal that
+// already fits is never touched.
+func TestStringWrapperLeavesShortLiterals(t *testing.T) {
+	source := strings.Join([]string{
+		"package p;",
+		"",
+		"class T {",
+		`  String ok = "this one fits well inside the column limit and must not be touched at all";`,
+		"}",
+		"",
+	}, "\n")
+	got, err := FormatSource(source, FormatOptions{Style: "google"}, "T.java")
+	if err != nil {
+		t.Fatalf("FormatSource: %v", err)
+	}
+	if got != source {
+		t.Errorf("short literal was touched:\n%s", got)
+	}
+}

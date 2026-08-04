@@ -5,6 +5,7 @@
 
 import { parseSourceFile } from "../compiler/parser.ts";
 import { type FormatOptions, formatSourceFile, UnsupportedSyntaxError } from "./printer.ts";
+import { wrapLongStrings } from "./string-wrapper.ts";
 
 export type { FormatOptions } from "./printer.ts";
 export { UnsupportedSyntaxError } from "./printer.ts";
@@ -24,5 +25,12 @@ export function formatSource(
   if (sf.parseDiagnostics.length > 0) {
     throw new UnsupportedSyntaxError("source has syntax errors");
   }
-  return formatSourceFile(sf, options);
+  const once = formatSourceFile(sf, options);
+  // google-java-format reflows over-long string literals as a post-pass over its
+  // own output and then formats again (Formatter.formatSource -> StringWrapper).
+  const wrapped = wrapLongStrings(once);
+  if (wrapped === once) return once;
+  const rewritten = parseSourceFile(fileName, wrapped);
+  if (rewritten.parseDiagnostics.length > 0) return once; // never ship a bad rewrite
+  return formatSourceFile(rewritten, options);
 }

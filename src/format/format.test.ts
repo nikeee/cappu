@@ -293,3 +293,56 @@ test("a trailing comment is not wrapped, and the output is stable", () => {
   expect(once).toContain("+ 1]; // creates the array");
   expect(formatSource(once, { style: "google" })).toBe(once);
 });
+
+// google-java-format reflows an over-long string literal as a post-pass over its
+// own output (StringWrapper), then formats again. The google-style result is
+// byte-identical to gjf; in aosp gjf's FIRST pass indents the continuation +4
+// and its second pass moves it to +8 - gjf's own output is not a fixpoint there,
+// and we emit the fixpoint.
+test("an over-long string literal is reflowed like google-java-format", () => {
+  const source = [
+    "package p;",
+    "",
+    "class T {",
+    "  void m() {",
+    '    throw new IllegalArgumentException("Absolute value of Long.MIN_VALUE does not fit into signed long. Use gcdBig() for full-range support.");',
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+  const expected = [
+    "package p;",
+    "",
+    "class T {",
+    "  void m() {",
+    "    throw new IllegalArgumentException(",
+    '        "Absolute value of Long.MIN_VALUE does not fit into signed long. Use gcdBig() for"',
+    '            + " full-range support.");',
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+  const once = formatSource(source, { style: "google" });
+  expect(once).toBe(expected);
+  expect(formatSource(once, { style: "google" })).toBe(once);
+  // The reflow only re-cuts the literal: the concatenated value is unchanged.
+  const value = (s: string) =>
+    [...s.matchAll(/"((?:\\.|[^"\\])*)"/g)].map(m => m[1]).join("");
+  expect(value(once)).toBe(value(source));
+  const aosp = formatSource(source, { style: "aosp" });
+  expect(formatSource(aosp, { style: "aosp" })).toBe(aosp);
+});
+
+// A literal that already fits is never touched, and one the source already split
+// keeps its cuts when nothing else fits on a line.
+test("string reflow leaves short literals alone", () => {
+  const source = [
+    "package p;",
+    "",
+    "class T {",
+    '  String ok = "this one fits well inside the column limit and must not be touched at all";',
+    "}",
+    "",
+  ].join("\n");
+  expect(formatSource(source, { style: "google" })).toBe(source);
+});
