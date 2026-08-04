@@ -2517,7 +2517,9 @@ class Printer {
    */
   private lineCommentAfterAssign(from: number, initStart: number): Comment | undefined {
     const t = this.comments[this.ci];
-    if (!t || !t.line || t.ownLine || t.pos >= initStart) return undefined;
+    // The pending comment can lie BEFORE the name (an earlier one this
+    // declaration does not own); `slice` would quietly return "" and claim it.
+    if (!t || !t.line || t.ownLine || t.pos < from || t.pos >= initStart) return undefined;
     if (this.text.slice(from, t.pos).includes("\n")) return undefined;
     this.ci++;
     return t;

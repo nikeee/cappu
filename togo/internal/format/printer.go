@@ -3065,7 +3065,9 @@ func (p *printer) lineCommentAfterAssign(from, initStart int) (comment, bool) {
 		return comment{}, false
 	}
 	t := p.comments[p.ci]
-	if !t.line || t.ownLine || t.pos >= initStart {
+	// The pending comment can lie BEFORE the name (an earlier one this
+	// declaration does not own), which is not ours and would slice backwards.
+	if !t.line || t.ownLine || t.pos < from || t.pos >= initStart {
 		return comment{}, false
 	}
 	if strings.Contains(p.text[from:t.pos], "\n") {
