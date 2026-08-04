@@ -11,12 +11,17 @@ const MAX_LINE_LENGTH = 100;
  * Rewrite a comment for output at `column0`. `isLine` is true for `//` comments.
  * Mirrors `JavaCommentsHelper.rewrite`.
  */
-export function rewriteComment(text: string, column0: number, isLine: boolean): string {
+export function rewriteComment(
+  text: string,
+  column0: number,
+  isLine: boolean,
+  noWrap = false,
+): string {
   if (text.startsWith("/**")) {
     text = formatJavadoc(text, column0);
   }
   const lines = text.split("\n").map(l => (isLine ? l.trim() : trimTrailing(l)));
-  if (isLine) return indentLineComments(lines, column0);
+  if (isLine) return indentLineComments(lines, column0, noWrap);
   const pc = reformatParamComment(text);
   if (pc !== null) return pc;
   const out = javadocShaped(lines)
@@ -71,8 +76,8 @@ function indentJavadoc(lines: string[], column0: number): string {
 }
 
 // Wrap and re-indent line comments.
-function indentLineComments(lines: string[], column0: number): string {
-  lines = wrapLineComments(lines, column0);
+function indentLineComments(lines: string[], column0: number, noWrap = false): string {
+  if (!noWrap) lines = wrapLineComments(lines, column0);
   let out = lines[0].trim();
   const pad = " ".repeat(column0);
   for (let i = 1; i < lines.length; i++) out += "\n" + pad + lines[i].trim();

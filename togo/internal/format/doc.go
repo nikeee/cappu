@@ -110,7 +110,12 @@ func (t *token) flat() string { return t.text }
 
 // reflowDoc is a leaf whose text is rewritten at write time given the column it
 // lands at - the generic hook the printer uses for comment reflow.
-type reflowDoc struct{ raw string }
+type reflowDoc struct {
+	raw string
+	// noWrap marks a comment that trails code: it must not be wrapped, its
+	// continuation lines would re-parse as separate comments.
+	noWrap bool
+}
 
 func (r *reflowDoc) width() int {
 	if strings.Contains(r.raw, "\n") {
@@ -121,6 +126,9 @@ func (r *reflowDoc) width() int {
 func (r *reflowDoc) flat() string { return r.raw }
 
 func reflow(raw string) Doc { return &reflowDoc{raw: raw} }
+
+// reflowNoWrap is reflow for a comment that trails code on its line.
+func reflowNoWrap(raw string) Doc { return &reflowDoc{raw: raw, noWrap: true} }
 
 type concatDoc struct {
 	parts []Doc
@@ -264,7 +272,7 @@ type printOptions struct {
 	width      int // hard wrap column (google-java-format: 100)
 	indentMult int // indent multiplier: 1 google (2-space), 2 aosp (4-space)
 	// commentRewriter rewrites a reflow leaf's text given the column it lands at.
-	commentRewriter func(raw string, column int) string
+	commentRewriter func(raw string, column int, noWrap bool) string
 }
 
 // splitByBreaks splits a Level's docs into Break-separated groups. Concats are
@@ -390,7 +398,7 @@ func computeSplit(maxW, mult int, docs []Doc, st state) state {
 type writer struct {
 	out     []string
 	col     int
-	rewrite func(raw string, column int) string
+	rewrite func(raw string, column int, noWrap bool) string
 }
 
 func (w *writer) push(s string) {
@@ -408,7 +416,7 @@ func writeDoc(doc Doc, w *writer) {
 		w.push(n.text)
 	case *reflowDoc:
 		if w.rewrite != nil {
-			w.push(w.rewrite(n.raw, w.col))
+			w.push(w.rewrite(n.raw, w.col, n.noWrap))
 		} else {
 			w.push(n.raw)
 		}

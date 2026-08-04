@@ -271,3 +271,25 @@ test("the source's line separator is preserved", () => {
   expect(formatSource(lines.join("\r\n"), { style: "google" })).toBe(lines.join("\r\n"));
   expect(formatSource(lines.join("\n"), { style: "google" })).toBe(lines.join("\n"));
 });
+
+// A comment that TRAILS code is never wrapped, even past the column limit: its
+// continuation lines would re-parse as separate own-line comments, so the
+// second `cappu format` run would move them and the formatter would not be
+// idempotent. (gjf wraps here, but its own output is not a fixpoint either -
+// it breaks the CODE hard enough that the comment fits, which we do not always
+// manage.) An OWN-LINE comment still wraps: it re-parses in the same place.
+test("a trailing comment is not wrapped, and the output is stable", () => {
+  const source = [
+    "package p;",
+    "",
+    "class T {",
+    "  void m(int[] rankArray, HeapNode min) {",
+    "    int[] a = new int[(int) Math.floor(Math.log(size()) / Math.log(RATIO)) + 1]; // creates the array",
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+  const once = formatSource(source, { style: "google" });
+  expect(once).toContain("+ 1]; // creates the array");
+  expect(formatSource(once, { style: "google" })).toBe(once);
+});

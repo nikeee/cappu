@@ -63,7 +63,10 @@ export type Doc = string | Concat | Level | Break | Reflow;
 // it only supplies the column and writes whatever the rewriter returns.
 class Reflow {
   readonly kind = "reflow";
-  constructor(readonly raw: string) {}
+  constructor(
+    readonly raw: string,
+    readonly noWrap = false,
+  ) {}
   width(): number {
     // Comments are emitted on their own line, so the exact width never drives a
     // fit decision; a multi-line raw reports MAX so its level always breaks.
@@ -72,8 +75,8 @@ class Reflow {
 }
 
 /** A leaf rewritten by `printDoc`'s `commentRewriter` at write time. */
-export function reflow(raw: string): Doc {
-  return new Reflow(raw);
+export function reflow(raw: string, noWrap = false): Doc {
+  return new Reflow(raw, noWrap);
 }
 
 class Concat {
@@ -227,8 +230,12 @@ interface PrintOptions {
   width: number;
   /** Indent multiplier: 1 for google (2-space), 2 for aosp (4-space). */
   indentMultiplier: number;
-  /** Rewrites a `reflow` leaf's text given the column it is written at. */
-  commentRewriter?: (raw: string, column: number) => string;
+  /**
+   * Rewrites a `reflow` leaf's text given the column it is written at. `noWrap`
+   * is the leaf's own flag: a comment that trails code must not be wrapped, its
+   * continuation lines would re-parse as separate comments.
+   */
+  commentRewriter?: (raw: string, column: number, noWrap: boolean) => string;
 }
 
 // Split a Level's docs into Break-separated groups. Concats are transparent and
@@ -356,7 +363,7 @@ function computeSplit(maxWidth: number, mult: number, docs: Doc[], state: State)
 interface Writer {
   out: string[];
   col: number;
-  rewrite?: (raw: string, column: number) => string;
+  rewrite?: (raw: string, column: number, noWrap: boolean) => string;
 }
 
 function push(w: Writer, s: string): void {
@@ -379,7 +386,7 @@ function writeDoc(doc: Doc, w: Writer): void {
       // Rewrite the raw text given the column it lands at (gjf's column0), then
       // write it. The rewriter returns fully-indented multi-line text whose first
       // line sits at the current column.
-      push(w, w.rewrite ? w.rewrite(doc.raw, w.col) : doc.raw);
+      push(w, w.rewrite ? w.rewrite(doc.raw, w.col, doc.noWrap) : doc.raw);
       break;
     case "level":
       if (doc.oneLine) {

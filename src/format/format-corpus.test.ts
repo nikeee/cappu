@@ -63,4 +63,22 @@ if (files.length === 0) {
     }
     expect(matched).toBeGreaterThanOrEqual(RATCHET);
   });
+
+  // Formatting is a normalization, so it must reach a fixpoint in ONE pass:
+  // `format(format(x)) === format(x)` for EVERY file, matched or not. The golden
+  // fixtures assert this per case; this widens it to the whole corpus, where a
+  // wrapped trailing comment used to re-parse as an own-line comment and move.
+  test("formatting the gjf corpus is idempotent", () => {
+    const unstable: string[] = [];
+    for (const f of files) {
+      let once: string;
+      try {
+        once = formatSource(readFileSync(f, "utf8"), { style: "google" }, f);
+      } catch {
+        continue;
+      }
+      if (formatSource(once, { style: "google" }, f) !== once) unstable.push(f.split("/").pop()!);
+    }
+    expect(unstable).toEqual([]);
+  });
 }

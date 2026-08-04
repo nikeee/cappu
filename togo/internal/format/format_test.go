@@ -305,3 +305,33 @@ func TestLineSeparatorPreserved(t *testing.T) {
 		}
 	}
 }
+
+// TestTrailingCommentNotWrapped mirrors the TS test "a trailing comment is not
+// wrapped, and the output is stable": wrapping it would re-parse the
+// continuation as an own-line comment, so a second pass would move it.
+func TestTrailingCommentNotWrapped(t *testing.T) {
+	source := strings.Join([]string{
+		"package p;",
+		"",
+		"class T {",
+		"  void m(int[] rankArray, HeapNode min) {",
+		"    int[] a = new int[(int) Math.floor(Math.log(size()) / Math.log(RATIO)) + 1]; // creates the array",
+		"  }",
+		"}",
+		"",
+	}, "\n")
+	once, err := FormatSource(source, FormatOptions{Style: "google"}, "T.java")
+	if err != nil {
+		t.Fatalf("FormatSource: %v", err)
+	}
+	if !strings.Contains(once, "+ 1]; // creates the array") {
+		t.Errorf("trailing comment was wrapped:\n%s", once)
+	}
+	twice, err := FormatSource(once, FormatOptions{Style: "google"}, "T.java")
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if twice != once {
+		t.Errorf("not idempotent:\n1st:\n%s\n2nd:\n%s", once, twice)
+	}
+}

@@ -49,4 +49,26 @@ func TestCorpusFixpoint(t *testing.T) {
 	if matched < corpusRatchet {
 		t.Fatalf("gjf corpus fixpoints regressed: %d < ratchet %d", matched, corpusRatchet)
 	}
+
+	// Formatting is a normalization, so it must reach a fixpoint in ONE pass:
+	// format(format(x)) == format(x) for EVERY file, matched or not. Mirrors the
+	// TS test "formatting the gjf corpus is idempotent".
+	for _, f := range files {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		once, ferr := FormatSource(string(src), FormatOptions{Style: "google"}, f)
+		if ferr != nil {
+			continue
+		}
+		twice, ferr := FormatSource(once, FormatOptions{Style: "google"}, f)
+		if ferr != nil {
+			t.Errorf("%s: second pass failed: %v", filepath.Base(f), ferr)
+			continue
+		}
+		if twice != once {
+			t.Errorf("%s: formatting is not idempotent", filepath.Base(f))
+		}
+	}
 }

@@ -17,7 +17,7 @@ const commentMaxLineLength = 100
 
 // rewriteComment rewrites a comment for output at column0. isLine is true for
 // `//` comments. Mirrors JavaCommentsHelper.rewrite.
-func rewriteComment(text string, column0 int, isLine bool) string {
+func rewriteComment(text string, column0 int, isLine, noWrap bool) string {
 	if strings.HasPrefix(text, "/**") {
 		text = javadoc.FormatJavadoc(text, column0)
 	}
@@ -31,7 +31,7 @@ func rewriteComment(text string, column0 int, isLine bool) string {
 		}
 	}
 	if isLine {
-		return indentLineComments(lines, column0)
+		return indentLineComments(lines, column0, noWrap)
 	}
 	if pc, ok := reformatParamComment(text); ok {
 		return pc
@@ -111,8 +111,10 @@ func indentJavadoc(lines []string, column0 int) string {
 	return b.String()
 }
 
-func indentLineComments(lines []string, column0 int) string {
-	lines = wrapLineComments(lines, column0)
+func indentLineComments(lines []string, column0 int, noWrap bool) string {
+	if !noWrap {
+		lines = wrapLineComments(lines, column0)
+	}
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(lines[0]))
 	pad := strings.Repeat(" ", column0)

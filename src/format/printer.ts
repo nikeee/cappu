@@ -174,10 +174,10 @@ export function formatSourceFile(sf: SourceFile, options: FormatOptions): string
     indentMultiplier: mult,
     // A `reflow` leaf carries a raw comment or a multi-line text block; rewrite it
     // at the column it lands at.
-    commentRewriter: (raw, col) =>
+    commentRewriter: (raw, col, noWrap) =>
       raw.startsWith('"""')
         ? reindentTextBlock(raw)
-        : rewriteComment(raw, col, raw.startsWith("//")),
+        : rewriteComment(raw, col, raw.startsWith("//"), noWrap),
   });
   // Safety net: the printer attaches comments at member/statement granularity.
   // If a comment sat somewhere it does not yet handle, refuse rather than
@@ -384,7 +384,7 @@ class Printer {
       for (const c of leadComments) {
         if (!c.ownLine && !pushedInEntry && i > 0) {
           // A comment after code on the same line: attach to the previous entry.
-          out[out.length - 1] = concat([out[out.length - 1], " ", reflow(c.text)]);
+          out[out.length - 1] = concat([out[out.length - 1], " ", reflow(c.text, true)]);
         } else {
           // Own-line comment: reflow it at the column it is written at.
           pushEntry(reflow(c.text), this.blankBeforePos(prevEnd, c.pos));
@@ -402,12 +402,12 @@ class Printer {
       // multi-line block comment cannot: its width would force every break.
       const peeked = this.peekTrailingComment(item);
       const tail =
-        peeked && !peeked.text.includes("\n") ? concat([" ", reflow(peeked.text)]) : undefined;
+        peeked && !peeked.text.includes("\n") ? concat([" ", reflow(peeked.text, true)]) : undefined;
       let itemDoc = tail ? this.nodeWithTail(item, tail) : this.node(item);
-      if (inlineLead) itemDoc = concat([reflow(inlineLead.text), " ", itemDoc]);
+      if (inlineLead) itemDoc = concat([reflow(inlineLead.text, true), " ", itemDoc]);
       const trailing = this.trailingCommentAfter(item);
       if (trailing) {
-        if (!tail) itemDoc = concat([itemDoc, " ", reflow(trailing.text)]);
+        if (!tail) itemDoc = concat([itemDoc, " ", reflow(trailing.text, true)]);
         prevEnd = trailing.end;
       } else {
         prevEnd = item.end;
@@ -591,7 +591,7 @@ class Printer {
     for (const a of m.annotations ?? []) {
       head.push(this.annotation(a));
       const tc = this.trailingCommentAfter(a);
-      if (tc) head.push(" ", reflow(tc.text));
+      if (tc) head.push(" ", reflow(tc.text, true));
       head.push(hardline);
     }
     if (m.isOpen) head.push("open ");
@@ -610,7 +610,7 @@ class Printer {
       for (const c of this.commentsBefore(this.start(d))) body.push(reflow(c.text), hardline);
       const trailing = this.trailingCommentAfter(d);
       body.push(
-        trailing ? concat([this.directive(d), " ", reflow(trailing.text)]) : this.directive(d),
+        trailing ? concat([this.directive(d), " ", reflow(trailing.text, true)]) : this.directive(d),
       );
     });
     // Comments between the last directive and the closing brace.
@@ -687,11 +687,11 @@ class Printer {
       if (at !== undefined) {
         // Identical import: drop the duplicate line but keep its comment, which
         // has already been consumed and would otherwise be lost.
-        if (comment !== undefined) lines[at] = concat([lines[at], " ", reflow(comment)]);
+        if (comment !== undefined) lines[at] = concat([lines[at], " ", reflow(comment, true)]);
         continue;
       }
       seen.set(text, lines.length);
-      lines.push(comment === undefined ? text : concat([text, " ", reflow(comment)]));
+      lines.push(comment === undefined ? text : concat([text, " ", reflow(comment, true)]));
     }
     return join(hardline, lines);
   }
@@ -759,7 +759,7 @@ class Printer {
       // (`@SuppressWarnings("x") // why`) instead of floating away.
       if (ownLine) {
         const tc = this.trailingCommentAfter(a);
-        if (tc) parts.push(" ", reflow(tc.text));
+        if (tc) parts.push(" ", reflow(tc.text, true));
       }
       parts.push(ownLine ? hardline : " ");
       // An own-line comment between this annotation and whatever follows it
@@ -1036,7 +1036,7 @@ class Printer {
       const trailing = this.trailingCommentAfter(c);
       if (trailing) {
         if (isLast) lastTrailing = trailing.text;
-        else cdoc = concat([cdoc, " ", reflow(trailing.text)]);
+        else cdoc = concat([cdoc, " ", reflow(trailing.text, true)]);
         prevConstEnd = trailing.end;
       } else {
         prevConstEnd = c.end;
@@ -1168,7 +1168,7 @@ class Printer {
         brk("unified", " ", ZERO, nameTag),
         name,
         " =",
-        eq ? concat([" ", reflow(eq.text)]) : "",
+        eq ? concat([" ", reflow(eq.text, true)]) : "",
       ]),
       level(indentIf(nameTag, indentConst(8), PLUS4), [
         eq ? hardline : line,
@@ -1195,7 +1195,7 @@ class Printer {
     return concat([
       name,
       " =",
-      eq ? concat([" ", reflow(eq.text)]) : "",
+      eq ? concat([" ", reflow(eq.text, true)]) : "",
       level(PLUS4, [eq ? hardline : line, this.statementTail(v.initializer, trailing)]),
     ]);
   }
@@ -1258,7 +1258,7 @@ class Printer {
       !/[\n,):]/.test(this.text.slice(endPos, t.pos))
     ) {
       this.ci++;
-      parts.push(" ", reflow(t.text));
+      parts.push(" ", reflow(t.text, true));
       return true;
     }
     return false;
@@ -1513,7 +1513,7 @@ class Printer {
     const c = this.comments[this.ci];
     if (!c || c.pos < afterBrace || /\n/.test(this.text.slice(afterBrace, c.pos))) return "";
     this.ci++;
-    return concat([" ", reflow(c.text)]);
+    return concat([" ", reflow(c.text, true)]);
   }
 
   private statementList(list: NodeArray<Statement>, endPos: number): Doc[] {
@@ -1574,7 +1574,10 @@ class Printer {
     if (cs.length === 0) return undefined;
     const parts: Doc[] = [];
     cs.forEach((c, i) => {
-      parts.push(i === 0 && !c.ownLine && afterBlock ? " " : hardline, reflow(c.text));
+      parts.push(
+        i === 0 && !c.ownLine && afterBlock ? " " : hardline,
+        reflow(c.text, i === 0 && !c.ownLine && afterBlock),
+      );
     });
     parts.push(hardline);
     return concat(parts);
@@ -1620,7 +1623,7 @@ class Printer {
       // indented line (`void h() { /* c */ }` -> `{`, `/* c */`, `}`).
       if (!c.line) return "";
       this.emittedAhead.add(i);
-      return concat([" ", reflow(c.text)]);
+      return concat([" ", reflow(c.text, true)]);
     }
     return "";
   }
@@ -1832,7 +1835,7 @@ class Printer {
       // trails THAT clause, not the next - append it to the previous entry.
       if (comments.length > 0 && !comments[0].ownLine && entries.length > 0) {
         const prev = entries[entries.length - 1];
-        prev.doc = concat([prev.doc, " ", reflow(comments[0].text)]);
+        prev.doc = concat([prev.doc, " ", reflow(comments[0].text, true)]);
         comments = comments.slice(1);
       }
       const start = comments.length > 0 ? comments[0].pos : this.start(c);
@@ -1914,7 +1917,7 @@ class Printer {
     const head: Doc[] = [level(ZERO, parts)];
     if (t !== undefined && !t.ownLine && t.pos < bound) {
       this.ci++;
-      head.push(" ", reflow(t.text));
+      head.push(" ", reflow(t.text, true));
     }
     // A fall-through case with no body is just its label; the switch body's clause
     // separator supplies the newline to the next clause.
@@ -1951,7 +1954,7 @@ class Printer {
       // hangs a token's toksAfter off that token, then forces the break), so it
       // goes before the break instead of onto the operator's line.
       const tc = this.trailingLineComment(operands[i].end);
-      parts.push(tc ? concat([" ", reflow(tc.text), hardline]) : brk(fillMode, " ", ZERO));
+      parts.push(tc ? concat([" ", reflow(tc.text, true), hardline]) : brk(fillMode, " ", ZERO));
       // A comment before the next operand sits on its own line before the
       // operator (gjf), not inside the operand - so consume it here.
       for (const c of this.commentsBefore(this.start(operands[i + 1]))) {
@@ -2109,7 +2112,7 @@ class Printer {
       !baseIsMultilineTextBlock
     ) {
       const glued = links.map((l, i) =>
-        l.trail === undefined ? linkDocs[i] : concat([" ", reflow(l.trail), hardline, linkDocs[i]]),
+        l.trail === undefined ? linkDocs[i] : concat([" ", reflow(l.trail, true), hardline, linkDocs[i]]),
       );
       return finish(concat([base, ...glued]));
     }
@@ -2139,7 +2142,7 @@ class Printer {
     links.forEach((l, i) => {
       // A comment trailing the previous link rides that line and forces the
       // break (gjf always breaks after a line comment).
-      if (l.trail !== undefined) parts.push(" ", reflow(l.trail), hardline);
+      if (l.trail !== undefined) parts.push(" ", reflow(l.trail, true), hardline);
       else if (i >= glue) parts.push(brk("unified", "", ZERO));
       parts.push(linkDocs[i]);
     });
@@ -2299,14 +2302,14 @@ class Printer {
     items.forEach((it, i) => {
       if (i > 0) {
         const blank = this.blankBeforePos(args[i - 1].end, leadStarts[i]);
-        if (leads[i] !== undefined) innerParts.push(" ", reflow(leads[i] as string), hardline);
+        if (leads[i] !== undefined) innerParts.push(" ", reflow(leads[i] as string, true), hardline);
         else innerParts.push(brk(fill, " ", ZERO));
         if (blank) innerParts.push(hardline);
       }
       innerParts.push(it);
     });
     const open: Doc[] = ["("];
-    if (openTrail !== undefined) open.push(" ", reflow(openTrail));
+    if (openTrail !== undefined) open.push(" ", reflow(openTrail, true));
     return concat([
       ...open,
       level(PLUS4, [
@@ -2385,7 +2388,7 @@ class Printer {
         const blank = this.blankBeforePos(e.elements[i - 1].end, leadStarts[i]);
         // A line comment trailing the previous element stays on its line, then
         // forces the break before this element.
-        if (leads[i] !== undefined) innerParts.push(" ", reflow(leads[i] as string), hardline);
+        if (leads[i] !== undefined) innerParts.push(" ", reflow(leads[i] as string, true), hardline);
         else innerParts.push(brk(fillMode, " ", ZERO));
         if (blank) innerParts.push(hardline);
       }
@@ -2455,7 +2458,7 @@ class Printer {
     // comment forces the `:` onto the next line (it would otherwise comment it out).
     const tc = this.trailingComment(e.whenTrue.end);
     if (tc) {
-      parts.push(" ", reflow(tc.text), tc.line ? hardline : brk("unified", " ", ZERO));
+      parts.push(" ", reflow(tc.text, true), tc.line ? hardline : brk("unified", " ", ZERO));
     } else {
       parts.push(brk("unified", " ", ZERO));
     }
