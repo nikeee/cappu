@@ -133,9 +133,10 @@ func (w *javadocWriter) writeListItemOpen(t Token) {
 }
 
 func (w *javadocWriter) writeHeaderOpen(t Token) {
-	if w.wroteAnythingSignificant {
-		w.requestBlankLine()
-	}
+	// gjf 1.25.2 requests the blank unconditionally: a header opening the comment
+	// still gets one, which lands as two empty `*` lines because the `/**` already
+	// opened a line.
+	w.requestBlankLine()
 	w.writeToken(t)
 }
 

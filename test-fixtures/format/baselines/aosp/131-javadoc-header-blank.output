@@ -1,0 +1,17 @@
+package p;
+
+/**
+ *
+ *
+ * <h2>Leading header</h2>
+ */
+class A {}
+
+/**
+ * Intro.
+ *
+ * <h1>Middle header</h1>
+ *
+ * <p>Body.
+ */
+class C {}
