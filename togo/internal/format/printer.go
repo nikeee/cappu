@@ -999,11 +999,18 @@ func (p *printer) typeArguments(args *compiler.NodeArray) Doc {
 	if args.Len() == 0 {
 		return text("<>") // diamond
 	}
-	ts := make([]Doc, args.Len())
+	// gjf visitParameterizedType: a type-argument list breaks right after the `<`
+	// and continues at +4, with the arguments in their own level (so the `>`,
+	// which gjf appends to that level, counts in its fit check).
+	var inner []Doc
 	for i, t := range nodes(args) {
-		ts[i] = p.typ(t)
+		if i > 0 {
+			inner = append(inner, text(","), brk(fillUnified, " ", ZERO, nil))
+		}
+		inner = append(inner, p.typ(t))
 	}
-	return concat(text("<"), join(text(", "), ts), text(">"))
+	inner = append(inner, text(">"))
+	return concat(text("<"), level(plus4, []Doc{brk(fillUnified, "", ZERO, nil), level(ZERO, inner)}))
 }
 
 func (p *printer) typ(t *compiler.Node) Doc {

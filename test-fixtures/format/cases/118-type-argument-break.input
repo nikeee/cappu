@@ -1,0 +1,9 @@
+package p;
+
+class Outer {
+  public static class Builder extends AbstractBuilder<FilterReadableByteChannel<ReadableByteChannel>, ReadableByteChannel, Builder> {
+    int x;
+  }
+
+  Map<String, Integer> small = new HashMap<>();
+}

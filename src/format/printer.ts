@@ -896,17 +896,18 @@ class Printer {
     ]);
   }
 
+  // gjf visitParameterizedType: a type-argument list breaks right after the `<`
+  // and continues at +4, with the arguments in their own level (so the `>`,
+  // which gjf appends to that level, counts in its fit check).
   private typeArguments(args: NodeArray<TypeNode | WildcardType> | undefined): Doc {
     if (!args) return "";
     if (args.length === 0) return "<>"; // diamond
-    return concat([
-      "<",
-      join(
-        ", ",
-        args.map(t => this.type(t)),
-      ),
-      ">",
-    ]);
+    const inner: Doc[] = [];
+    args.forEach((t, i) => {
+      if (i > 0) inner.push(",", brk("unified", " ", ZERO));
+      inner.push(this.type(t));
+    });
+    return concat(["<", level(PLUS4, [brk("unified", "", ZERO), level(ZERO, [...inner, ">"])])]);
   }
 
   private type(t: TypeNode | WildcardType): Doc {
