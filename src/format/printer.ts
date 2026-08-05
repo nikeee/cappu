@@ -2216,13 +2216,20 @@ class Printer {
       }
     }
     // Render the base (leftmost receiver) first, then each link in source order,
-    // so comments are consumed left to right.
+    // so comments are consumed left to right. An own-line comment BEFORE the
+    // base belongs above the whole chain (gjf), not between the receiver and its
+    // first dereference - consume it here so dotLinkLead cannot claim it.
+    const chainLead: Doc[] = [];
+    for (const c of this.commentsBefore(this.start(cur))) chainLead.push(reflow(c.text), hardline);
     const base = this.node(cur);
     const linkDocs = links.map(l => l.render());
     // A trailing token not routed into a rightmost call's args (e.g. the chain
     // ends in a field access) is appended after the whole chain.
     const finish = (doc: Doc): Doc =>
-      trailing === "" || trailingRouted ? doc : concat([doc, trailing]);
+      concat([
+        ...chainLead,
+        trailing === "" || trailingRouted ? doc : concat([doc, trailing]),
+      ]);
     const callCount = links.filter(l => l.isCall).length;
     const baseIsCall = cur.kind === SyntaxKind.CallExpression;
     // gjf keeps a chain glued when its only dereference invocation comes after a

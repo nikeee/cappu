@@ -1,0 +1,7 @@
+package p;
+
+class T {
+  public static final Option OPTION =
+      // @formatter:off
+      Option.builder("zkHost").longOpt("zkHost").required(false).build();
+}

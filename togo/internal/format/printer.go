@@ -2621,7 +2621,13 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 		break
 	}
 	// Render the base (leftmost receiver) first, then each link in source order,
-	// so comments are consumed left to right.
+	// so comments are consumed left to right. An own-line comment BEFORE the base
+	// belongs above the whole chain (gjf), not between the receiver and its first
+	// dereference - consume it here so dotLinkLead cannot claim it.
+	var chainLead []Doc
+	for _, c := range p.commentsBefore(p.start(cur)) {
+		chainLead = append(chainLead, reflow(c.text), hardline)
+	}
 	base := p.node(cur)
 	linkDocs := make([]Doc, len(links))
 	for i, l := range links {
@@ -2630,10 +2636,13 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	// A trailing token not routed into a rightmost call's args (chain ends in a
 	// field access) is appended after the whole chain.
 	finish := func(doc Doc) Doc {
-		if trailing == nil || trailingRouted {
+		if trailing != nil && !trailingRouted {
+			doc = concat(doc, trailing)
+		}
+		if len(chainLead) == 0 {
 			return doc
 		}
-		return concat(doc, trailing)
+		return concat(append(append([]Doc{}, chainLead...), doc)...)
 	}
 	callCount := 0
 	for _, l := range links {
