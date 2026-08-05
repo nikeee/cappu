@@ -1833,11 +1833,15 @@ class Printer {
         const inner: Doc[] = [];
         const resources = s.resources;
         resources.forEach((r, i) => {
-          if (i > 0) inner.push(";", hardline);
-          // The `) {` rides into the LAST resource (gjf's DocBuilder appends it
-          // to the innermost level that last took a break), so a resource that
-          // only overflows on it breaks after its `=`.
-          inner.push(i === resources.length - 1 ? this.resource(r, close) : this.resource(r));
+          if (i > 0) inner.push(hardline);
+          // The separator that follows a resource - its `;`, or the `) {` for the
+          // last one - rides INSIDE it (gjf's DocBuilder appends it to the
+          // innermost level that last took a break), so a resource that only
+          // overflows on it breaks after its `=`.
+          // gjf emits `token(";"); builder.space()` after a resource, and that
+          // SPACE counts in the fit check even though the break drops it - so a
+          // resource list breaks one column earlier than the rendered line.
+          inner.push(this.resource(r, i === resources.length - 1 ? close : "; "));
         });
         parts.push(" (", level(PLUS4, inner));
       }

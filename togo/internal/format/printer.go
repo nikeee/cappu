@@ -2162,16 +2162,20 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 			var inner []Doc
 			for i, r := range res {
 				if i > 0 {
-					inner = append(inner, text(";"), hardline)
+					inner = append(inner, hardline)
 				}
-				// The `) {` rides into the LAST resource (gjf's DocBuilder appends it to
-				// the innermost level that last took a break), so a resource that only
+				// The separator that follows a resource - its `;`, or the `) {` for the
+				// last one - rides INSIDE it (gjf's DocBuilder appends it to the
+				// innermost level that last took a break), so a resource that only
 				// overflows on it breaks after its `=`.
+				// gjf emits `token(";"); builder.space()` after a resource, and that
+				// SPACE counts in the fit check even though the break drops it - so a
+				// resource list breaks one column earlier than the rendered line.
+				sep := text("; ")
 				if i == len(res)-1 {
-					inner = append(inner, p.resourceTrailing(r.AsResource(), text(closeTok)))
-					continue
+					sep = text(closeTok)
 				}
-				inner = append(inner, p.resource(r.AsResource()))
+				inner = append(inner, p.resourceTrailing(r.AsResource(), sep))
 			}
 			parts = append(parts, text(" ("), level(plus4, inner))
 		}
