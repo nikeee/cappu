@@ -631,19 +631,32 @@ func (p *printer) moduleDeclaration(node *compiler.Node) Doc {
 	}
 	var body []Doc
 	for i, d := range dirs {
+		// A comment before a directive stays with it, own-line and reflowed; one
+		// after it on the same line stays on that line.
+		lead := p.commentsBefore(p.start(d))
 		// gjf (visitModule) wants a blank line exactly where the directive kind
-		// changes, and none between directives of the same kind.
+		// changes, and none between directives of the same kind - plus any blank
+		// the author left, which gjf preserves around comments.
 		if i > 0 {
-			if d.Kind != dirs[i-1].Kind {
+			firstPos := p.start(d)
+			if len(lead) > 0 {
+				firstPos = lead[0].pos
+			}
+			if d.Kind != dirs[i-1].Kind || p.blankBeforePos(dirs[i-1].End, firstPos) {
 				body = append(body, concat(hardline, hardline))
 			} else {
 				body = append(body, hardline)
 			}
 		}
-		// A comment before a directive stays with it, own-line and reflowed; one
-		// after it on the same line stays on that line.
-		for _, c := range p.commentsBefore(p.start(d)) {
+		for ci, c := range lead {
 			body = append(body, reflow(c.text), hardline)
+			next := p.start(d)
+			if ci+1 < len(lead) {
+				next = lead[ci+1].pos
+			}
+			if p.blankBeforePos(c.end, next) {
+				body = append(body, hardline)
+			}
 		}
 		doc := p.directive(d)
 		if tc, ok := p.trailingCommentAfter(d); ok {

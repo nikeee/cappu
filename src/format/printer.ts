@@ -614,15 +614,22 @@ class Printer {
     if (m.directives.length === 0) return concat([...head, "{}"]);
     const body: Doc[] = [];
     m.directives.forEach((d, i) => {
-      // gjf (visitModule) wants a blank line exactly where the directive kind
-      // changes, and none between directives of the same kind.
-      if (i > 0) {
-        const kindChanged = d.kind !== m.directives[i - 1].kind;
-        body.push(kindChanged ? concat([hardline, hardline]) : hardline);
-      }
       // A comment before a directive stays with it, own-line and reflowed; one
       // after it on the same line stays on that line.
-      for (const c of this.commentsBefore(this.start(d))) body.push(reflow(c.text), hardline);
+      const lead = this.commentsBefore(this.start(d));
+      // gjf (visitModule) wants a blank line exactly where the directive kind
+      // changes, and none between directives of the same kind - plus any blank
+      // the author left, which gjf preserves around comments.
+      if (i > 0) {
+        const kindChanged = d.kind !== m.directives[i - 1].kind;
+        const firstPos = lead.length > 0 ? lead[0].pos : this.start(d);
+        const sourceBlank = this.blankBeforePos(m.directives[i - 1].end, firstPos);
+        body.push(kindChanged || sourceBlank ? concat([hardline, hardline]) : hardline);
+      }
+      lead.forEach((c, ci) => {
+        body.push(reflow(c.text), hardline);
+        if (this.blankBeforePos(c.end, lead[ci + 1]?.pos ?? this.start(d))) body.push(hardline);
+      });
       const trailing = this.trailingCommentAfter(d);
       body.push(
         trailing ? concat([this.directive(d), " ", reflow(trailing.text, true)]) : this.directive(d),
