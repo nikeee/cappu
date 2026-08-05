@@ -1757,8 +1757,12 @@ class Printer {
     if (s.kind !== SyntaxKind.Block) return this.clauseBody(s);
     const b = s as Block;
     if (!this.blockIsEmpty(b)) return this.blockRest(b, allowTrailingBlank);
-    // Not collapsed: `braceOpen` emitted the bare `{`, so close it here.
-    return collapse ? "" : concat([hardline, "}"]);
+    // Not collapsed: `braceOpen` emitted the bare `{`, so close it here. gjf
+    // passes AllowLeadingBlankLine.YES for these clauses, so a blank the author
+    // left inside the empty block survives.
+    if (collapse) return "";
+    const blank = this.blankBeforePos(this.start(b) + 1, b.end - 1);
+    return blank ? concat([hardline, hardline, "}"]) : concat([hardline, "}"]);
   }
 
   /**

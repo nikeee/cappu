@@ -2094,7 +2094,12 @@ func (p *printer) clauseRestCollapse(s *compiler.Node, allowTrailingBlank, colla
 		if collapse {
 			return text("")
 		}
-		// Not collapsed: braceOpen emitted the bare `{`, so close it here.
+		// Not collapsed: braceOpen emitted the bare `{`, so close it here. gjf
+		// passes AllowLeadingBlankLine.YES for these clauses, so a blank the author
+		// left inside the empty block survives.
+		if p.blankBeforePos(p.start(s)+1, s.End-1) {
+			return concat(hardline, hardline, text("}"))
+		}
 		return concat(hardline, text("}"))
 	}
 	return p.blockRest(b, s.End, allowTrailingBlank)

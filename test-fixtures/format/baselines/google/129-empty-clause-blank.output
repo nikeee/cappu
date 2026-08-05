@@ -1,0 +1,12 @@
+package p;
+
+class T {
+  void m() {
+    try {
+      go();
+    } catch (final Exception e) {
+
+    } finally {
+    }
+  }
+}
