@@ -1,0 +1,16 @@
+package p;
+
+class T {
+  void m() {
+    try {
+      go();
+    } catch (final MalformedURLException
+        | IllegalArgumentException
+        | IOError
+        | SecurityException e2) {
+      handle(e2);
+    } catch (IOException | RuntimeException e) {
+      handle(e);
+    }
+  }
+}

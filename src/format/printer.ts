@@ -1843,16 +1843,17 @@ class Printer {
     }
     s.catchClauses.forEach((c, i) => {
       const lead = this.clauseKeywordLead(this.start(c), true);
+      // gjf visitUnionType: the parameter sits in a +4 level and breaks BEFORE
+      // each `|`, so a long multi-catch lays one alternative per line.
+      const paramParts: Doc[] = [this.modifiers(c.modifiers, "inline")];
+      c.catchTypes.forEach((t, ti) => {
+        if (ti > 0) paramParts.push(brk("unified", " ", ZERO), "| ");
+        paramParts.push(this.type(t));
+      });
+      paramParts.push(" ", this.raw(c.name), ")");
       parts.push(
         lead ? concat([lead, "catch ("]) : " catch (",
-        this.modifiers(c.modifiers, "inline"),
-        join(
-          " | ",
-          c.catchTypes.map(t => this.type(t)),
-        ),
-        " ",
-        this.raw(c.name),
-        ")",
+        level(PLUS4, [level(ZERO, paramParts)]),
         this.braceOpen(c.block, false),
         this.clauseRest(c.block, i < s.catchClauses.length - 1 || hasFinally, false),
       );

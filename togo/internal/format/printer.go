@@ -2176,15 +2176,21 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 	}
 	for i, cn := range catches {
 		c := cn.AsCatchClause()
-		ts := make([]Doc, c.CatchTypes.Len())
-		for j, t := range nodes(c.CatchTypes) {
-			ts[j] = p.typ(t)
-		}
 		open := text(" catch (")
 		if lead, ok := p.clauseKeywordLead(p.start(cn), true); ok {
 			open = concat(lead, text("catch ("))
 		}
-		parts = append(parts, open, p.modifiers(c.Modifiers, "inline"), join(text(" | "), ts), text(" "), text(p.raw(c.Name)), text(")"), p.braceOpenCollapse(c.Block, false), p.clauseRestCollapse(c.Block, i < len(catches)-1 || hasFinally, false))
+		// gjf visitUnionType: the parameter sits in a +4 level and breaks BEFORE
+		// each `|`, so a long multi-catch lays one alternative per line.
+		paramParts := []Doc{p.modifiers(c.Modifiers, "inline")}
+		for j, t := range nodes(c.CatchTypes) {
+			if j > 0 {
+				paramParts = append(paramParts, brk(fillUnified, " ", ZERO, nil), text("| "))
+			}
+			paramParts = append(paramParts, p.typ(t))
+		}
+		paramParts = append(paramParts, text(" "), text(p.raw(c.Name)), text(")"))
+		parts = append(parts, open, level(plus4, []Doc{level(ZERO, paramParts)}), p.braceOpenCollapse(c.Block, false), p.clauseRestCollapse(c.Block, i < len(catches)-1 || hasFinally, false))
 	}
 	if s.FinallyBlock != nil {
 		open := text(" finally")
