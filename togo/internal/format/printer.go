@@ -851,8 +851,25 @@ func (p *printer) modifiers(mods *compiler.NodeArray, annoMode string) Doc {
 			// stays where it is (`@Test` / `// why` / `public void m()`); without
 			// this it leaks past the declaration and lands inside the body.
 			// SkipTrivia is exactly the bound: the next real token.
-			for _, c := range p.commentsBefore(compiler.SkipTrivia(p.text, a.End)) {
+			bound := compiler.SkipTrivia(p.text, a.End)
+			after := p.commentsBefore(bound)
+			from := a.End
+			for ci, c := range after {
+				// A blank line the author left before the comment survives too.
+				if p.blankBeforePos(from, c.pos) {
+					parts = append(parts, hardline)
+				}
+				from = c.end
 				parts = append(parts, reflow(c.text), hardline)
+				// gjf's allowBlankAfterLastComment: a blank the author left after the
+				// comment survives.
+				next := bound
+				if ci+1 < len(after) {
+					next = after[ci+1].pos
+				}
+				if p.blankBeforePos(c.end, next) {
+					parts = append(parts, hardline)
+				}
 			}
 		} else if annoMode == "var" {
 			// gjf visitModifiers separates a horizontal-direction annotation from
@@ -1528,16 +1545,24 @@ func (p *printer) itemWithCommentsEx(node *compiler.Node, render func() Doc, ext
 	if p.ci < len(p.comments) && p.comments[p.ci].pos < p.start(node) {
 		leadStart = p.comments[p.ci].pos
 	}
-	for i, c := range p.commentsBefore(p.start(node)) {
+	lead := p.commentsBefore(p.start(node))
+	for i, c := range lead {
 		comment = true
 		switch {
 		case extractLeadTrailing && i == 0 && c.line && !c.ownLine:
 			// A line comment on the previous element's line trails THAT element.
 			leadTrailing = c.text
-		case c.ownLine:
+		case c.ownLine || c.line:
 			parts = append(parts, reflow(c.text), hardline)
-		case c.line:
-			parts = append(parts, reflow(c.text), hardline)
+			// gjf's allowBlankAfterLastComment: a blank line the author left after a
+			// comment survives, before the next comment or the item itself.
+			next := p.start(node)
+			if i+1 < len(lead) {
+				next = lead[i+1].pos
+			}
+			if p.blankBeforePos(c.end, next) {
+				parts = append(parts, hardline)
+			}
 		default:
 			pc := c.text
 			if norm, ok := reformatParamComment(c.text); ok {
@@ -2355,9 +2380,15 @@ func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, e
 			start = comments[0].pos
 		}
 		leading := prevEnd >= 0 && p.blankBeforePos(prevEnd, start)
-		for _, cm := range comments {
+		for ci, cm := range comments {
 			entries = append(entries, entry{reflow(cm.text), leading})
-			leading = false
+			// gjf's allowBlankAfterLastComment: a blank the author left after a
+			// comment survives, before the next comment or the clause itself.
+			next := p.start(c)
+			if ci+1 < len(comments) {
+				next = comments[ci+1].pos
+			}
+			leading = p.blankBeforePos(cm.end, next)
 		}
 		entries = append(entries, entry{p.switchClause(c.AsSwitchClause(), c.End), leading})
 		prevEnd = c.End

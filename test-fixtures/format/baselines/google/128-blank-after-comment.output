@@ -1,0 +1,25 @@
+package p;
+
+class T {
+  @Test
+
+  /** Javadoc after a blank. */
+  void a() {}
+
+  int[] xs = {
+    1, 2, // first row
+
+    // second group
+    3, 4,
+  };
+
+  void s(char c) {
+    switch (c) {
+      case 'a':
+      // fall-through
+
+      case 'b':
+        return;
+    }
+  }
+}

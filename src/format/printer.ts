@@ -804,9 +804,18 @@ class Printer {
       // it leaks past the declaration and lands inside the body. skipTrivia is
       // exactly the bound: the next real token after the annotation.
       if (ownLine) {
-        for (const c of this.commentsBefore(skipTrivia(this.text, a.end))) {
+        const bound = skipTrivia(this.text, a.end);
+        const after = this.commentsBefore(bound);
+        let from = a.end;
+        after.forEach((c, ci) => {
+          // A blank line the author left before the comment survives too.
+          if (this.blankBeforePos(from, c.pos)) parts.push(hardline);
+          from = c.end;
           parts.push(reflow(c.text), hardline);
-        }
+          // gjf's allowBlankAfterLastComment: a blank the author left after the
+          // comment survives.
+          if (this.blankBeforePos(c.end, after[ci + 1]?.pos ?? bound)) parts.push(hardline);
+        });
       }
     }
     for (const m of tailMods) {
@@ -1357,15 +1366,24 @@ class Printer {
     const firstPending = this.comments[this.ci];
     const leadStart =
       firstPending && firstPending.pos < this.start(node) ? firstPending.pos : this.start(node);
-    this.commentsBefore(this.start(node)).forEach((c, i) => {
+    const lead = this.commentsBefore(this.start(node));
+    lead.forEach((c, i) => {
       comment = true;
       // A line comment on the same line as the previous element (`elem, // note`)
       // trails THAT element; the caller emits it before the inter-item break.
       if (extractLeadTrailing && i === 0 && c.line && !c.ownLine) {
         leadTrailing = c.text;
-      } else if (c.ownLine) parts.push(reflow(c.text), hardline);
-      else if (c.line) parts.push(reflow(c.text), hardline);
-      else parts.push(reformatParamComment(c.text) ?? c.text, " ");
+        return;
+      }
+      if (!c.ownLine && !c.line) {
+        parts.push(reformatParamComment(c.text) ?? c.text, " ");
+        return;
+      }
+      parts.push(reflow(c.text), hardline);
+      // gjf's allowBlankAfterLastComment: a blank line the author left after a
+      // comment survives, before the next comment or the item itself.
+      const next = lead[i + 1]?.pos ?? this.start(node);
+      if (this.blankBeforePos(c.end, next)) parts.push(hardline);
     });
     parts.push(render());
     if (this.attachTrailingBlockComment(parts, node.end)) comment = true;
@@ -1985,12 +2003,13 @@ class Printer {
         comments = comments.slice(1);
       }
       const start = comments.length > 0 ? comments[0].pos : this.start(c);
-      const blank = prevEnd >= 0 && this.blankBeforePos(prevEnd, start);
-      let leading = blank;
-      for (const cm of comments) {
+      let leading = prevEnd >= 0 && this.blankBeforePos(prevEnd, start);
+      comments.forEach((cm, ci) => {
         entries.push({ doc: reflow(cm.text), blank: leading });
-        leading = false;
-      }
+        // gjf's allowBlankAfterLastComment: a blank the author left after a
+        // comment survives, before the next comment or the clause itself.
+        leading = this.blankBeforePos(cm.end, comments[ci + 1]?.pos ?? this.start(c));
+      });
       entries.push({ doc: this.switchClause(c), blank: leading });
       prevEnd = c.end;
     }
