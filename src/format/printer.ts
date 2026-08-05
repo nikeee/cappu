@@ -1831,11 +1831,15 @@ class Printer {
         // gjf's visitTry uses a FORCED break between resources, so more than one
         // always goes one per line even when they would fit together.
         const inner: Doc[] = [];
-        s.resources.forEach((r, i) => {
+        const resources = s.resources;
+        resources.forEach((r, i) => {
           if (i > 0) inner.push(";", hardline);
-          inner.push(this.resource(r));
+          // The `) {` rides into the LAST resource (gjf's DocBuilder appends it
+          // to the innermost level that last took a break), so a resource that
+          // only overflows on it breaks after its `=`.
+          inner.push(i === resources.length - 1 ? this.resource(r, close) : this.resource(r));
         });
-        parts.push(" (", level(PLUS4, inner), close);
+        parts.push(" (", level(PLUS4, inner));
       }
       if (!emptyTry) parts.push(this.blockRest(s.tryBlock, tryBlank));
     } else {

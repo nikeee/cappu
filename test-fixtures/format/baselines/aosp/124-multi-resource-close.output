@@ -1,0 +1,11 @@
+package p;
+
+class T {
+    void m() throws IOException {
+        try (ByteArrayOutputStream byteArrayStream = new ByteArrayOutputStream();
+                AbstractBinaryOutputStream bos =
+                        AbstractBinaryOutputStream.littleEndian(byteArrayStream)) {
+            bos.write(1);
+        }
+    }
+}

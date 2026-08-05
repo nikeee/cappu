@@ -2164,9 +2164,16 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 				if i > 0 {
 					inner = append(inner, text(";"), hardline)
 				}
+				// The `) {` rides into the LAST resource (gjf's DocBuilder appends it to
+				// the innermost level that last took a break), so a resource that only
+				// overflows on it breaks after its `=`.
+				if i == len(res)-1 {
+					inner = append(inner, p.resourceTrailing(r.AsResource(), text(closeTok)))
+					continue
+				}
 				inner = append(inner, p.resource(r.AsResource()))
 			}
-			parts = append(parts, text(" ("), level(plus4, inner), text(closeTok))
+			parts = append(parts, text(" ("), level(plus4, inner))
 		}
 		if !emptyTry {
 			parts = append(parts, p.blockRest(s.TryBlock.AsBlock(), s.TryBlock.End, tryBlank))
