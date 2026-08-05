@@ -2159,7 +2159,10 @@ class Printer {
         /^[ \t]*$/.test(this.text.slice(opPos + op.length, pending.pos));
       if (afterOp) {
         this.ci++;
-        parts.push(" ", op, " ", reflow(pending.text, true), hardline);
+        // The inter-operand break still decides whether the operator stays on
+        // this line: it only moves to the continuation line when the level
+        // breaks, and the comment then forces the break after it.
+        parts.push(brk(fillMode, " ", ZERO), op, " ", reflow(pending.text, true), hardline);
       } else {
         const tc = this.trailingLineComment(operands[i].end);
         parts.push(tc ? concat([" ", reflow(tc.text, true), hardline]) : brk(fillMode, " ", ZERO));

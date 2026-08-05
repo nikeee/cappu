@@ -2562,7 +2562,10 @@ func (p *printer) binaryTrailing(node *compiler.Node, trailing Doc) Doc {
 			if c.line && !c.ownLine && c.pos > opPos && strings.TrimLeft(p.text[opPos+len(op):c.pos], " \t") == "" {
 				afterOp = true
 				p.ci++
-				parts = append(parts, text(" "), text(op), text(" "), reflowNoWrap(c.text), hardline)
+				// The inter-operand break still decides whether the operator stays on
+				// this line: it only moves to the continuation line when the level
+				// breaks, and the comment then forces the break after it.
+				parts = append(parts, brk(fill, " ", ZERO, nil), text(op), text(" "), reflowNoWrap(c.text), hardline)
 			}
 		}
 		if !afterOp {
