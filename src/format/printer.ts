@@ -2438,9 +2438,21 @@ class Printer {
   }
 
   // The source column an element starts at, used by the tabular check below.
+  // gjf's OpsBuilder.actualStartColumn: a comment on the element's own line
+  // moves the start back to the comment (`/* 0 */ {'A', 'B'}` starts at the
+  // comment), but a comment on an earlier line ends the scan and the element
+  // keeps its own column.
   private elementColumn(n: Node): number {
-    const p = this.start(n);
-    return p - (this.text.lastIndexOf("\n", p - 1) + 1);
+    const start = this.start(n);
+    const column = (p: number): number => p - (this.text.lastIndexOf("\n", p - 1) + 1);
+    let p = start;
+    for (const c of this.comments) {
+      if (c.pos < n.pos) continue;
+      if (c.pos >= start) break;
+      if (this.text.slice(c.pos, start).includes("\n")) return column(start);
+      p = Math.min(p, c.pos);
+    }
+    return column(p);
   }
 
   // gjf rowLength: a nested array initializer counts as its own element count,
@@ -2526,29 +2538,86 @@ class Printer {
     for (let start = 0; start < e.elements.length; start += cols) {
       const row = e.elements.slice(start, start + cols);
       if (start > 0) parts.push(brk("forced", "", ZERO));
+      // An own-line comment before the row (a column header, say) keeps its own
+      // line above it.
+      const lead = this.commentsBefore(this.start(row[0]));
+      // gjf preserves one source blank line between rows.
+      if (start > 0) {
+        const leadStart = lead.length > 0 ? lead[0].pos : this.start(row[0]);
+        if (this.blankBeforePos(e.elements[start - 1].end, leadStart)) {
+          parts.push(brk("forced", "", ZERO));
+        }
+      }
+      for (const c of lead) {
+        parts.push(reflow(c.text), brk("forced", "", ZERO));
+      }
       const rowParts: Doc[] = [];
       row.forEach((el, j) => {
-        if (j > 0) rowParts.push(",", brk("independent", " ", ZERO));
+        if (j > 0) {
+          rowParts.push(",");
+          // A `//` comment trailing the previous element stays on its line, and
+          // forces the break there - which is how a long row wraps mid-row.
+          if (this.takeTrailingRowComment(rowParts, row[j - 1])) {
+            rowParts.push(brk("forced", "", ZERO));
+          } else {
+            rowParts.push(brk("independent", " ", ZERO));
+          }
+        }
         rowParts.push(this.node(el));
       });
       const last = row[row.length - 1];
       if (this.text[skipTrivia(this.text, last.end)] === ",") rowParts.push(",");
+      this.takeTrailingRowComment(rowParts, last);
       const rowIndent =
         cols === 1 || Printer.initializerOf(row[0]) !== undefined ? ZERO : PLUS4;
       parts.push(level(rowIndent, rowParts));
+    }
+    // Own-line comments between the last row and the `}` belong inside the braces.
+    for (const c of this.commentsBefore(e.end - 1)) {
+      parts.push(brk("forced", "", ZERO), reflow(c.text));
     }
     parts.push(brk("forced", "", MINUS2));
     return concat(["{", level(PLUS2, parts), "}"]);
   }
 
+  // Consume a `//` comment sitting on the same line just after `el` (past its
+  // comma) and append it to the row.
+  private takeTrailingRowComment(rowParts: Doc[], el: Node): boolean {
+    let after = skipTrivia(this.text, el.end);
+    if (this.text[after] === ",") after++;
+    const c = this.comments[this.ci];
+    // Only whitespace may separate them, and no newline: the comment must sit
+    // directly after this element on its line.
+    const gap = c === undefined || c.pos < after ? undefined : this.text.slice(after, c.pos);
+    if (c === undefined || !c.line || gap === undefined || gap.trim() !== "" || gap.includes("\n")) {
+      return false;
+    }
+    this.ci++;
+    rowParts.push(" ", reflow(c.text, true));
+    return true;
+  }
+
+  // Whether every comment inside the initializer sits where the tabular layout
+  // can place it: on its own line before a row, or trailing an element. An
+  // own-line comment in the middle of a row has nowhere to go.
+  private tabularCommentsPlaceable(els: readonly Node[], cols: number): boolean {
+    for (let i = 0; i < els.length; i++) {
+      if (i % cols === 0) continue; // own-line comments before a row are fine
+      for (let k = this.ci; k < this.comments.length; k++) {
+        const c = this.comments[k];
+        if (c.pos >= this.start(els[i])) break;
+        if (c.pos > els[i - 1].end && (c.ownLine || !c.line)) return false;
+      }
+    }
+    return true;
+  }
+
   private arrayInitializer(e: ArrayInitializer): Doc {
     if (e.elements.length === 0) return "{}";
-    // A source-laid-out grid is preserved verbatim as rows (gjf). Comments would
-    // land mid-row, so leave those to the normal path.
-    const nextComment = this.comments[this.ci];
-    if (nextComment === undefined || nextComment.pos > e.end) {
-      const cols = this.argumentsAreTabular(e.elements);
-      if (cols !== -1) return this.tabularArrayInitializer(e, cols);
+    // A source-laid-out grid is preserved verbatim as rows (gjf).
+    const cols = this.argumentsAreTabular(e.elements);
+    if (cols !== -1 && this.tabularCommentsPlaceable(e.elements, cols)) {
+      return this.tabularArrayInitializer(e, cols);
     }
     // gjf: contents indent +2; when broken, elements fill (INDEPENDENT) if all
     // short, else one per line (UNIFIED); the closing `}` goes on its own line

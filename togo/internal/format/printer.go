@@ -2960,9 +2960,29 @@ func (p *printer) arrayCreation(e *compiler.ArrayCreationExpressionData) Doc {
 }
 
 // The source column an element starts at, used by the tabular check below.
+// gjf's OpsBuilder.actualStartColumn: a comment on the element's own line moves
+// the start back to the comment (`/* 0 */ {'A', 'B'}` starts at the comment),
+// but a comment on an earlier line ends the scan and the element keeps its own
+// column.
 func (p *printer) elementColumn(n *compiler.Node) int {
-	pos := compiler.SkipTrivia(p.text, n.Pos)
-	return pos - (strings.LastIndex(p.text[:pos], "\n") + 1)
+	column := func(pos int) int { return pos - (strings.LastIndex(p.text[:pos], "\n") + 1) }
+	start := compiler.SkipTrivia(p.text, n.Pos)
+	at := start
+	for _, c := range p.comments {
+		if c.pos < n.Pos {
+			continue
+		}
+		if c.pos >= start {
+			break
+		}
+		if strings.Contains(p.text[c.pos:start], "\n") {
+			return column(start)
+		}
+		if c.pos < at {
+			at = c.pos
+		}
+	}
+	return column(at)
 }
 
 // initializerOf returns the array initializer a grid row element holds, if any.
@@ -3079,7 +3099,7 @@ func (p *printer) argumentsAreTabular(args []*compiler.Node) int {
 // gjf visitArrayInitializer's tabular branch: cols elements per line, each row
 // its own level so a too-long row fills at +4 (rows of arrays stay at the row
 // indent).
-func (p *printer) tabularArrayInitializer(els []*compiler.Node, cols int) Doc {
+func (p *printer) tabularArrayInitializer(els []*compiler.Node, cols, end int) Doc {
 	parts := []Doc{brk(fillForced, "", ZERO, nil)}
 	for start := 0; start < len(els); start += cols {
 		end := start + cols
@@ -3090,10 +3110,36 @@ func (p *printer) tabularArrayInitializer(els []*compiler.Node, cols int) Doc {
 		if start > 0 {
 			parts = append(parts, brk(fillForced, "", ZERO, nil))
 		}
+		// An own-line comment before the row (a column header, say) keeps its own
+		// line above it.
+		rowStart := compiler.SkipTrivia(p.text, row[0].Pos)
+		lead := p.commentsBefore(rowStart)
+		// gjf preserves one source blank line between rows.
+		if start > 0 {
+			leadStart := rowStart
+			if len(lead) > 0 {
+				leadStart = lead[0].pos
+			}
+			if p.blankBeforePos(els[start-1].End, leadStart) {
+				parts = append(parts, brk(fillForced, "", ZERO, nil))
+			}
+		}
+		for _, c := range lead {
+			parts = append(parts, reflow(c.text), brk(fillForced, "", ZERO, nil))
+		}
 		var rowParts []Doc
 		for j, el := range row {
 			if j > 0 {
-				rowParts = append(rowParts, text(","), brk(fillIndependent, " ", ZERO, nil))
+				rowParts = append(rowParts, text(","))
+				// A `//` comment trailing the previous element stays on its line, and
+				// forces the break there - which is how a long row wraps mid-row.
+				var taken bool
+				rowParts, taken = p.takeTrailingRowComment(rowParts, row[j-1])
+				if taken {
+					rowParts = append(rowParts, brk(fillForced, "", ZERO, nil))
+				} else {
+					rowParts = append(rowParts, brk(fillIndependent, " ", ZERO, nil))
+				}
 			}
 			rowParts = append(rowParts, p.node(el))
 		}
@@ -3101,26 +3147,75 @@ func (p *printer) tabularArrayInitializer(els []*compiler.Node, cols int) Doc {
 		if idx := compiler.SkipTrivia(p.text, last.End); idx < len(p.text) && p.text[idx] == ',' {
 			rowParts = append(rowParts, text(","))
 		}
+		rowParts, _ = p.takeTrailingRowComment(rowParts, last)
 		rowIndent := plus4
 		if cols == 1 || initializerOf(row[0]) != nil {
 			rowIndent = ZERO
 		}
 		parts = append(parts, level(rowIndent, rowParts))
 	}
+	// Own-line comments between the last row and the `}` belong inside the braces.
+	for _, c := range p.commentsBefore(end - 1) {
+		parts = append(parts, brk(fillForced, "", ZERO, nil), reflow(c.text))
+	}
 	parts = append(parts, brk(fillForced, "", minus2, nil))
 	return concat(text("{"), level(plus2, parts), text("}"))
+}
+
+// takeTrailingRowComment consumes a `//` comment sitting on the same line just
+// after el (past its comma) and appends it to the row.
+func (p *printer) takeTrailingRowComment(rowParts []Doc, el *compiler.Node) ([]Doc, bool) {
+	after := compiler.SkipTrivia(p.text, el.End)
+	if after < len(p.text) && p.text[after] == ',' {
+		after++
+	}
+	if p.ci >= len(p.comments) {
+		return rowParts, false
+	}
+	c := p.comments[p.ci]
+	if !c.line || c.pos < after {
+		return rowParts, false
+	}
+	// Only whitespace may separate them, and no newline: the comment must sit
+	// directly after this element on its line.
+	gap := p.text[after:c.pos]
+	if strings.TrimSpace(gap) != "" || strings.Contains(gap, "\n") {
+		return rowParts, false
+	}
+	p.ci++
+	return append(rowParts, text(" "), reflowNoWrap(c.text)), true
+}
+
+// tabularCommentsPlaceable reports whether every comment inside the initializer
+// sits where the tabular layout can place it: on its own line before a row, or
+// trailing an element. An own-line comment in the middle of a row has nowhere
+// to go.
+func (p *printer) tabularCommentsPlaceable(els []*compiler.Node, cols int) bool {
+	for i := 1; i < len(els); i++ {
+		if i%cols == 0 {
+			continue
+		}
+		start := compiler.SkipTrivia(p.text, els[i].Pos)
+		for k := p.ci; k < len(p.comments); k++ {
+			c := p.comments[k]
+			if c.pos >= start {
+				break
+			}
+			if c.pos > els[i-1].End && (c.ownLine || !c.line) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData, end int) Doc {
 	if e.Elements.Len() == 0 {
 		return text("{}")
 	}
-	// A source-laid-out grid is preserved verbatim as rows (gjf). Comments would
-	// land mid-row, so leave those to the normal path.
-	if p.ci >= len(p.comments) || p.comments[p.ci].pos > end {
-		if cols := p.argumentsAreTabular(nodes(e.Elements)); cols != -1 {
-			return p.tabularArrayInitializer(nodes(e.Elements), cols)
-		}
+	// A source-laid-out grid is preserved verbatim as rows (gjf).
+	if cols := p.argumentsAreTabular(nodes(e.Elements)); cols != -1 && p.tabularCommentsPlaceable(nodes(e.Elements), cols) {
+		return p.tabularArrayInitializer(nodes(e.Elements), cols, end)
 	}
 	// gjf: contents indent +2; when broken, elements fill (INDEPENDENT) if all
 	// short, else one per line (UNIFIED); the closing `}` goes on its own line
