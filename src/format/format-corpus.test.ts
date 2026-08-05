@@ -11,6 +11,13 @@
 // no JDK and is skipped when the submodule is not checked out, so CI without it
 // still passes:
 //
+// 62 is the CEILING, not a gap: the 9 files that are not fixpoints were
+// committed by an older google-java-format, so gjf 1.25.2 does not reproduce
+// them either (`gjf <file> != <file>`), and our output equals gjf 1.25.2's on
+// every one of them. Measure against real gjf before treating any of the nine
+// as a bug - the committed-basis count cannot go above 62 without deviating
+// from the tool we target.
+//
 //   git submodule update --init test-fixtures/format/corpus/gjf
 //
 // To see the live match rate / remaining diffs:  node --run format:corpus

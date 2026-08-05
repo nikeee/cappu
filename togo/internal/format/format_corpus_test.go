@@ -7,6 +7,10 @@ package format
 // fixpoint (formats each to itself). Regression ratchet, not a 100% gate -
 // ratchet RATCHET UP only. Skipped when the submodule is absent (no network/JDK
 // needed). The Go count must stay in lockstep with the TS count.
+//
+// 62 is the CEILING, not a gap: the 9 files that are not fixpoints were
+// committed by an older google-java-format, so gjf 1.25.2 does not reproduce
+// them either, and our output equals gjf 1.25.2's on every one of them.
 
 import (
 	"os"
