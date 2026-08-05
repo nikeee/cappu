@@ -2702,7 +2702,10 @@ class Printer {
   // Consume a `//` comment sitting on the same line just after `el` (past its
   // comma) and append it to the row.
   private takeTrailingRowComment(rowParts: Doc[], el: Node): boolean {
-    let after = skipTrivia(this.text, el.end);
+    // Skip whitespace only - skipTrivia would step over the very comment we are
+    // looking for.
+    let after = el.end;
+    while (this.text[after] === " " || this.text[after] === "\t") after++;
     if (this.text[after] === ",") after++;
     const c = this.comments[this.ci];
     // Only whitespace may separate them, and no newline: the comment must sit

@@ -3298,7 +3298,12 @@ func (p *printer) tabularArrayInitializer(els []*compiler.Node, cols, end int) D
 // takeTrailingRowComment consumes a `//` comment sitting on the same line just
 // after el (past its comma) and appends it to the row.
 func (p *printer) takeTrailingRowComment(rowParts []Doc, el *compiler.Node) ([]Doc, bool) {
-	after := compiler.SkipTrivia(p.text, el.End)
+	// Skip whitespace only - SkipTrivia would step over the very comment we are
+	// looking for.
+	after := el.End
+	for after < len(p.text) && (p.text[after] == ' ' || p.text[after] == '\t') {
+		after++
+	}
 	if after < len(p.text) && p.text[after] == ',' {
 		after++
 	}
