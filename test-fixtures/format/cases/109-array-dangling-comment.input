@@ -1,0 +1,16 @@
+package p;
+
+class T {
+  private static final String[] RULES = {
+      "a", // first
+      "b", // second
+      // @formatter:on
+  };
+
+  int[] x = {
+    1, 2,
+    // trailing note
+  };
+
+  int[] plain = {1, 2, 3};
+}

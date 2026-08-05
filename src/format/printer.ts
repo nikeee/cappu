@@ -2461,9 +2461,15 @@ class Printer {
       this.ci++;
       closingComment = t.text;
     }
-    if (closingComment !== undefined) innerParts.push(" ", closingComment);
+    if (closingComment !== undefined) innerParts.push(" ", reflow(closingComment, true));
+    // Own-line comments between the last element and the `}` belong INSIDE the
+    // braces (gjf); they used to stay pending and surface after the whole
+    // declaration, e.g. a `// @formatter:on` marker jumping past its `};`.
+    const dangling = this.commentsBefore(e.end - 1);
+    for (const c of dangling) innerParts.push(hardline, reflow(c.text));
     const inner = level(ZERO, innerParts);
-    const open: FillMode = trailingComma || closingComment !== undefined ? "forced" : "unified";
+    const forceOpen = trailingComma || closingComment !== undefined || dangling.length > 0;
+    const open: FillMode = forceOpen ? "forced" : "unified";
     return concat(["{", level(PLUS2, [brk(open, "", ZERO), inner, brk(open, "", MINUS2)]), "}"]);
   }
 

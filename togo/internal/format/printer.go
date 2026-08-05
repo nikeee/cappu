@@ -2937,12 +2937,12 @@ func (p *printer) arrayCreation(e *compiler.ArrayCreationExpressionData) Doc {
 	extra := strings.Repeat("[]", e.AdditionalRank)
 	init := text("")
 	if e.Initializer != nil {
-		init = concat(text(" "), p.arrayInitializer(e.Initializer.AsArrayInitializer()))
+		init = concat(text(" "), p.arrayInitializer(e.Initializer.AsArrayInitializer(), e.Initializer.End))
 	}
 	return concat(text("new "), p.typ(e.ElementType), concat(dims...), text(extra), init)
 }
 
-func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData) Doc {
+func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData, end int) Doc {
 	if e.Elements.Len() == 0 {
 		return text("{}")
 	}
@@ -2998,10 +2998,17 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData) Doc {
 		}
 	}
 	if closingComment != "" {
-		innerParts = append(innerParts, text(" "), text(closingComment))
+		innerParts = append(innerParts, text(" "), reflowNoWrap(closingComment))
+	}
+	// Own-line comments between the last element and the `}` belong INSIDE the
+	// braces (gjf); they used to stay pending and surface after the whole
+	// declaration, e.g. a `// @formatter:on` marker jumping past its `};`.
+	dangling := p.commentsBefore(end - 1)
+	for _, c := range dangling {
+		innerParts = append(innerParts, hardline, reflow(c.text))
 	}
 	open := fillUnified
-	if trailingComma || closingComment != "" {
+	if trailingComma || closingComment != "" || len(dangling) > 0 {
 		open = fillForced
 	}
 	inner := level(ZERO, innerParts)
@@ -3287,7 +3294,7 @@ func (p *printer) node(node *compiler.Node) Doc {
 	case compiler.ArrayCreationExpression:
 		return p.arrayCreation(node.AsArrayCreationExpression())
 	case compiler.ArrayInitializer:
-		return p.arrayInitializer(node.AsArrayInitializer())
+		return p.arrayInitializer(node.AsArrayInitializer(), node.End)
 	case compiler.ParenthesizedExpression:
 		return concat(text("("), p.node(node.AsParenthesizedExpression().Expression), text(")"))
 	case compiler.PrefixUnaryExpression:
