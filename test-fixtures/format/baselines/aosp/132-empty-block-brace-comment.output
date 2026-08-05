@@ -1,0 +1,17 @@
+package p;
+
+class T {
+    void a() { // one
+    }
+
+    void b() {
+        while (x) { // two
+        }
+        try {
+            go();
+        } catch (final IOException ignored) { // three
+        } finally {
+            done();
+        }
+    }
+}

@@ -1601,17 +1601,31 @@ class Printer {
     // own-line.
     const braceComment =
       b.statements.length > 0 ? this.braceTrailingComment(b.statements[0].pos) : "";
+    // An empty block whose only comment already rode the `{` has nothing to
+    // indent, so it must not open a line of its own - that plus the closing
+    // hardline would print a blank line inside the braces.
+    const emptyBody =
+      b.statements.length === 0 &&
+      !(this.comments[this.ci] !== undefined && this.comments[this.ci].pos < b.end);
     const lead =
       b.statements.length > 0
         ? this.braceLead(b.statements[0].pos, this.start(b.statements[0]))
-        : hardline;
+        : emptyBody
+          ? ""
+          : hardline;
     // The blank must be measured from the last thing actually rendered - a
     // dangling comment after the last statement, when there is one. Measuring
     // from the statement counts the comment's own line as the blank.
+    // Only a comment INSIDE the block can drive the blank before its `}`. With no
+    // statements left (the brace's own comment was emitted ahead) the next
+    // pending comment belongs to whatever follows the block.
+    const firstInside = this.comments[this.ci];
     const from =
       b.statements.length > 0
         ? b.statements[b.statements.length - 1].end
-        : this.comments[this.ci]?.pos;
+        : firstInside !== undefined && firstInside.pos < b.end
+          ? firstInside.pos
+          : undefined;
     const lastEnd = from !== undefined ? this.lastCommentEndBefore(from, b.end) : -1;
     const closeLead =
       (allowTrailingBlank && lastEnd >= 0 && this.blankBeforePos(lastEnd, b.end - 1)) ||

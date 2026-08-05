@@ -1880,15 +1880,21 @@ func (p *printer) blockRest(b *compiler.BlockData, endPos int, allowTrailingBlan
 	if b.Statements.Len() > 0 {
 		braceComment = p.braceTrailingComment(b.Statements.Nodes[0].Pos)
 		lead = p.braceLead(b.Statements.Nodes[0].Pos, p.start(b.Statements.Nodes[0]))
+	} else if p.ci >= len(p.comments) || p.comments[p.ci].pos >= endPos {
+		// An empty block whose only comment already rode the `{` has nothing to
+		// indent, so it must not open a line of its own - that plus the closing
+		// hardline would print a blank line inside the braces.
+		lead = text("")
 	}
 	// The blank must be measured from the last thing actually rendered - a
 	// dangling comment after the last statement, when there is one. Measuring
 	// from the statement counts the comment's own line as the blank.
 	closeLead := hardline
+	// Only a comment INSIDE the block can drive the blank before its `}`.
 	from := -1
 	if b.Statements.Len() > 0 {
 		from = b.Statements.Nodes[b.Statements.Len()-1].End
-	} else if p.ci < len(p.comments) {
+	} else if p.ci < len(p.comments) && p.comments[p.ci].pos < endPos {
 		from = p.comments[p.ci].pos
 	}
 	if from >= 0 {
