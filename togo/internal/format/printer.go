@@ -867,10 +867,16 @@ func (p *printer) annotation(a *compiler.AnnotationData) Doc {
 	for i, arg := range nodes(a.Args) {
 		aa := arg.AsAnnotationArgument()
 		value := p.node(aa.Value)
-		if aa.Name != nil {
-			args[i] = concat(text(p.raw(aa.Name)), text(" = "), value)
-		} else {
+		switch {
+		case aa.Name == nil:
 			args[i] = value
+		case aa.Value.Kind == compiler.ArrayInitializer:
+			// An array value hugs the `=` (its braces do the breaking).
+			args[i] = concat(text(p.raw(aa.Name)), text(" = "), value)
+		default:
+			// gjf visitAnnotationArgument: `name = <value>` is a +4 level with a
+			// break after the `=`, so a long value folds onto its own line.
+			args[i] = level(plus4, []Doc{text(p.raw(aa.Name)), text(" ="), brk(fillUnified, " ", ZERO, nil), value})
 		}
 	}
 	// gjf forces an annotation's element-value pairs one-per-line when there is

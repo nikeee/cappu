@@ -802,8 +802,16 @@ class Printer {
     }
     const args = a.args.map(arg => {
       const argName = (arg as { name?: Node }).name;
-      const value = this.node((arg as { value: Node }).value);
-      return argName ? concat([this.raw(argName), " = ", value]) : value;
+      const valueNode = (arg as { value: Node }).value;
+      const value = this.node(valueNode);
+      if (!argName) return value;
+      // gjf visitAnnotationArgument: `name = <value>` is a +4 level with a break
+      // after the `=`, so a long value folds onto its own continuation line. An
+      // array value hugs the `=` instead (its braces do the breaking).
+      if (valueNode.kind === SyntaxKind.ArrayInitializer) {
+        return concat([this.raw(argName), " = ", value]);
+      }
+      return level(PLUS4, [this.raw(argName), " =", brk("unified", " ", ZERO), value]);
     });
     // gjf forces an annotation's element-value pairs one-per-line when there is
     // more than one and any pair is array-valued (`name = {..}`), even if they
