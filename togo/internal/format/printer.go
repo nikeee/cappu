@@ -1868,6 +1868,12 @@ func (p *printer) blockTB(b *compiler.BlockData, endPos int, allowTrailingBlank 
 // caller, so it can be placed inside another level to count toward a wrap
 // decision).
 func (p *printer) blockRest(b *compiler.BlockData, endPos int, allowTrailingBlank bool) Doc {
+	return p.blockRestLead(b, endPos, allowTrailingBlank, true)
+}
+
+// blockRestLead is blockRest with gjf's AllowLeadingBlankLine: a lambda body
+// drops the blank an author left after its `{`.
+func (p *printer) blockRestLead(b *compiler.BlockData, endPos int, allowTrailingBlank, allowLeadingBlank bool) Doc {
 	// A comment already emitted with the opening brace (braceTrailAhead) must not
 	// be rendered again here - braceTrailingComment only runs when the block has
 	// statements, and a comment-only block would emit it twice.
@@ -1881,7 +1887,9 @@ func (p *printer) blockRest(b *compiler.BlockData, endPos int, allowTrailingBlan
 	lead := hardline
 	if b.Statements.Len() > 0 {
 		braceComment = p.braceTrailingComment(b.Statements.Nodes[0].Pos)
-		lead = p.braceLead(b.Statements.Nodes[0].Pos, p.start(b.Statements.Nodes[0]))
+		if allowLeadingBlank {
+			lead = p.braceLead(b.Statements.Nodes[0].Pos, p.start(b.Statements.Nodes[0]))
+		}
 	} else if p.ci >= len(p.comments) || p.comments[p.ci].pos >= endPos {
 		// An empty block whose only comment already rode the `{` has nothing to
 		// indent, so it must not open a line of its own - that plus the closing
@@ -3540,7 +3548,12 @@ func (p *printer) lambdaTrailing(e *compiler.LambdaExpressionData, trailing Doc)
 		head = concat(text("("), join(text(", "), ps), text(")"))
 	}
 	if e.Body.Kind == compiler.Block {
-		return appendTrailing(concat(head, text(" -> "), p.block(e.Body.AsBlock(), e.Body.End)))
+		// gjf's visitLambdaExpression passes AllowLeadingBlankLine.NO for the body.
+		body := e.Body.AsBlock()
+		if body.Statements.Len() == 0 && !p.hasCommentBefore(e.Body.End) {
+			return appendTrailing(concat(head, text(" -> "), text("{}")))
+		}
+		return appendTrailing(concat(head, text(" -> "), text("{"), p.blockRestLead(body, e.Body.End, false, false)))
 	}
 	// A comment before an expression body sits own-line at a +8 continuation
 	// indent (gjf), forcing `-> ` onto its own line; the comment forces the break.

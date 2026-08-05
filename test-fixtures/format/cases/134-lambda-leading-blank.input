@@ -1,0 +1,17 @@
+package p;
+
+class T {
+  void m() {
+    f(
+        (a, b) -> {
+
+          go();
+        });
+    Runnable empty = () -> {};
+  }
+
+  void n() {
+
+    go();
+  }
+}

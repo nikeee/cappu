@@ -1583,16 +1583,16 @@ class Printer {
    * for a method, if/while/for/do and a try body, but stays open (`{` newline
    * `}`) for else, catch, finally, synchronized, an initializer and a switch.
    */
-  private block(b: Block, allowTrailingBlank = false, collapse = true): Doc {
+  private block(b: Block, allowTrailingBlank = false, collapse = true, allowLeadingBlank = true): Doc {
     if (this.blockIsEmpty(b)) return collapse ? "{}" : concat(["{", hardline, "}"]);
-    return concat(["{", this.blockRest(b, allowTrailingBlank)]);
+    return concat(["{", this.blockRest(b, allowTrailingBlank, allowLeadingBlank)]);
   }
 
   /** A block's body after the opening `{` (the `{` is emitted by the caller, so
    * it can be placed inside another level to count toward a wrap decision).
    * `allowTrailingBlank` preserves a source blank line before the closing `}`,
    * which gjf does only when a clause follows (`} else`, `} catch`, `} finally`). */
-  private blockRest(b: Block, allowTrailingBlank = false): Doc {
+  private blockRest(b: Block, allowTrailingBlank = false, allowLeadingBlank = true): Doc {
     // A comment already emitted with the opening brace (braceTrailAhead) must not
     // be rendered again here - braceTrailingComment only runs when the block has
     // statements, and a comment-only block would emit it twice.
@@ -1611,7 +1611,9 @@ class Printer {
       !(this.comments[this.ci] !== undefined && this.comments[this.ci].pos < b.end);
     const lead =
       b.statements.length > 0
-        ? this.braceLead(b.statements[0].pos, this.start(b.statements[0]))
+        ? allowLeadingBlank
+          ? this.braceLead(b.statements[0].pos, this.start(b.statements[0]))
+          : hardline
         : emptyBody
           ? ""
           : hardline;
@@ -2886,7 +2888,8 @@ class Printer {
       ]);
     }
     if (e.body.kind === SyntaxKind.Block) {
-      return concat([head, " -> ", this.block(e.body as Block), trailing]);
+      // gjf's visitLambdaExpression passes AllowLeadingBlankLine.NO for the body.
+      return concat([head, " -> ", this.block(e.body as Block, false, true, false), trailing]);
     }
     // A comment before an expression body sits own-line at a +8 continuation
     // indent (gjf), forcing `-> ` onto its own line; the comment forces the break.
