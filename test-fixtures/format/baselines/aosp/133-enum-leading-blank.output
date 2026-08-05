@@ -1,0 +1,19 @@
+package p;
+
+enum E {
+    RED("r", 1),
+    GREEN("g", 2);
+
+    final String v;
+}
+
+enum F {
+
+    // note
+    A;
+}
+
+class G {
+
+    int x;
+}

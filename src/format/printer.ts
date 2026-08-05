@@ -1078,8 +1078,10 @@ class Printer {
     ]);
     if (d.enumConstants.length === 0 && d.members.length === 0) return concat([header, "{}"]);
     // Leading blank after `{` (before any constant comment is consumed below).
+    // gjf does not want one before the first CONSTANT (unlike a class body's
+    // first member), but a leading comment keeps the blank the author wrote.
     const lead =
-      d.enumConstants.length > 0
+      d.enumConstants.length > 0 && this.hasCommentBefore(this.start(d.enumConstants[0]))
         ? this.braceLead(d.enumConstants[0].pos, this.start(d.enumConstants[0]))
         : hardline;
     // google-java-format always lays enum constants one per line. A comment

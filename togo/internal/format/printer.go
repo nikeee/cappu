@@ -1216,8 +1216,10 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 	}
 	consts := nodes(d.EnumConstants)
 	// Leading blank after `{` (before any constant comment is consumed below).
+	// gjf does not want one before the first CONSTANT (unlike a class body's
+	// first member), but a leading comment keeps the blank the author wrote.
 	lead := hardline
-	if len(consts) > 0 {
+	if len(consts) > 0 && p.hasCommentBefore(p.start(consts[0])) {
 		lead = p.braceLead(consts[0].Pos, p.start(consts[0]))
 	}
 	// google-java-format always lays enum constants one per line. A comment
