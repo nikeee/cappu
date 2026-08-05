@@ -1,0 +1,25 @@
+package p;
+
+class T {
+  void m() {}
+
+  void n(boolean a, Object l) {
+    try {
+      x();
+    } catch (Exception ignored) {}
+    try {
+      x();
+    } finally {}
+    if (a) {}
+    if (a) {
+      x();
+    } else {}
+    while (a) {}
+    for (;;) {}
+    do {} while (a);
+    synchronized (l) {}
+    switch (a) {}
+  }
+
+  static {}
+}

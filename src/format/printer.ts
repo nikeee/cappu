@@ -1435,7 +1435,7 @@ class Printer {
   }
 
   private initializerBlock(d: InitializerBlock): Doc {
-    return concat([d.isStatic ? "static " : "", this.block(d.body)]);
+    return concat([d.isStatic ? "static " : "", this.block(d.body, false, false)]);
   }
 
   // --- statements ----------------------------------------------------------
@@ -1456,8 +1456,13 @@ class Printer {
     return true;
   }
 
-  private block(b: Block, allowTrailingBlank = false): Doc {
-    if (this.blockIsEmpty(b)) return "{}";
+  /**
+   * `collapse` mirrors gjf's CollapseEmptyOrNot: an empty body is written `{}`
+   * for a method, if/while/for/do and a try body, but stays open (`{` newline
+   * `}`) for else, catch, finally, synchronized, an initializer and a switch.
+   */
+  private block(b: Block, allowTrailingBlank = false, collapse = true): Doc {
+    if (this.blockIsEmpty(b)) return collapse ? "{}" : concat(["{", hardline, "}"]);
     return concat(["{", this.blockRest(b, allowTrailingBlank)]);
   }
 
@@ -1554,7 +1559,7 @@ class Printer {
         // The else-block owns its brace, so a comment on the brace's line rides
         // it (`} else { // note`) instead of starting the body.
         const eb = s.elseStatement as Block;
-        parts.push(this.braceOpen(eb), this.clauseRest(eb));
+        parts.push(this.braceOpen(eb, false), this.clauseRest(eb, false, false));
       } else {
         parts.push(this.clauseBody(s.elseStatement));
       }
@@ -1600,8 +1605,8 @@ class Printer {
    * Callers that own the brace themselves (catch/finally/else) use this so the
    * comment counts in THEIR fit check, like clauseClose does for a header.
    */
-  private braceOpen(b: Block): Doc {
-    if (this.blockIsEmpty(b)) return " {}";
+  private braceOpen(b: Block, collapse = true): Doc {
+    if (this.blockIsEmpty(b)) return collapse ? " {}" : " {";
     return concat([" {", this.braceTrailAhead(b)]);
   }
 
@@ -1629,10 +1634,12 @@ class Printer {
   }
 
   /** The clause body after `clauseClose` already emitted its `{`. */
-  private clauseRest(s: Statement, allowTrailingBlank = false): Doc {
+  private clauseRest(s: Statement, allowTrailingBlank = false, collapse = true): Doc {
     if (s.kind !== SyntaxKind.Block) return this.clauseBody(s);
     const b = s as Block;
-    return this.blockIsEmpty(b) ? "" : this.blockRest(b, allowTrailingBlank);
+    if (!this.blockIsEmpty(b)) return this.blockRest(b, allowTrailingBlank);
+    // Not collapsed: `braceOpen` emitted the bare `{`, so close it here.
+    return collapse ? "" : concat([hardline, "}"]);
   }
 
   /**
@@ -1772,16 +1779,16 @@ class Printer {
         " ",
         this.raw(c.name),
         ")",
-        this.braceOpen(c.block),
-        this.clauseRest(c.block, i < s.catchClauses.length - 1 || hasFinally),
+        this.braceOpen(c.block, false),
+        this.clauseRest(c.block, i < s.catchClauses.length - 1 || hasFinally, false),
       );
     });
     if (s.finallyBlock) {
       const lead = this.clauseKeywordLead(this.start(s.finallyBlock), true);
       parts.push(
         lead ? concat([lead, "finally"]) : " finally",
-        this.braceOpen(s.finallyBlock),
-        this.clauseRest(s.finallyBlock),
+        this.braceOpen(s.finallyBlock, false),
+        this.clauseRest(s.finallyBlock, false, false),
       );
     }
     return concat(parts);
@@ -1881,13 +1888,11 @@ class Printer {
       if (i > 0) body.push(e.blank ? concat([hardline, hardline]) : hardline);
       body.push(e.doc);
     });
-    return concat([
-      group(concat(["switch (", this.node(expr), ")"])),
-      " {",
-      indent(concat([hardline, ...body])),
-      hardline,
-      "}",
-    ]);
+    const header = group(concat(["switch (", this.node(expr), ")"]));
+    // An empty switch body stays open but holds no blank line (gjf does not
+    // collapse it to `{}` the way it collapses an if or a loop).
+    if (entries.length === 0) return concat([header, " {", hardline, "}"]);
+    return concat([header, " {", indent(concat([hardline, ...body])), hardline, "}"]);
   }
 
   private switchClause(c: SwitchClause): Doc {
@@ -2616,7 +2621,12 @@ class Printer {
         return concat(["yield ", this.node((node as YieldStatement).expression), ";"]);
       case SyntaxKind.SynchronizedStatement: {
         const s = node as SynchronizedStatement;
-        return concat(["synchronized (", this.node(s.expression), ") ", this.block(s.body)]);
+        return concat([
+          "synchronized (",
+          this.node(s.expression),
+          ") ",
+          this.block(s.body, false, false),
+        ]);
       }
       case SyntaxKind.AssertStatement: {
         const s = node as AssertStatement;

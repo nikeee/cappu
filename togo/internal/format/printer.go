@@ -1654,7 +1654,7 @@ func (p *printer) initializerBlock(d *compiler.InitializerBlockData) Doc {
 	if d.IsStatic {
 		static = "static "
 	}
-	return concat(text(static), p.block(d.Body.AsBlock(), d.Body.End))
+	return concat(text(static), p.blockOpen(d.Body.AsBlock(), p.start(d.Body), d.Body.End, false))
 }
 
 // --- statements ----------------------------------------------------------
@@ -1681,6 +1681,17 @@ func (p *printer) blockIsEmpty(b *compiler.BlockData, startPos, endPos int) bool
 }
 
 func (p *printer) block(b *compiler.BlockData, endPos int) Doc {
+	return p.blockTB(b, endPos, false)
+}
+
+// blockOpen is block with gjf's CollapseEmptyOrNot: an empty body is written
+// `{}` for a method, if/while/for/do and a try body, but stays open (`{`
+// newline `}`) for else, catch, finally, synchronized, an initializer and a
+// switch.
+func (p *printer) blockOpen(b *compiler.BlockData, startPos, endPos int, collapse bool) Doc {
+	if !collapse && p.blockIsEmpty(b, startPos, endPos) {
+		return concat(text("{"), hardline, text("}"))
+	}
 	return p.blockTB(b, endPos, false)
 }
 
@@ -1821,7 +1832,7 @@ func (p *printer) ifStatement(s *compiler.IfStatementData) Doc {
 		case compiler.Block:
 			// The else-block owns its brace, so a comment on the brace's line rides
 			// it (`} else { // note`) instead of starting the body.
-			parts = append(parts, p.braceOpen(s.ElseStatement), p.clauseRest(s.ElseStatement, false))
+			parts = append(parts, p.braceOpenCollapse(s.ElseStatement, false), p.clauseRestCollapse(s.ElseStatement, false, false))
 		default:
 			parts = append(parts, p.clauseBody(s.ElseStatement))
 		}
@@ -1883,8 +1894,15 @@ func (p *printer) clauseClose(s *compiler.Node) Doc {
 // this so the comment counts in THEIR fit check, like clauseClose does for a
 // header.
 func (p *printer) braceOpen(s *compiler.Node) Doc {
+	return p.braceOpenCollapse(s, true)
+}
+
+func (p *printer) braceOpenCollapse(s *compiler.Node, collapse bool) Doc {
 	if p.blockIsEmpty(s.AsBlock(), p.start(s), s.End) {
-		return text(" {}")
+		if collapse {
+			return text(" {}")
+		}
+		return text(" {")
 	}
 	return concat(text(" {"), p.braceTrailAhead(p.start(s)))
 }
@@ -1919,12 +1937,20 @@ func (p *printer) braceTrailAhead(blockStart int) Doc {
 
 // clauseRest is the clause body after clauseClose already emitted its `{`.
 func (p *printer) clauseRest(s *compiler.Node, allowTrailingBlank bool) Doc {
+	return p.clauseRestCollapse(s, allowTrailingBlank, true)
+}
+
+func (p *printer) clauseRestCollapse(s *compiler.Node, allowTrailingBlank, collapse bool) Doc {
 	if s.Kind != compiler.Block {
 		return p.clauseBody(s)
 	}
 	b := s.AsBlock()
 	if p.blockIsEmpty(b, p.start(s), s.End) {
-		return text("")
+		if collapse {
+			return text("")
+		}
+		// Not collapsed: braceOpen emitted the bare `{`, so close it here.
+		return concat(hardline, text("}"))
 	}
 	return p.blockRest(b, s.End, allowTrailingBlank)
 }
@@ -2058,14 +2084,14 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 		if lead, ok := p.clauseKeywordLead(p.start(cn), true); ok {
 			open = concat(lead, text("catch ("))
 		}
-		parts = append(parts, open, p.modifiers(c.Modifiers, "inline"), join(text(" | "), ts), text(" "), text(p.raw(c.Name)), text(")"), p.braceOpen(c.Block), p.clauseRest(c.Block, i < len(catches)-1 || hasFinally))
+		parts = append(parts, open, p.modifiers(c.Modifiers, "inline"), join(text(" | "), ts), text(" "), text(p.raw(c.Name)), text(")"), p.braceOpenCollapse(c.Block, false), p.clauseRestCollapse(c.Block, i < len(catches)-1 || hasFinally, false))
 	}
 	if s.FinallyBlock != nil {
 		open := text(" finally")
 		if lead, ok := p.clauseKeywordLead(p.start(s.FinallyBlock), true); ok {
 			open = concat(lead, text("finally"))
 		}
-		parts = append(parts, open, p.braceOpen(s.FinallyBlock), p.clauseRest(s.FinallyBlock, false))
+		parts = append(parts, open, p.braceOpenCollapse(s.FinallyBlock, false), p.clauseRestCollapse(s.FinallyBlock, false, false))
 	}
 	return concat(parts...)
 }
@@ -2210,8 +2236,14 @@ func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, e
 		}
 		body = append(body, e.doc)
 	}
+	header := group(concat(text("switch ("), p.node(expr), text(")")))
+	// An empty switch body stays open but holds no blank line (gjf does not
+	// collapse it to `{}` the way it collapses an if or a loop).
+	if len(entries) == 0 {
+		return concat(header, text(" {"), hardline, text("}"))
+	}
 	return concat(
-		group(concat(text("switch ("), p.node(expr), text(")"))),
+		header,
 		text(" {"),
 		indent(concat(append([]Doc{hardline}, body...)...)),
 		hardline,
@@ -3173,7 +3205,7 @@ func (p *printer) node(node *compiler.Node) Doc {
 		return concat(text("yield "), p.node(node.AsYieldStatement().Expression), text(";"))
 	case compiler.SynchronizedStatement:
 		s := node.AsSynchronizedStatement()
-		return concat(text("synchronized ("), p.node(s.Expression), text(") "), p.block(s.Body.AsBlock(), s.Body.End))
+		return concat(text("synchronized ("), p.node(s.Expression), text(") "), p.blockOpen(s.Body.AsBlock(), p.start(s.Body), s.Body.End, false))
 	case compiler.AssertStatement:
 		s := node.AsAssertStatement()
 		if s.Message != nil {
