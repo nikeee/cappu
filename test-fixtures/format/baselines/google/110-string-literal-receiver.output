@@ -1,0 +1,12 @@
+package p;
+
+class T {
+  void m(Object expected) {
+    assertArrayEquals(
+        expected,
+        Base16.decodeHex(
+            "54686520717569636b2062726f776e20666f78206a756d706564206f76657220746865206c617a7920646f67732e"
+                .getBytes(CHARSET_UTF8)));
+    byte[] s = "short".getBytes(CHARSET_UTF8);
+  }
+}

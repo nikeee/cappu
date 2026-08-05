@@ -2548,7 +2548,12 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	// A multi-line text-block receiver breaks before its dereference (gjf puts
 	// `.replace(..)` on its own +4 line after the closing `"""`).
 	baseIsMultilineTextBlock := cur.Kind == compiler.TextBlockLiteral && strings.Contains(p.raw(cur), "\n")
-	if callCount == 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass) && !baseIsMultilineTextBlock {
+	// A string-literal receiver is not a type-name prefix, so gjf never glues the
+	// dereference to it: `"...long...".getBytes(x)` breaks before the `.` when it
+	// does not fit, instead of wrapping the call's arguments.
+	baseIsStringLiteral := cur.Kind == compiler.StringLiteral
+	if callCount == 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass) && !baseIsMultilineTextBlock &&
+		!baseIsStringLiteral {
 		parts := []Doc{base}
 		for i, l := range links {
 			if l.trail != nil {

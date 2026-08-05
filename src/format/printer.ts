@@ -2152,11 +2152,16 @@ class Printer {
     // `.replace(..)` on its own +4 line after the closing `"""`).
     const baseIsMultilineTextBlock =
       cur.kind === SyntaxKind.TextBlockLiteral && this.raw(cur).includes("\n");
+    // A string-literal receiver is not a type-name prefix, so gjf never glues the
+    // dereference to it: `"...long...".getBytes(x)` breaks before the `.` when it
+    // does not fit, instead of wrapping the call's arguments.
+    const baseIsStringLiteral = cur.kind === SyntaxKind.StringLiteral;
     if (
       callCount === 1 &&
       !baseIsCall &&
       (!baseIsNew || baseIsAnonClass) &&
-      !baseIsMultilineTextBlock
+      !baseIsMultilineTextBlock &&
+      !baseIsStringLiteral
     ) {
       const glued = links.map((l, i) =>
         l.trail === undefined ? linkDocs[i] : concat([" ", reflow(l.trail, true), hardline, linkDocs[i]]),
