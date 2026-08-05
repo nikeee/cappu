@@ -1023,6 +1023,11 @@ func (p *printer) typ(t *compiler.Node) Doc {
 // --- declarations --------------------------------------------------------
 
 func (p *printer) classLike(keyword string, mods *compiler.NodeArray, name *compiler.Node, typeParams *compiler.NodeArray, members *compiler.NodeArray, end int, tail []Doc) Doc {
+	empty := p.bodyIsEmpty(members, end)
+	bodyToken := " {"
+	if empty {
+		bodyToken = " {}"
+	}
 	header := concat(
 		p.modifiers(mods, "own"),
 		text(keyword),
@@ -1032,11 +1037,15 @@ func (p *printer) classLike(keyword string, mods *compiler.NodeArray, name *comp
 		// extends/implements/permits clauses (visitClassDeclaration), so a
 		// type-parameter list that had to break forces the clause break too. The
 		// type parameters take a further +4 when a clause follows (landing at +8),
-		// else the header's own indent.
-		level(plus4, append([]Doc{p.typeParametersBreak(typeParams, classTypeParamIndent(len(tail) > 0))}, tail...)),
-		text(" "),
+		// else the header's own indent. The body's `{` rides inside that level too
+		// (gjf's DocBuilder appends it to the innermost level that last took a
+		// break), so a header that only overflows on the brace breaks its clause.
+		level(plus4, append(append([]Doc{p.typeParametersBreak(typeParams, classTypeParamIndent(len(tail) > 0))}, tail...), text(bodyToken))),
 	)
-	return concat(header, p.body(members, end))
+	if empty {
+		return header
+	}
+	return concat(header, p.bodyRest(members, end))
 }
 
 // typeListClause is a gjf class-header type list (`implements A, B, C`): a fill
@@ -1064,9 +1073,18 @@ func (p *printer) typeListClause(keyword string, types []*compiler.Node) Doc {
 // body renders a brace-delimited member body. endPos is the offset just past
 // the closing brace, bounding trailing comments.
 func (p *printer) body(members *compiler.NodeArray, endPos int) Doc {
-	if members.Len() == 0 && !p.hasCommentBefore(endPos) {
+	if p.bodyIsEmpty(members, endPos) {
 		return text("{}")
 	}
+	return concat(text("{"), p.bodyRest(members, endPos))
+}
+
+func (p *printer) bodyIsEmpty(members *compiler.NodeArray, endPos int) bool {
+	return members.Len() == 0 && !p.hasCommentBefore(endPos)
+}
+
+// bodyRest is a body minus its opening `{` (which rides into the header).
+func (p *printer) bodyRest(members *compiler.NodeArray, endPos int) Doc {
 	lead := hardline
 	from := -1
 	if members.Len() > 0 {
@@ -1080,7 +1098,6 @@ func (p *printer) body(members *compiler.NodeArray, endPos int) Doc {
 		closeLead = concat(hardline, hardline)
 	}
 	return concat(
-		text("{"),
 		indent(concat(append([]Doc{lead}, p.members(members, endPos)...)...)),
 		closeLead,
 		text("}"),

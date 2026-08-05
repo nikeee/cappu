@@ -1,0 +1,8 @@
+package p;
+
+class Outer {
+  public class EntrySetToMapIteratorAdapter<K, V>
+      implements MapIterator<K, V>, ResettableIterator<K> {
+    int x;
+  }
+}

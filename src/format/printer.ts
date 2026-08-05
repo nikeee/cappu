@@ -932,6 +932,7 @@ class Printer {
     },
     tail: Doc[],
   ): Doc {
+    const empty = this.bodyIsEmpty(decl.members, decl.end);
     const header = concat([
       this.modifiers(decl.modifiers, "own"),
       keyword,
@@ -942,13 +943,16 @@ class Printer {
       // type-parameter list that had to break forces the clause break too. The
       // type parameters take a further +4 when a clause follows (landing at +8),
       // else the header's own indent.
+      // The body's `{` rides inside the header level too (gjf's DocBuilder
+      // appends it to the innermost level that last took a break), so a header
+      // that only overflows on the brace breaks its clause.
       level(PLUS4, [
         this.typeParameters(decl.typeParameters, tail.length > 0 ? PLUS4 : ZERO),
         ...tail,
+        empty ? " {}" : " {",
       ]),
-      " ",
     ]);
-    return concat([header, this.body(decl.members, decl.end)]);
+    return empty ? header : concat([header, this.bodyRest(decl.members, decl.end)]);
   }
 
   // A gjf class-header type list (`implements A, B, C`): a fill break before the
@@ -968,7 +972,16 @@ class Printer {
   /** A brace-delimited member body: `{` ... `}` or `{}` when empty. `endPos` is
    * the offset just past the closing brace, bounding trailing comments. */
   private body(members: NodeArray<Node>, endPos: number): Doc {
-    if (members.length === 0 && !this.hasCommentBefore(endPos)) return "{}";
+    if (this.bodyIsEmpty(members, endPos)) return "{}";
+    return concat(["{", this.bodyRest(members, endPos)]);
+  }
+
+  private bodyIsEmpty(members: NodeArray<Node>, endPos: number): boolean {
+    return members.length === 0 && !this.hasCommentBefore(endPos);
+  }
+
+  /** A body minus its opening `{` (which rides into the declaration header). */
+  private bodyRest(members: NodeArray<Node>, endPos: number): Doc {
     const lead =
       members.length > 0 ? this.braceLead(members[0].pos, this.start(members[0])) : hardline;
     const from = members.length > 0 ? members[members.length - 1].end : this.comments[this.ci]?.pos;
@@ -976,7 +989,7 @@ class Printer {
       from !== undefined && this.blankAfterLastComment(from, endPos)
         ? concat([hardline, hardline])
         : hardline;
-    return concat(["{", indent(concat([lead, ...this.members(members, endPos)])), closeLead, "}"]);
+    return concat([indent(concat([lead, ...this.members(members, endPos)])), closeLead, "}"]);
   }
 
   private classDeclaration(d: ClassDeclaration): Doc {
