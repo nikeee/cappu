@@ -1,0 +1,15 @@
+package p;
+
+class T {
+    @Deprecated public static final CharSequenceTranslator ESCAPE_XML = new AggregateTranslator(x);
+
+    @Deprecated
+    public static final String JAVA_AWT_GRAPHICSENV = SystemProperties.getJavaAwtGraphicsenv();
+
+    @Deprecated public static final String SHORT = "s";
+
+    void m() {
+        @SuppressWarnings("unchecked")
+        Map<String, List<Integer>> longLocalNameHere = buildTheMapping(a, b);
+    }
+}

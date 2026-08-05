@@ -761,7 +761,10 @@ class Printer {
         const tc = this.trailingCommentAfter(a);
         if (tc) parts.push(" ", reflow(tc.text, true));
       }
-      parts.push(ownLine ? hardline : " ");
+      // gjf visitModifiers separates a horizontal-direction annotation from what
+      // follows with a real break, not a space: a marker annotation on a field or
+      // local moves to its own line when the declaration overflows.
+      parts.push(ownLine ? hardline : annoMode === "var" ? brk("unified", " ", ZERO) : " ");
       // An own-line comment between this annotation and whatever follows it
       // stays where it is (`@Test` / `// why` / `public void m()`); without this
       // it leaks past the declaration and lands inside the body. skipTrivia is
@@ -1120,13 +1123,15 @@ class Printer {
   }
 
   private fieldDeclaration(d: FieldDeclaration, tail: Doc = ""): Doc {
+    // The whole declaration is one level so the modifiers' annotation break can
+    // take when it overflows (gjf visitModifiers).
     if (d.declarators.length === 1) {
-      return concat([
+      return level(ZERO, [
         this.modifiers(d.modifiers, "var"),
         this.singleDeclaration(this.type(d.type), d.declarators[0], concat([";", tail])),
       ]);
     }
-    return concat([
+    return level(ZERO, [
       this.modifiers(d.modifiers, "var"),
       this.type(d.type),
       " ",
@@ -1543,7 +1548,7 @@ class Printer {
 
   private localVar(d: LocalVariableDeclarationStatement, tail: Doc = ""): Doc {
     if (d.declarators.length === 1) {
-      return concat([
+      return level(ZERO, [
         this.modifiers(d.modifiers, "var"),
         this.singleDeclaration(this.type(d.type), d.declarators[0], concat([";", tail])),
       ]);
@@ -1555,7 +1560,7 @@ class Printer {
       // The terminating `;` rides into the last declarator's initializer.
       parts.push(this.declarator(v, i === last ? concat([";", tail]) : ""));
     });
-    return concat(parts);
+    return level(ZERO, parts);
   }
 
   private ifStatement(s: IfStatement): Doc {

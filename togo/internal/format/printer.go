@@ -815,6 +815,11 @@ func (p *printer) modifiers(mods *compiler.NodeArray, annoMode string) Doc {
 			for _, c := range p.commentsBefore(compiler.SkipTrivia(p.text, a.End)) {
 				parts = append(parts, reflow(c.text), hardline)
 			}
+		} else if annoMode == "var" {
+			// gjf visitModifiers separates a horizontal-direction annotation from
+			// what follows with a real break, not a space: a marker annotation on a
+			// field or local moves to its own line when the declaration overflows.
+			parts = append(parts, brk(fillUnified, " ", ZERO, nil))
 		} else {
 			parts = append(parts, text(" "))
 		}
@@ -1272,19 +1277,21 @@ func (p *printer) fieldDeclaration(d *compiler.FieldDeclarationData) Doc {
 // fieldDeclarationTail is fieldDeclaration with a trailing comment routed in
 // after the `;`.
 func (p *printer) fieldDeclarationTail(d *compiler.FieldDeclarationData, tail Doc) Doc {
+	// The whole declaration is one level so the modifiers' annotation break can
+	// take when it overflows (gjf visitModifiers).
 	if d.Declarators.Len() == 1 {
-		return concat(
+		return level(ZERO, []Doc{
 			p.modifiers(d.Modifiers, "var"),
 			p.singleDeclaration(p.typ(d.Type), nodes(d.Declarators)[0].AsVariableDeclarator(), semiWithTail(tail)),
-		)
+		})
 	}
-	return concat(
+	return level(ZERO, []Doc{
 		p.modifiers(d.Modifiers, "var"),
 		p.typ(d.Type),
 		text(" "),
 		p.declaratorList(d.Declarators),
 		semiWithTail(tail),
-	)
+	})
 }
 
 // singleDeclaration renders `<type> <name> = <init><trailing>` with the gjf
@@ -1812,10 +1819,10 @@ func (p *printer) localVarTail(d *compiler.LocalVariableDeclarationStatementData
 	semi := semiWithTail(tail)
 	ds := nodes(d.Declarators)
 	if len(ds) == 1 {
-		return concat(
+		return level(ZERO, []Doc{
 			p.modifiers(d.Modifiers, "var"),
 			p.singleDeclaration(p.typ(d.Type), ds[0].AsVariableDeclarator(), semi),
-		)
+		})
 	}
 	parts := []Doc{p.modifiers(d.Modifiers, "var"), p.typ(d.Type), text(" ")}
 	for i, v := range ds {
@@ -1829,7 +1836,7 @@ func (p *printer) localVarTail(d *compiler.LocalVariableDeclarationStatementData
 		}
 		parts = append(parts, p.declarator(v.AsVariableDeclarator(), tr))
 	}
-	return concat(parts...)
+	return level(ZERO, parts)
 }
 
 // semiWithTail builds the `;` plus an optional trailing comment. Never concat a
