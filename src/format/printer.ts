@@ -2050,8 +2050,18 @@ class Printer {
       entries.push({ doc: this.switchClause(c), blank: leading });
       prevEnd = c.end;
     }
-    for (const cm of this.commentsBefore(endPos))
-      entries.push({ doc: reflow(cm.text), blank: false });
+    // Comments after the last clause belong to ITS body, so they sit at the
+    // statement indent (gjf) rather than the clause indent - a `// falls-through`
+    // before the switch's `}` lines up with the statements above it.
+    const dangling = this.commentsBefore(endPos);
+    if (dangling.length > 0 && entries.length > 0) {
+      const last = entries[entries.length - 1];
+      const inner: Doc[] = [];
+      for (const cm of dangling) inner.push(hardline, reflow(cm.text));
+      last.doc = concat([last.doc, indent(concat(inner))]);
+    } else {
+      for (const cm of dangling) entries.push({ doc: reflow(cm.text), blank: false });
+    }
     const body: Doc[] = [];
     entries.forEach((e, i) => {
       if (i > 0) body.push(e.blank ? concat([hardline, hardline]) : hardline);

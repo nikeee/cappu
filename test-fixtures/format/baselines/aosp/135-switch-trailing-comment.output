@@ -1,0 +1,14 @@
+package p;
+
+class T {
+    void m(int x) {
+        switch (x) {
+            case 2:
+                go();
+            // falls-through
+            case 1:
+                go();
+                // falls-through
+        }
+    }
+}

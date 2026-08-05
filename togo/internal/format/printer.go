@@ -2429,8 +2429,21 @@ func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, e
 		entries = append(entries, entry{p.switchClause(c.AsSwitchClause(), c.End), leading})
 		prevEnd = c.End
 	}
-	for _, cm := range p.commentsBefore(endPos) {
-		entries = append(entries, entry{reflow(cm.text), false})
+	// Comments after the last clause belong to ITS body, so they sit at the
+	// statement indent (gjf) rather than the clause indent - a `// falls-through`
+	// before the switch's `}` lines up with the statements above it.
+	dangling := p.commentsBefore(endPos)
+	if len(dangling) > 0 && len(entries) > 0 {
+		var inner []Doc
+		for _, cm := range dangling {
+			inner = append(inner, hardline, reflow(cm.text))
+		}
+		last := &entries[len(entries)-1]
+		last.doc = concat(last.doc, indent(concat(inner...)))
+	} else {
+		for _, cm := range dangling {
+			entries = append(entries, entry{reflow(cm.text), false})
+		}
 	}
 	var body []Doc
 	for i, e := range entries {
