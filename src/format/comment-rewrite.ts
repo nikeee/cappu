@@ -77,6 +77,10 @@ function indentJavadoc(lines: string[], column0: number): string {
 
 // Wrap and re-indent line comments.
 function indentLineComments(lines: string[], column0: number, noWrap = false): string {
+  // The missing-space fix is part of gjf's wrapLineComments, but it is not about
+  // wrapping: a comment we deliberately never wrap (one trailing code) still has
+  // to become `// foo`.
+  lines = lines.map(addMissingSpace);
   if (!noWrap) lines = wrapLineComments(lines, column0);
   let out = lines[0].trim();
   const pad = " ".repeat(column0);
@@ -87,14 +91,15 @@ function indentLineComments(lines: string[], column0: number, noWrap = false): s
 // Preserve special `//noinspection` / `//$NON-NLS-x$` comments (no leading space).
 const MISSING_SPACE_PREFIX = /^(\/\/+)(?!noinspection|\$NON-NLS-\d+\$)[^\s/]/;
 
+function addMissingSpace(line: string): string {
+  const m = line.match(MISSING_SPACE_PREFIX);
+  if (!m) return line;
+  return "/".repeat(m[1].length) + " " + line.slice(m[1].length);
+}
+
 function wrapLineComments(lines: string[], column0: number): string[] {
   const result: string[] = [];
   for (let line of lines) {
-    const m = line.match(MISSING_SPACE_PREFIX);
-    if (m) {
-      const length = m[1].length;
-      line = "/".repeat(length) + " " + line.slice(length);
-    }
     if (line.startsWith("// MOE:")) {
       result.push(line);
       continue;

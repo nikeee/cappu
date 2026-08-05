@@ -118,6 +118,7 @@ class Level {
   // Filled in by computeBreaks, read by write. broken[i]/newIndent[i] are the
   // decision for breaks[i] (parallel arrays, one entry per controlled break).
   oneLine = false;
+  anyReflow: boolean | undefined;
   splits: Doc[][] = [];
   breaks: Break[] = [];
   broken: boolean[] = [];
@@ -373,6 +374,44 @@ function push(w: Writer, s: string): void {
   else w.col += s.length;
 }
 
+/** Whether `doc` contains a `reflow` leaf (cached per Level). */
+function hasReflow(doc: Doc): boolean {
+  if (typeof doc === "string") return false;
+  switch (doc.kind) {
+    case "reflow":
+      return true;
+    case "break":
+      return false;
+    case "concat":
+      return doc.parts.some(hasReflow);
+    case "level":
+      if (doc.anyReflow === undefined) doc.anyReflow = doc.docs.some(hasReflow);
+      return doc.anyReflow;
+  }
+}
+
+/** Write a doc that fits on one line, rewriting any `reflow` leaf it holds. */
+function writeFlat(doc: Doc, w: Writer): void {
+  if (typeof doc === "string") {
+    push(w, doc);
+    return;
+  }
+  switch (doc.kind) {
+    case "reflow":
+      push(w, w.rewrite ? w.rewrite(doc.raw, w.col, doc.noWrap) : doc.raw);
+      break;
+    case "break":
+      push(w, doc.flatText);
+      break;
+    case "concat":
+      for (const d of doc.parts) writeFlat(d, w);
+      break;
+    case "level":
+      for (const d of doc.docs) writeFlat(d, w);
+      break;
+  }
+}
+
 function writeDoc(doc: Doc, w: Writer): void {
   if (typeof doc === "string") {
     push(w, doc);
@@ -390,7 +429,11 @@ function writeDoc(doc: Doc, w: Writer): void {
       break;
     case "level":
       if (doc.oneLine) {
-        push(w, doc.flat());
+        // A one-line level is normally written from its cached flat text, but a
+        // `reflow` leaf inside it still has to reach the rewriter (a trailing
+        // `//foo` comment needs its space), so walk those levels instead.
+        if (hasReflow(doc)) writeFlat(doc, w);
+        else push(w, doc.flat());
       } else {
         for (const d of doc.splits[0]) writeDoc(d, w);
         for (let i = 0; i < doc.breaks.length; i++) {

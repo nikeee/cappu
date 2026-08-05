@@ -112,6 +112,12 @@ func indentJavadoc(lines []string, column0 int) string {
 }
 
 func indentLineComments(lines []string, column0 int, noWrap bool) string {
+	// The missing-space fix is part of gjf's wrapLineComments, but it is not about
+	// wrapping: a comment we deliberately never wrap (one trailing code) still has
+	// to become `// foo`.
+	for i, line := range lines {
+		lines[i] = addMissingSpace(line)
+	}
 	if !noWrap {
 		lines = wrapLineComments(lines, column0)
 	}
@@ -129,13 +135,18 @@ func indentLineComments(lines []string, column0 int, noWrap bool) string {
 var missingSpacePrefix = regexp.MustCompile(`^(//+)(?:[^\s/])`)
 var allowedNoSpace = regexp.MustCompile(`^//(?:noinspection|\$NON-NLS-\d+\$)`)
 
+func addMissingSpace(line string) string {
+	m := missingSpacePrefix.FindStringSubmatch(line)
+	if m == nil || allowedNoSpace.MatchString(line) {
+		return line
+	}
+	length := len(m[1])
+	return strings.Repeat("/", length) + " " + line[length:]
+}
+
 func wrapLineComments(lines []string, column0 int) []string {
 	var result []string
 	for _, line := range lines {
-		if m := missingSpacePrefix.FindStringSubmatch(line); m != nil && !allowedNoSpace.MatchString(line) {
-			length := len(m[1])
-			line = strings.Repeat("/", length) + " " + line[length:]
-		}
 		if strings.HasPrefix(line, "// MOE:") {
 			result = append(result, line)
 			continue

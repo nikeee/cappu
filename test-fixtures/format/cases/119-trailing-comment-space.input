@@ -1,0 +1,11 @@
+package p;
+
+class T {
+  void m(Object[] otherElements, int bound) {
+    System.arraycopy( //src src_pos dst dst_pos length
+        getOtherElements(), 0, otherElements, 0, bound - 1);
+    int x = 1; //no space here
+    //noinspection unchecked
+    int y = 2;
+  }
+}

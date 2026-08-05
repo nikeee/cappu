@@ -175,6 +175,7 @@ type levelDoc struct {
 	f        *string
 	// filled in by computeBreaks, read by write.
 	oneLine   bool
+	anyReflow *bool
 	splits    [][]Doc
 	breaks    []*brkDoc
 	broken    []bool
@@ -410,6 +411,59 @@ func (w *writer) push(s string) {
 	}
 }
 
+// hasReflow reports whether doc contains a reflow leaf (cached per level).
+func hasReflow(doc Doc) bool {
+	switch n := doc.(type) {
+	case *reflowDoc:
+		return true
+	case *concatDoc:
+		for _, d := range n.parts {
+			if hasReflow(d) {
+				return true
+			}
+		}
+		return false
+	case *levelDoc:
+		if n.anyReflow == nil {
+			any := false
+			for _, d := range n.docs {
+				if hasReflow(d) {
+					any = true
+					break
+				}
+			}
+			n.anyReflow = &any
+		}
+		return *n.anyReflow
+	default:
+		return false
+	}
+}
+
+// writeFlat writes a doc that fits on one line, rewriting any reflow leaf.
+func writeFlat(doc Doc, w *writer) {
+	switch n := doc.(type) {
+	case *token:
+		w.push(n.text)
+	case *reflowDoc:
+		if w.rewrite != nil {
+			w.push(w.rewrite(n.raw, w.col, n.noWrap))
+		} else {
+			w.push(n.raw)
+		}
+	case *brkDoc:
+		w.push(n.flatText)
+	case *concatDoc:
+		for _, d := range n.parts {
+			writeFlat(d, w)
+		}
+	case *levelDoc:
+		for _, d := range n.docs {
+			writeFlat(d, w)
+		}
+	}
+}
+
 func writeDoc(doc Doc, w *writer) {
 	switch n := doc.(type) {
 	case *token:
@@ -426,7 +480,14 @@ func writeDoc(doc Doc, w *writer) {
 		}
 	case *levelDoc:
 		if n.oneLine {
-			w.push(n.flat())
+			// A one-line level is normally written from its cached flat text, but a
+			// reflow leaf inside it still has to reach the rewriter (a trailing
+			// `//foo` comment needs its space), so walk those levels instead.
+			if hasReflow(n) {
+				writeFlat(n, w)
+			} else {
+				w.push(n.flat())
+			}
 			return
 		}
 		for _, d := range n.splits[0] {
