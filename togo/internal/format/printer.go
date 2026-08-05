@@ -2947,9 +2947,168 @@ func (p *printer) arrayCreation(e *compiler.ArrayCreationExpressionData) Doc {
 	return concat(text("new "), p.typ(e.ElementType), concat(dims...), text(extra), init)
 }
 
+// The source column an element starts at, used by the tabular check below.
+func (p *printer) elementColumn(n *compiler.Node) int {
+	pos := compiler.SkipTrivia(p.text, n.Pos)
+	return pos - (strings.LastIndex(p.text[:pos], "\n") + 1)
+}
+
+// initializerOf returns the array initializer a grid row element holds, if any.
+func initializerOf(n *compiler.Node) *compiler.ArrayInitializerData {
+	switch n.Kind {
+	case compiler.ArrayInitializer:
+		return n.AsArrayInitializer()
+	case compiler.ArrayCreationExpression:
+		if init := n.AsArrayCreationExpression().Initializer; init != nil {
+			return init.AsArrayInitializer()
+		}
+	}
+	return nil
+}
+
+// gjf rowLength: a nested array initializer counts as its own element count,
+// so `{{1, 2}, {3, 4}}` is a row of four, not of two.
+func rowLength(row []*compiler.Node) int {
+	size := 0
+	for _, n := range row {
+		if inner := initializerOf(n); inner != nil {
+			size += rowLength(nodes(inner.Elements))
+			continue
+		}
+		size++
+	}
+	return size
+}
+
+// gjf expressionsAreParallel: at least atLeastM rows have the same node kind in
+// this column. A unary expression counts as its operand's kind, so `-1` and `1`
+// are the same shape.
+func expressionsAreParallel(rows [][]*compiler.Node, column, atLeastM int) bool {
+	counts := map[compiler.SyntaxKind]int{}
+	for _, row := range rows {
+		if column >= len(row) {
+			continue
+		}
+		n := row[column]
+		k := n.Kind
+		if k == compiler.PrefixUnaryExpression {
+			k = n.AsPrefixUnaryExpression().Operand.Kind
+		}
+		counts[k]++
+	}
+	for _, c := range counts {
+		if c >= atLeastM {
+			return true
+		}
+	}
+	return false
+}
+
+// gjf argumentsAreTabular: when the author already laid the elements out as a
+// grid (every row starting at the same column, parallel expression kinds), gjf
+// preserves those rows. Returns the number of columns, or -1.
+func (p *printer) argumentsAreTabular(args []*compiler.Node) int {
+	if len(args) == 0 {
+		return -1
+	}
+	var rows [][]*compiler.Node
+	col0 := p.elementColumn(args[0])
+	i := 0
+	row := []*compiler.Node{args[i]}
+	i++
+	for i < len(args) && p.elementColumn(args[i]) > col0 {
+		row = append(row, args[i])
+		i++
+	}
+	if i >= len(args) || rowLength(row) <= 1 {
+		return -1
+	}
+	rows = append(rows, row)
+	for i < len(args) {
+		if p.elementColumn(args[i]) != col0 {
+			return -1
+		}
+		row := []*compiler.Node{args[i]}
+		i++
+		for i < len(args) && p.elementColumn(args[i]) > col0 {
+			row = append(row, args[i])
+			i++
+		}
+		rows = append(rows, row)
+	}
+	size0 := len(rows[0])
+	if !expressionsAreParallel(rows, 0, len(rows)) {
+		return -1
+	}
+	for c := 1; c < size0; c++ {
+		if !expressionsAreParallel(rows, c, len(rows)/2+1) {
+			return -1
+		}
+	}
+	// With only two rows they must be the same length; otherwise a ragged last
+	// row is allowed (but no shorter middle row, and no longer last row).
+	if len(rows) == 2 {
+		if size0 == len(rows[1]) {
+			return size0
+		}
+		return -1
+	}
+	for r := 1; r < len(rows)-1; r++ {
+		if size0 != len(rows[r]) {
+			return -1
+		}
+	}
+	if size0 < len(rows[len(rows)-1]) {
+		return -1
+	}
+	return size0
+}
+
+// gjf visitArrayInitializer's tabular branch: cols elements per line, each row
+// its own level so a too-long row fills at +4 (rows of arrays stay at the row
+// indent).
+func (p *printer) tabularArrayInitializer(els []*compiler.Node, cols int) Doc {
+	parts := []Doc{brk(fillForced, "", ZERO, nil)}
+	for start := 0; start < len(els); start += cols {
+		end := start + cols
+		if end > len(els) {
+			end = len(els)
+		}
+		row := els[start:end]
+		if start > 0 {
+			parts = append(parts, brk(fillForced, "", ZERO, nil))
+		}
+		var rowParts []Doc
+		for j, el := range row {
+			if j > 0 {
+				rowParts = append(rowParts, text(","), brk(fillIndependent, " ", ZERO, nil))
+			}
+			rowParts = append(rowParts, p.node(el))
+		}
+		last := row[len(row)-1]
+		if idx := compiler.SkipTrivia(p.text, last.End); idx < len(p.text) && p.text[idx] == ',' {
+			rowParts = append(rowParts, text(","))
+		}
+		rowIndent := plus4
+		if cols == 1 || initializerOf(row[0]) != nil {
+			rowIndent = ZERO
+		}
+		parts = append(parts, level(rowIndent, rowParts))
+	}
+	parts = append(parts, brk(fillForced, "", minus2, nil))
+	return concat(text("{"), level(plus2, parts), text("}"))
+}
+
 func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData, end int) Doc {
 	if e.Elements.Len() == 0 {
 		return text("{}")
+	}
+	// A source-laid-out grid is preserved verbatim as rows (gjf). Comments would
+	// land mid-row, so leave those to the normal path.
+	if p.ci >= len(p.comments) || p.comments[p.ci].pos > end {
+		if cols := p.argumentsAreTabular(nodes(e.Elements)); cols != -1 {
+			return p.tabularArrayInitializer(nodes(e.Elements), cols)
+		}
 	}
 	// gjf: contents indent +2; when broken, elements fill (INDEPENDENT) if all
 	// short, else one per line (UNIFIED); the closing `}` goes on its own line

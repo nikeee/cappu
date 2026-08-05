@@ -2426,8 +2426,119 @@ class Printer {
     return concat(["new ", this.type(e.elementType), concat(dims), extra, init]);
   }
 
+  // The source column an element starts at, used by the tabular check below.
+  private elementColumn(n: Node): number {
+    const p = this.start(n);
+    return p - (this.text.lastIndexOf("\n", p - 1) + 1);
+  }
+
+  // gjf rowLength: a nested array initializer counts as its own element count,
+  // so `{{1, 2}, {3, 4}}` is a row of four, not of two.
+  private static rowLength(row: readonly Node[]): number {
+    let size = 0;
+    for (const n of row) {
+      const inner = Printer.initializerOf(n);
+      size += inner ? Printer.rowLength(inner.elements) : 1;
+    }
+    return size;
+  }
+
+  private static initializerOf(n: Node): ArrayInitializer | undefined {
+    if (n.kind === SyntaxKind.ArrayInitializer) return n as ArrayInitializer;
+    if (n.kind === SyntaxKind.ArrayCreationExpression) {
+      return (n as ArrayCreationExpression).initializer;
+    }
+    return undefined;
+  }
+
+  // gjf expressionsAreParallel: at least `atLeastM` rows have the same node kind
+  // in this column. A unary expression counts as its operand's kind, so `-1` and
+  // `1` are the same shape.
+  private static expressionsAreParallel(
+    rows: readonly (readonly Node[])[],
+    column: number,
+    atLeastM: number,
+  ): boolean {
+    const counts = new Map<SyntaxKind, number>();
+    for (const row of rows) {
+      const n = row[column];
+      if (n === undefined) continue;
+      const k =
+        n.kind === SyntaxKind.PrefixUnaryExpression
+          ? (n as PrefixUnaryExpression).operand.kind
+          : n.kind;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    for (const c of counts.values()) if (c >= atLeastM) return true;
+    return false;
+  }
+
+  // gjf argumentsAreTabular: when the author already laid the elements out as a
+  // grid (every row starting at the same column, parallel expression kinds), gjf
+  // preserves those rows. Returns the number of columns, or -1.
+  private argumentsAreTabular(args: readonly Node[]): number {
+    if (args.length === 0) return -1;
+    const rows: Node[][] = [];
+    const col0 = this.elementColumn(args[0]);
+    let i = 0;
+    {
+      const row: Node[] = [args[i++]];
+      while (i < args.length && this.elementColumn(args[i]) > col0) row.push(args[i++]);
+      if (i >= args.length) return -1;
+      if (Printer.rowLength(row) <= 1) return -1;
+      rows.push(row);
+    }
+    while (i < args.length) {
+      if (this.elementColumn(args[i]) !== col0) return -1;
+      const row: Node[] = [args[i++]];
+      while (i < args.length && this.elementColumn(args[i]) > col0) row.push(args[i++]);
+      rows.push(row);
+    }
+    const size0 = rows[0].length;
+    if (!Printer.expressionsAreParallel(rows, 0, rows.length)) return -1;
+    for (let c = 1; c < size0; c++) {
+      if (!Printer.expressionsAreParallel(rows, c, Math.floor(rows.length / 2) + 1)) return -1;
+    }
+    // With only two rows they must be the same length; otherwise a ragged last
+    // row is allowed (but no shorter middle row, and no longer last row).
+    if (rows.length === 2) return size0 === rows[1].length ? size0 : -1;
+    for (let r = 1; r < rows.length - 1; r++) if (size0 !== rows[r].length) return -1;
+    if (size0 < rows[rows.length - 1].length) return -1;
+    return size0;
+  }
+
+  // gjf visitArrayInitializer's tabular branch: `cols` elements per line, each
+  // row its own level so a too-long row fills at +4 (rows of arrays stay at the
+  // row indent).
+  private tabularArrayInitializer(e: ArrayInitializer, cols: number): Doc {
+    const parts: Doc[] = [brk("forced", "", ZERO)];
+    for (let start = 0; start < e.elements.length; start += cols) {
+      const row = e.elements.slice(start, start + cols);
+      if (start > 0) parts.push(brk("forced", "", ZERO));
+      const rowParts: Doc[] = [];
+      row.forEach((el, j) => {
+        if (j > 0) rowParts.push(",", brk("independent", " ", ZERO));
+        rowParts.push(this.node(el));
+      });
+      const last = row[row.length - 1];
+      if (this.text[skipTrivia(this.text, last.end)] === ",") rowParts.push(",");
+      const rowIndent =
+        cols === 1 || Printer.initializerOf(row[0]) !== undefined ? ZERO : PLUS4;
+      parts.push(level(rowIndent, rowParts));
+    }
+    parts.push(brk("forced", "", MINUS2));
+    return concat(["{", level(PLUS2, parts), "}"]);
+  }
+
   private arrayInitializer(e: ArrayInitializer): Doc {
     if (e.elements.length === 0) return "{}";
+    // A source-laid-out grid is preserved verbatim as rows (gjf). Comments would
+    // land mid-row, so leave those to the normal path.
+    const nextComment = this.comments[this.ci];
+    if (nextComment === undefined || nextComment.pos > e.end) {
+      const cols = this.argumentsAreTabular(e.elements);
+      if (cols !== -1) return this.tabularArrayInitializer(e, cols);
+    }
     // gjf: contents indent +2; when broken, elements fill (INDEPENDENT) if all
     // short, else one per line (UNIFIED); the closing `}` goes on its own line
     // back at the parent indent (a -2 break cancels the +2).
