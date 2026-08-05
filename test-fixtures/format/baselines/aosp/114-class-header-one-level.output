@@ -1,0 +1,11 @@
+package p;
+
+class T {
+    public abstract static class AbstractBuilder<
+                    F extends FilterReadableByteChannel,
+                    C extends ReadableByteChannel,
+                    B extends AbstractBuilder<F, C, B>>
+            extends FilterChannel.AbstractBuilder<F, C, B> {
+        int x;
+    }
+}

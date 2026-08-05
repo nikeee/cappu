@@ -913,12 +913,13 @@ func (p *printer) typeParameters(tps *compiler.NodeArray) Doc {
 	return p.typeParametersBreak(tps, nil)
 }
 
-// classTypeParamIndent is +8 when a header clause follows the type parameters
-// (they nest inside the header's own +4 level), else +4.
+// classTypeParamIndent is +4 when a header clause follows the type parameters
+// (nesting inside the header's own +4 level lands them at +8), else the header
+// indent itself.
 func classTypeParamIndent(hasClause bool) *Indent {
-	i := plus4
+	i := ZERO
 	if hasClause {
-		i = indentConst(8)
+		i = plus4
 	}
 	return &i
 }
@@ -1021,13 +1022,12 @@ func (p *printer) classLike(keyword string, mods *compiler.NodeArray, name *comp
 		text(keyword),
 		text(" "),
 		text(p.raw(name)),
-		// gjf opens the class header at +4 and puts the type parameters in a further
-		// +4 level when a clause follows (so they land at +8), else at the header's
-		// own indent.
-		p.typeParametersBreak(typeParams, classTypeParamIndent(len(tail) > 0)),
-		// extends/implements/permits live in one +4 level: each clause begins with
-		// a fill break, so a long clause folds onto its own continuation line.
-		level(plus4, tail),
+		// gjf opens ONE +4 level around the type parameters AND the
+		// extends/implements/permits clauses (visitClassDeclaration), so a
+		// type-parameter list that had to break forces the clause break too. The
+		// type parameters take a further +4 when a clause follows (landing at +8),
+		// else the header's own indent.
+		level(plus4, append([]Doc{p.typeParametersBreak(typeParams, classTypeParamIndent(len(tail) > 0))}, tail...)),
 		text(" "),
 	)
 	return concat(header, p.body(members, end))

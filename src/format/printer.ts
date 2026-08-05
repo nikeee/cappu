@@ -929,13 +929,15 @@ class Printer {
       keyword,
       " ",
       this.raw(decl.name),
-      // gjf opens the class header at +4 and puts the type parameters in a
-      // further +4 level when a clause follows (so they land at +8), else at the
-      // header's own indent.
-      this.typeParameters(decl.typeParameters, tail.length > 0 ? indentConst(8) : PLUS4),
-      // extends/implements/permits live in one +4 level: each clause begins with
-      // a fill break, so a long clause folds onto its own continuation line.
-      level(PLUS4, tail),
+      // gjf opens ONE +4 level around the type parameters AND the
+      // extends/implements/permits clauses (visitClassDeclaration), so a
+      // type-parameter list that had to break forces the clause break too. The
+      // type parameters take a further +4 when a clause follows (landing at +8),
+      // else the header's own indent.
+      level(PLUS4, [
+        this.typeParameters(decl.typeParameters, tail.length > 0 ? PLUS4 : ZERO),
+        ...tail,
+      ]),
       " ",
     ]);
     return concat([header, this.body(decl.members, decl.end)]);
