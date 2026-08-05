@@ -1,0 +1,17 @@
+package p;
+
+class T {
+  public void
+      canDetect_ParameterAnnotation_OneRuntimeRetention_OneClassRetention_Changedxxxxxxxx() {
+    x();
+  }
+
+  public void aMethodWithQuiteALongNameIndeed(
+      String firstParameter, String secondParameter, int x) {
+    y();
+  }
+
+  public void shortName() {
+    x();
+  }
+}

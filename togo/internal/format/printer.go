@@ -1500,11 +1500,17 @@ func (p *printer) listItemsEx(ns []*compiler.Node, render func(*compiler.Node) D
 	return rs
 }
 
-func (p *printer) parameters(params *compiler.NodeArray, trailing Doc) Doc {
+// parametersOpen renders the parameter list with the opening delimiter as a
+// parameter: the method-name break owns the `(` when a return type precedes it.
+func (p *printer) parametersOpen(params *compiler.NodeArray, trailing Doc, open string) Doc {
 	if params.Len() == 0 {
+		closeOnly := "()"
+		if open == "" {
+			closeOnly = ")"
+		}
 		// Even with no parameters the trailing run (a `throws` clause + brace) may
 		// carry a break, so it must sit in a +4 level to fold and indent correctly.
-		inner := []Doc{text("()")}
+		inner := []Doc{text(closeOnly)}
 		if trailing != nil {
 			inner = append(inner, trailing)
 		}
@@ -1512,7 +1518,7 @@ func (p *printer) parameters(params *compiler.NodeArray, trailing Doc) Doc {
 	}
 	// Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
 	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameterBreak(n, true) })
-	return p.argsLikeTrailing("(", items, ")", fillUnified, trailing)
+	return p.argsLikeTrailing(open, items, ")", fillUnified, trailing)
 }
 
 // paramListChildren returns `(`, break-before-args, the param list and `)` as
@@ -1520,8 +1526,11 @@ func (p *printer) parameters(params *compiler.NodeArray, trailing Doc) Doc {
 // with the throws break (gjf's open(ZERO) around visitFormals + visitThrowsClause).
 // The break before the args is INDEPENDENT so the params stay inline when they
 // fit and break to the +4 line only when they overflow.
-func (p *printer) paramListChildren(params *compiler.NodeArray) []Doc {
+func (p *printer) paramListChildrenOpen(params *compiler.NodeArray, open string) []Doc {
 	if params.Len() == 0 {
+		if open == "" {
+			return []Doc{text(")")}
+		}
 		return []Doc{text("()")}
 	}
 	items, _ := p.listItems(nodes(params), func(n *compiler.Node) Doc { return p.parameterBreak(n, true) })
@@ -1532,7 +1541,7 @@ func (p *printer) paramListChildren(params *compiler.NodeArray) []Doc {
 		}
 		innerParts = append(innerParts, it)
 	}
-	return []Doc{text("("), brk(fillIndependent, "", ZERO, nil), level(ZERO, innerParts), text(")")}
+	return []Doc{text(open), brk(fillIndependent, "", ZERO, nil), level(ZERO, innerParts), text(")")}
 }
 
 func (p *printer) parameter(n *compiler.Node) Doc {
@@ -1585,7 +1594,7 @@ func (p *printer) methodLikeDefault(mods, typeParams *compiler.NodeArray, return
 		head = append(head, tp, text(" "))
 	}
 	if returnType != nil {
-		head = append(head, p.typ(returnType), text(" "))
+		head = append(head, p.typ(returnType))
 	}
 	hasThrows := throws.Len() > 0
 	// With no throws clause the body-open token rides inside the param level
@@ -1631,16 +1640,40 @@ func (p *printer) methodLikeDefault(mods, typeParams *compiler.NodeArray, return
 		// column. When the params explode one-per-line, the param split's flat
 		// width overflows the +4 line, propagating mustBreak so the throws clause
 		// also breaks - matching gjf with no engine change.
+		open := "("
+		if returnType != nil {
+			open = ""
+		}
 		sig = level(plus4, append(
-			p.paramListChildren(params),
+			p.paramListChildrenOpen(params, open),
 			brk(fillIndependent, " ", ZERO, nil),
 			level(throwsIndent, throwsParts),
 			bodyToken,
 		))
 	} else {
-		sig = p.parameters(params, bodyToken)
+		open := "("
+		if returnType != nil {
+			open = ""
+		}
+		sig = p.parametersOpen(params, bodyToken, open)
 	}
-	head = append(head, text(p.raw(name)), sig)
+	// gjf breaks between the return type and the name when `name(` no longer
+	// fits, indenting the name +4 (visitMethodDeclaration's breakBeforeType). The
+	// break sits in a level holding just the name and the opening paren, so it
+	// fires on exactly that run - breaking the PARAMETER LIST is preferred
+	// whenever that is enough, which is what gjf does.
+	if returnType != nil {
+		nameRun := []Doc{brk(fillIndependent, " ", plus4, nil), text(p.raw(name))}
+		if params.Len() == 0 && !hasThrows {
+			// With no parameters there is no break-before-args to end the split, so
+			// the whole `name() {` run has to sit in the level for the fit check.
+			head = append(head, level(ZERO, append(nameRun, text("()"), bodyToken)))
+		} else {
+			head = append(head, level(ZERO, append(nameRun, text("("))), sig)
+		}
+	} else {
+		head = append(head, text(p.raw(name)), sig)
+	}
 	// Emit the rest of the block when there is a real body, else the signature
 	// (with its trailing `;`/` {}`) is complete.
 	if body == nil || emptyBody {

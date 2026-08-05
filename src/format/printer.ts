@@ -1320,13 +1320,13 @@ class Printer {
     return { items, leads, leadStarts, anyComment };
   }
 
-  private parameters(params: NodeArray<Parameter>, trailing: Doc = ""): Doc {
+  private parameters(params: NodeArray<Parameter>, trailing: Doc = "", open = "("): Doc {
     // Even with no parameters the trailing run (a `throws` clause + brace) may
     // carry a break, so it must sit in a +4 level to fold and indent correctly.
-    if (params.length === 0) return level(PLUS4, ["()", trailing]);
+    if (params.length === 0) return level(PLUS4, [open === "" ? ")" : "()", trailing]);
     // Parameters are never filled (gjf uses a UNIFIED inter-parameter break).
     const { items } = this.listItems(params, p => this.parameter(p as Parameter, true));
-    return this.argsLike("(", items, ")", "unified", trailing);
+    return this.argsLike(open, items, ")", "unified", trailing);
   }
 
   // The `(`, break-before-args, param list and `)` as flat children, for the
@@ -1334,15 +1334,15 @@ class Printer {
   // (gjf's open(ZERO) around visitFormals + visitThrowsClause). The break before
   // the args is INDEPENDENT so the params stay inline when they fit and break to
   // the +4 line only when they overflow.
-  private paramListChildren(params: NodeArray<Parameter>): Doc[] {
-    if (params.length === 0) return ["()"];
+  private paramListChildren(params: NodeArray<Parameter>, open = "("): Doc[] {
+    if (params.length === 0) return [open === "" ? ")" : "()"];
     const { items } = this.listItems(params, p => this.parameter(p as Parameter, true));
     const innerParts: Doc[] = [];
     items.forEach((it, i) => {
       if (i > 0) innerParts.push(",", brk("unified", " ", ZERO));
       innerParts.push(it);
     });
-    return ["(", brk("independent", "", ZERO), level(ZERO, innerParts), ")"];
+    return [open, brk("independent", "", ZERO), level(ZERO, innerParts), ")"];
   }
 
   private parameter(p: Parameter, breakBeforeName = false): Doc {
@@ -1378,7 +1378,7 @@ class Printer {
     const tp = this.typeParameters(decl.typeParameters);
     const head: Doc[] = [this.modifiers(decl.modifiers, "own")];
     if (tp !== "") head.push(tp, " ");
-    if (decl.returnType) head.push(this.type(decl.returnType), " ");
+    if (decl.returnType) head.push(this.type(decl.returnType));
     const hasThrows = decl.throws !== undefined && decl.throws.length > 0;
     // The token trailing the parameter list on the same line (`;`, ` {}`, or
     // ` {`) and any `throws` clause go *inside* the param level so the whole
@@ -1417,7 +1417,7 @@ class Printer {
       // width overflows the +4 line, propagating mustBreak so the throws clause
       // also breaks - matching gjf with no engine change.
       sig = level(PLUS4, [
-        ...this.paramListChildren(decl.parameters),
+        ...this.paramListChildren(decl.parameters, decl.returnType ? "" : "("),
         brk("independent", " ", ZERO),
         throwsClause,
         bodyToken,
@@ -1425,9 +1425,25 @@ class Printer {
     } else {
       // No throws clause: the body-open token rides inside the param level so the
       // list wraps when the whole `(...)<token>` run overflows (rest-of-line).
-      sig = this.parameters(decl.parameters, bodyToken);
+      sig = this.parameters(decl.parameters, bodyToken, decl.returnType ? "" : "(");
     }
-    head.push(this.raw(decl.name), sig);
+    // gjf breaks between the return type and the name when `name(` no longer
+    // fits, indenting the name +4 (visitMethodDeclaration's breakBeforeType).
+    // The break sits in a level holding just the name and the opening paren, so
+    // it fires on exactly that run - breaking the PARAMETER LIST is preferred
+    // whenever that is enough, which is what gjf does.
+    if (decl.returnType) {
+      // With no parameters there is no break-before-args to end the split, so the
+      // whole `name() {` run has to sit in the level for the fit check to see it.
+      const nameRun: Doc[] = [brk("independent", " ", PLUS4), this.raw(decl.name)];
+      if (decl.parameters.length === 0 && !hasThrows) {
+        head.push(level(ZERO, [...nameRun, "()", bodyToken]));
+      } else {
+        head.push(level(ZERO, [...nameRun, "("]), sig);
+      }
+    } else {
+      head.push(this.raw(decl.name), sig);
+    }
     // Emit the rest of the block when there is a real body, else the signature
     // (with its trailing `;`/` {}`) is complete.
     if (!decl.body || emptyBody) return concat(head);
