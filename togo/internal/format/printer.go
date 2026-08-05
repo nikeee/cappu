@@ -1749,6 +1749,14 @@ func (p *printer) methodLikeDefault(mods, typeParams *compiler.NodeArray, return
 		bodyToken = concat(text(" {"), p.braceTrailAhead(p.start(body)))
 	}
 	var sig Doc
+	// gjf opens the name-and-type scope with a CONDITIONAL indent
+	// (`make(breakBeforeType, plusFour, ZERO)`), so everything after a broken name
+	// - the parameters and the throws clause - shifts one level further.
+	sigNameTag := &BreakTag{}
+	sigIndent := plus4
+	if returnType != nil {
+		sigIndent = indentIf(sigNameTag, indentConst(8), plus4)
+	}
 	if hasThrows {
 		throwsParts := []Doc{text("throws ")}
 		for i, t := range nodes(throws) {
@@ -1776,7 +1784,7 @@ func (p *printer) methodLikeDefault(mods, typeParams *compiler.NodeArray, return
 		if returnType != nil {
 			open = ""
 		}
-		sig = level(plus4, append(
+		sig = level(sigIndent, append(
 			p.paramListChildrenOpen(params, open),
 			brk(fillIndependent, " ", ZERO, nil),
 			level(throwsIndent, throwsParts),
@@ -1795,7 +1803,7 @@ func (p *printer) methodLikeDefault(mods, typeParams *compiler.NodeArray, return
 	// fires on exactly that run - breaking the PARAMETER LIST is preferred
 	// whenever that is enough, which is what gjf does.
 	if returnType != nil {
-		nameRun := []Doc{brk(fillIndependent, " ", plus4, nil), text(p.raw(name))}
+		nameRun := []Doc{brk(fillIndependent, " ", plus4, sigNameTag), text(p.raw(name))}
 		if params.Len() == 0 && !hasThrows {
 			// With no parameters there is no break-before-args to end the split, so
 			// the whole `name() {` run has to sit in the level for the fit check.

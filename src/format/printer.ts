@@ -1514,6 +1514,11 @@ class Printer {
       : emptyBody
         ? " {}"
         : concat([" {", this.braceTrailAhead(decl.body)]);
+    // gjf opens the name-and-type scope with a CONDITIONAL indent
+    // (`make(breakBeforeType, plusFour, ZERO)`), so everything after a broken
+    // name - the parameters and the throws clause - shifts one level further.
+    const nameTag = new BreakTag();
+    const sigIndent = decl.returnType ? indentIf(nameTag, indentConst(8), PLUS4) : PLUS4;
     let sig: Doc;
     if (hasThrows) {
       const throwsParts: Doc[] = ["throws "];
@@ -1533,7 +1538,7 @@ class Printer {
       // column. When the params explode one-per-line, the param split's flat
       // width overflows the +4 line, propagating mustBreak so the throws clause
       // also breaks - matching gjf with no engine change.
-      sig = level(PLUS4, [
+      sig = level(sigIndent, [
         ...this.paramListChildren(decl.parameters, decl.returnType ? "" : "("),
         brk("independent", " ", ZERO),
         throwsClause,
@@ -1552,7 +1557,7 @@ class Printer {
     if (decl.returnType) {
       // With no parameters there is no break-before-args to end the split, so the
       // whole `name() {` run has to sit in the level for the fit check to see it.
-      const nameRun: Doc[] = [brk("independent", " ", PLUS4), this.raw(decl.name)];
+      const nameRun: Doc[] = [brk("independent", " ", PLUS4, nameTag), this.raw(decl.name)];
       if (decl.parameters.length === 0 && !hasThrows) {
         head.push(level(ZERO, [...nameRun, "()", bodyToken]));
       } else {

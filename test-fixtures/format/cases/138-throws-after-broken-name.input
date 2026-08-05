@@ -1,0 +1,12 @@
+package p;
+
+class T {
+  @Test
+  void testCopyDirectoryToDirectoryThrowsIllegalArgumentExceptionWithCorrectMessageWhenDstDirIsNotDirectory() throws IOException {
+    go();
+  }
+
+  void shortName(int a) throws IOException {
+    go();
+  }
+}
