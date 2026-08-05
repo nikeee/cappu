@@ -1455,14 +1455,22 @@ class Printer {
     // A receiver parameter (`@A Foo this`, `Outer.this`) has no name node and
     // its qualifier is not kept in the tree, so print it from source.
     if (p.isReceiver) return this.raw(p);
-    const parts: Doc[] = [this.modifiers(p.modifiers), this.type(p.type)];
+    const parts: Doc[] = [
+      this.modifiers(p.modifiers),
+      ...this.inlineBlockComments(this.start(p.type)),
+      this.type(p.type),
+    ];
     if (p.isVarArgs) parts.push("...");
     // gjf's declareOne breaks between the type and the name (an INDEPENDENT
     // break, the name conditionally indented +4) when they do not fit together.
     // The break is a direct child of the enclosing parameter-list level, so its
     // fit check counts the rest of the line - the `)` and the body's `{`.
     if (p.name) {
-      parts.push(breakBeforeName ? brk("independent", " ", PLUS4) : " ", this.raw(p.name));
+      parts.push(
+        breakBeforeName ? brk("independent", " ", PLUS4) : " ",
+        ...this.inlineBlockComments(this.start(p.name)),
+        this.raw(p.name),
+      );
       // C-style trailing brackets belong to the parameter's type (`byte b[]`);
       // dropping them changed the signature.
       if (p.arrayRankAfterName > 0) parts.push("[]".repeat(p.arrayRankAfterName));

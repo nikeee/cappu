@@ -5,5 +5,10 @@ class T {
 
   void m() {
     final Object /* Stream<String> */ resourcesStream = compute();
+    for (final Object /* ModuleLayer */ layer : layerOrderFinal) {
+      use(layer);
+    }
   }
+
+  void n(final /* nullable */ String s, int /* count */ n) {}
 }

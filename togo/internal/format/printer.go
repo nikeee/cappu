@@ -1685,7 +1685,8 @@ func (p *printer) parameterBreak(n *compiler.Node, breakBeforeName bool) Doc {
 	if pp.IsReceiver {
 		return text(p.raw(n))
 	}
-	parts := []Doc{p.modifiers(pp.Modifiers, "inline"), p.typ(pp.Type)}
+	parts := append([]Doc{p.modifiers(pp.Modifiers, "inline")}, p.inlineBlockComments(p.start(pp.Type))...)
+	parts = append(parts, p.typ(pp.Type))
 	if pp.IsVarArgs {
 		parts = append(parts, text("..."))
 	}
@@ -1695,6 +1696,7 @@ func (p *printer) parameterBreak(n *compiler.Node, breakBeforeName bool) Doc {
 		} else {
 			parts = append(parts, text(" "))
 		}
+		parts = append(parts, p.inlineBlockComments(p.start(pp.Name))...)
 		parts = append(parts, text(p.raw(pp.Name)))
 		// C-style trailing brackets belong to the parameter's type (`byte b[]`);
 		// dropping them changed the signature.
