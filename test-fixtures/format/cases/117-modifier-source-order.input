@@ -1,0 +1,8 @@
+package p;
+
+class T {
+  void m(final @TempDir Path tempDir, @TempDir final Path other) {}
+
+  @Deprecated
+  static public final int x = 1;
+}

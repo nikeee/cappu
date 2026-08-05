@@ -785,17 +785,38 @@ func (p *printer) modifiers(mods *compiler.NodeArray, annoMode string) Doc {
 			cut--
 		}
 	}
-	var annotations, keywords []*compiler.Node
-	for _, m := range all[:cut] {
-		if m.Kind == compiler.Annotation {
-			annotations = append(annotations, m)
-		} else {
-			keywords = append(keywords, m)
+	// gjf keeps the source order of annotations and modifiers (its
+	// AnnotationOrModifier list is sorted by position); only the modifier keywords
+	// are reordered among themselves, by ModifierOrderer, into their own slots. So
+	// `final @TempDir Path` keeps the `final` first. The leading run of
+	// annotations - those before the first keyword - is what gets the annotation
+	// break.
+	declMods := all[:cut]
+	firstKeyword := 0
+	for firstKeyword < len(declMods) && declMods[firstKeyword].Kind == compiler.Annotation {
+		firstKeyword++
+	}
+	annotations := declMods[:firstKeyword]
+	rest := declMods[firstKeyword:]
+	var sortedKeywords []*compiler.Node
+	for _, m := range rest {
+		if m.Kind != compiler.Annotation {
+			sortedKeywords = append(sortedKeywords, m)
 		}
 	}
-	slices.SortStableFunc(keywords, func(a, b *compiler.Node) int {
+	slices.SortStableFunc(sortedKeywords, func(a, b *compiler.Node) int {
 		return cmp.Compare(rank(a.Kind), rank(b.Kind))
 	})
+	tailMods := make([]*compiler.Node, len(rest))
+	nextKeyword := 0
+	for i, m := range rest {
+		if m.Kind == compiler.Annotation {
+			tailMods[i] = m
+			continue
+		}
+		tailMods[i] = sortedKeywords[nextKeyword]
+		nextKeyword++
+	}
 	var parts []Doc
 	for _, a := range annotations {
 		ad := a.AsAnnotation()
@@ -824,8 +845,12 @@ func (p *printer) modifiers(mods *compiler.NodeArray, annoMode string) Doc {
 			parts = append(parts, text(" "))
 		}
 	}
-	for _, k := range keywords {
-		parts = append(parts, concat(text(p.modifierText(k)), text(" ")))
+	for _, m := range tailMods {
+		if m.Kind == compiler.Annotation {
+			parts = append(parts, concat(p.annotation(m.AsAnnotation()), text(" ")))
+			continue
+		}
+		parts = append(parts, concat(text(p.modifierText(m)), text(" ")))
 	}
 	// Type-use annotation suffix, inline before the type.
 	for _, a := range all[cut:] {

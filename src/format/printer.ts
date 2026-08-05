@@ -747,9 +747,28 @@ class Printer {
       }
     }
     const declMods = cut === mods.length ? mods : mods.slice(0, cut);
-    const annotations = declMods.filter(m => m.kind === SyntaxKind.Annotation) as Annotation[];
-    const keywords = declMods.filter(m => m.kind !== SyntaxKind.Annotation);
-    keywords.sort((a, b) => rank(a.kind) - rank(b.kind));
+    // gjf keeps the source order of annotations and modifiers (its
+    // AnnotationOrModifier list is sorted by position); only the modifier
+    // keywords are reordered among themselves, by ModifierOrderer, into their
+    // own slots. So `final @TempDir Path` keeps the `final` first. The leading
+    // run of annotations - those before the first keyword - is what gets the
+    // annotation break.
+    let firstKeyword = 0;
+    while (
+      firstKeyword < declMods.length &&
+      declMods[firstKeyword].kind === SyntaxKind.Annotation
+    ) {
+      firstKeyword++;
+    }
+    const annotations = declMods.slice(0, firstKeyword) as Annotation[];
+    const rest = declMods.slice(firstKeyword);
+    const sortedKeywords = rest
+      .filter(m => m.kind !== SyntaxKind.Annotation)
+      .sort((a, b) => rank(a.kind) - rank(b.kind));
+    let nextKeyword = 0;
+    const tailMods = rest.map(m =>
+      m.kind === SyntaxKind.Annotation ? m : sortedKeywords[nextKeyword++],
+    );
     const parts: Doc[] = [];
     for (const a of annotations) {
       const ownLine =
@@ -775,7 +794,13 @@ class Printer {
         }
       }
     }
-    for (const k of keywords) parts.push(concat([this.modifierText(k), " "]));
+    for (const m of tailMods) {
+      parts.push(
+        m.kind === SyntaxKind.Annotation
+          ? concat([this.annotation(m as Annotation), " "])
+          : concat([this.modifierText(m), " "]),
+      );
+    }
     // Type-use annotation suffix, inline before the type.
     for (let i = cut; i < mods.length; i++) parts.push(this.annotation(mods[i] as Annotation), " ");
     return concat(parts);
