@@ -3472,7 +3472,33 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData, end int) Do
 	if idx := compiler.SkipTrivia(p.text, els[len(els)-1].End); idx < len(p.text) && p.text[idx] == ',' {
 		trailingComma = true
 	}
-	rs := p.listItemsEx(els, func(el *compiler.Node) Doc { return p.node(el) }, true)
+	// A `//` comment trailing an element rides INSIDE it, together with the `,`
+	// that separates it from the next one: gjf's DocBuilder appends both to the
+	// element's innermost level, so an element that only overflows because of the
+	// comment breaks its own call instead of running long.
+	lastIndex := len(els) - 1
+	routed := make([]bool, len(els))
+	ri := 0
+	rs := p.listItemsEx(els, func(el *compiler.Node) Doc {
+		i := ri
+		ri++
+		rendered := p.node(el)
+		sep := ""
+		if i < lastIndex || trailingComma {
+			sep = ","
+		}
+		if p.ci >= len(p.comments) {
+			return rendered
+		}
+		c := p.comments[p.ci]
+		after := compiler.SkipTrivia(p.text, el.End) + len(sep)
+		if !c.line || c.ownLine || c.pos < after || strings.TrimLeft(p.text[after:c.pos], " \t") != "" {
+			return rendered
+		}
+		p.ci++
+		routed[i] = true
+		return p.statementTail(el, concat(text(sep), text(" "), reflowNoWrap(c.text)))
+	}, true)
 	anyComment := false
 	for _, r := range rs {
 		if r.comment {
@@ -3484,14 +3510,21 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData, end int) Do
 	var innerParts []Doc
 	for i, r := range rs {
 		if i > 0 {
-			innerParts = append(innerParts, text(","))
-			// gjf preserves one source blank line between elements.
-			blank := p.blankBeforePos(els[i-1].End, r.leadStart)
+			if !routed[i-1] {
+				innerParts = append(innerParts, text(","))
+			}
+			// gjf preserves one source blank line between elements, but not after an
+			// element that carries a trailing comment - the comment ends its line and
+			// gjf drops the blank that follows.
+			blank := !routed[i-1] && p.blankBeforePos(els[i-1].End, r.leadStart)
 			// A line comment trailing the previous element stays on its line, then
 			// forces the break before this element.
-			if r.leadTrailing != "" {
+			switch {
+			case routed[i-1]:
+				innerParts = append(innerParts, hardline)
+			case r.leadTrailing != "":
 				innerParts = append(innerParts, text(" "), text(r.leadTrailing), hardline)
-			} else {
+			default:
 				innerParts = append(innerParts, brk(fill, " ", ZERO, nil))
 			}
 			if blank {
@@ -3500,7 +3533,7 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData, end int) Do
 		}
 		innerParts = append(innerParts, r.doc)
 	}
-	if trailingComma {
+	if trailingComma && !routed[lastIndex] {
 		innerParts = append(innerParts, text(","))
 	}
 	// A line comment after the last element (before `}`) stays on its line.

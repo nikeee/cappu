@@ -1,0 +1,14 @@
+package p;
+
+class T {
+    private static final Process[] PROCESSES = {
+        new NonPreemptivePriorityScheduling.Process(
+                1, 0, 10, 2), // id, arrivalTime, burstTime, priority
+        new NonPreemptivePriorityScheduling.Process(2, 0, 5, 1), // short
+    };
+
+    static final int[] XS = {
+        1, // one
+        2, // two
+    };
+}

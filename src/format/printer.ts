@@ -2849,9 +2849,34 @@ class Printer {
     // before `}`), but the elements themselves still fill (`{\n  1, 2, 3,\n}`).
     const trailingComma =
       this.text[skipTrivia(this.text, e.elements[e.elements.length - 1].end)] === ",";
+    // A `//` comment trailing an element rides INSIDE it, together with the `,`
+    // that separates it from the next one: gjf's DocBuilder appends both to the
+    // element's innermost level, so an element that only overflows because of
+    // the comment breaks its own call instead of running long.
+    const lastIndex = e.elements.length - 1;
+    const routed: (string | undefined)[] = new Array(e.elements.length);
+    let ri = 0;
     const { items, leads, leadStarts, anyComment } = this.listItems(
       e.elements,
-      el => this.node(el),
+      el => {
+        const i = ri++;
+        const rendered = this.node(el);
+        const sep = i < lastIndex || trailingComma ? "," : "";
+        const c = this.comments[this.ci];
+        const after = skipTrivia(this.text, el.end) + (sep === "," ? 1 : 0);
+        if (
+          c === undefined ||
+          !c.line ||
+          c.ownLine ||
+          c.pos < after ||
+          !/^[ \t]*$/.test(this.text.slice(after, c.pos))
+        ) {
+          return rendered;
+        }
+        this.ci++;
+        routed[i] = c.text;
+        return this.statementTail(el, concat([sep, " ", reflow(c.text, true)]));
+      },
       true,
     );
     // A comment forces one-per-line (gjf), else short items fill.
@@ -2859,18 +2884,24 @@ class Printer {
     const innerParts: Doc[] = [];
     items.forEach((el, i) => {
       if (i > 0) {
-        innerParts.push(",");
-        // gjf preserves one source blank line between elements.
-        const blank = this.blankBeforePos(e.elements[i - 1].end, leadStarts[i]);
+        if (routed[i - 1] === undefined) innerParts.push(",");
+        // gjf preserves one source blank line between elements, but not after an
+        // element that carries a trailing comment - the comment ends its line and
+        // gjf drops the blank that follows.
+        const blank =
+          routed[i - 1] === undefined &&
+          this.blankBeforePos(e.elements[i - 1].end, leadStarts[i]);
         // A line comment trailing the previous element stays on its line, then
         // forces the break before this element.
-        if (leads[i] !== undefined) innerParts.push(" ", reflow(leads[i] as string, true), hardline);
-        else innerParts.push(brk(fillMode, " ", ZERO));
+        if (routed[i - 1] !== undefined) innerParts.push(hardline);
+        else if (leads[i] !== undefined) {
+          innerParts.push(" ", reflow(leads[i] as string, true), hardline);
+        } else innerParts.push(brk(fillMode, " ", ZERO));
         if (blank) innerParts.push(hardline);
       }
       innerParts.push(el);
     });
-    if (trailingComma) innerParts.push(",");
+    if (trailingComma && routed[lastIndex] === undefined) innerParts.push(",");
     // A line comment after the last element (before `}`) stays on its line.
     const lastEnd = e.elements[e.elements.length - 1].end;
     const t = this.comments[this.ci];
