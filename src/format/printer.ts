@@ -854,12 +854,15 @@ class Printer {
     // the initializer's own braces do the breaking.
     const only = a.args.length === 1 ? (a.args[0] as { name?: Node; value: Node }) : undefined;
     if (only && !only.name && only.value.kind === SyntaxKind.ArrayInitializer) {
-      return concat([name, "(", this.node(only.value), ")"]);
+      return concat([name, "(", this.arrayInitializer(only.value as ArrayInitializer, true), ")"]);
     }
     const args = a.args.map(arg => {
       const argName = (arg as { name?: Node }).name;
       const valueNode = (arg as { value: Node }).value;
-      const value = this.node(valueNode);
+      const value =
+        valueNode.kind === SyntaxKind.ArrayInitializer
+          ? this.arrayInitializer(valueNode as ArrayInitializer, true)
+          : this.node(valueNode);
       if (!argName) return value;
       // gjf visitAnnotationArgument: `name = <value>` is a +4 level with a break
       // after the `=`, so a long value folds onto its own continuation line. An
@@ -2823,7 +2826,7 @@ class Printer {
     return true;
   }
 
-  private arrayInitializer(e: ArrayInitializer): Doc {
+  private arrayInitializer(e: ArrayInitializer, inAnnotation = false): Doc {
     if (e.elements.length === 0) return "{}";
     // A source-laid-out grid is preserved verbatim as rows (gjf).
     const cols = this.argumentsAreTabular(e.elements);
@@ -2905,7 +2908,11 @@ class Printer {
     // declaration, e.g. a `// @formatter:on` marker jumping past its `};`.
     const dangling = this.commentsBefore(e.end - 1);
     for (const c of dangling) innerParts.push(hardline, reflow(c.text));
-    const inner = level(ZERO, innerParts);
+    // gjf's allowFilledElementsOnOwnLine: inside an annotation's member value,
+    // elements that are not all short do NOT get their own level, so they break
+    // one per line with the brace instead of filling.
+    const filled = !inAnnotation || this.allShortItems(e.elements);
+    const inner: Doc = filled ? level(ZERO, innerParts) : concat(innerParts);
     const forceOpen = trailingComma || closingComment !== undefined || dangling.length > 0;
     const open: FillMode = forceOpen ? "forced" : "unified";
     return concat(["{", level(PLUS2, [brk(open, "", ZERO), inner, brk(open, "", MINUS2)]), "}"]);

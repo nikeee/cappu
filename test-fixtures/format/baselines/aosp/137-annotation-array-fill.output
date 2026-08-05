@@ -1,0 +1,24 @@
+package p;
+
+class T {
+    @ParameterizedTest
+    @CsvSource({
+        "0, 0",
+        "7, 7",
+        "10, 8",
+        "17, F",
+        "20, 10",
+        "777, 1FF",
+        "1234, 29C",
+        "752, 1EA",
+        "536, 15E"
+    })
+    void notShort(String a, String b) {}
+
+    @ParameterizedTest
+    @CsvSource({
+        "0, 0", "7, 7", "1, 8", "2, F", "3, 1", "4, 5", "5, 6", "6, 7", "8, 9", "9, 3", "1, 2",
+        "3, 4"
+    })
+    void allShort(String a, String b) {}
+}

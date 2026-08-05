@@ -933,13 +933,18 @@ func (p *printer) annotation(a *compiler.AnnotationData) Doc {
 	if a.Args.Len() == 1 {
 		only := nodes(a.Args)[0].AsAnnotationArgument()
 		if only.Name == nil && only.Value.Kind == compiler.ArrayInitializer {
-			return concat(text(name), text("("), p.node(only.Value), text(")"))
+			return concat(text(name), text("("), p.arrayInitializerAnno(only.Value.AsArrayInitializer(), only.Value.End, true), text(")"))
 		}
 	}
 	args := make([]Doc, a.Args.Len())
 	for i, arg := range nodes(a.Args) {
 		aa := arg.AsAnnotationArgument()
-		value := p.node(aa.Value)
+		var value Doc
+		if aa.Value.Kind == compiler.ArrayInitializer {
+			value = p.arrayInitializerAnno(aa.Value.AsArrayInitializer(), aa.Value.End, true)
+		} else {
+			value = p.node(aa.Value)
+		}
 		switch {
 		case aa.Name == nil:
 			args[i] = value
@@ -3456,6 +3461,13 @@ func (p *printer) tabularCommentsPlaceable(els []*compiler.Node, cols int) bool 
 }
 
 func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData, end int) Doc {
+	return p.arrayInitializerAnno(e, end, false)
+}
+
+// arrayInitializerAnno is arrayInitializer with gjf's allowFilledElementsOnOwnLine:
+// inside an annotation's member value, elements that are not all short do NOT
+// get their own level, so they break one per line with the brace.
+func (p *printer) arrayInitializerAnno(e *compiler.ArrayInitializerData, end int, inAnnotation bool) Doc {
 	if e.Elements.Len() == 0 {
 		return text("{}")
 	}
@@ -3561,7 +3573,10 @@ func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData, end int) Do
 	if trailingComma || closingComment != "" || len(dangling) > 0 {
 		open = fillForced
 	}
-	inner := level(ZERO, innerParts)
+	var inner Doc = level(ZERO, innerParts)
+	if inAnnotation && !p.allShortItems(els) {
+		inner = concat(innerParts...)
+	}
 	return concat(
 		text("{"),
 		level(plus2, []Doc{brk(open, "", ZERO, nil), inner, brk(open, "", minus2, nil)}),
