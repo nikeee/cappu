@@ -1,0 +1,9 @@
+package p;
+
+class T {
+  private /* not final might not matter for the test. */ AtomicInteger value;
+
+  void m() {
+    final Object /* Stream<String> */ resourcesStream = compute();
+  }
+}

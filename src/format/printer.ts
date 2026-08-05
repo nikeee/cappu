@@ -317,6 +317,21 @@ class Printer {
     return out;
   }
 
+  // Consume the block comments sitting inline just before `pos` (no newline
+  // between them and it) and render them as prefixes. gjf hangs a comment off
+  // the token it precedes, so a block comment between a declaration's modifiers
+  // and its type stays there instead of drifting to the end of the statement.
+  private inlineBlockComments(pos: number): Doc[] {
+    const out: Doc[] = [];
+    for (;;) {
+      const c = this.comments[this.ci];
+      if (!c || c.line || c.pos >= pos || this.text.slice(c.end, pos).includes("\n")) break;
+      this.ci++;
+      out.push(reflow(c.text, true), " ");
+    }
+    return out;
+  }
+
   /** Whether every collected comment was emitted (else we would lose one). */
   allCommentsEmitted(): boolean {
     return this.ci >= this.comments.length;
@@ -1177,11 +1192,13 @@ class Printer {
     if (d.declarators.length === 1) {
       return level(ZERO, [
         this.modifiers(d.modifiers, "var"),
+        ...this.inlineBlockComments(this.start(d.type)),
         this.singleDeclaration(this.type(d.type), d.declarators[0], concat([";", tail])),
       ]);
     }
     return level(ZERO, [
       this.modifiers(d.modifiers, "var"),
+      ...this.inlineBlockComments(this.start(d.type)),
       this.type(d.type),
       " ",
       join(
@@ -1200,7 +1217,11 @@ class Printer {
   // also broke). The break-before-name's fit check excludes the initializer
   // (it sits in a sibling level), so a long initializer alone does not trigger it.
   private singleDeclaration(type: Doc, v: VariableDeclarator, trailing: Doc): Doc {
-    const name = concat([this.raw(v.name), "[]".repeat(v.arrayRankAfterName)]);
+    const name = concat([
+      ...this.inlineBlockComments(this.start(v.name)),
+      this.raw(v.name),
+      "[]".repeat(v.arrayRankAfterName),
+    ]);
     // No initializer: the same declareOne break, with nothing after the name -
     // so the `;` and any trailing comment ride inside the level and count in its
     // fit check (`Map<String, Map<Integer, Integer>> index; // note`).
@@ -1603,11 +1624,17 @@ class Printer {
     if (d.declarators.length === 1) {
       return level(ZERO, [
         this.modifiers(d.modifiers, "var"),
+        ...this.inlineBlockComments(this.start(d.type)),
         this.singleDeclaration(this.type(d.type), d.declarators[0], concat([";", tail])),
       ]);
     }
     const last = d.declarators.length - 1;
-    const parts: Doc[] = [this.modifiers(d.modifiers, "var"), this.type(d.type), " "];
+    const parts: Doc[] = [
+      this.modifiers(d.modifiers, "var"),
+      ...this.inlineBlockComments(this.start(d.type)),
+      this.type(d.type),
+      " ",
+    ];
     d.declarators.forEach((v, i) => {
       if (i > 0) parts.push(", ");
       // The terminating `;` rides into the last declarator's initializer.

@@ -227,6 +227,24 @@ func (p *printer) commentsBefore(pos int) []comment {
 	return out
 }
 
+// inlineBlockComments consumes the block comments sitting inline just before
+// pos (no newline between them and it) and renders them as prefixes. gjf hangs
+// a comment off the token it precedes, so a block comment between a
+// declaration's modifiers and its type stays there instead of drifting to the
+// end of the statement.
+func (p *printer) inlineBlockComments(pos int) []Doc {
+	var out []Doc
+	for p.ci < len(p.comments) {
+		c := p.comments[p.ci]
+		if c.line || c.pos >= pos || strings.Contains(p.text[c.end:pos], "\n") {
+			break
+		}
+		p.ci++
+		out = append(out, reflowNoWrap(c.text), text(" "))
+	}
+	return out
+}
+
 func (p *printer) allCommentsEmitted() bool {
 	return p.ci >= len(p.comments)
 }
@@ -1335,18 +1353,18 @@ func (p *printer) fieldDeclarationTail(d *compiler.FieldDeclarationData, tail Do
 	// The whole declaration is one level so the modifiers' annotation break can
 	// take when it overflows (gjf visitModifiers).
 	if d.Declarators.Len() == 1 {
-		return level(ZERO, []Doc{
-			p.modifiers(d.Modifiers, "var"),
+		return level(ZERO, append(
+			append([]Doc{p.modifiers(d.Modifiers, "var")}, p.inlineBlockComments(p.start(d.Type))...),
 			p.singleDeclaration(p.typ(d.Type), nodes(d.Declarators)[0].AsVariableDeclarator(), semiWithTail(tail)),
-		})
+		))
 	}
-	return level(ZERO, []Doc{
-		p.modifiers(d.Modifiers, "var"),
+	return level(ZERO, append(
+		append([]Doc{p.modifiers(d.Modifiers, "var")}, p.inlineBlockComments(p.start(d.Type))...),
 		p.typ(d.Type),
 		text(" "),
 		p.declaratorList(d.Declarators),
 		semiWithTail(tail),
-	})
+	))
 }
 
 // singleDeclaration renders `<type> <name> = <init><trailing>` with the gjf
@@ -1356,7 +1374,7 @@ func (p *printer) fieldDeclarationTail(d *compiler.FieldDeclarationData, tail Do
 // also broke). The break-before-name's fit check excludes the initializer (a
 // sibling level), so a long initializer alone does not trigger it.
 func (p *printer) singleDeclaration(typ Doc, v *compiler.VariableDeclaratorData, trailing Doc) Doc {
-	name := concat(text(p.raw(v.Name)), text(strings.Repeat("[]", v.ArrayRankAfterName)))
+	name := concat(append(p.inlineBlockComments(p.start(v.Name)), text(p.raw(v.Name)), text(strings.Repeat("[]", v.ArrayRankAfterName)))...)
 	// No initializer: the same declareOne break, with nothing after the name - so
 	// the `;` and any trailing comment ride inside the level and count in its fit
 	// check (`Map<String, Map<Integer, Integer>> index; // note`).
@@ -1879,12 +1897,14 @@ func (p *printer) localVarTail(d *compiler.LocalVariableDeclarationStatementData
 	semi := semiWithTail(tail)
 	ds := nodes(d.Declarators)
 	if len(ds) == 1 {
-		return level(ZERO, []Doc{
-			p.modifiers(d.Modifiers, "var"),
+		return level(ZERO, append(
+			append([]Doc{p.modifiers(d.Modifiers, "var")}, p.inlineBlockComments(p.start(d.Type))...),
 			p.singleDeclaration(p.typ(d.Type), ds[0].AsVariableDeclarator(), semi),
-		})
+		))
 	}
-	parts := []Doc{p.modifiers(d.Modifiers, "var"), p.typ(d.Type), text(" ")}
+	parts := append(
+		append([]Doc{p.modifiers(d.Modifiers, "var")}, p.inlineBlockComments(p.start(d.Type))...),
+		p.typ(d.Type), text(" "))
 	for i, v := range ds {
 		if i > 0 {
 			parts = append(parts, text(", "))
