@@ -16,5 +16,13 @@ class T {
             "AaEeIiOoUuYy"
             + // acute
             "AaOoNn"; // tilde
+    String v =
+        "unescape(String) failed"
+            + ": expected '"
+            + escapeJava(expected)
+            +
+            // we escape this so we can see it in the error message
+            "' actual '"
+            + escapeJava(actual);
   }
 }

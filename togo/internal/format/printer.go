@@ -2564,52 +2564,53 @@ func (p *printer) binaryTrailing(node *compiler.Node, trailing Doc) Doc {
 	fill := p.fillMode(false, operands)
 	parts := []Doc{p.node(operands[0])}
 	for i, op := range operators {
-		// A `//` comment on the same line as the previous operand trails IT (gjf
-		// hangs a token's toksAfter off that token, then forces the break), so it
-		// goes before the break instead of onto the operator's line. Which side of
-		// the operator it sits on decides where it goes: `a + // why` keeps the
-		// operator up top, `a // why` leaves it for the continuation line.
-		opPos := strings.Index(p.text[operands[i].End:], op)
-		afterOp := false
-		if opPos >= 0 && p.ci < len(p.comments) {
-			opPos += operands[i].End
-			c := p.comments[p.ci]
-			if c.line && !c.ownLine && c.pos > opPos && strings.TrimLeft(p.text[opPos+len(op):c.pos], " \t") == "" {
-				afterOp = true
-				p.ci++
-				// The inter-operand break still decides whether the operator stays on
-				// this line: it only moves to the continuation line when the level
-				// breaks, and the comment then forces the break after it.
-				parts = append(parts, brk(fill, " ", ZERO, nil), text(op), text(" "), reflowNoWrap(c.text), hardline)
-			}
+		// gjf hangs a comment off the token it FOLLOWS, so which side of the
+		// operator a comment sits on in source decides where it goes: `a // why`
+		// keeps the comment with the operand and leaves the operator for the
+		// continuation line, `a + // why` keeps the operator up top. SkipTrivia
+		// lands on the operator token itself; searching the text for op would find
+		// one inside a comment (`// + foo`) and mis-sort it.
+		beforeOp := compiler.SkipTrivia(p.text, operands[i].End)
+		// A same-line comment on the previous operand rides its line and forces the
+		// break; otherwise the normal inter-operand break.
+		from := operands[i].End
+		if beforeOp < from {
+			from = beforeOp
 		}
-		if !afterOp {
-			if tc, ok := p.trailingLineComment(operands[i].End); ok {
-				parts = append(parts, text(" "), reflowNoWrap(tc.text), hardline)
-			} else {
-				parts = append(parts, brk(fill, " ", ZERO, nil))
-			}
+		if tc, ok := p.trailingLineComment(from); ok && tc.pos < beforeOp {
+			parts = append(parts, text(" "), reflowNoWrap(tc.text), hardline)
+		} else {
+			parts = append(parts, brk(fill, " ", ZERO, nil))
 		}
-		// A comment before the next operand sits on its own line before the
-		// operator (gjf), not inside the operand - so consume it here.
-		for _, c := range p.commentsBefore(p.start(operands[i+1])) {
+		// Own-line comments written before the operator stay before it.
+		for _, c := range p.commentsBefore(beforeOp) {
 			parts = append(parts, reflow(c.text), hardline)
 		}
-		if afterOp {
-			if i == len(operators)-1 {
-				parts = append(parts, p.statementTail(operands[i+1], trailing))
-			} else {
-				parts = append(parts, p.node(operands[i+1]))
+		parts = append(parts, text(op))
+		// Comments written after the operator follow it: a same-line one shares its
+		// line, an own-line one goes below it. Either way the comment forces the
+		// break before the operand.
+		after := p.commentsBefore(p.start(operands[i+1]))
+		if len(after) == 0 {
+			parts = append(parts, text(" "))
+		} else {
+			for ci, c := range after {
+				if ci == 0 && c.line && !c.ownLine {
+					parts = append(parts, text(" "))
+				} else {
+					parts = append(parts, hardline)
+				}
+				parts = append(parts, reflowNoWrap(c.text))
 			}
-			continue
+			parts = append(parts, hardline)
 		}
 		// The trailing token (`;`, `) {`, ...) rides into the LAST operand's own
 		// innermost level - gjf's appendLevel puts it there, so a call in the last
 		// operand wraps its arguments when the whole rest of the line overflows.
 		if i == len(operators)-1 {
-			parts = append(parts, text(op), text(" "), p.statementTail(operands[i+1], trailing))
+			parts = append(parts, p.statementTail(operands[i+1], trailing))
 		} else {
-			parts = append(parts, text(op), text(" "), p.node(operands[i+1]))
+			parts = append(parts, p.node(operands[i+1]))
 		}
 	}
 	return level(plus4, parts)
