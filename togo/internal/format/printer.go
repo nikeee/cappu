@@ -2739,6 +2739,27 @@ func (p *printer) callTrailing(e *compiler.CallExpressionData, trailing Doc) Doc
 	return concat(p.node(e.Expression), p.typeArguments(e.TypeArguments), p.argListTrailing(e.Arguments, trailing))
 }
 
+// pairedArgList lays out two arguments per line, each pair its own +4 level
+// (gjf addArguments). The closing `)` rides inside the last pair, as gjf's
+// DocBuilder places it.
+func (p *printer) pairedArgList(args []*compiler.Node, trailing Doc) Doc {
+	var pairs []Doc
+	for i := 0; i < len(args); i += 2 {
+		if i > 0 {
+			pairs = append(pairs, text(","), brk(fillForced, "", ZERO, nil))
+		}
+		pair := []Doc{p.node(args[i]), text(","), brk(fillUnified, " ", ZERO, nil), p.node(args[i+1])}
+		if i+2 >= len(args) {
+			pair = append(pair, text(")"))
+			if trailing != nil {
+				pair = append(pair, trailing)
+			}
+		}
+		pairs = append(pairs, level(plus4, pair))
+	}
+	return concat(text("("), level(plus4, []Doc{brk(fillForced, "", ZERO, nil), level(ZERO, pairs)}))
+}
+
 func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 	if args.Len() == 0 {
 		if trailing != nil {
@@ -2747,6 +2768,14 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 		return text("()")
 	}
 	argNodes := nodes(args)
+	// gjf's addArguments lays arguments out two per line when the author already
+	// did (a map-constructor-like call): an even count laid out as a two-column
+	// grid in source. Comments would land mid-pair, so leave those to the general
+	// path.
+	if len(argNodes)%2 == 0 && p.argumentsAreTabular(argNodes) == 2 &&
+		(p.ci >= len(p.comments) || p.comments[p.ci].pos > argNodes[len(argNodes)-1].End) {
+		return p.pairedArgList(argNodes, trailing)
+	}
 	anyComment := false
 	lastI := len(argNodes) - 1
 	// Render each argument with the token that FOLLOWS it routed into the

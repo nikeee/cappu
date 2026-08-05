@@ -1,0 +1,11 @@
+package p;
+
+class T {
+    void m() {
+        assertContains(
+                InheritedAnnotation.class.getName(), NormalAnnotation.class.getName(),
+                InheritedMetaAnnotation.class.getName(),
+                        NonInheritedMetaAnnotation.class.getName());
+        normalCall(a, b);
+    }
+}

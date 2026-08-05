@@ -2325,6 +2325,18 @@ class Printer {
 
   private argList(args: NodeArray<Expression>, trailing: Doc = ""): Doc {
     if (args.length === 0) return concat(["()", trailing]);
+    // gjf's addArguments lays arguments out two per line when the author already
+    // did (a map-constructor-like call): an even count laid out as a two-column
+    // grid in source. Comments would land mid-pair, so leave those to the
+    // general path.
+    if (
+      args.length % 2 === 0 &&
+      this.argumentsAreTabular([...args]) === 2 &&
+      (this.comments[this.ci] === undefined ||
+        this.comments[this.ci].pos > args[args.length - 1].end)
+    ) {
+      return this.pairedArgList(args, trailing);
+    }
     let anyComment = false;
     const lastI = args.length - 1;
     // Render each argument with the token that FOLLOWS it routed into the
@@ -2438,6 +2450,27 @@ class Printer {
         level(ZERO, innerParts),
       ]),
     ]);
+  }
+
+  // Two arguments per line, each pair its own +4 level (gjf addArguments). The
+  // closing `)` rides inside the last pair, as gjf's DocBuilder places it.
+  private pairedArgList(args: NodeArray<Expression>, trailing: Doc): Doc {
+    const pairs: Doc[] = [];
+    for (let i = 0; i < args.length; i += 2) {
+      if (i > 0) pairs.push(",", brk("forced", "", ZERO));
+      const pair: Doc[] = [
+        this.node(args[i]),
+        ",",
+        brk("unified", " ", ZERO),
+        this.node(args[i + 1]),
+      ];
+      if (i + 2 >= args.length) {
+        pair.push(")");
+        if (trailing !== "") pair.push(trailing);
+      }
+      pairs.push(level(PLUS4, pair));
+    }
+    return concat(["(", level(PLUS4, [brk("forced", "", ZERO), level(ZERO, pairs)])]);
   }
 
   // gjf's isFormatMethod: a call whose first argument is a string-literal
