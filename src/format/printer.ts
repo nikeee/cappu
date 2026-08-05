@@ -2066,12 +2066,36 @@ class Printer {
       // A `//` comment on the same line as the previous operand trails IT (gjf
       // hangs a token's toksAfter off that token, then forces the break), so it
       // goes before the break instead of onto the operator's line.
-      const tc = this.trailingLineComment(operands[i].end);
-      parts.push(tc ? concat([" ", reflow(tc.text, true), hardline]) : brk(fillMode, " ", ZERO));
+      // Which side of the operator the comment sits on decides where it goes
+      // (gjf hangs a comment off the token it follows): `a + // why` keeps the
+      // operator up top, `a // why` leaves it for the continuation line.
+      const opPos = this.text.indexOf(op, operands[i].end);
+      const pending = this.comments[this.ci];
+      const afterOp =
+        pending !== undefined &&
+        pending.line &&
+        !pending.ownLine &&
+        opPos >= 0 &&
+        pending.pos > opPos &&
+        /^[ \t]*$/.test(this.text.slice(opPos + op.length, pending.pos));
+      if (afterOp) {
+        this.ci++;
+        parts.push(" ", op, " ", reflow(pending.text, true), hardline);
+      } else {
+        const tc = this.trailingLineComment(operands[i].end);
+        parts.push(tc ? concat([" ", reflow(tc.text, true), hardline]) : brk(fillMode, " ", ZERO));
+      }
       // A comment before the next operand sits on its own line before the
       // operator (gjf), not inside the operand - so consume it here.
       for (const c of this.commentsBefore(this.start(operands[i + 1]))) {
         parts.push(reflow(c.text), hardline);
+      }
+      if (afterOp) {
+        const lastOp = i === operators.length - 1;
+        parts.push(
+          lastOp ? this.statementTail(operands[i + 1], trailing) : this.node(operands[i + 1]),
+        );
+        return;
       }
       // The trailing token (`;`, `) {`, ...) rides into the LAST operand's own
       // innermost level - gjf's appendLevel puts it there, so a call in the last

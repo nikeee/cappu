@@ -2462,16 +2462,39 @@ func (p *printer) binaryTrailing(node *compiler.Node, trailing Doc) Doc {
 	for i, op := range operators {
 		// A `//` comment on the same line as the previous operand trails IT (gjf
 		// hangs a token's toksAfter off that token, then forces the break), so it
-		// goes before the break instead of onto the operator's line.
-		if tc, ok := p.trailingLineComment(operands[i].End); ok {
-			parts = append(parts, text(" "), reflowNoWrap(tc.text), hardline)
-		} else {
-			parts = append(parts, brk(fill, " ", ZERO, nil))
+		// goes before the break instead of onto the operator's line. Which side of
+		// the operator it sits on decides where it goes: `a + // why` keeps the
+		// operator up top, `a // why` leaves it for the continuation line.
+		opPos := strings.Index(p.text[operands[i].End:], op)
+		afterOp := false
+		if opPos >= 0 && p.ci < len(p.comments) {
+			opPos += operands[i].End
+			c := p.comments[p.ci]
+			if c.line && !c.ownLine && c.pos > opPos && strings.TrimLeft(p.text[opPos+len(op):c.pos], " \t") == "" {
+				afterOp = true
+				p.ci++
+				parts = append(parts, text(" "), text(op), text(" "), reflowNoWrap(c.text), hardline)
+			}
+		}
+		if !afterOp {
+			if tc, ok := p.trailingLineComment(operands[i].End); ok {
+				parts = append(parts, text(" "), reflowNoWrap(tc.text), hardline)
+			} else {
+				parts = append(parts, brk(fill, " ", ZERO, nil))
+			}
 		}
 		// A comment before the next operand sits on its own line before the
 		// operator (gjf), not inside the operand - so consume it here.
 		for _, c := range p.commentsBefore(p.start(operands[i+1])) {
 			parts = append(parts, reflow(c.text), hardline)
+		}
+		if afterOp {
+			if i == len(operators)-1 {
+				parts = append(parts, p.statementTail(operands[i+1], trailing))
+			} else {
+				parts = append(parts, p.node(operands[i+1]))
+			}
+			continue
 		}
 		// The trailing token (`;`, `) {`, ...) rides into the LAST operand's own
 		// innermost level - gjf's appendLevel puts it there, so a call in the last
