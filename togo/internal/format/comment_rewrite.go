@@ -18,7 +18,9 @@ const commentMaxLineLength = 100
 // rewriteComment rewrites a comment for output at column0. isLine is true for
 // `//` comments. Mirrors JavaCommentsHelper.rewrite.
 func rewriteComment(text string, column0 int, isLine, noWrap bool) string {
-	if strings.HasPrefix(text, "/**") {
+	// gjf's Tok.isJavadocComment: `/***...` and a comment of four characters or
+	// fewer are not run through the javadoc formatter (`/***/` stays as written).
+	if strings.HasPrefix(text, "/**") && !strings.HasPrefix(text, "/***") && len(text) > 4 {
 		text = javadoc.FormatJavadoc(text, column0)
 	}
 	rawLines := strings.Split(text, "\n")

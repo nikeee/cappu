@@ -17,7 +17,9 @@ export function rewriteComment(
   isLine: boolean,
   noWrap = false,
 ): string {
-  if (text.startsWith("/**")) {
+  // gjf's Tok.isJavadocComment: `/***...` and a comment of four characters or
+  // fewer are not run through the javadoc formatter (`/***/` stays as written).
+  if (text.startsWith("/**") && !text.startsWith("/***") && text.length > 4) {
     text = formatJavadoc(text, column0);
   }
   const lines = text.split("\n").map(l => (isLine ? l.trim() : trimTrailing(l)));

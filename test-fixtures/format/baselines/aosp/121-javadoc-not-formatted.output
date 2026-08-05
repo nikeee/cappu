@@ -1,0 +1,14 @@
+package p;
+
+class T {
+    /***/
+    int x;
+
+    /**/
+    int y;
+
+    /*** not javadoc
+     * still not
+     */
+    int z;
+}
