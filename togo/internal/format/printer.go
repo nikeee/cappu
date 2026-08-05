@@ -2300,6 +2300,9 @@ func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, e
 		doc   Doc
 		blank bool
 	}
+	// A `//` comment on the switch's `{` line rides the brace (gjf's toksAfter),
+	// so consume it before the clauses claim it as their own-line lead.
+	braceTrail := p.braceTrailingComment(strings.Index(p.text[expr.End:], "{") + expr.End + 1)
 	var entries []entry
 	prevEnd := -1
 	for _, c := range nodes(clauses) {
@@ -2340,11 +2343,12 @@ func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, e
 	// An empty switch body stays open but holds no blank line (gjf does not
 	// collapse it to `{}` the way it collapses an if or a loop).
 	if len(entries) == 0 {
-		return concat(header, text(" {"), hardline, text("}"))
+		return concat(header, text(" {"), braceTrail, hardline, text("}"))
 	}
 	return concat(
 		header,
 		text(" {"),
+		braceTrail,
 		indent(concat(append([]Doc{hardline}, body...)...)),
 		hardline,
 		text("}"),

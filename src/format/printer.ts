@@ -1934,6 +1934,9 @@ class Printer {
     // but a single source blank line between clauses is preserved (gjf), so the
     // separator before a clause becomes a double hardline when the source left a
     // blank between the previous clause and this one's first rendered thing.
+    // A `//` comment on the switch's `{` line rides the brace (gjf's toksAfter),
+    // so consume it before the clauses claim it as their own-line lead.
+    const braceTrail = this.braceTrailingComment(this.text.indexOf("{", expr.end) + 1);
     const entries: { doc: Doc; blank: boolean }[] = [];
     let prevEnd = -1;
     for (const c of clauses) {
@@ -1965,8 +1968,8 @@ class Printer {
     const header = group(concat(["switch (", this.node(expr), ")"]));
     // An empty switch body stays open but holds no blank line (gjf does not
     // collapse it to `{}` the way it collapses an if or a loop).
-    if (entries.length === 0) return concat([header, " {", hardline, "}"]);
-    return concat([header, " {", indent(concat([hardline, ...body])), hardline, "}"]);
+    if (entries.length === 0) return concat([header, " {", braceTrail, hardline, "}"]);
+    return concat([header, " {", braceTrail, indent(concat([hardline, ...body])), hardline, "}"]);
   }
 
   private switchClause(c: SwitchClause): Doc {

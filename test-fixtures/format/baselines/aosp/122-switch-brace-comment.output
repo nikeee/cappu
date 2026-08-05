@@ -1,0 +1,13 @@
+package p;
+
+class T {
+    int m(int size) {
+        switch (size) { // drop through
+            case 1:
+            case 2:
+                return 1;
+            default:
+                return 0;
+        }
+    }
+}
