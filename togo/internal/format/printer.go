@@ -1548,7 +1548,12 @@ func (p *printer) paramListChildrenOpen(params *compiler.NodeArray, open string)
 		}
 		innerParts = append(innerParts, it)
 	}
-	return []Doc{text(open), brk(fillIndependent, "", ZERO, nil), level(ZERO, innerParts), text(")")}
+	// The `)` sits INSIDE the parameter level: gjf's DocBuilder appends it to the
+	// innermost level that last took a break (its appendLevel), so the list's own
+	// fit check counts it and a run that only overflows on the `)` breaks one
+	// parameter per line.
+	innerParts = append(innerParts, text(")"))
+	return []Doc{text(open), brk(fillIndependent, "", ZERO, nil), level(ZERO, innerParts)}
 }
 
 func (p *printer) parameter(n *compiler.Node) Doc {

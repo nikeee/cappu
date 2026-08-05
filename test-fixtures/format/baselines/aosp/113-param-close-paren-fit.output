@@ -1,0 +1,12 @@
+package p;
+
+class T {
+    private void printWithQuotes(
+            final Object object,
+            final CharSequence charSeq,
+            final Appendable out,
+            final boolean newRecord)
+            throws IOException {
+        return;
+    }
+}

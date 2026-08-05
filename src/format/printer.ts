@@ -1347,7 +1347,11 @@ class Printer {
       if (i > 0) innerParts.push(",", brk("unified", " ", ZERO));
       innerParts.push(it);
     });
-    return [open, brk("independent", "", ZERO), level(ZERO, innerParts), ")"];
+    // The `)` sits INSIDE the parameter level: gjf's DocBuilder appends it to
+    // the innermost level that last took a break (its appendLevel), so the
+    // list's own fit check counts it and a run that only overflows on the `)`
+    // breaks one parameter per line.
+    return [open, brk("independent", "", ZERO), level(ZERO, [...innerParts, ")"])];
   }
 
   private parameter(p: Parameter, breakBeforeName = false): Doc {
