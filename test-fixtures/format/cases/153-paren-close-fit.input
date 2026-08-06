@@ -1,0 +1,11 @@
+package p;
+
+class T {
+  void m(double initialVerticalVelocity, double gravity, double initialHeight) {
+    double t =
+        (-initialVerticalVelocity
+                - Math.sqrt(
+                    initialVerticalVelocity * initialVerticalVelocity + 2 * gravity * initialHeight))
+            / gravity;
+  }
+}

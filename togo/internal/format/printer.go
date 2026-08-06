@@ -4168,7 +4168,10 @@ func (p *printer) node(node *compiler.Node) Doc {
 	case compiler.ArrayInitializer:
 		return p.arrayInitializer(node.AsArrayInitializer(), node.End)
 	case compiler.ParenthesizedExpression:
-		return concat(text("("), p.node(node.AsParenthesizedExpression().Expression), text(")"))
+		// The closing `)` rides inside the parenthesized expression's own innermost
+		// level (gjf's appendLevel), so it counts in that level's fit check wherever
+		// the parentheses appear.
+		return concat(text("("), p.statementTail(node.AsParenthesizedExpression().Expression, text(")")))
 	case compiler.PrefixUnaryExpression:
 		e := node.AsPrefixUnaryExpression()
 		op := compiler.TokenToString(e.Operator)

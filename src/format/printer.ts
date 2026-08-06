@@ -3409,7 +3409,13 @@ class Printer {
       case SyntaxKind.ArrayInitializer:
         return this.arrayInitializer(node as ArrayInitializer);
       case SyntaxKind.ParenthesizedExpression:
-        return concat(["(", this.node((node as ParenthesizedExpression).expression), ")"]);
+        // The closing `)` rides inside the parenthesized expression's own
+        // innermost level (gjf's appendLevel), so it counts in that level's fit
+        // check wherever the parentheses appear.
+        return concat([
+          "(",
+          this.statementTail((node as ParenthesizedExpression).expression, ")"),
+        ]);
       case SyntaxKind.PrefixUnaryExpression: {
         const e = node as PrefixUnaryExpression;
         const op = tokenToString(e.operator) ?? "";
