@@ -2966,15 +2966,15 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	// provides its own indentation; gjf glues a single dereference onto its closing
 	// `}` (`}.scan(..)`) rather than starting a +4 chain that re-indents the body.
 	baseIsAnonClass := baseIsNew && cur.AsObjectCreationExpression().ClassBody != nil
-	// A multi-line text-block receiver breaks before its dereference (gjf puts
-	// `.replace(..)` on its own +4 line after the closing `"""`).
-	baseIsMultilineTextBlock := cur.Kind == compiler.TextBlockLiteral && strings.Contains(p.raw(cur), "\n")
-	// A string-literal receiver is not a type-name prefix, so gjf never glues the
-	// dereference to it: `"...long...".getBytes(x)` breaks before the `.` when it
-	// does not fit, instead of wrapping the call's arguments.
-	baseIsStringLiteral := cur.Kind == compiler.StringLiteral
-	singleInvocation := callCount == 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass) &&
-		!baseIsMultilineTextBlock && !baseIsStringLiteral
+	// gjf's visitDot only walks through identifiers, field accesses and calls; any
+	// other receiver (a cast, a parenthesized expression, a literal) is a primary
+	// expression that always gets a break before the first dereference, so it can
+	// never be part of the glued prefix. `X.class` is a member select in that walk,
+	// and an anonymous class is the exception gjf makes for its closing brace.
+	baseIsPrimary := cur.Kind != compiler.Identifier && cur.Kind != compiler.ThisExpression &&
+		cur.Kind != compiler.SuperExpression && cur.Kind != compiler.ClassLiteralExpression &&
+		!baseIsAnonClass
+	singleInvocation := callCount == 1 && !baseIsCall && !baseIsPrimary
 	firstCall := -1
 	for i, l := range links {
 		if l.isCall {

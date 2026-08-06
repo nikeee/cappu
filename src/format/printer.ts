@@ -2498,20 +2498,20 @@ class Printer {
     // closing `}` (`}.scan(..)`) rather than starting a +4 chain that would
     // re-indent the class body.
     const baseIsAnonClass = baseIsNew && (cur as ObjectCreationExpression).classBody !== undefined;
-    // A multi-line text-block receiver breaks before its dereference (gjf puts
-    // `.replace(..)` on its own +4 line after the closing `"""`).
-    const baseIsMultilineTextBlock =
-      cur.kind === SyntaxKind.TextBlockLiteral && this.raw(cur).includes("\n");
-    // A string-literal receiver is not a type-name prefix, so gjf never glues the
-    // dereference to it: `"...long...".getBytes(x)` breaks before the `.` when it
-    // does not fit, instead of wrapping the call's arguments.
-    const baseIsStringLiteral = cur.kind === SyntaxKind.StringLiteral;
-    const singleInvocation =
-      callCount === 1 &&
-      !baseIsCall &&
-      (!baseIsNew || baseIsAnonClass) &&
-      !baseIsMultilineTextBlock &&
-      !baseIsStringLiteral;
+    // gjf's visitDot only walks through identifiers, field accesses and calls; any
+    // other receiver (a cast, a parenthesized expression, a literal) is a primary
+    // expression that always gets a break before the first dereference, so it can
+    // never be part of the glued prefix. An anonymous class is the exception gjf
+    // makes for its closing brace.
+    const baseIsPrimary =
+      cur.kind !== SyntaxKind.Identifier &&
+      cur.kind !== SyntaxKind.ThisExpression &&
+      cur.kind !== SyntaxKind.SuperExpression &&
+      // `X.class` is a member select in gjf's walk, so it is part of the
+      // type-name prefix, not a primary expression.
+      cur.kind !== SyntaxKind.ClassLiteralExpression &&
+      !baseIsAnonClass;
+    const singleInvocation = callCount === 1 && !baseIsCall && !baseIsPrimary;
     const firstCall = links.findIndex(l => l.isCall);
     // gjf: with one dereference invocation and nothing after it, the whole chain
     // is a unit (`myField.foo()` never breaks before the call). But when field

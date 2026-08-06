@@ -1,0 +1,14 @@
+package p;
+
+class T {
+    void m(Object filterObj, String classpathElementURL) {
+        if (filterObj != null
+                && !((ClasspathElementURLFilter) filterObj)
+                        .includeClasspathElement(classpathElementURL)) {
+            go();
+        }
+        var method =
+                EulerPseudoprime.class.getDeclaredMethod(
+                        "jacobiSymbol", BigInteger.class, Big.class);
+    }
+}
