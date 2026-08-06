@@ -1217,7 +1217,7 @@ class Printer {
       return level(ZERO, [
         this.modifiers(d.modifiers, "var"),
         ...this.inlineBlockComments(this.start(d.type)),
-        this.singleDeclaration(this.type(d.type), d.declarators[0], concat([";", tail])),
+        this.singleDeclaration(this.type(d.type), d.declarators[0], concat([";", tail]), d.type.end),
       ]);
     }
     return level(ZERO, [
@@ -1240,7 +1240,17 @@ class Printer {
   // initializer keeps its own break-after-`=`, indented +4 (or +8 when the name
   // also broke). The break-before-name's fit check excludes the initializer
   // (it sits in a sibling level), so a long initializer alone does not trigger it.
-  private singleDeclaration(type: Doc, v: VariableDeclarator, trailing: Doc): Doc {
+  private singleDeclaration(
+    type: Doc,
+    v: VariableDeclarator,
+    trailing: Doc,
+    typeEnd = -1,
+  ): Doc {
+    // A `//` comment between the type and the name rides the TYPE's line (gjf
+    // hangs it off that token) and forces the break before the name.
+    const typeTrail = typeEnd >= 0 ? this.trailingLineComment(typeEnd) : undefined;
+    const typeDoc = typeTrail ? concat([type, " ", reflow(typeTrail.text, true)]) : type;
+    const nameBreak: Doc = typeTrail ? hardline : brk("unified", " ", ZERO);
     const name = concat([
       ...this.inlineBlockComments(this.start(v.name)),
       this.raw(v.name),
@@ -1250,11 +1260,11 @@ class Printer {
     // so the `;` and any trailing comment ride inside the level and count in its
     // fit check (`Map<String, Map<Integer, Integer>> index; // note`).
     if (!v.initializer) {
-      return level(PLUS4, [type, brk("unified", " ", ZERO), name, trailing]);
+      return level(PLUS4, [typeDoc, nameBreak, name, trailing]);
     }
     // An array/hugging initializer owns its own braces: keep the simple shape
     // (the declarator handles the `=`).
-    if (v.initializer.kind === SyntaxKind.ArrayInitializer) {
+    if (v.initializer.kind === SyntaxKind.ArrayInitializer && typeTrail === undefined) {
       return concat([type, " ", this.declarator(v, trailing)]);
     }
     // A `//` comment right after the `=` stays on its line and forces the break
@@ -1263,8 +1273,8 @@ class Printer {
     const nameTag = new BreakTag();
     return level(ZERO, [
       level(PLUS4, [
-        type,
-        brk("unified", " ", ZERO, nameTag),
+        typeDoc,
+        typeTrail ? hardline : brk("unified", " ", ZERO, nameTag),
         name,
         " =",
         eq ? concat([" ", reflow(eq.text, true)]) : "",
@@ -1687,7 +1697,7 @@ class Printer {
       return level(ZERO, [
         this.modifiers(d.modifiers, "var"),
         ...this.inlineBlockComments(this.start(d.type)),
-        this.singleDeclaration(this.type(d.type), d.declarators[0], concat([";", tail])),
+        this.singleDeclaration(this.type(d.type), d.declarators[0], concat([";", tail]), d.type.end),
       ]);
     }
     const last = d.declarators.length - 1;

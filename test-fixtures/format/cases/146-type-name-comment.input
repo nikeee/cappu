@@ -1,0 +1,13 @@
+package p;
+
+class T {
+  SingletonMap<ModuleRef, Recycler<ModuleReaderProxy, IOException>, IOException> //
+      moduleRefToModuleReaderProxyRecyclerMap;
+
+  int plain; // normal trailing
+
+  void m() {
+    final SingletonMap<Object, ClasspathElement, IOException> //
+        classpathEntryObjToClasspathEntrySingletonMap = build();
+  }
+}

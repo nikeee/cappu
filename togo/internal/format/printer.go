@@ -1400,7 +1400,7 @@ func (p *printer) fieldDeclarationTail(d *compiler.FieldDeclarationData, tail Do
 	if d.Declarators.Len() == 1 {
 		return level(ZERO, append(
 			append([]Doc{p.modifiers(d.Modifiers, "var")}, p.inlineBlockComments(p.start(d.Type))...),
-			p.singleDeclaration(p.typ(d.Type), nodes(d.Declarators)[0].AsVariableDeclarator(), semiWithTail(tail)),
+			p.singleDeclarationType(p.typ(d.Type), nodes(d.Declarators)[0].AsVariableDeclarator(), semiWithTail(tail), d.Type.End),
 		))
 	}
 	return level(ZERO, append(
@@ -1419,12 +1419,29 @@ func (p *printer) fieldDeclarationTail(d *compiler.FieldDeclarationData, tail Do
 // also broke). The break-before-name's fit check excludes the initializer (a
 // sibling level), so a long initializer alone does not trigger it.
 func (p *printer) singleDeclaration(typ Doc, v *compiler.VariableDeclaratorData, trailing Doc) Doc {
+	return p.singleDeclarationType(typ, v, trailing, -1)
+}
+
+// singleDeclarationType also takes the TYPE's end offset, so a `//` comment
+// between the type and the name can ride the type's line (gjf hangs it off that
+// token) and force the break before the name.
+func (p *printer) singleDeclarationType(typ Doc, v *compiler.VariableDeclaratorData, trailing Doc, typeEnd int) Doc {
+	typeTrail, hasTypeTrail := comment{}, false
+	if typeEnd >= 0 {
+		typeTrail, hasTypeTrail = p.trailingLineComment(typeEnd)
+	}
+	typeDoc := typ
+	nameBreak := brk(fillUnified, " ", ZERO, nil)
+	if hasTypeTrail {
+		typeDoc = concat(typ, text(" "), reflowNoWrap(typeTrail.text))
+		nameBreak = hardline
+	}
 	name := concat(append(p.inlineBlockComments(p.start(v.Name)), text(p.raw(v.Name)), text(strings.Repeat("[]", v.ArrayRankAfterName)))...)
 	// No initializer: the same declareOne break, with nothing after the name - so
 	// the `;` and any trailing comment ride inside the level and count in its fit
 	// check (`Map<String, Map<Integer, Integer>> index; // note`).
 	if v.Initializer == nil {
-		inner := []Doc{typ, brk(fillUnified, " ", ZERO, nil), name}
+		inner := []Doc{typeDoc, nameBreak, name}
 		if trailing != nil {
 			inner = append(inner, trailing)
 		}
@@ -1432,13 +1449,17 @@ func (p *printer) singleDeclaration(typ Doc, v *compiler.VariableDeclaratorData,
 	}
 	// An array/hugging initializer owns its own braces: keep the simple shape
 	// (the declarator handles the `=`).
-	if v.Initializer.Kind == compiler.ArrayInitializer {
+	if v.Initializer.Kind == compiler.ArrayInitializer && !hasTypeTrail {
 		return concat(typ, text(" "), p.declarator(v, trailing))
 	}
 	// A `//` comment right after the `=` stays on its line and forces the break
 	// (gjf hangs it off the `=` token), instead of drifting into the initializer.
 	nameTag := &BreakTag{}
-	sig := []Doc{typ, brk(fillUnified, " ", ZERO, nameTag), name, text(" =")}
+	typeNameBreak := brk(fillUnified, " ", ZERO, nameTag)
+	if hasTypeTrail {
+		typeNameBreak = hardline
+	}
+	sig := []Doc{typeDoc, typeNameBreak, name, text(" =")}
 	firstBreak := line
 	if eq, ok := p.lineCommentAfterAssign(v.Name.End, p.start(v.Initializer)); ok {
 		sig = append(sig, text(" "), reflowNoWrap(eq.text))
@@ -1976,7 +1997,7 @@ func (p *printer) localVarTail(d *compiler.LocalVariableDeclarationStatementData
 	if len(ds) == 1 {
 		return level(ZERO, append(
 			append([]Doc{p.modifiers(d.Modifiers, "var")}, p.inlineBlockComments(p.start(d.Type))...),
-			p.singleDeclaration(p.typ(d.Type), ds[0].AsVariableDeclarator(), semi),
+			p.singleDeclarationType(p.typ(d.Type), ds[0].AsVariableDeclarator(), semi, d.Type.End),
 		))
 	}
 	parts := append(
