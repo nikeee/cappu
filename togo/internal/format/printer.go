@@ -1538,6 +1538,43 @@ func (p *printer) argsLikeTrailing(open string, items []Doc, closeTok string, fi
 
 // allShortItems reports whether every node's source text is under
 // MAX_ITEM_LENGTH_FOR_FILLING (10) chars - gjf's fill heuristic.
+// actualSize mirrors gjf's OpsBuilder.actualSize: an item's width for the fill
+// heuristic spans its attached comments too - the leading ones before it and the
+// ones trailing it on its line. A long trailing comment therefore takes a list
+// off the fill path.
+func (p *printer) actualSize(n *compiler.Node) int {
+	start := p.start(n)
+	end := n.End
+	for _, c := range p.comments {
+		if c.end <= start && c.pos >= n.Pos && c.pos < start {
+			start = c.pos
+		}
+		if c.pos >= end && !strings.Contains(p.text[end:c.pos], "\n") {
+			gap := strings.TrimLeft(p.text[end:c.pos], " \t")
+			if gap == "" || (len(gap) > 0 && strings.ContainsRune(",;)}]", rune(gap[0])) && strings.TrimLeft(gap[1:], " \t") == "") {
+				if c.end > end {
+					end = c.end
+				}
+			}
+		}
+		if c.pos > end {
+			break
+		}
+	}
+	return end - start
+}
+
+// allShortItemsWithComments is allShortItems measuring actualSize - used where
+// gjf's fill heuristic runs over a delimited LIST (an array's elements).
+func (p *printer) allShortItemsWithComments(ns []*compiler.Node) bool {
+	for _, n := range ns {
+		if p.actualSize(n) >= 10 {
+			return false
+		}
+	}
+	return true
+}
+
 func (p *printer) allShortItems(ns []*compiler.Node) bool {
 	for _, n := range ns {
 		if n.End-p.start(n) >= 10 {
@@ -3728,8 +3765,12 @@ func (p *printer) arrayInitializerFull(e *compiler.ArrayInitializerData, end int
 			anyComment = true
 		}
 	}
-	// A comment forces one-per-line (gjf), else short items fill.
-	fill := p.fillMode(anyComment, els)
+	// A comment forces one-per-line (gjf), else short items fill - where an item's
+	// width spans its own comments (gjf's actualSize).
+	fill := fillUnified
+	if !anyComment && p.allShortItemsWithComments(els) {
+		fill = fillIndependent
+	}
 	var innerParts []Doc
 	for i, r := range rs {
 		if i > 0 {

@@ -1351,6 +1351,28 @@ class Printer {
     return nodes.every(n => n.end - this.start(n) < 10);
   }
 
+  // Like allShortItems, but measuring gjf's actualSize - used where gjf's fill
+  // heuristic runs over a delimited LIST (an array initializer's elements).
+  private allShortItemsWithComments(nodes: readonly Node[]): boolean {
+    return nodes.every(n => this.actualSize(n) < 10);
+  }
+
+  // gjf's OpsBuilder.actualSize: an item's width for the fill heuristic spans its
+  // attached comments too - the leading ones before it and the ones trailing it
+  // on its line. A long trailing comment therefore takes a list off the fill path.
+  private actualSize(n: Node): number {
+    let start = this.start(n);
+    let end = n.end;
+    for (const c of this.comments) {
+      if (c.end <= start && c.pos >= n.pos) start = Math.min(start, c.pos);
+      if (c.pos >= end && !this.text.slice(end, c.pos).includes("\n")) {
+        if (/^[ \t]*[,;)}\]]?[ \t]*$/.test(this.text.slice(end, c.pos))) end = Math.max(end, c.end);
+      }
+      if (c.pos > end) break;
+    }
+    return end - start;
+  }
+
   // gjf lays a delimited list one item per line (UNIFIED) when any item carries
   // a comment, else fills (INDEPENDENT) only when every item is short.
   private fillMode(anyComment: boolean, nodes: readonly Node[]): FillMode {
@@ -3054,8 +3076,10 @@ class Printer {
       },
       true,
     );
-    // A comment forces one-per-line (gjf), else short items fill.
-    const fillMode = this.fillMode(anyComment, e.elements);
+    // A comment forces one-per-line (gjf), else short items fill - where an
+    // item's width spans its own comments (gjf's actualSize).
+    const fillMode: FillMode =
+      !anyComment && this.allShortItemsWithComments(e.elements) ? "independent" : "unified";
     const innerParts: Doc[] = [];
     items.forEach((el, i) => {
       if (i > 0) {
