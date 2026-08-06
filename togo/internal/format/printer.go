@@ -3003,6 +3003,19 @@ func (p *printer) statementTail(e *compiler.Node, trailing Doc) Doc {
 			types = append(types, p.typ(b))
 		}
 		return level(plus4, []Doc{text("("), join(text(" & "), types), text(")"), brk(fillUnified, " ", ZERO, nil), p.statementTail(c.Expression, trailing)})
+	case compiler.ArrayInitializer:
+		return p.arrayInitializerFull(e.AsArrayInitializer(), e.End, false, trailing)
+	case compiler.ArrayCreationExpression:
+		ac := e.AsArrayCreationExpression()
+		if ac.Initializer != nil {
+			parts := []Doc{text("new "), p.typ(ac.ElementType)}
+			for _, d := range nodes(ac.Dimensions) {
+				parts = append(parts, text("["), p.node(d), text("]"))
+			}
+			parts = append(parts, text(strings.Repeat("[]", ac.AdditionalRank)), text(" "),
+				p.arrayInitializerFull(ac.Initializer.AsArrayInitializer(), ac.Initializer.End, false, trailing))
+			return concat(parts...)
+		}
 	case compiler.ElementAccessExpression:
 		// `a[i] = ...` / `foo()[i];` - the index's `]` and the tail ride inside.
 		ea := e.AsElementAccessExpression()
@@ -3487,7 +3500,7 @@ func (p *printer) argumentsAreTabular(args []*compiler.Node) int {
 // gjf visitArrayInitializer's tabular branch: cols elements per line, each row
 // its own level so a too-long row fills at +4 (rows of arrays stay at the row
 // indent).
-func (p *printer) tabularArrayInitializer(els []*compiler.Node, cols, end int) Doc {
+func (p *printer) tabularArrayInitializer(els []*compiler.Node, cols, end int, trailing Doc) Doc {
 	parts := []Doc{brk(fillForced, "", ZERO, nil)}
 	for start := 0; start < len(els); start += cols {
 		end := start + cols
@@ -3546,8 +3559,11 @@ func (p *printer) tabularArrayInitializer(els []*compiler.Node, cols, end int) D
 	for _, c := range p.commentsBefore(end - 1) {
 		parts = append(parts, brk(fillForced, "", ZERO, nil), reflow(c.text))
 	}
-	parts = append(parts, brk(fillForced, "", minus2, nil))
-	return concat(text("{"), level(plus2, parts), text("}"))
+	parts = append(parts, brk(fillForced, "", minus2, nil), text("}"))
+	if trailing != nil {
+		parts = append(parts, trailing)
+	}
+	return concat(text("{"), level(plus2, parts))
 }
 
 // takeTrailingRowComment consumes a `//` comment sitting on the same line just
@@ -3603,19 +3619,29 @@ func (p *printer) tabularCommentsPlaceable(els []*compiler.Node, cols int) bool 
 }
 
 func (p *printer) arrayInitializer(e *compiler.ArrayInitializerData, end int) Doc {
-	return p.arrayInitializerAnno(e, end, false)
+	return p.arrayInitializerFull(e, end, false, nil)
 }
 
 // arrayInitializerAnno is arrayInitializer with gjf's allowFilledElementsOnOwnLine:
 // inside an annotation's member value, elements that are not all short do NOT
 // get their own level, so they break one per line with the brace.
 func (p *printer) arrayInitializerAnno(e *compiler.ArrayInitializerData, end int, inAnnotation bool) Doc {
+	return p.arrayInitializerFull(e, end, inAnnotation, nil)
+}
+
+// arrayInitializerFull also routes a trailing token (the statement's `;`, a
+// separator, a trailing comment) INSIDE the initializer's level, so its width
+// drives the fit check.
+func (p *printer) arrayInitializerFull(e *compiler.ArrayInitializerData, end int, inAnnotation bool, trailing Doc) Doc {
 	if e.Elements.Len() == 0 {
+		if trailing != nil {
+			return concat(text("{}"), trailing)
+		}
 		return text("{}")
 	}
 	// A source-laid-out grid is preserved verbatim as rows (gjf).
 	if cols := p.argumentsAreTabular(nodes(e.Elements)); cols != -1 && p.tabularCommentsPlaceable(nodes(e.Elements), cols) {
-		return p.tabularArrayInitializer(nodes(e.Elements), cols, end)
+		return p.tabularArrayInitializer(nodes(e.Elements), cols, end, trailing)
 	}
 	// gjf: contents indent +2; when broken, elements fill (INDEPENDENT) if all
 	// short, else one per line (UNIFIED); the closing `}` goes on its own line
@@ -3719,11 +3745,13 @@ func (p *printer) arrayInitializerAnno(e *compiler.ArrayInitializerData, end int
 	if inAnnotation && !p.allShortItems(els) {
 		inner = concat(innerParts...)
 	}
-	return concat(
-		text("{"),
-		level(plus2, []Doc{brk(open, "", ZERO, nil), inner, brk(open, "", minus2, nil)}),
-		text("}"),
-	)
+	// The closing `}` and whatever follows it on the line (a `,` and a trailing
+	// comment) sit INSIDE the level, so their width drives its fit check.
+	lvl := []Doc{brk(open, "", ZERO, nil), inner, brk(open, "", minus2, nil), text("}")}
+	if trailing != nil {
+		lvl = append(lvl, trailing)
+	}
+	return concat(text("{"), level(plus2, lvl))
 }
 
 func (p *printer) lambda(e *compiler.LambdaExpressionData) Doc {

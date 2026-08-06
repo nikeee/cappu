@@ -2536,6 +2536,23 @@ class Printer {
         this.statementTail(c.expression, trailing),
       ]);
     }
+    if (e.kind === SyntaxKind.ArrayInitializer) {
+      return this.arrayInitializer(e as ArrayInitializer, false, trailing);
+    }
+    if (e.kind === SyntaxKind.ArrayCreationExpression) {
+      const ac = e as ArrayCreationExpression;
+      if (ac.initializer) {
+        const dims = (ac.dimensions ?? []).map(d => concat(["[", this.node(d), "]"]));
+        return concat([
+          "new ",
+          this.type(ac.elementType),
+          concat(dims),
+          "[]".repeat(ac.additionalRank),
+          " ",
+          this.arrayInitializer(ac.initializer, false, trailing),
+        ]);
+      }
+    }
     if (e.kind === SyntaxKind.ElementAccessExpression) {
       // `a[i] = ...` / `foo()[i];` - the index's `]` and the tail ride inside.
       const ea = e as ElementAccessExpression;
@@ -2868,7 +2885,7 @@ class Printer {
   // gjf visitArrayInitializer's tabular branch: `cols` elements per line, each
   // row its own level so a too-long row fills at +4 (rows of arrays stay at the
   // row indent).
-  private tabularArrayInitializer(e: ArrayInitializer, cols: number): Doc {
+  private tabularArrayInitializer(e: ArrayInitializer, cols: number, trailing: Doc = ""): Doc {
     const parts: Doc[] = [brk("forced", "", ZERO)];
     for (let start = 0; start < e.elements.length; start += cols) {
       const row = e.elements.slice(start, start + cols);
@@ -2911,8 +2928,8 @@ class Printer {
     for (const c of this.commentsBefore(e.end - 1)) {
       parts.push(brk("forced", "", ZERO), reflow(c.text));
     }
-    parts.push(brk("forced", "", MINUS2));
-    return concat(["{", level(PLUS2, parts), "}"]);
+    parts.push(brk("forced", "", MINUS2), "}", trailing);
+    return concat(["{", level(PLUS2, parts)]);
   }
 
   // Consume a `//` comment sitting on the same line just after `el` (past its
@@ -2950,12 +2967,12 @@ class Printer {
     return true;
   }
 
-  private arrayInitializer(e: ArrayInitializer, inAnnotation = false): Doc {
-    if (e.elements.length === 0) return "{}";
+  private arrayInitializer(e: ArrayInitializer, inAnnotation = false, trailing: Doc = ""): Doc {
+    if (e.elements.length === 0) return concat(["{}", trailing]);
     // A source-laid-out grid is preserved verbatim as rows (gjf).
     const cols = this.argumentsAreTabular(e.elements);
     if (cols !== -1 && this.tabularCommentsPlaceable(e.elements, cols)) {
-      return this.tabularArrayInitializer(e, cols);
+      return this.tabularArrayInitializer(e, cols, trailing);
     }
     // gjf: contents indent +2; when broken, elements fill (INDEPENDENT) if all
     // short, else one per line (UNIFIED); the closing `}` goes on its own line
@@ -3039,7 +3056,12 @@ class Printer {
     const inner: Doc = filled ? level(ZERO, innerParts) : concat(innerParts);
     const forceOpen = trailingComma || closingComment !== undefined || dangling.length > 0;
     const open: FillMode = forceOpen ? "forced" : "unified";
-    return concat(["{", level(PLUS2, [brk(open, "", ZERO), inner, brk(open, "", MINUS2)]), "}"]);
+    // The closing `}` and whatever follows it on the line (a `,` and a trailing
+    // comment) sit INSIDE the level, so their width drives its fit check.
+    return concat([
+      "{",
+      level(PLUS2, [brk(open, "", ZERO), inner, brk(open, "", MINUS2), "}", trailing]),
+    ]);
   }
 
   private lambda(e: LambdaExpression, trailing: Doc = ""): Doc {
