@@ -1719,7 +1719,11 @@ class Printer {
     // gjf preserves a source blank line before the then-block's `}` when an
     // `else` follows.
     const close = this.clauseClose(s.thenStatement);
-    const header = group(concat(["if (", this.statementTail(s.condition, close)]));
+    // An own-line comment written before the condition sits on its own line
+    // right after `if (`, at the statement's own indent (gjf hangs it off the
+    // paren, and its forced break resets the column).
+    const condLead = this.conditionLead(this.start(s.condition));
+    const header = group(concat(["if (", condLead, this.statementTail(s.condition, close)]));
     const parts: Doc[] = [header, this.clauseRest(s.thenStatement, s.elseStatement !== undefined)];
     if (s.elseStatement) {
       const elseOnSameLine = s.thenStatement.kind === SyntaxKind.Block;
@@ -1753,6 +1757,20 @@ class Printer {
    * keyword then always starts a new line. Undefined when there is no comment,
    * so the caller keeps its usual `} else` spacing.
    */
+  // Own-line comments written between a header's `(` and its condition: gjf puts
+  // them on their own lines at the statement's indent, before the condition.
+  private conditionLead(condStart: number): Doc {
+    const cs = this.commentsBefore(condStart).filter(c => {
+      if (c.ownLine || c.line) return true;
+      return false;
+    });
+    if (cs.length === 0) return "";
+    const parts: Doc[] = [];
+    for (const c of cs) parts.push(hardline, reflow(c.text));
+    parts.push(hardline);
+    return concat(parts);
+  }
+
   private clauseKeywordLead(bound: number, afterBlock: boolean): Doc | undefined {
     const cs = this.commentsBefore(bound);
     if (cs.length === 0) return undefined;
@@ -1847,7 +1865,11 @@ class Printer {
 
   private whileStatement(s: WhileStatement): Doc {
     const header = group(
-      concat(["while (", this.statementTail(s.condition, this.clauseClose(s.statement))]),
+      concat([
+        "while (",
+        this.conditionLead(this.start(s.condition)),
+        this.statementTail(s.condition, this.clauseClose(s.statement)),
+      ]),
     );
     return concat([header, this.clauseRest(s.statement)]);
   }

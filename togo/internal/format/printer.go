@@ -2027,7 +2027,10 @@ func semiWithTail(tail Doc) Doc {
 }
 
 func (p *printer) ifStatement(s *compiler.IfStatementData) Doc {
-	header := group(concat(text("if ("), p.statementTail(s.Condition, p.clauseClose(s.ThenStatement))))
+	// An own-line comment written before the condition sits on its own line right
+	// after `if (`, at the statement's own indent.
+	condLead := p.conditionLead(p.start(s.Condition))
+	header := group(concat(text("if ("), condLead, p.statementTail(s.Condition, p.clauseClose(s.ThenStatement))))
 	parts := []Doc{
 		header,
 		// gjf preserves a source blank line before the then-block's `}` when an
@@ -2082,6 +2085,23 @@ func (p *printer) clauseBodyTB(s *compiler.Node, allowTrailingBlank bool) Doc {
 // them. gjf hangs a same-line comment off the brace and puts the others on
 // their own line; the keyword then always starts a new line. ok=false when
 // there is no comment, so the caller keeps its usual `} else` spacing.
+// conditionLead renders own-line comments written between a header's `(` and its
+// condition: gjf puts them on their own lines at the statement's indent, before
+// the condition.
+func (p *printer) conditionLead(condStart int) Doc {
+	var parts []Doc
+	for _, c := range p.commentsBefore(condStart) {
+		if !c.ownLine && !c.line {
+			continue
+		}
+		parts = append(parts, hardline, reflow(c.text))
+	}
+	if len(parts) == 0 {
+		return text("")
+	}
+	return concat(append(parts, hardline)...)
+}
+
 func (p *printer) clauseKeywordLead(bound int, afterBlock bool) (Doc, bool) {
 	cs := p.commentsBefore(bound)
 	if len(cs) == 0 {
@@ -2190,7 +2210,8 @@ func (p *printer) clauseRestCollapse(s *compiler.Node, allowTrailingBlank, colla
 }
 
 func (p *printer) whileStatement(s *compiler.WhileStatementData) Doc {
-	header := group(concat(text("while ("), p.statementTail(s.Condition, p.clauseClose(s.Statement))))
+	condLead := p.conditionLead(p.start(s.Condition))
+	header := group(concat(text("while ("), condLead, p.statementTail(s.Condition, p.clauseClose(s.Statement))))
 	return concat(header, p.clauseRest(s.Statement, false))
 }
 

@@ -1,0 +1,16 @@
+package p;
+
+class T {
+  void m(String relativePath) {
+    if (
+    // The default package is always the ancestor of accepted paths (keep recursing)
+    relativePath.equals("/") || relativePath.isEmpty()) {
+      go();
+    }
+    while (
+    // keep going
+    hasNext()) {
+      go();
+    }
+  }
+}
