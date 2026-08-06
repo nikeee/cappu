@@ -3039,8 +3039,15 @@ class Printer {
     } else {
       parts.push(brk("unified", " ", ZERO));
     }
+    // gjf hangs a comment off the token it follows, so a comment written BEFORE
+    // the `:` stays above it while one written after it follows the `:`.
+    const colonPos = skipTrivia(this.text, e.whenTrue.end);
+    for (const c of this.commentsBefore(colonPos)) {
+      parts.push(reflow(c.text), hardline);
+    }
     parts.push(": ");
-    // A comment before the else-branch renders inline before it (`: /* a= */ x`).
+    // A comment after the `:` renders inline before the branch (`: /* a= */ x`);
+    // a line comment forces the branch onto the next line.
     for (const c of this.commentsBefore(this.start(e.whenFalse))) {
       if (c.line) parts.push(reflow(c.text), hardline);
       else parts.push(c.text, " ");

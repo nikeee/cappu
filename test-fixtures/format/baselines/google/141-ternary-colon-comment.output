@@ -1,0 +1,17 @@
+package p;
+
+class T {
+  Class<?> m(boolean b, String className) throws Exception {
+    return b
+        ? scanResult.loadClass(className, false)
+        // Fallback, if scanResult is not set
+        : Class.forName(className);
+  }
+
+  Object n(boolean b) {
+    return b
+        ? first()
+        : // after the colon
+        second();
+  }
+}

@@ -3748,6 +3748,11 @@ func (p *printer) conditionalTrailing(e *compiler.ConditionalExpressionData, tra
 	} else {
 		parts = append(parts, brk(fillUnified, " ", ZERO, nil))
 	}
+	// gjf hangs a comment off the token it follows, so a comment written BEFORE
+	// the `:` stays above it while one written after it follows the `:`.
+	for _, c := range p.commentsBefore(compiler.SkipTrivia(p.text, e.WhenTrue.End)) {
+		parts = append(parts, reflow(c.text), hardline)
+	}
 	parts = append(parts, text(": "))
 	// A comment before the else-branch renders inline before it (`: /* a= */ x`).
 	for _, c := range p.commentsBefore(p.start(e.WhenFalse)) {
