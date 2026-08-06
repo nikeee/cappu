@@ -2007,13 +2007,18 @@ func (p *printer) ifStatement(s *compiler.IfStatementData) Doc {
 	}
 	if s.ElseStatement != nil {
 		elseOnSameLine := s.ThenStatement.Kind == compiler.Block
-		switch lead, ok := p.clauseKeywordLead(p.start(s.ElseStatement), elseOnSameLine); {
+		switch lead, ok := p.clauseKeywordLead(compiler.SkipTrivia(p.text, s.ThenStatement.End), elseOnSameLine); {
 		case ok:
 			parts = append(parts, lead, text("else"))
 		case elseOnSameLine:
 			parts = append(parts, text(" else"))
 		default:
 			parts = append(parts, concat(hardline, text("else")))
+		}
+		// A comment between `else` and its `{` stays there (`else /* why */ {`).
+		if afterKeyword := p.inlineBlockComments(p.start(s.ElseStatement)); len(afterKeyword) > 0 {
+			parts = append(parts, text(" "))
+			parts = append(parts, afterKeyword[:len(afterKeyword)-1]...)
 		}
 		switch s.ElseStatement.Kind {
 		case compiler.IfStatement:
@@ -2061,6 +2066,12 @@ func (p *printer) clauseKeywordLead(bound int, afterBlock bool) (Doc, bool) {
 			continue
 		}
 		parts = append(parts, hardline, reflow(c.text))
+	}
+	// A block comment that shared the `}`'s line keeps the keyword on that line too
+	// (`} /* why */ else {`); a `//` comment would comment the keyword out, so it
+	// always breaks.
+	if len(cs) == 1 && !cs[0].ownLine && !cs[0].line && afterBlock {
+		return concat(append(parts, text(" "))...), true
 	}
 	parts = append(parts, hardline)
 	return concat(parts...), true

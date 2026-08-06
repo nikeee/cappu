@@ -1,0 +1,29 @@
+package p;
+
+class T {
+  void a(boolean b) {
+    if (b) {
+      go();
+    } /* before the keyword */ else {
+      stop();
+    }
+  }
+
+  void c(boolean b) {
+    if (b) {
+      go();
+    } else /* after the keyword */ {
+      stop();
+    }
+  }
+
+  void d(boolean b) {
+    if (b) {
+      go();
+    }
+    // own line
+    else {
+      stop();
+    }
+  }
+}

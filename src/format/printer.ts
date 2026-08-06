@@ -1710,9 +1710,15 @@ class Printer {
     const parts: Doc[] = [header, this.clauseRest(s.thenStatement, s.elseStatement !== undefined)];
     if (s.elseStatement) {
       const elseOnSameLine = s.thenStatement.kind === SyntaxKind.Block;
-      const lead = this.clauseKeywordLead(this.start(s.elseStatement), elseOnSameLine);
+      const lead = this.clauseKeywordLead(
+        skipTrivia(this.text, s.thenStatement.end),
+        elseOnSameLine,
+      );
       if (lead) parts.push(lead, "else");
       else parts.push(elseOnSameLine ? " else" : concat([hardline, "else"]));
+      // A comment between `else` and its `{` stays there (`else /* why */ {`).
+      const afterKeyword = this.inlineBlockComments(this.start(s.elseStatement));
+      if (afterKeyword.length > 0) parts.push(" ", ...afterKeyword.slice(0, -1));
       if (s.elseStatement.kind === SyntaxKind.IfStatement) {
         parts.push(" ", this.node(s.elseStatement));
       } else if (s.elseStatement.kind === SyntaxKind.Block) {
@@ -1744,6 +1750,14 @@ class Printer {
         reflow(c.text, i === 0 && !c.ownLine && afterBlock),
       );
     });
+    // A block comment that shared the `}`'s line keeps the keyword on that line
+    // too (`} /* why */ else {`); a `//` comment would comment the keyword out,
+    // so it always breaks.
+    const only = cs.length === 1 ? cs[0] : undefined;
+    if (only !== undefined && !only.ownLine && !only.line && afterBlock) {
+      parts.push(" ");
+      return concat(parts);
+    }
     parts.push(hardline);
     return concat(parts);
   }
