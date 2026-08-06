@@ -2260,7 +2260,10 @@ class Printer {
     // `trail` is a `//` comment that sits on the same line as the PREVIOUS link
     // (`.foo() // why` / `.bar()`); gjf hangs it off that line, so it is emitted
     // before this link's break rather than after it. Filled in during render.
-    type Link = { isCall: boolean; name: string; trail?: string; render: () => Doc };
+    // gjf splits a link at its argument list: the chain prefix's level closes
+    // after the NAME (dotExpressionUpToArgs), so a prefix call's arguments never
+    // count towards the prefix's own fit check.
+    type Link = { isCall: boolean; name: string; trail?: string; render: () => Doc; args?: Doc };
     const links: Link[] = [];
     let cur: Node = root;
     let trailingRouted = false;
@@ -2283,13 +2286,14 @@ class Printer {
           // `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
           render: () => {
             link.trail = this.trailingLineComment(pa.expression.end)?.text;
-            return concat([
+            const head = concat([
               this.dotLinkLead(this.start(pa.name)),
               ".",
               this.typeArguments(callExpr.typeArguments),
               name,
-              this.argList(callExpr.arguments, rightmost ? trailing : ""),
             ]);
+            link.args = this.argList(callExpr.arguments, rightmost ? trailing : "");
+            return head;
           },
         };
         links.unshift(link);
@@ -2350,16 +2354,25 @@ class Printer {
     // dereference to it: `"...long...".getBytes(x)` breaks before the `.` when it
     // does not fit, instead of wrapping the call's arguments.
     const baseIsStringLiteral = cur.kind === SyntaxKind.StringLiteral;
-    if (
+    const singleInvocation =
       callCount === 1 &&
       !baseIsCall &&
       (!baseIsNew || baseIsAnonClass) &&
       !baseIsMultilineTextBlock &&
-      !baseIsStringLiteral
-    ) {
-      const glued = links.map((l, i) =>
-        l.trail === undefined ? linkDocs[i] : concat([" ", reflow(l.trail, true), hardline, linkDocs[i]]),
-      );
+      !baseIsStringLiteral;
+    const firstCall = links.findIndex(l => l.isCall);
+    // gjf: with one dereference invocation and nothing after it, the whole chain
+    // is a unit (`myField.foo()` never breaks before the call). But when field
+    // accesses FOLLOW that call, the call and its receiver are only the chain's
+    // prefix - the trailing dereferences still break one per line.
+    if (singleInvocation && firstCall === links.length - 1) {
+      const glued = links.map((l, i) => {
+        const head =
+          l.trail === undefined
+            ? linkDocs[i]
+            : concat([" ", reflow(l.trail, true), hardline, linkDocs[i]]);
+        return l.args === undefined ? head : concat([head, l.args]);
+      });
       return finish(concat([base, ...glued]));
     }
     // The leading links glued to the base (no break before them): a type-name
@@ -2384,14 +2397,39 @@ class Printer {
     links.forEach((l, i) => {
       if (l.isCall && STREAM_PREFIX_METHODS.has(l.name)) glue = Math.max(glue, i + 1);
     });
-    const parts: Doc[] = [base];
-    links.forEach((l, i) => {
+    // gjf's prefix index counts the receiver as item 0, so the prefix spans the
+    // receiver, any leading field accesses AND the single call itself.
+    if (singleInvocation && firstCall >= 0) glue = Math.max(glue, firstCall + 1);
+    // The glued prefix sits in a level of its own (gjf's visitDotWithPrefix), so
+    // it prefers to stay on one line; the last glued link's ARGUMENTS follow
+    // outside that level, so their width never breaks the prefix apart.
+    const linkDoc = (i: number): Doc[] => {
+      const out: Doc[] = [];
       // A comment trailing the previous link rides that line and forces the
       // break (gjf always breaks after a line comment).
-      if (l.trail !== undefined) parts.push(" ", reflow(l.trail, true), hardline);
-      else if (i >= glue) parts.push(brk("unified", "", ZERO));
-      parts.push(linkDocs[i]);
-    });
+      if (links[i].trail !== undefined) out.push(" ", reflow(links[i].trail as string, true), hardline);
+      else if (i >= glue) out.push(brk("unified", "", ZERO));
+      out.push(linkDocs[i]);
+      return out;
+    };
+    const parts: Doc[] = [];
+    const gluedCount = Math.min(glue, links.length);
+    if (gluedCount > 0) {
+      const head: Doc[] = [base];
+      for (let i = 0; i < gluedCount; i++) {
+        head.push(...linkDoc(i));
+        if (i < gluedCount - 1 && links[i].args !== undefined) head.push(links[i].args as Doc);
+      }
+      parts.push(level(ZERO, head));
+      const lastArgs = links[gluedCount - 1].args;
+      if (lastArgs !== undefined) parts.push(lastArgs);
+    } else {
+      parts.push(base);
+    }
+    for (let i = gluedCount; i < links.length; i++) {
+      parts.push(...linkDoc(i));
+      if (links[i].args !== undefined) parts.push(links[i].args as Doc);
+    }
     return finish(level(PLUS4, parts));
   }
 

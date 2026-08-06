@@ -2688,11 +2688,15 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	// trail is a `//` comment on the same line as the PREVIOUS link
 	// (`.foo() // why` / `.bar()`); gjf hangs it off that line, so it is emitted
 	// before this link's break rather than after it. Filled in during render.
+	// gjf splits a link at its argument list: the chain prefix's level closes
+	// after the NAME (dotExpressionUpToArgs), so a prefix call's arguments never
+	// count towards the prefix's own fit check.
 	type linkT struct {
 		isCall bool
 		name   string
 		trail  *string
 		render func() Doc
+		args   Doc
 	}
 	var links []*linkT
 	cur := root
@@ -2720,7 +2724,9 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 				if tc, ok := p.trailingLineComment(pa.Expression.End); ok {
 					lk.trail = &tc.text
 				}
-				return concat(p.dotLinkLead(p.start(pa.Name)), text("."), p.typeArguments(ce.TypeArguments), text(name), p.argListTrailing(ce.Arguments, argTrailing))
+				head := concat(p.dotLinkLead(p.start(pa.Name)), text("."), p.typeArguments(ce.TypeArguments), text(name))
+				lk.args = p.argListTrailing(ce.Arguments, argTrailing)
+				return head
 			}
 			links = append([]*linkT{lk}, links...)
 			cur = pa.Expression
@@ -2789,14 +2795,29 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	// dereference to it: `"...long...".getBytes(x)` breaks before the `.` when it
 	// does not fit, instead of wrapping the call's arguments.
 	baseIsStringLiteral := cur.Kind == compiler.StringLiteral
-	if callCount == 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass) && !baseIsMultilineTextBlock &&
-		!baseIsStringLiteral {
+	singleInvocation := callCount == 1 && !baseIsCall && (!baseIsNew || baseIsAnonClass) &&
+		!baseIsMultilineTextBlock && !baseIsStringLiteral
+	firstCall := -1
+	for i, l := range links {
+		if l.isCall {
+			firstCall = i
+			break
+		}
+	}
+	// gjf: with one dereference invocation and nothing after it, the whole chain is
+	// a unit (`myField.foo()` never breaks before the call). But when field
+	// accesses FOLLOW that call, the call and its receiver are only the chain's
+	// prefix - the trailing dereferences still break one per line.
+	if singleInvocation && firstCall == len(links)-1 {
 		parts := []Doc{base}
 		for i, l := range links {
 			if l.trail != nil {
 				parts = append(parts, text(" "), reflowNoWrap(*l.trail), hardline)
 			}
 			parts = append(parts, linkDocs[i])
+			if l.args != nil {
+				parts = append(parts, l.args)
+			}
 		}
 		return finish(concat(parts...))
 	}
@@ -2829,17 +2850,51 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 			glue = i + 1
 		}
 	}
-	parts := []Doc{base}
-	for i, l := range links {
-		// A comment trailing the previous link rides that line and forces the
-		// break (gjf always breaks after a line comment).
+	// gjf's prefix index counts the receiver as item 0, so the prefix spans the
+	// receiver, any leading field accesses AND the single call itself.
+	if singleInvocation && firstCall >= 0 && firstCall+1 > glue {
+		glue = firstCall + 1
+	}
+	// The glued prefix sits in a level of its own (gjf's visitDotWithPrefix), so it
+	// prefers to stay on one line; the last glued link's ARGUMENTS follow outside
+	// that level, so their width never breaks the prefix apart.
+	linkDoc := func(i int) []Doc {
+		var out []Doc
+		// A comment trailing the previous link rides that line and forces the break
+		// (gjf always breaks after a line comment).
 		switch {
-		case l.trail != nil:
-			parts = append(parts, text(" "), reflowNoWrap(*l.trail), hardline)
+		case links[i].trail != nil:
+			out = append(out, text(" "), reflowNoWrap(*links[i].trail), hardline)
 		case i >= glue:
-			parts = append(parts, brk(fillUnified, "", ZERO, nil))
+			out = append(out, brk(fillUnified, "", ZERO, nil))
 		}
-		parts = append(parts, linkDocs[i])
+		return append(out, linkDocs[i])
+	}
+	var parts []Doc
+	gluedCount := glue
+	if gluedCount > len(links) {
+		gluedCount = len(links)
+	}
+	if gluedCount > 0 {
+		head := []Doc{base}
+		for i := 0; i < gluedCount; i++ {
+			head = append(head, linkDoc(i)...)
+			if i < gluedCount-1 && links[i].args != nil {
+				head = append(head, links[i].args)
+			}
+		}
+		parts = append(parts, level(ZERO, head))
+		if a := links[gluedCount-1].args; a != nil {
+			parts = append(parts, a)
+		}
+	} else {
+		parts = append(parts, base)
+	}
+	for i := gluedCount; i < len(links); i++ {
+		parts = append(parts, linkDoc(i)...)
+		if links[i].args != nil {
+			parts = append(parts, links[i].args)
+		}
 	}
 	return finish(level(plus4, parts))
 }

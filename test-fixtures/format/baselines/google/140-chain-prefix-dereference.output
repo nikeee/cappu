@@ -1,0 +1,11 @@
+package p;
+
+class T {
+  void m(ClassInfo superclass) {
+    reachableClasses =
+        superclass.filterClassInfo(RelType.IMPLEMENTED_INTERFACES, /* strictAccept= */ false)
+            .reachableClasses;
+    short1 = superclass.filterClassInfo(A, false).reachableClasses;
+    plain = myField.foo();
+  }
+}
