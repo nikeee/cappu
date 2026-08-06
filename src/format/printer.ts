@@ -2621,6 +2621,9 @@ class Printer {
         return concat([op, this.statementTail(u.operand, trailing)]);
       }
     }
+    if (e.kind === SyntaxKind.InstanceofExpression) {
+      return this.instanceOf(e as InstanceofExpression, trailing);
+    }
     if (e.kind === SyntaxKind.CastExpression) {
       // `(long) foo(...);` - the cast's operand owns the rest of the line, so the
       // tail rides into it (gjf visitTypeCast keeps both in one +4 level).
@@ -3276,11 +3279,15 @@ class Printer {
     return undefined;
   }
 
-  private instanceOf(e: InstanceofExpression): Doc {
-    const parts: Doc[] = [this.node(e.expression), " instanceof "];
-    if (e.type) parts.push(this.type(e.type));
-    if (e.name) parts.push(" ", this.raw(e.name));
-    return concat(parts);
+  // gjf visitInstanceOf: a +4 level holding the expression, a break, then the
+  // `instanceof` and its type in a ZERO level with its own break - so a long
+  // check breaks BEFORE the keyword rather than inside the type.
+  private instanceOf(e: InstanceofExpression, trailing: Doc = ""): Doc {
+    const rhs: Doc[] = ["instanceof", brk("unified", " ", ZERO)];
+    if (e.type) rhs.push(this.type(e.type));
+    if (e.name) rhs.push(" ", this.raw(e.name));
+    rhs.push(trailing);
+    return level(PLUS4, [this.node(e.expression), brk("unified", " ", ZERO), level(ZERO, rhs)]);
   }
 
   // --- dispatch ------------------------------------------------------------

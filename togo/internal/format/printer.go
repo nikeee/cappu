@@ -3115,6 +3115,8 @@ func (p *printer) statementTail(e *compiler.Node, trailing Doc) Doc {
 		if op := compiler.TokenToString(u.Operator); op == "!" || op == "~" {
 			return concat(text(op), p.statementTail(u.Operand, trailing))
 		}
+	case compiler.InstanceofExpression:
+		return p.instanceOfTrailing(e.AsInstanceofExpression(), trailing)
 	case compiler.CastExpression:
 		// `(long) foo(...);` - the cast's operand owns the rest of the line, so the
 		// tail rides into it (gjf visitTypeCast keeps both in one +4 level).
@@ -4040,14 +4042,25 @@ func onlySpaces(s string) bool {
 }
 
 func (p *printer) instanceOf(e *compiler.InstanceofExpressionData) Doc {
-	parts := []Doc{p.node(e.Expression), text(" instanceof ")}
+	return p.instanceOfTrailing(e, nil)
+}
+
+// instanceOfTrailing mirrors gjf's visitInstanceOf: a +4 level holding the
+// expression, a break, then the `instanceof` and its type in a ZERO level with
+// its own break - so a long check breaks BEFORE the keyword rather than inside
+// the type.
+func (p *printer) instanceOfTrailing(e *compiler.InstanceofExpressionData, trailing Doc) Doc {
+	rhs := []Doc{text("instanceof"), brk(fillUnified, " ", ZERO, nil)}
 	if e.Type != nil {
-		parts = append(parts, p.typ(e.Type))
+		rhs = append(rhs, p.typ(e.Type))
 	}
 	if e.Name != nil {
-		parts = append(parts, text(" "), text(p.raw(e.Name)))
+		rhs = append(rhs, text(" "), text(p.raw(e.Name)))
 	}
-	return concat(parts...)
+	if trailing != nil {
+		rhs = append(rhs, trailing)
+	}
+	return level(plus4, []Doc{p.node(e.Expression), brk(fillUnified, " ", ZERO, nil), level(ZERO, rhs)})
 }
 
 // --- dispatch ------------------------------------------------------------

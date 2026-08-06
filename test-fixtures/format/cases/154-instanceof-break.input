@@ -1,0 +1,12 @@
+package p;
+
+class T {
+  void m(Cache newCache) {
+    assertTrue(
+        newCache.getEvictionStrategy() instanceof FIFOCache.ImmediateEvictionStrategy<String, String>,
+        "msg");
+    if (o instanceof String s) {
+      go(s);
+    }
+  }
+}
