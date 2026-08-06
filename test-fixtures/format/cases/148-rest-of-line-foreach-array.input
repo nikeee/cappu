@@ -1,0 +1,10 @@
+package p;
+
+class T {
+  void m(Map<String, List<Entry>> map) {
+    for (final ClassLoaderHandlerRegistryEntry classLoaderHandlerRegistryEntry : ent.getValue()) {
+      go();
+    }
+    Double[] array = {3.3, 2.2, 1.1, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
+  }
+}

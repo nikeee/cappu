@@ -1483,10 +1483,10 @@ func (p *printer) declarator(v *compiler.VariableDeclaratorData, trailing Doc) D
 	// a +4 continuation line after `=`. The statement's `;` rides into the
 	// initializer's tail call (rest-of-line).
 	if v.Initializer.Kind == compiler.ArrayInitializer {
-		if trailing != nil {
-			return concat(name, text(" = "), p.node(v.Initializer), trailing)
-		}
-		return concat(name, text(" = "), p.node(v.Initializer))
+		// The `;` rides inside the initializer's level (rest-of-line), so an
+		// initializer that only overflows because of it opens its braces.
+		return concat(name, text(" = "),
+			p.arrayInitializerFull(v.Initializer.AsArrayInitializer(), v.Initializer.End, false, trailing))
 	}
 	// A `//` comment right after the `=` stays on its line and forces the break
 	// (gjf hangs it off the `=` token); without this it drifts into the
@@ -2277,7 +2277,7 @@ func (p *printer) forEachStatement(s *compiler.ForEachStatementData) Doc {
 	// gjf visitEnhancedForLoop: "for (" open(+4) param " :" breakOp(" ") expr
 	// close ")". The iterable breaks after the ":" at +4 when it overflows.
 	return concat(
-		concat(text("for ("), level(plus4, []Doc{p.parameter(s.Parameter), text(" :"), line, p.node(s.Expression)}), p.clauseClose(s.Statement)),
+		concat(text("for ("), level(plus4, []Doc{p.parameter(s.Parameter), text(" :"), line, p.statementTail(s.Expression, p.clauseClose(s.Statement))})),
 		p.clauseRest(s.Statement, false),
 	)
 }

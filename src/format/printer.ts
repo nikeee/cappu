@@ -1293,7 +1293,13 @@ class Printer {
     // so do not insert a break before it. (Other hugging RHS kinds - lambdas,
     // anonymous classes - are handled with the rest of assignment RHS in phase B.)
     if (v.initializer.kind === SyntaxKind.ArrayInitializer) {
-      return concat([name, " = ", this.node(v.initializer), trailing]);
+      // The `;` rides inside the initializer's level (rest-of-line), so an
+      // initializer that only overflows because of it opens its braces.
+      return concat([
+        name,
+        " = ",
+        this.arrayInitializer(v.initializer as ArrayInitializer, false, trailing),
+      ]);
     }
     // A `//` comment right after the `=` stays on its line and forces the break
     // (gjf hangs it off the `=` token); without this it drifts into the
@@ -1939,8 +1945,12 @@ class Printer {
     return concat([
       concat([
         "for (",
-        level(PLUS4, [this.parameter(s.parameter), " :", line, this.node(s.expression)]),
-        this.clauseClose(s.statement),
+        level(PLUS4, [
+          this.parameter(s.parameter),
+          " :",
+          line,
+          this.statementTail(s.expression, this.clauseClose(s.statement)),
+        ]),
       ]),
       this.clauseRest(s.statement),
     ]);
