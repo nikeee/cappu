@@ -1155,7 +1155,16 @@ class Printer {
       // member follows - a trailing empty statement (`;`) gets no blank line.
       const realMember = d.members.some(m => m.kind !== SyntaxKind.EmptyStatement);
       bodyParts.push(";", lastComment, hardline);
-      if (constants.length > 0 && realMember) bodyParts.push(hardline);
+      // ... and only when that member wants one - gjf's addBodyDeclarations: a
+      // plain field does not, a method or nested type does, and the author's own
+      // blank always counts.
+      const first = d.members[0];
+      const from = constants.length > 0 ? constants[constants.length - 1].end : -1;
+      const wantsBlank =
+        isBlankForcing(first.kind) ||
+        fieldSpansMultipleLines(first) ||
+        (from >= 0 && this.blankBeforePos(from, this.start(first)));
+      if (constants.length > 0 && realMember && wantsBlank) bodyParts.push(hardline);
       bodyParts.push(...this.members(d.members, d.end));
     } else if (semicolonAfter) {
       bodyParts.push(";", lastComment);
@@ -3271,7 +3280,8 @@ class Printer {
         return this.initializerBlock(node as InitializerBlock);
 
       case SyntaxKind.Block:
-        return this.block(node as Block);
+        // A bare block: gjf visits it with AllowLeadingBlankLine.NO.
+        return this.block(node as Block, false, true, false);
       case SyntaxKind.EmptyStatement:
         return ";";
       case SyntaxKind.LocalVariableDeclarationStatement:
@@ -3308,11 +3318,12 @@ class Printer {
         return concat(["yield ", this.node((node as YieldStatement).expression), ";"]);
       case SyntaxKind.SynchronizedStatement: {
         const s = node as SynchronizedStatement;
+        // gjf visits a synchronized body with AllowLeadingBlankLine.NO.
         return concat([
           "synchronized (",
           this.node(s.expression),
           ") ",
-          this.block(s.body, false, false),
+          this.block(s.body, false, false, false),
         ]);
       }
       case SyntaxKind.AssertStatement: {

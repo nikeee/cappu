@@ -1320,7 +1320,13 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 			}
 		}
 		bodyParts = append(bodyParts, text(";"), lastComment, hardline)
-		if len(consts) > 0 && realMember {
+		// ... and only when that member wants one - gjf's addBodyDeclarations: a
+		// plain field does not, a method or nested type does, and the author's own
+		// blank always counts.
+		first := nodes(d.Members)[0]
+		wantsBlank := isBlankForcing(first.Kind) || fieldSpansMultipleLines(first) ||
+			(len(consts) > 0 && p.blankBeforePos(consts[len(consts)-1].End, p.start(first)))
+		if len(consts) > 0 && realMember && wantsBlank {
 			bodyParts = append(bodyParts, hardline)
 		}
 		bodyParts = append(bodyParts, p.members(d.Members, end)...)
@@ -1928,10 +1934,19 @@ func (p *printer) block(b *compiler.BlockData, endPos int) Doc {
 // newline `}`) for else, catch, finally, synchronized, an initializer and a
 // switch.
 func (p *printer) blockOpen(b *compiler.BlockData, startPos, endPos int, collapse bool) Doc {
+	return p.blockOpenLead(b, startPos, endPos, collapse, true)
+}
+
+// blockOpenLead is blockOpen with gjf's AllowLeadingBlankLine: a synchronized
+// body and a bare block drop the blank an author left after their `{`.
+func (p *printer) blockOpenLead(b *compiler.BlockData, startPos, endPos int, collapse, allowLeadingBlank bool) Doc {
 	if !collapse && p.blockIsEmpty(b, startPos, endPos) {
 		return concat(text("{"), hardline, text("}"))
 	}
-	return p.blockTB(b, endPos, false)
+	if b.Statements.Len() == 0 && !p.hasCommentBefore(endPos) {
+		return text("{}")
+	}
+	return concat(text("{"), p.blockRestLead(b, endPos, false, allowLeadingBlank))
 }
 
 // blockTB is block with allowTrailingBlank: gjf preserves a source blank line
@@ -4032,7 +4047,8 @@ func (p *printer) node(node *compiler.Node) Doc {
 		return p.initializerBlock(node.AsInitializerBlock())
 
 	case compiler.Block:
-		return p.block(node.AsBlock(), node.End)
+		// A bare block: gjf visits it with AllowLeadingBlankLine.NO.
+		return p.blockOpenLead(node.AsBlock(), p.start(node), node.End, true, false)
 	case compiler.EmptyStatement:
 		return text(";")
 	case compiler.LocalVariableDeclarationStatement:
@@ -4073,7 +4089,8 @@ func (p *printer) node(node *compiler.Node) Doc {
 		return concat(text("yield "), p.node(node.AsYieldStatement().Expression), text(";"))
 	case compiler.SynchronizedStatement:
 		s := node.AsSynchronizedStatement()
-		return concat(text("synchronized ("), p.node(s.Expression), text(") "), p.blockOpen(s.Body.AsBlock(), p.start(s.Body), s.Body.End, false))
+		// gjf visits a synchronized body with AllowLeadingBlankLine.NO.
+		return concat(text("synchronized ("), p.node(s.Expression), text(") "), p.blockOpenLead(s.Body.AsBlock(), p.start(s.Body), s.Body.End, false, false))
 	case compiler.AssertStatement:
 		s := node.AsAssertStatement()
 		if s.Message != nil {

@@ -1,0 +1,30 @@
+package p;
+
+enum E {
+  RED("r", 1),
+  GREEN("g", 3);
+  final String value;
+}
+
+enum F {
+  A;
+
+  int code() {
+    return 1;
+  }
+}
+
+class T {
+  void m() {
+    synchronized (this) {
+      go();
+    }
+    {
+      go();
+    }
+    if (b) {
+
+      go();
+    }
+  }
+}
