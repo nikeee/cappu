@@ -373,8 +373,12 @@ class Printer {
         (isBlankForcing(item.kind) ||
           fieldSpansMultipleLines(item) ||
           leadComments.some(c => isJavadocComment(c)));
+      // A stray `;` between members never gets a blank line before it (gjf emits
+      // it right under the declaration it follows).
       const entryBlank =
-        i > 0 && (this.blankBeforePos(prevEnd, firstPos) || wantsBlank || prevWantsBlank);
+        i > 0 &&
+        item.kind !== SyntaxKind.EmptyStatement &&
+        (this.blankBeforePos(prevEnd, firstPos) || wantsBlank || prevWantsBlank);
       prevWantsBlank = wantsBlank;
       let pushedInEntry = false;
       const pushEntry = (doc: Doc, srcBlank: boolean) => {

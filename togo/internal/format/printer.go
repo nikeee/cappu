@@ -290,7 +290,10 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 		}
 		wantsBlank := forced &&
 			(isBlankForcing(item.Kind) || fieldSpansMultipleLines(item) || anyJavadoc(leadComments))
-		entryBlank := i > 0 && (p.blankBeforePos(prevEnd, firstPos) || wantsBlank || prevWantsBlank)
+		// A stray `;` between members never gets a blank line before it (gjf emits it
+		// right under the declaration it follows).
+		entryBlank := i > 0 && item.Kind != compiler.EmptyStatement &&
+			(p.blankBeforePos(prevEnd, firstPos) || wantsBlank || prevWantsBlank)
 		prevWantsBlank = wantsBlank
 		pushedInEntry := false
 		pushEntry := func(doc Doc, srcBlank bool) {
