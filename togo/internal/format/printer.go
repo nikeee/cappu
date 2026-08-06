@@ -506,6 +506,14 @@ func (p *printer) sourceFile(sf *compiler.SourceFileData) Doc {
 			pkg = append(pkg, hardline)
 		}
 		pkg = append(pkg, text("package "), text(p.entityName(pd.Name)), text(";"))
+		// A comment on the package declaration's own line stays there.
+		if tc, ok := p.trailingCommentAfter(sf.PackageDeclaration); ok {
+			if tc.line {
+				pkg = append(pkg, text(" "), reflowNoWrap(tc.text))
+			} else {
+				pkg = append(pkg, text(" "), reflow(tc.text))
+			}
+		}
 		blocks = append(blocks, concat(pkg...))
 	}
 	var statics, nonStatics []*compiler.Node

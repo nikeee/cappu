@@ -524,6 +524,9 @@ class Printer {
         pkg.push(hardline);
       }
       pkg.push("package ", this.entityName(sf.packageDeclaration.name), ";");
+      // A comment on the package declaration's own line stays there.
+      const tc = this.trailingCommentAfter(sf.packageDeclaration);
+      if (tc) pkg.push(" ", reflow(tc.text, tc.line));
       blocks.push(concat(pkg));
     }
     const statics = sf.imports.filter(i => i.isStatic);
