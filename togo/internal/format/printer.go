@@ -2818,8 +2818,29 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	var links []*linkT
 	cur := root
 	trailingRouted := false
+	// Array indices belong to the link they follow (gjf's visitDot walks through
+	// ARRAY_ACCESS to the array base), so `a.b()[0].c()` stays ONE chain.
+	var indices Doc
+	takeIndices := func() Doc {
+		out := indices
+		indices = nil
+		if out == nil {
+			return text("")
+		}
+		return out
+	}
 	for {
 		switch {
+		case cur.Kind == compiler.ElementAccessExpression:
+			ea := cur.AsElementAccessExpression()
+			idx := concat(text("["), p.node(ea.ArgumentExpression), text("]"))
+			if indices == nil {
+				indices = idx
+			} else {
+				indices = concat(idx, indices)
+			}
+			cur = ea.Expression
+			continue
 		case cur.Kind == compiler.CallExpression &&
 			cur.AsCallExpression().Expression.Kind == compiler.PropertyAccessExpression:
 			ce := cur.AsCallExpression()
@@ -2835,6 +2856,7 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 				}
 			}
 			name := p.raw(pa.Name)
+			linkIndices := takeIndices()
 			// cur is reassigned as the loop walks left, so capture this call's node
 			// for the trailing-comment lookup below.
 			callNode := cur
@@ -2857,7 +2879,7 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 				if !rightmost {
 					tail = box
 				}
-				lk.args = p.argListTrailing(ce.Arguments, tail)
+				lk.args = concat(p.argListTrailing(ce.Arguments, tail), linkIndices)
 				if !rightmost {
 					if tc, ok := p.trailingLineComment(callNode.End); ok {
 						box.parts = append(box.parts, text(" "), reflowNoWrap(tc.text))
@@ -2871,13 +2893,14 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 			continue
 		case cur.Kind == compiler.PropertyAccessExpression:
 			pa := cur.AsPropertyAccessExpression()
+			linkIndices := takeIndices()
 			name := p.raw(pa.Name)
 			lk := &linkT{isCall: false, name: name}
 			lk.render = func() Doc {
 				if tc, ok := p.trailingLineComment(pa.Expression.End); ok {
 					lk.trail = &tc.text
 				}
-				return concat(p.dotLinkLead(p.start(pa.Name)), text("."), text(name))
+				return concat(p.dotLinkLead(p.start(pa.Name)), text("."), text(name), linkIndices)
 			}
 			links = append([]*linkT{lk}, links...)
 			cur = pa.Expression
@@ -2896,6 +2919,9 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	// A `//` comment trailing the chain's RECEIVER routes into the receiver the
 	// same way (`assertThat(x) //` breaks the call's arguments, not the chain).
 	baseBox := &concatDoc{w: -1}
+	// Indices left over when the walk reached the receiver belong to IT
+	// (`foo[0].bar()`), and must not be dropped.
+	baseIndices := takeIndices()
 	var base Doc
 	baseTrailRouted := false
 	if len(links) == 0 {
@@ -2907,6 +2933,7 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 			baseTrailRouted = true
 		}
 	}
+	base = concat(base, baseIndices)
 	linkDocs := make([]Doc, len(links))
 	for i, l := range links {
 		linkDocs[i] = l.render()

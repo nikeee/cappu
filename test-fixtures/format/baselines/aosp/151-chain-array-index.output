@@ -1,0 +1,14 @@
+package p;
+
+class T {
+    void m(ScanResult scanResult) {
+        final ClassInfo x =
+                scanResult
+                        .getClassInfo(Issue246Test.class.getName()) //
+                        .getMethodInfo() //
+                        .getSingleMethod("dummyMethodWithParameter") //
+                        .getParameterInfo()[0] //
+                        .getTypeDescriptor();
+        int y = foo[0].bar();
+    }
+}

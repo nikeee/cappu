@@ -2367,7 +2367,22 @@ class Printer {
     const links: Link[] = [];
     let cur: Node = root;
     let trailingRouted = false;
+    // Array indices belong to the link they follow (gjf's visitDot walks through
+    // ARRAY_ACCESS to the array base), so `a.b()[0].c()` stays ONE chain.
+    let indices: Doc = "";
+    const takeIndices = (): Doc => {
+      const out = indices;
+      indices = "";
+      return out;
+    };
     for (;;) {
+      if (cur.kind === SyntaxKind.ElementAccessExpression) {
+        const ea = cur as ElementAccessExpression;
+        const idx = concat(["[", this.node(ea.argumentExpression), "]"]);
+        indices = indices === "" ? idx : concat([idx, indices]);
+        cur = ea.expression;
+        continue;
+      }
       if (
         cur.kind === SyntaxKind.CallExpression &&
         (cur as CallExpression).expression.kind === SyntaxKind.PropertyAccessExpression
@@ -2378,6 +2393,7 @@ class Printer {
         // trailing token inside its argument list, so the call's args wrap when
         // the whole `...(...);` run overflows (rest-of-line rule).
         const rightmost = links.length === 0;
+        const linkIndices = takeIndices();
         const name = this.raw(pa.name);
         const link: Link = {
           isCall: true,
@@ -2396,7 +2412,10 @@ class Printer {
             // arguments have rendered, so it is filled into a box that already
             // sits inside the argument list.
             const box: Doc[] = [];
-            link.args = this.argList(callExpr.arguments, rightmost ? trailing : concat(box));
+            link.args = concat([
+              this.argList(callExpr.arguments, rightmost ? trailing : concat(box)),
+              linkIndices,
+            ]);
             // Only a comment with another link after it can route: the following
             // dereference gives it a line to force. On the LAST link whatever
             // follows (a binary operator, say) is outside this chain's control,
@@ -2416,13 +2435,14 @@ class Printer {
         cur = pa.expression;
       } else if (cur.kind === SyntaxKind.PropertyAccessExpression) {
         const pa = cur as PropertyAccessExpression;
+        const linkIndices = takeIndices();
         const name = this.raw(pa.name);
         const link: Link = {
           isCall: false,
           name,
           render: () => {
             link.trail = this.trailingLineComment(pa.expression.end)?.text;
-            return concat([this.dotLinkLead(this.start(pa.name)), ".", name]);
+            return concat([this.dotLinkLead(this.start(pa.name)), ".", name, linkIndices]);
           },
         };
         links.unshift(link);
@@ -2440,8 +2460,13 @@ class Printer {
     // A `//` comment trailing the chain's RECEIVER routes into the receiver the
     // same way (`assertThat(x) //` breaks the call's arguments, not the chain).
     const baseBox: Doc[] = [];
-    const base =
-      links.length > 0 ? this.statementTail(cur, concat(baseBox)) : this.node(cur);
+    // Indices left over when the walk reached the receiver belong to IT
+    // (`foo[0].bar()`), and must not be dropped.
+    const baseIndices = takeIndices();
+    const base = concat([
+      links.length > 0 ? this.statementTail(cur, concat(baseBox)) : this.node(cur),
+      baseIndices,
+    ]);
     let baseTrailRouted = false;
     if (links.length > 0) {
       const tc = this.trailingLineComment(cur.end);
