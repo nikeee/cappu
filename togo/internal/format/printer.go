@@ -2708,6 +2708,10 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 		trail  *string
 		render func() Doc
 		args   Doc
+		// A `//` comment trailing this link's own `)`: it is routed INSIDE the
+		// argument list (gjf hangs it off that token, so its width drives the
+		// list's fit check) and forces the break before the next link.
+		trailRouted bool
 	}
 	var links []*linkT
 	cur := root
@@ -2721,13 +2725,17 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 			// The rightmost link (last in source order) carries the statement's
 			// trailing token inside its argument list (rest-of-line rule).
 			var argTrailing Doc
-			if len(links) == 0 {
+			rightmost := len(links) == 0
+			if rightmost {
 				argTrailing = trailing
 				if trailing != nil {
 					trailingRouted = true
 				}
 			}
 			name := p.raw(pa.Name)
+			// cur is reassigned as the loop walks left, so capture this call's node
+			// for the trailing-comment lookup below.
+			callNode := cur
 			lk := &linkT{isCall: true, name: name}
 			// Explicit method type arguments go between the dot and the name:
 			// `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
@@ -2736,7 +2744,24 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 					lk.trail = &tc.text
 				}
 				head := concat(p.dotLinkLead(p.start(pa.Name)), text("."), p.typeArguments(ce.TypeArguments), text(name))
-				lk.args = p.argListTrailing(ce.Arguments, argTrailing)
+				// The comment that trails this call is only reachable after the
+				// arguments have rendered, so it goes into a box that already sits
+				// inside the argument list. Only a comment with another link after it
+				// can route: the following dereference gives it a line to force. On the
+				// LAST link whatever follows (a binary operator, say) is outside this
+				// chain's control, and putting the comment first would comment it out.
+				box := &concatDoc{w: -1}
+				tail := argTrailing
+				if !rightmost {
+					tail = box
+				}
+				lk.args = p.argListTrailing(ce.Arguments, tail)
+				if !rightmost {
+					if tc, ok := p.trailingLineComment(callNode.End); ok {
+						box.parts = append(box.parts, text(" "), reflowNoWrap(tc.text))
+						lk.trailRouted = true
+					}
+				}
 				return head
 			}
 			links = append([]*linkT{lk}, links...)
@@ -2766,7 +2791,20 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	for _, c := range p.commentsBefore(p.start(cur)) {
 		chainLead = append(chainLead, reflow(c.text), hardline)
 	}
-	base := p.node(cur)
+	// A `//` comment trailing the chain's RECEIVER routes into the receiver the
+	// same way (`assertThat(x) //` breaks the call's arguments, not the chain).
+	baseBox := &concatDoc{w: -1}
+	var base Doc
+	baseTrailRouted := false
+	if len(links) == 0 {
+		base = p.node(cur)
+	} else {
+		base = p.statementTail(cur, baseBox)
+		if tc, ok := p.trailingLineComment(cur.End); ok {
+			baseBox.parts = append(baseBox.parts, text(" "), reflowNoWrap(tc.text))
+			baseTrailRouted = true
+		}
+	}
 	linkDocs := make([]Doc, len(links))
 	for i, l := range links {
 		linkDocs[i] = l.render()
@@ -2821,6 +2859,9 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	// prefix - the trailing dereferences still break one per line.
 	if singleInvocation && firstCall == len(links)-1 {
 		parts := []Doc{base}
+		if baseTrailRouted {
+			parts = append(parts, hardline)
+		}
 		for i, l := range links {
 			if l.trail != nil {
 				parts = append(parts, text(" "), reflowNoWrap(*l.trail), hardline)
@@ -2876,6 +2917,8 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 		switch {
 		case links[i].trail != nil:
 			out = append(out, text(" "), reflowNoWrap(*links[i].trail), hardline)
+		case i > 0 && links[i-1].trailRouted, i == 0 && baseTrailRouted:
+			out = append(out, hardline)
 		case i >= glue:
 			out = append(out, brk(fillUnified, "", ZERO, nil))
 		}

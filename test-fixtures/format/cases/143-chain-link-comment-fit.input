@@ -1,0 +1,8 @@
+package p;
+
+class T {
+  void m(ClassInfo classInfo) {
+    assertThat(classInfo.getMethodInfo("testMethod").get(0).getAnnotationInfo().getAsStrings()) //
+        .containsExactly("@Ann");
+  }
+}

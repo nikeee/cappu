@@ -2277,7 +2277,17 @@ class Printer {
     // gjf splits a link at its argument list: the chain prefix's level closes
     // after the NAME (dotExpressionUpToArgs), so a prefix call's arguments never
     // count towards the prefix's own fit check.
-    type Link = { isCall: boolean; name: string; trail?: string; render: () => Doc; args?: Doc };
+    type Link = {
+      isCall: boolean;
+      name: string;
+      trail?: string;
+      render: () => Doc;
+      args?: Doc;
+      // A `//` comment trailing this link's own `)`: it is routed INSIDE the
+      // argument list (gjf hangs it off that token, so its width drives the
+      // list's fit check) and forces the break before the next link.
+      trailRouted?: boolean;
+    };
     const links: Link[] = [];
     let cur: Node = root;
     let trailingRouted = false;
@@ -2306,7 +2316,22 @@ class Printer {
               this.typeArguments(callExpr.typeArguments),
               name,
             ]);
-            link.args = this.argList(callExpr.arguments, rightmost ? trailing : "");
+            // The comment that trails this call is only reachable after the
+            // arguments have rendered, so it is filled into a box that already
+            // sits inside the argument list.
+            const box: Doc[] = [];
+            link.args = this.argList(callExpr.arguments, rightmost ? trailing : concat(box));
+            // Only a comment with another link after it can route: the following
+            // dereference gives it a line to force. On the LAST link whatever
+            // follows (a binary operator, say) is outside this chain's control,
+            // and putting the comment first would comment that out.
+            if (!rightmost) {
+              const tc = this.trailingLineComment(callExpr.end);
+              if (tc) {
+                box.push(" ", reflow(tc.text, true));
+                link.trailRouted = true;
+              }
+            }
             return head;
           },
         };
@@ -2336,7 +2361,19 @@ class Printer {
     // first dereference - consume it here so dotLinkLead cannot claim it.
     const chainLead: Doc[] = [];
     for (const c of this.commentsBefore(this.start(cur))) chainLead.push(reflow(c.text), hardline);
-    const base = this.node(cur);
+    // A `//` comment trailing the chain's RECEIVER routes into the receiver the
+    // same way (`assertThat(x) //` breaks the call's arguments, not the chain).
+    const baseBox: Doc[] = [];
+    const base =
+      links.length > 0 ? this.statementTail(cur, concat(baseBox)) : this.node(cur);
+    let baseTrailRouted = false;
+    if (links.length > 0) {
+      const tc = this.trailingLineComment(cur.end);
+      if (tc) {
+        baseBox.push(" ", reflow(tc.text, true));
+        baseTrailRouted = true;
+      }
+    }
     const linkDocs = links.map(l => l.render());
     // A trailing token not routed into a rightmost call's args (e.g. the chain
     // ends in a field access) is appended after the whole chain.
@@ -2380,6 +2417,8 @@ class Printer {
     // accesses FOLLOW that call, the call and its receiver are only the chain's
     // prefix - the trailing dereferences still break one per line.
     if (singleInvocation && firstCall === links.length - 1) {
+      const gluedParts: Doc[] = [base];
+      if (baseTrailRouted) gluedParts.push(hardline);
       const glued = links.map((l, i) => {
         const head =
           l.trail === undefined
@@ -2387,7 +2426,7 @@ class Printer {
             : concat([" ", reflow(l.trail, true), hardline, linkDocs[i]]);
         return l.args === undefined ? head : concat([head, l.args]);
       });
-      return finish(concat([base, ...glued]));
+      return finish(concat([...gluedParts, ...glued]));
     }
     // The leading links glued to the base (no break before them): a type-name
     // prefix (`ImmutableList.builder()` stays a unit), else just the first link
@@ -2422,6 +2461,7 @@ class Printer {
       // A comment trailing the previous link rides that line and forces the
       // break (gjf always breaks after a line comment).
       if (links[i].trail !== undefined) out.push(" ", reflow(links[i].trail as string, true), hardline);
+      else if (i > 0 ? links[i - 1].trailRouted : baseTrailRouted) out.push(hardline);
       else if (i >= glue) out.push(brk("unified", "", ZERO));
       out.push(linkDocs[i]);
       return out;
