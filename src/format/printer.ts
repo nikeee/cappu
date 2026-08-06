@@ -2428,6 +2428,30 @@ class Printer {
         return concat([op, this.statementTail(u.operand, trailing)]);
       }
     }
+    if (e.kind === SyntaxKind.CastExpression) {
+      // `(long) foo(...);` - the cast's operand owns the rest of the line, so the
+      // tail rides into it (gjf visitTypeCast keeps both in one +4 level).
+      const c = e as CastExpression;
+      const types = [this.type(c.type), ...(c.bounds ?? []).map(b => this.type(b))];
+      return level(PLUS4, [
+        "(",
+        join(" & ", types),
+        ")",
+        brk("unified", " ", ZERO),
+        this.statementTail(c.expression, trailing),
+      ]);
+    }
+    if (e.kind === SyntaxKind.ElementAccessExpression) {
+      // `a[i] = ...` / `foo()[i];` - the index's `]` and the tail ride inside.
+      const ea = e as ElementAccessExpression;
+      return concat([
+        this.node(ea.expression),
+        "[",
+        this.node(ea.argumentExpression),
+        "]",
+        trailing,
+      ]);
+    }
     if (e.kind === SyntaxKind.ParenthesizedExpression) {
       // The closing `)` is part of the rest of the line, so it rides in too.
       const pe = e as ParenthesizedExpression;

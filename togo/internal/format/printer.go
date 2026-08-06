@@ -2877,6 +2877,23 @@ func (p *printer) statementTail(e *compiler.Node, trailing Doc) Doc {
 		if op := compiler.TokenToString(u.Operator); op == "!" || op == "~" {
 			return concat(text(op), p.statementTail(u.Operand, trailing))
 		}
+	case compiler.CastExpression:
+		// `(long) foo(...);` - the cast's operand owns the rest of the line, so the
+		// tail rides into it (gjf visitTypeCast keeps both in one +4 level).
+		c := e.AsCastExpression()
+		types := []Doc{p.typ(c.Type)}
+		for _, b := range nodes(c.Bounds) {
+			types = append(types, p.typ(b))
+		}
+		return level(plus4, []Doc{text("("), join(text(" & "), types), text(")"), brk(fillUnified, " ", ZERO, nil), p.statementTail(c.Expression, trailing)})
+	case compiler.ElementAccessExpression:
+		// `a[i] = ...` / `foo()[i];` - the index's `]` and the tail ride inside.
+		ea := e.AsElementAccessExpression()
+		out := concat(p.node(ea.Expression), text("["), p.node(ea.ArgumentExpression), text("]"))
+		if trailing != nil {
+			out = concat(out, trailing)
+		}
+		return out
 	case compiler.ParenthesizedExpression:
 		// The closing `)` is part of the rest of the line, so it rides in too.
 		pe := e.AsParenthesizedExpression()

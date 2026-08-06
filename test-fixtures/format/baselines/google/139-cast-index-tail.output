@@ -1,0 +1,8 @@
+package p;
+
+class T {
+  void m(int digit, int totalDigits, int[] a, int i) {
+    sum += (long) Math.pow(digit, totalDigits); // raised to the power
+    a[i] = compute(digit, totalDigits, sum, digit, totalDigits, sum, digit); // sets the slot
+  }
+}
