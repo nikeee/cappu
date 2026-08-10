@@ -76,11 +76,11 @@ func formatSourceFile(sf *compiler.Node, options FormatOptions) (string, error) 
 		indentMult: mult,
 		// A reflow leaf carries a raw comment or a multi-line text block; rewrite it
 		// at its column.
-		commentRewriter: func(raw string, col int, noWrap bool) string {
+		commentRewriter: func(raw string, col int) string {
 			if strings.HasPrefix(raw, `"""`) {
 				return reindentTextBlock(raw)
 			}
-			return rewriteComment(raw, col, strings.HasPrefix(raw, "//"), noWrap)
+			return rewriteComment(raw, col, strings.HasPrefix(raw, "//"))
 		},
 	})
 	// Safety net: the printer attaches comments at member/statement granularity.
@@ -240,7 +240,7 @@ func (p *printer) inlineBlockComments(pos int) []Doc {
 			break
 		}
 		p.ci++
-		out = append(out, reflowNoWrap(c.text), text(" "))
+		out = append(out, reflow(c.text), text(" "))
 	}
 	return out
 }
@@ -322,7 +322,7 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 		for _, c := range leadComments {
 			if !c.ownLine && !pushedInEntry && i > 0 {
 				// A comment after code on the same line: attach to the previous entry.
-				out[len(out)-1] = concat(out[len(out)-1], text(" "), reflowNoWrap(c.text))
+				out[len(out)-1] = concat(out[len(out)-1], text(" "), reflow(c.text))
 			} else {
 				pushEntry(reflow(c.text), p.blankBeforePos(prevEnd, c.pos))
 				lastOwnLead = &c
@@ -339,7 +339,7 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 		// multi-line block comment cannot: its width would force every break.
 		var tail Doc
 		if peeked, ok := p.peekTrailingComment(item); ok && !strings.Contains(peeked.text, "\n") {
-			tail = concat(text(" "), reflowNoWrap(peeked.text))
+			tail = concat(text(" "), reflow(peeked.text))
 		}
 		var itemDoc Doc
 		if tail != nil {
@@ -348,11 +348,11 @@ func (p *printer) listDocs(list []*compiler.Node, forced bool, endPos int) []Doc
 			itemDoc = p.node(item)
 		}
 		if inlineLead != nil {
-			itemDoc = concat(reflowNoWrap(inlineLead.text), text(" "), itemDoc)
+			itemDoc = concat(reflow(inlineLead.text), text(" "), itemDoc)
 		}
 		if trailing, ok := p.trailingCommentAfter(item); ok {
 			if tail == nil {
-				itemDoc = concat(itemDoc, text(" "), reflowNoWrap(trailing.text))
+				itemDoc = concat(itemDoc, text(" "), reflow(trailing.text))
 			}
 			prevEnd = trailing.end
 		} else {
@@ -511,11 +511,7 @@ func (p *printer) sourceFile(sf *compiler.SourceFileData) Doc {
 		pkg = append(pkg, text("package "), text(p.entityName(pd.Name)), text(";"))
 		// A comment on the package declaration's own line stays there.
 		if tc, ok := p.trailingCommentAfter(sf.PackageDeclaration); ok {
-			if tc.line {
-				pkg = append(pkg, text(" "), reflowNoWrap(tc.text))
-			} else {
-				pkg = append(pkg, text(" "), reflow(tc.text))
-			}
+			pkg = append(pkg, text(" "), reflow(tc.text))
 		}
 		blocks = append(blocks, concat(pkg...))
 	}
@@ -628,7 +624,7 @@ func (p *printer) moduleDeclaration(node *compiler.Node) Doc {
 	for _, a := range nodes(m.Annotations) {
 		head = append(head, p.annotation(a.AsAnnotation()))
 		if tc, ok := p.trailingCommentAfter(a); ok {
-			head = append(head, text(" "), reflowNoWrap(tc.text))
+			head = append(head, text(" "), reflow(tc.text))
 		}
 		head = append(head, hardline)
 	}
@@ -671,7 +667,7 @@ func (p *printer) moduleDeclaration(node *compiler.Node) Doc {
 		}
 		doc := p.directive(d)
 		if tc, ok := p.trailingCommentAfter(d); ok {
-			doc = concat(doc, text(" "), reflowNoWrap(tc.text))
+			doc = concat(doc, text(" "), reflow(tc.text))
 		}
 		body = append(body, doc)
 	}
@@ -757,13 +753,13 @@ func (p *printer) importGroup(imports []*compiler.Node) Doc {
 			// Identical import: drop the duplicate line but keep its comment, which
 			// has already been consumed and would otherwise be lost.
 			if hasComment {
-				lines[at] = concat(lines[at], text(" "), reflowNoWrap(comment))
+				lines[at] = concat(append([]Doc{lines[at]}, p.importComment(comment, len(t))...)...)
 			}
 			continue
 		}
 		seen[t] = len(lines)
 		if hasComment {
-			lines = append(lines, concat(text(t), text(" "), reflowNoWrap(comment)))
+			lines = append(lines, concat(append([]Doc{text(t)}, p.importComment(comment, len(t))...)...))
 		} else {
 			lines = append(lines, text(t))
 		}
@@ -780,6 +776,31 @@ func (p *printer) importTrailingComments(imports *compiler.NodeArray) {
 			p.importTrailing[imp] = c.text
 		}
 	}
+}
+
+// importComment renders an import's trailing comment. gjf's ImportOrderer
+// rebuilds the import block as TEXT and wraps that comment against the
+// 100-column limit itself, so the continuation lands as an own-line comment at
+// COLUMN 0 with a blank line before it - not aligned under the comment the way
+// the Doc writer would do it.
+func (p *printer) importComment(comment string, lineWidth int) []Doc {
+	first := " " + comment
+	if lineWidth+len(first) <= 100 {
+		return []Doc{text(first)}
+	}
+	// Wrap where gjf does: the last space that still fits, the rest continuing
+	// with its own `//`.
+	idx := 100 - lineWidth - 1
+	if idx >= len(comment) {
+		return []Doc{text(first)}
+	}
+	for idx >= 2 && !isSpaceByte(comment[idx]) {
+		idx--
+	}
+	if idx <= 2 {
+		return []Doc{text(first)}
+	}
+	return []Doc{text(" " + comment[:idx]), hardline, hardline, text("//" + comment[idx:])}
 }
 
 func (p *printer) importLine(imp *compiler.ImportDeclarationData) string {
@@ -868,7 +889,7 @@ func (p *printer) modifiers(mods *compiler.NodeArray, annoMode string) Doc {
 		// (`@SuppressWarnings("x") // why`) instead of floating away.
 		if ownLine {
 			if tc, ok := p.trailingCommentAfter(a); ok {
-				parts = append(parts, text(" "), reflowNoWrap(tc.text))
+				parts = append(parts, text(" "), reflow(tc.text))
 			}
 			parts = append(parts, hardline)
 			// An own-line comment between this annotation and whatever follows it
@@ -1285,7 +1306,7 @@ func (p *printer) enumDeclaration(d *compiler.EnumDeclarationData, end int) Doc 
 			if isLast {
 				lastTrailing = trailing.text
 			} else {
-				cdoc = concat(cdoc, text(" "), reflowNoWrap(trailing.text))
+				cdoc = concat(cdoc, text(" "), reflow(trailing.text))
 			}
 			prevConstEnd = trailing.end
 		} else {
@@ -1442,7 +1463,7 @@ func (p *printer) singleDeclarationType(typ Doc, v *compiler.VariableDeclaratorD
 	typeDoc := typ
 	nameBreak := brk(fillUnified, " ", ZERO, nil)
 	if hasTypeTrail {
-		typeDoc = concat(typ, text(" "), reflowNoWrap(typeTrail.text))
+		typeDoc = concat(typ, text(" "), reflow(typeTrail.text))
 		nameBreak = hardline
 	}
 	name := concat(append(p.inlineBlockComments(p.start(v.Name)), text(p.raw(v.Name)), text(strings.Repeat("[]", v.ArrayRankAfterName)))...)
@@ -1471,7 +1492,7 @@ func (p *printer) singleDeclarationType(typ Doc, v *compiler.VariableDeclaratorD
 	sig := []Doc{typeDoc, typeNameBreak, name, text(" =")}
 	firstBreak := line
 	if eq, ok := p.lineCommentAfterAssign(v.Name.End, p.start(v.Initializer)); ok {
-		sig = append(sig, text(" "), reflowNoWrap(eq.text))
+		sig = append(sig, text(" "), reflow(eq.text))
 		firstBreak = hardline
 	}
 	return level(ZERO, []Doc{
@@ -1503,7 +1524,7 @@ func (p *printer) declarator(v *compiler.VariableDeclaratorData, trailing Doc) D
 	head := []Doc{name, text(" =")}
 	firstBreak := line
 	if eq, ok := p.lineCommentAfterAssign(v.Name.End, p.start(v.Initializer)); ok {
-		head = append(head, text(" "), reflowNoWrap(eq.text))
+		head = append(head, text(" "), reflow(eq.text))
 		firstBreak = hardline
 	}
 	head = append(head, level(plus4, []Doc{firstBreak, p.statementTail(v.Initializer, trailing)}))
@@ -1613,7 +1634,7 @@ func (p *printer) attachTrailingBlockComment(parts []Doc, endPos int) ([]Doc, bo
 		// closing delimiter, so a comment past `)`/`,`/`:` is not mis-attached.
 		if !t.line && !t.ownLine && t.pos >= endPos && !strings.ContainsAny(p.text[endPos:t.pos], "\n,):") {
 			p.ci++
-			parts = append(parts, text(" "), reflowNoWrap(t.text))
+			parts = append(parts, text(" "), reflow(t.text))
 			return parts, true
 		}
 	}
@@ -2038,7 +2059,7 @@ func (p *printer) braceTrailingComment(afterBrace int) Doc {
 		return text("")
 	}
 	p.ci++
-	return concat(text(" "), reflowNoWrap(c.text))
+	return concat(text(" "), reflow(c.text))
 }
 
 func (p *printer) localVar(d *compiler.LocalVariableDeclarationStatementData) Doc {
@@ -2166,7 +2187,7 @@ func (p *printer) clauseKeywordLead(bound int, afterBlock bool) (Doc, bool) {
 	for i, c := range cs {
 		sameLine := i == 0 && !c.ownLine && afterBlock
 		if sameLine {
-			parts = append(parts, text(" "), reflowNoWrap(c.text))
+			parts = append(parts, text(" "), reflow(c.text))
 			continue
 		}
 		parts = append(parts, hardline, reflow(c.text))
@@ -2234,7 +2255,7 @@ func (p *printer) braceTrailAhead(blockStart int) Doc {
 			return text("")
 		}
 		p.emittedAhead[i] = true
-		return concat(text(" "), reflowNoWrap(c.text))
+		return concat(text(" "), reflow(c.text))
 	}
 	return text("")
 }
@@ -2503,14 +2524,14 @@ func (p *printer) resourceTrailing(r *compiler.ResourceData, trailing Doc) Doc {
 		return concat(
 			concat(head...),
 			text(" "),
-			reflowNoWrap(eq.text),
+			reflow(eq.text),
 			level(plus4, []Doc{hardline, text("= "), p.statementTail(r.Initializer, trailing)}),
 		)
 	}
 	firstBreak := line
 	eqDoc := text("")
 	if eq != nil {
-		eqDoc = concat(text(" "), reflowNoWrap(eq.text))
+		eqDoc = concat(text(" "), reflow(eq.text))
 		firstBreak = hardline
 	}
 	inner := []Doc{firstBreak, p.statementTail(r.Initializer, trailing)}
@@ -2537,7 +2558,7 @@ func (p *printer) switchLike(expr *compiler.Node, clauses *compiler.NodeArray, e
 		// A line comment on the previous clause's line (`case 'a': // fall through`)
 		// trails THAT clause, not the next - append it to the previous entry.
 		if len(comments) > 0 && !comments[0].ownLine && len(entries) > 0 {
-			entries[len(entries)-1].doc = concat(entries[len(entries)-1].doc, text(" "), reflowNoWrap(comments[0].text))
+			entries[len(entries)-1].doc = concat(entries[len(entries)-1].doc, text(" "), reflow(comments[0].text))
 			comments = comments[1:]
 		}
 		start := p.start(c)
@@ -2664,7 +2685,7 @@ func (p *printer) switchClause(c *compiler.SwitchClauseData, end int) Doc {
 		t := p.comments[p.ci]
 		if !t.ownLine && t.pos < bound {
 			p.ci++
-			head = concat(head, text(" "), reflowNoWrap(t.text))
+			head = concat(head, text(" "), reflow(t.text))
 		}
 	}
 	// A fall-through case with no body is just its label; the switch body's clause
@@ -2707,7 +2728,7 @@ func (p *printer) binaryTrailing(node *compiler.Node, trailing Doc) Doc {
 			from = beforeOp
 		}
 		if tc, ok := p.trailingLineComment(from); ok && tc.pos < beforeOp {
-			parts = append(parts, text(" "), reflowNoWrap(tc.text), hardline)
+			parts = append(parts, text(" "), reflow(tc.text), hardline)
 		} else {
 			parts = append(parts, brk(fill, " ", ZERO, nil))
 		}
@@ -2729,7 +2750,7 @@ func (p *printer) binaryTrailing(node *compiler.Node, trailing Doc) Doc {
 				} else {
 					parts = append(parts, hardline)
 				}
-				parts = append(parts, reflowNoWrap(c.text))
+				parts = append(parts, reflow(c.text))
 			}
 			parts = append(parts, hardline)
 		}
@@ -2817,7 +2838,11 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 		// argument list (gjf hangs it off that token, so its width drives the
 		// list's fit check) and forces the break before the next link.
 		trailRouted bool
+		// An empty argument list adds no break of its own, so gjf's appendLevel is
+		// still the chain's - whatever follows the `()` counts there.
+		emptyArgs bool
 	}
+	nameTag := &BreakTag{}
 	var links []*linkT
 	cur := root
 	trailingRouted := false
@@ -2863,7 +2888,7 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 			// cur is reassigned as the loop walks left, so capture this call's node
 			// for the trailing-comment lookup below.
 			callNode := cur
-			lk := &linkT{isCall: true, name: name}
+			lk := &linkT{isCall: true, name: name, emptyArgs: ce.Arguments.Len() == 0}
 			// Explicit method type arguments go between the dot and the name:
 			// `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
 			lk.render = func() Doc {
@@ -2885,7 +2910,7 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 				lk.args = concat(p.argListTrailing(ce.Arguments, tail), linkIndices)
 				if !rightmost {
 					if tc, ok := p.trailingLineComment(callNode.End); ok {
-						box.parts = append(box.parts, text(" "), reflowNoWrap(tc.text))
+						box.parts = append(box.parts, text(" "), reflow(tc.text))
 						lk.trailRouted = true
 					}
 				}
@@ -2932,11 +2957,28 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	} else {
 		base = p.statementTail(cur, baseBox)
 		if tc, ok := p.trailingLineComment(cur.End); ok {
-			baseBox.parts = append(baseBox.parts, text(" "), reflowNoWrap(tc.text))
+			baseBox.parts = append(baseBox.parts, text(" "), reflow(tc.text))
 			baseTrailRouted = true
 		}
 	}
 	base = concat(base, baseIndices)
+	// The chain's shape decides how the links are assembled below; it is known from
+	// the link metadata alone, before anything renders.
+	callCountPre, firstCallPre := 0, -1
+	for i, l := range links {
+		if l.isCall {
+			callCountPre++
+			if firstCallPre < 0 {
+				firstCallPre = i
+			}
+		}
+	}
+	baseIsAnonClassPre := cur.Kind == compiler.ObjectCreationExpression &&
+		cur.AsObjectCreationExpression().ClassBody != nil
+	baseIsPrimaryPre := cur.Kind != compiler.Identifier && cur.Kind != compiler.ThisExpression &&
+		cur.Kind != compiler.SuperExpression && cur.Kind != compiler.ClassLiteralExpression &&
+		!baseIsAnonClassPre
+	_, _ = callCountPre, baseIsPrimaryPre
 	linkDocs := make([]Doc, len(links))
 	for i, l := range links {
 		linkDocs[i] = l.render()
@@ -2989,14 +3031,13 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 	// a unit (`myField.foo()` never breaks before the call). But when field
 	// accesses FOLLOW that call, the call and its receiver are only the chain's
 	// prefix - the trailing dereferences still break one per line.
-	if singleInvocation && firstCall == len(links)-1 {
+	// An anonymous-class receiver is gjf's ZERO-indent case (visitDot): no break
+	// before the dereference and no +4, so the class body keeps its own indent.
+	if baseIsAnonClassPre {
 		parts := []Doc{base}
-		if baseTrailRouted {
-			parts = append(parts, hardline)
-		}
 		for i, l := range links {
 			if l.trail != nil {
-				parts = append(parts, text(" "), reflowNoWrap(*l.trail), hardline)
+				parts = append(parts, text(" "), reflow(*l.trail), hardline)
 			}
 			parts = append(parts, linkDocs[i])
 			if l.args != nil {
@@ -3004,6 +3045,41 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 			}
 		}
 		return finish(concat(parts...))
+	}
+	if singleInvocation && firstCall == len(links)-1 {
+		// gjf: the whole run up to the single call is the chain prefix, in a level of
+		// its own - it prefers to stay on one line but still breaks when it must
+		// (`myField.foo()`). The call's arguments sit outside that level, so their
+		// width never breaks the prefix apart, and they indent from the chain (not
+		// +4) while the prefix stays whole.
+		head := []Doc{base}
+		if baseTrailRouted {
+			head = append(head, hardline)
+		}
+		for i, l := range links {
+			if l.trail != nil {
+				head = append(head, text(" "), reflow(*l.trail), hardline)
+			} else {
+				head = append(head, brk(fillIndependent, "", ZERO, nameTag))
+			}
+			head = append(head, linkDocs[i])
+			if i < len(links)-1 && l.args != nil {
+				head = append(head, l.args)
+			}
+		}
+		last := links[len(links)-1]
+		var lastArgs Doc
+		if last.args != nil {
+			lastArgs = last.args
+		} else {
+			lastArgs = text("")
+		}
+		// With no arguments there is no break inside the call, so gjf's appendLevel
+		// is still the prefix level and the rest of the line counts there.
+		if last.emptyArgs {
+			return finish(level(plus4, []Doc{level(ZERO, append(head, lastArgs))}))
+		}
+		return finish(concat(level(plus4, []Doc{level(ZERO, head)}), lastArgs))
 	}
 	// The leading links glued to the base (no break before them): a type-name
 	// prefix (`ImmutableList.builder()` stays a unit), else just the first link
@@ -3048,7 +3124,7 @@ func (p *printer) dotChainTrailing(root *compiler.Node, trailing Doc) Doc {
 		// (gjf always breaks after a line comment).
 		switch {
 		case links[i].trail != nil:
-			out = append(out, text(" "), reflowNoWrap(*links[i].trail), hardline)
+			out = append(out, text(" "), reflow(*links[i].trail), hardline)
 		case i > 0 && links[i-1].trailRouted, i == 0 && baseTrailRouted:
 			out = append(out, hardline)
 		case i >= glue:
@@ -3132,16 +3208,7 @@ func (p *printer) statementTail(e *compiler.Node, trailing Doc) Doc {
 	case compiler.ArrayInitializer:
 		return p.arrayInitializerFull(e.AsArrayInitializer(), e.End, false, trailing)
 	case compiler.ArrayCreationExpression:
-		ac := e.AsArrayCreationExpression()
-		if ac.Initializer != nil {
-			parts := []Doc{text("new "), p.typ(ac.ElementType)}
-			for _, d := range nodes(ac.Dimensions) {
-				parts = append(parts, text("["), p.node(d), text("]"))
-			}
-			parts = append(parts, text(strings.Repeat("[]", ac.AdditionalRank)), text(" "),
-				p.arrayInitializerFull(ac.Initializer.AsArrayInitializer(), ac.Initializer.End, false, trailing))
-			return concat(parts...)
-		}
+		return p.arrayCreationTrailing(e.AsArrayCreationExpression(), trailing)
 	case compiler.ElementAccessExpression:
 		// `a[i] = ...` / `foo()[i];` - the index's `]` and the tail ride inside.
 		ea := e.AsElementAccessExpression()
@@ -3204,6 +3271,12 @@ func (p *printer) pairedArgList(args []*compiler.Node, trailing Doc) Doc {
 }
 
 func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
+	return p.argListIndent(args, trailing, plus4)
+}
+
+// argListIndent is argListTrailing with gjf's conditional argument indent (see
+// dotExpressionArgsAndParen).
+func (p *printer) argListIndent(args *compiler.NodeArray, trailing Doc, argsIndent Indent) Doc {
 	if args.Len() == 0 {
 		if trailing != nil {
 			return concat(text("()"), trailing)
@@ -3290,7 +3363,7 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 		case trailsThis && t.line && i == lastI:
 			p.ci++
 			anyComment = true
-			parts = append(parts, p.node(a), text(" "), reflowNoWrap(t.text), hardline, text(")"))
+			parts = append(parts, p.node(a), text(" "), reflow(t.text), hardline, text(")"))
 			if trailing != nil {
 				parts = append(parts, trailing)
 			}
@@ -3345,7 +3418,7 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 			// the break); gjf also preserves one source blank line between arguments.
 			blank := p.blankBeforePos(argNodes[i-1].End, leadStarts[i])
 			if leads[i] != "" {
-				innerParts = append(innerParts, text(" "), reflowNoWrap(leads[i]), hardline)
+				innerParts = append(innerParts, text(" "), reflow(leads[i]), hardline)
 			} else {
 				innerParts = append(innerParts, brk(fill, " ", ZERO, nil))
 			}
@@ -3358,10 +3431,10 @@ func (p *printer) argListTrailing(args *compiler.NodeArray, trailing Doc) Doc {
 	open := []Doc{text("(")}
 	firstBreak := brk(fillUnified, "", ZERO, nil)
 	if openTrail != "" {
-		open = append(open, text(" "), reflowNoWrap(openTrail))
+		open = append(open, text(" "), reflow(openTrail))
 		firstBreak = hardline
 	}
-	open = append(open, level(plus4, []Doc{firstBreak, level(ZERO, innerParts)}))
+	open = append(open, level(argsIndent, []Doc{firstBreak, level(ZERO, innerParts)}))
 	return concat(open...)
 }
 
@@ -3474,16 +3547,42 @@ func (p *printer) objectCreationTrailing(e *compiler.ObjectCreationExpressionDat
 }
 
 func (p *printer) arrayCreation(e *compiler.ArrayCreationExpressionData) Doc {
+	return p.arrayCreationTrailing(e, nil)
+}
+
+// arrayCreationTrailing mirrors gjf's maybeAddDims: a fill break before every
+// `[`, inside the `new`'s own +4 level, so a long dimension expression moves to
+// its own line rather than pushing the line past the limit. The `]` closes
+// inside the dimension expression's level, and the rest of the line rides with
+// the last dimension.
+func (p *printer) arrayCreationTrailing(e *compiler.ArrayCreationExpressionData, trailing Doc) Doc {
+	dimNodes := nodes(e.Dimensions)
 	var dims []Doc
-	for _, d := range nodes(e.Dimensions) {
-		dims = append(dims, concat(text("["), p.node(d), text("]")))
+	for i, d := range dimNodes {
+		last := i == len(dimNodes)-1 && e.AdditionalRank == 0 && e.Initializer == nil
+		var closeTok Doc
+		if last && trailing != nil {
+			closeTok = concat(text("]"), trailing)
+		} else {
+			closeTok = text("]")
+		}
+		dims = append(dims, brk(fillIndependent, "", ZERO, nil), text("["), p.statementTail(d, closeTok))
 	}
-	extra := strings.Repeat("[]", e.AdditionalRank)
-	init := text("")
-	if e.Initializer != nil {
-		init = concat(text(" "), p.arrayInitializer(e.Initializer.AsArrayInitializer(), e.Initializer.End))
+	for i := 0; i < e.AdditionalRank; i++ {
+		dims = append(dims, brk(fillIndependent, "", ZERO, nil), text("[]"))
 	}
-	return concat(text("new "), p.typ(e.ElementType), concat(dims...), text(extra), init)
+	if e.Initializer == nil {
+		routed := len(dimNodes) > 0 && e.AdditionalRank == 0
+		if !routed && trailing != nil {
+			dims = append(dims, trailing)
+		}
+		return level(plus4, []Doc{text("new "), p.typ(e.ElementType), level(ZERO, dims)})
+	}
+	return concat(
+		level(plus4, []Doc{text("new "), p.typ(e.ElementType), level(ZERO, dims)}),
+		text(" "),
+		p.arrayInitializerFull(e.Initializer.AsArrayInitializer(), e.Initializer.End, false, trailing),
+	)
 }
 
 // The source column an element starts at, used by the tabular check below.
@@ -3718,7 +3817,7 @@ func (p *printer) takeTrailingRowComment(rowParts []Doc, el *compiler.Node) ([]D
 		return rowParts, false
 	}
 	p.ci++
-	return append(rowParts, text(" "), reflowNoWrap(c.text)), true
+	return append(rowParts, text(" "), reflow(c.text)), true
 }
 
 // tabularCommentsPlaceable reports whether every comment inside the initializer
@@ -3804,7 +3903,7 @@ func (p *printer) arrayInitializerFull(e *compiler.ArrayInitializerData, end int
 		}
 		p.ci++
 		routed[i] = true
-		return p.statementTail(el, concat(text(sep), text(" "), reflowNoWrap(c.text)))
+		return p.statementTail(el, concat(text(sep), text(" "), reflow(c.text)))
 	}, true)
 	anyComment := false
 	for _, r := range rs {
@@ -3858,7 +3957,7 @@ func (p *printer) arrayInitializerFull(e *compiler.ArrayInitializerData, end int
 		}
 	}
 	if closingComment != "" {
-		innerParts = append(innerParts, text(" "), reflowNoWrap(closingComment))
+		innerParts = append(innerParts, text(" "), reflow(closingComment))
 	}
 	// Own-line comments between the last element and the `}` belong INSIDE the
 	// braces (gjf); they used to stay pending and surface after the whole
@@ -3959,7 +4058,7 @@ func (p *printer) conditionalTrailing(e *compiler.ConditionalExpressionData, tra
 	// A comment trailing the then-branch on its line stays there (gjf); a line
 	// comment forces the `:` onto the next line (it would otherwise comment it out).
 	if tc, ok := p.trailingComment(e.WhenTrue.End); ok {
-		parts = append(parts, text(" "), reflowNoWrap(tc.text))
+		parts = append(parts, text(" "), reflow(tc.text))
 		if tc.line {
 			parts = append(parts, hardline)
 		} else {

@@ -174,10 +174,10 @@ export function formatSourceFile(sf: SourceFile, options: FormatOptions): string
     indentMultiplier: mult,
     // A `reflow` leaf carries a raw comment or a multi-line text block; rewrite it
     // at the column it lands at.
-    commentRewriter: (raw, col, noWrap) =>
+    commentRewriter: (raw, col) =>
       raw.startsWith('"""')
         ? reindentTextBlock(raw)
-        : rewriteComment(raw, col, raw.startsWith("//"), noWrap),
+        : rewriteComment(raw, col, raw.startsWith("//")),
   });
   // Safety net: the printer attaches comments at member/statement granularity.
   // If a comment sat somewhere it does not yet handle, refuse rather than
@@ -327,7 +327,7 @@ class Printer {
       const c = this.comments[this.ci];
       if (!c || c.line || c.pos >= pos || this.text.slice(c.end, pos).includes("\n")) break;
       this.ci++;
-      out.push(reflow(c.text, true), " ");
+      out.push(reflow(c.text), " ");
     }
     return out;
   }
@@ -403,7 +403,7 @@ class Printer {
       for (const c of leadComments) {
         if (!c.ownLine && !pushedInEntry && i > 0) {
           // A comment after code on the same line: attach to the previous entry.
-          out[out.length - 1] = concat([out[out.length - 1], " ", reflow(c.text, true)]);
+          out[out.length - 1] = concat([out[out.length - 1], " ", reflow(c.text)]);
         } else {
           // Own-line comment: reflow it at the column it is written at.
           pushEntry(reflow(c.text), this.blankBeforePos(prevEnd, c.pos));
@@ -421,12 +421,12 @@ class Printer {
       // multi-line block comment cannot: its width would force every break.
       const peeked = this.peekTrailingComment(item);
       const tail =
-        peeked && !peeked.text.includes("\n") ? concat([" ", reflow(peeked.text, true)]) : undefined;
+        peeked && !peeked.text.includes("\n") ? concat([" ", reflow(peeked.text)]) : undefined;
       let itemDoc = tail ? this.nodeWithTail(item, tail) : this.node(item);
-      if (inlineLead) itemDoc = concat([reflow(inlineLead.text, true), " ", itemDoc]);
+      if (inlineLead) itemDoc = concat([reflow(inlineLead.text), " ", itemDoc]);
       const trailing = this.trailingCommentAfter(item);
       if (trailing) {
-        if (!tail) itemDoc = concat([itemDoc, " ", reflow(trailing.text, true)]);
+        if (!tail) itemDoc = concat([itemDoc, " ", reflow(trailing.text)]);
         prevEnd = trailing.end;
       } else {
         prevEnd = item.end;
@@ -530,7 +530,7 @@ class Printer {
       pkg.push("package ", this.entityName(sf.packageDeclaration.name), ";");
       // A comment on the package declaration's own line stays there.
       const tc = this.trailingCommentAfter(sf.packageDeclaration);
-      if (tc) pkg.push(" ", reflow(tc.text, tc.line));
+      if (tc) pkg.push(" ", reflow(tc.text));
       blocks.push(concat(pkg));
     }
     const statics = sf.imports.filter(i => i.isStatic);
@@ -545,7 +545,8 @@ class Printer {
       const lead = this.commentsBefore(importStart);
       const parts: Doc[] = [];
       lead.forEach((c, i) => {
-        if (i > 0) parts.push(this.blankBeforePos(lead[i - 1].end, c.pos) ? hardline : "", hardline);
+        if (i > 0)
+          parts.push(this.blankBeforePos(lead[i - 1].end, c.pos) ? hardline : "", hardline);
         parts.push(reflow(c.text));
       });
       if (lead.length > 0) {
@@ -613,7 +614,7 @@ class Printer {
     for (const a of m.annotations ?? []) {
       head.push(this.annotation(a));
       const tc = this.trailingCommentAfter(a);
-      if (tc) head.push(" ", reflow(tc.text, true));
+      if (tc) head.push(" ", reflow(tc.text));
       head.push(hardline);
     }
     if (m.isOpen) head.push("open ");
@@ -639,7 +640,7 @@ class Printer {
       });
       const trailing = this.trailingCommentAfter(d);
       body.push(
-        trailing ? concat([this.directive(d), " ", reflow(trailing.text, true)]) : this.directive(d),
+        trailing ? concat([this.directive(d), " ", reflow(trailing.text)]) : this.directive(d),
       );
     });
     // Comments between the last directive and the closing brace.
@@ -712,15 +713,17 @@ class Printer {
       // It was consumed in source order up front (importTrailingComments), since
       // this list is sorted and the comment cursor only moves forward.
       const comment = this.importTrailing.get(imp);
+      const withComment = (line: Doc, at: number): Doc =>
+        comment === undefined ? line : concat([line, ...this.importComment(comment, at)]);
       const at = seen.get(text);
       if (at !== undefined) {
         // Identical import: drop the duplicate line but keep its comment, which
         // has already been consumed and would otherwise be lost.
-        if (comment !== undefined) lines[at] = concat([lines[at], " ", reflow(comment, true)]);
+        if (comment !== undefined) lines[at] = withComment(lines[at], this.importWidth(sorted, at));
         continue;
       }
       seen.set(text, lines.length);
-      lines.push(comment === undefined ? text : concat([text, " ", reflow(comment, true)]));
+      lines.push(withComment(text, this.importLine(imp).length));
     }
     return join(hardline, lines);
   }
@@ -735,6 +738,28 @@ class Printer {
       const c = this.trailingCommentAfter(imp);
       if (c) this.importTrailing.set(imp, c.text);
     }
+  }
+
+  /**
+   * An import's trailing comment. gjf's ImportOrderer rebuilds the import block
+   * as TEXT and wraps that comment against the 100-column limit itself, so the
+   * continuation lands as an own-line comment at COLUMN 0 with a blank line
+   * before it - not aligned under the comment the way the Doc writer would do it.
+   */
+  private importComment(comment: string, lineWidth: number): Doc[] {
+    const first = ` ${comment}`;
+    if (lineWidth + first.length <= 100) return [first];
+    // Wrap where gjf does: the last space that still fits, the rest continuing
+    // with its own `//`.
+    let idx = 100 - lineWidth - 1;
+    while (idx >= 2 && !/\s/.test(comment[idx])) idx--;
+    if (idx <= 2) return [first];
+    const rest = `//${comment.slice(idx)}`;
+    return [` ${comment.slice(0, idx)}`, hardline, hardline, rest];
+  }
+
+  private importWidth(sorted: readonly ImportDeclaration[], at: number): number {
+    return this.importLine(sorted[at]).length;
   }
 
   private importLine(imp: ImportDeclaration): string {
@@ -807,7 +832,7 @@ class Printer {
       // (`@SuppressWarnings("x") // why`) instead of floating away.
       if (ownLine) {
         const tc = this.trailingCommentAfter(a);
-        if (tc) parts.push(" ", reflow(tc.text, true));
+        if (tc) parts.push(" ", reflow(tc.text));
       }
       // gjf visitModifiers separates a horizontal-direction annotation from what
       // follows with a real break, not a space: a marker annotation on a field or
@@ -907,10 +932,7 @@ class Printer {
    * the whole list in a level at that indent) when it does not fit; elsewhere
    * the list is unbreakable.
    */
-  private typeParameters(
-    tps: NodeArray<TypeParameter> | undefined,
-    breakIndent?: Indent,
-  ): Doc {
+  private typeParameters(tps: NodeArray<TypeParameter> | undefined, breakIndent?: Indent): Doc {
     if (!tps || tps.length === 0) return "";
     const params = tps.map(tp => {
       // <@A T extends ...>: the type parameter's own annotations (JSR-308).
@@ -1131,7 +1153,7 @@ class Printer {
       const trailing = this.trailingCommentAfter(c);
       if (trailing) {
         if (isLast) lastTrailing = trailing.text;
-        else cdoc = concat([cdoc, " ", reflow(trailing.text, true)]);
+        else cdoc = concat([cdoc, " ", reflow(trailing.text)]);
         prevConstEnd = trailing.end;
       } else {
         prevConstEnd = c.end;
@@ -1230,7 +1252,12 @@ class Printer {
       return level(ZERO, [
         this.modifiers(d.modifiers, "var"),
         ...this.inlineBlockComments(this.start(d.type)),
-        this.singleDeclaration(this.type(d.type), d.declarators[0], concat([";", tail]), d.type.end),
+        this.singleDeclaration(
+          this.type(d.type),
+          d.declarators[0],
+          concat([";", tail]),
+          d.type.end,
+        ),
       ]);
     }
     return level(ZERO, [
@@ -1253,16 +1280,11 @@ class Printer {
   // initializer keeps its own break-after-`=`, indented +4 (or +8 when the name
   // also broke). The break-before-name's fit check excludes the initializer
   // (it sits in a sibling level), so a long initializer alone does not trigger it.
-  private singleDeclaration(
-    type: Doc,
-    v: VariableDeclarator,
-    trailing: Doc,
-    typeEnd = -1,
-  ): Doc {
+  private singleDeclaration(type: Doc, v: VariableDeclarator, trailing: Doc, typeEnd = -1): Doc {
     // A `//` comment between the type and the name rides the TYPE's line (gjf
     // hangs it off that token) and forces the break before the name.
     const typeTrail = typeEnd >= 0 ? this.trailingLineComment(typeEnd) : undefined;
-    const typeDoc = typeTrail ? concat([type, " ", reflow(typeTrail.text, true)]) : type;
+    const typeDoc = typeTrail ? concat([type, " ", reflow(typeTrail.text)]) : type;
     const nameBreak: Doc = typeTrail ? hardline : brk("unified", " ", ZERO);
     const name = concat([
       ...this.inlineBlockComments(this.start(v.name)),
@@ -1290,7 +1312,7 @@ class Printer {
         typeTrail ? hardline : brk("unified", " ", ZERO, nameTag),
         name,
         " =",
-        eq ? concat([" ", reflow(eq.text, true)]) : "",
+        eq ? concat([" ", reflow(eq.text)]) : "",
       ]),
       level(indentIf(nameTag, indentConst(8), PLUS4), [
         eq ? hardline : line,
@@ -1323,7 +1345,7 @@ class Printer {
     return concat([
       name,
       " =",
-      eq ? concat([" ", reflow(eq.text, true)]) : "",
+      eq ? concat([" ", reflow(eq.text)]) : "",
       level(PLUS4, [eq ? hardline : line, this.statementTail(v.initializer, trailing)]),
     ]);
   }
@@ -1408,7 +1430,7 @@ class Printer {
       !/[\n,):]/.test(this.text.slice(endPos, t.pos))
     ) {
       this.ci++;
-      parts.push(" ", reflow(t.text, true));
+      parts.push(" ", reflow(t.text));
       return true;
     }
     return false;
@@ -1653,7 +1675,12 @@ class Printer {
    * for a method, if/while/for/do and a try body, but stays open (`{` newline
    * `}`) for else, catch, finally, synchronized, an initializer and a switch.
    */
-  private block(b: Block, allowTrailingBlank = false, collapse = true, allowLeadingBlank = true): Doc {
+  private block(
+    b: Block,
+    allowTrailingBlank = false,
+    collapse = true,
+    allowLeadingBlank = true,
+  ): Doc {
     if (this.blockIsEmpty(b)) return collapse ? "{}" : concat(["{", hardline, "}"]);
     return concat(["{", this.blockRest(b, allowTrailingBlank, allowLeadingBlank)]);
   }
@@ -1726,7 +1753,7 @@ class Printer {
     const c = this.comments[this.ci];
     if (!c || c.pos < afterBrace || /\n/.test(this.text.slice(afterBrace, c.pos))) return "";
     this.ci++;
-    return concat([" ", reflow(c.text, true)]);
+    return concat([" ", reflow(c.text)]);
   }
 
   private statementList(list: NodeArray<Statement>, endPos: number): Doc[] {
@@ -1738,7 +1765,12 @@ class Printer {
       return level(ZERO, [
         this.modifiers(d.modifiers, "var"),
         ...this.inlineBlockComments(this.start(d.type)),
-        this.singleDeclaration(this.type(d.type), d.declarators[0], concat([";", tail]), d.type.end),
+        this.singleDeclaration(
+          this.type(d.type),
+          d.declarators[0],
+          concat([";", tail]),
+          d.type.end,
+        ),
       ]);
     }
     const last = d.declarators.length - 1;
@@ -1817,10 +1849,7 @@ class Printer {
     if (cs.length === 0) return undefined;
     const parts: Doc[] = [];
     cs.forEach((c, i) => {
-      parts.push(
-        i === 0 && !c.ownLine && afterBlock ? " " : hardline,
-        reflow(c.text, i === 0 && !c.ownLine && afterBlock),
-      );
+      parts.push(i === 0 && !c.ownLine && afterBlock ? " " : hardline, reflow(c.text));
     });
     // A block comment that shared the `}`'s line keeps the keyword on that line
     // too (`} /* why */ else {`); a `//` comment would comment the keyword out,
@@ -1874,7 +1903,7 @@ class Printer {
       // indented line (`void h() { /* c */ }` -> `{`, `/* c */`, `}`).
       if (!c.line) return "";
       this.emittedAhead.add(i);
-      return concat([" ", reflow(c.text, true)]);
+      return concat([" ", reflow(c.text)]);
     }
     return "";
   }
@@ -2102,20 +2131,19 @@ class Printer {
     // The comment stays on whichever side of the `=` the source put it: gjf hangs
     // it off the token it follows, so `name //` keeps the `=` for the next line
     // while `name = //` keeps the `=` up here.
-    const eqBeforeComment =
-      eq !== undefined && this.text.slice(r.name!.end, eq.pos).includes("=");
+    const eqBeforeComment = eq !== undefined && this.text.slice(r.name!.end, eq.pos).includes("=");
     if (eq && !eqBeforeComment) {
       return concat([
         head,
         " ",
-        reflow(eq.text, true),
+        reflow(eq.text),
         level(PLUS4, [hardline, "= ", this.statementTail(r.initializer, trailing)]),
       ]);
     }
     return concat([
       head,
       " =",
-      eq ? concat([" ", reflow(eq.text, true)]) : "",
+      eq ? concat([" ", reflow(eq.text)]) : "",
       level(PLUS4, [eq ? hardline : line, this.statementTail(r.initializer, trailing)]),
     ]);
   }
@@ -2138,7 +2166,7 @@ class Printer {
       // trails THAT clause, not the next - append it to the previous entry.
       if (comments.length > 0 && !comments[0].ownLine && entries.length > 0) {
         const prev = entries[entries.length - 1];
-        prev.doc = concat([prev.doc, " ", reflow(comments[0].text, true)]);
+        prev.doc = concat([prev.doc, " ", reflow(comments[0].text)]);
         comments = comments.slice(1);
       }
       const start = comments.length > 0 ? comments[0].pos : this.start(c);
@@ -2229,7 +2257,7 @@ class Printer {
     const head: Doc[] = [level(ZERO, parts)];
     if (t !== undefined && !t.ownLine && t.pos < bound) {
       this.ci++;
-      head.push(" ", reflow(t.text, true));
+      head.push(" ", reflow(t.text));
     }
     // A fall-through case with no body is just its label; the switch body's clause
     // separator supplies the newline to the next clause.
@@ -2274,7 +2302,7 @@ class Printer {
       const tc = this.trailingLineComment(Math.min(operands[i].end, beforeOp));
       parts.push(
         tc !== undefined && tc.pos < beforeOp
-          ? concat([" ", reflow(tc.text, true), hardline])
+          ? concat([" ", reflow(tc.text), hardline])
           : brk(fillMode, " ", ZERO),
       );
       // Own-line comments written before the operator stay before it.
@@ -2288,7 +2316,7 @@ class Printer {
         parts.push(" ");
       } else {
         after.forEach((c, ci) => {
-          parts.push(ci === 0 && c.line && !c.ownLine ? " " : hardline, reflow(c.text, true));
+          parts.push(ci === 0 && c.line && !c.ownLine ? " " : hardline, reflow(c.text));
         });
         parts.push(hardline);
       }
@@ -2367,8 +2395,12 @@ class Printer {
       // argument list (gjf hangs it off that token, so its width drives the
       // list's fit check) and forces the break before the next link.
       trailRouted?: boolean;
+      // An empty argument list adds no break of its own, so gjf's appendLevel is
+      // still the chain's - whatever follows the `()` counts there.
+      emptyArgs?: boolean;
     };
     const links: Link[] = [];
+    const nameTag = new BreakTag();
     let cur: Node = root;
     let trailingRouted = false;
     // Array indices belong to the link they follow (gjf's visitDot walks through
@@ -2402,6 +2434,7 @@ class Printer {
         const link: Link = {
           isCall: true,
           name,
+          emptyArgs: callExpr.arguments.length === 0,
           // Explicit method type arguments go between the dot and the name:
           // `obj.<String>foo(x)`, not `obj.foo<String>(x)`.
           render: () => {
@@ -2427,7 +2460,7 @@ class Printer {
             if (!rightmost) {
               const tc = this.trailingLineComment(callExpr.end);
               if (tc) {
-                box.push(" ", reflow(tc.text, true));
+                box.push(" ", reflow(tc.text));
                 link.trailRouted = true;
               }
             }
@@ -2475,7 +2508,7 @@ class Printer {
     if (links.length > 0) {
       const tc = this.trailingLineComment(cur.end);
       if (tc) {
-        baseBox.push(" ", reflow(tc.text, true));
+        baseBox.push(" ", reflow(tc.text));
         baseTrailRouted = true;
       }
     }
@@ -2483,10 +2516,7 @@ class Printer {
     // A trailing token not routed into a rightmost call's args (e.g. the chain
     // ends in a field access) is appended after the whole chain.
     const finish = (doc: Doc): Doc =>
-      concat([
-        ...chainLead,
-        trailing === "" || trailingRouted ? doc : concat([doc, trailing]),
-      ]);
+      concat([...chainLead, trailing === "" || trailingRouted ? doc : concat([doc, trailing])]);
     const callCount = links.filter(l => l.isCall).length;
     const baseIsCall = cur.kind === SyntaxKind.CallExpression;
     // gjf keeps a chain glued when its only dereference invocation comes after a
@@ -2521,17 +2551,38 @@ class Printer {
     // is a unit (`myField.foo()` never breaks before the call). But when field
     // accesses FOLLOW that call, the call and its receiver are only the chain's
     // prefix - the trailing dereferences still break one per line.
-    if (singleInvocation && firstCall === links.length - 1) {
-      const gluedParts: Doc[] = [base];
-      if (baseTrailRouted) gluedParts.push(hardline);
+    // An anonymous-class receiver is gjf's ZERO-indent case (visitDot): no break
+    // before the dereference and no +4, so the class body keeps its own indent.
+    if (baseIsAnonClass) {
       const glued = links.map((l, i) => {
         const head =
           l.trail === undefined
             ? linkDocs[i]
-            : concat([" ", reflow(l.trail, true), hardline, linkDocs[i]]);
+            : concat([" ", reflow(l.trail), hardline, linkDocs[i]]);
         return l.args === undefined ? head : concat([head, l.args]);
       });
-      return finish(concat([...gluedParts, ...glued]));
+      return finish(concat([base, ...glued]));
+    }
+    if (singleInvocation && firstCall === links.length - 1) {
+      // gjf: the whole run up to the single call is the chain prefix, in a level
+      // of its own - it prefers to stay on one line but still breaks when it must
+      // (`myField.foo()`). The call's arguments sit outside that level, so their
+      // width never breaks the prefix apart, and they indent from the chain (not
+      // +4) while the prefix stays whole.
+      const head: Doc[] = [base];
+      if (baseTrailRouted) head.push(hardline);
+      links.forEach((l, i) => {
+        if (l.trail !== undefined) head.push(" ", reflow(l.trail), hardline);
+        else head.push(brk("independent", "", ZERO, nameTag));
+        head.push(linkDocs[i]);
+        if (i < links.length - 1 && l.args !== undefined) head.push(l.args);
+      });
+      const last = links[links.length - 1];
+      const lastArgs = last.args === undefined ? "" : last.args;
+      // With no arguments there is no break inside the call, so gjf's appendLevel
+      // is still the prefix level and the rest of the line counts there.
+      if (last.emptyArgs) return finish(level(PLUS4, [level(ZERO, [...head, lastArgs])]));
+      return finish(concat([level(PLUS4, [level(ZERO, head)]), lastArgs]));
     }
     // The leading links glued to the base (no break before them): a type-name
     // prefix (`ImmutableList.builder()` stays a unit), else just the first link
@@ -2565,7 +2616,7 @@ class Printer {
       const out: Doc[] = [];
       // A comment trailing the previous link rides that line and forces the
       // break (gjf always breaks after a line comment).
-      if (links[i].trail !== undefined) out.push(" ", reflow(links[i].trail as string, true), hardline);
+      if (links[i].trail !== undefined) out.push(" ", reflow(links[i].trail as string), hardline);
       else if (i > 0 ? links[i - 1].trailRouted : baseTrailRouted) out.push(hardline);
       else if (i >= glue) out.push(brk("unified", "", ZERO));
       out.push(linkDocs[i]);
@@ -2645,18 +2696,7 @@ class Printer {
       return this.arrayInitializer(e as ArrayInitializer, false, trailing);
     }
     if (e.kind === SyntaxKind.ArrayCreationExpression) {
-      const ac = e as ArrayCreationExpression;
-      if (ac.initializer) {
-        const dims = (ac.dimensions ?? []).map(d => concat(["[", this.node(d), "]"]));
-        return concat([
-          "new ",
-          this.type(ac.elementType),
-          concat(dims),
-          "[]".repeat(ac.additionalRank),
-          " ",
-          this.arrayInitializer(ac.initializer, false, trailing),
-        ]);
-      }
+      return this.arrayCreation(e as ArrayCreationExpression, trailing);
     }
     if (e.kind === SyntaxKind.ElementAccessExpression) {
       // `a[i] = ...` / `foo()[i];` - the index's `]` and the tail ride inside.
@@ -2765,7 +2805,7 @@ class Printer {
       if (lastLineComment) {
         this.ci++;
         anyComment = true;
-        parts.push(this.node(a), " ", reflow(t.text, true), hardline, ")", trailing);
+        parts.push(this.node(a), " ", reflow(t.text), hardline, ")", trailing);
       } else if (hasTrailingComment) {
         parts.push(this.node(a));
         this.attachTrailingBlockComment(parts, a.end);
@@ -2812,14 +2852,14 @@ class Printer {
     items.forEach((it, i) => {
       if (i > 0) {
         const blank = this.blankBeforePos(args[i - 1].end, leadStarts[i]);
-        if (leads[i] !== undefined) innerParts.push(" ", reflow(leads[i] as string, true), hardline);
+        if (leads[i] !== undefined) innerParts.push(" ", reflow(leads[i] as string), hardline);
         else innerParts.push(brk(fill, " ", ZERO));
         if (blank) innerParts.push(hardline);
       }
       innerParts.push(it);
     });
     const open: Doc[] = ["("];
-    if (openTrail !== undefined) open.push(" ", reflow(openTrail, true));
+    if (openTrail !== undefined) open.push(" ", reflow(openTrail));
     return concat([
       ...open,
       level(PLUS4, [
@@ -2887,11 +2927,41 @@ class Printer {
     return concat(parts);
   }
 
-  private arrayCreation(e: ArrayCreationExpression): Doc {
-    const dims = (e.dimensions ?? []).map(d => concat(["[", this.node(d), "]"]));
-    const extra = "[]".repeat(e.additionalRank);
-    const init = e.initializer ? concat([" ", this.arrayInitializer(e.initializer)]) : "";
-    return concat(["new ", this.type(e.elementType), concat(dims), extra, init]);
+  private arrayCreation(e: ArrayCreationExpression, trailing: Doc = ""): Doc {
+    // gjf's maybeAddDims puts a fill break before every `[`, inside the `new`'s
+    // own +4 level, so a long dimension expression moves to its own line rather
+    // than pushing the line past the limit.
+    const dimNodes = e.dimensions ?? [];
+    const dims: Doc[] = [];
+    dimNodes.forEach((d, i) => {
+      // The `]` closes inside the dimension expression's own level (gjf's
+      // appendLevel), so a long dimension breaks rather than overflowing; the
+      // rest of the line rides with the last one.
+      const last = i === dimNodes.length - 1 && e.additionalRank === 0 && !e.initializer;
+      dims.push(
+        brk("independent", "", ZERO),
+        "[",
+        this.statementTail(d, last ? concat(["]", trailing]) : "]"),
+      );
+    });
+    for (let i = 0; i < e.additionalRank; i++) {
+      dims.push(brk("independent", "", ZERO), "[]");
+    }
+    // With no initializer the rest of the line rides inside the dimension level,
+    // so a trailing `;` or comment drives the break before the last `[`.
+    if (!e.initializer) {
+      const routed = dimNodes.length > 0 && e.additionalRank === 0;
+      return level(PLUS4, [
+        "new ",
+        this.type(e.elementType),
+        level(ZERO, routed ? dims : [...dims, trailing]),
+      ]);
+    }
+    return concat([
+      level(PLUS4, ["new ", this.type(e.elementType), level(ZERO, dims)]),
+      " ",
+      this.arrayInitializer(e.initializer, false, trailing),
+    ]);
   }
 
   // The source column an element starts at, used by the tabular check below.
@@ -3025,8 +3095,7 @@ class Printer {
       const last = row[row.length - 1];
       if (this.text[skipTrivia(this.text, last.end)] === ",") rowParts.push(",");
       this.takeTrailingRowComment(rowParts, last);
-      const rowIndent =
-        cols === 1 || Printer.initializerOf(row[0]) !== undefined ? ZERO : PLUS4;
+      const rowIndent = cols === 1 || Printer.initializerOf(row[0]) !== undefined ? ZERO : PLUS4;
       parts.push(level(rowIndent, rowParts));
     }
     // Own-line comments between the last row and the `}` belong inside the braces.
@@ -3049,11 +3118,17 @@ class Printer {
     // Only whitespace may separate them, and no newline: the comment must sit
     // directly after this element on its line.
     const gap = c === undefined || c.pos < after ? undefined : this.text.slice(after, c.pos);
-    if (c === undefined || !c.line || gap === undefined || gap.trim() !== "" || gap.includes("\n")) {
+    if (
+      c === undefined ||
+      !c.line ||
+      gap === undefined ||
+      gap.trim() !== "" ||
+      gap.includes("\n")
+    ) {
       return false;
     }
     this.ci++;
-    rowParts.push(" ", reflow(c.text, true));
+    rowParts.push(" ", reflow(c.text));
     return true;
   }
 
@@ -3113,7 +3188,7 @@ class Printer {
         }
         this.ci++;
         routed[i] = c.text;
-        return this.statementTail(el, concat([sep, " ", reflow(c.text, true)]));
+        return this.statementTail(el, concat([sep, " ", reflow(c.text)]));
       },
       true,
     );
@@ -3129,13 +3204,12 @@ class Printer {
         // element that carries a trailing comment - the comment ends its line and
         // gjf drops the blank that follows.
         const blank =
-          routed[i - 1] === undefined &&
-          this.blankBeforePos(e.elements[i - 1].end, leadStarts[i]);
+          routed[i - 1] === undefined && this.blankBeforePos(e.elements[i - 1].end, leadStarts[i]);
         // A line comment trailing the previous element stays on its line, then
         // forces the break before this element.
         if (routed[i - 1] !== undefined) innerParts.push(hardline);
         else if (leads[i] !== undefined) {
-          innerParts.push(" ", reflow(leads[i] as string, true), hardline);
+          innerParts.push(" ", reflow(leads[i] as string), hardline);
         } else innerParts.push(brk(fillMode, " ", ZERO));
         if (blank) innerParts.push(hardline);
       }
@@ -3150,7 +3224,7 @@ class Printer {
       this.ci++;
       closingComment = t.text;
     }
-    if (closingComment !== undefined) innerParts.push(" ", reflow(closingComment, true));
+    if (closingComment !== undefined) innerParts.push(" ", reflow(closingComment));
     // Own-line comments between the last element and the `}` belong INSIDE the
     // braces (gjf); they used to stay pending and surface after the whole
     // declaration, e.g. a `// @formatter:on` marker jumping past its `};`.
@@ -3221,7 +3295,7 @@ class Printer {
     // comment forces the `:` onto the next line (it would otherwise comment it out).
     const tc = this.trailingComment(e.whenTrue.end);
     if (tc) {
-      parts.push(" ", reflow(tc.text, true), tc.line ? hardline : brk("unified", " ", ZERO));
+      parts.push(" ", reflow(tc.text), tc.line ? hardline : brk("unified", " ", ZERO));
     } else {
       parts.push(brk("unified", " ", ZERO));
     }
@@ -3423,10 +3497,7 @@ class Printer {
         // The closing `)` rides inside the parenthesized expression's own
         // innermost level (gjf's appendLevel), so it counts in that level's fit
         // check wherever the parentheses appear.
-        return concat([
-          "(",
-          this.statementTail((node as ParenthesizedExpression).expression, ")"),
-        ]);
+        return concat(["(", this.statementTail((node as ParenthesizedExpression).expression, ")")]);
       case SyntaxKind.PrefixUnaryExpression: {
         const e = node as PrefixUnaryExpression;
         const op = tokenToString(e.operator) ?? "";

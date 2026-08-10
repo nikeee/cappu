@@ -272,13 +272,13 @@ test("the source's line separator is preserved", () => {
   expect(formatSource(lines.join("\n"), { style: "google" })).toBe(lines.join("\n"));
 });
 
-// A comment that TRAILS code is never wrapped, even past the column limit: its
-// continuation lines would re-parse as separate own-line comments, so the
-// second `cappu format` run would move them and the formatter would not be
-// idempotent. (gjf wraps here, but its own output is not a fixpoint either -
-// it breaks the CODE hard enough that the comment fits, which we do not always
-// manage.) An OWN-LINE comment still wraps: it re-parses in the same place.
-test("a trailing comment is not wrapped, and the output is stable", () => {
+// A comment that trails code wraps at the column limit like gjf's, but the
+// layout rules come first: gjf breaks the CODE hard enough that most such
+// comments fit, and so do we (here the array dimension moves to its own line).
+// Where a wrap does happen the continuation re-parses as an own-line comment, so
+// a second run may move it - gjf's output is not a fixpoint in those cases
+// either, and the corpus test tracks how many files that is.
+test("breaking the code keeps a trailing comment on one line", () => {
   const source = [
     "package p;",
     "",
@@ -292,6 +292,27 @@ test("a trailing comment is not wrapped, and the output is stable", () => {
   const once = formatSource(source, { style: "google" });
   expect(once).toContain("+ 1]; // creates the array");
   expect(formatSource(once, { style: "google" })).toBe(once);
+});
+
+// When the code cannot be broken any further, the comment itself wraps, exactly
+// where gjf wraps it: at the last space that still fits, continuing with its own
+// `//` under the first line's comment column.
+test("a trailing comment that still does not fit is wrapped like gjf", () => {
+  const source = [
+    "package p;",
+    "",
+    "class T {",
+    "  void m() {",
+    "    go(); // a trailing comment long enough that no amount of code breaking will ever make it fit at all",
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+  const out = formatSource(source, { style: "google" });
+  expect(out).toContain(
+    "go(); // a trailing comment long enough that no amount of code breaking will ever make it fit at",
+  );
+  expect(out).toContain("\n          // all");
 });
 
 // google-java-format reflows an over-long string literal as a post-pass over its
@@ -326,8 +347,7 @@ test("an over-long string literal is reflowed like google-java-format", () => {
   expect(once).toBe(expected);
   expect(formatSource(once, { style: "google" })).toBe(once);
   // The reflow only re-cuts the literal: the concatenated value is unchanged.
-  const value = (s: string) =>
-    [...s.matchAll(/"((?:\\.|[^"\\])*)"/g)].map(m => m[1]).join("");
+  const value = (s: string) => [...s.matchAll(/"((?:\\.|[^"\\])*)"/g)].map(m => m[1]).join("");
   expect(value(once)).toBe(value(source));
   const aosp = formatSource(source, { style: "aosp" });
   expect(formatSource(aosp, { style: "aosp" })).toBe(aosp);

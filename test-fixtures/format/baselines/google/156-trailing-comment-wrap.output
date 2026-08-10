@@ -1,0 +1,17 @@
+package p;
+
+class T {
+  int[] countersRep() {
+    int[] rankArray =
+        new int
+            [(int) Math.floor(Math.log(size()) / Math.log(GOLDEN_RATIO)) + 1]; // creates the array
+    return rankArray;
+  }
+
+  void add(java.util.List doublyLinkedList) {
+    if (doublyLinkedList
+        .isEmpty()) { // Check if there are no elements in list then it adds first element
+      go();
+    }
+  }
+}

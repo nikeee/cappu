@@ -155,7 +155,9 @@ function flattenConcat(root: Node): Node[] {
 }
 
 function isPlainString(node: Node, text: string): boolean {
-  return node.kind === SyntaxKind.StringLiteral && !text.startsWith(TEXT_BLOCK, startOf(node, text));
+  return (
+    node.kind === SyntaxKind.StringLiteral && !text.startsWith(TEXT_BLOCK, startOf(node, text))
+  );
 }
 
 /**

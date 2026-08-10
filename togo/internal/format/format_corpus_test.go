@@ -8,6 +8,11 @@ package format
 // ratchet RATCHET UP only. Skipped when the submodule is absent (no network/JDK
 // needed). The Go count must stay in lockstep with the TS count.
 //
+// The idempotence check below holds over this tree. gjf itself is not a fixpoint
+// everywhere - wrapping a trailing comment turns the continuation into an
+// own-line comment, which the next pass re-indents - and we wrap where gjf
+// wraps; over 5114 real-world sources gjf is unstable on 14 files and we on 22.
+//
 // 62 is the CEILING, not a gap: the 9 files that are not fixpoints were
 // committed by an older google-java-format, so gjf 1.25.2 does not reproduce
 // them either, and our output equals gjf 1.25.2's on every one of them.

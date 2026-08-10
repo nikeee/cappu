@@ -1,0 +1,10 @@
+package org.apache.commons.codec.binary;
+
+import org.apache.commons.codec.binary.BaseNCodecInputStream.AbstracBuilder; // NOPMD: Required by
+
+// ECJ (Eclipse)
+
+/** Doc. */
+class T {
+  AbstracBuilder b;
+}

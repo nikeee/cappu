@@ -17,7 +17,7 @@ const commentMaxLineLength = 100
 
 // rewriteComment rewrites a comment for output at column0. isLine is true for
 // `//` comments. Mirrors JavaCommentsHelper.rewrite.
-func rewriteComment(text string, column0 int, isLine, noWrap bool) string {
+func rewriteComment(text string, column0 int, isLine bool) string {
 	// gjf's Tok.isJavadocComment: `/***...` and a comment of four characters or
 	// fewer are not run through the javadoc formatter (`/***/` stays as written).
 	if strings.HasPrefix(text, "/**") && !strings.HasPrefix(text, "/***") && len(text) > 4 {
@@ -33,7 +33,7 @@ func rewriteComment(text string, column0 int, isLine, noWrap bool) string {
 		}
 	}
 	if isLine {
-		return indentLineComments(lines, column0, noWrap)
+		return indentLineComments(lines, column0)
 	}
 	if pc, ok := reformatParamComment(text); ok {
 		return pc
@@ -113,16 +113,14 @@ func indentJavadoc(lines []string, column0 int) string {
 	return b.String()
 }
 
-func indentLineComments(lines []string, column0 int, noWrap bool) string {
+func indentLineComments(lines []string, column0 int) string {
 	// The missing-space fix is part of gjf's wrapLineComments, but it is not about
 	// wrapping: a comment we deliberately never wrap (one trailing code) still has
 	// to become `// foo`.
 	for i, line := range lines {
 		lines[i] = addMissingSpace(line)
 	}
-	if !noWrap {
-		lines = wrapLineComments(lines, column0)
-	}
+	lines = wrapLineComments(lines, column0)
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(lines[0]))
 	pad := strings.Repeat(" ", column0)

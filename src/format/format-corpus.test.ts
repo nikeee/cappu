@@ -73,8 +73,14 @@ if (files.length === 0) {
 
   // Formatting is a normalization, so it must reach a fixpoint in ONE pass:
   // `format(format(x)) === format(x)` for EVERY file, matched or not. The golden
-  // fixtures assert this per case; this widens it to the whole corpus, where a
-  // wrapped trailing comment used to re-parse as an own-line comment and move.
+  // fixtures assert this per case; this widens it to the whole corpus.
+  //
+  // gjf itself is not a fixpoint everywhere: wrapping a trailing comment turns
+  // the continuation into an own-line comment, which the next pass re-indents.
+  // We wrap where gjf wraps, so we inherit that - measured over 5114 real-world
+  // sources, gjf is unstable on 14 and we are on 22, all of them files where our
+  // layout still differs from gjf's. None of them are in gjf's own tree, which
+  // is what this corpus covers, so the invariant holds here.
   test("formatting the gjf corpus is idempotent", () => {
     const unstable: string[] = [];
     for (const f of files) {

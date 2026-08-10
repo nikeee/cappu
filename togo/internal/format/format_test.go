@@ -306,10 +306,11 @@ func TestLineSeparatorPreserved(t *testing.T) {
 	}
 }
 
-// TestTrailingCommentNotWrapped mirrors the TS test "a trailing comment is not
-// wrapped, and the output is stable": wrapping it would re-parse the
-// continuation as an own-line comment, so a second pass would move it.
-func TestTrailingCommentNotWrapped(t *testing.T) {
+// TestTrailingCommentCodeBreaks mirrors the TS test "breaking the code keeps a
+// trailing comment on one line": a trailing comment wraps like gjf's, but the
+// layout rules come first - gjf breaks the CODE hard enough that most such
+// comments fit, and so do we.
+func TestTrailingCommentCodeBreaks(t *testing.T) {
 	source := strings.Join([]string{
 		"package p;",
 		"",
@@ -333,6 +334,30 @@ func TestTrailingCommentNotWrapped(t *testing.T) {
 	}
 	if twice != once {
 		t.Errorf("not idempotent:\n1st:\n%s\n2nd:\n%s", once, twice)
+	}
+}
+
+// TestTrailingCommentWrapped mirrors the TS test "a trailing comment that still
+// does not fit is wrapped like gjf": when no code break can help, the comment
+// itself wraps at the last space that fits, continuing under its own column.
+func TestTrailingCommentWrapped(t *testing.T) {
+	source := strings.Join([]string{
+		"package p;",
+		"",
+		"class T {",
+		"  void m() {",
+		"    go(); // a trailing comment long enough that no amount of code breaking will ever make it fit at all",
+		"  }",
+		"}",
+		"",
+	}, "\n")
+	out, err := FormatSource(source, FormatOptions{Style: "google"}, "T.java")
+	if err != nil {
+		t.Fatalf("FormatSource: %v", err)
+	}
+	first := "go(); // a trailing comment long enough that no amount of code breaking will ever make it fit at"
+	if !strings.Contains(out, first) || !strings.Contains(out, "\n          // all") {
+		t.Errorf("comment not wrapped like gjf:\n%s", out)
 	}
 }
 
