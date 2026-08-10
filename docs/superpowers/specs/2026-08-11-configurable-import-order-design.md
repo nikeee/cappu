@@ -3,7 +3,7 @@
 ## Goal
 
 Let a project decide how `cappu format` groups and orders its import block, by
-listing glob patterns in `cappu.json`. Today the order is fixed: statics first,
+listing package prefixes in `cappu.json`. Today the order is fixed: statics first,
 then every other import in one lexicographic block, which is what
 google-java-format produces in google style.
 
@@ -23,32 +23,35 @@ Two things motivate this:
 }
 ```
 
-`importOrder` is an optional array of strings. Each entry is either a glob or
+`importOrder` is an optional array of strings. Each entry is either a pattern or
 the empty string.
 
-- A **glob** is matched against the import's full name (`java.io.File`), not
-  against a path. `*` matches any characters, dots included, so `java.*` covers
-  `java.io.File`. There is no `**`.
-- The **empty string** inserts a blank line at that position. Consecutive globs
-  share one block with no blank line between them.
-- **The most specific pattern wins**, measured as the longest literal prefix -
-  the characters before the pattern's first `*`. `com.acme.*` (9) beats `com.*`
-  (4), and `*` (0) loses to everything, so it works as the catch-all wherever it
-  sits. Two patterns with equally long prefixes are broken by list order.
+- A **pattern** is a package prefix ending in `*`, matched against the import's
+  full name: `java.*` selects everything whose name starts with `java.`, and
+  `*` selects everything. The `*` is only ever the last character - there is no
+  matching inside a name - so the whole rule is
+  `name.startsWith(pattern without its trailing "*")` and no glob engine is
+  involved. A pattern with a `*` anywhere else, or with none at all, is a
+  config error naming the offending entry.
+- The **empty string** inserts a blank line at that position. Consecutive
+  patterns share one block with no blank line between them.
+- **The longest matching prefix wins.** `com.acme.` (9 characters) beats `com.`
+  (4), and `*` has an empty prefix, so it loses to everything and works as the
+  catch-all wherever it sits. Equal-length prefixes are broken by list order.
 
-  Specificity is deliberately independent of list position, so the list controls
+  Precedence is deliberately independent of list position, so the list controls
   only *where a block appears*. `["com.*", "", "com.acme.*"]` puts
-  `com.acme.Widget` in the second block and everything else `com` in the first;
-  under a first-match rule that configuration would be impossible to express -
-  the general pattern would swallow the specific one, leaving an empty block.
-  IntelliJ and spotless resolve it the same way.
+  `com.acme.Widget` in the second block and every other `com` import in the
+  first; if the first match won instead, that configuration could not be
+  expressed at all - the general pattern would swallow the specific one and
+  leave an empty block. IntelliJ and spotless resolve it the same way.
 
 ### Fixed rules, not configurable
 
 - **Static imports** always form their own block, first, sorted
   lexicographically. `importOrder` governs the non-static imports only. This is
   what google-java-format does and what every other Java tool defaults to.
-- **Unmatched imports** - those matching no glob, when the list has no `*` -
+- **Unmatched imports** - those matching no prefix, when the list has no `*` -
   form a final block of their own, separated by a blank line. Adding a
   dependency in an unfamiliar top-level package can then never silently join an
   unrelated group, and formatting never fails over a missing entry.
@@ -70,7 +73,7 @@ google-java-format":
 The AOSP order is deliberately **not** expressed as a default `importOrder`
 list, because gjf inserts a blank line whenever the top-level package changes -
 `com.foo` and `io.bar` split even though both are third-party - and a static
-list of globs cannot say that. It stays a built-in comparator
+list of prefixes cannot say that. It stays a built-in comparator
 (`ImportOrderer.AOSP_IMPORT_COMPARATOR` plus `shouldInsertBlankLineAosp`).
 Setting `importOrder` replaces whichever built-in applies.
 
@@ -89,10 +92,10 @@ the action currently sorts static imports *last* while the formatter puts them
 *first*, so organizing a file and then formatting it produced two different
 orders.
 
-**Glob matching** reuses what the build already has: Node's `path.matchesGlob`
-in TypeScript, `globToRegexp` in Go (today in `internal/build`, moved to a
-shared spot). Both already treat a dotted string the way this feature needs,
-and a test pins the two engines to each other.
+**Matching** needs no glob engine: strip the trailing `*` once when the config
+is read, then compare with `startsWith`. The pattern's shape is validated at
+that point, so a malformed entry is reported against `cappu.json` rather than
+silently matching nothing.
 
 **Config plumbing**: `importOrder?: string[]` in the zod schema and in the Go
 `FormatterOptions` mirror, an entry in the `cappu init` template, and the
@@ -101,7 +104,7 @@ against the schema keeps them in sync.
 
 ## Testing
 
-- Unit tests for the ordering function in both builds, one per rule: glob
+- Unit tests for the ordering function in both builds, one per rule: prefix
   grouping, blank-line entries, longest-prefix precedence (including a specific
   group placed *after* a general one, and a `*` that is not last), statics
   first, the unmatched bucket, duplicate removal, and both built-in orders.
@@ -111,7 +114,8 @@ against the schema keeps them in sync.
 - Code-action tests asserting that organizing imports agrees with formatting
   them.
 - Config tests: the schema accepts a valid `importOrder`, rejects a non-string
-  entry, and the template stays schema-valid.
+  entry and a pattern whose `*` is not final, and the template stays
+  schema-valid.
 
 ## Out of scope
 
