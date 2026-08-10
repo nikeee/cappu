@@ -76,3 +76,4 @@ jobs:
         with:
           name: cappu-go-binaries
           path: togo/dist/*
+          retention-days: 7
