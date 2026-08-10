@@ -887,7 +887,8 @@ func (p *printer) modifiers(mods *compiler.NodeArray, annoMode string) Doc {
 		parts = append(parts, p.annotation(ad))
 		// A comment on the same line as an own-line annotation stays with it
 		// (`@SuppressWarnings("x") // why`) instead of floating away.
-		if ownLine {
+		switch {
+		case ownLine:
 			if tc, ok := p.trailingCommentAfter(a); ok {
 				parts = append(parts, text(" "), reflow(tc.text))
 			}
@@ -916,12 +917,12 @@ func (p *printer) modifiers(mods *compiler.NodeArray, annoMode string) Doc {
 					parts = append(parts, hardline)
 				}
 			}
-		} else if annoMode == "var" {
+		case annoMode == "var":
 			// gjf visitModifiers separates a horizontal-direction annotation from
 			// what follows with a real break, not a space: a marker annotation on a
 			// field or local moves to its own line when the declaration overflows.
 			parts = append(parts, brk(fillUnified, " ", ZERO, nil))
-		} else {
+		default:
 			parts = append(parts, text(" "))
 		}
 	}
@@ -1448,10 +1449,6 @@ func (p *printer) fieldDeclarationTail(d *compiler.FieldDeclarationData, tail Do
 // initializer keeps its own break-after-`=`, indented +4 (or +8 when the name
 // also broke). The break-before-name's fit check excludes the initializer (a
 // sibling level), so a long initializer alone does not trigger it.
-func (p *printer) singleDeclaration(typ Doc, v *compiler.VariableDeclaratorData, trailing Doc) Doc {
-	return p.singleDeclarationType(typ, v, trailing, -1)
-}
-
 // singleDeclarationType also takes the TYPE's end offset, so a `//` comment
 // between the type and the name can ride the type's line (gjf hangs it off that
 // token) and force the break before the name.
@@ -2442,10 +2439,6 @@ func (p *printer) tryStatement(s *compiler.TryStatementData) Doc {
 		parts = append(parts, open, p.braceOpenCollapse(s.FinallyBlock, false), p.clauseRestCollapse(s.FinallyBlock, false, false))
 	}
 	return concat(parts...)
-}
-
-func (p *printer) resource(r *compiler.ResourceData) Doc {
-	return p.resourceTrailing(r, nil)
 }
 
 // resourceTrailing is resource with the `) {` that closes the resource list
@@ -3970,7 +3963,7 @@ func (p *printer) arrayInitializerFull(e *compiler.ArrayInitializerData, end int
 	if trailingComma || closingComment != "" || len(dangling) > 0 {
 		open = fillForced
 	}
-	var inner Doc = level(ZERO, innerParts)
+	inner := level(ZERO, innerParts)
 	if inAnnotation && !p.allShortItems(els) {
 		inner = concat(innerParts...)
 	}
