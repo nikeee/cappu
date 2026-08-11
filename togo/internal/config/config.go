@@ -5,14 +5,15 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
-	"path/filepath"
 	"slices"
+	"strings"
 
+	"encoding/json"
 	"github.com/tidwall/jsonc"
+	"net/url"
+	"path/filepath"
 )
 
 // InlayHints configures the language server's inlay hints. Absent in cappu.json
@@ -86,6 +87,12 @@ type FormatterOptions struct {
 	Style string `json:"style"`
 	// Ignore is a list of glob patterns excluded from formatting.
 	Ignore []string `json:"ignore"`
+	// ImportOrder lays out the import block: package prefixes ending in "*", in
+	// the order their groups appear, with "" inserting a blank line. An import
+	// joins the group whose prefix matches it longest. Statics always come first
+	// in their own group; imports matching nothing form a last group. Nil means
+	// the style's own google-java-format order.
+	ImportOrder []string `json:"importOrder"`
 }
 
 // TestOptions mirrors the "testOptions" section. The JUnit launcher always
@@ -301,6 +308,19 @@ func (c *Config) validate() error {
 	case "google", "aosp":
 	default:
 		return fmt.Errorf(`formatterOptions.style: must be one of "google", "aosp"`)
+	}
+	// An importOrder entry is a package prefix ending in "*" (or ""), never a
+	// glob: matching is a plain prefix test, so a `*` anywhere else is a mistake
+	// worth reporting rather than a rule that silently matches nothing.
+	for _, entry := range c.FormatterOptions.ImportOrder {
+		if entry == "" {
+			continue
+		}
+		if !strings.HasSuffix(entry, "*") || strings.Contains(strings.TrimSuffix(entry, "*"), "*") {
+			return fmt.Errorf(
+				`formatterOptions.importOrder: %q must be "" or a package prefix ending in "*", e.g. "java.*"`,
+				entry)
+		}
 	}
 	switch c.TestOptions.OutputFormat {
 	case "text", "junit":

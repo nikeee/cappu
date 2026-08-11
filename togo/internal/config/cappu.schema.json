@@ -175,6 +175,12 @@
           "items": {
             "type": "string"
           }
+        },
+        "importOrder": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

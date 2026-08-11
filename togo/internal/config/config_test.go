@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -225,6 +226,31 @@ func TestLoadRejectsInvalidStyle(t *testing.T) {
 	path := writeConfig(t, `{ "formatterOptions": { "style": "k&r" } }`)
 	if _, err := Load(path, ""); err == nil {
 		t.Error("expected a validation error for a style outside the enum")
+	}
+}
+
+// An importOrder entry is a package prefix ending in "*", never a glob:
+// matching is a plain prefix test, so anything else is reported rather than
+// silently matching nothing. Mirrors the TS config test.
+func TestLoadImportOrder(t *testing.T) {
+	path := writeConfig(t, `{ "formatterOptions": { "importOrder": ["android.*", "", "java.*", "*"] } }`)
+	c, err := Load(path, "")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := []string{"android.*", "", "java.*", "*"}
+	if got := c.FormatterOptions.ImportOrder; !slices.Equal(got, want) {
+		t.Errorf("ImportOrder = %v, want %v", got, want)
+	}
+	if c2, err := Load(writeConfig(t, `{}`), ""); err != nil {
+		t.Fatalf("Load: %v", err)
+	} else if c2.FormatterOptions.ImportOrder != nil {
+		t.Errorf("ImportOrder defaults to %v, want nil (the style's own order)", c2.FormatterOptions.ImportOrder)
+	}
+	for _, bad := range []string{`["com.*.internal"]`, `["com.acme"]`} {
+		if _, err := Load(writeConfig(t, `{ "formatterOptions": { "importOrder": `+bad+` } }`), ""); err == nil {
+			t.Errorf("expected a validation error for importOrder %s", bad)
+		}
 	}
 }
 

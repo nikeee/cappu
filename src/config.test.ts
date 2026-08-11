@@ -225,3 +225,34 @@ test("testOptions.coverage defaults to false and parses true", () => {
   write({ testOptions: { coverage: true } });
   expect(loadConfig(undefined, dir.path).testOptions.coverage).toBe(true);
 });
+
+// `importOrder` entries are prefixes, not globs: the `*` may only be the final
+// character, so a pattern that would need real globbing is a config error
+// rather than a rule that silently matches nothing.
+test("importOrder accepts prefixes and rejects a non-final star", () => {
+  using dir = TempDir.create("cfg-");
+  const write = (importOrder: string[]): void =>
+    writeFileSync(
+      join(dir.path, DEFAULT_CONFIG_NAME),
+      JSON.stringify({ formatterOptions: { importOrder } }),
+    );
+
+  write(["android.*", "", "java.*", "*"]);
+  expect(loadConfig(undefined, dir.path).formatterOptions.importOrder).toEqual([
+    "android.*",
+    "",
+    "java.*",
+    "*",
+  ]);
+
+  write(["com.*.internal"]);
+  expect(() => loadConfig(undefined, dir.path)).toThrow(/package prefix ending in/);
+  write(["com.acme"]);
+  expect(() => loadConfig(undefined, dir.path)).toThrow(/package prefix ending in/);
+});
+
+test("importOrder is unset by default, meaning the style's own order", () => {
+  using dir = TempDir.create("cfg-");
+  writeFileSync(join(dir.path, DEFAULT_CONFIG_NAME), "{}");
+  expect(loadConfig(undefined, dir.path).formatterOptions.importOrder).toBeUndefined();
+});

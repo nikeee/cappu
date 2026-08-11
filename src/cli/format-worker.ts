@@ -12,9 +12,9 @@ import { formatOne, type Outcome } from "./format-one.ts";
 interface WorkerData {
   files: string[];
   cwd: string;
-  style: FormatOptions["style"];
+  options: FormatOptions;
 }
 
-const { files, cwd, style } = workerData as WorkerData;
-const outcomes: Outcome[] = files.map(f => formatOne(f, cwd, style));
+const { files, cwd, options } = workerData as WorkerData;
+const outcomes: Outcome[] = files.map(f => formatOne(f, cwd, options));
 parentPort!.postMessage(outcomes);

@@ -115,6 +115,17 @@ const LspOptionsSchema = z.object({
   inlayHints: InlayHintsSchema.optional(),
 });
 
+// One `importOrder` entry: a package prefix ending in `*` (`java.*`, `*`), or
+// `""` for a blank line. The `*` may only be the last character - matching is a
+// plain startsWith, with no globbing inside a name - so anything else is a
+// mistake worth reporting against the config rather than silently matching
+// nothing.
+const importOrderEntry = z
+  .string()
+  .refine(entry => entry === "" || (entry.endsWith("*") && !entry.slice(0, -1).includes("*")), {
+    error: 'an importOrder entry must be "" or a package prefix ending in "*", e.g. "java.*"',
+  });
+
 // `cappu format` (nikeee/cappu#24): a google-java-format-compatible formatter.
 // Deliberately few knobs - the only choice is the indent style, matching what
 // spotless exposes (googleJavaFormat vs its AOSP variant).
@@ -123,6 +134,15 @@ const FormatterSchema = z.object({
   style: z.enum(["google", "aosp"]).default("google"),
   /** Glob patterns (relative to the config dir) excluded from formatting. */
   ignore: z.array(z.string()).default([]),
+  /**
+   * Import block layout: package prefixes ending in `*`, in the order their
+   * groups should appear, with `""` inserting a blank line. An import joins the
+   * group whose prefix matches it longest, so `["com.*", "", "com.acme.*"]`
+   * puts `com.acme.X` in the second group. Static imports always come first in
+   * a group of their own, and imports matching nothing form a last group.
+   * Unset: the style's own google-java-format order.
+   */
+  importOrder: z.array(importOrderEntry).optional(),
 });
 
 // `cappu test` (nikeee/cappu#16): the JUnit launcher always streams its text
@@ -328,6 +348,13 @@ export const CONFIG_TEMPLATE = `
   // "formatterOptions": {
   //   "style": "google",   // "google" (2-space) or "aosp" (4-space)
   //   "ignore": [],         // glob patterns excluded from formatting
+  //
+  //   // Import block layout: package prefixes ending in "*", in the order their
+  //   // groups appear, with "" inserting a blank line. An import joins the group
+  //   // whose prefix matches it longest. Statics always come first in their own
+  //   // group; imports matching nothing form a last group. Unset: the style's
+  //   // own google-java-format order.
+  //   "importOrder": ["android.*", "com.*", "", "org.*", "*", "", "java.*", "javax.*"],
   // },
 
   // \`cappu test\` output. The launcher always prints its summary to stdout;

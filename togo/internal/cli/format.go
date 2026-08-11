@@ -61,7 +61,7 @@ func RunFormat(files []string, write bool, cfg *config.Config) int {
 
 	paint := painter(os.Stderr)
 	cwd, _ := os.Getwd()
-	opts := format.FormatOptions{Style: style}
+	opts := format.FormatOptions{Style: style, ImportOrder: cfg.FormatterOptions.ImportOrder}
 
 	// Parallel phase: read + format every file with bounded concurrency. The
 	// formatter is independent per file, so this scales with the CPU count.

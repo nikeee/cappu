@@ -31,11 +31,11 @@ const PARALLEL_THRESHOLD = 64;
 async function computeOutcomes(
   targets: string[],
   cwd: string,
-  style: FormatOptions["style"],
+  options: FormatOptions,
 ): Promise<Outcome[]> {
   const maxWorkers = Math.min(availableParallelism(), targets.length);
   if (targets.length < PARALLEL_THRESHOLD || maxWorkers <= 1) {
-    return targets.map(f => formatOne(f, cwd, style));
+    return targets.map(f => formatOne(f, cwd, options));
   }
 
   const results = new Array<Outcome>(targets.length);
@@ -47,7 +47,7 @@ async function computeOutcomes(
     workers.push(
       new Promise<void>((res, rej) => {
         const worker = new Worker(new URL("./format-worker.ts", import.meta.url), {
-          workerData: { files, cwd, style },
+          workerData: { files, cwd, options },
         });
         worker.on("message", (out: Outcome[]) => {
           out.forEach((o, k) => (results[base + k] = o));
@@ -69,7 +69,10 @@ export async function runFormat(
   flags: FormatFlags,
   config: CappuConfig,
 ): Promise<never> {
-  const style = config.formatterOptions.style;
+  const options: FormatOptions = {
+    style: config.formatterOptions.style,
+    importOrder: config.formatterOptions.importOrder,
+  };
   // Explicit file arguments win; otherwise format the whole project.
   const targets =
     files.length > 0
@@ -83,7 +86,7 @@ export async function runFormat(
 
   const paint = painter(process.stderr);
   const cwd = process.cwd();
-  const outcomes = await computeOutcomes(targets, cwd, style);
+  const outcomes = await computeOutcomes(targets, cwd, options);
 
   // Serial phase: emit output and apply writes in target order (deterministic,
   // independent of which worker finished first).

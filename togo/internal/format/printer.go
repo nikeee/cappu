@@ -24,6 +24,9 @@ import (
 // FormatOptions selects the layout style.
 type FormatOptions struct {
 	Style string // "google" or "aosp"
+	// ImportOrder lays out the import block (see importorder.go). Nil means the
+	// style's own google-java-format order.
+	ImportOrder []string
 }
 
 const width = 100
@@ -69,7 +72,7 @@ func formatSourceFile(sf *compiler.Node, options FormatOptions) (string, error) 
 	if options.Style == "aosp" {
 		mult = 2
 	}
-	p := newPrinter(sf, mult)
+	p := newPrinter(sf, mult, options)
 	doc := p.sourceFile(sf.AsSourceFile())
 	out := printDoc(doc, printOptions{
 		width:      width,
@@ -148,11 +151,13 @@ type printer struct {
 	// typeAnnotationNames holds simple names imported as a well-known nullness
 	// type annotation (e.g. "Nullable" with `import org.jspecify...Nullable;`).
 	typeAnnotationNames map[string]bool
+	// options is the format configuration; the import block reads its layout.
+	options FormatOptions
 }
 
-func newPrinter(sf *compiler.Node, mult int) *printer {
+func newPrinter(sf *compiler.Node, mult int, options FormatOptions) *printer {
 	text := sf.AsSourceFile().Text
-	p := &printer{sf: sf, text: text, comments: collectComments(text), mult: mult, typeAnnotationNames: map[string]bool{}, emittedAhead: map[int]bool{}, importTrailing: map[*compiler.Node]string{}}
+	p := &printer{sf: sf, text: text, comments: collectComments(text), mult: mult, options: options, typeAnnotationNames: map[string]bool{}, emittedAhead: map[int]bool{}, importTrailing: map[*compiler.Node]string{}}
 	for _, imp := range nodes(sf.AsSourceFile().Imports) {
 		id := imp.AsImportDeclaration()
 		if id.IsStatic {
@@ -515,14 +520,17 @@ func (p *printer) sourceFile(sf *compiler.SourceFileData) Doc {
 		}
 		blocks = append(blocks, concat(pkg...))
 	}
-	var statics, nonStatics []*compiler.Node
-	for _, imp := range nodes(sf.Imports) {
-		if imp.AsImportDeclaration().IsStatic {
-			statics = append(statics, imp)
-		} else {
-			nonStatics = append(nonStatics, imp)
-		}
+	// Grouping and ordering live in importorder.go, shared with the code action
+	// and the MCP tool; the printer only renders the blocks it returns.
+	entries := make([]importEntry, sf.Imports.Len())
+	for i, imp := range nodes(sf.Imports) {
+		d := imp.AsImportDeclaration()
+		entries[i] = importEntry{name: p.entityName(d.Name), isStatic: d.IsStatic, node: imp}
 	}
+	importBlocks := OrderImports(entries, ImportOrderOptions{
+		Style:       p.options.Style,
+		ImportOrder: p.options.ImportOrder,
+	})
 	// A comment between the package declaration and the first import belongs to
 	// the imports and stays in front of them; the sorting moves the imports around
 	// it. Without this it stayed pending and surfaced after the whole import
@@ -550,14 +558,16 @@ func (p *printer) sourceFile(sf *compiler.SourceFileData) Doc {
 		}
 	}
 	p.importTrailingComments(sf.Imports)
-	for _, g := range [][]*compiler.Node{statics, nonStatics} {
-		if len(g) > 0 {
-			if importLead != nil {
-				blocks = append(blocks, concat(importLead, p.importGroup(g)))
-				importLead = nil
-			} else {
-				blocks = append(blocks, p.importGroup(g))
-			}
+	for _, g := range importBlocks {
+		group := make([]*compiler.Node, len(g))
+		for i, e := range g {
+			group[i] = e.node
+		}
+		if importLead != nil {
+			blocks = append(blocks, concat(importLead, p.importGroup(group)))
+			importLead = nil
+		} else {
+			blocks = append(blocks, p.importGroup(group))
 		}
 	}
 	if sf.ModuleDeclaration != nil {
@@ -725,22 +735,9 @@ func (p *printer) moduleNameList(names *compiler.NodeArray) Doc {
 	return indent(indent(concat(hardline, join(concat(text(","), hardline), items))))
 }
 
-func (p *printer) importGroup(imports []*compiler.Node) Doc {
-	// Sort keys are precomputed: entityName rebuilds the dotted name from the
-	// source text, so keying per comparison would be O(n log n) rebuilds.
-	type keyed struct {
-		key string
-		imp *compiler.Node
-	}
-	entries := make([]keyed, len(imports))
-	for i, imp := range imports {
-		entries[i] = keyed{p.entityName(imp.AsImportDeclaration().Name), imp}
-	}
-	slices.SortStableFunc(entries, func(a, b keyed) int { return cmp.Compare(a.key, b.key) })
-	sorted := make([]*compiler.Node, len(entries))
-	for i, e := range entries {
-		sorted[i] = e.imp
-	}
+// importGroup renders one import block, already grouped and ordered by
+// OrderImports.
+func (p *printer) importGroup(sorted []*compiler.Node) Doc {
 	seen := map[string]int{}
 	var lines []Doc
 	for _, imp := range sorted {

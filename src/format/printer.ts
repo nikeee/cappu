@@ -9,6 +9,7 @@
 
 import { skipTrivia, tokenToString } from "../compiler/utilities.ts";
 import { reformatParamComment, rewriteComment } from "./comment-rewrite.ts";
+import { orderImports } from "./import-order.ts";
 import { type Comment, collectComments } from "./comments.ts";
 import {
   type Annotation,
@@ -138,6 +139,11 @@ const TYPE_ANNOTATION_FQNS = new Set([
 
 export interface FormatOptions {
   style: "google" | "aosp";
+  /**
+   * Import block layout (see src/format/import-order.ts). Unset means the
+   * style's own google-java-format order.
+   */
+  importOrder?: readonly string[];
 }
 
 const WIDTH = 100;
@@ -167,7 +173,7 @@ function reindentTextBlock(raw: string): string {
 
 export function formatSourceFile(sf: SourceFile, options: FormatOptions): string {
   const mult = options.style === "aosp" ? 2 : 1;
-  const p = new Printer(sf, mult);
+  const p = new Printer(sf, mult, options);
   const doc = p.sourceFile(sf);
   const text = printDoc(doc, {
     width: WIDTH,
@@ -227,6 +233,7 @@ class Printer {
   constructor(
     private readonly sf: SourceFile,
     private readonly mult: number,
+    private readonly options: FormatOptions = { style: "google" },
   ) {
     this.text = sf.text;
     this.comments = collectComments(sf.text);
@@ -533,8 +540,16 @@ class Printer {
       if (tc) pkg.push(" ", reflow(tc.text));
       blocks.push(concat(pkg));
     }
-    const statics = sf.imports.filter(i => i.isStatic);
-    const nonStatics = sf.imports.filter(i => !i.isStatic);
+    // Grouping and ordering live in import-order.ts, shared with the code
+    // action and the MCP tool; the printer only renders the blocks it returns.
+    const importBlocks = orderImports(
+      sf.imports.map(imp => ({
+        name: this.entityName(imp.name),
+        isStatic: imp.isStatic,
+        imp,
+      })),
+      this.options,
+    );
     // A comment between the package declaration and the first import belongs to
     // the imports and stays in front of them; the sorting moves the imports
     // around it. Without this it stayed pending and surfaced after the whole
@@ -556,11 +571,9 @@ class Printer {
       }
     }
     this.importTrailingComments(sf.imports);
-    for (const g of [statics, nonStatics]) {
-      if (g.length > 0) {
-        blocks.push(concat([importLead, this.importGroup(g)]));
-        importLead = "";
-      }
+    for (const g of importBlocks) {
+      blocks.push(concat([importLead, this.importGroup(g.map(e => e.imp))]));
+      importLead = "";
     }
     if (sf.moduleDeclaration) {
       blocks.push(this.moduleDeclaration(sf.moduleDeclaration));
@@ -698,13 +711,8 @@ class Printer {
     return indent(indent(concat([hardline, join(concat([",", hardline]), items)])));
   }
 
-  private importGroup(imports: ImportDeclaration[]): Doc {
-    // Sort keys are precomputed: entityName rebuilds the dotted name from the
-    // source text, so keying per comparison would be O(n log n) rebuilds.
-    const sorted = imports
-      .map(imp => ({ key: this.entityName(imp.name), imp }))
-      .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
-      .map(entry => entry.imp);
+  /** One import block, already grouped and ordered by `orderImports`. */
+  private importGroup(sorted: ImportDeclaration[]): Doc {
     const seen = new Map<string, number>();
     const lines: Doc[] = [];
     for (const imp of sorted) {

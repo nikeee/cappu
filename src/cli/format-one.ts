@@ -24,7 +24,7 @@ export interface Outcome {
   formatted?: string;
 }
 
-export function formatOne(file: string, cwd: string, style: FormatOptions["style"]): Outcome {
+export function formatOne(file: string, cwd: string, options: FormatOptions): Outcome {
   const rel = relative(cwd, file);
   let source: string;
   try {
@@ -34,7 +34,7 @@ export function formatOne(file: string, cwd: string, style: FormatOptions["style
   }
   let formatted: string;
   try {
-    formatted = formatSource(source, { style }, file);
+    formatted = formatSource(source, options, file);
   } catch (e) {
     if (e instanceof UnsupportedSyntaxError) return { rel, skipped: true };
     return { rel, fmtErr: (e as Error).message };
