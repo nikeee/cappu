@@ -7,11 +7,11 @@ package services
 // Port of src/services/codeActions.ts.
 
 import (
-	"cmp"
 	"slices"
 	"strings"
 
 	"github.com/nikeee/cappu/internal/compiler"
+	"github.com/nikeee/cappu/internal/format"
 )
 
 func forEachDescendant(node *compiler.Node, cb func(*compiler.Node)) {
@@ -151,7 +151,61 @@ func importText(imp *compiler.Node) string {
 	return "import " + static + compiler.EntityNameToString(d.Name) + star + ";"
 }
 
-func organizeImports(sf *compiler.Node) []CodeActionResult {
+// importComment holds the comments attached to one import, by gjf's rule: a
+// same-line comment trails its import, and own-line comments between two imports
+// belong to the PRECEDING one. Both travel with the import when the block is
+// reordered. Comments before the first import and after the last one lie outside
+// the rewritten range and are left alone.
+type importComment struct {
+	trailing string
+	follow   []string
+	end      int
+}
+
+func importComments(text string, imports []*compiler.Node) map[*compiler.Node]importComment {
+	all := format.CollectComments(text)
+	out := map[*compiler.Node]importComment{}
+	for i, imp := range imports {
+		entry := importComment{end: imp.End}
+		var next *compiler.Node
+		if i+1 < len(imports) {
+			next = imports[i+1]
+		}
+	commentLoop:
+		for _, c := range all {
+			if c.Pos < imp.End {
+				continue
+			}
+			if next != nil && c.Pos >= compiler.SkipTrivia(text, next.Pos) {
+				break
+			}
+			switch {
+			case entry.trailing == "" && !strings.Contains(text[imp.End:c.Pos], "\n"):
+				entry.trailing = c.Text
+			case next != nil:
+				entry.follow = append(entry.follow, c.Text)
+			default:
+				// After the last import: belongs to whatever follows the block.
+				break commentLoop
+			}
+			entry.end = c.End
+		}
+		out[imp] = entry
+	}
+	return out
+}
+
+// importEntry adapts an import declaration to format.ImportLike.
+type importEntry struct {
+	name     string
+	isStatic bool
+	node     *compiler.Node
+}
+
+func (e importEntry) ImportName() string   { return e.name }
+func (e importEntry) ImportIsStatic() bool { return e.isStatic }
+
+func organizeImports(sf *compiler.Node, layout format.ImportOrderOptions) []CodeActionResult {
 	data := sf.AsSourceFile()
 	imports := data.Imports
 	if imports.Len() == 0 {
@@ -165,36 +219,53 @@ func organizeImports(sf *compiler.Node) []CodeActionResult {
 			}
 		})
 	}
-	var kept []*compiler.Node
+	comments := importComments(data.Text, imports.Nodes)
+	var kept []importEntry
 	for _, imp := range imports.Nodes {
 		d := imp.AsImportDeclaration()
-		if d.IsStatic || d.IsOnDemand {
-			kept = append(kept, imp)
-			continue
-		}
 		fqn := compiler.EntityNameToString(d.Name)
-		if used[fqn[strings.LastIndex(fqn, ".")+1:]] {
-			kept = append(kept, imp)
+		c := comments[imp]
+		// An import carrying a comment is kept whatever the body looks like: the
+		// comment usually says why it is there (`// NOPMD: Required by ECJ`), and
+		// dropping the line would drop that explanation with it.
+		hasComment := c.trailing != "" || len(c.follow) > 0
+		if d.IsStatic || d.IsOnDemand || hasComment || used[fqn[strings.LastIndex(fqn, ".")+1:]] {
+			kept = append(kept, importEntry{name: fqn, isStatic: d.IsStatic, node: imp})
 		}
 	}
-	sorted := slices.Clone(kept)
-	slices.SortStableFunc(sorted, func(a, b *compiler.Node) int {
-		da, db := a.AsImportDeclaration(), b.AsImportDeclaration()
-		if da.IsStatic != db.IsStatic {
-			if da.IsStatic {
-				return 1
-			}
-			return -1
+	// Grouping and ordering come from the formatter's module, so organizing and
+	// formatting a file can never disagree.
+	blocks := format.OrderImports(kept, layout)
+	render := func(imp *compiler.Node) string {
+		c := comments[imp]
+		line := importText(imp)
+		if c.trailing != "" {
+			line += " " + c.trailing
 		}
-		return cmp.Compare(importText(a), importText(b))
-	})
+		for _, f := range c.follow {
+			line += "\n" + f
+		}
+		return line
+	}
+	blockTexts := make([]string, len(blocks))
+	for i, b := range blocks {
+		lines := make([]string, len(b))
+		for j, e := range b {
+			lines[j] = render(e.node)
+		}
+		blockTexts[i] = strings.Join(lines, "\n")
+	}
+	newText := strings.Join(blockTexts, "\n\n")
+
 	start := compiler.SkipTrivia(data.Text, imports.Nodes[0].Pos)
+	// The range runs to the end of the last import's own comments, so a trailing
+	// comment cannot be left behind when its import moves.
 	end := imports.Nodes[imports.Len()-1].End
-	var parts []string
-	for _, imp := range sorted {
-		parts = append(parts, importText(imp))
+	for _, imp := range imports.Nodes {
+		if e := comments[imp].end; e > end {
+			end = e
+		}
 	}
-	newText := strings.Join(parts, "\n")
 	if newText == data.Text[start:end] {
 		return nil
 	}
@@ -2598,9 +2669,15 @@ func mergeCatchClauses(program *compiler.Program, sf *compiler.Node, start int) 
 // GetCodeActions returns all code actions offered for a selection range. features
 // gates modern-Java rewrites to the target version that supports them.
 func GetCodeActions(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int, features LanguageFeatures) []CodeActionResult {
+	return GetCodeActionsLayout(program, checker, sf, start, end, features, format.ImportOrderOptions{Style: "google"})
+}
+
+// GetCodeActionsLayout is GetCodeActions with the project's import layout, so
+// organize-imports produces what `cappu format` would write.
+func GetCodeActionsLayout(program *compiler.Program, checker *compiler.Checker, sf *compiler.Node, start, end int, features LanguageFeatures, layout format.ImportOrderOptions) []CodeActionResult {
 	var out []CodeActionResult
 	out = append(out, addMissingImport(program, checker, sf, start)...)
-	out = append(out, organizeImports(sf)...)
+	out = append(out, organizeImports(sf, layout)...)
 	// extract-local emits a `var` declaration (SE10).
 	if features.SupportsVar {
 		out = append(out, extractLocalVariable(sf, start, end)...)

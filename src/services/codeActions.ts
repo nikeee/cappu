@@ -3,6 +3,8 @@
 // pure and testable; the server maps them to LSP WorkspaceEdits. Actions are
 // offered for a [start, end) selection range in one source file.
 
+import { collectComments } from "../format/comments.ts";
+import { type ImportOrderOptions, orderImports } from "../format/import-order.ts";
 import { type Checker, findUnusedImports } from "../compiler/checker.ts";
 import { Diagnostics } from "../compiler/diagnostics.ts";
 import { getIdentifierAtPosition, getNodeAtPosition } from "./nodeAtPosition.ts";
@@ -181,7 +183,43 @@ function importText(imp: ImportDeclaration): string {
   return `import ${imp.isStatic ? "static " : ""}${entityNameToString(imp.name)}${star};`;
 }
 
-function organizeImports(sourceFile: SourceFile): CodeActionResult[] {
+/**
+ * The comments attached to each import, by gjf's rule: a same-line comment
+ * trails its import, and own-line comments between two imports belong to the
+ * PRECEDING one. Both travel with the import when the block is reordered.
+ * Comments before the first import and after the last one lie outside the
+ * rewritten range and are left alone.
+ */
+function importComments(
+  sourceFile: SourceFile,
+  imports: readonly ImportDeclaration[],
+): Map<ImportDeclaration, { trailing?: string; follow: string[]; end: number }> {
+  const all = collectComments(sourceFile.text);
+  const out = new Map<ImportDeclaration, { trailing?: string; follow: string[]; end: number }>();
+  imports.forEach((imp, i) => {
+    const next = imports[i + 1];
+    const entry: { trailing?: string; follow: string[]; end: number } = {
+      follow: [],
+      end: imp.end,
+    };
+    for (const c of all) {
+      if (c.pos < imp.end) continue;
+      if (next !== undefined && c.pos >= skipTrivia(sourceFile.text, next.pos)) break;
+      const between = sourceFile.text.slice(imp.end, c.pos);
+      if (entry.trailing === undefined && !between.includes("\n")) entry.trailing = c.text;
+      else if (next !== undefined) entry.follow.push(c.text);
+      else break; // after the last import: belongs to whatever follows the block
+      entry.end = c.end;
+    }
+    out.set(imp, entry);
+  });
+  return out;
+}
+
+function organizeImports(
+  sourceFile: SourceFile,
+  layout: ImportOrderOptions = { style: "google" },
+): CodeActionResult[] {
   const imports = sourceFile.imports;
   if (imports.length === 0) return [];
 
@@ -195,23 +233,36 @@ function organizeImports(sourceFile: SourceFile): CodeActionResult[] {
     });
   }
 
+  const comments = importComments(sourceFile, imports);
   const kept = imports.filter(imp => {
     if (imp.isStatic || imp.isOnDemand) return true; // cannot tell precisely: keep
+    // An import carrying a comment is kept whatever the body looks like: the
+    // comment usually says why it is there (`// NOPMD: Required by ECJ`), and
+    // dropping the line would drop that explanation with it.
+    const c = comments.get(imp);
+    if (c !== undefined && (c.trailing !== undefined || c.follow.length > 0)) return true;
     const fqn = entityNameToString(imp.name);
     return used.has(fqn.slice(fqn.lastIndexOf(".") + 1));
   });
 
-  // Non-static group first, then static; alphabetical within each.
-  const sorted = kept.toSorted((a, b) => {
-    if (a.isStatic !== b.isStatic) return a.isStatic ? 1 : -1;
-    const ta = importText(a);
-    const tb = importText(b);
-    return ta < tb ? -1 : ta > tb ? 1 : 0;
-  });
+  // Grouping and ordering come from the formatter's module, so organizing and
+  // formatting a file can never disagree.
+  const blocks = orderImports(
+    kept.map(imp => ({ name: entityNameToString(imp.name), isStatic: imp.isStatic, imp })),
+    layout,
+  );
+  const render = (imp: ImportDeclaration): string => {
+    const c = comments.get(imp);
+    const trailing = c?.trailing === undefined ? "" : ` ${c.trailing}`;
+    const follow = (c?.follow ?? []).map(text => `\n${text}`).join("");
+    return `${importText(imp)}${trailing}${follow}`;
+  };
+  const newText = blocks.map(b => b.map(e => render(e.imp)).join("\n")).join("\n\n");
 
   const start = skipTrivia(sourceFile.text, imports[0]!.pos);
-  const end = imports.at(-1)!.end;
-  const newText = sorted.map(importText).join("\n");
+  // The range runs to the end of the last import's own comments, so a trailing
+  // comment cannot be left behind when its import moves.
+  const end = Math.max(...imports.map(imp => comments.get(imp)?.end ?? imp.end));
   if (newText === sourceFile.text.slice(start, end)) return []; // already organized
   return [
     {
@@ -2181,10 +2232,12 @@ export function getCodeActions(
   start: number,
   end: number,
   features: LanguageFeatures,
+  /** How the import block is laid out; defaults to google-java-format's order. */
+  importLayout?: ImportOrderOptions,
 ): CodeActionResult[] {
   return [
     ...addMissingImport(program, checker, sourceFile, start),
-    ...organizeImports(sourceFile),
+    ...organizeImports(sourceFile, importLayout),
     // extract-local emits a `var` declaration (SE10).
     ...(features.supportsVar ? extractLocalVariable(sourceFile, start, end) : []),
     ...inlineLocalVariable(program, checker, sourceFile, start),

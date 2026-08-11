@@ -100,3 +100,15 @@ test("a malformed cappu.json edit keeps the last good config", async () => {
   expect(await describeSymbol(client, "lib.Util")).toContain(UTIL_STUB_URI);
   expect(await describeSymbol(client, "lib.Util")).toContain(UTIL_STUB_URI);
 });
+
+// The tool surface must match the Go port's: same names, so a client can talk to
+// either build. `organize_imports` is the source action `code_actions` cannot
+// serve, since that one needs a selection.
+test("the tool list includes organize_imports", async () => {
+  using dir = TempDir.create("mcp-tools-");
+  writeFileSync(join(dir.path, "C.java"), "package app;\nclass C {}\n");
+  const client = await startClient(dir.path);
+  const names = (await client.listTools()).tools.map(t => t.name);
+  expect(names).toContain("organize_imports");
+  expect(names).toContain("code_actions");
+});

@@ -35,7 +35,11 @@ export async function startMcpServer(
   // Language-level features are fixed by the configured release; recomputed on
   // each rebuild so a cappu.json release change takes effect.
   let features = languageFeatures(config?.compilerOptions.release);
-  let tools = createMcpTools(program, checker, features);
+  const importLayout = (): { style: "google" | "aosp"; importOrder?: readonly string[] } => ({
+    style: config?.formatterOptions.style ?? "google",
+    importOrder: config?.formatterOptions.importOrder,
+  });
+  let tools = createMcpTools(program, checker, features, importLayout());
   let project: ReturnType<typeof createProjectTools> | undefined;
   const mtimes = new Map<string, number>();
   let cpFingerprint = new Map<string, number>();
@@ -53,7 +57,7 @@ export async function startMcpServer(
     if (cfg) loadConfiguredPaths(program, cfg);
     checker = createChecker(program);
     features = languageFeatures(cfg?.compilerOptions.release);
-    tools = createMcpTools(program, checker, features);
+    tools = createMcpTools(program, checker, features, importLayout());
     if (cfg) project = createProjectTools(cfg);
     mtimes.clear();
     cpFingerprint = new Map();
@@ -303,6 +307,19 @@ export async function startMcpServer(
     async args => {
       refresh();
       return ok(tools.renameSymbol(args));
+    },
+  );
+
+  server.registerTool(
+    "organize_imports",
+    {
+      description:
+        "Sort and group a file's imports, dropping unused ones (the edit is returned for you to apply; nothing is written). Follows the project's formatterOptions, so the result matches `cappu format`.",
+      inputSchema: { file: z.string() },
+    },
+    async args => {
+      refresh();
+      return ok(tools.organizeImports(args));
     },
   );
 

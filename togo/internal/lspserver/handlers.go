@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/nikeee/cappu/internal/compiler"
+	"github.com/nikeee/cappu/internal/format"
 	"github.com/nikeee/cappu/internal/lsp"
 	"github.com/nikeee/cappu/internal/services"
 )
@@ -180,7 +181,14 @@ func (s *Server) onCodeAction(params json.RawMessage) (any, *lsp.ResponseError) 
 	start := compiler.GetPositionOfLineAndCharacter(text, lineStarts, p.Range.Start.Line, p.Range.Start.Character)
 	end := compiler.GetPositionOfLineAndCharacter(text, lineStarts, p.Range.End.Line, p.Range.End.Character)
 	var out []lsp.CodeAction
-	for _, action := range services.GetCodeActions(s.program, s.checker, sourceFile, start, end, s.features) {
+	layout := format.ImportOrderOptions{Style: "google"}
+	if s.config != nil {
+		layout = format.ImportOrderOptions{
+			Style:       s.config.FormatterOptions.Style,
+			ImportOrder: s.config.FormatterOptions.ImportOrder,
+		}
+	}
+	for _, action := range services.GetCodeActionsLayout(s.program, s.checker, sourceFile, start, end, s.features, layout) {
 		var edits []lsp.TextEdit
 		for _, c := range action.Changes {
 			edits = append(edits, lsp.TextEdit{Range: lspRange(text, lineStarts, c.Start, c.End), NewText: c.NewText})

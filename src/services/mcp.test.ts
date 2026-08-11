@@ -7,11 +7,14 @@ import { type Uri } from "../workspace.ts";
 import { languageFeatures } from "./codeActions.ts";
 import { createMcpTools } from "./mcp.ts";
 
-function toolsFor(files: Record<string, string>) {
+function toolsFor(
+  files: Record<string, string>,
+  importLayout?: { style: "google" | "aosp"; importOrder?: readonly string[] },
+) {
   const program = createProgram();
   for (const [uri, text] of Object.entries(files)) program.addProjectFile(uri as Uri, text);
   const checker = createChecker(program);
-  return createMcpTools(program, checker, languageFeatures(undefined));
+  return createMcpTools(program, checker, languageFeatures(undefined), importLayout);
 }
 
 test("diagnostics reports a syntax error with a 1-based location", () => {
@@ -268,4 +271,31 @@ test("codeActions is empty for an unknown file", () => {
   expect(tools.codeActions({ file: "/Nope.java", startLine: 1, startColumn: 1 }).actions).toEqual(
     [],
   );
+});
+
+// `organize_imports` is a source action - there is no selection to hand to
+// `code_actions` - so it gets a tool of its own, returning the edit for the
+// caller to apply. It follows the project's formatterOptions, so applying it
+// leaves the file the way `cappu format` would write it.
+test("organizeImports returns the edit and honours importOrder", () => {
+  const source =
+    "package app;\nimport java.util.List;\nimport org.junit.Test;\nclass C { List<String> xs; Test t; }";
+  const tools = toolsFor(
+    { "file:///C.java": source },
+    {
+      style: "google",
+      importOrder: ["org.*", "", "java.*"],
+    },
+  );
+  const { actions } = tools.organizeImports({ file: "/C.java" });
+  expect(actions).toHaveLength(1);
+  expect(actions[0].kind).toBe("source.organizeImports");
+  expect(actions[0].edits[0].newText).toBe("import org.junit.Test;\n\nimport java.util.List;");
+});
+
+test("organizeImports offers nothing for a file that is already organized", () => {
+  const tools = toolsFor({
+    "file:///C.java": "package app;\nimport java.util.List;\nclass C { List<String> xs; }",
+  });
+  expect(tools.organizeImports({ file: "/C.java" }).actions).toEqual([]);
 });

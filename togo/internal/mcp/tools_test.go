@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nikeee/cappu/internal/compiler"
+	"github.com/nikeee/cappu/internal/format"
 	"github.com/nikeee/cappu/internal/services"
 )
 
@@ -353,4 +354,35 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// organize_imports is a source action - there is no selection to hand to
+// code_actions - so it gets a tool of its own, returning the edit for the caller
+// to apply. It follows the project's formatterOptions, so applying it leaves the
+// file the way `cappu format` would write it. Mirrors the TS mcp test.
+func TestOrganizeImportsTool(t *testing.T) {
+	program := compiler.NewProgram()
+	program.AddProjectFile("file:///C.java", "package app;\nimport java.util.List;\nimport org.junit.Test;\nclass C { List<String> xs; Test t; }")
+	tools := NewToolsLayout(program, compiler.NewChecker(program), services.NewLanguageFeatures(nil),
+		format.ImportOrderOptions{Style: "google", ImportOrder: []string{"org.*", "", "java.*"}})
+	res := tools.OrganizeImports("/C.java")
+	if len(res.Actions) != 1 {
+		t.Fatalf("actions = %d, want 1", len(res.Actions))
+	}
+	if res.Actions[0].Kind != "source.organizeImports" {
+		t.Errorf("kind = %q", res.Actions[0].Kind)
+	}
+	want := "import org.junit.Test;\n\nimport java.util.List;"
+	if got := res.Actions[0].Edits[0].NewText; got != want {
+		t.Errorf("newText = %q, want %q", got, want)
+	}
+}
+
+func TestOrganizeImportsToolOffersNothingWhenOrganized(t *testing.T) {
+	program := compiler.NewProgram()
+	program.AddProjectFile("file:///C.java", "package app;\nimport java.util.List;\nclass C { List<String> xs; }")
+	tools := NewTools(program, compiler.NewChecker(program), services.NewLanguageFeatures(nil))
+	if got := tools.OrganizeImports("/C.java").Actions; len(got) != 0 {
+		t.Errorf("actions = %v, want none", got)
+	}
 }

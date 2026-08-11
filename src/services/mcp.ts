@@ -31,6 +31,7 @@ import {
 } from "../compiler/types.ts";
 import { isValidIdentifier, skipTrivia } from "../compiler/utilities.ts";
 import { isSyntheticUri, pathToUri, type Uri, uriToPath } from "../workspace.ts";
+import type { ImportOrderOptions } from "../format/import-order.ts";
 import { getCodeActions, type LanguageFeatures, type TextChange } from "./codeActions.ts";
 import { getDocumentSymbols } from "./documentSymbols.ts";
 import { enclosingCall, getHoverText, symbolKindWord } from "./hover.ts";
@@ -197,12 +198,15 @@ export interface McpTools {
     endLine?: number;
     endColumn?: number;
   }): { actions: McpCodeAction[] };
+  organizeImports(args: { file: string }): { actions: McpCodeAction[] };
 }
 
 export function createMcpTools(
   program: Program,
   checker: Checker,
   features: LanguageFeatures,
+  /** How the import block is laid out; defaults to google-java-format's order. */
+  importLayout?: ImportOrderOptions,
 ): McpTools {
   function diagnostics(args: { files?: string[] }): { diagnostics: McpDiagnostic[] } {
     const uris = args.files?.length ? args.files.map(pathToUri) : program.getAllUris();
@@ -438,6 +442,36 @@ export function createMcpTools(
   // apply itself; nothing is written. Positions are 1-based (as elsewhere here),
   // so a diagnostic's location can be fed straight in. endLine/endColumn default
   // to the start for a collapsed caret.
+  /**
+   * The `source.organizeImports` edit for a whole file. It needs its own tool
+   * rather than a position in `code_actions`: it is a source action, with no
+   * selection to point at.
+   */
+  function organizeImports(args: { file: string }): { actions: McpCodeAction[] } {
+    const sourceFile = program.getSourceFile(pathToUri(args.file));
+    if (!sourceFile) return { actions: [] };
+    const lineStarts = computeLineStarts(sourceFile.text);
+    const actions = getCodeActions(program, checker, sourceFile, 0, 0, features, importLayout)
+      .filter(a => a.kind === "source.organizeImports")
+      .map(action => ({
+        title: action.title,
+        kind: action.kind,
+        edits: action.changes.map(c => {
+          const s = getLineAndCharacterOfPosition(lineStarts, c.start);
+          const e = getLineAndCharacterOfPosition(lineStarts, c.end);
+          return {
+            file: displayFile(sourceFile.fileName),
+            line: s.line + 1,
+            column: s.character + 1,
+            endLine: e.line + 1,
+            endColumn: e.character + 1,
+            newText: c.newText,
+          };
+        }),
+      }));
+    return { actions };
+  }
+
   function codeActions(args: {
     file: string;
     startLine: number;
@@ -510,5 +544,6 @@ export function createMcpTools(
     resolveImport,
     renameSymbol,
     codeActions,
+    organizeImports,
   };
 }

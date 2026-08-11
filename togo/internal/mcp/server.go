@@ -22,6 +22,7 @@ import (
 
 	"github.com/nikeee/cappu/internal/compiler"
 	"github.com/nikeee/cappu/internal/config"
+	"github.com/nikeee/cappu/internal/format"
 	"github.com/nikeee/cappu/internal/processors"
 	"github.com/nikeee/cappu/internal/services"
 )
@@ -99,7 +100,14 @@ func (s *Server) rebuild(cfg *config.Config) {
 	if cfg != nil {
 		release = cfg.CompilerOptions.Release
 	}
-	s.tools = NewTools(s.program, s.checker, services.NewLanguageFeatures(release))
+	layout := format.ImportOrderOptions{Style: "google"}
+	if s.config != nil {
+		layout = format.ImportOrderOptions{
+			Style:       s.config.FormatterOptions.Style,
+			ImportOrder: s.config.FormatterOptions.ImportOrder,
+		}
+	}
+	s.tools = NewToolsLayout(s.program, s.checker, services.NewLanguageFeatures(release), layout)
 	if cfg != nil {
 		s.project = NewProjectTools(cfg, ProjectToolDeps{})
 	}
@@ -239,6 +247,19 @@ func (s *Server) registerTools() {
 			}
 			sj(args, &a)
 			return s.tools.RenameSymbol(a.Ref, a.NewName), nil
+		},
+	})
+	s.registry = append(s.registry, toolDef{
+		name:        "organize_imports",
+		description: "Sort and group a file's imports, dropping unused ones (the edit is returned for you to apply; nothing is written). Follows the project's formatterOptions, so the result matches `cappu format`.",
+		inputSchema: objSchema(map[string]any{"file": str}, "file"),
+		usesProgram: true,
+		handler: func(args json.RawMessage) (any, error) {
+			var a struct {
+				File string `json:"file"`
+			}
+			sj(args, &a)
+			return s.tools.OrganizeImports(a.File), nil
 		},
 	})
 	num := map[string]any{"type": "integer"}

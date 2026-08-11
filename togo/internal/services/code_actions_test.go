@@ -193,15 +193,44 @@ func TestOrganizeRemovesUnused(t *testing.T) {
 	}
 }
 
+// Static imports lead, in a block of their own - google-java-format's rule, and
+// the same one `cappu format` applies, so organizing then formatting is stable.
 func TestOrganizeSortsKeepsOnDemandStatic(t *testing.T) {
 	ctx := actionsSetup("package app;\nimport java.util.Map;\nimport static java.lang.Math.max;\nimport java.util.*;\nimport java.util.List;\nclass C { List<String> xs; Map<String,String> m; }", nil)
 	action := ctx.organize()
 	if action == nil {
 		t.Fatal("no organize action")
 	}
-	want := "package app;\nimport java.util.*;\nimport java.util.List;\nimport java.util.Map;\nimport static java.lang.Math.max;\nclass C { List<String> xs; Map<String,String> m; }"
+	want := "package app;\nimport static java.lang.Math.max;\n\nimport java.util.*;\nimport java.util.List;\nimport java.util.Map;\nclass C { List<String> xs; Map<String,String> m; }"
 	if got := apply(ctx.text, *action); got != want {
 		t.Errorf("apply = %q", got)
+	}
+}
+
+// Organizing moves lines past each other, so the comments attached to an import
+// must move with it: a same-line comment trails its import and own-line comments
+// between two imports belong to the preceding one (google-java-format's rule).
+// Before this, the action rebuilt the block from the parsed imports alone and
+// deleted every comment in it.
+func TestOrganizeMovesCommentsWithTheirImport(t *testing.T) {
+	ctx := actionsSetup("package app;\nimport java.util.Map; // the map one\n// documents the list import\nimport java.util.List;\nclass C { List<String> xs; Map<String,String> m; }", nil)
+	action := ctx.organize()
+	if action == nil {
+		t.Fatal("no organize action")
+	}
+	want := "package app;\nimport java.util.List;\nimport java.util.Map; // the map one\n// documents the list import\nclass C { List<String> xs; Map<String,String> m; }"
+	if got := apply(ctx.text, *action); got != want {
+		t.Errorf("apply = %q", got)
+	}
+}
+
+// An import with a comment on it is kept whatever the body looks like: the
+// comment usually says why the import is there (`// NOPMD: Required by ECJ`),
+// and removing the line would remove that explanation with it.
+func TestOrganizeKeepsAnUnusedImportWithAComment(t *testing.T) {
+	ctx := actionsSetup("package app;\nimport java.util.List;\nimport java.util.Map; // NOPMD: required by the annotation processor\nclass C { List<String> xs; }", nil)
+	if ctx.organize() != nil {
+		t.Error("an unused import carrying a comment should be kept")
 	}
 }
 

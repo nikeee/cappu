@@ -84,7 +84,7 @@ func TestMcpToolsList(t *testing.T) {
 	for _, tl := range tools {
 		names[tl.(map[string]any)["name"].(string)] = true
 	}
-	for _, want := range []string{"diagnostics", "outline", "search_symbols", "describe_symbol", "find_references", "rename_symbol", "type_hierarchy"} {
+	for _, want := range []string{"diagnostics", "outline", "search_symbols", "describe_symbol", "find_references", "rename_symbol", "type_hierarchy", "organize_imports"} {
 		if !names[want] {
 			t.Errorf("tools/list missing %q", want)
 		}

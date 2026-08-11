@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/nikeee/cappu/internal/compiler"
+	"github.com/nikeee/cappu/internal/format"
 	"github.com/nikeee/cappu/internal/lsp"
 	"github.com/nikeee/cappu/internal/services"
 )
@@ -120,11 +121,19 @@ type Tools struct {
 	program  *compiler.Program
 	checker  *compiler.Checker
 	features services.LanguageFeatures
+	// importLayout is the project's import block layout, so organize-imports
+	// produces what `cappu format` would write.
+	importLayout format.ImportOrderOptions
 }
 
 // NewTools builds the tool surface over a program and checker.
 func NewTools(program *compiler.Program, checker *compiler.Checker, features services.LanguageFeatures) *Tools {
-	return &Tools{program: program, checker: checker, features: features}
+	return NewToolsLayout(program, checker, features, format.ImportOrderOptions{Style: "google"})
+}
+
+// NewToolsLayout is NewTools with the project's import layout.
+func NewToolsLayout(program *compiler.Program, checker *compiler.Checker, features services.LanguageFeatures, importLayout format.ImportOrderOptions) *Tools {
+	return &Tools{program: program, checker: checker, features: features, importLayout: importLayout}
 }
 
 // Diagnostics reports parse/bind/semantic diagnostics for the given files (all
@@ -519,6 +528,41 @@ type CodeActionsResult struct {
 	Actions []McpCodeAction `json:"actions"`
 }
 
+// OrganizeImports returns the source.organizeImports edit for a whole file.
+// It needs its own tool rather than a position in CodeActions, because that one
+// takes a selection and this is a source action with no position.
+func (t *Tools) OrganizeImports(file string) CodeActionsResult {
+	sourceFile := t.program.GetSourceFile(pathToURI(file))
+	if sourceFile == nil {
+		return CodeActionsResult{Actions: []McpCodeAction{}}
+	}
+	text := sourceFile.AsSourceFile().Text
+	lineStarts := sourceFile.AsSourceFile().LineStarts()
+	actions := []McpCodeAction{}
+	for _, action := range services.GetCodeActionsLayout(t.program, t.checker, sourceFile, 0, 0, t.features, t.importLayout) {
+		if action.Kind != "source.organizeImports" {
+			continue
+		}
+		edits := []McpEdit{}
+		for _, c := range action.Changes {
+			st := compiler.GetLineAndCharacterOfPosition(text, lineStarts, c.Start)
+			en := compiler.GetLineAndCharacterOfPosition(text, lineStarts, c.End)
+			edits = append(edits, McpEdit{
+				McpLocation: McpLocation{
+					File:      displayFile(sourceFile.AsSourceFile().FileName),
+					Line:      st.Line + 1,
+					Column:    st.Character + 1,
+					EndLine:   en.Line + 1,
+					EndColumn: en.Character + 1,
+				},
+				NewText: c.NewText,
+			})
+		}
+		actions = append(actions, McpCodeAction{Title: action.Title, Kind: action.Kind, Edits: edits})
+	}
+	return CodeActionsResult{Actions: actions}
+}
+
 // CodeActions returns the refactorings and quick fixes offered for a selection
 // range in a file, mirroring the LSP codeAction provider. Edits are returned for
 // the agent to apply itself; nothing is written. Positions are 1-based (as
@@ -558,7 +602,7 @@ func (t *Tools) CodeActions(file string, startLine, startColumn int, endLine, en
 		return edits
 	}
 	actions := []McpCodeAction{}
-	for _, action := range services.GetCodeActions(t.program, t.checker, sourceFile, start, end, t.features) {
+	for _, action := range services.GetCodeActionsLayout(t.program, t.checker, sourceFile, start, end, t.features, t.importLayout) {
 		result := McpCodeAction{
 			Title: action.Title,
 			Kind:  action.Kind,

@@ -104,3 +104,24 @@ func extractFromGap(source string, from, to int, out *[]comment) {
 		i++
 	}
 }
+
+// Comment is a source comment, for consumers outside this package (the
+// organize-imports code action needs the comments attached to each import).
+// Mirrors the exported collectComments in src/format/comments.ts.
+type Comment struct {
+	Pos     int    // offset of the comment's first character
+	End     int    // offset just past the comment
+	Text    string // the verbatim comment text
+	Line    bool   // a // line comment (vs a block comment)
+	OwnLine bool   // true when only whitespace precedes the comment on its line
+}
+
+// CollectComments returns every comment in source, in order.
+func CollectComments(source string) []Comment {
+	inner := collectComments(source)
+	out := make([]Comment, len(inner))
+	for i, c := range inner {
+		out[i] = Comment{Pos: c.pos, End: c.end, Text: c.text, Line: c.line, OwnLine: c.ownLine}
+	}
+	return out
+}

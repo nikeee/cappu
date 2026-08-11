@@ -125,15 +125,44 @@ test("removes an unused single-type import", () => {
   );
 });
 
+// Static imports lead, in a block of their own - google-java-format's rule, and
+// the same one `cappu format` applies, so organizing then formatting is stable.
 test("sorts imports and keeps on-demand and static", () => {
   const ctx = setup(
     "package app;\nimport java.util.Map;\nimport static java.lang.Math.max;\nimport java.util.*;\nimport java.util.List;\n" +
       "class C { List<String> xs; Map<String,String> m; }",
   );
   expect(apply(ctx.text, organize(ctx)!)).toBe(
-    "package app;\nimport java.util.*;\nimport java.util.List;\nimport java.util.Map;\nimport static java.lang.Math.max;\n" +
+    "package app;\nimport static java.lang.Math.max;\n\nimport java.util.*;\nimport java.util.List;\nimport java.util.Map;\n" +
       "class C { List<String> xs; Map<String,String> m; }",
   );
+});
+
+// Organizing moves lines past each other, so the comments attached to an import
+// must move with it: a same-line comment trails its import and own-line comments
+// between two imports belong to the preceding one (google-java-format's rule).
+// Before this, the action rebuilt the block from the parsed imports alone and
+// deleted every comment in it.
+test("comments move with their import", () => {
+  const ctx = setup(
+    "package app;\nimport java.util.Map; // the map one\n// documents the list import\nimport java.util.List;\n" +
+      "class C { List<String> xs; Map<String,String> m; }",
+  );
+  expect(apply(ctx.text, organize(ctx)!)).toBe(
+    "package app;\nimport java.util.List;\nimport java.util.Map; // the map one\n// documents the list import\n" +
+      "class C { List<String> xs; Map<String,String> m; }",
+  );
+});
+
+// An import with a comment on it is kept whatever the body looks like: the
+// comment usually says why the import is there (`// NOPMD: Required by ECJ`),
+// and removing the line would remove that explanation with it.
+test("an unused import carrying a comment is kept", () => {
+  const ctx = setup(
+    "package app;\nimport java.util.List;\nimport java.util.Map; // NOPMD: required by the annotation processor\n" +
+      "class C { List<String> xs; }",
+  );
+  expect(organize(ctx)).toBeUndefined();
 });
 
 test("no organize action when imports are already minimal and sorted", () => {
