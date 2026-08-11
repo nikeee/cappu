@@ -555,3 +555,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-08-11 10:02 — i want configurable import ordering per package name with globbing. we can put that into the cappu.json. any sensible default for that?
 - 2026-08-11 10:14 — what does first "matching entry" mean? shouldnt it be the longest match that wins?
 - 2026-08-11 10:26 — ony support glob at the end. we do not support glob in the middle of package names. we can probably just use string.startsWith for matchting then
+- 2026-08-11 10:38 — also add the LSP action to the MCP also
+- 2026-08-11 10:41 — add to the tests: how comments in between imports are handled. they should never vanish and not be placed randomly or produce invalid syntax

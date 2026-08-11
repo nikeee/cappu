@@ -59,6 +59,31 @@ the empty string.
 - **Duplicates** are still dropped, and a duplicate's trailing comment still
   moves to the surviving line (existing behaviour).
 
+### Comments in the import block
+
+Reordering moves lines past each other, so comment handling is a correctness
+requirement of this feature, not a detail:
+
+- A **trailing comment** (`import a.B; // why`) belongs to its import and moves
+  with it, into whatever block that import lands in.
+- An **own-line comment** belongs to the import that follows it and moves with
+  that import, staying directly above it. A comment before the first import,
+  with a blank line between it and that import, belongs to the block rather
+  than to any one import and stays at the top.
+- A comment is **never dropped**, never lands next to an import it did not
+  document, and the result always re-parses.
+
+The formatter mostly does this today: trailing comments are collected in source
+order before the sorted render, and a deduped import hands its comment to the
+survivor. Own-line comments currently stay above the block as a unit, which is
+correct when there is one block and needs the rule above once there are
+several.
+
+The **code action does not**: `organizeImports` replaces the whole import range
+with `sorted.map(importText).join("\n")`, and `importText` re-prints the
+statement only - so every comment inside the import block is deleted today.
+Sharing the ordering module fixes that, and the tests below pin it.
+
 ### Defaults
 
 `importOrder` unset keeps the built-in order for the configured style, so
@@ -85,12 +110,21 @@ options, returning the blocks to print. It owns every rule above: grouping,
 blank lines, statics, the unmatched bucket, and the two built-in orders. It has
 no dependency on the Doc IR, so it is unit-testable on its own.
 
-**Consumers.** The printer's `importGroup` renders whatever the function
-returns, instead of sorting itself. The LSP `source.organizeImports` code
-action calls the same function, which also settles an existing contradiction:
-the action currently sorts static imports *last* while the formatter puts them
-*first*, so organizing a file and then formatting it produced two different
-orders.
+**Consumers.** Three, all through the one function:
+
+- The printer's `importGroup` renders whatever the function returns, instead of
+  sorting itself.
+- The LSP `source.organizeImports` code action, which settles two existing
+  problems: it sorts static imports *last* while the formatter puts them
+  *first*, so organizing a file and then formatting it produced two different
+  orders, and it deletes comments (above).
+- A new **`organize_imports` MCP tool**, taking `file` and returning the edit
+  for the caller to apply, like every other edit-returning tool ("nothing is
+  written"). It needs to be its own tool rather than something reachable
+  through `code_actions`, because that tool takes a selection and this is a
+  source-level action with no position. Registered in both
+  `src/services/mcpServer.ts` and `togo/internal/mcp/server.go`, with the same
+  name, description and schema on both sides.
 
 **Matching** needs no glob engine: strip the trailing `*` once when the config
 is read, then compare with `startsWith`. The pattern's shape is validated at
@@ -111,8 +145,26 @@ against the schema keeps them in sync.
 - A golden fixture pinning `--aosp` import order against real
   google-java-format 1.25.2, alongside the existing fixtures that pin the google
   default.
+- **Comment tests**, run against both the formatter and the code action, since
+  the two now share the ordering:
+  - a trailing comment follows its import into another block;
+  - an own-line comment follows the import it documents, and is still directly
+    above it afterwards;
+  - a block-leading comment (blank line under it) stays at the top;
+  - a comment on an import that is deduped away survives on the survivor;
+  - a block comment and a javadoc-shaped comment between imports survive;
+  - a comment whose import is removed as unused (code action only) is not left
+    dangling above an unrelated import.
+  - **Invariants over a corpus, not just examples**: for every file in the
+    format corpus, re-parse the output and assert that the multiset of comment
+    texts is unchanged and the file still parses. The formatter already refuses
+    to emit when a comment could not be placed (`allCommentsEmitted`); this
+    extends the same guarantee to reordering, and to the code action, which has
+    no such net.
 - Code-action tests asserting that organizing imports agrees with formatting
   them.
+- MCP tests: `organize_imports` appears in the tool list with the same schema in
+  both builds and returns the same edit as the code action.
 - Config tests: the schema accepts a valid `importOrder`, rejects a non-string
   entry and a pattern whose `*` is not final, and the template stays
   schema-valid.
@@ -121,5 +173,6 @@ against the schema keeps them in sync.
 
 - Choosing where static imports go (always first).
 - Wildcard/on-demand collapsing (`import java.util.*`), which cappu never
-  introduces.
+  introduces (an existing on-demand import is grouped by its prefix like any
+  other).
 - Per-directory overrides: one `importOrder` per project.
