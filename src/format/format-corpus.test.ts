@@ -28,6 +28,8 @@ import { test } from "node:test";
 
 import { expect } from "expect";
 
+import { parseSourceFile } from "../compiler/parser.ts";
+import { collectComments } from "./comments.ts";
 import { formatSource, UnsupportedSyntaxError } from "./index.ts";
 
 const here = import.meta.dirname;
@@ -81,6 +83,36 @@ if (files.length === 0) {
   // sources, gjf is unstable on 14 and we are on 22, all of them files where our
   // layout still differs from gjf's. None of them are in gjf's own tree, which
   // is what this corpus covers, so the invariant holds here.
+  // Reordering the import block must not lose a comment or move one somewhere
+  // it changes meaning. The multiset of comment texts is the cheap invariant:
+  // it catches a dropped comment, and re-parsing catches one that landed
+  // somewhere that no longer compiles. Run with a configured `importOrder` too,
+  // since that moves imports much further than the default order does.
+  test("no comment is lost when the corpus is regrouped", () => {
+    const importOrder = ["java.*", "javax.*", "", "com.*", "", "*"];
+    const lost: string[] = [];
+    for (const f of files) {
+      const source = readFileSync(f, "utf8");
+      let out: string;
+      try {
+        out = formatSource(source, { style: "google", importOrder }, f);
+      } catch {
+        continue;
+      }
+      const before = collectComments(source)
+        .map(c => c.text)
+        .toSorted();
+      const after = collectComments(out)
+        .map(c => c.text)
+        .toSorted();
+      const name = f.split("/").pop()!;
+      if (parseSourceFile(f, out).parseDiagnostics.length > 0) lost.push(`${name}: does not parse`);
+      else if (before.join("\u0000") !== after.join("\u0000"))
+        lost.push(`${name}: comments differ`);
+    }
+    expect(lost).toEqual([]);
+  });
+
   test("formatting the gjf corpus is idempotent", () => {
     const unstable: string[] = [];
     for (const f of files) {

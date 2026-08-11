@@ -223,6 +223,8 @@ class Printer {
   private readonly emittedAhead = new Set<number>();
   /** Each import's same-line trailing comment (see `importTrailingComments`). */
   private readonly importTrailing = new Map<ImportDeclaration, string>();
+  /** Own-line comments following an import; they move with it (gjf's rule). */
+  private readonly importFollow = new Map<ImportDeclaration, string[]>();
   // The indent multiplier (1 google / 2 aosp). Most layout defers the multiplier
   // to print time, but a few gjf decisions (e.g. the method-chain "small
   // receiver" threshold) depend on it at build time.
@@ -723,15 +725,20 @@ class Printer {
       const comment = this.importTrailing.get(imp);
       const withComment = (line: Doc, at: number): Doc =>
         comment === undefined ? line : concat([line, ...this.importComment(comment, at)]);
+      // The comments that follow this import sit directly under it.
+      const follow = this.importFollow.get(imp) ?? [];
+      const withLead = (line: Doc): Doc =>
+        follow.length === 0 ? line : concat([line, ...follow.flatMap(c => [hardline, reflow(c)])]);
       const at = seen.get(text);
       if (at !== undefined) {
-        // Identical import: drop the duplicate line but keep its comment, which
-        // has already been consumed and would otherwise be lost.
+        // Identical import: drop the duplicate line but keep its comments, which
+        // have already been consumed and would otherwise be lost.
         if (comment !== undefined) lines[at] = withComment(lines[at], this.importWidth(sorted, at));
+        if (follow.length > 0) lines[at] = withLead(lines[at]);
         continue;
       }
       seen.set(text, lines.length);
-      lines.push(withComment(text, this.importLine(imp).length));
+      lines.push(withLead(withComment(text, this.importLine(imp).length)));
     }
     return join(hardline, lines);
   }
@@ -742,10 +749,18 @@ class Printer {
    * sorted, so they cannot be picked up there.
    */
   private importTrailingComments(imports: readonly ImportDeclaration[]): void {
-    for (const imp of imports) {
+    imports.forEach((imp, i) => {
       const c = this.trailingCommentAfter(imp);
       if (c) this.importTrailing.set(imp, c.text);
-    }
+      // gjf hangs an own-line comment between two imports off the PRECEDING one
+      // ("the import itself and following comments"), so it travels with that
+      // import when the block is sorted or regrouped. Comments after the LAST
+      // import belong to whatever follows the block, so they are left alone.
+      const next = imports[i + 1];
+      if (next === undefined) return;
+      const follow = this.commentsBefore(this.start(next)).map(x => x.text);
+      if (follow.length > 0) this.importFollow.set(imp, follow);
+    });
   }
 
   /**

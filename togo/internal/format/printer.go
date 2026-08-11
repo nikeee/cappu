@@ -145,6 +145,9 @@ type printer struct {
 	// importTrailing holds each import's same-line trailing comment (see
 	// importTrailingComments).
 	importTrailing map[*compiler.Node]string
+	// importFollow holds the own-line comments after an import; they move with it
+	// (gjf's rule, see importTrailingComments).
+	importFollow map[*compiler.Node][]string
 	// mult is the indent multiplier (1 google / 2 aosp); a few gjf decisions
 	// (e.g. the method-chain "small receiver" threshold) need it at build time.
 	mult int
@@ -157,7 +160,7 @@ type printer struct {
 
 func newPrinter(sf *compiler.Node, mult int, options FormatOptions) *printer {
 	text := sf.AsSourceFile().Text
-	p := &printer{sf: sf, text: text, comments: collectComments(text), mult: mult, options: options, typeAnnotationNames: map[string]bool{}, emittedAhead: map[int]bool{}, importTrailing: map[*compiler.Node]string{}}
+	p := &printer{sf: sf, text: text, comments: collectComments(text), mult: mult, options: options, typeAnnotationNames: map[string]bool{}, emittedAhead: map[int]bool{}, importTrailing: map[*compiler.Node]string{}, importFollow: map[*compiler.Node][]string{}}
 	for _, imp := range nodes(sf.AsSourceFile().Imports) {
 		id := imp.AsImportDeclaration()
 		if id.IsStatic {
@@ -746,19 +749,32 @@ func (p *printer) importGroup(sorted []*compiler.Node) Doc {
 		// was consumed in source order up front (importTrailingComments), since
 		// this list is sorted and the comment cursor only moves forward.
 		comment, hasComment := p.importTrailing[imp]
+		// The comments that follow this import sit directly under it.
+		withFollow := func(line Doc) Doc {
+			follow := p.importFollow[imp]
+			if len(follow) == 0 {
+				return line
+			}
+			parts := []Doc{line}
+			for _, c := range follow {
+				parts = append(parts, hardline, reflow(c))
+			}
+			return concat(parts...)
+		}
 		if at, dup := seen[t]; dup {
-			// Identical import: drop the duplicate line but keep its comment, which
-			// has already been consumed and would otherwise be lost.
+			// Identical import: drop the duplicate line but keep its comments, which
+			// have already been consumed and would otherwise be lost.
 			if hasComment {
 				lines[at] = concat(append([]Doc{lines[at]}, p.importComment(comment, len(t))...)...)
 			}
+			lines[at] = withFollow(lines[at])
 			continue
 		}
 		seen[t] = len(lines)
 		if hasComment {
-			lines = append(lines, concat(append([]Doc{text(t)}, p.importComment(comment, len(t))...)...))
+			lines = append(lines, withFollow(concat(append([]Doc{text(t)}, p.importComment(comment, len(t))...)...)))
 		} else {
-			lines = append(lines, text(t))
+			lines = append(lines, withFollow(text(t)))
 		}
 	}
 	return join(hardline, lines)
@@ -768,9 +784,24 @@ func (p *printer) importGroup(sorted []*compiler.Node) Doc {
 // SOURCE order - the comment cursor only moves forward, but importGroup renders
 // the imports sorted, so they cannot be picked up there.
 func (p *printer) importTrailingComments(imports *compiler.NodeArray) {
-	for _, imp := range nodes(imports) {
+	all := nodes(imports)
+	for i, imp := range all {
 		if c, ok := p.trailingCommentAfter(imp); ok {
 			p.importTrailing[imp] = c.text
+		}
+		// gjf hangs an own-line comment between two imports off the PRECEDING one
+		// ("the import itself and following comments"), so it travels with that
+		// import when the block is sorted or regrouped. Comments after the LAST
+		// import belong to whatever follows the block, so they are left alone.
+		if i+1 >= len(all) {
+			continue
+		}
+		var follow []string
+		for _, c := range p.commentsBefore(p.start(all[i+1])) {
+			follow = append(follow, c.text)
+		}
+		if len(follow) > 0 {
+			p.importFollow[imp] = follow
 		}
 	}
 }
