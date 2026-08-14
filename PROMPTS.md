@@ -559,3 +559,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-08-11 10:41 — add to the tests: how comments in between imports are handled. they should never vanish and not be placed randomly or produce invalid syntax
 - 2026-08-11 11:02 — plan done. start implementation
 - 2026-08-14 09:40 — add more tests. think of a lot abstract test cases. think hard. do not make mistakes.
+- 2026-08-14 10:32 — do it
