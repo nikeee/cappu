@@ -245,10 +245,32 @@ test("importOrder accepts prefixes and rejects a non-final star", () => {
     "*",
   ]);
 
-  write(["com.*.internal"]);
-  expect(() => loadConfig(undefined, dir.path)).toThrow(/package prefix ending in/);
-  write(["com.acme"]);
-  expect(() => loadConfig(undefined, dir.path)).toThrow(/package prefix ending in/);
+  // Every accepted shape: the catch-all, a lone blank line, a class-name prefix.
+  write(["*"]);
+  expect(loadConfig(undefined, dir.path).formatterOptions.importOrder).toEqual(["*"]);
+  write([""]);
+  expect(loadConfig(undefined, dir.path).formatterOptions.importOrder).toEqual([""]);
+  write(["com.acme.Widget*"]);
+  expect(loadConfig(undefined, dir.path).formatterOptions.importOrder).toEqual([
+    "com.acme.Widget*",
+  ]);
+
+  // An empty list is not the same as an unset one: it configures "no groups",
+  // so every import falls into the unmatched block.
+  write([]);
+  expect(loadConfig(undefined, dir.path).formatterOptions.importOrder).toEqual([]);
+
+  for (const bad of [
+    ["com.*.internal"],
+    ["com.acme"],
+    ["**"],
+    ["java.*extra"],
+    ["*.internal.*"],
+    [" "],
+  ]) {
+    write(bad);
+    expect(() => loadConfig(undefined, dir.path)).toThrow(/package prefix ending in/);
+  }
 });
 
 test("importOrder is unset by default, meaning the style's own order", () => {

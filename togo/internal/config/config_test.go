@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -247,7 +248,27 @@ func TestLoadImportOrder(t *testing.T) {
 	} else if c2.FormatterOptions.ImportOrder != nil {
 		t.Errorf("ImportOrder defaults to %v, want nil (the style's own order)", c2.FormatterOptions.ImportOrder)
 	}
-	for _, bad := range []string{`["com.*.internal"]`, `["com.acme"]`} {
+	// Every accepted shape: the catch-all, a lone blank line, a class-name prefix.
+	for _, good := range [][]string{{"*"}, {""}, {"com.acme.Widget*"}} {
+		raw, _ := json.Marshal(good)
+		c, err := Load(writeConfig(t, `{ "formatterOptions": { "importOrder": `+string(raw)+` } }`), "")
+		if err != nil {
+			t.Errorf("importOrder %s: %v", raw, err)
+		} else if !slices.Equal(c.FormatterOptions.ImportOrder, good) {
+			t.Errorf("ImportOrder = %v, want %v", c.FormatterOptions.ImportOrder, good)
+		}
+	}
+	// An empty list is not the same as an unset one: it configures "no groups",
+	// so every import falls into the unmatched block. Keeping it non-nil is what
+	// carries that distinction into OrderImports.
+	if c3, err := Load(writeConfig(t, `{ "formatterOptions": { "importOrder": [] } }`), ""); err != nil {
+		t.Fatalf("Load: %v", err)
+	} else if c3.FormatterOptions.ImportOrder == nil || len(c3.FormatterOptions.ImportOrder) != 0 {
+		t.Errorf("an empty importOrder loaded as %#v, want an empty non-nil slice", c3.FormatterOptions.ImportOrder)
+	}
+	for _, bad := range []string{
+		`["com.*.internal"]`, `["com.acme"]`, `["**"]`, `["java.*extra"]`, `["*.internal.*"]`, `[" "]`,
+	} {
 		if _, err := Load(writeConfig(t, `{ "formatterOptions": { "importOrder": `+bad+` } }`), ""); err == nil {
 			t.Errorf("expected a validation error for importOrder %s", bad)
 		}

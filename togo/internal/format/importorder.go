@@ -113,9 +113,13 @@ func configuredBlocks[T ImportLike](imports []T, importOrder []string) [][]T {
 	blocks := make([][]T, blockCount+1)
 	unmatched := blockCount
 	for _, imp := range imports {
+		// Match against the name plus a trailing dot, so a pattern selects its own
+		// package too: `java.util.*` covers `import java.util.*;`, whose name is
+		// `java.util`. The dot also keeps `com.*` from swallowing `common.Thing`.
+		name := imp.ImportName() + "."
 		best, bestLen := unmatched, -1
 		for _, p := range patterns {
-			if !strings.HasPrefix(imp.ImportName(), p.prefix) {
+			if !strings.HasPrefix(name, p.prefix) {
 				continue
 			}
 			if len(p.prefix) > bestLen {

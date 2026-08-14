@@ -82,8 +82,12 @@ function configuredBlocks<T extends ImportLike>(
   const unmatched = blockCount; // the extra block at the end
   for (const imp of imports) {
     let best: { prefix: string; block: number } | undefined;
+    // Match against the name plus a trailing dot, so a pattern selects its own
+    // package too: `java.util.*` covers `import java.util.*;`, whose name is
+    // `java.util`. The dot also keeps `com.*` from swallowing `common.Thing`.
+    const name = `${imp.name}.`;
     for (const p of patterns) {
-      if (!imp.name.startsWith(p.prefix)) continue;
+      if (!name.startsWith(p.prefix)) continue;
       if (best === undefined || p.prefix.length > best.prefix.length) best = p;
     }
     blocks[best?.block ?? unmatched].push(imp);

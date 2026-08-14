@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nikeee/cappu/internal/compiler"
+	"github.com/nikeee/cappu/internal/format"
 )
 
 // Port of src/services/codeActions.test.ts.
@@ -180,6 +181,98 @@ func TestNoImportForJavaLang(t *testing.T) {
 
 func (ctx *actionCtx) organize() *CodeActionResult {
 	return findKind(ctx.actionsAt("class", 1), "source.organizeImports")
+}
+
+// --- organize imports with a configured layout ---
+//
+// The action reuses the formatter's grouping (internal/format/importorder.go),
+// so a configured ImportOrder has to reach it: organizing and then formatting
+// must not fight over where the blank lines go.
+
+func (ctx *actionCtx) organizeWith(layout format.ImportOrderOptions) *CodeActionResult {
+	offset := strings.Index(ctx.text, "class")
+	sf := ctx.program.GetSourceFile("file:///T.java")
+	return findKind(
+		GetCodeActionsLayout(ctx.program, ctx.checker, sf, offset, offset, NewLanguageFeatures(nil), layout),
+		"source.organizeImports",
+	)
+}
+
+var googleLayout = format.ImportOrderOptions{Style: "google", ImportOrder: []string{"java.*", "", "*"}}
+
+func TestOrganizeWithLayout(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   string
+		layout format.ImportOrderOptions
+		want   string
+	}{
+		{
+			name: "organize groups by the configured importOrder",
+			text: "package app;\nimport org.junit.Test;\nimport java.util.List;\nimport java.util.Map;\n" +
+				"class C { List<String> xs; Map<String,String> m; Test t; }",
+			layout: googleLayout,
+			want: "package app;\nimport java.util.List;\nimport java.util.Map;\n\nimport org.junit.Test;\n" +
+				"class C { List<String> xs; Map<String,String> m; Test t; }",
+		},
+		{
+			// The replaced range has to reach past the LAST import's comment, or
+			// the action leaves a copy of it behind.
+			name: "a comment on the last import moves with it into another group",
+			text: "package app;\nimport java.util.List;\nimport org.junit.Test; // keep me\n" +
+				"class C { List<String> xs; Test t; }",
+			layout: googleLayout,
+			want: "package app;\nimport java.util.List;\n\nimport org.junit.Test; // keep me\n" +
+				"class C { List<String> xs; Test t; }",
+		},
+		{
+			name:   "organize puts an on-demand import in its own package's group",
+			text:   "package app;\nimport java.util.*;\nimport java.io.File;\nclass C { List<String> xs; File f; }",
+			layout: format.ImportOrderOptions{Style: "google", ImportOrder: []string{"java.util.*", "", "java.*"}},
+			want:   "package app;\nimport java.util.*;\n\nimport java.io.File;\nclass C { List<String> xs; File f; }",
+		},
+		{
+			name: "organize leaves a file of only static imports in one group",
+			text: "package app;\nimport static java.lang.Math.min;\nimport static java.lang.Math.max;\n" +
+				"class C { int x = max(min(1,2),3); }",
+			layout: googleLayout,
+			want: "package app;\nimport static java.lang.Math.max;\nimport static java.lang.Math.min;\n" +
+				"class C { int x = max(min(1,2),3); }",
+		},
+		{
+			name: "organize follows the aosp built-in when no importOrder is configured",
+			text: "package app;\nimport java.util.List;\nimport android.view.View;\nimport com.acme.Widget;\n" +
+				"class C { List<String> xs; View v; Widget w; }",
+			layout: format.ImportOrderOptions{Style: "aosp"},
+			want: "package app;\nimport android.view.View;\n\nimport com.acme.Widget;\n\nimport java.util.List;\n" +
+				"class C { List<String> xs; View v; Widget w; }",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := actionsSetup(tt.text, nil)
+			action := ctx.organizeWith(tt.layout)
+			if action == nil {
+				t.Fatal("no organize action")
+			}
+			expectEdit(t, tt.text, *action, tt.want)
+		})
+	}
+}
+
+// Organizing an organized file changes nothing, so no action is offered - the
+// user cannot end up applying it forever.
+func TestOrganizeIsAFixpoint(t *testing.T) {
+	text := "package app;\nimport org.junit.Test;\nimport java.util.List;\n" +
+		"class C { List<String> xs; Test t; }"
+	action := actionsSetup(text, nil).organizeWith(googleLayout)
+	if action == nil {
+		t.Fatal("no organize action")
+	}
+	once := apply(text, *action)
+	if again := actionsSetup(once, nil).organizeWith(googleLayout); again != nil {
+		t.Errorf("organize offered again on:\n%s\ngiving:\n%s", once, apply(once, *again))
+	}
 }
 
 func TestOrganizeRemovesUnused(t *testing.T) {

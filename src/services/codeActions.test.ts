@@ -6,6 +6,7 @@ import { createChecker } from "../compiler/checker.ts";
 import { getCodeActions, languageFeatures, type CodeActionResult } from "./codeActions.ts";
 import { loadJdkStub } from "../compiler/jdkStub.ts";
 import { createProgram } from "../compiler/program.ts";
+import { type ImportOrderOptions } from "../format/import-order.ts";
 import { type Uri } from "../workspace.ts";
 
 function setup(text: string, extra: Record<string, string> = {}) {
@@ -168,6 +169,102 @@ test("an unused import carrying a comment is kept", () => {
 test("no organize action when imports are already minimal and sorted", () => {
   const ctx = setup("package app;\nimport java.util.List;\nclass C { List<String> xs; }");
   expect(organize(ctx)).toBeUndefined();
+});
+
+// --- organize imports with a configured layout -------------------------------
+
+// The action reuses the formatter's grouping (src/format/import-order.ts), so a
+// configured `importOrder` has to reach it: organizing and then formatting must
+// not fight over where the blank lines go.
+function organizeWith(ctx: ReturnType<typeof setup>, layout: ImportOrderOptions) {
+  const offset = ctx.text.indexOf("class");
+  return getCodeActions(
+    ctx.program,
+    ctx.checker,
+    ctx.program.getSourceFile("file:///T.java" as Uri)!,
+    offset,
+    offset,
+    languageFeatures(undefined),
+    layout,
+  ).find(a => a.kind === "source.organizeImports");
+}
+
+const layout: ImportOrderOptions = { style: "google", importOrder: ["java.*", "", "*"] };
+
+test("organize groups by the configured importOrder", () => {
+  const ctx = setup(
+    "package app;\nimport org.junit.Test;\nimport java.util.List;\nimport java.util.Map;\n" +
+      "class C { List<String> xs; Map<String,String> m; Test t; }",
+  );
+  expectEdit(
+    ctx.text,
+    organizeWith(ctx, layout)!,
+    "package app;\nimport java.util.List;\nimport java.util.Map;\n\nimport org.junit.Test;\n" +
+      "class C { List<String> xs; Map<String,String> m; Test t; }",
+  );
+});
+
+// Organizing an organized file changes nothing, so no action is offered - the
+// user cannot end up applying it forever.
+test("organize is a fixpoint under a configured importOrder", () => {
+  const ctx = setup(
+    "package app;\nimport org.junit.Test;\nimport java.util.List;\n" +
+      "class C { List<String> xs; Test t; }",
+  );
+  const once = apply(ctx.text, organizeWith(ctx, layout)!);
+  expect(organizeWith(setup(once), layout)).toBeUndefined();
+});
+
+// The replaced range has to reach past the LAST import's comment, or the action
+// leaves a copy of it behind.
+test("a comment on the last import moves with it into another group", () => {
+  const ctx = setup(
+    "package app;\nimport java.util.List;\nimport org.junit.Test; // keep me\n" +
+      "class C { List<String> xs; Test t; }",
+  );
+  expectEdit(
+    ctx.text,
+    organizeWith(ctx, layout)!,
+    "package app;\nimport java.util.List;\n\nimport org.junit.Test; // keep me\n" +
+      "class C { List<String> xs; Test t; }",
+  );
+});
+
+test("organize puts an on-demand import in its own package's group", () => {
+  const ctx = setup(
+    "package app;\nimport java.util.*;\nimport java.io.File;\nclass C { List<String> xs; File f; }",
+  );
+  expectEdit(
+    ctx.text,
+    organizeWith(ctx, { style: "google", importOrder: ["java.util.*", "", "java.*"] })!,
+    "package app;\nimport java.util.*;\n\nimport java.io.File;\nclass C { List<String> xs; File f; }",
+  );
+});
+
+test("organize leaves a file of only static imports in one group", () => {
+  const ctx = setup(
+    "package app;\nimport static java.lang.Math.min;\nimport static java.lang.Math.max;\n" +
+      "class C { int x = max(min(1,2),3); }",
+  );
+  expectEdit(
+    ctx.text,
+    organizeWith(ctx, layout)!,
+    "package app;\nimport static java.lang.Math.max;\nimport static java.lang.Math.min;\n" +
+      "class C { int x = max(min(1,2),3); }",
+  );
+});
+
+test("organize follows the aosp built-in when no importOrder is configured", () => {
+  const ctx = setup(
+    "package app;\nimport java.util.List;\nimport android.view.View;\nimport com.acme.Widget;\n" +
+      "class C { List<String> xs; View v; Widget w; }",
+  );
+  expectEdit(
+    ctx.text,
+    organizeWith(ctx, { style: "aosp" })!,
+    "package app;\nimport android.view.View;\n\nimport com.acme.Widget;\n\nimport java.util.List;\n" +
+      "class C { List<String> xs; View v; Widget w; }",
+  );
 });
 
 // --- extract local variable --------------------------------------------------------

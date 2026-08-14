@@ -119,3 +119,137 @@ test("importOrder overrides the style's built-in order", () => {
   });
   expect(names(out)).toEqual([["java.io.File"], ["android.view.View"]]);
 });
+
+// --- degenerate inputs -------------------------------------------------------
+
+test("no imports produce no blocks at all", () => {
+  expect(orderImports([], { style: "google" })).toEqual([]);
+  expect(orderImports([], { style: "aosp" })).toEqual([]);
+  expect(orderImports([], { style: "google", importOrder: ["java.*", "", "*"] })).toEqual([]);
+});
+
+test("a file of only static imports is one block", () => {
+  const out = orderImports([imp("b.C.d", true), imp("a.B.c", true)], {
+    style: "google",
+    importOrder: ["java.*", "", "*"],
+  });
+  expect(names(out)).toEqual([["a.B.c", "b.C.d"]]);
+});
+
+test("an empty importOrder puts everything in the unmatched block", () => {
+  const out = orderImports([imp("org.junit.Test"), imp("java.io.File")], {
+    style: "google",
+    importOrder: [],
+  });
+  expect(names(out)).toEqual([["java.io.File", "org.junit.Test"]]);
+});
+
+test("an importOrder of only blank-line entries still groups everything once", () => {
+  const out = orderImports([imp("org.junit.Test"), imp("java.io.File")], {
+    style: "google",
+    importOrder: ["", ""],
+  });
+  expect(names(out)).toEqual([["java.io.File", "org.junit.Test"]]);
+});
+
+// A blank-line entry with no group on one side of it must not print as a stray
+// blank line: the empty block is dropped, wherever it sits.
+test("leading, trailing and doubled blank-line entries collapse", () => {
+  const imports = [imp("java.io.File"), imp("org.junit.Test")];
+  expect(
+    names(orderImports(imports, { style: "google", importOrder: ["", "java.*", "", "org.*"] })),
+  ).toEqual([["java.io.File"], ["org.junit.Test"]]);
+  expect(
+    names(orderImports(imports, { style: "google", importOrder: ["java.*", "", "org.*", ""] })),
+  ).toEqual([["java.io.File"], ["org.junit.Test"]]);
+  expect(
+    names(orderImports(imports, { style: "google", importOrder: ["java.*", "", "", "org.*"] })),
+  ).toEqual([["java.io.File"], ["org.junit.Test"]]);
+});
+
+test("a group whose pattern matches nothing is dropped", () => {
+  const out = orderImports([imp("java.io.File")], {
+    style: "google",
+    importOrder: ["org.*", "", "java.*", "", "com.*"],
+  });
+  expect(names(out)).toEqual([["java.io.File"]]);
+});
+
+// --- what a prefix selects ---------------------------------------------------
+
+// `import java.util.*;` has the name `java.util`, so a pattern must select its
+// own package as well as everything under it.
+test("an on-demand import matches the pattern for its own package", () => {
+  const out = orderImports([imp("java.util"), imp("java.util.List"), imp("java.io.File")], {
+    style: "google",
+    importOrder: ["java.util.*", "", "java.*"],
+  });
+  expect(names(out)).toEqual([["java.util", "java.util.List"], ["java.io.File"]]);
+});
+
+test("prefix matching is case-sensitive", () => {
+  const out = orderImports([imp("Java.io.File"), imp("java.io.File")], {
+    style: "google",
+    importOrder: ["java.*"],
+  });
+  expect(names(out)).toEqual([["java.io.File"], ["Java.io.File"]]);
+});
+
+test("the deepest of several nested prefixes wins", () => {
+  const out = orderImports(
+    [imp("com.acme.internal.Impl"), imp("com.acme.Widget"), imp("com.other.Thing")],
+    { style: "google", importOrder: ["com.*", "", "com.acme.*", "", "com.acme.internal.*"] },
+  );
+  expect(names(out)).toEqual([
+    ["com.other.Thing"],
+    ["com.acme.Widget"],
+    ["com.acme.internal.Impl"],
+  ]);
+});
+
+test("a static import is never routed by a pattern", () => {
+  const out = orderImports([imp("java.io.File"), imp("java.util.Arrays.asList", true)], {
+    style: "google",
+    importOrder: ["java.*"],
+  });
+  expect(names(out)).toEqual([["java.util.Arrays.asList"], ["java.io.File"]]);
+});
+
+// The result depends on the imports, not on the order they arrive in - the
+// printer hands them over in source order, the code action in its own.
+test("the input order does not affect the result", () => {
+  const imports = [
+    imp("org.junit.Test"),
+    imp("java.io.File"),
+    imp("com.acme.Widget"),
+    imp("a.B.c", true),
+  ];
+  const options = { style: "google", importOrder: ["com.*", "", "java.*", "", "*"] } as const;
+  const expected = names(orderImports(imports, options));
+  expect(names(orderImports([...imports].reverse(), options))).toEqual(expected);
+  expect(names(orderImports([imports[2], imports[0], imports[3], imports[1]], options))).toEqual(
+    expected,
+  );
+});
+
+// --- aosp built-in -----------------------------------------------------------
+
+test("aosp counts androidx, dalvik and libcore as android", () => {
+  const out = orderImports(
+    [imp("libcore.io.Streams"), imp("androidx.core.App"), imp("dalvik.system.VMStack")],
+    { style: "aosp" },
+  );
+  // Each is its own top-level package, so each gets a block, android first.
+  expect(names(out)).toEqual([
+    ["androidx.core.App"],
+    ["dalvik.system.VMStack"],
+    ["libcore.io.Streams"],
+  ]);
+});
+
+test("aosp keeps static imports first, before the android block", () => {
+  const out = orderImports([imp("android.view.View"), imp("org.junit.Assert.fail", true)], {
+    style: "aosp",
+  });
+  expect(names(out)).toEqual([["org.junit.Assert.fail"], ["android.view.View"]]);
+});
