@@ -560,3 +560,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-08-11 11:02 — plan done. start implementation
 - 2026-08-14 09:40 — add more tests. think of a lot abstract test cases. think hard. do not make mistakes.
 - 2026-08-14 10:32 — do it
+- 2026-08-14 19:12 — we now have a feature called import ordering. review the feature + tests + implementation. maybe even spawn two agents that do independent reviews
+- 2026-08-14 19:35 — fix them

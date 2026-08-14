@@ -59,17 +59,24 @@ func OrderImports[T ImportLike](imports []T, options ImportOrderOptions) [][]T {
 			rest = append(rest, i)
 		}
 	}
+	aosp := options.ImportOrder == nil && options.Style == "aosp"
 	var blocks [][]T
 	switch {
 	case options.ImportOrder != nil:
 		blocks = configuredBlocks(rest, options.ImportOrder)
-	case options.Style == "aosp":
+	case aosp:
 		blocks = aospBlocks(rest)
 	default:
 		blocks = [][]T{sortByName(rest)}
 	}
-	out := make([][]T, 0, len(blocks)+1)
-	for _, b := range append([][]T{sortByName(statics)}, blocks...) {
+	// gjf's AOSP order applies to the statics too (ImportOrdererTest.AospStyle):
+	// they lead, but split into the same android / third-party / java groups.
+	staticBlocks := [][]T{sortByName(statics)}
+	if aosp {
+		staticBlocks = aospBlocks(statics)
+	}
+	out := make([][]T, 0, len(blocks)+len(staticBlocks))
+	for _, b := range append(staticBlocks, blocks...) {
 		if len(b) > 0 {
 			out = append(out, b)
 		}

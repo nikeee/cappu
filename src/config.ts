@@ -120,11 +120,11 @@ const LspOptionsSchema = z.object({
 // plain startsWith, with no globbing inside a name - so anything else is a
 // mistake worth reporting against the config rather than silently matching
 // nothing.
-const importOrderEntry = z
-  .string()
-  .refine(entry => entry === "" || (entry.endsWith("*") && !entry.slice(0, -1).includes("*")), {
-    error: 'an importOrder entry must be "" or a package prefix ending in "*", e.g. "java.*"',
-  });
+// A regex rather than a refinement so the shape survives into the generated JSON
+// Schema, and an editor flags a bad entry the same way `cappu` does.
+const importOrderEntry = z.string().regex(/^(|[^*]*\*)$/, {
+  error: 'an importOrder entry must be "" or a package prefix ending in "*", e.g. "java.*"',
+});
 
 // `cappu format` (nikeee/cappu#24): a google-java-format-compatible formatter.
 // Deliberately few knobs - the only choice is the indent style, matching what

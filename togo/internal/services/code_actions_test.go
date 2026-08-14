@@ -240,6 +240,26 @@ func TestOrganizeWithLayout(t *testing.T) {
 				"class C { int x = max(min(1,2),3); }",
 		},
 		{
+			// The formatter drops a repeated import and keeps its comments on the
+			// surviving line; the action renders the lines itself, so it has to do
+			// the same or organizing then formatting rewrites the block twice.
+			name: "organize collapses a duplicate import onto one line, keeping its comment",
+			text: "package app;\nimport java.util.List;\nimport java.util.List; // and again\n" +
+				"class C { List<String> xs; }",
+			layout: googleLayout,
+			want:   "package app;\nimport java.util.List; // and again\nclass C { List<String> xs; }",
+		},
+		{
+			// The action rewrites whole lines, so it has to emit the separator the
+			// file already uses - otherwise a CRLF file ends up with mixed endings.
+			name: "organize keeps the file's CRLF line endings",
+			text: "package app;\r\nimport org.junit.Test;\r\nimport java.util.List;\r\n" +
+				"class C { List<String> xs; Test t; }\r\n",
+			layout: googleLayout,
+			want: "package app;\r\nimport java.util.List;\r\n\r\nimport org.junit.Test;\r\n" +
+				"class C { List<String> xs; Test t; }\r\n",
+		},
+		{
 			name: "organize follows the aosp built-in when no importOrder is configured",
 			text: "package app;\nimport java.util.List;\nimport android.view.View;\nimport com.acme.Widget;\n" +
 				"class C { List<String> xs; View v; Widget w; }",
@@ -273,6 +293,52 @@ func TestOrganizeIsAFixpoint(t *testing.T) {
 	if again := actionsSetup(once, nil).organizeWith(googleLayout); again != nil {
 		t.Errorf("organize offered again on:\n%s\ngiving:\n%s", once, apply(once, *again))
 	}
+}
+
+// The promise of sharing internal/format/importorder.go is that organizing a
+// file and formatting it cannot disagree, which is more than sharing the
+// grouping: the action also has to render the block the way the printer does
+// (duplicates, comment wrapping, line endings). Compare the two directly.
+func TestOrganizedBlockMatchesTheFormatter(t *testing.T) {
+	sources := []string{
+		"package app;\nimport org.junit.Test;\nimport java.util.List;\nimport java.util.List;\n" +
+			"class C { List<String> xs; Test t; }\n",
+		"package app;\nimport java.util.List; // a comment long enough to run past the hundred column limit that gjf wraps at\n" +
+			"class C { List<String> xs; }\n",
+		"package app;\r\nimport org.junit.Test;\r\nimport java.util.List;\r\n" +
+			"class C { List<String> xs; Test t; }\r\n",
+	}
+	for _, source := range sources {
+		organized := source
+		if action := actionsSetup(source, nil).organizeWith(googleLayout); action != nil {
+			organized = apply(source, *action)
+		}
+		formatted, err := format.FormatSource(source, format.FormatOptions(googleLayout), "T.java")
+		if err != nil {
+			t.Fatalf("format: %v", err)
+		}
+		if got, want := importBlockOf(organized), importBlockOf(formatted); got != want {
+			t.Errorf("organize gave:\n%q\nformat gave:\n%q", got, want)
+		}
+	}
+}
+
+// importBlockOf is the import block: the first `import ` line to the last.
+func importBlockOf(text string) string {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	first, last := -1, -1
+	for i, l := range lines {
+		if strings.HasPrefix(l, "import ") {
+			if first < 0 {
+				first = i
+			}
+			last = i
+		}
+	}
+	if first < 0 {
+		return ""
+	}
+	return strings.Join(lines[first:last+1], "\n")
 }
 
 func TestOrganizeRemovesUnused(t *testing.T) {

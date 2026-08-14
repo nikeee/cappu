@@ -253,3 +253,46 @@ test("aosp keeps static imports first, before the android block", () => {
   });
   expect(names(out)).toEqual([["org.junit.Assert.fail"], ["android.view.View"]]);
 });
+
+// gjf groups the AOSP statics the same way it groups the rest - android, third
+// party, then java/javax, with a blank line on every top-level change - instead
+// of leaving them in one lexicographic block. Case and expectation are gjf's own
+// ("Rough ordering" in ImportOrdererTest.AospStyle), which is why `java.lang`
+// lands after `org.junit` here.
+test("aosp splits the static imports into the same groups", () => {
+  const out = orderImports(
+    [
+      imp("net.Bar.baz", true),
+      imp("org.junit.Bar.baz", true),
+      imp("com.google.Bar.baz", true),
+      imp("java.lang.Bar.baz", true),
+      imp("junit.Bar.baz", true),
+      imp("javax.annotation.Bar.baz", true),
+      imp("android.Bar.baz", true),
+      imp("net.Bar"),
+      imp("android.Bar"),
+    ],
+    { style: "aosp" },
+  );
+  expect(names(out)).toEqual([
+    ["android.Bar.baz"],
+    ["com.google.Bar.baz"],
+    ["junit.Bar.baz"],
+    ["net.Bar.baz"],
+    ["org.junit.Bar.baz"],
+    ["java.lang.Bar.baz"],
+    ["javax.annotation.Bar.baz"],
+    ["android.Bar"],
+    ["net.Bar"],
+  ]);
+});
+
+// A configured importOrder governs the non-statics only, so the statics go back
+// to one lexicographic block even in aosp style.
+test("a configured importOrder keeps the aosp statics in one block", () => {
+  const out = orderImports(
+    [imp("org.junit.Bar.baz", true), imp("android.Bar.baz", true), imp("net.Bar")],
+    { style: "aosp", importOrder: ["*"] },
+  );
+  expect(names(out)).toEqual([["android.Bar.baz", "org.junit.Bar.baz"], ["net.Bar"]]);
+});

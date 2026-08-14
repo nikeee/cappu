@@ -66,18 +66,24 @@ requirement of this feature, not a detail:
 
 - A **trailing comment** (`import a.B; // why`) belongs to its import and moves
   with it, into whatever block that import lands in.
-- An **own-line comment** belongs to the import that follows it and moves with
-  that import, staying directly above it. A comment before the first import,
-  with a blank line between it and that import, belongs to the block rather
-  than to any one import and stays at the top.
-- A comment is **never dropped**, never lands next to an import it did not
-  document, and the result always re-parses.
+- An **own-line comment** between two imports belongs to the **preceding**
+  import and moves with it, staying directly under it. This is gjf's rule -
+  `ImportOrderer.Import.trailing` is "the import itself and following comments"
+  (`ImportOrderer.java`) - and matching it is what keeps unset `importOrder`
+  byte-identical to google-java-format.
 
-The formatter mostly does this today: trailing comments are collected in source
-order before the sorted render, and a deduped import hands its comment to the
-survivor. Own-line comments currently stay above the block as a unit, which is
-correct when there is one block and needs the rule above once there are
-several.
+  It is the opposite of what a reader usually means: a comment written above the
+  import it documents ends up under a different one when the two land in
+  different blocks. Following the reader instead would diverge from gjf on
+  files it already formats, which is the more expensive mistake, so the rule
+  stands and this is the price.
+- A comment before the first import stays at the top of the block; comments
+  after the last import lie outside the rewritten range and are left alone.
+- A comment is **never dropped**, and the result always re-parses.
+
+The formatter does this today: trailing comments are collected in source order
+before the sorted render, and a deduped import hands its comment to the
+survivor.
 
 The **code action does not**: `organizeImports` replaces the whole import range
 with `sorted.map(importText).join("\n")`, and `importText` re-prints the
@@ -148,8 +154,8 @@ against the schema keeps them in sync.
 - **Comment tests**, run against both the formatter and the code action, since
   the two now share the ordering:
   - a trailing comment follows its import into another block;
-  - an own-line comment follows the import it documents, and is still directly
-    above it afterwards;
+  - an own-line comment follows the import it sits under, and is still directly
+    under it afterwards;
   - a block-leading comment (blank line under it) stays at the top;
   - a comment on an import that is deduped away survives on the survivor;
   - a block comment and a javadoc-shaped comment between imports survive;
@@ -162,7 +168,13 @@ against the schema keeps them in sync.
     extends the same guarantee to reordering, and to the code action, which has
     no such net.
 - Code-action tests asserting that organizing imports agrees with formatting
-  them.
+  them - not only the grouping, which the shared module guarantees, but the
+  rendering the action does itself: a duplicate import collapses onto one line
+  carrying both comments, a trailing comment past column 100 wraps where the
+  printer wraps it, and the block is written in the file's own line separator
+  (a CRLF file must not come back with LF imports). The test compares the
+  organized import block against the formatted one directly, so any further
+  divergence fails.
 - MCP tests: `organize_imports` appears in the tool list with the same schema in
   both builds and returns the same edit as the code action.
 - Config tests: the schema accepts a valid `importOrder`, rejects a non-string

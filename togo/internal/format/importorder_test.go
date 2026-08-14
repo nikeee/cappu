@@ -215,6 +215,31 @@ func TestOrderImports(t *testing.T) {
 			want:    "org.junit.Assert.fail | android.view.View",
 		},
 		{
+			// gjf groups the AOSP statics the same way it groups the rest - android,
+			// third party, then java/javax, with a blank line on every top-level
+			// change - instead of leaving them in one lexicographic block. Case and
+			// expectation are gjf's own ("Rough ordering" in
+			// ImportOrdererTest.AospStyle), which is why java.lang lands after
+			// org.junit here.
+			name: "aosp splits the static imports into the same groups",
+			imports: []testImport{
+				staticImp("net.Bar.baz"), staticImp("org.junit.Bar.baz"), staticImp("com.google.Bar.baz"),
+				staticImp("java.lang.Bar.baz"), staticImp("junit.Bar.baz"), staticImp("javax.annotation.Bar.baz"),
+				staticImp("android.Bar.baz"), imp("net.Bar"), imp("android.Bar"),
+			},
+			options: ImportOrderOptions{Style: "aosp"},
+			want: "android.Bar.baz | com.google.Bar.baz | junit.Bar.baz | net.Bar.baz | " +
+				"org.junit.Bar.baz | java.lang.Bar.baz | javax.annotation.Bar.baz | android.Bar | net.Bar",
+		},
+		{
+			// A configured importOrder governs the non-statics only, so the statics
+			// go back to one lexicographic block even in aosp style.
+			name:    "a configured importOrder keeps the aosp statics in one block",
+			imports: []testImport{staticImp("org.junit.Bar.baz"), staticImp("android.Bar.baz"), imp("net.Bar")},
+			options: ImportOrderOptions{Style: "aosp", ImportOrder: []string{"*"}},
+			want:    "android.Bar.baz, org.junit.Bar.baz | net.Bar",
+		},
+		{
 			name:    "importOrder overrides the style's built-in order",
 			imports: []testImport{imp("android.view.View"), imp("java.io.File")},
 			options: ImportOrderOptions{Style: "aosp", ImportOrder: []string{"java.*", "", "*"}},

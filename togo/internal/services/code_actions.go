@@ -151,6 +151,25 @@ func importText(imp *compiler.Node) string {
 	return "import " + static + compiler.EntityNameToString(d.Name) + star + ";"
 }
 
+// importCommentText is a trailing import comment, wrapped where the formatter
+// wraps it (the printer's importComment): gjf rebuilds the import block as text
+// and breaks the comment at the 100-column limit, continuing at column 0 after a
+// blank line.
+func importCommentText(comment string, lineWidth int, sep string) string {
+	first := " " + comment
+	if lineWidth+len(first) <= 100 {
+		return first
+	}
+	idx := 100 - lineWidth - 1
+	for idx >= 2 && strings.IndexByte(" \t\n\r\f\v", comment[idx]) < 0 {
+		idx--
+	}
+	if idx <= 2 {
+		return first
+	}
+	return " " + comment[:idx] + sep + sep + "//" + comment[idx:]
+}
+
 // importComment holds the comments attached to one import, by gjf's rule: a
 // same-line comment trails its import, and own-line comments between two imports
 // belong to the PRECEDING one. Both travel with the import when the block is
@@ -236,26 +255,36 @@ func organizeImports(sf *compiler.Node, layout format.ImportOrderOptions) []Code
 	// Grouping and ordering come from the formatter's module, so organizing and
 	// formatting a file can never disagree.
 	blocks := format.OrderImports(kept, layout)
-	render := func(imp *compiler.Node) string {
-		c := comments[imp]
-		line := importText(imp)
-		if c.trailing != "" {
-			line += " " + c.trailing
-		}
-		for _, f := range c.follow {
-			line += "\n" + f
-		}
-		return line
-	}
+	// The file's own line separator (the formatter uses the same rule): the action
+	// rewrites whole lines, so emitting "\n" into a CRLF file would leave it mixed.
+	sep := format.GuessLineSeparator(data.Text)
+	// Identical imports collapse into one line that carries both their comments,
+	// like the formatter's importGroup. The dedup cannot live in OrderImports,
+	// which never sees the comments it would have to hand to the survivor.
 	blockTexts := make([]string, len(blocks))
 	for i, b := range blocks {
-		lines := make([]string, len(b))
-		for j, e := range b {
-			lines[j] = render(e.node)
+		var lines []string
+		at := map[string]int{}
+		for _, e := range b {
+			text := importText(e.node)
+			c := comments[e.node]
+			suffix := ""
+			if c.trailing != "" {
+				suffix = importCommentText(c.trailing, len(text), sep)
+			}
+			for _, f := range c.follow {
+				suffix += sep + f
+			}
+			if j, dup := at[text]; dup {
+				lines[j] += suffix
+				continue
+			}
+			at[text] = len(lines)
+			lines = append(lines, text+suffix)
 		}
-		blockTexts[i] = strings.Join(lines, "\n")
+		blockTexts[i] = strings.Join(lines, sep)
 	}
-	newText := strings.Join(blockTexts, "\n\n")
+	newText := strings.Join(blockTexts, sep+sep)
 
 	start := compiler.SkipTrivia(data.Text, imports.Nodes[0].Pos)
 	// The range runs to the end of the last import's own comments, so a trailing

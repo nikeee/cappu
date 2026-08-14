@@ -293,6 +293,24 @@ test("organizeImports returns the edit and honours importOrder", () => {
   expect(actions[0].edits[0].newText).toBe("import org.junit.Test;\n\nimport java.util.List;");
 });
 
+// `code_actions` offers the same source action at a position, so it has to be
+// given the same layout - two tools of one server handing back different import
+// blocks is worse than either order.
+test("codeActions organizes imports with the configured importOrder too", () => {
+  const source =
+    "package app;\nimport java.util.List;\nimport org.junit.Test;\nclass C { List<String> xs; Test t; }";
+  const tools = toolsFor(
+    { "file:///C.java": source },
+    { style: "google", importOrder: ["org.*", "", "java.*"] },
+  );
+  const organize = tools
+    .codeActions({ file: "/C.java", startLine: 4, startColumn: 1 })
+    .actions.find(a => a.kind === "source.organizeImports");
+  expect(organize?.edits[0].newText).toBe(
+    tools.organizeImports({ file: "/C.java" }).actions[0].edits[0].newText,
+  );
+});
+
 test("organizeImports offers nothing for a file that is already organized", () => {
   const tools = toolsFor({
     "file:///C.java": "package app;\nimport java.util.List;\nclass C { List<String> xs; }",

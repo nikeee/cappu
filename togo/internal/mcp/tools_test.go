@@ -378,6 +378,26 @@ func TestOrganizeImportsTool(t *testing.T) {
 	}
 }
 
+// code_actions offers the same source action at a position, so it has to be
+// given the same layout - two tools of one server handing back different import
+// blocks is worse than either order. Mirrors the TS mcp test.
+func TestCodeActionsToolUsesTheImportLayout(t *testing.T) {
+	program := compiler.NewProgram()
+	program.AddProjectFile("file:///C.java", "package app;\nimport java.util.List;\nimport org.junit.Test;\nclass C { List<String> xs; Test t; }")
+	tools := NewToolsLayout(program, compiler.NewChecker(program), services.NewLanguageFeatures(nil),
+		format.ImportOrderOptions{Style: "google", ImportOrder: []string{"org.*", "", "java.*"}})
+	want := tools.OrganizeImports("/C.java").Actions[0].Edits[0].NewText
+	var got string
+	for _, a := range tools.CodeActions("/C.java", 4, 1, nil, nil).Actions {
+		if a.Kind == "source.organizeImports" {
+			got = a.Edits[0].NewText
+		}
+	}
+	if got != want {
+		t.Errorf("code_actions newText = %q, want %q", got, want)
+	}
+}
+
 func TestOrganizeImportsToolOffersNothingWhenOrganized(t *testing.T) {
 	program := compiler.NewProgram()
 	program.AddProjectFile("file:///C.java", "package app;\nimport java.util.List;\nclass C { List<String> xs; }")

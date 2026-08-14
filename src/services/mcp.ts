@@ -505,27 +505,33 @@ export function createMcpTools(
           newText: c.newText,
         };
       });
-    const actions = getCodeActions(program, checker, sourceFile, start, end, features).map(
-      action => {
-        const result: McpCodeAction = {
-          title: action.title,
-          kind: action.kind,
-          edits: mapEdits(displayFile(sourceFile.fileName), lineStarts, action.changes),
-        };
-        if (action.additionalEdits) {
-          const additional: Record<string, McpEdit[]> = {};
-          for (const [uri, edits] of Object.entries(action.additionalEdits)) {
-            const other = program.getSourceFile(uri as Uri);
-            if (other) {
-              const path = displayFile(uri);
-              additional[path] = mapEdits(path, computeLineStarts(other.text), edits);
-            }
+    const actions = getCodeActions(
+      program,
+      checker,
+      sourceFile,
+      start,
+      end,
+      features,
+      importLayout,
+    ).map(action => {
+      const result: McpCodeAction = {
+        title: action.title,
+        kind: action.kind,
+        edits: mapEdits(displayFile(sourceFile.fileName), lineStarts, action.changes),
+      };
+      if (action.additionalEdits) {
+        const additional: Record<string, McpEdit[]> = {};
+        for (const [uri, edits] of Object.entries(action.additionalEdits)) {
+          const other = program.getSourceFile(uri as Uri);
+          if (other) {
+            const path = displayFile(uri);
+            additional[path] = mapEdits(path, computeLineStarts(other.text), edits);
           }
-          if (Object.keys(additional).length > 0) result.additionalEdits = additional;
         }
-        return result;
-      },
-    );
+        if (Object.keys(additional).length > 0) result.additionalEdits = additional;
+      }
+      return result;
+    });
     return { actions };
   }
 

@@ -95,15 +95,16 @@ func formatSourceFile(sf *compiler.Node, options FormatOptions) (string, error) 
 	// Exactly one trailing newline, like google-java-format, in the source's own
 	// line separator (gjf's Newlines.guessLineSeparator: the first one it sees).
 	out = strings.TrimRight(out, "\r\n") + "\n"
-	if sep := guessLineSeparator(p.text); sep != "\n" {
+	if sep := GuessLineSeparator(p.text); sep != "\n" {
 		out = strings.NewReplacer("\r\n", sep, "\r", sep, "\n", sep).Replace(out)
 	}
 	return out, nil
 }
 
-// guessLineSeparator returns the first line separator in text, mirroring gjf's
-// Newlines.guessLineSeparator.
-func guessLineSeparator(text string) string {
+// GuessLineSeparator returns the first line separator in text, mirroring gjf's
+// Newlines.guessLineSeparator. Exported for the organize-imports code action,
+// which rewrites whole lines and has to match the file's own ending.
+func GuessLineSeparator(text string) string {
 	for i := 0; i < len(text); i++ {
 		switch text[i] {
 		case '\r':

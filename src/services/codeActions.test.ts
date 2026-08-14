@@ -6,6 +6,7 @@ import { createChecker } from "../compiler/checker.ts";
 import { getCodeActions, languageFeatures, type CodeActionResult } from "./codeActions.ts";
 import { loadJdkStub } from "../compiler/jdkStub.ts";
 import { createProgram } from "../compiler/program.ts";
+import { formatSource } from "../format/index.ts";
 import { type ImportOrderOptions } from "../format/import-order.ts";
 import { type Uri } from "../workspace.ts";
 
@@ -265,6 +266,70 @@ test("organize follows the aosp built-in when no importOrder is configured", () 
     "package app;\nimport android.view.View;\n\nimport com.acme.Widget;\n\nimport java.util.List;\n" +
       "class C { List<String> xs; View v; Widget w; }",
   );
+});
+
+// The formatter drops a repeated import and keeps its comments on the surviving
+// line; the action shares the ordering but renders the lines itself, so it has
+// to do the same or organizing then formatting rewrites the block twice.
+test("organize collapses a duplicate import onto one line, keeping its comment", () => {
+  const ctx = setup(
+    "package app;\nimport java.util.List;\nimport java.util.List; // and again\n" +
+      "class C { List<String> xs; }",
+  );
+  expectEdit(
+    ctx.text,
+    organizeWith(ctx, layout)!,
+    "package app;\nimport java.util.List; // and again\nclass C { List<String> xs; }",
+  );
+});
+
+// The action rewrites whole lines, so it has to emit the separator the file
+// already uses - otherwise a CRLF file ends up with mixed line endings.
+test("organize keeps the file's CRLF line endings", () => {
+  const ctx = setup(
+    "package app;\r\nimport org.junit.Test;\r\nimport java.util.List;\r\n" +
+      "class C { List<String> xs; Test t; }\r\n",
+  );
+  expectEdit(
+    ctx.text,
+    organizeWith(ctx, layout)!,
+    "package app;\r\nimport java.util.List;\r\n\r\nimport org.junit.Test;\r\n" +
+      "class C { List<String> xs; Test t; }\r\n",
+  );
+});
+
+// The promise of sharing src/format/import-order.ts is that organizing a file
+// and formatting it cannot disagree, which is more than sharing the grouping:
+// the action also has to render the block the way the printer does (duplicates,
+// comment wrapping, line endings). Compare the two directly.
+test("the organized import block is what the formatter prints", () => {
+  const sources = [
+    "package app;\nimport org.junit.Test;\nimport java.util.List;\nimport java.util.List;\n" +
+      "class C { List<String> xs; Test t; }\n",
+    "package app;\nimport java.util.List; // a comment long enough to run past the hundred column limit that gjf wraps at\n" +
+      "class C { List<String> xs; }\n",
+    "package app;\r\nimport org.junit.Test;\r\nimport java.util.List;\r\n" +
+      "class C { List<String> xs; Test t; }\r\n",
+  ];
+  // The import block: from the first `import ` line to the last, verbatim.
+  const importBlock = (text: string): string => {
+    const lines = text.split(/\r\n|\r|\n/);
+    const first = lines.findIndex(l => l.startsWith("import "));
+    let last = first;
+    for (let i = lines.length - 1; i > first; i--) {
+      if (lines[i]!.startsWith("import ")) {
+        last = i;
+        break;
+      }
+    }
+    return lines.slice(first, last + 1).join("\n");
+  };
+  for (const source of sources) {
+    const ctx = setup(source);
+    const action = organizeWith(ctx, layout);
+    const organized = action === undefined ? source : apply(source, action);
+    expect(importBlock(organized)).toBe(importBlock(formatSource(source, layout)));
+  }
 });
 
 // --- extract local variable --------------------------------------------------------

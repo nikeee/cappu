@@ -184,6 +184,20 @@ function importText(imp: ImportDeclaration): string {
 }
 
 /**
+ * A trailing import comment, wrapped where the formatter wraps it (printer.ts's
+ * importComment): gjf rebuilds the import block as text and breaks the comment
+ * at the 100-column limit, continuing at column 0 after a blank line.
+ */
+function importCommentText(comment: string, lineWidth: number, sep: string): string {
+  const first = ` ${comment}`;
+  if (lineWidth + first.length <= 100) return first;
+  let idx = 100 - lineWidth - 1;
+  while (idx >= 2 && !/\s/.test(comment[idx]!)) idx--;
+  if (idx <= 2) return first;
+  return ` ${comment.slice(0, idx)}${sep}${sep}//${comment.slice(idx)}`;
+}
+
+/**
  * The comments attached to each import, by gjf's rule: a same-line comment
  * trails its import, and own-line comments between two imports belong to the
  * PRECEDING one. Both travel with the import when the block is reordered.
@@ -251,13 +265,32 @@ function organizeImports(
     kept.map(imp => ({ name: entityNameToString(imp.name), isStatic: imp.isStatic, imp })),
     layout,
   );
-  const render = (imp: ImportDeclaration): string => {
-    const c = comments.get(imp);
-    const trailing = c?.trailing === undefined ? "" : ` ${c.trailing}`;
-    const follow = (c?.follow ?? []).map(text => `\n${text}`).join("");
-    return `${importText(imp)}${trailing}${follow}`;
+  // The file's own line separator (the formatter uses the same rule): the action
+  // rewrites whole lines, so emitting "\n" into a CRLF file would leave it mixed.
+  const sep = /\r\n|\r|\n/.exec(sourceFile.text)?.[0] ?? "\n";
+  // Identical imports collapse into one line that carries both their comments,
+  // like the formatter's importGroup. The dedup cannot live in orderImports,
+  // which never sees the comments it would have to hand to the survivor.
+  const renderBlock = (block: readonly { imp: ImportDeclaration }[]): string => {
+    const lines: string[] = [];
+    const at = new Map<string, number>();
+    for (const { imp } of block) {
+      const text = importText(imp);
+      const c = comments.get(imp);
+      const trailing =
+        c?.trailing === undefined ? "" : importCommentText(c.trailing, text.length, sep);
+      const follow = (c?.follow ?? []).map(t => `${sep}${t}`).join("");
+      const seen = at.get(text);
+      if (seen !== undefined) {
+        lines[seen] += trailing + follow;
+        continue;
+      }
+      at.set(text, lines.length);
+      lines.push(text + trailing + follow);
+    }
+    return lines.join(sep);
   };
-  const newText = blocks.map(b => b.map(e => render(e.imp)).join("\n")).join("\n\n");
+  const newText = blocks.map(renderBlock).join(`${sep}${sep}`);
 
   const start = skipTrivia(sourceFile.text, imports[0]!.pos);
   // The range runs to the end of the last import's own comments, so a trailing

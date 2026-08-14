@@ -34,15 +34,19 @@ export function orderImports<T extends ImportLike>(
   imports: readonly T[],
   options: ImportOrderOptions,
 ): T[][] {
-  const statics = byName(imports.filter(i => i.isStatic));
+  const statics = imports.filter(i => i.isStatic);
   const rest = imports.filter(i => !i.isStatic);
+  const aosp = options.importOrder === undefined && options.style === "aosp";
+  // gjf's AOSP order applies to the statics too (ImportOrdererTest.AospStyle):
+  // they lead, but split into the same android / third-party / java groups.
+  const staticBlocks = aosp ? aospBlocks(statics) : [byName(statics)];
   const blocks =
     options.importOrder !== undefined
       ? configuredBlocks(rest, options.importOrder)
-      : options.style === "aosp"
+      : aosp
         ? aospBlocks(rest)
         : [byName(rest)];
-  return [statics, ...blocks].filter(b => b.length > 0);
+  return [...staticBlocks, ...blocks].filter(b => b.length > 0);
 }
 
 function byName<T extends ImportLike>(imports: readonly T[]): T[] {
