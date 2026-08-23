@@ -2,12 +2,13 @@ package compiler
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
-	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -21,6 +22,9 @@ import (
 // javap's layout: a 6 column indent with the pc right-aligned in the next 4
 // (wider pcs push the line out), the mnemonic in a 13 column field, and the
 // `// ...` comment starting at column 46.
+// ACC_MODULE (JVMS 4.1) marks a module-info.class; not in the shared flag set.
+const accModule = 0x8000
+
 const (
 	pcIndent      = 6
 	pcWidth       = 4
@@ -324,11 +328,10 @@ func JavaFloatText(value float32) string {
 func escapeString(value string) string {
 	var out strings.Builder
 	for i := 0; i < len(value); {
-		// An unpaired surrogate survives decoding as its WTF-8 bytes; it cannot be
-		// written out as text at all (javap emits a "?"), so escape the code unit.
+		// An unpaired surrogate survives decoding as its WTF-8 bytes (see
+		// decodeModifiedUTF8); it has no encoding at all, and javap writes "?".
 		if i+2 < len(value) && value[i] == 0xed && value[i+1] >= 0xa0 {
-			code := rune(value[i]&0x0f)<<12 | rune(value[i+1]&0x3f)<<6 | rune(value[i+2]&0x3f)
-			fmt.Fprintf(&out, "\\u%04x", code)
+			out.WriteByte('?')
 			i += 3
 			continue
 		}
@@ -361,11 +364,31 @@ func escapeString(value string) string {
 	return out.String()
 }
 
-var identifierRe = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
+// isJavaIdentifier mirrors Character.isJavaIdentifierStart / isJavaIdentifierPart:
+// letters of any script, not just ASCII (javap prints `café` bare, not quoted).
+func isJavaIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		start := unicode.IsLetter(r) || unicode.Is(unicode.Nl, r) || r == '$' || r == '_'
+		if start {
+			continue
+		}
+		if i == 0 {
+			return false
+		}
+		if !unicode.IsDigit(r) && !unicode.Is(unicode.Mn, r) &&
+			!unicode.Is(unicode.Mc, r) && !unicode.Is(unicode.Pc, r) {
+			return false
+		}
+	}
+	return true
+}
 
 // quoteName quotes a member name that is not a plain Java identifier (`"<init>"`).
 func quoteName(name string) string {
-	if identifierRe.MatchString(name) {
+	if isJavaIdentifier(name) {
 		return name
 	}
 	return `"` + name + `"`
@@ -454,12 +477,28 @@ type Instruction struct {
 	ExtraLines []string
 }
 
+// Bounds-checked, because the code array comes straight from the file: an
+// instruction that runs off the end is a corrupt class, not a crash (javap:
+// "Fatal error: attribute Code too big to handle", exit 1). Once `overrun` is
+// set every read yields zero, so decoding unwinds instead of walking on.
 type codeCursor struct {
-	b  []byte
-	at int
+	b       []byte
+	at      int
+	overrun bool
+}
+
+func (c *codeCursor) require(n int) bool {
+	if c.at+n > len(c.b) {
+		c.overrun = true
+		return false
+	}
+	return true
 }
 
 func (c *codeCursor) u1() uint8 {
+	if !c.require(1) {
+		return 0
+	}
 	v := c.b[c.at]
 	c.at++
 	return v
@@ -468,6 +507,9 @@ func (c *codeCursor) u1() uint8 {
 func (c *codeCursor) i1() int8 { return int8(c.u1()) }
 
 func (c *codeCursor) u2() uint16 {
+	if !c.require(2) {
+		return 0
+	}
 	v := binary.BigEndian.Uint16(c.b[c.at:])
 	c.at += 2
 	return v
@@ -476,9 +518,18 @@ func (c *codeCursor) u2() uint16 {
 func (c *codeCursor) i2() int16 { return int16(c.u2()) }
 
 func (c *codeCursor) i4() int32 {
+	if !c.require(4) {
+		return 0
+	}
 	v := int32(binary.BigEndian.Uint32(c.b[c.at:]))
 	c.at += 4
 	return v
+}
+
+// align4 moves to the 4-byte boundary a table/lookupswitch's operands start at.
+func (c *codeCursor) align4() {
+	c.at += (4 - (c.at % 4)) % 4
+	c.require(0)
 }
 
 func switchBody(keys []string, targets []int) []string {
@@ -489,11 +540,12 @@ func switchBody(keys []string, targets []int) []string {
 	return append(lines, strings.Repeat(" ", 12)+"}")
 }
 
-// DecodeInstructions decodes a Code attribute's bytes into javap's instruction stream.
-func DecodeInstructions(classFile *ClassFile, code []byte) []Instruction {
+// DecodeInstructions decodes a Code attribute's bytes into javap's instruction
+// stream, or reports that the stream ends inside an instruction.
+func DecodeInstructions(classFile *ClassFile, code []byte) ([]Instruction, error) {
 	c := &codeCursor{b: code}
 	var out []Instruction
-	for c.at < len(code) {
+	for c.at < len(code) && !c.overrun {
 		pc := c.at
 		opcode := int(c.u1())
 		if opcode >= len(mnemonics) {
@@ -507,7 +559,11 @@ func DecodeInstructions(classFile *ClassFile, code []byte) []Instruction {
 			// The wide prefix widens the following instruction's operands; javap
 			// prints those as `<mnemonic>_w`.
 			wide = true
-			widened := mnemonics[int(c.u1())]
+			widenedOpcode := int(c.u1())
+			if widenedOpcode >= len(mnemonics) {
+				return nil, errors.New("wide prefix on an unknown opcode")
+			}
+			widened := mnemonics[widenedOpcode]
 			mnemonic = widened + "_w"
 			kind = operands[widened]
 		}
@@ -568,13 +624,13 @@ func DecodeInstructions(classFile *ClassFile, code []byte) []Instruction {
 			instruction.Operand = fmt.Sprintf("#%d,  %d", index, dimensions)
 			instruction.Comment, instruction.HasComment = constantComment(classFile, index)
 		case operandTableSwitch:
-			c.at += (4 - (c.at % 4)) % 4 // pad to the next 4-byte boundary
+			c.align4()
 			defaultTarget := pc + int(c.i4())
 			low := int(c.i4())
 			high := int(c.i4())
 			var keys []string
 			var targets []int
-			for key := low; key <= high; key++ {
+			for key := low; key <= high && !c.overrun; key++ {
 				keys = append(keys, strconv.Itoa(key))
 				targets = append(targets, pc+int(c.i4()))
 			}
@@ -583,12 +639,12 @@ func DecodeInstructions(classFile *ClassFile, code []byte) []Instruction {
 			instruction.Operand = fmt.Sprintf("{ // %d to %d", low, high)
 			instruction.ExtraLines = switchBody(keys, targets)
 		case operandLookupSwitch:
-			c.at += (4 - (c.at % 4)) % 4
+			c.align4()
 			defaultTarget := pc + int(c.i4())
 			pairs := int(c.i4())
 			var keys []string
 			var targets []int
-			for i := 0; i < pairs; i++ {
+			for i := 0; i < pairs && !c.overrun; i++ {
 				keys = append(keys, strconv.Itoa(int(c.i4())))
 				targets = append(targets, pc+int(c.i4()))
 			}
@@ -599,7 +655,10 @@ func DecodeInstructions(classFile *ClassFile, code []byte) []Instruction {
 		}
 		out = append(out, instruction)
 	}
-	return out
+	if c.overrun {
+		return nil, errors.New("truncated code attribute")
+	}
+	return out, nil
 }
 
 func instructionLine(instruction Instruction) string {
@@ -979,25 +1038,33 @@ func exceptionTableLines(code *Code) []string {
 	return lines
 }
 
-func memberBlock(classFile *ClassFile, method Member) []string {
+func memberBlock(classFile *ClassFile, method Member) ([]string, error) {
 	lines := []string{"  " + methodDeclaration(method, classFile)}
 	code, err := ReadCode(method, classFile.Pool)
-	if err != nil || code == nil {
-		return lines
+	if err != nil {
+		return nil, err
+	}
+	if code == nil {
+		return lines, nil // abstract or native: no Code attribute
+	}
+	instructions, err := DecodeInstructions(classFile, code.Code)
+	if err != nil {
+		return nil, err
 	}
 	lines = append(lines, "    Code:")
-	for _, instruction := range DecodeInstructions(classFile, code.Code) {
+	for _, instruction := range instructions {
 		lines = append(lines, instructionLine(instruction))
 		lines = append(lines, instruction.ExtraLines...)
 	}
-	return append(lines, exceptionTableLines(code)...)
+	return append(lines, exceptionTableLines(code)...), nil
 }
 
 // RenderClass renders one class in `javap -c -p` layout.
-func RenderClass(classFile *ClassFile) string {
+func RenderClass(classFile *ClassFile) (string, error) {
 	var lines []string
 	if source := SourceFileName(classFile); source != "" {
-		lines = append(lines, fmt.Sprintf("Compiled from %q", source))
+		// Not %q: javap prints the name as it stands, with no Go-style escaping.
+		lines = append(lines, `Compiled from "`+source+`"`)
 	}
 	lines = append(lines, classDeclaration(classFile))
 	// javap terminates every field with a blank line, but only separates methods
@@ -1009,10 +1076,14 @@ func RenderClass(classFile *ClassFile) string {
 		if i > 0 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, memberBlock(classFile, method)...)
+		block, err := memberBlock(classFile, method)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, block...)
 	}
 	lines = append(lines, "}")
-	return strings.Join(lines, "\n") + "\n"
+	return strings.Join(lines, "\n") + "\n", nil
 }
 
 // Disassemble disassembles one class file's bytes.
@@ -1021,8 +1092,10 @@ func Disassemble(b []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// BootstrapMethods is read so a malformed table fails here rather than
-	// silently rendering a wrong `invokedynamic` comment.
-	ReadBootstrapMethods(classFile)
-	return RenderClass(classFile), nil
+	// A module-info.class carries a Module attribute instead of members; rendering
+	// it as a class would print a plausible-looking empty type (nikeee/cappu#43).
+	if classFile.Flags&accModule != 0 {
+		return "", errors.New("module descriptors are not supported yet")
+	}
+	return RenderClass(classFile)
 }

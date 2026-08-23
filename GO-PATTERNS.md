@@ -586,10 +586,13 @@ supplementary character is stored *as* a surrogate pair, so the two builds only
 agree if the Go side keeps surrogates out of the rune round trip:
 
 - Decode to `[]uint16` first, pair the surrogates yourself, and encode the
-  result (`decodeModifiedUTF8` / `utf16Decode` in `internal/compiler/classfile.go`).
+  result *byte by byte* (`decodeModifiedUTF8` / `encodeUTF16` in
+  `internal/compiler/classfile.go`). Do NOT go through `[]rune` /
+  `string(runes)`: that converts every surrogate half to U+FFFD before any
+  caller can see it, which silently kills the next bullet.
 - Keep an *unpaired* surrogate as its three WTF-8 bytes and detect that byte
   pattern (`0xed`, second byte `>= 0xa0`) where the text is rendered
-  (`escapeString` in `disasm.go`), rather than letting `[]rune` replace it.
+  (`escapeString` in `disasm.go`, which prints javap's `?` for it).
 - The writing side already does this: `byteBuffer.utf8` encodes
   `utf16.Encode([]rune(s))`, one 3-byte sequence per code unit.
 

@@ -5,9 +5,28 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"syscall"
 
 	"github.com/nikeee/cappu/internal/compiler"
 )
+
+// Node and Go word their I/O errors differently, so both builds map the cases
+// that matter to the same text (src/cli/decompile.ts does the same).
+func readErrorText(err error) string {
+	var pathError *fs.PathError
+	if !errors.As(err, &pathError) {
+		return err.Error() // a class-file error, not an I/O failure
+	}
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return "no such file or directory"
+	case errors.Is(err, syscall.EISDIR):
+		return "is a directory"
+	case errors.Is(err, fs.ErrPermission):
+		return "permission denied"
+	}
+	return "cannot read file"
+}
 
 // RunDecompile handles `cappu decompile`: print the bytecode of .class files,
 // in `javap -c -p` layout (#43). Reconstructing Java source is a later phase,
@@ -29,12 +48,7 @@ func RunDecompile(files []string) int {
 				continue
 			}
 		}
-		// Kept identical to the TS build's wording (src/cli/decompile.ts).
-		reason := err.Error()
-		if errors.Is(err, fs.ErrNotExist) {
-			reason = "no such file or directory"
-		}
-		fmt.Fprintf(os.Stderr, "cappu: %s: %s\n", file, reason)
+		fmt.Fprintf(os.Stderr, "cappu: %s: %s\n", file, readErrorText(err))
 		failed = true
 	}
 	if failed {

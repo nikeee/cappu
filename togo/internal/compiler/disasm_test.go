@@ -82,9 +82,11 @@ func compareDisasm(t *testing.T, className string, got, want *Disasm) {
 
 // --- tier 2: the text baselines the TS side writes ----------------------------------
 
-// The classes with no javac baseline (enum bodies, annotations, sealed types).
-// The baselines are written by src/compiler/disasm.test.ts under
-// UPDATE_BASELINES=1; here they double as the TS/Go parity check.
+// Classes whose full listing is pinned as text: enum bodies, annotations and
+// sealed types, where tier 1 covers little or nothing (a javac baseline holds
+// only the normalized instruction stream, and some of these have no baseline at
+// all). The files are written by src/compiler/disasm.test.ts under
+// UPDATE_BASELINES=1, so here they double as the TS/Go parity check.
 var textBaselineClasses = []string{
 	"AnnAll",
 	"EnumAbstract",
@@ -188,6 +190,11 @@ public class Dynamic {
     return (int) (a0 + b9 + k9 + m9);
   }
 }`,
+	"Unicode": `public class Unicode {
+  int caf\u00e9 = 1;
+  int m\u00fcnchen() { return caf\u00e9; }
+  static String \u03c0() { return "\\u00a0"; }
+}`,
 	"Shapes": `import java.util.*;
 public class Shapes<T extends Number & Comparable<T>> implements Cloneable, java.io.Serializable {
   public static final int CONST = 7;
@@ -208,6 +215,7 @@ const oldRelease = "8"
 
 var oldReleaseFixtures = map[string]bool{
 	"Switches": true, "Guards": true, "Dynamic": true, "Numbers": true, "Wide": true,
+	"Unicode": true,
 }
 
 func hasTool(name string) bool {
@@ -260,6 +268,69 @@ func TestDisasmMatchesJavap(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// --- malformed and unsupported input --------------------------------------------------
+
+func TestDecodeInstructionsRejectsTruncatedCode(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(emitBaselinesDir, "Concat.class"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	classFile, err := ReadClassFile(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ldc without its index, invokevirtual with half an index, a tableswitch whose
+	// padding alone runs off the end, iinc without operands, a dangling wide.
+	for _, code := range [][]byte{{0x12}, {0xb6, 0x00}, {0xaa, 0x00, 0x00}, {0x84}, {0xc4, 0x15}} {
+		if _, err := DecodeInstructions(classFile, code); err == nil {
+			t.Errorf("DecodeInstructions(%v) = nil error, want a failure", code)
+		}
+	}
+}
+
+func TestDisassembleRejectsTruncatedClass(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(emitBaselinesDir, "Pt.class"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Disassemble(b[:len(b)-12]); err == nil {
+		t.Error("a truncated class file produced a listing")
+	}
+}
+
+func TestDisassembleRefusesModuleInfo(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "module-info.java")
+	if err := os.WriteFile(source, []byte("module cappu.test.mod { requires java.base; }"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("javac", "-d", dir, source).CombinedOutput(); err != nil {
+		t.Fatalf("javac: %v\n%s", err, out)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "module-info.class"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Disassemble(b)
+	if err == nil || !strings.Contains(err.Error(), "module descriptors are not supported yet") {
+		t.Errorf("err = %v, want the module-descriptor refusal", err)
+	}
+}
+
+func TestEscapeStringRendersUnpairedSurrogateLikeJavap(t *testing.T) {
+	// The pool holds a lone high surrogate; it has no encoding, and javap prints "?".
+	lone := encodeUTF16([]uint16{'a', 0xd800, 'b'})
+	if got := escapeString(lone); got != "a?b" {
+		t.Errorf("escapeString(lone surrogate) = %q, want %q", got, "a?b")
+	}
+	if got := escapeString("ok"); got != "ok" {
+		t.Errorf("escapeString(%q) = %q", "ok", got)
 	}
 }
 

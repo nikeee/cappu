@@ -5,10 +5,10 @@
 
 import {
   type ClassFile,
+  ClassFileError,
   type Code,
   type Constant,
   type Member,
-  readBootstrapMethods,
   readClassFile,
   readCode,
   readExceptions,
@@ -32,6 +32,7 @@ const ACC_TRANSIENT = 0x0080;
 const ACC_NATIVE = 0x0100;
 const ACC_INTERFACE = 0x0200;
 const ACC_ABSTRACT = 0x0400;
+const ACC_MODULE = 0x8000;
 
 // javap's layout: a 6 column indent with the pc right-aligned in the next 4
 // (wider pcs push the line out), the mnemonic in a 13 column field, and the
@@ -279,7 +280,8 @@ export function javaFloatText(value: number): string {
   return javaFloatingPoint(negative, digits, exponent);
 }
 
-function escapeString(value: string): string {
+/** A string constant as javap escapes it (exported for its own tests). */
+export function escapeString(value: string): string {
   let out = "";
   for (const ch of value) {
     const code = ch.codePointAt(0)!;
@@ -294,14 +296,21 @@ function escapeString(value: string): string {
     // javap escapes the C0 and C1 control ranges; everything else prints as is.
     else if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) {
       out += `\\u${code.toString(16).padStart(4, "0")}`;
-    } else out += ch;
+    }
+    // An unpaired surrogate has no encoding at all; javap writes "?" for it.
+    else if (code >= 0xd800 && code <= 0xdfff) out += "?";
+    else out += ch;
   }
   return out;
 }
 
+// Character.isJavaIdentifierStart / isJavaIdentifierPart: letters of any
+// script, not just ASCII (javap prints `café` bare, not quoted).
+const IDENTIFIER = /^[\p{L}\p{Nl}$_][\p{L}\p{Nl}\p{Mn}\p{Mc}\p{Nd}\p{Pc}$]*$/u;
+
 /** javap quotes a member name that is not a plain Java identifier (`"<init>"`). */
 function quoteName(name: string): string {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : `"${name}"`;
+  return IDENTIFIER.test(name) ? name : `"${name}"`;
 }
 
 /** javap quotes a class name that is an array descriptor (`class "[[I"`). */
@@ -372,32 +381,48 @@ export interface Instruction {
   readonly extraLines: string[];
 }
 
+// Bounds-checked, because the code array comes straight from the file: an
+// instruction that runs off the end is a corrupt class, not a crash (javap:
+// "Fatal error: attribute Code too big to handle", exit 1).
 class CodeCursor {
   at = 0;
   readonly view: DataView;
   constructor(readonly code: Uint8Array) {
     this.view = new DataView(code.buffer, code.byteOffset, code.byteLength);
   }
+  private require(n: number): void {
+    if (this.at + n > this.code.length) throw new ClassFileError("truncated code attribute");
+  }
   u1(): number {
+    this.require(1);
     return this.view.getUint8(this.at++);
   }
   i1(): number {
+    this.require(1);
     return this.view.getInt8(this.at++);
   }
   u2(): number {
+    this.require(2);
     const v = this.view.getUint16(this.at);
     this.at += 2;
     return v;
   }
   i2(): number {
+    this.require(2);
     const v = this.view.getInt16(this.at);
     this.at += 2;
     return v;
   }
   i4(): number {
+    this.require(4);
     const v = this.view.getInt32(this.at);
     this.at += 4;
     return v;
+  }
+  /** The 4-byte alignment a table/lookupswitch's operands start at. */
+  align4(): void {
+    this.at += (4 - (this.at % 4)) % 4;
+    this.require(0);
   }
 }
 
@@ -495,7 +520,7 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
         break;
       }
       case "tableswitch": {
-        c.at += (4 - (c.at % 4)) % 4; // pad to the next 4-byte boundary
+        c.align4(); // the operands start at the next 4-byte boundary
         const defaultTarget = pc + c.i4();
         const low = c.i4();
         const high = c.i4();
@@ -507,7 +532,7 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
         break;
       }
       case "lookupswitch": {
-        c.at += (4 - (c.at % 4)) % 4;
+        c.align4();
         const defaultTarget = pc + c.i4();
         const pairs = c.i4();
         const entries: [string, number][] = [];
@@ -549,23 +574,24 @@ function instructionLine(instruction: Instruction): string {
 // --- declarations -------------------------------------------------------------------
 
 /** A field/method descriptor type as source text; nested names keep their `$`. */
+const DESCRIPTOR_PRIMITIVES: Record<string, string> = {
+  B: "byte",
+  C: "char",
+  D: "double",
+  F: "float",
+  I: "int",
+  J: "long",
+  S: "short",
+  Z: "boolean",
+  V: "void",
+};
+
 export function descriptorType(descriptor: string, at: number): { text: string; next: number } {
   let arrays = 0;
   while (descriptor[at] === "[") {
     arrays++;
     at++;
   }
-  const primitives: Record<string, string> = {
-    B: "byte",
-    C: "char",
-    D: "double",
-    F: "float",
-    I: "int",
-    J: "long",
-    S: "short",
-    Z: "boolean",
-    V: "void",
-  };
   let base: string;
   if (descriptor[at] === "L") {
     const end = descriptor.indexOf(";", at);
@@ -573,7 +599,7 @@ export function descriptorType(descriptor: string, at: number): { text: string; 
     base = descriptor.slice(at + 1, stop).replaceAll("/", ".");
     at = end < 0 ? descriptor.length : end + 1;
   } else {
-    base = primitives[descriptor[at] ?? ""] ?? "java.lang.Object";
+    base = DESCRIPTOR_PRIMITIVES[descriptor[at] ?? ""] ?? "java.lang.Object";
     at++;
   }
   return { text: base + "[]".repeat(arrays), next: at };
@@ -627,18 +653,7 @@ class SignatureCursor {
   }
 
   javaType(): string {
-    const primitives: Record<string, string> = {
-      B: "byte",
-      C: "char",
-      D: "double",
-      F: "float",
-      I: "int",
-      J: "long",
-      S: "short",
-      Z: "boolean",
-      V: "void",
-    };
-    const primitive = primitives[this.peek()];
+    const primitive = DESCRIPTOR_PRIMITIVES[this.peek()];
     if (primitive) {
       this.take();
       return primitive;
@@ -857,8 +872,10 @@ export function renderClass(classFile: ClassFile): string {
 /** Disassemble one class file's bytes. Throws ClassFileError on malformed input. */
 export function disassemble(bytes: Uint8Array): string {
   const classFile = readClassFile(bytes);
-  // BootstrapMethods is read so a malformed table fails here rather than
-  // silently rendering a wrong `invokedynamic` comment.
-  readBootstrapMethods(classFile);
+  // A module-info.class carries a Module attribute instead of members; rendering
+  // it as a class would print a plausible-looking empty type (nikeee/cappu#43).
+  if (classFile.flags & ACC_MODULE) {
+    throw new ClassFileError("module descriptors are not supported yet");
+  }
   return renderClass(classFile);
 }

@@ -281,13 +281,6 @@ export function readClassFile(bytes: Uint8Array): ClassFile {
 
 // --- constant pool accessors -----------------------------------------------------
 
-export function constantAt(
-  pool: readonly (Constant | undefined)[],
-  index: number,
-): Constant | undefined {
-  return pool[index];
-}
-
 export function utf8(pool: readonly (Constant | undefined)[], index: number): string | undefined {
   const entry = pool[index];
   return entry?.tag === "utf8" ? entry.value : undefined;

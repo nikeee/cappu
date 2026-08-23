@@ -27,15 +27,30 @@ func runDecompile(t *testing.T, files ...string) (code int, stdout, stderr strin
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Drain both pipes while the command runs: a listing larger than the pipe
+	// buffer (~64 KiB) would otherwise block the writer forever.
+	outDone := readAll(outRead)
+	errDone := readAll(errRead)
 	oldOut, oldErr := os.Stdout, os.Stderr
+	defer func() {
+		os.Stdout, os.Stderr = oldOut, oldErr
+	}()
 	os.Stdout, os.Stderr = outWrite, errWrite
 	code = RunDecompile(files)
 	os.Stdout, os.Stderr = oldOut, oldErr
 	_ = outWrite.Close()
 	_ = errWrite.Close()
-	out, _ := io.ReadAll(outRead)
-	errs, _ := io.ReadAll(errRead)
-	return code, string(out), string(errs)
+	return code, <-outDone, <-errDone
+}
+
+// readAll drains a pipe in the background and yields its contents at EOF.
+func readAll(r *os.File) <-chan string {
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+	return done
 }
 
 func TestDecompilePrintsListing(t *testing.T) {
@@ -70,6 +85,18 @@ func TestDecompileRejectsOtherFiles(t *testing.T) {
 		t.Errorf("exit = %d, want 1", code)
 	}
 	if !strings.Contains(stderr, "not a class file") {
+		t.Errorf("stderr = %q", stderr)
+	}
+}
+
+func TestDecompileReportsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	code, _, stderr := runDecompile(t, dir)
+	if code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+	// Same wording as the TS build (src/cli/decompile.test.ts).
+	if !strings.Contains(stderr, "is a directory") {
 		t.Errorf("stderr = %q", stderr)
 	}
 }

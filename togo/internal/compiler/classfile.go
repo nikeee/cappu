@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"unicode/utf8"
 )
 
 // A complete class-file reader (JVMS chapter 4): every constant-pool tag is
@@ -182,19 +183,19 @@ func decodeModifiedUTF8(b []byte) string {
 			i++
 		case b[i]&0xe0 == 0xc0:
 			if i+1 >= len(b) {
-				return string(utf16Decode(units))
+				return encodeUTF16(units)
 			}
 			units = append(units, uint16(b[i]&0x1f)<<6|uint16(b[i+1]&0x3f))
 			i += 2
 		default:
 			if i+2 >= len(b) {
-				return string(utf16Decode(units))
+				return encodeUTF16(units)
 			}
 			units = append(units, uint16(b[i]&0x0f)<<12|uint16(b[i+1]&0x3f)<<6|uint16(b[i+2]&0x3f))
 			i += 3
 		}
 	}
-	return string(utf16Decode(units))
+	return encodeUTF16(units)
 }
 
 func readConstantPool(c *cursor) ([]*Constant, error) {
@@ -390,7 +391,10 @@ func readMemberTable(c *cursor, pool []*Constant) ([]Member, error) {
 func ReadClassFile(b []byte) (*ClassFile, error) {
 	c := &cursor{b: b}
 	magic, err := c.u4()
-	if err != nil || magic != 0xcafebabe {
+	if err != nil {
+		return nil, err // a file shorter than the magic is truncated, not foreign
+	}
+	if magic != 0xcafebabe {
 		return nil, ErrNotClassFile
 	}
 	minor, err := c.u2()
@@ -679,20 +683,27 @@ func SignatureOf(attributes []Attribute, pool []*Constant) string {
 	return PoolUtf8(pool, binary.BigEndian.Uint16(attribute.Bytes))
 }
 
-// utf16Decode turns UTF-16 code units into runes, keeping unpaired surrogates
-// as the replacement-free code point so callers can escape them themselves.
-func utf16Decode(units []uint16) []rune {
-	runes := make([]rune, 0, len(units))
+// encodeUTF16 turns UTF-16 code units into a string. A surrogate pair becomes
+// the supplementary character it stands for; an UNPAIRED surrogate is written
+// as its own three-byte (WTF-8) sequence, because Go's rune-to-string
+// conversion would silently replace it with U+FFFD and the caller needs to see
+// that the class file held one (disasm.go renders it as javap's "?").
+func encodeUTF16(units []uint16) string {
+	out := make([]byte, 0, len(units)+len(units)/2)
 	for i := 0; i < len(units); i++ {
 		u := units[i]
 		if u >= 0xd800 && u <= 0xdbff && i+1 < len(units) && units[i+1] >= 0xdc00 && units[i+1] <= 0xdfff {
-			runes = append(runes, ((rune(u)-0xd800)<<10|(rune(units[i+1])-0xdc00))+0x10000)
+			out = utf8.AppendRune(out, ((rune(u)-0xd800)<<10|(rune(units[i+1])-0xdc00))+0x10000)
 			i++
 			continue
 		}
-		runes = append(runes, rune(u))
+		if u >= 0xd800 && u <= 0xdfff {
+			out = append(out, byte(0xe0|u>>12), byte(0x80|(u>>6)&0x3f), byte(0x80|u&0x3f))
+			continue
+		}
+		out = utf8.AppendRune(out, rune(u))
 	}
-	return runes
+	return string(out)
 }
 
 // internalToJava turns an internal class name into its external form.

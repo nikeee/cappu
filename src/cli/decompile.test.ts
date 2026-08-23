@@ -65,6 +65,13 @@ test("exits 1 on input that is not a class file", () => {
   expect(stderr).toContain("not a class file");
 });
 
+test("reports a directory argument the same way the Go build does", () => {
+  using dir = TempDir.create("cappu-decompile-cli-");
+  const { status, stderr } = run(dir.path, dir.path);
+  expect(status).toBe(1);
+  expect(stderr).toContain("is a directory");
+});
+
 test("keeps going after a bad file and still exits 1", () => {
   using dir = TempDir.create("cappu-decompile-cli-");
   const { status, stdout, stderr } = run(dir.path, join(dir.path, "missing.class"), classFile);

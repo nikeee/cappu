@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -22,7 +23,7 @@ func emitClassBytes(t *testing.T, name, source string) []byte {
 	checker := NewChecker(program)
 	classes := EmitSourceFile(program.GetSourceFile(uri), program, checker, true)
 	for _, c := range classes {
-		if len(c.Name) >= len(name) && c.Name[len(c.Name)-len(name):] == name {
+		if strings.HasSuffix(c.Name, name) {
 			return c.Bytes
 		}
 	}

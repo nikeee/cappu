@@ -6,7 +6,14 @@ import { test } from "node:test";
 import { expect } from "expect";
 
 import TempDir from "../TempDir.ts";
-import { disassemble, javaDoubleText, javaFloatText } from "./disasm.ts";
+import { ClassFileError, readClassFile } from "./classfile.ts";
+import {
+  decodeInstructions,
+  disassemble,
+  escapeString,
+  javaDoubleText,
+  javaFloatText,
+} from "./disasm.ts";
 import { type Disasm, parseJavapText } from "./javapNormalize.ts";
 
 const here = import.meta.dirname;
@@ -54,8 +61,10 @@ for (const file of readdirSync(javacBaselines)
 
 // --- tier 2: our own text baselines for the classes javac has none for ---------------
 
-// The classes with no javac baseline (enum bodies, annotations, sealed types):
-// their full listing is pinned here so a decoding change cannot pass unnoticed.
+// Classes whose full listing is pinned as text: enum bodies, annotations and
+// sealed types, where tier 1 covers little or nothing (a javac baseline holds
+// only the normalized instruction stream, and some of these have no baseline at
+// all). The Go tests read the same files, so these double as the parity check.
 const TEXT_BASELINE_CLASSES = [
   "AnnAll",
   "EnumAbstract",
@@ -144,6 +153,12 @@ const JAVAC_FIXTURES: Record<string, string> = {
     "    return (int) (a0 + b9 + k9 + m9);\n" +
     "  }\n" +
     "}",
+  Unicode:
+    "public class Unicode {\n" +
+    "  int caf\u00e9 = 1;\n" +
+    "  int m\u00fcnchen() { return caf\u00e9; }\n" +
+    '  static String \u03c0() { return "\\u00a0"; }\n' +
+    "}",
   Shapes:
     "import java.util.*;\n" +
     "public class Shapes<T extends Number & Comparable<T>> implements Cloneable, java.io.Serializable {\n" +
@@ -162,7 +177,7 @@ const JAVAC_FIXTURES: Record<string, string> = {
 // Only the fixtures that are valid Java 8 are compiled for the older release
 // (`Shapes` uses records and private interface methods).
 const OLD_RELEASE = "8";
-const OLD_RELEASE_FIXTURES = ["Switches", "Guards", "Dynamic", "Numbers", "Wide"];
+const OLD_RELEASE_FIXTURES = ["Switches", "Guards", "Dynamic", "Numbers", "Wide", "Unicode"];
 const JAVAC_RELEASES = ["21", OLD_RELEASE];
 
 function compileWithJavac(source: string, name: string, release: string, outDir: string): string[] {
@@ -193,6 +208,43 @@ for (const release of JAVAC_RELEASES) {
     );
   }
 }
+
+// --- malformed and unsupported input --------------------------------------------------
+
+test("a code array ending inside an instruction is an error, not a crash", () => {
+  const classFile = readClassFile(readFileSync(join(emitBaselines, "Concat.class")));
+  // ldc without its index, invokevirtual with half an index, a tableswitch whose
+  // padding alone runs off the end, iinc without operands, a dangling wide.
+  for (const code of [[0x12], [0xb6, 0x00], [0xaa, 0x00, 0x00], [0x84], [0xc4, 0x15]]) {
+    expect(() => decodeInstructions(classFile, new Uint8Array(code))).toThrow(ClassFileError);
+  }
+});
+
+test("a truncated class file reports rather than printing half a listing", () => {
+  const bytes = readFileSync(join(emitBaselines, "Pt.class"));
+  expect(() => disassemble(bytes.subarray(0, bytes.length - 12))).toThrow(ClassFileError);
+});
+
+test(
+  "a module descriptor is refused instead of rendered as an empty class",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-disasm-module-");
+    writeFileSync(
+      join(dir.path, "module-info.java"),
+      "module cappu.test.mod { requires java.base; }",
+    );
+    execFileSync("javac", ["-d", dir.path, join(dir.path, "module-info.java")], { stdio: "pipe" });
+    const bytes = readFileSync(join(dir.path, "module-info.class"));
+    expect(() => disassemble(bytes)).toThrow(/module descriptors are not supported yet/);
+  },
+);
+
+test("javap renders an unpaired surrogate as ?", () => {
+  // The pool holds a lone high surrogate; it has no encoding, and javap prints "?".
+  expect(escapeString("a\ud800b")).toBe("a?b");
+  expect(escapeString("ok")).toBe("ok");
+});
 
 // --- Java's own number formatting ----------------------------------------------------
 
