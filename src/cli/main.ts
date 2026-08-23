@@ -12,6 +12,7 @@ import { runRemove } from "./remove.ts";
 import { runOutdated } from "./outdated.ts";
 import { runCompileCommand } from "./compile.ts";
 import { runCheckCommand } from "./check.ts";
+import { runDecompile } from "./decompile.ts";
 import { runFormat } from "./format.ts";
 import { runConfigSchema } from "./configSchema.ts";
 import { runInit } from "./init.ts";
@@ -135,6 +136,11 @@ const COMMAND_GROUPS: HelpGroup[] = [
         name: "check",
         args: "[file...]",
         desc: "Type-check with cappu's own checker (the LSP's diagnostics, more than javac emits) without writing any class files; with no files, check everything under the configured sourcePaths",
+      },
+      {
+        name: "decompile",
+        args: "<file.class>...",
+        desc: "Print the bytecode of compiled .class files, in javap -c -p layout (no JDK needed)",
       },
       {
         name: "format",
@@ -405,6 +411,9 @@ switch (command) {
   case "config-schema":
     runConfigSchema();
   // falls through: runConfigSchema exits the process (never returns)
+  case "decompile":
+    runDecompile(files); // reads class files directly: no project config needed
+  // falls through: runDecompile exits the process (never returns)
 }
 
 let config;

@@ -1,0 +1,8 @@
+Compiled from "ImplicitSealed.java"
+class ImplicitSealed {
+  ImplicitSealed();
+    Code:
+         0: aload_0
+         1: invokespecial #8                  // Method java/lang/Object."<init>":()V
+         4: return
+}

@@ -1,0 +1,21 @@
+Compiled from "QualifiedAnon.java"
+class QualifiedAnon$1 extends QualifiedAnon$Inner {
+  QualifiedAnon$1(QualifiedAnon, int);
+    Code:
+         0: aload_0
+         1: aload_1
+         2: dup
+         3: invokestatic  #10                 // Method java/util/Objects.requireNonNull:(Ljava/lang/Object;)Ljava/lang/Object;
+         6: pop
+         7: iload_2
+         8: invokespecial #14                 // Method QualifiedAnon$Inner."<init>":(LQualifiedAnon;I)V
+        11: return
+
+  int get();
+    Code:
+         0: aload_0
+         1: getfield      #21                 // Field v:I
+         4: bipush        100
+         6: iadd
+         7: ireturn
+}
