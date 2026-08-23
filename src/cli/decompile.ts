@@ -4,7 +4,6 @@
 
 import { readFileSync } from "node:fs";
 
-import { ClassFileError } from "../compiler/classfile.ts";
 import { disassemble } from "../compiler/disasm.ts";
 
 export function runDecompile(files: string[]): never {
@@ -17,7 +16,11 @@ export function runDecompile(files: string[]): never {
     try {
       process.stdout.write(disassemble(readFileSync(file)));
     } catch (e) {
-      const reason = e instanceof ClassFileError ? e.message : (e as Error).message;
+      // Kept identical to the Go build's wording (togo/internal/cli/decompile.go).
+      const reason =
+        (e as NodeJS.ErrnoException).code === "ENOENT"
+          ? "no such file or directory"
+          : (e as Error).message;
       process.stderr.write(`cappu: ${file}: ${reason}\n`);
       failed = true;
     }
