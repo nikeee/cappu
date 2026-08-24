@@ -415,17 +415,44 @@ var reconstructions = []struct {
 		name: "Tern",
 		source: "class Tern { static int f(int a, int b) { return (a > b ? a : b) + 1; }" +
 			" static int g(boolean c) { int[] xs = new int[3]; xs[c ? 0 : 1] = 7; return xs[0]; } }",
-		// The condition is a boolean, so an index has to ask for the int back.
-		want:          []string{"return (arg0 > arg1 ? arg0 : arg1) + 1;", "var1[!arg0 ? 0 : 1] = 7;"},
+		// The condition is a boolean, so an index has to ask for the int back -
+		// and the int form keeps the branch's own arms, not the boolean reading.
+		want:          []string{"return (arg0 > arg1 ? arg0 : arg1) + 1;", "var1[arg0 ? 0 : 1] = 7;"},
 		selfContained: true,
 	},
 	{
-		// Only the branch says the local is a boolean: `istore` is what an int uses.
+		// `istore` is what an int uses, so a materialized condition starts as one -
+		// and a use that needs a boolean (`return b`) is what narrows it. With no
+		// such use it stays an int, which still compiles and still branches.
 		name: "BoolVar",
-		source: "class BoolVar { static int f(int a) { boolean big = a > 10;" +
-			" if (big) { return 1; } return 0; } }",
-		want:          []string{"boolean var1 = arg0 > 10;", "if (var1) {"},
-		reject:        []string{"var1 != 0"},
+		source: "class BoolVar { static boolean f(int a) { boolean b = a > 10;" +
+			" if (b) { return b; } return false; }" +
+			" static int g(int a) { boolean b = a > 10; if (b) { return 1; } return 0; }" +
+			" static int h(int a) { int x = a > 0 ? 1 : 0; return x + 1; } }",
+		want: []string{
+			"boolean var1 = arg0 > 10;",
+			"if (var1) {",
+			// Our emitter branches on the true arm, so the int form reads
+			// inverted - the same value, written the way this branch is laid out.
+			"int var1 = arg0 <= 10 ? 0 : 1;",
+			"if (var1 != 0) {",
+			"int var1 = arg0 > 0 ? 1 : 0;",
+			"return var1 + 1;",
+		},
+		selfContained: true,
+	},
+	{
+		// A materialized condition in a position that wants a number: arithmetic
+		// and an array index splice the text in as it stands, so it has to be the
+		// ternary again rather than the boolean it reads as elsewhere.
+		name: "AsNumber",
+		source: "class AsNumber { static int f(boolean q, int[] xs) { return xs[q ? 2 : 0] + (q ? 1 : 0); }" +
+			" static int g(int a) { return -(a > 0 ? 1 : 0); }" +
+			" static long h(int a) { return (long) (a > 0 ? 1 : 0); } }",
+		want: []string{
+			"arg0 ? 2 : 0", "+ (arg0 ? 1 : 0)",
+			"-(arg0 > 0 ? 1 : 0)", "(long) (arg0 > 0 ? 1 : 0)",
+		},
 		selfContained: true,
 	},
 	{
@@ -517,15 +544,15 @@ func TestDecompileReconstructsControlFlowFixture(t *testing.T) {
 // The two arms store to the same slot with the same opcode but differently typed
 // values, so without a debug table there is nothing left to say whether that is
 // one variable or two - and guessing would produce code that lies.
-const ambiguousSlotSource = "class Amb { static boolean f(boolean c, int x) { boolean b;" +
-	" if (c) { b = true; } else { b = x > 1; } return b; } }"
+const ambiguousSlotSource = "class Amb { static java.lang.Object f(boolean c, java.lang.String s, int[] a) {" +
+	" java.lang.Object o; if (c) { o = s; } else { o = a; } return o; } }"
 
 func TestDecompileSaysWhenASlotComesFromEitherBranch(t *testing.T) {
 	source, err := Decompile(emitClassBytesNoDebug(t, "Amb", ambiguousSlotSource))
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(source, "cappu: local 2 is written in more than one branch") {
+	if !strings.Contains(source, "cappu: local 3 is written in more than one branch") {
 		t.Errorf("expected the ambiguity to be reported in:\n%s", source)
 	}
 }
@@ -537,12 +564,12 @@ func TestDecompileReadsOneVariableWhenTheDebugTableScopesItPerBranch(t *testing.
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	for _, want := range []string{"boolean b;", "b = true;", "b = x > 1;", "return b;"} {
+	for _, want := range []string{"java.lang.Object o;", "o = s;", "o = a;", "return o;"} {
 		if !strings.Contains(source, want) {
 			t.Errorf("missing %q in:\n%s", want, source)
 		}
 	}
-	if strings.Contains(source, "b_2") {
+	if strings.Contains(source, "o_2") {
 		t.Errorf("the variable was split in two:\n%s", source)
 	}
 	if diagnostics := diagnosticsOf("Amb", source); len(diagnostics) > 0 {
@@ -564,6 +591,10 @@ const branchySource = `public class Branchy {
   static boolean nested(int a, int b, int c) { return (a > 0 && b > 0) || c > 0; }
   static double pick(boolean c, int a, double b) { return c ? a : b; }
   static boolean isNull(java.lang.Object o) { return o == null; }
+  static int index(boolean c, int[] a) { a[c ? 0 : 1] = 7; return a[0]; }
+  static boolean staleCondition(int a) { boolean b = true; if (b) { return a > 0; } return b; }
+  static int numeric(int a) { int x = a > 0 ? 1 : 0; return x + 1; }
+  static int counted(boolean q, int[] xs) { return xs[q ? 2 : 0] + (q ? 1 : 0); }
   static int andOr(int a, int b, int c) { if ((a > 0 && b > 0) || c > 0) { return 11; } else { return 22; } }
   static int orAnd(int a, int b, int c) { if (a > 0 || (b > 0 && c > 0)) { return 11; } else { return 22; } }
   static int andGroup(int a, int b, int c) { if (a > 0 && (b > 0 || c > 0)) { return 11; } else { return 22; } }

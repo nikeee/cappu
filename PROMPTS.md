@@ -569,3 +569,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-08-24 20:05 — continue with the next step of the decompilation implementation (see issue 43)
 - 2026-08-24 20:10 — continue
 - 2026-08-24 20:12 — build it
+- 2026-08-24 21:26 — deep reiew

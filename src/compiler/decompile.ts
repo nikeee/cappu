@@ -191,6 +191,17 @@ function negate(expr: Expr): Expr {
 /** The wider of two numeric types, as binary numeric promotion picks it. */
 const NUMERIC_WIDTH = ["int", "long", "float", "double"];
 
+/**
+ * A value in a position that wants a number. A condition javac materialized as
+ * `1`/`0` reads as a boolean everywhere the type is known (a store, a return),
+ * but arithmetic and comparisons splice the text in as it stands, so it has to
+ * become the ternary again.
+ */
+function numeric(expr: Expr): Expr {
+  if (expr.asInt === undefined) return expr;
+  return { text: expr.asInt, prec: PREC_TERNARY, type: "int" };
+}
+
 /** `1` and `0` in a position where the other arm proves a boolean was meant. */
 function asBoolean(expr: Expr): Expr {
   if (expr.text === "1") return primary("true", "boolean");
@@ -246,15 +257,14 @@ function ternary(condition: Expr, thenValue: Expr, elseValue: Expr): Expr | unde
 }
 
 /**
- * The value of a branch whose arms are `1` and `0`: that is a boolean, and the
- * condition is what source wrote - but the int form is kept for a use that
- * wants a number back.
+ * The value of a branch whose arms are `1` and `0`: that is a boolean, and
+ * `value` is how the condition reads as one - but the int form has to keep the
+ * *branch's* own arms (`c ? 0 : 1`, not `!c ? 1 : 0`), which is the form source
+ * wrote and the one that recompiles to the same branch.
  */
-function materializedBoolean(condition: Expr, thenValue: string): Expr {
-  return {
-    ...condition,
-    asInt: `${at(condition, PREC_TERNARY + 1)} ? ${thenValue} : ${thenValue === "1" ? "0" : "1"}`,
-  };
+function materializedBoolean(value: Expr, condition: Expr, whenTrue: string): Expr {
+  const whenFalse = whenTrue === "1" ? "0" : "1";
+  return { ...value, asInt: `${at(condition, PREC_TERNARY + 1)} ? ${whenTrue} : ${whenFalse}` };
 }
 
 const BINARY_OPS: Record<string, { operator: string; prec: number }> = {
@@ -728,6 +738,12 @@ class BodyDecompiler {
   private currentBlock = 0;
   private followOf = new Map<number, number>();
   private readonly visited = new Set<number>();
+  /**
+   * Every `if (...)` line emitted, with the condition it came from: a local's
+   * type can still narrow after the line is written (the use that proves it is a
+   * boolean may come later), and the text has to follow.
+   */
+  private readonly conditions: { list: Stmt[]; index: number; condition: Expr }[] = [];
 
   constructor(
     private readonly classFile: ClassFile,
@@ -774,6 +790,45 @@ class BodyDecompiler {
         index === 0 && declaration?.inline === true
           ? `${target} ${local.name} = ${assigned};`
           : `${local.name} = ${assigned};`;
+    }
+    for (const emitted of this.conditions) {
+      emitted.list[emitted.index] = this.ifLine(emitted.condition);
+    }
+  }
+
+  private ifLine(condition: Expr): string {
+    return `if (${this.renderCondition(condition).text}) {`;
+  }
+
+  /**
+   * A condition rendered against the types its locals are known to have *now*.
+   * `ifeq` on a local is how both `if (!b)` and `if (x == 0)` are compiled, so
+   * the comparison is written against an int until something proves the variable
+   * is a boolean - and then this rewrites it.
+   */
+  private renderCondition(condition: Expr): Expr {
+    const logic = condition.logic;
+    if (logic === undefined) return condition;
+    switch (logic.kind) {
+      case "and":
+      case "or":
+        return logical(
+          logic.kind,
+          this.renderCondition(logic.left),
+          this.renderCondition(logic.right),
+        );
+      case "not":
+        return not(this.renderCondition(logic.value));
+      case "compare": {
+        const local = this.byName.get(logic.left.text);
+        if (local === undefined || local.type === logic.left.type) return condition;
+        const value = primary(local.name, local.type);
+        if (local.type === "boolean" && logic.right.text === "0") {
+          if (logic.op === "!=") return value;
+          if (logic.op === "==") return not(value);
+        }
+        return compare(value, logic.op, primary(coerce(logic.right, local.type), local.type));
+      }
     }
   }
 
@@ -952,7 +1007,7 @@ class BodyDecompiler {
         at = block.successors[0]!;
         continue;
       }
-      at = this.conditional(block, stop);
+      at = this.conditional(block);
     }
   }
 
@@ -960,16 +1015,16 @@ class BodyDecompiler {
    * One `if`, from the branch that ends `block`. Returns where the statement
    * after it begins.
    */
-  private conditional(block: Block, stop: number): number {
+  private conditional(block: Block): number {
     const taken: number[] = [];
     const jump = this.jumpConditionOf(block, taken);
     for (const start of taken) this.visited.add(start);
     // javac emits the arms in source order, so the `then` is whichever comes
     // first; the branch is written to select it.
     const targetIsThen = jump.target < jump.fallthrough;
-    let condition = targetIsThen ? jump.condition : negate(jump.condition);
-    let whenTrue = targetIsThen ? jump.target : jump.fallthrough;
-    let whenFalse = targetIsThen ? jump.fallthrough : jump.target;
+    const condition = targetIsThen ? jump.condition : negate(jump.condition);
+    const whenTrue = targetIsThen ? jump.target : jump.fallthrough;
+    const whenFalse = targetIsThen ? jump.fallthrough : jump.target;
     const follow = this.followOf.get(block.start) ?? EXIT;
 
     if (follow !== EXIT) {
@@ -979,33 +1034,30 @@ class BodyDecompiler {
         return follow;
       }
     }
-    // `if (c) return x;` has no merge point: the arm that leaves the method is
-    // the whole statement, and the rest of the body follows it at the same
-    // level, not inside an `else`.
+    // `if (c) return x;` has no merge point. Both arms leave the method - every
+    // path does, since a block that runs off the end is rejected - so the arm
+    // that branches is the whole statement and the other one is what follows it,
+    // at the same level rather than inside an `else`.
     if (follow === EXIT) {
-      if (!this.alwaysExits(whenTrue) && this.alwaysExits(whenFalse)) {
-        condition = negate(condition);
-        [whenTrue, whenFalse] = [whenFalse, whenTrue];
-      }
-      if (this.alwaysExits(whenTrue)) {
-        const exiting = this.capture(() => this.structure(whenTrue, EXIT));
-        this.current.push(`if (${condition.text}) {`, exiting, "}");
-        return whenFalse;
-      }
+      const exiting = this.capture(() => this.structure(whenTrue, EXIT));
+      this.pushIf(condition, exiting);
+      return whenFalse;
     }
-    // With no merge of their own the arms run to the end of the region they sit
-    // in, which is the enclosing `if`'s follow, not the end of the method.
-    const stopAt = follow === EXIT ? stop : follow;
-    const thenStatements = this.capture(() => this.structure(whenTrue, stopAt));
-    const elseStatements = this.capture(() => this.structure(whenFalse, stopAt));
+    const thenStatements = this.capture(() => this.structure(whenTrue, follow));
+    const elseStatements = this.capture(() => this.structure(whenFalse, follow));
     if (thenStatements.length === 0 && elseStatements.length > 0) {
-      this.current.push(`if (${negate(condition).text}) {`, elseStatements, "}");
-      return stopAt;
+      this.pushIf(negate(condition), elseStatements);
+      return follow;
     }
-    this.current.push(`if (${condition.text}) {`, thenStatements);
+    this.pushIf(condition, thenStatements, elseStatements);
+    return follow;
+  }
+
+  private pushIf(condition: Expr, thenStatements: Stmt[], elseStatements: Stmt[] = []): void {
+    this.conditions.push({ list: this.current, index: this.current.length, condition });
+    this.current.push(this.ifLine(condition), thenStatements);
     if (elseStatements.length > 0) this.current.push("} else {", elseStatements);
     this.current.push("}");
-    return stopAt;
   }
 
   /**
@@ -1086,7 +1138,7 @@ class BodyDecompiler {
     if (folded.has(start) || this.visited.has(start)) return undefined;
     // Nothing outside the chain may reach it, or folding would skip a path in.
     if (this.predecessorsOf(start, folded) !== 0) return undefined;
-    const stackDepth = this.stack.length;
+    const stackBefore = [...this.stack];
     const takenCount = taken.length;
     const foldedBefore = [...folded];
     folded.add(start);
@@ -1103,7 +1155,7 @@ class BodyDecompiler {
     return {
       ...jump,
       undo: () => {
-        this.stack.length = stackDepth;
+        this.stack.splice(0, this.stack.length, ...stackBefore);
         taken.length = takenCount;
         folded.clear();
         for (const block of foldedBefore) folded.add(block);
@@ -1136,8 +1188,8 @@ class BodyDecompiler {
     const op = COMPARISONS[mnemonic.replace("if_icmp", "if").replace(/^if/, "")];
     if (op === undefined) throw new NotDecompilable(`unsupported branch ${mnemonic}`);
     if (mnemonic.startsWith("if_icmp")) {
-      const right = this.pop();
-      return compare(this.pop(), op, right);
+      const right = numeric(this.pop());
+      return compare(numeric(this.pop()), op, right);
     }
     const value = this.popRaw();
     // `lcmp`/`fcmpl`/`dcmpg` only exist to feed one of these: what source wrote
@@ -1148,15 +1200,7 @@ class BodyDecompiler {
     if (value.type === "boolean" && (op === "==" || op === "!=")) {
       return op === "!=" ? value : negate(value);
     }
-    return compare(value, op, intLiteral(0));
-  }
-
-  /** True when every path from `start` leaves the method. */
-  private alwaysExits(start: number): boolean {
-    const block = this.blocks.get(start);
-    if (block === undefined) return false;
-    if (block.kind === "end") return true;
-    return block.successors.every(successor => this.alwaysExits(successor));
+    return compare(numeric(value), op, intLiteral(0));
   }
 
   /**
@@ -1171,10 +1215,12 @@ class BodyDecompiler {
     follow: number,
   ): Expr | undefined {
     const consumed: number[] = [];
-    const before = this.stack.length;
+    const before = [...this.stack];
     const value = this.armValues(condition, whenTrue, whenFalse, follow, consumed);
     if (value === undefined) {
-      this.stack.length = before;
+      // An arm may have consumed values that were already on the stack, so the
+      // depth alone does not put it back.
+      this.stack.splice(0, this.stack.length, ...before);
       return undefined;
     }
     for (const start of consumed) this.visited.add(start);
@@ -1195,10 +1241,10 @@ class BodyDecompiler {
     // `c ? 1 : 0` is a boolean that javac erased to an int; source wrote the
     // condition itself.
     if (thenValue.text === "1" && elseValue.text === "0") {
-      return materializedBoolean(condition, "1");
+      return materializedBoolean(condition, condition, "1");
     }
     if (thenValue.text === "0" && elseValue.text === "1") {
-      return materializedBoolean(negate(condition), "0");
+      return materializedBoolean(negate(condition), condition, "0");
     }
     return ternary(condition, thenValue, elseValue);
   }
@@ -1259,7 +1305,7 @@ class BodyDecompiler {
   private runInstructions(
     instructions: readonly Instruction[],
     endPc: number,
-    blockStart = this.currentBlock,
+    blockStart: number,
   ): void {
     const outer = this.currentBlock;
     this.currentBlock = blockStart;
@@ -1321,9 +1367,12 @@ class BodyDecompiler {
       }
       const value = this.pop();
       // `istore` is what a boolean, char, byte and short are stored with too;
-      // when the value knows which one it is, that is the variable's type.
+      // when the value knows which one it is, that is the variable's type. A
+      // condition javac materialized as `1`/`0` does *not* know: `int x = c ? 1
+      // : 0` and `boolean b = c` compile to the same store, so it starts as an
+      // int and a use that needs a boolean narrows it (as for a literal).
       const fallback =
-        base === "astore" || ERASED_TO_INT.includes(value.type)
+        base === "astore" || (ERASED_TO_INT.includes(value.type) && value.asInt === undefined)
           ? value.type
           : PRIMITIVE_OF_PREFIX[base[0]!]!;
       return this.store(this.slotOf(instruction), nextPc, value, fallback);
@@ -1341,13 +1390,13 @@ class BodyDecompiler {
     // Arithmetic, bitwise and conversions.
     const operator = BINARY_OPS[mnemonic.slice(1)];
     if (operator && /^[ilfd]/.test(mnemonic)) {
-      const right = this.pop();
-      const left = this.pop();
+      const right = numeric(this.pop());
+      const left = numeric(this.pop());
       const type = PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
       return this.push(binary(left, operator.operator, right, operator.prec, type));
     }
     if (/^[ilfd]neg$/.test(mnemonic)) {
-      const value = this.pop();
+      const value = numeric(this.pop());
       return this.push({
         // A unary operand needs the parens too: `-(-a)` is not `--a`.
         text: `-${at(value, PREC_UNARY + 1)}`,
@@ -1357,7 +1406,7 @@ class BodyDecompiler {
     }
     const conversion = CONVERSIONS[mnemonic];
     if (conversion) {
-      const value = this.pop();
+      const value = numeric(this.pop());
       return this.push({
         text: `(${conversion}) ${at(value, PREC_UNARY)}`,
         prec: PREC_UNARY,
@@ -1413,14 +1462,14 @@ class BodyDecompiler {
       return;
     }
     if (mnemonic === "newarray") {
-      const length = this.pop();
+      const length = numeric(this.pop());
       return this.push(
         primary(`new ${instruction.operand}[${length.text}]`, `${instruction.operand}[]`),
       );
     }
     if (mnemonic === "anewarray") {
       const element = typeName(className(pool, instruction.arg) ?? "java/lang/Object", this.self);
-      const length = this.pop();
+      const length = numeric(this.pop());
       // The element type may itself be an array: the new dimension goes first,
       // so `new String[n][]`, never `new String[][n]`.
       const base = element.replaceAll("[]", "");
@@ -1431,7 +1480,7 @@ class BodyDecompiler {
       const type = typeName(className(pool, instruction.arg) ?? "", this.self);
       const rank = (type.match(/\[\]/g) ?? []).length;
       const sizes: string[] = [];
-      for (let i = 0; i < instruction.arg2; i++) sizes.unshift(this.pop().text);
+      for (let i = 0; i < instruction.arg2; i++) sizes.unshift(numeric(this.pop()).text);
       if (sizes.length > rank) throw new NotDecompilable("multianewarray rank mismatch");
       const element = type.slice(0, type.length - rank * 2);
       const dimensions = sizes.map(size => `[${size}]`).join("");

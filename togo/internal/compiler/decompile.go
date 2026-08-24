@@ -192,6 +192,17 @@ func widthOf(typ string) int {
 	return -1
 }
 
+// numeric renders a value in a position that wants a number. A condition javac
+// materialized as `1`/`0` reads as a boolean everywhere the type is known (a
+// store, a return), but arithmetic and comparisons splice the text in as it
+// stands, so it has to become the ternary again.
+func numeric(e expr) expr {
+	if e.AsInt == "" {
+		return e
+	}
+	return expr{Text: e.AsInt, Prec: precTernary, Type: "int"}
+}
+
 // asBoolean rewrites `1` and `0` in a position where the other arm proves a
 // boolean was meant.
 func asBoolean(e expr) expr {
@@ -262,15 +273,16 @@ func ternaryExpr(condition, thenValue, elseValue expr) (expr, bool) {
 }
 
 // materializedBoolean is the value of a branch whose arms are `1` and `0`: that
-// is a boolean, and the condition is what source wrote - but the int form is
-// kept for a use that wants a number back.
-func materializedBoolean(condition expr, thenValue string) expr {
-	elseValue := "0"
-	if thenValue == "0" {
-		elseValue = "1"
+// is a boolean, and value is how the condition reads as one - but the int form
+// has to keep the *branch's* own arms (`c ? 0 : 1`, not `!c ? 1 : 0`), which is
+// the form source wrote and the one that recompiles to the same branch.
+func materializedBoolean(value, condition expr, whenTrue string) expr {
+	whenFalse := "0"
+	if whenTrue == "0" {
+		whenFalse = "1"
 	}
-	out := condition
-	out.AsInt = at(condition, precTernary+1) + " ? " + thenValue + " : " + elseValue
+	out := value
+	out.AsInt = at(condition, precTernary+1) + " ? " + whenTrue + " : " + whenFalse
 	return out
 }
 
@@ -864,11 +876,15 @@ type bodyDecompiler struct {
 	depth   int
 	// names is every local name handed out so far, so a reused slot cannot
 	// shadow one.
-	names        map[string]bool
-	byName       map[string]*local
-	blocks       map[int]*block
-	followOf     map[int]int
-	visited      map[int]bool
+	names    map[string]bool
+	byName   map[string]*local
+	blocks   map[int]*block
+	followOf map[int]int
+	visited  map[int]bool
+	// conditions are every `if (...)` line emitted, with the condition it came
+	// from: a local's type can still narrow after the line is written (the use
+	// that proves it is a boolean may come later), and the text has to follow.
+	conditions   []emittedCondition
 	entryPc      int
 	currentBlock int
 }
@@ -902,6 +918,52 @@ func (d *bodyDecompiler) retype(entry *local, target string) {
 			text = target + " " + entry.Name + " = " + assigned + ";"
 		}
 		(*write.List)[write.Index] = stmt{Text: text}
+	}
+	for _, emitted := range d.conditions {
+		(*emitted.List)[emitted.Index] = stmt{Text: d.ifLine(emitted.Condition)}
+	}
+}
+
+// emittedCondition is an `if (...)` line and the condition it was rendered from.
+type emittedCondition struct {
+	List      *[]stmt
+	Index     int
+	Condition expr
+}
+
+func (d *bodyDecompiler) ifLine(condition expr) string {
+	return "if (" + d.renderCondition(condition).Text + ") {"
+}
+
+// renderCondition renders a condition against the types its locals are known to
+// have *now*. `ifeq` on a local is how both `if (!b)` and `if (x == 0)` are
+// compiled, so the comparison is written against an int until something proves
+// the variable is a boolean - and then this rewrites it.
+func (d *bodyDecompiler) renderCondition(condition expr) expr {
+	logic := condition.Logic
+	if logic == nil {
+		return condition
+	}
+	switch logic.Kind {
+	case logicAnd, logicOr:
+		return logicalExpr(logic.Kind, d.renderCondition(*logic.Left), d.renderCondition(*logic.Right))
+	case logicNot:
+		return notExpr(d.renderCondition(*logic.Left))
+	default:
+		entry, ok := d.byName[logic.Left.Text]
+		if !ok || entry.Type == logic.Left.Type {
+			return condition
+		}
+		value := primary(entry.Name, entry.Type)
+		if entry.Type == "boolean" && logic.Right.Text == "0" {
+			if logic.Op == "!=" {
+				return value
+			}
+			if logic.Op == "==" {
+				return notExpr(value)
+			}
+		}
+		return compareExpr(value, logic.Op, primary(coerce(*logic.Right, entry.Type), entry.Type))
 	}
 }
 
@@ -1134,7 +1196,7 @@ func (d *bodyDecompiler) structure(entry, stop int) error {
 			at = b.Successors[0]
 			continue
 		}
-		next, err := d.conditional(b, stop)
+		next, err := d.conditional(b)
 		if err != nil {
 			return err
 		}
@@ -1145,7 +1207,7 @@ func (d *bodyDecompiler) structure(entry, stop int) error {
 
 // conditional writes one `if`, from the branch that ends b, and reports where
 // the statement after it begins.
-func (d *bodyDecompiler) conditional(b *block, stop int) (int, error) {
+func (d *bodyDecompiler) conditional(b *block) (int, error) {
 	var taken []int
 	jump, err := d.jumpConditionOf(b, &taken, nil)
 	if err != nil {
@@ -1177,53 +1239,44 @@ func (d *bodyDecompiler) conditional(b *block, stop int) (int, error) {
 			return follow, nil
 		}
 	}
-	// `if (c) return x;` has no merge point: the arm that leaves the method is
-	// the whole statement, and the rest of the body follows it at the same level,
-	// not inside an `else`.
+	// `if (c) return x;` has no merge point. Both arms leave the method - every
+	// path does, since a block that runs off the end is rejected - so the arm
+	// that branches is the whole statement and the other one is what follows it,
+	// at the same level rather than inside an `else`.
 	if follow == exitBlock {
-		if !d.alwaysExits(whenTrue) && d.alwaysExits(whenFalse) {
-			condition = negate(condition)
-			whenTrue, whenFalse = whenFalse, whenTrue
+		exiting, err := d.capture(func() error { return d.structure(whenTrue, exitBlock) })
+		if err != nil {
+			return 0, err
 		}
-		if d.alwaysExits(whenTrue) {
-			exiting, err := d.capture(func() error { return d.structure(whenTrue, exitBlock) })
-			if err != nil {
-				return 0, err
-			}
-			d.emit("if (" + condition.Text + ") {")
-			*d.current = append(*d.current, stmt{Nested: &exiting})
-			d.emit("}")
-			return whenFalse, nil
-		}
+		d.pushIf(condition, exiting, nil)
+		return whenFalse, nil
 	}
-	// With no merge of their own the arms run to the end of the region they sit
-	// in, which is the enclosing `if`'s follow, not the end of the method.
-	stopAt := follow
-	if follow == exitBlock {
-		stopAt = stop
-	}
-	thenStatements, err := d.capture(func() error { return d.structure(whenTrue, stopAt) })
+	thenStatements, err := d.capture(func() error { return d.structure(whenTrue, follow) })
 	if err != nil {
 		return 0, err
 	}
-	elseStatements, err := d.capture(func() error { return d.structure(whenFalse, stopAt) })
+	elseStatements, err := d.capture(func() error { return d.structure(whenFalse, follow) })
 	if err != nil {
 		return 0, err
 	}
 	if len(thenStatements) == 0 && len(elseStatements) > 0 {
-		d.emit("if (" + negate(condition).Text + ") {")
-		*d.current = append(*d.current, stmt{Nested: &elseStatements})
-		d.emit("}")
-		return stopAt, nil
+		d.pushIf(negate(condition), elseStatements, nil)
+		return follow, nil
 	}
-	d.emit("if (" + condition.Text + ") {")
+	d.pushIf(condition, thenStatements, elseStatements)
+	return follow, nil
+}
+
+func (d *bodyDecompiler) pushIf(condition expr, thenStatements, elseStatements []stmt) {
+	d.conditions = append(d.conditions,
+		emittedCondition{List: d.current, Index: len(*d.current), Condition: condition})
+	d.emit(d.ifLine(condition))
 	*d.current = append(*d.current, stmt{Nested: &thenStatements})
 	if len(elseStatements) > 0 {
 		d.emit("} else {")
 		*d.current = append(*d.current, stmt{Nested: &elseStatements})
 	}
 	d.emit("}")
-	return stopAt, nil
 }
 
 // jump is a conditional branch, once the tests that belong with it are folded in.
@@ -1328,7 +1381,7 @@ func (d *bodyDecompiler) chainFrom(
 	if d.predecessorsOf(start, folded) != 0 {
 		return jump{}, false, nil, nil
 	}
-	stackDepth := len(d.stack)
+	stackBefore := append([]expr(nil), d.stack...)
 	takenCount := len(*taken)
 	foldedBefore := make([]int, 0, len(folded))
 	for at := range folded {
@@ -1353,7 +1406,7 @@ func (d *bodyDecompiler) chainFrom(
 		return jump{}, false, nil, err
 	}
 	undo := func() {
-		d.stack = d.stack[:stackDepth]
+		d.stack = stackBefore
 		*taken = (*taken)[:takenCount]
 		for at := range folded {
 			delete(folded, at)
@@ -1425,7 +1478,7 @@ func (d *bodyDecompiler) branchExpr(instruction Instruction) (expr, error) {
 		if err != nil {
 			return expr{}, err
 		}
-		return compareExpr(left, op, right), nil
+		return compareExpr(numeric(left), op, numeric(right)), nil
 	}
 	value, err := d.popRaw()
 	if err != nil {
@@ -1445,37 +1498,20 @@ func (d *bodyDecompiler) branchExpr(instruction Instruction) (expr, error) {
 	return compareExpr(value, op, intLiteral(0)), nil
 }
 
-// alwaysExits reports whether every path from start leaves the method.
-func (d *bodyDecompiler) alwaysExits(start int) bool {
-	b := d.blocks[start]
-	if b == nil {
-		return false
-	}
-	if b.Kind == blockEnd {
-		return true
-	}
-	for _, successor := range b.Successors {
-		if !d.alwaysExits(successor) {
-			return false
-		}
-	}
-	return true
-}
-
 // tryTernary writes the two arms of a branch as `condition ? a : b`, when both
 // are side-effect-free and leave one value behind - which is how javac writes a
 // conditional expression, and how a boolean ends up in a variable.
 func (d *bodyDecompiler) tryTernary(condition expr, whenTrue, whenFalse, follow int) (expr, bool, error) {
 	consumed := []int{}
-	before := len(d.stack)
+	before := append([]expr(nil), d.stack...)
 	value, found, err := d.armValues(condition, whenTrue, whenFalse, follow, &consumed)
 	if err != nil {
 		return expr{}, false, err
 	}
 	if !found {
-		if len(d.stack) > before {
-			d.stack = d.stack[:before]
-		}
+		// An arm may have consumed values that were already on the stack, so the
+		// depth alone does not put it back.
+		d.stack = before
 		return expr{}, false, nil
 	}
 	for _, start := range consumed {
@@ -1500,10 +1536,10 @@ func (d *bodyDecompiler) armValues(
 	// `c ? 1 : 0` is a boolean that javac erased to an int; source wrote the
 	// condition itself.
 	if thenValue.Text == "1" && elseValue.Text == "0" {
-		return materializedBoolean(condition, "1"), true, nil
+		return materializedBoolean(condition, condition, "1"), true, nil
 	}
 	if thenValue.Text == "0" && elseValue.Text == "1" {
-		return materializedBoolean(negate(condition), "0"), true, nil
+		return materializedBoolean(negate(condition), condition, "0"), true, nil
 	}
 	value, ok := ternaryExpr(condition, thenValue, elseValue)
 	return value, ok, nil
@@ -1687,9 +1723,12 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 			return err
 		}
 		// `istore` is what a boolean, char, byte and short are stored with too;
-		// when the value knows which one it is, that is the variable's type.
+		// when the value knows which one it is, that is the variable's type. A
+		// condition javac materialized as `1`/`0` does *not* know: `int x = c ? 1
+		// : 0` and `boolean b = c` compile to the same store, so it starts as an
+		// int and a use that needs a boolean narrows it (as for a literal).
 		fallback := primitiveOfPrefix[base[0]]
-		if base == "astore" || erasedToInt[value.Type] {
+		if base == "astore" || (erasedToInt[value.Type] && value.AsInt == "") {
 			fallback = value.Type
 		}
 		return d.store(slotOf(instruction), nextPc, value, fallback)
@@ -1722,7 +1761,8 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
-		d.push(binaryExpr(left, operator.operator, right, operator.prec, primitiveOfPrefix[mnemonic[0]]))
+		d.push(binaryExpr(numeric(left), operator.operator, numeric(right),
+			operator.prec, primitiveOfPrefix[mnemonic[0]]))
 		return nil
 	}
 	if isOneOf(mnemonic, "ilfd", "neg") {
@@ -1730,6 +1770,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
+		value = numeric(value)
 		// A unary operand needs the parens too: `-(-a)` is not `--a`.
 		d.push(expr{Text: "-" + at(value, precUnary+1), Prec: precUnary, Type: primitiveOfPrefix[mnemonic[0]]})
 		return nil
@@ -1739,6 +1780,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
+		value = numeric(value)
 		d.push(expr{Text: "(" + conversion + ") " + at(value, precUnary), Prec: precUnary, Type: conversion})
 		return nil
 	}
@@ -1827,7 +1869,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
-		d.push(primary("new "+instruction.Operand+"["+length.Text+"]", instruction.Operand+"[]"))
+		d.push(primary("new "+instruction.Operand+"["+numeric(length).Text+"]", instruction.Operand+"[]"))
 		return nil
 	}
 	if mnemonic == "anewarray" {
@@ -1840,7 +1882,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		// so `new String[n][]`, never `new String[][n]`.
 		base := strings.ReplaceAll(element, "[]", "")
 		rest := strings.Repeat("[]", (len(element)-len(base))/2)
-		d.push(primary("new "+base+"["+length.Text+"]"+rest, element+"[]"))
+		d.push(primary("new "+base+"["+numeric(length).Text+"]"+rest, element+"[]"))
 		return nil
 	}
 	if mnemonic == "multianewarray" {
@@ -1852,7 +1894,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 			if err != nil {
 				return err
 			}
-			sizes[i] = size.Text
+			sizes[i] = numeric(size).Text
 		}
 		if len(sizes) > rank {
 			return bail("multianewarray rank mismatch")
