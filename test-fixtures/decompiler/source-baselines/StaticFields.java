@@ -5,11 +5,11 @@ class StaticFields {
   long y;
 
   static int getC() {
-    return StaticFields.counter;
+    return counter;
   }
 
   static void setC(int arg0) {
-    StaticFields.counter = arg0;
+    counter = arg0;
   }
 
   int getX() {
@@ -21,7 +21,7 @@ class StaticFields {
   }
 
   static long getT() {
-    return StaticFields.total;
+    return total;
   }
 
   void setY(long arg0) {

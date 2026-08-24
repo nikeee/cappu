@@ -1,8 +1,8 @@
-public class Pt {
+class Nest$Point {
   int x;
   int y;
 
-  Pt(int arg0, int arg1) {
+  Nest$Point(int arg0, int arg1) {
     this.x = arg0;
     this.y = arg1;
   }

@@ -1,0 +1,1 @@
+class SubB extends Sealed {}

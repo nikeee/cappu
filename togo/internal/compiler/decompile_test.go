@@ -15,15 +15,23 @@ import (
 // Every class our emitter produced whose methods this phase reconstructs in
 // full - straight-line arithmetic, conversions, fields, arrays and casts.
 var fullyDecompiled = []string{
-	"Arithmetic", "ArrayLoad", "ArrayStore", "CastInstance", "ClassLit", "Constants",
-	"Empty", "Fields", "FloatArith", "FloatConst", "FloatConv", "Fold", "IntConv",
-	"IntLiterals", "Locals", "LongArith", "Methods", "ModifiedFields", "NewArray",
-	"ReturnLiterals", "Returns", "StaticFields", "VarargsAndAbstract",
+	"AnnAll", "Arithmetic", "ArrayLoad", "ArrayStore", "CastInstance", "Cl",
+	"ClassLit", "Constants", "Empty", "EnumAbstract$1", "EnumAbstract$2",
+	"EnumMixed$1", "EnumMixed$2", "Fields", "FloatArith", "FloatConst", "FloatConv",
+	"Fold", "ICast$A", "ICast$B", "ISA", "ISB", "ImplicitSealed", "IntConv",
+	"IntLiterals", "Locals", "LongArith", "Methods", "ModifiedFields", "Nest$Counter",
+	"Nest$Point", "Nest", "NewArray", "Pt", "ReturnLiterals", "Returns", "Rt",
+	"Sealed", "SealedI", "StaticFields", "SubA", "SubB", "SubC", "VarargsAndAbstract",
 }
 
 // Classes kept for the bail-out rendering: control flow (phase 1.4+) and method
 // calls (phase 1.6) are not this phase's job, and must say so.
-var notDecompiled = []string{"ControlFlow", "Invoke", "Pt"}
+var notDecompiled = []string{
+	"BoundErasure", "Boxing", "Compute", "Concat", "ControlFlow", "EnumAbstract",
+	"EnumMixed", "EnumUnqualified", "Hello", "ICast", "Invoke", "PrivateCall",
+	"QualifiedAnon$1", "QualifiedAnon$Inner", "QualifiedAnon", "QualifiedNew$Inner",
+	"QualifiedNew", "VarargsPack",
+}
 
 // `ClassLit.prim()` reads `java.lang.Integer.TYPE`, which javac accepts and the
 // decompiler gets right, but our JDK stub does not declare - so re-emitting it
@@ -31,6 +39,18 @@ var notDecompiled = []string{"ControlFlow", "Invoke", "Pt"}
 // oracles are only as good as the stub, so that class is held to its text
 // baseline alone.
 var stubGap = map[string]bool{"ClassLit": true}
+
+// `Nest$Counter.tick()` reconstructs `this.n = this.n + 1` exactly, but our
+// emitter writes it as `aload_0; aload_0; getfield` where javac used
+// `aload_0; dup; getfield` - the same statement, a different codegen strategy,
+// which this instruction-identical oracle cannot express.
+// The class javac writes for an enum constant with a body is not expressible as
+// source at all - `class X$1 extends X` where X is an enum is exactly what Java
+// forbids anyone to write - so nothing can re-emit it.
+var noRoundtrip = map[string]bool{
+	"ClassLit": true, "Nest$Counter": true,
+	"EnumAbstract$1": true, "EnumAbstract$2": true, "EnumMixed$1": true, "EnumMixed$2": true,
+}
 
 func decompileBaseline(t *testing.T, name string) string {
 	t.Helper()
@@ -65,7 +85,7 @@ func TestDecompileReportsWhatItCannotReconstruct(t *testing.T) {
 // by design.
 func TestDecompileRecompilesToTheSameBytecode(t *testing.T) {
 	for _, name := range fullyDecompiled {
-		if stubGap[name] {
+		if noRoundtrip[name] {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
@@ -298,4 +318,186 @@ func readFile(t *testing.T, path string) []byte {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return b
+}
+
+// --- shapes the reconstruction has to get right ---------------------------------------
+
+// Each case is emitted by our own emitter, decompiled, and held to the text it
+// has to produce; selfContained cases are type-checked on top (the others
+// reference a class that lives in another file).
+var reconstructions = []struct {
+	name          string
+	source        string
+	want          []string
+	reject        []string
+	selfContained bool
+}{
+	{
+		name:   "Neg",
+		source: "class Neg { static int f(int a) { return -(-a); } }",
+		// `--arg0` would decrement it
+		want:          []string{"return -(-arg0);"},
+		selfContained: true,
+	},
+	{
+		name: "Jag",
+		source: "class Jag { static java.lang.String[][] f(int n) " +
+			"{ return new java.lang.String[n][]; } }",
+		want:          []string{"new java.lang.String[arg0][]"},
+		selfContained: true,
+	},
+	{
+		// A no-arg constructor is only javac's when it is the only one.
+		name:          "Ctors",
+		source:        "class Ctors { int v; Ctors() { this.v = 1; } Ctors(int x) { this.v = x; } }",
+		want:          []string{"Ctors() {", "Ctors(int arg0) {"},
+		selfContained: true,
+	},
+	{
+		name:   "Single",
+		source: "class Single { private Single() {} }",
+		// dropping it would make the class instantiable
+		want:          []string{"private Single() {"},
+		selfContained: true,
+	},
+	{
+		// Only the use says these are not ints: the store opcode is the same.
+		name: "Erased",
+		source: "class Erased { static boolean b() { boolean v = true; return v; }" +
+			" static char c() { char v = 'a'; return v; } }",
+		want:          []string{"boolean var0 = true;", "char var0 = 'a';"},
+		selfContained: true,
+	},
+	{
+		name: "Blank",
+		source: "class Blank { static int v() { return 1; } static final int N;" +
+			" static { N = v(); } }",
+		// The initializer could not be reconstructed, so `final` cannot stand,
+		// and a static initializer may not throw.
+		want:          []string{"static int N;"},
+		reject:        []string{"static final int N", "UnsupportedOperationException"},
+		selfContained: true,
+	},
+}
+
+func TestDecompileReconstructions(t *testing.T) {
+	for _, c := range reconstructions {
+		t.Run(c.name, func(t *testing.T) {
+			source, err := Decompile(emitClassBytesNoDebug(t, c.name, c.source))
+			if err != nil {
+				t.Fatalf("decompile: %v", err)
+			}
+			for _, want := range c.want {
+				if !strings.Contains(source, want) {
+					t.Errorf("missing %q in:\n%s", want, source)
+				}
+			}
+			for _, reject := range c.reject {
+				if strings.Contains(source, reject) {
+					t.Errorf("unexpected %q in:\n%s", reject, source)
+				}
+			}
+			if c.selfContained {
+				if found := diagnosticsOf(c.name, source); len(found) > 0 {
+					t.Errorf("does not type-check: %v\n%s", found, source)
+				}
+			}
+		})
+	}
+}
+
+func TestDecompileWritesNestedTypeReferencesWithADot(t *testing.T) {
+	source, err := Decompile(emitClassBytesNoDebug(t, "Outer",
+		"class Outer { static class Inner {} static Inner get() { return null; } }"))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "Outer.Inner get()") {
+		t.Errorf("nested reference kept its binary name:\n%s", source)
+	}
+}
+
+func TestDecompileChainsToTheSuperConstructor(t *testing.T) {
+	program := NewProgram()
+	LoadJdkStub(program)
+	uri := URI("file:///Base.java")
+	program.SetOpenDocument(uri, "class Base { int v; Base(int v) { this.v = v; } }"+
+		" class Sub extends Base { Sub(int x) { super(x); } }", 1)
+	classes := EmitSourceFile(program.GetSourceFile(uri), program, NewChecker(program), false)
+	for _, c := range classes {
+		if !strings.HasSuffix(c.Name, "Sub") {
+			continue
+		}
+		source, err := Decompile(c.Bytes)
+		if err != nil {
+			t.Fatalf("decompile: %v", err)
+		}
+		if !strings.Contains(source, "super(arg0);") {
+			t.Errorf("missing the chain call:\n%s", source)
+		}
+		return
+	}
+	t.Fatal("class Sub was not emitted")
+}
+
+// --- the JDK as a corpus -------------------------------------------------------------
+
+// javaBaseJmod is the JDK on PATH (or JAVA_HOME), when it ships the jmods/ a
+// class corpus needs.
+func javaBaseJmod() string {
+	home := os.Getenv("JAVA_HOME")
+	if home == "" {
+		javac, err := exec.LookPath("javac")
+		if err != nil {
+			return ""
+		}
+		resolved, err := filepath.EvalSymlinks(javac)
+		if err != nil {
+			return ""
+		}
+		home = filepath.Dir(filepath.Dir(resolved))
+	}
+	jmod := filepath.Join(home, "jmods", "java.base.jmod")
+	if _, err := os.Stat(jmod); err != nil {
+		return ""
+	}
+	return jmod
+}
+
+// Real classes from a real compiler: every shape javac emits, including the ones
+// no fixture here covers. The bar is not a full reconstruction - most of these
+// bail - but that what comes out is always Java the parser accepts.
+func TestDecompileEveryClassInJavaBase(t *testing.T) {
+	jmod := javaBaseJmod()
+	if jmod == "" {
+		t.Skip("no JDK with jmods/")
+	}
+	entries := readJmodEntries(jmod)
+	classes := 0
+	var failures []string
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name, "classes/") || !strings.HasSuffix(entry.Name, ".class") {
+			continue
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(entry.Name, "classes/"), ".class")
+		if name == "module-info" {
+			continue
+		}
+		classes++
+		source, err := Decompile(entry.Read())
+		if err != nil {
+			failures = append(failures, name+": "+err.Error())
+			continue
+		}
+		if diagnostics := ParseSourceFile(name+".java", source).AsSourceFile().ParseDiagnostics; len(diagnostics) > 0 {
+			failures = append(failures, name+": "+diagnostics[0].MessageText)
+		}
+	}
+	if classes < 1000 {
+		t.Fatalf("only %d classes read from %s", classes, jmod)
+	}
+	if len(failures) > 0 {
+		t.Errorf("%d of %d classes did not come back as parseable Java: %v",
+			len(failures), classes, failures[:min(10, len(failures))])
+	}
 }

@@ -110,13 +110,52 @@ var conversions = map[string]string{
 
 // --- constants -----------------------------------------------------------------------
 
-// typeName renders a `Foo$Bar` binary name as source text. Nested names keep the `$`.
-func typeName(internal string) string {
-	if strings.HasPrefix(internal, "[") {
-		text, _ := DescriptorType(internal, 0)
+// sourceTypeText renders a binary type name as a source *reference*:
+// `java.util.Map$Entry` is written `java.util.Map.Entry`, because `Map$Entry`
+// resolves to nothing. It stops at the first `$` segment that starts with a
+// digit - an anonymous or local class has no source name at all, so its binary
+// one is the only thing left to print.
+//
+// self is the class being declared. This file declares it under its binary name
+// (restoring the nesting needs the enclosing file, a later phase), so references
+// to it keep the `$` and still resolve.
+func sourceTypeText(text, self string) string {
+	// Only the class itself keeps the binary name - a *sibling* nested class is
+	// a different type, and `Outer$Other` resolves to nothing.
+	if !strings.Contains(text, "$") || (self != "" && strings.ReplaceAll(text, "[]", "") == self) {
 		return text
 	}
-	return strings.ReplaceAll(internal, "/", ".")
+	parts := strings.Split(text, "$")
+	out := parts[0]
+	for _, part := range parts[1:] {
+		anonymous := part == "" || (part[0] >= '0' && part[0] <= '9')
+		if anonymous || strings.Contains(out, "$") {
+			out += "$" + part
+		} else {
+			out += "." + part
+		}
+	}
+	return out
+}
+
+// typeName renders a `Foo$Bar` binary name as a source type reference.
+func typeName(internal, self string) string {
+	text := strings.ReplaceAll(internal, "/", ".")
+	if strings.HasPrefix(internal, "[") {
+		text, _ = DescriptorType(internal, 0)
+	}
+	return sourceTypeText(text, self)
+}
+
+// descriptorSourceType renders a descriptor as a source type reference.
+func descriptorSourceType(descriptor, self string) string {
+	text, _ := DescriptorType(descriptor, 0)
+	return sourceTypeText(text, self)
+}
+
+// selfOf is the class being decompiled, as its own references have to spell it.
+func selfOf(classFile *ClassFile) string {
+	return strings.ReplaceAll(classFile.ThisClass, "/", ".")
 }
 
 func intLiteral(value int) expr {
@@ -150,7 +189,7 @@ func negatablePrec(text string) int {
 	return precPrimary
 }
 
-func constantExpr(pool []*Constant, index uint16) (expr, error) {
+func constantExpr(pool []*Constant, index uint16, self string) (expr, error) {
 	entry := PoolAt(pool, index)
 	if entry == nil {
 		return expr{}, bail("unsupported constant #%d", index)
@@ -176,7 +215,7 @@ func constantExpr(pool []*Constant, index uint16) (expr, error) {
 	case TagString:
 		return primary(`"`+escapeString(PoolUtf8(pool, entry.Index))+`"`, "java.lang.String"), nil
 	case TagClass:
-		return primary(typeName(PoolUtf8(pool, entry.Index))+".class", "java.lang.Class"), nil
+		return primary(typeName(PoolUtf8(pool, entry.Index), self)+".class", "java.lang.Class"), nil
 	}
 	// A method handle/type or a dynamic constant: only reachable through the
 	// features later phases add.
@@ -263,12 +302,29 @@ func readLocalVariables(code *Code, pool []*Constant) []localEntry {
 	return out
 }
 
+// erasedToInt are the types javac erases to int in the bytecode, leaving only
+// the use to say so.
+var erasedToInt = map[string]bool{"boolean": true, "char": true, "byte": true, "short": true}
+
+type localWrite struct {
+	Index int
+	Value expr
+}
+
 type local struct {
 	Name     string
 	Type     string
 	Declared bool
 	// Origin is the debug-table row this name came from, when there is one.
 	Origin *localEntry
+	// Authoritative is set when the type came from a parameter descriptor or the
+	// debug table, so a store of a differently-typed value is an assignment to
+	// *this* variable (`boolean b` taking `iconst_0`), not a second variable in
+	// the same slot.
+	Authoritative bool
+	// Writes records where the declaration and every assignment landed, so a
+	// retype can rewrite them.
+	Writes []localWrite
 }
 
 type paramSlot struct {
@@ -316,7 +372,42 @@ type bodyDecompiler struct {
 	statements []string
 	// names is every local name handed out so far, so a reused slot cannot
 	// shadow one.
-	names map[string]bool
+	names  map[string]bool
+	byName map[string]*local
+}
+
+// self is the class being decompiled, as its references have to spell it.
+func (d *bodyDecompiler) self() string { return selfOf(d.classFile) }
+
+// coerceInto renders value as it has to read in a target-typed position. A local
+// the bytecode only says is an int, used where a boolean/char/byte/short
+// belongs, *is* one - the store opcode is the same for all of them - so its
+// declaration and every assignment to it are rewritten to that type.
+func (d *bodyDecompiler) coerceInto(value expr, target string) string {
+	if entry, ok := d.byName[value.Text]; ok && !entry.Authoritative &&
+		entry.Type == "int" && erasedToInt[target] {
+		entry.Type = target
+		for i, write := range entry.Writes {
+			assigned := coerce(write.Value, target)
+			if i == 0 {
+				d.statements[write.Index] = target + " " + entry.Name + " = " + assigned + ";"
+			} else {
+				d.statements[write.Index] = entry.Name + " = " + assigned + ";"
+			}
+		}
+	}
+	return coerce(value, target)
+}
+
+// staticRef writes a static field of this class with its simple name: that is
+// what source used, and a blank `static final` can only be *assigned* that way.
+// A local of the same name (declared before this point) shadows it, so then the
+// owner has to stay.
+func (d *bodyDecompiler) staticRef(owner, name string) string {
+	if owner == d.classFile.ThisClass && !d.names[name] {
+		return name
+	}
+	return typeName(owner, d.self()) + "." + name
 }
 
 func (d *bodyDecompiler) push(e expr) { d.stack = append(d.stack, e) }
@@ -347,7 +438,7 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 			if existing.Origin == scoped {
 				return existing, nil
 			}
-		} else if !isStore || existing.Type == fallbackType {
+		} else if !isStore || existing.Authoritative || existing.Type == fallbackType {
 			return existing, nil
 		}
 	}
@@ -357,26 +448,36 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 	if !isStore {
 		return nil, bail("local %d is read before it is written", slot)
 	}
-	created := &local{Type: fallbackType, Origin: scoped}
+	wanted := "var" + strconv.Itoa(slot)
 	if scoped != nil && scoped.Name != "" {
-		created.Name = scoped.Name
-	} else {
-		created.Name = d.freshName(slot)
+		wanted = scoped.Name
 	}
+	declared := fallbackType
+	authoritative := false
 	if scoped != nil && scoped.Type != "" {
-		created.Type = scoped.Type
+		declared = scoped.Type
+		authoritative = true
 	}
-	d.names[created.Name] = true
+	created := &local{
+		Name:          d.freshName(wanted),
+		Type:          sourceTypeText(declared, d.self()),
+		Origin:        scoped,
+		Authoritative: authoritative,
+	}
 	d.locals[slot] = created
+	d.byName[created.Name] = created
 	return created, nil
 }
 
-// freshName is `var<slot>`, kept distinct from the names already handed out.
-func (d *bodyDecompiler) freshName(slot int) string {
-	name := "var" + strconv.Itoa(slot)
+// freshName is wanted, kept distinct from the names already handed out. Two
+// sibling scopes can declare the same name over the same slot; the body they
+// decompile to is flat, so the second one has to be renamed.
+func (d *bodyDecompiler) freshName(wanted string) string {
+	name := wanted
 	for n := 2; d.names[name]; n++ {
-		name = "var" + strconv.Itoa(slot) + "_" + strconv.Itoa(n)
+		name = wanted + "_" + strconv.Itoa(n)
 	}
+	d.names[name] = true
 	return name
 }
 
@@ -405,7 +506,8 @@ func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType strin
 	if err != nil {
 		return err
 	}
-	text := coerce(value, target.Type)
+	text := d.coerceInto(value, target.Type)
+	target.Writes = append(target.Writes, localWrite{Index: len(d.statements), Value: value})
 	if target.Declared {
 		d.statements = append(d.statements, target.Name+" = "+text+";")
 		return nil
@@ -477,7 +579,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		d.push(intLiteral(instruction.Arg))
 		return nil
 	case mnemonic == "ldc" || mnemonic == "ldc_w" || mnemonic == "ldc2_w":
-		constant, err := constantExpr(pool, uint16(instruction.Arg))
+		constant, err := constantExpr(pool, uint16(instruction.Arg), d.self())
 		if err != nil {
 			return err
 		}
@@ -490,7 +592,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 	if isOneOf(base, "ilfda", "load") {
 		slot := slotOf(instruction)
 		if base == "aload" && slot == 0 && !d.isStatic {
-			d.push(primary("this", typeName(d.classFile.ThisClass)))
+			d.push(primary("this", d.self()))
 			return nil
 		}
 		target, err := d.local(slot, pc, primitiveOfPrefix[base[0]], false)
@@ -551,7 +653,8 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
-		d.push(expr{Text: "-" + at(value, precUnary), Prec: precUnary, Type: primitiveOfPrefix[mnemonic[0]]})
+		// A unary operand needs the parens too: `-(-a)` is not `--a`.
+		d.push(expr{Text: "-" + at(value, precUnary+1), Prec: precUnary, Type: primitiveOfPrefix[mnemonic[0]]})
 		return nil
 	}
 	if conversion, ok := conversions[mnemonic]; ok {
@@ -569,16 +672,16 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if !ok {
 			return bail("bad field reference")
 		}
-		owner := typeName(field.Owner)
-		if mnemonic == "getfield" {
-			target, err := d.pop()
-			if err != nil {
-				return err
-			}
-			owner = at(target, precPrimary)
+		fieldType := descriptorSourceType(field.Descriptor, d.self())
+		if mnemonic == "getstatic" {
+			d.push(primary(d.staticRef(field.Owner, field.Name), fieldType))
+			return nil
 		}
-		fieldType, _ := DescriptorType(field.Descriptor, 0)
-		d.push(primary(owner+"."+field.Name, fieldType))
+		target, err := d.pop()
+		if err != nil {
+			return err
+		}
+		d.push(primary(at(target, precPrimary)+"."+field.Name, fieldType))
 		return nil
 	}
 	if mnemonic == "putstatic" || mnemonic == "putfield" {
@@ -590,16 +693,16 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
-		fieldType, _ := DescriptorType(field.Descriptor, 0)
-		owner := typeName(field.Owner)
+		fieldType := descriptorSourceType(field.Descriptor, d.self())
+		target := d.staticRef(field.Owner, field.Name)
 		if mnemonic == "putfield" {
-			target, err := d.pop()
+			receiver, err := d.pop()
 			if err != nil {
 				return err
 			}
-			owner = at(target, precPrimary)
+			target = at(receiver, precPrimary) + "." + field.Name
 		}
-		d.statements = append(d.statements, owner+"."+field.Name+" = "+coerce(value, fieldType)+";")
+		d.statements = append(d.statements, target+" = "+d.coerceInto(value, fieldType)+";")
 		return nil
 	}
 
@@ -639,7 +742,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		}
 		element := elementType(array.Type, mnemonic[0])
 		d.statements = append(d.statements,
-			at(array, precPrimary)+"["+index.Text+"] = "+coerce(value, element)+";")
+			at(array, precPrimary)+"["+index.Text+"] = "+d.coerceInto(value, element)+";")
 		return nil
 	}
 	if mnemonic == "newarray" {
@@ -651,16 +754,20 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		return nil
 	}
 	if mnemonic == "anewarray" {
-		element := typeName(orDefault(PoolClassName(pool, uint16(instruction.Arg))))
+		element := typeName(orDefault(PoolClassName(pool, uint16(instruction.Arg))), d.self())
 		length, err := d.pop()
 		if err != nil {
 			return err
 		}
-		d.push(primary("new "+element+"["+length.Text+"]", element+"[]"))
+		// The element type may itself be an array: the new dimension goes first,
+		// so `new String[n][]`, never `new String[][n]`.
+		base := strings.ReplaceAll(element, "[]", "")
+		rest := strings.Repeat("[]", (len(element)-len(base))/2)
+		d.push(primary("new "+base+"["+length.Text+"]"+rest, element+"[]"))
 		return nil
 	}
 	if mnemonic == "multianewarray" {
-		typ := typeName(PoolClassName(pool, uint16(instruction.Arg)))
+		typ := typeName(PoolClassName(pool, uint16(instruction.Arg)), d.self())
 		rank := strings.Count(typ, "[]")
 		sizes := make([]string, instruction.Arg2)
 		for i := instruction.Arg2 - 1; i >= 0; i-- {
@@ -684,7 +791,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 
 	// Casts.
 	if mnemonic == "checkcast" {
-		typ := typeName(orDefault(PoolClassName(pool, uint16(instruction.Arg))))
+		typ := typeName(orDefault(PoolClassName(pool, uint16(instruction.Arg))), d.self())
 		value, err := d.pop()
 		if err != nil {
 			return err
@@ -693,12 +800,63 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		return nil
 	}
 	if mnemonic == "instanceof" {
-		typ := typeName(orDefault(PoolClassName(pool, uint16(instruction.Arg))))
+		typ := typeName(orDefault(PoolClassName(pool, uint16(instruction.Arg))), d.self())
 		value, err := d.pop()
 		if err != nil {
 			return err
 		}
 		d.push(expr{Text: at(value, precRel+1) + " instanceof " + typ, Prec: precRel, Type: "boolean"})
+		return nil
+	}
+
+	// Constructor chaining. `super(...)`/`this(...)` is not a method call in
+	// source, it is the shape of a constructor - without it no constructor
+	// decompiles at all. Any other invokespecial (a `new`, a private call) is
+	// still a later phase.
+	if mnemonic == "invokespecial" {
+		target, ok := PoolMemberRef(pool, uint16(instruction.Arg))
+		if !ok || target.Name != "<init>" {
+			return bail("unsupported instruction invokespecial")
+		}
+		superClass := d.classFile.SuperClass
+		if superClass == "" {
+			superClass = "java/lang/Object"
+		}
+		isSuper := target.Owner == superClass
+		if !isSuper && target.Owner != d.classFile.ThisClass {
+			return bail("constructor call to an unrelated class")
+		}
+		params := parameterSlots(target.Descriptor, true)
+		args := make([]string, len(params))
+		for i := len(params) - 1; i >= 0; i-- {
+			value, err := d.pop()
+			if err != nil {
+				return err
+			}
+			args[i] = d.coerceInto(value, params[i].Type)
+		}
+		receiver, err := d.pop()
+		if err != nil {
+			return err
+		}
+		if receiver.Text != "this" {
+			return bail("constructor call on another object")
+		}
+		if len(d.statements) > 0 {
+			return bail("constructor call is not first")
+		}
+		// javac writes the implicit `super()` into every constructor; source
+		// does not, and re-emitting puts it back. An enum constructor's
+		// `super(name, ordinal)` is generated too - and writing it is a compile
+		// error.
+		if isSuper && (len(args) == 0 || isEnumDeclaration(d.classFile)) {
+			return nil
+		}
+		keyword := "this"
+		if isSuper {
+			keyword = "super"
+		}
+		d.statements = append(d.statements, keyword+"("+strings.Join(args, ", ")+");")
 		return nil
 	}
 
@@ -732,7 +890,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
-		d.statements = append(d.statements, "return "+coerce(value, d.returnType)+";")
+		d.statements = append(d.statements, "return "+d.coerceInto(value, d.returnType)+";")
 		return nil
 	}
 
@@ -783,15 +941,15 @@ func constantValue(field Member, classFile *ClassFile) (expr, bool) {
 	if !ok || len(attribute.Bytes) < 2 {
 		return expr{}, false
 	}
-	value, err := constantExpr(classFile.Pool, binary.BigEndian.Uint16(attribute.Bytes))
+	value, err := constantExpr(classFile.Pool, binary.BigEndian.Uint16(attribute.Bytes), selfOf(classFile))
 	if err != nil {
 		return expr{}, false
 	}
 	return value, true
 }
 
-func fieldSource(field Member, classFile *ClassFile) string {
-	fieldType, _ := DescriptorType(field.Descriptor, 0)
+func fieldSource(field Member, classFile *ClassFile, keepFinal bool) string {
+	fieldType := descriptorSourceType(field.Descriptor, selfOf(classFile))
 	modifiers := accessModifiers(field.Flags)
 	if field.Flags&accStatic != 0 {
 		modifiers = append(modifiers, "static")
@@ -806,10 +964,23 @@ func fieldSource(field Member, classFile *ClassFile) string {
 		modifiers = append(modifiers, "volatile")
 	}
 	initializer := ""
+	hasValue := false
 	if value, ok := constantValue(field, classFile); ok {
 		initializer = " = " + coerce(value, fieldType)
+		hasValue = true
 	}
-	return strings.Join(append(modifiers, fieldType), " ") + " " + field.Name + initializer + ";"
+	// A blank `static final` is only legal when something assigns it; when the
+	// static initializer could not be reconstructed, nothing does.
+	shown := modifiers
+	if !keepFinal && !hasValue {
+		shown = nil
+		for _, m := range modifiers {
+			if m != "final" {
+				shown = append(shown, m)
+			}
+		}
+	}
+	return strings.Join(append(shown, fieldType), " ") + " " + field.Name + initializer + ";"
 }
 
 func methodModifiers(method Member, classFile *ClassFile) []string {
@@ -840,10 +1011,14 @@ func methodModifiers(method Member, classFile *ClassFile) []string {
 
 // buildLocals seeds the parameter (and `this`) slots, named from the debug table
 // when there is one.
-func buildLocals(method Member, localTable []localEntry, isStatic bool) map[int]*local {
+func buildLocals(method Member, localTable []localEntry, isStatic bool, self string) map[int]*local {
 	locals := map[int]*local{}
 	for index, parameter := range parameterSlots(method.Descriptor, isStatic) {
-		entry := &local{Name: "arg" + strconv.Itoa(index), Type: parameter.Type, Declared: true}
+		// The descriptor says what a parameter's type is.
+		entry := &local{
+			Name: "arg" + strconv.Itoa(index), Type: parameter.Type,
+			Declared: true, Authoritative: true,
+		}
 		for i := range localTable {
 			if scoped := &localTable[i]; scoped.Slot == parameter.Slot && scoped.StartPc == 0 {
 				entry.Name = scoped.Name
@@ -854,21 +1029,26 @@ func buildLocals(method Member, localTable []localEntry, isStatic bool) map[int]
 				break
 			}
 		}
+		entry.Type = sourceTypeText(entry.Type, self)
 		locals[parameter.Slot] = entry
 	}
 	return locals
 }
 
-func parameterList(method Member, locals map[int]*local, isStatic bool) string {
+func parameterList(method Member, locals map[int]*local, isStatic bool, dropLeading int) string {
 	slots := parameterSlots(method.Descriptor, isStatic)
+	if dropLeading > 0 && dropLeading <= len(slots) {
+		slots = slots[dropLeading:]
+	}
 	parameters := make([]string, 0, len(slots))
-	for index, parameter := range slots {
+	for offset, parameter := range slots {
+		index := offset + dropLeading
 		name := "arg" + strconv.Itoa(index)
 		typ := parameter.Type
 		if entry, ok := locals[parameter.Slot]; ok {
 			name, typ = entry.Name, entry.Type
 		}
-		if method.Flags&accVarargs != 0 && index == len(slots)-1 && strings.HasSuffix(typ, "[]") {
+		if method.Flags&accVarargs != 0 && offset == len(slots)-1 && strings.HasSuffix(typ, "[]") {
 			typ = typ[:len(typ)-2] + "..."
 		}
 		parameters = append(parameters, typ+" "+name)
@@ -896,58 +1076,141 @@ func bailComment(instructions []Instruction, reason string) []string {
 	return append(lines, " */")
 }
 
-// isDefaultConstructor reports the `<init>()` javac writes when a class declares
-// no constructor: nothing but the implicit `super()` call. Java puts it back, so
-// it is not source.
-func isDefaultConstructor(method Member, classFile *ClassFile) bool {
-	if method.Name != "<init>" || method.Descriptor != "()V" {
-		return false
+// generatedConstructor reports the `<init>()` javac writes when a class declares
+// no constructor: the sole constructor, carrying the class' own access, whose
+// body is nothing but the implicit `super()` call. Java puts exactly that back,
+// so it is not source - but a declared no-arg constructor that merely looks like
+// it (one of several, or `private` on a package-private class) has to stay, or
+// the class' API changes.
+func generatedConstructor(classFile *ClassFile) *Member {
+	var only *Member
+	count := 0
+	for i := range classFile.Methods {
+		if classFile.Methods[i].Name == "<init>" {
+			count++
+			only = &classFile.Methods[i]
+		}
 	}
-	code, err := ReadCode(method, classFile.Pool)
+	if count != 1 || only.Descriptor != "()V" {
+		return nil
+	}
+	const access = accPublic | accProtected | accPrivate
+	if only.Flags&access != classFile.Flags&access {
+		return nil
+	}
+	code, err := ReadCode(*only, classFile.Pool)
 	if err != nil || code == nil || len(code.Exceptions) > 0 {
-		return false
+		return nil
 	}
 	instructions, err := DecodeInstructions(classFile, code.Code)
 	if err != nil || len(instructions) != 3 {
-		return false
+		return nil
 	}
 	if instructions[0].Mnemonic != "aload_0" || instructions[1].Mnemonic != "invokespecial" ||
 		instructions[2].Mnemonic != "return" {
-		return false
+		return nil
 	}
 	target, ok := PoolMemberRef(classFile.Pool, uint16(instructions[1].Arg))
 	superClass := classFile.SuperClass
 	if superClass == "" {
 		superClass = "java/lang/Object"
 	}
-	return ok && target.Name == "<init>" && target.Descriptor == "()V" && target.Owner == superClass
+	if ok && target.Name == "<init>" && target.Descriptor == "()V" && target.Owner == superClass {
+		return only
+	}
+	return nil
 }
 
-func methodSource(method Member, classFile *ClassFile) ([]string, error) {
+// defaultValue is a value of type that compiles, for a chain call this phase
+// cannot rebuild.
+func defaultValue(typ string) string {
+	switch typ {
+	case "boolean":
+		return "false"
+	case "int", "long", "float", "double", "byte", "char", "short":
+		return "(" + typ + ") 0"
+	}
+	return "(" + typ + ") null"
+}
+
+// chainCallStub is the `super(...)`/`this(...)` a constructor that gave up still
+// has to make: without it the class does not compile when the superclass has no
+// no-arg constructor. The arguments are placeholders - the body throws before
+// anything can observe them - but their types come from the real descriptor.
+func chainCallStub(instructions []Instruction, classFile *ClassFile) string {
+	if isEnumDeclaration(classFile) {
+		return "" // generated, never source
+	}
+	superClass := classFile.SuperClass
+	if superClass == "" {
+		superClass = "java/lang/Object"
+	}
+	for _, instruction := range instructions {
+		if instruction.Mnemonic != "invokespecial" {
+			continue
+		}
+		target, ok := PoolMemberRef(classFile.Pool, uint16(instruction.Arg))
+		if !ok || target.Name != "<init>" {
+			continue
+		}
+		isSuper := target.Owner == superClass
+		// `new Foo()` in an argument is an invokespecial too; the chain call is
+		// the one on this class or its superclass.
+		if !isSuper && target.Owner != classFile.ThisClass {
+			continue
+		}
+		params := parameterSlots(target.Descriptor, true)
+		if len(params) == 0 {
+			return "" // the implicit super(), regenerated
+		}
+		args := make([]string, len(params))
+		for i, parameter := range params {
+			args[i] = defaultValue(sourceTypeText(parameter.Type, selfOf(classFile)))
+		}
+		keyword := "this"
+		if isSuper {
+			keyword = "super"
+		}
+		return keyword + "(" + strings.Join(args, ", ") + ");"
+	}
+	return ""
+}
+
+// methodSource renders one member; reconstructed is false when the body is the
+// bail-out rendering rather than reconstructed code.
+func methodSource(method Member, classFile *ClassFile) (lines []string, reconstructed bool, err error) {
 	isStatic := method.Flags&accStatic != 0
+	self := selfOf(classFile)
 	code, err := ReadCode(method, classFile.Pool)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var localTable []localEntry
 	if code != nil {
 		localTable = readLocalVariables(code, classFile.Pool)
 	}
-	locals := buildLocals(method, localTable, isStatic)
+	locals := buildLocals(method, localTable, isStatic, self)
 
 	head := "static"
 	if method.Name != "<clinit>" {
 		parts := methodModifiers(method, classFile)
 		if method.Name == "<init>" {
-			parts = append(parts, simpleClassName(classFile.ThisClass)+"("+parameterList(method, locals, isStatic)+")")
+			// Every enum constructor starts with the generated name and
+			// ordinal; source declares neither.
+			dropLeading := 0
+			if isEnumDeclaration(classFile) {
+				dropLeading = 2
+			}
+			parts = append(parts, simpleClassName(classFile.ThisClass)+
+				"("+parameterList(method, locals, isStatic, dropLeading)+")")
 		} else {
-			parts = append(parts, methodReturnType(method.Descriptor),
-				method.Name+"("+parameterList(method, locals, isStatic)+")")
+			parts = append(parts, sourceTypeText(methodReturnType(method.Descriptor), self),
+				method.Name+"("+parameterList(method, locals, isStatic, 0)+")")
 		}
 		head = strings.Join(parts, " ")
 		var thrown []string
 		for _, name := range ReadThrownExceptions(method, classFile.Pool) {
-			thrown = append(thrown, typeName(name))
+			thrown = append(thrown, typeName(name, self))
 		}
 		if len(thrown) > 0 {
 			head += " throws " + strings.Join(thrown, ", ")
@@ -955,23 +1218,41 @@ func methodSource(method Member, classFile *ClassFile) ([]string, error) {
 	}
 
 	if code == nil {
-		return []string{head + ";"}, nil
+		return []string{head + ";"}, true, nil
 	}
 
 	instructions, err := DecodeInstructions(classFile, code.Code)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	body, err := decompileBody(classFile, code, instructions, locals, localTable, method, isStatic)
+	body, reached, err := decompileBody(classFile, code, instructions, locals, localTable, method, isStatic)
+	reconstructed = true
 	if err != nil {
 		var reason *notDecompilable
 		if !errors.As(err, &reason) {
-			return nil, err
+			return nil, false, err
 		}
-		body = append(bailComment(instructions, reason.reason),
-			`throw new UnsupportedOperationException("cappu: not decompiled");`)
+		reconstructed = false
+		// A constructor that gave up keeps its chain call: without it the class
+		// does not compile when the superclass has no no-arg constructor.
+		chained := ""
+		if len(reached) > 0 && (strings.HasPrefix(reached[0], "super(") || strings.HasPrefix(reached[0], "this(")) {
+			chained = reached[0]
+		} else if method.Name == "<init>" {
+			chained = chainCallStub(instructions, classFile)
+		}
+		body = nil
+		if chained != "" {
+			body = append(body, chained)
+		}
+		body = append(body, bailComment(instructions, reason.reason)...)
+		// A static initializer has to be able to complete normally, so the throw
+		// that marks every other unreconstructed body would not compile here.
+		if method.Name != "<clinit>" {
+			body = append(body, `throw new UnsupportedOperationException("cappu: not decompiled");`)
+		}
 	}
-	return append(append([]string{head + " {"}, body...), "}"), nil
+	return append(append([]string{head + " {"}, body...), "}"), reconstructed, nil
 }
 
 func decompileBody(
@@ -982,9 +1263,9 @@ func decompileBody(
 	localTable []localEntry,
 	method Member,
 	isStatic bool,
-) ([]string, error) {
+) (body []string, reached []string, err error) {
 	if len(code.Exceptions) > 0 {
-		return nil, bail("the method catches exceptions")
+		return nil, nil, bail("the method catches exceptions")
 	}
 	d := &bodyDecompiler{
 		classFile:  classFile,
@@ -993,25 +1274,66 @@ func decompileBody(
 		returnType: methodReturnType(method.Descriptor),
 		isStatic:   isStatic,
 		names:      map[string]bool{},
+		byName:     map[string]*local{},
 	}
 	for _, parameter := range locals {
 		d.names[parameter.Name] = true
+		d.byName[parameter.Name] = parameter
 	}
 	if err := d.run(instructions); err != nil {
-		return nil, err
+		return nil, d.statements, err
 	}
-	body := d.statements
+	body = d.statements
 	// Every void method ends in a `return` javac inserted; source does not.
 	if len(body) > 0 && body[len(body)-1] == "return;" {
 		body = body[:len(body)-1]
 	}
-	return body, nil
+	return body, d.statements, nil
+}
+
+// generatedFields are the fields javac writes for itself, and regenerates from
+// source.
+var generatedFields = map[string]bool{"$VALUES": true, "$assertionsDisabled": true}
+
+// isEnumDeclaration reports an enum type. ACC_ENUM is also set on the anonymous
+// subclass javac writes for an enum constant with a body - which is a plain
+// class, not an enum declaration: it extends the enum type, and `enum X extends
+// Y` is not Java.
+func isEnumDeclaration(classFile *ClassFile) bool {
+	return classFile.Flags&accEnum != 0 && classFile.SuperClass == "java/lang/Enum"
+}
+
+// enumConstants are the constants of an enum, in declaration order, as the body
+// must open.
+func enumConstants(classFile *ClassFile) []string {
+	self := "L" + classFile.ThisClass + ";"
+	var out []string
+	for _, field := range classFile.Fields {
+		if field.Flags&accEnum != 0 && field.Descriptor == self {
+			out = append(out, field.Name)
+		}
+	}
+	return out
+}
+
+// isGeneratedEnumMember reports `values` and `valueOf`, which javac generates for
+// every enum; writing them out is a compile error ("already defined"), so they
+// are not source. The two leading constructor parameters are dropped for the
+// same reason (see parameterList).
+func isGeneratedEnumMember(method Member, classFile *ClassFile) bool {
+	if !isEnumDeclaration(classFile) {
+		return false
+	}
+	self := "L" + classFile.ThisClass + ";"
+	return (method.Name == "values" && method.Descriptor == "()["+self) ||
+		(method.Name == "valueOf" && method.Descriptor == "(Ljava/lang/String;)"+self)
 }
 
 func classHead(classFile *ClassFile) string {
 	isInterface := classFile.Flags&accInterface != 0
 	isAnnotation := classFile.Flags&accAnnotation != 0
-	isEnum := classFile.Flags&accEnum != 0
+	isEnum := isEnumDeclaration(classFile)
+	self := selfOf(classFile)
 	keyword := "class"
 	switch {
 	case isAnnotation:
@@ -1028,19 +1350,21 @@ func classHead(classFile *ClassFile) string {
 	if !isInterface && !isEnum && classFile.Flags&accFinal != 0 {
 		head = append(head, "final")
 	}
-	if !isInterface && classFile.Flags&accAbstract != 0 {
+	// An enum carrying constant bodies is ACC_ABSTRACT, but `abstract enum` is
+	// not something Java lets you write.
+	if !isInterface && !isEnum && classFile.Flags&accAbstract != 0 {
 		head = append(head, "abstract")
 	}
 	head = append(head, keyword, simpleClassName(classFile.ThisClass))
 	// The implicit supertypes are not written in source.
 	implicit := map[string]bool{"java/lang/Object": true, "java/lang/Enum": true, "java/lang/Record": true}
 	if !isInterface && classFile.SuperClass != "" && !implicit[classFile.SuperClass] {
-		head = append(head, "extends", typeName(classFile.SuperClass))
+		head = append(head, "extends", typeName(classFile.SuperClass, self))
 	}
 	var interfaces []string
 	for _, name := range classFile.Interfaces {
 		if name != "java/lang/annotation/Annotation" {
-			interfaces = append(interfaces, typeName(name))
+			interfaces = append(interfaces, typeName(name, self))
 		}
 	}
 	if len(interfaces) > 0 {
@@ -1059,25 +1383,65 @@ func classHead(classFile *ClassFile) string {
 // DecompileClass renders one class as (unformatted) Java source.
 func DecompileClass(classFile *ClassFile) (string, error) {
 	var lines []string
+	packageName := ""
 	if slash := strings.LastIndex(classFile.ThisClass, "/"); slash > 0 {
-		lines = append(lines, "package "+strings.ReplaceAll(classFile.ThisClass[:slash], "/", ".")+";", "")
+		packageName = strings.ReplaceAll(classFile.ThisClass[:slash], "/", ".")
 	}
-	lines = append(lines, classHead(classFile))
-	for _, field := range classFile.Fields {
-		if field.Flags&(accSynthetic|accEnum) != 0 {
+	// A package-info.class only carries the package's annotations, and its name
+	// is not an identifier - the package declaration is the whole source.
+	if simpleClassName(classFile.ThisClass) == "package-info" {
+		if packageName == "" {
+			return "", nil
+		}
+		return "package " + packageName + ";\n", nil
+	}
+	if packageName != "" {
+		lines = append(lines, "package "+packageName+";", "")
+	}
+	// Methods first: whether the static initializer came back decides how the
+	// static fields have to be declared.
+	generated := generatedConstructor(classFile)
+	var bodies [][]string
+	staticInitializerLost := false
+	for i := range classFile.Methods {
+		method := classFile.Methods[i]
+		if method.Flags&(accSynthetic|accBridge) != 0 || isGeneratedEnumMember(method, classFile) {
 			continue
 		}
-		lines = append(lines, fieldSource(field, classFile))
-	}
-	for _, method := range classFile.Methods {
-		if method.Flags&(accSynthetic|accBridge) != 0 || isDefaultConstructor(method, classFile) {
+		if generated != nil && &classFile.Methods[i] == generated {
 			continue
 		}
-		source, err := methodSource(method, classFile)
+		body, reconstructed, err := methodSource(method, classFile)
 		if err != nil {
 			return "", err
 		}
-		lines = append(append(lines, ""), source...)
+		if !reconstructed && method.Name == "<clinit>" {
+			staticInitializerLost = true
+		}
+		bodies = append(bodies, body)
+	}
+
+	lines = append(lines, classHead(classFile))
+	if isEnumDeclaration(classFile) {
+		// An enum body opens with its constant list; even an empty one needs
+		// the `;` before any member. How the constants are constructed lives in
+		// <clinit>, which this phase does not reconstruct.
+		lines = append(lines, strings.Join(enumConstants(classFile), ", ")+";")
+	}
+	for _, field := range classFile.Fields {
+		// Enum constants are the constant list above, not fields. A synthetic
+		// field is kept - the captured outer instance (`this$0`) and captured
+		// locals (`val$x`) are referenced by real method bodies - except the two
+		// javac generates on its own, which would clash with the ones it
+		// regenerates.
+		if field.Flags&accEnum != 0 || (field.Flags&accSynthetic != 0 && generatedFields[field.Name]) {
+			continue
+		}
+		keepFinal := !staticInitializerLost || field.Flags&accStatic == 0
+		lines = append(lines, fieldSource(field, classFile, keepFinal))
+	}
+	for _, body := range bodies {
+		lines = append(append(lines, ""), body...)
 	}
 	lines = append(lines, "}")
 	return strings.Join(lines, "\n") + "\n", nil

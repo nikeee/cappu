@@ -142,11 +142,45 @@ const CONVERSIONS: Record<string, string> = {
 
 // --- constants -----------------------------------------------------------------------
 
-/** A `Foo$Bar` binary name as source text. Nested names keep the `$`. */
-function typeName(internalName: string): string {
-  return internalName.startsWith("[")
+/**
+ * A binary type name as a source *reference*: `java.util.Map$Entry` is written
+ * `java.util.Map.Entry`, because `Map$Entry` resolves to nothing. Stops at the
+ * first `$` segment that starts with a digit - an anonymous or local class has
+ * no source name at all, so its binary one is the only thing left to print.
+ *
+ * `self` is the class being declared. This file declares it under its binary
+ * name (restoring the nesting needs the enclosing file, a later phase), so
+ * references to it keep the `$` and still resolve.
+ */
+function sourceTypeText(text: string, self: string): string {
+  // Only the class itself keeps the binary name - a *sibling* nested class is a
+  // different type, and `Outer$Other` resolves to nothing.
+  if (!text.includes("$") || (self !== "" && text.replaceAll("[]", "") === self)) return text;
+  const parts = text.split("$");
+  let out = parts[0]!;
+  for (const part of parts.slice(1)) {
+    const anonymous = part === "" || (part[0]! >= "0" && part[0]! <= "9");
+    out += anonymous || out.includes("$") ? `$${part}` : `.${part}`;
+  }
+  return out;
+}
+
+/** A `Foo$Bar` binary name as a source type reference. */
+function typeName(internalName: string, self = ""): string {
+  const text = internalName.startsWith("[")
     ? descriptorType(internalName, 0).text
     : internalName.replaceAll("/", ".");
+  return sourceTypeText(text, self);
+}
+
+/** A descriptor as a source type reference. */
+function descriptorSourceType(descriptor: string, self: string): string {
+  return sourceTypeText(descriptorType(descriptor, 0).text, self);
+}
+
+/** The class being decompiled, as its own references have to spell it. */
+function selfOf(classFile: ClassFile): string {
+  return classFile.thisClass.replaceAll("/", ".");
 }
 
 /**
@@ -166,7 +200,7 @@ function intLiteral(value: number): Expr {
   return { text: String(value), prec: value < 0 ? PREC_UNARY : PREC_PRIMARY, type: "int" };
 }
 
-function constantExpr(pool: readonly (Constant | undefined)[], index: number): Expr {
+function constantExpr(pool: readonly (Constant | undefined)[], index: number, self = ""): Expr {
   const entry = pool[index];
   switch (entry?.tag) {
     case "int":
@@ -192,7 +226,10 @@ function constantExpr(pool: readonly (Constant | undefined)[], index: number): E
     case "string":
       return primary(`"${escapeString(utf8(pool, entry.valueIndex) ?? "")}"`, "java.lang.String");
     case "class":
-      return primary(`${typeName(utf8(pool, entry.nameIndex) ?? "")}.class`, "java.lang.Class");
+      return primary(
+        `${typeName(utf8(pool, entry.nameIndex) ?? "", self)}.class`,
+        "java.lang.Class",
+      );
     default:
       // A method handle/type or a dynamic constant: only reachable through the
       // features later phases add.
@@ -250,12 +287,23 @@ function readLocalVariables(code: Code, pool: readonly (Constant | undefined)[])
   return out;
 }
 
+/** The types javac erases to int in the bytecode, leaving only the use to say so. */
+const ERASED_TO_INT = ["boolean", "char", "byte", "short"];
+
 interface Local {
   name: string;
   type: string;
   declared: boolean;
+  /** Where the declaration and every assignment landed, so a retype can rewrite them. */
+  writes: { index: number; value: Expr }[];
   /** The debug-table row this name came from, when there is one. */
   origin: LocalEntry | undefined;
+  /**
+   * True when the type came from a parameter descriptor or the debug table, so
+   * a store of a differently-typed value is an assignment to *this* variable
+   * (`boolean b` taking `iconst_0`), not a second variable in the same slot.
+   */
+  authoritative: boolean;
 }
 
 /** The slot each declared parameter occupies; long and double take two. */
@@ -284,6 +332,7 @@ class BodyDecompiler {
   private readonly stack: Expr[] = [];
   /** Every local name handed out so far, so a reused slot cannot shadow one. */
   private readonly names = new Set<string>();
+  private readonly byName = new Map<string, Local>();
   readonly statements: string[] = [];
 
   constructor(
@@ -293,7 +342,36 @@ class BodyDecompiler {
     private readonly methodReturnType: string,
     private readonly isStatic: boolean,
   ) {
-    for (const local of locals.values()) this.names.add(local.name);
+    for (const local of locals.values()) {
+      this.names.add(local.name);
+      this.byName.set(local.name, local);
+    }
+  }
+
+  /**
+   * `value` as it has to read in a `target`-typed position. A local the
+   * bytecode only says is an int, used where a boolean/char/byte/short belongs,
+   * *is* one - the store opcode is the same for all of them - so its
+   * declaration and every assignment to it are rewritten to that type.
+   */
+  private coerceInto(value: Expr, target: string): string {
+    const local = this.byName.get(value.text);
+    if (
+      local !== undefined &&
+      !local.authoritative &&
+      local.type === "int" &&
+      ERASED_TO_INT.includes(target)
+    ) {
+      local.type = target;
+      for (const write of local.writes) {
+        const assigned = coerce(write.value, target);
+        this.statements[write.index] =
+          write.index === local.writes[0]?.index
+            ? `${target} ${local.name} = ${assigned};`
+            : `${local.name} = ${assigned};`;
+      }
+    }
+    return coerce(value, target);
   }
 
   private push(expr: Expr): void {
@@ -313,11 +391,28 @@ class BodyDecompiler {
    * different type - starts a new one, which has to be declared under its own
    * name.
    */
+  private get self(): string {
+    return selfOf(this.classFile);
+  }
+
+  /**
+   * A static field of this class is written with its simple name: that is what
+   * source used, and a blank `static final` can only be *assigned* that way.
+   * A local of the same name (declared before this point) shadows it, so then
+   * the owner has to stay.
+   */
+  private staticRef(owner: string, name: string): string {
+    if (owner === this.classFile.thisClass && !this.names.has(name)) return name;
+    return `${typeName(owner, this.self)}.${name}`;
+  }
+
   private local(slot: number, pc: number, fallbackType: string, isStore = false): Local {
     const scoped = this.localTable.find(e => e.slot === slot && pc >= e.startPc && pc < e.endPc);
     const existing = this.locals.get(slot);
     if (existing) {
-      if (scoped ? existing.origin === scoped : !isStore || existing.type === fallbackType) {
+      if (scoped !== undefined) {
+        if (existing.origin === scoped) return existing;
+      } else if (!isStore || existing.authoritative || existing.type === fallbackType) {
         return existing;
       }
     }
@@ -325,21 +420,29 @@ class BodyDecompiler {
     // uninitialized - javac cannot produce that, so the input is doing
     // something this phase does not model.
     if (!isStore) throw new NotDecompilable(`local ${slot} is read before it is written`);
+    const named = scoped?.name !== undefined && scoped.name !== "" ? scoped.name : `var${slot}`;
+    const declared = scoped?.type !== undefined && scoped.type !== "" ? scoped.type : fallbackType;
     const local: Local = {
-      name: scoped?.name !== undefined && scoped.name !== "" ? scoped.name : this.freshName(slot),
-      type: scoped?.type !== undefined && scoped.type !== "" ? scoped.type : fallbackType,
+      name: this.freshName(named),
+      type: sourceTypeText(declared, this.self),
       declared: false,
       origin: scoped,
+      authoritative: scoped?.type !== undefined && scoped.type !== "",
+      writes: [],
     };
-    this.names.add(local.name);
+    this.byName.set(local.name, local);
     this.locals.set(slot, local);
     return local;
   }
 
-  /** `var<slot>`, kept distinct from the names already handed out. */
-  private freshName(slot: number): string {
-    let name = `var${slot}`;
-    for (let n = 2; this.names.has(name); n++) name = `var${slot}_${n}`;
+  /**
+   * `wanted`, kept distinct from the names already handed out. Two sibling
+   * scopes can declare the same name over the same slot; the body they
+   * decompile to is flat, so the second one has to be renamed.
+   */
+  private freshName(wanted: string): string {
+    let name = wanted;
+    for (let n = 2; this.names.has(name); n++) name = `${wanted}_${n}`;
     this.names.add(name);
     return name;
   }
@@ -352,7 +455,8 @@ class BodyDecompiler {
 
   private store(slot: number, scopePc: number, value: Expr, declaredType: string): void {
     const local = this.local(slot, scopePc, declaredType, true);
-    const text = coerce(value, local.type);
+    const text = this.coerceInto(value, local.type);
+    local.writes.push({ index: this.statements.length, value });
     if (local.declared) {
       this.statements.push(`${local.name} = ${text};`);
     } else {
@@ -397,7 +501,7 @@ class BodyDecompiler {
       return this.push(intLiteral(instruction.arg));
     }
     if (mnemonic === "ldc" || mnemonic === "ldc_w" || mnemonic === "ldc2_w") {
-      return this.push(constantExpr(pool, instruction.arg));
+      return this.push(constantExpr(pool, instruction.arg, this.self));
     }
 
     // Loads and stores.
@@ -405,7 +509,7 @@ class BodyDecompiler {
     if (/^[ilfda]load$/.test(base)) {
       const slot = this.slotOf(instruction);
       if (base === "aload" && slot === 0 && !this.isStatic) {
-        return this.push(primary("this", typeName(this.classFile.thisClass)));
+        return this.push(primary("this", this.self));
       }
       const local = this.local(slot, pc, PRIMITIVE_OF_PREFIX[base[0]!]!);
       return this.push(primary(local.name, local.type));
@@ -440,7 +544,8 @@ class BodyDecompiler {
     if (/^[ilfd]neg$/.test(mnemonic)) {
       const value = this.pop();
       return this.push({
-        text: `-${at(value, PREC_UNARY)}`,
+        // A unary operand needs the parens too: `-(-a)` is not `--a`.
+        text: `-${at(value, PREC_UNARY + 1)}`,
         prec: PREC_UNARY,
         type: PRIMITIVE_OF_PREFIX[mnemonic[0]!]!,
       });
@@ -459,16 +564,22 @@ class BodyDecompiler {
     if (mnemonic === "getstatic" || mnemonic === "getfield") {
       const field = memberRef(pool, instruction.arg);
       if (!field) throw new NotDecompilable("bad field reference");
-      const owner = mnemonic === "getstatic" ? typeName(field.owner) : at(this.pop(), PREC_PRIMARY);
-      return this.push(primary(`${owner}.${field.name}`, descriptorType(field.descriptor, 0).text));
+      const type = descriptorSourceType(field.descriptor, this.self);
+      if (mnemonic === "getstatic") {
+        return this.push(primary(this.staticRef(field.owner, field.name), type));
+      }
+      return this.push(primary(`${at(this.pop(), PREC_PRIMARY)}.${field.name}`, type));
     }
     if (mnemonic === "putstatic" || mnemonic === "putfield") {
       const field = memberRef(pool, instruction.arg);
       if (!field) throw new NotDecompilable("bad field reference");
       const value = this.pop();
-      const type = descriptorType(field.descriptor, 0).text;
-      const owner = mnemonic === "putstatic" ? typeName(field.owner) : at(this.pop(), PREC_PRIMARY);
-      this.statements.push(`${owner}.${field.name} = ${coerce(value, type)};`);
+      const type = descriptorSourceType(field.descriptor, this.self);
+      const target =
+        mnemonic === "putstatic"
+          ? this.staticRef(field.owner, field.name)
+          : `${at(this.pop(), PREC_PRIMARY)}.${field.name}`;
+      this.statements.push(`${target} = ${this.coerceInto(value, type)};`);
       return;
     }
 
@@ -492,7 +603,7 @@ class BodyDecompiler {
         ? array.type.slice(0, -2)
         : PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
       this.statements.push(
-        `${at(array, PREC_PRIMARY)}[${index.text}] = ${coerce(value, element)};`,
+        `${at(array, PREC_PRIMARY)}[${index.text}] = ${this.coerceInto(value, element)};`,
       );
       return;
     }
@@ -503,12 +614,16 @@ class BodyDecompiler {
       );
     }
     if (mnemonic === "anewarray") {
-      const element = typeName(className(pool, instruction.arg) ?? "java/lang/Object");
+      const element = typeName(className(pool, instruction.arg) ?? "java/lang/Object", this.self);
       const length = this.pop();
-      return this.push(primary(`new ${element}[${length.text}]`, `${element}[]`));
+      // The element type may itself be an array: the new dimension goes first,
+      // so `new String[n][]`, never `new String[][n]`.
+      const base = element.replaceAll("[]", "");
+      const rest = "[]".repeat((element.length - base.length) / 2);
+      return this.push(primary(`new ${base}[${length.text}]${rest}`, `${element}[]`));
     }
     if (mnemonic === "multianewarray") {
-      const type = typeName(className(pool, instruction.arg) ?? "");
+      const type = typeName(className(pool, instruction.arg) ?? "", this.self);
       const rank = (type.match(/\[\]/g) ?? []).length;
       const sizes: string[] = [];
       for (let i = 0; i < instruction.arg2; i++) sizes.unshift(this.pop().text);
@@ -522,18 +637,46 @@ class BodyDecompiler {
 
     // Casts.
     if (mnemonic === "checkcast") {
-      const type = typeName(className(pool, instruction.arg) ?? "java/lang/Object");
+      const type = typeName(className(pool, instruction.arg) ?? "java/lang/Object", this.self);
       const value = this.pop();
       return this.push({ text: `(${type}) ${at(value, PREC_UNARY)}`, prec: PREC_UNARY, type });
     }
     if (mnemonic === "instanceof") {
-      const type = typeName(className(pool, instruction.arg) ?? "java/lang/Object");
+      const type = typeName(className(pool, instruction.arg) ?? "java/lang/Object", this.self);
       const value = this.pop();
       return this.push({
         text: `${at(value, PREC_REL + 1)} instanceof ${type}`,
         prec: PREC_REL,
         type: "boolean",
       });
+    }
+
+    // Constructor chaining. `super(...)`/`this(...)` is not a method call in
+    // source, it is the shape of a constructor - without it no constructor
+    // decompiles at all. Any other invokespecial (a `new`, a private call) is
+    // still a later phase.
+    if (mnemonic === "invokespecial") {
+      const target = memberRef(pool, instruction.arg);
+      if (target?.name !== "<init>") {
+        throw new NotDecompilable("unsupported instruction invokespecial");
+      }
+      const isSuper = target.owner === (this.classFile.superClass ?? "java/lang/Object");
+      const isThis = target.owner === this.classFile.thisClass;
+      if (!isSuper && !isThis) throw new NotDecompilable("constructor call to an unrelated class");
+      const params = parameterSlots(target.descriptor, true).map(p => p.type);
+      const args: string[] = [];
+      for (let i = params.length - 1; i >= 0; i--) {
+        args.unshift(this.coerceInto(this.pop(), params[i]!));
+      }
+      if (this.pop().text !== "this")
+        throw new NotDecompilable("constructor call on another object");
+      if (this.statements.length > 0) throw new NotDecompilable("constructor call is not first");
+      // javac writes the implicit `super()` into every constructor; source does
+      // not, and re-emitting puts it back. An enum constructor's `super(name,
+      // ordinal)` is generated too - and writing it is a compile error.
+      if (isSuper && (args.length === 0 || isEnumDeclaration(this.classFile))) return;
+      this.statements.push(`${isSuper ? "super" : "this"}(${args.join(", ")});`);
+      return;
     }
 
     // Stack shuffling. A dup of anything but a name would duplicate the
@@ -559,7 +702,7 @@ class BodyDecompiler {
       return;
     }
     if (/^[ilfda]return$/.test(mnemonic)) {
-      this.statements.push(`return ${coerce(this.pop(), this.methodReturnType)};`);
+      this.statements.push(`return ${this.coerceInto(this.pop(), this.methodReturnType)};`);
       return;
     }
 
@@ -595,8 +738,8 @@ function constantValue(field: Member, classFile: ClassFile): Expr | undefined {
   }
 }
 
-function fieldSource(field: Member, classFile: ClassFile): string {
-  const type = descriptorType(field.descriptor, 0).text;
+function fieldSource(field: Member, classFile: ClassFile, keepFinal = true): string {
+  const type = descriptorSourceType(field.descriptor, selfOf(classFile));
   const modifiers = [
     ...accessModifiers(field.flags),
     ...(field.flags & ACC_STATIC ? ["static"] : []),
@@ -606,7 +749,10 @@ function fieldSource(field: Member, classFile: ClassFile): string {
   ];
   const value = constantValue(field, classFile);
   const initializer = value ? ` = ${coerce(value, type)}` : "";
-  return `${[...modifiers, type].join(" ")} ${field.name}${initializer};`;
+  // A blank `static final` is only legal when something assigns it; when the
+  // static initializer could not be reconstructed, nothing does.
+  const shown = keepFinal || value !== undefined ? modifiers : modifiers.filter(m => m !== "final");
+  return `${[...shown, type].join(" ")} ${field.name}${initializer};`;
 }
 
 function methodModifiers(method: Member, classFile: ClassFile): string[] {
@@ -631,30 +777,83 @@ function buildLocals(
   method: Member,
   localTable: readonly LocalEntry[],
   isStatic: boolean,
+  self: string,
 ): Map<number, Local> {
   const locals = new Map<number, Local>();
   parameterSlots(method.descriptor, isStatic).forEach(({ slot, type }, index) => {
     const scoped = localTable.find(e => e.slot === slot && e.startPc === 0);
+    const declared = scoped?.type !== undefined && scoped.type !== "" ? scoped.type : type;
     locals.set(slot, {
       name: scoped?.name ?? `arg${index}`,
-      type: scoped?.type !== undefined && scoped.type !== "" ? scoped.type : type,
+      type: sourceTypeText(declared, self),
       declared: true,
       origin: scoped,
+      authoritative: true, // the descriptor says what a parameter's type is
+      writes: [],
     });
   });
   return locals;
 }
 
-function parameterList(method: Member, locals: Map<number, Local>, isStatic: boolean): string {
-  const parameters = parameterSlots(method.descriptor, isStatic).map(({ slot, type }, index) => {
-    const local = locals.get(slot);
-    return { type: local?.type ?? type, name: local?.name ?? `arg${index}` };
-  });
+function parameterList(
+  method: Member,
+  locals: Map<number, Local>,
+  isStatic: boolean,
+  dropLeading = 0,
+): string {
+  const parameters = parameterSlots(method.descriptor, isStatic)
+    .slice(dropLeading)
+    .map(({ slot, type }, index) => {
+      const local = locals.get(slot);
+      return {
+        type: local?.type ?? type,
+        name: local?.name ?? `arg${index + dropLeading}`,
+      };
+    });
   if (method.flags & ACC_VARARGS && parameters.length > 0) {
     const last = parameters[parameters.length - 1]!;
     if (last.type.endsWith("[]")) last.type = `${last.type.slice(0, -2)}...`;
   }
   return parameters.map(p => `${p.type} ${p.name}`).join(", ");
+}
+
+/** A value of `type` that compiles, for a chain call this phase cannot rebuild. */
+function defaultValue(type: string): string {
+  if (type === "boolean") return "false";
+  if (type === "int" || type === "long" || type === "float" || type === "double") {
+    return `(${type}) 0`;
+  }
+  return DESCRIPTOR_ERASED.includes(type) ? `(${type}) 0` : `(${type}) null`;
+}
+
+const DESCRIPTOR_ERASED = ["byte", "char", "short"];
+
+/**
+ * The `super(...)`/`this(...)` a constructor that gave up still has to make:
+ * without it the class does not compile when the superclass has no no-arg
+ * constructor. The arguments are placeholders - the body throws before anything
+ * can observe them - but their types come from the real descriptor.
+ */
+function chainCallStub(
+  instructions: readonly Instruction[],
+  classFile: ClassFile,
+): string | undefined {
+  if (isEnumDeclaration(classFile)) return undefined; // generated, never source
+  for (const instruction of instructions) {
+    if (instruction.mnemonic !== "invokespecial") continue;
+    const target = memberRef(classFile.pool, instruction.arg);
+    if (target?.name !== "<init>") continue;
+    const isSuper = target.owner === (classFile.superClass ?? "java/lang/Object");
+    // `new Foo()` in an argument is an invokespecial too; the chain call is the
+    // one on this class or its superclass.
+    if (!isSuper && target.owner !== classFile.thisClass) continue;
+    const params = parameterSlots(target.descriptor, true).map(p =>
+      sourceTypeText(p.type, selfOf(classFile)),
+    );
+    if (params.length === 0) return undefined; // the implicit super(), regenerated
+    return `${isSuper ? "super" : "this"}(${params.map(defaultValue).join(", ")});`;
+  }
+  return undefined;
 }
 
 /** The disassembly of a body this phase cannot reconstruct, as a comment. */
@@ -675,38 +874,53 @@ function bailComment(instructions: readonly Instruction[], reason: string): stri
 }
 
 /**
- * The `<init>()` javac writes when a class declares no constructor: nothing but
- * the implicit `super()` call. Java puts it back, so it is not source.
+ * The `<init>()` javac writes when a class declares no constructor: the sole
+ * constructor, carrying the class' own access, whose body is nothing but the
+ * implicit `super()` call. Java puts exactly that back, so it is not source -
+ * but a declared no-arg constructor that merely looks like it (one of several,
+ * or `private` on a package-private class) has to stay, or the class' API
+ * changes.
  */
-function isDefaultConstructor(method: Member, classFile: ClassFile): boolean {
-  if (method.name !== "<init>" || method.descriptor !== "()V") return false;
+function generatedConstructor(classFile: ClassFile): Member | undefined {
+  const constructors = classFile.methods.filter(m => m.name === "<init>");
+  const method = constructors[0];
+  if (constructors.length !== 1 || !method || method.descriptor !== "()V") return undefined;
+  const access = ACC_PUBLIC | ACC_PROTECTED | ACC_PRIVATE;
+  if ((method.flags & access) !== (classFile.flags & access)) return undefined;
   const code = readCode(method, classFile.pool);
-  if (!code || code.exceptions.length > 0) return false;
+  if (!code || code.exceptions.length > 0) return undefined;
   const instructions = decodeInstructions(classFile, code.code);
-  if (instructions.length !== 3) return false;
+  if (instructions.length !== 3) return undefined;
   const [load, call, ret] = instructions as [Instruction, Instruction, Instruction];
   if (
     load.mnemonic !== "aload_0" ||
     call.mnemonic !== "invokespecial" ||
     ret.mnemonic !== "return"
   ) {
-    return false;
+    return undefined;
   }
   const target = memberRef(classFile.pool, call.arg);
-  return (
-    target?.name === "<init>" &&
+  return target?.name === "<init>" &&
     target.descriptor === "()V" &&
     target.owner === (classFile.superClass ?? "java/lang/Object")
-  );
+    ? method
+    : undefined;
 }
 
-function methodSource(method: Member, classFile: ClassFile): string[] {
+interface MethodSource {
+  readonly lines: string[];
+  /** False when the body is the bail-out rendering rather than reconstructed code. */
+  readonly reconstructed: boolean;
+}
+
+function methodSource(method: Member, classFile: ClassFile): MethodSource {
   const isStatic = (method.flags & ACC_STATIC) !== 0;
   const code = readCode(method, classFile.pool);
   const localTable = code ? readLocalVariables(code, classFile.pool) : [];
-  const locals = buildLocals(method, localTable, isStatic);
+  const locals = buildLocals(method, localTable, isStatic, selfOf(classFile));
 
-  const thrown = readExceptions(method, classFile.pool).map(typeName);
+  const self = selfOf(classFile);
+  const thrown = readExceptions(method, classFile.pool).map(name => typeName(name, self));
   const throwsClause = thrown.length > 0 ? ` throws ${thrown.join(", ")}` : "";
   const head =
     method.name === "<clinit>"
@@ -714,44 +928,103 @@ function methodSource(method: Member, classFile: ClassFile): string[] {
       : [
           ...methodModifiers(method, classFile),
           ...(method.name === "<init>"
-            ? [`${simpleName(classFile.thisClass)}(${parameterList(method, locals, isStatic)})`]
+            ? [
+                // Every enum constructor starts with the generated name and
+                // ordinal; source declares neither.
+                `${simpleName(classFile.thisClass)}(${parameterList(
+                  method,
+                  locals,
+                  isStatic,
+                  isEnumDeclaration(classFile) ? 2 : 0,
+                )})`,
+              ]
             : [
-                returnType(method.descriptor),
+                sourceTypeText(returnType(method.descriptor), self),
                 `${method.name}(${parameterList(method, locals, isStatic)})`,
               ]),
         ].join(" ") + throwsClause;
 
-  if (!code) return [`${head};`];
+  if (!code) return { lines: [`${head};`], reconstructed: true };
 
   const instructions = decodeInstructions(classFile, code.code);
+  const decompiler = new BodyDecompiler(
+    classFile,
+    locals,
+    localTable,
+    returnType(method.descriptor),
+    isStatic,
+  );
   let body: string[];
+  let reconstructed = true;
   try {
     if (code.exceptions.length > 0) throw new NotDecompilable("the method catches exceptions");
-    const decompiler = new BodyDecompiler(
-      classFile,
-      locals,
-      localTable,
-      returnType(method.descriptor),
-      isStatic,
-    );
     decompiler.run(instructions);
     body = decompiler.statements;
     // Every void method ends in a `return` javac inserted; source does not.
     if (body[body.length - 1] === "return;") body = body.slice(0, -1);
   } catch (e) {
     if (!(e instanceof NotDecompilable)) throw e;
+    reconstructed = false;
+    // A constructor that gave up after chaining keeps the chain call: without
+    // it the class does not compile when the superclass has no no-arg
+    // constructor.
+    const reached = decompiler.statements[0];
+    const chained =
+      reached !== undefined && /^(?:super|this)\(/.test(reached)
+        ? reached
+        : method.name === "<init>"
+          ? chainCallStub(instructions, classFile)
+          : undefined;
     body = [
+      ...(chained === undefined ? [] : [chained]),
       ...bailComment(instructions, e.message),
-      'throw new UnsupportedOperationException("cappu: not decompiled");',
+      // A static initializer has to be able to complete normally, so the throw
+      // that marks every other unreconstructed body would not compile here.
+      ...(method.name === "<clinit>"
+        ? []
+        : ['throw new UnsupportedOperationException("cappu: not decompiled");']),
     ];
   }
-  return [`${head} {`, ...body, "}"];
+  return { lines: [`${head} {`, ...body, "}"], reconstructed };
+}
+
+/**
+ * ACC_ENUM is also set on the anonymous subclass javac writes for an enum
+ * constant with a body - which is a plain class, not an enum declaration: it
+ * extends the enum type, and `enum X extends Y` is not Java.
+ */
+function isEnumDeclaration(classFile: ClassFile): boolean {
+  return (classFile.flags & ACC_ENUM) !== 0 && classFile.superClass === "java/lang/Enum";
+}
+
+/** Fields javac writes for itself, and regenerates from source. */
+const GENERATED_FIELDS = ["$VALUES", "$assertionsDisabled"];
+
+/** The constants of an enum, in declaration order, as the body must open. */
+function enumConstants(classFile: ClassFile): string[] {
+  const self = `L${classFile.thisClass};`;
+  return classFile.fields.filter(f => f.flags & ACC_ENUM && f.descriptor === self).map(f => f.name);
+}
+
+/**
+ * `values`, `valueOf` and the two leading constructor parameters are generated
+ * for every enum; writing them out is a compile error ("already defined"), so
+ * they are not source.
+ */
+function isGeneratedEnumMember(method: Member, classFile: ClassFile): boolean {
+  if (!isEnumDeclaration(classFile)) return false;
+  const self = `L${classFile.thisClass};`;
+  return (
+    (method.name === "values" && method.descriptor === `()[${self}`) ||
+    (method.name === "valueOf" && method.descriptor === `(Ljava/lang/String;)${self}`)
+  );
 }
 
 function classHead(classFile: ClassFile): string {
   const isInterface = (classFile.flags & ACC_INTERFACE) !== 0;
   const isAnnotation = (classFile.flags & ACC_ANNOTATION) !== 0;
-  const isEnum = (classFile.flags & ACC_ENUM) !== 0;
+  const isEnum = isEnumDeclaration(classFile);
+  const self = selfOf(classFile);
   const keyword = isAnnotation
     ? "@interface"
     : isInterface
@@ -762,7 +1035,9 @@ function classHead(classFile: ClassFile): string {
   const head = [
     ...(classFile.flags & ACC_PUBLIC ? ["public"] : []),
     ...(!isInterface && !isEnum && classFile.flags & ACC_FINAL ? ["final"] : []),
-    ...(!isInterface && classFile.flags & ACC_ABSTRACT ? ["abstract"] : []),
+    // An enum carrying constant bodies is ACC_ABSTRACT, but `abstract enum` is
+    // not something Java lets you write.
+    ...(!isInterface && !isEnum && classFile.flags & ACC_ABSTRACT ? ["abstract"] : []),
     keyword,
     simpleName(classFile.thisClass),
   ];
@@ -770,11 +1045,14 @@ function classHead(classFile: ClassFile): string {
   const IMPLICIT = ["java/lang/Object", "java/lang/Enum", "java/lang/Record"];
   const superClass = classFile.superClass;
   if (!isInterface && superClass && !IMPLICIT.includes(superClass)) {
-    head.push("extends", typeName(superClass));
+    head.push("extends", typeName(superClass, self));
   }
   const interfaces = classFile.interfaces.filter(i => i !== "java/lang/annotation/Annotation");
   if (interfaces.length > 0) {
-    head.push(isInterface ? "extends" : "implements", interfaces.map(typeName).join(", "));
+    head.push(
+      isInterface ? "extends" : "implements",
+      interfaces.map(name => typeName(name, self)).join(", "),
+    );
   }
   return `${head.join(" ")} {`;
 }
@@ -785,18 +1063,44 @@ function classHead(classFile: ClassFile): string {
 export function decompileClass(classFile: ClassFile): string {
   const lines: string[] = [];
   const slash = classFile.thisClass.lastIndexOf("/");
-  if (slash > 0)
-    lines.push(`package ${classFile.thisClass.slice(0, slash).replaceAll("/", ".")};`, "");
-  lines.push(classHead(classFile));
-  for (const field of classFile.fields) {
-    if (field.flags & (ACC_SYNTHETIC | ACC_ENUM)) continue;
-    lines.push(fieldSource(field, classFile));
+  const packageName = slash > 0 ? classFile.thisClass.slice(0, slash).replaceAll("/", ".") : "";
+  // A package-info.class only carries the package's annotations, and its name
+  // is not an identifier - the package declaration is the whole source.
+  if (simpleName(classFile.thisClass) === "package-info") {
+    return packageName === "" ? "" : `package ${packageName};\n`;
   }
+  if (packageName !== "") lines.push(`package ${packageName};`, "");
+  const generated = generatedConstructor(classFile);
+  // Methods first: whether the static initializer came back decides how the
+  // static fields have to be declared.
+  const bodies: string[][] = [];
+  let staticInitializerLost = false;
   for (const method of classFile.methods) {
     if (method.flags & (ACC_SYNTHETIC | ACC_BRIDGE)) continue;
-    if (isDefaultConstructor(method, classFile)) continue;
-    lines.push("", ...methodSource(method, classFile));
+    if (method === generated || isGeneratedEnumMember(method, classFile)) continue;
+    const { lines: body, reconstructed } = methodSource(method, classFile);
+    if (!reconstructed && method.name === "<clinit>") staticInitializerLost = true;
+    bodies.push(body);
   }
+
+  lines.push(classHead(classFile));
+  if (isEnumDeclaration(classFile)) {
+    // An enum body opens with its constant list; even an empty one needs the
+    // `;` before any member. How the constants are constructed lives in
+    // <clinit>, which this phase does not reconstruct.
+    lines.push(`${enumConstants(classFile).join(", ")};`);
+  }
+  for (const field of classFile.fields) {
+    // Enum constants are the constant list above, not fields. A synthetic field
+    // is kept - the captured outer instance (`this$0`) and captured locals
+    // (`val$x`) are referenced by real method bodies - except the two javac
+    // generates on its own, which would clash with the ones it regenerates.
+    if (field.flags & ACC_ENUM) continue;
+    if (field.flags & ACC_SYNTHETIC && GENERATED_FIELDS.includes(field.name)) continue;
+    const keepFinal = !staticInitializerLost || (field.flags & ACC_STATIC) === 0;
+    lines.push(fieldSource(field, classFile, keepFinal));
+  }
+  for (const body of bodies) lines.push("", ...body);
   lines.push("}");
   return `${lines.join("\n")}\n`;
 }
