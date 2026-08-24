@@ -614,3 +614,21 @@ switch is at `1e-3`/`1e7` (not JS's `1e21` or Go's `%g` heuristics), and a
 subnormal never renders with a single significant digit. Verified against 18k
 values printed by a real JVM - keep the two implementations in step, they are
 line-for-line the same algorithm.
+
+## Throw-to-bail (TS) -> sentinel error type + `errors.As` (Go)
+
+The decompiler (`decompile.ts` / `decompile.go`) uses an exception to abandon
+one method's reconstruction from deep inside the stack interpreter and fall back
+to a placeholder body. In TS that is a `class NotDecompilable extends Error`
+caught at the method boundary; in Go every step returns `error` and the boundary
+uses `errors.As(err, &reason)` on a `*notDecompilable` - **not** a type
+assertion, which `golangci-lint`'s errorlint rejects (it fails on wrapped
+errors). Keep the two boundaries at the same place, otherwise a bail in one
+build becomes a hard failure in the other.
+
+Related layering rule: `internal/format` imports `internal/compiler`, so
+compiler-side code can never import the formatter. Anything that produces Java
+text (the decompiler) returns rough source and the *CLI* runs `FormatSource`
+over it - `src/compiler/decompile.ts` and `src/cli/decompile.ts` are split the
+same way, so the two builds format at the same point and their text baselines
+match byte for byte.

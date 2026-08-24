@@ -20,19 +20,19 @@ import {
   utf8,
 } from "./classfile.ts";
 
-const ACC_PUBLIC = 0x0001;
-const ACC_PRIVATE = 0x0002;
-const ACC_PROTECTED = 0x0004;
-const ACC_STATIC = 0x0008;
-const ACC_FINAL = 0x0010;
-const ACC_SYNCHRONIZED = 0x0020;
-const ACC_VOLATILE = 0x0040;
-const ACC_VARARGS = 0x0080;
-const ACC_TRANSIENT = 0x0080;
-const ACC_NATIVE = 0x0100;
-const ACC_INTERFACE = 0x0200;
-const ACC_ABSTRACT = 0x0400;
-const ACC_MODULE = 0x8000;
+export const ACC_PUBLIC = 0x0001;
+export const ACC_PRIVATE = 0x0002;
+export const ACC_PROTECTED = 0x0004;
+export const ACC_STATIC = 0x0008;
+export const ACC_FINAL = 0x0010;
+export const ACC_SYNCHRONIZED = 0x0020;
+export const ACC_VOLATILE = 0x0040;
+export const ACC_VARARGS = 0x0080;
+export const ACC_TRANSIENT = 0x0080;
+export const ACC_NATIVE = 0x0100;
+export const ACC_INTERFACE = 0x0200;
+export const ACC_ABSTRACT = 0x0400;
+export const ACC_MODULE = 0x8000;
 
 // javap's layout: a 6 column indent with the pc right-aligned in the next 4
 // (wider pcs push the line out), the mnemonic in a 13 column field, and the
@@ -379,6 +379,14 @@ export interface Instruction {
   readonly comment: string | undefined;
   /** The `{ ... }` body lines of a table/lookupswitch, already indented. */
   readonly extraLines: string[];
+  /**
+   * The instruction's numeric operand, for consumers that need it structured
+   * rather than rendered (decompile.ts): a constant-pool index, a local slot or
+   * an immediate value, depending on the mnemonic. 0 when there is none.
+   */
+  readonly arg: number;
+  /** The second numeric operand: the `iinc` delta, `multianewarray` dimensions. */
+  readonly arg2: number;
 }
 
 // Bounds-checked, because the code array comes straight from the file: an
@@ -447,6 +455,8 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
         operand: "",
         comment: undefined,
         extraLines: [],
+        arg: 0,
+        arg2: 0,
       });
       continue;
     }
@@ -463,21 +473,27 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
     let operand = "";
     let comment: string | undefined;
     const extraLines: string[] = [];
+    let arg = 0;
+    let arg2 = 0;
     switch (kind) {
       case "none":
         break;
       case "local":
-        operand = String(wide ? c.u2() : c.u1());
+        arg = wide ? c.u2() : c.u1();
+        operand = String(arg);
         break;
       case "i1":
-        operand = String(c.i1());
+        arg = c.i1();
+        operand = String(arg);
         break;
       case "i2":
-        operand = String(c.i2());
+        arg = c.i2();
+        operand = String(arg);
         break;
       case "cp1":
       case "cp2": {
         const index = kind === "cp1" ? c.u1() : c.u2();
+        arg = index;
         operand = `#${index}`;
         comment = constantComment(classFile, index);
         break;
@@ -491,6 +507,8 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
       case "iinc": {
         const slot = wide ? c.u2() : c.u1();
         const delta = wide ? c.i2() : c.i1();
+        arg = slot;
+        arg2 = delta;
         operand = `${slot}, ${delta}`;
         break;
       }
@@ -501,6 +519,8 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
         const index = c.u2();
         const count = c.u1();
         c.u1(); // the required trailing zero byte
+        arg = index;
+        arg2 = count;
         operand = `#${index},  ${count}`;
         comment = constantComment(classFile, index);
         break;
@@ -508,6 +528,7 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
       case "invokedynamic": {
         const index = c.u2();
         c.u2(); // two zero bytes
+        arg = index;
         operand = `#${index},  0`;
         comment = constantComment(classFile, index);
         break;
@@ -515,6 +536,8 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
       case "multianewarray": {
         const index = c.u2();
         const dimensions = c.u1();
+        arg = index;
+        arg2 = dimensions;
         operand = `#${index},  ${dimensions}`;
         comment = constantComment(classFile, index);
         break;
@@ -548,7 +571,7 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
       default:
         break;
     }
-    out.push({ pc, mnemonic, operand, comment, extraLines });
+    out.push({ pc, mnemonic, operand, comment, extraLines, arg, arg2 });
   }
   return out;
 }
