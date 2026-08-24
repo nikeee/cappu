@@ -119,12 +119,14 @@ function instructionStreams(bytes: Uint8Array, name: string): Map<string, string
   return new Map(disasm!.code.map(([member, code]) => [member.replaceAll(/<[^()]*>/g, ""), code]));
 }
 
-// `ClassLit.prim()` reads `java.lang.Integer.TYPE`, which the decompiler gets
-// right but our own emitter degrades to aconst_null - the oracle is only as good
-// as the emitter, so that one class is checked by its text baseline alone.
-const NO_ROUNDTRIP = ["ClassLit"];
+// `ClassLit.prim()` reads `java.lang.Integer.TYPE`, which javac accepts and the
+// decompiler gets right, but our JDK stub does not declare - so re-emitting it
+// degrades to aconst_null and checking it reports an unresolved symbol. Both
+// oracles below are only as good as the stub, so that class is held to its text
+// baseline alone.
+const STUB_GAP = ["ClassLit"];
 
-for (const name of FULLY_DECOMPILED.filter(n => !NO_ROUNDTRIP.includes(n))) {
+for (const name of FULLY_DECOMPILED.filter(n => !STUB_GAP.includes(n))) {
   test(`recompiles to the same bytecode: ${name}`, () => {
     const original = classBytes(name);
     const source = decompileToSource(original);
@@ -135,7 +137,53 @@ for (const name of FULLY_DECOMPILED.filter(n => !NO_ROUNDTRIP.includes(n))) {
   });
 }
 
+// --- the output has to be valid Java --------------------------------------------------
+
+/** Parse and type-check a reconstruction the way `cappu check` would. */
+function diagnosticsOf(name: string, source: string): string[] {
+  const program = createProgram();
+  loadJdkStub(program);
+  const uri = `file:///${name}.java` as Uri;
+  program.setOpenDocument(uri, source, 1);
+  const sourceFile = program.getSourceFile(uri)!;
+  return [
+    ...sourceFile.parseDiagnostics.map(d => `parse: ${d.messageText}`),
+    ...createChecker(program)
+      .getSemanticDiagnostics(sourceFile)
+      .map(d => `semantic: ${d.messageText}`),
+  ];
+}
+
+for (const name of [...FULLY_DECOMPILED, ...NOT_DECOMPILED].filter(n => !STUB_GAP.includes(n))) {
+  test(`type-checks its own output: ${name}`, () => {
+    expect({ [name]: diagnosticsOf(name, decompileToSource(classBytes(name))) }).toEqual({
+      [name]: [],
+    });
+  });
+}
+
 // --- names ---------------------------------------------------------------------------
+
+// javac (and our emitter) reuse a slot once a variable goes out of scope, so a
+// slot is not a variable: the second one needs its own name and type, or the
+// output does not compile.
+const REUSED_SLOT =
+  "public class Reuse { static int f(int n) {" +
+  " { int a = n + 1; n = a; } { long b = n * 2L; n = (int) b; } return n; } }";
+
+test("declares a second variable when a slot is reused", () => {
+  const source = decompileToSource(emitClass("Reuse", REUSED_SLOT));
+  expect(source).toContain("int var1 = arg0 + 1;");
+  expect(source).toContain("long var1_2 = (long) arg0 * 2L;");
+  // Reusing the name would assign a long to an int; the checker says so.
+  expect({ Reuse: diagnosticsOf("Reuse", source) }).toEqual({ Reuse: [] });
+});
+
+test("keeps both debug-table names when a slot is reused", () => {
+  const source = decompileToSource(emitClass("Reuse", REUSED_SLOT, true));
+  expect(source).toContain("int a = n + 1;");
+  expect(source).toContain("long b = (long) n * 2L;");
+});
 
 const DEBUGGY = "class Debuggy { int f(int seed) { int doubled = seed * 2; return doubled; } }";
 

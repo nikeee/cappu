@@ -232,6 +232,8 @@ interface Local {
   name: string;
   type: string;
   declared: boolean;
+  /** The debug-table row this name came from, when there is one. */
+  origin: LocalEntry | undefined;
 }
 
 /** The slot each declared parameter occupies; long and double take two. */
@@ -258,6 +260,8 @@ function returnType(descriptor: string): string {
 /** Straight-line bytecode of one method, as Java statements. */
 class BodyDecompiler {
   private readonly stack: Expr[] = [];
+  /** Every local name handed out so far, so a reused slot cannot shadow one. */
+  private readonly names = new Set<string>();
   readonly statements: string[] = [];
 
   constructor(
@@ -266,7 +270,9 @@ class BodyDecompiler {
     private readonly localTable: LocalEntry[],
     private readonly methodReturnType: string,
     private readonly isStatic: boolean,
-  ) {}
+  ) {
+    for (const local of locals.values()) this.names.add(local.name);
+  }
 
   private push(expr: Expr): void {
     this.stack.push(expr);
@@ -278,21 +284,38 @@ class BodyDecompiler {
     return expr;
   }
 
-  private local(slot: number, pc: number, fallbackType: string): Local {
+  /**
+   * The variable living in `slot` at `pc`. javac reuses a slot for the next
+   * variable once the previous one goes out of scope, so a slot is not a
+   * variable: a new debug-table scope - or, with no debug table, a store of a
+   * different type - starts a new one, which has to be declared under its own
+   * name.
+   */
+  private local(slot: number, pc: number, fallbackType: string, isStore = false): Local {
+    const scoped = this.localTable.find(e => e.slot === slot && pc >= e.startPc && pc < e.endPc);
     const existing = this.locals.get(slot);
-    if (existing) return existing;
-    // A name from the debug table beats `var<slot>`; the scope that covers this
-    // pc wins, so slots reused by sibling blocks keep their own names.
-    const scoped =
-      this.localTable.find(e => e.slot === slot && pc >= e.startPc && pc < e.endPc) ??
-      this.localTable.find(e => e.slot === slot);
+    if (existing) {
+      if (scoped ? existing.origin === scoped : !isStore || existing.type === fallbackType) {
+        return existing;
+      }
+    }
     const local: Local = {
-      name: scoped?.name ?? `var${slot}`,
+      name: scoped?.name !== undefined && scoped.name !== "" ? scoped.name : this.freshName(slot),
       type: scoped?.type !== undefined && scoped.type !== "" ? scoped.type : fallbackType,
       declared: false,
+      origin: scoped,
     };
+    this.names.add(local.name);
     this.locals.set(slot, local);
     return local;
+  }
+
+  /** `var<slot>`, kept distinct from the names already handed out. */
+  private freshName(slot: number): string {
+    let name = `var${slot}`;
+    for (let n = 2; this.names.has(name); n++) name = `var${slot}_${n}`;
+    this.names.add(name);
+    return name;
   }
 
   /** The local slot of `iload_1`-style mnemonics, or the decoded operand. */
@@ -301,8 +324,8 @@ class BodyDecompiler {
     return suffix ? Number(suffix[1]) : instruction.arg;
   }
 
-  private store(slot: number, pc: number, value: Expr, declaredType: string): void {
-    const local = this.local(slot, pc, declaredType);
+  private store(slot: number, scopePc: number, value: Expr, declaredType: string): void {
+    const local = this.local(slot, scopePc, declaredType, true);
     const text = coerce(value, local.type);
     if (local.declared) {
       this.statements.push(`${local.name} = ${text};`);
@@ -314,7 +337,9 @@ class BodyDecompiler {
 
   run(instructions: readonly Instruction[]): void {
     for (const [index, instruction] of instructions.entries()) {
-      this.step(instruction);
+      // A store's variable comes into scope after the store, so the debug table
+      // is searched at the next instruction's pc, not the store's own.
+      this.step(instruction, instructions[index + 1]?.pc ?? instruction.pc + 1);
       if (instruction.mnemonic.endsWith("return") && index !== instructions.length - 1) {
         // Code after a return only exists because something branches over it.
         throw new NotDecompilable("unreachable code");
@@ -323,7 +348,7 @@ class BodyDecompiler {
     if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
   }
 
-  private step(instruction: Instruction): void {
+  private step(instruction: Instruction, nextPc: number): void {
     const { mnemonic, pc } = instruction;
     const pool = this.classFile.pool;
 
@@ -362,7 +387,7 @@ class BodyDecompiler {
     if (/^[ilfda]store$/.test(base)) {
       const value = this.pop();
       const fallback = base === "astore" ? value.type : PRIMITIVE_OF_PREFIX[base[0]!]!;
-      return this.store(this.slotOf(instruction), pc, value, fallback);
+      return this.store(this.slotOf(instruction), nextPc, value, fallback);
     }
     if (base === "iinc") {
       const local = this.local(instruction.arg, pc, "int");
@@ -584,6 +609,7 @@ function buildLocals(
       name: scoped?.name ?? `arg${index}`,
       type: scoped?.type !== undefined && scoped.type !== "" ? scoped.type : type,
       declared: true,
+      origin: scoped,
     });
   });
   return locals;

@@ -239,6 +239,8 @@ type local struct {
 	Name     string
 	Type     string
 	Declared bool
+	// Origin is the debug-table row this name came from, when there is one.
+	Origin *localEntry
 }
 
 type paramSlot struct {
@@ -284,6 +286,9 @@ type bodyDecompiler struct {
 	isStatic   bool
 	stack      []expr
 	statements []string
+	// names is every local name handed out so far, so a reused slot cannot
+	// shadow one.
+	names map[string]bool
 }
 
 func (d *bodyDecompiler) push(e expr) { d.stack = append(d.stack, e) }
@@ -297,12 +302,11 @@ func (d *bodyDecompiler) pop() (expr, error) {
 	return top, nil
 }
 
-func (d *bodyDecompiler) local(slot, pc int, fallbackType string) *local {
-	if existing, ok := d.locals[slot]; ok {
-		return existing
-	}
-	// A name from the debug table beats `var<slot>`; the scope that covers this
-	// pc wins, so slots reused by sibling blocks keep their own names.
+// local reports the variable living in slot at pc. javac reuses a slot for the
+// next variable once the previous one goes out of scope, so a slot is not a
+// variable: a new debug-table scope - or, with no debug table, a store of a
+// different type - starts a new one, which has to be declared under its own name.
+func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) *local {
 	var scoped *localEntry
 	for i := range d.localTable {
 		if e := &d.localTable[i]; e.Slot == slot && pc >= e.StartPc && pc < e.EndPc {
@@ -310,23 +314,36 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string) *local {
 			break
 		}
 	}
-	if scoped == nil {
-		for i := range d.localTable {
-			if e := &d.localTable[i]; e.Slot == slot {
-				scoped = e
-				break
+	if existing, ok := d.locals[slot]; ok {
+		if scoped != nil {
+			if existing.Origin == scoped {
+				return existing
 			}
+		} else if !isStore || existing.Type == fallbackType {
+			return existing
 		}
 	}
-	created := &local{Name: "var" + strconv.Itoa(slot), Type: fallbackType}
-	if scoped != nil {
+	created := &local{Type: fallbackType, Origin: scoped}
+	if scoped != nil && scoped.Name != "" {
 		created.Name = scoped.Name
-		if scoped.Type != "" {
-			created.Type = scoped.Type
-		}
+	} else {
+		created.Name = d.freshName(slot)
 	}
+	if scoped != nil && scoped.Type != "" {
+		created.Type = scoped.Type
+	}
+	d.names[created.Name] = true
 	d.locals[slot] = created
 	return created
+}
+
+// freshName is `var<slot>`, kept distinct from the names already handed out.
+func (d *bodyDecompiler) freshName(slot int) string {
+	name := "var" + strconv.Itoa(slot)
+	for n := 2; d.names[name]; n++ {
+		name = "var" + strconv.Itoa(slot) + "_" + strconv.Itoa(n)
+	}
+	return name
 }
 
 // slotOf reports the local slot of `iload_1`-style mnemonics, or the decoded operand.
@@ -349,8 +366,8 @@ func opBase(m string) string {
 	return m
 }
 
-func (d *bodyDecompiler) store(slot, pc int, value expr, declaredType string) {
-	target := d.local(slot, pc, declaredType)
+func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType string) {
+	target := d.local(slot, scopePc, declaredType, true)
 	text := coerce(value, target.Type)
 	if target.Declared {
 		d.statements = append(d.statements, target.Name+" = "+text+";")
@@ -362,7 +379,13 @@ func (d *bodyDecompiler) store(slot, pc int, value expr, declaredType string) {
 
 func (d *bodyDecompiler) run(instructions []Instruction) error {
 	for i, instruction := range instructions {
-		if err := d.step(instruction); err != nil {
+		// A store's variable comes into scope after the store, so the debug
+		// table is searched at the next instruction's pc, not the store's own.
+		nextPc := instruction.Pc + 1
+		if i+1 < len(instructions) {
+			nextPc = instructions[i+1].Pc
+		}
+		if err := d.step(instruction, nextPc); err != nil {
 			return err
 		}
 		if strings.HasSuffix(instruction.Mnemonic, "return") && i != len(instructions)-1 {
@@ -381,7 +404,7 @@ func isOneOf(base string, prefixes string, suffix string) bool {
 		strings.IndexByte(prefixes, base[0]) >= 0
 }
 
-func (d *bodyDecompiler) step(instruction Instruction) error {
+func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 	mnemonic, pc := instruction.Mnemonic, instruction.Pc
 	pool := d.classFile.Pool
 
@@ -432,7 +455,7 @@ func (d *bodyDecompiler) step(instruction Instruction) error {
 			d.push(primary("this", typeName(d.classFile.ThisClass)))
 			return nil
 		}
-		target := d.local(slot, pc, primitiveOfPrefix[base[0]])
+		target := d.local(slot, pc, primitiveOfPrefix[base[0]], false)
 		d.push(primary(target.Name, target.Type))
 		return nil
 	}
@@ -445,11 +468,11 @@ func (d *bodyDecompiler) step(instruction Instruction) error {
 		if base == "astore" {
 			fallback = value.Type
 		}
-		d.store(slotOf(instruction), pc, value, fallback)
+		d.store(slotOf(instruction), nextPc, value, fallback)
 		return nil
 	}
 	if base == "iinc" {
-		target := d.local(instruction.Arg, pc, "int")
+		target := d.local(instruction.Arg, pc, "int", false)
 		switch delta := instruction.Arg2; {
 		case delta == 1:
 			d.statements = append(d.statements, target.Name+"++;")
@@ -775,8 +798,9 @@ func buildLocals(method Member, localTable []localEntry, isStatic bool) map[int]
 	for index, parameter := range parameterSlots(method.Descriptor, isStatic) {
 		entry := &local{Name: "arg" + strconv.Itoa(index), Type: parameter.Type, Declared: true}
 		for i := range localTable {
-			if scoped := localTable[i]; scoped.Slot == parameter.Slot && scoped.StartPc == 0 {
+			if scoped := &localTable[i]; scoped.Slot == parameter.Slot && scoped.StartPc == 0 {
 				entry.Name = scoped.Name
+				entry.Origin = scoped
 				if scoped.Type != "" {
 					entry.Type = scoped.Type
 				}
@@ -921,6 +945,10 @@ func decompileBody(
 		localTable: localTable,
 		returnType: methodReturnType(method.Descriptor),
 		isStatic:   isStatic,
+		names:      map[string]bool{},
+	}
+	for _, parameter := range locals {
+		d.names[parameter.Name] = true
 	}
 	if err := d.run(instructions); err != nil {
 		return nil, err

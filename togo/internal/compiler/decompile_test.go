@@ -24,10 +24,12 @@ var fullyDecompiled = []string{
 // calls (phase 1.6) are not this phase's job, and must say so.
 var notDecompiled = []string{"ControlFlow", "Invoke", "Pt"}
 
-// `ClassLit.prim()` reads `java.lang.Integer.TYPE`, which the decompiler gets
-// right but our own emitter degrades to aconst_null - the oracle is only as good
-// as the emitter, so that one class is checked by its text baseline alone.
-var noRoundtrip = map[string]bool{"ClassLit": true}
+// `ClassLit.prim()` reads `java.lang.Integer.TYPE`, which javac accepts and the
+// decompiler gets right, but our JDK stub does not declare - so re-emitting it
+// degrades to aconst_null and checking it reports an unresolved symbol. Both
+// oracles are only as good as the stub, so that class is held to its text
+// baseline alone.
+var stubGap = map[string]bool{"ClassLit": true}
 
 func decompileBaseline(t *testing.T, name string) string {
 	t.Helper()
@@ -62,7 +64,7 @@ func TestDecompileReportsWhatItCannotReconstruct(t *testing.T) {
 // by design.
 func TestDecompileRecompilesToTheSameBytecode(t *testing.T) {
 	for _, name := range fullyDecompiled {
-		if noRoundtrip[name] {
+		if stubGap[name] {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
@@ -155,4 +157,70 @@ func emitClassBytesNoDebug(t *testing.T, name, source string) []byte {
 	}
 	t.Fatalf("class %s was not emitted", name)
 	return nil
+}
+
+// --- the output has to be valid Java --------------------------------------------------
+
+// diagnosticsOf parses and type-checks a reconstruction the way `cappu check` would.
+func diagnosticsOf(name, source string) []string {
+	program := NewProgram()
+	LoadJdkStub(program)
+	uri := URI("file:///" + name + ".java")
+	program.SetOpenDocument(uri, source, 1)
+	sourceFile := program.GetSourceFile(uri)
+	var out []string
+	for _, d := range sourceFile.AsSourceFile().ParseDiagnostics {
+		out = append(out, "parse: "+d.MessageText)
+	}
+	for _, d := range NewChecker(program).GetSemanticDiagnostics(sourceFile) {
+		out = append(out, "semantic: "+d.MessageText)
+	}
+	return out
+}
+
+func TestDecompileOutputTypeChecks(t *testing.T) {
+	for _, name := range append(append([]string{}, fullyDecompiled...), notDecompiled...) {
+		if stubGap[name] {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			if found := diagnosticsOf(name, decompileBaseline(t, name)); len(found) > 0 {
+				t.Errorf("%s: %v", name, found)
+			}
+		})
+	}
+}
+
+// javac (and our emitter) reuse a slot once a variable goes out of scope, so a
+// slot is not a variable: the second one needs its own name and type, or the
+// output does not compile.
+const reusedSlotSource = "public class Reuse { static int f(int n) {" +
+	" { int a = n + 1; n = a; } { long b = n * 2L; n = (int) b; } return n; } }"
+
+func TestDecompileDeclaresASecondVariableForAReusedSlot(t *testing.T) {
+	source, err := Decompile(emitClassBytesNoDebug(t, "Reuse", reusedSlotSource))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{"int var1 = arg0 + 1;", "long var1_2 = (long) arg0 * 2L;"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("missing %q in:\n%s", want, source)
+		}
+	}
+	// Reusing the name would assign a long to an int; the checker says so.
+	if found := diagnosticsOf("Reuse", source); len(found) > 0 {
+		t.Errorf("reconstruction does not type-check: %v\n%s", found, source)
+	}
+}
+
+func TestDecompileKeepsBothDebugNamesForAReusedSlot(t *testing.T) {
+	source, err := Decompile(emitClassBytes(t, "Reuse", reusedSlotSource))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{"int a = n + 1;", "long b = (long) n * 2L;"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("missing %q in:\n%s", want, source)
+		}
+	}
 }
