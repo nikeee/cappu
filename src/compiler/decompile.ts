@@ -8,6 +8,12 @@
 // The text is deliberately rough - callers run it through the formatter
 // (src/cli/decompile.ts), which is why this module stays free of a dependency
 // on src/format.
+//
+// Only the class shape is reconstructed, not the declaration forms that carry
+// generated members: an enum keeps its keyword but loses its constants (they
+// live in <clinit>) and an obfuscated or non-javac class file can still produce
+// something javac would reject. Those are later phases; the bail-out body keeps
+// the *method* level honest, not the type level.
 
 import {
   ClassFileError,
@@ -143,6 +149,18 @@ function typeName(internalName: string): string {
     : internalName.replaceAll("/", ".");
 }
 
+/**
+ * Java has no literal for NaN or an infinity - javap prints `NaNf`/`Infinity`,
+ * which is not source - so those come back as the wrapper constants javac
+ * inlined them from.
+ */
+function nonFinite(value: number, wrapper: string): string | undefined {
+  if (Number.isNaN(value)) return `${wrapper}.NaN`;
+  if (value === Infinity) return `${wrapper}.POSITIVE_INFINITY`;
+  if (value === -Infinity) return `${wrapper}.NEGATIVE_INFINITY`;
+  return undefined;
+}
+
 function intLiteral(value: number): Expr {
   // A negative literal is a unary minus, not part of the token.
   return { text: String(value), prec: value < 0 ? PREC_UNARY : PREC_PRIMARY, type: "int" };
@@ -160,10 +178,14 @@ function constantExpr(pool: readonly (Constant | undefined)[], index: number): E
         type: "long",
       };
     case "float": {
+      const wrapper = nonFinite(entry.value, "java.lang.Float");
+      if (wrapper) return primary(wrapper, "float");
       const text = `${javaFloatText(entry.value)}f`;
       return { text, prec: text.startsWith("-") ? PREC_UNARY : PREC_PRIMARY, type: "float" };
     }
     case "double": {
+      const wrapper = nonFinite(entry.value, "java.lang.Double");
+      if (wrapper) return primary(wrapper, "double");
       const text = javaDoubleText(entry.value);
       return { text, prec: text.startsWith("-") ? PREC_UNARY : PREC_PRIMARY, type: "double" };
     }
@@ -299,6 +321,10 @@ class BodyDecompiler {
         return existing;
       }
     }
+    // Reaching a slot that was never stored means the local is read
+    // uninitialized - javac cannot produce that, so the input is doing
+    // something this phase does not model.
+    if (!isStore) throw new NotDecompilable(`local ${slot} is read before it is written`);
     const local: Local = {
       name: scoped?.name !== undefined && scoped.name !== "" ? scoped.name : this.freshName(slot),
       type: scoped?.type !== undefined && scoped.type !== "" ? scoped.type : fallbackType,
@@ -385,6 +411,10 @@ class BodyDecompiler {
       return this.push(primary(local.name, local.type));
     }
     if (/^[ilfda]store$/.test(base)) {
+      // `this` is final in source; a class file may still store over slot 0.
+      if (!this.isStatic && this.slotOf(instruction) === 0) {
+        throw new NotDecompilable("the method assigns to `this`");
+      }
       const value = this.pop();
       const fallback = base === "astore" ? value.type : PRIMITIVE_OF_PREFIX[base[0]!]!;
       return this.store(this.slotOf(instruction), nextPc, value, fallback);

@@ -9,12 +9,14 @@
 //      normalized instruction stream, which proves the output is valid Java
 //      that means what the input meant.
 
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import { expect } from "expect";
 
+import TempDir from "../TempDir.ts";
 import { type Uri } from "../workspace.ts";
 import { decompileToSource } from "../cli/decompile.ts";
 import { createChecker } from "./checker.ts";
@@ -160,6 +162,68 @@ for (const name of [...FULLY_DECOMPILED, ...NOT_DECOMPILED].filter(n => !STUB_GA
       [name]: [],
     });
   });
+}
+
+// --- constants javac inlines and javap prints unsourceably --------------------------
+
+function hasTool(name: string): boolean {
+  try {
+    execFileSync(name, ["-version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const HAS_JAVAC = hasTool("javac");
+const HAS_JAVAP = hasTool("javap");
+
+// Only javac produces these: NaN and the infinities reach the constant pool
+// because `Float.NaN` and friends are constant variables, and our own emitter
+// does not fold float division. javap prints them as `NaNf`/`Infinity`, which is
+// not Java - the wrapper constants are.
+const NON_FINITE_SOURCE =
+  "public class NonFinite {\n" +
+  "  static float nan() { return Float.NaN; }\n" +
+  "  static float inf() { return Float.POSITIVE_INFINITY; }\n" +
+  "  static double negInf() { return Double.NEGATIVE_INFINITY; }\n" +
+  "  static double dnan() { return Double.NaN; }\n" +
+  "}";
+
+test(
+  "renders NaN and the infinities as the wrapper constants",
+  { skip: HAS_JAVAC && HAS_JAVAP ? false : "no JDK (javac/javap)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-nonfinite-");
+    const classFile = compileWithJavac(NON_FINITE_SOURCE, "NonFinite", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    for (const constant of [
+      "java.lang.Float.NaN",
+      "java.lang.Float.POSITIVE_INFINITY",
+      "java.lang.Double.NEGATIVE_INFINITY",
+      "java.lang.Double.NaN",
+    ]) {
+      expect(source).toContain(constant);
+    }
+    // Not checked with diagnosticsOf: our JDK stub declares no fields on Float
+    // and Double, so our own checker calls these unresolved (the same gap that
+    // exempts ClassLit above). javac is the oracle here instead - it inlines
+    // them right back, so the bytecode has to come out identical.
+    const roundTripped = compileWithJavac(source, "NonFinite", join(dir.path, "again"));
+    expect(javap(roundTripped)).toEqual(javap(classFile));
+  },
+);
+
+/** Compile one source file with javac and return the .class path. */
+function compileWithJavac(source: string, name: string, outDir: string): string {
+  mkdirSync(outDir, { recursive: true });
+  const javaFile = join(outDir, `${name}.java`);
+  writeFileSync(javaFile, source);
+  execFileSync("javac", ["--release", "21", "-d", outDir, javaFile], { stdio: "pipe" });
+  return join(outDir, `${name}.class`);
+}
+
+function javap(classFile: string): string {
+  return execFileSync("javap", ["-c", "-p", classFile], { encoding: "utf8" });
 }
 
 // --- names ---------------------------------------------------------------------------

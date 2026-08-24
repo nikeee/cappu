@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -223,4 +224,78 @@ func TestDecompileKeepsBothDebugNamesForAReusedSlot(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, source)
 		}
 	}
+}
+
+// --- constants javac inlines and javap prints unsourceably --------------------------
+
+// Only javac produces these: NaN and the infinities reach the constant pool
+// because `Float.NaN` and friends are constant variables, and our own emitter
+// does not fold float division. javap prints them as `NaNf`/`Infinity`, which is
+// not Java - the wrapper constants are.
+const nonFiniteSource = `public class NonFinite {
+  static float nan() { return Float.NaN; }
+  static float inf() { return Float.POSITIVE_INFINITY; }
+  static double negInf() { return Double.NEGATIVE_INFINITY; }
+  static double dnan() { return Double.NaN; }
+}`
+
+func TestDecompileRendersNonFiniteConstants(t *testing.T) {
+	if !hasTool("javac") || !hasTool("javap") {
+		t.Skip("no JDK (javac/javap)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "NonFinite", nonFiniteSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, constant := range []string{
+		"java.lang.Float.NaN", "java.lang.Float.POSITIVE_INFINITY",
+		"java.lang.Double.NEGATIVE_INFINITY", "java.lang.Double.NaN",
+	} {
+		if !strings.Contains(source, constant) {
+			t.Errorf("missing %q in:\n%s", constant, source)
+		}
+	}
+	// Not checked with diagnosticsOf: our JDK stub declares no fields on Float
+	// and Double, so our own checker calls these unresolved (the same gap that
+	// exempts ClassLit above). javac is the oracle here instead - it inlines
+	// them right back, so the bytecode has to come out identical.
+	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "NonFinite", source)
+	if javapText(t, roundTripped) != javapText(t, classFile) {
+		t.Errorf("recompiled bytecode differs:\n%s", javapText(t, roundTripped))
+	}
+}
+
+func compileWithJavac(t *testing.T, dir, name, source string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	javaFile := filepath.Join(dir, name+".java")
+	if err := os.WriteFile(javaFile, []byte(source), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	if out, err := exec.Command("javac", "--release", "21", "-d", dir, javaFile).CombinedOutput(); err != nil {
+		t.Fatalf("javac: %v\n%s", err, out)
+	}
+	return filepath.Join(dir, name+".class")
+}
+
+func javapText(t *testing.T, classFile string) string {
+	t.Helper()
+	out, err := exec.Command("javap", "-c", "-p", classFile).Output()
+	if err != nil {
+		t.Fatalf("javap: %v", err)
+	}
+	return string(out)
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return b
 }

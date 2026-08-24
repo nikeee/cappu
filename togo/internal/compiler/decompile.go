@@ -12,11 +12,18 @@ package compiler
 // The text is deliberately rough - callers run it through the formatter
 // (internal/cli/decompile.go), which is why this file stays free of a
 // dependency on internal/format.
+//
+// Only the class shape is reconstructed, not the declaration forms that carry
+// generated members: an enum keeps its keyword but loses its constants (they
+// live in <clinit>) and an obfuscated or non-javac class file can still produce
+// something javac would reject. Those are later phases; the bail-out body keeps
+// the *method* level honest, not the type level.
 
 import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -121,6 +128,21 @@ func intLiteral(value int) expr {
 	return expr{Text: strconv.Itoa(value), Prec: prec, Type: "int"}
 }
 
+// nonFinite maps NaN and the infinities to the wrapper constants javac inlined
+// them from: Java has no literal for them, and javap's `NaNf`/`Infinity` is not
+// source.
+func nonFinite(value float64, wrapper string) (string, bool) {
+	switch {
+	case math.IsNaN(value):
+		return wrapper + ".NaN", true
+	case math.IsInf(value, 1):
+		return wrapper + ".POSITIVE_INFINITY", true
+	case math.IsInf(value, -1):
+		return wrapper + ".NEGATIVE_INFINITY", true
+	}
+	return "", false
+}
+
 func negatablePrec(text string) int {
 	if strings.HasPrefix(text, "-") {
 		return precUnary
@@ -140,9 +162,15 @@ func constantExpr(pool []*Constant, index uint16) (expr, error) {
 		text := fmt.Sprintf("%dL", entry.Long)
 		return expr{Text: text, Prec: negatablePrec(text), Type: "long"}, nil
 	case TagFloat:
+		if wrapper, ok := nonFinite(float64(entry.Float), "java.lang.Float"); ok {
+			return primary(wrapper, "float"), nil
+		}
 		text := JavaFloatText(entry.Float) + "f"
 		return expr{Text: text, Prec: negatablePrec(text), Type: "float"}, nil
 	case TagDouble:
+		if wrapper, ok := nonFinite(entry.Double, "java.lang.Double"); ok {
+			return primary(wrapper, "double"), nil
+		}
 		text := JavaDoubleText(entry.Double)
 		return expr{Text: text, Prec: negatablePrec(text), Type: "double"}, nil
 	case TagString:
@@ -306,7 +334,7 @@ func (d *bodyDecompiler) pop() (expr, error) {
 // next variable once the previous one goes out of scope, so a slot is not a
 // variable: a new debug-table scope - or, with no debug table, a store of a
 // different type - starts a new one, which has to be declared under its own name.
-func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) *local {
+func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) (*local, error) {
 	var scoped *localEntry
 	for i := range d.localTable {
 		if e := &d.localTable[i]; e.Slot == slot && pc >= e.StartPc && pc < e.EndPc {
@@ -317,11 +345,17 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 	if existing, ok := d.locals[slot]; ok {
 		if scoped != nil {
 			if existing.Origin == scoped {
-				return existing
+				return existing, nil
 			}
 		} else if !isStore || existing.Type == fallbackType {
-			return existing
+			return existing, nil
 		}
+	}
+	// Reaching a slot that was never stored means the local is read
+	// uninitialized - javac cannot produce that, so the input is doing something
+	// this phase does not model.
+	if !isStore {
+		return nil, bail("local %d is read before it is written", slot)
 	}
 	created := &local{Type: fallbackType, Origin: scoped}
 	if scoped != nil && scoped.Name != "" {
@@ -334,7 +368,7 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 	}
 	d.names[created.Name] = true
 	d.locals[slot] = created
-	return created
+	return created, nil
 }
 
 // freshName is `var<slot>`, kept distinct from the names already handed out.
@@ -366,15 +400,19 @@ func opBase(m string) string {
 	return m
 }
 
-func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType string) {
-	target := d.local(slot, scopePc, declaredType, true)
+func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType string) error {
+	target, err := d.local(slot, scopePc, declaredType, true)
+	if err != nil {
+		return err
+	}
 	text := coerce(value, target.Type)
 	if target.Declared {
 		d.statements = append(d.statements, target.Name+" = "+text+";")
-		return
+		return nil
 	}
 	target.Declared = true
-	d.statements = append(d.statements, target.Type+" "+target.Name+" "+"= "+text+";")
+	d.statements = append(d.statements, target.Type+" "+target.Name+" = "+text+";")
+	return nil
 }
 
 func (d *bodyDecompiler) run(instructions []Instruction) error {
@@ -455,11 +493,18 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 			d.push(primary("this", typeName(d.classFile.ThisClass)))
 			return nil
 		}
-		target := d.local(slot, pc, primitiveOfPrefix[base[0]], false)
+		target, err := d.local(slot, pc, primitiveOfPrefix[base[0]], false)
+		if err != nil {
+			return err
+		}
 		d.push(primary(target.Name, target.Type))
 		return nil
 	}
 	if isOneOf(base, "ilfda", "store") {
+		// `this` is final in source; a class file may still store over slot 0.
+		if !d.isStatic && slotOf(instruction) == 0 {
+			return bail("the method assigns to `this`")
+		}
 		value, err := d.pop()
 		if err != nil {
 			return err
@@ -468,11 +513,13 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if base == "astore" {
 			fallback = value.Type
 		}
-		d.store(slotOf(instruction), nextPc, value, fallback)
-		return nil
+		return d.store(slotOf(instruction), nextPc, value, fallback)
 	}
 	if base == "iinc" {
-		target := d.local(instruction.Arg, pc, "int", false)
+		target, err := d.local(instruction.Arg, pc, "int", false)
+		if err != nil {
+			return err
+		}
 		switch delta := instruction.Arg2; {
 		case delta == 1:
 			d.statements = append(d.statements, target.Name+"++;")
