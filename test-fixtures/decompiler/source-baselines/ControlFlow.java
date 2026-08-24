@@ -1,7 +1,7 @@
 public class ControlFlow {
 
   static int sum(int arg0) {
-    /* cappu: unsupported instruction if_icmpge; the bytecode is:
+    /* cappu: loops are not decompiled yet; the bytecode is:
      * 0: iconst_0
      * 1: istore_1
      * 2: iconst_0
@@ -22,21 +22,14 @@ public class ControlFlow {
   }
 
   static int absish(int arg0) {
-    /* cappu: unsupported instruction if_icmpge; the bytecode is:
-     * 0: iload_0
-     * 1: iconst_0
-     * 2: if_icmpge 8
-     * 5: iload_0
-     * 6: ineg
-     * 7: ireturn
-     * 8: iload_0
-     * 9: ireturn
-     */
-    throw new UnsupportedOperationException("cappu: not decompiled");
+    if (arg0 < 0) {
+      return -arg0;
+    }
+    return arg0;
   }
 
   static int countdown(int arg0) {
-    /* cappu: unsupported instruction if_icmple; the bytecode is:
+    /* cappu: loops are not decompiled yet; the bytecode is:
      * 0: iconst_0
      * 1: istore_1
      * 2: iload_0
@@ -58,7 +51,7 @@ public class ControlFlow {
   }
 
   static int firstSet(int arg0) {
-    /* cappu: unsupported instruction if_icmplt; the bytecode is:
+    /* cappu: loops are not decompiled yet; the bytecode is:
      * 0: iconst_0
      * 1: istore_1
      * 2: iload_1
@@ -75,19 +68,7 @@ public class ControlFlow {
   }
 
   static boolean inRange(int arg0, int arg1, int arg2) {
-    /* cappu: unsupported instruction if_icmplt; the bytecode is:
-     * 0: iload_0
-     * 1: iload_1
-     * 2: if_icmplt 10
-     * 5: iload_0
-     * 6: iload_2
-     * 7: if_icmple 14
-     * 10: iconst_0
-     * 11: goto 15
-     * 14: iconst_1
-     * 15: ireturn
-     */
-    throw new UnsupportedOperationException("cappu: not decompiled");
+    return arg0 >= arg1 && arg0 <= arg2;
   }
 
   public static void main(java.lang.String[] arg0) {

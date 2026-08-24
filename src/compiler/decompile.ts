@@ -1,9 +1,10 @@
-// `cappu decompile`, phase 1.3 (nikeee/cappu#43): reconstruct Java source from
-// straight-line bytecode. A symbolic stack interpreter walks a method's
-// instructions and turns them back into expressions and statements; anything
-// that needs control flow or a method call (later phases) renders as its
-// disassembly plus a `throw new UnsupportedOperationException(...)`, so the
-// output is always compilable Java.
+// `cappu decompile`, phases 1.3 and 1.4 (nikeee/cappu#43): reconstruct Java
+// source from bytecode without a loop in it. A symbolic stack interpreter walks
+// a method's basic blocks and turns them back into expressions and statements,
+// with the branches structured into `if`/`else`, `&&`/`||` and `?:`; anything
+// that needs a loop or a method call (later phases) renders as its disassembly
+// plus a `throw new UnsupportedOperationException(...)`, so the output is always
+// compilable Java.
 //
 // The text is deliberately rough - callers run it through the formatter
 // (src/cli/decompile.ts), which is why this module stays free of a dependency
@@ -71,15 +72,42 @@ const PREC_MUL = 12;
 const PREC_ADD = 11;
 const PREC_SHIFT = 10;
 const PREC_REL = 9;
+const PREC_EQ = 8;
 const PREC_AND = 7;
 const PREC_XOR = 6;
 const PREC_OR = 5;
+const PREC_LAND = 4;
+const PREC_LOR = 3;
+const PREC_TERNARY = 2;
+
+/**
+ * The structured form of a boolean expression, kept alongside its text so
+ * `negate` can flip the operator instead of wrapping everything in a `!`: the
+ * bytecode branches on the *inverse* of what the source said, so every
+ * condition is negated exactly once on the way back.
+ */
+type Logic =
+  | { readonly kind: "compare"; readonly left: Expr; readonly op: string; readonly right: Expr }
+  | { readonly kind: "and" | "or"; readonly left: Expr; readonly right: Expr }
+  | { readonly kind: "not"; readonly value: Expr };
 
 interface Expr {
   readonly text: string;
   readonly prec: number;
   /** The value's Java type as source text, used to declare locals. */
   readonly type: string;
+  readonly logic?: Logic;
+  /**
+   * The int form of a value javac materialized as `1`/`0`: written back as the
+   * condition itself, which is a boolean, so a use that wants an int has to get
+   * the ternary again (`array[c ? 1 : 0]`).
+   */
+  readonly asInt?: string;
+  /**
+   * The operands of an `lcmp`/`fcmp`/`dcmp`, which has no source form of its
+   * own: the comparison it feeds is what source wrote.
+   */
+  readonly compared?: { readonly left: Expr; readonly right: Expr };
 }
 
 function primary(text: string, type: string): Expr {
@@ -95,6 +123,138 @@ function binary(left: Expr, operator: string, right: Expr, prec: number, type: s
   // Every operator here is left-associative, so the right operand needs one
   // more level to keep `a - (b - c)` from losing its parentheses.
   return { text: `${at(left, prec)} ${operator} ${at(right, prec + 1)}`, prec, type };
+}
+
+/** `<`, `<=`, `>`, `>=`, `==` and `!=` bind at two different levels. */
+function comparePrec(op: string): number {
+  return op === "==" || op === "!=" ? PREC_EQ : PREC_REL;
+}
+
+function compare(left: Expr, op: string, right: Expr): Expr {
+  const prec = comparePrec(op);
+  return {
+    text: `${at(left, prec + 1)} ${op} ${at(right, prec + 1)}`,
+    prec,
+    type: "boolean",
+    logic: { kind: "compare", left, op, right },
+  };
+}
+
+function logical(kind: "and" | "or", left: Expr, right: Expr): Expr {
+  const prec = kind === "and" ? PREC_LAND : PREC_LOR;
+  return {
+    text: `${at(left, prec)} ${kind === "and" ? "&&" : "||"} ${at(right, prec + 1)}`,
+    prec,
+    type: "boolean",
+    logic: { kind, left, right },
+  };
+}
+
+function not(value: Expr): Expr {
+  return {
+    text: `!${at(value, PREC_UNARY)}`,
+    prec: PREC_UNARY,
+    type: "boolean",
+    logic: { kind: "not", value },
+  };
+}
+
+const FLIPPED: Record<string, string> = {
+  "==": "!=",
+  "!=": "==",
+  "<": ">=",
+  ">=": "<",
+  ">": "<=",
+  "<=": ">",
+};
+
+/**
+ * `!expr`, written the way source would have: a comparison flips its operator
+ * and a `&&`/`||` goes through De Morgan, because the bytecode always carries
+ * the negated form of what was written.
+ */
+function negate(expr: Expr): Expr {
+  const logic = expr.logic;
+  if (logic === undefined) return not(expr);
+  switch (logic.kind) {
+    case "compare":
+      return compare(logic.left, FLIPPED[logic.op]!, logic.right);
+    case "and":
+      return logical("or", negate(logic.left), negate(logic.right));
+    case "or":
+      return logical("and", negate(logic.left), negate(logic.right));
+    case "not":
+      return logic.value;
+  }
+}
+
+/** The wider of two numeric types, as binary numeric promotion picks it. */
+const NUMERIC_WIDTH = ["int", "long", "float", "double"];
+
+/** `1` and `0` in a position where the other arm proves a boolean was meant. */
+function asBoolean(expr: Expr): Expr {
+  if (expr.text === "1") return primary("true", "boolean");
+  if (expr.text === "0") return primary("false", "boolean");
+  return expr;
+}
+
+function ternary(condition: Expr, thenValue: Expr, elseValue: Expr): Expr | undefined {
+  let whenTrue = thenValue;
+  let whenFalse = elseValue;
+  if ((whenTrue.type === "boolean") !== (whenFalse.type === "boolean")) {
+    // One arm is a boolean and the other an int: either that int is the `1`/`0`
+    // a boolean was erased to, or the boolean is a condition javac materialized
+    // and the value really is a number, which is what `asInt` is for.
+    const boolean = whenTrue.type === "boolean" ? whenTrue : whenFalse;
+    const other = whenTrue.type === "boolean" ? whenFalse : whenTrue;
+    const asBool = asBoolean(other);
+    let replacement: Expr | undefined;
+    let replacesOther = true;
+    if (asBool !== other) {
+      replacement = asBool;
+    } else if (boolean.asInt !== undefined) {
+      replacement = { text: boolean.asInt, prec: PREC_TERNARY, type: "int" };
+      replacesOther = false;
+    }
+    if (replacement === undefined) return undefined; // a mix nothing can write
+    if ((whenTrue.type === "boolean") === replacesOther) whenFalse = replacement;
+    else whenTrue = replacement;
+  }
+  // `c ? true : x` and `c ? x : false` are how a short-circuit reads once its
+  // value is materialized; writing them back as `||`/`&&` is both shorter and
+  // what the source said.
+  if (whenTrue.text === "true") return logical("or", condition, whenFalse);
+  if (whenFalse.text === "false") return logical("and", condition, whenTrue);
+  if (whenTrue.text === "false") return logical("and", negate(condition), whenFalse);
+  if (whenFalse.text === "true") return logical("or", negate(condition), whenTrue);
+  const left = NUMERIC_WIDTH.indexOf(whenTrue.type);
+  const right = NUMERIC_WIDTH.indexOf(whenFalse.type);
+  const type =
+    whenTrue.type === whenFalse.type
+      ? whenTrue.type
+      : left >= 0 && right >= 0
+        ? NUMERIC_WIDTH[Math.max(left, right)]!
+        : whenTrue.type;
+  return {
+    text: `${at(condition, PREC_TERNARY + 1)} ? ${at(whenTrue, PREC_TERNARY)} : ${at(
+      whenFalse,
+      PREC_TERNARY,
+    )}`,
+    prec: PREC_TERNARY,
+    type,
+  };
+}
+
+/**
+ * The value of a branch whose arms are `1` and `0`: that is a boolean, and the
+ * condition is what source wrote - but the int form is kept for a use that
+ * wants a number back.
+ */
+function materializedBoolean(condition: Expr, thenValue: string): Expr {
+  return {
+    ...condition,
+    asInt: `${at(condition, PREC_TERNARY + 1)} ? ${thenValue} : ${thenValue === "1" ? "0" : "1"}`,
+  };
 }
 
 const BINARY_OPS: Record<string, { operator: string; prec: number }> = {
@@ -120,6 +280,16 @@ const PRIMITIVE_OF_PREFIX: Record<string, string> = {
   b: "byte",
   c: "char",
   s: "short",
+};
+
+/** The source operator a branch tests, keyed by the mnemonic's suffix. */
+const COMPARISONS: Record<string, string> = {
+  eq: "==",
+  ne: "!=",
+  lt: "<",
+  ge: ">=",
+  gt: ">",
+  le: "<=",
 };
 
 const CONVERSIONS: Record<string, string> = {
@@ -242,6 +412,9 @@ function constantExpr(pool: readonly (Constant | undefined)[], index: number, se
  * boolean and char to int constants, so the literal has to be written back.
  */
 function coerce(expr: Expr, target: string): string {
+  // A condition javac materialized as `1`/`0` reads as a boolean everywhere but
+  // where a number is what belongs.
+  if (expr.asInt !== undefined && target !== "boolean") return expr.asInt;
   if (expr.type !== "int" || !/^-?\d+$/.test(expr.text)) return expr.text;
   const value = Number(expr.text);
   if (target === "boolean" && (value === 0 || value === 1)) return value === 1 ? "true" : "false";
@@ -290,12 +463,21 @@ function readLocalVariables(code: Code, pool: readonly (Constant | undefined)[])
 /** The types javac erases to int in the bytecode, leaving only the use to say so. */
 const ERASED_TO_INT = ["boolean", "char", "byte", "short"];
 
+/** A statement already emitted, kept addressable so a retype can rewrite it. */
+interface Emitted {
+  readonly list: string[];
+  readonly index: number;
+  readonly value: Expr;
+}
+
 interface Local {
   name: string;
   type: string;
   declared: boolean;
-  /** Where the declaration and every assignment landed, so a retype can rewrite them. */
-  writes: { index: number; value: Expr }[];
+  /** Where the declaration landed; `inline` when it carries the first value. */
+  declaration: { list: string[]; index: number; inline: boolean } | undefined;
+  /** Every assignment, so a retype can rewrite them. */
+  writes: Emitted[];
   /** The debug-table row this name came from, when there is one. */
   origin: LocalEntry | undefined;
   /**
@@ -325,6 +507,175 @@ function returnType(descriptor: string): string {
   return descriptorType(descriptor, close + 1).text;
 }
 
+// --- the control-flow graph ----------------------------------------------------------
+
+// Phase 1.4 covers acyclic control flow only: every edge runs forward, so a
+// block's pc order is a topological order and one reverse pass computes the
+// post-dominators. A back edge is a loop, which is phase 1.5.
+
+/** The virtual block every `return`/`athrow` falls into, so a merge always exists. */
+const EXIT = -1;
+
+const CONDITIONAL_BRANCHES = new Set([
+  "ifeq",
+  "ifne",
+  "iflt",
+  "ifge",
+  "ifgt",
+  "ifle",
+  "if_icmpeq",
+  "if_icmpne",
+  "if_icmplt",
+  "if_icmpge",
+  "if_icmpgt",
+  "if_icmple",
+  "if_acmpeq",
+  "if_acmpne",
+  "ifnull",
+  "ifnonnull",
+]);
+
+function isGoto(mnemonic: string): boolean {
+  return mnemonic === "goto" || mnemonic === "goto_w";
+}
+
+function isBlockEnd(mnemonic: string): boolean {
+  return mnemonic === "athrow" || /^(?:[ilfda])?return$/.test(mnemonic);
+}
+
+/** A conditional branch, once the tests that belong with it are folded in. */
+interface Jump {
+  readonly condition: Expr;
+  readonly target: number;
+  readonly fallthrough: number;
+}
+
+interface Block {
+  readonly start: number;
+  readonly instructions: Instruction[];
+  readonly kind: "fall" | "conditional" | "goto" | "end";
+  /** A conditional's are `[fallthrough, target]`, in that order. */
+  readonly successors: number[];
+}
+
+function buildBlocks(instructions: readonly Instruction[]): Map<number, Block> {
+  const leaders = new Set<number>([instructions[0]?.pc ?? 0]);
+  for (const [index, instruction] of instructions.entries()) {
+    const { mnemonic } = instruction;
+    if (mnemonic === "tableswitch" || mnemonic === "lookupswitch") {
+      throw new NotDecompilable(`switch is not decompiled yet (${mnemonic})`);
+    }
+    // The subroutine opcodes: gone since Java 6, and their control flow is not
+    // expressible as a branch.
+    if (["jsr", "jsr_w", "ret", "ret_w"].includes(mnemonic)) {
+      throw new NotDecompilable(`unsupported instruction ${mnemonic}`);
+    }
+    const branch = CONDITIONAL_BRANCHES.has(mnemonic) || isGoto(mnemonic);
+    if (branch) leaders.add(instruction.arg);
+    if (branch || isBlockEnd(mnemonic)) {
+      const next = instructions[index + 1];
+      if (next) leaders.add(next.pc);
+    }
+  }
+  const blocks = new Map<number, Block>();
+  let current: Instruction[] = [];
+  let start = instructions[0]?.pc ?? 0;
+  const flush = (fallthrough: number | undefined): void => {
+    if (current.length === 0) return;
+    const last = current[current.length - 1]!;
+    const { mnemonic } = last;
+    let kind: Block["kind"] = "fall";
+    let successors: number[] = fallthrough === undefined ? [] : [fallthrough];
+    if (CONDITIONAL_BRANCHES.has(mnemonic)) {
+      if (fallthrough === undefined) throw new NotDecompilable("a branch runs off the end");
+      kind = "conditional";
+      successors = [fallthrough, last.arg];
+    } else if (isGoto(mnemonic)) {
+      kind = "goto";
+      successors = [last.arg];
+    } else if (isBlockEnd(mnemonic)) {
+      kind = "end";
+      successors = [];
+    } else if (fallthrough === undefined) {
+      throw new NotDecompilable("the code runs off the end of the method");
+    }
+    for (const successor of successors) {
+      if (successor <= start) throw new NotDecompilable("loops are not decompiled yet");
+    }
+    blocks.set(start, { start, instructions: current, kind, successors });
+  };
+  for (const instruction of instructions) {
+    if (leaders.has(instruction.pc) && current.length > 0) {
+      flush(instruction.pc);
+      current = [];
+      start = instruction.pc;
+    }
+    current.push(instruction);
+  }
+  flush(undefined);
+  for (const block of blocks.values()) {
+    for (const successor of block.successors) {
+      if (!blocks.has(successor)) throw new NotDecompilable("a branch lands mid-instruction");
+    }
+  }
+  return blocks;
+}
+
+/** Every block reachable from the entry, which is all the structuring may cover. */
+function reachableBlocks(blocks: Map<number, Block>, entry: number): Set<number> {
+  const seen = new Set<number>();
+  const queue = [entry];
+  while (queue.length > 0) {
+    const at = queue.pop()!;
+    if (seen.has(at) || !blocks.has(at)) continue;
+    seen.add(at);
+    queue.push(...blocks.get(at)!.successors);
+  }
+  return seen;
+}
+
+/**
+ * The immediate post-dominator of every block: the point where the two arms of
+ * a branch come back together, and so where the `if` it was written as ends.
+ * Blocks whose paths all leave the method map to EXIT.
+ */
+function postDominators(blocks: Map<number, Block>): Map<number, number> {
+  const starts = [...blocks.keys()].sort((a, b) => a - b);
+  const sets = new Map<number, Set<number>>();
+  for (const start of [...starts].reverse()) {
+    const block = blocks.get(start)!;
+    let shared: Set<number> | undefined;
+    for (const successor of block.successors.length === 0 ? [EXIT] : block.successors) {
+      const of = successor === EXIT ? new Set([EXIT]) : (sets.get(successor) ?? new Set([EXIT]));
+      shared = shared === undefined ? new Set(of) : new Set([...shared].filter(x => of.has(x)));
+    }
+    sets.set(start, new Set([start, ...(shared ?? [EXIT])]));
+  }
+  const immediate = new Map<number, number>();
+  for (const start of starts) {
+    const candidates = [...sets.get(start)!].filter(x => x !== start && x !== EXIT);
+    immediate.set(start, candidates.length === 0 ? EXIT : Math.min(...candidates));
+  }
+  return immediate;
+}
+
+/**
+ * Instructions a *condition* may be built from: no store, no call, nothing that
+ * is a statement. A block made only of these can be folded into the condition of
+ * the branch before it (`a && b`) or into a ternary without changing what runs.
+ */
+const PURE_MNEMONICS =
+  /^(?:nop|aconst_null|[ilfd]const_\w+|bipush|sipush|ldc\w*|[ilfda]load(?:_\d|_w)?|arraylength|[ilfdabcs]aload|[ilfd](?:add|sub|mul|div|rem|neg|shl|shr|ushr|and|or|xor)|[ilfd]2[ilfdbcs]|lcmp|[fd]cmp[lg]|getstatic|getfield|checkcast|instanceof|dup)$/;
+
+function isPureBlock(block: Block): boolean {
+  return block.instructions.every(
+    (instruction, index) =>
+      PURE_MNEMONICS.test(instruction.mnemonic) ||
+      (index === block.instructions.length - 1 &&
+        (CONDITIONAL_BRANCHES.has(instruction.mnemonic) || isGoto(instruction.mnemonic))),
+  );
+}
+
 // --- the method body -----------------------------------------------------------------
 
 /** Straight-line bytecode of one method, as Java statements. */
@@ -334,6 +685,21 @@ class BodyDecompiler {
   private readonly names = new Set<string>();
   private readonly byName = new Map<string, Local>();
   readonly statements: string[] = [];
+  /**
+   * Declarations of locals first stored inside a branch. Java scopes them to
+   * that branch, the bytecode does not, so they are declared up front and the
+   * store becomes an assignment; `methodSource` puts these first.
+   *
+   * ponytail: hoisting to the top of the method, not to the innermost block that
+   * encloses every use - that is the upgrade path if the output reads badly.
+   */
+  readonly hoisted: string[] = [];
+  /** Where statements are being appended right now: a branch's arm, or the body. */
+  private current: string[] = this.statements;
+  private depth = 0;
+  private blocks = new Map<number, Block>();
+  private followOf = new Map<number, number>();
+  private readonly visited = new Set<number>();
 
   constructor(
     private readonly classFile: ClassFile,
@@ -363,10 +729,14 @@ class BodyDecompiler {
       ERASED_TO_INT.includes(target)
     ) {
       local.type = target;
-      for (const write of local.writes) {
+      const declaration = local.declaration;
+      if (declaration !== undefined && !declaration.inline) {
+        declaration.list[declaration.index] = `${target} ${local.name};`;
+      }
+      for (const [index, write] of local.writes.entries()) {
         const assigned = coerce(write.value, target);
-        this.statements[write.index] =
-          write.index === local.writes[0]?.index
+        write.list[write.index] =
+          index === 0 && declaration?.inline === true
             ? `${target} ${local.name} = ${assigned};`
             : `${local.name} = ${assigned};`;
       }
@@ -374,13 +744,36 @@ class BodyDecompiler {
     return coerce(value, target);
   }
 
+  /** The statements `run` appends, as a nested block rather than the body. */
+  private capture(run: () => void): string[] {
+    const outer = this.current;
+    const captured: string[] = [];
+    this.current = captured;
+    this.depth++;
+    try {
+      run();
+    } finally {
+      this.current = outer;
+      this.depth--;
+    }
+    return captured;
+  }
+
   private push(expr: Expr): void {
     this.stack.push(expr);
   }
 
-  private pop(): Expr {
+  private popRaw(): Expr {
     const expr = this.stack.pop();
     if (!expr) throw new NotDecompilable("stack underflow");
+    return expr;
+  }
+
+  private pop(): Expr {
+    const expr = this.popRaw();
+    // An `lcmp` result has no source form of its own (`Long.compare` is a call,
+    // which is a later phase), so only the branch that follows may consume it.
+    if (expr.compared !== undefined) throw new NotDecompilable("a comparison outside a branch");
     return expr;
   }
 
@@ -427,6 +820,7 @@ class BodyDecompiler {
       type: sourceTypeText(declared, this.self),
       declared: false,
       origin: scoped,
+      declaration: undefined,
       authoritative: scoped?.type !== undefined && scoped.type !== "",
       writes: [],
     };
@@ -456,26 +850,345 @@ class BodyDecompiler {
   private store(slot: number, scopePc: number, value: Expr, declaredType: string): void {
     const local = this.local(slot, scopePc, declaredType, true);
     const text = this.coerceInto(value, local.type);
-    local.writes.push({ index: this.statements.length, value });
-    if (local.declared) {
-      this.statements.push(`${local.name} = ${text};`);
-    } else {
+    if (!local.declared) {
       local.declared = true;
-      this.statements.push(`${local.type} ${local.name} = ${text};`);
+      if (this.depth === 0) {
+        local.declaration = { list: this.current, index: this.current.length, inline: true };
+        local.writes.push({ list: this.current, index: this.current.length, value });
+        this.current.push(`${local.type} ${local.name} = ${text};`);
+        return;
+      }
+      local.declaration = { list: this.hoisted, index: this.hoisted.length, inline: false };
+      this.hoisted.push(`${local.type} ${local.name};`);
     }
+    local.writes.push({ list: this.current, index: this.current.length, value });
+    this.current.push(`${local.name} = ${text};`);
   }
 
   run(instructions: readonly Instruction[]): void {
+    this.blocks = buildBlocks(instructions);
+    this.followOf = postDominators(this.blocks);
+    const entry = instructions[0]?.pc ?? 0;
+    this.structure(entry, EXIT);
+    if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
+    // A block that was never entered would silently drop its statements, and one
+    // entered twice would duplicate them: either means the layout is not the
+    // nest of `if`s this phase reconstructs.
+    for (const start of reachableBlocks(this.blocks, entry)) {
+      if (!this.visited.has(start)) throw new NotDecompilable("unstructured control flow");
+    }
+  }
+
+  /** Statements for the blocks from `entry` up to (not including) `stop`. */
+  private structure(entry: number, stop: number): void {
+    let at = entry;
+    while (at !== stop && at !== EXIT) {
+      const block = this.blocks.get(at);
+      if (block === undefined) throw new NotDecompilable("a branch lands outside the method");
+      if (this.visited.has(at)) throw new NotDecompilable("unstructured control flow");
+      this.visited.add(at);
+      const terminator = block.instructions[block.instructions.length - 1]!;
+      const isBranch = block.kind === "conditional" || block.kind === "goto";
+      const body = isBranch ? block.instructions.slice(0, -1) : block.instructions;
+      this.runInstructions(body, terminator.pc);
+      if (block.kind === "end") return;
+      if (block.kind !== "conditional") {
+        at = block.successors[0]!;
+        continue;
+      }
+      at = this.conditional(block, stop);
+    }
+  }
+
+  /**
+   * One `if`, from the branch that ends `block`. Returns where the statement
+   * after it begins.
+   */
+  private conditional(block: Block, stop: number): number {
+    const taken: number[] = [];
+    const jump = this.jumpConditionOf(block, taken);
+    for (const start of taken) this.visited.add(start);
+    // javac emits the arms in source order, so the `then` is whichever comes
+    // first; the branch is written to select it.
+    const targetIsThen = jump.target < jump.fallthrough;
+    let condition = targetIsThen ? jump.condition : negate(jump.condition);
+    let whenTrue = targetIsThen ? jump.target : jump.fallthrough;
+    let whenFalse = targetIsThen ? jump.fallthrough : jump.target;
+    const follow = this.followOf.get(block.start) ?? EXIT;
+
+    if (follow !== EXIT) {
+      const value = this.tryTernary(condition, whenTrue, whenFalse, follow);
+      if (value !== undefined) {
+        this.push(value);
+        return follow;
+      }
+    }
+    // `if (c) return x;` has no merge point: the arm that leaves the method is
+    // the whole statement, and the rest of the body follows it at the same
+    // level, not inside an `else`.
+    if (follow === EXIT) {
+      if (!this.alwaysExits(whenTrue) && this.alwaysExits(whenFalse)) {
+        condition = negate(condition);
+        [whenTrue, whenFalse] = [whenFalse, whenTrue];
+      }
+      if (this.alwaysExits(whenTrue)) {
+        const exiting = this.capture(() => this.structure(whenTrue, EXIT));
+        this.current.push(`if (${condition.text}) {`, ...exiting, "}");
+        return whenFalse;
+      }
+    }
+    // With no merge of their own the arms run to the end of the region they sit
+    // in, which is the enclosing `if`'s follow, not the end of the method.
+    const stopAt = follow === EXIT ? stop : follow;
+    const thenStatements = this.capture(() => this.structure(whenTrue, stopAt));
+    const elseStatements = this.capture(() => this.structure(whenFalse, stopAt));
+    if (thenStatements.length === 0 && elseStatements.length > 0) {
+      this.current.push(`if (${negate(condition).text}) {`, ...elseStatements, "}");
+      return stopAt;
+    }
+    this.current.push(`if (${condition.text}) {`, ...thenStatements);
+    if (elseStatements.length > 0) this.current.push("} else {", ...elseStatements);
+    this.current.push("}");
+    return stopAt;
+  }
+
+  /**
+   * The condition under which `block`'s branch is taken, folding a
+   * single-predecessor condition block behind it into a `&&`/`||`: javac lays a
+   * short-circuit out as two branches to the same place.
+   */
+  /**
+   * The condition under which `block`'s branch is taken, with any further tests
+   * that belong to the same source condition folded in: javac lays a
+   * short-circuit out as a chain of branches that share their outcomes. The
+   * blocks folded away are appended to `taken`, for the caller to account for.
+   */
+  private jumpConditionOf(block: Block, taken: number[], folded?: Set<number>): Jump {
+    const inChain = folded ?? new Set<number>([block.start]);
+    let condition = this.branchExpr(block.instructions[block.instructions.length - 1]!);
+    let target = block.successors[1]!;
+    let fallthrough = block.successors[0]!;
+    for (;;) {
+      let merged = false;
+      // The shortest fold first: a test that carries its own chain may not line
+      // up with this one, while the single branch at its head does.
+      for (const deep of [false, true]) {
+        // A test on the *fallthrough* path shares an outcome with this one:
+        // `a || b` when both jump to the same place, `a || !b` when the second
+        // falls into where the first jumped.
+        const onFall = this.chainFrom(fallthrough, taken, inChain, deep);
+        if (onFall !== undefined) {
+          if (onFall.target === target || onFall.fallthrough === target) {
+            const jumpsAway = onFall.target === target;
+            condition = logical(
+              "or",
+              condition,
+              jumpsAway ? onFall.condition : negate(onFall.condition),
+            );
+            fallthrough = jumpsAway ? onFall.fallthrough : onFall.target;
+            merged = true;
+            break;
+          }
+          onFall.undo();
+        }
+        // A test on the *target* path: landing on the fallthrough now means
+        // either this branch was not taken, or the second one sent us there.
+        const onTarget = this.chainFrom(target, taken, inChain, deep);
+        if (onTarget !== undefined) {
+          if (onTarget.target === fallthrough || onTarget.fallthrough === fallthrough) {
+            const jumpsBack = onTarget.target === fallthrough;
+            condition = logical(
+              "or",
+              negate(condition),
+              jumpsBack ? onTarget.condition : negate(onTarget.condition),
+            );
+            target = fallthrough;
+            fallthrough = jumpsBack ? onTarget.fallthrough : onTarget.target;
+            merged = true;
+            break;
+          }
+          onTarget.undo();
+        }
+      }
+      if (!merged) return { condition, target, fallthrough };
+    }
+  }
+
+  /**
+   * The branch `start` amounts to once its own chain is folded, or nothing when
+   * it is not a test that belongs to this condition. Speculative: `undo` puts
+   * everything back when the outcomes turn out not to line up.
+   */
+  private chainFrom(
+    start: number,
+    taken: number[],
+    folded: Set<number>,
+    deep: boolean,
+  ): (Jump & { undo: () => void }) | undefined {
+    const next = this.blocks.get(start);
+    if (next === undefined || next.kind !== "conditional" || !isPureBlock(next)) return undefined;
+    if (folded.has(start) || this.visited.has(start)) return undefined;
+    // Nothing outside the chain may reach it, or folding would skip a path in.
+    if (this.predecessorsOf(start, folded) !== 0) return undefined;
+    const stackDepth = this.stack.length;
+    const takenCount = taken.length;
+    const foldedBefore = [...folded];
+    folded.add(start);
+    taken.push(start);
+    const last = next.instructions[next.instructions.length - 1]!;
+    this.runInstructions(next.instructions.slice(0, -1), last.pc);
+    const jump = deep
+      ? this.jumpConditionOf(next, taken, folded)
+      : {
+          condition: this.branchExpr(last),
+          target: next.successors[1]!,
+          fallthrough: next.successors[0]!,
+        };
+    return {
+      ...jump,
+      undo: () => {
+        this.stack.length = stackDepth;
+        taken.length = takenCount;
+        folded.clear();
+        for (const block of foldedBefore) folded.add(block);
+      },
+    };
+  }
+
+  private predecessorsOf(start: number, ignore: ReadonlySet<number>): number {
+    let count = 0;
+    for (const block of this.blocks.values()) {
+      if (!ignore.has(block.start) && block.successors.includes(start)) count++;
+    }
+    return count;
+  }
+
+  /** The source condition a branch instruction tests, with its operands popped. */
+  private branchExpr(instruction: Instruction): Expr {
+    const { mnemonic } = instruction;
+    if (mnemonic === "ifnull" || mnemonic === "ifnonnull") {
+      return compare(
+        this.pop(),
+        mnemonic === "ifnull" ? "==" : "!=",
+        primary("null", "java.lang.Object"),
+      );
+    }
+    if (mnemonic === "if_acmpeq" || mnemonic === "if_acmpne") {
+      const right = this.pop();
+      return compare(this.pop(), mnemonic === "if_acmpeq" ? "==" : "!=", right);
+    }
+    const op = COMPARISONS[mnemonic.replace("if_icmp", "if").replace(/^if/, "")];
+    if (op === undefined) throw new NotDecompilable(`unsupported branch ${mnemonic}`);
+    if (mnemonic.startsWith("if_icmp")) {
+      const right = this.pop();
+      return compare(this.pop(), op, right);
+    }
+    const value = this.popRaw();
+    // `lcmp`/`fcmpl`/`dcmpg` only exist to feed one of these: what source wrote
+    // is the comparison of their two operands.
+    if (value.compared !== undefined) {
+      return compare(value.compared.left, op, value.compared.right);
+    }
+    if (value.type === "boolean" && (op === "==" || op === "!=")) {
+      return op === "!=" ? value : negate(value);
+    }
+    return compare(value, op, intLiteral(0));
+  }
+
+  /** True when every path from `start` leaves the method. */
+  private alwaysExits(start: number): boolean {
+    const block = this.blocks.get(start);
+    if (block === undefined) return false;
+    if (block.kind === "end") return true;
+    return block.successors.every(successor => this.alwaysExits(successor));
+  }
+
+  /**
+   * The two arms of a branch as `condition ? a : b`, when both are a single
+   * side-effect-free block that leaves one value behind - which is how javac
+   * writes a conditional expression, and how a `boolean` ends up in a variable.
+   */
+  private tryTernary(
+    condition: Expr,
+    whenTrue: number,
+    whenFalse: number,
+    follow: number,
+  ): Expr | undefined {
+    const consumed: number[] = [];
+    const before = this.stack.length;
+    const value = this.armValues(condition, whenTrue, whenFalse, follow, consumed);
+    if (value === undefined) {
+      this.stack.length = before;
+      return undefined;
+    }
+    for (const start of consumed) this.visited.add(start);
+    return value;
+  }
+
+  private armValues(
+    condition: Expr,
+    whenTrue: number,
+    whenFalse: number,
+    follow: number,
+    consumed: number[],
+  ): Expr | undefined {
+    const thenValue = this.valueOfRegion(whenTrue, follow, consumed);
+    const elseValue =
+      thenValue === undefined ? undefined : this.valueOfRegion(whenFalse, follow, consumed);
+    if (thenValue === undefined || elseValue === undefined) return undefined;
+    // `c ? 1 : 0` is a boolean that javac erased to an int; source wrote the
+    // condition itself.
+    if (thenValue.text === "1" && elseValue.text === "0") {
+      return materializedBoolean(condition, "1");
+    }
+    if (thenValue.text === "0" && elseValue.text === "1") {
+      return materializedBoolean(negate(condition), "0");
+    }
+    return ternary(condition, thenValue, elseValue);
+  }
+
+  /**
+   * The blocks from `start` to `follow` as a single value: either one
+   * side-effect-free block that leaves it on the stack, or - because a
+   * short-circuit nests them - another branch whose arms are values themselves.
+   */
+  private valueOfRegion(start: number, follow: number, consumed: number[]): Expr | undefined {
+    const block = this.blocks.get(start);
+    if (block === undefined || !isPureBlock(block)) return undefined;
+    // A block already emitted as a statement cannot also be a value; one that
+    // two arms of the same expression share (the merge of a `||`) is fine - it
+    // has no side effects, so evaluating it twice is the same value twice.
+    if (this.visited.has(start)) return undefined;
+    const terminator = block.instructions[block.instructions.length - 1]!;
+    if (block.kind === "conditional") {
+      if ((this.followOf.get(start) ?? EXIT) !== follow) return undefined;
+      this.runInstructions(block.instructions.slice(0, -1), terminator.pc);
+      const jump = this.jumpConditionOf(block, consumed);
+      consumed.push(start);
+      const targetIsThen = jump.target < jump.fallthrough;
+      return this.armValues(
+        targetIsThen ? jump.condition : negate(jump.condition),
+        targetIsThen ? jump.target : jump.fallthrough,
+        targetIsThen ? jump.fallthrough : jump.target,
+        follow,
+        consumed,
+      );
+    }
+    if (block.successors.length !== 1 || block.successors[0] !== follow) return undefined;
+    const before = this.stack.length;
+    const body = block.kind === "goto" ? block.instructions.slice(0, -1) : block.instructions;
+    this.runInstructions(body, terminator.pc);
+    if (this.stack.length !== before + 1) return undefined;
+    consumed.push(start);
+    return this.pop();
+  }
+
+  private runInstructions(instructions: readonly Instruction[], endPc: number): void {
     for (const [index, instruction] of instructions.entries()) {
       // A store's variable comes into scope after the store, so the debug table
       // is searched at the next instruction's pc, not the store's own.
-      this.step(instruction, instructions[index + 1]?.pc ?? instruction.pc + 1);
-      if (instruction.mnemonic.endsWith("return") && index !== instructions.length - 1) {
-        // Code after a return only exists because something branches over it.
-        throw new NotDecompilable("unreachable code");
-      }
+      this.step(instruction, instructions[index + 1]?.pc ?? endPc);
     }
-    if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
   }
 
   private step(instruction: Instruction, nextPc: number): void {
@@ -520,16 +1233,21 @@ class BodyDecompiler {
         throw new NotDecompilable("the method assigns to `this`");
       }
       const value = this.pop();
-      const fallback = base === "astore" ? value.type : PRIMITIVE_OF_PREFIX[base[0]!]!;
+      // `istore` is what a boolean, char, byte and short are stored with too;
+      // when the value knows which one it is, that is the variable's type.
+      const fallback =
+        base === "astore" || ERASED_TO_INT.includes(value.type)
+          ? value.type
+          : PRIMITIVE_OF_PREFIX[base[0]!]!;
       return this.store(this.slotOf(instruction), nextPc, value, fallback);
     }
     if (base === "iinc") {
       const local = this.local(instruction.arg, pc, "int");
       const delta = instruction.arg2;
-      if (delta === 1) this.statements.push(`${local.name}++;`);
-      else if (delta === -1) this.statements.push(`${local.name}--;`);
-      else if (delta < 0) this.statements.push(`${local.name} -= ${-delta};`);
-      else this.statements.push(`${local.name} += ${delta};`);
+      if (delta === 1) this.current.push(`${local.name}++;`);
+      else if (delta === -1) this.current.push(`${local.name}--;`);
+      else if (delta < 0) this.current.push(`${local.name} -= ${-delta};`);
+      else this.current.push(`${local.name} += ${delta};`);
       return;
     }
 
@@ -579,7 +1297,7 @@ class BodyDecompiler {
         mnemonic === "putstatic"
           ? this.staticRef(field.owner, field.name)
           : `${at(this.pop(), PREC_PRIMARY)}.${field.name}`;
-      this.statements.push(`${target} = ${this.coerceInto(value, type)};`);
+      this.current.push(`${target} = ${this.coerceInto(value, type)};`);
       return;
     }
 
@@ -593,7 +1311,7 @@ class BodyDecompiler {
       const element = array.type.endsWith("[]")
         ? array.type.slice(0, -2)
         : PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
-      return this.push(primary(`${at(array, PREC_PRIMARY)}[${index.text}]`, element));
+      return this.push(primary(`${at(array, PREC_PRIMARY)}[${coerce(index, "int")}]`, element));
     }
     if (/^[ilfdabcs]astore$/.test(mnemonic)) {
       const value = this.pop();
@@ -602,8 +1320,8 @@ class BodyDecompiler {
       const element = array.type.endsWith("[]")
         ? array.type.slice(0, -2)
         : PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
-      this.statements.push(
-        `${at(array, PREC_PRIMARY)}[${index.text}] = ${this.coerceInto(value, element)};`,
+      this.current.push(
+        `${at(array, PREC_PRIMARY)}[${coerce(index, "int")}] = ${this.coerceInto(value, element)};`,
       );
       return;
     }
@@ -670,12 +1388,13 @@ class BodyDecompiler {
       }
       if (this.pop().text !== "this")
         throw new NotDecompilable("constructor call on another object");
-      if (this.statements.length > 0) throw new NotDecompilable("constructor call is not first");
+      if (this.statements.length > 0 || this.depth > 0)
+        throw new NotDecompilable("constructor call is not first");
       // javac writes the implicit `super()` into every constructor; source does
       // not, and re-emitting puts it back. An enum constructor's `super(name,
       // ordinal)` is generated too - and writing it is a compile error.
       if (isSuper && (args.length === 0 || isEnumDeclaration(this.classFile))) return;
-      this.statements.push(`${isSuper ? "super" : "this"}(${args.join(", ")});`);
+      this.current.push(`${isSuper ? "super" : "this"}(${args.join(", ")});`);
       return;
     }
 
@@ -696,13 +1415,25 @@ class BodyDecompiler {
       return;
     }
 
+    // Comparisons. `lcmp` and the float ones have no source form: they only
+    // exist to feed the branch that follows, which is what was written.
+    if (mnemonic === "lcmp" || /^[fd]cmp[lg]$/.test(mnemonic)) {
+      const right = this.pop();
+      const left = this.pop();
+      return this.push({ text: "", prec: PREC_PRIMARY, type: "int", compared: { left, right } });
+    }
+
     // Returns.
+    if (mnemonic === "athrow") {
+      this.current.push(`throw ${this.pop().text};`);
+      return;
+    }
     if (mnemonic === "return") {
-      this.statements.push("return;");
+      this.current.push("return;");
       return;
     }
     if (/^[ilfda]return$/.test(mnemonic)) {
-      this.statements.push(`return ${this.coerceInto(this.pop(), this.methodReturnType)};`);
+      this.current.push(`return ${this.coerceInto(this.pop(), this.methodReturnType)};`);
       return;
     }
 
@@ -788,6 +1519,7 @@ function buildLocals(
       type: sourceTypeText(declared, self),
       declared: true,
       origin: scoped,
+      declaration: undefined,
       authoritative: true, // the descriptor says what a parameter's type is
       writes: [],
     });
@@ -959,7 +1691,7 @@ function methodSource(method: Member, classFile: ClassFile): MethodSource {
   try {
     if (code.exceptions.length > 0) throw new NotDecompilable("the method catches exceptions");
     decompiler.run(instructions);
-    body = decompiler.statements;
+    body = [...decompiler.hoisted, ...decompiler.statements];
     // Every void method ends in a `return` javac inserted; source does not.
     if (body[body.length - 1] === "return;") body = body.slice(0, -1);
   } catch (e) {
