@@ -463,9 +463,22 @@ function readLocalVariables(code: Code, pool: readonly (Constant | undefined)[])
 /** The types javac erases to int in the bytecode, leaving only the use to say so. */
 const ERASED_TO_INT = ["boolean", "char", "byte", "short"];
 
+/**
+ * A statement, or the body of a nested block. The tree is flattened only once
+ * the method is done, so a retype can still reach a statement that has already
+ * been placed inside an `if`.
+ */
+type Stmt = string | Stmt[];
+
+function flattenStatements(statements: readonly Stmt[]): string[] {
+  return statements.flatMap(statement =>
+    typeof statement === "string" ? [statement] : flattenStatements(statement),
+  );
+}
+
 /** A statement already emitted, kept addressable so a retype can rewrite it. */
 interface Emitted {
-  readonly list: string[];
+  readonly list: Stmt[];
   readonly index: number;
   readonly value: Expr;
 }
@@ -475,9 +488,11 @@ interface Local {
   type: string;
   declared: boolean;
   /** Where the declaration landed; `inline` when it carries the first value. */
-  declaration: { list: string[]; index: number; inline: boolean } | undefined;
+  declaration: { list: Stmt[]; index: number; inline: boolean } | undefined;
   /** Every assignment, so a retype can rewrite them. */
   writes: Emitted[];
+  /** The blocks that store to it, which is what says whether a read is unambiguous. */
+  readonly storeBlocks: Set<number>;
   /** The debug-table row this name came from, when there is one. */
   origin: LocalEntry | undefined;
   /**
@@ -667,6 +682,16 @@ function postDominators(blocks: Map<number, Block>): Map<number, number> {
 const PURE_MNEMONICS =
   /^(?:nop|aconst_null|[ilfd]const_\w+|bipush|sipush|ldc\w*|[ilfda]load(?:_\d|_w)?|arraylength|[ilfdabcs]aload|[ilfd](?:add|sub|mul|div|rem|neg|shl|shr|ushr|and|or|xor)|[ilfd]2[ilfdbcs]|lcmp|[fd]cmp[lg]|getstatic|getfield|checkcast|instanceof|dup)$/;
 
+/**
+ * Where the code after `block`'s body begins - the pc a store at the end of it
+ * has to look its variable's scope up at. A branch ends at its terminator; a
+ * block that falls through ends where the next one starts.
+ */
+function endOf(block: Block): number {
+  if (block.kind === "fall") return block.successors[0]!;
+  return block.instructions[block.instructions.length - 1]!.pc;
+}
+
 function isPureBlock(block: Block): boolean {
   return block.instructions.every(
     (instruction, index) =>
@@ -684,7 +709,7 @@ class BodyDecompiler {
   /** Every local name handed out so far, so a reused slot cannot shadow one. */
   private readonly names = new Set<string>();
   private readonly byName = new Map<string, Local>();
-  readonly statements: string[] = [];
+  readonly statements: Stmt[] = [];
   /**
    * Declarations of locals first stored inside a branch. Java scopes them to
    * that branch, the bytecode does not, so they are declared up front and the
@@ -695,9 +720,12 @@ class BodyDecompiler {
    */
   readonly hoisted: string[] = [];
   /** Where statements are being appended right now: a branch's arm, or the body. */
-  private current: string[] = this.statements;
+  private current: Stmt[] = this.statements;
   private depth = 0;
   private blocks = new Map<number, Block>();
+  private entryPc = 0;
+  /** The block whose instructions are running, for reasoning about reads. */
+  private currentBlock = 0;
   private followOf = new Map<number, number>();
   private readonly visited = new Set<number>();
 
@@ -728,26 +756,31 @@ class BodyDecompiler {
       local.type === "int" &&
       ERASED_TO_INT.includes(target)
     ) {
-      local.type = target;
-      const declaration = local.declaration;
-      if (declaration !== undefined && !declaration.inline) {
-        declaration.list[declaration.index] = `${target} ${local.name};`;
-      }
-      for (const [index, write] of local.writes.entries()) {
-        const assigned = coerce(write.value, target);
-        write.list[write.index] =
-          index === 0 && declaration?.inline === true
-            ? `${target} ${local.name} = ${assigned};`
-            : `${local.name} = ${assigned};`;
-      }
+      this.retype(local, target);
     }
     return coerce(value, target);
   }
 
+  /** Give `local` a narrower type, rewriting its declaration and assignments. */
+  private retype(local: Local, target: string): void {
+    local.type = target;
+    const declaration = local.declaration;
+    if (declaration !== undefined && !declaration.inline) {
+      declaration.list[declaration.index] = `${target} ${local.name};`;
+    }
+    for (const [index, write] of local.writes.entries()) {
+      const assigned = coerce(write.value, target);
+      write.list[write.index] =
+        index === 0 && declaration?.inline === true
+          ? `${target} ${local.name} = ${assigned};`
+          : `${local.name} = ${assigned};`;
+    }
+  }
+
   /** The statements `run` appends, as a nested block rather than the body. */
-  private capture(run: () => void): string[] {
+  private capture(run: () => void): Stmt[] {
     const outer = this.current;
-    const captured: string[] = [];
+    const captured: Stmt[] = [];
     this.current = captured;
     this.depth++;
     try {
@@ -804,8 +837,28 @@ class BodyDecompiler {
     const existing = this.locals.get(slot);
     if (existing) {
       if (scoped !== undefined) {
-        if (existing.origin === scoped) return existing;
+        // javac writes one row per scope range, so the same variable can appear
+        // twice for one slot (once per arm of an `if`); the name and type are
+        // what say it is the same one.
+        const origin = existing.origin;
+        if (
+          origin === scoped ||
+          (origin !== undefined && origin.name === scoped.name && origin.type === scoped.type)
+        ) {
+          return existing;
+        }
       } else if (!isStore || existing.authoritative || existing.type === fallbackType) {
+        // Without a debug table a slot is only a variable as long as one
+        // definition explains every path to here: two arms that stored
+        // differently-typed values were split into two variables, and which one
+        // this reads is not something the bytecode still says.
+        if (
+          !isStore &&
+          existing.storeBlocks.size > 0 &&
+          this.reachesAvoiding(this.currentBlock, existing.storeBlocks)
+        ) {
+          throw new NotDecompilable(`local ${slot} is written in more than one branch`);
+        }
         return existing;
       }
     }
@@ -823,6 +876,7 @@ class BodyDecompiler {
       declaration: undefined,
       authoritative: scoped?.type !== undefined && scoped.type !== "",
       writes: [],
+      storeBlocks: new Set(),
     };
     this.byName.set(local.name, local);
     this.locals.set(slot, local);
@@ -849,6 +903,7 @@ class BodyDecompiler {
 
   private store(slot: number, scopePc: number, value: Expr, declaredType: string): void {
     const local = this.local(slot, scopePc, declaredType, true);
+    local.storeBlocks.add(this.currentBlock);
     const text = this.coerceInto(value, local.type);
     if (!local.declared) {
       local.declared = true;
@@ -869,6 +924,8 @@ class BodyDecompiler {
     this.blocks = buildBlocks(instructions);
     this.followOf = postDominators(this.blocks);
     const entry = instructions[0]?.pc ?? 0;
+    this.entryPc = entry;
+    this.currentBlock = entry;
     this.structure(entry, EXIT);
     if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
     // A block that was never entered would silently drop its statements, and one
@@ -887,10 +944,9 @@ class BodyDecompiler {
       if (block === undefined) throw new NotDecompilable("a branch lands outside the method");
       if (this.visited.has(at)) throw new NotDecompilable("unstructured control flow");
       this.visited.add(at);
-      const terminator = block.instructions[block.instructions.length - 1]!;
       const isBranch = block.kind === "conditional" || block.kind === "goto";
       const body = isBranch ? block.instructions.slice(0, -1) : block.instructions;
-      this.runInstructions(body, terminator.pc);
+      this.runInstructions(body, endOf(block), block.start);
       if (block.kind === "end") return;
       if (block.kind !== "conditional") {
         at = block.successors[0]!;
@@ -933,7 +989,7 @@ class BodyDecompiler {
       }
       if (this.alwaysExits(whenTrue)) {
         const exiting = this.capture(() => this.structure(whenTrue, EXIT));
-        this.current.push(`if (${condition.text}) {`, ...exiting, "}");
+        this.current.push(`if (${condition.text}) {`, exiting, "}");
         return whenFalse;
       }
     }
@@ -943,11 +999,11 @@ class BodyDecompiler {
     const thenStatements = this.capture(() => this.structure(whenTrue, stopAt));
     const elseStatements = this.capture(() => this.structure(whenFalse, stopAt));
     if (thenStatements.length === 0 && elseStatements.length > 0) {
-      this.current.push(`if (${negate(condition).text}) {`, ...elseStatements, "}");
+      this.current.push(`if (${negate(condition).text}) {`, elseStatements, "}");
       return stopAt;
     }
-    this.current.push(`if (${condition.text}) {`, ...thenStatements);
-    if (elseStatements.length > 0) this.current.push("} else {", ...elseStatements);
+    this.current.push(`if (${condition.text}) {`, thenStatements);
+    if (elseStatements.length > 0) this.current.push("} else {", elseStatements);
     this.current.push("}");
     return stopAt;
   }
@@ -1036,7 +1092,7 @@ class BodyDecompiler {
     folded.add(start);
     taken.push(start);
     const last = next.instructions[next.instructions.length - 1]!;
-    this.runInstructions(next.instructions.slice(0, -1), last.pc);
+    this.runInstructions(next.instructions.slice(0, -1), last.pc, start);
     const jump = deep
       ? this.jumpConditionOf(next, taken, folded)
       : {
@@ -1162,7 +1218,7 @@ class BodyDecompiler {
     const terminator = block.instructions[block.instructions.length - 1]!;
     if (block.kind === "conditional") {
       if ((this.followOf.get(start) ?? EXIT) !== follow) return undefined;
-      this.runInstructions(block.instructions.slice(0, -1), terminator.pc);
+      this.runInstructions(block.instructions.slice(0, -1), terminator.pc, start);
       const jump = this.jumpConditionOf(block, consumed);
       consumed.push(start);
       const targetIsThen = jump.target < jump.fallthrough;
@@ -1177,13 +1233,44 @@ class BodyDecompiler {
     if (block.successors.length !== 1 || block.successors[0] !== follow) return undefined;
     const before = this.stack.length;
     const body = block.kind === "goto" ? block.instructions.slice(0, -1) : block.instructions;
-    this.runInstructions(body, terminator.pc);
+    this.runInstructions(body, endOf(block), start);
     if (this.stack.length !== before + 1) return undefined;
     consumed.push(start);
     return this.pop();
   }
 
-  private runInstructions(instructions: readonly Instruction[], endPc: number): void {
+  /** True when a path from the entry reaches `target` without passing a store. */
+  private reachesAvoiding(target: number, stores: ReadonlySet<number>): boolean {
+    // A store in the reading block itself comes first: the read is what follows
+    // it, so that path is covered.
+    if (stores.has(target)) return false;
+    const seen = new Set<number>();
+    const queue = [this.entryPc];
+    while (queue.length > 0) {
+      const at = queue.pop()!;
+      if (seen.has(at) || stores.has(at) || !this.blocks.has(at)) continue;
+      if (at === target) return true;
+      seen.add(at);
+      queue.push(...this.blocks.get(at)!.successors);
+    }
+    return false;
+  }
+
+  private runInstructions(
+    instructions: readonly Instruction[],
+    endPc: number,
+    blockStart = this.currentBlock,
+  ): void {
+    const outer = this.currentBlock;
+    this.currentBlock = blockStart;
+    try {
+      this.runSteps(instructions, endPc);
+    } finally {
+      this.currentBlock = outer;
+    }
+  }
+
+  private runSteps(instructions: readonly Instruction[], endPc: number): void {
     for (const [index, instruction] of instructions.entries()) {
       // A store's variable comes into scope after the store, so the debug table
       // is searched at the next instruction's pc, not the store's own.
@@ -1522,6 +1609,7 @@ function buildLocals(
       declaration: undefined,
       authoritative: true, // the descriptor says what a parameter's type is
       writes: [],
+      storeBlocks: new Set(),
     });
   });
   return locals;
@@ -1691,7 +1779,7 @@ function methodSource(method: Member, classFile: ClassFile): MethodSource {
   try {
     if (code.exceptions.length > 0) throw new NotDecompilable("the method catches exceptions");
     decompiler.run(instructions);
-    body = [...decompiler.hoisted, ...decompiler.statements];
+    body = [...decompiler.hoisted, ...flattenStatements(decompiler.statements)];
     // Every void method ends in a `return` javac inserted; source does not.
     if (body[body.length - 1] === "return;") body = body.slice(0, -1);
   } catch (e) {
@@ -1702,7 +1790,7 @@ function methodSource(method: Member, classFile: ClassFile): MethodSource {
     // constructor.
     const reached = decompiler.statements[0];
     const chained =
-      reached !== undefined && /^(?:super|this)\(/.test(reached)
+      typeof reached === "string" && /^(?:super|this)\(/.test(reached)
         ? reached
         : method.name === "<init>"
           ? chainCallStub(instructions, classFile)

@@ -456,6 +456,17 @@ const RECONSTRUCTIONS: {
     selfContained: true,
   },
   {
+    name: "Retype",
+    // Only the *use* says the slot is a boolean, and the use comes after the
+    // branch the assignments sit in - so the rewrite has to reach into it.
+    source:
+      "class Retype { static boolean f(int a) { boolean b; if (a > 0) { b = true; }" +
+      " else { b = false; } return b; } }",
+    expect: ["boolean var1;", "var1 = true;", "var1 = false;"],
+    reject: ["var1 = 1;", "var1 = 0;"],
+    selfContained: true,
+  },
+  {
     name: "Loop",
     // Phase 1.5; until then it has to say so rather than produce something wrong.
     source:
@@ -576,6 +587,30 @@ test("keeps both debug-table names when a slot is reused", () => {
   const source = decompileToSource(emitClass("Reuse", REUSED_SLOT, true));
   expect(source).toContain("int a = n + 1;");
   expect(source).toContain("long b = (long) n * 2L;");
+});
+
+// The two arms store to the same slot with the same opcode but differently
+// typed values, so without a debug table there is nothing left to say whether
+// that is one variable or two - and guessing would produce code that lies.
+const AMBIGUOUS =
+  "class Amb { static boolean f(boolean c, int x) { boolean b;" +
+  " if (c) { b = true; } else { b = x > 1; } return b; } }";
+
+test("says so when a slot's value could come from either branch", () => {
+  const source = decompileToSource(emitClass("Amb", AMBIGUOUS));
+  expect(source).toContain("cappu: local 2 is written in more than one branch");
+});
+
+test("reads one variable when the debug table scopes it per branch", () => {
+  // javac (and our emitter with -g) writes a LocalVariableTable row per scope
+  // range, so one variable can appear once per arm; name and type say it is one.
+  const source = decompileToSource(emitClass("Amb", AMBIGUOUS, true));
+  expect(source).toContain("boolean b;");
+  expect(source).toContain("b = true;");
+  expect(source).toContain("b = x > 1;");
+  expect(source).toContain("return b;");
+  expect(source).not.toContain("b_2");
+  expect({ Amb: diagnosticsOf("Amb", source) }).toEqual({ Amb: [] });
 });
 
 const DEBUGGY = "class Debuggy { int f(int seed) { int doubled = seed * 2; return doubled; } }";
