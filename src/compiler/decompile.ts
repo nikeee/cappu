@@ -1,10 +1,11 @@
-// `cappu decompile`, phases 1.3 to 1.5 (nikeee/cappu#43): reconstruct Java
+// `cappu decompile`, phases 1.3 to 1.7 (nikeee/cappu#43): reconstruct Java
 // source from bytecode. A symbolic stack interpreter walks a method's basic
 // blocks and turns them back into expressions and statements, with the control
-// flow structured into `if`/`else`, `&&`/`||`, `?:` and the loop forms; anything
-// that needs a method call or a `switch` (later phases) renders as its
-// disassembly plus a `throw new UnsupportedOperationException(...)`, so the
-// output is always compilable Java.
+// flow structured into `if`/`else`, `&&`/`||`, `?:`, the loop forms, method
+// calls and `try`/`catch`; anything that needs a `finally`, a `switch` or an
+// invokedynamic (later phases) renders as its disassembly plus a
+// `throw new UnsupportedOperationException(...)`, so the output is always
+// compilable Java.
 //
 // The text is deliberately rough - callers run it through the formatter
 // (src/cli/decompile.ts), which is why this module stays free of a dependency
@@ -21,6 +22,7 @@ import {
   type ClassFile,
   type Code,
   type Constant,
+  type ExceptionEntry,
   type Member,
   className,
   findAttribute,
@@ -629,8 +631,17 @@ interface Block {
   readonly successors: number[];
 }
 
-function buildBlocks(instructions: readonly Instruction[]): Map<number, Block> {
+function buildBlocks(
+  instructions: readonly Instruction[],
+  exceptions: readonly ExceptionEntry[] = [],
+): Map<number, Block> {
   const leaders = new Set<number>([instructions[0]?.pc ?? 0]);
+  // A protected range and a handler both begin a statement of their own, and
+  // neither is a branch target, so nothing else would split the block there.
+  for (const entry of exceptions) {
+    leaders.add(entry.startPc);
+    leaders.add(entry.handlerPc);
+  }
   for (const [index, instruction] of instructions.entries()) {
     const { mnemonic } = instruction;
     if (mnemonic === "tableswitch" || mnemonic === "lookupswitch") {
@@ -689,10 +700,102 @@ function buildBlocks(instructions: readonly Instruction[]): Map<number, Block> {
   return blocks;
 }
 
-/** Every block reachable from the entry, which is all the structuring may cover. */
-function reachableBlocks(blocks: Map<number, Block>, entry: number): Set<number> {
+/** One `catch` clause: the types it names, and where its handler begins. */
+interface Clause {
+  readonly types: string[];
+  readonly handlerPc: number;
+}
+
+/** One `try` statement: the range it protects, and the clauses guarding it. */
+interface TryRegion {
+  readonly startPc: number;
+  readonly endPc: number;
+  readonly clauses: Clause[];
+}
+
+/**
+ * The `try` statements of one method, from its exception table. A clause is one
+ * handler with the types that reach it (a multi-catch reaches the table as one
+ * entry per type); the clauses guarding the same range are one statement, in
+ * source order.
+ */
+function tryRegions(
+  exceptions: readonly ExceptionEntry[],
+  blocks: Map<number, Block>,
+  self: string,
+): TryRegion[] {
+  const byHandler = new Map<
+    number,
+    { types: string[]; ranges: { startPc: number; endPc: number }[] }
+  >();
+  const order: number[] = [];
+  for (const entry of exceptions) {
+    // A catch-all guards `finally`, `synchronized` and try-with-resources, all
+    // of which javac writes as duplicated code plus a rethrow: not this phase.
+    if (entry.catchType === undefined) {
+      throw new NotDecompilable("a finally or synchronized block");
+    }
+    if (!blocks.has(entry.startPc) || !blocks.has(entry.handlerPc)) {
+      throw new NotDecompilable("a try range that starts mid-instruction");
+    }
+    if (entry.handlerPc >= entry.startPc && entry.handlerPc < entry.endPc) {
+      throw new NotDecompilable("a handler inside its own try");
+    }
+    let clause = byHandler.get(entry.handlerPc);
+    if (clause === undefined) {
+      clause = { types: [], ranges: [] };
+      byHandler.set(entry.handlerPc, clause);
+      order.push(entry.handlerPc);
+    }
+    const type = typeName(entry.catchType, self);
+    if (!clause.types.includes(type)) clause.types.push(type);
+    clause.ranges.push({ startPc: entry.startPc, endPc: entry.endPc });
+  }
+
+  const starts = [...blocks.keys()];
+  const byRange = new Map<string, TryRegion>();
+  const regions: TryRegion[] = [];
+  for (const handlerPc of order) {
+    const clause = byHandler.get(handlerPc)!;
+    const range = clause.ranges
+      .sort((a, b) => a.startPc - b.startPc)
+      .reduce((left, right) => {
+        // javac splits the range of a `try` that encloses a nested `catch`: the
+        // return or jump that ends the inner handler is not protected, so one
+        // statement reaches the table as two entries. Nothing but those excluded
+        // instructions sits in the gap - no block begins in it.
+        const joined =
+          right.startPc <= left.endPc ||
+          !starts.some(start => start >= left.endPc && start < right.startPc);
+        if (!joined) throw new NotDecompilable("a try with a split range");
+        return { startPc: left.startPc, endPc: Math.max(left.endPc, right.endPc) };
+      });
+    const key = `${range.startPc}:${range.endPc}`;
+    let region = byRange.get(key);
+    if (region === undefined) {
+      region = { startPc: range.startPc, endPc: range.endPc, clauses: [] };
+      byRange.set(key, region);
+      regions.push(region);
+    }
+    region.clauses.push({ types: clause.types, handlerPc });
+  }
+
+  for (const region of regions) {
+    for (const other of regions) {
+      const disjoint = other.endPc <= region.startPc || other.startPc >= region.endPc;
+      const nested =
+        (other.startPc >= region.startPc && other.endPc <= region.endPc) ||
+        (region.startPc >= other.startPc && region.endPc <= other.endPc);
+      if (!disjoint && !nested) throw new NotDecompilable("overlapping try ranges");
+    }
+  }
+  return regions;
+}
+
+/** Every block reachable from the roots, which is all the structuring may cover. */
+function reachableBlocks(blocks: Map<number, Block>, roots: readonly number[]): Set<number> {
   const seen = new Set<number>();
-  const queue = [entry];
+  const queue = [...roots];
   while (queue.length > 0) {
     const at = queue.pop()!;
     if (seen.has(at) || !blocks.has(at)) continue;
@@ -863,7 +966,9 @@ function loopFollow(
   // Several ways out, none of them a test: the one they all reach ends the loop.
   const candidates = [...exits].sort((a, b) => a - b);
   const merged = candidates.find(candidate =>
-    candidates.every(other => other === candidate || reachableBlocks(blocks, other).has(candidate)),
+    candidates.every(
+      other => other === candidate || reachableBlocks(blocks, [other]).has(candidate),
+    ),
   );
   if (merged === undefined) throw new NotDecompilable("a loop with more than one exit");
   return merged;
@@ -1019,6 +1124,16 @@ class BodyDecompiler {
   private currentBlock = 0;
   private followOf = new Map<number, number>();
   private loops = new Map<number, Loop>();
+  private regions: TryRegion[] = [];
+  /** The `try` statements being written right now. */
+  private readonly activeTries = new Set<TryRegion>();
+  /**
+   * Instructions to drop from the front of a block: a handler starts with the
+   * store of the exception, which source writes as the catch parameter.
+   */
+  private readonly skip = new Map<number, number>();
+  /** `followOf` over the whole method, which `followOf` itself is not inside a loop. */
+  private methodFollowOf = new Map<number, number>();
   /** The loops being written right now, innermost last. */
   private readonly active: ActiveLoop[] = [];
   private readonly visited = new Set<number>();
@@ -1359,9 +1474,11 @@ class BodyDecompiler {
     this.current.push(`${local.name} = ${text};`);
   }
 
-  run(instructions: readonly Instruction[]): void {
-    this.blocks = buildBlocks(instructions);
+  run(instructions: readonly Instruction[], exceptions: readonly ExceptionEntry[] = []): void {
+    this.blocks = buildBlocks(instructions, exceptions);
+    this.regions = tryRegions(exceptions, this.blocks, this.self);
     this.followOf = postDominators(this.blocks);
+    this.methodFollowOf = this.followOf;
     const entry = instructions[0]?.pc ?? 0;
     this.loops = findLoops(this.blocks, entry);
     this.entryPc = entry;
@@ -1371,7 +1488,8 @@ class BodyDecompiler {
     // A block that was never entered would silently drop its statements, and one
     // entered twice would duplicate them: either means the layout is not the
     // nest of `if`s this phase reconstructs.
-    for (const start of reachableBlocks(this.blocks, entry)) {
+    const handlers = this.regions.flatMap(region => region.clauses.map(c => c.handlerPc));
+    for (const start of reachableBlocks(this.blocks, [entry, ...handlers])) {
       if (!this.visited.has(start)) throw new NotDecompilable("unstructured control flow");
     }
   }
@@ -1384,6 +1502,11 @@ class BodyDecompiler {
       if (jump !== undefined) {
         this.current.push(jump);
         return;
+      }
+      const region = this.regionAt(at);
+      if (region !== undefined) {
+        at = this.tryStatement(region);
+        continue;
       }
       const loop = this.loops.get(at);
       if (loop !== undefined && !this.active.some(entered => entered.loop === loop)) {
@@ -1404,7 +1527,8 @@ class BodyDecompiler {
       }
       this.visited.add(at);
       const isBranch = block.kind === "conditional" || block.kind === "goto";
-      const body = isBranch ? block.instructions.slice(0, -1) : block.instructions;
+      const kept = block.instructions.slice(this.skip.get(at) ?? 0);
+      const body = isBranch ? kept.slice(0, -1) : kept;
       this.runInstructions(body, endOf(block), block.start);
       if (block.kind === "end") return;
       if (block.kind !== "conditional") {
@@ -1467,6 +1591,134 @@ class BodyDecompiler {
     this.current.push(thenStatements);
     if (elseStatements.length > 0) this.current.push("} else {", elseStatements);
     this.current.push("}");
+  }
+
+  /**
+   * The `try` statement that begins at `at`, if one does. The outermost comes
+   * first: an inner `try` sharing the start is written when the body reaches it
+   * again. A loop whose header is the same block is the outer statement, unless
+   * the protected range covers the whole loop.
+   */
+  private regionAt(at: number): TryRegion | undefined {
+    const candidates = this.regions
+      .filter(region => region.startPc === at && !this.activeTries.has(region))
+      .sort((a, b) => b.endPc - a.endPc);
+    const region = candidates[0];
+    if (region === undefined) return undefined;
+    const loop = this.loops.get(at);
+    if (loop !== undefined && !this.active.some(entered => entered.loop === loop)) {
+      const covered = [...loop.body].every(
+        start => start >= region.startPc && start < region.endPc,
+      );
+      if (!covered) return undefined;
+    }
+    return region;
+  }
+
+  /** One `try`, with its clauses. Returns where the statement after it begins. */
+  private tryStatement(region: TryRegion): number {
+    if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
+    const bodyStop = this.tryFollow(region);
+    // Where the body leaves off is not always where the statement ends: when the
+    // exit is also a branch target, javac's jump over the handlers stands in a
+    // block of its own. That block is the end of the `try`, not a statement.
+    let follow = bodyStop;
+    while (follow !== EXIT) {
+      const block = this.blocks.get(follow)!;
+      if (block.kind !== "goto" || block.instructions.length !== 1 || this.visited.has(follow))
+        break;
+      this.visited.add(follow);
+      follow = block.successors[0]!;
+    }
+    this.activeTries.add(region);
+    const clauses: { head: string; statements: Stmt[] }[] = [];
+    let body: Stmt[];
+    try {
+      body = this.capture(() => this.structure(region.startPc, bodyStop));
+      for (const clause of region.clauses) {
+        // The parameter has to be named before the handler runs: its store is
+        // what the name comes from, and that store is not a statement.
+        const name = this.catchName(clause);
+        const statements = this.capture(() => this.structure(clause.handlerPc, follow));
+        clauses.push({ head: `} catch (${clause.types.join(" | ")} ${name}) {`, statements });
+      }
+    } finally {
+      this.activeTries.delete(region);
+    }
+    this.current.push("try {", body);
+    for (const clause of clauses) this.current.push(clause.head, clause.statements);
+    this.current.push("}");
+    return follow;
+  }
+
+  /**
+   * Where a `try` statement ends. What leaves the protected range normally is
+   * the statement's own follow; a `break`, a `continue` or a `return` leaves the
+   * statement the way it leaves an `if`, and says nothing about where it ends.
+   * When nothing leaves the body at all, the code after the statement is
+   * whatever the handlers fall into.
+   */
+  private tryFollow(region: TryRegion): number {
+    const inside = new Set(
+      [...this.blocks.keys()].filter(start => start >= region.startPc && start < region.endPc),
+    );
+    const jumps = new Set(
+      this.active.flatMap(entered => [entered.continueTarget, entered.loop.follow]),
+    );
+    const exits = new Set<number>();
+    for (const start of inside) {
+      for (const successor of this.blocks.get(start)!.successors) {
+        if (!inside.has(successor) && !jumps.has(successor)) exits.add(successor);
+      }
+    }
+    if (exits.size > 1) throw new NotDecompilable("unstructured control flow");
+    const [bodyFollow] = exits;
+    if (bodyFollow !== undefined) return bodyFollow;
+    const follows = new Set(
+      region.clauses.map(clause => this.methodFollowOf.get(clause.handlerPc) ?? EXIT),
+    );
+    for (const jump of [...jumps, EXIT]) follows.delete(jump);
+    if (follows.size > 1) throw new NotDecompilable("unstructured control flow");
+    return [...follows][0] ?? EXIT;
+  }
+
+  /**
+   * The catch parameter of one clause. A handler is entered with the exception
+   * on the stack, so it starts by storing it - or dropping it, when source
+   * never named it.
+   */
+  private catchName(clause: Clause): string {
+    const block = this.blocks.get(clause.handlerPc)!;
+    const first = block.instructions[0];
+    if (first === undefined || (first.mnemonic !== "pop" && !first.mnemonic.startsWith("astore"))) {
+      throw new NotDecompilable("an exception handler that keeps the exception");
+    }
+    this.skip.set(clause.handlerPc, 1);
+    if (first.mnemonic === "pop") return this.freshName("e");
+    const slot = this.slotOf(first);
+    // The debug table scopes the parameter from *after* its store, which is
+    // where the handler's own code begins.
+    const scopePc = block.instructions[1]?.pc ?? clause.handlerPc;
+    const scoped = this.localTable.find(
+      entry => entry.slot === slot && scopePc >= entry.startPc && scopePc < entry.endPc,
+    );
+    // ponytail: a multi-catch with no debug table is declared as its first type -
+    // the common supertype source used is not written to the class file.
+    const declared =
+      scoped?.type !== undefined && scoped.type !== "" ? scoped.type : clause.types[0]!;
+    const local: Local = {
+      name: this.freshName(scoped?.name !== undefined && scoped.name !== "" ? scoped.name : "e"),
+      type: sourceTypeText(declared, this.self),
+      declared: true,
+      origin: scoped,
+      declaration: undefined,
+      authoritative: true, // the clause says what the parameter's type is
+      writes: [],
+      storeBlocks: new Set([clause.handlerPc]),
+    };
+    this.byName.set(local.name, local);
+    this.locals.set(slot, local);
+    return local.name;
   }
 
   /**
@@ -2422,8 +2674,7 @@ function methodSource(method: Member, classFile: ClassFile): MethodSource {
   let body: string[];
   let reconstructed = true;
   try {
-    if (code.exceptions.length > 0) throw new NotDecompilable("the method catches exceptions");
-    decompiler.run(instructions);
+    decompiler.run(instructions, code.exceptions);
     body = [...decompiler.hoisted, ...flattenStatements(decompiler.statements)];
     // Every void method ends in a `return` javac inserted; source does not.
     if (body[body.length - 1] === "return;") body = body.slice(0, -1);
