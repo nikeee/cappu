@@ -98,6 +98,14 @@ type expr struct {
 	// number has to get the ternary again (`array[c ? 1 : 0]`).
 	AsInt    string
 	Compared *comparedPair
+	// Effects marks a value that does something when it runs - a call. Dropping
+	// it has to keep it as a statement, and nothing may write it twice.
+	Effects bool
+	// Pending is the id of the object `new` left on the stack, which is not a
+	// value until its constructor has run. Every copy carries the same id, so
+	// the call can put `new C(...)` in all of their places at once. Zero means
+	// the value is not one.
+	Pending int
 }
 
 func primary(text, typ string) expr { return expr{Text: text, Prec: precPrimary, Type: typ} }
@@ -675,6 +683,10 @@ var conditionalBranches = map[string]bool{
 
 var subroutineOpcodes = map[string]bool{"jsr": true, "jsr_w": true, "ret": true, "ret_w": true}
 
+var invokes = map[string]bool{
+	"invokestatic": true, "invokevirtual": true, "invokeinterface": true, "invokespecial": true,
+}
+
 func isGotoMnemonic(mnemonic string) bool {
 	return mnemonic == "goto" || mnemonic == "goto_w"
 }
@@ -1205,6 +1217,24 @@ var pureMnemonics = regexp.MustCompile(`^(?:nop|aconst_null|[ilfd]const_\w+|bipu
 	`[ilfd](?:add|sub|mul|div|rem|neg|shl|shr|ushr|and|or|xor)|[ilfd]2[ilfdbcs]|` +
 	`lcmp|[fd]cmp[lg]|getstatic|getfield|checkcast|instanceof|dup)$`)
 
+// isConditionBlock reports whether a condition may be folded from a block. Like
+// isPureBlock, but a call is allowed: folding runs it exactly once and in the
+// same place, which is not true of the ternary arms isPureBlock guards - those
+// can be evaluated twice.
+func isConditionBlock(b *block) bool {
+	for i, instruction := range b.Instructions {
+		if pureMnemonics.MatchString(instruction.Mnemonic) || invokes[instruction.Mnemonic] {
+			continue
+		}
+		last := i == len(b.Instructions)-1
+		if last && (conditionalBranches[instruction.Mnemonic] || isGotoMnemonic(instruction.Mnemonic)) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func isPureBlock(b *block) bool {
 	for i, instruction := range b.Instructions {
 		if pureMnemonics.MatchString(instruction.Mnemonic) {
@@ -1259,6 +1289,8 @@ type bodyDecompiler struct {
 	// active are the loops being written right now, innermost last.
 	active  []activeLoop
 	visited map[int]bool
+	// pendingCount hands out the ids that tell the copies of one `new` apart.
+	pendingCount int
 	// conditions are every `if (...)` line emitted, with the condition it came
 	// from: a local's type can still narrow after the line is written (the use
 	// that proves it is a boolean may come later), and the text has to follow.
@@ -1469,6 +1501,126 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 	d.locals[slot] = created
 	d.byName[created.Name] = created
 	return created, nil
+}
+
+// callArguments pops a call's arguments in reverse and writes them as the
+// parameters.
+func (d *bodyDecompiler) callArguments(descriptor string) ([]string, error) {
+	params := parameterSlots(descriptor, true)
+	args := make([]string, len(params))
+	for i := len(params) - 1; i >= 0; i-- {
+		value, err := d.pop()
+		if err != nil {
+			return nil, err
+		}
+		args[i] = d.coerceInto(value, params[i].Type)
+	}
+	return args, nil
+}
+
+// staticCallee names a static call: unqualified when it is this class's own
+// method.
+func (d *bodyDecompiler) staticCallee(owner, name string) string {
+	if owner == d.classFile.ThisClass {
+		return name
+	}
+	return typeName(owner, d.self()) + "." + name
+}
+
+// receiverCallee names an instance call, with the receiver the bytecode pushed
+// before the arguments.
+func (d *bodyDecompiler) receiverCallee(mnemonic, owner, name string) (string, error) {
+	receiver, err := d.pop()
+	if err != nil {
+		return "", err
+	}
+	if mnemonic != "invokespecial" || owner == d.classFile.ThisClass {
+		return at(receiver, precPrimary) + "." + name, nil
+	}
+	// The only other invokespecial source writes is `super.m()`; an interface's
+	// `Iface.super.m()` needs the interface named, which this phase does not do.
+	superClass := d.classFile.SuperClass
+	if superClass == "" {
+		superClass = "java/lang/Object"
+	}
+	if owner != superClass || receiver.Text != "this" {
+		return "", bail("unsupported instruction invokespecial")
+	}
+	return "super." + name, nil
+}
+
+// construct writes a constructor call: either `new C(...)`, whose object is
+// already on the stack, or the `super(...)`/`this(...)` that opens a
+// constructor - which is not a call in source but the shape of one, and without
+// which no constructor decompiles at all.
+func (d *bodyDecompiler) construct(target MemberRef) error {
+	// An inner class's constructor takes the enclosing instance as its first
+	// argument, and source cannot pass it: `outer.new Inner(...)` is the only
+	// way to write one. Whether the class is inner at all is in *its* file, not
+	// this one, so the shape of the descriptor is all there is to go on.
+	if cut := strings.LastIndexByte(target.Owner, '$'); cut > 0 {
+		enclosing := strings.ReplaceAll(target.Owner[:cut], "/", ".")
+		if params := parameterSlots(target.Descriptor, true); len(params) > 0 &&
+			params[0].Type == enclosing {
+			return bail("an inner class constructor")
+		}
+	}
+	args, err := d.callArguments(target.Descriptor)
+	if err != nil {
+		return err
+	}
+	receiver, err := d.pop()
+	if err != nil {
+		return err
+	}
+	if receiver.Pending == 0 {
+		superClass := d.classFile.SuperClass
+		if superClass == "" {
+			superClass = "java/lang/Object"
+		}
+		isSuper := target.Owner == superClass
+		if !isSuper && target.Owner != d.classFile.ThisClass {
+			return bail("constructor call to an unrelated class")
+		}
+		if receiver.Text != "this" {
+			return bail("constructor call on another object")
+		}
+		if len(d.statements) > 0 || d.depth > 0 {
+			return bail("constructor call is not first")
+		}
+		// javac writes the implicit `super()` into every constructor; source
+		// does not, and re-emitting puts it back. An enum constructor's
+		// `super(name, ordinal)` is generated too - and writing it is a compile
+		// error.
+		if isSuper && (len(args) == 0 || isEnumDeclaration(d.classFile)) {
+			return nil
+		}
+		keyword := "this"
+		if isSuper {
+			keyword = "super"
+		}
+		d.emit(keyword + "(" + strings.Join(args, ", ") + ");")
+		return nil
+	}
+	value := expr{
+		Text:    "new " + receiver.Type + "(" + strings.Join(args, ", ") + ")",
+		Prec:    precPrimary,
+		Type:    receiver.Type,
+		Effects: true,
+	}
+	// The `dup` in front of the call left the other copies of the same object.
+	kept := false
+	for i := range d.stack {
+		if d.stack[i].Pending != receiver.Pending {
+			continue
+		}
+		d.stack[i] = value
+		kept = true
+	}
+	if !kept {
+		d.emit(value.Text + ";")
+	}
+	return nil
 }
 
 // freshName is wanted, kept distinct from the names already handed out. Two
@@ -2021,7 +2173,7 @@ func (d *bodyDecompiler) chainFrom(
 	deep bool,
 ) (jump, bool, func(), error) {
 	next := d.blocks[start]
-	if next == nil || next.Kind != blockConditional || !isPureBlock(next) {
+	if next == nil || next.Kind != blockConditional || !isConditionBlock(next) {
 		return jump{}, false, nil, nil
 	}
 	if folded[start] || d.visited[start] {
@@ -2036,6 +2188,7 @@ func (d *bodyDecompiler) chainFrom(
 		return jump{}, false, nil, nil
 	}
 	stackBefore := append([]expr(nil), d.stack...)
+	statementsBefore := len(*d.current)
 	takenCount := len(*taken)
 	foldedBefore := make([]int, 0, len(folded))
 	for at := range folded {
@@ -2061,6 +2214,7 @@ func (d *bodyDecompiler) chainFrom(
 	}
 	undo := func() {
 		d.stack = stackBefore
+		*d.current = (*d.current)[:statementsBefore]
 		*taken = (*taken)[:takenCount]
 		for at := range folded {
 			delete(folded, at)
@@ -2068,6 +2222,12 @@ func (d *bodyDecompiler) chainFrom(
 		for _, at := range foldedBefore {
 			folded[at] = true
 		}
+	}
+	// A statement means the block did more than compute a value - a call whose
+	// result is dropped, say - and folding it into a condition would move it.
+	if len(*d.current) != statementsBefore {
+		undo()
+		return jump{}, false, nil, nil
 	}
 	return folded_, true, undo, nil
 }
@@ -2585,54 +2745,48 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		return nil
 	}
 
-	// Constructor chaining. `super(...)`/`this(...)` is not a method call in
-	// source, it is the shape of a constructor - without it no constructor
-	// decompiles at all. Any other invokespecial (a `new`, a private call) is
-	// still a later phase.
-	if mnemonic == "invokespecial" {
+	// Object creation. `new` leaves a reference that is not a value yet: only
+	// the constructor call makes one, and javac dups it first so the call can
+	// consume a copy and leave the object behind.
+	if mnemonic == "new" {
+		name := PoolClassName(pool, uint16(instruction.Arg))
+		if name == "" {
+			name = "java/lang/Object"
+		}
+		d.pendingCount++
+		d.push(expr{
+			Text:    "",
+			Prec:    precPrimary,
+			Type:    typeName(name, d.self()),
+			Pending: d.pendingCount,
+		})
+		return nil
+	}
+	if invokes[mnemonic] {
 		target, ok := PoolMemberRef(pool, uint16(instruction.Arg))
-		if !ok || target.Name != "<init>" {
-			return bail("unsupported instruction invokespecial")
+		if !ok {
+			return bail("bad method reference")
 		}
-		superClass := d.classFile.SuperClass
-		if superClass == "" {
-			superClass = "java/lang/Object"
+		if target.Name == "<init>" {
+			return d.construct(target)
 		}
-		isSuper := target.Owner == superClass
-		if !isSuper && target.Owner != d.classFile.ThisClass {
-			return bail("constructor call to an unrelated class")
-		}
-		params := parameterSlots(target.Descriptor, true)
-		args := make([]string, len(params))
-		for i := len(params) - 1; i >= 0; i-- {
-			value, err := d.pop()
-			if err != nil {
-				return err
-			}
-			args[i] = d.coerceInto(value, params[i].Type)
-		}
-		receiver, err := d.pop()
+		args, err := d.callArguments(target.Descriptor)
 		if err != nil {
 			return err
 		}
-		if receiver.Text != "this" {
-			return bail("constructor call on another object")
+		callee := ""
+		if mnemonic == "invokestatic" {
+			callee = d.staticCallee(target.Owner, target.Name)
+		} else if callee, err = d.receiverCallee(mnemonic, target.Owner, target.Name); err != nil {
+			return err
 		}
-		if len(d.statements) > 0 || d.depth > 0 {
-			return bail("constructor call is not first")
-		}
-		// javac writes the implicit `super()` into every constructor; source
-		// does not, and re-emitting puts it back. An enum constructor's
-		// `super(name, ordinal)` is generated too - and writing it is a compile
-		// error.
-		if isSuper && (len(args) == 0 || isEnumDeclaration(d.classFile)) {
+		text := callee + "(" + strings.Join(args, ", ") + ")"
+		typ := sourceTypeText(methodReturnType(target.Descriptor), d.self())
+		if typ == "void" {
+			d.emit(text + ";")
 			return nil
 		}
-		keyword := "this"
-		if isSuper {
-			keyword = "super"
-		}
-		d.emit(keyword + "(" + strings.Join(args, ", ") + ");")
+		d.push(expr{Text: text, Prec: precPrimary, Type: typ, Effects: true})
 		return nil
 	}
 
@@ -2644,16 +2798,32 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
-		if value.Prec != precPrimary || strings.HasPrefix(value.Text, "new ") {
+		if value.Effects {
+			return bail("dup of a call")
+		}
+		if value.Pending == 0 &&
+			(value.Prec != precPrimary || strings.HasPrefix(value.Text, "new ")) {
 			return bail("dup of a non-trivial value")
 		}
 		d.push(value)
 		d.push(value)
 		return nil
 	}
-	if mnemonic == "pop" {
-		_, err := d.pop()
-		return err
+	if mnemonic == "pop" || mnemonic == "pop2" {
+		value, err := d.pop()
+		if err != nil {
+			return err
+		}
+		// `pop2` drops one long or double, or two of anything else - and two of
+		// anything else is a shape this phase does not produce.
+		if mnemonic == "pop2" && value.Type != "long" && value.Type != "double" {
+			return bail("pop2 of two values")
+		}
+		// The value of a call is what is being dropped, not the call itself.
+		if value.Effects {
+			d.emit(value.Text + ";")
+		}
+		return nil
 	}
 
 	// Comparisons. `lcmp` and the float ones have no source form: they only exist
