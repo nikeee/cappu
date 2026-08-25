@@ -562,3 +562,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-08-14 10:32 — do it
 - 2026-08-14 19:12 — we now have a feature called import ordering. review the feature + tests + implementation. maybe even spawn two agents that do independent reviews
 - 2026-08-14 19:35 — fix them
+- 2026-08-23 20:32 — plan issue #43 in a separate branch
+- 2026-08-24 01:52 — deep review

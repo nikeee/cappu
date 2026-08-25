@@ -1,0 +1,150 @@
+import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { expect } from "expect";
+
+import { createChecker } from "./checker.ts";
+import {
+  ClassFileError,
+  findAttribute,
+  memberRef,
+  readBootstrapMethods,
+  readClassFile,
+  readCode,
+  readExceptions,
+  signatureOf,
+  sourceFileName,
+  utf8,
+} from "./classfile.ts";
+import { emitSourceFile } from "./emitter.ts";
+import { loadJdkStub } from "./jdkStub.ts";
+import { createProgram } from "./program.ts";
+import { type Uri } from "../workspace.ts";
+
+const baselinesDir = join(
+  import.meta.dirname,
+  "..",
+  "..",
+  "test-fixtures",
+  "emitter",
+  "emit-baselines",
+);
+
+// Emit with OUR compiler and read the bytes back - no JDK needed.
+function emitClass(name: string, source: string): Uint8Array {
+  const program = createProgram();
+  loadJdkStub(program);
+  program.setOpenDocument(`file:///${name}.java` as Uri, source, 1);
+  const checker = createChecker(program);
+  const classes = emitSourceFile(
+    program.getSourceFile(`file:///${name}.java` as Uri)!,
+    program,
+    checker,
+    { debugInfo: true },
+  );
+  return classes.find(c => c.name.endsWith(name))!.bytes;
+}
+
+test("reads the class header, members and their descriptors", () => {
+  const classFile = readClassFile(
+    emitClass(
+      "Greeter",
+      "package lib; public class Greeter implements java.lang.Runnable { int factor; static long total;" +
+        " public Greeter(int factor) { this.factor = factor; } public void run() {} }",
+    ),
+  );
+  expect(classFile.major).toBe(65); // Java 21
+  expect(classFile.thisClass).toBe("lib/Greeter");
+  expect(classFile.superClass).toBe("java/lang/Object");
+  expect(classFile.interfaces).toEqual(["java/lang/Runnable"]);
+  expect(classFile.fields.map(f => `${f.name}:${f.descriptor}`)).toEqual(["factor:I", "total:J"]);
+  expect(classFile.methods.map(m => `${m.name}${m.descriptor}`)).toEqual(["<init>(I)V", "run()V"]);
+  expect(sourceFileName(classFile)).toBe("Greeter.java");
+});
+
+test("reads a Code attribute with its exception table", () => {
+  const classFile = readClassFile(
+    emitClass(
+      "Guarded",
+      "public class Guarded { int f(int n) { try { return 1 / n; } catch (ArithmeticException e) { return -1; } } }",
+    ),
+  );
+  const method = classFile.methods.find(m => m.name === "f")!;
+  const code = readCode(method, classFile.pool)!;
+  expect(code.maxStack).toBeGreaterThan(0);
+  expect(code.maxLocals).toBeGreaterThanOrEqual(2);
+  expect(code.code.length).toBeGreaterThan(0);
+  expect(code.exceptions).toHaveLength(1);
+  expect(code.exceptions[0]!.catchType).toBe("java/lang/ArithmeticException");
+  expect(findAttribute(code.attributes, "LineNumberTable")).toBeDefined();
+});
+
+test("resolves member references out of the constant pool", () => {
+  const classFile = readClassFile(
+    emitClass("Caller", 'public class Caller { int len() { return "hi".length(); } }'),
+  );
+  const refs: string[] = [];
+  classFile.pool.forEach((entry, index) => {
+    if (entry?.tag === "methodref") {
+      const ref = memberRef(classFile.pool, index)!;
+      refs.push(`${ref.owner}.${ref.name}${ref.descriptor}`);
+    }
+  });
+  expect(refs).toContain("java/lang/String.length()I");
+});
+
+test("keeps generic signatures and throws clauses", () => {
+  const classFile = readClassFile(
+    emitClass(
+      "Boxy",
+      "public class Boxy<T extends java.lang.CharSequence> {" +
+        " T value; public T get() throws java.io.IOException { return value; } }",
+    ),
+  );
+  expect(signatureOf(classFile.attributes, classFile.pool)).toBe(
+    "<T::Ljava/lang/CharSequence;>Ljava/lang/Object;",
+  );
+  // cappu's own emitter does not write the Exceptions attribute (javac does);
+  // reading a real one is covered by the javac tier in disasm.test.ts.
+  const get = classFile.methods.find(m => m.name === "get")!;
+  expect(readExceptions(get, classFile.pool)).toEqual([]);
+});
+
+test("reads the BootstrapMethods table behind an invokedynamic", () => {
+  const classFile = readClassFile(
+    emitClass("Joiner", "public class Joiner { String j(String a, int b) { return a + b; } }"),
+  );
+  const bootstraps = readBootstrapMethods(classFile);
+  expect(bootstraps.length).toBeGreaterThan(0);
+  const handle = classFile.pool[bootstraps[0]!.handleIndex];
+  expect(handle?.tag).toBe("methodHandle");
+});
+
+test("decodes modified UTF-8 constants", () => {
+  // In the constant pool a NUL is encoded as c0 80 and a supplementary
+  // character as a surrogate pair of three-byte sequences.
+  const nul = "\u0000";
+  const grin = "\u{1F600}";
+  const classFile = readClassFile(
+    emitClass("Texts", `public class Texts { String s() { return "a\\u0000b😀"; } }`),
+  );
+  const strings = classFile.pool
+    .map(entry => (entry?.tag === "string" ? utf8(classFile.pool, entry.valueIndex) : undefined))
+    .filter(value => value !== undefined);
+  expect(strings).toContain(`a${nul}b${grin}`);
+});
+
+test("rejects input that is not a class file", () => {
+  expect(() => readClassFile(new Uint8Array([1, 2, 3, 4]))).toThrow(ClassFileError);
+  expect(() => readClassFile(new Uint8Array([0xca, 0xfe, 0xba, 0xbe]))).toThrow(ClassFileError);
+});
+
+test("reads the checked-in emitter baselines", () => {
+  // Every committed baseline parses, and every method with code decodes.
+  for (const name of ["Arithmetic", "EnumMixed", "AnnAll", "Concat", "QualifiedAnon$Inner"]) {
+    const classFile = readClassFile(readFileSync(join(baselinesDir, `${name}.class`)));
+    expect(classFile.thisClass).toBe(name);
+    for (const method of classFile.methods) readCode(method, classFile.pool);
+  }
+});

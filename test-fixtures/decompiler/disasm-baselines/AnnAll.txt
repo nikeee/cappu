@@ -1,0 +1,17 @@
+Compiled from "AnnAll.java"
+public class AnnAll {
+  int field;
+
+  public AnnAll();
+    Code:
+         0: aload_0
+         1: invokespecial #14                 // Method java/lang/Object."<init>":()V
+         4: return
+
+  public int m(int, int);
+    Code:
+         0: iload_1
+         1: iload_2
+         2: iadd
+         3: ireturn
+}

@@ -63,6 +63,9 @@ cappu format
 # check dependencies for known CVEs. Exits with != 0 if there are some. You can use that in CI
 cappu audit
 
+# print the bytecode of a compiled class, in javap -c -p layout (no JDK needed)
+cappu decompile build/classes/App.class
+
 cappu search commons-lang3 # look up a maven package
 
 cappu tree # cargo tree, npm ls, but for java

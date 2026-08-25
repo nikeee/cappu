@@ -44,10 +44,17 @@ func DisasmFiles(classFiles []string, javapBin string) (map[string]*Disasm, erro
 	if err != nil {
 		return nil, err
 	}
+	return ParseJavapText(string(out)), nil
+}
+
+// ParseJavapText is the normalization itself, over `javap -c -p` output - also
+// applied to our own disassembler's text (disasm.go), which is why it is not
+// inlined above.
+func ParseJavapText(out string) map[string]*Disasm {
 	m := map[string]*Disasm{}
 	var cur *Disasm
 	var method *DisasmMethod
-	for _, raw := range strings.Split(string(out), "\n") {
+	for _, raw := range strings.Split(out, "\n") {
 		t := strings.TrimSpace(raw)
 		if t == "" {
 			continue
@@ -81,7 +88,7 @@ func DisasmFiles(classFiles []string, javapBin string) (map[string]*Disasm, erro
 	for _, d := range m {
 		slices.Sort(d.Members)
 	}
-	return m, nil
+	return m
 }
 
 // placeholderBodies are the trivial method bodies the emitter falls back to for

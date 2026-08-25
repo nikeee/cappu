@@ -1,0 +1,18 @@
+Compiled from "EnumMixed.java"
+final class EnumMixed$1 extends EnumMixed {
+  private EnumMixed$1(java.lang.String, int, java.lang.String);
+    Code:
+         0: aload_0
+         1: aload_1
+         2: iload_2
+         3: aload_3
+         4: invokespecial #8                  // Method EnumMixed."<init>":(Ljava/lang/String;ILjava/lang/String;)V
+         7: return
+
+  public int apply(int, int);
+    Code:
+         0: iload_1
+         1: iload_2
+         2: iadd
+         3: ireturn
+}

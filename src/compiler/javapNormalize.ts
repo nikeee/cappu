@@ -15,10 +15,17 @@ export interface Disasm {
 // Disassemble one or more class files in a SINGLE javap invocation, keyed by the
 // (binary) class name javap prints.
 export function disasmFiles(classFiles: string[], javapBin = "javap"): Map<string, Disasm> {
-  const out = execFileSync(javapBin, ["-c", "-p", ...classFiles], {
-    encoding: "utf8",
-    maxBuffer: 256 * 1024 * 1024, // large projects produce a lot of disassembly
-  });
+  return parseJavapText(
+    execFileSync(javapBin, ["-c", "-p", ...classFiles], {
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024, // large projects produce a lot of disassembly
+    }),
+  );
+}
+
+// The normalization itself, over `javap -c -p` output - also applied to our own
+// disassembler's text (disasm.ts), which is why it is not inlined above.
+export function parseJavapText(out: string): Map<string, Disasm> {
   const map = new Map<string, Disasm>();
   let cur: Disasm | undefined;
   let method: string[] | undefined;
