@@ -17,7 +17,7 @@ enum EnumMixed {
   }
 
   public static void main(java.lang.String[] arg0) {
-    /* cappu: loops are not decompiled yet; the bytecode is:
+    /* cappu: unsupported instruction invokedynamic; the bytecode is:
      * 0: invokestatic #30
      * 3: astore_1
      * 4: iconst_0
@@ -49,7 +49,7 @@ enum EnumMixed {
   }
 
   static {
-    /* cappu: unsupported instruction new; the bytecode is:
+    /* cappu: an inner class constructor; the bytecode is:
      * 0: new #80
      * 3: dup
      * 4: ldc #81

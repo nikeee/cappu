@@ -15,22 +15,73 @@ import (
 // Every class our emitter produced whose methods this phase reconstructs in
 // full - straight-line arithmetic, conversions, fields, arrays and casts.
 var fullyDecompiled = []string{
-	"AnnAll", "Arithmetic", "ArrayLoad", "ArrayStore", "CastInstance", "Cl",
-	"ClassLit", "Constants", "Empty", "EnumAbstract$1", "EnumAbstract$2",
-	"EnumMixed$1", "EnumMixed$2", "Fields", "FloatArith", "FloatConst", "FloatConv",
-	"Fold", "ICast$A", "ICast$B", "ISA", "ISB", "ImplicitSealed", "IntConv",
-	"IntLiterals", "Locals", "LongArith", "Methods", "ModifiedFields", "Nest$Counter",
-	"Nest$Point", "Nest", "NewArray", "Pt", "ReturnLiterals", "Returns", "Rt",
-	"Sealed", "SealedI", "StaticFields", "SubA", "SubB", "SubC", "VarargsAndAbstract",
+	"AnnAll",
+	"Arithmetic",
+	"ArrayLoad",
+	"ArrayStore",
+	"BoundErasure",
+	"Boxing",
+	"CastInstance",
+	"Cl",
+	"ClassLit",
+	"Compute",
+	"Constants",
+	"ControlFlow",
+	"Empty",
+	"EnumAbstract$1",
+	"EnumAbstract$2",
+	"EnumMixed$1",
+	"EnumMixed$2",
+	"EnumUnqualified",
+	"Fields",
+	"FloatArith",
+	"FloatConst",
+	"FloatConv",
+	"Fold",
+	"Hello",
+	"ICast",
+	"ICast$A",
+	"ICast$B",
+	"ISA",
+	"ISB",
+	"ImplicitSealed",
+	"IntConv",
+	"IntLiterals",
+	"Invoke",
+	"Locals",
+	"LongArith",
+	"Methods",
+	"ModifiedFields",
+	"Nest",
+	"Nest$Counter",
+	"Nest$Point",
+	"NewArray",
+	"PrivateCall",
+	"Pt",
+	"ReturnLiterals",
+	"Returns",
+	"Rt",
+	"Sealed",
+	"SealedI",
+	"StaticFields",
+	"SubA",
+	"SubB",
+	"SubC",
+	"VarargsAndAbstract",
 }
 
 // Classes kept for the bail-out rendering: control flow (phase 1.4+) and method
 // calls (phase 1.6) are not this phase's job, and must say so.
 var notDecompiled = []string{
-	"BoundErasure", "Boxing", "Compute", "Concat", "ControlFlow", "EnumAbstract",
-	"EnumMixed", "EnumUnqualified", "Hello", "ICast", "Invoke", "PrivateCall",
-	"QualifiedAnon$1", "QualifiedAnon$Inner", "QualifiedAnon", "QualifiedNew$Inner",
-	"QualifiedNew", "VarargsPack",
+	"Concat",
+	"EnumAbstract",
+	"EnumMixed",
+	"QualifiedAnon$1",
+	"QualifiedAnon$Inner",
+	"QualifiedAnon",
+	"QualifiedNew$Inner",
+	"QualifiedNew",
+	"VarargsPack",
 }
 
 // `ClassLit.prim()` reads `java.lang.Integer.TYPE`, which javac accepts and the
@@ -47,9 +98,22 @@ var stubGap = map[string]bool{"ClassLit": true}
 // The class javac writes for an enum constant with a body is not expressible as
 // source at all - `class X$1 extends X` where X is an enum is exactly what Java
 // forbids anyone to write - so nothing can re-emit it.
+// Reconstructions this oracle cannot judge, for reasons of its own:
+//   - `ICast` names two nested types that live outside the one class the
+//     decompiler writes, so re-emitting the file alone cannot resolve them;
+//   - `BoundErasure` declares `T get()`, and the decompiler works off the
+//     descriptor, so what comes back is the erased `CharSequence get()` - a
+//     different member, not different code;
+//   - `EnumUnqualified` declares a local inside a loop, which is hoisted to the
+//     top of the method and shifts every slot after it;
+//   - `Boxing` calls `Integer.intValue()`, and our emitter writes the
+//     *declaring* class into the method ref (`Number.intValue`) where javac
+//     writes the receiver's static type. That is an emitter bug, not a
+//     decompiler one.
 var noRoundtrip = map[string]bool{
 	"ClassLit": true, "Nest$Counter": true,
 	"EnumAbstract$1": true, "EnumAbstract$2": true, "EnumMixed$1": true, "EnumMixed$2": true,
+	"ICast": true, "BoundErasure": true, "EnumUnqualified": true, "Boxing": true,
 }
 
 func decompileBaseline(t *testing.T, name string) string {
@@ -289,6 +353,11 @@ func TestDecompileRendersNonFiniteConstants(t *testing.T) {
 
 func compileWithJavac(t *testing.T, dir, name, source string) string {
 	t.Helper()
+	return compileWithJavacOn(t, dir, name, source, "")
+}
+
+func compileWithJavacOn(t *testing.T, dir, name, source, classPath string) string {
+	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -296,7 +365,11 @@ func compileWithJavac(t *testing.T, dir, name, source string) string {
 	if err := os.WriteFile(javaFile, []byte(source), 0o644); err != nil {
 		t.Fatalf("write source: %v", err)
 	}
-	if out, err := exec.Command("javac", "--release", "21", "-d", dir, javaFile).CombinedOutput(); err != nil {
+	args := []string{"--release", "21", "-d", dir}
+	if classPath != "" {
+		args = append(args, "-cp", classPath)
+	}
+	if out, err := exec.Command("javac", append(args, javaFile)...).CombinedOutput(); err != nil {
 		t.Fatalf("javac: %v\n%s", err, out)
 	}
 	return filepath.Join(dir, name+".class")
@@ -481,21 +554,84 @@ var reconstructions = []struct {
 		selfContained: true,
 	},
 	{
-		// Phase 1.5; until then it has to say so rather than produce something wrong.
+		// A `for` is a `while` whose update sits at the bottom of the body - the
+		// same bytecode, so that is what it comes back as.
 		name: "Loop",
 		source: "class Loop { static int f(int n) { int s = 0; for (int i = 0; i < n; i++) s += i;" +
 			" return s; } }",
-		want:          []string{"loops are not decompiled yet", "not decompiled"},
+		want:          []string{"while (var2 < arg0) {", "var1 = var1 + var2;", "var2++;"},
+		reject:        []string{"not decompiled"},
+		selfContained: true,
+	},
+	{
+		name: "WhileLoop",
+		source: "class WhileLoop { static int f(int n) { int c = 0; while (n > 0) { c++; n--; }" +
+			" return c; } }",
+		want:          []string{"while (arg0 > 0) {"},
+		reject:        []string{"while (true)", "not decompiled"},
+		selfContained: true,
+	},
+	{
+		// The test is at the foot, so the body runs before it is asked.
+		name: "DoLoop",
+		source: "class DoLoop { static int f(int n) { int i = 0; do { i += 3; } while (i < n);" +
+			" return i; } }",
+		want:          []string{"do {", "var1 = var1 + 3;", "} while (var1 < arg0);"},
+		reject:        []string{"not decompiled"},
+		selfContained: true,
+	},
+	{
+		name: "Forever",
+		source: "class Forever { static int f(int n) { int i = 0; while (true) { i += 2;" +
+			" if (i > n) { break; } i += n; } return i; } }",
+		want:          []string{"while (true) {", "break;"},
+		reject:        []string{"not decompiled"},
+		selfContained: true,
+	},
+	{
+		name: "BreakOut",
+		source: "class BreakOut { static int f(int[] xs, int stop) { int t = 0;" +
+			" for (int i = 0; i < xs.length; i++) { if (xs[i] == stop) { break; } t += xs[i]; }" +
+			" return t; } }",
+		want:          []string{"while (var3 < arg0.length) {", "break;"},
+		reject:        []string{"not decompiled"},
+		selfContained: true,
+	},
+	{
+		name: "Nested",
+		source: "class Nested { static int f(int n, int m) { int t = 0;" +
+			" for (int i = 0; i < n; i++) { for (int j = 0; j < m; j++) { t += i * j; } }" +
+			" return t; } }",
+		want:          []string{"while (var3 < arg0) {", "while (var4 < arg1) {"},
+		reject:        []string{"not decompiled"},
+		selfContained: true,
+	},
+	{
+		// Both tests belong to the loop's own condition, not to an `if` inside it.
+		name: "LoopAnd",
+		source: "class LoopAnd { static int f(int a, int b) { int t = 0;" +
+			" while (a > 0 && b > 0) { t++; a--; b--; } return t; } }",
+		want:          []string{"while (arg0 > 0 && arg1 > 0) {"},
+		reject:        []string{"not decompiled"},
+		selfContained: true,
+	},
+	{
+		name: "LoopContinue",
+		source: "class LoopContinue { static int f(int[] xs) { int t = 0; int i = 0;" +
+			" while (i < xs.length) { int v = xs[i]; i++; if (v < 0) { continue; } t += v; }" +
+			" return t; } }",
+		want:          []string{"while (var2 < arg0.length) {"},
+		reject:        []string{"not decompiled"},
 		selfContained: true,
 	},
 	{
 		name: "Blank",
 		source: "class Blank { static int v() { return 1; } static final int N;" +
 			" static { N = v(); } }",
-		// The initializer could not be reconstructed, so `final` cannot stand,
-		// and a static initializer may not throw.
-		want:          []string{"static int N;"},
-		reject:        []string{"static final int N", "UnsupportedOperationException"},
+		// A blank `static final` is only assignable in the initializer, so the
+		// initializer has to come back for the `final` to stand.
+		want:          []string{"static final int N;", "N = v();"},
+		reject:        []string{"UnsupportedOperationException"},
 		selfContained: true,
 	},
 }
@@ -528,16 +664,21 @@ func TestDecompileReconstructions(t *testing.T) {
 
 func TestDecompileReconstructsControlFlowFixture(t *testing.T) {
 	source := decompileBaseline(t, "ControlFlow")
-	// Two branches, no loop: both come back as the expression they were written as.
+	// Every shape comes back as the statement it was written as.
 	for _, want := range []string{
 		"if (arg0 < 0) {",
 		"return arg0 >= arg1 && arg0 <= arg2;",
-		// The loops in the same class still say they are a later phase.
-		"cappu: loops are not decompiled yet",
+		"while (var2 < arg0) {", // the `for`, whose update is at the bottom
+		"while (arg0 > 0) {",
+		"} while (var1 < arg0);",
+		"java.lang.System.out.println(sum(5));",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("missing %q in:\n%s", want, source)
 		}
+	}
+	if strings.Contains(source, "not decompiled") {
+		t.Errorf("a method still bails:\n%s", source)
 	}
 }
 
@@ -618,6 +759,188 @@ func TestDecompileRecompilesJavacBranchesToTheSameBytecode(t *testing.T) {
 		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
 			javapText(t, roundTripped), javapText(t, classFile))
 	}
+}
+
+// Every loop shape javac writes. These reconstruct to source it compiles back to
+// the same bytecode from, which is the only oracle that can see an inverted test
+// or an arm on the wrong side - our own emitter lays branches out differently.
+const loopySource = `public class Loopy {
+  static int sum(int n) { int s = 0; for (int i = 0; i < n; i++) { s = s + i; } return s; }
+  static int down(int n) { int c = 0; while (n > 0) { c = c + n; n = n - 1; } return c; }
+  static int atLeastOnce(int n) { int i = 0; do { i = i + 3; } while (i < n); return i; }
+  static int breaks(int[] xs, int stop) { int t = 0; for (int i = 0; i < xs.length; i++) { if (xs[i] == stop) { break; } t = t + xs[i]; } return t; }
+  static int forever(int n) { int i = 0; while (true) { i = i + 2; if (i > n) { return i; } } }
+  static int both(int a, int b) { int t = 0; while (a > 0 && b > 0) { t = t + 1; a = a - 1; b = b - 2; } return t; }
+  static int either(int a, int b) { int t = 0; while (a > 0 || b > 0) { t = t + 1; a = a - 1; b = b - 1; } return t; }
+  static int ifInside(int n) { int t = 0; for (int i = 0; i < n; i++) { if (i % 2 == 0) { t = t + i; } else { t = t - i; } } return t; }
+  static int untilNull(java.lang.Object o, int n) { int i = 0; while (o == null && i < n) { i = i + 1; } return i; }
+  static long longLoop(long n) { long s = 0L; while (s < n) { s = s + 3L; } return s; }
+  static int arms(int a, int b) { int t = a; int i = 0; do { i = i + 1; if (i <= a) { t = t * i; if (a >= b) { continue; } } t = t * t; } while (i < b); return t; }
+  static int tail(int a, int b) { int u = b; int i = 0; do { i = i + 1; if (i > a) { u = u * u; } else { u = u - a; } u = u * (u + 1); } while (i < a); return u; }
+}`
+
+func TestDecompileRecompilesJavacLoopsToTheSameBytecode(t *testing.T) {
+	if !hasTool("javac") || !hasTool("javap") {
+		t.Skip("no JDK (javac/javap)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Loopy", loopySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "not decompiled") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Loopy", source)
+	if javapText(t, roundTripped) != javapText(t, classFile) {
+		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
+			javapText(t, roundTripped), javapText(t, classFile))
+	}
+}
+
+// A local first written inside a loop is declared at the top of the method, so
+// the recompiled slots do not line up with javac's - the bytecode is not
+// identical, but what it computes has to be. These run instead.
+const loopyRunSource = `public class LoopyRun {
+  static int nested(int n, int m) { int t = 0; for (int i = 0; i < n; i++) { for (int j = 0; j < m; j++) { t = t + i * j; } } return t; }
+  static int continues(int[] xs) { int t = 0; int i = 0; while (i < xs.length) { int v = xs[i]; i = i + 1; if (v < 0) { continue; } t = t + v; } return t; }
+  static int windows(int n) { int t = 0; int i = 0; while (i < n) { int step = i % 3 + 1; i = i + step; t = t + step * i; } return t; }
+  static int triangle(int n) { int t = 0; int i = 0; do { int row = 0; for (int j = 0; j <= i; j++) { row = row + j; } t = t + row; i = i + 1; } while (i < n); return t; }
+  static int breakOut(int a, int b) { int u = b; int i = 0; do { i = i + 1; u = a * 4; if (a == u) { break; } for (int j = 0; j < i; j++) { if (a != u) { u = a + b; } } } while (i < a); return u; }
+}`
+
+// The caller stays javac's, so only the class under test is swapped for the
+// decompiled one - `main` itself is full of calls, which is a later phase.
+const loopyDriverSource = `public class LoopyDriver {
+  public static void main(String[] args) {
+    int[] xs = { 3, -1, 4, -1, 5, 9, -2, 6 };
+    for (int n = -1; n < 6; n++) {
+      System.out.println(LoopyRun.nested(n, n + 1) + " " + LoopyRun.continues(xs)
+        + " " + LoopyRun.windows(n) + " " + LoopyRun.triangle(n)
+        + " " + LoopyRun.breakOut(n, n + 2));
+    }
+  }
+}`
+
+func TestDecompileRunsLikeJavacLoops(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "LoopyRun", loopyRunSource)
+	compileWithJavacOn(t, dir, "LoopyDriver", loopyDriverSource, dir)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "not decompiled") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "LoopyRun", source)
+	expected := runJava(t, dir, "LoopyDriver")
+	// `again` first, so the decompiled class is the one that runs.
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "LoopyDriver")
+	if actual != expected {
+		t.Errorf("the decompiled class runs differently:\n%s\n--- from ---\n%s", actual, expected)
+	}
+	if expected == "" {
+		t.Error("the driver printed nothing")
+	}
+}
+
+// runJava reports what the class's `main` printed.
+func runJava(t *testing.T, classPath, name string) string {
+	t.Helper()
+	out, err := exec.Command("java", "-cp", classPath, name).Output()
+	if err != nil {
+		t.Fatalf("java: %v", err)
+	}
+	return string(out)
+}
+
+// Every call shape javac writes: static, virtual, interface, private and
+// `super`, a `new`, a chain, a call whose value is dropped, and one inside a
+// loop. Raw `java.util.List` on purpose - the decompiler works off descriptors,
+// so a type argument would come back erased and only the signature would differ.
+const callsySource = `public class Callsy {
+  private int seed;
+  public Callsy(int seed) { this.seed = seed; }
+  private int twice(int v) { return v * 2; }
+  static int stat(int v) { return v + 1; }
+  int use(int v) { return this.twice(v) + stat(v); }
+  int chain(String s) { return s.trim().length(); }
+  static int iface(java.util.List xs) { return xs.size(); }
+  static Object make(int v) { return new Callsy(v); }
+  static int viaNew(int v) { return new Callsy(v).seed; }
+  static void discard(java.util.List xs) { xs.remove(0); }
+  static int nested(int v) { return stat(stat(stat(v))); }
+  static String str(Object o) { return o.toString(); }
+  static int cmp(String a, String b) { return a.compareTo(b); }
+  int loopCall(int n) { int t = 0; for (int i = 0; i < n; i++) { t = t + this.twice(i); } return t; }
+  static boolean eq(Object a, Object b) { return a.equals(b); }
+  static int len(String s) { if (s == null) { return 0; } return s.length(); }
+  int superHash() { return super.hashCode(); }
+  static long widen(int v) { return java.lang.Math.abs((long) v); }
+  static int both(int a, String s) { if (a > 0 && s.length() > 3) { return 1; } return 0; }
+  static int either(String s, int a) { if (s == null || a > 0) { return 1; } return 0; }
+  static int untilLen(String s) { int t = 0; while (t < s.length()) { t = t + 2; } return t; }
+  static int pick(boolean c, int a) { return c ? stat(a) : stat(-a); }
+  static String name(Object o) { return o == null ? "null" : o.toString(); }
+  static int callTail(int n) { int t = 0; int i = 0; do { if (i > 1) { t = t + stat(i); } else { t = t - stat(i); } t = t + stat(t); i = i + 1; } while (stat(i) < n); return t; }
+}`
+
+func TestDecompileRecompilesJavacCallsToTheSameBytecode(t *testing.T) {
+	if !hasTool("javac") || !hasTool("javap") {
+		t.Skip("no JDK (javac/javap)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Callsy", callsySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "not decompiled") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Callsy", source)
+	if javapText(t, roundTripped) != javapText(t, classFile) {
+		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
+			javapText(t, roundTripped), javapText(t, classFile))
+	}
+}
+
+// A static nested class is `new Outer.Inner(...)`; a true inner one is only
+// writable as `outer.new Inner(...)`, which needs the enclosing file. The
+// InnerClasses attribute of *this* file is what tells them apart - the first
+// constructor parameter cannot, since a static one may take the outer type too.
+func TestDecompileTellsAStaticNestedClassFromAnInnerOne(t *testing.T) {
+	program := NewProgram()
+	LoadJdkStub(program)
+	uri := URI("file:///Nested.java")
+	program.SetOpenDocument(uri, "public class Nested {"+
+		" static class St { int v; St(Nested n, int v) { this.v = v; } }"+
+		" class In { int v; In(int v) { this.v = v; } }"+
+		" static int useStatic(Nested n) { return new St(n, 3).v; }"+
+		" int useInner() { return new In(4).v; } }", 1)
+	classes := EmitSourceFile(program.GetSourceFile(uri), program, NewChecker(program), false)
+	for _, c := range classes {
+		if c.Name != "Nested" {
+			continue
+		}
+		source, err := Decompile(c.Bytes)
+		if err != nil {
+			t.Fatalf("decompile: %v", err)
+		}
+		for _, want := range []string{"new Nested.St(arg0, 3)", "cappu: an inner class constructor"} {
+			if !strings.Contains(source, want) {
+				t.Errorf("missing %q in:\n%s", want, source)
+			}
+		}
+		return
+	}
+	t.Fatal("class Nested was not emitted")
 }
 
 func TestDecompileWritesNestedTypeReferencesWithADot(t *testing.T) {

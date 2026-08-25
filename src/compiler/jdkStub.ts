@@ -206,10 +206,13 @@ class Double extends Number implements Comparable<Double> {
 
 class Float extends Number implements Comparable<Float> {
   public int compareTo(Float o) { return 0; }
+  public static float parseFloat(String s) { return 0; }
+  public static Float valueOf(float f) { return null; }
 }
 
 class Short extends Number implements Comparable<Short> {
   public int compareTo(Short o) { return 0; }
+  public static Short valueOf(short s) { return null; }
   public static short parseShort(String s) { return 0; }
   public static short parseShort(String s, int radix) { return 0; }
   public static Short valueOf(String s) { return null; }
@@ -217,6 +220,7 @@ class Short extends Number implements Comparable<Short> {
 
 class Byte extends Number implements Comparable<Byte> {
   public int compareTo(Byte o) { return 0; }
+  public static Byte valueOf(byte b) { return null; }
   public static byte parseByte(String s) { return 0; }
   public static byte parseByte(String s, int radix) { return 0; }
   public static Byte valueOf(String s) { return null; }
@@ -224,6 +228,7 @@ class Byte extends Number implements Comparable<Byte> {
 
 class Character implements Comparable<Character> {
   public char charValue() { return ' '; }
+  public static Character valueOf(char c) { return null; }
   public int compareTo(Character o) { return 0; }
   public static boolean isDigit(char c) { return false; }
   public static boolean isLetter(char c) { return false; }

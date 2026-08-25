@@ -661,3 +661,16 @@ at the caller.
 
 A TS `T | undefined` return that is not an error becomes `(T, bool, error)` in
 Go, since `error` is already spoken for by the bail path.
+
+## `Set` iteration order (TS) -> sorted slices (Go)
+
+A JS `Set`/`Map` iterates in insertion order, so TS code that picks "the first
+candidate that qualifies" is deterministic by accident. Go's map iteration is
+randomized, so the same loop can pick a different block on every run and the two
+builds drift - silently, since either answer is usually valid.
+
+Wherever a choice is made by scanning a set (the immediate post-dominator among
+the candidates, a loop's follow among its exits), collect into a slice and
+`sort.Ints` it first, and make the TS side sort too rather than leaning on
+insertion order. Sets that are only ever membership-tested (`body`, `visited`,
+`folded`) need none of this.

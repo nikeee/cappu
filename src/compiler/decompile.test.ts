@@ -1,5 +1,5 @@
-// Phases 1.3 and 1.4 of `cappu decompile` (nikeee/cappu#43): straight-line
-// bytecode, and branches without a loop, back to Java source.
+// Phases 1.3 to 1.5 of `cappu decompile` (nikeee/cappu#43): straight-line
+// bytecode, branches and loops, back to Java source.
 //
 // The class bytes come from test-fixtures/emitter/emit-baselines, which our own
 // emitter produced - so no JDK is needed here. Two tiers:
@@ -39,26 +39,33 @@ function classBytes(name: string): Uint8Array {
 }
 
 // Every class our emitter produced whose methods this phase reconstructs in
-// full - straight-line arithmetic, conversions, fields, arrays and casts.
+// full - arithmetic, conversions, fields, arrays, casts, control flow and calls.
 const FULLY_DECOMPILED = [
   "AnnAll",
   "Arithmetic",
   "ArrayLoad",
   "ArrayStore",
+  "BoundErasure",
+  "Boxing",
   "CastInstance",
   "Cl",
   "ClassLit",
+  "Compute",
   "Constants",
+  "ControlFlow",
   "Empty",
   "EnumAbstract$1",
   "EnumAbstract$2",
   "EnumMixed$1",
   "EnumMixed$2",
+  "EnumUnqualified",
   "Fields",
   "FloatArith",
   "FloatConst",
   "FloatConv",
   "Fold",
+  "Hello",
+  "ICast",
   "ICast$A",
   "ICast$B",
   "ISA",
@@ -66,14 +73,16 @@ const FULLY_DECOMPILED = [
   "ImplicitSealed",
   "IntConv",
   "IntLiterals",
+  "Invoke",
   "Locals",
   "LongArith",
   "Methods",
   "ModifiedFields",
+  "Nest",
   "Nest$Counter",
   "Nest$Point",
-  "Nest",
   "NewArray",
+  "PrivateCall",
   "Pt",
   "ReturnLiterals",
   "Returns",
@@ -87,21 +96,13 @@ const FULLY_DECOMPILED = [
   "VarargsAndAbstract",
 ];
 
-// Classes kept for the bail-out rendering: control flow (phase 1.4+) and method
-// calls (phase 1.6) are not this phase's job, and must say so.
+// Classes kept for the bail-out rendering: string concatenation (an
+// invokedynamic), an inner class's constructor and an array initializer are not
+// this phase's job, and must say so.
 const NOT_DECOMPILED = [
-  "BoundErasure",
-  "Boxing",
-  "Compute",
   "Concat",
-  "ControlFlow",
   "EnumAbstract",
   "EnumMixed",
-  "EnumUnqualified",
-  "Hello",
-  "ICast",
-  "Invoke",
-  "PrivateCall",
   "QualifiedAnon$1",
   "QualifiedAnon$Inner",
   "QualifiedAnon",
@@ -193,7 +194,20 @@ const STUB_GAP = ["ClassLit"];
 // forbids anyone to write - so nothing can re-emit it.
 const ENUM_CONSTANT_BODIES = ["EnumAbstract$1", "EnumAbstract$2", "EnumMixed$1", "EnumMixed$2"];
 
-const NO_ROUNDTRIP = [...STUB_GAP, "Nest$Counter", ...ENUM_CONSTANT_BODIES];
+// Reconstructions this oracle cannot judge, for reasons of its own:
+//   - `ICast` names two nested types that live outside the one class the
+//     decompiler writes, so re-emitting the file alone cannot resolve them;
+//   - `BoundErasure` declares `T get()`, and the decompiler works off the
+//     descriptor, so what comes back is the erased `CharSequence get()` - a
+//     different member, not different code;
+//   - `EnumUnqualified` declares a local inside a loop, which is hoisted to the
+//     top of the method and shifts every slot after it;
+//   - `Boxing` calls `Integer.intValue()`, and our emitter writes the *declaring*
+//     class into the method ref (`Number.intValue`) where javac writes the
+//     receiver's static type. That is an emitter bug, not a decompiler one.
+const EMITTER_GAP = ["ICast", "BoundErasure", "EnumUnqualified", "Boxing"];
+
+const NO_ROUNDTRIP = [...STUB_GAP, "Nest$Counter", ...ENUM_CONSTANT_BODIES, ...EMITTER_GAP];
 
 for (const name of FULLY_DECOMPILED.filter(n => !NO_ROUNDTRIP.includes(n))) {
   test(`recompiles to the same bytecode: ${name}`, () => {
@@ -243,6 +257,7 @@ function hasTool(name: string): boolean {
 }
 const HAS_JAVAC = hasTool("javac");
 const HAS_JAVAP = hasTool("javap");
+const HAS_JAVA = hasTool("java");
 
 // Only javac produces these: NaN and the infinities reach the constant pool
 // because `Float.NaN` and friends are constant variables, and our own emitter
@@ -321,12 +336,148 @@ test(
   },
 );
 
+// Every loop shape javac writes. These reconstruct to source it compiles back to
+// the same bytecode from, which is the only oracle that can see an inverted test
+// or an arm on the wrong side - our own emitter lays branches out differently.
+const LOOPY_SOURCE =
+  "public class Loopy {\n" +
+  "  static int sum(int n) { int s = 0; for (int i = 0; i < n; i++) { s = s + i; } return s; }\n" +
+  "  static int down(int n) { int c = 0; while (n > 0) { c = c + n; n = n - 1; } return c; }\n" +
+  "  static int atLeastOnce(int n) { int i = 0; do { i = i + 3; } while (i < n); return i; }\n" +
+  "  static int breaks(int[] xs, int stop) { int t = 0; for (int i = 0; i < xs.length; i++) { if (xs[i] == stop) { break; } t = t + xs[i]; } return t; }\n" +
+  "  static int forever(int n) { int i = 0; while (true) { i = i + 2; if (i > n) { return i; } } }\n" +
+  "  static int both(int a, int b) { int t = 0; while (a > 0 && b > 0) { t = t + 1; a = a - 1; b = b - 2; } return t; }\n" +
+  "  static int either(int a, int b) { int t = 0; while (a > 0 || b > 0) { t = t + 1; a = a - 1; b = b - 1; } return t; }\n" +
+  "  static int ifInside(int n) { int t = 0; for (int i = 0; i < n; i++) { if (i % 2 == 0) { t = t + i; } else { t = t - i; } } return t; }\n" +
+  "  static int untilNull(java.lang.Object o, int n) { int i = 0; while (o == null && i < n) { i = i + 1; } return i; }\n" +
+  "  static long longLoop(long n) { long s = 0L; while (s < n) { s = s + 3L; } return s; }\n" +
+  // An arm of an `if` that ends in `continue` never reaches the merge point, and
+  // a `do` whose test shares its block with the tail of the body still has one.
+  "  static int arms(int a, int b) { int t = a; int i = 0; do { i = i + 1; if (i <= a) { t = t * i; if (a >= b) { continue; } } t = t * t; } while (i < b); return t; }\n" +
+  "  static int tail(int a, int b) { int u = b; int i = 0; do { i = i + 1; if (i > a) { u = u * u; } else { u = u - a; } u = u * (u + 1); } while (i < a); return u; }\n" +
+  "}";
+
+test(
+  "recompiles javac's own loops to the same bytecode",
+  { skip: HAS_JAVAC && HAS_JAVAP ? false : "no JDK (javac/javap)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-loopy-");
+    const classFile = compileWithJavac(LOOPY_SOURCE, "Loopy", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("not decompiled");
+    const roundTripped = compileWithJavac(source, "Loopy", join(dir.path, "again"));
+    expect(javap(roundTripped)).toEqual(javap(classFile));
+  },
+);
+
+// A local first written inside a loop is declared at the top of the method, so
+// the recompiled slots do not line up with javac's - the bytecode is not
+// identical, but what it computes has to be. These run instead.
+const LOOPY_RUN_SOURCE =
+  "public class LoopyRun {\n" +
+  "  static int nested(int n, int m) { int t = 0; for (int i = 0; i < n; i++) { for (int j = 0; j < m; j++) { t = t + i * j; } } return t; }\n" +
+  "  static int continues(int[] xs) { int t = 0; int i = 0; while (i < xs.length) { int v = xs[i]; i = i + 1; if (v < 0) { continue; } t = t + v; } return t; }\n" +
+  "  static int windows(int n) { int t = 0; int i = 0; while (i < n) { int step = i % 3 + 1; i = i + step; t = t + step * i; } return t; }\n" +
+  "  static int triangle(int n) { int t = 0; int i = 0; do { int row = 0; for (int j = 0; j <= i; j++) { row = row + j; } t = t + row; i = i + 1; } while (i < n); return t; }\n" +
+  // A `do` whose body starts with a statement and leaves through a `break`: what
+  // the head branches to is the break, not the end of the loop.
+  "  static int breakOut(int a, int b) { int u = b; int i = 0; do { i = i + 1; u = a * 4; if (a == u) { break; } for (int j = 0; j < i; j++) { if (a != u) { u = a + b; } } } while (i < a); return u; }\n" +
+  "}";
+
+// The caller stays javac's, so only the class under test is swapped for the
+// decompiled one - `main` itself is full of calls, which is a later phase.
+const LOOPY_DRIVER_SOURCE =
+  "public class LoopyDriver {\n" +
+  "  public static void main(String[] args) {\n" +
+  "    int[] xs = { 3, -1, 4, -1, 5, 9, -2, 6 };\n" +
+  "    for (int n = -1; n < 6; n++) {\n" +
+  '      System.out.println(LoopyRun.nested(n, n + 1) + " " + LoopyRun.continues(xs)\n' +
+  '        + " " + LoopyRun.windows(n) + " " + LoopyRun.triangle(n)\n' +
+  '        + " " + LoopyRun.breakOut(n, n + 2));\n' +
+  "    }\n" +
+  "  }\n" +
+  "}";
+
+test(
+  "runs like javac's own loops when the slots cannot line up",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-loopyrun-");
+    const classFile = compileWithJavac(LOOPY_RUN_SOURCE, "LoopyRun", dir.path);
+    compileWithJavac(LOOPY_DRIVER_SOURCE, "LoopyDriver", dir.path, dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("not decompiled");
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "LoopyRun", again);
+    const expected = execFileSync("java", ["-cp", dir.path, "LoopyDriver"], { encoding: "utf8" });
+    // `again` first, so the decompiled class is the one that runs.
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "LoopyDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).not.toEqual("");
+  },
+);
+
+// Every call shape javac writes: static, virtual, interface, private and
+// `super`, a `new`, a chain, a call whose value is dropped, and one inside a
+// loop. Raw `java.util.List` on purpose - the decompiler works off descriptors,
+// so a type argument would come back erased and only the signature would differ.
+const CALLSY_SOURCE =
+  "public class Callsy {\n" +
+  "  private int seed;\n" +
+  "  public Callsy(int seed) { this.seed = seed; }\n" +
+  "  private int twice(int v) { return v * 2; }\n" +
+  "  static int stat(int v) { return v + 1; }\n" +
+  "  int use(int v) { return this.twice(v) + stat(v); }\n" +
+  "  int chain(String s) { return s.trim().length(); }\n" +
+  "  static int iface(java.util.List xs) { return xs.size(); }\n" +
+  "  static Object make(int v) { return new Callsy(v); }\n" +
+  "  static int viaNew(int v) { return new Callsy(v).seed; }\n" +
+  "  static void discard(java.util.List xs) { xs.remove(0); }\n" +
+  "  static int nested(int v) { return stat(stat(stat(v))); }\n" +
+  "  static String str(Object o) { return o.toString(); }\n" +
+  "  static int cmp(String a, String b) { return a.compareTo(b); }\n" +
+  "  int loopCall(int n) { int t = 0; for (int i = 0; i < n; i++) { t = t + this.twice(i); } return t; }\n" +
+  "  static boolean eq(Object a, Object b) { return a.equals(b); }\n" +
+  "  static int len(String s) { if (s == null) { return 0; } return s.length(); }\n" +
+  "  int superHash() { return super.hashCode(); }\n" +
+  "  static long widen(int v) { return java.lang.Math.abs((long) v); }\n" +
+  "  static int both(int a, String s) { if (a > 0 && s.length() > 3) { return 1; } return 0; }\n" +
+  "  static int either(String s, int a) { if (s == null || a > 0) { return 1; } return 0; }\n" +
+  "  static int untilLen(String s) { int t = 0; while (t < s.length()) { t = t + 2; } return t; }\n" +
+  "  static int pick(boolean c, int a) { return c ? stat(a) : stat(-a); }\n" +
+  '  static String name(Object o) { return o == null ? "null" : o.toString(); }\n' +
+  // A `do` whose latch is body-tail *calls* plus the test: cutting it would
+  // put a `continue` in front of the tail and drop it.
+  "  static int callTail(int n) { int t = 0; int i = 0; do { if (i > 1) { t = t + stat(i); } else { t = t - stat(i); } t = t + stat(t); i = i + 1; } while (stat(i) < n); return t; }\n" +
+  "}\n";
+
+test(
+  "recompiles javac's own calls to the same bytecode",
+  { skip: HAS_JAVAC && HAS_JAVAP ? false : "no JDK (javac/javap)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-callsy-");
+    const classFile = compileWithJavac(CALLSY_SOURCE, "Callsy", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("not decompiled");
+    const roundTripped = compileWithJavac(source, "Callsy", join(dir.path, "again"));
+    expect(javap(roundTripped)).toEqual(javap(classFile));
+  },
+);
+
 /** Compile one source file with javac and return the .class path. */
-function compileWithJavac(source: string, name: string, outDir: string): string {
+function compileWithJavac(
+  source: string,
+  name: string,
+  outDir: string,
+  classPath?: string,
+): string {
   mkdirSync(outDir, { recursive: true });
   const javaFile = join(outDir, `${name}.java`);
   writeFileSync(javaFile, source);
-  execFileSync("javac", ["--release", "21", "-d", outDir, javaFile], { stdio: "pipe" });
+  const path = classPath === undefined ? [] : ["-cp", classPath];
+  execFileSync("javac", ["--release", "21", "-d", outDir, ...path, javaFile], { stdio: "pipe" });
   return join(outDir, `${name}.class`);
 }
 
@@ -504,19 +655,82 @@ const RECONSTRUCTIONS: {
   },
   {
     name: "Loop",
-    // Phase 1.5; until then it has to say so rather than produce something wrong.
+    // A `for` is a `while` whose update sits at the bottom of the body - the same
+    // bytecode, so that is what it comes back as.
     source:
       "class Loop { static int f(int n) { int s = 0; for (int i = 0; i < n; i++) s += i; return s; } }",
-    expect: ["loops are not decompiled yet", "not decompiled"],
+    expect: ["while (var2 < arg0) {", "var1 = var1 + var2;", "var2++;"],
+    reject: ["not decompiled"],
+    selfContained: true,
+  },
+  {
+    name: "WhileLoop",
+    source:
+      "class WhileLoop { static int f(int n) { int c = 0; while (n > 0) { c++; n--; } return c; } }",
+    expect: ["while (arg0 > 0) {"],
+    reject: ["while (true)", "not decompiled"],
+    selfContained: true,
+  },
+  {
+    name: "DoLoop",
+    // The test is at the foot, so the body runs before it is asked.
+    source:
+      "class DoLoop { static int f(int n) { int i = 0; do { i += 3; } while (i < n); return i; } }",
+    expect: ["do {", "var1 = var1 + 3;", "} while (var1 < arg0);"],
+    reject: ["not decompiled"],
+    selfContained: true,
+  },
+  {
+    name: "Forever",
+    source:
+      "class Forever { static int f(int n) { int i = 0; while (true) { i += 2; if (i > n) { break; } i += n; } return i; } }",
+    expect: ["while (true) {", "break;"],
+    reject: ["not decompiled"],
+    selfContained: true,
+  },
+  {
+    name: "BreakOut",
+    source:
+      "class BreakOut { static int f(int[] xs, int stop) { int t = 0;" +
+      " for (int i = 0; i < xs.length; i++) { if (xs[i] == stop) { break; } t += xs[i]; } return t; } }",
+    expect: ["while (var3 < arg0.length) {", "break;"],
+    reject: ["not decompiled"],
+    selfContained: true,
+  },
+  {
+    name: "Nested",
+    source:
+      "class Nested { static int f(int n, int m) { int t = 0;" +
+      " for (int i = 0; i < n; i++) { for (int j = 0; j < m; j++) { t += i * j; } } return t; } }",
+    expect: ["while (var3 < arg0) {", "while (var4 < arg1) {"],
+    reject: ["not decompiled"],
+    selfContained: true,
+  },
+  {
+    name: "LoopAnd",
+    // Both tests belong to the loop's own condition, not to an `if` inside it.
+    source:
+      "class LoopAnd { static int f(int a, int b) { int t = 0; while (a > 0 && b > 0) { t++; a--; b--; } return t; } }",
+    expect: ["while (arg0 > 0 && arg1 > 0) {"],
+    reject: ["not decompiled"],
+    selfContained: true,
+  },
+  {
+    name: "LoopContinue",
+    source:
+      "class LoopContinue { static int f(int[] xs) { int t = 0; int i = 0;" +
+      " while (i < xs.length) { int v = xs[i]; i++; if (v < 0) { continue; } t += v; } return t; } }",
+    expect: ["while (var2 < arg0.length) {"],
+    reject: ["not decompiled"],
     selfContained: true,
   },
   {
     name: "Blank",
     source: "class Blank { static int v() { return 1; } static final int N; static { N = v(); } }",
-    // The initializer could not be reconstructed, so `final` cannot stand, and
-    // a static initializer may not throw.
-    expect: ["static int N;"],
-    reject: ["static final int N", "UnsupportedOperationException"],
+    // A blank `static final` is only assignable in the initializer, so the
+    // initializer has to come back for the `final` to stand.
+    expect: ["static final int N;", "N = v();"],
+    reject: ["UnsupportedOperationException"],
     selfContained: true,
   },
 ];
@@ -532,6 +746,25 @@ for (const { name, source, expect: wanted, reject, selfContained } of RECONSTRUC
   });
 }
 
+// A static nested class is `new Outer.Inner(...)`; a true inner one is only
+// writable as `outer.new Inner(...)`, which needs the enclosing file. The
+// InnerClasses attribute of *this* file is what tells them apart - the first
+// constructor parameter cannot, since a static one may take the outer type too.
+test("tells a static nested class from an inner one", () => {
+  const emitted = emitClasses(
+    "Nested",
+    "public class Nested { static class St { int v; St(Nested n, int v) { this.v = v; } }" +
+      " class In { int v; In(int v) { this.v = v; } }" +
+      " static int useStatic(Nested n) { return new St(n, 3).v; }" +
+      " int useInner() { return new In(4).v; } }",
+  );
+  const outer = emitted.find(c => c.name === "Nested");
+  expect(outer).toBeDefined();
+  const source = decompileToSource(outer!.bytes);
+  expect(source).toContain("new Nested.St(arg0, 3)");
+  expect(source).toContain("cappu: an inner class constructor");
+});
+
 test("writes a nested type reference with a dot, not the binary $", () => {
   const source = decompileToSource(
     emitClass("Outer", "class Outer { static class Inner {} static Inner get() { return null; } }"),
@@ -541,11 +774,14 @@ test("writes a nested type reference with a dot, not the binary $", () => {
 
 test("reconstructs the control flow of the ControlFlow fixture", () => {
   const source = decompileToSource(classBytes("ControlFlow"));
-  // Two branches, no loop: both come back as the expression they were written as.
+  // Every shape comes back as the statement it was written as.
   expect(source).toContain("if (arg0 < 0) {");
   expect(source).toContain("return arg0 >= arg1 && arg0 <= arg2;");
-  // The loops in the same class still say they are a later phase.
-  expect(source).toContain("cappu: loops are not decompiled yet");
+  expect(source).toContain("while (var2 < arg0) {"); // the `for`, whose update is at the bottom
+  expect(source).toContain("while (arg0 > 0) {");
+  expect(source).toContain("} while (var1 < arg0);");
+  expect(source).toContain("java.lang.System.out.println(sum(5));");
+  expect(source).not.toContain("not decompiled");
 });
 
 test("chains to the superclass constructor", () => {

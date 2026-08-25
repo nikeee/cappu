@@ -295,6 +295,28 @@ export function className(
   return entry?.tag === "class" ? utf8(pool, entry.nameIndex) : undefined;
 }
 
+/**
+ * The access flags of every nested class this file names, from its
+ * `InnerClasses` attribute (JVMS 4.7.6), keyed by binary name. It is what says
+ * whether `Outer$Inner` is `static`: an inner class's constructor takes the
+ * enclosing instance, which source cannot pass.
+ */
+export function innerClassFlags(classFile: ClassFile): Map<string, number> {
+  const flags = new Map<string, number>();
+  const attribute = findAttribute(classFile.attributes, "InnerClasses");
+  if (attribute === undefined) return flags;
+  const c = new Cursor(attribute.bytes);
+  const count = c.u2();
+  for (let i = 0; i < count; i++) {
+    const inner = className(classFile.pool, c.u2());
+    c.u2(); // the enclosing class, which the name already carries
+    c.u2(); // the simple name, empty for an anonymous class
+    const access = c.u2();
+    if (inner !== undefined) flags.set(inner, access);
+  }
+  return flags;
+}
+
 export interface MemberRef {
   readonly owner: string;
   readonly name: string;

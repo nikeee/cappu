@@ -6,7 +6,7 @@ public class QualifiedNew {
   }
 
   static int make(QualifiedNew arg0) {
-    /* cappu: unsupported instruction new; the bytecode is:
+    /* cappu: an inner class constructor; the bytecode is:
      * 0: new #17
      * 3: dup
      * 4: aload_0
