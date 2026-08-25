@@ -2,7 +2,11 @@ package cli
 
 // Mirrors src/cli/decompile.test.ts: `cappu decompile` runs without a project
 // config and reports unreadable input. The disassembly itself is covered by
-// internal/compiler/disasm_test.go.
+// internal/compiler/disasm_test.go, the reconstruction by
+// internal/compiler/decompile_test.go.
+//
+// The source baselines are the ones the TS build writes, so comparing against
+// them here is the TS/Go parity check for the decompiler.
 
 import (
 	"io"
@@ -18,6 +22,10 @@ var arithmeticClass = filepath.Join(
 
 // runDecompile captures what the command writes to stdout and stderr.
 func runDecompile(t *testing.T, files ...string) (code int, stdout, stderr string) {
+	return runDecompileMode(t, false, files...)
+}
+
+func runDecompileMode(t *testing.T, disasm bool, files ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	outRead, outWrite, err := os.Pipe()
 	if err != nil {
@@ -36,7 +44,7 @@ func runDecompile(t *testing.T, files ...string) (code int, stdout, stderr strin
 		os.Stdout, os.Stderr = oldOut, oldErr
 	}()
 	os.Stdout, os.Stderr = outWrite, errWrite
-	code = RunDecompile(files)
+	code = RunDecompile(files, disasm)
 	os.Stdout, os.Stderr = oldOut, oldErr
 	_ = outWrite.Close()
 	_ = errWrite.Close()
@@ -53,8 +61,22 @@ func readAll(r *os.File) <-chan string {
 	return done
 }
 
-func TestDecompilePrintsListing(t *testing.T) {
+func TestDecompilePrintsSource(t *testing.T) {
 	code, stdout, _ := runDecompile(t, arithmeticClass)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	for _, want := range []string{
+		"class Arithmetic {", "int add(int arg0, int arg1) {", "return arg0 + arg1;",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestDecompilePrintsListingWithDisasm(t *testing.T) {
+	code, stdout, _ := runDecompileMode(t, true, arithmeticClass)
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
@@ -62,6 +84,40 @@ func TestDecompilePrintsListing(t *testing.T) {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout missing %q:\n%s", want, stdout)
 		}
+	}
+}
+
+// Every baseline the TS build wrote must come back byte for byte.
+func TestDecompileMatchesSourceBaselines(t *testing.T) {
+	baselines := filepath.Join("..", "..", "..", "test-fixtures", "decompiler", "source-baselines")
+	entries, err := os.ReadDir(baselines)
+	if err != nil {
+		t.Fatalf("read source baselines: %v", err)
+	}
+	for _, entry := range entries {
+		name := strings.TrimSuffix(entry.Name(), ".java")
+		if name == entry.Name() {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			classBytes, err := os.ReadFile(filepath.Join(
+				"..", "..", "..", "test-fixtures", "emitter", "emit-baselines", name+".class"))
+			if err != nil {
+				t.Fatalf("read class: %v", err)
+			}
+			want, err := os.ReadFile(filepath.Join(baselines, entry.Name()))
+			if err != nil {
+				t.Fatalf("read baseline: %v", err)
+			}
+			got, err := DecompileToSource(classBytes)
+			if err != nil {
+				t.Fatalf("decompile: %v", err)
+			}
+			if got != string(want) {
+				t.Errorf("%s differs from the baseline:\n--- got ---\n%s\n--- want ---\n%s",
+					name, got, want)
+			}
+		})
 	}
 }
 

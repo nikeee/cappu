@@ -140,7 +140,7 @@ const COMMAND_GROUPS: HelpGroup[] = [
       {
         name: "decompile",
         args: "<file.class>...",
-        desc: "Print the bytecode of compiled .class files, in javap -c -p layout (no JDK needed)",
+        desc: "Reconstruct Java source from compiled .class files (no JDK needed); --disasm prints the bytecode in javap -c -p layout instead",
       },
       {
         name: "format",
@@ -326,6 +326,7 @@ const { values, positionals } = (() => {
         locked: { type: "boolean", default: false },
         write: { type: "boolean", short: "w", default: false },
         "with-schema": { type: "boolean", default: false },
+        disasm: { type: "boolean", default: false },
         yes: { type: "boolean", short: "y", default: false },
         json: { type: "boolean", default: false },
         format: { type: "string" },
@@ -412,7 +413,7 @@ switch (command) {
     runConfigSchema();
   // falls through: runConfigSchema exits the process (never returns)
   case "decompile":
-    runDecompile(files); // reads class files directly: no project config needed
+    runDecompile(files, values.disasm); // reads class files directly: no project config needed
   // falls through: runDecompile exits the process (never returns)
 }
 

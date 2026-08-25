@@ -1,6 +1,6 @@
 // `cappu decompile` end to end: the command runs without a project config and
-// reports unreadable input. The disassembly itself is covered by
-// src/compiler/disasm.test.ts.
+// reports unreadable input. The reconstructed source is covered by
+// src/compiler/decompile.test.ts, the disassembly by src/compiler/disasm.test.ts.
 //
 // runDecompile ends the process, so it is exercised through a real cli invocation.
 
@@ -40,9 +40,18 @@ function run(cwd: string, ...args: string[]): { status: number; stdout: string; 
   }
 }
 
-test("prints a javap-style listing without a project config", () => {
+test("prints Java source without a project config", () => {
   using dir = TempDir.create("cappu-decompile-cli-");
   const { status, stdout } = run(dir.path, classFile);
+  expect(status).toBe(0);
+  expect(stdout).toContain("class Arithmetic {");
+  expect(stdout).toContain("int add(int arg0, int arg1) {");
+  expect(stdout).toContain("return arg0 + arg1;");
+});
+
+test("prints a javap-style listing with --disasm", () => {
+  using dir = TempDir.create("cappu-decompile-cli-");
+  const { status, stdout } = run(dir.path, "--disasm", classFile);
   expect(status).toBe(0);
   expect(stdout).toContain("class Arithmetic {");
   expect(stdout).toContain("0: iload_1");

@@ -475,6 +475,14 @@ type Instruction struct {
 	HasComment bool
 	// ExtraLines are the `{ ... }` body lines of a table/lookupswitch.
 	ExtraLines []string
+	// Arg is the instruction's numeric operand, for consumers that need it
+	// structured rather than rendered (decompile.go): a constant-pool index, a
+	// local slot or an immediate value, depending on the mnemonic. 0 when there
+	// is none.
+	Arg int
+	// Arg2 is the second numeric operand: the `iinc` delta, `multianewarray`
+	// dimensions.
+	Arg2 int
 }
 
 // Bounds-checked, because the code array comes straight from the file: an
@@ -572,14 +580,17 @@ func DecodeInstructions(classFile *ClassFile, code []byte) ([]Instruction, error
 		case operandNone:
 		case operandLocal:
 			if wide {
-				instruction.Operand = strconv.Itoa(int(c.u2()))
+				instruction.Arg = int(c.u2())
 			} else {
-				instruction.Operand = strconv.Itoa(int(c.u1()))
+				instruction.Arg = int(c.u1())
 			}
+			instruction.Operand = strconv.Itoa(instruction.Arg)
 		case operandI1:
-			instruction.Operand = strconv.Itoa(int(c.i1()))
+			instruction.Arg = int(c.i1())
+			instruction.Operand = strconv.Itoa(instruction.Arg)
 		case operandI2:
-			instruction.Operand = strconv.Itoa(int(c.i2()))
+			instruction.Arg = int(c.i2())
+			instruction.Operand = strconv.Itoa(instruction.Arg)
 		case operandCp1, operandCp2:
 			var index uint16
 			if kind == operandCp1 {
@@ -587,6 +598,7 @@ func DecodeInstructions(classFile *ClassFile, code []byte) ([]Instruction, error
 			} else {
 				index = c.u2()
 			}
+			instruction.Arg = int(index)
 			instruction.Operand = fmt.Sprintf("#%d", index)
 			instruction.Comment, instruction.HasComment = constantComment(classFile, index)
 		case operandBranch2:
@@ -600,6 +612,7 @@ func DecodeInstructions(classFile *ClassFile, code []byte) ([]Instruction, error
 			} else {
 				slot, delta = int(c.u1()), int(c.i1())
 			}
+			instruction.Arg, instruction.Arg2 = slot, delta
 			instruction.Operand = fmt.Sprintf("%d, %d", slot, delta)
 		case operandAtype:
 			name, ok := arrayTypes[c.u1()]
@@ -611,16 +624,19 @@ func DecodeInstructions(classFile *ClassFile, code []byte) ([]Instruction, error
 			index := c.u2()
 			count := c.u1()
 			c.u1() // the required trailing zero byte
+			instruction.Arg, instruction.Arg2 = int(index), int(count)
 			instruction.Operand = fmt.Sprintf("#%d,  %d", index, count)
 			instruction.Comment, instruction.HasComment = constantComment(classFile, index)
 		case operandInvokeDynamic:
 			index := c.u2()
 			c.u2() // two zero bytes
+			instruction.Arg = int(index)
 			instruction.Operand = fmt.Sprintf("#%d,  0", index)
 			instruction.Comment, instruction.HasComment = constantComment(classFile, index)
 		case operandMultiANewArray:
 			index := c.u2()
 			dimensions := c.u1()
+			instruction.Arg, instruction.Arg2 = int(index), int(dimensions)
 			instruction.Operand = fmt.Sprintf("#%d,  %d", index, dimensions)
 			instruction.Comment, instruction.HasComment = constantComment(classFile, index)
 		case operandTableSwitch:

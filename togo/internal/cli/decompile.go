@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/nikeee/cappu/internal/compiler"
+	"github.com/nikeee/cappu/internal/format"
 )
 
 // Node and Go word their I/O errors differently, so both builds map the cases
@@ -28,11 +29,26 @@ func readErrorText(err error) string {
 	return "cannot read file"
 }
 
-// RunDecompile handles `cappu decompile`: print the bytecode of .class files,
-// in `javap -c -p` layout (#43). Reconstructing Java source is a later phase,
-// which is why there is no output-format flag yet.
+// DecompileToSource reconstructs Java source from one class file. The
+// decompiler emits rough text; the formatter lays it out. A body this phase
+// cannot reconstruct carries its disassembly as a comment, which the formatter
+// may refuse - the unformatted source is still the right answer then.
+func DecompileToSource(b []byte) (string, error) {
+	source, err := compiler.Decompile(b)
+	if err != nil {
+		return "", err
+	}
+	formatted, err := format.FormatSource(source, format.FormatOptions{}, "")
+	if err != nil {
+		return source, nil
+	}
+	return formatted, nil
+}
+
+// RunDecompile handles `cappu decompile`: reconstruct Java source from .class
+// files, or print their bytecode in `javap -c -p` layout with --disasm (#43).
 // Port of src/cli/decompile.ts.
-func RunDecompile(files []string) int {
+func RunDecompile(files []string, disasm bool) int {
 	if len(files) == 0 {
 		fmt.Fprint(os.Stderr, "usage: cappu decompile <file.class> ...\n")
 		return 2
@@ -42,7 +58,11 @@ func RunDecompile(files []string) int {
 		bytes, err := os.ReadFile(file)
 		if err == nil {
 			var text string
-			text, err = compiler.Disassemble(bytes)
+			if disasm {
+				text, err = compiler.Disassemble(bytes)
+			} else {
+				text, err = DecompileToSource(bytes)
+			}
 			if err == nil {
 				fmt.Print(text)
 				continue

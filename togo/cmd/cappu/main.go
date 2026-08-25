@@ -59,7 +59,7 @@ type CLI struct {
 	Compile      compileCmd      `cmd:"" help:"Compile .java files to .class bytecode"`
 	Check        checkCmd        `cmd:"" help:"Type-check with cappu's own checker (the LSP's diagnostics) without writing class files"`
 	Format       formatCmd       `cmd:"" help:"Format .java files (google-java-format compatible)"`
-	Decompile    decompileCmd    `cmd:"" help:"Print the bytecode of compiled .class files, in javap -c -p layout (no JDK needed)"`
+	Decompile    decompileCmd    `cmd:"" help:"Reconstruct Java source from compiled .class files (no JDK needed); --disasm prints the bytecode in javap -c -p layout instead"`
 }
 
 // --- exit-code plumbing ------------------------------------------------------
@@ -484,12 +484,13 @@ func (c *checkCmd) Run(a *appState) error {
 }
 
 type decompileCmd struct {
-	Files []string `arg:"" optional:"" help:"The .class files to disassemble"`
+	Files  []string `arg:"" optional:"" help:"The .class files to decompile"`
+	Disasm bool     `help:"Print the bytecode in javap -c -p layout instead of Java source"`
 }
 
 // Reads class files directly: no project config needed.
 func (c *decompileCmd) Run(_ *appState) error {
-	return exit(cli.RunDecompile(c.Files))
+	return exit(cli.RunDecompile(c.Files, c.Disasm))
 }
 
 type formatCmd struct {
