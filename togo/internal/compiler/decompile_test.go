@@ -886,6 +886,8 @@ const callsySource = `public class Callsy {
   static int both(int a, String s) { if (a > 0 && s.length() > 3) { return 1; } return 0; }
   static int either(String s, int a) { if (s == null || a > 0) { return 1; } return 0; }
   static int untilLen(String s) { int t = 0; while (t < s.length()) { t = t + 2; } return t; }
+  static int pick(boolean c, int a) { return c ? stat(a) : stat(-a); }
+  static String name(Object o) { return o == null ? "null" : o.toString(); }
 }`
 
 func TestDecompileRecompilesJavacCallsToTheSameBytecode(t *testing.T) {
@@ -906,6 +908,38 @@ func TestDecompileRecompilesJavacCallsToTheSameBytecode(t *testing.T) {
 		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
 			javapText(t, roundTripped), javapText(t, classFile))
 	}
+}
+
+// A static nested class is `new Outer.Inner(...)`; a true inner one is only
+// writable as `outer.new Inner(...)`, which needs the enclosing file. The
+// InnerClasses attribute of *this* file is what tells them apart - the first
+// constructor parameter cannot, since a static one may take the outer type too.
+func TestDecompileTellsAStaticNestedClassFromAnInnerOne(t *testing.T) {
+	program := NewProgram()
+	LoadJdkStub(program)
+	uri := URI("file:///Nested.java")
+	program.SetOpenDocument(uri, "public class Nested {"+
+		" static class St { int v; St(Nested n, int v) { this.v = v; } }"+
+		" class In { int v; In(int v) { this.v = v; } }"+
+		" static int useStatic(Nested n) { return new St(n, 3).v; }"+
+		" int useInner() { return new In(4).v; } }", 1)
+	classes := EmitSourceFile(program.GetSourceFile(uri), program, NewChecker(program), false)
+	for _, c := range classes {
+		if c.Name != "Nested" {
+			continue
+		}
+		source, err := Decompile(c.Bytes)
+		if err != nil {
+			t.Fatalf("decompile: %v", err)
+		}
+		for _, want := range []string{"new Nested.St(arg0, 3)", "cappu: an inner class constructor"} {
+			if !strings.Contains(source, want) {
+				t.Errorf("missing %q in:\n%s", want, source)
+			}
+		}
+		return
+	}
+	t.Fatal("class Nested was not emitted")
 }
 
 func TestDecompileWritesNestedTypeReferencesWithADot(t *testing.T) {

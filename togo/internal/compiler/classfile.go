@@ -540,6 +540,43 @@ func FindAttribute(attributes []Attribute, name string) (Attribute, bool) {
 	return Attribute{}, false
 }
 
+// InnerClassFlags reports the access flags of every nested class this file
+// names, from its InnerClasses attribute (JVMS 4.7.6), keyed by binary name. It
+// is what says whether `Outer$Inner` is `static`: an inner class's constructor
+// takes the enclosing instance, which source cannot pass.
+func InnerClassFlags(classFile *ClassFile) map[string]uint16 {
+	flags := map[string]uint16{}
+	attribute, ok := FindAttribute(classFile.Attributes, "InnerClasses")
+	if !ok {
+		return flags
+	}
+	c := &cursor{b: attribute.Bytes}
+	count, err := c.u2()
+	if err != nil {
+		return flags
+	}
+	for i := 0; i < int(count); i++ {
+		index, err := c.u2()
+		if err != nil {
+			return flags
+		}
+		if _, err := c.u2(); err != nil { // the enclosing class, which the name carries
+			return flags
+		}
+		if _, err := c.u2(); err != nil { // the simple name, empty when anonymous
+			return flags
+		}
+		access, err := c.u2()
+		if err != nil {
+			return flags
+		}
+		if inner := PoolClassName(classFile.Pool, index); inner != "" {
+			flags[inner] = access
+		}
+	}
+	return flags
+}
+
 // ReadCode decodes a method's Code attribute (JVMS 4.7.3), when it has one.
 func ReadCode(method Member, pool []*Constant) (*Code, error) {
 	attribute, ok := FindAttribute(method.Attributes, "Code")

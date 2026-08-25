@@ -49,7 +49,7 @@ enum EnumMixed {
   }
 
   static {
-    /* cappu: dup of a non-trivial value; the bytecode is:
+    /* cappu: an inner class constructor; the bytecode is:
      * 0: new #80
      * 3: dup
      * 4: ldc #81

@@ -1291,6 +1291,8 @@ type bodyDecompiler struct {
 	visited map[int]bool
 	// pendingCount hands out the ids that tell the copies of one `new` apart.
 	pendingCount int
+	// innerFlags are the access flags of the nested classes this file names.
+	innerFlags map[string]uint16
 	// conditions are every `if (...)` line emitted, with the condition it came
 	// from: a local's type can still narrow after the line is written (the use
 	// that proves it is a boolean may come later), and the text has to follow.
@@ -1556,12 +1558,19 @@ func (d *bodyDecompiler) receiverCallee(mnemonic, owner, name string) (string, e
 func (d *bodyDecompiler) construct(target MemberRef) error {
 	// An inner class's constructor takes the enclosing instance as its first
 	// argument, and source cannot pass it: `outer.new Inner(...)` is the only
-	// way to write one. Whether the class is inner at all is in *its* file, not
-	// this one, so the shape of the descriptor is all there is to go on.
+	// way to write one. The InnerClasses attribute of *this* file says which of
+	// the nested classes it names are `static`; without an entry, the shape of
+	// the descriptor is all there is to go on.
 	if cut := strings.LastIndexByte(target.Owner, '$'); cut > 0 {
-		enclosing := strings.ReplaceAll(target.Owner[:cut], "/", ".")
-		if params := parameterSlots(target.Descriptor, true); len(params) > 0 &&
-			params[0].Type == enclosing {
+		inner := false
+		if access, ok := d.innerFlags[target.Owner]; ok {
+			inner = access&accStatic == 0
+		} else {
+			enclosing := strings.ReplaceAll(target.Owner[:cut], "/", ".")
+			params := parameterSlots(target.Descriptor, true)
+			inner = len(params) > 0 && params[0].Type == enclosing
+		}
+		if inner {
 			return bail("an inner class constructor")
 		}
 	}
@@ -2325,14 +2334,19 @@ func (d *bodyDecompiler) branchExpr(instruction Instruction) (expr, error) {
 func (d *bodyDecompiler) tryTernary(condition expr, whenTrue, whenFalse, follow int) (expr, bool, error) {
 	consumed := []int{}
 	before := append([]expr(nil), d.stack...)
+	statements := d.current
+	statementsBefore := len(*statements)
 	value, found, err := d.armValues(condition, whenTrue, whenFalse, follow, &consumed)
 	if err != nil {
 		return expr{}, false, err
 	}
-	if !found {
+	// A statement means an arm did more than compute a value - a call whose
+	// result is dropped, say - and it would end up in front of the `?:`.
+	if !found || len(*statements) != statementsBefore {
 		// An arm may have consumed values that were already on the stack, so the
 		// depth alone does not put it back.
 		d.stack = before
+		*statements = (*statements)[:statementsBefore]
 		return expr{}, false, nil
 	}
 	for _, start := range consumed {
@@ -2371,7 +2385,13 @@ func (d *bodyDecompiler) armValues(
 // short-circuit nests them - another branch whose arms are values themselves.
 func (d *bodyDecompiler) valueOfRegion(start, follow int, consumed *[]int) (expr, bool, error) {
 	b := d.blocks[start]
-	if b == nil || !isPureBlock(b) {
+	if b == nil {
+		return expr{}, false, nil
+	}
+	// A block the two arms share (the merge of a `||`) is taken twice, so it may
+	// only be one that has no side effects - then evaluating it twice is the
+	// same value twice. An arm of its own may call something.
+	if !isPureBlock(b) && (containsInt(*consumed, start) || !isConditionBlock(b)) {
 		return expr{}, false, nil
 	}
 	if d.isLoopEdge(start) {
@@ -3253,6 +3273,7 @@ func decompileBody(
 		names:      map[string]bool{},
 		byName:     map[string]*local{},
 		visited:    map[int]bool{},
+		innerFlags: InnerClassFlags(classFile),
 	}
 	d.current = &d.statements
 	for _, parameter := range locals {

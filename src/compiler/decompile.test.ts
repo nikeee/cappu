@@ -446,6 +446,8 @@ const CALLSY_SOURCE =
   "  static int both(int a, String s) { if (a > 0 && s.length() > 3) { return 1; } return 0; }\n" +
   "  static int either(String s, int a) { if (s == null || a > 0) { return 1; } return 0; }\n" +
   "  static int untilLen(String s) { int t = 0; while (t < s.length()) { t = t + 2; } return t; }\n" +
+  "  static int pick(boolean c, int a) { return c ? stat(a) : stat(-a); }\n" +
+  '  static String name(Object o) { return o == null ? "null" : o.toString(); }\n' +
   "}\n";
 
 test(
@@ -740,6 +742,25 @@ for (const { name, source, expect: wanted, reject, selfContained } of RECONSTRUC
     }
   });
 }
+
+// A static nested class is `new Outer.Inner(...)`; a true inner one is only
+// writable as `outer.new Inner(...)`, which needs the enclosing file. The
+// InnerClasses attribute of *this* file is what tells them apart - the first
+// constructor parameter cannot, since a static one may take the outer type too.
+test("tells a static nested class from an inner one", () => {
+  const emitted = emitClasses(
+    "Nested",
+    "public class Nested { static class St { int v; St(Nested n, int v) { this.v = v; } }" +
+      " class In { int v; In(int v) { this.v = v; } }" +
+      " static int useStatic(Nested n) { return new St(n, 3).v; }" +
+      " int useInner() { return new In(4).v; } }",
+  );
+  const outer = emitted.find(c => c.name === "Nested");
+  expect(outer).toBeDefined();
+  const source = decompileToSource(outer!.bytes);
+  expect(source).toContain("new Nested.St(arg0, 3)");
+  expect(source).toContain("cappu: an inner class constructor");
+});
 
 test("writes a nested type reference with a dot, not the binary $", () => {
   const source = decompileToSource(

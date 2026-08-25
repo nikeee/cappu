@@ -24,6 +24,7 @@ import {
   type Member,
   className,
   findAttribute,
+  innerClassFlags,
   memberRef,
   type MemberRef,
   readClassFile,
@@ -1022,6 +1023,8 @@ class BodyDecompiler {
   private readonly visited = new Set<number>();
   /** Hands out the ids that tell the copies of one `new` apart. */
   private pendingCount = 0;
+  /** The access flags of the nested classes this file names, read once. */
+  private readonly innerFlags: Map<string, number>;
   /**
    * Every `if (...)` line emitted, with the condition it came from: a local's
    * type can still narrow after the line is written (the use that proves it is a
@@ -1041,6 +1044,7 @@ class BodyDecompiler {
     private readonly methodReturnType: string,
     private readonly isStatic: boolean,
   ) {
+    this.innerFlags = innerClassFlags(classFile);
     for (const local of locals.values()) {
       this.names.add(local.name);
       this.byName.set(local.name, local);
@@ -1268,12 +1272,18 @@ class BodyDecompiler {
   private construct(target: MemberRef): void {
     // An inner class's constructor takes the enclosing instance as its first
     // argument, and source cannot pass it: `outer.new Inner(...)` is the only
-    // way to write one. Whether the class is inner at all is in *its* file, not
-    // this one, so the shape of the descriptor is all there is to go on.
+    // way to write one. The `InnerClasses` attribute of *this* file says which
+    // of the nested classes it names are `static`; without an entry, the shape
+    // of the descriptor is all there is to go on.
     const enclosing = target.owner.slice(0, Math.max(0, target.owner.lastIndexOf("$")));
-    const first = parameterSlots(target.descriptor, true)[0]?.type;
-    if (enclosing !== "" && first === enclosing.replaceAll("/", ".")) {
-      throw new NotDecompilable("an inner class constructor");
+    if (enclosing !== "") {
+      const access = this.innerFlags.get(target.owner);
+      const first = parameterSlots(target.descriptor, true)[0]?.type;
+      const inner =
+        access === undefined
+          ? first === enclosing.replaceAll("/", ".")
+          : (access & ACC_STATIC) === 0;
+      if (inner) throw new NotDecompilable("an inner class constructor");
     }
     const args = this.arguments(target.descriptor);
     const receiver = this.pop();
@@ -1780,11 +1790,16 @@ class BodyDecompiler {
   ): Expr | undefined {
     const consumed: number[] = [];
     const before = [...this.stack];
+    const statements = this.current;
+    const statementsBefore = statements.length;
     const value = this.armValues(condition, whenTrue, whenFalse, follow, consumed);
-    if (value === undefined) {
+    // A statement means an arm did more than compute a value - a call whose
+    // result is dropped, say - and it would end up in front of the `?:`.
+    if (value === undefined || statements.length !== statementsBefore) {
       // An arm may have consumed values that were already on the stack, so the
       // depth alone does not put it back.
       this.stack.splice(0, this.stack.length, ...before);
+      statements.length = statementsBefore;
       return undefined;
     }
     for (const start of consumed) this.visited.add(start);
@@ -1820,11 +1835,15 @@ class BodyDecompiler {
    */
   private valueOfRegion(start: number, follow: number, consumed: number[]): Expr | undefined {
     const block = this.blocks.get(start);
-    if (block === undefined || !isPureBlock(block)) return undefined;
+    if (block === undefined) return undefined;
+    // A block the two arms share (the merge of a `||`) is taken twice, so it may
+    // only be one that has no side effects - then evaluating it twice is the
+    // same value twice. An arm of its own may call something.
+    if (!isPureBlock(block) && (consumed.includes(start) || !isConditionBlock(block))) {
+      return undefined;
+    }
     if (this.isLoopEdge(start)) return undefined;
-    // A block already emitted as a statement cannot also be a value; one that
-    // two arms of the same expression share (the merge of a `||`) is fine - it
-    // has no side effects, so evaluating it twice is the same value twice.
+    // A block already emitted as a statement cannot also be a value.
     if (this.visited.has(start)) return undefined;
     const terminator = block.instructions[block.instructions.length - 1]!;
     if (block.kind === "conditional") {
