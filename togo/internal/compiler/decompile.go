@@ -2,13 +2,14 @@ package compiler
 
 // Port of src/compiler/decompile.ts.
 //
-// `cappu decompile`, phases 1.3 to 1.5 (nikeee/cappu#43): reconstruct Java
+// `cappu decompile`, phases 1.3 to 1.7 (nikeee/cappu#43): reconstruct Java
 // source from bytecode. A symbolic stack interpreter walks a method's basic
 // blocks and turns them back into expressions and statements, with the control
-// flow structured into `if`/`else`, `&&`/`||`, `?:` and the loop forms; anything
-// that needs a method call or a `switch` (later phases) renders as its
-// disassembly plus a `throw new UnsupportedOperationException(...)`, so the
-// output is always compilable Java.
+// flow structured into `if`/`else`, `&&`/`||`, `?:`, the loop forms, method
+// calls and `try`/`catch`; anything that needs a `finally`, a `switch` or an
+// invokedynamic (later phases) renders as its disassembly plus a
+// `throw new UnsupportedOperationException(...)`, so the output is always
+// compilable Java.
 //
 // The text is deliberately rough - callers run it through the formatter
 // (internal/cli/decompile.go), which is why this file stays free of a
@@ -716,12 +717,18 @@ type block struct {
 	Successors []int
 }
 
-func buildBlocks(instructions []Instruction) (map[int]*block, error) {
+func buildBlocks(instructions []Instruction, exceptions []ExceptionEntry) (map[int]*block, error) {
 	entry := 0
 	if len(instructions) > 0 {
 		entry = instructions[0].Pc
 	}
 	leaders := map[int]bool{entry: true}
+	// A protected range and a handler both begin a statement of their own, and
+	// neither is a branch target, so nothing else would split the block there.
+	for _, entry := range exceptions {
+		leaders[int(entry.StartPc)] = true
+		leaders[int(entry.HandlerPc)] = true
+	}
 	for i, instruction := range instructions {
 		mnemonic := instruction.Mnemonic
 		if mnemonic == "tableswitch" || mnemonic == "lookupswitch" {
@@ -797,11 +804,125 @@ func buildBlocks(instructions []Instruction) (map[int]*block, error) {
 	return blocks, nil
 }
 
-// reachableBlocks are the blocks reachable from the entry, which is all the
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+// clause is one `catch`: the types that reach the handler, and where it begins.
+type clause struct {
+	Types     []string
+	HandlerPc int
+}
+
+// tryRegion is one `try` statement: the range it protects, and the clauses
+// guarding it.
+type tryRegion struct {
+	StartPc int
+	EndPc   int
+	Clauses []*clause
+}
+
+// tryRegions are the `try` statements of one method, from its exception table. A
+// clause is one handler with the types that reach it (a multi-catch reaches the
+// table as one entry per type); the clauses guarding the same range are one
+// statement, in source order.
+func tryRegions(exceptions []ExceptionEntry, blocks map[int]*block, self string) ([]*tryRegion, error) {
+	type clauseRanges struct {
+		types  []string
+		ranges [][2]int
+	}
+	byHandler := map[int]*clauseRanges{}
+	var order []int
+	for _, entry := range exceptions {
+		startPc, endPc, handlerPc := int(entry.StartPc), int(entry.EndPc), int(entry.HandlerPc)
+		// A catch-all guards `finally`, `synchronized` and try-with-resources,
+		// all of which javac writes as duplicated code plus a rethrow: not this
+		// phase.
+		if entry.CatchType == "" {
+			return nil, bail("a finally or synchronized block")
+		}
+		if blocks[startPc] == nil || blocks[handlerPc] == nil {
+			return nil, bail("a try range that starts mid-instruction")
+		}
+		if handlerPc >= startPc && handlerPc < endPc {
+			return nil, bail("a handler inside its own try")
+		}
+		found := byHandler[handlerPc]
+		if found == nil {
+			found = &clauseRanges{}
+			byHandler[handlerPc] = found
+			order = append(order, handlerPc)
+		}
+		caught := typeName(entry.CatchType, self)
+		if !containsString(found.types, caught) {
+			found.types = append(found.types, caught)
+		}
+		found.ranges = append(found.ranges, [2]int{startPc, endPc})
+	}
+
+	starts := make([]int, 0, len(blocks))
+	for start := range blocks {
+		starts = append(starts, start)
+	}
+	byRange := map[[2]int]*tryRegion{}
+	var regions []*tryRegion
+	for _, handlerPc := range order {
+		found := byHandler[handlerPc]
+		sort.Slice(found.ranges, func(i, j int) bool { return found.ranges[i][0] < found.ranges[j][0] })
+		merged := found.ranges[0]
+		for _, next := range found.ranges[1:] {
+			// javac splits the range of a `try` that encloses a nested `catch`:
+			// the return or jump that ends the inner handler is not protected,
+			// so one statement reaches the table as two entries. Nothing but
+			// those excluded instructions sits in the gap - no block begins in
+			// it.
+			joined := next[0] <= merged[1]
+			if !joined {
+				joined = true
+				for _, start := range starts {
+					if start >= merged[1] && start < next[0] {
+						joined = false
+						break
+					}
+				}
+			}
+			if !joined {
+				return nil, bail("a try with a split range")
+			}
+			merged = [2]int{merged[0], max(merged[1], next[1])}
+		}
+		region := byRange[merged]
+		if region == nil {
+			region = &tryRegion{StartPc: merged[0], EndPc: merged[1]}
+			byRange[merged] = region
+			regions = append(regions, region)
+		}
+		region.Clauses = append(region.Clauses, &clause{Types: found.types, HandlerPc: handlerPc})
+	}
+
+	for _, region := range regions {
+		for _, other := range regions {
+			disjoint := other.EndPc <= region.StartPc || other.StartPc >= region.EndPc
+			nested := (other.StartPc >= region.StartPc && other.EndPc <= region.EndPc) ||
+				(region.StartPc >= other.StartPc && region.EndPc <= other.EndPc)
+			if !disjoint && !nested {
+				return nil, bail("overlapping try ranges")
+			}
+		}
+	}
+	return regions, nil
+}
+
+// reachableBlocks are the blocks reachable from the roots, which is all the
 // structuring may cover.
-func reachableBlocks(blocks map[int]*block, entry int) map[int]bool {
+func reachableBlocks(blocks map[int]*block, roots ...int) map[int]bool {
 	seen := map[int]bool{}
-	queue := []int{entry}
+	queue := append([]int{}, roots...)
 	for len(queue) > 0 {
 		at := queue[len(queue)-1]
 		queue = queue[:len(queue)-1]
@@ -1287,6 +1408,16 @@ type bodyDecompiler struct {
 	blocks   map[int]*block
 	followOf map[int]int
 	loops    map[int]*loop
+	regions  []*tryRegion
+	// activeTries are the `try` statements being written right now.
+	activeTries map[*tryRegion]bool
+	// skip counts instructions to drop from the front of a block: a handler
+	// starts with the store of the exception, which source writes as the catch
+	// parameter.
+	skip map[int]int
+	// methodFollowOf is followOf over the whole method, which followOf itself is
+	// not inside a loop.
+	methodFollowOf map[int]int
 	// active are the loops being written right now, innermost last.
 	active  []activeLoop
 	visited map[int]bool
@@ -1695,13 +1826,19 @@ func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType strin
 	return nil
 }
 
-func (d *bodyDecompiler) run(instructions []Instruction) error {
-	blocks, err := buildBlocks(instructions)
+func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionEntry) error {
+	blocks, err := buildBlocks(instructions, exceptions)
 	if err != nil {
 		return err
 	}
 	d.blocks = blocks
+	regions, err := tryRegions(exceptions, blocks, d.self())
+	if err != nil {
+		return err
+	}
+	d.regions = regions
 	d.followOf = postDominators(blocks, nil, nil)
+	d.methodFollowOf = d.followOf
 	entry := 0
 	if len(instructions) > 0 {
 		entry = instructions[0].Pc
@@ -1722,7 +1859,13 @@ func (d *bodyDecompiler) run(instructions []Instruction) error {
 	// A block that was never entered would silently drop its statements, and one
 	// entered twice would duplicate them: either means the layout is not the nest
 	// of `if`s this phase reconstructs.
-	for start := range reachableBlocks(d.blocks, entry) {
+	roots := []int{entry}
+	for _, region := range d.regions {
+		for _, c := range region.Clauses {
+			roots = append(roots, c.HandlerPc)
+		}
+	}
+	for start := range reachableBlocks(d.blocks, roots...) {
 		if !d.visited[start] {
 			return bail("unstructured control flow")
 		}
@@ -1742,6 +1885,14 @@ func (d *bodyDecompiler) structure(entry, stop int) error {
 		if jumped {
 			d.emit(jump)
 			return nil
+		}
+		if region := d.regionAt(at); region != nil {
+			next, err := d.tryStatement(region)
+			if err != nil {
+				return err
+			}
+			at = next
+			continue
 		}
 		if l := d.loops[at]; l != nil && !d.inActive(l) {
 			next, err := d.loop(l)
@@ -1768,7 +1919,7 @@ func (d *bodyDecompiler) structure(entry, stop int) error {
 			return bail("unstructured control flow")
 		}
 		d.visited[at] = true
-		body := b.Instructions
+		body := b.Instructions[d.skip[at]:]
 		if b.Kind == blockConditional || b.Kind == blockGoto {
 			body = body[:len(body)-1]
 		}
@@ -1789,6 +1940,197 @@ func (d *bodyDecompiler) structure(entry, stop int) error {
 		at = next
 	}
 	return nil
+}
+
+// regionAt is the `try` statement that begins at at, if one does. The outermost
+// comes first: an inner `try` sharing the start is written when the body reaches
+// it again. A loop whose header is the same block is the outer statement, unless
+// the protected range covers the whole loop.
+func (d *bodyDecompiler) regionAt(at int) *tryRegion {
+	var region *tryRegion
+	for _, candidate := range d.regions {
+		if candidate.StartPc != at || d.activeTries[candidate] {
+			continue
+		}
+		if region == nil || candidate.EndPc > region.EndPc {
+			region = candidate
+		}
+	}
+	if region == nil {
+		return nil
+	}
+	if l := d.loops[at]; l != nil && !d.inActive(l) {
+		for start := range l.Body {
+			if start < region.StartPc || start >= region.EndPc {
+				return nil
+			}
+		}
+	}
+	return region
+}
+
+// tryStatement writes one `try` with its clauses. It returns where the statement
+// after it begins.
+func (d *bodyDecompiler) tryStatement(region *tryRegion) (int, error) {
+	if len(d.stack) > 0 {
+		return 0, bail("values left on the stack")
+	}
+	bodyStop, err := d.tryFollow(region)
+	if err != nil {
+		return 0, err
+	}
+	// Where the body leaves off is not always where the statement ends: when the
+	// exit is also a branch target, javac's jump over the handlers stands in a
+	// block of its own. That block is the end of the `try`, not a statement.
+	follow := bodyStop
+	for follow != exitBlock {
+		b := d.blocks[follow]
+		if b.Kind != blockGoto || len(b.Instructions) != 1 || d.visited[follow] {
+			break
+		}
+		d.visited[follow] = true
+		follow = b.Successors[0]
+	}
+	d.activeTries[region] = true
+	defer delete(d.activeTries, region)
+	body, err := d.capture(func() error { return d.structure(region.StartPc, bodyStop) })
+	if err != nil {
+		return 0, err
+	}
+	type written struct {
+		head       string
+		statements []stmt
+	}
+	var clauses []written
+	for _, c := range region.Clauses {
+		// The parameter has to be named before the handler runs: its store is
+		// what the name comes from, and that store is not a statement.
+		name, err := d.catchName(c)
+		if err != nil {
+			return 0, err
+		}
+		statements, err := d.capture(func() error { return d.structure(c.HandlerPc, follow) })
+		if err != nil {
+			return 0, err
+		}
+		clauses = append(clauses, written{
+			head:       "} catch (" + strings.Join(c.Types, " | ") + " " + name + ") {",
+			statements: statements,
+		})
+	}
+	d.emit("try {")
+	*d.current = append(*d.current, stmt{Nested: &body})
+	for i := range clauses {
+		d.emit(clauses[i].head)
+		*d.current = append(*d.current, stmt{Nested: &clauses[i].statements})
+	}
+	d.emit("}")
+	return follow, nil
+}
+
+// tryFollow is where a `try` statement ends. What leaves the protected range
+// normally is the statement's own follow; a `break`, a `continue` or a `return`
+// leaves the statement the way it leaves an `if`, and says nothing about where
+// it ends. When nothing leaves the body at all, the code after the statement is
+// whatever the handlers fall into.
+func (d *bodyDecompiler) tryFollow(region *tryRegion) (int, error) {
+	inside := map[int]bool{}
+	for start := range d.blocks {
+		if start >= region.StartPc && start < region.EndPc {
+			inside[start] = true
+		}
+	}
+	jumps := map[int]bool{}
+	for _, entered := range d.active {
+		jumps[entered.ContinueTarget] = true
+		jumps[entered.Loop.Follow] = true
+	}
+	exits := map[int]bool{}
+	for start := range inside {
+		for _, successor := range d.blocks[start].Successors {
+			if !inside[successor] && !jumps[successor] {
+				exits[successor] = true
+			}
+		}
+	}
+	if len(exits) > 1 {
+		return 0, bail("unstructured control flow")
+	}
+	for exit := range exits {
+		return exit, nil
+	}
+	follows := map[int]bool{}
+	for _, c := range region.Clauses {
+		follow, ok := d.methodFollowOf[c.HandlerPc]
+		if !ok {
+			follow = exitBlock
+		}
+		if follow != exitBlock && !jumps[follow] {
+			follows[follow] = true
+		}
+	}
+	if len(follows) > 1 {
+		return 0, bail("unstructured control flow")
+	}
+	for follow := range follows {
+		return follow, nil
+	}
+	return exitBlock, nil
+}
+
+// catchName is the catch parameter of one clause. A handler is entered with the
+// exception on the stack, so it starts by storing it - or dropping it, when
+// source never named it.
+func (d *bodyDecompiler) catchName(c *clause) (string, error) {
+	b := d.blocks[c.HandlerPc]
+	if len(b.Instructions) == 0 {
+		return "", bail("an exception handler that keeps the exception")
+	}
+	first := b.Instructions[0]
+	if first.Mnemonic != "pop" && !strings.HasPrefix(first.Mnemonic, "astore") {
+		return "", bail("an exception handler that keeps the exception")
+	}
+	d.skip[c.HandlerPc] = 1
+	if first.Mnemonic == "pop" {
+		return d.freshName("e"), nil
+	}
+	slot := slotOf(first)
+	// The debug table scopes the parameter from *after* its store, which is
+	// where the handler's own code begins.
+	scopePc := c.HandlerPc
+	if len(b.Instructions) > 1 {
+		scopePc = b.Instructions[1].Pc
+	}
+	var scoped *localEntry
+	for i := range d.localTable {
+		entry := &d.localTable[i]
+		if entry.Slot == slot && scopePc >= entry.StartPc && scopePc < entry.EndPc {
+			scoped = entry
+			break
+		}
+	}
+	// ponytail: a multi-catch with no debug table is declared as its first type -
+	// the common supertype source used is not written to the class file.
+	declared, name := c.Types[0], "e"
+	if scoped != nil {
+		if scoped.Type != "" {
+			declared = scoped.Type
+		}
+		if scoped.Name != "" {
+			name = scoped.Name
+		}
+	}
+	entry := &local{
+		Name:          d.freshName(name),
+		Type:          sourceTypeText(declared, d.self()),
+		Declared:      true,
+		Origin:        scoped,
+		Authoritative: true, // the clause says what the parameter's type is
+		StoreBlocks:   map[int]bool{c.HandlerPc: true},
+	}
+	d.byName[entry.Name] = entry
+	d.locals[slot] = entry
+	return entry.Name, nil
 }
 
 // loopJump reports `break;` or `continue;` when at is where the innermost
@@ -3268,26 +3610,25 @@ func decompileBody(
 	method Member,
 	isStatic bool,
 ) (body []string, reached []string, err error) {
-	if len(code.Exceptions) > 0 {
-		return nil, nil, bail("the method catches exceptions")
-	}
 	d := &bodyDecompiler{
-		classFile:  classFile,
-		locals:     locals,
-		localTable: localTable,
-		returnType: methodReturnType(method.Descriptor),
-		isStatic:   isStatic,
-		names:      map[string]bool{},
-		byName:     map[string]*local{},
-		visited:    map[int]bool{},
-		innerFlags: InnerClassFlags(classFile),
+		classFile:   classFile,
+		locals:      locals,
+		localTable:  localTable,
+		returnType:  methodReturnType(method.Descriptor),
+		isStatic:    isStatic,
+		names:       map[string]bool{},
+		byName:      map[string]*local{},
+		visited:     map[int]bool{},
+		activeTries: map[*tryRegion]bool{},
+		skip:        map[int]int{},
+		innerFlags:  InnerClassFlags(classFile),
 	}
 	d.current = &d.statements
 	for _, parameter := range locals {
 		d.names[parameter.Name] = true
 		d.byName[parameter.Name] = parameter
 	}
-	if err := d.run(instructions); err != nil {
+	if err := d.run(instructions, code.Exceptions); err != nil {
 		return nil, flattenStatements(d.statements), err
 	}
 	body = append(flattenStatements(d.hoisted), flattenStatements(d.statements)...)

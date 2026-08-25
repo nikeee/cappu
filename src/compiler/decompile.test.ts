@@ -1,5 +1,5 @@
-// Phases 1.3 to 1.5 of `cappu decompile` (nikeee/cappu#43): straight-line
-// bytecode, branches and loops, back to Java source.
+// Phases 1.3 to 1.7 of `cappu decompile` (nikeee/cappu#43): straight-line
+// bytecode, branches, loops, calls and `try`/`catch`, back to Java source.
 //
 // The class bytes come from test-fixtures/emitter/emit-baselines, which our own
 // emitter produced - so no JDK is needed here. Two tiers:
@@ -339,6 +339,42 @@ test(
 // Every loop shape javac writes. These reconstruct to source it compiles back to
 // the same bytecode from, which is the only oracle that can see an inverted test
 // or an arm on the wrong side - our own emitter lays branches out differently.
+// Every `try` shape javac writes, and the reconstruction has to recompile to the
+// same bytecode: clause order, which arm is the body, and where the statement
+// ends are all invisible to a text baseline.
+const CATCHY_SOURCE =
+  "public class Catchy {\n" +
+  "  static int one(int a) { try { return 10 / a; } catch (java.lang.ArithmeticException e) { return -1; } }\n" +
+  "  static int two(int[] xs, int i) { int r = 0; try { r = xs[i]; } catch (java.lang.ArrayIndexOutOfBoundsException e) { r = -1; } catch (java.lang.NullPointerException e2) { r = -2; } return r; }\n" +
+  "  static int multi(int[] xs, int i) { try { return xs[i] / i; } catch (java.lang.ArithmeticException | java.lang.ArrayIndexOutOfBoundsException e) { return e.hashCode(); } }\n" +
+  // A `try` inside a loop: the handler leaves the loop, which is a `break` and
+  // not the end of the statement.
+  "  static int loopy(int[] xs) { int s = 0; for (int i = 0; i < 10; i++) { try { s = s + xs[i]; } catch (java.lang.RuntimeException e) { break; } } return s; }\n" +
+  "  static int continues(int[] xs) { int s = 0; int i = 0; while (i < xs.length) { try { s = s + 10 / xs[i]; } catch (java.lang.ArithmeticException e) { i = i + 1; continue; } i = i + 1; } return s; }\n" +
+  // The outer `try` protects the inner `catch` too, which splits its range in two.
+  "  static int nested(int[] xs) { try { try { return xs[0]; } catch (java.lang.NullPointerException e) { return 1; } } catch (java.lang.RuntimeException e) { return 2; } }\n" +
+  "  static void unused(int a) { try { java.lang.System.out.println(a); } catch (java.lang.RuntimeException e) { } }\n" +
+  "  static int rethrow(int[] xs) { try { return xs[0]; } catch (java.lang.RuntimeException e) { throw e; } }\n" +
+  "  static int afterCatch(int[] xs) { int r = 0; try { return xs[0]; } catch (java.lang.RuntimeException e) { r = 5; } return r + 1; }\n" +
+  "  static int twice(int[] xs) { int r = 0; try { r = xs[0]; } catch (java.lang.RuntimeException e) { r = 1; } try { r = r + xs[1]; } catch (java.lang.RuntimeException e2) { r = 2; } return r; }\n" +
+  "  static int inIf(boolean c, int[] xs) { if (c) { try { return xs[0]; } catch (java.lang.RuntimeException e) { return -1; } } return 0; }\n" +
+  "  static int throwsInside(int a) { try { if (a < 0) { throw new java.lang.IllegalStateException(); } return a; } catch (java.lang.IllegalStateException e) { return -1; } }\n" +
+  "  static int alwaysThrows(int a) { try { throw new java.lang.IllegalStateException(); } catch (java.lang.IllegalStateException e) { return a; } }\n" +
+  "}";
+
+test(
+  "recompiles javac's own try/catch to the same bytecode",
+  { skip: HAS_JAVAC && HAS_JAVAP ? false : "no JDK (javac/javap)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-catchy-");
+    const classFile = compileWithJavac(CATCHY_SOURCE, "Catchy", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("not decompiled");
+    const roundTripped = compileWithJavac(source, "Catchy", join(dir.path, "again"));
+    expect(javap(roundTripped)).toEqual(javap(classFile));
+  },
+);
+
 const LOOPY_SOURCE =
   "public class Loopy {\n" +
   "  static int sum(int n) { int s = 0; for (int i = 0; i < n; i++) { s = s + i; } return s; }\n" +
@@ -723,6 +759,68 @@ const RECONSTRUCTIONS: {
     expect: ["while (var2 < arg0.length) {"],
     reject: ["not decompiled"],
     selfContained: true,
+  },
+  {
+    name: "Catching",
+    source:
+      "class Catching { static int f(int[] xs, int i) { try { return xs[i]; }" +
+      " catch (java.lang.RuntimeException e) { return -1; } } }",
+    expect: [
+      "try {",
+      "return arg0[arg1];",
+      "} catch (java.lang.RuntimeException e) {",
+      "return -1;",
+    ],
+    reject: ["not decompiled"],
+    selfContained: true,
+  },
+  {
+    name: "MultiCatch",
+    // One clause per handler, one handler per `catch`: the two types of a
+    // multi-catch share theirs, the two clauses of a chain do not.
+    source:
+      "class MultiCatch { static int f(int[] xs, int i) { try { return xs[i] / i; }" +
+      " catch (java.lang.ArithmeticException | java.lang.NullPointerException e) { return 0; } }" +
+      " static int g(int[] xs) { int r = 0; try { r = xs[0]; }" +
+      " catch (java.lang.RuntimeException e) { r = 1; } catch (java.lang.Error e2) { r = 2; } return r; } }",
+    expect: [
+      "} catch (java.lang.ArithmeticException | java.lang.NullPointerException e) {",
+      "} catch (java.lang.RuntimeException e) {",
+      "} catch (java.lang.Error e_2) {",
+    ],
+    reject: ["not decompiled"],
+    selfContained: true,
+  },
+  {
+    name: "CatchBreak",
+    // The `try` sits inside the loop, and what leaves the loop from a handler is
+    // a `break` - not the statement's own end.
+    source:
+      "class CatchBreak { static int f(int[] xs) { int s = 0; int i = 0;" +
+      " while (i < xs.length) { try { s += xs[i]; } catch (java.lang.RuntimeException e) { break; } i++; }" +
+      " return s; } }",
+    expect: ["while (var2 < arg0.length) {", "try {", "break;", "var2++;"],
+    reject: ["not decompiled"],
+    selfContained: true,
+  },
+  {
+    name: "CatchEmpty",
+    source:
+      "class CatchEmpty { static void f(int a) { try { java.lang.System.out.println(a); }" +
+      " catch (java.lang.RuntimeException e) { } } }",
+    expect: ["} catch (java.lang.RuntimeException e) {"],
+    reject: ["not decompiled"],
+    // Not checked: an empty `catch` is what the source had, and our own checker
+    // flags it as a swallowed exception.
+  },
+  {
+    name: "Finally",
+    // javac copies the `finally` into every exit path and guards the rest with a
+    // catch-all that rethrows: which of those copies source wrote is not in the
+    // class file, so this one says so.
+    source:
+      "class Finally { static int f(int a) { try { return a; } finally { java.lang.System.out.println(a); } } }",
+    expect: ["cappu: a finally or synchronized block"],
   },
   {
     name: "Blank",

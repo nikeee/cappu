@@ -625,6 +625,61 @@ var reconstructions = []struct {
 		selfContained: true,
 	},
 	{
+		name: "Catching",
+		source: "class Catching { static int f(int[] xs, int i) { try { return xs[i]; }" +
+			" catch (java.lang.RuntimeException e) { return -1; } } }",
+		want: []string{"try {", "return arg0[arg1];",
+			"} catch (java.lang.RuntimeException e) {", "return -1;"},
+		reject:        []string{"not decompiled"},
+		selfContained: true,
+	},
+	{
+		// One clause per handler, one handler per `catch`: the two types of a
+		// multi-catch share theirs, the two clauses of a chain do not.
+		name: "MultiCatch",
+		source: "class MultiCatch { static int f(int[] xs, int i) { try { return xs[i] / i; }" +
+			" catch (java.lang.ArithmeticException | java.lang.NullPointerException e) { return 0; } }" +
+			" static int g(int[] xs) { int r = 0; try { r = xs[0]; }" +
+			" catch (java.lang.RuntimeException e) { r = 1; } catch (java.lang.Error e2) { r = 2; }" +
+			" return r; } }",
+		want: []string{
+			"} catch (java.lang.ArithmeticException | java.lang.NullPointerException e) {",
+			"} catch (java.lang.RuntimeException e) {",
+			"} catch (java.lang.Error e_2) {",
+		},
+		reject:        []string{"not decompiled"},
+		selfContained: true,
+	},
+	{
+		// The `try` sits inside the loop, and what leaves the loop from a
+		// handler is a `break` - not the statement's own end.
+		name: "CatchBreak",
+		source: "class CatchBreak { static int f(int[] xs) { int s = 0; int i = 0;" +
+			" while (i < xs.length) { try { s += xs[i]; }" +
+			" catch (java.lang.RuntimeException e) { break; } i++; } return s; } }",
+		want:          []string{"while (var2 < arg0.length) {", "try {", "break;", "var2++;"},
+		reject:        []string{"not decompiled"},
+		selfContained: true,
+	},
+	{
+		name: "CatchEmpty",
+		source: "class CatchEmpty { static void f(int a) { try { java.lang.System.out.println(a); }" +
+			" catch (java.lang.RuntimeException e) { } } }",
+		want:   []string{"} catch (java.lang.RuntimeException e) {"},
+		reject: []string{"not decompiled"},
+		// Not checked: an empty `catch` is what the source had, and our own
+		// checker flags it as a swallowed exception.
+	},
+	{
+		// javac copies the `finally` into every exit path and guards the rest
+		// with a catch-all that rethrows: which of those copies source wrote is
+		// not in the class file, so this one says so.
+		name: "Finally",
+		source: "class Finally { static int f(int a) { try { return a; }" +
+			" finally { java.lang.System.out.println(a); } } }",
+		want: []string{"cappu: a finally or synchronized block"},
+	},
+	{
 		name: "Blank",
 		source: "class Blank { static int v() { return 1; } static final int N;" +
 			" static { N = v(); } }",
@@ -778,6 +833,45 @@ const loopySource = `public class Loopy {
   static int arms(int a, int b) { int t = a; int i = 0; do { i = i + 1; if (i <= a) { t = t * i; if (a >= b) { continue; } } t = t * t; } while (i < b); return t; }
   static int tail(int a, int b) { int u = b; int i = 0; do { i = i + 1; if (i > a) { u = u * u; } else { u = u - a; } u = u * (u + 1); } while (i < a); return u; }
 }`
+
+// Every `try` shape javac writes, and the reconstruction has to recompile to the
+// same bytecode: clause order, which arm is the body, and where the statement
+// ends are all invisible to a text baseline.
+const catchySource = `public class Catchy {
+  static int one(int a) { try { return 10 / a; } catch (java.lang.ArithmeticException e) { return -1; } }
+  static int two(int[] xs, int i) { int r = 0; try { r = xs[i]; } catch (java.lang.ArrayIndexOutOfBoundsException e) { r = -1; } catch (java.lang.NullPointerException e2) { r = -2; } return r; }
+  static int multi(int[] xs, int i) { try { return xs[i] / i; } catch (java.lang.ArithmeticException | java.lang.ArrayIndexOutOfBoundsException e) { return e.hashCode(); } }
+  static int loopy(int[] xs) { int s = 0; for (int i = 0; i < 10; i++) { try { s = s + xs[i]; } catch (java.lang.RuntimeException e) { break; } } return s; }
+  static int continues(int[] xs) { int s = 0; int i = 0; while (i < xs.length) { try { s = s + 10 / xs[i]; } catch (java.lang.ArithmeticException e) { i = i + 1; continue; } i = i + 1; } return s; }
+  static int nested(int[] xs) { try { try { return xs[0]; } catch (java.lang.NullPointerException e) { return 1; } } catch (java.lang.RuntimeException e) { return 2; } }
+  static void unused(int a) { try { java.lang.System.out.println(a); } catch (java.lang.RuntimeException e) { } }
+  static int rethrow(int[] xs) { try { return xs[0]; } catch (java.lang.RuntimeException e) { throw e; } }
+  static int afterCatch(int[] xs) { int r = 0; try { return xs[0]; } catch (java.lang.RuntimeException e) { r = 5; } return r + 1; }
+  static int twice(int[] xs) { int r = 0; try { r = xs[0]; } catch (java.lang.RuntimeException e) { r = 1; } try { r = r + xs[1]; } catch (java.lang.RuntimeException e2) { r = 2; } return r; }
+  static int inIf(boolean c, int[] xs) { if (c) { try { return xs[0]; } catch (java.lang.RuntimeException e) { return -1; } } return 0; }
+  static int throwsInside(int a) { try { if (a < 0) { throw new java.lang.IllegalStateException(); } return a; } catch (java.lang.IllegalStateException e) { return -1; } }
+  static int alwaysThrows(int a) { try { throw new java.lang.IllegalStateException(); } catch (java.lang.IllegalStateException e) { return a; } }
+}`
+
+func TestDecompileRecompilesJavacTryCatchToTheSameBytecode(t *testing.T) {
+	if !hasTool("javac") || !hasTool("javap") {
+		t.Skip("no JDK (javac/javap)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Catchy", catchySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "not decompiled") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Catchy", source)
+	if javapText(t, roundTripped) != javapText(t, classFile) {
+		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
+			javapText(t, roundTripped), javapText(t, classFile))
+	}
+}
 
 func TestDecompileRecompilesJavacLoopsToTheSameBytecode(t *testing.T) {
 	if !hasTool("javac") || !hasTool("javap") {
