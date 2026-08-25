@@ -691,9 +691,22 @@ function reachableBlocks(blocks: Map<number, Block>, entry: number): Set<number>
  * The immediate post-dominator of every block: the point where the two arms of
  * a branch come back together, and so where the `if` it was written as ends.
  * Blocks whose paths all leave the method map to EXIT.
+ *
+ * Inside a loop this is computed over the loop's blocks alone, with the edges
+ * that `break` and `continue` take cut: they leave the statement they sit in
+ * exactly the way a `return` does, and counting them would put the merge of
+ * every `if` in the body at the loop's own test.
  */
-function postDominators(blocks: Map<number, Block>): Map<number, number> {
-  const starts = [...blocks.keys()].sort((a, b) => a - b);
+function postDominators(
+  blocks: Map<number, Block>,
+  within?: ReadonlySet<number>,
+  cut?: ReadonlySet<number>,
+): Map<number, number> {
+  const starts = [...blocks.keys()]
+    .filter(start => within?.has(start) ?? true)
+    .sort((a, b) => a - b);
+  const leaves = (successor: number): boolean =>
+    successor === EXIT || (cut?.has(successor) ?? false) || !(within?.has(successor) ?? true);
   const all = new Set([...starts, EXIT]);
   // A back edge makes reverse pc order stop being a topological one, so this is
   // a fixpoint: every set starts full and shrinks until nothing moves.
@@ -704,7 +717,7 @@ function postDominators(blocks: Map<number, Block>): Map<number, number> {
       const block = blocks.get(start)!;
       let shared: Set<number> | undefined;
       for (const successor of block.successors.length === 0 ? [EXIT] : block.successors) {
-        const of = successor === EXIT ? new Set([EXIT]) : (sets.get(successor) ?? new Set([EXIT]));
+        const of = leaves(successor) ? new Set([EXIT]) : (sets.get(successor) ?? new Set([EXIT]));
         shared = shared === undefined ? new Set(of) : new Set([...shared].filter(x => of.has(x)));
       }
       const next = new Set([start, ...(shared ?? [EXIT])]);
@@ -716,7 +729,9 @@ function postDominators(blocks: Map<number, Block>): Map<number, number> {
   }
   const immediate = new Map<number, number>();
   for (const start of starts) {
-    const candidates = [...sets.get(start)!].filter(x => x !== start && x !== EXIT);
+    const candidates = [...sets.get(start)!]
+      .filter(x => x !== start && x !== EXIT)
+      .sort((a, b) => a - b);
     // The nearest one: the one every other candidate post-dominates too.
     const nearest = candidates.find(x => candidates.every(other => sets.get(x)!.has(other)));
     immediate.set(start, nearest ?? EXIT);
@@ -812,7 +827,15 @@ function loopFollow(
   const outside = (start: number): number[] =>
     (blocks.get(start)?.successors ?? []).filter(successor => !body.has(successor));
   const fromHeader = outside(header);
-  if (blocks.get(header)!.kind === "conditional" && fromHeader.length === 1) return fromHeader[0]!;
+  // Only a header that is the test itself: one that carries statements is the
+  // start of a `do`'s body, and what leaves it is a `break`, not the loop's end.
+  if (
+    blocks.get(header)!.kind === "conditional" &&
+    isPureBlock(blocks.get(header)!) &&
+    fromHeader.length === 1
+  ) {
+    return fromHeader[0]!;
+  }
   if (latches.length === 1) {
     const latch = blocks.get(latches[0]!)!;
     const fromLatch = outside(latch.start);
@@ -822,8 +845,9 @@ function loopFollow(
   for (const start of body) for (const successor of outside(start)) exits.add(successor);
   if (exits.size <= 1) return [...exits][0] ?? EXIT;
   // Several ways out, none of them a test: the one they all reach ends the loop.
-  const merged = [...exits].find(candidate =>
-    [...exits].every(other => other === candidate || reachableBlocks(blocks, other).has(candidate)),
+  const candidates = [...exits].sort((a, b) => a - b);
+  const merged = candidates.find(candidate =>
+    candidates.every(other => other === candidate || reachableBlocks(blocks, other).has(candidate)),
   );
   if (merged === undefined) throw new NotDecompilable("a loop with more than one exit");
   return merged;
@@ -860,7 +884,12 @@ function findLoops(blocks: Map<number, Block>, entry: number): Map<number, Loop>
       body.add(at);
       queue.push(...(predecessors.get(at) ?? []));
     }
-    loops.set(header, { header, body, latches, follow: loopFollow(blocks, header, latches, body) });
+    loops.set(header, {
+      header,
+      body,
+      latches,
+      follow: loopFollow(blocks, header, latches, body),
+    });
   }
   // Two loops are either nested or disjoint; anything else is one loop entered
   // at two places, which no `while` describes.
@@ -1239,7 +1268,16 @@ class BodyDecompiler {
       }
       const block = this.blocks.get(at);
       if (block === undefined) throw new NotDecompilable("a branch lands outside the method");
-      if (this.visited.has(at)) throw new NotDecompilable("unstructured control flow");
+      if (this.visited.has(at)) {
+        // The `continue` of a `for` jumps to its update, not to the test - so
+        // the update is entered twice, once from the jump and once from the
+        // body running off its end. Writing it needs the `for` form.
+        const inner = this.active[this.active.length - 1];
+        if (inner !== undefined && inner.loop.body.has(at) && at !== inner.continueTarget) {
+          throw new NotDecompilable("a jump into the middle of a loop");
+        }
+        throw new NotDecompilable("unstructured control flow");
+      }
       this.visited.add(at);
       const isBranch = block.kind === "conditional" || block.kind === "goto";
       const body = isBranch ? block.instructions.slice(0, -1) : block.instructions;
@@ -1268,19 +1306,19 @@ class BodyDecompiler {
     const whenTrue = targetIsThen ? jump.target : jump.fallthrough;
     const whenFalse = targetIsThen ? jump.fallthrough : jump.target;
     const merge = this.followOf.get(block.start) ?? EXIT;
-    // A merge point outside the loop this `if` sits in is not one: the arm that
-    // gets there is a `break`, and writing it as the end of an `if`/`else` would
-    // drop the keyword.
-    const inside = this.active[this.active.length - 1];
-    const follow = inside !== undefined && !inside.loop.body.has(merge) ? EXIT : merge;
 
-    if (follow !== EXIT) {
-      const value = this.tryTernary(condition, whenTrue, whenFalse, follow);
+    if (merge !== EXIT) {
+      const value = this.tryTernary(condition, whenTrue, whenFalse, merge);
       if (value !== undefined) {
         this.push(value);
-        return follow;
+        return merge;
       }
     }
+    // An arm that flows into the other one is an `if` without an `else`: the
+    // second arm is what follows the statement, not a branch of it. The merge
+    // point cannot say so when the first arm also ends in a `return`, a `break`
+    // or a `continue` - those paths never reach it.
+    const follow = this.reachesArm(whenTrue, whenFalse) ? whenFalse : merge;
     // `if (c) return x;` has no merge point. Both arms leave the method - every
     // path does, since a block that runs off the end is rejected - so the arm
     // that branches is the whole statement and the other one is what follows it,
@@ -1325,6 +1363,28 @@ class BodyDecompiler {
     return undefined;
   }
 
+  /**
+   * Whether one arm of a branch runs into the other, which makes the second one
+   * the code after the `if` rather than its `else`. A `break` or a `continue`
+   * ends the walk: it leaves the statement, like a `return`.
+   */
+  private reachesArm(from: number, to: number): boolean {
+    const inner = this.active[this.active.length - 1];
+    const stop = new Set<number>(
+      inner === undefined ? [] : [inner.continueTarget, inner.loop.follow],
+    );
+    const seen = new Set<number>();
+    const queue = [from];
+    while (queue.length > 0) {
+      const at = queue.pop()!;
+      if (at === to) return true;
+      if (seen.has(at) || stop.has(at) || !this.blocks.has(at)) continue;
+      seen.add(at);
+      queue.push(...this.blocks.get(at)!.successors);
+    }
+    return false;
+  }
+
   /** Whether `start` is a loop's own edge, which no expression may fold away. */
   private isLoopEdge(start: number): boolean {
     return (
@@ -1338,24 +1398,34 @@ class BodyDecompiler {
     if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
     const header = this.blocks.get(loop.header)!;
     const latch = loop.latches.length === 1 ? this.blocks.get(loop.latches[0]!) : undefined;
-    if (
+    const isWhile =
       loop.follow !== EXIT &&
       header.kind === "conditional" &&
       isPureBlock(header) &&
-      headerExits(this.blocks, loop)
-    ) {
-      return this.whileLoop(loop, header);
-    }
-    if (
+      headerExits(this.blocks, loop);
+    const isDoWhile =
+      !isWhile &&
       loop.follow !== EXIT &&
       latch !== undefined &&
       latch.kind === "conditional" &&
       latch.successors.includes(loop.header) &&
-      latch.successors.includes(loop.follow)
-    ) {
-      return this.doWhileLoop(loop, latch);
+      latch.successors.includes(loop.follow);
+    // Inside the body, the merge of an `if` is a merge of the body's own paths:
+    // the edges a `continue` and a `break` take are exits, not joins. A `do`'s
+    // latch only counts when it is the test alone - javac puts the tail of the
+    // body in the same block when nothing jumps to the test, and that tail is a
+    // join like any other.
+    const cut = new Set<number>([loop.header]);
+    if (isDoWhile && isPureBlock(latch!)) cut.add(latch!.start);
+    const outer = this.followOf;
+    this.followOf = postDominators(this.blocks, loop.body, cut);
+    try {
+      if (isWhile) return this.whileLoop(loop, header);
+      if (isDoWhile) return this.doWhileLoop(loop, latch!);
+      return this.foreverLoop(loop);
+    } finally {
+      this.followOf = outer;
     }
-    return this.foreverLoop(loop);
   }
 
   /** `while (c) { ... }`: the header is the test, and the loop runs while it holds. */

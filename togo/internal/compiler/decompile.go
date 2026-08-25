@@ -2,13 +2,13 @@ package compiler
 
 // Port of src/compiler/decompile.ts.
 //
-// `cappu decompile`, phases 1.3 and 1.4 (nikeee/cappu#43): reconstruct Java
-// source from bytecode without a loop in it. A symbolic stack interpreter walks
-// a method's basic blocks and turns them back into expressions and statements,
-// with the branches structured into `if`/`else`, `&&`/`||` and `?:`; anything
-// that needs a loop or a method call (later phases) renders as its disassembly
-// plus a `throw new UnsupportedOperationException(...)`, so the output is always
-// compilable Java.
+// `cappu decompile`, phases 1.3 to 1.5 (nikeee/cappu#43): reconstruct Java
+// source from bytecode. A symbolic stack interpreter walks a method's basic
+// blocks and turns them back into expressions and statements, with the control
+// flow structured into `if`/`else`, `&&`/`||`, `?:` and the loop forms; anything
+// that needs a method call or a `switch` (later phases) renders as its
+// disassembly plus a `throw new UnsupportedOperationException(...)`, so the
+// output is always compilable Java.
 //
 // The text is deliberately rough - callers run it through the formatter
 // (internal/cli/decompile.go), which is why this file stays free of a
@@ -125,7 +125,42 @@ func comparePrec(op string) int {
 	return precRel
 }
 
+// foldComparison evaluates two integer literals compared, which only a constant
+// condition produces.
+func foldComparison(left expr, op string, right expr) (bool, bool) {
+	a, err := strconv.Atoi(left.Text)
+	if err != nil {
+		return false, false
+	}
+	b, err := strconv.Atoi(right.Text)
+	if err != nil {
+		return false, false
+	}
+	switch op {
+	case "==":
+		return a == b, true
+	case "!=":
+		return a != b, true
+	case "<":
+		return a < b, true
+	case "<=":
+		return a <= b, true
+	case ">":
+		return a > b, true
+	default:
+		return a >= b, true
+	}
+}
+
 func compareExpr(left expr, op string, right expr) expr {
+	// `while (true)` is a test against a constant to a compiler that does not
+	// fold it, and `1 != 0` is not what anyone wrote.
+	if folded, ok := foldComparison(left, op, right); ok {
+		if folded {
+			return primary("true", "boolean")
+		}
+		return primary("false", "boolean")
+	}
 	prec := comparePrec(op)
 	return expr{
 		Text:  at(left, prec+1) + " " + op + " " + at(right, prec+1),
@@ -149,6 +184,12 @@ func logicalExpr(kind logicKind, left, right expr) expr {
 }
 
 func notExpr(value expr) expr {
+	if value.Text == "true" {
+		return primary("false", "boolean")
+	}
+	if value.Text == "false" {
+		return primary("true", "boolean")
+	}
 	return expr{
 		Text:  "!" + at(value, precUnary),
 		Prec:  precUnary,
@@ -618,9 +659,8 @@ func methodReturnType(descriptor string) string {
 // bodyDecompiler turns one method's straight-line bytecode into Java statements.
 // --- the control-flow graph ----------------------------------------------------------
 
-// Phase 1.4 covers acyclic control flow only: every edge runs forward, so a
-// block's pc order is a topological order and one reverse pass computes the
-// post-dominators. A back edge is a loop, which is phase 1.5.
+// A back edge is a loop, so pc order is not a topological order and the
+// dominator analyses below are fixpoints rather than a single pass.
 
 // exitBlock is the virtual block every `return`/`athrow` falls into, so a merge
 // always exists.
@@ -719,11 +759,6 @@ func buildBlocks(instructions []Instruction) (map[int]*block, error) {
 		case !hasNext:
 			return bail("the code runs off the end of the method")
 		}
-		for _, successor := range successors {
-			if successor <= start {
-				return bail("loops are not decompiled yet")
-			}
-		}
 		blocks[start] = &block{Start: start, Instructions: current, Kind: kind, Successors: successors}
 		return nil
 	}
@@ -770,55 +805,395 @@ func reachableBlocks(blocks map[int]*block, entry int) map[int]bool {
 // postDominators reports the immediate post-dominator of every block: the point
 // where the two arms of a branch come back together, and so where the `if` it
 // was written as ends. Blocks whose paths all leave the method map to exitBlock.
-func postDominators(blocks map[int]*block) map[int]int {
+//
+// Inside a loop this is computed over the loop's blocks alone (within), with the
+// edges that `break` and `continue` take cut: they leave the statement they sit
+// in exactly the way a `return` does, and counting them would put the merge of
+// every `if` in the body at the loop's own test.
+func postDominators(blocks map[int]*block, within, cut map[int]bool) map[int]int {
+	starts := make([]int, 0, len(blocks))
+	for start := range blocks {
+		if within == nil || within[start] {
+			starts = append(starts, start)
+		}
+	}
+	sort.Ints(starts)
+	leaves := func(successor int) bool {
+		return successor == exitBlock || cut[successor] || (within != nil && !within[successor])
+	}
+	// A back edge makes reverse pc order stop being a topological one, so this
+	// is a fixpoint: every set starts full and shrinks until nothing moves.
+	all := map[int]bool{exitBlock: true}
+	for _, start := range starts {
+		all[start] = true
+	}
+	sets := map[int]map[int]bool{}
+	for _, start := range starts {
+		sets[start] = copySet(all)
+	}
+	for changed := true; changed; {
+		changed = false
+		for i := len(starts) - 1; i >= 0; i-- {
+			start := starts[i]
+			successors := blocks[start].Successors
+			if len(successors) == 0 {
+				successors = []int{exitBlock}
+			}
+			var shared map[int]bool
+			for _, successor := range successors {
+				of := map[int]bool{exitBlock: true}
+				if !leaves(successor) && sets[successor] != nil {
+					of = sets[successor]
+				}
+				if shared == nil {
+					shared = copySet(of)
+					continue
+				}
+				for at := range shared {
+					if !of[at] {
+						delete(shared, at)
+					}
+				}
+			}
+			shared[start] = true
+			if !sameSet(shared, sets[start]) {
+				sets[start] = shared
+				changed = true
+			}
+		}
+	}
+	immediate := map[int]int{}
+	for _, start := range starts {
+		immediate[start] = exitBlock
+		candidates := make([]int, 0, len(sets[start]))
+		for at := range sets[start] {
+			if at != start && at != exitBlock {
+				candidates = append(candidates, at)
+			}
+		}
+		sort.Ints(candidates)
+		// The nearest one: the one every other candidate post-dominates too.
+		for _, at := range candidates {
+			nearest := true
+			for _, other := range candidates {
+				if !sets[at][other] {
+					nearest = false
+					break
+				}
+			}
+			if nearest {
+				immediate[start] = at
+				break
+			}
+		}
+	}
+	return immediate
+}
+
+func copySet(of map[int]bool) map[int]bool {
+	out := make(map[int]bool, len(of))
+	for at := range of {
+		out[at] = true
+	}
+	return out
+}
+
+func sameSet(a, b map[int]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for at := range a {
+		if !b[at] {
+			return false
+		}
+	}
+	return true
+}
+
+// dominators reports which blocks every path from the entry to a block has to
+// pass through.
+func dominators(blocks map[int]*block, entry int) map[int]map[int]bool {
 	starts := make([]int, 0, len(blocks))
 	for start := range blocks {
 		starts = append(starts, start)
 	}
 	sort.Ints(starts)
-	sets := map[int]map[int]bool{}
-	for i := len(starts) - 1; i >= 0; i-- {
-		start := starts[i]
-		successors := blocks[start].Successors
-		if len(successors) == 0 {
-			successors = []int{exitBlock}
+	predecessors := map[int][]int{}
+	for _, start := range starts {
+		for _, successor := range blocks[start].Successors {
+			if blocks[successor] != nil {
+				predecessors[successor] = append(predecessors[successor], start)
+			}
 		}
-		var shared map[int]bool
-		for _, successor := range successors {
-			of := map[int]bool{exitBlock: true}
-			if successor != exitBlock && sets[successor] != nil {
-				of = sets[successor]
+	}
+	all := map[int]bool{}
+	for _, start := range starts {
+		all[start] = true
+	}
+	sets := map[int]map[int]bool{}
+	for _, start := range starts {
+		if start == entry {
+			sets[start] = map[int]bool{entry: true}
+			continue
+		}
+		sets[start] = copySet(all)
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, start := range starts {
+			if start == entry {
+				continue
+			}
+			var shared map[int]bool
+			for _, predecessor := range predecessors[start] {
+				if shared == nil {
+					shared = copySet(sets[predecessor])
+					continue
+				}
+				for at := range shared {
+					if !sets[predecessor][at] {
+						delete(shared, at)
+					}
+				}
 			}
 			if shared == nil {
 				shared = map[int]bool{}
-				for at := range of {
-					shared[at] = true
-				}
-				continue
 			}
-			for at := range shared {
-				if !of[at] {
-					delete(shared, at)
-				}
+			shared[start] = true
+			if !sameSet(shared, sets[start]) {
+				sets[start] = shared
+				changed = true
 			}
 		}
-		shared[start] = true
-		sets[start] = shared
 	}
-	immediate := map[int]int{}
-	for _, start := range starts {
-		nearest := exitBlock
-		for at := range sets[start] {
-			if at == start || at == exitBlock {
-				continue
-			}
-			if nearest == exitBlock || at < nearest {
-				nearest = at
+	return sets
+}
+
+// loop is a loop, as the blocks it is made of and the two places control leaves
+// it.
+type loop struct {
+	Header int
+	// Body holds every block inside the loop, the header included.
+	Body map[int]bool
+	// Latches are the blocks whose branch closes the loop.
+	Latches []int
+	// Follow is where the code after the loop begins, or exitBlock when nothing
+	// leaves it.
+	Follow int
+}
+
+// retreatingEdges are the edges that close a cycle, found by a depth-first walk:
+// an edge to a block the walk is still inside. pc order does not say this -
+// javac lays a `while (a && b)` out with the second test jumping *backwards*
+// into the body.
+func retreatingEdges(blocks map[int]*block, entry int) [][2]int {
+	type frame struct{ at, next int }
+	var edges [][2]int
+	open := map[int]bool{entry: true}
+	done := map[int]bool{}
+	stack := []frame{{at: entry}}
+	for len(stack) > 0 {
+		top := &stack[len(stack)-1]
+		var successors []int
+		if blocks[top.at] != nil {
+			successors = blocks[top.at].Successors
+		}
+		if top.next >= len(successors) {
+			delete(open, top.at)
+			done[top.at] = true
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		successor := successors[top.next]
+		top.next++
+		if blocks[successor] == nil || done[successor] {
+			continue
+		}
+		if open[successor] {
+			edges = append(edges, [2]int{top.at, successor})
+			continue
+		}
+		open[successor] = true
+		stack = append(stack, frame{at: successor})
+	}
+	return edges
+}
+
+// loopFollow reports where the code after the loop begins. The test decides it -
+// the one at the head of a `while`, the one at the foot of a `do` - because a
+// `break` leaves from a block that no longer reaches the latch, so it is not in
+// the loop's body and its own target would otherwise look like a second way out.
+func loopFollow(blocks map[int]*block, header int, latches []int, body map[int]bool) (int, error) {
+	outside := func(start int) []int {
+		var out []int
+		if blocks[start] == nil {
+			return out
+		}
+		for _, successor := range blocks[start].Successors {
+			if !body[successor] {
+				out = append(out, successor)
 			}
 		}
-		immediate[start] = nearest
+		return out
 	}
-	return immediate
+	// Only a header that is the test itself: one that carries statements is the
+	// start of a `do`'s body, and what leaves it is a `break`, not the loop's end.
+	if fromHeader := outside(header); blocks[header].Kind == blockConditional &&
+		isPureBlock(blocks[header]) && len(fromHeader) == 1 {
+		return fromHeader[0], nil
+	}
+	if len(latches) == 1 {
+		latch := blocks[latches[0]]
+		if fromLatch := outside(latch.Start); latch.Kind == blockConditional && len(fromLatch) == 1 {
+			return fromLatch[0], nil
+		}
+	}
+	exits := map[int]bool{}
+	for start := range body {
+		for _, successor := range outside(start) {
+			exits[successor] = true
+		}
+	}
+	if len(exits) == 0 {
+		return exitBlock, nil
+	}
+	if len(exits) == 1 {
+		for exit := range exits {
+			return exit, nil
+		}
+	}
+	// Several ways out, none of them a test: the one they all reach ends the loop.
+	candidates := make([]int, 0, len(exits))
+	for exit := range exits {
+		candidates = append(candidates, exit)
+	}
+	sort.Ints(candidates)
+	for _, candidate := range candidates {
+		merged := true
+		for _, other := range candidates {
+			if other != candidate && !reachableBlocks(blocks, other)[candidate] {
+				merged = false
+				break
+			}
+		}
+		if merged {
+			return candidate, nil
+		}
+	}
+	return 0, bail("a loop with more than one exit")
+}
+
+// findLoops reports the natural loops of the method, keyed by header. Every
+// cycle has to be one: an edge that closes a cycle without its target dominating
+// its source means two ways into the same loop, which is not something Java
+// source can say.
+func findLoops(blocks map[int]*block, entry int) (map[int]*loop, error) {
+	retreating := retreatingEdges(blocks, entry)
+	loops := map[int]*loop{}
+	if len(retreating) == 0 {
+		return loops, nil
+	}
+	doms := dominators(blocks, entry)
+	headers := []int{}
+	latchesOf := map[int][]int{}
+	for _, edge := range retreating {
+		from, to := edge[0], edge[1]
+		if !doms[from][to] {
+			return nil, bail("irreducible control flow")
+		}
+		if latchesOf[to] == nil {
+			headers = append(headers, to)
+		}
+		latchesOf[to] = append(latchesOf[to], from)
+	}
+	sort.Ints(headers)
+	predecessors := map[int][]int{}
+	for start, b := range blocks {
+		for _, successor := range b.Successors {
+			predecessors[successor] = append(predecessors[successor], start)
+		}
+	}
+	for _, header := range headers {
+		latches := latchesOf[header]
+		// Everything that reaches a latch without leaving through the header.
+		body := map[int]bool{header: true}
+		queue := append([]int{}, latches...)
+		for len(queue) > 0 {
+			at := queue[len(queue)-1]
+			queue = queue[:len(queue)-1]
+			if body[at] {
+				continue
+			}
+			body[at] = true
+			queue = append(queue, predecessors[at]...)
+		}
+		follow, err := loopFollow(blocks, header, latches, body)
+		if err != nil {
+			return nil, err
+		}
+		loops[header] = &loop{Header: header, Body: body, Latches: latches, Follow: follow}
+	}
+	// Two loops are either nested or disjoint; anything else is one loop entered
+	// at two places, which no `while` describes.
+	for _, outer := range loops {
+		for _, inner := range loops {
+			if outer == inner {
+				continue
+			}
+			shared := 0
+			for start := range inner.Body {
+				if outer.Body[start] {
+					shared++
+				}
+			}
+			if shared == 0 || shared == len(inner.Body) || shared == len(outer.Body) {
+				continue
+			}
+			return nil, bail("overlapping loops")
+		}
+	}
+	return loops, nil
+}
+
+// headerExits reports whether the test at the head of the loop is what leaves
+// it - the `while (c)` shape, which javac writes with the test at the bottom and
+// a `goto` into it. Only condition-only blocks count on the way there:
+// `while (a && b)` is two of them, while a loop that leaves from inside its body
+// is a `do` or a `for (;;)`.
+func headerExits(blocks map[int]*block, l *loop) bool {
+	seen := map[int]bool{}
+	queue := []int{l.Header}
+	for len(queue) > 0 {
+		at := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		if seen[at] {
+			continue
+		}
+		seen[at] = true
+		b := blocks[at]
+		if b == nil || b.Kind != blockConditional || !isPureBlock(b) {
+			continue
+		}
+		for _, successor := range b.Successors {
+			if successor == l.Follow {
+				return true
+			}
+		}
+		for _, successor := range b.Successors {
+			if l.Body[successor] {
+				queue = append(queue, successor)
+			}
+		}
+	}
+	return false
+}
+
+// activeLoop is a loop being written right now.
+type activeLoop struct {
+	Loop *loop
+	// ContinueTarget is where `continue;` goes: the test, which a `do` keeps at
+	// the bottom.
+	ContinueTarget int
 }
 
 // pureMnemonics are the instructions a *condition* may be built from: no store,
@@ -880,7 +1255,10 @@ type bodyDecompiler struct {
 	byName   map[string]*local
 	blocks   map[int]*block
 	followOf map[int]int
-	visited  map[int]bool
+	loops    map[int]*loop
+	// active are the loops being written right now, innermost last.
+	active  []activeLoop
+	visited map[int]bool
 	// conditions are every `if (...)` line emitted, with the condition it came
 	// from: a local's type can still narrow after the line is written (the use
 	// that proves it is a boolean may come later), and the text has to follow.
@@ -920,7 +1298,7 @@ func (d *bodyDecompiler) retype(entry *local, target string) {
 		(*write.List)[write.Index] = stmt{Text: text}
 	}
 	for _, emitted := range d.conditions {
-		(*emitted.List)[emitted.Index] = stmt{Text: d.ifLine(emitted.Condition)}
+		(*emitted.List)[emitted.Index] = stmt{Text: emitted.Wrap(d.renderCondition(emitted.Condition).Text)}
 	}
 }
 
@@ -929,11 +1307,22 @@ type emittedCondition struct {
 	List      *[]stmt
 	Index     int
 	Condition expr
+	Wrap      func(text string) string
 }
 
-func (d *bodyDecompiler) ifLine(condition expr) string {
-	return "if (" + d.renderCondition(condition).Text + ") {"
+// emitCondition writes a condition as a line, kept re-renderable for as long as
+// a local can retype.
+func (d *bodyDecompiler) emitCondition(condition expr, wrap func(text string) string) {
+	d.conditions = append(d.conditions,
+		emittedCondition{List: d.current, Index: len(*d.current), Condition: condition, Wrap: wrap})
+	*d.current = append(*d.current, stmt{Text: wrap(d.renderCondition(condition).Text)})
 }
+
+func ifWrap(text string) string { return "if (" + text + ") {" }
+
+func whileWrap(text string) string { return "while (" + text + ") {" }
+
+func doWhileWrap(text string) string { return "} while (" + text + ");" }
 
 // renderCondition renders a condition against the types its locals are known to
 // have *now*. `ifeq` on a local is how both `if (!b)` and `if (x == 0)` are
@@ -1145,11 +1534,16 @@ func (d *bodyDecompiler) run(instructions []Instruction) error {
 		return err
 	}
 	d.blocks = blocks
-	d.followOf = postDominators(blocks)
+	d.followOf = postDominators(blocks, nil, nil)
 	entry := 0
 	if len(instructions) > 0 {
 		entry = instructions[0].Pc
 	}
+	loops, err := findLoops(blocks, entry)
+	if err != nil {
+		return err
+	}
+	d.loops = loops
 	d.entryPc = entry
 	d.currentBlock = entry
 	if err := d.structure(entry, exitBlock); err != nil {
@@ -1174,11 +1568,36 @@ func (d *bodyDecompiler) run(instructions []Instruction) error {
 func (d *bodyDecompiler) structure(entry, stop int) error {
 	at := entry
 	for at != stop && at != exitBlock {
+		jump, jumped, err := d.loopJump(at)
+		if err != nil {
+			return err
+		}
+		if jumped {
+			d.emit(jump)
+			return nil
+		}
+		if l := d.loops[at]; l != nil && !d.inActive(l) {
+			next, err := d.loop(l)
+			if err != nil {
+				return err
+			}
+			at = next
+			continue
+		}
 		b := d.blocks[at]
 		if b == nil {
 			return bail("a branch lands outside the method")
 		}
 		if d.visited[at] {
+			// The `continue` of a `for` jumps to its update, not to the test -
+			// so the update is entered twice, once from the jump and once from
+			// the body running off its end. Writing it needs the `for` form.
+			if len(d.active) > 0 {
+				inner := d.active[len(d.active)-1]
+				if inner.Loop.Body[at] && at != inner.ContinueTarget {
+					return bail("a jump into the middle of a loop")
+				}
+			}
 			return bail("unstructured control flow")
 		}
 		d.visited[at] = true
@@ -1205,6 +1624,231 @@ func (d *bodyDecompiler) structure(entry, stop int) error {
 	return nil
 }
 
+// loopJump reports `break;` or `continue;` when at is where the innermost
+// loop's next iteration, or the code after it, begins. Leaving an *enclosing*
+// loop needs a label, which this phase does not write.
+func (d *bodyDecompiler) loopJump(at int) (string, bool, error) {
+	if len(d.active) == 0 {
+		return "", false, nil
+	}
+	inner := d.active[len(d.active)-1]
+	if at == inner.ContinueTarget {
+		return "continue;", true, nil
+	}
+	if at == inner.Loop.Follow {
+		return "break;", true, nil
+	}
+	for _, outer := range d.active[:len(d.active)-1] {
+		if at == outer.ContinueTarget || at == outer.Loop.Follow {
+			return "", false, bail("a labeled break or continue")
+		}
+	}
+	return "", false, nil
+}
+
+func (d *bodyDecompiler) inActive(l *loop) bool {
+	for _, entered := range d.active {
+		if entered.Loop == l {
+			return true
+		}
+	}
+	return false
+}
+
+// isLoopEdge reports whether start is a loop's own edge, which no expression may
+// fold away.
+func (d *bodyDecompiler) isLoopEdge(start int) bool {
+	if d.loops[start] != nil {
+		return true
+	}
+	for _, entered := range d.active {
+		if entered.ContinueTarget == start || entered.Loop.Follow == start {
+			return true
+		}
+	}
+	return false
+}
+
+// trimTail drops a trailing `continue;` a loop's own fallthrough already says.
+func trimTail(statements []stmt, text string) []stmt {
+	if len(statements) > 0 {
+		last := statements[len(statements)-1]
+		if last.Nested == nil && last.Text == text {
+			return statements[:len(statements)-1]
+		}
+	}
+	return statements
+}
+
+// loop writes one loop, from its header, and reports where the statement after
+// it begins.
+func (d *bodyDecompiler) loop(l *loop) (int, error) {
+	if len(d.stack) > 0 {
+		return 0, bail("values left on the stack")
+	}
+	header := d.blocks[l.Header]
+	var latch *block
+	if len(l.Latches) == 1 {
+		latch = d.blocks[l.Latches[0]]
+	}
+	isWhile := l.Follow != exitBlock && header.Kind == blockConditional && isPureBlock(header) &&
+		headerExits(d.blocks, l)
+	isDoWhile := !isWhile && l.Follow != exitBlock && latch != nil &&
+		latch.Kind == blockConditional &&
+		containsInt(latch.Successors, l.Header) && containsInt(latch.Successors, l.Follow)
+	// Inside the body, the merge of an `if` is a merge of the body's own paths:
+	// the edges a `continue` and a `break` take are exits, not joins. A `do`'s
+	// latch only counts when it is the test alone - javac puts the tail of the
+	// body in the same block when nothing jumps to the test, and that tail is a
+	// join like any other.
+	cut := map[int]bool{l.Header: true}
+	if isDoWhile && isPureBlock(latch) {
+		cut[latch.Start] = true
+	}
+	outer := d.followOf
+	d.followOf = postDominators(d.blocks, l.Body, cut)
+	defer func() { d.followOf = outer }()
+	if isWhile {
+		return d.whileLoop(l, header)
+	}
+	if isDoWhile {
+		return d.doWhileLoop(l, latch)
+	}
+	return d.foreverLoop(l)
+}
+
+// reachesArm reports whether one arm of a branch runs into the other, which
+// makes the second one the code after the `if` rather than its `else`. A `break`
+// or a `continue` ends the walk: it leaves the statement, like a `return`.
+func (d *bodyDecompiler) reachesArm(from, to int) bool {
+	stop := map[int]bool{}
+	if len(d.active) > 0 {
+		inner := d.active[len(d.active)-1]
+		stop[inner.ContinueTarget] = true
+		stop[inner.Loop.Follow] = true
+	}
+	seen := map[int]bool{}
+	queue := []int{from}
+	for len(queue) > 0 {
+		at := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		if at == to {
+			return true
+		}
+		if seen[at] || stop[at] || d.blocks[at] == nil {
+			continue
+		}
+		seen[at] = true
+		queue = append(queue, d.blocks[at].Successors...)
+	}
+	return false
+}
+
+func containsInt(values []int, wanted int) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+// whileLoop writes `while (c) { ... }`: the header is the test, and the loop
+// runs while it holds.
+func (d *bodyDecompiler) whileLoop(l *loop, header *block) (int, error) {
+	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: l.Header})
+	defer func() { d.active = d.active[:len(d.active)-1] }()
+	d.visited[l.Header] = true
+	last := header.Instructions[len(header.Instructions)-1]
+	if err := d.runInstructions(header.Instructions[:len(header.Instructions)-1], last.Pc, header.Start); err != nil {
+		return 0, err
+	}
+	var taken []int
+	jump, err := d.jumpConditionOf(header, &taken, nil)
+	if err != nil {
+		return 0, err
+	}
+	for _, start := range taken {
+		d.visited[start] = true
+	}
+	if jump.Target != l.Follow && jump.Fallthrough != l.Follow {
+		return 0, bail("an unstructured loop")
+	}
+	// The branch that leaves the loop is the negation of what source wrote.
+	condition, body := jump.Condition, jump.Target
+	if jump.Target == l.Follow {
+		condition, body = negate(jump.Condition), jump.Fallthrough
+	}
+	statements, err := d.capture(func() error { return d.structure(body, l.Header) })
+	if err != nil {
+		return 0, err
+	}
+	statements = trimTail(statements, "continue;")
+	d.emitCondition(condition, whileWrap)
+	*d.current = append(*d.current, stmt{Nested: &statements})
+	d.emit("}")
+	return l.Follow, nil
+}
+
+// doWhileLoop writes `do { ... } while (c);`: the test is the latch, and the
+// body runs first.
+func (d *bodyDecompiler) doWhileLoop(l *loop, latch *block) (int, error) {
+	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: latch.Start})
+	defer func() { d.active = d.active[:len(d.active)-1] }()
+	var condition expr
+	statements, err := d.capture(func() error {
+		if err := d.structure(l.Header, latch.Start); err != nil {
+			return err
+		}
+		if d.visited[latch.Start] {
+			return bail("unstructured control flow")
+		}
+		d.visited[latch.Start] = true
+		// The latch holds the last of the body and then the test, which is what
+		// the instructions before its branch leave on the stack.
+		last := latch.Instructions[len(latch.Instructions)-1]
+		if err := d.runInstructions(latch.Instructions[:len(latch.Instructions)-1], last.Pc, latch.Start); err != nil {
+			return err
+		}
+		var taken []int
+		jump, err := d.jumpConditionOf(latch, &taken, nil)
+		if err != nil {
+			return err
+		}
+		for _, start := range taken {
+			d.visited[start] = true
+		}
+		if jump.Target != l.Header || jump.Fallthrough != l.Follow {
+			return bail("an unstructured loop")
+		}
+		condition = jump.Condition
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	d.emit("do {")
+	*d.current = append(*d.current, stmt{Nested: &statements})
+	d.emitCondition(condition, doWhileWrap)
+	return l.Follow, nil
+}
+
+// foreverLoop writes `while (true) { ... }`: nothing at the head decides whether
+// to go round again.
+func (d *bodyDecompiler) foreverLoop(l *loop) (int, error) {
+	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: l.Header})
+	defer func() { d.active = d.active[:len(d.active)-1] }()
+	statements, err := d.capture(func() error { return d.structure(l.Header, exitBlock) })
+	if err != nil {
+		return 0, err
+	}
+	statements = trimTail(statements, "continue;")
+	d.emit("while (true) {")
+	*d.current = append(*d.current, stmt{Nested: &statements})
+	d.emit("}")
+	return l.Follow, nil
+}
+
 // conditional writes one `if`, from the branch that ends b, and reports where
 // the statement after it begins.
 func (d *bodyDecompiler) conditional(b *block) (int, error) {
@@ -1224,20 +1868,28 @@ func (d *bodyDecompiler) conditional(b *block) (int, error) {
 		condition = jump.Condition
 		whenTrue, whenFalse = jump.Target, jump.Fallthrough
 	}
-	follow, ok := d.followOf[b.Start]
+	merge, ok := d.followOf[b.Start]
 	if !ok {
-		follow = exitBlock
+		merge = exitBlock
 	}
 
-	if follow != exitBlock {
-		value, found, err := d.tryTernary(condition, whenTrue, whenFalse, follow)
+	if merge != exitBlock {
+		value, found, err := d.tryTernary(condition, whenTrue, whenFalse, merge)
 		if err != nil {
 			return 0, err
 		}
 		if found {
 			d.push(value)
-			return follow, nil
+			return merge, nil
 		}
+	}
+	// An arm that flows into the other one is an `if` without an `else`: the
+	// second arm is what follows the statement, not a branch of it. The merge
+	// point cannot say so when the first arm also ends in a `return`, a `break`
+	// or a `continue` - those paths never reach it.
+	follow := merge
+	if d.reachesArm(whenTrue, whenFalse) {
+		follow = whenFalse
 	}
 	// `if (c) return x;` has no merge point. Both arms leave the method - every
 	// path does, since a block that runs off the end is rejected - so the arm
@@ -1268,9 +1920,7 @@ func (d *bodyDecompiler) conditional(b *block) (int, error) {
 }
 
 func (d *bodyDecompiler) pushIf(condition expr, thenStatements, elseStatements []stmt) {
-	d.conditions = append(d.conditions,
-		emittedCondition{List: d.current, Index: len(*d.current), Condition: condition})
-	d.emit(d.ifLine(condition))
+	d.emitCondition(condition, ifWrap)
 	*d.current = append(*d.current, stmt{Nested: &thenStatements})
 	if len(elseStatements) > 0 {
 		d.emit("} else {")
@@ -1375,6 +2025,10 @@ func (d *bodyDecompiler) chainFrom(
 		return jump{}, false, nil, nil
 	}
 	if folded[start] || d.visited[start] {
+		return jump{}, false, nil, nil
+	}
+	// A loop's own test is a statement, not a term of the condition in front of it.
+	if d.isLoopEdge(start) {
 		return jump{}, false, nil, nil
 	}
 	// Nothing outside the chain may reach it, or folding would skip a path in.
@@ -1551,6 +2205,9 @@ func (d *bodyDecompiler) armValues(
 func (d *bodyDecompiler) valueOfRegion(start, follow int, consumed *[]int) (expr, bool, error) {
 	b := d.blocks[start]
 	if b == nil || !isPureBlock(b) {
+		return expr{}, false, nil
+	}
+	if d.isLoopEdge(start) {
 		return expr{}, false, nil
 	}
 	// A block already emitted as a statement cannot also be a value; one that two

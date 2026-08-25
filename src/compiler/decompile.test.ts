@@ -337,6 +337,10 @@ const LOOPY_SOURCE =
   "  static int ifInside(int n) { int t = 0; for (int i = 0; i < n; i++) { if (i % 2 == 0) { t = t + i; } else { t = t - i; } } return t; }\n" +
   "  static int untilNull(java.lang.Object o, int n) { int i = 0; while (o == null && i < n) { i = i + 1; } return i; }\n" +
   "  static long longLoop(long n) { long s = 0L; while (s < n) { s = s + 3L; } return s; }\n" +
+  // An arm of an `if` that ends in `continue` never reaches the merge point, and
+  // a `do` whose test shares its block with the tail of the body still has one.
+  "  static int arms(int a, int b) { int t = a; int i = 0; do { i = i + 1; if (i <= a) { t = t * i; if (a >= b) { continue; } } t = t * t; } while (i < b); return t; }\n" +
+  "  static int tail(int a, int b) { int u = b; int i = 0; do { i = i + 1; if (i > a) { u = u * u; } else { u = u - a; } u = u * (u + 1); } while (i < a); return u; }\n" +
   "}";
 
 test(
@@ -361,6 +365,9 @@ const LOOPY_RUN_SOURCE =
   "  static int continues(int[] xs) { int t = 0; int i = 0; while (i < xs.length) { int v = xs[i]; i = i + 1; if (v < 0) { continue; } t = t + v; } return t; }\n" +
   "  static int windows(int n) { int t = 0; int i = 0; while (i < n) { int step = i % 3 + 1; i = i + step; t = t + step * i; } return t; }\n" +
   "  static int triangle(int n) { int t = 0; int i = 0; do { int row = 0; for (int j = 0; j <= i; j++) { row = row + j; } t = t + row; i = i + 1; } while (i < n); return t; }\n" +
+  // A `do` whose body starts with a statement and leaves through a `break`: what
+  // the head branches to is the break, not the end of the loop.
+  "  static int breakOut(int a, int b) { int u = b; int i = 0; do { i = i + 1; u = a * 4; if (a == u) { break; } for (int j = 0; j < i; j++) { if (a != u) { u = a + b; } } } while (i < a); return u; }\n" +
   "}";
 
 // The caller stays javac's, so only the class under test is swapped for the
@@ -371,7 +378,8 @@ const LOOPY_DRIVER_SOURCE =
   "    int[] xs = { 3, -1, 4, -1, 5, 9, -2, 6 };\n" +
   "    for (int n = -1; n < 6; n++) {\n" +
   '      System.out.println(LoopyRun.nested(n, n + 1) + " " + LoopyRun.continues(xs)\n' +
-  '        + " " + LoopyRun.windows(n) + " " + LoopyRun.triangle(n));\n' +
+  '        + " " + LoopyRun.windows(n) + " " + LoopyRun.triangle(n)\n' +
+  '        + " " + LoopyRun.breakOut(n, n + 2));\n' +
   "    }\n" +
   "  }\n" +
   "}";
