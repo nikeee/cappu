@@ -39,26 +39,33 @@ function classBytes(name: string): Uint8Array {
 }
 
 // Every class our emitter produced whose methods this phase reconstructs in
-// full - straight-line arithmetic, conversions, fields, arrays and casts.
+// full - arithmetic, conversions, fields, arrays, casts, control flow and calls.
 const FULLY_DECOMPILED = [
   "AnnAll",
   "Arithmetic",
   "ArrayLoad",
   "ArrayStore",
+  "BoundErasure",
+  "Boxing",
   "CastInstance",
   "Cl",
   "ClassLit",
+  "Compute",
   "Constants",
+  "ControlFlow",
   "Empty",
   "EnumAbstract$1",
   "EnumAbstract$2",
   "EnumMixed$1",
   "EnumMixed$2",
+  "EnumUnqualified",
   "Fields",
   "FloatArith",
   "FloatConst",
   "FloatConv",
   "Fold",
+  "Hello",
+  "ICast",
   "ICast$A",
   "ICast$B",
   "ISA",
@@ -66,14 +73,16 @@ const FULLY_DECOMPILED = [
   "ImplicitSealed",
   "IntConv",
   "IntLiterals",
+  "Invoke",
   "Locals",
   "LongArith",
   "Methods",
   "ModifiedFields",
+  "Nest",
   "Nest$Counter",
   "Nest$Point",
-  "Nest",
   "NewArray",
+  "PrivateCall",
   "Pt",
   "ReturnLiterals",
   "Returns",
@@ -87,21 +96,13 @@ const FULLY_DECOMPILED = [
   "VarargsAndAbstract",
 ];
 
-// Classes kept for the bail-out rendering: control flow (phase 1.4+) and method
-// calls (phase 1.6) are not this phase's job, and must say so.
+// Classes kept for the bail-out rendering: string concatenation (an
+// invokedynamic), an inner class's constructor and an array initializer are not
+// this phase's job, and must say so.
 const NOT_DECOMPILED = [
-  "BoundErasure",
-  "Boxing",
-  "Compute",
   "Concat",
-  "ControlFlow",
   "EnumAbstract",
   "EnumMixed",
-  "EnumUnqualified",
-  "Hello",
-  "ICast",
-  "Invoke",
-  "PrivateCall",
   "QualifiedAnon$1",
   "QualifiedAnon$Inner",
   "QualifiedAnon",
@@ -193,7 +194,20 @@ const STUB_GAP = ["ClassLit"];
 // forbids anyone to write - so nothing can re-emit it.
 const ENUM_CONSTANT_BODIES = ["EnumAbstract$1", "EnumAbstract$2", "EnumMixed$1", "EnumMixed$2"];
 
-const NO_ROUNDTRIP = [...STUB_GAP, "Nest$Counter", ...ENUM_CONSTANT_BODIES];
+// Reconstructions this oracle cannot judge, for reasons of its own:
+//   - `ICast` names two nested types that live outside the one class the
+//     decompiler writes, so re-emitting the file alone cannot resolve them;
+//   - `BoundErasure` declares `T get()`, and the decompiler works off the
+//     descriptor, so what comes back is the erased `CharSequence get()` - a
+//     different member, not different code;
+//   - `EnumUnqualified` declares a local inside a loop, which is hoisted to the
+//     top of the method and shifts every slot after it;
+//   - `Boxing` calls `Integer.intValue()`, and our emitter writes the *declaring*
+//     class into the method ref (`Number.intValue`) where javac writes the
+//     receiver's static type. That is an emitter bug, not a decompiler one.
+const EMITTER_GAP = ["ICast", "BoundErasure", "EnumUnqualified", "Boxing"];
+
+const NO_ROUNDTRIP = [...STUB_GAP, "Nest$Counter", ...ENUM_CONSTANT_BODIES, ...EMITTER_GAP];
 
 for (const name of FULLY_DECOMPILED.filter(n => !NO_ROUNDTRIP.includes(n))) {
   test(`recompiles to the same bytecode: ${name}`, () => {
@@ -402,6 +416,47 @@ test(
     });
     expect(actual).toEqual(expected);
     expect(actual).not.toEqual("");
+  },
+);
+
+// Every call shape javac writes: static, virtual, interface, private and
+// `super`, a `new`, a chain, a call whose value is dropped, and one inside a
+// loop. Raw `java.util.List` on purpose - the decompiler works off descriptors,
+// so a type argument would come back erased and only the signature would differ.
+const CALLSY_SOURCE =
+  "public class Callsy {\n" +
+  "  private int seed;\n" +
+  "  public Callsy(int seed) { this.seed = seed; }\n" +
+  "  private int twice(int v) { return v * 2; }\n" +
+  "  static int stat(int v) { return v + 1; }\n" +
+  "  int use(int v) { return this.twice(v) + stat(v); }\n" +
+  "  int chain(String s) { return s.trim().length(); }\n" +
+  "  static int iface(java.util.List xs) { return xs.size(); }\n" +
+  "  static Object make(int v) { return new Callsy(v); }\n" +
+  "  static int viaNew(int v) { return new Callsy(v).seed; }\n" +
+  "  static void discard(java.util.List xs) { xs.remove(0); }\n" +
+  "  static int nested(int v) { return stat(stat(stat(v))); }\n" +
+  "  static String str(Object o) { return o.toString(); }\n" +
+  "  static int cmp(String a, String b) { return a.compareTo(b); }\n" +
+  "  int loopCall(int n) { int t = 0; for (int i = 0; i < n; i++) { t = t + this.twice(i); } return t; }\n" +
+  "  static boolean eq(Object a, Object b) { return a.equals(b); }\n" +
+  "  static int len(String s) { if (s == null) { return 0; } return s.length(); }\n" +
+  "  int superHash() { return super.hashCode(); }\n" +
+  "  static long widen(int v) { return java.lang.Math.abs((long) v); }\n" +
+  "  static int both(int a, String s) { if (a > 0 && s.length() > 3) { return 1; } return 0; }\n" +
+  "  static int either(String s, int a) { if (s == null || a > 0) { return 1; } return 0; }\n" +
+  "}\n";
+
+test(
+  "recompiles javac's own calls to the same bytecode",
+  { skip: HAS_JAVAC && HAS_JAVAP ? false : "no JDK (javac/javap)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-callsy-");
+    const classFile = compileWithJavac(CALLSY_SOURCE, "Callsy", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("not decompiled");
+    const roundTripped = compileWithJavac(source, "Callsy", join(dir.path, "again"));
+    expect(javap(roundTripped)).toEqual(javap(classFile));
   },
 );
 
@@ -666,10 +721,10 @@ const RECONSTRUCTIONS: {
   {
     name: "Blank",
     source: "class Blank { static int v() { return 1; } static final int N; static { N = v(); } }",
-    // The initializer could not be reconstructed, so `final` cannot stand, and
-    // a static initializer may not throw.
-    expect: ["static int N;"],
-    reject: ["static final int N", "UnsupportedOperationException"],
+    // A blank `static final` is only assignable in the initializer, so the
+    // initializer has to come back for the `final` to stand.
+    expect: ["static final int N;", "N = v();"],
+    reject: ["UnsupportedOperationException"],
     selfContained: true,
   },
 ];
@@ -700,9 +755,8 @@ test("reconstructs the control flow of the ControlFlow fixture", () => {
   expect(source).toContain("while (var2 < arg0) {"); // the `for`, whose update is at the bottom
   expect(source).toContain("while (arg0 > 0) {");
   expect(source).toContain("} while (var1 < arg0);");
-  // Only `main` is left: it calls the others, which is a later phase.
-  expect(source).toContain("cappu: unsupported instruction invokestatic");
-  expect(source).not.toContain("loops are not decompiled yet");
+  expect(source).toContain("java.lang.System.out.println(sum(5));");
+  expect(source).not.toContain("not decompiled");
 });
 
 test("chains to the superclass constructor", () => {

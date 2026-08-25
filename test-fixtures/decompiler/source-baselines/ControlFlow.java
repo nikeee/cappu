@@ -39,31 +39,10 @@ public class ControlFlow {
   }
 
   public static void main(java.lang.String[] arg0) {
-    /* cappu: unsupported instruction invokestatic; the bytecode is:
-     * 0: getstatic #26
-     * 3: iconst_5
-     * 4: invokestatic #28
-     * 7: invokevirtual #34
-     * 10: getstatic #26
-     * 13: bipush -7
-     * 15: invokestatic #36
-     * 18: invokevirtual #34
-     * 21: getstatic #26
-     * 24: iconst_3
-     * 25: invokestatic #38
-     * 28: invokevirtual #34
-     * 31: getstatic #26
-     * 34: iconst_4
-     * 35: invokestatic #40
-     * 38: invokevirtual #34
-     * 41: getstatic #26
-     * 44: iconst_5
-     * 45: iconst_1
-     * 46: bipush 10
-     * 48: invokestatic #42
-     * 51: invokevirtual #45
-     * 54: return
-     */
-    throw new UnsupportedOperationException("cappu: not decompiled");
+    java.lang.System.out.println(sum(5));
+    java.lang.System.out.println(absish(-7));
+    java.lang.System.out.println(countdown(3));
+    java.lang.System.out.println(firstSet(4));
+    java.lang.System.out.println(inRange(5, 1, 10));
   }
 }

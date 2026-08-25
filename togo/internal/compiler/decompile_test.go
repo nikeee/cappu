@@ -15,22 +15,73 @@ import (
 // Every class our emitter produced whose methods this phase reconstructs in
 // full - straight-line arithmetic, conversions, fields, arrays and casts.
 var fullyDecompiled = []string{
-	"AnnAll", "Arithmetic", "ArrayLoad", "ArrayStore", "CastInstance", "Cl",
-	"ClassLit", "Constants", "Empty", "EnumAbstract$1", "EnumAbstract$2",
-	"EnumMixed$1", "EnumMixed$2", "Fields", "FloatArith", "FloatConst", "FloatConv",
-	"Fold", "ICast$A", "ICast$B", "ISA", "ISB", "ImplicitSealed", "IntConv",
-	"IntLiterals", "Locals", "LongArith", "Methods", "ModifiedFields", "Nest$Counter",
-	"Nest$Point", "Nest", "NewArray", "Pt", "ReturnLiterals", "Returns", "Rt",
-	"Sealed", "SealedI", "StaticFields", "SubA", "SubB", "SubC", "VarargsAndAbstract",
+	"AnnAll",
+	"Arithmetic",
+	"ArrayLoad",
+	"ArrayStore",
+	"BoundErasure",
+	"Boxing",
+	"CastInstance",
+	"Cl",
+	"ClassLit",
+	"Compute",
+	"Constants",
+	"ControlFlow",
+	"Empty",
+	"EnumAbstract$1",
+	"EnumAbstract$2",
+	"EnumMixed$1",
+	"EnumMixed$2",
+	"EnumUnqualified",
+	"Fields",
+	"FloatArith",
+	"FloatConst",
+	"FloatConv",
+	"Fold",
+	"Hello",
+	"ICast",
+	"ICast$A",
+	"ICast$B",
+	"ISA",
+	"ISB",
+	"ImplicitSealed",
+	"IntConv",
+	"IntLiterals",
+	"Invoke",
+	"Locals",
+	"LongArith",
+	"Methods",
+	"ModifiedFields",
+	"Nest",
+	"Nest$Counter",
+	"Nest$Point",
+	"NewArray",
+	"PrivateCall",
+	"Pt",
+	"ReturnLiterals",
+	"Returns",
+	"Rt",
+	"Sealed",
+	"SealedI",
+	"StaticFields",
+	"SubA",
+	"SubB",
+	"SubC",
+	"VarargsAndAbstract",
 }
 
 // Classes kept for the bail-out rendering: control flow (phase 1.4+) and method
 // calls (phase 1.6) are not this phase's job, and must say so.
 var notDecompiled = []string{
-	"BoundErasure", "Boxing", "Compute", "Concat", "ControlFlow", "EnumAbstract",
-	"EnumMixed", "EnumUnqualified", "Hello", "ICast", "Invoke", "PrivateCall",
-	"QualifiedAnon$1", "QualifiedAnon$Inner", "QualifiedAnon", "QualifiedNew$Inner",
-	"QualifiedNew", "VarargsPack",
+	"Concat",
+	"EnumAbstract",
+	"EnumMixed",
+	"QualifiedAnon$1",
+	"QualifiedAnon$Inner",
+	"QualifiedAnon",
+	"QualifiedNew$Inner",
+	"QualifiedNew",
+	"VarargsPack",
 }
 
 // `ClassLit.prim()` reads `java.lang.Integer.TYPE`, which javac accepts and the
@@ -564,10 +615,10 @@ var reconstructions = []struct {
 		name: "Blank",
 		source: "class Blank { static int v() { return 1; } static final int N;" +
 			" static { N = v(); } }",
-		// The initializer could not be reconstructed, so `final` cannot stand,
-		// and a static initializer may not throw.
-		want:          []string{"static int N;"},
-		reject:        []string{"static final int N", "UnsupportedOperationException"},
+		// A blank `static final` is only assignable in the initializer, so the
+		// initializer has to come back for the `final` to stand.
+		want:          []string{"static final int N;", "N = v();"},
+		reject:        []string{"UnsupportedOperationException"},
 		selfContained: true,
 	},
 }
@@ -607,15 +658,14 @@ func TestDecompileReconstructsControlFlowFixture(t *testing.T) {
 		"while (var2 < arg0) {", // the `for`, whose update is at the bottom
 		"while (arg0 > 0) {",
 		"} while (var1 < arg0);",
-		// Only `main` is left: it calls the others, which is a later phase.
-		"cappu: unsupported instruction invokestatic",
+		"java.lang.System.out.println(sum(5));",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("missing %q in:\n%s", want, source)
 		}
 	}
-	if strings.Contains(source, "loops are not decompiled yet") {
-		t.Errorf("still bails on a loop:\n%s", source)
+	if strings.Contains(source, "not decompiled") {
+		t.Errorf("a method still bails:\n%s", source)
 	}
 }
 
@@ -795,6 +845,53 @@ func runJava(t *testing.T, classPath, name string) string {
 		t.Fatalf("java: %v", err)
 	}
 	return string(out)
+}
+
+// Every call shape javac writes: static, virtual, interface, private and
+// `super`, a `new`, a chain, a call whose value is dropped, and one inside a
+// loop. Raw `java.util.List` on purpose - the decompiler works off descriptors,
+// so a type argument would come back erased and only the signature would differ.
+const callsySource = `public class Callsy {
+  private int seed;
+  public Callsy(int seed) { this.seed = seed; }
+  private int twice(int v) { return v * 2; }
+  static int stat(int v) { return v + 1; }
+  int use(int v) { return this.twice(v) + stat(v); }
+  int chain(String s) { return s.trim().length(); }
+  static int iface(java.util.List xs) { return xs.size(); }
+  static Object make(int v) { return new Callsy(v); }
+  static int viaNew(int v) { return new Callsy(v).seed; }
+  static void discard(java.util.List xs) { xs.remove(0); }
+  static int nested(int v) { return stat(stat(stat(v))); }
+  static String str(Object o) { return o.toString(); }
+  static int cmp(String a, String b) { return a.compareTo(b); }
+  int loopCall(int n) { int t = 0; for (int i = 0; i < n; i++) { t = t + this.twice(i); } return t; }
+  static boolean eq(Object a, Object b) { return a.equals(b); }
+  static int len(String s) { if (s == null) { return 0; } return s.length(); }
+  int superHash() { return super.hashCode(); }
+  static long widen(int v) { return java.lang.Math.abs((long) v); }
+  static int both(int a, String s) { if (a > 0 && s.length() > 3) { return 1; } return 0; }
+  static int either(String s, int a) { if (s == null || a > 0) { return 1; } return 0; }
+}`
+
+func TestDecompileRecompilesJavacCallsToTheSameBytecode(t *testing.T) {
+	if !hasTool("javac") || !hasTool("javap") {
+		t.Skip("no JDK (javac/javap)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Callsy", callsySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "not decompiled") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Callsy", source)
+	if javapText(t, roundTripped) != javapText(t, classFile) {
+		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
+			javapText(t, roundTripped), javapText(t, classFile))
+	}
 }
 
 func TestDecompileWritesNestedTypeReferencesWithADot(t *testing.T) {

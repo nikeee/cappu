@@ -31,13 +31,7 @@ class VarargsPack {
   }
 
   int callEmpty() {
-    /* cappu: unsupported instruction invokestatic; the bytecode is:
-     * 0: iconst_0
-     * 1: newarray int
-     * 3: invokestatic #18
-     * 6: ireturn
-     */
-    throw new UnsupportedOperationException("cappu: not decompiled");
+    return sum(new int[0]);
   }
 
   java.lang.String callMixed() {

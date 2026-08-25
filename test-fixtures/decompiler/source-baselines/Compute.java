@@ -5,18 +5,8 @@ public class Compute {
   }
 
   public static void main(java.lang.String[] arg0) {
-    /* cappu: unsupported instruction invokestatic; the bytecode is:
-     * 0: invokestatic #16
-     * 3: istore_1
-     * 4: iload_1
-     * 5: iconst_2
-     * 6: isub
-     * 7: istore_2
-     * 8: getstatic #22
-     * 11: iload_2
-     * 12: invokevirtual #28
-     * 15: return
-     */
-    throw new UnsupportedOperationException("cappu: not decompiled");
+    int var1 = v();
+    int var2 = var1 - 2;
+    java.lang.System.out.println(var2);
   }
 }

@@ -25,6 +25,7 @@ import {
   className,
   findAttribute,
   memberRef,
+  type MemberRef,
   readClassFile,
   readCode,
   readExceptions,
@@ -108,6 +109,17 @@ interface Expr {
    * own: the comparison it feeds is what source wrote.
    */
   readonly compared?: { readonly left: Expr; readonly right: Expr };
+  /**
+   * A value that does something when it runs - a call. Dropping it has to keep
+   * it as a statement, and nothing may write it twice.
+   */
+  readonly effects?: true;
+  /**
+   * The object `new` left on the stack, which is not a value until its
+   * constructor has run. Every copy carries the same id, so the call can put
+   * `new C(...)` in all of their places at once.
+   */
+  readonly pending?: number;
 }
 
 function primary(text: string, type: string): Expr {
@@ -591,6 +603,8 @@ const CONDITIONAL_BRANCHES = new Set([
   "ifnonnull",
 ]);
 
+const INVOKES = new Set(["invokestatic", "invokevirtual", "invokeinterface", "invokespecial"]);
+
 function isGoto(mnemonic: string): boolean {
   return mnemonic === "goto" || mnemonic === "goto_w";
 }
@@ -952,6 +966,21 @@ interface ActiveLoop {
   readonly continueTarget: number;
 }
 
+/**
+ * A block a condition may be folded from. Like `isPureBlock`, but a call is
+ * allowed: folding runs it exactly once and in the same place, which is not
+ * true of the ternary arms `isPureBlock` guards - those can be evaluated twice.
+ */
+function isConditionBlock(block: Block): boolean {
+  return block.instructions.every(
+    (instruction, index) =>
+      PURE_MNEMONICS.test(instruction.mnemonic) ||
+      INVOKES.has(instruction.mnemonic) ||
+      (index === block.instructions.length - 1 &&
+        (CONDITIONAL_BRANCHES.has(instruction.mnemonic) || isGoto(instruction.mnemonic))),
+  );
+}
+
 function isPureBlock(block: Block): boolean {
   return block.instructions.every(
     (instruction, index) =>
@@ -991,6 +1020,8 @@ class BodyDecompiler {
   /** The loops being written right now, innermost last. */
   private readonly active: ActiveLoop[] = [];
   private readonly visited = new Set<number>();
+  /** Hands out the ids that tell the copies of one `new` apart. */
+  private pendingCount = 0;
   /**
    * Every `if (...)` line emitted, with the condition it came from: a local's
    * type can still narrow after the line is written (the use that proves it is a
@@ -1196,6 +1227,85 @@ class BodyDecompiler {
     this.byName.set(local.name, local);
     this.locals.set(slot, local);
     return local;
+  }
+
+  /** The arguments of a call, popped in reverse and written as the parameters. */
+  private arguments(descriptor: string): string[] {
+    const params = parameterSlots(descriptor, true).map(p => p.type);
+    const args: string[] = [];
+    for (let i = params.length - 1; i >= 0; i--) {
+      args.unshift(this.coerceInto(this.pop(), params[i]!));
+    }
+    return args;
+  }
+
+  /** A static call: unqualified when it is this class's own method. */
+  private staticCallee(owner: string, name: string): string {
+    if (owner === this.classFile.thisClass) return name;
+    return `${typeName(owner, this.self)}.${name}`;
+  }
+
+  /** An instance call, with the receiver the bytecode pushed before the arguments. */
+  private receiverCallee(mnemonic: string, owner: string, name: string): string {
+    const receiver = this.pop();
+    if (mnemonic !== "invokespecial" || owner === this.classFile.thisClass) {
+      return `${at(receiver, PREC_PRIMARY)}.${name}`;
+    }
+    // The only other invokespecial source writes is `super.m()`; an interface's
+    // `Iface.super.m()` needs the interface named, which this phase does not do.
+    if (owner !== (this.classFile.superClass ?? "java/lang/Object") || receiver.text !== "this") {
+      throw new NotDecompilable("unsupported instruction invokespecial");
+    }
+    return `super.${name}`;
+  }
+
+  /**
+   * A constructor call: either `new C(...)`, whose object is already on the
+   * stack, or the `super(...)`/`this(...)` that opens a constructor - which is
+   * not a call in source but the shape of one, and without which no constructor
+   * decompiles at all.
+   */
+  private construct(target: MemberRef): void {
+    // An inner class's constructor takes the enclosing instance as its first
+    // argument, and source cannot pass it: `outer.new Inner(...)` is the only
+    // way to write one. Whether the class is inner at all is in *its* file, not
+    // this one, so the shape of the descriptor is all there is to go on.
+    const enclosing = target.owner.slice(0, Math.max(0, target.owner.lastIndexOf("$")));
+    const first = parameterSlots(target.descriptor, true)[0]?.type;
+    if (enclosing !== "" && first === enclosing.replaceAll("/", ".")) {
+      throw new NotDecompilable("an inner class constructor");
+    }
+    const args = this.arguments(target.descriptor);
+    const receiver = this.pop();
+    if (receiver.pending === undefined) {
+      const isSuper = target.owner === (this.classFile.superClass ?? "java/lang/Object");
+      const isThis = target.owner === this.classFile.thisClass;
+      if (!isSuper && !isThis) throw new NotDecompilable("constructor call to an unrelated class");
+      if (receiver.text !== "this") throw new NotDecompilable("constructor call on another object");
+      if (this.statements.length > 0 || this.depth > 0) {
+        throw new NotDecompilable("constructor call is not first");
+      }
+      // javac writes the implicit `super()` into every constructor; source does
+      // not, and re-emitting puts it back. An enum constructor's `super(name,
+      // ordinal)` is generated too - and writing it is a compile error.
+      if (isSuper && (args.length === 0 || isEnumDeclaration(this.classFile))) return;
+      this.current.push(`${isSuper ? "super" : "this"}(${args.join(", ")});`);
+      return;
+    }
+    const value: Expr = {
+      text: `new ${receiver.type}(${args.join(", ")})`,
+      prec: PREC_PRIMARY,
+      type: receiver.type,
+      effects: true,
+    };
+    // The `dup` in front of the call left the other copies of the same object.
+    let kept = false;
+    for (const [index, entry] of this.stack.entries()) {
+      if (entry.pending !== receiver.pending) continue;
+      this.stack[index] = value;
+      kept = true;
+    }
+    if (!kept) this.current.push(`${value.text};`);
   }
 
   /**
@@ -1571,7 +1681,9 @@ class BodyDecompiler {
     deep: boolean,
   ): (Jump & { undo: () => void }) | undefined {
     const next = this.blocks.get(start);
-    if (next === undefined || next.kind !== "conditional" || !isPureBlock(next)) return undefined;
+    if (next === undefined || next.kind !== "conditional" || !isConditionBlock(next)) {
+      return undefined;
+    }
     if (folded.has(start) || this.visited.has(start)) return undefined;
     // A loop's own test is a statement, not a term of the condition in front of it.
     if (this.isLoopEdge(start)) return undefined;
@@ -1580,6 +1692,7 @@ class BodyDecompiler {
     const stackBefore = [...this.stack];
     const takenCount = taken.length;
     const foldedBefore = [...folded];
+    const statementsBefore = this.current.length;
     folded.add(start);
     taken.push(start);
     const last = next.instructions[next.instructions.length - 1]!;
@@ -1591,15 +1704,20 @@ class BodyDecompiler {
           target: next.successors[1]!,
           fallthrough: next.successors[0]!,
         };
-    return {
-      ...jump,
-      undo: () => {
-        this.stack.splice(0, this.stack.length, ...stackBefore);
-        taken.length = takenCount;
-        folded.clear();
-        for (const block of foldedBefore) folded.add(block);
-      },
+    const undo = (): void => {
+      this.stack.splice(0, this.stack.length, ...stackBefore);
+      this.current.length = statementsBefore;
+      taken.length = takenCount;
+      folded.clear();
+      for (const block of foldedBefore) folded.add(block);
     };
+    // A statement means the block did more than compute a value - a call whose
+    // result is dropped, say - and folding it into a condition would move it.
+    if (this.current.length !== statementsBefore) {
+      undo();
+      return undefined;
+    }
+    return { ...jump, undo };
   }
 
   private predecessorsOf(start: number, ignore: ReadonlySet<number>): number {
@@ -1945,33 +2063,29 @@ class BodyDecompiler {
       });
     }
 
-    // Constructor chaining. `super(...)`/`this(...)` is not a method call in
-    // source, it is the shape of a constructor - without it no constructor
-    // decompiles at all. Any other invokespecial (a `new`, a private call) is
-    // still a later phase.
-    if (mnemonic === "invokespecial") {
+    // Object creation. `new` leaves a reference that is not a value yet: only
+    // the constructor call makes one, and javac dups it first so the call can
+    // consume a copy and leave the object behind.
+    if (mnemonic === "new") {
+      const type = typeName(className(pool, instruction.arg) ?? "java/lang/Object", this.self);
+      return this.push({ text: "", prec: PREC_PRIMARY, type, pending: this.pendingCount++ });
+    }
+    if (INVOKES.has(mnemonic)) {
       const target = memberRef(pool, instruction.arg);
-      if (target?.name !== "<init>") {
-        throw new NotDecompilable("unsupported instruction invokespecial");
+      if (!target) throw new NotDecompilable("bad method reference");
+      if (target.name === "<init>") return this.construct(target);
+      const args = this.arguments(target.descriptor);
+      const callee =
+        mnemonic === "invokestatic"
+          ? this.staticCallee(target.owner, target.name)
+          : this.receiverCallee(mnemonic, target.owner, target.name);
+      const text = `${callee}(${args.join(", ")})`;
+      const type = sourceTypeText(returnType(target.descriptor), this.self);
+      if (type === "void") {
+        this.current.push(`${text};`);
+        return;
       }
-      const isSuper = target.owner === (this.classFile.superClass ?? "java/lang/Object");
-      const isThis = target.owner === this.classFile.thisClass;
-      if (!isSuper && !isThis) throw new NotDecompilable("constructor call to an unrelated class");
-      const params = parameterSlots(target.descriptor, true).map(p => p.type);
-      const args: string[] = [];
-      for (let i = params.length - 1; i >= 0; i--) {
-        args.unshift(this.coerceInto(this.pop(), params[i]!));
-      }
-      if (this.pop().text !== "this")
-        throw new NotDecompilable("constructor call on another object");
-      if (this.statements.length > 0 || this.depth > 0)
-        throw new NotDecompilable("constructor call is not first");
-      // javac writes the implicit `super()` into every constructor; source does
-      // not, and re-emitting puts it back. An enum constructor's `super(name,
-      // ordinal)` is generated too - and writing it is a compile error.
-      if (isSuper && (args.length === 0 || isEnumDeclaration(this.classFile))) return;
-      this.current.push(`${isSuper ? "super" : "this"}(${args.join(", ")});`);
-      return;
+      return this.push({ text, prec: PREC_PRIMARY, type, effects: true });
     }
 
     // Stack shuffling. A dup of anything but a name would duplicate the
@@ -1979,15 +2093,26 @@ class BodyDecompiler {
     // taken; array initializers and the rest wait for a later phase.
     if (mnemonic === "dup") {
       const value = this.pop();
-      if (value.prec !== PREC_PRIMARY || value.text.startsWith("new ")) {
+      if (value.effects === true) throw new NotDecompilable("dup of a call");
+      if (
+        value.pending === undefined &&
+        (value.prec !== PREC_PRIMARY || value.text.startsWith("new "))
+      ) {
         throw new NotDecompilable("dup of a non-trivial value");
       }
       this.push(value);
       this.push(value);
       return;
     }
-    if (mnemonic === "pop") {
-      this.pop();
+    if (mnemonic === "pop" || mnemonic === "pop2") {
+      const value = this.pop();
+      // `pop2` drops one long or double, or two of anything else - and two of
+      // anything else is a shape this phase does not produce.
+      if (mnemonic === "pop2" && value.type !== "long" && value.type !== "double") {
+        throw new NotDecompilable("pop2 of two values");
+      }
+      // The value of a call is what is being dropped, not the call itself.
+      if (value.effects === true) this.current.push(`${value.text};`);
       return;
     }
 

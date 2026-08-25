@@ -7,7 +7,7 @@ enum EnumAbstract {
   public abstract int rank();
 
   public static void main(java.lang.String[] arg0) {
-    /* cappu: unsupported instruction invokestatic; the bytecode is:
+    /* cappu: unsupported instruction invokedynamic; the bytecode is:
      * 0: invokestatic #22
      * 3: astore_1
      * 4: iconst_0
@@ -35,7 +35,7 @@ enum EnumAbstract {
   }
 
   static {
-    /* cappu: unsupported instruction new; the bytecode is:
+    /* cappu: dup of a non-trivial value; the bytecode is:
      * 0: new #72
      * 3: dup
      * 4: ldc #73
