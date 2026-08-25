@@ -842,11 +842,12 @@ function loopFollow(
   const outside = (start: number): number[] =>
     (blocks.get(start)?.successors ?? []).filter(successor => !body.has(successor));
   const fromHeader = outside(header);
-  // Only a header that is the test itself: one that carries statements is the
-  // start of a `do`'s body, and what leaves it is a `break`, not the loop's end.
+  // Only a header that is the test itself: one that carries statements - a call
+  // among them - is the start of a `do`'s body, and what leaves it is a `break`,
+  // not the loop's end.
   if (
     blocks.get(header)!.kind === "conditional" &&
-    isConditionBlock(blocks.get(header)!) &&
+    isPureBlock(blocks.get(header)!) &&
     fromHeader.length === 1
   ) {
     return fromHeader[0]!;
@@ -1308,14 +1309,17 @@ class BodyDecompiler {
       type: receiver.type,
       effects: true,
     };
-    // The `dup` in front of the call left the other copies of the same object.
-    let kept = false;
+    // The `dup` in front of the call left one other copy of the same object.
+    // Two would mean the object is used twice, and writing `new C(...)` in both
+    // places would make two of them.
+    let kept = 0;
     for (const [index, entry] of this.stack.entries()) {
       if (entry.pending !== receiver.pending) continue;
       this.stack[index] = value;
-      kept = true;
+      kept++;
     }
-    if (!kept) this.current.push(`${value.text};`);
+    if (kept > 1) throw new NotDecompilable("one object used twice");
+    if (kept === 0) this.current.push(`${value.text};`);
   }
 
   /**
@@ -1534,9 +1538,10 @@ class BodyDecompiler {
     // the edges a `continue` and a `break` take are exits, not joins. A `do`'s
     // latch only counts when it is the test alone - javac puts the tail of the
     // body in the same block when nothing jumps to the test, and that tail is a
-    // join like any other.
+    // join like any other. A call in there is body, not test, so this is the
+    // strict predicate: cutting a join would drop the statements after it.
     const cut = new Set<number>([loop.header]);
-    if (isDoWhile && isConditionBlock(latch!)) cut.add(latch!.start);
+    if (isDoWhile && isPureBlock(latch!)) cut.add(latch!.start);
     const outer = this.followOf;
     this.followOf = postDominators(this.blocks, loop.body, cut);
     try {

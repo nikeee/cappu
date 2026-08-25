@@ -1048,10 +1048,11 @@ func loopFollow(blocks map[int]*block, header int, latches []int, body map[int]b
 		}
 		return out
 	}
-	// Only a header that is the test itself: one that carries statements is the
-	// start of a `do`'s body, and what leaves it is a `break`, not the loop's end.
+	// Only a header that is the test itself: one that carries statements - a call
+	// among them - is the start of a `do`'s body, and what leaves it is a
+	// `break`, not the loop's end.
 	if fromHeader := outside(header); blocks[header].Kind == blockConditional &&
-		isConditionBlock(blocks[header]) && len(fromHeader) == 1 {
+		isPureBlock(blocks[header]) && len(fromHeader) == 1 {
 		return fromHeader[0], nil
 	}
 	if len(latches) == 1 {
@@ -1617,16 +1618,21 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 		Type:    receiver.Type,
 		Effects: true,
 	}
-	// The `dup` in front of the call left the other copies of the same object.
-	kept := false
+	// The `dup` in front of the call left one other copy of the same object. Two
+	// would mean the object is used twice, and writing `new C(...)` in both
+	// places would make two of them.
+	kept := 0
 	for i := range d.stack {
 		if d.stack[i].Pending != receiver.Pending {
 			continue
 		}
 		d.stack[i] = value
-		kept = true
+		kept++
 	}
-	if !kept {
+	if kept > 1 {
+		return bail("one object used twice")
+	}
+	if kept == 0 {
 		d.emit(value.Text + ";")
 	}
 	return nil
@@ -1861,9 +1867,10 @@ func (d *bodyDecompiler) loop(l *loop) (int, error) {
 	// the edges a `continue` and a `break` take are exits, not joins. A `do`'s
 	// latch only counts when it is the test alone - javac puts the tail of the
 	// body in the same block when nothing jumps to the test, and that tail is a
-	// join like any other.
+	// join like any other. A call in there is body, not test, so this is the
+	// strict predicate: cutting a join would drop the statements after it.
 	cut := map[int]bool{l.Header: true}
-	if isDoWhile && isConditionBlock(latch) {
+	if isDoWhile && isPureBlock(latch) {
 		cut[latch.Start] = true
 	}
 	outer := d.followOf

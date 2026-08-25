@@ -448,6 +448,9 @@ const CALLSY_SOURCE =
   "  static int untilLen(String s) { int t = 0; while (t < s.length()) { t = t + 2; } return t; }\n" +
   "  static int pick(boolean c, int a) { return c ? stat(a) : stat(-a); }\n" +
   '  static String name(Object o) { return o == null ? "null" : o.toString(); }\n' +
+  // A `do` whose latch is body-tail *calls* plus the test: cutting it would
+  // put a `continue` in front of the tail and drop it.
+  "  static int callTail(int n) { int t = 0; int i = 0; do { if (i > 1) { t = t + stat(i); } else { t = t - stat(i); } t = t + stat(t); i = i + 1; } while (stat(i) < n); return t; }\n" +
   "}\n";
 
 test(
