@@ -845,7 +845,7 @@ function loopFollow(
   // start of a `do`'s body, and what leaves it is a `break`, not the loop's end.
   if (
     blocks.get(header)!.kind === "conditional" &&
-    isPureBlock(blocks.get(header)!) &&
+    isConditionBlock(blocks.get(header)!) &&
     fromHeader.length === 1
   ) {
     return fromHeader[0]!;
@@ -950,7 +950,7 @@ function headerExits(blocks: Map<number, Block>, loop: Loop): boolean {
     if (seen.has(at)) continue;
     seen.add(at);
     const block = blocks.get(at);
-    if (block === undefined || block.kind !== "conditional" || !isPureBlock(block)) continue;
+    if (block === undefined || block.kind !== "conditional" || !isConditionBlock(block)) continue;
     if (block.successors.includes(loop.follow)) return true;
     for (const successor of block.successors) {
       if (loop.body.has(successor)) queue.push(successor);
@@ -1511,7 +1511,7 @@ class BodyDecompiler {
     const isWhile =
       loop.follow !== EXIT &&
       header.kind === "conditional" &&
-      isPureBlock(header) &&
+      isConditionBlock(header) &&
       headerExits(this.blocks, loop);
     const isDoWhile =
       !isWhile &&
@@ -1526,7 +1526,7 @@ class BodyDecompiler {
     // body in the same block when nothing jumps to the test, and that tail is a
     // join like any other.
     const cut = new Set<number>([loop.header]);
-    if (isDoWhile && isPureBlock(latch!)) cut.add(latch!.start);
+    if (isDoWhile && isConditionBlock(latch!)) cut.add(latch!.start);
     const outer = this.followOf;
     this.followOf = postDominators(this.blocks, loop.body, cut);
     try {
@@ -1545,7 +1545,14 @@ class BodyDecompiler {
       this.visited.add(loop.header);
       const taken: number[] = [];
       const last = header.instructions[header.instructions.length - 1]!;
+      const statementsBefore = this.current.length;
       this.runInstructions(header.instructions.slice(0, -1), last.pc, header.start);
+      // The test runs once per iteration, and what it computes goes into the
+      // `while (...)` line - a statement in there would run once, ahead of the
+      // loop, which is not what the bytecode says.
+      if (this.current.length !== statementsBefore) {
+        throw new NotDecompilable("a loop test that is a statement");
+      }
       const jump = this.jumpConditionOf(header, taken);
       for (const start of taken) this.visited.add(start);
       if (jump.target !== loop.follow && jump.fallthrough !== loop.follow) {

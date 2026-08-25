@@ -885,6 +885,7 @@ const callsySource = `public class Callsy {
   static long widen(int v) { return java.lang.Math.abs((long) v); }
   static int both(int a, String s) { if (a > 0 && s.length() > 3) { return 1; } return 0; }
   static int either(String s, int a) { if (s == null || a > 0) { return 1; } return 0; }
+  static int untilLen(String s) { int t = 0; while (t < s.length()) { t = t + 2; } return t; }
 }`
 
 func TestDecompileRecompilesJavacCallsToTheSameBytecode(t *testing.T) {

@@ -445,6 +445,7 @@ const CALLSY_SOURCE =
   "  static long widen(int v) { return java.lang.Math.abs((long) v); }\n" +
   "  static int both(int a, String s) { if (a > 0 && s.length() > 3) { return 1; } return 0; }\n" +
   "  static int either(String s, int a) { if (s == null || a > 0) { return 1; } return 0; }\n" +
+  "  static int untilLen(String s) { int t = 0; while (t < s.length()) { t = t + 2; } return t; }\n" +
   "}\n";
 
 test(

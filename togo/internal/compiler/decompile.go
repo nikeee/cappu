@@ -1051,7 +1051,7 @@ func loopFollow(blocks map[int]*block, header int, latches []int, body map[int]b
 	// Only a header that is the test itself: one that carries statements is the
 	// start of a `do`'s body, and what leaves it is a `break`, not the loop's end.
 	if fromHeader := outside(header); blocks[header].Kind == blockConditional &&
-		isPureBlock(blocks[header]) && len(fromHeader) == 1 {
+		isConditionBlock(blocks[header]) && len(fromHeader) == 1 {
 		return fromHeader[0], nil
 	}
 	if len(latches) == 1 {
@@ -1183,7 +1183,7 @@ func headerExits(blocks map[int]*block, l *loop) bool {
 		}
 		seen[at] = true
 		b := blocks[at]
-		if b == nil || b.Kind != blockConditional || !isPureBlock(b) {
+		if b == nil || b.Kind != blockConditional || !isConditionBlock(b) {
 			continue
 		}
 		for _, successor := range b.Successors {
@@ -1843,8 +1843,8 @@ func (d *bodyDecompiler) loop(l *loop) (int, error) {
 	if len(l.Latches) == 1 {
 		latch = d.blocks[l.Latches[0]]
 	}
-	isWhile := l.Follow != exitBlock && header.Kind == blockConditional && isPureBlock(header) &&
-		headerExits(d.blocks, l)
+	isWhile := l.Follow != exitBlock && header.Kind == blockConditional &&
+		isConditionBlock(header) && headerExits(d.blocks, l)
 	isDoWhile := !isWhile && l.Follow != exitBlock && latch != nil &&
 		latch.Kind == blockConditional &&
 		containsInt(latch.Successors, l.Header) && containsInt(latch.Successors, l.Follow)
@@ -1854,7 +1854,7 @@ func (d *bodyDecompiler) loop(l *loop) (int, error) {
 	// body in the same block when nothing jumps to the test, and that tail is a
 	// join like any other.
 	cut := map[int]bool{l.Header: true}
-	if isDoWhile && isPureBlock(latch) {
+	if isDoWhile && isConditionBlock(latch) {
 		cut[latch.Start] = true
 	}
 	outer := d.followOf
@@ -1912,8 +1912,15 @@ func (d *bodyDecompiler) whileLoop(l *loop, header *block) (int, error) {
 	defer func() { d.active = d.active[:len(d.active)-1] }()
 	d.visited[l.Header] = true
 	last := header.Instructions[len(header.Instructions)-1]
+	statementsBefore := len(*d.current)
 	if err := d.runInstructions(header.Instructions[:len(header.Instructions)-1], last.Pc, header.Start); err != nil {
 		return 0, err
+	}
+	// The test runs once per iteration, and what it computes goes into the
+	// `while (...)` line - a statement in there would run once, ahead of the
+	// loop, which is not what the bytecode says.
+	if len(*d.current) != statementsBefore {
+		return 0, bail("a loop test that is a statement")
 	}
 	var taken []int
 	jump, err := d.jumpConditionOf(header, &taken, nil)
