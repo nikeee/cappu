@@ -1,5 +1,5 @@
-// Phase 1.3 of `cappu decompile` (nikeee/cappu#43): straight-line bytecode back
-// to Java source.
+// Phases 1.3 and 1.4 of `cappu decompile` (nikeee/cappu#43): straight-line
+// bytecode, and branches without a loop, back to Java source.
 //
 // The class bytes come from test-fixtures/emitter/emit-baselines, which our own
 // emitter produced - so no JDK is needed here. Two tiers:
@@ -280,6 +280,47 @@ test(
   },
 );
 
+// javac lays branches out its own way - our emitter is not the oracle here, the
+// real compiler is: decompiled and recompiled, the bytecode has to come back
+// identical, instruction for instruction.
+const BRANCHY_SOURCE =
+  "public class Branchy {\n" +
+  "  static int clamp(int v, int lo, int hi) { if (v < lo) return lo; if (v > hi) return hi; return v; }\n" +
+  "  static boolean between(int v, int lo, int hi) { return v >= lo && v <= hi; }\n" +
+  "  static boolean either(int a, int b) { return a > 0 || b > 0; }\n" +
+  "  static int max3(int a, int b, int c) { int m = a > b ? a : b; return m > c ? m : c; }\n" +
+  "  static int sign(long v) { return v < 0L ? -1 : (v > 0L ? 1 : 0); }\n" +
+  "  static int check(int a, java.lang.RuntimeException e) { if (a < 0) throw e; return a; }\n" +
+  "  static int both(boolean c) { int x; if (c) { x = 1; } else { x = 2; } return x; }\n" +
+  "  static boolean nested(int a, int b, int c) { return (a > 0 && b > 0) || c > 0; }\n" +
+  "  static double pick(boolean c, int a, double b) { return c ? a : b; }\n" +
+  "  static boolean isNull(java.lang.Object o) { return o == null; }\n" +
+  // A materialized boolean used where a number belongs: the int form has to
+  // keep the branch's own arms.
+  "  static int index(boolean c, int[] a) { a[c ? 0 : 1] = 7; return a[0]; }\n" +
+  "  static boolean staleCondition(int a) { boolean b = true; if (b) { return a > 0; } return b; }\n" +
+  "  static int numeric(int a) { int x = a > 0 ? 1 : 0; return x + 1; }\n" +
+  "  static int counted(boolean q, int[] xs) { return xs[q ? 2 : 0] + (q ? 1 : 0); }\n" +
+  // The three groupings of a compound condition, which javac lays out as a
+  // chain of branches that share their outcomes.
+  "  static int andOr(int a, int b, int c) { if ((a > 0 && b > 0) || c > 0) { return 11; } else { return 22; } }\n" +
+  "  static int orAnd(int a, int b, int c) { if (a > 0 || (b > 0 && c > 0)) { return 11; } else { return 22; } }\n" +
+  "  static int andGroup(int a, int b, int c) { if (a > 0 && (b > 0 || c > 0)) { return 11; } else { return 22; } }\n" +
+  "}";
+
+test(
+  "recompiles javac's own branches to the same bytecode",
+  { skip: HAS_JAVAC && HAS_JAVAP ? false : "no JDK (javac/javap)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-branchy-");
+    const classFile = compileWithJavac(BRANCHY_SOURCE, "Branchy", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("not decompiled");
+    const roundTripped = compileWithJavac(source, "Branchy", join(dir.path, "again"));
+    expect(javap(roundTripped)).toEqual(javap(classFile));
+  },
+);
+
 /** Compile one source file with javac and return the .class path. */
 function compileWithJavac(source: string, name: string, outDir: string): string {
   mkdirSync(outDir, { recursive: true });
@@ -340,6 +381,135 @@ const RECONSTRUCTIONS: {
     expect: ["boolean var0 = true;", "char var0 = 'a';"],
     selfContained: true,
   },
+  // --- phase 1.4: acyclic control flow ---
+  {
+    name: "IfOnly",
+    source: "class IfOnly { static int f(int a) { int r = 0; if (a > 0) { r = a; } return r; } }",
+    expect: ["int var1 = 0;", "if (arg0 > 0) {", "var1 = arg0;"],
+    selfContained: true,
+  },
+  {
+    name: "IfElse",
+    // The arm that leaves the method is the whole `if`; the rest follows it.
+    source: "class IfElse { static int f(int a) { if (a > 0) return 1; else return 2; } }",
+    expect: ["if (arg0 > 0) {", "return 1;", "}", "return 2;"],
+    reject: ["} else {"],
+    selfContained: true,
+  },
+  {
+    name: "Hoist",
+    // Java scopes a variable to the branch it is declared in, the bytecode does
+    // not: assigned in both arms, it has to be declared before the `if`.
+    source:
+      "class Hoist { static int f(boolean c) { int x; if (c) { x = 1; } else { x = 2; } return x; } }",
+    expect: ["int var1;", "if (arg0) {", "var1 = 1;", "} else {", "var1 = 2;"],
+    selfContained: true,
+  },
+  {
+    name: "Short",
+    source:
+      "class Short { static boolean f(int a, int b) { return a > 0 && b < 10; }" +
+      " static boolean g(int a, int b) { return a > 0 || b < 10; } }",
+    expect: ["return arg0 > 0 && arg1 < 10;", "return arg0 > 0 || arg1 < 10;"],
+    selfContained: true,
+  },
+  {
+    name: "Mixed",
+    // Nested short-circuits share the block the value comes from, so the
+    // parenthesization is the only thing that says which grouping was written.
+    source:
+      "class Mixed { static boolean f(int a, int b, int c) { return (a > 0 && b > 0) || c > 0; }" +
+      " static boolean g(int a, int b, int c) { return a > 0 && (b > 0 || c > 0); } }",
+    expect: [
+      "return arg0 > 0 && arg1 > 0 || arg2 > 0;",
+      "return arg0 > 0 && (arg1 > 0 || arg2 > 0);",
+    ],
+    selfContained: true,
+  },
+  {
+    name: "Tern",
+    source:
+      "class Tern { static int f(int a, int b) { return (a > b ? a : b) + 1; }" +
+      " static int g(boolean c) { int[] xs = new int[3]; xs[c ? 0 : 1] = 7; return xs[0]; } }",
+    // The condition is a boolean, so an index has to ask for the int back - and
+    // the int form keeps the branch's own arms, not the boolean reading of them.
+    expect: ["return (arg0 > arg1 ? arg0 : arg1) + 1;", "var1[arg0 ? 0 : 1] = 7;"],
+    selfContained: true,
+  },
+  {
+    name: "BoolVar",
+    // `istore` is what an int uses, so a materialized condition starts as one -
+    // and a use that needs a boolean (`return b`) is what narrows it. With no
+    // such use it stays an int, which still compiles and still branches.
+    source:
+      "class BoolVar { static boolean f(int a) { boolean b = a > 10; if (b) { return b; } return false; }" +
+      " static int g(int a) { boolean b = a > 10; if (b) { return 1; } return 0; }" +
+      " static int h(int a) { int x = a > 0 ? 1 : 0; return x + 1; } }",
+    expect: [
+      "boolean var1 = arg0 > 10;",
+      "if (var1) {",
+      // Our emitter branches on the true arm, so the int form reads inverted -
+      // the same value, written the way *this* branch is laid out.
+      "int var1 = arg0 <= 10 ? 0 : 1;",
+      "if (var1 != 0) {",
+      "int var1 = arg0 > 0 ? 1 : 0;",
+      "return var1 + 1;",
+    ],
+    selfContained: true,
+  },
+  {
+    name: "AsNumber",
+    // A materialized condition in a position that wants a number: arithmetic
+    // and an array index splice the text in as it stands, so it has to be the
+    // ternary again rather than the boolean it reads as elsewhere.
+    source:
+      "class AsNumber { static int f(boolean q, int[] xs) { return xs[q ? 2 : 0] + (q ? 1 : 0); }" +
+      " static int g(int a) { return -(a > 0 ? 1 : 0); }" +
+      " static long h(int a) { return (long) (a > 0 ? 1 : 0); } }",
+    expect: [
+      "arg0 ? 2 : 0",
+      "+ (arg0 ? 1 : 0)",
+      "-(arg0 > 0 ? 1 : 0)",
+      "(long) (arg0 > 0 ? 1 : 0)",
+    ],
+    selfContained: true,
+  },
+  {
+    name: "Cmp",
+    // lcmp/dcmpg have no source form: the comparison they feed is what was written.
+    source:
+      "class Cmp { static boolean f(long a, long b) { return a < b; }" +
+      " static boolean g(double a, double b) { return a >= b; } }",
+    expect: ["return arg0 < arg1;", "return arg0 >= arg1;"],
+    selfContained: true,
+  },
+  {
+    name: "Throwing",
+    source:
+      "class Throwing { static int f(int a, java.lang.RuntimeException e) {" +
+      " if (a < 0) throw e; return a; } }",
+    expect: ["if (arg0 < 0) {", "throw arg1;"],
+    selfContained: true,
+  },
+  {
+    name: "Retype",
+    // Only the *use* says the slot is a boolean, and the use comes after the
+    // branch the assignments sit in - so the rewrite has to reach into it.
+    source:
+      "class Retype { static boolean f(int a) { boolean b; if (a > 0) { b = true; }" +
+      " else { b = false; } return b; } }",
+    expect: ["boolean var1;", "var1 = true;", "var1 = false;"],
+    reject: ["var1 = 1;", "var1 = 0;"],
+    selfContained: true,
+  },
+  {
+    name: "Loop",
+    // Phase 1.5; until then it has to say so rather than produce something wrong.
+    source:
+      "class Loop { static int f(int n) { int s = 0; for (int i = 0; i < n; i++) s += i; return s; } }",
+    expect: ["loops are not decompiled yet", "not decompiled"],
+    selfContained: true,
+  },
   {
     name: "Blank",
     source: "class Blank { static int v() { return 1; } static final int N; static { N = v(); } }",
@@ -367,6 +537,15 @@ test("writes a nested type reference with a dot, not the binary $", () => {
     emitClass("Outer", "class Outer { static class Inner {} static Inner get() { return null; } }"),
   );
   expect(source).toContain("Outer.Inner get()");
+});
+
+test("reconstructs the control flow of the ControlFlow fixture", () => {
+  const source = decompileToSource(classBytes("ControlFlow"));
+  // Two branches, no loop: both come back as the expression they were written as.
+  expect(source).toContain("if (arg0 < 0) {");
+  expect(source).toContain("return arg0 >= arg1 && arg0 <= arg2;");
+  // The loops in the same class still say they are a later phase.
+  expect(source).toContain("cappu: loops are not decompiled yet");
 });
 
 test("chains to the superclass constructor", () => {
@@ -444,6 +623,30 @@ test("keeps both debug-table names when a slot is reused", () => {
   const source = decompileToSource(emitClass("Reuse", REUSED_SLOT, true));
   expect(source).toContain("int a = n + 1;");
   expect(source).toContain("long b = (long) n * 2L;");
+});
+
+// The two arms store to the same slot with the same opcode but differently
+// typed values, so without a debug table there is nothing left to say whether
+// that is one variable or two - and guessing would produce code that lies.
+const AMBIGUOUS =
+  "class Amb { static java.lang.Object f(boolean c, java.lang.String s, int[] a) {" +
+  " java.lang.Object o; if (c) { o = s; } else { o = a; } return o; } }";
+
+test("says so when a slot's value could come from either branch", () => {
+  const source = decompileToSource(emitClass("Amb", AMBIGUOUS));
+  expect(source).toContain("cappu: local 3 is written in more than one branch");
+});
+
+test("reads one variable when the debug table scopes it per branch", () => {
+  // javac (and our emitter with -g) writes a LocalVariableTable row per scope
+  // range, so one variable can appear once per arm; name and type say it is one.
+  const source = decompileToSource(emitClass("Amb", AMBIGUOUS, true));
+  expect(source).toContain("java.lang.Object o;");
+  expect(source).toContain("o = s;");
+  expect(source).toContain("o = a;");
+  expect(source).toContain("return o;");
+  expect(source).not.toContain("o_2");
+  expect({ Amb: diagnosticsOf("Amb", source) }).toEqual({ Amb: [] });
 });
 
 const DEBUGGY = "class Debuggy { int f(int seed) { int doubled = seed * 2; return doubled; } }";

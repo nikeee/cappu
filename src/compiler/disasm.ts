@@ -499,10 +499,14 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
         break;
       }
       case "branch2":
-        operand = String(pc + c.i2());
+        // The absolute target, which is what javap prints and what decompile.ts
+        // builds its control-flow graph from.
+        arg = pc + c.i2();
+        operand = String(arg);
         break;
       case "branch4":
-        operand = String(pc + c.i4());
+        arg = pc + c.i4();
+        operand = String(arg);
         break;
       case "iinc": {
         const slot = wide ? c.u2() : c.u1();

@@ -6,7 +6,7 @@ enum EnumUnqualified {
   private EnumUnqualified() {}
 
   public static void main(java.lang.String[] arg0) {
-    /* cappu: unsupported instruction invokestatic; the bytecode is:
+    /* cappu: loops are not decompiled yet; the bytecode is:
      * 0: getstatic #23
      * 3: invokestatic #27
      * 6: arraylength

@@ -602,9 +602,13 @@ func DecodeInstructions(classFile *ClassFile, code []byte) ([]Instruction, error
 			instruction.Operand = fmt.Sprintf("#%d", index)
 			instruction.Comment, instruction.HasComment = constantComment(classFile, index)
 		case operandBranch2:
-			instruction.Operand = strconv.Itoa(pc + int(c.i2()))
+			// The absolute target, which is what javap prints and what
+			// decompile.go builds its control-flow graph from.
+			instruction.Arg = pc + int(c.i2())
+			instruction.Operand = strconv.Itoa(instruction.Arg)
 		case operandBranch4:
-			instruction.Operand = strconv.Itoa(pc + int(c.i4()))
+			instruction.Arg = pc + int(c.i4())
+			instruction.Operand = strconv.Itoa(instruction.Arg)
 		case operandIinc:
 			var slot, delta int
 			if wide {

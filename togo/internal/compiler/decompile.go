@@ -2,12 +2,13 @@ package compiler
 
 // Port of src/compiler/decompile.ts.
 //
-// `cappu decompile`, phase 1.3 (nikeee/cappu#43): reconstruct Java source from
-// straight-line bytecode. A symbolic stack interpreter walks a method's
-// instructions and turns them back into expressions and statements; anything
-// that needs control flow or a method call (later phases) renders as its
-// disassembly plus a `throw new UnsupportedOperationException(...)`, so the
-// output is always compilable Java.
+// `cappu decompile`, phases 1.3 and 1.4 (nikeee/cappu#43): reconstruct Java
+// source from bytecode without a loop in it. A symbolic stack interpreter walks
+// a method's basic blocks and turns them back into expressions and statements,
+// with the branches structured into `if`/`else`, `&&`/`||` and `?:`; anything
+// that needs a loop or a method call (later phases) renders as its disassembly
+// plus a `throw new UnsupportedOperationException(...)`, so the output is always
+// compilable Java.
 //
 // The text is deliberately rough - callers run it through the formatter
 // (internal/cli/decompile.go), which is why this file stays free of a
@@ -24,6 +25,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -41,9 +44,13 @@ func bail(format string, a ...any) error { return &notDecompilable{fmt.Sprintf(f
 // Java operator precedence, high binds tighter. Only the levels straight-line
 // code can produce are listed.
 const (
+	precTernary = 2
+	precLor     = 3
+	precLand    = 4
 	precOr      = 5
 	precXor     = 6
 	precAnd     = 7
+	precEq      = 8
 	precRel     = 9
 	precShift   = 10
 	precAdd     = 11
@@ -52,12 +59,45 @@ const (
 	precPrimary = 15
 )
 
+// logicKind names the structured form of a boolean expression, kept alongside
+// its text so negate can flip the operator instead of wrapping everything in a
+// `!`: the bytecode branches on the *inverse* of what the source said, so every
+// condition is negated exactly once on the way back.
+type logicKind int
+
+const (
+	logicCompare logicKind = iota
+	logicAnd
+	logicOr
+	logicNot
+)
+
+type logicNode struct {
+	Kind  logicKind
+	Left  *expr
+	Right *expr
+	Op    string
+}
+
+// comparedPair are the operands of an lcmp/fcmp/dcmp, which has no source form
+// of its own: the comparison it feeds is what source wrote.
+type comparedPair struct {
+	Left  expr
+	Right expr
+}
+
 // expr is a reconstructed value: its source text, how tightly it binds, and its
 // Java type (used to declare locals).
 type expr struct {
-	Text string
-	Prec int
-	Type string
+	Text  string
+	Prec  int
+	Type  string
+	Logic *logicNode
+	// AsInt is the int form of a value javac materialized as `1`/`0`: written
+	// back as the condition itself, which is a boolean, so a use that wants a
+	// number has to get the ternary again (`array[c ? 1 : 0]`).
+	AsInt    string
+	Compared *comparedPair
 }
 
 func primary(text, typ string) expr { return expr{Text: text, Prec: precPrimary, Type: typ} }
@@ -74,6 +114,182 @@ func binaryExpr(left expr, operator string, right expr, prec int, typ string) ex
 	// Every operator here is left-associative, so the right operand needs one
 	// more level to keep `a - (b - c)` from losing its parentheses.
 	return expr{Text: at(left, prec) + " " + operator + " " + at(right, prec+1), Prec: prec, Type: typ}
+}
+
+// comparePrec reports where an operator binds: `==` and `!=` sit one level
+// below the relational operators.
+func comparePrec(op string) int {
+	if op == "==" || op == "!=" {
+		return precEq
+	}
+	return precRel
+}
+
+func compareExpr(left expr, op string, right expr) expr {
+	prec := comparePrec(op)
+	return expr{
+		Text:  at(left, prec+1) + " " + op + " " + at(right, prec+1),
+		Prec:  prec,
+		Type:  "boolean",
+		Logic: &logicNode{Kind: logicCompare, Left: &left, Right: &right, Op: op},
+	}
+}
+
+func logicalExpr(kind logicKind, left, right expr) expr {
+	prec, operator := precLor, "||"
+	if kind == logicAnd {
+		prec, operator = precLand, "&&"
+	}
+	return expr{
+		Text:  at(left, prec) + " " + operator + " " + at(right, prec+1),
+		Prec:  prec,
+		Type:  "boolean",
+		Logic: &logicNode{Kind: kind, Left: &left, Right: &right},
+	}
+}
+
+func notExpr(value expr) expr {
+	return expr{
+		Text:  "!" + at(value, precUnary),
+		Prec:  precUnary,
+		Type:  "boolean",
+		Logic: &logicNode{Kind: logicNot, Left: &value},
+	}
+}
+
+var flippedComparison = map[string]string{
+	"==": "!=", "!=": "==", "<": ">=", ">=": "<", ">": "<=", "<=": ">",
+}
+
+// negate renders `!e` the way source would have: a comparison flips its
+// operator and a `&&`/`||` goes through De Morgan, because the bytecode always
+// carries the negated form of what was written.
+func negate(e expr) expr {
+	if e.Logic == nil {
+		return notExpr(e)
+	}
+	switch e.Logic.Kind {
+	case logicCompare:
+		return compareExpr(*e.Logic.Left, flippedComparison[e.Logic.Op], *e.Logic.Right)
+	case logicAnd:
+		return logicalExpr(logicOr, negate(*e.Logic.Left), negate(*e.Logic.Right))
+	case logicOr:
+		return logicalExpr(logicAnd, negate(*e.Logic.Left), negate(*e.Logic.Right))
+	default:
+		return *e.Logic.Left
+	}
+}
+
+// numericWidth orders the types binary numeric promotion picks between.
+var numericWidth = []string{"int", "long", "float", "double"}
+
+func widthOf(typ string) int {
+	for i, name := range numericWidth {
+		if name == typ {
+			return i
+		}
+	}
+	return -1
+}
+
+// numeric renders a value in a position that wants a number. A condition javac
+// materialized as `1`/`0` reads as a boolean everywhere the type is known (a
+// store, a return), but arithmetic and comparisons splice the text in as it
+// stands, so it has to become the ternary again.
+func numeric(e expr) expr {
+	if e.AsInt == "" {
+		return e
+	}
+	return expr{Text: e.AsInt, Prec: precTernary, Type: "int"}
+}
+
+// asBoolean rewrites `1` and `0` in a position where the other arm proves a
+// boolean was meant.
+func asBoolean(e expr) expr {
+	if e.Text == "1" {
+		return primary("true", "boolean")
+	}
+	if e.Text == "0" {
+		return primary("false", "boolean")
+	}
+	return e
+}
+
+func ternaryExpr(condition, thenValue, elseValue expr) (expr, bool) {
+	whenTrue, whenFalse := thenValue, elseValue
+	if (whenTrue.Type == "boolean") != (whenFalse.Type == "boolean") {
+		// One arm is a boolean and the other an int: either that int is the
+		// `1`/`0` a boolean was erased to, or the boolean is a condition javac
+		// materialized and the value really is a number, which AsInt is for.
+		boolArm, other := whenTrue, whenFalse
+		if whenFalse.Type == "boolean" {
+			boolArm, other = whenFalse, whenTrue
+		}
+		asBool := asBoolean(other)
+		var replacement expr
+		replacesOther := true
+		found := false
+		if asBool.Text != other.Text {
+			replacement, found = asBool, true
+		} else if boolArm.AsInt != "" {
+			replacement = expr{Text: boolArm.AsInt, Prec: precTernary, Type: "int"}
+			replacesOther, found = false, true
+		}
+		if !found {
+			return expr{}, false // a mix nothing can write
+		}
+		if (whenTrue.Type == "boolean") == replacesOther {
+			whenFalse = replacement
+		} else {
+			whenTrue = replacement
+		}
+	}
+	// `c ? true : x` and `c ? x : false` are how a short-circuit reads once its
+	// value is materialized; writing them back as `||`/`&&` is both shorter and
+	// what the source said.
+	switch {
+	case whenTrue.Text == "true":
+		return logicalExpr(logicOr, condition, whenFalse), true
+	case whenFalse.Text == "false":
+		return logicalExpr(logicAnd, condition, whenTrue), true
+	case whenTrue.Text == "false":
+		return logicalExpr(logicAnd, negate(condition), whenFalse), true
+	case whenFalse.Text == "true":
+		return logicalExpr(logicOr, negate(condition), whenTrue), true
+	}
+	typ := whenTrue.Type
+	if whenTrue.Type != whenFalse.Type {
+		left, right := widthOf(whenTrue.Type), widthOf(whenFalse.Type)
+		if left >= 0 && right >= 0 && right > left {
+			typ = whenFalse.Type
+		}
+	}
+	return expr{
+		Text: at(condition, precTernary+1) + " ? " + at(whenTrue, precTernary) +
+			" : " + at(whenFalse, precTernary),
+		Prec: precTernary,
+		Type: typ,
+	}, true
+}
+
+// materializedBoolean is the value of a branch whose arms are `1` and `0`: that
+// is a boolean, and value is how the condition reads as one - but the int form
+// has to keep the *branch's* own arms (`c ? 0 : 1`, not `!c ? 1 : 0`), which is
+// the form source wrote and the one that recompiles to the same branch.
+func materializedBoolean(value, condition expr, whenTrue string) expr {
+	whenFalse := "0"
+	if whenTrue == "0" {
+		whenFalse = "1"
+	}
+	out := value
+	out.AsInt = at(condition, precTernary+1) + " ? " + whenTrue + " : " + whenFalse
+	return out
+}
+
+// comparisons are the source operators a branch tests, keyed by the mnemonic's
+// suffix.
+var comparisons = map[string]string{
+	"eq": "==", "ne": "!=", "lt": "<", "ge": ">=", "gt": ">", "le": "<=",
 }
 
 type binaryOp struct {
@@ -238,6 +454,11 @@ func isIntegerText(text string) bool {
 // coerce renders e as it must be written to land in a target-typed slot. javac
 // erases boolean and char to int constants, so the literal has to be written back.
 func coerce(e expr, target string) string {
+	// A condition javac materialized as `1`/`0` reads as a boolean everywhere
+	// but where a number is what belongs.
+	if e.AsInt != "" && target != "boolean" {
+		return e.AsInt
+	}
 	if e.Type != "int" || !isIntegerText(e.Text) {
 		return e.Text
 	}
@@ -306,9 +527,38 @@ func readLocalVariables(code *Code, pool []*Constant) []localEntry {
 // the use to say so.
 var erasedToInt = map[string]bool{"boolean": true, "char": true, "byte": true, "short": true}
 
+// stmt is a statement, or the body of a nested block. The tree is flattened
+// only once the method is done, so a retype can still reach a statement that
+// has already been placed inside an `if`.
+type stmt struct {
+	Text   string
+	Nested *[]stmt
+}
+
+func flattenStatements(statements []stmt) []string {
+	out := []string{}
+	for _, statement := range statements {
+		if statement.Nested != nil {
+			out = append(out, flattenStatements(*statement.Nested)...)
+			continue
+		}
+		out = append(out, statement.Text)
+	}
+	return out
+}
+
 type localWrite struct {
+	List  *[]stmt
 	Index int
 	Value expr
+}
+
+// localDeclaration is where a local was declared; Inline when it carries the
+// first value.
+type localDeclaration struct {
+	List   *[]stmt
+	Index  int
+	Inline bool
 }
 
 type local struct {
@@ -322,9 +572,13 @@ type local struct {
 	// *this* variable (`boolean b` taking `iconst_0`), not a second variable in
 	// the same slot.
 	Authoritative bool
-	// Writes records where the declaration and every assignment landed, so a
-	// retype can rewrite them.
+	// Writes records where every assignment landed, so a retype can rewrite them.
 	Writes []localWrite
+	// Declaration is where the declaration landed.
+	Declaration *localDeclaration
+	// StoreBlocks are the blocks that store to it, which is what says whether a
+	// read is unambiguous.
+	StoreBlocks map[int]bool
 }
 
 type paramSlot struct {
@@ -362,6 +616,244 @@ func methodReturnType(descriptor string) string {
 // --- the method body -----------------------------------------------------------------
 
 // bodyDecompiler turns one method's straight-line bytecode into Java statements.
+// --- the control-flow graph ----------------------------------------------------------
+
+// Phase 1.4 covers acyclic control flow only: every edge runs forward, so a
+// block's pc order is a topological order and one reverse pass computes the
+// post-dominators. A back edge is a loop, which is phase 1.5.
+
+// exitBlock is the virtual block every `return`/`athrow` falls into, so a merge
+// always exists.
+const exitBlock = -1
+
+var conditionalBranches = map[string]bool{
+	"ifeq": true, "ifne": true, "iflt": true, "ifge": true, "ifgt": true, "ifle": true,
+	"if_icmpeq": true, "if_icmpne": true, "if_icmplt": true,
+	"if_icmpge": true, "if_icmpgt": true, "if_icmple": true,
+	"if_acmpeq": true, "if_acmpne": true, "ifnull": true, "ifnonnull": true,
+}
+
+var subroutineOpcodes = map[string]bool{"jsr": true, "jsr_w": true, "ret": true, "ret_w": true}
+
+func isGotoMnemonic(mnemonic string) bool {
+	return mnemonic == "goto" || mnemonic == "goto_w"
+}
+
+func isBlockEndMnemonic(mnemonic string) bool {
+	if mnemonic == "athrow" || mnemonic == "return" {
+		return true
+	}
+	return len(mnemonic) == len("ireturn") && strings.HasSuffix(mnemonic, "return") &&
+		strings.IndexByte("ilfda", mnemonic[0]) >= 0
+}
+
+type blockKind int
+
+const (
+	blockFall blockKind = iota
+	blockConditional
+	blockGoto
+	blockEnd
+)
+
+type block struct {
+	Start        int
+	Instructions []Instruction
+	Kind         blockKind
+	// Successors of a conditional are [fallthrough, target], in that order.
+	Successors []int
+}
+
+func buildBlocks(instructions []Instruction) (map[int]*block, error) {
+	entry := 0
+	if len(instructions) > 0 {
+		entry = instructions[0].Pc
+	}
+	leaders := map[int]bool{entry: true}
+	for i, instruction := range instructions {
+		mnemonic := instruction.Mnemonic
+		if mnemonic == "tableswitch" || mnemonic == "lookupswitch" {
+			return nil, bail("switch is not decompiled yet (%s)", mnemonic)
+		}
+		// The subroutine opcodes: gone since Java 6, and their control flow is
+		// not expressible as a branch.
+		if subroutineOpcodes[mnemonic] {
+			return nil, bail("unsupported instruction %s", mnemonic)
+		}
+		branch := conditionalBranches[mnemonic] || isGotoMnemonic(mnemonic)
+		if branch {
+			leaders[instruction.Arg] = true
+		}
+		if branch || isBlockEndMnemonic(mnemonic) {
+			if i+1 < len(instructions) {
+				leaders[instructions[i+1].Pc] = true
+			}
+		}
+	}
+	blocks := map[int]*block{}
+	var current []Instruction
+	start := entry
+	flush := func(next int, hasNext bool) error {
+		if len(current) == 0 {
+			return nil
+		}
+		last := current[len(current)-1]
+		kind := blockFall
+		var successors []int
+		if hasNext {
+			successors = []int{next}
+		}
+		switch {
+		case conditionalBranches[last.Mnemonic]:
+			if !hasNext {
+				return bail("a branch runs off the end")
+			}
+			kind = blockConditional
+			successors = []int{next, last.Arg}
+		case isGotoMnemonic(last.Mnemonic):
+			kind = blockGoto
+			successors = []int{last.Arg}
+		case isBlockEndMnemonic(last.Mnemonic):
+			kind = blockEnd
+			successors = nil
+		case !hasNext:
+			return bail("the code runs off the end of the method")
+		}
+		for _, successor := range successors {
+			if successor <= start {
+				return bail("loops are not decompiled yet")
+			}
+		}
+		blocks[start] = &block{Start: start, Instructions: current, Kind: kind, Successors: successors}
+		return nil
+	}
+	for _, instruction := range instructions {
+		if leaders[instruction.Pc] && len(current) > 0 {
+			if err := flush(instruction.Pc, true); err != nil {
+				return nil, err
+			}
+			current = nil
+			start = instruction.Pc
+		}
+		current = append(current, instruction)
+	}
+	if err := flush(0, false); err != nil {
+		return nil, err
+	}
+	for _, b := range blocks {
+		for _, successor := range b.Successors {
+			if blocks[successor] == nil {
+				return nil, bail("a branch lands mid-instruction")
+			}
+		}
+	}
+	return blocks, nil
+}
+
+// reachableBlocks are the blocks reachable from the entry, which is all the
+// structuring may cover.
+func reachableBlocks(blocks map[int]*block, entry int) map[int]bool {
+	seen := map[int]bool{}
+	queue := []int{entry}
+	for len(queue) > 0 {
+		at := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		if seen[at] || blocks[at] == nil {
+			continue
+		}
+		seen[at] = true
+		queue = append(queue, blocks[at].Successors...)
+	}
+	return seen
+}
+
+// postDominators reports the immediate post-dominator of every block: the point
+// where the two arms of a branch come back together, and so where the `if` it
+// was written as ends. Blocks whose paths all leave the method map to exitBlock.
+func postDominators(blocks map[int]*block) map[int]int {
+	starts := make([]int, 0, len(blocks))
+	for start := range blocks {
+		starts = append(starts, start)
+	}
+	sort.Ints(starts)
+	sets := map[int]map[int]bool{}
+	for i := len(starts) - 1; i >= 0; i-- {
+		start := starts[i]
+		successors := blocks[start].Successors
+		if len(successors) == 0 {
+			successors = []int{exitBlock}
+		}
+		var shared map[int]bool
+		for _, successor := range successors {
+			of := map[int]bool{exitBlock: true}
+			if successor != exitBlock && sets[successor] != nil {
+				of = sets[successor]
+			}
+			if shared == nil {
+				shared = map[int]bool{}
+				for at := range of {
+					shared[at] = true
+				}
+				continue
+			}
+			for at := range shared {
+				if !of[at] {
+					delete(shared, at)
+				}
+			}
+		}
+		shared[start] = true
+		sets[start] = shared
+	}
+	immediate := map[int]int{}
+	for _, start := range starts {
+		nearest := exitBlock
+		for at := range sets[start] {
+			if at == start || at == exitBlock {
+				continue
+			}
+			if nearest == exitBlock || at < nearest {
+				nearest = at
+			}
+		}
+		immediate[start] = nearest
+	}
+	return immediate
+}
+
+// pureMnemonics are the instructions a *condition* may be built from: no store,
+// no call, nothing that is a statement. A block made only of these can be folded
+// into the condition of the branch before it (`a && b`) or into a ternary
+// without changing what runs.
+var pureMnemonics = regexp.MustCompile(`^(?:nop|aconst_null|[ilfd]const_\w+|bipush|sipush|ldc\w*|` +
+	`[ilfda]load(?:_\d|_w)?|arraylength|[ilfdabcs]aload|` +
+	`[ilfd](?:add|sub|mul|div|rem|neg|shl|shr|ushr|and|or|xor)|[ilfd]2[ilfdbcs]|` +
+	`lcmp|[fd]cmp[lg]|getstatic|getfield|checkcast|instanceof|dup)$`)
+
+func isPureBlock(b *block) bool {
+	for i, instruction := range b.Instructions {
+		if pureMnemonics.MatchString(instruction.Mnemonic) {
+			continue
+		}
+		last := i == len(b.Instructions)-1
+		if last && (conditionalBranches[instruction.Mnemonic] || isGotoMnemonic(instruction.Mnemonic)) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// endOf reports where the code after a block's body begins - the pc a store at
+// the end of it has to look its variable's scope up at. A branch ends at its
+// terminator; a block that falls through ends where the next one starts.
+func endOf(b *block) int {
+	if b.Kind == blockFall {
+		return b.Successors[0]
+	}
+	return b.Instructions[len(b.Instructions)-1].Pc
+}
+
 type bodyDecompiler struct {
 	classFile  *ClassFile
 	locals     map[int]*local
@@ -369,11 +861,32 @@ type bodyDecompiler struct {
 	returnType string
 	isStatic   bool
 	stack      []expr
-	statements []string
+	statements []stmt
+	// hoisted are declarations of locals first stored inside a branch. Java
+	// scopes them to that branch, the bytecode does not, so they are declared up
+	// front and the store becomes an assignment; methodSource puts these first.
+	//
+	// ponytail: hoisting to the top of the method, not to the innermost block
+	// that encloses every use - that is the upgrade path if the output reads
+	// badly.
+	hoisted []stmt
+	// current is where statements are being appended right now: a branch's arm,
+	// or the body.
+	current *[]stmt
+	depth   int
 	// names is every local name handed out so far, so a reused slot cannot
 	// shadow one.
-	names  map[string]bool
-	byName map[string]*local
+	names    map[string]bool
+	byName   map[string]*local
+	blocks   map[int]*block
+	followOf map[int]int
+	visited  map[int]bool
+	// conditions are every `if (...)` line emitted, with the condition it came
+	// from: a local's type can still narrow after the line is written (the use
+	// that proves it is a boolean may come later), and the text has to follow.
+	conditions   []emittedCondition
+	entryPc      int
+	currentBlock int
 }
 
 // self is the class being decompiled, as its references have to spell it.
@@ -386,17 +899,90 @@ func (d *bodyDecompiler) self() string { return selfOf(d.classFile) }
 func (d *bodyDecompiler) coerceInto(value expr, target string) string {
 	if entry, ok := d.byName[value.Text]; ok && !entry.Authoritative &&
 		entry.Type == "int" && erasedToInt[target] {
-		entry.Type = target
-		for i, write := range entry.Writes {
-			assigned := coerce(write.Value, target)
-			if i == 0 {
-				d.statements[write.Index] = target + " " + entry.Name + " = " + assigned + ";"
-			} else {
-				d.statements[write.Index] = entry.Name + " = " + assigned + ";"
-			}
-		}
+		d.retype(entry, target)
 	}
 	return coerce(value, target)
+}
+
+// retype gives a local a narrower type, rewriting its declaration and assignments.
+func (d *bodyDecompiler) retype(entry *local, target string) {
+	entry.Type = target
+	declaration := entry.Declaration
+	if declaration != nil && !declaration.Inline {
+		(*declaration.List)[declaration.Index] = stmt{Text: target + " " + entry.Name + ";"}
+	}
+	for i, write := range entry.Writes {
+		assigned := coerce(write.Value, target)
+		text := entry.Name + " = " + assigned + ";"
+		if i == 0 && declaration != nil && declaration.Inline {
+			text = target + " " + entry.Name + " = " + assigned + ";"
+		}
+		(*write.List)[write.Index] = stmt{Text: text}
+	}
+	for _, emitted := range d.conditions {
+		(*emitted.List)[emitted.Index] = stmt{Text: d.ifLine(emitted.Condition)}
+	}
+}
+
+// emittedCondition is an `if (...)` line and the condition it was rendered from.
+type emittedCondition struct {
+	List      *[]stmt
+	Index     int
+	Condition expr
+}
+
+func (d *bodyDecompiler) ifLine(condition expr) string {
+	return "if (" + d.renderCondition(condition).Text + ") {"
+}
+
+// renderCondition renders a condition against the types its locals are known to
+// have *now*. `ifeq` on a local is how both `if (!b)` and `if (x == 0)` are
+// compiled, so the comparison is written against an int until something proves
+// the variable is a boolean - and then this rewrites it.
+func (d *bodyDecompiler) renderCondition(condition expr) expr {
+	logic := condition.Logic
+	if logic == nil {
+		return condition
+	}
+	switch logic.Kind {
+	case logicAnd, logicOr:
+		return logicalExpr(logic.Kind, d.renderCondition(*logic.Left), d.renderCondition(*logic.Right))
+	case logicNot:
+		return notExpr(d.renderCondition(*logic.Left))
+	default:
+		entry, ok := d.byName[logic.Left.Text]
+		if !ok || entry.Type == logic.Left.Type {
+			return condition
+		}
+		value := primary(entry.Name, entry.Type)
+		if entry.Type == "boolean" && logic.Right.Text == "0" {
+			if logic.Op == "!=" {
+				return value
+			}
+			if logic.Op == "==" {
+				return notExpr(value)
+			}
+		}
+		return compareExpr(value, logic.Op, primary(coerce(*logic.Right, entry.Type), entry.Type))
+	}
+}
+
+// emit appends one statement where statements are currently going.
+func (d *bodyDecompiler) emit(text string) {
+	*d.current = append(*d.current, stmt{Text: text})
+}
+
+// capture collects the statements run appends as a nested block rather than
+// into the body.
+func (d *bodyDecompiler) capture(run func() error) ([]stmt, error) {
+	outer := d.current
+	captured := []stmt{}
+	d.current = &captured
+	d.depth++
+	err := run()
+	d.current = outer
+	d.depth--
+	return captured, err
 }
 
 // staticRef writes a static field of this class with its simple name: that is
@@ -412,12 +998,25 @@ func (d *bodyDecompiler) staticRef(owner, name string) string {
 
 func (d *bodyDecompiler) push(e expr) { d.stack = append(d.stack, e) }
 
-func (d *bodyDecompiler) pop() (expr, error) {
+func (d *bodyDecompiler) popRaw() (expr, error) {
 	if len(d.stack) == 0 {
 		return expr{}, bail("stack underflow")
 	}
 	top := d.stack[len(d.stack)-1]
 	d.stack = d.stack[:len(d.stack)-1]
+	return top, nil
+}
+
+func (d *bodyDecompiler) pop() (expr, error) {
+	top, err := d.popRaw()
+	if err != nil {
+		return expr{}, err
+	}
+	// An `lcmp` result has no source form of its own (`Long.compare` is a call,
+	// which is a later phase), so only the branch that follows may consume it.
+	if top.Compared != nil {
+		return expr{}, bail("a comparison outside a branch")
+	}
 	return top, nil
 }
 
@@ -435,10 +1034,23 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 	}
 	if existing, ok := d.locals[slot]; ok {
 		if scoped != nil {
-			if existing.Origin == scoped {
+			// javac writes one row per scope range, so the same variable can
+			// appear twice for one slot (once per arm of an `if`); the name and
+			// type are what say it is the same one.
+			origin := existing.Origin
+			if origin == scoped ||
+				(origin != nil && origin.Name == scoped.Name && origin.Type == scoped.Type) {
 				return existing, nil
 			}
 		} else if !isStore || existing.Authoritative || existing.Type == fallbackType {
+			// Without a debug table a slot is only a variable as long as one
+			// definition explains every path to here: two arms that stored
+			// differently-typed values were split into two variables, and which
+			// one this reads is not something the bytecode still says.
+			if !isStore && len(existing.StoreBlocks) > 0 &&
+				d.reachesAvoiding(d.currentBlock, existing.StoreBlocks) {
+				return nil, bail("local %d is written in more than one branch", slot)
+			}
 			return existing, nil
 		}
 	}
@@ -463,6 +1075,7 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 		Type:          sourceTypeText(declared, d.self()),
 		Origin:        scoped,
 		Authoritative: authoritative,
+		StoreBlocks:   map[int]bool{},
 	}
 	d.locals[slot] = created
 	d.byName[created.Name] = created
@@ -506,35 +1119,533 @@ func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType strin
 	if err != nil {
 		return err
 	}
+	target.StoreBlocks[d.currentBlock] = true
 	text := d.coerceInto(value, target.Type)
-	target.Writes = append(target.Writes, localWrite{Index: len(d.statements), Value: value})
-	if target.Declared {
-		d.statements = append(d.statements, target.Name+" = "+text+";")
-		return nil
+	if !target.Declared {
+		target.Declared = true
+		if d.depth == 0 {
+			target.Declaration = &localDeclaration{List: d.current, Index: len(*d.current), Inline: true}
+			target.Writes = append(target.Writes,
+				localWrite{List: d.current, Index: len(*d.current), Value: value})
+			d.emit(target.Type + " " + target.Name + " = " + text + ";")
+			return nil
+		}
+		target.Declaration = &localDeclaration{List: &d.hoisted, Index: len(d.hoisted)}
+		d.hoisted = append(d.hoisted, stmt{Text: target.Type + " " + target.Name + ";"})
 	}
-	target.Declared = true
-	d.statements = append(d.statements, target.Type+" "+target.Name+" = "+text+";")
+	target.Writes = append(target.Writes,
+		localWrite{List: d.current, Index: len(*d.current), Value: value})
+	d.emit(target.Name + " = " + text + ";")
 	return nil
 }
 
 func (d *bodyDecompiler) run(instructions []Instruction) error {
+	blocks, err := buildBlocks(instructions)
+	if err != nil {
+		return err
+	}
+	d.blocks = blocks
+	d.followOf = postDominators(blocks)
+	entry := 0
+	if len(instructions) > 0 {
+		entry = instructions[0].Pc
+	}
+	d.entryPc = entry
+	d.currentBlock = entry
+	if err := d.structure(entry, exitBlock); err != nil {
+		return err
+	}
+	if len(d.stack) > 0 {
+		return bail("values left on the stack")
+	}
+	// A block that was never entered would silently drop its statements, and one
+	// entered twice would duplicate them: either means the layout is not the nest
+	// of `if`s this phase reconstructs.
+	for start := range reachableBlocks(d.blocks, entry) {
+		if !d.visited[start] {
+			return bail("unstructured control flow")
+		}
+	}
+	return nil
+}
+
+// structure appends the statements for the blocks from entry up to (not
+// including) stop.
+func (d *bodyDecompiler) structure(entry, stop int) error {
+	at := entry
+	for at != stop && at != exitBlock {
+		b := d.blocks[at]
+		if b == nil {
+			return bail("a branch lands outside the method")
+		}
+		if d.visited[at] {
+			return bail("unstructured control flow")
+		}
+		d.visited[at] = true
+		body := b.Instructions
+		if b.Kind == blockConditional || b.Kind == blockGoto {
+			body = body[:len(body)-1]
+		}
+		if err := d.runInstructions(body, endOf(b), b.Start); err != nil {
+			return err
+		}
+		if b.Kind == blockEnd {
+			return nil
+		}
+		if b.Kind != blockConditional {
+			at = b.Successors[0]
+			continue
+		}
+		next, err := d.conditional(b)
+		if err != nil {
+			return err
+		}
+		at = next
+	}
+	return nil
+}
+
+// conditional writes one `if`, from the branch that ends b, and reports where
+// the statement after it begins.
+func (d *bodyDecompiler) conditional(b *block) (int, error) {
+	var taken []int
+	jump, err := d.jumpConditionOf(b, &taken, nil)
+	if err != nil {
+		return 0, err
+	}
+	for _, start := range taken {
+		d.visited[start] = true
+	}
+	// javac emits the arms in source order, so the `then` is whichever comes
+	// first; the branch is written to select it.
+	condition := negate(jump.Condition)
+	whenTrue, whenFalse := jump.Fallthrough, jump.Target
+	if jump.Target < jump.Fallthrough {
+		condition = jump.Condition
+		whenTrue, whenFalse = jump.Target, jump.Fallthrough
+	}
+	follow, ok := d.followOf[b.Start]
+	if !ok {
+		follow = exitBlock
+	}
+
+	if follow != exitBlock {
+		value, found, err := d.tryTernary(condition, whenTrue, whenFalse, follow)
+		if err != nil {
+			return 0, err
+		}
+		if found {
+			d.push(value)
+			return follow, nil
+		}
+	}
+	// `if (c) return x;` has no merge point. Both arms leave the method - every
+	// path does, since a block that runs off the end is rejected - so the arm
+	// that branches is the whole statement and the other one is what follows it,
+	// at the same level rather than inside an `else`.
+	if follow == exitBlock {
+		exiting, err := d.capture(func() error { return d.structure(whenTrue, exitBlock) })
+		if err != nil {
+			return 0, err
+		}
+		d.pushIf(condition, exiting, nil)
+		return whenFalse, nil
+	}
+	thenStatements, err := d.capture(func() error { return d.structure(whenTrue, follow) })
+	if err != nil {
+		return 0, err
+	}
+	elseStatements, err := d.capture(func() error { return d.structure(whenFalse, follow) })
+	if err != nil {
+		return 0, err
+	}
+	if len(thenStatements) == 0 && len(elseStatements) > 0 {
+		d.pushIf(negate(condition), elseStatements, nil)
+		return follow, nil
+	}
+	d.pushIf(condition, thenStatements, elseStatements)
+	return follow, nil
+}
+
+func (d *bodyDecompiler) pushIf(condition expr, thenStatements, elseStatements []stmt) {
+	d.conditions = append(d.conditions,
+		emittedCondition{List: d.current, Index: len(*d.current), Condition: condition})
+	d.emit(d.ifLine(condition))
+	*d.current = append(*d.current, stmt{Nested: &thenStatements})
+	if len(elseStatements) > 0 {
+		d.emit("} else {")
+		*d.current = append(*d.current, stmt{Nested: &elseStatements})
+	}
+	d.emit("}")
+}
+
+// jump is a conditional branch, once the tests that belong with it are folded in.
+type jump struct {
+	Condition   expr
+	Target      int
+	Fallthrough int
+}
+
+// jumpConditionOf reports the condition under which b's branch is taken, with
+// any further tests that belong to the same source condition folded in: javac
+// lays a short-circuit out as a chain of branches that share their outcomes. The
+// blocks folded away are appended to taken, for the caller to account for.
+func (d *bodyDecompiler) jumpConditionOf(b *block, taken *[]int, folded map[int]bool) (jump, error) {
+	inChain := folded
+	if inChain == nil {
+		inChain = map[int]bool{b.Start: true}
+	}
+	condition, err := d.branchExpr(b.Instructions[len(b.Instructions)-1])
+	if err != nil {
+		return jump{}, err
+	}
+	target, fallthrough_ := b.Successors[1], b.Successors[0]
+	for {
+		merged := false
+		// The shortest fold first: a test that carries its own chain may not line
+		// up with this one, while the single branch at its head does.
+		for _, deep := range []bool{false, true} {
+			// A test on the *fallthrough* path shares an outcome with this one:
+			// `a || b` when both jump to the same place, `a || !b` when the
+			// second falls into where the first jumped.
+			onFall, found, undo, err := d.chainFrom(fallthrough_, taken, inChain, deep)
+			if err != nil {
+				return jump{}, err
+			}
+			if found {
+				if onFall.Target == target || onFall.Fallthrough == target {
+					second := onFall.Condition
+					if onFall.Target != target {
+						second = negate(second)
+					}
+					condition = logicalExpr(logicOr, condition, second)
+					if onFall.Target == target {
+						fallthrough_ = onFall.Fallthrough
+					} else {
+						fallthrough_ = onFall.Target
+					}
+					merged = true
+					break
+				}
+				undo()
+			}
+			// A test on the *target* path: landing on the fallthrough now means
+			// either this branch was not taken, or the second one sent us there.
+			onTarget, found, undo, err := d.chainFrom(target, taken, inChain, deep)
+			if err != nil {
+				return jump{}, err
+			}
+			if found {
+				if onTarget.Target == fallthrough_ || onTarget.Fallthrough == fallthrough_ {
+					second := onTarget.Condition
+					jumpsBack := onTarget.Target == fallthrough_
+					if !jumpsBack {
+						second = negate(second)
+					}
+					condition = logicalExpr(logicOr, negate(condition), second)
+					target = fallthrough_
+					if jumpsBack {
+						fallthrough_ = onTarget.Fallthrough
+					} else {
+						fallthrough_ = onTarget.Target
+					}
+					merged = true
+					break
+				}
+				undo()
+			}
+		}
+		if !merged {
+			return jump{Condition: condition, Target: target, Fallthrough: fallthrough_}, nil
+		}
+	}
+}
+
+// chainFrom reports the branch start amounts to once its own chain is folded, or
+// nothing when it is not a test that belongs to this condition. It is
+// speculative: undo puts everything back when the outcomes do not line up.
+func (d *bodyDecompiler) chainFrom(
+	start int,
+	taken *[]int,
+	folded map[int]bool,
+	deep bool,
+) (jump, bool, func(), error) {
+	next := d.blocks[start]
+	if next == nil || next.Kind != blockConditional || !isPureBlock(next) {
+		return jump{}, false, nil, nil
+	}
+	if folded[start] || d.visited[start] {
+		return jump{}, false, nil, nil
+	}
+	// Nothing outside the chain may reach it, or folding would skip a path in.
+	if d.predecessorsOf(start, folded) != 0 {
+		return jump{}, false, nil, nil
+	}
+	stackBefore := append([]expr(nil), d.stack...)
+	takenCount := len(*taken)
+	foldedBefore := make([]int, 0, len(folded))
+	for at := range folded {
+		foldedBefore = append(foldedBefore, at)
+	}
+	folded[start] = true
+	*taken = append(*taken, start)
+	last := next.Instructions[len(next.Instructions)-1]
+	if err := d.runInstructions(next.Instructions[:len(next.Instructions)-1], last.Pc, start); err != nil {
+		return jump{}, false, nil, err
+	}
+	var folded_ jump
+	var err error
+	if deep {
+		folded_, err = d.jumpConditionOf(next, taken, folded)
+	} else {
+		var condition expr
+		condition, err = d.branchExpr(last)
+		folded_ = jump{Condition: condition, Target: next.Successors[1], Fallthrough: next.Successors[0]}
+	}
+	if err != nil {
+		return jump{}, false, nil, err
+	}
+	undo := func() {
+		d.stack = stackBefore
+		*taken = (*taken)[:takenCount]
+		for at := range folded {
+			delete(folded, at)
+		}
+		for _, at := range foldedBefore {
+			folded[at] = true
+		}
+	}
+	return folded_, true, undo, nil
+}
+
+func (d *bodyDecompiler) predecessorsOf(start int, ignore map[int]bool) int {
+	count := 0
+	for _, b := range d.blocks {
+		if ignore[b.Start] {
+			continue
+		}
+		for _, successor := range b.Successors {
+			if successor == start {
+				count++
+				break
+			}
+		}
+	}
+	return count
+}
+
+// branchExpr reports the source condition a branch instruction tests, with its
+// operands popped.
+func (d *bodyDecompiler) branchExpr(instruction Instruction) (expr, error) {
+	mnemonic := instruction.Mnemonic
+	if mnemonic == "ifnull" || mnemonic == "ifnonnull" {
+		value, err := d.pop()
+		if err != nil {
+			return expr{}, err
+		}
+		op := "!="
+		if mnemonic == "ifnull" {
+			op = "=="
+		}
+		return compareExpr(value, op, primary("null", "java.lang.Object")), nil
+	}
+	if mnemonic == "if_acmpeq" || mnemonic == "if_acmpne" {
+		right, err := d.pop()
+		if err != nil {
+			return expr{}, err
+		}
+		left, err := d.pop()
+		if err != nil {
+			return expr{}, err
+		}
+		op := "!="
+		if mnemonic == "if_acmpeq" {
+			op = "=="
+		}
+		return compareExpr(left, op, right), nil
+	}
+	suffix := strings.TrimPrefix(strings.Replace(mnemonic, "if_icmp", "if", 1), "if")
+	op, ok := comparisons[suffix]
+	if !ok {
+		return expr{}, bail("unsupported branch %s", mnemonic)
+	}
+	if strings.HasPrefix(mnemonic, "if_icmp") {
+		right, err := d.pop()
+		if err != nil {
+			return expr{}, err
+		}
+		left, err := d.pop()
+		if err != nil {
+			return expr{}, err
+		}
+		return compareExpr(numeric(left), op, numeric(right)), nil
+	}
+	value, err := d.popRaw()
+	if err != nil {
+		return expr{}, err
+	}
+	// `lcmp`/`fcmpl`/`dcmpg` only exist to feed one of these: what source wrote
+	// is the comparison of their two operands.
+	if value.Compared != nil {
+		return compareExpr(value.Compared.Left, op, value.Compared.Right), nil
+	}
+	if value.Type == "boolean" && (op == "==" || op == "!=") {
+		if op == "!=" {
+			return value, nil
+		}
+		return negate(value), nil
+	}
+	return compareExpr(value, op, intLiteral(0)), nil
+}
+
+// tryTernary writes the two arms of a branch as `condition ? a : b`, when both
+// are side-effect-free and leave one value behind - which is how javac writes a
+// conditional expression, and how a boolean ends up in a variable.
+func (d *bodyDecompiler) tryTernary(condition expr, whenTrue, whenFalse, follow int) (expr, bool, error) {
+	consumed := []int{}
+	before := append([]expr(nil), d.stack...)
+	value, found, err := d.armValues(condition, whenTrue, whenFalse, follow, &consumed)
+	if err != nil {
+		return expr{}, false, err
+	}
+	if !found {
+		// An arm may have consumed values that were already on the stack, so the
+		// depth alone does not put it back.
+		d.stack = before
+		return expr{}, false, nil
+	}
+	for _, start := range consumed {
+		d.visited[start] = true
+	}
+	return value, true, nil
+}
+
+func (d *bodyDecompiler) armValues(
+	condition expr,
+	whenTrue, whenFalse, follow int,
+	consumed *[]int,
+) (expr, bool, error) {
+	thenValue, found, err := d.valueOfRegion(whenTrue, follow, consumed)
+	if err != nil || !found {
+		return expr{}, false, err
+	}
+	elseValue, found, err := d.valueOfRegion(whenFalse, follow, consumed)
+	if err != nil || !found {
+		return expr{}, false, err
+	}
+	// `c ? 1 : 0` is a boolean that javac erased to an int; source wrote the
+	// condition itself.
+	if thenValue.Text == "1" && elseValue.Text == "0" {
+		return materializedBoolean(condition, condition, "1"), true, nil
+	}
+	if thenValue.Text == "0" && elseValue.Text == "1" {
+		return materializedBoolean(negate(condition), condition, "0"), true, nil
+	}
+	value, ok := ternaryExpr(condition, thenValue, elseValue)
+	return value, ok, nil
+}
+
+// valueOfRegion reports the blocks from start to follow as a single value:
+// either one side-effect-free block that leaves it on the stack, or - because a
+// short-circuit nests them - another branch whose arms are values themselves.
+func (d *bodyDecompiler) valueOfRegion(start, follow int, consumed *[]int) (expr, bool, error) {
+	b := d.blocks[start]
+	if b == nil || !isPureBlock(b) {
+		return expr{}, false, nil
+	}
+	// A block already emitted as a statement cannot also be a value; one that two
+	// arms of the same expression share (the merge of a `||`) is fine - it has no
+	// side effects, so evaluating it twice is the same value twice.
+	if d.visited[start] {
+		return expr{}, false, nil
+	}
+	terminator := b.Instructions[len(b.Instructions)-1]
+	if b.Kind == blockConditional {
+		if follow_, ok := d.followOf[start]; !ok || follow_ != follow {
+			return expr{}, false, nil
+		}
+		if err := d.runInstructions(b.Instructions[:len(b.Instructions)-1], terminator.Pc, start); err != nil {
+			return expr{}, false, err
+		}
+		inner, err := d.jumpConditionOf(b, consumed, nil)
+		if err != nil {
+			return expr{}, false, err
+		}
+		*consumed = append(*consumed, start)
+		condition := negate(inner.Condition)
+		armTrue, armFalse := inner.Fallthrough, inner.Target
+		if inner.Target < inner.Fallthrough {
+			condition = inner.Condition
+			armTrue, armFalse = inner.Target, inner.Fallthrough
+		}
+		return d.armValues(condition, armTrue, armFalse, follow, consumed)
+	}
+	if len(b.Successors) != 1 || b.Successors[0] != follow {
+		return expr{}, false, nil
+	}
+	before := len(d.stack)
+	body := b.Instructions
+	if b.Kind == blockGoto {
+		body = body[:len(body)-1]
+	}
+	if err := d.runInstructions(body, endOf(b), start); err != nil {
+		return expr{}, false, err
+	}
+	if len(d.stack) != before+1 {
+		return expr{}, false, nil
+	}
+	*consumed = append(*consumed, start)
+	value, err := d.pop()
+	if err != nil {
+		return expr{}, false, err
+	}
+	return value, true, nil
+}
+
+// reachesAvoiding reports whether a path from the entry reaches target without
+// passing a store.
+func (d *bodyDecompiler) reachesAvoiding(target int, stores map[int]bool) bool {
+	// A store in the reading block itself comes first: the read is what follows
+	// it, so that path is covered.
+	if stores[target] {
+		return false
+	}
+	seen := map[int]bool{}
+	queue := []int{d.entryPc}
+	for len(queue) > 0 {
+		at := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		if seen[at] || stores[at] || d.blocks[at] == nil {
+			continue
+		}
+		if at == target {
+			return true
+		}
+		seen[at] = true
+		queue = append(queue, d.blocks[at].Successors...)
+	}
+	return false
+}
+
+func (d *bodyDecompiler) runInstructions(instructions []Instruction, endPc, blockStart int) error {
+	outer := d.currentBlock
+	d.currentBlock = blockStart
+	err := d.runSteps(instructions, endPc)
+	d.currentBlock = outer
+	return err
+}
+
+func (d *bodyDecompiler) runSteps(instructions []Instruction, endPc int) error {
 	for i, instruction := range instructions {
-		// A store's variable comes into scope after the store, so the debug
-		// table is searched at the next instruction's pc, not the store's own.
-		nextPc := instruction.Pc + 1
+		// A store's variable comes into scope after the store, so the debug table
+		// is searched at the next instruction's pc, not the store's own.
+		nextPc := endPc
 		if i+1 < len(instructions) {
 			nextPc = instructions[i+1].Pc
 		}
 		if err := d.step(instruction, nextPc); err != nil {
 			return err
 		}
-		if strings.HasSuffix(instruction.Mnemonic, "return") && i != len(instructions)-1 {
-			// Code after a return only exists because something branches over it.
-			return bail("unreachable code")
-		}
-	}
-	if len(d.stack) > 0 {
-		return bail("values left on the stack")
 	}
 	return nil
 }
@@ -611,8 +1722,13 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
+		// `istore` is what a boolean, char, byte and short are stored with too;
+		// when the value knows which one it is, that is the variable's type. A
+		// condition javac materialized as `1`/`0` does *not* know: `int x = c ? 1
+		// : 0` and `boolean b = c` compile to the same store, so it starts as an
+		// int and a use that needs a boolean narrows it (as for a literal).
 		fallback := primitiveOfPrefix[base[0]]
-		if base == "astore" {
+		if base == "astore" || (erasedToInt[value.Type] && value.AsInt == "") {
 			fallback = value.Type
 		}
 		return d.store(slotOf(instruction), nextPc, value, fallback)
@@ -624,13 +1740,13 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		}
 		switch delta := instruction.Arg2; {
 		case delta == 1:
-			d.statements = append(d.statements, target.Name+"++;")
+			d.emit(target.Name + "++;")
 		case delta == -1:
-			d.statements = append(d.statements, target.Name+"--;")
+			d.emit(target.Name + "--;")
 		case delta < 0:
-			d.statements = append(d.statements, fmt.Sprintf("%s -= %d;", target.Name, -delta))
+			d.emit(fmt.Sprintf("%s -= %d;", target.Name, -delta))
 		default:
-			d.statements = append(d.statements, fmt.Sprintf("%s += %d;", target.Name, delta))
+			d.emit(fmt.Sprintf("%s += %d;", target.Name, delta))
 		}
 		return nil
 	}
@@ -645,7 +1761,8 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
-		d.push(binaryExpr(left, operator.operator, right, operator.prec, primitiveOfPrefix[mnemonic[0]]))
+		d.push(binaryExpr(numeric(left), operator.operator, numeric(right),
+			operator.prec, primitiveOfPrefix[mnemonic[0]]))
 		return nil
 	}
 	if isOneOf(mnemonic, "ilfd", "neg") {
@@ -653,6 +1770,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
+		value = numeric(value)
 		// A unary operand needs the parens too: `-(-a)` is not `--a`.
 		d.push(expr{Text: "-" + at(value, precUnary+1), Prec: precUnary, Type: primitiveOfPrefix[mnemonic[0]]})
 		return nil
@@ -662,6 +1780,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
+		value = numeric(value)
 		d.push(expr{Text: "(" + conversion + ") " + at(value, precUnary), Prec: precUnary, Type: conversion})
 		return nil
 	}
@@ -702,7 +1821,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 			}
 			target = at(receiver, precPrimary) + "." + field.Name
 		}
-		d.statements = append(d.statements, target+" = "+d.coerceInto(value, fieldType)+";")
+		d.emit(target + " = " + d.coerceInto(value, fieldType) + ";")
 		return nil
 	}
 
@@ -741,8 +1860,8 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 			return err
 		}
 		element := elementType(array.Type, mnemonic[0])
-		d.statements = append(d.statements,
-			at(array, precPrimary)+"["+index.Text+"] = "+d.coerceInto(value, element)+";")
+		d.emit(at(array, precPrimary) + "[" + coerce(index, "int") + "] = " +
+			d.coerceInto(value, element) + ";")
 		return nil
 	}
 	if mnemonic == "newarray" {
@@ -750,7 +1869,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
-		d.push(primary("new "+instruction.Operand+"["+length.Text+"]", instruction.Operand+"[]"))
+		d.push(primary("new "+instruction.Operand+"["+numeric(length).Text+"]", instruction.Operand+"[]"))
 		return nil
 	}
 	if mnemonic == "anewarray" {
@@ -763,7 +1882,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		// so `new String[n][]`, never `new String[][n]`.
 		base := strings.ReplaceAll(element, "[]", "")
 		rest := strings.Repeat("[]", (len(element)-len(base))/2)
-		d.push(primary("new "+base+"["+length.Text+"]"+rest, element+"[]"))
+		d.push(primary("new "+base+"["+numeric(length).Text+"]"+rest, element+"[]"))
 		return nil
 	}
 	if mnemonic == "multianewarray" {
@@ -775,7 +1894,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 			if err != nil {
 				return err
 			}
-			sizes[i] = size.Text
+			sizes[i] = numeric(size).Text
 		}
 		if len(sizes) > rank {
 			return bail("multianewarray rank mismatch")
@@ -842,7 +1961,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if receiver.Text != "this" {
 			return bail("constructor call on another object")
 		}
-		if len(d.statements) > 0 {
+		if len(d.statements) > 0 || d.depth > 0 {
 			return bail("constructor call is not first")
 		}
 		// javac writes the implicit `super()` into every constructor; source
@@ -856,7 +1975,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if isSuper {
 			keyword = "super"
 		}
-		d.statements = append(d.statements, keyword+"("+strings.Join(args, ", ")+");")
+		d.emit(keyword + "(" + strings.Join(args, ", ") + ");")
 		return nil
 	}
 
@@ -880,9 +1999,33 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		return err
 	}
 
+	// Comparisons. `lcmp` and the float ones have no source form: they only exist
+	// to feed the branch that follows, which is what was written.
+	if mnemonic == "lcmp" || (len(mnemonic) == 5 && strings.HasPrefix(mnemonic[1:], "cmp") &&
+		(mnemonic[0] == 'f' || mnemonic[0] == 'd') && (mnemonic[4] == 'l' || mnemonic[4] == 'g')) {
+		right, err := d.pop()
+		if err != nil {
+			return err
+		}
+		left, err := d.pop()
+		if err != nil {
+			return err
+		}
+		d.push(expr{Prec: precPrimary, Type: "int", Compared: &comparedPair{Left: left, Right: right}})
+		return nil
+	}
+
 	// Returns.
+	if mnemonic == "athrow" {
+		value, err := d.pop()
+		if err != nil {
+			return err
+		}
+		d.emit("throw " + value.Text + ";")
+		return nil
+	}
 	if mnemonic == "return" {
-		d.statements = append(d.statements, "return;")
+		d.emit("return;")
 		return nil
 	}
 	if isOneOf(mnemonic, "ilfda", "return") {
@@ -890,7 +2033,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
-		d.statements = append(d.statements, "return "+d.coerceInto(value, d.returnType)+";")
+		d.emit("return " + d.coerceInto(value, d.returnType) + ";")
 		return nil
 	}
 
@@ -1017,7 +2160,7 @@ func buildLocals(method Member, localTable []localEntry, isStatic bool, self str
 		// The descriptor says what a parameter's type is.
 		entry := &local{
 			Name: "arg" + strconv.Itoa(index), Type: parameter.Type,
-			Declared: true, Authoritative: true,
+			Declared: true, Authoritative: true, StoreBlocks: map[int]bool{},
 		}
 		for i := range localTable {
 			if scoped := &localTable[i]; scoped.Slot == parameter.Slot && scoped.StartPc == 0 {
@@ -1275,20 +2418,22 @@ func decompileBody(
 		isStatic:   isStatic,
 		names:      map[string]bool{},
 		byName:     map[string]*local{},
+		visited:    map[int]bool{},
 	}
+	d.current = &d.statements
 	for _, parameter := range locals {
 		d.names[parameter.Name] = true
 		d.byName[parameter.Name] = parameter
 	}
 	if err := d.run(instructions); err != nil {
-		return nil, d.statements, err
+		return nil, flattenStatements(d.statements), err
 	}
-	body = d.statements
+	body = append(flattenStatements(d.hoisted), flattenStatements(d.statements)...)
 	// Every void method ends in a `return` javac inserted; source does not.
 	if len(body) > 0 && body[len(body)-1] == "return;" {
 		body = body[:len(body)-1]
 	}
-	return body, d.statements, nil
+	return body, flattenStatements(d.statements), nil
 }
 
 // generatedFields are the fields javac writes for itself, and regenerates from

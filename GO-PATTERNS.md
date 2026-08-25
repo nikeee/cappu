@@ -632,3 +632,32 @@ text (the decompiler) returns rough source and the *CLI* runs `FormatSource`
 over it - `src/compiler/decompile.ts` and `src/cli/decompile.ts` are split the
 same way, so the two builds format at the same point and their text baselines
 match byte for byte.
+
+## Nested statement blocks: array identity (TS) -> `*[]stmt` (Go)
+
+Reconstructed statements are a tree, not a flat list, until the method is done -
+a local's type is often only known at its *use*, and the rewrite has to reach a
+statement already placed inside an `if`. TS gets this for free: `Stmt[]` nested
+inside `Stmt[]` shares the array, so an edit through a kept reference is visible
+in the tree. Go slices are values, so the same shape needs pointers on both
+sides: a nested block is `stmt{Nested: *[]stmt}` and every edit site keeps a
+`*[]stmt` plus an index (`localWrite`, `localDeclaration`). Appending through
+`*d.current = append(*d.current, ...)` keeps the pointer valid because the slice
+header lives in the struct field, not in a local.
+
+The corollary: never `append(parent, child...)` a nested block into its parent
+before the rewrites are done - that copies, and the edit lands on a detached
+slice. Flatten once, at the end (`flattenStatements`).
+
+## Speculative recursion: try/rollback (TS) -> an `undo` closure (Go)
+
+Folding a short-circuit tries a merge, then puts everything back when the
+outcomes do not line up. TS can snapshot and restore inline; the Go port returns
+`(jump, found bool, undo func(), error)` from `chainFrom` and the caller calls
+`undo()` on the path that does not take the fold. Anything the speculation
+mutates (the stack, the folded set, the list of consumed blocks) has to be
+restored *there*, so keep the closure next to the mutation instead of unwinding
+at the caller.
+
+A TS `T | undefined` return that is not an error becomes `(T, bool, error)` in
+Go, since `error` is already spoken for by the bail path.

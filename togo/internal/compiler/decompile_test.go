@@ -368,6 +368,126 @@ var reconstructions = []struct {
 		want:          []string{"boolean var0 = true;", "char var0 = 'a';"},
 		selfContained: true,
 	},
+	// --- phase 1.4: acyclic control flow ---
+	{
+		name:          "IfOnly",
+		source:        "class IfOnly { static int f(int a) { int r = 0; if (a > 0) { r = a; } return r; } }",
+		want:          []string{"int var1 = 0;", "if (arg0 > 0) {", "var1 = arg0;"},
+		selfContained: true,
+	},
+	{
+		// The arm that leaves the method is the whole `if`; the rest follows it.
+		name:          "IfElse",
+		source:        "class IfElse { static int f(int a) { if (a > 0) return 1; else return 2; } }",
+		want:          []string{"if (arg0 > 0) {", "return 1;", "}", "return 2;"},
+		reject:        []string{"} else {"},
+		selfContained: true,
+	},
+	{
+		// Java scopes a variable to the branch it is declared in, the bytecode
+		// does not: assigned in both arms, it has to be declared before the `if`.
+		name: "Hoist",
+		source: "class Hoist { static int f(boolean c) { int x; if (c) { x = 1; }" +
+			" else { x = 2; } return x; } }",
+		want:          []string{"int var1;", "if (arg0) {", "var1 = 1;", "} else {", "var1 = 2;"},
+		selfContained: true,
+	},
+	{
+		name: "Short",
+		source: "class Short { static boolean f(int a, int b) { return a > 0 && b < 10; }" +
+			" static boolean g(int a, int b) { return a > 0 || b < 10; } }",
+		want:          []string{"return arg0 > 0 && arg1 < 10;", "return arg0 > 0 || arg1 < 10;"},
+		selfContained: true,
+	},
+	{
+		// Nested short-circuits share the block the value comes from, so the
+		// parenthesization is the only thing that says which grouping was written.
+		name: "Mixed",
+		source: "class Mixed { static boolean f(int a, int b, int c) { return (a > 0 && b > 0) || c > 0; }" +
+			" static boolean g(int a, int b, int c) { return a > 0 && (b > 0 || c > 0); } }",
+		want: []string{
+			"return arg0 > 0 && arg1 > 0 || arg2 > 0;",
+			"return arg0 > 0 && (arg1 > 0 || arg2 > 0);",
+		},
+		selfContained: true,
+	},
+	{
+		name: "Tern",
+		source: "class Tern { static int f(int a, int b) { return (a > b ? a : b) + 1; }" +
+			" static int g(boolean c) { int[] xs = new int[3]; xs[c ? 0 : 1] = 7; return xs[0]; } }",
+		// The condition is a boolean, so an index has to ask for the int back -
+		// and the int form keeps the branch's own arms, not the boolean reading.
+		want:          []string{"return (arg0 > arg1 ? arg0 : arg1) + 1;", "var1[arg0 ? 0 : 1] = 7;"},
+		selfContained: true,
+	},
+	{
+		// `istore` is what an int uses, so a materialized condition starts as one -
+		// and a use that needs a boolean (`return b`) is what narrows it. With no
+		// such use it stays an int, which still compiles and still branches.
+		name: "BoolVar",
+		source: "class BoolVar { static boolean f(int a) { boolean b = a > 10;" +
+			" if (b) { return b; } return false; }" +
+			" static int g(int a) { boolean b = a > 10; if (b) { return 1; } return 0; }" +
+			" static int h(int a) { int x = a > 0 ? 1 : 0; return x + 1; } }",
+		want: []string{
+			"boolean var1 = arg0 > 10;",
+			"if (var1) {",
+			// Our emitter branches on the true arm, so the int form reads
+			// inverted - the same value, written the way this branch is laid out.
+			"int var1 = arg0 <= 10 ? 0 : 1;",
+			"if (var1 != 0) {",
+			"int var1 = arg0 > 0 ? 1 : 0;",
+			"return var1 + 1;",
+		},
+		selfContained: true,
+	},
+	{
+		// A materialized condition in a position that wants a number: arithmetic
+		// and an array index splice the text in as it stands, so it has to be the
+		// ternary again rather than the boolean it reads as elsewhere.
+		name: "AsNumber",
+		source: "class AsNumber { static int f(boolean q, int[] xs) { return xs[q ? 2 : 0] + (q ? 1 : 0); }" +
+			" static int g(int a) { return -(a > 0 ? 1 : 0); }" +
+			" static long h(int a) { return (long) (a > 0 ? 1 : 0); } }",
+		want: []string{
+			"arg0 ? 2 : 0", "+ (arg0 ? 1 : 0)",
+			"-(arg0 > 0 ? 1 : 0)", "(long) (arg0 > 0 ? 1 : 0)",
+		},
+		selfContained: true,
+	},
+	{
+		// lcmp/dcmpg have no source form: the comparison they feed is what was written.
+		name: "Cmp",
+		source: "class Cmp { static boolean f(long a, long b) { return a < b; }" +
+			" static boolean g(double a, double b) { return a >= b; } }",
+		want:          []string{"return arg0 < arg1;", "return arg0 >= arg1;"},
+		selfContained: true,
+	},
+	{
+		name: "Throwing",
+		source: "class Throwing { static int f(int a, java.lang.RuntimeException e) {" +
+			" if (a < 0) throw e; return a; } }",
+		want:          []string{"if (arg0 < 0) {", "throw arg1;"},
+		selfContained: true,
+	},
+	{
+		// Only the *use* says the slot is a boolean, and the use comes after the
+		// branch the assignments sit in - so the rewrite has to reach into it.
+		name: "Retype",
+		source: "class Retype { static boolean f(int a) { boolean b; if (a > 0) { b = true; }" +
+			" else { b = false; } return b; } }",
+		want:          []string{"boolean var1;", "var1 = true;", "var1 = false;"},
+		reject:        []string{"var1 = 1;", "var1 = 0;"},
+		selfContained: true,
+	},
+	{
+		// Phase 1.5; until then it has to say so rather than produce something wrong.
+		name: "Loop",
+		source: "class Loop { static int f(int n) { int s = 0; for (int i = 0; i < n; i++) s += i;" +
+			" return s; } }",
+		want:          []string{"loops are not decompiled yet", "not decompiled"},
+		selfContained: true,
+	},
 	{
 		name: "Blank",
 		source: "class Blank { static int v() { return 1; } static final int N;" +
@@ -403,6 +523,100 @@ func TestDecompileReconstructions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDecompileReconstructsControlFlowFixture(t *testing.T) {
+	source := decompileBaseline(t, "ControlFlow")
+	// Two branches, no loop: both come back as the expression they were written as.
+	for _, want := range []string{
+		"if (arg0 < 0) {",
+		"return arg0 >= arg1 && arg0 <= arg2;",
+		// The loops in the same class still say they are a later phase.
+		"cappu: loops are not decompiled yet",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("missing %q in:\n%s", want, source)
+		}
+	}
+}
+
+// The two arms store to the same slot with the same opcode but differently typed
+// values, so without a debug table there is nothing left to say whether that is
+// one variable or two - and guessing would produce code that lies.
+const ambiguousSlotSource = "class Amb { static java.lang.Object f(boolean c, java.lang.String s, int[] a) {" +
+	" java.lang.Object o; if (c) { o = s; } else { o = a; } return o; } }"
+
+func TestDecompileSaysWhenASlotComesFromEitherBranch(t *testing.T) {
+	source, err := Decompile(emitClassBytesNoDebug(t, "Amb", ambiguousSlotSource))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: local 3 is written in more than one branch") {
+		t.Errorf("expected the ambiguity to be reported in:\n%s", source)
+	}
+}
+
+func TestDecompileReadsOneVariableWhenTheDebugTableScopesItPerBranch(t *testing.T) {
+	// javac (and our emitter with -g) writes a LocalVariableTable row per scope
+	// range, so one variable can appear once per arm; name and type say it is one.
+	source, err := Decompile(emitClassBytes(t, "Amb", ambiguousSlotSource))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{"java.lang.Object o;", "o = s;", "o = a;", "return o;"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("missing %q in:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "o_2") {
+		t.Errorf("the variable was split in two:\n%s", source)
+	}
+	if diagnostics := diagnosticsOf("Amb", source); len(diagnostics) > 0 {
+		t.Errorf("diagnostics: %v\n%s", diagnostics, source)
+	}
+}
+
+// javac lays branches out its own way - our emitter is not the oracle here, the
+// real compiler is: decompiled and recompiled, the bytecode has to come back
+// identical, instruction for instruction.
+const branchySource = `public class Branchy {
+  static int clamp(int v, int lo, int hi) { if (v < lo) return lo; if (v > hi) return hi; return v; }
+  static boolean between(int v, int lo, int hi) { return v >= lo && v <= hi; }
+  static boolean either(int a, int b) { return a > 0 || b > 0; }
+  static int max3(int a, int b, int c) { int m = a > b ? a : b; return m > c ? m : c; }
+  static int sign(long v) { return v < 0L ? -1 : (v > 0L ? 1 : 0); }
+  static int check(int a, java.lang.RuntimeException e) { if (a < 0) throw e; return a; }
+  static int both(boolean c) { int x; if (c) { x = 1; } else { x = 2; } return x; }
+  static boolean nested(int a, int b, int c) { return (a > 0 && b > 0) || c > 0; }
+  static double pick(boolean c, int a, double b) { return c ? a : b; }
+  static boolean isNull(java.lang.Object o) { return o == null; }
+  static int index(boolean c, int[] a) { a[c ? 0 : 1] = 7; return a[0]; }
+  static boolean staleCondition(int a) { boolean b = true; if (b) { return a > 0; } return b; }
+  static int numeric(int a) { int x = a > 0 ? 1 : 0; return x + 1; }
+  static int counted(boolean q, int[] xs) { return xs[q ? 2 : 0] + (q ? 1 : 0); }
+  static int andOr(int a, int b, int c) { if ((a > 0 && b > 0) || c > 0) { return 11; } else { return 22; } }
+  static int orAnd(int a, int b, int c) { if (a > 0 || (b > 0 && c > 0)) { return 11; } else { return 22; } }
+  static int andGroup(int a, int b, int c) { if (a > 0 && (b > 0 || c > 0)) { return 11; } else { return 22; } }
+}`
+
+func TestDecompileRecompilesJavacBranchesToTheSameBytecode(t *testing.T) {
+	if !hasTool("javac") || !hasTool("javap") {
+		t.Skip("no JDK (javac/javap)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Branchy", branchySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "not decompiled") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Branchy", source)
+	if javapText(t, roundTripped) != javapText(t, classFile) {
+		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
+			javapText(t, roundTripped), javapText(t, classFile))
 	}
 }
 
