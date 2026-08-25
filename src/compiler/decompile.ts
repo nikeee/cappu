@@ -1,10 +1,10 @@
-// `cappu decompile`, phases 1.3 and 1.4 (nikeee/cappu#43): reconstruct Java
-// source from bytecode without a loop in it. A symbolic stack interpreter walks
-// a method's basic blocks and turns them back into expressions and statements,
-// with the branches structured into `if`/`else`, `&&`/`||` and `?:`; anything
-// that needs a loop or a method call (later phases) renders as its disassembly
-// plus a `throw new UnsupportedOperationException(...)`, so the output is always
-// compilable Java.
+// `cappu decompile`, phases 1.3 to 1.5 (nikeee/cappu#43): reconstruct Java
+// source from bytecode. A symbolic stack interpreter walks a method's basic
+// blocks and turns them back into expressions and statements, with the control
+// flow structured into `if`/`else`, `&&`/`||`, `?:` and the loop forms; anything
+// that needs a method call or a `switch` (later phases) renders as its
+// disassembly plus a `throw new UnsupportedOperationException(...)`, so the
+// output is always compilable Java.
 //
 // The text is deliberately rough - callers run it through the formatter
 // (src/cli/decompile.ts), which is why this module stays free of a dependency
@@ -130,7 +130,32 @@ function comparePrec(op: string): number {
   return op === "==" || op === "!=" ? PREC_EQ : PREC_REL;
 }
 
+/** Two integer literals compared, which only a constant condition produces. */
+function foldComparison(left: Expr, op: string, right: Expr): boolean | undefined {
+  if (!/^-?\d+$/.test(left.text) || !/^-?\d+$/.test(right.text)) return undefined;
+  const a = Number(left.text);
+  const b = Number(right.text);
+  switch (op) {
+    case "==":
+      return a === b;
+    case "!=":
+      return a !== b;
+    case "<":
+      return a < b;
+    case "<=":
+      return a <= b;
+    case ">":
+      return a > b;
+    default:
+      return a >= b;
+  }
+}
+
 function compare(left: Expr, op: string, right: Expr): Expr {
+  // `while (true)` is a test against a constant to a compiler that does not fold
+  // it, and `1 != 0` is not what anyone wrote.
+  const folded = foldComparison(left, op, right);
+  if (folded !== undefined) return primary(folded ? "true" : "false", "boolean");
   const prec = comparePrec(op);
   return {
     text: `${at(left, prec + 1)} ${op} ${at(right, prec + 1)}`,
@@ -151,6 +176,8 @@ function logical(kind: "and" | "or", left: Expr, right: Expr): Expr {
 }
 
 function not(value: Expr): Expr {
+  if (value.text === "true") return primary("false", "boolean");
+  if (value.text === "false") return primary("true", "boolean");
   return {
     text: `!${at(value, PREC_UNARY)}`,
     prec: PREC_UNARY,
@@ -480,6 +507,11 @@ const ERASED_TO_INT = ["boolean", "char", "byte", "short"];
  */
 type Stmt = string | Stmt[];
 
+/** Drop a trailing `continue;` a loop's own fallthrough already says. */
+function trimTail(statements: Stmt[], text: string): void {
+  if (statements[statements.length - 1] === text) statements.pop();
+}
+
 function flattenStatements(statements: readonly Stmt[]): string[] {
   return statements.flatMap(statement =>
     typeof statement === "string" ? [statement] : flattenStatements(statement),
@@ -534,9 +566,8 @@ function returnType(descriptor: string): string {
 
 // --- the control-flow graph ----------------------------------------------------------
 
-// Phase 1.4 covers acyclic control flow only: every edge runs forward, so a
-// block's pc order is a topological order and one reverse pass computes the
-// post-dominators. A back edge is a loop, which is phase 1.5.
+// A back edge is a loop, so pc order is not a topological order and the
+// dominator analyses below are fixpoints rather than a single pass.
 
 /** The virtual block every `return`/`athrow` falls into, so a merge always exists. */
 const EXIT = -1;
@@ -624,9 +655,6 @@ function buildBlocks(instructions: readonly Instruction[]): Map<number, Block> {
     } else if (fallthrough === undefined) {
       throw new NotDecompilable("the code runs off the end of the method");
     }
-    for (const successor of successors) {
-      if (successor <= start) throw new NotDecompilable("loops are not decompiled yet");
-    }
     blocks.set(start, { start, instructions: current, kind, successors });
   };
   for (const instruction of instructions) {
@@ -666,22 +694,185 @@ function reachableBlocks(blocks: Map<number, Block>, entry: number): Set<number>
  */
 function postDominators(blocks: Map<number, Block>): Map<number, number> {
   const starts = [...blocks.keys()].sort((a, b) => a - b);
-  const sets = new Map<number, Set<number>>();
-  for (const start of [...starts].reverse()) {
-    const block = blocks.get(start)!;
-    let shared: Set<number> | undefined;
-    for (const successor of block.successors.length === 0 ? [EXIT] : block.successors) {
-      const of = successor === EXIT ? new Set([EXIT]) : (sets.get(successor) ?? new Set([EXIT]));
-      shared = shared === undefined ? new Set(of) : new Set([...shared].filter(x => of.has(x)));
+  const all = new Set([...starts, EXIT]);
+  // A back edge makes reverse pc order stop being a topological one, so this is
+  // a fixpoint: every set starts full and shrinks until nothing moves.
+  const sets = new Map<number, Set<number>>(starts.map(start => [start, new Set(all)]));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const start of [...starts].reverse()) {
+      const block = blocks.get(start)!;
+      let shared: Set<number> | undefined;
+      for (const successor of block.successors.length === 0 ? [EXIT] : block.successors) {
+        const of = successor === EXIT ? new Set([EXIT]) : (sets.get(successor) ?? new Set([EXIT]));
+        shared = shared === undefined ? new Set(of) : new Set([...shared].filter(x => of.has(x)));
+      }
+      const next = new Set([start, ...(shared ?? [EXIT])]);
+      const before = sets.get(start)!;
+      if (next.size === before.size && [...next].every(x => before.has(x))) continue;
+      sets.set(start, next);
+      changed = true;
     }
-    sets.set(start, new Set([start, ...(shared ?? [EXIT])]));
   }
   const immediate = new Map<number, number>();
   for (const start of starts) {
     const candidates = [...sets.get(start)!].filter(x => x !== start && x !== EXIT);
-    immediate.set(start, candidates.length === 0 ? EXIT : Math.min(...candidates));
+    // The nearest one: the one every other candidate post-dominates too.
+    const nearest = candidates.find(x => candidates.every(other => sets.get(x)!.has(other)));
+    immediate.set(start, nearest ?? EXIT);
   }
   return immediate;
+}
+
+/** Which blocks every path from the entry to a block has to pass through. */
+function dominators(blocks: Map<number, Block>, entry: number): Map<number, Set<number>> {
+  const starts = [...blocks.keys()].sort((a, b) => a - b);
+  const predecessors = new Map<number, number[]>(starts.map(start => [start, []]));
+  for (const block of blocks.values()) {
+    for (const successor of block.successors) predecessors.get(successor)?.push(block.start);
+  }
+  const all = new Set(starts);
+  const sets = new Map<number, Set<number>>(
+    starts.map(start => [start, start === entry ? new Set([entry]) : new Set(all)]),
+  );
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const start of starts) {
+      if (start === entry) continue;
+      let shared: Set<number> | undefined;
+      for (const predecessor of predecessors.get(start)!) {
+        const of = sets.get(predecessor)!;
+        shared = shared === undefined ? new Set(of) : new Set([...shared].filter(x => of.has(x)));
+      }
+      const next = new Set([start, ...(shared ?? [])]);
+      const before = sets.get(start)!;
+      if (next.size === before.size && [...next].every(x => before.has(x))) continue;
+      sets.set(start, next);
+      changed = true;
+    }
+  }
+  return sets;
+}
+
+/** A loop, as the blocks it is made of and the two places control leaves it. */
+interface Loop {
+  readonly header: number;
+  /** Every block inside the loop, the header included. */
+  readonly body: Set<number>;
+  /** The blocks whose branch closes the loop. */
+  readonly latches: number[];
+  /** Where the code after the loop begins, or EXIT when nothing leaves it. */
+  readonly follow: number;
+}
+
+/**
+ * Every edge that closes a cycle, found by a depth-first walk: an edge to a
+ * block the walk is still inside. pc order does not say this - javac lays a
+ * `while (a && b)` out with the second test jumping *backwards* into the body.
+ */
+function retreatingEdges(blocks: Map<number, Block>, entry: number): [number, number][] {
+  const edges: [number, number][] = [];
+  const open = new Set<number>();
+  const done = new Set<number>();
+  const stack: { at: number; next: number }[] = [{ at: entry, next: 0 }];
+  open.add(entry);
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]!;
+    const successors = blocks.get(frame.at)?.successors ?? [];
+    if (frame.next >= successors.length) {
+      open.delete(frame.at);
+      done.add(frame.at);
+      stack.pop();
+      continue;
+    }
+    const successor = successors[frame.next++]!;
+    if (!blocks.has(successor) || done.has(successor)) continue;
+    if (open.has(successor)) {
+      edges.push([frame.at, successor]);
+      continue;
+    }
+    open.add(successor);
+    stack.push({ at: successor, next: 0 });
+  }
+  return edges;
+}
+
+/**
+ * Where the code after the loop begins. The test decides it - the one at the
+ * head of a `while`, the one at the foot of a `do` - because a `break` leaves
+ * from a block that no longer reaches the latch, so it is not in the loop's
+ * body and its own target would otherwise look like a second way out.
+ */
+function loopFollow(
+  blocks: Map<number, Block>,
+  header: number,
+  latches: readonly number[],
+  body: ReadonlySet<number>,
+): number {
+  const outside = (start: number): number[] =>
+    (blocks.get(start)?.successors ?? []).filter(successor => !body.has(successor));
+  const fromHeader = outside(header);
+  if (blocks.get(header)!.kind === "conditional" && fromHeader.length === 1) return fromHeader[0]!;
+  if (latches.length === 1) {
+    const latch = blocks.get(latches[0]!)!;
+    const fromLatch = outside(latch.start);
+    if (latch.kind === "conditional" && fromLatch.length === 1) return fromLatch[0]!;
+  }
+  const exits = new Set<number>();
+  for (const start of body) for (const successor of outside(start)) exits.add(successor);
+  if (exits.size <= 1) return [...exits][0] ?? EXIT;
+  // Several ways out, none of them a test: the one they all reach ends the loop.
+  const merged = [...exits].find(candidate =>
+    [...exits].every(other => other === candidate || reachableBlocks(blocks, other).has(candidate)),
+  );
+  if (merged === undefined) throw new NotDecompilable("a loop with more than one exit");
+  return merged;
+}
+
+/**
+ * The natural loops of the method, keyed by header. Every cycle has to be one:
+ * an edge that closes a cycle without its target dominating its source means
+ * two ways into the same loop, which is not something Java source can say.
+ */
+function findLoops(blocks: Map<number, Block>, entry: number): Map<number, Loop> {
+  const retreating = retreatingEdges(blocks, entry);
+  if (retreating.length === 0) return new Map();
+  const doms = dominators(blocks, entry);
+  const latchesOf = new Map<number, number[]>();
+  for (const [from, to] of retreating) {
+    if (!doms.get(from)!.has(to)) throw new NotDecompilable("irreducible control flow");
+    latchesOf.set(to, [...(latchesOf.get(to) ?? []), from]);
+  }
+  const predecessors = new Map<number, number[]>();
+  for (const block of blocks.values()) {
+    for (const successor of block.successors) {
+      predecessors.set(successor, [...(predecessors.get(successor) ?? []), block.start]);
+    }
+  }
+  const loops = new Map<number, Loop>();
+  for (const [header, latches] of latchesOf) {
+    // Everything that reaches a latch without leaving through the header.
+    const body = new Set<number>([header]);
+    const queue = [...latches];
+    while (queue.length > 0) {
+      const at = queue.pop()!;
+      if (body.has(at)) continue;
+      body.add(at);
+      queue.push(...(predecessors.get(at) ?? []));
+    }
+    loops.set(header, { header, body, latches, follow: loopFollow(blocks, header, latches, body) });
+  }
+  // Two loops are either nested or disjoint; anything else is one loop entered
+  // at two places, which no `while` describes.
+  for (const outer of loops.values()) {
+    for (const inner of loops.values()) {
+      if (outer === inner) continue;
+      const shared = [...inner.body].filter(start => outer.body.has(start));
+      if (shared.length === 0 || shared.length === inner.body.size) continue;
+      if (shared.length !== outer.body.size) throw new NotDecompilable("overlapping loops");
+    }
+  }
+  return loops;
 }
 
 /**
@@ -700,6 +891,36 @@ const PURE_MNEMONICS =
 function endOf(block: Block): number {
   if (block.kind === "fall") return block.successors[0]!;
   return block.instructions[block.instructions.length - 1]!.pc;
+}
+
+/**
+ * Whether the test at the head of the loop is what leaves it - the `while (c)`
+ * shape, which javac writes with the test at the bottom and a `goto` into it.
+ * Only condition-only blocks count on the way there: `while (a && b)` is two of
+ * them, while a loop that leaves from inside its body is a `do` or a `for (;;)`.
+ */
+function headerExits(blocks: Map<number, Block>, loop: Loop): boolean {
+  const seen = new Set<number>();
+  const queue = [loop.header];
+  while (queue.length > 0) {
+    const at = queue.pop()!;
+    if (seen.has(at)) continue;
+    seen.add(at);
+    const block = blocks.get(at);
+    if (block === undefined || block.kind !== "conditional" || !isPureBlock(block)) continue;
+    if (block.successors.includes(loop.follow)) return true;
+    for (const successor of block.successors) {
+      if (loop.body.has(successor)) queue.push(successor);
+    }
+  }
+  return false;
+}
+
+/** A loop being written right now. */
+interface ActiveLoop {
+  readonly loop: Loop;
+  /** Where `continue;` goes: the test, which a `do` keeps at the bottom. */
+  readonly continueTarget: number;
 }
 
 function isPureBlock(block: Block): boolean {
@@ -737,13 +958,21 @@ class BodyDecompiler {
   /** The block whose instructions are running, for reasoning about reads. */
   private currentBlock = 0;
   private followOf = new Map<number, number>();
+  private loops = new Map<number, Loop>();
+  /** The loops being written right now, innermost last. */
+  private readonly active: ActiveLoop[] = [];
   private readonly visited = new Set<number>();
   /**
    * Every `if (...)` line emitted, with the condition it came from: a local's
    * type can still narrow after the line is written (the use that proves it is a
    * boolean may come later), and the text has to follow.
    */
-  private readonly conditions: { list: Stmt[]; index: number; condition: Expr }[] = [];
+  private readonly conditions: {
+    list: Stmt[];
+    index: number;
+    condition: Expr;
+    wrap: (text: string) => string;
+  }[] = [];
 
   constructor(
     private readonly classFile: ClassFile,
@@ -792,12 +1021,14 @@ class BodyDecompiler {
           : `${local.name} = ${assigned};`;
     }
     for (const emitted of this.conditions) {
-      emitted.list[emitted.index] = this.ifLine(emitted.condition);
+      emitted.list[emitted.index] = emitted.wrap(this.renderCondition(emitted.condition).text);
     }
   }
 
-  private ifLine(condition: Expr): string {
-    return `if (${this.renderCondition(condition).text}) {`;
+  /** A condition as a line, kept re-renderable for as long as a local can retype. */
+  private emitCondition(condition: Expr, wrap: (text: string) => string): void {
+    this.conditions.push({ list: this.current, index: this.current.length, condition, wrap });
+    this.current.push(wrap(this.renderCondition(condition).text));
   }
 
   /**
@@ -979,6 +1210,7 @@ class BodyDecompiler {
     this.blocks = buildBlocks(instructions);
     this.followOf = postDominators(this.blocks);
     const entry = instructions[0]?.pc ?? 0;
+    this.loops = findLoops(this.blocks, entry);
     this.entryPc = entry;
     this.currentBlock = entry;
     this.structure(entry, EXIT);
@@ -995,6 +1227,16 @@ class BodyDecompiler {
   private structure(entry: number, stop: number): void {
     let at = entry;
     while (at !== stop && at !== EXIT) {
+      const jump = this.loopJump(at);
+      if (jump !== undefined) {
+        this.current.push(jump);
+        return;
+      }
+      const loop = this.loops.get(at);
+      if (loop !== undefined && !this.active.some(entered => entered.loop === loop)) {
+        at = this.loop(loop);
+        continue;
+      }
       const block = this.blocks.get(at);
       if (block === undefined) throw new NotDecompilable("a branch lands outside the method");
       if (this.visited.has(at)) throw new NotDecompilable("unstructured control flow");
@@ -1025,7 +1267,12 @@ class BodyDecompiler {
     const condition = targetIsThen ? jump.condition : negate(jump.condition);
     const whenTrue = targetIsThen ? jump.target : jump.fallthrough;
     const whenFalse = targetIsThen ? jump.fallthrough : jump.target;
-    const follow = this.followOf.get(block.start) ?? EXIT;
+    const merge = this.followOf.get(block.start) ?? EXIT;
+    // A merge point outside the loop this `if` sits in is not one: the arm that
+    // gets there is a `break`, and writing it as the end of an `if`/`else` would
+    // drop the keyword.
+    const inside = this.active[this.active.length - 1];
+    const follow = inside !== undefined && !inside.loop.body.has(merge) ? EXIT : merge;
 
     if (follow !== EXIT) {
       const value = this.tryTernary(condition, whenTrue, whenFalse, follow);
@@ -1054,10 +1301,130 @@ class BodyDecompiler {
   }
 
   private pushIf(condition: Expr, thenStatements: Stmt[], elseStatements: Stmt[] = []): void {
-    this.conditions.push({ list: this.current, index: this.current.length, condition });
-    this.current.push(this.ifLine(condition), thenStatements);
+    this.emitCondition(condition, text => `if (${text}) {`);
+    this.current.push(thenStatements);
     if (elseStatements.length > 0) this.current.push("} else {", elseStatements);
     this.current.push("}");
+  }
+
+  /**
+   * `break;` or `continue;` when `at` is where the innermost loop's next
+   * iteration, or the code after it, begins. Leaving an *enclosing* loop needs a
+   * label, which this phase does not write.
+   */
+  private loopJump(at: number): string | undefined {
+    const inner = this.active[this.active.length - 1];
+    if (inner === undefined) return undefined;
+    if (at === inner.continueTarget) return "continue;";
+    if (at === inner.loop.follow) return "break;";
+    for (const outer of this.active.slice(0, -1)) {
+      if (at === outer.continueTarget || at === outer.loop.follow) {
+        throw new NotDecompilable("a labeled break or continue");
+      }
+    }
+    return undefined;
+  }
+
+  /** Whether `start` is a loop's own edge, which no expression may fold away. */
+  private isLoopEdge(start: number): boolean {
+    return (
+      this.loops.has(start) ||
+      this.active.some(entered => entered.continueTarget === start || entered.loop.follow === start)
+    );
+  }
+
+  /** One loop, from its header. Returns where the statement after it begins. */
+  private loop(loop: Loop): number {
+    if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
+    const header = this.blocks.get(loop.header)!;
+    const latch = loop.latches.length === 1 ? this.blocks.get(loop.latches[0]!) : undefined;
+    if (
+      loop.follow !== EXIT &&
+      header.kind === "conditional" &&
+      isPureBlock(header) &&
+      headerExits(this.blocks, loop)
+    ) {
+      return this.whileLoop(loop, header);
+    }
+    if (
+      loop.follow !== EXIT &&
+      latch !== undefined &&
+      latch.kind === "conditional" &&
+      latch.successors.includes(loop.header) &&
+      latch.successors.includes(loop.follow)
+    ) {
+      return this.doWhileLoop(loop, latch);
+    }
+    return this.foreverLoop(loop);
+  }
+
+  /** `while (c) { ... }`: the header is the test, and the loop runs while it holds. */
+  private whileLoop(loop: Loop, header: Block): number {
+    this.active.push({ loop, continueTarget: loop.header });
+    try {
+      this.visited.add(loop.header);
+      const taken: number[] = [];
+      const last = header.instructions[header.instructions.length - 1]!;
+      this.runInstructions(header.instructions.slice(0, -1), last.pc, header.start);
+      const jump = this.jumpConditionOf(header, taken);
+      for (const start of taken) this.visited.add(start);
+      if (jump.target !== loop.follow && jump.fallthrough !== loop.follow) {
+        throw new NotDecompilable("an unstructured loop");
+      }
+      // The branch that leaves the loop is the negation of what source wrote.
+      const leaves = jump.target === loop.follow;
+      const condition = leaves ? negate(jump.condition) : jump.condition;
+      const body = leaves ? jump.fallthrough : jump.target;
+      const statements = this.capture(() => this.structure(body, loop.header));
+      trimTail(statements, "continue;");
+      this.emitCondition(condition, text => `while (${text}) {`);
+      this.current.push(statements, "}");
+    } finally {
+      this.active.pop();
+    }
+    return loop.follow;
+  }
+
+  /** `do { ... } while (c);`: the test is the latch, and the body runs first. */
+  private doWhileLoop(loop: Loop, latch: Block): number {
+    this.active.push({ loop, continueTarget: latch.start });
+    let condition: Expr | undefined;
+    try {
+      const statements = this.capture(() => {
+        this.structure(loop.header, latch.start);
+        if (this.visited.has(latch.start)) throw new NotDecompilable("unstructured control flow");
+        this.visited.add(latch.start);
+        // The latch holds the last of the body and then the test, which is what
+        // the instructions before its branch leave on the stack.
+        const last = latch.instructions[latch.instructions.length - 1]!;
+        this.runInstructions(latch.instructions.slice(0, -1), last.pc, latch.start);
+        const taken: number[] = [];
+        const jump = this.jumpConditionOf(latch, taken);
+        for (const start of taken) this.visited.add(start);
+        if (jump.target !== loop.header || jump.fallthrough !== loop.follow) {
+          throw new NotDecompilable("an unstructured loop");
+        }
+        condition = jump.condition;
+      });
+      this.current.push("do {", statements);
+      this.emitCondition(condition!, text => `} while (${text});`);
+    } finally {
+      this.active.pop();
+    }
+    return loop.follow;
+  }
+
+  /** `while (true) { ... }`: nothing at the head decides whether to go round again. */
+  private foreverLoop(loop: Loop): number {
+    this.active.push({ loop, continueTarget: loop.header });
+    try {
+      const statements = this.capture(() => this.structure(loop.header, EXIT));
+      trimTail(statements, "continue;");
+      this.current.push("while (true) {", statements, "}");
+    } finally {
+      this.active.pop();
+    }
+    return loop.follow;
   }
 
   /**
@@ -1136,6 +1503,8 @@ class BodyDecompiler {
     const next = this.blocks.get(start);
     if (next === undefined || next.kind !== "conditional" || !isPureBlock(next)) return undefined;
     if (folded.has(start) || this.visited.has(start)) return undefined;
+    // A loop's own test is a statement, not a term of the condition in front of it.
+    if (this.isLoopEdge(start)) return undefined;
     // Nothing outside the chain may reach it, or folding would skip a path in.
     if (this.predecessorsOf(start, folded) !== 0) return undefined;
     const stackBefore = [...this.stack];
@@ -1257,6 +1626,7 @@ class BodyDecompiler {
   private valueOfRegion(start: number, follow: number, consumed: number[]): Expr | undefined {
     const block = this.blocks.get(start);
     if (block === undefined || !isPureBlock(block)) return undefined;
+    if (this.isLoopEdge(start)) return undefined;
     // A block already emitted as a statement cannot also be a value; one that
     // two arms of the same expression share (the merge of a `||`) is fine - it
     // has no side effects, so evaluating it twice is the same value twice.

@@ -1,24 +1,13 @@
 public class ControlFlow {
 
   static int sum(int arg0) {
-    /* cappu: loops are not decompiled yet; the bytecode is:
-     * 0: iconst_0
-     * 1: istore_1
-     * 2: iconst_0
-     * 3: istore_2
-     * 4: iload_2
-     * 5: iload_0
-     * 6: if_icmpge 19
-     * 9: iload_1
-     * 10: iload_2
-     * 11: iadd
-     * 12: istore_1
-     * 13: iinc 2, 1
-     * 16: goto 4
-     * 19: iload_1
-     * 20: ireturn
-     */
-    throw new UnsupportedOperationException("cappu: not decompiled");
+    int var1 = 0;
+    int var2 = 0;
+    while (var2 < arg0) {
+      var1 = var1 + var2;
+      var2++;
+    }
+    return var1;
   }
 
   static int absish(int arg0) {
@@ -29,42 +18,20 @@ public class ControlFlow {
   }
 
   static int countdown(int arg0) {
-    /* cappu: loops are not decompiled yet; the bytecode is:
-     * 0: iconst_0
-     * 1: istore_1
-     * 2: iload_0
-     * 3: iconst_0
-     * 4: if_icmple 18
-     * 7: iload_1
-     * 8: iconst_1
-     * 9: iadd
-     * 10: istore_1
-     * 11: iload_0
-     * 12: iconst_1
-     * 13: isub
-     * 14: istore_0
-     * 15: goto 2
-     * 18: iload_1
-     * 19: ireturn
-     */
-    throw new UnsupportedOperationException("cappu: not decompiled");
+    int var1 = 0;
+    while (arg0 > 0) {
+      var1 = var1 + 1;
+      arg0 = arg0 - 1;
+    }
+    return var1;
   }
 
   static int firstSet(int arg0) {
-    /* cappu: loops are not decompiled yet; the bytecode is:
-     * 0: iconst_0
-     * 1: istore_1
-     * 2: iload_1
-     * 3: iconst_1
-     * 4: iadd
-     * 5: istore_1
-     * 6: iload_1
-     * 7: iload_0
-     * 8: if_icmplt 2
-     * 11: iload_1
-     * 12: ireturn
-     */
-    throw new UnsupportedOperationException("cappu: not decompiled");
+    int var1 = 0;
+    do {
+      var1 = var1 + 1;
+    } while (var1 < arg0);
+    return var1;
   }
 
   static boolean inRange(int arg0, int arg1, int arg2) {

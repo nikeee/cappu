@@ -7,7 +7,7 @@ enum EnumAbstract {
   public abstract int rank();
 
   public static void main(java.lang.String[] arg0) {
-    /* cappu: loops are not decompiled yet; the bytecode is:
+    /* cappu: unsupported instruction invokestatic; the bytecode is:
      * 0: invokestatic #22
      * 3: astore_1
      * 4: iconst_0
