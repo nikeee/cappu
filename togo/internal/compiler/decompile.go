@@ -2,12 +2,13 @@ package compiler
 
 // Port of src/compiler/decompile.ts.
 //
-// `cappu decompile`, phases 1.3 to 1.7 (nikeee/cappu#43): reconstruct Java
+// `cappu decompile`, phases 1.3 to 1.9 (nikeee/cappu#43): reconstruct Java
 // source from bytecode. A symbolic stack interpreter walks a method's basic
 // blocks and turns them back into expressions and statements, with the control
 // flow structured into `if`/`else`, `&&`/`||`, `?:`, the loop forms, method
-// calls and `try`/`catch`; anything that needs a `finally`, a `switch` or an
-// invokedynamic (later phases) renders as its disassembly plus a
+// calls, `try`/`catch`, array initializers and string concatenation; anything
+// that needs a `finally`, a `switch` or an invokedynamic that is not a
+// concatenation (later phases) renders as its disassembly plus a
 // `throw new UnsupportedOperationException(...)`, so the output is always
 // compilable Java.
 //
@@ -1421,7 +1422,8 @@ var pureMnemonics = regexp.MustCompile(`^(?:nop|aconst_null|[ilfd]const_\w+|bipu
 // can be evaluated twice.
 func isConditionBlock(b *block) bool {
 	for i, instruction := range b.Instructions {
-		if pureMnemonics.MatchString(instruction.Mnemonic) || invokes[instruction.Mnemonic] {
+		if pureMnemonics.MatchString(instruction.Mnemonic) || invokes[instruction.Mnemonic] ||
+			instruction.Mnemonic == "invokedynamic" {
 			continue
 		}
 		last := i == len(b.Instructions)-1
@@ -1505,6 +1507,8 @@ type bodyDecompiler struct {
 	initCount int
 	// innerFlags are the access flags of the nested classes this file names.
 	innerFlags map[string]uint16
+	// bootstraps is the BootstrapMethods table, which every invokedynamic indexes into.
+	bootstraps []BootstrapMethod
 	// conditions are every `if (...)` line emitted, with the condition it came
 	// from: a local's type can still narrow after the line is written (the use
 	// that proves it is a boolean may come later), and the text has to follow.
@@ -1772,9 +1776,153 @@ func (d *bodyDecompiler) callArguments(descriptor string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		args[i] = d.coerceInto(value, params[i].Type)
+		target := params[i].Type
+		text := d.coerceInto(value, target)
+		// Java narrows an int constant implicitly when it is assigned, but never
+		// when it is passed: `f((byte) 3)` is the only way to write the call.
+		if (target == "byte" || target == "short") && intLiteralText.MatchString(text) {
+			text = "(" + target + ") " + text
+		}
+		args[i] = text
 	}
 	return args, nil
+}
+
+// intLiteralText matches a rendered int constant, which is what may need a cast.
+var intLiteralText = regexp.MustCompile(`^-?\d+$`)
+
+// noSpaceText matches a rendered value that is a single token: a name or a literal.
+var noSpaceText = regexp.MustCompile(`^\S+$`)
+
+// coercedExpr is value where a target-typed value belongs, kept an expression so
+// the caller can still parenthesize it.
+func (d *bodyDecompiler) coercedExpr(value expr, target string) expr {
+	text := d.coerceInto(value, target)
+	if text == value.Text {
+		return value
+	}
+	// What the rewrite produces is a literal (`true`, `'a'`) or something with an
+	// operator in it (`(char) 200`, a materialized boolean's own ternary); the
+	// latter gets the lowest precedence, so it is parenthesized wherever it lands
+	// rather than needing its real level worked out.
+	prec := 0
+	if noSpaceText.MatchString(text) {
+		prec = precPrimary
+	}
+	return expr{Text: text, Prec: prec, Type: target}
+}
+
+// concat reconstructs a string concatenation, which javac compiles to an
+// invokedynamic whose bootstrap is StringConcatFactory.makeConcatWithConstants:
+// the recipe (its first bootstrap argument) is the result text with \u0001 where
+// a stack argument goes and \u0002 where one of the remaining bootstrap
+// constants does. makeConcat is the same call with no literal parts at all.
+func (d *bodyDecompiler) concat(index uint16) error {
+	pool := d.classFile.Pool
+	entry := PoolAt(pool, index)
+	if entry == nil || entry.Tag != TagInvokeDynamic {
+		return bail("bad invokedynamic reference")
+	}
+	_, siteDescriptor, haveSite := PoolNameAndType(pool, entry.NameAndType)
+	var factory MemberRef
+	haveFactory := false
+	var bootstrap BootstrapMethod
+	haveBootstrap := int(entry.Bootstrap) < len(d.bootstraps)
+	if haveBootstrap {
+		bootstrap = d.bootstraps[entry.Bootstrap]
+		if handle := PoolAt(pool, bootstrap.HandleIndex); handle != nil && handle.Tag == TagMethodHandle {
+			factory, haveFactory = PoolMemberRef(pool, handle.RefIndex)
+		}
+	}
+	// Every other bootstrap - a lambda, a method reference, a record's generated
+	// members, a pattern switch - is a later phase.
+	if !haveSite || !haveBootstrap || !haveFactory ||
+		factory.Owner != "java/lang/invoke/StringConcatFactory" ||
+		(factory.Name != "makeConcatWithConstants" && factory.Name != "makeConcat") ||
+		methodReturnType(siteDescriptor) != "java.lang.String" {
+		return bail("an invokedynamic that is not a string concatenation")
+	}
+
+	params := parameterSlots(siteDescriptor, true)
+	args := make([]expr, len(params))
+	for i := len(params) - 1; i >= 0; i-- {
+		value, err := d.pop()
+		if err != nil {
+			return err
+		}
+		args[i] = d.coercedExpr(value, params[i].Type)
+	}
+
+	recipe := strings.Repeat("\u0001", len(args))
+	if factory.Name == "makeConcatWithConstants" {
+		if len(bootstrap.ArgumentIndexes) == 0 {
+			return bail("a concatenation without a recipe")
+		}
+		first := PoolAt(pool, bootstrap.ArgumentIndexes[0])
+		if first == nil || first.Tag != TagString {
+			return bail("a concatenation without a recipe")
+		}
+		recipe = PoolUtf8(pool, first.Index)
+	}
+
+	type concatPart struct {
+		Value    expr
+		IsString bool
+	}
+	var parts []concatPart
+	literal := ""
+	flush := func() {
+		if literal == "" {
+			return
+		}
+		parts = append(parts, concatPart{primary(`"`+escapeString(literal)+`"`, "java.lang.String"), true})
+		literal = ""
+	}
+	taken := 0
+	constant := 1
+	for _, char := range recipe {
+		switch char {
+		case '\u0001':
+			if taken >= len(args) {
+				return bail("a recipe that wants more arguments")
+			}
+			flush()
+			parts = append(parts, concatPart{args[taken], params[taken].Type == "java.lang.String"})
+			taken++
+		case '\u0002':
+			// A literal part javac could not put in the recipe itself, because it
+			// contains one of the two tag characters: it is spliced back in as text.
+			if constant >= len(bootstrap.ArgumentIndexes) {
+				return bail("a concatenation constant that is not a string")
+			}
+			at := PoolAt(pool, bootstrap.ArgumentIndexes[constant])
+			constant++
+			if at == nil || at.Tag != TagString {
+				return bail("a concatenation constant that is not a string")
+			}
+			literal += PoolUtf8(pool, at.Index)
+		default:
+			literal += string(char)
+		}
+	}
+	flush()
+	if taken != len(args) {
+		return bail("a recipe that leaves arguments unused")
+	}
+
+	// The result is a String, so one of the first two operands has to be one:
+	// `"" + i + j` and `i + j` compile to the same arguments but are not the same
+	// expression. A single operand needs the empty literal too - `s + ""` is a
+	// concatenation, and `null + ""` is `"null"` where `s` alone is null.
+	if len(parts) < 2 || (!parts[0].IsString && !parts[1].IsString) {
+		parts = append([]concatPart{{primary(`""`, "java.lang.String"), true}}, parts...)
+	}
+	result := parts[0].Value
+	for _, part := range parts[1:] {
+		result = binaryExpr(result, "+", part.Value, precAdd, "java.lang.String")
+	}
+	d.push(result)
+	return nil
 }
 
 // staticCallee names a static call: unqualified when it is this class's own
@@ -3359,6 +3507,10 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		return nil
 	}
 
+	if mnemonic == "invokedynamic" {
+		return d.concat(uint16(instruction.Arg))
+	}
+
 	// Stack shuffling. A dup of anything but a name or an array being filled in
 	// would duplicate the expression itself (`new int[2][0] = 1;`), so only
 	// those cases are taken; the rest waits for a later phase.
@@ -3820,6 +3972,7 @@ func decompileBody(
 		activeTries: map[*tryRegion]bool{},
 		skip:        map[int]int{},
 		innerFlags:  InnerClassFlags(classFile),
+		bootstraps:  ReadBootstrapMethods(classFile),
 	}
 	d.current = &d.statements
 	for _, parameter := range locals {

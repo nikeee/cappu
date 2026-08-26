@@ -25,6 +25,7 @@ var fullyDecompiled = []string{
 	"Cl",
 	"ClassLit",
 	"Compute",
+	"Concat",
 	"Constants",
 	"ControlFlow",
 	"Empty",
@@ -74,7 +75,6 @@ var fullyDecompiled = []string{
 // Classes kept for the bail-out rendering: control flow (phase 1.4+) and method
 // calls (phase 1.6) are not this phase's job, and must say so.
 var notDecompiled = []string{
-	"Concat",
 	"EnumAbstract",
 	"EnumMixed",
 	"QualifiedAnon$1",
@@ -130,13 +130,15 @@ func decompileBaseline(t *testing.T, name string) string {
 }
 
 func TestDecompileReportsWhatItCannotReconstruct(t *testing.T) {
+	// The marker is the comment, not the `throw`: a bailed-out static initializer
+	// has no value to return, so it renders as the disassembly alone.
 	for _, name := range fullyDecompiled {
-		if strings.Contains(decompileBaseline(t, name), "not decompiled") {
+		if strings.Contains(decompileBaseline(t, name), "/* cappu:") {
 			t.Errorf("%s: expected a full reconstruction", name)
 		}
 	}
 	for _, name := range notDecompiled {
-		if !strings.Contains(decompileBaseline(t, name), "not decompiled") {
+		if !strings.Contains(decompileBaseline(t, name), "/* cappu:") {
 			t.Errorf("%s: expected the bail-out body", name)
 		}
 	}
@@ -1099,6 +1101,54 @@ func TestDecompileRecompilesJavacArrayInitializersToTheSameBytecode(t *testing.T
 		t.Fatalf("a method bailed:\n%s", source)
 	}
 	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Arrayly", source)
+	if javapText(t, roundTripped) != javapText(t, classFile) {
+		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
+			javapText(t, roundTripped), javapText(t, classFile))
+	}
+}
+
+// Every string concatenation javac writes. The recipe is what says where the
+// literal parts sit, and only a recompile can see a misplaced one - so this runs
+// the reconstruction back through javac and compares the bytecode.
+const concattySource = `public class Concatty {
+  static String si(String s, int i) { return s + i; }
+  static String is(int i, String s) { return i + s; }
+  static String around(String s, int i) { return "x=" + s + ", i=" + i + "!"; }
+  static String plain(String s) { return s + ""; }
+  static String twoInts(int i, int j) { return "" + i + j; }
+  static String objects(Object a, Object b) { return "" + a + b; }
+  static String tag(String s) { return "tag\u0001here" + s; }
+  static String tags(String s) { return "a\u0002b" + s + "c\u0001d"; }
+  static String charConst(String s) { return s + '\n' + "q"; }
+  static String nullPart(String s) { return s + null; }
+  static String escapes(String s) { return "\"q\"\\\t" + s + "\n"; }
+  static String grouped(int i) { return "a" + (i + 1) + "b"; }
+  static String append(String s, int n) { s += n; return s; }
+  static String types(String s, long l, double d, float f, boolean b, char c, byte y, short h) { return s + l + d + f + b + c + y + h; }
+  static String call(String s) { return s + s.length(); }
+  static String nested(String a, String b, String c) { return a + b.trim() + c; }
+  static int used(String a, int i) { return (a + i).length(); }
+  static boolean cond(String a, String b) { return (a + b).isEmpty(); }
+  static String loop(int n) { String s = ""; for (int i = 0; i < n; i++) { s = s + i; } return s; }
+  static String ternary(boolean c, String a, int i) { return c ? a + i : a + "no"; }
+  static String upper(String s) { return ("A" + s).toUpperCase(); }
+  static void print(int i) { System.out.println("v" + i); }
+}`
+
+func TestDecompileRecompilesJavacStringConcatenationsToTheSameBytecode(t *testing.T) {
+	if !hasTool("javac") || !hasTool("javap") {
+		t.Skip("no JDK (javac/javap)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Concatty", concattySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "not decompiled") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Concatty", source)
 	if javapText(t, roundTripped) != javapText(t, classFile) {
 		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
 			javapText(t, roundTripped), javapText(t, classFile))

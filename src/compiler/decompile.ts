@@ -1,9 +1,10 @@
-// `cappu decompile`, phases 1.3 to 1.7 (nikeee/cappu#43): reconstruct Java
+// `cappu decompile`, phases 1.3 to 1.9 (nikeee/cappu#43): reconstruct Java
 // source from bytecode. A symbolic stack interpreter walks a method's basic
 // blocks and turns them back into expressions and statements, with the control
 // flow structured into `if`/`else`, `&&`/`||`, `?:`, the loop forms, method
-// calls and `try`/`catch`; anything that needs a `finally`, a `switch` or an
-// invokedynamic (later phases) renders as its disassembly plus a
+// calls, `try`/`catch`, array initializers and string concatenation; anything
+// that needs a `finally`, a `switch` or an invokedynamic that is not a
+// concatenation (later phases) renders as its disassembly plus a
 // `throw new UnsupportedOperationException(...)`, so the output is always
 // compilable Java.
 //
@@ -29,6 +30,9 @@ import {
   innerClassFlags,
   memberRef,
   type MemberRef,
+  nameAndTypeAt,
+  type BootstrapMethod,
+  readBootstrapMethods,
   readClassFile,
   readCode,
   readExceptions,
@@ -1151,6 +1155,7 @@ function isConditionBlock(block: Block): boolean {
     (instruction, index) =>
       PURE_MNEMONICS.test(instruction.mnemonic) ||
       INVOKES.has(instruction.mnemonic) ||
+      instruction.mnemonic === "invokedynamic" ||
       (index === block.instructions.length - 1 &&
         (CONDITIONAL_BRANCHES.has(instruction.mnemonic) || isGoto(instruction.mnemonic))),
   );
@@ -1212,6 +1217,8 @@ class BodyDecompiler {
   private initCount = 0;
   /** The access flags of the nested classes this file names, read once. */
   private readonly innerFlags: Map<string, number>;
+  /** The BootstrapMethods table, which every invokedynamic indexes into. */
+  private readonly bootstraps: readonly BootstrapMethod[];
   /**
    * Every `if (...)` line emitted, with the condition it came from: a local's
    * type can still narrow after the line is written (the use that proves it is a
@@ -1232,6 +1239,7 @@ class BodyDecompiler {
     private readonly isStatic: boolean,
   ) {
     this.innerFlags = innerClassFlags(classFile);
+    this.bootstraps = readBootstrapMethods(classFile);
     for (const local of locals.values()) {
       this.names.add(local.name);
       this.byName.set(local.name, local);
@@ -1460,9 +1468,117 @@ class BodyDecompiler {
     const params = parameterSlots(descriptor, true).map(p => p.type);
     const args: string[] = [];
     for (let i = params.length - 1; i >= 0; i--) {
-      args.unshift(this.coerceInto(this.pop(), params[i]!));
+      const target = params[i]!;
+      const text = this.coerceInto(this.pop(), target);
+      // Java narrows an int constant implicitly when it is assigned, but never
+      // when it is passed: `f((byte) 3)` is the only way to write the call.
+      const narrows = (target === "byte" || target === "short") && /^-?\d+$/.test(text);
+      args.unshift(narrows ? `(${target}) ${text}` : text);
     }
     return args;
+  }
+
+  /**
+   * `value` where a `target`-typed value belongs, kept an expression so the
+   * caller can still parenthesize it.
+   */
+  private coercedExpr(value: Expr, target: string): Expr {
+    const text = this.coerceInto(value, target);
+    if (text === value.text) return value;
+    // What the rewrite produces is a literal (`true`, `'a'`) or something with
+    // an operator in it (`(char) 200`, a materialized boolean's own ternary);
+    // the latter gets the lowest precedence, so it is parenthesized wherever it
+    // lands rather than needing its real level worked out.
+    return { text, prec: /^\S+$/.test(text) ? PREC_PRIMARY : 0, type: target };
+  }
+
+  /**
+   * A string concatenation, which javac compiles to an invokedynamic whose
+   * bootstrap is `StringConcatFactory.makeConcatWithConstants`: the recipe (its
+   * first bootstrap argument) is the result text with `\u0001` where a stack
+   * argument goes and `\u0002` where one of the remaining bootstrap constants
+   * does. `makeConcat` is the same call with no literal parts at all.
+   */
+  private concat(index: number): void {
+    const pool = this.classFile.pool;
+    const entry = pool[index];
+    if (entry?.tag !== "invokeDynamic") throw new NotDecompilable("bad invokedynamic reference");
+    const site = nameAndTypeAt(pool, entry.nameAndTypeIndex);
+    const bootstrap = this.bootstraps[entry.bootstrapMethodIndex];
+    const handle = bootstrap === undefined ? undefined : pool[bootstrap.handleIndex];
+    const factory =
+      handle?.tag === "methodHandle" ? memberRef(pool, handle.referenceIndex) : undefined;
+    // Every other bootstrap - a lambda, a method reference, a record's
+    // generated members, a pattern switch - is a later phase.
+    if (
+      site === undefined ||
+      bootstrap === undefined ||
+      factory?.owner !== "java/lang/invoke/StringConcatFactory" ||
+      (factory.name !== "makeConcatWithConstants" && factory.name !== "makeConcat") ||
+      returnType(site.descriptor) !== "java.lang.String"
+    ) {
+      throw new NotDecompilable("an invokedynamic that is not a string concatenation");
+    }
+    const params = parameterSlots(site.descriptor, true).map(p => p.type);
+    const args: Expr[] = [];
+    for (let i = params.length - 1; i >= 0; i--) {
+      args.unshift(this.coercedExpr(this.pop(), params[i]!));
+    }
+
+    let recipe = "\u0001".repeat(args.length);
+    if (factory.name === "makeConcatWithConstants") {
+      const first = pool[bootstrap.argumentIndexes[0] ?? 0];
+      if (first?.tag !== "string") throw new NotDecompilable("a concatenation without a recipe");
+      recipe = utf8(pool, first.valueIndex) ?? "";
+    }
+    const parts: { expr: Expr; isString: boolean }[] = [];
+    let literal = "";
+    const flush = (): void => {
+      if (literal === "") return;
+      parts.push({
+        expr: primary(`"${escapeString(literal)}"`, "java.lang.String"),
+        isString: true,
+      });
+      literal = "";
+    };
+    let taken = 0;
+    let constant = 1;
+    for (const char of recipe) {
+      if (char === "\u0001") {
+        const arg = args[taken];
+        if (arg === undefined) throw new NotDecompilable("a recipe that wants more arguments");
+        flush();
+        parts.push({ expr: arg, isString: params[taken] === "java.lang.String" });
+        taken++;
+      } else if (char === "\u0002") {
+        // A literal part javac could not put in the recipe itself, because it
+        // contains one of the two tag characters: it is spliced back in as text.
+        const at = pool[bootstrap.argumentIndexes[constant] ?? 0];
+        constant++;
+        if (at?.tag !== "string") {
+          throw new NotDecompilable("a concatenation constant that is not a string");
+        }
+        literal += utf8(pool, at.valueIndex) ?? "";
+      } else {
+        literal += char;
+      }
+    }
+    flush();
+    if (taken !== args.length) throw new NotDecompilable("a recipe that leaves arguments unused");
+
+    // The result is a String, so one of the first two operands has to be one:
+    // `"" + i + j` and `i + j` compile to the same arguments but are not the
+    // same expression. A single operand needs the empty literal too - `s + ""`
+    // is a concatenation, and `null + ""` is `"null"` where `s` alone is null.
+    const concatenates = parts.length > 1 && (parts[0]!.isString || parts[1]!.isString);
+    if (!concatenates) {
+      parts.unshift({ expr: primary('""', "java.lang.String"), isString: true });
+    }
+    let result = parts[0]!.expr;
+    for (const part of parts.slice(1)) {
+      result = binary(result, "+", part.expr, PREC_ADD, "java.lang.String");
+    }
+    this.push(result);
   }
 
   /** A static call: unqualified when it is this class's own method. */
@@ -2535,6 +2651,8 @@ class BodyDecompiler {
       }
       return this.push({ text, prec: PREC_PRIMARY, type, effects: true });
     }
+
+    if (mnemonic === "invokedynamic") return this.concat(instruction.arg);
 
     // Stack shuffling. A dup of anything but a name or an array being filled in
     // would duplicate the expression itself (`new int[2][0] = 1;`), so only

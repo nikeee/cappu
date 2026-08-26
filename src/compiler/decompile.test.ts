@@ -1,5 +1,6 @@
-// Phases 1.3 to 1.7 of `cappu decompile` (nikeee/cappu#43): straight-line
-// bytecode, branches, loops, calls and `try`/`catch`, back to Java source.
+// Phases 1.3 to 1.9 of `cappu decompile` (nikeee/cappu#43): straight-line
+// bytecode, branches, loops, calls, `try`/`catch`, array initializers and
+// string concatenation, back to Java source.
 //
 // The class bytes come from test-fixtures/emitter/emit-baselines, which our own
 // emitter produced - so no JDK is needed here. Two tiers:
@@ -51,6 +52,7 @@ const FULLY_DECOMPILED = [
   "Cl",
   "ClassLit",
   "Compute",
+  "Concat",
   "Constants",
   "ControlFlow",
   "Empty",
@@ -97,11 +99,9 @@ const FULLY_DECOMPILED = [
   "VarargsPack",
 ];
 
-// Classes kept for the bail-out rendering: string concatenation (an
-// invokedynamic) and an inner class's constructor are not this phase's job, and
-// must say so.
+// Classes kept for the bail-out rendering: an inner class's constructor and the
+// members javac generates for an enum are not this phase's job, and must say so.
 const NOT_DECOMPILED = [
-  "Concat",
   "EnumAbstract",
   "EnumMixed",
   "QualifiedAnon$1",
@@ -126,13 +126,15 @@ for (const name of [...FULLY_DECOMPILED, ...NOT_DECOMPILED]) {
 }
 
 test("only the classes that cannot be reconstructed say so", () => {
+  // The marker is the comment, not the `throw`: a bailed-out static initializer
+  // has no value to return, so it renders as the disassembly alone.
   for (const name of FULLY_DECOMPILED) {
-    expect({ [name]: decompile(classBytes(name)).includes("not decompiled") }).toEqual({
+    expect({ [name]: decompile(classBytes(name)).includes("/* cappu:") }).toEqual({
       [name]: false,
     });
   }
   for (const name of NOT_DECOMPILED) {
-    expect({ [name]: decompile(classBytes(name)).includes("not decompiled") }).toEqual({
+    expect({ [name]: decompile(classBytes(name)).includes("/* cappu:") }).toEqual({
       [name]: true,
     });
   }
@@ -557,6 +559,54 @@ test(
     const source = decompileToSource(readFileSync(classFile));
     expect(source).not.toContain("not decompiled");
     const roundTripped = compileWithJavac(source, "Arrayly", join(dir.path, "again"));
+    expect(javap(roundTripped)).toEqual(javap(classFile));
+  },
+);
+
+// Every string concatenation javac writes. The recipe is what says where the
+// literal parts sit, and only a recompile can see a misplaced one - so this
+// runs the reconstruction back through javac and compares the bytecode.
+const CONCATTY_SOURCE =
+  "public class Concatty {\n" +
+  "  static String si(String s, int i) { return s + i; }\n" +
+  "  static String is(int i, String s) { return i + s; }\n" +
+  '  static String around(String s, int i) { return "x=" + s + ", i=" + i + "!"; }\n' +
+  // A single operand is still a concatenation: `null + ""` is "null".
+  '  static String plain(String s) { return s + ""; }\n' +
+  // Neither operand is a String, so the empty literal has to come back with it.
+  '  static String twoInts(int i, int j) { return "" + i + j; }\n' +
+  '  static String objects(Object a, Object b) { return "" + a + b; }\n' +
+  // A literal that contains a recipe tag character is passed as a bootstrap
+  // constant instead, and one that contains both tags needs two of them.
+  '  static String tag(String s) { return "tag\\u0001here" + s; }\n' +
+  '  static String tags(String s) { return "a\\u0002b" + s + "c\\u0001d"; }\n' +
+  // javac folds a constant operand into the recipe - it comes back as text.
+  "  static String charConst(String s) { return s + '\\n' + \"q\"; }\n" +
+  "  static String nullPart(String s) { return s + null; }\n" +
+  '  static String escapes(String s) { return "\\"q\\"\\\\\\t" + s + "\\n"; }\n' +
+  // The parentheses are the difference between an int addition and two parts.
+  '  static String grouped(int i) { return "a" + (i + 1) + "b"; }\n' +
+  "  static String append(String s, int n) { s += n; return s; }\n" +
+  "  static String types(String s, long l, double d, float f, boolean b, char c, byte y, short h) { return s + l + d + f + b + c + y + h; }\n" +
+  "  static String call(String s) { return s + s.length(); }\n" +
+  "  static String nested(String a, String b, String c) { return a + b.trim() + c; }\n" +
+  "  static int used(String a, int i) { return (a + i).length(); }\n" +
+  "  static boolean cond(String a, String b) { return (a + b).isEmpty(); }\n" +
+  '  static String loop(int n) { String s = ""; for (int i = 0; i < n; i++) { s = s + i; } return s; }\n' +
+  '  static String ternary(boolean c, String a, int i) { return c ? a + i : a + "no"; }\n' +
+  '  static String upper(String s) { return ("A" + s).toUpperCase(); }\n' +
+  '  static void print(int i) { System.out.println("v" + i); }\n' +
+  "}\n";
+
+test(
+  "recompiles javac's own string concatenations to the same bytecode",
+  { skip: HAS_JAVAC && HAS_JAVAP ? false : "no JDK (javac/javap)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-concatty-");
+    const classFile = compileWithJavac(CONCATTY_SOURCE, "Concatty", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("not decompiled");
+    const roundTripped = compileWithJavac(source, "Concatty", join(dir.path, "again"));
     expect(javap(roundTripped)).toEqual(javap(classFile));
   },
 );
