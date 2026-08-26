@@ -804,6 +804,15 @@ func buildBlocks(instructions []Instruction, exceptions []ExceptionEntry) (map[i
 	return blocks, nil
 }
 
+func containsRange(values [][2]int, wanted [2]int) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func containsString(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
@@ -862,30 +871,35 @@ func tryRegions(exceptions []ExceptionEntry, blocks map[int]*block, self string)
 		if !containsString(found.types, caught) {
 			found.types = append(found.types, caught)
 		}
-		found.ranges = append(found.ranges, [2]int{startPc, endPc})
+		// A multi-catch is one entry per type over the same range: one clause,
+		// one range.
+		if !containsRange(found.ranges, [2]int{startPc, endPc}) {
+			found.ranges = append(found.ranges, [2]int{startPc, endPc})
+		}
 	}
 
-	starts := make([]int, 0, len(blocks))
-	for start := range blocks {
-		starts = append(starts, start)
-	}
 	byRange := map[[2]int]*tryRegion{}
+	guards := map[*tryRegion]string{}
 	var regions []*tryRegion
 	for _, handlerPc := range order {
 		found := byHandler[handlerPc]
 		sort.Slice(found.ranges, func(i, j int) bool { return found.ranges[i][0] < found.ranges[j][0] })
 		merged := found.ranges[0]
 		for _, next := range found.ranges[1:] {
-			// javac splits the range of a `try` that encloses a nested `catch`:
-			// the return or jump that ends the inner handler is not protected,
-			// so one statement reaches the table as two entries. Nothing but
-			// those excluded instructions sits in the gap - no block begins in
-			// it.
+			// javac splits the range of a `try` around what it does not protect:
+			// the return or jump that ends a nested `catch`, or the `return`,
+			// `break` or `continue` that leaves the body. Both are body in
+			// source, so the gap may only hold blocks that jump or end, and none
+			// may run past it.
 			joined := next[0] <= merged[1]
 			if !joined {
 				joined = true
-				for _, start := range starts {
-					if start >= merged[1] && start < next[0] {
+				for start, b := range blocks {
+					if start < merged[1] || start >= next[0] {
+						continue
+					}
+					last := b.Instructions[len(b.Instructions)-1]
+					if (b.Kind != blockGoto && b.Kind != blockEnd) || last.Pc >= next[0] {
 						joined = false
 						break
 					}
@@ -896,11 +910,21 @@ func tryRegions(exceptions []ExceptionEntry, blocks map[int]*block, self string)
 			}
 			merged = [2]int{merged[0], max(merged[1], next[1])}
 		}
+		guarded := ""
+		for _, one := range found.ranges {
+			guarded += strconv.Itoa(one[0]) + ":" + strconv.Itoa(one[1]) + ","
+		}
 		region := byRange[merged]
 		if region == nil {
 			region = &tryRegion{StartPc: merged[0], EndPc: merged[1]}
 			byRange[merged] = region
+			guards[region] = guarded
 			regions = append(regions, region)
+		} else if guards[region] != guarded {
+			// Two clauses over the same span that do not guard the same ranges
+			// are not the same `try`; which handler catches what is no longer
+			// the clause order.
+			return nil, bail("clauses that guard different ranges")
 		}
 		region.Clauses = append(region.Clauses, &clause{Types: found.types, HandlerPc: handlerPc})
 	}
@@ -1221,13 +1245,51 @@ func loopFollow(blocks map[int]*block, header int, latches []int, body map[int]b
 // cycle has to be one: an edge that closes a cycle without its target dominating
 // its source means two ways into the same loop, which is not something Java
 // source can say.
-func findLoops(blocks map[int]*block, entry int) (map[int]*loop, error) {
-	retreating := retreatingEdges(blocks, entry)
+// withExceptionEdges is the graph with an edge from every protected block to the
+// handlers guarding it. A handler is only reachable by throwing, so without those
+// edges it has no predecessor at all: its dominator set collapses to itself and
+// poisons every block it flows into, which makes a loop holding a `try` look
+// irreducible. Only the loop analysis wants them - a merge point does not, since
+// an `if` inside a `try` still ends where its own arms come back together.
+func withExceptionEdges(blocks map[int]*block, regions []*tryRegion) map[int]*block {
+	if len(regions) == 0 {
+		return blocks
+	}
+	augmented := make(map[int]*block, len(blocks))
+	for start, b := range blocks {
+		var handlers []int
+		for _, region := range regions {
+			if start < region.StartPc || start >= region.EndPc {
+				continue
+			}
+			for _, c := range region.Clauses {
+				if !containsInt(b.Successors, c.HandlerPc) && !containsInt(handlers, c.HandlerPc) {
+					handlers = append(handlers, c.HandlerPc)
+				}
+			}
+		}
+		if len(handlers) == 0 {
+			augmented[start] = b
+			continue
+		}
+		copied := *b
+		copied.Successors = append(append([]int{}, b.Successors...), handlers...)
+		augmented[start] = &copied
+	}
+	return augmented
+}
+
+func findLoops(blocks map[int]*block, entry int, regions []*tryRegion) (map[int]*loop, error) {
+	// Everything that asks which blocks a loop is made of runs over the graph
+	// with the throwing edges in it; where the loop *ends* is read off the real
+	// one, where entering a handler is not a way out of the body.
+	flow := withExceptionEdges(blocks, regions)
+	retreating := retreatingEdges(flow, entry)
 	loops := map[int]*loop{}
 	if len(retreating) == 0 {
 		return loops, nil
 	}
-	doms := dominators(blocks, entry)
+	doms := dominators(flow, entry)
 	headers := []int{}
 	latchesOf := map[int][]int{}
 	for _, edge := range retreating {
@@ -1242,7 +1304,7 @@ func findLoops(blocks map[int]*block, entry int) (map[int]*loop, error) {
 	}
 	sort.Ints(headers)
 	predecessors := map[int][]int{}
-	for start, b := range blocks {
+	for start, b := range flow {
 		for _, successor := range b.Successors {
 			predecessors[successor] = append(predecessors[successor], start)
 		}
@@ -1418,6 +1480,8 @@ type bodyDecompiler struct {
 	// methodFollowOf is followOf over the whole method, which followOf itself is
 	// not inside a loop.
 	methodFollowOf map[int]int
+	// dominators over the graph the throwing edges are in, for a `try`'s own end.
+	dominators map[int]map[int]bool
 	// active are the loops being written right now, innermost last.
 	active  []activeLoop
 	visited map[int]bool
@@ -1843,7 +1907,10 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 	if len(instructions) > 0 {
 		entry = instructions[0].Pc
 	}
-	loops, err := findLoops(blocks, entry)
+	if len(d.regions) > 0 {
+		d.dominators = dominators(withExceptionEdges(blocks, d.regions), entry)
+	}
+	loops, err := findLoops(blocks, entry, d.regions)
 	if err != nil {
 		return err
 	}
@@ -1933,7 +2000,7 @@ func (d *bodyDecompiler) structure(entry, stop int) error {
 			at = b.Successors[0]
 			continue
 		}
-		next, err := d.conditional(b)
+		next, err := d.conditional(b, stop)
 		if err != nil {
 			return err
 		}
@@ -1947,6 +2014,9 @@ func (d *bodyDecompiler) structure(entry, stop int) error {
 // it again. A loop whose header is the same block is the outer statement, unless
 // the protected range covers the whole loop.
 func (d *bodyDecompiler) regionAt(at int) *tryRegion {
+	if d.visited[at] {
+		return nil
+	}
 	var region *tryRegion
 	for _, candidate := range d.regions {
 		if candidate.StartPc != at || d.activeTries[candidate] {
@@ -1997,6 +2067,9 @@ func (d *bodyDecompiler) tryStatement(region *tryRegion) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	if len(d.stack) > 0 {
+		return 0, bail("values left on the stack")
+	}
 	type written struct {
 		head       string
 		statements []stmt
@@ -2005,13 +2078,19 @@ func (d *bodyDecompiler) tryStatement(region *tryRegion) (int, error) {
 	for _, c := range region.Clauses {
 		// The parameter has to be named before the handler runs: its store is
 		// what the name comes from, and that store is not a statement.
-		name, err := d.catchName(c)
+		name, restore, err := d.catchName(c)
 		if err != nil {
 			return 0, err
 		}
 		statements, err := d.capture(func() error { return d.structure(c.HandlerPc, follow) })
 		if err != nil {
 			return 0, err
+		}
+		// The parameter's scope is its clause; the slot goes back to whatever
+		// variable it held before, which javac reuses it for afterwards.
+		restore()
+		if len(d.stack) > 0 {
+			return 0, bail("values left on the stack")
 		}
 		clauses = append(clauses, written{
 			head:       "} catch (" + strings.Join(c.Types, " | ") + " " + name + ") {",
@@ -2042,8 +2121,13 @@ func (d *bodyDecompiler) tryFollow(region *tryRegion) (int, error) {
 	}
 	jumps := map[int]bool{}
 	for _, entered := range d.active {
-		jumps[entered.ContinueTarget] = true
 		jumps[entered.Loop.Follow] = true
+		// A `do`'s continue target is its latch, and javac puts the tail of the
+		// body in there: falling into it is the body running on, not a `continue`.
+		latch := d.blocks[entered.ContinueTarget]
+		if entered.ContinueTarget == entered.Loop.Header || (latch != nil && isPureBlock(latch)) {
+			jumps[entered.ContinueTarget] = true
+		}
 	}
 	exits := map[int]bool{}
 	for start := range inside {
@@ -2053,7 +2137,19 @@ func (d *bodyDecompiler) tryFollow(region *tryRegion) (int, error) {
 			}
 		}
 	}
-	if len(exits) > 1 {
+	// A `return` or a `throw` javac kept out of the protected range shows up as
+	// an edge leaving it, but it is body, not the end of the statement: it only
+	// counts when nothing else leaves.
+	var leaving []int
+	for exit := range exits {
+		if b := d.blocks[exit]; b == nil || b.Kind != blockEnd {
+			leaving = append(leaving, exit)
+		}
+	}
+	if len(leaving) == 1 {
+		return leaving[0], nil
+	}
+	if len(leaving) > 1 || len(exits) > 1 {
 		return 0, bail("unstructured control flow")
 	}
 	for exit := range exits {
@@ -2065,7 +2161,10 @@ func (d *bodyDecompiler) tryFollow(region *tryRegion) (int, error) {
 		if !ok {
 			follow = exitBlock
 		}
-		if follow != exitBlock && !jumps[follow] {
+		// The post-dominator of a handler that branches is a merge *inside* it,
+		// and so is anything only the handler reaches: taking either would end
+		// the statement in the middle of its own `catch`.
+		if follow != exitBlock && !jumps[follow] && !d.dominators[follow][c.HandlerPc] {
 			follows[follow] = true
 		}
 	}
@@ -2081,23 +2180,24 @@ func (d *bodyDecompiler) tryFollow(region *tryRegion) (int, error) {
 // catchName is the catch parameter of one clause. A handler is entered with the
 // exception on the stack, so it starts by storing it - or dropping it, when
 // source never named it.
-func (d *bodyDecompiler) catchName(c *clause) (string, error) {
+func (d *bodyDecompiler) catchName(c *clause) (string, func(), error) {
 	b := d.blocks[c.HandlerPc]
 	if len(b.Instructions) == 0 {
-		return "", bail("an exception handler that keeps the exception")
+		return "", nil, bail("an exception handler that keeps the exception")
 	}
 	first := b.Instructions[0]
 	if first.Mnemonic != "pop" && !strings.HasPrefix(first.Mnemonic, "astore") {
-		return "", bail("an exception handler that keeps the exception")
+		return "", nil, bail("an exception handler that keeps the exception")
 	}
 	d.skip[c.HandlerPc] = 1
 	if first.Mnemonic == "pop" {
-		return d.freshName("e"), nil
+		return d.freshName("e"), func() {}, nil
 	}
 	slot := slotOf(first)
 	// The debug table scopes the parameter from *after* its store, which is
-	// where the handler's own code begins.
-	scopePc := c.HandlerPc
+	// where the handler's own code begins - and when the store is all there is,
+	// that is where the block ends.
+	scopePc := endOf(b)
 	if len(b.Instructions) > 1 {
 		scopePc = b.Instructions[1].Pc
 	}
@@ -2128,9 +2228,17 @@ func (d *bodyDecompiler) catchName(c *clause) (string, error) {
 		Authoritative: true, // the clause says what the parameter's type is
 		StoreBlocks:   map[int]bool{c.HandlerPc: true},
 	}
+	shadowed, wasSet := d.locals[slot]
 	d.byName[entry.Name] = entry
 	d.locals[slot] = entry
-	return entry.Name, nil
+	restore := func() {
+		if wasSet {
+			d.locals[slot] = shadowed
+		} else {
+			delete(d.locals, slot)
+		}
+	}
+	return entry.Name, restore, nil
 }
 
 // loopJump reports `break;` or `continue;` when at is where the innermost
@@ -2368,7 +2476,7 @@ func (d *bodyDecompiler) foreverLoop(l *loop) (int, error) {
 
 // conditional writes one `if`, from the branch that ends b, and reports where
 // the statement after it begins.
-func (d *bodyDecompiler) conditional(b *block) (int, error) {
+func (d *bodyDecompiler) conditional(b *block, stop int) (int, error) {
 	var taken []int
 	jump, err := d.jumpConditionOf(b, &taken, nil)
 	if err != nil {
@@ -2408,12 +2516,22 @@ func (d *bodyDecompiler) conditional(b *block) (int, error) {
 	if d.reachesArm(whenTrue, whenFalse) {
 		follow = whenFalse
 	}
+	// Inside a `try` the merge can sit outside the statement: a `return` on one
+	// path makes the post-dominator exitBlock, but the arms still come back
+	// together where the statement around this one ends.
+	if follow == exitBlock && stop != exitBlock &&
+		(d.reachesArm(whenTrue, stop) || d.reachesArm(whenFalse, stop)) {
+		follow = stop
+	}
 	// `if (c) return x;` has no merge point. Both arms leave the method - every
 	// path does, since a block that runs off the end is rejected - so the arm
 	// that branches is the whole statement and the other one is what follows it,
 	// at the same level rather than inside an `else`.
 	if follow == exitBlock {
-		exiting, err := d.capture(func() error { return d.structure(whenTrue, exitBlock) })
+		// The arm still ends where the statement around it does: `stop` is the
+		// end of the `try` or the loop body this `if` sits in, not always the
+		// method.
+		exiting, err := d.capture(func() error { return d.structure(whenTrue, stop) })
 		if err != nil {
 			return 0, err
 		}

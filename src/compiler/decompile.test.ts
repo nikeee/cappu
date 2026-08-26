@@ -360,6 +360,23 @@ const CATCHY_SOURCE =
   "  static int inIf(boolean c, int[] xs) { if (c) { try { return xs[0]; } catch (java.lang.RuntimeException e) { return -1; } } return 0; }\n" +
   "  static int throwsInside(int a) { try { if (a < 0) { throw new java.lang.IllegalStateException(); } return a; } catch (java.lang.IllegalStateException e) { return -1; } }\n" +
   "  static int alwaysThrows(int a) { try { throw new java.lang.IllegalStateException(); } catch (java.lang.IllegalStateException e) { return a; } }\n" +
+  // A `do`'s latch holds the tail of the body, so falling into it is not a
+  // `continue` - and the tail is not part of the `try`.
+  "  static int doWhile(int a) { int d = 0; do { try { check(a); } catch (java.lang.IllegalStateException e) { return -1; } d = d + 1; } while (d < 3); return d; }\n" +
+  // The handler branches and the body never returns normally: the end of the
+  // statement is not the merge point inside the `catch`.
+  "  static int handlerBranch(int a) { try { check(a); return 1; } catch (java.lang.IllegalStateException e) { return a > 0 ? 5 : 6; } }\n" +
+  // The slot the catch parameter sat in is reused once the clause ends.
+  "  static int slotAfter(int a) { int r = 0; try { r = 100 / a; } catch (java.lang.ArithmeticException e) { r = -1; } int q = r * 2; return q; }\n" +
+  // A handler that falls back into the loop body: without the throwing edges the
+  // loop stops being reducible.
+  "  static int fallsBack(int n) { int s = 0; for (int i = 0; i < n; i++) { try { check(i); s = s + i; } catch (java.lang.IllegalStateException e) { s = s + 100; } } return s; }\n" +
+  // javac keeps a `return`, a `break` and a `continue` out of the protected
+  // range, which splits it around them.
+  "  static int earlyReturn(int n) { try { if (n == 1) { return 1; } check(n); } catch (java.lang.IllegalStateException e) { return 8; } return 9; }\n" +
+  "  static int breakInTry(int n) { int s = 0; for (int i = 0; i < n; i++) { try { if (i == 2) { break; } s = s + i; } catch (java.lang.IllegalStateException e) { s = -1; } } return s; }\n" +
+  "  static int endExit(boolean c, int n) { try { if (c) { check(n); } else { return 0; } } catch (java.lang.IllegalStateException e) { return 2; } return 3; }\n" +
+  "  static void check(int n) { if (n < 0) { throw new java.lang.IllegalStateException(); } }\n" +
   "}";
 
 test(
@@ -812,6 +829,28 @@ const RECONSTRUCTIONS: {
     reject: ["not decompiled"],
     // Not checked: an empty `catch` is what the source had, and our own checker
     // flags it as a swallowed exception.
+  },
+  {
+    // A loop inside a handler: a handler is only reachable by throwing, so the
+    // loop analysis has to see the throwing edges or it never finds this one.
+    name: "CatchLoop",
+    source:
+      "class CatchLoop { static int f(int[] xs) { int s = 0; try { s = xs[0]; }" +
+      " catch (java.lang.RuntimeException e) { for (int k = 0; k < 3; k++) { s += k; } } return s; } }",
+    expect: ["} catch (java.lang.RuntimeException e) {", "while (var3 < 3) {"],
+    reject: ["not decompiled"],
+    selfContained: true,
+  },
+  {
+    // The catch parameter's scope is its clause: javac hands the slot to the
+    // next variable, and with no debug table only the scope says so.
+    name: "CatchSlot",
+    source:
+      "class CatchSlot { static int f(int a) { int r = 0; try { r = 100 / a; }" +
+      " catch (java.lang.ArithmeticException e) { r = -1; } int q = r * 2; return q; } }",
+    expect: ["} catch (java.lang.ArithmeticException e) {", "int var2 = var1 * 2;"],
+    reject: ["not decompiled", "e = "],
+    selfContained: true,
   },
   {
     name: "Finally",

@@ -671,6 +671,28 @@ var reconstructions = []struct {
 		// checker flags it as a swallowed exception.
 	},
 	{
+		// A loop inside a handler: a handler is only reachable by throwing, so
+		// the loop analysis has to see the throwing edges or it never finds this
+		// one.
+		name: "CatchLoop",
+		source: "class CatchLoop { static int f(int[] xs) { int s = 0; try { s = xs[0]; }" +
+			" catch (java.lang.RuntimeException e) { for (int k = 0; k < 3; k++) { s += k; } }" +
+			" return s; } }",
+		want:          []string{"} catch (java.lang.RuntimeException e) {", "while (var3 < 3) {"},
+		reject:        []string{"not decompiled"},
+		selfContained: true,
+	},
+	{
+		// The catch parameter's scope is its clause: javac hands the slot to the
+		// next variable, and with no debug table only the scope says so.
+		name: "CatchSlot",
+		source: "class CatchSlot { static int f(int a) { int r = 0; try { r = 100 / a; }" +
+			" catch (java.lang.ArithmeticException e) { r = -1; } int q = r * 2; return q; } }",
+		want:          []string{"} catch (java.lang.ArithmeticException e) {", "int var2 = var1 * 2;"},
+		reject:        []string{"not decompiled", "e = "},
+		selfContained: true,
+	},
+	{
 		// javac copies the `finally` into every exit path and guards the rest
 		// with a catch-all that rethrows: which of those copies source wrote is
 		// not in the class file, so this one says so.
@@ -851,6 +873,14 @@ const catchySource = `public class Catchy {
   static int inIf(boolean c, int[] xs) { if (c) { try { return xs[0]; } catch (java.lang.RuntimeException e) { return -1; } } return 0; }
   static int throwsInside(int a) { try { if (a < 0) { throw new java.lang.IllegalStateException(); } return a; } catch (java.lang.IllegalStateException e) { return -1; } }
   static int alwaysThrows(int a) { try { throw new java.lang.IllegalStateException(); } catch (java.lang.IllegalStateException e) { return a; } }
+  static int doWhile(int a) { int d = 0; do { try { check(a); } catch (java.lang.IllegalStateException e) { return -1; } d = d + 1; } while (d < 3); return d; }
+  static int handlerBranch(int a) { try { check(a); return 1; } catch (java.lang.IllegalStateException e) { return a > 0 ? 5 : 6; } }
+  static int slotAfter(int a) { int r = 0; try { r = 100 / a; } catch (java.lang.ArithmeticException e) { r = -1; } int q = r * 2; return q; }
+  static int fallsBack(int n) { int s = 0; for (int i = 0; i < n; i++) { try { check(i); s = s + i; } catch (java.lang.IllegalStateException e) { s = s + 100; } } return s; }
+  static int earlyReturn(int n) { try { if (n == 1) { return 1; } check(n); } catch (java.lang.IllegalStateException e) { return 8; } return 9; }
+  static int breakInTry(int n) { int s = 0; for (int i = 0; i < n; i++) { try { if (i == 2) { break; } s = s + i; } catch (java.lang.IllegalStateException e) { s = -1; } } return s; }
+  static int endExit(boolean c, int n) { try { if (c) { check(n); } else { return 0; } } catch (java.lang.IllegalStateException e) { return 2; } return 3; }
+  static void check(int n) { if (n < 0) { throw new java.lang.IllegalStateException(); } }
 }`
 
 func TestDecompileRecompilesJavacTryCatchToTheSameBytecode(t *testing.T) {
