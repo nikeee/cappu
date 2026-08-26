@@ -107,6 +107,20 @@ type expr struct {
 	// the call can put `new C(...)` in all of their places at once. Zero means
 	// the value is not one.
 	Pending int
+	// Init is the array creation javac may still be filling in: `{1, 2, 3}` is a
+	// `new int[3]` that is duplicated once per element and written through.
+	// Every copy carries the same id, and the elements written so far are what
+	// the literal gets rendered from once it is full.
+	Init *arrayInit
+}
+
+type arrayInit struct {
+	ID int
+	// Prefix is `new int[]` for an `int[3]`, so the literal is Prefix + `{...}`.
+	Prefix   string
+	Element  string
+	Length   int
+	Elements []string
 }
 
 func primary(text, typ string) expr { return expr{Text: text, Prec: precPrimary, Type: typ} }
@@ -1487,6 +1501,8 @@ type bodyDecompiler struct {
 	visited map[int]bool
 	// pendingCount hands out the ids that tell the copies of one `new` apart.
 	pendingCount int
+	// initCount does the same for the copies of one array literal.
+	initCount int
 	// innerFlags are the access flags of the nested classes this file names.
 	innerFlags map[string]uint16
 	// conditions are every `if (...)` line emitted, with the condition it came
@@ -1636,7 +1652,52 @@ func (d *bodyDecompiler) pop() (expr, error) {
 	if top.Compared != nil {
 		return expr{}, bail("a comparison outside a branch")
 	}
+	// A half-written array literal has no source form: the elements already
+	// consumed are gone from the statement list.
+	if top.Init != nil && len(top.Init.Elements) > 0 {
+		return expr{}, bail("incomplete array initializer")
+	}
 	return top, nil
+}
+
+// arrayInitOf reports the literal a fresh array may still turn into. Only a
+// constant length can: `{1, 2, 3}` is the only source that duplicates a new
+// array and writes through the copies, and its length is the element count.
+func (d *bodyDecompiler) arrayInitOf(prefix, element string, length expr) *arrayInit {
+	size, err := strconv.Atoi(length.Text)
+	if err != nil || size < 0 {
+		return nil
+	}
+	d.initCount++
+	return &arrayInit{ID: d.initCount, Prefix: prefix, Element: element, Length: size}
+}
+
+// fillArray takes one `dup; index; value; Xastore` of an array initializer. The
+// store consumed one copy of the array; the copy left below it is the same
+// array, so it is replaced by the literal grown by this element - and by the
+// finished literal once the last one lands.
+func (d *bodyDecompiler) fillArray(init *arrayInit, index, value expr) error {
+	// javac writes an initializer front to back, one element per index.
+	if index.Text != strconv.Itoa(len(init.Elements)) || len(init.Elements) >= init.Length {
+		return bail("array initializer out of order")
+	}
+	below, err := d.popRaw()
+	if err != nil {
+		return err
+	}
+	if below.Init == nil || below.Init.ID != init.ID {
+		return bail("array initializer copy lost")
+	}
+	elements := append(append([]string{}, init.Elements...), d.coerceInto(value, init.Element))
+	if len(elements) == init.Length {
+		d.push(primary(init.Prefix+"{"+strings.Join(elements, ", ")+"}", below.Type))
+		return nil
+	}
+	grown := *init
+	grown.Elements = elements
+	below.Init = &grown
+	d.push(below)
+	return nil
 }
 
 // local reports the variable living in slot at pc. javac reuses a slot for the
@@ -3166,9 +3227,12 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
-		array, err := d.pop()
+		array, err := d.popRaw()
 		if err != nil {
 			return err
+		}
+		if array.Init != nil {
+			return d.fillArray(array.Init, index, value)
 		}
 		element := elementType(array.Type, mnemonic[0])
 		d.emit(at(array, precPrimary) + "[" + coerce(index, "int") + "] = " +
@@ -3180,7 +3244,13 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
-		d.push(primary("new "+instruction.Operand+"["+numeric(length).Text+"]", instruction.Operand+"[]"))
+		element := instruction.Operand
+		d.push(expr{
+			Text: "new " + element + "[" + numeric(length).Text + "]",
+			Prec: precPrimary,
+			Type: element + "[]",
+			Init: d.arrayInitOf("new "+element+"[]", element, numeric(length)),
+		})
 		return nil
 	}
 	if mnemonic == "anewarray" {
@@ -3193,7 +3263,12 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		// so `new String[n][]`, never `new String[][n]`.
 		base := strings.ReplaceAll(element, "[]", "")
 		rest := strings.Repeat("[]", (len(element)-len(base))/2)
-		d.push(primary("new "+base+"["+numeric(length).Text+"]"+rest, element+"[]"))
+		d.push(expr{
+			Text: "new " + base + "[" + numeric(length).Text + "]" + rest,
+			Prec: precPrimary,
+			Type: element + "[]",
+			Init: d.arrayInitOf("new "+base+"[]"+rest, element, numeric(length)),
+		})
 		return nil
 	}
 	if mnemonic == "multianewarray" {
@@ -3284,18 +3359,23 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		return nil
 	}
 
-	// Stack shuffling. A dup of anything but a name would duplicate the
-	// expression itself (`new int[2][0] = 1;`), so only the trivial case is
-	// taken; array initializers and the rest wait for a later phase.
+	// Stack shuffling. A dup of anything but a name or an array being filled in
+	// would duplicate the expression itself (`new int[2][0] = 1;`), so only
+	// those cases are taken; the rest waits for a later phase.
 	if mnemonic == "dup" {
-		value, err := d.pop()
+		// popRaw, because the copy being duplicated is the array literal that is
+		// still being filled in, which pop rejects as incomplete.
+		value, err := d.popRaw()
 		if err != nil {
 			return err
 		}
 		if value.Effects {
 			return bail("dup of a call")
 		}
-		if value.Pending == 0 &&
+		if value.Compared != nil {
+			return bail("dup of a comparison")
+		}
+		if value.Pending == 0 && value.Init == nil &&
 			(value.Prec != precPrimary || strings.HasPrefix(value.Text, "new ")) {
 			return bail("dup of a non-trivial value")
 		}

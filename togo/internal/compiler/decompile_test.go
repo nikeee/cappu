@@ -68,6 +68,7 @@ var fullyDecompiled = []string{
 	"SubB",
 	"SubC",
 	"VarargsAndAbstract",
+	"VarargsPack",
 }
 
 // Classes kept for the bail-out rendering: control flow (phase 1.4+) and method
@@ -81,7 +82,6 @@ var notDecompiled = []string{
 	"QualifiedAnon",
 	"QualifiedNew$Inner",
 	"QualifiedNew",
-	"VarargsPack",
 }
 
 // `ClassLit.prim()` reads `java.lang.Integer.TYPE`, which javac accepts and the
@@ -439,6 +439,28 @@ var reconstructions = []struct {
 		source: "class Erased { static boolean b() { boolean v = true; return v; }" +
 			" static char c() { char v = 'a'; return v; } }",
 		want:          []string{"boolean var0 = true;", "char var0 = 'a';"},
+		selfContained: true,
+	},
+	// --- phase 1.8: array initializers ---
+	{
+		// The `dup; index; value; store` chain is one literal, not three statements.
+		name:          "ArrLit",
+		source:        "class ArrLit { static int[] f() { return new int[]{1, 2}; } }",
+		want:          []string{"return new int[]{1, 2};"},
+		reject:        []string{"new int[2]"},
+		selfContained: true,
+	},
+	{
+		// No `dup`, so this stays the sized form with the write as a statement.
+		name:          "ArrSized",
+		source:        "class ArrSized { static int[] f() { int[] a = new int[2]; a[1] = 3; return a; } }",
+		want:          []string{"int[] var0 = new int[2];", "var0[1] = 3;"},
+		selfContained: true,
+	},
+	{
+		name:          "ArrNest",
+		source:        "class ArrNest { static int[][] f() { return new int[][]{{1}, {2}}; } }",
+		want:          []string{"return new int[][]{new int[]{1}, new int[]{2}};"},
 		selfContained: true,
 	},
 	// --- phase 1.4: acyclic control flow ---
@@ -1029,6 +1051,54 @@ func TestDecompileRecompilesJavacCallsToTheSameBytecode(t *testing.T) {
 		t.Fatalf("a method bailed:\n%s", source)
 	}
 	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Callsy", source)
+	if javapText(t, roundTripped) != javapText(t, classFile) {
+		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
+			javapText(t, roundTripped), javapText(t, classFile))
+	}
+}
+
+// Every array-initializer shape javac writes: the `new T[]{...}` form and the
+// `{...}` shorthand, primitives of every width, a nested one, an element that is
+// a call, a varargs pack, and the sized form that is *not* an initializer.
+const arraylySource = `public class Arrayly {
+  static int[] ints() { return new int[]{1, 2, 3}; }
+  static int[] shorthand() { int[] a = {4, 5}; return a; }
+  static int[] empty() { return new int[]{}; }
+  static long[] longs() { return new long[]{1L, 2L}; }
+  static double[] doubles() { return new double[]{1.5, 2.5}; }
+  static boolean[] flags() { return new boolean[]{true, false}; }
+  static char[] chars() { return new char[]{'a', 'b'}; }
+  static byte[] bytes() { return new byte[]{1, 2}; }
+  static short[] shorts() { return new short[]{1, 2}; }
+  static float[] floats() { return new float[]{1.5f}; }
+  static String[] strings() { return new String[]{"a", "b"}; }
+  static Object[] objects() { return new Object[]{null, null}; }
+  static int[][] nested() { return new int[][]{{1, 2}, {3}}; }
+  static String[][] nestedRefs() { return new String[][]{{null}}; }
+  static int sum(int[] a) { return a[0] + a[1]; }
+  static int call() { return sum(new int[]{7, 8}); }
+  static int[] fromCalls(int n) { return new int[]{sum(new int[]{n, n}), n}; }
+  static int[] sized(int n) { int[] a = new int[n]; a[0] = 1; return a; }
+  static int[] sizedConst() { int[] a = new int[2]; a[1] = 1; return a; }
+  static int[] branchy(boolean c) { return new int[]{c ? 1 : 2, 3}; }
+  static String fmt(int a) { return String.format("%d", new Object[]{Integer.valueOf(a)}); }
+  static int[][] multi(int n) { return new int[n][2]; }
+}`
+
+func TestDecompileRecompilesJavacArrayInitializersToTheSameBytecode(t *testing.T) {
+	if !hasTool("javac") || !hasTool("javap") {
+		t.Skip("no JDK (javac/javap)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Arrayly", arraylySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "not decompiled") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Arrayly", source)
 	if javapText(t, roundTripped) != javapText(t, classFile) {
 		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
 			javapText(t, roundTripped), javapText(t, classFile))

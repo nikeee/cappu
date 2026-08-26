@@ -575,3 +575,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-08-25 14:45 — deep review and the continue
 - 2026-08-25 20:15 — continue with the next step of the decompilation implementation (see issue 43)
 - 2026-08-25 21:27 — deep review
+- 2026-08-26 23:46 — continue with the next step of the decompilation implementation (see issue 43)
+- 2026-08-26 23:47 — continue
