@@ -7,31 +7,14 @@ enum EnumAbstract {
   public abstract int rank();
 
   public static void main(java.lang.String[] arg0) {
-    /* cappu: unsupported instruction invokedynamic; the bytecode is:
-     * 0: invokestatic #22
-     * 3: astore_1
-     * 4: iconst_0
-     * 5: istore_2
-     * 6: iload_2
-     * 7: aload_1
-     * 8: arraylength
-     * 9: if_icmpge 41
-     * 12: aload_1
-     * 13: iload_2
-     * 14: aaload
-     * 15: astore_3
-     * 16: getstatic #28
-     * 19: aload_3
-     * 20: invokevirtual #32
-     * 23: aload_3
-     * 24: invokevirtual #34
-     * 27: invokedynamic #46,  0
-     * 32: invokevirtual #52
-     * 35: iinc 2, 1
-     * 38: goto 6
-     * 41: return
-     */
-    throw new UnsupportedOperationException("cappu: not decompiled");
+    EnumAbstract var3;
+    EnumAbstract[] var1 = values();
+    int var2 = 0;
+    while (var2 < var1.length) {
+      var3 = var1[var2];
+      java.lang.System.out.println(var3.name() + var3.rank());
+      var2++;
+    }
   }
 
   static {

@@ -17,35 +17,14 @@ enum EnumMixed {
   }
 
   public static void main(java.lang.String[] arg0) {
-    /* cappu: unsupported instruction invokedynamic; the bytecode is:
-     * 0: invokestatic #30
-     * 3: astore_1
-     * 4: iconst_0
-     * 5: istore_2
-     * 6: iload_2
-     * 7: aload_1
-     * 8: arraylength
-     * 9: if_icmpge 49
-     * 12: aload_1
-     * 13: iload_2
-     * 14: aaload
-     * 15: astore_3
-     * 16: getstatic #36
-     * 19: aload_3
-     * 20: invokevirtual #39
-     * 23: aload_3
-     * 24: invokevirtual #41
-     * 27: aload_3
-     * 28: bipush 6
-     * 30: bipush 7
-     * 32: invokevirtual #43
-     * 35: invokedynamic #55,  0
-     * 40: invokevirtual #61
-     * 43: iinc 2, 1
-     * 46: goto 6
-     * 49: return
-     */
-    throw new UnsupportedOperationException("cappu: not decompiled");
+    EnumMixed var3;
+    EnumMixed[] var1 = values();
+    int var2 = 0;
+    while (var2 < var1.length) {
+      var3 = var1[var2];
+      java.lang.System.out.println(var3.name() + var3.sym() + var3.apply(6, 7));
+      var2++;
+    }
   }
 
   static {
