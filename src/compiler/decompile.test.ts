@@ -94,11 +94,12 @@ const FULLY_DECOMPILED = [
   "SubB",
   "SubC",
   "VarargsAndAbstract",
+  "VarargsPack",
 ];
 
 // Classes kept for the bail-out rendering: string concatenation (an
-// invokedynamic), an inner class's constructor and an array initializer are not
-// this phase's job, and must say so.
+// invokedynamic) and an inner class's constructor are not this phase's job, and
+// must say so.
 const NOT_DECOMPILED = [
   "Concat",
   "EnumAbstract",
@@ -108,7 +109,6 @@ const NOT_DECOMPILED = [
   "QualifiedAnon",
   "QualifiedNew$Inner",
   "QualifiedNew",
-  "VarargsPack",
 ];
 
 // --- tier 1: text baselines ---------------------------------------------------------
@@ -519,6 +519,48 @@ test(
   },
 );
 
+// Every array-initializer shape javac writes: the `new T[]{...}` form and the
+// `{...}` shorthand, primitives of every width, a nested one, an element that
+// is a call, a varargs pack, and the sized form that is *not* an initializer.
+const ARRAYLY_SOURCE =
+  "public class Arrayly {\n" +
+  "  static int[] ints() { return new int[]{1, 2, 3}; }\n" +
+  "  static int[] shorthand() { int[] a = {4, 5}; return a; }\n" +
+  "  static int[] empty() { return new int[]{}; }\n" +
+  "  static long[] longs() { return new long[]{1L, 2L}; }\n" +
+  "  static double[] doubles() { return new double[]{1.5, 2.5}; }\n" +
+  "  static boolean[] flags() { return new boolean[]{true, false}; }\n" +
+  "  static char[] chars() { return new char[]{'a', 'b'}; }\n" +
+  "  static byte[] bytes() { return new byte[]{1, 2}; }\n" +
+  "  static short[] shorts() { return new short[]{1, 2}; }\n" +
+  "  static float[] floats() { return new float[]{1.5f}; }\n" +
+  '  static String[] strings() { return new String[]{"a", "b"}; }\n' +
+  "  static Object[] objects() { return new Object[]{null, null}; }\n" +
+  "  static int[][] nested() { return new int[][]{{1, 2}, {3}}; }\n" +
+  "  static String[][] nestedRefs() { return new String[][]{{null}}; }\n" +
+  "  static int sum(int[] a) { return a[0] + a[1]; }\n" +
+  "  static int call() { return sum(new int[]{7, 8}); }\n" +
+  "  static int[] fromCalls(int n) { return new int[]{sum(new int[]{n, n}), n}; }\n" +
+  "  static int[] sized(int n) { int[] a = new int[n]; a[0] = 1; return a; }\n" +
+  "  static int[] sizedConst() { int[] a = new int[2]; a[1] = 1; return a; }\n" +
+  "  static int[] branchy(boolean c) { return new int[]{c ? 1 : 2, 3}; }\n" +
+  '  static String fmt(int a) { return String.format("%d", new Object[]{Integer.valueOf(a)}); }\n' +
+  "  static int[][] multi(int n) { return new int[n][2]; }\n" +
+  "}\n";
+
+test(
+  "recompiles javac's own array initializers to the same bytecode",
+  { skip: HAS_JAVAC && HAS_JAVAP ? false : "no JDK (javac/javap)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-arrayly-");
+    const classFile = compileWithJavac(ARRAYLY_SOURCE, "Arrayly", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("not decompiled");
+    const roundTripped = compileWithJavac(source, "Arrayly", join(dir.path, "again"));
+    expect(javap(roundTripped)).toEqual(javap(classFile));
+  },
+);
+
 /** Compile one source file with javac and return the .class path. */
 function compileWithJavac(
   source: string,
@@ -583,6 +625,28 @@ const RECONSTRUCTIONS: {
       "class Erased { static boolean b() { boolean v = true; return v; }" +
       " static char c() { char v = 'a'; return v; } }",
     expect: ["boolean var0 = true;", "char var0 = 'a';"],
+    selfContained: true,
+  },
+  // --- phase 1.8: array initializers ---
+  {
+    name: "ArrLit",
+    // The `dup; index; value; store` chain is one literal, not three statements.
+    source: "class ArrLit { static int[] f() { return new int[]{1, 2}; } }",
+    expect: ["return new int[] {1, 2};"],
+    reject: ["new int[2]"],
+    selfContained: true,
+  },
+  {
+    name: "ArrSized",
+    // No `dup`, so this stays the sized form with the write as a statement.
+    source: "class ArrSized { static int[] f() { int[] a = new int[2]; a[1] = 3; return a; } }",
+    expect: ["int[] var0 = new int[2];", "var0[1] = 3;"],
+    selfContained: true,
+  },
+  {
+    name: "ArrNest",
+    source: "class ArrNest { static int[][] f() { return new int[][]{{1}, {2}}; } }",
+    expect: ["return new int[][] {new int[] {1}, new int[] {2}};"],
     selfContained: true,
   },
   // --- phase 1.4: acyclic control flow ---

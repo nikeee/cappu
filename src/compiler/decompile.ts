@@ -123,6 +123,22 @@ interface Expr {
    * `new C(...)` in all of their places at once.
    */
   readonly pending?: number;
+  /**
+   * An array creation javac may still be filling in: `{1, 2, 3}` is a `new
+   * int[3]` that is duplicated once per element and written through. Every copy
+   * carries the same `id`, and the elements written so far are what the literal
+   * gets rendered from once it is full.
+   */
+  readonly init?: ArrayInit;
+}
+
+interface ArrayInit {
+  readonly id: number;
+  /** `new int[]` for an `int[3]`, so the literal is `prefix + "{...}"`. */
+  readonly prefix: string;
+  readonly element: string;
+  readonly length: number;
+  readonly elements: readonly string[];
 }
 
 function primary(text: string, type: string): Expr {
@@ -1193,6 +1209,7 @@ class BodyDecompiler {
   private readonly visited = new Set<number>();
   /** Hands out the ids that tell the copies of one `new` apart. */
   private pendingCount = 0;
+  private initCount = 0;
   /** The access flags of the nested classes this file names, read once. */
   private readonly innerFlags: Map<string, number>;
   /**
@@ -1316,6 +1333,36 @@ class BodyDecompiler {
     this.stack.push(expr);
   }
 
+  /**
+   * The literal a fresh array may still turn into. Only a constant length can:
+   * `{1, 2, 3}` is the only source that duplicates a new array and writes
+   * through the copies, and its length is the element count.
+   */
+  private arrayInit(prefix: string, element: string, length: Expr): ArrayInit | undefined {
+    if (!/^\d+$/.test(length.text)) return undefined;
+    return { id: this.initCount++, prefix, element, length: Number(length.text), elements: [] };
+  }
+
+  /**
+   * One `dup; index; value; Xastore` of an array initializer. The store
+   * consumed one copy of the array; the copy left below it is the same array,
+   * so it is replaced by the literal grown by this element - and by the
+   * finished literal once the last one lands.
+   */
+  private fillArray(init: ArrayInit, index: Expr, value: Expr): void {
+    // javac writes an initializer front to back, one element per index.
+    if (index.text !== String(init.elements.length) || init.elements.length >= init.length) {
+      throw new NotDecompilable("array initializer out of order");
+    }
+    const below = this.popRaw();
+    if (below.init?.id !== init.id) throw new NotDecompilable("array initializer copy lost");
+    const elements = [...init.elements, this.coerceInto(value, init.element)];
+    if (elements.length === init.length) {
+      return this.push(primary(`${init.prefix}{${elements.join(", ")}}`, below.type));
+    }
+    this.push({ ...below, init: { ...init, elements } });
+  }
+
   private popRaw(): Expr {
     const expr = this.stack.pop();
     if (!expr) throw new NotDecompilable("stack underflow");
@@ -1327,6 +1374,11 @@ class BodyDecompiler {
     // An `lcmp` result has no source form of its own (`Long.compare` is a call,
     // which is a later phase), so only the branch that follows may consume it.
     if (expr.compared !== undefined) throw new NotDecompilable("a comparison outside a branch");
+    // A half-written array literal has no source form: the elements already
+    // consumed are gone from the statement list.
+    if (expr.init !== undefined && expr.init.elements.length > 0) {
+      throw new NotDecompilable("incomplete array initializer");
+    }
     return expr;
   }
 
@@ -2396,7 +2448,8 @@ class BodyDecompiler {
     if (/^[ilfdabcs]astore$/.test(mnemonic)) {
       const value = this.pop();
       const index = this.pop();
-      const array = this.pop();
+      const array = this.popRaw();
+      if (array.init !== undefined) return this.fillArray(array.init, index, value);
       const element = array.type.endsWith("[]")
         ? array.type.slice(0, -2)
         : PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
@@ -2407,9 +2460,13 @@ class BodyDecompiler {
     }
     if (mnemonic === "newarray") {
       const length = numeric(this.pop());
-      return this.push(
-        primary(`new ${instruction.operand}[${length.text}]`, `${instruction.operand}[]`),
-      );
+      const element = instruction.operand ?? "int";
+      return this.push({
+        text: `new ${element}[${length.text}]`,
+        prec: PREC_PRIMARY,
+        type: `${element}[]`,
+        init: this.arrayInit(`new ${element}[]`, element, length),
+      });
     }
     if (mnemonic === "anewarray") {
       const element = typeName(className(pool, instruction.arg) ?? "java/lang/Object", this.self);
@@ -2418,7 +2475,12 @@ class BodyDecompiler {
       // so `new String[n][]`, never `new String[][n]`.
       const base = element.replaceAll("[]", "");
       const rest = "[]".repeat((element.length - base.length) / 2);
-      return this.push(primary(`new ${base}[${length.text}]${rest}`, `${element}[]`));
+      return this.push({
+        text: `new ${base}[${length.text}]${rest}`,
+        prec: PREC_PRIMARY,
+        type: `${element}[]`,
+        init: this.arrayInit(`new ${base}[]${rest}`, element, length),
+      });
     }
     if (mnemonic === "multianewarray") {
       const type = typeName(className(pool, instruction.arg) ?? "", this.self);
@@ -2474,14 +2536,18 @@ class BodyDecompiler {
       return this.push({ text, prec: PREC_PRIMARY, type, effects: true });
     }
 
-    // Stack shuffling. A dup of anything but a name would duplicate the
-    // expression itself (`new int[2][0] = 1;`), so only the trivial case is
-    // taken; array initializers and the rest wait for a later phase.
+    // Stack shuffling. A dup of anything but a name or an array being filled in
+    // would duplicate the expression itself (`new int[2][0] = 1;`), so only
+    // those cases are taken; the rest waits for a later phase.
     if (mnemonic === "dup") {
-      const value = this.pop();
+      // `popRaw`, because the copy being duplicated is the array literal that
+      // is still being filled in, which `pop` rejects as incomplete.
+      const value = this.popRaw();
       if (value.effects === true) throw new NotDecompilable("dup of a call");
+      if (value.compared !== undefined) throw new NotDecompilable("dup of a comparison");
       if (
         value.pending === undefined &&
+        value.init === undefined &&
         (value.prec !== PREC_PRIMARY || value.text.startsWith("new "))
       ) {
         throw new NotDecompilable("dup of a non-trivial value");
