@@ -332,7 +332,7 @@ test(
     using dir = TempDir.create("cappu-decompile-branchy-");
     const classFile = compileWithJavac(BRANCHY_SOURCE, "Branchy", dir.path);
     const source = decompileToSource(readFileSync(classFile));
-    expect(source).not.toContain("not decompiled");
+    expect(source).not.toContain("/* cappu:");
     const roundTripped = compileWithJavac(source, "Branchy", join(dir.path, "again"));
     expect(javap(roundTripped)).toEqual(javap(classFile));
   },
@@ -388,7 +388,7 @@ test(
     using dir = TempDir.create("cappu-decompile-catchy-");
     const classFile = compileWithJavac(CATCHY_SOURCE, "Catchy", dir.path);
     const source = decompileToSource(readFileSync(classFile));
-    expect(source).not.toContain("not decompiled");
+    expect(source).not.toContain("/* cappu:");
     const roundTripped = compileWithJavac(source, "Catchy", join(dir.path, "again"));
     expect(javap(roundTripped)).toEqual(javap(classFile));
   },
@@ -419,7 +419,7 @@ test(
     using dir = TempDir.create("cappu-decompile-loopy-");
     const classFile = compileWithJavac(LOOPY_SOURCE, "Loopy", dir.path);
     const source = decompileToSource(readFileSync(classFile));
-    expect(source).not.toContain("not decompiled");
+    expect(source).not.toContain("/* cappu:");
     const roundTripped = compileWithJavac(source, "Loopy", join(dir.path, "again"));
     expect(javap(roundTripped)).toEqual(javap(classFile));
   },
@@ -461,7 +461,7 @@ test(
     const classFile = compileWithJavac(LOOPY_RUN_SOURCE, "LoopyRun", dir.path);
     compileWithJavac(LOOPY_DRIVER_SOURCE, "LoopyDriver", dir.path, dir.path);
     const source = decompileToSource(readFileSync(classFile));
-    expect(source).not.toContain("not decompiled");
+    expect(source).not.toContain("/* cappu:");
     const again = join(dir.path, "again");
     compileWithJavac(source, "LoopyRun", again);
     const expected = execFileSync("java", ["-cp", dir.path, "LoopyDriver"], { encoding: "utf8" });
@@ -515,7 +515,7 @@ test(
     using dir = TempDir.create("cappu-decompile-callsy-");
     const classFile = compileWithJavac(CALLSY_SOURCE, "Callsy", dir.path);
     const source = decompileToSource(readFileSync(classFile));
-    expect(source).not.toContain("not decompiled");
+    expect(source).not.toContain("/* cappu:");
     const roundTripped = compileWithJavac(source, "Callsy", join(dir.path, "again"));
     expect(javap(roundTripped)).toEqual(javap(classFile));
   },
@@ -557,7 +557,7 @@ test(
     using dir = TempDir.create("cappu-decompile-arrayly-");
     const classFile = compileWithJavac(ARRAYLY_SOURCE, "Arrayly", dir.path);
     const source = decompileToSource(readFileSync(classFile));
-    expect(source).not.toContain("not decompiled");
+    expect(source).not.toContain("/* cappu:");
     const roundTripped = compileWithJavac(source, "Arrayly", join(dir.path, "again"));
     expect(javap(roundTripped)).toEqual(javap(classFile));
   },
@@ -589,6 +589,10 @@ const CONCATTY_SOURCE =
   "  static String append(String s, int n) { s += n; return s; }\n" +
   "  static String types(String s, long l, double d, float f, boolean b, char c, byte y, short h) { return s + l + d + f + b + c + y + h; }\n" +
   "  static String call(String s) { return s + s.length(); }\n" +
+  // A `null` operand: javac passes it through `String.valueOf`, and a bare
+  // `null` there would bind the `char[]` overload and throw.
+  '  static String objectNull(Object o) { return "v" + (Object) null + o; }\n' +
+  '  static String stringNull(String s) { return "v" + (String) null + s; }\n' +
   "  static String nested(String a, String b, String c) { return a + b.trim() + c; }\n" +
   "  static int used(String a, int i) { return (a + i).length(); }\n" +
   "  static boolean cond(String a, String b) { return (a + b).isEmpty(); }\n" +
@@ -605,7 +609,7 @@ test(
     using dir = TempDir.create("cappu-decompile-concatty-");
     const classFile = compileWithJavac(CONCATTY_SOURCE, "Concatty", dir.path);
     const source = decompileToSource(readFileSync(classFile));
-    expect(source).not.toContain("not decompiled");
+    expect(source).not.toContain("/* cappu:");
     const roundTripped = compileWithJavac(source, "Concatty", join(dir.path, "again"));
     expect(javap(roundTripped)).toEqual(javap(classFile));
   },
@@ -1023,6 +1027,16 @@ test("writes a nested type reference with a dot, not the binary $", () => {
   expect(source).toContain("Outer.Inner get()");
 });
 
+// `i++` in a concatenation reads the variable before the increment and again
+// after it. The increment is a statement here, so writing it back in front of
+// the parts would change what they read - the method has to bail instead.
+test("says so when an increment happens while the variable is on the stack", () => {
+  const source = decompileToSource(
+    emitClass("Inc", 'public class Inc { static String f(int i) { return "x" + i++ + i; } }'),
+  );
+  expect(source).toContain("cappu: an increment of a variable that is already on the stack");
+});
+
 test("reconstructs the control flow of the ControlFlow fixture", () => {
   const source = decompileToSource(classBytes("ControlFlow"));
   // Every shape comes back as the statement it was written as.
@@ -1032,7 +1046,7 @@ test("reconstructs the control flow of the ControlFlow fixture", () => {
   expect(source).toContain("while (arg0 > 0) {");
   expect(source).toContain("} while (var1 < arg0);");
   expect(source).toContain("java.lang.System.out.println(sum(5));");
-  expect(source).not.toContain("not decompiled");
+  expect(source).not.toContain("/* cappu:");
 });
 
 test("chains to the superclass constructor", () => {
@@ -1048,8 +1062,8 @@ test("chains to the superclass constructor", () => {
 
 // --- the JDK as a corpus -------------------------------------------------------------
 
-/** The JDK on PATH (or JAVA_HOME), when it ships the jmods/ a class corpus needs. */
-function javaBaseJmod(): string | undefined {
+/** A module of the JDK on PATH (or JAVA_HOME), when it ships the jmods/ a corpus needs. */
+function jmodOf(module: string): string | undefined {
   const home =
     process.env.JAVA_HOME ??
     (process.env.PATH ?? "")
@@ -1058,36 +1072,43 @@ function javaBaseJmod(): string | undefined {
       .filter(existsSync)
       .map(javac => dirname(dirname(realpathSync(javac))))[0];
   if (home === undefined) return undefined;
-  const jmod = join(home, "jmods", "java.base.jmod");
+  const jmod = join(home, "jmods", `${module}.jmod`);
   return existsSync(jmod) ? jmod : undefined;
 }
+
+// java.base is built with `-XDstringConcat=inline` - it holds StringConcatFactory
+// itself - so it contains almost no concatenation invokedynamic. java.desktop is
+// the module that covers that phase.
+const CORPUS_MODULES = ["java.base", "java.desktop"];
 
 // Real classes from a real compiler: every shape javac emits, including the ones
 // no fixture here covers. The bar is not a full reconstruction - most of these
 // bail - but that what comes out is always Java the parser accepts.
-test("decompiles every class in java.base to parseable source", () => {
-  const jmod = javaBaseJmod();
-  if (jmod === undefined) return; // a JRE or a stripped image: nothing to read
-  // .jmod is a zip behind a 4-byte magic.
-  const entries = readZipEntries(readFileSync(jmod).subarray(4)) ?? [];
-  const classes = entries.filter(e => e.name.startsWith("classes/") && e.name.endsWith(".class"));
-  expect(classes.length).toBeGreaterThan(1000);
-  const failures: string[] = [];
-  for (const entry of classes) {
-    const name = entry.name.slice("classes/".length, -".class".length);
-    if (name === "module-info") continue;
-    let source: string;
-    try {
-      source = decompile(entry.read());
-    } catch (e) {
-      failures.push(`${name}: threw ${(e as Error).message}`);
-      continue;
+for (const module of CORPUS_MODULES) {
+  test(`decompiles every class in ${module} to parseable source`, () => {
+    const jmod = jmodOf(module);
+    if (jmod === undefined) return; // a JRE or a stripped image: nothing to read
+    // .jmod is a zip behind a 4-byte magic.
+    const entries = readZipEntries(readFileSync(jmod).subarray(4)) ?? [];
+    const classes = entries.filter(e => e.name.startsWith("classes/") && e.name.endsWith(".class"));
+    expect(classes.length).toBeGreaterThan(1000);
+    const failures: string[] = [];
+    for (const entry of classes) {
+      const name = entry.name.slice("classes/".length, -".class".length);
+      if (name === "module-info") continue;
+      let source: string;
+      try {
+        source = decompile(entry.read());
+      } catch (e) {
+        failures.push(`${name}: threw ${(e as Error).message}`);
+        continue;
+      }
+      const diagnostics = parseSourceFile(`${name}.java`, source).parseDiagnostics;
+      if (diagnostics.length > 0) failures.push(`${name}: ${diagnostics[0]!.messageText}`);
     }
-    const diagnostics = parseSourceFile(`${name}.java`, source).parseDiagnostics;
-    if (diagnostics.length > 0) failures.push(`${name}: ${diagnostics[0]!.messageText}`);
-  }
-  expect(failures.slice(0, 10)).toEqual([]);
-});
+    expect(failures.slice(0, 10)).toEqual([]);
+  });
+}
 
 // --- names ---------------------------------------------------------------------------
 

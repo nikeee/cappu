@@ -1780,8 +1780,17 @@ func (d *bodyDecompiler) callArguments(descriptor string) ([]string, error) {
 		text := d.coerceInto(value, target)
 		// Java narrows an int constant implicitly when it is assigned, but never
 		// when it is passed: `f((byte) 3)` is the only way to write the call.
-		if (target == "byte" || target == "short") && intLiteralText.MatchString(text) {
-			text = "(" + target + ") " + text
+		narrows := (target == "byte" || target == "short") && intLiteralText.MatchString(text)
+		// A bare `null` where an `Object` is declared re-resolves the overload -
+		// `String.valueOf(null)` binds `char[]` and throws - so the type the call
+		// was compiled against is written back. Only `Object` gets it: a cast to
+		// any other reference type is a `checkcast` the original did not have.
+		//
+		// ponytail: that leaves a narrower hole - a parameter typed `CharSequence`
+		// with a `String` overload alongside it also re-resolves. Closing it needs
+		// the callee's other overloads, which live outside this class file.
+		if narrows || (text == "null" && target == "java.lang.Object") {
+			text = "(" + sourceTypeText(target, d.self()) + ") " + text
 		}
 		args[i] = text
 	}
@@ -1880,8 +1889,11 @@ func (d *bodyDecompiler) concat(index uint16) error {
 	}
 	taken := 0
 	constant := 1
-	for _, char := range recipe {
-		switch char {
+	// Byte by byte, not rune by rune: an unpaired surrogate reaches here as the
+	// bytes PoolUtf8 kept, and re-encoding a decoded rune would turn them into
+	// replacement characters instead of the `?` escapeString writes.
+	for i := 0; i < len(recipe); i++ {
+		switch recipe[i] {
 		case '\u0001':
 			if taken >= len(args) {
 				return bail("a recipe that wants more arguments")
@@ -1893,7 +1905,7 @@ func (d *bodyDecompiler) concat(index uint16) error {
 			// A literal part javac could not put in the recipe itself, because it
 			// contains one of the two tag characters: it is spliced back in as text.
 			if constant >= len(bootstrap.ArgumentIndexes) {
-				return bail("a concatenation constant that is not a string")
+				return bail("a recipe that wants more constants")
 			}
 			at := PoolAt(pool, bootstrap.ArgumentIndexes[constant])
 			constant++
@@ -1902,12 +1914,19 @@ func (d *bodyDecompiler) concat(index uint16) error {
 			}
 			literal += PoolUtf8(pool, at.Index)
 		default:
-			literal += string(char)
+			// The byte itself, not `string(recipe[i])` - that would read it as a
+			// code point and re-encode a WTF-8 byte into something else.
+			literal += recipe[i : i+1]
 		}
 	}
 	flush()
 	if taken != len(args) {
 		return bail("a recipe that leaves arguments unused")
+	}
+	// With every part in the recipe the result is a constant expression, and javac
+	// folds one of those to an `ldc` instead of the call it came from.
+	if len(args) == 0 {
+		return bail("a concatenation of constants")
 	}
 
 	// The result is a String, so one of the first two operands has to be one:
@@ -1920,6 +1939,14 @@ func (d *bodyDecompiler) concat(index uint16) error {
 	result := parts[0].Value
 	for _, part := range parts[1:] {
 		result = binaryExpr(result, "+", part.Value, precAdd, "java.lang.String")
+	}
+	// A part that calls something makes the concatenation itself a value that does
+	// something: dropping it has to keep the call, not delete it.
+	for _, arg := range args {
+		if arg.Effects {
+			result.Effects = true
+			break
+		}
 	}
 	d.push(result)
 	return nil
@@ -3258,6 +3285,18 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
+		// `i++` is a statement here, so anything already on the stack that reads
+		// the variable would read the *new* value: `f(i++, i)` and `"x" + i++ + i`
+		// are not what this writes back. Their form needs the increment to stay an
+		// expression, which this phase does not do.
+		for _, value := range d.stack {
+			if !strings.Contains(value.Text, target.Name) {
+				continue
+			}
+			if regexp.MustCompile(`\b` + regexp.QuoteMeta(target.Name) + `\b`).MatchString(value.Text) {
+				return bail("an increment of a variable that is already on the stack")
+			}
+		}
 		switch delta := instruction.Arg2; {
 		case delta == 1:
 			d.emit(target.Name + "++;")
@@ -3545,8 +3584,13 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if mnemonic == "pop2" && value.Type != "long" && value.Type != "double" {
 			return bail("pop2 of two values")
 		}
-		// The value of a call is what is being dropped, not the call itself.
+		// The value of a call is what is being dropped, not the call itself. Only a
+		// call is a statement in Java, though: a dropped concatenation would have to
+		// keep the calls inside it, and `"a" + f();` is not something to write.
 		if value.Effects {
+			if value.Prec != precPrimary {
+				return bail("a dropped value that is not a statement")
+			}
 			d.emit(value.Text + ";")
 		}
 		return nil

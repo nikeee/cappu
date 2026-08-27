@@ -72,8 +72,8 @@ var fullyDecompiled = []string{
 	"VarargsPack",
 }
 
-// Classes kept for the bail-out rendering: control flow (phase 1.4+) and method
-// calls (phase 1.6) are not this phase's job, and must say so.
+// Classes kept for the bail-out rendering: an inner class's constructor and the
+// members javac generates for an enum are not this phase's job, and must say so.
 var notDecompiled = []string{
 	"EnumAbstract",
 	"EnumMixed",
@@ -763,6 +763,20 @@ func TestDecompileReconstructions(t *testing.T) {
 	}
 }
 
+// `i++` in a concatenation reads the variable before the increment and again
+// after it. The increment is a statement here, so writing it back in front of
+// the parts would change what they read - the method has to bail instead.
+func TestDecompileSaysWhenAnIncrementHappensWhileTheVariableIsOnTheStack(t *testing.T) {
+	source, err := Decompile(emitClassBytes(t, "Inc",
+		`public class Inc { static String f(int i) { return "x" + i++ + i; } }`))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: an increment of a variable that is already on the stack") {
+		t.Errorf("expected the increment bail:\n%s", source)
+	}
+}
+
 func TestDecompileReconstructsControlFlowFixture(t *testing.T) {
 	source := decompileBaseline(t, "ControlFlow")
 	// Every shape comes back as the statement it was written as.
@@ -778,7 +792,7 @@ func TestDecompileReconstructsControlFlowFixture(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, source)
 		}
 	}
-	if strings.Contains(source, "not decompiled") {
+	if strings.Contains(source, "/* cappu:") {
 		t.Errorf("a method still bails:\n%s", source)
 	}
 }
@@ -852,7 +866,7 @@ func TestDecompileRecompilesJavacBranchesToTheSameBytecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if strings.Contains(source, "not decompiled") {
+	if strings.Contains(source, "/* cappu:") {
 		t.Fatalf("a method bailed:\n%s", source)
 	}
 	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Branchy", source)
@@ -917,7 +931,7 @@ func TestDecompileRecompilesJavacTryCatchToTheSameBytecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if strings.Contains(source, "not decompiled") {
+	if strings.Contains(source, "/* cappu:") {
 		t.Fatalf("a method bailed:\n%s", source)
 	}
 	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Catchy", source)
@@ -937,7 +951,7 @@ func TestDecompileRecompilesJavacLoopsToTheSameBytecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if strings.Contains(source, "not decompiled") {
+	if strings.Contains(source, "/* cappu:") {
 		t.Fatalf("a method bailed:\n%s", source)
 	}
 	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Loopy", source)
@@ -982,7 +996,7 @@ func TestDecompileRunsLikeJavacLoops(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if strings.Contains(source, "not decompiled") {
+	if strings.Contains(source, "/* cappu:") {
 		t.Fatalf("a method bailed:\n%s", source)
 	}
 	again := filepath.Join(dir, "again")
@@ -1049,7 +1063,7 @@ func TestDecompileRecompilesJavacCallsToTheSameBytecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if strings.Contains(source, "not decompiled") {
+	if strings.Contains(source, "/* cappu:") {
 		t.Fatalf("a method bailed:\n%s", source)
 	}
 	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Callsy", source)
@@ -1097,7 +1111,7 @@ func TestDecompileRecompilesJavacArrayInitializersToTheSameBytecode(t *testing.T
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if strings.Contains(source, "not decompiled") {
+	if strings.Contains(source, "/* cappu:") {
 		t.Fatalf("a method bailed:\n%s", source)
 	}
 	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Arrayly", source)
@@ -1126,6 +1140,8 @@ const concattySource = `public class Concatty {
   static String append(String s, int n) { s += n; return s; }
   static String types(String s, long l, double d, float f, boolean b, char c, byte y, short h) { return s + l + d + f + b + c + y + h; }
   static String call(String s) { return s + s.length(); }
+  static String objectNull(Object o) { return "v" + (Object) null + o; }
+  static String stringNull(String s) { return "v" + (String) null + s; }
   static String nested(String a, String b, String c) { return a + b.trim() + c; }
   static int used(String a, int i) { return (a + i).length(); }
   static boolean cond(String a, String b) { return (a + b).isEmpty(); }
@@ -1145,7 +1161,7 @@ func TestDecompileRecompilesJavacStringConcatenationsToTheSameBytecode(t *testin
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if strings.Contains(source, "not decompiled") {
+	if strings.Contains(source, "/* cappu:") {
 		t.Fatalf("a method bailed:\n%s", source)
 	}
 	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Concatty", source)
@@ -1223,9 +1239,9 @@ func TestDecompileChainsToTheSuperConstructor(t *testing.T) {
 
 // --- the JDK as a corpus -------------------------------------------------------------
 
-// javaBaseJmod is the JDK on PATH (or JAVA_HOME), when it ships the jmods/ a
-// class corpus needs.
-func javaBaseJmod() string {
+// jmodOf is a module of the JDK on PATH (or JAVA_HOME), when it ships the jmods/
+// a class corpus needs.
+func jmodOf(module string) string {
 	home := os.Getenv("JAVA_HOME")
 	if home == "" {
 		javac, err := exec.LookPath("javac")
@@ -1238,18 +1254,30 @@ func javaBaseJmod() string {
 		}
 		home = filepath.Dir(filepath.Dir(resolved))
 	}
-	jmod := filepath.Join(home, "jmods", "java.base.jmod")
+	jmod := filepath.Join(home, "jmods", module+".jmod")
 	if _, err := os.Stat(jmod); err != nil {
 		return ""
 	}
 	return jmod
 }
 
+// java.base is built with `-XDstringConcat=inline` - it holds StringConcatFactory
+// itself - so it contains almost no concatenation invokedynamic. java.desktop is
+// the module that covers that phase.
+var corpusModules = []string{"java.base", "java.desktop"}
+
 // Real classes from a real compiler: every shape javac emits, including the ones
 // no fixture here covers. The bar is not a full reconstruction - most of these
 // bail - but that what comes out is always Java the parser accepts.
-func TestDecompileEveryClassInJavaBase(t *testing.T) {
-	jmod := javaBaseJmod()
+func TestDecompileEveryClassInTheJdkCorpus(t *testing.T) {
+	for _, module := range corpusModules {
+		t.Run(module, func(t *testing.T) { decompileEveryClassIn(t, module) })
+	}
+}
+
+func decompileEveryClassIn(t *testing.T, module string) {
+	t.Helper()
+	jmod := jmodOf(module)
 	if jmod == "" {
 		t.Skip("no JDK with jmods/")
 	}

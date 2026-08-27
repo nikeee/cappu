@@ -1473,7 +1473,16 @@ class BodyDecompiler {
       // Java narrows an int constant implicitly when it is assigned, but never
       // when it is passed: `f((byte) 3)` is the only way to write the call.
       const narrows = (target === "byte" || target === "short") && /^-?\d+$/.test(text);
-      args.unshift(narrows ? `(${target}) ${text}` : text);
+      // A bare `null` where an `Object` is declared re-resolves the overload -
+      // `String.valueOf(null)` binds `char[]` and throws - so the type the call
+      // was compiled against is written back. Only `Object` gets it: a cast to
+      // any other reference type is a `checkcast` the original did not have.
+      //
+      // ponytail: that leaves a narrower hole - a parameter typed `CharSequence`
+      // with a `String` overload alongside it also re-resolves. Closing it needs
+      // the callee's other overloads, which live outside this class file.
+      const untyped = text === "null" && target === "java.lang.Object";
+      args.unshift(narrows || untyped ? `(${sourceTypeText(target, this.self)}) ${text}` : text);
     }
     return args;
   }
@@ -1556,7 +1565,11 @@ class BodyDecompiler {
         const at = pool[bootstrap.argumentIndexes[constant] ?? 0];
         constant++;
         if (at?.tag !== "string") {
-          throw new NotDecompilable("a concatenation constant that is not a string");
+          throw new NotDecompilable(
+            constant > bootstrap.argumentIndexes.length
+              ? "a recipe that wants more constants"
+              : "a concatenation constant that is not a string",
+          );
         }
         literal += utf8(pool, at.valueIndex) ?? "";
       } else {
@@ -1565,6 +1578,9 @@ class BodyDecompiler {
     }
     flush();
     if (taken !== args.length) throw new NotDecompilable("a recipe that leaves arguments unused");
+    // With every part in the recipe the result is a constant expression, and
+    // javac folds one of those to an `ldc` instead of the call it came from.
+    if (args.length === 0) throw new NotDecompilable("a concatenation of constants");
 
     // The result is a String, so one of the first two operands has to be one:
     // `"" + i + j` and `i + j` compile to the same arguments but are not the
@@ -1578,6 +1594,9 @@ class BodyDecompiler {
     for (const part of parts.slice(1)) {
       result = binary(result, "+", part.expr, PREC_ADD, "java.lang.String");
     }
+    // A part that calls something makes the concatenation itself a value that
+    // does something: dropping it has to keep the call, not delete it.
+    if (args.some(arg => arg.effects === true)) result = { ...result, effects: true };
     this.push(result);
   }
 
@@ -2491,6 +2510,14 @@ class BodyDecompiler {
     }
     if (base === "iinc") {
       const local = this.local(instruction.arg, pc, "int");
+      // `i++` is a statement here, so anything already on the stack that reads
+      // the variable would read the *new* value: `f(i++, i)` and `"x" + i++ + i`
+      // are not what this writes back. Their form needs the increment to stay an
+      // expression, which this phase does not do.
+      const reads = new RegExp(`\\b${local.name}\\b`);
+      if (this.stack.some(value => value.text.includes(local.name) && reads.test(value.text))) {
+        throw new NotDecompilable("an increment of a variable that is already on the stack");
+      }
       const delta = instruction.arg2;
       if (delta === 1) this.current.push(`${local.name}++;`);
       else if (delta === -1) this.current.push(`${local.name}--;`);
@@ -2681,8 +2708,15 @@ class BodyDecompiler {
       if (mnemonic === "pop2" && value.type !== "long" && value.type !== "double") {
         throw new NotDecompilable("pop2 of two values");
       }
-      // The value of a call is what is being dropped, not the call itself.
-      if (value.effects === true) this.current.push(`${value.text};`);
+      // The value of a call is what is being dropped, not the call itself. Only a
+      // call is a statement in Java, though: a dropped concatenation would have
+      // to keep the calls inside it, and `"a" + f();` is not something to write.
+      if (value.effects === true) {
+        if (value.prec !== PREC_PRIMARY) {
+          throw new NotDecompilable("a dropped value that is not a statement");
+        }
+        this.current.push(`${value.text};`);
+      }
       return;
     }
 
