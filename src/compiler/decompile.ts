@@ -1744,10 +1744,10 @@ class BodyDecompiler {
     this.regions = tryRegions(exceptions, this.blocks, this.self);
     this.followOf = postDominators(this.blocks);
     this.methodFollowOf = this.followOf;
-    this.dominators = dominators(
-      withExceptionEdges(this.blocks, this.regions),
-      instructions[0]?.pc ?? 0,
-    );
+    this.dominators =
+      this.regions.length === 0
+        ? new Map()
+        : dominators(withExceptionEdges(this.blocks, this.regions), instructions[0]?.pc ?? 0);
     const entry = instructions[0]?.pc ?? 0;
     this.loops = findLoops(this.blocks, entry, this.regions);
     this.entryPc = entry;
@@ -1893,6 +1893,11 @@ class BodyDecompiler {
       barriers.add(entered.continueTarget);
       barriers.add(entered.loop.follow);
     }
+    // Only a `try` needs the dominators up front; a `switch` this deep into the
+    // rules is rare enough to pay for them here instead of in every method.
+    if (this.dominators.size === 0) {
+      this.dominators = dominators(withExceptionEdges(this.blocks, this.regions), this.entryPc);
+    }
     const reachable = reachableBlocks(this.blocks, [...cases, defaultTarget]);
     const leadsTo = (owners: readonly number[]): number => {
       const candidates = [...reachable].filter(start => {
@@ -1928,7 +1933,12 @@ class BodyDecompiler {
     // lands on the default is dropped: a tableswitch pads its gaps that way, and
     // a case that shares the default's body says nothing a `default:` does not.
     const keysOf = new Map<number, number[]>();
+    const seen = new Set<number>();
     for (const { key, target } of table.switchCases) {
+      // A repeated key is not a table javac wrote, and source cannot say it
+      // twice, so the reconstruction would not compile.
+      if (seen.has(key)) throw new NotDecompilable("a switch table with a repeated key");
+      seen.add(key);
       if (target === defaultTarget) continue;
       const keys = keysOf.get(target);
       if (keys === undefined) keysOf.set(target, [key]);
@@ -2154,15 +2164,17 @@ class BodyDecompiler {
   private loopJump(at: number): string | undefined {
     const inner = this.active[this.active.length - 1];
     const enclosing = this.switches[this.switches.length - 1];
-    // A `switch` catches `break` but not `continue`, so the innermost loop still
-    // owns its own continue target even from inside one.
-    if (inner !== undefined && at === inner.continueTarget) return "continue;";
     // Only the innermost breakable statement can be left without a label, and a
     // loop opened inside a `switch` is the innermost one.
     const switchIsInner = enclosing !== undefined && enclosing.loopDepth === this.active.length;
-    if (switchIsInner) {
-      if (at === enclosing.follow) return "break;";
-    } else if (inner !== undefined && at === inner.loop.follow) {
+    // The end of the `switch` comes first, even when it is also the loop's
+    // continue target: a `do`'s continue target is its latch, and javac puts the
+    // tail of the body in there - `continue;` would skip it.
+    if (switchIsInner && at === enclosing.follow) return "break;";
+    // A `switch` catches `break` but not `continue`, so the innermost loop still
+    // owns its own continue target even from inside one.
+    if (inner !== undefined && at === inner.continueTarget) return "continue;";
+    if (!switchIsInner && inner !== undefined && at === inner.loop.follow) {
       return "break;";
     }
     for (const outer of switchIsInner ? this.active : this.active.slice(0, -1)) {

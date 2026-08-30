@@ -2177,7 +2177,9 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 	if len(instructions) > 0 {
 		entry = instructions[0].Pc
 	}
-	d.dominators = dominators(withExceptionEdges(blocks, d.regions), entry)
+	if len(d.regions) > 0 {
+		d.dominators = dominators(withExceptionEdges(blocks, d.regions), entry)
+	}
 	loops, err := findLoops(blocks, entry, d.regions)
 	if err != nil {
 		return err
@@ -2521,19 +2523,21 @@ func (d *bodyDecompiler) catchName(c *clause) (string, func(), error) {
 // loop's next iteration, or the code after it, begins. Leaving an *enclosing*
 // loop needs a label, which this phase does not write.
 func (d *bodyDecompiler) loopJump(at int) (string, bool, error) {
+	// Only the innermost breakable statement can be left without a label, and a
+	// loop opened inside a `switch` is the innermost one.
+	switchIsInner := len(d.switches) > 0 && d.switches[len(d.switches)-1].LoopDepth == len(d.active)
+	// The end of the `switch` comes first, even when it is also the loop's
+	// continue target: a `do`'s continue target is its latch, and javac puts the
+	// tail of the body in there - `continue;` would skip it.
+	if switchIsInner && at == d.switches[len(d.switches)-1].Follow {
+		return "break;", true, nil
+	}
 	// A `switch` catches `break` but not `continue`, so the innermost loop still
 	// owns its own continue target even from inside one.
 	if len(d.active) > 0 && at == d.active[len(d.active)-1].ContinueTarget {
 		return "continue;", true, nil
 	}
-	// Only the innermost breakable statement can be left without a label, and a
-	// loop opened inside a `switch` is the innermost one.
-	switchIsInner := len(d.switches) > 0 && d.switches[len(d.switches)-1].LoopDepth == len(d.active)
-	if switchIsInner {
-		if at == d.switches[len(d.switches)-1].Follow {
-			return "break;", true, nil
-		}
-	} else if len(d.active) > 0 && at == d.active[len(d.active)-1].Loop.Follow {
+	if !switchIsInner && len(d.active) > 0 && at == d.active[len(d.active)-1].Loop.Follow {
 		return "break;", true, nil
 	}
 	outerLoops := d.active
@@ -2783,6 +2787,11 @@ func (d *bodyDecompiler) switchFollowOf(b *block, cases []int, defaultTarget int
 		barriers[entered.ContinueTarget] = true
 		barriers[entered.Loop.Follow] = true
 	}
+	// Only a `try` needs the dominators up front; a `switch` this deep into the
+	// rules is rare enough to pay for them here instead of in every method.
+	if len(d.dominators) == 0 {
+		d.dominators = dominators(withExceptionEdges(d.blocks, d.regions), d.entryPc)
+	}
 	reachable := reachableBlocks(d.blocks, append(append([]int{}, cases...), defaultTarget)...)
 	leadsTo := func(owners []int) int {
 		follow := exitBlock
@@ -2830,8 +2839,15 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	// lands on the default is dropped: a tableswitch pads its gaps that way, and
 	// a case that shares the default's body says nothing a `default:` does not.
 	keysOf := map[int][]int{}
+	seen := map[int]bool{}
 	var cases []int
 	for _, entry := range table.SwitchCases {
+		// A repeated key is not a table javac wrote, and source cannot say it
+		// twice, so the reconstruction would not compile.
+		if seen[entry.Key] {
+			return 0, bail("a switch table with a repeated key")
+		}
+		seen[entry.Key] = true
 		if entry.Target == defaultTarget {
 			continue
 		}

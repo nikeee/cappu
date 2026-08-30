@@ -636,6 +636,18 @@ const SWITCHY_SOURCE =
   "  static int continues(int n) { int r = 0; int i = 0; while (i < n) { i = i + 1; switch (i % 3) { case 0: continue; case 1: r += 1; break; default: r += 2; } r *= 2; } return r; }\n" +
   "  static int charSwitch(char c) { switch (c) { case 'a': return 1; case 'z': return 26; default: return 0; } }\n" +
   "  static int inTry(int x) { int r = 0; try { switch (x) { case 1: r = 1; break; default: r = 2; } } catch (RuntimeException e) { r = -1; } return r; }\n" +
+  // A `do`'s continue target is its latch, and javac puts the tail of the body
+  // in there: a `break` out of the `switch` that lands on it is not a `continue`.
+  "  static int doWhile(int n) { int r = 0; int i = 0; do { switch (i % 3) { case 0: r += 1; break; case 1: r += 2; break; default: r += 3; } r *= 2; i = i + 1; } while (i < n); return r; }\n" +
+  "  static int doWhileTail(int n) { int r = 0; int i = 0; do { switch (i % 3) { case 0: r += 1; break; default: r += 3; } i = i + 1; } while (i < n); return r; }\n" +
+  // The `switch` is the last statement of the loop, so every case leaves through
+  // the loop's own edge: no block after the table ends the statement, and the
+  // `default` in the middle is not it either.
+  "  static int loopTail(int n, int x) { int r = 0; int i = 0; while (i < n) { i = i + 1; switch (x) { case 2: r += 1; break; case 3: r += 1; r += 4; break; default: r += 1; break; case 4: r += 1; } } return r; }\n" +
+  // The inner switch has no `default` of its own, so its table's default is the
+  // end of the outer case it sits in - a case that lands exactly on where the
+  // statement around it ends.
+  "  static int sharedExit(int a, int b) { int r = 0; switch (a) { case 1: switch (b) { case 0: r += 2; case 1: r += 1; break; case 3: return r; } case 4: r += 9; return r; } return r; }\n" +
   // javac writes a `String` switch as two: one over `hashCode`, one over the
   // index it stores. Both come back, which is what the original ran.
   '  static String str(String s) { switch (s) { case "a": return "A"; case "b": return "B"; default: return "?"; } }\n' +
@@ -661,7 +673,7 @@ const SWITCHY_RUN_SOURCE =
   "public class SwitchyRun {\n" +
   "  static int loopInside(int x, int n) { int r = 0; switch (x) { case 1: for (int i = 0; i < n; i++) { if (i == 3) { break; } r += i; } break; default: r = -1; } return r; }\n" +
   "  static int doInside(int x, int n) { int r = 0; switch (x) { case 1: { int i = 0; do { r += i; i = i + 1; } while (i < n); break; } default: r = 7; } return r; }\n" +
-  "  static int tryInside(int x) { switch (x) { case 1: try { return Integer.parseInt(\"nope\"); } catch (NumberFormatException e) { return -1; } default: return 0; } }\n" +
+  '  static int tryInside(int x) { switch (x) { case 1: try { return Integer.parseInt("nope"); } catch (NumberFormatException e) { return -1; } default: return 0; } }\n' +
   "}";
 
 const SWITCHY_DRIVER_SOURCE =
