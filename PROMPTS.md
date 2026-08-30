@@ -579,3 +579,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-08-26 23:47 — continue
 - 2026-08-26 23:55 — continue with the next step of the decompilation implementation (see issue 43)
 - 2026-08-27 01:05 — deep review
+- 2026-08-27 12:28 — continue with the next step of the decompilation implementation (see issue 43)
