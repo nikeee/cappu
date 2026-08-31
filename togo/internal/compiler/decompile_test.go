@@ -1218,6 +1218,52 @@ const switchySource = `public class Switchy {
   static String str(String s) { switch (s) { case "a": return "A"; case "b": return "B"; default: return "?"; } }
 }`
 
+// javac puts the tail of a `do` body in the same block as the test, and the jump
+// that leaves the inner `switch` lands there: `continue;` would skip the tail, so
+// this says so instead of writing one.
+const doTailSource = `public class DoTail {
+  static int f(int n) { int r = 0; int i = 0; do { switch (i % 2) { case 0: switch (r % 3) { case 0: r += 1; break; case 1: return -1; default: r += 4; break; } break; default: r += 100; } i++; } while (i < n); return r; }
+}`
+
+func TestDecompileSaysWhenAJumpLandsInTheTailOfADoWhile(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "DoTail", doTailSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: a jump into the tail of a do-while") {
+		t.Errorf("expected the bail, got:\n%s", source)
+	}
+}
+
+// javac writes a `switch` over an enum from another file as a lookup through a
+// synthetic `$SwitchMap$` array, held by an anonymous class no source can name.
+const enumSource = "public enum Colour { RED, GREEN, BLUE }\n"
+
+const enumSwitchSource = `public class Painter {
+  static int f(Colour c) { switch (c) { case RED: return 1; case GREEN: return 2; default: return 0; } }
+}`
+
+func TestDecompileSaysWhenASwitchReadsTheEnumLookupTable(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	compileWithJavac(t, dir, "Colour", enumSource)
+	classFile := compileWithJavacOn(t, dir, "Painter", enumSwitchSource, dir)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: an enum switch") {
+		t.Errorf("expected the bail, got:\n%s", source)
+	}
+}
+
 func TestDecompileRecompilesJavacSwitchesToTheSameBytecode(t *testing.T) {
 	if !hasTool("javac") || !hasTool("javap") {
 		t.Skip("no JDK (javac/javap)")

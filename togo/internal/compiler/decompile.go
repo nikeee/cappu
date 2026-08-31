@@ -1427,6 +1427,10 @@ type activeLoop struct {
 	// ContinueTarget is where `continue;` goes: the test, which a `do` keeps at
 	// the bottom.
 	ContinueTarget int
+	// Continues says whether jumping to ContinueTarget really is `continue;`. A
+	// `do`'s latch is the test *and* the tail of the body when nothing else jumps
+	// to it - and `continue;` skips that tail, so a jump there is not one.
+	Continues bool
 }
 
 // activeSwitch is a `switch` statement being written right now.
@@ -2535,6 +2539,11 @@ func (d *bodyDecompiler) loopJump(at int) (string, bool, error) {
 	// A `switch` catches `break` but not `continue`, so the innermost loop still
 	// owns its own continue target even from inside one.
 	if len(d.active) > 0 && at == d.active[len(d.active)-1].ContinueTarget {
+		// Unless the jump lands in the tail of a `do`'s body, which a `continue;`
+		// would skip: nothing in this phase can write that jump.
+		if !d.active[len(d.active)-1].Continues {
+			return "", false, bail("a jump into the tail of a do-while")
+		}
 		return "continue;", true, nil
 	}
 	if !switchIsInner && len(d.active) > 0 && at == d.active[len(d.active)-1].Loop.Follow {
@@ -2675,7 +2684,7 @@ func containsInt(values []int, wanted int) bool {
 // whileLoop writes `while (c) { ... }`: the header is the test, and the loop
 // runs while it holds.
 func (d *bodyDecompiler) whileLoop(l *loop, header *block) (int, error) {
-	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: l.Header})
+	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: l.Header, Continues: true})
 	defer func() { d.active = d.active[:len(d.active)-1] }()
 	d.visited[l.Header] = true
 	last := header.Instructions[len(header.Instructions)-1]
@@ -2719,7 +2728,7 @@ func (d *bodyDecompiler) whileLoop(l *loop, header *block) (int, error) {
 // doWhileLoop writes `do { ... } while (c);`: the test is the latch, and the
 // body runs first.
 func (d *bodyDecompiler) doWhileLoop(l *loop, latch *block) (int, error) {
-	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: latch.Start})
+	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: latch.Start, Continues: isPureBlock(latch)})
 	defer func() { d.active = d.active[:len(d.active)-1] }()
 	var condition expr
 	statements, err := d.capture(func() error {
@@ -2762,7 +2771,7 @@ func (d *bodyDecompiler) doWhileLoop(l *loop, latch *block) (int, error) {
 // foreverLoop writes `while (true) { ... }`: nothing at the head decides whether
 // to go round again.
 func (d *bodyDecompiler) foreverLoop(l *loop) (int, error) {
-	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: l.Header})
+	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: l.Header, Continues: true})
 	defer func() { d.active = d.active[:len(d.active)-1] }()
 	statements, err := d.capture(func() error { return d.structure(l.Header, exitBlock) })
 	if err != nil {
@@ -2833,6 +2842,13 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	}
 	if len(d.stack) > 0 {
 		return 0, bail("values left on the stack")
+	}
+	// javac compiles a `switch` over an enum into a lookup through a synthetic
+	// `$SwitchMap$` array held by an *anonymous* class - which has no name source
+	// can write, so the reconstruction would not compile. Restoring the
+	// `case CONSTANT:` form needs that holder's initializer, in another file.
+	if strings.Contains(selector.Text, "$SwitchMap$") {
+		return 0, bail("an enum switch")
 	}
 	defaultTarget := table.Arg
 	// Every key that lands on the same block is one list of labels. A key that

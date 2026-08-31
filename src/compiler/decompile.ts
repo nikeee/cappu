@@ -1154,6 +1154,12 @@ interface ActiveLoop {
   readonly loop: Loop;
   /** Where `continue;` goes: the test, which a `do` keeps at the bottom. */
   readonly continueTarget: number;
+  /**
+   * Whether jumping to `continueTarget` really is `continue;`. A `do`'s latch is
+   * the test *and* the tail of the body when nothing else jumps to it - and
+   * `continue;` skips that tail, so a jump there is not one.
+   */
+  readonly continues: boolean;
 }
 
 interface ActiveSwitch {
@@ -1928,6 +1934,11 @@ class BodyDecompiler {
     const table = block.instructions[block.instructions.length - 1]!;
     const selector = this.pop();
     if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
+    // javac compiles a `switch` over an enum into a lookup through a synthetic
+    // `$SwitchMap$` array held by an *anonymous* class - which has no name
+    // source can write, so the reconstruction would not compile. Restoring the
+    // `case CONSTANT:` form needs that holder's initializer, in another file.
+    if (selector.text.includes("$SwitchMap$")) throw new NotDecompilable("an enum switch");
     const defaultTarget = table.arg;
     // Every key that lands on the same block is one list of labels. A key that
     // lands on the default is dropped: a tableswitch pads its gaps that way, and
@@ -2173,7 +2184,12 @@ class BodyDecompiler {
     if (switchIsInner && at === enclosing.follow) return "break;";
     // A `switch` catches `break` but not `continue`, so the innermost loop still
     // owns its own continue target even from inside one.
-    if (inner !== undefined && at === inner.continueTarget) return "continue;";
+    if (inner !== undefined && at === inner.continueTarget) {
+      // Unless the jump lands in the tail of a `do`'s body, which a `continue;`
+      // would skip: nothing in this phase can write that jump.
+      if (!inner.continues) throw new NotDecompilable("a jump into the tail of a do-while");
+      return "continue;";
+    }
     if (!switchIsInner && inner !== undefined && at === inner.loop.follow) {
       return "break;";
     }
@@ -2257,7 +2273,7 @@ class BodyDecompiler {
 
   /** `while (c) { ... }`: the header is the test, and the loop runs while it holds. */
   private whileLoop(loop: Loop, header: Block): number {
-    this.active.push({ loop, continueTarget: loop.header });
+    this.active.push({ loop, continueTarget: loop.header, continues: true });
     try {
       this.visited.add(loop.header);
       const taken: number[] = [];
@@ -2291,7 +2307,7 @@ class BodyDecompiler {
 
   /** `do { ... } while (c);`: the test is the latch, and the body runs first. */
   private doWhileLoop(loop: Loop, latch: Block): number {
-    this.active.push({ loop, continueTarget: latch.start });
+    this.active.push({ loop, continueTarget: latch.start, continues: isPureBlock(latch) });
     let condition: Expr | undefined;
     try {
       const statements = this.capture(() => {
@@ -2320,7 +2336,7 @@ class BodyDecompiler {
 
   /** `while (true) { ... }`: nothing at the head decides whether to go round again. */
   private foreverLoop(loop: Loop): number {
-    this.active.push({ loop, continueTarget: loop.header });
+    this.active.push({ loop, continueTarget: loop.header, continues: true });
     try {
       const statements = this.capture(() => this.structure(loop.header, EXIT));
       trimTail(statements, "continue;");

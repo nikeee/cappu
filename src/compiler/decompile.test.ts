@@ -708,6 +708,47 @@ test(
   },
 );
 
+// javac puts the tail of a `do` body in the same block as the test, and the jump
+// that leaves the inner `switch` lands there: `continue;` would skip the tail, so
+// this says so instead of writing one.
+const DO_TAIL_SOURCE =
+  "public class DoTail {\n" +
+  "  static int f(int n) { int r = 0; int i = 0; do { switch (i % 2) { case 0:" +
+  " switch (r % 3) { case 0: r += 1; break; case 1: return -1; default: r += 4; break; }" +
+  " break; default: r += 100; } i++; } while (i < n); return r; }\n" +
+  "}\n";
+
+test(
+  "says so when a jump lands in the tail of a do-while body",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-dotail-");
+    const classFile = compileWithJavac(DO_TAIL_SOURCE, "DoTail", dir.path);
+    expect(decompileToSource(readFileSync(classFile))).toContain(
+      "cappu: a jump into the tail of a do-while",
+    );
+  },
+);
+
+// javac writes a `switch` over an enum from another file as a lookup through a
+// synthetic `$SwitchMap$` array, held by an anonymous class no source can name.
+const ENUM_SOURCE = "public enum Colour { RED, GREEN, BLUE }\n";
+const ENUM_SWITCH_SOURCE =
+  "public class Painter {\n" +
+  "  static int f(Colour c) { switch (c) { case RED: return 1; case GREEN: return 2; default: return 0; } }\n" +
+  "}\n";
+
+test(
+  "says so when a switch reads javac's enum lookup table",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-enumswitch-");
+    compileWithJavac(ENUM_SOURCE, "Colour", dir.path);
+    const classFile = compileWithJavac(ENUM_SWITCH_SOURCE, "Painter", dir.path, dir.path);
+    expect(decompileToSource(readFileSync(classFile))).toContain("cappu: an enum switch");
+  },
+);
+
 /** Compile one source file with javac and return the .class path. */
 function compileWithJavac(
   source: string,
