@@ -2335,23 +2335,13 @@ class BodyDecompiler {
       // `for (; c; update)` is the same bytecode as the `while` whose last
       // statement is the update - but it is where a `continue` goes, so it is
       // the only form that can write one.
-      const written = update === undefined ? undefined : this.updateClause(update);
-      if (written !== undefined && "clause" in written) {
-        const { clause } = written;
-        this.emitCondition(condition, text => `for (; ${text}; ${clause}) {`);
-      } else {
-        // Not an update clause after all: the block belongs at the end of the
-        // body, which is where the `while` form has always put it. It is kept as
-        // the list it was captured into, so a later retype still finds it.
-        if (written !== undefined) {
-          // A `continue;` was written against the update, and a `while`'s goes to
-          // the test instead - which would skip the statements now at the tail.
-          if (flattenStatements(statements).includes("continue;")) {
-            throw new NotDecompilable("a loop whose update is not an expression");
-          }
-          statements.push(written.statements);
-        }
+      const clause = update === undefined ? "" : this.updateClause(update);
+      if (clause === "") {
+        // A `continue` target with nothing in it: the jump back to the test, on
+        // its own. There is no update to write, so this stays a `while`.
         this.emitCondition(condition, text => `while (${text}) {`);
+      } else {
+        this.emitCondition(condition, text => `for (; ${text}; ${clause}) {`);
       }
       this.current.push(statements, "}");
     } finally {
@@ -2370,10 +2360,18 @@ class BodyDecompiler {
     if (loop.latches.length !== 1) return undefined;
     const latch = this.blocks.get(loop.latches[0]!);
     if (latch === undefined) return undefined;
-    // The update runs before the test, so it ends in the jump back to it, and
-    // it has to hold something besides that jump.
+    // The update runs before the test, so it ends in the jump back to it.
     if (latch.start === loop.header || latch.kind !== "goto") return undefined;
-    if (latch.instructions.length < 2 || this.visited.has(latch.start)) return undefined;
+    if (this.visited.has(latch.start)) return undefined;
+    // Only an increment can be written as the update clause, and this has to be
+    // decided before the body is - `continue;` goes here only if it does. Any
+    // other tail stays a statement of the body, where the `while` form has
+    // always put it: a local stored in here could still be *retyped*, and a
+    // clause frozen into the `for` line would not carry the rewrite.
+    const update = latch.instructions.slice(0, -1);
+    if (!update.every(instruction => instruction.mnemonic.replace(/_w$/, "") === "iinc")) {
+      return undefined;
+    }
     let predecessors = 0;
     for (const block of this.blocks.values()) {
       if (block.successors.includes(latch.start)) predecessors++;
@@ -2385,39 +2383,16 @@ class BodyDecompiler {
    * The `for`'s update clause: the update block's statements, which have to be
    * expressions - a `for` takes a comma-separated list of them, nothing else.
    */
-  private updateClause(update: Block): { clause: string } | { statements: Stmt[] } {
+  private updateClause(update: Block): string {
     this.visited.add(update.start);
-    // A local assigned in here can still be *retyped* later, and the rewrite goes
-    // through the statement this captured - which a clause frozen into the `for`
-    // line would not carry. So the writes are counted, and one sends the block
-    // back to the body.
-    const before = new Map([...this.byName.values()].map(local => [local, local.writes.length]));
     const statements = this.capture(() =>
-      this.runInstructions(
-        update.instructions.slice(this.skip.get(update.start) ?? 0, -1),
-        endOf(update),
-        update.start,
-      ),
+      this.runInstructions(update.instructions.slice(0, -1), endOf(update), update.start),
     );
-    // A local the block *declares* counts too: it is not in `before` at all.
-    const assigned = [...this.byName.values()].some(
-      local => before.get(local) !== local.writes.length,
-    );
-    const written: string[] = [];
-    for (const statement of statements) {
-      // A `for` takes a comma-separated list of expressions and nothing else: a
-      // block, a jump or an object allocation whose value is dropped is not one.
-      if (assigned || typeof statement !== "string" || !statement.endsWith(";")) {
-        return { statements };
-      }
-      const text = statement.slice(0, -1);
-      if (!/^[\w$.[\]()]/.test(text) || /^(?:return|break|continue|throw|new)\b/.test(text)) {
-        return { statements };
-      }
-      written.push(text);
-    }
-    // Nothing to update: the block held only the jump back to the test.
-    return written.length === 0 ? { statements } : { clause: written.join(", ") };
+    // Increments only, so every one of them is an expression statement; an empty
+    // block is a `continue` target with nothing to update.
+    return flattenStatements(statements)
+      .map(text => text.replace(/;$/, ""))
+      .join(", ");
   }
 
   /** `do { ... } while (c);`: the test is the latch, and the body runs first. */

@@ -1610,11 +1610,6 @@ func ifWrap(text string) string { return "if (" + text + ") {" }
 
 func whileWrap(text string) string { return "while (" + text + ") {" }
 
-var (
-	expressionStart = regexp.MustCompile(`^[\w$.\[\]()]`)
-	notAnExpression = regexp.MustCompile(`^(?:return|break|continue|throw|new)\b`)
-)
-
 func doWhileWrap(text string) string { return "} while (" + text + ");" }
 
 // renderCondition renders a condition against the types its locals are known to
@@ -2742,28 +2737,15 @@ func (d *bodyDecompiler) whileLoop(l *loop, header *block) (int, error) {
 	// statement is the update - but it is where a `continue` goes, so it is the
 	// only form that can write one.
 	clause := ""
-	var tail []stmt
 	if update != nil {
-		clause, tail, err = d.updateClause(update)
+		clause, err = d.updateClause(update)
 		if err != nil {
 			return 0, err
 		}
 	}
 	if clause == "" {
-		// Not an update clause after all: the block belongs at the end of the
-		// body, which is where the `while` form has always put it. It is kept as
-		// the list it was captured into, so a later retype still finds it.
-		if tail != nil {
-			// A `continue;` was written against the update, and a `while`'s goes
-			// to the test instead - which would skip the statements now at the
-			// tail.
-			for _, text := range flattenStatements(statements) {
-				if text == "continue;" {
-					return 0, bail("a loop whose update is not an expression")
-				}
-			}
-			statements = append(statements, stmt{Nested: &tail})
-		}
+		// A `continue` target with nothing in it: the jump back to the test, on
+		// its own. There is no update to write, so this stays a `while`.
 		d.emitCondition(condition, whileWrap)
 	} else {
 		d.emitCondition(condition, func(text string) string {
@@ -2789,8 +2771,18 @@ func (d *bodyDecompiler) forUpdate(l *loop) *block {
 	if latch == nil || latch.Start == l.Header || latch.Kind != blockGoto {
 		return nil
 	}
-	if len(latch.Instructions) < 2 || d.visited[latch.Start] {
+	if d.visited[latch.Start] {
 		return nil
+	}
+	// Only an increment can be written as the update clause, and this has to be
+	// decided before the body is - `continue;` goes here only if it does. Any
+	// other tail stays a statement of the body, where the `while` form has always
+	// put it: a local stored in here could still be *retyped*, and a clause
+	// frozen into the `for` line would not carry the rewrite.
+	for _, instruction := range latch.Instructions[:len(latch.Instructions)-1] {
+		if strings.TrimSuffix(instruction.Mnemonic, "_w") != "iinc" {
+			return nil
+		}
 	}
 	predecessors := 0
 	for _, b := range d.blocks {
@@ -2807,50 +2799,22 @@ func (d *bodyDecompiler) forUpdate(l *loop) *block {
 	return nil
 }
 
-// updateClause is the `for`'s update clause: the update block's statements,
-// which have to be expressions - a `for` takes a comma-separated list of them,
-// nothing else. It reports "" when they are not.
-func (d *bodyDecompiler) updateClause(update *block) (string, []stmt, error) {
+// updateClause is the `for`'s update clause: the update block's statements, which
+// are increments, so every one of them is an expression statement. It reports ""
+// for a block that holds only the jump back to the test.
+func (d *bodyDecompiler) updateClause(update *block) (string, error) {
 	d.visited[update.Start] = true
-	// A local assigned in here can still be *retyped* later, and the rewrite goes
-	// through the statement this captured - which a clause frozen into the `for`
-	// line would not carry. So the writes are counted, and one sends the block
-	// back to the body.
-	before := map[*local]int{}
-	for _, entry := range d.byName {
-		before[entry] = len(entry.Writes)
-	}
 	statements, err := d.capture(func() error {
-		return d.runInstructions(update.Instructions[d.skip[update.Start]:len(update.Instructions)-1], endOf(update), update.Start)
+		return d.runInstructions(update.Instructions[:len(update.Instructions)-1], endOf(update), update.Start)
 	})
 	if err != nil {
-		return "", nil, err
-	}
-	assigned := false
-	for _, entry := range d.byName {
-		if count, ok := before[entry]; !ok || len(entry.Writes) != count {
-			assigned = true
-			break
-		}
+		return "", err
 	}
 	var written []string
-	for _, statement := range statements {
-		// A `for` takes a comma-separated list of expressions and nothing else: a
-		// block, a jump or an object allocation whose value is dropped is not one.
-		if assigned || statement.Nested != nil || !strings.HasSuffix(statement.Text, ";") {
-			return "", statements, nil
-		}
-		text := strings.TrimSuffix(statement.Text, ";")
-		if !expressionStart.MatchString(text) || notAnExpression.MatchString(text) {
-			return "", statements, nil
-		}
-		written = append(written, text)
+	for _, text := range flattenStatements(statements) {
+		written = append(written, strings.TrimSuffix(text, ";"))
 	}
-	// Nothing to update: the block held only the jump back to the test.
-	if len(written) == 0 {
-		return "", statements, nil
-	}
-	return strings.Join(written, ", "), nil, nil
+	return strings.Join(written, ", "), nil
 }
 
 // doWhileLoop writes `do { ... } while (c);`: the test is the latch, and the

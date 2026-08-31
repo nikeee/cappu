@@ -1225,6 +1225,7 @@ const forrySource = `public class Forry {
   static int inSwitch(int n) { int r = 0; for (int i = 0; i < n; i++) { switch (i % 3) { case 0: r += 1; break; case 1: continue; default: r += 3; } r *= 2; } return r; }
   static int inSwitchTry(int n) { int r = 0; for (int i = 0; i < n; i++) { switch (i % 2) { case 0: continue; default: r += 3; } } return r; }
   static int whileForm(int n) { int r = 0; int i = 0; while (i < n) { if (i % 2 == 0) { r += 1; } else { r += 2; } i++; } return r; }
+  static int switchExits(int n, int x) { int r = 0; for (int i = 0; i < n; i++) { switch (x) { case 1: continue; case 2: r += 1; break; case 3: return -1; default: r += 3; } r *= 2; } return r; }
 }`
 
 func TestDecompileRecompilesJavacForLoopsToTheSameBytecode(t *testing.T) {
@@ -1291,13 +1292,15 @@ const forryRunSource = `public class ForryRun {
   static int twoContinues(int n) { int r = 0; for (int i = 0; i < n; i++) { if (i == 1) { continue; } if (i == 3) { r += 7; continue; } r += 1; } return r; }
   static int nested(int n) { int r = 0; for (int i = 0; i < n; i++) { for (int j = 0; j < n; j++) { if (j == 1) { continue; } r += i + j; } r += 1; } return r; }
   static int inWhile(int n) { int r = 0; int i = 0; while (i < n) { i = i + 1; if (i == 2) { continue; } r += i; } return r; }
+  static int search(int[] a, int key) { int low = 0; int high = a.length - 1; while (low <= high) { int mid = (low + high) >>> 1; if (a[mid] < key) { low = mid + 1; } else if (a[mid] > key) { high = mid - 1; } else { return mid; } } return -(low + 1); }
 }`
 
 const forryDriverSource = `public class ForryDriver {
   public static void main(String[] args) {
     for (int n = 0; n < 8; n++) {
       System.out.println(n + " " + ForryRun.twoUpdates(n) + " " + ForryRun.twoContinues(n)
-        + " " + ForryRun.nested(n) + " " + ForryRun.inWhile(n));
+        + " " + ForryRun.nested(n) + " " + ForryRun.inWhile(n)
+        + " " + ForryRun.search(new int[] { 0, 2, 4, 6, 8 }, n));
     }
   }
 }`
