@@ -68,6 +68,7 @@ var fullyDecompiled = []string{
 	"SubA",
 	"SubB",
 	"SubC",
+	"Switches",
 	"VarargsAndAbstract",
 	"VarargsPack",
 }
@@ -575,6 +576,27 @@ var reconstructions = []struct {
 			" else { b = false; } return b; } }",
 		want:          []string{"boolean var1;", "var1 = true;", "var1 = false;"},
 		reject:        []string{"var1 = 1;", "var1 = 0;"},
+		selfContained: true,
+	},
+	{
+		name: "SwitchLabeled",
+		// A `switch` catches an unlabeled `break`, so one that leaves the loop
+		// around it needs a label - which this phase does not write.
+		source: "class SwitchLabeled { static int f(int n, int x) { int r = 0;" +
+			" outer: while (r < n) { switch (x) { case 1: r += 1; break; case 2: break outer;" +
+			" default: r += 3; } r += 1; } return r; } }",
+		want:          []string{"cappu: a labeled break or continue"},
+		selfContained: true,
+	},
+	{
+		name: "SwitchDefaultPad",
+		// The gaps a tableswitch pads with its default target say nothing a
+		// `default:` does not, so they are not written back as cases.
+		source: "class SwitchDefaultPad { static int f(int x) { int r = 0;" +
+			" switch (x) { case 1: r = 1; break; case 4: r = 4; break; default: r = 9; }" +
+			" return r; } }",
+		want:          []string{"case 1:", "case 4:", "default:"},
+		reject:        []string{"case 2:", "case 3:", "not decompiled"},
 		selfContained: true,
 	},
 	{
@@ -1168,6 +1190,168 @@ func TestDecompileRecompilesJavacStringConcatenationsToTheSameBytecode(t *testin
 	if javapText(t, roundTripped) != javapText(t, classFile) {
 		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
 			javapText(t, roundTripped), javapText(t, classFile))
+	}
+}
+
+// Every switch shape javac lays out. Only a recompile can see a case written in
+// the wrong place, so this runs the reconstruction back through javac and
+// compares the bytecode.
+const switchySource = `public class Switchy {
+  static int dense(int x) { switch (x) { case 1: return 10; case 2: return 20; case 3: return 30; default: return -1; } }
+  static int breaks(int x) { int r = 0; switch (x) { case 0: r = 1; break; case 1: r = 2; break; default: r = 9; } return r + 1; }
+  static int fall(int x) { int r = 0; switch (x) { case 1: case 2: r += 1; case 3: r += 2; break; case 7: r += 4; break; } return r; }
+  static int sparse(int x) { switch (x) { case 100: return 1; case 5000: return 2; case -7: return 3; } return 0; }
+  static int noDefault(int x) { int r = 0; switch (x) { case 1: r = 5; break; case 2: r = 6; break; } return r; }
+  static int emptyCase(int x) { int r = 3; switch (x) { case 1: break; case 2: r = 7; break; default: r = 8; } return r; }
+  static int mixedExit(int x) { int r = 0; switch (x) { case 1: return 100; case 2: r = 2; break; default: r = 3; } return r; }
+  static int defaultFirst(int x) { int r = 0; switch (x) { default: r += 1; case 5: r += 2; break; case 9: r += 4; } return r; }
+  static int nested(int x, int y) { int r = 0; switch (x) { case 1: switch (y) { case 1: r = 11; break; default: r = 12; } break; case 2: r = 20; break; default: r = 99; } return r; }
+  static int withIf(int x, boolean b) { int r = 0; switch (x) { case 1: if (b) { r = 1; } else { r = 2; } break; case 2: if (b) { return -1; } r = 3; break; } return r; }
+  static int inWhile(int n) { int r = 0; int i = 0; while (i < n) { switch (i % 2) { case 0: r += 1; break; default: r += 2; } i = i + 1; } return r; }
+  static int continues(int n) { int r = 0; int i = 0; while (i < n) { i = i + 1; switch (i % 3) { case 0: continue; case 1: r += 1; break; default: r += 2; } r *= 2; } return r; }
+  static int charSwitch(char c) { switch (c) { case 'a': return 1; case 'z': return 26; default: return 0; } }
+  static int inTry(int x) { int r = 0; try { switch (x) { case 1: r = 1; break; default: r = 2; } } catch (RuntimeException e) { r = -1; } return r; }
+  static int doWhile(int n) { int r = 0; int i = 0; do { switch (i % 3) { case 0: r += 1; break; case 1: r += 2; break; default: r += 3; } r *= 2; i = i + 1; } while (i < n); return r; }
+  static int doWhileTail(int n) { int r = 0; int i = 0; do { switch (i % 3) { case 0: r += 1; break; default: r += 3; } i = i + 1; } while (i < n); return r; }
+  static int loopTail(int n, int x) { int r = 0; int i = 0; while (i < n) { i = i + 1; switch (x) { case 2: r += 1; break; case 3: r += 1; r += 4; break; default: r += 1; break; case 4: r += 1; } } return r; }
+  static int sharedExit(int a, int b) { int r = 0; switch (a) { case 1: switch (b) { case 0: r += 2; case 1: r += 1; break; case 3: return r; } case 4: r += 9; return r; } return r; }
+  static String str(String s) { switch (s) { case "a": return "A"; case "b": return "B"; default: return "?"; } }
+}`
+
+// The same trap one level out from `i++`: `arr[idx++]` where `idx` is a *field*
+// is a getstatic/dup/putstatic, and writing the assignment out first would make
+// the read take the new value.
+const fieldPostIncrementSource = `public class FieldPost {
+  static int[] arr = { 5, 6, 7 };
+  static int idx = 0;
+  static int f() { int v = arr[idx++]; return v * 100 + idx; }
+}`
+
+func TestDecompileSaysWhenAFieldIsAssignedWhileItIsOnTheStack(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "FieldPost", fieldPostIncrementSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: an assignment to a field that is already on the stack") {
+		t.Errorf("expected the bail, got:\n%s", source)
+	}
+}
+
+// javac puts the tail of a `do` body in the same block as the test, and the jump
+// that leaves the inner `switch` lands there: `continue;` would skip the tail, so
+// this says so instead of writing one.
+const doTailSource = `public class DoTail {
+  static int f(int n) { int r = 0; int i = 0; do { switch (i % 2) { case 0: switch (r % 3) { case 0: r += 1; break; case 1: return -1; default: r += 4; break; } break; default: r += 100; } i++; } while (i < n); return r; }
+}`
+
+func TestDecompileSaysWhenAJumpLandsInTheTailOfADoWhile(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "DoTail", doTailSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: a jump into the tail of a do-while") {
+		t.Errorf("expected the bail, got:\n%s", source)
+	}
+}
+
+// javac writes a `switch` over an enum from another file as a lookup through a
+// synthetic `$SwitchMap$` array, held by an anonymous class no source can name.
+const enumSource = "public enum Colour { RED, GREEN, BLUE }\n"
+
+const enumSwitchSource = `public class Painter {
+  static int f(Colour c) { switch (c) { case RED: return 1; case GREEN: return 2; default: return 0; } }
+}`
+
+func TestDecompileSaysWhenASwitchReadsTheEnumLookupTable(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	compileWithJavac(t, dir, "Colour", enumSource)
+	classFile := compileWithJavacOn(t, dir, "Painter", enumSwitchSource, dir)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: an enum switch") {
+		t.Errorf("expected the bail, got:\n%s", source)
+	}
+}
+
+func TestDecompileRecompilesJavacSwitchesToTheSameBytecode(t *testing.T) {
+	if !hasTool("javac") || !hasTool("javap") {
+		t.Skip("no JDK (javac/javap)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Switchy", switchySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Switchy", source)
+	if javapText(t, roundTripped) != javapText(t, classFile) {
+		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
+			javapText(t, roundTripped), javapText(t, classFile))
+	}
+}
+
+// A loop inside a `case` declares its variable there, which the reconstruction
+// hoists to the top of the method - the slots shift, so only running it can say
+// the two are the same.
+const switchyRunSource = `public class SwitchyRun {
+  static int loopInside(int x, int n) { int r = 0; switch (x) { case 1: for (int i = 0; i < n; i++) { if (i == 3) { break; } r += i; } break; default: r = -1; } return r; }
+  static int doInside(int x, int n) { int r = 0; switch (x) { case 1: { int i = 0; do { r += i; i = i + 1; } while (i < n); break; } default: r = 7; } return r; }
+  static int tryInside(int x) { switch (x) { case 1: try { return Integer.parseInt("nope"); } catch (NumberFormatException e) { return -1; } default: return 0; } }
+}`
+
+const switchyDriverSource = `public class SwitchyDriver {
+  public static void main(String[] args) {
+    for (int x = -1; x < 4; x++) {
+      for (int n = 0; n < 5; n++) {
+        System.out.println(SwitchyRun.loopInside(x, n) + " " + SwitchyRun.doInside(x, n)
+          + " " + SwitchyRun.tryInside(x));
+      }
+    }
+  }
+}`
+
+func TestDecompileRunsLikeJavacSwitches(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "SwitchyRun", switchyRunSource)
+	compileWithJavacOn(t, dir, "SwitchyDriver", switchyDriverSource, dir)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "SwitchyRun", source)
+	expected := runJava(t, dir, "SwitchyDriver")
+	// `again` first, so the decompiled class is the one that runs.
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "SwitchyDriver")
+	if actual != expected {
+		t.Errorf("the decompiled class runs differently:\n%s\n--- from ---\n%s", actual, expected)
+	}
+	if expected == "" {
+		t.Fatal("the driver printed nothing")
 	}
 }
 

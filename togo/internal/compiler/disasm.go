@@ -483,6 +483,15 @@ type Instruction struct {
 	// Arg2 is the second numeric operand: the `iinc` delta, `multianewarray`
 	// dimensions.
 	Arg2 int
+	// SwitchCases are a table/lookupswitch's `key -> target` pairs, ascending by
+	// key; Arg holds its default target. Empty for every other instruction.
+	SwitchCases []SwitchCase
+}
+
+// SwitchCase is one `key -> target` entry of a table/lookupswitch.
+type SwitchCase struct {
+	Key    int
+	Target int
 }
 
 // Bounds-checked, because the code array comes straight from the file: an
@@ -650,9 +659,12 @@ func DecodeInstructions(classFile *ClassFile, code []byte) ([]Instruction, error
 			high := int(c.i4())
 			var keys []string
 			var targets []int
+			instruction.Arg = defaultTarget
 			for key := low; key <= high && !c.overrun; key++ {
+				target := pc + int(c.i4())
+				instruction.SwitchCases = append(instruction.SwitchCases, SwitchCase{Key: key, Target: target})
 				keys = append(keys, strconv.Itoa(key))
-				targets = append(targets, pc+int(c.i4()))
+				targets = append(targets, target)
 			}
 			keys = append(keys, "default")
 			targets = append(targets, defaultTarget)
@@ -664,9 +676,13 @@ func DecodeInstructions(classFile *ClassFile, code []byte) ([]Instruction, error
 			pairs := int(c.i4())
 			var keys []string
 			var targets []int
+			instruction.Arg = defaultTarget
 			for i := 0; i < pairs && !c.overrun; i++ {
-				keys = append(keys, strconv.Itoa(int(c.i4())))
-				targets = append(targets, pc+int(c.i4()))
+				key := int(c.i4())
+				target := pc + int(c.i4())
+				instruction.SwitchCases = append(instruction.SwitchCases, SwitchCase{Key: key, Target: target})
+				keys = append(keys, strconv.Itoa(key))
+				targets = append(targets, target)
 			}
 			keys = append(keys, "default")
 			targets = append(targets, defaultTarget)

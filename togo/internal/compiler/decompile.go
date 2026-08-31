@@ -2,12 +2,12 @@ package compiler
 
 // Port of src/compiler/decompile.ts.
 //
-// `cappu decompile`, phases 1.3 to 1.9 (nikeee/cappu#43): reconstruct Java
+// `cappu decompile`, phases 1.3 to 1.10 (nikeee/cappu#43): reconstruct Java
 // source from bytecode. A symbolic stack interpreter walks a method's basic
 // blocks and turns them back into expressions and statements, with the control
 // flow structured into `if`/`else`, `&&`/`||`, `?:`, the loop forms, method
-// calls, `try`/`catch`, array initializers and string concatenation; anything
-// that needs a `finally`, a `switch` or an invokedynamic that is not a
+// calls, `try`/`catch`, array initializers, string concatenation and `switch`;
+// anything that needs a `finally` or an invokedynamic that is not a
 // concatenation (later phases) renders as its disassembly plus a
 // `throw new UnsupportedOperationException(...)`, so the output is always
 // compilable Java.
@@ -707,6 +707,10 @@ func isGotoMnemonic(mnemonic string) bool {
 	return mnemonic == "goto" || mnemonic == "goto_w"
 }
 
+func isSwitchMnemonic(mnemonic string) bool {
+	return mnemonic == "tableswitch" || mnemonic == "lookupswitch"
+}
+
 func isBlockEndMnemonic(mnemonic string) bool {
 	if mnemonic == "athrow" || mnemonic == "return" {
 		return true
@@ -721,6 +725,7 @@ const (
 	blockFall blockKind = iota
 	blockConditional
 	blockGoto
+	blockSwitch
 	blockEnd
 )
 
@@ -746,9 +751,6 @@ func buildBlocks(instructions []Instruction, exceptions []ExceptionEntry) (map[i
 	}
 	for i, instruction := range instructions {
 		mnemonic := instruction.Mnemonic
-		if mnemonic == "tableswitch" || mnemonic == "lookupswitch" {
-			return nil, bail("switch is not decompiled yet (%s)", mnemonic)
-		}
 		// The subroutine opcodes: gone since Java 6, and their control flow is
 		// not expressible as a branch.
 		if subroutineOpcodes[mnemonic] {
@@ -758,7 +760,14 @@ func buildBlocks(instructions []Instruction, exceptions []ExceptionEntry) (map[i
 		if branch {
 			leaders[instruction.Arg] = true
 		}
-		if branch || isBlockEndMnemonic(mnemonic) {
+		if isSwitchMnemonic(mnemonic) {
+			// Arg is the default target, and every case target begins a statement.
+			leaders[instruction.Arg] = true
+			for _, entry := range instruction.SwitchCases {
+				leaders[entry.Target] = true
+			}
+		}
+		if branch || isSwitchMnemonic(mnemonic) || isBlockEndMnemonic(mnemonic) {
 			if i+1 < len(instructions) {
 				leaders[instructions[i+1].Pc] = true
 			}
@@ -787,6 +796,19 @@ func buildBlocks(instructions []Instruction, exceptions []ExceptionEntry) (map[i
 		case isGotoMnemonic(last.Mnemonic):
 			kind = blockGoto
 			successors = []int{last.Arg}
+		case isSwitchMnemonic(last.Mnemonic):
+			kind = blockSwitch
+			// The default first, then each distinct case target once: the
+			// analyses below walk this list, and a repeated edge would be
+			// walked twice.
+			successors = []int{last.Arg}
+			seen := map[int]bool{last.Arg: true}
+			for _, entry := range last.SwitchCases {
+				if !seen[entry.Target] {
+					seen[entry.Target] = true
+					successors = append(successors, entry.Target)
+				}
+			}
 		case isBlockEndMnemonic(last.Mnemonic):
 			kind = blockEnd
 			successors = nil
@@ -1405,6 +1427,20 @@ type activeLoop struct {
 	// ContinueTarget is where `continue;` goes: the test, which a `do` keeps at
 	// the bottom.
 	ContinueTarget int
+	// Continues says whether jumping to ContinueTarget really is `continue;`. A
+	// `do`'s latch is the test *and* the tail of the body when nothing else jumps
+	// to it - and `continue;` skips that tail, so a jump there is not one.
+	Continues bool
+}
+
+// activeSwitch is a `switch` statement being written right now.
+type activeSwitch struct {
+	// Follow is where `break;` goes: the end of the statement.
+	Follow int
+	// LoopDepth is how many loops were being written when this `switch` was
+	// entered. It is the innermost breakable statement only while that is still
+	// true - a loop opened inside it takes every unlabeled `break` for itself.
+	LoopDepth int
 }
 
 // pureMnemonics are the instructions a *condition* may be built from: no store,
@@ -1499,8 +1535,10 @@ type bodyDecompiler struct {
 	// dominators over the graph the throwing edges are in, for a `try`'s own end.
 	dominators map[int]map[int]bool
 	// active are the loops being written right now, innermost last.
-	active  []activeLoop
-	visited map[int]bool
+	active []activeLoop
+	// switches are the `switch` statements being written right now, innermost last.
+	switches []activeSwitch
+	visited  map[int]bool
 	// pendingCount hands out the ids that tell the copies of one `new` apart.
 	pendingCount int
 	// initCount does the same for the copies of one array literal.
@@ -1604,6 +1642,15 @@ func (d *bodyDecompiler) renderCondition(condition expr) expr {
 		}
 		return compareExpr(value, logic.Op, primary(coerce(*logic.Right, entry.Type), entry.Type))
 	}
+}
+
+// reads reports whether text reads name - a variable or a field reference,
+// matched whole so a longer name that contains it does not count.
+func reads(text, name string) bool {
+	if !strings.Contains(text, name) {
+		return false
+	}
+	return regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`).MatchString(text)
 }
 
 // emit appends one statement where statements are currently going.
@@ -2223,7 +2270,7 @@ func (d *bodyDecompiler) structure(entry, stop int) error {
 		}
 		d.visited[at] = true
 		body := b.Instructions[d.skip[at]:]
-		if b.Kind == blockConditional || b.Kind == blockGoto {
+		if b.Kind == blockConditional || b.Kind == blockGoto || b.Kind == blockSwitch {
 			body = body[:len(body)-1]
 		}
 		if err := d.runInstructions(body, endOf(b), b.Start); err != nil {
@@ -2231,6 +2278,14 @@ func (d *bodyDecompiler) structure(entry, stop int) error {
 		}
 		if b.Kind == blockEnd {
 			return nil
+		}
+		if b.Kind == blockSwitch {
+			next, err := d.switchStatement(b, stop)
+			if err != nil {
+				return err
+			}
+			at = next
+			continue
 		}
 		if b.Kind != blockConditional {
 			at = b.Successors[0]
@@ -2481,18 +2536,43 @@ func (d *bodyDecompiler) catchName(c *clause) (string, func(), error) {
 // loop's next iteration, or the code after it, begins. Leaving an *enclosing*
 // loop needs a label, which this phase does not write.
 func (d *bodyDecompiler) loopJump(at int) (string, bool, error) {
-	if len(d.active) == 0 {
-		return "", false, nil
-	}
-	inner := d.active[len(d.active)-1]
-	if at == inner.ContinueTarget {
-		return "continue;", true, nil
-	}
-	if at == inner.Loop.Follow {
+	// Only the innermost breakable statement can be left without a label, and a
+	// loop opened inside a `switch` is the innermost one.
+	switchIsInner := len(d.switches) > 0 && d.switches[len(d.switches)-1].LoopDepth == len(d.active)
+	// The end of the `switch` comes first, even when it is also the loop's
+	// continue target: a `do`'s continue target is its latch, and javac puts the
+	// tail of the body in there - `continue;` would skip it.
+	if switchIsInner && at == d.switches[len(d.switches)-1].Follow {
 		return "break;", true, nil
 	}
-	for _, outer := range d.active[:len(d.active)-1] {
+	// A `switch` catches `break` but not `continue`, so the innermost loop still
+	// owns its own continue target even from inside one.
+	if len(d.active) > 0 && at == d.active[len(d.active)-1].ContinueTarget {
+		// Unless the jump lands in the tail of a `do`'s body, which a `continue;`
+		// would skip: nothing in this phase can write that jump.
+		if !d.active[len(d.active)-1].Continues {
+			return "", false, bail("a jump into the tail of a do-while")
+		}
+		return "continue;", true, nil
+	}
+	if !switchIsInner && len(d.active) > 0 && at == d.active[len(d.active)-1].Loop.Follow {
+		return "break;", true, nil
+	}
+	outerLoops := d.active
+	if !switchIsInner && len(d.active) > 0 {
+		outerLoops = d.active[:len(d.active)-1]
+	}
+	for _, outer := range outerLoops {
 		if at == outer.ContinueTarget || at == outer.Loop.Follow {
+			return "", false, bail("a labeled break or continue")
+		}
+	}
+	outerSwitches := d.switches
+	if switchIsInner {
+		outerSwitches = d.switches[:len(d.switches)-1]
+	}
+	for _, outer := range outerSwitches {
+		if at == outer.Follow {
 			return "", false, bail("a labeled break or continue")
 		}
 	}
@@ -2581,6 +2661,9 @@ func (d *bodyDecompiler) reachesArm(from, to int) bool {
 		stop[inner.ContinueTarget] = true
 		stop[inner.Loop.Follow] = true
 	}
+	for _, entered := range d.switches {
+		stop[entered.Follow] = true
+	}
 	seen := map[int]bool{}
 	queue := []int{from}
 	for len(queue) > 0 {
@@ -2610,7 +2693,7 @@ func containsInt(values []int, wanted int) bool {
 // whileLoop writes `while (c) { ... }`: the header is the test, and the loop
 // runs while it holds.
 func (d *bodyDecompiler) whileLoop(l *loop, header *block) (int, error) {
-	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: l.Header})
+	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: l.Header, Continues: true})
 	defer func() { d.active = d.active[:len(d.active)-1] }()
 	d.visited[l.Header] = true
 	last := header.Instructions[len(header.Instructions)-1]
@@ -2654,7 +2737,7 @@ func (d *bodyDecompiler) whileLoop(l *loop, header *block) (int, error) {
 // doWhileLoop writes `do { ... } while (c);`: the test is the latch, and the
 // body runs first.
 func (d *bodyDecompiler) doWhileLoop(l *loop, latch *block) (int, error) {
-	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: latch.Start})
+	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: latch.Start, Continues: isPureBlock(latch)})
 	defer func() { d.active = d.active[:len(d.active)-1] }()
 	var condition expr
 	statements, err := d.capture(func() error {
@@ -2697,7 +2780,7 @@ func (d *bodyDecompiler) doWhileLoop(l *loop, latch *block) (int, error) {
 // foreverLoop writes `while (true) { ... }`: nothing at the head decides whether
 // to go round again.
 func (d *bodyDecompiler) foreverLoop(l *loop) (int, error) {
-	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: l.Header})
+	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: l.Header, Continues: true})
 	defer func() { d.active = d.active[:len(d.active)-1] }()
 	statements, err := d.capture(func() error { return d.structure(l.Header, exitBlock) })
 	if err != nil {
@@ -2708,6 +2791,186 @@ func (d *bodyDecompiler) foreverLoop(l *loop) (int, error) {
 	*d.current = append(*d.current, stmt{Nested: &statements})
 	d.emit("}")
 	return l.Follow, nil
+}
+
+// switchFollowOf is where a `switch` ends when its cases do not all come back
+// together: a case that returns leaves the post-dominator at exitBlock, and what
+// follows the statement is then the first block the switch as a whole leads to
+// that no single case owns.
+func (d *bodyDecompiler) switchFollowOf(b *block, cases []int, defaultTarget int) int {
+	// A jump that leaves an enclosing loop is that loop's, not this statement's:
+	// taking it for the follow would write a `break` that breaks the wrong one.
+	barriers := map[int]bool{}
+	for _, entered := range d.active {
+		barriers[entered.ContinueTarget] = true
+		barriers[entered.Loop.Follow] = true
+	}
+	// Only a `try` needs the dominators up front; a `switch` this deep into the
+	// rules is rare enough to pay for them here instead of in every method.
+	if len(d.dominators) == 0 {
+		d.dominators = dominators(withExceptionEdges(d.blocks, d.regions), d.entryPc)
+	}
+	reachable := reachableBlocks(d.blocks, append(append([]int{}, cases...), defaultTarget)...)
+	leadsTo := func(owners []int) int {
+		follow := exitBlock
+		for start := range reachable {
+			above := d.dominators[start]
+			if start <= b.Start || barriers[start] || above == nil || !above[b.Start] {
+				continue
+			}
+			owned := false
+			for _, owner := range owners {
+				if above[owner] {
+					owned = true
+					break
+				}
+			}
+			if owned || (follow != exitBlock && start >= follow) {
+				continue
+			}
+			follow = start
+		}
+		return follow
+	}
+	if merged := leadsTo(append(append([]int{}, cases...), defaultTarget)); merged != exitBlock {
+		return merged
+	}
+	// A `switch` with no `default` of its own ends where the table's default
+	// sends it - which the pass above ruled out as the default's own body. A
+	// default that a case falls into is still ruled out, by that case.
+	return leadsTo(cases)
+}
+
+// switchStatement writes one `switch`, from the table that ends b, and reports
+// where the statement after it begins.
+func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
+	table := b.Instructions[len(b.Instructions)-1]
+	selector, err := d.pop()
+	if err != nil {
+		return 0, err
+	}
+	if len(d.stack) > 0 {
+		return 0, bail("values left on the stack")
+	}
+	// javac compiles a `switch` over an enum into a lookup through a synthetic
+	// `$SwitchMap$` array held by an *anonymous* class - which has no name source
+	// can write, so the reconstruction would not compile. Restoring the
+	// `case CONSTANT:` form needs that holder's initializer, in another file.
+	if strings.Contains(selector.Text, "$SwitchMap$") {
+		return 0, bail("an enum switch")
+	}
+	defaultTarget := table.Arg
+	// Every key that lands on the same block is one list of labels. A key that
+	// lands on the default is dropped: a tableswitch pads its gaps that way, and
+	// a case that shares the default's body says nothing a `default:` does not.
+	keysOf := map[int][]int{}
+	seen := map[int]bool{}
+	var cases []int
+	for _, entry := range table.SwitchCases {
+		// A repeated key is not a table javac wrote, and source cannot say it
+		// twice, so the reconstruction would not compile.
+		if seen[entry.Key] {
+			return 0, bail("a switch table with a repeated key")
+		}
+		seen[entry.Key] = true
+		if entry.Target == defaultTarget {
+			continue
+		}
+		if _, seen := keysOf[entry.Target]; !seen {
+			cases = append(cases, entry.Target)
+		}
+		keysOf[entry.Target] = append(keysOf[entry.Target], entry.Key)
+	}
+	targets := append(append([]int{}, cases...), defaultTarget)
+	sort.Ints(targets)
+	if targets[0] <= b.Start {
+		return 0, bail("a switch that jumps backwards")
+	}
+
+	follow, ok := d.followOf[b.Start]
+	if !ok {
+		follow = exitBlock
+	}
+	// The merge can sit outside this statement: a case that returns makes the
+	// post-dominator exitBlock, while the rest still comes back together where
+	// the statement around this one ends. That only counts when no case begins
+	// past it: a loop's `stop` is its header, behind them. A case *on* it is the
+	// end of this statement, which is `case k: break;`.
+	if follow == exitBlock && targets[len(targets)-1] <= stop {
+		for _, target := range targets {
+			if d.reachesArm(target, stop) {
+				follow = stop
+				break
+			}
+		}
+	}
+	if follow == exitBlock {
+		follow = d.switchFollowOf(b, cases, defaultTarget)
+	}
+	// javac lays the case bodies out in one run before the end of the statement,
+	// so a candidate that sits between them ends nothing: the statement has no
+	// follow at all then, and every case runs into the next or leaves on its own.
+	if follow != exitBlock && targets[len(targets)-1] > follow {
+		follow = exitBlock
+	}
+	// A case that lands on the end of the statement has no body: it is
+	// `case k: break;`, written last so nothing can fall into it.
+	var bodies []int
+	for _, target := range targets {
+		if target != follow {
+			bodies = append(bodies, target)
+		}
+	}
+
+	d.switches = append(d.switches, activeSwitch{Follow: follow, LoopDepth: len(d.active)})
+	// The bodyless cases come first: nothing can fall into them there, and their
+	// own `break;` keeps them from falling into the first body.
+	clauses := []stmt{}
+	for _, target := range targets {
+		if target != follow {
+			continue
+		}
+		for _, key := range keysOf[target] {
+			clauses = append(clauses, stmt{Text: fmt.Sprintf("case %d:", key)})
+		}
+		if len(keysOf[target]) > 0 {
+			broke := []stmt{{Text: "break;"}}
+			clauses = append(clauses, stmt{Nested: &broke})
+		}
+	}
+	err = func() error {
+		defer func() { d.switches = d.switches[:len(d.switches)-1] }()
+		for i, target := range bodies {
+			// Running off the end of one case is a fallthrough into the next, so
+			// a body stops where the next one begins.
+			end := follow
+			if i+1 < len(bodies) {
+				end = bodies[i+1]
+			}
+			for _, key := range keysOf[target] {
+				clauses = append(clauses, stmt{Text: fmt.Sprintf("case %d:", key)})
+			}
+			if target == defaultTarget {
+				clauses = append(clauses, stmt{Text: "default:"})
+			}
+			statements, err := d.capture(func() error { return d.structure(target, end) })
+			if err != nil {
+				return err
+			}
+			clauses = append(clauses, stmt{Nested: &statements})
+			if len(d.stack) > 0 {
+				return bail("values left on the stack")
+			}
+		}
+		return nil
+	}()
+	if err != nil {
+		return 0, err
+	}
+	d.emit("switch (" + selector.Text + ") {")
+	*d.current = append(*d.current, stmt{Nested: &clauses})
+	d.emit("}")
+	return follow, nil
 }
 
 // conditional writes one `if`, from the branch that ends b, and reports where
@@ -3290,10 +3553,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		// are not what this writes back. Their form needs the increment to stay an
 		// expression, which this phase does not do.
 		for _, value := range d.stack {
-			if !strings.Contains(value.Text, target.Name) {
-				continue
-			}
-			if regexp.MustCompile(`\b` + regexp.QuoteMeta(target.Name) + `\b`).MatchString(value.Text) {
+			if reads(value.Text, target.Name) {
 				return bail("an increment of a variable that is already on the stack")
 			}
 		}
@@ -3379,6 +3639,14 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 				return err
 			}
 			target = at(receiver, precPrimary) + "." + field.Name
+		}
+		// The assignment is a statement here, so anything already on the stack that
+		// reads the same field would read the *new* value: `arr[idx++]` writes the
+		// increment out first, and the read has to stay behind it.
+		for _, stacked := range d.stack {
+			if reads(stacked.Text, target) {
+				return bail("an assignment to a field that is already on the stack")
+			}
 		}
 		d.emit(target + " = " + d.coerceInto(value, fieldType) + ";")
 		return nil

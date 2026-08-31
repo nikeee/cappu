@@ -1,9 +1,9 @@
-// `cappu decompile`, phases 1.3 to 1.9 (nikeee/cappu#43): reconstruct Java
+// `cappu decompile`, phases 1.3 to 1.10 (nikeee/cappu#43): reconstruct Java
 // source from bytecode. A symbolic stack interpreter walks a method's basic
 // blocks and turns them back into expressions and statements, with the control
 // flow structured into `if`/`else`, `&&`/`||`, `?:`, the loop forms, method
-// calls, `try`/`catch`, array initializers and string concatenation; anything
-// that needs a `finally`, a `switch` or an invokedynamic that is not a
+// calls, `try`/`catch`, array initializers, string concatenation and `switch`;
+// anything that needs a `finally` or an invokedynamic that is not a
 // concatenation (later phases) renders as its disassembly plus a
 // `throw new UnsupportedOperationException(...)`, so the output is always
 // compilable Java.
@@ -543,6 +543,15 @@ const ERASED_TO_INT = ["boolean", "char", "byte", "short"];
 type Stmt = string | Stmt[];
 
 /** Drop a trailing `continue;` a loop's own fallthrough already says. */
+/**
+ * Whether `text` reads `name` - a variable or a field reference, matched whole
+ * so a longer name that contains it does not count.
+ */
+function reads(text: string, name: string): boolean {
+  if (!text.includes(name)) return false;
+  return new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text);
+}
+
 function trimTail(statements: Stmt[], text: string): void {
   if (statements[statements.length - 1] === text) statements.pop();
 }
@@ -632,6 +641,10 @@ function isGoto(mnemonic: string): boolean {
   return mnemonic === "goto" || mnemonic === "goto_w";
 }
 
+function isSwitch(mnemonic: string): boolean {
+  return mnemonic === "tableswitch" || mnemonic === "lookupswitch";
+}
+
 function isBlockEnd(mnemonic: string): boolean {
   return mnemonic === "athrow" || /^(?:[ilfda])?return$/.test(mnemonic);
 }
@@ -646,7 +659,7 @@ interface Jump {
 interface Block {
   readonly start: number;
   readonly instructions: Instruction[];
-  readonly kind: "fall" | "conditional" | "goto" | "end";
+  readonly kind: "fall" | "conditional" | "goto" | "switch" | "end";
   /** A conditional's are `[fallthrough, target]`, in that order. */
   readonly successors: number[];
 }
@@ -664,9 +677,6 @@ function buildBlocks(
   }
   for (const [index, instruction] of instructions.entries()) {
     const { mnemonic } = instruction;
-    if (mnemonic === "tableswitch" || mnemonic === "lookupswitch") {
-      throw new NotDecompilable(`switch is not decompiled yet (${mnemonic})`);
-    }
     // The subroutine opcodes: gone since Java 6, and their control flow is not
     // expressible as a branch.
     if (["jsr", "jsr_w", "ret", "ret_w"].includes(mnemonic)) {
@@ -674,7 +684,12 @@ function buildBlocks(
     }
     const branch = CONDITIONAL_BRANCHES.has(mnemonic) || isGoto(mnemonic);
     if (branch) leaders.add(instruction.arg);
-    if (branch || isBlockEnd(mnemonic)) {
+    if (isSwitch(mnemonic)) {
+      // `arg` is the default target, and every case target begins a statement.
+      leaders.add(instruction.arg);
+      for (const { target } of instruction.switchCases) leaders.add(target);
+    }
+    if (branch || isSwitch(mnemonic) || isBlockEnd(mnemonic)) {
       const next = instructions[index + 1];
       if (next) leaders.add(next.pc);
     }
@@ -695,6 +710,11 @@ function buildBlocks(
     } else if (isGoto(mnemonic)) {
       kind = "goto";
       successors = [last.arg];
+    } else if (isSwitch(mnemonic)) {
+      kind = "switch";
+      // The default first, then each distinct case target once: the analyses
+      // below walk this list, and a repeated edge would be walked twice.
+      successors = [...new Set([last.arg, ...last.switchCases.map(entry => entry.target)])];
     } else if (isBlockEnd(mnemonic)) {
       kind = "end";
       successors = [];
@@ -1143,6 +1163,23 @@ interface ActiveLoop {
   readonly loop: Loop;
   /** Where `continue;` goes: the test, which a `do` keeps at the bottom. */
   readonly continueTarget: number;
+  /**
+   * Whether jumping to `continueTarget` really is `continue;`. A `do`'s latch is
+   * the test *and* the tail of the body when nothing else jumps to it - and
+   * `continue;` skips that tail, so a jump there is not one.
+   */
+  readonly continues: boolean;
+}
+
+interface ActiveSwitch {
+  /** Where `break;` goes: the end of the statement. */
+  readonly follow: number;
+  /**
+   * How many loops were being written when this `switch` was entered. It is the
+   * innermost breakable statement only while that is still true - a loop opened
+   * inside it takes every unlabeled `break` for itself.
+   */
+  readonly loopDepth: number;
 }
 
 /**
@@ -1211,6 +1248,8 @@ class BodyDecompiler {
   private dominators = new Map<number, Set<number>>();
   /** The loops being written right now, innermost last. */
   private readonly active: ActiveLoop[] = [];
+  /** The `switch` statements being written right now, innermost last. */
+  private readonly switches: ActiveSwitch[] = [];
   private readonly visited = new Set<number>();
   /** Hands out the ids that tell the copies of one `new` apart. */
   private pendingCount = 0;
@@ -1771,11 +1810,16 @@ class BodyDecompiler {
         throw new NotDecompilable("unstructured control flow");
       }
       this.visited.add(at);
-      const isBranch = block.kind === "conditional" || block.kind === "goto";
+      const isBranch =
+        block.kind === "conditional" || block.kind === "goto" || block.kind === "switch";
       const kept = block.instructions.slice(this.skip.get(at) ?? 0);
       const body = isBranch ? kept.slice(0, -1) : kept;
       this.runInstructions(body, endOf(block), block.start);
       if (block.kind === "end") return;
+      if (block.kind === "switch") {
+        at = this.switchStatement(block, stop);
+        continue;
+      }
       if (block.kind !== "conditional") {
         at = block.successors[0]!;
         continue;
@@ -1848,6 +1892,127 @@ class BodyDecompiler {
     this.current.push(thenStatements);
     if (elseStatements.length > 0) this.current.push("} else {", elseStatements);
     this.current.push("}");
+  }
+
+  /**
+   * Where a `switch` ends when its cases do not all come back together: a case
+   * that returns leaves the post-dominator at EXIT, and what follows the
+   * statement is then the first block the switch as a whole leads to that no
+   * single case owns.
+   */
+  private switchFollowOf(block: Block, cases: readonly number[], defaultTarget: number): number {
+    // A jump that leaves an enclosing loop is that loop's, not this statement's:
+    // taking it for the follow would write a `break` that breaks the wrong one.
+    const barriers = new Set<number>();
+    for (const entered of this.active) {
+      barriers.add(entered.continueTarget);
+      barriers.add(entered.loop.follow);
+    }
+    // Only a `try` needs the dominators up front; a `switch` this deep into the
+    // rules is rare enough to pay for them here instead of in every method.
+    if (this.dominators.size === 0) {
+      this.dominators = dominators(withExceptionEdges(this.blocks, this.regions), this.entryPc);
+    }
+    const reachable = reachableBlocks(this.blocks, [...cases, defaultTarget]);
+    const leadsTo = (owners: readonly number[]): number => {
+      const candidates = [...reachable].filter(start => {
+        const above = this.dominators.get(start);
+        return (
+          start > block.start &&
+          !barriers.has(start) &&
+          above !== undefined &&
+          above.has(block.start) &&
+          !owners.some(owner => above.has(owner))
+        );
+      });
+      return candidates.length === 0 ? EXIT : Math.min(...candidates);
+    };
+    const merged = leadsTo([...cases, defaultTarget]);
+    if (merged !== EXIT) return merged;
+    // A `switch` with no `default` of its own ends where the table's default
+    // sends it - which the pass above ruled out as the default's own body. A
+    // default that a case falls into is still ruled out, by that case.
+    return leadsTo(cases);
+  }
+
+  /**
+   * One `switch`, from the table that ends `block`. Returns where the statement
+   * after it begins.
+   */
+  private switchStatement(block: Block, stop: number): number {
+    const table = block.instructions[block.instructions.length - 1]!;
+    const selector = this.pop();
+    if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
+    // javac compiles a `switch` over an enum into a lookup through a synthetic
+    // `$SwitchMap$` array held by an *anonymous* class - which has no name
+    // source can write, so the reconstruction would not compile. Restoring the
+    // `case CONSTANT:` form needs that holder's initializer, in another file.
+    if (selector.text.includes("$SwitchMap$")) throw new NotDecompilable("an enum switch");
+    const defaultTarget = table.arg;
+    // Every key that lands on the same block is one list of labels. A key that
+    // lands on the default is dropped: a tableswitch pads its gaps that way, and
+    // a case that shares the default's body says nothing a `default:` does not.
+    const keysOf = new Map<number, number[]>();
+    const seen = new Set<number>();
+    for (const { key, target } of table.switchCases) {
+      // A repeated key is not a table javac wrote, and source cannot say it
+      // twice, so the reconstruction would not compile.
+      if (seen.has(key)) throw new NotDecompilable("a switch table with a repeated key");
+      seen.add(key);
+      if (target === defaultTarget) continue;
+      const keys = keysOf.get(target);
+      if (keys === undefined) keysOf.set(target, [key]);
+      else keys.push(key);
+    }
+    const targets = [...new Set([...keysOf.keys(), defaultTarget])].sort((a, b) => a - b);
+    if (targets[0]! <= block.start) throw new NotDecompilable("a switch that jumps backwards");
+
+    let follow = this.followOf.get(block.start) ?? EXIT;
+    // The merge can sit outside this statement: a case that returns makes the
+    // post-dominator EXIT, while the rest still comes back together where the
+    // statement around this one ends.
+    if (
+      follow === EXIT &&
+      // Where the statement around this one ends is only where this one can end
+      // when no case begins past it: a loop's `stop` is its header, behind them.
+      // A case *on* it is the end of this statement, which is `case k: break;`.
+      targets.every(target => target <= stop) &&
+      targets.some(target => this.reachesArm(target, stop))
+    ) {
+      follow = stop;
+    }
+    if (follow === EXIT) follow = this.switchFollowOf(block, [...keysOf.keys()], defaultTarget);
+    // javac lays the case bodies out in one run before the end of the statement,
+    // so a candidate that sits between them ends nothing: the statement has no
+    // follow at all then, and every case runs into the next or leaves on its own.
+    if (follow !== EXIT && targets.some(target => target > follow)) follow = EXIT;
+    // A case that lands on the end of the statement has no body: it is
+    // `case k: break;`, written last so nothing can fall into it.
+    const bodies = targets.filter(target => target !== follow);
+
+    this.switches.push({ follow, loopDepth: this.active.length });
+    // The bodyless cases come first: nothing can fall into them there, and their
+    // own `break;` keeps them from falling into the first body.
+    const clauses: Stmt[] = [];
+    for (const target of targets.filter(t => t === follow && keysOf.has(t))) {
+      for (const key of keysOf.get(target)!) clauses.push(`case ${key}:`);
+      clauses.push(["break;"]);
+    }
+    try {
+      for (const [index, target] of bodies.entries()) {
+        // Running off the end of one case is a fallthrough into the next, so a
+        // body stops where the next one begins.
+        const end = bodies[index + 1] ?? follow;
+        for (const key of keysOf.get(target) ?? []) clauses.push(`case ${key}:`);
+        if (target === defaultTarget) clauses.push("default:");
+        clauses.push(this.capture(() => this.structure(target, end)));
+        if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
+      }
+    } finally {
+      this.switches.pop();
+    }
+    this.current.push(`switch (${selector.text}) {`, clauses, "}");
+    return follow;
   }
 
   /**
@@ -2018,13 +2183,32 @@ class BodyDecompiler {
    */
   private loopJump(at: number): string | undefined {
     const inner = this.active[this.active.length - 1];
-    if (inner === undefined) return undefined;
-    if (at === inner.continueTarget) return "continue;";
-    if (at === inner.loop.follow) return "break;";
-    for (const outer of this.active.slice(0, -1)) {
+    const enclosing = this.switches[this.switches.length - 1];
+    // Only the innermost breakable statement can be left without a label, and a
+    // loop opened inside a `switch` is the innermost one.
+    const switchIsInner = enclosing !== undefined && enclosing.loopDepth === this.active.length;
+    // The end of the `switch` comes first, even when it is also the loop's
+    // continue target: a `do`'s continue target is its latch, and javac puts the
+    // tail of the body in there - `continue;` would skip it.
+    if (switchIsInner && at === enclosing.follow) return "break;";
+    // A `switch` catches `break` but not `continue`, so the innermost loop still
+    // owns its own continue target even from inside one.
+    if (inner !== undefined && at === inner.continueTarget) {
+      // Unless the jump lands in the tail of a `do`'s body, which a `continue;`
+      // would skip: nothing in this phase can write that jump.
+      if (!inner.continues) throw new NotDecompilable("a jump into the tail of a do-while");
+      return "continue;";
+    }
+    if (!switchIsInner && inner !== undefined && at === inner.loop.follow) {
+      return "break;";
+    }
+    for (const outer of switchIsInner ? this.active : this.active.slice(0, -1)) {
       if (at === outer.continueTarget || at === outer.loop.follow) {
         throw new NotDecompilable("a labeled break or continue");
       }
+    }
+    for (const outer of this.switches.slice(0, switchIsInner ? -1 : undefined)) {
+      if (at === outer.follow) throw new NotDecompilable("a labeled break or continue");
     }
     return undefined;
   }
@@ -2039,6 +2223,7 @@ class BodyDecompiler {
     const stop = new Set<number>(
       inner === undefined ? [] : [inner.continueTarget, inner.loop.follow],
     );
+    for (const entered of this.switches) stop.add(entered.follow);
     const seen = new Set<number>();
     const queue = [from];
     while (queue.length > 0) {
@@ -2097,7 +2282,7 @@ class BodyDecompiler {
 
   /** `while (c) { ... }`: the header is the test, and the loop runs while it holds. */
   private whileLoop(loop: Loop, header: Block): number {
-    this.active.push({ loop, continueTarget: loop.header });
+    this.active.push({ loop, continueTarget: loop.header, continues: true });
     try {
       this.visited.add(loop.header);
       const taken: number[] = [];
@@ -2131,7 +2316,7 @@ class BodyDecompiler {
 
   /** `do { ... } while (c);`: the test is the latch, and the body runs first. */
   private doWhileLoop(loop: Loop, latch: Block): number {
-    this.active.push({ loop, continueTarget: latch.start });
+    this.active.push({ loop, continueTarget: latch.start, continues: isPureBlock(latch) });
     let condition: Expr | undefined;
     try {
       const statements = this.capture(() => {
@@ -2160,7 +2345,7 @@ class BodyDecompiler {
 
   /** `while (true) { ... }`: nothing at the head decides whether to go round again. */
   private foreverLoop(loop: Loop): number {
-    this.active.push({ loop, continueTarget: loop.header });
+    this.active.push({ loop, continueTarget: loop.header, continues: true });
     try {
       const statements = this.capture(() => this.structure(loop.header, EXIT));
       trimTail(statements, "continue;");
@@ -2514,8 +2699,7 @@ class BodyDecompiler {
       // the variable would read the *new* value: `f(i++, i)` and `"x" + i++ + i`
       // are not what this writes back. Their form needs the increment to stay an
       // expression, which this phase does not do.
-      const reads = new RegExp(`\\b${local.name}\\b`);
-      if (this.stack.some(value => value.text.includes(local.name) && reads.test(value.text))) {
+      if (this.stack.some(value => reads(value.text, local.name))) {
         throw new NotDecompilable("an increment of a variable that is already on the stack");
       }
       const delta = instruction.arg2;
@@ -2572,6 +2756,12 @@ class BodyDecompiler {
         mnemonic === "putstatic"
           ? this.staticRef(field.owner, field.name)
           : `${at(this.pop(), PREC_PRIMARY)}.${field.name}`;
+      // The assignment is a statement here, so anything already on the stack that
+      // reads the same field would read the *new* value: `arr[idx++]` writes the
+      // increment out first, and the read has to stay behind it.
+      if (this.stack.some(stacked => reads(stacked.text, target))) {
+        throw new NotDecompilable("an assignment to a field that is already on the stack");
+      }
       this.current.push(`${target} = ${this.coerceInto(value, type)};`);
       return;
     }

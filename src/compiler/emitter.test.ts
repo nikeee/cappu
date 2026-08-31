@@ -99,6 +99,11 @@ const FIXTURES: Record<string, string> = {
   // checkcast (narrowing + array), upcast (no instruction), instanceof as a value.
   CastInstance:
     "class CastInstance { String down(Object o) { return (String) o; } CharSequence up(String s) { return s; } boolean isStr(Object o) { return o instanceof String; } int[] arr(Object o) { return (int[]) o; } }",
+  // Every switch shape javac lays out: a dense tableswitch, a sparse
+  // lookupswitch, shared labels, a fallthrough, a `default` and no `default`,
+  // and a case that returns while the others break (JLS 14.11).
+  Switches:
+    "class Switches { int dense(int x) { switch (x) { case 1: return 10; case 2: return 20; case 3: return 30; default: return -1; } } int breaks(int x) { int r = 0; switch (x) { case 0: r = 1; break; case 1: r = 2; break; default: r = 9; } return r + 1; } int fall(int x) { int r = 0; switch (x) { case 1: case 2: r = r + 1; case 3: r = r + 2; break; case 7: r = r + 4; } return r; } int sparse(int x) { switch (x) { case 100: return 1; case 5000: return 2; case -7: return 3; } return 0; } int mixed(int x) { int r = 0; switch (x) { case 1: return 100; case 2: r = 2; break; default: r = 3; } return r; } }",
   // invokedynamic StringConcatFactory for `+` with each operand type (JLS 15.18.1).
   Concat:
     "class Concat { String si(String a, int b) { return a + b; } String is(int a, String b) { return a + b; } String ss(String a, String b) { return a + b; } String sl(String a, long b) { return a + b; } String sd(String a, double b) { return a + b; } String sb(String a, boolean b) { return a + b; } String sc(String a, char b) { return a + b; } }",

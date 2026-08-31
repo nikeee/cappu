@@ -387,6 +387,11 @@ export interface Instruction {
   readonly arg: number;
   /** The second numeric operand: the `iinc` delta, `multianewarray` dimensions. */
   readonly arg2: number;
+  /**
+   * A table/lookupswitch's `key -> target` pairs, ascending by key; `arg` holds
+   * its default target. Empty for every other instruction.
+   */
+  readonly switchCases: readonly { key: number; target: number }[];
 }
 
 // Bounds-checked, because the code array comes straight from the file: an
@@ -455,6 +460,7 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
         operand: "",
         comment: undefined,
         extraLines: [],
+        switchCases: [],
         arg: 0,
         arg2: 0,
       });
@@ -475,6 +481,7 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
     const extraLines: string[] = [];
     let arg = 0;
     let arg2 = 0;
+    const switchCases: { key: number; target: number }[] = [];
     switch (kind) {
       case "none":
         break;
@@ -549,10 +556,15 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
       case "tableswitch": {
         c.align4(); // the operands start at the next 4-byte boundary
         const defaultTarget = pc + c.i4();
+        arg = defaultTarget;
         const low = c.i4();
         const high = c.i4();
         const entries: [string, number][] = [];
-        for (let key = low; key <= high; key++) entries.push([String(key), pc + c.i4()]);
+        for (let key = low; key <= high; key++) {
+          const target = pc + c.i4();
+          switchCases.push({ key, target });
+          entries.push([String(key), target]);
+        }
         entries.push(["default", defaultTarget]);
         operand = `{ // ${low} to ${high}`;
         extraLines.push(...switchBody(entries));
@@ -561,11 +573,14 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
       case "lookupswitch": {
         c.align4();
         const defaultTarget = pc + c.i4();
+        arg = defaultTarget;
         const pairs = c.i4();
         const entries: [string, number][] = [];
         for (let i = 0; i < pairs; i++) {
           const key = c.i4();
-          entries.push([String(key), pc + c.i4()]);
+          const target = pc + c.i4();
+          switchCases.push({ key, target });
+          entries.push([String(key), target]);
         }
         entries.push(["default", defaultTarget]);
         operand = `{ // ${pairs}`;
@@ -575,7 +590,7 @@ export function decodeInstructions(classFile: ClassFile, code: Uint8Array): Inst
       default:
         break;
     }
-    out.push({ pc, mnemonic, operand, comment, extraLines, arg, arg2 });
+    out.push({ pc, mnemonic, operand, comment, extraLines, arg, arg2, switchCases });
   }
   return out;
 }

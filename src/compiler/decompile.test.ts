@@ -95,6 +95,7 @@ const FULLY_DECOMPILED = [
   "SubA",
   "SubB",
   "SubC",
+  "Switches",
   "VarargsAndAbstract",
   "VarargsPack",
 ];
@@ -615,6 +616,161 @@ test(
   },
 );
 
+const SWITCHY_SOURCE =
+  "public class Switchy {\n" +
+  "  static int dense(int x) { switch (x) { case 1: return 10; case 2: return 20; case 3: return 30; default: return -1; } }\n" +
+  "  static int breaks(int x) { int r = 0; switch (x) { case 0: r = 1; break; case 1: r = 2; break; default: r = 9; } return r + 1; }\n" +
+  // Shared labels, a fallthrough, and the gaps a tableswitch pads with its default.
+  "  static int fall(int x) { int r = 0; switch (x) { case 1: case 2: r += 1; case 3: r += 2; break; case 7: r += 4; break; } return r; }\n" +
+  "  static int sparse(int x) { switch (x) { case 100: return 1; case 5000: return 2; case -7: return 3; } return 0; }\n" +
+  "  static int noDefault(int x) { int r = 0; switch (x) { case 1: r = 5; break; case 2: r = 6; break; } return r; }\n" +
+  // A case whose whole body is the `break`, and one that returns while the rest
+  // break - the post-dominator of the table is EXIT for the second one.
+  "  static int emptyCase(int x) { int r = 3; switch (x) { case 1: break; case 2: r = 7; break; default: r = 8; } return r; }\n" +
+  "  static int mixedExit(int x) { int r = 0; switch (x) { case 1: return 100; case 2: r = 2; break; default: r = 3; } return r; }\n" +
+  "  static int defaultFirst(int x) { int r = 0; switch (x) { default: r += 1; case 5: r += 2; break; case 9: r += 4; } return r; }\n" +
+  "  static int nested(int x, int y) { int r = 0; switch (x) { case 1: switch (y) { case 1: r = 11; break; default: r = 12; } break; case 2: r = 20; break; default: r = 99; } return r; }\n" +
+  "  static int withIf(int x, boolean b) { int r = 0; switch (x) { case 1: if (b) { r = 1; } else { r = 2; } break; case 2: if (b) { return -1; } r = 3; break; } return r; }\n" +
+  "  static int inWhile(int n) { int r = 0; int i = 0; while (i < n) { switch (i % 2) { case 0: r += 1; break; default: r += 2; } i = i + 1; } return r; }\n" +
+  // A `switch` catches `break` but not `continue`, which still leaves the loop test.
+  "  static int continues(int n) { int r = 0; int i = 0; while (i < n) { i = i + 1; switch (i % 3) { case 0: continue; case 1: r += 1; break; default: r += 2; } r *= 2; } return r; }\n" +
+  "  static int charSwitch(char c) { switch (c) { case 'a': return 1; case 'z': return 26; default: return 0; } }\n" +
+  "  static int inTry(int x) { int r = 0; try { switch (x) { case 1: r = 1; break; default: r = 2; } } catch (RuntimeException e) { r = -1; } return r; }\n" +
+  // A `do`'s continue target is its latch, and javac puts the tail of the body
+  // in there: a `break` out of the `switch` that lands on it is not a `continue`.
+  "  static int doWhile(int n) { int r = 0; int i = 0; do { switch (i % 3) { case 0: r += 1; break; case 1: r += 2; break; default: r += 3; } r *= 2; i = i + 1; } while (i < n); return r; }\n" +
+  "  static int doWhileTail(int n) { int r = 0; int i = 0; do { switch (i % 3) { case 0: r += 1; break; default: r += 3; } i = i + 1; } while (i < n); return r; }\n" +
+  // The `switch` is the last statement of the loop, so every case leaves through
+  // the loop's own edge: no block after the table ends the statement, and the
+  // `default` in the middle is not it either.
+  "  static int loopTail(int n, int x) { int r = 0; int i = 0; while (i < n) { i = i + 1; switch (x) { case 2: r += 1; break; case 3: r += 1; r += 4; break; default: r += 1; break; case 4: r += 1; } } return r; }\n" +
+  // The inner switch has no `default` of its own, so its table's default is the
+  // end of the outer case it sits in - a case that lands exactly on where the
+  // statement around it ends.
+  "  static int sharedExit(int a, int b) { int r = 0; switch (a) { case 1: switch (b) { case 0: r += 2; case 1: r += 1; break; case 3: return r; } case 4: r += 9; return r; } return r; }\n" +
+  // javac writes a `String` switch as two: one over `hashCode`, one over the
+  // index it stores. Both come back, which is what the original ran.
+  '  static String str(String s) { switch (s) { case "a": return "A"; case "b": return "B"; default: return "?"; } }\n' +
+  "}\n";
+
+test(
+  "recompiles javac's own switches to the same bytecode",
+  { skip: HAS_JAVAC && HAS_JAVAP ? false : "no JDK (javac/javap)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-switchy-");
+    const classFile = compileWithJavac(SWITCHY_SOURCE, "Switchy", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    const roundTripped = compileWithJavac(source, "Switchy", join(dir.path, "again"));
+    expect(javap(roundTripped)).toEqual(javap(classFile));
+  },
+);
+
+// A loop inside a `case` declares its variable there, which the reconstruction
+// hoists to the top of the method - the slots shift, so only running it can say
+// the two are the same.
+const SWITCHY_RUN_SOURCE =
+  "public class SwitchyRun {\n" +
+  "  static int loopInside(int x, int n) { int r = 0; switch (x) { case 1: for (int i = 0; i < n; i++) { if (i == 3) { break; } r += i; } break; default: r = -1; } return r; }\n" +
+  "  static int doInside(int x, int n) { int r = 0; switch (x) { case 1: { int i = 0; do { r += i; i = i + 1; } while (i < n); break; } default: r = 7; } return r; }\n" +
+  '  static int tryInside(int x) { switch (x) { case 1: try { return Integer.parseInt("nope"); } catch (NumberFormatException e) { return -1; } default: return 0; } }\n' +
+  "}";
+
+const SWITCHY_DRIVER_SOURCE =
+  "public class SwitchyDriver {\n" +
+  "  public static void main(String[] args) {\n" +
+  "    for (int x = -1; x < 4; x++) {\n" +
+  "      for (int n = 0; n < 5; n++) {\n" +
+  '        System.out.println(SwitchyRun.loopInside(x, n) + " " + SwitchyRun.doInside(x, n)\n' +
+  '          + " " + SwitchyRun.tryInside(x));\n' +
+  "      }\n" +
+  "    }\n" +
+  "  }\n" +
+  "}";
+
+test(
+  "runs like javac's own switches when the slots cannot line up",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-switchyrun-");
+    const classFile = compileWithJavac(SWITCHY_RUN_SOURCE, "SwitchyRun", dir.path);
+    compileWithJavac(SWITCHY_DRIVER_SOURCE, "SwitchyDriver", dir.path, dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "SwitchyRun", again);
+    const expected = execFileSync("java", ["-cp", dir.path, "SwitchyDriver"], { encoding: "utf8" });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "SwitchyDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).not.toEqual("");
+  },
+);
+
+// The same trap one level out from `i++`: `arr[idx++]` where `idx` is a *field*
+// is a getstatic/dup/putstatic, and writing the assignment out first would make
+// the read take the new value.
+const FIELD_POST_INCREMENT_SOURCE =
+  "public class FieldPost {\n" +
+  "  static int[] arr = { 5, 6, 7 };\n" +
+  "  static int idx = 0;\n" +
+  "  static int f() { int v = arr[idx++]; return v * 100 + idx; }\n" +
+  "}\n";
+
+test(
+  "says so when a field is assigned while it is on the stack",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-fieldpost-");
+    const classFile = compileWithJavac(FIELD_POST_INCREMENT_SOURCE, "FieldPost", dir.path);
+    expect(decompileToSource(readFileSync(classFile))).toContain(
+      "cappu: an assignment to a field that is already on the stack",
+    );
+  },
+);
+
+// javac puts the tail of a `do` body in the same block as the test, and the jump
+// that leaves the inner `switch` lands there: `continue;` would skip the tail, so
+// this says so instead of writing one.
+const DO_TAIL_SOURCE =
+  "public class DoTail {\n" +
+  "  static int f(int n) { int r = 0; int i = 0; do { switch (i % 2) { case 0:" +
+  " switch (r % 3) { case 0: r += 1; break; case 1: return -1; default: r += 4; break; }" +
+  " break; default: r += 100; } i++; } while (i < n); return r; }\n" +
+  "}\n";
+
+test(
+  "says so when a jump lands in the tail of a do-while body",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-dotail-");
+    const classFile = compileWithJavac(DO_TAIL_SOURCE, "DoTail", dir.path);
+    expect(decompileToSource(readFileSync(classFile))).toContain(
+      "cappu: a jump into the tail of a do-while",
+    );
+  },
+);
+
+// javac writes a `switch` over an enum from another file as a lookup through a
+// synthetic `$SwitchMap$` array, held by an anonymous class no source can name.
+const ENUM_SOURCE = "public enum Colour { RED, GREEN, BLUE }\n";
+const ENUM_SWITCH_SOURCE =
+  "public class Painter {\n" +
+  "  static int f(Colour c) { switch (c) { case RED: return 1; case GREEN: return 2; default: return 0; } }\n" +
+  "}\n";
+
+test(
+  "says so when a switch reads javac's enum lookup table",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-enumswitch-");
+    compileWithJavac(ENUM_SOURCE, "Colour", dir.path);
+    const classFile = compileWithJavac(ENUM_SWITCH_SOURCE, "Painter", dir.path, dir.path);
+    expect(decompileToSource(readFileSync(classFile))).toContain("cappu: an enum switch");
+  },
+);
+
 /** Compile one source file with javac and return the .class path. */
 function compileWithJavac(
   source: string,
@@ -822,6 +978,28 @@ const RECONSTRUCTIONS: {
       " else { b = false; } return b; } }",
     expect: ["boolean var1;", "var1 = true;", "var1 = false;"],
     reject: ["var1 = 1;", "var1 = 0;"],
+    selfContained: true,
+  },
+  {
+    name: "SwitchLabeled",
+    // A `switch` catches an unlabeled `break`, so one that leaves the loop
+    // around it needs a label - which this phase does not write.
+    source:
+      "class SwitchLabeled { static int f(int n, int x) { int r = 0;" +
+      " outer: while (r < n) { switch (x) { case 1: r += 1; break; case 2: break outer;" +
+      " default: r += 3; } r += 1; } return r; } }",
+    expect: ["cappu: a labeled break or continue"],
+    selfContained: true,
+  },
+  {
+    name: "SwitchDefaultPad",
+    // The gaps a tableswitch pads with its default target say nothing a
+    // `default:` does not, so they are not written back as cases.
+    source:
+      "class SwitchDefaultPad { static int f(int x) { int r = 0; switch (x) { case 1: r = 1; break;" +
+      " case 4: r = 4; break; default: r = 9; } return r; } }",
+    expect: ["case 1:", "case 4:", "default:"],
+    reject: ["case 2:", "case 3:", "not decompiled"],
     selfContained: true,
   },
   {

@@ -1,0 +1,131 @@
+{
+  "Switches": {
+    "members": [
+      "Switches();",
+      "int breaks(int);",
+      "int dense(int);",
+      "int fall(int);",
+      "int mixed(int);",
+      "int sparse(int);"
+    ],
+    "code": [
+      [
+        "Switches();",
+        [
+          "aload_0",
+          "invokespecial # // Method java/lang/Object.\"<init>\":()V",
+          "return"
+        ]
+      ],
+      [
+        "int dense(int);",
+        [
+          "iload_1",
+          "tableswitch { // 1 to 3",
+          "28",
+          "31",
+          "34",
+          "bipush 10",
+          "ireturn",
+          "bipush 20",
+          "ireturn",
+          "bipush 30",
+          "ireturn",
+          "iconst_m1",
+          "ireturn"
+        ]
+      ],
+      [
+        "int breaks(int);",
+        [
+          "iconst_0",
+          "istore_2",
+          "iload_1",
+          "lookupswitch { // 2",
+          "28",
+          "33",
+          "iconst_1",
+          "istore_2",
+          "goto 41",
+          "iconst_2",
+          "istore_2",
+          "goto 41",
+          "bipush 9",
+          "istore_2",
+          "iload_2",
+          "iconst_1",
+          "iadd",
+          "ireturn"
+        ]
+      ],
+      [
+        "int fall(int);",
+        [
+          "iconst_0",
+          "istore_2",
+          "iload_1",
+          "tableswitch { // 1 to 7",
+          "44",
+          "44",
+          "48",
+          "59",
+          "59",
+          "59",
+          "55",
+          "iload_2",
+          "iconst_1",
+          "iadd",
+          "istore_2",
+          "iload_2",
+          "iconst_2",
+          "iadd",
+          "istore_2",
+          "goto 59",
+          "iload_2",
+          "iconst_4",
+          "iadd",
+          "istore_2",
+          "iload_2",
+          "ireturn"
+        ]
+      ],
+      [
+        "int sparse(int);",
+        [
+          "iload_1",
+          "lookupswitch { // 3",
+          "36",
+          "38",
+          "iconst_1",
+          "ireturn",
+          "iconst_2",
+          "ireturn",
+          "iconst_3",
+          "ireturn",
+          "iconst_0",
+          "ireturn"
+        ]
+      ],
+      [
+        "int mixed(int);",
+        [
+          "iconst_0",
+          "istore_2",
+          "iload_1",
+          "lookupswitch { // 2",
+          "28",
+          "31",
+          "bipush 100",
+          "ireturn",
+          "iconst_2",
+          "istore_2",
+          "goto 38",
+          "iconst_3",
+          "istore_2",
+          "iload_2",
+          "ireturn"
+        ]
+      ]
+    ]
+  }
+}
