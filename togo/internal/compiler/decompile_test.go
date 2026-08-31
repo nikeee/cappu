@@ -1218,6 +1218,30 @@ const switchySource = `public class Switchy {
   static String str(String s) { switch (s) { case "a": return "A"; case "b": return "B"; default: return "?"; } }
 }`
 
+// The same trap one level out from `i++`: `arr[idx++]` where `idx` is a *field*
+// is a getstatic/dup/putstatic, and writing the assignment out first would make
+// the read take the new value.
+const fieldPostIncrementSource = `public class FieldPost {
+  static int[] arr = { 5, 6, 7 };
+  static int idx = 0;
+  static int f() { int v = arr[idx++]; return v * 100 + idx; }
+}`
+
+func TestDecompileSaysWhenAFieldIsAssignedWhileItIsOnTheStack(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "FieldPost", fieldPostIncrementSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: an assignment to a field that is already on the stack") {
+		t.Errorf("expected the bail, got:\n%s", source)
+	}
+}
+
 // javac puts the tail of a `do` body in the same block as the test, and the jump
 // that leaves the inner `switch` lands there: `continue;` would skip the tail, so
 // this says so instead of writing one.

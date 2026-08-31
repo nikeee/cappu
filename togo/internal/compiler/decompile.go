@@ -1644,6 +1644,15 @@ func (d *bodyDecompiler) renderCondition(condition expr) expr {
 	}
 }
 
+// reads reports whether text reads name - a variable or a field reference,
+// matched whole so a longer name that contains it does not count.
+func reads(text, name string) bool {
+	if !strings.Contains(text, name) {
+		return false
+	}
+	return regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`).MatchString(text)
+}
+
 // emit appends one statement where statements are currently going.
 func (d *bodyDecompiler) emit(text string) {
 	*d.current = append(*d.current, stmt{Text: text})
@@ -3544,10 +3553,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		// are not what this writes back. Their form needs the increment to stay an
 		// expression, which this phase does not do.
 		for _, value := range d.stack {
-			if !strings.Contains(value.Text, target.Name) {
-				continue
-			}
-			if regexp.MustCompile(`\b` + regexp.QuoteMeta(target.Name) + `\b`).MatchString(value.Text) {
+			if reads(value.Text, target.Name) {
 				return bail("an increment of a variable that is already on the stack")
 			}
 		}
@@ -3633,6 +3639,14 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 				return err
 			}
 			target = at(receiver, precPrimary) + "." + field.Name
+		}
+		// The assignment is a statement here, so anything already on the stack that
+		// reads the same field would read the *new* value: `arr[idx++]` writes the
+		// increment out first, and the read has to stay behind it.
+		for _, stacked := range d.stack {
+			if reads(stacked.Text, target) {
+				return bail("an assignment to a field that is already on the stack")
+			}
 		}
 		d.emit(target + " = " + d.coerceInto(value, fieldType) + ";")
 		return nil

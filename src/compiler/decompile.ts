@@ -543,6 +543,15 @@ const ERASED_TO_INT = ["boolean", "char", "byte", "short"];
 type Stmt = string | Stmt[];
 
 /** Drop a trailing `continue;` a loop's own fallthrough already says. */
+/**
+ * Whether `text` reads `name` - a variable or a field reference, matched whole
+ * so a longer name that contains it does not count.
+ */
+function reads(text: string, name: string): boolean {
+  if (!text.includes(name)) return false;
+  return new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text);
+}
+
 function trimTail(statements: Stmt[], text: string): void {
   if (statements[statements.length - 1] === text) statements.pop();
 }
@@ -2690,8 +2699,7 @@ class BodyDecompiler {
       // the variable would read the *new* value: `f(i++, i)` and `"x" + i++ + i`
       // are not what this writes back. Their form needs the increment to stay an
       // expression, which this phase does not do.
-      const reads = new RegExp(`\\b${local.name}\\b`);
-      if (this.stack.some(value => value.text.includes(local.name) && reads.test(value.text))) {
+      if (this.stack.some(value => reads(value.text, local.name))) {
         throw new NotDecompilable("an increment of a variable that is already on the stack");
       }
       const delta = instruction.arg2;
@@ -2748,6 +2756,12 @@ class BodyDecompiler {
         mnemonic === "putstatic"
           ? this.staticRef(field.owner, field.name)
           : `${at(this.pop(), PREC_PRIMARY)}.${field.name}`;
+      // The assignment is a statement here, so anything already on the stack that
+      // reads the same field would read the *new* value: `arr[idx++]` writes the
+      // increment out first, and the read has to stay behind it.
+      if (this.stack.some(stacked => reads(stacked.text, target))) {
+        throw new NotDecompilable("an assignment to a field that is already on the stack");
+      }
       this.current.push(`${target} = ${this.coerceInto(value, type)};`);
       return;
     }

@@ -708,6 +708,28 @@ test(
   },
 );
 
+// The same trap one level out from `i++`: `arr[idx++]` where `idx` is a *field*
+// is a getstatic/dup/putstatic, and writing the assignment out first would make
+// the read take the new value.
+const FIELD_POST_INCREMENT_SOURCE =
+  "public class FieldPost {\n" +
+  "  static int[] arr = { 5, 6, 7 };\n" +
+  "  static int idx = 0;\n" +
+  "  static int f() { int v = arr[idx++]; return v * 100 + idx; }\n" +
+  "}\n";
+
+test(
+  "says so when a field is assigned while it is on the stack",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-fieldpost-");
+    const classFile = compileWithJavac(FIELD_POST_INCREMENT_SOURCE, "FieldPost", dir.path);
+    expect(decompileToSource(readFileSync(classFile))).toContain(
+      "cappu: an assignment to a field that is already on the stack",
+    );
+  },
+);
+
 // javac puts the tail of a `do` body in the same block as the test, and the jump
 // that leaves the inner `switch` lands there: `continue;` would skip the tail, so
 // this says so instead of writing one.
