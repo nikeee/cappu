@@ -1218,6 +1218,71 @@ const switchySource = `public class Switchy {
   static String str(String s) { switch (s) { case "a": return "A"; case "b": return "B"; default: return "?"; } }
 }`
 
+// javac writes `synchronized` as a monitor held in a synthetic local, guarded by
+// a catch-all that releases it and rethrows - and splits the range around every
+// `return`, `break` and `continue` that leaves the statement.
+const syncySource = `public class Syncy {
+  private final Object lock = new Object();
+  int n;
+  int simple() { synchronized (lock) { n = n + 1; } return n; }
+  int early(int x) { synchronized (lock) { if (x > 0) { return 1; } n = n + 2; } return n; }
+  int onThis() { synchronized (this) { n = n + 3; } return n; }
+  int nested(Object other) { synchronized (lock) { synchronized (other) { n = n + 4; } } return n; }
+  int allReturn() { synchronized (lock) { return n; } }
+  int throwing() { synchronized (lock) { if (n == 0) { throw new IllegalStateException("x"); } return n; } }
+  int withTry() { synchronized (lock) { try { return Integer.parseInt("7"); } catch (NumberFormatException e) { return -1; } } }
+  int inTry() { try { synchronized (lock) { n = n + 1; } } catch (RuntimeException e) { return -1; } return n; }
+  static int stat(Object o) { synchronized (o) { return o.hashCode(); } }
+  int twice() { synchronized (lock) { n = n + 1; } synchronized (lock) { n = n + 2; } return n; }
+  int breakOut(int k) { int r = 0; for (int i = 0; i < k; i++) { synchronized (lock) { if (i == 2) { break; } r = r + i; } } return r; }
+  int continueOut(int k) { int r = 0; for (int i = 0; i < k; i++) { synchronized (lock) { if (i == 2) { continue; } r = r + i; } r = r * 2; } return r; }
+  synchronized int flagged() { return n; }
+}`
+
+func TestDecompileRecompilesJavacSynchronizedToTheSameBytecode(t *testing.T) {
+	if !hasTool("javac") || !hasTool("javap") {
+		t.Skip("no JDK (javac/javap)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Syncy", syncySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	if !strings.Contains(source, "synchronized (this.lock) {") || strings.Contains(source, "monitorexit") {
+		t.Errorf("the monitor is not written as a statement:\n%s", source)
+	}
+	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Syncy", source)
+	if javapText(t, roundTripped) != javapText(t, classFile) {
+		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
+			javapText(t, roundTripped), javapText(t, classFile))
+	}
+}
+
+// A `finally` is a catch-all too, and javac writes it as duplicated code: this
+// phase says so rather than guessing.
+const finallySource = `public class Finally {
+  static int f(int x) { try { return 10 / x; } finally { System.out.print(""); } }
+}`
+
+func TestDecompileSaysWhenACatchAllIsNotAMonitor(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Finally", finallySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: a finally or synchronized block") {
+		t.Errorf("expected the bail, got:\n%s", source)
+	}
+}
+
 // javac lays a `for` out with the test at the top and the update at the bottom,
 // and a `continue` jumps to that update - which only the `for` form can say.
 const forrySource = `public class Forry {
