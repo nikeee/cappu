@@ -1900,7 +1900,12 @@ class BodyDecompiler {
    * statement is then the first block the switch as a whole leads to that no
    * single case owns.
    */
-  private switchFollowOf(block: Block, cases: readonly number[], defaultTarget: number): number {
+  private switchFollowOf(
+    block: Block,
+    cases: readonly number[],
+    defaultTarget: number,
+    orDefaultBody = true,
+  ): number {
     // A jump that leaves an enclosing loop is that loop's, not this statement's:
     // taking it for the follow would write a `break` that breaks the wrong one.
     const barriers = new Set<number>();
@@ -1928,7 +1933,7 @@ class BodyDecompiler {
       return candidates.length === 0 ? EXIT : Math.min(...candidates);
     };
     const merged = leadsTo([...cases, defaultTarget]);
-    if (merged !== EXIT) return merged;
+    if (merged !== EXIT || !orDefaultBody) return merged;
     // A `switch` with no `default` of its own ends where the table's default
     // sends it - which the pass above ruled out as the default's own body. A
     // default that a case falls into is still ruled out, by that case.
@@ -1968,6 +1973,20 @@ class BodyDecompiler {
     if (targets[0]! <= block.start) throw new NotDecompilable("a switch that jumps backwards");
 
     let follow = this.followOf.get(block.start) ?? EXIT;
+    // A `continue` in one case skips the end of the statement, which leaves the
+    // post-dominator on the loop's own edge instead of on it. What the statement
+    // really ends at is then what the rule below finds - it never lands there.
+    if (
+      follow !== EXIT &&
+      this.active.some(
+        entered => entered.continueTarget === follow || entered.loop.follow === follow,
+      )
+    ) {
+      // Only a block every case leads to: the `default`'s own body is where a
+      // `switch` with no `default` ends, and inside a loop that is not this.
+      const earlier = this.switchFollowOf(block, [...keysOf.keys()], defaultTarget, false);
+      if (earlier !== EXIT && earlier < follow) follow = earlier;
+    }
     // The merge can sit outside this statement: a case that returns makes the
     // post-dominator EXIT, while the rest still comes back together where the
     // statement around this one ends.
@@ -2282,7 +2301,12 @@ class BodyDecompiler {
 
   /** `while (c) { ... }`: the header is the test, and the loop runs while it holds. */
   private whileLoop(loop: Loop, header: Block): number {
-    this.active.push({ loop, continueTarget: loop.header, continues: true });
+    const update = this.forUpdate(loop);
+    this.active.push({
+      loop,
+      continueTarget: update?.start ?? loop.header,
+      continues: true,
+    });
     try {
       this.visited.add(loop.header);
       const taken: number[] = [];
@@ -2304,14 +2328,65 @@ class BodyDecompiler {
       const leaves = jump.target === loop.follow;
       const condition = leaves ? negate(jump.condition) : jump.condition;
       const body = leaves ? jump.fallthrough : jump.target;
-      const statements = this.capture(() => this.structure(body, loop.header));
+      const stop = update?.start ?? loop.header;
+      const statements = this.capture(() => this.structure(body, stop));
       trimTail(statements, "continue;");
-      this.emitCondition(condition, text => `while (${text}) {`);
+      // `for (; c; update)` is the same bytecode as the `while` whose last
+      // statement is the update - but it is where a `continue` goes, so it is
+      // the only form that can write one.
+      const clause = update === undefined ? undefined : this.updateClause(update);
+      if (clause === undefined) {
+        this.emitCondition(condition, text => `while (${text}) {`);
+      } else {
+        this.emitCondition(condition, text => `for (; ${text}; ${clause}) {`);
+      }
       this.current.push(statements, "}");
     } finally {
       this.active.pop();
     }
     return loop.follow;
+  }
+
+  /**
+   * The update of a `for`, which javac lays out at the bottom of the body with
+   * the test at the top. It is only worth naming when something *jumps* to it -
+   * a body that simply runs into it is a `while` whose last statement is the
+   * update, which is what this wrote before there was a `for` form.
+   */
+  private forUpdate(loop: Loop): Block | undefined {
+    if (loop.latches.length !== 1) return undefined;
+    const latch = this.blocks.get(loop.latches[0]!)!;
+    // The update runs before the test, so it ends in the jump back to it, and
+    // it has to hold something besides that jump.
+    if (latch.start === loop.header || latch.kind !== "goto") return undefined;
+    if (latch.instructions.length < 2 || this.visited.has(latch.start)) return undefined;
+    let predecessors = 0;
+    for (const block of this.blocks.values()) {
+      if (block.successors.includes(latch.start)) predecessors++;
+    }
+    return predecessors > 1 ? latch : undefined;
+  }
+
+  /**
+   * The `for`'s update clause: the update block's statements, which have to be
+   * expressions - a `for` takes a comma-separated list of them, nothing else.
+   */
+  private updateClause(update: Block): string | undefined {
+    this.visited.add(update.start);
+    const statements = this.capture(() =>
+      this.runInstructions(update.instructions.slice(0, -1), endOf(update), update.start),
+    );
+    const written: string[] = [];
+    for (const statement of statements) {
+      if (typeof statement !== "string" || !statement.endsWith(";")) return undefined;
+      const text = statement.slice(0, -1);
+      // A declaration or a jump is not an expression; a `for` takes no others.
+      if (!/^[\w$.[\]()]/.test(text) || /^(?:return|break|continue|throw|new)\b/.test(text)) {
+        return undefined;
+      }
+      written.push(text);
+    }
+    return written.length === 0 ? undefined : written.join(", ");
   }
 
   /** `do { ... } while (c);`: the test is the latch, and the body runs first. */

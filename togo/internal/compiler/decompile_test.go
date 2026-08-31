@@ -1218,6 +1218,83 @@ const switchySource = `public class Switchy {
   static String str(String s) { switch (s) { case "a": return "A"; case "b": return "B"; default: return "?"; } }
 }`
 
+// javac lays a `for` out with the test at the top and the update at the bottom,
+// and a `continue` jumps to that update - which only the `for` form can say.
+const forrySource = `public class Forry {
+  static int simple(int n) { int r = 0; for (int i = 0; i < n; i++) { if (i % 3 == 1) { r += 5; continue; } r += 1; r *= 2; } return r; }
+  static int inSwitch(int n) { int r = 0; for (int i = 0; i < n; i++) { switch (i % 3) { case 0: r += 1; break; case 1: continue; default: r += 3; } r *= 2; } return r; }
+  static int inSwitchTry(int n) { int r = 0; for (int i = 0; i < n; i++) { switch (i % 2) { case 0: continue; default: r += 3; } } return r; }
+  static int whileForm(int n) { int r = 0; int i = 0; while (i < n) { if (i % 2 == 0) { r += 1; } else { r += 2; } i++; } return r; }
+}`
+
+func TestDecompileRecompilesJavacForLoopsToTheSameBytecode(t *testing.T) {
+	if !hasTool("javac") || !hasTool("javap") {
+		t.Skip("no JDK (javac/javap)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Forry", forrySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	if !strings.Contains(source, "for (; var2 < arg0; var2++) {") {
+		t.Errorf("expected the `for` form, got:\n%s", source)
+	}
+	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "Forry", source)
+	if javapText(t, roundTripped) != javapText(t, classFile) {
+		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
+			javapText(t, roundTripped), javapText(t, classFile))
+	}
+}
+
+// A `continue` whose arm is the whole `if` comes back as the inverted test that
+// runs the rest - the same thing, other bytecode - and a nested loop's variable
+// is hoisted, so these can only be judged by running them.
+const forryRunSource = `public class ForryRun {
+  static int twoUpdates(int n) { int r = 0; for (int i = 0, j = n; i < j; i++, j--) { if (i == 2) { continue; } r += i * j; } return r; }
+  static int twoContinues(int n) { int r = 0; for (int i = 0; i < n; i++) { if (i == 1) { continue; } if (i == 3) { r += 7; continue; } r += 1; } return r; }
+  static int nested(int n) { int r = 0; for (int i = 0; i < n; i++) { for (int j = 0; j < n; j++) { if (j == 1) { continue; } r += i + j; } r += 1; } return r; }
+  static int inWhile(int n) { int r = 0; int i = 0; while (i < n) { i = i + 1; if (i == 2) { continue; } r += i; } return r; }
+}`
+
+const forryDriverSource = `public class ForryDriver {
+  public static void main(String[] args) {
+    for (int n = 0; n < 8; n++) {
+      System.out.println(n + " " + ForryRun.twoUpdates(n) + " " + ForryRun.twoContinues(n)
+        + " " + ForryRun.nested(n) + " " + ForryRun.inWhile(n));
+    }
+  }
+}`
+
+func TestDecompileRunsLikeJavacForLoops(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "ForryRun", forryRunSource)
+	compileWithJavacOn(t, dir, "ForryDriver", forryDriverSource, dir)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "ForryRun", source)
+	expected := runJava(t, dir, "ForryDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "ForryDriver")
+	if actual != expected {
+		t.Errorf("the decompiled class runs differently:\n%s\n--- from ---\n%s", actual, expected)
+	}
+	if expected == "" {
+		t.Fatal("the driver printed nothing")
+	}
+}
+
 // The same trap one level out from `i++`: `arr[idx++]` where `idx` is a *field*
 // is a getstatic/dup/putstatic, and writing the assignment out first would make
 // the read take the new value.

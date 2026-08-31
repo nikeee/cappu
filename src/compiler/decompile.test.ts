@@ -771,6 +771,72 @@ test(
   },
 );
 
+// javac lays a `for` out with the test at the top and the update at the bottom,
+// and a `continue` jumps to that update - which only the `for` form can say.
+const FORRY_SOURCE =
+  "public class Forry {\n" +
+  "  static int simple(int n) { int r = 0; for (int i = 0; i < n; i++) { if (i % 3 == 1) { r += 5; continue; } r += 1; r *= 2; } return r; }\n" +
+  "  static int inSwitch(int n) { int r = 0; for (int i = 0; i < n; i++) { switch (i % 3) { case 0: r += 1; break; case 1: continue; default: r += 3; } r *= 2; } return r; }\n" +
+  "  static int inSwitchTry(int n) { int r = 0; for (int i = 0; i < n; i++) { switch (i % 2) { case 0: continue; default: r += 3; } } return r; }\n" +
+  // Nothing jumps to the update here, so this stays the `while` it reads as.
+  "  static int whileForm(int n) { int r = 0; int i = 0; while (i < n) { if (i % 2 == 0) { r += 1; } else { r += 2; } i++; } return r; }\n" +
+  "}\n";
+
+test(
+  "recompiles javac's own `for` loops to the same bytecode",
+  { skip: HAS_JAVAC && HAS_JAVAP ? false : "no JDK (javac/javap)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-forry-");
+    const classFile = compileWithJavac(FORRY_SOURCE, "Forry", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    expect(source).toContain("for (; var2 < arg0; var2++) {");
+    const roundTripped = compileWithJavac(source, "Forry", join(dir.path, "again"));
+    expect(javap(roundTripped)).toEqual(javap(classFile));
+  },
+);
+
+// A `continue` whose arm is the whole `if` comes back as the inverted test that
+// runs the rest - the same thing, other bytecode - and a nested loop's variable
+// is hoisted, so these can only be judged by running them.
+const FORRY_RUN_SOURCE =
+  "public class ForryRun {\n" +
+  "  static int twoUpdates(int n) { int r = 0; for (int i = 0, j = n; i < j; i++, j--) { if (i == 2) { continue; } r += i * j; } return r; }\n" +
+  "  static int twoContinues(int n) { int r = 0; for (int i = 0; i < n; i++) { if (i == 1) { continue; } if (i == 3) { r += 7; continue; } r += 1; } return r; }\n" +
+  "  static int nested(int n) { int r = 0; for (int i = 0; i < n; i++) { for (int j = 0; j < n; j++) { if (j == 1) { continue; } r += i + j; } r += 1; } return r; }\n" +
+  "  static int inWhile(int n) { int r = 0; int i = 0; while (i < n) { i = i + 1; if (i == 2) { continue; } r += i; } return r; }\n" +
+  "}\n";
+
+const FORRY_DRIVER_SOURCE =
+  "public class ForryDriver {\n" +
+  "  public static void main(String[] args) {\n" +
+  "    for (int n = 0; n < 8; n++) {\n" +
+  '      System.out.println(n + " " + ForryRun.twoUpdates(n) + " " + ForryRun.twoContinues(n)\n' +
+  '        + " " + ForryRun.nested(n) + " " + ForryRun.inWhile(n));\n' +
+  "    }\n" +
+  "  }\n" +
+  "}";
+
+test(
+  "runs like javac's own `for` loops when the shape cannot line up",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-forryrun-");
+    const classFile = compileWithJavac(FORRY_RUN_SOURCE, "ForryRun", dir.path);
+    compileWithJavac(FORRY_DRIVER_SOURCE, "ForryDriver", dir.path, dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "ForryRun", again);
+    const expected = execFileSync("java", ["-cp", dir.path, "ForryDriver"], { encoding: "utf8" });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "ForryDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).not.toEqual("");
+  },
+);
+
 /** Compile one source file with javac and return the .class path. */
 function compileWithJavac(
   source: string,

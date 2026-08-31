@@ -1610,6 +1610,11 @@ func ifWrap(text string) string { return "if (" + text + ") {" }
 
 func whileWrap(text string) string { return "while (" + text + ") {" }
 
+var (
+	expressionStart = regexp.MustCompile(`^[\w$.\[\]()]`)
+	notAnExpression = regexp.MustCompile(`^(?:return|break|continue|throw|new)\b`)
+)
+
 func doWhileWrap(text string) string { return "} while (" + text + ");" }
 
 // renderCondition renders a condition against the types its locals are known to
@@ -2693,7 +2698,12 @@ func containsInt(values []int, wanted int) bool {
 // whileLoop writes `while (c) { ... }`: the header is the test, and the loop
 // runs while it holds.
 func (d *bodyDecompiler) whileLoop(l *loop, header *block) (int, error) {
-	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: l.Header, Continues: true})
+	update := d.forUpdate(l)
+	continueTarget := l.Header
+	if update != nil {
+		continueTarget = update.Start
+	}
+	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: continueTarget, Continues: true})
 	defer func() { d.active = d.active[:len(d.active)-1] }()
 	d.visited[l.Header] = true
 	last := header.Instructions[len(header.Instructions)-1]
@@ -2723,15 +2733,89 @@ func (d *bodyDecompiler) whileLoop(l *loop, header *block) (int, error) {
 	if jump.Target == l.Follow {
 		condition, body = negate(jump.Condition), jump.Fallthrough
 	}
-	statements, err := d.capture(func() error { return d.structure(body, l.Header) })
+	statements, err := d.capture(func() error { return d.structure(body, continueTarget) })
 	if err != nil {
 		return 0, err
 	}
 	statements = trimTail(statements, "continue;")
-	d.emitCondition(condition, whileWrap)
+	// `for (; c; update)` is the same bytecode as the `while` whose last
+	// statement is the update - but it is where a `continue` goes, so it is the
+	// only form that can write one.
+	clause := ""
+	if update != nil {
+		clause, err = d.updateClause(update)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if clause == "" {
+		d.emitCondition(condition, whileWrap)
+	} else {
+		d.emitCondition(condition, func(text string) string {
+			return "for (; " + text + "; " + clause + ") {"
+		})
+	}
 	*d.current = append(*d.current, stmt{Nested: &statements})
 	d.emit("}")
 	return l.Follow, nil
+}
+
+// forUpdate is the update of a `for`, which javac lays out at the bottom of the
+// body with the test at the top. It is only worth naming when something *jumps*
+// to it - a body that simply runs into it is a `while` whose last statement is
+// the update, which is what this wrote before there was a `for` form.
+func (d *bodyDecompiler) forUpdate(l *loop) *block {
+	if len(l.Latches) != 1 {
+		return nil
+	}
+	latch := d.blocks[l.Latches[0]]
+	// The update runs before the test, so it ends in the jump back to it, and it
+	// has to hold something besides that jump.
+	if latch == nil || latch.Start == l.Header || latch.Kind != blockGoto {
+		return nil
+	}
+	if len(latch.Instructions) < 2 || d.visited[latch.Start] {
+		return nil
+	}
+	predecessors := 0
+	for _, b := range d.blocks {
+		for _, successor := range b.Successors {
+			if successor == latch.Start {
+				predecessors++
+				break
+			}
+		}
+	}
+	if predecessors > 1 {
+		return latch
+	}
+	return nil
+}
+
+// updateClause is the `for`'s update clause: the update block's statements,
+// which have to be expressions - a `for` takes a comma-separated list of them,
+// nothing else. It reports "" when they are not.
+func (d *bodyDecompiler) updateClause(update *block) (string, error) {
+	d.visited[update.Start] = true
+	statements, err := d.capture(func() error {
+		return d.runInstructions(update.Instructions[:len(update.Instructions)-1], endOf(update), update.Start)
+	})
+	if err != nil {
+		return "", err
+	}
+	var written []string
+	for _, statement := range statements {
+		if statement.Nested != nil || !strings.HasSuffix(statement.Text, ";") {
+			return "", nil
+		}
+		text := strings.TrimSuffix(statement.Text, ";")
+		// A declaration or a jump is not an expression; a `for` takes no others.
+		if !expressionStart.MatchString(text) || notAnExpression.MatchString(text) {
+			return "", nil
+		}
+		written = append(written, text)
+	}
+	return strings.Join(written, ", "), nil
 }
 
 // doWhileLoop writes `do { ... } while (c);`: the test is the latch, and the
@@ -2797,7 +2881,7 @@ func (d *bodyDecompiler) foreverLoop(l *loop) (int, error) {
 // together: a case that returns leaves the post-dominator at exitBlock, and what
 // follows the statement is then the first block the switch as a whole leads to
 // that no single case owns.
-func (d *bodyDecompiler) switchFollowOf(b *block, cases []int, defaultTarget int) int {
+func (d *bodyDecompiler) switchFollowOf(b *block, cases []int, defaultTarget int, orDefaultBody bool) int {
 	// A jump that leaves an enclosing loop is that loop's, not this statement's:
 	// taking it for the follow would write a `break` that breaks the wrong one.
 	barriers := map[int]bool{}
@@ -2832,7 +2916,8 @@ func (d *bodyDecompiler) switchFollowOf(b *block, cases []int, defaultTarget int
 		}
 		return follow
 	}
-	if merged := leadsTo(append(append([]int{}, cases...), defaultTarget)); merged != exitBlock {
+	merged := leadsTo(append(append([]int{}, cases...), defaultTarget))
+	if merged != exitBlock || !orDefaultBody {
 		return merged
 	}
 	// A `switch` with no `default` of its own ends where the table's default
@@ -2891,6 +2976,25 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	if !ok {
 		follow = exitBlock
 	}
+	// A `continue` in one case skips the end of the statement, which leaves the
+	// post-dominator on the loop's own edge instead of on it. What the statement
+	// really ends at is then what the rule below finds - it never lands there.
+	if follow != exitBlock {
+		onLoopEdge := false
+		for _, entered := range d.active {
+			if entered.ContinueTarget == follow || entered.Loop.Follow == follow {
+				onLoopEdge = true
+				break
+			}
+		}
+		if onLoopEdge {
+			// Only a block every case leads to: the `default`'s own body is where
+			// a `switch` with no `default` ends, and inside a loop that is not it.
+			if earlier := d.switchFollowOf(b, cases, defaultTarget, false); earlier != exitBlock && earlier < follow {
+				follow = earlier
+			}
+		}
+	}
 	// The merge can sit outside this statement: a case that returns makes the
 	// post-dominator exitBlock, while the rest still comes back together where
 	// the statement around this one ends. That only counts when no case begins
@@ -2905,7 +3009,7 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 		}
 	}
 	if follow == exitBlock {
-		follow = d.switchFollowOf(b, cases, defaultTarget)
+		follow = d.switchFollowOf(b, cases, defaultTarget, true)
 	}
 	// javac lays the case bodies out in one run before the end of the statement,
 	// so a candidate that sits between them ends nothing: the statement has no
