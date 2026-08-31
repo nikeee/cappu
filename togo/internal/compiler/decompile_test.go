@@ -1250,6 +1250,39 @@ func TestDecompileRecompilesJavacForLoopsToTheSameBytecode(t *testing.T) {
 	}
 }
 
+// The update of a `for` is a list of expressions. When the block at the bottom of
+// the body is not that - an allocation whose value is dropped, or an assignment a
+// later retype still has to reach - it is not an update clause, and the
+// statements belong at the end of the body, where the `while` form puts them.
+const notAnUpdateSource = `public class NotAnUpdate {
+  static int dropped(int n, StringBuilder out) { int r = 0; int i = 0; while (i < n) { if (i % 2 == 0) { r += 1; } else { r += 2; } new StringBuilder("x").append(i).toString(); out.append(i); i++; } return r; }
+  static boolean retyped(int n) { boolean b = false; int i = 0; while (i < n) { if (i % 2 == 0) { i += 1; } else { i += 3; } b = true; i++; } return b; }
+}`
+
+func TestDecompileKeepsALoopTailThatIsNotAnUpdateClause(t *testing.T) {
+	if !hasTool("javac") || !hasTool("javap") {
+		t.Skip("no JDK (javac/javap)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "NotAnUpdate", notAnUpdateSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	// The dropped allocation is a statement of the body, not an update.
+	if !strings.Contains(source, ".toString();") || !strings.Contains(source, "var1 = true;") {
+		t.Errorf("the loop tail is missing:\n%s", source)
+	}
+	roundTripped := compileWithJavac(t, filepath.Join(dir, "again"), "NotAnUpdate", source)
+	if javapText(t, roundTripped) != javapText(t, classFile) {
+		t.Errorf("recompiled bytecode differs:\n%s\n--- from ---\n%s",
+			javapText(t, roundTripped), javapText(t, classFile))
+	}
+}
+
 // A `continue` whose arm is the whole `if` comes back as the inverted test that
 // runs the rest - the same thing, other bytecode - and a nested loop's variable
 // is hoisted, so these can only be judged by running them.

@@ -796,6 +796,35 @@ test(
   },
 );
 
+// The update of a `for` is a list of expressions. When the block at the bottom
+// of the body is not that - an allocation whose value is dropped, or an
+// assignment a later retype still has to reach - it is not an update clause, and
+// the statements belong at the end of the body, where the `while` form puts them.
+const NOT_AN_UPDATE_SOURCE =
+  "public class NotAnUpdate {\n" +
+  "  static int dropped(int n, StringBuilder out) { int r = 0; int i = 0;" +
+  " while (i < n) { if (i % 2 == 0) { r += 1; } else { r += 2; }" +
+  ' new StringBuilder("x").append(i).toString(); out.append(i); i++; } return r; }\n' +
+  "  static boolean retyped(int n) { boolean b = false; int i = 0;" +
+  " while (i < n) { if (i % 2 == 0) { i += 1; } else { i += 3; } b = true; i++; } return b; }\n" +
+  "}\n";
+
+test(
+  "keeps a loop tail that is not an update clause",
+  { skip: HAS_JAVAC && HAS_JAVAP ? false : "no JDK (javac/javap)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-notanupdate-");
+    const classFile = compileWithJavac(NOT_AN_UPDATE_SOURCE, "NotAnUpdate", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    // The dropped allocation is a statement of the body, not an update.
+    expect(source).toContain(".toString();");
+    expect(source).toContain("var1 = true;");
+    const roundTripped = compileWithJavac(source, "NotAnUpdate", join(dir.path, "again"));
+    expect(javap(roundTripped)).toEqual(javap(classFile));
+  },
+);
+
 // A `continue` whose arm is the whole `if` comes back as the inverted test that
 // runs the rest - the same thing, other bytecode - and a nested loop's variable
 // is hoisted, so these can only be judged by running them.

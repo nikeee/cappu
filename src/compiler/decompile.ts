@@ -1973,20 +1973,6 @@ class BodyDecompiler {
     if (targets[0]! <= block.start) throw new NotDecompilable("a switch that jumps backwards");
 
     let follow = this.followOf.get(block.start) ?? EXIT;
-    // A `continue` in one case skips the end of the statement, which leaves the
-    // post-dominator on the loop's own edge instead of on it. What the statement
-    // really ends at is then what the rule below finds - it never lands there.
-    if (
-      follow !== EXIT &&
-      this.active.some(
-        entered => entered.continueTarget === follow || entered.loop.follow === follow,
-      )
-    ) {
-      // Only a block every case leads to: the `default`'s own body is where a
-      // `switch` with no `default` ends, and inside a loop that is not this.
-      const earlier = this.switchFollowOf(block, [...keysOf.keys()], defaultTarget, false);
-      if (earlier !== EXIT && earlier < follow) follow = earlier;
-    }
     // The merge can sit outside this statement: a case that returns makes the
     // post-dominator EXIT, while the rest still comes back together where the
     // statement around this one ends.
@@ -2001,6 +1987,21 @@ class BodyDecompiler {
       follow = stop;
     }
     if (follow === EXIT) follow = this.switchFollowOf(block, [...keysOf.keys()], defaultTarget);
+    // A `continue` in one case skips the end of the statement, which leaves both
+    // the post-dominator and the end of the statement around this one on the
+    // loop's own edge instead of on it. Where it really ends is then the block
+    // every case leads to - which is never that edge. (Only that strict pass: the
+    // `default`'s own body ends a `switch` that has none, and inside a loop that
+    // is not this.)
+    if (
+      follow !== EXIT &&
+      this.active.some(
+        entered => entered.continueTarget === follow || entered.loop.follow === follow,
+      )
+    ) {
+      const earlier = this.switchFollowOf(block, [...keysOf.keys()], defaultTarget, false);
+      if (earlier !== EXIT && earlier < follow) follow = earlier;
+    }
     // javac lays the case bodies out in one run before the end of the statement,
     // so a candidate that sits between them ends nothing: the statement has no
     // follow at all then, and every case runs into the next or leaves on its own.
@@ -2334,11 +2335,23 @@ class BodyDecompiler {
       // `for (; c; update)` is the same bytecode as the `while` whose last
       // statement is the update - but it is where a `continue` goes, so it is
       // the only form that can write one.
-      const clause = update === undefined ? undefined : this.updateClause(update);
-      if (clause === undefined) {
-        this.emitCondition(condition, text => `while (${text}) {`);
-      } else {
+      const written = update === undefined ? undefined : this.updateClause(update);
+      if (written !== undefined && "clause" in written) {
+        const { clause } = written;
         this.emitCondition(condition, text => `for (; ${text}; ${clause}) {`);
+      } else {
+        // Not an update clause after all: the block belongs at the end of the
+        // body, which is where the `while` form has always put it. It is kept as
+        // the list it was captured into, so a later retype still finds it.
+        if (written !== undefined) {
+          // A `continue;` was written against the update, and a `while`'s goes to
+          // the test instead - which would skip the statements now at the tail.
+          if (flattenStatements(statements).includes("continue;")) {
+            throw new NotDecompilable("a loop whose update is not an expression");
+          }
+          statements.push(written.statements);
+        }
+        this.emitCondition(condition, text => `while (${text}) {`);
       }
       this.current.push(statements, "}");
     } finally {
@@ -2355,7 +2368,8 @@ class BodyDecompiler {
    */
   private forUpdate(loop: Loop): Block | undefined {
     if (loop.latches.length !== 1) return undefined;
-    const latch = this.blocks.get(loop.latches[0]!)!;
+    const latch = this.blocks.get(loop.latches[0]!);
+    if (latch === undefined) return undefined;
     // The update runs before the test, so it ends in the jump back to it, and
     // it has to hold something besides that jump.
     if (latch.start === loop.header || latch.kind !== "goto") return undefined;
@@ -2371,22 +2385,39 @@ class BodyDecompiler {
    * The `for`'s update clause: the update block's statements, which have to be
    * expressions - a `for` takes a comma-separated list of them, nothing else.
    */
-  private updateClause(update: Block): string | undefined {
+  private updateClause(update: Block): { clause: string } | { statements: Stmt[] } {
     this.visited.add(update.start);
+    // A local assigned in here can still be *retyped* later, and the rewrite goes
+    // through the statement this captured - which a clause frozen into the `for`
+    // line would not carry. So the writes are counted, and one sends the block
+    // back to the body.
+    const before = new Map([...this.byName.values()].map(local => [local, local.writes.length]));
     const statements = this.capture(() =>
-      this.runInstructions(update.instructions.slice(0, -1), endOf(update), update.start),
+      this.runInstructions(
+        update.instructions.slice(this.skip.get(update.start) ?? 0, -1),
+        endOf(update),
+        update.start,
+      ),
+    );
+    // A local the block *declares* counts too: it is not in `before` at all.
+    const assigned = [...this.byName.values()].some(
+      local => before.get(local) !== local.writes.length,
     );
     const written: string[] = [];
     for (const statement of statements) {
-      if (typeof statement !== "string" || !statement.endsWith(";")) return undefined;
+      // A `for` takes a comma-separated list of expressions and nothing else: a
+      // block, a jump or an object allocation whose value is dropped is not one.
+      if (assigned || typeof statement !== "string" || !statement.endsWith(";")) {
+        return { statements };
+      }
       const text = statement.slice(0, -1);
-      // A declaration or a jump is not an expression; a `for` takes no others.
       if (!/^[\w$.[\]()]/.test(text) || /^(?:return|break|continue|throw|new)\b/.test(text)) {
-        return undefined;
+        return { statements };
       }
       written.push(text);
     }
-    return written.length === 0 ? undefined : written.join(", ");
+    // Nothing to update: the block held only the jump back to the test.
+    return written.length === 0 ? { statements } : { clause: written.join(", ") };
   }
 
   /** `do { ... } while (c);`: the test is the latch, and the body runs first. */
