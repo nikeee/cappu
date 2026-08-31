@@ -1900,7 +1900,12 @@ class BodyDecompiler {
    * statement is then the first block the switch as a whole leads to that no
    * single case owns.
    */
-  private switchFollowOf(block: Block, cases: readonly number[], defaultTarget: number): number {
+  private switchFollowOf(
+    block: Block,
+    cases: readonly number[],
+    defaultTarget: number,
+    orDefaultBody = true,
+  ): number {
     // A jump that leaves an enclosing loop is that loop's, not this statement's:
     // taking it for the follow would write a `break` that breaks the wrong one.
     const barriers = new Set<number>();
@@ -1928,7 +1933,7 @@ class BodyDecompiler {
       return candidates.length === 0 ? EXIT : Math.min(...candidates);
     };
     const merged = leadsTo([...cases, defaultTarget]);
-    if (merged !== EXIT) return merged;
+    if (merged !== EXIT || !orDefaultBody) return merged;
     // A `switch` with no `default` of its own ends where the table's default
     // sends it - which the pass above ruled out as the default's own body. A
     // default that a case falls into is still ruled out, by that case.
@@ -1982,6 +1987,21 @@ class BodyDecompiler {
       follow = stop;
     }
     if (follow === EXIT) follow = this.switchFollowOf(block, [...keysOf.keys()], defaultTarget);
+    // A `continue` in one case skips the end of the statement, which leaves both
+    // the post-dominator and the end of the statement around this one on the
+    // loop's own edge instead of on it. Where it really ends is then the block
+    // every case leads to - which is never that edge. (Only that strict pass: the
+    // `default`'s own body ends a `switch` that has none, and inside a loop that
+    // is not this.)
+    if (
+      follow !== EXIT &&
+      this.active.some(
+        entered => entered.continueTarget === follow || entered.loop.follow === follow,
+      )
+    ) {
+      const earlier = this.switchFollowOf(block, [...keysOf.keys()], defaultTarget, false);
+      if (earlier !== EXIT && earlier < follow) follow = earlier;
+    }
     // javac lays the case bodies out in one run before the end of the statement,
     // so a candidate that sits between them ends nothing: the statement has no
     // follow at all then, and every case runs into the next or leaves on its own.
@@ -2282,7 +2302,12 @@ class BodyDecompiler {
 
   /** `while (c) { ... }`: the header is the test, and the loop runs while it holds. */
   private whileLoop(loop: Loop, header: Block): number {
-    this.active.push({ loop, continueTarget: loop.header, continues: true });
+    const update = this.forUpdate(loop);
+    this.active.push({
+      loop,
+      continueTarget: update?.start ?? loop.header,
+      continues: true,
+    });
     try {
       this.visited.add(loop.header);
       const taken: number[] = [];
@@ -2304,14 +2329,70 @@ class BodyDecompiler {
       const leaves = jump.target === loop.follow;
       const condition = leaves ? negate(jump.condition) : jump.condition;
       const body = leaves ? jump.fallthrough : jump.target;
-      const statements = this.capture(() => this.structure(body, loop.header));
+      const stop = update?.start ?? loop.header;
+      const statements = this.capture(() => this.structure(body, stop));
       trimTail(statements, "continue;");
-      this.emitCondition(condition, text => `while (${text}) {`);
+      // `for (; c; update)` is the same bytecode as the `while` whose last
+      // statement is the update - but it is where a `continue` goes, so it is
+      // the only form that can write one.
+      const clause = update === undefined ? "" : this.updateClause(update);
+      if (clause === "") {
+        // A `continue` target with nothing in it: the jump back to the test, on
+        // its own. There is no update to write, so this stays a `while`.
+        this.emitCondition(condition, text => `while (${text}) {`);
+      } else {
+        this.emitCondition(condition, text => `for (; ${text}; ${clause}) {`);
+      }
       this.current.push(statements, "}");
     } finally {
       this.active.pop();
     }
     return loop.follow;
+  }
+
+  /**
+   * The update of a `for`, which javac lays out at the bottom of the body with
+   * the test at the top. It is only worth naming when something *jumps* to it -
+   * a body that simply runs into it is a `while` whose last statement is the
+   * update, which is what this wrote before there was a `for` form.
+   */
+  private forUpdate(loop: Loop): Block | undefined {
+    if (loop.latches.length !== 1) return undefined;
+    const latch = this.blocks.get(loop.latches[0]!);
+    if (latch === undefined) return undefined;
+    // The update runs before the test, so it ends in the jump back to it.
+    if (latch.start === loop.header || latch.kind !== "goto") return undefined;
+    if (this.visited.has(latch.start)) return undefined;
+    // Only an increment can be written as the update clause, and this has to be
+    // decided before the body is - `continue;` goes here only if it does. Any
+    // other tail stays a statement of the body, where the `while` form has
+    // always put it: a local stored in here could still be *retyped*, and a
+    // clause frozen into the `for` line would not carry the rewrite.
+    const update = latch.instructions.slice(0, -1);
+    if (!update.every(instruction => instruction.mnemonic.replace(/_w$/, "") === "iinc")) {
+      return undefined;
+    }
+    let predecessors = 0;
+    for (const block of this.blocks.values()) {
+      if (block.successors.includes(latch.start)) predecessors++;
+    }
+    return predecessors > 1 ? latch : undefined;
+  }
+
+  /**
+   * The `for`'s update clause: the update block's statements, which have to be
+   * expressions - a `for` takes a comma-separated list of them, nothing else.
+   */
+  private updateClause(update: Block): string {
+    this.visited.add(update.start);
+    const statements = this.capture(() =>
+      this.runInstructions(update.instructions.slice(0, -1), endOf(update), update.start),
+    );
+    // Increments only, so every one of them is an expression statement; an empty
+    // block is a `continue` target with nothing to update.
+    return flattenStatements(statements)
+      .map(text => text.replace(/;$/, ""))
+      .join(", ");
   }
 
   /** `do { ... } while (c);`: the test is the latch, and the body runs first. */

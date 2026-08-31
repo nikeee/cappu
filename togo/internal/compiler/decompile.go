@@ -2693,7 +2693,12 @@ func containsInt(values []int, wanted int) bool {
 // whileLoop writes `while (c) { ... }`: the header is the test, and the loop
 // runs while it holds.
 func (d *bodyDecompiler) whileLoop(l *loop, header *block) (int, error) {
-	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: l.Header, Continues: true})
+	update := d.forUpdate(l)
+	continueTarget := l.Header
+	if update != nil {
+		continueTarget = update.Start
+	}
+	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: continueTarget, Continues: true})
 	defer func() { d.active = d.active[:len(d.active)-1] }()
 	d.visited[l.Header] = true
 	last := header.Instructions[len(header.Instructions)-1]
@@ -2723,15 +2728,93 @@ func (d *bodyDecompiler) whileLoop(l *loop, header *block) (int, error) {
 	if jump.Target == l.Follow {
 		condition, body = negate(jump.Condition), jump.Fallthrough
 	}
-	statements, err := d.capture(func() error { return d.structure(body, l.Header) })
+	statements, err := d.capture(func() error { return d.structure(body, continueTarget) })
 	if err != nil {
 		return 0, err
 	}
 	statements = trimTail(statements, "continue;")
-	d.emitCondition(condition, whileWrap)
+	// `for (; c; update)` is the same bytecode as the `while` whose last
+	// statement is the update - but it is where a `continue` goes, so it is the
+	// only form that can write one.
+	clause := ""
+	if update != nil {
+		clause, err = d.updateClause(update)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if clause == "" {
+		// A `continue` target with nothing in it: the jump back to the test, on
+		// its own. There is no update to write, so this stays a `while`.
+		d.emitCondition(condition, whileWrap)
+	} else {
+		d.emitCondition(condition, func(text string) string {
+			return "for (; " + text + "; " + clause + ") {"
+		})
+	}
 	*d.current = append(*d.current, stmt{Nested: &statements})
 	d.emit("}")
 	return l.Follow, nil
+}
+
+// forUpdate is the update of a `for`, which javac lays out at the bottom of the
+// body with the test at the top. It is only worth naming when something *jumps*
+// to it - a body that simply runs into it is a `while` whose last statement is
+// the update, which is what this wrote before there was a `for` form.
+func (d *bodyDecompiler) forUpdate(l *loop) *block {
+	if len(l.Latches) != 1 {
+		return nil
+	}
+	latch := d.blocks[l.Latches[0]]
+	// The update runs before the test, so it ends in the jump back to it, and it
+	// has to hold something besides that jump.
+	if latch == nil || latch.Start == l.Header || latch.Kind != blockGoto {
+		return nil
+	}
+	if d.visited[latch.Start] {
+		return nil
+	}
+	// Only an increment can be written as the update clause, and this has to be
+	// decided before the body is - `continue;` goes here only if it does. Any
+	// other tail stays a statement of the body, where the `while` form has always
+	// put it: a local stored in here could still be *retyped*, and a clause
+	// frozen into the `for` line would not carry the rewrite.
+	for _, instruction := range latch.Instructions[:len(latch.Instructions)-1] {
+		if strings.TrimSuffix(instruction.Mnemonic, "_w") != "iinc" {
+			return nil
+		}
+	}
+	predecessors := 0
+	for _, b := range d.blocks {
+		for _, successor := range b.Successors {
+			if successor == latch.Start {
+				predecessors++
+				break
+			}
+		}
+	}
+	if predecessors > 1 {
+		return latch
+	}
+	return nil
+}
+
+// updateClause is the `for`'s update clause: the update block's statements, which
+// are increments, so every one of them is an expression statement. It reports ""
+// for a block that holds only the jump back to the test.
+func (d *bodyDecompiler) updateClause(update *block) (string, error) {
+	d.visited[update.Start] = true
+	statements, err := d.capture(func() error {
+		return d.runInstructions(update.Instructions[:len(update.Instructions)-1], endOf(update), update.Start)
+	})
+	if err != nil {
+		return "", err
+	}
+	var written []string
+	for _, text := range flattenStatements(statements) {
+		written = append(written, strings.TrimSuffix(text, ";"))
+	}
+	return strings.Join(written, ", "), nil
 }
 
 // doWhileLoop writes `do { ... } while (c);`: the test is the latch, and the
@@ -2797,7 +2880,7 @@ func (d *bodyDecompiler) foreverLoop(l *loop) (int, error) {
 // together: a case that returns leaves the post-dominator at exitBlock, and what
 // follows the statement is then the first block the switch as a whole leads to
 // that no single case owns.
-func (d *bodyDecompiler) switchFollowOf(b *block, cases []int, defaultTarget int) int {
+func (d *bodyDecompiler) switchFollowOf(b *block, cases []int, defaultTarget int, orDefaultBody bool) int {
 	// A jump that leaves an enclosing loop is that loop's, not this statement's:
 	// taking it for the follow would write a `break` that breaks the wrong one.
 	barriers := map[int]bool{}
@@ -2832,7 +2915,8 @@ func (d *bodyDecompiler) switchFollowOf(b *block, cases []int, defaultTarget int
 		}
 		return follow
 	}
-	if merged := leadsTo(append(append([]int{}, cases...), defaultTarget)); merged != exitBlock {
+	merged := leadsTo(append(append([]int{}, cases...), defaultTarget))
+	if merged != exitBlock || !orDefaultBody {
 		return merged
 	}
 	// A `switch` with no `default` of its own ends where the table's default
@@ -2905,7 +2989,27 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 		}
 	}
 	if follow == exitBlock {
-		follow = d.switchFollowOf(b, cases, defaultTarget)
+		follow = d.switchFollowOf(b, cases, defaultTarget, true)
+	}
+	// A `continue` in one case skips the end of the statement, which leaves both
+	// the post-dominator and the end of the statement around this one on the
+	// loop's own edge instead of on it. Where it really ends is then the block
+	// every case leads to - which is never that edge. (Only that strict pass: the
+	// `default`'s own body ends a `switch` that has none, and inside a loop that
+	// is not this.)
+	if follow != exitBlock {
+		onLoopEdge := false
+		for _, entered := range d.active {
+			if entered.ContinueTarget == follow || entered.Loop.Follow == follow {
+				onLoopEdge = true
+				break
+			}
+		}
+		if onLoopEdge {
+			if earlier := d.switchFollowOf(b, cases, defaultTarget, false); earlier != exitBlock && earlier < follow {
+				follow = earlier
+			}
+		}
 	}
 	// javac lays the case bodies out in one run before the end of the statement,
 	// so a candidate that sits between them ends nothing: the statement has no
