@@ -865,6 +865,85 @@ type clause struct {
 	HandlerPc int
 }
 
+// monitorRegion is one `synchronized` statement: javac holds the monitor in a
+// synthetic local and guards the body with a catch-all that releases it and
+// rethrows.
+type monitorRegion struct {
+	StartPc int
+	// EndPc is the end of the last range the handler guards, where the body leaves.
+	EndPc     int
+	HandlerPc int
+	// Slot is the synthetic local the monitor was copied into.
+	Slot int
+}
+
+// isMonitorHandler reports the monitor slot when b is the release-and-rethrow a
+// `synchronized` is guarded by.
+func isMonitorHandler(b *block) (int, bool) {
+	if b == nil || len(b.Instructions) != 5 {
+		return 0, false
+	}
+	store, load, exit := b.Instructions[0], b.Instructions[1], b.Instructions[2]
+	reload, throwing := b.Instructions[3], b.Instructions[4]
+	if !strings.HasPrefix(store.Mnemonic, "astore") || !strings.HasPrefix(load.Mnemonic, "aload") ||
+		exit.Mnemonic != "monitorexit" || !strings.HasPrefix(reload.Mnemonic, "aload") ||
+		throwing.Mnemonic != "athrow" || slotOf(store) != slotOf(reload) {
+		return 0, false
+	}
+	return slotOf(load), true
+}
+
+// monitorRegions returns the `synchronized` statements among the catch-all
+// ranges, and the exception entries left for tryRegions. A `finally` and a
+// try-with-resources are catch-alls too, and those javac writes as duplicated
+// code: not this phase.
+func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instructions []Instruction) ([]monitorRegion, []ExceptionEntry, error) {
+	enters := map[int]bool{}
+	for _, one := range instructions {
+		if one.Mnemonic == "monitorenter" {
+			enters[one.Pc+1] = true
+		}
+	}
+	var rest []ExceptionEntry
+	byHandler := map[int][]ExceptionEntry{}
+	var order []int
+	for _, entry := range exceptions {
+		if entry.CatchType != "" {
+			rest = append(rest, entry)
+			continue
+		}
+		handlerPc := int(entry.HandlerPc)
+		if _, seen := byHandler[handlerPc]; !seen {
+			order = append(order, handlerPc)
+		}
+		byHandler[handlerPc] = append(byHandler[handlerPc], entry)
+	}
+	var monitors []monitorRegion
+	for _, handlerPc := range order {
+		slot, ok := isMonitorHandler(blocks[handlerPc])
+		// The handler guards itself as well, so a throw out of the release runs
+		// it again; that entry says nothing about where the statement is.
+		start, end, ranges := 0, 0, 0
+		for _, entry := range byHandler[handlerPc] {
+			if int(entry.StartPc) == handlerPc {
+				continue
+			}
+			if ranges == 0 || int(entry.StartPc) < start {
+				start = int(entry.StartPc)
+			}
+			if int(entry.EndPc) > end {
+				end = int(entry.EndPc)
+			}
+			ranges++
+		}
+		if !ok || ranges == 0 || !enters[start] {
+			return nil, nil, bail("a finally or synchronized block")
+		}
+		monitors = append(monitors, monitorRegion{StartPc: start, EndPc: end, HandlerPc: handlerPc, Slot: slot})
+	}
+	return monitors, rest, nil
+}
+
 // tryRegion is one `try` statement: the range it protects, and the clauses
 // guarding it.
 type tryRegion struct {
@@ -886,11 +965,9 @@ func tryRegions(exceptions []ExceptionEntry, blocks map[int]*block, self string)
 	var order []int
 	for _, entry := range exceptions {
 		startPc, endPc, handlerPc := int(entry.StartPc), int(entry.EndPc), int(entry.HandlerPc)
-		// A catch-all guards `finally`, `synchronized` and try-with-resources,
-		// all of which javac writes as duplicated code plus a rethrow: not this
-		// phase.
+		// monitorRegions has taken the catch-alls it knows, and rejected the rest.
 		if entry.CatchType == "" {
-			return nil, bail("a finally or synchronized block")
+			return nil, bail("a finally block")
 		}
 		if blocks[startPc] == nil || blocks[handlerPc] == nil {
 			return nil, bail("a try range that starts mid-instruction")
@@ -1538,7 +1615,13 @@ type bodyDecompiler struct {
 	active []activeLoop
 	// switches are the `switch` statements being written right now, innermost last.
 	switches []activeSwitch
-	visited  map[int]bool
+	// monitors are the `synchronized` statements of this method, and the slots
+	// they hold; instructionAt is every instruction by pc, for the ones a
+	// statement has to look up.
+	monitors      []monitorRegion
+	monitorSlots  map[int]bool
+	instructionAt map[int]Instruction
+	visited       map[int]bool
 	// pendingCount hands out the ids that tell the copies of one `new` apart.
 	pendingCount int
 	// initCount does the same for the copies of one array literal.
@@ -2179,7 +2262,20 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 		return err
 	}
 	d.blocks = blocks
-	regions, err := tryRegions(exceptions, blocks, d.self())
+	d.instructionAt = map[int]Instruction{}
+	for _, one := range instructions {
+		d.instructionAt[one.Pc] = one
+	}
+	monitors, rest, err := monitorRegions(exceptions, blocks, instructions)
+	if err != nil {
+		return err
+	}
+	d.monitors = monitors
+	d.monitorSlots = map[int]bool{}
+	for _, region := range monitors {
+		d.monitorSlots[region.Slot] = true
+	}
+	regions, err := tryRegions(rest, blocks, d.self())
 	if err != nil {
 		return err
 	}
@@ -2270,6 +2366,14 @@ func (d *bodyDecompiler) structure(entry, stop int) error {
 		}
 		d.visited[at] = true
 		body := b.Instructions[d.skip[at]:]
+		if len(body) > 0 && body[len(body)-1].Mnemonic == "monitorenter" {
+			next, err := d.synchronizedStatement(b, body)
+			if err != nil {
+				return err
+			}
+			at = next
+			continue
+		}
 		if b.Kind == blockConditional || b.Kind == blockGoto || b.Kind == blockSwitch {
 			body = body[:len(body)-1]
 		}
@@ -2298,6 +2402,78 @@ func (d *bodyDecompiler) structure(entry, stop int) error {
 		at = next
 	}
 	return nil
+}
+
+// synchronizedStatement writes one `synchronized`, from the `monitorenter` that
+// ends b, and reports where the statement after it begins.
+func (d *bodyDecompiler) synchronizedStatement(b *block, kept []Instruction) (int, error) {
+	var region *monitorRegion
+	for i := range d.monitors {
+		if len(b.Successors) > 0 && d.monitors[i].StartPc == b.Successors[0] {
+			region = &d.monitors[i]
+			break
+		}
+	}
+	if region == nil {
+		return 0, bail("unsupported instruction monitorenter")
+	}
+	// javac evaluates the monitor, copies it into a synthetic local and enters:
+	// the copy is what the handler releases, and source wrote only the expression.
+	if len(kept) < 3 {
+		return 0, bail("a monitor that is not held in a local")
+	}
+	head := kept[:len(kept)-3]
+	copyInstruction, store := kept[len(kept)-3], kept[len(kept)-2]
+	if copyInstruction.Mnemonic != "dup" || !strings.HasPrefix(store.Mnemonic, "astore") ||
+		slotOf(store) != region.Slot {
+		return 0, bail("a monitor that is not held in a local")
+	}
+	if err := d.runInstructions(head, copyInstruction.Pc, b.Start); err != nil {
+		return 0, err
+	}
+	monitor, err := d.pop()
+	if err != nil {
+		return 0, err
+	}
+	if len(d.stack) > 0 {
+		return 0, bail("values left on the stack")
+	}
+	// The body leaves through the jump over the handler; with no jump there,
+	// every path out of it returns or throws.
+	follow := exitBlock
+	if exit, ok := d.instructionAt[region.EndPc]; ok && isGotoMnemonic(exit.Mnemonic) && d.blocks[exit.Arg] != nil {
+		follow = exit.Arg
+	}
+	// The release and the rethrow are the statement's own, not the body's.
+	d.visited[region.HandlerPc] = true
+	// Inside the body, a merge is a merge of the body's own paths: what leaves
+	// the statement leaves it the way a `return` does, and counting it would put
+	// the merge of an `if` in here past the end of the `synchronized`.
+	within := map[int]bool{}
+	queue := []int{region.StartPc}
+	for len(queue) > 0 {
+		at := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		if at == follow || within[at] || d.blocks[at] == nil {
+			continue
+		}
+		within[at] = true
+		queue = append(queue, d.blocks[at].Successors...)
+	}
+	outer := d.followOf
+	d.followOf = postDominators(d.blocks, within, map[int]bool{follow: true})
+	statements, err := d.capture(func() error { return d.structure(region.StartPc, follow) })
+	d.followOf = outer
+	if err != nil {
+		return 0, err
+	}
+	if len(d.stack) > 0 {
+		return 0, bail("values left on the stack")
+	}
+	d.emit("synchronized (" + monitor.Text + ") {")
+	*d.current = append(*d.current, stmt{Nested: &statements})
+	d.emit("}")
+	return follow, nil
 }
 
 // regionAt is the `try` statement that begins at at, if one does. The outermost
@@ -3614,8 +3790,18 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 
 	// Loads and stores.
 	base := opBase(mnemonic)
+	// The monitor of a `synchronized` lives in a synthetic local: source never
+	// named it, and reading it back is part of the release, not a statement.
+	if mnemonic == "monitorexit" {
+		_, err := d.pop()
+		return err
+	}
 	if isOneOf(base, "ilfda", "load") {
 		slot := slotOf(instruction)
+		if base == "aload" && d.monitorSlots[slot] {
+			d.push(primary("null", "java.lang.Object"))
+			return nil
+		}
 		if base == "aload" && slot == 0 && !d.isStatic {
 			d.push(primary("this", d.self()))
 			return nil

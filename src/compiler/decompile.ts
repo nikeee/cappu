@@ -740,6 +740,85 @@ function buildBlocks(
   return blocks;
 }
 
+/**
+ * One `synchronized` statement: javac holds the monitor in a synthetic local and
+ * guards the body with a catch-all that releases it and rethrows.
+ */
+interface MonitorRegion {
+  readonly startPc: number;
+  /** The end of the last range the handler guards, where the body leaves. */
+  readonly endPc: number;
+  readonly handlerPc: number;
+  /** The synthetic local the monitor was copied into. */
+  readonly slot: number;
+}
+
+/** Whether `block` is the release-and-rethrow a `synchronized` is guarded by. */
+function isMonitorHandler(block: Block | undefined): number | undefined {
+  const kept = block?.instructions ?? [];
+  if (kept.length !== 5) return undefined;
+  const [store, load, exit, reload, throwing] = kept;
+  const slot = (instruction: Instruction): number =>
+    /_\d$/.test(instruction.mnemonic)
+      ? Number(instruction.mnemonic.slice(-1))
+      : instruction.arg;
+  if (
+    !store!.mnemonic.startsWith("astore") ||
+    !load!.mnemonic.startsWith("aload") ||
+    exit!.mnemonic !== "monitorexit" ||
+    !reload!.mnemonic.startsWith("aload") ||
+    throwing!.mnemonic !== "athrow" ||
+    slot(store!) !== slot(reload!)
+  ) {
+    return undefined;
+  }
+  return slot(load!);
+}
+
+/**
+ * The `synchronized` statements among the catch-all ranges, and the exception
+ * entries left for `tryRegions`. A `finally` and a try-with-resources are
+ * catch-alls too, and those javac writes as duplicated code: not this phase.
+ */
+function monitorRegions(
+  exceptions: readonly ExceptionEntry[],
+  blocks: Map<number, Block>,
+  instructions: readonly Instruction[],
+): { monitors: MonitorRegion[]; rest: ExceptionEntry[] } {
+  const monitors: MonitorRegion[] = [];
+  const rest: ExceptionEntry[] = [];
+  const enters = new Set(
+    instructions.filter(one => one.mnemonic === "monitorenter").map(one => one.pc + 1),
+  );
+  const byHandler = new Map<number, ExceptionEntry[]>();
+  for (const entry of exceptions) {
+    if (entry.catchType !== undefined) {
+      rest.push(entry);
+      continue;
+    }
+    const group = byHandler.get(entry.handlerPc);
+    if (group === undefined) byHandler.set(entry.handlerPc, [entry]);
+    else group.push(entry);
+  }
+  for (const [handlerPc, group] of byHandler) {
+    const slot = isMonitorHandler(blocks.get(handlerPc));
+    // The handler guards itself as well, so a throw out of the release runs it
+    // again; that entry says nothing about where the statement is.
+    const ranges = group.filter(entry => entry.startPc !== handlerPc);
+    const start = Math.min(...ranges.map(entry => entry.startPc));
+    if (slot === undefined || ranges.length === 0 || !enters.has(start)) {
+      throw new NotDecompilable("a finally or synchronized block");
+    }
+    monitors.push({
+      startPc: start,
+      endPc: Math.max(...ranges.map(entry => entry.endPc)),
+      handlerPc,
+      slot,
+    });
+  }
+  return { monitors, rest };
+}
+
 /** One `catch` clause: the types it names, and where its handler begins. */
 interface Clause {
   readonly types: string[];
@@ -770,11 +849,8 @@ function tryRegions(
   >();
   const order: number[] = [];
   for (const entry of exceptions) {
-    // A catch-all guards `finally`, `synchronized` and try-with-resources, all
-    // of which javac writes as duplicated code plus a rethrow: not this phase.
-    if (entry.catchType === undefined) {
-      throw new NotDecompilable("a finally or synchronized block");
-    }
+    // `monitorRegions` has taken the catch-alls it knows, and rejected the rest.
+    if (entry.catchType === undefined) throw new NotDecompilable("a finally block");
     if (!blocks.has(entry.startPc) || !blocks.has(entry.handlerPc)) {
       throw new NotDecompilable("a try range that starts mid-instruction");
     }
@@ -1235,6 +1311,11 @@ class BodyDecompiler {
   private followOf = new Map<number, number>();
   private loops = new Map<number, Loop>();
   private regions: TryRegion[] = [];
+  /** The `synchronized` statements of this method, and the slots they hold. */
+  private monitors: MonitorRegion[] = [];
+  private monitorSlots = new Set<number>();
+  /** Every instruction by pc, for the ones a statement has to look up. */
+  private instructionAt = new Map<number, Instruction>();
   /** The `try` statements being written right now. */
   private readonly activeTries = new Set<TryRegion>();
   /**
@@ -1756,7 +1837,11 @@ class BodyDecompiler {
 
   run(instructions: readonly Instruction[], exceptions: readonly ExceptionEntry[] = []): void {
     this.blocks = buildBlocks(instructions, exceptions);
-    this.regions = tryRegions(exceptions, this.blocks, this.self);
+    this.instructionAt = new Map(instructions.map(one => [one.pc, one]));
+    const { monitors, rest } = monitorRegions(exceptions, this.blocks, instructions);
+    this.monitors = monitors;
+    this.monitorSlots = new Set(monitors.map(region => region.slot));
+    this.regions = tryRegions(rest, this.blocks, this.self);
     this.followOf = postDominators(this.blocks);
     this.methodFollowOf = this.followOf;
     this.dominators =
@@ -1813,6 +1898,10 @@ class BodyDecompiler {
       const isBranch =
         block.kind === "conditional" || block.kind === "goto" || block.kind === "switch";
       const kept = block.instructions.slice(this.skip.get(at) ?? 0);
+      if (kept[kept.length - 1]?.mnemonic === "monitorenter") {
+        at = this.synchronizedStatement(block, kept);
+        continue;
+      }
       const body = isBranch ? kept.slice(0, -1) : kept;
       this.runInstructions(body, endOf(block), block.start);
       if (block.kind === "end") return;
@@ -2032,6 +2121,59 @@ class BodyDecompiler {
       this.switches.pop();
     }
     this.current.push(`switch (${selector.text}) {`, clauses, "}");
+    return follow;
+  }
+
+  /**
+   * One `synchronized`, from the `monitorenter` that ends `block`. Returns where
+   * the statement after it begins.
+   */
+  private synchronizedStatement(block: Block, kept: readonly Instruction[]): number {
+    const region = this.monitors.find(one => one.startPc === block.successors[0]);
+    if (region === undefined) throw new NotDecompilable("unsupported instruction monitorenter");
+    // javac evaluates the monitor, copies it into a synthetic local and enters:
+    // the copy is what the handler releases, and source wrote only the
+    // expression.
+    const head = kept.slice(0, -3);
+    const [copy, store] = kept.slice(-3, -1);
+    if (
+      copy?.mnemonic !== "dup" ||
+      store === undefined ||
+      !store.mnemonic.startsWith("astore") ||
+      this.slotOf(store) !== region.slot
+    ) {
+      throw new NotDecompilable("a monitor that is not held in a local");
+    }
+    this.runInstructions(head, copy.pc, block.start);
+    const monitor = this.pop();
+    if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
+    // The body leaves through the jump over the handler; with no jump there,
+    // every path out of it returns or throws.
+    const exit = this.instructionAt.get(region.endPc);
+    const follow =
+      exit !== undefined && isGoto(exit.mnemonic) && this.blocks.has(exit.arg) ? exit.arg : EXIT;
+    // The release and the rethrow are the statement's own, not the body's.
+    this.visited.add(region.handlerPc);
+    // Inside the body, a merge is a merge of the body's own paths: what leaves
+    // the statement leaves it the way a `return` does, and counting it would put
+    // the merge of an `if` in here past the end of the `synchronized`.
+    const within = new Set<number>();
+    for (const queue = [region.startPc]; queue.length > 0; ) {
+      const at = queue.pop()!;
+      if (at === follow || within.has(at) || !this.blocks.has(at)) continue;
+      within.add(at);
+      queue.push(...this.blocks.get(at)!.successors);
+    }
+    const outer = this.followOf;
+    this.followOf = postDominators(this.blocks, within, new Set([follow]));
+    let statements: Stmt[];
+    try {
+      statements = this.capture(() => this.structure(region.startPc, follow));
+    } finally {
+      this.followOf = outer;
+    }
+    if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
+    this.current.push(`synchronized (${monitor.text}) {`, statements, "}");
     return follow;
   }
 
@@ -2749,8 +2891,17 @@ class BodyDecompiler {
 
     // Loads and stores.
     const base = mnemonic.replace(/(_\d|_w)$/, "");
+    // The monitor of a `synchronized` lives in a synthetic local: source never
+    // named it, and reading it back is part of the release, not a statement.
+    if (mnemonic === "monitorexit") {
+      this.pop();
+      return;
+    }
     if (/^[ilfda]load$/.test(base)) {
       const slot = this.slotOf(instruction);
+      if (base === "aload" && this.monitorSlots.has(slot)) {
+        return this.push(primary("null", "java.lang.Object"));
+      }
       if (base === "aload" && slot === 0 && !this.isStatic) {
         return this.push(primary("this", this.self));
       }

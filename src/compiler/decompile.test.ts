@@ -875,6 +875,65 @@ test(
   },
 );
 
+// javac writes `synchronized` as a monitor held in a synthetic local, guarded by
+// a catch-all that releases it and rethrows - and splits the range around every
+// `return`, `break` and `continue` that leaves the statement.
+const SYNCY_SOURCE =
+  "public class Syncy {\n" +
+  "  private final Object lock = new Object();\n" +
+  "  int n;\n" +
+  "  int simple() { synchronized (lock) { n = n + 1; } return n; }\n" +
+  "  int early(int x) { synchronized (lock) { if (x > 0) { return 1; } n = n + 2; } return n; }\n" +
+  "  int onThis() { synchronized (this) { n = n + 3; } return n; }\n" +
+  "  int nested(Object other) { synchronized (lock) { synchronized (other) { n = n + 4; } } return n; }\n" +
+  "  int allReturn() { synchronized (lock) { return n; } }\n" +
+  "  int throwing() { synchronized (lock) { if (n == 0) { throw new IllegalStateException(\"x\"); } return n; } }\n" +
+  "  int withTry() { synchronized (lock) { try { return Integer.parseInt(\"7\"); } catch (NumberFormatException e) { return -1; } } }\n" +
+  "  int inTry() { try { synchronized (lock) { n = n + 1; } } catch (RuntimeException e) { return -1; } return n; }\n" +
+  "  static int stat(Object o) { synchronized (o) { return o.hashCode(); } }\n" +
+  "  int twice() { synchronized (lock) { n = n + 1; } synchronized (lock) { n = n + 2; } return n; }\n" +
+  // A `break` and a `continue` out of the statement: javac releases the monitor
+  // first, and the merge of an `if` in the body is not past the release.
+  "  int breakOut(int k) { int r = 0; for (int i = 0; i < k; i++) { synchronized (lock) { if (i == 2) { break; } r = r + i; } } return r; }\n" +
+  "  int continueOut(int k) { int r = 0; for (int i = 0; i < k; i++) { synchronized (lock) { if (i == 2) { continue; } r = r + i; } r = r * 2; } return r; }\n" +
+  "  synchronized int flagged() { return n; }\n" +
+  "}\n";
+
+test(
+  "recompiles javac's own `synchronized` blocks to the same bytecode",
+  { skip: HAS_JAVAC && HAS_JAVAP ? false : "no JDK (javac/javap)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-syncy-");
+    const classFile = compileWithJavac(SYNCY_SOURCE, "Syncy", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    expect(source).toContain("synchronized (this.lock) {");
+    // The monitor local javac copies the expression into is not a variable.
+    expect(source).not.toContain("monitorexit");
+    const roundTripped = compileWithJavac(source, "Syncy", join(dir.path, "again"));
+    expect(javap(roundTripped)).toEqual(javap(classFile));
+  },
+);
+
+// A `finally` is a catch-all too, and javac writes it as duplicated code: this
+// phase says so rather than guessing.
+const FINALLY_SOURCE =
+  "public class Finally {\n" +
+  "  static int f(int x) { try { return 10 / x; } finally { System.out.print(\"\"); } }\n" +
+  "}\n";
+
+test(
+  "says so when a catch-all is not a monitor",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-finally-");
+    const classFile = compileWithJavac(FINALLY_SOURCE, "Finally", dir.path);
+    expect(decompileToSource(readFileSync(classFile))).toContain(
+      "cappu: a finally or synchronized block",
+    );
+  },
+);
+
 /** Compile one source file with javac and return the .class path. */
 function compileWithJavac(
   source: string,
