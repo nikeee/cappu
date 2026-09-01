@@ -1044,6 +1044,48 @@ test(
   },
 );
 
+// A `while (true)` opens with the block a `continue` jumps to, and a
+// `synchronized` inside one keeps the `return` javac writes in it: neither is
+// where the loop ends.
+const FOREVER_SOURCE =
+  "public class Forever {\n" +
+  "  static final Object L = new Object();\n" +
+  "  static int broke(int n) { int r = 0; while (true) { r += n; if (r > 100) { break; } n++; } return r; }\n" +
+  "  static int held(int p) { int n = p; while (true) { synchronized (L) { if (n > 3) { return n; } n = n + 1; } } }\n" +
+  "  static int leaves(int p) { int n = p; for (;;) { synchronized (L) { if (n > 3) { break; } } n = n + 1; } return n; }\n" +
+  "  static int inside(int p) { int n = p; synchronized (L) { while (n < 4) { n = n + 1; } n = n * 2; } return n; }\n" +
+  "}\n";
+
+test(
+  "reconstructs a `while (true)` and what a `synchronized` in one holds",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-forever-");
+    const classFile = compileWithJavac(FOREVER_SOURCE, "Forever", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    expect(source).toContain("while (true) {");
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "Forever", again);
+    const driver =
+      "public class ForeverDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      "    for (int p = 0; p < 7; p++) {\n" +
+      '      System.out.println(Forever.broke(p) + " " + Forever.held(p) + " " + Forever.leaves(p)\n' +
+      '        + " " + Forever.inside(p));\n' +
+      "    }\n" +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "ForeverDriver", dir.path, dir.path);
+    const expected = execFileSync("java", ["-cp", dir.path, "ForeverDriver"], { encoding: "utf8" });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "ForeverDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).not.toEqual("");
+  },
+);
+
 /** Compile one source file with javac and return the .class path. */
 function compileWithJavac(
   source: string,

@@ -1310,14 +1310,40 @@ func retreatingEdges(blocks map[int]*block, entry int) [][2]int {
 // the one at the head of a `while`, the one at the foot of a `do` - because a
 // `break` leaves from a block that no longer reaches the latch, so it is not in
 // the loop's body and its own target would otherwise look like a second way out.
-func loopFollow(blocks map[int]*block, header int, latches []int, body map[int]bool) (int, error) {
+func loopFollow(blocks map[int]*block, header int, latches []int, body map[int]bool, monitors []monitorRegion) (int, error) {
+	// A `synchronized` *inside* the loop keeps its own blocks: the `return` javac
+	// writes in there leaves the loop, but it is part of that statement and the
+	// statement is what writes it. A loop inside a `synchronized` is the other way
+	// round - then the range holds the whole body, and its blocks are the loop's.
+	var held []monitorRegion
+	for _, region := range monitors {
+		inside, outsideRange := false, false
+		for start := range body {
+			if start >= region.StartPc && start < region.EndPc {
+				inside = true
+			} else {
+				outsideRange = true
+			}
+		}
+		if inside && outsideRange {
+			held = append(held, region)
+		}
+	}
+	inStatement := func(start int) bool {
+		for _, region := range held {
+			if start >= region.StartPc && start < region.EndPc {
+				return true
+			}
+		}
+		return false
+	}
 	outside := func(start int) []int {
 		var out []int
 		if blocks[start] == nil {
 			return out
 		}
 		for _, successor := range blocks[start].Successors {
-			if !body[successor] {
+			if !body[successor] && !inStatement(successor) {
 				out = append(out, successor)
 			}
 		}
@@ -1381,8 +1407,8 @@ func loopFollow(blocks map[int]*block, header int, latches []int, body map[int]b
 // poisons every block it flows into, which makes a loop holding a `try` look
 // irreducible. Only the loop analysis wants them - a merge point does not, since
 // an `if` inside a `try` still ends where its own arms come back together.
-func withExceptionEdges(blocks map[int]*block, regions []*tryRegion) map[int]*block {
-	if len(regions) == 0 {
+func withExceptionEdges(blocks map[int]*block, regions []*tryRegion, monitors []monitorRegion) map[int]*block {
+	if len(regions) == 0 && len(monitors) == 0 {
 		return blocks
 	}
 	augmented := make(map[int]*block, len(blocks))
@@ -1398,6 +1424,16 @@ func withExceptionEdges(blocks map[int]*block, regions []*tryRegion) map[int]*bl
 				}
 			}
 		}
+		// A `synchronized` is guarded the same way, and a handler nothing reaches
+		// has no dominators of its own - which poisons every block it flows into.
+		for _, region := range monitors {
+			if start < region.StartPc || start >= region.EndPc {
+				continue
+			}
+			if !containsInt(b.Successors, region.HandlerPc) && !containsInt(handlers, region.HandlerPc) {
+				handlers = append(handlers, region.HandlerPc)
+			}
+		}
 		if len(handlers) == 0 {
 			augmented[start] = b
 			continue
@@ -1409,11 +1445,11 @@ func withExceptionEdges(blocks map[int]*block, regions []*tryRegion) map[int]*bl
 	return augmented
 }
 
-func findLoops(blocks map[int]*block, entry int, regions []*tryRegion) (map[int]*loop, error) {
+func findLoops(blocks map[int]*block, entry int, regions []*tryRegion, monitors []monitorRegion) (map[int]*loop, error) {
 	// Everything that asks which blocks a loop is made of runs over the graph
 	// with the throwing edges in it; where the loop *ends* is read off the real
 	// one, where entering a handler is not a way out of the body.
-	flow := withExceptionEdges(blocks, regions)
+	flow := withExceptionEdges(blocks, regions, monitors)
 	retreating := retreatingEdges(flow, entry)
 	loops := map[int]*loop{}
 	if len(retreating) == 0 {
@@ -1453,7 +1489,7 @@ func findLoops(blocks map[int]*block, entry int, regions []*tryRegion) (map[int]
 			body[at] = true
 			queue = append(queue, predecessors[at]...)
 		}
-		follow, err := loopFollow(blocks, header, latches, body)
+		follow, err := loopFollow(blocks, header, latches, body, monitors)
 		if err != nil {
 			return nil, err
 		}
@@ -2586,10 +2622,10 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 	if len(instructions) > 0 {
 		entry = instructions[0].Pc
 	}
-	if len(d.regions) > 0 {
-		d.dominators = dominators(withExceptionEdges(blocks, d.regions), entry)
+	if len(d.regions) > 0 || len(d.monitors) > 0 {
+		d.dominators = dominators(withExceptionEdges(blocks, d.regions, d.monitors), entry)
 	}
-	loops, err := findLoops(blocks, entry, d.regions)
+	loops, err := findLoops(blocks, entry, d.regions, d.monitors)
 	if err != nil {
 		return err
 	}
@@ -2633,12 +2669,26 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 // structure appends the statements for the blocks from entry up to (not
 // including) stop.
 func (d *bodyDecompiler) structure(entry, stop int) error {
+	return d.structureFrom(entry, stop, false)
+}
+
+// structureFrom appends the statements for the blocks from entry up to (not
+// including) stop. The block a `while (true)` opens with *is* its continue
+// target: arriving there later is a `continue`, but entering it is the body
+// starting, which `opening` says.
+func (d *bodyDecompiler) structureFrom(entry, stop int, opening bool) error {
 	at := entry
+	entering := opening
 	for at != stop && at != exitBlock {
-		jump, jumped, err := d.loopJump(at)
-		if err != nil {
-			return err
+		jump, jumped := "", false
+		if !entering {
+			var err error
+			jump, jumped, err = d.loopJump(at)
+			if err != nil {
+				return err
+			}
 		}
+		entering = false
 		if jumped {
 			d.emit(jump)
 			return nil
@@ -3354,7 +3404,7 @@ func (d *bodyDecompiler) doWhileLoop(l *loop, latch *block) (int, error) {
 func (d *bodyDecompiler) foreverLoop(l *loop) (int, error) {
 	d.active = append(d.active, activeLoop{Loop: l, ContinueTarget: l.Header, Continues: true})
 	defer func() { d.active = d.active[:len(d.active)-1] }()
-	statements, err := d.capture(func() error { return d.structure(l.Header, exitBlock) })
+	statements, err := d.capture(func() error { return d.structureFrom(l.Header, exitBlock, true) })
 	if err != nil {
 		return 0, err
 	}
@@ -3380,7 +3430,7 @@ func (d *bodyDecompiler) switchFollowOf(b *block, cases []int, defaultTarget int
 	// Only a `try` needs the dominators up front; a `switch` this deep into the
 	// rules is rare enough to pay for them here instead of in every method.
 	if len(d.dominators) == 0 {
-		d.dominators = dominators(withExceptionEdges(d.blocks, d.regions), d.entryPc)
+		d.dominators = dominators(withExceptionEdges(d.blocks, d.regions, d.monitors), d.entryPc)
 	}
 	reachable := reachableBlocks(d.blocks, append(append([]int{}, cases...), defaultTarget)...)
 	leadsTo := func(owners []int) int {

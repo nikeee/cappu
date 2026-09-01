@@ -1324,6 +1324,55 @@ func TestDecompileSaysWhenALambdaCaptureCannotBeFinal(t *testing.T) {
 	}
 }
 
+// A `while (true)` opens with the block a `continue` jumps to, and a
+// `synchronized` inside one keeps the `return` javac writes in it: neither is
+// where the loop ends.
+const foreverSource = `public class Forever {
+  static final Object L = new Object();
+  static int broke(int n) { int r = 0; while (true) { r += n; if (r > 100) { break; } n++; } return r; }
+  static int held(int p) { int n = p; while (true) { synchronized (L) { if (n > 3) { return n; } n = n + 1; } } }
+  static int leaves(int p) { int n = p; for (;;) { synchronized (L) { if (n > 3) { break; } } n = n + 1; } return n; }
+  static int inside(int p) { int n = p; synchronized (L) { while (n < 4) { n = n + 1; } n = n * 2; } return n; }
+}`
+
+const foreverDriverSource = `public class ForeverDriver {
+  public static void main(String[] args) {
+    for (int p = 0; p < 7; p++) {
+      System.out.println(Forever.broke(p) + " " + Forever.held(p) + " " + Forever.leaves(p)
+        + " " + Forever.inside(p));
+    }
+  }
+}`
+
+func TestDecompileReconstructsForeverLoops(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Forever", foreverSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	if !strings.Contains(source, "while (true) {") {
+		t.Errorf("the loop did not come back:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Forever", source)
+	compileWithJavacOn(t, dir, "ForeverDriver", foreverDriverSource, dir)
+	expected := runJava(t, dir, "ForeverDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "ForeverDriver")
+	if actual != expected {
+		t.Errorf("the decompiled class runs differently:\n%s\n--- from ---\n%s", actual, expected)
+	}
+	if expected == "" {
+		t.Fatal("the driver printed nothing")
+	}
+}
+
 // javac writes `synchronized` as a monitor held in a synthetic local, guarded by
 // a catch-all that releases it and rethrows - and splits the range around every
 // `return`, `break` and `continue` that leaves the statement.

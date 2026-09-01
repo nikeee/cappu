@@ -1104,9 +1104,23 @@ function loopFollow(
   header: number,
   latches: readonly number[],
   body: ReadonlySet<number>,
+  monitors: readonly MonitorRegion[] = [],
 ): number {
+  // A `synchronized` *inside* the loop keeps its own blocks: the `return` javac
+  // writes in there leaves the loop, but it is part of that statement and the
+  // statement is what writes it. A loop inside a `synchronized` is the other way
+  // round - then the range holds the whole body, and its blocks are the loop's.
+  const held = monitors.filter(
+    region =>
+      [...body].some(start => start >= region.startPc && start < region.endPc) &&
+      [...body].some(start => start < region.startPc || start >= region.endPc),
+  );
+  const inStatement = (start: number): boolean =>
+    held.some(region => start >= region.startPc && start < region.endPc);
   const outside = (start: number): number[] =>
-    (blocks.get(start)?.successors ?? []).filter(successor => !body.has(successor));
+    (blocks.get(start)?.successors ?? []).filter(
+      successor => !body.has(successor) && !inStatement(successor),
+    );
   const fromHeader = outside(header);
   // Only a header that is the test itself: one that carries statements - a call
   // among them - is the start of a `do`'s body, and what leaves it is a `break`,
@@ -1153,14 +1167,21 @@ function loopFollow(
 function withExceptionEdges(
   blocks: Map<number, Block>,
   regions: readonly TryRegion[],
+  monitors: readonly MonitorRegion[] = [],
 ): Map<number, Block> {
-  if (regions.length === 0) return blocks;
+  if (regions.length === 0 && monitors.length === 0) return blocks;
   const augmented = new Map<number, Block>();
   for (const [start, block] of blocks) {
-    const handlers = regions
-      .filter(region => start >= region.startPc && start < region.endPc)
-      .flatMap(region => region.clauses.map(clause => clause.handlerPc))
-      .filter(handler => !block.successors.includes(handler));
+    const handlers = [
+      ...regions
+        .filter(region => start >= region.startPc && start < region.endPc)
+        .flatMap(region => region.clauses.map(clause => clause.handlerPc)),
+      // A `synchronized` is guarded the same way, and a handler nothing reaches
+      // has no dominators of its own - which poisons every block it flows into.
+      ...monitors
+        .filter(region => start >= region.startPc && start < region.endPc)
+        .map(region => region.handlerPc),
+    ].filter(handler => !block.successors.includes(handler));
     augmented.set(
       start,
       handlers.length === 0 ? block : { ...block, successors: [...block.successors, ...handlers] },
@@ -1173,11 +1194,12 @@ function findLoops(
   blocks: Map<number, Block>,
   entry: number,
   regions: readonly TryRegion[] = [],
+  monitors: readonly MonitorRegion[] = [],
 ): Map<number, Loop> {
   // Everything that asks which blocks a loop is made of runs over the graph with
   // the throwing edges in it; where the loop *ends* is read off the real one,
   // where entering a handler is not a way out of the body.
-  const flow = withExceptionEdges(blocks, regions);
+  const flow = withExceptionEdges(blocks, regions, monitors);
   const retreating = retreatingEdges(flow, entry);
   if (retreating.length === 0) return new Map();
   const doms = dominators(flow, entry);
@@ -1207,7 +1229,7 @@ function findLoops(
       header,
       body,
       latches,
-      follow: loopFollow(blocks, header, latches, body),
+      follow: loopFollow(blocks, header, latches, body, monitors),
     });
   }
   // Two loops are either nested or disjoint; anything else is one loop entered
@@ -2105,12 +2127,12 @@ class BodyDecompiler {
     this.regions = tryRegions(rest, this.blocks, this.self);
     this.followOf = postDominators(this.blocks);
     this.methodFollowOf = this.followOf;
-    this.dominators =
-      this.regions.length === 0
-        ? new Map()
-        : dominators(withExceptionEdges(this.blocks, this.regions), instructions[0]?.pc ?? 0);
     const entry = instructions[0]?.pc ?? 0;
-    this.loops = findLoops(this.blocks, entry, this.regions);
+    this.dominators =
+      this.regions.length === 0 && this.monitors.length === 0
+        ? new Map()
+        : dominators(withExceptionEdges(this.blocks, this.regions, this.monitors), entry);
+    this.loops = findLoops(this.blocks, entry, this.regions, this.monitors);
     this.entryPc = entry;
     this.currentBlock = entry;
     this.structure(entry, EXIT);
@@ -2142,10 +2164,14 @@ class BodyDecompiler {
   }
 
   /** Statements for the blocks from `entry` up to (not including) `stop`. */
-  private structure(entry: number, stop: number): void {
+  private structure(entry: number, stop: number, opening = false): void {
     let at = entry;
+    // The block a `while (true)` opens with *is* its continue target: arriving
+    // there later is a `continue`, but entering it is the body starting.
+    let entering = opening;
     while (at !== stop && at !== EXIT) {
-      const jump = this.loopJump(at);
+      const jump = entering ? undefined : this.loopJump(at);
+      entering = false;
       if (jump !== undefined) {
         this.current.push(jump);
         return;
@@ -2283,7 +2309,10 @@ class BodyDecompiler {
     // Only a `try` needs the dominators up front; a `switch` this deep into the
     // rules is rare enough to pay for them here instead of in every method.
     if (this.dominators.size === 0) {
-      this.dominators = dominators(withExceptionEdges(this.blocks, this.regions), this.entryPc);
+      this.dominators = dominators(
+        withExceptionEdges(this.blocks, this.regions, this.monitors),
+        this.entryPc,
+      );
     }
     const reachable = reachableBlocks(this.blocks, [...cases, defaultTarget]);
     const leadsTo = (owners: readonly number[]): number => {
@@ -2850,7 +2879,7 @@ class BodyDecompiler {
   private foreverLoop(loop: Loop): number {
     this.active.push({ loop, continueTarget: loop.header, continues: true });
     try {
-      const statements = this.capture(() => this.structure(loop.header, EXIT));
+      const statements = this.capture(() => this.structure(loop.header, EXIT, true));
       trimTail(statements, "continue;");
       this.current.push("while (true) {", statements, "}");
     } finally {
