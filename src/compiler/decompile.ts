@@ -3863,6 +3863,19 @@ function methodSource(method: Member, classFile: ClassFile): MethodSource {
   const code = readCode(method, classFile.pool);
   const localTable = code ? readLocalVariables(code, classFile.pool) : [];
   const locals = buildLocals(method, localTable, isStatic, selfOf(classFile));
+  // A record's canonical constructor has to name its parameters after the
+  // components - Java checks that, and a class file without a debug table does
+  // not carry the names.
+  const components = recordComponents(classFile);
+  if (components !== undefined && method.name === "<init>") {
+    if (method.descriptor === canonicalDescriptor(components)) {
+      parameterSlots(method.descriptor, isStatic).forEach(({ slot }, index) => {
+        const local = locals.get(slot);
+        const component = components[index];
+        if (local !== undefined && component !== undefined) local.name = component.name;
+      });
+    }
+  }
 
   const self = selfOf(classFile);
   const thrown = readExceptions(method, classFile.pool).map(name => typeName(name, self));
@@ -3937,6 +3950,102 @@ function methodSource(method: Member, classFile: ClassFile): MethodSource {
  * constant with a body - which is a plain class, not an enum declaration: it
  * extends the enum type, and `enum X extends Y` is not Java.
  */
+/** One component of a record: its name and its type, in declaration order. */
+interface RecordComponent {
+  readonly name: string;
+  readonly type: string;
+  /** The raw descriptor, which is what a generated member is recognised by. */
+  readonly descriptor: string;
+}
+
+/**
+ * The components of a record (JVMS 4.7.30), which is what its header declares -
+ * and what says which of its members javac generated.
+ */
+function recordComponents(classFile: ClassFile): RecordComponent[] | undefined {
+  if (classFile.superClass !== "java/lang/Record") return undefined;
+  const attribute = findAttribute(classFile.attributes, "Record");
+  if (attribute === undefined) return undefined;
+  const view = new DataView(
+    attribute.bytes.buffer,
+    attribute.bytes.byteOffset,
+    attribute.bytes.byteLength,
+  );
+  const components: RecordComponent[] = [];
+  let at = 2;
+  const count = view.getUint16(0);
+  for (let i = 0; i < count; i++) {
+    if (at + 6 > attribute.bytes.length) return undefined;
+    const name = utf8(classFile.pool, view.getUint16(at));
+    const descriptor = utf8(classFile.pool, view.getUint16(at + 2));
+    const attributes = view.getUint16(at + 4);
+    at += 6;
+    // Each component carries attributes of its own (a signature, annotations),
+    // which are laid out like any other and skipped the same way.
+    for (let j = 0; j < attributes; j++) {
+      if (at + 6 > attribute.bytes.length) return undefined;
+      at += 6 + view.getUint32(at + 2);
+    }
+    if (name === undefined || descriptor === undefined) return undefined;
+    components.push({
+      name,
+      type: descriptorSourceType(descriptor, selfOf(classFile)),
+      descriptor,
+    });
+  }
+  return components;
+}
+
+/**
+ * Whether `method` is one javac writes for a record: the accessor of a
+ * component, the canonical constructor that only stores them, or one of the
+ * three `ObjectMethods` members. A record may declare any of those itself, and
+ * then the body is not what javac generates.
+ */
+function isGeneratedRecordMember(
+  method: Member,
+  classFile: ClassFile,
+  components: readonly RecordComponent[],
+): boolean {
+  const self = selfOf(classFile);
+  const generated = ["equals", "hashCode", "toString"];
+  if (generated.includes(method.name)) {
+    // The generated three are the ones built by the `ObjectMethods` bootstrap.
+    const code = readCode(method, classFile.pool);
+    if (!code) return false;
+    const indy = decodeInstructions(classFile, code.code).find(
+      one => one.mnemonic === "invokedynamic",
+    );
+    if (indy === undefined) return false;
+    const entry = classFile.pool[indy.arg];
+    if (entry?.tag !== "invokeDynamic") return false;
+    const bootstrap = readBootstrapMethods(classFile)[entry.bootstrapMethodIndex];
+    const handle = bootstrap === undefined ? undefined : classFile.pool[bootstrap.handleIndex];
+    const factory =
+      handle?.tag === "methodHandle" ? memberRef(classFile.pool, handle.referenceIndex) : undefined;
+    return factory?.owner === "java/lang/runtime/ObjectMethods";
+  }
+  const component = components.find(one => one.name === method.name);
+  if (component !== undefined && method.descriptor === `()${component.descriptor}`) {
+    // An accessor javac wrote returns the field and nothing else.
+    const code = readCode(method, classFile.pool);
+    return code !== undefined && code.code.length <= 5;
+  }
+  if (method.name === "<init>") {
+    if (method.descriptor !== canonicalDescriptor(components)) return false;
+    // The canonical constructor javac writes stores each component and returns;
+    // one that source wrote does more, and has to stay.
+    const code = readCode(method, classFile.pool);
+    return code !== undefined && code.code.length <= 5 + components.length * 6;
+  }
+  return false;
+}
+
+/** The descriptor of a record's canonical constructor. */
+function canonicalDescriptor(components: readonly RecordComponent[]): string {
+  return `(${components.map(one => one.descriptor).join("")})V`;
+}
+
 function isEnumDeclaration(classFile: ClassFile): boolean {
   return (classFile.flags & ACC_ENUM) !== 0 && classFile.superClass === "java/lang/Enum";
 }
@@ -3964,7 +4073,7 @@ function isGeneratedEnumMember(method: Member, classFile: ClassFile): boolean {
   );
 }
 
-function classHead(classFile: ClassFile): string {
+function classHead(classFile: ClassFile, components?: readonly RecordComponent[]): string {
   const isInterface = (classFile.flags & ACC_INTERFACE) !== 0;
   const isAnnotation = (classFile.flags & ACC_ANNOTATION) !== 0;
   const isEnum = isEnumDeclaration(classFile);
@@ -3985,6 +4094,17 @@ function classHead(classFile: ClassFile): string {
     keyword,
     simpleName(classFile.thisClass),
   ];
+  if (components !== undefined) {
+    // A record declares its state in the header, and `final` is implicit.
+    head.length = 0;
+    head.push(
+      ...(classFile.flags & ACC_PUBLIC ? ["public"] : []),
+      "record",
+      `${simpleName(classFile.thisClass)}(${components
+        .map(one => `${sourceTypeText(one.type, selfOf(classFile))} ${one.name}`)
+        .join(", ")})`,
+    );
+  }
   // The implicit supertypes are not written in source.
   const IMPLICIT = ["java/lang/Object", "java/lang/Enum", "java/lang/Record"];
   const superClass = classFile.superClass;
@@ -4019,15 +4139,21 @@ export function decompileClass(classFile: ClassFile): string {
   // static fields have to be declared.
   const bodies: string[][] = [];
   let staticInitializerLost = false;
+  const components = recordComponents(classFile);
   for (const method of classFile.methods) {
     if (method.flags & (ACC_SYNTHETIC | ACC_BRIDGE)) continue;
     if (method === generated || isGeneratedEnumMember(method, classFile)) continue;
+    // A record's accessors, its canonical constructor and the three members
+    // `ObjectMethods` builds are the header, written out.
+    if (components !== undefined && isGeneratedRecordMember(method, classFile, components)) {
+      continue;
+    }
     const { lines: body, reconstructed } = methodSource(method, classFile);
     if (!reconstructed && method.name === "<clinit>") staticInitializerLost = true;
     bodies.push(body);
   }
 
-  lines.push(classHead(classFile));
+  lines.push(classHead(classFile, components));
   if (isEnumDeclaration(classFile)) {
     // An enum body opens with its constant list; even an empty one needs the
     // `;` before any member. How the constants are constructed lives in
@@ -4041,6 +4167,9 @@ export function decompileClass(classFile: ClassFile): string {
     // generates on its own, which would clash with the ones it regenerates.
     if (field.flags & ACC_ENUM) continue;
     if (field.flags & ACC_SYNTHETIC && GENERATED_FIELDS.includes(field.name)) continue;
+    // A record's components are its state: declaring the fields again is not
+    // something Java lets you write.
+    if (components?.some(one => one.name === field.name) === true) continue;
     const keepFinal = !staticInitializerLost || (field.flags & ACC_STATIC) === 0;
     lines.push(fieldSource(field, classFile, keepFinal));
   }

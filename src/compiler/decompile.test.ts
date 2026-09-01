@@ -1263,6 +1263,61 @@ test(
   },
 );
 
+// A record declares its state in the header, and javac writes the accessors, the
+// canonical constructor and `equals`/`hashCode`/`toString` (through the
+// `ObjectMethods` bootstrap) from it. Those come back as the header; anything the
+// source added stays.
+const RECORD_SOURCE =
+  "public record Recordy(int x, String name, long[] data) {\n" +
+  "  static int made;\n" +
+  "  public Recordy {\n" +
+  '    if (x < 0) { throw new IllegalArgumentException("x"); }\n' +
+  "  }\n" +
+  "  public int twice() { return x * 2; }\n" +
+  '  public static Recordy of(int x) { made++; return new Recordy(x, "n", new long[] { 1L }); }\n' +
+  "}\n";
+
+test(
+  "reconstructs a record from its components",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-record-");
+    const classFile = compileWithJavac(RECORD_SOURCE, "Recordy", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    expect(source).toContain("public record Recordy(int x, java.lang.String name, long[] data) {");
+    // The three `ObjectMethods` members and the accessors are the header, and a
+    // component may not be declared as a field on top of it.
+    expect(source).not.toContain("hashCode()");
+    expect(source).not.toContain("private final int x;");
+    // The canonical constructor did more than store, so it stays - named after
+    // the components, which Java checks.
+    expect(source).toContain("public Recordy(int x, java.lang.String name, long[] data) {");
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "Recordy", again);
+    const driver =
+      "public class RecordyDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      "    for (int i = 0; i < 3; i++) {\n" +
+      "      Recordy r = Recordy.of(i);\n" +
+      '      System.out.println(r + " " + r.x() + " " + r.name() + " " + r.twice()\n' +
+      '        + " " + r.hashCode() + " " + r.equals(Recordy.of(i)) + " " + Recordy.made);\n' +
+      "    }\n" +
+      '    try { new Recordy(-1, "n", null); } catch (RuntimeException e) {\n' +
+      '      System.out.println("caught " + e.getMessage());\n' +
+      "    }\n" +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "RecordyDriver", dir.path, dir.path);
+    const expected = execFileSync("java", ["-cp", dir.path, "RecordyDriver"], { encoding: "utf8" });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "RecordyDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).not.toEqual("");
+  },
+);
+
 /** Compile one source file with javac and return the .class path. */
 function compileWithJavac(
   source: string,

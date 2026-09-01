@@ -5087,6 +5087,17 @@ func methodSource(method Member, classFile *ClassFile) (lines []string, reconstr
 		localTable = readLocalVariables(code, classFile.Pool)
 	}
 	locals := buildLocals(method, localTable, isStatic, self)
+	// A record's canonical constructor has to name its parameters after the
+	// components - Java checks that, and a class file without a debug table does
+	// not carry the names.
+	if components := recordComponents(classFile); components != nil && method.Name == "<init>" &&
+		method.Descriptor == canonicalDescriptor(components) {
+		for index, slot := range parameterSlots(method.Descriptor, isStatic) {
+			if entry, ok := locals[slot.Slot]; ok && index < len(components) {
+				entry.Name = components[index].Name
+			}
+		}
+	}
 
 	head := "static"
 	if method.Name != "<clinit>" {
@@ -5196,6 +5207,122 @@ func decompileBody(
 // source.
 var generatedFields = map[string]bool{"$VALUES": true, "$assertionsDisabled": true}
 
+// recordComponent is one component of a record: its name and its type, in
+// declaration order.
+type decompiledRecordComponent struct {
+	Name string
+	Type string
+	// Descriptor is the raw one, which is what a generated member is recognised by.
+	Descriptor string
+}
+
+// recordComponents are the components of a record (JVMS 4.7.30), which is what
+// its header declares - and what says which of its members javac generated.
+func recordComponents(classFile *ClassFile) []decompiledRecordComponent {
+	if classFile.SuperClass != "java/lang/Record" {
+		return nil
+	}
+	attribute, ok := FindAttribute(classFile.Attributes, "Record")
+	if !ok || len(attribute.Bytes) < 2 {
+		return nil
+	}
+	b := attribute.Bytes
+	be := binary.BigEndian
+	count := int(be.Uint16(b))
+	at := 2
+	components := make([]decompiledRecordComponent, 0, count)
+	for i := 0; i < count; i++ {
+		if at+6 > len(b) {
+			return nil
+		}
+		name := PoolUtf8(classFile.Pool, be.Uint16(b[at:]))
+		descriptor := PoolUtf8(classFile.Pool, be.Uint16(b[at+2:]))
+		attributes := int(be.Uint16(b[at+4:]))
+		at += 6
+		// Each component carries attributes of its own (a signature,
+		// annotations), which are laid out like any other and skipped the same way.
+		for j := 0; j < attributes; j++ {
+			if at+6 > len(b) {
+				return nil
+			}
+			at += 6 + int(be.Uint32(b[at+2:]))
+		}
+		if name == "" || descriptor == "" {
+			return nil
+		}
+		components = append(components, decompiledRecordComponent{
+			Name:       name,
+			Type:       descriptorSourceType(descriptor, selfOf(classFile)),
+			Descriptor: descriptor,
+		})
+	}
+	return components
+}
+
+// canonicalDescriptor is the descriptor of a record's canonical constructor.
+func canonicalDescriptor(components []decompiledRecordComponent) string {
+	descriptor := "("
+	for _, one := range components {
+		descriptor += one.Descriptor
+	}
+	return descriptor + ")V"
+}
+
+// isGeneratedRecordMember reports whether method is one javac writes for a
+// record: the accessor of a component, the canonical constructor that only
+// stores them, or one of the three `ObjectMethods` members. A record may declare
+// any of those itself, and then the body is not what javac generates.
+func isGeneratedRecordMember(method Member, classFile *ClassFile, components []decompiledRecordComponent) bool {
+	if method.Name == "equals" || method.Name == "hashCode" || method.Name == "toString" {
+		code, err := ReadCode(method, classFile.Pool)
+		if err != nil || code == nil {
+			return false
+		}
+		instructions, err := DecodeInstructions(classFile, code.Code)
+		if err != nil {
+			return false
+		}
+		for _, one := range instructions {
+			if one.Mnemonic != "invokedynamic" {
+				continue
+			}
+			entry := PoolAt(classFile.Pool, uint16(one.Arg))
+			if entry == nil || entry.Tag != TagInvokeDynamic {
+				return false
+			}
+			bootstraps := ReadBootstrapMethods(classFile)
+			if int(entry.Bootstrap) >= len(bootstraps) {
+				return false
+			}
+			handle := PoolAt(classFile.Pool, bootstraps[entry.Bootstrap].HandleIndex)
+			if handle == nil || handle.Tag != TagMethodHandle {
+				return false
+			}
+			factory, ok := PoolMemberRef(classFile.Pool, handle.RefIndex)
+			return ok && factory.Owner == "java/lang/runtime/ObjectMethods"
+		}
+		return false
+	}
+	for _, component := range components {
+		if component.Name != method.Name {
+			continue
+		}
+		if method.Descriptor != "()"+component.Descriptor {
+			continue
+		}
+		// An accessor javac wrote returns the field and nothing else.
+		code, err := ReadCode(method, classFile.Pool)
+		return err == nil && code != nil && len(code.Code) <= 5
+	}
+	if method.Name == "<init>" && method.Descriptor == canonicalDescriptor(components) {
+		// The canonical constructor javac writes stores each component and
+		// returns; one that source wrote does more, and has to stay.
+		code, err := ReadCode(method, classFile.Pool)
+		return err == nil && code != nil && len(code.Code) <= 5+len(components)*6
+	}
+	return false
+}
+
 // isEnumDeclaration reports an enum type. ACC_ENUM is also set on the anonymous
 // subclass javac writes for an enum constant with a body - which is a plain
 // class, not an enum declaration: it extends the enum type, and `enum X extends
@@ -5230,7 +5357,7 @@ func isGeneratedEnumMember(method Member, classFile *ClassFile) bool {
 		(method.Name == "valueOf" && method.Descriptor == "(Ljava/lang/String;)"+self)
 }
 
-func classHead(classFile *ClassFile) string {
+func classHead(classFile *ClassFile, components []decompiledRecordComponent) string {
 	isInterface := classFile.Flags&accInterface != 0
 	isAnnotation := classFile.Flags&accAnnotation != 0
 	isEnum := isEnumDeclaration(classFile)
@@ -5257,6 +5384,19 @@ func classHead(classFile *ClassFile) string {
 		head = append(head, "abstract")
 	}
 	head = append(head, keyword, simpleClassName(classFile.ThisClass))
+	if components != nil {
+		// A record declares its state in the header, and `final` is implicit.
+		head = head[:0]
+		if classFile.Flags&accPublic != 0 {
+			head = append(head, "public")
+		}
+		var declared []string
+		for _, one := range components {
+			declared = append(declared, sourceTypeText(one.Type, selfOf(classFile))+" "+one.Name)
+		}
+		head = append(head, "record",
+			simpleClassName(classFile.ThisClass)+"("+strings.Join(declared, ", ")+")")
+	}
 	// The implicit supertypes are not written in source.
 	implicit := map[string]bool{"java/lang/Object": true, "java/lang/Enum": true, "java/lang/Record": true}
 	if !isInterface && classFile.SuperClass != "" && !implicit[classFile.SuperClass] {
@@ -5302,6 +5442,7 @@ func DecompileClass(classFile *ClassFile) (string, error) {
 	// Methods first: whether the static initializer came back decides how the
 	// static fields have to be declared.
 	generated := generatedConstructor(classFile)
+	components := recordComponents(classFile)
 	var bodies [][]string
 	staticInitializerLost := false
 	for i := range classFile.Methods {
@@ -5310,6 +5451,11 @@ func DecompileClass(classFile *ClassFile) (string, error) {
 			continue
 		}
 		if generated != nil && &classFile.Methods[i] == generated {
+			continue
+		}
+		// A record's accessors, its canonical constructor and the three members
+		// `ObjectMethods` builds are the header, written out.
+		if components != nil && isGeneratedRecordMember(method, classFile, components) {
 			continue
 		}
 		body, reconstructed, err := methodSource(method, classFile)
@@ -5322,7 +5468,7 @@ func DecompileClass(classFile *ClassFile) (string, error) {
 		bodies = append(bodies, body)
 	}
 
-	lines = append(lines, classHead(classFile))
+	lines = append(lines, classHead(classFile, components))
 	if isEnumDeclaration(classFile) {
 		// An enum body opens with its constant list; even an empty one needs
 		// the `;` before any member. How the constants are constructed lives in
@@ -5336,6 +5482,17 @@ func DecompileClass(classFile *ClassFile) (string, error) {
 		// javac generates on its own, which would clash with the ones it
 		// regenerates.
 		if field.Flags&accEnum != 0 || (field.Flags&accSynthetic != 0 && generatedFields[field.Name]) {
+			continue
+		}
+		// A record's components are its state: declaring the fields again is not
+		// something Java lets you write.
+		isComponent := false
+		for _, one := range components {
+			if one.Name == field.Name {
+				isComponent = true
+			}
+		}
+		if isComponent {
 			continue
 		}
 		keepFinal := !staticInitializerLost || field.Flags&accStatic == 0
