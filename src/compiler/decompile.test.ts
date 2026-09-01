@@ -928,12 +928,15 @@ const FINALLY_SOURCE =
   "  static int simple(int x) { int r = 0; try { r = 10 / x; } finally { n += 1; } return r; }\n" +
   '  static int several(int x) { int r = 0; try { r = 10 / x; n += 2; } finally { System.out.print(""); } return r; }\n' +
   "  static int inLoop(int x) { int r = 0; for (int i = 0; i < x; i++) { try { r += 10 / (x - i); } finally { n += 5; } } return r; }\n" +
+  // A `return` inside the body is the one other way out javac writes a copy for:
+  // the value is computed in the `try`, and the return follows the statement.
+  "  static int returning(int a) { try { return a * 2; } finally { n += 6; } }\n" +
+  "  static String returningRef(String s) { try { return s.trim(); } finally { n += 7; } }\n" +
   "}\n";
 
 const FINALLY_BAILS_SOURCE =
   "public class Bails {\n" +
   "  static int n;\n" +
-  "  static int returning(int a) { try { return a; } finally { n += 1; } }\n" +
   // A `catch` beside the `finally`, and a `finally` inside one: each is another
   // copy of the body, and which one source wrote is not in the class file.
   "  static int caught(int x) { int r = 0; try { r = 10 / x; } catch (ArithmeticException e) { r = -1; } finally { n += 2; } return r; }\n" +
@@ -960,7 +963,8 @@ test(
       "      String line;\n" +
       "      try {\n" +
       '        line = Finallies.simple(x) + " " + Finallies.several(x)\n' +
-      '          + " " + Finallies.inLoop(x);\n' +
+      '          + " " + Finallies.inLoop(x) + " " + Finallies.returning(x)\n' +
+      '          + " " + Finallies.returningRef(" q ");\n' +
       '      } catch (RuntimeException e) { line = "ex"; }\n' +
       '      System.out.println(line + " " + Finallies.n);\n' +
       "    }\n" +
@@ -979,15 +983,16 @@ test(
 );
 
 test(
-  "says so when a `finally` has more than one way out",
+  "says so when a `finally` is written more than twice",
   { skip: HAS_JAVAC ? false : "no JDK (javac)" },
   () => {
     using dir = TempDir.create("cappu-decompile-finallybails-");
     const classFile = compileWithJavac(FINALLY_BAILS_SOURCE, "Bails", dir.path);
     const source = decompileToSource(readFileSync(classFile));
-    expect(source).toContain("cappu: a finally with more than one way out");
-    // Every one of them says so rather than guessing which copy source wrote.
-    expect(source.match(/cappu: /g)?.length).toBe(6);
+    // A `catch` beside the `finally` and a `finally` inside one are each another
+    // copy, and which one source wrote is not in the class file: both say so.
+    expect(source).toContain("cappu: a finally or synchronized block");
+    expect(source.match(/cappu: /g)?.length).toBe(4);
   },
 );
 

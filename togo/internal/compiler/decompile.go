@@ -1072,8 +1072,12 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 				fromOutside = true
 			}
 		}
-		if copyBlock == nil || fromOutside ||
-			!isGotoMnemonic(copyBlock.Instructions[len(copyBlock.Instructions)-1].Mnemonic) ||
+		// The copy is followed by what the body was doing when it left: the jump
+		// over the handler, or the `return` javac protected the *value* of.
+		leaves := copyBlock != nil &&
+			(isGotoMnemonic(copyBlock.Instructions[len(copyBlock.Instructions)-1].Mnemonic) ||
+				copyBlock.Kind == blockEnd)
+		if copyBlock == nil || fromOutside || !leaves ||
 			len(copyBlock.Instructions) < len(body) ||
 			!sameInstructions(body, copyBlock.Instructions[:len(body)]) {
 			return nil, nil, nil, bail("a finally with more than one way out")
@@ -3033,8 +3037,9 @@ func (d *bodyDecompiler) finallyStatement(region *finallyRegion) (int, error) {
 	}
 	copyBlock := d.blocks[region.EndPc]
 	jump := copyBlock.Instructions[len(copyBlock.Instructions)-1]
-	follow := jump.Arg
-	if d.blocks[follow] == nil {
+	// What is left of the copy block is the jump over the handler, or the `return`
+	// javac protected the value of - and a jump to nowhere is not a statement.
+	if copyBlock.Kind != blockEnd && d.blocks[jump.Arg] == nil {
 		return 0, bail("a finally that leaves the method")
 	}
 	// The copy on the way out is not a statement: what is left of that block is
