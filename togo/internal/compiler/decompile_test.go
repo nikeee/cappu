@@ -1465,6 +1465,71 @@ func TestDecompileRecompilesJavacSynchronizedToTheSameBytecode(t *testing.T) {
 	}
 }
 
+// A record declares its state in the header, and javac writes the accessors, the
+// canonical constructor and `equals`/`hashCode`/`toString` (through the
+// `ObjectMethods` bootstrap) from it. Those come back as the header; anything the
+// source added stays.
+const recordSource = `public record Recordy(int x, String name, long[] data) {
+  static int made;
+  public Recordy {
+    if (x < 0) { throw new IllegalArgumentException("x"); }
+  }
+  public int twice() { return x * 2; }
+  public static Recordy of(int x) { made++; return new Recordy(x, "n", new long[] { 1L }); }
+}`
+
+const recordyDriverSource = `public class RecordyDriver {
+  public static void main(String[] args) {
+    for (int i = 0; i < 3; i++) {
+      Recordy r = Recordy.of(i);
+      System.out.println(r + " " + r.x() + " " + r.name() + " " + r.twice()
+        + " " + r.hashCode() + " " + r.equals(Recordy.of(i)) + " " + Recordy.made);
+    }
+    try { new Recordy(-1, "n", null); } catch (RuntimeException e) {
+      System.out.println("caught " + e.getMessage());
+    }
+  }
+}`
+
+func TestDecompileReconstructsARecord(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Recordy", recordSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	if !strings.Contains(source, "public record Recordy(int x, java.lang.String name, long[] data) {") {
+		t.Fatalf("the header did not come back:\n%s", source)
+	}
+	// The three `ObjectMethods` members and the accessors are the header, and a
+	// component may not be declared as a field on top of it.
+	if strings.Contains(source, "hashCode()") || strings.Contains(source, "private final int x;") {
+		t.Errorf("a generated member is still written:\n%s", source)
+	}
+	// The canonical constructor did more than store, so it stays - named after
+	// the components, which Java checks.
+	if !strings.Contains(source, "public Recordy(int x, java.lang.String name, long[] data) {") {
+		t.Errorf("the canonical constructor is missing or unnamed:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Recordy", source)
+	compileWithJavacOn(t, dir, "RecordyDriver", recordyDriverSource, dir)
+	expected := runJava(t, dir, "RecordyDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "RecordyDriver")
+	if actual != expected {
+		t.Errorf("the decompiled class runs differently:\n%s\n--- from ---\n%s", actual, expected)
+	}
+	if expected == "" {
+		t.Fatal("the driver printed nothing")
+	}
+}
+
 // javac writes a compound assignment by *copying* the target on the stack -
 // `dup2` for an array element, `dup` for a field - and reads it back through the
 // copy. The long form is what comes back, which is the same thing as long as the
