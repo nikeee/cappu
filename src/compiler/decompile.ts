@@ -278,8 +278,10 @@ function asBoolean(expr: Expr): Expr {
 }
 
 function ternary(condition: Expr, thenValue: Expr, elseValue: Expr): Expr | undefined {
-  let whenTrue = thenValue;
-  let whenFalse = elseValue;
+  // A lambda has no type of its own, and a conditional gives it none: the arm
+  // has to name the interface, which is what source wrote.
+  let whenTrue = named(thenValue);
+  let whenFalse = named(elseValue);
   if ((whenTrue.type === "boolean") !== (whenFalse.type === "boolean")) {
     // One arm is a boolean and the other an int: either that int is the `1`/`0`
     // a boolean was erased to, or the boolean is a condition javac materialized
@@ -330,6 +332,12 @@ function ternary(condition: Expr, thenValue: Expr, elseValue: Expr): Expr | unde
  * *branch's* own arms (`c ? 0 : 1`, not `!c ? 1 : 0`), which is the form source
  * wrote and the one that recompiles to the same branch.
  */
+/** A lambda with its interface named, for a place that does not say it. */
+function named(value: Expr): Expr {
+  if (value.lambda !== true) return value;
+  return { text: `(${value.type}) ${value.text}`, prec: 0, type: value.type };
+}
+
 function materializedBoolean(value: Expr, condition: Expr, whenTrue: string): Expr {
   const whenFalse = whenTrue === "1" ? "0" : "1";
   return { ...value, asInt: `${at(condition, PREC_TERNARY + 1)} ? ${whenTrue} : ${whenFalse}` };
@@ -556,6 +564,22 @@ type Stmt = string | Stmt[];
 function reads(text: string, name: string): boolean {
   if (!text.includes(name)) return false;
   return new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text);
+}
+
+/**
+ * Whether one line is a statement *expression* - the only thing a lambda may
+ * carry without a block. A `throw` and a declaration are statements and neither
+ * is one, however much they look like a call.
+ */
+function isStatementExpression(line: string): boolean {
+  if (!line.endsWith(";") || line.includes("{")) return false;
+  if (/^(?:throw|if|while|for|do|switch|try|synchronized|assert|break|continue|return|else)\b/.test(line)) {
+    return false;
+  }
+  // A declaration is a type and a name before the `=`; an assignment has only
+  // the name.
+  if (/^[A-Za-z_$][\w.$]*(?:\[\])*(?:<[^;]*>)?\s+[A-Za-z_$][\w$]*\s*[=;]/.test(line)) return false;
+  return /^[A-Za-z_$(]/.test(line);
 }
 
 function trimTail(statements: Stmt[], text: string): void {
@@ -1321,13 +1345,19 @@ class BodyDecompiler {
   private regions: TryRegion[] = [];
   /**
    * The locals a lambda captured. Java takes only effectively final ones, and a
-   * variable this hoisted to the top of the method may be written more than
-   * once - which is only known when the whole body is out.
+   * variable this hoisted to the top of the method is written where it was
+   * declared - once per turn of any loop around it - which is only known when
+   * the whole body is out.
    */
   private readonly captured: Local[] = [];
   /** The `synchronized` statements of this method, and the slots they hold. */
   private monitors: MonitorRegion[] = [];
-  private monitorSlots = new Set<number>();
+  /**
+   * The slots held by the `synchronized` statements being written right now.
+   * javac frees the monitor's local when the statement ends and reuses the slot
+   * for the next variable, so this may not outlive the body it belongs to.
+   */
+  private readonly monitorSlots: number[] = [];
   /** Every instruction by pc, for the ones a statement has to look up. */
   private instructionAt = new Map<number, Instruction>();
   /** The `try` statements being written right now. */
@@ -1724,6 +1754,32 @@ class BodyDecompiler {
         erased[index] === wantedTypes[index] ? name : `(${wantedTypes[index]}) ${name}`,
       ),
     ];
+    // What kind of call the handle is decides both forms below; an unknown one
+    // is not a call at all.
+    if (![5, 6, 7, 8, 9].includes(handle.referenceKind)) {
+      throw new NotDecompilable("a lambda that is not a call");
+    }
+    const type = returnType(site.descriptor);
+    // A body javac generated is the lambda source wrote: inlining it is what
+    // brings that source back, and javac generates the same method from it.
+    const body =
+      target.owner === this.classFile.thisClass
+        ? this.classFile.methods.find(
+            one =>
+              one.name === target.name &&
+              one.descriptor === target.descriptor &&
+              (one.flags & ACC_SYNTHETIC) !== 0,
+          )
+        : undefined;
+    if (body !== undefined) {
+      const text = this.inlineLambda(body, captures, passed, returnType(sam));
+      return this.push({
+        text: `(${parameters.join(", ")}) -> ${text}`,
+        prec: 0,
+        type,
+        lambda: true,
+      });
+    }
     const wanted = parameterSlots(target.descriptor, true).length;
     let call: string;
     switch (handle.referenceKind) {
@@ -1752,27 +1808,6 @@ class BodyDecompiler {
       default:
         throw new NotDecompilable("a lambda that is not a call");
     }
-    const type = returnType(site.descriptor);
-    // A body javac generated is the lambda source wrote: inlining it is what
-    // brings that source back, and javac generates the same method from it.
-    const body =
-      target.owner === this.classFile.thisClass
-        ? this.classFile.methods.find(
-            one =>
-              one.name === target.name &&
-              one.descriptor === target.descriptor &&
-              (one.flags & ACC_SYNTHETIC) !== 0,
-          )
-        : undefined;
-    if (body !== undefined) {
-      const text = this.inlineLambda(body, captures, parameters, passed, returnType(sam));
-      return this.push({
-        text: `(${parameters.join(", ")}) -> ${text}`,
-        prec: 0,
-        type,
-        lambda: true,
-      });
-    }
     // With nothing captured and nothing to cast, source's own form is a method
     // reference - and that is what javac compiles back to this same call site.
     const reference =
@@ -1795,7 +1830,6 @@ class BodyDecompiler {
   private inlineLambda(
     body: Member,
     captures: readonly string[],
-    parameters: readonly string[],
     passed: readonly string[],
     /** What the interface method returns, which is what the body has to yield. */
     yields: string,
@@ -1852,9 +1886,7 @@ class BodyDecompiler {
     if (only?.startsWith("return ") === true && only.endsWith(";")) {
       return only.slice("return ".length, -1);
     }
-    if (only !== undefined && /^[\w$(]/.test(only) && only.endsWith(";") && !only.includes("{")) {
-      return only.slice(0, -1);
-    }
+    if (only !== undefined && isStatementExpression(only)) return only.slice(0, -1);
     return `{ ${lines.join(" ")} }`;
   }
 
@@ -1956,6 +1988,9 @@ class BodyDecompiler {
   /** An instance call, with the receiver the bytecode pushed before the arguments. */
   private receiverCallee(mnemonic: string, owner: string, name: string): string {
     const receiver = this.pop();
+    // A lambda has no type of its own, so calling a method on one needs the
+    // interface named - source could not have written it any other way.
+    if (receiver.lambda === true) return `(${named(receiver).text}).${name}`;
     if (mnemonic !== "invokespecial" || owner === this.classFile.thisClass) {
       return `${at(receiver, PREC_PRIMARY)}.${name}`;
     }
@@ -2067,7 +2102,6 @@ class BodyDecompiler {
     this.instructionAt = new Map(instructions.map(one => [one.pc, one]));
     const { monitors, rest } = monitorRegions(exceptions, this.blocks, instructions);
     this.monitors = monitors;
-    this.monitorSlots = new Set(monitors.map(region => region.slot));
     this.regions = tryRegions(rest, this.blocks, this.self);
     this.followOf = postDominators(this.blocks);
     this.methodFollowOf = this.followOf;
@@ -2086,8 +2120,11 @@ class BodyDecompiler {
     // once per turn.
     for (const local of this.captured) {
       // A parameter is written nowhere; anything else has to carry its one value
-      // at the declaration. A hoisted one does not - and a loop writes it once
-      // per turn, which is not effectively final however few writes there are.
+      // at its declaration. A variable this *hoisted* out of the block it was
+      // declared in does not: the assignment left behind runs once per turn of
+      // the loop around it, and what this writes is then not effectively final -
+      // even though the source variable was. Scoping a declaration to its block
+      // is what would take these.
       const settled =
         local.writes.length === 0 ||
         (local.writes.length === 1 && local.declaration?.inline === true);
@@ -2407,11 +2444,13 @@ class BodyDecompiler {
     }
     const outer = this.followOf;
     this.followOf = postDominators(this.blocks, within, new Set([follow]));
+    this.monitorSlots.push(region.slot);
     let statements: Stmt[];
     try {
       statements = this.capture(() => this.structure(region.startPc, follow));
     } finally {
       this.followOf = outer;
+      this.monitorSlots.pop();
     }
     if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
     this.current.push(`synchronized (${monitor.text}) {`, statements, "}");
@@ -3140,7 +3179,7 @@ class BodyDecompiler {
     }
     if (/^[ilfda]load$/.test(base)) {
       const slot = this.slotOf(instruction);
-      if (base === "aload" && this.monitorSlots.has(slot)) {
+      if (base === "aload" && this.monitorSlots.includes(slot)) {
         return this.push(primary("null", "java.lang.Object"));
       }
       if (base === "aload" && slot === 0 && !this.isStatic) {

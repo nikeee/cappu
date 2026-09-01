@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -284,8 +285,19 @@ func asBoolean(e expr) expr {
 	return e
 }
 
+// namedLambda is a lambda with its interface named, for a place that does not
+// say it.
+func namedLambda(value expr) expr {
+	if !value.Lambda {
+		return value
+	}
+	return expr{Text: "(" + value.Type + ") " + value.Text, Prec: 0, Type: value.Type}
+}
+
 func ternaryExpr(condition, thenValue, elseValue expr) (expr, bool) {
-	whenTrue, whenFalse := thenValue, elseValue
+	// A lambda has no type of its own, and a conditional gives it none: the arm
+	// has to name the interface, which is what source wrote.
+	whenTrue, whenFalse := namedLambda(thenValue), namedLambda(elseValue)
 	if (whenTrue.Type == "boolean") != (whenFalse.Type == "boolean") {
 		// One arm is a boolean and the other an int: either that int is the
 		// `1`/`0` a boolean was erased to, or the boolean is a condition javac
@@ -1622,8 +1634,12 @@ type bodyDecompiler struct {
 	// monitors are the `synchronized` statements of this method, and the slots
 	// they hold; instructionAt is every instruction by pc, for the ones a
 	// statement has to look up.
-	monitors      []monitorRegion
-	monitorSlots  map[int]bool
+	monitors []monitorRegion
+	// monitorSlots are the slots held by the `synchronized` statements being
+	// written right now. javac frees the monitor's local when the statement ends
+	// and reuses the slot for the next variable, so this may not outlive the body
+	// it belongs to.
+	monitorSlots  []int
 	instructionAt map[int]Instruction
 	// captured are the locals a lambda captured. Java takes only effectively
 	// final ones, and a variable this hoisted to the top of the method may be
@@ -2061,6 +2077,13 @@ func (d *bodyDecompiler) lambda(siteDescriptor string, bootstrap BootstrapMethod
 			passed = append(passed, "("+wanted[i].Type+") "+parameters[i])
 		}
 	}
+	// What kind of call the handle is decides both forms below; an unknown one is
+	// not a call at all.
+	switch handle.RefKind {
+	case 5, 6, 7, 8, 9:
+	default:
+		return bail("a lambda that is not a call")
+	}
 	sourceType := methodReturnType(siteDescriptor)
 	// A body javac generated is the lambda source wrote: inlining it is what
 	// brings that source back, and javac generates the same method from it.
@@ -2224,8 +2247,7 @@ func (d *bodyDecompiler) inlineLambda(body Member, captures, passed []string, yi
 		if strings.HasPrefix(only, "return ") && strings.HasSuffix(only, ";") {
 			return strings.TrimSuffix(strings.TrimPrefix(only, "return "), ";"), nil
 		}
-		if expressionStatement.MatchString(only) && strings.HasSuffix(only, ";") &&
-			!strings.Contains(only, "{") {
+		if isStatementExpression(only) {
 			return strings.TrimSuffix(only, ";"), nil
 		}
 	}
@@ -2233,9 +2255,24 @@ func (d *bodyDecompiler) inlineLambda(body Member, captures, passed []string, yi
 }
 
 var (
-	plainName           = regexp.MustCompile(`^[\w$.]+$`)
-	expressionStatement = regexp.MustCompile(`^[\w$(]`)
+	plainName        = regexp.MustCompile(`^[\w$.]+$`)
+	statementKeyword = regexp.MustCompile(`^(?:throw|if|while|for|do|switch|try|synchronized|assert|break|continue|return|else)\b`)
+	declarationStart = regexp.MustCompile(`^[A-Za-z_$][\w.$]*(?:\[\])*(?:<[^;]*>)?\s+[A-Za-z_$][\w$]*\s*[=;]`)
+	expressionStart2 = regexp.MustCompile(`^[A-Za-z_$(]`)
 )
+
+// isStatementExpression reports whether one line is a statement *expression* -
+// the only thing a lambda may carry without a block. A `throw` and a declaration
+// are statements and neither is one, however much they look like a call.
+func isStatementExpression(line string) bool {
+	if !strings.HasSuffix(line, ";") || strings.Contains(line, "{") {
+		return false
+	}
+	if statementKeyword.MatchString(line) || declarationStart.MatchString(line) {
+		return false
+	}
+	return expressionStart2.MatchString(line)
+}
 
 func (d *bodyDecompiler) concat(siteDescriptor string, bootstrap BootstrapMethod, factory MemberRef) error {
 	pool := d.classFile.Pool
@@ -2359,6 +2396,11 @@ func (d *bodyDecompiler) receiverCallee(mnemonic, owner, name string) (string, e
 	receiver, err := d.pop()
 	if err != nil {
 		return "", err
+	}
+	// A lambda has no type of its own, so calling a method on one needs the
+	// interface named - source could not have written it any other way.
+	if receiver.Lambda {
+		return "(" + namedLambda(receiver).Text + ")." + name, nil
 	}
 	if mnemonic != "invokespecial" || owner == d.classFile.ThisClass {
 		return at(receiver, precPrimary) + "." + name, nil
@@ -2533,10 +2575,6 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 		return err
 	}
 	d.monitors = monitors
-	d.monitorSlots = map[int]bool{}
-	for _, region := range monitors {
-		d.monitorSlots[region.Slot] = true
-	}
 	regions, err := tryRegions(rest, blocks, d.self())
 	if err != nil {
 		return err
@@ -2735,8 +2773,10 @@ func (d *bodyDecompiler) synchronizedStatement(b *block, kept []Instruction) (in
 	}
 	outer := d.followOf
 	d.followOf = postDominators(d.blocks, within, map[int]bool{follow: true})
+	d.monitorSlots = append(d.monitorSlots, region.Slot)
 	statements, err := d.capture(func() error { return d.structure(region.StartPc, follow) })
 	d.followOf = outer
+	d.monitorSlots = d.monitorSlots[:len(d.monitorSlots)-1]
 	if err != nil {
 		return 0, err
 	}
@@ -4071,7 +4111,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 	}
 	if isOneOf(base, "ilfda", "load") {
 		slot := slotOf(instruction)
-		if base == "aload" && d.monitorSlots[slot] {
+		if base == "aload" && slices.Contains(d.monitorSlots, slot) {
 			d.push(primary("null", "java.lang.Object"))
 			return nil
 		}

@@ -1243,6 +1243,10 @@ public class Lammy {
   int stream(List<String> xs) { return xs.stream().map(String::length).reduce(0, Integer::sum); }
   Comparator<String> comparator() { return (a, b) -> a.length() - b.length(); }
   Runnable staticField() { return () -> stat++; }
+  Runnable throwing() { return () -> { throw new RuntimeException("x"); }; }
+  Runnable declaring() { return () -> { int q = 3; System.out.print(q); }; }
+  String receiver() { return ((Supplier<String>) () -> "sup").get(); }
+  Object arm(boolean c) { return c ? (Runnable) () -> System.out.print("1") : (Runnable) () -> System.out.print("2"); }
 }`
 
 const lammyDriverSource = `import java.util.*;
@@ -1336,6 +1340,8 @@ const syncySource = `public class Syncy {
   int inTry() { try { synchronized (lock) { n = n + 1; } } catch (RuntimeException e) { return -1; } return n; }
   static int stat(Object o) { synchronized (o) { return o.hashCode(); } }
   int twice() { synchronized (lock) { n = n + 1; } synchronized (lock) { n = n + 2; } return n; }
+  int reused(Object o) { synchronized (o) { n = n + 1; } String s = "hello"; return s.length() + n; }
+  int shared(Object o) { String before = "a"; synchronized (o) { n = before.length(); } String after = "bb"; return n + after.length(); }
   int breakOut(int k) { int r = 0; for (int i = 0; i < k; i++) { synchronized (lock) { if (i == 2) { break; } r = r + i; } } return r; }
   int continueOut(int k) { int r = 0; for (int i = 0; i < k; i++) { synchronized (lock) { if (i == 2) { continue; } r = r + i; } r = r * 2; } return r; }
   synchronized int flagged() { return n; }

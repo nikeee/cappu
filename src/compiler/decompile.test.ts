@@ -892,6 +892,10 @@ const SYNCY_SOURCE =
   "  int inTry() { try { synchronized (lock) { n = n + 1; } } catch (RuntimeException e) { return -1; } return n; }\n" +
   "  static int stat(Object o) { synchronized (o) { return o.hashCode(); } }\n" +
   "  int twice() { synchronized (lock) { n = n + 1; } synchronized (lock) { n = n + 2; } return n; }\n" +
+  // javac frees the monitor's local when the statement ends and hands the slot
+  // to the next variable: reading it back as the monitor would lose that one.
+  '  int reused(Object o) { synchronized (o) { n = n + 1; } String s = "hello"; return s.length() + n; }\n' +
+  '  int shared(Object o) { String before = "a"; synchronized (o) { n = before.length(); } String after = "bb"; return n + after.length(); }\n' +
   // A `break` and a `continue` out of the statement: javac releases the monitor
   // first, and the merge of an `if` in the body is not past the release.
   "  int breakOut(int k) { int r = 0; for (int i = 0; i < k; i++) { synchronized (lock) { if (i == 2) { break; } r = r + i; } } return r; }\n" +
@@ -962,6 +966,12 @@ const LAMMY_SOURCE =
   "  int stream(List<String> xs) { return xs.stream().map(String::length).reduce(0, Integer::sum); }\n" +
   "  Comparator<String> comparator() { return (a, b) -> a.length() - b.length(); }\n" +
   "  Runnable staticField() { return () -> stat++; }\n" +
+  // A body that is one *statement* and not one expression needs the braces, and
+  // a lambda written where nothing says the interface has to name it.
+  '  Runnable throwing() { return () -> { throw new RuntimeException("x"); }; }\n' +
+  "  Runnable declaring() { return () -> { int q = 3; System.out.print(q); }; }\n" +
+  '  String receiver() { return ((Supplier<String>) () -> "sup").get(); }\n' +
+  '  Object arm(boolean c) { return c ? (Runnable) () -> System.out.print("1") : (Runnable) () -> System.out.print("2"); }\n' +
   "}\n";
 
 test(
@@ -1012,8 +1022,10 @@ test(
   },
 );
 
-// A lambda that captures a variable this hoisted to the top of the method is not
-// effectively final, and Java takes no other kind.
+// A variable declared inside a loop is effectively final in source, but this
+// hoists the declaration to the top of the method, and what is left behind is an
+// assignment that runs once per turn - which Java will not let a lambda capture.
+// Scoped declarations are what would take these.
 const HOISTED_CAPTURE_SOURCE =
   "import java.util.function.*;\n" +
   "public class Hoisted {\n" +
