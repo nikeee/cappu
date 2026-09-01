@@ -730,6 +730,13 @@ var conditionalBranches = map[string]bool{
 
 var subroutineOpcodes = map[string]bool{"jsr": true, "jsr_w": true, "ret": true, "ret_w": true}
 
+// dups are the stack-copying opcodes, which is how javac writes a compound
+// assignment.
+var dups = map[string]bool{
+	"dup": true, "dup_x1": true, "dup_x2": true,
+	"dup2": true, "dup2_x1": true, "dup2_x2": true,
+}
+
 var invokes = map[string]bool{
 	"invokestatic": true, "invokevirtual": true, "invokeinterface": true, "invokespecial": true,
 }
@@ -1878,7 +1885,10 @@ func reads(text, name string) bool {
 	if !strings.Contains(text, name) {
 		return false
 	}
-	return regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`).MatchString(text)
+	// Not `\b`: a name may end in a bracket (`a[i]`), where there is no word
+	// boundary at all. A leading `.` is excluded so a field does not match a local
+	// of the same name.
+	return regexp.MustCompile(`(^|[^\w$.])` + regexp.QuoteMeta(name) + `($|[^\w$])`).MatchString(text)
 }
 
 // emit appends one statement where statements are currently going.
@@ -4519,8 +4529,16 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 			return d.fillArray(array.Init, index, value)
 		}
 		element := elementType(array.Type, mnemonic[0])
-		d.emit(at(array, precPrimary) + "[" + coerce(index, "int") + "] = " +
-			d.coerceInto(value, element) + ";")
+		target := at(array, precPrimary) + "[" + coerce(index, "int") + "]"
+		// The assignment is a statement here, so anything already on the stack
+		// that reads the same element would read the *new* value: `a[i]++` yields
+		// the old one, which needs the assignment to stay an expression.
+		for _, stacked := range d.stack {
+			if reads(stacked.Text, target) {
+				return bail("an assignment to an array element that is already on the stack")
+			}
+		}
+		d.emit(target + " = " + d.coerceInto(value, element) + ";")
 		return nil
 	}
 	if mnemonic == "newarray" {
@@ -4650,25 +4668,67 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 	// Stack shuffling. A dup of anything but a name or an array being filled in
 	// would duplicate the expression itself (`new int[2][0] = 1;`), so only
 	// those cases are taken; the rest waits for a later phase.
-	if mnemonic == "dup" {
+	if dups[mnemonic] {
+		// How many values the copy is of, and how far down it goes: `dup2` is one
+		// long or double, or two of anything else, and the `_xN` says how many
+		// values it is pushed under.
+		wide := func(value expr) bool { return value.Type == "long" || value.Type == "double" }
 		// popRaw, because the copy being duplicated is the array literal that is
 		// still being filled in, which pop rejects as incomplete.
-		value, err := d.popRaw()
+		top, err := d.popRaw()
 		if err != nil {
 			return err
 		}
-		if value.Effects {
-			return bail("dup of a call")
+		taken := []expr{top}
+		if strings.HasPrefix(mnemonic, "dup2") && !wide(top) {
+			second, err := d.popRaw()
+			if err != nil {
+				return err
+			}
+			taken = append([]expr{second}, taken...)
 		}
-		if value.Compared != nil {
-			return bail("dup of a comparison")
+		depth := 0
+		if strings.HasSuffix(mnemonic, "_x1") {
+			depth = 1
+		} else if strings.HasSuffix(mnemonic, "_x2") {
+			depth = 2
 		}
-		if value.Pending == 0 && value.Init == nil &&
-			(value.Prec != precPrimary || strings.HasPrefix(value.Text, "new ")) {
-			return bail("dup of a non-trivial value")
+		var under []expr
+		for left := depth; left > 0; {
+			value, err := d.popRaw()
+			if err != nil {
+				return err
+			}
+			under = append([]expr{value}, under...)
+			if wide(value) {
+				left -= 2
+			} else {
+				left--
+			}
 		}
-		d.push(value)
-		d.push(value)
+		for _, value := range append(append([]expr{}, taken...), under...) {
+			if value.Effects {
+				return bail("dup of a call")
+			}
+			if value.Compared != nil {
+				return bail("dup of a comparison")
+			}
+			// Only a value that reads the same thing every time may be written
+			// twice; an expression would be *computed* twice.
+			if value.Pending == 0 && value.Init == nil &&
+				(value.Prec != precPrimary || strings.HasPrefix(value.Text, "new ")) {
+				return bail("dup of a non-trivial value")
+			}
+		}
+		for _, value := range taken {
+			d.push(value)
+		}
+		for _, value := range under {
+			d.push(value)
+		}
+		for _, value := range taken {
+			d.push(value)
+		}
 		return nil
 	}
 	if mnemonic == "pop" || mnemonic == "pop2" {

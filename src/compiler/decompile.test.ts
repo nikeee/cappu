@@ -1182,6 +1182,87 @@ test(
   },
 );
 
+// javac writes a compound assignment by *copying* the target on the stack -
+// `dup2` for an array element, `dup` for a field - and reads it back through the
+// copy. The long form is what comes back, which is the same thing as long as the
+// array and the index are read the same way twice.
+const COMPOUND_SOURCE =
+  "public class Compound {\n" +
+  "  static int[] a = { 1, 2, 3 };\n" +
+  "  static long[] longs = { 1L };\n" +
+  "  int n;\n" +
+  "  static int s;\n" +
+  "  static void arrPlus(int i, int x) { a[i] += x; }\n" +
+  "  static void arrInc(int i) { a[i]++; }\n" +
+  "  static void arrPre(int i) { ++a[i]; }\n" +
+  "  static void arrShift(int i) { a[i] <<= 2; }\n" +
+  "  static void longPlus(int i, long x) { longs[i] += x; }\n" +
+  "  void fieldPlus(int x) { n += x; }\n" +
+  "  void fieldInc() { n++; }\n" +
+  "  static void statPlus(int x) { s += x; }\n" +
+  "  static void statInc() { s++; }\n" +
+  "}\n";
+
+// The *value* of a post-increment is the old one, and the long form reads the
+// new one: those need the assignment to stay an expression, which it does not.
+const COMPOUND_BAILS_SOURCE =
+  "public class Both {\n" +
+  "  static int[] a = { 1, 2, 3 };\n" +
+  "  int n;\n" +
+  "  static int arrValue(int i) { return a[i]++; }\n" +
+  "  int fieldValue() { return n++; }\n" +
+  "}\n";
+
+test(
+  "reconstructs a compound assignment to a field and an array element",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-compound-");
+    const classFile = compileWithJavac(COMPOUND_SOURCE, "Compound", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    expect(source).toContain("a[arg0] = a[arg0] + arg1;");
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "Compound", again);
+    const driver =
+      "public class CompoundDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      "    for (int i = 0; i < 3; i++) {\n" +
+      "      Compound c = new Compound();\n" +
+      "      Compound.arrPlus(i, 5); Compound.arrInc(i); Compound.arrPre(i);\n" +
+      "      Compound.arrShift(i); Compound.longPlus(0, 7L);\n" +
+      "      c.fieldPlus(3); c.fieldInc(); Compound.statPlus(2); Compound.statInc();\n" +
+      '      System.out.println(Compound.a[0] + " " + Compound.a[1] + " " + Compound.a[2]\n' +
+      '        + " " + c.n + " " + Compound.s + " " + Compound.longs[0]);\n' +
+      "    }\n" +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "CompoundDriver", dir.path, dir.path);
+    const expected = execFileSync("java", ["-cp", dir.path, "CompoundDriver"], {
+      encoding: "utf8",
+    });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "CompoundDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).not.toEqual("");
+  },
+);
+
+test(
+  "says so when the value of a post-increment is used",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-compoundbails-");
+    const classFile = compileWithJavac(COMPOUND_BAILS_SOURCE, "Both", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).toContain(
+      "cappu: an assignment to an array element that is already on the stack",
+    );
+    expect(source).toContain("cappu: an assignment to a field that is already on the stack");
+  },
+);
+
 /** Compile one source file with javac and return the .class path. */
 function compileWithJavac(
   source: string,

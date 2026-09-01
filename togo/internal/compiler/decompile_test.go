@@ -1465,6 +1465,97 @@ func TestDecompileRecompilesJavacSynchronizedToTheSameBytecode(t *testing.T) {
 	}
 }
 
+// javac writes a compound assignment by *copying* the target on the stack -
+// `dup2` for an array element, `dup` for a field - and reads it back through the
+// copy. The long form is what comes back, which is the same thing as long as the
+// array and the index are read the same way twice.
+const compoundSource = `public class Compound {
+  static int[] a = { 1, 2, 3 };
+  static long[] longs = { 1L };
+  int n;
+  static int s;
+  static void arrPlus(int i, int x) { a[i] += x; }
+  static void arrInc(int i) { a[i]++; }
+  static void arrPre(int i) { ++a[i]; }
+  static void arrShift(int i) { a[i] <<= 2; }
+  static void longPlus(int i, long x) { longs[i] += x; }
+  void fieldPlus(int x) { n += x; }
+  void fieldInc() { n++; }
+  static void statPlus(int x) { s += x; }
+  static void statInc() { s++; }
+}`
+
+const compoundDriverSource = `public class CompoundDriver {
+  public static void main(String[] args) {
+    for (int i = 0; i < 3; i++) {
+      Compound c = new Compound();
+      Compound.arrPlus(i, 5); Compound.arrInc(i); Compound.arrPre(i);
+      Compound.arrShift(i); Compound.longPlus(0, 7L);
+      c.fieldPlus(3); c.fieldInc(); Compound.statPlus(2); Compound.statInc();
+      System.out.println(Compound.a[0] + " " + Compound.a[1] + " " + Compound.a[2]
+        + " " + c.n + " " + Compound.s + " " + Compound.longs[0]);
+    }
+  }
+}`
+
+// The *value* of a post-increment is the old one, and the long form reads the new
+// one: those need the assignment to stay an expression, which it does not.
+const compoundBailsSource = `public class Both {
+  static int[] a = { 1, 2, 3 };
+  int n;
+  static int arrValue(int i) { return a[i]++; }
+  int fieldValue() { return n++; }
+}`
+
+func TestDecompileReconstructsCompoundAssignment(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Compound", compoundSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	if !strings.Contains(source, "a[arg0] = a[arg0] + arg1;") {
+		t.Errorf("the compound assignment did not come back:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Compound", source)
+	compileWithJavacOn(t, dir, "CompoundDriver", compoundDriverSource, dir)
+	expected := runJava(t, dir, "CompoundDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "CompoundDriver")
+	if actual != expected {
+		t.Errorf("the decompiled class runs differently:\n%s\n--- from ---\n%s", actual, expected)
+	}
+	if expected == "" {
+		t.Fatal("the driver printed nothing")
+	}
+}
+
+func TestDecompileSaysWhenAPostIncrementValueIsUsed(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Both", compoundBailsSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"cappu: an assignment to an array element that is already on the stack",
+		"cappu: an assignment to a field that is already on the stack",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("missing %q in:\n%s", want, source)
+		}
+	}
+}
+
 // javac writes the body of a `finally` twice - once on the way out of the
 // protected range, once in the catch-all that rethrows - and a `return` inside
 // the body is one more copy. One way out is what this reads back; the rest say so.

@@ -575,7 +575,11 @@ type Stmt = string | Stmt[];
  */
 function reads(text: string, name: string): boolean {
   if (!text.includes(name)) return false;
-  return new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text);
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Not `\b`: a name may end in a bracket (`a[i]`), where there is no word
+  // boundary at all. A leading `.` is excluded so a field does not match a local
+  // of the same name.
+  return new RegExp(`(^|[^\\w$.])${escaped}($|[^\\w$])`).test(text);
 }
 
 /**
@@ -683,6 +687,9 @@ const CONDITIONAL_BRANCHES = new Set([
 
 const INVOKES = new Set(["invokestatic", "invokevirtual", "invokeinterface", "invokespecial"]);
 
+/** The stack-copying opcodes, which is how javac writes a compound assignment. */
+const DUPS = new Set(["dup", "dup_x1", "dup_x2", "dup2", "dup2_x1", "dup2_x2"]);
+
 function isGoto(mnemonic: string): boolean {
   return mnemonic === "goto" || mnemonic === "goto_w";
 }
@@ -722,7 +729,6 @@ function buildBlocks(
   for (const entry of exceptions) {
     leaders.add(entry.startPc);
     leaders.add(entry.handlerPc);
-
   }
   for (const [index, instruction] of instructions.entries()) {
     const { mnemonic } = instruction;
@@ -3475,9 +3481,14 @@ class BodyDecompiler {
       const element = array.type.endsWith("[]")
         ? array.type.slice(0, -2)
         : PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
-      this.current.push(
-        `${at(array, PREC_PRIMARY)}[${coerce(index, "int")}] = ${this.coerceInto(value, element)};`,
-      );
+      const target = `${at(array, PREC_PRIMARY)}[${coerce(index, "int")}]`;
+      // The assignment is a statement here, so anything already on the stack that
+      // reads the same element would read the *new* value: `a[i]++` yields the
+      // old one, which needs the assignment to stay an expression.
+      if (this.stack.some(stacked => reads(stacked.text, target))) {
+        throw new NotDecompilable("an assignment to an array element that is already on the stack");
+      }
+      this.current.push(`${target} = ${this.coerceInto(value, element)};`);
       return;
     }
     if (mnemonic === "newarray") {
@@ -3563,21 +3574,38 @@ class BodyDecompiler {
     // Stack shuffling. A dup of anything but a name or an array being filled in
     // would duplicate the expression itself (`new int[2][0] = 1;`), so only
     // those cases are taken; the rest waits for a later phase.
-    if (mnemonic === "dup") {
-      // `popRaw`, because the copy being duplicated is the array literal that
-      // is still being filled in, which `pop` rejects as incomplete.
-      const value = this.popRaw();
-      if (value.effects === true) throw new NotDecompilable("dup of a call");
-      if (value.compared !== undefined) throw new NotDecompilable("dup of a comparison");
-      if (
-        value.pending === undefined &&
-        value.init === undefined &&
-        (value.prec !== PREC_PRIMARY || value.text.startsWith("new "))
-      ) {
-        throw new NotDecompilable("dup of a non-trivial value");
+    if (DUPS.has(mnemonic)) {
+      // How many values the copy is of, and how far down it goes: `dup2` is one
+      // long or double, or two of anything else, and the `_xN` says how many
+      // values it is pushed under.
+      const wide = (value: Expr): boolean => value.type === "long" || value.type === "double";
+      // `popRaw`, because the copy being duplicated is the array literal that is
+      // still being filled in, which `pop` rejects as incomplete.
+      const taken: Expr[] = [this.popRaw()];
+      if (mnemonic.startsWith("dup2") && !wide(taken[0]!)) taken.unshift(this.popRaw());
+      const under: Expr[] = [];
+      const depth = mnemonic.endsWith("_x1") ? 1 : mnemonic.endsWith("_x2") ? 2 : 0;
+      for (let left = depth; left > 0;) {
+        const value = this.popRaw();
+        under.unshift(value);
+        left -= wide(value) ? 2 : 1;
       }
-      this.push(value);
-      this.push(value);
+      for (const value of [...taken, ...under]) {
+        if (value.effects === true) throw new NotDecompilable("dup of a call");
+        if (value.compared !== undefined) throw new NotDecompilable("dup of a comparison");
+        // Only a value that reads the same thing every time may be written
+        // twice; an expression would be *computed* twice (`new int[2][0] = 1;`).
+        if (
+          value.pending === undefined &&
+          value.init === undefined &&
+          (value.prec !== PREC_PRIMARY || value.text.startsWith("new "))
+        ) {
+          throw new NotDecompilable("dup of a non-trivial value");
+        }
+      }
+      for (const value of taken) this.push(value);
+      for (const value of under) this.push(value);
+      for (const value of taken) this.push(value);
       return;
     }
     if (mnemonic === "pop" || mnemonic === "pop2") {
