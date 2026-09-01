@@ -941,6 +941,10 @@ const FINALLY_BAILS_SOURCE =
   // copy of the body, and which one source wrote is not in the class file.
   "  static int caught(int x) { int r = 0; try { r = 10 / x; } catch (ArithmeticException e) { r = -1; } finally { n += 2; } return r; }\n" +
   "  static int nested(int x) { int r = 0; try { try { r = 10 / x; } finally { n += 3; } } finally { n += 4; } return r; }\n" +
+  // A `return` beside another way out of the protected range: javac wrote a copy
+  // of the body on each, and the one that leaves the range is not the one this
+  // drops - reading it back would run the body twice.
+  "  static int ifRet(int x) { try { if (x > 0) return 1; } finally { n += 5; } return 0; }\n" +
   "}\n";
 
 test(
@@ -992,7 +996,10 @@ test(
     // A `catch` beside the `finally` and a `finally` inside one are each another
     // copy, and which one source wrote is not in the class file: both say so.
     expect(source).toContain("cappu: a finally or synchronized block");
-    expect(source.match(/cappu: /g)?.length).toBe(4);
+    // A second way out of the protected range is a copy of the body this cannot
+    // tell from a statement source wrote.
+    expect(source).toContain("cappu: a finally with more than one way out");
+    expect(source.match(/cappu: /g)?.length).toBe(6);
   },
 );
 
@@ -1766,10 +1773,10 @@ const RECONSTRUCTIONS: {
   },
   {
     name: "Finally",
-    // javac copies the `finally` into every exit path and guards the rest with a
-    // catch-all that rethrows. One way out is one copy, which comes back; a
-    // `return` inside the body is a second, and which copy source wrote is not
-    // in the class file.
+    // The `finally` is copied into every exit path and the rest is guarded by a
+    // catch-all that rethrows. Reading the copy back needs javac's layout, where
+    // the copy sits right after the protected range; this emitter lays the same
+    // method out differently, so it says so instead.
     source:
       "class Finally { static int f(int a) { try { return a; } finally { java.lang.System.out.println(a); } } }",
     expect: ["cappu: a finally with more than one way out"],

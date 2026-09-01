@@ -965,14 +965,25 @@ function monitorRegions(
         block.successors.includes(range.endPc) &&
         (block.start < range.startPc || block.start >= range.endPc),
     );
+    // Nothing may leave the range other than into the copy: javac wrote another
+    // copy of the body on any such path, and structuring the range would pull
+    // that one in as a statement on top of the `finally` this writes.
+    const escapes = [...blocks.values()].some(
+      block =>
+        block.start >= range.startPc &&
+        block.start < range.endPc &&
+        block.successors.some(target => target < range.startPc || target > range.endPc),
+    );
     // The copy is followed by what the body was doing when it left: the jump over
     // the handler, or the `return` javac protected the *value* of.
     const leaves =
       copy !== undefined &&
+      copy.instructions.length > body.length &&
       (isGoto(copy.instructions[copy.instructions.length - 1]!.mnemonic) || copy.kind === "end");
     if (
       copy === undefined ||
       fromOutside ||
+      escapes ||
       !leaves ||
       !sameInstructions(body, copy.instructions.slice(0, body.length))
     ) {

@@ -1072,12 +1072,28 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 				fromOutside = true
 			}
 		}
+		// Nothing may leave the range other than into the copy: javac wrote
+		// another copy of the body on any such path, and structuring the range
+		// would pull that one in as a statement on top of the `finally` this
+		// writes.
+		escapes := false
+		for _, b := range blocks {
+			if b.Start < start || b.Start >= end {
+				continue
+			}
+			for _, target := range b.Successors {
+				if target < start || target > end {
+					escapes = true
+				}
+			}
+		}
 		// The copy is followed by what the body was doing when it left: the jump
 		// over the handler, or the `return` javac protected the *value* of.
 		leaves := copyBlock != nil &&
+			len(copyBlock.Instructions) > len(body) &&
 			(isGotoMnemonic(copyBlock.Instructions[len(copyBlock.Instructions)-1].Mnemonic) ||
 				copyBlock.Kind == blockEnd)
-		if copyBlock == nil || fromOutside || !leaves ||
+		if copyBlock == nil || fromOutside || escapes || !leaves ||
 			len(copyBlock.Instructions) < len(body) ||
 			!sameInstructions(body, copyBlock.Instructions[:len(body)]) {
 			return nil, nil, nil, bail("a finally with more than one way out")

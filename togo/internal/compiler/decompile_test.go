@@ -739,10 +739,10 @@ var reconstructions = []struct {
 		selfContained: true,
 	},
 	{
-		// javac copies the `finally` into every exit path and guards the rest
-		// with a catch-all that rethrows: which of those copies source wrote is
-		// not in the class file. One way out is one copy, which comes back; a
-		// `return` inside the body is a second.
+		// The `finally` is copied into every exit path and the rest is guarded
+		// by a catch-all that rethrows. Reading the copy back needs javac's
+		// layout, where the copy sits right after the protected range; this
+		// emitter lays the same method out differently, so it says so instead.
 		name: "Finally",
 		source: "class Finally { static int f(int a) { try { return a; }" +
 			" finally { java.lang.System.out.println(a); } } }",
@@ -1724,6 +1724,7 @@ const finallyBailsSource = `public class Bails {
   static int n;
   static int caught(int x) { int r = 0; try { r = 10 / x; } catch (ArithmeticException e) { r = -1; } finally { n += 2; } return r; }
   static int nested(int x) { int r = 0; try { try { r = 10 / x; } finally { n += 3; } } finally { n += 4; } return r; }
+  static int ifRet(int x) { try { if (x > 0) return 1; } finally { n += 5; } return 0; }
 }`
 
 func TestDecompileReconstructsAFinallyWithOneWayOut(t *testing.T) {
@@ -1774,8 +1775,13 @@ func TestDecompileSaysWhenAFinallyIsWrittenMoreThanTwice(t *testing.T) {
 	if !strings.Contains(source, "cappu: a finally or synchronized block") {
 		t.Errorf("expected the bail, got:\n%s", source)
 	}
-	if strings.Count(source, "cappu: ") != 4 {
-		t.Errorf("expected two bailed methods, got:\n%s", source)
+	// A second way out of the protected range is a copy of the body this cannot
+	// tell from a statement source wrote.
+	if !strings.Contains(source, "cappu: a finally with more than one way out") {
+		t.Errorf("expected the second-way-out bail, got:\n%s", source)
+	}
+	if strings.Count(source, "cappu: ") != 6 {
+		t.Errorf("expected three bailed methods, got:\n%s", source)
 	}
 }
 
