@@ -285,6 +285,40 @@ func asBoolean(e expr) expr {
 	return e
 }
 
+// observesWrites reports whether a value already on the stack could *see* a
+// write to a field or an array element - which decides whether the write may be
+// written out as a statement in front of it. A local cannot be aliased and a
+// literal is a value, so only a field, an array element or a call can.
+func observesWrites(value expr, locals map[string]bool) bool {
+	if value.Effects {
+		return true
+	}
+	withoutLiterals := literalText.ReplaceAllString(value.Text, "")
+	// A field access or an array element can be the one being written, under this
+	// name or another.
+	if strings.ContainsAny(withoutLiterals, ".[") {
+		return true
+	}
+	// A bare name that is not a local is a field of this class, which the store
+	// may be to. `this` and the primitive type names of a cast are neither.
+	for _, name := range identifierText.FindAllString(withoutLiterals, -1) {
+		if !locals[name] && !notAName[name] {
+			return true
+		}
+	}
+	return false
+}
+
+var (
+	literalText    = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'`)
+	identifierText = regexp.MustCompile(`[A-Za-z_$][\w$]*`)
+	notAName       = map[string]bool{
+		"this": true, "true": true, "false": true, "null": true,
+		"boolean": true, "byte": true, "char": true, "short": true,
+		"int": true, "long": true, "float": true, "double": true,
+	}
+)
+
 // isConstantText reports whether a value's text is the same every time it is read.
 func isConstantText(text string) bool {
 	switch text {
@@ -1030,7 +1064,16 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 			return nil, nil, nil, bail("a finally or synchronized block")
 		}
 		copyBlock := blocks[end]
-		if copyBlock == nil || !isGotoMnemonic(copyBlock.Instructions[len(copyBlock.Instructions)-1].Mnemonic) ||
+		// Everything that reaches the copy has to come out of the protected range:
+		// a jump into it from elsewhere would lose the body this drops.
+		fromOutside := false
+		for _, b := range blocks {
+			if (b.Start < start || b.Start >= end) && containsInt(b.Successors, end) {
+				fromOutside = true
+			}
+		}
+		if copyBlock == nil || fromOutside ||
+			!isGotoMnemonic(copyBlock.Instructions[len(copyBlock.Instructions)-1].Mnemonic) ||
 			len(copyBlock.Instructions) < len(body) ||
 			!sameInstructions(body, copyBlock.Instructions[:len(body)]) {
 			return nil, nil, nil, bail("a finally with more than one way out")
@@ -4419,6 +4462,14 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
+		// `|`, `&` and `^` are the only ones a boolean takes, and there the `1`
+		// and `0` javac wrote are `true` and `false` - `b | 1` is not Java.
+		if len(operator.operator) == 1 && strings.ContainsAny(operator.operator, "|&^") &&
+			(left.Type == "boolean" || right.Type == "boolean") {
+			d.push(binaryExpr(asBoolean(left), operator.operator, asBoolean(right),
+				operator.prec, "boolean"))
+			return nil
+		}
 		d.push(binaryExpr(numeric(left), operator.operator, numeric(right),
 			operator.prec, primitiveOfPrefix[mnemonic[0]]))
 		return nil
@@ -4479,12 +4530,14 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 			}
 			target = at(receiver, precPrimary) + "." + field.Name
 		}
-		// The assignment is a statement here, so anything already on the stack that
-		// reads the same field would read the *new* value: `arr[idx++]` writes the
-		// increment out first, and the read has to stay behind it.
+		// The assignment is a statement here, so it runs *before* everything the
+		// stack already holds - and any of those that reads a field, an array or a
+		// call could see it. `arr[idx++]`, `p.x + (q.x = 1)` and `f() + (n = 1)`
+		// all need the assignment to stay an expression, which this phase does not
+		// write. Textual identity is not enough: `q` may be `p`.
 		for _, stacked := range d.stack {
-			if reads(stacked.Text, target) {
-				return bail("an assignment to a field that is already on the stack")
+			if observesWrites(stacked, d.names) {
+				return bail("an assignment with a value that could see it on the stack")
 			}
 		}
 		d.emit(target + " = " + d.coerceInto(value, fieldType) + ";")
@@ -4530,12 +4583,11 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		}
 		element := elementType(array.Type, mnemonic[0])
 		target := at(array, precPrimary) + "[" + coerce(index, "int") + "]"
-		// The assignment is a statement here, so anything already on the stack
-		// that reads the same element would read the *new* value: `a[i]++` yields
-		// the old one, which needs the assignment to stay an expression.
+		// The same as a field: the store runs before what the stack holds, and an
+		// array read on it may be this element under another name.
 		for _, stacked := range d.stack {
-			if reads(stacked.Text, target) {
-				return bail("an assignment to an array element that is already on the stack")
+			if observesWrites(stacked, d.names) {
+				return bail("an assignment with a value that could see it on the stack")
 			}
 		}
 		d.emit(target + " = " + d.coerceInto(value, element) + ";")
@@ -4706,7 +4758,9 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 				left--
 			}
 		}
-		for _, value := range append(append([]expr{}, taken...), under...) {
+		// Only what is *copied* has to be re-readable; a value the copy is pushed
+		// under is popped and pushed back untouched.
+		for _, value := range taken {
 			if value.Effects {
 				return bail("dup of a call")
 			}
@@ -5303,25 +5357,75 @@ func isGeneratedRecordMember(method Member, classFile *ClassFile, components []d
 		}
 		return false
 	}
-	for _, component := range components {
-		if component.Name != method.Name {
-			continue
-		}
-		if method.Descriptor != "()"+component.Descriptor {
-			continue
-		}
-		// An accessor javac wrote returns the field and nothing else.
+	body := func() []Instruction {
 		code, err := ReadCode(method, classFile.Pool)
-		return err == nil && code != nil && len(code.Code) <= 5
+		if err != nil || code == nil {
+			return nil
+		}
+		instructions, err := DecodeInstructions(classFile, code.Code)
+		if err != nil {
+			return nil
+		}
+		return instructions
+	}
+	// fieldOf is the field a `getfield`/`putfield` names, when it is this class'.
+	fieldOf := func(instruction Instruction) string {
+		field, ok := PoolMemberRef(classFile.Pool, uint16(instruction.Arg))
+		if !ok || field.Owner != classFile.ThisClass {
+			return ""
+		}
+		return field.Name + field.Descriptor
+	}
+	for _, component := range components {
+		if component.Name != method.Name || method.Descriptor != "()"+component.Descriptor {
+			continue
+		}
+		// An accessor javac wrote reads *that* component and returns it, and
+		// nothing else: one that reads another one, or does anything more, is the
+		// source's.
+		kept := body()
+		return len(kept) == 3 && kept[0].Mnemonic == "aload_0" && kept[1].Mnemonic == "getfield" &&
+			fieldOf(kept[1]) == component.Name+component.Descriptor &&
+			returnMnemonic.MatchString(kept[2].Mnemonic)
 	}
 	if method.Name == "<init>" && method.Descriptor == canonicalDescriptor(components) {
-		// The canonical constructor javac writes stores each component and
-		// returns; one that source wrote does more, and has to stay.
-		code, err := ReadCode(method, classFile.Pool)
-		return err == nil && code != nil && len(code.Code) <= 5+len(components)*6
+		// The canonical constructor javac writes chains to `Record` and stores
+		// each component into its own field, in order, from its own parameter -
+		// one that source wrote does more, or does it differently, and has to stay.
+		kept := body()
+		if len(kept) != 2+len(components)*3+1 {
+			return false
+		}
+		if kept[0].Mnemonic != "aload_0" || kept[1].Mnemonic != "invokespecial" {
+			return false
+		}
+		chained, ok := PoolMemberRef(classFile.Pool, uint16(kept[1].Arg))
+		if !ok || chained.Owner != "java/lang/Record" || chained.Name != "<init>" {
+			return false
+		}
+		slot := 1
+		for index, one := range components {
+			load, read, store := kept[2+index*3], kept[3+index*3], kept[4+index*3]
+			if load.Mnemonic != "aload_0" || !loadMnemonic.MatchString(read.Mnemonic) ||
+				slotOf(read) != slot || store.Mnemonic != "putfield" ||
+				fieldOf(store) != one.Name+one.Descriptor {
+				return false
+			}
+			if one.Descriptor == "J" || one.Descriptor == "D" {
+				slot += 2
+			} else {
+				slot++
+			}
+		}
+		return kept[len(kept)-1].Mnemonic == "return"
 	}
 	return false
 }
+
+var (
+	returnMnemonic = regexp.MustCompile(`^[ilfda]?return$`)
+	loadMnemonic   = regexp.MustCompile(`^[ilfda]load(?:_\d)?$`)
+)
 
 // isEnumDeclaration reports an enum type. ACC_ENUM is also set on the anonymous
 // subclass javac writes for an enum constant with a body - which is a plain
@@ -5387,9 +5491,7 @@ func classHead(classFile *ClassFile, components []decompiledRecordComponent) str
 	if components != nil {
 		// A record declares its state in the header, and `final` is implicit.
 		head = head[:0]
-		if classFile.Flags&accPublic != 0 {
-			head = append(head, "public")
-		}
+		head = append(head, accessModifiers(classFile.Flags)...)
 		var declared []string
 		for _, one := range components {
 			declared = append(declared, sourceTypeText(one.Type, selfOf(classFile))+" "+one.Name)

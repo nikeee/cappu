@@ -332,6 +332,39 @@ function ternary(condition: Expr, thenValue: Expr, elseValue: Expr): Expr | unde
  * *branch's* own arms (`c ? 0 : 1`, not `!c ? 1 : 0`), which is the form source
  * wrote and the one that recompiles to the same branch.
  */
+/**
+ * Whether a value already on the stack could *see* a write to a field or an
+ * array element - which decides whether the write may be written out as a
+ * statement in front of it. A local cannot be aliased and a literal is a value,
+ * so only a field, an array element or a call can.
+ */
+function observesWrites(value: Expr, locals: ReadonlySet<string>): boolean {
+  if (value.effects === true) return true;
+  const withoutLiterals = value.text.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "");
+  // A field access or an array element can be the one being written, under this
+  // name or another.
+  if (/[.[]/.test(withoutLiterals)) return true;
+  // A bare name that is not a local is a field of this class, which the store
+  // may be to. `this` and the primitive type names of a cast are neither.
+  const known = new Set([
+    "this",
+    "true",
+    "false",
+    "null",
+    "boolean",
+    "byte",
+    "char",
+    "short",
+    "int",
+    "long",
+    "float",
+    "double",
+  ]);
+  return (withoutLiterals.match(/[A-Za-z_$][\w$]*/g) ?? []).some(
+    name => !locals.has(name) && !known.has(name),
+  );
+}
+
 /** Whether a value's text is the same every time it is read. */
 function isConstantText(text: string): boolean {
   return (
@@ -925,8 +958,16 @@ function monitorRegions(
     }
     const range = ranges[0]!;
     const copy = blocks.get(range.endPc);
+    // Everything that reaches the copy has to come out of the protected range:
+    // a jump into it from elsewhere would lose the body this drops.
+    const fromOutside = [...blocks.values()].some(
+      block =>
+        block.successors.includes(range.endPc) &&
+        (block.start < range.startPc || block.start >= range.endPc),
+    );
     if (
       copy === undefined ||
+      fromOutside ||
       !isGoto(copy.instructions[copy.instructions.length - 1]!.mnemonic) ||
       !sameInstructions(body, copy.instructions.slice(0, body.length))
     ) {
@@ -3408,9 +3449,20 @@ class BodyDecompiler {
     // Arithmetic, bitwise and conversions.
     const operator = BINARY_OPS[mnemonic.slice(1)];
     if (operator && /^[ilfd]/.test(mnemonic)) {
-      const right = numeric(this.pop());
-      const left = numeric(this.pop());
-      const type = PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
+      let right = this.pop();
+      let left = this.pop();
+      // `|`, `&` and `^` are the only ones a boolean takes, and there the `1`
+      // and `0` javac wrote are `true` and `false` - `b | 1` is not Java.
+      const boolean =
+        "|&^".includes(operator.operator) && (left.type === "boolean" || right.type === "boolean");
+      if (boolean) {
+        left = asBoolean(left);
+        right = asBoolean(right);
+      } else {
+        left = numeric(left);
+        right = numeric(right);
+      }
+      const type = boolean ? "boolean" : PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
       return this.push(binary(left, operator.operator, right, operator.prec, type));
     }
     if (/^[ilfd]neg$/.test(mnemonic)) {
@@ -3451,11 +3503,13 @@ class BodyDecompiler {
         mnemonic === "putstatic"
           ? this.staticRef(field.owner, field.name)
           : `${at(this.pop(), PREC_PRIMARY)}.${field.name}`;
-      // The assignment is a statement here, so anything already on the stack that
-      // reads the same field would read the *new* value: `arr[idx++]` writes the
-      // increment out first, and the read has to stay behind it.
-      if (this.stack.some(stacked => reads(stacked.text, target))) {
-        throw new NotDecompilable("an assignment to a field that is already on the stack");
+      // The assignment is a statement here, so it runs *before* everything the
+      // stack already holds - and any of those that reads a field, an array or a
+      // call could see it. `arr[idx++]`, `p.x + (q.x = 1)` and `f() + (n = 1)`
+      // all need the assignment to stay an expression, which this phase does not
+      // write. Textual identity is not enough: `q` may be `p`.
+      if (this.stack.some(value => observesWrites(value, this.names))) {
+        throw new NotDecompilable("an assignment with a value that could see it on the stack");
       }
       this.current.push(`${target} = ${this.coerceInto(value, type)};`);
       return;
@@ -3482,11 +3536,10 @@ class BodyDecompiler {
         ? array.type.slice(0, -2)
         : PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
       const target = `${at(array, PREC_PRIMARY)}[${coerce(index, "int")}]`;
-      // The assignment is a statement here, so anything already on the stack that
-      // reads the same element would read the *new* value: `a[i]++` yields the
-      // old one, which needs the assignment to stay an expression.
-      if (this.stack.some(stacked => reads(stacked.text, target))) {
-        throw new NotDecompilable("an assignment to an array element that is already on the stack");
+      // The same as a field: the store runs before what the stack holds, and an
+      // array read on it may be this element under another name.
+      if (this.stack.some(value => observesWrites(value, this.names))) {
+        throw new NotDecompilable("an assignment with a value that could see it on the stack");
       }
       this.current.push(`${target} = ${this.coerceInto(value, element)};`);
       return;
@@ -3590,7 +3643,9 @@ class BodyDecompiler {
         under.unshift(value);
         left -= wide(value) ? 2 : 1;
       }
-      for (const value of [...taken, ...under]) {
+      // Only what is *copied* has to be re-readable; a value the copy is pushed
+      // under is popped and pushed back untouched.
+      for (const value of taken) {
         if (value.effects === true) throw new NotDecompilable("dup of a call");
         if (value.compared !== undefined) throw new NotDecompilable("dup of a comparison");
         // Only a value that reads the same thing every time may be written
@@ -3965,7 +4020,9 @@ interface RecordComponent {
 function recordComponents(classFile: ClassFile): RecordComponent[] | undefined {
   if (classFile.superClass !== "java/lang/Record") return undefined;
   const attribute = findAttribute(classFile.attributes, "Record");
-  if (attribute === undefined) return undefined;
+  // The attribute comes straight from the file: a truncated one is a corrupt
+  // class, not a crash.
+  if (attribute === undefined || attribute.bytes.length < 2) return undefined;
   const view = new DataView(
     attribute.bytes.buffer,
     attribute.bytes.byteOffset,
@@ -4007,7 +4064,6 @@ function isGeneratedRecordMember(
   classFile: ClassFile,
   components: readonly RecordComponent[],
 ): boolean {
-  const self = selfOf(classFile);
   const generated = ["equals", "hashCode", "toString"];
   if (generated.includes(method.name)) {
     // The generated three are the ones built by the `ObjectMethods` bootstrap.
@@ -4025,18 +4081,54 @@ function isGeneratedRecordMember(
       handle?.tag === "methodHandle" ? memberRef(classFile.pool, handle.referenceIndex) : undefined;
     return factory?.owner === "java/lang/runtime/ObjectMethods";
   }
+  const body = (): Instruction[] => {
+    const code = readCode(method, classFile.pool);
+    return code === undefined ? [] : decodeInstructions(classFile, code.code);
+  };
+  /** The field a `getfield`/`putfield` names, when it is this class'. */
+  const fieldOf = (instruction: Instruction): string | undefined => {
+    const field = memberRef(classFile.pool, instruction.arg);
+    return field?.owner === classFile.thisClass ? `${field.name}${field.descriptor}` : undefined;
+  };
   const component = components.find(one => one.name === method.name);
   if (component !== undefined && method.descriptor === `()${component.descriptor}`) {
-    // An accessor javac wrote returns the field and nothing else.
-    const code = readCode(method, classFile.pool);
-    return code !== undefined && code.code.length <= 5;
+    // An accessor javac wrote reads *that* component and returns it, and nothing
+    // else: one that reads another one, or does anything more, is the source's.
+    const kept = body();
+    return (
+      kept.length === 3 &&
+      kept[0]!.mnemonic === "aload_0" &&
+      kept[1]!.mnemonic === "getfield" &&
+      fieldOf(kept[1]!) === `${component.name}${component.descriptor}` &&
+      /^[ilfda]?return$/.test(kept[2]!.mnemonic)
+    );
   }
-  if (method.name === "<init>") {
-    if (method.descriptor !== canonicalDescriptor(components)) return false;
-    // The canonical constructor javac writes stores each component and returns;
-    // one that source wrote does more, and has to stay.
-    const code = readCode(method, classFile.pool);
-    return code !== undefined && code.code.length <= 5 + components.length * 6;
+  if (method.name === "<init>" && method.descriptor === canonicalDescriptor(components)) {
+    // The canonical constructor javac writes chains to `Record` and stores each
+    // component into its own field, in order, from its own parameter - one that
+    // source wrote does more, or does it differently, and has to stay.
+    const kept = body();
+    const wanted = 2 + components.length * 3 + 1;
+    if (kept.length !== wanted) return false;
+    if (kept[0]!.mnemonic !== "aload_0" || kept[1]!.mnemonic !== "invokespecial") return false;
+    const chained = memberRef(classFile.pool, kept[1]!.arg);
+    if (chained?.owner !== "java/lang/Record" || chained.name !== "<init>") return false;
+    let slot = 1;
+    for (const [index, one] of components.entries()) {
+      const [load, read, store] = kept.slice(2 + index * 3, 5 + index * 3);
+      const slotOfLoad = /_\d$/.test(read!.mnemonic) ? Number(read!.mnemonic.slice(-1)) : read!.arg;
+      if (
+        load!.mnemonic !== "aload_0" ||
+        !/^[ilfda]load(?:_\d)?$/.test(read!.mnemonic) ||
+        slotOfLoad !== slot ||
+        store!.mnemonic !== "putfield" ||
+        fieldOf(store!) !== `${one.name}${one.descriptor}`
+      ) {
+        return false;
+      }
+      slot += one.descriptor === "J" || one.descriptor === "D" ? 2 : 1;
+    }
+    return kept[kept.length - 1]!.mnemonic === "return";
   }
   return false;
 }
@@ -4095,10 +4187,11 @@ function classHead(classFile: ClassFile, components?: readonly RecordComponent[]
     simpleName(classFile.thisClass),
   ];
   if (components !== undefined) {
-    // A record declares its state in the header, and `final` is implicit.
+    // A record declares its state in the header, and `final` is implicit - the
+    // modifiers in front of it are the class', and stay.
     head.length = 0;
     head.push(
-      ...(classFile.flags & ACC_PUBLIC ? ["public"] : []),
+      ...accessModifiers(classFile.flags),
       "record",
       `${simpleName(classFile.thisClass)}(${components
         .map(one => `${sourceTypeText(one.type, selfOf(classFile))} ${one.name}`)

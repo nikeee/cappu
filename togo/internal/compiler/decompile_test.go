@@ -1465,6 +1465,82 @@ func TestDecompileRecompilesJavacSynchronizedToTheSameBytecode(t *testing.T) {
 	}
 }
 
+// A hand-written accessor or canonical constructor may be *smaller* than the one
+// javac generates, so only their shape tells them apart: reading another
+// component, or storing in another order, is the source's and stays.
+const recordKeptSource = `public class Kept {
+  public record Accessor(int x, int y) { public int x() { return y; } }
+  public record Swapped(int x, int y) { public Swapped(int x, int y) { this.x = y; this.y = x; } }
+  public record Negated(int x) { public Negated(int x) { this.x = -x; } }
+  public record Wide(long a, String b, double c) { public int extra() { return 1; } }
+}`
+
+func TestDecompileKeepsARecordMemberThatOnlyLooksGenerated(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	compileWithJavac(t, dir, "Kept", recordKeptSource)
+	for _, one := range []struct{ name, want string }{
+		{"Kept$Accessor", "return this.y;"},
+		{"Kept$Swapped", "this.x = y;"},
+		{"Kept$Negated", "this.x = -x;"},
+	} {
+		source, err := Decompile(readFile(t, filepath.Join(dir, one.name+".class")))
+		if err != nil {
+			t.Fatalf("decompile %s: %v", one.name, err)
+		}
+		if !strings.Contains(source, one.want) {
+			t.Errorf("%s dropped a member that is the source's:\n%s", one.name, source)
+		}
+	}
+	// The generated members of a record whose components are wide are still
+	// recognised - the slots they load from are two apart.
+	wide, err := Decompile(readFile(t, filepath.Join(dir, "Kept$Wide.class")))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(wide, "record Kept$Wide(long a, java.lang.String b, double c)") ||
+		strings.Contains(wide, "public long a()") {
+		t.Errorf("the wide record did not come back as a header:\n%s", wide)
+	}
+}
+
+// An assignment written out as a statement runs in front of everything the stack
+// already holds, and a value that reads a field or an array element may be the
+// one being written - under this name or another. Only locals and literals are
+// safe, so the rest say so.
+const aliasSource = `public class Aliased {
+  static int[] a = { 0, 0, 0 };
+  int x;
+  static int reads;
+  static int rd() { reads++; return a[0]; }
+  static int aliasArray() { int[] b = a; a[0] = 1; return a[0] + (b[0] = 5); }
+  static int sameIndex() { int i = 0, j = 0; a[1] = 1; return a[i] + (a[j] = 7); }
+  int sameObject(Aliased that) { this.x = 1; return this.x + (that.x = 9); }
+  static int throughCall() { return rd() + (a[0] = 7); }
+  static int chained() { int p, q; p = q = 5; return p + q; }
+}`
+
+func TestDecompileSaysWhenAnAssignmentWouldMoveInFrontOfAValue(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Aliased", aliasSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if count := strings.Count(source, "an assignment with a value that could see it on the stack"); count != 4 {
+		t.Errorf("expected four guarded methods, got %d:\n%s", count, source)
+	}
+	// A chained assignment holds only the literal it copied, which sees nothing.
+	if !strings.Contains(source, "int var1 = 5;") {
+		t.Errorf("the chained assignment did not come back:\n%s", source)
+	}
+}
+
 // A record declares its state in the header, and javac writes the accessors, the
 // canonical constructor and `equals`/`hashCode`/`toString` (through the
 // `ObjectMethods` bootstrap) from it. Those come back as the header; anything the
@@ -1611,13 +1687,10 @@ func TestDecompileSaysWhenAPostIncrementValueIsUsed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	for _, want := range []string{
-		"cappu: an assignment to an array element that is already on the stack",
-		"cappu: an assignment to a field that is already on the stack",
-	} {
-		if !strings.Contains(source, want) {
-			t.Errorf("missing %q in:\n%s", want, source)
-		}
+	// Both of them, and both for the same reason: the store would have to run in
+	// front of the value the post-increment yields.
+	if count := strings.Count(source, "an assignment with a value that could see it on the stack"); count != 2 {
+		t.Errorf("expected two guarded methods, got %d:\n%s", count, source)
 	}
 }
 
@@ -1835,7 +1908,7 @@ func TestDecompileSaysWhenAFieldIsAssignedWhileItIsOnTheStack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(source, "cappu: an assignment to a field that is already on the stack") {
+	if !strings.Contains(source, "cappu: an assignment with a value that could see it on the stack") {
 		t.Errorf("expected the bail, got:\n%s", source)
 	}
 }

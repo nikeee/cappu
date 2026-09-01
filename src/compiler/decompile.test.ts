@@ -725,7 +725,7 @@ test(
     using dir = TempDir.create("cappu-decompile-fieldpost-");
     const classFile = compileWithJavac(FIELD_POST_INCREMENT_SOURCE, "FieldPost", dir.path);
     expect(decompileToSource(readFileSync(classFile))).toContain(
-      "cappu: an assignment to a field that is already on the stack",
+      "cappu: an assignment with a value that could see it on the stack",
     );
   },
 );
@@ -1256,10 +1256,10 @@ test(
     using dir = TempDir.create("cappu-decompile-compoundbails-");
     const classFile = compileWithJavac(COMPOUND_BAILS_SOURCE, "Both", dir.path);
     const source = decompileToSource(readFileSync(classFile));
-    expect(source).toContain(
-      "cappu: an assignment to an array element that is already on the stack",
-    );
-    expect(source).toContain("cappu: an assignment to a field that is already on the stack");
+    // Both of them, and both for the same reason: the store would have to run
+    // in front of the value the post-increment yields.
+    const guarded = source.match(/an assignment with a value that could see it on the stack/g);
+    expect(guarded?.length).toBe(2);
   },
 );
 
@@ -1267,6 +1267,39 @@ test(
 // canonical constructor and `equals`/`hashCode`/`toString` (through the
 // `ObjectMethods` bootstrap) from it. Those come back as the header; anything the
 // source added stays.
+// A hand-written accessor or canonical constructor may be *smaller* than the one
+// javac generates, so only their shape tells them apart: reading another
+// component, or storing in another order, is the source's and stays.
+const RECORD_KEPT_SOURCE =
+  "public class Kept {\n" +
+  "  public record Accessor(int x, int y) { public int x() { return y; } }\n" +
+  "  public record Swapped(int x, int y) { public Swapped(int x, int y) { this.x = y; this.y = x; } }\n" +
+  "  public record Negated(int x) { public Negated(int x) { this.x = -x; } }\n" +
+  "  public record Wide(long a, String b, double c) { public int extra() { return 1; } }\n" +
+  "}\n";
+
+test(
+  "keeps a record member that only looks generated",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-recordkept-");
+    compileWithJavac(RECORD_KEPT_SOURCE, "Kept", dir.path);
+    for (const [name, wanted] of [
+      ["Kept$Accessor", "return this.y;"],
+      ["Kept$Swapped", "this.x = y;"],
+      ["Kept$Negated", "this.x = -x;"],
+    ] as const) {
+      const source = decompileToSource(readFileSync(join(dir.path, `${name}.class`)));
+      expect(source).toContain(wanted);
+    }
+    // The generated members of a record whose components are wide are still
+    // recognised - the slots they load from are two apart.
+    const wide = decompileToSource(readFileSync(join(dir.path, "Kept$Wide.class")));
+    expect(wide).toContain("record Kept$Wide(long a, java.lang.String b, double c)");
+    expect(wide).not.toContain("public long a()");
+  },
+);
+
 const RECORD_SOURCE =
   "public record Recordy(int x, String name, long[] data) {\n" +
   "  static int made;\n" +
@@ -1315,6 +1348,37 @@ test(
     });
     expect(actual).toEqual(expected);
     expect(actual).not.toEqual("");
+  },
+);
+
+// An assignment written out as a statement runs in front of everything the stack
+// already holds, and a value that reads a field or an array element may be the
+// one being written - under this name or another. Only locals and literals are
+// safe, so the rest say so.
+const ALIAS_SOURCE =
+  "public class Aliased {\n" +
+  "  static int[] a = { 0, 0, 0 };\n" +
+  "  int x;\n" +
+  "  static int reads;\n" +
+  "  static int rd() { reads++; return a[0]; }\n" +
+  "  static int aliasArray() { int[] b = a; a[0] = 1; return a[0] + (b[0] = 5); }\n" +
+  "  static int sameIndex() { int i = 0, j = 0; a[1] = 1; return a[i] + (a[j] = 7); }\n" +
+  "  int sameObject(Aliased that) { this.x = 1; return this.x + (that.x = 9); }\n" +
+  "  static int throughCall() { return rd() + (a[0] = 7); }\n" +
+  "  static int chained() { int p, q; p = q = 5; return p + q; }\n" +
+  "}\n";
+
+test(
+  "says so when an assignment would move in front of a value that could see it",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-alias-");
+    const classFile = compileWithJavac(ALIAS_SOURCE, "Aliased", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    const guarded = source.match(/an assignment with a value that could see it on the stack/g);
+    expect(guarded?.length).toBe(4);
+    // A chained assignment holds only the literal it copied, which sees nothing.
+    expect(source).toContain("int var1 = 5;");
   },
 );
 
