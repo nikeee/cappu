@@ -1702,6 +1702,8 @@ const finallySource = `public class Finallies {
   static int simple(int x) { int r = 0; try { r = 10 / x; } finally { n += 1; } return r; }
   static int several(int x) { int r = 0; try { r = 10 / x; n += 2; } finally { System.out.print(""); } return r; }
   static int inLoop(int x) { int r = 0; for (int i = 0; i < x; i++) { try { r += 10 / (x - i); } finally { n += 5; } } return r; }
+  static int returning(int a) { try { return a * 2; } finally { n += 6; } }
+  static String returningRef(String s) { try { return s.trim(); } finally { n += 7; } }
 }`
 
 const finalliesDriverSource = `public class FinalliesDriver {
@@ -1710,7 +1712,8 @@ const finalliesDriverSource = `public class FinalliesDriver {
       String line;
       try {
         line = Finallies.simple(x) + " " + Finallies.several(x)
-          + " " + Finallies.inLoop(x);
+          + " " + Finallies.inLoop(x) + " " + Finallies.returning(x)
+          + " " + Finallies.returningRef(" q ");
       } catch (RuntimeException e) { line = "ex"; }
       System.out.println(line + " " + Finallies.n);
     }
@@ -1719,7 +1722,6 @@ const finalliesDriverSource = `public class FinalliesDriver {
 
 const finallyBailsSource = `public class Bails {
   static int n;
-  static int returning(int a) { try { return a; } finally { n += 1; } }
   static int caught(int x) { int r = 0; try { r = 10 / x; } catch (ArithmeticException e) { r = -1; } finally { n += 2; } return r; }
   static int nested(int x) { int r = 0; try { try { r = 10 / x; } finally { n += 3; } } finally { n += 4; } return r; }
 }`
@@ -1757,7 +1759,7 @@ func TestDecompileReconstructsAFinallyWithOneWayOut(t *testing.T) {
 	}
 }
 
-func TestDecompileSaysWhenAFinallyHasMoreThanOneWayOut(t *testing.T) {
+func TestDecompileSaysWhenAFinallyIsWrittenMoreThanTwice(t *testing.T) {
 	if !hasTool("javac") {
 		t.Skip("no JDK (javac)")
 	}
@@ -1767,12 +1769,13 @@ func TestDecompileSaysWhenAFinallyHasMoreThanOneWayOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(source, "cappu: a finally with more than one way out") {
+	// A `catch` beside the `finally` and a `finally` inside one are each another
+	// copy, and which one source wrote is not in the class file: both say so.
+	if !strings.Contains(source, "cappu: a finally or synchronized block") {
 		t.Errorf("expected the bail, got:\n%s", source)
 	}
-	// Every one of them says so rather than guessing which copy source wrote.
-	if strings.Count(source, "cappu: ") != 6 {
-		t.Errorf("expected three bailed methods, got:\n%s", source)
+	if strings.Count(source, "cappu: ") != 4 {
+		t.Errorf("expected two bailed methods, got:\n%s", source)
 	}
 }
 

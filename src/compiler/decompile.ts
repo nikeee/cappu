@@ -965,10 +965,15 @@ function monitorRegions(
         block.successors.includes(range.endPc) &&
         (block.start < range.startPc || block.start >= range.endPc),
     );
+    // The copy is followed by what the body was doing when it left: the jump over
+    // the handler, or the `return` javac protected the *value* of.
+    const leaves =
+      copy !== undefined &&
+      (isGoto(copy.instructions[copy.instructions.length - 1]!.mnemonic) || copy.kind === "end");
     if (
       copy === undefined ||
       fromOutside ||
-      !isGoto(copy.instructions[copy.instructions.length - 1]!.mnemonic) ||
+      !leaves ||
       !sameInstructions(body, copy.instructions.slice(0, body.length))
     ) {
       throw new NotDecompilable("a finally with more than one way out");
@@ -2603,8 +2608,12 @@ class BodyDecompiler {
     if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
     const copy = this.blocks.get(region.endPc)!;
     const jump = copy.instructions[copy.instructions.length - 1]!;
-    const follow = jump.arg;
-    if (!this.blocks.has(follow)) throw new NotDecompilable("a finally that leaves the method");
+    // What is left of the copy block is the jump over the handler, or the
+    // `return` javac protected the value of - and a jump to nowhere is not a
+    // statement this can write.
+    if (copy.kind !== "end" && !this.blocks.has(jump.arg)) {
+      throw new NotDecompilable("a finally that leaves the method");
+    }
     // The copy on the way out is not a statement: what is left of that block is
     // the jump over the handler.
     this.skip.set(copy.start, region.body.length);
