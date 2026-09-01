@@ -768,12 +768,16 @@ type block struct {
 	Successors []int
 }
 
-func buildBlocks(instructions []Instruction, exceptions []ExceptionEntry) (map[int]*block, error) {
+func buildBlocks(instructions []Instruction, exceptions []ExceptionEntry, splits ...int) (map[int]*block, error) {
 	entry := 0
 	if len(instructions) > 0 {
 		entry = instructions[0].Pc
 	}
 	leaders := map[int]bool{entry: true}
+	// Where a `finally`'s copy begins, which nothing else would split at.
+	for _, split := range splits {
+		leaders[split] = true
+	}
 	// A protected range and a handler both begin a statement of their own, and
 	// neither is a branch target, so nothing else would split the block there.
 	for _, entry := range exceptions {
@@ -908,6 +912,46 @@ type monitorRegion struct {
 	Slot int
 }
 
+// finallyRegion is one `finally`: javac writes the body twice - once on the way
+// out, once in a catch-all that rethrows - and the copies are what says where it
+// is.
+type finallyRegion struct {
+	StartPc   int
+	EndPc     int
+	HandlerPc int
+	// Body is the handler's copy, without the store and the rethrow.
+	Body []Instruction
+}
+
+// finallyBody is the body of a `finally`, when b is the catch-all that rethrows:
+// `astore e; <body>; aload e; athrow`, with the same slot at both ends.
+func finallyBody(b *block) ([]Instruction, bool) {
+	if b == nil || len(b.Instructions) < 4 || b.Kind != blockEnd {
+		return nil, false
+	}
+	kept := b.Instructions
+	store, reload, throwing := kept[0], kept[len(kept)-2], kept[len(kept)-1]
+	if !strings.HasPrefix(store.Mnemonic, "astore") || !strings.HasPrefix(reload.Mnemonic, "aload") ||
+		throwing.Mnemonic != "athrow" || slotOf(store) != slotOf(reload) {
+		return nil, false
+	}
+	return kept[1 : len(kept)-2], true
+}
+
+// sameInstructions reports whether two runs are the same code, which a copy has
+// to be.
+func sameInstructions(left, right []Instruction) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i, one := range left {
+		if one.Mnemonic != right[i].Mnemonic || one.Arg != right[i].Arg || one.Arg2 != right[i].Arg2 {
+			return false
+		}
+	}
+	return true
+}
+
 // isMonitorHandler reports the monitor slot when b is the release-and-rethrow a
 // `synchronized` is guarded by.
 func isMonitorHandler(b *block) (int, bool) {
@@ -928,7 +972,7 @@ func isMonitorHandler(b *block) (int, bool) {
 // ranges, and the exception entries left for tryRegions. A `finally` and a
 // try-with-resources are catch-alls too, and those javac writes as duplicated
 // code: not this phase.
-func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instructions []Instruction) ([]monitorRegion, []ExceptionEntry, error) {
+func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instructions []Instruction) ([]monitorRegion, []finallyRegion, []ExceptionEntry, error) {
 	enters := map[int]bool{}
 	for _, one := range instructions {
 		if one.Mnemonic == "monitorenter" {
@@ -950,6 +994,7 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 		byHandler[handlerPc] = append(byHandler[handlerPc], entry)
 	}
 	var monitors []monitorRegion
+	var finallys []finallyRegion
 	for _, handlerPc := range order {
 		slot, ok := isMonitorHandler(blocks[handlerPc])
 		// The handler guards itself as well, so a throw out of the release runs
@@ -967,12 +1012,25 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 			}
 			ranges++
 		}
-		if !ok || ranges == 0 || !enters[start] {
-			return nil, nil, bail("a finally or synchronized block")
+		if ok && ranges > 0 && enters[start] {
+			monitors = append(monitors, monitorRegion{StartPc: start, EndPc: end, HandlerPc: handlerPc, Slot: slot})
+			continue
 		}
-		monitors = append(monitors, monitorRegion{StartPc: start, EndPc: end, HandlerPc: handlerPc, Slot: slot})
+		// A `finally` javac wrote once per way out: this takes the shape with one
+		// way out, where the range is not split and the copy sits right after it.
+		body, isFinally := finallyBody(blocks[handlerPc])
+		if !isFinally || ranges != 1 || len(body) == 0 {
+			return nil, nil, nil, bail("a finally or synchronized block")
+		}
+		copyBlock := blocks[end]
+		if copyBlock == nil || !isGotoMnemonic(copyBlock.Instructions[len(copyBlock.Instructions)-1].Mnemonic) ||
+			len(copyBlock.Instructions) < len(body) ||
+			!sameInstructions(body, copyBlock.Instructions[:len(body)]) {
+			return nil, nil, nil, bail("a finally with more than one way out")
+		}
+		finallys = append(finallys, finallyRegion{StartPc: start, EndPc: end, HandlerPc: handlerPc, Body: body})
 	}
-	return monitors, rest, nil
+	return monitors, finallys, rest, nil
 }
 
 // tryRegion is one `try` statement: the range it protects, and the clauses
@@ -1686,6 +1744,10 @@ type bodyDecompiler struct {
 	// they hold; instructionAt is every instruction by pc, for the ones a
 	// statement has to look up.
 	monitors []monitorRegion
+	// finallys are the `finally` statements of this method, and activeFinallys
+	// the ones being written right now.
+	finallys       []finallyRegion
+	activeFinallys map[*finallyRegion]bool
 	// monitorSlots are the slots held by the `synchronized` statements being
 	// written right now. javac frees the monitor's local when the statement ends
 	// and reuses the slot for the next variable, so this may not outlive the body
@@ -2631,11 +2693,36 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 	for _, one := range instructions {
 		d.instructionAt[one.Pc] = one
 	}
-	monitors, rest, err := monitorRegions(exceptions, blocks, instructions)
+	// A `finally` writes its body twice, and the copy begins where the protected
+	// range ends - in the middle of a block. Only that shape wants the split: a
+	// monitor's range ends inside the expression it releases.
+	var splits []int
+	for _, entry := range exceptions {
+		if entry.CatchType != "" || int(entry.StartPc) == int(entry.HandlerPc) {
+			continue
+		}
+		if _, isMonitor := isMonitorHandler(blocks[int(entry.HandlerPc)]); isMonitor {
+			continue
+		}
+		if _, isFinally := finallyBody(blocks[int(entry.HandlerPc)]); isFinally {
+			splits = append(splits, int(entry.EndPc))
+		}
+	}
+	if len(splits) > 0 {
+		rebuilt, err := buildBlocks(instructions, exceptions, splits...)
+		if err != nil {
+			return err
+		}
+		blocks = rebuilt
+		d.blocks = blocks
+	}
+	monitors, finallys, rest, err := monitorRegions(exceptions, blocks, instructions)
 	if err != nil {
 		return err
 	}
 	d.monitors = monitors
+	d.finallys = finallys
+	d.activeFinallys = map[*finallyRegion]bool{}
 	regions, err := tryRegions(rest, blocks, d.self())
 	if err != nil {
 		return err
@@ -2717,6 +2804,12 @@ func (d *bodyDecompiler) structureFrom(entry, stop int, opening bool) error {
 		if jumped {
 			d.emit(jump)
 			return nil
+		}
+		if next, handled, err := d.finallyAt(at); err != nil {
+			return err
+		} else if handled {
+			at = next
+			continue
 		}
 		if region := d.regionAt(at); region != nil {
 			next, err := d.tryStatement(region)
@@ -2862,6 +2955,64 @@ func (d *bodyDecompiler) synchronizedStatement(b *block, kept []Instruction) (in
 	*d.current = append(*d.current, stmt{Nested: &statements})
 	d.emit("}")
 	return follow, nil
+}
+
+// finallyAt writes the `try`/`finally` that begins at at, if one does.
+func (d *bodyDecompiler) finallyAt(at int) (int, bool, error) {
+	for i := range d.finallys {
+		guarded := &d.finallys[i]
+		if guarded.StartPc != at || d.visited[at] || d.activeFinallys[guarded] {
+			continue
+		}
+		next, err := d.finallyStatement(guarded)
+		return next, true, err
+	}
+	return 0, false, nil
+}
+
+// finallyStatement writes one `try`/`finally`. javac writes the body of the
+// `finally` twice - once on the way out of the protected range, once in the
+// catch-all that rethrows - and only the second one is written back; the copy on
+// the way out is dropped, because source wrote it once.
+func (d *bodyDecompiler) finallyStatement(region *finallyRegion) (int, error) {
+	if len(d.stack) > 0 {
+		return 0, bail("values left on the stack")
+	}
+	copyBlock := d.blocks[region.EndPc]
+	jump := copyBlock.Instructions[len(copyBlock.Instructions)-1]
+	follow := jump.Arg
+	if d.blocks[follow] == nil {
+		return 0, bail("a finally that leaves the method")
+	}
+	// The copy on the way out is not a statement: what is left of that block is
+	// the jump over the handler.
+	d.skip[copyBlock.Start] = len(region.Body)
+	d.visited[region.HandlerPc] = true
+	d.activeFinallys[region] = true
+	body, err := d.capture(func() error { return d.structure(region.StartPc, copyBlock.Start) })
+	delete(d.activeFinallys, region)
+	if err != nil {
+		return 0, err
+	}
+	if len(d.stack) > 0 {
+		return 0, bail("values left on the stack")
+	}
+	handler := d.blocks[region.HandlerPc]
+	cleanup, err := d.capture(func() error {
+		return d.runInstructions(region.Body, endOf(handler), region.HandlerPc)
+	})
+	if err != nil {
+		return 0, err
+	}
+	if len(d.stack) > 0 {
+		return 0, bail("values left on the stack")
+	}
+	d.emit("try {")
+	*d.current = append(*d.current, stmt{Nested: &body})
+	d.emit("} finally {")
+	*d.current = append(*d.current, stmt{Nested: &cleanup})
+	d.emit("}")
+	return copyBlock.Start, nil
 }
 
 // regionAt is the `try` statement that begins at at, if one does. The outermost
