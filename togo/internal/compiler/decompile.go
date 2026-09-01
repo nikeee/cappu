@@ -100,6 +100,10 @@ type expr struct {
 	// number has to get the ternary again (`array[c ? 1 : 0]`).
 	AsInt    string
 	Compared *comparedPair
+	// Lambda is set on a lambda: it has no type of its own, so it needs the
+	// interface named wherever the context does not say it (a return type the
+	// interface erased to `Object`, for one).
+	Lambda bool
 	// Effects marks a value that does something when it runs - a call. Dropping
 	// it has to keep it as a statement, and nothing may write it twice.
 	Effects bool
@@ -1621,7 +1625,14 @@ type bodyDecompiler struct {
 	monitors      []monitorRegion
 	monitorSlots  map[int]bool
 	instructionAt map[int]Instruction
-	visited       map[int]bool
+	// captured are the locals a lambda captured. Java takes only effectively
+	// final ones, and a variable this hoisted to the top of the method may be
+	// written more than once - which is only known when the whole body is out.
+	captured []*local
+	// inlining are the lambda bodies being inlined right now, so one cannot
+	// inline itself.
+	inlining map[string]bool
+	visited  map[int]bool
 	// pendingCount hands out the ids that tell the copies of one `new` apart.
 	pendingCount int
 	// initCount does the same for the copies of one array literal.
@@ -1646,6 +1657,11 @@ func (d *bodyDecompiler) self() string { return selfOf(d.classFile) }
 // belongs, *is* one - the store opcode is the same for all of them - so its
 // declaration and every assignment to it are rewritten to that type.
 func (d *bodyDecompiler) coerceInto(value expr, target string) string {
+	// A lambda takes its type from where it is written; when that is not the
+	// interface itself, source had to say which one it is.
+	if value.Lambda && target != value.Type {
+		return "(" + value.Type + ") " + value.Text
+	}
 	if entry, ok := d.byName[value.Text]; ok && !entry.Authoritative &&
 		entry.Type == "int" && erasedToInt[target] {
 		d.retype(entry, target)
@@ -1956,7 +1972,9 @@ func (d *bodyDecompiler) coercedExpr(value expr, target string) expr {
 // the recipe (its first bootstrap argument) is the result text with \u0001 where
 // a stack argument goes and \u0002 where one of the remaining bootstrap
 // constants does. makeConcat is the same call with no literal parts at all.
-func (d *bodyDecompiler) concat(index uint16) error {
+// dynamic writes one invokedynamic. javac writes two of them: a string
+// concatenation, and the lambda or method reference LambdaMetafactory builds.
+func (d *bodyDecompiler) dynamic(index uint16) error {
 	pool := d.classFile.Pool
 	entry := PoolAt(pool, index)
 	if entry == nil || entry.Tag != TagInvokeDynamic {
@@ -1973,11 +1991,255 @@ func (d *bodyDecompiler) concat(index uint16) error {
 			factory, haveFactory = PoolMemberRef(pool, handle.RefIndex)
 		}
 	}
-	// Every other bootstrap - a lambda, a method reference, a record's generated
-	// members, a pattern switch - is a later phase.
-	if !haveSite || !haveBootstrap || !haveFactory ||
-		factory.Owner != "java/lang/invoke/StringConcatFactory" ||
-		(factory.Name != "makeConcatWithConstants" && factory.Name != "makeConcat") ||
+	if !haveSite || !haveBootstrap || !haveFactory {
+		return bail("bad invokedynamic reference")
+	}
+	if factory.Owner == "java/lang/invoke/StringConcatFactory" {
+		return d.concat(siteDescriptor, bootstrap, factory)
+	}
+	// `altMetafactory` carries flags of its own - a serializable lambda, extra
+	// interfaces, extra bridges - and dropping them would change what the class
+	// implements.
+	if factory.Owner == "java/lang/invoke/LambdaMetafactory" && factory.Name == "metafactory" {
+		return d.lambda(siteDescriptor, bootstrap)
+	}
+	return bail("an invokedynamic that is neither a lambda nor a concatenation")
+}
+
+// lambda writes a lambda or a method reference: `LambdaMetafactory.metafactory`
+// is handed the interface method's type, the method javac compiled the body
+// into, and the type it is instantiated at; the call site takes the captured
+// values and returns the interface. A body javac generated is inlined, which is
+// the lambda source wrote; a method reference points at a method that was
+// already there.
+func (d *bodyDecompiler) lambda(siteDescriptor string, bootstrap BootstrapMethod) error {
+	pool := d.classFile.Pool
+	if len(bootstrap.ArgumentIndexes) < 3 {
+		return bail("a lambda without an implementation")
+	}
+	samType := PoolAt(pool, bootstrap.ArgumentIndexes[0])
+	handle := PoolAt(pool, bootstrap.ArgumentIndexes[1])
+	instantiated := PoolAt(pool, bootstrap.ArgumentIndexes[2])
+	if samType == nil || samType.Tag != TagMethodType || handle == nil ||
+		handle.Tag != TagMethodHandle || instantiated == nil || instantiated.Tag != TagMethodType {
+		return bail("a lambda without an implementation")
+	}
+	sam := PoolUtf8(pool, samType.Index)
+	exact := PoolUtf8(pool, instantiated.Index)
+	target, okTarget := PoolMemberRef(pool, handle.RefIndex)
+	if sam == "" || exact == "" || !okTarget {
+		return bail("a lambda without an implementation")
+	}
+	// The captured values are the call site's arguments; the interface method's
+	// own parameters are what the lambda has to name.
+	captureTypes := parameterSlots(siteDescriptor, true)
+	captures := make([]string, len(captureTypes))
+	for i := len(captureTypes) - 1; i >= 0; i-- {
+		value, err := d.pop()
+		if err != nil {
+			return err
+		}
+		captures[i] = d.coerceInto(value, captureTypes[i].Type)
+		if entry, ok := d.byName[captures[i]]; ok {
+			d.captured = append(d.captured, entry)
+		}
+	}
+	// A parameter the interface passes as its erased type is cast at the use,
+	// which is what the body javac generated does.
+	erased := parameterSlots(sam, true)
+	wanted := parameterSlots(exact, true)
+	if len(erased) != len(wanted) {
+		return bail("a lambda that binds differently")
+	}
+	parameters := make([]string, len(erased))
+	passed := append([]string{}, captures...)
+	for i := range erased {
+		parameters[i] = d.freshName("p")
+		if erased[i].Type == wanted[i].Type {
+			passed = append(passed, parameters[i])
+		} else {
+			passed = append(passed, "("+wanted[i].Type+") "+parameters[i])
+		}
+	}
+	sourceType := methodReturnType(siteDescriptor)
+	// A body javac generated is the lambda source wrote: inlining it is what
+	// brings that source back, and javac generates the same method from it.
+	if target.Owner == d.classFile.ThisClass {
+		for _, method := range d.classFile.Methods {
+			if method.Name != target.Name || method.Descriptor != target.Descriptor ||
+				method.Flags&accSynthetic == 0 {
+				continue
+			}
+			text, err := d.inlineLambda(method, captures, passed, methodReturnType(sam))
+			if err != nil {
+				return err
+			}
+			d.push(expr{
+				Text:   "(" + strings.Join(parameters, ", ") + ") -> " + text,
+				Prec:   0,
+				Type:   sourceType,
+				Lambda: true,
+			})
+			return nil
+		}
+	}
+	implParams := len(parameterSlots(target.Descriptor, true))
+	var call string
+	switch handle.RefKind {
+	case 6: // REF_invokeStatic
+		if len(passed) != implParams {
+			return bail("a lambda that binds differently")
+		}
+		call = d.staticCallee(target.Owner, target.Name) + "(" + strings.Join(passed, ", ") + ")"
+	case 8: // REF_newInvokeSpecial
+		if len(passed) != implParams {
+			return bail("a lambda that binds differently")
+		}
+		call = "new " + typeName(target.Owner, d.self()) + "(" + strings.Join(passed, ", ") + ")"
+	case 5, 7, 9:
+		// The receiver is the captured value, or - for an unbound reference like
+		// `String::length` - the first parameter.
+		if len(passed) != implParams+1 {
+			return bail("a lambda that binds differently")
+		}
+		receiver := passed[0]
+		if strings.HasPrefix(receiver, "(") {
+			receiver = "(" + receiver + ")"
+		}
+		call = receiver + "." + target.Name + "(" + strings.Join(passed[1:], ", ") + ")"
+	default:
+		return bail("a lambda that is not a call")
+	}
+	// With nothing captured and nothing to cast, source's own form is a method
+	// reference - and that is what javac compiles back to this same call site.
+	reference := len(captures) == 0
+	for i := range parameters {
+		if passed[i] != parameters[i] {
+			reference = false
+		}
+	}
+	if reference {
+		named := typeName(target.Owner, d.self()) + "::" + target.Name
+		if handle.RefKind == 8 {
+			named = typeName(target.Owner, d.self()) + "::new"
+		}
+		d.push(primary(named, sourceType))
+		return nil
+	}
+	d.push(expr{
+		Text:   "(" + strings.Join(parameters, ", ") + ") -> " + call,
+		Prec:   0,
+		Type:   sourceType,
+		Lambda: true,
+	})
+	return nil
+}
+
+// inlineLambda is the body of a lambda, as the expression or block source wrote:
+// the method javac generated is decompiled with its parameters bound to what the
+// call site captured and to the lambda's own parameters.
+func (d *bodyDecompiler) inlineLambda(body Member, captures, passed []string, yields string) (string, error) {
+	key := body.Name + body.Descriptor
+	if d.inlining[key] {
+		return "", bail("a lambda that inlines itself")
+	}
+	isStatic := body.Flags&accStatic != 0
+	code, err := ReadCode(body, d.classFile.Pool)
+	if err != nil || code == nil {
+		return "", bail("a lambda without a body")
+	}
+	// A cast binds looser than a member access, so a bound value that is not a
+	// plain name is parenthesized where the body reads it.
+	bound := make([]string, 0, len(passed))
+	for _, text := range passed {
+		if plainName.MatchString(text) {
+			bound = append(bound, text)
+		} else {
+			bound = append(bound, "("+text+")")
+		}
+	}
+	if !isStatic {
+		// An instance body reads the enclosing object as `this`, which is what
+		// the call site captured first.
+		if len(captures) == 0 || captures[0] != "this" {
+			return "", bail("a lambda on another object")
+		}
+		bound = bound[1:]
+	}
+	instructions, err := DecodeInstructions(d.classFile, code.Code)
+	if err != nil {
+		return "", bail("a lambda without a body")
+	}
+	localTable := readLocalVariables(code, d.classFile.Pool)
+	locals := buildLocals(body, localTable, isStatic, d.self())
+	slots := parameterSlots(body.Descriptor, isStatic)
+	if len(slots) != len(bound) {
+		return "", bail("a lambda that binds differently")
+	}
+	for i, slot := range slots {
+		if entry, ok := locals[slot.Slot]; ok {
+			entry.Name = bound[i]
+		}
+	}
+	nested := &bodyDecompiler{
+		classFile:   d.classFile,
+		locals:      locals,
+		localTable:  localTable,
+		returnType:  yields,
+		isStatic:    isStatic,
+		names:       d.names,
+		byName:      map[string]*local{},
+		visited:     map[int]bool{},
+		activeTries: map[*tryRegion]bool{},
+		skip:        map[int]int{},
+		innerFlags:  d.innerFlags,
+		bootstraps:  d.bootstraps,
+		inlining:    d.inlining,
+	}
+	nested.current = &nested.statements
+	for _, parameter := range locals {
+		nested.names[parameter.Name] = true
+		nested.byName[parameter.Name] = parameter
+	}
+	d.inlining[key] = true
+	err = nested.run(instructions, code.Exceptions)
+	delete(d.inlining, key)
+	if err != nil {
+		return "", err
+	}
+	// A body that assigns to one of its parameters would be assigning to what
+	// the call site handed it, which source cannot write.
+	for _, slot := range slots {
+		if entry, ok := locals[slot.Slot]; ok && len(entry.Writes) > 0 {
+			return "", bail("a lambda that assigns to its parameter")
+		}
+	}
+	lines := append(flattenStatements(nested.hoisted), flattenStatements(nested.statements)...)
+	if len(lines) > 0 && lines[len(lines)-1] == "return;" {
+		lines = lines[:len(lines)-1]
+	}
+	// One expression is the form source wrote; anything else needs the block.
+	if len(lines) == 1 {
+		only := lines[0]
+		if strings.HasPrefix(only, "return ") && strings.HasSuffix(only, ";") {
+			return strings.TrimSuffix(strings.TrimPrefix(only, "return "), ";"), nil
+		}
+		if expressionStatement.MatchString(only) && strings.HasSuffix(only, ";") &&
+			!strings.Contains(only, "{") {
+			return strings.TrimSuffix(only, ";"), nil
+		}
+	}
+	return "{ " + strings.Join(lines, " ") + " }", nil
+}
+
+var (
+	plainName           = regexp.MustCompile(`^[\w$.]+$`)
+	expressionStatement = regexp.MustCompile(`^[\w$(]`)
+)
+
+func (d *bodyDecompiler) concat(siteDescriptor string, bootstrap BootstrapMethod, factory MemberRef) error {
+	pool := d.classFile.Pool
+	if (factory.Name != "makeConcatWithConstants" && factory.Name != "makeConcat") ||
 		methodReturnType(siteDescriptor) != "java.lang.String" {
 		return bail("an invokedynamic that is not a string concatenation")
 	}
@@ -2301,6 +2563,17 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 	}
 	if len(d.stack) > 0 {
 		return bail("values left on the stack")
+	}
+	// Only now is it known how often a captured variable is written: Java takes
+	// an effectively final one, and hoisting can leave a loop variable assigned
+	// once per turn. A parameter is written nowhere; anything else has to carry
+	// its one value at the declaration.
+	for _, entry := range d.captured {
+		settled := len(entry.Writes) == 0 ||
+			(len(entry.Writes) == 1 && entry.Declaration != nil && entry.Declaration.Inline)
+		if !settled {
+			return bail("a lambda that captures a variable that is not final")
+		}
 	}
 	// A block that was never entered would silently drop its statements, and one
 	// entered twice would duplicate them: either means the layout is not the nest
@@ -4105,7 +4378,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 	}
 
 	if mnemonic == "invokedynamic" {
-		return d.concat(uint16(instruction.Arg))
+		return d.dynamic(uint16(instruction.Arg))
 	}
 
 	// Stack shuffling. A dup of anything but a name or an array being filled in
@@ -4575,6 +4848,7 @@ func decompileBody(
 		skip:        map[int]int{},
 		innerFlags:  InnerClassFlags(classFile),
 		bootstraps:  ReadBootstrapMethods(classFile),
+		inlining:    map[string]bool{},
 	}
 	d.current = &d.statements
 	for _, parameter := range locals {

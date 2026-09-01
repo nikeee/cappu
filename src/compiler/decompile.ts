@@ -106,6 +106,12 @@ interface Expr {
   readonly type: string;
   readonly logic?: Logic;
   /**
+   * Set on a lambda: it has no type of its own, so it needs the interface named
+   * wherever the context does not say it (a return type the interface erased to
+   * `Object`, for one).
+   */
+  readonly lambda?: boolean;
+  /**
    * The int form of a value javac materialized as `1`/`0`: written back as the
    * condition itself, which is a boolean, so a use that wants an int has to get
    * the ternary again (`array[c ? 1 : 0]`).
@@ -1289,7 +1295,9 @@ function isPureBlock(block: Block): boolean {
 class BodyDecompiler {
   private readonly stack: Expr[] = [];
   /** Every local name handed out so far, so a reused slot cannot shadow one. */
-  private readonly names = new Set<string>();
+  private names = new Set<string>();
+  /** The lambda bodies being inlined right now, so one cannot inline itself. */
+  private inlining = new Set<string>();
   private readonly byName = new Map<string, Local>();
   readonly statements: Stmt[] = [];
   /**
@@ -1311,6 +1319,12 @@ class BodyDecompiler {
   private followOf = new Map<number, number>();
   private loops = new Map<number, Loop>();
   private regions: TryRegion[] = [];
+  /**
+   * The locals a lambda captured. Java takes only effectively final ones, and a
+   * variable this hoisted to the top of the method may be written more than
+   * once - which is only known when the whole body is out.
+   */
+  private readonly captured: Local[] = [];
   /** The `synchronized` statements of this method, and the slots they hold. */
   private monitors: MonitorRegion[] = [];
   private monitorSlots = new Set<number>();
@@ -1357,7 +1371,17 @@ class BodyDecompiler {
     private readonly localTable: LocalEntry[],
     private readonly methodReturnType: string,
     private readonly isStatic: boolean,
+    /**
+     * The names the *enclosing* method has handed out, when this body is a
+     * lambda being inlined into one: Java lets neither shadow the other, so the
+     * two share the set.
+     */
+    shared?: { names: Set<string>; inlining: Set<string> },
   ) {
+    if (shared !== undefined) {
+      this.names = shared.names;
+      this.inlining = shared.inlining;
+    }
     this.innerFlags = innerClassFlags(classFile);
     this.bootstraps = readBootstrapMethods(classFile);
     for (const local of locals.values()) {
@@ -1373,6 +1397,9 @@ class BodyDecompiler {
    * declaration and every assignment to it are rewritten to that type.
    */
   private coerceInto(value: Expr, target: string): string {
+    // A lambda takes its type from where it is written; when that is not the
+    // interface itself, source had to say which one it is.
+    if (value.lambda === true && target !== value.type) return `(${value.type}) ${value.text}`;
     const local = this.byName.get(value.text);
     if (
       local !== undefined &&
@@ -1622,13 +1649,10 @@ class BodyDecompiler {
   }
 
   /**
-   * A string concatenation, which javac compiles to an invokedynamic whose
-   * bootstrap is `StringConcatFactory.makeConcatWithConstants`: the recipe (its
-   * first bootstrap argument) is the result text with `\u0001` where a stack
-   * argument goes and `\u0002` where one of the remaining bootstrap constants
-   * does. `makeConcat` is the same call with no literal parts at all.
+   * One invokedynamic. javac writes two of them: a string concatenation, and the
+   * lambda or method reference `LambdaMetafactory` builds.
    */
-  private concat(index: number): void {
+  private dynamic(index: number): void {
     const pool = this.classFile.pool;
     const entry = pool[index];
     if (entry?.tag !== "invokeDynamic") throw new NotDecompilable("bad invokedynamic reference");
@@ -1637,12 +1661,215 @@ class BodyDecompiler {
     const handle = bootstrap === undefined ? undefined : pool[bootstrap.handleIndex];
     const factory =
       handle?.tag === "methodHandle" ? memberRef(pool, handle.referenceIndex) : undefined;
-    // Every other bootstrap - a lambda, a method reference, a record's
-    // generated members, a pattern switch - is a later phase.
+    if (site === undefined || bootstrap === undefined || factory === undefined) {
+      throw new NotDecompilable("bad invokedynamic reference");
+    }
+    if (factory.owner === "java/lang/invoke/StringConcatFactory") {
+      return this.concat(site, bootstrap, factory);
+    }
+    // `altMetafactory` carries flags of its own - a serializable lambda, extra
+    // interfaces, extra bridges - and dropping them would change what the class
+    // implements.
+    if (factory.owner === "java/lang/invoke/LambdaMetafactory" && factory.name === "metafactory") {
+      return this.lambda(site, bootstrap);
+    }
+    throw new NotDecompilable("an invokedynamic that is neither a lambda nor a concatenation");
+  }
+
+  /**
+   * A lambda or a method reference: `LambdaMetafactory.metafactory` is handed
+   * the interface method's type, the method javac compiled the body into, and
+   * the type it is instantiated at; the call site takes the captured values and
+   * returns the interface. It comes back as a lambda that calls that method,
+   * which is what the bytecode says - a `x -> ...` body would have to inline it.
+   */
+  private lambda(site: { name: string; descriptor: string }, bootstrap: BootstrapMethod): void {
+    const pool = this.classFile.pool;
+    const samType = pool[bootstrap.argumentIndexes[0] ?? -1];
+    const handle = pool[bootstrap.argumentIndexes[1] ?? -1];
+    if (samType?.tag !== "methodType" || handle?.tag !== "methodHandle") {
+      throw new NotDecompilable("a lambda without an implementation");
+    }
+    const sam = utf8(pool, samType.descriptorIndex);
+    const target = memberRef(pool, handle.referenceIndex);
+    // The interface method's type is erased; what the lambda is instantiated at
+    // is the third bootstrap argument, and it says what each parameter really is.
+    const instantiated = pool[bootstrap.argumentIndexes[2] ?? -1];
+    const exact =
+      instantiated?.tag === "methodType" ? utf8(pool, instantiated.descriptorIndex) : undefined;
+    if (sam === undefined || target === undefined || exact === undefined) {
+      throw new NotDecompilable("a lambda without an implementation");
+    }
+    // The captured values are the call site's arguments; the interface method's
+    // own parameters are what the lambda has to name.
+    const captureTypes = parameterSlots(site.descriptor, true).map(one => one.type);
+    const captures: string[] = [];
+    for (let i = captureTypes.length - 1; i >= 0; i--) {
+      const value = this.coerceInto(this.pop(), captureTypes[i]!);
+      const local = this.byName.get(value);
+      if (local !== undefined) this.captured.push(local);
+      captures.unshift(value);
+    }
+    // A parameter the interface passes as its erased type is cast at the use,
+    // which is what the body javac generated does.
+    const erased = parameterSlots(sam, true).map(one => one.type);
+    const wantedTypes = parameterSlots(exact, true).map(one => one.type);
+    if (erased.length !== wantedTypes.length) {
+      throw new NotDecompilable("a lambda that binds differently");
+    }
+    const parameters = erased.map(() => this.freshName("p"));
+    const passed = [
+      ...captures,
+      ...parameters.map((name, index) =>
+        erased[index] === wantedTypes[index] ? name : `(${wantedTypes[index]}) ${name}`,
+      ),
+    ];
+    const wanted = parameterSlots(target.descriptor, true).length;
+    let call: string;
+    switch (handle.referenceKind) {
+      case 6: // REF_invokeStatic
+        if (passed.length !== wanted) throw new NotDecompilable("a lambda that binds differently");
+        call = `${this.staticCallee(target.owner, target.name)}(${passed.join(", ")})`;
+        break;
+      case 8: // REF_newInvokeSpecial
+        if (passed.length !== wanted) throw new NotDecompilable("a lambda that binds differently");
+        call = `new ${typeName(target.owner, this.self)}(${passed.join(", ")})`;
+        break;
+      case 5: // REF_invokeVirtual
+      case 7: // REF_invokeSpecial
+      case 9: {
+        // REF_invokeInterface: the receiver is the captured value, or - for an
+        // unbound reference like `String::length` - the first parameter.
+        const receiver = passed[0];
+        if (receiver === undefined || passed.length !== wanted + 1) {
+          throw new NotDecompilable("a lambda that binds differently");
+        }
+        // A cast receiver needs the parentheses source would have written.
+        const target0 = receiver.startsWith("(") ? `(${receiver})` : receiver;
+        call = `${target0}.${target.name}(${passed.slice(1).join(", ")})`;
+        break;
+      }
+      default:
+        throw new NotDecompilable("a lambda that is not a call");
+    }
+    const type = returnType(site.descriptor);
+    // A body javac generated is the lambda source wrote: inlining it is what
+    // brings that source back, and javac generates the same method from it.
+    const body =
+      target.owner === this.classFile.thisClass
+        ? this.classFile.methods.find(
+            one =>
+              one.name === target.name &&
+              one.descriptor === target.descriptor &&
+              (one.flags & ACC_SYNTHETIC) !== 0,
+          )
+        : undefined;
+    if (body !== undefined) {
+      const text = this.inlineLambda(body, captures, parameters, passed, returnType(sam));
+      return this.push({
+        text: `(${parameters.join(", ")}) -> ${text}`,
+        prec: 0,
+        type,
+        lambda: true,
+      });
+    }
+    // With nothing captured and nothing to cast, source's own form is a method
+    // reference - and that is what javac compiles back to this same call site.
+    const reference =
+      captures.length === 0 && parameters.every((name, index) => passed[index] === name);
+    if (reference) {
+      const named =
+        handle.referenceKind === 8
+          ? `${typeName(target.owner, this.self)}::new`
+          : `${typeName(target.owner, this.self)}::${target.name}`;
+      return this.push({ text: named, prec: PREC_PRIMARY, type });
+    }
+    this.push({ text: `(${parameters.join(", ")}) -> ${call}`, prec: 0, type, lambda: true });
+  }
+
+  /**
+   * The body of a lambda, as the expression or block source wrote: the method
+   * javac generated is decompiled with its parameters bound to what the call
+   * site captured and to the lambda's own parameters.
+   */
+  private inlineLambda(
+    body: Member,
+    captures: readonly string[],
+    parameters: readonly string[],
+    passed: readonly string[],
+    /** What the interface method returns, which is what the body has to yield. */
+    yields: string,
+  ): string {
+    const key = `${body.name}${body.descriptor}`;
+    if (this.inlining.has(key)) throw new NotDecompilable("a lambda that inlines itself");
+    const isStatic = (body.flags & ACC_STATIC) !== 0;
+    const code = readCode(body, this.classFile.pool);
+    if (!code) throw new NotDecompilable("a lambda without a body");
+    // What the body's parameters stand for: the captured values, then the
+    // interface method's own parameters, cast where the interface erased them.
+    // A cast binds looser than a member access, so a bound value that is not a
+    // plain name is parenthesized where the body reads it.
+    const bound = passed.map(text => (/^[\w$.]+$/.test(text) ? text : `(${text})`));
+    if (!isStatic) {
+      // An instance body reads the enclosing object as `this`, which is what the
+      // call site captured first.
+      if (captures[0] !== "this") throw new NotDecompilable("a lambda on another object");
+      bound.shift();
+    }
+    const localTable = readLocalVariables(code, this.classFile.pool);
+    const locals = buildLocals(body, localTable, isStatic, this.self);
+    const slots = parameterSlots(body.descriptor, isStatic);
+    if (slots.length !== bound.length) throw new NotDecompilable("a lambda that binds differently");
+    slots.forEach(({ slot }, index) => {
+      const local = locals.get(slot);
+      if (local !== undefined) local.name = bound[index]!;
+    });
+    const nested = new BodyDecompiler(
+      this.classFile,
+      locals,
+      localTable,
+      yields,
+      isStatic,
+      { names: this.names, inlining: this.inlining },
+    );
+    this.inlining.add(key);
+    try {
+      nested.run(decodeInstructions(this.classFile, code.code), code.exceptions);
+    } finally {
+      this.inlining.delete(key);
+    }
+    // A body that assigns to one of its parameters would be assigning to what
+    // the call site handed it, which source cannot write.
+    for (const { slot } of slots) {
+      if ((locals.get(slot)?.writes.length ?? 0) > 0) {
+        throw new NotDecompilable("a lambda that assigns to its parameter");
+      }
+    }
+    const lines = [...nested.hoisted, ...flattenStatements(nested.statements)];
+    if (lines[lines.length - 1] === "return;") lines.pop();
+    const only = lines.length === 1 ? lines[0]! : undefined;
+    // One expression is the form source wrote; anything else needs the block.
+    if (only?.startsWith("return ") === true && only.endsWith(";")) {
+      return only.slice("return ".length, -1);
+    }
+    if (only !== undefined && /^[\w$(]/.test(only) && only.endsWith(";") && !only.includes("{")) {
+      return only.slice(0, -1);
+    }
+    return `{ ${lines.join(" ")} }`;
+  }
+
+  /**
+   * A string concatenation, which javac compiles to an invokedynamic whose
+   * bootstrap is `StringConcatFactory.makeConcatWithConstants`: the recipe (its
+   * first bootstrap argument) is the result text with `\u0001` where a stack
+   * argument goes and `\u0002` where one of the remaining bootstrap constants
+   * does. `makeConcat` is the same call with no literal parts at all.
+   */
+  private concat(site: { name: string; descriptor: string },
+    bootstrap: BootstrapMethod,
+    factory: { owner: string; name: string },): void {
+    const pool = this.classFile.pool;
     if (
-      site === undefined ||
-      bootstrap === undefined ||
-      factory?.owner !== "java/lang/invoke/StringConcatFactory" ||
       (factory.name !== "makeConcatWithConstants" && factory.name !== "makeConcat") ||
       returnType(site.descriptor) !== "java.lang.String"
     ) {
@@ -1854,6 +2081,20 @@ class BodyDecompiler {
     this.currentBlock = entry;
     this.structure(entry, EXIT);
     if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
+    // Only now is it known how often a captured variable is written: Java takes
+    // an effectively final one, and hoisting can leave a loop variable assigned
+    // once per turn.
+    for (const local of this.captured) {
+      // A parameter is written nowhere; anything else has to carry its one value
+      // at the declaration. A hoisted one does not - and a loop writes it once
+      // per turn, which is not effectively final however few writes there are.
+      const settled =
+        local.writes.length === 0 ||
+        (local.writes.length === 1 && local.declaration?.inline === true);
+      if (!settled) {
+        throw new NotDecompilable("a lambda that captures a variable that is not final");
+      }
+    }
     // A block that was never entered would silently drop its statements, and one
     // entered twice would duplicate them: either means the layout is not the
     // nest of `if`s this phase reconstructs.
@@ -3101,7 +3342,7 @@ class BodyDecompiler {
       return this.push({ text, prec: PREC_PRIMARY, type, effects: true });
     }
 
-    if (mnemonic === "invokedynamic") return this.concat(instruction.arg);
+    if (mnemonic === "invokedynamic") return this.dynamic(instruction.arg);
 
     // Stack shuffling. A dup of anything but a name or an array being filled in
     // would duplicate the expression itself (`new int[2][0] = 1;`), so only
