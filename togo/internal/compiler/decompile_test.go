@@ -1218,6 +1218,108 @@ const switchySource = `public class Switchy {
   static String str(String s) { switch (s) { case "a": return "A"; case "b": return "B"; default: return "?"; } }
 }`
 
+// javac compiles a lambda into a synthetic method plus an invokedynamic that
+// `LambdaMetafactory` turns into the interface; a method reference points the
+// same call site straight at the method. The body comes back inlined, so javac
+// generates the same method from it again.
+const lammySource = `import java.util.*;
+import java.util.function.*;
+public class Lammy {
+  int base = 5;
+  static int stat = 7;
+  Runnable noCapture() { return () -> System.out.print("x"); }
+  Runnable capture(int n) { return () -> System.out.print(n); }
+  Supplier<Integer> field() { return () -> base; }
+  IntUnaryOperator math(int k) { return x -> x * k + base; }
+  Function<String, Integer> unboundRef() { return String::length; }
+  Supplier<String> boundRef(String s) { return s::trim; }
+  Supplier<Object> ctorRef() { return Object::new; }
+  static Runnable staticRef() { return Lammy::helper; }
+  static void helper() {}
+  BiFunction<Integer, Integer, Integer> two(int k) { return (a, b) -> a + b + k; }
+  int localCapture(int n) { int k = n * 2; Supplier<Integer> s = () -> k + base; return s.get(); }
+  Supplier<Integer> block(int n) { return () -> { int t = n; t = t * 3; return t + base; }; }
+  Function<Integer, Supplier<Integer>> nested(int n) { return a -> () -> a + n; }
+  int stream(List<String> xs) { return xs.stream().map(String::length).reduce(0, Integer::sum); }
+  Comparator<String> comparator() { return (a, b) -> a.length() - b.length(); }
+  Runnable staticField() { return () -> stat++; }
+}`
+
+const lammyDriverSource = `import java.util.*;
+public class LammyDriver {
+  public static void main(String[] args) {
+    List<String> xs = Arrays.asList("a", "bb", "", "cccc");
+    for (int n = 0; n < 4; n++) {
+      Lammy l = new Lammy();
+      l.noCapture().run();
+      l.capture(n).run();
+      l.staticRef().run();
+      l.staticField().run();
+      System.out.println(" " + l.field().get() + " " + l.math(n).applyAsInt(3)
+        + " " + l.unboundRef().apply("abcd") + " " + l.boundRef(" q ").get()
+        + " " + l.ctorRef().get().getClass() + " " + l.two(n).apply(1, 2)
+        + " " + l.localCapture(n) + " " + l.block(n).get()
+        + " " + l.nested(n).apply(3).get() + " " + l.stream(xs)
+        + " " + l.comparator().compare("aa", "b"));
+    }
+  }
+}`
+
+func TestDecompileReconstructsJavacLambdas(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Lammy", lammySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	// A reference where source wrote one, a lambda where the body is inlined,
+	// and nothing left of the synthetic method javac generated.
+	if !strings.Contains(source, "java.lang.Object::new") || !strings.Contains(source, "Lammy::helper") ||
+		!strings.Contains(source, "() -> java.lang.System.out.print(arg0)") ||
+		strings.Contains(source, "lambda$") {
+		t.Fatalf("the lambdas did not come back:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Lammy", source)
+	compileWithJavacOn(t, dir, "LammyDriver", lammyDriverSource, dir)
+	expected := runJava(t, dir, "LammyDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "LammyDriver")
+	if actual != expected {
+		t.Errorf("the decompiled class runs differently:\n%s\n--- from ---\n%s", actual, expected)
+	}
+	if expected == "" {
+		t.Fatal("the driver printed nothing")
+	}
+}
+
+// A lambda that captures a variable this hoisted to the top of the method is not
+// effectively final, and Java takes no other kind.
+const hoistedCaptureSource = `import java.util.function.*;
+public class Hoisted {
+  static int f(int n) { int t = 0; for (int i = 0; i < n; i++) { int j = i; Supplier<Integer> s = () -> j * 2; t += s.get(); } return t; }
+}`
+
+func TestDecompileSaysWhenALambdaCaptureCannotBeFinal(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Hoisted", hoistedCaptureSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: a lambda that captures a variable that is not final") {
+		t.Errorf("expected the bail, got:\n%s", source)
+	}
+}
+
 // javac writes `synchronized` as a monitor held in a synthetic local, guarded by
 // a catch-all that releases it and rethrows - and splits the range around every
 // `return`, `break` and `continue` that leaves the statement.

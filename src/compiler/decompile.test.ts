@@ -934,6 +934,104 @@ test(
   },
 );
 
+// javac compiles a lambda into a synthetic method plus an invokedynamic that
+// `LambdaMetafactory` turns into the interface; a method reference points the
+// same call site straight at the method. The body comes back inlined, so javac
+// generates the same method from it again.
+const LAMMY_SOURCE =
+  "import java.util.*;\n" +
+  "import java.util.function.*;\n" +
+  "public class Lammy {\n" +
+  "  int base = 5;\n" +
+  "  static int stat = 7;\n" +
+  '  Runnable noCapture() { return () -> System.out.print("x"); }\n' +
+  "  Runnable capture(int n) { return () -> System.out.print(n); }\n" +
+  "  Supplier<Integer> field() { return () -> base; }\n" +
+  "  IntUnaryOperator math(int k) { return x -> x * k + base; }\n" +
+  "  Function<String, Integer> unboundRef() { return String::length; }\n" +
+  "  Supplier<String> boundRef(String s) { return s::trim; }\n" +
+  "  Supplier<Object> ctorRef() { return Object::new; }\n" +
+  "  static Runnable staticRef() { return Lammy::helper; }\n" +
+  "  static void helper() {}\n" +
+  "  BiFunction<Integer, Integer, Integer> two(int k) { return (a, b) -> a + b + k; }\n" +
+  "  int localCapture(int n) { int k = n * 2; Supplier<Integer> s = () -> k + base; return s.get(); }\n" +
+  // A lambda whose body is a block, and one that returns another lambda - the
+  // interface erases both, so the reconstruction has to name them.
+  "  Supplier<Integer> block(int n) { return () -> { int t = n; t = t * 3; return t + base; }; }\n" +
+  "  Function<Integer, Supplier<Integer>> nested(int n) { return a -> () -> a + n; }\n" +
+  "  int stream(List<String> xs) { return xs.stream().map(String::length).reduce(0, Integer::sum); }\n" +
+  "  Comparator<String> comparator() { return (a, b) -> a.length() - b.length(); }\n" +
+  "  Runnable staticField() { return () -> stat++; }\n" +
+  "}\n";
+
+test(
+  "reconstructs javac's own lambdas and method references",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-lammy-");
+    const classFile = compileWithJavac(LAMMY_SOURCE, "Lammy", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    // A reference where source wrote one, a lambda where the body is inlined,
+    // and nothing left of the synthetic method javac generated.
+    expect(source).toContain("java.lang.Object::new");
+    expect(source).toContain("Lammy::helper");
+    expect(source).toContain("() -> java.lang.System.out.print(arg0)");
+    expect(source).not.toContain("lambda$");
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "Lammy", again);
+    // The lambdas have to run, not just compile: the captured values and the
+    // interface method's own parameters are bound in one order only.
+    const driver =
+      "import java.util.*;\n" +
+      "public class LammyDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      '    List<String> xs = Arrays.asList("a", "bb", "", "cccc");\n' +
+      "    for (int n = 0; n < 4; n++) {\n" +
+      "      Lammy l = new Lammy();\n" +
+      "      l.noCapture().run();\n" +
+      "      l.capture(n).run();\n" +
+      "      l.staticRef().run();\n" +
+      "      l.staticField().run();\n" +
+      '      System.out.println(" " + l.field().get() + " " + l.math(n).applyAsInt(3)\n' +
+      '        + " " + l.unboundRef().apply("abcd") + " " + l.boundRef(" q ").get()\n' +
+      '        + " " + l.ctorRef().get().getClass() + " " + l.two(n).apply(1, 2)\n' +
+      '        + " " + l.localCapture(n) + " " + l.block(n).get()\n' +
+      '        + " " + l.nested(n).apply(3).get() + " " + l.stream(xs)\n' +
+      '        + " " + l.comparator().compare("aa", "b"));\n' +
+      "    }\n" +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "LammyDriver", dir.path, dir.path);
+    const expected = execFileSync("java", ["-cp", dir.path, "LammyDriver"], { encoding: "utf8" });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "LammyDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).not.toEqual("");
+  },
+);
+
+// A lambda that captures a variable this hoisted to the top of the method is not
+// effectively final, and Java takes no other kind.
+const HOISTED_CAPTURE_SOURCE =
+  "import java.util.function.*;\n" +
+  "public class Hoisted {\n" +
+  "  static int f(int n) { int t = 0; for (int i = 0; i < n; i++) { int j = i; Supplier<Integer> s = () -> j * 2; t += s.get(); } return t; }\n" +
+  "}\n";
+
+test(
+  "says so when a lambda captures a variable that cannot be final",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-hoisted-");
+    const classFile = compileWithJavac(HOISTED_CAPTURE_SOURCE, "Hoisted", dir.path);
+    expect(decompileToSource(readFileSync(classFile))).toContain(
+      "cappu: a lambda that captures a variable that is not final",
+    );
+  },
+);
+
 /** Compile one source file with javac and return the .class path. */
 function compileWithJavac(
   source: string,
