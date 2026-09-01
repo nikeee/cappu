@@ -919,22 +919,75 @@ test(
   },
 );
 
-// A `finally` is a catch-all too, and javac writes it as duplicated code: this
-// phase says so rather than guessing.
+// javac writes the body of a `finally` twice - once on the way out of the
+// protected range, once in the catch-all that rethrows - and a `return` inside
+// the body is one more copy. One way out is what this reads back; the rest say so.
 const FINALLY_SOURCE =
-  "public class Finally {\n" +
-  '  static int f(int x) { try { return 10 / x; } finally { System.out.print(""); } }\n' +
+  "public class Finallies {\n" +
+  "  static int n;\n" +
+  "  static int simple(int x) { int r = 0; try { r = 10 / x; } finally { n += 1; } return r; }\n" +
+  '  static int several(int x) { int r = 0; try { r = 10 / x; n += 2; } finally { System.out.print(""); } return r; }\n' +
+  "  static int inLoop(int x) { int r = 0; for (int i = 0; i < x; i++) { try { r += 10 / (x - i); } finally { n += 5; } } return r; }\n" +
+  "}\n";
+
+const FINALLY_BAILS_SOURCE =
+  "public class Bails {\n" +
+  "  static int n;\n" +
+  "  static int returning(int a) { try { return a; } finally { n += 1; } }\n" +
+  // A `catch` beside the `finally`, and a `finally` inside one: each is another
+  // copy of the body, and which one source wrote is not in the class file.
+  "  static int caught(int x) { int r = 0; try { r = 10 / x; } catch (ArithmeticException e) { r = -1; } finally { n += 2; } return r; }\n" +
+  "  static int nested(int x) { int r = 0; try { try { r = 10 / x; } finally { n += 3; } } finally { n += 4; } return r; }\n" +
   "}\n";
 
 test(
-  "says so when a catch-all is not a monitor",
-  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  "reconstructs a `finally` with one way out",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
   () => {
     using dir = TempDir.create("cappu-decompile-finally-");
-    const classFile = compileWithJavac(FINALLY_SOURCE, "Finally", dir.path);
-    expect(decompileToSource(readFileSync(classFile))).toContain(
-      "cappu: a finally or synchronized block",
-    );
+    const classFile = compileWithJavac(FINALLY_SOURCE, "Finallies", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    expect(source).toContain("} finally {");
+    // The copy javac wrote on the way out is not a statement of its own.
+    expect(source.match(/n = n \+ 1;/g)?.length).toBe(1);
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "Finallies", again);
+    const driver =
+      "public class FinalliesDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      "    for (int x = -2; x < 4; x++) {\n" +
+      "      String line;\n" +
+      "      try {\n" +
+      '        line = Finallies.simple(x) + " " + Finallies.several(x)\n' +
+      '          + " " + Finallies.inLoop(x);\n' +
+      '      } catch (RuntimeException e) { line = "ex"; }\n' +
+      '      System.out.println(line + " " + Finallies.n);\n' +
+      "    }\n" +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "FinalliesDriver", dir.path, dir.path);
+    const expected = execFileSync("java", ["-cp", dir.path, "FinalliesDriver"], {
+      encoding: "utf8",
+    });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "FinalliesDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).not.toEqual("");
+  },
+);
+
+test(
+  "says so when a `finally` has more than one way out",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-finallybails-");
+    const classFile = compileWithJavac(FINALLY_BAILS_SOURCE, "Bails", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).toContain("cappu: a finally with more than one way out");
+    // Every one of them says so rather than guessing which copy source wrote.
+    expect(source.match(/cappu: /g)?.length).toBe(6);
   },
 );
 
@@ -1509,11 +1562,12 @@ const RECONSTRUCTIONS: {
   {
     name: "Finally",
     // javac copies the `finally` into every exit path and guards the rest with a
-    // catch-all that rethrows: which of those copies source wrote is not in the
-    // class file, so this one says so.
+    // catch-all that rethrows. One way out is one copy, which comes back; a
+    // `return` inside the body is a second, and which copy source wrote is not
+    // in the class file.
     source:
       "class Finally { static int f(int a) { try { return a; } finally { java.lang.System.out.println(a); } } }",
-    expect: ["cappu: a finally or synchronized block"],
+    expect: ["cappu: a finally with more than one way out"],
   },
   {
     name: "Blank",

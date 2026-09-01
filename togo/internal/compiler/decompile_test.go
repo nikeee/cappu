@@ -741,11 +741,12 @@ var reconstructions = []struct {
 	{
 		// javac copies the `finally` into every exit path and guards the rest
 		// with a catch-all that rethrows: which of those copies source wrote is
-		// not in the class file, so this one says so.
+		// not in the class file. One way out is one copy, which comes back; a
+		// `return` inside the body is a second.
 		name: "Finally",
 		source: "class Finally { static int f(int a) { try { return a; }" +
 			" finally { java.lang.System.out.println(a); } } }",
-		want: []string{"cappu: a finally or synchronized block"},
+		want: []string{"cappu: a finally with more than one way out"},
 	},
 	{
 		name: "Blank",
@@ -1464,24 +1465,85 @@ func TestDecompileRecompilesJavacSynchronizedToTheSameBytecode(t *testing.T) {
 	}
 }
 
-// A `finally` is a catch-all too, and javac writes it as duplicated code: this
-// phase says so rather than guessing.
-const finallySource = `public class Finally {
-  static int f(int x) { try { return 10 / x; } finally { System.out.print(""); } }
+// javac writes the body of a `finally` twice - once on the way out of the
+// protected range, once in the catch-all that rethrows - and a `return` inside
+// the body is one more copy. One way out is what this reads back; the rest say so.
+const finallySource = `public class Finallies {
+  static int n;
+  static int simple(int x) { int r = 0; try { r = 10 / x; } finally { n += 1; } return r; }
+  static int several(int x) { int r = 0; try { r = 10 / x; n += 2; } finally { System.out.print(""); } return r; }
+  static int inLoop(int x) { int r = 0; for (int i = 0; i < x; i++) { try { r += 10 / (x - i); } finally { n += 5; } } return r; }
 }`
 
-func TestDecompileSaysWhenACatchAllIsNotAMonitor(t *testing.T) {
-	if !hasTool("javac") {
-		t.Skip("no JDK (javac)")
+const finalliesDriverSource = `public class FinalliesDriver {
+  public static void main(String[] args) {
+    for (int x = -2; x < 4; x++) {
+      String line;
+      try {
+        line = Finallies.simple(x) + " " + Finallies.several(x)
+          + " " + Finallies.inLoop(x);
+      } catch (RuntimeException e) { line = "ex"; }
+      System.out.println(line + " " + Finallies.n);
+    }
+  }
+}`
+
+const finallyBailsSource = `public class Bails {
+  static int n;
+  static int returning(int a) { try { return a; } finally { n += 1; } }
+  static int caught(int x) { int r = 0; try { r = 10 / x; } catch (ArithmeticException e) { r = -1; } finally { n += 2; } return r; }
+  static int nested(int x) { int r = 0; try { try { r = 10 / x; } finally { n += 3; } } finally { n += 4; } return r; }
+}`
+
+func TestDecompileReconstructsAFinallyWithOneWayOut(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
 	}
 	dir := t.TempDir()
-	classFile := compileWithJavac(t, dir, "Finally", finallySource)
+	classFile := compileWithJavac(t, dir, "Finallies", finallySource)
 	source, err := Decompile(readFile(t, classFile))
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(source, "cappu: a finally or synchronized block") {
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	if !strings.Contains(source, "} finally {") {
+		t.Fatalf("the statement did not come back:\n%s", source)
+	}
+	// The copy javac wrote on the way out is not a statement of its own.
+	if strings.Count(source, "n = n + 1;") != 1 {
+		t.Errorf("the copy on the way out is still there:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Finallies", source)
+	compileWithJavacOn(t, dir, "FinalliesDriver", finalliesDriverSource, dir)
+	expected := runJava(t, dir, "FinalliesDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "FinalliesDriver")
+	if actual != expected {
+		t.Errorf("the decompiled class runs differently:\n%s\n--- from ---\n%s", actual, expected)
+	}
+	if expected == "" {
+		t.Fatal("the driver printed nothing")
+	}
+}
+
+func TestDecompileSaysWhenAFinallyHasMoreThanOneWayOut(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Bails", finallyBailsSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: a finally with more than one way out") {
 		t.Errorf("expected the bail, got:\n%s", source)
+	}
+	// Every one of them says so rather than guessing which copy source wrote.
+	if strings.Count(source, "cappu: ") != 6 {
+		t.Errorf("expected three bailed methods, got:\n%s", source)
 	}
 }
 

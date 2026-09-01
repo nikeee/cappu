@@ -713,13 +713,16 @@ interface Block {
 function buildBlocks(
   instructions: readonly Instruction[],
   exceptions: readonly ExceptionEntry[] = [],
+  /** Where a `finally`'s copy begins, which nothing else would split at. */
+  splits: readonly number[] = [],
 ): Map<number, Block> {
-  const leaders = new Set<number>([instructions[0]?.pc ?? 0]);
+  const leaders = new Set<number>([instructions[0]?.pc ?? 0, ...splits]);
   // A protected range and a handler both begin a statement of their own, and
   // neither is a branch target, so nothing else would split the block there.
   for (const entry of exceptions) {
     leaders.add(entry.startPc);
     leaders.add(entry.handlerPc);
+
   }
   for (const [index, instruction] of instructions.entries()) {
     const { mnemonic } = instruction;
@@ -799,6 +802,54 @@ interface MonitorRegion {
   readonly slot: number;
 }
 
+/**
+ * One `finally`: javac writes the body twice - once on the way out, once in a
+ * catch-all that rethrows - and the copies are what says where it is.
+ */
+interface FinallyRegion {
+  readonly startPc: number;
+  readonly endPc: number;
+  readonly handlerPc: number;
+  /** The handler's copy of the body, without the store and the rethrow. */
+  readonly body: readonly Instruction[];
+}
+
+/**
+ * The body of a `finally`, when `block` is the catch-all that rethrows:
+ * `astore e; <body>; aload e; athrow`, with the same slot at both ends.
+ */
+function finallyBody(block: Block | undefined): readonly Instruction[] | undefined {
+  const kept = block?.instructions ?? [];
+  if (kept.length < 4 || block?.kind !== "end") return undefined;
+  const store = kept[0]!;
+  const reload = kept[kept.length - 2]!;
+  const throwing = kept[kept.length - 1]!;
+  const slot = (instruction: Instruction): number =>
+    /_\d$/.test(instruction.mnemonic) ? Number(instruction.mnemonic.slice(-1)) : instruction.arg;
+  if (
+    !store.mnemonic.startsWith("astore") ||
+    !reload.mnemonic.startsWith("aload") ||
+    throwing.mnemonic !== "athrow" ||
+    slot(store) !== slot(reload)
+  ) {
+    return undefined;
+  }
+  return kept.slice(1, -2);
+}
+
+/** Whether two runs of instructions are the same code, which a copy has to be. */
+function sameInstructions(left: readonly Instruction[], right: readonly Instruction[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (one, index) =>
+        one.mnemonic === right[index]!.mnemonic &&
+        one.arg === right[index]!.arg &&
+        one.arg2 === right[index]!.arg2,
+    )
+  );
+}
+
 /** Whether `block` is the release-and-rethrow a `synchronized` is guarded by. */
 function isMonitorHandler(block: Block | undefined): number | undefined {
   const kept = block?.instructions ?? [];
@@ -828,8 +879,9 @@ function monitorRegions(
   exceptions: readonly ExceptionEntry[],
   blocks: Map<number, Block>,
   instructions: readonly Instruction[],
-): { monitors: MonitorRegion[]; rest: ExceptionEntry[] } {
+): { monitors: MonitorRegion[]; finallys: FinallyRegion[]; rest: ExceptionEntry[] } {
   const monitors: MonitorRegion[] = [];
+  const finallys: FinallyRegion[] = [];
   const rest: ExceptionEntry[] = [];
   const enters = new Set(
     instructions.filter(one => one.mnemonic === "monitorenter").map(one => one.pc + 1),
@@ -850,17 +902,33 @@ function monitorRegions(
     // again; that entry says nothing about where the statement is.
     const ranges = group.filter(entry => entry.startPc !== handlerPc);
     const start = Math.min(...ranges.map(entry => entry.startPc));
-    if (slot === undefined || ranges.length === 0 || !enters.has(start)) {
+    if (slot !== undefined && ranges.length > 0 && enters.has(start)) {
+      monitors.push({
+        startPc: start,
+        endPc: Math.max(...ranges.map(entry => entry.endPc)),
+        handlerPc,
+        slot,
+      });
+      continue;
+    }
+    // A `finally` javac wrote once per way out: this takes the shape with one
+    // way out, where the range is not split and the copy sits right after it.
+    const body = finallyBody(blocks.get(handlerPc));
+    if (body === undefined || ranges.length !== 1 || body.length === 0) {
       throw new NotDecompilable("a finally or synchronized block");
     }
-    monitors.push({
-      startPc: start,
-      endPc: Math.max(...ranges.map(entry => entry.endPc)),
-      handlerPc,
-      slot,
-    });
+    const range = ranges[0]!;
+    const copy = blocks.get(range.endPc);
+    if (
+      copy === undefined ||
+      !isGoto(copy.instructions[copy.instructions.length - 1]!.mnemonic) ||
+      !sameInstructions(body, copy.instructions.slice(0, body.length))
+    ) {
+      throw new NotDecompilable("a finally with more than one way out");
+    }
+    finallys.push({ startPc: range.startPc, endPc: range.endPc, handlerPc, body });
   }
-  return { monitors, rest };
+  return { monitors, finallys, rest };
 }
 
 /** One `catch` clause: the types it names, and where its handler begins. */
@@ -1390,6 +1458,9 @@ class BodyDecompiler {
   private readonly captured: Local[] = [];
   /** The `synchronized` statements of this method, and the slots they hold. */
   private monitors: MonitorRegion[] = [];
+  /** The `finally` statements of this method, and the ones being written now. */
+  private finallys: FinallyRegion[] = [];
+  private readonly activeFinallys = new Set<FinallyRegion>();
   /**
    * The slots held by the `synchronized` statements being written right now.
    * javac frees the monitor's local when the statement ends and reuses the slot
@@ -2144,9 +2215,23 @@ class BodyDecompiler {
 
   run(instructions: readonly Instruction[], exceptions: readonly ExceptionEntry[] = []): void {
     this.blocks = buildBlocks(instructions, exceptions);
+    // A `finally` writes its body twice, and the copy begins where the protected
+    // range ends - in the middle of a block. Only that shape wants the split: a
+    // monitor's range ends inside the expression it releases.
+    const splits = exceptions
+      .filter(
+        entry =>
+          entry.catchType === undefined &&
+          entry.startPc !== entry.handlerPc &&
+          isMonitorHandler(this.blocks.get(entry.handlerPc)) === undefined &&
+          finallyBody(this.blocks.get(entry.handlerPc)) !== undefined,
+      )
+      .map(entry => entry.endPc);
+    if (splits.length > 0) this.blocks = buildBlocks(instructions, exceptions, splits);
     this.instructionAt = new Map(instructions.map(one => [one.pc, one]));
-    const { monitors, rest } = monitorRegions(exceptions, this.blocks, instructions);
+    const { monitors, finallys, rest } = monitorRegions(exceptions, this.blocks, instructions);
     this.monitors = monitors;
+    this.finallys = finallys;
     this.regions = tryRegions(rest, this.blocks, this.self);
     this.followOf = postDominators(this.blocks);
     this.methodFollowOf = this.followOf;
@@ -2198,6 +2283,13 @@ class BodyDecompiler {
       if (jump !== undefined) {
         this.current.push(jump);
         return;
+      }
+      const guarded = this.finallys.find(
+        one => one.startPc === at && !this.visited.has(at) && !this.activeFinallys.has(one),
+      );
+      if (guarded !== undefined) {
+        at = this.finallyStatement(guarded);
+        continue;
       }
       const region = this.regionAt(at);
       if (region !== undefined) {
@@ -2452,6 +2544,39 @@ class BodyDecompiler {
     }
     this.current.push(`switch (${selector.text}) {`, clauses, "}");
     return follow;
+  }
+
+  /**
+   * One `try`/`finally`. javac writes the body of the `finally` twice - once on
+   * the way out of the protected range, once in the catch-all that rethrows -
+   * and only the second one is written back; the copy on the way out is dropped,
+   * because source wrote it once.
+   */
+  private finallyStatement(region: FinallyRegion): number {
+    if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
+    const copy = this.blocks.get(region.endPc)!;
+    const jump = copy.instructions[copy.instructions.length - 1]!;
+    const follow = jump.arg;
+    if (!this.blocks.has(follow)) throw new NotDecompilable("a finally that leaves the method");
+    // The copy on the way out is not a statement: what is left of that block is
+    // the jump over the handler.
+    this.skip.set(copy.start, region.body.length);
+    this.visited.add(region.handlerPc);
+    this.activeFinallys.add(region);
+    let body: Stmt[];
+    try {
+      body = this.capture(() => this.structure(region.startPc, copy.start));
+    } finally {
+      this.activeFinallys.delete(region);
+    }
+    if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
+    const handler = this.blocks.get(region.handlerPc)!;
+    const cleanup = this.capture(() =>
+      this.runInstructions(region.body, endOf(handler), region.handlerPc),
+    );
+    if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
+    this.current.push("try {", body, "} finally {", cleanup, "}");
+    return copy.start;
   }
 
   /**
