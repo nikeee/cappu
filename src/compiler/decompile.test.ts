@@ -887,8 +887,8 @@ const SYNCY_SOURCE =
   "  int onThis() { synchronized (this) { n = n + 3; } return n; }\n" +
   "  int nested(Object other) { synchronized (lock) { synchronized (other) { n = n + 4; } } return n; }\n" +
   "  int allReturn() { synchronized (lock) { return n; } }\n" +
-  "  int throwing() { synchronized (lock) { if (n == 0) { throw new IllegalStateException(\"x\"); } return n; } }\n" +
-  "  int withTry() { synchronized (lock) { try { return Integer.parseInt(\"7\"); } catch (NumberFormatException e) { return -1; } } }\n" +
+  '  int throwing() { synchronized (lock) { if (n == 0) { throw new IllegalStateException("x"); } return n; } }\n' +
+  '  int withTry() { synchronized (lock) { try { return Integer.parseInt("7"); } catch (NumberFormatException e) { return -1; } } }\n' +
   "  int inTry() { try { synchronized (lock) { n = n + 1; } } catch (RuntimeException e) { return -1; } return n; }\n" +
   "  static int stat(Object o) { synchronized (o) { return o.hashCode(); } }\n" +
   "  int twice() { synchronized (lock) { n = n + 1; } synchronized (lock) { n = n + 2; } return n; }\n" +
@@ -923,7 +923,7 @@ test(
 // phase says so rather than guessing.
 const FINALLY_SOURCE =
   "public class Finally {\n" +
-  "  static int f(int x) { try { return 10 / x; } finally { System.out.print(\"\"); } }\n" +
+  '  static int f(int x) { try { return 10 / x; } finally { System.out.print(""); } }\n' +
   "}\n";
 
 test(
@@ -1083,6 +1083,49 @@ test(
     });
     expect(actual).toEqual(expected);
     expect(actual).not.toEqual("");
+  },
+);
+
+// The guards a reconstruction rests on, each of which said nothing when it was
+// removed: a `Serializable` lambda is `altMetafactory` and carries flags this
+// drops; one statement that is a *declaration* still needs the braces; a
+// captured field is read again every time the lambda runs, where javac read it
+// once; and a loop over a `synchronized` needs the handler's edge to find its
+// own end.
+const GUARD_SOURCE =
+  "import java.io.Serializable;\n" +
+  "import java.util.function.*;\n" +
+  "public class Guard {\n" +
+  "  static final Object L = new Object();\n" +
+  '  String name = "one";\n' +
+  "  interface SRun extends Runnable, Serializable {}\n" +
+  '  static SRun serial() { return (SRun) () -> System.out.print("s"); }\n' +
+  "  static Runnable declaring() { return () -> { int q = 3; }; }\n" +
+  "  Supplier<String> boundField() { return name::toUpperCase; }\n" +
+  "  static int hooks(int n) { int r = 0; for (int i = 0; i < n; i++) { synchronized (L) { if (i == 2) { return r; } r += i; } } return r; }\n" +
+  // A `synchronized` inside a `try` inside a loop: without the monitor
+  // handler's edge, the loop's dominators collapse and this is irreducible.
+  "  static final int[] taken = { 1, 0, 3 };\n" +
+  "  static int runHooks() { int r = 0; for (int i = 0; i < taken.length; i++) { try { int hook; synchronized (L) { hook = taken[i]; } if (hook != 0) { r += 10 / hook; } } catch (RuntimeException t) { r -= 1; } } return r; }\n" +
+  "}\n";
+
+test(
+  "keeps the guards a lambda and a monitor rest on",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-guard-");
+    const classFile = compileWithJavac(GUARD_SOURCE, "Guard", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).toContain(
+      "cappu: an invokedynamic that is neither a lambda nor a concatenation",
+    );
+    expect(source).toContain("cappu: a lambda that captures more than a variable");
+    // The declaration keeps its braces, and the loop over the monitor is written.
+    expect(source).toContain("() -> {");
+    expect(source).toContain("synchronized (L) {");
+    // The loop over a `try` over a monitor is reducible only with the handler's
+    // edge in the graph.
+    expect(source).not.toContain("cappu: irreducible control flow");
   },
 );
 

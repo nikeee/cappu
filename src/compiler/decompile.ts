@@ -332,6 +332,18 @@ function ternary(condition: Expr, thenValue: Expr, elseValue: Expr): Expr | unde
  * *branch's* own arms (`c ? 0 : 1`, not `!c ? 1 : 0`), which is the form source
  * wrote and the one that recompiles to the same branch.
  */
+/** Whether a value's text is the same every time it is read. */
+function isConstantText(text: string): boolean {
+  return (
+    text === "null" ||
+    text === "true" ||
+    text === "false" ||
+    /^-?\d[\w.]*$/.test(text) ||
+    /^"(?:[^"\\]|\\.)*"$/.test(text) ||
+    /^'(?:[^'\\]|\\.)*'$/.test(text)
+  );
+}
+
 /** A lambda with its interface named, for a place that does not say it. */
 function named(value: Expr): Expr {
   if (value.lambda !== true) return value;
@@ -573,7 +585,11 @@ function reads(text: string, name: string): boolean {
  */
 function isStatementExpression(line: string): boolean {
   if (!line.endsWith(";") || line.includes("{")) return false;
-  if (/^(?:throw|if|while|for|do|switch|try|synchronized|assert|break|continue|return|else)\b/.test(line)) {
+  if (
+    /^(?:throw|if|while|for|do|switch|try|synchronized|assert|break|continue|return|else)\b/.test(
+      line,
+    )
+  ) {
     return false;
   }
   // A declaration is a type and a name before the `=`; an assignment has only
@@ -789,9 +805,7 @@ function isMonitorHandler(block: Block | undefined): number | undefined {
   if (kept.length !== 5) return undefined;
   const [store, load, exit, reload, throwing] = kept;
   const slot = (instruction: Instruction): number =>
-    /_\d$/.test(instruction.mnemonic)
-      ? Number(instruction.mnemonic.slice(-1))
-      : instruction.arg;
+    /_\d$/.test(instruction.mnemonic) ? Number(instruction.mnemonic.slice(-1)) : instruction.arg;
   if (
     !store!.mnemonic.startsWith("astore") ||
     !load!.mnemonic.startsWith("aload") ||
@@ -1173,14 +1187,16 @@ function withExceptionEdges(
   const augmented = new Map<number, Block>();
   for (const [start, block] of blocks) {
     const handlers = [
-      ...regions
-        .filter(region => start >= region.startPc && start < region.endPc)
-        .flatMap(region => region.clauses.map(clause => clause.handlerPc)),
-      // A `synchronized` is guarded the same way, and a handler nothing reaches
-      // has no dominators of its own - which poisons every block it flows into.
-      ...monitors
-        .filter(region => start >= region.startPc && start < region.endPc)
-        .map(region => region.handlerPc),
+      ...new Set([
+        ...regions
+          .filter(region => start >= region.startPc && start < region.endPc)
+          .flatMap(region => region.clauses.map(clause => clause.handlerPc)),
+        // A `synchronized` is guarded the same way, and a handler nothing reaches
+        // has no dominators of its own - which poisons every block it flows into.
+        ...monitors
+          .filter(region => start >= region.startPc && start < region.endPc)
+          .map(region => region.handlerPc),
+      ]),
     ].filter(handler => !block.successors.includes(handler));
     augmented.set(
       start,
@@ -1760,6 +1776,13 @@ class BodyDecompiler {
       const value = this.coerceInto(this.pop(), captureTypes[i]!);
       const local = this.byName.get(value);
       if (local !== undefined) this.captured.push(local);
+      // javac evaluates a captured value *here* and hands it over; the lambda
+      // this writes reads the text again every time it runs. That is the same
+      // value only for a variable - a field or an array element can change, and
+      // `name::toUpperCase` would then upper-case whatever the field holds later.
+      if (local === undefined && value !== "this" && !isConstantText(value)) {
+        throw new NotDecompilable("a lambda that captures more than a variable");
+      }
       captures.unshift(value);
     }
     // A parameter the interface passes as its erased type is cast at the use,
@@ -1835,11 +1858,13 @@ class BodyDecompiler {
     const reference =
       captures.length === 0 && parameters.every((name, index) => passed[index] === name);
     if (reference) {
-      const named =
+      const written =
         handle.referenceKind === 8
           ? `${typeName(target.owner, this.self)}::new`
           : `${typeName(target.owner, this.self)}::${target.name}`;
-      return this.push({ text: named, prec: PREC_PRIMARY, type });
+      // A method reference takes its type from where it is written, exactly as a
+      // lambda does, so it needs the interface named in the same places.
+      return this.push({ text: written, prec: PREC_PRIMARY, type, lambda: true });
     }
     this.push({ text: `(${parameters.join(", ")}) -> ${call}`, prec: 0, type, lambda: true });
   }
@@ -1880,14 +1905,10 @@ class BodyDecompiler {
       const local = locals.get(slot);
       if (local !== undefined) local.name = bound[index]!;
     });
-    const nested = new BodyDecompiler(
-      this.classFile,
-      locals,
-      localTable,
-      yields,
-      isStatic,
-      { names: this.names, inlining: this.inlining },
-    );
+    const nested = new BodyDecompiler(this.classFile, locals, localTable, yields, isStatic, {
+      names: this.names,
+      inlining: this.inlining,
+    });
     this.inlining.add(key);
     try {
       nested.run(decodeInstructions(this.classFile, code.code), code.exceptions);
@@ -1919,9 +1940,11 @@ class BodyDecompiler {
    * argument goes and `\u0002` where one of the remaining bootstrap constants
    * does. `makeConcat` is the same call with no literal parts at all.
    */
-  private concat(site: { name: string; descriptor: string },
+  private concat(
+    site: { name: string; descriptor: string },
     bootstrap: BootstrapMethod,
-    factory: { owner: string; name: string },): void {
+    factory: { owner: string; name: string },
+  ): void {
     const pool = this.classFile.pool;
     if (
       (factory.name !== "makeConcatWithConstants" && factory.name !== "makeConcat") ||
@@ -2465,7 +2488,7 @@ class BodyDecompiler {
     // the statement leaves it the way a `return` does, and counting it would put
     // the merge of an `if` in here past the end of the `synchronized`.
     const within = new Set<number>();
-    for (const queue = [region.startPc]; queue.length > 0; ) {
+    for (const queue = [region.startPc]; queue.length > 0;) {
       const at = queue.pop()!;
       if (at === follow || within.has(at) || !this.blocks.has(at)) continue;
       within.add(at);

@@ -1373,6 +1373,51 @@ func TestDecompileReconstructsForeverLoops(t *testing.T) {
 	}
 }
 
+// The guards a reconstruction rests on, each of which said nothing when it was
+// removed: a `Serializable` lambda is `altMetafactory` and carries flags this
+// drops; one statement that is a *declaration* still needs the braces; a captured
+// field is read again every time the lambda runs, where javac read it once; and a
+// loop over a `try` over a `synchronized` needs the handler's edge to be
+// reducible at all.
+const guardSource = `import java.io.Serializable;
+import java.util.function.*;
+public class Guard {
+  static final Object L = new Object();
+  String name = "one";
+  interface SRun extends Runnable, Serializable {}
+  static SRun serial() { return (SRun) () -> System.out.print("s"); }
+  static Runnable declaring() { return () -> { int q = 3; }; }
+  Supplier<String> boundField() { return name::toUpperCase; }
+  static int hooks(int n) { int r = 0; for (int i = 0; i < n; i++) { synchronized (L) { if (i == 2) { return r; } r += i; } } return r; }
+  static final int[] taken = { 1, 0, 3 };
+  static int runHooks() { int r = 0; for (int i = 0; i < taken.length; i++) { try { int hook; synchronized (L) { hook = taken[i]; } if (hook != 0) { r += 10 / hook; } } catch (RuntimeException t) { r -= 1; } } return r; }
+}`
+
+func TestDecompileKeepsTheLambdaAndMonitorGuards(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Guard", guardSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"cappu: an invokedynamic that is neither a lambda nor a concatenation",
+		"cappu: a lambda that captures more than a variable",
+		"() -> {",
+		"synchronized (L) {",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("missing %q in:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "cappu: irreducible control flow") {
+		t.Errorf("the monitor handler's edge is missing:\n%s", source)
+	}
+}
+
 // javac writes `synchronized` as a monitor held in a synthetic local, guarded by
 // a catch-all that releases it and rethrows - and splits the range around every
 // `return`, `break` and `continue` that leaves the statement.

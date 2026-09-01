@@ -285,6 +285,21 @@ func asBoolean(e expr) expr {
 	return e
 }
 
+// isConstantText reports whether a value's text is the same every time it is read.
+func isConstantText(text string) bool {
+	switch text {
+	case "null", "true", "false":
+		return true
+	}
+	return numericText.MatchString(text) || stringText.MatchString(text) || charText.MatchString(text)
+}
+
+var (
+	numericText = regexp.MustCompile(`^-?\d[\w.]*$`)
+	stringText  = regexp.MustCompile(`^"(?:[^"\\]|\\.)*"$`)
+	charText    = regexp.MustCompile(`^'(?:[^'\\]|\\.)*'$`)
+)
+
 // namedLambda is a lambda with its interface named, for a place that does not
 // say it.
 func namedLambda(value expr) expr {
@@ -2092,8 +2107,16 @@ func (d *bodyDecompiler) lambda(siteDescriptor string, bootstrap BootstrapMethod
 			return err
 		}
 		captures[i] = d.coerceInto(value, captureTypes[i].Type)
-		if entry, ok := d.byName[captures[i]]; ok {
+		entry, isLocal := d.byName[captures[i]]
+		if isLocal {
 			d.captured = append(d.captured, entry)
+		}
+		// javac evaluates a captured value *here* and hands it over; the lambda
+		// this writes reads the text again every time it runs. That is the same
+		// value only for a variable - a field or an array element can change, and
+		// `name::toUpperCase` would then upper-case whatever the field holds later.
+		if !isLocal && captures[i] != "this" && !isConstantText(captures[i]) {
+			return bail("a lambda that captures more than a variable")
 		}
 	}
 	// A parameter the interface passes as its erased type is cast at the use,
@@ -2178,11 +2201,13 @@ func (d *bodyDecompiler) lambda(siteDescriptor string, bootstrap BootstrapMethod
 		}
 	}
 	if reference {
-		named := typeName(target.Owner, d.self()) + "::" + target.Name
+		written := typeName(target.Owner, d.self()) + "::" + target.Name
 		if handle.RefKind == 8 {
-			named = typeName(target.Owner, d.self()) + "::new"
+			written = typeName(target.Owner, d.self()) + "::new"
 		}
-		d.push(primary(named, sourceType))
+		// A method reference takes its type from where it is written, exactly as
+		// a lambda does, so it needs the interface named in the same places.
+		d.push(expr{Text: written, Prec: precPrimary, Type: sourceType, Lambda: true})
 		return nil
 	}
 	d.push(expr{
