@@ -1855,6 +1855,20 @@ const INCY_SOURCE =
   "  static int twice(int[] a, int i) { return a[i++] + a[i++]; }\n" +
   "}\n";
 
+// A `char`, `byte` or `short` post-increment is an `iload`/`iadd`/`i2c`/`istore`,
+// not an `iinc`: the store is a statement, so writing it in front of the value
+// already on the stack would make that value read the incremented one.
+test("says so when an assignment happens while the variable is on the stack", () => {
+  const source = decompileToSource(
+    emitClass(
+      "Narrow",
+      "public class Narrow { static int f(char c) { return g(c++, c); }" +
+        " static int g(int a, int b) { return a - b; } }",
+    ),
+  );
+  expect(source).toContain("cappu: an assignment to a variable that is already on the stack");
+});
+
 test(
   "writes the increment behind a value on the stack the way source did",
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },

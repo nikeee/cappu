@@ -2736,6 +2736,15 @@ func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType strin
 	if err != nil {
 		return err
 	}
+	// The assignment is a statement here, so it runs before everything the stack
+	// already holds - and those read the variable as it is *after* it. A `char`,
+	// `byte` or `short` post-increment is written this way rather than with an
+	// `iinc`, and so is any other assignment used as a value.
+	for _, one := range d.stack {
+		if reads(one.Text, target.Name) {
+			return bail("an assignment to a variable that is already on the stack")
+		}
+	}
 	target.StoreBlocks[d.currentBlock] = true
 	text := d.coerceInto(value, target.Type)
 	if !target.Declared {

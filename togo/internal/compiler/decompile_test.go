@@ -800,6 +800,21 @@ func TestDecompileWritesAnIncrementBehindAValueOnTheStack(t *testing.T) {
 	}
 }
 
+// A `char`, `byte` or `short` post-increment is an `iload`/`iadd`/`i2c`/`istore`,
+// not an `iinc`: the store is a statement, so writing it in front of the value
+// already on the stack would make that value read the incremented one.
+func TestDecompileSaysWhenAnAssignmentHappensWhileTheVariableIsOnTheStack(t *testing.T) {
+	source, err := Decompile(emitClassBytesNoDebug(t, "Narrow",
+		`public class Narrow { static int f(char c) { return g(c++, c); }`+
+			` static int g(int a, int b) { return a - b; } }`))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: an assignment to a variable that is already on the stack") {
+		t.Errorf("expected the assignment bail:\n%s", source)
+	}
+}
+
 // javac pushes the old value and increments behind it, so `i++` is the value on
 // top of the stack at the increment. Every shape source can write it in has to
 // come back running the same way.

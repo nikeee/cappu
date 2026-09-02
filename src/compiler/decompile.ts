@@ -2259,6 +2259,13 @@ class BodyDecompiler {
 
   private store(slot: number, scopePc: number, value: Expr, declaredType: string): void {
     const local = this.local(slot, scopePc, declaredType, true);
+    // The assignment is a statement here, so it runs before everything the stack
+    // already holds - and those read the variable as it is *after* it. A `char`,
+    // `byte` or `short` post-increment is written this way rather than with an
+    // `iinc`, and so is any other assignment used as a value.
+    if (this.stack.some(one => reads(one.text, local.name))) {
+      throw new NotDecompilable("an assignment to a variable that is already on the stack");
+    }
     local.storeBlocks.add(this.currentBlock);
     const text = this.coerceInto(value, local.type);
     if (!local.declared) {
