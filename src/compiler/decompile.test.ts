@@ -1830,14 +1830,64 @@ test("writes a nested type reference with a dot, not the binary $", () => {
 });
 
 // `i++` in a concatenation reads the variable before the increment and again
-// after it. The increment is a statement here, so writing it back in front of
-// the parts would change what they read - the method has to bail instead.
-test("says so when an increment happens while the variable is on the stack", () => {
+// after it: javac pushes the old value and increments behind it, so the value on
+// top of the stack is the one the `++` belongs to.
+test("writes an increment behind a value on the stack as `i++`", () => {
   const source = decompileToSource(
     emitClass("Inc", 'public class Inc { static String f(int i) { return "x" + i++ + i; } }'),
   );
-  expect(source).toContain("cappu: an increment of a variable that is already on the stack");
+  expect(source).toContain('return "x" + arg0++ + arg0;');
 });
+
+// javac pushes the old value and increments behind it, so `i++` is the value on
+// top of the stack at the increment. Every shape source can write it in has to
+// come back running the same way.
+const INCY_SOURCE =
+  "public class Incy {\n" +
+  "  static int n;\n" +
+  "  static int g(int a, int b) { n += a * 10 + b; return a - b; }\n" +
+  "  static int arg(int i) { return g(i++, i); }\n" +
+  "  static int index(int[] a, int i) { a[i++] = 7; a[i++] = 8; return i; }\n" +
+  '  static String concat(int i) { return "x" + i++ + i; }\n' +
+  "  static int self(int i) { i = i++; return i; }\n" +
+  "  static int second(int i) { return g(i, i++); }\n" +
+  "  static int down(int i) { return g(i--, i); }\n" +
+  "  static int twice(int[] a, int i) { return a[i++] + a[i++]; }\n" +
+  "}\n";
+
+test(
+  "writes the increment behind a value on the stack the way source did",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-incy-");
+    const classFile = compileWithJavac(INCY_SOURCE, "Incy", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    expect(source).toContain("return g(arg0++, arg0);");
+    expect(source).toContain("return g(arg0, arg0++);");
+    expect(source).toContain("return g(arg0--, arg0);");
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "Incy", again);
+    const driver =
+      "public class IncyDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      "    int[] a = new int[6];\n" +
+      "    for (int x = 0; x < 4; x++) {\n" +
+      '      System.out.println(Incy.arg(x) + " " + Incy.index(a, x) + " " + Incy.concat(x)\n' +
+      '        + " " + Incy.self(x) + " " + Incy.second(x) + " " + Incy.down(x)\n' +
+      '        + " " + Incy.twice(a, 0) + " " + Incy.n + " " + java.util.Arrays.toString(a));\n' +
+      "    }\n" +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "IncyDriver", dir.path, dir.path);
+    const expected = execFileSync("java", ["-cp", dir.path, "IncyDriver"], { encoding: "utf8" });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "IncyDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).not.toEqual("");
+  },
+);
 
 test("reconstructs the control flow of the ControlFlow fixture", () => {
   const source = decompileToSource(classBytes("ControlFlow"));

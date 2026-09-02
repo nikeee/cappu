@@ -787,16 +787,75 @@ func TestDecompileReconstructions(t *testing.T) {
 }
 
 // `i++` in a concatenation reads the variable before the increment and again
-// after it. The increment is a statement here, so writing it back in front of
-// the parts would change what they read - the method has to bail instead.
-func TestDecompileSaysWhenAnIncrementHappensWhileTheVariableIsOnTheStack(t *testing.T) {
-	source, err := Decompile(emitClassBytes(t, "Inc",
+// after it: javac pushes the old value and increments behind it, so the value on
+// top of the stack is the one the `++` belongs to.
+func TestDecompileWritesAnIncrementBehindAValueOnTheStack(t *testing.T) {
+	source, err := Decompile(emitClassBytesNoDebug(t, "Inc",
 		`public class Inc { static String f(int i) { return "x" + i++ + i; } }`))
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(source, "cappu: an increment of a variable that is already on the stack") {
-		t.Errorf("expected the increment bail:\n%s", source)
+	if !strings.Contains(source, `return "x" + arg0++ + arg0;`) {
+		t.Errorf("expected the post-increment:\n%s", source)
+	}
+}
+
+// javac pushes the old value and increments behind it, so `i++` is the value on
+// top of the stack at the increment. Every shape source can write it in has to
+// come back running the same way.
+const incySource = `public class Incy {
+  static int n;
+  static int g(int a, int b) { n += a * 10 + b; return a - b; }
+  static int arg(int i) { return g(i++, i); }
+  static int index(int[] a, int i) { a[i++] = 7; a[i++] = 8; return i; }
+  static String concat(int i) { return "x" + i++ + i; }
+  static int self(int i) { i = i++; return i; }
+  static int second(int i) { return g(i, i++); }
+  static int down(int i) { return g(i--, i); }
+  static int twice(int[] a, int i) { return a[i++] + a[i++]; }
+}`
+
+const incyDriverSource = `public class IncyDriver {
+  public static void main(String[] args) {
+    int[] a = new int[6];
+    for (int x = 0; x < 4; x++) {
+      System.out.println(Incy.arg(x) + " " + Incy.index(a, x) + " " + Incy.concat(x)
+        + " " + Incy.self(x) + " " + Incy.second(x) + " " + Incy.down(x)
+        + " " + Incy.twice(a, 0) + " " + Incy.n + " " + java.util.Arrays.toString(a));
+    }
+  }
+}`
+
+func TestDecompileWritesTheIncrementTheWaySourceDid(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Incy", incySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	for _, want := range []string{
+		"return g(arg0++, arg0);", "return g(arg0, arg0++);", "return g(arg0--, arg0);",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Incy", source)
+	compileWithJavacOn(t, dir, "IncyDriver", incyDriverSource, dir)
+	expected := runJava(t, dir, "IncyDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "IncyDriver")
+	if actual != expected {
+		t.Errorf("the decompiled class runs differently:\n%s\n--- from ---\n%s", actual, expected)
+	}
+	if expected == "" {
+		t.Fatal("the driver printed nothing")
 	}
 }
 

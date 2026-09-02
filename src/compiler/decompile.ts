@@ -3383,11 +3383,11 @@ class BodyDecompiler {
     for (const [index, instruction] of instructions.entries()) {
       // A store's variable comes into scope after the store, so the debug table
       // is searched at the next instruction's pc, not the store's own.
-      this.step(instruction, instructions[index + 1]?.pc ?? endPc);
+      this.step(instruction, instructions[index + 1]?.pc ?? endPc, instructions[index - 1]);
     }
   }
 
-  private step(instruction: Instruction, nextPc: number): void {
+  private step(instruction: Instruction, nextPc: number, previous?: Instruction): void {
     const { mnemonic, pc } = instruction;
     const pool = this.classFile.pool;
 
@@ -3451,14 +3451,33 @@ class BodyDecompiler {
     }
     if (base === "iinc") {
       const local = this.local(instruction.arg, pc, "int");
-      // `i++` is a statement here, so anything already on the stack that reads
-      // the variable would read the *new* value: `f(i++, i)` and `"x" + i++ + i`
-      // are not what this writes back. Their form needs the increment to stay an
-      // expression, which this phase does not do.
-      if (this.stack.some(value => reads(value.text, local.name))) {
-        throw new NotDecompilable("an increment of a variable that is already on the stack");
-      }
       const delta = instruction.arg2;
+      // The old value being on the stack is what `i++` leaves: javac pushes the
+      // variable and increments it behind the value. That is the top of the
+      // stack and nothing else - a value under it was computed before the
+      // increment, and in `f(i++, i)` it is written to its left, so it still
+      // reads the old one. Any other shape needs the increment somewhere source
+      // could not have put it.
+      const top = this.stack[this.stack.length - 1];
+      // The load right before the increment is what put that value there; a
+      // `dup` of the same read would leave two of it, and only one of them can
+      // carry the `++`.
+      const loaded =
+        previous !== undefined &&
+        previous.mnemonic.startsWith("iload") &&
+        this.slotOf(previous) === instruction.arg;
+      if (this.stack.some(value => reads(value.text, local.name))) {
+        if (Math.abs(delta) !== 1 || top === undefined || top.text !== local.name || !loaded) {
+          throw new NotDecompilable("an increment of a variable that is already on the stack");
+        }
+        this.stack[this.stack.length - 1] = {
+          text: `${local.name}${delta === 1 ? "++" : "--"}`,
+          prec: PREC_PRIMARY,
+          type: top.type,
+          effects: true,
+        };
+        return;
+      }
       if (delta === 1) this.current.push(`${local.name}++;`);
       else if (delta === -1) this.current.push(`${local.name}--;`);
       else if (delta < 0) this.current.push(`${local.name} -= ${-delta};`);

@@ -4346,7 +4346,11 @@ func (d *bodyDecompiler) runSteps(instructions []Instruction, endPc int) error {
 		if i+1 < len(instructions) {
 			nextPc = instructions[i+1].Pc
 		}
-		if err := d.step(instruction, nextPc); err != nil {
+		var previous *Instruction
+		if i > 0 {
+			previous = &instructions[i-1]
+		}
+		if err := d.step(instruction, nextPc, previous); err != nil {
 			return err
 		}
 	}
@@ -4358,7 +4362,7 @@ func isOneOf(base string, prefixes string, suffix string) bool {
 		strings.IndexByte(prefixes, base[0]) >= 0
 }
 
-func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
+func (d *bodyDecompiler) step(instruction Instruction, nextPc int, previous *Instruction) error {
 	mnemonic, pc := instruction.Mnemonic, instruction.Pc
 	pool := d.classFile.Pool
 
@@ -4451,16 +4455,42 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int) error {
 		if err != nil {
 			return err
 		}
-		// `i++` is a statement here, so anything already on the stack that reads
-		// the variable would read the *new* value: `f(i++, i)` and `"x" + i++ + i`
-		// are not what this writes back. Their form needs the increment to stay an
-		// expression, which this phase does not do.
+		delta := instruction.Arg2
+		// The old value being on the stack is what `i++` leaves: javac pushes the
+		// variable and increments it behind the value. That is the top of the
+		// stack and nothing else - a value under it was computed before the
+		// increment, and in `f(i++, i)` it is written to its left, so it still
+		// reads the old one. Any other shape needs the increment somewhere source
+		// could not have put it.
+		onStack := false
 		for _, value := range d.stack {
 			if reads(value.Text, target.Name) {
-				return bail("an increment of a variable that is already on the stack")
+				onStack = true
 			}
 		}
-		switch delta := instruction.Arg2; {
+		if onStack {
+			// The load right before the increment is what put that value there; a
+			// `dup` of the same read would leave two of it, and only one of them
+			// can carry the `++`.
+			loaded := previous != nil && strings.HasPrefix(previous.Mnemonic, "iload") &&
+				slotOf(*previous) == instruction.Arg
+			top := len(d.stack) - 1
+			if (delta != 1 && delta != -1) || top < 0 || d.stack[top].Text != target.Name || !loaded {
+				return bail("an increment of a variable that is already on the stack")
+			}
+			suffix := "++"
+			if delta == -1 {
+				suffix = "--"
+			}
+			d.stack[top] = expr{
+				Text:    target.Name + suffix,
+				Prec:    precPrimary,
+				Type:    d.stack[top].Type,
+				Effects: true,
+			}
+			return nil
+		}
+		switch {
 		case delta == 1:
 			d.emit(target.Name + "++;")
 		case delta == -1:
