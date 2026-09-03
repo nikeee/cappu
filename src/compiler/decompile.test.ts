@@ -210,11 +210,15 @@ const ENUM_CONSTANT_BODIES = ["EnumAbstract$1", "EnumAbstract$2", "EnumMixed$1",
 //     receiver's static type. That is an emitter bug, not a decompiler one.
 const EMITTER_GAP = ["ICast", "BoundErasure", "EnumUnqualified", "Boxing"];
 
-// An inner class assigns its synthetic enclosing field *before* the `super()`,
-// an order Java source cannot express: written back, the assignment follows the
-// implicit `super()` instead. `java.lang.Object`'s constructor does nothing, so
-// no program can tell the two apart - but the bytes differ, so this oracle
-// cannot judge them.
+// Two reasons at once, and this oracle can judge neither:
+//   - the constructor assigns the synthetic enclosing field *before* the
+//     `super()`, an order Java source cannot express, so written back the
+//     assignment follows the implicit `super()` instead. Nothing observes the
+//     difference where the assignment cannot throw, which is why it is written
+//     back at all - but the bytes differ;
+//   - `get()`/`sum()` read a field of the enclosing class, which cannot be
+//     resolved when this file is emitted alone, so they degrade to a constant.
+//     That is the `ICast` problem above, not a decompiler one.
 const UNWRITABLE_ORDER = ["QualifiedAnon$Inner", "QualifiedNew$Inner"];
 
 const NO_ROUNDTRIP = [
@@ -1895,6 +1899,17 @@ test(
   },
 );
 
+// A `ConstantValue` on an *instance* field is ignored by the JVM: javac assigns
+// the value in the constructor instead, so writing both is the assignment twice
+// - and on a `final` field the second one does not compile.
+test("does not write a ConstantValue on an instance field", () => {
+  const source = decompileToSource(
+    emitClass("Cvi", "public class Cvi { final int M = 10; static final int S = 20; }"),
+  );
+  expect(source).toContain("static final int S = 20;");
+  expect(source).not.toContain("int M = 10;");
+});
+
 // A superclass that is not `Object` runs code the order is observable through,
 // so the statements in front of its call still say so.
 test(
@@ -2029,6 +2044,26 @@ test("chains to the superclass constructor", () => {
 });
 
 // --- the JDK as a corpus -------------------------------------------------------------
+
+// A prologue statement that can throw is not movable across the `super()`:
+// `Object`'s constructor is where an object is registered for finalization, so
+// one that throws in front of it leaves an object that never was, and behind it
+// one that is. Newer javacs than this one null-check the enclosing instance
+// there, so the trigger has to come from the JDK on PATH.
+test("says so when a statement that can throw comes before `super()`", () => {
+  const jmod = jmodOf("java.desktop");
+  if (jmod === undefined) return; // a JRE or a stripped image: nothing to read
+  const entries = readZipEntries(readFileSync(jmod).subarray(4)) ?? [];
+  const entry = entries.find(
+    e => e.name === "classes/javax/swing/text/StringContent$StickyPosition.class",
+  );
+  if (entry === undefined) return;
+  const bytes = entry.read();
+  // Only this javac's layout is the point; one that does not null-check there
+  // has nothing to say.
+  if (!disassemble(bytes).includes("requireNonNull")) return;
+  expect(decompileToSource(bytes)).toContain("cappu: constructor call is not first");
+});
 
 /** A module of the JDK on PATH (or JAVA_HOME), when it ships the jmods/ a corpus needs. */
 function jmodOf(module: string): string | undefined {

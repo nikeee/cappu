@@ -350,6 +350,19 @@ function increments(text: string): boolean {
 }
 
 /**
+ * Whether a statement can be moved across a `super()` - which only one that
+ * cannot throw can be. A field of `this` assigned a local, `this` or a literal
+ * is the shape javac writes an inner class's captured values in; anything that
+ * calls, indexes or reads through another reference can throw, and where it
+ * lands relative to the `super()` is then observable.
+ */
+function cannotThrow(statement: Stmt): boolean {
+  if (typeof statement !== "string") return false;
+  const assignment = /^this\.[A-Za-z_$][\w$]* = ([^;]+);$/.exec(statement);
+  return assignment !== null && !/[.([]/.test(assignment[1]!);
+}
+
+/**
  * Whether a value already on the stack could *see* a write to a field or an
  * array element - which decides whether the write may be written out as a
  * statement in front of it. A local cannot be aliased and a literal is a value,
@@ -2231,13 +2244,16 @@ class BodyDecompiler {
       if (receiver.text !== "this") throw new NotDecompilable("constructor call on another object");
       // Statements in front of the call are ones source could not have written:
       // the synthetic field an inner class assigns before its `super()`, for
-      // one. `Object`'s constructor does nothing, so where that is the call
-      // nothing can tell the order apart and they stand where they are.
+      // one. Written back they follow the `super()` instead, and only a
+      // statement that cannot throw survives that move - `Object`'s
+      // constructor is where the object is registered for finalization, so one
+      // that throws in front of it leaves an object that is never registered,
+      // and after it one that is.
       const trivialSuper =
         isSuper &&
         args.length === 0 &&
         target.owner === "java/lang/Object" &&
-        this.current === this.statements;
+        this.statements.every(one => cannotThrow(one));
       if ((this.statements.length > 0 && !trivialSuper) || this.depth > 0) {
         throw new NotDecompilable("constructor call is not first");
       }
@@ -3805,8 +3821,14 @@ function simpleName(internalName: string): string {
   return slash < 0 ? internalName : internalName.slice(slash + 1);
 }
 
-/** The ConstantValue (JVMS 4.7.2) a `static final` field must be initialized to. */
+/**
+ * The ConstantValue (JVMS 4.7.2) a `static final` field must be initialized to.
+ * On an instance field the JVM ignores the attribute and javac assigns the value
+ * in the constructor instead, so writing it back would be the assignment twice -
+ * and on a `final` field the second one does not compile.
+ */
 function constantValue(field: Member, classFile: ClassFile): Expr | undefined {
+  if ((field.flags & ACC_STATIC) === 0) return undefined;
   const attribute = findAttribute(field.attributes, "ConstantValue");
   if (!attribute || attribute.bytes.length < 2) return undefined;
   const index = (attribute.bytes[0]! << 8) | attribute.bytes[1]!;

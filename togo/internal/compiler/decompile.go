@@ -299,6 +299,21 @@ func increments(text string) bool {
 	return strings.Contains(stripped, "++") || strings.Contains(stripped, "--")
 }
 
+// cannotThrow reports whether a statement can be moved across a `super()` -
+// which only one that cannot throw can be. A field of `this` assigned a local,
+// `this` or a literal is the shape javac writes an inner class's captured values
+// in; anything that calls, indexes or reads through another reference can throw,
+// and where it lands relative to the `super()` is then observable.
+func cannotThrow(statement stmt) bool {
+	if statement.Nested != nil {
+		return false
+	}
+	match := plainFieldAssignment.FindStringSubmatch(statement.Text)
+	return match != nil && !strings.ContainsAny(match[1], ".([")
+}
+
+var plainFieldAssignment = regexp.MustCompile(`^this\.[A-Za-z_$][\w$]* = ([^;]+);$`)
+
 // observesWrites reports whether a value already on the stack could *see* a
 // write to a field or an array element - which decides whether the write may be
 // written out as a statement in front of it. A local cannot be aliased and a
@@ -2674,11 +2689,17 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 		}
 		// Statements in front of the call are ones source could not have
 		// written: the synthetic field an inner class assigns before its
-		// `super()`, for one. `Object`'s constructor does nothing, so where
-		// that is the call nothing can tell the order apart and they stand
-		// where they are.
-		trivialSuper := isSuper && len(args) == 0 &&
-			target.Owner == "java/lang/Object" && d.current == &d.statements
+		// `super()`, for one. Written back they follow the `super()` instead,
+		// and only a statement that cannot throw survives that move -
+		// `Object`'s constructor is where the object is registered for
+		// finalization, so one that throws in front of it leaves an object
+		// that is never registered, and after it one that is.
+		trivialSuper := isSuper && len(args) == 0 && target.Owner == "java/lang/Object"
+		for _, one := range d.statements {
+			if !cannotThrow(one) {
+				trivialSuper = false
+			}
+		}
 		if (len(d.statements) > 0 && !trivialSuper) || d.depth > 0 {
 			return bail("constructor call is not first")
 		}
@@ -4976,8 +4997,14 @@ func simpleClassName(internal string) string {
 }
 
 // constantValue reads the ConstantValue (JVMS 4.7.2) a `static final` field must
-// be initialized to.
+// be initialized to. On an instance field the JVM ignores the attribute and
+// javac assigns the value in the constructor instead, so writing it back would
+// be the assignment twice - and on a `final` field the second one does not
+// compile.
 func constantValue(field Member, classFile *ClassFile) (expr, bool) {
+	if field.Flags&accStatic == 0 {
+		return expr{}, false
+	}
 	attribute, ok := FindAttribute(field.Attributes, "ConstantValue")
 	if !ok || len(attribute.Bytes) < 2 {
 		return expr{}, false

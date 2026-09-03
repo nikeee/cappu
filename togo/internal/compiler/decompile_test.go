@@ -111,11 +111,13 @@ var stubGap = map[string]bool{"ClassLit": true}
 //     *declaring* class into the method ref (`Number.intValue`) where javac
 //     writes the receiver's static type. That is an emitter bug, not a
 //     decompiler one.
-//   - `QualifiedAnon$Inner` and `QualifiedNew$Inner` assign the synthetic
-//     enclosing field *before* the `super()`, an order Java source cannot
-//     express: written back, the assignment follows the implicit `super()`
-//     instead. `java.lang.Object`'s constructor does nothing, so no program can
-//     tell the two apart - but the bytes differ.
+//   - `QualifiedAnon$Inner` and `QualifiedNew$Inner` fail for two reasons at
+//     once: the constructor assigns the synthetic enclosing field *before* the
+//     `super()`, an order Java source cannot express, so written back it
+//     follows the implicit `super()` and the bytes differ; and `get()`/`sum()`
+//     read a field of the enclosing class, which cannot be resolved when the
+//     file is emitted alone, so they degrade to a constant the way `ICast`
+//     does.
 var noRoundtrip = map[string]bool{
 	"ClassLit": true, "Nest$Counter": true,
 	"EnumAbstract$1": true, "EnumAbstract$2": true, "EnumMixed$1": true, "EnumMixed$2": true,
@@ -2282,6 +2284,57 @@ func TestDecompileChainsToTheSuperConstructor(t *testing.T) {
 }
 
 // --- the JDK as a corpus -------------------------------------------------------------
+
+// A prologue statement that can throw is not movable across the `super()`:
+// `Object`'s constructor is where an object is registered for finalization, so
+// one that throws in front of it leaves an object that never was, and behind it
+// one that is. Newer javacs than this one null-check the enclosing instance
+// there, so the trigger has to come from the JDK on PATH.
+func TestDecompileSaysWhenAStatementThatCanThrowComesBeforeSuper(t *testing.T) {
+	jmod := jmodOf("java.desktop")
+	if jmod == "" {
+		t.Skip("no JDK with jmods/")
+	}
+	var bytes []byte
+	for _, entry := range readJmodEntries(jmod) {
+		if entry.Name == "classes/javax/swing/text/StringContent$StickyPosition.class" {
+			bytes = entry.Read()
+		}
+	}
+	if bytes == nil {
+		t.Skip("the class is not in this image")
+	}
+	// Only this javac's layout is the point; one that does not null-check there
+	// has nothing to say.
+	text, err := Disassemble(bytes)
+	if err != nil || !strings.Contains(text, "requireNonNull") {
+		t.Skip("this javac does not null-check the enclosing instance")
+	}
+	source, err := Decompile(bytes)
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: constructor call is not first") {
+		t.Errorf("expected the bail:\n%s", source)
+	}
+}
+
+// A `ConstantValue` on an *instance* field is ignored by the JVM: javac assigns
+// the value in the constructor instead, so writing both is the assignment twice
+// - and on a `final` field the second one does not compile.
+func TestDecompileDoesNotWriteAConstantValueOnAnInstanceField(t *testing.T) {
+	source, err := Decompile(emitClassBytesNoDebug(t, "Cvi",
+		`public class Cvi { final int M = 10; static final int S = 20; }`))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "static final int S = 20;") {
+		t.Errorf("the static ConstantValue is missing:\n%s", source)
+	}
+	if strings.Contains(source, "int M = 10;") {
+		t.Errorf("the instance ConstantValue came back:\n%s", source)
+	}
+}
 
 // jmodOf is a module of the JDK on PATH (or JAVA_HOME), when it ships the jmods/
 // a class corpus needs.
