@@ -808,6 +808,65 @@ func TestDecompileWritesAnIncrementBehindAValueOnTheStack(t *testing.T) {
 	}
 }
 
+// A `return` inside a loop is a statement, not the loop's end - but where the
+// test carries a call the header is not a pure test, so the follow has to come
+// from somewhere else. A single unconditional latch says the test is still the
+// header, and what it leaves to is the end.
+const loopRetSource = `import java.util.*;
+public class LoopRet {
+  static int log;
+  static int size(List<Object> l) { log++; return l.size(); }
+  static int idx(List<Object> l, Object x) {
+    for (int i = 0; i < size(l); i++) { if (l.get(i) == x) return i; } return -1; }
+  static int two(List<Object> l, Object x, Object y) {
+    for (int i = 0; i < size(l); i++) {
+      if (l.get(i) == x) return i; if (l.get(i) == y) return -i - 1; } return -99; }
+  static int doBrk(List<Object> l) {
+    int i = 0, s = 0; do { if (size(l) == 0) break; s += i; i++; } while (i < 3); return s; }
+  static int forever(List<Object> l) {
+    int s = 0, i = 0;
+    while (true) { int n = size(l); if (i >= n) break; s += i; i++; } return s; }
+}`
+
+// log counts the test, so a loop whose condition moved prints differently.
+const loopRetDriverSource = `import java.util.*;
+public class LoopRetDriver {
+  public static void main(String[] args) {
+    List<Object> l = new ArrayList<>(List.of("a", "b", "c"));
+    for (Object t : new Object[] { "a", "c", "zz" }) {
+      LoopRet.log = 0;
+      System.out.println(LoopRet.idx(l, t) + " " + LoopRet.two(l, t, "b")
+        + " " + LoopRet.doBrk(l) + " " + LoopRet.forever(l) + " " + LoopRet.log);
+    }
+  }
+}`
+
+func TestDecompileReconstructsALoopAReturnLeavesWhoseTestCarriesACall(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "LoopRet", loopRetSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "LoopRet", source)
+	compileWithJavacOn(t, dir, "LoopRetDriver", loopRetDriverSource, dir)
+	expected := runJava(t, dir, "LoopRetDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "LoopRetDriver")
+	if actual != expected {
+		t.Errorf("the decompiled class runs differently:\n%s\n--- from ---\n%s", actual, expected)
+	}
+	if expected == "" {
+		t.Fatal("the driver printed nothing")
+	}
+}
+
 // An inner class assigns the enclosing instance to its synthetic field before
 // the `super()`, which source cannot write. `Object`'s constructor does nothing,
 // so the assignment stands where it is and the `super()` is dropped as usual.

@@ -1324,8 +1324,22 @@ function loopFollow(
       other => other === candidate || reachableBlocks(blocks, [other]).has(candidate),
     ),
   );
-  if (merged === undefined) throw new NotDecompilable("a loop with more than one exit");
-  return merged;
+  if (merged !== undefined) return merged;
+  // None of them reaches the others, so they are `return`s and the loop's own
+  // end. Where the test is the header - which a single unconditional latch says,
+  // a conditional one being the test of a `do` - what the header leaves to is
+  // that end, and the rest are `return`s the body writes.
+  const single = blocks.get(latches[0]!);
+  if (
+    latches.length === 1 &&
+    single !== undefined &&
+    single.kind !== "conditional" &&
+    blocks.get(header)!.kind === "conditional" &&
+    fromHeader.length === 1
+  ) {
+    return fromHeader[0]!;
+  }
+  throw new NotDecompilable("a loop with more than one exit");
 }
 
 /**

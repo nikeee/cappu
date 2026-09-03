@@ -1568,6 +1568,16 @@ func loopFollow(blocks map[int]*block, header int, latches []int, body map[int]b
 			return candidate, nil
 		}
 	}
+	// None of them reaches the others, so they are `return`s and the loop's own
+	// end. Where the test is the header - which a single unconditional latch
+	// says, a conditional one being the test of a `do` - what the header leaves
+	// to is that end, and the rest are `return`s the body writes.
+	if fromHeader := outside(header); len(latches) == 1 &&
+		blocks[header].Kind == blockConditional && len(fromHeader) == 1 {
+		if single, ok := blocks[latches[0]]; ok && single.Kind != blockConditional {
+			return fromHeader[0], nil
+		}
+	}
 	return 0, bail("a loop with more than one exit")
 }
 

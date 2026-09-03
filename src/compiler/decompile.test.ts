@@ -1875,6 +1875,60 @@ const INCY_SOURCE =
 // A `char`, `byte` or `short` post-increment is an `iload`/`iadd`/`i2c`/`istore`,
 // not an `iinc`: the store is a statement, so writing it in front of the value
 // already on the stack would make that value read the incremented one.
+// A `return` inside a loop is a statement, not the loop's end - but where the
+// test carries a call the header is not a pure test, so the follow has to come
+// from somewhere else. A single unconditional latch says the test is still the
+// header, and what it leaves to is the end.
+const LOOPRET_SOURCE =
+  "import java.util.*;\n" +
+  "public class LoopRet {\n" +
+  "  static int log;\n" +
+  "  static int size(List<Object> l) { log++; return l.size(); }\n" +
+  "  static int idx(List<Object> l, Object x) {\n" +
+  "    for (int i = 0; i < size(l); i++) { if (l.get(i) == x) return i; } return -1; }\n" +
+  "  static int two(List<Object> l, Object x, Object y) {\n" +
+  "    for (int i = 0; i < size(l); i++) {\n" +
+  "      if (l.get(i) == x) return i; if (l.get(i) == y) return -i - 1; } return -99; }\n" +
+  "  static int doBrk(List<Object> l) {\n" +
+  "    int i = 0, s = 0; do { if (size(l) == 0) break; s += i; i++; } while (i < 3); return s; }\n" +
+  "  static int forever(List<Object> l) {\n" +
+  "    int s = 0, i = 0;\n" +
+  "    while (true) { int n = size(l); if (i >= n) break; s += i; i++; } return s; }\n" +
+  "}\n";
+
+test(
+  "reconstructs a loop a `return` leaves, whose test carries a call",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-loopret-");
+    const classFile = compileWithJavac(LOOPRET_SOURCE, "LoopRet", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "LoopRet", again);
+    // `log` counts the test, so a loop whose condition moved prints differently.
+    const driver =
+      "import java.util.*;\n" +
+      "public class LoopRetDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      '    List<Object> l = new ArrayList<>(List.of("a", "b", "c"));\n' +
+      '    for (Object t : new Object[] { "a", "c", "zz" }) {\n' +
+      "      LoopRet.log = 0;\n" +
+      '      System.out.println(LoopRet.idx(l, t) + " " + LoopRet.two(l, t, "b")\n' +
+      '        + " " + LoopRet.doBrk(l) + " " + LoopRet.forever(l) + " " + LoopRet.log);\n' +
+      "    }\n" +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "LoopRetDriver", dir.path, dir.path);
+    const expected = execFileSync("java", ["-cp", dir.path, "LoopRetDriver"], { encoding: "utf8" });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "LoopRetDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).not.toEqual("");
+  },
+);
+
 // An inner class assigns the enclosing instance to its synthetic field before
 // the `super()`, which source cannot write. `Object`'s constructor does nothing,
 // so the assignment stands where it is and the `super()` is dropped as usual.
