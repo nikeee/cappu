@@ -285,12 +285,28 @@ func asBoolean(e expr) expr {
 	return e
 }
 
+// withoutLiterals is a value's text with its string and character literals
+// removed, so a name or an operator inside one is not read as code.
+func withoutLiterals(text string) string {
+	return literalText.ReplaceAllString(text, "")
+}
+
+// increments reports whether a value carries an increment. `Effects` says the
+// same for a call, but it is a property of the value, and an operand keeps none
+// of it when it is nested into a larger expression - the text does.
+func increments(text string) bool {
+	stripped := withoutLiterals(text)
+	return strings.Contains(stripped, "++") || strings.Contains(stripped, "--")
+}
+
 // observesWrites reports whether a value already on the stack could *see* a
 // write to a field or an array element - which decides whether the write may be
 // written out as a statement in front of it. A local cannot be aliased and a
-// literal is a value, so only a field, an array element or a call can.
+// literal is a value, so only a field, an array element or a call can. A value
+// that increments is the other way round: the write would run before an
+// increment that has already happened.
 func observesWrites(value expr, locals map[string]bool) bool {
-	if value.Effects {
+	if value.Effects || increments(value.Text) {
 		return true
 	}
 	withoutLiterals := literalText.ReplaceAllString(value.Text, "")
@@ -2739,9 +2755,11 @@ func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType strin
 	// The assignment is a statement here, so it runs before everything the stack
 	// already holds - and those read the variable as it is *after* it. A `char`,
 	// `byte` or `short` post-increment is written this way rather than with an
-	// `iinc`, and so is any other assignment used as a value.
+	// `iinc`, and so is any other assignment used as a value. A value that
+	// increments is wrong the other way round: this would run before an
+	// increment that has already happened.
 	for _, one := range d.stack {
-		if reads(one.Text, target.Name) {
+		if increments(one.Text) || reads(withoutLiterals(one.Text), target.Name) {
 			return bail("an assignment to a variable that is already on the stack")
 		}
 	}
@@ -4473,7 +4491,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int, previous *Ins
 		// could not have put it.
 		onStack := false
 		for _, value := range d.stack {
-			if reads(value.Text, target.Name) {
+			if reads(withoutLiterals(value.Text), target.Name) {
 				onStack = true
 			}
 		}
@@ -4622,7 +4640,7 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int, previous *Ins
 		if err != nil {
 			return err
 		}
-		d.push(primary(at(array, precPrimary)+"["+index.Text+"]", elementType(array.Type, mnemonic[0])))
+		d.push(primary(at(array, precPrimary)+"["+coerce(index, "int")+"]", elementType(array.Type, mnemonic[0])))
 		return nil
 	}
 	if isOneOf(mnemonic, "ilfdabcs", "astore") {
@@ -4823,6 +4841,11 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int, previous *Ins
 		for _, value := range taken {
 			if value.Effects {
 				return bail("dup of a call")
+			}
+			// The text is written once per copy, so an increment inside it would
+			// run once per copy too.
+			if increments(value.Text) {
+				return bail("dup of an increment")
 			}
 			if value.Compared != nil {
 				return bail("dup of a comparison")

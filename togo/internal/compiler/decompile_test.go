@@ -800,6 +800,20 @@ func TestDecompileWritesAnIncrementBehindAValueOnTheStack(t *testing.T) {
 	}
 }
 
+// A boolean javac erased to `1`/`0` is still a boolean where it is written back,
+// so an array index needs the ternary again - `a[b]` is not Java.
+func TestDecompileWritesAMaterializedBooleanArrayIndexAsTheTernary(t *testing.T) {
+	source, err := Decompile(emitClassBytesNoDebug(t, "BoolIndex",
+		`public class BoolIndex { int[][] t; int[] k;`+
+			` void f(boolean d) { this.k = this.t[d ? 1 : 0]; } }`))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "this.t[arg0 ? 1 : 0]") {
+		t.Errorf("expected the ternary index:\n%s", source)
+	}
+}
+
 // A `char`, `byte` or `short` post-increment is an `iload`/`iadd`/`i2c`/`istore`,
 // not an `iinc`: the store is a statement, so writing it in front of the value
 // already on the stack would make that value read the incremented one.
@@ -812,6 +826,43 @@ func TestDecompileSaysWhenAnAssignmentHappensWhileTheVariableIsOnTheStack(t *tes
 	}
 	if !strings.Contains(source, "cappu: an assignment to a variable that is already on the stack") {
 		t.Errorf("expected the assignment bail:\n%s", source)
+	}
+}
+
+// An increment is not a value that may be written twice or moved: `Effects` says
+// so for a call, but an operand keeps none of it once it is nested, so the text
+// is what the `dup` and the assignment guards have to read.
+const incyBailsSource = `public class IncyBails {
+  static int n;
+  static int g(int a, int b) { n += a * 100 + b; return a - b; }
+  static int nested(int[] a, int i) { a[a[i++]] += 1; return a[0]; }
+  static int before(int[] a, int i) { return g(i++ + 1, a[i] = 5); }
+  static int field(int i) { return g(i++ + 1, n = i); }
+  static int local(int i) { int x = -1; int r = g(i++, x = i); return r + x; }
+}`
+
+func TestDecompileSaysWhenAnIncrementWouldBeWrittenTwiceOrMoved(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "IncyBails", incyBailsSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: dup of an increment") {
+		t.Errorf("expected the dup bail:\n%s", source)
+	}
+	if !strings.Contains(source, "cappu: an assignment with a value that could see it on the stack") {
+		t.Errorf("expected the assignment bail:\n%s", source)
+	}
+	if !strings.Contains(source, "cappu: an assignment to a variable that is already on the stack") {
+		t.Errorf("expected the local-store bail:\n%s", source)
+	}
+	// `g` is the only body that comes back.
+	if strings.Count(source, "cappu: ") != 8 {
+		t.Errorf("expected four bailed methods, got:\n%s", source)
 	}
 }
 

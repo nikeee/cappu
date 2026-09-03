@@ -333,13 +333,32 @@ function ternary(condition: Expr, thenValue: Expr, elseValue: Expr): Expr | unde
  * wrote and the one that recompiles to the same branch.
  */
 /**
+ * A value's text with its string and character literals removed, so a name or
+ * an operator inside one is not read as code.
+ */
+function withoutLiterals(text: string): string {
+  return text.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "");
+}
+
+/**
+ * Whether a value carries an increment. `effects` says the same for a call, but
+ * it is a property of the value, and an operand keeps none of it when it is
+ * nested into a larger expression - the text does.
+ */
+function increments(text: string): boolean {
+  return /\+\+|--/.test(withoutLiterals(text));
+}
+
+/**
  * Whether a value already on the stack could *see* a write to a field or an
  * array element - which decides whether the write may be written out as a
  * statement in front of it. A local cannot be aliased and a literal is a value,
- * so only a field, an array element or a call can.
+ * so only a field, an array element or a call can. A value that increments is
+ * the other way round: the write would run before an increment that has already
+ * happened.
  */
 function observesWrites(value: Expr, locals: ReadonlySet<string>): boolean {
-  if (value.effects === true) return true;
+  if (value.effects === true || increments(value.text)) return true;
   const withoutLiterals = value.text.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "");
   // A field access or an array element can be the one being written, under this
   // name or another.
@@ -2262,8 +2281,12 @@ class BodyDecompiler {
     // The assignment is a statement here, so it runs before everything the stack
     // already holds - and those read the variable as it is *after* it. A `char`,
     // `byte` or `short` post-increment is written this way rather than with an
-    // `iinc`, and so is any other assignment used as a value.
-    if (this.stack.some(one => reads(one.text, local.name))) {
+    // `iinc`, and so is any other assignment used as a value. A value that
+    // increments is wrong the other way round: this would run before an
+    // increment that has already happened.
+    if (
+      this.stack.some(one => increments(one.text) || reads(withoutLiterals(one.text), local.name))
+    ) {
       throw new NotDecompilable("an assignment to a variable that is already on the stack");
     }
     local.storeBlocks.add(this.currentBlock);
@@ -3473,7 +3496,7 @@ class BodyDecompiler {
         previous !== undefined &&
         previous.mnemonic.startsWith("iload") &&
         this.slotOf(previous) === instruction.arg;
-      if (this.stack.some(value => reads(value.text, local.name))) {
+      if (this.stack.some(value => reads(withoutLiterals(value.text), local.name))) {
         if (Math.abs(delta) !== 1 || top === undefined || top.text !== local.name || !loaded) {
           throw new NotDecompilable("an increment of a variable that is already on the stack");
         }
@@ -3693,6 +3716,9 @@ class BodyDecompiler {
       // under is popped and pushed back untouched.
       for (const value of taken) {
         if (value.effects === true) throw new NotDecompilable("dup of a call");
+        // The text is written once per copy, so an increment inside it would
+        // run once per copy too.
+        if (increments(value.text)) throw new NotDecompilable("dup of an increment");
         if (value.compared !== undefined) throw new NotDecompilable("dup of a comparison");
         // Only a value that reads the same thing every time may be written
         // twice; an expression would be *computed* twice (`new int[2][0] = 1;`).

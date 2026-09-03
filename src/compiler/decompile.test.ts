@@ -1858,6 +1858,19 @@ const INCY_SOURCE =
 // A `char`, `byte` or `short` post-increment is an `iload`/`iadd`/`i2c`/`istore`,
 // not an `iinc`: the store is a statement, so writing it in front of the value
 // already on the stack would make that value read the incremented one.
+// A boolean javac erased to `1`/`0` is still a boolean where it is written back,
+// so an array index needs the ternary again - `a[b]` is not Java.
+test("writes a materialized boolean array index as the ternary", () => {
+  const source = decompileToSource(
+    emitClass(
+      "BoolIndex",
+      "public class BoolIndex { int[][] t; int[] k;" +
+        " void f(boolean d) { this.k = this.t[d ? 1 : 0]; } }",
+    ),
+  );
+  expect(source).toContain("this.t[arg0 ? 1 : 0]");
+});
+
 test("says so when an assignment happens while the variable is on the stack", () => {
   const source = decompileToSource(
     emitClass(
@@ -1868,6 +1881,38 @@ test("says so when an assignment happens while the variable is on the stack", ()
   );
   expect(source).toContain("cappu: an assignment to a variable that is already on the stack");
 });
+
+// An increment is not a value that may be written twice or moved: `effects`
+// says so for a call, but an operand keeps none of it once it is nested, so the
+// text is what the `dup` and the assignment guards have to read.
+const INCY_BAILS_SOURCE =
+  "public class IncyBails {\n" +
+  "  static int n;\n" +
+  "  static int g(int a, int b) { n += a * 100 + b; return a - b; }\n" +
+  // The `dup` family writes the target twice, and the increment with it.
+  "  static int nested(int[] a, int i) { a[a[i++]] += 1; return a[0]; }\n" +
+  // The array store is a statement, so it would run before the increment that
+  // has already happened.
+  "  static int before(int[] a, int i) { return g(i++ + 1, a[i] = 5); }\n" +
+  "  static int field(int i) { return g(i++ + 1, n = i); }\n" +
+  // The local store is a statement too, and there is no `iinc` to move.
+  "  static int local(int i) { int x = -1; int r = g(i++, x = i); return r + x; }\n" +
+  "}\n";
+
+test(
+  "says so when an increment would be written twice or moved",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-incybails-");
+    const classFile = compileWithJavac(INCY_BAILS_SOURCE, "IncyBails", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).toContain("cappu: dup of an increment");
+    expect(source).toContain("cappu: an assignment with a value that could see it on the stack");
+    expect(source).toContain("cappu: an assignment to a variable that is already on the stack");
+    // `g` is the only body that comes back.
+    expect(source.match(/cappu: /g)?.length).toBe(8);
+  },
+);
 
 test(
   "writes the increment behind a value on the stack the way source did",
