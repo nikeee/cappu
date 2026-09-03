@@ -2672,7 +2672,14 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 		if receiver.Text != "this" {
 			return bail("constructor call on another object")
 		}
-		if len(d.statements) > 0 || d.depth > 0 {
+		// Statements in front of the call are ones source could not have
+		// written: the synthetic field an inner class assigns before its
+		// `super()`, for one. `Object`'s constructor does nothing, so where
+		// that is the call nothing can tell the order apart and they stand
+		// where they are.
+		trivialSuper := isSuper && len(args) == 0 &&
+			target.Owner == "java/lang/Object" && d.current == &d.statements
+		if (len(d.statements) > 0 && !trivialSuper) || d.depth > 0 {
 			return bail("constructor call is not first")
 		}
 		// javac writes the implicit `super()` into every constructor; source

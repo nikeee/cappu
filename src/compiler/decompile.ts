@@ -2229,7 +2229,16 @@ class BodyDecompiler {
       const isThis = target.owner === this.classFile.thisClass;
       if (!isSuper && !isThis) throw new NotDecompilable("constructor call to an unrelated class");
       if (receiver.text !== "this") throw new NotDecompilable("constructor call on another object");
-      if (this.statements.length > 0 || this.depth > 0) {
+      // Statements in front of the call are ones source could not have written:
+      // the synthetic field an inner class assigns before its `super()`, for
+      // one. `Object`'s constructor does nothing, so where that is the call
+      // nothing can tell the order apart and they stand where they are.
+      const trivialSuper =
+        isSuper &&
+        args.length === 0 &&
+        target.owner === "java/lang/Object" &&
+        this.current === this.statements;
+      if ((this.statements.length > 0 && !trivialSuper) || this.depth > 0) {
         throw new NotDecompilable("constructor call is not first");
       }
       // javac writes the implicit `super()` into every constructor; source does

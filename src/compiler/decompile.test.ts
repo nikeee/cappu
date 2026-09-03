@@ -86,6 +86,8 @@ const FULLY_DECOMPILED = [
   "NewArray",
   "PrivateCall",
   "Pt",
+  "QualifiedAnon$Inner",
+  "QualifiedNew$Inner",
   "ReturnLiterals",
   "Returns",
   "Rt",
@@ -106,9 +108,7 @@ const NOT_DECOMPILED = [
   "EnumAbstract",
   "EnumMixed",
   "QualifiedAnon$1",
-  "QualifiedAnon$Inner",
   "QualifiedAnon",
-  "QualifiedNew$Inner",
   "QualifiedNew",
 ];
 
@@ -210,7 +210,20 @@ const ENUM_CONSTANT_BODIES = ["EnumAbstract$1", "EnumAbstract$2", "EnumMixed$1",
 //     receiver's static type. That is an emitter bug, not a decompiler one.
 const EMITTER_GAP = ["ICast", "BoundErasure", "EnumUnqualified", "Boxing"];
 
-const NO_ROUNDTRIP = [...STUB_GAP, "Nest$Counter", ...ENUM_CONSTANT_BODIES, ...EMITTER_GAP];
+// An inner class assigns its synthetic enclosing field *before* the `super()`,
+// an order Java source cannot express: written back, the assignment follows the
+// implicit `super()` instead. `java.lang.Object`'s constructor does nothing, so
+// no program can tell the two apart - but the bytes differ, so this oracle
+// cannot judge them.
+const UNWRITABLE_ORDER = ["QualifiedAnon$Inner", "QualifiedNew$Inner"];
+
+const NO_ROUNDTRIP = [
+  ...STUB_GAP,
+  "Nest$Counter",
+  ...ENUM_CONSTANT_BODIES,
+  ...EMITTER_GAP,
+  ...UNWRITABLE_ORDER,
+];
 
 for (const name of FULLY_DECOMPILED.filter(n => !NO_ROUNDTRIP.includes(n))) {
   test(`recompiles to the same bytecode: ${name}`, () => {
@@ -1858,6 +1871,50 @@ const INCY_SOURCE =
 // A `char`, `byte` or `short` post-increment is an `iload`/`iadd`/`i2c`/`istore`,
 // not an `iinc`: the store is a statement, so writing it in front of the value
 // already on the stack would make that value read the incremented one.
+// An inner class assigns the enclosing instance to its synthetic field before
+// the `super()`, which source cannot write. `Object`'s constructor does nothing,
+// so the assignment stands where it is and the `super()` is dropped as usual.
+test(
+  "reconstructs a constructor that assigns a field before `super()`",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-ctorfirst-");
+    compileWithJavac(
+      "public class Ctory { int base = 3;\n" +
+        "  class In { int k; In(int k) { this.k = k; } int get() { return k + base; } }\n" +
+        "}\n",
+      "Ctory",
+      dir.path,
+    );
+    const source = decompileToSource(readFileSync(join(dir.path, "Ctory$In.class")));
+    expect(source).not.toContain("/* cappu:");
+    expect(source).toContain("this.this$0 = arg0;");
+    expect(source).toContain("this.k = arg1;");
+    // The `super()` javac wrote is still implicit.
+    expect(source).not.toContain("super(");
+  },
+);
+
+// A superclass that is not `Object` runs code the order is observable through,
+// so the statements in front of its call still say so.
+test(
+  "says so when a field is assigned before a superclass constructor that runs",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-ctorsuper-");
+    compileWithJavac(
+      "public class Ctors { int base = 3;\n" +
+        '  static class Base { Base() { System.out.print(""); } }\n' +
+        "  class In extends Base { int k; In(int k) { this.k = k; } int get() { return k + base; } }\n" +
+        "}\n",
+      "Ctors",
+      dir.path,
+    );
+    const source = decompileToSource(readFileSync(join(dir.path, "Ctors$In.class")));
+    expect(source).toContain("cappu: constructor call is not first");
+  },
+);
+
 // A boolean javac erased to `1`/`0` is still a boolean where it is written back,
 // so an array index needs the ternary again - `a[b]` is not Java.
 test("writes a materialized boolean array index as the ternary", () => {

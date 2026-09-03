@@ -59,6 +59,8 @@ var fullyDecompiled = []string{
 	"NewArray",
 	"PrivateCall",
 	"Pt",
+	"QualifiedAnon$Inner",
+	"QualifiedNew$Inner",
 	"ReturnLiterals",
 	"Returns",
 	"Rt",
@@ -79,9 +81,7 @@ var notDecompiled = []string{
 	"EnumAbstract",
 	"EnumMixed",
 	"QualifiedAnon$1",
-	"QualifiedAnon$Inner",
 	"QualifiedAnon",
-	"QualifiedNew$Inner",
 	"QualifiedNew",
 }
 
@@ -111,10 +111,16 @@ var stubGap = map[string]bool{"ClassLit": true}
 //     *declaring* class into the method ref (`Number.intValue`) where javac
 //     writes the receiver's static type. That is an emitter bug, not a
 //     decompiler one.
+//   - `QualifiedAnon$Inner` and `QualifiedNew$Inner` assign the synthetic
+//     enclosing field *before* the `super()`, an order Java source cannot
+//     express: written back, the assignment follows the implicit `super()`
+//     instead. `java.lang.Object`'s constructor does nothing, so no program can
+//     tell the two apart - but the bytes differ.
 var noRoundtrip = map[string]bool{
 	"ClassLit": true, "Nest$Counter": true,
 	"EnumAbstract$1": true, "EnumAbstract$2": true, "EnumMixed$1": true, "EnumMixed$2": true,
 	"ICast": true, "BoundErasure": true, "EnumUnqualified": true, "Boxing": true,
+	"QualifiedAnon$Inner": true, "QualifiedNew$Inner": true,
 }
 
 func decompileBaseline(t *testing.T, name string) string {
@@ -797,6 +803,55 @@ func TestDecompileWritesAnIncrementBehindAValueOnTheStack(t *testing.T) {
 	}
 	if !strings.Contains(source, `return "x" + arg0++ + arg0;`) {
 		t.Errorf("expected the post-increment:\n%s", source)
+	}
+}
+
+// An inner class assigns the enclosing instance to its synthetic field before
+// the `super()`, which source cannot write. `Object`'s constructor does nothing,
+// so the assignment stands where it is and the `super()` is dropped as usual.
+func TestDecompileReconstructsAConstructorThatAssignsAFieldBeforeSuper(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	compileWithJavac(t, dir, "Ctory", `public class Ctory { int base = 3;
+  class In { int k; In(int k) { this.k = k; } int get() { return k + base; } }
+}`)
+	source, err := Decompile(readFile(t, filepath.Join(dir, "Ctory$In.class")))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("the constructor bailed:\n%s", source)
+	}
+	for _, want := range []string{"this.this$0 = arg0;", "this.k = arg1;"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	// The `super()` javac wrote is still implicit.
+	if strings.Contains(source, "super(") {
+		t.Errorf("the implicit super() came back:\n%s", source)
+	}
+}
+
+// A superclass that is not `Object` runs code the order is observable through,
+// so the statements in front of its call still say so.
+func TestDecompileSaysWhenAFieldIsAssignedBeforeASuperclassConstructorThatRuns(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	compileWithJavac(t, dir, "Ctors", `public class Ctors { int base = 3;
+  static class Base { Base() { System.out.print(""); } }
+  class In extends Base { int k; In(int k) { this.k = k; } int get() { return k + base; } }
+}`)
+	source, err := Decompile(readFile(t, filepath.Join(dir, "Ctors$In.class")))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(source, "cappu: constructor call is not first") {
+		t.Errorf("expected the bail:\n%s", source)
 	}
 }
 
