@@ -825,6 +825,8 @@ public class Assigny {
   static int arg(Deque<String> q) {
     String line; return len(line = poll(q)) + (line == null ? 7 : 0); }
   static int len(String s) { return s == null ? 0 : s.length(); }
+  static int readsTarget() { int v = 7; return two(v, v = len("ab")) * 10 + v; }
+  static int two(int a, int b) { return a * 100 + b; }
 }`
 
 // log counts the call, so a value copied instead of assigned prints twice.
@@ -838,7 +840,8 @@ public class AssignyDriver {
       System.out.println(Assigny.whileAssign(new ArrayDeque<>(q))
         + " " + Assigny.ifAssign(new ArrayDeque<>(q))
         + " " + Assigny.chain(new ArrayDeque<>(q))
-        + " " + Assigny.arg(new ArrayDeque<>(q)) + " " + Assigny.log);
+        + " " + Assigny.arg(new ArrayDeque<>(q))
+        + " " + Assigny.readsTarget() + " " + Assigny.log);
     }
   }
 }`

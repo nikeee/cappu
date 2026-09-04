@@ -1894,6 +1894,10 @@ const ASSIGNY_SOURCE =
   "  static int arg(Deque<String> q) {\n" +
   "    String line; return len(line = poll(q)) + (line == null ? 7 : 0); }\n" +
   "  static int len(String s) { return s == null ? 0 : s.length(); }\n" +
+  // The ordering case: the argument to its left reads the very variable being
+  // assigned, so it has to keep reading the old value.
+  '  static int readsTarget() { int v = 7; return two(v, v = len("ab")) * 10 + v; }\n' +
+  "  static int two(int a, int b) { return a * 100 + b; }\n" +
   "}\n";
 
 test(
@@ -1919,7 +1923,8 @@ test(
       "      System.out.println(Assigny.whileAssign(new ArrayDeque<>(q))\n" +
       '        + " " + Assigny.ifAssign(new ArrayDeque<>(q))\n' +
       '        + " " + Assigny.chain(new ArrayDeque<>(q))\n' +
-      '        + " " + Assigny.arg(new ArrayDeque<>(q)) + " " + Assigny.log);\n' +
+      '        + " " + Assigny.arg(new ArrayDeque<>(q))\n' +
+      '        + " " + Assigny.readsTarget() + " " + Assigny.log);\n' +
       "    }\n" +
       "  }\n" +
       "}";
