@@ -811,6 +811,37 @@ func TestDecompileWritesAnIncrementBehindAValueOnTheStack(t *testing.T) {
 // A condition javac materialized as `1`/`0` reads as the condition itself, so
 // every place that wants a *number* has to ask for the ternary back. A switch
 // selector is one of them: `switch (flag)` is not Java.
+// A lambda has no type of its own, so where it is stored *as a value* the type
+// has to come from the variable it is assigned to. That crosses the assignment
+// path with the lambda one, and neither fixture covered the pair. cappu's own
+// emitter cannot build this source, so the class has to come from javac.
+func TestDecompileWritesALambdaStoredAsAValue(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "LamValue", `public class LamValue { static Object obj; static int log;
+  static void assignLambda() { Runnable r; obj = (r = () -> { log += 5; }); r.run(); }
+  static String methodRef() {
+    java.util.function.Supplier<String> s; obj = (s = LamValue::name);
+    return s.get(); }
+  static String name() { return "abcd"; }
+}`)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	// The target type is the variable's, so neither needs the interface named.
+	for _, want := range []string{"obj = var0 = () ->", "obj = var0 = LamValue::name;"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+}
+
 func TestDecompileWritesAMaterializedBooleanWhereANumberIsWanted(t *testing.T) {
 	source, err := Decompile(emitClassBytesNoDebug(t, "AsInt",
 		`public class AsInt { static int[] a = {10, 20};

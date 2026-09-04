@@ -1873,9 +1873,6 @@ const INCY_SOURCE =
   "  static int twice(int[] a, int i) { return a[i++] + a[i++]; }\n" +
   "}\n";
 
-// A `char`, `byte` or `short` post-increment is an `iload`/`iadd`/`i2c`/`istore`,
-// not an `iinc`: the store is a statement, so writing it in front of the value
-// already on the stack would make that value read the incremented one.
 // A condition javac materialized as `1`/`0` reads as the condition itself, so
 // every place that wants a *number* has to ask for the ternary back. A switch
 // selector is one of them: `switch (flag)` is not Java.
@@ -1903,6 +1900,30 @@ test("writes a materialized boolean in every place that wants a number", () => {
   expect(source).toContain("(arg0 ? 1 : 0) + 5");
   expect(source).toContain("1 << (arg0 ? 1 : 0)");
   expect(source).toContain("f(arg0 ? 1 : 0)");
+});
+
+// A lambda has no type of its own, so where it is stored *as a value* the type
+// has to come from the variable it is assigned to. That crosses the assignment
+// path with the lambda one, and neither fixture covered the pair. cappu's own
+// emitter cannot build this source, so the class has to come from javac.
+test("writes a lambda stored as a value", { skip: HAS_JAVAC ? false : "no JDK (javac)" }, () => {
+  using dir = TempDir.create("cappu-decompile-lamvalue-");
+  const classFile = compileWithJavac(
+    "public class LamValue { static Object obj; static int log;\n" +
+      "  static void assignLambda() { Runnable r; obj = (r = () -> { log += 5; }); r.run(); }\n" +
+      "  static String methodRef() {\n" +
+      "    java.util.function.Supplier<String> s; obj = (s = LamValue::name);\n" +
+      "    return s.get(); }\n" +
+      '  static String name() { return "abcd"; }\n' +
+      "}\n",
+    "LamValue",
+    dir.path,
+  );
+  const source = decompileToSource(readFileSync(classFile));
+  expect(source).not.toContain("/* cappu:");
+  // The target type is the variable's, so neither needs the interface named.
+  expect(source).toContain("obj = var0 = () ->");
+  expect(source).toContain("obj = var0 = LamValue::name;");
 });
 
 // javac copies a value with `dup` and stores the copy where source wrote an
@@ -2089,6 +2110,9 @@ test("writes a materialized boolean array index as the ternary", () => {
   expect(source).toContain("this.t[arg0 ? 1 : 0]");
 });
 
+// A `char`, `byte` or `short` post-increment is an `iload`/`iadd`/`i2c`/`istore`,
+// not an `iinc`: the store is a statement, so writing it in front of the value
+// already on the stack would make that value read the incremented one.
 test("says so when an assignment happens while the variable is on the stack", () => {
   const source = decompileToSource(
     emitClass(
