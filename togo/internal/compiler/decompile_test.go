@@ -808,6 +808,42 @@ func TestDecompileWritesAnIncrementBehindAValueOnTheStack(t *testing.T) {
 	}
 }
 
+// A condition javac materialized as `1`/`0` reads as the condition itself, so
+// every place that wants a *number* has to ask for the ternary back. A switch
+// selector is one of them: `switch (flag)` is not Java.
+func TestDecompileWritesAMaterializedBooleanWhereANumberIsWanted(t *testing.T) {
+	source, err := Decompile(emitClassBytesNoDebug(t, "AsInt",
+		`public class AsInt { static int[] a = {10, 20};
+  static int f(int v) { return v; }
+  static int index(boolean c) { return a[c ? 1 : 0]; }
+  static int length(boolean c) { return new int[c ? 1 : 0].length; }
+  static int arith(boolean c) { return (c ? 1 : 0) + 5; }
+  static int shift(boolean c) { return 1 << (c ? 1 : 0); }
+  static int argument(boolean c) { return f(c ? 1 : 0); }
+  static int selector(boolean c) {
+    switch (c ? 1 : 0) { case 0: return 100; default: return 200; } }
+}`))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	for _, want := range []string{
+		// The selector is the one this missed: it used to write `switch (arg0)`.
+		"switch (arg0 ? 1 : 0) {",
+		"a[arg0 ? 1 : 0]",
+		"new int[arg0 ? 1 : 0]",
+		"(arg0 ? 1 : 0) + 5",
+		"1 << (arg0 ? 1 : 0)",
+		"f(arg0 ? 1 : 0)",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+}
+
 // javac copies a value with `dup` and stores the copy where source wrote an
 // assignment as a value: `while ((line = read()) != null)`. The store is the
 // expression, in the place the value was, so nothing is written twice.

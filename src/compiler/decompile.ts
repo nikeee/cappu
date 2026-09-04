@@ -2616,7 +2616,9 @@ class BodyDecompiler {
    */
   private switchStatement(block: Block, stop: number): number {
     const table = block.instructions[block.instructions.length - 1]!;
-    const selector = this.pop();
+    // The selector is an int, so a condition javac materialized as `1`/`0` has
+    // to become the ternary again - `switch (flag)` is not Java.
+    const selector = numeric(this.pop());
     if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
     // javac compiles a `switch` over an enum into a lookup through a synthetic
     // `$SwitchMap$` array held by an *anonymous* class - which has no name

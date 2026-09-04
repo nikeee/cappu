@@ -1876,6 +1876,35 @@ const INCY_SOURCE =
 // A `char`, `byte` or `short` post-increment is an `iload`/`iadd`/`i2c`/`istore`,
 // not an `iinc`: the store is a statement, so writing it in front of the value
 // already on the stack would make that value read the incremented one.
+// A condition javac materialized as `1`/`0` reads as the condition itself, so
+// every place that wants a *number* has to ask for the ternary back. A switch
+// selector is one of them: `switch (flag)` is not Java.
+test("writes a materialized boolean in every place that wants a number", () => {
+  const source = decompileToSource(
+    emitClass(
+      "AsInt",
+      "public class AsInt { static int[] a = {10, 20};\n" +
+        "  static int f(int v) { return v; }\n" +
+        "  static int index(boolean c) { return a[c ? 1 : 0]; }\n" +
+        "  static int length(boolean c) { return new int[c ? 1 : 0].length; }\n" +
+        "  static int arith(boolean c) { return (c ? 1 : 0) + 5; }\n" +
+        "  static int shift(boolean c) { return 1 << (c ? 1 : 0); }\n" +
+        "  static int argument(boolean c) { return f(c ? 1 : 0); }\n" +
+        "  static int selector(boolean c) {\n" +
+        "    switch (c ? 1 : 0) { case 0: return 100; default: return 200; } }\n" +
+        "}",
+    ),
+  );
+  expect(source).not.toContain("/* cappu:");
+  // The selector is the one this missed: it used to write `switch (arg0)`.
+  expect(source).toContain("switch (arg0 ? 1 : 0) {");
+  expect(source).toContain("a[arg0 ? 1 : 0]");
+  expect(source).toContain("new int[arg0 ? 1 : 0]");
+  expect(source).toContain("(arg0 ? 1 : 0) + 5");
+  expect(source).toContain("1 << (arg0 ? 1 : 0)");
+  expect(source).toContain("f(arg0 ? 1 : 0)");
+});
+
 // javac copies a value with `dup` and stores the copy where source wrote an
 // assignment as a value: `while ((line = read()) != null)`. The store is the
 // expression, in the place the value was, so nothing is written twice.

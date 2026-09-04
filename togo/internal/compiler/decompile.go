@@ -3820,6 +3820,9 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// The selector is an int, so a condition javac materialized as `1`/`0` has
+	// to become the ternary again - `switch (flag)` is not Java.
+	selector = numeric(selector)
 	if len(d.stack) > 0 {
 		return 0, bail("values left on the stack")
 	}
