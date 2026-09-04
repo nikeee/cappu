@@ -48,6 +48,8 @@ func bail(format string, a ...any) error { return &notDecompilable{fmt.Sprintf(f
 // code can produce are listed.
 const (
 	precTernary = 2
+	// precAssign: an assignment used as a value binds looser than everything else.
+	precAssign  = 1
 	precLor     = 3
 	precLand    = 4
 	precOr      = 5
@@ -1816,6 +1818,9 @@ type bodyDecompiler struct {
 	isStatic   bool
 	stack      []expr
 	statements []stmt
+	// assignAsValue is set by a `dup` into a store: the store is the value, not
+	// a statement.
+	assignAsValue bool
 	// hoisted are declarations of locals first stored inside a branch. Java
 	// scopes them to that branch, the bytecode does not, so they are declared up
 	// front and the store becomes an assignment; methodSource puts these first.
@@ -2783,6 +2788,34 @@ func opBase(m string) string {
 		}
 	}
 	return m
+}
+
+var singleSlotStore = regexp.MustCompile(`^[ifa]store(_[0-3])?$`)
+
+// storeAsValue writes a store whose value the stack still wants as the
+// assignment it is, in the place the value was. The variable cannot be declared
+// here - an expression is no place for a declaration - so it is hoisted.
+func (d *bodyDecompiler) storeAsValue(slot, scopePc int, value expr, declaredType string) error {
+	target, err := d.local(slot, scopePc, declaredType, true)
+	if err != nil {
+		return err
+	}
+	target.StoreBlocks[d.currentBlock] = true
+	text := d.coerceInto(value, target.Type)
+	if !target.Declared {
+		target.Declared = true
+		target.Declaration = &localDeclaration{List: &d.hoisted, Index: len(d.hoisted)}
+		d.hoisted = append(d.hoisted, stmt{Text: target.Type + " " + target.Name + ";"})
+	}
+	target.Writes = append(target.Writes,
+		localWrite{List: d.current, Index: len(*d.current), Value: value})
+	d.push(expr{
+		Text:    target.Name + " = " + text,
+		Prec:    precAssign,
+		Type:    target.Type,
+		Effects: true,
+	})
+	return nil
 }
 
 func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType string) error {
@@ -4411,11 +4444,14 @@ func (d *bodyDecompiler) runSteps(instructions []Instruction, endPc int) error {
 		if i+1 < len(instructions) {
 			nextPc = instructions[i+1].Pc
 		}
-		var previous *Instruction
+		var previous, next *Instruction
 		if i > 0 {
 			previous = &instructions[i-1]
 		}
-		if err := d.step(instruction, nextPc, previous); err != nil {
+		if i+1 < len(instructions) {
+			next = &instructions[i+1]
+		}
+		if err := d.step(instruction, nextPc, previous, next); err != nil {
 			return err
 		}
 	}
@@ -4427,7 +4463,9 @@ func isOneOf(base string, prefixes string, suffix string) bool {
 		strings.IndexByte(prefixes, base[0]) >= 0
 }
 
-func (d *bodyDecompiler) step(instruction Instruction, nextPc int, previous *Instruction) error {
+func (d *bodyDecompiler) step(
+	instruction Instruction, nextPc int, previous, next *Instruction,
+) error {
 	mnemonic, pc := instruction.Mnemonic, instruction.Pc
 	pool := d.classFile.Pool
 
@@ -4512,6 +4550,10 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int, previous *Ins
 		fallback := primitiveOfPrefix[base[0]]
 		if base == "astore" || (erasedToInt[value.Type] && value.AsInt == "") {
 			fallback = value.Type
+		}
+		if d.assignAsValue {
+			d.assignAsValue = false
+			return d.storeAsValue(slotOf(instruction), nextPc, value, fallback)
 		}
 		return d.store(slotOf(instruction), nextPc, value, fallback)
 	}
@@ -4841,6 +4883,14 @@ func (d *bodyDecompiler) step(instruction Instruction, nextPc int, previous *Ins
 		// long or double, or two of anything else, and the `_xN` says how many
 		// values it is pushed under.
 		wide := func(value expr) bool { return value.Type == "long" || value.Type == "double" }
+		// A `dup` straight into a store is an assignment source used as a value:
+		// `while ((line = read()) != null)`. Nothing is written twice - the store
+		// stays where it is and becomes the expression - so the guards below,
+		// which are about writing a value's text once per copy, do not apply.
+		if mnemonic == "dup" && next != nil && singleSlotStore.MatchString(next.Mnemonic) {
+			d.assignAsValue = true
+			return nil
+		}
 		// popRaw, because the copy being duplicated is the array literal that is
 		// still being filled in, which pop rejects as incomplete.
 		top, err := d.popRaw()

@@ -1406,8 +1406,9 @@ test(
     const source = decompileToSource(readFileSync(classFile));
     const guarded = source.match(/an assignment with a value that could see it on the stack/g);
     expect(guarded?.length).toBe(4);
-    // A chained assignment holds only the literal it copied, which sees nothing.
-    expect(source).toContain("int var1 = 5;");
+    // A chained assignment is the one shape here that comes back: the store is
+    // the value, so it stays where source put it.
+    expect(source).toContain("int var0 = var1 = 5;");
   },
 );
 
@@ -1875,6 +1876,63 @@ const INCY_SOURCE =
 // A `char`, `byte` or `short` post-increment is an `iload`/`iadd`/`i2c`/`istore`,
 // not an `iinc`: the store is a statement, so writing it in front of the value
 // already on the stack would make that value read the incremented one.
+// javac copies a value with `dup` and stores the copy where source wrote an
+// assignment as a value: `while ((line = read()) != null)`. The store is the
+// expression, in the place the value was, so nothing is written twice.
+const ASSIGNY_SOURCE =
+  "import java.util.*;\n" +
+  "public class Assigny {\n" +
+  "  static int log;\n" +
+  "  static String poll(Deque<String> q) { log++; return q.poll(); }\n" +
+  "  static String whileAssign(Deque<String> q) {\n" +
+  '    String s = "", line; while ((line = poll(q)) != null) { s += line; } return s; }\n' +
+  "  static int ifAssign(Deque<String> q) {\n" +
+  "    String line; if ((line = poll(q)) != null) { return line.length(); } return -1; }\n" +
+  "  static int chain(Deque<String> q) {\n" +
+  "    String a, b; a = b = poll(q);\n" +
+  "    return (a == null ? 0 : a.length()) + (b == null ? 0 : 100); }\n" +
+  "  static int arg(Deque<String> q) {\n" +
+  "    String line; return len(line = poll(q)) + (line == null ? 7 : 0); }\n" +
+  "  static int len(String s) { return s == null ? 0 : s.length(); }\n" +
+  "}\n";
+
+test(
+  "reconstructs an assignment used as a value",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-assigny-");
+    const classFile = compileWithJavac(ASSIGNY_SOURCE, "Assigny", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    expect(source).toContain("(var2 = poll(arg0)) != null");
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "Assigny", again);
+    // `log` counts the call, so a value copied instead of assigned prints twice.
+    const driver =
+      "import java.util.*;\n" +
+      "public class AssignyDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      "    for (int n = 0; n < 3; n++) {\n" +
+      "      Deque<String> q = new ArrayDeque<>();\n" +
+      '      for (int i = 0; i < n; i++) q.add("x" + i);\n' +
+      "      Assigny.log = 0;\n" +
+      "      System.out.println(Assigny.whileAssign(new ArrayDeque<>(q))\n" +
+      '        + " " + Assigny.ifAssign(new ArrayDeque<>(q))\n' +
+      '        + " " + Assigny.chain(new ArrayDeque<>(q))\n' +
+      '        + " " + Assigny.arg(new ArrayDeque<>(q)) + " " + Assigny.log);\n' +
+      "    }\n" +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "AssignyDriver", dir.path, dir.path);
+    const expected = execFileSync("java", ["-cp", dir.path, "AssignyDriver"], { encoding: "utf8" });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "AssignyDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).not.toEqual("");
+  },
+);
+
 // A `return` inside a loop is a statement, not the loop's end - but where the
 // test carries a call the header is not a pure test, so the follow has to come
 // from somewhere else. A single unconditional latch says the test is still the
@@ -2021,7 +2079,8 @@ const INCY_BAILS_SOURCE =
   // has already happened.
   "  static int before(int[] a, int i) { return g(i++ + 1, a[i] = 5); }\n" +
   "  static int field(int i) { return g(i++ + 1, n = i); }\n" +
-  // The local store is a statement too, and there is no `iinc` to move.
+  // A store into a local is the one that comes back: written as the value it is,
+  // it stays behind the increment instead of moving in front of it.
   "  static int local(int i) { int x = -1; int r = g(i++, x = i); return r + x; }\n" +
   "}\n";
 
@@ -2034,9 +2093,10 @@ test(
     const source = decompileToSource(readFileSync(classFile));
     expect(source).toContain("cappu: dup of an increment");
     expect(source).toContain("cappu: an assignment with a value that could see it on the stack");
-    expect(source).toContain("cappu: an assignment to a variable that is already on the stack");
-    // `g` is the only body that comes back.
-    expect(source.match(/cappu: /g)?.length).toBe(8);
+    expect(source).toContain("static int local(int arg0) {");
+    expect(source).toContain("g(arg0++, var1 = arg0)");
+    // `g` and `local` are the bodies that come back.
+    expect(source.match(/cappu: /g)?.length).toBe(6);
   },
 );
 

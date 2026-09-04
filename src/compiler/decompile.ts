@@ -87,6 +87,8 @@ const PREC_OR = 5;
 const PREC_LAND = 4;
 const PREC_LOR = 3;
 const PREC_TERNARY = 2;
+// An assignment used as a value binds looser than everything else.
+const PREC_ASSIGN = 1;
 
 /**
  * The structured form of a boolean expression, kept alongside its text so
@@ -1551,6 +1553,8 @@ class BodyDecompiler {
   /** Where statements are being appended right now: a branch's arm, or the body. */
   private current: Stmt[] = this.statements;
   private depth = 0;
+  /** Set by a `dup` into a store: the store is the value, not a statement. */
+  private assignAsValue = false;
   private blocks = new Map<number, Block>();
   private entryPc = 0;
   /** The block whose instructions are running, for reasoning about reads. */
@@ -2313,6 +2317,29 @@ class BodyDecompiler {
   private slotOf(instruction: Instruction): number {
     const suffix = /_(\d)$/.exec(instruction.mnemonic);
     return suffix ? Number(suffix[1]) : instruction.arg;
+  }
+
+  /**
+   * A store whose value the stack still wants: written as the assignment it is,
+   * in the place the value was. The variable cannot be declared here - an
+   * expression is no place for a declaration - so it is hoisted.
+   */
+  private storeAsValue(slot: number, scopePc: number, value: Expr, declaredType: string): void {
+    const local = this.local(slot, scopePc, declaredType, true);
+    local.storeBlocks.add(this.currentBlock);
+    const text = this.coerceInto(value, local.type);
+    if (!local.declared) {
+      local.declared = true;
+      local.declaration = { list: this.hoisted, index: this.hoisted.length, inline: false };
+      this.hoisted.push(`${local.type} ${local.name};`);
+    }
+    local.writes.push({ list: this.current, index: this.current.length, value });
+    this.push({
+      text: `${local.name} = ${text}`,
+      prec: PREC_ASSIGN,
+      type: local.type,
+      effects: true,
+    });
   }
 
   private store(slot: number, scopePc: number, value: Expr, declaredType: string): void {
@@ -3452,11 +3479,21 @@ class BodyDecompiler {
     for (const [index, instruction] of instructions.entries()) {
       // A store's variable comes into scope after the store, so the debug table
       // is searched at the next instruction's pc, not the store's own.
-      this.step(instruction, instructions[index + 1]?.pc ?? endPc, instructions[index - 1]);
+      this.step(
+        instruction,
+        instructions[index + 1]?.pc ?? endPc,
+        instructions[index - 1],
+        instructions[index + 1],
+      );
     }
   }
 
-  private step(instruction: Instruction, nextPc: number, previous?: Instruction): void {
+  private step(
+    instruction: Instruction,
+    nextPc: number,
+    previous?: Instruction,
+    next?: Instruction,
+  ): void {
     const { mnemonic, pc } = instruction;
     const pool = this.classFile.pool;
 
@@ -3516,6 +3553,10 @@ class BodyDecompiler {
         base === "astore" || (ERASED_TO_INT.includes(value.type) && value.asInt === undefined)
           ? value.type
           : PRIMITIVE_OF_PREFIX[base[0]!]!;
+      if (this.assignAsValue) {
+        this.assignAsValue = false;
+        return this.storeAsValue(this.slotOf(instruction), nextPc, value, fallback);
+      }
       return this.store(this.slotOf(instruction), nextPc, value, fallback);
     }
     if (base === "iinc") {
@@ -3742,6 +3783,14 @@ class BodyDecompiler {
       const wide = (value: Expr): boolean => value.type === "long" || value.type === "double";
       // `popRaw`, because the copy being duplicated is the array literal that is
       // still being filled in, which `pop` rejects as incomplete.
+      // A `dup` straight into a store is an assignment source used as a value:
+      // `while ((line = read()) != null)`. Nothing is written twice - the store
+      // stays where it is and becomes the expression - so the guards below,
+      // which are about writing a value's text once per copy, do not apply.
+      if (mnemonic === "dup" && next !== undefined && /^[ifa]store(_[0-3])?$/.test(next.mnemonic)) {
+        this.assignAsValue = true;
+        return;
+      }
       const taken: Expr[] = [this.popRaw()];
       if (mnemonic.startsWith("dup2") && !wide(taken[0]!)) taken.unshift(this.popRaw());
       const under: Expr[] = [];

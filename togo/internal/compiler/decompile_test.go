@@ -808,6 +808,70 @@ func TestDecompileWritesAnIncrementBehindAValueOnTheStack(t *testing.T) {
 	}
 }
 
+// javac copies a value with `dup` and stores the copy where source wrote an
+// assignment as a value: `while ((line = read()) != null)`. The store is the
+// expression, in the place the value was, so nothing is written twice.
+const assignySource = `import java.util.*;
+public class Assigny {
+  static int log;
+  static String poll(Deque<String> q) { log++; return q.poll(); }
+  static String whileAssign(Deque<String> q) {
+    String s = "", line; while ((line = poll(q)) != null) { s += line; } return s; }
+  static int ifAssign(Deque<String> q) {
+    String line; if ((line = poll(q)) != null) { return line.length(); } return -1; }
+  static int chain(Deque<String> q) {
+    String a, b; a = b = poll(q);
+    return (a == null ? 0 : a.length()) + (b == null ? 0 : 100); }
+  static int arg(Deque<String> q) {
+    String line; return len(line = poll(q)) + (line == null ? 7 : 0); }
+  static int len(String s) { return s == null ? 0 : s.length(); }
+}`
+
+// log counts the call, so a value copied instead of assigned prints twice.
+const assignyDriverSource = `import java.util.*;
+public class AssignyDriver {
+  public static void main(String[] args) {
+    for (int n = 0; n < 3; n++) {
+      Deque<String> q = new ArrayDeque<>();
+      for (int i = 0; i < n; i++) q.add("x" + i);
+      Assigny.log = 0;
+      System.out.println(Assigny.whileAssign(new ArrayDeque<>(q))
+        + " " + Assigny.ifAssign(new ArrayDeque<>(q))
+        + " " + Assigny.chain(new ArrayDeque<>(q))
+        + " " + Assigny.arg(new ArrayDeque<>(q)) + " " + Assigny.log);
+    }
+  }
+}`
+
+func TestDecompileReconstructsAnAssignmentUsedAsAValue(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Assigny", assignySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	if !strings.Contains(source, "(var2 = poll(arg0)) != null") {
+		t.Errorf("expected the assignment as a value:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Assigny", source)
+	compileWithJavacOn(t, dir, "AssignyDriver", assignyDriverSource, dir)
+	expected := runJava(t, dir, "AssignyDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "AssignyDriver")
+	if actual != expected {
+		t.Errorf("the decompiled class runs differently:\n%s\n--- from ---\n%s", actual, expected)
+	}
+	if expected == "" {
+		t.Fatal("the driver printed nothing")
+	}
+}
+
 // A `return` inside a loop is a statement, not the loop's end - but where the
 // test carries a call the header is not a pure test, so the follow has to come
 // from somewhere else. A single unconditional latch says the test is still the
@@ -973,12 +1037,14 @@ func TestDecompileSaysWhenAnIncrementWouldBeWrittenTwiceOrMoved(t *testing.T) {
 	if !strings.Contains(source, "cappu: an assignment with a value that could see it on the stack") {
 		t.Errorf("expected the assignment bail:\n%s", source)
 	}
-	if !strings.Contains(source, "cappu: an assignment to a variable that is already on the stack") {
-		t.Errorf("expected the local-store bail:\n%s", source)
+	// A store into a local is the one that comes back: written as the value it
+	// is, it stays behind the increment instead of moving in front of it.
+	if !strings.Contains(source, "g(arg0++, var1 = arg0)") {
+		t.Errorf("expected the local store as a value:\n%s", source)
 	}
-	// `g` is the only body that comes back.
-	if strings.Count(source, "cappu: ") != 8 {
-		t.Errorf("expected four bailed methods, got:\n%s", source)
+	// `g` and `local` are the bodies that come back.
+	if strings.Count(source, "cappu: ") != 6 {
+		t.Errorf("expected three bailed methods, got:\n%s", source)
 	}
 }
 
@@ -1776,8 +1842,9 @@ func TestDecompileSaysWhenAnAssignmentWouldMoveInFrontOfAValue(t *testing.T) {
 	if count := strings.Count(source, "an assignment with a value that could see it on the stack"); count != 4 {
 		t.Errorf("expected four guarded methods, got %d:\n%s", count, source)
 	}
-	// A chained assignment holds only the literal it copied, which sees nothing.
-	if !strings.Contains(source, "int var1 = 5;") {
+	// A chained assignment is the one shape here that comes back: the store is
+	// the value, so it stays where source put it.
+	if !strings.Contains(source, "int var0 = var1 = 5;") {
 		t.Errorf("the chained assignment did not come back:\n%s", source)
 	}
 }
