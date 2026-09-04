@@ -674,3 +674,36 @@ the candidates, a loop's follow among its exits), collect into a slice and
 `sort.Ints` it first, and make the TS side sort too rather than leaning on
 insertion order. Sets that are only ever membership-tested (`body`, `visited`,
 `folded`) need none of this.
+
+## Test-helper defaults drift: debug info in emitted fixtures
+
+`emitClass` (TS, `decompile.test.ts`) defaults `debugInfo` to **false**;
+`emitClassBytes` (Go, `classfile_test.go`) passes **true**. So the same fixture
+source yields different local names in the two builds - `arg0`/`var1` from the
+descriptor in TS, the real parameter names from the `LocalVariableTable` in Go -
+and a ported test that asserts on a name passes in one build and fails in the
+other. Use `emitClassBytesNoDebug` on the Go side for any fixture that asserts
+reconstructed *text*, and reach for `emitClassBytes` only when the debug table
+is the thing under test. The two helpers are not each other's port despite the
+matching names; check which one a test needs rather than translating the call.
+
+## Textual guards: JS regexes and Go regexes agree, but prove it per guard
+
+Several decompiler guards read a rendered expression's *text* rather than its
+structure (`reads`, `increments`, `withoutLiterals`, `cannotThrow`), because a
+flag on the value does not survive being nested into a bigger expression. The
+two regex engines line up on everything those guards need, and it is worth
+knowing exactly why:
+
+- `\w` is `[0-9A-Za-z_]` in both, so `[\w$]` is the same character class.
+- `$` anchors at end of text in both (JS without `/m`, Go without `(?m)`); Go's
+  `$` does **not** match before a trailing newline the way some engines do.
+- JS `/[.([]/.test(s)` is Go `strings.ContainsAny(s, ".([")`.
+- A negated class stops at the delimiter in both, so `([^;]+);$` cannot cross a
+  `;` inside a string literal - which is why these guards strip literals first
+  and are conservative when they cannot.
+
+Port such a guard by pairing it with a small differential table (feed both
+implementations the same dozen strings and diff the booleans) rather than
+reading the two regexes and calling them equal - a `;` or a `.` inside a string
+literal is exactly where they would quietly disagree.
