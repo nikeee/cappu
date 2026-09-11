@@ -684,6 +684,11 @@ interface Emitted {
   readonly list: Stmt[];
   readonly index: number;
   readonly value: Expr;
+  /**
+   * The assignment is inside an expression, not a statement of its own: it
+   * counts as a write, but there is no line at `index` to rewrite.
+   */
+  readonly inValue?: true;
 }
 
 interface Local {
@@ -1666,6 +1671,12 @@ class BodyDecompiler {
 
   /** Give `local` a narrower type, rewriting its declaration and assignments. */
   private retype(local: Local, target: string): void {
+    // An assignment written inside an expression was coerced to the type the
+    // variable had then, and its text is already part of a bigger one: nothing
+    // here can reach in and change it.
+    if (local.writes.some(write => write.inValue === true)) {
+      throw new NotDecompilable("a retyped assignment used as a value");
+    }
     local.type = target;
     const declaration = local.declaration;
     if (declaration !== undefined && !declaration.inline) {
@@ -2320,6 +2331,25 @@ class BodyDecompiler {
   }
 
   /**
+   * What a `dup` may copy: only a value that reads the same thing every time may
+   * be written twice; an expression would be *computed* twice.
+   */
+  private checkDuplicable(value: Expr): void {
+    if (value.effects === true) throw new NotDecompilable("dup of a call");
+    // The text is written once per copy, so an increment inside it would run
+    // once per copy too.
+    if (increments(value.text)) throw new NotDecompilable("dup of an increment");
+    if (value.compared !== undefined) throw new NotDecompilable("dup of a comparison");
+    if (
+      value.pending === undefined &&
+      value.init === undefined &&
+      (value.prec !== PREC_PRIMARY || value.text.startsWith("new "))
+    ) {
+      throw new NotDecompilable("dup of a non-trivial value");
+    }
+  }
+
+  /**
    * A store whose value the stack still wants: written as the assignment it is,
    * in the place the value was. The variable cannot be declared here - an
    * expression is no place for a declaration - so it is hoisted.
@@ -2333,7 +2363,7 @@ class BodyDecompiler {
       local.declaration = { list: this.hoisted, index: this.hoisted.length, inline: false };
       this.hoisted.push(`${local.type} ${local.name};`);
     }
-    local.writes.push({ list: this.current, index: this.current.length, value });
+    local.writes.push({ list: this.current, index: this.current.length, value, inValue: true });
     this.push({
       text: `${local.name} = ${text}`,
       prec: PREC_ASSIGN,
@@ -3557,7 +3587,19 @@ class BodyDecompiler {
           : PRIMITIVE_OF_PREFIX[base[0]!]!;
       if (this.assignAsValue) {
         this.assignAsValue = false;
-        return this.storeAsValue(this.slotOf(instruction), nextPc, value, fallback);
+        const slot = this.slotOf(instruction);
+        // Written as a value, the assignment is coerced to the type the variable
+        // has *now* and cannot be rewritten later. An int-family variable the
+        // debug table does not type may still narrow to a boolean or a char at
+        // a later use, so for one of those the copy the `dup` would have left
+        // is what gets stored, the way it was before.
+        const local = this.local(slot, nextPc, fallback, true);
+        if (local.authoritative || (value.type !== "int" && !ERASED_TO_INT.includes(value.type))) {
+          return this.storeAsValue(slot, nextPc, value, fallback);
+        }
+        this.checkDuplicable(value);
+        this.push(value);
+        return this.store(slot, nextPc, value, fallback);
       }
       return this.store(this.slotOf(instruction), nextPc, value, fallback);
     }
@@ -3804,22 +3846,7 @@ class BodyDecompiler {
       }
       // Only what is *copied* has to be re-readable; a value the copy is pushed
       // under is popped and pushed back untouched.
-      for (const value of taken) {
-        if (value.effects === true) throw new NotDecompilable("dup of a call");
-        // The text is written once per copy, so an increment inside it would
-        // run once per copy too.
-        if (increments(value.text)) throw new NotDecompilable("dup of an increment");
-        if (value.compared !== undefined) throw new NotDecompilable("dup of a comparison");
-        // Only a value that reads the same thing every time may be written
-        // twice; an expression would be *computed* twice (`new int[2][0] = 1;`).
-        if (
-          value.pending === undefined &&
-          value.init === undefined &&
-          (value.prec !== PREC_PRIMARY || value.text.startsWith("new "))
-        ) {
-          throw new NotDecompilable("dup of a non-trivial value");
-        }
-      }
+      for (const value of taken) this.checkDuplicable(value);
       for (const value of taken) this.push(value);
       for (const value of under) this.push(value);
       for (const value of taken) this.push(value);

@@ -367,7 +367,20 @@ func compileWithJavac(t *testing.T, dir, name, source string) string {
 	return compileWithJavacOn(t, dir, name, source, "")
 }
 
+// compileWithJavacDebug is compileWithJavac with `-g`, which writes the
+// LocalVariableTable that types every local; without it the decompiler infers
+// types, and some shapes only come back when it need not.
+func compileWithJavacDebug(t *testing.T, dir, name, source string) string {
+	t.Helper()
+	return compileWithJavacFlags(t, dir, name, source, "", true)
+}
+
 func compileWithJavacOn(t *testing.T, dir, name, source, classPath string) string {
+	t.Helper()
+	return compileWithJavacFlags(t, dir, name, source, classPath, false)
+}
+
+func compileWithJavacFlags(t *testing.T, dir, name, source, classPath string, debug bool) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -376,7 +389,11 @@ func compileWithJavacOn(t *testing.T, dir, name, source, classPath string) strin
 	if err := os.WriteFile(javaFile, []byte(source), 0o644); err != nil {
 		t.Fatalf("write source: %v", err)
 	}
-	args := []string{"--release", "21", "-d", dir}
+	args := []string{"--release", "21"}
+	if debug {
+		args = append(args, "-g")
+	}
+	args = append(args, "-d", dir)
 	if classPath != "" {
 		args = append(args, "-cp", classPath)
 	}
@@ -918,7 +935,9 @@ func TestDecompileReconstructsAnAssignmentUsedAsAValue(t *testing.T) {
 		t.Skip("no JDK (javac/java)")
 	}
 	dir := t.TempDir()
-	classFile := compileWithJavac(t, dir, "Assigny", assignySource)
+	// With the debug table: every local is typed, so the int cases come back
+	// too. Without it, see the test after this one.
+	classFile := compileWithJavacDebug(t, dir, "Assigny", assignySource)
 	source, err := Decompile(readFile(t, classFile))
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
@@ -926,8 +945,10 @@ func TestDecompileReconstructsAnAssignmentUsedAsAValue(t *testing.T) {
 	if strings.Contains(source, "/* cappu:") {
 		t.Fatalf("a method bailed:\n%s", source)
 	}
-	if !strings.Contains(source, "(var2 = poll(arg0)) != null") {
-		t.Errorf("expected the assignment as a value:\n%s", source)
+	for _, want := range []string{"(line = poll(q)) != null", `two(v, v = len("ab"))`} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
 	}
 	again := filepath.Join(dir, "again")
 	compileWithJavac(t, again, "Assigny", source)
@@ -939,6 +960,46 @@ func TestDecompileReconstructsAnAssignmentUsedAsAValue(t *testing.T) {
 	}
 	if expected == "" {
 		t.Fatal("the driver printed nothing")
+	}
+}
+
+// Written as a value, an assignment is coerced to the type its variable has at
+// that moment and can never be rewritten. Without a debug table an int-family
+// variable may still turn out to be a boolean or a char at a later use, so for
+// one of those the store falls back to what the `dup` used to leave - the copy,
+// with its guards - and only a variable whose type is certain takes the new form.
+func TestDecompileFallsBackForAnIntFamilyVariableTheDebugTableDoesNotType(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Untyped", `public class Untyped {
+  static int counter;
+  static void foo(boolean b) { counter += 101; }
+  static int len(String s) { return s.length(); }
+  static boolean dropped() { boolean b; foo(b = false); return b; }
+  static char narrowed() { char c; int i = (c = 65); return c; }
+  static int kept(String s) { String t; return len(t = s.trim()) + t.length(); }
+}`)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		// A boolean that reads as an int until `return b` proves otherwise: as a
+		// value it would have been assigned `false` after `foo` ran.
+		"boolean var0 = false;", "foo(false);",
+		// A char that would have been written as `int var = 97`.
+		"char var0 = 'A';", "int var1 = 65;",
+		// A reference is typed by its store, so this still comes back.
+		"len(var1 = arg0.trim())",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("a method bailed:\n%s", source)
 	}
 }
 
@@ -1107,14 +1168,14 @@ func TestDecompileSaysWhenAnIncrementWouldBeWrittenTwiceOrMoved(t *testing.T) {
 	if !strings.Contains(source, "cappu: an assignment with a value that could see it on the stack") {
 		t.Errorf("expected the assignment bail:\n%s", source)
 	}
-	// A store into a local is the one that comes back: written as the value it
-	// is, it stays behind the increment instead of moving in front of it.
-	if !strings.Contains(source, "g(arg0++, var1 = arg0)") {
-		t.Errorf("expected the local store as a value:\n%s", source)
+	// A store into an int local the debug table does not type: the copy the
+	// `dup` leaves is what gets stored, and that copy sits behind the increment.
+	if !strings.Contains(source, "cappu: an assignment to a variable that is already on the stack") {
+		t.Errorf("expected the local-store bail:\n%s", source)
 	}
-	// `g` and `local` are the bodies that come back.
-	if strings.Count(source, "cappu: ") != 6 {
-		t.Errorf("expected three bailed methods, got:\n%s", source)
+	// `g` is the only body that comes back.
+	if strings.Count(source, "cappu: ") != 8 {
+		t.Errorf("expected four bailed methods, got:\n%s", source)
 	}
 }
 
@@ -1912,9 +1973,9 @@ func TestDecompileSaysWhenAnAssignmentWouldMoveInFrontOfAValue(t *testing.T) {
 	if count := strings.Count(source, "an assignment with a value that could see it on the stack"); count != 4 {
 		t.Errorf("expected four guarded methods, got %d:\n%s", count, source)
 	}
-	// A chained assignment is the one shape here that comes back: the store is
-	// the value, so it stays where source put it.
-	if !strings.Contains(source, "int var0 = var1 = 5;") {
+	// A chained assignment holds only the literal it copied, which sees nothing.
+	// Its int locals carry no debug table here, so the copy is what is stored.
+	if !strings.Contains(source, "int var1 = 5;") {
 		t.Errorf("the chained assignment did not come back:\n%s", source)
 	}
 }

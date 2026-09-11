@@ -714,6 +714,9 @@ type localWrite struct {
 	List  *[]stmt
 	Index int
 	Value expr
+	// InValue: the assignment is inside an expression, not a statement of its
+	// own - it counts as a write, but there is no line at Index to rewrite.
+	InValue bool
 }
 
 // localDeclaration is where a local was declared; Inline when it carries the
@@ -1901,21 +1904,31 @@ func (d *bodyDecompiler) self() string { return selfOf(d.classFile) }
 // the bytecode only says is an int, used where a boolean/char/byte/short
 // belongs, *is* one - the store opcode is the same for all of them - so its
 // declaration and every assignment to it are rewritten to that type.
-func (d *bodyDecompiler) coerceInto(value expr, target string) string {
+func (d *bodyDecompiler) coerceInto(value expr, target string) (string, error) {
 	// A lambda takes its type from where it is written; when that is not the
 	// interface itself, source had to say which one it is.
 	if value.Lambda && target != value.Type {
-		return "(" + value.Type + ") " + value.Text
+		return "(" + value.Type + ") " + value.Text, nil
 	}
 	if entry, ok := d.byName[value.Text]; ok && !entry.Authoritative &&
 		entry.Type == "int" && erasedToInt[target] {
-		d.retype(entry, target)
+		if err := d.retype(entry, target); err != nil {
+			return "", err
+		}
 	}
-	return coerce(value, target)
+	return coerce(value, target), nil
 }
 
 // retype gives a local a narrower type, rewriting its declaration and assignments.
-func (d *bodyDecompiler) retype(entry *local, target string) {
+func (d *bodyDecompiler) retype(entry *local, target string) error {
+	// An assignment written inside an expression was coerced to the type the
+	// variable had then, and its text is already part of a bigger one: nothing
+	// here can reach in and change it.
+	for _, write := range entry.Writes {
+		if write.InValue {
+			return bail("a retyped assignment used as a value")
+		}
+	}
 	entry.Type = target
 	declaration := entry.Declaration
 	if declaration != nil && !declaration.Inline {
@@ -1932,6 +1945,7 @@ func (d *bodyDecompiler) retype(entry *local, target string) {
 	for _, emitted := range d.conditions {
 		(*emitted.List)[emitted.Index] = stmt{Text: emitted.Wrap(d.renderCondition(emitted.Condition).Text)}
 	}
+	return nil
 }
 
 // emittedCondition is an `if (...)` line and the condition it was rendered from.
@@ -2086,7 +2100,11 @@ func (d *bodyDecompiler) fillArray(init *arrayInit, index, value expr) error {
 	if below.Init == nil || below.Init.ID != init.ID {
 		return bail("array initializer copy lost")
 	}
-	elements := append(append([]string{}, init.Elements...), d.coerceInto(value, init.Element))
+	element, err := d.coerceInto(value, init.Element)
+	if err != nil {
+		return err
+	}
+	elements := append(append([]string{}, init.Elements...), element)
 	if len(elements) == init.Length {
 		d.push(primary(init.Prefix+"{"+strings.Join(elements, ", ")+"}", below.Type))
 		return nil
@@ -2171,7 +2189,10 @@ func (d *bodyDecompiler) callArguments(descriptor string) ([]string, error) {
 			return nil, err
 		}
 		target := params[i].Type
-		text := d.coerceInto(value, target)
+		text, err := d.coerceInto(value, target)
+		if err != nil {
+			return nil, err
+		}
 		// Java narrows an int constant implicitly when it is assigned, but never
 		// when it is passed: `f((byte) 3)` is the only way to write the call.
 		narrows := (target == "byte" || target == "short") && intLiteralText.MatchString(text)
@@ -2199,10 +2220,13 @@ var noSpaceText = regexp.MustCompile(`^\S+$`)
 
 // coercedExpr is value where a target-typed value belongs, kept an expression so
 // the caller can still parenthesize it.
-func (d *bodyDecompiler) coercedExpr(value expr, target string) expr {
-	text := d.coerceInto(value, target)
+func (d *bodyDecompiler) coercedExpr(value expr, target string) (expr, error) {
+	text, err := d.coerceInto(value, target)
+	if err != nil {
+		return expr{}, err
+	}
 	if text == value.Text {
-		return value
+		return value, nil
 	}
 	// What the rewrite produces is a literal (`true`, `'a'`) or something with an
 	// operator in it (`(char) 200`, a materialized boolean's own ternary); the
@@ -2212,7 +2236,7 @@ func (d *bodyDecompiler) coercedExpr(value expr, target string) expr {
 	if noSpaceText.MatchString(text) {
 		prec = precPrimary
 	}
-	return expr{Text: text, Prec: prec, Type: target}
+	return expr{Text: text, Prec: prec, Type: target}, nil
 }
 
 // concat reconstructs a string concatenation, which javac compiles to an
@@ -2287,7 +2311,11 @@ func (d *bodyDecompiler) lambda(siteDescriptor string, bootstrap BootstrapMethod
 		if err != nil {
 			return err
 		}
-		captures[i] = d.coerceInto(value, captureTypes[i].Type)
+		capture, err := d.coerceInto(value, captureTypes[i].Type)
+		if err != nil {
+			return err
+		}
+		captures[i] = capture
 		entry, isLocal := d.byName[captures[i]]
 		if isLocal {
 			d.captured = append(d.captured, entry)
@@ -2530,7 +2558,11 @@ func (d *bodyDecompiler) concat(siteDescriptor string, bootstrap BootstrapMethod
 		if err != nil {
 			return err
 		}
-		args[i] = d.coercedExpr(value, params[i].Type)
+		arg, err := d.coercedExpr(value, params[i].Type)
+		if err != nil {
+			return err
+		}
+		args[i] = arg
 	}
 
 	recipe := strings.Repeat("\u0001", len(args))
@@ -2792,6 +2824,28 @@ func opBase(m string) string {
 
 var singleSlotStore = regexp.MustCompile(`^[ifa]store(_[0-3])?$`)
 
+// checkDuplicable says what a `dup` may copy: only a value that reads the same
+// thing every time may be written twice; an expression would be *computed*
+// twice.
+func checkDuplicable(value expr) error {
+	if value.Effects {
+		return bail("dup of a call")
+	}
+	// The text is written once per copy, so an increment inside it would run
+	// once per copy too.
+	if increments(value.Text) {
+		return bail("dup of an increment")
+	}
+	if value.Compared != nil {
+		return bail("dup of a comparison")
+	}
+	if value.Pending == 0 && value.Init == nil &&
+		(value.Prec != precPrimary || strings.HasPrefix(value.Text, "new ")) {
+		return bail("dup of a non-trivial value")
+	}
+	return nil
+}
+
 // storeAsValue writes a store whose value the stack still wants as the
 // assignment it is, in the place the value was. The variable cannot be declared
 // here - an expression is no place for a declaration - so it is hoisted.
@@ -2801,14 +2855,17 @@ func (d *bodyDecompiler) storeAsValue(slot, scopePc int, value expr, declaredTyp
 		return err
 	}
 	target.StoreBlocks[d.currentBlock] = true
-	text := d.coerceInto(value, target.Type)
+	text, err := d.coerceInto(value, target.Type)
+	if err != nil {
+		return err
+	}
 	if !target.Declared {
 		target.Declared = true
 		target.Declaration = &localDeclaration{List: &d.hoisted, Index: len(d.hoisted)}
 		d.hoisted = append(d.hoisted, stmt{Text: target.Type + " " + target.Name + ";"})
 	}
 	target.Writes = append(target.Writes,
-		localWrite{List: d.current, Index: len(*d.current), Value: value})
+		localWrite{List: d.current, Index: len(*d.current), Value: value, InValue: true})
 	d.push(expr{
 		Text:    target.Name + " = " + text,
 		Prec:    precAssign,
@@ -2835,7 +2892,10 @@ func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType strin
 		}
 	}
 	target.StoreBlocks[d.currentBlock] = true
-	text := d.coerceInto(value, target.Type)
+	text, err := d.coerceInto(value, target.Type)
+	if err != nil {
+		return err
+	}
 	if !target.Declared {
 		target.Declared = true
 		if d.depth == 0 {
@@ -4556,7 +4616,24 @@ func (d *bodyDecompiler) step(
 		}
 		if d.assignAsValue {
 			d.assignAsValue = false
-			return d.storeAsValue(slotOf(instruction), nextPc, value, fallback)
+			slot := slotOf(instruction)
+			// Written as a value, the assignment is coerced to the type the
+			// variable has *now* and cannot be rewritten later. An int-family
+			// variable the debug table does not type may still narrow to a
+			// boolean or a char at a later use, so for one of those the copy the
+			// `dup` would have left is what gets stored, the way it was before.
+			target, err := d.local(slot, nextPc, fallback, true)
+			if err != nil {
+				return err
+			}
+			if target.Authoritative || (value.Type != "int" && !erasedToInt[value.Type]) {
+				return d.storeAsValue(slot, nextPc, value, fallback)
+			}
+			if err := checkDuplicable(value); err != nil {
+				return err
+			}
+			d.push(value)
+			return d.store(slot, nextPc, value, fallback)
 		}
 		return d.store(slotOf(instruction), nextPc, value, fallback)
 	}
@@ -4701,7 +4778,11 @@ func (d *bodyDecompiler) step(
 				return bail("an assignment with a value that could see it on the stack")
 			}
 		}
-		d.emit(target + " = " + d.coerceInto(value, fieldType) + ";")
+		assigned, err := d.coerceInto(value, fieldType)
+		if err != nil {
+			return err
+		}
+		d.emit(target + " = " + assigned + ";")
 		return nil
 	}
 
@@ -4751,7 +4832,11 @@ func (d *bodyDecompiler) step(
 				return bail("an assignment with a value that could see it on the stack")
 			}
 		}
-		d.emit(target + " = " + d.coerceInto(value, element) + ";")
+		assigned, err := d.coerceInto(value, element)
+		if err != nil {
+			return err
+		}
+		d.emit(target + " = " + assigned + ";")
 		return nil
 	}
 	if mnemonic == "newarray" {
@@ -4930,22 +5015,8 @@ func (d *bodyDecompiler) step(
 		// Only what is *copied* has to be re-readable; a value the copy is pushed
 		// under is popped and pushed back untouched.
 		for _, value := range taken {
-			if value.Effects {
-				return bail("dup of a call")
-			}
-			// The text is written once per copy, so an increment inside it would
-			// run once per copy too.
-			if increments(value.Text) {
-				return bail("dup of an increment")
-			}
-			if value.Compared != nil {
-				return bail("dup of a comparison")
-			}
-			// Only a value that reads the same thing every time may be written
-			// twice; an expression would be *computed* twice.
-			if value.Pending == 0 && value.Init == nil &&
-				(value.Prec != precPrimary || strings.HasPrefix(value.Text, "new ")) {
-				return bail("dup of a non-trivial value")
+			if err := checkDuplicable(value); err != nil {
+				return err
 			}
 		}
 		for _, value := range taken {
@@ -5015,7 +5086,11 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
-		d.emit("return " + d.coerceInto(value, d.returnType) + ";")
+		returned, err := d.coerceInto(value, d.returnType)
+		if err != nil {
+			return err
+		}
+		d.emit("return " + returned + ";")
 		return nil
 	}
 
