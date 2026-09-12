@@ -21,7 +21,7 @@ import TempDir from "../TempDir.ts";
 import { type Uri } from "../workspace.ts";
 import { decompileToSource } from "../cli/decompile.ts";
 import { createChecker } from "./checker.ts";
-import { decompile } from "./decompile.ts";
+import { decompile, withHoisted } from "./decompile.ts";
 import { disassemble } from "./disasm.ts";
 import { emitSourceFile } from "./emitter.ts";
 import { parseJavapText } from "./javapNormalize.ts";
@@ -1406,9 +1406,9 @@ test(
     const source = decompileToSource(readFileSync(classFile));
     const guarded = source.match(/an assignment with a value that could see it on the stack/g);
     expect(guarded?.length).toBe(4);
-    // A chained assignment holds only the literal it copied, which sees nothing.
-    // Its int locals carry no debug table here, so the copy is what is stored.
-    expect(source).toContain("int var1 = 5;");
+    // A chained assignment is the one shape here that comes back: the store is
+    // the value, so it stays where source put it.
+    expect(source).toContain("int var0 = var1 = 5;");
   },
 );
 
@@ -1418,18 +1418,12 @@ function compileWithJavac(
   name: string,
   outDir: string,
   classPath?: string,
-  debug = false,
 ): string {
   mkdirSync(outDir, { recursive: true });
   const javaFile = join(outDir, `${name}.java`);
   writeFileSync(javaFile, source);
   const path = classPath === undefined ? [] : ["-cp", classPath];
-  // `-g` writes the LocalVariableTable, which types every local; without it the
-  // decompiler infers types, and some shapes only come back when it need not.
-  const flags = debug ? ["-g"] : [];
-  execFileSync("javac", ["--release", "21", ...flags, "-d", outDir, ...path, javaFile], {
-    stdio: "pipe",
-  });
+  execFileSync("javac", ["--release", "21", "-d", outDir, ...path, javaFile], { stdio: "pipe" });
   return join(outDir, `${name}.class`);
 }
 
@@ -1922,7 +1916,7 @@ test(
     using dir = TempDir.create("cappu-decompile-bitwise-");
     const classFile = compileWithJavac(
       "public class Bitwise {\n" +
-        "  static int[] arr = {7};\n" +
+        "  static int[] arr = {7, 8};\n" +
         "  static int and(boolean c, int x) { return (c ? 1 : 0) & x; }\n" +
         "  static int or(boolean c) { return (c ? 1 : 0) | 2; }\n" +
         "  static int xor(boolean c) { return (c ? 1 : 0) ^ 1; }\n" +
@@ -1931,6 +1925,12 @@ test(
         "  static boolean asBool(int a, int b) { return (a > b) ^ true; }\n" +
         "  static boolean eq(boolean c) { return c == (arr[0] > 5); }\n" +
         "  static int nested(boolean k, boolean c) { int r = k ? (c ? 1 : 0) : (c ? 0 : 1); return r; }\n" +
+        // An int-typed local against a real boolean: Java has no `int ^ boolean`,
+        // so the use proves the local a boolean.
+        "  static boolean proven(int a, int b, boolean f) { boolean x = (a > b) ^ true; return x ^ f; }\n" +
+        "  static boolean provenEq(int a, int b, boolean f) { boolean x = (a > b) ^ (b > a); return x == f; }\n" +
+        // A short-circuit whose arms are both erased keeps its int form.
+        "  static int shortCircuit(boolean f, int a, int b) { return arr[f ? (a > b ? 1 : 0) : 0]; }\n" +
         "}\n",
       "Bitwise",
       dir.path,
@@ -1942,6 +1942,9 @@ test(
     // The same operation as a boolean, where the consumer says so.
     expect(source).toContain("arg0 > arg1 ^ true");
     expect(source).toContain("arg0 == arr[0] > 5");
+    expect(source).toContain("boolean var3 = arg0 > arg1 ^ true;");
+    expect(source).toContain("var3 == arg2");
+    expect(source).toContain("arr[arg0 ? arg1 > arg2 ? 1 : 0 : 0]");
     const again = join(dir.path, "again");
     compileWithJavac(source, "Bitwise", again);
     const driver =
@@ -1950,7 +1953,9 @@ test(
       "    for (boolean c : new boolean[] { true, false })\n" +
       '      System.out.println(Bitwise.and(c, 3) + " " + Bitwise.or(c) + " " + Bitwise.xor(c)\n' +
       '        + " " + Bitwise.not(c) + " " + Bitwise.both(c, !c) + " " + Bitwise.asBool(2, 1)\n' +
-      '        + " " + Bitwise.eq(c) + " " + Bitwise.nested(c, !c));\n' +
+      '        + " " + Bitwise.eq(c) + " " + Bitwise.nested(c, !c)\n' +
+      '        + " " + Bitwise.proven(2, 1, c) + " " + Bitwise.provenEq(1, 2, c)\n' +
+      '        + " " + Bitwise.shortCircuit(c, 2, 1));\n' +
       "  }\n" +
       "}";
     compileWithJavac(driver, "BitwiseDriver", dir.path, dir.path);
@@ -2016,13 +2021,11 @@ test(
   { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
   () => {
     using dir = TempDir.create("cappu-decompile-assigny-");
-    // With the debug table: every local is typed, so the int cases come back
-    // too. Without it, see the test after this one.
-    const classFile = compileWithJavac(ASSIGNY_SOURCE, "Assigny", dir.path, undefined, true);
+    const classFile = compileWithJavac(ASSIGNY_SOURCE, "Assigny", dir.path);
     const source = decompileToSource(readFileSync(classFile));
     expect(source).not.toContain("/* cappu:");
-    expect(source).toContain("(line = poll(q)) != null");
-    expect(source).toContain('two(v, v = len("ab"))');
+    expect(source).toContain("(var2 = poll(arg0)) != null");
+    expect(source).toContain('two(var0, var0 = len("ab"))');
     const again = join(dir.path, "again");
     compileWithJavac(source, "Assigny", again);
     // `log` counts the call, so a value copied instead of assigned prints twice.
@@ -2052,39 +2055,59 @@ test(
   },
 );
 
-// Written as a value, an assignment is coerced to the type its variable has at
-// that moment and can never be rewritten. Without a debug table an int-family
-// variable may still turn out to be a boolean or a char at a later use, so for
-// one of those the store falls back to what the `dup` used to leave - the copy,
-// with its guards - and only a variable whose type is certain takes the new form.
+// Written as a value, an assignment's text is coerced to the type its variable
+// has at that moment and can never be rewritten. Without a debug table an
+// int-family variable's type is only inferred, and a later use that would
+// narrow it to a boolean or a char has nothing to rewrite: it says so. The value
+// form itself stays - a statement instead would run before what is already on
+// the stack, and a copy would evaluate the value twice - and the type it hands
+// on is the `int` it was erased to, not what the inner variable happened to be.
 test(
-  "falls back for an int-family variable the debug table does not type",
-  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  "keeps an assignment as a value without a debug table, and says so when its type would change",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
   () => {
     using dir = TempDir.create("cappu-decompile-assignyuntyped-");
     const classFile = compileWithJavac(
       "public class Untyped {\n" +
         "  static int counter;\n" +
-        "  static void foo(boolean b) { counter += 101; }\n" +
-        "  static int len(String s) { return s.length(); }\n" +
-        // A boolean that reads as an int until `return b` proves otherwise: as a
-        // value it would have been assigned `false` after `foo` ran.
-        "  static boolean dropped() { boolean b; foo(b = false); return b; }\n" +
-        // A char that would have been written as `int var = 97`.
+        '  static int g() { throw new RuntimeException("boom"); }\n' +
+        "  static void f(int a, int b) { counter += a + b; }\n" +
+        "  static int[] arr() { counter++; return new int[counter]; }\n" +
+        // The store must not move ahead of `g()`, which throws first.
+        "  static int ordered() { int x = 0; try { f(g(), x = 5); } catch (RuntimeException e) {} return x; }\n" +
+        // `arr()` must run once, not once per variable.
+        "  static int once() { int x, y; x = y = arr().length; return x * 10 + y; }\n" +
+        // The outer variable is an int, whatever `c` was inferred to be.
+        '  static String erased(String s) { char c; int i = (c = s.charAt(0)); return "" + c + i; }\n' +
+        // `return c` would narrow `c` to a char after its assignment was written.
         "  static char narrowed() { char c; int i = (c = 65); return c; }\n" +
-        // A reference is typed by its store, so this still comes back.
-        "  static int kept(String s) { String t; return len(t = s.trim()) + t.length(); }\n" +
         "}\n",
       "Untyped",
       dir.path,
     );
     const source = decompileToSource(readFileSync(classFile));
-    expect(source).toContain("boolean var0 = false;");
-    expect(source).toContain("foo(false);");
-    expect(source).toContain("char var0 = 'A';");
-    expect(source).toContain("int var1 = 65;");
-    expect(source).toContain("len(var1 = arg0.trim())");
-    expect(source).not.toContain("/* cappu:");
+    expect(source).toContain("f(g(), var0 = 5);");
+    expect(source).toContain("int var0 = var1 = arr().length;");
+    expect(source).toContain("int var2 = var1 = arg0.charAt(0);");
+    expect(source).toContain("cappu: a retyped assignment used as a value");
+    expect(source.match(/cappu: /g)?.length).toBe(2);
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "Untyped", again);
+    const driver =
+      "public class UntypedDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      "    Untyped.counter = 0;\n" +
+      '    System.out.println(Untyped.ordered() + " " + Untyped.once() + " " + Untyped.erased("z")\n' +
+      '      + " " + Untyped.counter);\n' +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "UntypedDriver", dir.path, dir.path);
+    const expected = execFileSync("java", ["-cp", dir.path, "UntypedDriver"], { encoding: "utf8" });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "UntypedDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).not.toEqual("");
   },
 );
 
@@ -2207,6 +2230,14 @@ test(
     expect(source).toMatch(/this\(arg0\);\n\s*int var3;/);
     // The proof is javac accepting it under --release 21.
     compileWithJavac(source, "Hoisty", join(dir.path, "again"), dir.path);
+    // A variable the call's own arguments assign is the exception: only Java 25
+    // can write that, and it has to be written the way that source was.
+    expect(withHoisted(["int x;", "int y;"], ["super(x = a);", "y = 1;"])).toEqual([
+      "int x;",
+      "super(x = a);",
+      "int y;",
+      "y = 1;",
+    ]);
   },
 );
 
@@ -2270,8 +2301,7 @@ const INCY_BAILS_SOURCE =
   // has already happened.
   "  static int before(int[] a, int i) { return g(i++ + 1, a[i] = 5); }\n" +
   "  static int field(int i) { return g(i++ + 1, n = i); }\n" +
-  // A store into an int local the debug table does not type: the copy the
-  // `dup` leaves is what gets stored, and that copy sits behind the increment.
+  // A store into a local, written as the value it is, stays behind the increment.
   "  static int local(int i) { int x = -1; int r = g(i++, x = i); return r + x; }\n" +
   "}\n";
 
@@ -2284,9 +2314,11 @@ test(
     const source = decompileToSource(readFileSync(classFile));
     expect(source).toContain("cappu: dup of an increment");
     expect(source).toContain("cappu: an assignment with a value that could see it on the stack");
-    expect(source).toContain("cappu: an assignment to a variable that is already on the stack");
-    // `g` is the only body that comes back.
-    expect(source.match(/cappu: /g)?.length).toBe(8);
+    // A store into a local is the one that comes back: written as the value it
+    // is, it stays behind the increment instead of moving in front of it.
+    expect(source).toContain("g(arg0++, var1 = arg0)");
+    // `g` and `local` are the bodies that come back.
+    expect(source.match(/cappu: /g)?.length).toBe(6);
   },
 );
 

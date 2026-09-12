@@ -315,6 +315,13 @@ func withoutLiterals(text string) string {
 	return literalText.ReplaceAllString(text, "")
 }
 
+// embedsAssignment reports whether a value has an assignment inside it - the
+// one operator this writes with a lone `=`, which no comparison or compound
+// assignment does.
+func embedsAssignment(text string) bool {
+	return strings.Contains(withoutLiterals(text), " = ")
+}
+
 // increments reports whether a value carries an increment. `Effects` says the
 // same for a call, but it is a property of the value, and an operand keeps none
 // of it when it is nested into a larger expression - the text does.
@@ -431,16 +438,23 @@ func ternaryExpr(condition, thenValue, elseValue expr) (expr, bool) {
 	}
 	// `c ? true : x` and `c ? x : false` are how a short-circuit reads once its
 	// value is materialized; writing them back as `||`/`&&` is both shorter and
-	// what the source said.
+	// what the source said. Where both arms are booleans javac erased, the int
+	// form is the conditional itself, the way it is for any two such arms below.
+	shortCircuit := func(value expr) expr {
+		if erasedBoolean(thenValue) && erasedBoolean(elseValue) {
+			value.AsInt = conditionalOverInts(condition, thenValue, elseValue)
+		}
+		return value
+	}
 	switch {
 	case whenTrue.Text == "true":
-		return logicalExpr(logicOr, condition, whenFalse), true
+		return shortCircuit(logicalExpr(logicOr, condition, whenFalse)), true
 	case whenFalse.Text == "false":
-		return logicalExpr(logicAnd, condition, whenTrue), true
+		return shortCircuit(logicalExpr(logicAnd, condition, whenTrue)), true
 	case whenTrue.Text == "false":
-		return logicalExpr(logicAnd, negate(condition), whenFalse), true
+		return shortCircuit(logicalExpr(logicAnd, negate(condition), whenFalse)), true
 	case whenFalse.Text == "true":
-		return logicalExpr(logicOr, negate(condition), whenTrue), true
+		return shortCircuit(logicalExpr(logicOr, negate(condition), whenTrue)), true
 	}
 	typ := whenTrue.Type
 	if whenTrue.Type != whenFalse.Type {
@@ -459,10 +473,16 @@ func ternaryExpr(condition, thenValue, elseValue expr) (expr, bool) {
 	// too, and the int form is the conditional over their int forms - which is
 	// what source wrote where the result is a number.
 	if erasedBoolean(whenTrue) && erasedBoolean(whenFalse) {
-		out.AsInt = at(condition, precTernary+1) + " ? " + at(numeric(whenTrue), precTernary) +
-			" : " + at(numeric(whenFalse), precTernary)
+		out.AsInt = conditionalOverInts(condition, whenTrue, whenFalse)
 	}
 	return out, true
+}
+
+// conditionalOverInts is the conditional over the int forms of two erased
+// booleans.
+func conditionalOverInts(condition, whenTrue, whenFalse expr) string {
+	return at(condition, precTernary+1) + " ? " + at(numeric(whenTrue), precTernary) +
+		" : " + at(numeric(whenFalse), precTernary)
 }
 
 // materializedBoolean is the value of a branch whose arms are `1` and `0`: that
@@ -733,11 +753,26 @@ type stmt struct {
 // `super(...)`/`this(...)` call, so they follow it. That call is always the
 // first statement when it is there.
 func withHoisted(hoisted, statements []string) []string {
-	if len(statements) > 0 && chainingCall.MatchString(statements[0]) {
-		out := append([]string{statements[0]}, hoisted...)
-		return append(out, statements[1:]...)
+	if len(statements) == 0 || !chainingCall.MatchString(statements[0]) {
+		return append(append([]string{}, hoisted...), statements...)
 	}
-	return append(append([]string{}, hoisted...), statements...)
+	// One the call's own arguments assign has to be declared before it - which
+	// only Java 25 accepts, and is then exactly what that source wrote.
+	first := statements[0]
+	var before, after []string
+	for _, one := range hoisted {
+		name := one[strings.LastIndex(one, " ")+1 : len(one)-1]
+		if reads(first, name) {
+			before = append(before, one)
+		} else {
+			after = append(after, one)
+		}
+	}
+	out := make([]string, 0, len(hoisted)+len(statements))
+	out = append(out, before...)
+	out = append(out, first)
+	out = append(out, after...)
+	return append(out, statements[1:]...)
 }
 
 var chainingCall = regexp.MustCompile(`^(super|this)\(`)
@@ -1967,9 +2002,10 @@ func (d *bodyDecompiler) coerceInto(value expr, target string) (string, error) {
 func (d *bodyDecompiler) retype(entry *local, target string) error {
 	// An assignment written inside an expression was coerced to the type the
 	// variable had then, and its text is already part of a bigger one: nothing
-	// here can reach in and change it.
+	// here can reach in and change it. That holds for the variable it assigns,
+	// and for any variable whose own value has such an assignment inside it.
 	for _, write := range entry.Writes {
-		if write.InValue {
+		if write.InValue || embedsAssignment(write.Value.Text) {
 			return bail("a retyped assignment used as a value")
 		}
 	}
@@ -2868,6 +2904,26 @@ func opBase(m string) string {
 
 var singleSlotStore = regexp.MustCompile(`^[ifa]store(_[0-3])?$`)
 
+// provenBoolean is value where its partner in a boolean operation is a boolean:
+// Java has no `int & boolean`, so an int-typed local there is a boolean whose
+// type was only inferred, and this is the use that proves it.
+func (d *bodyDecompiler) provenBoolean(value, partner expr) (expr, error) {
+	// A boolean javac erased to `1`/`0` proves nothing: `buf | (c ? 1 : 0)` is
+	// an int operation. Only one that could never have been a number does.
+	if partner.Type != "boolean" || erasedBoolean(partner) || value.Type != "int" {
+		return value, nil
+	}
+	entry, ok := d.byName[value.Text]
+	if !ok || entry.Authoritative {
+		return value, nil
+	}
+	if _, err := d.coerceInto(value, "boolean"); err != nil {
+		return expr{}, err
+	}
+	value.Type = "boolean"
+	return value, nil
+}
+
 // checkDuplicable says what a `dup` may copy: only a value that reads the same
 // thing every time may be written twice; an expression would be *computed*
 // twice.
@@ -2910,10 +2966,19 @@ func (d *bodyDecompiler) storeAsValue(slot, scopePc int, value expr, declaredTyp
 	}
 	target.Writes = append(target.Writes,
 		localWrite{List: d.current, Index: len(*d.current), Value: value, InValue: true})
+	// The value is the assignment, whose text is coerced to the variable's type
+	// as it stands and can never be rewritten. Where that type was only inferred
+	// it is not what the next variable in a chain should learn from -
+	// `int i = (c = s.charAt(0))` is an int, whatever `c` turned out to be - so
+	// an inferred int-family type is handed on as the `int` it was erased to.
+	typ := target.Type
+	if !target.Authoritative && (typ == "int" || erasedToInt[typ]) {
+		typ = "int"
+	}
 	d.push(expr{
 		Text:    target.Name + " = " + text,
 		Prec:    precAssign,
-		Type:    target.Type,
+		Type:    typ,
 		Effects: true,
 	})
 	return nil
@@ -4375,6 +4440,12 @@ func (d *bodyDecompiler) branchExpr(instruction Instruction) (expr, error) {
 		// `==` and `!=` are the only comparisons a boolean takes; on one, both
 		// sides are booleans and a materialized one keeps its own text.
 		if op == "==" || op == "!=" {
+			if left, err = d.provenBoolean(left, right); err != nil {
+				return expr{}, err
+			}
+			if right, err = d.provenBoolean(right, left); err != nil {
+				return expr{}, err
+			}
 			if l, r, ok := booleanOperands(left, right); ok {
 				return compareExpr(l, op, r), nil
 			}
@@ -4665,26 +4736,16 @@ func (d *bodyDecompiler) step(
 		if base == "astore" || (erasedToInt[value.Type] && value.AsInt == "") {
 			fallback = value.Type
 		}
+		// A `1`/`0` stored into a variable an earlier use already proved a
+		// boolean is `true`/`false`, not an int that would split the slot in two.
+		if fallback == "int" && erasedBoolean(value) {
+			if existing, ok := d.locals[slotOf(instruction)]; ok && existing.Type == "boolean" {
+				fallback = "boolean"
+			}
+		}
 		if d.assignAsValue {
 			d.assignAsValue = false
-			slot := slotOf(instruction)
-			// Written as a value, the assignment is coerced to the type the
-			// variable has *now* and cannot be rewritten later. An int-family
-			// variable the debug table does not type may still narrow to a
-			// boolean or a char at a later use, so for one of those the copy the
-			// `dup` would have left is what gets stored, the way it was before.
-			target, err := d.local(slot, nextPc, fallback, true)
-			if err != nil {
-				return err
-			}
-			if target.Authoritative || (value.Type != "int" && !erasedToInt[value.Type]) {
-				return d.storeAsValue(slot, nextPc, value, fallback)
-			}
-			if err := checkDuplicable(value); err != nil {
-				return err
-			}
-			d.push(value)
-			return d.store(slot, nextPc, value, fallback)
+			return d.storeAsValue(slotOf(instruction), nextPc, value, fallback)
 		}
 		return d.store(slotOf(instruction), nextPc, value, fallback)
 	}
@@ -4758,6 +4819,13 @@ func (d *bodyDecompiler) step(
 		// wrote: where every operand is a boolean javac erased, the value
 		// carries the int form as well, the way a materialized boolean does.
 		if len(operator.operator) == 1 && strings.ContainsAny(operator.operator, "|&^") {
+			var err error
+			if left, err = d.provenBoolean(left, right); err != nil {
+				return err
+			}
+			if right, err = d.provenBoolean(right, left); err != nil {
+				return err
+			}
 			if l, r, ok := booleanOperands(left, right); ok {
 				asBool := binaryExpr(l, operator.operator, r, operator.prec, "boolean")
 				if erasedBoolean(left) && erasedBoolean(right) {

@@ -324,11 +324,16 @@ function ternary(condition: Expr, thenValue: Expr, elseValue: Expr): Expr | unde
   }
   // `c ? true : x` and `c ? x : false` are how a short-circuit reads once its
   // value is materialized; writing them back as `||`/`&&` is both shorter and
-  // what the source said.
-  if (whenTrue.text === "true") return logical("or", condition, whenFalse);
-  if (whenFalse.text === "false") return logical("and", condition, whenTrue);
-  if (whenTrue.text === "false") return logical("and", negate(condition), whenFalse);
-  if (whenFalse.text === "true") return logical("or", negate(condition), whenTrue);
+  // what the source said. Where both arms are booleans javac erased, the int
+  // form is the conditional itself, the way it is for any two such arms below.
+  const shortCircuit = (value: Expr): Expr =>
+    erasedBoolean(thenValue) && erasedBoolean(elseValue)
+      ? { ...value, asInt: conditionalOverInts(condition, thenValue, elseValue) }
+      : value;
+  if (whenTrue.text === "true") return shortCircuit(logical("or", condition, whenFalse));
+  if (whenFalse.text === "false") return shortCircuit(logical("and", condition, whenTrue));
+  if (whenTrue.text === "false") return shortCircuit(logical("and", negate(condition), whenFalse));
+  if (whenFalse.text === "true") return shortCircuit(logical("or", negate(condition), whenTrue));
   const left = NUMERIC_WIDTH.indexOf(whenTrue.type);
   const right = NUMERIC_WIDTH.indexOf(whenFalse.type);
   const type =
@@ -348,14 +353,17 @@ function ternary(condition: Expr, thenValue: Expr, elseValue: Expr): Expr | unde
     // too, and the int form is the conditional over their int forms - which is
     // what source wrote where the result is a number.
     ...(erasedBoolean(whenTrue) && erasedBoolean(whenFalse)
-      ? {
-          asInt: `${at(condition, PREC_TERNARY + 1)} ? ${at(numeric(whenTrue), PREC_TERNARY)} : ${at(
-            numeric(whenFalse),
-            PREC_TERNARY,
-          )}`,
-        }
+      ? { asInt: conditionalOverInts(condition, whenTrue, whenFalse) }
       : {}),
   };
+}
+
+/** The conditional over the int forms of two erased booleans. */
+function conditionalOverInts(condition: Expr, whenTrue: Expr, whenFalse: Expr): string {
+  return `${at(condition, PREC_TERNARY + 1)} ? ${at(numeric(whenTrue), PREC_TERNARY)} : ${at(
+    numeric(whenFalse),
+    PREC_TERNARY,
+  )}`;
 }
 
 /**
@@ -370,6 +378,14 @@ function ternary(condition: Expr, thenValue: Expr, elseValue: Expr): Expr | unde
  */
 function withoutLiterals(text: string): string {
   return text.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "");
+}
+
+/**
+ * Whether a value has an assignment inside it - the one operator this writes
+ * with a lone `=`, which no comparison or compound assignment does.
+ */
+function embedsAssignment(text: string): boolean {
+  return withoutLiterals(text).includes(" = ");
 }
 
 /**
@@ -708,12 +724,14 @@ function trimTail(statements: Stmt[], text: string): void {
  * chains, where nothing may come before the `super(...)`/`this(...)` call, so
  * they follow it. That call is always the first statement when it is there.
  */
-function withHoisted(hoisted: readonly string[], statements: readonly string[]): string[] {
+export function withHoisted(hoisted: readonly string[], statements: readonly string[]): string[] {
   const first = statements[0];
-  if (first !== undefined && /^(super|this)\(/.test(first)) {
-    return [first, ...hoisted, ...statements.slice(1)];
-  }
-  return [...hoisted, ...statements];
+  if (first === undefined || !/^(super|this)\(/.test(first)) return [...hoisted, ...statements];
+  // One the call's own arguments assign has to be declared before it - which
+  // only Java 25 accepts, and is then exactly what that source wrote.
+  const before = hoisted.filter(one => reads(first, one.slice(one.lastIndexOf(" ") + 1, -1)));
+  const after = hoisted.filter(one => !before.includes(one));
+  return [...before, first, ...after, ...statements.slice(1)];
 }
 
 function flattenStatements(statements: readonly Stmt[]): string[] {
@@ -1716,8 +1734,9 @@ class BodyDecompiler {
   private retype(local: Local, target: string): void {
     // An assignment written inside an expression was coerced to the type the
     // variable had then, and its text is already part of a bigger one: nothing
-    // here can reach in and change it.
-    if (local.writes.some(write => write.inValue === true)) {
+    // here can reach in and change it. That holds for the variable it assigns,
+    // and for any variable whose own value has such an assignment inside it.
+    if (local.writes.some(write => write.inValue === true || embedsAssignment(write.value.text))) {
       throw new NotDecompilable("a retyped assignment used as a value");
     }
     local.type = target;
@@ -2374,6 +2393,21 @@ class BodyDecompiler {
   }
 
   /**
+   * `value` where its partner in a boolean operation is a boolean: Java has no
+   * `int & boolean`, so an int-typed local there is a boolean whose type was
+   * only inferred, and this is the use that proves it.
+   */
+  private provenBoolean(value: Expr, partner: Expr): Expr {
+    // A boolean javac erased to `1`/`0` proves nothing: `buf | (c ? 1 : 0)` is
+    // an int operation. Only one that could never have been a number does.
+    if (partner.type !== "boolean" || erasedBoolean(partner) || value.type !== "int") return value;
+    const local = this.byName.get(value.text);
+    if (local === undefined || local.authoritative) return value;
+    this.coerceInto(value, "boolean");
+    return { ...value, type: "boolean" };
+  }
+
+  /**
    * What a `dup` may copy: only a value that reads the same thing every time may
    * be written twice; an expression would be *computed* twice.
    */
@@ -2407,10 +2441,17 @@ class BodyDecompiler {
       this.hoisted.push(`${local.type} ${local.name};`);
     }
     local.writes.push({ list: this.current, index: this.current.length, value, inValue: true });
+    // The value is the assignment, whose text is coerced to the variable's type
+    // as it stands and can never be rewritten. Where that type was only
+    // inferred it is not what the next variable in a chain should learn from -
+    // `int i = (c = s.charAt(0))` is an int, whatever `c` turned out to be - so
+    // an inferred int-family type is handed on as the `int` it was erased to.
+    const inferred =
+      !local.authoritative && (local.type === "int" || ERASED_TO_INT.includes(local.type));
     this.push({
       text: `${local.name} = ${text}`,
       prec: PREC_ASSIGN,
-      type: local.type,
+      type: inferred ? "int" : local.type,
       effects: true,
     });
   }
@@ -3412,10 +3453,14 @@ class BodyDecompiler {
     const op = COMPARISONS[mnemonic.replace("if_icmp", "if").replace(/^if/, "")];
     if (op === undefined) throw new NotDecompilable(`unsupported branch ${mnemonic}`);
     if (mnemonic.startsWith("if_icmp")) {
-      const right = this.pop();
-      const left = this.pop();
+      let right = this.pop();
+      let left = this.pop();
       // `==` and `!=` are the only comparisons a boolean takes; on one, both
       // sides are booleans and a materialized one keeps its own text.
+      if (op === "==" || op === "!=") {
+        left = this.provenBoolean(left, right);
+        right = this.provenBoolean(right, left);
+      }
       const booleans = op === "==" || op === "!=" ? booleanOperands(left, right) : undefined;
       if (booleans !== undefined) return compare(booleans[0], op, booleans[1]);
       return compare(numeric(left), op, numeric(right));
@@ -3629,25 +3674,19 @@ class BodyDecompiler {
       // condition javac materialized as `1`/`0` does *not* know: `int x = c ? 1
       // : 0` and `boolean b = c` compile to the same store, so it starts as an
       // int and a use that needs a boolean narrows it (as for a literal).
-      const fallback =
+      let fallback =
         base === "astore" || (ERASED_TO_INT.includes(value.type) && value.asInt === undefined)
           ? value.type
           : PRIMITIVE_OF_PREFIX[base[0]!]!;
+      // A `1`/`0` stored into a variable an earlier use already proved a boolean
+      // is `true`/`false`, not an int that would split the slot in two.
+      if (fallback === "int" && erasedBoolean(value)) {
+        const existing = this.locals.get(this.slotOf(instruction));
+        if (existing !== undefined && existing.type === "boolean") fallback = "boolean";
+      }
       if (this.assignAsValue) {
         this.assignAsValue = false;
-        const slot = this.slotOf(instruction);
-        // Written as a value, the assignment is coerced to the type the variable
-        // has *now* and cannot be rewritten later. An int-family variable the
-        // debug table does not type may still narrow to a boolean or a char at
-        // a later use, so for one of those the copy the `dup` would have left
-        // is what gets stored, the way it was before.
-        const local = this.local(slot, nextPc, fallback, true);
-        if (local.authoritative || (value.type !== "int" && !ERASED_TO_INT.includes(value.type))) {
-          return this.storeAsValue(slot, nextPc, value, fallback);
-        }
-        this.checkDuplicable(value);
-        this.push(value);
-        return this.store(slot, nextPc, value, fallback);
+        return this.storeAsValue(this.slotOf(instruction), nextPc, value, fallback);
       }
       return this.store(this.slotOf(instruction), nextPc, value, fallback);
     }
@@ -3698,6 +3737,10 @@ class BodyDecompiler {
       // and only what consumes the result knows which one source wrote: where
       // every operand is a boolean javac erased, the value carries the int form
       // as well, the way a materialized boolean does.
+      if ("|&^".includes(operator.operator)) {
+        left = this.provenBoolean(left, right);
+        right = this.provenBoolean(right, left);
+      }
       const booleans = "|&^".includes(operator.operator) ? booleanOperands(left, right) : undefined;
       if (booleans === undefined) {
         left = numeric(left);

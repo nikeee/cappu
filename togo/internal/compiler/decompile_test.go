@@ -367,20 +367,7 @@ func compileWithJavac(t *testing.T, dir, name, source string) string {
 	return compileWithJavacOn(t, dir, name, source, "")
 }
 
-// compileWithJavacDebug is compileWithJavac with `-g`, which writes the
-// LocalVariableTable that types every local; without it the decompiler infers
-// types, and some shapes only come back when it need not.
-func compileWithJavacDebug(t *testing.T, dir, name, source string) string {
-	t.Helper()
-	return compileWithJavacFlags(t, dir, name, source, "", true)
-}
-
 func compileWithJavacOn(t *testing.T, dir, name, source, classPath string) string {
-	t.Helper()
-	return compileWithJavacFlags(t, dir, name, source, classPath, false)
-}
-
-func compileWithJavacFlags(t *testing.T, dir, name, source, classPath string, debug bool) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -389,11 +376,7 @@ func compileWithJavacFlags(t *testing.T, dir, name, source, classPath string, de
 	if err := os.WriteFile(javaFile, []byte(source), 0o644); err != nil {
 		t.Fatalf("write source: %v", err)
 	}
-	args := []string{"--release", "21"}
-	if debug {
-		args = append(args, "-g")
-	}
-	args = append(args, "-d", dir)
+	args := []string{"--release", "21", "-d", dir}
 	if classPath != "" {
 		args = append(args, "-cp", classPath)
 	}
@@ -836,7 +819,7 @@ func TestDecompileWritesAnIncrementBehindAValueOnTheStack(t *testing.T) {
 // bytecode and only the consumer knows. `==` against a boolean is the same
 // story, and a conditional over two erased arms keeps its int form as well.
 const bitwiseSource = `public class Bitwise {
-  static int[] arr = {7};
+  static int[] arr = {7, 8};
   static int and(boolean c, int x) { return (c ? 1 : 0) & x; }
   static int or(boolean c) { return (c ? 1 : 0) | 2; }
   static int xor(boolean c) { return (c ? 1 : 0) ^ 1; }
@@ -845,6 +828,9 @@ const bitwiseSource = `public class Bitwise {
   static boolean asBool(int a, int b) { return (a > b) ^ true; }
   static boolean eq(boolean c) { return c == (arr[0] > 5); }
   static int nested(boolean k, boolean c) { int r = k ? (c ? 1 : 0) : (c ? 0 : 1); return r; }
+  static boolean proven(int a, int b, boolean f) { boolean x = (a > b) ^ true; return x ^ f; }
+  static boolean provenEq(int a, int b, boolean f) { boolean x = (a > b) ^ (b > a); return x == f; }
+  static int shortCircuit(boolean f, int a, int b) { return arr[f ? (a > b ? 1 : 0) : 0]; }
 }`
 
 const bitwiseDriverSource = `public class BitwiseDriver {
@@ -852,7 +838,9 @@ const bitwiseDriverSource = `public class BitwiseDriver {
     for (boolean c : new boolean[] { true, false })
       System.out.println(Bitwise.and(c, 3) + " " + Bitwise.or(c) + " " + Bitwise.xor(c)
         + " " + Bitwise.not(c) + " " + Bitwise.both(c, !c) + " " + Bitwise.asBool(2, 1)
-        + " " + Bitwise.eq(c) + " " + Bitwise.nested(c, !c));
+        + " " + Bitwise.eq(c) + " " + Bitwise.nested(c, !c)
+        + " " + Bitwise.proven(2, 1, c) + " " + Bitwise.provenEq(1, 2, c)
+        + " " + Bitwise.shortCircuit(c, 2, 1));
   }
 }`
 
@@ -873,6 +861,11 @@ func TestDecompileWritesAMaterializedBooleanAsANumberInABitwiseOperation(t *test
 		"(arg0 ? 1 : 0) & arg1", "(arg0 ? 1 : 0) | 2",
 		// The same operation as a boolean, where the consumer says so.
 		"arg0 > arg1 ^ true", "arg0 == arr[0] > 5",
+		// An int-typed local against a real boolean: Java has no `int ^ boolean`,
+		// so the use proves the local a boolean.
+		"boolean var3 = arg0 > arg1 ^ true;", "var3 == arg2",
+		// A short-circuit whose arms are both erased keeps its int form.
+		"arr[arg0 ? arg1 > arg2 ? 1 : 0 : 0]",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
@@ -998,9 +991,7 @@ func TestDecompileReconstructsAnAssignmentUsedAsAValue(t *testing.T) {
 		t.Skip("no JDK (javac/java)")
 	}
 	dir := t.TempDir()
-	// With the debug table: every local is typed, so the int cases come back
-	// too. Without it, see the test after this one.
-	classFile := compileWithJavacDebug(t, dir, "Assigny", assignySource)
+	classFile := compileWithJavac(t, dir, "Assigny", assignySource)
 	source, err := Decompile(readFile(t, classFile))
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
@@ -1008,7 +999,7 @@ func TestDecompileReconstructsAnAssignmentUsedAsAValue(t *testing.T) {
 	if strings.Contains(source, "/* cappu:") {
 		t.Fatalf("a method bailed:\n%s", source)
 	}
-	for _, want := range []string{"(line = poll(q)) != null", `two(v, v = len("ab"))`} {
+	for _, want := range []string{"(var2 = poll(arg0)) != null", `two(var0, var0 = len("ab"))`} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
 		}
@@ -1026,43 +1017,69 @@ func TestDecompileReconstructsAnAssignmentUsedAsAValue(t *testing.T) {
 	}
 }
 
-// Written as a value, an assignment is coerced to the type its variable has at
-// that moment and can never be rewritten. Without a debug table an int-family
-// variable may still turn out to be a boolean or a char at a later use, so for
-// one of those the store falls back to what the `dup` used to leave - the copy,
-// with its guards - and only a variable whose type is certain takes the new form.
-func TestDecompileFallsBackForAnIntFamilyVariableTheDebugTableDoesNotType(t *testing.T) {
-	if !hasTool("javac") {
-		t.Skip("no JDK (javac)")
+// Written as a value, an assignment's text is coerced to the type its variable
+// has at that moment and can never be rewritten. Without a debug table an
+// int-family variable's type is only inferred, and a later use that would
+// narrow it to a boolean or a char has nothing to rewrite: it says so. The value
+// form itself stays - a statement instead would run before what is already on
+// the stack, and a copy would evaluate the value twice - and the type it hands
+// on is the `int` it was erased to, not what the inner variable happened to be.
+const untypedSource = `public class Untyped {
+  static int counter;
+  static int g() { throw new RuntimeException("boom"); }
+  static void f(int a, int b) { counter += a + b; }
+  static int[] arr() { counter++; return new int[counter]; }
+  static int ordered() { int x = 0; try { f(g(), x = 5); } catch (RuntimeException e) {} return x; }
+  static int once() { int x, y; x = y = arr().length; return x * 10 + y; }
+  static String erased(String s) { char c; int i = (c = s.charAt(0)); return "" + c + i; }
+  static char narrowed() { char c; int i = (c = 65); return c; }
+}`
+
+const untypedDriverSource = `public class UntypedDriver {
+  public static void main(String[] args) {
+    Untyped.counter = 0;
+    System.out.println(Untyped.ordered() + " " + Untyped.once() + " " + Untyped.erased("z")
+      + " " + Untyped.counter);
+  }
+}`
+
+func TestDecompileKeepsAnAssignmentAsAValueWithoutADebugTable(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
 	}
 	dir := t.TempDir()
-	classFile := compileWithJavac(t, dir, "Untyped", `public class Untyped {
-  static int counter;
-  static void foo(boolean b) { counter += 101; }
-  static int len(String s) { return s.length(); }
-  static boolean dropped() { boolean b; foo(b = false); return b; }
-  static char narrowed() { char c; int i = (c = 65); return c; }
-  static int kept(String s) { String t; return len(t = s.trim()) + t.length(); }
-}`)
+	classFile := compileWithJavac(t, dir, "Untyped", untypedSource)
 	source, err := Decompile(readFile(t, classFile))
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
 	for _, want := range []string{
-		// A boolean that reads as an int until `return b` proves otherwise: as a
-		// value it would have been assigned `false` after `foo` ran.
-		"boolean var0 = false;", "foo(false);",
-		// A char that would have been written as `int var = 97`.
-		"char var0 = 'A';", "int var1 = 65;",
-		// A reference is typed by its store, so this still comes back.
-		"len(var1 = arg0.trim())",
+		// The store must not move ahead of g(), which throws first.
+		"f(g(), var0 = 5);",
+		// arr() must run once, not once per variable.
+		"int var0 = var1 = arr().length;",
+		// The outer variable is an int, whatever c was inferred to be.
+		"int var2 = var1 = arg0.charAt(0);",
+		// `return c` would narrow c to a char after its assignment was written.
+		"cappu: a retyped assignment used as a value",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
 		}
 	}
-	if strings.Contains(source, "/* cappu:") {
-		t.Errorf("a method bailed:\n%s", source)
+	if strings.Count(source, "cappu: ") != 2 {
+		t.Errorf("expected one bailed method, got:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Untyped", source)
+	compileWithJavacOn(t, dir, "UntypedDriver", untypedDriverSource, dir)
+	expected := runJava(t, dir, "UntypedDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "UntypedDriver")
+	if actual != expected {
+		t.Errorf("the decompiled class runs differently:\n%s\n--- from ---\n%s", actual, expected)
+	}
+	if expected == "" {
+		t.Fatal("the driver printed nothing")
 	}
 }
 
@@ -1183,6 +1200,13 @@ func TestDecompileDeclaresAHoistedLocalAfterTheConstructorCall(t *testing.T) {
 	}
 	// The proof is javac accepting it under --release 21.
 	compileWithJavacOn(t, filepath.Join(dir, "again"), "Hoisty", source, dir)
+	// A variable the call's own arguments assign is the exception: only Java 25
+	// can write that, and it has to be written the way that source was.
+	got := withHoisted([]string{"int x;", "int y;"}, []string{"super(x = a);", "y = 1;"})
+	want := []string{"int x;", "super(x = a);", "int y;", "y = 1;"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("withHoisted = %v, want %v", got, want)
+	}
 }
 
 // A superclass that is not `Object` runs code the order is observable through,
@@ -1262,14 +1286,14 @@ func TestDecompileSaysWhenAnIncrementWouldBeWrittenTwiceOrMoved(t *testing.T) {
 	if !strings.Contains(source, "cappu: an assignment with a value that could see it on the stack") {
 		t.Errorf("expected the assignment bail:\n%s", source)
 	}
-	// A store into an int local the debug table does not type: the copy the
-	// `dup` leaves is what gets stored, and that copy sits behind the increment.
-	if !strings.Contains(source, "cappu: an assignment to a variable that is already on the stack") {
-		t.Errorf("expected the local-store bail:\n%s", source)
+	// A store into a local is the one that comes back: written as the value it
+	// is, it stays behind the increment instead of moving in front of it.
+	if !strings.Contains(source, "g(arg0++, var1 = arg0)") {
+		t.Errorf("expected the local store as a value:\n%s", source)
 	}
-	// `g` is the only body that comes back.
-	if strings.Count(source, "cappu: ") != 8 {
-		t.Errorf("expected four bailed methods, got:\n%s", source)
+	// `g` and `local` are the bodies that come back.
+	if strings.Count(source, "cappu: ") != 6 {
+		t.Errorf("expected three bailed methods, got:\n%s", source)
 	}
 }
 
@@ -2067,9 +2091,9 @@ func TestDecompileSaysWhenAnAssignmentWouldMoveInFrontOfAValue(t *testing.T) {
 	if count := strings.Count(source, "an assignment with a value that could see it on the stack"); count != 4 {
 		t.Errorf("expected four guarded methods, got %d:\n%s", count, source)
 	}
-	// A chained assignment holds only the literal it copied, which sees nothing.
-	// Its int locals carry no debug table here, so the copy is what is stored.
-	if !strings.Contains(source, "int var1 = 5;") {
+	// A chained assignment is the one shape here that comes back: the store is
+	// the value, so it stays where source put it.
+	if !strings.Contains(source, "int var0 = var1 = 5;") {
 		t.Errorf("the chained assignment did not come back:\n%s", source)
 	}
 }
