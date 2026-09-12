@@ -703,6 +703,19 @@ function trimTail(statements: Stmt[], text: string): void {
   if (statements[statements.length - 1] === text) statements.pop();
 }
 
+/**
+ * The hoisted declarations in front of the body - except in a constructor that
+ * chains, where nothing may come before the `super(...)`/`this(...)` call, so
+ * they follow it. That call is always the first statement when it is there.
+ */
+function withHoisted(hoisted: readonly string[], statements: readonly string[]): string[] {
+  const first = statements[0];
+  if (first !== undefined && /^(super|this)\(/.test(first)) {
+    return [first, ...hoisted, ...statements.slice(1)];
+  }
+  return [...hoisted, ...statements];
+}
+
 function flattenStatements(statements: readonly Stmt[]): string[] {
   return statements.flatMap(statement =>
     typeof statement === "string" ? [statement] : flattenStatements(statement),
@@ -2147,7 +2160,7 @@ class BodyDecompiler {
         throw new NotDecompilable("a lambda that assigns to its parameter");
       }
     }
-    const lines = [...nested.hoisted, ...flattenStatements(nested.statements)];
+    const lines = withHoisted(nested.hoisted, flattenStatements(nested.statements));
     if (lines[lines.length - 1] === "return;") lines.pop();
     const only = lines.length === 1 ? lines[0]! : undefined;
     // One expression is the form source wrote; anything else needs the block.
@@ -4205,7 +4218,7 @@ function methodSource(method: Member, classFile: ClassFile): MethodSource {
   let reconstructed = true;
   try {
     decompiler.run(instructions, code.exceptions);
-    body = [...decompiler.hoisted, ...flattenStatements(decompiler.statements)];
+    body = withHoisted(decompiler.hoisted, flattenStatements(decompiler.statements));
     // Every void method ends in a `return` javac inserted; source does not.
     if (body[body.length - 1] === "return;") body = body.slice(0, -1);
   } catch (e) {

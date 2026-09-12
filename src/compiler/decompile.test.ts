@@ -2177,7 +2177,40 @@ test("does not write a ConstantValue on an instance field", () => {
   expect(source).not.toContain("int M = 10;");
 });
 
-// A superclass that is not `Object` runs code the order is observable through,
+// A local first stored inside a branch is declared at the top of the method -
+// but in a constructor that chains, nothing may come before the
+// `super(...)`/`this(...)` call, so the declarations follow it instead. Before
+// Java 25 the other order does not compile.
+test(
+  "declares a hoisted local after the constructor call, not before",
+  { skip: HAS_JAVAC ? false : "no JDK (javac)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-hoistsuper-");
+    compileWithJavac(
+      "public class HoistBase { int b; HoistBase(int b) { this.b = b; } }\n",
+      "HoistBase",
+      dir.path,
+    );
+    const classFile = compileWithJavac(
+      "public class Hoisty extends HoistBase {\n" +
+        "  int f;\n" +
+        "  Hoisty(int a) { super(a); int x; if (a > 0) { x = 1; } else { x = 2; } f = x; }\n" +
+        "  Hoisty(int a, int z) { this(a); int y; if (a > 0) { y = 1; } else { y = 2; } f += y + z; }\n" +
+        "}\n",
+      "Hoisty",
+      dir.path,
+      dir.path,
+    );
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    expect(source).toMatch(/super\(arg0\);\n\s*int var2;/);
+    expect(source).toMatch(/this\(arg0\);\n\s*int var3;/);
+    // The proof is javac accepting it under --release 21.
+    compileWithJavac(source, "Hoisty", join(dir.path, "again"), dir.path);
+  },
+);
+
+// A superclass that is not `Object` runs code the order is observable through,// A superclass that is not `Object` runs code the order is observable through,
 // so the statements in front of its call still say so.
 test(
   "says so when a field is assigned before a superclass constructor that runs",

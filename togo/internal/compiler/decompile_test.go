@@ -1154,6 +1154,37 @@ func TestDecompileReconstructsAConstructorThatAssignsAFieldBeforeSuper(t *testin
 	}
 }
 
+// A local first stored inside a branch is declared at the top of the method -
+// but in a constructor that chains, nothing may come before the
+// `super(...)`/`this(...)` call, so the declarations follow it instead. Before
+// Java 25 the other order does not compile.
+func TestDecompileDeclaresAHoistedLocalAfterTheConstructorCall(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	dir := t.TempDir()
+	compileWithJavac(t, dir, "HoistBase", `public class HoistBase { int b; HoistBase(int b) { this.b = b; } }`)
+	classFile := compileWithJavacOn(t, dir, "Hoisty", `public class Hoisty extends HoistBase {
+  int f;
+  Hoisty(int a) { super(a); int x; if (a > 0) { x = 1; } else { x = 2; } f = x; }
+  Hoisty(int a, int z) { this(a); int y; if (a > 0) { y = 1; } else { y = 2; } f += y + z; }
+}`, dir)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a constructor bailed:\n%s", source)
+	}
+	for _, want := range []string{"super(arg0);\nint var2;", "this(arg0);\nint var3;"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q in order:\n%s", want, source)
+		}
+	}
+	// The proof is javac accepting it under --release 21.
+	compileWithJavacOn(t, filepath.Join(dir, "again"), "Hoisty", source, dir)
+}
+
 // A superclass that is not `Object` runs code the order is observable through,
 // so the statements in front of its call still say so.
 func TestDecompileSaysWhenAFieldIsAssignedBeforeASuperclassConstructorThatRuns(t *testing.T) {

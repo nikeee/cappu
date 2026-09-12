@@ -728,6 +728,20 @@ type stmt struct {
 	Nested *[]stmt
 }
 
+// withHoisted puts the hoisted declarations in front of the body - except in a
+// constructor that chains, where nothing may come before the
+// `super(...)`/`this(...)` call, so they follow it. That call is always the
+// first statement when it is there.
+func withHoisted(hoisted, statements []string) []string {
+	if len(statements) > 0 && chainingCall.MatchString(statements[0]) {
+		out := append([]string{statements[0]}, hoisted...)
+		return append(out, statements[1:]...)
+	}
+	return append(append([]string{}, hoisted...), statements...)
+}
+
+var chainingCall = regexp.MustCompile(`^(super|this)\(`)
+
 func flattenStatements(statements []stmt) []string {
 	out := []string{}
 	for _, statement := range statements {
@@ -2537,7 +2551,7 @@ func (d *bodyDecompiler) inlineLambda(body Member, captures, passed []string, yi
 			return "", bail("a lambda that assigns to its parameter")
 		}
 	}
-	lines := append(flattenStatements(nested.hoisted), flattenStatements(nested.statements)...)
+	lines := withHoisted(flattenStatements(nested.hoisted), flattenStatements(nested.statements))
 	if len(lines) > 0 && lines[len(lines)-1] == "return;" {
 		lines = lines[:len(lines)-1]
 	}
@@ -5550,7 +5564,7 @@ func decompileBody(
 	if err := d.run(instructions, code.Exceptions); err != nil {
 		return nil, flattenStatements(d.statements), err
 	}
-	body = append(flattenStatements(d.hoisted), flattenStatements(d.statements)...)
+	body = withHoisted(flattenStatements(d.hoisted), flattenStatements(d.statements))
 	// Every void method ends in a `return` javac inserted; source does not.
 	if len(body) > 0 && body[len(body)-1] == "return;" {
 		body = body[:len(body)-1]
