@@ -279,6 +279,25 @@ function asBoolean(expr: Expr): Expr {
   return expr;
 }
 
+/**
+ * Both operands as booleans, when the operation is one: a boolean on either side
+ * makes the other one a boolean too - `1` and `0` are `true` and `false` there.
+ * An int that is not one of those (a variable, a `2`) makes it an int operation
+ * instead, and a boolean javac materialized as `1`/`0` on the other side is
+ * then a number, which `numeric` writes.
+ */
+function booleanOperands(left: Expr, right: Expr): [Expr, Expr] | undefined {
+  if (left.type !== "boolean" && right.type !== "boolean") return undefined;
+  const l = asBoolean(left);
+  const r = asBoolean(right);
+  return l.type === "boolean" && r.type === "boolean" ? [l, r] : undefined;
+}
+
+/** Whether a value is the `1`/`0` a boolean was erased to, in either form. */
+function erasedBoolean(expr: Expr): boolean {
+  return expr.asInt !== undefined || expr.text === "1" || expr.text === "0";
+}
+
 function ternary(condition: Expr, thenValue: Expr, elseValue: Expr): Expr | undefined {
   // A lambda has no type of its own, and a conditional gives it none: the arm
   // has to name the interface, which is what source wrote.
@@ -325,6 +344,17 @@ function ternary(condition: Expr, thenValue: Expr, elseValue: Expr): Expr | unde
     )}`,
     prec: PREC_TERNARY,
     type,
+    // Two arms that are each a boolean javac erased make a value that is one
+    // too, and the int form is the conditional over their int forms - which is
+    // what source wrote where the result is a number.
+    ...(erasedBoolean(whenTrue) && erasedBoolean(whenFalse)
+      ? {
+          asInt: `${at(condition, PREC_TERNARY + 1)} ? ${at(numeric(whenTrue), PREC_TERNARY)} : ${at(
+            numeric(whenFalse),
+            PREC_TERNARY,
+          )}`,
+        }
+      : {}),
   };
 }
 
@@ -3369,8 +3399,13 @@ class BodyDecompiler {
     const op = COMPARISONS[mnemonic.replace("if_icmp", "if").replace(/^if/, "")];
     if (op === undefined) throw new NotDecompilable(`unsupported branch ${mnemonic}`);
     if (mnemonic.startsWith("if_icmp")) {
-      const right = numeric(this.pop());
-      return compare(numeric(this.pop()), op, right);
+      const right = this.pop();
+      const left = this.pop();
+      // `==` and `!=` are the only comparisons a boolean takes; on one, both
+      // sides are booleans and a materialized one keeps its own text.
+      const booleans = op === "==" || op === "!=" ? booleanOperands(left, right) : undefined;
+      if (booleans !== undefined) return compare(booleans[0], op, booleans[1]);
+      return compare(numeric(left), op, numeric(right));
     }
     const value = this.popRaw();
     // `lcmp`/`fcmpl`/`dcmpg` only exist to feed one of these: what source wrote
@@ -3645,18 +3680,22 @@ class BodyDecompiler {
       let right = this.pop();
       let left = this.pop();
       // `|`, `&` and `^` are the only ones a boolean takes, and there the `1`
-      // and `0` javac wrote are `true` and `false` - `b | 1` is not Java.
-      const boolean =
-        "|&^".includes(operator.operator) && (left.type === "boolean" || right.type === "boolean");
-      if (boolean) {
-        left = asBoolean(left);
-        right = asBoolean(right);
-      } else {
+      // and `0` javac wrote are `true` and `false` - `b | 1` is not Java. But
+      // `(a > b) ^ true` and `((a > b) ? 1 : 0) ^ 1` compile to the same thing,
+      // and only what consumes the result knows which one source wrote: where
+      // every operand is a boolean javac erased, the value carries the int form
+      // as well, the way a materialized boolean does.
+      const booleans = "|&^".includes(operator.operator) ? booleanOperands(left, right) : undefined;
+      if (booleans === undefined) {
         left = numeric(left);
         right = numeric(right);
+        const type = PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
+        return this.push(binary(left, operator.operator, right, operator.prec, type));
       }
-      const type = boolean ? "boolean" : PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
-      return this.push(binary(left, operator.operator, right, operator.prec, type));
+      const asBool = binary(booleans[0], operator.operator, booleans[1], operator.prec, "boolean");
+      if (!erasedBoolean(left) || !erasedBoolean(right)) return this.push(asBool);
+      const asInt = binary(numeric(left), operator.operator, numeric(right), operator.prec, "int");
+      return this.push({ ...asBool, asInt: asInt.text });
     }
     if (/^[ilfd]neg$/.test(mnemonic)) {
       const value = numeric(this.pop());

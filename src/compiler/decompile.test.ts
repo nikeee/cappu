@@ -1908,6 +1908,61 @@ test("writes a materialized boolean in every place that wants a number", () => {
   expect(source).toContain("f(arg0 ? 1 : 0)");
 });
 
+// `|`, `&` and `^` take a boolean, so a materialized one on either side used to
+// make the whole operation a boolean - `c & x` for `(c ? 1 : 0) & x`, which is
+// not Java. Only an operand that is itself `1`/`0` or a boolean makes it one;
+// where every operand is a boolean javac erased, the result carries the int
+// form too, since `(a > b) ^ true` and `((a > b) ? 1 : 0) ^ 1` are the same
+// bytecode and only the consumer knows. `==` against a boolean is the same
+// story, and a conditional over two erased arms keeps its int form as well.
+test(
+  "writes a materialized boolean as a number in a bitwise operation",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-bitwise-");
+    const classFile = compileWithJavac(
+      "public class Bitwise {\n" +
+        "  static int[] arr = {7};\n" +
+        "  static int and(boolean c, int x) { return (c ? 1 : 0) & x; }\n" +
+        "  static int or(boolean c) { return (c ? 1 : 0) | 2; }\n" +
+        "  static int xor(boolean c) { return (c ? 1 : 0) ^ 1; }\n" +
+        "  static int not(boolean c) { return ~(c ? 1 : 0); }\n" +
+        "  static int both(boolean c, boolean k) { return (c ? 1 : 0) & (k ? 1 : 0); }\n" +
+        "  static boolean asBool(int a, int b) { return (a > b) ^ true; }\n" +
+        "  static boolean eq(boolean c) { return c == (arr[0] > 5); }\n" +
+        "  static int nested(boolean k, boolean c) { int r = k ? (c ? 1 : 0) : (c ? 0 : 1); return r; }\n" +
+        "}\n",
+      "Bitwise",
+      dir.path,
+    );
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    expect(source).toContain("(arg0 ? 1 : 0) & arg1");
+    expect(source).toContain("(arg0 ? 1 : 0) | 2");
+    // The same operation as a boolean, where the consumer says so.
+    expect(source).toContain("arg0 > arg1 ^ true");
+    expect(source).toContain("arg0 == arr[0] > 5");
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "Bitwise", again);
+    const driver =
+      "public class BitwiseDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      "    for (boolean c : new boolean[] { true, false })\n" +
+      '      System.out.println(Bitwise.and(c, 3) + " " + Bitwise.or(c) + " " + Bitwise.xor(c)\n' +
+      '        + " " + Bitwise.not(c) + " " + Bitwise.both(c, !c) + " " + Bitwise.asBool(2, 1)\n' +
+      '        + " " + Bitwise.eq(c) + " " + Bitwise.nested(c, !c));\n' +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "BitwiseDriver", dir.path, dir.path);
+    const expected = execFileSync("java", ["-cp", dir.path, "BitwiseDriver"], { encoding: "utf8" });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "BitwiseDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).not.toEqual("");
+  },
+);
+
 // A lambda has no type of its own, so where it is stored *as a value* the type
 // has to come from the variable it is assigned to. That crosses the assignment
 // path with the lambda one, and neither fixture covered the pair. cappu's own

@@ -828,6 +828,69 @@ func TestDecompileWritesAnIncrementBehindAValueOnTheStack(t *testing.T) {
 // A condition javac materialized as `1`/`0` reads as the condition itself, so
 // every place that wants a *number* has to ask for the ternary back. A switch
 // selector is one of them: `switch (flag)` is not Java.
+// `|`, `&` and `^` take a boolean, so a materialized one on either side used to
+// make the whole operation a boolean - `c & x` for `(c ? 1 : 0) & x`, which is
+// not Java. Only an operand that is itself `1`/`0` or a boolean makes it one;
+// where every operand is a boolean javac erased, the result carries the int
+// form too, since `(a > b) ^ true` and `((a > b) ? 1 : 0) ^ 1` are the same
+// bytecode and only the consumer knows. `==` against a boolean is the same
+// story, and a conditional over two erased arms keeps its int form as well.
+const bitwiseSource = `public class Bitwise {
+  static int[] arr = {7};
+  static int and(boolean c, int x) { return (c ? 1 : 0) & x; }
+  static int or(boolean c) { return (c ? 1 : 0) | 2; }
+  static int xor(boolean c) { return (c ? 1 : 0) ^ 1; }
+  static int not(boolean c) { return ~(c ? 1 : 0); }
+  static int both(boolean c, boolean k) { return (c ? 1 : 0) & (k ? 1 : 0); }
+  static boolean asBool(int a, int b) { return (a > b) ^ true; }
+  static boolean eq(boolean c) { return c == (arr[0] > 5); }
+  static int nested(boolean k, boolean c) { int r = k ? (c ? 1 : 0) : (c ? 0 : 1); return r; }
+}`
+
+const bitwiseDriverSource = `public class BitwiseDriver {
+  public static void main(String[] args) {
+    for (boolean c : new boolean[] { true, false })
+      System.out.println(Bitwise.and(c, 3) + " " + Bitwise.or(c) + " " + Bitwise.xor(c)
+        + " " + Bitwise.not(c) + " " + Bitwise.both(c, !c) + " " + Bitwise.asBool(2, 1)
+        + " " + Bitwise.eq(c) + " " + Bitwise.nested(c, !c));
+  }
+}`
+
+func TestDecompileWritesAMaterializedBooleanAsANumberInABitwiseOperation(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Bitwise", bitwiseSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Fatalf("a method bailed:\n%s", source)
+	}
+	for _, want := range []string{
+		"(arg0 ? 1 : 0) & arg1", "(arg0 ? 1 : 0) | 2",
+		// The same operation as a boolean, where the consumer says so.
+		"arg0 > arg1 ^ true", "arg0 == arr[0] > 5",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Bitwise", source)
+	compileWithJavacOn(t, dir, "BitwiseDriver", bitwiseDriverSource, dir)
+	expected := runJava(t, dir, "BitwiseDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "BitwiseDriver")
+	if actual != expected {
+		t.Errorf("the decompiled class runs differently:\n%s\n--- from ---\n%s", actual, expected)
+	}
+	if expected == "" {
+		t.Fatal("the driver printed nothing")
+	}
+}
+
 // A lambda has no type of its own, so where it is stored *as a value* the type
 // has to come from the variable it is assigned to. That crosses the assignment
 // path with the lambda one, and neither fixture covered the pair. cappu's own

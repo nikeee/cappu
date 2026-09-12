@@ -287,6 +287,28 @@ func asBoolean(e expr) expr {
 	return e
 }
 
+// booleanOperands returns both operands as booleans, when the operation is one:
+// a boolean on either side makes the other one a boolean too - `1` and `0` are
+// `true` and `false` there. An int that is not one of those (a variable, a `2`)
+// makes it an int operation instead, and a boolean javac materialized as `1`/`0`
+// on the other side is then a number, which numeric writes.
+func booleanOperands(left, right expr) (expr, expr, bool) {
+	if left.Type != "boolean" && right.Type != "boolean" {
+		return expr{}, expr{}, false
+	}
+	l, r := asBoolean(left), asBoolean(right)
+	if l.Type != "boolean" || r.Type != "boolean" {
+		return expr{}, expr{}, false
+	}
+	return l, r, true
+}
+
+// erasedBoolean reports whether a value is the `1`/`0` a boolean was erased to,
+// in either form.
+func erasedBoolean(e expr) bool {
+	return e.AsInt != "" || e.Text == "1" || e.Text == "0"
+}
+
 // withoutLiterals is a value's text with its string and character literals
 // removed, so a name or an operator inside one is not read as code.
 func withoutLiterals(text string) string {
@@ -427,12 +449,20 @@ func ternaryExpr(condition, thenValue, elseValue expr) (expr, bool) {
 			typ = whenFalse.Type
 		}
 	}
-	return expr{
+	out := expr{
 		Text: at(condition, precTernary+1) + " ? " + at(whenTrue, precTernary) +
 			" : " + at(whenFalse, precTernary),
 		Prec: precTernary,
 		Type: typ,
-	}, true
+	}
+	// Two arms that are each a boolean javac erased make a value that is one
+	// too, and the int form is the conditional over their int forms - which is
+	// what source wrote where the result is a number.
+	if erasedBoolean(whenTrue) && erasedBoolean(whenFalse) {
+		out.AsInt = at(condition, precTernary+1) + " ? " + at(numeric(whenTrue), precTernary) +
+			" : " + at(numeric(whenFalse), precTernary)
+	}
+	return out, true
 }
 
 // materializedBoolean is the value of a branch whose arms are `1` and `0`: that
@@ -4328,6 +4358,13 @@ func (d *bodyDecompiler) branchExpr(instruction Instruction) (expr, error) {
 		if err != nil {
 			return expr{}, err
 		}
+		// `==` and `!=` are the only comparisons a boolean takes; on one, both
+		// sides are booleans and a materialized one keeps its own text.
+		if op == "==" || op == "!=" {
+			if l, r, ok := booleanOperands(left, right); ok {
+				return compareExpr(l, op, r), nil
+			}
+		}
 		return compareExpr(numeric(left), op, numeric(right)), nil
 	}
 	value, err := d.popRaw()
@@ -4701,12 +4738,21 @@ func (d *bodyDecompiler) step(
 			return err
 		}
 		// `|`, `&` and `^` are the only ones a boolean takes, and there the `1`
-		// and `0` javac wrote are `true` and `false` - `b | 1` is not Java.
-		if len(operator.operator) == 1 && strings.ContainsAny(operator.operator, "|&^") &&
-			(left.Type == "boolean" || right.Type == "boolean") {
-			d.push(binaryExpr(asBoolean(left), operator.operator, asBoolean(right),
-				operator.prec, "boolean"))
-			return nil
+		// and `0` javac wrote are `true` and `false` - `b | 1` is not Java. But
+		// `(a > b) ^ true` and `((a > b) ? 1 : 0) ^ 1` compile to the same
+		// thing, and only what consumes the result knows which one source
+		// wrote: where every operand is a boolean javac erased, the value
+		// carries the int form as well, the way a materialized boolean does.
+		if len(operator.operator) == 1 && strings.ContainsAny(operator.operator, "|&^") {
+			if l, r, ok := booleanOperands(left, right); ok {
+				asBool := binaryExpr(l, operator.operator, r, operator.prec, "boolean")
+				if erasedBoolean(left) && erasedBoolean(right) {
+					asBool.AsInt = binaryExpr(numeric(left), operator.operator, numeric(right),
+						operator.prec, "int").Text
+				}
+				d.push(asBool)
+				return nil
+			}
 		}
 		d.push(binaryExpr(numeric(left), operator.operator, numeric(right),
 			operator.prec, primitiveOfPrefix[mnemonic[0]]))
