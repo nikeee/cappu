@@ -1033,13 +1033,21 @@ const untypedSource = `public class Untyped {
   static int once() { int x, y; x = y = arr().length; return x * 10 + y; }
   static String erased(String s) { char c; int i = (c = s.charAt(0)); return "" + c + i; }
   static char narrowed() { char c; int i = (c = 65); return c; }
+  static int asBool(boolean k) { boolean b; if ((b = k) && counter > 0) return 1; return b ? 2 : 3; }
+  static int boolChain(boolean k) { boolean a, b; a = b = k; return (a ? 1 : 0) + (b ? 10 : 0); }
+  static int reused(boolean q) { { boolean b = q; f(b ? 1 : 0, 0); } { int y = 1; y++; f(y, 0); } return counter; }
+  static int counterThenFlag(int n, boolean k) { int s = 0; for (int i = 1; i < n; i++) { s += i; } boolean d = k; f(d ? 1 : 0, s); return counter; }
+  static boolean returned() { boolean b; return b = true; }
+  static int callThenFlag(int a, int b, boolean[] fl) { { int m = Math.min(a, b); f(m, 0); } boolean any = false; any = any | fl[0]; return any ? 1 : -1; }
+  static String appended() { StringBuilder sb = new StringBuilder(); char c; sb.append(c = 'y'); return sb.toString(); }
 }`
 
 const untypedDriverSource = `public class UntypedDriver {
   public static void main(String[] args) {
     Untyped.counter = 0;
     System.out.println(Untyped.ordered() + " " + Untyped.once() + " " + Untyped.erased("z")
-      + " " + Untyped.counter);
+      + " " + Untyped.asBool(true) + Untyped.asBool(false) + " " + Untyped.boolChain(true)
+      + " " + Untyped.reused(true) + " " + Untyped.counterThenFlag(4, true) + " " + Untyped.counter);
   }
 }`
 
@@ -1062,13 +1070,26 @@ func TestDecompileKeepsAnAssignmentAsAValueWithoutADebugTable(t *testing.T) {
 		"int var2 = var1 = arg0.charAt(0);",
 		// `return c` would narrow c to a char after its assignment was written.
 		"cappu: a retyped assignment used as a value",
+		// A boolean is not erased: a Z-typed value proves the variable, and the
+		// assignment is a boolean wherever it is used.
+		"if ((var1 = arg0) && counter > 0)", "boolean var1 = var2 = arg0;",
+		// A dead boolean's slot reused for an int: two variables, not one.
+		"int var1_2 = 1;",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
 		}
 	}
-	if strings.Count(source, "cappu: ") != 2 {
-		t.Errorf("expected one bailed method, got:\n%s", source)
+	// narrowed, returned and appended are the ones that say so: a use that would
+	// narrow the assigned variable after the fact finds its text frozen.
+	if strings.Count(source, "cappu: a retyped assignment used as a value") != 3 {
+		t.Errorf("expected three frozen-text bails, got:\n%s", source)
+	}
+	if !strings.Contains(source, "cappu: a variable used as both a number and a boolean") {
+		t.Errorf("expected the reused-slot bail:\n%s", source)
+	}
+	if strings.Count(source, "cappu: ") != 8 {
+		t.Errorf("expected four bailed methods, got:\n%s", source)
 	}
 	again := filepath.Join(dir, "again")
 	compileWithJavac(t, again, "Untyped", source)

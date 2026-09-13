@@ -2081,6 +2081,24 @@ test(
         '  static String erased(String s) { char c; int i = (c = s.charAt(0)); return "" + c + i; }\n' +
         // `return c` would narrow `c` to a char after its assignment was written.
         "  static char narrowed() { char c; int i = (c = 65); return c; }\n" +
+        // A boolean is not erased: a `Z`-typed value proves the variable, and the
+        // assignment is a boolean wherever it is used.
+        "  static int asBool(boolean k) { boolean b; if ((b = k) && counter > 0) return 1; return b ? 2 : 3; }\n" +
+        "  static int boolChain(boolean k) { boolean a, b; a = b = k; return (a ? 1 : 0) + (b ? 10 : 0); }\n" +
+        // A dead boolean's slot reused for an int: two variables, not one.
+        "  static int reused(boolean q) { { boolean b = q; f(b ? 1 : 0, 0); } { int y = 1; y++; f(y, 0); } return counter; }\n" +
+        // An int loop counter whose slot a boolean takes over afterwards: `y++`
+        // and `y < n` say the first is a number, so a use that would make the
+        // slot a boolean says so instead of narrowing them both.
+        "  static int counterThenFlag(int n, boolean k) { int s = 0; for (int i = 1; i < n; i++) { s += i; } boolean d = k; f(d ? 1 : 0, s); return counter; }\n" +
+        // A use that would narrow the assigned variable after the fact - the
+        // text `b = 1` is frozen and cannot become `b = true` - says so, even
+        // where it would have compiled to the wrong overload silently.
+        "  static boolean returned() { boolean b; return b = true; }\n" +
+        // An int from a call, then the slot taken by a boolean accumulator: the
+        // call says the first is a number, so the accumulator says so too.
+        "  static int callThenFlag(int a, int b, boolean[] fl) { { int m = Math.min(a, b); f(m, 0); } boolean any = false; any = any | fl[0]; return any ? 1 : -1; }\n" +
+        "  static String appended() { StringBuilder sb = new StringBuilder(); char c; sb.append(c = 'y'); return sb.toString(); }\n" +
         "}\n",
       "Untyped",
       dir.path,
@@ -2090,7 +2108,13 @@ test(
     expect(source).toContain("int var0 = var1 = arr().length;");
     expect(source).toContain("int var2 = var1 = arg0.charAt(0);");
     expect(source).toContain("cappu: a retyped assignment used as a value");
-    expect(source.match(/cappu: /g)?.length).toBe(2);
+    expect(source).toContain("if ((var1 = arg0) && counter > 0)");
+    expect(source).toContain("boolean var1 = var2 = arg0;");
+    expect(source).toContain("int var1_2 = 1;");
+    // `narrowed`, `returned` and `appended` are the ones that say so.
+    expect(source.match(/cappu: a retyped assignment used as a value/g)?.length).toBe(3);
+    expect(source).toContain("cappu: a variable used as both a number and a boolean");
+    expect(source.match(/cappu: /g)?.length).toBe(8);
     const again = join(dir.path, "again");
     compileWithJavac(source, "Untyped", again);
     const driver =
@@ -2098,7 +2122,8 @@ test(
       "  public static void main(String[] args) {\n" +
       "    Untyped.counter = 0;\n" +
       '    System.out.println(Untyped.ordered() + " " + Untyped.once() + " " + Untyped.erased("z")\n' +
-      '      + " " + Untyped.counter);\n' +
+      '      + " " + Untyped.asBool(true) + Untyped.asBool(false) + " " + Untyped.boolChain(true)\n' +
+      '      + " " + Untyped.reused(true) + " " + Untyped.counterThenFlag(4, true) + " " + Untyped.counter);\n' +
       "  }\n" +
       "}";
     compileWithJavac(driver, "UntypedDriver", dir.path, dir.path);

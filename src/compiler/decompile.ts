@@ -729,7 +729,9 @@ export function withHoisted(hoisted: readonly string[], statements: readonly str
   if (first === undefined || !/^(super|this)\(/.test(first)) return [...hoisted, ...statements];
   // One the call's own arguments assign has to be declared before it - which
   // only Java 25 accepts, and is then exactly what that source wrote.
-  const before = hoisted.filter(one => reads(first, one.slice(one.lastIndexOf(" ") + 1, -1)));
+  const before = hoisted.filter(one =>
+    reads(withoutLiterals(first), one.slice(one.lastIndexOf(" ") + 1, -1)),
+  );
   const after = hoisted.filter(one => !before.includes(one));
   return [...before, first, ...after, ...statements.slice(1)];
 }
@@ -770,6 +772,12 @@ interface Local {
    * (`boolean b` taking `iconst_0`), not a second variable in the same slot.
    */
   authoritative: boolean;
+  /**
+   * The variable was used where only a number can be - incremented, ordered,
+   * an index - so a later use that would make it a boolean is a slot reused
+   * for another variable, not this one changing its mind.
+   */
+  numeric?: true;
 }
 
 /** The slot each declared parameter occupies; long and double take two. */
@@ -1718,7 +1726,11 @@ class BodyDecompiler {
     // A lambda takes its type from where it is written; when that is not the
     // interface itself, source had to say which one it is.
     if (value.lambda === true && target !== value.type) return `(${value.type}) ${value.text}`;
-    const local = this.byName.get(value.text);
+    // A bare variable, or an assignment to one used as a value - `return b =
+    // true` - where the variable's type was only inferred and this use narrows
+    // it. For the assignment that can only be a refusal: its text is frozen.
+    const name = /^([A-Za-z_$][\w$]*)(?: = |$)/.exec(value.text)?.[1];
+    const local = name === undefined ? undefined : this.byName.get(name);
     if (
       local !== undefined &&
       !local.authoritative &&
@@ -1738,6 +1750,12 @@ class BodyDecompiler {
     // and for any variable whose own value has such an assignment inside it.
     if (local.writes.some(write => write.inValue === true || embedsAssignment(write.value.text))) {
       throw new NotDecompilable("a retyped assignment used as a value");
+    }
+    // A boolean cannot be incremented, ordered or used as an index: a variable
+    // that was is an int whose slot a boolean took over afterwards, which one
+    // name cannot carry.
+    if (target === "boolean" && local.numeric === true) {
+      throw new NotDecompilable("a variable used as both a number and a boolean");
     }
     local.type = target;
     const declaration = local.declaration;
@@ -2392,6 +2410,12 @@ class BodyDecompiler {
     return suffix ? Number(suffix[1]) : instruction.arg;
   }
 
+  /** Note a use of `value` where only a number can go, when it is a variable. */
+  private usedAsNumber(value: Expr): void {
+    const local = this.byName.get(value.text);
+    if (local !== undefined) local.numeric = true;
+  }
+
   /**
    * `value` where its partner in a boolean operation is a boolean: Java has no
    * `int & boolean`, so an int-typed local there is a boolean whose type was
@@ -2399,8 +2423,11 @@ class BodyDecompiler {
    */
   private provenBoolean(value: Expr, partner: Expr): Expr {
     // A boolean javac erased to `1`/`0` proves nothing: `buf | (c ? 1 : 0)` is
-    // an int operation. Only one that could never have been a number does.
+    // an int operation. Nor does a variable whose own boolean type was only
+    // inferred. Only a value that could never have been a number does.
     if (partner.type !== "boolean" || erasedBoolean(partner) || value.type !== "int") return value;
+    const other = this.byName.get(partner.text);
+    if (other !== undefined && !other.authoritative) return value;
     const local = this.byName.get(value.text);
     if (local === undefined || local.authoritative) return value;
     this.coerceInto(value, "boolean");
@@ -2445,9 +2472,13 @@ class BodyDecompiler {
     // as it stands and can never be rewritten. Where that type was only
     // inferred it is not what the next variable in a chain should learn from -
     // `int i = (c = s.charAt(0))` is an int, whatever `c` turned out to be - so
-    // an inferred int-family type is handed on as the `int` it was erased to.
+    // an inferred char, byte or short is handed on as the `int` javac erased it
+    // to. A boolean is not erased: a `Z`-typed value stored with `istore` is a
+    // boolean in source, and so is the assignment.
     const inferred =
-      !local.authoritative && (local.type === "int" || ERASED_TO_INT.includes(local.type));
+      !local.authoritative &&
+      local.type !== "boolean" &&
+      (local.type === "int" || ERASED_TO_INT.includes(local.type));
     this.push({
       text: `${local.name} = ${text}`,
       prec: PREC_ASSIGN,
@@ -3463,6 +3494,10 @@ class BodyDecompiler {
       }
       const booleans = op === "==" || op === "!=" ? booleanOperands(left, right) : undefined;
       if (booleans !== undefined) return compare(booleans[0], op, booleans[1]);
+      if (op !== "==" && op !== "!=") {
+        this.usedAsNumber(left);
+        this.usedAsNumber(right);
+      }
       return compare(numeric(left), op, numeric(right));
     }
     const value = this.popRaw();
@@ -3674,15 +3709,20 @@ class BodyDecompiler {
       // condition javac materialized as `1`/`0` does *not* know: `int x = c ? 1
       // : 0` and `boolean b = c` compile to the same store, so it starts as an
       // int and a use that needs a boolean narrows it (as for a literal).
-      let fallback =
+      const fallback =
         base === "astore" || (ERASED_TO_INT.includes(value.type) && value.asInt === undefined)
           ? value.type
           : PRIMITIVE_OF_PREFIX[base[0]!]!;
-      // A `1`/`0` stored into a variable an earlier use already proved a boolean
-      // is `true`/`false`, not an int that would split the slot in two.
-      if (fallback === "int" && erasedBoolean(value)) {
-        const existing = this.locals.get(this.slotOf(instruction));
-        if (existing !== undefined && existing.type === "boolean") fallback = "boolean";
+      // A value that is an int and nothing else - a call that returns one, an
+      // arithmetic result - makes the variable one: not a `1`/`0` a boolean was
+      // erased to, and not another variable whose own type is still open.
+      if (
+        base === "istore" &&
+        value.type === "int" &&
+        !erasedBoolean(value) &&
+        !this.byName.has(value.text)
+      ) {
+        this.local(this.slotOf(instruction), nextPc, fallback, true).numeric = true;
       }
       if (this.assignAsValue) {
         this.assignAsValue = false;
@@ -3692,6 +3732,7 @@ class BodyDecompiler {
     }
     if (base === "iinc") {
       const local = this.local(instruction.arg, pc, "int");
+      local.numeric = true;
       const delta = instruction.arg2;
       // The old value being on the stack is what `i++` leaves: javac pushes the
       // variable and increments it behind the value. That is the top of the
@@ -3813,6 +3854,7 @@ class BodyDecompiler {
       const element = array.type.endsWith("[]")
         ? array.type.slice(0, -2)
         : PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
+      this.usedAsNumber(index);
       return this.push(primary(`${at(array, PREC_PRIMARY)}[${coerce(index, "int")}]`, element));
     }
     if (/^[ilfdabcs]astore$/.test(mnemonic)) {
@@ -3823,6 +3865,7 @@ class BodyDecompiler {
       const element = array.type.endsWith("[]")
         ? array.type.slice(0, -2)
         : PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
+      this.usedAsNumber(index);
       const target = `${at(array, PREC_PRIMARY)}[${coerce(index, "int")}]`;
       // The same as a field: the store runs before what the stack holds, and an
       // array read on it may be this element under another name.

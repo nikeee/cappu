@@ -762,7 +762,7 @@ func withHoisted(hoisted, statements []string) []string {
 	var before, after []string
 	for _, one := range hoisted {
 		name := one[strings.LastIndex(one, " ")+1 : len(one)-1]
-		if reads(first, name) {
+		if reads(withoutLiterals(first), name) {
 			before = append(before, one)
 		} else {
 			after = append(after, one)
@@ -817,6 +817,10 @@ type local struct {
 	// *this* variable (`boolean b` taking `iconst_0`), not a second variable in
 	// the same slot.
 	Authoritative bool
+	// Numeric: the variable was used where only a number can be - incremented,
+	// ordered, an index - so a later use that would make it a boolean is a slot
+	// reused for another variable, not this one changing its mind.
+	Numeric bool
 	// Writes records where every assignment landed, so a retype can rewrite them.
 	Writes []localWrite
 	// Declaration is where the declaration landed.
@@ -1989,7 +1993,14 @@ func (d *bodyDecompiler) coerceInto(value expr, target string) (string, error) {
 	if value.Lambda && target != value.Type {
 		return "(" + value.Type + ") " + value.Text, nil
 	}
-	if entry, ok := d.byName[value.Text]; ok && !entry.Authoritative &&
+	// A bare variable, or an assignment to one used as a value - `return b =
+	// true` - where the variable's type was only inferred and this use narrows
+	// it. For the assignment that can only be a refusal: its text is frozen.
+	name := value.Text
+	if m := assignedName.FindStringSubmatch(value.Text); m != nil {
+		name = m[1]
+	}
+	if entry, ok := d.byName[name]; ok && !entry.Authoritative &&
 		entry.Type == "int" && erasedToInt[target] {
 		if err := d.retype(entry, target); err != nil {
 			return "", err
@@ -2008,6 +2019,12 @@ func (d *bodyDecompiler) retype(entry *local, target string) error {
 		if write.InValue || embedsAssignment(write.Value.Text) {
 			return bail("a retyped assignment used as a value")
 		}
+	}
+	// A boolean cannot be incremented, ordered or used as an index: a variable
+	// that was is an int whose slot a boolean took over afterwards, which one
+	// name cannot carry.
+	if target == "boolean" && entry.Numeric {
+		return bail("a variable used as both a number and a boolean")
 	}
 	entry.Type = target
 	declaration := entry.Declaration
@@ -2904,6 +2921,17 @@ func opBase(m string) string {
 
 var singleSlotStore = regexp.MustCompile(`^[ifa]store(_[0-3])?$`)
 
+// assignedName is the variable an assignment-as-value assigns.
+var assignedName = regexp.MustCompile(`^([A-Za-z_$][\w$]*) = `)
+
+// usedAsNumber notes a use of value where only a number can go, when it is a
+// variable.
+func (d *bodyDecompiler) usedAsNumber(value expr) {
+	if entry, ok := d.byName[value.Text]; ok {
+		entry.Numeric = true
+	}
+}
+
 // provenBoolean is value where its partner in a boolean operation is a boolean:
 // Java has no `int & boolean`, so an int-typed local there is a boolean whose
 // type was only inferred, and this is the use that proves it.
@@ -2911,6 +2939,10 @@ func (d *bodyDecompiler) provenBoolean(value, partner expr) (expr, error) {
 	// A boolean javac erased to `1`/`0` proves nothing: `buf | (c ? 1 : 0)` is
 	// an int operation. Only one that could never have been a number does.
 	if partner.Type != "boolean" || erasedBoolean(partner) || value.Type != "int" {
+		return value, nil
+	}
+	// Nor does a variable whose own boolean type was only inferred.
+	if other, ok := d.byName[partner.Text]; ok && !other.Authoritative {
 		return value, nil
 	}
 	entry, ok := d.byName[value.Text]
@@ -2971,8 +3003,10 @@ func (d *bodyDecompiler) storeAsValue(slot, scopePc int, value expr, declaredTyp
 	// it is not what the next variable in a chain should learn from -
 	// `int i = (c = s.charAt(0))` is an int, whatever `c` turned out to be - so
 	// an inferred int-family type is handed on as the `int` it was erased to.
+	// A boolean is not erased: a `Z`-typed value stored with `istore` is a
+	// boolean in source, and so is the assignment.
 	typ := target.Type
-	if !target.Authoritative && (typ == "int" || erasedToInt[typ]) {
+	if !target.Authoritative && typ != "boolean" && (typ == "int" || erasedToInt[typ]) {
 		typ = "int"
 	}
 	d.push(expr{
@@ -4450,6 +4484,10 @@ func (d *bodyDecompiler) branchExpr(instruction Instruction) (expr, error) {
 				return compareExpr(l, op, r), nil
 			}
 		}
+		if op != "==" && op != "!=" {
+			d.usedAsNumber(left)
+			d.usedAsNumber(right)
+		}
 		return compareExpr(numeric(left), op, numeric(right)), nil
 	}
 	value, err := d.popRaw()
@@ -4736,12 +4774,16 @@ func (d *bodyDecompiler) step(
 		if base == "astore" || (erasedToInt[value.Type] && value.AsInt == "") {
 			fallback = value.Type
 		}
-		// A `1`/`0` stored into a variable an earlier use already proved a
-		// boolean is `true`/`false`, not an int that would split the slot in two.
-		if fallback == "int" && erasedBoolean(value) {
-			if existing, ok := d.locals[slotOf(instruction)]; ok && existing.Type == "boolean" {
-				fallback = "boolean"
+		// A value that is an int and nothing else - a call that returns one, an
+		// arithmetic result - makes the variable one: not a `1`/`0` a boolean
+		// was erased to, and not another variable whose own type is still open.
+		if _, isLocal := d.byName[value.Text]; base == "istore" && value.Type == "int" &&
+			!erasedBoolean(value) && !isLocal {
+			target, err := d.local(slotOf(instruction), nextPc, fallback, true)
+			if err != nil {
+				return err
 			}
+			target.Numeric = true
 		}
 		if d.assignAsValue {
 			d.assignAsValue = false
@@ -4754,6 +4796,7 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
+		target.Numeric = true
 		delta := instruction.Arg2
 		// The old value being on the stack is what `i++` leaves: javac pushes the
 		// variable and increments it behind the value. That is the top of the
@@ -4932,6 +4975,7 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
+		d.usedAsNumber(index)
 		d.push(primary(at(array, precPrimary)+"["+coerce(index, "int")+"]", elementType(array.Type, mnemonic[0])))
 		return nil
 	}
@@ -4952,6 +4996,7 @@ func (d *bodyDecompiler) step(
 			return d.fillArray(array.Init, index, value)
 		}
 		element := elementType(array.Type, mnemonic[0])
+		d.usedAsNumber(index)
 		target := at(array, precPrimary) + "[" + coerce(index, "int") + "]"
 		// The same as a field: the store runs before what the stack holds, and an
 		// array read on it may be this element under another name.
