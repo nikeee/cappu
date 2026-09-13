@@ -740,6 +740,11 @@ func readLocalVariables(code *Code, pool []*Constant) []localEntry {
 // the use to say so.
 var erasedToInt = map[string]bool{"boolean": true, "char": true, "byte": true, "short": true}
 
+// numericTargets are the targets only a number can be coerced into.
+var numericTargets = map[string]bool{
+	"int": true, "long": true, "float": true, "double": true, "char": true, "byte": true, "short": true,
+}
+
 // stmt is a statement, or the body of a nested block. The tree is flattened
 // only once the method is done, so a retype can still reach a statement that
 // has already been placed inside an `if`.
@@ -821,6 +826,11 @@ type local struct {
 	// ordered, an index - so a later use that would make it a boolean is a slot
 	// reused for another variable, not this one changing its mind.
 	Numeric bool
+	// Proven: the variable was stored a value that is a boolean and nothing
+	// else - a call that returns one, a parameter, a field - so where it stands
+	// beside an int-typed variable in `&`, `|`, `^` or `==`, that one is a
+	// boolean too.
+	Proven bool
 	// Writes records where every assignment landed, so a retype can rewrite them.
 	Writes []localWrite
 	// Declaration is where the declaration landed.
@@ -2006,6 +2016,13 @@ func (d *bodyDecompiler) coerceInto(value expr, target string) (string, error) {
 			return "", err
 		}
 	}
+	// Where a number belongs, an int variable is used as one. A boolean one is
+	// not wrong there: `state = found` into an int field is javac's own
+	// shortcut for `found ? 1 : 0`, which coerce writes.
+	if entry, ok := d.byName[name]; ok && name == value.Text && numericTargets[target] &&
+		entry.Type == "int" {
+		entry.Numeric = true
+	}
 	return coerce(value, target), nil
 }
 
@@ -2925,11 +2942,31 @@ var singleSlotStore = regexp.MustCompile(`^[ifa]store(_[0-3])?$`)
 var assignedName = regexp.MustCompile(`^([A-Za-z_$][\w$]*) = `)
 
 // usedAsNumber notes a use of value where only a number can go, when it is a
-// variable.
-func (d *bodyDecompiler) usedAsNumber(value expr) {
-	if entry, ok := d.byName[value.Text]; ok {
-		entry.Numeric = true
+// variable. A variable this took for a boolean cannot be there: it is an int
+// whose slot a dead boolean had, merged into one name that cannot carry both.
+func (d *bodyDecompiler) usedAsNumber(value expr) error {
+	// A materialized boolean reads as its condition - which may be a bare
+	// variable - but is a number already, written as the ternary it carries.
+	if value.AsInt != "" {
+		return nil
 	}
+	entry, ok := d.byName[value.Text]
+	if !ok {
+		return nil
+	}
+	if entry.Type == "boolean" && !entry.Authoritative {
+		return bail("a variable used as both a number and a boolean")
+	}
+	entry.Numeric = true
+	return nil
+}
+
+// asNumber is numeric, with the use noted.
+func (d *bodyDecompiler) asNumber(value expr) (expr, error) {
+	if err := d.usedAsNumber(value); err != nil {
+		return expr{}, err
+	}
+	return numeric(value), nil
 }
 
 // provenBoolean is value where its partner in a boolean operation is a boolean:
@@ -2941,11 +2978,17 @@ func (d *bodyDecompiler) provenBoolean(value, partner expr) (expr, error) {
 	if partner.Type != "boolean" || erasedBoolean(partner) || value.Type != "int" {
 		return value, nil
 	}
-	// Nor does a variable whose own boolean type was only inferred.
-	if other, ok := d.byName[partner.Text]; ok && !other.Authoritative {
+	// Nor does a variable whose boolean type was only inferred from such a
+	// value; one that was stored a genuine boolean does.
+	if other, ok := d.byName[partner.Text]; ok && !other.Authoritative && !other.Proven {
 		return value, nil
 	}
-	entry, ok := d.byName[value.Text]
+	// The variable itself, or the one an assignment used as a value assigns.
+	name := value.Text
+	if m := assignedName.FindStringSubmatch(value.Text); m != nil {
+		name = m[1]
+	}
+	entry, ok := d.byName[name]
 	if !ok || entry.Authoritative {
 		return value, nil
 	}
@@ -4025,7 +4068,10 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	}
 	// The selector is an int, so a condition javac materialized as `1`/`0` has
 	// to become the ternary again - `switch (flag)` is not Java.
-	selector = numeric(selector)
+	selector, err = d.asNumber(selector)
+	if err != nil {
+		return 0, err
+	}
 	if len(d.stack) > 0 {
 		return 0, bail("values left on the stack")
 	}
@@ -4485,8 +4531,12 @@ func (d *bodyDecompiler) branchExpr(instruction Instruction) (expr, error) {
 			}
 		}
 		if op != "==" && op != "!=" {
-			d.usedAsNumber(left)
-			d.usedAsNumber(right)
+			if err := d.usedAsNumber(left); err != nil {
+				return expr{}, err
+			}
+			if err := d.usedAsNumber(right); err != nil {
+				return expr{}, err
+			}
 		}
 		return compareExpr(numeric(left), op, numeric(right)), nil
 	}
@@ -4774,16 +4824,36 @@ func (d *bodyDecompiler) step(
 		if base == "astore" || (erasedToInt[value.Type] && value.AsInt == "") {
 			fallback = value.Type
 		}
+		// A `1`/`0` - or a condition javac materialized as one - stored into a
+		// variable that is a boolean is a boolean: `w = !w` in a loop is the
+		// same variable, and splitting it would leave every earlier read on a
+		// stale one. Where the slot really was reused for an int, the int's
+		// first use as a number says so.
+		if fallback == "int" && erasedBoolean(value) {
+			if existing, ok := d.locals[slotOf(instruction)]; ok && existing.Type == "boolean" {
+				fallback = "boolean"
+			}
+		}
 		// A value that is an int and nothing else - a call that returns one, an
-		// arithmetic result - makes the variable one: not a `1`/`0` a boolean
-		// was erased to, and not another variable whose own type is still open.
-		if _, isLocal := d.byName[value.Text]; base == "istore" && value.Type == "int" &&
-			!erasedBoolean(value) && !isLocal {
+		// arithmetic result, a parameter - makes the variable one: not a `1`/`0`
+		// a boolean was erased to, and not another variable whose own type is
+		// still open.
+		source, isLocal := d.byName[value.Text]
+		if base == "istore" && value.Type == "int" && !erasedBoolean(value) &&
+			(!isLocal || source.Authoritative) {
 			target, err := d.local(slotOf(instruction), nextPc, fallback, true)
 			if err != nil {
 				return err
 			}
 			target.Numeric = true
+		}
+		// And one that is a boolean and nothing else makes it one.
+		if base == "istore" && value.Type == "boolean" && !erasedBoolean(value) {
+			target, err := d.local(slotOf(instruction), nextPc, fallback, true)
+			if err != nil {
+				return err
+			}
+			target.Proven = true
 		}
 		if d.assignAsValue {
 			d.assignAsValue = false
@@ -4796,7 +4866,9 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
-		target.Numeric = true
+		if err := d.usedAsNumber(primary(target.Name, target.Type)); err != nil {
+			return err
+		}
 		delta := instruction.Arg2
 		// The old value being on the stack is what `i++` leaves: javac pushes the
 		// variable and increments it behind the value. That is the top of the
@@ -4879,7 +4951,13 @@ func (d *bodyDecompiler) step(
 				return nil
 			}
 		}
-		d.push(binaryExpr(numeric(left), operator.operator, numeric(right),
+		if left, err = d.asNumber(left); err != nil {
+			return err
+		}
+		if right, err = d.asNumber(right); err != nil {
+			return err
+		}
+		d.push(binaryExpr(left, operator.operator, right,
 			operator.prec, primitiveOfPrefix[mnemonic[0]]))
 		return nil
 	}
@@ -4888,7 +4966,9 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
-		value = numeric(value)
+		if value, err = d.asNumber(value); err != nil {
+			return err
+		}
 		// A unary operand needs the parens too: `-(-a)` is not `--a`.
 		d.push(expr{Text: "-" + at(value, precUnary+1), Prec: precUnary, Type: primitiveOfPrefix[mnemonic[0]]})
 		return nil
@@ -4898,7 +4978,9 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
-		value = numeric(value)
+		if value, err = d.asNumber(value); err != nil {
+			return err
+		}
 		d.push(expr{Text: "(" + conversion + ") " + at(value, precUnary), Prec: precUnary, Type: conversion})
 		return nil
 	}
@@ -4975,7 +5057,9 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
-		d.usedAsNumber(index)
+		if err := d.usedAsNumber(index); err != nil {
+			return err
+		}
 		d.push(primary(at(array, precPrimary)+"["+coerce(index, "int")+"]", elementType(array.Type, mnemonic[0])))
 		return nil
 	}
@@ -4996,7 +5080,9 @@ func (d *bodyDecompiler) step(
 			return d.fillArray(array.Init, index, value)
 		}
 		element := elementType(array.Type, mnemonic[0])
-		d.usedAsNumber(index)
+		if err := d.usedAsNumber(index); err != nil {
+			return err
+		}
 		target := at(array, precPrimary) + "[" + coerce(index, "int") + "]"
 		// The same as a field: the store runs before what the stack holds, and an
 		// array read on it may be this element under another name.
@@ -5017,6 +5103,9 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
+		if err := d.usedAsNumber(length); err != nil {
+			return err
+		}
 		element := instruction.Operand
 		d.push(expr{
 			Text: "new " + element + "[" + numeric(length).Text + "]",
@@ -5030,6 +5119,9 @@ func (d *bodyDecompiler) step(
 		element := typeName(orDefault(PoolClassName(pool, uint16(instruction.Arg))), d.self())
 		length, err := d.pop()
 		if err != nil {
+			return err
+		}
+		if err := d.usedAsNumber(length); err != nil {
 			return err
 		}
 		// The element type may itself be an array: the new dimension goes first,
@@ -5051,6 +5143,9 @@ func (d *bodyDecompiler) step(
 		for i := instruction.Arg2 - 1; i >= 0; i-- {
 			size, err := d.pop()
 			if err != nil {
+				return err
+			}
+			if err := d.usedAsNumber(size); err != nil {
 				return err
 			}
 			sizes[i] = numeric(size).Text

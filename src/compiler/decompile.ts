@@ -673,6 +673,8 @@ function readLocalVariables(code: Code, pool: readonly (Constant | undefined)[])
 
 /** The types javac erases to int in the bytecode, leaving only the use to say so. */
 const ERASED_TO_INT = ["boolean", "char", "byte", "short"];
+/** The targets only a number can be coerced into. */
+const NUMERIC_TARGETS = new Set(["int", "long", "float", "double", "char", "byte", "short"]);
 
 /**
  * A statement, or the body of a nested block. The tree is flattened only once
@@ -778,6 +780,12 @@ interface Local {
    * for another variable, not this one changing its mind.
    */
   numeric?: true;
+  /**
+   * The variable was stored a value that is a boolean and nothing else - a
+   * call that returns one, a parameter, a field - so where it stands beside an
+   * int-typed variable in `&`, `|`, `^` or `==`, that one is a boolean too.
+   */
+  proven?: true;
 }
 
 /** The slot each declared parameter occupies; long and double take two. */
@@ -1739,6 +1747,12 @@ class BodyDecompiler {
     ) {
       this.retype(local, target);
     }
+    // Where a number belongs, an int variable is used as one. A boolean one is
+    // not wrong there: `state = found` into an int field is javac's own
+    // shortcut for `found ? 1 : 0`, which `coerce` writes.
+    if (name === value.text && NUMERIC_TARGETS.has(target) && local?.type === "int") {
+      local.numeric = true;
+    }
     return coerce(value, target);
   }
 
@@ -2410,10 +2424,27 @@ class BodyDecompiler {
     return suffix ? Number(suffix[1]) : instruction.arg;
   }
 
-  /** Note a use of `value` where only a number can go, when it is a variable. */
+  /**
+   * Note a use of `value` where only a number can go, when it is a variable. A
+   * variable this took for a boolean cannot be there: it is an int whose slot
+   * a dead boolean had, merged into one name that cannot carry both.
+   */
   private usedAsNumber(value: Expr): void {
+    // A materialized boolean reads as its condition - which may be a bare
+    // variable - but is a number already, written as the ternary it carries.
+    if (value.asInt !== undefined) return;
     const local = this.byName.get(value.text);
-    if (local !== undefined) local.numeric = true;
+    if (local === undefined) return;
+    if (local.type === "boolean" && !local.authoritative) {
+      throw new NotDecompilable("a variable used as both a number and a boolean");
+    }
+    local.numeric = true;
+  }
+
+  /** `numeric`, with the use noted. */
+  private asNumber(value: Expr): Expr {
+    this.usedAsNumber(value);
+    return numeric(value);
   }
 
   /**
@@ -2423,12 +2454,15 @@ class BodyDecompiler {
    */
   private provenBoolean(value: Expr, partner: Expr): Expr {
     // A boolean javac erased to `1`/`0` proves nothing: `buf | (c ? 1 : 0)` is
-    // an int operation. Nor does a variable whose own boolean type was only
-    // inferred. Only a value that could never have been a number does.
+    // an int operation. Nor does a variable whose boolean type was only
+    // inferred from such a value. A value that could never have been a number
+    // does - and so does a variable that was stored one.
     if (partner.type !== "boolean" || erasedBoolean(partner) || value.type !== "int") return value;
     const other = this.byName.get(partner.text);
-    if (other !== undefined && !other.authoritative) return value;
-    const local = this.byName.get(value.text);
+    if (other !== undefined && !other.authoritative && other.proven !== true) return value;
+    // The variable itself, or the one an assignment used as a value assigns.
+    const name = /^([A-Za-z_$][\w$]*)(?: = |$)/.exec(value.text)?.[1];
+    const local = name === undefined ? undefined : this.byName.get(name);
     if (local === undefined || local.authoritative) return value;
     this.coerceInto(value, "boolean");
     return { ...value, type: "boolean" };
@@ -2763,7 +2797,7 @@ class BodyDecompiler {
     const table = block.instructions[block.instructions.length - 1]!;
     // The selector is an int, so a condition javac materialized as `1`/`0` has
     // to become the ternary again - `switch (flag)` is not Java.
-    const selector = numeric(this.pop());
+    const selector = this.asNumber(this.pop());
     if (this.stack.length > 0) throw new NotDecompilable("values left on the stack");
     // javac compiles a `switch` over an enum into a lookup through a synthetic
     // `$SwitchMap$` array held by an *anonymous* class - which has no name
@@ -3709,20 +3743,34 @@ class BodyDecompiler {
       // condition javac materialized as `1`/`0` does *not* know: `int x = c ? 1
       // : 0` and `boolean b = c` compile to the same store, so it starts as an
       // int and a use that needs a boolean narrows it (as for a literal).
-      const fallback =
+      let fallback =
         base === "astore" || (ERASED_TO_INT.includes(value.type) && value.asInt === undefined)
           ? value.type
           : PRIMITIVE_OF_PREFIX[base[0]!]!;
+      // A `1`/`0` - or a condition javac materialized as one - stored into a
+      // variable that is a boolean is a boolean: `w = !w` in a loop is the same
+      // variable, and splitting it would leave every earlier read on a stale
+      // one. Where the slot really was reused for an int, the int's first use
+      // as a number says so.
+      if (fallback === "int" && erasedBoolean(value)) {
+        const existing = this.locals.get(this.slotOf(instruction));
+        if (existing !== undefined && existing.type === "boolean") fallback = "boolean";
+      }
       // A value that is an int and nothing else - a call that returns one, an
       // arithmetic result - makes the variable one: not a `1`/`0` a boolean was
       // erased to, and not another variable whose own type is still open.
+      const source = this.byName.get(value.text);
       if (
         base === "istore" &&
         value.type === "int" &&
         !erasedBoolean(value) &&
-        !this.byName.has(value.text)
+        (source === undefined || source.authoritative)
       ) {
         this.local(this.slotOf(instruction), nextPc, fallback, true).numeric = true;
+      }
+      // And one that is a boolean and nothing else makes it one.
+      if (base === "istore" && value.type === "boolean" && !erasedBoolean(value)) {
+        this.local(this.slotOf(instruction), nextPc, fallback, true).proven = true;
       }
       if (this.assignAsValue) {
         this.assignAsValue = false;
@@ -3732,7 +3780,7 @@ class BodyDecompiler {
     }
     if (base === "iinc") {
       const local = this.local(instruction.arg, pc, "int");
-      local.numeric = true;
+      this.usedAsNumber(primary(local.name, local.type));
       const delta = instruction.arg2;
       // The old value being on the stack is what `i++` leaves: javac pushes the
       // variable and increments it behind the value. That is the top of the
@@ -3784,8 +3832,8 @@ class BodyDecompiler {
       }
       const booleans = "|&^".includes(operator.operator) ? booleanOperands(left, right) : undefined;
       if (booleans === undefined) {
-        left = numeric(left);
-        right = numeric(right);
+        left = this.asNumber(left);
+        right = this.asNumber(right);
         const type = PRIMITIVE_OF_PREFIX[mnemonic[0]!]!;
         return this.push(binary(left, operator.operator, right, operator.prec, type));
       }
@@ -3795,7 +3843,7 @@ class BodyDecompiler {
       return this.push({ ...asBool, asInt: asInt.text });
     }
     if (/^[ilfd]neg$/.test(mnemonic)) {
-      const value = numeric(this.pop());
+      const value = this.asNumber(this.pop());
       return this.push({
         // A unary operand needs the parens too: `-(-a)` is not `--a`.
         text: `-${at(value, PREC_UNARY + 1)}`,
@@ -3805,7 +3853,7 @@ class BodyDecompiler {
     }
     const conversion = CONVERSIONS[mnemonic];
     if (conversion) {
-      const value = numeric(this.pop());
+      const value = this.asNumber(this.pop());
       return this.push({
         text: `(${conversion}) ${at(value, PREC_UNARY)}`,
         prec: PREC_UNARY,
@@ -3876,7 +3924,7 @@ class BodyDecompiler {
       return;
     }
     if (mnemonic === "newarray") {
-      const length = numeric(this.pop());
+      const length = this.asNumber(this.pop());
       const element = instruction.operand ?? "int";
       return this.push({
         text: `new ${element}[${length.text}]`,
@@ -3887,7 +3935,7 @@ class BodyDecompiler {
     }
     if (mnemonic === "anewarray") {
       const element = typeName(className(pool, instruction.arg) ?? "java/lang/Object", this.self);
-      const length = numeric(this.pop());
+      const length = this.asNumber(this.pop());
       // The element type may itself be an array: the new dimension goes first,
       // so `new String[n][]`, never `new String[][n]`.
       const base = element.replaceAll("[]", "");
@@ -3903,7 +3951,7 @@ class BodyDecompiler {
       const type = typeName(className(pool, instruction.arg) ?? "", this.self);
       const rank = (type.match(/\[\]/g) ?? []).length;
       const sizes: string[] = [];
-      for (let i = 0; i < instruction.arg2; i++) sizes.unshift(numeric(this.pop()).text);
+      for (let i = 0; i < instruction.arg2; i++) sizes.unshift(this.asNumber(this.pop()).text);
       if (sizes.length > rank) throw new NotDecompilable("multianewarray rank mismatch");
       const element = type.slice(0, type.length - rank * 2);
       const dimensions = sizes.map(size => `[${size}]`).join("");

@@ -2085,7 +2085,9 @@ test(
         // assignment is a boolean wherever it is used.
         "  static int asBool(boolean k) { boolean b; if ((b = k) && counter > 0) return 1; return b ? 2 : 3; }\n" +
         "  static int boolChain(boolean k) { boolean a, b; a = b = k; return (a ? 1 : 0) + (b ? 10 : 0); }\n" +
-        // A dead boolean's slot reused for an int: two variables, not one.
+        // A dead boolean's slot reused for an `int y = 1`: from the bytecode that
+        // is the same shape as `w = !w` in a loop, and only `y++` tells them
+        // apart - it says so rather than write `++` on a boolean.
         "  static int reused(boolean q) { { boolean b = q; f(b ? 1 : 0, 0); } { int y = 1; y++; f(y, 0); } return counter; }\n" +
         // An int loop counter whose slot a boolean takes over afterwards: `y++`
         // and `y < n` say the first is a number, so a use that would make the
@@ -2095,6 +2097,14 @@ test(
         // text `b = 1` is frozen and cannot become `b = true` - says so, even
         // where it would have compiled to the wrong overload silently.
         "  static boolean returned() { boolean b; return b = true; }\n" +
+        // A boolean reassigned in a loop - `w = !w`, `rel = true` - is the same
+        // variable every earlier read names again on the next turn. Splitting
+        // it would leave those reads on a stale one and compile all the same.
+        "  static int toggles(int n, boolean k) { boolean w = k; int c = 0; for (int i = 0; i < n; i++) { if (w) c++; w = !w; } return c; }\n" +
+        "  static int flag(int n, boolean k) { boolean rel = k; int c = 0; for (int i = 0; i < n; i++) { if (rel) c++; if (i == 1) rel = true; } return c; }\n" +
+        // A variable stored a boolean call result is a boolean, and proves the
+        // int-typed one beside it in `!=` or `&`.
+        "  static int partner(int n, boolean[] fl) { boolean a = fl[0]; boolean b = n == 2 || n == 4; if (b != a) return 1; return 0; }\n" +
         // An int from a call, then the slot taken by a boolean accumulator: the
         // call says the first is a number, so the accumulator says so too.
         "  static int callThenFlag(int a, int b, boolean[] fl) { { int m = Math.min(a, b); f(m, 0); } boolean any = false; any = any | fl[0]; return any ? 1 : -1; }\n" +
@@ -2110,11 +2120,14 @@ test(
     expect(source).toContain("cappu: a retyped assignment used as a value");
     expect(source).toContain("if ((var1 = arg0) && counter > 0)");
     expect(source).toContain("boolean var1 = var2 = arg0;");
-    expect(source).toContain("int var1_2 = 1;");
+    expect(source).toContain("var2 = !var2;");
+    expect(source).toContain("var2 = true;");
+    expect(source).toContain("if (var3 != var2)");
     // `narrowed`, `returned` and `appended` are the ones that say so.
     expect(source.match(/cappu: a retyped assignment used as a value/g)?.length).toBe(3);
-    expect(source).toContain("cappu: a variable used as both a number and a boolean");
-    expect(source.match(/cappu: /g)?.length).toBe(8);
+    // `reused` and `callThenFlag` are the reused slots.
+    expect(source.match(/cappu: a variable used as both a number and a boolean/g)?.length).toBe(2);
+    expect(source.match(/cappu: /g)?.length).toBe(10);
     const again = join(dir.path, "again");
     compileWithJavac(source, "Untyped", again);
     const driver =
@@ -2123,7 +2136,10 @@ test(
       "    Untyped.counter = 0;\n" +
       '    System.out.println(Untyped.ordered() + " " + Untyped.once() + " " + Untyped.erased("z")\n' +
       '      + " " + Untyped.asBool(true) + Untyped.asBool(false) + " " + Untyped.boolChain(true)\n' +
-      '      + " " + Untyped.reused(true) + " " + Untyped.counterThenFlag(4, true) + " " + Untyped.counter);\n' +
+      '      + " " + Untyped.counterThenFlag(4, true)\n' +
+      '      + " " + Untyped.toggles(5, true) + Untyped.toggles(4, false) + " " + Untyped.flag(5, false)\n' +
+      '      + " " + Untyped.partner(2, new boolean[] { true }) + Untyped.partner(3, new boolean[] { true })\n' +
+      '      + " " + Untyped.counter);\n' +
       "  }\n" +
       "}";
     compileWithJavac(driver, "UntypedDriver", dir.path, dir.path);

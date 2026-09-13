@@ -1038,6 +1038,9 @@ const untypedSource = `public class Untyped {
   static int reused(boolean q) { { boolean b = q; f(b ? 1 : 0, 0); } { int y = 1; y++; f(y, 0); } return counter; }
   static int counterThenFlag(int n, boolean k) { int s = 0; for (int i = 1; i < n; i++) { s += i; } boolean d = k; f(d ? 1 : 0, s); return counter; }
   static boolean returned() { boolean b; return b = true; }
+  static int toggles(int n, boolean k) { boolean w = k; int c = 0; for (int i = 0; i < n; i++) { if (w) c++; w = !w; } return c; }
+  static int flag(int n, boolean k) { boolean rel = k; int c = 0; for (int i = 0; i < n; i++) { if (rel) c++; if (i == 1) rel = true; } return c; }
+  static int partner(int n, boolean[] fl) { boolean a = fl[0]; boolean b = n == 2 || n == 4; if (b != a) return 1; return 0; }
   static int callThenFlag(int a, int b, boolean[] fl) { { int m = Math.min(a, b); f(m, 0); } boolean any = false; any = any | fl[0]; return any ? 1 : -1; }
   static String appended() { StringBuilder sb = new StringBuilder(); char c; sb.append(c = 'y'); return sb.toString(); }
 }`
@@ -1047,7 +1050,10 @@ const untypedDriverSource = `public class UntypedDriver {
     Untyped.counter = 0;
     System.out.println(Untyped.ordered() + " " + Untyped.once() + " " + Untyped.erased("z")
       + " " + Untyped.asBool(true) + Untyped.asBool(false) + " " + Untyped.boolChain(true)
-      + " " + Untyped.reused(true) + " " + Untyped.counterThenFlag(4, true) + " " + Untyped.counter);
+      + " " + Untyped.counterThenFlag(4, true)
+      + " " + Untyped.toggles(5, true) + Untyped.toggles(4, false) + " " + Untyped.flag(5, false)
+      + " " + Untyped.partner(2, new boolean[] { true }) + Untyped.partner(3, new boolean[] { true })
+      + " " + Untyped.counter);
   }
 }`
 
@@ -1073,8 +1079,9 @@ func TestDecompileKeepsAnAssignmentAsAValueWithoutADebugTable(t *testing.T) {
 		// A boolean is not erased: a Z-typed value proves the variable, and the
 		// assignment is a boolean wherever it is used.
 		"if ((var1 = arg0) && counter > 0)", "boolean var1 = var2 = arg0;",
-		// A dead boolean's slot reused for an int: two variables, not one.
-		"int var1_2 = 1;",
+		// A boolean reassigned in a loop is the same variable, and a variable
+		// stored a boolean call result proves the int-typed one beside it.
+		"var2 = !var2;", "var2 = true;", "if (var3 != var2)",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
@@ -1085,11 +1092,12 @@ func TestDecompileKeepsAnAssignmentAsAValueWithoutADebugTable(t *testing.T) {
 	if strings.Count(source, "cappu: a retyped assignment used as a value") != 3 {
 		t.Errorf("expected three frozen-text bails, got:\n%s", source)
 	}
-	if !strings.Contains(source, "cappu: a variable used as both a number and a boolean") {
-		t.Errorf("expected the reused-slot bail:\n%s", source)
+	// reused and callThenFlag are the reused slots.
+	if strings.Count(source, "cappu: a variable used as both a number and a boolean") != 2 {
+		t.Errorf("expected two reused-slot bails:\n%s", source)
 	}
-	if strings.Count(source, "cappu: ") != 8 {
-		t.Errorf("expected four bailed methods, got:\n%s", source)
+	if strings.Count(source, "cappu: ") != 10 {
+		t.Errorf("expected five bailed methods, got:\n%s", source)
 	}
 	again := filepath.Join(dir, "again")
 	compileWithJavac(t, again, "Untyped", source)
