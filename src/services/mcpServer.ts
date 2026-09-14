@@ -1,6 +1,7 @@
 // MCP server over stdio. Exposes the Java semantic engine to agents as tools.
 // Mirrors server.ts (the LSP entry) but speaks the Model Context Protocol.
-// Tool logic lives in mcp.ts (pure, tested); this module owns config-aware
+// Tool logic lives in mcp.ts, mcpFiles.ts and mcpProject.ts (pure, tested);
+// this module owns config-aware
 // workspace loading, disk freshness and transport. Nothing happens at module
 // load - the cli (`cappu mcp`) calls startMcpServer with the project config.
 
@@ -130,13 +131,14 @@ export async function startMcpServer(
   // execute the JVM are left to the cappu CLI so the user stays in control of
   // when writes happen.
   const instructions = [
-    "cappu server read-only. Look at Java code and dependency tree. Never write file,",
-    "never compile, never run code.",
+    "cappu server read-only. Look at Java code, dependency tree, and the source of",
+    "a dependency class (decompile). Never write file, never compile, never run code.",
     "",
     "Need write disk or run JVM? Use cappu CLI in shell:",
     "  - Build (.class / jar / fat-jar in ./dist):  cappu compile",
     "  - Run JUnit test:                            cappu test",
-    "rename_symbol give you edits. You apply edits. Server not write them.",
+    "  - Rewrite files formatted:                   cappu format --write",
+    "rename_symbol give you edits, format give you text. You apply them. Server not write them.",
     "",
     "Config file = cappu.json. Want schema? Run: cappu config-schema",
     "All commands: cappu help",
@@ -154,7 +156,7 @@ export async function startMcpServer(
     try {
       return ok(run());
     } catch (e) {
-      return { ...ok({ error: (e as Error).message }), isError: true };
+      return { ...ok({ error: String((e as Error).message ?? e) }), isError: true };
     }
   }
 
@@ -354,13 +356,13 @@ export async function startMcpServer(
   );
 
   // File tools work on one file (or one class on the classPath) without the
-  // Java program (no refresh()). They read the config at call time, so a
-  // cappu.json change (classPath, formatterOptions) is seen after a refresh.
+  // Java program; they refresh() only so that a cappu.json change (classPath,
+  // formatterOptions) is loaded before they read the config.
   server.registerTool(
     "decompile",
     {
       description:
-        "Reconstruct Java source from a `.class` file (`file`), or from a class on the project's classPath by binary name (`className`, e.g. `com.acme.Foo$Bar`). `disasm` gives the bytecode in `javap -c -p` layout instead. A method the decompiler cannot reconstruct is left as a commented disassembly.",
+        "Reconstruct Java source from a `.class` file (`file`, absolute or relative to the server's working directory), or from a class on the project's classPath by binary name (`className`, e.g. `com.acme.Foo$Bar`). `disasm` gives the bytecode in `javap -c -p` layout instead. A method the decompiler cannot reconstruct is left as a commented disassembly.",
       inputSchema: {
         file: z.string().optional(),
         className: z.string().optional(),
@@ -377,7 +379,7 @@ export async function startMcpServer(
     "format",
     {
       description:
-        "The file as `cappu format --write` would leave it (returned, nothing is written), following the project's formatterOptions. `changed` is false when the file is already formatted.",
+        "The file (absolute or relative to the server's working directory) as `cappu format --write` would leave it: returned, nothing is written. Follows the project's formatterOptions; `changed` is false when the file is already formatted.",
       inputSchema: { file: z.string() },
     },
     async args => {

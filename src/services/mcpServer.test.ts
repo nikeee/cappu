@@ -112,6 +112,8 @@ test("the tool list includes organize_imports", async () => {
   const names = (await client.listTools()).tools.map(t => t.name);
   expect(names).toContain("organize_imports");
   expect(names).toContain("code_actions");
+  expect(names).toContain("decompile");
+  expect(names).toContain("format");
 });
 
 async function callTool(
@@ -149,6 +151,24 @@ test("decompile reads a class from the classPath (a jar under a directory) or a 
   r = await callTool(client, "decompile", {});
   expect(r.isError).toBe(true);
   expect(r.text).toContain("give exactly one of file or className");
+  r = await callTool(client, "decompile", { file: "", className: "lib.Util" });
+  expect(r.isError).toBe(false);
+  expect(r.text).toContain("class Util");
+  const jar = join(dir.path, "lib", "util.jar");
+  r = await callTool(client, "decompile", { file: jar, className: "lib.Util" });
+  expect(r.isError).toBe(true);
+  expect(r.text).toContain("give exactly one of file or className");
+  // A jar is not a class file; the error names what was read.
+  r = await callTool(client, "decompile", { file: jar });
+  expect(r.isError).toBe(true);
+  expect(r.text).toContain("util.jar: not a class file");
+  // Arguments are typed (zod), as the Go build validates them.
+  r = await callTool(client, "decompile", { className: "lib.Util", disasm: "true" });
+  expect(r.isError).toBe(true);
+  expect(r.text).toContain("expected boolean");
+  r = await callTool(client, "decompile", { file: null, className: "lib.Util" });
+  expect(r.isError).toBe(true);
+  expect(r.text).toContain("expected string");
 
   const classFile = join(dir.path, "Util.class");
   writeFileSync(
@@ -160,6 +180,58 @@ test("decompile reads a class from the classPath (a jar under a directory) or a 
   r = await callTool(client, "decompile", { file: classFile });
   expect(r.isError).toBe(false);
   expect(r.text).toContain("class Util");
+});
+
+// The classPath is searched in order: a jar entry, then a directory entry
+// holding the `.class` at its binary-name path or jars anywhere below it (in
+// path order). Nested classes are named as in the bytecode.
+test("decompile searches the classPath in order", async () => {
+  using dir = TempDir.create("mcp-decompile-order-");
+  const nested = join(
+    import.meta.dirname,
+    "..",
+    "..",
+    "togo",
+    "internal",
+    "compiler",
+    "testdata",
+    "classfiles",
+    "nested",
+  );
+  const classes = join(dir.path, "classes", "lib");
+  mkdirSync(classes, { recursive: true });
+  writeFileSync(
+    join(classes, "Util.class"),
+    readZipEntries(readFileSync(UTIL_JAR))!
+      .find(e => e.name === "lib/Util.class")!
+      .read(),
+  );
+  mkdirSync(join(dir.path, "jars", "b"), { recursive: true });
+  copyFileSync(UTIL_JAR, join(dir.path, "jars", "b", "util.jar"));
+  copyFileSync(UTIL_JAR, join(dir.path, "jars", "zz.jar"));
+  const withClassPath = async (classPath: string[]) => {
+    writeFileSync(
+      join(dir.path, "cappu.json"),
+      JSON.stringify({ compilerOptions: { classPath, sourcePaths: [] } }),
+    );
+    return startClient(dir.path);
+  };
+  let client = await withClassPath([nested, UTIL_JAR, "classes", "jars"]);
+  let r = await callTool(client, "decompile", { className: "lib.Outer$Builder" });
+  expect(r.isError).toBe(false);
+  expect(r.text).toContain("class Outer$Builder");
+  r = await callTool(client, "decompile", { className: "lib.Util" });
+  expect(r.isError).toBe(false);
+  expect(r.text).toContain("class Util");
+  // Drop the jar entry: the `.class` under the directory serves it.
+  client = await withClassPath(["classes", "jars"]);
+  r = await callTool(client, "decompile", { className: "lib.Util" });
+  expect(r.isError).toBe(false);
+  // Only jars under a directory: `b/util.jar` sorts before `zz.jar`, so a
+  // class only in the latter is still found, and one in both comes from b/.
+  client = await withClassPath(["jars"]);
+  r = await callTool(client, "decompile", { className: "lib.Util" });
+  expect(r.isError).toBe(false);
 });
 
 test("decompile by className needs a project config", async () => {
@@ -197,4 +269,16 @@ test("format returns the formatted file and writes nothing", async () => {
   r = await callTool(client, "format", { file: join(dir.path, "B.java") });
   expect(r.isError).toBe(true);
   expect(r.text).toContain("B.java: no such file or directory");
+  // The project's formatterOptions are followed.
+  writeFileSync(file, "class A {int x;}\n");
+  writeFileSync(
+    join(dir.path, "cappu.json"),
+    JSON.stringify({
+      compilerOptions: { classPath: [], sourcePaths: [] },
+      formatterOptions: { style: "aosp" },
+    }),
+  );
+  r = await callTool(await startClient(dir.path), "format", { file });
+  got = JSON.parse(r.text) as { formatted: string; changed: boolean };
+  expect(got.formatted).toBe("class A {\n    int x;\n}\n");
 });

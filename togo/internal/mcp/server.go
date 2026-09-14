@@ -2,8 +2,8 @@ package mcp
 
 // MCP server over stdio. Exposes the Java semantic engine to agents as tools.
 // Mirrors the LSP server (internal/lspserver) but speaks the Model Context
-// Protocol: newline-delimited JSON-RPC 2.0. Tool logic lives in tools.go /
-// project.go (pure, tested); this module owns config-aware workspace loading,
+// Protocol: newline-delimited JSON-RPC 2.0. Tool logic lives in tools.go,
+// files.go and project.go (pure, tested); this module owns config-aware workspace loading,
 // disk freshness and transport. Port of src/services/mcpServer.ts.
 
 import (
@@ -28,13 +28,14 @@ import (
 )
 
 // instructions are surfaced to the host in the initialize response.
-const instructions = `cappu server read-only. Look at Java code and dependency tree. Never write file,
-never compile, never run code.
+const instructions = `cappu server read-only. Look at Java code, dependency tree, and the source of
+a dependency class (decompile). Never write file, never compile, never run code.
 
 Need write disk or run JVM? Use cappu CLI in shell:
   - Build (.class / jar / fat-jar in ./dist):  cappu compile
   - Run JUnit test:                            cappu test
-rename_symbol give you edits. You apply edits. Server not write them.
+  - Rewrite files formatted:                   cappu format --write
+rename_symbol give you edits, format give you text. You apply them. Server not write them.
 
 Config file = cappu.json. Want schema? Run: cappu config-schema
 All commands: cappu help`
@@ -68,7 +69,8 @@ type toolDef struct {
 	name        string
 	description string
 	inputSchema map[string]any
-	// usesProgram requires a workspace refresh before the call.
+	// usesProgram requires a workspace refresh before the call (the file tools
+	// set it for the config reload alone).
 	usesProgram bool
 	handler     func(args json.RawMessage) (any, error)
 }
@@ -100,7 +102,14 @@ func (s *Server) rebuild(cfg *config.Config) {
 	if cfg != nil {
 		release = cfg.CompilerOptions.Release
 	}
-	s.tools = NewToolsLayout(s.program, s.checker, services.NewLanguageFeatures(release), format.ImportOrderOptions(s.formatOptions()))
+	layout := format.ImportOrderOptions{Style: "google"}
+	if s.config != nil {
+		layout = format.ImportOrderOptions{
+			Style:       s.config.FormatterOptions.Style,
+			ImportOrder: s.config.FormatterOptions.ImportOrder,
+		}
+	}
+	s.tools = NewToolsLayout(s.program, s.checker, services.NewLanguageFeatures(release), layout)
 	if cfg != nil {
 		s.project = NewProjectTools(cfg, ProjectToolDeps{})
 	}
@@ -275,12 +284,12 @@ func (s *Server) registerTools() {
 	})
 
 	// File tools work on one file (or one class on the classPath) without the
-	// Java program. They read s.config at call time, so a cappu.json change
-	// (classPath, formatterOptions) is seen after a refresh.
+	// Java program; they refresh only so that a cappu.json change (classPath,
+	// formatterOptions) is loaded before they read s.config.
 	boolean := map[string]any{"type": "boolean"}
 	s.registry = append(s.registry, toolDef{
 		name:        "decompile",
-		description: "Reconstruct Java source from a `.class` file (`file`), or from a class on the project's classPath by binary name (`className`, e.g. `com.acme.Foo$Bar`). `disasm` gives the bytecode in `javap -c -p` layout instead. A method the decompiler cannot reconstruct is left as a commented disassembly.",
+		description: "Reconstruct Java source from a `.class` file (`file`, absolute or relative to the server's working directory), or from a class on the project's classPath by binary name (`className`, e.g. `com.acme.Foo$Bar`). `disasm` gives the bytecode in `javap -c -p` layout instead. A method the decompiler cannot reconstruct is left as a commented disassembly.",
 		inputSchema: objSchema(map[string]any{"file": str, "className": str, "disasm": boolean}),
 		usesProgram: true,
 		handler: func(args json.RawMessage) (any, error) {
@@ -291,7 +300,7 @@ func (s *Server) registerTools() {
 	})
 	s.registry = append(s.registry, toolDef{
 		name:        "format",
-		description: "The file as `cappu format --write` would leave it (returned, nothing is written), following the project's formatterOptions. `changed` is false when the file is already formatted.",
+		description: "The file (absolute or relative to the server's working directory) as `cappu format --write` would leave it: returned, nothing is written. Follows the project's formatterOptions; `changed` is false when the file is already formatted.",
 		inputSchema: objSchema(map[string]any{"file": str}, "file"),
 		usesProgram: true,
 		handler: func(args json.RawMessage) (any, error) {
@@ -573,9 +582,10 @@ func (s *Server) handleToolCall(req mcpRequest) {
 	s.replyError(req.ID, -32602, "unknown tool: "+params.Name)
 }
 
-// validateArgs enforces the tool's declared required fields; the TS SDK
-// zod-validates the same schemas, so a missing arg errors instead of silently
-// becoming "".
+// validateArgs enforces the tool's declared required fields and property
+// types; the TS SDK zod-validates the same schemas, so a missing arg errors
+// instead of silently becoming "", and a `"true"` is not a boolean (nor is
+// null an absent optional).
 func validateArgs(t toolDef, args json.RawMessage) error {
 	var m map[string]any
 	if len(args) > 0 {
@@ -587,6 +597,25 @@ func validateArgs(t toolDef, args json.RawMessage) error {
 	for _, key := range required {
 		if _, ok := m[key]; !ok {
 			return fmt.Errorf("invalid arguments for %s: missing %s", t.name, key)
+		}
+	}
+	properties, _ := t.inputSchema["properties"].(map[string]any)
+	for key, value := range m {
+		schema, _ := properties[key].(map[string]any)
+		want, _ := schema["type"].(string)
+		ok := true
+		switch want {
+		case "string":
+			_, ok = value.(string)
+		case "boolean":
+			_, ok = value.(bool)
+		case "integer":
+			_, ok = value.(float64)
+		case "array":
+			_, ok = value.([]any)
+		}
+		if !ok {
+			return fmt.Errorf("invalid arguments for %s: %s is not a %s", t.name, key, want)
 		}
 	}
 	return nil

@@ -80,12 +80,13 @@ func TestMcpToolsList(t *testing.T) {
 	resp := c.request(t, "tools/list", nil)
 	result := resp["result"].(map[string]any)
 	tools := result["tools"].([]any)
-	// Without a config the project tools are absent: the 14 semantic tools remain.
+	// Without a config the project tools are absent: the 14 semantic and 2 file
+	// tools remain.
 	names := map[string]bool{}
 	for _, tl := range tools {
 		names[tl.(map[string]any)["name"].(string)] = true
 	}
-	for _, want := range []string{"diagnostics", "outline", "search_symbols", "describe_symbol", "find_references", "rename_symbol", "type_hierarchy", "organize_imports"} {
+	for _, want := range []string{"diagnostics", "outline", "search_symbols", "describe_symbol", "find_references", "rename_symbol", "type_hierarchy", "organize_imports", "decompile", "format"} {
 		if !names[want] {
 			t.Errorf("tools/list missing %q", want)
 		}
@@ -342,6 +343,85 @@ func TestMcpDecompileTool(t *testing.T) {
 	if !isError || !strings.Contains(text, "give exactly one of file or className") {
 		t.Errorf("decompile() = %s, isError=%v", text, isError)
 	}
+	text, isError = callTool(t, c, "decompile", map[string]any{"file": "", "className": "lib.Util"})
+	if isError || !strings.Contains(text, "class Util") {
+		t.Errorf("decompile(empty file, className) = %s, isError=%v", text, isError)
+	}
+	text, isError = callTool(t, c, "decompile", map[string]any{"file": jar, "className": "lib.Util"})
+	if !isError || !strings.Contains(text, "give exactly one of file or className") {
+		t.Errorf("decompile(file, className) = %s, isError=%v", text, isError)
+	}
+	// A jar is not a class file; the error names what was read.
+	text, isError = callTool(t, c, "decompile", map[string]any{"file": jar})
+	if !isError || !strings.Contains(text, "util.jar: not a class file") {
+		t.Errorf("decompile(jar as file) = %s, isError=%v", text, isError)
+	}
+	// Arguments are typed, as the TS SDK's zod schemas are.
+	resp := c.request(t, "tools/call", map[string]any{"name": "decompile", "arguments": map[string]any{"className": "lib.Util", "disasm": "true"}})
+	if resp["error"] == nil {
+		t.Errorf("a string disasm should be rejected, got %v", resp)
+	}
+	resp = c.request(t, "tools/call", map[string]any{"name": "decompile", "arguments": map[string]any{"file": nil, "className": "lib.Util"}})
+	if resp["error"] == nil {
+		t.Errorf("a null file should be rejected, got %v", resp)
+	}
+}
+
+// The classPath is searched in order: a jar entry, then a directory entry
+// holding the `.class` at its binary-name path or jars anywhere below it (in
+// path order). Nested classes are named as in the bytecode.
+func TestMcpDecompileToolClasspathOrder(t *testing.T) {
+	dir := t.TempDir()
+	nested, err := filepath.Abs(filepath.Join("..", "compiler", "testdata", "classfiles", "nested"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	classes := filepath.Join(dir, "classes", "lib")
+	if err := os.MkdirAll(classes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The same class under two entries, and under two jars of one directory:
+	// the first entry wins, and among jars the first in path order.
+	util := utilJarPath(t)
+	for _, entry := range compiler.ReadZipEntries(mustRead(t, util)) {
+		if entry.Name == "lib/Util.class" {
+			if err := os.WriteFile(filepath.Join(classes, "Util.class"), entry.Read(), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	jars := filepath.Join(dir, "jars")
+	if err := os.MkdirAll(filepath.Join(jars, "b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	copyFile(t, util, filepath.Join(jars, "b", "util.jar"))
+	copyFile(t, util, filepath.Join(jars, "zz.jar"))
+
+	cfg := &config.Config{BaseDir: dir}
+	cfg.CompilerOptions.ClassPath = []string{nested, util, "classes", "jars"}
+	cfg.CompilerOptions.SourcePaths = []string{}
+	c := startMcpTestServer(t, cfg)
+	text, isError := callTool(t, c, "decompile", map[string]any{"className": "lib.Outer$Builder"})
+	if isError || !strings.Contains(text, "class Outer$Builder") {
+		t.Errorf("decompile(Outer$Builder) = %s, isError=%v", text, isError)
+	}
+	text, isError = callTool(t, c, "decompile", map[string]any{"className": "lib.Util"})
+	if isError || !strings.Contains(text, "class Util") {
+		t.Errorf("decompile(lib.Util) = %s, isError=%v", text, isError)
+	}
+	// Drop the jar entry: the `.class` under the directory serves it.
+	cfg.CompilerOptions.ClassPath = []string{"classes", "jars"}
+	c = startMcpTestServer(t, cfg)
+	if text, isError = callTool(t, c, "decompile", map[string]any{"className": "lib.Util"}); isError {
+		t.Errorf("decompile(lib.Util from classes) = %s", text)
+	}
+	// Only jars under a directory: `b/util.jar` sorts before `zz.jar`, so a
+	// class only in the latter is still found, and one in both comes from b/.
+	cfg.CompilerOptions.ClassPath = []string{"jars"}
+	c = startMcpTestServer(t, cfg)
+	if text, isError = callTool(t, c, "decompile", map[string]any{"className": "lib.Util"}); isError {
+		t.Errorf("decompile(lib.Util from jars) = %s", text)
+	}
 }
 
 func TestMcpDecompileToolFileAndNoConfig(t *testing.T) {
@@ -416,5 +496,20 @@ func TestMcpFormatTool(t *testing.T) {
 	text, isError = callTool(t, c, "format", map[string]any{"file": filepath.Join(dir, "B.java")})
 	if !isError || !strings.Contains(text, "B.java: no such file or directory") {
 		t.Errorf("format(missing) = %s, isError=%v", text, isError)
+	}
+	// The project's formatterOptions are followed.
+	if err := os.WriteFile(file, []byte("class A {int x;}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{BaseDir: dir}
+	cfg.CompilerOptions.ClassPath = []string{}
+	cfg.CompilerOptions.SourcePaths = []string{}
+	cfg.FormatterOptions.Style = "aosp"
+	text, _ = callTool(t, startMcpTestServer(t, cfg), "format", map[string]any{"file": file})
+	if err := json.Unmarshal([]byte(text), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Formatted != "class A {\n    int x;\n}\n" {
+		t.Errorf("format(aosp) = %+v", got)
 	}
 }

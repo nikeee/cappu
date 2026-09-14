@@ -63,9 +63,9 @@ func readFile(file string) ([]byte, error) {
 	return b, nil
 }
 
-// findClass is the bytes of className from the config's classPath: a `.class`
-// file under a directory entry, or an entry of a jar (given directly, or found
-// under a directory - the same places LoadClassPath looks).
+// findClass is the bytes of className from the config's classPath: a jar entry
+// (the jar given directly, or found anywhere under a directory entry, in path
+// order), or the `.class` at its binary-name path under a directory entry.
 func findClass(cfg *config.Config, className string) ([]byte, error) {
 	if cfg == nil {
 		return nil, errors.New("className needs a project config (cappu.json) with a classPath")
@@ -95,6 +95,7 @@ func findClass(cfg *config.Config, className string) ([]byte, error) {
 			return b, nil
 		}
 		var found []byte
+		// WalkDir is in path order, as the TS build sorts its glob.
 		_ = filepath.WalkDir(entry, func(path string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".jar") {
 				return nil
@@ -129,15 +130,22 @@ func decompileToSource(b []byte) (string, error) {
 
 // DecompileTool is the `decompile` tool.
 func DecompileTool(cfg *config.Config, args DecompileArgs) (DecompileResult, error) {
-	if (args.File == nil) == (args.ClassName == nil) {
+	file, className := "", ""
+	if args.File != nil {
+		file = *args.File
+	}
+	if args.ClassName != nil {
+		className = *args.ClassName
+	}
+	if (file == "") == (className == "") {
 		return DecompileResult{}, errors.New("give exactly one of file or className")
 	}
 	var b []byte
 	var err error
-	if args.File != nil {
-		b, err = readFile(*args.File)
+	if file != "" {
+		b, err = readFile(file)
 	} else {
-		b, err = findClass(cfg, *args.ClassName)
+		b, err = findClass(cfg, className)
 	}
 	if err != nil {
 		return DecompileResult{}, err
@@ -149,7 +157,8 @@ func DecompileTool(cfg *config.Config, args DecompileArgs) (DecompileResult, err
 		text, err = decompileToSource(b)
 	}
 	if err != nil {
-		return DecompileResult{}, err
+		// A class-file error names what it was read from, like the I/O ones.
+		return DecompileResult{}, fmt.Errorf("%s: %s", file+className, err.Error())
 	}
 	return DecompileResult{Source: text}, nil
 }
@@ -163,9 +172,13 @@ func FormatTool(options format.FormatOptions, file string) (FormatResult, error)
 	}
 	text := string(b)
 	formatted, err := format.FormatSource(text, options, file)
-	if err != nil {
+	if errors.Is(err, format.ErrUnsupportedSyntax) {
 		// Both builds word this the same, whichever unsupported construct it was.
+		// Anything else is a formatter bug and stays one.
 		return FormatResult{}, fmt.Errorf("%s: unsupported syntax", file)
+	}
+	if err != nil {
+		return FormatResult{}, err
 	}
 	return FormatResult{Formatted: formatted, Changed: formatted != text}, nil
 }

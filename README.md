@@ -94,7 +94,7 @@ I know you are using AI. AIs should be fairly good at writing Java due to the am
 ```sh
 cappu mcp
 ```
-This starts an MCP server that exposes all **read-only-LSP capabilities** as well as all **read-only package management features** like license information, auditing/CVEs and package search.
+This starts an MCP server that exposes all **read-only-LSP capabilities** as well as all **read-only package management features** like license information, auditing/CVEs and package search. It also serves `decompile` (the source of a `.class` file or of a class on the project's classPath - so an agent can read a dependency's code) and `format` (a file as `cappu format --write` would leave it, returned rather than written).
 
 ### Usage without your Colleagues noticing
 Your colleagues use an IDE and you obviously don't want to migrate your project to a vibe-coded Java toolchain? Understandable.

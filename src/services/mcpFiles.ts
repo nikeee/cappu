@@ -11,6 +11,7 @@ import { disassemble } from "../compiler/disasm.ts";
 import { readZipEntries } from "../compiler/zipReader.ts";
 import { type CappuConfig, resolveConfigPath } from "../config.ts";
 import { type FormatOptions, formatSource } from "../format/index.ts";
+import { UnsupportedSyntaxError } from "../format/printer.ts";
 
 export interface DecompileArgs {
   /** Path to a `.class` file. */
@@ -22,9 +23,9 @@ export interface DecompileArgs {
 }
 
 /**
- * The bytes of `className` from the config's classPath: a `.class` file under a
- * directory entry, or an entry of a jar (given directly, or found under a
- * directory - the same places loadClassPath looks).
+ * The bytes of `className` from the config's classPath: a jar entry (the jar
+ * given directly, or found anywhere under a directory entry, in path order),
+ * or the `.class` at its binary-name path under a directory entry.
  */
 function findClass(config: CappuConfig | undefined, className: string): Uint8Array {
   if (!config) throw new Error("className needs a project config (cappu.json) with a classPath");
@@ -52,7 +53,7 @@ function findClass(config: CappuConfig | undefined, className: string): Uint8Arr
     }
     let jars: string[];
     try {
-      jars = globSync("**/*.jar", { cwd: entry });
+      jars = globSync("**/*.jar", { cwd: entry }).sort(); // path order, like the Go build's walk
     } catch {
       continue;
     }
@@ -77,11 +78,14 @@ export function decompileTool(
   config: CappuConfig | undefined,
   args: DecompileArgs,
 ): { source: string } {
-  if ((args.file === undefined) === (args.className === undefined)) {
-    throw new Error("give exactly one of file or className");
+  if (!args.file === !args.className) throw new Error("give exactly one of file or className");
+  const bytes = args.file ? read(args.file) : findClass(config, args.className!);
+  try {
+    return { source: args.disasm ? disassemble(bytes) : decompileToSource(bytes) };
+  } catch (e) {
+    // A class-file error names what it was read from, like the I/O ones.
+    throw new Error(`${args.file ?? args.className}: ${(e as Error).message}`);
   }
-  const bytes = args.file !== undefined ? read(args.file) : findClass(config, args.className!);
-  return { source: args.disasm ? disassemble(bytes) : decompileToSource(bytes) };
 }
 
 /**
@@ -96,8 +100,10 @@ export function formatTool(
   let formatted: string;
   try {
     formatted = formatSource(text, options, args.file);
-  } catch {
+  } catch (e) {
     // Both builds word this the same, whichever unsupported construct it was.
+    // Anything else is a formatter bug and stays one.
+    if (!(e instanceof UnsupportedSyntaxError)) throw e;
     throw new Error(`${args.file}: unsupported syntax`);
   }
   return { formatted, changed: formatted !== text };

@@ -707,3 +707,18 @@ Port such a guard by pairing it with a small differential table (feed both
 implementations the same dozen strings and diff the booleans) rather than
 reading the two regexes and calling them equal - a `;` or a `.` inside a string
 literal is exactly where they would quietly disagree.
+
+## Shared CLI helpers: `services/` may import `cli/` (TS) but `mcp` cannot import `cli` (Go)
+
+In TS a module is only its own imports, so `src/services/mcpFiles.ts` imports
+`decompileToSource` and `readErrorText` from `src/cli/decompile.ts` without a
+cycle (`cli/main.ts -> services/mcpServer.ts -> cli/decompile.ts` is fine).
+In Go a package is the unit: `internal/cli` imports `internal/mcp` (it wires
+`cappu mcp`), so `internal/mcp` importing `internal/cli` is an import cycle.
+
+The natural home for the shared pair, `internal/compiler`, is out too: it
+formats the decompiler's output, and `internal/format` imports `compiler`.
+So `togo/internal/mcp/files.go` carries a copy of both helpers with a comment
+pointing at the original. Keep the copies in step when the CLI's change (the
+error wording is asserted by both MCP test suites), or move the pair into a
+small package below both once a third consumer appears.
