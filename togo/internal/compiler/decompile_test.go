@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -369,6 +370,12 @@ func compileWithJavac(t *testing.T, dir, name, source string) string {
 
 func compileWithJavacOn(t *testing.T, dir, name, source, classPath string) string {
 	t.Helper()
+	return compileWithJavacFlags(t, dir, name, source, classPath, false)
+}
+
+// compileWithJavacFlags compiles with `-g` (a LocalVariableTable) when debug is set.
+func compileWithJavacFlags(t *testing.T, dir, name, source, classPath string, debug bool) string {
+	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -376,7 +383,11 @@ func compileWithJavacOn(t *testing.T, dir, name, source, classPath string) strin
 	if err := os.WriteFile(javaFile, []byte(source), 0o644); err != nil {
 		t.Fatalf("write source: %v", err)
 	}
-	args := []string{"--release", "21", "-d", dir}
+	args := []string{"--release", "21"}
+	if debug {
+		args = append(args, "-g")
+	}
+	args = append(args, "-d", dir)
 	if classPath != "" {
 		args = append(args, "-cp", classPath)
 	}
@@ -1170,6 +1181,63 @@ func TestDecompileSaysSoWhereAReusedBooleanSlotsIntReachesANumber(t *testing.T) 
 	expected := runJava(t, dir, "ReusedDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "ReusedDriver")
 	if actual != expected || actual != "6\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// With a debug table, a variable's slot is free once its range is over, and
+// javac hands it to the next scope: `sUID` is declared after the first loop and
+// takes its array copy's slot, so the second loop's unnamed index lands where
+// the first loop's `boolean b` was. The table has no row for the index, and the
+// store is a boolean's slot no more - `b = 0; while (b < n)` was what came out
+// of reading it as one.
+const slotFreedSource = `public class SlotFreed {
+  static String bits(boolean[] a, boolean[] b) {
+    StringBuilder sb = new StringBuilder();
+    boolean[] iUID = a;
+    if (iUID != null) { for (boolean bit : iUID) { sb.append(bit ? 1 : 0); } }
+    boolean[] sUID = b;
+    if (sUID != null) { for (boolean bit : sUID) { sb.append(bit ? 1 : 0); } }
+    return sb.toString();
+  }
+}
+`
+
+func TestDecompileStartsANewVariableWhereADebugTableRangeIsOver(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavacFlags(t, dir, "SlotFreed", slotFreedSource, "", true)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	for _, want := range []string{"boolean bit;", "boolean bit_2;"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if regexp.MustCompile(`while \(bit(?:_2)? <`).MatchString(source) {
+		t.Errorf("a boolean is the loop index:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "SlotFreed", source)
+	if _, err := os.Stat(filepath.Join(again, "SlotFreed.class")); err != nil {
+		t.Fatalf("the decompiled class did not recompile: %v", err)
+	}
+	driver := `public class SlotFreedDriver {
+  public static void main(String[] args) {
+    System.out.println(SlotFreed.bits(new boolean[] { true, false, true }, new boolean[] { false, true }));
+  }
+}`
+	compileWithJavacOn(t, dir, "SlotFreedDriver", driver, dir)
+	expected := runJava(t, dir, "SlotFreedDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "SlotFreedDriver")
+	if actual != expected || actual != "10101\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }

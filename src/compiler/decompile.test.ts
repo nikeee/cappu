@@ -1418,12 +1418,16 @@ function compileWithJavac(
   name: string,
   outDir: string,
   classPath?: string,
+  debug = false,
 ): string {
   mkdirSync(outDir, { recursive: true });
   const javaFile = join(outDir, `${name}.java`);
   writeFileSync(javaFile, source);
   const path = classPath === undefined ? [] : ["-cp", classPath];
-  execFileSync("javac", ["--release", "21", "-d", outDir, ...path, javaFile], { stdio: "pipe" });
+  const flags = debug ? ["-g"] : [];
+  execFileSync("javac", ["--release", "21", ...flags, "-d", outDir, ...path, javaFile], {
+    stdio: "pipe",
+  });
   return join(outDir, `${name}.class`);
 }
 
@@ -2203,6 +2207,56 @@ test(
     });
     expect(actual).toEqual(expected);
     expect(actual).toEqual("6\n");
+  },
+);
+
+// With a debug table, a variable's slot is free once its range is over, and
+// javac hands it to the next scope: `sUID` is declared after the first loop and
+// takes its array copy's slot, so the second loop's unnamed index lands where
+// the first loop's `boolean b` was. The table has no row for the index, and the
+// store is a boolean's slot no more - `b = 0; while (b < n)` was what came out
+// of reading it as one.
+const SLOT_FREED_SOURCE =
+  "public class SlotFreed {\n" +
+  "  static String bits(boolean[] a, boolean[] b) {\n" +
+  "    StringBuilder sb = new StringBuilder();\n" +
+  "    boolean[] iUID = a;\n" +
+  "    if (iUID != null) { for (boolean bit : iUID) { sb.append(bit ? 1 : 0); } }\n" +
+  "    boolean[] sUID = b;\n" +
+  "    if (sUID != null) { for (boolean bit : sUID) { sb.append(bit ? 1 : 0); } }\n" +
+  "    return sb.toString();\n" +
+  "  }\n" +
+  "}\n";
+
+test(
+  "starts a new variable where a debug-table variable's range is over",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-slotfreed-");
+    const classFile = compileWithJavac(SLOT_FREED_SOURCE, "SlotFreed", dir.path, undefined, true);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).not.toContain("/* cappu:");
+    expect(source).toContain("boolean bit;");
+    expect(source).toContain("boolean bit_2;");
+    expect(source).not.toMatch(/while \(bit(?:_2)? </);
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "SlotFreed", again);
+    expect(existsSync(join(again, "SlotFreed.class"))).toBe(true);
+    const driver =
+      "public class SlotFreedDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      "    System.out.println(SlotFreed.bits(new boolean[] { true, false, true }, new boolean[] { false, true }));\n" +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "SlotFreedDriver", dir.path, dir.path);
+    const expected = execFileSync("java", ["-cp", dir.path, "SlotFreedDriver"], {
+      encoding: "utf8",
+    });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "SlotFreedDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).toEqual("10101\n");
   },
 );
 

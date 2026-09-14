@@ -1927,6 +1927,10 @@ class BodyDecompiler {
         ) {
           return existing;
         }
+      } else if (isStore && existing.origin !== undefined) {
+        // The debug table scoped the variable in this slot, and scopes nothing
+        // here: its range is over, and this store begins a variable source never
+        // named - a for-each's array copy or index, say. It is not the old one.
       } else if (!isStore || existing.authoritative || existing.type === fallbackType) {
         // Without a debug table a slot is only a variable as long as one
         // definition explains every path to here: two arms that stored
@@ -3749,10 +3753,13 @@ class BodyDecompiler {
       // variable that is a boolean is a boolean: `w = !w` in a loop is the same
       // variable, and splitting it would leave every earlier read on a stale
       // one. Where the slot really was reused for an int, the int's first use
-      // as a number says so.
+      // as a number says so. A variable the debug table typed needs none of
+      // this: in its range the table's type wins, and past it the slot is free.
       if (fallback === "int" && erasedBoolean(value)) {
         const existing = this.locals.get(this.slotOf(instruction));
-        if (existing !== undefined && existing.type === "boolean") fallback = "boolean";
+        if (existing !== undefined && existing.type === "boolean" && !existing.authoritative) {
+          fallback = "boolean";
+        }
       }
       // A value that is an int and nothing else - a call that returns one, an
       // arithmetic result - makes the variable one: not a `1`/`0` a boolean was

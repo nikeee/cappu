@@ -2242,7 +2242,8 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 		}
 	}
 	if existing, ok := d.locals[slot]; ok {
-		if scoped != nil {
+		switch {
+		case scoped != nil:
 			// javac writes one row per scope range, so the same variable can
 			// appear twice for one slot (once per arm of an `if`); the name and
 			// type are what say it is the same one.
@@ -2251,7 +2252,12 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 				(origin != nil && origin.Name == scoped.Name && origin.Type == scoped.Type) {
 				return existing, nil
 			}
-		} else if !isStore || existing.Authoritative || existing.Type == fallbackType {
+		case isStore && existing.Origin != nil:
+			// The debug table scoped the variable in this slot, and scopes
+			// nothing here: its range is over, and this store begins a variable
+			// source never named - a for-each's array copy or index, say. It is
+			// not the old one.
+		case !isStore || existing.Authoritative || existing.Type == fallbackType:
 			// Without a debug table a slot is only a variable as long as one
 			// definition explains every path to here: two arms that stored
 			// differently-typed values were split into two variables, and which
@@ -4828,9 +4834,11 @@ func (d *bodyDecompiler) step(
 		// variable that is a boolean is a boolean: `w = !w` in a loop is the
 		// same variable, and splitting it would leave every earlier read on a
 		// stale one. Where the slot really was reused for an int, the int's
-		// first use as a number says so.
+		// first use as a number says so. A variable the debug table typed needs
+		// none of this: in its range the table's type wins, and past it the
+		// slot is free.
 		if fallback == "int" && erasedBoolean(value) {
-			if existing, ok := d.locals[slotOf(instruction)]; ok && existing.Type == "boolean" {
+			if existing, ok := d.locals[slotOf(instruction)]; ok && existing.Type == "boolean" && !existing.Authoritative {
 				fallback = "boolean"
 			}
 		}
