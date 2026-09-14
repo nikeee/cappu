@@ -9,7 +9,7 @@ import { formatSource } from "../format/index.ts";
 
 // Node and Go word their I/O errors differently, so both builds map the cases
 // that matter to the same text (togo/internal/cli/decompile.go does the same).
-function readErrorText(e: unknown): string {
+export function readErrorText(e: unknown): string {
   switch ((e as NodeJS.ErrnoException).code) {
     case "ENOENT":
       return "no such file or directory";

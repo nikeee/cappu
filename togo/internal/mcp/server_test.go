@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nikeee/cappu/internal/compiler"
 	"github.com/nikeee/cappu/internal/config"
 )
 
@@ -293,5 +294,127 @@ func TestMcpUnknownTool(t *testing.T) {
 	resp := c.request(t, "tools/call", map[string]any{"name": "nope", "arguments": map[string]any{}})
 	if resp["error"] == nil {
 		t.Errorf("unknown tool should error, got %v", resp)
+	}
+}
+
+// callTool calls a tool and returns its text content and isError flag.
+func callTool(t *testing.T, c *mcpTestClient, name string, args map[string]any) (string, bool) {
+	t.Helper()
+	resp := c.request(t, "tools/call", map[string]any{"name": name, "arguments": args})
+	result, ok := resp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("no result: %v", resp)
+	}
+	content := result["content"].([]any)
+	isError, _ := result["isError"].(bool)
+	return content[0].(map[string]any)["text"].(string), isError
+}
+
+func TestMcpDecompileTool(t *testing.T) {
+	dir := t.TempDir()
+	jar := filepath.Join(dir, "lib", "util.jar")
+	if err := os.MkdirAll(filepath.Dir(jar), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	copyFile(t, utilJarPath(t), jar)
+	cfg := &config.Config{BaseDir: dir}
+	cfg.CompilerOptions.ClassPath = []string{"lib"} // a directory holding the jar
+	cfg.CompilerOptions.SourcePaths = []string{}
+	c := startMcpTestServer(t, cfg)
+
+	text, isError := callTool(t, c, "decompile", map[string]any{"className": "lib.Util"})
+	if isError || !strings.Contains(text, "package lib;") || !strings.Contains(text, "class Util") {
+		t.Errorf("decompile(className) = %s, isError=%v", text, isError)
+	}
+	text, isError = callTool(t, c, "decompile", map[string]any{"className": "lib.Util", "disasm": true})
+	if isError || !strings.Contains(text, "Code:") {
+		t.Errorf("decompile(disasm) = %s, isError=%v", text, isError)
+	}
+	text, isError = callTool(t, c, "decompile", map[string]any{"className": "lib.Missing"})
+	if !isError || !strings.Contains(text, "class lib.Missing not found on the classPath") {
+		t.Errorf("decompile(missing) = %s, isError=%v", text, isError)
+	}
+	text, isError = callTool(t, c, "decompile", map[string]any{"file": filepath.Join(dir, "nope.class")})
+	if !isError || !strings.Contains(text, "nope.class: no such file or directory") {
+		t.Errorf("decompile(missing file) = %s, isError=%v", text, isError)
+	}
+	text, isError = callTool(t, c, "decompile", map[string]any{})
+	if !isError || !strings.Contains(text, "give exactly one of file or className") {
+		t.Errorf("decompile() = %s, isError=%v", text, isError)
+	}
+}
+
+func TestMcpDecompileToolFileAndNoConfig(t *testing.T) {
+	dir := t.TempDir()
+	class := filepath.Join(dir, "Util.class")
+	for _, entry := range compiler.ReadZipEntries(mustRead(t, utilJarPath(t))) {
+		if entry.Name == "lib/Util.class" {
+			if err := os.WriteFile(class, entry.Read(), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	c := startMcpTestServer(t, nil)
+	text, isError := callTool(t, c, "decompile", map[string]any{"file": class})
+	if isError || !strings.Contains(text, "class Util") {
+		t.Errorf("decompile(file) = %s, isError=%v", text, isError)
+	}
+	text, isError = callTool(t, c, "decompile", map[string]any{"className": "lib.Util"})
+	if !isError || !strings.Contains(text, "className needs a project config") {
+		t.Errorf("decompile(className, no config) = %s, isError=%v", text, isError)
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestMcpFormatTool(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "A.java")
+	if err := os.WriteFile(file, []byte("class A {int x;}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := startMcpTestServer(t, nil)
+	text, isError := callTool(t, c, "format", map[string]any{"file": file})
+	if isError {
+		t.Fatalf("format = %s", text)
+	}
+	var got FormatResult
+	if err := json.Unmarshal([]byte(text), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Formatted != "class A {\n  int x;\n}\n" || !got.Changed {
+		t.Errorf("format = %+v", got)
+	}
+	// Nothing was written.
+	if b := mustRead(t, file); string(b) != "class A {int x;}\n" {
+		t.Errorf("format wrote the file: %q", b)
+	}
+	if err := os.WriteFile(file, []byte(got.Formatted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	text, _ = callTool(t, c, "format", map[string]any{"file": file})
+	if err := json.Unmarshal([]byte(text), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Changed {
+		t.Error("an already formatted file should not be changed")
+	}
+	if err := os.WriteFile(file, []byte("class A {\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	text, isError = callTool(t, c, "format", map[string]any{"file": file})
+	if !isError || !strings.Contains(text, "A.java: unsupported syntax") {
+		t.Errorf("format(broken) = %s, isError=%v", text, isError)
+	}
+	text, isError = callTool(t, c, "format", map[string]any{"file": filepath.Join(dir, "B.java")})
+	if !isError || !strings.Contains(text, "B.java: no such file or directory") {
+		t.Errorf("format(missing) = %s, isError=%v", text, isError)
 	}
 }

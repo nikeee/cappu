@@ -1,7 +1,7 @@
 // Integration tests for the MCP server's config/classpath live reload: a real
 // client over an in-memory transport, real files on disk. The jar fixture is
 // the same util.jar (lib.Util) the Go port's tests use.
-import { copyFileSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { join } from "node:path";
 
@@ -9,6 +9,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { expect } from "expect";
 
+import { readZipEntries } from "../compiler/zipReader.ts";
 import { loadConfig } from "../config.ts";
 import TempDir from "../TempDir.ts";
 import { startMcpServer } from "./mcpServer.ts";
@@ -111,4 +112,89 @@ test("the tool list includes organize_imports", async () => {
   const names = (await client.listTools()).tools.map(t => t.name);
   expect(names).toContain("organize_imports");
   expect(names).toContain("code_actions");
+});
+
+async function callTool(
+  client: Client,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<{ text: string; isError: boolean }> {
+  const result = await client.callTool({ name, arguments: args });
+  return {
+    text: (result.content as Array<{ text: string }>)[0].text,
+    isError: result.isError === true,
+  };
+}
+
+test("decompile reads a class from the classPath (a jar under a directory) or a file", async () => {
+  using dir = TempDir.create("mcp-decompile-");
+  mkdirSync(join(dir.path, "lib"));
+  copyFileSync(UTIL_JAR, join(dir.path, "lib", "util.jar"));
+  writeConfigFile(dir.path, "lib", base);
+  const client = await startClient(dir.path);
+
+  let r = await callTool(client, "decompile", { className: "lib.Util" });
+  expect(r.isError).toBe(false);
+  expect(r.text).toContain("package lib;");
+  expect(r.text).toContain("class Util");
+  r = await callTool(client, "decompile", { className: "lib.Util", disasm: true });
+  expect(r.isError).toBe(false);
+  expect(r.text).toContain("Code:");
+  r = await callTool(client, "decompile", { className: "lib.Missing" });
+  expect(r.isError).toBe(true);
+  expect(r.text).toContain("class lib.Missing not found on the classPath");
+  r = await callTool(client, "decompile", { file: join(dir.path, "nope.class") });
+  expect(r.isError).toBe(true);
+  expect(r.text).toContain("nope.class: no such file or directory");
+  r = await callTool(client, "decompile", {});
+  expect(r.isError).toBe(true);
+  expect(r.text).toContain("give exactly one of file or className");
+
+  const classFile = join(dir.path, "Util.class");
+  writeFileSync(
+    classFile,
+    readZipEntries(readFileSync(UTIL_JAR))!
+      .find(e => e.name === "lib/Util.class")!
+      .read(),
+  );
+  r = await callTool(client, "decompile", { file: classFile });
+  expect(r.isError).toBe(false);
+  expect(r.text).toContain("class Util");
+});
+
+test("decompile by className needs a project config", async () => {
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await startMcpServer(undefined, serverTransport);
+  const client = new Client({ name: "test", version: "0.0.0" });
+  await client.connect(clientTransport);
+  const r = await callTool(client, "decompile", { className: "lib.Util" });
+  expect(r.isError).toBe(true);
+  expect(r.text).toContain("className needs a project config");
+});
+
+test("format returns the formatted file and writes nothing", async () => {
+  using dir = TempDir.create("mcp-format-");
+  writeConfigFile(dir.path, "lib", base);
+  const client = await startClient(dir.path);
+  const file = join(dir.path, "A.java");
+  writeFileSync(file, "class A {int x;}\n");
+
+  let r = await callTool(client, "format", { file });
+  expect(r.isError).toBe(false);
+  let got = JSON.parse(r.text) as { formatted: string; changed: boolean };
+  expect(got).toEqual({ formatted: "class A {\n  int x;\n}\n", changed: true });
+  expect(readFileSync(file, "utf8")).toBe("class A {int x;}\n");
+
+  writeFileSync(file, got.formatted);
+  r = await callTool(client, "format", { file });
+  got = JSON.parse(r.text) as { formatted: string; changed: boolean };
+  expect(got.changed).toBe(false);
+
+  writeFileSync(file, "class A {\n");
+  r = await callTool(client, "format", { file });
+  expect(r.isError).toBe(true);
+  expect(r.text).toContain("A.java: unsupported syntax");
+  r = await callTool(client, "format", { file: join(dir.path, "B.java") });
+  expect(r.isError).toBe(true);
+  expect(r.text).toContain("B.java: no such file or directory");
 });

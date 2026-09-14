@@ -100,14 +100,7 @@ func (s *Server) rebuild(cfg *config.Config) {
 	if cfg != nil {
 		release = cfg.CompilerOptions.Release
 	}
-	layout := format.ImportOrderOptions{Style: "google"}
-	if s.config != nil {
-		layout = format.ImportOrderOptions{
-			Style:       s.config.FormatterOptions.Style,
-			ImportOrder: s.config.FormatterOptions.ImportOrder,
-		}
-	}
-	s.tools = NewToolsLayout(s.program, s.checker, services.NewLanguageFeatures(release), layout)
+	s.tools = NewToolsLayout(s.program, s.checker, services.NewLanguageFeatures(release), format.ImportOrderOptions(s.formatOptions()))
 	if cfg != nil {
 		s.project = NewProjectTools(cfg, ProjectToolDeps{})
 	}
@@ -281,6 +274,35 @@ func (s *Server) registerTools() {
 		},
 	})
 
+	// File tools work on one file (or one class on the classPath) without the
+	// Java program. They read s.config at call time, so a cappu.json change
+	// (classPath, formatterOptions) is seen after a refresh.
+	boolean := map[string]any{"type": "boolean"}
+	s.registry = append(s.registry, toolDef{
+		name:        "decompile",
+		description: "Reconstruct Java source from a `.class` file (`file`), or from a class on the project's classPath by binary name (`className`, e.g. `com.acme.Foo$Bar`). `disasm` gives the bytecode in `javap -c -p` layout instead. A method the decompiler cannot reconstruct is left as a commented disassembly.",
+		inputSchema: objSchema(map[string]any{"file": str, "className": str, "disasm": boolean}),
+		usesProgram: true,
+		handler: func(args json.RawMessage) (any, error) {
+			var a DecompileArgs
+			sj(args, &a)
+			return DecompileTool(s.config, a)
+		},
+	})
+	s.registry = append(s.registry, toolDef{
+		name:        "format",
+		description: "The file as `cappu format --write` would leave it (returned, nothing is written), following the project's formatterOptions. `changed` is false when the file is already formatted.",
+		inputSchema: objSchema(map[string]any{"file": str}, "file"),
+		usesProgram: true,
+		handler: func(args json.RawMessage) (any, error) {
+			var a struct {
+				File string `json:"file"`
+			}
+			sj(args, &a)
+			return FormatTool(s.formatOptions(), a.File)
+		},
+	})
+
 	if s.project == nil {
 		return
 	}
@@ -318,6 +340,18 @@ func (s *Server) registerTools() {
 			return s.project.DependencyTree(a.Coord)
 		}},
 	)
+}
+
+// formatOptions is the project's formatterOptions (google without a config),
+// as the LSP and `cappu format` read them.
+func (s *Server) formatOptions() format.FormatOptions {
+	if s.config == nil {
+		return format.FormatOptions{Style: "google"}
+	}
+	return format.FormatOptions{
+		Style:       s.config.FormatterOptions.Style,
+		ImportOrder: s.config.FormatterOptions.ImportOrder,
+	}
 }
 
 func refArg(args json.RawMessage) string {

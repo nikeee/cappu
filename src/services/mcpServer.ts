@@ -18,6 +18,7 @@ import { createProgram } from "../compiler/program.ts";
 import { type CappuConfig, loadConfig } from "../config.ts";
 import { classpathFingerprint, findSourceJavaFiles, pathToUri } from "../workspace.ts";
 import { languageFeatures } from "./codeActions.ts";
+import { decompileTool, formatTool } from "./mcpFiles.ts";
 import { createMcpTools } from "./mcp.ts";
 import { createProjectTools } from "./mcpProject.ts";
 
@@ -145,6 +146,16 @@ export async function startMcpServer(
 
   function ok(data: unknown) {
     return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+  }
+
+  // A tool failure the caller can act on (a missing file, a class not on the
+  // classPath): the message as `{error}` with isError, like the Go build.
+  function attempt(run: () => unknown) {
+    try {
+      return ok(run());
+    } catch (e) {
+      return { ...ok({ error: (e as Error).message }), isError: true };
+    }
   }
 
   server.registerTool(
@@ -339,6 +350,39 @@ export async function startMcpServer(
     async args => {
       refresh();
       return ok(tools.codeActions(args));
+    },
+  );
+
+  // File tools work on one file (or one class on the classPath) without the
+  // Java program (no refresh()). They read the config at call time, so a
+  // cappu.json change (classPath, formatterOptions) is seen after a refresh.
+  server.registerTool(
+    "decompile",
+    {
+      description:
+        "Reconstruct Java source from a `.class` file (`file`), or from a class on the project's classPath by binary name (`className`, e.g. `com.acme.Foo$Bar`). `disasm` gives the bytecode in `javap -c -p` layout instead. A method the decompiler cannot reconstruct is left as a commented disassembly.",
+      inputSchema: {
+        file: z.string().optional(),
+        className: z.string().optional(),
+        disasm: z.boolean().optional(),
+      },
+    },
+    async args => {
+      refresh();
+      return attempt(() => decompileTool(config, args));
+    },
+  );
+
+  server.registerTool(
+    "format",
+    {
+      description:
+        "The file as `cappu format --write` would leave it (returned, nothing is written), following the project's formatterOptions. `changed` is false when the file is already formatted.",
+      inputSchema: { file: z.string() },
+    },
+    async args => {
+      refresh();
+      return attempt(() => formatTool(importLayout(), args));
     },
   );
 
