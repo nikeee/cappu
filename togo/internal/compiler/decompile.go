@@ -2016,12 +2016,11 @@ func (d *bodyDecompiler) coerceInto(value expr, target string) (string, error) {
 			return "", err
 		}
 	}
-	// Where a number belongs, an int variable is used as one. A boolean one is
-	// not wrong there: `state = found` into an int field is javac's own
-	// shortcut for `found ? 1 : 0`, which coerce writes.
-	if entry, ok := d.byName[name]; ok && name == value.Text && numericTargets[target] &&
-		entry.Type == "int" {
-		entry.Numeric = true
+	// Where a number belongs, the value is used as one.
+	if numericTargets[target] {
+		if err := d.usedAsNumber(value); err != nil {
+			return "", err
+		}
 	}
 	return coerce(value, target), nil
 }
@@ -2950,14 +2949,15 @@ func (d *bodyDecompiler) usedAsNumber(value expr) error {
 	if value.AsInt != "" {
 		return nil
 	}
-	entry, ok := d.byName[value.Text]
-	if !ok {
-		return nil
-	}
-	if entry.Type == "boolean" && !entry.Authoritative {
+	// javac never puts a boolean bare where a number belongs; it materializes
+	// one. So a value that reads as a boolean here has an int in it that this
+	// took for a boolean - a variable whose slot a dead boolean had.
+	if value.Type == "boolean" {
 		return bail("a variable used as both a number and a boolean")
 	}
-	entry.Numeric = true
+	if entry, ok := d.byName[value.Text]; ok {
+		entry.Numeric = true
+	}
 	return nil
 }
 

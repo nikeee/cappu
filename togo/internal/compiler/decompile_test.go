@@ -1112,6 +1112,68 @@ func TestDecompileKeepsAnAssignmentAsAValueWithoutADebugTable(t *testing.T) {
 	}
 }
 
+// A dead boolean's slot reused for an int, where the int's later use is not
+// `++` but any other place a number belongs: an int argument, `return y + n`,
+// an int field, a concatenation, a widening, or an operand of `|` beside a
+// materialized boolean whose result an int method returns. javac never puts a
+// boolean bare in any of those - it materializes one - so the value there is
+// the int the slot's boolean type hid, and every one says so. `y == 0` alone
+// reads the same either way and is reconstructed.
+const reusedSource = `public class Reused {
+  static int fld;
+  static boolean g() { return true; }
+  static void takeB(boolean b) {}
+  static void takeI(int i) { fld += i; }
+  static int arg(boolean q) { { boolean b = g(); takeB(b); } { int y = 1; takeI(y); } return fld; }
+  static int ret(int n) { { boolean b = g(); takeB(b); } { int y = 1; return y + n; } }
+  static int fieldStore() { { boolean b = g(); takeB(b); } { int y = 1; fld = y; } return fld; }
+  static String concat() { { boolean b = g(); takeB(b); } { int y = 1; return "v" + y; } }
+  static int eqZero() { { boolean b = g(); takeB(b); } { int y = 1; return y == 0 ? 5 : 6; } }
+  static int mat(int x) { { boolean b = g(); takeB(b); } { int y = x > 3 ? 1 : 0; takeI(y); } return fld; }
+  static long widen() { { boolean b = g(); takeB(b); } { int y = 1; long l = y; return l; } }
+  static int proven(boolean f) { { boolean b = g(); takeB(b); } { int y = 1; return y | (f ? 1 : 0); } }
+}
+`
+
+func TestDecompileSaysSoWhereAReusedBooleanSlotsIntReachesANumber(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Reused", reusedSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	// Seven bodies (the reason in the comment, then the throw).
+	if strings.Count(source, "cappu: a variable used as both a number and a boolean") != 7 {
+		t.Errorf("expected seven reused-slot bails:\n%s", source)
+	}
+	if strings.Count(source, "cappu: ") != 14 {
+		t.Errorf("expected seven bailed methods, got:\n%s", source)
+	}
+	// The one that reads the same either way.
+	if !strings.Contains(source, "static int eqZero() {") {
+		t.Errorf("expected eqZero reconstructed:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Reused", source)
+	if _, err := os.Stat(filepath.Join(again, "Reused.class")); err != nil {
+		t.Fatalf("the decompiled class did not recompile: %v", err)
+	}
+	driver := `public class ReusedDriver {
+  public static void main(String[] args) {
+    System.out.println(Reused.eqZero());
+  }
+}`
+	compileWithJavacOn(t, dir, "ReusedDriver", driver, dir)
+	expected := runJava(t, dir, "ReusedDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "ReusedDriver")
+	if actual != expected || actual != "6\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A `return` inside a loop is a statement, not the loop's end - but where the
 // test carries a call the header is not a pure test, so the follow has to come
 // from somewhere else. A single unconditional latch says the test is still the

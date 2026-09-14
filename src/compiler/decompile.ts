@@ -1747,12 +1747,8 @@ class BodyDecompiler {
     ) {
       this.retype(local, target);
     }
-    // Where a number belongs, an int variable is used as one. A boolean one is
-    // not wrong there: `state = found` into an int field is javac's own
-    // shortcut for `found ? 1 : 0`, which `coerce` writes.
-    if (name === value.text && NUMERIC_TARGETS.has(target) && local?.type === "int") {
-      local.numeric = true;
-    }
+    // Where a number belongs, the value is used as one.
+    if (NUMERIC_TARGETS.has(target)) this.usedAsNumber(value);
     return coerce(value, target);
   }
 
@@ -2433,12 +2429,14 @@ class BodyDecompiler {
     // A materialized boolean reads as its condition - which may be a bare
     // variable - but is a number already, written as the ternary it carries.
     if (value.asInt !== undefined) return;
-    const local = this.byName.get(value.text);
-    if (local === undefined) return;
-    if (local.type === "boolean" && !local.authoritative) {
+    // javac never puts a boolean bare where a number belongs; it materializes
+    // one. So a value that reads as a boolean here has an int in it that this
+    // took for a boolean - a variable whose slot a dead boolean had.
+    if (value.type === "boolean") {
       throw new NotDecompilable("a variable used as both a number and a boolean");
     }
-    local.numeric = true;
+    const local = this.byName.get(value.text);
+    if (local !== undefined) local.numeric = true;
   }
 
   /** `numeric`, with the use noted. */

@@ -2152,6 +2152,60 @@ test(
   },
 );
 
+// A dead boolean's slot reused for an int, where the int's later use is not
+// `++` but any other place a number belongs: an int argument, `return y + n`,
+// an int field, a concatenation, a widening, or an operand of `|` beside a
+// materialized boolean whose result an int method returns. javac never puts a
+// boolean bare in any of those - it materializes one - so the value there is
+// the int the slot's boolean type hid, and every one says so. `y == 0` alone
+// reads the same either way and is reconstructed.
+const REUSED_SOURCE =
+  "public class Reused {\n" +
+  "  static int fld;\n" +
+  "  static boolean g() { return true; }\n" +
+  "  static void takeB(boolean b) {}\n" +
+  "  static void takeI(int i) { fld += i; }\n" +
+  "  static int arg(boolean q) { { boolean b = g(); takeB(b); } { int y = 1; takeI(y); } return fld; }\n" +
+  "  static int ret(int n) { { boolean b = g(); takeB(b); } { int y = 1; return y + n; } }\n" +
+  "  static int fieldStore() { { boolean b = g(); takeB(b); } { int y = 1; fld = y; } return fld; }\n" +
+  '  static String concat() { { boolean b = g(); takeB(b); } { int y = 1; return "v" + y; } }\n' +
+  "  static int eqZero() { { boolean b = g(); takeB(b); } { int y = 1; return y == 0 ? 5 : 6; } }\n" +
+  "  static int mat(int x) { { boolean b = g(); takeB(b); } { int y = x > 3 ? 1 : 0; takeI(y); } return fld; }\n" +
+  "  static long widen() { { boolean b = g(); takeB(b); } { int y = 1; long l = y; return l; } }\n" +
+  "  static int proven(boolean f) { { boolean b = g(); takeB(b); } { int y = 1; return y | (f ? 1 : 0); } }\n" +
+  "}\n";
+
+test(
+  "says so where a reused boolean slot's int reaches a place a number belongs",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-reused-");
+    const classFile = compileWithJavac(REUSED_SOURCE, "Reused", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    // Seven bodies (the reason in the comment, then the throw).
+    expect(source.match(/cappu: a variable used as both a number and a boolean/g)?.length).toBe(7);
+    expect(source.match(/cappu: /g)?.length).toBe(14);
+    // The one that reads the same either way.
+    expect(source).toContain("static int eqZero() {");
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "Reused", again);
+    expect(existsSync(join(again, "Reused.class"))).toBe(true);
+    const driver =
+      "public class ReusedDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      "    System.out.println(Reused.eqZero());\n" +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "ReusedDriver", dir.path, dir.path);
+    const expected = execFileSync("java", ["-cp", dir.path, "ReusedDriver"], { encoding: "utf8" });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "ReusedDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).toEqual("6\n");
+  },
+);
+
 // A `return` inside a loop is a statement, not the loop's end - but where the
 // test carries a call the header is not a pure test, so the follow has to come
 // from somewhere else. A single unconditional latch says the test is still the
