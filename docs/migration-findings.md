@@ -59,7 +59,7 @@ The entire `pom.xml` -> `cappu.json` translation is manual: coordinates,
 scopes, java release, source layout, annotation processors. Every project here
 needed hand translation. This is the single biggest opportunity - an automated
 importer would remove ~90% of the effort and most of the error surface below.
-The migration skill (`.claude/skills/migrate-to-cappu/`) is the interim manual
+The migration skill (`plugins/cappu/skills/migrate/`) is the interim manual
 procedure.
 
 ### 2. No BOM / parent-POM / `dependencyManagement` / `${property}` resolution
@@ -133,6 +133,6 @@ EDL/EPL.
   silently skipped.
 
 ## Reproduction
-Per project: write `cappu.json` (see the migrate-to-cappu skill), remove Maven
+Per project: write `cappu.json` (see the migrate skill), remove Maven
 files (`pom.xml .mvn mvnw mvnw.cmd`), then `cappu install && cappu compile`
 (and `cappu test`). The concrete configs used are in the skill's examples.

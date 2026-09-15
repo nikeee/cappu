@@ -83,6 +83,16 @@ make build-all     # cross-compile every release target
 The Go CI (`.github/workflows/CI-go.yaml`) runs parallel to the Node CI; both
 must stay green.
 
+## Claude Code plugin (`plugins/cappu/`)
+
+`plugins/cappu/` is a Claude Code plugin (marketplace manifest in
+`.claude-plugin/marketplace.json`) whose skills teach an agent how to USE cappu
+in a Java project: `setup`, `dependencies`, `build-test`, `ci-release`,
+`code-intel`, `debug`, `migrate`. They state CLI flags, exit codes, `cappu.json`
+fields and MCP tool names verbatim. When you add, rename or change a command,
+flag, config field, exit code or MCP tool, update the affected skill in the same
+change. Try them locally with `claude --plugin-dir plugins/cappu`.
+
 ## Testing
 
 Tests use the Node test runner via `tsx` (TypeScript sources run directly).

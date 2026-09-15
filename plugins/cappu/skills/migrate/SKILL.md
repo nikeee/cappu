@@ -1,5 +1,5 @@
 ---
-name: migrate-to-cappu
+name: migrate
 description: "Use when migrating a Maven or Gradle Java project to cappu - translating pom.xml/build.gradle into cappu.json, removing the old build files, and getting it to build/test. Covers single-module and multi-module projects, annotation processors, and the known gotchas."
 ---
 
@@ -8,7 +8,8 @@ description: "Use when migrating a Maven or Gradle Java project to cappu - trans
 There is no `cappu migrate` command. Migration is a manual translation of the
 build file into `cappu.json`. This skill is that procedure, distilled from
 migrating commons-lang, mapstruct (core + processor), and microexpressions.
-See `docs/migration-findings.md` for the feature gaps behind these steps.
+See https://github.com/nikeee/cappu/blob/main/docs/migration-findings.md for the
+feature gaps behind these steps.
 
 ## Procedure
 

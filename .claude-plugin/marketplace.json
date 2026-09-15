@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "cappu",
+  "description": "Claude Code skills for using cappu, the Java package manager, build tool, language server, MCP server and debug adapter.",
+  "owner": {
+    "name": "Niklas Mollenhauer",
+    "url": "https://github.com/nikeee"
+  },
+  "plugins": [
+    {
+      "name": "cappu",
+      "description": "Skills for Java projects built with cappu: project setup and cappu.json, dependencies and audit, build/check/test/format, CI and releases, code navigation through the cappu MCP server, DAP debugging, and migration from Maven or Gradle. Also registers the read-only cappu MCP server.",
+      "source": "./plugins/cappu",
+      "category": "development"
+    }
+  ]
+}

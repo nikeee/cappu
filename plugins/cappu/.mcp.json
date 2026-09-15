@@ -1,0 +1,7 @@
+{
+  "cappu": {
+    "type": "stdio",
+    "command": "cappu",
+    "args": ["mcp"]
+  }
+}
