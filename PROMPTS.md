@@ -598,3 +598,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-09-15 17:42 — cappu install kommt manchmal an ein rate-limit von der package-registry. gibts da einen mirror, den man stattdessen benutzen kann?
 - 2026-09-15 17:54 — benutze den mirror, falls noch nicht getan. commit.
 - 2026-09-15 18:07 — commit ohne signatur
+- 2026-09-15 20:25 — continu
+- 2026-09-15 20:25 — fix rebase. i stashed

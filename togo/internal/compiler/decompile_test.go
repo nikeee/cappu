@@ -60,7 +60,9 @@ var fullyDecompiled = []string{
 	"NewArray",
 	"PrivateCall",
 	"Pt",
+	"QualifiedAnon$1",
 	"QualifiedAnon$Inner",
+	"QualifiedNew",
 	"QualifiedNew$Inner",
 	"ReturnLiterals",
 	"Returns",
@@ -76,15 +78,9 @@ var fullyDecompiled = []string{
 	"VarargsPack",
 }
 
-// Classes kept for the bail-out rendering: an inner class's constructor and the
-// members javac generates for an enum are not this phase's job, and must say so.
-var notDecompiled = []string{
-	"EnumAbstract",
-	"EnumMixed",
-	"QualifiedAnon$1",
-	"QualifiedAnon",
-	"QualifiedNew",
-}
+// Classes kept for the bail-out rendering: an anonymous class and the members
+// javac generates for an enum are not this phase's job, and must say so.
+var notDecompiled = []string{"EnumAbstract", "EnumMixed", "QualifiedAnon"}
 
 // `ClassLit.prim()` reads `java.lang.Integer.TYPE`, which javac accepts and the
 // decompiler gets right, but our JDK stub does not declare - so re-emitting it
@@ -118,12 +114,16 @@ var stubGap = map[string]bool{"ClassLit": true}
 //     follows the implicit `super()` and the bytes differ; and `get()`/`sum()`
 //     read a field of the enclosing class, which cannot be resolved when the
 //     file is emitted alone, so they degrade to a constant the way `ICast`
-//     does.
+//     does;
+//   - `QualifiedNew` and `QualifiedAnon$1` write `outer.new Inner(5)` and
+//     `outer.super(v)`, whose enclosing instance and null check our emitter
+//     does not pass (it compiles the inner class without one).
 var noRoundtrip = map[string]bool{
 	"ClassLit": true, "Nest$Counter": true,
 	"EnumAbstract$1": true, "EnumAbstract$2": true, "EnumMixed$1": true, "EnumMixed$2": true,
 	"ICast": true, "BoundErasure": true, "EnumUnqualified": true, "Boxing": true,
 	"QualifiedAnon$Inner": true, "QualifiedNew$Inner": true,
+	"QualifiedNew": true, "QualifiedAnon$1": true,
 }
 
 func decompileBaseline(t *testing.T, name string) string {
@@ -1128,8 +1128,9 @@ func TestDecompileKeepsAnAssignmentAsAValueWithoutADebugTable(t *testing.T) {
 // an int field, a concatenation, a widening, or an operand of `|` beside a
 // materialized boolean whose result an int method returns. javac never puts a
 // boolean bare in any of those - it materializes one - so the value there is
-// the int the slot's boolean type hid, and every one says so. `y == 0` alone
-// reads the same either way and is reconstructed.
+// the int the slot's boolean type hid, and every one says so - as does one
+// compared with anything but `0`/`1`, or ordered. `y == 0` alone reads the same
+// either way and is reconstructed.
 const reusedSource = `public class Reused {
   static int fld;
   static boolean g() { return true; }
@@ -1140,6 +1141,10 @@ const reusedSource = `public class Reused {
   static int fieldStore() { { boolean b = g(); takeB(b); } { int y = 1; fld = y; } return fld; }
   static String concat() { { boolean b = g(); takeB(b); } { int y = 1; return "v" + y; } }
   static int eqZero() { { boolean b = g(); takeB(b); } { int y = 1; return y == 0 ? 5 : 6; } }
+  static int eqFive() { { boolean b = g(); takeB(b); } { int y = 1; return y == 5 ? 5 : 6; } }
+  static int eqParam(int p) { { boolean b = g(); takeB(b); } { int y = 1; return y == p ? 5 : 6; } }
+  static int gtZero() { { boolean b = g(); takeB(b); } { int y = 1; return y > 0 ? 5 : 6; } }
+  static int ltZero() { { boolean b = g(); takeB(b); } { int y = 1; if (y < 0) return 1; return 2; } }
   static int mat(int x) { { boolean b = g(); takeB(b); } { int y = x > 3 ? 1 : 0; takeI(y); } return fld; }
   static long widen() { { boolean b = g(); takeB(b); } { int y = 1; long l = y; return l; } }
   static int proven(boolean f) { { boolean b = g(); takeB(b); } { int y = 1; return y | (f ? 1 : 0); } }
@@ -1156,15 +1161,15 @@ func TestDecompileSaysSoWhereAReusedBooleanSlotsIntReachesANumber(t *testing.T) 
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	// Seven bodies (the reason in the comment, then the throw).
-	if strings.Count(source, "cappu: a variable used as both a number and a boolean") != 7 {
-		t.Errorf("expected seven reused-slot bails:\n%s", source)
+	// Eleven bodies (the reason in the comment, then the throw).
+	if strings.Count(source, "cappu: a variable used as both a number and a boolean") != 11 {
+		t.Errorf("expected eleven reused-slot bails:\n%s", source)
 	}
-	if strings.Count(source, "cappu: ") != 14 {
-		t.Errorf("expected seven bailed methods, got:\n%s", source)
+	if strings.Count(source, "cappu: ") != 22 {
+		t.Errorf("expected eleven bailed methods, got:\n%s", source)
 	}
 	// The one that reads the same either way.
-	if !strings.Contains(source, "static int eqZero() {") {
+	if !strings.Contains(source, "return !var0 ? 5 : 6;") {
 		t.Errorf("expected eqZero reconstructed:\n%s", source)
 	}
 	again := filepath.Join(dir, "again")
@@ -1188,7 +1193,7 @@ func TestDecompileSaysSoWhereAReusedBooleanSlotsIntReachesANumber(t *testing.T) 
 // With a debug table, a variable's slot is free once its range is over, and
 // javac hands it to the next scope: `sUID` is declared after the first loop and
 // takes its array copy's slot, so the second loop's unnamed index lands where
-// the first loop's `boolean b` was. The table has no row for the index, and the
+// the first loop's `boolean bit` was. The table has no row for the index, and the
 // store is a boolean's slot no more - `b = 0; while (b < n)` was what came out
 // of reading it as one.
 const slotFreedSource = `public class SlotFreed {
@@ -1238,6 +1243,157 @@ func TestDecompileStartsANewVariableWhereADebugTableRangeIsOver(t *testing.T) {
 	expected := runJava(t, dir, "SlotFreedDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "SlotFreedDriver")
 	if actual != expected || actual != "10101\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// An inner class's constructor takes the enclosing instance first, and source
+// passes it another way: implicitly, from a method of the enclosing class, or
+// as the qualifier of `outer.new In(...)` / `outer.super(...)`. javac
+// null-checks the qualifier (`dup; requireNonNull; pop`) and stores it before
+// `super()`, neither of which source writes. The callers are top-level classes
+// so each decompiled file recompiles on its own against the original classes.
+const innerlySource = `public class Innerly {
+  int f;
+  Innerly(int f) { this.f = f; }
+  class In { int g; In(int a) { g = a + f; } In() { this(0); } int plus() { return g + f; }
+    class Deep { int h() { return g * 10; } } }
+  In own() { return new In(1); }
+}
+class InnerlySub extends Innerly.In {
+  InnerlySub(Innerly o) { o.super(5); }
+  int twice() { return g * 2; }
+}
+class InnerlyMk {
+  static Innerly.In make(Innerly o) { return o.new In(2); }
+  static Innerly.In.Deep deep(Innerly o) { return o.new In(3).new Deep(); }
+  static int sum(Innerly o) {
+    return make(o).g + deep(o).h() + new InnerlySub(o).twice() + o.own().plus(); }
+}
+`
+
+func TestDecompilePassesAnInnerClassItsEnclosingInstance(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	orig := filepath.Join(dir, "orig")
+	compileWithJavac(t, orig, "Innerly", innerlySource)
+	sources := map[string]string{}
+	for _, name := range []string{"Innerly", "Innerly$In", "Innerly$In$Deep", "InnerlySub", "InnerlyMk"} {
+		source, err := Decompile(readFile(t, filepath.Join(orig, name+".class")))
+		if err != nil {
+			t.Fatalf("decompile %s: %v", name, err)
+		}
+		if strings.Contains(source, "/* cappu:") {
+			t.Errorf("%s bails:\n%s", name, source)
+		}
+		sources[name] = source
+	}
+	for name, want := range map[string]string{
+		"Innerly":    "return new Innerly.In(1);",
+		"Innerly$In": "this.this$0 = arg0;",
+		// Its own constructors keep the parameter, so a `this(...)` passes it on.
+		"Innerly$In$this": "this(arg0, 0);",
+		"Innerly$In$Deep": "this.this$1 = arg0;",
+		"InnerlySub":      "arg0.super(5);",
+		"InnerlyMk":       "return arg0.new In(3).new Deep();",
+	} {
+		name = strings.TrimSuffix(name, "$this")
+		if !strings.Contains(sources[name], want) {
+			t.Errorf("%s: expected %q:\n%s", name, want, sources[name])
+		}
+	}
+	if !strings.Contains(sources["InnerlyMk"], "return arg0.new In(2);") ||
+		strings.Contains(sources["Innerly$In"], "requireNonNull") {
+		t.Errorf("unexpected:\n%s\n%s", sources["InnerlyMk"], sources["Innerly$In"])
+	}
+	// The nested files carry their binary names, which the enclosing file
+	// cannot resolve on its own yet - and javac, seeing the original `Innerly`
+	// name them in its InnerClasses, compiles a `class Innerly$In` as the inner
+	// class itself, enclosing instance and all. The top-level callers recompile.
+	again := filepath.Join(dir, "again")
+	for _, name := range []string{"InnerlySub", "InnerlyMk"} {
+		compileWithJavacOn(t, again, name, sources[name], orig)
+		if _, err := os.Stat(filepath.Join(again, name+".class")); err != nil {
+			t.Fatalf("%s did not recompile: %v", name, err)
+		}
+	}
+	driver := `public class InnerlyDriver {
+  public static void main(String[] args) {
+    System.out.println(InnerlyMk.sum(new Innerly(7)));
+  }
+}`
+	compileWithJavacOn(t, dir, "InnerlyDriver", driver, orig)
+	sep := string(os.PathListSeparator)
+	expected := runJava(t, orig+sep+dir, "InnerlyDriver")
+	actual := runJava(t, again+sep+orig+sep+dir, "InnerlyDriver")
+	// 9 + 100 + 24 + 15
+	if actual != expected || actual != "148\n" {
+		t.Errorf("the decompiled classes run differently: %q vs %q", actual, expected)
+	}
+}
+
+// A condition is rendered against the types its locals have when it is
+// written, and a local that is only inferred may turn out a boolean later. A
+// condition stored into a variable is rewritten then, like one branched on -
+// `w = !w` - but one written into anything else is text by then, and says so.
+// A materialized condition is no constant, so it takes the cast an int would
+// where a byte, short or char belongs.
+const frozenSource = `public class Frozen {
+  static int count;
+  static void takeB(boolean b) {}
+  static void takeByte(byte b) { count += b; }
+  static boolean lv(int a) { boolean w = false; for (int i = 0; i < a; i++) { w = !w; } return w; }
+  static boolean m(int a, int b) { boolean ok = a > b; count += ok ? 1 : 0; return ok; }
+  static boolean arg(int a, int b) { boolean ok = a > b; takeB(ok == false); return ok; }
+  static byte by(boolean flag) { byte b = flag ? (byte) 1 : (byte) 0; return b; }
+  static short sh(boolean flag) { return flag ? (short) 1 : (short) 0; }
+  static char ch(boolean flag) { return flag ? (char) 1 : (char) 0; }
+  static void bya(boolean flag) { byte[] a = new byte[1]; a[0] = flag ? (byte) 1 : (byte) 0; takeByte(a[0]); }
+}
+`
+
+func TestDecompileRewritesAStoredConditionOnARetype(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Frozen", frozenSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"boolean var1 = false;", "var1 = !var1;",
+		"byte var1 = (byte) (arg0 ? 1 : 0);", "return (short) (arg0 ? 1 : 0);",
+		"return (char) (arg0 ? 1 : 0);", "var1[0] = (byte) (arg0 ? 1 : 0);",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	// m and arg: the condition over ok went into an operand, an argument.
+	if strings.Count(source, "cappu: a retyped variable in a condition already written") != 2 ||
+		strings.Count(source, "cappu: ") != 4 {
+		t.Errorf("expected two frozen-condition bails:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Frozen", source)
+	if _, err := os.Stat(filepath.Join(again, "Frozen.class")); err != nil {
+		t.Fatalf("the decompiled class did not recompile: %v", err)
+	}
+	driver := `public class FrozenDriver {
+  public static void main(String[] args) {
+    Frozen.bya(true);
+    System.out.println(Frozen.lv(3) + " " + Frozen.lv(4) + " " + Frozen.by(true) + Frozen.sh(false)
+      + (int) Frozen.ch(true) + " " + Frozen.count);
+  }
+}`
+	compileWithJavacOn(t, dir, "FrozenDriver", driver, dir)
+	expected := runJava(t, dir, "FrozenDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "FrozenDriver")
+	if actual != expected || actual != "true false 101 1\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
@@ -2773,7 +2929,9 @@ func TestDecompileTellsAStaticNestedClassFromAnInnerOne(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decompile: %v", err)
 		}
-		for _, want := range []string{"new Nested.St(arg0, 3)", "cappu: an inner class constructor"} {
+		// The emitter passes an inner class no enclosing instance, so its `new`
+		// reads the same as a static one's, and the argument stays an argument.
+		for _, want := range []string{"new Nested.St(arg0, 3)", "new Nested.In(4)"} {
 			if !strings.Contains(source, want) {
 				t.Errorf("missing %q in:\n%s", want, source)
 			}
@@ -2824,7 +2982,7 @@ func TestDecompileChainsToTheSuperConstructor(t *testing.T) {
 // one that throws in front of it leaves an object that never was, and behind it
 // one that is. Newer javacs than this one null-check the enclosing instance
 // there, so the trigger has to come from the JDK on PATH.
-func TestDecompileSaysWhenAStatementThatCanThrowComesBeforeSuper(t *testing.T) {
+func TestDecompileDropsTheNullCheckBeforeAnInnerClassSuper(t *testing.T) {
 	jmod := jmodOf("java.desktop")
 	if jmod == "" {
 		t.Skip("no JDK with jmods/")
@@ -2848,8 +3006,11 @@ func TestDecompileSaysWhenAStatementThatCanThrowComesBeforeSuper(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(source, "cappu: constructor call is not first") {
-		t.Errorf("expected the bail:\n%s", source)
+	// The `dup; requireNonNull; pop` is no statement of source's: dropped, the
+	// prologue is movable across the `super()`.
+	if strings.Contains(source, "/* cappu:") || strings.Contains(source, "requireNonNull") ||
+		!strings.Contains(source, "this$0.marks.addElement(this.rec);") {
+		t.Errorf("expected the null check dropped and the body reconstructed:\n%s", source)
 	}
 }
 

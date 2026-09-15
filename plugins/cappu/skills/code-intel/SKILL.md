@@ -1,14 +1,15 @@
 ---
 name: code-intel
-description: "Use when you need to understand or navigate Java code in a cappu project (find definitions, references, callers, implementations, type hierarchies, members, Javadoc, diagnostics, deprecated uses), refactor through the cappu MCP tools (rename_symbol, organize_imports, code_actions, resolve_import), or read compiled .class files with cappu decompile. Not for building or testing - see build-test."
+description: "Use when you need to understand or navigate Java code in a cappu project (find definitions, references, callers, implementations, type hierarchies, members, Javadoc, diagnostics, deprecated uses), refactor through the cappu MCP tools (rename_symbol, organize_imports, code_actions, resolve_import), format a file (format), or read compiled .class files and dependency classes (decompile). Not for building or testing - see build-test."
 ---
 
 # Navigate and refactor Java with the cappu MCP server
 
 `cappu mcp` exposes cappu's language server as MCP tools (`mcp__cappu__*`). It
 is strictly read-only: it never writes files, compiles or runs code. Tools that
-"refactor" (`rename_symbol`, `organize_imports`, `code_actions`) return edits;
-you apply them with your editing tool and verify with `cappu check`. Prefer
+"refactor" (`rename_symbol`, `organize_imports`, `code_actions`) return edits
+and `format` returns the formatted text; you apply them with your editing tool
+and verify with `cappu check`. Prefer
 these tools over grep for anything symbol-shaped; grep is for strings, config
 and comments.
 
@@ -50,6 +51,8 @@ absolute paths; a relative path returns an empty result instead of an error.
 | rename | `rename_symbol(ref, newName)` | returns the full workspace edit set |
 | tidy imports | `organize_imports(file)` | sorts, groups, drops unused; matches `formatterOptions.importOrder` and `cappu format` |
 | quick fixes, refactorings | `code_actions(file, startLine, startColumn, endLine?, endColumn?)` | positions are 1-based; end defaults to start |
+| format one file | `format(file)` | `{formatted, changed}` as `cappu format --write` would leave it; nothing written |
+| source of a dependency class | `decompile(className)` or `decompile(file)` | binary name on the project classPath (`com.acme.Foo$Bar`) or a `.class` path; `disasm: true` for `javap -c -p` layout |
 
 The dependency-facing tools (`dependency_tree`, `audit`, `licenses`,
 `search_packages`, `outdated`, `latest_version`) are covered in the
@@ -82,17 +85,21 @@ add the chosen line, then run `organize_imports` again.
 
 ## Reading compiled code
 
-Dependency jars live under `.cappu/lib/classes`. For a class without sources:
+For a dependency class without sources, `decompile(className: "com.acme.Foo")`
+finds the class on the project's classPath (jars and directories) and returns
+reconstructed Java source; `disasm: true` returns bytecode in `javap -c -p`
+layout instead. A method the decompiler cannot reconstruct is left as a
+commented disassembly plus a `throw`. Without an MCP server:
 `unzip -o some.jar 'com/acme/Foo.class' -d /tmp/x`, then
-`cappu decompile /tmp/x/com/acme/Foo.class` reconstructs Java source;
-`--disasm` prints bytecode in `javap -c -p` layout. No JDK needed.
-`describe_symbol` on a dependency type already shows signature and Javadoc when
-the jar carries them, so decompile only when you need method bodies.
+`cappu decompile /tmp/x/com/acme/Foo.class` (`--disasm` for bytecode). No JDK
+needed. `describe_symbol` on a dependency type already shows signature and
+Javadoc when the jar carries them, so decompile only when you need method
+bodies.
 
 ## Gotchas checklist
 
-- [ ] MCP answers, you edit: nothing from `rename_symbol`, `organize_imports` or `code_actions` is written for you.
-- [ ] `code_actions` positions are 1-based lines and columns; `file` arguments are absolute paths.
+- [ ] MCP answers, you edit: nothing from `rename_symbol`, `organize_imports`, `code_actions` or `format` is written for you.
+- [ ] `code_actions` positions are 1-based lines and columns; `file` arguments are absolute paths (or relative to the server's working directory).
 - [ ] Project tools missing? The server started outside a `cappu.json` project; restart it in the project root.
 - [ ] `diagnostics` is cappu's checker, not javac; confirm with `cappu compile`.
 - [ ] Prefer `Type#member` refs; simple names fail when ambiguous.

@@ -86,7 +86,9 @@ const FULLY_DECOMPILED = [
   "NewArray",
   "PrivateCall",
   "Pt",
+  "QualifiedAnon$1",
   "QualifiedAnon$Inner",
+  "QualifiedNew",
   "QualifiedNew$Inner",
   "ReturnLiterals",
   "Returns",
@@ -102,15 +104,9 @@ const FULLY_DECOMPILED = [
   "VarargsPack",
 ];
 
-// Classes kept for the bail-out rendering: an inner class's constructor and the
-// members javac generates for an enum are not this phase's job, and must say so.
-const NOT_DECOMPILED = [
-  "EnumAbstract",
-  "EnumMixed",
-  "QualifiedAnon$1",
-  "QualifiedAnon",
-  "QualifiedNew",
-];
+// Classes kept for the bail-out rendering: an anonymous class and the members
+// javac generates for an enum are not this phase's job, and must say so.
+const NOT_DECOMPILED = ["EnumAbstract", "EnumMixed", "QualifiedAnon"];
 
 // --- tier 1: text baselines ---------------------------------------------------------
 
@@ -207,8 +203,18 @@ const ENUM_CONSTANT_BODIES = ["EnumAbstract$1", "EnumAbstract$2", "EnumMixed$1",
 //     top of the method and shifts every slot after it;
 //   - `Boxing` calls `Integer.intValue()`, and our emitter writes the *declaring*
 //     class into the method ref (`Number.intValue`) where javac writes the
-//     receiver's static type. That is an emitter bug, not a decompiler one.
-const EMITTER_GAP = ["ICast", "BoundErasure", "EnumUnqualified", "Boxing"];
+//     receiver's static type. That is an emitter bug, not a decompiler one;
+//   - `QualifiedNew` and `QualifiedAnon$1` write `outer.new Inner(5)` and
+//     `outer.super(v)`, whose enclosing instance and null check our emitter
+//     does not pass (it compiles the inner class without one).
+const EMITTER_GAP = [
+  "ICast",
+  "BoundErasure",
+  "EnumUnqualified",
+  "Boxing",
+  "QualifiedNew",
+  "QualifiedAnon$1",
+];
 
 // Two reasons at once, and this oracle can judge neither:
 //   - the constructor assigns the synthetic enclosing field *before* the
@@ -1825,10 +1831,12 @@ for (const { name, source, expect: wanted, reject, selfContained } of RECONSTRUC
   });
 }
 
-// A static nested class is `new Outer.Inner(...)`; a true inner one is only
-// writable as `outer.new Inner(...)`, which needs the enclosing file. The
-// InnerClasses attribute of *this* file is what tells them apart - the first
-// constructor parameter cannot, since a static one may take the outer type too.
+// A static nested class is `new Outer.Inner(...)`, whatever its first parameter
+// is; an inner one takes the enclosing instance first, which the emitter does
+// not pass - so its `new` reads the same, and the argument stays an argument.
+// The InnerClasses attribute of *this* file is what tells them apart - the
+// first constructor parameter cannot, since a static one may take the outer
+// type too.
 test("tells a static nested class from an inner one", () => {
   const emitted = emitClasses(
     "Nested",
@@ -1841,7 +1849,7 @@ test("tells a static nested class from an inner one", () => {
   expect(outer).toBeDefined();
   const source = decompileToSource(outer!.bytes);
   expect(source).toContain("new Nested.St(arg0, 3)");
-  expect(source).toContain("cappu: an inner class constructor");
+  expect(source).toContain("new Nested.In(4)");
 });
 
 test("writes a nested type reference with a dot, not the binary $", () => {
@@ -2161,8 +2169,9 @@ test(
 // an int field, a concatenation, a widening, or an operand of `|` beside a
 // materialized boolean whose result an int method returns. javac never puts a
 // boolean bare in any of those - it materializes one - so the value there is
-// the int the slot's boolean type hid, and every one says so. `y == 0` alone
-// reads the same either way and is reconstructed.
+// the int the slot's boolean type hid, and every one says so - as does one
+// compared with anything but `0`/`1`, or ordered. `y == 0` alone reads the same
+// either way and is reconstructed.
 const REUSED_SOURCE =
   "public class Reused {\n" +
   "  static int fld;\n" +
@@ -2174,6 +2183,10 @@ const REUSED_SOURCE =
   "  static int fieldStore() { { boolean b = g(); takeB(b); } { int y = 1; fld = y; } return fld; }\n" +
   '  static String concat() { { boolean b = g(); takeB(b); } { int y = 1; return "v" + y; } }\n' +
   "  static int eqZero() { { boolean b = g(); takeB(b); } { int y = 1; return y == 0 ? 5 : 6; } }\n" +
+  "  static int eqFive() { { boolean b = g(); takeB(b); } { int y = 1; return y == 5 ? 5 : 6; } }\n" +
+  "  static int eqParam(int p) { { boolean b = g(); takeB(b); } { int y = 1; return y == p ? 5 : 6; } }\n" +
+  "  static int gtZero() { { boolean b = g(); takeB(b); } { int y = 1; return y > 0 ? 5 : 6; } }\n" +
+  "  static int ltZero() { { boolean b = g(); takeB(b); } { int y = 1; if (y < 0) return 1; return 2; } }\n" +
   "  static int mat(int x) { { boolean b = g(); takeB(b); } { int y = x > 3 ? 1 : 0; takeI(y); } return fld; }\n" +
   "  static long widen() { { boolean b = g(); takeB(b); } { int y = 1; long l = y; return l; } }\n" +
   "  static int proven(boolean f) { { boolean b = g(); takeB(b); } { int y = 1; return y | (f ? 1 : 0); } }\n" +
@@ -2186,11 +2199,11 @@ test(
     using dir = TempDir.create("cappu-decompile-reused-");
     const classFile = compileWithJavac(REUSED_SOURCE, "Reused", dir.path);
     const source = decompileToSource(readFileSync(classFile));
-    // Seven bodies (the reason in the comment, then the throw).
-    expect(source.match(/cappu: a variable used as both a number and a boolean/g)?.length).toBe(7);
-    expect(source.match(/cappu: /g)?.length).toBe(14);
+    // Eleven bodies (the reason in the comment, then the throw).
+    expect(source.match(/cappu: a variable used as both a number and a boolean/g)?.length).toBe(11);
+    expect(source.match(/cappu: /g)?.length).toBe(22);
     // The one that reads the same either way.
-    expect(source).toContain("static int eqZero() {");
+    expect(source).toContain("return !var0 ? 5 : 6;");
     const again = join(dir.path, "again");
     compileWithJavac(source, "Reused", again);
     expect(existsSync(join(again, "Reused.class"))).toBe(true);
@@ -2213,7 +2226,7 @@ test(
 // With a debug table, a variable's slot is free once its range is over, and
 // javac hands it to the next scope: `sUID` is declared after the first loop and
 // takes its array copy's slot, so the second loop's unnamed index lands where
-// the first loop's `boolean b` was. The table has no row for the index, and the
+// the first loop's `boolean bit` was. The table has no row for the index, and the
 // store is a boolean's slot no more - `b = 0; while (b < n)` was what came out
 // of reading it as one.
 const SLOT_FREED_SOURCE =
@@ -2257,6 +2270,140 @@ test(
     });
     expect(actual).toEqual(expected);
     expect(actual).toEqual("10101\n");
+  },
+);
+
+// An inner class's constructor takes the enclosing instance first, and source
+// passes it another way: implicitly, from a method of the enclosing class, or as
+// the qualifier of `outer.new In(...)` / `outer.super(...)`. javac null-checks
+// the qualifier (`dup; requireNonNull; pop`) and stores it before `super()`,
+// neither of which source writes. The callers are top-level classes so each
+// decompiled file recompiles on its own against the original classes.
+const INNERLY_SOURCE =
+  "public class Innerly {\n" +
+  "  int f;\n" +
+  "  Innerly(int f) { this.f = f; }\n" +
+  "  class In { int g; In(int a) { g = a + f; } In() { this(0); } int plus() { return g + f; }\n" +
+  "    class Deep { int h() { return g * 10; } } }\n" +
+  "  In own() { return new In(1); }\n" +
+  "}\n" +
+  "class InnerlySub extends Innerly.In {\n" +
+  "  InnerlySub(Innerly o) { o.super(5); }\n" +
+  "  int twice() { return g * 2; }\n" +
+  "}\n" +
+  "class InnerlyMk {\n" +
+  "  static Innerly.In make(Innerly o) { return o.new In(2); }\n" +
+  "  static Innerly.In.Deep deep(Innerly o) { return o.new In(3).new Deep(); }\n" +
+  "  static int sum(Innerly o) {\n" +
+  "    return make(o).g + deep(o).h() + new InnerlySub(o).twice() + o.own().plus(); }\n" +
+  "}\n";
+
+test(
+  "passes an inner class its enclosing instance the way source does",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-innerly-");
+    const orig = join(dir.path, "orig");
+    compileWithJavac(INNERLY_SOURCE, "Innerly", orig);
+    const again = join(dir.path, "again");
+    const sources = new Map<string, string>();
+    for (const name of ["Innerly", "Innerly$In", "Innerly$In$Deep", "InnerlySub", "InnerlyMk"]) {
+      const source = decompileToSource(readFileSync(join(orig, `${name}.class`)));
+      expect({ [name]: source.includes("/* cappu:") }).toEqual({ [name]: false });
+      sources.set(name, source);
+    }
+    expect(sources.get("Innerly")).toContain("return new Innerly.In(1);");
+    expect(sources.get("Innerly$In")).toContain("this.this$0 = arg0;");
+    // Its own constructors keep the parameter, so a `this(...)` passes it on.
+    expect(sources.get("Innerly$In")).toContain("this(arg0, 0);");
+    expect(sources.get("Innerly$In$Deep")).toContain("this.this$1 = arg0;");
+    expect(sources.get("Innerly$In")).not.toContain("requireNonNull");
+    expect(sources.get("InnerlySub")).toContain("arg0.super(5);");
+    expect(sources.get("InnerlyMk")).toContain("return arg0.new In(2);");
+    expect(sources.get("InnerlyMk")).toContain("return arg0.new In(3).new Deep();");
+    // The nested files carry their binary names, which the enclosing file cannot
+    // resolve on its own yet - and javac, seeing the original `Innerly` name
+    // them in its InnerClasses, compiles a `class Innerly$In` as the inner class
+    // itself, enclosing instance and all. The top-level callers recompile.
+    for (const name of ["InnerlySub", "InnerlyMk"]) {
+      compileWithJavac(sources.get(name)!, name, again, orig);
+      expect(existsSync(join(again, `${name}.class`))).toBe(true);
+    }
+    const driver =
+      "public class InnerlyDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      "    System.out.println(InnerlyMk.sum(new Innerly(7)));\n" +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "InnerlyDriver", dir.path, orig);
+    const expected = execFileSync("java", ["-cp", `${orig}:${dir.path}`, "InnerlyDriver"], {
+      encoding: "utf8",
+    });
+    const actual = execFileSync("java", ["-cp", `${again}:${orig}:${dir.path}`, "InnerlyDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    // 9 + 100 + 24 + 15
+    expect(actual).toEqual("148\n");
+  },
+);
+
+// A condition is rendered against the types its locals have when it is written,
+// and a local that is only inferred may turn out a boolean later. A condition
+// stored into a variable is rewritten then, like one branched on - `w = !w` -
+// but one written into anything else is text by then, and says so. A
+// materialized condition is no constant, so it takes the cast an int would
+// where a byte, short or char belongs.
+const FROZEN_SOURCE =
+  "public class Frozen {\n" +
+  "  static int count;\n" +
+  "  static void takeB(boolean b) {}\n" +
+  "  static void takeByte(byte b) { count += b; }\n" +
+  "  static boolean lv(int a) { boolean w = false; for (int i = 0; i < a; i++) { w = !w; } return w; }\n" +
+  "  static boolean m(int a, int b) { boolean ok = a > b; count += ok ? 1 : 0; return ok; }\n" +
+  "  static boolean arg(int a, int b) { boolean ok = a > b; takeB(ok == false); return ok; }\n" +
+  "  static byte by(boolean flag) { byte b = flag ? (byte) 1 : (byte) 0; return b; }\n" +
+  "  static short sh(boolean flag) { return flag ? (short) 1 : (short) 0; }\n" +
+  "  static char ch(boolean flag) { return flag ? (char) 1 : (char) 0; }\n" +
+  "  static void bya(boolean flag) { byte[] a = new byte[1]; a[0] = flag ? (byte) 1 : (byte) 0; takeByte(a[0]); }\n" +
+  "}\n";
+
+test(
+  "rewrites a stored condition on a retype, and says so for one already written",
+  { skip: HAS_JAVAC && HAS_JAVA ? false : "no JDK (javac/java)" },
+  () => {
+    using dir = TempDir.create("cappu-decompile-frozen-");
+    const classFile = compileWithJavac(FROZEN_SOURCE, "Frozen", dir.path);
+    const source = decompileToSource(readFileSync(classFile));
+    expect(source).toContain("boolean var1 = false;");
+    expect(source).toContain("var1 = !var1;");
+    expect(source).toContain("byte var1 = (byte) (arg0 ? 1 : 0);");
+    expect(source).toContain("return (short) (arg0 ? 1 : 0);");
+    expect(source).toContain("return (char) (arg0 ? 1 : 0);");
+    expect(source).toContain("var1[0] = (byte) (arg0 ? 1 : 0);");
+    // `m` and `arg`: the condition over `ok` went into an operand, an argument.
+    expect(source.match(/cappu: a retyped variable in a condition already written/g)?.length).toBe(
+      2,
+    );
+    expect(source.match(/cappu: /g)?.length).toBe(4);
+    const again = join(dir.path, "again");
+    compileWithJavac(source, "Frozen", again);
+    expect(existsSync(join(again, "Frozen.class"))).toBe(true);
+    const driver =
+      "public class FrozenDriver {\n" +
+      "  public static void main(String[] args) {\n" +
+      "    Frozen.bya(true);\n" +
+      '    System.out.println(Frozen.lv(3) + " " + Frozen.lv(4) + " " + Frozen.by(true) + Frozen.sh(false)\n' +
+      '      + (int) Frozen.ch(true) + " " + Frozen.count);\n' +
+      "  }\n" +
+      "}";
+    compileWithJavac(driver, "FrozenDriver", dir.path, dir.path);
+    const expected = execFileSync("java", ["-cp", dir.path, "FrozenDriver"], { encoding: "utf8" });
+    const actual = execFileSync("java", ["-cp", `${again}:${dir.path}`, "FrozenDriver"], {
+      encoding: "utf8",
+    });
+    expect(actual).toEqual(expected);
+    expect(actual).toEqual("true false 101 1\n");
   },
 );
 
@@ -2530,12 +2677,12 @@ test("chains to the superclass constructor", () => {
 
 // --- the JDK as a corpus -------------------------------------------------------------
 
-// A prologue statement that can throw is not movable across the `super()`:
-// `Object`'s constructor is where an object is registered for finalization, so
-// one that throws in front of it leaves an object that never was, and behind it
-// one that is. Newer javacs than this one null-check the enclosing instance
-// there, so the trigger has to come from the JDK on PATH.
-test("says so when a statement that can throw comes before `super()`", () => {
+// Newer javacs null-check the enclosing instance an inner class is handed, in
+// front of the `super()` - a `dup; requireNonNull; pop` that is no statement of
+// source's, and would otherwise be one that can throw before the chain call,
+// which is not movable across it. It is dropped; the trigger has to come from
+// the JDK on PATH.
+test("drops the null check javac writes before an inner class's `super()`", () => {
   const jmod = jmodOf("java.desktop");
   if (jmod === undefined) return; // a JRE or a stripped image: nothing to read
   const entries = readZipEntries(readFileSync(jmod).subarray(4)) ?? [];
@@ -2547,7 +2694,10 @@ test("says so when a statement that can throw comes before `super()`", () => {
   // Only this javac's layout is the point; one that does not null-check there
   // has nothing to say.
   if (!disassemble(bytes).includes("requireNonNull")) return;
-  expect(decompileToSource(bytes)).toContain("cappu: constructor call is not first");
+  const source = decompileToSource(bytes);
+  expect(source).not.toContain("/* cappu:");
+  expect(source).not.toContain("requireNonNull");
+  expect(source).toContain("this$0.marks.addElement(this.rec);");
 });
 
 /** A module of the JDK on PATH (or JAVA_HOME), when it ships the jmods/ a corpus needs. */

@@ -668,8 +668,12 @@ func isIntegerText(text string) bool {
 // erases boolean and char to int constants, so the literal has to be written back.
 func coerce(e expr, target string) string {
 	// A condition javac materialized as `1`/`0` reads as a boolean everywhere
-	// but where a number is what belongs.
+	// but where a number is what belongs - and a conditional is no constant, so
+	// the narrower targets need the cast an int would.
 	if e.AsInt != "" && target != "boolean" {
+		if target == "byte" || target == "short" || target == "char" {
+			return "(" + target + ") (" + e.AsInt + ")"
+		}
 		return e.AsInt
 	}
 	if e.Type != "int" || !isIntegerText(e.Text) {
@@ -1929,6 +1933,9 @@ type bodyDecompiler struct {
 	// or the body.
 	current *[]stmt
 	depth   int
+	// open is the blocks being captured right now, innermost last: not yet
+	// placed in statements.
+	open []*[]stmt
 	// names is every local name handed out so far, so a reused slot cannot
 	// shadow one.
 	names    map[string]bool
@@ -2048,7 +2055,13 @@ func (d *bodyDecompiler) retype(entry *local, target string) error {
 		(*declaration.List)[declaration.Index] = stmt{Text: target + " " + entry.Name + ";"}
 	}
 	for i, write := range entry.Writes {
-		assigned := coerce(write.Value, target)
+		// A condition stored is rendered against the types its locals have now,
+		// like one that was branched on: `w = !w` reads `w` on both sides.
+		value := write.Value
+		if value.Logic != nil {
+			value = d.renderCondition(value)
+		}
+		assigned := coerce(value, target)
 		text := entry.Name + " = " + assigned + ";"
 		if i == 0 && declaration != nil && declaration.Inline {
 			text = target + " " + entry.Name + " = " + assigned + ";"
@@ -2058,7 +2071,33 @@ func (d *bodyDecompiler) retype(entry *local, target string) error {
 	for _, emitted := range d.conditions {
 		(*emitted.List)[emitted.Index] = stmt{Text: emitted.Wrap(d.renderCondition(emitted.Condition).Text)}
 	}
+	// A condition written into anything else - an argument, an operand, a
+	// field - was rendered against the old type and is text now, `x == 0` or
+	// `x != 0 ? 1 : 0` for what has become a boolean: there is nothing left that
+	// can reach in and rewrite it.
+	if d.frozenCondition(entry.Name) {
+		return bail("a retyped variable in a condition already written")
+	}
 	return nil
+}
+
+// frozenCondition reports whether name is still compared with a number
+// somewhere the rewrite cannot reach.
+func (d *bodyDecompiler) frozenCondition(name string) bool {
+	pattern := regexp.MustCompile(`(^|[^\w$.])` + regexp.QuoteMeta(name) + ` [!=]= \d`)
+	texts := flattenStatements(d.statements)
+	for _, block := range d.open {
+		texts = append(texts, flattenStatements(*block)...)
+	}
+	for _, value := range d.stack {
+		texts = append(texts, value.Text, value.AsInt)
+	}
+	for _, text := range texts {
+		if pattern.MatchString(text) {
+			return true
+		}
+	}
+	return false
 }
 
 // emittedCondition is an `if (...)` line and the condition it was rendered from.
@@ -2138,9 +2177,11 @@ func (d *bodyDecompiler) capture(run func() error) ([]stmt, error) {
 	outer := d.current
 	captured := []stmt{}
 	d.current = &captured
+	d.open = append(d.open, &captured)
 	d.depth++
 	err := run()
 	d.current = outer
+	d.open = d.open[:len(d.open)-1]
 	d.depth--
 	return captured, err
 }
@@ -2255,8 +2296,9 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 		case isStore && existing.Origin != nil:
 			// The debug table scoped the variable in this slot, and scopes
 			// nothing here: its range is over, and this store begins a variable
-			// source never named - a for-each's array copy or index, say. It is
-			// not the old one.
+			// source never named - a for-each's array copy or index, say - or is
+			// a dead one past the variable's last use, which javac keeps no row
+			// for. Either way it is not the old one.
 		case !isStore || existing.Authoritative || existing.Type == fallbackType:
 			// Without a debug table a slot is only a variable as long as one
 			// definition explains every path to here: two arms that stored
@@ -2816,26 +2858,55 @@ func (d *bodyDecompiler) receiverCallee(mnemonic, owner, name string) (string, e
 // which no constructor decompiles at all.
 func (d *bodyDecompiler) construct(target MemberRef) error {
 	// An inner class's constructor takes the enclosing instance as its first
-	// argument, and source cannot pass it: `outer.new Inner(...)` is the only
-	// way to write one. The InnerClasses attribute of *this* file says which of
-	// the nested classes it names are `static`; without an entry, the shape of
-	// the descriptor is all there is to go on.
+	// argument, which source passes another way: implicitly, from a method of
+	// the enclosing class, or as the `outer.new Inner(...)` qualifier. The
+	// InnerClasses attribute of *this* file says which of the nested classes it
+	// names are `static`; without an entry, the shape of the descriptor is all
+	// there is to go on. An anonymous or local class is named for the method it
+	// lives in, which is a declaration this phase does not restore.
+	enclosing := ""
 	if cut := strings.LastIndexByte(target.Owner, '$'); cut > 0 {
-		inner := false
+		enclosing = target.Owner[:cut]
+	}
+	params := parameterSlots(target.Descriptor, true)
+	var outer *expr
+	if enclosing != "" {
+		// A static nested class may take the outer type first too, which is why
+		// the flag decides where there is one; a class the emitter wrote may be
+		// inner without taking the instance at all, and then there is none to
+		// pass on.
+		takesOuter := len(params) > 0 && params[0].Type == strings.ReplaceAll(enclosing, "/", ".")
+		inner := takesOuter
 		if access, ok := d.innerFlags[target.Owner]; ok {
 			inner = access&accStatic == 0
-		} else {
-			enclosing := strings.ReplaceAll(target.Owner[:cut], "/", ".")
-			params := parameterSlots(target.Descriptor, true)
-			inner = len(params) > 0 && params[0].Type == enclosing
 		}
 		if inner {
-			return bail("an inner class constructor")
+			tail := target.Owner[len(enclosing)+1:]
+			if tail != "" && tail[0] >= '0' && tail[0] <= '9' {
+				if strings.Trim(tail, "0123456789") == "" {
+					return bail("an anonymous class")
+				}
+				return bail("a local class")
+			}
+			if takesOuter {
+				outer = &d.stack[len(d.stack)-len(params)]
+			}
 		}
 	}
 	args, err := d.callArguments(target.Descriptor)
 	if err != nil {
 		return err
+	}
+	// The enclosing instance is implicit where source is a method of the
+	// enclosing class and passed `this`; anywhere else it qualifies the call.
+	// A `this(...)` keeps it: this file declares the class on its own, with the
+	// parameter its constructors take, until the nesting is restored.
+	qualifier := ""
+	if outer != nil && target.Owner != d.classFile.ThisClass {
+		args = args[1:]
+		if outer.Text != "this" || d.classFile.ThisClass != enclosing {
+			qualifier = at(*outer, precPrimary)
+		}
 	}
 	receiver, err := d.pop()
 	if err != nil {
@@ -2879,12 +2950,19 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 		keyword := "this"
 		if isSuper {
 			keyword = "super"
+			if qualifier != "" {
+				keyword = qualifier + ".super"
+			}
 		}
 		d.emit(keyword + "(" + strings.Join(args, ", ") + ");")
 		return nil
 	}
+	text := "new " + receiver.Type + "(" + strings.Join(args, ", ") + ")"
+	if qualifier != "" {
+		text = qualifier + ".new " + target.Owner[len(enclosing)+1:] + "(" + strings.Join(args, ", ") + ")"
+	}
 	value := expr{
-		Text:    "new " + receiver.Type + "(" + strings.Join(args, ", ") + ")",
+		Text:    text,
 		Prec:    precPrimary,
 		Type:    receiver.Type,
 		Effects: true,
@@ -4536,7 +4614,10 @@ func (d *bodyDecompiler) branchExpr(instruction Instruction) (expr, error) {
 				return compareExpr(l, op, r), nil
 			}
 		}
-		if op != "==" && op != "!=" {
+		// Not a comparison of two booleans, then: both sides are numbers -
+		// unless one side is the `0`/`1` a boolean may still turn out to be
+		// compared with.
+		if (op != "==" && op != "!=") || (!erasedBoolean(left) && !erasedBoolean(right)) {
 			if err := d.usedAsNumber(left); err != nil {
 				return expr{}, err
 			}
@@ -4561,7 +4642,13 @@ func (d *bodyDecompiler) branchExpr(instruction Instruction) (expr, error) {
 		}
 		return negate(value), nil
 	}
-	return compareExpr(value, op, intLiteral(0)), nil
+	// `ifeq` is how a boolean is tested too; an ordering is a number's alone.
+	if op != "==" && op != "!=" {
+		if err := d.usedAsNumber(value); err != nil {
+			return expr{}, err
+		}
+	}
+	return compareExpr(numeric(value), op, intLiteral(0)), nil
 }
 
 // tryTernary writes the two arms of a branch as `condition ? a : b`, when both
@@ -4715,7 +4802,8 @@ func (d *bodyDecompiler) runInstructions(instructions []Instruction, endPc, bloc
 	return err
 }
 
-func (d *bodyDecompiler) runSteps(instructions []Instruction, endPc int) error {
+func (d *bodyDecompiler) runSteps(steps []Instruction, endPc int) error {
+	instructions := withoutNullChecks(steps, d.classFile.Pool)
 	for i, instruction := range instructions {
 		// A store's variable comes into scope after the store, so the debug table
 		// is searched at the next instruction's pc, not the store's own.
@@ -4735,6 +4823,33 @@ func (d *bodyDecompiler) runSteps(instructions []Instruction, endPc int) error {
 		}
 	}
 	return nil
+}
+
+// withoutNullChecks drops the null check javac writes for a qualifying
+// instance - `outer.new Inner()`, `outer.super()`, the enclosing instance an
+// inner class stores, `x::m` - as `dup; requireNonNull; pop` (`getClass` before
+// Java 9). Source has no such statement: the construct it belongs to brings it
+// back when compiled.
+func withoutNullChecks(instructions []Instruction, pool []*Constant) []Instruction {
+	out := make([]Instruction, 0, len(instructions))
+	for i := 0; i < len(instructions); i++ {
+		if instructions[i].Mnemonic == "dup" && i+2 < len(instructions) && instructions[i+2].Mnemonic == "pop" {
+			call := instructions[i+1]
+			if call.Mnemonic == "invokestatic" || call.Mnemonic == "invokevirtual" {
+				target, ok := PoolMemberRef(pool, uint16(call.Arg))
+				check := ok && ((target.Owner == "java/util/Objects" && target.Name == "requireNonNull" &&
+					target.Descriptor == "(Ljava/lang/Object;)Ljava/lang/Object;") ||
+					(target.Owner == "java/lang/Object" && target.Name == "getClass" &&
+						target.Descriptor == "()Ljava/lang/Class;"))
+				if check {
+					i += 2
+					continue
+				}
+			}
+		}
+		out = append(out, instructions[i])
+	}
+	return out
 }
 
 func isOneOf(base string, prefixes string, suffix string) bool {
@@ -5642,6 +5757,14 @@ func chainCallStub(instructions []Instruction, classFile *ClassFile) string {
 			continue
 		}
 		params := parameterSlots(target.Descriptor, true)
+		// An inner class's constructor takes its enclosing instance first, which
+		// a chain call passes on implicitly.
+		if cut := strings.LastIndexByte(target.Owner, '$'); cut > 0 && len(params) > 0 &&
+			sourceTypeText(params[0].Type, selfOf(classFile)) == typeName(target.Owner[:cut], selfOf(classFile)) {
+			if access, ok := InnerClassFlags(classFile)[target.Owner]; !ok || access&accStatic == 0 {
+				params = params[1:]
+			}
+		}
 		if len(params) == 0 {
 			return "" // the implicit super(), regenerated
 		}

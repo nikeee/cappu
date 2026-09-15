@@ -624,8 +624,11 @@ function constantExpr(pool: readonly (Constant | undefined)[], index: number, se
  */
 function coerce(expr: Expr, target: string): string {
   // A condition javac materialized as `1`/`0` reads as a boolean everywhere but
-  // where a number is what belongs.
-  if (expr.asInt !== undefined && target !== "boolean") return expr.asInt;
+  // where a number is what belongs - and a conditional is no constant, so the
+  // narrower targets need the cast an int would.
+  if (expr.asInt !== undefined && target !== "boolean") {
+    return DESCRIPTOR_ERASED.includes(target) ? `(${target}) (${expr.asInt})` : expr.asInt;
+  }
   if (expr.type !== "int" || !/^-?\d+$/.test(expr.text)) return expr.text;
   const value = Number(expr.text);
   if (target === "boolean" && (value === 0 || value === 1)) return value === 1 ? "true" : "false";
@@ -667,6 +670,44 @@ function readLocalVariables(code: Code, pool: readonly (Constant | undefined)[])
       slot: view.getUint16(at + 8),
       type: descriptor === "" ? "" : descriptorType(descriptor, 0).text,
     });
+  }
+  return out;
+}
+
+/**
+ * Whether `instruction` (a `dup`) opens the null check javac writes for a
+ * qualifying instance - `outer.new Inner()`, `outer.super()`, the enclosing
+ * instance an inner class stores, `x::m` - as `dup; requireNonNull; pop`
+ * (`getClass` before Java 9). Source has no such statement: the construct it
+ * belongs to brings it back when compiled.
+ */
+function withoutNullChecks(
+  instructions: readonly Instruction[],
+  pool: readonly (Constant | undefined)[],
+): Instruction[] {
+  const out: Instruction[] = [];
+  for (let i = 0; i < instructions.length; i++) {
+    const call = instructions[i + 1];
+    if (
+      instructions[i]!.mnemonic === "dup" &&
+      call !== undefined &&
+      instructions[i + 2]?.mnemonic === "pop" &&
+      (call.mnemonic === "invokestatic" || call.mnemonic === "invokevirtual")
+    ) {
+      const target = memberRef(pool, call.arg);
+      const check =
+        (target?.owner === "java/util/Objects" &&
+          target.name === "requireNonNull" &&
+          target.descriptor === "(Ljava/lang/Object;)Ljava/lang/Object;") ||
+        (target?.owner === "java/lang/Object" &&
+          target.name === "getClass" &&
+          target.descriptor === "()Ljava/lang/Class;");
+      if (check) {
+        i += 2;
+        continue;
+      }
+    }
+    out.push(instructions[i]!);
   }
   return out;
 }
@@ -1635,6 +1676,8 @@ class BodyDecompiler {
   /** Where statements are being appended right now: a branch's arm, or the body. */
   private current: Stmt[] = this.statements;
   private depth = 0;
+  /** The blocks being captured right now, innermost last: not yet placed in `statements`. */
+  private readonly open: Stmt[][] = [];
   /** Set by a `dup` into a store: the store is the value, not a statement. */
   private assignAsValue = false;
   private blocks = new Map<number, Block>();
@@ -1773,7 +1816,11 @@ class BodyDecompiler {
       declaration.list[declaration.index] = `${target} ${local.name};`;
     }
     for (const [index, write] of local.writes.entries()) {
-      const assigned = coerce(write.value, target);
+      // A condition stored is rendered against the types its locals have now,
+      // like one that was branched on: `w = !w` reads `w` on both sides.
+      const value =
+        write.value.logic === undefined ? write.value : this.renderCondition(write.value);
+      const assigned = coerce(value, target);
       write.list[write.index] =
         index === 0 && declaration?.inline === true
           ? `${target} ${local.name} = ${assigned};`
@@ -1782,6 +1829,25 @@ class BodyDecompiler {
     for (const emitted of this.conditions) {
       emitted.list[emitted.index] = emitted.wrap(this.renderCondition(emitted.condition).text);
     }
+    // A condition written into anything else - an argument, an operand, a
+    // field - was rendered against the old type and is text now, `x == 0` or
+    // `x != 0 ? 1 : 0` for what has become a boolean: there is nothing left
+    // that can reach in and rewrite it.
+    if (this.frozenCondition(local.name)) {
+      throw new NotDecompilable("a retyped variable in a condition already written");
+    }
+  }
+
+  /** Whether `name` is still compared with a number somewhere the rewrite cannot reach. */
+  private frozenCondition(name: string): boolean {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(^|[^\\w$.])${escaped} [!=]= \\d`);
+    const texts = [
+      ...flattenStatements(this.statements),
+      ...this.open.flatMap(block => flattenStatements(block)),
+      ...this.stack.flatMap(value => [value.text, value.asInt ?? ""]),
+    ];
+    return texts.some(text => pattern.test(text));
   }
 
   /** A condition as a line, kept re-renderable for as long as a local can retype. */
@@ -1827,11 +1893,13 @@ class BodyDecompiler {
     const outer = this.current;
     const captured: Stmt[] = [];
     this.current = captured;
+    this.open.push(captured);
     this.depth++;
     try {
       run();
     } finally {
       this.current = outer;
+      this.open.pop();
       this.depth--;
     }
     return captured;
@@ -1930,7 +1998,9 @@ class BodyDecompiler {
       } else if (isStore && existing.origin !== undefined) {
         // The debug table scoped the variable in this slot, and scopes nothing
         // here: its range is over, and this store begins a variable source never
-        // named - a for-each's array copy or index, say. It is not the old one.
+        // named - a for-each's array copy or index, say - or is a dead one past
+        // the variable's last use, which javac keeps no row for. Either way it
+        // is not the old one.
       } else if (!isStore || existing.authoritative || existing.type === fallbackType) {
         // Without a debug table a slot is only a variable as long as one
         // definition explains every path to here: two arms that stored
@@ -2344,21 +2414,43 @@ class BodyDecompiler {
    */
   private construct(target: MemberRef): void {
     // An inner class's constructor takes the enclosing instance as its first
-    // argument, and source cannot pass it: `outer.new Inner(...)` is the only
-    // way to write one. The `InnerClasses` attribute of *this* file says which
-    // of the nested classes it names are `static`; without an entry, the shape
-    // of the descriptor is all there is to go on.
+    // argument, which source passes another way: implicitly, from a method of
+    // the enclosing class, or as the `outer.new Inner(...)` qualifier. The
+    // `InnerClasses` attribute of *this* file says which of the nested classes
+    // it names are `static`; without an entry, the shape of the descriptor is
+    // all there is to go on. An anonymous or local class is named for the
+    // method it lives in, which is a declaration this phase does not restore.
     const enclosing = target.owner.slice(0, Math.max(0, target.owner.lastIndexOf("$")));
+    const parameters = parameterSlots(target.descriptor, true);
+    let outer: Expr | undefined;
     if (enclosing !== "") {
+      // A static nested class may take the outer type first too, which is why
+      // the flag decides where there is one; a class the emitter wrote may be
+      // inner without taking the instance at all, and then there is none to
+      // pass on.
       const access = this.innerFlags.get(target.owner);
-      const first = parameterSlots(target.descriptor, true)[0]?.type;
-      const inner =
-        access === undefined
-          ? first === enclosing.replaceAll("/", ".")
-          : (access & ACC_STATIC) === 0;
-      if (inner) throw new NotDecompilable("an inner class constructor");
+      const takesOuter = parameters[0]?.type === enclosing.replaceAll("/", ".");
+      const inner = access === undefined ? takesOuter : (access & ACC_STATIC) === 0;
+      if (inner) {
+        const tail = target.owner.slice(enclosing.length + 1);
+        if (/^\d/.test(tail)) {
+          throw new NotDecompilable(/^\d+$/.test(tail) ? "an anonymous class" : "a local class");
+        }
+        if (takesOuter) outer = this.stack[this.stack.length - parameters.length];
+      }
     }
-    const args = this.arguments(target.descriptor);
+    let args = this.arguments(target.descriptor);
+    // The enclosing instance is implicit where source is a method of the
+    // enclosing class and passed `this`; anywhere else it qualifies the call.
+    // A `this(...)` keeps it: this file declares the class on its own, with the
+    // parameter its constructors take, until the nesting is restored.
+    let qualifier: string | undefined;
+    if (outer !== undefined && target.owner !== this.classFile.thisClass) {
+      args = args.slice(1);
+      if (outer.text !== "this" || this.classFile.thisClass !== enclosing) {
+        qualifier = at(outer, PREC_PRIMARY);
+      }
+    }
     const receiver = this.pop();
     if (receiver.pending === undefined) {
       const isSuper = target.owner === (this.classFile.superClass ?? "java/lang/Object");
@@ -2383,12 +2475,18 @@ class BodyDecompiler {
       // javac writes the implicit `super()` into every constructor; source does
       // not, and re-emitting puts it back. An enum constructor's `super(name,
       // ordinal)` is generated too - and writing it is a compile error.
-      if (isSuper && (args.length === 0 || isEnumDeclaration(this.classFile))) return;
-      this.current.push(`${isSuper ? "super" : "this"}(${args.join(", ")});`);
+      if (!isSuper || (args.length > 0 && !isEnumDeclaration(this.classFile))) {
+        const call = isSuper ? "super" : "this";
+        const qualified = isSuper && qualifier !== undefined ? `${qualifier}.${call}` : call;
+        this.current.push(`${qualified}(${args.join(", ")});`);
+      }
       return;
     }
     const value: Expr = {
-      text: `new ${receiver.type}(${args.join(", ")})`,
+      text:
+        qualifier === undefined
+          ? `new ${receiver.type}(${args.join(", ")})`
+          : `${qualifier}.new ${target.owner.slice(enclosing.length + 1)}(${args.join(", ")})`,
       prec: PREC_PRIMARY,
       type: receiver.type,
       effects: true,
@@ -3530,7 +3628,9 @@ class BodyDecompiler {
       }
       const booleans = op === "==" || op === "!=" ? booleanOperands(left, right) : undefined;
       if (booleans !== undefined) return compare(booleans[0], op, booleans[1]);
-      if (op !== "==" && op !== "!=") {
+      // Not a comparison of two booleans, then: both sides are numbers - unless
+      // one side is the `0`/`1` a boolean may still turn out to be compared with.
+      if (!(op === "==" || op === "!=") || !(erasedBoolean(left) || erasedBoolean(right))) {
         this.usedAsNumber(left);
         this.usedAsNumber(right);
       }
@@ -3545,6 +3645,8 @@ class BodyDecompiler {
     if (value.type === "boolean" && (op === "==" || op === "!=")) {
       return op === "!=" ? value : negate(value);
     }
+    // `ifeq` is how a boolean is tested too; an ordering is a number's alone.
+    if (op !== "==" && op !== "!=") this.usedAsNumber(value);
     return compare(numeric(value), op, intLiteral(0));
   }
 
@@ -3671,7 +3773,8 @@ class BodyDecompiler {
     }
   }
 
-  private runSteps(instructions: readonly Instruction[], endPc: number): void {
+  private runSteps(steps: readonly Instruction[], endPc: number): void {
+    const instructions = withoutNullChecks(steps, this.classFile.pool);
     for (const [index, instruction] of instructions.entries()) {
       // A store's variable comes into scope after the store, so the debug table
       // is searched at the next instruction's pc, not the store's own.
@@ -4233,9 +4336,16 @@ function chainCallStub(
     // `new Foo()` in an argument is an invokespecial too; the chain call is the
     // one on this class or its superclass.
     if (!isSuper && target.owner !== classFile.thisClass) continue;
-    const params = parameterSlots(target.descriptor, true).map(p =>
+    let params = parameterSlots(target.descriptor, true).map(p =>
       sourceTypeText(p.type, selfOf(classFile)),
     );
+    // An inner class's constructor takes its enclosing instance first, which a
+    // chain call passes on implicitly.
+    const enclosing = target.owner.slice(0, Math.max(0, target.owner.lastIndexOf("$")));
+    if (enclosing !== "" && params[0] === typeName(enclosing, selfOf(classFile))) {
+      const access = innerClassFlags(classFile).get(target.owner);
+      if (access === undefined || (access & ACC_STATIC) === 0) params = params.slice(1);
+    }
     if (params.length === 0) return undefined; // the implicit super(), regenerated
     return `${isSuper ? "super" : "this"}(${params.map(defaultValue).join(", ")});`;
   }
