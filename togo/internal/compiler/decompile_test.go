@@ -1257,11 +1257,18 @@ const innerlySource = `public class Innerly {
   int f;
   Innerly(int f) { this.f = f; }
   class In { int g; In(int a) { g = a + f; } In() { this(0); } int plus() { return g + f; }
+    In(String s) { this(new Object() {}.hashCode() & 0); }
     class Deep { int h() { return g * 10; } } }
   In own() { return new In(1); }
+  static Runnable ref(Object x) { return x::notify; }
+  static int rec() { record Q(int x) {} return new Q(3).x(); }
+  static class SN { int v = 5; SN(Innerly o) { v += o.f; } }
+  static SN sn(Innerly o) { return new SN(o); }
 }
 class InnerlySub extends Innerly.In {
   InnerlySub(Innerly o) { o.super(5); }
+  InnerlySub(Innerly o, boolean c) { o.super(); if (c) { int t = g; System.out.println(t); } }
+  InnerlySub(Innerly o, String s) { o.super(new Object() {}.hashCode() & 0); }
   int twice() { return g * 2; }
 }
 class InnerlyMk {
@@ -1285,28 +1292,40 @@ func TestDecompilePassesAnInnerClassItsEnclosingInstance(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decompile %s: %v", name, err)
 		}
-		if strings.Contains(source, "/* cappu:") {
-			t.Errorf("%s bails:\n%s", name, source)
-		}
 		sources[name] = source
 	}
-	for name, want := range map[string]string{
-		"Innerly":    "return new Innerly.In(1);",
-		"Innerly$In": "this.this$0 = arg0;",
-		// Its own constructors keep the parameter, so a `this(...)` passes it on.
-		"Innerly$In$this": "this(arg0, 0);",
-		"Innerly$In$Deep": "this.this$1 = arg0;",
-		"InnerlySub":      "arg0.super(5);",
-		"InnerlyMk":       "return arg0.new In(3).new Deep();",
+	for _, want := range []struct{ name, text string }{
+		{"Innerly", "return new Innerly.In(1);"},
+		// A static nested class taking the outer type first: the InnerClasses
+		// flag says so, and the argument stays one.
+		{"Innerly", "return new Innerly.SN(arg0);"},
+		// A bound method reference is written as a lambda, so the null check
+		// javac put in front of it stays a statement.
+		{"Innerly", "java.util.Objects.requireNonNull(arg0);"},
+		// A local record is a local class: named for its method, not writable.
+		{"Innerly", "cappu: a local class"},
+		{"Innerly$In", "this.this$0 = arg0;"},
+		// Its own constructors keep the parameter, so a `this(...)` passes it
+		// on - the stub of one that gave up too.
+		{"Innerly$In", "this(arg0, 0);"},
+		{"Innerly$In", "this((Innerly) null, (int) 0);"},
+		{"Innerly$In$Deep", "this.this$1 = arg0;"},
+		{"InnerlySub", "arg0.super(5);"},
+		// A qualified `super()` with no arguments is not the implicit one, and
+		// the hoisted declaration follows it.
+		{"InnerlySub", "arg0.super();\nint var3;"},
+		// A chain call never reached is stubbed with its qualifier.
+		{"InnerlySub", "((Innerly) null).super((int) 0);"},
+		{"InnerlyMk", "return arg0.new In(2);"},
+		{"InnerlyMk", "return arg0.new In(3).new Deep();"},
 	} {
-		name = strings.TrimSuffix(name, "$this")
-		if !strings.Contains(sources[name], want) {
-			t.Errorf("%s: expected %q:\n%s", name, want, sources[name])
+		if !strings.Contains(sources[want.name], want.text) {
+			t.Errorf("%s: expected %q:\n%s", want.name, want.text, sources[want.name])
 		}
 	}
-	if !strings.Contains(sources["InnerlyMk"], "return arg0.new In(2);") ||
-		strings.Contains(sources["Innerly$In"], "requireNonNull") {
-		t.Errorf("unexpected:\n%s\n%s", sources["InnerlyMk"], sources["Innerly$In"])
+	if strings.Contains(sources["Innerly$In"], "requireNonNull") || strings.Contains(sources["InnerlyMk"], "/* cappu:") ||
+		strings.Contains(sources["Innerly$In$Deep"], "/* cappu:") {
+		t.Errorf("unexpected bail or null check:\n%s\n%s", sources["InnerlyMk"], sources["Innerly$In"])
 	}
 	// The nested files carry their binary names, which the enclosing file
 	// cannot resolve on its own yet - and javac, seeing the original `Innerly`
@@ -1321,15 +1340,16 @@ func TestDecompilePassesAnInnerClassItsEnclosingInstance(t *testing.T) {
 	}
 	driver := `public class InnerlyDriver {
   public static void main(String[] args) {
-    System.out.println(InnerlyMk.sum(new Innerly(7)));
+    System.out.println(InnerlyMk.sum(new Innerly(7)) + " " + new InnerlySub(new Innerly(1), true).twice());
+    try { Innerly.ref(null); System.out.println("no NPE"); } catch (NullPointerException e) { System.out.println("NPE"); }
   }
 }`
 	compileWithJavacOn(t, dir, "InnerlyDriver", driver, orig)
 	sep := string(os.PathListSeparator)
 	expected := runJava(t, orig+sep+dir, "InnerlyDriver")
 	actual := runJava(t, again+sep+orig+sep+dir, "InnerlyDriver")
-	// 9 + 100 + 24 + 15
-	if actual != expected || actual != "148\n" {
+	// 9 + 100 + 24 + 15; the subclass prints its g first
+	if actual != expected || actual != "1\n148 2\nNPE\n" {
 		t.Errorf("the decompiled classes run differently: %q vs %q", actual, expected)
 	}
 }
@@ -1517,7 +1537,7 @@ func TestDecompileDeclaresAHoistedLocalAfterTheConstructorCall(t *testing.T) {
 	compileWithJavacOn(t, filepath.Join(dir, "again"), "Hoisty", source, dir)
 	// A variable the call's own arguments assign is the exception: only Java 25
 	// can write that, and it has to be written the way that source was.
-	got := withHoisted([]string{"int x;", "int y;"}, []string{"super(x = a);", "y = 1;"})
+	got := withHoisted([]string{"int x;", "int y;"}, []string{"super(x = a);", "y = 1;"}, "super(x = a);")
 	want := []string{"int x;", "super(x = a);", "int y;", "y = 1;"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("withHoisted = %v, want %v", got, want)

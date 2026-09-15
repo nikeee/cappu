@@ -600,3 +600,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-09-15 18:07 — commit ohne signatur
 - 2026-09-15 20:25 — continu
 - 2026-09-15 20:25 — fix rebase. i stashed
+- 2026-09-15 20:33 — only continue building the go version for now. we want to remove the ts version soon. port everything that is not present in the go version over

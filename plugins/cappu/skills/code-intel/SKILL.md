@@ -99,7 +99,7 @@ bodies.
 ## Gotchas checklist
 
 - [ ] MCP answers, you edit: nothing from `rename_symbol`, `organize_imports`, `code_actions` or `format` is written for you.
-- [ ] `code_actions` positions are 1-based lines and columns; `file` arguments are absolute paths (or relative to the server's working directory).
+- [ ] `code_actions` positions are 1-based lines and columns; `file` arguments are absolute paths (`format` and `decompile` also take one relative to the server's working directory).
 - [ ] Project tools missing? The server started outside a `cappu.json` project; restart it in the project root.
 - [ ] `diagnostics` is cappu's checker, not javac; confirm with `cappu compile`.
 - [ ] Prefer `Type#member` refs; simple names fail when ambiguous.
