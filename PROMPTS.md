@@ -593,3 +593,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-09-03 22:21 — continue
 - 2026-09-03 23:22 — (autonomous loop) continue building the remaining features
 - 2026-09-11 23:23 — try again
+- 2026-09-15 17:42 — cappu install kommt manchmal an ein rate-limit von der package-registry. gibts da einen mirror, den man stattdessen benutzen kann?
+- 2026-09-15 17:54 — benutze den mirror, falls noch nicht getan. commit.

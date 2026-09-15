@@ -107,6 +107,7 @@ test("unknown keys are ignored, comment-json metadata does not leak", () => {
     "testOptions",
   ]);
   expect(config.packageSources).toEqual([
+    "https://maven-central-eu.storage-download.googleapis.com/maven2",
     "https://repo.maven.apache.org/maven2",
     "https://maven.google.com",
     "https://plugins.gradle.org/m2",

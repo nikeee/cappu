@@ -168,12 +168,26 @@ const DapOptionsSchema = z.object({
 });
 
 export const MAVEN_CENTRAL = "https://repo.maven.apache.org/maven2";
+/**
+ * Google's read-only mirror of Central (same maven2 layout, full copy). Central
+ * throttles per IP with 429s after a burst of POM fetches (nikeee/cappu#22, #31);
+ * the mirror does not, so it is the first default source. Central stays second:
+ * it has the artifacts the mirror has not synced yet, and it alone carries the
+ * search index (see configuredSources in src/install.ts).
+ */
+export const MAVEN_CENTRAL_MIRROR =
+  "https://maven-central-eu.storage-download.googleapis.com/maven2";
 /** Central's index service; a maven2 repository itself has no search endpoint. */
 export const MAVEN_CENTRAL_SEARCH = "https://search.maven.org/solrsearch/select";
 export const GOOGLE_MAVEN = "https://maven.google.com";
 export const GRADLE_PLUGIN_PORTAL = "https://plugins.gradle.org/m2";
-/** The repositories Maven and Gradle resolve from out of the box. */
-export const DEFAULT_PACKAGE_SOURCES = [MAVEN_CENTRAL, GOOGLE_MAVEN, GRADLE_PLUGIN_PORTAL];
+/** The default sources: the Central mirror first, then what Maven and Gradle resolve from. */
+export const DEFAULT_PACKAGE_SOURCES = [
+  MAVEN_CENTRAL_MIRROR,
+  MAVEN_CENTRAL,
+  GOOGLE_MAVEN,
+  GRADLE_PLUGIN_PORTAL,
+];
 /** Where `cappu publish` uploads when nothing else is configured (npm-style). */
 export const DEFAULT_PUBLISH_REGISTRY = MAVEN_CENTRAL;
 
@@ -366,8 +380,11 @@ export const CONFIG_TEMPLATE = `
   //   "coverage": false,                   // attach JaCoCo, emit jacoco.exec
   // },
 
-  // Package repositories dependencies are resolved from, in order. Default if unset:
+  // Package repositories dependencies are resolved from, in order. The first
+  // default is Google's mirror of Maven Central, which does not rate-limit.
+  // Default if unset:
   // "packageSources": [
+  //   "https://maven-central-eu.storage-download.googleapis.com/maven2",
   //   "https://repo.maven.apache.org/maven2",
   //   "https://maven.google.com",
   //   "https://plugins.gradle.org/m2",

@@ -48,8 +48,9 @@ func TestLoadAppliesDefaults(t *testing.T) {
 		cfg.CompilerOptions.SourcePaths[1] != DefaultGeneratedSourcePath {
 		t.Errorf("sourcePaths default = %v", cfg.CompilerOptions.SourcePaths)
 	}
-	if len(cfg.PackageSources) != len(DefaultPackageSources) {
-		t.Errorf("packageSources default = %v", cfg.PackageSources)
+	wantSources := []string{MavenCentralMirror, MavenCentral, GoogleMaven, GradlePluginPortal}
+	if !slices.Equal(cfg.PackageSources, wantSources) {
+		t.Errorf("packageSources default = %v, want %v", cfg.PackageSources, wantSources)
 	}
 	if cfg.Dependencies.API == nil || cfg.Dependencies.Implementation == nil {
 		t.Error("dependency maps should default to non-nil empty maps")

@@ -29,7 +29,14 @@ const (
 	// output is always this.
 	DefaultOutputDir = "dist"
 
-	MavenCentral       = "https://repo.maven.apache.org/maven2"
+	MavenCentral = "https://repo.maven.apache.org/maven2"
+	// MavenCentralMirror is Google's read-only mirror of Central (same maven2
+	// layout, full copy). Central throttles per IP with 429s after a burst of
+	// POM fetches (nikeee/cappu#22, #31); the mirror does not, so it is the
+	// first default source. Central stays second: it has the artifacts the
+	// mirror has not synced yet, and it alone carries the search index (see
+	// sources.Configured).
+	MavenCentralMirror = "https://maven-central-eu.storage-download.googleapis.com/maven2"
 	MavenCentralSearch = "https://search.maven.org/solrsearch/select"
 	GoogleMaven        = "https://maven.google.com"
 	GradlePluginPortal = "https://plugins.gradle.org/m2"
@@ -52,9 +59,9 @@ var ExternalClassPaths = []string{
 // the hand-written tree plus the conventional generated-sources root.
 var DefaultSourcePaths = []string{DefaultSourcePath, DefaultGeneratedSourcePath}
 
-// DefaultPackageSources are the repositories Maven and Gradle resolve from out
-// of the box.
-var DefaultPackageSources = []string{MavenCentral, GoogleMaven, GradlePluginPortal}
+// DefaultPackageSources are the default sources: the Central mirror first, then
+// what Maven and Gradle resolve from.
+var DefaultPackageSources = []string{MavenCentralMirror, MavenCentral, GoogleMaven, GradlePluginPortal}
 
 // Configurations are the dependency configurations, in resolution order. The
 // keys of the dependencies section mirror these names.
