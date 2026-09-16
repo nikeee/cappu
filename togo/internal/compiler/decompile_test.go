@@ -1494,6 +1494,19 @@ const nullishSource = `public class Nullish {
   static String b(boolean c) { String s = "y"; if (c) { s = null; } return s == null ? "-" : s; }
   static int[] arr(boolean c) { int[] a = null; if (c) { a = new int[2]; } return a == null ? new int[0] : a; }
   static Object caught(boolean c) { Object o = null; try { o = c ? "q" : Integer.valueOf(1); } catch (RuntimeException e) { return o; } return o; }
+  static String f(Object o) { return "O"; }
+  static String f(String s) { return "S"; }
+  static void use(Object o) {}
+  // Read as an Object before the first real value: the reads are text, the
+  // variable stays an Object (and the branch-merged read bails as it did).
+  static String readFirst(boolean c) { Object o = null; String r = f(o); if (c) o = "x"; return r + f(o); }
+  static boolean compared(boolean c, Integer i) { Object o = null; boolean r = o == i; if (c) o = "s"; return r; }
+  // A dead variable's slot, reused: the new one is its own, and its type is
+  // what its first use asks for.
+  static String reused() { { String s = "a"; f(s); } { Object o = null; return f(o); } }
+  static Integer afterLoop(java.util.List<String> l) { for (String s : l) { use(s); } Integer r = null; return r; }
+  static Object nested(boolean c, boolean d, Integer i, String s, Integer j) { Object o = c ? (d ? i : s) : j; return o; }
+  static Object bound(boolean c, Object p) { String s = "a"; use(s); Object o = c ? p : "s"; return o; }
 }
 `
 
@@ -1511,25 +1524,33 @@ func TestDecompileKeepsANullStoreInItsVariable(t *testing.T) {
 		"java.lang.String var1 = null;", "var1 = \"x\";",
 		"java.lang.String var1 = \"y\";", "var1 = null;",
 		"int[] var1 = null;", "var1 = new int[2];",
+		"java.lang.Object var1 = null;", "var1 = arg0 ? \"q\" : java.lang.Integer.valueOf(1);",
+		"java.lang.Object var2 = null;", "boolean var3 = var2 == arg1;",
+		"java.lang.Object var0_2 = null;", "return f(var0_2);",
+		"java.lang.Integer var1_2 = null;", "return var1_2;",
+		"cappu: a conditional whose arms differ in type",
+		"java.lang.Object var3 = arg0 ? arg1 : \"s\";",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
 		}
 	}
-	if strings.Contains(source, "var1_2") || strings.Contains(source, "/* cappu:") {
-		t.Errorf("expected one variable per method and no bail:\n%s", source)
+	// readFirst: the merged read after the branch; nested: the store.
+	if strings.Count(source, "/* cappu:") != 2 || !strings.Contains(source, "cappu: local 1 is written in more than one branch") {
+		t.Errorf("expected two bails:\n%s", source)
 	}
 	again := filepath.Join(dir, "again")
 	compileWithJavac(t, again, "Nullish", source)
 	driver := `public class NullishDriver {
   public static void main(String[] x) {
-    System.out.println(Nullish.a(true) + Nullish.a(false) + Nullish.b(true) + Nullish.b(false) + Nullish.arr(true).length + Nullish.caught(false));
+    System.out.println(Nullish.a(true) + Nullish.a(false) + Nullish.b(true) + Nullish.b(false) + Nullish.arr(true).length + Nullish.caught(false)
+      + Nullish.compared(true, 1) + Nullish.reused() + Nullish.afterLoop(java.util.List.of("q")) + Nullish.bound(false, 2));
   }
 }`
 	compileWithJavacOn(t, dir, "NullishDriver", driver, dir)
 	expected := runJava(t, dir, "NullishDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "NullishDriver")
-	if actual != expected || actual != "x--y21\n" {
+	if actual != expected || actual != "x--y21falseOnulls\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
@@ -1544,7 +1565,11 @@ public class NullArg {
   static String v() { return String.valueOf((Object) null); }
   static String o(Optional<String> op) { return op.orElse(null); }
   static Object w() { return new java.lang.ref.WeakReference<Object>(null).get(); }
+  static long s() { return java.util.stream.Stream.of((Object) null).count(); }
+  static String chained(java.util.Map<String, Optional<String>> m) { return m.get("k").orElse(null); }
+  static Object direct(NullArgFinder f) { return f.find("k").orElse(null); }
 }
+interface NullArgFinder { Optional<Object> find(String k); }
 `
 
 func TestDecompileCastsANullArgumentOnlyWhereAnOverloadWouldTakeIt(t *testing.T) {
@@ -1559,24 +1584,106 @@ func TestDecompileCastsANullArgumentOnlyWhereAnOverloadWouldTakeIt(t *testing.T)
 	}
 	for _, want := range []string{
 		"return java.lang.String.valueOf((java.lang.Object) null);",
-		"return (java.lang.String) arg0.orElse(null);",
-		"return new java.lang.ref.WeakReference(null).get();",
+		// A raw receiver takes the cast (a checkcast makes one raw too); a
+		// call's receiver has the real parameterized type, where it would not
+		// compile.
+		"return (java.lang.String) arg0.orElse((java.lang.Object) null);",
+		"return new java.lang.ref.WeakReference((java.lang.Object) null).get();",
+		"return java.util.stream.Stream.of((java.lang.Object) null).count();",
+		"return (java.lang.String) ((java.util.Optional) arg0.get(\"k\")).orElse((java.lang.Object) null);",
+		"return arg0.find(\"k\").orElse(null);",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
 		}
 	}
 	again := filepath.Join(dir, "again")
-	compileWithJavac(t, again, "NullArg", source)
+	compileWithJavacOn(t, again, "NullArg", source, dir)
 	driver := `public class NullArgDriver {
   public static void main(String[] x) {
-    System.out.println(NullArg.v() + " " + NullArg.o(java.util.Optional.empty()) + " " + NullArg.w());
+    System.out.println(NullArg.v() + " " + NullArg.o(java.util.Optional.empty()) + " " + NullArg.w() + " " + NullArg.s()
+      + " " + NullArg.chained(java.util.Map.of("k", java.util.Optional.of("v"))) + " " + NullArg.direct(k -> java.util.Optional.of(k)));
   }
 }`
 	compileWithJavacOn(t, dir, "NullArgDriver", driver, dir)
 	expected := runJava(t, dir, "NullArgDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "NullArgDriver")
-	if actual != expected || actual != "null null null\n" {
+	if actual != expected || actual != "null null null 1 v k\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// An assignment the stack still wants is the expression it is, in place: a
+// long or double local (`dup2; lstore`), a field (`dup_x1; putfield`, `dup;
+// putstatic`), an array element (`dup_x2; iastore`). And a receiver copied for
+// a read-modify-write that cannot be written twice - `self().count += 5`,
+// `arr[i()] ^= 3` - is written once, as the compound assignment it was; the
+// narrowing conversion javac puts on a byte's is the assignment's own.
+const rmwSource = `public class Rmw {
+  int count; byte b; long l; String s; int[] arr = new int[4]; byte[] bs = new byte[3]; long[] la = new long[2];
+  static long g; static int calls;
+  Rmw self() { calls++; return this; }
+  int idx() { calls++; return 1; }
+  static long mk() { calls++; return 7L; }
+  void f1() { self().count += 5; }
+  void f2() { self().count -= 2 - 1; }
+  void f3() { self().b += 1; }
+  void f4() { self().l <<= 2; }
+  void f5() { self().s += "x"; }
+  void f6() { arr[idx()] ^= 3; }
+  void f7() { self().arr[idx()] *= 4; }
+  void f8() { bs[idx()] += 2; }
+  int f9() { return self().count += 100; }
+  int v1(int v) { int x = this.count = v; return x + count; }
+  long v2() { long a; long m = a = mk(); return a + m; }
+  static long v3() { long t = g = mk(); return t; }
+  String v4(Rmw o) { return this.s = o.s = "q"; }
+  int v5() { return arr[idx()] = 5; }
+  long v6() { return la[idx() - 1] = 9L; }
+  int v7() { return arr[idx()] += 7; }
+}
+`
+
+func TestDecompileWritesCompoundAndValueAssignments(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Rmw", rmwSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"this.self().count += 5;", "this.self().count -= 1;", "this.self().b += 1;", "this.self().l <<= 2;",
+		"this.self().s += \"x\";", "this.arr[this.idx()] ^= 3;", "this.self().arr[this.idx()] *= 4;",
+		"this.bs[this.idx()] += 2;", "return this.self().count += 100;",
+		"int var2 = this.count = arg0;", "long var3 = var1 = mk();", "long var0 = g = mk();",
+		"return this.s = arg0.s = \"q\";", "return this.arr[this.idx()] = 5;",
+		"return this.la[this.idx() - 1] = 9L;", "return this.arr[this.idx()] += 7;",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Rmw", source)
+	driver := `public class RmwDriver {
+  public static void main(String[] z) {
+    Rmw c = new Rmw();
+    c.f1(); c.f2(); c.f3(); c.f4(); c.f5(); c.f6(); c.f7(); c.f8();
+    System.out.println(c.f9() + " " + c.count + " " + c.b + " " + c.l + " " + c.s + " " + c.arr[1] + " " + c.bs[1]
+      + " " + c.v1(3) + " " + c.v2() + " " + Rmw.v3() + " " + c.v4(new Rmw()) + " " + c.v5() + " " + c.v6()
+      + " " + c.v7() + " " + Rmw.calls);
+  }
+}`
+	compileWithJavacOn(t, dir, "RmwDriver", driver, dir)
+	expected := runJava(t, dir, "RmwDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "RmwDriver")
+	if actual != expected || actual != "104 104 1 0 nullx 12 2 6 14 7 q 5 9 12 15\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
@@ -1756,9 +1863,10 @@ func TestDecompileSaysWhenAnAssignmentHappensWhileTheVariableIsOnTheStack(t *tes
 	}
 }
 
-// An increment is not a value that may be written twice or moved: `Effects` says
-// so for a call, but an operand keeps none of it once it is nested, so the text
-// is what the `dup` and the assignment guards have to read.
+// An increment is not a value that may be written twice or moved - and it is
+// not: an array element or a field assigned while the stack still wants the
+// value is written as the assignment it is, in place, and a receiver copied for
+// a compound assignment is written once.
 const incyBailsSource = `public class IncyBails {
   static int n;
   static int g(int a, int b) { n += a * 100 + b; return a - b; }
@@ -1768,9 +1876,9 @@ const incyBailsSource = `public class IncyBails {
   static int local(int i) { int x = -1; int r = g(i++, x = i); return r + x; }
 }`
 
-func TestDecompileSaysWhenAnIncrementWouldBeWrittenTwiceOrMoved(t *testing.T) {
-	if !hasTool("javac") {
-		t.Skip("no JDK (javac)")
+func TestDecompileKeepsAnIncrementInPlaceBesideAnAssignment(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
 	}
 	dir := t.TempDir()
 	classFile := compileWithJavac(t, dir, "IncyBails", incyBailsSource)
@@ -1778,20 +1886,31 @@ func TestDecompileSaysWhenAnIncrementWouldBeWrittenTwiceOrMoved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(source, "cappu: dup of an increment") {
-		t.Errorf("expected the dup bail:\n%s", source)
+	for _, want := range []string{
+		"arg0[arg0[arg1++]] += 1;", "return g(arg1++ + 1, arg0[arg1] = 5);",
+		"return g(arg0++ + 1, n = arg0);", "int var2 = g(arg0++, var1 = arg0);",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
 	}
-	if !strings.Contains(source, "cappu: an assignment with a value that could see it on the stack") {
-		t.Errorf("expected the assignment bail:\n%s", source)
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
 	}
-	// A store into a local is the one that comes back: written as the value it
-	// is, it stays behind the increment instead of moving in front of it.
-	if !strings.Contains(source, "g(arg0++, var1 = arg0)") {
-		t.Errorf("expected the local store as a value:\n%s", source)
-	}
-	// `g` and `local` are the bodies that come back.
-	if strings.Count(source, "cappu: ") != 6 {
-		t.Errorf("expected three bailed methods, got:\n%s", source)
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "IncyBails", source)
+	driver := `public class IncyBailsDriver {
+  public static void main(String[] z) {
+    int[] a = {1, 0, 2};
+    System.out.println(IncyBails.nested(a, 0) + " " + a[1] + " " + IncyBails.before(a, 1) + " " + a[2] + " "
+      + IncyBails.field(3) + " " + IncyBails.local(4) + " " + IncyBails.n);
+  }
+}`
+	compileWithJavacOn(t, dir, "IncyBailsDriver", driver, dir)
+	expected := runJava(t, dir, "IncyBailsDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "IncyBailsDriver")
+	if actual != expected || actual != "1 1 -3 5 0 4 813\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
 
@@ -2562,8 +2681,8 @@ func TestDecompileKeepsARecordMemberThatOnlyLooksGenerated(t *testing.T) {
 
 // An assignment written out as a statement runs in front of everything the stack
 // already holds, and a value that reads a field or an array element may be the
-// one being written - under this name or another. Only locals and literals are
-// safe, so the rest say so.
+// one being written - under this name or another. So one the stack still wants
+// is not written out: it stays the expression it is, where source put it.
 const aliasSource = `public class Aliased {
   static int[] a = { 0, 0, 0 };
   int x;
@@ -2576,9 +2695,9 @@ const aliasSource = `public class Aliased {
   static int chained() { int p, q; p = q = 5; return p + q; }
 }`
 
-func TestDecompileSaysWhenAnAssignmentWouldMoveInFrontOfAValue(t *testing.T) {
-	if !hasTool("javac") {
-		t.Skip("no JDK (javac)")
+func TestDecompileKeepsAnAssignmentWhereTheStackWantsIt(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
 	}
 	dir := t.TempDir()
 	classFile := compileWithJavac(t, dir, "Aliased", aliasSource)
@@ -2586,13 +2705,30 @@ func TestDecompileSaysWhenAnAssignmentWouldMoveInFrontOfAValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if count := strings.Count(source, "an assignment with a value that could see it on the stack"); count != 4 {
-		t.Errorf("expected four guarded methods, got %d:\n%s", count, source)
+	for _, want := range []string{
+		"return a[0] + (var0[0] = 5);", "return a[var0] + (a[var1] = 7);",
+		"return this.x + (arg0.x = 9);", "return rd() + (a[0] = 7);", "int var0 = var1 = 5;",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
 	}
-	// A chained assignment is the one shape here that comes back: the store is
-	// the value, so it stays where source put it.
-	if !strings.Contains(source, "int var0 = var1 = 5;") {
-		t.Errorf("the chained assignment did not come back:\n%s", source)
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Aliased", source)
+	driver := `public class AliasedDriver {
+  public static void main(String[] z) {
+    System.out.println(Aliased.aliasArray() + " " + Aliased.sameIndex() + " " + new Aliased().sameObject(new Aliased())
+      + " " + Aliased.throughCall() + " " + Aliased.chained() + " " + Aliased.reads);
+  }
+}`
+	compileWithJavacOn(t, dir, "AliasedDriver", driver, dir)
+	expected := runJava(t, dir, "AliasedDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "AliasedDriver")
+	if actual != expected || actual != "6 12 10 14 10 1\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
 

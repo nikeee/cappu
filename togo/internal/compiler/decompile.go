@@ -115,6 +115,17 @@ type expr struct {
 	// the call can put `new C(...)` in all of their places at once. Zero means
 	// the value is not one.
 	Pending int
+	// Shared marks the copies a `dup` made of a receiver (or of an array and
+	// its index) that cannot be written twice: only the read-modify-write of
+	// a compound assignment may consume them, where the text is written once.
+	Shared int
+	// ReadOf is the Shared id of the receiver a field or element read came from.
+	ReadOf int
+	// Bin is the operation a binary expression was built from, kept for a
+	// compound assignment to recognise `x op rhs`.
+	Bin *binaryNode
+	// Inner is the value a narrowing conversion wraps.
+	Inner *expr
 	// Untyped is set on a conditional whose reference arms are of different
 	// types: the type is their least upper bound, which needs a class hierarchy
 	// this has not got. Where the value is target-typed (a return, an argument,
@@ -146,10 +157,18 @@ func at(e expr, minimum int) string {
 	return e.Text
 }
 
+type binaryNode struct {
+	Left, Right expr
+	Op          string
+}
+
 func binaryExpr(left expr, operator string, right expr, prec int, typ string) expr {
 	// Every operator here is left-associative, so the right operand needs one
 	// more level to keep `a - (b - c)` from losing its parentheses.
-	return expr{Text: at(left, prec) + " " + operator + " " + at(right, prec+1), Prec: prec, Type: typ}
+	return expr{
+		Text: at(left, prec) + " " + operator + " " + at(right, prec+1), Prec: prec, Type: typ,
+		Bin: &binaryNode{Left: left, Right: right, Op: operator},
+	}
 }
 
 // comparePrec reports where an operator binds: `==` and `!=` sit one level
@@ -462,7 +481,9 @@ func ternaryExpr(condition, thenValue, elseValue expr) (expr, bool) {
 		return shortCircuit(logicalExpr(logicOr, negate(condition), whenTrue)), true
 	}
 	typ := whenTrue.Type
-	untyped := false
+	// An arm that is a conditional of differing arms has no type of its own,
+	// and neither has the whole then.
+	untyped := whenTrue.Untyped || whenFalse.Untyped
 	if whenTrue.Type != whenFalse.Type {
 		left, right := widthOf(whenTrue.Type), widthOf(whenFalse.Type)
 		switch {
@@ -472,6 +493,10 @@ func ternaryExpr(condition, thenValue, elseValue expr) (expr, bool) {
 			// `null` is of the other arm's type.
 			typ = whenFalse.Type
 		case whenFalse.Text == "null":
+		case whenTrue.Type == "java.lang.Object" || whenFalse.Type == "java.lang.Object":
+			// An Object arm is the bound, whatever the other is.
+			typ = "java.lang.Object"
+			untyped = false
 		case !primitiveTypeNames[whenTrue.Type] && !primitiveTypeNames[whenFalse.Type]:
 			untyped = true
 		}
@@ -861,6 +886,13 @@ type local struct {
 	// StoreBlocks are the blocks that store to it, which is what says whether a
 	// read is unambiguous.
 	StoreBlocks map[int]bool
+	// Reads counts the loads of it: a read rendered against the type it had
+	// then is text, and a later narrowing cannot reach it.
+	Reads int
+	// Depth is how deep in captured blocks it was first stored: a store deeper
+	// in is inside its scope, one at the same depth or shallower may be a new
+	// variable in a reused slot.
+	Depth int
 }
 
 type paramSlot struct {
@@ -1882,7 +1914,7 @@ type activeSwitch struct {
 // into the condition of the branch before it (`a && b`) or into a ternary
 // without changing what runs.
 // onlyNull reports whether every value stored into the variable so far was
-// `null`.
+// `null` - and there was one: a parameter, never stored, is not.
 func onlyNull(entry *local) bool {
 	for _, write := range entry.Writes {
 		if write.Value.Text != "null" {
@@ -1957,6 +1989,11 @@ type bodyDecompiler struct {
 	isStatic   bool
 	stack      []expr
 	statements []stmt
+	// sharedIDs numbers the copies a compound assignment's dup made.
+	sharedIDs int
+	// assignFieldAsValue is set by a `dup_x1` into a `putfield` (or a `dup`
+	// into a `putstatic`): the field assignment is the value, not a statement.
+	assignFieldAsValue bool
 	// assignAsValue is set by a `dup` into a store: the store is the value, not
 	// a statement.
 	assignAsValue bool
@@ -2065,6 +2102,18 @@ func (d *bodyDecompiler) coerceInto(value expr, target string) (string, error) {
 		if err := d.retype(entry, target); err != nil {
 			return "", err
 		}
+	}
+	// A variable that has only held `null` is of the type its first use asks
+	// for - javac chose that overload, return or field by the declared type.
+	// A read before this one was rendered against `Object` and is text; the
+	// variable stays an Object then.
+	if entry, ok := d.byName[name]; ok && !entry.Authoritative && name == value.Text &&
+		entry.Type == "java.lang.Object" && target != "java.lang.Object" && !primitiveTypeNames[target] &&
+		onlyNull(entry) && entry.Reads <= 1 {
+		if err := d.retype(entry, target); err != nil {
+			return "", err
+		}
+		value = primary(entry.Name, entry.Type)
 	}
 	// Where a number belongs, the value is used as one.
 	if numericTargets[target] {
@@ -2285,6 +2334,11 @@ func (d *bodyDecompiler) pop() (expr, error) {
 	if top.Init != nil && len(top.Init.Elements) > 0 {
 		return expr{}, bail("incomplete array initializer")
 	}
+	// A copy that may only be written once is consumed by the read and the
+	// write of a compound assignment, which take it raw.
+	if top.Shared != 0 {
+		return expr{}, bail("dup of a non-trivial value")
+	}
 	return top, nil
 }
 
@@ -2397,27 +2451,25 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 		Origin:        scoped,
 		Authoritative: authoritative,
 		StoreBlocks:   map[int]bool{},
+		Depth:         d.depth,
 	}
 	d.locals[slot] = created
 	d.byName[created.Name] = created
 	return created, nil
 }
 
-// callArguments pops a call's arguments in reverse and writes them as the
-// parameters.
-// nullAmbiguousOwners are the classes with a `char[]` overload beside an
-// `Object` one, where a bare `null` binds the array: `String.valueOf`,
-// `println`, `append`. A generic method's `T` erases to `Object` too, and a
-// cast there does not compile against the real parameterized type.
-var nullAmbiguousOwners = map[string]bool{
-	"java/lang/String": true, "java/lang/StringBuilder": true, "java/lang/StringBuffer": true,
-	"java/io/PrintStream": true, "java/io/PrintWriter": true, "java/io/Writer": true,
-}
-
 // callArguments pops a call's arguments, coerced to the parameter types of
-// its descriptor; owner is the callee's class.
-func (d *bodyDecompiler) callArguments(owner, descriptor string) ([]string, error) {
+// its descriptor. A literal `null` where `Object` is declared is cast, except
+// on a call whose receiver is itself a call: that receiver has the
+// parameterized type the real class gives it, and a generic `T` there erases
+// to `Object` in the descriptor but is not one to javac.
+func (d *bodyDecompiler) callArguments(descriptor string) ([]string, error) {
 	params := parameterSlots(descriptor, true)
+	receiverIsCall := false
+	if at := len(d.stack) - len(params) - 1; at >= 0 {
+		receiver := d.stack[at]
+		receiverIsCall = receiver.Effects && receiver.Pending == 0
+	}
 	args := make([]string, len(params))
 	for i := len(params) - 1; i >= 0; i-- {
 		value, err := d.pop()
@@ -2433,16 +2485,14 @@ func (d *bodyDecompiler) callArguments(owner, descriptor string) ([]string, erro
 		// when it is passed: `f((byte) 3)` is the only way to write the call.
 		narrows := (target == "byte" || target == "short") && intLiteralText.MatchString(text)
 		// A bare `null` where an `Object` is declared re-resolves the overload -
-		// `String.valueOf(null)` binds `char[]` and throws - so there the type
-		// the call was compiled against is written back. Only `Object` gets it,
-		// and only on the classes known to carry that overload: javac only
-		// binds the `Object` one to a literal `null` when source cast it, and a
-		// generic `T` erases to `Object` where the cast would not compile.
+		// `String.valueOf(null)` binds `char[]` and throws - so the type the call
+		// was compiled against is written back. Only `Object` gets it: a cast to
+		// any other reference type is a `checkcast` the original did not have.
 		//
 		// ponytail: that leaves a narrower hole - a parameter typed `CharSequence`
 		// with a `String` overload alongside it also re-resolves. Closing it needs
 		// the callee's other overloads, which live outside this class file.
-		if narrows || (text == "null" && target == "java.lang.Object" && nullAmbiguousOwners[owner]) {
+		if narrows || (text == "null" && target == "java.lang.Object" && !receiverIsCall) {
 			text = "(" + sourceTypeText(target, d.self()) + ") " + text
 		}
 		args[i] = text
@@ -2978,7 +3028,7 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 			outer = &value
 		}
 	}
-	args, err := d.callArguments(target.Owner, target.Descriptor)
+	args, err := d.callArguments(target.Descriptor)
 	if err != nil {
 		return err
 	}
@@ -3107,6 +3157,8 @@ func opBase(m string) string {
 
 var singleSlotStore = regexp.MustCompile(`^[ifa]store(_[0-3])?$`)
 
+var wideStore = regexp.MustCompile(`^[ld]store(_[0-3])?$`)
+
 // assignedName is the variable an assignment-as-value assigns.
 var assignedName = regexp.MustCompile(`^([A-Za-z_$][\w$]*) = `)
 
@@ -3188,6 +3240,53 @@ func checkDuplicable(value expr) error {
 		(value.Prec != precPrimary || strings.HasPrefix(value.Text, "new ")) {
 		return bail("dup of a non-trivial value")
 	}
+	return nil
+}
+
+// popShared pops a value that may be one of a compound assignment's copies.
+func (d *bodyDecompiler) popShared() (expr, error) {
+	top, err := d.popRaw()
+	if err != nil {
+		return expr{}, err
+	}
+	if top.Shared != 0 {
+		return top, nil
+	}
+	d.push(top)
+	return d.pop()
+}
+
+// compoundOps are the operators with a compound assignment form.
+var compoundOps = map[string]bool{
+	"+": true, "-": true, "*": true, "/": true, "%": true,
+	"<<": true, ">>": true, ">>>": true, "&": true, "|": true, "^": true,
+}
+
+// compoundAssign writes `target op= rhs` for a value that is the read of the
+// same target (through the copies marked shared) combined with one operand -
+// the only shape a receiver written once can carry. A narrowing conversion
+// javac put on the result is the compound assignment's own.
+func (d *bodyDecompiler) compoundAssign(target string, shared int, value expr, targetType string) error {
+	if value.Inner != nil && value.Type == targetType {
+		value = *value.Inner
+	}
+	if value.Bin == nil || value.Bin.Left.ReadOf != shared || !compoundOps[value.Bin.Op] ||
+		value.Bin.Left.Text != target {
+		return bail("dup of a non-trivial value")
+	}
+	text := target + " " + value.Bin.Op + "= " + at(value.Bin.Right, precAssign+1)
+	// One the stack still wants is the expression it is, in place.
+	if d.assignFieldAsValue {
+		d.assignFieldAsValue = false
+		d.push(expr{Text: text, Prec: precAssign, Type: targetType, Effects: true})
+		return nil
+	}
+	for _, stacked := range d.stack {
+		if observesWrites(stacked, d.names) {
+			return bail("an assignment with a value that could see it on the stack")
+		}
+	}
+	d.emit(text + ";")
 	return nil
 }
 
@@ -5024,6 +5123,7 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
+		target.Reads++
 		d.push(primary(target.Name, target.Type))
 		return nil
 	}
@@ -5050,18 +5150,23 @@ func (d *bodyDecompiler) step(
 		if value.Untyped {
 			fallback = ""
 		}
-		// `null` is of every reference type: stored into a variable it does not
-		// begin another one, and a variable that has only ever held `null` is
-		// of the type the first real value gives it.
+		// `null` is of every reference type: stored into a variable whose scope
+		// this is inside of, it does not begin another one - at the same depth
+		// the slot may be a dead variable's, reused for a new one. And a
+		// variable that has only ever held `null`, and was never read, is of
+		// the type the first real value gives it; one that was read is text
+		// already, rendered against `Object`, and stays one.
 		if base == "astore" {
 			if existing, ok := d.locals[slotOf(instruction)]; ok && !existing.Authoritative && !primitiveTypeNames[existing.Type] {
+				nested := d.depth > existing.Depth
 				switch {
-				case value.Text == "null":
+				case value.Text == "null" && nested:
 					fallback = existing.Type
-				case value.Untyped && existing.Type == "java.lang.Object":
+				case value.Untyped && existing.Type == "java.lang.Object" && (nested || onlyNull(existing)):
 					// Whatever the arms' bound is, an Object holds it.
 					fallback = existing.Type
-				case existing.Type == "java.lang.Object" && fallback != "java.lang.Object" && fallback != "" && onlyNull(existing):
+				case existing.Type == "java.lang.Object" && fallback != "java.lang.Object" && fallback != "" &&
+					onlyNull(existing) && existing.Reads == 0:
 					if err := d.retype(existing, fallback); err != nil {
 						return err
 					}
@@ -5227,7 +5332,8 @@ func (d *bodyDecompiler) step(
 		if value, err = d.asNumber(value); err != nil {
 			return err
 		}
-		d.push(expr{Text: "(" + conversion + ") " + at(value, precUnary), Prec: precUnary, Type: conversion})
+		inner := value
+		d.push(expr{Text: "(" + conversion + ") " + at(value, precUnary), Prec: precUnary, Type: conversion, Inner: &inner})
 		return nil
 	}
 
@@ -5242,11 +5348,13 @@ func (d *bodyDecompiler) step(
 			d.push(primary(d.staticRef(field.Owner, field.Name), fieldType))
 			return nil
 		}
-		target, err := d.pop()
+		target, err := d.popShared()
 		if err != nil {
 			return err
 		}
-		d.push(primary(at(target, precPrimary)+"."+field.Name, fieldType))
+		read := primary(at(target, precPrimary)+"."+field.Name, fieldType)
+		read.ReadOf = target.Shared
+		d.push(read)
 		return nil
 	}
 	if mnemonic == "putstatic" || mnemonic == "putfield" {
@@ -5261,11 +5369,25 @@ func (d *bodyDecompiler) step(
 		fieldType := descriptorSourceType(field.Descriptor, d.self())
 		target := d.staticRef(field.Owner, field.Name)
 		if mnemonic == "putfield" {
-			receiver, err := d.pop()
+			receiver, err := d.popShared()
 			if err != nil {
 				return err
 			}
 			target = at(receiver, precPrimary) + "." + field.Name
+			if receiver.Shared != 0 {
+				return d.compoundAssign(target, receiver.Shared, value, fieldType)
+			}
+		}
+		assigned, err := d.coerceInto(value, fieldType)
+		if err != nil {
+			return err
+		}
+		// An assignment the stack still wants stays where the value was, as the
+		// expression it is.
+		if d.assignFieldAsValue {
+			d.assignFieldAsValue = false
+			d.push(expr{Text: target + " = " + assigned, Prec: precAssign, Type: fieldType, Effects: true})
+			return nil
 		}
 		// The assignment is a statement here, so it runs *before* everything the
 		// stack already holds - and any of those that reads a field, an array or a
@@ -5276,10 +5398,6 @@ func (d *bodyDecompiler) step(
 			if observesWrites(stacked, d.names) {
 				return bail("an assignment with a value that could see it on the stack")
 			}
-		}
-		assigned, err := d.coerceInto(value, fieldType)
-		if err != nil {
-			return err
 		}
 		d.emit(target + " = " + assigned + ";")
 		return nil
@@ -5295,18 +5413,22 @@ func (d *bodyDecompiler) step(
 		return nil
 	}
 	if isOneOf(mnemonic, "ilfdabcs", "aload") {
-		index, err := d.pop()
+		index, err := d.popShared()
 		if err != nil {
 			return err
 		}
-		array, err := d.pop()
+		array, err := d.popShared()
 		if err != nil {
 			return err
 		}
 		if err := d.usedAsNumber(index); err != nil {
 			return err
 		}
-		d.push(primary(at(array, precPrimary)+"["+coerce(index, "int")+"]", elementType(array.Type, mnemonic[0])))
+		read := primary(at(array, precPrimary)+"["+coerce(index, "int")+"]", elementType(array.Type, mnemonic[0]))
+		if array.Shared != 0 && array.Shared == index.Shared {
+			read.ReadOf = array.Shared
+		}
+		d.push(read)
 		return nil
 	}
 	if isOneOf(mnemonic, "ilfdabcs", "astore") {
@@ -5314,7 +5436,7 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
-		index, err := d.pop()
+		index, err := d.popShared()
 		if err != nil {
 			return err
 		}
@@ -5330,16 +5452,28 @@ func (d *bodyDecompiler) step(
 			return err
 		}
 		target := at(array, precPrimary) + "[" + coerce(index, "int") + "]"
+		if array.Shared != 0 || index.Shared != 0 {
+			if array.Shared != index.Shared {
+				return bail("dup of a non-trivial value")
+			}
+			return d.compoundAssign(target, array.Shared, value, element)
+		}
+		assigned, err := d.coerceInto(value, element)
+		if err != nil {
+			return err
+		}
+		// An assignment the stack still wants stays where the value was.
+		if d.assignFieldAsValue {
+			d.assignFieldAsValue = false
+			d.push(expr{Text: target + " = " + assigned, Prec: precAssign, Type: element, Effects: true})
+			return nil
+		}
 		// The same as a field: the store runs before what the stack holds, and an
 		// array read on it may be this element under another name.
 		for _, stacked := range d.stack {
 			if observesWrites(stacked, d.names) {
 				return bail("an assignment with a value that could see it on the stack")
 			}
-		}
-		assigned, err := d.coerceInto(value, element)
-		if err != nil {
-			return err
 		}
 		d.emit(target + " = " + assigned + ";")
 		return nil
@@ -5453,7 +5587,7 @@ func (d *bodyDecompiler) step(
 		if target.Name == "<init>" {
 			return d.construct(target)
 		}
-		args, err := d.callArguments(target.Owner, target.Descriptor)
+		args, err := d.callArguments(target.Descriptor)
 		if err != nil {
 			return err
 		}
@@ -5489,8 +5623,46 @@ func (d *bodyDecompiler) step(
 		// `while ((line = read()) != null)`. Nothing is written twice - the store
 		// stays where it is and becomes the expression - so the guards below,
 		// which are about writing a value's text once per copy, do not apply.
-		if mnemonic == "dup" && next != nil && singleSlotStore.MatchString(next.Mnemonic) {
+		if next != nil && (mnemonic == "dup" && singleSlotStore.MatchString(next.Mnemonic) ||
+			mnemonic == "dup2" && wideStore.MatchString(next.Mnemonic)) {
 			d.assignAsValue = true
+			return nil
+		}
+		// A receiver copied for a read-modify-write - `dup; getfield` - or an
+		// array and index copied for one - `dup2; iaload` - that cannot be
+		// written twice is not written twice: both copies carry one mark, and
+		// only the compound assignment's read and write may take them.
+		if next != nil && (mnemonic == "dup" && next.Mnemonic == "getfield" ||
+			mnemonic == "dup2" && isOneOf(next.Mnemonic, "ilfdabcs", "aload")) {
+			count := 1
+			if mnemonic == "dup2" {
+				count = 2
+			}
+			if len(d.stack) < count {
+				return bail("stack underflow")
+			}
+			copies := append([]expr(nil), d.stack[len(d.stack)-count:]...)
+			shareable := count == 1 || !wide(copies[len(copies)-1])
+			needed := false
+			for _, value := range copies {
+				needed = needed || checkDuplicable(value) != nil
+			}
+			if shareable && needed {
+				d.sharedIDs++
+				for i := range copies {
+					copies[i].Shared = d.sharedIDs
+				}
+				d.stack = append(d.stack[:len(d.stack)-count], copies...)
+				d.stack = append(d.stack, copies...)
+				return nil
+			}
+		}
+		// The same for a field: `dup_x1; putfield` keeps the value under the
+		// receiver, `dup; putstatic` keeps it in place (`dup2` for a long).
+		if next != nil && ((mnemonic == "dup_x1" || mnemonic == "dup2_x1") && next.Mnemonic == "putfield" ||
+			(mnemonic == "dup" || mnemonic == "dup2") && next.Mnemonic == "putstatic" ||
+			(mnemonic == "dup_x2" || mnemonic == "dup2_x2") && isOneOf(next.Mnemonic, "ilfdabcs", "astore")) {
+			d.assignFieldAsValue = true
 			return nil
 		}
 		// popRaw, because the copy being duplicated is the array literal that is
