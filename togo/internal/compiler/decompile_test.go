@@ -1907,6 +1907,80 @@ func TestDecompileBoundsAVariableTwoArmsAssign(t *testing.T) {
 	}
 }
 
+// Two arms that store values of different reference types into one variable
+// - `new ArrayList<>()` and `new LinkedList<>()` - declared a bound this has no
+// class hierarchy to compute. The variable's type stays open, an Object, until
+// the first use asks for one: the class a method called on it belongs to (its
+// static type, as javac wrote it), the field read from it, the parameter it is
+// passed as, or the type it is returned as.
+const openSource = `import java.util.*;
+public class Open {
+  static int size(boolean c) { List<String> l; if (c) l = new ArrayList<>(); else l = new LinkedList<>(); l.add("x"); return l.size(); }
+  static Object ret(boolean c) { Collection<String> l; if (c) l = new ArrayList<>(); else l = new HashSet<>(); return l; }
+  static int arg(boolean c) { Map<String, Integer> m; if (c) m = new HashMap<>(); else m = new TreeMap<>(); return count(m); }
+  static int count(Map<String, Integer> m) { return m.size(); }
+  static int field(boolean c) { java.awt.Point p; if (c) p = new java.awt.Point(1, 2); else p = new OpenPoint(); return p.x; }
+  static String twoUses(boolean c) { CharSequence s; if (c) s = "abc"; else s = new StringBuilder("de"); return s.length() + "" + s.charAt(0); }
+  // An argument takes a supertype too: addAll(Collection) before keep(Set) are two answers, the member call one.
+  static int conflict(boolean c) { Set<String> s; if (c) s = Collections.emptySet(); else s = new HashSet<>(); Collections.addAll(s, "a"); return keep(s); }
+  static int keep(Set<String> s) { return s.size(); }
+  static int exact(boolean c) { Set<String> s; if (c) s = Collections.emptySet(); else s = new HashSet<>(); Collections.addAll(s, "a"); s.add("b"); return keep(s); }
+  static Object arm(boolean c, Object o) { Collection<String> l; if (c) l = new ArrayList<>(); else l = new HashSet<>(); return c ? l : o; }
+  static CharSequence armTyped(boolean c, CharSequence o) { CharSequence s; if (c) s = "a"; else s = new StringBuilder("b"); return c ? s : o; }
+  static CharSequence cast(boolean c, Object o) { CharSequence s; if (c) s = (CharSequence) o; else s = new StringBuilder("x"); return s; }
+  static int unresolved(boolean c) { Collection<String> l; if (c) l = new ArrayList<>(); else l = new HashSet<>(); synchronized (l) { return 1; } }
+  static Number linked(boolean c, int e) { Number d; if (c) d = Long.valueOf(e); else d = java.math.BigInteger.valueOf(e); Number n = d; if (d instanceof Long) { n = Long.valueOf(((Long) d).longValue() + 1); } return n; }
+}
+class OpenPoint extends java.awt.Point { OpenPoint() { super(3, 4); } }
+`
+
+func TestDecompileTypesAMergedVariableByItsFirstUse(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Open", openSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"java.util.List var1;", "var1 = new java.util.ArrayList();", "var1 = new java.util.LinkedList();", "var1.add(\"x\");",
+		"java.lang.Object var1;", "return var1;",
+		"java.util.Map var1;", "return count(var1);",
+		"java.awt.Point var1;", "return var1.x;",
+		"java.lang.CharSequence var1;",
+		"java.util.Set var1;", "var1.add(\"b\");",
+		"java.lang.Object var2;", "return arg0 ? var2 : arg1;",
+		"java.lang.CharSequence var2;", "var2 = (java.lang.CharSequence) arg1;",
+		"cappu: a variable whose uses ask for different types", "cappu: a variable whose type no use says",
+		"java.lang.Number var2;", "java.lang.Number var3 = var2;",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Count(source, "/* cappu:") != 2 || strings.Contains(source, "var1_2") {
+		t.Errorf("expected one variable per method and two bails:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavacOn(t, again, "Open", source, dir)
+	driver := `public class OpenDriver {
+  public static void main(String[] z) {
+    System.out.println(Open.size(true) + " " + Open.size(false) + " " + Open.ret(false).getClass().getSimpleName() + " " + Open.arg(true)
+      + " " + Open.field(false) + " " + Open.twoUses(true) + Open.twoUses(false) + " " + Open.exact(false)
+      + " " + Open.arm(true, "o") + Open.arm(false, "o") + " " + Open.armTyped(true, "z") + Open.armTyped(false, "z") + " " + Open.cast(true, "q") + Open.cast(false, null)
+      + " " + Open.linked(true, 4) + Open.linked(false, 4));
+  }
+}`
+	compileWithJavacOn(t, dir, "OpenDriver", driver, dir)
+	expected := runJava(t, dir, "OpenDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "OpenDriver")
+	if actual != expected || actual != "1 1 HashSet 0 3 3a2d 2 []o az qx 54\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A `return` inside a loop is a statement, not the loop's end - but where the
 // test carries a call the header is not a pure test, so the follow has to come
 // from somewhere else. A single unconditional latch says the test is still the

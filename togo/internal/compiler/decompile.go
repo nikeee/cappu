@@ -126,6 +126,12 @@ type expr struct {
 	Bin *binaryNode
 	// Inner is the value a narrowing conversion wraps.
 	Inner *expr
+	// Arms are a conditional's two values: a variable with an open type read
+	// in one is typed by what the conditional is asked for.
+	Arms *[2]expr
+	// Cast is set on a checkcast: assigned to a variable, the cast's type is
+	// the declaration javac matched it to.
+	Cast bool
 	// Untyped is set on a conditional whose reference arms are of different
 	// types: the type is their least upper bound, which needs a class hierarchy
 	// this has not got. Where the value is target-typed (a return, an argument,
@@ -507,6 +513,7 @@ func ternaryExpr(condition, thenValue, elseValue expr) (expr, bool) {
 		Prec:    precTernary,
 		Type:    typ,
 		Untyped: untyped,
+		Arms:    &[2]expr{whenTrue, whenFalse},
 	}
 	// Two arms that are each a boolean javac erased make a value that is one
 	// too, and the int form is the conditional over their int forms - which is
@@ -889,6 +896,19 @@ type local struct {
 	// Reads counts the loads of it: a read rendered against the type it had
 	// then is text, and a later narrowing cannot reach it.
 	Reads int
+	// Open says the type is not known yet - two arms stored values of
+	// different reference types, whose bound this cannot compute - and the
+	// first use that asks for one gives it: an argument, a return, a field, or
+	// the class a method called on it belongs to. Until then it is an Object.
+	Open bool
+	// Tentative says the type came from an argument or a return, which take a
+	// supertype too: the class a method or field is reached through is the
+	// exact one and replaces it, another argument asking for something else
+	// is a conflict this cannot resolve.
+	Tentative bool
+	// Also are the variables this one was assigned to, or from, while its type
+	// was open: whatever types one types the others.
+	Also []*local
 }
 
 type paramSlot struct {
@@ -2143,13 +2163,38 @@ func (d *bodyDecompiler) coerceInto(value expr, target string) (string, error) {
 	// for - javac chose that overload, return or field by the declared type.
 	// A read before this one was rendered against `Object` and is text; the
 	// variable stays an Object then.
+	// An open type is asked for by any use: a read before that was a bare name,
+	// which reads the same whatever the type turns out to be.
 	if entry, ok := d.byName[name]; ok && !entry.Authoritative && name == value.Text &&
 		entry.Type == "java.lang.Object" && target != "java.lang.Object" && !primitiveTypeNames[target] &&
-		onlyNull(entry) && entry.Reads <= 1 {
-		if err := d.retype(entry, target); err != nil {
+		(onlyNull(entry) && entry.Reads <= 1 || entry.Open) {
+		if err := d.settle(entry, target, entry.Open); err != nil {
 			return "", err
 		}
 		value = primary(entry.Name, entry.Type)
+	} else if ok && entry.Tentative && name == value.Text && target != entry.Type && target != "java.lang.Object" &&
+		!primitiveTypeNames[target] {
+		return "", bail("a variable whose uses ask for different types")
+	} else if ok && entry.Open && name == value.Text && target == "java.lang.Object" {
+		// An Object is asked for: an Object it is, until a member says better.
+		if err := d.settle(entry, "", true); err != nil {
+			return "", err
+		}
+	}
+	// A conditional's arm that is such a variable is asked for the same.
+	if value.Arms != nil && !primitiveTypeNames[target] {
+		for _, arm := range value.Arms {
+			if entry, ok := d.byName[arm.Text]; ok && entry.Open {
+				typ := ""
+				if target != "java.lang.Object" {
+					typ = target
+					value.Type = target
+				}
+				if err := d.settle(entry, typ, true); err != nil {
+					return "", err
+				}
+			}
+		}
 	}
 	// Where a number belongs, the value is used as one.
 	if numericTargets[target] {
@@ -3010,6 +3055,14 @@ func (d *bodyDecompiler) receiverCallee(mnemonic, owner, name string) (string, e
 	if err != nil {
 		return "", err
 	}
+	// A variable whose type is still open is of the class the method called on
+	// it belongs to: javac wrote the receiver's static type there.
+	if entry, ok := d.byName[receiver.Text]; ok && (entry.Open || entry.Tentative) && mnemonic != "invokespecial" {
+		if err := d.settle(entry, typeName(owner, d.self()), false); err != nil {
+			return "", err
+		}
+		receiver = primary(entry.Name, entry.Type)
+	}
 	// A lambda has no type of its own, so calling a method on one needs the
 	// interface named - source could not have written it any other way.
 	if receiver.Lambda {
@@ -3294,6 +3347,25 @@ func checkDuplicable(value expr) error {
 	return nil
 }
 
+// settle gives an open variable its type - and the variables typed with it.
+// An empty type closes it as the Object it is.
+func (d *bodyDecompiler) settle(entry *local, typ string, tentative bool) error {
+	entry.Open, entry.Tentative = false, tentative
+	if typ != "" && typ != entry.Type {
+		if err := d.retype(entry, typ); err != nil {
+			return err
+		}
+	}
+	for _, other := range entry.Also {
+		if other.Open {
+			if err := d.settle(other, typ, tentative); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // popShared pops a value that may be one of a compound assignment's copies.
 func (d *bodyDecompiler) popShared() (expr, error) {
 	top, err := d.popRaw()
@@ -3386,6 +3458,16 @@ func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType strin
 	if err != nil {
 		return err
 	}
+	// A variable assigned another whose type is open shares that: the two are
+	// typed together, by whichever use asks first - this store asks nothing.
+	linked := false
+	if source, ok := d.byName[value.Text]; ok && source.Open && !target.Authoritative &&
+		target.Type == "java.lang.Object" && len(target.Writes) == 0 {
+		target.Open = true
+		source.Also = append(source.Also, target)
+		target.Also = append(target.Also, source)
+		linked = true
+	}
 	// The assignment is a statement here, so it runs before everything the stack
 	// already holds - and those read the variable as it is *after* it. A `char`,
 	// `byte` or `short` post-increment is written this way rather than with an
@@ -3398,7 +3480,10 @@ func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType strin
 		}
 	}
 	target.StoreBlocks[d.currentBlock] = true
-	text, err := d.coerceInto(value, target.Type)
+	text := value.Text
+	if !linked {
+		text, err = d.coerceInto(value, target.Type)
+	}
 	if err != nil {
 		return err
 	}
@@ -5342,6 +5427,25 @@ func (d *bodyDecompiler) step(
 					if err := d.retype(existing, fallback); err != nil {
 						return err
 					}
+				// Two reference types with a bound this cannot compute: one
+				// variable, its type open until a use says.
+				case fallback != "" && fallback != existing.Type && existing.Type != "java.lang.Object" && value.Text != "null" &&
+					!primitiveTypeNames[fallback] && !strings.HasSuffix(fallback, "]") && !strings.HasSuffix(existing.Type, "]") &&
+					existing.Reads == 0 && same:
+					// A checkcast on either value is the declaration javac matched it
+					// to; otherwise the type stays open until a use says.
+					bound := "java.lang.Object"
+					if value.Cast {
+						bound = fallback
+					} else if len(existing.Writes) > 0 && existing.Writes[len(existing.Writes)-1].Value.Cast {
+						bound = existing.Type
+					}
+					if err := d.retype(existing, bound); err != nil {
+						return err
+					}
+					existing.Open = bound == "java.lang.Object"
+					existing.Tentative = !existing.Open
+					fallback = existing.Type
 				}
 			}
 		}
@@ -5543,6 +5647,14 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
+		// A variable whose type is still open is of the class the field read
+		// from it belongs to.
+		if entry, ok := d.byName[target.Text]; ok && (entry.Open || entry.Tentative) {
+			if err := d.settle(entry, typeName(field.Owner, d.self()), false); err != nil {
+				return err
+			}
+			target = primary(entry.Name, entry.Type)
+		}
 		read := primary(at(target, precPrimary)+"."+field.Name, fieldType)
 		read.ReadOf = target.Shared
 		d.push(read)
@@ -5740,7 +5852,7 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
-		d.push(expr{Text: "(" + typ + ") " + at(value, precUnary), Prec: precUnary, Type: typ})
+		d.push(expr{Text: "(" + typ + ") " + at(value, precUnary), Prec: precUnary, Type: typ, Cast: true})
 		return nil
 	}
 	if mnemonic == "instanceof" {
@@ -6391,6 +6503,14 @@ func decompileBody(
 	}
 	if err := d.run(instructions, code.Exceptions); err != nil {
 		return nil, flattenStatements(d.statements), d.chained, err
+	}
+	// A variable whose type stayed open was read only where any type reads the
+	// same - in a conditional's arm, say - and that is where an Object is not
+	// what source declared.
+	for _, entry := range d.byName {
+		if entry.Open {
+			return nil, flattenStatements(d.statements), d.chained, bail("a variable whose type no use says")
+		}
 	}
 	body = withHoisted(flattenStatements(d.hoisted), flattenStatements(d.statements), d.chained)
 	// Every void method ends in a `return` javac inserted; source does not.
