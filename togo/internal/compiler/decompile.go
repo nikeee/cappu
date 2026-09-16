@@ -1917,6 +1917,40 @@ type activeSwitch struct {
 // no call, nothing that is a statement. A block made only of these can be folded
 // into the condition of the branch before it (`a && b`) or into a ternary
 // without changing what runs.
+// literalFits reports whether an int literal is a value of a boolean, char,
+// byte or short.
+func literalFits(text, typ string) bool {
+	n, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return false
+	}
+	switch typ {
+	case "boolean":
+		return n == 0 || n == 1
+	case "char":
+		return n >= 0 && n <= 0xFFFF
+	case "byte":
+		return n >= -128 && n <= 127
+	case "short":
+		return n >= -32768 && n <= 32767
+	}
+	return false
+}
+
+// allLiteralsFit reports whether every value stored into the variable so far
+// was a literal of typ - or, for a boolean, a condition javac materialized.
+func allLiteralsFit(entry *local, typ string) bool {
+	for _, write := range entry.Writes {
+		if typ == "boolean" && write.Value.AsInt != "" {
+			continue
+		}
+		if !literalFits(write.Value.Text, typ) {
+			return false
+		}
+	}
+	return true
+}
+
 // onlyNull reports whether every value stored into the variable so far was
 // `null` - and there was one: a parameter, never stored, is not.
 func onlyNull(entry *local) bool {
@@ -2146,6 +2180,22 @@ func (d *bodyDecompiler) retype(entry *local, target string) error {
 	// name cannot carry.
 	if target == "boolean" && entry.Numeric {
 		return bail("a variable used as both a number and a boolean")
+	}
+	// A value that is an int and nothing else - a call's result, arithmetic -
+	// cannot be a char's, byte's or boolean's: a variable that holds one and is
+	// used as the narrower type is two variables in one slot, which one name
+	// cannot carry.
+	if erasedToInt[target] && entry.Type == "int" {
+		for _, write := range entry.Writes {
+			value := write.Value
+			_, bareLocal := d.byName[value.Text]
+			if value.Type == target || literalFits(value.Text, target) || value.AsInt != "" || bareLocal {
+				continue
+			}
+			if value.Type == "int" {
+				return bail("a variable used as both an int and a %s", target)
+			}
+		}
 	}
 	entry.Type = target
 	declaration := entry.Declaration
@@ -3436,6 +3486,11 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 	d.loops = loops
 	d.entryPc = entry
 	d.currentBlock = entry
+	// A parameter is defined on entry, on every path: a read after a branch
+	// that reassigned it is as unambiguous as any other.
+	for _, parameter := range d.locals {
+		parameter.StoreBlocks[entry] = true
+	}
 	if err := d.structure(entry, exitBlock); err != nil {
 		return err
 	}
@@ -5211,6 +5266,25 @@ func (d *bodyDecompiler) step(
 		if fallback == "int" && erasedBoolean(value) {
 			if existing, ok := d.locals[slotOf(instruction)]; ok && existing.Type == "boolean" && !existing.Authoritative {
 				fallback = "boolean"
+			}
+		}
+		// The same for a char, byte or short: a literal that fits is one of
+		// theirs. And the other way round - a variable that has only held such
+		// literals, and was never read, takes the type of the first value that
+		// knows its own: `c = 'a'` in one arm and `c = s.charAt(0)` in the other
+		// are one variable, whichever arm comes first.
+		if fallback == "int" && isIntegerText(value.Text) {
+			if existing, ok := d.locals[slotOf(instruction)]; ok && !existing.Authoritative &&
+				literalFits(value.Text, existing.Type) {
+				fallback = existing.Type
+			}
+		}
+		if erasedToInt[fallback] && !erasedBoolean(value) {
+			if existing, ok := d.locals[slotOf(instruction)]; ok && !existing.Authoritative &&
+				existing.Type == "int" && existing.Reads == 0 && len(existing.Writes) > 0 && allLiteralsFit(existing, fallback) {
+				if err := d.retype(existing, fallback); err != nil {
+					return err
+				}
 			}
 		}
 		// A value that is an int and nothing else - a call that returns one, an

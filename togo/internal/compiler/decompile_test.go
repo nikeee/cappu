@@ -1742,6 +1742,105 @@ func TestDecompileNamesTheLoopALabeledJumpLeaves(t *testing.T) {
 	}
 }
 
+// A parameter is defined on entry, on every path: reassigned in a branch and
+// read after it, the read is as unambiguous as any other, and not "written in
+// more than one branch".
+const paramsSource = `public class Params {
+  static int clamp(int v, int lo) { if (v < lo) v = lo; return v * 2; }
+  static String norm(String s) { if (s == null) s = ""; else s = s.trim(); return s + "!"; }
+  static long both(long a, boolean c) { if (c) { a += 5; } else { a -= 1; } return a; }
+  static int loop(int n) { while (n > 10) n /= 2; return n; }
+}
+`
+
+func TestDecompileReadsAReassignedParameterAfterABranch(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Params", paramsSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{"arg0 = arg1;", "return arg0 * 2;", "arg0 = \"\";", "arg0 = arg0.trim();", "return arg0 + \"!\";"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Params", source)
+	driver := `public class ParamsDriver {
+  public static void main(String[] z) {
+    System.out.println(Params.clamp(3, 5) + " " + Params.norm(null) + Params.norm(" x ") + " " + Params.both(10L, true) + " " + Params.loop(100));
+  }
+}`
+	compileWithJavacOn(t, dir, "ParamsDriver", driver, dir)
+	expected := runJava(t, dir, "ParamsDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "ParamsDriver")
+	if actual != expected || actual != "10 !x! 15 6\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// javac erases a boolean, char, byte or short to an int, so `c = 'a'` in one
+// arm and `c = s.charAt(0)` in the other store an int literal and a char into
+// one slot. Without a debug table that split the variable in two. A literal
+// that fits the typed variable is one of its values, and a variable that has
+// only held such literals, and was never read, takes the type of the first
+// value that knows its own - whichever arm comes first.
+const erasedSource = `public class Erased {
+  static boolean flag() { return true; }
+  static char ch(boolean x, String s) { char c; if (x) c = 'a'; else c = s.charAt(0); return c; }
+  static char ch2(boolean x, String s) { char c; if (x) c = s.charAt(0); else c = 'q'; return c; }
+  static boolean bo(boolean x) { boolean b; if (x) b = true; else b = flag(); return b; }
+  static byte by(boolean x, byte[] a) { byte b; if (x) b = 5; else b = a[0]; return b; }
+  static short sh(boolean x, short[] a) { short s; if (x) s = a[0]; else s = -300; return s; }
+}
+`
+
+func TestDecompileMergesAnErasedVariableAcrossBranches(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Erased", erasedSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"char var2;", "var2 = 'a';", "var2 = arg1.charAt(0);", "var2 = 'q';",
+		"boolean var1;", "var1 = true;", "var1 = flag();",
+		"byte var2;", "var2 = 5;", "short var2;", "var2 = -300;",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") || strings.Contains(source, "var2_2") {
+		t.Errorf("expected one variable per method and no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Erased", source)
+	driver := `public class ErasedDriver {
+  public static void main(String[] z) {
+    System.out.println(Erased.ch(true, "z") + "" + Erased.ch(false, "z") + Erased.ch2(true, "z") + Erased.ch2(false, "z") + " "
+      + Erased.bo(true) + Erased.bo(false) + " " + Erased.by(true, new byte[]{9}) + Erased.by(false, new byte[]{9}) + " "
+      + Erased.sh(true, new short[]{3}) + Erased.sh(false, new short[]{3}));
+  }
+}`
+	compileWithJavacOn(t, dir, "ErasedDriver", driver, dir)
+	expected := runJava(t, dir, "ErasedDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "ErasedDriver")
+	if actual != expected || actual != "azzq truetrue 59 3-300\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A `return` inside a loop is a statement, not the loop's end - but where the
 // test carries a call the header is not a pure test, so the follow has to come
 // from somewhere else. A single unconditional latch says the test is still the
