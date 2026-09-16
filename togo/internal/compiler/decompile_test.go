@@ -1418,6 +1418,169 @@ func TestDecompileRewritesAStoredConditionOnARetype(t *testing.T) {
 	}
 }
 
+// An arm of a conditional expression may allocate - `r != null ? r : new
+// SecureRandom()` - as it may call: the arm runs once, in its place. Only an
+// arm two branches share (the merge of a `||`) has to be pure.
+const ternewSource = `import java.security.SecureRandom;
+public class Ternew {
+  static int calls;
+  static SecureRandom mk() { calls++; return new SecureRandom(); }
+  static byte[] nonce(SecureRandom r) { byte[] n = new byte[12]; SecureRandom rng = (r != null) ? r : new SecureRandom(); rng.nextBytes(n); return n; }
+  static Object pick(boolean c, Object o) { return c ? o : new int[3]; }
+  static int len(boolean c) { return (c ? new int[2] : new int[5]).length; }
+  static Object call(boolean c) { return c ? mk() : new Object(); }
+  static boolean cond() { return new Object().hashCode() != 0 && calls >= 0; }
+  static RuntimeException nul(boolean c) { RuntimeException e = c ? null : new IllegalStateException("x"); return e == null ? new IllegalArgumentException("y") : e; }
+  static Exception ret(boolean c, java.io.IOException io) { return c ? new IllegalStateException("z") : io; }
+  static Exception store(boolean c, java.io.IOException io) { Exception e = c ? new IllegalStateException("z") : io; return e; }
+}
+`
+
+func TestDecompileAllocatesInATernaryArm(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Ternew", ternewSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"java.security.SecureRandom var2 = arg0 != null ? arg0 : new java.security.SecureRandom();",
+		"return arg0 ? arg1 : new int[3];",
+		"return (arg0 ? new int[2] : new int[5]).length;",
+		"return arg0 ? mk() : new java.lang.Object();",
+		"return new java.lang.Object().hashCode() != 0 && calls >= 0;",
+		// A `null` arm is of the other arm's type; a return is target-typed.
+		"java.lang.IllegalStateException var1 = arg0 ? null : new java.lang.IllegalStateException(\"x\");",
+		"return var1 == null ? new java.lang.IllegalArgumentException(\"y\") : var1;",
+		"return arg0 ? new java.lang.IllegalStateException(\"z\") : arg1;",
+		// A variable typed from arms that differ needs their least upper bound,
+		// which only a debug table can say.
+		"cappu: a conditional whose arms differ in type",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Count(source, "/* cappu:") != 1 {
+		t.Errorf("expected one bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Ternew", source)
+	driver := `public class TernewDriver {
+  public static void main(String[] a) {
+    System.out.println(Ternew.nonce(null).length + " " + ((int[]) Ternew.pick(false, null)).length + " "
+      + Ternew.len(true) + " " + (Ternew.call(true) != null) + " " + Ternew.cond() + " " + Ternew.calls
+      + " " + Ternew.nul(true).getMessage() + Ternew.nul(false).getMessage() + " " + Ternew.ret(false, null));
+  }
+}`
+	compileWithJavacOn(t, dir, "TernewDriver", driver, dir)
+	expected := runJava(t, dir, "TernewDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "TernewDriver")
+	if actual != expected || actual != "12 3 2 true true 1 yx null\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// `null` is of every reference type: `T x = null; ... x = get();` is one
+// variable, typed by the first real value, and `x = null` later does not begin
+// another one. Without a debug table the store's type was all a slot had to go
+// on, and either shape split the variable in two - the second read stale, or
+// never initialized.
+const nullishSource = `public class Nullish {
+  static String a(boolean c) { String s = null; if (c) { s = "x"; } return s == null ? "-" : s; }
+  static String b(boolean c) { String s = "y"; if (c) { s = null; } return s == null ? "-" : s; }
+  static int[] arr(boolean c) { int[] a = null; if (c) { a = new int[2]; } return a == null ? new int[0] : a; }
+  static Object caught(boolean c) { Object o = null; try { o = c ? "q" : Integer.valueOf(1); } catch (RuntimeException e) { return o; } return o; }
+}
+`
+
+func TestDecompileKeepsANullStoreInItsVariable(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Nullish", nullishSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"java.lang.String var1 = null;", "var1 = \"x\";",
+		"java.lang.String var1 = \"y\";", "var1 = null;",
+		"int[] var1 = null;", "var1 = new int[2];",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "var1_2") || strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected one variable per method and no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Nullish", source)
+	driver := `public class NullishDriver {
+  public static void main(String[] x) {
+    System.out.println(Nullish.a(true) + Nullish.a(false) + Nullish.b(true) + Nullish.b(false) + Nullish.arr(true).length + Nullish.caught(false));
+  }
+}`
+	compileWithJavacOn(t, dir, "NullishDriver", driver, dir)
+	expected := runJava(t, dir, "NullishDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "NullishDriver")
+	if actual != expected || actual != "x--y21\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// A literal `null` passed where `Object` is declared: on the classes with a
+// `char[]` overload beside it (`String.valueOf`, `println`, `append`) the
+// bytecode's choice of the `Object` one means source cast it, and the cast is
+// written back; anywhere else `Object` is as likely a generic `T`, and a cast
+// would not compile against the parameterized type (`Optional.orElse(null)`).
+const nullArgSource = `import java.util.Optional;
+public class NullArg {
+  static String v() { return String.valueOf((Object) null); }
+  static String o(Optional<String> op) { return op.orElse(null); }
+  static Object w() { return new java.lang.ref.WeakReference<Object>(null).get(); }
+}
+`
+
+func TestDecompileCastsANullArgumentOnlyWhereAnOverloadWouldTakeIt(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "NullArg", nullArgSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"return java.lang.String.valueOf((java.lang.Object) null);",
+		"return (java.lang.String) arg0.orElse(null);",
+		"return new java.lang.ref.WeakReference(null).get();",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "NullArg", source)
+	driver := `public class NullArgDriver {
+  public static void main(String[] x) {
+    System.out.println(NullArg.v() + " " + NullArg.o(java.util.Optional.empty()) + " " + NullArg.w());
+  }
+}`
+	compileWithJavacOn(t, dir, "NullArgDriver", driver, dir)
+	expected := runJava(t, dir, "NullArgDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "NullArgDriver")
+	if actual != expected || actual != "null null null\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A `return` inside a loop is a statement, not the loop's end - but where the
 // test carries a call the header is not a pure test, so the follow has to come
 // from somewhere else. A single unconditional latch says the test is still the

@@ -115,6 +115,11 @@ type expr struct {
 	// the call can put `new C(...)` in all of their places at once. Zero means
 	// the value is not one.
 	Pending int
+	// Untyped is set on a conditional whose reference arms are of different
+	// types: the type is their least upper bound, which needs a class hierarchy
+	// this has not got. Where the value is target-typed (a return, an argument,
+	// a typed variable) that does not matter; a variable typed from it cannot be.
+	Untyped bool
 	// Init is the array creation javac may still be filling in: `{1, 2, 3}` is a
 	// `new int[3]` that is duplicated once per element and written through.
 	// Every copy carries the same id, and the elements written so far are what
@@ -457,17 +462,26 @@ func ternaryExpr(condition, thenValue, elseValue expr) (expr, bool) {
 		return shortCircuit(logicalExpr(logicOr, negate(condition), whenTrue)), true
 	}
 	typ := whenTrue.Type
+	untyped := false
 	if whenTrue.Type != whenFalse.Type {
 		left, right := widthOf(whenTrue.Type), widthOf(whenFalse.Type)
-		if left >= 0 && right >= 0 && right > left {
+		switch {
+		case left >= 0 && right >= 0 && right > left:
 			typ = whenFalse.Type
+		case whenTrue.Text == "null":
+			// `null` is of the other arm's type.
+			typ = whenFalse.Type
+		case whenFalse.Text == "null":
+		case !primitiveTypeNames[whenTrue.Type] && !primitiveTypeNames[whenFalse.Type]:
+			untyped = true
 		}
 	}
 	out := expr{
 		Text: at(condition, precTernary+1) + " ? " + at(whenTrue, precTernary) +
 			" : " + at(whenFalse, precTernary),
-		Prec: precTernary,
-		Type: typ,
+		Prec:    precTernary,
+		Type:    typ,
+		Untyped: untyped,
 	}
 	// Two arms that are each a boolean javac erased make a value that is one
 	// too, and the int form is the conditional over their int forms - which is
@@ -1867,19 +1881,39 @@ type activeSwitch struct {
 // no call, nothing that is a statement. A block made only of these can be folded
 // into the condition of the branch before it (`a && b`) or into a ternary
 // without changing what runs.
+// onlyNull reports whether every value stored into the variable so far was
+// `null`.
+func onlyNull(entry *local) bool {
+	for _, write := range entry.Writes {
+		if write.Value.Text != "null" {
+			return false
+		}
+	}
+	return len(entry.Writes) > 0
+}
+
+var primitiveTypeNames = map[string]bool{
+	"boolean": true, "byte": true, "char": true, "short": true,
+	"int": true, "long": true, "float": true, "double": true,
+}
+
+// allocations are the instructions that make an object or an array: an effect,
+// but one a block may carry into a condition or a ternary arm.
+var allocations = map[string]bool{"new": true, "newarray": true, "anewarray": true, "multianewarray": true}
+
 var pureMnemonics = regexp.MustCompile(`^(?:nop|aconst_null|[ilfd]const_\w+|bipush|sipush|ldc\w*|` +
 	`[ilfda]load(?:_\d|_w)?|arraylength|[ilfdabcs]aload|` +
 	`[ilfd](?:add|sub|mul|div|rem|neg|shl|shr|ushr|and|or|xor)|[ilfd]2[ilfdbcs]|` +
 	`lcmp|[fd]cmp[lg]|getstatic|getfield|checkcast|instanceof|dup)$`)
 
 // isConditionBlock reports whether a condition may be folded from a block. Like
-// isPureBlock, but a call is allowed: folding runs it exactly once and in the
-// same place, which is not true of the ternary arms isPureBlock guards - those
-// can be evaluated twice.
+// isPureBlock, but a call or an allocation is allowed: folding runs it exactly
+// once and in the same place, which is not true of the ternary arms isPureBlock
+// guards - those can be evaluated twice.
 func isConditionBlock(b *block) bool {
 	for i, instruction := range b.Instructions {
 		if pureMnemonics.MatchString(instruction.Mnemonic) || invokes[instruction.Mnemonic] ||
-			instruction.Mnemonic == "invokedynamic" {
+			instruction.Mnemonic == "invokedynamic" || allocations[instruction.Mnemonic] {
 			continue
 		}
 		last := i == len(b.Instructions)-1
@@ -2354,6 +2388,8 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 	if scoped != nil && scoped.Type != "" {
 		declared = scoped.Type
 		authoritative = true
+	} else if declared == "" {
+		return nil, bail("a conditional whose arms differ in type")
 	}
 	created := &local{
 		Name:          d.freshName(wanted),
@@ -2369,7 +2405,18 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 
 // callArguments pops a call's arguments in reverse and writes them as the
 // parameters.
-func (d *bodyDecompiler) callArguments(descriptor string) ([]string, error) {
+// nullAmbiguousOwners are the classes with a `char[]` overload beside an
+// `Object` one, where a bare `null` binds the array: `String.valueOf`,
+// `println`, `append`. A generic method's `T` erases to `Object` too, and a
+// cast there does not compile against the real parameterized type.
+var nullAmbiguousOwners = map[string]bool{
+	"java/lang/String": true, "java/lang/StringBuilder": true, "java/lang/StringBuffer": true,
+	"java/io/PrintStream": true, "java/io/PrintWriter": true, "java/io/Writer": true,
+}
+
+// callArguments pops a call's arguments, coerced to the parameter types of
+// its descriptor; owner is the callee's class.
+func (d *bodyDecompiler) callArguments(owner, descriptor string) ([]string, error) {
 	params := parameterSlots(descriptor, true)
 	args := make([]string, len(params))
 	for i := len(params) - 1; i >= 0; i-- {
@@ -2386,14 +2433,16 @@ func (d *bodyDecompiler) callArguments(descriptor string) ([]string, error) {
 		// when it is passed: `f((byte) 3)` is the only way to write the call.
 		narrows := (target == "byte" || target == "short") && intLiteralText.MatchString(text)
 		// A bare `null` where an `Object` is declared re-resolves the overload -
-		// `String.valueOf(null)` binds `char[]` and throws - so the type the call
-		// was compiled against is written back. Only `Object` gets it: a cast to
-		// any other reference type is a `checkcast` the original did not have.
+		// `String.valueOf(null)` binds `char[]` and throws - so there the type
+		// the call was compiled against is written back. Only `Object` gets it,
+		// and only on the classes known to carry that overload: javac only
+		// binds the `Object` one to a literal `null` when source cast it, and a
+		// generic `T` erases to `Object` where the cast would not compile.
 		//
 		// ponytail: that leaves a narrower hole - a parameter typed `CharSequence`
 		// with a `String` overload alongside it also re-resolves. Closing it needs
 		// the callee's other overloads, which live outside this class file.
-		if narrows || (text == "null" && target == "java.lang.Object") {
+		if narrows || (text == "null" && target == "java.lang.Object" && nullAmbiguousOwners[owner]) {
 			text = "(" + sourceTypeText(target, d.self()) + ") " + text
 		}
 		args[i] = text
@@ -2929,7 +2978,7 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 			outer = &value
 		}
 	}
-	args, err := d.callArguments(target.Descriptor)
+	args, err := d.callArguments(target.Owner, target.Descriptor)
 	if err != nil {
 		return err
 	}
@@ -4996,6 +5045,29 @@ func (d *bodyDecompiler) step(
 		if base == "astore" || (erasedToInt[value.Type] && value.AsInt == "") {
 			fallback = value.Type
 		}
+		// A conditional whose arms differ in type has none this could declare
+		// a variable with; only a debug table can say what source wrote.
+		if value.Untyped {
+			fallback = ""
+		}
+		// `null` is of every reference type: stored into a variable it does not
+		// begin another one, and a variable that has only ever held `null` is
+		// of the type the first real value gives it.
+		if base == "astore" {
+			if existing, ok := d.locals[slotOf(instruction)]; ok && !existing.Authoritative && !primitiveTypeNames[existing.Type] {
+				switch {
+				case value.Text == "null":
+					fallback = existing.Type
+				case value.Untyped && existing.Type == "java.lang.Object":
+					// Whatever the arms' bound is, an Object holds it.
+					fallback = existing.Type
+				case existing.Type == "java.lang.Object" && fallback != "java.lang.Object" && fallback != "" && onlyNull(existing):
+					if err := d.retype(existing, fallback); err != nil {
+						return err
+					}
+				}
+			}
+		}
 		// A `1`/`0` - or a condition javac materialized as one - stored into a
 		// variable that is a boolean is a boolean: `w = !w` in a loop is the
 		// same variable, and splitting it would leave every earlier read on a
@@ -5381,7 +5453,7 @@ func (d *bodyDecompiler) step(
 		if target.Name == "<init>" {
 			return d.construct(target)
 		}
-		args, err := d.callArguments(target.Descriptor)
+		args, err := d.callArguments(target.Owner, target.Descriptor)
 		if err != nil {
 			return err
 		}
