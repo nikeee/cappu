@@ -1897,6 +1897,10 @@ type activeLoop struct {
 	// `do`'s latch is the test *and* the tail of the body when nothing else jumps
 	// to it - and `continue;` skips that tail, so a jump there is not one.
 	Continues bool
+	// Label names the loop once a jump from a loop inside it leaves or
+	// continues it: `break label;` needs a `label:` on the header, which is
+	// written after the body and so can still take it.
+	Label string
 }
 
 // activeSwitch is a `switch` statement being written right now.
@@ -1991,6 +1995,8 @@ type bodyDecompiler struct {
 	statements []stmt
 	// sharedIDs numbers the copies a compound assignment's dup made.
 	sharedIDs int
+	// labels numbers the loop labels handed out.
+	labels int
 	// assignFieldAsValue is set by a `dup_x1` into a `putfield` (or a `dup`
 	// into a `putstatic`): the field assignment is the value, not a statement.
 	assignFieldAsValue bool
@@ -3935,8 +3941,8 @@ func (d *bodyDecompiler) catchName(c *clause) (string, func(), error) {
 }
 
 // loopJump reports `break;` or `continue;` when at is where the innermost
-// loop's next iteration, or the code after it, begins. Leaving an *enclosing*
-// loop needs a label, which this phase does not write.
+// loop's next iteration, or the code after it, begins - and `break label;` or
+// `continue label;` for an enclosing loop, which the label then names.
 func (d *bodyDecompiler) loopJump(at int) (string, bool, error) {
 	// Only the innermost breakable statement can be left without a label, and a
 	// loop opened inside a `switch` is the innermost one.
@@ -3964,10 +3970,23 @@ func (d *bodyDecompiler) loopJump(at int) (string, bool, error) {
 	if !switchIsInner && len(d.active) > 0 {
 		outerLoops = d.active[:len(d.active)-1]
 	}
-	for _, outer := range outerLoops {
-		if at == outer.ContinueTarget || at == outer.Loop.Follow {
-			return "", false, bail("a labeled break or continue")
+	// Innermost first: the nearest loop the jump fits is the one source named.
+	for i := len(outerLoops) - 1; i >= 0; i-- {
+		outer := &outerLoops[i]
+		if at != outer.ContinueTarget && at != outer.Loop.Follow {
+			continue
 		}
+		if at == outer.ContinueTarget && !outer.Continues {
+			return "", false, bail("a jump into the tail of a do-while")
+		}
+		if outer.Label == "" {
+			d.labels++
+			outer.Label = d.freshName("label" + strconv.Itoa(d.labels))
+		}
+		if at == outer.ContinueTarget {
+			return "continue " + outer.Label + ";", true, nil
+		}
+		return "break " + outer.Label + ";", true, nil
 	}
 	outerSwitches := d.switches
 	if switchIsInner {
@@ -4145,18 +4164,27 @@ func (d *bodyDecompiler) whileLoop(l *loop, header *block) (int, error) {
 			return 0, err
 		}
 	}
+	label := labelPrefix(d.active[len(d.active)-1].Label)
 	if clause == "" {
 		// A `continue` target with nothing in it: the jump back to the test, on
 		// its own. There is no update to write, so this stays a `while`.
-		d.emitCondition(condition, whileWrap)
+		d.emitCondition(condition, func(text string) string { return label + whileWrap(text) })
 	} else {
 		d.emitCondition(condition, func(text string) string {
-			return "for (; " + text + "; " + clause + ") {"
+			return label + "for (; " + text + "; " + clause + ") {"
 		})
 	}
 	*d.current = append(*d.current, stmt{Nested: &statements})
 	d.emit("}")
 	return l.Follow, nil
+}
+
+// labelPrefix is `label: ` for a loop a jump named, and nothing otherwise.
+func labelPrefix(label string) string {
+	if label == "" {
+		return ""
+	}
+	return label + ": "
 }
 
 // forUpdate is the update of a `for`, which javac lays out at the bottom of the
@@ -4256,7 +4284,7 @@ func (d *bodyDecompiler) doWhileLoop(l *loop, latch *block) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	d.emit("do {")
+	d.emit(labelPrefix(d.active[len(d.active)-1].Label) + "do {")
 	*d.current = append(*d.current, stmt{Nested: &statements})
 	d.emitCondition(condition, doWhileWrap)
 	return l.Follow, nil
@@ -4272,7 +4300,7 @@ func (d *bodyDecompiler) foreverLoop(l *loop) (int, error) {
 		return 0, err
 	}
 	statements = trimTail(statements, "continue;")
-	d.emit("while (true) {")
+	d.emit(labelPrefix(d.active[len(d.active)-1].Label) + "while (true) {")
 	*d.current = append(*d.current, stmt{Nested: &statements})
 	d.emit("}")
 	return l.Follow, nil

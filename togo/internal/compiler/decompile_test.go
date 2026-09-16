@@ -600,11 +600,11 @@ var reconstructions = []struct {
 	{
 		name: "SwitchLabeled",
 		// A `switch` catches an unlabeled `break`, so one that leaves the loop
-		// around it needs a label - which this phase does not write.
+		// around it needs a label, which names the loop.
 		source: "class SwitchLabeled { static int f(int n, int x) { int r = 0;" +
 			" outer: while (r < n) { switch (x) { case 1: r += 1; break; case 2: break outer;" +
 			" default: r += 3; } r += 1; } return r; } }",
-		want:          []string{"cappu: a labeled break or continue"},
+		want:          []string{"label1: while (var2 < arg0) {", "break label1;"},
 		selfContained: true,
 	},
 	{
@@ -1684,6 +1684,60 @@ func TestDecompileWritesCompoundAndValueAssignments(t *testing.T) {
 	expected := runJava(t, dir, "RmwDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "RmwDriver")
 	if actual != expected || actual != "104 104 1 0 nullx 12 2 6 14 7 q 5 9 12 15\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// A jump that leaves or continues an enclosing loop needs that loop named:
+// `break label;` and `continue label;` name the nearest enclosing loop the jump
+// fits, and the label goes on its header - written after the body, so it can
+// still take it. Every loop form takes one.
+const labeledSource = `public class Labeled {
+  static int find(int[][] m, int v) { int r = -1; outer: for (int i = 0; i < m.length; i++) { for (int j = 0; j < m[i].length; j++) { if (m[i][j] == v) { r = i * 10 + j; break outer; } } } return r; }
+  static int skip(int[][] m) { int s = 0; rows: for (int i = 0; i < m.length; i++) { for (int j = 0; j < m[i].length; j++) { if (m[i][j] < 0) continue rows; s += m[i][j]; } s += 100; } return s; }
+  static int fromSwitch(int[] a) { int n = 0; loop: for (int x : a) { switch (x) { case 0: break loop; case 1: continue loop; default: n += x; } n++; } return n; }
+  static int three(int[][][] c) { int n = 0; a: for (int[][] p : c) { b: for (int[] q : p) { for (int r : q) { if (r == 7) break a; if (r == 5) continue b; if (r == 3) continue a; n += r; } n += 1000; } n += 100000; } return n; }
+  static int whileTrue(int[] a) { int i = 0, n = 0; outer: while (true) { while (i < a.length) { if (a[i] == 9) break outer; n += a[i++]; } break; } return n; }
+  static int doo(int[] a) { int i = 0, n = 0; outer: do { i++; int j = 0; do { if (a[j] == 4) continue outer; n += a[j]; j++; } while (j < a.length); n += 50; } while (i < 2); return n; }
+}
+`
+
+func TestDecompileNamesTheLoopALabeledJumpLeaves(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Labeled", labeledSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"label1: while (var3 < arg0.length) {", "break label1;", "continue label1;",
+		"label1: for (; var2 < arg0.length; var2++) {", "label2: for (; var8 < var7; var8++) {",
+		"continue label2;", "label1: do {",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Labeled", source)
+	driver := `public class LabeledDriver {
+  public static void main(String[] z) {
+    int[][] m = {{1,2},{3,4}};
+    System.out.println(Labeled.find(m, 4) + " " + Labeled.find(m, 9) + " " + Labeled.skip(new int[][]{{1,-1,5},{2,3}}) + " "
+      + Labeled.fromSwitch(new int[]{2,1,3,0,5}) + " " + Labeled.three(new int[][][]{{{1,2},{5,9},{3,8}},{{7}}}) + " "
+      + Labeled.whileTrue(new int[]{1,2,9,4}) + " " + Labeled.doo(new int[]{1,4,2}));
+  }
+}`
+	compileWithJavacOn(t, dir, "LabeledDriver", driver, dir)
+	expected := runJava(t, dir, "LabeledDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "LabeledDriver")
+	if actual != expected || actual != "11 -1 106 7 1003 3 2\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
