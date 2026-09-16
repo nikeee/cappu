@@ -1981,6 +1981,51 @@ func TestDecompileTypesAMergedVariableByItsFirstUse(t *testing.T) {
 	}
 }
 
+// `super.m()` names, in the bytecode, the class that declares `m` - which may
+// be further up than the direct superclass (`super.clone()` is `Object`'s) - and
+// an interface's default method is `Iface.super.m()`. The JVM allows an
+// invokespecial on `this` nothing else, so the reference kind decides.
+const superySource = `interface SuperyGreeter { default String greet() { return "hi"; } }
+class SuperyBase { public String toString() { return "base"; } }
+class SuperyMid extends SuperyBase {}
+public class Supery extends SuperyMid implements SuperyGreeter, Cloneable {
+  public String greet() { return SuperyGreeter.super.greet() + "!"; }
+  public String toString() { return super.toString() + "-s"; }
+  public Supery copy() { try { return (Supery) super.clone(); } catch (CloneNotSupportedException e) { throw new AssertionError(e); } }
+}
+`
+
+func TestDecompileWritesSuperCallsToAnyAncestor(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Supery", superySource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{"return SuperyGreeter.super.greet() + \"!\";", "return super.toString() + \"-s\";", "return (Supery) super.clone();"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavacOn(t, again, "Supery", source, dir)
+	driver := `public class SuperyDriver {
+  public static void main(String[] z) { Supery s = new Supery(); System.out.println(s.greet() + " " + s + " " + (s.copy() != s)); }
+}`
+	compileWithJavacOn(t, dir, "SuperyDriver", driver, dir)
+	expected := runJava(t, dir, "SuperyDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "SuperyDriver")
+	if actual != expected || actual != "hi! base-s true\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A `return` inside a loop is a statement, not the loop's end - but where the
 // test carries a call the header is not a pure test, so the follow has to come
 // from somewhere else. A single unconditional latch says the test is still the

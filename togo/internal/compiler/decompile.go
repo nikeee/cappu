@@ -3050,7 +3050,7 @@ func (d *bodyDecompiler) staticCallee(owner, name string) string {
 
 // receiverCallee names an instance call, with the receiver the bytecode pushed
 // before the arguments.
-func (d *bodyDecompiler) receiverCallee(mnemonic, owner, name string) (string, error) {
+func (d *bodyDecompiler) receiverCallee(mnemonic, owner, name string, iface bool) (string, error) {
 	receiver, err := d.pop()
 	if err != nil {
 		return "", err
@@ -3071,14 +3071,15 @@ func (d *bodyDecompiler) receiverCallee(mnemonic, owner, name string) (string, e
 	if mnemonic != "invokespecial" || owner == d.classFile.ThisClass {
 		return at(receiver, precPrimary) + "." + name, nil
 	}
-	// The only other invokespecial source writes is `super.m()`; an interface's
-	// `Iface.super.m()` needs the interface named, which this phase does not do.
-	superClass := d.classFile.SuperClass
-	if superClass == "" {
-		superClass = "java/lang/Object"
-	}
-	if owner != superClass || receiver.Text != "this" {
+	// The only other invokespecial source writes is `super.m()` - on `this`, of
+	// a method of a superclass (javac names the one that declares it, which may
+	// be further up) or of a direct superinterface, `Iface.super.m()`. The JVM
+	// allows nothing else here.
+	if receiver.Text != "this" {
 		return "", bail("unsupported instruction invokespecial")
+	}
+	if iface {
+		return typeName(owner, d.self()) + ".super." + name, nil
 	}
 	return "super." + name, nil
 }
@@ -5897,7 +5898,7 @@ func (d *bodyDecompiler) step(
 		callee := ""
 		if mnemonic == "invokestatic" {
 			callee = d.staticCallee(target.Owner, target.Name)
-		} else if callee, err = d.receiverCallee(mnemonic, target.Owner, target.Name); err != nil {
+		} else if callee, err = d.receiverCallee(mnemonic, target.Owner, target.Name, target.Interface); err != nil {
 			return err
 		}
 		text := callee + "(" + strings.Join(args, ", ") + ")"

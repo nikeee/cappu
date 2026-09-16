@@ -501,6 +501,8 @@ type MemberRef struct {
 	Owner      string
 	Name       string
 	Descriptor string
+	// Interface is set for an InterfaceMethodref: the owner is an interface.
+	Interface bool
 }
 
 // PoolMemberRef resolves a Fieldref/Methodref/InterfaceMethodref index.
@@ -516,7 +518,10 @@ func PoolMemberRef(pool []*Constant, index uint16) (MemberRef, bool) {
 	if !ok {
 		return MemberRef{}, false
 	}
-	return MemberRef{Owner: PoolClassName(pool, entry.ClassIndex), Name: name, Descriptor: descriptor}, true
+	return MemberRef{
+		Owner: PoolClassName(pool, entry.ClassIndex), Name: name, Descriptor: descriptor,
+		Interface: entry.Tag == TagInterfaceMethodref,
+	}, true
 }
 
 // PoolNameAndType resolves a CONSTANT_NameAndType index.
