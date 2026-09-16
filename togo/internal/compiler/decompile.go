@@ -889,10 +889,6 @@ type local struct {
 	// Reads counts the loads of it: a read rendered against the type it had
 	// then is text, and a later narrowing cannot reach it.
 	Reads int
-	// Depth is how deep in captured blocks it was first stored: a store deeper
-	// in is inside its scope, one at the same depth or shallower may be a new
-	// variable in a reused slot.
-	Depth int
 }
 
 type paramSlot struct {
@@ -2507,7 +2503,6 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 		Origin:        scoped,
 		Authoritative: authoritative,
 		StoreBlocks:   map[int]bool{},
-		Depth:         d.depth,
 	}
 	d.locals[slot] = created
 	d.byName[created.Name] = created
@@ -5072,6 +5067,85 @@ func (d *bodyDecompiler) reachesAvoiding(target int, stores map[int]bool) bool {
 	return false
 }
 
+// sharesRead reports whether the variable's stores and a store to its slot at
+// pc flow to one read of the slot - a read reachable from both before another
+// store. Two arms of one `if` that assign one variable read it after the join;
+// two variables of their own in the slot - one per arm, or a dead one before a
+// new one - never reach one read together: javac keeps a variable assigned on
+// every path to where it is read. That is the one sign, without a debug table,
+// that two stores are one variable.
+func (d *bodyDecompiler) sharesRead(entry *local, slot, pc int) bool {
+	if len(entry.StoreBlocks) == 0 {
+		return false
+	}
+	theirs := map[int]bool{}
+	for start := range entry.StoreBlocks {
+		if start == d.currentBlock {
+			continue
+		}
+		for read := range d.readsBeforeStore(d.blocks[start].Successors, slot) {
+			theirs[read] = true
+		}
+	}
+	if len(theirs) == 0 {
+		return false
+	}
+	// This block's own tail after the store, then what follows it.
+	block := d.blocks[d.currentBlock]
+	if block == nil {
+		return false
+	}
+	for _, instruction := range block.Instructions {
+		if instruction.Pc <= pc {
+			continue
+		}
+		base := opBase(instruction.Mnemonic)
+		if (isOneOf(base, "ilfda", "load") || base == "iinc") && slotOf(instruction) == slot && theirs[instruction.Pc] {
+			return true
+		}
+		if isOneOf(base, "ilfda", "store") && slotOf(instruction) == slot {
+			return false
+		}
+	}
+	for read := range d.readsBeforeStore(block.Successors, slot) {
+		if theirs[read] {
+			return true
+		}
+	}
+	return false
+}
+
+// readsBeforeStore is the pcs of the loads of the slot some path from the
+// starts reaches before storing to it.
+func (d *bodyDecompiler) readsBeforeStore(starts []int, slot int) map[int]bool {
+	reads := map[int]bool{}
+	seen := map[int]bool{}
+	queue := append([]int(nil), starts...)
+	for len(queue) > 0 {
+		at := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		if seen[at] || d.blocks[at] == nil {
+			continue
+		}
+		seen[at] = true
+		stored := false
+		for _, instruction := range d.blocks[at].Instructions {
+			base := opBase(instruction.Mnemonic)
+			if (isOneOf(base, "ilfda", "load") || base == "iinc") && slotOf(instruction) == slot {
+				reads[instruction.Pc] = true
+			}
+			if isOneOf(base, "ilfda", "store") && slotOf(instruction) == slot {
+				stored = true
+				break
+			}
+		}
+		if !stored {
+			queue = append(queue, d.blocks[at].Successors...)
+		}
+	}
+	return reads
+}
+
 func (d *bodyDecompiler) runInstructions(instructions []Instruction, endPc, blockStart int) error {
 	outer := d.currentBlock
 	d.currentBlock = blockStart
@@ -5241,11 +5315,26 @@ func (d *bodyDecompiler) step(
 		// already, rendered against `Object`, and stays one.
 		if base == "astore" {
 			if existing, ok := d.locals[slotOf(instruction)]; ok && !existing.Authoritative && !primitiveTypeNames[existing.Type] {
-				nested := d.depth > existing.Depth
+				// The same variable, when this store and the variable's flow to a
+				// read together; otherwise the slot may be a dead variable's, or
+				// another arm's own.
+				same := d.sharesRead(existing, slotOf(instruction), pc)
 				switch {
-				case value.Text == "null" && nested:
+				case value.Text == "null" && same:
 					fallback = existing.Type
-				case value.Untyped && existing.Type == "java.lang.Object" && (nested || onlyNull(existing)):
+				// `Object` is every reference type's bound: a variable that holds
+				// one and takes another is an Object, and source declared it so
+				// (or the Object it held would not have gone in). The other way
+				// round, a variable typed by one arm's value is an Object once the
+				// other arm stores one - if nothing has read it as the narrower
+				// type yet.
+				case existing.Type == "java.lang.Object" && fallback != "" && !onlyNull(existing) && same:
+					fallback = existing.Type
+				case fallback == "java.lang.Object" && value.Text != "null" && existing.Reads == 0 && same:
+					if err := d.retype(existing, fallback); err != nil {
+						return err
+					}
+				case value.Untyped && existing.Type == "java.lang.Object" && (same || onlyNull(existing)):
 					// Whatever the arms' bound is, an Object holds it.
 					fallback = existing.Type
 				case existing.Type == "java.lang.Object" && fallback != "java.lang.Object" && fallback != "" &&

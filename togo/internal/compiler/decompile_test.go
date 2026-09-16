@@ -1841,6 +1841,72 @@ func TestDecompileMergesAnErasedVariableAcrossBranches(t *testing.T) {
 	}
 }
 
+// Two arms of one `if` that store differently-typed values into one slot are
+// one variable when the types allow: `Object` is every reference type's bound,
+// so a variable that holds one and takes another is an Object, and one typed by
+// one arm's value becomes an Object once the other arm stores one (if nothing
+// read it as the narrower type yet); `null` fits whatever the other arm stored.
+// Two stores are one variable when they flow to one read of the slot - which is
+// what definite assignment guarantees for a variable read after the arms join,
+// and what two arm-local variables in one slot (`Object o` in one `else if`
+// arm, `Node c` in the next) never do.
+const boundSource = `import java.util.*;
+public class Bound {
+  static Object first(boolean c, Map<String, Object> m) { Object x; if (c) x = m.get("k"); else x = new ArrayList<String>(); return x; }
+  static Object second(boolean c, Map<String, Object> m) { Object x; if (c) x = new StringBuilder("s"); else x = m.get("k"); return x; }
+  static int[] arr(boolean c, Object o) { Object x; if (c) x = o; else x = new int[2]; return x instanceof int[] ? (int[]) x : new int[0]; }
+  static String arms(boolean c, String a) { String s; if (c) s = a.trim(); else s = null; return s == null ? "-" : s; }
+  static String arms2(boolean c, String a) { String s; if (c) s = null; else s = a.trim(); return s == null ? "-" : s; }
+  static void use(Object o) { System.out.print(o); }
+  static void armLocal(int k, Map<String, Object> m, java.util.List<String> l) { if (k == 1) { Object o = m.get("a"); use(o); } else if (k == 2) { java.util.List<String> c = l; use(c.size()); } }
+  static Object joined(int k, Map<String, Object> m) { Object x; if (k == 1) { x = m.get("a"); } else { x = new ArrayList<>(); use(x); } return x; }
+}
+`
+
+func TestDecompileBoundsAVariableTwoArmsAssign(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Bound", boundSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"java.lang.Object var2;", "var2 = arg1.get(\"k\");", "var2 = new java.util.ArrayList();",
+		"var2 = new java.lang.StringBuilder(\"s\");", "var2 = new int[2];",
+		"java.lang.String var2;", "var2 = arg1.trim();", "var2 = null;",
+		// Two arm-local variables keep their slot apart, one joined variable does not.
+		"java.lang.Object var3;", "java.util.List var3_2;", "var3 = arg1.get(\"a\");", "var3_2 = arg2;",
+		"java.lang.Object var2;", "var2 = new java.util.ArrayList();", "use(var2);",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") || strings.Contains(source, "var2_2") {
+		t.Errorf("expected one variable per method and no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Bound", source)
+	driver := `public class BoundDriver {
+  public static void main(String[] z) {
+    java.util.Map<String, Object> m = new java.util.HashMap<>(); m.put("k", 5);
+    System.out.println(Bound.first(true, m) + " " + Bound.first(false, m) + " " + Bound.second(true, m) + " " + Bound.second(false, m)
+      + " " + Bound.arr(false, null).length + " " + Bound.arms(true, " x ") + Bound.arms(false, "y") + Bound.arms2(true, "x") + Bound.arms2(false, " y "));
+    Bound.armLocal(1, m, null); Bound.armLocal(2, m, java.util.List.of("q"));
+    System.out.println(" " + Bound.joined(1, m) + Bound.joined(2, m));
+  }
+}`
+	compileWithJavacOn(t, dir, "BoundDriver", driver, dir)
+	expected := runJava(t, dir, "BoundDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "BoundDriver")
+	if actual != expected || actual != "5 [] s 5 2 x--y\nnull1[] null[]\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A `return` inside a loop is a statement, not the loop's end - but where the
 // test carries a call the header is not a pure test, so the follow has to come
 // from somewhere else. A single unconditional latch says the test is still the
