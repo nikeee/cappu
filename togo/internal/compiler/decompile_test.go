@@ -2026,6 +2026,63 @@ func TestDecompileWritesSuperCallsToAnyAncestor(t *testing.T) {
 	}
 }
 
+// A switch whose every case leaves one value where they come back together - or
+// throws - is a switch expression, and the code after the merge picks the value
+// up. The value's type is the arms' common one, as for a conditional.
+const switchExprSource = `public class SwitchExpr {
+  static String name(int k) { return switch (k) { case 0 -> "zero"; case 1, 2 -> "small"; default -> throw new IllegalArgumentException("k=" + k); }; }
+  static int val(int k) { int v = switch (k) { case 0 -> 10; case 1 -> 20; default -> k * 2; }; return v + 1; }
+  static Object mixed(int k) { return switch (k) { case 0 -> "s"; case 1 -> Integer.valueOf(7); default -> null; }; }
+  static long wide(int k) { return switch (k) { case 0 -> 1; default -> 5L; }; }
+  static int stmt(int k) { int r = 0; switch (k) { case 0: r = 1; break; case 1: r = 2; default: r += 10; } return r; }
+  static boolean t(int k) { return true; }
+  static boolean mix(int k, boolean f) { return switch (k) { case 5 -> false; case 4 -> true; case 6 -> f; default -> t(k); }; }
+}
+`
+
+func TestDecompileWritesASwitchExpression(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "SwitchExpr", switchExprSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"return switch (arg0) { case 0 -> \"zero\"; case 1, 2 -> \"small\"; default -> throw new java.lang.IllegalArgumentException(\"k=\" + arg0); };",
+		"int var1 = switch (arg0) { case 0 -> 10; case 1 -> 20; default -> arg0 * 2; };",
+		"return switch (arg0) { case 0 -> \"s\"; case 1 -> java.lang.Integer.valueOf(7); default -> null; };",
+		"return switch (arg0) { case 0 -> 1L; default -> 5L; };",
+		// The statement form stays one: its cases fall through and store.
+		"case 1:", "var1 += 10;",
+		// A boolean arm makes the others' 1/0 true/false.
+		"return switch (arg0) { case 5 -> false; case 4 -> true; case 6 -> arg1; default -> t(arg0); };",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "SwitchExpr", source)
+	driver := `public class SwitchExprDriver {
+  public static void main(String[] z) {
+    System.out.println(SwitchExpr.name(0) + SwitchExpr.name(2) + " " + SwitchExpr.val(1) + SwitchExpr.val(9) + " " + SwitchExpr.mixed(1) + SwitchExpr.mixed(5) + " " + SwitchExpr.wide(0) + SwitchExpr.wide(2) + " " + SwitchExpr.stmt(1) + SwitchExpr.stmt(0) + " " + SwitchExpr.mix(5, true) + SwitchExpr.mix(6, true));
+    try { SwitchExpr.name(7); } catch (IllegalArgumentException e) { System.out.println(e.getMessage()); }
+  }
+}`
+	compileWithJavacOn(t, dir, "SwitchExprDriver", driver, dir)
+	expected := runJava(t, dir, "SwitchExprDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "SwitchExprDriver")
+	if actual != expected || actual != "zerosmall 2119 7null 15 121 falsetrue\nk=7\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A `return` inside a loop is a statement, not the loop's end - but where the
 // test carries a call the header is not a pure test, so the follow has to come
 // from somewhere else. A single unconditional latch says the test is still the

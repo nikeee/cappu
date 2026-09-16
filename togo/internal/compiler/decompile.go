@@ -4598,6 +4598,20 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 		}
 	}
 
+	// A `switch` whose every case leaves one value where they all come back
+	// together - or throws - is a switch expression, and the value is what the
+	// code after the merge picks up.
+	if follow != exitBlock && len(bodies) == len(targets) {
+		value, found, err := d.trySwitchExpression(selector, bodies, keysOf, defaultTarget, follow)
+		if err != nil {
+			return 0, err
+		}
+		if found {
+			d.push(value)
+			return follow, nil
+		}
+	}
+
 	d.switches = append(d.switches, activeSwitch{Follow: follow, LoopDepth: len(d.active)})
 	// The bodyless cases come first: nothing can fall into them there, and their
 	// own `break;` keeps them from falling into the first body.
@@ -4647,6 +4661,135 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	*d.current = append(*d.current, stmt{Nested: &clauses})
 	d.emit("}")
 	return follow, nil
+}
+
+// trySwitchExpression writes the cases as `case k -> value;` arms when each is
+// a single value left for the merge, or a `throw`. Nothing is kept of a try
+// that does not fit.
+func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf map[int][]int, defaultTarget, follow int) (expr, bool, error) {
+	stackBefore := append([]expr(nil), d.stack...)
+	statements := d.current
+	statementsBefore := len(*statements)
+	visitedBefore := map[int]bool{}
+	for k, v := range d.visited {
+		visitedBefore[k] = v
+	}
+	restore := func() {
+		d.stack = stackBefore
+		*statements = (*statements)[:statementsBefore]
+		d.visited = visitedBefore
+	}
+	consumed := []int{}
+	arms := []string{}
+	values := []expr{}
+	for _, target := range bodies {
+		label := "default"
+		if target != defaultTarget {
+			keys := make([]string, len(keysOf[target]))
+			for i, key := range keysOf[target] {
+				keys[i] = strconv.Itoa(key)
+			}
+			label = "case " + strings.Join(keys, ", ")
+		}
+		b := d.blocks[target]
+		if b != nil && len(b.Instructions) > 0 && b.Instructions[len(b.Instructions)-1].Mnemonic == "athrow" {
+			captured, err := d.capture(func() error { return d.structure(target, follow) })
+			if err != nil {
+				restore()
+				return expr{}, false, err
+			}
+			lines := flattenStatements(captured)
+			if len(lines) != 1 || !strings.HasPrefix(lines[0], "throw ") {
+				restore()
+				return expr{}, false, nil
+			}
+			arms = append(arms, label+" -> "+lines[0])
+			continue
+		}
+		value, found, err := d.valueOfRegion(target, follow, &consumed)
+		if err != nil {
+			restore()
+			return expr{}, false, err
+		}
+		if !found || len(d.stack) != len(stackBefore) {
+			restore()
+			return expr{}, false, nil
+		}
+		values = append(values, value)
+		arms = append(arms, label+" -> %s;")
+	}
+	if len(values) == 0 || len(*statements) != statementsBefore {
+		restore()
+		return expr{}, false, nil
+	}
+	for _, start := range consumed {
+		d.visited[start] = true
+	}
+	// The value's type is the arms' common one, as for a conditional; arms that
+	// are all a boolean javac erased make a boolean, with the int form kept.
+	typ := values[0].Type
+	untyped := false
+	allErased, anyBoolean := true, false
+	for _, value := range values {
+		if !erasedBoolean(value) {
+			allErased = false
+			if value.Type == "boolean" {
+				anyBoolean = true
+			}
+		}
+		if value.Type == typ {
+			continue
+		}
+		left, right := widthOf(typ), widthOf(value.Type)
+		switch {
+		case left >= 0 && right >= 0 && right > left:
+			typ = value.Type
+		case value.Text == "null":
+		case typ == "java.lang.Object" || value.Type == "java.lang.Object":
+			typ = "java.lang.Object"
+		case !primitiveTypeNames[typ] && !primitiveTypeNames[value.Type]:
+			untyped = true
+		}
+	}
+	render := func(arm func(expr) string) string {
+		texts := []string{}
+		next := 0
+		for _, one := range arms {
+			if strings.HasSuffix(one, " -> %s;") {
+				texts = append(texts, strings.TrimSuffix(one, "%s;")+arm(values[next])+";")
+				next++
+			} else {
+				texts = append(texts, one)
+			}
+		}
+		return "switch (" + selector.Text + ") { " + strings.Join(texts, " ") + " }"
+	}
+	if allErased {
+		return expr{
+			Text:  render(func(v expr) string { return asBoolean(v).Text }),
+			Prec:  precPrimary,
+			Type:  "boolean",
+			AsInt: render(func(v expr) string { return numeric(v).Text }),
+		}, true, nil
+	}
+	// An arm that is a boolean and nothing else makes the others' `1`/`0` the
+	// `true`/`false` they were.
+	if anyBoolean {
+		for _, value := range values {
+			if value.Type != "boolean" && !erasedBoolean(value) {
+				restore()
+				return expr{}, false, nil
+			}
+		}
+		return expr{Text: render(func(v expr) string { return asBoolean(v).Text }), Prec: precPrimary, Type: "boolean", Effects: true}, true, nil
+	}
+	return expr{
+		Text:    render(func(v expr) string { return v.Text }),
+		Prec:    precPrimary,
+		Type:    typ,
+		Untyped: untyped,
+		Effects: true,
+	}, true, nil
 }
 
 // conditional writes one `if`, from the branch that ends b, and reports where
