@@ -1433,6 +1433,11 @@ public class Ternew {
   static RuntimeException nul(boolean c) { RuntimeException e = c ? null : new IllegalStateException("x"); return e == null ? new IllegalArgumentException("y") : e; }
   static Exception ret(boolean c, java.io.IOException io) { return c ? new IllegalStateException("z") : io; }
   static Exception store(boolean c, java.io.IOException io) { Exception e = c ? new IllegalStateException("z") : io; return e; }
+  Object impl; int[] cache = new int[4];
+  Object compute() { calls++; return new Object(); }
+  Object impl() { Object i = impl; return i != null ? i : (impl = compute()); }
+  int cached(int k) { int v = cache[k]; return v != 0 ? v : (cache[k] = k * 7); }
+  static int loc(boolean c, int x) { int r; return c ? (r = x + 1) : (r = 2); }
 }
 `
 
@@ -1459,6 +1464,10 @@ func TestDecompileAllocatesInATernaryArm(t *testing.T) {
 		// A variable typed from arms that differ needs their least upper bound,
 		// which only a debug table can say.
 		"cappu: a conditional whose arms differ in type",
+		// An arm may carry an assignment used as a value: an expression.
+		"return var1 != null ? var1 : (this.impl = this.compute());",
+		"return var2 != 0 ? var2 : (this.cache[arg0] = arg0 * 7);",
+		"return arg0 ? (var2 = arg1 + 1) : (var2 = 2);",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
@@ -1474,12 +1483,14 @@ func TestDecompileAllocatesInATernaryArm(t *testing.T) {
     System.out.println(Ternew.nonce(null).length + " " + ((int[]) Ternew.pick(false, null)).length + " "
       + Ternew.len(true) + " " + (Ternew.call(true) != null) + " " + Ternew.cond() + " " + Ternew.calls
       + " " + Ternew.nul(true).getMessage() + Ternew.nul(false).getMessage() + " " + Ternew.ret(false, null));
+    Ternew t = new Ternew();
+    System.out.println((t.impl() == t.impl()) + " " + t.cached(2) + t.cached(2) + " " + Ternew.loc(true, 5) + Ternew.loc(false, 5) + " " + Ternew.calls);
   }
 }`
 	compileWithJavacOn(t, dir, "TernewDriver", driver, dir)
 	expected := runJava(t, dir, "TernewDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "TernewDriver")
-	if actual != expected || actual != "12 3 2 true true 1 yx null\n" {
+	if actual != expected || actual != "12 3 2 true true 1 yx null\ntrue 1414 62 2\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }

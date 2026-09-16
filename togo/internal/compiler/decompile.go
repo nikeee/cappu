@@ -1997,9 +1997,31 @@ var pureMnemonics = regexp.MustCompile(`^(?:nop|aconst_null|[ilfd]const_\w+|bipu
 // once and in the same place, which is not true of the ternary arms isPureBlock
 // guards - those can be evaluated twice.
 func isConditionBlock(b *block) bool {
+	return isValueBlock(b, false)
+}
+
+func isAssignment(base string) bool {
+	return isOneOf(base, "ilfda", "store") || base == "putfield" || base == "putstatic" || isOneOf(base, "ilfdabcs", "astore")
+}
+
+// isArmBlock is isConditionBlock for a conditional's arm, where an assignment
+// used as a value - a store straight after a dup - is an expression too.
+func isArmBlock(b *block) bool {
+	return isValueBlock(b, true)
+}
+
+func isValueBlock(b *block, assignments bool) bool {
 	for i, instruction := range b.Instructions {
 		if pureMnemonics.MatchString(instruction.Mnemonic) || invokes[instruction.Mnemonic] ||
 			instruction.Mnemonic == "invokedynamic" || allocations[instruction.Mnemonic] {
+			continue
+		}
+		base := opBase(instruction.Mnemonic)
+		if assignments && strings.HasPrefix(instruction.Mnemonic, "dup") && i+1 < len(b.Instructions) &&
+			isAssignment(opBase(b.Instructions[i+1].Mnemonic)) {
+			continue
+		}
+		if assignments && i > 0 && strings.HasPrefix(b.Instructions[i-1].Mnemonic, "dup") && isAssignment(base) {
 			continue
 		}
 		last := i == len(b.Instructions)-1
@@ -5216,7 +5238,7 @@ func (d *bodyDecompiler) valueOfRegion(start, follow int, consumed *[]int) (expr
 	// A block the two arms share (the merge of a `||`) is taken twice, so it may
 	// only be one that has no side effects - then evaluating it twice is the
 	// same value twice. An arm of its own may call something.
-	if !isPureBlock(b) && (containsInt(*consumed, start) || !isConditionBlock(b)) {
+	if !isPureBlock(b) && (containsInt(*consumed, start) || !isArmBlock(b)) {
 		return expr{}, false, nil
 	}
 	if d.isLoopEdge(start) {
