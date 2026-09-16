@@ -1653,7 +1653,7 @@ func retreatingEdges(blocks map[int]*block, entry int) [][2]int {
 // the one at the head of a `while`, the one at the foot of a `do` - because a
 // `break` leaves from a block that no longer reaches the latch, so it is not in
 // the loop's body and its own target would otherwise look like a second way out.
-func loopFollow(blocks map[int]*block, header int, latches []int, body map[int]bool, monitors []monitorRegion) (int, error) {
+func loopFollow(blocks map[int]*block, header int, latches []int, body, enclosing map[int]bool, monitors []monitorRegion) (int, error) {
 	// A `synchronized` *inside* the loop keeps its own blocks: the `return` javac
 	// writes in there leaves the loop, but it is part of that statement and the
 	// statement is what writes it. A loop inside a `synchronized` is the other way
@@ -1719,12 +1719,29 @@ func loopFollow(blocks map[int]*block, header int, latches []int, body map[int]b
 			return exit, nil
 		}
 	}
-	// Several ways out, none of them a test: the one they all reach ends the loop.
+	// Several ways out. The `return`s and `throw`s among them go nowhere the
+	// loop has to come back to; of the rest, one that stays in the body of the
+	// loop around this one is the end - the others `break` out of that loop
+	// too, and reach its end only through this one's.
 	candidates := make([]int, 0, len(exits))
 	for exit := range exits {
 		candidates = append(candidates, exit)
 	}
 	sort.Ints(candidates)
+	var goesOn, inside []int
+	for _, candidate := range candidates {
+		if terminates(blocks[candidate]) {
+			continue
+		}
+		goesOn = append(goesOn, candidate)
+		if enclosing[candidate] {
+			inside = append(inside, candidate)
+		}
+	}
+	if len(inside) == 1 {
+		return inside[0], nil
+	}
+	// The one they all reach ends the loop.
 	for _, candidate := range candidates {
 		merged := true
 		for _, other := range candidates {
@@ -1737,34 +1754,64 @@ func loopFollow(blocks map[int]*block, header int, latches []int, body map[int]b
 			return candidate, nil
 		}
 	}
-	// None of them reaches the others, so they are `return`s and the loop's own
-	// end. Where the test is the header - which a single unconditional latch
-	// says, a conditional one being the test of a `do` - what the header leaves
-	// to is that end, and the rest are `return`s the body writes.
-	if fromHeader := outside(header); len(latches) == 1 &&
-		blocks[header].Kind == blockConditional && len(fromHeader) == 1 {
-		if single, ok := blocks[latches[0]]; ok && single.Kind != blockConditional {
-			return fromHeader[0], nil
+	// None of them reaches the others. Where the header is only the test (an
+	// assignment used as a value in it and all) and every latch jumps straight
+	// back to it, it is a `while`'s test, and where it leaves to is the end:
+	// the other ways out are the `return`s and `break`s the body writes.
+	fromHeader := outside(header)
+	isTest := blocks[header].Kind == blockConditional && len(fromHeader) == 1
+	for _, latch := range latches {
+		if b := blocks[latch]; b == nil || b.Kind == blockConditional {
+			isTest = false
 		}
 	}
-	// However many latches (`continue`s) there are: where the header leaves to
-	// one block and every other way out returns or throws, that block is the
-	// end - a `return` inside the body goes nowhere the loop has to come back to.
-	if fromHeader := outside(header); blocks[header].Kind == blockConditional && len(fromHeader) == 1 {
-		terminal := true
-		for _, candidate := range candidates {
-			if candidate == fromHeader[0] {
-				continue
-			}
-			b := blocks[candidate]
-			if b == nil || len(b.Instructions) == 0 || !terminates(b.Instructions[len(b.Instructions)-1].Mnemonic) {
-				terminal = false
-				break
+	if isTest && isValueBlock(blocks[header], true) {
+		return fromHeader[0], nil
+	}
+	// A `while (true)` left by `break`s out of an `if` or a `switch`: the first
+	// block the ways out that go on all reach is the end.
+	if len(inside) == 0 && len(goesOn) > 1 {
+		common := reachableBlocks(blocks, goesOn[0])
+		for _, candidate := range goesOn[1:] {
+			reach := reachableBlocks(blocks, candidate)
+			for start := range common {
+				if !reach[start] {
+					delete(common, start)
+				}
 			}
 		}
-		if terminal {
-			return fromHeader[0], nil
+		first := -1
+		for start := range common {
+			reach := reachableBlocks(blocks, start)
+			firstOfAll := true
+			for other := range common {
+				if !reach[other] {
+					firstOfAll = false
+					break
+				}
+			}
+			if firstOfAll && (first < 0 || start < first) {
+				first = start
+			}
 		}
+		if first >= 0 {
+			return first, nil
+		}
+	}
+	// A header with statements before its test still ends the loop where it
+	// leaves to when that goes on - `while (++i < n) { .. return; }` - and the
+	// other way round when it returns: then the header's is a `return` in a
+	// `while (true)`, and the one way out that goes on is the end.
+	if isTest && !terminates(blocks[fromHeader[0]]) {
+		return fromHeader[0], nil
+	}
+	if len(goesOn) == 1 {
+		return goesOn[0], nil
+	}
+	// Every way out returns or throws but the header's own: where the header
+	// leaves to is the end.
+	if len(goesOn) == 0 && blocks[header].Kind == blockConditional && len(fromHeader) == 1 {
+		return fromHeader[0], nil
 	}
 	return 0, bail("a loop with more than one exit")
 }
@@ -1847,11 +1894,11 @@ func findLoops(blocks map[int]*block, entry int, regions []*tryRegion, monitors 
 			predecessors[successor] = append(predecessors[successor], start)
 		}
 	}
+	bodies := map[int]map[int]bool{}
 	for _, header := range headers {
-		latches := latchesOf[header]
 		// Everything that reaches a latch without leaving through the header.
 		body := map[int]bool{header: true}
-		queue := append([]int{}, latches...)
+		queue := append([]int{}, latchesOf[header]...)
 		for len(queue) > 0 {
 			at := queue[len(queue)-1]
 			queue = queue[:len(queue)-1]
@@ -1861,11 +1908,27 @@ func findLoops(blocks map[int]*block, entry int, regions []*tryRegion, monitors 
 			body[at] = true
 			queue = append(queue, predecessors[at]...)
 		}
-		follow, err := loopFollow(blocks, header, latches, body, monitors)
+		bodies[header] = body
+	}
+	for _, header := range headers {
+		// The bodies of the loops around this one, less their headers: a way out
+		// that lands in them is this loop's own end, one that does not is a
+		// `break` out of them too - and one to a header is a `continue` of theirs.
+		enclosing := map[int]bool{}
+		for other, body := range bodies {
+			if other != header && body[header] {
+				for start := range body {
+					if start != other {
+						enclosing[start] = true
+					}
+				}
+			}
+		}
+		follow, err := loopFollow(blocks, header, latchesOf[header], bodies[header], enclosing, monitors)
 		if err != nil {
 			return nil, err
 		}
-		loops[header] = &loop{Header: header, Body: body, Latches: latches, Follow: follow}
+		loops[header] = &loop{Header: header, Body: bodies[header], Latches: latchesOf[header], Follow: follow}
 	}
 	// Two loops are either nested or disjoint; anything else is one loop entered
 	// at two places, which no `while` describes.
@@ -2019,10 +2082,14 @@ func isConditionBlock(b *block) bool {
 	return isValueBlock(b, false)
 }
 
-// terminates reports whether an instruction leaves the method: a return or a
-// throw.
-func terminates(mnemonic string) bool {
-	return mnemonic == "athrow" || strings.HasSuffix(mnemonic, "return")
+// terminates reports whether a block leaves the method: its last instruction
+// is a return or a throw.
+func terminates(b *block) bool {
+	if b == nil || len(b.Instructions) == 0 {
+		return false
+	}
+	last := b.Instructions[len(b.Instructions)-1].Mnemonic
+	return last == "athrow" || strings.HasSuffix(last, "return")
 }
 
 func isAssignment(base string) bool {

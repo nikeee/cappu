@@ -1753,12 +1753,20 @@ func TestDecompileNamesTheLoopALabeledJumpLeaves(t *testing.T) {
 	}
 }
 
-// A loop the body can `continue` from more than one place and `return` (or
-// throw) out of has one end all the same: where the header leaves to. The
-// returns go nowhere the loop comes back to.
+// A loop with several ways out has one end all the same. The `return`s and
+// `throw`s go nowhere the loop comes back to, so what a test header leaves to
+// is the end; `break`s out of an `if` or a `switch` in a `while (true)` meet at
+// it; in a nested loop, the way out that stays in the outer body is it, and the
+// others are `break outer`.
 const returnsSource = `public class Returns {
   static int firstNeg(int[] a) { int i = 0; while (i < a.length) { if (a[i] == 0) { i++; continue; } if (a[i] < 0) return i; i++; } return -1; }
   static int thrower(int[] a) { for (int x : a) { if (x == 0) continue; if (x < 0) throw new IllegalArgumentException("neg"); if (x > 100) return x; } return 0; }
+  static int ifs(int[] a) { int i = 0, n = 0; while (true) { int c = a[i++]; if (c == 0) { n += 5; break; } if (c == 1) { if (a[i] == 7) n = -1; break; } n += c; } return n * 10 + i; }
+  static int mixed(int[] a) { int i = 0, n = 0; while (true) { int c = a[i++]; if (c == 0) { n += 5; break; } if (c == 1) { if (a[i] == 7) return -1; break; } if (c == 2) throw new IllegalStateException("two"); n += c; } return n * 10 + i; }
+  static int sw(int[] a) { int i = 0, n = 0; while (true) { int c = a[i++]; switch (c) { case 0: case 1: break; case 2: if (a[i] == 9) break; n += 100; break; default: n += c; continue; } break; } return n * 10 + i; }
+  static int nest(int[] a) { int i = 0, n = 0; outer: while (i < a.length) { while (true) { int c = a[i++]; if (c == 0) break; if (c == 9) break outer; n += c; } n += 1000; } return n * 10 + i; }
+  static int nestReturn(int[] a) { int i = 0, n = 0; outer: while (i < a.length) { while (true) { int c = a[i++]; if (c == 0) return n; if (c == 9) break outer; n += c; } } return n * 10 + i; }
+  static int preInc(int[] a, int from) { int i = from; while (++i < a.length) { if (a[i] != 0) { a[i] = 0; return i - from; } } return -1; }
 }
 `
 
@@ -1781,12 +1789,18 @@ func TestDecompileEndsALoopWhoseOtherExitsReturn(t *testing.T) {
   public static void main(String[] z) {
     System.out.println(Returns.firstNeg(new int[]{0, 3, -1}) + " " + Returns.firstNeg(new int[]{0}) + " " + Returns.thrower(new int[]{0, 5, 200}));
     try { Returns.thrower(new int[]{-1}); } catch (IllegalArgumentException e) { System.out.println(e.getMessage()); }
+    System.out.println(Returns.ifs(new int[]{3, 0}) + " " + Returns.ifs(new int[]{1, 7}) + " " + Returns.ifs(new int[]{4, 1, 2}) + " "
+      + Returns.mixed(new int[]{3, 0}) + " " + Returns.mixed(new int[]{1, 7}) + " " + Returns.mixed(new int[]{4, 1, 2}) + " "
+      + Returns.sw(new int[]{3, 4, 0}) + " " + Returns.sw(new int[]{2, 9}) + " " + Returns.sw(new int[]{2, 5, 1}) + " "
+      + Returns.nest(new int[]{1, 0, 2, 9, 5}) + " " + Returns.nest(new int[]{1, 0, 2, 0}) + " " + Returns.nestReturn(new int[]{1, 2, 9}) + " " + Returns.nestReturn(new int[]{1, 0}) + " "
+      + Returns.preInc(new int[]{0, 0, 4}, 0) + " " + Returns.preInc(new int[]{0, 0}, 0));
+    try { Returns.mixed(new int[]{2}); } catch (IllegalStateException e) { System.out.println(e.getMessage()); }
   }
 }`
 	compileWithJavacOn(t, dir, "ReturnsDriver", driver, dir)
 	expected := runJava(t, dir, "ReturnsDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "ReturnsDriver")
-	if actual != expected || actual != "2 -1 200\nneg\n" {
+	if actual != expected || actual != "2 -1 200\nneg\n82 -9 42 82 -1 42 73 1 1001 10034 20034 33 1 2 -1\ntwo\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
