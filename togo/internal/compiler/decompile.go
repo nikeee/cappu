@@ -1747,6 +1747,25 @@ func loopFollow(blocks map[int]*block, header int, latches []int, body map[int]b
 			return fromHeader[0], nil
 		}
 	}
+	// However many latches (`continue`s) there are: where the header leaves to
+	// one block and every other way out returns or throws, that block is the
+	// end - a `return` inside the body goes nowhere the loop has to come back to.
+	if fromHeader := outside(header); blocks[header].Kind == blockConditional && len(fromHeader) == 1 {
+		terminal := true
+		for _, candidate := range candidates {
+			if candidate == fromHeader[0] {
+				continue
+			}
+			b := blocks[candidate]
+			if b == nil || len(b.Instructions) == 0 || !terminates(b.Instructions[len(b.Instructions)-1].Mnemonic) {
+				terminal = false
+				break
+			}
+		}
+		if terminal {
+			return fromHeader[0], nil
+		}
+	}
 	return 0, bail("a loop with more than one exit")
 }
 
@@ -1998,6 +2017,12 @@ var pureMnemonics = regexp.MustCompile(`^(?:nop|aconst_null|[ilfd]const_\w+|bipu
 // guards - those can be evaluated twice.
 func isConditionBlock(b *block) bool {
 	return isValueBlock(b, false)
+}
+
+// terminates reports whether an instruction leaves the method: a return or a
+// throw.
+func terminates(mnemonic string) bool {
+	return mnemonic == "athrow" || strings.HasSuffix(mnemonic, "return")
 }
 
 func isAssignment(base string) bool {

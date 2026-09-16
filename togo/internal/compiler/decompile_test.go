@@ -1753,6 +1753,44 @@ func TestDecompileNamesTheLoopALabeledJumpLeaves(t *testing.T) {
 	}
 }
 
+// A loop the body can `continue` from more than one place and `return` (or
+// throw) out of has one end all the same: where the header leaves to. The
+// returns go nowhere the loop comes back to.
+const returnsSource = `public class Returns {
+  static int firstNeg(int[] a) { int i = 0; while (i < a.length) { if (a[i] == 0) { i++; continue; } if (a[i] < 0) return i; i++; } return -1; }
+  static int thrower(int[] a) { for (int x : a) { if (x == 0) continue; if (x < 0) throw new IllegalArgumentException("neg"); if (x > 100) return x; } return 0; }
+}
+`
+
+func TestDecompileEndsALoopWhoseOtherExitsReturn(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Returns", returnsSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Returns", source)
+	driver := `public class ReturnsDriver {
+  public static void main(String[] z) {
+    System.out.println(Returns.firstNeg(new int[]{0, 3, -1}) + " " + Returns.firstNeg(new int[]{0}) + " " + Returns.thrower(new int[]{0, 5, 200}));
+    try { Returns.thrower(new int[]{-1}); } catch (IllegalArgumentException e) { System.out.println(e.getMessage()); }
+  }
+}`
+	compileWithJavacOn(t, dir, "ReturnsDriver", driver, dir)
+	expected := runJava(t, dir, "ReturnsDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "ReturnsDriver")
+	if actual != expected || actual != "2 -1 200\nneg\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A parameter is defined on entry, on every path: reassigned in a branch and
 // read after it, the read is as unambiguous as any other, and not "written in
 // more than one branch".
