@@ -33,6 +33,37 @@ function hasTool(name: string): boolean {
 const HAS_JAVAC = hasTool("javac");
 const HAS_JAVAP = hasTool("javap");
 
+// javac/javap render non-ASCII text (identifiers, string constants) using the
+// platform's default charset unless told otherwise; in a container with a
+// non-UTF-8 locale (e.g. plain "C"), that charset is ASCII and both tools
+// silently replace characters like "é" with "?" - not a JDK version quirk,
+// just an unset locale. Forcing a UTF-8 locale here keeps the comparisons
+// below meaningful regardless of the host's locale.
+const UTF8_ENV = { ...process.env, LANG: "C.UTF-8", LC_ALL: "C.UTF-8" };
+
+// javap's own Code-instruction indent got one level deeper when it was
+// rewritten onto the java.lang.classfile API (JDK-8294969, landed for JDK 22+):
+// the `<pc>:` column is 2 columns narrower on older javap builds. disasm.ts
+// (see PC_INDENT/PC_WIDTH there) targets the rewritten layout, so an older
+// javap on PATH can never match it byte-for-byte; detect that case (instead of
+// guessing a JDK version cutoff) so the exact-match tests below skip cleanly.
+function javapUsesLegacyCodeIndent(): boolean {
+  if (!HAS_JAVAC || !HAS_JAVAP) return false;
+  using dir = TempDir.create("cappu-disasm-probe-");
+  writeFileSync(join(dir.path, "Probe.java"), "class Probe { void m() {} }");
+  execFileSync("javac", ["-d", dir.path, join(dir.path, "Probe.java")], {
+    stdio: "pipe",
+    env: UTF8_ENV,
+  });
+  const out = execFileSync("javap", ["-c", join(dir.path, "Probe.class")], {
+    encoding: "utf8",
+    env: UTF8_ENV,
+  });
+  const match = out.match(/^( *)0: return$/m);
+  return match !== null && match[1]!.length + 1 !== 10;
+}
+const JAVAP_LEGACY_CODE_INDENT = javapUsesLegacyCodeIndent();
+
 function disasmBaselineClass(name: string): string {
   return disassemble(readFileSync(join(emitBaselines, `${name}.class`)));
 }
@@ -184,6 +215,7 @@ function compileWithJavac(source: string, name: string, release: string, outDir:
   writeFileSync(join(outDir, `${name}.java`), source);
   execFileSync("javac", ["--release", release, "-d", outDir, join(outDir, `${name}.java`)], {
     stdio: "pipe",
+    env: UTF8_ENV,
   });
   return readdirSync(outDir)
     .filter(f => f.endsWith(".class"))
@@ -196,12 +228,22 @@ for (const release of JAVAC_RELEASES) {
     if (release === OLD_RELEASE && !OLD_RELEASE_FIXTURES.includes(name)) continue;
     test(
       `matches javap on javac --release ${release} output: ${name}`,
-      { skip: HAS_JAVAC && HAS_JAVAP ? false : "no JDK (javac/javap)" },
+      {
+        skip:
+          !HAS_JAVAC || !HAS_JAVAP
+            ? "no JDK (javac/javap)"
+            : JAVAP_LEGACY_CODE_INDENT
+              ? "installed javap uses the pre-JDK-8294969 Code indent width"
+              : false,
+      },
       () => {
         using dir = TempDir.create("cappu-disasm-");
         const classFiles = compileWithJavac(source, name, release, dir.path);
         for (const classFile of classFiles) {
-          const theirs = execFileSync("javap", ["-c", "-p", classFile], { encoding: "utf8" });
+          const theirs = execFileSync("javap", ["-c", "-p", classFile], {
+            encoding: "utf8",
+            env: UTF8_ENV,
+          });
           expect(disassemble(readFileSync(classFile))).toEqual(theirs);
         }
       },
