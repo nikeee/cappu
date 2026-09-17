@@ -3556,13 +3556,6 @@ const finalliesDriverSource = `public class FinalliesDriver {
   }
 }`
 
-const finallyBailsSource = `public class Bails {
-  static int n;
-  static int caught(int x) { int r = 0; try { r = 10 / x; } catch (ArithmeticException e) { r = -1; } finally { n += 2; } return r; }
-  static int nested(int x) { int r = 0; try { try { r = 10 / x; } finally { n += 3; } } finally { n += 4; } return r; }
-  static int ifRet(int x) { try { if (x > 0) return 1; } finally { n += 5; } return 0; }
-}`
-
 func TestDecompileReconstructsAFinallyWithOneWayOut(t *testing.T) {
 	if !hasTool("javac") || !hasTool("java") {
 		t.Skip("no JDK (javac/java)")
@@ -3596,28 +3589,74 @@ func TestDecompileReconstructsAFinallyWithOneWayOut(t *testing.T) {
 	}
 }
 
-func TestDecompileSaysWhenAFinallyIsWrittenMoreThanTwice(t *testing.T) {
-	if !hasTool("javac") {
-		t.Skip("no JDK (javac)")
+// javac writes the body of a `finally` once more on every way out of the
+// protected range - before each `return`, `break` and `continue` - and splits
+// the range around those copies. Every copy is dropped; what it was written in
+// front of is the statement, and it stays inside the `try`.
+const finallyWaysSource = `import java.util.concurrent.locks.*;
+public class Ways {
+  static int n; static StringBuilder log = new StringBuilder();
+  static final ReentrantLock lock = new ReentrantLock();
+  static int one(int a) { try { n += a; return n; } finally { log.append("f"); } }
+  static int two(int a) { try { if (a < 0) return -1; n += a; if (a > 100) return 100; return n; } finally { log.append("g"); } }
+  static void three(int a) { try { if (a == 0) return; n += a; } finally { log.append("h"); } }
+  static int brk(int[] xs) { int s = 0; for (int x : xs) { try { if (x < 0) break; s += x; } finally { log.append("i"); } } return s; }
+  static int cont(int[] xs) { int s = 0; for (int x : xs) { try { if (x == 0) continue; s += x; } finally { log.append("j"); } } return s; }
+  static int whl(int[] xs) { int s = 0, i = 0; while (i < xs.length) { try { if (xs[i] < 0) break; s += xs[i]; } finally { i++; } } return s; }
+  static int locked(int a) { lock.lock(); try { if (a == 1) return 1; n += a; return n; } finally { lock.unlock(); } }
+  static int vals(int a) { try { return a * 2; } finally { log.append("v"); } }
+  static int ifRet(int x) { try { if (x > 0) return 1; } finally { n += 5; } return 0; }
+  // A catch beside the finally is guarded by it too - both get a copy, and
+  // both jump to the same place - as is a catch that rethrows, which needs
+  // none; a finally inside another is written from the outside in.
+  static int caught(int x) { int r = 0; try { r = 10 / x; } catch (ArithmeticException e) { r = -1; } finally { n += 2; } return r; }
+  static int nested(int x) { int r = 0; try { try { r = 10 / x; } finally { n += 3; } } finally { n += 4; } return r; }
+  static int rethrow(int x) { try { return 10 / x; } catch (ArithmeticException e) { n = -1; throw e; } finally { n += 7; } }
+  public static void main(String[] z) {
+    System.out.println(one(1) + " " + two(-1) + two(5) + two(200) + " " + brk(new int[]{1, 2, -1, 5}) + " " + cont(new int[]{1, 0, 2}) + " " + whl(new int[]{1, 2, -1, 5}) + " " + locked(1) + locked(3) + " " + vals(4) + " " + ifRet(1) + ifRet(0));
+    three(0); three(2); System.out.println(log + " " + n);
+    System.out.println(caught(2) + " " + caught(0) + " " + nested(5) + " " + n);
+    try { nested(0); } catch (ArithmeticException e) { System.out.println("ae " + n); }
+    try { rethrow(0); } catch (ArithmeticException e) { System.out.println("re " + n); }
+    System.out.println(rethrow(5) + " " + n);
+  }
+}
+`
+
+func TestDecompileReconstructsAFinallyWithSeveralWaysOut(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
 	}
 	dir := t.TempDir()
-	classFile := compileWithJavac(t, dir, "Bails", finallyBailsSource)
+	classFile := compileWithJavac(t, dir, "Ways", finallyWaysSource)
 	source, err := Decompile(readFile(t, classFile))
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	// A `catch` beside the `finally` and a `finally` inside one are each another
-	// copy, and which one source wrote is not in the class file: both say so.
-	if !strings.Contains(source, "cappu: a finally or synchronized block") {
-		t.Errorf("expected the bail, got:\n%s", source)
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
 	}
-	// A second way out of the protected range is a copy of the body this cannot
-	// tell from a statement source wrote.
-	if !strings.Contains(source, "cappu: a finally with more than one way out") {
-		t.Errorf("expected the second-way-out bail, got:\n%s", source)
+	for _, want := range []string{
+		"if (arg0 < 0) {\nvar1 = -1;\nreturn var1;", "} finally {\nlog.append(\"g\");",
+		"if (var5 < 0) {\nbreak;", "if (var5 != 0) {\nvar1 = var1 + var5;\n}\n} finally {", "} finally {\nvar2++;", "} finally {\nlock.unlock();",
+		"try {\ntry {\nvar1 = 10 / arg0;\n} catch (java.lang.ArithmeticException e) {\nvar1 = -1;\n}\n} finally {\nn = n + 2;",
+		"try {\ntry {\nvar1 = 10 / arg0;\n} finally {\nn = n + 3;\n}\n} finally {\nn = n + 4;",
+		"throw e;\n}\nreturn var1;\n} finally {\nn = n + 7;",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
 	}
-	if strings.Count(source, "cappu: ") != 6 {
-		t.Errorf("expected three bailed methods, got:\n%s", source)
+	// One `finally` per method (two in nested), and its body written once each.
+	if strings.Count(source, "finally {") != 13 || strings.Count(source, `log.append("g")`) != 1 || strings.Count(source, `log.append("i")`) != 1 {
+		t.Errorf("expected each finally body once:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Ways", source)
+	expected := runJava(t, dir, "Ways")
+	actual := runJava(t, again, "Ways")
+	if actual != expected || actual != "1 -16100 3 3 3 1209 8 10\nfgggiiijjjvhh 221\n5 -1 2 232\nae 239\nre 6\n2 13\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
 

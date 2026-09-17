@@ -1174,23 +1174,40 @@ type finallyRegion struct {
 	StartPc   int
 	EndPc     int
 	HandlerPc int
-	// Body is the handler's copy, without the store and the rethrow.
-	Body []Instruction
+	// Body is the handler's copy, without the store and the rethrow, and
+	// BodyEnd where the handler's blocks end.
+	Body    []Instruction
+	BodyEnd int
+	// Copies are the blocks that begin with a copy of the body on a way out of
+	// the protected range - one per `return` or `break` inside it, and the
+	// last one, at EndPc, the way off its end.
+	Copies []int
 }
 
-// finallyBody is the body of a `finally`, when b is the catch-all that rethrows:
-// `astore e; <body>; aload e; athrow`, with the same slot at both ends.
-func finallyBody(b *block) ([]Instruction, bool) {
-	if b == nil || len(b.Instructions) < 4 || b.Kind != blockEnd {
-		return nil, false
+// finallyBody is the body of a `finally`, when the handler at start is the
+// catch-all that rethrows: `astore e; <body>; aload e; athrow`, with the same
+// slot at both ends. The range around a `catch` that rethrows ends one
+// instruction into the handler, which splits it after the store: the blocks
+// that fall into one another are read as one. Also reports where it ends.
+func finallyBody(blocks map[int]*block, start int) ([]Instruction, int, bool) {
+	b := blocks[start]
+	if b == nil {
+		return nil, 0, false
 	}
-	kept := b.Instructions
+	kept := append([]Instruction(nil), b.Instructions...)
+	for b.Kind == blockFall && len(b.Successors) == 1 && blocks[b.Successors[0]] != nil {
+		b = blocks[b.Successors[0]]
+		kept = append(kept, b.Instructions...)
+	}
+	if len(kept) < 4 || b.Kind != blockEnd {
+		return nil, 0, false
+	}
 	store, reload, throwing := kept[0], kept[len(kept)-2], kept[len(kept)-1]
 	if !strings.HasPrefix(store.Mnemonic, "astore") || !strings.HasPrefix(reload.Mnemonic, "aload") ||
 		throwing.Mnemonic != "athrow" || slotOf(store) != slotOf(reload) {
-		return nil, false
+		return nil, 0, false
 	}
-	return kept[1 : len(kept)-2], true
+	return kept[1 : len(kept)-2], endOf(b), true
 }
 
 // sameInstructions reports whether two runs are the same code, which a copy has
@@ -1271,50 +1288,167 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 			monitors = append(monitors, monitorRegion{StartPc: start, EndPc: end, HandlerPc: handlerPc, Slot: slot})
 			continue
 		}
-		// A `finally` javac wrote once per way out: this takes the shape with one
-		// way out, where the range is not split and the copy sits right after it.
-		body, isFinally := finallyBody(blocks[handlerPc])
-		if !isFinally || ranges != 1 || len(body) == 0 {
+		// A `finally` javac wrote once per way out: the range is split around
+		// each `return` or `break` inside the body, and a copy of the finally
+		// sits in every gap and after the last piece, followed by what the body
+		// was doing when it left - the jump over the handler, or the `return`
+		// javac protected the *value* of.
+		body, bodyEnd, isFinally := finallyBody(blocks, handlerPc)
+		if !isFinally || ranges == 0 || len(body) == 0 {
 			return nil, nil, nil, bail("a finally or synchronized block")
 		}
-		copyBlock := blocks[end]
-		// Everything that reaches the copy has to come out of the protected range:
-		// a jump into it from elsewhere would lose the body this drops.
-		fromOutside := false
-		for _, b := range blocks {
-			if (b.Start < start || b.Start >= end) && containsInt(b.Successors, end) {
-				fromOutside = true
+		var pieces []ExceptionEntry
+		for _, entry := range byHandler[handlerPc] {
+			if int(entry.StartPc) == handlerPc {
+				continue
 			}
+			// The range around a `catch` that rethrows runs one instruction
+			// into this handler - over its own store - and ends at the throw.
+			if int(entry.EndPc) > handlerPc && int(entry.StartPc) < handlerPc {
+				entry.EndPc = uint16(handlerPc)
+			}
+			pieces = append(pieces, entry)
 		}
-		// Nothing may leave the range other than into the copy: javac wrote
-		// another copy of the body on any such path, and structuring the range
-		// would pull that one in as a statement on top of the `finally` this
-		// writes.
-		escapes := false
+		sort.Slice(pieces, func(i, j int) bool { return pieces[i].StartPc < pieces[j].StartPc })
+		end = 0
+		for _, piece := range pieces {
+			end = max(end, int(piece.EndPc))
+		}
+		// A copy block: the body, then what the range was doing when it left.
+		isCopyBlock := func(b *block) bool {
+			return b != nil && len(b.Instructions) > len(body) &&
+				(isGotoMnemonic(b.Instructions[len(b.Instructions)-1].Mnemonic) || b.Kind == blockEnd) &&
+				sameInstructions(body, b.Instructions[:len(body)])
+		}
+		var copies []int
+		wellFormed := true
+		for i, piece := range pieces {
+			// A piece that ends in a `throw` - a `catch` that rethrows - needs
+			// no copy: the throw runs the handler.
+			if thrown := lastInstructionBefore(instructions, int(piece.EndPc)); thrown != nil && thrown.Mnemonic == "athrow" {
+				continue
+			}
+			copyBlock := blocks[int(piece.EndPc)]
+			if !isCopyBlock(copyBlock) {
+				wellFormed = false
+				break
+			}
+			// A gap is the copy and nothing else: the next piece begins where
+			// the copy's block ends.
+			if i+1 < len(pieces) {
+				last := copyBlock.Instructions[len(copyBlock.Instructions)-1]
+				if last.Pc >= int(pieces[i+1].StartPc) || nextBlockStart(blocks, copyBlock.Start) != int(pieces[i+1].StartPc) {
+					wellFormed = false
+					break
+				}
+			}
+			copies = append(copies, copyBlock.Start)
+		}
+		inRange := func(pc int) bool {
+			for _, piece := range pieces {
+				if pc >= int(piece.StartPc) && pc < int(piece.EndPc) {
+					return true
+				}
+			}
+			return false
+		}
+		// Nothing may leave the range other than into a copy - javac wrote one
+		// on any such path, and structuring the range would pull it in as a
+		// statement on top of the `finally` this writes - and a jump out of
+		// the range lands on one that is not at a piece's end: a `return`
+		// inside an `if`, say.
 		for _, b := range blocks {
-			if b.Start < start || b.Start >= end {
+			if !inRange(b.Start) {
 				continue
 			}
 			for _, target := range b.Successors {
-				if target < start || target > end {
-					escapes = true
+				if inRange(target) || containsInt(copies, target) {
+					continue
+				}
+				if !isCopyBlock(blocks[target]) {
+					wellFormed = false
+					continue
+				}
+				copies = append(copies, target)
+			}
+		}
+		// Everything that reaches a copy has to come out of the protected
+		// range: a jump into one from elsewhere would lose the body this drops.
+		for _, b := range blocks {
+			if inRange(b.Start) {
+				continue
+			}
+			for _, target := range b.Successors {
+				if containsInt(copies, target) {
+					wellFormed = false
 				}
 			}
 		}
-		// The copy is followed by what the body was doing when it left: the jump
-		// over the handler, or the `return` javac protected the *value* of.
-		leaves := copyBlock != nil &&
-			len(copyBlock.Instructions) > len(body) &&
-			(isGotoMnemonic(copyBlock.Instructions[len(copyBlock.Instructions)-1].Mnemonic) ||
-				copyBlock.Kind == blockEnd)
-		if copyBlock == nil || fromOutside || escapes || !leaves ||
-			len(copyBlock.Instructions) < len(body) ||
-			!sameInstructions(body, copyBlock.Instructions[:len(body)]) {
+		if !wellFormed {
 			return nil, nil, nil, bail("a finally with more than one way out")
 		}
-		finallys = append(finallys, finallyRegion{StartPc: start, EndPc: end, HandlerPc: handlerPc, Body: body})
+		sort.Ints(copies)
+		// The statement goes on after the copy that jumps over the handler; a
+		// copy that returns is the end only when no copy goes on. Several that
+		// go on - the `try` and the `catch` beside it a `finally` guards both
+		// of - meet where they all jump to, and the statement goes on there.
+		var goesOn []int
+		for _, copyStart := range copies {
+			if blocks[copyStart].Kind != blockEnd {
+				goesOn = append(goesOn, copyStart)
+			}
+		}
+		switch {
+		case len(goesOn) == 0:
+			// Every way out returns or throws: nothing runs after the statement,
+			// and the body is structured up to the handler it never reaches.
+			end = handlerPc
+		case len(goesOn) == 1:
+			end = goesOn[0]
+		case len(goesOn) > 1:
+			// Ones that jump to different places - a `break` out of the loop
+			// around the statement beside the way off its end - leave the end
+			// where the range ends.
+			target := -1
+			for _, copyStart := range goesOn {
+				b := blocks[copyStart]
+				jump := b.Instructions[len(b.Instructions)-1].Arg
+				if target >= 0 && jump != target {
+					target = -1
+					break
+				}
+				target = jump
+			}
+			if target >= 0 && !inRange(target) && !containsInt(copies, target) {
+				end = target
+			}
+		}
+		finallys = append(finallys, finallyRegion{StartPc: start, EndPc: end, HandlerPc: handlerPc, Body: body, BodyEnd: bodyEnd, Copies: copies})
 	}
 	return monitors, finallys, rest, nil
+}
+
+// lastInstructionBefore reports the instruction right before pc, or nil.
+func lastInstructionBefore(instructions []Instruction, pc int) *Instruction {
+	var last *Instruction
+	for i := range instructions {
+		if instructions[i].Pc >= pc {
+			break
+		}
+		last = &instructions[i]
+	}
+	return last
+}
+
+// nextBlockStart reports the start of the block after the one at start, or -1.
+func nextBlockStart(blocks map[int]*block, start int) int {
+	next := -1
+	for candidate := range blocks {
+		if candidate > start && (next < 0 || candidate < next) {
+			next = candidate
+		}
+	}
+	return next
 }
 
 // tryRegion is one `try` statement: the range it protects, and the clauses
@@ -3841,7 +3975,7 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 		if _, isMonitor := isMonitorHandler(blocks[int(entry.HandlerPc)]); isMonitor {
 			continue
 		}
-		if _, isFinally := finallyBody(blocks[int(entry.HandlerPc)]); isFinally {
+		if _, _, isFinally := finallyBody(blocks, int(entry.HandlerPc)); isFinally {
 			splits = append(splits, int(entry.EndPc))
 		}
 	}
@@ -4099,17 +4233,36 @@ func (d *bodyDecompiler) synchronizedStatement(b *block, kept []Instruction) (in
 	return follow, nil
 }
 
+// endsAFinally reports whether start is where a `try`/`finally` being written
+// ends.
+func (d *bodyDecompiler) endsAFinally(start int) bool {
+	for region := range d.activeFinallys {
+		if region.EndPc == start {
+			return true
+		}
+	}
+	return false
+}
+
 // finallyAt writes the `try`/`finally` that begins at at, if one does.
 func (d *bodyDecompiler) finallyAt(at int) (int, bool, error) {
+	// The outermost first: a `finally` inside another begins at the same
+	// block, and is written when the outer body reaches it again.
+	var outermost *finallyRegion
 	for i := range d.finallys {
 		guarded := &d.finallys[i]
 		if guarded.StartPc != at || d.visited[at] || d.activeFinallys[guarded] {
 			continue
 		}
-		next, err := d.finallyStatement(guarded)
-		return next, true, err
+		if outermost == nil || guarded.EndPc > outermost.EndPc {
+			outermost = guarded
+		}
 	}
-	return 0, false, nil
+	if outermost == nil {
+		return 0, false, nil
+	}
+	next, err := d.finallyStatement(outermost)
+	return next, true, err
 }
 
 // finallyStatement writes one `try`/`finally`. javac writes the body of the
@@ -4120,19 +4273,26 @@ func (d *bodyDecompiler) finallyStatement(region *finallyRegion) (int, error) {
 	if len(d.stack) > 0 {
 		return 0, bail("values left on the stack")
 	}
-	copyBlock := d.blocks[region.EndPc]
-	jump := copyBlock.Instructions[len(copyBlock.Instructions)-1]
-	// What is left of the copy block is the jump over the handler, or the `return`
+	// What is left of a copy block is the jump over the handler, or the `return`
 	// javac protected the value of - and a jump to nowhere is not a statement.
-	if copyBlock.Kind != blockEnd && d.blocks[jump.Arg] == nil {
-		return 0, bail("a finally that leaves the method")
+	for _, start := range region.Copies {
+		copied := d.blocks[start]
+		jump := copied.Instructions[len(copied.Instructions)-1]
+		if copied.Kind != blockEnd && d.blocks[jump.Arg] == nil {
+			return 0, bail("a finally that leaves the method")
+		}
+		// The copies on the way out are not statements: what is left of each
+		// block is the `return` or the jump it was written in front of.
+		d.skip[start] = len(region.Body)
 	}
-	// The copy on the way out is not a statement: what is left of that block is
-	// the jump over the handler.
-	d.skip[copyBlock.Start] = len(region.Body)
-	d.visited[region.HandlerPc] = true
+	for at := d.blocks[region.HandlerPc]; at != nil; at = d.blocks[at.Successors[0]] {
+		d.visited[at.Start] = true
+		if at.Kind != blockFall || len(at.Successors) != 1 {
+			break
+		}
+	}
 	d.activeFinallys[region] = true
-	body, err := d.capture(func() error { return d.structure(region.StartPc, copyBlock.Start) })
+	body, err := d.capture(func() error { return d.structure(region.StartPc, region.EndPc) })
 	delete(d.activeFinallys, region)
 	if err != nil {
 		return 0, err
@@ -4140,9 +4300,8 @@ func (d *bodyDecompiler) finallyStatement(region *finallyRegion) (int, error) {
 	if len(d.stack) > 0 {
 		return 0, bail("values left on the stack")
 	}
-	handler := d.blocks[region.HandlerPc]
 	cleanup, err := d.capture(func() error {
-		return d.runInstructions(region.Body, endOf(handler), region.HandlerPc)
+		return d.runInstructions(region.Body, region.BodyEnd, region.HandlerPc)
 	})
 	if err != nil {
 		return 0, err
@@ -4155,7 +4314,10 @@ func (d *bodyDecompiler) finallyStatement(region *finallyRegion) (int, error) {
 	d.emit("} finally {")
 	*d.current = append(*d.current, stmt{Nested: &cleanup})
 	d.emit("}")
-	return copyBlock.Start, nil
+	if region.EndPc == region.HandlerPc {
+		return exitBlock, nil
+	}
+	return region.EndPc, nil
 }
 
 // regionAt is the `try` statement that begins at at, if one does. The outermost
@@ -4282,6 +4444,13 @@ func (d *bodyDecompiler) tryFollow(region *tryRegion) (int, error) {
 	for start := range inside {
 		for _, successor := range d.blocks[start].Successors {
 			if !inside[successor] && !jumps[successor] {
+				// A copy of a `finally` around this statement is dropped; the
+				// way out goes where the copy jumps - unless the copy is where
+				// that `finally` statement itself ends.
+				if copied := d.blocks[successor]; d.skip[successor] > 0 && copied != nil && copied.Kind != blockEnd &&
+					!d.endsAFinally(successor) {
+					successor = copied.Instructions[len(copied.Instructions)-1].Arg
+				}
 				exits[successor] = true
 			}
 		}
@@ -4548,6 +4717,17 @@ func (d *bodyDecompiler) reachesArm(from, to int) bool {
 		}
 		seen[at] = true
 		queue = append(queue, d.blocks[at].Successors...)
+	}
+	return false
+}
+
+// onLoopEdge reports whether start is where a `continue` or a `break` of a
+// loop around the current statement goes.
+func (d *bodyDecompiler) onLoopEdge(start int) bool {
+	for _, entered := range d.active {
+		if entered.ContinueTarget == start || entered.Loop.Follow == start {
+			return true
+		}
 	}
 	return false
 }
@@ -5231,6 +5411,17 @@ func (d *bodyDecompiler) conditional(b *block, stop int) (int, error) {
 	if follow == exitBlock && stop != exitBlock &&
 		(d.reachesArm(whenTrue, stop) || d.reachesArm(whenFalse, stop)) {
 		follow = stop
+	}
+	// Or on a loop's edge: a `continue` copied out of a `try` inside a loop
+	// makes the post-dominator the loop's update, past the end of the `try`.
+	// A `continue` or a `break` is a way out, not a merge: where the arms meet
+	// short of the edge is the end, or the end of the statement around this one.
+	if follow != exitBlock && stop != exitBlock && follow != stop && d.onLoopEdge(follow) {
+		if common := d.armsMeet(whenTrue, whenFalse, stop); common != exitBlock {
+			follow = common
+		} else if d.reachesArm(whenTrue, stop) || d.reachesArm(whenFalse, stop) {
+			follow = stop
+		}
 	}
 	// `if (c) return x;` has no merge point. Both arms leave the method - every
 	// path does, since a block that runs off the end is rejected - so the arm
