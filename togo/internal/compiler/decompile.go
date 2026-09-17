@@ -126,6 +126,10 @@ type expr struct {
 	Bin *binaryNode
 	// Inner is the value a narrowing conversion wraps.
 	Inner *expr
+	// Dup marks the two copies a `dup` (`dup_x1` under a receiver) made of a
+	// field's value: the one stored back plus or minus one, and the one left
+	// on the stack, which is then the old value `f++` yields.
+	Dup int
 	// Arms are a conditional's two values: a variable with an open type read
 	// in one is typed by what the conditional is asked for.
 	Arms *[2]expr
@@ -2159,6 +2163,8 @@ type bodyDecompiler struct {
 	statements []stmt
 	// sharedIDs numbers the copies a compound assignment's dup made.
 	sharedIDs int
+	// dupIDs numbers the copies a `dup_x1` made.
+	dupIDs int
 	// labels numbers the loop labels handed out.
 	labels int
 	// assignFieldAsValue is set by a `dup_x1` into a `putfield` (or a `dup`
@@ -2315,6 +2321,12 @@ func (d *bodyDecompiler) coerceInto(value expr, target string) (string, error) {
 		if err := d.usedAsNumber(value); err != nil {
 			return "", err
 		}
+	}
+	// A conditional whose arms were written as the ints javac materialized
+	// (`c ? x == 0 ? 1 : 0 : x`) cannot be read back as the boolean it was
+	// without rewriting both arms and the variables in them.
+	if target == "boolean" && value.Arms != nil && value.Type != "boolean" {
+		return "", bail("a conditional with number arms where a boolean belongs")
 	}
 	return coerce(value, target), nil
 }
@@ -2705,6 +2717,12 @@ func (d *bodyDecompiler) callArguments(descriptor string) ([]string, error) {
 		if narrows || (text == "null" && target == "java.lang.Object" && !receiverIsCall) {
 			text = "(" + sourceTypeText(target, d.self()) + ") " + text
 		}
+		// A char passed as an int is the same widening in bytecode and a
+		// different overload in source: `print(c)` writes the character, and
+		// `(int) c` is what the descriptor says was meant.
+		if target == "int" && value.Type == "char" {
+			text = "(int) " + at(value, precUnary)
+		}
 		args[i] = text
 	}
 	return args, nil
@@ -2715,6 +2733,9 @@ var intLiteralText = regexp.MustCompile(`^-?\d+$`)
 
 // noSpaceText matches a rendered value that is a single token: a name or a literal.
 var noSpaceText = regexp.MustCompile(`^\S+$`)
+
+// castText matches a rendered value that is a primitive cast of one.
+var castText = regexp.MustCompile(`^\((?:int|char|byte|short)\) `)
 
 // coercedExpr is value where a target-typed value belongs, kept an expression so
 // the caller can still parenthesize it.
@@ -2733,6 +2754,8 @@ func (d *bodyDecompiler) coercedExpr(value expr, target string) (expr, error) {
 	prec := 0
 	if noSpaceText.MatchString(text) {
 		prec = precPrimary
+	} else if castText.MatchString(text) {
+		prec = precUnary
 	}
 	return expr{Text: text, Prec: prec, Type: target}, nil
 }
@@ -3059,6 +3082,11 @@ func (d *bodyDecompiler) concat(siteDescriptor string, bootstrap BootstrapMethod
 		arg, err := d.coercedExpr(value, params[i].Type)
 		if err != nil {
 			return err
+		}
+		// A char concatenated as an int prints its number, so the `(int)` that
+		// got it there is written back.
+		if params[i].Type == "int" && value.Type == "char" {
+			arg = expr{Text: "(int) " + at(value, precUnary), Prec: precUnary, Type: "int", Effects: value.Effects}
 		}
 		args[i] = arg
 	}
@@ -3519,6 +3547,9 @@ func (d *bodyDecompiler) compoundAssign(target string, shared int, value expr, t
 		d.push(expr{Text: text, Prec: precAssign, Type: targetType, Effects: true})
 		return nil
 	}
+	if d.postfix(target, value, targetType) {
+		return nil
+	}
 	for _, stacked := range d.stack {
 		if observesWrites(stacked, d.names) {
 			return bail("an assignment with a value that could see it on the stack")
@@ -3526,6 +3557,25 @@ func (d *bodyDecompiler) compoundAssign(target string, shared int, value expr, t
 	}
 	d.emit(text + ";")
 	return nil
+}
+
+// postfix writes `f++` or `f--` where the value stored back is the field's own
+// read plus or minus one, and a `dup` left a copy of that read on the stack
+// (under the receiver, for an instance field): the copy is the old value,
+// which is what the postfix form yields, so it becomes the expression in place. A narrowing javac put on the result
+// of a byte, short or char field's increment is the form's own.
+func (d *bodyDecompiler) postfix(target string, value expr, targetType string) bool {
+	if value.Inner != nil && value.Type == targetType {
+		value = *value.Inner
+	}
+	top := len(d.stack) - 1
+	if top < 0 || value.Bin == nil || value.Bin.Left.Dup == 0 || value.Bin.Left.Dup != d.stack[top].Dup ||
+		value.Bin.Left.Text != target || (value.Bin.Op != "+" && value.Bin.Op != "-") ||
+		(value.Bin.Right.Text != "1" && value.Bin.Right.Text != "1L") {
+		return false
+	}
+	d.stack[top] = expr{Text: target + value.Bin.Op + value.Bin.Op, Prec: precPrimary, Type: targetType, Effects: true}
+	return true
 }
 
 // storeAsValue writes a store whose value the stack still wants as the
@@ -4352,6 +4402,68 @@ func (d *bodyDecompiler) reachesArm(from, to int) bool {
 	return false
 }
 
+// armsMeet reports the first block both arms of a branch reach, or exitBlock
+// when there is none or it is not the same first block on every path. The walk
+// stops at stop and on the edges of every loop and switch around the branch: a
+// way out of the statement around it is no merge of its arms.
+func (d *bodyDecompiler) armsMeet(whenTrue, whenFalse, stop int) int {
+	stops := map[int]bool{stop: true}
+	for _, entered := range d.active {
+		stops[entered.ContinueTarget] = true
+		stops[entered.Loop.Follow] = true
+	}
+	for _, entered := range d.switches {
+		stops[entered.Follow] = true
+	}
+	walk := func(from int, halt map[int]bool) map[int]bool {
+		seen := map[int]bool{}
+		queue := []int{from}
+		for len(queue) > 0 {
+			at := queue[len(queue)-1]
+			queue = queue[:len(queue)-1]
+			if seen[at] || stops[at] || d.blocks[at] == nil {
+				continue
+			}
+			seen[at] = true
+			if halt[at] {
+				continue
+			}
+			queue = append(queue, d.blocks[at].Successors...)
+		}
+		return seen
+	}
+	common := walk(whenTrue, nil)
+	for start := range walk(whenFalse, nil) {
+		if !common[start] {
+			continue
+		}
+		common[start] = false
+	}
+	for start, only := range common {
+		if only {
+			delete(common, start)
+		} else {
+			common[start] = true
+		}
+	}
+	if len(common) == 0 {
+		return exitBlock
+	}
+	first := exitBlock
+	for _, arm := range []int{whenTrue, whenFalse} {
+		for start := range walk(arm, common) {
+			if !common[start] {
+				continue
+			}
+			if first != exitBlock && first != start {
+				return exitBlock
+			}
+			first = start
+		}
+	}
+	return first
+}
+
 func containsInt(values []int, wanted int) bool {
 	for _, value := range values {
 		if value == wanted {
@@ -4947,6 +5059,16 @@ func (d *bodyDecompiler) conditional(b *block, stop int) (int, error) {
 	follow := merge
 	if d.reachesArm(whenTrue, whenFalse) {
 		follow = whenFalse
+	}
+	// A `return` (or a `break`) in one of them makes the post-dominator
+	// exitBlock while the arms still come back together: `if (a) { .. } else
+	// if (b) { .. } else { return; }` merges after the `else if`. The first
+	// block both arms reach - without leaving the statement around this one -
+	// is where.
+	if follow == exitBlock && !d.reachesArm(whenFalse, whenTrue) {
+		if common := d.armsMeet(whenTrue, whenFalse, stop); common != exitBlock {
+			follow = common
+		}
 	}
 	// Inside a `try` the merge can sit outside the statement: a `return` on one
 	// path makes the post-dominator exitBlock, but the arms still come back
@@ -5950,6 +6072,9 @@ func (d *bodyDecompiler) step(
 			d.push(expr{Text: target + " = " + assigned, Prec: precAssign, Type: fieldType, Effects: true})
 			return nil
 		}
+		if d.postfix(target, value, fieldType) {
+			return nil
+		}
 		// The assignment is a statement here, so it runs *before* everything the
 		// stack already holds - and any of those that reads a field, an array or a
 		// call could see it. `arr[idx++]`, `p.x + (q.x = 1)` and `f() + (n = 1)`
@@ -6265,6 +6390,10 @@ func (d *bodyDecompiler) step(
 			if err := checkDuplicable(value); err != nil {
 				return err
 			}
+		}
+		if len(taken) == 1 && depth <= 1 {
+			d.dupIDs++
+			taken[0].Dup = d.dupIDs
 		}
 		for _, value := range taken {
 			d.push(value)

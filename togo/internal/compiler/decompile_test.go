@@ -1805,6 +1805,114 @@ func TestDecompileEndsALoopWhoseOtherExitsReturn(t *testing.T) {
 	}
 }
 
+// A char where an int is asked for widens without an instruction, so the
+// bytecode looks the same as `c` itself would - but source binds `c` to the
+// char overload and prints it as a character. The `(int)` is written back on
+// call arguments and concatenation parts; nowhere else does it change anything
+// (and an int local a char was stored in is, without a debug table, a char).
+const charIntSource = `public class CharInt {
+  char c = 'b';
+  static String f(int i) { return "i" + i; }
+  static String f(char c) { return "c" + c; }
+  String all(char p) { int i = c; long l = c; return f((int) c) + f(c) + f((int) p) + f(p) + " " + (int) c + c + (int) p + p + String.valueOf((int) c) + String.valueOf(c) + i + l + (char) (c + 1); }
+  public static void main(String[] z) { System.out.println(new CharInt().all('q')); }
+}
+`
+
+func TestDecompileCastsACharPassedAsAnInt(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "CharInt", charIntSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"f((int) this.c) + f(this.c) + f((int) arg0) + f(arg0)", "+ (int) this.c + this.c + (int) arg0 + arg0",
+		"java.lang.String.valueOf((int) this.c)", "java.lang.String.valueOf(this.c)",
+		"char var2 = this.c;", "long var3 = (long) this.c;", "+ (int) var2 + var3 +",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "CharInt", source)
+	expected := runJava(t, dir, "CharInt")
+	actual := runJava(t, again, "CharInt")
+	if actual != expected || actual != "i98cbi113cq 98b113q98b9898c\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// An `if` whose last `else` returns, breaks or continues has no post-dominator
+// - that arm never reaches the merge - while the other arms still come back
+// together after it. The first block both arms reach is the end of the
+// statement; walking there stops at the edges of every loop around it, so a
+// `break outer` is not mistaken for a merge.
+const elseExitsSource = `public class ElseExits {
+  int m; int size = 5;
+  int g1(int a, int b) { if (a > 0) { m += a; } else if (b > 0) { m += b; } else { return -1; } m += 100; return m; }
+  int g3(int a, int b) { if (a > 0) { m += a; } else if (b > 0) { m += b; } else { throw new IllegalStateException(); } m += 100; return m; }
+  void g4() { while (size > 1) { int n = size - 2; if (n > 0) { m += n; } else if (n == 0) { m += 7; } else { return; } size = size - 1; } }
+  void g5() { while (size > 1) { int n = size - 2; if (n > 0) { m += n; } else if (n == 0) { m += 7; } else { break; } size = size - 1; } }
+  void g6() { while (size > 1) { int n = size - 2; if (n > 0) { m += n; } else if (n == 0) { m += 7; } else { size--; continue; } size = size - 1; } }
+  static int nested(int[][] c) { int n = 0; outer: for (int[] p : c) { for (int r : p) { if (r == 7) break outer; if (r == 5) continue outer; n += r; } n += 1000; } return n; }
+  static boolean armsAsInts(boolean inarc, int a, int b) { boolean inside = a * b >= 0; return inarc ? !inside : inside; }
+  public static void main(String[] z) {
+    ElseExits t = new ElseExits();
+    System.out.print(t.g1(1, 0) + " " + t.g1(0, 1) + " " + t.g1(0, 0) + " " + t.g3(0, 1));
+    t.g4(); System.out.print(" " + t.m + t.size); t = new ElseExits(); t.g5(); System.out.print(" " + t.m + t.size); t = new ElseExits(); t.g6(); System.out.print(" " + t.m + t.size);
+    System.out.println(" " + nested(new int[][]{{1, 2}, {5, 9}, {3, 7}, {4}}) + " " + armsAsInts(true, 1, 2));
+  }
+}
+`
+
+func TestDecompileEndsAnIfWhoseLastElseLeaves(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "ElseExits", elseExitsSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"return -1;\n}\n}\nthis.m = this.m + 100;",
+		"break;\n}\n}\nthis.size = this.size - 1;",
+		"break label1;", "continue label1;", "var1 += 1000;",
+		// The one method that still bails, and why: the arms of the returned
+		// conditional were written as the ints javac materialized.
+		"/* cappu: a conditional with number arms where a boolean belongs",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if count := strings.Count(source, "/* cappu:"); count != 1 {
+		t.Errorf("expected one bail, got %d:\n%s", count, source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "ElseExits", source)
+	expected := runJava(t, dir, "ElseExits")
+	if expected != "101 202 -1 303 3161 131 131 1006 false\n" {
+		t.Fatalf("unexpected reference output %q", expected)
+	}
+	// armsAsInts bails, so the driver is run up to the line before it.
+	source = strings.Replace(source, `+ " " + armsAsInts(true, 1, 2)`, "", 1)
+	compileWithJavac(t, again, "ElseExits", source)
+	actual := runJava(t, again, "ElseExits")
+	if actual != strings.TrimSuffix(expected, " false\n")+"\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A parameter is defined on entry, on every path: reassigned in a branch and
 // read after it, the read is as unambiguous as any other, and not "written in
 // more than one branch".
@@ -3289,7 +3397,8 @@ const compoundDriverSource = `public class CompoundDriver {
 }`
 
 // The *value* of a post-increment is the old one, and the long form reads the new
-// one: those need the assignment to stay an expression, which it does not.
+// one: a field's comes back as the `n++` it was; an array element's would need
+// the assignment to stay an expression, which it does not.
 const compoundBailsSource = `public class Both {
   static int[] a = { 1, 2, 3 };
   int n;
@@ -3336,10 +3445,11 @@ func TestDecompileSaysWhenAPostIncrementValueIsUsed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	// Both of them, and both for the same reason: the store would have to run in
-	// front of the value the post-increment yields.
-	if count := strings.Count(source, "an assignment with a value that could see it on the stack"); count != 2 {
-		t.Errorf("expected two guarded methods, got %d:\n%s", count, source)
+	if count := strings.Count(source, "an assignment with a value that could see it on the stack"); count != 1 {
+		t.Errorf("expected one guarded method, got %d:\n%s", count, source)
+	}
+	if !strings.Contains(source, "return this.n++;") {
+		t.Errorf("expected the field's post-increment:\n%s", source)
 	}
 }
 
@@ -3548,17 +3658,41 @@ func TestDecompileRunsLikeJavacForLoops(t *testing.T) {
 }
 
 // The same trap one level out from `i++`: `arr[idx++]` where `idx` is a *field*
-// is a getstatic/dup/putstatic, and writing the assignment out first would make
-// the read take the new value.
+// is a getstatic/dup/putstatic (a getfield under a dup_x1 for an instance
+// field), and writing the assignment out first would make the read take the
+// new value. The copy the dup left is the old value, so it is the `idx++`; a
+// byte, short or char field's carries javac's narrowing, and one whose value
+// is the *new* one stays the assignment it is. Anything else on the stack
+// still keeps the store from becoming a statement.
 const fieldPostIncrementSource = `public class FieldPost {
   static int[] arr = { 5, 6, 7 };
   static int idx = 0;
+  int pos; byte b; char c = 'a'; long n; short sh;
   static int f() { int v = arr[idx++]; return v * 100 + idx; }
+  int read() { return arr()[pos++] & 0xff; }
+  int[] arr() { return arr; }
+  int dec() { return arr[--pos + 1] + pos--; }
+  int old() { return pos + pos++; }
+  int fresh() { return pos + (pos += 1); }
+  int both() { return pos++ + pos++; }
+  byte bb() { return b++; }
+  char cc() { return c++; }
+  short ss() { return ss(sh--); }
+  short ss(short v) { return v; }
+  long ll() { return n++ + n--; }
+  int other(FieldPost q) { return q.pos++ + q.arr()[q.pos % 3]; }
+  int stays() { int k = pos; pos = pos + 2; return k + pos; }
+  public static void main(String[] z) {
+    FieldPost p = new FieldPost();
+    System.out.println(f() + " " + p.read() + " " + p.read() + " " + p.dec() + " " + p.old() + " " + p.fresh() + " " + p.both()
+      + " " + p.bb() + " " + p.cc() + " " + p.ss() + " " + p.ll() + " " + p.other(p) + " " + p.stays()
+      + " " + idx + " " + p.pos + " " + p.b + " " + p.c + " " + p.sh + " " + p.n);
+  }
 }`
 
-func TestDecompileSaysWhenAFieldIsAssignedWhileItIsOnTheStack(t *testing.T) {
-	if !hasTool("javac") {
-		t.Skip("no JDK (javac)")
+func TestDecompileWritesAFieldPostIncrementAsItsValue(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
 	}
 	dir := t.TempDir()
 	classFile := compileWithJavac(t, dir, "FieldPost", fieldPostIncrementSource)
@@ -3566,8 +3700,24 @@ func TestDecompileSaysWhenAFieldIsAssignedWhileItIsOnTheStack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(source, "cappu: an assignment with a value that could see it on the stack") {
-		t.Errorf("expected the bail, got:\n%s", source)
+	for _, want := range []string{
+		"arr[idx++]", "this.arr()[this.pos++] & 255", "this.pos + this.pos++", "this.pos + (this.pos = this.pos + 1)",
+		"this.pos++ + this.pos++", "return this.b++;", "return this.c++;", "this.ss(this.sh--)",
+		"this.n++ + this.n--", "arg0.pos++ + arg0.arr()[arg0.pos % 3]", "this.pos = this.pos + 2;",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "FieldPost", source)
+	expected := runJava(t, dir, "FieldPost")
+	actual := runJava(t, again, "FieldPost")
+	if actual != expected || actual != "501 5 6 8 0 3 5 0 a 0 1 11 12 1 7 1 b -1 0\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
 
