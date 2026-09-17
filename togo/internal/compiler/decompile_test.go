@@ -1508,9 +1508,16 @@ const nullishSource = `public class Nullish {
   static String f(Object o) { return "O"; }
   static String f(String s) { return "S"; }
   static void use(Object o) {}
-  // Read as an Object before the first real value: the reads are text, the
-  // variable stays an Object (and the branch-merged read bails as it did).
+  // Read before the first real value: what the reads ask for types it, not
+  // the value - javac chose f(Object) by the declared type.
   static String readFirst(boolean c) { Object o = null; String r = f(o); if (c) o = "x"; return r + f(o); }
+  // The value says nothing about the declared type either way: the use does.
+  static String typedByUse(boolean c) { Object o = null; if (c) o = "s"; return f(o); }
+  static String typedByUse2(boolean c) { String o = null; if (c) o = "s"; return f(o); }
+  // Carried around a loop: the read before the store and the store are one variable.
+  static int loop(String[] a) { Object x = null; int n = 0; for (String s : a) { if (x != null) n++; x = s.trim(); } return n; }
+  static String carried(int[] a) { Object x = "a"; String r = ""; for (int i : a) { r += x; x = Integer.valueOf(i); } return r; }
+  static String erased(String[] s) { int x = 0; String r = ""; for (int i = 0; i < s.length; i++) { r += x; x = s[i].charAt(0); } return r; }
   static boolean compared(boolean c, Integer i) { Object o = null; boolean r = o == i; if (c) o = "s"; return r; }
   // A dead variable's slot, reused: the new one is its own, and its type is
   // what its first use asks for.
@@ -1538,6 +1545,8 @@ func TestDecompileKeepsANullStoreInItsVariable(t *testing.T) {
 		"java.lang.Object var1 = null;", "var1 = arg0 ? \"q\" : java.lang.Integer.valueOf(1);",
 		"java.lang.Object var2 = null;", "boolean var3 = var2 == arg1;",
 		"java.lang.Object var0_2 = null;", "return f(var0_2);",
+		"java.lang.Object var1 = null;\njava.lang.String var2 = f(var1);", "return var2 + f(var1);",
+		"var1 = var6.trim();", "java.lang.Object var1 = \"a\";", "var1 = java.lang.Integer.valueOf(var6);", "int var1 = 0;", "var1 = arg0[var3].charAt(0);",
 		"java.lang.Integer var1_2 = null;", "return var1_2;",
 		"cappu: a conditional whose arms differ in type",
 		"java.lang.Object var3 = arg0 ? arg1 : \"s\";",
@@ -1546,31 +1555,36 @@ func TestDecompileKeepsANullStoreInItsVariable(t *testing.T) {
 			t.Errorf("expected %q:\n%s", want, source)
 		}
 	}
-	// readFirst: the merged read after the branch; nested: the store.
-	if strings.Count(source, "/* cappu:") != 2 || !strings.Contains(source, "cappu: local 1 is written in more than one branch") {
-		t.Errorf("expected two bails:\n%s", source)
+	// nested: the store of a conditional whose arms differ.
+	if strings.Count(source, "/* cappu:") != 1 {
+		t.Errorf("expected one bail:\n%s", source)
 	}
 	again := filepath.Join(dir, "again")
 	compileWithJavac(t, again, "Nullish", source)
 	driver := `public class NullishDriver {
   public static void main(String[] x) {
     System.out.println(Nullish.a(true) + Nullish.a(false) + Nullish.b(true) + Nullish.b(false) + Nullish.arr(true).length + Nullish.caught(false)
-      + Nullish.compared(true, 1) + Nullish.reused() + Nullish.afterLoop(java.util.List.of("q")) + Nullish.bound(false, 2));
+      + Nullish.compared(true, 1) + Nullish.reused() + Nullish.afterLoop(java.util.List.of("q")) + Nullish.bound(false, 2)
+      + Nullish.readFirst(true) + Nullish.typedByUse(true) + Nullish.typedByUse2(true) + " " + Nullish.loop(new String[]{"a", "b", "c"})
+      + Nullish.carried(new int[]{1, 2}) + Nullish.erased(new String[]{"q", "z"}));
   }
 }`
 	compileWithJavacOn(t, dir, "NullishDriver", driver, dir)
 	expected := runJava(t, dir, "NullishDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "NullishDriver")
-	if actual != expected || actual != "x--y21falseOnulls\n" {
+	if actual != expected || actual != "x--y21falseOnullsOOOS 2a10113\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
 
-// A literal `null` passed where `Object` is declared: on the classes with a
-// `char[]` overload beside it (`String.valueOf`, `println`, `append`) the
-// bytecode's choice of the `Object` one means source cast it, and the cast is
-// written back; anywhere else `Object` is as likely a generic `T`, and a cast
-// would not compile against the parameterized type (`Optional.orElse(null)`).
+// A literal `null` passed where `Object` is declared: the bytecode's choice of
+// the `Object` overload (`String.valueOf`, `println`, `append` have a `char[]`
+// one beside it) means source cast it, and the cast is written back. On a
+// method of a call's result the `Object` is as likely a generic `T`, where the
+// cast would not compile against the parameterized type and its absence may
+// take another overload: that is a refusal. The receiver has to be the call's
+// own, not whatever a static call's arguments happen to sit on, and not a
+// `new`, which names its type arguments itself.
 const nullArgSource = `import java.util.Optional;
 public class NullArg {
   static String v() { return String.valueOf((Object) null); }
@@ -1579,6 +1593,16 @@ public class NullArg {
   static long s() { return java.util.stream.Stream.of((Object) null).count(); }
   static String chained(java.util.Map<String, Optional<String>> m) { return m.get("k").orElse(null); }
   static Object direct(NullArgFinder f) { return f.find("k").orElse(null); }
+  static String use(String a, String b) { return a + b; }
+  static String foo() { return "f"; }
+  static String underStatic() { return use(foo(), String.valueOf((Object) null)); }
+  static String underConcat() { return foo() + String.valueOf((Object) null); }
+  static String underAppend(StringBuilder sb) { return sb.append(foo()).append((Object) null).toString(); }
+  String bar(Object o) { return "O"; }
+  String bar(String s) { return "S"; }
+  static NullArg make() { return new NullArg(); }
+  String onNew() { return new NullArg().bar((Object) null); }
+  String onCall() { return make().bar((Object) null); }
 }
 interface NullArgFinder { Optional<Object> find(String k); }
 `
@@ -1602,24 +1626,31 @@ func TestDecompileCastsANullArgumentOnlyWhereAnOverloadWouldTakeIt(t *testing.T)
 		"return new java.lang.ref.WeakReference((java.lang.Object) null).get();",
 		"return java.util.stream.Stream.of((java.lang.Object) null).count();",
 		"return (java.lang.String) ((java.util.Optional) arg0.get(\"k\")).orElse((java.lang.Object) null);",
-		"return arg0.find(\"k\").orElse(null);",
+		"return use(foo(), java.lang.String.valueOf((java.lang.Object) null));",
+		"return foo() + java.lang.String.valueOf((java.lang.Object) null);",
+		"return new NullArg().bar((java.lang.Object) null);",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
 		}
+	}
+	// direct, underAppend and onCall: a null to a method of a call's result.
+	if count := strings.Count(source, "/* cappu: a null argument to a method of a call's result"); count != 3 {
+		t.Errorf("expected three refusals, got %d:\n%s", count, source)
 	}
 	again := filepath.Join(dir, "again")
 	compileWithJavacOn(t, again, "NullArg", source, dir)
 	driver := `public class NullArgDriver {
   public static void main(String[] x) {
     System.out.println(NullArg.v() + " " + NullArg.o(java.util.Optional.empty()) + " " + NullArg.w() + " " + NullArg.s()
-      + " " + NullArg.chained(java.util.Map.of("k", java.util.Optional.of("v"))) + " " + NullArg.direct(k -> java.util.Optional.of(k)));
+      + " " + NullArg.chained(java.util.Map.of("k", java.util.Optional.of("v"))) + " " + NullArg.underStatic() + " " + NullArg.underConcat()
+      + " " + new NullArg().onNew());
   }
 }`
 	compileWithJavacOn(t, dir, "NullArgDriver", driver, dir)
 	expected := runJava(t, dir, "NullArgDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "NullArgDriver")
-	if actual != expected || actual != "null null null 1 v k\n" {
+	if actual != expected || actual != "null null null 1 v fnull fnull O\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
@@ -1962,7 +1993,11 @@ func TestDecompileReadsAReassignedParameterAfterABranch(t *testing.T) {
 // one slot. Without a debug table that split the variable in two. A literal
 // that fits the typed variable is one of its values, and a variable that has
 // only held such literals, and was never read, takes the type of the first
-// value that knows its own - whichever arm comes first.
+// value that knows its own - whichever arm comes first. That type is a guess:
+// `int i = s.charAt(0)` stores the same way. An `iinc`, or an int stored
+// without javac's narrowing, says the variable was an int all along, and the
+// variable widens back; passed or concatenated as an int, a char is cast, so
+// the guess cannot change what runs.
 const erasedSource = `public class Erased {
   static boolean flag() { return true; }
   static char ch(boolean x, String s) { char c; if (x) c = 'a'; else c = s.charAt(0); return c; }
@@ -1970,6 +2005,13 @@ const erasedSource = `public class Erased {
   static boolean bo(boolean x) { boolean b; if (x) b = true; else b = flag(); return b; }
   static byte by(boolean x, byte[] a) { byte b; if (x) b = 5; else b = a[0]; return b; }
   static short sh(boolean x, short[] a) { short s; if (x) s = a[0]; else s = -300; return s; }
+  static int inc(String s) { int i = s.charAt(0); i++; return i; }
+  static int widened(String s) { int i = s.charAt(0); i = i + 1; return i; }  // two variables read the same
+  static int mix(byte[] b) { int i = b[0]; i += 200; return i; }
+  static String asInt(boolean x, String s) { int i; if (x) i = 65; else i = s.charAt(0); return String.valueOf(i) + i; }
+  static String use(char c) { return "c"; }
+  static String use(int i) { return "i"; }
+  static String overload(byte[] b, String s) { char c = s.charAt(0); int i = b[0]; return use(c) + use((int) c) + use(i); }
 }
 `
 
@@ -1987,6 +2029,8 @@ func TestDecompileMergesAnErasedVariableAcrossBranches(t *testing.T) {
 		"char var2;", "var2 = 'a';", "var2 = arg1.charAt(0);", "var2 = 'q';",
 		"boolean var1;", "var1 = true;", "var1 = flag();",
 		"byte var2;", "var2 = 5;", "short var2;", "var2 = -300;",
+		"int var1 = arg0.charAt(0);\nvar1++;", "char var1 = arg0.charAt(0);\nint var1_2 = var1 + 1;", "int var1 = arg0[0];\nvar1 += 200;",
+		"return java.lang.String.valueOf((int) var2) + (int) var2;", "return use(var2) + use((int) var2) + use((int) var3);",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
@@ -2001,13 +2045,14 @@ func TestDecompileMergesAnErasedVariableAcrossBranches(t *testing.T) {
   public static void main(String[] z) {
     System.out.println(Erased.ch(true, "z") + "" + Erased.ch(false, "z") + Erased.ch2(true, "z") + Erased.ch2(false, "z") + " "
       + Erased.bo(true) + Erased.bo(false) + " " + Erased.by(true, new byte[]{9}) + Erased.by(false, new byte[]{9}) + " "
-      + Erased.sh(true, new short[]{3}) + Erased.sh(false, new short[]{3}));
+      + Erased.sh(true, new short[]{3}) + Erased.sh(false, new short[]{3}) + " " + Erased.inc("\uffff") + " " + Erased.widened("\uffff")
+      + " " + Erased.mix(new byte[]{100}) + " " + Erased.asInt(false, "q") + " " + Erased.overload(new byte[]{1}, "z"));
   }
 }`
 	compileWithJavacOn(t, dir, "ErasedDriver", driver, dir)
 	expected := runJava(t, dir, "ErasedDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "ErasedDriver")
-	if actual != expected || actual != "azzq truetrue 59 3-300\n" {
+	if actual != expected || actual != "azzq truetrue 59 3-300 65536 65536 300 113113 cii\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
@@ -2083,7 +2128,9 @@ func TestDecompileBoundsAVariableTwoArmsAssign(t *testing.T) {
 // class hierarchy to compute. The variable's type stays open, an Object, until
 // the first use asks for one: the class a method called on it belongs to (its
 // static type, as javac wrote it), the field read from it, the parameter it is
-// passed as, or the type it is returned as.
+// passed as, or the type it is returned as. One no use asks of is an Object.
+// A checkcast on a value says what the value is, not the variable; a variable
+// assigned an open one is typed by its own uses, and the two have to agree.
 const openSource = `import java.util.*;
 public class Open {
   static int size(boolean c) { List<String> l; if (c) l = new ArrayList<>(); else l = new LinkedList<>(); l.add("x"); return l.size(); }
@@ -2099,8 +2146,23 @@ public class Open {
   static Object arm(boolean c, Object o) { Collection<String> l; if (c) l = new ArrayList<>(); else l = new HashSet<>(); return c ? l : o; }
   static CharSequence armTyped(boolean c, CharSequence o) { CharSequence s; if (c) s = "a"; else s = new StringBuilder("b"); return c ? s : o; }
   static CharSequence cast(boolean c, Object o) { CharSequence s; if (c) s = (CharSequence) o; else s = new StringBuilder("x"); return s; }
+  static int castLies(boolean c, Object o) { CharSequence s; if (c) s = (String) o; else s = new StringBuilder("x"); return s.length(); }
   static int unresolved(boolean c) { Collection<String> l; if (c) l = new ArrayList<>(); else l = new HashSet<>(); synchronized (l) { return 1; } }
   static Number linked(boolean c, int e) { Number d; if (c) d = Long.valueOf(e); else d = java.math.BigInteger.valueOf(e); Number n = d; if (d instanceof Long) { n = Long.valueOf(((Long) d).longValue() + 1); } return n; }
+  static String useN(Object o) { return "O"; }
+  static String useN(Number n) { return "N"; }
+  static String linkedUses(boolean c, int e) { Number d; if (c) d = Long.valueOf(e); else d = java.math.BigInteger.valueOf(e); Object n = d; d.intValue(); return useN(n); }
+  static String linkedOther(boolean c, int e) { Number d; if (c) d = Long.valueOf(e); else d = java.math.BigInteger.valueOf(e); Object n = d; n.hashCode(); return useN(d); }
+  static int linkedNarrower(boolean c, int e) { Object d; if (c) d = Long.valueOf(e); else d = java.math.BigInteger.valueOf(e); Number n = (Number) d; d.hashCode(); return n.intValue(); }
+  // Held only null, then a cast: the cast's type is tried first, and when a
+  // use asks for a supertype instead, the type every value has is the one.
+  static Exception merge(Exception a, Exception b) { return a == null ? b : a; }
+  static String thrown(boolean c) throws java.io.IOException { java.io.IOException e = null; if (c) e = (java.io.IOException) merge(e, new java.io.IOException("io")); if (e != null) throw e; return "-"; }
+  static String nulled(boolean c) { String s = null; if (c) s = "v"; StringBuilder b = new StringBuilder(); b.append((CharSequence) s); return b.append(s).toString(); }  // the upcast is lost: append(String) does the same
+  // A variable that held a subclass first and widens later widens what was
+  // typed by it: previous = ancestor took the narrower type as it was then.
+  static CharSequence root(String s) { CharSequence ancestor = s; CharSequence previous; do { previous = ancestor; ancestor = ancestor.length() > 2 ? new StringBuilder(ancestor.subSequence(1, ancestor.length())) : null; } while (ancestor != null); return previous; }
+  static String keyed(int id, int code, java.util.Hashtable<Object, Object> h) { String ks2 = null; String ks; if (id == 0) { ks = "k" + code; } else { if (code > 1) { ks2 = "k" + (code - 1); } ks = "k" + code; } Object o = null; if (ks2 != null) { o = h.get(ks2); if (o != null) ks = ks2; } if (o == null) o = h.get(ks); return o + ":" + ks; }
 }
 class OpenPoint extends java.awt.Point { OpenPoint() { super(3, 4); } }
 `
@@ -2124,30 +2186,39 @@ func TestDecompileTypesAMergedVariableByItsFirstUse(t *testing.T) {
 		"java.util.Set var1;", "var1.add(\"b\");",
 		"java.lang.Object var2;", "return arg0 ? var2 : arg1;",
 		"java.lang.CharSequence var2;", "var2 = (java.lang.CharSequence) arg1;",
-		"cappu: a variable whose uses ask for different types", "cappu: a variable whose type no use says",
+		"var2 = (java.lang.String) arg1;", "return var2.length();",
+		"cappu: a variable whose uses ask for different types",
+		"java.lang.Object var1;", "synchronized (var1) {",
 		"java.lang.Number var2;", "java.lang.Number var3 = var2;",
+		"java.lang.Object var3 = var2;", "return useN(var3);", "return useN(var2);",
+		"java.lang.Number var3 = (java.lang.Number) var2;",
+		"java.io.IOException var1 = null;", "throw var1;", "java.lang.String var1 = null;", "var2.append(var1);",
+		"java.lang.CharSequence var2;\njava.lang.CharSequence var1 = arg0;", "java.lang.String var4;\njava.lang.String var3 = null;",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
 		}
 	}
-	if strings.Count(source, "/* cappu:") != 2 || strings.Contains(source, "var1_2") {
-		t.Errorf("expected one variable per method and two bails:\n%s", source)
+	if strings.Count(source, "/* cappu:") != 1 || strings.Contains(source, "var1_2") {
+		t.Errorf("expected one variable per method and one bail:\n%s", source)
 	}
 	again := filepath.Join(dir, "again")
 	compileWithJavacOn(t, again, "Open", source, dir)
 	driver := `public class OpenDriver {
-  public static void main(String[] z) {
+  public static void main(String[] z) throws Exception {
     System.out.println(Open.size(true) + " " + Open.size(false) + " " + Open.ret(false).getClass().getSimpleName() + " " + Open.arg(true)
       + " " + Open.field(false) + " " + Open.twoUses(true) + Open.twoUses(false) + " " + Open.exact(false)
       + " " + Open.arm(true, "o") + Open.arm(false, "o") + " " + Open.armTyped(true, "z") + Open.armTyped(false, "z") + " " + Open.cast(true, "q") + Open.cast(false, null)
-      + " " + Open.linked(true, 4) + Open.linked(false, 4));
+      + " " + Open.linked(true, 4) + Open.linked(false, 4) + " " + Open.castLies(false, "q") + Open.unresolved(true)
+      + " " + Open.linkedUses(true, 1) + Open.linkedOther(false, 1) + Open.linkedNarrower(true, 7) + " " + Open.thrown(false) + Open.nulled(true)
+      + " " + Open.root("abcd") + " " + Open.keyed(1, 3, new java.util.Hashtable<>(java.util.Map.of("k2", "v"))));
+    try { Open.thrown(true); } catch (java.io.IOException e) { System.out.println(e.getMessage()); }
   }
 }`
 	compileWithJavacOn(t, dir, "OpenDriver", driver, dir)
 	expected := runJava(t, dir, "OpenDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "OpenDriver")
-	if actual != expected || actual != "1 1 HashSet 0 3 3a2d 2 []o az qx 54\n" {
+	if actual != expected || actual != "1 1 HashSet 0 3 3a2d 2 []o az qx 54 11 ON7 -vv cd v:k2\nio\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
@@ -2208,6 +2279,8 @@ const switchExprSource = `public class SwitchExpr {
   static int stmt(int k) { int r = 0; switch (k) { case 0: r = 1; break; case 1: r = 2; default: r += 10; } return r; }
   static boolean t(int k) { return true; }
   static boolean mix(int k, boolean f) { return switch (k) { case 5 -> false; case 4 -> true; case 6 -> f; default -> t(k); }; }
+  static int len(int k) { return (switch (k) { case 0 -> "a"; default -> "bb"; }).length(); }
+  static int neg(int k) { return -switch (k) { case 0 -> 1; default -> 2; } + 5; }
 }
 `
 
@@ -2230,6 +2303,9 @@ func TestDecompileWritesASwitchExpression(t *testing.T) {
 		"case 1:", "var1 += 10;",
 		// A boolean arm makes the others' 1/0 true/false.
 		"return switch (arg0) { case 5 -> false; case 4 -> true; case 6 -> arg1; default -> t(arg0); };",
+		// It binds like a cast: parenthesized under a member access, bare as an operand.
+		"return (switch (arg0) { case 0 -> \"a\"; default -> \"bb\"; }).length();",
+		"return -(switch (arg0) { case 0 -> 1; default -> 2; }) + 5;",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
@@ -2242,14 +2318,14 @@ func TestDecompileWritesASwitchExpression(t *testing.T) {
 	compileWithJavac(t, again, "SwitchExpr", source)
 	driver := `public class SwitchExprDriver {
   public static void main(String[] z) {
-    System.out.println(SwitchExpr.name(0) + SwitchExpr.name(2) + " " + SwitchExpr.val(1) + SwitchExpr.val(9) + " " + SwitchExpr.mixed(1) + SwitchExpr.mixed(5) + " " + SwitchExpr.wide(0) + SwitchExpr.wide(2) + " " + SwitchExpr.stmt(1) + SwitchExpr.stmt(0) + " " + SwitchExpr.mix(5, true) + SwitchExpr.mix(6, true));
+    System.out.println(SwitchExpr.name(0) + SwitchExpr.name(2) + " " + SwitchExpr.val(1) + SwitchExpr.val(9) + " " + SwitchExpr.mixed(1) + SwitchExpr.mixed(5) + " " + SwitchExpr.wide(0) + SwitchExpr.wide(2) + " " + SwitchExpr.stmt(1) + SwitchExpr.stmt(0) + " " + SwitchExpr.mix(5, true) + SwitchExpr.mix(6, true) + " " + SwitchExpr.len(1) + SwitchExpr.neg(1));
     try { SwitchExpr.name(7); } catch (IllegalArgumentException e) { System.out.println(e.getMessage()); }
   }
 }`
 	compileWithJavacOn(t, dir, "SwitchExprDriver", driver, dir)
 	expected := runJava(t, dir, "SwitchExprDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "SwitchExprDriver")
-	if actual != expected || actual != "zerosmall 2119 7null 15 121 falsetrue\nk=7\n" {
+	if actual != expected || actual != "zerosmall 2119 7null 15 121 falsetrue 23\nk=7\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
@@ -2560,8 +2636,9 @@ func TestDecompileReconstructsControlFlowFixture(t *testing.T) {
 }
 
 // The two arms store to the same slot with the same opcode but differently typed
-// values, so without a debug table there is nothing left to say whether that is
-// one variable or two - and guessing would produce code that lies.
+// values - a String and an array, which no open type covers - and the read after
+// them wants one variable: the store says so, rather than split it in two and
+// leave the read on one arm's.
 const ambiguousSlotSource = "class Amb { static java.lang.Object f(boolean c, java.lang.String s, int[] a) {" +
 	" java.lang.Object o; if (c) { o = s; } else { o = a; } return o; } }"
 
@@ -2570,7 +2647,7 @@ func TestDecompileSaysWhenASlotComesFromEitherBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(source, "cappu: local 3 is written in more than one branch") {
+	if !strings.Contains(source, "cappu: a variable that holds values of different types") {
 		t.Errorf("expected the ambiguity to be reported in:\n%s", source)
 	}
 }
