@@ -1178,6 +1178,12 @@ type finallyRegion struct {
 	// BodyEnd where the handler's blocks end.
 	Body    []Instruction
 	BodyEnd int
+	// Ranges are the pieces of the protected range, split around the copies.
+	Ranges [][2]int
+	// Targets are the copies that go on, when they do not agree on where: which
+	// one the statement ends at - the rest leaving a loop around it, as a
+	// `break` or a `continue` - only the loops say.
+	Targets []int
 	// Copies are the blocks that begin with a copy of the body on a way out of
 	// the protected range - one per `return` or `break` inside it, and the
 	// last one, at EndPc, the way off its end.
@@ -1392,7 +1398,7 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 		// copy that returns is the end only when no copy goes on. Several that
 		// go on - the `try` and the `catch` beside it a `finally` guards both
 		// of - meet where they all jump to, and the statement goes on there.
-		var goesOn []int
+		var goesOn, targets []int
 		for _, copyStart := range copies {
 			if blocks[copyStart].Kind != blockEnd {
 				goesOn = append(goesOn, copyStart)
@@ -1406,9 +1412,9 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 		case len(goesOn) == 1:
 			end = goesOn[0]
 		case len(goesOn) > 1:
-			// Ones that jump to different places - a `break` out of the loop
-			// around the statement beside the way off its end - leave the end
-			// where the range ends.
+			// Ones that jump to different places - a `break` or a `continue` of
+			// a loop around the statement beside the way off its end - are
+			// sorted out when the loops are known.
 			target := -1
 			for _, copyStart := range goesOn {
 				b := blocks[copyStart]
@@ -1419,11 +1425,22 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 				}
 				target = jump
 			}
-			if target >= 0 && !inRange(target) && !containsInt(copies, target) {
+			switch {
+			case target >= 0 && !inRange(target) && !containsInt(copies, target):
 				end = target
+			case target < 0:
+				targets = append(targets, goesOn...)
+				end = handlerPc
 			}
 		}
-		finallys = append(finallys, finallyRegion{StartPc: start, EndPc: end, HandlerPc: handlerPc, Body: body, BodyEnd: bodyEnd, Copies: copies})
+		var protected [][2]int
+		for _, piece := range pieces {
+			protected = append(protected, [2]int{int(piece.StartPc), int(piece.EndPc)})
+		}
+		finallys = append(finallys, finallyRegion{
+			StartPc: start, EndPc: end, HandlerPc: handlerPc,
+			Body: body, BodyEnd: bodyEnd, Copies: copies, Ranges: protected, Targets: targets,
+		})
 	}
 	return monitors, finallys, rest, nil
 }
@@ -4233,6 +4250,26 @@ func (d *bodyDecompiler) synchronizedStatement(b *block, kept []Instruction) (in
 	return follow, nil
 }
 
+// covers reports whether every block is in the protected range, the copies of
+// the body on the ways out included.
+func (region *finallyRegion) covers(body map[int]bool) bool {
+	for start := range body {
+		if containsInt(region.Copies, start) {
+			continue
+		}
+		inside := false
+		for _, piece := range region.Ranges {
+			if start >= piece[0] && start < piece[1] {
+				inside = true
+			}
+		}
+		if !inside {
+			return false
+		}
+	}
+	return true
+}
+
 // endsAFinally reports whether start is where a `try`/`finally` being written
 // ends.
 func (d *bodyDecompiler) endsAFinally(start int) bool {
@@ -4252,6 +4289,12 @@ func (d *bodyDecompiler) finallyAt(at int) (int, bool, error) {
 	for i := range d.finallys {
 		guarded := &d.finallys[i]
 		if guarded.StartPc != at || d.visited[at] || d.activeFinallys[guarded] {
+			continue
+		}
+		// A loop that begins here and runs past the protected range is the
+		// statement around it - `while (c) { try { .. } finally { .. } }`,
+		// whose cleanup runs once per turn, not once.
+		if l := d.loops[at]; l != nil && !d.inActive(l) && !guarded.covers(l.Body) {
 			continue
 		}
 		if outermost == nil || guarded.EndPc > outermost.EndPc {
@@ -4292,7 +4335,9 @@ func (d *bodyDecompiler) finallyStatement(region *finallyRegion) (int, error) {
 		}
 	}
 	d.activeFinallys[region] = true
-	body, err := d.capture(func() error { return d.structure(region.StartPc, region.EndPc) })
+	// opening: the body begins where the statement does, and where that is also
+	// a loop's header the first block is the body, not a `continue` into it.
+	body, err := d.capture(func() error { return d.structureFrom(region.StartPc, region.EndPc, true) })
 	delete(d.activeFinallys, region)
 	if err != nil {
 		return 0, err
@@ -4314,10 +4359,25 @@ func (d *bodyDecompiler) finallyStatement(region *finallyRegion) (int, error) {
 	d.emit("} finally {")
 	*d.current = append(*d.current, stmt{Nested: &cleanup})
 	d.emit("}")
-	if region.EndPc == region.HandlerPc {
-		return exitBlock, nil
+	if region.EndPc != region.HandlerPc {
+		return region.EndPc, nil
 	}
-	return region.EndPc, nil
+	// Of the ways out that go on, the ones that land on a loop's own edge are
+	// its `break`s and `continue`s; what is left, if anything, is where the
+	// statement ends.
+	follow := exitBlock
+	for _, copyStart := range region.Targets {
+		copied := d.blocks[copyStart]
+		jump := copied.Instructions[len(copied.Instructions)-1].Arg
+		if d.onLoopEdge(copyStart) || d.onLoopEdge(jump) {
+			continue
+		}
+		if follow != exitBlock {
+			return 0, bail("a finally with more than one way out")
+		}
+		follow = copyStart
+	}
+	return follow, nil
 }
 
 // regionAt is the `try` statement that begins at at, if one does. The outermost
@@ -4725,7 +4785,8 @@ func (d *bodyDecompiler) reachesArm(from, to int) bool {
 // loop around the current statement goes.
 func (d *bodyDecompiler) onLoopEdge(start int) bool {
 	for _, entered := range d.active {
-		if entered.ContinueTarget == start || entered.Loop.Follow == start {
+		if entered.ContinueTarget == start || entered.Loop.Follow == start ||
+			containsInt(entered.Loop.Latches, start) {
 			return true
 		}
 	}

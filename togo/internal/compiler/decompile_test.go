@@ -3612,10 +3612,15 @@ public class Ways {
   static int caught(int x) { int r = 0; try { r = 10 / x; } catch (ArithmeticException e) { r = -1; } finally { n += 2; } return r; }
   static int nested(int x) { int r = 0; try { try { r = 10 / x; } finally { n += 3; } } finally { n += 4; } return r; }
   static int rethrow(int x) { try { return 10 / x; } catch (ArithmeticException e) { n = -1; throw e; } finally { n += 7; } }
+  // The loop around a finally is the statement over it: the cleanup runs once
+  // per turn, and every way out of the body is a break or a continue.
+  static int wt(int x) { while (true) { try { x++; if (x > 3) break; } finally { log.append("W"); } } return x; }
+  static int wc(int[] xs) { int s = 0; for (int x : xs) { try { if (x == 0) continue; if (x < 0) break; s += x; } finally { log.append("C"); } } return s; }
+  static int wr(int[] xs) { int s = 0; for (int x : xs) { try { if (x < 0) return -s; s += x; } finally { log.append("R"); } } return s; }
   public static void main(String[] z) {
     System.out.println(one(1) + " " + two(-1) + two(5) + two(200) + " " + brk(new int[]{1, 2, -1, 5}) + " " + cont(new int[]{1, 0, 2}) + " " + whl(new int[]{1, 2, -1, 5}) + " " + locked(1) + locked(3) + " " + vals(4) + " " + ifRet(1) + ifRet(0));
     three(0); three(2); System.out.println(log + " " + n);
-    System.out.println(caught(2) + " " + caught(0) + " " + nested(5) + " " + n);
+    System.out.println(caught(2) + " " + caught(0) + " " + nested(5) + " " + n + " " + wt(0) + " " + wc(new int[]{1, 0, 2, -1, 5}) + " " + wr(new int[]{1, 2, -3, 4}) + wr(new int[]{1, 2}));
     try { nested(0); } catch (ArithmeticException e) { System.out.println("ae " + n); }
     try { rethrow(0); } catch (ArithmeticException e) { System.out.println("re " + n); }
     System.out.println(rethrow(5) + " " + n);
@@ -3642,20 +3647,22 @@ func TestDecompileReconstructsAFinallyWithSeveralWaysOut(t *testing.T) {
 		"try {\ntry {\nvar1 = 10 / arg0;\n} catch (java.lang.ArithmeticException e) {\nvar1 = -1;\n}\n} finally {\nn = n + 2;",
 		"try {\ntry {\nvar1 = 10 / arg0;\n} finally {\nn = n + 3;\n}\n} finally {\nn = n + 4;",
 		"throw e;\n}\nreturn var1;\n} finally {\nn = n + 7;",
+		"while (true) {\ntry {\narg0++;", "break;\n}\ncontinue;\n} finally {\nlog.append(\"W\");\n}\n}\nreturn arg0;",
+		"continue;\n}\nif (var5 < 0) {\nbreak;", "var6 = -var1;\nreturn var6;\n} else {\nvar1 = var1 + var5;\n}\n} finally {\nlog.append(\"R\");",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
 		}
 	}
 	// One `finally` per method (two in nested), and its body written once each.
-	if strings.Count(source, "finally {") != 13 || strings.Count(source, `log.append("g")`) != 1 || strings.Count(source, `log.append("i")`) != 1 {
+	if strings.Count(source, "finally {") != 16 || strings.Count(source, `log.append("g")`) != 1 || strings.Count(source, `log.append("i")`) != 1 {
 		t.Errorf("expected each finally body once:\n%s", source)
 	}
 	again := filepath.Join(dir, "again")
 	compileWithJavac(t, again, "Ways", source)
 	expected := runJava(t, dir, "Ways")
 	actual := runJava(t, again, "Ways")
-	if actual != expected || actual != "1 -16100 3 3 3 1209 8 10\nfgggiiijjjvhh 221\n5 -1 2 232\nae 239\nre 6\n2 13\n" {
+	if actual != expected || actual != "1 -16100 3 3 3 1209 8 10\nfgggiiijjjvhh 221\n5 -1 2 232 4 3 -33\nae 239\nre 6\n2 13\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }

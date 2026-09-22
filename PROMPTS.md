@@ -603,3 +603,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-09-15 20:33 — only continue building the go version for now. we want to remove the ts version soon. port everything that is not present in the go version over
 - 2026-09-16 11:40 — continue
 - 2026-09-17 23:09 — fix ci
+- 2026-09-22 22:21 — continue
+- 2026-09-22 22:33 — keep in mind that we focus on getting the go and ts version on par, so we can remove the ts version
