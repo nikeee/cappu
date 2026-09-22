@@ -910,6 +910,10 @@ type local struct {
 	// exact one and replaces it, another argument asking for something else
 	// is a conflict this cannot resolve.
 	Tentative bool
+	// AskedObject says a use asked for an `Object`, which is a ceiling, not a
+	// type: where no use asked for anything narrower, the variable was declared
+	// one. Pinned says a use needs the type it has - indexing an array.
+	AskedObject, Pinned bool
 	// Asked is the first reference type a use asked of the variable while its
 	// type was a value's, and Owner the class of the first member called on
 	// it: what to fall back on should a later value make the type open.
@@ -2448,32 +2452,40 @@ func (d *bodyDecompiler) coerceInto(value expr, target string) (string, error) {
 	// member call says exactly. A read before this one was a bare name, which
 	// reads the same whatever the type turns out to be.
 	if entry, ok := d.byName[name]; ok && !entry.Authoritative && name == value.Text &&
-		entry.Type == "java.lang.Object" && target != "java.lang.Object" && !primitiveTypeNames[target] &&
-		(onlyNull(entry) && entry.Reads <= 1 || entry.Open) {
+		entry.Type == "java.lang.Object" && target != "java.lang.Object" && !primitiveTypeNames[target] {
+		// An `Object` fits nothing but an `Object`: one this use can still give
+		// a type takes the target's, and one already settled as an Object has
+		// lost whatever source declared.
+		if (!onlyNull(entry) || entry.Reads > 1) && !entry.Open && !entry.Tentative {
+			return "", bail("a variable an Object cannot be declared for")
+		}
 		if err := d.settle(entry, target, true); err != nil {
 			return "", err
 		}
 		value = primary(entry.Name, entry.Type)
 	} else if ok && entry.Tentative && name == value.Text && target != entry.Type && target != "java.lang.Object" &&
 		!primitiveTypeNames[target] {
-		// Two uses asking for different supertypes: the one type every value
-		// stored has is under both, and the declaration when there is one.
-		held := d.heldType(entry)
-		if held == "" {
-			return "", bail("a variable whose uses ask for different types")
-		}
-		if err := d.settle(entry, held, false); err != nil {
-			return "", err
-		}
-		value = primary(entry.Name, entry.Type)
-	} else if ok && entry.Open && name == value.Text && target == "java.lang.Object" {
-		// An Object is asked for: an Object it is, until a member says better.
-		if err := d.settle(entry, "", true); err != nil {
-			return "", err
+		// Two uses asking for different supertypes: the type every value has is
+		// under both, but so is the narrower of the two asks, and the overload
+		// the first one resolved is the one javac wrote. Nothing here decides it.
+		return "", bail("a variable whose uses ask for different types")
+	} else if ok && (entry.Open || entry.Tentative) && name == value.Text && target == "java.lang.Object" &&
+		!entry.Authoritative && entry.Owner == "" {
+		// An Object is asked for. One whose type is still open is that Object;
+		// one that has a type keeps it until the end of the body, where a
+		// variable no use asked anything narrower of becomes an Object too -
+		// widening it here would break the uses already written.
+		if entry.Open {
+			if err := d.settle(entry, "java.lang.Object", true); err != nil {
+				return "", err
+			}
+			value = primary(entry.Name, entry.Type)
+		} else {
+			entry.AskedObject = true
 		}
 	}
 	if entry, ok := d.byName[name]; ok && name == value.Text && entry.Asked == "" && !primitiveTypeNames[target] &&
-		target != "java.lang.Object" && !strings.HasSuffix(target, "]") {
+		target != "java.lang.Object" {
 		entry.Asked = target
 	}
 	// A conditional's arm that is such a variable is asked for the same - by
@@ -3711,6 +3723,31 @@ func (d *bodyDecompiler) isOpen(value expr) bool {
 	return ok && (entry.Open || entry.Tentative && entry.Type == "java.lang.Object")
 }
 
+// usedAsArray types a variable indexed or asked its length: only an array can
+// be, so the array type its values have is the one it was declared. Nothing
+// else says it - an `Object` is what a use asking for one left behind.
+func (d *bodyDecompiler) usedAsArray(array *expr) error {
+	entry, ok := d.byName[array.Text]
+	if !ok || entry.Authoritative {
+		return nil
+	}
+	if strings.HasSuffix(entry.Type, "]") {
+		// Pinned: an `Object` a use asks for cannot widen it any more.
+		entry.Tentative, entry.Pinned = false, true
+		return nil
+	}
+	held := d.heldType(entry)
+	if !strings.HasSuffix(held, "]") {
+		return bail("a variable used as an array whose type no value says")
+	}
+	if err := d.settle(entry, held, false); err != nil {
+		return err
+	}
+	entry.Pinned = true
+	*array = primary(entry.Name, entry.Type)
+	return nil
+}
+
 // heldType reports the one reference type every value stored into the variable
 // has - `null` and variables whose own type is still a placeholder aside - or
 // "" when they differ or there is none.
@@ -3744,13 +3781,19 @@ func (d *bodyDecompiler) heldType(entry *local) string {
 // Two settled by their own uses are left as they are: whether one is the
 // other's supertype this cannot tell, and javac can.
 func (d *bodyDecompiler) settleLinks() error {
+	names := make([]string, 0, len(d.byName))
+	for name := range d.byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	for changed := true; changed; {
 		changed = false
-		for _, entry := range d.byName {
+		for _, name := range names {
+			entry := d.byName[name]
 			for _, source := range entry.From {
 				var open, typed *local
 				switch {
-				case entry.Open && !source.Open && d.holdsOnly(entry, source.Type):
+				case entry.Open && !source.Open && d.agree(entry.From, source.Type) && d.holdsOnly(entry, source.Type):
 					open, typed = entry, source
 				case (source.Open || source.Tentative && source.Type == "java.lang.Object") && !entry.Open:
 					open, typed = source, entry
@@ -3763,13 +3806,17 @@ func (d *bodyDecompiler) settleLinks() error {
 				if err := d.settle(open, typed.Type, typed.Tentative); err != nil {
 					return err
 				}
+				// The variable it was assigned to holds it: that is narrower
+				// than the `Object` any use asked for.
+				open.AskedObject = false
 				changed = true
 			}
 			// A variable typed by nothing but the variables assigned to it took
 			// their types as they were then; one that has since widened - it
 			// held a subclass first - widens this one with it. Not one a use
 			// typed: that said what it is.
-			if entry.Authoritative || entry.Open || entry.Tentative || len(entry.From) == 0 || !d.holdsOnly(entry, "") {
+			if entry.Authoritative || entry.Open || entry.Tentative || len(entry.From) == 0 || !d.holdsOnly(entry, "") ||
+				entry.Owner != "" || entry.Asked != "" {
 				continue
 			}
 			held, tentative := "", false
@@ -3788,7 +3835,51 @@ func (d *bodyDecompiler) settleLinks() error {
 			}
 		}
 	}
+	// What is left has to hold what was assigned to it. Which of two differing
+	// types is the wider one is not in the class file, so: a type no use asked
+	// for gives way to one that a use did, and where both were asked for, or
+	// neither, nothing here can order them.
+	for _, name := range names {
+		entry := d.byName[name]
+		for _, source := range entry.From {
+			if entry.Type == source.Type || entry.Type == "java.lang.Object" || strings.HasSuffix(entry.Type, "]") {
+				continue
+			}
+			switch {
+			case !asked(entry) && asked(source):
+				if err := d.settle(entry, source.Type, source.Tentative); err != nil {
+					return err
+				}
+				entry.AskedObject = false
+			case asked(entry) && !asked(source) && d.holdsOnly(source, entry.Type):
+				if err := d.settle(source, entry.Type, entry.Tentative); err != nil {
+					return err
+				}
+				source.AskedObject = false
+			default:
+				return bail("a variable assigned one whose type differs")
+			}
+		}
+	}
 	return nil
+}
+
+// asked reports whether a use, or the class file itself, says what the type is:
+// a parameter or a debug-table row, a member call's owner, or an argument,
+// return or field the variable went into.
+func asked(entry *local) bool {
+	return entry.Authoritative || entry.Owner != "" || entry.Asked != ""
+}
+
+// agree reports whether every settled variable among sources is of the type,
+// and none is still a placeholder: one that is not would settle the other way.
+func (d *bodyDecompiler) agree(sources []*local, typ string) bool {
+	for _, source := range sources {
+		if source.Open || source.Type != typ {
+			return false
+		}
+	}
+	return true
 }
 
 // holdsOnly reports whether every value stored into the variable that is not
@@ -4438,6 +4529,24 @@ func (d *bodyDecompiler) tryStatement(region *tryRegion) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// javac keeps the `return` of a value computed inside the `try` outside the
+	// protected range: the body leaves the value on the stack and the block
+	// after the statement returns it. Source wrote that `return` in the body,
+	// and it goes back there - when nothing else reaches the return.
+	returned := false
+	if len(d.stack) == 1 && d.returnsOnly(follow, region) {
+		value, err := d.pop()
+		if err != nil {
+			return 0, err
+		}
+		text, err := d.coerceInto(value, d.returnType)
+		if err != nil {
+			return 0, err
+		}
+		body = append(body, stmt{Text: "return " + text + ";"})
+		d.visited[follow] = true
+		returned = true
+	}
 	if len(d.stack) > 0 {
 		return 0, bail("values left on the stack")
 	}
@@ -4475,7 +4584,30 @@ func (d *bodyDecompiler) tryStatement(region *tryRegion) (int, error) {
 		*d.current = append(*d.current, stmt{Nested: &clauses[i].statements})
 	}
 	d.emit("}")
+	if returned {
+		return exitBlock, nil
+	}
 	return follow, nil
+}
+
+// returnsOnly reports whether start is the `return` javac wrote outside the
+// protected range for a value computed inside it: the block returns and
+// nothing else, and only the range reaches it.
+func (d *bodyDecompiler) returnsOnly(start int, region *tryRegion) bool {
+	b := d.blocks[start]
+	if b == nil || len(b.Instructions) != 1 || !strings.HasSuffix(b.Instructions[0].Mnemonic, "return") ||
+		b.Instructions[0].Mnemonic == "return" {
+		return false
+	}
+	for from, other := range d.blocks {
+		if from >= region.StartPc && from < region.EndPc {
+			continue
+		}
+		if containsInt(other.Successors, start) {
+			return false
+		}
+	}
+	return true
 }
 
 // tryFollow is where a `try` statement ends. What leaves the protected range
@@ -6214,25 +6346,30 @@ func (d *bodyDecompiler) step(
 					fallback = existing.Type
 				case existing.Type == "java.lang.Object" && (fallback != "java.lang.Object" || d.isOpen(value)) && fallback != "" &&
 					onlyNull(existing) && !existing.Open && (same || existing.Reads == 0):
-					// An array is what it is - no overload takes another - and a
-					// cast's type is the first thing to try; anything else waits.
+					// The value says what it is, not what the variable was
+					// declared: `println(o)` took the `Object` overload where
+					// the value is a `char[]`, and a `checkcast` is the value's
+					// own. An array is written back all the same - only an
+					// array type can be indexed or asked its length - but as a
+					// type an `Object` a use asks for still widens.
 					switch {
 					case strings.HasSuffix(fallback, "]"):
-						if err := d.retype(existing, fallback); err != nil {
-							return err
-						}
-					case value.Cast:
 						if err := d.retype(existing, fallback); err != nil {
 							return err
 						}
 						existing.Tentative = true
 					default:
 						existing.Open = true
+						if existing.Asked == "" && value.Cast {
+							existing.Asked = fallback
+						}
 						fallback = existing.Type
 					}
-				// A type a use asked for holds whatever is stored: the value went
-				// into the declared type, which went into that use.
-				case existing.Tentative && fallback != "" && !primitiveTypeNames[fallback] && same:
+				// A type a use asked for holds what the use passed it; another
+				// value is one more reason to wait for the uses to agree.
+				case existing.Tentative && fallback == existing.Type && same:
+					fallback = existing.Type
+				case existing.Tentative && fallback != "" && !primitiveTypeNames[fallback] && same && d.isOpen(value):
 					fallback = existing.Type
 				// Two reference types with a bound this cannot compute: one
 				// variable, its type open until a use says. The reads so far were
@@ -6560,6 +6697,9 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
+		if err := d.usedAsArray(&array); err != nil {
+			return err
+		}
 		d.push(primary(at(array, precPrimary)+".length", "int"))
 		return nil
 	}
@@ -6573,6 +6713,9 @@ func (d *bodyDecompiler) step(
 			return err
 		}
 		if err := d.usedAsNumber(index); err != nil {
+			return err
+		}
+		if err := d.usedAsArray(&array); err != nil {
 			return err
 		}
 		read := primary(at(array, precPrimary)+"["+coerce(index, "int")+"]", elementType(array.Type, mnemonic[0]))
@@ -6597,6 +6740,9 @@ func (d *bodyDecompiler) step(
 		}
 		if array.Init != nil {
 			return d.fillArray(array.Init, index, value)
+		}
+		if err := d.usedAsArray(&array); err != nil {
+			return err
 		}
 		element := elementType(array.Type, mnemonic[0])
 		if err := d.usedAsNumber(index); err != nil {
@@ -6916,11 +7062,13 @@ func (d *bodyDecompiler) step(
 			return err
 		}
 		// A variable thrown has to be declared the exception it is - the
-		// `throws` clause and the `catch`es around it check it - which a use
-		// can only have said as a supertype: the type its values have is it.
+		// `throws` clause checks it - which a use can only have said as a
+		// supertype: the type its values have is it. Inside a `try` that is
+		// not enough: narrowing it can leave a `catch` beside it unreachable,
+		// which is a compile error, and which type source wrote is then gone.
 		if entry, ok := d.byName[value.Text]; ok && (entry.Open || entry.Tentative) {
 			held := d.heldType(entry)
-			if held == "" {
+			if held == "" || len(d.activeTries) > 0 {
 				return bail("a thrown variable whose type no use says")
 			}
 			if err := d.settle(entry, held, false); err != nil {
@@ -7370,6 +7518,17 @@ func decompileBody(
 	}
 	if err := d.settleLinks(); err != nil {
 		return nil, flattenStatements(d.statements), d.chained, err
+	}
+	// A variable every use asked for as an `Object` was declared one: javac
+	// chose those overloads, returns and fields by the declaration, and the
+	// value's own type would resolve them differently.
+	for _, entry := range d.byName {
+		if entry.AskedObject && !entry.Authoritative && !entry.Pinned && entry.Asked == "" && entry.Owner == "" &&
+			!primitiveTypeNames[entry.Type] && entry.Type != "java.lang.Object" {
+			if err := d.retype(entry, "java.lang.Object"); err != nil {
+				return nil, flattenStatements(d.statements), d.chained, err
+			}
+		}
 	}
 	// A variable whose type stayed open was read only where any type reads the
 	// same - compared with null, in a conditional's arm an Object takes, in a

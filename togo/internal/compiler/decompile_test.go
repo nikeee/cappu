@@ -2161,6 +2161,8 @@ public class Open {
   static String nulled(boolean c) { String s = null; if (c) s = "v"; StringBuilder b = new StringBuilder(); b.append((CharSequence) s); return b.append(s).toString(); }  // the upcast is lost: append(String) does the same
   // A variable that held a subclass first and widens later widens what was
   // typed by it: previous = ancestor took the narrower type as it was then.
+  // Two variables assigned one another, each with its own use: which type is
+  // the wider one is not in the class file, and neither is a refusal away.
   static CharSequence root(String s) { CharSequence ancestor = s; CharSequence previous; do { previous = ancestor; ancestor = ancestor.length() > 2 ? new StringBuilder(ancestor.subSequence(1, ancestor.length())) : null; } while (ancestor != null); return previous; }
   static String keyed(int id, int code, java.util.Hashtable<Object, Object> h) { String ks2 = null; String ks; if (id == 0) { ks = "k" + code; } else { if (code > 1) { ks2 = "k" + (code - 1); } ks = "k" + code; } Object o = null; if (ks2 != null) { o = h.get(ks2); if (o != null) ks = ks2; } if (o == null) o = h.get(ks); return o + ":" + ks; }
 }
@@ -2192,15 +2194,18 @@ func TestDecompileTypesAMergedVariableByItsFirstUse(t *testing.T) {
 		"java.lang.Number var2;", "java.lang.Number var3 = var2;",
 		"java.lang.Object var3 = var2;", "return useN(var3);", "return useN(var2);",
 		"java.lang.Number var3 = (java.lang.Number) var2;",
-		"java.io.IOException var1 = null;", "throw var1;", "java.lang.String var1 = null;", "var2.append(var1);",
-		"java.lang.CharSequence var2;\njava.lang.CharSequence var1 = arg0;", "java.lang.String var4;\njava.lang.String var3 = null;",
+		"java.io.IOException var1 = null;", "throw var1;",
+		// nulled: `append((CharSequence) s)` and `append(s)` ask for two types
+		// no hierarchy here can order; root: two linked variables, the same.
+		"cappu: a variable whose uses ask for different types",
+		"cappu: a variable assigned one whose type differs",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
 		}
 	}
-	if strings.Count(source, "/* cappu:") != 1 || strings.Contains(source, "var1_2") {
-		t.Errorf("expected one variable per method and one bail:\n%s", source)
+	if strings.Count(source, "/* cappu:") != 3 || strings.Contains(source, "var1_2") {
+		t.Errorf("expected one variable per method and three bails:\n%s", source)
 	}
 	again := filepath.Join(dir, "again")
 	compileWithJavacOn(t, again, "Open", source, dir)
@@ -2210,15 +2215,15 @@ func TestDecompileTypesAMergedVariableByItsFirstUse(t *testing.T) {
       + " " + Open.field(false) + " " + Open.twoUses(true) + Open.twoUses(false) + " " + Open.exact(false)
       + " " + Open.arm(true, "o") + Open.arm(false, "o") + " " + Open.armTyped(true, "z") + Open.armTyped(false, "z") + " " + Open.cast(true, "q") + Open.cast(false, null)
       + " " + Open.linked(true, 4) + Open.linked(false, 4) + " " + Open.castLies(false, "q") + Open.unresolved(true)
-      + " " + Open.linkedUses(true, 1) + Open.linkedOther(false, 1) + Open.linkedNarrower(true, 7) + " " + Open.thrown(false) + Open.nulled(true)
-      + " " + Open.root("abcd") + " " + Open.keyed(1, 3, new java.util.Hashtable<>(java.util.Map.of("k2", "v"))));
+      + " " + Open.linkedUses(true, 1) + Open.linkedOther(false, 1) + Open.linkedNarrower(true, 7) + " " + Open.thrown(false)
+      + " " + Open.keyed(1, 3, new java.util.Hashtable<>(java.util.Map.of("k2", "v"))));
     try { Open.thrown(true); } catch (java.io.IOException e) { System.out.println(e.getMessage()); }
   }
 }`
 	compileWithJavacOn(t, dir, "OpenDriver", driver, dir)
 	expected := runJava(t, dir, "OpenDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "OpenDriver")
-	if actual != expected || actual != "1 1 HashSet 0 3 3a2d 2 []o az qx 54 11 ON7 -vv cd v:k2\nio\n" {
+	if actual != expected || actual != "1 1 HashSet 0 3 3a2d 2 []o az qx 54 11 ON7 - v:k2\nio\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
