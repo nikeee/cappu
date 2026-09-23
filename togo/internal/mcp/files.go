@@ -116,8 +116,8 @@ func findClass(cfg *config.Config, className string) ([]byte, error) {
 // decompileToSource is cli.DecompileToSource (that package wires `cappu mcp`,
 // so this one cannot import it): the formatter lays out the decompiler's rough
 // text, and a body it refuses stays unformatted.
-func decompileToSource(b []byte) (string, error) {
-	source, err := compiler.Decompile(b)
+func decompileToSource(b []byte, siblings compiler.Siblings) (string, error) {
+	source, err := compiler.DecompileWith(b, siblings)
 	if err != nil {
 		return "", err
 	}
@@ -142,10 +142,26 @@ func DecompileTool(cfg *config.Config, args DecompileArgs) (DecompileResult, err
 	}
 	var b []byte
 	var err error
+	// The classes javac wrote beside this one: next to the file, or on the
+	// same classPath the class itself came from.
+	var siblings compiler.Siblings
 	if file != "" {
 		b, err = readFile(file)
+		dir := filepath.Dir(file)
+		siblings = func(binaryName string) ([]byte, bool) {
+			name := binaryName
+			if slash := strings.LastIndex(name, "/"); slash >= 0 {
+				name = name[slash+1:]
+			}
+			b, err := os.ReadFile(filepath.Join(dir, name+".class"))
+			return b, err == nil
+		}
 	} else {
 		b, err = findClass(cfg, className)
+		siblings = func(binaryName string) ([]byte, bool) {
+			b, err := findClass(cfg, strings.ReplaceAll(binaryName, "/", "."))
+			return b, err == nil
+		}
 	}
 	if err != nil {
 		return DecompileResult{}, err
@@ -154,7 +170,7 @@ func DecompileTool(cfg *config.Config, args DecompileArgs) (DecompileResult, err
 	if args.Disasm {
 		text, err = compiler.Disassemble(b)
 	} else {
-		text, err = decompileToSource(b)
+		text, err = decompileToSource(b, siblings)
 	}
 	if err != nil {
 		// A class-file error names what it was read from, like the I/O ones.

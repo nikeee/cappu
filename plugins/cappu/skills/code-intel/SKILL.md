@@ -89,10 +89,12 @@ For a dependency class without sources, `decompile(className: "com.acme.Foo")`
 finds the class on the project's classPath (jars and directories) and returns
 reconstructed Java source; `disasm: true` returns bytecode in `javap -c -p`
 layout instead. A method the decompiler cannot reconstruct is left as a
-commented disassembly plus a `throw`. Without an MCP server:
-`unzip -o some.jar 'com/acme/Foo.class' -d /tmp/x`, then
-`cappu decompile /tmp/x/com/acme/Foo.class` (`--disasm` for bytecode). No JDK
-needed. `describe_symbol` on a dependency type already shows signature and
+commented disassembly plus a `throw`. The classes javac wrote beside the one
+you ask for are read too, so keep them together: a `switch` over an enum comes
+back as `case CONSTANT:` only when the synthetic `Foo$1` map class is there.
+Without an MCP server: `unzip -o some.jar 'com/acme/Foo*.class' -d /tmp/x`,
+then `cappu decompile /tmp/x/com/acme/Foo.class` (`--disasm` for bytecode). No
+JDK needed. `describe_symbol` on a dependency type already shows signature and
 Javadoc when the jar carries them, so decompile only when you need method
 bodies.
 

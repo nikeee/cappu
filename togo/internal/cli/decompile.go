@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/nikeee/cappu/internal/compiler"
@@ -33,8 +35,12 @@ func readErrorText(err error) string {
 // decompiler emits rough text; the formatter lays it out. A body this phase
 // cannot reconstruct carries its disassembly as a comment, which the formatter
 // may refuse - the unformatted source is still the right answer then.
-func DecompileToSource(b []byte) (string, error) {
-	source, err := compiler.Decompile(b)
+func DecompileToSource(b []byte) (string, error) { return DecompileToSourceWith(b, nil) }
+
+// DecompileToSourceWith is DecompileToSource with the classes beside this one
+// to read.
+func DecompileToSourceWith(b []byte, siblings compiler.Siblings) (string, error) {
+	source, err := compiler.DecompileWith(b, siblings)
 	if err != nil {
 		return "", err
 	}
@@ -43,6 +49,20 @@ func DecompileToSource(b []byte) (string, error) {
 		return source, nil
 	}
 	return formatted, nil
+}
+
+// SiblingsBeside is a resolver for the classes javac wrote next to this one: a
+// nested or synthetic class of `Outer` is `Outer$..` in the same directory.
+func SiblingsBeside(file string) compiler.Siblings {
+	dir := filepath.Dir(file)
+	return func(binaryName string) ([]byte, bool) {
+		name := binaryName
+		if slash := strings.LastIndex(name, "/"); slash >= 0 {
+			name = name[slash+1:]
+		}
+		b, err := os.ReadFile(filepath.Join(dir, name+".class"))
+		return b, err == nil
+	}
 }
 
 // RunDecompile handles `cappu decompile`: reconstruct Java source from .class
@@ -61,7 +81,7 @@ func RunDecompile(files []string, disasm bool) int {
 			if disasm {
 				text, err = compiler.Disassemble(bytes)
 			} else {
-				text, err = DecompileToSource(bytes)
+				text, err = DecompileToSourceWith(bytes, SiblingsBeside(file))
 			}
 			if err == nil {
 				fmt.Print(text)

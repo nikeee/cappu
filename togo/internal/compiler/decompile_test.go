@@ -1944,6 +1944,63 @@ func TestDecompileEndsAnIfWhoseLastElseLeaves(t *testing.T) {
 	}
 }
 
+// javac compiles a `switch` over an enum from another compilation unit into a
+// lookup in a `$SwitchMap$` array it keeps in a class of its own beside this
+// one; that class's initializer says which constant each key stands for, so
+// with the sibling classes to hand the `case CONSTANT:` form comes back.
+const paintingSource = `public class Painting {
+  static int n(Colour c) { switch (c) { case RED: return 1; case GREEN: return 2; default: return 0; } }
+  static String s(Colour c) { switch (c) { case RED: return "a"; case GREEN: case BLUE: return "b"; } return "-"; }
+  static int fall(Colour c) { int r = 0; switch (c) { case BLUE: r += 4; case RED: r += 1; break; case GREEN: r += 2; } return r; }
+  public static void main(String[] z) {
+    System.out.println(n(Colour.RED) + n(Colour.BLUE) + " " + s(Colour.GREEN) + s(Colour.RED) + " " + fall(Colour.BLUE) + fall(Colour.RED) + fall(Colour.GREEN));
+  }
+}
+`
+
+func TestDecompileReadsAnEnumSwitchFromItsMapClass(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	compileWithJavac(t, dir, "Colour", enumSource)
+	classFile := compileWithJavacOn(t, dir, "Painting", paintingSource, dir)
+	siblings := func(binaryName string) ([]byte, bool) {
+		if slash := strings.LastIndex(binaryName, "/"); slash >= 0 {
+			binaryName = binaryName[slash+1:]
+		}
+		b, err := os.ReadFile(filepath.Join(dir, binaryName+".class"))
+		return b, err == nil
+	}
+	source, err := DecompileWith(readFile(t, classFile), siblings)
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{"case RED:", "case GREEN:", "case BLUE:", "switch (arg0) {"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	// Without the map class there is no way to name the keys, and it says so.
+	blind, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Count(blind, "cappu: an enum switch") != 3 {
+		t.Errorf("expected three enum-switch bails without the siblings:\n%s", blind)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavacOn(t, again, "Painting", source, dir)
+	expected := runJava(t, dir, "Painting")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "Painting")
+	if actual != expected || actual != "1 ba 512\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A parameter is defined on entry, on every path: reassigned in a branch and
 // read after it, the read is as unambiguous as any other, and not "written in
 // more than one branch".
@@ -3871,8 +3928,9 @@ func TestDecompileSaysWhenAJumpLandsInTheTailOfADoWhile(t *testing.T) {
 	}
 }
 
-// javac writes a `switch` over an enum from another file as a lookup through a
-// synthetic `$SwitchMap$` array, held by an anonymous class no source can name.
+// javac writes a `switch` over an enum as a lookup through a synthetic
+// `$SwitchMap$` array, held by a class no source can name. Without that class
+// to read, which key stands for which constant is not in this file.
 const enumSource = "public enum Colour { RED, GREEN, BLUE }\n"
 
 const enumSwitchSource = `public class Painter {

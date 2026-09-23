@@ -91,7 +91,16 @@ type ClassFile struct {
 	Fields     []Member
 	Methods    []Member
 	Attributes []Attribute
+	// Siblings reads the classes javac generated beside this one - the
+	// synthetic `Outer$1` an enum switch keeps its map in, for one. Reading a
+	// class file never sets it; a caller that knows where the bytes came from
+	// does, and the decompiler asks only when a shape needs the answer.
+	Siblings Siblings
 }
+
+// Siblings reports the bytes of the class with that binary name, and whether
+// there is one to read.
+type Siblings func(binaryName string) ([]byte, bool)
 
 // ExceptionEntry is one row of a Code attribute's exception table.
 type ExceptionEntry struct {

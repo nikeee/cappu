@@ -2367,6 +2367,10 @@ type bodyDecompiler struct {
 	regions  []*tryRegion
 	// activeTries are the `try` statements being written right now.
 	activeTries map[*tryRegion]bool
+	// enumLabels names the keys of the switch being written, when it is one
+	// over an enum: the map javac keeps in a class beside this one says which
+	// constant each key stands for.
+	enumLabels map[int]string
 	// skip counts instructions to drop from the front of a block: a handler
 	// starts with the store of the exception, which source writes as the catch
 	// parameter.
@@ -5240,6 +5244,92 @@ func (d *bodyDecompiler) switchFollowOf(b *block, cases []int, defaultTarget int
 	return leadsTo(cases)
 }
 
+// caseLabel names one key of the switch being written.
+func (d *bodyDecompiler) caseLabel(key int) string {
+	if name, ok := d.enumLabels[key]; ok {
+		return name
+	}
+	return strconv.Itoa(key)
+}
+
+// enumSwitch reads the `$SwitchMap$` array a switch over an enum looks its
+// selector up in: the array lives in a class javac wrote beside this one,
+// whose initializer stores one key per constant. It reports the enum value
+// being switched over and the name each key stands for.
+func (d *bodyDecompiler) enumSwitch(selector expr) (expr, map[int]string, error) {
+	mark := strings.Index(selector.Text, ".$SwitchMap$")
+	open := strings.Index(selector.Text, "[")
+	if mark < 0 || open < mark || !strings.HasSuffix(selector.Text, ".ordinal()]") || d.classFile.Siblings == nil {
+		return expr{}, nil, bail("an enum switch")
+	}
+	b, ok := d.classFile.Siblings(strings.ReplaceAll(selector.Text[:mark], ".", "/"))
+	if !ok {
+		return expr{}, nil, bail("an enum switch")
+	}
+	mapper, err := ReadClassFile(b)
+	if err != nil {
+		return expr{}, nil, bail("an enum switch")
+	}
+	field := selector.Text[mark+1 : open]
+	value := selector.Text[open+1 : len(selector.Text)-len(".ordinal()]")]
+	labels := map[int]string{}
+	enumType := ""
+	for _, method := range mapper.Methods {
+		if method.Name != "<clinit>" {
+			continue
+		}
+		code, err := ReadCode(method, mapper.Pool)
+		if err != nil || code == nil {
+			return expr{}, nil, bail("an enum switch")
+		}
+		instructions, err := DecodeInstructions(mapper, code.Code)
+		if err != nil {
+			return expr{}, nil, bail("an enum switch")
+		}
+		// `getstatic $SwitchMap$..; getstatic E.CONST; invokevirtual ordinal;
+		// <key>; iastore` is one constant's row.
+		for i := 0; i+4 < len(instructions); i++ {
+			run := instructions[i : i+5]
+			if run[0].Mnemonic != "getstatic" || run[1].Mnemonic != "getstatic" ||
+				run[2].Mnemonic != "invokevirtual" || run[4].Mnemonic != "iastore" {
+				continue
+			}
+			array, arrayOk := PoolMemberRef(mapper.Pool, uint16(run[0].Arg))
+			constant, constantOk := PoolMemberRef(mapper.Pool, uint16(run[1].Arg))
+			ordinal, ordinalOk := PoolMemberRef(mapper.Pool, uint16(run[2].Arg))
+			key, keyOk := intConstant(run[3])
+			if !arrayOk || !constantOk || !ordinalOk || !keyOk ||
+				array.Name != field || ordinal.Name != "ordinal" || constant.Owner != ordinal.Owner {
+				continue
+			}
+			if enumType != "" && enumType != constant.Owner {
+				return expr{}, nil, bail("an enum switch")
+			}
+			enumType = constant.Owner
+			labels[key] = constant.Name
+		}
+	}
+	if len(labels) == 0 || enumType == "" {
+		return expr{}, nil, bail("an enum switch")
+	}
+	return primary(value, typeName(enumType, d.self())), labels, nil
+}
+
+// intConstant is the value an instruction pushes, when it pushes an int.
+func intConstant(instruction Instruction) (int, bool) {
+	switch {
+	case strings.HasPrefix(instruction.Mnemonic, "iconst_"):
+		if instruction.Mnemonic == "iconst_m1" {
+			return -1, true
+		}
+		value, err := strconv.Atoi(instruction.Mnemonic[len("iconst_"):])
+		return value, err == nil
+	case instruction.Mnemonic == "bipush" || instruction.Mnemonic == "sipush":
+		return instruction.Arg, true
+	}
+	return 0, false
+}
+
 // switchStatement writes one `switch`, from the table that ends b, and reports
 // where the statement after it begins.
 func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
@@ -5258,11 +5348,18 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 		return 0, bail("values left on the stack")
 	}
 	// javac compiles a `switch` over an enum into a lookup through a synthetic
-	// `$SwitchMap$` array held by an *anonymous* class - which has no name source
-	// can write, so the reconstruction would not compile. Restoring the
-	// `case CONSTANT:` form needs that holder's initializer, in another file.
+	// `$SwitchMap$` array held by a class of its own - which has no name source
+	// can write. The `case CONSTANT:` form comes back from that holder's
+	// initializer, in the file beside this one.
+	outerLabels := d.enumLabels
+	defer func() { d.enumLabels = outerLabels }()
+	d.enumLabels = nil
 	if strings.Contains(selector.Text, "$SwitchMap$") {
-		return 0, bail("an enum switch")
+		value, labels, err := d.enumSwitch(selector)
+		if err != nil {
+			return 0, err
+		}
+		selector, d.enumLabels = value, labels
 	}
 	defaultTarget := table.Arg
 	// Every key that lands on the same block is one list of labels. A key that
@@ -5370,7 +5467,7 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 			continue
 		}
 		for _, key := range keysOf[target] {
-			clauses = append(clauses, stmt{Text: fmt.Sprintf("case %d:", key)})
+			clauses = append(clauses, stmt{Text: "case " + d.caseLabel(key) + ":"})
 		}
 		if len(keysOf[target]) > 0 {
 			broke := []stmt{{Text: "break;"}}
@@ -5387,7 +5484,7 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 				end = bodies[i+1]
 			}
 			for _, key := range keysOf[target] {
-				clauses = append(clauses, stmt{Text: fmt.Sprintf("case %d:", key)})
+				clauses = append(clauses, stmt{Text: "case " + d.caseLabel(key) + ":"})
 			}
 			if target == defaultTarget {
 				clauses = append(clauses, stmt{Text: "default:"})
@@ -5438,7 +5535,7 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 		if target != defaultTarget {
 			keys := make([]string, len(keysOf[target]))
 			for i, key := range keysOf[target] {
-				keys[i] = strconv.Itoa(key)
+				keys[i] = d.caseLabel(key)
 			}
 			label = "case " + strings.Join(keys, ", ")
 		}
@@ -5537,8 +5634,16 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 		}
 		return expr{Text: render(func(v expr) string { return asBoolean(v).Text }), Prec: precUnary, Type: "boolean", Effects: true}, true, nil
 	}
+	// An arm javac materialized as `1`/`0` beside arms that are numbers is one
+	// of those numbers: its condition is what the `1`/`0` came from, and the
+	// `switch` yields an int.
 	return expr{
-		Text:    render(func(v expr) string { return v.Text }),
+		Text: render(func(v expr) string {
+			if primitiveTypeNames[typ] && typ != "boolean" && v.AsInt != "" {
+				return numeric(v).Text
+			}
+			return v.Text
+		}),
 		Prec:    precUnary,
 		Type:    typ,
 		Untyped: untyped,
@@ -7901,11 +8006,17 @@ func DecompileClass(classFile *ClassFile) (string, error) {
 
 // Decompile renders one class file's bytes as Java source. The text is
 // unformatted: callers pass it through the formatter.
-func Decompile(b []byte) (string, error) {
+func Decompile(b []byte) (string, error) { return DecompileWith(b, nil) }
+
+// DecompileWith is Decompile with the classes javac generated beside this one
+// to hand - a caller that knows where the bytes came from can read them, and
+// some shapes only that answers.
+func DecompileWith(b []byte, siblings Siblings) (string, error) {
 	classFile, err := ReadClassFile(b)
 	if err != nil {
 		return "", err
 	}
+	classFile.Siblings = siblings
 	// Same reasoning as Disassemble: a module descriptor carries no members, so
 	// rendering it as a class would print a plausible-looking empty type.
 	if classFile.Flags&accModule != 0 {

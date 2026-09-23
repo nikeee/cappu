@@ -607,3 +607,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-09-22 22:33 — keep in mind that we focus on getting the go and ts version on par, so we can remove the ts version
 - 2026-09-22 22:53 — continue
 - 2026-09-22 23:51 — continue
+- 2026-09-23 00:19 — continue
+- 2026-09-23 13:34 — continue
