@@ -3449,58 +3449,158 @@ func (d *bodyDecompiler) receiverCallee(mnemonic, owner, name string, iface bool
 // this one. Its captured values are constructor parameters stored in synthetic
 // fields, and what the body makes of them is not this phase - only a class
 // that captures nothing comes back.
-func (d *bodyDecompiler) anonymousBody(target MemberRef, params []paramSlot) (string, string, error) {
+func (d *bodyDecompiler) anonymousBody(
+	target MemberRef, args []string, outer *expr,
+) (string, string, []string, error) {
 	if d.classFile.Siblings == nil {
-		return "", "", bail("an anonymous class")
+		return "", "", nil, bail("an anonymous class")
 	}
 	b, ok := d.classFile.Siblings(target.Owner)
 	if !ok {
-		return "", "", bail("an anonymous class")
+		return "", "", nil, bail("an anonymous class")
 	}
 	anonymous, err := ReadClassFile(b)
 	if err != nil {
-		return "", "", bail("an anonymous class")
+		return "", "", nil, bail("an anonymous class")
 	}
 	anonymous.Siblings = d.classFile.Siblings
-	// Nothing but the enclosing instance may be passed: another argument is a
-	// captured value, and where the body reads it is a name this does not know.
-	// `new Iface() { .. }` takes none at all - the arguments of the one that
-	// names a class are its superclass constructor's.
-	if len(params) > 1 {
-		return "", "", bail("an anonymous class")
+	// Every argument is a captured value: source names the variable itself, and
+	// the body reads it through a synthetic field of its own. Which field takes
+	// which argument is in the constructor javac wrote.
+	captured, err := capturedFields(anonymous, target.Descriptor)
+	if err != nil {
+		return "", "", nil, err
 	}
-	if len(params) == 1 && len(anonymous.Interfaces) == 1 {
-		return "", "", bail("an anonymous class")
+	// The constructor's parameters by slot: a long or a double takes two, so
+	// the slot a field was stored from is not its position on its own.
+	position := map[int]int{}
+	for i, one := range parameterSlots(target.Descriptor, false) {
+		position[one.Slot] = i
+	}
+	names := map[string]string{}
+	taken := map[int]bool{}
+	for slot, field := range captured {
+		// The enclosing instance comes first and is not an argument any more.
+		at, known := position[slot]
+		if outer != nil {
+			at--
+		}
+		switch {
+		case !known:
+			return "", "", nil, bail("an anonymous class")
+		case strings.HasPrefix(field, "this$"):
+			if outer == nil || outer.Text != "this" {
+				return "", "", nil, bail("an anonymous class")
+			}
+			names[field] = simpleClassName(d.classFile.ThisClass) + ".this"
+		case at < 0 || at >= len(args):
+			return "", "", nil, bail("an anonymous class")
+		case !capturedValue.MatchString(args[at]):
+			// Anything but a name would be evaluated once per use in the body,
+			// where source evaluated it once at the `new`.
+			return "", "", nil, bail("an anonymous class")
+		default:
+			names[field] = args[at]
+			taken[at] = true
+		}
+	}
+	// What is left is the superclass constructor's, which source wrote inside
+	// the `new Super(..) { .. }` - an interface's `new` takes none.
+	var kept []string
+	for i, arg := range args {
+		if !taken[i] {
+			kept = append(kept, arg)
+		}
 	}
 	// A generic supertype is written with its type arguments - `new
 	// Function<A, B>() { .. }` - and without them the body's method does not
 	// override the erased one it came from. The arguments are in the class's
 	// signature, which this phase does not read yet.
 	if SignatureOf(anonymous.Attributes, anonymous.Pool) != "" {
-		return "", "", bail("an anonymous class with a generic supertype")
+		return "", "", nil, bail("an anonymous class with a generic supertype")
 	}
 	// `new Iface() { .. }` implements one interface, `new Super() { .. }`
 	// extends one class; javac writes the other side as `java/lang/Object`.
 	named := ""
 	switch {
 	case len(anonymous.Interfaces) == 1 && anonymous.SuperClass == "java/lang/Object":
+		if len(kept) > 0 {
+			return "", "", nil, bail("an anonymous class")
+		}
 		named = typeName(anonymous.Interfaces[0], d.self())
 	case len(anonymous.Interfaces) == 0 && anonymous.SuperClass != "":
 		named = typeName(anonymous.SuperClass, d.self())
 	default:
-		return "", "", bail("an anonymous class")
+		return "", "", nil, bail("an anonymous class")
 	}
 	lines, err := anonymousMembers(anonymous)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	body := strings.Join(lines, "\n") + "\n"
-	// A captured value, or the enclosing instance, reaches the body through a
-	// synthetic field - whose name is not one source wrote.
-	if strings.Contains(body, "this$") || strings.Contains(body, "val$") {
-		return "", "", bail("an anonymous class")
+	// The body reads a captured value through its synthetic field; source read
+	// the variable the `new` was handed. A body that already uses that name
+	// for something of its own would read the wrong one.
+	for field, name := range names {
+		if !strings.HasSuffix(name, ".this") &&
+			regexp.MustCompile(`(^|[^\w$.])`+regexp.QuoteMeta(name)+`($|[^\w$])`).MatchString(body) {
+			return "", "", nil, bail("an anonymous class whose captured name is taken")
+		}
+		body = strings.ReplaceAll(body, "this."+field, name)
 	}
-	return body, named, nil
+	// A field left over is one the constructor did not explain.
+	if strings.Contains(body, "this$") || strings.Contains(body, "val$") {
+		return "", "", nil, bail("an anonymous class")
+	}
+	return body, named, kept, nil
+}
+
+// capturedValue matches a value a body may read as often as it likes: a
+// variable, a parameter or a literal. Anything else would be evaluated once
+// per read, where source evaluated it once at the `new`.
+var capturedValue = regexp.MustCompile(`^(?:[A-Za-z_$][\w$]*|-?\d+[LlFfDd]?|"[^"\\]*"|'[^'\\]*'|true|false|null)$`)
+
+// capturedFields reads the constructor javac wrote for an anonymous class: it
+// stores each argument it is handed into a synthetic field of its own, and
+// that is the only place which argument is which is written down.
+func capturedFields(anonymous *ClassFile, descriptor string) (map[int]string, error) {
+	synthetic := map[string]bool{}
+	for _, field := range anonymous.Fields {
+		if field.Flags&accSynthetic != 0 {
+			synthetic[field.Name] = true
+		}
+	}
+	for _, method := range anonymous.Methods {
+		if method.Name != "<init>" || method.Descriptor != descriptor {
+			continue
+		}
+		code, err := ReadCode(method, anonymous.Pool)
+		if err != nil || code == nil {
+			return nil, bail("an anonymous class")
+		}
+		instructions, err := DecodeInstructions(anonymous, code.Code)
+		if err != nil {
+			return nil, bail("an anonymous class")
+		}
+		out := map[int]string{}
+		for i := 0; i+2 < len(instructions); i++ {
+			run := instructions[i : i+3]
+			if run[0].Mnemonic != "aload_0" || !isOneOf(opBase(run[1].Mnemonic), "ilfda", "load") ||
+				run[2].Mnemonic != "putfield" {
+				continue
+			}
+			field, ok := PoolMemberRef(anonymous.Pool, uint16(run[2].Arg))
+			if !ok || !synthetic[field.Name] {
+				continue
+			}
+			out[slotOf(run[1])] = field.Name
+		}
+		if len(out) != len(synthetic) {
+			return nil, bail("an anonymous class")
+		}
+		return out, nil
+	}
+	return nil, bail("an anonymous class")
 }
 
 // anonymousMembers renders the fields and methods of an anonymous class as the
@@ -3553,7 +3653,7 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 	}
 	params := parameterSlots(target.Descriptor, true)
 	var outer *expr
-	anonBody, anonType := "", ""
+	anonBody, anonType, anonymous := "", "", false
 	if enclosing != "" {
 		// A static nested class may take the outer type first too, which is why
 		// the flag decides where there is one; a class the emitter wrote may be
@@ -3567,11 +3667,7 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 			if strings.Trim(tail, "0123456789") != "" {
 				return bail("a local class")
 			}
-			body, named, err := d.anonymousBody(target, params)
-			if err != nil {
-				return err
-			}
-			anonBody, anonType = body, named
+			anonymous = true
 		}
 		access, ok := d.innerFlags[target.Owner]
 		inner := ok && access&accStatic == 0
@@ -3603,6 +3699,13 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 		if outer.Text != "this" || d.classFile.ThisClass != enclosing {
 			qualifier = at(*outer, precPrimary)
 		}
+	}
+	if anonymous {
+		body, named, kept, err := d.anonymousBody(target, args, outer)
+		if err != nil {
+			return err
+		}
+		anonBody, anonType, args = body, named, kept
 	}
 	receiver, err := d.pop()
 	if err != nil {

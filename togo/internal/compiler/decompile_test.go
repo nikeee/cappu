@@ -2006,15 +2006,23 @@ func TestDecompileReadsAnEnumSwitchFromItsMapClass(t *testing.T) {
 // wrote it. A captured value arrives in a synthetic field whose name source
 // never wrote, so those still say so.
 const anonymousSource = `interface Greeter { String greet(String who); }
+class Base { final String tag; Base(String tag) { this.tag = tag; } String show() { return tag; } }
 public class Anon {
+  int field = 7;
   static Greeter plain() { return new Greeter() { public String greet(String who) { return "hi " + who; } }; }
   static Runnable runner() { return new Runnable() { int n; public void run() { n++; System.out.print("run" + n); } }; }
   static Object obj() { return new Object() { public String toString() { return "anon"; } }; }
   static Greeter captures(String prefix) { return new Greeter() { public String greet(String who) { return prefix + who; } }; }
+  static Runnable held(long big) { return new Runnable() { public void run() { System.out.print("w" + big); } }; }
+  Runnable outer() { return new Runnable() { public void run() { System.out.print("f" + field); } }; }
+  static Base sub(String t, int n) { return new Base(t) { String show() { return super.show() + n; } }; }
   public static void main(String[] z) {
     Runnable r = runner();
     r.run();
     r.run();
+    new Anon().outer().run();
+    held(9L).run();
+    System.out.print(sub("s", 4).show());
     System.out.println(" " + plain().greet("you") + " " + obj());
   }
 }
@@ -2040,8 +2048,13 @@ func TestDecompileWritesAnAnonymousClassWhereItWasWritten(t *testing.T) {
 	for _, want := range []string{
 		"return new Greeter() {\n\npublic java.lang.String greet(java.lang.String arg0) {",
 		"return new java.lang.Runnable() {\nint n;", "new java.lang.Object() {",
-		// captures: the value reaches the body as a synthetic field.
-		"cappu: an anonymous class",
+		// A captured value is the variable the `new` was handed, and the
+		// enclosing instance is `Outer.this`; what is left over belongs to the
+		// superclass constructor.
+		"java.lang.System.out.print(\"w\" + arg0);", "java.lang.System.out.print(\"f\" + Anon.this.field);",
+		"return new Base(arg0) {", "return super.show() + arg1;",
+		// `prefix` is the name the body's own parameter carries.
+		"cappu: an anonymous class whose captured name is taken",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
@@ -2055,14 +2068,14 @@ func TestDecompileWritesAnAnonymousClassWhereItWasWritten(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if strings.Count(blind, "cappu: an anonymous class") != 4 {
-		t.Errorf("expected four bails without the siblings:\n%s", blind)
+	if strings.Count(blind, "cappu: an anonymous class") != 7 {
+		t.Errorf("expected seven bails without the siblings:\n%s", blind)
 	}
 	again := filepath.Join(dir, "again")
 	compileWithJavacOn(t, again, "Anon", strings.ReplaceAll(source, "static Greeter captures", "static Greeter unused"), dir)
 	expected := runJava(t, dir, "Anon")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "Anon")
-	if actual != expected || actual != "run1run2 hi you anon\n" {
+	if actual != expected || actual != "run1run2f7w9s4 hi you anon\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
