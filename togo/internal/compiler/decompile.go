@@ -626,6 +626,149 @@ func typeName(internal, self string) string {
 	return sourceTypeText(text, self)
 }
 
+// classSignatureTypes reads a class's generic signature (JVMS 4.7.9) and
+// renders the types it extends and implements as source writes them, type
+// arguments and all. It reports false for a signature this does not cover -
+// a class with type parameters of its own, for one, which an anonymous class
+// never has.
+func classSignatureTypes(signature, self string) (string, []string, bool) {
+	if signature == "" || strings.HasPrefix(signature, "<") {
+		return "", nil, false
+	}
+	super, at, ok := classTypeSignature(signature, 0, self)
+	if !ok {
+		return "", nil, false
+	}
+	var interfaces []string
+	for at < len(signature) {
+		one, next, ok := classTypeSignature(signature, at, self)
+		if !ok {
+			return "", nil, false
+		}
+		interfaces = append(interfaces, one)
+		at = next
+	}
+	return super, interfaces, true
+}
+
+// classTypeSignature renders one `Lpkg/Outer<Args>.Inner<Args>;` from at, and
+// reports where it ends.
+func classTypeSignature(signature string, at int, self string) (string, int, bool) {
+	if at >= len(signature) || signature[at] != 'L' {
+		return "", 0, false
+	}
+	at++
+	text := ""
+	for {
+		start := at
+		for at < len(signature) && !strings.ContainsRune("<;.", rune(signature[at])) {
+			at++
+		}
+		if at >= len(signature) {
+			return "", 0, false
+		}
+		name := signature[start:at]
+		if text == "" {
+			text = sourceTypeText(strings.ReplaceAll(name, "/", "."), self)
+		} else {
+			text += "." + name
+		}
+		if signature[at] == '<' {
+			arguments, next, ok := typeArguments(signature, at, self)
+			if !ok {
+				return "", 0, false
+			}
+			text += arguments
+			at = next
+		}
+		if at >= len(signature) {
+			return "", 0, false
+		}
+		if signature[at] == '.' {
+			at++
+			continue
+		}
+		break
+	}
+	if signature[at] != ';' {
+		return "", 0, false
+	}
+	return text, at + 1, true
+}
+
+// typeArguments renders `<A, B>` from the `<` at at, and reports where it ends.
+func typeArguments(signature string, at int, self string) (string, int, bool) {
+	at++ // the `<`
+	var written []string
+	for at < len(signature) && signature[at] != '>' {
+		one, next, ok := typeArgument(signature, at, self)
+		if !ok {
+			return "", 0, false
+		}
+		written = append(written, one)
+		at = next
+	}
+	if at >= len(signature) || len(written) == 0 {
+		return "", 0, false
+	}
+	return "<" + strings.Join(written, ", ") + ">", at + 1, true
+}
+
+// typeArgument renders one argument of a type: a type, a wildcard, or a
+// wildcard with a bound.
+func typeArgument(signature string, at int, self string) (string, int, bool) {
+	switch signature[at] {
+	case '*':
+		return "?", at + 1, true
+	case '+', '-':
+		keyword := " extends "
+		if signature[at] == '-' {
+			keyword = " super "
+		}
+		bound, next, ok := fieldTypeSignature(signature, at+1, self)
+		if !ok {
+			return "", 0, false
+		}
+		return "?" + keyword + bound, next, true
+	default:
+		return fieldTypeSignature(signature, at, self)
+	}
+}
+
+// fieldTypeSignature renders a class type, an array of one, or a type variable.
+func fieldTypeSignature(signature string, at int, self string) (string, int, bool) {
+	if at >= len(signature) {
+		return "", 0, false
+	}
+	switch signature[at] {
+	case 'L':
+		return classTypeSignature(signature, at, self)
+	case 'T':
+		end := strings.IndexByte(signature[at:], ';')
+		if end < 0 {
+			return "", 0, false
+		}
+		return signature[at+1 : at+end], at + end + 1, true
+	case '[':
+		element, next, ok := fieldTypeSignature(signature, at+1, self)
+		if ok {
+			return element + "[]", next, true
+		}
+		// A primitive element is one letter, and no signature of its own.
+		text, size := DescriptorType(signature[at+1:], 0)
+		if size == 0 {
+			return "", 0, false
+		}
+		return text + "[]", at + 1 + size, true
+	default:
+		text, size := DescriptorType(signature[at:], 0)
+		if size == 0 {
+			return "", 0, false
+		}
+		return text, at + size, true
+	}
+}
+
 // descriptorSourceType renders a descriptor as a source type reference.
 func descriptorSourceType(descriptor, self string) string {
 	text, _ := DescriptorType(descriptor, 0)
@@ -3514,22 +3657,42 @@ func (d *bodyDecompiler) anonymousBody(
 	}
 	// A generic supertype is written with its type arguments - `new
 	// Function<A, B>() { .. }` - and without them the body's method does not
-	// override the erased one it came from. The arguments are in the class's
-	// signature, which this phase does not read yet.
-	if SignatureOf(anonymous.Attributes, anonymous.Pool) != "" {
-		return "", "", nil, bail("an anonymous class with a generic supertype")
+	// override the erased one it came from. They are in the class's signature.
+	superType := typeName(anonymous.SuperClass, d.self())
+	interfaces := make([]string, len(anonymous.Interfaces))
+	for i, one := range anonymous.Interfaces {
+		interfaces[i] = typeName(one, d.self())
+	}
+	if signature := SignatureOf(anonymous.Attributes, anonymous.Pool); signature != "" {
+		generic, genericInterfaces, ok := classSignatureTypes(signature, d.self())
+		if !ok || len(genericInterfaces) != len(interfaces) {
+			return "", "", nil, bail("an anonymous class with a generic supertype")
+		}
+		// The class this file declares is written without its type parameters,
+		// so naming it with type arguments would not compile. Only the types
+		// that come from elsewhere keep theirs.
+		own := func(binary, generic, erased string) string {
+			if binary == d.classFile.ThisClass {
+				return erased
+			}
+			return generic
+		}
+		superType = own(anonymous.SuperClass, generic, superType)
+		for i := range interfaces {
+			interfaces[i] = own(anonymous.Interfaces[i], genericInterfaces[i], interfaces[i])
+		}
 	}
 	// `new Iface() { .. }` implements one interface, `new Super() { .. }`
 	// extends one class; javac writes the other side as `java/lang/Object`.
 	named := ""
 	switch {
-	case len(anonymous.Interfaces) == 1 && anonymous.SuperClass == "java/lang/Object":
+	case len(interfaces) == 1 && anonymous.SuperClass == "java/lang/Object":
 		if len(kept) > 0 {
 			return "", "", nil, bail("an anonymous class")
 		}
-		named = typeName(anonymous.Interfaces[0], d.self())
-	case len(anonymous.Interfaces) == 0 && anonymous.SuperClass != "":
-		named = typeName(anonymous.SuperClass, d.self())
+		named = interfaces[0]
+	case len(interfaces) == 0 && anonymous.SuperClass != "":
+		named = superType
 	default:
 		return "", "", nil, bail("an anonymous class")
 	}
