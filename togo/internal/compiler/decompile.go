@@ -3444,6 +3444,97 @@ func (d *bodyDecompiler) receiverCallee(mnemonic, owner, name string, iface bool
 	return "super." + name, nil
 }
 
+// anonymousBody is the body of `new Iface() { .. }`: javac compiles it to a
+// class of its own, named for the method it sits in, which is the file beside
+// this one. Its captured values are constructor parameters stored in synthetic
+// fields, and what the body makes of them is not this phase - only a class
+// that captures nothing comes back.
+func (d *bodyDecompiler) anonymousBody(target MemberRef, params []paramSlot) (string, string, error) {
+	if d.classFile.Siblings == nil {
+		return "", "", bail("an anonymous class")
+	}
+	b, ok := d.classFile.Siblings(target.Owner)
+	if !ok {
+		return "", "", bail("an anonymous class")
+	}
+	anonymous, err := ReadClassFile(b)
+	if err != nil {
+		return "", "", bail("an anonymous class")
+	}
+	anonymous.Siblings = d.classFile.Siblings
+	// Nothing but the enclosing instance may be passed: another argument is a
+	// captured value, and where the body reads it is a name this does not know.
+	// `new Iface() { .. }` takes none at all - the arguments of the one that
+	// names a class are its superclass constructor's.
+	if len(params) > 1 {
+		return "", "", bail("an anonymous class")
+	}
+	if len(params) == 1 && len(anonymous.Interfaces) == 1 {
+		return "", "", bail("an anonymous class")
+	}
+	// A generic supertype is written with its type arguments - `new
+	// Function<A, B>() { .. }` - and without them the body's method does not
+	// override the erased one it came from. The arguments are in the class's
+	// signature, which this phase does not read yet.
+	if SignatureOf(anonymous.Attributes, anonymous.Pool) != "" {
+		return "", "", bail("an anonymous class with a generic supertype")
+	}
+	// `new Iface() { .. }` implements one interface, `new Super() { .. }`
+	// extends one class; javac writes the other side as `java/lang/Object`.
+	named := ""
+	switch {
+	case len(anonymous.Interfaces) == 1 && anonymous.SuperClass == "java/lang/Object":
+		named = typeName(anonymous.Interfaces[0], d.self())
+	case len(anonymous.Interfaces) == 0 && anonymous.SuperClass != "":
+		named = typeName(anonymous.SuperClass, d.self())
+	default:
+		return "", "", bail("an anonymous class")
+	}
+	lines, err := anonymousMembers(anonymous)
+	if err != nil {
+		return "", "", err
+	}
+	body := strings.Join(lines, "\n") + "\n"
+	// A captured value, or the enclosing instance, reaches the body through a
+	// synthetic field - whose name is not one source wrote.
+	if strings.Contains(body, "this$") || strings.Contains(body, "val$") {
+		return "", "", bail("an anonymous class")
+	}
+	return body, named, nil
+}
+
+// anonymousMembers renders the fields and methods of an anonymous class as the
+// body of a `new Iface() { .. }`: its constructor and the synthetic fields the
+// captured values arrive in are javac's, not source's.
+func anonymousMembers(classFile *ClassFile) ([]string, error) {
+	var lines []string
+	for _, field := range classFile.Fields {
+		if field.Flags&accSynthetic != 0 {
+			continue
+		}
+		// The constructor that gave a blank final its value is javac's, and it
+		// is not written back: the field cannot stay final without it.
+		lines = append(lines, fieldSource(field, classFile, false))
+	}
+	for i := range classFile.Methods {
+		method := classFile.Methods[i]
+		if method.Flags&(accSynthetic|accBridge) != 0 || method.Name == "<init>" {
+			continue
+		}
+		// A static initializer is not something an anonymous class's source
+		// wrote, and dropping it would lose what it set.
+		if method.Name == "<clinit>" {
+			return nil, bail("an anonymous class with a static initializer")
+		}
+		body, _, err := methodSource(method, classFile)
+		if err != nil {
+			return nil, err
+		}
+		lines = append(append(lines, ""), body...)
+	}
+	return lines, nil
+}
+
 // construct writes a constructor call: either `new C(...)`, whose object is
 // already on the stack, or the `super(...)`/`this(...)` that opens a
 // constructor - which is not a call in source but the shape of one, and without
@@ -3462,6 +3553,7 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 	}
 	params := parameterSlots(target.Descriptor, true)
 	var outer *expr
+	anonBody, anonType := "", ""
 	if enclosing != "" {
 		// A static nested class may take the outer type first too, which is why
 		// the flag decides where there is one; a class the emitter wrote may be
@@ -3472,10 +3564,14 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 		// method it lives in, a declaration this phase does not restore.
 		tail := target.Owner[len(enclosing)+1:]
 		if tail != "" && tail[0] >= '0' && tail[0] <= '9' {
-			if strings.Trim(tail, "0123456789") == "" {
-				return bail("an anonymous class")
+			if strings.Trim(tail, "0123456789") != "" {
+				return bail("a local class")
 			}
-			return bail("a local class")
+			body, named, err := d.anonymousBody(target, params)
+			if err != nil {
+				return err
+			}
+			anonBody, anonType = body, named
 		}
 		access, ok := d.innerFlags[target.Owner]
 		inner := ok && access&accStatic == 0
@@ -3562,10 +3658,18 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 	if qualifier != "" {
 		text = qualifier + ".new " + target.Owner[len(enclosing)+1:] + "(" + strings.Join(args, ", ") + ")"
 	}
+	valueType := receiver.Type
+	if anonBody != "" {
+		// The class javac wrote for `new Iface() { .. }` is named after the
+		// method it sits in; source names the type it extends, and the body
+		// follows it.
+		text = "new " + anonType + "(" + strings.Join(args, ", ") + ") {\n" + anonBody + "}"
+		valueType = anonType
+	}
 	value := expr{
 		Text:    text,
 		Prec:    precPrimary,
-		Type:    receiver.Type,
+		Type:    valueType,
 		Effects: true,
 	}
 	// The `dup` in front of the call left one other copy of the same object. Two
@@ -6751,6 +6855,17 @@ func (d *bodyDecompiler) step(
 		field, ok := PoolMemberRef(pool, uint16(instruction.Arg))
 		if !ok {
 			return bail("bad field reference")
+		}
+		// An enum's constants are built in its `<clinit>`, one `new` and one
+		// store each; source writes them as the constant list, and writing the
+		// stores back assigns a `static final` field - which is no more legal
+		// than instantiating the enum.
+		if mnemonic == "putstatic" && field.Owner == d.classFile.ThisClass && isEnumDeclaration(d.classFile) {
+			for _, declared := range d.classFile.Fields {
+				if declared.Name == field.Name && declared.Flags&accEnum != 0 {
+					return bail("an enum constant's construction")
+				}
+			}
 		}
 		value, err := d.pop()
 		if err != nil {

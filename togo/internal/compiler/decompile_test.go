@@ -34,7 +34,6 @@ var fullyDecompiled = []string{
 	"EnumAbstract$2",
 	"EnumMixed$1",
 	"EnumMixed$2",
-	"EnumUnqualified",
 	"Fields",
 	"FloatArith",
 	"FloatConst",
@@ -79,8 +78,9 @@ var fullyDecompiled = []string{
 }
 
 // Classes kept for the bail-out rendering: an anonymous class and the members
-// javac generates for an enum are not this phase's job, and must say so.
-var notDecompiled = []string{"EnumAbstract", "EnumMixed", "QualifiedAnon"}
+// javac generates for an enum are not this phase's job, and must say so. An
+// enum's constants are built in its `<clinit>`, which no source may write.
+var notDecompiled = []string{"EnumAbstract", "EnumMixed", "QualifiedAnon", "EnumUnqualified"}
 
 // `ClassLit.prim()` reads `java.lang.Integer.TYPE`, which javac accepts and the
 // decompiler gets right, but our JDK stub does not declare - so re-emitting it
@@ -1997,6 +1997,72 @@ func TestDecompileReadsAnEnumSwitchFromItsMapClass(t *testing.T) {
 	expected := runJava(t, dir, "Painting")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "Painting")
 	if actual != expected || actual != "1 ba 512\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// `new Iface() { .. }` is a class of its own to javac, named for the method it
+// sits in; with that class beside this one the body comes back where source
+// wrote it. A captured value arrives in a synthetic field whose name source
+// never wrote, so those still say so.
+const anonymousSource = `interface Greeter { String greet(String who); }
+public class Anon {
+  static Greeter plain() { return new Greeter() { public String greet(String who) { return "hi " + who; } }; }
+  static Runnable runner() { return new Runnable() { int n; public void run() { n++; System.out.print("run" + n); } }; }
+  static Object obj() { return new Object() { public String toString() { return "anon"; } }; }
+  static Greeter captures(String prefix) { return new Greeter() { public String greet(String who) { return prefix + who; } }; }
+  public static void main(String[] z) {
+    Runnable r = runner();
+    r.run();
+    r.run();
+    System.out.println(" " + plain().greet("you") + " " + obj());
+  }
+}
+`
+
+func TestDecompileWritesAnAnonymousClassWhereItWasWritten(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Anon", anonymousSource)
+	siblings := func(binaryName string) ([]byte, bool) {
+		if slash := strings.LastIndex(binaryName, "/"); slash >= 0 {
+			binaryName = binaryName[slash+1:]
+		}
+		b, err := os.ReadFile(filepath.Join(dir, binaryName+".class"))
+		return b, err == nil
+	}
+	source, err := DecompileWith(readFile(t, classFile), siblings)
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"return new Greeter() {\n\npublic java.lang.String greet(java.lang.String arg0) {",
+		"return new java.lang.Runnable() {\nint n;", "new java.lang.Object() {",
+		// captures: the value reaches the body as a synthetic field.
+		"cappu: an anonymous class",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Count(source, "/* cappu:") != 1 {
+		t.Errorf("expected one bail:\n%s", source)
+	}
+	// Without the classes beside it there is no body to write.
+	blind, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Count(blind, "cappu: an anonymous class") != 4 {
+		t.Errorf("expected four bails without the siblings:\n%s", blind)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavacOn(t, again, "Anon", strings.ReplaceAll(source, "static Greeter captures", "static Greeter unused"), dir)
+	expected := runJava(t, dir, "Anon")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "Anon")
+	if actual != expected || actual != "run1run2 hi you anon\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
