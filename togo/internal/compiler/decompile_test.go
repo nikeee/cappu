@@ -34,6 +34,7 @@ var fullyDecompiled = []string{
 	"EnumAbstract$2",
 	"EnumMixed$1",
 	"EnumMixed$2",
+	"EnumUnqualified",
 	"Fields",
 	"FloatArith",
 	"FloatConst",
@@ -78,9 +79,9 @@ var fullyDecompiled = []string{
 }
 
 // Classes kept for the bail-out rendering: an anonymous class and the members
-// javac generates for an enum are not this phase's job, and must say so. An
-// enum's constants are built in its `<clinit>`, which no source may write.
-var notDecompiled = []string{"EnumAbstract", "EnumMixed", "QualifiedAnon", "EnumUnqualified"}
+// javac generates for an enum are not this phase's job, and must say so. A
+// constant with a body of its own is an anonymous subclass of the enum.
+var notDecompiled = []string{"EnumAbstract", "EnumMixed", "QualifiedAnon"}
 
 // `ClassLit.prim()` reads `java.lang.Integer.TYPE`, which javac accepts and the
 // decompiler gets right, but our JDK stub does not declare - so re-emitting it
@@ -1958,6 +1959,17 @@ const paintingSource = `public class Painting {
 }
 `
 
+// siblingsIn reads the classes javac wrote into one directory.
+func siblingsIn(dir string) Siblings {
+	return func(binaryName string) ([]byte, bool) {
+		if slash := strings.LastIndex(binaryName, "/"); slash >= 0 {
+			binaryName = binaryName[slash+1:]
+		}
+		b, err := os.ReadFile(filepath.Join(dir, binaryName+".class"))
+		return b, err == nil
+	}
+}
+
 func TestDecompileReadsAnEnumSwitchFromItsMapClass(t *testing.T) {
 	if !hasTool("javac") || !hasTool("java") {
 		t.Skip("no JDK (javac/java)")
@@ -2082,6 +2094,68 @@ func TestDecompileWritesAnAnonymousClassWhereItWasWritten(t *testing.T) {
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "Anon")
 	if actual != expected || actual != "run1run2f7w9s43 hi you anon\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// An enum's constants are built in its `<clinit>`: one `new` per constant,
+// with the name and the ordinal javac adds in front of what source wrote, and
+// a store into the constant's field. Source writes them as the constant list,
+// so that is where the arguments go back - and the array javac keeps them in
+// is its own.
+const enumArgumentsSource = `public enum Shade {
+  RED(1, "r"), GREEN(2, "g"), BLUE(3, "b");
+  private final int code;
+  private final String tag;
+  Shade(int code, String tag) { this.code = code; this.tag = tag; }
+  public String show() { return code + tag; }
+  public static void main(String[] z) {
+    for (Shade s : values()) System.out.print(s.show());
+    System.out.println(" " + valueOf("RED").show());
+  }
+}
+`
+
+func TestDecompileWritesAnEnumConstantsArguments(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Shade", enumArgumentsSource)
+	source, err := DecompileWith(readFile(t, classFile), siblingsIn(dir))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{`RED(1, "r")`, `GREEN(2, "g")`, `BLUE(3, "b")`} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	// The array javac keeps the constants in is not source's, and neither is
+	// the static initializer left holding nothing else.
+	if strings.Contains(source, "$VALUES") || strings.Contains(source, "static {") {
+		t.Errorf("expected no generated static initializer:\n%s", source)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Shade", source)
+	expected := runJava(t, dir, "Shade")
+	actual := runJava(t, again, "Shade")
+	if actual != expected || actual != "1r2g3b 1r\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+	// A constant with a body of its own is an anonymous subclass of the enum,
+	// which source writes after the arguments - not this phase.
+	withBody := strings.Replace(enumArgumentsSource, `BLUE(3, "b");`,
+		`BLUE(3, "b") { public String show() { return "blue"; } };`, 1)
+	bodyClass := compileWithJavac(t, t.TempDir(), "Shade", withBody)
+	bodySource, err := Decompile(readFile(t, bodyClass))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(bodySource, "cappu: an anonymous class") {
+		t.Errorf("expected the bail for a constant with a body:\n%s", bodySource)
 	}
 }
 

@@ -93,6 +93,10 @@ type ClassFile struct {
 	Fields     []Member
 	Methods    []Member
 	Attributes []Attribute
+	// builtEnumConstants are the constants an enum's `<clinit>` built, filled
+	// in when that body is decompiled: the constant list needs the arguments
+	// source wrote, which are only in there.
+	builtEnumConstants []builtEnumConstant
 	// Siblings reads the classes javac generated beside this one - the
 	// synthetic `Outer$1` an enum switch keeps its map in, for one. Reading a
 	// class file never sets it; a caller that knows where the bytes came from

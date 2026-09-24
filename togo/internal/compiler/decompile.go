@@ -2507,6 +2507,9 @@ type bodyDecompiler struct {
 	regions  []*tryRegion
 	// activeTries are the `try` statements being written right now.
 	activeTries map[*tryRegion]bool
+	// enumArguments are the arguments of each `new` an enum's `<clinit>` wrote,
+	// by the text of the expression: source writes them in the constant list.
+	enumArguments map[string][]string
 	// enumLabels names the keys of the switch being written, when it is one
 	// over an enum: the map javac keeps in a class beside this one says which
 	// constant each key stands for.
@@ -3986,6 +3989,14 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 		Prec:    precPrimary,
 		Type:    valueType,
 		Effects: true,
+	}
+	// An enum constant's `new` carries the name and the ordinal javac added in
+	// front of what source wrote.
+	if target.Owner == d.classFile.ThisClass && isEnumDeclaration(d.classFile) && len(args) >= 2 {
+		if d.enumArguments == nil {
+			d.enumArguments = map[string][]string{}
+		}
+		d.enumArguments[text] = args[2:]
 	}
 	// The `dup` in front of the call left one other copy of the same object. Two
 	// would mean the object is used twice, and writing `new C(...)` in both
@@ -5663,6 +5674,13 @@ func (d *bodyDecompiler) switchFollowOf(b *block, cases []int, defaultTarget int
 	return leadsTo(cases)
 }
 
+// builtEnumConstant is one constant an enum's `<clinit>` built: its name and
+// the arguments source wrote after it.
+type builtEnumConstant struct {
+	Name      string
+	Arguments []string
+}
+
 // caseLabel names one key of the switch being written.
 func (d *bodyDecompiler) caseLabel(key int) (string, error) {
 	if d.enumLabels == nil {
@@ -7190,16 +7208,38 @@ func (d *bodyDecompiler) step(
 		// store each; source writes them as the constant list, and writing the
 		// stores back assigns a `static final` field - which is no more legal
 		// than instantiating the enum.
+		// `$VALUES = $values()` is the array javac keeps the constants in, and
+		// the method it fills it from: neither is source's.
+		if mnemonic == "putstatic" && field.Owner == d.classFile.ThisClass &&
+			isEnumDeclaration(d.classFile) && generatedFields[field.Name] {
+			if _, err := d.pop(); err != nil {
+				return err
+			}
+			return nil
+		}
+		enumConstant := false
 		if mnemonic == "putstatic" && field.Owner == d.classFile.ThisClass && isEnumDeclaration(d.classFile) {
 			for _, declared := range d.classFile.Fields {
 				if declared.Name == field.Name && declared.Flags&accEnum != 0 {
-					return bail("an enum constant's construction")
+					enumConstant = true
 				}
 			}
 		}
 		value, err := d.pop()
 		if err != nil {
 			return err
+		}
+		// An enum's constants are built in its `<clinit>`, one `new` and one
+		// store each. Source writes them as the constant list, with the
+		// arguments javac put after the name and the ordinal it generates.
+		if enumConstant {
+			arguments, ok := d.enumArguments[value.Text]
+			if !ok {
+				return bail("an enum constant's construction")
+			}
+			d.classFile.builtEnumConstants = append(d.classFile.builtEnumConstants,
+				builtEnumConstant{Name: field.Name, Arguments: arguments})
+			return nil
 		}
 		fieldType := descriptorSourceType(field.Descriptor, d.self())
 		target := d.staticRef(field.Owner, field.Name)
@@ -8285,10 +8325,25 @@ func isEnumDeclaration(classFile *ClassFile) bool {
 // must open.
 func enumConstants(classFile *ClassFile) []string {
 	self := "L" + classFile.ThisClass + ";"
+	// What the `<clinit>` built, when it was reconstructed: `RED(1, "r")` is
+	// the constant list source wrote, and the constructor takes those.
+	built := map[string][]string{}
+	for _, one := range classFile.builtEnumConstants {
+		built[one.Name] = one.Arguments
+	}
 	var out []string
 	for _, field := range classFile.Fields {
-		if field.Flags&accEnum != 0 && field.Descriptor == self {
+		if field.Flags&accEnum == 0 || field.Descriptor != self {
+			continue
+		}
+		arguments, ok := built[field.Name]
+		switch {
+		case !ok:
 			out = append(out, field.Name)
+		case len(arguments) == 0:
+			out = append(out, field.Name)
+		default:
+			out = append(out, field.Name+"("+strings.Join(arguments, ", ")+")")
 		}
 	}
 	return out
@@ -8412,6 +8467,11 @@ func DecompileClass(classFile *ClassFile) (string, error) {
 		}
 		if !reconstructed && method.Name == "<clinit>" {
 			staticInitializerLost = true
+		}
+		// A static initializer left empty held nothing but what javac
+		// generates - an enum's constants and the array it keeps them in.
+		if method.Name == "<clinit>" && reconstructed && len(body) == 2 {
+			continue
 		}
 		bodies = append(bodies, body)
 	}
