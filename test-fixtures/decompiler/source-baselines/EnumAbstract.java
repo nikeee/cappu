@@ -44,5 +44,6 @@ enum EnumAbstract {
      * 42: putstatic #59
      * 45: return
      */
+    if (true) throw new UnsupportedOperationException("cappu: not decompiled");
   }
 }

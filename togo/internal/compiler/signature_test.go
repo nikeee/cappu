@@ -20,8 +20,13 @@ func TestClassSignatureTypes(t *testing.T) {
 			"java.lang.Object", []string{"java.util.List<? extends java.lang.Number>"}, true},
 		{"Ljava/lang/Object;Ljava/util/List<-Ljava/lang/Number;>;",
 			"java.lang.Object", []string{"java.util.List<? super java.lang.Number>"}, true},
-		{"Ljava/lang/Object;Ljava/util/function/Function<TT;Ljava/lang/String;>;",
-			"java.lang.Object", []string{"java.util.function.Function<T, java.lang.String>"}, true},
+		// A type variable is declared by the class or method around it, and the
+		// standalone rendering writes neither's parameters.
+		{"Ljava/lang/Object;Ljava/util/function/Function<TT;Ljava/lang/String;>;", "", nil, false},
+		// Nothing but a real descriptor letter is a type argument.
+		{"Ljava/lang/Object;Ljava/util/function/Function<VLjava/lang/Integer;>;", "", nil, false},
+		{"Ljava/lang/Object;Ljava/util/function/Function<<<Ljava/lang/String;>;", "", nil, false},
+		{"Ljava/lang/Object;Ljava/util/function/Function<T;Ljava/lang/Integer;>;", "", nil, false},
 		{"Ljava/lang/Object;Ljava/util/List<[Ljava/lang/String;>;",
 			"java.lang.Object", []string{"java.util.List<java.lang.String[]>"}, true},
 		{"Ljava/lang/Object;Ljava/util/Map<Ljava/lang/String;Ljava/util/List<Ljava/lang/Integer;>;>;",

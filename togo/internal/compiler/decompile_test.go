@@ -3282,7 +3282,7 @@ func TestDecompileSaysWhenALambdaCaptureCannotBeFinal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(source, "cappu: a lambda that captures a variable that is not final") {
+	if !strings.Contains(source, "cappu: a captured variable that is not final") {
 		t.Errorf("expected the bail, got:\n%s", source)
 	}
 }

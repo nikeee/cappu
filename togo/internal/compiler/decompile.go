@@ -744,23 +744,20 @@ func fieldTypeSignature(signature string, at int, self string) (string, int, boo
 	case 'L':
 		return classTypeSignature(signature, at, self)
 	case 'T':
-		end := strings.IndexByte(signature[at:], ';')
-		if end < 0 {
-			return "", 0, false
-		}
-		return signature[at+1 : at+end], at + end + 1, true
+		// A type variable is declared by the class or the method around it, and
+		// the standalone rendering writes neither's parameters: naming one here
+		// would not compile.
+		return "", 0, false
 	case '[':
 		element, next, ok := fieldTypeSignature(signature, at+1, self)
-		if ok {
-			return element + "[]", next, true
-		}
-		// A primitive element is one letter, and no signature of its own.
-		text, size := DescriptorType(signature[at+1:], 0)
-		if size == 0 {
+		if !ok {
 			return "", 0, false
 		}
-		return text + "[]", at + 1 + size, true
+		return element + "[]", next, true
 	default:
+		if !strings.ContainsRune("BCDFIJSZ", rune(signature[at])) {
+			return "", 0, false
+		}
 		text, size := DescriptorType(signature[at:], 0)
 		if size == 0 {
 			return "", 0, false
@@ -2541,9 +2538,10 @@ type bodyDecompiler struct {
 	// it belongs to.
 	monitorSlots  []int
 	instructionAt map[int]Instruction
-	// captured are the locals a lambda captured. Java takes only effectively
-	// final ones, and a variable this hoisted to the top of the method may be
-	// written more than once - which is only known when the whole body is out.
+	// captured are the locals a lambda or an anonymous class captured. Java
+	// takes only effectively final ones, and a variable this hoisted to the top
+	// of the method - or two of source that share one slot - may be written
+	// more than once, which is only known when the whole body is out.
 	captured []*local
 	// inlining are the lambda bodies being inlined right now, so one cannot
 	// inline itself.
@@ -3589,24 +3587,24 @@ func (d *bodyDecompiler) receiverCallee(mnemonic, owner, name string, iface bool
 
 // anonymousBody is the body of `new Iface() { .. }`: javac compiles it to a
 // class of its own, named for the method it sits in, which is the file beside
-// this one. Its captured values are constructor parameters stored in synthetic
-// fields, and what the body makes of them is not this phase - only a class
-// that captures nothing comes back.
+// this one. Its captured values arrive as constructor parameters kept in
+// synthetic fields; the body reads them through those fields, and source read
+// the variables the `new` was handed.
 func (d *bodyDecompiler) anonymousBody(
 	target MemberRef, args []string, outer *expr,
 ) (string, string, []string, error) {
 	if d.classFile.Siblings == nil {
 		return "", "", nil, bail("an anonymous class")
 	}
-	b, ok := d.classFile.Siblings(target.Owner)
+	// A class file javac wrote cannot nest anonymous classes without end, but
+	// one that was edited could, and each level reads another file.
+	if d.depth > 16 {
+		return "", "", nil, bail("an anonymous class")
+	}
+	anonymous, ok := SiblingClass(d.classFile.Siblings, target.Owner)
 	if !ok {
 		return "", "", nil, bail("an anonymous class")
 	}
-	anonymous, err := ReadClassFile(b)
-	if err != nil {
-		return "", "", nil, bail("an anonymous class")
-	}
-	anonymous.Siblings = d.classFile.Siblings
 	// Every argument is a captured value: source names the variable itself, and
 	// the body reads it through a synthetic field of its own. Which field takes
 	// which argument is in the constructor javac wrote.
@@ -3632,10 +3630,13 @@ func (d *bodyDecompiler) anonymousBody(
 		case !known:
 			return "", "", nil, bail("an anonymous class")
 		case strings.HasPrefix(field, "this$"):
-			if outer == nil || outer.Text != "this" {
+			enclosing := simpleClassName(d.classFile.ThisClass)
+			// `Outer$1.this` is not a name: a class javac named for the method
+			// it sits in has none of its own.
+			if outer == nil || outer.Text != "this" || namedForAMethod.MatchString(enclosing) {
 				return "", "", nil, bail("an anonymous class")
 			}
-			names[field] = simpleClassName(d.classFile.ThisClass) + ".this"
+			names[field] = enclosing + ".this"
 		case at < 0 || at >= len(args):
 			return "", "", nil, bail("an anonymous class")
 		case !capturedValue.MatchString(args[at]):
@@ -3645,6 +3646,7 @@ func (d *bodyDecompiler) anonymousBody(
 		default:
 			names[field] = args[at]
 			taken[at] = true
+			d.capturedLocal(args[at])
 		}
 	}
 	// What is left is the superclass constructor's, which source wrote inside
@@ -3704,18 +3706,47 @@ func (d *bodyDecompiler) anonymousBody(
 	// The body reads a captured value through its synthetic field; source read
 	// the variable the `new` was handed. A body that already uses that name
 	// for something of its own would read the wrong one.
-	for field, name := range names {
-		if !strings.HasSuffix(name, ".this") &&
-			regexp.MustCompile(`(^|[^\w$.])`+regexp.QuoteMeta(name)+`($|[^\w$])`).MatchString(body) {
+	for _, name := range names {
+		if !strings.HasSuffix(name, ".this") && standaloneName(name).MatchString(body) {
 			return "", "", nil, bail("an anonymous class whose captured name is taken")
 		}
-		body = strings.ReplaceAll(body, "this."+field, name)
 	}
+	// One pass: `this.val$a` is a prefix of `this.val$ab`, and replacing one
+	// field at a time would rewrite the other's name.
+	body = syntheticRead.ReplaceAllStringFunc(body, func(match string) string {
+		if name, ok := names[strings.TrimPrefix(match, "this.")]; ok {
+			return name
+		}
+		return match
+	})
 	// A field left over is one the constructor did not explain.
 	if strings.Contains(body, "this$") || strings.Contains(body, "val$") {
 		return "", "", nil, bail("an anonymous class")
 	}
 	return body, named, kept, nil
+}
+
+// capturedLocal records a variable an anonymous class was handed. Whether it is the
+// effectively final one source captured is only known at the end of the body:
+// two variables of source that share a slot read back as one name, and Java
+// takes only an effectively final one into an inner class.
+func (d *bodyDecompiler) capturedLocal(name string) {
+	if entry, ok := d.byName[name]; ok {
+		d.captured = append(d.captured, entry)
+	}
+}
+
+// syntheticRead matches a read of a synthetic field through `this`, which is
+// how the body of an anonymous class reaches a captured value.
+var syntheticRead = regexp.MustCompile(`this\.(?:val\$|this\$)[\w$]+`)
+
+// namedForAMethod matches the name javac gives a class that source wrote
+// inside a method: `Outer$1`, `Outer$1Local`.
+var namedForAMethod = regexp.MustCompile(`^\d`)
+
+// standaloneName matches an identifier that is not part of a longer one.
+func standaloneName(name string) *regexp.Regexp {
+	return regexp.MustCompile(`(^|[^\w$.])` + regexp.QuoteMeta(name) + `($|[^\w$])`)
 }
 
 // capturedValue matches a value a body may read as often as it likes: a
@@ -3761,22 +3792,40 @@ func capturedFields(anonymous *ClassFile, descriptor string) (map[int]string, er
 		if len(out) != len(synthetic) {
 			return nil, bail("an anonymous class")
 		}
+		// What a field initializer or an instance block computes lives in this
+		// constructor too, and dropping it would drop what source wrote: only
+		// the loads, the stores of the captures and the one super call belong.
+		for i, one := range instructions {
+			switch {
+			case one.Mnemonic == "putfield", isOneOf(opBase(one.Mnemonic), "ilfda", "load"):
+			case one.Mnemonic == "return" && i == len(instructions)-1:
+			case one.Mnemonic == "invokespecial":
+				target, ok := PoolMemberRef(anonymous.Pool, uint16(one.Arg))
+				if !ok || target.Name != "<init>" {
+					return nil, bail("an anonymous class with a body of its own")
+				}
+			default:
+				return nil, bail("an anonymous class with a body of its own")
+			}
+		}
 		return out, nil
 	}
 	return nil, bail("an anonymous class")
 }
 
 // anonymousMembers renders the fields and methods of an anonymous class as the
-// body of a `new Iface() { .. }`: its constructor and the synthetic fields the
-// captured values arrive in are javac's, not source's.
+// body of a `new Iface() { .. }`: the synthetic fields the captured values
+// arrive in are javac's, and so is the constructor - which capturedFields has
+// already checked holds nothing source wrote.
 func anonymousMembers(classFile *ClassFile) ([]string, error) {
 	var lines []string
 	for _, field := range classFile.Fields {
 		if field.Flags&accSynthetic != 0 {
 			continue
 		}
-		// The constructor that gave a blank final its value is javac's, and it
-		// is not written back: the field cannot stay final without it.
+		// The constructor is javac's and is not written back, so a field it
+		// assigned cannot stay final. One with an initializer of its own is
+		// not written back here either - capturedFields refuses that class.
 		lines = append(lines, fieldSource(field, classFile, false))
 	}
 	for i := range classFile.Methods {
@@ -4516,7 +4565,7 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 		settled := len(entry.Writes) == 0 ||
 			(len(entry.Writes) == 1 && entry.Declaration != nil && entry.Declaration.Inline)
 		if !settled {
-			return bail("a lambda that captures a variable that is not final")
+			return bail("a captured variable that is not final")
 		}
 	}
 	// A block that was never entered would silently drop its statements, and one
@@ -5615,11 +5664,17 @@ func (d *bodyDecompiler) switchFollowOf(b *block, cases []int, defaultTarget int
 }
 
 // caseLabel names one key of the switch being written.
-func (d *bodyDecompiler) caseLabel(key int) string {
-	if name, ok := d.enumLabels[key]; ok {
-		return name
+func (d *bodyDecompiler) caseLabel(key int) (string, error) {
+	if d.enumLabels == nil {
+		return strconv.Itoa(key), nil
 	}
-	return strconv.Itoa(key)
+	name, ok := d.enumLabels[key]
+	if !ok {
+		// The map class does not name this key: which constant source wrote is
+		// not in either file, and a number is no label for an enum.
+		return "", bail("an enum switch")
+	}
+	return name, nil
 }
 
 // enumSwitch reads the `$SwitchMap$` array a switch over an enum looks its
@@ -5632,12 +5687,8 @@ func (d *bodyDecompiler) enumSwitch(selector expr) (expr, map[int]string, error)
 	if mark < 0 || open < mark || !strings.HasSuffix(selector.Text, ".ordinal()]") || d.classFile.Siblings == nil {
 		return expr{}, nil, bail("an enum switch")
 	}
-	b, ok := d.classFile.Siblings(strings.ReplaceAll(selector.Text[:mark], ".", "/"))
+	mapper, ok := SiblingClass(d.classFile.Siblings, strings.ReplaceAll(selector.Text[:mark], ".", "/"))
 	if !ok {
-		return expr{}, nil, bail("an enum switch")
-	}
-	mapper, err := ReadClassFile(b)
-	if err != nil {
 		return expr{}, nil, bail("an enum switch")
 	}
 	field := selector.Text[mark+1 : open]
@@ -5837,7 +5888,11 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 			continue
 		}
 		for _, key := range keysOf[target] {
-			clauses = append(clauses, stmt{Text: "case " + d.caseLabel(key) + ":"})
+			label, err := d.caseLabel(key)
+			if err != nil {
+				return 0, err
+			}
+			clauses = append(clauses, stmt{Text: "case " + label + ":"})
 		}
 		if len(keysOf[target]) > 0 {
 			broke := []stmt{{Text: "break;"}}
@@ -5854,7 +5909,11 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 				end = bodies[i+1]
 			}
 			for _, key := range keysOf[target] {
-				clauses = append(clauses, stmt{Text: "case " + d.caseLabel(key) + ":"})
+				label, err := d.caseLabel(key)
+				if err != nil {
+					return err
+				}
+				clauses = append(clauses, stmt{Text: "case " + label + ":"})
 			}
 			if target == defaultTarget {
 				clauses = append(clauses, stmt{Text: "default:"})
@@ -5905,7 +5964,12 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 		if target != defaultTarget {
 			keys := make([]string, len(keysOf[target]))
 			for i, key := range keysOf[target] {
-				keys[i] = d.caseLabel(key)
+				label, err := d.caseLabel(key)
+				if err != nil {
+					restore()
+					return expr{}, false, err
+				}
+				keys[i] = label
 			}
 			label = "case " + strings.Join(keys, ", ")
 		}
@@ -7961,9 +8025,13 @@ func methodSource(method Member, classFile *ClassFile) (lines []string, reconstr
 			body = append(body, chained)
 		}
 		body = append(body, bailComment(instructions, reason.reason)...)
-		// A static initializer has to be able to complete normally, so the throw
-		// that marks every other unreconstructed body would not compile here.
-		if method.Name != "<clinit>" {
+		// A static initializer has to be able to complete normally, so the bare
+		// throw that marks every other unreconstructed body would not compile
+		// here - but a class whose static state was never set has to fail where
+		// it is used, not run on with the fields at their defaults.
+		if method.Name == "<clinit>" {
+			body = append(body, `if (true) throw new UnsupportedOperationException("cappu: not decompiled");`)
+		} else {
 			body = append(body, `throw new UnsupportedOperationException("cappu: not decompiled");`)
 		}
 	}

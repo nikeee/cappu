@@ -56,5 +56,6 @@ enum EnumUnqualified {
      * 61: putstatic #60
      * 64: return
      */
+    if (true) throw new UnsupportedOperationException("cappu: not decompiled");
   }
 }

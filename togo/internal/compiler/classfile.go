@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 )
@@ -101,6 +103,46 @@ type ClassFile struct {
 // Siblings reports the bytes of the class with that binary name, and whether
 // there is one to read.
 type Siblings func(binaryName string) ([]byte, bool)
+
+// SiblingsBeside is a resolver for the classes javac wrote next to this one: a
+// nested or synthetic class of `Outer` is `Outer$..` in the same directory. A
+// class from another package is read from where its own name puts it, under
+// the root this file's package implies - a directory may hold two classes of
+// the same simple name.
+func SiblingsBeside(file string, ofClass string) Siblings {
+	dir := filepath.Dir(file)
+	root := dir
+	if slash := strings.LastIndex(ofClass, "/"); slash >= 0 {
+		root = strings.TrimSuffix(dir, string(filepath.Separator)+filepath.FromSlash(ofClass[:slash]))
+	}
+	return func(binaryName string) ([]byte, bool) {
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(binaryName)+".class"))
+		return b, err == nil
+	}
+}
+
+// RunDecompile handles `cappu decompile`: reconstruct Java source from .class
+// files, or print their bytecode in `javap -c -p` layout with --disasm (#43).
+// Port of src/cli/decompile.ts.
+
+// SiblingClass reads the class with that binary name and checks that it is the
+// one asked for: a directory may hold a class of the same simple name from
+// another package, whose body would be written back for this one's.
+func SiblingClass(siblings Siblings, binaryName string) (*ClassFile, bool) {
+	if siblings == nil || strings.ContainsAny(binaryName, `\`) || strings.Contains(binaryName, "..") {
+		return nil, false
+	}
+	b, ok := siblings(binaryName)
+	if !ok {
+		return nil, false
+	}
+	read, err := ReadClassFile(b)
+	if err != nil || read.ThisClass != binaryName {
+		return nil, false
+	}
+	read.Siblings = siblings
+	return read, true
+}
 
 // ExceptionEntry is one row of a Code attribute's exception table.
 type ExceptionEntry struct {

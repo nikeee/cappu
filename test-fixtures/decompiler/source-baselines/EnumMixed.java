@@ -67,5 +67,6 @@ enum EnumMixed {
      * 67: putstatic #67
      * 70: return
      */
+    if (true) throw new UnsupportedOperationException("cappu: not decompiled");
   }
 }

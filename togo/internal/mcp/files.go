@@ -113,6 +113,15 @@ func findClass(cfg *config.Config, className string) ([]byte, error) {
 	return nil, fmt.Errorf("class %s not found on the classPath", className)
 }
 
+// thisClassOf is the binary name in a class file, or "" when it cannot be read.
+func thisClassOf(b []byte) string {
+	read, err := compiler.ReadClassFile(b)
+	if err != nil {
+		return ""
+	}
+	return read.ThisClass
+}
+
 // decompileToSource is cli.DecompileToSource (that package wires `cappu mcp`,
 // so this one cannot import it): the formatter lays out the decompiler's rough
 // text, and a body it refuses stays unformatted.
@@ -147,15 +156,7 @@ func DecompileTool(cfg *config.Config, args DecompileArgs) (DecompileResult, err
 	var siblings compiler.Siblings
 	if file != "" {
 		b, err = readFile(file)
-		dir := filepath.Dir(file)
-		siblings = func(binaryName string) ([]byte, bool) {
-			name := binaryName
-			if slash := strings.LastIndex(name, "/"); slash >= 0 {
-				name = name[slash+1:]
-			}
-			b, err := os.ReadFile(filepath.Join(dir, name+".class"))
-			return b, err == nil
-		}
+		siblings = compiler.SiblingsBeside(file, thisClassOf(b))
 	} else {
 		b, err = findClass(cfg, className)
 		siblings = func(binaryName string) ([]byte, bool) {
