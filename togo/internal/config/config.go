@@ -107,6 +107,23 @@ type TestOptions struct {
 	Coverage bool `json:"coverage"`
 }
 
+// AuditIgnore is one "auditOptions.ignore" entry: an advisory `cappu audit`
+// still reports but no longer fails on. ID matches an advisory's primary id
+// (GHSA-...) or one of its CVE aliases, ignoring case; Reason records why it
+// is accepted.
+type AuditIgnore struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
+}
+
+// AuditOptions mirrors the "auditOptions" section. Go build only (not yet in
+// src/config.ts).
+type AuditOptions struct {
+	// Ignore lists the accepted advisories. An entry that matches no finding is
+	// an error unless `cappu audit --allow-stale-ignores` is given.
+	Ignore []AuditIgnore `json:"ignore"`
+}
+
 // Config is the parsed cappu.json plus where it came from. Mirrors CappuConfig.
 type Config struct {
 	CompilerOptions   CompilerOptions  `json:"compilerOptions"`
@@ -114,6 +131,7 @@ type Config struct {
 	DapOptions        DapOptions       `json:"dapOptions"`
 	FormatterOptions  FormatterOptions `json:"formatterOptions"`
 	TestOptions       TestOptions      `json:"testOptions"`
+	AuditOptions      AuditOptions     `json:"auditOptions"`
 	PackageSources    []string         `json:"packageSources"`
 	Dependencies      Dependencies     `json:"dependencies"`
 	JDK               string           `json:"jdk,omitempty"`
@@ -275,6 +293,9 @@ func (c *Config) applyDefaults() {
 	if c.TestOptions.ReportsDir == "" {
 		c.TestOptions.ReportsDir = DefaultTestReportsDir
 	}
+	if c.AuditOptions.Ignore == nil {
+		c.AuditOptions.Ignore = []AuditIgnore{}
+	}
 	if c.PackageSources == nil {
 		c.PackageSources = append([]string(nil), DefaultPackageSources...)
 	}
@@ -326,6 +347,21 @@ func (c *Config) validate() error {
 	case "text", "junit":
 	default:
 		return fmt.Errorf(`testOptions.outputFormat: must be one of "text", "junit"`)
+	}
+	firstIgnore := map[string]int{}
+	for i, ignore := range c.AuditOptions.Ignore {
+		if ignore.ID == "" || strings.TrimSpace(ignore.ID) != ignore.ID {
+			return fmt.Errorf("auditOptions.ignore[%d].id: must be an advisory id or CVE without surrounding whitespace, e.g. \"CVE-2021-44228\"", i)
+		}
+		// ids match case-insensitively, so "cve-1" duplicates "CVE-1"
+		key := strings.ToUpper(ignore.ID)
+		if j, ok := firstIgnore[key]; ok {
+			return fmt.Errorf("auditOptions.ignore[%d].id: %s duplicates auditOptions.ignore[%d]", i, ignore.ID, j)
+		}
+		firstIgnore[key] = i
+		if strings.TrimSpace(ignore.Reason) == "" {
+			return fmt.Errorf("auditOptions.ignore[%d].reason: must say why %s is accepted", i, ignore.ID)
+		}
 	}
 	if c.GroupID != "" && !MavenID.MatchString(c.GroupID) {
 		return fmt.Errorf("groupId: must be a Maven id (letters, digits, . _ -)")

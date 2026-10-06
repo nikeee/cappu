@@ -60,7 +60,7 @@ or Gradle? Use the `migrate` skill.
 
 | Command | Output | Exit |
 |---|---|---|
-| `cappu audit [--no-cache] [--format text\|sarif]` | OSV advisories per resolved transitive dep, with the tree path to each | 0 clean, **1 any finding**, 2 scan failed |
+| `cappu audit [--no-cache] [--format text\|sarif] [--allow-stale-ignores]` | OSV advisories per resolved transitive dep, with the tree path to each | 0 clean or every finding ignored, **1 any unignored finding or stale ignore entry**, 2 scan failed |
 | `cappu licenses [--json]` | every resolved dep with a best-effort SPDX id | 0 |
 | `cappu show g:a` | includes the OSV findings of that one package | 0 |
 
@@ -68,6 +68,28 @@ or Gradle? Use the `migrate` skill.
 `--json` to `audit`; that is exit 2. Fixing a finding means bumping the
 dependency that pulls the vulnerable version in, or pinning the vulnerable
 transitive artifact to a fixed version under `implementation`.
+
+Accepting a finding instead (Go build of cappu only; the Node build ignores the
+field and rejects the flag): list it under `auditOptions.ignore` in
+`cappu.json` with a reason.
+
+```jsonc
+"auditOptions": {
+  "ignore": [{ "id": "CVE-2021-44228", "reason": "JNDI lookups disabled" }]
+}
+```
+
+- `id` is the advisory's OSV id (`GHSA-...`) or one of its `CVE-` aliases,
+  case-insensitive. Other alias kinds do not match.
+- `reason` is required. Duplicate ids are a config error.
+- An ignored finding is still printed, suffixed `(ignored: <reason>)`, and the
+  summary ends in `, N ignored`. In SARIF it keeps its result with a
+  `suppressions` entry. It no longer counts towards exit 1.
+- An entry that matches no finding is an `error:` on stderr and exit 1, so the
+  list cannot rot: remove the entry once the dependency is fixed.
+  `--allow-stale-ignores` turns that into a `warning:`.
+- Only add an entry when the user decided to accept the risk; never to make a
+  failing audit pass.
 
 ## Cache
 
@@ -80,7 +102,9 @@ override with `CAPPU_PACKAGE_STORE`) against the recorded hashes;
 When the cappu MCP server is attached (`mcp__cappu__*` tools), prefer these
 read-only tools over shelling out; they exist only when the server found a
 `cappu.json`: `search_packages(query)`, `latest_version("g:a")`,
-`dependency_tree(coord?)`, `outdated()`, `audit()`, `licenses()`. Anything that
+`dependency_tree(coord?)`, `outdated()`, `audit()`, `licenses()`. In the Go
+build, `audit()` marks an ignored advisory with `ignored: "<reason>"` and lists
+unmatched entries in `staleIgnores`. Anything that
 changes `cappu.json` or `.cappu/` (`add`, `remove`, `update`, `install`) is CLI
 only.
 

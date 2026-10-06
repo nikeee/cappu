@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -121,6 +122,39 @@ func TestProjectAudit(t *testing.T) {
 	v := report.Vulnerable[0]
 	if v.Coordinate != "org.b:bad:1" || strings.Join(v.Path, ",") != "org.a:a:1,org.b:bad:1" || v.Advisories[0].ID != "CVE-1" {
 		t.Errorf("vulnerable = %+v", v)
+	}
+}
+
+// Go build only: advisories covered by auditOptions.ignore carry the entry's
+// reason, and entries matching nothing are listed as stale.
+func TestProjectAuditIgnores(t *testing.T) {
+	src := fakeAuditSource{advisories: map[string][]audit.Advisory{
+		"org.a:a:1": {
+			{ID: "GHSA-x", Aliases: []string{"CVE-1"}, Severity: audit.SeverityHigh},
+			{ID: "GHSA-y", Severity: audit.SeverityLow},
+		},
+	}}
+	tools := projectToolsFor([]string{"org.a:a:1"}, []packages.PackageMetadata{meta("org.a:a:1", nil)}, ProjectToolDeps{AuditSource: src})
+	tools.config.AuditOptions.Ignore = []config.AuditIgnore{
+		{ID: "CVE-1", Reason: "not reachable"},
+		{ID: "CVE-2", Reason: "stale"},
+	}
+	report, err := tools.Audit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Vulnerable) != 1 || len(report.Vulnerable[0].Advisories) != 2 {
+		t.Fatalf("report = %+v", report)
+	}
+	reasons := map[string]string{}
+	for _, a := range report.Vulnerable[0].Advisories {
+		reasons[a.ID] = a.Ignored
+	}
+	if reasons["GHSA-x"] != "not reachable" || reasons["GHSA-y"] != "" {
+		t.Errorf("ignored reasons = %v", reasons)
+	}
+	if !slices.Equal(report.StaleIgnores, []string{"CVE-2"}) {
+		t.Errorf("staleIgnores = %v, want [CVE-2]", report.StaleIgnores)
 	}
 }
 

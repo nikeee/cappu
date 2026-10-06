@@ -21,6 +21,7 @@ Unknown keys are ignored silently, so a typo does nothing rather than fail.
 | `formatterOptions` | object | `{}` | |
 | `lspOptions` | object | `{}` | |
 | `dapOptions` | object | `{}` | |
+| `auditOptions` | object | `{}` | Go build only |
 
 ## dependencies
 
@@ -88,6 +89,14 @@ The MCP tool `organize_imports` follows the same settings, so it agrees with `ca
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `enableAssertions` | boolean | `false` | passes `-ea` to every debug launch; a launch request's `vmArgs` (`-da`) still override |
+
+## auditOptions
+
+Go build only; the Node build ignores this section.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `ignore` | `{ "id": string, "reason": string }[]` | `[]` | advisories `cappu audit` still prints but no longer fails on. `id` is an OSV id (`GHSA-...`) or `CVE-` alias, case-insensitive, no duplicates; `reason` is required. An entry matching no finding fails the audit unless `--allow-stale-ignores` is passed; see the `dependencies` skill |
 
 ## Environment variables
 

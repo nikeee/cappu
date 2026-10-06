@@ -613,3 +613,10 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-09-23 14:53 — continue
 - 2026-10-06 13:49 — bau bash/zsh-completion für das cappu-command
 - 2026-10-06 13:52 — cpmmit
+- 2026-10-06 13:58 — cappu audit meldet sicher einige CVEs drafte, wie es aussehen könnte, eine allowlist zu haben, die den exit-code nicht mehr auf != 0 setzen. Also ich will in der cappu.-json eine liste haben. die CVEs sollen trotzdem im stdout gemeldet, aber mit einer "wurde ignoriert"-meldung markiert werden. dann soll per default ein error kommen, wenn man eine cve ignoriert, die gar nicht vorhanden ist. mit --weak oder so sollte das aber ok sein
+- 2026-10-06 13:58 — wie findest du die idee?
+- 2026-10-06 13:58 — mach es mit reason/objekt. nenn es --allow-stale-ignores
+- 2026-10-06 13:58 — bau es nur in der go-version
+- 2026-10-06 13:59 — deep review
+- 2026-10-06 14:04 — fixe 1-7 + "remove from cappu.json"
+- 2026-10-06 14:09 — commit

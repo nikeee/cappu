@@ -161,6 +161,9 @@ func (c *verifyCmd) Run(a *appState) error {
 
 type auditCmd struct {
 	NoCache bool `name:"no-cache" help:"Ignore all caches (fresh scan)"`
+	// Go build only: an auditOptions.ignore entry matching no finding is then a
+	// warning instead of an error.
+	AllowStaleIgnores bool `name:"allow-stale-ignores" help:"Warn instead of fail when an auditOptions.ignore entry matches no finding"`
 	// Pointer: an explicit empty --format must be an error (like the TS
 	// build), not fall back to the default.
 	Format *string `name:"format" help:"Output format: text|sarif (default: text; sarif under an AI agent)"`
@@ -177,7 +180,7 @@ func (c *auditCmd) Run(a *appState) error {
 	if err != nil {
 		return err
 	}
-	return exit(cli.RunAudit(cfg, c.NoCache, c.Format))
+	return exit(cli.RunAudit(cfg, c.NoCache, c.AllowStaleIgnores, c.Format))
 }
 
 type licensesCmd struct {

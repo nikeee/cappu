@@ -28,6 +28,9 @@ type McpAdvisory struct {
 	Summary       string         `json:"summary"`
 	FixedVersions []string       `json:"fixedVersions"`
 	URL           string         `json:"url"`
+	// Ignored is the reason of the auditOptions.ignore entry covering this
+	// advisory; empty (and omitted) when it is not ignored. Go build only.
+	Ignored string `json:"ignored,omitempty"`
 }
 
 // McpVulnerablePackage is a vulnerable package plus why it is in the tree.
@@ -42,6 +45,9 @@ type McpAuditReport struct {
 	Scanned    int                    `json:"scanned"`
 	Counts     audit.Counts           `json:"counts"`
 	Vulnerable []McpVulnerablePackage `json:"vulnerable"`
+	// StaleIgnores are the auditOptions.ignore ids that matched no finding.
+	// Go build only.
+	StaleIgnores []string `json:"staleIgnores,omitempty"`
 }
 
 // McpLicenseEntry is a declared license.
@@ -143,6 +149,7 @@ func (t *ProjectTools) Audit() (McpAuditReport, error) {
 	if err != nil {
 		return McpAuditReport{}, err
 	}
+	ignores := audit.ApplyIgnores(report, t.config.AuditOptions.Ignore)
 	vulnerable := []McpVulnerablePackage{}
 	for _, p := range report.Vulnerable {
 		var pathStrs []string
@@ -151,6 +158,7 @@ func (t *ProjectTools) Audit() (McpAuditReport, error) {
 		}
 		var advisories []McpAdvisory
 		for _, a := range p.Advisories {
+			reason, _ := ignores.Ignored(a)
 			advisories = append(advisories, McpAdvisory{
 				ID:            string(a.ID),
 				Aliases:       append([]string{}, a.Aliases...),
@@ -158,11 +166,16 @@ func (t *ProjectTools) Audit() (McpAuditReport, error) {
 				Summary:       a.Summary,
 				FixedVersions: append([]string{}, a.FixedVersions...),
 				URL:           a.URL,
+				Ignored:       reason,
 			})
 		}
 		vulnerable = append(vulnerable, McpVulnerablePackage{Coordinate: string(p.Coordinates.String()), Path: pathStrs, Advisories: advisories})
 	}
-	return McpAuditReport{Scanned: report.Scanned, Counts: report.Counts, Vulnerable: vulnerable}, nil
+	var stale []string
+	for _, ignore := range ignores.Stale {
+		stale = append(stale, ignore.ID)
+	}
+	return McpAuditReport{Scanned: report.Scanned, Counts: report.Counts, Vulnerable: vulnerable, StaleIgnores: stale}, nil
 }
 
 // Licenses lists resolved packages with their declared licenses and SPDX ids, sorted.

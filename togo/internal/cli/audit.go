@@ -16,8 +16,13 @@ import (
 // RunAudit handles `cappu audit`: scan the resolved dependencies (transitive
 // included) for known vulnerabilities (OSV.dev), grouped by severity and
 // coloured like npm, printing the dependency path that pulls each one in. No
-// fixing. Exits non-zero when anything is found. Port of src/cli/audit.ts.
-func RunAudit(cfg *config.Config, noCache bool, formatFlag *string) int {
+// fixing. Exits non-zero when an unignored finding or a stale ignore entry is
+// found. Port of src/cli/audit.ts.
+//
+// Go build only: findings covered by auditOptions.ignore are still printed,
+// marked ignored, and do not fail the run. An ignore entry that matches no
+// finding fails it, unless allowStaleIgnores downgrades that to a warning.
+func RunAudit(cfg *config.Config, noCache, allowStaleIgnores bool, formatFlag *string) int {
 	format := "text"
 	if AgentEnabled(os.Getenv) {
 		format = "sarif"
@@ -83,10 +88,57 @@ func RunAudit(cfg *config.Config, noCache bool, formatFlag *string) int {
 		return 2
 	}
 
+	return renderAudit(os.Stdout, os.Stderr, cfg, report, byKey, format, allowStaleIgnores)
+}
+
+// renderAudit prints a finished scan in the given format and returns the exit
+// code: 1 for an unignored finding or a stale ignore entry, else 0.
+func renderAudit(stdout, stderr *os.File, cfg *config.Config, report audit.AuditReport,
+	byKey map[packages.PackageKey]packages.ResolvedPackage, format string, allowStaleIgnores bool) int {
+	ignores := audit.ApplyIgnores(report, cfg.AuditOptions.Ignore)
+	var code int
 	if format == "sarif" {
-		return auditSarif(report, byKey)
+		code = auditSarif(stdout, report, ignores, byKey)
+	} else {
+		code = auditText(stdout, report, ignores, byKey)
 	}
-	return auditText(report, byKey)
+	if reportStaleIgnores(stderr, ignores.Stale, cfg.ConfigPath, allowStaleIgnores) {
+		code = 1
+	}
+	return code
+}
+
+// reportStaleIgnores prints the ignore entries that matched no finding to
+// stderr (stdout may be SARIF), plus a CI annotation each: as errors, or as
+// warnings when allowed. Reports whether they fail the run.
+func reportStaleIgnores(stderr *os.File, stale []config.AuditIgnore, configPath string, allow bool) bool {
+	paint := painter(stderr)
+	for _, ignore := range stale {
+		msg := fmt.Sprintf("auditOptions.ignore entry %q matches no finding", ignore.ID)
+		if allow {
+			fmt.Fprintf(stderr, "%s %s\n", paint("yellow", "warning:"), msg)
+			emitAnnotation("warning", msg, AnnotationLocation{})
+		} else {
+			fmt.Fprintf(stderr, "%s %s; remove it from %s (or pass --allow-stale-ignores)\n",
+				paint("red", "error:"), msg, configPath)
+			emitAnnotation("error", msg, AnnotationLocation{})
+		}
+	}
+	return len(stale) > 0 && !allow
+}
+
+// unignoredFindings counts the (package, advisory) findings not covered by an
+// ignore entry; any of them fails the run.
+func unignoredFindings(report audit.AuditReport, ignores audit.IgnoreResult) int {
+	n := 0
+	for _, p := range report.Vulnerable {
+		for _, a := range p.Advisories {
+			if _, ok := ignores.Ignored(a); !ok {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // dependencyPath is the chain of coordinates from a declared root down to
@@ -158,11 +210,19 @@ type sarifRuleProps struct {
 	SecuritySeverity string   `json:"security-severity,omitempty"`
 }
 type sarifResult struct {
-	RuleID     string           `json:"ruleId"`
-	Level      string           `json:"level"`
-	Message    sarifText        `json:"message"`
-	Locations  []sarifLocation  `json:"locations"`
-	Properties sarifResultProps `json:"properties"`
+	RuleID       string             `json:"ruleId"`
+	Level        string             `json:"level"`
+	Message      sarifText          `json:"message"`
+	Locations    []sarifLocation    `json:"locations"`
+	Suppressions []sarifSuppression `json:"suppressions,omitempty"`
+	Properties   sarifResultProps   `json:"properties"`
+}
+
+// sarifSuppression marks a result ignored via auditOptions.ignore; "external"
+// because the decision lives in cappu.json, not in the scanned source.
+type sarifSuppression struct {
+	Kind          string `json:"kind"`
+	Justification string `json:"justification"`
 }
 type sarifLocation struct {
 	PhysicalLocation sarifPhysical `json:"physicalLocation"`
@@ -199,8 +259,9 @@ func sarifSeverity(s audit.Severity) (level, score string) {
 // buildAuditSarif builds the SARIF log: one rule per distinct advisory, one
 // result per (package, advisory). Results point at cappu.json (the file that
 // declares the dependency, directly or transitively); the dependency path is
-// kept in result.properties for traceability.
-func buildAuditSarif(report audit.AuditReport, byKey map[packages.PackageKey]packages.ResolvedPackage, version string) sarifLog {
+// kept in result.properties for traceability. An ignored finding keeps its
+// result, with a suppression carrying the ignore entry's reason.
+func buildAuditSarif(report audit.AuditReport, ignores audit.IgnoreResult, byKey map[packages.PackageKey]packages.ResolvedPackage, version string) sarifLog {
 	seen := map[string]struct{}{}
 	rules := []sarifRule{}
 	results := []sarifResult{}
@@ -232,11 +293,16 @@ func buildAuditSarif(report audit.AuditReport, byKey map[packages.PackageKey]pac
 			if len(a.FixedVersions) > 0 {
 				fixed = " Fixed in: " + strings.Join(a.FixedVersions, ", ") + "."
 			}
+			var suppressions []sarifSuppression
+			if reason, ok := ignores.Ignored(a); ok {
+				suppressions = []sarifSuppression{{Kind: "external", Justification: reason}}
+			}
 			results = append(results, sarifResult{
-				RuleID:    id,
-				Level:     level,
-				Message:   sarifText{Text: fmt.Sprintf("%s is affected by %s%s: %s.%s", coordinate, id, cve, a.Summary, fixed)},
-				Locations: []sarifLocation{{PhysicalLocation: sarifPhysical{ArtifactLocation: sarifArtifact{URI: "cappu.json"}}}},
+				RuleID:       id,
+				Suppressions: suppressions,
+				Level:        level,
+				Message:      sarifText{Text: fmt.Sprintf("%s is affected by %s%s: %s.%s", coordinate, id, cve, a.Summary, fixed)},
+				Locations:    []sarifLocation{{PhysicalLocation: sarifPhysical{ArtifactLocation: sarifArtifact{URI: "cappu.json"}}}},
 				Properties: sarifResultProps{
 					Coordinate: coordinate,
 					Severity:   string(a.Severity),
@@ -255,21 +321,21 @@ func buildAuditSarif(report audit.AuditReport, byKey map[packages.PackageKey]pac
 	}
 }
 
-func auditSarif(report audit.AuditReport, byKey map[packages.PackageKey]packages.ResolvedPackage) int {
-	out, _ := json.MarshalIndent(buildAuditSarif(report, byKey, meta.Version), "", "  ")
-	fmt.Fprintf(os.Stdout, "%s\n", out)
-	if len(report.Vulnerable) > 0 {
+func auditSarif(stdout *os.File, report audit.AuditReport, ignores audit.IgnoreResult, byKey map[packages.PackageKey]packages.ResolvedPackage) int {
+	out, _ := json.MarshalIndent(buildAuditSarif(report, ignores, byKey, meta.Version), "", "  ")
+	fmt.Fprintf(stdout, "%s\n", out)
+	if unignoredFindings(report, ignores) > 0 {
 		return 1
 	}
 	return 0
 }
 
-func auditText(report audit.AuditReport, byKey map[packages.PackageKey]packages.ResolvedPackage) int {
-	paint := painter(os.Stdout)
+func auditText(stdout *os.File, report audit.AuditReport, ignores audit.IgnoreResult, byKey map[packages.PackageKey]packages.ResolvedPackage) int {
+	paint := painter(stdout)
 	sev := func(s audit.Severity, text string) string { return severityPaint(paint, s, text) }
 
 	if len(report.Vulnerable) == 0 {
-		fmt.Fprintf(os.Stdout, "%s in %d packages\n", paint("green", "found no known vulnerabilities"), report.Scanned)
+		fmt.Fprintf(stdout, "%s in %d packages\n", paint("green", "found no known vulnerabilities"), report.Scanned)
 		return 0
 	}
 
@@ -282,7 +348,7 @@ func auditText(report audit.AuditReport, byKey map[packages.PackageKey]packages.
 			} else {
 				label = paint("dim", label)
 			}
-			fmt.Fprintf(os.Stdout, "    %s%s\n", strings.Repeat("  ", i), label)
+			fmt.Fprintf(stdout, "    %s%s\n", strings.Repeat("  ", i), label)
 		}
 	}
 
@@ -302,7 +368,7 @@ func auditText(report audit.AuditReport, byKey map[packages.PackageKey]packages.
 		if len(inBucket) == 0 {
 			continue
 		}
-		fmt.Fprintf(os.Stdout, "\n%s\n", sev(severity, strings.ToUpper(string(severity))))
+		fmt.Fprintf(stdout, "\n%s\n", sev(severity, strings.ToUpper(string(severity))))
 		for _, f := range inBucket {
 			cve := ""
 			if len(f.a.Aliases) > 0 {
@@ -312,8 +378,12 @@ func auditText(report audit.AuditReport, byKey map[packages.PackageKey]packages.
 			if len(f.a.FixedVersions) > 0 {
 				fixed = "  [fixed in: " + strings.Join(f.a.FixedVersions, ", ") + "]"
 			}
-			fmt.Fprintf(os.Stdout, "  %s  %s%s - %s%s\n", f.c.String(), f.a.ID, cve, f.a.Summary, fixed)
-			fmt.Fprintf(os.Stdout, "    %s\n", paint("dim", f.a.URL))
+			ignored := ""
+			if reason, ok := ignores.Ignored(f.a); ok {
+				ignored = "  " + paint("yellow", "(ignored: "+reason+")")
+			}
+			fmt.Fprintf(stdout, "  %s  %s%s - %s%s%s\n", f.c.String(), f.a.ID, cve, f.a.Summary, fixed, ignored)
+			fmt.Fprintf(stdout, "    %s\n", paint("dim", f.a.URL))
 			printTree(f.c)
 		}
 	}
@@ -329,9 +399,17 @@ func auditText(report audit.AuditReport, byKey map[packages.PackageKey]packages.
 	if total == 1 {
 		noun = "vulnerability"
 	}
-	fmt.Fprintf(os.Stdout, "\n%d %s (%s) across %d of %d packages\n",
-		total, noun, strings.Join(parts, ", "), len(report.Vulnerable), report.Scanned)
-	return 1
+	unignored := unignoredFindings(report, ignores)
+	ignoredNote := ""
+	if n := total - unignored; n > 0 {
+		ignoredNote = fmt.Sprintf(", %d ignored", n)
+	}
+	fmt.Fprintf(stdout, "\n%d %s (%s) across %d of %d packages%s\n",
+		total, noun, strings.Join(parts, ", "), len(report.Vulnerable), report.Scanned, ignoredNote)
+	if unignored > 0 {
+		return 1
+	}
+	return 0
 }
 
 // severityPaint colours text in npm's palette for a severity (critical is

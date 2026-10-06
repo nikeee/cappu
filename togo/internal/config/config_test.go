@@ -231,6 +231,44 @@ func TestLoadRejectsInvalidStyle(t *testing.T) {
 	}
 }
 
+// auditOptions.ignore entries are objects with an id and a reason; both are
+// required so every accepted advisory says why. Go build only.
+func TestLoadAuditIgnore(t *testing.T) {
+	path := writeConfig(t, `{ "auditOptions": { "ignore": [
+		{ "id": "CVE-2021-44228", "reason": "JNDI lookups disabled" }
+	] } }`)
+	cfg, err := Load(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []AuditIgnore{{ID: "CVE-2021-44228", Reason: "JNDI lookups disabled"}}
+	if !slices.Equal(cfg.AuditOptions.Ignore, want) {
+		t.Errorf("ignore = %v, want %v", cfg.AuditOptions.Ignore, want)
+	}
+
+	defaults, err := Load(writeConfig(t, `{}`), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.AuditOptions.Ignore == nil || len(defaults.AuditOptions.Ignore) != 0 {
+		t.Errorf("ignore default = %v, want empty non-nil", defaults.AuditOptions.Ignore)
+	}
+
+	for _, bad := range []string{
+		`[{ "id": "CVE-2021-44228" }]`,
+		`[{ "id": "CVE-2021-44228", "reason": "  " }]`,
+		`[{ "reason": "no id" }]`,
+		`["CVE-2021-44228"]`,
+		`[{ "id": " CVE-2021-44228", "reason": "r" }]`,
+		`[{ "id": "CVE-2021-44228", "reason": "a" }, { "id": "cve-2021-44228", "reason": "b" }]`,
+	} {
+		path := writeConfig(t, `{ "auditOptions": { "ignore": `+bad+` } }`)
+		if _, err := Load(path, ""); err == nil {
+			t.Errorf("expected a validation error for ignore %s", bad)
+		}
+	}
+}
+
 // An importOrder entry is a package prefix ending in "*", never a glob:
 // matching is a plain prefix test, so anything else is reported rather than
 // silently matching nothing. Mirrors the TS config test.
