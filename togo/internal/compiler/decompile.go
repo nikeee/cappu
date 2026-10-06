@@ -3701,7 +3701,11 @@ func (d *bodyDecompiler) anonymousBody(
 	default:
 		return "", "", nil, bail("an anonymous class")
 	}
-	lines, err := anonymousMembers(anonymous)
+	block, err := initializerBlock(anonymous, target.Descriptor)
+	if err != nil {
+		return "", "", nil, err
+	}
+	lines, err := anonymousMembers(anonymous, block)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -3757,6 +3761,84 @@ func standaloneName(name string) *regexp.Regexp {
 // per read, where source evaluated it once at the `new`.
 var capturedValue = regexp.MustCompile(`^(?:[A-Za-z_$][\w$]*|-?\d+[LlFfDd]?|"[^"\\]*"|'[^'\\]*'|true|false|null)$`)
 
+// initializerBlock is what an anonymous class's constructor holds beyond the
+// capture stores and the super call: the field initializers and instance
+// blocks source wrote, which Java writes back as one instance initializer.
+// Nothing of it may read the constructor's own parameters - the names those
+// carry here are not the ones the enclosing body gave the captured values.
+func initializerBlock(anonymous *ClassFile, descriptor string) ([]string, error) {
+	var method Member
+	for _, one := range anonymous.Methods {
+		if one.Name == "<init>" && one.Descriptor == descriptor {
+			method = one
+		}
+	}
+	code, err := ReadCode(method, anonymous.Pool)
+	if err != nil || code == nil {
+		return nil, bail("an anonymous class")
+	}
+	instructions, err := DecodeInstructions(anonymous, code.Code)
+	if err != nil {
+		return nil, bail("an anonymous class")
+	}
+	// A constructor that holds nothing but the capture stores and the super
+	// call has no block to write, and needs no reconstruction to say so -
+	// javac puts those stores in front of the `super()`, which on its own is
+	// a shape this phase refuses.
+	extra := false
+	for i, one := range instructions {
+		switch {
+		case one.Mnemonic == "putfield", isOneOf(opBase(one.Mnemonic), "ilfda", "load"):
+		case one.Mnemonic == "return" && i == len(instructions)-1:
+		case one.Mnemonic == "invokespecial":
+			target, ok := PoolMemberRef(anonymous.Pool, uint16(one.Arg))
+			if !ok || target.Name != "<init>" {
+				extra = true
+			}
+		default:
+			extra = true
+		}
+	}
+	if !extra {
+		return nil, nil
+	}
+	lines, reconstructed, err := methodSource(method, anonymous)
+	if err != nil {
+		return nil, err
+	}
+	if !reconstructed {
+		return nil, bail("an anonymous class with a body of its own")
+	}
+	var kept []string
+	for _, line := range lines[1 : len(lines)-1] {
+		statement := strings.TrimSpace(line)
+		switch {
+		// javac's own: the capture stores and the super call.
+		case syntheticStore.MatchString(statement):
+			continue
+		case strings.HasPrefix(statement, "super("):
+			continue
+		case parameterRead.MatchString(statement):
+			// Whatever reads a parameter of this constructor reads a name the
+			// enclosing body does not know under that spelling.
+			return nil, bail("an anonymous class with a body of its own")
+		}
+		kept = append(kept, line)
+	}
+	if len(kept) == 0 {
+		return nil, nil
+	}
+	return append(append([]string{"{"}, kept...), "}"), nil
+}
+
+// syntheticStore matches the store of a captured value into the field javac
+// keeps it in, and parameterRead a read of one of the constructor's own
+// parameters.
+var (
+	syntheticStore = regexp.MustCompile(`^this\.(?:val\$|this\$)[\w$]+ = \w+;$`)
+	parameterRead  = regexp.MustCompile(`(^|[^\w$.])arg\d+($|[^\w$])`)
+)
+
 // capturedFields reads the constructor javac wrote for an anonymous class: it
 // stores each argument it is handed into a synthetic field of its own, and
 // that is the only place which argument is which is written down.
@@ -3795,22 +3877,6 @@ func capturedFields(anonymous *ClassFile, descriptor string) (map[int]string, er
 		if len(out) != len(synthetic) {
 			return nil, bail("an anonymous class")
 		}
-		// What a field initializer or an instance block computes lives in this
-		// constructor too, and dropping it would drop what source wrote: only
-		// the loads, the stores of the captures and the one super call belong.
-		for i, one := range instructions {
-			switch {
-			case one.Mnemonic == "putfield", isOneOf(opBase(one.Mnemonic), "ilfda", "load"):
-			case one.Mnemonic == "return" && i == len(instructions)-1:
-			case one.Mnemonic == "invokespecial":
-				target, ok := PoolMemberRef(anonymous.Pool, uint16(one.Arg))
-				if !ok || target.Name != "<init>" {
-					return nil, bail("an anonymous class with a body of its own")
-				}
-			default:
-				return nil, bail("an anonymous class with a body of its own")
-			}
-		}
 		return out, nil
 	}
 	return nil, bail("an anonymous class")
@@ -3820,7 +3886,7 @@ func capturedFields(anonymous *ClassFile, descriptor string) (map[int]string, er
 // body of a `new Iface() { .. }`: the synthetic fields the captured values
 // arrive in are javac's, and so is the constructor - which capturedFields has
 // already checked holds nothing source wrote.
-func anonymousMembers(classFile *ClassFile) ([]string, error) {
+func anonymousMembers(classFile *ClassFile, block []string) ([]string, error) {
 	var lines []string
 	for _, field := range classFile.Fields {
 		if field.Flags&accSynthetic != 0 {
@@ -3846,6 +3912,9 @@ func anonymousMembers(classFile *ClassFile) ([]string, error) {
 			return nil, err
 		}
 		lines = append(append(lines, ""), body...)
+	}
+	if len(block) > 0 {
+		lines = append(append(lines, ""), block...)
 	}
 	return lines, nil
 }

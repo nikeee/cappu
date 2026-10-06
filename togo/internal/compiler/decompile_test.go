@@ -2031,6 +2031,9 @@ public class Anon {
   // A generic supertype is written with its type arguments, which are in the
   // anonymous class's signature - without them its method overrides nothing.
   static java.util.function.Function<String, Integer> len() { return new java.util.function.Function<String, Integer>() { public Integer apply(String s) { return s.length(); } }; }
+  // A field initializer and an instance block both live in the constructor
+  // javac wrote; Java writes them back as one instance initializer.
+  static Runnable fielded(String s) { return new Runnable() { int n = 3; String cache = s + "!"; public void run() { n++; System.out.print(cache + n); } }; }
   public static void main(String[] z) {
     Runnable r = runner();
     r.run();
@@ -2039,6 +2042,7 @@ public class Anon {
     held(9L).run();
     System.out.print(sub("s", 4).show());
     System.out.print(len().apply("abc"));
+    fielded("f").run();
     System.out.println(" " + plain().greet("you") + " " + obj());
   }
 }
@@ -2070,6 +2074,7 @@ func TestDecompileWritesAnAnonymousClassWhereItWasWritten(t *testing.T) {
 		"java.lang.System.out.print(\"w\" + arg0);", "java.lang.System.out.print(\"f\" + Anon.this.field);",
 		"return new Base(arg0) {", "return super.show() + arg1;",
 		"new java.util.function.Function<java.lang.String, java.lang.Integer>() {",
+		"int n;", "{\nthis.n = 3;\nthis.cache = arg0 + \"!\";\n}",
 		// `prefix` is the name the body's own parameter carries.
 		"cappu: an anonymous class whose captured name is taken",
 	} {
@@ -2085,14 +2090,14 @@ func TestDecompileWritesAnAnonymousClassWhereItWasWritten(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if strings.Count(blind, "cappu: an anonymous class") != 8 {
-		t.Errorf("expected eight bails without the siblings:\n%s", blind)
+	if strings.Count(blind, "cappu: an anonymous class") != 9 {
+		t.Errorf("expected nine bails without the siblings:\n%s", blind)
 	}
 	again := filepath.Join(dir, "again")
 	compileWithJavacOn(t, again, "Anon", strings.ReplaceAll(source, "static Greeter captures", "static Greeter unused"), dir)
 	expected := runJava(t, dir, "Anon")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "Anon")
-	if actual != expected || actual != "run1run2f7w9s43 hi you anon\n" {
+	if actual != expected || actual != "run1run2f7w9s43f!4 hi you anon\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
