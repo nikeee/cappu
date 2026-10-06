@@ -2155,17 +2155,92 @@ func TestDecompileWritesAnEnumConstantsArguments(t *testing.T) {
 	if actual != expected || actual != "1r2g3b 1r\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
-	// A constant with a body of its own is an anonymous subclass of the enum,
-	// which source writes after the arguments - not this phase.
+	// A constant with a body of its own is built as a subclass javac wrote;
+	// source writes that body after the arguments.
 	withBody := strings.Replace(enumArgumentsSource, `BLUE(3, "b");`,
 		`BLUE(3, "b") { public String show() { return "blue"; } };`, 1)
-	bodyClass := compileWithJavac(t, t.TempDir(), "Shade", withBody)
-	bodySource, err := Decompile(readFile(t, bodyClass))
+	bodyDir := t.TempDir()
+	bodyClass := compileWithJavac(t, bodyDir, "Shade", withBody)
+	bodySource, err := DecompileWith(readFile(t, bodyClass), siblingsIn(bodyDir))
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(bodySource, "cappu: an anonymous class") {
-		t.Errorf("expected the bail for a constant with a body:\n%s", bodySource)
+	if strings.Contains(bodySource, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", bodySource)
+	}
+	if !strings.Contains(bodySource, `BLUE(3, "b") {`) || !strings.Contains(bodySource, `return "blue";`) {
+		t.Errorf("expected the constant's body after its arguments:\n%s", bodySource)
+	}
+	bodyAgain := filepath.Join(bodyDir, "again")
+	compileWithJavac(t, bodyAgain, "Shade", bodySource)
+	if actual, expected := runJava(t, bodyAgain, "Shade"), "1r2gblue 1r\n"; actual != expected {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+	// Without the siblings the subclass cannot be read, and the constant list
+	// is not something to guess at.
+	blind, err := Decompile(readFile(t, bodyClass))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(blind, "cappu: an anonymous class") {
+		t.Errorf("expected the bail without the siblings:\n%s", blind)
+	}
+}
+
+// javac compiles an `assert` into a test of a flag field it generates, so the
+// statement has to come back as an assert - what is left otherwise does not
+// even name a field this file declares.
+const assertSource = `public class Asserts {
+  static int positive(int v) { assert v > 0; return v; }
+  static int message(int v) { assert v > 0 : "v was " + v; return v; }
+  static String two(String s, int n) { assert s != null && n > 0 : s; assert !s.isEmpty(); return s + n; }
+  static int following(int v) { assert v != 3; if (v > 1) { return v; } else { return -v; } }
+  static void never() { assert false : "unreachable"; }
+  public static void main(String[] z) {
+    System.out.print(positive(2));
+    System.out.print(message(3));
+    System.out.print(two("a", 1));
+    System.out.print(following(5));
+    try { never(); } catch (AssertionError e) { System.out.print(e.getMessage()); }
+  }
+}
+`
+
+func TestDecompileWritesTheAssertSourceWrote(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Asserts", assertSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "$assertionsDisabled") {
+		t.Errorf("the generated flag is not source's:\n%s", source)
+	}
+	for _, want := range []string{
+		"assert arg0 > 0;",
+		`assert arg0 > 0 : "v was " + arg0;`,
+		"assert arg0 != null && arg1 > 0 : arg0;",
+		"assert !arg0.isEmpty();",
+		"assert arg0 != 3;",
+		`assert false : "unreachable";`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	// The assert runs: javac's flag is off unless -ea is given, so the class
+	// has to behave the same with assertions enabled.
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Asserts", source)
+	expected := runJavaWith(t, dir, "Asserts", "-ea")
+	if actual := runJavaWith(t, again, "Asserts", "-ea"); actual != expected {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
 
@@ -3084,7 +3159,14 @@ func TestDecompileRunsLikeJavacLoops(t *testing.T) {
 // runJava reports what the class's `main` printed.
 func runJava(t *testing.T, classPath, name string) string {
 	t.Helper()
-	out, err := exec.Command("java", "-cp", classPath, name).Output()
+	return runJavaWith(t, classPath, name)
+}
+
+// runJavaWith runs the class under extra JVM flags - `-ea` for a class whose
+// asserts have to run.
+func runJavaWith(t *testing.T, classPath, name string, flags ...string) string {
+	t.Helper()
+	out, err := exec.Command("java", append(append(flags, "-cp", classPath), name)...).Output()
 	if err != nil {
 		t.Fatalf("java: %v", err)
 	}

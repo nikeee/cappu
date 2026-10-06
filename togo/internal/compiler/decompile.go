@@ -2507,6 +2507,9 @@ type bodyDecompiler struct {
 	regions  []*tryRegion
 	// activeTries are the `try` statements being written right now.
 	activeTries map[*tryRegion]bool
+	// enumBodies are the bodies of the constants an enum's `<clinit>` built as
+	// subclasses of its own, keyed like enumArguments.
+	enumBodies map[string]string
 	// enumArguments are the arguments of each `new` an enum's `<clinit>` wrote,
 	// by the text of the expression: source writes them in the constant list.
 	enumArguments map[string][]string
@@ -2776,6 +2779,54 @@ func (d *bodyDecompiler) emitCondition(condition expr, wrap func(text string) st
 }
 
 func ifWrap(text string) string { return "if (" + text + ") {" }
+
+// assertFromIf writes back the `assert` javac compiled away. It guards every
+// one with the flag it generates - `if (!$assertionsDisabled && <negated>)
+// throw new AssertionError(..)` - and that flag's field is not source's, so
+// leaving the test as it stands would not even compile.
+func assertFromIf(condition expr, thenStatements []stmt) (string, bool) {
+	if len(thenStatements) != 1 || thenStatements[0].Nested != nil {
+		return "", false
+	}
+	message, ok := assertionThrow(thenStatements[0].Text)
+	if !ok || condition.Logic == nil {
+		return "", false
+	}
+	// `assert false;` compiles to the flag test alone.
+	if readsAssertionFlag(condition) {
+		return "assert false" + message + ";", true
+	}
+	if condition.Logic.Kind != logicAnd || !readsAssertionFlag(*condition.Logic.Left) {
+		return "", false
+	}
+	// The bytecode carries the negation of what was asserted: the branch is
+	// taken when the assertion does NOT hold.
+	return "assert " + negate(*condition.Logic.Right).Text + message + ";", true
+}
+
+// readsAssertionFlag reports `!$assertionsDisabled`, however the field is
+// qualified - a nested class reads the one its outermost class holds.
+func readsAssertionFlag(condition expr) bool {
+	if condition.Logic == nil || condition.Logic.Kind != logicNot {
+		return false
+	}
+	text := condition.Logic.Left.Text
+	return text == "$assertionsDisabled" || strings.HasSuffix(text, ".$assertionsDisabled")
+}
+
+// assertionThrow reads the message of `throw new AssertionError(<message>);`,
+// returning it as the ` : <message>` an assert spells it with.
+func assertionThrow(statement string) (string, bool) {
+	const prefix = "throw new java.lang.AssertionError("
+	if !strings.HasPrefix(statement, prefix) || !strings.HasSuffix(statement, ");") {
+		return "", false
+	}
+	message := statement[len(prefix) : len(statement)-len(");")]
+	if message == "" {
+		return "", true
+	}
+	return " : " + message, true
+}
 
 func whileWrap(text string) string { return "while (" + text + ") {" }
 
@@ -4076,11 +4127,20 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 	}
 	// An enum constant's `new` carries the name and the ordinal javac added in
 	// front of what source wrote.
-	if target.Owner == d.classFile.ThisClass && isEnumDeclaration(d.classFile) && len(args) >= 2 {
+	// A constant with a body of its own is built as a subclass javac wrote, so
+	// the `new` names that subclass; the body belongs to the constant.
+	if isEnumDeclaration(d.classFile) && len(args) >= 2 &&
+		(target.Owner == d.classFile.ThisClass || (anonymous && anonType == d.self())) {
 		if d.enumArguments == nil {
 			d.enumArguments = map[string][]string{}
 		}
 		d.enumArguments[text] = args[2:]
+		if anonBody != "" {
+			if d.enumBodies == nil {
+				d.enumBodies = map[string]string{}
+			}
+			d.enumBodies[text] = anonBody
+		}
 	}
 	// The `dup` in front of the call left one other copy of the same object. Two
 	// would mean the object is used twice, and writing `new C(...)` in both
@@ -5763,6 +5823,9 @@ func (d *bodyDecompiler) switchFollowOf(b *block, cases []int, defaultTarget int
 type builtEnumConstant struct {
 	Name      string
 	Arguments []string
+	// Body is the members of a constant that has a body of its own, empty
+	// for one that has none.
+	Body string
 }
 
 // caseLabel names one key of the switch being written.
@@ -6289,6 +6352,13 @@ func (d *bodyDecompiler) conditional(b *block, stop int) (int, error) {
 }
 
 func (d *bodyDecompiler) pushIf(condition expr, thenStatements, elseStatements []stmt) {
+	if assertion, ok := assertFromIf(condition, thenStatements); ok {
+		d.emit(assertion)
+		// The arm that threw is gone, so what the `else` held is simply what
+		// follows the assert.
+		*d.current = append(*d.current, elseStatements...)
+		return
+	}
 	d.emitCondition(condition, ifWrap)
 	*d.current = append(*d.current, stmt{Nested: &thenStatements})
 	if len(elseStatements) > 0 {
@@ -7294,8 +7364,11 @@ func (d *bodyDecompiler) step(
 		// than instantiating the enum.
 		// `$VALUES = $values()` is the array javac keeps the constants in, and
 		// the method it fills it from: neither is source's.
+		// `$assertionsDisabled = !C.class.desiredAssertionStatus()` is the flag
+		// behind every `assert`, which this phase writes back as the assert
+		// itself; the field is javac's, in an enum or anywhere else.
 		if mnemonic == "putstatic" && field.Owner == d.classFile.ThisClass &&
-			isEnumDeclaration(d.classFile) && generatedFields[field.Name] {
+			(d.generatedField(field.Name) || (isEnumDeclaration(d.classFile) && generatedFields[field.Name])) {
 			if _, err := d.pop(); err != nil {
 				return err
 			}
@@ -7322,7 +7395,7 @@ func (d *bodyDecompiler) step(
 				return bail("an enum constant's construction")
 			}
 			d.classFile.builtEnumConstants = append(d.classFile.builtEnumConstants,
-				builtEnumConstant{Name: field.Name, Arguments: arguments})
+				builtEnumConstant{Name: field.Name, Arguments: arguments, Body: d.enumBodies[value.Text]})
 			return nil
 		}
 		fieldType := descriptorSourceType(field.Descriptor, d.self())
@@ -8231,6 +8304,21 @@ func decompileBody(
 // source.
 var generatedFields = map[string]bool{"$VALUES": true, "$assertionsDisabled": true}
 
+// generatedField reports the assertion flag javac adds to a class that asserts,
+// by the name it gives it and the synthetic flag it marks it with - a field
+// source wrote under that name is still source's.
+func (d *bodyDecompiler) generatedField(name string) bool {
+	if name != "$assertionsDisabled" {
+		return false
+	}
+	for _, declared := range d.classFile.Fields {
+		if declared.Name == name {
+			return declared.Flags&accSynthetic != 0
+		}
+	}
+	return false
+}
+
 // recordComponent is one component of a record: its name and its type, in
 // declaration order.
 type decompiledRecordComponent struct {
@@ -8411,24 +8499,24 @@ func enumConstants(classFile *ClassFile) []string {
 	self := "L" + classFile.ThisClass + ";"
 	// What the `<clinit>` built, when it was reconstructed: `RED(1, "r")` is
 	// the constant list source wrote, and the constructor takes those.
-	built := map[string][]string{}
+	built := map[string]builtEnumConstant{}
 	for _, one := range classFile.builtEnumConstants {
-		built[one.Name] = one.Arguments
+		built[one.Name] = one
 	}
 	var out []string
 	for _, field := range classFile.Fields {
 		if field.Flags&accEnum == 0 || field.Descriptor != self {
 			continue
 		}
-		arguments, ok := built[field.Name]
-		switch {
-		case !ok:
-			out = append(out, field.Name)
-		case len(arguments) == 0:
-			out = append(out, field.Name)
-		default:
-			out = append(out, field.Name+"("+strings.Join(arguments, ", ")+")")
+		constant, ok := built[field.Name]
+		text := field.Name
+		if ok && len(constant.Arguments) > 0 {
+			text += "(" + strings.Join(constant.Arguments, ", ") + ")"
 		}
+		if ok && constant.Body != "" {
+			text += " {\n" + constant.Body + "}"
+		}
+		out = append(out, text)
 	}
 	return out
 }
