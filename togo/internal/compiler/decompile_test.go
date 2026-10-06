@@ -2310,19 +2310,100 @@ func TestDecompileWritesASerializableLambda(t *testing.T) {
 	}
 }
 
+// A pattern-matching switch is a `SwitchBootstraps.typeSwitch` answering with
+// the index of the case that matched, then a table over that index. The types
+// are the bootstrap's arguments, one per index, and each case binds a variable
+// of its own.
+const patternSwitchSource = `public class Patterns {
+  static void order(Object o) {
+    switch (o) {
+      case Integer i -> System.out.print("I" + i);
+      case Number n -> System.out.print("N" + n);
+      default -> System.out.print("?");
+    }
+  }
+  static void nulls(Object o) {
+    switch (o) {
+      case null -> System.out.print("0");
+      case String s -> System.out.print("S" + s.length());
+      default -> System.out.print("D");
+    }
+  }
+  static void twice(Object a, Object b) {
+    switch (a) { case Integer i -> System.out.print("a"); default -> {} }
+    switch (b) { case String s -> System.out.print("b"); default -> {} }
+  }
+  static void guarded(Object o) {
+    switch (o) {
+      case String s when s.length() > 2 -> System.out.print("L");
+      case String s -> System.out.print("s");
+      default -> System.out.print("x");
+    }
+  }
+  public static void main(String[] z) {
+    order(1); order(1.5); order("x");
+    nulls(null); nulls("yz"); nulls(3);
+    twice(1, "s"); twice("s", 1);
+    System.out.println();
+  }
+}
+`
+
+func TestDecompileWritesAPatternSwitch(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Patterns", patternSwitchSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		// the order the indy answers in is the order source wrote, so the
+		// subtype keeps its own arm in front of the supertype's
+		"case java.lang.Integer p",
+		"case java.lang.Number p",
+		"case null:",
+		// a switch that covers every value has to say so, even where source
+		// wrote nothing in the default
+		"default:",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	// A guard re-enters the switch at the case after the one that failed, and
+	// reading the selector straight loses which case that is.
+	if !strings.Contains(source, "cappu: a pattern-matching switch with a guard") {
+		t.Errorf("expected the guarded switch to refuse:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Patterns", source)
+	expected := runJava(t, dir, "Patterns")
+	if actual := runJava(t, again, "Patterns"); actual != expected || expected != "I1N1.5?0S2Dab\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A bail names the construct source wrote: a pattern-matching switch is a
 // `SwitchBootstraps.typeSwitch`, not "an invokedynamic".
 func TestDecompileNamesWhatItCannotWriteBack(t *testing.T) {
 	if !hasTool("javac") {
 		t.Skip("no JDK (javac)")
 	}
-	source := `public class Patterned {
-  static String kind(Object o) {
-    return switch (o) {
-      case Integer i -> "int:" + i;
-      case String s -> "str:" + s;
-      default -> "other";
-    };
+	// An exhaustive switch over a sealed type is laid out with javac's
+	// `default: throw new MatchException(..)` first, where every pattern label
+	// after it would be dominated by it.
+	source := `sealed interface Pat permits PatA, PatB {}
+record PatA() implements Pat {}
+record PatB() implements Pat {}
+public class Patterned {
+  static void which(Pat p) {
+    switch (p) {
+      case PatA a -> System.out.print("A");
+      case PatB b -> System.out.print("B");
+    }
   }
 }
 `
@@ -2332,8 +2413,8 @@ func TestDecompileNamesWhatItCannotWriteBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(decompiled, "cappu: a pattern-matching switch") {
-		t.Errorf("expected the switch to be named:\n%s", decompiled)
+	if !strings.Contains(decompiled, "cappu: a pattern-matching switch over a sealed type") {
+		t.Errorf("expected the sealed switch to be named:\n%s", decompiled)
 	}
 }
 

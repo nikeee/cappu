@@ -2527,6 +2527,12 @@ type bodyDecompiler struct {
 	regions  []*tryRegion
 	// activeTries are the `try` statements being written right now.
 	activeTries map[*tryRegion]bool
+	// patternCases are the types a pattern-matching switch's indy answers with,
+	// one per case index, waiting for the `switch` that reads them.
+	patternCases map[int]string
+	// patternNames counts the pattern variables written so far, so two cases
+	// never declare the same name.
+	patternNames int
 	// enumBodies are the bodies of the constants an enum's `<clinit>` built as
 	// subclasses of its own, keyed like enumArguments.
 	enumBodies map[string]string
@@ -3255,12 +3261,91 @@ func (d *bodyDecompiler) dynamic(index uint16) error {
 	// Named for what source wrote, where the bootstrap says it: a reader of the
 	// bail has to know which construct of theirs is missing.
 	if factory.Owner == "java/lang/runtime/SwitchBootstraps" {
+		if factory.Name == "typeSwitch" {
+			return d.typeSwitch(bootstrap)
+		}
 		return bail("a pattern-matching switch")
 	}
 	if factory.Owner == "java/lang/runtime/ObjectMethods" {
 		return bail("a member generated for a record")
 	}
 	return bail("an invokedynamic that is neither a lambda nor a concatenation")
+}
+
+// typeSwitch takes the `SwitchBootstraps.typeSwitch` a pattern-matching switch
+// is compiled into: it is handed the selector and a restart index and answers
+// which case matched, and the cases themselves are its bootstrap arguments, one
+// per index. The `switch` that follows is left to read the selector straight,
+// with the type each index stands for as its label.
+func (d *bodyDecompiler) typeSwitch(bootstrap BootstrapMethod) error {
+	restart, err := d.pop()
+	if err != nil {
+		return err
+	}
+	// javac keeps the restart index in a local of its own, set to zero in front
+	// of the switch; a guarded case sets it to the next case and comes back to
+	// the indy, so a second write to that local is a `when` clause - and
+	// reading the selector straight would lose where the switch restarts,
+	// which is the branch it then takes.
+	if restart.Text != "0" && !d.restartAlwaysZero(restart.Text) {
+		return bail("a pattern-matching switch with a guard")
+	}
+	selector, err := d.pop()
+	if err != nil {
+		return err
+	}
+	labels := map[int]string{}
+	for index, argument := range bootstrap.ArgumentIndexes {
+		name := PoolClassName(d.classFile.Pool, argument)
+		if name == "" {
+			// A constant case label (`case 1 ->` over an Integer, an enum
+			// constant) is not a type, and the number is no label for it.
+			return bail("a pattern-matching switch over constants")
+		}
+		labels[index] = typeName(name, d.self())
+	}
+	if len(labels) == 0 {
+		return bail("a pattern-matching switch without cases")
+	}
+	// A `case null` is the index javac answers with for a null selector; every
+	// other switch over a reference throws instead, which is the null check in
+	// front of the indy.
+	labels[-1] = ""
+	d.patternCases = labels
+	d.push(selector)
+	return nil
+}
+
+// restartAlwaysZero reports a restart index this body only ever sets to zero.
+// javac writes `iconst_0; istore` in front of every pattern switch - two
+// switches in one method share the local - while a guard stores the case to go
+// on from, which is never zero.
+func (d *bodyDecompiler) restartAlwaysZero(name string) bool {
+	slot, found := -1, false
+	for at, one := range d.locals {
+		if one != nil && one.Name == name {
+			slot, found = at, true
+			break
+		}
+	}
+	if !found {
+		return false
+	}
+	for _, b := range d.blocks {
+		if b == nil {
+			continue
+		}
+		for at, instruction := range b.Instructions {
+			base := opBase(instruction.Mnemonic)
+			if !(isOneOf(base, "ilfda", "store") || base == "iinc") || slotOf(instruction) != slot {
+				continue
+			}
+			if at == 0 || b.Instructions[at-1].Mnemonic != "iconst_0" {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // lambdaFlagsAreImplied reports an `altMetafactory` whose flags say nothing
@@ -6001,11 +6086,18 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	// The selector is an int, so a condition javac materialized as `1`/`0` has
-	// to become the ternary again - `switch (flag)` is not Java.
-	selector, err = d.asNumber(selector)
-	if err != nil {
-		return 0, err
+	// A pattern-matching switch reads its selector as it is: the indy before
+	// the table turned it into the matching case's index, and what source
+	// switched over is the reference itself.
+	patternCases := d.patternCases
+	d.patternCases = nil
+	if patternCases == nil {
+		// The selector is an int, so a condition javac materialized as `1`/`0`
+		// has to become the ternary again - `switch (flag)` is not Java.
+		selector, err = d.asNumber(selector)
+		if err != nil {
+			return 0, err
+		}
 	}
 	if len(d.stack) > 0 {
 		return 0, bail("values left on the stack")
@@ -6017,6 +6109,21 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	outerLabels := d.enumLabels
 	defer func() { d.enumLabels = outerLabels }()
 	d.enumLabels = nil
+	if patternCases != nil {
+		labels := map[int]string{}
+		for key, typ := range patternCases {
+			if typ == "" {
+				labels[key] = "null"
+				continue
+			}
+			// Each case binds a variable of its own. The body casts the
+			// selector again for the one javac stored, so this one is only the
+			// type test source wrote, and names nothing the body names.
+			d.patternNames++
+			labels[key] = typ + " p" + strconv.Itoa(d.patternNames)
+		}
+		d.enumLabels = labels
+	}
 	if strings.Contains(selector.Text, "$SwitchMap$") {
 		value, labels, err := d.enumSwitch(selector)
 		if err != nil {
@@ -6121,6 +6228,14 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 		}
 	}
 
+	// A pattern label after a `default:` is dominated by it, which javac
+	// refuses - and an exhaustive switch over a sealed type is laid out exactly
+	// that way, its `default: throw new MatchException(..)` first. Dropping
+	// that arm needs the `sealed`/`permits` of the selector's type, which this
+	// phase does not write back yet.
+	if patternCases != nil && len(bodies) > 1 && bodies[0] == defaultTarget {
+		return 0, bail("a pattern-matching switch over a sealed type")
+	}
 	d.switches = append(d.switches, activeSwitch{Follow: follow, LoopDepth: len(d.active)})
 	// The bodyless cases come first: nothing can fall into them there, and their
 	// own `break;` keeps them from falling into the first body.
@@ -6141,6 +6256,10 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 			clauses = append(clauses, stmt{Nested: &broke})
 		}
 	}
+	// A pattern switch has to cover every value, so the empty `default -> {}`
+	// source wrote is not something to drop - and it goes last, where a
+	// pattern label after it would be dominated by it.
+	emptyDefault := patternCases != nil && defaultTarget == follow
 	err = func() error {
 		defer func() { d.switches = d.switches[:len(d.switches)-1] }()
 		for i, target := range bodies {
@@ -6173,6 +6292,10 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	}()
 	if err != nil {
 		return 0, err
+	}
+	if emptyDefault {
+		broke := []stmt{{Text: "break;"}}
+		clauses = append(clauses, stmt{Text: "default:"}, stmt{Nested: &broke})
 	}
 	d.emit("switch (" + selector.Text + ") {")
 	*d.current = append(*d.current, stmt{Nested: &clauses})
