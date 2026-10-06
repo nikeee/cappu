@@ -627,3 +627,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-10-06 19:52 — anything else left?
 - 2026-10-06 19:58 — yes
 - 2026-10-06 20:49 — upgrade golang auf latest
+- 2026-10-06 22:10 — deep review

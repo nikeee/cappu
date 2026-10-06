@@ -1,1 +1,1 @@
-public class Sealed {}
+public sealed class Sealed permits SubA, SubB {}

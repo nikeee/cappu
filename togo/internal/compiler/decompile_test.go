@@ -2392,9 +2392,10 @@ func TestDecompileNamesWhatItCannotWriteBack(t *testing.T) {
 	if !hasTool("javac") {
 		t.Skip("no JDK (javac)")
 	}
-	// An exhaustive switch over a sealed type is laid out with javac's
-	// `default: throw new MatchException(..)` first, where every pattern label
-	// after it would be dominated by it.
+	// An exhaustive switch over a sealed type has no default of its own: javac
+	// adds one that throws MatchException and lays it out first, where a
+	// pattern label after it would be dominated by it. The `permits` clause is
+	// what makes the rest exhaustive again.
 	source := `sealed interface Pat permits PatA, PatB {}
 record PatA() implements Pat {}
 record PatB() implements Pat {}
@@ -2405,6 +2406,7 @@ public class Patterned {
       case PatB b -> System.out.print("B");
     }
   }
+  public static void main(String[] z) { which(new PatA()); which(new PatB()); System.out.println(); }
 }
 `
 	dir := t.TempDir()
@@ -2413,8 +2415,18 @@ public class Patterned {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(decompiled, "cappu: a pattern-matching switch over a sealed type") {
-		t.Errorf("expected the sealed switch to be named:\n%s", decompiled)
+	for _, unwanted := range []string{"/* cappu:", "MatchException", "default:"} {
+		if strings.Contains(decompiled, unwanted) {
+			t.Errorf("did not expect %q:\n%s", unwanted, decompiled)
+		}
+	}
+	sealedFile := filepath.Join(dir, "Pat.class")
+	sealedSource, err := Decompile(readFile(t, sealedFile))
+	if err != nil {
+		t.Fatalf("decompile the sealed type: %v", err)
+	}
+	if !strings.Contains(sealedSource, "sealed interface Pat permits PatA, PatB {") {
+		t.Errorf("expected the permits clause:\n%s", sealedSource)
 	}
 }
 

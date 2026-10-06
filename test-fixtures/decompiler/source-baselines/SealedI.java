@@ -1,1 +1,1 @@
-interface SealedI {}
+sealed interface SealedI permits SubC {}

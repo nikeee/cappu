@@ -637,6 +637,33 @@ func InnerClassFlags(classFile *ClassFile) map[string]uint16 {
 	return flags
 }
 
+// PermittedSubclasses reports the types a sealed class or interface permits,
+// from its PermittedSubclasses attribute (JVMS 4.7.31), in the order the
+// attribute lists them - which is the order source wrote the `permits` clause.
+// A file with no such attribute is not sealed.
+func PermittedSubclasses(classFile *ClassFile) []string {
+	attribute, ok := FindAttribute(classFile.Attributes, "PermittedSubclasses")
+	if !ok {
+		return nil
+	}
+	c := &cursor{b: attribute.Bytes}
+	count, err := c.u2()
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for i := 0; i < int(count); i++ {
+		index, err := c.u2()
+		if err != nil {
+			return nil
+		}
+		if name := PoolClassName(classFile.Pool, index); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // ReadCode decodes a method's Code attribute (JVMS 4.7.3), when it has one.
 func ReadCode(method Member, pool []*Constant) (*Code, error) {
 	attribute, ok := FindAttribute(method.Attributes, "Code")

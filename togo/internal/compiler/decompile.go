@@ -3337,7 +3337,8 @@ func (d *bodyDecompiler) restartAlwaysZero(name string) bool {
 		}
 		for at, instruction := range b.Instructions {
 			base := opBase(instruction.Mnemonic)
-			if !(isOneOf(base, "ilfda", "store") || base == "iinc") || slotOf(instruction) != slot {
+			stores := isOneOf(base, "ilfda", "store") || base == "iinc"
+			if !stores || slotOf(instruction) != slot {
 				continue
 			}
 			if at == 0 || b.Instructions[at-1].Mnemonic != "iconst_0" {
@@ -6228,12 +6229,13 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 		}
 	}
 
-	// A pattern label after a `default:` is dominated by it, which javac
-	// refuses - and an exhaustive switch over a sealed type is laid out exactly
-	// that way, its `default: throw new MatchException(..)` first. Dropping
-	// that arm needs the `sealed`/`permits` of the selector's type, which this
-	// phase does not write back yet.
-	if patternCases != nil && len(bodies) > 1 && bodies[0] == defaultTarget {
+	// An exhaustive switch over a sealed type has no default in source: javac
+	// adds one that throws, and lays it out first, where a pattern label after
+	// it would be dominated by it. That arm is javac's, so it goes - the
+	// `permits` clause of the selector's type is what makes the rest
+	// exhaustive again.
+	if patternCases != nil && len(bodies) > 1 && bodies[0] == defaultTarget &&
+		!d.throwsMatchException(defaultTarget) {
 		return 0, bail("a pattern-matching switch over a sealed type")
 	}
 	d.switches = append(d.switches, activeSwitch{Follow: follow, LoopDepth: len(d.active)})
@@ -6269,6 +6271,14 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 			if i+1 < len(bodies) {
 				end = bodies[i+1]
 			}
+			// javac's own arm is still walked - the block has to be accounted
+			// for - and then dropped.
+			if patternCases != nil && target == defaultTarget && d.throwsMatchException(target) {
+				if _, err := d.capture(func() error { return d.structure(target, end) }); err != nil {
+					return err
+				}
+				continue
+			}
 			for _, key := range keysOf[target] {
 				label, err := d.caseLabel(key)
 				if err != nil {
@@ -6301,6 +6311,36 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	*d.current = append(*d.current, stmt{Nested: &clauses})
 	d.emit("}")
 	return follow, nil
+}
+
+// throwsMatchException reports a block that does nothing but throw the
+// `MatchException` javac adds to an exhaustive switch over a sealed type - the
+// arm no source wrote.
+func (d *bodyDecompiler) throwsMatchException(start int) bool {
+	b := d.blocks[start]
+	if b == nil {
+		return false
+	}
+	threw := false
+	for _, instruction := range b.Instructions {
+		switch instruction.Mnemonic {
+		case "new":
+			if PoolClassName(d.classFile.Pool, uint16(instruction.Arg)) != "java/lang/MatchException" {
+				return false
+			}
+		case "dup", "aconst_null":
+		case "invokespecial":
+			target, ok := PoolMemberRef(d.classFile.Pool, uint16(instruction.Arg))
+			if !ok || target.Owner != "java/lang/MatchException" {
+				return false
+			}
+		case "athrow":
+			threw = true
+		default:
+			return false
+		}
+	}
+	return threw
 }
 
 // trySwitchExpression writes the cases as `case k -> value;` arms when each is
@@ -8766,6 +8806,43 @@ func isGeneratedEnumMember(method Member, classFile *ClassFile) bool {
 		(method.Name == "valueOf" && method.Descriptor == "(Ljava/lang/String;)"+self)
 }
 
+// isPermittedElsewhere reports a class a supertype of its own permits, while
+// being neither final nor sealed itself - which is what `non-sealed` says. The
+// supertype is read beside this file; without it there is nothing to go on.
+func isPermittedElsewhere(classFile *ClassFile) bool {
+	if classFile.Siblings == nil || classFile.Flags&accFinal != 0 || classFile.Flags&accEnum != 0 {
+		return false
+	}
+	supertypes := append([]string{}, classFile.Interfaces...)
+	if classFile.SuperClass != "" {
+		supertypes = append(supertypes, classFile.SuperClass)
+	}
+	for _, name := range supertypes {
+		parent, ok := SiblingClass(classFile.Siblings, name)
+		if !ok {
+			continue
+		}
+		for _, permitted := range PermittedSubclasses(parent) {
+			if permitted == classFile.ThisClass {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// writableTypeName reports a binary name source could have written: an
+// anonymous or local class is named after the method it sits in, which is not
+// a name a `permits` clause can hold.
+func writableTypeName(binaryName string) bool {
+	for _, part := range strings.Split(binaryName, "$") {
+		if part == "" || (part[0] >= '0' && part[0] <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
 func classHead(classFile *ClassFile, components []decompiledRecordComponent) string {
 	isInterface := classFile.Flags&accInterface != 0
 	isAnnotation := classFile.Flags&accAnnotation != 0
@@ -8791,6 +8868,27 @@ func classHead(classFile *ClassFile, components []decompiledRecordComponent) str
 	// not something Java lets you write.
 	if !isInterface && !isEnum && classFile.Flags&accAbstract != 0 {
 		head = append(head, "abstract")
+	}
+	// A sealed type names what it permits; javac keeps that list in an
+	// attribute of its own, in the order source wrote it. An enum carrying
+	// constant bodies is sealed over those bodies, which source does not write
+	// - `sealed enum` is not Java, and a body has no name to permit.
+	permits := PermittedSubclasses(classFile)
+	if isEnum || isAnnotation {
+		permits = nil
+	}
+	for _, one := range permits {
+		if !writableTypeName(one) {
+			permits = nil
+			break
+		}
+	}
+	if len(permits) > 0 {
+		head = append(head, "sealed")
+	} else if isPermittedElsewhere(classFile) {
+		// A permitted subclass that neither closes the hierarchy nor is final
+		// has to say so: Java takes no silence there.
+		head = append(head, "non-sealed")
 	}
 	head = append(head, keyword, simpleClassName(classFile.ThisClass))
 	if components != nil {
@@ -8822,6 +8920,13 @@ func classHead(classFile *ClassFile, components []decompiledRecordComponent) str
 			head = append(head, "implements")
 		}
 		head = append(head, strings.Join(interfaces, ", "))
+	}
+	if len(permits) > 0 {
+		var named []string
+		for _, one := range permits {
+			named = append(named, typeName(one, self))
+		}
+		head = append(head, "permits", strings.Join(named, ", "))
 	}
 	return strings.Join(head, " ") + " {"
 }
