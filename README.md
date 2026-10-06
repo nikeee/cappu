@@ -31,9 +31,6 @@ Tried to run spotless as a pre-commit hook via CLI? Gradle needs to spawn 8 thre
 
 Using maven or gradle is somehow extremely cumbersome to use in multi-stage Docker builds. Cappu aims to improve that by offering a global cache directory as well as a lockfile. Everything should be as easy as shown below.
 
-##### Why was this thing built with TypeScript?
-Because I wanted to use the same parsing/checking/lsp architecture as the TS compiler. It has since been ported to Go (the same way the TSC team did it), so that's all that's left - the TypeScript is gone.
-
 Consider this project as an exploration or proof-of-concept that Java can have better tooling than it has now.
 
 ## Usage
