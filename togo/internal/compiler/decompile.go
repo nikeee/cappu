@@ -2808,8 +2808,11 @@ func assertFromIf(condition expr, thenStatements []stmt) (asserted expr, message
 	if len(thenStatements) != 1 || thenStatements[0].Nested != nil {
 		return expr{}, "", false
 	}
+	if condition.Logic == nil {
+		return expr{}, "", false
+	}
 	message, ok = assertionThrow(thenStatements[0].Text)
-	if !ok || condition.Logic == nil {
+	if !ok {
 		return expr{}, "", false
 	}
 	// `assert false;` compiles to the flag test alone.
@@ -2837,11 +2840,16 @@ func withoutAssertionFlag(condition expr) (expr, bool) {
 	if readsAssertionFlag(left) {
 		return right, true
 	}
-	rest, ok := withoutAssertionFlag(left)
-	if !ok {
-		return condition, false
+	if readsAssertionFlag(right) {
+		return left, true
 	}
-	return logicalExpr(logicAnd, rest, right), true
+	if rest, ok := withoutAssertionFlag(left); ok {
+		return logicalExpr(logicAnd, rest, right), true
+	}
+	if rest, ok := withoutAssertionFlag(right); ok {
+		return logicalExpr(logicAnd, left, rest), true
+	}
+	return condition, false
 }
 
 // readsAssertionFlag reports `!$assertionsDisabled`, however the field is
@@ -8254,6 +8262,17 @@ func methodSource(method Member, classFile *ClassFile) (lines []string, reconstr
 		return nil, false, err
 	}
 	body, reached, chainCall, err := decompileBody(classFile, code, instructions, locals, localTable, method, isStatic)
+	// The assertion flag is javac's field and is not declared here, so a body
+	// still naming it is a shape the assert was not read back from - it would
+	// not compile, and a body that does not compile is not a reconstruction.
+	if err == nil {
+		for _, line := range body {
+			if strings.Contains(line, "$assertionsDisabled") {
+				err = bail("an assert this phase cannot write back")
+				break
+			}
+		}
+	}
 	reconstructed = true
 	if err != nil {
 		var reason *notDecompilable

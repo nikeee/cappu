@@ -2239,6 +2239,27 @@ func TestDecompileWritesTheAssertSourceWrote(t *testing.T) {
 	if strings.Contains(source, "/* cappu:") {
 		t.Errorf("expected no bail:\n%s", source)
 	}
+	// An assert whose condition has a side effect lives in a shape this phase
+	// does not read back; naming javac's flag field is not an option, so the
+	// body refuses.
+	sideEffect := `public class SideAssert {
+  static int n = 3;
+  static void step() { assert --n == 0 : "n=" + n; }
+}
+`
+	effectDir := t.TempDir()
+	effectClass := compileWithJavac(t, effectDir, "SideAssert", sideEffect)
+	effectSource, err := Decompile(readFile(t, effectClass))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(effectSource, "cappu: an assert this phase cannot write back") {
+		t.Errorf("expected the bail:\n%s", effectSource)
+	}
+	if strings.Contains(effectSource, "$assertionsDisabled") {
+		t.Errorf("a bailed body still names the flag:\n%s", effectSource)
+	}
+
 	// The assert runs: javac's flag is off unless -ea is given, so the class
 	// has to behave the same with assertions enabled.
 	again := filepath.Join(dir, "again")
