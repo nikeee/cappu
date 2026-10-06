@@ -15,4 +15,4 @@ output goes to `dist/`.
 - [spring-boot-app](spring-boot-app/README.md) - booting Spring Boot from a single fat jar
 - [spring-boot-web-app](spring-boot-web-app/README.md) - a Spring Boot web app (embedded Tomcat) from a single fat jar
 
-`src/examples.test.ts` builds, runs, tests and audits every example end-to-end.
+`togo/cmd/cappu/examples_test.go` builds, runs, tests and audits every example end-to-end.
