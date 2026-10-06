@@ -25,7 +25,7 @@ It's 2026 and I still have to do weird things to
 
 These things aren't that hard and can be solved by the package manager. npm, cargo and uv show how it can be done.
 
-The entire Java tooling seems to be centered around the experience in an IDE that is built by a single vendor. It's good, but I get annoyed pretty fast when I try to do something in some other editor.
+The entire Java tooling seems to be centered around the experience in an IDE that is built by a single vendor. It's good, but I get annoyed pretty fast when I try to do something in some other editor. It also prevents LLMs to use the language capabilities when they are not built into the IDE itself.
 
 Tried to run spotless as a pre-commit hook via CLI? Gradle needs to spawn 8 threads to figure out its configuration and needs at least 10 seconds before it even knows how to run the formatter. Even if it didn't change any formatting at all. This is simply not acceptable as as CLI tool.
 
