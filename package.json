@@ -10,43 +10,15 @@
   "license": "MIT",
   "author": "Niklas Mollenhauer <nikeee@outlook.com>",
   "type": "module",
-  "main": "index.js",
   "scripts": {
-    "build": "tsdown",
     "ci": "oxlint --deny-warnings -f github",
     "lint": "oxlint",
     "format": "oxfmt",
-    "typecheck": "tsc --noEmit",
     "version": "node scripts/sync-go-version.mjs && git add togo/internal/meta/meta.go",
-    "lsp": "tsx src/cli/main.ts lsp",
-    "schema:write": "tsx -e \"import {configJsonSchema} from './src/config.ts'; process.stdout.write(configJsonSchema())\" > togo/internal/config/cappu.schema.json",
-    "completion:write": "tsx -e \"import {BASH_COMPLETION, ZSH_COMPLETION} from './src/cli/completion.ts'; import {writeFileSync} from 'node:fs'; writeFileSync('togo/internal/cli/completion/cappu.bash', BASH_COMPLETION); writeFileSync('togo/internal/cli/completion/cappu.zsh', ZSH_COMPLETION)\"",
-    "corpus:init": "git submodule update --init && for d in test-fixtures/emitter/corpus/*/; do git -C \"$d\" sparse-checkout set --no-cone '/**/*.java' '*.java'; done",
-    "format:corpus": "tsx --test ./src/format/format-corpus.test.ts",
-    "test": "tsx --test \"./src/**/*.test.ts\"",
-    "coverage": "tsx --test --experimental-test-coverage --test-coverage-exclude=\"**/*.test.ts\" --test-reporter=lcov --test-reporter-destination=coverage.lcov --test-reporter=spec --test-reporter-destination=stdout \"./src/**/*.test.ts\""
-  },
-  "dependencies": {
-    "@inquirer/prompts": "^8.5.2",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "cli-progress": "^3.12.0",
-    "comment-json": "^5.0.0",
-    "fast-xml-parser": "^5.10.0",
-    "p-limit": "^7.3.0",
-    "vscode-languageserver": "^10.1.0",
-    "vscode-languageserver-textdocument": "^1.0.12",
-    "zod": "^4.4.3"
+    "corpus:init": "git submodule update --init && for d in test-fixtures/emitter/corpus/*/; do git -C \"$d\" sparse-checkout set --no-cone '/**/*.java' '*.java'; done"
   },
   "devDependencies": {
-    "@tsdown/exe": "^0.22.5",
-    "@types/cli-progress": "^3.11.6",
-    "expect": "^30.4.1",
     "oxfmt": "^0.58.0",
-    "oxlint": "^1.73.0",
-    "oxlint-tsgolint": "^0.24.0",
-    "testcontainers": "^12.0.4",
-    "tsdown": "^0.22.5",
-    "tsx": "^4.23.0",
-    "typescript": "^7.0.2"
+    "oxlint": "^1.73.0"
   }
 }

@@ -1,5 +1,5 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "import", "promise"],
+  "plugins": ["import", "promise"],
   "ignorePatterns": ["TypeScript/**", "TypeScript-Go/**", "test-fixtures/**", "dist/**"]
 }

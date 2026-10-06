@@ -52,23 +52,26 @@ For multi-step tasks, state a brief plan:
 3. [Step] → verify: [check]
 ```
 
-## Two codebases: TypeScript (`src/`) + Go port (`togo/`)
+## One codebase: Go (`togo/`)
 
-This repo holds two implementations of cappu. The TypeScript build under `src/`
-is the original and the reference. The Go build under `togo/` is an in-progress
-port (issue #18) that produces a single statically linked binary. `GO-PATTERNS.md`
-at the repo root records the migration patterns (branded types, JSONC editing,
-static linking, library mapping) - read it before working in `togo/`, and
-**amend it whenever you discover a new pattern**.
+cappu is the Go build under `togo/`: a single statically linked binary. It
+began as a port (issue #18) of a TypeScript build under `src/`, which was
+removed once the port overtook it - so the Go files carry `// Port of src/...`
+comments naming where their behaviour came from. Those paths no longer exist;
+they are provenance, not a place to look. `GO-PATTERNS.md` at the repo root
+records the patterns that came out of the migration (branded types, JSONC
+editing, static linking, library mapping) - read it before working in `togo/`,
+and **amend it whenever you discover a new pattern**.
 
-**Every feature lives in BOTH codebases.** When you add or change a command,
-config field, validation rule, or behaviour:
-- Implement it in `src/` (TypeScript) AND `togo/` (Go), with tests in both.
-- **Watch for diverging behaviour.** The two builds must behave identically:
-  same flags, same exit codes, same stdout/stderr text, same config defaults and
-  validation. When editing one side, diff it against the other and reconcile any
-  drift. The Go ports carry `// Port of src/...` comments pointing at their TS
-  source - keep those accurate.
+What the TypeScript build used to generate is now checked in and edited by
+hand, each with a Go test that fails when it drifts from the code:
+`togo/internal/config/cappu.schema.json` (the cappu.json schema) and
+`togo/internal/cli/completion/cappu.{bash,zsh}`.
+
+The JavaScript that is left is the VS Code extension and
+`scripts/sync-go-version.mjs`, which the `npm version` lifecycle hook runs to
+mirror the bumped version into `togo/internal/meta/meta.go`. `node --run lint`
+and `node --run format` (oxlint, oxfmt) cover it.
 
 ### Go build commands (run inside `togo/`)
 ```bash
@@ -80,8 +83,9 @@ make lint          # golangci-lint run
 make build         # static host binary -> dist/cappu (CGO_ENABLED=0, stripped)
 make build-all     # cross-compile every release target
 ```
-The Go CI (`.github/workflows/CI-go.yaml`) runs parallel to the Node CI; both
-must stay green.
+`.github/workflows/CI-go.yaml` is the suite (including the JDK matrix: no JDK,
+21, 25, and one cappu provisions itself); `CI.yaml` only lints the leftover
+JavaScript. Both must stay green.
 
 ## Claude Code plugin (`plugins/cappu/`)
 
@@ -97,7 +101,8 @@ change. Try them locally with `claude --plugin-dir plugins/cappu`.
 See `./docs/testing.md`.
 
 ## Linting / Formatting
-- **oxlint** + **oxfmt** for backend/frontend/ingest (config: `.oxlintrc.json`, `.oxfmtrc.json`, `.editorconfig`). Use `node --run lint` and `node --run format` to execute.
+- **gofmt** + **golangci-lint** for the Go build: `make fmt` and `make lint` inside `togo/`.
+- **oxlint** + **oxfmt** for the leftover JavaScript (config: `.oxlintrc.json`, `.oxfmtrc.json`, `.editorconfig`). Use `node --run lint` and `node --run format` to execute.
 - **lefthook**: pre-commit formats staged files; pre-push lints all components in parallel
 
 ## Prompt log
@@ -112,7 +117,6 @@ See `./docs/testing.md`.
 ## Final Notices
 - NEVER use the `npx` command under any circumstances. It is strictly blocked by security policies on our system.
 - ALWAYS use allowed `npm` scripts defined in `package.json`.
-- Instead of `npx tsc` -> YOU MUST RUN: `node --run typecheck`
 - Never use en or em dashes. Avoid using those dashes in general. If you need one, use a normal minus (-)
 
 ## graphify

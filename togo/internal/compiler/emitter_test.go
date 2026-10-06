@@ -70,6 +70,11 @@ var emitFixtures = map[string]string{
 	"AnnAll":          "import java.lang.annotation.*;\n@Retention(RetentionPolicy.RUNTIME) @interface Rt {\n  String value(); int n() default 0; long l() default 0; double d() default 0;\n  boolean b() default false; Class<?> c() default Object.class;\n  ElementType e() default ElementType.TYPE; String[] arr() default {}; Cl nested() default @Cl(x=0);\n}\n@Retention(RetentionPolicy.CLASS) @interface Cl { int x(); }\n@Rt(value=\"hi\", n=5, l=9L, d=1.5, b=true, c=String.class, e=ElementType.METHOD, arr={\"a\",\"b\"}, nested=@Cl(x=7))\n@Cl(x=3)\npublic class AnnAll {\n  @Rt(\"f\") int field;\n  @Rt(\"m\") public int m(@Rt(\"p\") int p, @Cl(x=1) int q) { return p + q; }\n}",
 }
 
+// updateBaselines is UPDATE_BASELINES=1: an intentional emitter change is
+// blessed by writing what it now emits, instead of asserting the committed
+// bytes. Regenerating used to be the TypeScript build's job.
+var updateBaselines = os.Getenv("UPDATE_BASELINES") == "1"
+
 func TestEmitterBaselines(t *testing.T) {
 	baseDir := filepath.Join("..", "..", "..", "test-fixtures", "emitter", "emit-baselines")
 	for name, source := range emitFixtures {
@@ -84,7 +89,14 @@ func TestEmitterBaselines(t *testing.T) {
 				t.Fatalf("%s emitted no classes", name)
 			}
 			for _, cls := range classes {
-				want, err := os.ReadFile(filepath.Join(baseDir, cls.Name+".class"))
+				at := filepath.Join(baseDir, cls.Name+".class")
+				if updateBaselines {
+					if err := os.WriteFile(at, cls.Bytes, 0o644); err != nil {
+						t.Fatalf("write baseline %s: %v", cls.Name, err)
+					}
+					continue
+				}
+				want, err := os.ReadFile(at)
 				if err != nil {
 					t.Errorf("no baseline for emitted class %s: %v", cls.Name, err)
 					continue

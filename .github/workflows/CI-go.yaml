@@ -1,6 +1,9 @@
-# CI for the Go build (./togo), running parallel to the Node CI. No JDK matrix
-# yet: no milestone-1 command invokes javac. The build job cross-compiles the
-# statically linked release binaries (CGO_ENABLED=0) for every target.
+# CI for the Go build (./togo), the only build. The test job runs the suite
+# under a preinstalled JDK 21; the jdk job repeats it without a JDK at all
+# (javac-dependent tests skip), under 25, and under a JDK that cappu
+# PROVISIONED itself (#8 - then the only javac on PATH). The build job
+# cross-compiles the statically linked release binaries (CGO_ENABLED=0) for
+# every target.
 
 name: CI (Go)
 
@@ -57,6 +60,44 @@ jobs:
           flags: go
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  jdk:
+    name: Test (JDK ${{ matrix.jdk }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        jdk: ["none", "25", "provisioned"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache-dependency-path: togo/go.sum
+
+      - uses: actions/setup-java@v5
+        if: matrix.jdk == '25'
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      # Ubuntu's runner image ships a JDK; the "none" and "provisioned" legs
+      # have to hide it to be what they say they are.
+      - name: Hide the preinstalled JDK
+        if: matrix.jdk != '25'
+        run: echo "JAVA_HOME=" >> "$GITHUB_ENV" && sudo rm -rf /usr/lib/jvm
+
+      - name: Provision a JDK through cappu
+        if: matrix.jdk == 'provisioned'
+        run: |
+          make build
+          mkdir /tmp/jdk-project
+          echo '{"jdk": "temurin-21"}' > /tmp/jdk-project/cappu.json
+          (cd /tmp/jdk-project && "$GITHUB_WORKSPACE/togo/dist/cappu" install)
+          echo "/tmp/jdk-project/.cappu/jdks/temurin-21/bin" >> "$GITHUB_PATH"
+
+      - run: go test ./...
 
   build:
     name: Build static binaries
