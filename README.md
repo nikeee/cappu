@@ -17,7 +17,7 @@ I was annoyed by the Java extension for VSC that everyone uses. So I vibed my ow
 
 I loathe ./gradlew and ./mvnw with random wrapper scripts checked into the repository. Why can't we just use a tool that everyone just runs the latest version of?
 
-Also, gradle uses a turing-complete language for its configuration. This leads to large config drift across different projects. Eventually everything becomes customized and cannot be updated programmatically. Every project is different. Using a single declarative JSON and "convention over configuration" file solves that.
+Also, gradle uses a turing-complete language for its configuration. This leads to large config drift across different projects. Eventually everything becomes customized and cannot be updated programmatically. Every project eventually becomes different. Using a single declarative JSON and "convention over configuration" file solves that. JSON can be changed programmatically by tools like Renovate/Dependabot or even the CLI tool itself without any LLM use. Not possible with Gradle.
 
 It's 2026 and I still have to do weird things to
 - get a list of dependencies with known CVEs / other vulnerabilities
