@@ -77,6 +77,10 @@ cappu verify # check installed dependencies against their checksum, reinstall if
 
 cappu self-upgrade # upgrade cappu binary to latest version
 
+# shell completion: put one of these in your ~/.bashrc or ~/.zshrc
+source <(cappu completion bash)
+source <(cappu completion zsh)
+
 # get something you can forward to that one compliance person that desperately needs a list of all project dependencies + licenses
 cappu licenses # optional --json
 ```

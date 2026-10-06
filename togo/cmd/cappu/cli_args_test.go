@@ -27,6 +27,8 @@ func TestCliArgValidationParity(t *testing.T) {
 		{"version missing release", []string{"version"}, 2, "cappu: version needs one of: major, minor, patch"},
 		{"version bad release", []string{"version", "bogus"}, 2, "cappu: version needs one of: major, minor, patch"},
 		{"audit rejects --json", []string{"audit", "--json"}, 2, "cappu: `audit` uses --format (text|sarif), not --json"},
+		{"completion missing shell", []string{"completion"}, 2, "cappu: completion needs a shell: bash or zsh"},
+		{"completion bad shell", []string{"completion", "fish"}, 2, "cappu: unknown shell 'fish' (expected: bash, zsh)"},
 		{"audit bad format", []string{"audit", "--format", "yaml"}, 2, "cappu: unknown --format 'yaml' (expected: text, sarif)"},
 		// Parse-level failures must match the TS contract (exit 2, one-liner
 		// with the help hint on stderr), not kong's usage dump + exit 80.

@@ -15,6 +15,7 @@ import { runCheckCommand } from "./check.ts";
 import { runDecompile } from "./decompile.ts";
 import { runFormat } from "./format.ts";
 import { runConfigSchema } from "./configSchema.ts";
+import { runCompletion } from "./completion.ts";
 import { runInit } from "./init.ts";
 import { runInstall } from "./install.ts";
 import { runLsp } from "./lsp.ts";
@@ -195,6 +196,11 @@ const COMMAND_GROUPS: HelpGroup[] = [
         name: "rage",
         args: "[--open]",
         desc: "Print version/environment info and the issue tracker URL; --open also opens it in your browser",
+      },
+      {
+        name: "completion",
+        args: "<bash|zsh>",
+        desc: "Print a shell completion script, e.g. source <(cappu completion bash) in ~/.bashrc or source <(cappu completion zsh) in ~/.zshrc",
       },
       { name: "cache clean", desc: "Remove the global download cache" },
       {
@@ -392,7 +398,7 @@ if (TIMED_COMMANDS.has(command)) {
   });
 }
 
-// init, cache, self-upgrade and rage run before loadConfig: none depends on
+// init, cache, self-upgrade, rage and completion run before loadConfig: none depends on
 // (nor should be blocked by) an existing, possibly broken project config -
 // self-upgrade is global and must work even when the cwd's cappu.json is bad.
 // Each handler exits the process, so control never falls through to loadConfig.
@@ -412,6 +418,9 @@ switch (command) {
   case "config-schema":
     runConfigSchema();
   // falls through: runConfigSchema exits the process (never returns)
+  case "completion":
+    runCompletion(files[0]);
+  // falls through: runCompletion exits the process (never returns)
   case "decompile":
     runDecompile(files, values.disasm); // reads class files directly: no project config needed
   // falls through: runDecompile exits the process (never returns)

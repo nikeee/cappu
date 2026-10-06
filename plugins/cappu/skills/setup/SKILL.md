@@ -20,6 +20,8 @@ repository auth, Kotlin or WAR support. `cappu config-schema` prints the schema;
    `cappu-darwin-x64`, `cappu-win-x64.exe`, `cappu-win-arm64.exe`), `chmod +x`,
    put it on PATH. Later `cappu self-upgrade` pulls the newest release. There is
    no npm package. `cappu rage` prints version and environment for bug reports.
+   `cappu completion bash|zsh` prints a shell completion script (exit 2 on a
+   missing or unknown shell); `source <(cappu completion zsh)` in the rc file.
 2. **Scaffold.** `cappu init -y` writes `cappu.json` (groupId `com.example`,
    artifactId = directory name, version `1.0.0`, `output: "fat-jar"`, four empty
    dependency maps), a `.gitignore` for `/.cappu/` and `/dist/`, and `src/`.

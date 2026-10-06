@@ -53,6 +53,7 @@ type CLI struct {
 	SelfUpgrade  selfUpgradeCmd  `cmd:"" name:"self-upgrade" help:"Replace this binary with the latest CD build"`
 	Rage         rageCmd         `cmd:"" help:"Print version/environment info and the issue tracker URL; --open also opens it in your browser"`
 	Cache        cacheCmd        `cmd:"" help:"Manage the global download cache"`
+	Completion   completionCmd   `cmd:"" help:"Print a shell completion script (bash or zsh)"`
 	Lsp          lspCmd          `cmd:"" help:"Start the Java language server (JSON-RPC)"`
 	Mcp          mcpCmd          `cmd:"" help:"Start the MCP server for agents (over stdio)"`
 	Dap          dapCmd          `cmd:"" help:"Start the debug adapter (Debug Adapter Protocol over stdio)"`
@@ -331,6 +332,14 @@ func (c *rageCmd) Run(*appState) error { return exit(cli.RunRage(c.Open)) }
 type configSchemaCmd struct{}
 
 func (*configSchemaCmd) Run(*appState) error { return exit(cli.RunConfigSchema()) }
+
+type completionCmd struct {
+	// No kong enum/required: RunCompletion exits 2 with the same message as
+	// the TS build (kong would exit 1 with its own text).
+	Shell string `arg:"" optional:"" help:"bash|zsh"`
+}
+
+func (c *completionCmd) Run(*appState) error { return exit(cli.RunCompletion(c.Shell)) }
 
 type cacheCmd struct {
 	Clean  cacheCleanCmd  `cmd:"" help:"Remove the global download cache"`

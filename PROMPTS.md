@@ -611,3 +611,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-09-23 13:34 — continue
 - 2026-09-23 14:08 — continue
 - 2026-09-23 14:53 — continue
+- 2026-10-06 13:49 — bau bash/zsh-completion für das cappu-command
+- 2026-10-06 13:52 — cpmmit
