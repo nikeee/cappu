@@ -2270,6 +2270,46 @@ func TestDecompileWritesTheAssertSourceWrote(t *testing.T) {
 	}
 }
 
+// A serializable lambda goes through `altMetafactory`, whose flags say only
+// what the interface asked for; an intersection cast names the marker in
+// source, and the marker on its own is not a functional interface.
+const serializableLambdaSource = `import java.io.Serializable;
+import java.util.Comparator;
+public class SerLambda {
+  static Comparator<String> byLen() {
+    return (Comparator<String> & Serializable) (a, b) -> a.length() - b.length();
+  }
+  public static void main(String[] z) {
+    System.out.print(byLen().compare("ab", "c"));
+    System.out.print(byLen() instanceof Serializable);
+  }
+}
+`
+
+func TestDecompileWritesASerializableLambda(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "SerLambda", serializableLambdaSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	if !strings.Contains(source, "java.util.Comparator & java.io.Serializable) (") {
+		t.Errorf("expected the intersection cast:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "SerLambda", source)
+	expected := runJava(t, dir, "SerLambda")
+	if actual := runJava(t, again, "SerLambda"); actual != expected || expected != "1true" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // `invokeExact` and `invoke` are signature-polymorphic: the JVM links them
 // against the descriptor at the call site, and source wrote the cast that
 // descriptor encodes. Without it the value does not even typecheck.
@@ -3583,11 +3623,11 @@ func TestDecompileReconstructsForeverLoops(t *testing.T) {
 }
 
 // The guards a reconstruction rests on, each of which said nothing when it was
-// removed: a `Serializable` lambda is `altMetafactory` and carries flags this
-// drops; one statement that is a *declaration* still needs the braces; a captured
-// field is read again every time the lambda runs, where javac read it once; and a
-// loop over a `try` over a `synchronized` needs the handler's edge to be
-// reducible at all.
+// removed: a `Serializable` lambda is `altMetafactory` and writes back as the
+// lambda the interface implies; one statement that is a *declaration* still
+// needs the braces; a captured field is read again every time the lambda runs,
+// where javac read it once; and a loop over a `try` over a `synchronized` needs
+// the handler's edge to be reducible at all.
 const guardSource = `import java.io.Serializable;
 import java.util.function.*;
 public class Guard {
@@ -3613,7 +3653,9 @@ func TestDecompileKeepsTheLambdaAndMonitorGuards(t *testing.T) {
 		t.Fatalf("decompile: %v", err)
 	}
 	for _, want := range []string{
-		"cappu: an invokedynamic that is neither a lambda nor a concatenation",
+		// the Serializable lambda: a plain lambda, which javac compiles back
+		// into the altMetafactory call it came from
+		"return () -> java.lang.System.out.print(\"s\");",
 		"cappu: a lambda that captures more than a variable",
 		"() -> {",
 		"synchronized (L) {",

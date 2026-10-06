@@ -3240,13 +3240,34 @@ func (d *bodyDecompiler) dynamic(index uint16) error {
 	if factory.Owner == "java/lang/invoke/StringConcatFactory" {
 		return d.concat(siteDescriptor, bootstrap, factory)
 	}
-	// `altMetafactory` carries flags of its own - a serializable lambda, extra
-	// interfaces, extra bridges - and dropping them would change what the class
-	// implements.
-	if factory.Owner == "java/lang/invoke/LambdaMetafactory" && factory.Name == "metafactory" {
-		return d.lambda(siteDescriptor, bootstrap)
+	if factory.Owner == "java/lang/invoke/LambdaMetafactory" {
+		// `altMetafactory` takes the same three arguments first and flags after
+		// them. A serializable lambda and the bridges an interface asks for are
+		// nothing source wrote - javac derives both from the type the lambda is
+		// assigned to - so those write back as the lambda they were. Extra
+		// marker interfaces do not: source names them in an intersection cast,
+		// which this phase does not write.
+		if factory.Name == "metafactory" ||
+			(factory.Name == "altMetafactory" && lambdaFlagsAreImplied(pool, bootstrap)) {
+			return d.lambda(siteDescriptor, bootstrap)
+		}
 	}
 	return bail("an invokedynamic that is neither a lambda nor a concatenation")
+}
+
+// lambdaFlagsAreImplied reports an `altMetafactory` whose flags say nothing
+// about what source wrote: FLAG_SERIALIZABLE (1) and FLAG_BRIDGES (4) follow
+// from the interface the lambda is assigned to, FLAG_MARKERS (2) does not.
+func lambdaFlagsAreImplied(pool []*Constant, bootstrap BootstrapMethod) bool {
+	if len(bootstrap.ArgumentIndexes) < 4 {
+		return false
+	}
+	entry := PoolAt(pool, bootstrap.ArgumentIndexes[3])
+	if entry == nil || entry.Tag != TagInt {
+		return false
+	}
+	const flagMarkers = 2
+	return entry.Int&flagMarkers == 0
 }
 
 // lambda writes a lambda or a method reference: `LambdaMetafactory.metafactory`
@@ -7643,6 +7664,15 @@ func (d *bodyDecompiler) step(
 		value, err := d.pop()
 		if err != nil {
 			return err
+		}
+		// A lambda cast to anything but its own interface is the intersection
+		// cast source wrote - `(Comparator<String> & Serializable) (a, b) ->
+		// ..` - and the marker alone is not a functional interface, so casting
+		// to it would not compile.
+		if value.Lambda && typ != value.Type {
+			text := "(" + value.Type + " & " + typ + ") " + at(value, precUnary)
+			d.push(expr{Text: text, Prec: precUnary, Type: typ, Cast: true})
+			return nil
 		}
 		d.push(expr{Text: "(" + typ + ") " + at(value, precUnary), Prec: precUnary, Type: typ, Cast: true})
 		return nil
