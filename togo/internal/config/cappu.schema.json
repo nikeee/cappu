@@ -207,6 +207,27 @@
         }
       }
     },
+    "auditOptions": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "ignore": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
     "packageSources": {
       "default": [
         "https://maven-central-eu.storage-download.googleapis.com/maven2",

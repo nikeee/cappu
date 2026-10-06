@@ -6,8 +6,9 @@ import (
 	"os"
 )
 
-// The scripts are generated from src/cli/completion.ts (`node --run
-// completion:write`); src/cli/completion.test.ts guards against drift.
+// The scripts are checked in and embedded, edited by hand alongside the
+// commands; TestCompletionScriptsListEveryCommand fails when one of them
+// stops offering a command the CLI has.
 var (
 	//go:embed completion/cappu.bash
 	bashCompletion string
