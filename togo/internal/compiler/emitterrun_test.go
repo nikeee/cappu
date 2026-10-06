@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1565,8 +1566,9 @@ func TestEmitterRunsLikeJavac(t *testing.T) {
 			out, err := exec.Command("java", "-cp", dir, tc.main()).Output()
 			if err != nil {
 				stderr := ""
-				if ee, ok := err.(*exec.ExitError); ok {
-					stderr = string(ee.Stderr)
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					stderr = string(exitErr.Stderr)
 				}
 				t.Fatalf("java -cp %s %s: %v\n%s", dir, tc.main(), err, stderr)
 			}
