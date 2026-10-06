@@ -3252,6 +3252,14 @@ func (d *bodyDecompiler) dynamic(index uint16) error {
 			return d.lambda(siteDescriptor, bootstrap)
 		}
 	}
+	// Named for what source wrote, where the bootstrap says it: a reader of the
+	// bail has to know which construct of theirs is missing.
+	if factory.Owner == "java/lang/runtime/SwitchBootstraps" {
+		return bail("a pattern-matching switch")
+	}
+	if factory.Owner == "java/lang/runtime/ObjectMethods" {
+		return bail("a member generated for a record")
+	}
 	return bail("an invokedynamic that is neither a lambda nor a concatenation")
 }
 

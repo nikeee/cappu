@@ -2310,6 +2310,33 @@ func TestDecompileWritesASerializableLambda(t *testing.T) {
 	}
 }
 
+// A bail names the construct source wrote: a pattern-matching switch is a
+// `SwitchBootstraps.typeSwitch`, not "an invokedynamic".
+func TestDecompileNamesWhatItCannotWriteBack(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	source := `public class Patterned {
+  static String kind(Object o) {
+    return switch (o) {
+      case Integer i -> "int:" + i;
+      case String s -> "str:" + s;
+      default -> "other";
+    };
+  }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Patterned", source)
+	decompiled, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(decompiled, "cappu: a pattern-matching switch") {
+		t.Errorf("expected the switch to be named:\n%s", decompiled)
+	}
+}
+
 // `invokeExact` and `invoke` are signature-polymorphic: the JVM links them
 // against the descriptor at the call site, and source wrote the cast that
 // descriptor encodes. Without it the value does not even typecheck.
