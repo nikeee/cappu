@@ -2195,12 +2195,16 @@ const assertSource = `public class Asserts {
   static int message(int v) { assert v > 0 : "v was " + v; return v; }
   static String two(String s, int n) { assert s != null && n > 0 : s; assert !s.isEmpty(); return s + n; }
   static int following(int v) { assert v != 3; if (v > 1) { return v; } else { return -v; } }
+  // More than two terms nest to the left, so the flag javac tests is the
+  // leftmost leaf of the conjunction, not its left operand.
+  static int three(String s, int n) { assert s != null || n > 0; return n; }
   static void never() { assert false : "unreachable"; }
   public static void main(String[] z) {
     System.out.print(positive(2));
     System.out.print(message(3));
     System.out.print(two("a", 1));
     System.out.print(following(5));
+    System.out.print(three("a", 1));
     try { never(); } catch (AssertionError e) { System.out.print(e.getMessage()); }
   }
 }
@@ -2225,6 +2229,7 @@ func TestDecompileWritesTheAssertSourceWrote(t *testing.T) {
 		"assert arg0 != null && arg1 > 0 : arg0;",
 		"assert !arg0.isEmpty();",
 		"assert arg0 != 3;",
+		"assert arg0 != null || arg1 > 0;",
 		`assert false : "unreachable";`,
 	} {
 		if !strings.Contains(source, want) {
@@ -2240,6 +2245,60 @@ func TestDecompileWritesTheAssertSourceWrote(t *testing.T) {
 	compileWithJavac(t, again, "Asserts", source)
 	expected := runJavaWith(t, dir, "Asserts", "-ea")
 	if actual := runJavaWith(t, again, "Asserts", "-ea"); actual != expected {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// `invokeExact` and `invoke` are signature-polymorphic: the JVM links them
+// against the descriptor at the call site, and source wrote the cast that
+// descriptor encodes. Without it the value does not even typecheck.
+const polymorphicSource = `import java.lang.invoke.*;
+public class Poly {
+  static final MethodHandle LEN;
+  static final MethodHandle UP;
+  static {
+    try {
+      LEN = MethodHandles.lookup().findVirtual(String.class, "length", MethodType.methodType(int.class));
+      UP = MethodHandles.lookup().findVirtual(String.class, "toUpperCase", MethodType.methodType(String.class));
+    } catch (ReflectiveOperationException e) { throw new ExceptionInInitializerError(e); }
+  }
+  static int len(String s) throws Throwable { return (int) LEN.invokeExact(s); }
+  static String up(String s) throws Throwable { return (String) UP.invokeExact(s); }
+  static void dropped(String s) throws Throwable { LEN.invoke(s); }
+  public static void main(String[] z) throws Throwable {
+    System.out.print(len("abcd"));
+    System.out.print(up("hi"));
+    dropped("x");
+  }
+}
+`
+
+func TestDecompileCastsASignaturePolymorphicCall(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Poly", polymorphicSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"return (int) LEN.invokeExact(arg0);",
+		"return (java.lang.String) UP.invokeExact(arg0);",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	// A call whose value is dropped is a statement, and casting a statement is
+	// not Java.
+	if strings.Contains(source, "(java.lang.Object) LEN.invoke(") {
+		t.Errorf("a dropped value needs no cast:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Poly", source)
+	if actual, expected := runJava(t, again, "Poly"), runJava(t, dir, "Poly"); actual != expected {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }

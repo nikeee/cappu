@@ -1096,6 +1096,26 @@ func parameterSlots(descriptor string, isStatic bool) []paramSlot {
 	return out
 }
 
+// signaturePolymorphic names the methods the JVM links against the descriptor
+// written at the call site rather than the one the method declares (JVMS
+// 2.9.3): what source wrote is the descriptor, and the value it hands back
+// needs the cast that goes with it.
+var signaturePolymorphic = map[string]bool{
+	"java/lang/invoke/MethodHandle.invoke":          true,
+	"java/lang/invoke/MethodHandle.invokeExact":     true,
+	"java/lang/invoke/MethodHandle.invokeBasic":     true,
+	"java/lang/invoke/VarHandle.get":                true,
+	"java/lang/invoke/VarHandle.getVolatile":        true,
+	"java/lang/invoke/VarHandle.getAcquire":         true,
+	"java/lang/invoke/VarHandle.getOpaque":          true,
+	"java/lang/invoke/VarHandle.getAndSet":          true,
+	"java/lang/invoke/VarHandle.getAndAdd":          true,
+	"java/lang/invoke/VarHandle.compareAndExchange": true,
+	"java/lang/invoke/VarHandle.getAndBitwiseOr":    true,
+	"java/lang/invoke/VarHandle.getAndBitwiseAnd":   true,
+	"java/lang/invoke/VarHandle.getAndBitwiseXor":   true,
+}
+
 func methodReturnType(descriptor string) string {
 	text, _ := DescriptorType(descriptor, strings.LastIndex(descriptor, ")")+1)
 	return text
@@ -2784,24 +2804,44 @@ func ifWrap(text string) string { return "if (" + text + ") {" }
 // one with the flag it generates - `if (!$assertionsDisabled && <negated>)
 // throw new AssertionError(..)` - and that flag's field is not source's, so
 // leaving the test as it stands would not even compile.
-func assertFromIf(condition expr, thenStatements []stmt) (string, bool) {
+func assertFromIf(condition expr, thenStatements []stmt) (asserted expr, message string, ok bool) {
 	if len(thenStatements) != 1 || thenStatements[0].Nested != nil {
-		return "", false
+		return expr{}, "", false
 	}
-	message, ok := assertionThrow(thenStatements[0].Text)
+	message, ok = assertionThrow(thenStatements[0].Text)
 	if !ok || condition.Logic == nil {
-		return "", false
+		return expr{}, "", false
 	}
 	// `assert false;` compiles to the flag test alone.
 	if readsAssertionFlag(condition) {
-		return "assert false" + message + ";", true
+		return primary("false", "boolean"), message, true
 	}
-	if condition.Logic.Kind != logicAnd || !readsAssertionFlag(*condition.Logic.Left) {
-		return "", false
+	compiled, ok := withoutAssertionFlag(condition)
+	if !ok {
+		return expr{}, "", false
 	}
 	// The bytecode carries the negation of what was asserted: the branch is
 	// taken when the assertion does NOT hold.
-	return "assert " + negate(*condition.Logic.Right).Text + message + ";", true
+	return negate(compiled), message, true
+}
+
+// withoutAssertionFlag takes the flag test off the front of the conjunction
+// javac guards an assert with, leaving the compiled condition alone. A
+// conjunction of more than two terms nests to the left, so the flag is the
+// leftmost leaf, not always the left operand.
+func withoutAssertionFlag(condition expr) (expr, bool) {
+	if condition.Logic == nil || condition.Logic.Kind != logicAnd {
+		return condition, false
+	}
+	left, right := *condition.Logic.Left, *condition.Logic.Right
+	if readsAssertionFlag(left) {
+		return right, true
+	}
+	rest, ok := withoutAssertionFlag(left)
+	if !ok {
+		return condition, false
+	}
+	return logicalExpr(logicAnd, rest, right), true
 }
 
 // readsAssertionFlag reports `!$assertionsDisabled`, however the field is
@@ -6352,8 +6392,11 @@ func (d *bodyDecompiler) conditional(b *block, stop int) (int, error) {
 }
 
 func (d *bodyDecompiler) pushIf(condition expr, thenStatements, elseStatements []stmt) {
-	if assertion, ok := assertFromIf(condition, thenStatements); ok {
-		d.emit(assertion)
+	if asserted, message, ok := assertFromIf(condition, thenStatements); ok {
+		// Registered like any other condition, not rendered on the spot: a
+		// variable in it can still be retyped, and then the statement is
+		// written again from the expression.
+		d.emitCondition(asserted, func(text string) string { return "assert " + text + message + ";" })
 		// The arm that threw is gone, so what the `else` held is simply what
 		// follows the assert.
 		*d.current = append(*d.current, elseStatements...)
@@ -7647,7 +7690,16 @@ func (d *bodyDecompiler) step(
 			d.emit(text + ";")
 			return nil
 		}
-		d.push(expr{Text: text, Prec: precPrimary, Type: typ, Effects: true})
+		prec := precPrimary
+		// A signature-polymorphic method is declared to return Object and takes
+		// Object...; the descriptor at the call site is the one source asked
+		// for, with a cast where the value is not an Object. Without that cast
+		// the call does not even compile where the value is used.
+		if signaturePolymorphic[target.Owner+"."+target.Name] && typ != "java.lang.Object" {
+			text = "(" + typ + ") " + text
+			prec = precUnary
+		}
+		d.push(expr{Text: text, Prec: prec, Type: typ, Effects: true})
 		return nil
 	}
 
