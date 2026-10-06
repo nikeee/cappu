@@ -4,7 +4,8 @@ package services
 // compiler's fourslash tests). A fixture is a .java file with markers /*name*/;
 // the marker is stripped and its offset becomes a query position. Completion and
 // hover results are serialized and compared against checked-in baselines shared
-// with the TypeScript build. Port of src/services/fourslash*.test.ts.
+// with the TypeScript build. Port of src/services/fourslash*.test.ts, including
+// its UPDATE_BASELINES=1 write mode (a missing baseline is always written).
 
 import (
 	"os"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nikeee/cappu/internal/baselines"
 	"github.com/nikeee/cappu/internal/compiler"
 )
 
@@ -23,6 +25,17 @@ const (
 	hoverDir          = "../../../test-fixtures/language-service/fourslash-hover"
 	hoverBaseline     = "../../../test-fixtures/language-service/fourslash-hover-baselines"
 )
+
+// writeBaseline writes actual when UPDATE_BASELINES=1 or the baseline does not
+// exist yet, and reports true so the caller skips its assertion.
+func writeBaseline(t *testing.T, path, actual string) bool {
+	t.Helper()
+	wrote, err := baselines.Write(path, []byte(actual))
+	if err != nil {
+		t.Fatalf("write baseline %s: %v", path, err)
+	}
+	return wrote
+}
 
 var markerRE = regexp.MustCompile(`/\*([A-Za-z0-9_]+)\*/`)
 
@@ -109,7 +122,11 @@ func TestFourslashCompletions(t *testing.T) {
 			}
 			actual := strings.Join(sections, "\n\n") + "\n"
 
-			want, err := os.ReadFile(filepath.Join(fourslashBaseline, strings.TrimSuffix(fixture, ".java")+".txt"))
+			path := filepath.Join(fourslashBaseline, strings.TrimSuffix(fixture, ".java")+".txt")
+			if writeBaseline(t, path, actual) {
+				return
+			}
+			want, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatalf("baseline missing: %v", err)
 			}
@@ -148,7 +165,11 @@ func TestFourslashHover(t *testing.T) {
 			}
 			actual := strings.Join(sections, "\n") + "\n"
 
-			want, err := os.ReadFile(filepath.Join(hoverBaseline, strings.TrimSuffix(fixture, ".java")+".txt"))
+			path := filepath.Join(hoverBaseline, strings.TrimSuffix(fixture, ".java")+".txt")
+			if writeBaseline(t, path, actual) {
+				return
+			}
+			want, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatalf("baseline missing: %v", err)
 			}

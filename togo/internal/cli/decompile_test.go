@@ -5,8 +5,9 @@ package cli
 // internal/compiler/disasm_test.go, the reconstruction by
 // internal/compiler/decompile_test.go.
 //
-// The source baselines are the ones the TS build writes, so comparing against
-// them here is the TS/Go parity check for the decompiler.
+// The source baselines were written by the TS build, so comparing against them
+// here is the TS/Go parity check for the decompiler. UPDATE_BASELINES=1
+// rewrites them (and a missing one is always written).
 
 import (
 	"io"
@@ -14,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nikeee/cappu/internal/baselines"
 )
 
 var arithmeticClass = filepath.Join(
@@ -87,31 +90,41 @@ func TestDecompilePrintsListingWithDisasm(t *testing.T) {
 	}
 }
 
-// Every baseline the TS build wrote must come back byte for byte.
+// Every baseline the TS build wrote must come back byte for byte. The test set
+// is driven by the emitted classes, not by the baseline directory, so a deleted
+// baseline is regenerated rather than silently dropped.
 func TestDecompileMatchesSourceBaselines(t *testing.T) {
-	baselines := filepath.Join("..", "..", "..", "test-fixtures", "decompiler", "source-baselines")
-	entries, err := os.ReadDir(baselines)
+	baselineDir := filepath.Join("..", "..", "..", "test-fixtures", "decompiler", "source-baselines")
+	classDir := filepath.Join("..", "..", "..", "test-fixtures", "emitter", "emit-baselines")
+	entries, err := os.ReadDir(classDir)
 	if err != nil {
-		t.Fatalf("read source baselines: %v", err)
+		t.Fatalf("read emit baselines: %v", err)
 	}
 	for _, entry := range entries {
-		name := strings.TrimSuffix(entry.Name(), ".java")
+		name := strings.TrimSuffix(entry.Name(), ".class")
 		if name == entry.Name() {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
-			classBytes, err := os.ReadFile(filepath.Join(
-				"..", "..", "..", "test-fixtures", "emitter", "emit-baselines", name+".class"))
+			classBytes, err := os.ReadFile(filepath.Join(classDir, entry.Name()))
 			if err != nil {
 				t.Fatalf("read class: %v", err)
-			}
-			want, err := os.ReadFile(filepath.Join(baselines, entry.Name()))
-			if err != nil {
-				t.Fatalf("read baseline: %v", err)
 			}
 			got, err := DecompileToSource(classBytes)
 			if err != nil {
 				t.Fatalf("decompile: %v", err)
+			}
+			path := filepath.Join(baselineDir, name+".java")
+			wrote, err := baselines.Write(path, []byte(got))
+			if err != nil {
+				t.Fatalf("write baseline %s: %v", path, err)
+			}
+			if wrote {
+				return
+			}
+			want, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read baseline: %v", err)
 			}
 			if got != string(want) {
 				t.Errorf("%s differs from the baseline:\n--- got ---\n%s\n--- want ---\n%s",

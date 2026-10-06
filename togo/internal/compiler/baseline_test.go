@@ -15,6 +15,7 @@ import (
 // baseline under test-fixtures/parser/baselines. Port of src/compiler/
 // baseline.test.ts; the Go serialization must match the TS-generated baselines
 // byte-for-byte, proving the parser produces an identical tree shape.
+// UPDATE_BASELINES=1 rewrites them (and a missing one is always written).
 
 func flagSuffix(flags NodeFlags) string {
 	var parts []string
@@ -98,6 +99,9 @@ func TestParserBaselines(t *testing.T) {
 			}
 			actual := serializeTree(e.Name(), string(source))
 			baselinePath := filepath.Join(baselinesDir, strings.TrimSuffix(e.Name(), ".java")+".txt")
+			if writeBaseline(t, baselinePath, actual) {
+				return
+			}
 			expected, err := os.ReadFile(baselinePath)
 			if err != nil {
 				t.Fatalf("no baseline %s: %v", baselinePath, err)

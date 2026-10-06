@@ -173,6 +173,25 @@ var corpusKnownGaps = map[string]bool{
 // TestCorpusBytecodeMatchesJavac is the regression guard over the committed
 // corpus-baselines: a baselined (class, method) pair must still match our output
 // (normalized javap). Needs javap (skipped otherwise).
+//
+// Unlike every other baseline family this file has no UPDATE_BASELINES write
+// mode, because a Go-side regeneration provably cannot reproduce the committed
+// files byte for byte:
+//
+//   - The baseline records only the (class, method) pairs the emitter CURRENTLY
+//     matches javac on, so regenerating re-derives the set from whichever
+//     emitter runs. corpusKnownGaps below is proof the sets differ: the Go
+//     emitter does not match a method the TypeScript emitter did, so a
+//     regeneration would silently DROP it from the baseline and the guard would
+//     stop protecting it.
+//   - The committed JSON is keyed in javac/javap discovery order (see
+//     commons-cli.json, where DeprecatedAttributes$Builder precedes
+//     DeprecatedAttributes). encoding/json emits map keys sorted, so even an
+//     identical set would reorder every file.
+//
+// Regenerating is therefore a deliberate, reviewed act, not a test side effect:
+// widen corpusKnownGaps when a gap is understood, and rewrite the JSON by hand
+// (or with a throwaway program) when the Go emitter's matched set grows.
 func TestCorpusBytecodeMatchesJavac(t *testing.T) {
 	projects := discoverCorpus()
 	if len(projects) == 0 {

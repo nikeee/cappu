@@ -85,8 +85,9 @@ func compareDisasm(t *testing.T, className string, got, want *Disasm) {
 // Classes whose full listing is pinned as text: enum bodies, annotations and
 // sealed types, where tier 1 covers little or nothing (a javac baseline holds
 // only the normalized instruction stream, and some of these have no baseline at
-// all). The files are written by src/compiler/disasm.test.ts under
-// UPDATE_BASELINES=1, so here they double as the TS/Go parity check.
+// all). UPDATE_BASELINES=1 rewrites them (and a missing one is always written);
+// the committed text came from src/compiler/disasm.test.ts, so these also pin
+// the Go disassembler to what the TypeScript one printed.
 var textBaselineClasses = []string{
 	"AnnAll",
 	"EnumAbstract",
@@ -101,11 +102,16 @@ var textBaselineClasses = []string{
 func TestDisasmTextBaselines(t *testing.T) {
 	for _, name := range textBaselineClasses {
 		t.Run(name, func(t *testing.T) {
-			want, err := os.ReadFile(filepath.Join(disasmBaselinesDir, name+".txt"))
+			got := disassembleBaseline(t, name)
+			path := filepath.Join(disasmBaselinesDir, name+".txt")
+			if writeBaseline(t, path, got) {
+				return
+			}
+			want, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatalf("read baseline: %v", err)
 			}
-			if got := disassembleBaseline(t, name); got != string(want) {
+			if got != string(want) {
 				t.Errorf("%s:\n--- got ---\n%s\n--- want ---\n%s", name, got, want)
 			}
 		})

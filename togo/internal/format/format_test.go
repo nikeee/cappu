@@ -6,13 +6,82 @@ package format
 // the real google-java-format output, so these tests measure actual
 // compatibility - and that the Go port matches the TypeScript build byte for
 // byte. No JDK is needed; the baselines are read from disk.
+//
+// A baseline is only ever (re)written by running the REAL google-java-format,
+// which needs a jar. Either point GJF_JAR at the all-deps jar:
+//
+//	GJF_JAR=/path/to/google-java-format-all-deps.jar \
+//	  UPDATE_BASELINES=1 go test ./internal/format/
+//
+// or, when only the maven repo jar is present (it is not all-deps), point
+// GJF_CP at a resolved classpath (mvn dependency:build-classpath
+// -Dmdep.outputFile=cp.txt):
+//
+//	GJF_CP=$(cat cp.txt) UPDATE_BASELINES=1 go test ./internal/format/
+//
+// Download the jar from https://github.com/google/google-java-format/releases.
+// Port of src/format/format.test.ts. One deliberate deviation from it: when
+// UPDATE_BASELINES=1 is set but neither variable is, a present baseline is
+// asserted against instead of failing the run, so `UPDATE_BASELINES=1 go test
+// ./...` stays usable without a jar. A MISSING baseline with no jar is still
+// fatal - there is nothing to compare against.
+//
+// Regeneration is gjf-version-sensitive, so always review the diff: with gjf
+// 1.34.1 the 72-text-block-deindent and 73-text-block-dot-chain baselines come
+// back with the text block's content left at its source indentation, where the
+// committed ones (written by an older gjf build) de-indent it to column 0.
 
 import (
+	"bytes"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nikeee/cappu/internal/baselines"
 )
+
+// gjfJVMArgs are the exports google-java-format needs on a modern JDK: it
+// reaches into javac internals. Mirrors the wrapper its README documents.
+var gjfJVMArgs = []string{
+	"--add-exports", "jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
+	"--add-exports", "jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED",
+	"--add-exports", "jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED",
+	"--add-exports", "jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
+	"--add-exports", "jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED",
+}
+
+// haveGjf reports whether a real google-java-format can be launched.
+func haveGjf() bool {
+	return os.Getenv("GJF_JAR") != "" || os.Getenv("GJF_CP") != ""
+}
+
+// runGoogleJavaFormat pipes source through the real google-java-format and
+// returns its output - the only thing a baseline is ever written from.
+func runGoogleJavaFormat(source, style string) (string, error) {
+	args := append([]string{}, gjfJVMArgs...)
+	if cp := os.Getenv("GJF_CP"); cp != "" {
+		args = append(args, "-cp", cp, "com.google.googlejavaformat.java.Main")
+	} else {
+		args = append(args, "-jar", os.Getenv("GJF_JAR"))
+	}
+	if style == "aosp" {
+		args = append(args, "--aosp")
+	}
+	args = append(args, "-")
+
+	cmd := exec.Command("java", args...)
+	cmd.Stdin = strings.NewReader(source)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("google-java-format: %w: %s", err, stderr.String())
+	}
+	return stdout.String(), nil
+}
 
 func fixturesRoot(t *testing.T) string {
 	// togo/internal/format -> repo root.
@@ -21,6 +90,32 @@ func fixturesRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+// regenerate (re)writes one baseline from the real google-java-format when
+// UPDATE_BASELINES=1 or the baseline does not exist yet.
+func regenerate(t *testing.T, baselinePath, source, style string) {
+	t.Helper()
+	_, missing := os.Stat(baselinePath)
+	if !baselines.Update && missing == nil {
+		return
+	}
+	if !haveGjf() {
+		if missing != nil {
+			t.Fatalf("missing baseline %s and neither GJF_JAR nor GJF_CP is set; "+
+				"set one to (re)generate baselines (see this file's header)", baselinePath)
+		}
+		t.Logf("UPDATE_BASELINES=1 but neither GJF_JAR nor GJF_CP is set: "+
+			"asserting the committed %s instead of regenerating it", baselinePath)
+		return
+	}
+	out, err := runGoogleJavaFormat(source, style)
+	if err != nil {
+		t.Fatalf("regenerate %s: %v", baselinePath, err)
+	}
+	if _, err := baselines.Write(baselinePath, []byte(out)); err != nil {
+		t.Fatalf("write baseline %s: %v", baselinePath, err)
+	}
 }
 
 func TestFormatGolden(t *testing.T) {
@@ -42,6 +137,7 @@ func TestFormatGolden(t *testing.T) {
 		}
 		for _, style := range styles {
 			baselinePath := filepath.Join(root, "baselines", style, base+".output")
+			regenerate(t, baselinePath, string(source), style)
 			expected, err := os.ReadFile(baselinePath)
 			if err != nil {
 				t.Fatalf("missing baseline %s: %v", baselinePath, err)
