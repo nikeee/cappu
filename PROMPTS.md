@@ -626,3 +626,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-10-06 19:06 — do all of them using an opus 5.5 subagent
 - 2026-10-06 19:52 — anything else left?
 - 2026-10-06 19:58 — yes
+- 2026-10-06 20:49 — upgrade golang auf latest

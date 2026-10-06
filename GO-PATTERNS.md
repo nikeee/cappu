@@ -18,7 +18,7 @@ the import surface stays private.
 
 ```
 togo/
-  go.mod                module github.com/nikeee/cappu  (go 1.26)
+  go.mod                module github.com/nikeee/cappu  (go 1.27)
   cmd/cappu/main.go     arg parse + dispatch (mirrors src/cli/main.ts)
   internal/
     cli/        one file per subcommand (rage.go, cache.go, version.go, ...) + stubs.go

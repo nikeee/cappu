@@ -26,7 +26,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache-dependency-path: togo/go.sum
 
       # javac lets the publish testcontainers e2e build a real jar (Docker is
@@ -47,7 +47,7 @@ jobs:
       - name: Lint (golangci-lint)
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.14.0
           working-directory: togo
 
       - run: go vet ./...
@@ -73,7 +73,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache-dependency-path: togo/go.sum
 
       - uses: actions/setup-java@v5
@@ -108,7 +108,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache-dependency-path: togo/go.sum
 
       - run: make build-all
