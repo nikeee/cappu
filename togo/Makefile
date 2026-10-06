@@ -8,7 +8,7 @@ ifneq ($(VERSION),)
 LDFLAGS += -X github.com/nikeee/cappu/internal/meta.Version=$(VERSION)
 endif
 
-.PHONY: help fmt fmt-check lint vet test cover cover-html build build-all clean tools generate generate-check
+.PHONY: help fmt fmt-check lint vet test cover cover-html build build-all clean tools generate generate-check corpus-init
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/'
@@ -42,6 +42,16 @@ cover: ## Run tests with coverage and print a per-function summary
 
 cover-html: cover ## Open the coverage report in a browser
 	go tool cover -html=coverage.out
+
+# The corpus tests (emitcorpus_test.go, format_corpus_test.go) read only *.java,
+# so each submodule is restricted to that via sparse-checkout - which cannot be
+# expressed in .gitmodules, it is per-clone config. A plain `git submodule
+# update --init` also works, it just leaves the other files on disk.
+corpus-init: ## Check out the test corpora (shallow, *.java only)
+	git -C .. submodule update --init
+	@for d in ../test-fixtures/emitter/corpus/*/; do \
+		git -C "$$d" sparse-checkout set --no-cone '/**/*.java' '*.java'; \
+	done
 
 build: ## Build a static binary for the host
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/cappu ./cmd/cappu

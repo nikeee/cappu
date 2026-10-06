@@ -93,16 +93,15 @@ text block's content is de-indented to column 0.
 Auto-discovers every git submodule under `test-fixtures/emitter/corpus/` and asserts the emitter
 produces class bytes for every `.java` file without throwing (degrading to a
 placeholder is fine, crashing is not). No JDK needed. Initialize the corpus
-submodules first, with the one npm script the repo still has (there is no
-JavaScript build - `package.json` only carries the linters and this helper):
+submodules first:
 ```bash
-node --run corpus:init
+cd togo && make corpus-init
 ```
 This runs `git submodule update --init` (the submodules are marked
 `shallow = true` in `.gitmodules`, so only depth-1 history is cloned) and then
 restricts each corpus working tree to `*.java` via sparse-checkout - the only
 files the tests read. Sparse-checkout cannot be expressed in `.gitmodules`
-(it is per-clone config), which is why it lives in this script rather than the
+(it is per-clone config), which is why it lives in this target rather than the
 submodule spec; a plain `git submodule update --init` also works but leaves the
 non-Java files on disk. The corpus tests are skipped when no submodule is
 checked out, so CI without them still passes.

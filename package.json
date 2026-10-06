@@ -14,8 +14,7 @@
     "ci": "oxlint --deny-warnings -f github",
     "lint": "oxlint",
     "format": "oxfmt",
-    "version": "node scripts/sync-go-version.mjs && git add togo/internal/meta/meta.go",
-    "corpus:init": "git submodule update --init && for d in test-fixtures/emitter/corpus/*/; do git -C \"$d\" sparse-checkout set --no-cone '/**/*.java' '*.java'; done"
+    "version": "node scripts/sync-go-version.mjs && git add togo/internal/meta/meta.go"
   },
   "devDependencies": {
     "oxfmt": "^0.58.0",
