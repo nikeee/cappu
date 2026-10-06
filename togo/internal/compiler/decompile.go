@@ -3701,7 +3701,7 @@ func (d *bodyDecompiler) anonymousBody(
 	default:
 		return "", "", nil, bail("an anonymous class")
 	}
-	block, err := initializerBlock(anonymous, target.Descriptor)
+	block, err := initializerBlock(anonymous, target.Descriptor, syntheticFields(anonymous))
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -3766,7 +3766,7 @@ var capturedValue = regexp.MustCompile(`^(?:[A-Za-z_$][\w$]*|-?\d+[LlFfDd]?|"[^"
 // blocks source wrote, which Java writes back as one instance initializer.
 // Nothing of it may read the constructor's own parameters - the names those
 // carry here are not the ones the enclosing body gave the captured values.
-func initializerBlock(anonymous *ClassFile, descriptor string) ([]string, error) {
+func initializerBlock(anonymous *ClassFile, descriptor string, synthetic map[string]bool) ([]string, error) {
 	var method Member
 	for _, one := range anonymous.Methods {
 		if one.Name == "<init>" && one.Descriptor == descriptor {
@@ -3788,7 +3788,15 @@ func initializerBlock(anonymous *ClassFile, descriptor string) ([]string, error)
 	extra := false
 	for i, one := range instructions {
 		switch {
-		case one.Mnemonic == "putfield", isOneOf(opBase(one.Mnemonic), "ilfda", "load"):
+		case one.Mnemonic == "putfield":
+			// Only a store into one of javac's own fields is javac's own work:
+			// `Object self = this;` is a store of a load too, and dropping it
+			// would drop what source wrote.
+			target, ok := PoolMemberRef(anonymous.Pool, uint16(one.Arg))
+			if !ok || !synthetic[target.Name] {
+				extra = true
+			}
+		case isOneOf(opBase(one.Mnemonic), "ilfda", "load"):
 		case one.Mnemonic == "return" && i == len(instructions)-1:
 		case one.Mnemonic == "invokespecial":
 			target, ok := PoolMemberRef(anonymous.Pool, uint16(one.Arg))
@@ -3839,16 +3847,23 @@ var (
 	parameterRead  = regexp.MustCompile(`(^|[^\w$.])arg\d+($|[^\w$])`)
 )
 
+// syntheticFields names the fields javac added to an anonymous class: the
+// captured values and the enclosing instance, never anything source wrote.
+func syntheticFields(anonymous *ClassFile) map[string]bool {
+	out := map[string]bool{}
+	for _, field := range anonymous.Fields {
+		if field.Flags&accSynthetic != 0 {
+			out[field.Name] = true
+		}
+	}
+	return out
+}
+
 // capturedFields reads the constructor javac wrote for an anonymous class: it
 // stores each argument it is handed into a synthetic field of its own, and
 // that is the only place which argument is which is written down.
 func capturedFields(anonymous *ClassFile, descriptor string) (map[int]string, error) {
-	synthetic := map[string]bool{}
-	for _, field := range anonymous.Fields {
-		if field.Flags&accSynthetic != 0 {
-			synthetic[field.Name] = true
-		}
-	}
+	synthetic := syntheticFields(anonymous)
 	for _, method := range anonymous.Methods {
 		if method.Name != "<init>" || method.Descriptor != descriptor {
 			continue

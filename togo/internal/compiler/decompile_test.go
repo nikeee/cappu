@@ -2034,6 +2034,9 @@ public class Anon {
   // A field initializer and an instance block both live in the constructor
   // javac wrote; Java writes them back as one instance initializer.
   static Runnable fielded(String s) { return new Runnable() { int n = 3; String cache = s + "!"; public void run() { n++; System.out.print(cache + n); } }; }
+  // A field initialized to this is a store of a load, like a capture store, and
+  // dropping it would silently change what the body does.
+  static Runnable holdsThis() { return new Runnable() { Object self = this; public void run() { System.out.print(self == this ? "same" : "other"); } }; }
   public static void main(String[] z) {
     Runnable r = runner();
     r.run();
@@ -2043,6 +2046,7 @@ public class Anon {
     System.out.print(sub("s", 4).show());
     System.out.print(len().apply("abc"));
     fielded("f").run();
+    holdsThis().run();
     System.out.println(" " + plain().greet("you") + " " + obj());
   }
 }
@@ -2075,6 +2079,7 @@ func TestDecompileWritesAnAnonymousClassWhereItWasWritten(t *testing.T) {
 		"return new Base(arg0) {", "return super.show() + arg1;",
 		"new java.util.function.Function<java.lang.String, java.lang.Integer>() {",
 		"int n;", "{\nthis.n = 3;\nthis.cache = arg0 + \"!\";\n}",
+		"{\nthis.self = this;\n}",
 		// `prefix` is the name the body's own parameter carries.
 		"cappu: an anonymous class whose captured name is taken",
 	} {
@@ -2090,14 +2095,14 @@ func TestDecompileWritesAnAnonymousClassWhereItWasWritten(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if strings.Count(blind, "cappu: an anonymous class") != 9 {
-		t.Errorf("expected nine bails without the siblings:\n%s", blind)
+	if strings.Count(blind, "cappu: an anonymous class") != 10 {
+		t.Errorf("expected ten bails without the siblings:\n%s", blind)
 	}
 	again := filepath.Join(dir, "again")
 	compileWithJavacOn(t, again, "Anon", strings.ReplaceAll(source, "static Greeter captures", "static Greeter unused"), dir)
 	expected := runJava(t, dir, "Anon")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "Anon")
-	if actual != expected || actual != "run1run2f7w9s43f!4 hi you anon\n" {
+	if actual != expected || actual != "run1run2f7w9s43f!4same hi you anon\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
