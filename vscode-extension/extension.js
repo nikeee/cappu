@@ -7,15 +7,14 @@ let client;
 
 export function activate(context) {
   const repoRoot = path.join(import.meta.dirname, "..");
-  // Run the TypeScript source directly via the repo's tsx: a bundled
-  // dist/server.mjs silently goes stale whenever the source changes, which is
-  // exactly the failure mode a test client must not have.
-  const tsx = path.join(repoRoot, "node_modules", ".bin", "tsx");
-  const serverMain = path.join(repoRoot, "src", "services", "serverMain.ts");
+  // The language server is `cappu lsp` out of the Go binary that `cd togo &&
+  // make build` writes. It is a build artifact, so it goes stale the moment you
+  // change the server and do not rebuild - rebuild before reloading the window.
+  const cappu = path.join(repoRoot, "togo", "dist", "cappu");
 
   const run = {
-    command: tsx,
-    args: [serverMain],
+    command: cappu,
+    args: ["lsp"],
     options: { cwd: repoRoot },
     transport: TransportKind.stdio,
   };
