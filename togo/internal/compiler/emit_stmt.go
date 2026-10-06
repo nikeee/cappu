@@ -1201,9 +1201,14 @@ func (g *bodyGen) emitSwitchDispatch(selector *Node, clauses []*Node, throwOnNoM
 		var cases []switchCase
 		for i, cl := range clauses {
 			for _, lab := range arrayNodes(cl.AsSwitchClause().Labels) {
-				v := g.caseValue(lab)
+				// An enum label is an identifier, not a foldable constant, so
+				// caseValue must not be asked for it: it would panic with
+				// unsupportedEmit and degrade the whole enclosing method.
+				v := 0
 				if enumSym != nil {
 					v = enumOrdinal(lab)
+				} else {
+					v = g.caseValue(lab)
 				}
 				cases = append(cases, switchCase{value: v, label: clauseLabels[i]})
 			}
