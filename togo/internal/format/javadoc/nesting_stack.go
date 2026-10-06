@@ -1,4 +1,4 @@
-// Port of src/format/javadoc/nesting-stack.ts.
+// Port of src/format/javadoc/nesting-stack.ts (gjf's javadoc/NestingStack.java).
 
 package javadoc
 

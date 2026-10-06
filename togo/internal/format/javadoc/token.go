@@ -1,4 +1,4 @@
-// Port of src/format/javadoc/token.ts.
+// Port of src/format/javadoc/token.ts (gjf's javadoc/Token.java).
 //
 // Javadoc token taxonomy. The lexer produces these; the writer renders them.
 

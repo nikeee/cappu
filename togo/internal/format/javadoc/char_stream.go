@@ -1,4 +1,4 @@
-// Port of src/format/javadoc/char-stream.ts.
+// Port of src/format/javadoc/char-stream.ts (gjf's javadoc/CharStream.java).
 //
 // String reader for the lexer. Regexes must be anchored at the cursor; we build
 // them with a leading `\A`-equivalent via FindStringIndex from the offset.

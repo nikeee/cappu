@@ -15,30 +15,20 @@ distributed under the Apache License, Version 2.0.
     Copyright Google Inc.
 
 The following files are ports (translations, with modifications) of
-google-java-format source. Each carries a `Port of google-java-format ...`
-header comment noting the origin and that it was modified:
+google-java-format source. Each names google-java-format and the class it
+derives from in its header comment. They were first written in TypeScript
+(`src/format/`, removed once the Go build overtook it) and ported from there,
+which is what their `Port of src/...` lines record:
 
-TypeScript (`src/`):
-- `src/format/doc.ts` - the `com.google.googlejavaformat.Doc` / `Indent` line-breaking engine
-- `src/format/printer.ts` - AST-to-Doc lowering modeled on gjf's `JavaInputAstVisitor`
-- `src/format/comment-rewrite.ts` - gjf's `JavaCommentsHelper` rewrite path
-- `src/format/javadoc/char-stream.ts` - `javadoc/CharStream.java`
-- `src/format/javadoc/lexer.ts` - `javadoc/JavadocLexer.java`
-- `src/format/javadoc/token.ts` - `javadoc/Token.java`
-- `src/format/javadoc/nesting-stack.ts` - `javadoc/NestingStack.java`
-- `src/format/javadoc/writer.ts` - `javadoc/JavadocWriter.java`
-- `src/format/javadoc/formatter.ts` - `javadoc/JavadocFormatter.java`
-
-Go (`togo/`), mirror ports of the TypeScript files above:
-- `togo/internal/format/doc.go`
-- `togo/internal/format/printer.go`
-- `togo/internal/format/comment_rewrite.go`
-- `togo/internal/format/javadoc/char_stream.go`
-- `togo/internal/format/javadoc/lexer.go`
-- `togo/internal/format/javadoc/token.go`
-- `togo/internal/format/javadoc/nesting_stack.go`
-- `togo/internal/format/javadoc/writer.go`
-- `togo/internal/format/javadoc/formatter.go`
+- `togo/internal/format/doc.go` - the `com.google.googlejavaformat.Doc` / `Indent` line-breaking engine
+- `togo/internal/format/printer.go` - AST-to-Doc lowering modeled on gjf's `JavaInputAstVisitor`
+- `togo/internal/format/comment_rewrite.go` - gjf's `JavaCommentsHelper` rewrite path
+- `togo/internal/format/javadoc/char_stream.go` - `javadoc/CharStream.java`
+- `togo/internal/format/javadoc/lexer.go` - `javadoc/JavadocLexer.java`
+- `togo/internal/format/javadoc/token.go` - `javadoc/Token.java`
+- `togo/internal/format/javadoc/nesting_stack.go` - `javadoc/NestingStack.java`
+- `togo/internal/format/javadoc/writer.go` - `javadoc/JavadocWriter.java`
+- `togo/internal/format/javadoc/formatter.go` - `javadoc/JavadocFormatter.java`
 
 The full text of the Apache License 2.0 under which the above code is used
 follows.

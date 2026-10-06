@@ -624,3 +624,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-10-06 14:19 — oh yes, we want to remove ts
 - 2026-10-06 18:45 — continue
 - 2026-10-06 19:06 — do all of them using an opus 5.5 subagent
+- 2026-10-06 19:52 — anything else left?
+- 2026-10-06 19:58 — yes
