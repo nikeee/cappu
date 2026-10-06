@@ -112,12 +112,12 @@ func runRender(t *testing.T, report audit.AuditReport, byKey map[packages.Packag
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stdout.Close()
+	defer func() { _ = stdout.Close() }()
 	stderr, err := os.Create(filepath.Join(dir, "stderr"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stderr.Close()
+	defer func() { _ = stderr.Close() }()
 	cfg := &config.Config{ConfigPath: "/project/cappu.json", AuditOptions: config.AuditOptions{Ignore: ignores}}
 	code := renderAudit(stdout, stderr, cfg, report, byKey, format, allow)
 	out, _ := os.ReadFile(stdout.Name())

@@ -620,3 +620,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-10-06 13:59 — deep review
 - 2026-10-06 14:04 — fixe 1-7 + "remove from cappu.json"
 - 2026-10-06 14:09 — commit
+- 2026-10-06 14:10 — continue. note that we strive for feature parity between ts and go, so we can remove go
