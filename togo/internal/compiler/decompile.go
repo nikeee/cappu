@@ -3974,11 +3974,19 @@ func (d *bodyDecompiler) anonymousBody(
 	default:
 		return "", "", nil, bail("an anonymous class of no type source could name")
 	}
-	block, err := initializerBlock(anonymous, target.Descriptor, syntheticFields(anonymous))
+	// The body reads a captured value by the name the `new` was handed, so no
+	// local of its own may carry that name.
+	reserved := map[string]bool{}
+	for _, name := range names {
+		if !strings.HasSuffix(name, ".this") {
+			reserved[name] = true
+		}
+	}
+	block, err := initializerBlock(anonymous, target.Descriptor, syntheticFields(anonymous), reserved)
 	if err != nil {
 		return "", "", nil, err
 	}
-	lines, err := anonymousMembers(anonymous, block)
+	lines, err := anonymousMembers(anonymous, block, reserved)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -4039,7 +4047,7 @@ var capturedValue = regexp.MustCompile(`^(?:[A-Za-z_$][\w$]*|-?\d+[LlFfDd]?|"[^"
 // blocks source wrote, which Java writes back as one instance initializer.
 // Nothing of it may read the constructor's own parameters - the names those
 // carry here are not the ones the enclosing body gave the captured values.
-func initializerBlock(anonymous *ClassFile, descriptor string, synthetic map[string]bool) ([]string, error) {
+func initializerBlock(anonymous *ClassFile, descriptor string, synthetic map[string]bool, reserved map[string]bool) ([]string, error) {
 	var method Member
 	for _, one := range anonymous.Methods {
 		if one.Name == "<init>" && one.Descriptor == descriptor {
@@ -4088,7 +4096,7 @@ func initializerBlock(anonymous *ClassFile, descriptor string, synthetic map[str
 	if !extra {
 		return nil, nil
 	}
-	lines, reconstructed, err := methodSource(method, anonymous)
+	lines, reconstructed, err := methodSource(method, anonymous, reserved)
 	if err != nil {
 		return nil, err
 	}
@@ -4186,7 +4194,7 @@ func capturedFields(anonymous *ClassFile, descriptor string) (map[int]string, er
 // body of a `new Iface() { .. }`: the synthetic fields the captured values
 // arrive in are javac's, and so is the constructor - which capturedFields has
 // already checked holds nothing source wrote.
-func anonymousMembers(classFile *ClassFile, block []string) ([]string, error) {
+func anonymousMembers(classFile *ClassFile, block []string, reserved map[string]bool) ([]string, error) {
 	var lines []string
 	for _, field := range classFile.Fields {
 		if field.Flags&accSynthetic != 0 {
@@ -4212,7 +4220,7 @@ func anonymousMembers(classFile *ClassFile, block []string) ([]string, error) {
 			}
 			return nil, bail("an anonymous class with a static initializer")
 		}
-		body, _, err := methodSource(method, classFile)
+		body, _, err := methodSource(method, classFile, reserved)
 		if err != nil {
 			return nil, err
 		}
@@ -8688,7 +8696,38 @@ func chainCallStub(instructions []Instruction, classFile *ClassFile) string {
 
 // methodSource renders one member; reconstructed is false when the body is the
 // bail-out rendering rather than reconstructed code.
-func methodSource(method Member, classFile *ClassFile) (lines []string, reconstructed bool, err error) {
+// renameReserved gives another name to every local that carries one the text
+// around this method already uses - a value the enclosing `new` captured. The
+// names here are this phase's own invention, so renaming one costs nothing,
+// where reading the wrong variable would cost everything.
+func renameReserved(locals map[int]*local, reserved map[string]bool) {
+	if len(reserved) == 0 {
+		return
+	}
+	taken := map[string]bool{}
+	for _, one := range locals {
+		taken[one.Name] = true
+	}
+	for _, one := range locals {
+		if !reserved[one.Name] {
+			continue
+		}
+		for n := 2; ; n++ {
+			candidate := one.Name + "_" + strconv.Itoa(n)
+			if !taken[candidate] && !reserved[candidate] {
+				delete(taken, one.Name)
+				one.Name, taken[candidate] = candidate, true
+				break
+			}
+		}
+	}
+}
+
+// methodSource writes one method. `reserved` are names the text around it
+// already uses for something else - the values an anonymous class captured,
+// which its body reads by the name the `new` was handed - so the locals here
+// take other ones.
+func methodSource(method Member, classFile *ClassFile, reserved map[string]bool) (lines []string, reconstructed bool, err error) {
 	isStatic := method.Flags&accStatic != 0
 	self := selfOf(classFile)
 	code, err := ReadCode(method, classFile.Pool)
@@ -8700,6 +8739,7 @@ func methodSource(method Member, classFile *ClassFile) (lines []string, reconstr
 		localTable = readLocalVariables(code, classFile.Pool)
 	}
 	locals := buildLocals(method, localTable, isStatic, self)
+	renameReserved(locals, reserved)
 	// A record's canonical constructor has to name its parameters after the
 	// components - Java checks that, and a class file without a debug table does
 	// not carry the names.
@@ -9255,7 +9295,7 @@ func DecompileClass(classFile *ClassFile) (string, error) {
 		if components != nil && isGeneratedRecordMember(method, classFile, components) {
 			continue
 		}
-		body, reconstructed, err := methodSource(method, classFile)
+		body, reconstructed, err := methodSource(method, classFile, nil)
 		if err != nil {
 			return "", err
 		}

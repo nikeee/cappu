@@ -2425,6 +2425,41 @@ public class Erased {
 	}
 }
 
+// A captured value is read in the body by the name the `new` was handed, and
+// the names this phase gives a body's own locals are its own invention: where
+// the two collide, the local is the one that moves.
+func TestDecompileRenamesALocalThatTakesACapturedName(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	source := `interface Go { String go(int n); }
+public class Taken {
+  static Go make(String p) { return new Go() { public String go(int n) { return p + n; } }; }
+  public static void main(String[] z) { System.out.println(make("v").go(2)); }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Taken", source)
+	decompiled, err := DecompileWith(readFile(t, classFile), siblingsIn(dir))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(decompiled, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", decompiled)
+	}
+	// The capture keeps the name the `new` was handed; the body's parameter,
+	// which this phase named, takes another.
+	if !strings.Contains(decompiled, "go(int arg0_2)") || !strings.Contains(decompiled, "return arg0 + arg0_2;") {
+		t.Errorf("expected the local to move, not the capture:\n%s", decompiled)
+	}
+	// `Go` lives beside it, so the round-trip compiles against the original.
+	again := filepath.Join(dir, "again")
+	compileWithJavacOn(t, again, "Taken", decompiled, dir)
+	if actual, expected := runJava(t, again+string(os.PathListSeparator)+dir, "Taken"), runJava(t, dir, "Taken"); actual != expected {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A body that asserts gets a synthetic static flag and the `<clinit>` that sets
 // it. Neither is a capture nor a static initializer source wrote, and an
 // anonymous class carrying them is still an anonymous class.
