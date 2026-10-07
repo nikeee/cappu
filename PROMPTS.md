@@ -628,3 +628,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-10-06 19:58 — yes
 - 2026-10-06 20:49 — upgrade golang auf latest
 - 2026-10-06 22:10 — deep review
+- 2026-10-07 23:01 — die ci failt https://github.com/nikeee/cappu/actions/runs/37681653971

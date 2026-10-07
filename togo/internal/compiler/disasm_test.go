@@ -228,9 +228,39 @@ func hasTool(name string) bool {
 	return exec.Command(name, "-version").Run() == nil
 }
 
+// javap's Code-instruction indent got one level deeper when it was rewritten
+// onto the java.lang.classfile API (JDK-8294969, JDK 22+): the `<pc>:` column
+// is 2 columns narrower on older javap builds. disasm.go (see pcIndent/pcWidth)
+// targets the rewritten layout, so an older javap on PATH (JDK 21 on some CI
+// legs) can never match it byte-for-byte. Probe for that instead of guessing a
+// JDK version cutoff.
+func javapUsesLegacyCodeIndent(t *testing.T) bool {
+	dir := t.TempDir()
+	javaFile := filepath.Join(dir, "Probe.java")
+	if err := os.WriteFile(javaFile, []byte("class Probe { void m() {} }"), 0o644); err != nil {
+		t.Fatalf("write probe: %v", err)
+	}
+	if out, err := exec.Command("javac", "-d", dir, javaFile).CombinedOutput(); err != nil {
+		t.Fatalf("javac probe: %v\n%s", err, out)
+	}
+	out, err := exec.Command("javap", "-c", filepath.Join(dir, "Probe.class")).Output()
+	if err != nil {
+		t.Fatalf("javap probe: %v", err)
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		if strings.TrimLeft(line, " ") == "0: return" {
+			return len(line)-len("0: return") != pcIndent+pcWidth-1
+		}
+	}
+	return false
+}
+
 func TestDisasmMatchesJavap(t *testing.T) {
 	if !hasTool("javac") || !hasTool("javap") {
 		t.Skip("no JDK (javac/javap)")
+	}
+	if javapUsesLegacyCodeIndent(t) {
+		t.Skip("installed javap uses the pre-JDK-8294969 Code indent width")
 	}
 	for _, release := range []string{"21", oldRelease} {
 		for name, source := range javacFixtures {
