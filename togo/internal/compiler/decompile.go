@@ -3899,7 +3899,7 @@ func (d *bodyDecompiler) anonymousBody(
 			names[field] = enclosing + ".this"
 		case at < 0 || at >= len(args):
 			return "", "", nil, bail("an anonymous class whose capture is not an argument")
-		case !capturedValue.MatchString(args[at]):
+		case !capturedValue.MatchString(args[at]) && !passedOnCapture.MatchString(args[at]):
 			// Anything but a name would be evaluated once per use in the body,
 			// where source evaluated it once at the `new`.
 			return "", "", nil, bail("an anonymous class capturing more than a name")
@@ -3934,7 +3934,14 @@ func (d *bodyDecompiler) anonymousBody(
 			// from, as long as javac wrote no bridge: a bridge is where the
 			// body's own method is narrower than the one it overrides, and
 			// raw types would leave that one unimplemented.
-			if hasBridge(anonymous) {
+			// Only where the class implements an interface and extends nothing:
+			// the body's methods are then the erased ones the raw interface
+			// asks for. A generic *class* brings methods of its own hierarchy -
+			// `Sink.ChainedDouble<U>` specializes `Consumer<Double>.accept` for
+			// a double - and raw types leave those unimplemented. A bridge says
+			// the body is narrower than what it overrides, which raw types lose
+			// the same way.
+			if anonymous.SuperClass != "java/lang/Object" || hasBridge(anonymous) {
 				return "", "", nil, bail("an anonymous class with a generic supertype")
 			}
 			generic, genericInterfaces = superType, interfaces
@@ -3995,21 +4002,39 @@ func (d *bodyDecompiler) anonymousBody(
 	// the variable the `new` was handed. A body that already uses that name
 	// for something of its own would read the wrong one.
 	for _, name := range names {
-		if !strings.HasSuffix(name, ".this") && standaloneName(name).MatchString(body) {
+		// A capture passed on from the class around this one reads as that
+		// class's own field, which is exactly what the body says and what the
+		// outer pass rewrites; it collides with nothing.
+		if strings.HasSuffix(name, ".this") || passedOnCapture.MatchString(name) {
+			continue
+		}
+		if standaloneName(name).MatchString(body) {
 			return "", "", nil, bail("an anonymous class whose captured name is taken")
 		}
 	}
 	// One pass: `this.val$a` is a prefix of `this.val$ab`, and replacing one
 	// field at a time would rewrite the other's name.
+	// What this class handed on to an anonymous class inside it reads as this
+	// class's own field, and stays for the pass around this one to rewrite.
+	passedOn := map[string]bool{}
+	for _, name := range names {
+		if passedOnCapture.MatchString(name) {
+			passedOn[name] = true
+		}
+	}
 	body = syntheticRead.ReplaceAllStringFunc(body, func(match string) string {
 		if name, ok := names[strings.TrimPrefix(match, "this.")]; ok {
 			return name
 		}
 		return match
 	})
-	// A field left over is one the constructor did not explain.
-	if strings.Contains(body, "this$") || strings.Contains(body, "val$") {
-		return "", "", nil, bail("an anonymous class holding a field its constructor did not explain")
+	// A field left over is one the constructor did not explain - except a
+	// capture this class passed on to one inside it, which still reads as this
+	// class's own field and which the pass around this one rewrites.
+	for _, match := range syntheticRead.FindAllString(body, -1) {
+		if !passedOn[match] {
+			return "", "", nil, bail("an anonymous class holding a field its constructor did not explain")
+		}
 	}
 	return body, named, kept, nil
 }
@@ -4041,6 +4066,13 @@ func standaloneName(name string) *regexp.Regexp {
 // variable, a parameter or a literal. Anything else would be evaluated once
 // per read, where source evaluated it once at the `new`.
 var capturedValue = regexp.MustCompile(`^(?:[A-Za-z_$][\w$]*|-?\d+[LlFfDd]?|"[^"\\]*"|'[^'\\]*'|true|false|null)$`)
+
+// passedOnCapture matches a read of a field javac keeps a capture in. An
+// anonymous class inside another one is handed what the outer one captured,
+// which at this point still reads as the outer's own field; the pass that
+// finishes the outer body rewrites it to the name source wrote, and the
+// read itself is of a final field javac wrote, so it costs nothing to repeat.
+var passedOnCapture = regexp.MustCompile(`^this\.(?:val\$|this\$)[\w$]+$`)
 
 // initializerBlock is what an anonymous class's constructor holds beyond the
 // capture stores and the super call: the field initializers and instance

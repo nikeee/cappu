@@ -2094,15 +2094,16 @@ func TestDecompileWritesAnAnonymousClassWhereItWasWritten(t *testing.T) {
 		"new java.util.function.Function<java.lang.String, java.lang.Integer>() {",
 		"int n;", "{\nthis.n = 3;\nthis.cache = arg0 + \"!\";\n}",
 		"{\nthis.self = this;\n}",
-		// `prefix` is the name the body's own parameter carries.
-		"cappu: an anonymous class whose captured name is taken",
+		// The capture keeps the name the `new` was handed; the body's own
+		// parameter, which this phase named, takes another.
+		"public java.lang.String greet(java.lang.String arg0_2) {\nreturn arg0 + arg0_2;",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
 		}
 	}
-	if strings.Count(source, "/* cappu:") != 1 {
-		t.Errorf("expected one bail:\n%s", source)
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
 	}
 	// Without the classes beside it there is no body to write.
 	blind, err := Decompile(readFile(t, classFile))
@@ -2421,6 +2422,48 @@ public class Erased {
 	again := filepath.Join(dir, "again")
 	compileWithJavac(t, again, "Erased", decompiled)
 	if actual, expected := runJava(t, again, "Erased"), runJava(t, dir, "Erased"); actual != expected {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// An anonymous class inside another one is handed what the outer one
+// captured, which at that point still reads as the outer's own field. The
+// pass that finishes the outer body rewrites it, so the inner class is not a
+// refusal.
+func TestDecompileWritesACapturePassedOn(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	source := `public class PassedOn {
+  static Runnable outer(String a) {
+    return new Runnable() {
+      public void run() {
+        Runnable inner = new Runnable() { public void run() { System.out.print(a + "!"); } };
+        inner.run();
+        System.out.print(a);
+      }
+    };
+  }
+  public static void main(String[] z) { outer("v").run(); System.out.println(); }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "PassedOn", source)
+	decompiled, err := DecompileWith(readFile(t, classFile), siblingsIn(dir))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(decompiled, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", decompiled)
+	}
+	// Both levels read the capture by the name the outermost `new` was handed,
+	// and no field javac wrote is left in the text.
+	if strings.Count(decompiled, "arg0") < 2 || strings.Contains(decompiled, "val$") {
+		t.Errorf("expected the capture resolved at both levels:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "PassedOn", decompiled)
+	if actual, expected := runJava(t, again, "PassedOn"), runJava(t, dir, "PassedOn"); actual != expected {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
