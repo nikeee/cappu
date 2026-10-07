@@ -6676,10 +6676,8 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 		// statement: source wrote the arm as a block then, and the value it
 		// leaves is what `yield` says.
 		if written := flattenStatements((*statements)[armBefore:]); len(written) > 0 {
-			if !patterns {
-				restore()
-				return expr{}, false, nil
-			}
+			// Source wrote the arm as a block then, and the value it leaves is
+			// what `yield` says.
 			*statements = (*statements)[:armBefore]
 			arms = append(arms, switchArm{
 				Prefix:   label + " -> { " + strings.Join(written, " ") + " yield ",

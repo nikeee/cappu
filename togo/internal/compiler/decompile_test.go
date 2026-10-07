@@ -2426,6 +2426,42 @@ public class Erased {
 	}
 }
 
+// A switch expression whose arm does something before the value is a block
+// with a `yield` in source, whatever the switch is over.
+func TestDecompileWritesABlockArmOfASwitchExpression(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	source := `public class Yielded {
+  static int f(int k) {
+    return switch (k) {
+      case 1 -> { System.out.print("one"); yield 10; }
+      case 2 -> { System.out.print("two"); yield 20; }
+      default -> 0;
+    };
+  }
+  public static void main(String[] z) { System.out.println("" + f(1) + f(2) + f(9)); }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Yielded", source)
+	decompiled, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(decompiled, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", decompiled)
+	}
+	if !strings.Contains(decompiled, "yield 10;") || !strings.Contains(decompiled, "case 2 -> {") {
+		t.Errorf("expected the block arms:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Yielded", decompiled)
+	if actual, expected := runJava(t, again, "Yielded"), runJava(t, dir, "Yielded"); actual != expected {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // An anonymous class inside another one is handed what the outer one
 // captured, which at that point still reads as the outer's own field. The
 // pass that finishes the outer body rewrites it, so the inner class is not a
