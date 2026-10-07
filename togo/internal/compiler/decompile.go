@@ -3928,7 +3928,16 @@ func (d *bodyDecompiler) anonymousBody(
 	if signature := SignatureOf(anonymous.Attributes, anonymous.Pool); signature != "" {
 		generic, genericInterfaces, ok := classSignatureTypes(signature, d.self())
 		if !ok || len(genericInterfaces) != len(interfaces) {
-			return "", "", nil, bail("an anonymous class with a generic supertype")
+			// The type arguments cannot be written here - a type variable of
+			// the enclosing method has no name this phase keeps. The erased
+			// types still compile, and the body still overrides what it came
+			// from, as long as javac wrote no bridge: a bridge is where the
+			// body's own method is narrower than the one it overrides, and
+			// raw types would leave that one unimplemented.
+			if hasBridge(anonymous) {
+				return "", "", nil, bail("an anonymous class with a generic supertype")
+			}
+			generic, genericInterfaces = superType, interfaces
 		}
 		// The class this file declares is written without its type parameters,
 		// so naming it with type arguments would not compile. Only the types
@@ -6500,6 +6509,18 @@ func takesAnEnclosingInstance(anonymous *ClassFile, innerFlags map[string]uint16
 			if one.Type == enclosing {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// hasBridge reports a class javac gave a bridge method: the body implements a
+// narrower signature than the one it overrides, which only the type arguments
+// of the supertype explain.
+func hasBridge(classFile *ClassFile) bool {
+	for _, method := range classFile.Methods {
+		if method.Flags&accBridge != 0 {
+			return true
 		}
 	}
 	return false

@@ -2374,6 +2374,57 @@ func TestDecompileWritesASerializableLambda(t *testing.T) {
 	}
 }
 
+// A supertype whose type arguments name a type variable of the enclosing
+// method cannot be written here - the variable has no name this phase keeps -
+// but the erased type still compiles and the body still overrides what it came
+// from, as long as javac wrote no bridge.
+func TestDecompileErasesASupertypeItCannotName(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	source := `import java.util.*;
+import java.util.function.*;
+public class Erased {
+  static <E> Iterator<E> one(E e) {
+    return new Iterator<E>() {
+      boolean done;
+      public boolean hasNext() { return !done; }
+      public E next() { if (done) throw new NoSuchElementException(); done = true; return e; }
+    };
+  }
+  static Function<String, Integer> len() {
+    return new Function<String, Integer>() { public Integer apply(String s) { return s.length(); } };
+  }
+  public static void main(String[] z) {
+    Iterator<String> i = one("q");
+    System.out.print(i.next() + "" + i.hasNext() + len().apply("abcd"));
+    System.out.println();
+  }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Erased", source)
+	decompiled, err := DecompileWith(readFile(t, classFile), siblingsIn(dir))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(decompiled, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", decompiled)
+	}
+	// The type variable goes, the type arguments this phase can name stay.
+	if !strings.Contains(decompiled, "new java.util.Iterator() {") {
+		t.Errorf("expected the erased supertype:\n%s", decompiled)
+	}
+	if !strings.Contains(decompiled, "new java.util.function.Function<java.lang.String, java.lang.Integer>() {") {
+		t.Errorf("expected the named type arguments to stay:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Erased", decompiled)
+	if actual, expected := runJava(t, again, "Erased"), runJava(t, dir, "Erased"); actual != expected {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A body that asserts gets a synthetic static flag and the `<clinit>` that sets
 // it. Neither is a capture nor a static initializer source wrote, and an
 // anonymous class carrying them is still an anonymous class.
