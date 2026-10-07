@@ -4309,6 +4309,12 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 				keyword = qualifier + ".super"
 			}
 		}
+		// An enum constructor is handed the constant's name and ordinal in front
+		// of what source wrote, and this phase declares neither: a `this(..)`
+		// chain passes them on, where source passed only its own arguments.
+		if !isSuper && isEnumDeclaration(d.classFile) && len(args) >= 2 {
+			args = args[2:]
+		}
 		d.chained = keyword + "(" + strings.Join(args, ", ") + ");"
 		d.emit(d.chained)
 		return nil

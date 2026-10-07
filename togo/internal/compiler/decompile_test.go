@@ -2169,6 +2169,36 @@ func TestDecompileWritesAnEnumConstantsArguments(t *testing.T) {
 	if actual != expected || actual != "1r2g3b 1r\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
+	// An enum constructor is handed the constant's name and ordinal in front of
+	// what source wrote, and neither is declared here: a `this(..)` chain that
+	// passed them on would name variables this file does not have.
+	chained := `public enum Chained {
+  A(1, "a"), B(2);
+  final int n; final String tag;
+  Chained(int n, String tag) { this.n = n; this.tag = tag; }
+  Chained(int n) { this(n, "?"); }
+  public String show() { return n + tag; }
+  public static void main(String[] z) {
+    for (Chained c : values()) System.out.print(c.show());
+    System.out.println();
+  }
+}
+`
+	chainDir := t.TempDir()
+	chainClass := compileWithJavac(t, chainDir, "Chained", chained)
+	chainSource, err := DecompileWith(readFile(t, chainClass), siblingsIn(chainDir))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(chainSource, `this(arg2, "?");`) {
+		t.Errorf("expected the chain to pass only source's arguments:\n%s", chainSource)
+	}
+	chainAgain := filepath.Join(chainDir, "again")
+	compileWithJavac(t, chainAgain, "Chained", chainSource)
+	if actual, expected := runJava(t, chainAgain, "Chained"), runJava(t, chainDir, "Chained"); actual != expected {
+		t.Errorf("the decompiled enum runs differently: %q vs %q", actual, expected)
+	}
+
 	// A constant with a body of its own is built as a subclass javac wrote;
 	// source writes that body after the arguments.
 	withBody := strings.Replace(enumArgumentsSource, `BLUE(3, "b");`,
