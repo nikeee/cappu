@@ -3954,6 +3954,13 @@ func (d *bodyDecompiler) anonymousBody(
 		}
 		named = interfaces[0]
 	case len(interfaces) == 0 && anonymous.SuperClass != "":
+		// An inner class's constructor takes the enclosing instance, and source
+		// names it in front of the `new` - `outer.new Inner(..) { .. }`. The
+		// instance is one of the arguments here, not a qualifier this phase
+		// writes, so the `new` would lose it.
+		if takesAnEnclosingInstance(anonymous, d.innerFlags) {
+			return "", "", nil, bail("an anonymous class of an inner class")
+		}
 		named = superType
 	default:
 		return "", "", nil, bail("an anonymous class of no type source could name")
@@ -4042,6 +4049,10 @@ func initializerBlock(anonymous *ClassFile, descriptor string, synthetic map[str
 	// call has no block to write, and needs no reconstruction to say so -
 	// javac puts those stores in front of the `super()`, which on its own is
 	// a shape this phase refuses.
+	// javac null-checks the enclosing instance even where the class keeps
+	// nothing of it, and then throws the value away: the check is its own, and
+	// the `pop` left behind is nothing source wrote either.
+	instructions = withoutNullChecks(instructions, anonymous.Pool)
 	extra := false
 	for i, one := range instructions {
 		switch {
@@ -4055,6 +4066,7 @@ func initializerBlock(anonymous *ClassFile, descriptor string, synthetic map[str
 			}
 		case isOneOf(opBase(one.Mnemonic), "ilfda", "load"):
 		case one.Mnemonic == "return" && i == len(instructions)-1:
+		case one.Mnemonic == "pop", one.Mnemonic == "pop2":
 		case one.Mnemonic == "invokespecial":
 			target, ok := PoolMemberRef(anonymous.Pool, uint16(one.Arg))
 			if !ok || target.Name != "<init>" {
@@ -6464,6 +6476,33 @@ func setsOnlyTheAssertionFlag(method Member, classFile *ClassFile) bool {
 		}
 	}
 	return stored
+}
+
+// takesAnEnclosingInstance reports an anonymous class whose superclass is an
+// inner class: its constructor is handed the enclosing instance of that class,
+// which source wrote as the qualifier of the `new`.
+func takesAnEnclosingInstance(anonymous *ClassFile, innerFlags map[string]uint16) bool {
+	access, known := innerFlags[anonymous.SuperClass]
+	if !known || access&accStatic != 0 {
+		return false
+	}
+	at := strings.LastIndex(anonymous.SuperClass, "$")
+	if at < 0 {
+		return false
+	}
+	enclosing := strings.ReplaceAll(anonymous.SuperClass[:at], "/", ".")
+	for _, method := range anonymous.Methods {
+		if method.Name != "<init>" {
+			continue
+		}
+		params := parameterSlots(method.Descriptor, true)
+		for _, one := range params {
+			if one.Type == enclosing {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // throwsMatchException reports a block that does nothing but throw the
