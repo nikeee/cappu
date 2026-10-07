@@ -364,6 +364,20 @@ func TestDecompileRendersNonFiniteConstants(t *testing.T) {
 	}
 }
 
+// compileDir compiles every .java file in one directory together, which is
+// what a hierarchy split across files needs.
+func compileDir(t *testing.T, dir string) {
+	t.Helper()
+	sources, err := filepath.Glob(filepath.Join(dir, "*.java"))
+	if err != nil || len(sources) == 0 {
+		t.Fatalf("no sources in %s: %v", dir, err)
+	}
+	out, err := exec.Command("javac", append([]string{"--release", "21", "-d", dir}, sources...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("javac %s: %v\n%s", dir, err, out)
+	}
+}
+
 func compileWithJavac(t *testing.T, dir, name, source string) string {
 	t.Helper()
 	return compileWithJavacOn(t, dir, name, source, "")
@@ -2239,6 +2253,26 @@ func TestDecompileWritesTheAssertSourceWrote(t *testing.T) {
 	if strings.Contains(source, "/* cappu:") {
 		t.Errorf("expected no bail:\n%s", source)
 	}
+	// A field source wrote under javac's name is source's: reading it is not an
+	// assert, and rewriting it into one changes what the body does.
+	userFlag := `class OwnFlag { static boolean $assertionsDisabled = false; }
+public class UserFlag {
+  static int h(int x) { if (!OwnFlag.$assertionsDisabled && x < 0) throw new AssertionError("real"); return x; }
+}
+`
+	flagDir := t.TempDir()
+	flagClass := compileWithJavac(t, flagDir, "UserFlag", userFlag)
+	flagSource, err := Decompile(readFile(t, flagClass))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(flagSource, "assert ") || strings.Contains(flagSource, "/* cappu:") {
+		t.Errorf("a field of source's own is not javac's flag:\n%s", flagSource)
+	}
+	if !strings.Contains(flagSource, "OwnFlag.$assertionsDisabled") {
+		t.Errorf("expected the field read to survive:\n%s", flagSource)
+	}
+
 	// An assert whose condition has a side effect lives in a shape this phase
 	// does not read back; naming javac's flag field is not an option, so the
 	// body refuses.
@@ -2333,6 +2367,22 @@ const patternSwitchSource = `public class Patterns {
     switch (a) { case Integer i -> System.out.print("a"); default -> {} }
     switch (b) { case String s -> System.out.print("b"); default -> {} }
   }
+  // A null-and-default label lands both on one block: a pattern switch
+  // without the null label throws where this ran the default arm.
+  static void nullOrDefault(Object o) {
+    switch (o) {
+      case String s -> System.out.print("S");
+      case null, default -> System.out.print("N");
+    }
+  }
+  // The expression form: each arm leaves the value the switch takes.
+  static String kind(Object o) {
+    return switch (o) {
+      case Integer i -> "i" + i;
+      case String s -> "s" + s.length();
+      default -> "d";
+    };
+  }
   static void guarded(Object o) {
     switch (o) {
       case String s when s.length() > 2 -> System.out.print("L");
@@ -2344,6 +2394,8 @@ const patternSwitchSource = `public class Patterns {
     order(1); order(1.5); order("x");
     nulls(null); nulls("yz"); nulls(3);
     twice(1, "s"); twice("s", 1);
+    nullOrDefault("x"); nullOrDefault(null); nullOrDefault(1);
+    System.out.print(kind(2) + kind("ab") + kind(1.5));
     System.out.println();
   }
 }
@@ -2365,6 +2417,10 @@ func TestDecompileWritesAPatternSwitch(t *testing.T) {
 		"case java.lang.Integer p",
 		"case java.lang.Number p",
 		"case null:",
+		// the label a shared null-and-default block keeps
+		"case null:\ndefault:",
+		// the arms of the expression form, with the binding the label makes
+		`case java.lang.Integer p`,
 		// a switch that covers every value has to say so, even where source
 		// wrote nothing in the default
 		"default:",
@@ -2381,16 +2437,17 @@ func TestDecompileWritesAPatternSwitch(t *testing.T) {
 	again := filepath.Join(dir, "again")
 	compileWithJavac(t, again, "Patterns", source)
 	expected := runJava(t, dir, "Patterns")
-	if actual := runJava(t, again, "Patterns"); actual != expected || expected != "I1N1.5?0S2Dab\n" {
+	if actual := runJava(t, again, "Patterns"); actual != expected || expected != "I1N1.5?0S2DabSNNi2s2d\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
 
-// A bail names the construct source wrote: a pattern-matching switch is a
-// `SwitchBootstraps.typeSwitch`, not "an invokedynamic".
-func TestDecompileNamesWhatItCannotWriteBack(t *testing.T) {
-	if !hasTool("javac") {
-		t.Skip("no JDK (javac)")
+// An exhaustive switch over a sealed type keeps neither javac's arm nor the
+// `permits` clause by accident: the clause is what makes the rest exhaustive,
+// so this compiles and runs the reconstruction.
+func TestDecompileWritesAnExhaustiveSealedSwitch(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
 	}
 	// An exhaustive switch over a sealed type has no default of its own: javac
 	// adds one that throws MatchException and lays it out first, where a
@@ -2427,6 +2484,25 @@ public class Patterned {
 	}
 	if !strings.Contains(sealedSource, "sealed interface Pat permits PatA, PatB {") {
 		t.Errorf("expected the permits clause:\n%s", sealedSource)
+	}
+	// Every class of the hierarchy goes back together: the switch is only
+	// exhaustive because the sealed type says what it permits.
+	again := filepath.Join(dir, "again")
+	if err := os.MkdirAll(again, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Pat", "PatA", "PatB", "Patterned"} {
+		one, err := Decompile(readFile(t, filepath.Join(dir, name+".class")))
+		if err != nil {
+			t.Fatalf("decompile %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(again, name+".java"), []byte(one), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	compileDir(t, again)
+	if actual, expected := runJava(t, again, "Patterned"), runJava(t, dir, "Patterned"); actual != expected || expected != "AB\n" {
+		t.Errorf("the decompiled hierarchy runs differently: %q vs %q", actual, expected)
 	}
 }
 

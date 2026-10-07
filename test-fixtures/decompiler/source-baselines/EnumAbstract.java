@@ -1,6 +1,16 @@
 enum EnumAbstract {
-  LOW,
-  HIGH;
+  LOW {
+
+    public int rank() {
+      return 1;
+    }
+  },
+  HIGH {
+
+    public int rank() {
+      return 9;
+    }
+  };
 
   private EnumAbstract() {}
 
@@ -15,35 +25,5 @@ enum EnumAbstract {
       java.lang.System.out.println(var3.name() + var3.rank());
       var2++;
     }
-  }
-
-  static {
-    /* cappu: an anonymous class; the bytecode is:
-     * 0: new #72
-     * 3: dup
-     * 4: ldc #73
-     * 6: iconst_0
-     * 7: invokespecial #74
-     * 10: putstatic #76
-     * 13: new #78
-     * 16: dup
-     * 17: ldc #79
-     * 19: iconst_1
-     * 20: invokespecial #80
-     * 23: putstatic #82
-     * 26: iconst_2
-     * 27: anewarray #2
-     * 30: dup
-     * 31: iconst_0
-     * 32: getstatic #76
-     * 35: aastore
-     * 36: dup
-     * 37: iconst_1
-     * 38: getstatic #82
-     * 41: aastore
-     * 42: putstatic #59
-     * 45: return
-     */
-    if (true) throw new UnsupportedOperationException("cappu: not decompiled");
   }
 }

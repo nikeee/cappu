@@ -103,6 +103,9 @@ type expr struct {
 	// number has to get the ternary again (`array[c ? 1 : 0]`).
 	AsInt    string
 	Compared *comparedPair
+	// AssertionFlag is set on a read of the synthetic field javac tests an
+	// `assert` against, which is the only read that writes one back.
+	AssertionFlag bool
 	// Lambda is set on a lambda: it has no type of its own, so it needs the
 	// interface named wherever the context does not say it (a return type the
 	// interface erased to `Object`, for one).
@@ -1101,19 +1104,31 @@ func parameterSlots(descriptor string, isStatic bool) []paramSlot {
 // 2.9.3): what source wrote is the descriptor, and the value it hands back
 // needs the cast that goes with it.
 var signaturePolymorphic = map[string]bool{
-	"java/lang/invoke/MethodHandle.invoke":          true,
-	"java/lang/invoke/MethodHandle.invokeExact":     true,
-	"java/lang/invoke/MethodHandle.invokeBasic":     true,
-	"java/lang/invoke/VarHandle.get":                true,
-	"java/lang/invoke/VarHandle.getVolatile":        true,
-	"java/lang/invoke/VarHandle.getAcquire":         true,
-	"java/lang/invoke/VarHandle.getOpaque":          true,
-	"java/lang/invoke/VarHandle.getAndSet":          true,
-	"java/lang/invoke/VarHandle.getAndAdd":          true,
-	"java/lang/invoke/VarHandle.compareAndExchange": true,
-	"java/lang/invoke/VarHandle.getAndBitwiseOr":    true,
-	"java/lang/invoke/VarHandle.getAndBitwiseAnd":   true,
-	"java/lang/invoke/VarHandle.getAndBitwiseXor":   true,
+	"java/lang/invoke/MethodHandle.invoke":                 true,
+	"java/lang/invoke/MethodHandle.invokeExact":            true,
+	"java/lang/invoke/MethodHandle.invokeBasic":            true,
+	"java/lang/invoke/VarHandle.compareAndExchange":        true,
+	"java/lang/invoke/VarHandle.compareAndExchangeAcquire": true,
+	"java/lang/invoke/VarHandle.compareAndExchangeRelease": true,
+	"java/lang/invoke/VarHandle.get":                       true,
+	"java/lang/invoke/VarHandle.getAcquire":                true,
+	"java/lang/invoke/VarHandle.getAndAdd":                 true,
+	"java/lang/invoke/VarHandle.getAndAddAcquire":          true,
+	"java/lang/invoke/VarHandle.getAndAddRelease":          true,
+	"java/lang/invoke/VarHandle.getAndBitwiseAnd":          true,
+	"java/lang/invoke/VarHandle.getAndBitwiseAndAcquire":   true,
+	"java/lang/invoke/VarHandle.getAndBitwiseAndRelease":   true,
+	"java/lang/invoke/VarHandle.getAndBitwiseOr":           true,
+	"java/lang/invoke/VarHandle.getAndBitwiseOrAcquire":    true,
+	"java/lang/invoke/VarHandle.getAndBitwiseOrRelease":    true,
+	"java/lang/invoke/VarHandle.getAndBitwiseXor":          true,
+	"java/lang/invoke/VarHandle.getAndBitwiseXorAcquire":   true,
+	"java/lang/invoke/VarHandle.getAndBitwiseXorRelease":   true,
+	"java/lang/invoke/VarHandle.getAndSet":                 true,
+	"java/lang/invoke/VarHandle.getAndSetAcquire":          true,
+	"java/lang/invoke/VarHandle.getAndSetRelease":          true,
+	"java/lang/invoke/VarHandle.getOpaque":                 true,
+	"java/lang/invoke/VarHandle.getVolatile":               true,
 }
 
 func methodReturnType(descriptor string) string {
@@ -2527,6 +2542,12 @@ type bodyDecompiler struct {
 	regions  []*tryRegion
 	// activeTries are the `try` statements being written right now.
 	activeTries map[*tryRegion]bool
+	// readAssertionFlag records a read of javac's assertion flag, whose `assert`
+	// has to be written back or the body refused.
+	readAssertionFlag bool
+	// skipped are the instructions a construct has accounted for elsewhere: the
+	// binding a pattern switch's arm opens with belongs to the case label.
+	skipped map[int]bool
 	// patternCases are the types a pattern-matching switch's indy answers with,
 	// one per case index, waiting for the `switch` that reads them.
 	patternCases map[int]string
@@ -2858,14 +2879,36 @@ func withoutAssertionFlag(condition expr) (expr, bool) {
 	return condition, false
 }
 
-// readsAssertionFlag reports `!$assertionsDisabled`, however the field is
-// qualified - a nested class reads the one its outermost class holds.
+// readsAssertionFlag reports `!$assertionsDisabled` - the flag itself, not a
+// field that merely carries the name.
 func readsAssertionFlag(condition expr) bool {
-	if condition.Logic == nil || condition.Logic.Kind != logicNot {
+	return condition.Logic != nil && condition.Logic.Kind == logicNot &&
+		condition.Logic.Left.AssertionFlag
+}
+
+// isAssertionFlag reports the field javac adds to a class that asserts: static
+// and synthetic, under the name it always uses. The declaring class is read
+// beside this file when it is not this one - an interface keeps its flag on a
+// synthetic class of its own - and a field it cannot reach is not taken for
+// javac's.
+func (d *bodyDecompiler) isAssertionFlag(field MemberRef) bool {
+	if field.Name != "$assertionsDisabled" {
 		return false
 	}
-	text := condition.Logic.Left.Text
-	return text == "$assertionsDisabled" || strings.HasSuffix(text, ".$assertionsDisabled")
+	declaring := d.classFile
+	if field.Owner != d.classFile.ThisClass {
+		beside, ok := SiblingClass(d.classFile.Siblings, field.Owner)
+		if !ok {
+			return false
+		}
+		declaring = beside
+	}
+	for _, one := range declaring.Fields {
+		if one.Name == field.Name {
+			return one.Flags&accStatic != 0 && one.Flags&accSynthetic != 0
+		}
+	}
+	return false
 }
 
 // assertionThrow reads the message of `throw new AssertionError(<message>);`,
@@ -6112,16 +6155,26 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	d.enumLabels = nil
 	if patternCases != nil {
 		labels := map[int]string{}
-		for key, typ := range patternCases {
-			if typ == "" {
-				labels[key] = "null"
+		for _, entry := range table.SwitchCases {
+			typ, ok := patternCases[entry.Key]
+			if !ok {
 				continue
 			}
-			// Each case binds a variable of its own. The body casts the
-			// selector again for the one javac stored, so this one is only the
-			// type test source wrote, and names nothing the body names.
+			if typ == "" {
+				labels[entry.Key] = "null"
+				continue
+			}
+			// The arm opens with the binding javac stored - `aload selector;
+			// checkcast T; astore k` - which is what the case label says. The
+			// label takes that variable over, and the store goes.
+			if name, taken := d.takeOverBinding(entry.Target, typ); taken {
+				labels[entry.Key] = typ + " " + name
+				continue
+			}
+			// Without that shape the body keeps its own cast, so the label
+			// binds a name of its own that nothing reads.
 			d.patternNames++
-			labels[key] = typ + " p" + strconv.Itoa(d.patternNames)
+			labels[entry.Key] = typ + " p" + strconv.Itoa(d.patternNames)
 		}
 		d.enumLabels = labels
 	}
@@ -6147,6 +6200,13 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 		}
 		seen[entry.Key] = true
 		if entry.Target == defaultTarget {
+			// `case null, default ->` lands both on one block, and there the
+			// null label is not something a `default:` says: a pattern switch
+			// without it throws where source ran the default arm. The label
+			// goes with the default's own, on the same block.
+			if patternCases != nil && entry.Key == -1 {
+				keysOf[defaultTarget] = append(keysOf[defaultTarget], entry.Key)
+			}
 			continue
 		}
 		if _, seen := keysOf[entry.Target]; !seen {
@@ -6219,7 +6279,7 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	// together - or throws - is a switch expression, and the value is what the
 	// code after the merge picks up.
 	if follow != exitBlock && len(bodies) == len(targets) {
-		value, found, err := d.trySwitchExpression(selector, bodies, keysOf, defaultTarget, follow)
+		value, found, err := d.trySwitchExpression(selector, bodies, keysOf, defaultTarget, follow, patternCases != nil)
 		if err != nil {
 			return 0, err
 		}
@@ -6313,6 +6373,46 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	return follow, nil
 }
 
+// takeOverBinding gives the case label the variable javac bound at the top of
+// the arm - `aload selector; checkcast T; astore k` - and drops those three
+// instructions, which the label now says. It reports the name the label binds.
+func (d *bodyDecompiler) takeOverBinding(start int, typ string) (string, bool) {
+	b := d.blocks[start]
+	if b == nil || len(b.Instructions) < 3 {
+		return "", false
+	}
+	load, cast, store := b.Instructions[0], b.Instructions[1], b.Instructions[2]
+	if opBase(load.Mnemonic) != "aload" || cast.Mnemonic != "checkcast" ||
+		opBase(store.Mnemonic) != "astore" {
+		return "", false
+	}
+	if typeName(orDefault(PoolClassName(d.classFile.Pool, uint16(cast.Arg))), d.self()) != typ {
+		return "", false
+	}
+	slot := slotOf(store)
+	// The arm has not run yet, so the slot holds nothing: the variable the
+	// label binds is declared here, where its name and type are both known.
+	// A slot already carrying a variable is one javac reused, which this does
+	// not take over.
+	if one, taken := d.locals[slot]; taken && one != nil {
+		return "", false
+	}
+	d.patternNames++
+	one := &local{
+		Name:        d.freshName("p" + strconv.Itoa(d.patternNames)),
+		Type:        typ,
+		Declared:    true,
+		StoreBlocks: map[int]bool{},
+	}
+	d.locals[slot] = one
+	d.byName[one.Name] = one
+	if d.skipped == nil {
+		d.skipped = map[int]bool{}
+	}
+	d.skipped[load.Pc], d.skipped[cast.Pc], d.skipped[store.Pc] = true, true, true
+	return one.Name, true
+}
+
 // throwsMatchException reports a block that does nothing but throw the
 // `MatchException` javac adds to an exhaustive switch over a sealed type - the
 // arm no source wrote.
@@ -6346,7 +6446,7 @@ func (d *bodyDecompiler) throwsMatchException(start int) bool {
 // trySwitchExpression writes the cases as `case k -> value;` arms when each is
 // a single value left for the merge, or a `throw`. Nothing is kept of a try
 // that does not fit.
-func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf map[int][]int, defaultTarget, follow int) (expr, bool, error) {
+func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf map[int][]int, defaultTarget, follow int, patterns bool) (expr, bool, error) {
 	stackBefore := append([]expr(nil), d.stack...)
 	statements := d.current
 	statementsBefore := len(*statements)
@@ -6362,7 +6462,16 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 		d.arms = d.arms[:armsBefore]
 	}
 	consumed := []int{}
-	arms := []string{}
+	// Each arm is its text and, for one that takes a value, where the value
+	// goes - a placeholder in the text would be found again in a `throw` whose
+	// message holds one.
+	type switchArm struct {
+		Text     string
+		Prefix   string
+		Suffix   string
+		HasValue bool
+	}
+	arms := []switchArm{}
 	values := []expr{}
 	for _, target := range bodies {
 		label := "default"
@@ -6390,9 +6499,16 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 				restore()
 				return expr{}, false, nil
 			}
-			arms = append(arms, label+" -> "+lines[0])
+			// javac's own arm for an exhaustive switch over a sealed type is
+			// dropped here too: written first, as it is laid out, it would
+			// dominate every pattern label after it.
+			if patterns && target == defaultTarget && d.throwsMatchException(target) {
+				continue
+			}
+			arms = append(arms, switchArm{Text: label + " -> " + lines[0]})
 			continue
 		}
+		armBefore := len(*statements)
 		value, found, err := d.valueOfRegion(target, follow, &consumed)
 		if err != nil {
 			restore()
@@ -6403,7 +6519,23 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 			return expr{}, false, nil
 		}
 		values = append(values, value)
-		arms = append(arms, label+" -> %s;")
+		// A pattern arm opens with the binding javac stored, which is a
+		// statement: source wrote the arm as a block then, and the value it
+		// leaves is what `yield` says.
+		if written := flattenStatements((*statements)[armBefore:]); len(written) > 0 {
+			if !patterns {
+				restore()
+				return expr{}, false, nil
+			}
+			*statements = (*statements)[:armBefore]
+			arms = append(arms, switchArm{
+				Prefix:   label + " -> { " + strings.Join(written, " ") + " yield ",
+				Suffix:   "; }",
+				HasValue: true,
+			})
+			continue
+		}
+		arms = append(arms, switchArm{Prefix: label + " -> ", Suffix: ";", HasValue: true})
 	}
 	if len(values) == 0 || len(*statements) != statementsBefore {
 		restore()
@@ -6442,12 +6574,12 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 		texts := []string{}
 		next := 0
 		for _, one := range arms {
-			if strings.HasSuffix(one, " -> %s;") {
-				texts = append(texts, strings.TrimSuffix(one, "%s;")+arm(values[next])+";")
-				next++
-			} else {
-				texts = append(texts, one)
+			if !one.HasValue {
+				texts = append(texts, one.Text)
+				continue
 			}
+			texts = append(texts, one.Prefix+arm(values[next])+one.Suffix)
+			next++
 		}
 		return "switch (" + selector.Text + ") { " + strings.Join(texts, " ") + " }"
 	}
@@ -6944,8 +7076,10 @@ func (d *bodyDecompiler) valueOfRegion(start, follow int, consumed *[]int) (expr
 	}
 	// A block the two arms share (the merge of a `||`) is taken twice, so it may
 	// only be one that has no side effects - then evaluating it twice is the
-	// same value twice. An arm of its own may call something.
-	if !isPureBlock(b) && (containsInt(*consumed, start) || !isArmBlock(b)) {
+	// same value twice. An arm of its own may call something. What a case label
+	// has taken over is not part of either shape.
+	shape := d.withoutSkipped(b)
+	if !isPureBlock(shape) && (containsInt(*consumed, start) || !isArmBlock(shape)) {
 		return expr{}, false, nil
 	}
 	if d.isLoopEdge(start) {
@@ -6998,6 +7132,26 @@ func (d *bodyDecompiler) valueOfRegion(start, follow int, consumed *[]int) (expr
 		return expr{}, false, err
 	}
 	return value, true, nil
+}
+
+// withoutSkipped is the block as the shape checks should see it: without the
+// instructions a construct has accounted for elsewhere.
+func (d *bodyDecompiler) withoutSkipped(b *block) *block {
+	if len(d.skipped) == 0 {
+		return b
+	}
+	kept := make([]Instruction, 0, len(b.Instructions))
+	for _, one := range b.Instructions {
+		if !d.skipped[one.Pc] {
+			kept = append(kept, one)
+		}
+	}
+	if len(kept) == len(b.Instructions) {
+		return b
+	}
+	view := *b
+	view.Instructions = kept
+	return &view
 }
 
 // reachesAvoiding reports whether a path from the entry reaches target without
@@ -7117,6 +7271,15 @@ func (d *bodyDecompiler) runInstructions(instructions []Instruction, endPc, bloc
 
 func (d *bodyDecompiler) runSteps(steps []Instruction, endPc int) error {
 	instructions := withoutNullChecks(steps, d.classFile.Pool)
+	if len(d.skipped) > 0 {
+		kept := make([]Instruction, 0, len(instructions))
+		for _, one := range instructions {
+			if !d.skipped[one.Pc] {
+				kept = append(kept, one)
+			}
+		}
+		instructions = kept
+	}
 	for i, instruction := range instructions {
 		// A store's variable comes into scope after the store, so the debug table
 		// is searched at the next instruction's pc, not the store's own.
@@ -7576,7 +7739,15 @@ func (d *bodyDecompiler) step(
 		}
 		fieldType := descriptorSourceType(field.Descriptor, d.self())
 		if mnemonic == "getstatic" {
-			d.push(primary(d.staticRef(field.Owner, field.Name), fieldType))
+			value := primary(d.staticRef(field.Owner, field.Name), fieldType)
+			// Only javac's own flag turns an `if` back into an `assert`; a
+			// field source wrote under that name is source's, whatever it is
+			// called.
+			value.AssertionFlag = d.isAssertionFlag(field)
+			if value.AssertionFlag {
+				d.readAssertionFlag = true
+			}
+			d.push(value)
 			return nil
 		}
 		target, err := d.popShared()
@@ -8463,17 +8634,6 @@ func methodSource(method Member, classFile *ClassFile) (lines []string, reconstr
 		return nil, false, err
 	}
 	body, reached, chainCall, err := decompileBody(classFile, code, instructions, locals, localTable, method, isStatic)
-	// The assertion flag is javac's field and is not declared here, so a body
-	// still naming it is a shape the assert was not read back from - it would
-	// not compile, and a body that does not compile is not a reconstruction.
-	if err == nil {
-		for _, line := range body {
-			if strings.Contains(line, "$assertionsDisabled") {
-				err = bail("an assert this phase cannot write back")
-				break
-			}
-		}
-	}
 	reconstructed = true
 	if err != nil {
 		var reason *notDecompilable
@@ -8568,6 +8728,18 @@ func decompileBody(
 	// Every void method ends in a `return` javac inserted; source does not.
 	if len(body) > 0 && body[len(body)-1] == "return;" {
 		body = body[:len(body)-1]
+	}
+	// A body that read javac's assertion flag and still names it is a shape the
+	// `assert` was not written back from. That field is javac's and this file
+	// does not declare it, so the body would not compile - and a body that does
+	// not compile is not a reconstruction. A field source happens to call the
+	// same thing is not javac's and keeps its reads.
+	if d.readAssertionFlag {
+		for _, line := range body {
+			if strings.Contains(line, "$assertionsDisabled") {
+				return nil, nil, "", bail("an assert this phase cannot write back")
+			}
+		}
 	}
 	return body, flattenStatements(d.statements), d.chained, nil
 }

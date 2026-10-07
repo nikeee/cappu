@@ -1,1 +1,1 @@
-class SubB extends Sealed {}
+non-sealed class SubB extends Sealed {}

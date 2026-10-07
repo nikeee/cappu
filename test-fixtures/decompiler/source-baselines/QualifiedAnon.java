@@ -6,7 +6,7 @@ public class QualifiedAnon {
   }
 
   static int use(QualifiedAnon arg0) {
-    /* cappu: an anonymous class; the bytecode is:
+    /* cappu: an anonymous class with a body of its own; the bytecode is:
      * 0: new #17
      * 3: dup
      * 4: aload_0

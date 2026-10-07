@@ -110,7 +110,11 @@ func TestDecompileMatchesSourceBaselines(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read class: %v", err)
 			}
-			got, err := DecompileToSource(classBytes)
+			// With the siblings beside the class, the way the CLI and the MCP
+			// tools read it: a class whose shape depends on another - a sealed
+			// parent, an anonymous body - is only written correctly there.
+			classPath := filepath.Join(classDir, entry.Name())
+			got, err := DecompileToSourceWith(classBytes, siblingsFor(classPath, classBytes))
 			if err != nil {
 				t.Fatalf("decompile: %v", err)
 			}
