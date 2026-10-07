@@ -2374,6 +2374,49 @@ func TestDecompileWritesASerializableLambda(t *testing.T) {
 	}
 }
 
+// A body that asserts gets a synthetic static flag and the `<clinit>` that sets
+// it. Neither is a capture nor a static initializer source wrote, and an
+// anonymous class carrying them is still an anonymous class.
+func TestDecompileWritesAnAnonymousClassThatAsserts(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	source := `public class Asserting {
+  static Runnable make(String p) {
+    return new Runnable() {
+      public void run() {
+        assert p.length() > 0 : "e";
+        System.out.print(p + "!");
+      }
+    };
+  }
+  public static void main(String[] z) { make("v").run(); System.out.println(); }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Asserting", source)
+	decompiled, err := DecompileWith(readFile(t, classFile), siblingsIn(dir))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(decompiled, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", decompiled)
+	}
+	for _, want := range []string{`assert arg0.length() > 0 : "e";`, "new java.lang.Runnable() {"} {
+		if !strings.Contains(decompiled, want) {
+			t.Errorf("expected %q:\n%s", want, decompiled)
+		}
+	}
+	if strings.Contains(decompiled, "$assertionsDisabled") || strings.Contains(decompiled, "static {") {
+		t.Errorf("the flag and its initializer are javac's:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Asserting", decompiled)
+	if actual, expected := runJavaWith(t, again, "Asserting", "-ea"), runJavaWith(t, dir, "Asserting", "-ea"); actual != expected {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A pattern-matching switch is a `SwitchBootstraps.typeSwitch` answering with
 // the index of the case that matched, then a table over that index. The types
 // are the bootstrap's arguments, one per index, and each case binds a variable

@@ -3854,16 +3854,16 @@ func (d *bodyDecompiler) anonymousBody(
 	target MemberRef, args []string, outer *expr,
 ) (string, string, []string, error) {
 	if d.classFile.Siblings == nil {
-		return "", "", nil, bail("an anonymous class")
+		return "", "", nil, bail("an anonymous class read without its own file")
 	}
 	// A class file javac wrote cannot nest anonymous classes without end, but
 	// one that was edited could, and each level reads another file.
 	if d.depth > 16 {
-		return "", "", nil, bail("an anonymous class")
+		return "", "", nil, bail("anonymous classes nested without end")
 	}
 	anonymous, ok := SiblingClass(d.classFile.Siblings, target.Owner)
 	if !ok {
-		return "", "", nil, bail("an anonymous class")
+		return "", "", nil, bail("an anonymous class whose file is not beside this one")
 	}
 	// Every argument is a captured value: source names the variable itself, and
 	// the body reads it through a synthetic field of its own. Which field takes
@@ -3888,21 +3888,21 @@ func (d *bodyDecompiler) anonymousBody(
 		}
 		switch {
 		case !known:
-			return "", "", nil, bail("an anonymous class")
+			return "", "", nil, bail("an anonymous class whose captures are not named")
 		case strings.HasPrefix(field, "this$"):
 			enclosing := simpleClassName(d.classFile.ThisClass)
 			// `Outer$1.this` is not a name: a class javac named for the method
 			// it sits in has none of its own.
 			if outer == nil || outer.Text != "this" || namedForAMethod.MatchString(enclosing) {
-				return "", "", nil, bail("an anonymous class")
+				return "", "", nil, bail("an anonymous class holding an enclosing instance with no name")
 			}
 			names[field] = enclosing + ".this"
 		case at < 0 || at >= len(args):
-			return "", "", nil, bail("an anonymous class")
+			return "", "", nil, bail("an anonymous class whose capture is not an argument")
 		case !capturedValue.MatchString(args[at]):
 			// Anything but a name would be evaluated once per use in the body,
 			// where source evaluated it once at the `new`.
-			return "", "", nil, bail("an anonymous class")
+			return "", "", nil, bail("an anonymous class capturing more than a name")
 		default:
 			names[field] = args[at]
 			taken[at] = true
@@ -3950,13 +3950,13 @@ func (d *bodyDecompiler) anonymousBody(
 	switch {
 	case len(interfaces) == 1 && anonymous.SuperClass == "java/lang/Object":
 		if len(kept) > 0 {
-			return "", "", nil, bail("an anonymous class")
+			return "", "", nil, bail("an anonymous class of an interface taking arguments")
 		}
 		named = interfaces[0]
 	case len(interfaces) == 0 && anonymous.SuperClass != "":
 		named = superType
 	default:
-		return "", "", nil, bail("an anonymous class")
+		return "", "", nil, bail("an anonymous class of no type source could name")
 	}
 	block, err := initializerBlock(anonymous, target.Descriptor, syntheticFields(anonymous))
 	if err != nil {
@@ -3985,7 +3985,7 @@ func (d *bodyDecompiler) anonymousBody(
 	})
 	// A field left over is one the constructor did not explain.
 	if strings.Contains(body, "this$") || strings.Contains(body, "val$") {
-		return "", "", nil, bail("an anonymous class")
+		return "", "", nil, bail("an anonymous class holding a field its constructor did not explain")
 	}
 	return body, named, kept, nil
 }
@@ -4032,11 +4032,11 @@ func initializerBlock(anonymous *ClassFile, descriptor string, synthetic map[str
 	}
 	code, err := ReadCode(method, anonymous.Pool)
 	if err != nil || code == nil {
-		return nil, bail("an anonymous class")
+		return nil, bail("an anonymous class whose constructor has no code")
 	}
 	instructions, err := DecodeInstructions(anonymous, code.Code)
 	if err != nil {
-		return nil, bail("an anonymous class")
+		return nil, bail("an anonymous class whose constructor does not decode")
 	}
 	// A constructor that holds nothing but the capture stores and the super
 	// call has no block to write, and needs no reconstruction to say so -
@@ -4104,12 +4104,15 @@ var (
 	parameterRead  = regexp.MustCompile(`(^|[^\w$.])arg\d+($|[^\w$])`)
 )
 
-// syntheticFields names the fields javac added to an anonymous class: the
-// captured values and the enclosing instance, never anything source wrote.
+// syntheticFields names the fields javac added to an anonymous class to carry
+// what the `new` was handed: the captured values and the enclosing instance,
+// never anything source wrote. A static one carries nothing from there - the
+// assertion flag of a body that asserts is the common one - and counting it
+// would leave the constructor looking as though it had missed a capture.
 func syntheticFields(anonymous *ClassFile) map[string]bool {
 	out := map[string]bool{}
 	for _, field := range anonymous.Fields {
-		if field.Flags&accSynthetic != 0 {
+		if field.Flags&accSynthetic != 0 && field.Flags&accStatic == 0 {
 			out[field.Name] = true
 		}
 	}
@@ -4127,12 +4130,16 @@ func capturedFields(anonymous *ClassFile, descriptor string) (map[int]string, er
 		}
 		code, err := ReadCode(method, anonymous.Pool)
 		if err != nil || code == nil {
-			return nil, bail("an anonymous class")
+			return nil, bail("an anonymous class whose constructor has no code")
 		}
 		instructions, err := DecodeInstructions(anonymous, code.Code)
 		if err != nil {
-			return nil, bail("an anonymous class")
+			return nil, bail("an anonymous class whose constructor does not decode")
 		}
+		// javac guards the enclosing instance with a null check between the
+		// load and the store - `aload_1; dup; requireNonNull; pop; putfield` -
+		// and that check is its own, not part of what source captured.
+		instructions = withoutNullChecks(instructions, anonymous.Pool)
 		out := map[int]string{}
 		for i := 0; i+2 < len(instructions); i++ {
 			run := instructions[i : i+3]
@@ -4147,11 +4154,11 @@ func capturedFields(anonymous *ClassFile, descriptor string) (map[int]string, er
 			out[slotOf(run[1])] = field.Name
 		}
 		if len(out) != len(synthetic) {
-			return nil, bail("an anonymous class")
+			return nil, bail("an anonymous class whose constructor stores a capture this phase cannot follow")
 		}
 		return out, nil
 	}
-	return nil, bail("an anonymous class")
+	return nil, bail("an anonymous class with no constructor of that shape")
 }
 
 // anonymousMembers renders the fields and methods of an anonymous class as the
@@ -4175,8 +4182,13 @@ func anonymousMembers(classFile *ClassFile, block []string) ([]string, error) {
 			continue
 		}
 		// A static initializer is not something an anonymous class's source
-		// wrote, and dropping it would lose what it set.
+		// wrote, and dropping it would lose what it set - unless it is the one
+		// javac writes for a body that asserts, which sets only the assertion
+		// flag and is written again from the same source.
 		if method.Name == "<clinit>" {
+			if setsOnlyTheAssertionFlag(method, classFile) {
+				continue
+			}
 			return nil, bail("an anonymous class with a static initializer")
 		}
 		body, _, err := methodSource(method, classFile)
@@ -6417,6 +6429,41 @@ func (d *bodyDecompiler) takeOverBinding(start int, typ string) (string, bool) {
 	}
 	d.skipped[load.Pc], d.skipped[cast.Pc], d.skipped[store.Pc] = true, true, true
 	return one.Name, true
+}
+
+// setsOnlyTheAssertionFlag reports the `<clinit>` javac writes for a class that
+// asserts: it reads `desiredAssertionStatus` and stores the flag, and nothing
+// else. Source wrote no static initializer there, and javac writes this one
+// again from the same body.
+func setsOnlyTheAssertionFlag(method Member, classFile *ClassFile) bool {
+	code, err := ReadCode(method, classFile.Pool)
+	if err != nil || code == nil {
+		return false
+	}
+	instructions, err := DecodeInstructions(classFile, code.Code)
+	if err != nil {
+		return false
+	}
+	stored := false
+	for _, one := range instructions {
+		switch one.Mnemonic {
+		case "ldc", "ldc_w", "iconst_0", "iconst_1", "ifne", "goto", "return":
+		case "invokevirtual":
+			target, ok := PoolMemberRef(classFile.Pool, uint16(one.Arg))
+			if !ok || target.Name != "desiredAssertionStatus" {
+				return false
+			}
+		case "putstatic":
+			target, ok := PoolMemberRef(classFile.Pool, uint16(one.Arg))
+			if !ok || target.Owner != classFile.ThisClass || target.Name != "$assertionsDisabled" {
+				return false
+			}
+			stored = true
+		default:
+			return false
+		}
+	}
+	return stored
 }
 
 // throwsMatchException reports a block that does nothing but throw the
