@@ -102,12 +102,12 @@ type ClassFile struct {
 	// class file never sets it; a caller that knows where the bytes came from
 	// does, and the decompiler asks only when a shape needs the answer.
 	Siblings Siblings
-	// WrittenNested is set while this class is being written inside the class
-	// that declares it. An inner class is handed its enclosing instance, which
-	// javac writes again from the nested declaration: the field that holds it,
-	// the constructor parameter that fills it and the store in front of the
-	// `super(..)` are all javac's there, and writing them back would clash.
-	WrittenNested bool
+	// Inlined is set while this class is being written inside the body that
+	// creates it - an anonymous class read back as the `new` source wrote.
+	// What it was handed is rewritten by that pass, so a value it passes on to
+	// an anonymous class of its own may name a field of its own; standing on
+	// its own, there is no such pass.
+	Inlined bool
 }
 
 // Siblings reports the bytes of the class with that binary name, and whether
