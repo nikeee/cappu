@@ -5021,3 +5021,136 @@ func decompileEveryClassIn(t *testing.T, module string) {
 			len(failures), classes, failures[:min(10, len(failures))])
 	}
 }
+
+// The oracle the bail contract rests on and the suite did not have: what this
+// phase writes has to be Java. Every class of a program is decompiled, the
+// whole set is handed back to javac, and the program is run again - a
+// reconstruction that does not compile, or that behaves differently, fails
+// here. Comparing text against a baseline cannot see either.
+var compilesAndRuns = map[string]string{
+	// Anonymous classes: a capture, an enclosing instance, one inside another.
+	"Anon": `public class Anon {
+  int field = 5;
+  static Runnable captures(String s) { return () -> System.out.print(s); }
+  Runnable outer() { return new Runnable() { public void run() { System.out.print(field); } }; }
+  static Runnable nestedAnon(String a) {
+    return new Runnable() { public void run() {
+      Runnable inner = new Runnable() { public void run() { System.out.print(a); } };
+      inner.run(); System.out.print(a);
+    } };
+  }
+  public static void main(String[] z) {
+    captures("c").run(); new Anon().outer().run(); nestedAnon("n").run();
+    System.out.println();
+  }
+}
+`,
+	// The shapes earlier commits reconstructed: an assert, an enum with
+	// arguments and a constant body, a pattern switch.
+	"Shapes": `enum Op { PLUS("+") { int apply(int a, int b) { return a + b; } }, TIMES("*") { int apply(int a, int b) { return a * b; } };
+  final String sym; Op(String sym) { this.sym = sym; } abstract int apply(int a, int b); }
+public class Shapes {
+  static int checked(int v) { assert v > 0 : "v=" + v; return v; }
+  static String kind(Object o) {
+    switch (o) { case Integer i -> { return "i" + i; } case String s -> { return "s" + s.length(); } default -> { return "d"; } }
+  }
+  public static void main(String[] z) {
+    System.out.println(Op.PLUS.apply(1, 2) + Op.TIMES.sym + checked(4) + kind(1) + kind("ab") + kind(1.5));
+  }
+}
+`,
+}
+
+// A nested class is still written as a file of its own, declaring
+// `class Outer$Inner`, so a file that names `Outer.Inner` has nothing to
+// resolve - and `outer.new Inner(..)` needs the nesting itself. Restoring it
+// is what fixes this, and this test says so until then: a reconstruction that
+// compiles here means the nesting is back and this test has to go.
+func TestDecompiledNestedClassDoesNotCompileYet(t *testing.T) {
+	if !hasTool("javac") {
+		t.Skip("no JDK (javac)")
+	}
+	source := `public class Holding {
+  int base = 7;
+  class Inner {
+    Holding this$0;
+    Inner(Holding other) { this.this$0 = other; }
+    int read() { return this.this$0.base; }
+  }
+  public static void main(String[] z) {
+    Holding a = new Holding(); Holding b = new Holding(); b.base = 3;
+    System.out.println(a.new Inner(b).read());
+  }
+}
+`
+	dir := t.TempDir()
+	classes := filepath.Join(dir, "classes")
+	compileWithJavac(t, classes, "Holding", source)
+	text, err := DecompileWith(readFile(t, filepath.Join(classes, "Holding.class")), siblingsIn(classes))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	// What it must NOT do is read the field source declared as javac's own.
+	if strings.Contains(text, "Holding.this.base") {
+		t.Errorf("a field source wrote is not the enclosing instance:\n%s", text)
+	}
+	again := filepath.Join(dir, "again")
+	if err := os.MkdirAll(again, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(again, "Holding.java"), []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("javac", "--release", "21", "-d", again,
+		filepath.Join(again, "Holding.java")).CombinedOutput()
+	if err == nil {
+		t.Fatalf("the inner class resolves now - restore the nesting test and delete this one:\n%s", text)
+	}
+	if !strings.Contains(string(out), "class Inner") {
+		t.Errorf("expected the unresolved inner class, got:\n%s", out)
+	}
+}
+
+func TestDecompiledSourceCompilesAndRuns(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	for name, source := range compilesAndRuns {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			classes := filepath.Join(dir, "classes")
+			compileWithJavac(t, classes, name, source)
+			written, err := filepath.Glob(filepath.Join(classes, "*.class"))
+			if err != nil || len(written) == 0 {
+				t.Fatalf("javac wrote no classes: %v", err)
+			}
+			// Every class of the program, the way the CLI reads a directory.
+			again := filepath.Join(dir, "again")
+			if err := os.MkdirAll(again, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, one := range written {
+				// A class javac named for the place it was written - an
+				// anonymous class, an enum constant's body - is read back
+				// where it was written, and the file of its own is only
+				// what is left for a reader who has nothing else. Compiling
+				// both would declare the same thing twice.
+				if strings.Contains(filepath.Base(one), "$") {
+					continue
+				}
+				text, err := DecompileWith(readFile(t, one), siblingsIn(classes))
+				if err != nil {
+					t.Fatalf("decompile %s: %v", filepath.Base(one), err)
+				}
+				at := filepath.Join(again, strings.TrimSuffix(filepath.Base(one), ".class")+".java")
+				if err := os.WriteFile(at, []byte(text), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			compileDir(t, again)
+			if actual, expected := runJava(t, again, name), runJava(t, classes, name); actual != expected {
+				t.Errorf("the decompiled program runs differently: %q vs %q", actual, expected)
+			}
+		})
+	}
+}
