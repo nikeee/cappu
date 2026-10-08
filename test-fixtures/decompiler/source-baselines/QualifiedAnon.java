@@ -22,4 +22,16 @@ public class QualifiedAnon {
      */
     throw new UnsupportedOperationException("cappu: not decompiled");
   }
+
+  class Inner {
+    int v;
+
+    Inner(int arg1) {
+      this.v = arg1;
+    }
+
+    int get() {
+      return this.v + QualifiedAnon.this.x;
+    }
+  }
 }

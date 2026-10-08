@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"strings"
 	"syscall"
 
 	"github.com/nikeee/cappu/internal/compiler"
@@ -59,14 +60,48 @@ func siblingsFor(file string, b []byte) compiler.Siblings {
 	return compiler.SiblingsBeside(file, name)
 }
 
+// writtenInsideAnother reports a class the file of its enclosing class carries:
+// a named class nested in one this run also decompiles. An anonymous or local
+// class is not written there, so it still stands on its own.
+func writtenInsideAnother(b []byte, declared map[string]bool) bool {
+	read, err := compiler.ReadClassFile(b)
+	if err != nil {
+		return false
+	}
+	at := strings.LastIndex(read.ThisClass, "$")
+	if at <= 0 {
+		return false
+	}
+	simple := read.ThisClass[at+1:]
+	if simple == "" || (simple[0] >= '0' && simple[0] <= '9') {
+		return false
+	}
+	return declared[read.ThisClass[:at]]
+}
+
 func RunDecompile(files []string, disasm bool) int {
 	if len(files) == 0 {
 		fmt.Fprint(os.Stderr, "usage: cappu decompile <file.class> ...\n")
 		return 2
 	}
+	// A class written inside the class that declares it is not written again on
+	// its own: two declarations of one type do not compile together.
+	declared := map[string]bool{}
+	if !disasm {
+		for _, file := range files {
+			if b, err := os.ReadFile(file); err == nil {
+				if read, err := compiler.ReadClassFile(b); err == nil {
+					declared[read.ThisClass] = true
+				}
+			}
+		}
+	}
 	failed := false
 	for _, file := range files {
 		bytes, err := os.ReadFile(file)
+		if err == nil && writtenInsideAnother(bytes, declared) {
+			continue
+		}
 		if err == nil {
 			var text string
 			if disasm {

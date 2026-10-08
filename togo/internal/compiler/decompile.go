@@ -3891,6 +3891,13 @@ func (d *bodyDecompiler) anonymousBody(
 			return "", "", nil, bail("an anonymous class whose captures are not named")
 		case strings.HasPrefix(field, "this$"):
 			enclosing := simpleClassName(d.classFile.ThisClass)
+			// Written inside the class that declares it, a class reads its own
+			// enclosing instance as `Outer.this`, and that is what the `new`
+			// was handed.
+			if outer != nil && strings.HasSuffix(outer.Text, ".this") {
+				names[field] = outer.Text
+				break
+			}
 			// `Outer$1.this` is not a name: a class javac named for the method
 			// it sits in has none of its own.
 			if outer == nil || outer.Text != "this" || namedForAMethod.MatchString(enclosing) {
@@ -4364,6 +4371,15 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 			if !cannotThrow(one) {
 				trivialSuper = false
 			}
+		}
+		// Written nested, the store of the enclosing instance is javac's: it
+		// writes the same store from the declaration, so this one goes rather
+		// than moving after the `super(..)`, where a superclass constructor
+		// calling an overridable method would see it unset.
+		if d.classFile.WrittenNested && len(d.statements) > 0 && d.depth == 0 &&
+			onlySyntheticStores(d.statements, d.classFile) {
+			*d.current = (*d.current)[:0]
+			d.statements = d.statements[:0]
 		}
 		if (len(d.statements) > 0 && !trivialSuper) || d.depth > 0 {
 			return bail("constructor call is not first")
@@ -7905,6 +7921,16 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
+		// Written nested, the enclosing instance is read the way source wrote
+		// it: the field javac keeps it in is not declared there.
+		if d.classFile.WrittenNested && target.Text == "this" && strings.HasPrefix(field.Name, "this$") &&
+			field.Owner == d.classFile.ThisClass {
+			if at := strings.LastIndex(d.classFile.ThisClass, "$"); at > 0 {
+				outer := typeName(d.classFile.ThisClass[:at], d.self())
+				d.push(expr{Text: outer + ".this", Prec: precPrimary, Type: outer})
+				return nil
+			}
+		}
 		// A variable whose type is still open is of the class the field read
 		// from it belongs to.
 		if entry, ok := d.byName[target.Text]; ok && (entry.Open || entry.Tentative) {
@@ -8792,6 +8818,10 @@ func methodSource(method Member, classFile *ClassFile, reserved map[string]bool)
 			if isEnumDeclaration(classFile) {
 				dropLeading = 2
 			}
+			// The enclosing instance comes first and is javac's, not source's.
+			if classFile.WrittenNested {
+				dropLeading = 1
+			}
 			parts = append(parts, simpleClassName(classFile.ThisClass)+
 				"("+parameterList(method, locals, isStatic, dropLeading)+")")
 		} else {
@@ -9369,6 +9399,11 @@ func decompileClassAt(classFile *ClassFile, depth int) (string, error) {
 		if field.Flags&accEnum != 0 || (field.Flags&accSynthetic != 0 && generatedFields[field.Name]) {
 			continue
 		}
+		// Written inside the class that declares it, an inner class is handed
+		// its enclosing instance by javac, which writes the field again.
+		if classFile.WrittenNested && field.Flags&accSynthetic != 0 && strings.HasPrefix(field.Name, "this$") {
+			continue
+		}
 		// A record's components are its state: declaring the fields again is not
 		// something Java lets you write.
 		isComponent := false
@@ -9402,12 +9437,13 @@ func nestedSources(classFile *ClassFile, depth int) ([]string, error) {
 		return nil, nil
 	}
 	var lines []string
-	for _, name := range nestedStaticClasses(classFile) {
+	for _, name := range nestedClasses(classFile) {
 		nested, ok := SiblingClass(classFile.Siblings, name)
 		if !ok {
 			continue
 		}
 		nested.Siblings = classFile.Siblings
+		nested.WrittenNested = InnerClassFlags(classFile)[name]&accStatic == 0
 		text, err := decompileClassAt(nested, depth+1)
 		if err != nil {
 			return nil, err
@@ -9460,13 +9496,38 @@ func renameConstructors(body []string, binarySimple string) {
 	}
 }
 
-// nestedStaticClasses names the static classes a class declares, anonymous and
-// local ones left out: those have no name source could write.
-func nestedStaticClasses(classFile *ClassFile) []string {
+// onlySyntheticStores reports statements that are all stores into fields javac
+// added - the enclosing instance an inner class holds, the values a local
+// class captured. Written nested, those are javac's to write again.
+func onlySyntheticStores(statements []stmt, classFile *ClassFile) bool {
+	if len(statements) == 0 {
+		return false
+	}
+	synthetic := map[string]bool{}
+	for _, field := range classFile.Fields {
+		if field.Flags&accSynthetic != 0 {
+			synthetic[field.Name] = true
+		}
+	}
+	for _, one := range statements {
+		if one.Nested != nil {
+			return false
+		}
+		name, _, ok := strings.Cut(strings.TrimPrefix(strings.TrimSpace(one.Text), "this."), " = ")
+		if !ok || !synthetic[name] {
+			return false
+		}
+	}
+	return true
+}
+
+// nestedClasses names the classes a class declares, anonymous and local ones
+// left out: those have no name source could write.
+func nestedClasses(classFile *ClassFile) []string {
 	flags := InnerClassFlags(classFile)
 	var names []string
-	for name, access := range flags {
-		if access&accStatic == 0 || !strings.HasPrefix(name, classFile.ThisClass+"$") {
+	for name := range flags {
+		if !strings.HasPrefix(name, classFile.ThisClass+"$") {
 			continue
 		}
 		simple := name[len(classFile.ThisClass)+1:]
