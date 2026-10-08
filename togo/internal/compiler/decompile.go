@@ -9290,6 +9290,19 @@ func classHead(classFile *ClassFile, components []decompiledRecordComponent) str
 
 // DecompileClass renders one class as (unformatted) Java source.
 func DecompileClass(classFile *ClassFile) (string, error) {
+	return decompileClassAt(classFile, 0)
+}
+
+// nestedDepth bounds how far a file follows its own nested classes: javac
+// cannot nest without end, but a class file that was edited could.
+const nestedDepth = 8
+
+// decompileClassAt renders one class and, at depth 0, the static classes it
+// declares - a file that names `Outer.Inner` without declaring it does not
+// compile. An inner (non-static) class is not written back yet: javac
+// regenerates the enclosing instance it holds and the constructor parameter
+// that fills it, which would clash with the ones this phase writes.
+func decompileClassAt(classFile *ClassFile, depth int) (string, error) {
 	var lines []string
 	packageName := ""
 	if slash := strings.LastIndex(classFile.ThisClass, "/"); slash > 0 {
@@ -9373,8 +9386,97 @@ func DecompileClass(classFile *ClassFile) (string, error) {
 	for _, body := range bodies {
 		lines = append(append(lines, ""), body...)
 	}
+	nested, err := nestedSources(classFile, depth)
+	if err != nil {
+		return "", err
+	}
+	lines = append(lines, nested...)
 	lines = append(lines, "}")
 	return strings.Join(lines, "\n") + "\n", nil
+}
+
+// nestedSources renders the static classes a class declares, in the order the
+// InnerClasses attribute lists them, so the file carries every type it names.
+func nestedSources(classFile *ClassFile, depth int) ([]string, error) {
+	if classFile.Siblings == nil || depth >= nestedDepth {
+		return nil, nil
+	}
+	var lines []string
+	for _, name := range nestedStaticClasses(classFile) {
+		nested, ok := SiblingClass(classFile.Siblings, name)
+		if !ok {
+			continue
+		}
+		nested.Siblings = classFile.Siblings
+		text, err := decompileClassAt(nested, depth+1)
+		if err != nil {
+			return nil, err
+		}
+		body := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+		// The package belongs to the file, and the declaration says `static`
+		// where the InnerClasses attribute does.
+		for len(body) > 0 && (strings.HasPrefix(body[0], "package ") || body[0] == "") {
+			body = body[1:]
+		}
+		if len(body) == 0 {
+			continue
+		}
+		body[0] = nestedDeclaration(body[0], name, InnerClassFlags(classFile)[name])
+		renameConstructors(body, simpleClassName(name))
+		lines = append(append(lines, ""), body...)
+	}
+	return lines, nil
+}
+
+// nestedDeclaration rewrites a class declaration for the file that declares it:
+// the name loses the enclosing class it carries in the class file, and a class
+// says `static`, which nothing else in its own text does. An interface, an enum
+// and a record are static by being nested, and say nothing.
+func nestedDeclaration(declaration, binaryName string, access uint16) string {
+	simple := binaryName[strings.LastIndex(binaryName, "$")+1:]
+	declaration = strings.Replace(declaration, simpleClassName(binaryName), simple, 1)
+	if access&accStatic == 0 {
+		return declaration
+	}
+	at := strings.Index(declaration, "class ")
+	if at < 0 || strings.Contains(declaration[:at], "static") {
+		return declaration
+	}
+	return declaration[:at] + "static " + declaration[at:]
+}
+
+// renameConstructors gives a nested class's constructors the name the file
+// declares it under: a constructor is named for its class, and in the class
+// file that name carries the class it is nested in.
+func renameConstructors(body []string, binarySimple string) {
+	at := strings.LastIndex(binarySimple, "$")
+	if at < 0 {
+		return
+	}
+	simple := binarySimple[at+1:]
+	declaration := regexp.MustCompile(`^(\s*(?:[a-z]+ )*)` + regexp.QuoteMeta(binarySimple) + `\(`)
+	for i, line := range body {
+		body[i] = declaration.ReplaceAllString(line, "${1}"+simple+"(")
+	}
+}
+
+// nestedStaticClasses names the static classes a class declares, anonymous and
+// local ones left out: those have no name source could write.
+func nestedStaticClasses(classFile *ClassFile) []string {
+	flags := InnerClassFlags(classFile)
+	var names []string
+	for name, access := range flags {
+		if access&accStatic == 0 || !strings.HasPrefix(name, classFile.ThisClass+"$") {
+			continue
+		}
+		simple := name[len(classFile.ThisClass)+1:]
+		if simple == "" || strings.Contains(simple, "$") || (simple[0] >= '0' && simple[0] <= '9') {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Decompile renders one class file's bytes as Java source. The text is
