@@ -4496,6 +4496,49 @@ public class Ways {
 }
 `
 
+// A `finally` whose body branches: javac writes the branch into every copy
+// too, with the targets moved - the copy on the way out is the same code at
+// another place, and reading one back means matching it where the jumps differ.
+const finallyBranchingSource = `public class Branching {
+  static StringBuilder log = new StringBuilder();
+  static int n;
+  static int guarded(String s) { try { n += 1; return s.length(); } finally { if (s != null) log.append("g"); } }
+  static int either(int a) { try { n += a; return n; } finally { if (a > 0) log.append("+"); else log.append("-"); } }
+  static int leaving(int a) { try { if (a == 0) return -1; n += a; } finally { if (a != 0) log.append("l"); } return n; }
+  public static void main(String[] z) {
+    System.out.println(guarded("ab") + " " + either(2) + either(-1) + " " + leaving(0) + leaving(3) + " " + log + " " + n);
+  }
+}
+`
+
+func TestDecompileReconstructsAFinallyThatBranches(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Branching", finallyBranchingSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	// Three statements, each body written once - the copies on the way out are
+	// javac's, and a branch in one is no reason to write it twice.
+	if strings.Count(source, "finally {") != 3 || strings.Count(source, `log.append("g")`) != 1 ||
+		strings.Count(source, `log.append("+")`) != 1 || strings.Count(source, `log.append("l")`) != 1 {
+		t.Errorf("expected each finally body once:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Branching", source)
+	expected := runJava(t, dir, "Branching")
+	actual := runJava(t, again, "Branching")
+	if actual != expected || actual != "2 32 -15 g+-l 5\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 func TestDecompileReconstructsAFinallyWithSeveralWaysOut(t *testing.T) {
 	if !hasTool("javac") || !hasTool("java") {
 		t.Skip("no JDK (javac/java)")

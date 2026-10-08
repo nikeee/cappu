@@ -1258,7 +1258,7 @@ type block struct {
 	Successors []int
 }
 
-func buildBlocks(instructions []Instruction, exceptions []ExceptionEntry, splits ...int) (map[int]*block, error) {
+func buildBlocks(instructions []Instruction, exceptions []ExceptionEntry, splits []int, atomic [][2]int) (map[int]*block, error) {
 	entry := 0
 	if len(instructions) > 0 {
 		entry = instructions[0].Pc
@@ -1267,6 +1267,18 @@ func buildBlocks(instructions []Instruction, exceptions []ExceptionEntry, splits
 	// Where a `finally`'s copy begins, which nothing else would split at.
 	for _, split := range splits {
 		leaders[split] = true
+	}
+	// A copy of a `finally` that branches is one run: the jumps in it are
+	// javac's own, written again at every way out of the protected range, and
+	// splitting there would read the copy as a statement. The whole run is
+	// dropped together, and what is left of the block is the way out.
+	within := func(pc int) bool {
+		for _, one := range atomic {
+			if pc > one[0] && pc <= one[1] {
+				return true
+			}
+		}
+		return false
 	}
 	// A protected range and a handler both begin a statement of their own, and
 	// neither is a branch target, so nothing else would split the block there.
@@ -1282,6 +1294,9 @@ func buildBlocks(instructions []Instruction, exceptions []ExceptionEntry, splits
 			return nil, bail("unsupported instruction %s", mnemonic)
 		}
 		branch := conditionalBranches[mnemonic] || isGotoMnemonic(mnemonic)
+		if (branch || isSwitchMnemonic(mnemonic)) && within(instruction.Pc) {
+			continue
+		}
 		if branch {
 			leaders[instruction.Arg] = true
 		}
@@ -1423,6 +1438,10 @@ type finallyRegion struct {
 	// the protected range - one per `return` or `break` inside it, and the
 	// last one, at EndPc, the way off its end.
 	Copies []int
+	// RethrowPc is where the handler's `aload e; athrow` begins, for a body
+	// that branches - zero for one that does not, which is written from its
+	// instructions alone.
+	RethrowPc int
 }
 
 // finallyBody is the body of a `finally`, when the handler at start is the
@@ -1449,6 +1468,188 @@ func finallyBody(blocks map[int]*block, start int) ([]Instruction, int, bool) {
 		return nil, 0, false
 	}
 	return kept[1 : len(kept)-2], endOf(b), true
+}
+
+// branchingFinallyBody is the body of a `finally` that branches: the handler is
+// still `astore e; <body>; aload e; athrow`, but the body in between jumps
+// around - `finally { if (x != null) x.close(); }` - so its blocks no longer
+// fall into one another and finallyBody cannot read it. The run is taken off
+// the instructions instead, and every jump in it has to land inside it or on
+// the rethrow it ends at: one that leaves belongs to some other statement.
+// Reports the body, where the handler ends, and where the rethrow begins.
+func branchingFinallyBody(instructions []Instruction, start int) ([]Instruction, int, int, bool) {
+	at := -1
+	for i := range instructions {
+		if instructions[i].Pc == start {
+			at = i
+			break
+		}
+	}
+	if at < 0 || !strings.HasPrefix(instructions[at].Mnemonic, "astore") {
+		return nil, 0, 0, false
+	}
+	slot, end := slotOf(instructions[at]), -1
+	for i := at + 2; i < len(instructions) && end < 0; i++ {
+		switch {
+		case instructions[i].Mnemonic == "athrow" && strings.HasPrefix(instructions[i-1].Mnemonic, "aload") &&
+			slotOf(instructions[i-1]) == slot:
+			end = i
+		case isBlockEndMnemonic(instructions[i].Mnemonic), isSwitchMnemonic(instructions[i].Mnemonic):
+			// A `return` or a second `throw` in there is a way out of the
+			// cleanup, which the copies on the way out do not have.
+			return nil, 0, 0, false
+		}
+	}
+	if end < 0 || end-1 <= at+1 {
+		return nil, 0, 0, false
+	}
+	body, rethrow, branches := instructions[at+1:end-1], instructions[end-1].Pc, false
+	for _, one := range body {
+		if !conditionalBranches[one.Mnemonic] && !isGotoMnemonic(one.Mnemonic) {
+			continue
+		}
+		branches = true
+		if one.Arg <= start || one.Arg > rethrow {
+			return nil, 0, 0, false
+		}
+	}
+	last := body[len(body)-1]
+	if !branches || conditionalBranches[last.Mnemonic] || isGotoMnemonic(last.Mnemonic) {
+		// A body that ends by jumping - a loop in the cleanup - is written
+		// again the same way, and the copy's own last instruction is then the
+		// one the block it sits in would end at: there is no way out left to
+		// read it as.
+		return nil, 0, 0, false
+	}
+	return body, instructions[end].Pc, rethrow, true
+}
+
+// sameCopy reports whether run is a copy of body: the same code at another
+// place, so a jump inside it points the same number of instructions along, and
+// one out of it goes where the run goes when it is done. end is where each run
+// leaves - the rethrow for the body, the way out for a copy - which javac
+// writes as the jump's own target or as the place the jump after the run
+// reaches.
+func sameCopy(body []Instruction, bodyEnd int, run []Instruction, runEnd int, after func(int) int) bool {
+	if len(body) != len(run) || len(body) == 0 {
+		return false
+	}
+	inside := func(instructions []Instruction, pc int) bool {
+		return pc >= instructions[0].Pc && pc <= instructions[len(instructions)-1].Pc
+	}
+	for i, one := range body {
+		other := run[i]
+		if one.Mnemonic != other.Mnemonic || one.Arg2 != other.Arg2 {
+			return false
+		}
+		if !conditionalBranches[one.Mnemonic] && !isGotoMnemonic(one.Mnemonic) {
+			if one.Arg != other.Arg {
+				return false
+			}
+			continue
+		}
+		switch {
+		case inside(body, one.Arg) && inside(run, other.Arg):
+			if one.Arg-body[0].Pc != other.Arg-run[0].Pc {
+				return false
+			}
+		case one.Arg == bodyEnd && (other.Arg == runEnd || other.Arg == after(runEnd)):
+			// The way out: the rethrow in the handler, and in a copy either
+			// the instruction after it or where that one jumps - javac writes
+			// the shorter of the two.
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// finallyCopies are the runs javac wrote the body of a branching `finally` as
+// on every way out of its protected range. They are found on the instructions,
+// before the blocks are built, because a run has to stay inside one block: the
+// jumps in it are the cleanup's own, and a block boundary there would read the
+// copy as a statement of its own. Each run is reported as the pc it begins at
+// and the pc of its last instruction.
+func finallyCopies(instructions []Instruction, exceptions []ExceptionEntry) [][2]int {
+	indexOf := map[int]int{}
+	for i, one := range instructions {
+		indexOf[one.Pc] = i
+	}
+	// Where a run goes when it is done: javac writes a jump out of a copy as
+	// the instruction after it, or as where that one jumps.
+	after := func(pc int) int {
+		if i, ok := indexOf[pc]; ok && isGotoMnemonic(instructions[i].Mnemonic) {
+			return instructions[i].Arg
+		}
+		return pc
+	}
+	byHandler := map[int][]ExceptionEntry{}
+	var order []int
+	for _, entry := range exceptions {
+		if entry.CatchType != "" || int(entry.StartPc) == int(entry.HandlerPc) {
+			continue
+		}
+		handlerPc := int(entry.HandlerPc)
+		if _, seen := byHandler[handlerPc]; !seen {
+			order = append(order, handlerPc)
+		}
+		byHandler[handlerPc] = append(byHandler[handlerPc], entry)
+	}
+	var runs [][2]int
+	for _, handlerPc := range order {
+		body, _, rethrow, ok := branchingFinallyBody(instructions, handlerPc)
+		if !ok {
+			continue
+		}
+		pieces := byHandler[handlerPc]
+		inRange := func(pc int) bool {
+			for _, piece := range pieces {
+				if pc >= int(piece.StartPc) && pc < int(piece.EndPc) {
+					return true
+				}
+			}
+			return false
+		}
+		// A copy sits where the range leaves: off the end of a piece, and
+		// wherever a jump inside one lands.
+		var candidates []int
+		for _, piece := range pieces {
+			candidates = append(candidates, int(piece.EndPc))
+		}
+		for _, one := range instructions {
+			if !inRange(one.Pc) {
+				continue
+			}
+			var targets []int
+			switch {
+			case conditionalBranches[one.Mnemonic], isGotoMnemonic(one.Mnemonic):
+				targets = []int{one.Arg}
+			case isSwitchMnemonic(one.Mnemonic):
+				targets = append(targets, one.Arg)
+				for _, entry := range one.SwitchCases {
+					targets = append(targets, entry.Target)
+				}
+			}
+			for _, target := range targets {
+				if !inRange(target) {
+					candidates = append(candidates, target)
+				}
+			}
+		}
+		for _, start := range candidates {
+			at, ok := indexOf[start]
+			if !ok || at+len(body) > len(instructions) || start >= handlerPc {
+				continue
+			}
+			run := instructions[at : at+len(body)]
+			runEnd := instructions[at+len(body)].Pc
+			if !sameCopy(body, rethrow, run, runEnd, after) {
+				continue
+			}
+			runs = append(runs, [2]int{start, run[len(run)-1].Pc})
+		}
+	}
+	return runs
 }
 
 // sameInstructions reports whether two runs are the same code, which a copy has
@@ -1535,6 +1736,10 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 		// was doing when it left - the jump over the handler, or the `return`
 		// javac protected the *value* of.
 		body, bodyEnd, isFinally := finallyBody(blocks, handlerPc)
+		rethrow := 0
+		if !isFinally {
+			body, bodyEnd, rethrow, isFinally = branchingFinallyBody(instructions, handlerPc)
+		}
 		if !isFinally || ranges == 0 || len(body) == 0 {
 			return nil, nil, nil, bail("a finally or synchronized block")
 		}
@@ -1555,11 +1760,28 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 		for _, piece := range pieces {
 			end = max(end, int(piece.EndPc))
 		}
+		// Where a copy goes when it is done, for a body that branches: the
+		// instruction after the run, or where that one jumps.
+		after := func(pc int) int {
+			for _, one := range instructions {
+				if one.Pc == pc && isGotoMnemonic(one.Mnemonic) {
+					return one.Arg
+				}
+			}
+			return pc
+		}
 		// A copy block: the body, then what the range was doing when it left.
+		// A body that branches is written again with its jumps moved, which is
+		// the same code at another place, not the same instructions.
 		isCopyBlock := func(b *block) bool {
-			return b != nil && len(b.Instructions) > len(body) &&
-				(isGotoMnemonic(b.Instructions[len(b.Instructions)-1].Mnemonic) || b.Kind == blockEnd) &&
-				sameInstructions(body, b.Instructions[:len(body)])
+			if b == nil || len(b.Instructions) <= len(body) ||
+				(!isGotoMnemonic(b.Instructions[len(b.Instructions)-1].Mnemonic) && b.Kind != blockEnd) {
+				return false
+			}
+			if rethrow == 0 {
+				return sameInstructions(body, b.Instructions[:len(body)])
+			}
+			return sameCopy(body, rethrow, b.Instructions[:len(body)], b.Instructions[len(body)].Pc, after)
 		}
 		var copies []int
 		wellFormed := true
@@ -1674,7 +1896,8 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 		}
 		finallys = append(finallys, finallyRegion{
 			StartPc: start, EndPc: end, HandlerPc: handlerPc,
-			Body: body, BodyEnd: bodyEnd, Copies: copies, Ranges: protected, Targets: targets,
+			Body: body, BodyEnd: bodyEnd, RethrowPc: rethrow,
+			Copies: copies, Ranges: protected, Targets: targets,
 		})
 	}
 	return monitors, finallys, rest, nil
@@ -5005,7 +5228,7 @@ func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType strin
 }
 
 func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionEntry) error {
-	blocks, err := buildBlocks(instructions, exceptions)
+	blocks, err := buildBlocks(instructions, exceptions, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -5027,10 +5250,17 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 		}
 		if _, _, isFinally := finallyBody(blocks, int(entry.HandlerPc)); isFinally {
 			splits = append(splits, int(entry.EndPc))
+			continue
+		}
+		if _, _, rethrow, branches := branchingFinallyBody(instructions, int(entry.HandlerPc)); branches {
+			// The rethrow the cleanup ends at is where it is read up to, and
+			// a body that falls into it leaves nothing to split there.
+			splits = append(splits, int(entry.EndPc), rethrow)
 		}
 	}
+	atomic := finallyCopies(instructions, exceptions)
 	if len(splits) > 0 {
-		rebuilt, err := buildBlocks(instructions, exceptions, splits...)
+		rebuilt, err := buildBlocks(instructions, exceptions, splits, atomic)
 		if err != nil {
 			return err
 		}
@@ -5361,10 +5591,15 @@ func (d *bodyDecompiler) finallyStatement(region *finallyRegion) (int, error) {
 		// block is the `return` or the jump it was written in front of.
 		d.skip[start] = len(region.Body)
 	}
-	for at := d.blocks[region.HandlerPc]; at != nil; at = d.blocks[at.Successors[0]] {
-		d.visited[at.Start] = true
-		if at.Kind != blockFall || len(at.Successors) != 1 {
-			break
+	// A handler whose body branches is written from its blocks, and those are
+	// marked as they are walked; one that does not is written from its
+	// instructions, and its blocks are no statements of the method.
+	if region.RethrowPc == 0 {
+		for at := d.blocks[region.HandlerPc]; at != nil; at = d.blocks[at.Successors[0]] {
+			d.visited[at.Start] = true
+			if at.Kind != blockFall || len(at.Successors) != 1 {
+				break
+			}
 		}
 	}
 	d.activeFinallys[region] = true
@@ -5379,7 +5614,17 @@ func (d *bodyDecompiler) finallyStatement(region *finallyRegion) (int, error) {
 		return 0, bail("values left on the stack")
 	}
 	cleanup, err := d.capture(func() error {
-		return d.runInstructions(region.Body, region.BodyEnd, region.HandlerPc)
+		if region.RethrowPc == 0 {
+			return d.runInstructions(region.Body, region.BodyEnd, region.HandlerPc)
+		}
+		// The store of the exception is javac's, and the rethrow it ends at is
+		// where the statement the cleanup belongs to goes on.
+		d.skip[region.HandlerPc] = 1
+		if err := d.structureFrom(region.HandlerPc, region.RethrowPc, true); err != nil {
+			return err
+		}
+		d.visited[region.RethrowPc] = true
+		return nil
 	})
 	if err != nil {
 		return 0, err
