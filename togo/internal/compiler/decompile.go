@@ -634,6 +634,55 @@ func typeName(internal, self string) string {
 // arguments and all. It reports false for a signature this does not cover -
 // a class with type parameters of its own, for one, which an anonymous class
 // never has.
+// classTypeParameters renders the type parameters a class declares - the
+// `<T, U>` a signature opens with - as source wrote them, bounds left off.
+// A bound is only a constraint on what may be written at a use; the members
+// here are the erased ones either way, so dropping it costs nothing a
+// reconstruction can tell, where writing one that names another type variable
+// would not compile.
+func classTypeParameters(signature string) (string, bool) {
+	if !strings.HasPrefix(signature, "<") {
+		return "", false
+	}
+	var names []string
+	depth, at, name := 0, 0, strings.Builder{}
+	for ; at < len(signature); at++ {
+		switch c := signature[at]; {
+		case c == '<':
+			depth++
+			if depth == 1 {
+				name.Reset()
+			}
+		case c == '>' && depth == 1:
+			if names == nil {
+				return "", false
+			}
+			return "<" + strings.Join(names, ", ") + ">", true
+		case c == '>':
+			depth--
+		case depth == 1 && c == ':':
+			// The bounds run to the next parameter, which starts after the
+			// last `;` of this one.
+			if name.Len() > 0 {
+				names = append(names, name.String())
+				name.Reset()
+			}
+			for at+1 < len(signature) && signature[at+1] != ';' {
+				if signature[at+1] == '<' {
+					depth++
+				}
+				if signature[at+1] == '>' {
+					depth--
+				}
+				at++
+			}
+		case depth == 1 && c != ';':
+			name.WriteByte(c)
+		}
+	}
+	return "", false
+}
+
 func classSignatureTypes(signature, self string) (string, []string, bool) {
 	if signature == "" || strings.HasPrefix(signature, "<") {
 		return "", nil, false
@@ -9261,7 +9310,13 @@ func classHead(classFile *ClassFile, components []decompiledRecordComponent) str
 		// has to say so: Java takes no silence there.
 		head = append(head, "non-sealed")
 	}
-	head = append(head, keyword, simpleClassName(classFile.ThisClass))
+	// A generic class declares its type parameters, or a use that names type
+	// arguments has nothing to apply them to.
+	name := simpleClassName(classFile.ThisClass)
+	if parameters, ok := classTypeParameters(SignatureOf(classFile.Attributes, classFile.Pool)); ok {
+		name += parameters
+	}
+	head = append(head, keyword, name)
 	if components != nil {
 		// A record declares its state in the header, and `final` is implicit.
 		head = head[:0]
