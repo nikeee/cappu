@@ -1086,6 +1086,10 @@ type local struct {
 	Name     string
 	Type     string
 	Declared bool
+	// FromPattern: a type pattern declared it, so it lives only where the test
+	// that binds it holds. javac reuses the slot after that, and a store from
+	// outside is another variable - one that still needs a declaration.
+	FromPattern bool
 	// Origin is the debug-table row this name came from, when there is one.
 	Origin *localEntry
 	// Authoritative is set when the type came from a parameter descriptor or the
@@ -2909,6 +2913,10 @@ type bodyDecompiler struct {
 	// the ones being written right now.
 	finallys       []finallyRegion
 	activeFinallys map[*finallyRegion]bool
+	// bound are the variables type patterns have declared, in the order they
+	// were: a fold that is rolled back takes back the ones it made, including
+	// the ones a fold nested in it made.
+	bound []*patternBinding
 	// monitorSlots are the slots held by the `synchronized` statements being
 	// written right now. javac frees the monitor's local when the statement ends
 	// and reuses the slot for the next variable, so this may not outlive the body
@@ -3446,6 +3454,9 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 				(origin != nil && origin.Name == scoped.Name && origin.Type == scoped.Type) {
 				return existing, nil
 			}
+		case isStore && existing.FromPattern:
+			// The pattern's variable is out of scope here: javac put another
+			// one in the slot, and it is declared where it is written.
 		case isStore && existing.Origin != nil:
 			// The debug table scoped the variable in this slot, and scopes
 			// nothing here: its range is over, and this store begins a variable
@@ -7391,6 +7402,7 @@ func (d *bodyDecompiler) chainFrom(
 	if d.predecessorsOf(start, folded) != 0 {
 		return jump{}, false, nil, nil, nil
 	}
+	boundBefore := len(d.bound)
 	if bind != nil && !d.bindLocal(bind, next, steps[0].Pc) {
 		return jump{}, false, nil, nil, nil
 	}
@@ -7423,13 +7435,11 @@ func (d *bodyDecompiler) chainFrom(
 		d.stack = stackBefore
 		*d.current = (*d.current)[:statementsBefore]
 		*taken = (*taken)[:takenCount]
-		if bind != nil {
-			// The name it took goes back too: a fold that is rolled back must
-			// leave no trace, or the next variable in the slot is renamed for
-			// a pattern that was never written.
-			delete(d.locals, bind.Slot)
-			delete(d.names, bind.Name)
-		}
+		// Every pattern this fold declared a variable for goes back, its own
+		// and the ones the folds under it made: a rolled-back fold must leave
+		// no trace, or the slot stays taken and the attempt that is kept finds
+		// nothing left to bind.
+		d.unbindFrom(boundBefore)
 		for at := range folded {
 			delete(folded, at)
 		}
@@ -7509,10 +7519,22 @@ func (d *bodyDecompiler) bindLocal(bind *patternBinding, b *block, pc int) bool 
 	if err != nil || bound == nil {
 		return false
 	}
-	bound.Declared = true
+	bound.Declared, bound.FromPattern = true, true
 	bound.StoreBlocks[b.Start] = true
 	bind.Name = bound.Name
+	d.bound = append(d.bound, bind)
 	return true
+}
+
+// unbindFrom takes back the pattern variables declared since mark, for a fold
+// that is being rolled back. Without it the slot stays taken and the next
+// attempt at the same block - the one that is kept - finds no variable to bind.
+func (d *bodyDecompiler) unbindFrom(mark int) {
+	for _, one := range d.bound[mark:] {
+		delete(d.locals, one.Slot)
+		delete(d.names, one.Name)
+	}
+	d.bound = d.bound[:mark]
 }
 
 // bindPattern writes the variable a type pattern binds into the test it belongs
@@ -7662,6 +7684,7 @@ func (d *bodyDecompiler) tryTernary(condition expr, whenTrue, whenFalse, follow 
 	before := append([]expr(nil), d.stack...)
 	statements := d.current
 	statementsBefore := len(*statements)
+	boundBefore := len(d.bound)
 	value, found, err := d.armValues(condition, whenTrue, whenFalse, follow, &consumed)
 	if err != nil {
 		return expr{}, false, err
@@ -7673,6 +7696,7 @@ func (d *bodyDecompiler) tryTernary(condition expr, whenTrue, whenFalse, follow 
 		// depth alone does not put it back.
 		d.stack = before
 		*statements = (*statements)[:statementsBefore]
+		d.unbindFrom(boundBefore)
 		return expr{}, false, nil
 	}
 	for _, start := range consumed {

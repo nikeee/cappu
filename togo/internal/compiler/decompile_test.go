@@ -4569,11 +4569,25 @@ const patternSource = `public class Patterns {
   }
   static boolean both(Object a, Object b) { return a instanceof String x && b instanceof String y && x.length() == y.length(); }
   static String negated(Object o) { if (!(o instanceof String s) || s.isEmpty()) return "no"; return s; }
+  // The identity check in front is a statement of its own, so the pattern is
+  // the head of the chain, not a term folded into one already written.
+  static boolean same(Object a, Object b) { if (a == b) return true; return b instanceof String s && s.equals(a); }
+  // A cast and a store right after a test that throws is not a pattern - the
+  // test does not guard a condition, it guards a statement - and the variable
+  // still has to be declared where it is written.
+  static String guarded(Object k, Object p) {
+    if (!(k instanceof Integer)) throw new IllegalArgumentException("x");
+    Integer n = (Integer) k;
+    if (p != null) return "p" + n;
+    return "n" + n.intValue();
+  }
   public static void main(String[] z) {
     System.out.println(new Patterns(1).equals(new Patterns(1)) + " " + new Patterns(1).equals("x")
       + " " + kind("abc") + kind("a") + kind(new int[]{7, 8}) + kind(1)
       + " " + both("ab", "cd") + both("ab", "c") + both("ab", 1)
-      + " " + negated("hi") + negated("") + negated(1));
+      + " " + negated("hi") + negated("") + negated(1)
+      + " " + same("a", "a") + same("a", "b") + same("a", 1)
+      + " " + guarded(1, null) + guarded(2, "q"));
   }
 }
 `
