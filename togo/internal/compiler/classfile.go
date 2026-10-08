@@ -108,6 +108,11 @@ type ClassFile struct {
 	// an anonymous class of its own may name a field of its own; standing on
 	// its own, there is no such pass.
 	Inlined bool
+	// DeclaredNested is set while this class is being written inside the class
+	// that declares it, where source names it `Outer.Inner` and a reference to
+	// itself converts like any other nested name. Standing on its own it is
+	// declared as `Outer$Inner` and has to keep saying so.
+	DeclaredNested bool
 }
 
 // Siblings reports the bytes of the class with that binary name, and whether

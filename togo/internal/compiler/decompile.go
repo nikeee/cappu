@@ -777,7 +777,14 @@ func descriptorSourceType(descriptor, self string) string {
 
 // selfOf is the class being decompiled, as its own references have to spell it.
 func selfOf(classFile *ClassFile) string {
-	return strings.ReplaceAll(classFile.ThisClass, "/", ".")
+	name := strings.ReplaceAll(classFile.ThisClass, "/", ".")
+	if classFile.DeclaredNested {
+		// The file declares it under the name source wrote, so a reference to
+		// itself is converted like any other - `Outer$Inner` resolves to
+		// nothing where the declaration says `Inner`.
+		return strings.ReplaceAll(name, "$", ".")
+	}
+	return name
 }
 
 func intLiteral(value int) expr {
@@ -3481,7 +3488,9 @@ func (d *bodyDecompiler) lambda(siteDescriptor string, bootstrap BootstrapMethod
 	default:
 		return bail("a lambda that is not a call")
 	}
-	sourceType := methodReturnType(siteDescriptor)
+	// The interface the lambda stands for is a type like any other: written
+	// nested, it is named the way the file declares it.
+	sourceType := sourceTypeText(methodReturnType(siteDescriptor), d.self())
 	// A body javac generated is the lambda source wrote: inlining it is what
 	// brings that source back, and javac generates the same method from it.
 	if target.Owner == d.classFile.ThisClass {
@@ -8870,7 +8879,7 @@ func decompileBody(
 		classFile:   classFile,
 		locals:      locals,
 		localTable:  localTable,
-		returnType:  methodReturnType(method.Descriptor),
+		returnType:  sourceTypeText(methodReturnType(method.Descriptor), selfOf(classFile)),
 		isStatic:    isStatic,
 		names:       map[string]bool{},
 		byName:      map[string]*local{},
@@ -9297,6 +9306,34 @@ func classHead(classFile *ClassFile, components []decompiledRecordComponent) str
 
 // DecompileClass renders one class as (unformatted) Java source.
 func DecompileClass(classFile *ClassFile) (string, error) {
+	return decompileClassAt(classFile, 0)
+}
+
+// NestedStaticClasses names the static classes a class declares, in the order
+// their names sort. An anonymous or local class is left out: javac named it
+// for the place it was written, which is not a name source could write, and
+// it is read back where it was written instead.
+func NestedStaticClasses(classFile *ClassFile) []string {
+	var names []string
+	for name, access := range InnerClassFlags(classFile) {
+		if access&accStatic == 0 || !strings.HasPrefix(name, classFile.ThisClass+"$") {
+			continue
+		}
+		simple := name[len(classFile.ThisClass)+1:]
+		if simple == "" || strings.Contains(simple, "$") || (simple[0] >= '0' && simple[0] <= '9') {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// NestedDepth bounds how far a file follows the classes it declares. A class
+// file javac wrote cannot nest without end; one that was edited could.
+const NestedDepth = 8
+
+func decompileClassAt(classFile *ClassFile, depth int) (string, error) {
 	var lines []string
 	packageName := ""
 	if slash := strings.LastIndex(classFile.ThisClass, "/"); slash > 0 {
@@ -9380,8 +9417,56 @@ func DecompileClass(classFile *ClassFile) (string, error) {
 	for _, body := range bodies {
 		lines = append(append(lines, ""), body...)
 	}
+	// A file that names `Outer.Inner` has to declare it.
+	if classFile.Siblings != nil && depth < NestedDepth {
+		for _, name := range NestedStaticClasses(classFile) {
+			nested, ok := SiblingClass(classFile.Siblings, name)
+			if !ok {
+				continue
+			}
+			nested.Siblings, nested.DeclaredNested = classFile.Siblings, true
+			text, err := decompileClassAt(nested, depth+1)
+			if err != nil {
+				return "", err
+			}
+			declared := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+			for len(declared) > 0 && (strings.HasPrefix(declared[0], "package ") || declared[0] == "") {
+				declared = declared[1:]
+			}
+			if len(declared) == 0 {
+				continue
+			}
+			simple := name[strings.LastIndex(name, "$")+1:]
+			declared[0] = nestedDeclaration(declared[0], simpleClassName(name), simple)
+			renameConstructors(declared, simpleClassName(name), simple)
+			lines = append(append(lines, ""), declared...)
+		}
+	}
 	lines = append(lines, "}")
 	return strings.Join(lines, "\n") + "\n", nil
+}
+
+// nestedDeclaration rewrites a declaration for the file that declares it: the
+// name loses the class it is nested in, and a class says `static`, which
+// nothing else in its own text does. An interface, an enum and a record are
+// static by being nested and say nothing.
+func nestedDeclaration(declaration, binary, simple string) string {
+	declaration = strings.Replace(declaration, binary, simple, 1)
+	at := strings.Index(declaration, "class ")
+	if at < 0 || strings.Contains(declaration[:at], "static") {
+		return declaration
+	}
+	return declaration[:at] + "static " + declaration[at:]
+}
+
+// renameConstructors gives a nested class's constructors the name the file
+// declares it under: a constructor is named for its class, and in the class
+// file that name carries the class it is nested in.
+func renameConstructors(body []string, binary, simple string) {
+	declaration := regexp.MustCompile(`^(\s*(?:[a-z]+ )*)` + regexp.QuoteMeta(binary) + `\(`)
+	for i, line := range body {
+		body[i] = declaration.ReplaceAllString(line, "${1}"+simple+"(")
+	}
 }
 
 // Decompile renders one class file's bytes as Java source. The text is

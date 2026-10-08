@@ -5028,6 +5028,21 @@ func decompileEveryClassIn(t *testing.T, module string) {
 // reconstruction that does not compile, or that behaves differently, fails
 // here. Comparing text against a baseline cannot see either.
 var compilesAndRuns = map[string]string{
+	// A nested class is declared by the file that names it, and names itself
+	// the way source does - a node whose own field is of its own type is the
+	// shape that showed the binary name leaking through.
+	"Nested": `public class Nested {
+  static class Node { int v; Node next; Node(int v) { this.v = v; } int sum() { return v + (next == null ? 0 : next.sum()); } }
+  interface Named { String name(); }
+  enum Kind { ONE, TWO }
+  record Pair(int a, int b) { int total() { return a + b; } }
+  static Node chain() { Node head = new Node(1); head.next = new Node(2); return head; }
+  public static void main(String[] z) {
+    Named named = () -> "n";
+    System.out.println(chain().sum() + named.name() + Kind.TWO + new Pair(3, 4).total());
+  }
+}
+`,
 	// Anonymous classes: a capture, an enclosing instance, one inside another.
 	"Anon": `public class Anon {
   int field = 5;
