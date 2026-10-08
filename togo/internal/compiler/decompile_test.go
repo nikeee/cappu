@@ -776,11 +776,16 @@ var reconstructions = []struct {
 		// The `finally` is copied into every exit path and the rest is guarded
 		// by a catch-all that rethrows. Reading the copy back needs javac's
 		// layout, where the copy sits right after the protected range; this
-		// emitter lays the same method out differently, so it says so instead.
+		// emitter lays the same method out differently, so what comes back is
+		// the catch-all itself - the same code, with the copy left where it is.
 		name: "Finally",
 		source: "class Finally { static int f(int a) { try { return a; }" +
 			" finally { java.lang.System.out.println(a); } } }",
-		want: []string{"cappu: a finally with more than one way out"},
+		want: []string{
+			"} catch (java.lang.Throwable e) {", "throw e;",
+			"java.lang.System.out.println(arg0);\nreturn var1;",
+		},
+		reject: []string{"UnsupportedOperationException"},
 	},
 	{
 		name: "Blank",
@@ -4495,6 +4500,58 @@ public class Ways {
   }
 }
 `
+
+// A try-with-resources is a catch-all this phase does not read as a `finally`:
+// javac writes the close twice and the suppressed-exception dance around the
+// second one. What is left is `catch (Throwable t) { ..; throw t; }`, which
+// catches the same things and runs the same code - the close on the way out
+// stays where javac put it, because that is what the bytecode does.
+const resourceSource = `import java.io.*;
+public class Resources {
+  static int one(String n) throws IOException { try (StringReader r = new StringReader(n)) { return r.read(); } }
+  static int two(String a, String b) throws IOException {
+    try (StringReader x = new StringReader(a); StringReader y = new StringReader(b)) { return x.read() + y.read(); }
+  }
+  static String boom() {
+    try (StringReader r = new StringReader("z")) { throw new IllegalStateException("x"); }
+    catch (IllegalStateException e) { return "c" + e.getMessage(); }
+  }
+  // The close really ran: a reader that is closed throws on the next read.
+  static String closed() throws IOException {
+    StringReader kept;
+    try (StringReader r = new StringReader("ab")) { kept = r; }
+    try { kept.read(); return "open"; } catch (IOException e) { return "closed"; }
+  }
+  public static void main(String[] z) throws Exception {
+    System.out.println(one("ab") + " " + two("c", "de") + " " + boom() + " " + closed());
+  }
+}
+`
+
+func TestDecompileReadsATryWithResourcesAsACatchAll(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Resources", resourceSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	if !strings.Contains(source, "catch (java.lang.Throwable") || !strings.Contains(source, ".addSuppressed(") {
+		t.Errorf("expected the catch-all written back:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Resources", source)
+	expected := runJava(t, dir, "Resources")
+	actual := runJava(t, again, "Resources")
+	if actual != expected || actual != "97 199 cx closed\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
 
 // A type pattern binds its variable where the test it belongs to is true, and
 // javac writes the binding as a cast and a store at the head of the block the

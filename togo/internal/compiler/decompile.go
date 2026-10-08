@@ -1754,6 +1754,10 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 			body, bodyEnd, rethrow, isFinally = branchingFinallyBody(instructions, handlerPc)
 		}
 		if !isFinally || ranges == 0 || len(body) == 0 {
+			if entry, ok := asCatchAll(byHandler[handlerPc], blocks[handlerPc], ranges); ok {
+				rest = append(rest, entry)
+				continue
+			}
 			return nil, nil, nil, bail("a finally or synchronized block")
 		}
 		var pieces []ExceptionEntry
@@ -1861,6 +1865,10 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 			}
 		}
 		if !wellFormed {
+			if entry, ok := asCatchAll(byHandler[handlerPc], blocks[handlerPc], ranges); ok {
+				rest = append(rest, entry)
+				continue
+			}
 			return nil, nil, nil, bail("a finally with more than one way out")
 		}
 		sort.Ints(copies)
@@ -1914,6 +1922,30 @@ func monitorRegions(exceptions []ExceptionEntry, blocks map[int]*block, instruct
 		})
 	}
 	return monitors, finallys, rest, nil
+}
+
+// asCatchAll is what is left for a catch-all this phase cannot read as a
+// `finally`: `catch (Throwable t)`, which catches the same things. The cleanup
+// javac wrote on the way out of the range stays where it is - source wrote it
+// once and javac twice, and writing both back is the shape the bytecode has,
+// not the shape source had. Only one protected range qualifies: javac splits a
+// range around the copies, and a gap between two pieces is code it deliberately
+// left unguarded, which a `try` cannot leave out. A handler that guards itself
+// is out too - a `catch` does not catch what its own body throws.
+func asCatchAll(entries []ExceptionEntry, handler *block, ranges int) (ExceptionEntry, bool) {
+	if ranges != 1 || handler == nil || len(handler.Instructions) == 0 ||
+		!strings.HasPrefix(handler.Instructions[0].Mnemonic, "astore") {
+		return ExceptionEntry{}, false
+	}
+	var only ExceptionEntry
+	for _, entry := range entries {
+		if int(entry.StartPc) == int(entry.HandlerPc) {
+			return ExceptionEntry{}, false
+		}
+		only = entry
+	}
+	only.CatchType = "java/lang/Throwable"
+	return only, true
 }
 
 // lastInstructionBefore reports the instruction right before pc, or nil.
