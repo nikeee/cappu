@@ -52,3 +52,26 @@ func TestClassSignatureTypes(t *testing.T) {
 		}
 	}
 }
+
+// The type parameters a class declares are the `<T, U>` its signature opens
+// with. Bounds are read past, not written: they constrain a use, and the
+// members here are erased either way.
+func TestClassTypeParameters(t *testing.T) {
+	for signature, want := range map[string]string{
+		"<T:Ljava/lang/Object;>Ljava/lang/Object;":                                  "<T>",
+		"<T:Ljava/lang/Object;U:Ljava/lang/Object;>Ljava/lang/Object;":              "<T, U>",
+		"<T::Ljava/lang/Comparable<TT;>;>Ljava/lang/Object;":                        "<T>",
+		"<K:Ljava/lang/Object;V:Ljava/lang/Object;>Ljava/util/AbstractMap<TK;TV;>;": "<K, V>",
+	} {
+		got, ok := classTypeParameters(signature)
+		if !ok || got != want {
+			t.Errorf("%s -> %q %v, want %q", signature, got, ok, want)
+		}
+	}
+	// A class with none says none, and so does a member's signature.
+	for _, signature := range []string{"Ljava/lang/Object;", "(I)V", ""} {
+		if got, ok := classTypeParameters(signature); ok {
+			t.Errorf("%q -> %q, want none", signature, got)
+		}
+	}
+}
