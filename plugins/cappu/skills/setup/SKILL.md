@@ -106,6 +106,10 @@ dependency resolution needs one. The default `classPath` already includes
 `./target/dependency` and `./build/libs`, so jars that Maven or Gradle copied
 there are visible to the language server.
 
+For an IDE that speaks the Build Server Protocol, `cappu bsp --install` writes
+`.bsp/cappu.json`; the IDE then runs `cappu bsp` (stdio) to compile the `main`
+and `test` targets and run the JUnit tests.
+
 ## Agent mode
 
 When any of `CLAUDECODE`, `AGENT`, `CURSOR_AGENT`, `GEMINI_CLI` (and similar

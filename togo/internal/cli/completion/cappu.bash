@@ -35,7 +35,7 @@ _cappu() {
     if [[ $cur == -* ]]; then
       COMPREPLY=($(compgen -W "-c --config -h --help --version" -- "$cur"))
     else
-      COMPREPLY=($(compgen -W "init config-schema install update outdated tree add remove audit licenses verify search show publish compile check decompile format run test lsp dap mcp version self-upgrade rage cache completion" -- "$cur"))
+      COMPREPLY=($(compgen -W "init config-schema install update outdated tree add remove audit licenses verify search show publish compile check decompile format run test lsp dap bsp mcp version self-upgrade rage cache completion" -- "$cur"))
     fi
     return
   fi
@@ -52,6 +52,7 @@ _cappu() {
     format) flags="-w --write"; files='!*.java' ;;
     decompile) flags="--disasm"; files='!*.class' ;;
     lsp|dap) flags="-p --port" ;;
+    bsp) flags="--install" ;;
     rage) flags="--open" ;;
     add|remove) first="api implementation annotationProcessor testImplementation" ;;
     version) first="major minor patch" ;;

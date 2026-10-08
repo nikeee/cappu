@@ -110,6 +110,13 @@ echo "cappu.json" >> .git/info/exclude
 cappu dap
 ```
 
+### BSP Server
+[BSP](https://build-server-protocol.github.io) lets an IDE (IntelliJ, Metals, ...) import the project and drive its builds through cappu. The project shows up as two build targets, `main` and `test`; the server compiles them (diagnostics go to the IDE) and runs the JUnit tests.
+```sh
+cappu bsp --install # writes .bsp/cappu.json, which the IDE discovers
+```
+The IDE then starts `cappu bsp` itself (BSP over stdio).
+
 ### Use in Docker
 Having a deterministic build + docker-managed cache is as simple as:
 ```Dockerfile

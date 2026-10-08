@@ -496,6 +496,17 @@ stay byte-comparable, like the LSP pair.
   `launch.go`s parse it off stdout, then forward the rest of stdout as program
   output (safe because `suspend=y` means no program output until resumed).
 
+## Build server: BSP rides the LSP connection (internal/bspserver)
+
+BSP is JSON-RPC 2.0 with the same `Content-Length` framing as LSP, so the build
+server reuses `internal/lsp.Conn` as is (no third transport next to
+`internal/wire`). Its payloads stay `map[string]any`: the server only answers a
+handful of methods, and typed structs for each would be the larger part of the
+package. stdout is the protocol channel, so nothing the server calls may print
+there - it uses the print-free `compile`/`testing` layers, never `cli.Run*`, and
+a child process's output (the JUnit run) is captured and sent as
+`build/logMessage`.
+
 ## Source formatter (src/format -> internal/format)
 
 The google-java-format-compatible formatter (nikeee/cappu#24) is a Wadler/Leijen

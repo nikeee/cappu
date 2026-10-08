@@ -29,6 +29,7 @@ _cappu() {
     'test:Compile src/test/java and run JUnit'
     'lsp:Start the Java language server'
     'dap:Start the debug adapter'
+    'bsp:Start the build server'
     'mcp:Start the MCP server for agents'
     'version:Bump the project version in cappu.json'
     'self-upgrade:Replace this binary with the latest CD build'
@@ -95,6 +96,8 @@ _cappu() {
             '*:class file:_files -g "*.class"' && ret=0 ;;
         lsp|dap)
           _arguments $common '(-p --port)'{-p,--port}'[listen on a TCP port]:port: ' && ret=0 ;;
+        bsp)
+          _arguments $common '--install[write the .bsp/cappu.json connection file]' && ret=0 ;;
         rage)
           _arguments $common '--open[open the issue tracker in your browser]' && ret=0 ;;
         version)

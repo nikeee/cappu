@@ -19,6 +19,7 @@ import (
 
 	"github.com/alecthomas/kong"
 
+	"github.com/nikeee/cappu/internal/bspserver"
 	"github.com/nikeee/cappu/internal/cli"
 	"github.com/nikeee/cappu/internal/config"
 	"github.com/nikeee/cappu/internal/dapserver"
@@ -57,6 +58,7 @@ type CLI struct {
 	Lsp          lspCmd          `cmd:"" help:"Start the Java language server (JSON-RPC)"`
 	Mcp          mcpCmd          `cmd:"" help:"Start the MCP server for agents (over stdio)"`
 	Dap          dapCmd          `cmd:"" help:"Start the debug adapter (Debug Adapter Protocol over stdio)"`
+	Bsp          bspCmd          `cmd:"" help:"Start the build server (Build Server Protocol over stdio); --install writes .bsp/cappu.json"`
 	Compile      compileCmd      `cmd:"" help:"Compile .java files to .class bytecode"`
 	Check        checkCmd        `cmd:"" help:"Type-check with cappu's own checker (the LSP's diagnostics) without writing class files"`
 	Format       formatCmd       `cmd:"" help:"Format .java files (google-java-format compatible)"`
@@ -462,6 +464,30 @@ func (c *dapCmd) Run(a *appState) error {
 	}
 	if serr := dapserver.Serve(cfg); serr != nil {
 		fmt.Fprintln(os.Stderr, "cappu:", serr)
+		return exit(1)
+	}
+	return exit(0)
+}
+
+// The build server (nikeee/cappu#48) exposes the project as BSP build targets
+// over stdio. --install writes the .bsp/cappu.json connection file BSP clients
+// discover it by, instead of serving.
+type bspCmd struct {
+	Install bool `help:"Write .bsp/cappu.json (the BSP connection file) and exit"`
+}
+
+func (c *bspCmd) Run(a *appState) error {
+	cfg, err := a.config()
+	if err != nil {
+		return err
+	}
+	if c.Install {
+		return exit(cli.RunBspInstall(cfg))
+	}
+	if serr := bspserver.Serve(cfg); serr != nil {
+		if !errors.Is(serr, bspserver.ErrExitWithoutShutdown) {
+			fmt.Fprintln(os.Stderr, "cappu:", serr)
+		}
 		return exit(1)
 	}
 	return exit(0)
