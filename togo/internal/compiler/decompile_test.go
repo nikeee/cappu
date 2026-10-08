@@ -5043,6 +5043,49 @@ var compilesAndRuns = map[string]string{
   }
 }
 `,
+	// An inner class is handed the instance it was created against: the field
+	// that holds it, the parameter that fills it and the store in front of the
+	// `super(..)` are all javac's where the file declares the class, and a
+	// field source wrote under that name is not.
+	"Holding": `public class Holding {
+  int base = 7;
+  class Inner {
+    Holding this$0;
+    int k;
+    Inner(int k) { this.k = k; }
+    Inner() { this(1); }
+    int read() { return this.this$0 == null ? -1 : this.this$0.base; }
+    int mine() { return base + k; }
+  }
+  class Sub extends Inner { Sub(int k) { super(k); } int twice() { return mine() * 2; } }
+  public static void main(String[] z) {
+    Holding a = new Holding();
+    System.out.println(a.new Inner(2).mine() + "" + a.new Inner().mine() + a.new Inner(1).read() + a.new Sub(3).twice());
+  }
+}
+`,
+	// An inner class that builds another of its own kind: javac hands the
+	// enclosing instance over as the first argument, and source wrote it as
+	// the qualifier in front of `new` - or wrote nothing, where a `this(..)`
+	// passes the instance the constructor already has.
+	"Chained": `public class Chained {
+  final int base;
+  Chained(int base) { this.base = base; }
+  class Step {
+    final int n;
+    Step(int n) { this.n = n; }
+    Step() { this(1); }
+    Step next() { return new Step(n + 1); }
+    Step first() { return new Chained(base + 10).new Step(n); }
+    int total() { return base + n; }
+  }
+  public static void main(String[] z) {
+    Chained c = new Chained(100);
+    Step s = c.new Step().next();
+    System.out.println(s.total() + "" + s.first().total() + c.new Step(5).total());
+  }
+}
+`,
 	// Anonymous classes: a capture, an enclosing instance, one inside another.
 	"Anon": `public class Anon {
   int field = 5;
@@ -5074,56 +5117,6 @@ public class Shapes {
   }
 }
 `,
-}
-
-// A nested class is still written as a file of its own, declaring
-// `class Outer$Inner`, so a file that names `Outer.Inner` has nothing to
-// resolve - and `outer.new Inner(..)` needs the nesting itself. Restoring it
-// is what fixes this, and this test says so until then: a reconstruction that
-// compiles here means the nesting is back and this test has to go.
-func TestDecompiledNestedClassDoesNotCompileYet(t *testing.T) {
-	if !hasTool("javac") {
-		t.Skip("no JDK (javac)")
-	}
-	source := `public class Holding {
-  int base = 7;
-  class Inner {
-    Holding this$0;
-    Inner(Holding other) { this.this$0 = other; }
-    int read() { return this.this$0.base; }
-  }
-  public static void main(String[] z) {
-    Holding a = new Holding(); Holding b = new Holding(); b.base = 3;
-    System.out.println(a.new Inner(b).read());
-  }
-}
-`
-	dir := t.TempDir()
-	classes := filepath.Join(dir, "classes")
-	compileWithJavac(t, classes, "Holding", source)
-	text, err := DecompileWith(readFile(t, filepath.Join(classes, "Holding.class")), siblingsIn(classes))
-	if err != nil {
-		t.Fatalf("decompile: %v", err)
-	}
-	// What it must NOT do is read the field source declared as javac's own.
-	if strings.Contains(text, "Holding.this.base") {
-		t.Errorf("a field source wrote is not the enclosing instance:\n%s", text)
-	}
-	again := filepath.Join(dir, "again")
-	if err := os.MkdirAll(again, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(again, "Holding.java"), []byte(text), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	out, err := exec.Command("javac", "--release", "21", "-d", again,
-		filepath.Join(again, "Holding.java")).CombinedOutput()
-	if err == nil {
-		t.Fatalf("the inner class resolves now - restore the nesting test and delete this one:\n%s", text)
-	}
-	if !strings.Contains(string(out), "class Inner") {
-		t.Errorf("expected the unresolved inner class, got:\n%s", out)
-	}
 }
 
 func TestDecompiledSourceCompilesAndRuns(t *testing.T) {

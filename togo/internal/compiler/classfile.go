@@ -113,6 +113,11 @@ type ClassFile struct {
 	// itself converts like any other nested name. Standing on its own it is
 	// declared as `Outer$Inner` and has to keep saying so.
 	DeclaredNested bool
+	// DeclaredInner is set with DeclaredNested for a class the InnerClasses
+	// attribute marks as inner: it is handed the instance it was created
+	// against, whether it holds that instance itself or inherits the field
+	// from the class it extends.
+	DeclaredInner bool
 }
 
 // Siblings reports the bytes of the class with that binary name, and whether

@@ -85,7 +85,7 @@ func RunDecompile(files []string, disasm bool) int {
 			if err != nil {
 				continue
 			}
-			for _, name := range compiler.NestedStaticClasses(read) {
+			for _, name := range compiler.NestedClasses(read) {
 				declared[name] = true
 			}
 		}

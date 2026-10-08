@@ -4385,10 +4385,11 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 	}
 	// The enclosing instance is implicit where source is a method of the
 	// enclosing class and passed `this`; anywhere else it qualifies the call.
-	// A `this(...)` keeps it: this file declares the class on its own, with the
-	// parameter its constructors take, until the nesting is restored.
+	// A class creating another instance of itself keeps the argument while it
+	// stands on its own, where its constructors still take the parameter;
+	// written where it is declared, they do not.
 	qualifier := ""
-	if outer != nil && target.Owner != d.classFile.ThisClass {
+	if outer != nil && (target.Owner != d.classFile.ThisClass || d.classFile.DeclaredInner) {
 		args = args[1:]
 		if outer.Text != "this" || d.classFile.ThisClass != enclosing {
 			qualifier = at(*outer, precPrimary)
@@ -4430,6 +4431,14 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 				trivialSuper = false
 			}
 		}
+		// Written nested, the store of the enclosing instance is javac's: it
+		// writes the same store from the declaration, where standing on its
+		// own nothing would assign the field at all.
+		if d.classFile.DeclaredInner && len(d.statements) > 0 && d.depth == 0 &&
+			storesOnlyTheEnclosingInstance(d) {
+			*d.current = (*d.current)[:0]
+			d.statements = d.statements[:0]
+		}
 		if (len(d.statements) > 0 && !trivialSuper) || d.depth > 0 {
 			return bail("constructor call is not first")
 		}
@@ -4443,7 +4452,12 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 		keyword := "this"
 		if isSuper {
 			keyword = "super"
-			if qualifier != "" {
+			// Written nested, a superclass that is an inner class of the same
+			// class takes its enclosing instance implicitly - source wrote
+			// `super(..)`, and the qualifier is the parameter javac added.
+			sameOuter := d.classFile.DeclaredInner &&
+				enclosingOf(target.Owner) == enclosingOf(d.classFile.ThisClass)
+			if qualifier != "" && !sameOuter {
 				keyword = qualifier + ".super"
 			}
 		}
@@ -7970,6 +7984,17 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
+		// Written nested, the instance an inner class was created against is
+		// read the way source wrote it: the field that holds it is not
+		// declared there. Only javac's own field - synthetic, of the enclosing
+		// type - is read that way; one source wrote under the same name is
+		// source's.
+		if enclosing, ok := enclosingField(d.classFile); d.classFile.DeclaredNested && ok &&
+			target.Text == "this" && field.Name == enclosing.Name && field.Owner == d.classFile.ThisClass {
+			outer := typeName(d.classFile.ThisClass[:strings.LastIndex(d.classFile.ThisClass, "$")], d.self())
+			d.push(expr{Text: outer + ".this", Prec: precPrimary, Type: outer})
+			return nil
+		}
 		// A variable whose type is still open is of the class the field read
 		// from it belongs to.
 		if entry, ok := d.byName[target.Text]; ok && (entry.Open || entry.Tentative) {
@@ -8857,6 +8882,11 @@ func methodSource(method Member, classFile *ClassFile, reserved map[string]bool)
 			if isEnumDeclaration(classFile) {
 				dropLeading = 2
 			}
+			// The instance an inner class is created against comes first and
+			// is javac's, not source's.
+			if classFile.DeclaredInner {
+				dropLeading = 1
+			}
 			parts = append(parts, simpleClassName(classFile.ThisClass)+
 				"("+parameterList(method, locals, isStatic, dropLeading)+")")
 		} else {
@@ -9364,14 +9394,14 @@ func DecompileClass(classFile *ClassFile) (string, error) {
 	return decompileClassAt(classFile, 0)
 }
 
-// NestedStaticClasses names the static classes a class declares, in the order
-// their names sort. An anonymous or local class is left out: javac named it
-// for the place it was written, which is not a name source could write, and
-// it is read back where it was written instead.
-func NestedStaticClasses(classFile *ClassFile) []string {
+// NestedClasses names the classes a class declares, in the order their names
+// sort. An anonymous or local class is left out: javac named it for the place
+// it was written, which is not a name source could write, and it is read back
+// where it was written instead.
+func NestedClasses(classFile *ClassFile) []string {
 	var names []string
-	for name, access := range InnerClassFlags(classFile) {
-		if access&accStatic == 0 || !strings.HasPrefix(name, classFile.ThisClass+"$") {
+	for name := range InnerClassFlags(classFile) {
+		if !strings.HasPrefix(name, classFile.ThisClass+"$") {
 			continue
 		}
 		simple := name[len(classFile.ThisClass)+1:]
@@ -9455,6 +9485,12 @@ func decompileClassAt(classFile *ClassFile, depth int) (string, error) {
 		if field.Flags&accEnum != 0 || (field.Flags&accSynthetic != 0 && generatedFields[field.Name]) {
 			continue
 		}
+		// Written inside the class that declares it, an inner class is handed
+		// the instance it was created against, and javac writes the field that
+		// holds it again from the declaration.
+		if enclosing, ok := enclosingField(classFile); classFile.DeclaredNested && ok && field.Name == enclosing.Name {
+			continue
+		}
 		// A record's components are its state: declaring the fields again is not
 		// something Java lets you write.
 		isComponent := false
@@ -9474,12 +9510,13 @@ func decompileClassAt(classFile *ClassFile, depth int) (string, error) {
 	}
 	// A file that names `Outer.Inner` has to declare it.
 	if classFile.Siblings != nil && depth < NestedDepth {
-		for _, name := range NestedStaticClasses(classFile) {
+		for _, name := range NestedClasses(classFile) {
 			nested, ok := SiblingClass(classFile.Siblings, name)
 			if !ok {
 				continue
 			}
 			nested.Siblings, nested.DeclaredNested = classFile.Siblings, true
+			nested.DeclaredInner = InnerClassFlags(classFile)[name]&accStatic == 0
 			text, err := decompileClassAt(nested, depth+1)
 			if err != nil {
 				return "", err
@@ -9492,7 +9529,8 @@ func decompileClassAt(classFile *ClassFile, depth int) (string, error) {
 				continue
 			}
 			simple := name[strings.LastIndex(name, "$")+1:]
-			declared[0] = nestedDeclaration(declared[0], simpleClassName(name), simple)
+			declared[0] = nestedDeclaration(declared[0], simpleClassName(name), simple,
+				InnerClassFlags(classFile)[name])
 			renameConstructors(declared, simpleClassName(name), simple)
 			lines = append(append(lines, ""), declared...)
 		}
@@ -9501,14 +9539,63 @@ func decompileClassAt(classFile *ClassFile, depth int) (string, error) {
 	return strings.Join(lines, "\n") + "\n", nil
 }
 
+// storesOnlyTheEnclosingInstance reports a constructor that has done nothing
+// so far but store the instance it was created against - javac's own
+// statement, which it writes again from a nested declaration.
+func storesOnlyTheEnclosingInstance(d *bodyDecompiler) bool {
+	enclosing, ok := enclosingField(d.classFile)
+	if !ok {
+		return false
+	}
+	want := "this." + enclosing.Name + " = "
+	for _, one := range flattenStatements(d.statements) {
+		if !strings.HasPrefix(strings.TrimSpace(one), want) {
+			return false
+		}
+	}
+	return len(d.statements) > 0
+}
+
+// enclosingOf names the class a nested one is declared in, empty for a class
+// that is not nested.
+func enclosingOf(binaryName string) string {
+	at := strings.LastIndex(binaryName, "$")
+	if at < 0 {
+		return ""
+	}
+	return binaryName[:at]
+}
+
+// enclosingField is the field javac gives an inner class to hold the instance
+// it was created against: synthetic, named `this$N`, and of the type of the
+// class around it. A field source wrote under that name is none of those
+// together.
+func enclosingField(classFile *ClassFile) (Member, bool) {
+	at := strings.LastIndex(classFile.ThisClass, "$")
+	if at < 0 {
+		return Member{}, false
+	}
+	enclosing := "L" + classFile.ThisClass[:at] + ";"
+	for _, field := range classFile.Fields {
+		if field.Flags&accSynthetic != 0 && strings.HasPrefix(field.Name, "this$") &&
+			field.Descriptor == enclosing {
+			return field, true
+		}
+	}
+	return Member{}, false
+}
+
 // nestedDeclaration rewrites a declaration for the file that declares it: the
 // name loses the class it is nested in, and a class says `static`, which
 // nothing else in its own text does. An interface, an enum and a record are
 // static by being nested and say nothing.
-func nestedDeclaration(declaration, binary, simple string) string {
+func nestedDeclaration(declaration, binary, simple string, access uint16) string {
 	declaration = strings.Replace(declaration, binary, simple, 1)
+	// An inner class says nothing; a static nested class says `static`, which
+	// nothing in its own text does. An interface, an enum and a record are
+	// static by being nested and say nothing either.
 	at := strings.Index(declaration, "class ")
-	if at < 0 || strings.Contains(declaration[:at], "static") {
+	if access&accStatic == 0 || at < 0 || strings.Contains(declaration[:at], "static") {
 		return declaration
 	}
 	return declaration[:at] + "static " + declaration[at:]
