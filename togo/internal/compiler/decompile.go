@@ -84,6 +84,15 @@ type logicNode struct {
 	Op    string
 }
 
+// patternTest is an `instanceof` as a type pattern may begin: the type it
+// tests, how the value under test reads, and the whole test as it was written -
+// which is what the binding is added to once it is found.
+type patternTest struct {
+	Type    string
+	Operand string
+	Term    string
+}
+
 // comparedPair are the operands of an lcmp/fcmp/dcmp, which has no source form
 // of its own: the comparison it feeds is what source wrote.
 type comparedPair struct {
@@ -103,6 +112,10 @@ type expr struct {
 	// number has to get the ternary again (`array[c ? 1 : 0]`).
 	AsInt    string
 	Compared *comparedPair
+	// Pattern is set on an `instanceof`, which is where a type pattern begins:
+	// `o instanceof X x` tests and binds, and javac writes the binding as a
+	// cast and a store in the block the test guards.
+	Pattern *patternTest
 	// AssertionFlag is set on a read of the synthetic field javac tests an
 	// `assert` against, which is the only read that writes one back.
 	AssertionFlag bool
@@ -7247,7 +7260,7 @@ func (d *bodyDecompiler) jumpConditionOf(b *block, taken *[]int, folded map[int]
 			// A test on the *fallthrough* path shares an outcome with this one:
 			// `a || b` when both jump to the same place, `a || !b` when the
 			// second falls into where the first jumped.
-			onFall, found, undo, err := d.chainFrom(fallthrough_, taken, inChain, deep)
+			onFall, found, undo, bind, err := d.chainFrom(fallthrough_, taken, inChain, deep, condition)
 			if err != nil {
 				return jump{}, err
 			}
@@ -7256,6 +7269,9 @@ func (d *bodyDecompiler) jumpConditionOf(b *block, taken *[]int, folded map[int]
 					second := onFall.Condition
 					if onFall.Target != target {
 						second = negate(second)
+					}
+					if bind != nil {
+						bindPattern(&condition, bind.Term, bind.Name)
 					}
 					condition = logicalExpr(logicOr, condition, second)
 					if onFall.Target == target {
@@ -7270,7 +7286,7 @@ func (d *bodyDecompiler) jumpConditionOf(b *block, taken *[]int, folded map[int]
 			}
 			// A test on the *target* path: landing on the fallthrough now means
 			// either this branch was not taken, or the second one sent us there.
-			onTarget, found, undo, err := d.chainFrom(target, taken, inChain, deep)
+			onTarget, found, undo, bind, err := d.chainFrom(target, taken, inChain, deep, condition)
 			if err != nil {
 				return jump{}, err
 			}
@@ -7280,6 +7296,9 @@ func (d *bodyDecompiler) jumpConditionOf(b *block, taken *[]int, folded map[int]
 					jumpsBack := onTarget.Target == fallthrough_
 					if !jumpsBack {
 						second = negate(second)
+					}
+					if bind != nil {
+						bindPattern(&condition, bind.Term, bind.Name)
 					}
 					condition = logicalExpr(logicOr, negate(condition), second)
 					target = fallthrough_
@@ -7308,21 +7327,40 @@ func (d *bodyDecompiler) chainFrom(
 	taken *[]int,
 	folded map[int]bool,
 	deep bool,
-) (jump, bool, func(), error) {
+	condition expr,
+) (jump, bool, func(), *patternBinding, error) {
 	next := d.blocks[start]
-	if next == nil || next.Kind != blockConditional || !isConditionBlock(next) {
-		return jump{}, false, nil, nil
+	if next == nil || next.Kind != blockConditional {
+		return jump{}, false, nil, nil, nil
+	}
+	// A type pattern binds its variable at the head of the block the test
+	// guards: the cast and the store are javac's, and `o instanceof X x` is
+	// what source wrote in front of the rest of the condition.
+	steps, bind := next.Instructions, (*patternBinding)(nil)
+	if !isConditionBlock(next) {
+		found, ok := d.bindingAt(next, condition)
+		if !ok {
+			return jump{}, false, nil, nil, nil
+		}
+		rest := &block{Start: next.Start, Instructions: steps[3:], Kind: next.Kind, Successors: next.Successors}
+		if len(rest.Instructions) == 0 || !isConditionBlock(rest) {
+			return jump{}, false, nil, nil, nil
+		}
+		steps, bind = steps[3:], found
 	}
 	if folded[start] || d.visited[start] {
-		return jump{}, false, nil, nil
+		return jump{}, false, nil, nil, nil
 	}
 	// A loop's own test is a statement, not a term of the condition in front of it.
 	if d.isLoopEdge(start) {
-		return jump{}, false, nil, nil
+		return jump{}, false, nil, nil, nil
 	}
 	// Nothing outside the chain may reach it, or folding would skip a path in.
 	if d.predecessorsOf(start, folded) != 0 {
-		return jump{}, false, nil, nil
+		return jump{}, false, nil, nil, nil
+	}
+	if bind != nil && !d.bindLocal(bind, next, steps[0].Pc) {
+		return jump{}, false, nil, nil, nil
 	}
 	stackBefore := append([]expr(nil), d.stack...)
 	statementsBefore := len(*d.current)
@@ -7333,26 +7371,33 @@ func (d *bodyDecompiler) chainFrom(
 	}
 	folded[start] = true
 	*taken = append(*taken, start)
-	last := next.Instructions[len(next.Instructions)-1]
-	if err := d.runInstructions(next.Instructions[:len(next.Instructions)-1], last.Pc, start); err != nil {
-		return jump{}, false, nil, err
+	last := steps[len(steps)-1]
+	if err := d.runInstructions(steps[:len(steps)-1], last.Pc, start); err != nil {
+		return jump{}, false, nil, nil, err
 	}
 	var folded_ jump
 	var err error
 	if deep {
 		folded_, err = d.jumpConditionOf(next, taken, folded)
 	} else {
-		var condition expr
-		condition, err = d.branchExpr(last)
-		folded_ = jump{Condition: condition, Target: next.Successors[1], Fallthrough: next.Successors[0]}
+		var test expr
+		test, err = d.branchExpr(last)
+		folded_ = jump{Condition: test, Target: next.Successors[1], Fallthrough: next.Successors[0]}
 	}
 	if err != nil {
-		return jump{}, false, nil, err
+		return jump{}, false, nil, nil, err
 	}
 	undo := func() {
 		d.stack = stackBefore
 		*d.current = (*d.current)[:statementsBefore]
 		*taken = (*taken)[:takenCount]
+		if bind != nil {
+			// The name it took goes back too: a fold that is rolled back must
+			// leave no trace, or the next variable in the slot is renamed for
+			// a pattern that was never written.
+			delete(d.locals, bind.Slot)
+			delete(d.names, bind.Name)
+		}
 		for at := range folded {
 			delete(folded, at)
 		}
@@ -7364,9 +7409,97 @@ func (d *bodyDecompiler) chainFrom(
 	// result is dropped, say - and folding it into a condition would move it.
 	if len(*d.current) != statementsBefore {
 		undo()
-		return jump{}, false, nil, nil
+		return jump{}, false, nil, nil, nil
 	}
-	return folded_, true, undo, nil
+	return folded_, true, undo, bind, nil
+}
+
+// patternBinding is the variable a type pattern binds, found in the block the
+// `instanceof` guards: javac writes `o instanceof X x` as the test, then the
+// cast and the store of x at the head of the block the test falls into.
+type patternBinding struct {
+	Term string
+	Type string
+	Name string
+	Slot int
+}
+
+// bindingAt reports the type pattern the head of b binds, against the test
+// condition already written. The test has to be the one and only `instanceof`
+// of that type on that value in the condition so far: more than one and which
+// of them binds is not something the bytecode still says.
+func (d *bodyDecompiler) bindingAt(b *block, condition expr) (*patternBinding, bool) {
+	if len(b.Instructions) < 4 {
+		return nil, false
+	}
+	load, cast, store := b.Instructions[0], b.Instructions[1], b.Instructions[2]
+	if !strings.HasPrefix(load.Mnemonic, "aload") || cast.Mnemonic != "checkcast" ||
+		!strings.HasPrefix(store.Mnemonic, "astore") {
+		return nil, false
+	}
+	typ := typeName(orDefault(PoolClassName(d.classFile.Pool, uint16(cast.Arg))), d.self())
+	source, err := d.local(slotOf(load), load.Pc, "", false)
+	if err != nil || source == nil {
+		return nil, false
+	}
+	var found *patternTest
+	seen := 0
+	var walk func(value *expr)
+	walk = func(value *expr) {
+		if value == nil {
+			return
+		}
+		if value.Pattern != nil && value.Pattern.Type == typ && value.Pattern.Operand == source.Name {
+			found, seen = value.Pattern, seen+1
+		}
+		if value.Logic != nil {
+			walk(value.Logic.Left)
+			walk(value.Logic.Right)
+		}
+	}
+	walk(&condition)
+	if seen != 1 || strings.Count(condition.Text, found.Term) != 1 {
+		return nil, false
+	}
+	// The slot the pattern binds has to be a new variable: one javac already
+	// put something else in is not the pattern's.
+	slot := slotOf(store)
+	if _, taken := d.locals[slot]; taken {
+		return nil, false
+	}
+	return &patternBinding{Term: found.Term, Type: typ, Slot: slot}, true
+}
+
+// bindLocal declares the variable a type pattern binds. The pattern is the
+// declaration, so nothing is hoisted for it.
+func (d *bodyDecompiler) bindLocal(bind *patternBinding, b *block, pc int) bool {
+	bound, err := d.local(bind.Slot, pc, bind.Type, true)
+	if err != nil || bound == nil {
+		return false
+	}
+	bound.Declared = true
+	bound.StoreBlocks[b.Start] = true
+	bind.Name = bound.Name
+	return true
+}
+
+// bindPattern writes the variable a type pattern binds into the test it belongs
+// to, wherever that test reads - the condition's own text and every logical
+// node under it keep a rendering of their own.
+func bindPattern(value *expr, term, name string) {
+	if value == nil {
+		return
+	}
+	if strings.Count(value.Text, term) == 1 {
+		value.Text = strings.Replace(value.Text, term, term+" "+name, 1)
+	}
+	if value.Pattern != nil && value.Pattern.Term == term {
+		value.Pattern.Term += " " + name
+	}
+	if value.Logic != nil {
+		bindPattern(value.Logic.Left, term, name)
+		bindPattern(value.Logic.Right, term, name)
+	}
 }
 
 func (d *bodyDecompiler) predecessorsOf(start int, ignore map[int]bool) int {
@@ -8511,7 +8644,11 @@ func (d *bodyDecompiler) step(
 		if err != nil {
 			return err
 		}
-		d.push(expr{Text: at(value, precRel+1) + " instanceof " + typ, Prec: precRel, Type: "boolean"})
+		text := at(value, precRel+1) + " instanceof " + typ
+		d.push(expr{
+			Text: text, Prec: precRel, Type: "boolean",
+			Pattern: &patternTest{Type: typ, Operand: value.Text, Term: text},
+		})
 		return nil
 	}
 

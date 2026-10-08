@@ -4496,6 +4496,59 @@ public class Ways {
 }
 `
 
+// A type pattern binds its variable where the test it belongs to is true, and
+// javac writes the binding as a cast and a store at the head of the block the
+// test guards - which is in the middle of the condition when the pattern is
+// one term of a short-circuit.
+const patternSource = `public class Patterns {
+  int f;
+  Patterns(int f) { this.f = f; }
+  public boolean equals(Object o) { return o == this || (o instanceof Patterns p && this.f == p.f); }
+  public int hashCode() { return this.f; }
+  static String kind(Object o) {
+    if (o instanceof String s && s.length() > 2) return "s" + s;
+    if (o instanceof int[] a && a.length > 1) return "a" + a[1];
+    return "?";
+  }
+  static boolean both(Object a, Object b) { return a instanceof String x && b instanceof String y && x.length() == y.length(); }
+  static String negated(Object o) { if (!(o instanceof String s) || s.isEmpty()) return "no"; return s; }
+  public static void main(String[] z) {
+    System.out.println(new Patterns(1).equals(new Patterns(1)) + " " + new Patterns(1).equals("x")
+      + " " + kind("abc") + kind("a") + kind(new int[]{7, 8}) + kind(1)
+      + " " + both("ab", "cd") + both("ab", "c") + both("ab", 1)
+      + " " + negated("hi") + negated("") + negated(1));
+  }
+}
+`
+
+func TestDecompileReconstructsATypePattern(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Patterns", patternSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	// The pattern declares the variable, so nothing else may.
+	for _, want := range []string{"instanceof Patterns ", "instanceof java.lang.String "} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Patterns", source)
+	expected := runJava(t, dir, "Patterns")
+	actual := runJava(t, again, "Patterns")
+	if actual != expected || expected == "" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A `finally` whose body branches: javac writes the branch into every copy
 // too, with the targets moved - the copy on the way out is the same code at
 // another place, and reading one back means matching it where the jumps differ.
