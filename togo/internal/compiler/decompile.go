@@ -3890,7 +3890,17 @@ func (d *bodyDecompiler) anonymousBody(
 		case !known:
 			return "", "", nil, bail("an anonymous class whose captures are not named")
 		case strings.HasPrefix(field, "this$"):
-			enclosing := simpleClassName(d.classFile.ThisClass)
+			// The class around this one may itself be nested, and `Outer$Inner`
+			// is not how source names it. The check below is of the name javac
+			// wrote, where a class named for a method still carries its number.
+			binary := simpleClassName(d.classFile.ThisClass)
+			enclosing := binary
+			// Only where the class around this one is written inside the class
+			// that declares it: standing on its own, `Outer.Inner` names
+			// nothing the file encloses.
+			if d.classFile.WrittenNested {
+				enclosing = strings.ReplaceAll(binary, "$", ".")
+			}
 			// Written inside the class that declares it, a class reads its own
 			// enclosing instance as `Outer.this`, and that is what the `new`
 			// was handed.
@@ -3900,7 +3910,7 @@ func (d *bodyDecompiler) anonymousBody(
 			}
 			// `Outer$1.this` is not a name: a class javac named for the method
 			// it sits in has none of its own.
-			if outer == nil || outer.Text != "this" || namedForAMethod.MatchString(enclosing) {
+			if outer == nil || outer.Text != "this" || !writableTypeName(binary) {
 				return "", "", nil, bail("an anonymous class holding an enclosing instance with no name")
 			}
 			names[field] = enclosing + ".this"
@@ -4035,6 +4045,25 @@ func (d *bodyDecompiler) anonymousBody(
 		}
 		return match
 	})
+	// An enclosing instance reached through another one - `Outer.Inner.this.
+	// this$0`, which the substitution above leaves behind - is how source
+	// names the class around that one, and only a class written inside the one
+	// that declares it has that class to name. No source writes that shape, so
+	// collapsing it is unambiguous.
+	if d.classFile.WrittenNested {
+		body = reachedThroughEnclosing.ReplaceAllStringFunc(body, func(match string) string {
+			marker := strings.Index(match, ".this.this$")
+			if marker < 0 {
+				return match
+			}
+			qualified := match[:marker]
+			at := strings.LastIndex(qualified, ".")
+			if at < 0 {
+				return match
+			}
+			return qualified[:at] + ".this"
+		})
+	}
 	// A field left over is one the constructor did not explain - except a
 	// capture this class passed on to one inside it, which still reads as this
 	// class's own field and which the pass around this one rewrites.
@@ -4045,6 +4074,11 @@ func (d *bodyDecompiler) anonymousBody(
 	}
 	return body, named, kept, nil
 }
+
+// reachedThroughEnclosing matches the enclosing instance of an enclosing
+// instance, which the substitution leaves as a qualified `this` followed by
+// the field javac keeps the next one in.
+var reachedThroughEnclosing = regexp.MustCompile(`[A-Za-z_$][\w.$]*\.this\.this\$\d+`)
 
 // capturedLocal records a variable an anonymous class was handed. Whether it is the
 // effectively final one source captured is only known at the end of the body:
@@ -4059,10 +4093,6 @@ func (d *bodyDecompiler) capturedLocal(name string) {
 // syntheticRead matches a read of a synthetic field through `this`, which is
 // how the body of an anonymous class reaches a captured value.
 var syntheticRead = regexp.MustCompile(`this\.(?:val\$|this\$)[\w$]+`)
-
-// namedForAMethod matches the name javac gives a class that source wrote
-// inside a method: `Outer$1`, `Outer$1Local`.
-var namedForAMethod = regexp.MustCompile(`^\d`)
 
 // standaloneName matches an identifier that is not part of a longer one.
 func standaloneName(name string) *regexp.Regexp {
