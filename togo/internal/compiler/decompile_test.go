@@ -3248,6 +3248,58 @@ func TestDecompileDropsTheEnclosingStoreFromAnInitializer(t *testing.T) {
 	}
 }
 
+// A local declared inside a loop or a branch and captured by a lambda is
+// declared there again, at its one store: hoisted to the top of the body, a
+// variable written once per turn is written in every turn, and a lambda cannot
+// capture it. One read outside that block keeps it where it was.
+const capturedSource = `import java.util.*;
+import java.util.function.*;
+public class Captured {
+  static List<IntSupplier> loop(int n) { List<IntSupplier> r = new ArrayList<>(); for (int i = 0; i < n; i++) { int x = i * 2; r.add(() -> x); } return r; }
+  static Supplier<String> branch(boolean b) { if (b) { String s = "a" + b; return () -> s; } return null; }
+  static int after(String v) { final int x; try { x = Integer.parseInt(v); } catch (NumberFormatException e) { throw new IllegalStateException(e); } IntSupplier f = () -> x; return f.getAsInt() + x; }
+}
+`
+
+func TestDecompileDeclaresACapturedLocalAtItsStore(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Captured", capturedSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{"int var3 = var2 * 2;", "java.lang.String var1 = \"a\" + arg0;"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	// after reads x past the try, so its declaration cannot move into it,
+	// and hoisted it is no variable a lambda can capture.
+	if strings.Contains(source, "int var1 = java.lang.Integer.parseInt(arg0);") ||
+		!strings.Contains(source, "cappu: a captured variable that is not final") {
+		t.Errorf("expected the declaration of after's local to stay put:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Captured", source)
+	driver := `public class CapturedDriver {
+  public static void main(String[] z) {
+    StringBuilder out = new StringBuilder();
+    for (java.util.function.IntSupplier f : Captured.loop(3)) out.append(f.getAsInt());
+    out.append(" ").append(Captured.branch(true).get()).append(Captured.branch(false));
+    System.out.println(out);
+  }
+}`
+	compileWithJavacOn(t, dir, "CapturedDriver", driver, dir)
+	expected := runJava(t, dir, "CapturedDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "CapturedDriver")
+	if actual != expected || actual != "024 atruenull\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // javac lowers a `switch` over a String to two: one over the hash that stores
 // the matching label's index, one over that index with the bodies. Written
 // back it is the one source wrote, over the String and with its labels -
@@ -4106,14 +4158,15 @@ func TestDecompileReconstructsJavacLambdas(t *testing.T) {
 	}
 }
 
-// A lambda that captures a variable this hoisted to the top of the method is not
-// effectively final, and Java takes no other kind.
+// A lambda that captures a variable stored once in a loop body takes it from
+// there: hoisted to the top of the method it would be written in every turn
+// and not effectively final, so the declaration is the store, as source wrote.
 const hoistedCaptureSource = `import java.util.function.*;
 public class Hoisted {
   static int f(int n) { int t = 0; for (int i = 0; i < n; i++) { int j = i; Supplier<Integer> s = () -> j * 2; t += s.get(); } return t; }
 }`
 
-func TestDecompileSaysWhenALambdaCaptureCannotBeFinal(t *testing.T) {
+func TestDecompileDeclaresALoopCaptureInTheLoop(t *testing.T) {
 	if !hasTool("javac") {
 		t.Skip("no JDK (javac)")
 	}
@@ -4123,9 +4176,10 @@ func TestDecompileSaysWhenALambdaCaptureCannotBeFinal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(source, "cappu: a captured variable that is not final") {
-		t.Errorf("expected the bail, got:\n%s", source)
+	if strings.Contains(source, "/* cappu:") || !strings.Contains(source, "int var3 = var2;") {
+		t.Errorf("expected the capture declared at its store, got:\n%s", source)
 	}
+	compileWithJavac(t, filepath.Join(dir, "again"), "Hoisted", source)
 }
 
 // A `while (true)` opens with the block a `continue` jumps to, and a

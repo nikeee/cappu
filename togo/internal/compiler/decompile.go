@@ -3125,6 +3125,58 @@ func (d *bodyDecompiler) retype(entry *local, target string) error {
 	return nil
 }
 
+// declareAtTheWrite moves the declaration of a local written once from the top
+// of the body, where a store inside a branch or loop hoisted it, down to that
+// store - which is where source declared it, when nothing outside the block
+// the store is in reads it. Hoisted, a variable written once per turn of a
+// loop is written in every turn, and a lambda cannot capture it.
+func (d *bodyDecompiler) declareAtTheWrite(entry *local) bool {
+	declaration := entry.Declaration
+	if len(entry.Writes) != 1 || declaration == nil || declaration.Inline || declaration.List != &d.hoisted {
+		return false
+	}
+	write := entry.Writes[0]
+	if write.InValue {
+		return false
+	}
+	// Every read has to come after the store, in its own block. The write
+	// holds the list it was captured into, not the block's own handle on it:
+	// the two share the statements, not the pointer.
+	written := func(list *[]stmt, i int) bool { return i < len(*list) && &(*list)[i] == &(*write.List)[write.Index] }
+	outside := false
+	var walk func(list *[]stmt, inside bool)
+	walk = func(list *[]stmt, inside bool) {
+		after := false
+		for i, one := range *list {
+			if written(list, i) {
+				after = true
+				continue
+			}
+			here := inside || after
+			if one.Nested != nil {
+				walk(one.Nested, here)
+				continue
+			}
+			if !here && reads(withoutLiterals(one.Text), entry.Name) {
+				outside = true
+			}
+		}
+	}
+	walk(&d.statements, false)
+	if outside {
+		return false
+	}
+	d.hoisted = append(d.hoisted[:declaration.Index], d.hoisted[declaration.Index+1:]...)
+	for _, other := range d.byName {
+		if other.Declaration != nil && other.Declaration.List == &d.hoisted && other.Declaration.Index > declaration.Index {
+			other.Declaration.Index--
+		}
+	}
+	entry.Declaration = &localDeclaration{List: write.List, Index: write.Index, Inline: true}
+	(*write.List)[write.Index] = stmt{Text: entry.Type + " " + entry.Name + " = " + coerce(write.Value, entry.Type) + ";"}
+	return true
+}
+
 // frozenCondition reports whether name is still compared with a number
 // somewhere the rewrite cannot reach.
 func (d *bodyDecompiler) frozenCondition(name string) bool {
@@ -5373,7 +5425,8 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 	// its one value at the declaration.
 	for _, entry := range d.captured {
 		settled := len(entry.Writes) == 0 ||
-			(len(entry.Writes) == 1 && entry.Declaration != nil && entry.Declaration.Inline)
+			(len(entry.Writes) == 1 && entry.Declaration != nil && entry.Declaration.Inline) ||
+			d.declareAtTheWrite(entry)
 		if !settled {
 			return bail("a captured variable that is not final")
 		}
