@@ -26,6 +26,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -7884,7 +7885,7 @@ func (d *bodyDecompiler) valueOfRegion(start, follow int, consumed *[]int) (expr
 	// same value twice. An arm of its own may call something. What a case label
 	// has taken over is not part of either shape.
 	shape := d.withoutSkipped(b)
-	if !isPureBlock(shape) && (containsInt(*consumed, start) || !isArmBlock(shape)) {
+	if b.Kind != blockSwitch && !isPureBlock(shape) && (containsInt(*consumed, start) || !isArmBlock(shape)) {
 		return expr{}, false, nil
 	}
 	if d.isLoopEdge(start) {
@@ -7916,6 +7917,74 @@ func (d *bodyDecompiler) valueOfRegion(start, follow int, consumed *[]int) (expr
 			armTrue, armFalse = inner.Target, inner.Fallthrough
 		}
 		return d.armValues(condition, armTrue, armFalse, follow, consumed)
+	}
+	// A `switch` here is a switch expression nested in this one, and its value
+	// is what the region leaves - but only when it is one through and through,
+	// writing no statement and ending where this region does.
+	if b.Kind == blockSwitch {
+		// A statement form that is then thrown away would leave the locals it
+		// declared behind, so no local may be written in here - but for the
+		// two of javac's lowering of a String, which the fold never writes.
+		lowering := map[int]bool{}
+		for _, one := range b.Instructions {
+			if isOneOf(opBase(one.Mnemonic), "ilfda", "store") {
+				lowering[slotOf(one)] = true
+			}
+		}
+		for at, other := range d.blocks {
+			if at <= start || at >= follow {
+				continue
+			}
+			for _, one := range other.Instructions {
+				if one.Mnemonic == "iinc" || (isOneOf(opBase(one.Mnemonic), "ilfda", "store") && !lowering[slotOf(one)]) {
+					return expr{}, false, nil
+				}
+			}
+		}
+		stackBefore := append([]expr(nil), d.stack...)
+		visitedBefore := maps.Clone(d.visited)
+		armsBefore := len(d.arms)
+		restore := func() {
+			d.stack, d.visited, d.arms = stackBefore, visitedBefore, d.arms[:armsBefore]
+		}
+		d.visited[start] = true
+		next := 0
+		captured, err := d.capture(func() error {
+			body := b.Instructions[d.skip[start]:]
+			var folded bool
+			var err error
+			if next, folded, err = d.stringSwitch(b, body, follow); err != nil || folded || len(lowering) > 0 {
+				return err
+			}
+			if err := d.runInstructions(body[:len(body)-1], terminator.Pc, start); err != nil {
+				return err
+			}
+			next, err = d.switchStatement(b, follow)
+			return err
+		})
+		// What the statement form cannot write is only no value here: the
+		// region is still written some other way.
+		var reason *notDecompilable
+		if errors.As(err, &reason) {
+			restore()
+			return expr{}, false, nil
+		}
+		if err != nil {
+			return expr{}, false, err
+		}
+		// javac can end the nested one on a `goto` of its own to this one's end.
+		if hop := d.blocks[next]; hop != nil && next != follow && !d.visited[next] && len(hop.Instructions) == 1 &&
+			hop.Kind == blockGoto && len(hop.Successors) == 1 && hop.Successors[0] == follow {
+			*consumed = append(*consumed, next)
+			next = follow
+		}
+		if next != follow || len(captured) != 0 || len(d.stack) != len(stackBefore)+1 {
+			restore()
+			return expr{}, false, nil
+		}
+		*consumed = append(*consumed, start)
+		value, err := d.pop()
+		return value, true, err
 	}
 	if len(b.Successors) != 1 || b.Successors[0] != follow {
 		return expr{}, false, nil

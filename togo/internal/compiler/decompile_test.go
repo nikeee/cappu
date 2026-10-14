@@ -3153,6 +3153,11 @@ const switchExprSource = `public class SwitchExpr {
   // Inside an if, with an arm that throws, the end of the statement is the
   // if's - the value still lands where the other arms meet.
   static SwitchExpr nested(int k, boolean b) { SwitchExpr s = new SwitchExpr(); if (b) s.f = switch (k) { case 0 -> "x"; case 1 -> "y"; default -> throw new IllegalStateException(); }; else s.f = "n"; return s; }
+  // A switch expression as the value of an arm: of another one, over an int
+  // and over a String, and of a conditional.
+  static String nest(int a, int b) { return switch (a) { case 1 -> switch (b) { case 1 -> "11"; default -> throw new IllegalStateException(); }; case 2 -> "2"; default -> "d"; }; }
+  static String nestS(String a, int b) { return switch (b) { case 1 -> switch (a) { case "x" -> "1x"; default -> "1?"; }; default -> "d"; }; }
+  static String cond(boolean c, int k) { return c ? switch (k) { case 0 -> "z"; default -> "nz"; } : "f"; }
   static int sum(int k) { return k * 3 + switch (k) { case 1 -> { System.out.print("one "); yield k + 1; } default -> 0; }; }
 }
 `
@@ -3182,6 +3187,9 @@ func TestDecompileWritesASwitchExpression(t *testing.T) {
 		"var1.f = switch (arg0) { case 0 -> \"x\"; default -> throw new java.lang.IllegalStateException(); };",
 		".concat(switch (arg0) { case 0 -> \"a\"; default -> \"b\"; });",
 		"var2.f = switch (arg0) { case 0 -> \"x\"; case 1 -> \"y\"; default -> throw new java.lang.IllegalStateException(); };",
+		"return switch (arg0) { case 1 -> switch (arg1) { case 1 -> \"11\"; default -> throw new java.lang.IllegalStateException(); }; case 2 -> \"2\"; default -> \"d\"; };",
+		"return switch (arg1) { case 1 -> switch (arg0) { case \"x\" -> \"1x\"; default -> \"1?\"; }; default -> \"d\"; };",
+		"return arg0 ? switch (arg1) { case 0 -> \"z\"; default -> \"nz\"; } : \"f\";",
 		"return arg0 * 3 + switch (arg0) { case 1 -> { java.lang.System.out.print(\"one \"); yield arg0 + 1; } default -> 0; };",
 	} {
 		if !strings.Contains(source, want) {
@@ -3195,14 +3203,14 @@ func TestDecompileWritesASwitchExpression(t *testing.T) {
 	compileWithJavac(t, again, "SwitchExpr", source)
 	driver := `public class SwitchExprDriver {
   public static void main(String[] z) {
-    System.out.println(SwitchExpr.name(0) + SwitchExpr.name(2) + " " + SwitchExpr.val(1) + SwitchExpr.val(9) + " " + SwitchExpr.mixed(1) + SwitchExpr.mixed(5) + " " + SwitchExpr.wide(0) + SwitchExpr.wide(2) + " " + SwitchExpr.stmt(1) + SwitchExpr.stmt(0) + " " + SwitchExpr.mix(5, true) + SwitchExpr.mix(6, true) + " " + SwitchExpr.len(1) + SwitchExpr.neg(1) + " " + SwitchExpr.store(0).f + SwitchExpr.arg(0) + SwitchExpr.arg(4) + SwitchExpr.sum(1) + SwitchExpr.sum(2) + SwitchExpr.nested(1, true).f + SwitchExpr.nested(5, false).f);
+    System.out.println(SwitchExpr.name(0) + SwitchExpr.name(2) + " " + SwitchExpr.val(1) + SwitchExpr.val(9) + " " + SwitchExpr.mixed(1) + SwitchExpr.mixed(5) + " " + SwitchExpr.wide(0) + SwitchExpr.wide(2) + " " + SwitchExpr.stmt(1) + SwitchExpr.stmt(0) + " " + SwitchExpr.mix(5, true) + SwitchExpr.mix(6, true) + " " + SwitchExpr.len(1) + SwitchExpr.neg(1) + " " + SwitchExpr.store(0).f + SwitchExpr.arg(0) + SwitchExpr.arg(4) + SwitchExpr.sum(1) + SwitchExpr.sum(2) + SwitchExpr.nested(1, true).f + SwitchExpr.nested(5, false).f + " " + SwitchExpr.nest(1, 1) + SwitchExpr.nest(2, 0) + SwitchExpr.nestS("x", 1) + SwitchExpr.nestS("y", 1) + SwitchExpr.nestS("x", 3) + SwitchExpr.cond(true, 0) + SwitchExpr.cond(true, 4) + SwitchExpr.cond(false, 0));
     try { SwitchExpr.name(7); } catch (IllegalArgumentException e) { System.out.println(e.getMessage()); }
   }
 }`
 	compileWithJavacOn(t, dir, "SwitchExprDriver", driver, dir)
 	expected := runJava(t, dir, "SwitchExprDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "SwitchExprDriver")
-	if actual != expected || actual != "one zerosmall 2119 7null 15 121 falsetrue 23 x0a4b56yn\nk=7\n" {
+	if actual != expected || actual != "one zerosmall 2119 7null 15 121 falsetrue 23 x0a4b56yn 1121x1?dznzf\nk=7\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
