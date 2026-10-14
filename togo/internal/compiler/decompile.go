@@ -7200,11 +7200,28 @@ func (d *bodyDecompiler) takeOverBinding(start int, typ string) (string, bool) {
 	if one, taken := d.locals[slot]; taken && one != nil {
 		return "", false
 	}
+	// With a debug table the arm's reads look the variable up by its row,
+	// which begins right after the store - and carries the name source gave.
+	var scoped *localEntry
+	if len(b.Instructions) > 3 {
+		after := b.Instructions[3].Pc
+		for i := range d.localTable {
+			if e := &d.localTable[i]; e.Slot == slot && after >= e.StartPc && after < e.EndPc {
+				scoped = e
+				break
+			}
+		}
+	}
 	d.patternNames++
+	wanted := "p" + strconv.Itoa(d.patternNames)
+	if scoped != nil && scoped.Name != "" {
+		wanted = scoped.Name
+	}
 	one := &local{
-		Name:        d.freshName("p" + strconv.Itoa(d.patternNames)),
+		Name:        d.freshName(wanted),
 		Type:        typ,
 		Declared:    true,
+		Origin:      scoped,
 		StoreBlocks: map[int]bool{},
 	}
 	d.locals[slot] = one

@@ -2686,6 +2686,42 @@ func TestDecompileWritesAPatternSwitch(t *testing.T) {
 	}
 }
 
+// With a debug table every read of a variable is looked up by its row, and
+// the one a case label binds has a row too, beginning after javac's store:
+// without it the arm's first read found no variable at all. The label takes
+// the name source gave it.
+func TestDecompileWritesAPatternSwitchWithADebugTable(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	source := `public class DebugPatterns {
+  static void n(Object p) {
+    switch (p) {
+      case String s -> { if (s.isEmpty()) return; System.out.print(s); }
+      case Integer i -> System.out.print(i + 1);
+      default -> System.out.print("d");
+    }
+  }
+  public static void main(String[] z) { n(""); n("x"); n(2); n(1.5); System.out.println(); }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavacFlags(t, dir, "DebugPatterns", source, "", true)
+	decompiled, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(decompiled, "/* cappu:") ||
+		!strings.Contains(decompiled, "case java.lang.String s") || !strings.Contains(decompiled, "case java.lang.Integer i") {
+		t.Errorf("expected the arms with the names source gave:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "DebugPatterns", decompiled)
+	if actual, expected := runJava(t, again, "DebugPatterns"), runJava(t, dir, "DebugPatterns"); actual != expected || actual != "x3d\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // An exhaustive switch over a sealed type keeps neither javac's arm nor the
 // `permits` clause by accident: the clause is what makes the rest exhaustive,
 // so this compiles and runs the reconstruction.
