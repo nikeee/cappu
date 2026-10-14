@@ -3448,6 +3448,51 @@ func TestDecompileWritesASwitchOverAString(t *testing.T) {
 	}
 }
 
+// A loop whose test assigns - `(item = p.item) == null` - and whose body ends
+// in `if (c) break;` leaves through a lone goto to where the test leaves to:
+// that is the end of the loop, not the start of a way out of its own. A
+// labeled continue from inside it restarts the loop around it.
+func TestDecompileEndsALoopWhereItsTestLeavesTo(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	source := `public class Assigning {
+  static class Node { Object item; Node next, prev; Node(Object i, Node n) { item = i; next = n; } }
+  static Object last(Node p) { Object item; while ((item = p.item) == null) { p = p.next; if (p == null) break; } return item; }
+  static Object peek(Node head) {
+    restart: for (;;) {
+      Object item;
+      Node first = head, p = first;
+      while ((item = p.item) == null) {
+        if (p == (p = p.next)) continue restart;
+        if (p == null) break;
+      }
+      if (first.prev != null) continue restart;
+      return item;
+    }
+  }
+  public static void main(String[] z) {
+    Node n = new Node(null, new Node(null, new Node("x", null)));
+    System.out.println(last(n) + " " + last(new Node(null, null)) + " " + peek(n));
+  }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Assigning", source)
+	decompiled, err := DecompileWith(readFile(t, classFile), siblingsIn(dir))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(decompiled, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Assigning", decompiled)
+	if actual, expected := runJava(t, again, "Assigning"), runJava(t, dir, "Assigning"); actual != expected || actual != "x null x\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // A `while (true)` whose every way out returns has no end of its own: it is
 // left only by leaving the method, from more than one place.
 func TestDecompileWritesALoopLeftOnlyByReturns(t *testing.T) {

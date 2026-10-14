@@ -2513,6 +2513,16 @@ func loopFollow(blocks map[int]*block, header int, latches []int, body, enclosin
 	if len(latches) == 1 {
 		latch := blocks[latches[0]]
 		if fromLatch := outside(latch.Start); latch.Kind == blockConditional && len(fromLatch) == 1 {
+			// `while ((x = ..) == null) { ..; if (c) break; }`: the test's
+			// assignment makes the header more than a test, and the latch's way
+			// out is the `break`, a lone `goto` to where the header leaves to -
+			// which is the end.
+			if hop := blocks[fromLatch[0]]; hop != nil && hop.Kind == blockGoto && len(hop.Instructions) == 1 {
+				if fromHeader := outside(header); blocks[header].Kind == blockConditional &&
+					len(fromHeader) == 1 && fromHeader[0] == hop.Successors[0] {
+					return fromHeader[0], nil
+				}
+			}
 			return fromLatch[0], nil
 		}
 	}
@@ -6359,6 +6369,8 @@ func (d *bodyDecompiler) loop(l *loop) (int, error) {
 	if len(l.Latches) == 1 {
 		latch = d.blocks[l.Latches[0]]
 	}
+	// An assignment used as a value is part of the test - `while ((x = next())
+	// != null)` - and whileLoop refuses a header that writes a statement.
 	isWhile := l.Follow != exitBlock && header.Kind == blockConditional &&
 		isConditionBlock(header) && headerExits(d.blocks, l)
 	isDoWhile := !isWhile && l.Follow != exitBlock && latch != nil &&
