@@ -3448,6 +3448,52 @@ func TestDecompileWritesASwitchOverAString(t *testing.T) {
 	}
 }
 
+// Three arms of a conditional that are more than one block that pushes: a
+// conditional nested in an operand, a field post-increment, and the variable a
+// type pattern in the condition binds.
+const ternaryArmsSource = `public class TernaryArms {
+  byte[] buf = {7, 8, 9}; int pos, len = 3;
+  static Object nested(String x, boolean b) { return x == null ? null : new StringBuilder(b ? "A" : "B"); }
+  int next() { return pos < len ? buf[pos++] & 0xff : -1; }
+  static int bound(Object o) { return o instanceof String s ? s.length() : -1; }
+  public static void main(String[] z) {
+    TernaryArms t = new TernaryArms();
+    System.out.println(nested(null, true) + " " + nested("", false) + " " + t.next() + t.next() + t.next() + t.next() + " " + bound("abc") + bound(4));
+  }
+}
+`
+
+func TestDecompileWritesConditionalArmsOfMoreThanOneBlock(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	for _, debug := range []bool{false, true} {
+		dir := t.TempDir()
+		classFile := compileWithJavacFlags(t, dir, "TernaryArms", ternaryArmsSource, "", debug)
+		source, err := Decompile(readFile(t, classFile))
+		if err != nil {
+			t.Fatalf("decompile: %v", err)
+		}
+		for _, want := range []string{
+			"? null : new java.lang.StringBuilder(",
+			"this.buf[this.pos++] & 255 : -1;",
+			"instanceof java.lang.String ",
+		} {
+			if !strings.Contains(source, want) {
+				t.Errorf("expected %q:\n%s", want, source)
+			}
+		}
+		if strings.Contains(source, "/* cappu:") {
+			t.Errorf("expected no bail:\n%s", source)
+		}
+		again := filepath.Join(dir, "again")
+		compileWithJavac(t, again, "TernaryArms", source)
+		if actual, expected := runJava(t, again, "TernaryArms"), runJava(t, dir, "TernaryArms"); actual != expected || actual != "null B 789-1 3-1\n" {
+			t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+		}
+	}
+}
+
 // An arm of a switch expression that declares a local is a block in source,
 // and the store goes into it in front of the yield. The block becomes text, so
 // only a variable whose type the debug table gives is written there; one this

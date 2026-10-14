@@ -2928,6 +2928,20 @@ func isArmBlock(b *block) bool {
 }
 
 func isValueBlock(b *block, assignments bool) bool {
+	heldUnder := map[int]bool{}
+	for i, one := range b.Instructions {
+		if !strings.HasPrefix(one.Mnemonic, "dup") || !strings.Contains(one.Mnemonic, "_x") {
+			continue
+		}
+		for j := i + 1; j < len(b.Instructions); j++ {
+			if base := opBase(b.Instructions[j].Mnemonic); isAssignment(base) {
+				if base == "putfield" || base == "putstatic" || strings.HasSuffix(base, "astore") && len(base) == 7 {
+					heldUnder[i], heldUnder[j] = true, true
+				}
+				break
+			}
+		}
+	}
 	for i, instruction := range b.Instructions {
 		if pureMnemonics.MatchString(instruction.Mnemonic) || invokes[instruction.Mnemonic] ||
 			instruction.Mnemonic == "invokedynamic" || allocations[instruction.Mnemonic] {
@@ -2939,6 +2953,13 @@ func isValueBlock(b *block, assignments bool) bool {
 			continue
 		}
 		if assignments && i > 0 && strings.HasPrefix(b.Instructions[i-1].Mnemonic, "dup") && isAssignment(base) {
+			continue
+		}
+		// `this.pos++` and its kin: the value is copied under the field or
+		// array element it goes into (`dup_x1`), and the store that follows
+		// takes it - the copy is the value. A store into a local is no part of
+		// that.
+		if assignments && heldUnder[i] {
 			continue
 		}
 		last := i == len(b.Instructions)-1
@@ -7370,11 +7391,13 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 	// An arm that stores declares and writes locals: taken back with it.
 	localsBefore, byNameBefore, namesBefore := maps.Clone(d.locals), maps.Clone(d.byName), maps.Clone(d.names)
 	hoistedBefore := len(d.hoisted)
+	boundBefore := len(d.bound)
 	writesBefore := map[*local]int{}
 	for _, one := range d.byName {
 		writesBefore[one] = len(one.Writes)
 	}
 	restore := func() {
+		d.unbindFrom(boundBefore)
 		d.stack = stackBefore
 		*statements = (*statements)[:statementsBefore]
 		d.visited = visitedBefore
@@ -7898,6 +7921,9 @@ type patternBinding struct {
 	Type string
 	Name string
 	Slot int
+	// Skipped are javac's cast and store a conditional's arm left out, which
+	// go back in with the variable.
+	Skipped []int
 }
 
 // bindingAt reports the type pattern the head of b binds, against the test
@@ -7967,8 +7993,31 @@ func (d *bodyDecompiler) unbindFrom(mark int) {
 	for _, one := range d.bound[mark:] {
 		delete(d.locals, one.Slot)
 		delete(d.names, one.Name)
+		for _, pc := range one.Skipped {
+			delete(d.skipped, pc)
+		}
 	}
 	d.bound = d.bound[:mark]
+}
+
+// withOwnNodes copies the logical nodes and pattern tests under value, which
+// bindPattern otherwise writes into wherever else they are held.
+func withOwnNodes(value expr) expr {
+	if value.Pattern != nil {
+		pattern := *value.Pattern
+		value.Pattern = &pattern
+	}
+	if value.Logic != nil {
+		logic := *value.Logic
+		for _, side := range []**expr{&logic.Left, &logic.Right} {
+			if *side != nil {
+				copied := withOwnNodes(**side)
+				*side = &copied
+			}
+		}
+		value.Logic = &logic
+	}
+	return value
 }
 
 // bindPattern writes the variable a type pattern binds into the test it belongs
@@ -8144,6 +8193,26 @@ func (d *bodyDecompiler) armValues(
 	whenTrue, whenFalse, follow int,
 	consumed *[]int,
 ) (expr, bool, error) {
+	// `o instanceof X x ? x.f() : ..`: javac's cast and store of x open the
+	// arm the test guards, and the pattern in the condition is what declares
+	// it. The caller takes the variable back with everything else when the
+	// conditional does not fold.
+	if b := d.blocks[whenTrue]; b != nil && !d.visited[whenTrue] {
+		if bind, ok := d.bindingAt(b, condition); ok && d.bindLocal(bind, b, b.Instructions[3].Pc) {
+			if d.skipped == nil {
+				d.skipped = map[int]bool{}
+			}
+			for _, one := range b.Instructions[:3] {
+				d.skipped[one.Pc] = true
+				bind.Skipped = append(bind.Skipped, one.Pc)
+			}
+			// The condition's nodes are shared with whoever tries the branch
+			// next, as a statement, when this does not fold: the name goes
+			// into a copy of its own.
+			condition = withOwnNodes(condition)
+			bindPattern(&condition, bind.Term, bind.Name)
+		}
+	}
 	thenValue, found, err := d.valueOfRegion(whenTrue, follow, consumed)
 	if err != nil || !found {
 		return expr{}, false, err
@@ -8194,7 +8263,42 @@ func (d *bodyDecompiler) valueOfRegion(start, follow int, consumed *[]int) (expr
 	}
 	terminator := b.Instructions[len(b.Instructions)-1]
 	if b.Kind == blockConditional {
-		if follow_, ok := d.followOf[start]; !ok || follow_ != follow {
+		follow_, ok := d.followOf[start]
+		// A conditional that comes back together before the region ends is an
+		// operand of what the rest of the region computes - `new X(b ? A : B)`
+		// as an arm: its value goes on the stack, and the blocks after its
+		// merge take it with whatever went on before it.
+		if ok && follow_ > start && follow_ < follow {
+			entry := len(d.stack)
+			head, found, err := d.valueOfRegion(start, follow_, consumed)
+			if err != nil || !found {
+				return expr{}, false, err
+			}
+			d.push(head)
+			for at := follow_; at != follow; {
+				tail := d.blocks[at]
+				if tail == nil || tail.Kind == blockConditional || tail.Kind == blockSwitch || len(tail.Successors) != 1 ||
+					tail.Successors[0] <= at || tail.Successors[0] > follow || d.isLoopEdge(at) || d.visited[at] ||
+					containsInt(*consumed, at) || !isArmBlock(d.withoutSkipped(tail)) {
+					return expr{}, false, nil
+				}
+				body := tail.Instructions
+				if tail.Kind == blockGoto {
+					body = body[:len(body)-1]
+				}
+				if err := d.runInstructions(body, endOf(tail), at); err != nil {
+					return expr{}, false, err
+				}
+				*consumed = append(*consumed, at)
+				at = tail.Successors[0]
+			}
+			if len(d.stack) != entry+1 {
+				return expr{}, false, nil
+			}
+			value, err := d.pop()
+			return value, err == nil, err
+		}
+		if !ok || follow_ != follow {
 			return expr{}, false, nil
 		}
 		if err := d.runInstructions(b.Instructions[:len(b.Instructions)-1], terminator.Pc, start); err != nil {
