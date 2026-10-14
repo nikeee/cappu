@@ -697,6 +697,144 @@ func classTypeParameters(signature string) (string, bool) {
 	return "", false
 }
 
+// typeErasures reads the type parameters the class and method signatures
+// declare, and maps each to the internal name of the class it erases to: its
+// class bound, else its first interface bound, else Object - followed through
+// a bound that is another type variable. The method's shadow the class's.
+func typeErasures(signatures ...string) map[string]string {
+	bounds := map[string]string{}
+	for _, signature := range signatures {
+		if !strings.HasPrefix(signature, "<") {
+			continue
+		}
+		at := 1
+		for at < len(signature) && signature[at] != '>' {
+			colon := strings.IndexByte(signature[at:], ':')
+			if colon <= 0 {
+				return nil
+			}
+			name := signature[at : at+colon]
+			at += colon
+			bound := ""
+			for at < len(signature) && signature[at] == ':' {
+				at++
+				if at < len(signature) && signature[at] == ':' {
+					continue // no class bound
+				}
+				end, ok := skipFieldType(signature, at)
+				if !ok {
+					return nil
+				}
+				if bound == "" {
+					bound = signature[at:end]
+				}
+				at = end
+			}
+			bounds[name] = bound
+		}
+	}
+	erasures := map[string]string{}
+	for name := range bounds {
+		bound, seen := bounds[name], map[string]bool{name: true}
+		for strings.HasPrefix(bound, "T") {
+			next := strings.TrimSuffix(bound[1:], ";")
+			if seen[next] {
+				bound = ""
+				break
+			}
+			seen[next] = true
+			bound = bounds[next]
+		}
+		switch {
+		case bound == "":
+			erasures[name] = "java/lang/Object"
+		case strings.HasPrefix(bound, "L"):
+			end := strings.IndexAny(bound, "<;")
+			erasures[name] = bound[1:end]
+		}
+	}
+	return erasures
+}
+
+// skipFieldType reports where the field type signature at at ends.
+func skipFieldType(signature string, at int) (int, bool) {
+	if at >= len(signature) {
+		return 0, false
+	}
+	switch signature[at] {
+	case '[':
+		return skipFieldType(signature, at+1)
+	case 'T':
+		end := strings.IndexByte(signature[at:], ';')
+		if end < 0 {
+			return 0, false
+		}
+		return at + end + 1, true
+	case 'L':
+		depth := 0
+		for i := at + 1; i < len(signature); i++ {
+			switch signature[i] {
+			case '<':
+				depth++
+			case '>':
+				depth--
+			case ';':
+				if depth == 0 {
+					return i + 1, true
+				}
+			}
+		}
+		return 0, false
+	}
+	if strings.ContainsRune("BCDFIJSZ", rune(signature[at])) {
+		return at + 1, true
+	}
+	return 0, false
+}
+
+// withTypeVariablesErased rewrites every type variable a class signature uses
+// into the class it erases to, and reports whether there was one to rewrite
+// and every one was known.
+func withTypeVariablesErased(signature string, erasures map[string]string) (string, bool) {
+	if strings.HasPrefix(signature, "<") {
+		return "", false
+	}
+	var out strings.Builder
+	rewrote := false
+	// A type variable starts where a field type may: after `<`, `;` closing
+	// an argument, a wildcard's `+`/`-`, or an array's `[`. Inside a class
+	// name a `T` is only a letter, and a class name runs from `L` or `.`.
+	inName := false
+	for at := 0; at < len(signature); at++ {
+		c := signature[at]
+		switch {
+		case inName:
+			if c == '<' || c == ';' {
+				inName = false
+			}
+			out.WriteByte(c)
+		case c == 'L' || c == '.':
+			inName = true
+			out.WriteByte(c)
+		case c == 'T':
+			end := strings.IndexByte(signature[at:], ';')
+			if end < 0 {
+				return "", false
+			}
+			erased, ok := erasures[signature[at+1:at+end]]
+			if !ok {
+				return "", false
+			}
+			out.WriteString("L" + erased + ";")
+			at += end
+			rewrote = true
+		default:
+			out.WriteByte(c)
+		}
+	}
+	return out.String(), rewrote
+}
+
 func classSignatureTypes(signature, self string) (string, []string, bool) {
 	if signature == "" || strings.HasPrefix(signature, "<") {
 		return "", nil, false
@@ -2823,13 +2961,16 @@ func endOf(b *block) int {
 }
 
 type bodyDecompiler struct {
-	classFile  *ClassFile
-	locals     map[int]*local
-	localTable []localEntry
-	returnType string
-	isStatic   bool
-	stack      []expr
-	statements []stmt
+	classFile *ClassFile
+	// typeErasures maps each type variable in scope - the method's and its
+	// class's - to the internal name of the class it erases to.
+	typeErasures map[string]string
+	locals       map[int]*local
+	localTable   []localEntry
+	returnType   string
+	isStatic     bool
+	stack        []expr
+	statements   []stmt
 	// sharedIDs numbers the copies a compound assignment's dup made.
 	sharedIDs int
 	// dupIDs numbers the copies a `dup_x1` made.
@@ -3997,19 +4138,20 @@ func (d *bodyDecompiler) inlineLambda(body Member, captures, passed []string, yi
 		}
 	}
 	nested := &bodyDecompiler{
-		classFile:   d.classFile,
-		locals:      locals,
-		localTable:  localTable,
-		returnType:  yields,
-		isStatic:    isStatic,
-		names:       d.names,
-		byName:      map[string]*local{},
-		visited:     map[int]bool{},
-		activeTries: map[*tryRegion]bool{},
-		skip:        map[int]int{},
-		innerFlags:  d.innerFlags,
-		bootstraps:  d.bootstraps,
-		inlining:    d.inlining,
+		classFile:    d.classFile,
+		typeErasures: d.typeErasures,
+		locals:       locals,
+		localTable:   localTable,
+		returnType:   yields,
+		isStatic:     isStatic,
+		names:        d.names,
+		byName:       map[string]*local{},
+		visited:      map[int]bool{},
+		activeTries:  map[*tryRegion]bool{},
+		skip:         map[int]int{},
+		innerFlags:   d.innerFlags,
+		bootstraps:   d.bootstraps,
+		inlining:     d.inlining,
 	}
 	nested.current = &nested.statements
 	for _, parameter := range locals {
@@ -4324,6 +4466,12 @@ func (d *bodyDecompiler) anonymousBody(
 	}
 	if signature := SignatureOf(anonymous.Attributes, anonymous.Pool); signature != "" {
 		generic, genericInterfaces, ok := classSignatureTypes(signature, d.self())
+		// A type variable of the method or class around it has no name here -
+		// the members are written erased - so it is written as what it erases
+		// to: the body's methods take exactly that, and override what they did.
+		if erased, rewritten := withTypeVariablesErased(signature, d.typeErasures); !ok && rewritten {
+			generic, genericInterfaces, ok = classSignatureTypes(erased, d.self())
+		}
 		if !ok || len(genericInterfaces) != len(interfaces) {
 			// The type arguments cannot be written here - a type variable of
 			// the enclosing method has no name this phase keeps. The erased
@@ -9670,6 +9818,8 @@ func decompileBody(
 		innerFlags:  InnerClassFlags(classFile),
 		bootstraps:  ReadBootstrapMethods(classFile),
 		inlining:    map[string]bool{},
+		typeErasures: typeErasures(
+			SignatureOf(classFile.Attributes, classFile.Pool), SignatureOf(method.Attributes, classFile.Pool)),
 	}
 	d.current = &d.statements
 	for _, parameter := range locals {

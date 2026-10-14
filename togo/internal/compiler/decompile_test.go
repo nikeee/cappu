@@ -2381,9 +2381,9 @@ func TestDecompileWritesASerializableLambda(t *testing.T) {
 }
 
 // A supertype whose type arguments name a type variable of the enclosing
-// method cannot be written here - the variable has no name this phase keeps -
-// but the erased type still compiles and the body still overrides what it came
-// from, as long as javac wrote no bridge.
+// method cannot be written as it was - the variable has no name this phase
+// keeps - but with what the variable erases to it still compiles and the body
+// still overrides what it came from.
 func TestDecompileErasesASupertypeItCannotName(t *testing.T) {
 	if !hasTool("javac") || !hasTool("java") {
 		t.Skip("no JDK (javac/java)")
@@ -2417,8 +2417,9 @@ public class Erased {
 	if strings.Contains(decompiled, "/* cappu:") {
 		t.Errorf("expected no bail:\n%s", decompiled)
 	}
-	// The type variable goes, the type arguments this phase can name stay.
-	if !strings.Contains(decompiled, "new java.util.Iterator() {") {
+	// The type variable is written as what it erases to, the type arguments
+	// this phase can name stay.
+	if !strings.Contains(decompiled, "new java.util.Iterator<java.lang.Object>() {") {
 		t.Errorf("expected the erased supertype:\n%s", decompiled)
 	}
 	if !strings.Contains(decompiled, "new java.util.function.Function<java.lang.String, java.lang.Integer>() {") {
@@ -3211,6 +3212,55 @@ func TestDecompileWritesASwitchExpression(t *testing.T) {
 	expected := runJava(t, dir, "SwitchExprDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "SwitchExprDriver")
 	if actual != expected || actual != "one zerosmall 2119 7null 15 121 falsetrue 23 x0a4b56yn 1121x1?dznzf\nk=7\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// An anonymous class whose supertype names a type variable of the method
+// around it is written with what that variable erases to: the method's own
+// types are written erased, and the body's methods take exactly the erasure -
+// a bound that is a class, a bound that is another variable, or Object.
+const typeVariableAnonSource = `import java.util.*;
+import java.util.function.*;
+public class TypeVarAnon<C extends CharSequence> {
+  static <T> Function<T, String> show() { return new Function<T, String>() { public String apply(T t) { return "<" + t + ">"; } }; }
+  static <M extends Number, N extends M> Function<N, Integer> num() { return new Function<N, Integer>() { public Integer apply(N n) { return n.intValue() + 1; } }; }
+  static <T> List<T> wrap(T t) { return new AbstractList<T>() { public T get(int i) { return t; } public int size() { return 2; } }; }
+  Function<C, Integer> len() { return new Function<C, Integer>() { public Integer apply(C c) { return c.length(); } }; }
+  public static void main(String[] z) { System.out.println(TypeVarAnon.<Integer>show().apply(3) + TypeVarAnon.<Number, Double>num().apply(2.5) + wrap("x") + new TypeVarAnon<String>().len().apply("abcd")); }
+}
+`
+
+func TestDecompileErasesATypeVariableOfAnAnonymousSupertype(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "TypeVarAnon", typeVariableAnonSource)
+	siblings := func(binaryName string) ([]byte, bool) {
+		b, err := os.ReadFile(filepath.Join(dir, binaryName+".class"))
+		return b, err == nil
+	}
+	decompiled, err := DecompileWith(readFile(t, classFile), siblings)
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"new java.util.function.Function<java.lang.Object, java.lang.String>() {",
+		"new java.util.function.Function<java.lang.Number, java.lang.Integer>() {",
+		"new java.util.AbstractList<java.lang.Object>() {",
+		"new java.util.function.Function<java.lang.CharSequence, java.lang.Integer>() {",
+	} {
+		if !strings.Contains(decompiled, want) {
+			t.Errorf("expected %q:\n%s", want, decompiled)
+		}
+	}
+	if strings.Contains(decompiled, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "TypeVarAnon", decompiled)
+	if actual, expected := runJava(t, again, "TypeVarAnon"), runJava(t, dir, "TypeVarAnon"); actual != expected || actual != "<3>3[x, x]4\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
