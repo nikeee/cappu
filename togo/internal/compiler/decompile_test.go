@@ -3215,6 +3215,39 @@ func TestDecompileWritesASwitchExpression(t *testing.T) {
 	}
 }
 
+// An anonymous class with a field initializer keeps an instance block, and
+// javac's store of the enclosing instance is no statement of it: its reads
+// become the outer class's own this, which source can never assign.
+func TestDecompileDropsTheEnclosingStoreFromAnInitializer(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	source := `public class Outerly {
+  int k = 3;
+  Runnable f() { return new Runnable() { private boolean done = false; public void run() { done = !done; System.out.println(k + " " + done); } }; }
+  public static void main(String[] z) { new Outerly().f().run(); }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Outerly", source)
+	siblings := func(binaryName string) ([]byte, bool) {
+		b, err := os.ReadFile(filepath.Join(dir, binaryName+".class"))
+		return b, err == nil
+	}
+	decompiled, err := DecompileWith(readFile(t, classFile), siblings)
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(decompiled, "Outerly.this = ") || !strings.Contains(decompiled, "this.done = false;") {
+		t.Errorf("expected the initializer without the enclosing store:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Outerly", decompiled)
+	if actual, expected := runJava(t, again, "Outerly"), runJava(t, dir, "Outerly"); actual != expected || actual != "3 true\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // javac lowers a `switch` over a String to two: one over the hash that stores
 // the matching label's index, one over that index with the bodies. Written
 // back it is the one source wrote, over the String and with its labels -

@@ -4506,10 +4506,11 @@ func initializerBlock(anonymous *ClassFile, descriptor string, synthetic map[str
 }
 
 // syntheticStore matches the store of a captured value into the field javac
-// keeps it in, and parameterRead a read of one of the constructor's own
-// parameters.
+// keeps it in - the enclosing instance's written as the `Outer.this` its reads
+// become, which source can never assign - and parameterRead a read of one of
+// the constructor's own parameters.
 var (
-	syntheticStore = regexp.MustCompile(`^this\.(?:val\$|this\$)[\w$]+ = \w+;$`)
+	syntheticStore = regexp.MustCompile(`^(?:this\.(?:val\$|this\$)[\w$]+|[\w$.]+\.this) = [\w$]+;$`)
 	parameterRead  = regexp.MustCompile(`(^|[^\w$.])arg\d+($|[^\w$])`)
 )
 
