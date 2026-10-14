@@ -3150,6 +3150,9 @@ const switchExprSource = `public class SwitchExpr {
   String f;
   static SwitchExpr store(int k) { SwitchExpr s = new SwitchExpr(); s.f = switch (k) { case 0 -> "x"; default -> throw new IllegalStateException(); }; return s; }
   static String arg(int k) { return String.valueOf(k).concat(switch (k) { case 0 -> "a"; default -> "b"; }); }
+  // Inside an if, with an arm that throws, the end of the statement is the
+  // if's - the value still lands where the other arms meet.
+  static SwitchExpr nested(int k, boolean b) { SwitchExpr s = new SwitchExpr(); if (b) s.f = switch (k) { case 0 -> "x"; case 1 -> "y"; default -> throw new IllegalStateException(); }; else s.f = "n"; return s; }
   static int sum(int k) { return k * 3 + switch (k) { case 1 -> { System.out.print("one "); yield k + 1; } default -> 0; }; }
 }
 `
@@ -3178,6 +3181,7 @@ func TestDecompileWritesASwitchExpression(t *testing.T) {
 		"return -(switch (arg0) { case 0 -> 1; default -> 2; }) + 5;",
 		"var1.f = switch (arg0) { case 0 -> \"x\"; default -> throw new java.lang.IllegalStateException(); };",
 		".concat(switch (arg0) { case 0 -> \"a\"; default -> \"b\"; });",
+		"var2.f = switch (arg0) { case 0 -> \"x\"; case 1 -> \"y\"; default -> throw new java.lang.IllegalStateException(); };",
 		"return arg0 * 3 + switch (arg0) { case 1 -> { java.lang.System.out.print(\"one \"); yield arg0 + 1; } default -> 0; };",
 	} {
 		if !strings.Contains(source, want) {
@@ -3191,14 +3195,76 @@ func TestDecompileWritesASwitchExpression(t *testing.T) {
 	compileWithJavac(t, again, "SwitchExpr", source)
 	driver := `public class SwitchExprDriver {
   public static void main(String[] z) {
-    System.out.println(SwitchExpr.name(0) + SwitchExpr.name(2) + " " + SwitchExpr.val(1) + SwitchExpr.val(9) + " " + SwitchExpr.mixed(1) + SwitchExpr.mixed(5) + " " + SwitchExpr.wide(0) + SwitchExpr.wide(2) + " " + SwitchExpr.stmt(1) + SwitchExpr.stmt(0) + " " + SwitchExpr.mix(5, true) + SwitchExpr.mix(6, true) + " " + SwitchExpr.len(1) + SwitchExpr.neg(1) + " " + SwitchExpr.store(0).f + SwitchExpr.arg(0) + SwitchExpr.arg(4) + SwitchExpr.sum(1) + SwitchExpr.sum(2));
+    System.out.println(SwitchExpr.name(0) + SwitchExpr.name(2) + " " + SwitchExpr.val(1) + SwitchExpr.val(9) + " " + SwitchExpr.mixed(1) + SwitchExpr.mixed(5) + " " + SwitchExpr.wide(0) + SwitchExpr.wide(2) + " " + SwitchExpr.stmt(1) + SwitchExpr.stmt(0) + " " + SwitchExpr.mix(5, true) + SwitchExpr.mix(6, true) + " " + SwitchExpr.len(1) + SwitchExpr.neg(1) + " " + SwitchExpr.store(0).f + SwitchExpr.arg(0) + SwitchExpr.arg(4) + SwitchExpr.sum(1) + SwitchExpr.sum(2) + SwitchExpr.nested(1, true).f + SwitchExpr.nested(5, false).f);
     try { SwitchExpr.name(7); } catch (IllegalArgumentException e) { System.out.println(e.getMessage()); }
   }
 }`
 	compileWithJavacOn(t, dir, "SwitchExprDriver", driver, dir)
 	expected := runJava(t, dir, "SwitchExprDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "SwitchExprDriver")
-	if actual != expected || actual != "one zerosmall 2119 7null 15 121 falsetrue 23 x0a4b56\nk=7\n" {
+	if actual != expected || actual != "one zerosmall 2119 7null 15 121 falsetrue 23 x0a4b56yn\nk=7\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// javac lowers a `switch` over a String to two: one over the hash that stores
+// the matching label's index, one over that index with the bodies. Written
+// back it is the one source wrote, over the String and with its labels -
+// two of them sharing a case, two sharing a hash ("Aa" and "BB").
+const stringSwitchSource = `public class StringSwitch {
+  static int stmt(String s) {
+    int r = 0;
+    switch (s) { case "one": r = 1; break; case "two": case "deux": r = 2; case "Aa": r += 10; break; case "BB": r = 20; break; default: r = -1; }
+    return r;
+  }
+  static String expr(String s) { return switch (s) { case "a", "b" -> "ab"; case "Aa" -> "Aa"; case "BB" -> "BB"; default -> "?"; }; }
+  static void noDefault(String s) { switch (s) { case "x": System.out.print("x"); } }
+  String f;
+  static StringSwitch store(String s) { StringSwitch t = new StringSwitch(); t.f = switch (s) { case "k" -> "K"; default -> throw new IllegalStateException(s); }; return t; }
+}
+`
+
+func TestDecompileWritesASwitchOverAString(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "StringSwitch", stringSwitchSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"switch (arg0) {", "case \"two\":", "case \"deux\":", "case \"Aa\":",
+		"return switch (arg0) { case \"a\", \"b\" -> \"ab\"; case \"Aa\" -> \"Aa\"; case \"BB\" -> \"BB\"; default -> \"?\"; };",
+		"var1.f = switch (arg0) { case \"k\" -> \"K\"; default -> throw new java.lang.IllegalStateException(arg0); };",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	for _, unwanted := range []string{"/* cappu:", "hashCode()", ".equals("} {
+		if strings.Contains(source, unwanted) {
+			t.Errorf("expected no %q:\n%s", unwanted, source)
+		}
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "StringSwitch", source)
+	driver := `public class StringSwitchDriver {
+  public static void main(String[] z) {
+    for (String s : new String[] {"one", "two", "deux", "Aa", "BB", "zz"}) System.out.print(StringSwitch.stmt(s) + " ");
+    for (String s : new String[] {"a", "b", "Aa", "BB", "C#"}) System.out.print(StringSwitch.expr(s) + " ");
+    StringSwitch.noDefault("x"); StringSwitch.noDefault("y");
+    System.out.print(" " + StringSwitch.store("k").f);
+    try { StringSwitch.store("q"); } catch (IllegalStateException e) { System.out.print(" " + e.getMessage()); }
+    try { StringSwitch.expr(null); } catch (NullPointerException e) { System.out.print(" npe"); }
+    System.out.println();
+  }
+}`
+	compileWithJavacOn(t, dir, "StringSwitchDriver", driver, dir)
+	expected := runJava(t, dir, "StringSwitchDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "StringSwitchDriver")
+	if actual != expected || actual != "1 12 12 10 20 -1 ab ab Aa BB ? x K q npe\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }

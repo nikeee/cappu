@@ -2879,6 +2879,9 @@ type bodyDecompiler struct {
 	// patternCases are the types a pattern-matching switch's indy answers with,
 	// one per case index, waiting for the `switch` that reads them.
 	patternCases map[int]string
+	// stringCases are the labels of a `switch` over a String, one per index
+	// javac's lowering answers with, waiting for the `switch` that reads it.
+	stringCases map[int]string
 	// patternNames counts the pattern variables written so far, so two cases
 	// never declare the same name.
 	patternNames int
@@ -5465,6 +5468,16 @@ func (d *bodyDecompiler) structureFrom(entry, stop int, opening bool) error {
 			at = next
 			continue
 		}
+		if b.Kind == blockSwitch {
+			next, folded, err := d.stringSwitch(b, body, stop)
+			if err != nil {
+				return err
+			}
+			if folded {
+				at = next
+				continue
+			}
+		}
 		if b.Kind == blockConditional || b.Kind == blockGoto || b.Kind == blockSwitch {
 			body = body[:len(body)-1]
 		}
@@ -6581,6 +6594,100 @@ func intConstant(instruction Instruction) (int, bool) {
 	return 0, false
 }
 
+// stringSwitch writes a `switch` over a String back as one. javac lowers it to
+// two: the first over the selector's hash, whose cases compare it to each
+// label and store that label's index in a local of its own, and the second
+// over that index, with the bodies source wrote. Nothing of the first is
+// source's, so it goes, and the second takes the String and its labels back.
+// It reports false, with nothing run, for anything that is not that shape.
+func (d *bodyDecompiler) stringSwitch(b *block, body []Instruction, stop int) (int, bool, error) {
+	n := len(body)
+	if n < 6 {
+		return 0, false, nil
+	}
+	// `astore t; iconst_m1; istore i; aload t; invokevirtual hashCode; switch`
+	tail := body[n-6:]
+	if opBase(tail[0].Mnemonic) != "astore" || tail[1].Mnemonic != "iconst_m1" ||
+		opBase(tail[2].Mnemonic) != "istore" || opBase(tail[3].Mnemonic) != "aload" ||
+		!d.callsString(tail[4], "hashCode", "()I") {
+		return 0, false, nil
+	}
+	text, index := slotOf(tail[0]), slotOf(tail[2])
+	if slotOf(tail[3]) != text {
+		return 0, false, nil
+	}
+	table := tail[5]
+	indexed := d.blocks[table.Arg]
+	if indexed == nil || indexed.Kind != blockSwitch || len(indexed.Instructions) != 2 ||
+		opBase(indexed.Instructions[0].Mnemonic) != "iload" || slotOf(indexed.Instructions[0]) != index ||
+		d.visited[indexed.Start] {
+		return 0, false, nil
+	}
+	// Each case of the first is a chain of `if (t.equals("..")) i = k;`, one
+	// per label sharing the hash, and every one of them ends on the second.
+	labels := map[int][]string{}
+	owned := map[int]bool{}
+	for _, entry := range table.SwitchCases {
+		for at := entry.Target; at != indexed.Start; {
+			test := d.blocks[at]
+			if test == nil || owned[at] || test.Kind != blockConditional || len(test.Instructions) != 4 {
+				return 0, false, nil
+			}
+			ins := test.Instructions
+			if opBase(ins[0].Mnemonic) != "aload" || slotOf(ins[0]) != text ||
+				(ins[1].Mnemonic != "ldc" && ins[1].Mnemonic != "ldc_w") ||
+				!d.callsString(ins[2], "equals", "(Ljava/lang/Object;)Z") || ins[3].Mnemonic != "ifeq" {
+				return 0, false, nil
+			}
+			literal, err := constantExpr(d.classFile.Pool, uint16(ins[1].Arg), d.self())
+			if err != nil || literal.Type != "java.lang.String" {
+				return 0, false, nil
+			}
+			store := d.blocks[test.Successors[0]]
+			if store == nil || owned[store.Start] || len(store.Successors) != 1 ||
+				store.Successors[0] != indexed.Start || len(store.Instructions) < 2 {
+				return 0, false, nil
+			}
+			key, isInt := intConstant(store.Instructions[0])
+			if !isInt || opBase(store.Instructions[1].Mnemonic) != "istore" || slotOf(store.Instructions[1]) != index ||
+				len(store.Instructions) > 3 || (len(store.Instructions) == 3 && !isGotoMnemonic(store.Instructions[2].Mnemonic)) {
+				return 0, false, nil
+			}
+			labels[key] = append(labels[key], literal.Text)
+			owned[at], owned[store.Start] = true, true
+			at = test.Successors[1]
+		}
+	}
+	// Nothing but the lowering lies between the two tables.
+	for start := range d.blocks {
+		if start > b.Start && start < indexed.Start && (!owned[start] || d.visited[start]) {
+			return 0, false, nil
+		}
+	}
+	if err := d.runInstructions(body[:n-6], tail[0].Pc, b.Start); err != nil {
+		return 0, true, err
+	}
+	for start := range owned {
+		d.visited[start] = true
+	}
+	d.visited[indexed.Start] = true
+	d.stringCases = map[int]string{}
+	for key, texts := range labels {
+		d.stringCases[key] = strings.Join(texts, ", ")
+	}
+	next, err := d.switchStatement(indexed, stop)
+	return next, true, err
+}
+
+// callsString reports an invokevirtual of the named method of String.
+func (d *bodyDecompiler) callsString(instruction Instruction, name, descriptor string) bool {
+	if instruction.Mnemonic != "invokevirtual" {
+		return false
+	}
+	ref, ok := PoolMemberRef(d.classFile.Pool, uint16(instruction.Arg))
+	return ok && ref.Owner == "java/lang/String" && ref.Name == name && ref.Descriptor == descriptor
+}
+
 // switchStatement writes one `switch`, from the table that ends b, and reports
 // where the statement after it begins.
 func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
@@ -6594,7 +6701,9 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	// switched over is the reference itself.
 	patternCases := d.patternCases
 	d.patternCases = nil
-	if patternCases == nil {
+	stringCases := d.stringCases
+	d.stringCases = nil
+	if patternCases == nil && stringCases == nil {
 		// The selector is an int, so a condition javac materialized as `1`/`0`
 		// has to become the ternary again - `switch (flag)` is not Java.
 		selector, err = d.asNumber(selector)
@@ -6612,7 +6721,7 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 	// initializer, in the file beside this one.
 	outerLabels := d.enumLabels
 	defer func() { d.enumLabels = outerLabels }()
-	d.enumLabels = nil
+	d.enumLabels = stringCases
 	if patternCases != nil {
 		labels := map[int]string{}
 		for _, entry := range table.SwitchCases {
@@ -6748,26 +6857,32 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 			return follow, nil
 		}
 	}
-	// With one arm that leaves a value and every other one throwing, nothing
-	// but that arm reaches the merge: it dominates it, so the search above took
-	// a throwing body for the end. The value lands where that one arm leads.
-	var valued []int
+	// The end found above can be the wrong one for an expression: with one arm
+	// that leaves a value and every other one throwing, that arm dominates the
+	// merge, so the search took a throwing body for the end; with an arm that
+	// throws inside an `if`, the end is the `if`'s. The value lands where every
+	// arm that does not throw leads.
+	merge, agreed := exitBlock, true
 	for _, target := range targets {
-		if b := d.blocks[target]; b == nil || len(b.Instructions) == 0 ||
-			b.Instructions[len(b.Instructions)-1].Mnemonic != "athrow" {
-			valued = append(valued, target)
+		if b := d.blocks[target]; b != nil && len(b.Instructions) > 0 &&
+			b.Instructions[len(b.Instructions)-1].Mnemonic == "athrow" {
+			continue
 		}
+		next, ok := d.followOf[target]
+		if !ok || next == exitBlock || (merge != exitBlock && next != merge) {
+			agreed = false
+			break
+		}
+		merge = next
 	}
-	if len(valued) == 1 && len(targets) > 1 {
-		if merge, ok := d.followOf[valued[0]]; ok && merge != exitBlock && merge != follow && merge > targets[len(targets)-1] {
-			value, found, err := d.trySwitchExpression(selector, targets, keysOf, defaultTarget, merge, patternCases != nil)
-			if err != nil {
-				return 0, err
-			}
-			if found {
-				d.push(value)
-				return merge, nil
-			}
+	if agreed && merge != exitBlock && merge != follow && merge > targets[len(targets)-1] {
+		value, found, err := d.trySwitchExpression(selector, targets, keysOf, defaultTarget, merge, patternCases != nil)
+		if err != nil {
+			return 0, err
+		}
+		if found {
+			d.push(value)
+			return merge, nil
 		}
 	}
 	if pending {
