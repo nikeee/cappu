@@ -207,3 +207,24 @@ func TestReadCommittedBaselines(t *testing.T) {
 		}
 	}
 }
+
+// A class file named without the directories of its package - `cappu
+// decompile *.class` run from inside them - finds its nested classes beside
+// it. Without that the nested ones, which the outer file writes, were dropped
+// from the output without a word. A class of another package is still read
+// only from where its own name puts it.
+func TestSiblingsBesideAFileOutsideItsPackageDirectories(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"Outer$In.class", "Other.class"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	siblings := SiblingsBeside(filepath.Join(dir, "Outer.class"), "p/Outer")
+	if b, ok := siblings("p/Outer$In"); !ok || string(b) != "Outer$In.class" {
+		t.Errorf("expected the nested class beside the file, got %q, %v", b, ok)
+	}
+	if _, ok := siblings("q/Other"); ok {
+		t.Errorf("expected a class of another package not to be read from beside the file")
+	}
+}
