@@ -631,3 +631,7 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-10-07 23:01 — die ci failt https://github.com/nikeee/cappu/actions/runs/37681653971
 - 2026-10-14 21:57 — continue work on the decompiler
 - 2026-10-14 22:34 — /loop
+- 2026-10-15 00:24 — deep review
+- 2026-10-15 00:24 — dann mach weiter
+- 2026-10-15 00:25 — then continue, always with code review afterwards
+- 2026-10-15 00:25 — /loop

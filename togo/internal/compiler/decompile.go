@@ -33,6 +33,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // notDecompilable is reported per method when the body is beyond this phase; it
@@ -697,63 +699,115 @@ func classTypeParameters(signature string) (string, bool) {
 	return "", false
 }
 
-// typeErasures reads the type parameters the class and method signatures
-// declare, and maps each to the internal name of the class it erases to: its
-// class bound, else its first interface bound, else Object - followed through
-// a bound that is another type variable. The method's shadow the class's.
-func typeErasures(signatures ...string) map[string]string {
-	bounds := map[string]string{}
-	for _, signature := range signatures {
-		if !strings.HasPrefix(signature, "<") {
-			continue
-		}
-		at := 1
-		for at < len(signature) && signature[at] != '>' {
-			colon := strings.IndexByte(signature[at:], ':')
-			if colon <= 0 {
-				return nil
-			}
-			name := signature[at : at+colon]
-			at += colon
-			bound := ""
-			for at < len(signature) && signature[at] == ':' {
-				at++
-				if at < len(signature) && signature[at] == ':' {
-					continue // no class bound
-				}
-				end, ok := skipFieldType(signature, at)
-				if !ok {
-					return nil
-				}
-				if bound == "" {
-					bound = signature[at:end]
-				}
-				at = end
-			}
-			bounds[name] = bound
-		}
+// typeErasures maps each type variable the class and method signatures
+// declare to the internal name of the class it erases to: its class bound,
+// else its first interface bound - followed through a bound that is another
+// type variable. The class's are resolved among themselves, the method's
+// against their own first and the class's after, which they shadow. A
+// variable bounded by one neither declares - an enclosing class's, seen from
+// an inner class - is left out: its erasure is not in these signatures.
+func typeErasures(classSignature, methodSignature string) map[string]string {
+	classBounds, ok := formalBounds(classSignature)
+	if !ok {
+		return nil
 	}
+	methodBounds, ok := formalBounds(methodSignature)
+	if !ok {
+		return nil
+	}
+	erasures := eraseBounds(classBounds, nil)
+	maps.Copy(erasures, eraseBounds(methodBounds, erasures))
+	return erasures
+}
+
+// formalBounds reads the first bound of each type parameter a signature
+// declares, empty for one that declares none.
+func formalBounds(signature string) (map[string]string, bool) {
+	bounds := map[string]string{}
+	if !strings.HasPrefix(signature, "<") {
+		return bounds, true
+	}
+	at := 1
+	for at < len(signature) && signature[at] != '>' {
+		colon := strings.IndexByte(signature[at:], ':')
+		if colon <= 0 {
+			return nil, false
+		}
+		name := signature[at : at+colon]
+		at += colon
+		bound := ""
+		for at < len(signature) && signature[at] == ':' {
+			at++
+			if at < len(signature) && signature[at] == ':' {
+				continue // no class bound
+			}
+			end, ok := skipFieldType(signature, at)
+			if !ok {
+				return nil, false
+			}
+			if bound == "" {
+				bound = signature[at:end]
+			}
+			at = end
+		}
+		bounds[name] = bound
+	}
+	return bounds, true
+}
+
+// eraseBounds erases each variable of one scope, looking a variable its
+// bounds name up in the scope first and in outer, already erased, after.
+func eraseBounds(bounds map[string]string, outer map[string]string) map[string]string {
 	erasures := map[string]string{}
 	for name := range bounds {
 		bound, seen := bounds[name], map[string]bool{name: true}
-		for strings.HasPrefix(bound, "T") {
-			next := strings.TrimSuffix(bound[1:], ";")
-			if seen[next] {
-				bound = ""
-				break
+		erased, known := "", true
+		for known && erased == "" {
+			switch {
+			case strings.HasPrefix(bound, "T"):
+				next := strings.TrimSuffix(bound[1:], ";")
+				if inner, ok := bounds[next]; ok && !seen[next] {
+					seen[next] = true
+					bound = inner
+				} else if outerErasure, ok := outer[next]; ok && !seen[next] {
+					erased = outerErasure
+				} else {
+					known = false
+				}
+			case strings.HasPrefix(bound, "L"):
+				erased, known = classSignatureErasure(bound)
+			default:
+				known = false
 			}
-			seen[next] = true
-			bound = bounds[next]
 		}
-		switch {
-		case bound == "":
-			erasures[name] = "java/lang/Object"
-		case strings.HasPrefix(bound, "L"):
-			end := strings.IndexAny(bound, "<;")
-			erasures[name] = bound[1:end]
+		if known {
+			erasures[name] = erased
 		}
 	}
 	return erasures
+}
+
+// classSignatureErasure is the internal name of a class type signature with
+// its type arguments dropped: `LOuter<TT;>.Inner;` is `Outer$Inner`.
+func classSignatureErasure(signature string) (string, bool) {
+	var name strings.Builder
+	depth := 0
+	for _, c := range signature[1:] {
+		switch {
+		case c == '<':
+			depth++
+		case c == '>':
+			depth--
+		case depth > 0:
+		case c == '.':
+			name.WriteByte('$')
+		case c == ';':
+			return name.String(), name.Len() > 0
+		default:
+			name.WriteRune(c)
+		}
+	}
+	return "", false
 }
 
 // skipFieldType reports where the field type signature at at ends.
@@ -1043,7 +1097,7 @@ func constantExpr(pool []*Constant, index uint16, self string) (expr, error) {
 		text := JavaDoubleText(entry.Double)
 		return expr{Text: text, Prec: negatablePrec(text), Type: "double"}, nil
 	case TagString:
-		return primary(`"`+escapeString(PoolUtf8(pool, entry.Index))+`"`, "java.lang.String"), nil
+		return primary(`"`+javaStringText(PoolUtf8(pool, entry.Index))+`"`, "java.lang.String"), nil
 	case TagClass:
 		return primary(typeName(PoolUtf8(pool, entry.Index), self)+".class", "java.lang.Class"), nil
 	}
@@ -2928,7 +2982,7 @@ func isStoringArmBlock(b *block) bool {
 	kept := make([]Instruction, 0, len(b.Instructions))
 	for i, one := range b.Instructions {
 		dupped := i > 0 && strings.HasPrefix(b.Instructions[i-1].Mnemonic, "dup")
-		if one.Mnemonic == "iinc" || (isOneOf(opBase(one.Mnemonic), "ilfda", "store") && !dupped) {
+		if opBase(one.Mnemonic) == "iinc" || (isOneOf(opBase(one.Mnemonic), "ilfda", "store") && !dupped) {
 			continue
 		}
 		kept = append(kept, one)
@@ -3337,6 +3391,9 @@ func (d *bodyDecompiler) declareAtTheWrite(entry *local) bool {
 	// Every read has to come after the store, in its own block. The write
 	// holds the list it was captured into, not the block's own handle on it:
 	// the two share the statements, not the pointer.
+	if write.Index >= len(*write.List) {
+		return false
+	}
 	written := func(list *[]stmt, i int) bool { return i < len(*list) && &(*list)[i] == &(*write.List)[write.Index] }
 	outside := false
 	var walk func(list *[]stmt, inside bool)
@@ -3700,9 +3757,13 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 			// javac writes one row per scope range, so the same variable can
 			// appear twice for one slot (once per arm of an `if`); the name and
 			// type are what say it is the same one.
+			// A pattern's variable lives only where its test holds: a store
+			// under another row is the next variable javac put in the slot,
+			// whatever the debug table names it.
 			origin := existing.Origin
 			if origin == scoped ||
-				(origin != nil && origin.Name == scoped.Name && origin.Type == scoped.Type) {
+				(origin != nil && origin.Name == scoped.Name && origin.Type == scoped.Type &&
+					!(isStore && existing.FromPattern)) {
 				return existing, nil
 			}
 		case isStore && existing.FromPattern:
@@ -4057,7 +4118,7 @@ func (d *bodyDecompiler) lambda(siteDescriptor string, bootstrap BootstrapMethod
 		if erased[i].Type == wanted[i].Type {
 			passed = append(passed, parameters[i])
 		} else {
-			passed = append(passed, "("+wanted[i].Type+") "+parameters[i])
+			passed = append(passed, "("+sourceTypeText(wanted[i].Type, d.self())+") "+parameters[i])
 		}
 	}
 	// What kind of call the handle is decides both forms below; an unknown one is
@@ -4310,7 +4371,7 @@ func (d *bodyDecompiler) concat(siteDescriptor string, bootstrap BootstrapMethod
 		if literal == "" {
 			return
 		}
-		parts = append(parts, concatPart{primary(`"`+escapeString(literal)+`"`, "java.lang.String"), true})
+		parts = append(parts, concatPart{primary(`"`+javaStringText(literal)+`"`, "java.lang.String"), true})
 		literal = ""
 	}
 	taken := 0
@@ -4485,6 +4546,11 @@ func (d *bodyDecompiler) anonymousBody(
 			if outer == nil || outer.Text != "this" || namedForAMethod.MatchString(enclosing) {
 				return "", "", nil, bail("an anonymous class holding an enclosing instance with no name")
 			}
+			// Written nested, the class is named as source declares it there,
+			// not by its binary name.
+			if d.classFile.DeclaredNested {
+				enclosing = selfOf(d.classFile)
+			}
 			names[field] = enclosing + ".this"
 		case at < 0 || at >= len(args):
 			return "", "", nil, bail("an anonymous class whose capture is not an argument")
@@ -4525,6 +4591,11 @@ func (d *bodyDecompiler) anonymousBody(
 		// to: the body's methods take exactly that, and override what they did.
 		if erased, rewritten := withTypeVariablesErased(signature, d.typeErasures); !ok && rewritten {
 			generic, genericInterfaces, ok = classSignatureTypes(erased, d.self())
+		}
+		// A local or anonymous class among the type arguments has only its
+		// binary name, which no source can write.
+		if ok && localClassName.MatchString(generic+" "+strings.Join(genericInterfaces, " ")) {
+			ok = false
 		}
 		if !ok || len(genericInterfaces) != len(interfaces) {
 			// The type arguments cannot be written here - a type variable of
@@ -4759,12 +4830,16 @@ func initializerBlock(anonymous *ClassFile, descriptor string, synthetic map[str
 	return append(append([]string{"{"}, kept...), "}"), nil
 }
 
+// localClassName matches the binary name of a local or anonymous class in a
+// rendered type: `Outer$1Sink`, `Outer$2`.
+var localClassName = regexp.MustCompile(`\$\d`)
+
 // syntheticStore matches the store of a captured value into the field javac
 // keeps it in - the enclosing instance's written as the `Outer.this` its reads
 // become, which source can never assign - and parameterRead a read of one of
 // the constructor's own parameters.
 var (
-	syntheticStore = regexp.MustCompile(`^(?:this\.(?:val\$|this\$)[\w$]+|[\w$.]+\.this) = [\w$]+;$`)
+	syntheticStore = regexp.MustCompile(`^(?:this\.(?:val\$|this\$)[\w$]+|[\w$.]+\.this) = [\w$.]+;$`)
 	parameterRead  = regexp.MustCompile(`(^|[^\w$.])arg\d+($|[^\w$])`)
 )
 
@@ -6369,8 +6444,6 @@ func (d *bodyDecompiler) loop(l *loop) (int, error) {
 	if len(l.Latches) == 1 {
 		latch = d.blocks[l.Latches[0]]
 	}
-	// An assignment used as a value is part of the test - `while ((x = next())
-	// != null)` - and whileLoop refuses a header that writes a statement.
 	isWhile := l.Follow != exitBlock && header.Kind == blockConditional &&
 		isConditionBlock(header) && headerExits(d.blocks, l)
 	isDoWhile := !isWhile && l.Follow != exitBlock && latch != nil &&
@@ -6898,8 +6971,17 @@ func (d *bodyDecompiler) stringSwitch(b *block, body []Instruction, stop int) (i
 				!d.callsString(ins[2], "equals", "(Ljava/lang/Object;)Z") || ins[3].Mnemonic != "ifeq" {
 				return 0, false, nil
 			}
+			// The label is only the one the case compares with when its hash is
+			// the key: javac's always is, a hand-written chain need not be, and
+			// a constant this phase cannot render exactly (a lone surrogate)
+			// hashes differently once decoded.
+			constant := PoolAt(d.classFile.Pool, uint16(ins[1].Arg))
+			if constant == nil || constant.Tag != TagString ||
+				javaHashCode(PoolUtf8(d.classFile.Pool, constant.Index)) != int32(entry.Key) {
+				return 0, false, nil
+			}
 			literal, err := constantExpr(d.classFile.Pool, uint16(ins[1].Arg), d.self())
-			if err != nil || literal.Type != "java.lang.String" {
+			if err != nil {
 				return 0, false, nil
 			}
 			store := d.blocks[test.Successors[0]]
@@ -6915,6 +6997,12 @@ func (d *bodyDecompiler) stringSwitch(b *block, body []Instruction, stop int) (i
 			labels[key] = append(labels[key], literal.Text)
 			owned[at], owned[store.Start] = true, true
 			at = test.Successors[1]
+		}
+	}
+	// Every case of the second answers to a label of the first.
+	for _, entry := range indexed.Instructions[1].SwitchCases {
+		if _, ok := labels[entry.Key]; !ok && entry.Target != indexed.Instructions[1].Arg {
+			return 0, false, nil
 		}
 	}
 	// Nothing but the lowering lies between the two tables.
@@ -6936,6 +7024,58 @@ func (d *bodyDecompiler) stringSwitch(b *block, body []Instruction, stop int) (i
 	}
 	next, err := d.switchStatement(indexed, stop)
 	return next, true, err
+}
+
+// javaHashCode is String.hashCode over the UTF-16 code units of s.
+func javaHashCode(s string) int32 {
+	var h int32
+	for _, unit := range utf16Units(s) {
+		h = 31*h + int32(unit)
+	}
+	return h
+}
+
+// utf16Units are the UTF-16 code units of a decoded constant, whose unpaired
+// surrogates are kept as their WTF-8 bytes (see decodeModifiedUTF8).
+func utf16Units(s string) []uint16 {
+	var units []uint16
+	for i := 0; i < len(s); {
+		if unit, ok := loneSurrogate(s, i); ok {
+			units = append(units, unit)
+			i += 3
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		units = utf16.AppendRune(units, r)
+		i += size
+	}
+	return units
+}
+
+// loneSurrogate reads the WTF-8 bytes of an unpaired surrogate at i.
+func loneSurrogate(s string, i int) (uint16, bool) {
+	if i+2 >= len(s) || s[i] != 0xed || s[i+1] < 0xa0 {
+		return 0, false
+	}
+	return 0xd000 | uint16(s[i+1]&0x3f)<<6 | uint16(s[i+2]&0x3f), true
+}
+
+// javaStringText is a constant as the inside of a Java string literal. Where
+// javap writes an unpaired surrogate as "?", which is another string, source
+// needs its escape.
+func javaStringText(s string) string {
+	var out strings.Builder
+	for i := 0; i < len(s); {
+		if unit, ok := loneSurrogate(s, i); ok {
+			fmt.Fprintf(&out, "\\u%04x", unit)
+			i += 3
+			continue
+		}
+		_, size := utf8.DecodeRuneInString(s[i:])
+		out.WriteString(escapeString(s[i : i+size]))
+		i += size
+	}
+	return out.String()
 }
 
 // callsString reports an invokevirtual of the named method of String.
@@ -7252,20 +7392,18 @@ func (d *bodyDecompiler) takeOverBinding(start int, typ string) (string, bool) {
 	// The arm has not run yet, so the slot holds nothing: the variable the
 	// label binds is declared here, where its name and type are both known.
 	// A slot already carrying a variable is one javac reused, which this does
-	// not take over.
-	if one, taken := d.locals[slot]; taken && one != nil {
+	// not take over - unless it is another pattern's, whose scope is over.
+	if one, taken := d.locals[slot]; taken && one != nil && !one.FromPattern {
 		return "", false
 	}
 	// With a debug table the arm's reads look the variable up by its row,
 	// which begins right after the store - and carries the name source gave.
+	// The store is at most a `wide astore`, four bytes.
 	var scoped *localEntry
-	if len(b.Instructions) > 3 {
-		after := b.Instructions[3].Pc
-		for i := range d.localTable {
-			if e := &d.localTable[i]; e.Slot == slot && after >= e.StartPc && after < e.EndPc {
-				scoped = e
-				break
-			}
+	for i := range d.localTable {
+		if e := &d.localTable[i]; e.Slot == slot && e.StartPc > store.Pc && e.StartPc <= store.Pc+4 {
+			scoped = e
+			break
 		}
 	}
 	d.patternNames++
@@ -7277,6 +7415,7 @@ func (d *bodyDecompiler) takeOverBinding(start int, typ string) (string, bool) {
 		Name:        d.freshName(wanted),
 		Type:        typ,
 		Declared:    true,
+		FromPattern: true,
 		Origin:      scoped,
 		StoreBlocks: map[int]bool{},
 	}
@@ -7407,14 +7546,14 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 	armsBefore := len(d.arms)
 	// An arm that stores declares and writes locals: taken back with it.
 	localsBefore, byNameBefore, namesBefore := maps.Clone(d.locals), maps.Clone(d.byName), maps.Clone(d.names)
-	hoistedBefore := len(d.hoisted)
-	boundBefore := len(d.bound)
-	writesBefore := map[*local]int{}
+	hoistedBefore, boundBefore, capturedBefore := len(d.hoisted), len(d.bound), len(d.captured)
+	writesBefore, fromBefore := map[*local]int{}, map[*local]int{}
 	for _, one := range d.byName {
-		writesBefore[one] = len(one.Writes)
+		writesBefore[one], fromBefore[one] = len(one.Writes), len(one.From)
 	}
 	restore := func() {
 		d.unbindFrom(boundBefore)
+		d.captured = d.captured[:capturedBefore]
 		d.stack = stackBefore
 		*statements = (*statements)[:statementsBefore]
 		d.visited = visitedBefore
@@ -7427,39 +7566,66 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 		for one, n := range writesBefore {
 			one.Writes = one.Writes[:min(n, len(one.Writes))]
 		}
+		for one, n := range fromBefore {
+			one.From = one.From[:min(n, len(one.From))]
+		}
 	}
 	// What an arm's block wrote becomes text in the arm, where a retype can no
 	// longer reach it: the variables it writes have to have their type for
 	// certain, and forget the lines that were theirs.
+	//
+	// Only a variable the block declares qualifies. One declared outside it -
+	// before the switch, or hoisted to the top of the body from inside a loop -
+	// lives on past the arm, and the writes the text hides are what says
+	// whether it is effectively final.
+	//
+	// Inside a loop or a branch the first store hoists its declaration to the
+	// top of the body. One hoisted by this arm and written once, by a statement
+	// of it, is declared at that store instead - where source declared it.
 	freeze := func(from int) bool {
-		var scoped []*local
+		inArm := func(list *[]stmt, index int) bool { return list == statements && index >= from }
+		var scoped, hoisted []*local
 		for _, one := range d.byName {
-			kept := one.Writes[:0:0]
-			for _, write := range one.Writes {
-				if write.List == statements && write.Index >= from {
-					if !one.Authoritative {
-						return false
-					}
-					continue
-				}
-				kept = append(kept, write)
+			declared := one.Declaration != nil && inArm(one.Declaration.List, one.Declaration.Index)
+			written := slices.ContainsFunc(one.Writes, func(write localWrite) bool { return inArm(write.List, write.Index) })
+			if !declared && !written {
+				continue
 			}
-			one.Writes = kept
-			if one.Declaration != nil && one.Declaration.List == statements && one.Declaration.Index >= from {
-				if !one.Authoritative {
+			if !one.Authoritative {
+				return false
+			}
+			if !declared {
+				if one.Declaration == nil || one.Declaration.List != &d.hoisted || one.Declaration.Index < hoistedBefore ||
+					len(one.Writes) != 1 || one.Writes[0].InValue {
 					return false
 				}
-				one.Declaration = nil
-				scoped = append(scoped, one)
+				hoisted = append(hoisted, one)
 			}
+			scoped = append(scoped, one)
+		}
+		// Latest first, so the indices of the ones still to go stay right.
+		slices.SortFunc(hoisted, func(a, b *local) int { return b.Declaration.Index - a.Declaration.Index })
+		for _, one := range hoisted {
+			at := one.Declaration.Index
+			d.hoisted = slices.Delete(d.hoisted, at, at+1)
+			for _, other := range d.byName {
+				if other.Declaration != nil && other.Declaration.List == &d.hoisted && other.Declaration.Index > at {
+					other.Declaration.Index--
+				}
+			}
+			write := one.Writes[0]
+			(*write.List)[write.Index].Text = one.Type + " " + (*write.List)[write.Index].Text
 		}
 		// A variable declared in the block lives only there. javac hands the
 		// slot - and the debug table the name - to the next arm's own, which
-		// is another variable with a declaration of its own.
+		// is another variable with a declaration of its own. Its name stays
+		// taken: a variable after the switch hoisted to the top of the body
+		// would otherwise be declared over the arm's.
 		for _, one := range scoped {
+			one.Writes = slices.DeleteFunc(one.Writes, func(write localWrite) bool { return inArm(write.List, write.Index) })
+			one.Declaration = nil
 			maps.DeleteFunc(d.locals, func(_ int, held *local) bool { return held == one })
 			delete(d.byName, one.Name)
-			delete(d.names, one.Name)
 		}
 		return true
 	}
@@ -7525,13 +7691,14 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 		// A pattern arm opens with the binding javac stored, which is a
 		// statement: source wrote the arm as a block then, and the value it
 		// leaves is what `yield` says.
-		if written := flattenStatements((*statements)[armBefore:]); len(written) > 0 {
+		if len(*statements) > armBefore {
 			// Source wrote the arm as a block then, and the value it leaves is
 			// what `yield` says.
 			if !freeze(armBefore) {
 				restore()
 				return expr{}, false, nil
 			}
+			written := flattenStatements((*statements)[armBefore:])
 			*statements = (*statements)[:armBefore]
 			arms = append(arms, switchArm{
 				Prefix:   label + " -> { " + strings.Join(written, " ") + " yield ",
@@ -8185,6 +8352,8 @@ func (d *bodyDecompiler) tryTernary(condition expr, whenTrue, whenFalse, follow 
 	statements := d.current
 	statementsBefore := len(*statements)
 	boundBefore := len(d.bound)
+	// A switch expression in an arm marks the blocks it took as it goes.
+	visitedBefore := maps.Clone(d.visited)
 	value, found, err := d.armValues(condition, whenTrue, whenFalse, follow, &consumed)
 	if err != nil {
 		return expr{}, false, err
@@ -8197,6 +8366,7 @@ func (d *bodyDecompiler) tryTernary(condition expr, whenTrue, whenFalse, follow 
 		d.stack = before
 		*statements = (*statements)[:statementsBefore]
 		d.unbindFrom(boundBefore)
+		d.visited = visitedBefore
 		return expr{}, false, nil
 	}
 	for _, start := range consumed {
@@ -8342,26 +8512,27 @@ func (d *bodyDecompiler) valueOfRegion(start, follow int, consumed *[]int) (expr
 		// declared behind, so no local may be written in here - but for the
 		// two of javac's lowering of a String, which the fold never writes.
 		lowering := map[int]bool{}
-		for _, one := range b.Instructions {
-			if isOneOf(opBase(one.Mnemonic), "ilfda", "store") {
-				lowering[slotOf(one)] = true
-			}
+		if n := len(b.Instructions); n >= 6 && opBase(b.Instructions[n-6].Mnemonic) == "astore" &&
+			opBase(b.Instructions[n-4].Mnemonic) == "istore" {
+			lowering[slotOf(b.Instructions[n-6])] = true
+			lowering[slotOf(b.Instructions[n-4])] = true
 		}
 		for at, other := range d.blocks {
-			if at <= start || at >= follow {
+			if at < start || at >= follow {
 				continue
 			}
 			for _, one := range other.Instructions {
-				if one.Mnemonic == "iinc" || (isOneOf(opBase(one.Mnemonic), "ilfda", "store") && !lowering[slotOf(one)]) {
+				if opBase(one.Mnemonic) == "iinc" || (isOneOf(opBase(one.Mnemonic), "ilfda", "store") && !lowering[slotOf(one)]) {
 					return expr{}, false, nil
 				}
 			}
 		}
 		stackBefore := append([]expr(nil), d.stack...)
 		visitedBefore := maps.Clone(d.visited)
-		armsBefore := len(d.arms)
+		armsBefore, capturedBefore := len(d.arms), len(d.captured)
 		restore := func() {
 			d.stack, d.visited, d.arms = stackBefore, visitedBefore, d.arms[:armsBefore]
+			d.captured = d.captured[:capturedBefore]
 		}
 		d.visited[start] = true
 		next := 0
@@ -10036,6 +10207,16 @@ func decompileBody(
 			SignatureOf(classFile.Attributes, classFile.Pool), SignatureOf(method.Attributes, classFile.Pool)),
 	}
 	d.current = &d.statements
+	// Written nested, an inner class's constructor has no parameter for the
+	// instance it is created against - the head leaves javac's out - and the
+	// body reads that instance as source does.
+	if method.Name == "<init>" && classFile.DeclaredInner {
+		cut := strings.LastIndex(classFile.ThisClass, "$")
+		outer := typeName(classFile.ThisClass[:cut], selfOf(classFile))
+		if first, ok := locals[1]; ok && cut > 0 && first.Type == outer {
+			first.Name = outer + ".this"
+		}
+	}
 	for _, parameter := range locals {
 		d.names[parameter.Name] = true
 		d.byName[parameter.Name] = parameter

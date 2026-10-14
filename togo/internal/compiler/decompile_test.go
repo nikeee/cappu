@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -3602,7 +3603,9 @@ func TestDecompileWritesALocalInAnArmOfASwitchExpression(t *testing.T) {
 		"case java.lang.Integer i -> { int j = i.intValue() + 1; yield \"i\" + j; }",
 		"case 1 -> { java.lang.String s = \"ab\" + k; int n = s.length(); n++; yield n * 2; }",
 		"case 2 -> { long w = (long) k; yield (int) (w << 3); }",
-		"case 1 -> { int t = k * 2; yield t; } case 2 -> { int t = k * 3; yield t + 1; }",
+		// The second is another variable; its name stays taken by the first,
+		// so a variable hoisted past the switch cannot be declared over it.
+		"case 1 -> { int t = k * 2; yield t; } case 2 -> { int t_2 = k * 3; yield t_2 + 1; }",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
@@ -5762,5 +5765,139 @@ func TestDecompiledSourceCompilesAndRuns(t *testing.T) {
 				t.Errorf("the decompiled program runs differently: %q vs %q", actual, expected)
 			}
 		})
+	}
+}
+
+// What the review of the switch-expression, pattern and erasure work found,
+// each compiled with and without a debug table, decompiled with its nested
+// classes, compiled again and run. Every one has to compile; one marked
+// whole has to come back without a bail and print what the original does.
+func TestDecompileWhatTheReviewFound(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	cases := []struct {
+		name, source string
+		whole        bool
+	}{
+		// A statement switch is first tried as an expression; a case that
+		// declares a local a lambda captures must leave nothing behind when
+		// that attempt fails - it once crashed the run.
+		{"Rollback", `import java.util.function.*;
+public class Rollback {
+  static void run(IntSupplier s) { System.out.print(s.getAsInt()); }
+  static void f(boolean c, int k) {
+    if (c) {
+      switch (k) {
+        case 1: System.out.print("a"); System.out.print("b"); int x = k * 2; run(() -> x); break;
+        default: System.out.print("o");
+      }
+    }
+  }
+  public static void main(String[] z) { f(true, 1); f(true, 2); System.out.println(); }
+}`, true},
+		// An arm's local inside a loop is hoisted by its store; declared back in
+		// the arm it is effectively final again, two arms' of one name too.
+		{"ArmInLoop", `import java.util.*; import java.util.function.*;
+public class ArmInLoop {
+  static List<Supplier<String>> f(int[] ks) {
+    List<Supplier<String>> out = new ArrayList<>();
+    for (int k : ks) {
+      Supplier<String> s = switch (k) {
+        case 1 -> { int j = k * 3; yield () -> "a" + j; }
+        case 2 -> { int j = k * 5; yield () -> "b" + j; }
+        default -> () -> "c";
+      };
+      out.add(s);
+    }
+    return out;
+  }
+  public static void main(String[] z) { for (Supplier<String> s : f(new int[] {1, 2, 3})) System.out.print(s.get()); System.out.println(); }
+}`, false},
+		// The arm's name stays taken: a variable after the switch hoisted to
+		// the top of the body would otherwise be declared over it.
+		{"ArmName", `public class ArmName {
+  static int f(int k, boolean c) {
+    int r = switch (k) { case 1 -> { int j = k + 1; yield j * 2; } case 2 -> { int j = k * 7; yield j - 1; } default -> 0; };
+    int j; if (c) j = 1; else j = 2;
+    return r + j;
+  }
+  public static void main(String[] z) { System.out.println(f(1, true) + " " + f(2, false) + " " + f(3, true)); }
+}`, false},
+		// A pattern's variable lives only where its test holds; a later local
+		// of the same name in the same slot is another variable.
+		{"PatternScope", `public class PatternScope {
+  static int g(Object p) { int q = p instanceof String s ? s.length() * 2 : 1; String s = "zz"; return q + s.length(); }
+  static int h(Object o) { int q = switch (o) { case String s -> s.length(); default -> 0; }; long x = 7; String s = "zzz"; return q + (int) x + s.length(); }
+  static String twice(Object o) {
+    StringBuilder sb = new StringBuilder();
+    switch (o) { case String s -> sb.append(s); case Integer i -> sb.append(i + 1); default -> sb.append("?"); }
+    switch (o) { case String s -> sb.append(" again ").append(s); default -> sb.append(" no"); }
+    return sb.toString();
+  }
+  static int loopArm(Object o) { int n = 0; switch (o) { case String s -> { while (n < s.length()) n++; } default -> n = -1; } return n; }
+  public static void main(String[] z) { System.out.println(g("abc") + " " + g(1) + " " + h("abc") + " " + h(1) + " " + twice("x") + twice(4) + " " + loopArm("abc") + loopArm(1)); }
+}`, false},
+		// Only javac's own lowering is a String switch: a hash that is not the
+		// label's is a hand-written switch, and a lone surrogate keeps its escape.
+		{"Hashes", `public class Hashes {
+  static int wrongHash(String s) { String t = s; int i = -1; switch (t.hashCode()) { case 1: if (t.equals("a")) i = 0; break; } switch (i) { case 0: return 10; default: return -5; } }
+  static int surrogate(String s) { switch (s) { case "\uD800": return 1; case "\u0000": return 2; default: return 0; } }
+  public static void main(String[] z) { System.out.println(wrongHash("a") + " " + surrogate("\uD800") + surrogate("\u0000") + surrogate("?")); }
+}`, true},
+		// A type variable erases to its bound: an inner class of a generic one,
+		// through the method's own variable shadowing the class's, and not at
+		// all where the bound is a variable these signatures do not declare.
+		{"Erasures", `import java.util.function.*;
+public class Erasures<X extends Number, U extends Number, T extends U> {
+  static class Outer<Y> { class Inner { String v = "inner"; } }
+  static <T extends Outer<String>.Inner> Function<T, String> inner() { return new Function<T, String>() { public String apply(T t) { return "got " + t.v; } }; }
+  <U extends CharSequence> Function<T, String> shadowed() { return new Function<T, String>() { public String apply(T t) { return "n" + t.intValue(); } }; }
+  class Deep { <S extends X> Function<S, String> f() { return new Function<S, String>() { public String apply(S s) { return "v" + s.intValue(); } }; } }
+  public static void main(String[] z) {
+    Outer<String> o = new Outer<>();
+    Erasures<Integer, Integer, Integer> e = new Erasures<>();
+    System.out.println(Erasures.<Outer<String>.Inner>inner().apply(o.new Inner()) + " " + e.<String>shadowed().apply(4) + " " + e.new Deep().<Integer>f().apply(7));
+  }
+}`, false},
+		// Read by its source name: a lambda parameter cast to a nested class,
+		// the instance an inner class's constructor is created against, and
+		// the one an anonymous class in a nested class reads.
+		{"Names", `import java.util.*;
+public class Names {
+  static String entries(Map<String, Integer> m) { StringBuilder sb = new StringBuilder(); m.entrySet().forEach(e -> sb.append(e.getKey()).append(e.getValue())); return sb.toString(); }
+  int base = 5;
+  class Inner { int v; Inner() { v = base + 1; } }
+  class Nested { int k = 2; Runnable r() { return new Runnable() { public void run() { System.out.print(k * 3); } }; } }
+  public static void main(String[] z) {
+    Names n = new Names();
+    System.out.print(entries(new TreeMap<>(Map.of("a", 1))) + " " + n.new Inner().v + " ");
+    n.new Nested().r().run();
+    System.out.println();
+  }
+}`, true},
+	}
+	for _, c := range cases {
+		for _, debug := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/debug=%v", c.name, debug), func(t *testing.T) {
+				dir := t.TempDir()
+				classFile := compileWithJavacFlags(t, dir, c.name, c.source, "", debug)
+				source, err := DecompileWith(readFile(t, classFile), siblingsIn(dir))
+				if err != nil {
+					t.Fatalf("decompile: %v", err)
+				}
+				if c.whole && strings.Contains(source, "/* cappu:") {
+					t.Errorf("expected no bail:\n%s", source)
+				}
+				again := filepath.Join(dir, "again")
+				compileWithJavac(t, again, c.name, source)
+				if strings.Contains(source, "/* cappu:") {
+					return
+				}
+				if actual, expected := runJava(t, again, c.name), runJava(t, dir, c.name); actual != expected {
+					t.Errorf("the decompiled class runs differently: %q vs %q\n%s", actual, expected, source)
+				}
+			})
+		}
 	}
 }
