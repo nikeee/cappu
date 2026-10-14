@@ -3448,6 +3448,58 @@ func TestDecompileWritesASwitchOverAString(t *testing.T) {
 	}
 }
 
+// An arm of a switch expression that declares a local is a block in source,
+// and the store goes into it in front of the yield. The block becomes text, so
+// only a variable whose type the debug table gives is written there; one this
+// phase only guessed could still be retyped, and is refused.
+const yieldLocalSource = `public class YieldLocal {
+  static String b(Object o) { return switch (o) { case Integer i -> { int j = i + 1; yield "i" + j; } default -> "d"; }; }
+  static int c(int k) { return switch (k) { case 1 -> { String s = "ab" + k; int n = s.length(); n++; yield n * 2; } case 2 -> { long w = k; yield (int) (w << 3); } default -> 0; }; }
+  // Two arms declaring one name in one slot: two variables, each in its block.
+  static int d(int k) { return switch (k) { case 1 -> { int t = k * 2; yield t; } case 2 -> { int t = k * 3; yield t + 1; } default -> 0; }; }
+  public static void main(String[] z) { System.out.println(b(4) + b("x") + c(1) + c(2) + c(3) + d(1) + d(2)); }
+}
+`
+
+func TestDecompileWritesALocalInAnArmOfASwitchExpression(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavacFlags(t, dir, "YieldLocal", yieldLocalSource, "", true)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"case java.lang.Integer i -> { int j = i.intValue() + 1; yield \"i\" + j; }",
+		"case 1 -> { java.lang.String s = \"ab\" + k; int n = s.length(); n++; yield n * 2; }",
+		"case 2 -> { long w = (long) k; yield (int) (w << 3); }",
+		"case 1 -> { int t = k * 2; yield t; } case 2 -> { int t = k * 3; yield t + 1; }",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "YieldLocal", source)
+	if actual, expected := runJava(t, again, "YieldLocal"), runJava(t, dir, "YieldLocal"); actual != expected || actual != "i5d816027\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+	// Without the table the type is a guess, and the arm is refused.
+	bare := filepath.Join(dir, "bare")
+	guessed, err := Decompile(readFile(t, compileWithJavac(t, bare, "YieldLocal", yieldLocalSource)))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(guessed, "/* cappu:") {
+		t.Errorf("expected the guessed arms to be refused:\n%s", guessed)
+	}
+}
+
 // A `return` inside a loop is a statement, not the loop's end - but where the
 // test carries a call the header is not a pure test, so the follow has to come
 // from somewhere else. A single unconditional latch says the test is still the

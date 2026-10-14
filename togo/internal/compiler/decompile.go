@@ -2907,6 +2907,20 @@ func isAssignment(base string) bool {
 	return isOneOf(base, "ilfda", "store") || base == "putfield" || base == "putstatic" || isOneOf(base, "ilfdabcs", "astore")
 }
 
+// isStoringArmBlock is isArmBlock for the arm of a switch expression, which
+// may store into locals as well: the block source wrote there.
+func isStoringArmBlock(b *block) bool {
+	kept := make([]Instruction, 0, len(b.Instructions))
+	for i, one := range b.Instructions {
+		dupped := i > 0 && strings.HasPrefix(b.Instructions[i-1].Mnemonic, "dup")
+		if one.Mnemonic == "iinc" || (isOneOf(opBase(one.Mnemonic), "ilfda", "store") && !dupped) {
+			continue
+		}
+		kept = append(kept, one)
+	}
+	return isArmBlock(&block{Instructions: kept})
+}
+
 // isArmBlock is isConditionBlock for a conditional's arm, where an assignment
 // used as a value - a store straight after a dup - is an expression too.
 func isArmBlock(b *block) bool {
@@ -2962,6 +2976,10 @@ func endOf(b *block) int {
 
 type bodyDecompiler struct {
 	classFile *ClassFile
+	// armStores says the next region valueOfRegion reads is an arm of a switch
+	// expression, which is a block in source: a store in it is a statement of
+	// that block, written in front of the `yield`.
+	armStores bool
 	// typeErasures maps each type variable in scope - the method's and its
 	// class's - to the internal name of the class it erases to.
 	typeErasures map[string]string
@@ -7349,11 +7367,61 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 		visitedBefore[k] = v
 	}
 	armsBefore := len(d.arms)
+	// An arm that stores declares and writes locals: taken back with it.
+	localsBefore, byNameBefore, namesBefore := maps.Clone(d.locals), maps.Clone(d.byName), maps.Clone(d.names)
+	hoistedBefore := len(d.hoisted)
+	writesBefore := map[*local]int{}
+	for _, one := range d.byName {
+		writesBefore[one] = len(one.Writes)
+	}
 	restore := func() {
 		d.stack = stackBefore
 		*statements = (*statements)[:statementsBefore]
 		d.visited = visitedBefore
 		d.arms = d.arms[:armsBefore]
+		maps.DeleteFunc(d.locals, func(slot int, _ *local) bool { _, kept := localsBefore[slot]; return !kept })
+		maps.Copy(d.locals, localsBefore)
+		maps.DeleteFunc(d.byName, func(name string, _ *local) bool { _, kept := byNameBefore[name]; return !kept })
+		maps.DeleteFunc(d.names, func(name string, _ bool) bool { _, kept := namesBefore[name]; return !kept })
+		d.hoisted = d.hoisted[:hoistedBefore]
+		for one, n := range writesBefore {
+			one.Writes = one.Writes[:min(n, len(one.Writes))]
+		}
+	}
+	// What an arm's block wrote becomes text in the arm, where a retype can no
+	// longer reach it: the variables it writes have to have their type for
+	// certain, and forget the lines that were theirs.
+	freeze := func(from int) bool {
+		var scoped []*local
+		for _, one := range d.byName {
+			kept := one.Writes[:0:0]
+			for _, write := range one.Writes {
+				if write.List == statements && write.Index >= from {
+					if !one.Authoritative {
+						return false
+					}
+					continue
+				}
+				kept = append(kept, write)
+			}
+			one.Writes = kept
+			if one.Declaration != nil && one.Declaration.List == statements && one.Declaration.Index >= from {
+				if !one.Authoritative {
+					return false
+				}
+				one.Declaration = nil
+				scoped = append(scoped, one)
+			}
+		}
+		// A variable declared in the block lives only there. javac hands the
+		// slot - and the debug table the name - to the next arm's own, which
+		// is another variable with a declaration of its own.
+		for _, one := range scoped {
+			maps.DeleteFunc(d.locals, func(_ int, held *local) bool { return held == one })
+			delete(d.byName, one.Name)
+			delete(d.names, one.Name)
+		}
+		return true
 	}
 	consumed := []int{}
 	// Each arm is its text and, for one that takes a value, where the value
@@ -7403,6 +7471,7 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 			continue
 		}
 		armBefore := len(*statements)
+		d.armStores = true
 		value, found, err := d.valueOfRegion(target, follow, &consumed)
 		if err != nil {
 			restore()
@@ -7419,6 +7488,10 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 		if written := flattenStatements((*statements)[armBefore:]); len(written) > 0 {
 			// Source wrote the arm as a block then, and the value it leaves is
 			// what `yield` says.
+			if !freeze(armBefore) {
+				restore()
+				return expr{}, false, nil
+			}
 			*statements = (*statements)[:armBefore]
 			arms = append(arms, switchArm{
 				Prefix:   label + " -> { " + strings.Join(written, " ") + " yield ",
@@ -8095,6 +8168,8 @@ func (d *bodyDecompiler) armValues(
 // either one side-effect-free block that leaves it on the stack, or - because a
 // short-circuit nests them - another branch whose arms are values themselves.
 func (d *bodyDecompiler) valueOfRegion(start, follow int, consumed *[]int) (expr, bool, error) {
+	stores := d.armStores
+	d.armStores = false
 	b := d.blocks[start]
 	if b == nil {
 		return expr{}, false, nil
@@ -8104,7 +8179,8 @@ func (d *bodyDecompiler) valueOfRegion(start, follow int, consumed *[]int) (expr
 	// same value twice. An arm of its own may call something. What a case label
 	// has taken over is not part of either shape.
 	shape := d.withoutSkipped(b)
-	if b.Kind != blockSwitch && !isPureBlock(shape) && (containsInt(*consumed, start) || !isArmBlock(shape)) {
+	if b.Kind != blockSwitch && !isPureBlock(shape) &&
+		(containsInt(*consumed, start) || !(isArmBlock(shape) || stores && isStoringArmBlock(shape))) {
 		return expr{}, false, nil
 	}
 	if d.isLoopEdge(start) {
