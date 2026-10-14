@@ -3448,6 +3448,42 @@ func TestDecompileWritesASwitchOverAString(t *testing.T) {
 	}
 }
 
+// A `while (true)` whose every way out returns has no end of its own: it is
+// left only by leaving the method, from more than one place.
+func TestDecompileWritesALoopLeftOnlyByReturns(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	source := `public class Returning {
+  Object cache; int gen = 2; int tries;
+  Object make(int g) { tries++; return tries < 3 ? null : "v" + g; }
+  Object data() {
+    while (true) {
+      Object d = cache;
+      if (d != null && tries > 5) return d;
+      Object n = make(gen);
+      if (n != null) return n;
+    }
+  }
+  public static void main(String[] z) { Returning r = new Returning(); System.out.println(r.data() + " " + r.tries); }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Returning", source)
+	decompiled, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(decompiled, "/* cappu:") || !strings.Contains(decompiled, "while (true) {") {
+		t.Errorf("expected the endless loop:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Returning", decompiled)
+	if actual, expected := runJava(t, again, "Returning"), runJava(t, dir, "Returning"); actual != expected || actual != "v2 3\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 // Three arms of a conditional that are more than one block that pushes: a
 // conditional nested in an operand, a field post-increment, and the variable a
 // type pattern in the condition binds.

@@ -2624,6 +2624,11 @@ func loopFollow(blocks map[int]*block, header int, latches []int, body, enclosin
 	if len(goesOn) == 0 && blocks[header].Kind == blockConditional && len(fromHeader) == 1 {
 		return fromHeader[0], nil
 	}
+	// Every way out returns or throws, the header's own included: a
+	// `while (true)` that only ends by leaving the method has no end of its own.
+	if len(goesOn) == 0 {
+		return exitBlock, nil
+	}
 	return 0, bail("a loop with more than one exit")
 }
 
