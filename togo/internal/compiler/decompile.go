@@ -6602,9 +6602,10 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 			return 0, err
 		}
 	}
-	if len(d.stack) > 0 {
-		return 0, bail("values left on the stack")
-	}
+	// A value under the selector - the receiver of a store, an operand to the
+	// left - is one only a switch expression can leave there: a statement
+	// would have to run before it.
+	pending := len(d.stack) > 0
 	// javac compiles a `switch` over an enum into a lookup through a synthetic
 	// `$SwitchMap$` array held by a class of its own - which has no name source
 	// can write. The `case CONSTANT:` form comes back from that holder's
@@ -6746,6 +6747,31 @@ func (d *bodyDecompiler) switchStatement(b *block, stop int) (int, error) {
 			d.push(value)
 			return follow, nil
 		}
+	}
+	// With one arm that leaves a value and every other one throwing, nothing
+	// but that arm reaches the merge: it dominates it, so the search above took
+	// a throwing body for the end. The value lands where that one arm leads.
+	var valued []int
+	for _, target := range targets {
+		if b := d.blocks[target]; b == nil || len(b.Instructions) == 0 ||
+			b.Instructions[len(b.Instructions)-1].Mnemonic != "athrow" {
+			valued = append(valued, target)
+		}
+	}
+	if len(valued) == 1 && len(targets) > 1 {
+		if merge, ok := d.followOf[valued[0]]; ok && merge != exitBlock && merge != follow && merge > targets[len(targets)-1] {
+			value, found, err := d.trySwitchExpression(selector, targets, keysOf, defaultTarget, merge, patternCases != nil)
+			if err != nil {
+				return 0, err
+			}
+			if found {
+				d.push(value)
+				return merge, nil
+			}
+		}
+	}
+	if pending {
+		return 0, bail("values left on the stack")
 	}
 
 	// An exhaustive switch over a sealed type has no default in source: javac

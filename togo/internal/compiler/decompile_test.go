@@ -3145,6 +3145,12 @@ const switchExprSource = `public class SwitchExpr {
   static boolean mix(int k, boolean f) { return switch (k) { case 5 -> false; case 4 -> true; case 6 -> f; default -> t(k); }; }
   static int len(int k) { return (switch (k) { case 0 -> "a"; default -> "bb"; }).length(); }
   static int neg(int k) { return -switch (k) { case 0 -> 1; default -> 2; } + 5; }
+  // A value already on the stack under the selector: the receiver of a field
+  // store, an argument in front of it, an operand to its left.
+  String f;
+  static SwitchExpr store(int k) { SwitchExpr s = new SwitchExpr(); s.f = switch (k) { case 0 -> "x"; default -> throw new IllegalStateException(); }; return s; }
+  static String arg(int k) { return String.valueOf(k).concat(switch (k) { case 0 -> "a"; default -> "b"; }); }
+  static int sum(int k) { return k * 3 + switch (k) { case 1 -> { System.out.print("one "); yield k + 1; } default -> 0; }; }
 }
 `
 
@@ -3170,6 +3176,9 @@ func TestDecompileWritesASwitchExpression(t *testing.T) {
 		// It binds like a cast: parenthesized under a member access, bare as an operand.
 		"return (switch (arg0) { case 0 -> \"a\"; default -> \"bb\"; }).length();",
 		"return -(switch (arg0) { case 0 -> 1; default -> 2; }) + 5;",
+		"var1.f = switch (arg0) { case 0 -> \"x\"; default -> throw new java.lang.IllegalStateException(); };",
+		".concat(switch (arg0) { case 0 -> \"a\"; default -> \"b\"; });",
+		"return arg0 * 3 + switch (arg0) { case 1 -> { java.lang.System.out.print(\"one \"); yield arg0 + 1; } default -> 0; };",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
@@ -3182,14 +3191,14 @@ func TestDecompileWritesASwitchExpression(t *testing.T) {
 	compileWithJavac(t, again, "SwitchExpr", source)
 	driver := `public class SwitchExprDriver {
   public static void main(String[] z) {
-    System.out.println(SwitchExpr.name(0) + SwitchExpr.name(2) + " " + SwitchExpr.val(1) + SwitchExpr.val(9) + " " + SwitchExpr.mixed(1) + SwitchExpr.mixed(5) + " " + SwitchExpr.wide(0) + SwitchExpr.wide(2) + " " + SwitchExpr.stmt(1) + SwitchExpr.stmt(0) + " " + SwitchExpr.mix(5, true) + SwitchExpr.mix(6, true) + " " + SwitchExpr.len(1) + SwitchExpr.neg(1));
+    System.out.println(SwitchExpr.name(0) + SwitchExpr.name(2) + " " + SwitchExpr.val(1) + SwitchExpr.val(9) + " " + SwitchExpr.mixed(1) + SwitchExpr.mixed(5) + " " + SwitchExpr.wide(0) + SwitchExpr.wide(2) + " " + SwitchExpr.stmt(1) + SwitchExpr.stmt(0) + " " + SwitchExpr.mix(5, true) + SwitchExpr.mix(6, true) + " " + SwitchExpr.len(1) + SwitchExpr.neg(1) + " " + SwitchExpr.store(0).f + SwitchExpr.arg(0) + SwitchExpr.arg(4) + SwitchExpr.sum(1) + SwitchExpr.sum(2));
     try { SwitchExpr.name(7); } catch (IllegalArgumentException e) { System.out.println(e.getMessage()); }
   }
 }`
 	compileWithJavacOn(t, dir, "SwitchExprDriver", driver, dir)
 	expected := runJava(t, dir, "SwitchExprDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "SwitchExprDriver")
-	if actual != expected || actual != "zerosmall 2119 7null 15 121 falsetrue 23\nk=7\n" {
+	if actual != expected || actual != "one zerosmall 2119 7null 15 121 falsetrue 23 x0a4b56\nk=7\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
