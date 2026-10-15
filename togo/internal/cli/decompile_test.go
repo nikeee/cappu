@@ -407,19 +407,21 @@ func TestDecompileSaysNothingOfAClassNobodyDeclares(t *testing.T) {
 	}
 	dir := t.TempDir()
 	for name, source := range map[string]string{
-		"Foo.java":     "package p;\npublic class Foo { public static class Ab { } }\n",
-		"Foo$Abc.java": "package p;\npublic class Foo$Abc { public int v() { return 7; } }\n",
+		"Foo.java":      "package p;\npublic class Foo { public static class Ab { } }\n",
+		"Foo$Abc.java":  "package p;\npublic class Foo$Abc { public int v() { return 7; } }\n",
+		"Foo$Ab$C.java": "package p;\npublic class Foo$Ab$C { public int w() { return 8; } }\n",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	classes := filepath.Join(dir, "c")
-	if out, err := exec.Command("javac", "--release", "21", "-d", classes, filepath.Join(dir, "Foo.java"), filepath.Join(dir, "Foo$Abc.java")).CombinedOutput(); err != nil {
+	if out, err := exec.Command("javac", "--release", "21", "-d", classes, filepath.Join(dir, "Foo.java"), filepath.Join(dir, "Foo$Abc.java"), filepath.Join(dir, "Foo$Ab$C.java")).CombinedOutput(); err != nil {
 		t.Fatalf("javac: %v\n%s", err, out)
 	}
-	code, stdout, stderr := runDecompile(t, filepath.Join(classes, "p", "Foo.class"), filepath.Join(classes, "p", "Foo$Abc.class"))
-	if code != 0 || !strings.Contains(stdout, "return 7;") || stderr != "" {
+	// Foo$Ab$C: Foo declares Ab, and Ab declares nothing of that name.
+	code, stdout, stderr := runDecompile(t, filepath.Join(classes, "p", "Foo.class"), filepath.Join(classes, "p", "Foo$Abc.class"), filepath.Join(classes, "p", "Foo$Ab$C.class"))
+	if code != 0 || !strings.Contains(stdout, "return 7;") || !strings.Contains(stdout, "return 8;") || stderr != "" {
 		t.Errorf("expected Foo$Abc written plainly, without a note (exit %d):\n%s\n%s", code, stdout, stderr)
 	}
 }

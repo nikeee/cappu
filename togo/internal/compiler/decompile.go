@@ -3847,6 +3847,50 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 	return created, nil
 }
 
+// descriptorParameters is each parameter of a method descriptor as written
+// in the descriptor.
+func descriptorParameters(descriptor string) []string {
+	var out []string
+	for at := 1; at < len(descriptor) && descriptor[at] != ')'; {
+		_, next := DescriptorType(descriptor, at)
+		if next <= at {
+			break
+		}
+		out = append(out, descriptor[at:next])
+		at = next
+	}
+	return out
+}
+
+// declaredInThisFile reports a method or constructor that a class this file
+// writes declares - this class, or one nested with it in the class at the
+// top - other than an anonymous or local class's.
+func (d *bodyDecompiler) declaredInThisFile(owner, name, descriptor string) bool {
+	top := func(binary string) string {
+		if cut := strings.IndexByte(binary, '$'); cut >= 0 {
+			return binary[:cut]
+		}
+		return binary
+	}
+	if top(owner) != top(d.classFile.ThisClass) {
+		return false
+	}
+	if cut := strings.LastIndexByte(owner, '$'); cut >= 0 && cut+1 < len(owner) && owner[cut+1] >= '0' && owner[cut+1] <= '9' {
+		return false
+	}
+	declaring := d.classFile
+	if owner != d.classFile.ThisClass {
+		read, ok := SiblingClass(d.classFile.Siblings, owner)
+		if !ok {
+			return false
+		}
+		declaring = read
+	}
+	return slices.ContainsFunc(declaring.Methods, func(one Member) bool {
+		return one.Name == name && one.Descriptor == descriptor
+	})
+}
+
 // callArguments pops a call's arguments, coerced to the parameter types of
 // its descriptor. A literal `null` where `Object` is declared is cast - except
 // on a call whose receiver (when the call has one) is itself a call: that
@@ -3855,7 +3899,7 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 // the cast would not compile; without it another overload may be taken. That
 // is a refusal. A `new` is no such receiver: the allocation names its type
 // arguments itself.
-func (d *bodyDecompiler) callArguments(descriptor string, hasReceiver bool) ([]string, error) {
+func (d *bodyDecompiler) callArguments(owner, name, descriptor string, hasReceiver bool) ([]string, error) {
 	params := parameterSlots(descriptor, true)
 	receiverIsCall := false
 	if at := len(d.stack) - len(params) - 1; hasReceiver && at >= 0 {
@@ -3878,8 +3922,15 @@ func (d *bodyDecompiler) callArguments(descriptor string, hasReceiver bool) ([]s
 		// narrower than what source declared: javac then binds another
 		// overload (`Object x = s; log(x);` with `log(CharSequence)` beside
 		// `log(Object)`). Passed as the type the call was compiled against,
-		// it binds the same one; a widening cast compiles to nothing.
+		// it binds the same one; a widening cast compiles to nothing. Only
+		// for a method one of the classes this file writes declares, whose
+		// members are written erased: one of a library keeps its type
+		// arguments, which an erased type does not satisfy (`a.compareTo((Enum)
+		// b)` - inherited from Enum - or `List.of((Object) x)`), and may take a
+		// type this class cannot name. Not the constructor of an anonymous
+		// class: what it is handed are its captures, read back by name.
 		if guessed, ok := d.byName[value.Text]; ok && text == value.Text && !guessed.Authoritative &&
+			d.declaredInThisFile(owner, name, descriptor) &&
 			!primitiveTypeNames[target] && !primitiveTypeNames[guessed.Type] &&
 			sourceTypeText(target, d.self()) != guessed.Type {
 			text = "(" + sourceTypeText(target, d.self()) + ") " + text
@@ -4610,10 +4661,31 @@ func (d *bodyDecompiler) anonymousBody(
 	}
 	// What is left is the superclass constructor's, which source wrote inside
 	// the `new Super(..) { .. }` - an interface's `new` takes none.
-	var kept []string
+	var kept, keptTypes []string
+	params := descriptorParameters(target.Descriptor)
+	if outer != nil && len(params) > 0 {
+		params = params[1:]
+	}
 	for i, arg := range args {
 		if !taken[i] {
 			kept = append(kept, arg)
+			if i < len(params) {
+				keptTypes = append(keptTypes, params[i])
+			}
+		}
+	}
+	// What goes on to `super(..)` binds the superclass's constructor as any
+	// argument binds a call, and a variable whose type is a guess is passed
+	// as the type it was compiled against (see callArguments).
+	if len(keptTypes) == len(kept) &&
+		d.declaredInThisFile(anonymous.SuperClass, "<init>", "("+strings.Join(keptTypes, "")+")V") {
+		for i, arg := range kept {
+			target, _ := DescriptorType(keptTypes[i], 0)
+			if guessed, ok := d.byName[arg]; ok && !guessed.Authoritative &&
+				!primitiveTypeNames[target] && !primitiveTypeNames[guessed.Type] &&
+				sourceTypeText(target, d.self()) != guessed.Type {
+				kept[i] = "(" + sourceTypeText(target, d.self()) + ") " + arg
+			}
 		}
 	}
 	// A generic supertype is written with its type arguments - `new
@@ -5032,7 +5104,7 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 			outer = &value
 		}
 	}
-	args, err := d.callArguments(target.Descriptor, false)
+	args, err := d.callArguments(target.Owner, target.Name, target.Descriptor, false)
 	if err != nil {
 		return err
 	}
@@ -6073,10 +6145,44 @@ func (d *bodyDecompiler) finallyStatement(region *finallyRegion) (int, error) {
 			}
 		}
 	}
+	// Of the ways out that go on to different places, the ones that land on a
+	// loop's own edge are its `break`s and `continue`s; what is left, if
+	// anything, is where the statement ends - and where the body stops, or
+	// the way through that copy runs on into the code after the statement as
+	// if it were the body's.
+	stop, follow := region.EndPc, region.EndPc
+	if region.EndPc == region.HandlerPc {
+		follow = exitBlock
+		// Only a jump to where a loop goes on or ends is one of its own: a
+		// latch that holds the rest of the body - `print(s); i++;` before the
+		// jump back - is the code after this statement.
+		leaves := func(at int) bool {
+			for _, entered := range d.active {
+				if entered.ContinueTarget == at || entered.Loop.Follow == at {
+					return true
+				}
+			}
+			return false
+		}
+		for _, copyStart := range region.Targets {
+			copied := d.blocks[copyStart]
+			jump := copied.Instructions[len(copied.Instructions)-1].Arg
+			if leaves(copyStart) || leaves(jump) {
+				continue
+			}
+			if follow != exitBlock {
+				return 0, bail("a finally with more than one way out")
+			}
+			follow = copyStart
+		}
+		if follow != exitBlock {
+			stop = follow
+		}
+	}
 	d.activeFinallys[region] = true
 	// opening: the body begins where the statement does, and where that is also
 	// a loop's header the first block is the body, not a `continue` into it.
-	body, err := d.capture(func() error { return d.structureFrom(region.StartPc, region.EndPc, true) })
+	body, err := d.capture(func() error { return d.structureFrom(region.StartPc, stop, true) })
 	delete(d.activeFinallys, region)
 	if err != nil {
 		return 0, err
@@ -6108,24 +6214,6 @@ func (d *bodyDecompiler) finallyStatement(region *finallyRegion) (int, error) {
 	d.emit("} finally {")
 	*d.current = append(*d.current, stmt{Nested: &cleanup})
 	d.emit("}")
-	if region.EndPc != region.HandlerPc {
-		return region.EndPc, nil
-	}
-	// Of the ways out that go on, the ones that land on a loop's own edge are
-	// its `break`s and `continue`s; what is left, if anything, is where the
-	// statement ends.
-	follow := exitBlock
-	for _, copyStart := range region.Targets {
-		copied := d.blocks[copyStart]
-		jump := copied.Instructions[len(copied.Instructions)-1].Arg
-		if d.onLoopEdge(copyStart) || d.onLoopEdge(jump) {
-			continue
-		}
-		if follow != exitBlock {
-			return 0, bail("a finally with more than one way out")
-		}
-		follow = copyStart
-	}
 	return follow, nil
 }
 
@@ -9956,7 +10044,7 @@ func (d *bodyDecompiler) step(
 		if target.Name == "<init>" {
 			return d.construct(target)
 		}
-		args, err := d.callArguments(target.Descriptor, mnemonic != "invokestatic")
+		args, err := d.callArguments(target.Owner, target.Name, target.Descriptor, mnemonic != "invokestatic")
 		if err != nil {
 			return err
 		}

@@ -5126,7 +5126,7 @@ func TestDecompileReconstructsAFinallyWithSeveralWaysOut(t *testing.T) {
 		"try {\ntry {\nvar1 = 10 / arg0;\n} catch (java.lang.ArithmeticException e) {\nvar1 = -1;\n}\n} finally {\nn = n + 2;",
 		"try {\ntry {\nvar1 = 10 / arg0;\n} finally {\nn = n + 3;\n}\n} finally {\nn = n + 4;",
 		"throw e;\n}\nreturn var1;\n} finally {\nn = n + 7;",
-		"while (true) {\ntry {\narg0++;", "break;\n}\ncontinue;\n} finally {\nlog.append(\"W\");\n}\n}\nreturn arg0;",
+		"while (true) {\ntry {\narg0++;", "break;\n}\n} finally {\nlog.append(\"W\");\n}\n}\nreturn arg0;",
 		"continue;\n}\nif (var5 < 0) {\nbreak;", "var6 = -var1;\nreturn var6;\n} else {\nvar1 = var1 + var5;\n}\n} finally {\nlog.append(\"R\");",
 	} {
 		if !strings.Contains(source, want) {
@@ -6167,7 +6167,29 @@ public class Names {
   static void log(CharSequence o) { System.out.print("CS:" + o + " "); }
   static CharSequence mk() { return "m"; }
   static void f() { CharSequence s = mk(); Object x = s; log(x); log(s); }
-  public static void main(String[] z) { f(); System.out.println(); }
+  static class Base { Base(Object o) { System.out.print("BO "); } Base(CharSequence o) { System.out.print("BC "); } void hi() { } }
+  static void g() { Object x = mk(); Base b = new Base(x) { void hi() { System.out.print("hi "); } }; b.hi(); }
+  public static void main(String[] z) { f(); g(); System.out.println(); }
+}`, true, false},
+		// From the review of those. A library method keeps its type arguments,
+		// so a guessed variable passed to one is not cast to the erased type
+		// the call was compiled against. A finally whose ways out go to a
+		// loop's end and on to the rest of the body ends where the latter
+		// copy goes on - the rest of the body is not the try's.
+		{"LibraryArguments", `import java.util.*;
+public class LibraryArguments {
+  enum Color { RED, GREEN }
+  static int cmp(Color a, Color b) { Color x = a; return x.compareTo(b); }
+  static String joined(String a, String b) { String x = a; return String.join(",", List.of(x, b)); }
+  static String orElse(String a, String def) { String d = def; return Optional.ofNullable(a).orElse(d); }
+  public static void main(String[] z) { System.out.println(cmp(Color.RED, Color.GREEN) + " " + joined("a", "b") + " " + orElse(null, "d")); }
+}`, true, false},
+		{"FinallyBreakInLoop", `public class FinallyBreakInLoop {
+  static String s = "init";
+  static void f(int k) {
+    for (int i = 0; i < 2; i++) { try { if (k == 0) break; } finally { s = "fin" + k; } System.out.print(s + " "); }
+  }
+  public static void main(String[] z) { for (int k = 0; k < 3; k++) f(k); System.out.println(); }
 }`, true, false},
 	}
 	for _, c := range cases {

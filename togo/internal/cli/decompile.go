@@ -128,7 +128,7 @@ func (w *writers) decide(i int) {
 		for w.inside[top] >= 0 {
 			top = w.inside[top]
 		}
-		if level, _, written := w.chain(i, outer, w.lookup(top)); written &&
+		if level, _, written, _ := w.chain(i, outer, w.lookup(top)); written &&
 			level+w.level[outer] <= compiler.NestedDepth {
 			w.inside[i], w.level[i] = outer, level+w.level[outer]
 		}
@@ -167,8 +167,9 @@ func (w *writers) declared(i int) bool {
 	for w.inside[top] >= 0 {
 		top = w.inside[top]
 	}
-	if _, declared, _ := w.chain(i, outer, w.lookup(top)); declared {
-		return true
+	_, declared, _, read := w.chain(i, outer, w.lookup(top))
+	if declared || read {
+		return declared
 	}
 	// A class in between that cannot be read leaves the chain unread; the
 	// first step down from the class of the run is still a declared one.
@@ -195,8 +196,9 @@ func (w *writers) ancestor(i int) (int, bool) {
 // chain follows file i's class down from the class of outer, one `$` at a
 // time, each a class the one before declares, read through lookup. It
 // reports how many levels down file i's class is, whether the declarations
-// lead there, and whether the lookup reads this very file for it.
-func (w *writers) chain(i, outer int, lookup compiler.Siblings) (level int, declared, same bool) {
+// lead there, whether the lookup reads this very file for it, and whether
+// every class in between could be read to say so.
+func (w *writers) chain(i, outer int, lookup compiler.Siblings) (level int, declared, same, read bool) {
 	class, declares := w.files[i].class, w.files[outer].nested
 	at := len(w.files[outer].class)
 	for level = 1; ; level++ {
@@ -206,20 +208,20 @@ func (w *writers) chain(i, outer int, lookup compiler.Siblings) (level int, decl
 			name = class[:at+1+next]
 		}
 		if !slices.Contains(declares, name) {
-			return 0, false, false
+			return 0, false, false, true
 		}
 		found, ok := lookup(name)
 		if name == class {
-			return level, true, ok && bytes.Equal(found, w.files[i].bytes)
+			return level, true, ok && bytes.Equal(found, w.files[i].bytes), true
 		}
 		if !ok {
-			return 0, false, false
+			return 0, false, false, false
 		}
-		read, err := compiler.ReadClassFile(found)
+		parsed, err := compiler.ReadClassFile(found)
 		if err != nil {
-			return 0, false, false
+			return 0, false, false, false
 		}
-		declares, at = compiler.NestedClasses(read), at+1+next
+		declares, at = compiler.NestedClasses(parsed), at+1+next
 	}
 }
 
