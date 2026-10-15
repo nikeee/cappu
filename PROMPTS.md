@@ -645,3 +645,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-10-15 12:50 — create issues in the repository that capture the TODOs for proper bsp support
 - 2026-10-15 12:55 — create labels for dap, bsp, mcp, lsp and so on
 - 2026-10-15 12:57 — label the issues accordignly
+- 2026-10-15 13:05 — are there TODOs for mcp and dap? open issues for them as well
