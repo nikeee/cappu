@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Port of src/compiler/decompile.test.ts (tiers 2 and 3). The text baselines are
@@ -4161,7 +4163,11 @@ func runJava(t *testing.T, classPath, name string) string {
 // asserts have to run.
 func runJavaWith(t *testing.T, classPath, name string, flags ...string) string {
 	t.Helper()
-	out, err := exec.Command("java", append(append(flags, "-cp", classPath), name)...).Output()
+	// A reconstruction that loops where the original ends would otherwise
+	// hold the whole run until go test gives up, and leave the JVM behind.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "java", append(append(flags, "-cp", classPath), name)...).Output()
 	if err != nil {
 		t.Fatalf("java: %v", err)
 	}
@@ -6005,6 +6011,52 @@ public class Names {
   }
   public static void main(String[] z) { int[] ks = {1, 2, 1}; System.out.println(" " + both(ks) + " " + last(ks) + " " + later(ks)); }
 }`, false, true},
+		// From the review of those. A finally's cleanup is decided by the copy
+		// of it on the way off the range: a variable there that reuses an
+		// ended pattern's slot is another one. A store into the pattern's
+		// variable followed by another store in the same block still reaches
+		// the handler with its value, and a catch's handler is guarded by the
+		// finally around it too.
+		{"FinallyCopies", `public class FinallyCopies {
+  static void log(CharSequence c) { System.out.print("CS:" + c + " "); }
+  static void log(StringBuilder c) { System.out.print("SB:" + c + " "); }
+  static void boomOn(String s) { if (s.length() > 1) throw new IllegalStateException(); }
+  static int other(Object o) {
+    int r = 0;
+    { if (!(o instanceof CharSequence s) || s.isEmpty()) return -1; r = s.length(); }
+    StringBuilder v;
+    try { r++; } finally { v = new StringBuilder("n" + r); log(v); }
+    return r;
+  }
+  static int boxed(Object o) {
+    int r = 0;
+    { if (!(o instanceof String s) || s.isEmpty()) return -1; r = s.length(); }
+    Integer v;
+    try { r++; } finally { v = r * 2; System.out.print(v); }
+    return r;
+  }
+  static void twice(Object o) { if (!(o instanceof String s) || s.isEmpty()) return; try { s = s + "!"; boomOn(s); s = s + "?"; } catch (RuntimeException e) { System.out.print(s); } }
+  static void catchInFinally(Object o) {
+    if (!(o instanceof String s) || s.isEmpty()) return;
+    try { boomOn(s); } catch (IllegalStateException e) { s = s + "!"; throw new RuntimeException(s); } finally { System.out.print("[" + s + "]"); }
+  }
+  // A finally's cleanup stores on the way off the range too, where it is
+  // not written: a read after the statement is reached through that store -
+  // or past it, where the cleanup branches.
+  static String plain(String a) { String s; try { log(a); } finally { s = a + "!"; } return s; }
+  static String branching(Object o, int k) {
+    if (o instanceof String s && !s.isEmpty()) { try { boomOn(s); } finally { if (k > 0) s = s + "?"; } return s; }
+    return "-";
+  }
+  public static void main(String[] z) {
+    System.out.print(plain("q") + branching("y", 1) + branching("z", 0) + " ");
+    System.out.print(other("abc") + " " + other(1) + " " + boxed("ab") + " ");
+    twice("x"); twice(1);
+    catchInFinally("x");
+    try { catchInFinally("yy"); } catch (RuntimeException e) { System.out.print(e.getMessage()); }
+    System.out.println();
+  }
+}`, true, false},
 	}
 	for _, c := range cases {
 		for _, debug := range []bool{false, true} {

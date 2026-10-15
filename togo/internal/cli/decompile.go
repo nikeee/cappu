@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
+	"slices"
 	"syscall"
 
 	"github.com/nikeee/cappu/internal/compiler"
@@ -76,27 +76,26 @@ func siblingsFor(file string, b []byte, named map[string]string) compiler.Siblin
 	}
 }
 
-// declaringFile is the file of this run whose class declares a nested one.
-type declaringFile struct {
-	file  string
-	bytes []byte
-}
-
 // writtenInsideAnother reports a class another file of this run declares and
-// writes: the one that class reads for it is this very file. One it reads
-// from elsewhere - another build beside it - leaves this one to be written
-// on its own, or it would be lost without a word.
-func writtenInsideAnother(b []byte, declared map[string]declaringFile, named map[string]string) bool {
+// writes: one of the classes declaring it reads this very file for it. One
+// they read from elsewhere - another build beside them - is written on its
+// own instead, which is said, or it would be lost without a word.
+func writtenInsideAnother(file string, b []byte, declaredBy map[string][]compiler.Siblings) bool {
 	read, err := compiler.ReadClassFile(b)
 	if err != nil {
 		return false
 	}
-	outer, ok := declared[read.ThisClass]
+	outers, ok := declaredBy[read.ThisClass]
 	if !ok {
 		return false
 	}
-	found, ok := siblingsFor(outer.file, outer.bytes, named)(read.ThisClass)
-	return ok && bytes.Equal(found, b)
+	for _, siblings := range outers {
+		if found, ok := siblings(read.ThisClass); ok && bytes.Equal(found, b) {
+			return true
+		}
+	}
+	fmt.Fprintf(os.Stderr, "cappu: %s: written on its own: the class that declares it reads another copy, or none\n", file)
+	return false
 }
 
 func RunDecompile(files []string, disasm bool) int {
@@ -104,25 +103,30 @@ func RunDecompile(files []string, disasm bool) int {
 		fmt.Fprint(os.Stderr, "usage: cappu decompile <file.class> ...\n")
 		return 2
 	}
-	// A file named twice is one file.
-	seen := map[string]bool{}
+	// A file named twice - by another path, a link - is one file.
+	var kept []os.FileInfo
 	unique := files[:0:0]
 	for _, file := range files {
-		key := file
-		if abs, err := filepath.Abs(file); err == nil {
-			key = abs
+		info, err := os.Stat(file)
+		if err == nil && slices.ContainsFunc(kept, func(one os.FileInfo) bool { return os.SameFile(one, info) }) {
+			continue
 		}
-		if !seen[key] {
-			seen[key] = true
-			unique = append(unique, file)
+		if err == nil {
+			kept = append(kept, info)
 		}
+		unique = append(unique, file)
 	}
 	files = unique
 	// A class the file of another one declares is not written twice: two
 	// declarations of one type do not compile together. Only what that other
 	// file actually writes is skipped - a name that merely looks nested is
 	// not, or the class would be lost without a word.
-	declared, named := map[string]declaringFile{}, map[string]string{}
+	type outer struct {
+		file  string
+		bytes []byte
+	}
+	var outers []outer
+	declared, named := map[string][]int{}, map[string]string{}
 	if !disasm {
 		for _, file := range files {
 			b, err := os.ReadFile(file)
@@ -138,17 +142,30 @@ func RunDecompile(files []string, disasm bool) int {
 			} else {
 				named[read.ThisClass] = file
 			}
-			for _, name := range compiler.NestedClasses(read) {
-				if _, ok := declared[name]; !ok {
-					declared[name] = declaringFile{file, b}
+			if nested := compiler.NestedClasses(read); len(nested) > 0 {
+				outers = append(outers, outer{file, b})
+				for _, name := range nested {
+					declared[name] = append(declared[name], len(outers)-1)
 				}
 			}
+		}
+	}
+	// Each declaring class's own lookup, built once - every one of its
+	// nested classes asks it.
+	resolvers := make([]compiler.Siblings, len(outers))
+	for i, one := range outers {
+		resolvers[i] = siblingsFor(one.file, one.bytes, named)
+	}
+	declaredBy := map[string][]compiler.Siblings{}
+	for name, indices := range declared {
+		for _, i := range indices {
+			declaredBy[name] = append(declaredBy[name], resolvers[i])
 		}
 	}
 	failed := false
 	for _, file := range files {
 		bytes, err := os.ReadFile(file)
-		if err == nil && writtenInsideAnother(bytes, declared, named) {
+		if err == nil && writtenInsideAnother(file, bytes, declaredBy) {
 			continue
 		}
 		if err == nil {

@@ -3159,12 +3159,10 @@ type bodyDecompiler struct {
 	methodFollowOf map[int]int
 	// dominators over the graph the throwing edges are in, for a `try`'s own end.
 	dominators map[int]map[int]bool
-	// finallyDominators are the dominators of flowGraph, with the edges into
-	// each finally's handler too, which the copy its cleanup is written from
-	// sits in.
-	finallyDominators map[int]map[int]bool
 	// flow is flowGraph's, once built.
 	flow map[int]*block
+	// ordered is every instruction of the method in order, once read.
+	ordered []Instruction
 	// active are the loops being written right now, innermost last.
 	active []activeLoop
 	// switches are the `switch` statements being written right now, innermost last.
@@ -5545,7 +5543,7 @@ func (d *bodyDecompiler) storeAsValue(slot, scopePc int, value expr, declaredTyp
 	if err != nil {
 		return err
 	}
-	target.StoreBlocks[d.currentBlock] = true
+	d.storedIn(target, slot, scopePc)
 	text, err := d.coerceInto(value, target.Type)
 	if err != nil {
 		return err
@@ -5605,7 +5603,7 @@ func (d *bodyDecompiler) store(slot, scopePc int, value expr, declaredType strin
 			return bail("an assignment to a variable that is already on the stack")
 		}
 	}
-	target.StoreBlocks[d.currentBlock] = true
+	d.storedIn(target, slot, scopePc)
 	text := value.Text
 	if !linked {
 		text, err = d.coerceInto(value, target.Type)
@@ -6508,8 +6506,12 @@ func (d *bodyDecompiler) livesPast(one *local, pc int) bool {
 func (d *bodyDecompiler) flowGraph() map[int]*block {
 	if d.flow == nil {
 		guarded := append([]monitorRegion{}, d.monitors...)
+		// A finally guards the pieces of its range javac split around the
+		// copies - a catch's handler among them - not just where it ends.
 		for _, one := range d.finallys {
-			guarded = append(guarded, monitorRegion{StartPc: one.StartPc, EndPc: one.EndPc, HandlerPc: one.HandlerPc})
+			for _, piece := range one.Ranges {
+				guarded = append(guarded, monitorRegion{StartPc: piece[0], EndPc: piece[1], HandlerPc: one.HandlerPc})
+			}
 		}
 		d.flow = withExceptionEdges(d.blocks, d.regions, guarded)
 	}
@@ -6522,23 +6524,91 @@ func (d *bodyDecompiler) flowGraph() map[int]*block {
 // variable after a `try` the test sits in is too, and javac reuses the slot
 // for it. A store the binding shares a read with is the same variable - what
 // reads the slot afterwards reads either, through a catch or a finally too.
-// A finally's cleanup, written from
-// the copy that rethrows, reads nothing after its store, and there being
-// under the binding - with the cleanup reached from its protected range - is
-// what says it.
+//
+// A finally's cleanup is written from the copy in the handler, which
+// rethrows and reads nothing after the store. javac lays the same
+// instructions out again on every way off the protected range, and the copy
+// there goes on to whatever reads the slot next: the store at the same place
+// in one of those copies is what answers.
 func (d *bodyDecompiler) assignsPattern(pattern *local, slot, pc int) bool {
 	if d.sharesRead(pattern, slot, pc-1) {
 		return true
 	}
-	for _, region := range d.finallys {
-		if d.currentBlock >= region.HandlerPc && d.currentBlock < region.BodyEnd {
-			if d.finallyDominators == nil {
-				d.finallyDominators = dominators(d.flowGraph(), d.entryPc)
-			}
-			return d.finallyDominators[d.currentBlock][pattern.Binding]
+	for _, store := range d.finallyCopies(slot, pc) {
+		if d.sharesReadAt(pattern, slot, d.blockAt(store.Pc), store.Pc) {
+			return true
 		}
 	}
 	return false
+}
+
+// storedIn records the block a store to the variable sits in - and, for a
+// finally's cleanup, the blocks of the copies on the ways off its range,
+// which are not written but do store: a read after the statement is
+// reached through them.
+func (d *bodyDecompiler) storedIn(target *local, slot, pc int) {
+	target.StoreBlocks[d.currentBlock] = true
+	for _, store := range d.finallyCopies(slot, pc) {
+		target.StoreBlocks[d.blockAt(store.Pc)] = true
+	}
+}
+
+// finallyCopies is, for a store into slot that a finally's cleanup makes - in
+// the handler's copy, which is what is written, ending before pc - the same
+// store in each copy javac laid out on a way off the protected range. The
+// handler opens with the store of the exception, which no copy has; after
+// it, instruction for instruction, the copies match.
+func (d *bodyDecompiler) finallyCopies(slot, pc int) []Instruction {
+	for _, region := range d.finallys {
+		if d.currentBlock < region.HandlerPc || d.currentBlock >= region.BodyEnd {
+			continue
+		}
+		handler := d.instructionsFrom(region.HandlerPc)
+		at := -1
+		for i, one := range handler {
+			if one.Pc >= pc {
+				break
+			}
+			if isOneOf(opBase(one.Mnemonic), "ilfda", "store") && slotOf(one) == slot {
+				at = i
+			}
+		}
+		if at < 1 {
+			return nil
+		}
+		var stores []Instruction
+		for _, copyStart := range region.Copies {
+			copied := d.instructionsFrom(copyStart)
+			if at-1 < len(copied) && copied[at-1].Mnemonic == handler[at].Mnemonic && slotOf(copied[at-1]) == slot {
+				stores = append(stores, copied[at-1])
+			}
+		}
+		return stores
+	}
+	return nil
+}
+
+// instructionsFrom is the method's instructions from pc on, in order.
+func (d *bodyDecompiler) instructionsFrom(pc int) []Instruction {
+	if d.ordered == nil {
+		for _, b := range d.blocks {
+			d.ordered = append(d.ordered, b.Instructions...)
+		}
+		slices.SortFunc(d.ordered, func(a, b Instruction) int { return a.Pc - b.Pc })
+	}
+	at, _ := slices.BinarySearchFunc(d.ordered, pc, func(one Instruction, pc int) int { return one.Pc - pc })
+	return d.ordered[at:]
+}
+
+// blockAt is the start of the block that holds pc.
+func (d *bodyDecompiler) blockAt(pc int) int {
+	found := -1
+	for start := range d.blocks {
+		if start <= pc && start > found {
+			found = start
+		}
+	}
+	return found
 }
 
 // reachesArm reports whether one arm of a branch runs into the other, which
@@ -8731,12 +8801,18 @@ func (d *bodyDecompiler) reachesAvoiding(target int, stores map[int]bool) bool {
 // every path to where it is read. That is the one sign, without a debug table,
 // that two stores are one variable.
 func (d *bodyDecompiler) sharesRead(entry *local, slot, pc int) bool {
+	return d.sharesReadAt(entry, slot, d.currentBlock, pc)
+}
+
+// sharesReadAt is sharesRead for a store in the block at, which need not be
+// the one being written.
+func (d *bodyDecompiler) sharesReadAt(entry *local, slot, at, pc int) bool {
 	if len(entry.StoreBlocks) == 0 {
 		return false
 	}
 	theirs := map[int]bool{}
 	for start := range entry.StoreBlocks {
-		if start == d.currentBlock {
+		if start == at {
 			continue
 		}
 		if d.blocks[start] == nil {
@@ -8749,9 +8825,25 @@ func (d *bodyDecompiler) sharesRead(entry *local, slot, pc int) bool {
 	if len(theirs) == 0 {
 		return false
 	}
-	// This block's own tail after the store, then what follows it.
-	block := d.blocks[d.currentBlock]
+	// This block's own tail after the store, then what follows it - the
+	// handlers too, which what throws before a second store reaches with this
+	// one's value.
+	block, flow := d.blocks[at], d.flowGraph()[at]
 	if block == nil {
+		return false
+	}
+	var handlers []int
+	for _, successor := range flow.Successors {
+		if !containsInt(block.Successors, successor) {
+			handlers = append(handlers, successor)
+		}
+	}
+	shared := func(starts []int) bool {
+		for read := range d.readsBeforeStore(starts, slot) {
+			if theirs[read] {
+				return true
+			}
+		}
 		return false
 	}
 	for _, instruction := range block.Instructions {
@@ -8763,15 +8855,10 @@ func (d *bodyDecompiler) sharesRead(entry *local, slot, pc int) bool {
 			return true
 		}
 		if isOneOf(base, "ilfda", "store") && slotOf(instruction) == slot {
-			return false
+			return shared(handlers)
 		}
 	}
-	for read := range d.readsBeforeStore(d.flowGraph()[d.currentBlock].Successors, slot) {
-		if theirs[read] {
-			return true
-		}
-	}
-	return false
+	return shared(flow.Successors)
 }
 
 // readsBeforeStore is the pcs of the loads of the slot some path from the
@@ -8788,15 +8875,20 @@ func (d *bodyDecompiler) readsBeforeStore(starts []int, slot int) map[int]bool {
 			continue
 		}
 		seen[at] = true
-		stored := false
+		// A finally's copy on a way off its range is one block even where the
+		// cleanup branches: a store past a jump in it may not run.
+		stored, branched := false, false
 		for _, instruction := range flow[at].Instructions {
 			base := opBase(instruction.Mnemonic)
 			if (isOneOf(base, "ilfda", "load") || base == "iinc") && slotOf(instruction) == slot {
 				reads[instruction.Pc] = true
 			}
-			if isOneOf(base, "ilfda", "store") && slotOf(instruction) == slot {
+			if isOneOf(base, "ilfda", "store") && slotOf(instruction) == slot && !branched {
 				stored = true
 				break
+			}
+			if conditionalBranches[instruction.Mnemonic] || isGotoMnemonic(instruction.Mnemonic) {
+				branched = true
 			}
 		}
 		if !stored {

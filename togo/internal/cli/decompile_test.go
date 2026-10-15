@@ -242,8 +242,9 @@ func TestDecompileKeepsTwoBuildsOfOneClassApart(t *testing.T) {
 		files = append(files, filepath.Join(classes, "p", "Foo.class"), filepath.Join(classes, "p", "Foo$In.class"))
 	}
 	code, stdout, stderr := runDecompile(t, files...)
-	if code != 0 || !strings.Contains(stdout, "return 1;") || !strings.Contains(stdout, "return 2;") {
-		t.Errorf("expected each build's own nested class (exit %d):\n%s\n%s", code, stdout, stderr)
+	if code != 0 || !strings.Contains(stdout, "return 1;") || !strings.Contains(stdout, "return 2;") ||
+		strings.Count(stdout, "int v()") != 2 {
+		t.Errorf("expected each build's own nested class, once (exit %d):\n%s\n%s", code, stdout, stderr)
 	}
 }
 
@@ -281,6 +282,9 @@ func TestDecompileWritesEveryNamedNestedClass(t *testing.T) {
 		}
 		nested[v] = moved
 	}
+	if err := os.Symlink(filepath.Join(dir, "only1"), filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
 	outer := filepath.Join(dir, "v1", "p", "Foo.class")
 	if err := os.Remove(filepath.Join(dir, "v1", "p", "Foo$In.class")); err != nil {
 		t.Fatal(err)
@@ -292,6 +296,7 @@ func TestDecompileWritesEveryNamedNestedClass(t *testing.T) {
 	}{
 		{"two copies, neither beside", []string{outer, nested["1"], nested["2"]}, []string{"return 1;", "return 2;"}},
 		{"one file named twice", []string{outer, nested["1"], nested["1"]}, []string{"return 1;"}},
+		{"one file named by a link too", []string{outer, nested["1"], filepath.Join(dir, "link", "Foo$In.class")}, []string{"return 1;"}},
 		{"another build than the one beside", []string{filepath.Join(dir, "v2", "p", "Foo.class"), nested["1"]}, []string{"return 1;", "return 2;"}},
 	} {
 		code, stdout, stderr := runDecompile(t, c.files...)
