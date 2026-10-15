@@ -509,9 +509,15 @@ notifications (`build/logMessage` for the JUnit run, `run/printStdout` /
 `run/printStderr` for `buildTarget/run`). `bspserver` imports `cli` for
 `SelectMainClass` / `DetectMainClasses`, so `cli` must not import `bspserver`:
 `cappu bsp --install` lives in `cmd/cappu` and calls
-`bspserver.WriteConnectionFile`. Requests are dispatched one at a time, which
-is why a running program gets no stdin (`run/readStdin`) and nothing can be
-cancelled yet.
+`bspserver.WriteConnectionFile`. compile / test / run register with
+`lsp.Conn.OnRequestAsync`: each runs on its own goroutine with a context that
+`$/cancelRequest` (or the end of `Run`) cancels, so the read loop stays free to
+deliver `run/readStdin` to the running program. They share the output tree and
+the diagnostics bookkeeping, so a server mutex still runs them one at a time;
+async buys responsiveness, not parallel builds. A cancelled request answers
+normally with StatusCode 3 (BSP's Cancelled) rather than a JSON-RPC error, and
+the child is killed through `exec.CommandContext`; javac itself takes no
+context, so a cancelled compile finishes before it notices.
 
 ## Source formatter (src/format -> internal/format)
 

@@ -7,6 +7,7 @@ package bspserver
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/nikeee/cappu/internal/build"
 	"github.com/nikeee/cappu/internal/cli"
@@ -34,8 +36,9 @@ var ErrExitWithoutShutdown = errors.New("exit without shutdown")
 
 // BSP StatusCode values.
 const (
-	statusOK    = 1
-	statusError = 2
+	statusOK        = 1
+	statusError     = 2
+	statusCancelled = 3
 )
 
 type targetID struct {
@@ -52,6 +55,13 @@ type Server struct {
 	reported map[string]map[string]bool
 	// mainWritten is what the last main compile wrote, for main-class detection.
 	mainWritten []string
+	// buildMu serializes compile / test / run: they run off the read loop (so
+	// `$/cancelRequest` and run/readStdin get through) but share the output
+	// tree, reported and mainWritten.
+	buildMu sync.Mutex
+	// stdin holds the running programs' stdin by originId, for run/readStdin.
+	stdinMu sync.Mutex
+	stdin   map[string]io.Writer
 }
 
 // Serve runs a session on stdio.
@@ -63,7 +73,7 @@ func Run(cfg *config.Config, r io.Reader, w io.Writer) error {
 }
 
 func newServer(cfg *config.Config) *Server {
-	return &Server{cfg: cfg, reported: map[string]map[string]bool{}}
+	return &Server{cfg: cfg, reported: map[string]map[string]bool{}, stdin: map[string]io.Writer{}}
 }
 
 func (s *Server) run(r io.Reader, w io.Writer) error {
@@ -88,9 +98,10 @@ func (s *Server) run(r io.Reader, w io.Writer) error {
 	c.OnRequest("workspace/reload", func(json.RawMessage) (any, *lsp.ResponseError) { return nil, nil })
 	c.OnRequest("buildTarget/sources", s.onSources)
 	c.OnRequest("buildTarget/javacOptions", s.onJavacOptions)
-	c.OnRequest("buildTarget/compile", s.onCompile)
-	c.OnRequest("buildTarget/test", s.onTest)
-	c.OnRequest("buildTarget/run", s.onRun)
+	c.OnRequestAsync("buildTarget/compile", s.serialized(s.onCompile))
+	c.OnRequestAsync("buildTarget/test", s.serialized(s.onTest))
+	c.OnRequestAsync("buildTarget/run", s.serialized(s.onRun))
+	c.OnNotification("run/readStdin", s.onReadStdin)
 	c.OnRequest("build/shutdown", func(json.RawMessage) (any, *lsp.ResponseError) {
 		s.shutdown = true
 		return nil, nil
@@ -103,6 +114,15 @@ func (s *Server) run(r io.Reader, w io.Writer) error {
 		}
 	})
 	return c.Run()
+}
+
+// serialized runs a build request under buildMu.
+func (s *Server) serialized(h lsp.AsyncRequestHandler) lsp.AsyncRequestHandler {
+	return func(ctx context.Context, params json.RawMessage) (any, *lsp.ResponseError) {
+		s.buildMu.Lock()
+		defer s.buildMu.Unlock()
+		return h(ctx, params)
+	}
 }
 
 // The two targets are addressed by the project directory's URI plus ?id=.
@@ -235,26 +255,33 @@ func (s *Server) compileTargets(p targetsParams) bool {
 	return true
 }
 
-func status(ok bool) int {
-	if ok {
+// status is a build request's StatusCode; cancelled wins over the outcome.
+func status(ctx context.Context, ok bool) int {
+	switch {
+	case ctx.Err() != nil:
+		return statusCancelled
+	case ok:
 		return statusOK
 	}
 	return statusError
 }
 
-func (s *Server) onCompile(params json.RawMessage) (any, *lsp.ResponseError) {
+// ponytail: a cancelled compile still finishes its javac run (the compile
+// pipeline takes no context); the cancellation shows in the status code, and
+// test / run skip starting their child.
+func (s *Server) onCompile(ctx context.Context, params json.RawMessage) (any, *lsp.ResponseError) {
 	p := decode(params)
-	return map[string]any{"originId": p.OriginID, "statusCode": status(s.compileTargets(p))}, nil
+	return map[string]any{"originId": p.OriginID, "statusCode": status(ctx, s.compileTargets(p))}, nil
 }
 
 // onTest compiles main + test and runs the JUnit launcher over the whole test
 // tree (BSP's per-class TestParams data is ignored), its output streamed as
 // build/logMessage. With testOptions.coverage on, the JaCoCo agent is attached
 // like `cappu test` does.
-func (s *Server) onTest(params json.RawMessage) (any, *lsp.ResponseError) {
+func (s *Server) onTest(ctx context.Context, params json.RawMessage) (any, *lsp.ResponseError) {
 	p := decode(params)
 	result := func(ok bool) (any, *lsp.ResponseError) {
-		return map[string]any{"originId": p.OriginID, "statusCode": status(ok)}, nil
+		return map[string]any{"originId": p.OriginID, "statusCode": status(ctx, ok)}, nil
 	}
 	isTest := false
 	for _, id := range p.Targets {
@@ -263,7 +290,7 @@ func (s *Server) onTest(params json.RawMessage) (any, *lsp.ResponseError) {
 	if !isTest {
 		return result(true) // main has no tests
 	}
-	if !s.compileTargets(targetsParams{Targets: []targetID{s.id("test")}, OriginID: p.OriginID}) {
+	if !s.compileTargets(targetsParams{Targets: []targetID{s.id("test")}, OriginID: p.OriginID}) || ctx.Err() != nil {
 		return result(false)
 	}
 	launcher, err := testing.ConsoleLauncherJar(s.cfg)
@@ -279,7 +306,7 @@ func (s *Server) onTest(params json.RawMessage) (any, *lsp.ResponseError) {
 		return result(false)
 	}
 	out := newLineWriter(func(line string) { s.log(p.OriginID, 4, line) })
-	cmd := exec.Command(testing.ResolveJava(s.cfg), testing.TestRunArgs(s.cfg, launcher, agent)...)
+	cmd := exec.CommandContext(ctx, testing.ResolveJava(s.cfg), testing.TestRunArgs(s.cfg, launcher, agent)...)
 	cmd.Stdout, cmd.Stderr = out, out
 	err = cmd.Run()
 	out.flush()
@@ -294,17 +321,18 @@ type runParams struct {
 
 // onRun compiles main and runs its main class (compilerOptions.mainClass, or
 // the single class declaring main) with the request's arguments, streaming the
-// program's output as run/printStdout / run/printStderr.
-func (s *Server) onRun(params json.RawMessage) (any, *lsp.ResponseError) {
+// program's output as run/printStdout / run/printStderr and feeding it
+// run/readStdin. Cancelling the request kills the program.
+func (s *Server) onRun(ctx context.Context, params json.RawMessage) (any, *lsp.ResponseError) {
 	var p runParams
 	_ = json.Unmarshal(params, &p)
 	if s.targetName(p.Target) != "main" {
 		return nil, &lsp.ResponseError{Code: lsp.ErrInvalidParams, Message: "only the main target can run"}
 	}
 	result := func(ok bool) (any, *lsp.ResponseError) {
-		return map[string]any{"originId": p.OriginID, "statusCode": status(ok)}, nil
+		return map[string]any{"originId": p.OriginID, "statusCode": status(ctx, ok)}, nil
 	}
-	if !s.compileTargets(targetsParams{Targets: []targetID{p.Target}, OriginID: p.OriginID}) {
+	if !s.compileTargets(targetsParams{Targets: []targetID{p.Target}, OriginID: p.OriginID}) || ctx.Err() != nil {
 		return result(false)
 	}
 	outDir := testing.MainClassesDir(s.cfg)
@@ -321,15 +349,40 @@ func (s *Server) onRun(params json.RawMessage) (any, *lsp.ResponseError) {
 		})
 	}
 	stdout, stderr := printer("run/printStdout"), printer("run/printStderr")
-	// ponytail: the program gets no stdin (run/readStdin needs a concurrent
-	// read loop; requests are dispatched one at a time).
-	cmd := exec.Command(testing.ResolveJava(s.cfg), args...)
+	cmd := exec.CommandContext(ctx, testing.ResolveJava(s.cfg), args...)
 	cmd.Dir = s.cfg.BaseDir
 	cmd.Stdout, cmd.Stderr = stdout, stderr
-	err := cmd.Run()
+	stdin, err := cmd.StdinPipe()
+	if err == nil {
+		err = cmd.Start()
+	}
+	if err == nil {
+		s.stdinMu.Lock()
+		s.stdin[p.OriginID] = stdin
+		s.stdinMu.Unlock()
+		err = cmd.Wait()
+		s.stdinMu.Lock()
+		delete(s.stdin, p.OriginID)
+		s.stdinMu.Unlock()
+	}
 	stdout.flush()
 	stderr.flush()
 	return result(s.exited(p.OriginID, err))
+}
+
+// onReadStdin writes run/readStdin's value to the stdin of the program its
+// originId started (dropped if that program is not running).
+func (s *Server) onReadStdin(params json.RawMessage) {
+	var p struct {
+		OriginID string `json:"originId"`
+		Value    string `json:"value"`
+	}
+	_ = json.Unmarshal(params, &p)
+	s.stdinMu.Lock()
+	defer s.stdinMu.Unlock()
+	if w, ok := s.stdin[p.OriginID]; ok {
+		_, _ = io.WriteString(w, p.Value)
+	}
 }
 
 // exited reports a child's outcome: success, a non-zero exit, or a failure to

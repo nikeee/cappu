@@ -215,6 +215,73 @@ func TestRunStreamsOutput(t *testing.T) {
 	}
 }
 
+// read returns the next message from the server.
+func (c *client) read() msg {
+	c.t.Helper()
+	body, err := c.framer.Read()
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	var m msg
+	_ = json.Unmarshal(body, &m)
+	return m
+}
+
+// A running program reads run/readStdin, and cancelling the request kills it:
+// the program echoes one line, then blocks on stdin until cancelled.
+func TestRunStdinAndCancel(t *testing.T) {
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("javac not available")
+	}
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "src/main/java/app/M.java"), `package app; public class M {
+  public static void main(String[] a) throws Exception {
+    var in = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
+    System.out.println("ready");
+    System.out.println("got " + in.readLine());
+    in.readLine(); } }`)
+	c := start(t, dir)
+	c.call("build/initialize", map[string]any{})
+	c.send(map[string]any{"jsonrpc": "2.0", "id": 99, "method": "buildTarget/run", "params": map[string]any{
+		"target": targetID{URI: pathToURI(dir) + "?id=main"}, "originId": "r",
+	}})
+	printed := func() string {
+		for {
+			m := c.read()
+			if m.Method == "run/printStdout" {
+				var p struct {
+					Message string `json:"message"`
+				}
+				_ = json.Unmarshal(m.Params, &p)
+				return p.Message
+			}
+			if m.Method == "" {
+				t.Fatalf("run ended early: %s", m.Result)
+			}
+		}
+	}
+	if got := printed(); got != "ready\n" {
+		t.Fatalf("got %q", got)
+	}
+	c.send(map[string]any{"jsonrpc": "2.0", "method": "run/readStdin", "params": map[string]any{"originId": "r", "value": "line\n"}})
+	if got := printed(); got != "got line\n" {
+		t.Fatalf("got %q", got)
+	}
+	c.send(map[string]any{"jsonrpc": "2.0", "method": "$/cancelRequest", "params": map[string]any{"id": 99}})
+	for {
+		if m := c.read(); m.Method == "" {
+			var r struct {
+				StatusCode int `json:"statusCode"`
+			}
+			_ = json.Unmarshal(m.Result, &r)
+			if string(m.ID) != "99" || r.StatusCode != statusCancelled {
+				t.Fatalf("response %s: %s", m.ID, m.Result)
+			}
+			return
+		}
+	}
+}
+
 func TestLineWriter(t *testing.T) {
 	var got []string
 	w := newLineWriter(func(l string) { got = append(got, l) })

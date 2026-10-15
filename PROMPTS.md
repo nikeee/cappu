@@ -641,3 +641,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-10-15 10:35 — stop after this iteration
 - 2026-10-15 11:06 — ci failed
 - 2026-10-15 12:22 — i pulled form master. you may want to merge that into your branch. thencontinue
+- 2026-10-15 12:36 — continue building bsp
+- 2026-10-15 12:50 — create issues in the repository that capture the TODOs for proper bsp support
