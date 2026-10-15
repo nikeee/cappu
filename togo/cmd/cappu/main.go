@@ -482,7 +482,13 @@ func (c *bspCmd) Run(a *appState) error {
 		return err
 	}
 	if c.Install {
-		return exit(cli.RunBspInstall(cfg))
+		path, ierr := bspserver.WriteConnectionFile(cfg)
+		if ierr != nil {
+			fmt.Fprintln(os.Stderr, "cappu:", ierr)
+			return exit(1)
+		}
+		fmt.Println(path)
+		return exit(0)
 	}
 	if serr := bspserver.Serve(cfg); serr != nil {
 		if !errors.Is(serr, bspserver.ErrExitWithoutShutdown) {

@@ -6,6 +6,7 @@
 package bspserver
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/nikeee/cappu/internal/build"
+	"github.com/nikeee/cappu/internal/cli"
 	"github.com/nikeee/cappu/internal/compile"
 	"github.com/nikeee/cappu/internal/config"
 	"github.com/nikeee/cappu/internal/lsp"
@@ -48,6 +50,8 @@ type Server struct {
 	// reported holds the files each target last published diagnostics for, so
 	// a fixed file gets an empty reset instead of keeping stale errors.
 	reported map[string]map[string]bool
+	// mainWritten is what the last main compile wrote, for main-class detection.
+	mainWritten []string
 }
 
 // Serve runs a session on stdio.
@@ -73,6 +77,7 @@ func (s *Server) run(r io.Reader, w io.Writer) error {
 			"capabilities": map[string]any{
 				"compileProvider": map[string]any{"languageIds": []string{"java"}},
 				"testProvider":    map[string]any{"languageIds": []string{"java"}},
+				"runProvider":     map[string]any{"languageIds": []string{"java"}},
 			},
 		}, nil
 	})
@@ -85,6 +90,7 @@ func (s *Server) run(r io.Reader, w io.Writer) error {
 	c.OnRequest("buildTarget/javacOptions", s.onJavacOptions)
 	c.OnRequest("buildTarget/compile", s.onCompile)
 	c.OnRequest("buildTarget/test", s.onTest)
+	c.OnRequest("buildTarget/run", s.onRun)
 	c.OnRequest("build/shutdown", func(json.RawMessage) (any, *lsp.ResponseError) {
 		s.shutdown = true
 		return nil, nil
@@ -110,7 +116,7 @@ func (s *Server) hasTests() bool {
 }
 
 func (s *Server) buildTargets() []map[string]any {
-	target := func(name string, tags []string, deps []targetID, canTest bool) map[string]any {
+	target := func(name string, tags []string, deps []targetID, isTest bool) map[string]any {
 		return map[string]any{
 			"id":            s.id(name),
 			"displayName":   name,
@@ -118,7 +124,7 @@ func (s *Server) buildTargets() []map[string]any {
 			"tags":          tags,
 			"languageIds":   []string{"java"},
 			"dependencies":  deps,
-			"capabilities":  map[string]bool{"canCompile": true, "canTest": canTest, "canRun": false, "canDebug": false},
+			"capabilities":  map[string]bool{"canCompile": true, "canTest": isTest, "canRun": !isTest, "canDebug": false},
 		}
 	}
 	targets := []map[string]any{target("main", []string{}, []targetID{}, false)}
@@ -204,12 +210,13 @@ func (s *Server) compileTargets(p targetsParams) bool {
 	if want["main"] || want["test"] {
 		var diags []compile.CompileDiagnostic
 		ok := true
+		s.mainWritten = nil
 		if sources := build.SourceJavaFiles(s.cfg); len(sources) > 0 {
 			result := compile.RunCompile(sources, compile.Options{OutDir: testing.MainClassesDir(s.cfg), Output: "classes", Config: s.cfg})
 			for _, w := range result.Warnings {
 				s.log(p.OriginID, 2, w)
 			}
-			diags, ok = result.Diagnostics, result.Success
+			diags, ok, s.mainWritten = result.Diagnostics, result.Success, result.Written
 		}
 		s.publish("main", p.OriginID, diags)
 		if !ok {
@@ -241,7 +248,9 @@ func (s *Server) onCompile(params json.RawMessage) (any, *lsp.ResponseError) {
 }
 
 // onTest compiles main + test and runs the JUnit launcher over the whole test
-// tree (BSP's per-class TestParams data is ignored).
+// tree (BSP's per-class TestParams data is ignored), its output streamed as
+// build/logMessage. With testOptions.coverage on, the JaCoCo agent is attached
+// like `cappu test` does.
 func (s *Server) onTest(params json.RawMessage) (any, *lsp.ResponseError) {
 	p := decode(params)
 	result := func(ok bool) (any, *lsp.ResponseError) {
@@ -258,25 +267,110 @@ func (s *Server) onTest(params json.RawMessage) (any, *lsp.ResponseError) {
 		return result(false)
 	}
 	launcher, err := testing.ConsoleLauncherJar(s.cfg)
+	agent := ""
+	if err == nil && s.cfg.TestOptions.Coverage {
+		if agent, err = testing.JacocoAgentJar(s.cfg); err == nil {
+			// the JaCoCo agent opens destfile but does not create parent dirs
+			err = os.MkdirAll(s.cfg.ResolvePath(s.cfg.TestOptions.ReportsDir), 0o755)
+		}
+	}
 	if err != nil {
 		s.log(p.OriginID, 1, err.Error())
 		return result(false)
 	}
-	// ponytail: output is sent once the run ends, stream it line by line if
-	// long suites need live progress. Coverage (testOptions.coverage) is not
-	// attached here; `cappu test` does that.
-	out, err := exec.Command(testing.ResolveJava(s.cfg), testing.TestRunArgs(s.cfg, launcher, "")...).CombinedOutput()
-	if len(out) > 0 {
-		s.log(p.OriginID, 4, string(out))
+	out := newLineWriter(func(line string) { s.log(p.OriginID, 4, line) })
+	cmd := exec.Command(testing.ResolveJava(s.cfg), testing.TestRunArgs(s.cfg, launcher, agent)...)
+	cmd.Stdout, cmd.Stderr = out, out
+	err = cmd.Run()
+	out.flush()
+	return result(s.exited(p.OriginID, err))
+}
+
+type runParams struct {
+	Target    targetID `json:"target"`
+	OriginID  string   `json:"originId,omitempty"`
+	Arguments []string `json:"arguments"`
+}
+
+// onRun compiles main and runs its main class (compilerOptions.mainClass, or
+// the single class declaring main) with the request's arguments, streaming the
+// program's output as run/printStdout / run/printStderr.
+func (s *Server) onRun(params json.RawMessage) (any, *lsp.ResponseError) {
+	var p runParams
+	_ = json.Unmarshal(params, &p)
+	if s.targetName(p.Target) != "main" {
+		return nil, &lsp.ResponseError{Code: lsp.ErrInvalidParams, Message: "only the main target can run"}
 	}
-	if err != nil {
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) {
-			s.log(p.OriginID, 1, "could not run java: "+err.Error())
-		}
+	result := func(ok bool) (any, *lsp.ResponseError) {
+		return map[string]any{"originId": p.OriginID, "statusCode": status(ok)}, nil
+	}
+	if !s.compileTargets(targetsParams{Targets: []targetID{p.Target}, OriginID: p.OriginID}) {
 		return result(false)
 	}
-	return result(true)
+	outDir := testing.MainClassesDir(s.cfg)
+	mainClass, reason := cli.SelectMainClass(cli.DetectMainClasses(s.mainWritten, outDir), s.cfg.CompilerOptions.MainClass)
+	if reason != "" {
+		s.log(p.OriginID, 1, reason)
+		return result(false)
+	}
+	classPath := append([]string{outDir}, build.ClassPath(s.cfg)...)
+	args := append([]string{"-cp", strings.Join(classPath, string(os.PathListSeparator)), mainClass}, p.Arguments...)
+	printer := func(method string) *lineWriter {
+		return newLineWriter(func(line string) {
+			_ = s.conn.Notify(method, map[string]any{"originId": p.OriginID, "message": line + "\n"})
+		})
+	}
+	stdout, stderr := printer("run/printStdout"), printer("run/printStderr")
+	// ponytail: the program gets no stdin (run/readStdin needs a concurrent
+	// read loop; requests are dispatched one at a time).
+	cmd := exec.Command(testing.ResolveJava(s.cfg), args...)
+	cmd.Dir = s.cfg.BaseDir
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	err := cmd.Run()
+	stdout.flush()
+	stderr.flush()
+	return result(s.exited(p.OriginID, err))
+}
+
+// exited reports a child's outcome: success, a non-zero exit, or a failure to
+// start it at all (logged).
+func (s *Server) exited(originID string, err error) bool {
+	if err == nil {
+		return true
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		s.log(originID, 1, "could not run java: "+err.Error())
+	}
+	return false
+}
+
+// lineWriter hands each complete line written to it to emit; flush sends a
+// trailing partial line. exec calls Write from one goroutine per writer.
+type lineWriter struct {
+	emit func(string)
+	buf  []byte
+}
+
+func newLineWriter(emit func(string)) *lineWriter { return &lineWriter{emit: emit} }
+
+func (w *lineWriter) Write(b []byte) (int, error) {
+	w.buf = append(w.buf, b...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			return len(b), nil
+		}
+		w.emit(strings.TrimSuffix(string(w.buf[:i]), "\r"))
+		w.buf = w.buf[i+1:]
+	}
+}
+
+func (w *lineWriter) flush() {
+	if len(w.buf) > 0 {
+		w.emit(string(w.buf))
+		w.buf = nil
+	}
 }
 
 // log sends build/logMessage (type 1 error, 2 warning, 3 info, 4 log).
@@ -339,6 +433,24 @@ func ConnectionFile(executable string) ([]byte, error) {
 		"languages":  []string{"java"},
 		"argv":       []string{executable, "bsp"},
 	}, "", "  ")
+}
+
+// WriteConnectionFile writes .bsp/cappu.json beside cappu.json, pointing at
+// this binary, and returns its path (`cappu bsp --install`).
+func WriteConnectionFile(cfg *config.Config) (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	data, err := ConnectionFile(exe)
+	if err != nil {
+		return "", err
+	}
+	path := cfg.ResolvePath(filepath.Join(".bsp", "cappu.json"))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	return path, os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
 // pathToURI converts an absolute filesystem path to a file:// URI (same

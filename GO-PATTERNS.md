@@ -504,8 +504,14 @@ server reuses `internal/lsp.Conn` as is (no third transport next to
 handful of methods, and typed structs for each would be the larger part of the
 package. stdout is the protocol channel, so nothing the server calls may print
 there - it uses the print-free `compile`/`testing` layers, never `cli.Run*`, and
-a child process's output (the JUnit run) is captured and sent as
-`build/logMessage`.
+a child process's output is split into lines as it arrives and sent as
+notifications (`build/logMessage` for the JUnit run, `run/printStdout` /
+`run/printStderr` for `buildTarget/run`). `bspserver` imports `cli` for
+`SelectMainClass` / `DetectMainClasses`, so `cli` must not import `bspserver`:
+`cappu bsp --install` lives in `cmd/cappu` and calls
+`bspserver.WriteConnectionFile`. Requests are dispatched one at a time, which
+is why a running program gets no stdin (`run/readStdin`) and nothing can be
+cancelled yet.
 
 ## Source formatter (src/format -> internal/format)
 

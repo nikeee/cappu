@@ -108,7 +108,7 @@ there are visible to the language server.
 
 For an IDE that speaks the Build Server Protocol, `cappu bsp --install` writes
 `.bsp/cappu.json`; the IDE then runs `cappu bsp` (stdio) to compile the `main`
-and `test` targets and run the JUnit tests.
+and `test` targets, run the JUnit tests and run the main class.
 
 ## Agent mode
 

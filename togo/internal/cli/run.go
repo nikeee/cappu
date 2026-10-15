@@ -37,9 +37,9 @@ func SelectMainClass(detected []string, configured string) (mainClass, reason st
 	}
 }
 
-// detectMainClasses is the fully qualified names of the compiled .class files
+// DetectMainClasses is the fully qualified names of the compiled .class files
 // that declare a main method (com/app/Main.class -> com.app.Main).
-func detectMainClasses(written []string, outDir string) []string {
+func DetectMainClasses(written []string, outDir string) []string {
 	var mains []string
 	for _, f := range written {
 		if !strings.HasSuffix(f, ".class") {
@@ -91,7 +91,7 @@ func RunRun(args []string, cfg *config.Config) int {
 	}
 	renderDiagnostics(result.Diagnostics)
 
-	mainClass, reason := SelectMainClass(detectMainClasses(result.Written, outDir), cfg.CompilerOptions.MainClass)
+	mainClass, reason := SelectMainClass(DetectMainClasses(result.Written, outDir), cfg.CompilerOptions.MainClass)
 	if reason != "" {
 		fmt.Fprintf(os.Stderr, "cappu: %s\n", reason)
 		emitAnnotation("error", reason, AnnotationLocation{})

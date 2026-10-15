@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/nikeee/cappu/internal/config"
@@ -180,5 +181,47 @@ func TestCompilePublishesAndClearsDiagnostics(t *testing.T) {
 	status, published = compileOnce()
 	if n, ok := published[pathToURI(src)]; status != statusOK || !ok || n != 0 {
 		t.Fatalf("fixed build: status %d, published %v", status, published)
+	}
+}
+
+// run compiles main, runs its single main class with the request's arguments
+// and streams stdout / stderr as run/print* notifications.
+func TestRunStreamsOutput(t *testing.T) {
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("javac not available")
+	}
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "src/main/java/app/M.java"), `package app; public class M {
+  public static void main(String[] a) { System.out.println("hi " + a[0]); System.err.print("oops"); System.exit(3); } }`)
+	c := start(t, dir)
+	c.call("build/initialize", map[string]any{})
+	res, notes := c.call("buildTarget/run", map[string]any{
+		"target": targetID{URI: pathToURI(dir) + "?id=main"}, "originId": "r", "arguments": []string{"there"},
+	})
+	var r struct {
+		StatusCode int `json:"statusCode"`
+	}
+	_ = json.Unmarshal(res, &r)
+	printed := map[string]string{}
+	for _, n := range notes {
+		var p struct {
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(n.Params, &p)
+		printed[n.Method] += p.Message
+	}
+	if r.StatusCode != statusError || printed["run/printStdout"] != "hi there\n" || printed["run/printStderr"] != "oops\n" {
+		t.Fatalf("status %d, printed %q", r.StatusCode, printed)
+	}
+}
+
+func TestLineWriter(t *testing.T) {
+	var got []string
+	w := newLineWriter(func(l string) { got = append(got, l) })
+	_, _ = w.Write([]byte("a\r\nb"))
+	_, _ = w.Write([]byte("c\n\nd"))
+	w.flush()
+	if want := []string{"a", "bc", "", "d"}; !slices.Equal(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
