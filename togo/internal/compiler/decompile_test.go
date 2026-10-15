@@ -5768,7 +5768,7 @@ func TestDecompiledSourceCompilesAndRuns(t *testing.T) {
 	}
 }
 
-// What the review of the switch-expression, pattern and erasure work found,
+// What the reviews of the switch-expression, pattern and erasure work found,
 // each compiled with and without a debug table, decompiled with its nested
 // classes, compiled again and run. Every one has to compile; one marked
 // whole has to come back without a bail and print what the original does.
@@ -5876,6 +5876,43 @@ public class Names {
     System.out.println();
   }
 }`, true},
+		// From the review of those fixes. A superclass that is an inner class
+		// of the same outer takes the instance implicitly only when it is the
+		// constructor's own; another one is source's `other.super()`.
+		{"OtherSuper", `public class OtherSuper {
+  String name;
+  OtherSuper(String n) { name = n; }
+  class A { String tag; A() { tag = name; } }
+  class B extends A { B(OtherSuper other) { other.super(); System.out.println("B " + tag + " " + name); } }
+  public static void main(String[] z) { new OtherSuper("m").new B(new OtherSuper("other")); }
+}`, true},
+		// A pattern's variable that flow scoping keeps past its test, or that
+		// its arm assigns, is still that variable: a store to it is not the
+		// next variable in the slot.
+		{"PatternAssigned", `public class PatternAssigned {
+  static int f4(Object o, boolean cond) { if (!(o instanceof Integer n) || n < 0) return -1; if (cond) n = n + 1; return n; }
+  static String f5(Object o, int k) { if (!(o instanceof String s) || s.isEmpty()) return "-"; for (int i = 0; i < k; i++) s = s + i; return s; }
+  static String f6(Object o) { if (!(o instanceof String s) || s.isEmpty()) return "-"; while (s.length() < 5) s = s + "+"; return s; }
+  static String f7(Object o) { if (!(o instanceof String s) || s.isEmpty()) return "-"; String r = ""; for (int i = 0; i < 3; i++) { r += s; s = "x"; } return r; }
+  static String f8(Object o) { switch (o) { case String s -> { String r = ""; while (r.length() < 6) { r += s; s = "x"; } return r; } default -> { return "d"; } } }
+  public static void main(String[] z) {
+    System.out.println(f4(3, true) + " " + f4(3, false) + " " + f4("x", true) + " " + f5("a", 3) + f5("b", 0) + f5(1, 1) + " " + f6("ab") + f6(2) + " " + f7("ab") + " " + f8("ab") + f8(1));
+  }
+}`, true},
+		// A variable an arm writes but declared outside it is read after the
+		// switch: its declaration stays where it is.
+		{"ArmWritesOuter", `public class ArmWritesOuter {
+  static int g(int[] ks) {
+    int s = 0;
+    for (int k : ks) {
+      int y;
+      int x = switch (k) { case 1 -> { y = 5; yield 1; } case 2 -> { y = 7; yield 2; } default -> throw new IllegalStateException(); };
+      s += y * x;
+    }
+    return s;
+  }
+  public static void main(String[] z) { System.out.println(g(new int[] {1, 2, 1})); }
+}`, false},
 	}
 	for _, c := range cases {
 		for _, debug := range []bool{false, true} {

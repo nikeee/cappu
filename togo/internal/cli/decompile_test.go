@@ -12,6 +12,7 @@ package cli
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -114,7 +115,7 @@ func TestDecompileMatchesSourceBaselines(t *testing.T) {
 			// tools read it: a class whose shape depends on another - a sealed
 			// parent, an anonymous body - is only written correctly there.
 			classPath := filepath.Join(classDir, entry.Name())
-			got, err := DecompileToSourceWith(classBytes, siblingsFor(classPath, classBytes))
+			got, err := DecompileToSourceWith(classBytes, siblingsFor(classPath, classBytes, nil))
 			if err != nil {
 				t.Fatalf("decompile: %v", err)
 			}
@@ -185,5 +186,35 @@ func TestDecompileContinuesAfterBadFile(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "class Arithmetic {") {
 		t.Errorf("stdout = %q", stdout)
+	}
+}
+
+// A nested class named on the command line is written inside its outer
+// class, so the run skips it - and the outer class has to read it from that
+// file, wherever it is, or it is lost without a word.
+func TestDecompileReadsANamedNestedClassFromWhereItIs(t *testing.T) {
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("no javac")
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "Foo.java")
+	if err := os.WriteFile(source, []byte("package p;\npublic class Foo {\n  public static class In { public int v() { return 3; } }\n  public int w() { return new In().v(); }\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	classes := filepath.Join(dir, "c")
+	if out, err := exec.Command("javac", "--release", "21", "-d", classes, source).CombinedOutput(); err != nil {
+		t.Fatalf("javac: %v\n%s", err, out)
+	}
+	other := filepath.Join(dir, "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(other, "Foo$In.class")
+	if err := os.Rename(filepath.Join(classes, "p", "Foo$In.class"), nested); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := runDecompile(t, filepath.Join(classes, "p", "Foo.class"), nested)
+	if code != 0 || !strings.Contains(stdout, "class In") || !strings.Contains(stdout, "return 3;") {
+		t.Errorf("expected the nested class inside its outer one (exit %d):\n%s\n%s", code, stdout, stderr)
 	}
 }

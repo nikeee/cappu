@@ -220,6 +220,14 @@ func TestSiblingsBesideAFileOutsideItsPackageDirectories(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A stale copy where the package root would put it loses to the one
+	// beside the file.
+	if err := os.MkdirAll(filepath.Join(dir, "p"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p", "Outer$In.class"), []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	siblings := SiblingsBeside(filepath.Join(dir, "Outer.class"), "p/Outer")
 	if b, ok := siblings("p/Outer$In"); !ok || string(b) != "Outer$In.class" {
 		t.Errorf("expected the nested class beside the file, got %q, %v", b, ok)

@@ -140,13 +140,15 @@ func SiblingsBeside(file string, ofClass string) Siblings {
 		pkg = ofClass[:slash+1]
 	}
 	return func(binaryName string) ([]byte, bool) {
-		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(binaryName)+".class"))
-		if err != nil && pkg != "" && strings.HasPrefix(binaryName, pkg) && !strings.Contains(binaryName[len(pkg):], "/") {
-			// A file named without the directories of its package - `cappu
-			// decompile Foo.class` from inside them - has its siblings right
-			// beside it.
-			b, err = os.ReadFile(filepath.Join(dir, binaryName[len(pkg):]+".class"))
+		// A class of the same package is the one right beside the file - which
+		// is also where it is when the file is named without the directories
+		// of its package, `cappu decompile Foo.class` from inside them.
+		if strings.HasPrefix(binaryName, pkg) && !strings.Contains(binaryName[len(pkg):], "/") {
+			if b, err := os.ReadFile(filepath.Join(dir, binaryName[len(pkg):]+".class")); err == nil {
+				return b, true
+			}
 		}
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(binaryName)+".class"))
 		return b, err == nil
 	}
 }

@@ -50,13 +50,23 @@ func DecompileToSourceWith(b []byte, siblings compiler.Siblings) (string, error)
 }
 
 // siblingsFor is SiblingsBeside for a class whose bytes are already read: the
-// name in them says which directory is the package root.
-func siblingsFor(file string, b []byte) compiler.Siblings {
+// name in them says which directory is the package root. A class named on the
+// command line is read from the file that names it, wherever that is - the
+// run skips it as written inside its outer class, which has to find it then.
+func siblingsFor(file string, b []byte, named map[string]string) compiler.Siblings {
 	name := ""
 	if read, err := compiler.ReadClassFile(b); err == nil {
 		name = read.ThisClass
 	}
-	return compiler.SiblingsBeside(file, name)
+	beside := compiler.SiblingsBeside(file, name)
+	return func(binaryName string) ([]byte, bool) {
+		if path, ok := named[binaryName]; ok {
+			if b, err := os.ReadFile(path); err == nil {
+				return b, true
+			}
+		}
+		return beside(binaryName)
+	}
 }
 
 // writtenInsideAnother reports a class another file of this run declares.
@@ -74,7 +84,7 @@ func RunDecompile(files []string, disasm bool) int {
 	// declarations of one type do not compile together. Only what that other
 	// file actually writes is skipped - a name that merely looks nested is
 	// not, or the class would be lost without a word.
-	declared := map[string]bool{}
+	declared, named := map[string]bool{}, map[string]string{}
 	if !disasm {
 		for _, file := range files {
 			b, err := os.ReadFile(file)
@@ -85,6 +95,7 @@ func RunDecompile(files []string, disasm bool) int {
 			if err != nil {
 				continue
 			}
+			named[read.ThisClass] = file
 			for _, name := range compiler.NestedClasses(read) {
 				declared[name] = true
 			}
@@ -101,7 +112,7 @@ func RunDecompile(files []string, disasm bool) int {
 			if disasm {
 				text, err = compiler.Disassemble(bytes)
 			} else {
-				text, err = DecompileToSourceWith(bytes, siblingsFor(file, bytes))
+				text, err = DecompileToSourceWith(bytes, siblingsFor(file, bytes, named))
 			}
 			if err == nil {
 				fmt.Print(text)

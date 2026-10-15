@@ -1265,6 +1265,9 @@ type localWrite struct {
 	// InValue: the assignment is inside an expression, not a statement of its
 	// own - it counts as a write, but there is no line at Index to rewrite.
 	InValue bool
+	// Frozen: the line went into the text of a switch expression's arm. It
+	// counts as a write, and there is no line at Index any more either.
+	Frozen bool
 }
 
 // localDeclaration is where a local was declared; Inline when it carries the
@@ -1283,6 +1286,9 @@ type local struct {
 	// that binds it holds. javac reuses the slot after that, and a store from
 	// outside is another variable - one that still needs a declaration.
 	FromPattern bool
+	// Binding is the block a pattern's variable is bound at the head of: what
+	// it dominates is where the variable is in scope.
+	Binding int
 	// Origin is the debug-table row this name came from, when there is one.
 	Origin *localEntry
 	// Authoritative is set when the type came from a parameter descriptor or the
@@ -3344,7 +3350,7 @@ func (d *bodyDecompiler) retype(entry *local, target string) error {
 	for i, write := range entry.Writes {
 		// An assignment inside an expression is part of that expression's
 		// text, which reads the same for any reference type.
-		if write.InValue {
+		if write.InValue || write.Frozen {
 			continue
 		}
 		// A condition stored is rendered against the types its locals have now,
@@ -3385,7 +3391,7 @@ func (d *bodyDecompiler) declareAtTheWrite(entry *local) bool {
 		return false
 	}
 	write := entry.Writes[0]
-	if write.InValue {
+	if write.InValue || write.Frozen {
 		return false
 	}
 	// Every read has to come after the store, in its own block. The write
@@ -3755,20 +3761,22 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 		switch {
 		case scoped != nil:
 			// javac writes one row per scope range, so the same variable can
-			// appear twice for one slot (once per arm of an `if`); the name and
-			// type are what say it is the same one.
-			// A pattern's variable lives only where its test holds: a store
-			// under another row is the next variable javac put in the slot,
-			// whatever the debug table names it.
+			// appear twice for one slot (once per arm of an `if`, once more
+			// for a pattern variable flow scoping keeps alive past one); the
+			// name and type are what say it is the same one. Only in a
+			// pattern's slot does a store whose row begins right after it
+			// begin the next variable javac put there, whatever its name.
 			origin := existing.Origin
-			if origin == scoped ||
-				(origin != nil && origin.Name == scoped.Name && origin.Type == scoped.Type &&
-					!(isStore && existing.FromPattern)) {
+			fresh := isStore && existing.FromPattern && origin != scoped && scoped.StartPc == pc
+			if !fresh && (origin == scoped ||
+				(origin != nil && origin.Name == scoped.Name && origin.Type == scoped.Type)) {
 				return existing, nil
 			}
-		case isStore && existing.FromPattern:
-			// The pattern's variable is out of scope here: javac put another
-			// one in the slot, and it is declared where it is written.
+		case isStore && existing.FromPattern && !d.dominates(existing.Binding, d.currentBlock):
+			// The pattern's variable is out of scope here - the store is not
+			// under the test that binds it: javac put another one in the slot,
+			// and it is declared where it is written. One under the test is
+			// the pattern's variable assigned, as source may.
 		case isStore && existing.Origin != nil:
 			// The debug table scoped the variable in this slot, and scopes
 			// nothing here: its range is over, and this store begins a variable
@@ -5067,9 +5075,12 @@ func (d *bodyDecompiler) construct(target MemberRef) error {
 			keyword = "super"
 			// Written nested, a superclass that is an inner class of the same
 			// class takes its enclosing instance implicitly - source wrote
-			// `super(..)`, and the qualifier is the parameter javac added.
+			// `super(..)`, and the qualifier is the parameter javac added,
+			// read as `Outer.this`. Any other instance is source's
+			// `other.super(..)`.
 			sameOuter := d.classFile.DeclaredInner &&
-				enclosingOf(target.Owner) == enclosingOf(d.classFile.ThisClass)
+				enclosingOf(target.Owner) == enclosingOf(d.classFile.ThisClass) &&
+				qualifier == typeName(enclosingOf(d.classFile.ThisClass), d.self())+".this"
 			if qualifier != "" && !sameOuter {
 				keyword = qualifier + ".super"
 			}
@@ -6471,6 +6482,15 @@ func (d *bodyDecompiler) loop(l *loop) (int, error) {
 	return d.foreverLoop(l)
 }
 
+// dominates reports whether every path from the entry to block passes through
+// at.
+func (d *bodyDecompiler) dominates(at, block int) bool {
+	if len(d.dominators) == 0 {
+		d.dominators = dominators(withExceptionEdges(d.blocks, d.regions, d.monitors), d.entryPc)
+	}
+	return d.dominators[block][at]
+}
+
 // reachesArm reports whether one arm of a branch runs into the other, which
 // makes the second one the code after the `if` rather than its `else`. A `break`
 // or a `continue` ends the walk: it leaves the statement, like a `return`.
@@ -7416,6 +7436,7 @@ func (d *bodyDecompiler) takeOverBinding(start int, typ string) (string, bool) {
 		Type:        typ,
 		Declared:    true,
 		FromPattern: true,
+		Binding:     start,
 		Origin:      scoped,
 		StoreBlocks: map[int]bool{},
 	}
@@ -7572,19 +7593,19 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 	}
 	// What an arm's block wrote becomes text in the arm, where a retype can no
 	// longer reach it: the variables it writes have to have their type for
-	// certain, and forget the lines that were theirs.
+	// certain.
 	//
-	// Only a variable the block declares qualifies. One declared outside it -
-	// before the switch, or hoisted to the top of the body from inside a loop -
-	// lives on past the arm, and the writes the text hides are what says
-	// whether it is effectively final.
-	//
-	// Inside a loop or a branch the first store hoists its declaration to the
-	// top of the body. One hoisted by this arm and written once, by a statement
-	// of it, is declared at that store instead - where source declared it.
+	// A variable the block declares lives only there and forgets the lines
+	// that were its own. One declared outside it - before the switch, or
+	// hoisted to the top of the body by its first store, inside a loop or a
+	// branch - lives on, may be read after the switch, and keeps its writes,
+	// marked as text now: they still say whether it is effectively final. One
+	// a lambda in the arm captures has to be, and when this arm's store
+	// hoisted it and wrote it once, it is declared at that store instead -
+	// where source declared it.
 	freeze := func(from int) bool {
 		inArm := func(list *[]stmt, index int) bool { return list == statements && index >= from }
-		var scoped, hoisted []*local
+		var scoped, hoisted, kept []*local
 		for _, one := range d.byName {
 			declared := one.Declaration != nil && inArm(one.Declaration.List, one.Declaration.Index)
 			written := slices.ContainsFunc(one.Writes, func(write localWrite) bool { return inArm(write.List, write.Index) })
@@ -7594,14 +7615,16 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 			if !one.Authoritative {
 				return false
 			}
-			if !declared {
-				if one.Declaration == nil || one.Declaration.List != &d.hoisted || one.Declaration.Index < hoistedBefore ||
-					len(one.Writes) != 1 || one.Writes[0].InValue {
-					return false
-				}
+			switch {
+			case declared:
+				scoped = append(scoped, one)
+			case one.Declaration != nil && one.Declaration.List == &d.hoisted && one.Declaration.Index >= hoistedBefore &&
+				len(one.Writes) == 1 && !one.Writes[0].InValue && slices.Contains(d.captured, one):
 				hoisted = append(hoisted, one)
+				scoped = append(scoped, one)
+			default:
+				kept = append(kept, one)
 			}
-			scoped = append(scoped, one)
 		}
 		// Latest first, so the indices of the ones still to go stay right.
 		slices.SortFunc(hoisted, func(a, b *local) int { return b.Declaration.Index - a.Declaration.Index })
@@ -7616,11 +7639,17 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 			write := one.Writes[0]
 			(*write.List)[write.Index].Text = one.Type + " " + (*write.List)[write.Index].Text
 		}
-		// A variable declared in the block lives only there. javac hands the
-		// slot - and the debug table the name - to the next arm's own, which
-		// is another variable with a declaration of its own. Its name stays
-		// taken: a variable after the switch hoisted to the top of the body
-		// would otherwise be declared over the arm's.
+		for _, one := range kept {
+			for i := range one.Writes {
+				if inArm(one.Writes[i].List, one.Writes[i].Index) {
+					one.Writes[i].Frozen = true
+				}
+			}
+		}
+		// The slot - and the debug table the name - go to the next arm's own,
+		// which is another variable with a declaration of its own. The name
+		// stays taken: a variable after the switch hoisted to the top of the
+		// body would otherwise be declared over the arm's.
 		for _, one := range scoped {
 			one.Writes = slices.DeleteFunc(one.Writes, func(write localWrite) bool { return inArm(write.List, write.Index) })
 			one.Declaration = nil
@@ -8163,7 +8192,7 @@ func (d *bodyDecompiler) bindLocal(bind *patternBinding, b *block, pc int) bool 
 	if err != nil || bound == nil {
 		return false
 	}
-	bound.Declared, bound.FromPattern = true, true
+	bound.Declared, bound.FromPattern, bound.Binding = true, true, b.Start
 	bound.StoreBlocks[b.Start] = true
 	bind.Name = bound.Name
 	d.bound = append(d.bound, bind)
