@@ -139,6 +139,7 @@ func ProcOnlyArgs(cfg *config.Config, files, jars []string, outSources, outClass
 	if len(sourcePaths) > 0 {
 		args = append(args, "-sourcepath", strings.Join(sourcePaths, string(os.PathListSeparator)))
 	}
+	args = append(args, cfg.CompilerOptions.JavacOptions...)
 	args = append(args, files...)
 	return args
 }

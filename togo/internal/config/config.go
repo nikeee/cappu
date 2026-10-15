@@ -54,6 +54,7 @@ type CompilerOptions struct {
 	ResourcePaths        []string             `json:"resourcePaths"`
 	Output               string               `json:"output"`
 	Javac                string               `json:"javac"`
+	JavacOptions         []string             `json:"javacOptions"`
 	Release              *int                 `json:"release,omitempty"`
 	MainClass            string               `json:"mainClass,omitempty"`
 	ExperimentalCompiler ExperimentalCompiler `json:"experimentalCompiler"`
@@ -252,6 +253,9 @@ func (c *Config) applyDefaults() {
 	}
 	if co.Javac == "" {
 		co.Javac = "javac"
+	}
+	if co.JavacOptions == nil {
+		co.JavacOptions = []string{}
 	}
 	if co.ExperimentalCompiler.FailOnDegrade == nil {
 		t := true

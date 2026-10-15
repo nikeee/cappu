@@ -425,6 +425,10 @@ func RunCompile(files []string, options Options) Result {
 		failOnDegrade = *options.FailOnDegrade
 	}
 	typeCheck := options.TypeCheck == nil || *options.TypeCheck
+	// ponytail: our emitter cannot honour arbitrary javac flags, so it ignores
+	// compilerOptions.javacOptions rather than silently swapping in javac. The
+	// -proc:only pass below is javac and gets them (e.g. -A processor options);
+	// --validate's reference javac does not, so its bytecode stays comparable.
 
 	// Annotation processors (#7): generation is javac's job even in experimental
 	// mode (-proc:only); our compiler then compiles original + generated sources.
@@ -622,6 +626,7 @@ func runJavacCompile(files []string, outDir, output string, cfg *config.Config, 
 	if len(sourcePaths) > 0 {
 		args = append(args, "-sourcepath", strings.Join(sourcePaths, string(os.PathListSeparator)))
 	}
+	args = append(args, cfg.CompilerOptions.JavacOptions...)
 	args = append(args, files...)
 
 	cmd := exec.Command(build.Javac(cfg), args...)

@@ -89,4 +89,5 @@ diagnostics and unformatted files are additionally printed as
 - [ ] Tests must live under `./src/test/java`; other locations are not found.
 - [ ] Program arguments go after `--`: `cappu run -- arg1 arg2`.
 - [ ] Ambiguous main class? Set `compilerOptions.mainClass`.
+- [ ] Extra javac flags go in `compilerOptions.javacOptions`; they never reach `java`, so `--enable-preview` also needs `JDK_JAVA_OPTIONS=--enable-preview` for `run` and `test`.
 - [ ] Jar name depends on `artifactId` and `version`; use `--artifact` for a fixed name.

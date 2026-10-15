@@ -214,7 +214,7 @@ func (s *Server) onJavacOptions(params json.RawMessage) (any, *lsp.ResponseError
 		for i, p := range classpath {
 			uris[i] = pathToURI(p)
 		}
-		items = append(items, map[string]any{"target": id, "options": []string{}, "classpath": uris, "classDirectory": pathToURI(classDir)})
+		items = append(items, map[string]any{"target": id, "options": s.cfg.CompilerOptions.JavacOptions, "classpath": uris, "classDirectory": pathToURI(classDir)})
 	}
 	return map[string]any{"items": items}, nil
 }

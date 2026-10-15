@@ -40,6 +40,7 @@ feature gaps behind these steps.
 | dependency scope `test` | `dependencies.testImplementation` |
 | dependency scope `provided` / `optional` / `runtime` | `dependencies.implementation` (**no exact equivalent** - lossy; fine for building, wrong for publishing) |
 | annotation processor (compiler-plugin `annotationProcessorPaths`, or a `*-processor` artifact) | `dependencies.annotationProcessor` |
+| compiler-plugin `<compilerArgs>` / `<parameters>true`, Gradle `options.compilerArgs` | `compilerOptions.javacOptions` (string array, e.g. `["-parameters", "-Xlint:all"]`) |
 | non-default `<sourceDirectory>` / build-helper generated sources | `compilerOptions.sourcePaths` (array) |
 | a runnable main | `compilerOptions.mainClass` |
 | fat/shaded jar | `compilerOptions.output: "fat-jar"` (else `"classes"` or `"jar"`) |

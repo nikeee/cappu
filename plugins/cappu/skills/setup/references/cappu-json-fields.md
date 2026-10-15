@@ -43,6 +43,7 @@ Each configuration is a map `"group:artifact": "version"`.
 | `resourcePaths` | string[] | `["./src/main/resources"]` | copied verbatim into the output |
 | `output` | `"classes"` \| `"jar"` \| `"fat-jar"` | `"classes"` | what `compile` writes to `./dist`; `-o` overrides per call. `fat-jar` merges `META-INF/services/*` and `spring.factories` from all jars |
 | `javac` | string | `"javac"` | binary to compile with; a provisioned `jdk` wins |
+| `javacOptions` | string[] | `[]` | extra javac arguments (`-parameters`, `-Xlint:all`, `-Werror`, `-A<key>=<value>`), placed after cappu's own and before the sources in every javac run: `compile`, `run`, `test`, `publish`, `dap`, `bsp`. The experimental compiler ignores them (its annotation-processing pass still gets them). They never reach `java`: `--enable-preview` (which also needs `release`) needs `JDK_JAVA_OPTIONS=--enable-preview` for `run` and `test` |
 | `release` | integer >= 8 | javac's own | `javac --release`: language level and class file version |
 | `mainClass` | string | the single `main(String[])` found | required by `run`, `dap` and executable jars when there are 0 or more than 1 candidates |
 | `experimentalCompiler.enabled` | boolean | `false` | cappu's own bytecode emitter instead of javac. Leave off unless testing it |

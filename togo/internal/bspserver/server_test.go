@@ -137,6 +137,25 @@ func TestExitWithoutShutdown(t *testing.T) {
 	}
 }
 
+// buildTarget/javacOptions reports compilerOptions.javacOptions for both targets.
+func TestJavacOptionsReportsConfiguredFlags(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "cappu.json"), `{ "compilerOptions": { "javacOptions": ["-parameters"] } }`)
+	c := start(t, dir)
+	res, _ := c.call("buildTarget/javacOptions", map[string]any{"targets": []targetID{
+		{URI: pathToURI(dir) + "?id=main"}, {URI: pathToURI(dir) + "?id=test"},
+	}})
+	var r struct {
+		Items []struct {
+			Options []string `json:"options"`
+		} `json:"items"`
+	}
+	_ = json.Unmarshal(res, &r)
+	if len(r.Items) != 2 || !slices.Equal(r.Items[0].Options, []string{"-parameters"}) || !slices.Equal(r.Items[1].Options, []string{"-parameters"}) {
+		t.Fatalf("javacOptions: %s", res)
+	}
+}
+
 // A compile error is published for its file and fails the build; once fixed,
 // the file gets an empty reset and the build succeeds.
 func TestCompilePublishesAndClearsDiagnostics(t *testing.T) {

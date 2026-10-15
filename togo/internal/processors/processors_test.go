@@ -88,6 +88,7 @@ func TestProcOnlyArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := loadCfg(t, project)
+	cfg.CompilerOptions.JavacOptions = []string{"-Adebug=true"}
 	sep := string(os.PathListSeparator)
 	args := ProcOnlyArgs(cfg, []string{"/p/A.java"}, []string{"/p/proc.jar", "/p/extra.jar"}, "/out/sources", "/out/classes")
 	want := []string{
@@ -98,6 +99,7 @@ func TestProcOnlyArgs(t *testing.T) {
 		"-encoding", "UTF-8",
 		"-cp", filepath.Join(project, ".cappu", "lib", "classes"),
 		// no -sourcepath: ./src/main/java does not exist in this project
+		"-Adebug=true",
 		"/p/A.java",
 	}
 	if !eq(args, want) {

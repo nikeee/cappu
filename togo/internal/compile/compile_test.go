@@ -587,6 +587,25 @@ func TestDefaultCompileReleaseTargetsOlderVersion(t *testing.T) {
 	}
 }
 
+// compilerOptions.javacOptions reaches javac: -parameters makes it write the
+// MethodParameters attribute, which a plain javac run leaves out.
+func TestDefaultCompilePassesJavacOptions(t *testing.T) {
+	if !hasJDK() {
+		t.Skip("javac not available")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "cappu.json", `{ "compilerOptions": { "javacOptions": ["-parameters"] } }`)
+	src := writeFile(t, dir, "P.java", "class P { void m(int count) {} }")
+	r := RunCompile([]string{src}, Options{OutDir: dir, Config: loadCfg(t, dir)})
+	if !r.Success {
+		t.Fatalf("compile failed: %+v", r)
+	}
+	bs, _ := os.ReadFile(r.Written[0])
+	if !bytes.Contains(bs, []byte("MethodParameters")) {
+		t.Error("-parameters did not reach javac: no MethodParameters attribute")
+	}
+}
+
 func TestDefaultCompileSurfacesJavacDiagnostics(t *testing.T) {
 	if !hasJDK() {
 		t.Skip("javac not available")

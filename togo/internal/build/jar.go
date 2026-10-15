@@ -204,6 +204,7 @@ func Compile(cfg *config.Config, sources []string, outDir string, classpath []st
 	if len(classpath) > 0 {
 		args = append(args, "-cp", strings.Join(classpath, string(os.PathListSeparator)))
 	}
+	args = append(args, cfg.CompilerOptions.JavacOptions...)
 	args = append(args, sources...)
 	cmd := exec.Command(Javac(cfg), args...)
 	var stderr bytes.Buffer

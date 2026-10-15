@@ -49,6 +49,7 @@ func CompileForDebug(cfg *config.Config) []javacdiag.CompileDiagnostic {
 	if len(cp) > 0 {
 		args = append(args, "-cp", strings.Join(cp, string(os.PathListSeparator)))
 	}
+	args = append(args, cfg.CompilerOptions.JavacOptions...)
 	args = append(args, sources...)
 	cmd := exec.Command(javac, args...)
 	var stderr bytes.Buffer

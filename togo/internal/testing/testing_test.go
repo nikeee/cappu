@@ -54,6 +54,16 @@ func TestCompileTestsJavacUnavailable(t *testing.T) {
 	}
 }
 
+// compilerOptions.javacOptions reach the test compile, before the sources.
+func TestCompileTestsArgsPassJavacOptions(t *testing.T) {
+	cfg := project(t)
+	cfg.CompilerOptions.JavacOptions = []string{"-parameters", "-Xlint:all"}
+	args := compileTestsArgs(cfg, []string{"T.java"})
+	if got := args[len(args)-3:]; got[0] != "-parameters" || got[1] != "-Xlint:all" || got[2] != "T.java" {
+		t.Errorf("args = %v", args)
+	}
+}
+
 func TestRunArgsStructure(t *testing.T) {
 	cfg := project(t)
 	args := TestRunArgs(cfg, "/path/launcher.jar", "")

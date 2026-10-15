@@ -51,6 +51,13 @@
           "default": "javac",
           "type": "string"
         },
+        "javacOptions": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "release": {
           "type": "integer",
           "minimum": 8,

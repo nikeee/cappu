@@ -1,6 +1,6 @@
 ---
 name: setup
-description: "Use when creating a new Java project with cappu, reading or editing cappu.json (any field: JDK pinning, source and resource paths, output kind, main class, annotation processors, nullness), installing or upgrading the cappu binary, or when you land in a repo that has a cappu.json and need to know its layout. Not for migrating from Maven or Gradle - see the migrate skill."
+description: "Use when creating a new Java project with cappu, reading or editing cappu.json (any field: JDK pinning, source and resource paths, output kind, main class, javac flags, annotation processors, nullness), installing or upgrading the cappu binary, or when you land in a repo that has a cappu.json and need to know its layout. Not for migrating from Maven or Gradle - see the migrate skill."
 ---
 
 # Set up and configure a cappu project
@@ -74,6 +74,12 @@ repository auth, Kotlin or WAR support. `cappu config-schema` prints the schema;
   their API library under `implementation`. MapStruct: `org.mapstruct:mapstruct`
   in `implementation`, `org.mapstruct:mapstruct-processor` in
   `annotationProcessor`. Immutables: `org.immutables:value` in both.
+- **Extra javac flags** (`-parameters` for Spring and Jackson, `-Xlint:all`,
+  `-Werror`, `-A<key>=<value>` processor options): `compilerOptions.javacOptions`,
+  a string array every javac run gets. It never reaches `java`, so
+  `--enable-preview` (which also needs `release`) needs
+  `JDK_JAVA_OPTIONS=--enable-preview` for `run` and `test` and the launch
+  `vmArgs` for `dap`.
 - **Extra classpath entries** (a sibling module's jar, a vendored lib): set
   `compilerOptions.classPath`. It replaces the default list; `./.cappu/lib/classes`
   is re-added automatically but `./target/dependency`, `./build/libs`, `./lib`

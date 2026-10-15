@@ -70,6 +70,7 @@ func compileTestsArgs(cfg *config.Config, sources []string) []string {
 		args = append(args, "--release", strconv.Itoa(*cfg.CompilerOptions.Release))
 	}
 	args = append(args, "-cp", strings.Join(dependencyClassPath(cfg), string(os.PathListSeparator)))
+	args = append(args, cfg.CompilerOptions.JavacOptions...)
 	return append(args, sources...)
 }
 

@@ -1,6 +1,10 @@
 package dapserver
 
 import (
+	"bytes"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -23,6 +27,36 @@ func TestDebuggeeVMArgs(t *testing.T) {
 	// The project -ea precedes launch vmArgs so a launch -da overrides it.
 	if got := DebuggeeVMArgs(on, dap.LaunchArguments{VMArgs: []string{"-da"}}); !slices.Equal(got, []string{"-ea", "-da"}) {
 		t.Fatalf("override: %v", got)
+	}
+}
+
+// compilerOptions.javacOptions reach the debug compile: -parameters makes javac
+// write the MethodParameters attribute.
+func TestCompileForDebugPassesJavacOptions(t *testing.T) {
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("javac not on PATH")
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src", "main", "java", "M.java")
+	if err := os.MkdirAll(filepath.Dir(src), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("class M { void m(int count) {} }"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cappu.json"), []byte(`{ "compilerOptions": { "javacOptions": ["-parameters"] } }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diags := CompileForDebug(cfg); len(diags) != 0 {
+		t.Fatalf("diagnostics: %+v", diags)
+	}
+	bs, _ := os.ReadFile(filepath.Join(DebugClassesDir(cfg), "M.class"))
+	if !bytes.Contains(bs, []byte("MethodParameters")) {
+		t.Error("-parameters did not reach javac: no MethodParameters attribute")
 	}
 }
 
