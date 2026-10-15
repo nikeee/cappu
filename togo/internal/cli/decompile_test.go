@@ -12,6 +12,7 @@ package cli
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -114,7 +115,7 @@ func TestDecompileMatchesSourceBaselines(t *testing.T) {
 			// tools read it: a class whose shape depends on another - a sealed
 			// parent, an anonymous body - is only written correctly there.
 			classPath := filepath.Join(classDir, entry.Name())
-			got, err := DecompileToSourceWith(classBytes, siblingsFor(classPath, classBytes))
+			got, err := DecompileToSourceWith(classBytes, siblingsFor(classPath, classBytes, nil))
 			if err != nil {
 				t.Fatalf("decompile: %v", err)
 			}
@@ -185,5 +186,242 @@ func TestDecompileContinuesAfterBadFile(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "class Arithmetic {") {
 		t.Errorf("stdout = %q", stdout)
+	}
+}
+
+// A nested class named on the command line is written inside its outer
+// class, so the run skips it - and the outer class has to read it from that
+// file, wherever it is, or it is lost without a word.
+func TestDecompileReadsANamedNestedClassFromWhereItIs(t *testing.T) {
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("no javac")
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "Foo.java")
+	if err := os.WriteFile(source, []byte("package p;\npublic class Foo {\n  public static class In { public int v() { return 3; } }\n  public int w() { return new In().v(); }\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	classes := filepath.Join(dir, "c")
+	if out, err := exec.Command("javac", "--release", "21", "-d", classes, source).CombinedOutput(); err != nil {
+		t.Fatalf("javac: %v\n%s", err, out)
+	}
+	other := filepath.Join(dir, "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(other, "Foo$In.class")
+	if err := os.Rename(filepath.Join(classes, "p", "Foo$In.class"), nested); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := runDecompile(t, filepath.Join(classes, "p", "Foo.class"), nested)
+	if code != 0 || !strings.Contains(stdout, "class In") || !strings.Contains(stdout, "return 3;") {
+		t.Errorf("expected the nested class inside its outer one (exit %d):\n%s\n%s", code, stdout, stderr)
+	}
+}
+
+// Two builds of one class named in one run: each outer class reads the
+// nested one beside it, not whichever file came last.
+func TestDecompileKeepsTwoBuildsOfOneClassApart(t *testing.T) {
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("no javac")
+	}
+	dir := t.TempDir()
+	var files []string
+	for _, v := range []string{"1", "2"} {
+		source := filepath.Join(dir, "src"+v, "Foo.java")
+		if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(source, []byte("package p;\npublic class Foo {\n  public static class In { public int v() { return "+v+"; } }\n  public int w() { return new In().v(); }\n}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		classes := filepath.Join(dir, "v"+v)
+		if out, err := exec.Command("javac", "--release", "21", "-d", classes, source).CombinedOutput(); err != nil {
+			t.Fatalf("javac: %v\n%s", err, out)
+		}
+		files = append(files, filepath.Join(classes, "p", "Foo.class"), filepath.Join(classes, "p", "Foo$In.class"))
+	}
+	code, stdout, stderr := runDecompile(t, files...)
+	if code != 0 || !strings.Contains(stdout, "return 1;") || !strings.Contains(stdout, "return 2;") ||
+		strings.Count(stdout, "int v()") != 2 {
+		t.Errorf("expected each build's own nested class, once (exit %d):\n%s\n%s", code, stdout, stderr)
+	}
+}
+
+// A nested class named on the command line that its outer class does not
+// read for itself - not beside it, or another build of it - is written on
+// its own rather than dropped; one named twice is one file.
+func TestDecompileWritesEveryNamedNestedClass(t *testing.T) {
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("no javac")
+	}
+	dir := t.TempDir()
+	nested := map[string]string{}
+	for _, v := range []string{"1", "2"} {
+		source := filepath.Join(dir, "src"+v, "Foo.java")
+		if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(source, []byte("package p;\npublic class Foo {\n  public static class In { public int v() { return "+v+"; } }\n  public int w() { return new In().v(); }\n}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		classes := filepath.Join(dir, "v"+v)
+		if out, err := exec.Command("javac", "--release", "21", "-d", classes, source).CombinedOutput(); err != nil {
+			t.Fatalf("javac: %v\n%s", err, out)
+		}
+		moved := filepath.Join(dir, "only"+v, "Foo$In.class")
+		if err := os.MkdirAll(filepath.Dir(moved), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(filepath.Join(classes, "p", "Foo$In.class"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(moved, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		nested[v] = moved
+	}
+	if err := os.Symlink(filepath.Join(dir, "only1"), filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	outer := filepath.Join(dir, "v1", "p", "Foo.class")
+	if err := os.Remove(filepath.Join(dir, "v1", "p", "Foo$In.class")); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name  string
+		files []string
+		want  []string
+	}{
+		{"two copies, neither beside", []string{outer, nested["1"], nested["2"]}, []string{"return 1;", "return 2;"}},
+		{"one file named twice", []string{outer, nested["1"], nested["1"]}, []string{"return 1;"}},
+		{"one file named by a link too", []string{outer, nested["1"], filepath.Join(dir, "link", "Foo$In.class")}, []string{"return 1;"}},
+		{"another build than the one beside", []string{filepath.Join(dir, "v2", "p", "Foo.class"), nested["1"]}, []string{"return 1;", "return 2;"}},
+	} {
+		code, stdout, stderr := runDecompile(t, c.files...)
+		for _, want := range c.want {
+			if code != 0 || !strings.Contains(stdout, want) {
+				t.Errorf("%s: expected %q (exit %d):\n%s\n%s", c.name, want, code, stdout, stderr)
+			}
+		}
+		if strings.Count(stdout, "int v()") != len(c.want) {
+			t.Errorf("%s: expected %d In:\n%s", c.name, len(c.want), stdout)
+		}
+	}
+}
+
+// Classes nested in nested classes are written by the class at the top,
+// through its own lookup: a named copy of one that the top reads elsewhere
+// is written on its own, and said so. So is one nested deeper than a file
+// follows the classes it declares, which no class writes inside.
+func TestDecompileWritesDeeplyNestedClassesOnce(t *testing.T) {
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("no javac")
+	}
+	dir := t.TempDir()
+	compile := func(name, source string) string {
+		path := filepath.Join(dir, name, "Foo.java")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		classes := filepath.Join(dir, name, "c")
+		if out, err := exec.Command("javac", "--release", "21", "-d", classes, path).CombinedOutput(); err != nil {
+			t.Fatalf("javac: %v\n%s", err, out)
+		}
+		return filepath.Join(classes, "p")
+	}
+	two := func(v string) string {
+		return "package p;\npublic class Foo { public static class A { public static class B { public int v() { return " + v + "; } } } }\n"
+	}
+	v1, v2 := compile("v1", two("1")), compile("v2", two("2"))
+	// v1's A elsewhere, with v2's B beside it: Foo still writes A and B,
+	// both read beside Foo, and A's neighbour is not what it writes.
+	other := filepath.Join(dir, "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for from, to := range map[string]string{filepath.Join(v1, "Foo$A.class"): "Foo$A.class", filepath.Join(v2, "Foo$A$B.class"): "Foo$A$B.class"} {
+		b, err := os.ReadFile(from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(other, to), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, stdout, stderr := runDecompile(t, filepath.Join(v1, "Foo.class"), filepath.Join(other, "Foo$A.class"), filepath.Join(other, "Foo$A$B.class"))
+	if code != 0 || strings.Count(stdout, "int v()") != 2 || !strings.Contains(stdout, "return 2;") ||
+		!strings.Contains(stderr, "Foo$A$B.class: written on its own") {
+		t.Errorf("expected v1's B inside Foo and v2's on its own, said so (exit %d):\n%s\n%s", code, stdout, stderr)
+	}
+	deep := "package p;\npublic class Foo {"
+	for _, name := range []string{"A", "B", "C", "D", "E", "F", "G", "H", "I"} {
+		deep += " public static class " + name + " {"
+	}
+	deep += " public int v() { return 42; } " + strings.Repeat("}", 10) + "\n"
+	classes := compile("deep", deep)
+	all, err := filepath.Glob(filepath.Join(classes, "*.class"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr = runDecompile(t, all...)
+	if code != 0 || strings.Count(stdout, "return 42;") != 1 || !strings.Contains(stderr, "Foo$A$B$C$D$E$F$G$H$I.class: written on its own") {
+		t.Errorf("expected the class nested past the depth a file follows, once and said so (exit %d):\n%s\n%s", code, stdout, stderr)
+	}
+	// A chain through a class the run does not name: Foo writes A, which it
+	// reads for itself, and A writes B - once.
+	v1Files := []string{filepath.Join(v1, "Foo.class"), filepath.Join(v1, "Foo$A$B.class")}
+	code, stdout, stderr = runDecompile(t, v1Files...)
+	if code != 0 || strings.Count(stdout, "int v()") != 1 || stderr != "" {
+		t.Errorf("expected B once, inside A inside Foo (exit %d):\n%s\n%s", code, stdout, stderr)
+	}
+	// Without A to read, Foo writes no A and B stands on its own - said so.
+	alone := filepath.Join(dir, "alone")
+	if err := os.MkdirAll(alone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Foo.class", "Foo$A$B.class"} {
+		b, err := os.ReadFile(filepath.Join(v1, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(alone, name), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, stdout, stderr = runDecompile(t, filepath.Join(alone, "Foo.class"), filepath.Join(alone, "Foo$A$B.class"))
+	if code != 0 || strings.Count(stdout, "int v()") != 1 || !strings.Contains(stderr, "Foo$A$B.class: written on its own") {
+		t.Errorf("expected B on its own, said so (exit %d):\n%s\n%s", code, stdout, stderr)
+	}
+}
+
+// A top-level class whose name merely begins with a nested class's, `$` and
+// all, is no class the other declares: written as it is, without a note.
+func TestDecompileSaysNothingOfAClassNobodyDeclares(t *testing.T) {
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("no javac")
+	}
+	dir := t.TempDir()
+	for name, source := range map[string]string{
+		"Foo.java":      "package p;\npublic class Foo { public static class Ab { } }\n",
+		"Foo$Abc.java":  "package p;\npublic class Foo$Abc { public int v() { return 7; } }\n",
+		"Foo$Ab$C.java": "package p;\npublic class Foo$Ab$C { public int w() { return 8; } }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	classes := filepath.Join(dir, "c")
+	if out, err := exec.Command("javac", "--release", "21", "-d", classes, filepath.Join(dir, "Foo.java"), filepath.Join(dir, "Foo$Abc.java"), filepath.Join(dir, "Foo$Ab$C.java")).CombinedOutput(); err != nil {
+		t.Fatalf("javac: %v\n%s", err, out)
+	}
+	// Foo$Ab$C: Foo declares Ab, and Ab declares nothing of that name.
+	code, stdout, stderr := runDecompile(t, filepath.Join(classes, "p", "Foo.class"), filepath.Join(classes, "p", "Foo$Abc.class"), filepath.Join(classes, "p", "Foo$Ab$C.class"))
+	if code != 0 || !strings.Contains(stdout, "return 7;") || !strings.Contains(stdout, "return 8;") || stderr != "" {
+		t.Errorf("expected Foo$Abc written plainly, without a note (exit %d):\n%s\n%s", code, stdout, stderr)
 	}
 }

@@ -1,12 +1,15 @@
 package compiler
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Port of src/compiler/decompile.test.ts (tiers 2 and 3). The text baselines are
@@ -776,11 +779,16 @@ var reconstructions = []struct {
 		// The `finally` is copied into every exit path and the rest is guarded
 		// by a catch-all that rethrows. Reading the copy back needs javac's
 		// layout, where the copy sits right after the protected range; this
-		// emitter lays the same method out differently, so it says so instead.
+		// emitter lays the same method out differently, so what comes back is
+		// the catch-all itself - the same code, with the copy left where it is.
 		name: "Finally",
 		source: "class Finally { static int f(int a) { try { return a; }" +
 			" finally { java.lang.System.out.println(a); } } }",
-		want: []string{"cappu: a finally with more than one way out"},
+		want: []string{
+			"} catch (java.lang.Throwable e) {", "throw e;",
+			"java.lang.System.out.println(arg0);\nreturn var1;",
+		},
+		reject: []string{"UnsupportedOperationException"},
 	},
 	{
 		name: "Blank",
@@ -2376,9 +2384,9 @@ func TestDecompileWritesASerializableLambda(t *testing.T) {
 }
 
 // A supertype whose type arguments name a type variable of the enclosing
-// method cannot be written here - the variable has no name this phase keeps -
-// but the erased type still compiles and the body still overrides what it came
-// from, as long as javac wrote no bridge.
+// method cannot be written as it was - the variable has no name this phase
+// keeps - but with what the variable erases to it still compiles and the body
+// still overrides what it came from.
 func TestDecompileErasesASupertypeItCannotName(t *testing.T) {
 	if !hasTool("javac") || !hasTool("java") {
 		t.Skip("no JDK (javac/java)")
@@ -2412,8 +2420,9 @@ public class Erased {
 	if strings.Contains(decompiled, "/* cappu:") {
 		t.Errorf("expected no bail:\n%s", decompiled)
 	}
-	// The type variable goes, the type arguments this phase can name stay.
-	if !strings.Contains(decompiled, "new java.util.Iterator() {") {
+	// The type variable is written as what it erases to, the type arguments
+	// this phase can name stay.
+	if !strings.Contains(decompiled, "new java.util.Iterator<java.lang.Object>() {") {
 		t.Errorf("expected the erased supertype:\n%s", decompiled)
 	}
 	if !strings.Contains(decompiled, "new java.util.function.Function<java.lang.String, java.lang.Integer>() {") {
@@ -2676,6 +2685,42 @@ func TestDecompileWritesAPatternSwitch(t *testing.T) {
 	compileWithJavac(t, again, "Patterns", source)
 	expected := runJava(t, dir, "Patterns")
 	if actual := runJava(t, again, "Patterns"); actual != expected || expected != "I1N1.5?0S2DabSNNi2s2d\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// With a debug table every read of a variable is looked up by its row, and
+// the one a case label binds has a row too, beginning after javac's store:
+// without it the arm's first read found no variable at all. The label takes
+// the name source gave it.
+func TestDecompileWritesAPatternSwitchWithADebugTable(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	source := `public class DebugPatterns {
+  static void n(Object p) {
+    switch (p) {
+      case String s -> { if (s.isEmpty()) return; System.out.print(s); }
+      case Integer i -> System.out.print(i + 1);
+      default -> System.out.print("d");
+    }
+  }
+  public static void main(String[] z) { n(""); n("x"); n(2); n(1.5); System.out.println(); }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavacFlags(t, dir, "DebugPatterns", source, "", true)
+	decompiled, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(decompiled, "/* cappu:") ||
+		!strings.Contains(decompiled, "case java.lang.String s") || !strings.Contains(decompiled, "case java.lang.Integer i") {
+		t.Errorf("expected the arms with the names source gave:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "DebugPatterns", decompiled)
+	if actual, expected := runJava(t, again, "DebugPatterns"), runJava(t, dir, "DebugPatterns"); actual != expected || actual != "x3d\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
 	}
 }
@@ -3140,6 +3185,20 @@ const switchExprSource = `public class SwitchExpr {
   static boolean mix(int k, boolean f) { return switch (k) { case 5 -> false; case 4 -> true; case 6 -> f; default -> t(k); }; }
   static int len(int k) { return (switch (k) { case 0 -> "a"; default -> "bb"; }).length(); }
   static int neg(int k) { return -switch (k) { case 0 -> 1; default -> 2; } + 5; }
+  // A value already on the stack under the selector: the receiver of a field
+  // store, an argument in front of it, an operand to its left.
+  String f;
+  static SwitchExpr store(int k) { SwitchExpr s = new SwitchExpr(); s.f = switch (k) { case 0 -> "x"; default -> throw new IllegalStateException(); }; return s; }
+  static String arg(int k) { return String.valueOf(k).concat(switch (k) { case 0 -> "a"; default -> "b"; }); }
+  // Inside an if, with an arm that throws, the end of the statement is the
+  // if's - the value still lands where the other arms meet.
+  static SwitchExpr nested(int k, boolean b) { SwitchExpr s = new SwitchExpr(); if (b) s.f = switch (k) { case 0 -> "x"; case 1 -> "y"; default -> throw new IllegalStateException(); }; else s.f = "n"; return s; }
+  // A switch expression as the value of an arm: of another one, over an int
+  // and over a String, and of a conditional.
+  static String nest(int a, int b) { return switch (a) { case 1 -> switch (b) { case 1 -> "11"; default -> throw new IllegalStateException(); }; case 2 -> "2"; default -> "d"; }; }
+  static String nestS(String a, int b) { return switch (b) { case 1 -> switch (a) { case "x" -> "1x"; default -> "1?"; }; default -> "d"; }; }
+  static String cond(boolean c, int k) { return c ? switch (k) { case 0 -> "z"; default -> "nz"; } : "f"; }
+  static int sum(int k) { return k * 3 + switch (k) { case 1 -> { System.out.print("one "); yield k + 1; } default -> 0; }; }
 }
 `
 
@@ -3165,6 +3224,13 @@ func TestDecompileWritesASwitchExpression(t *testing.T) {
 		// It binds like a cast: parenthesized under a member access, bare as an operand.
 		"return (switch (arg0) { case 0 -> \"a\"; default -> \"bb\"; }).length();",
 		"return -(switch (arg0) { case 0 -> 1; default -> 2; }) + 5;",
+		"var1.f = switch (arg0) { case 0 -> \"x\"; default -> throw new java.lang.IllegalStateException(); };",
+		".concat(switch (arg0) { case 0 -> \"a\"; default -> \"b\"; });",
+		"var2.f = switch (arg0) { case 0 -> \"x\"; case 1 -> \"y\"; default -> throw new java.lang.IllegalStateException(); };",
+		"return switch (arg0) { case 1 -> switch (arg1) { case 1 -> \"11\"; default -> throw new java.lang.IllegalStateException(); }; case 2 -> \"2\"; default -> \"d\"; };",
+		"return switch (arg1) { case 1 -> switch (arg0) { case \"x\" -> \"1x\"; default -> \"1?\"; }; default -> \"d\"; };",
+		"return arg0 ? switch (arg1) { case 0 -> \"z\"; default -> \"nz\"; } : \"f\";",
+		"return arg0 * 3 + switch (arg0) { case 1 -> { java.lang.System.out.print(\"one \"); yield arg0 + 1; } default -> 0; };",
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("expected %q:\n%s", want, source)
@@ -3177,15 +3243,392 @@ func TestDecompileWritesASwitchExpression(t *testing.T) {
 	compileWithJavac(t, again, "SwitchExpr", source)
 	driver := `public class SwitchExprDriver {
   public static void main(String[] z) {
-    System.out.println(SwitchExpr.name(0) + SwitchExpr.name(2) + " " + SwitchExpr.val(1) + SwitchExpr.val(9) + " " + SwitchExpr.mixed(1) + SwitchExpr.mixed(5) + " " + SwitchExpr.wide(0) + SwitchExpr.wide(2) + " " + SwitchExpr.stmt(1) + SwitchExpr.stmt(0) + " " + SwitchExpr.mix(5, true) + SwitchExpr.mix(6, true) + " " + SwitchExpr.len(1) + SwitchExpr.neg(1));
+    System.out.println(SwitchExpr.name(0) + SwitchExpr.name(2) + " " + SwitchExpr.val(1) + SwitchExpr.val(9) + " " + SwitchExpr.mixed(1) + SwitchExpr.mixed(5) + " " + SwitchExpr.wide(0) + SwitchExpr.wide(2) + " " + SwitchExpr.stmt(1) + SwitchExpr.stmt(0) + " " + SwitchExpr.mix(5, true) + SwitchExpr.mix(6, true) + " " + SwitchExpr.len(1) + SwitchExpr.neg(1) + " " + SwitchExpr.store(0).f + SwitchExpr.arg(0) + SwitchExpr.arg(4) + SwitchExpr.sum(1) + SwitchExpr.sum(2) + SwitchExpr.nested(1, true).f + SwitchExpr.nested(5, false).f + " " + SwitchExpr.nest(1, 1) + SwitchExpr.nest(2, 0) + SwitchExpr.nestS("x", 1) + SwitchExpr.nestS("y", 1) + SwitchExpr.nestS("x", 3) + SwitchExpr.cond(true, 0) + SwitchExpr.cond(true, 4) + SwitchExpr.cond(false, 0));
     try { SwitchExpr.name(7); } catch (IllegalArgumentException e) { System.out.println(e.getMessage()); }
   }
 }`
 	compileWithJavacOn(t, dir, "SwitchExprDriver", driver, dir)
 	expected := runJava(t, dir, "SwitchExprDriver")
 	actual := runJava(t, again+string(os.PathListSeparator)+dir, "SwitchExprDriver")
-	if actual != expected || actual != "zerosmall 2119 7null 15 121 falsetrue 23\nk=7\n" {
+	if actual != expected || actual != "one zerosmall 2119 7null 15 121 falsetrue 23 x0a4b56yn 1121x1?dznzf\nk=7\n" {
 		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// An anonymous class whose supertype names a type variable of the method
+// around it is written with what that variable erases to: the method's own
+// types are written erased, and the body's methods take exactly the erasure -
+// a bound that is a class, a bound that is another variable, or Object.
+const typeVariableAnonSource = `import java.util.*;
+import java.util.function.*;
+public class TypeVarAnon<C extends CharSequence> {
+  static <T> Function<T, String> show() { return new Function<T, String>() { public String apply(T t) { return "<" + t + ">"; } }; }
+  static <M extends Number, N extends M> Function<N, Integer> num() { return new Function<N, Integer>() { public Integer apply(N n) { return n.intValue() + 1; } }; }
+  static <T> List<T> wrap(T t) { return new AbstractList<T>() { public T get(int i) { return t; } public int size() { return 2; } }; }
+  Function<C, Integer> len() { return new Function<C, Integer>() { public Integer apply(C c) { return c.length(); } }; }
+  public static void main(String[] z) { System.out.println(TypeVarAnon.<Integer>show().apply(3) + TypeVarAnon.<Number, Double>num().apply(2.5) + wrap("x") + new TypeVarAnon<String>().len().apply("abcd")); }
+}
+`
+
+func TestDecompileErasesATypeVariableOfAnAnonymousSupertype(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "TypeVarAnon", typeVariableAnonSource)
+	siblings := func(binaryName string) ([]byte, bool) {
+		b, err := os.ReadFile(filepath.Join(dir, binaryName+".class"))
+		return b, err == nil
+	}
+	decompiled, err := DecompileWith(readFile(t, classFile), siblings)
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"new java.util.function.Function<java.lang.Object, java.lang.String>() {",
+		"new java.util.function.Function<java.lang.Number, java.lang.Integer>() {",
+		"new java.util.AbstractList<java.lang.Object>() {",
+		"new java.util.function.Function<java.lang.CharSequence, java.lang.Integer>() {",
+	} {
+		if !strings.Contains(decompiled, want) {
+			t.Errorf("expected %q:\n%s", want, decompiled)
+		}
+	}
+	if strings.Contains(decompiled, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "TypeVarAnon", decompiled)
+	if actual, expected := runJava(t, again, "TypeVarAnon"), runJava(t, dir, "TypeVarAnon"); actual != expected || actual != "<3>3[x, x]4\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// An anonymous class with a field initializer keeps an instance block, and
+// javac's store of the enclosing instance is no statement of it: its reads
+// become the outer class's own this, which source can never assign.
+func TestDecompileDropsTheEnclosingStoreFromAnInitializer(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	source := `public class Outerly {
+  int k = 3;
+  Runnable f() { return new Runnable() { private boolean done = false; public void run() { done = !done; System.out.println(k + " " + done); } }; }
+  public static void main(String[] z) { new Outerly().f().run(); }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Outerly", source)
+	siblings := func(binaryName string) ([]byte, bool) {
+		b, err := os.ReadFile(filepath.Join(dir, binaryName+".class"))
+		return b, err == nil
+	}
+	decompiled, err := DecompileWith(readFile(t, classFile), siblings)
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(decompiled, "Outerly.this = ") || !strings.Contains(decompiled, "this.done = false;") {
+		t.Errorf("expected the initializer without the enclosing store:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Outerly", decompiled)
+	if actual, expected := runJava(t, again, "Outerly"), runJava(t, dir, "Outerly"); actual != expected || actual != "3 true\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// A local declared inside a loop or a branch and captured by a lambda is
+// declared there again, at its one store: hoisted to the top of the body, a
+// variable written once per turn is written in every turn, and a lambda cannot
+// capture it. One read outside that block keeps it where it was.
+const capturedSource = `import java.util.*;
+import java.util.function.*;
+public class Captured {
+  static List<IntSupplier> loop(int n) { List<IntSupplier> r = new ArrayList<>(); for (int i = 0; i < n; i++) { int x = i * 2; r.add(() -> x); } return r; }
+  static Supplier<String> branch(boolean b) { if (b) { String s = "a" + b; return () -> s; } return null; }
+  static int after(String v) { final int x; try { x = Integer.parseInt(v); } catch (NumberFormatException e) { throw new IllegalStateException(e); } IntSupplier f = () -> x; return f.getAsInt() + x; }
+}
+`
+
+func TestDecompileDeclaresACapturedLocalAtItsStore(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Captured", capturedSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{"int var3 = var2 * 2;", "java.lang.String var1 = \"a\" + arg0;"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	// after reads x past the try, so its declaration cannot move into it,
+	// and hoisted it is no variable a lambda can capture.
+	if strings.Contains(source, "int var1 = java.lang.Integer.parseInt(arg0);") ||
+		!strings.Contains(source, "cappu: a captured variable that is not final") {
+		t.Errorf("expected the declaration of after's local to stay put:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Captured", source)
+	driver := `public class CapturedDriver {
+  public static void main(String[] z) {
+    StringBuilder out = new StringBuilder();
+    for (java.util.function.IntSupplier f : Captured.loop(3)) out.append(f.getAsInt());
+    out.append(" ").append(Captured.branch(true).get()).append(Captured.branch(false));
+    System.out.println(out);
+  }
+}`
+	compileWithJavacOn(t, dir, "CapturedDriver", driver, dir)
+	expected := runJava(t, dir, "CapturedDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "CapturedDriver")
+	if actual != expected || actual != "024 atruenull\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// javac lowers a `switch` over a String to two: one over the hash that stores
+// the matching label's index, one over that index with the bodies. Written
+// back it is the one source wrote, over the String and with its labels -
+// two of them sharing a case, two sharing a hash ("Aa" and "BB").
+const stringSwitchSource = `public class StringSwitch {
+  static int stmt(String s) {
+    int r = 0;
+    switch (s) { case "one": r = 1; break; case "two": case "deux": r = 2; case "Aa": r += 10; break; case "BB": r = 20; break; default: r = -1; }
+    return r;
+  }
+  static String expr(String s) { return switch (s) { case "a", "b" -> "ab"; case "Aa" -> "Aa"; case "BB" -> "BB"; default -> "?"; }; }
+  static void noDefault(String s) { switch (s) { case "x": System.out.print("x"); } }
+  String f;
+  static StringSwitch store(String s) { StringSwitch t = new StringSwitch(); t.f = switch (s) { case "k" -> "K"; default -> throw new IllegalStateException(s); }; return t; }
+}
+`
+
+func TestDecompileWritesASwitchOverAString(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "StringSwitch", stringSwitchSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"switch (arg0) {", "case \"two\":", "case \"deux\":", "case \"Aa\":",
+		"return switch (arg0) { case \"a\", \"b\" -> \"ab\"; case \"Aa\" -> \"Aa\"; case \"BB\" -> \"BB\"; default -> \"?\"; };",
+		"var1.f = switch (arg0) { case \"k\" -> \"K\"; default -> throw new java.lang.IllegalStateException(arg0); };",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	for _, unwanted := range []string{"/* cappu:", "hashCode()", ".equals("} {
+		if strings.Contains(source, unwanted) {
+			t.Errorf("expected no %q:\n%s", unwanted, source)
+		}
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "StringSwitch", source)
+	driver := `public class StringSwitchDriver {
+  public static void main(String[] z) {
+    for (String s : new String[] {"one", "two", "deux", "Aa", "BB", "zz"}) System.out.print(StringSwitch.stmt(s) + " ");
+    for (String s : new String[] {"a", "b", "Aa", "BB", "C#"}) System.out.print(StringSwitch.expr(s) + " ");
+    StringSwitch.noDefault("x"); StringSwitch.noDefault("y");
+    System.out.print(" " + StringSwitch.store("k").f);
+    try { StringSwitch.store("q"); } catch (IllegalStateException e) { System.out.print(" " + e.getMessage()); }
+    try { StringSwitch.expr(null); } catch (NullPointerException e) { System.out.print(" npe"); }
+    System.out.println();
+  }
+}`
+	compileWithJavacOn(t, dir, "StringSwitchDriver", driver, dir)
+	expected := runJava(t, dir, "StringSwitchDriver")
+	actual := runJava(t, again+string(os.PathListSeparator)+dir, "StringSwitchDriver")
+	if actual != expected || actual != "1 12 12 10 20 -1 ab ab Aa BB ? x K q npe\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// A loop whose test assigns - `(item = p.item) == null` - and whose body ends
+// in `if (c) break;` leaves through a lone goto to where the test leaves to:
+// that is the end of the loop, not the start of a way out of its own. A
+// labeled continue from inside it restarts the loop around it.
+func TestDecompileEndsALoopWhereItsTestLeavesTo(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	source := `public class Assigning {
+  static class Node { Object item; Node next, prev; Node(Object i, Node n) { item = i; next = n; } }
+  static Object last(Node p) { Object item; while ((item = p.item) == null) { p = p.next; if (p == null) break; } return item; }
+  static Object peek(Node head) {
+    restart: for (;;) {
+      Object item;
+      Node first = head, p = first;
+      while ((item = p.item) == null) {
+        if (p == (p = p.next)) continue restart;
+        if (p == null) break;
+      }
+      if (first.prev != null) continue restart;
+      return item;
+    }
+  }
+  public static void main(String[] z) {
+    Node n = new Node(null, new Node(null, new Node("x", null)));
+    System.out.println(last(n) + " " + last(new Node(null, null)) + " " + peek(n));
+  }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Assigning", source)
+	decompiled, err := DecompileWith(readFile(t, classFile), siblingsIn(dir))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(decompiled, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Assigning", decompiled)
+	if actual, expected := runJava(t, again, "Assigning"), runJava(t, dir, "Assigning"); actual != expected || actual != "x null x\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// A `while (true)` whose every way out returns has no end of its own: it is
+// left only by leaving the method, from more than one place.
+func TestDecompileWritesALoopLeftOnlyByReturns(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	source := `public class Returning {
+  Object cache; int gen = 2; int tries;
+  Object make(int g) { tries++; return tries < 3 ? null : "v" + g; }
+  Object data() {
+    while (true) {
+      Object d = cache;
+      if (d != null && tries > 5) return d;
+      Object n = make(gen);
+      if (n != null) return n;
+    }
+  }
+  public static void main(String[] z) { Returning r = new Returning(); System.out.println(r.data() + " " + r.tries); }
+}
+`
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Returning", source)
+	decompiled, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(decompiled, "/* cappu:") || !strings.Contains(decompiled, "while (true) {") {
+		t.Errorf("expected the endless loop:\n%s", decompiled)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Returning", decompiled)
+	if actual, expected := runJava(t, again, "Returning"), runJava(t, dir, "Returning"); actual != expected || actual != "v2 3\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// Three arms of a conditional that are more than one block that pushes: a
+// conditional nested in an operand, a field post-increment, and the variable a
+// type pattern in the condition binds.
+const ternaryArmsSource = `public class TernaryArms {
+  byte[] buf = {7, 8, 9}; int pos, len = 3;
+  static Object nested(String x, boolean b) { return x == null ? null : new StringBuilder(b ? "A" : "B"); }
+  int next() { return pos < len ? buf[pos++] & 0xff : -1; }
+  static int bound(Object o) { return o instanceof String s ? s.length() : -1; }
+  public static void main(String[] z) {
+    TernaryArms t = new TernaryArms();
+    System.out.println(nested(null, true) + " " + nested("", false) + " " + t.next() + t.next() + t.next() + t.next() + " " + bound("abc") + bound(4));
+  }
+}
+`
+
+func TestDecompileWritesConditionalArmsOfMoreThanOneBlock(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	for _, debug := range []bool{false, true} {
+		dir := t.TempDir()
+		classFile := compileWithJavacFlags(t, dir, "TernaryArms", ternaryArmsSource, "", debug)
+		source, err := Decompile(readFile(t, classFile))
+		if err != nil {
+			t.Fatalf("decompile: %v", err)
+		}
+		for _, want := range []string{
+			"? null : new java.lang.StringBuilder(",
+			"this.buf[this.pos++] & 255 : -1;",
+			"instanceof java.lang.String ",
+		} {
+			if !strings.Contains(source, want) {
+				t.Errorf("expected %q:\n%s", want, source)
+			}
+		}
+		if strings.Contains(source, "/* cappu:") {
+			t.Errorf("expected no bail:\n%s", source)
+		}
+		again := filepath.Join(dir, "again")
+		compileWithJavac(t, again, "TernaryArms", source)
+		if actual, expected := runJava(t, again, "TernaryArms"), runJava(t, dir, "TernaryArms"); actual != expected || actual != "null B 789-1 3-1\n" {
+			t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+		}
+	}
+}
+
+// An arm of a switch expression that declares a local is a block in source,
+// and the store goes into it in front of the yield. The block becomes text, so
+// only a variable whose type the debug table gives is written there; one this
+// phase only guessed could still be retyped, and is refused.
+const yieldLocalSource = `public class YieldLocal {
+  static String b(Object o) { return switch (o) { case Integer i -> { int j = i + 1; yield "i" + j; } default -> "d"; }; }
+  static int c(int k) { return switch (k) { case 1 -> { String s = "ab" + k; int n = s.length(); n++; yield n * 2; } case 2 -> { long w = k; yield (int) (w << 3); } default -> 0; }; }
+  // Two arms declaring one name in one slot: two variables, each in its block.
+  static int d(int k) { return switch (k) { case 1 -> { int t = k * 2; yield t; } case 2 -> { int t = k * 3; yield t + 1; } default -> 0; }; }
+  public static void main(String[] z) { System.out.println(b(4) + b("x") + c(1) + c(2) + c(3) + d(1) + d(2)); }
+}
+`
+
+func TestDecompileWritesALocalInAnArmOfASwitchExpression(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavacFlags(t, dir, "YieldLocal", yieldLocalSource, "", true)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	for _, want := range []string{
+		"case java.lang.Integer i -> { int j = i.intValue() + 1; yield \"i\" + j; }",
+		"case 1 -> { java.lang.String s = \"ab\" + k; int n = s.length(); n++; yield n * 2; }",
+		"case 2 -> { long w = (long) k; yield (int) (w << 3); }",
+		// The second is another variable; its name stays taken by the first,
+		// so a variable hoisted past the switch cannot be declared over it.
+		"case 1 -> { int t = k * 2; yield t; } case 2 -> { int t_2 = k * 3; yield t_2 + 1; }",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "YieldLocal", source)
+	if actual, expected := runJava(t, again, "YieldLocal"), runJava(t, dir, "YieldLocal"); actual != expected || actual != "i5d816027\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+	// Without the table the type is a guess, and the arm is refused.
+	bare := filepath.Join(dir, "bare")
+	guessed, err := Decompile(readFile(t, compileWithJavac(t, bare, "YieldLocal", yieldLocalSource)))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if !strings.Contains(guessed, "/* cappu:") {
+		t.Errorf("expected the guessed arms to be refused:\n%s", guessed)
 	}
 }
 
@@ -3720,7 +4163,11 @@ func runJava(t *testing.T, classPath, name string) string {
 // asserts have to run.
 func runJavaWith(t *testing.T, classPath, name string, flags ...string) string {
 	t.Helper()
-	out, err := exec.Command("java", append(append(flags, "-cp", classPath), name)...).Output()
+	// A reconstruction that loops where the original ends would otherwise
+	// hold the whole run until go test gives up, and leave the JVM behind.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "java", append(append(flags, "-cp", classPath), name)...).Output()
 	if err != nil {
 		t.Fatalf("java: %v", err)
 	}
@@ -3985,14 +4432,15 @@ func TestDecompileReconstructsJavacLambdas(t *testing.T) {
 	}
 }
 
-// A lambda that captures a variable this hoisted to the top of the method is not
-// effectively final, and Java takes no other kind.
+// A lambda that captures a variable stored once in a loop body takes it from
+// there: hoisted to the top of the method it would be written in every turn
+// and not effectively final, so the declaration is the store, as source wrote.
 const hoistedCaptureSource = `import java.util.function.*;
 public class Hoisted {
   static int f(int n) { int t = 0; for (int i = 0; i < n; i++) { int j = i; Supplier<Integer> s = () -> j * 2; t += s.get(); } return t; }
 }`
 
-func TestDecompileSaysWhenALambdaCaptureCannotBeFinal(t *testing.T) {
+func TestDecompileDeclaresALoopCaptureInTheLoop(t *testing.T) {
 	if !hasTool("javac") {
 		t.Skip("no JDK (javac)")
 	}
@@ -4002,9 +4450,10 @@ func TestDecompileSaysWhenALambdaCaptureCannotBeFinal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decompile: %v", err)
 	}
-	if !strings.Contains(source, "cappu: a captured variable that is not final") {
-		t.Errorf("expected the bail, got:\n%s", source)
+	if strings.Contains(source, "/* cappu:") || !strings.Contains(source, "int var3 = var2;") {
+		t.Errorf("expected the capture declared at its store, got:\n%s", source)
 	}
+	compileWithJavac(t, filepath.Join(dir, "again"), "Hoisted", source)
 }
 
 // A `while (true)` opens with the block a `continue` jumps to, and a
@@ -4496,6 +4945,168 @@ public class Ways {
 }
 `
 
+// A try-with-resources is a catch-all this phase does not read as a `finally`:
+// javac writes the close twice and the suppressed-exception dance around the
+// second one. What is left is `catch (Throwable t) { ..; throw t; }`, which
+// catches the same things and runs the same code - the close on the way out
+// stays where javac put it, because that is what the bytecode does.
+const resourceSource = `import java.io.*;
+public class Resources {
+  static int one(String n) throws IOException { try (StringReader r = new StringReader(n)) { return r.read(); } }
+  static int two(String a, String b) throws IOException {
+    try (StringReader x = new StringReader(a); StringReader y = new StringReader(b)) { return x.read() + y.read(); }
+  }
+  static String boom() {
+    try (StringReader r = new StringReader("z")) { throw new IllegalStateException("x"); }
+    catch (IllegalStateException e) { return "c" + e.getMessage(); }
+  }
+  // The close really ran: a reader that is closed throws on the next read.
+  static String closed() throws IOException {
+    StringReader kept;
+    try (StringReader r = new StringReader("ab")) { kept = r; }
+    try { kept.read(); return "open"; } catch (IOException e) { return "closed"; }
+  }
+  public static void main(String[] z) throws Exception {
+    System.out.println(one("ab") + " " + two("c", "de") + " " + boom() + " " + closed());
+  }
+}
+`
+
+func TestDecompileReadsATryWithResourcesAsACatchAll(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Resources", resourceSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	if !strings.Contains(source, "catch (java.lang.Throwable") || !strings.Contains(source, ".addSuppressed(") {
+		t.Errorf("expected the catch-all written back:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Resources", source)
+	expected := runJava(t, dir, "Resources")
+	actual := runJava(t, again, "Resources")
+	if actual != expected || actual != "97 199 cx closed\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// A type pattern binds its variable where the test it belongs to is true, and
+// javac writes the binding as a cast and a store at the head of the block the
+// test guards - which is in the middle of the condition when the pattern is
+// one term of a short-circuit.
+const patternSource = `public class Patterns {
+  int f;
+  Patterns(int f) { this.f = f; }
+  public boolean equals(Object o) { return o == this || (o instanceof Patterns p && this.f == p.f); }
+  public int hashCode() { return this.f; }
+  static String kind(Object o) {
+    if (o instanceof String s && s.length() > 2) return "s" + s;
+    if (o instanceof int[] a && a.length > 1) return "a" + a[1];
+    return "?";
+  }
+  static boolean both(Object a, Object b) { return a instanceof String x && b instanceof String y && x.length() == y.length(); }
+  static String negated(Object o) { if (!(o instanceof String s) || s.isEmpty()) return "no"; return s; }
+  // The identity check in front is a statement of its own, so the pattern is
+  // the head of the chain, not a term folded into one already written.
+  static boolean same(Object a, Object b) { if (a == b) return true; return b instanceof String s && s.equals(a); }
+  // A cast and a store right after a test that throws is not a pattern - the
+  // test does not guard a condition, it guards a statement - and the variable
+  // still has to be declared where it is written.
+  static String guarded(Object k, Object p) {
+    if (!(k instanceof Integer)) throw new IllegalArgumentException("x");
+    Integer n = (Integer) k;
+    if (p != null) return "p" + n;
+    return "n" + n.intValue();
+  }
+  public static void main(String[] z) {
+    System.out.println(new Patterns(1).equals(new Patterns(1)) + " " + new Patterns(1).equals("x")
+      + " " + kind("abc") + kind("a") + kind(new int[]{7, 8}) + kind(1)
+      + " " + both("ab", "cd") + both("ab", "c") + both("ab", 1)
+      + " " + negated("hi") + negated("") + negated(1)
+      + " " + same("a", "a") + same("a", "b") + same("a", 1)
+      + " " + guarded(1, null) + guarded(2, "q"));
+  }
+}
+`
+
+func TestDecompileReconstructsATypePattern(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Patterns", patternSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	// The pattern declares the variable, so nothing else may.
+	for _, want := range []string{"instanceof Patterns ", "instanceof java.lang.String "} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected %q:\n%s", want, source)
+		}
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Patterns", source)
+	expected := runJava(t, dir, "Patterns")
+	actual := runJava(t, again, "Patterns")
+	if actual != expected || expected == "" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
+// A `finally` whose body branches: javac writes the branch into every copy
+// too, with the targets moved - the copy on the way out is the same code at
+// another place, and reading one back means matching it where the jumps differ.
+const finallyBranchingSource = `public class Branching {
+  static StringBuilder log = new StringBuilder();
+  static int n;
+  static int guarded(String s) { try { n += 1; return s.length(); } finally { if (s != null) log.append("g"); } }
+  static int either(int a) { try { n += a; return n; } finally { if (a > 0) log.append("+"); else log.append("-"); } }
+  static int leaving(int a) { try { if (a == 0) return -1; n += a; } finally { if (a != 0) log.append("l"); } return n; }
+  public static void main(String[] z) {
+    System.out.println(guarded("ab") + " " + either(2) + either(-1) + " " + leaving(0) + leaving(3) + " " + log + " " + n);
+  }
+}
+`
+
+func TestDecompileReconstructsAFinallyThatBranches(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	dir := t.TempDir()
+	classFile := compileWithJavac(t, dir, "Branching", finallyBranchingSource)
+	source, err := Decompile(readFile(t, classFile))
+	if err != nil {
+		t.Fatalf("decompile: %v", err)
+	}
+	if strings.Contains(source, "/* cappu:") {
+		t.Errorf("expected no bail:\n%s", source)
+	}
+	// Three statements, each body written once - the copies on the way out are
+	// javac's, and a branch in one is no reason to write it twice.
+	if strings.Count(source, "finally {") != 3 || strings.Count(source, `log.append("g")`) != 1 ||
+		strings.Count(source, `log.append("+")`) != 1 || strings.Count(source, `log.append("l")`) != 1 {
+		t.Errorf("expected each finally body once:\n%s", source)
+	}
+	again := filepath.Join(dir, "again")
+	compileWithJavac(t, again, "Branching", source)
+	expected := runJava(t, dir, "Branching")
+	actual := runJava(t, again, "Branching")
+	if actual != expected || actual != "2 32 -15 g+-l 5\n" {
+		t.Errorf("the decompiled class runs differently: %q vs %q", actual, expected)
+	}
+}
+
 func TestDecompileReconstructsAFinallyWithSeveralWaysOut(t *testing.T) {
 	if !hasTool("javac") || !hasTool("java") {
 		t.Skip("no JDK (javac/java)")
@@ -4515,7 +5126,7 @@ func TestDecompileReconstructsAFinallyWithSeveralWaysOut(t *testing.T) {
 		"try {\ntry {\nvar1 = 10 / arg0;\n} catch (java.lang.ArithmeticException e) {\nvar1 = -1;\n}\n} finally {\nn = n + 2;",
 		"try {\ntry {\nvar1 = 10 / arg0;\n} finally {\nn = n + 3;\n}\n} finally {\nn = n + 4;",
 		"throw e;\n}\nreturn var1;\n} finally {\nn = n + 7;",
-		"while (true) {\ntry {\narg0++;", "break;\n}\ncontinue;\n} finally {\nlog.append(\"W\");\n}\n}\nreturn arg0;",
+		"while (true) {\ntry {\narg0++;", "break;\n}\n} finally {\nlog.append(\"W\");\n}\n}\nreturn arg0;",
 		"continue;\n}\nif (var5 < 0) {\nbreak;", "var6 = -var1;\nreturn var6;\n} else {\nvar1 = var1 + var5;\n}\n} finally {\nlog.append(\"R\");",
 	} {
 		if !strings.Contains(source, want) {
@@ -5019,5 +5630,645 @@ func decompileEveryClassIn(t *testing.T, module string) {
 	if len(failures) > 0 {
 		t.Errorf("%d of %d classes did not come back as parseable Java: %v",
 			len(failures), classes, failures[:min(10, len(failures))])
+	}
+}
+
+// The oracle the bail contract rests on and the suite did not have: what this
+// phase writes has to be Java. Every class of a program is decompiled, the
+// whole set is handed back to javac, and the program is run again - a
+// reconstruction that does not compile, or that behaves differently, fails
+// here. Comparing text against a baseline cannot see either.
+var compilesAndRuns = map[string]string{
+	// A nested class is declared by the file that names it, and names itself
+	// the way source does - a node whose own field is of its own type is the
+	// shape that showed the binary name leaking through.
+	"Nested": `public class Nested {
+  static class Node { int v; Node next; Node(int v) { this.v = v; } int sum() { return v + (next == null ? 0 : next.sum()); } }
+  interface Named { String name(); }
+  enum Kind { ONE, TWO }
+  record Pair(int a, int b) { int total() { return a + b; } }
+  static Node chain() { Node head = new Node(1); head.next = new Node(2); return head; }
+  public static void main(String[] z) {
+    Named named = () -> "n";
+    System.out.println(chain().sum() + named.name() + Kind.TWO + new Pair(3, 4).total());
+  }
+}
+`,
+	// An inner class is handed the instance it was created against: the field
+	// that holds it, the parameter that fills it and the store in front of the
+	// `super(..)` are all javac's where the file declares the class, and a
+	// field source wrote under that name is not.
+	"Holding": `public class Holding {
+  int base = 7;
+  class Inner {
+    Holding this$0;
+    int k;
+    Inner(int k) { this.k = k; }
+    Inner() { this(1); }
+    int read() { return this.this$0 == null ? -1 : this.this$0.base; }
+    int mine() { return base + k; }
+  }
+  class Sub extends Inner { Sub(int k) { super(k); } int twice() { return mine() * 2; } }
+  public static void main(String[] z) {
+    Holding a = new Holding();
+    System.out.println(a.new Inner(2).mine() + "" + a.new Inner().mine() + a.new Inner(1).read() + a.new Sub(3).twice());
+  }
+}
+`,
+	// An inner class that builds another of its own kind: javac hands the
+	// enclosing instance over as the first argument, and source wrote it as
+	// the qualifier in front of `new` - or wrote nothing, where a `this(..)`
+	// passes the instance the constructor already has.
+	"Chained": `public class Chained {
+  final int base;
+  Chained(int base) { this.base = base; }
+  class Step {
+    final int n;
+    Step(int n) { this.n = n; }
+    Step() { this(1); }
+    Step next() { return new Step(n + 1); }
+    Step first() { return new Chained(base + 10).new Step(n); }
+    int total() { return base + n; }
+  }
+  public static void main(String[] z) {
+    Chained c = new Chained(100);
+    Step s = c.new Step().next();
+    System.out.println(s.total() + "" + s.first().total() + c.new Step(5).total());
+  }
+}
+`,
+	// Anonymous classes: a capture, an enclosing instance, one inside another.
+	"Anon": `public class Anon {
+  int field = 5;
+  static Runnable captures(String s) { return () -> System.out.print(s); }
+  Runnable outer() { return new Runnable() { public void run() { System.out.print(field); } }; }
+  static Runnable nestedAnon(String a) {
+    return new Runnable() { public void run() {
+      Runnable inner = new Runnable() { public void run() { System.out.print(a); } };
+      inner.run(); System.out.print(a);
+    } };
+  }
+  public static void main(String[] z) {
+    captures("c").run(); new Anon().outer().run(); nestedAnon("n").run();
+    System.out.println();
+  }
+}
+`,
+	// The shapes earlier commits reconstructed: an assert, an enum with
+	// arguments and a constant body, a pattern switch.
+	"Shapes": `enum Op { PLUS("+") { int apply(int a, int b) { return a + b; } }, TIMES("*") { int apply(int a, int b) { return a * b; } };
+  final String sym; Op(String sym) { this.sym = sym; } abstract int apply(int a, int b); }
+public class Shapes {
+  static int checked(int v) { assert v > 0 : "v=" + v; return v; }
+  static String kind(Object o) {
+    switch (o) { case Integer i -> { return "i" + i; } case String s -> { return "s" + s.length(); } default -> { return "d"; } }
+  }
+  public static void main(String[] z) {
+    System.out.println(Op.PLUS.apply(1, 2) + Op.TIMES.sym + checked(4) + kind(1) + kind("ab") + kind(1.5));
+  }
+}
+`,
+}
+
+func TestDecompiledSourceCompilesAndRuns(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	for name, source := range compilesAndRuns {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			classes := filepath.Join(dir, "classes")
+			compileWithJavac(t, classes, name, source)
+			written, err := filepath.Glob(filepath.Join(classes, "*.class"))
+			if err != nil || len(written) == 0 {
+				t.Fatalf("javac wrote no classes: %v", err)
+			}
+			// Every class of the program, the way the CLI reads a directory.
+			again := filepath.Join(dir, "again")
+			if err := os.MkdirAll(again, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, one := range written {
+				// A class javac named for the place it was written - an
+				// anonymous class, an enum constant's body - is read back
+				// where it was written, and the file of its own is only
+				// what is left for a reader who has nothing else. Compiling
+				// both would declare the same thing twice.
+				if strings.Contains(filepath.Base(one), "$") {
+					continue
+				}
+				text, err := DecompileWith(readFile(t, one), siblingsIn(classes))
+				if err != nil {
+					t.Fatalf("decompile %s: %v", filepath.Base(one), err)
+				}
+				at := filepath.Join(again, strings.TrimSuffix(filepath.Base(one), ".class")+".java")
+				if err := os.WriteFile(at, []byte(text), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			compileDir(t, again)
+			if actual, expected := runJava(t, again, name), runJava(t, classes, name); actual != expected {
+				t.Errorf("the decompiled program runs differently: %q vs %q", actual, expected)
+			}
+		})
+	}
+}
+
+// What the reviews of the switch-expression, pattern and erasure work found,
+// each compiled with and without a debug table, decompiled with its nested
+// classes, compiled again and run. Every one has to compile; one marked
+// whole has to come back without a bail and print what the original does.
+func TestDecompileWhatTheReviewFound(t *testing.T) {
+	if !hasTool("javac") || !hasTool("java") {
+		t.Skip("no JDK (javac/java)")
+	}
+	cases := []struct {
+		name, source string
+		whole        bool
+		// tableWhole is whole only with a debug table, which is what says
+		// where the variable a switch expression's arm writes lives.
+		tableWhole bool
+	}{
+		// A statement switch is first tried as an expression; a case that
+		// declares a local a lambda captures must leave nothing behind when
+		// that attempt fails - it once crashed the run.
+		{"Rollback", `import java.util.function.*;
+public class Rollback {
+  static void run(IntSupplier s) { System.out.print(s.getAsInt()); }
+  static void f(boolean c, int k) {
+    if (c) {
+      switch (k) {
+        case 1: System.out.print("a"); System.out.print("b"); int x = k * 2; run(() -> x); break;
+        default: System.out.print("o");
+      }
+    }
+  }
+  public static void main(String[] z) { f(true, 1); f(true, 2); System.out.println(); }
+}`, true, false},
+		// An arm's local inside a loop is hoisted by its store; declared back in
+		// the arm it is effectively final again, two arms' of one name too.
+		{"ArmInLoop", `import java.util.*; import java.util.function.*;
+public class ArmInLoop {
+  static List<Supplier<String>> f(int[] ks) {
+    List<Supplier<String>> out = new ArrayList<>();
+    for (int k : ks) {
+      Supplier<String> s = switch (k) {
+        case 1 -> { int j = k * 3; yield () -> "a" + j; }
+        case 2 -> { int j = k * 5; yield () -> "b" + j; }
+        default -> () -> "c";
+      };
+      out.add(s);
+    }
+    return out;
+  }
+  public static void main(String[] z) { for (Supplier<String> s : f(new int[] {1, 2, 3})) System.out.print(s.get()); System.out.println(); }
+}`, false, false},
+		// The arm's name stays taken: a variable after the switch hoisted to
+		// the top of the body would otherwise be declared over it.
+		{"ArmName", `public class ArmName {
+  static int f(int k, boolean c) {
+    int r = switch (k) { case 1 -> { int j = k + 1; yield j * 2; } case 2 -> { int j = k * 7; yield j - 1; } default -> 0; };
+    int j; if (c) j = 1; else j = 2;
+    return r + j;
+  }
+  public static void main(String[] z) { System.out.println(f(1, true) + " " + f(2, false) + " " + f(3, true)); }
+}`, false, false},
+		// A pattern's variable lives only where its test holds; a later local
+		// of the same name in the same slot is another variable.
+		{"PatternScope", `public class PatternScope {
+  static int g(Object p) { int q = p instanceof String s ? s.length() * 2 : 1; String s = "zz"; return q + s.length(); }
+  static int h(Object o) { int q = switch (o) { case String s -> s.length(); default -> 0; }; long x = 7; String s = "zzz"; return q + (int) x + s.length(); }
+  static String twice(Object o) {
+    StringBuilder sb = new StringBuilder();
+    switch (o) { case String s -> sb.append(s); case Integer i -> sb.append(i + 1); default -> sb.append("?"); }
+    switch (o) { case String s -> sb.append(" again ").append(s); default -> sb.append(" no"); }
+    return sb.toString();
+  }
+  static int loopArm(Object o) { int n = 0; switch (o) { case String s -> { while (n < s.length()) n++; } default -> n = -1; } return n; }
+  public static void main(String[] z) { System.out.println(g("abc") + " " + g(1) + " " + h("abc") + " " + h(1) + " " + twice("x") + twice(4) + " " + loopArm("abc") + loopArm(1)); }
+}`, false, false},
+		// Only javac's own lowering is a String switch: a hash that is not the
+		// label's is a hand-written switch, and a lone surrogate keeps its escape.
+		{"Hashes", `public class Hashes {
+  static int wrongHash(String s) { String t = s; int i = -1; switch (t.hashCode()) { case 1: if (t.equals("a")) i = 0; break; } switch (i) { case 0: return 10; default: return -5; } }
+  static int surrogate(String s) { switch (s) { case "\uD800": return 1; case "\u0000": return 2; default: return 0; } }
+  public static void main(String[] z) { System.out.println(wrongHash("a") + " " + surrogate("\uD800") + surrogate("\u0000") + surrogate("?")); }
+}`, true, false},
+		// A type variable erases to its bound: an inner class of a generic one,
+		// through the method's own variable shadowing the class's, and not at
+		// all where the bound is a variable these signatures do not declare.
+		{"Erasures", `import java.util.function.*;
+public class Erasures<X extends Number, U extends Number, T extends U> {
+  static class Outer<Y> { class Inner { String v = "inner"; } }
+  static <T extends Outer<String>.Inner> Function<T, String> inner() { return new Function<T, String>() { public String apply(T t) { return "got " + t.v; } }; }
+  <U extends CharSequence> Function<T, String> shadowed() { return new Function<T, String>() { public String apply(T t) { return "n" + t.intValue(); } }; }
+  class Deep { <S extends X> Function<S, String> f() { return new Function<S, String>() { public String apply(S s) { return "v" + s.intValue(); } }; } }
+  public static void main(String[] z) {
+    Outer<String> o = new Outer<>();
+    Erasures<Integer, Integer, Integer> e = new Erasures<>();
+    System.out.println(Erasures.<Outer<String>.Inner>inner().apply(o.new Inner()) + " " + e.<String>shadowed().apply(4) + " " + e.new Deep().<Integer>f().apply(7));
+  }
+}`, false, false},
+		// Read by its source name: a lambda parameter cast to a nested class,
+		// the instance an inner class's constructor is created against, and
+		// the one an anonymous class in a nested class reads.
+		{"Names", `import java.util.*;
+public class Names {
+  static String entries(Map<String, Integer> m) { StringBuilder sb = new StringBuilder(); m.entrySet().forEach(e -> sb.append(e.getKey()).append(e.getValue())); return sb.toString(); }
+  int base = 5;
+  class Inner { int v; Inner() { v = base + 1; } }
+  class Nested { int k = 2; Runnable r() { return new Runnable() { public void run() { System.out.print(k * 3); } }; } }
+  public static void main(String[] z) {
+    Names n = new Names();
+    System.out.print(entries(new TreeMap<>(Map.of("a", 1))) + " " + n.new Inner().v + " ");
+    n.new Nested().r().run();
+    System.out.println();
+  }
+}`, true, false},
+		// From the review of those fixes. A superclass that is an inner class
+		// of the same outer takes the instance implicitly only when it is the
+		// constructor's own; another one is source's `other.super()`.
+		{"OtherSuper", `public class OtherSuper {
+  String name;
+  OtherSuper(String n) { name = n; }
+  class A { String tag; A() { tag = name; } }
+  class B extends A { B(OtherSuper other) { other.super(); System.out.println("B " + tag + " " + name); } }
+  public static void main(String[] z) { new OtherSuper("m").new B(new OtherSuper("other")); }
+}`, true, false},
+		// A pattern's variable that flow scoping keeps past its test, or that
+		// its arm assigns, is still that variable: a store to it is not the
+		// next variable in the slot.
+		{"PatternAssigned", `public class PatternAssigned {
+  static int f4(Object o, boolean cond) { if (!(o instanceof Integer n) || n < 0) return -1; if (cond) n = n + 1; return n; }
+  static String f5(Object o, int k) { if (!(o instanceof String s) || s.isEmpty()) return "-"; for (int i = 0; i < k; i++) s = s + i; return s; }
+  static String f6(Object o) { if (!(o instanceof String s) || s.isEmpty()) return "-"; while (s.length() < 5) s = s + "+"; return s; }
+  static String f7(Object o) { if (!(o instanceof String s) || s.isEmpty()) return "-"; String r = ""; for (int i = 0; i < 3; i++) { r += s; s = "x"; } return r; }
+  static String f8(Object o) { switch (o) { case String s -> { String r = ""; while (r.length() < 6) { r += s; s = "x"; } return r; } default -> { return "d"; } } }
+  public static void main(String[] z) {
+    System.out.println(f4(3, true) + " " + f4(3, false) + " " + f4("x", true) + " " + f5("a", 3) + f5("b", 0) + f5(1, 1) + " " + f6("ab") + f6(2) + " " + f7("ab") + " " + f8("ab") + f8(1));
+  }
+}`, true, false},
+		// A variable an arm writes but declared outside it is read after the
+		// switch: its declaration stays where it is.
+		{"ArmWritesOuter", `public class ArmWritesOuter {
+  static int g(int[] ks) {
+    int s = 0;
+    for (int k : ks) {
+      int y;
+      int x = switch (k) { case 1 -> { y = 5; yield 1; } case 2 -> { y = 7; yield 2; } default -> throw new IllegalStateException(); };
+      s += y * x;
+    }
+    return s;
+  }
+  public static void main(String[] z) { System.out.println(g(new int[] {1, 2, 1})); }
+}`, false, true},
+		// From the review of those. Without a debug table, a store under the
+		// test that binds a pattern is the pattern's variable only when it
+		// shares a read with it: after a try the test sits in, javac reuses
+		// the slot. A finally's cleanup, written from the copy that rethrows,
+		// reads nothing after its store, and there being under the binding is
+		// what counts. A case label's variable assigned on one branch of its
+		// arm is still one variable.
+		{"PatternSlot", `public class PatternSlot {
+  static void p(Object x) { System.out.print("O" + x); }
+  static void p(String x) { System.out.print("S" + x); }
+  static String inFinally(Object o, int k) {
+    if (!(o instanceof String s) || s.isEmpty()) return "-";
+    while (s.length() < k) { try { p(s); } finally { s = s + "!"; } }
+    return "done";
+  }
+  static String onABranch(Object o, boolean c) { switch (o) { case String s -> { if (c) s = s + "!"; return s; } default -> { return "d"; } } }
+  public static void main(String[] z) {
+    System.out.println(inFinally("x", 3) + inFinally("", 1) + " " + onABranch("a", true) + onABranch("b", false) + onABranch(1, true));
+  }
+}`, true, false},
+		// A store under the test with no read in common is the next variable in
+		// the slot - after a try or an if the test sat in - or the pattern's own
+		// replacing its value. Written as a variable of its own both run the
+		// same, unless a later store is the pattern's own: that one would be
+		// taken for the new variable's, and is refused.
+		{"PatternSlotAfterTry", `public class PatternSlotAfterTry {
+  static void afterTry(Object o) {
+    try { if (!(o instanceof String s) || s.isEmpty()) return; System.out.print(s); } catch (RuntimeException e) { return; }
+    String t = "after";
+    System.out.print(t);
+  }
+  public static void main(String[] z) { afterTry("x"); System.out.println(); }
+}`, true, false},
+		{"PatternSlotAfterIf", `public class PatternSlotAfterIf {
+  static void afterIf(Object o, boolean flag) {
+    if (flag) { if (!(o instanceof String s) || s.isEmpty()) return; System.out.print(s); } else { return; }
+    String t = "after";
+    Runnable r = () -> System.out.print(t);
+    r.run();
+  }
+  public static void main(String[] z) { afterIf("y", true); System.out.println(); }
+}`, true, false},
+		{"PatternSlotJoined", `public class PatternSlotJoined {
+  static void log(Object o) { System.out.print(o + " "); }
+  static void f(Object o, int k) {
+    if (o instanceof String s && !s.isEmpty()) { for (int i = 0; i < 3; i++) { log(s); if (k > 0) s = "dead"; s = "a" + i; } }
+  }
+  public static void main(String[] z) { f("q", 1); f("q", 0); System.out.println(); }
+}`, false, false},
+		// An arm's own variable inside a loop is hoisted by its first store;
+		// a later variable of the same name in the slot is another one.
+		{"ArmOwnInLoop", `public class ArmOwnInLoop {
+  static int e(int[] ks) {
+    int s = 0;
+    for (int k : ks) {
+      int x = switch (k) { case 1 -> { int y = k * 2; yield y + 1; } default -> 0; };
+      int y = x * 3;
+      Runnable r = () -> System.out.print("y" + y);
+      r.run();
+      s += y;
+    }
+    return s;
+  }
+  public static void main(String[] z) { System.out.println(" " + e(new int[] {1, 2, 1})); }
+}`, false, true},
+		// From the review of those. A pattern's variable assigned in a try is
+		// read by the catch, the finally or the code after the try, through
+		// the way out an exception takes - and the read is shared all the
+		// same. A finally that assigns it a value of another type still
+		// assigns it.
+		{"PatternThroughExceptions", `public class PatternThroughExceptions {
+  static void boom() { throw new IllegalStateException(); }
+  static void boomOn(String s) { if (s.length() > 1) throw new IllegalStateException(); }
+  static void inCatch(Object o) { if (!(o instanceof String s) || s.isEmpty()) return; try { s = s + "!"; boom(); } catch (RuntimeException e) { System.out.print(s); } }
+  static void inFinally(Object o) { if (!(o instanceof String s) || s.isEmpty()) return; try { s = s + "!"; boomOn(s); } finally { System.out.print(s); } }
+  static void afterTry(Object o) { if (!(o instanceof String s) || s.isEmpty()) return; try { s = s + "!"; boom(); } catch (RuntimeException e) { } System.out.print(s); }
+  static int toNull(Object o) { if (!(o instanceof String s) || s.isEmpty()) return -1; int n = 0; while (s != null) { try { n++; } finally { s = null; } } return n; }
+  static int wider(Object o) { if (!(o instanceof CharSequence s) || s.isEmpty()) return -1; int n = 0; while (s.length() < 4) { try { n++; } finally { s = s + "!"; } } return n; }
+  public static void main(String[] z) {
+    inCatch("x"); inCatch(1);
+    try { inFinally("y"); } catch (RuntimeException e) { System.out.print("E"); }
+    afterTry("z");
+    System.out.println(" " + toNull("x") + toNull(1) + " " + wider("x") + wider(1));
+  }
+}`, true, false},
+		// A variable declared before the switch is in scope where the arms
+		// meet - by a row the last arm's store opened and that runs through
+		// the merge - while an arm's own one is not, even with a later
+		// variable of its name.
+		{"ArmScopes", `public class ArmScopes {
+  static int both(int[] ks) { int s = 0; for (int k : ks) { int y; int x = switch (k) { case 1 -> { y = 5; yield 1; } default -> { y = 7; yield 2; } }; s += y * x; } return s; }
+  static int last(int[] ks) { int s = 0; for (int k : ks) { int y; int x = switch (k) { case 1 -> { y = 5; yield 1; } default -> y = 7; }; s += y * x; } return s; }
+  static int later(int[] ks) {
+    int s = 0;
+    for (int k : ks) {
+      int x = switch (k) { case 1 -> { int y = k * 2; yield y + 1; } default -> 0; };
+      int y;
+      if (x >= 0) { y = x * 3; } else { throw new IllegalStateException(); }
+      Runnable r = () -> System.out.print("y" + y);
+      r.run();
+      s += y;
+    }
+    return s;
+  }
+  public static void main(String[] z) { int[] ks = {1, 2, 1}; System.out.println(" " + both(ks) + " " + last(ks) + " " + later(ks)); }
+}`, false, true},
+		// From the review of those. A finally's cleanup is decided by the copy
+		// of it on the way off the range: a variable there that reuses an
+		// ended pattern's slot is another one. A store into the pattern's
+		// variable followed by another store in the same block still reaches
+		// the handler with its value, and a catch's handler is guarded by the
+		// finally around it too.
+		{"FinallyCopies", `public class FinallyCopies {
+  static void log(CharSequence c) { System.out.print("CS:" + c + " "); }
+  static void boomOn(String s) { if (s.length() > 1) throw new IllegalStateException(); }
+  static void twice(Object o) { if (!(o instanceof String s) || s.isEmpty()) return; try { s = s + "!"; boomOn(s); s = s + "?"; } catch (RuntimeException e) { System.out.print(s); } }
+  static void catchInFinally(Object o) {
+    if (!(o instanceof String s) || s.isEmpty()) return;
+    try { boomOn(s); } catch (IllegalStateException e) { s = s + "!"; throw new RuntimeException(s); } finally { System.out.print("[" + s + "]"); }
+  }
+  // A finally's cleanup stores on the way off the range too, where it is
+  // not written: a read after the statement is reached through that store.
+  static String plain(String a) { String s; try { log(a); } finally { s = a + "!"; } return s; }
+  public static void main(String[] z) {
+    System.out.print(plain("q") + " ");
+    twice("x"); twice(1);
+    catchInFinally("x");
+    try { catchInFinally("yy"); } catch (RuntimeException e) { System.out.print(e.getMessage()); }
+    System.out.println();
+  }
+}`, true, false},
+		// Under the test that binds a pattern, with no read in common, a store
+		// of another type is the pattern's variable or the next one in its
+		// slot - which decides an overload: what the bytecode does not say is
+		// refused, not guessed. Each on its own, so one written back has to
+		// run as the original does.
+		{"UndecidedOther", `public class UndecidedOther {
+  static void log(CharSequence c) { System.out.print("CS:" + c + " "); }
+  static void log(StringBuilder c) { System.out.print("SB:" + c + " "); }
+  static void boomOn(String s) { if (s.length() > 1) throw new IllegalStateException(); }
+  static void foo() { }
+  static int other(Object o) {
+    int r = 0;
+    { if (!(o instanceof CharSequence s) || s.isEmpty()) return -1; r = s.length(); }
+    StringBuilder v;
+    try { r++; } finally { v = new StringBuilder("n" + r); log(v); }
+    return r;
+  }
+  public static void main(String[] z) { System.out.println(other("abc") + " " + other(1)); }
+}`, false, false},
+		{"UndecidedReassigned", `public class UndecidedReassigned {
+  static void log(CharSequence c) { System.out.print("CS:" + c + " "); }
+  static void log(StringBuilder c) { System.out.print("SB:" + c + " "); }
+  static void boomOn(String s) { if (s.length() > 1) throw new IllegalStateException(); }
+  static void foo() { }
+  static void reassigned(Object o) {
+    if (!(o instanceof CharSequence s) || s.isEmpty()) return;
+    try { foo(); } finally { s = new StringBuilder("x").append(s); }
+    log(s);
+  }
+  public static void main(String[] z) { reassigned("a"); System.out.println(); }
+}`, false, false},
+		{"UndecidedBranching", `public class UndecidedBranching {
+  static void log(CharSequence c) { System.out.print("CS:" + c + " "); }
+  static void log(StringBuilder c) { System.out.print("SB:" + c + " "); }
+  static void boomOn(String s) { if (s.length() > 1) throw new IllegalStateException(); }
+  static void foo() { }
+  static String branching(Object o, int k) {
+    if (o instanceof String s && !s.isEmpty()) { try { boomOn(s); } finally { if (k > 0) s = s + "?"; } return s; }
+    return "-";
+  }
+  public static void main(String[] z) { System.out.println(branching("y", 1) + branching("z", 0)); }
+}`, false, false},
+		// From the review of those. A finally's cleanup that branches is one
+		// block in each copy on the ways off its range, which hides whether a
+		// store in it runs; read from the instructions themselves, its copies
+		// say where the value goes - for a pattern's variable and any other.
+		// A catch beside the one that assigns a pattern's variable reads the
+		// old value, through the way out the exception takes.
+		{"BranchingCleanups", `public class BranchingCleanups {
+  static void log(Object o) { System.out.print("O:" + o + " "); }
+  static void foo() { }
+  static void inLoop(Object o, int k) {
+    if (o instanceof String s && !s.isEmpty()) { for (int i = 0; i < 3; i++) { log(s); try { foo(); } finally { if (k > 0) s = "a" + i; } } }
+  }
+  static void plain(int k) {
+    CharSequence v = "init";
+    for (int i = 0; i < 3; i++) { try { foo(); } finally { if (k > 0) v = "a"; } log(v); v = new StringBuilder("sb" + i); }
+  }
+  static void before(int k) {
+    CharSequence v = "init";
+    try { foo(); } finally { if (k > 0) foo(); v = "a"; }
+    int i = 0;
+    while (true) { log(v); if (++i >= 3) break; v = new StringBuilder("sb" + i); }
+  }
+  public static void main(String[] z) { inLoop("q", 1); inLoop("q", 0); plain(0); plain(1); before(0); before(1); System.out.println(); }
+}`, true, false},
+		{"SiblingCatch", `public class SiblingCatch {
+  static void boom(int k) { if (k > 0) throw new IllegalStateException("ise"); if (k < 0) throw new RuntimeException("re"); }
+  static void f(Object o, int k) {
+    if (o instanceof String s && !s.isEmpty()) {
+      try { boom(k); } catch (IllegalStateException e) { s = "x"; System.out.print("A " + s); } catch (RuntimeException e) { System.out.print("B " + s); }
+    }
+  }
+  public static void main(String[] z) { f("q", 1); f("q", -1); f("q", 0); f(1, 1); System.out.println(); }
+}`, false, false},
+		// From the review of those. Two finallys that begin at one place both
+		// end where the outer cleanup's copy goes on: the outer one is the one
+		// whose range holds the inner one's handler. A parameter reassigned in
+		// a try still holds its value in the handler. A pattern's variable
+		// reassigned in a straight line, or bound again on the next turn, is
+		// renamed safely; only a later store that is the pattern's own - in
+		// the code or in a finally's copies - refuses it.
+		{"NestedFinallys", `public class NestedFinallys {
+  static void log(Object o) { System.out.print(o + " "); }
+  static void f(int k) {
+    try { try { log("body"); if (k > 0) throw new IllegalStateException(); } catch (IllegalStateException e) { log("catch"); } finally { log("inner"); } } finally { log("outer"); }
+  }
+  static int parse(String s) { try { s = s.trim(); return Integer.parseInt(s); } catch (NumberFormatException e) { log("bad:" + s); return -1; } }
+  static String twice(Object o) { if (!(o instanceof String s) || s.isEmpty()) return "-"; s = s.trim(); s = s.toUpperCase(); return s; }
+  static void again(Object[] os) { for (Object o : os) { if (o instanceof String s && !s.isEmpty()) { log(s); s = s + "!"; log(s); } } }
+  public static void main(String[] z) {
+    f(0); f(1);
+    System.out.println(parse(" 7 ") + " " + parse("x") + " " + twice(" ab ") + twice(""));
+    again(new Object[] {"a", "", "b"});
+    System.out.println();
+  }
+}`, true, false},
+		{"FinallyStoreJoined", `public class FinallyStoreJoined {
+  static void log(Object o) { System.out.print(o + " "); }
+  static void boom(int k) { if (k > 9) throw new IllegalStateException(); }
+  static void f(Object o, int k) {
+    if (o instanceof String s && !s.isEmpty()) { for (int i = 0; i < 3; i++) { log(s); try { boom(k); } finally { if (k > 0) s = "dead"; } s = "a" + i; } }
+  }
+  public static void main(String[] z) { f("q", 1); f("q", 0); System.out.println(); }
+}`, false, false},
+		// Without a debug table a variable is declared as what was stored in
+		// it, which can be narrower than what source declared: passed to an
+		// overloaded method it is written as the type the call was compiled
+		// against, so javac binds the same overload.
+		{"GuessedArguments", `public class GuessedArguments {
+  static void log(Object o) { System.out.print("O:" + o + " "); }
+  static void log(CharSequence o) { System.out.print("CS:" + o + " "); }
+  static CharSequence mk() { return "m"; }
+  static void f() { CharSequence s = mk(); Object x = s; log(x); log(s); }
+  static class Base { Base(Object o) { System.out.print("BO "); } Base(CharSequence o) { System.out.print("BC "); } void hi() { } }
+  static void g() { Object x = mk(); Base b = new Base(x) { void hi() { System.out.print("hi "); } }; b.hi(); }
+  public static void main(String[] z) { f(); g(); System.out.println(); }
+}`, true, false},
+		// From the review of those. A library method keeps its type arguments,
+		// so a guessed variable passed to one is not cast to the erased type
+		// the call was compiled against. A finally whose ways out go to a
+		// loop's end and on to the rest of the body ends where the latter
+		// copy goes on - the rest of the body is not the try's.
+		{"LibraryArguments", `import java.util.*;
+public class LibraryArguments {
+  enum Color { RED, GREEN }
+  static int cmp(Color a, Color b) { Color x = a; return x.compareTo(b); }
+  static String joined(String a, String b) { String x = a; return String.join(",", List.of(x, b)); }
+  static String orElse(String a, String def) { String d = def; return Optional.ofNullable(a).orElse(d); }
+  public static void main(String[] z) { System.out.println(cmp(Color.RED, Color.GREEN) + " " + joined("a", "b") + " " + orElse(null, "d")); }
+}`, true, false},
+		{"FinallyBreakInLoop", `public class FinallyBreakInLoop {
+  static String s = "init";
+  static void f(int k) {
+    for (int i = 0; i < 2; i++) { try { if (k == 0) break; } finally { s = "fin" + k; } System.out.print(s + " "); }
+  }
+  public static void main(String[] z) { for (int k = 0; k < 3; k++) f(k); System.out.println(); }
+}`, true, false},
+		// From the review of those. A method this file declares is cast to
+		// also where the call names a subclass or implementation that
+		// inherits it. A try with a catch and a finally as the last
+		// statement of a loop ends at the copy that goes on, not past it.
+		{"InheritedArguments", `public class InheritedArguments {
+  static class Base { void log(Object o) { System.out.print("O:" + o + " "); } void log(CharSequence o) { System.out.print("C:" + o + " "); } }
+  static class Sub extends Base { void g(CharSequence s) { Object x = s; log(x); } }
+  interface I { default void m(Object o) { System.out.print("IO:" + o + " "); } default void m(CharSequence o) { System.out.print("IC:" + o + " "); } }
+  static class C implements I { }
+  static void h(CharSequence s) { Object x = s; new C().m(x); }
+  public static void main(String[] z) { new Sub().g("s"); h("t"); System.out.println(); }
+}`, true, false},
+		{"TryCatchFinallyEndsLoop", `public class TryCatchFinallyEndsLoop {
+  static void work(int i) { if (i == 3) throw new IllegalStateException(); System.out.print("w" + i + " "); }
+  public static void main(String[] z) {
+    int i = 0;
+    while (i < 5) { i++; try { work(i); } catch (IllegalStateException e) { System.out.print("caught "); break; } finally { System.out.print("f" + i + " "); } }
+    System.out.println();
+  }
+}`, true, false},
+		{"TryInLoopInFinallyBody", `public class TryInLoopInFinallyBody {
+  static void work(int i, int j) { if ((i + j) % 3 == 0) throw new IllegalStateException(); System.out.print("w" + i + j + " "); }
+  public static void main(String[] z) {
+    int i = 0;
+    while (i < 4) {
+      i++;
+      try {
+        int j = 0;
+        while (j < 3) { j++; if (j == 2) continue; try { work(i, j); } catch (IllegalStateException e) { System.out.print("c" + j + " "); } }
+        if (i == 3) break;
+      } finally { System.out.print("f" + i + " "); }
+    }
+    System.out.println();
+  }
+}`, true, false},
+		// An anonymous class inside another reads what the outer one
+		// captured, and the fields of the class around both, through the
+		// outer one's instance - which javac 21 does for a capture too.
+		{"ThroughEnclosingAnonymous", `public class ThroughEnclosingAnonymous {
+  String name = "M";
+  Runnable outer(String a, int n) {
+    return new Runnable() {
+      public void run() {
+        Runnable mid = new Runnable() {
+          public void run() {
+            Runnable in = new Runnable() { public void run() { System.out.print(name + a + n + "!"); } };
+            in.run();
+            System.out.print(a);
+          }
+        };
+        mid.run();
+      }
+    };
+  }
+  public static void main(String[] z) { new ThroughEnclosingAnonymous().outer("v", 3).run(); System.out.println(); }
+}`, true, false},
+	}
+	for _, c := range cases {
+		for _, debug := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/debug=%v", c.name, debug), func(t *testing.T) {
+				dir := t.TempDir()
+				classFile := compileWithJavacFlags(t, dir, c.name, c.source, "", debug)
+				source, err := DecompileWith(readFile(t, classFile), siblingsIn(dir))
+				if err != nil {
+					t.Fatalf("decompile: %v", err)
+				}
+				if (c.whole || c.tableWhole && debug) && strings.Contains(source, "/* cappu:") {
+					t.Errorf("expected no bail:\n%s", source)
+				}
+				again := filepath.Join(dir, "again")
+				compileWithJavac(t, again, c.name, source)
+				if strings.Contains(source, "/* cappu:") {
+					return
+				}
+				if actual, expected := runJava(t, again, c.name), runJava(t, dir, c.name); actual != expected {
+					t.Errorf("the decompiled class runs differently: %q vs %q\n%s", actual, expected, source)
+				}
+			})
+		}
 	}
 }

@@ -1,4 +1,4 @@
-class BoundErasure {
+class BoundErasure<T> {
   java.lang.CharSequence v;
 
   java.lang.CharSequence get() {

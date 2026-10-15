@@ -102,12 +102,22 @@ type ClassFile struct {
 	// class file never sets it; a caller that knows where the bytes came from
 	// does, and the decompiler asks only when a shape needs the answer.
 	Siblings Siblings
-	// WrittenNested is set while this class is being written inside the class
-	// that declares it. An inner class is handed its enclosing instance, which
-	// javac writes again from the nested declaration: the field that holds it,
-	// the constructor parameter that fills it and the store in front of the
-	// `super(..)` are all javac's there, and writing them back would clash.
-	WrittenNested bool
+	// Inlined is set while this class is being written inside the body that
+	// creates it - an anonymous class read back as the `new` source wrote.
+	// What it was handed is rewritten by that pass, so a value it passes on to
+	// an anonymous class of its own may name a field of its own; standing on
+	// its own, there is no such pass.
+	Inlined bool
+	// DeclaredNested is set while this class is being written inside the class
+	// that declares it, where source names it `Outer.Inner` and a reference to
+	// itself converts like any other nested name. Standing on its own it is
+	// declared as `Outer$Inner` and has to keep saying so.
+	DeclaredNested bool
+	// DeclaredInner is set with DeclaredNested for a class the InnerClasses
+	// attribute marks as inner: it is handed the instance it was created
+	// against, whether it holds that instance itself or inherits the field
+	// from the class it extends.
+	DeclaredInner bool
 }
 
 // Siblings reports the bytes of the class with that binary name, and whether
@@ -125,7 +135,19 @@ func SiblingsBeside(file string, ofClass string) Siblings {
 	if slash := strings.LastIndex(ofClass, "/"); slash >= 0 {
 		root = strings.TrimSuffix(dir, string(filepath.Separator)+filepath.FromSlash(ofClass[:slash]))
 	}
+	pkg := ""
+	if slash := strings.LastIndex(ofClass, "/"); slash >= 0 {
+		pkg = ofClass[:slash+1]
+	}
 	return func(binaryName string) ([]byte, bool) {
+		// A class of the same package is the one right beside the file - which
+		// is also where it is when the file is named without the directories
+		// of its package, `cappu decompile Foo.class` from inside them.
+		if strings.HasPrefix(binaryName, pkg) && !strings.Contains(binaryName[len(pkg):], "/") {
+			if b, err := os.ReadFile(filepath.Join(dir, binaryName[len(pkg):]+".class")); err == nil {
+				return b, true
+			}
+		}
 		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(binaryName)+".class"))
 		return b, err == nil
 	}

@@ -632,3 +632,12 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-10-08 03:40 — continue
 - 2026-10-08 03:53 — review and continue
 - 2026-10-08 04:33 — do #48 in a worktree
+- 2026-10-14 21:57 — continue work on the decompiler
+- 2026-10-14 22:34 — /loop
+- 2026-10-15 00:24 — deep review
+- 2026-10-15 00:24 — dann mach weiter
+- 2026-10-15 00:25 — then continue, always with code review afterwards
+- 2026-10-15 00:25 — /loop
+- 2026-10-15 10:35 — stop after this iteration
+- 2026-10-15 11:06 — ci failed
+- 2026-10-15 12:22 — i pulled form master. you may want to merge that into your branch. thencontinue
