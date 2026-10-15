@@ -5932,17 +5932,6 @@ public class Names {
 		{"PatternSlot", `public class PatternSlot {
   static void p(Object x) { System.out.print("O" + x); }
   static void p(String x) { System.out.print("S" + x); }
-  static void afterTry(Object o) {
-    try { if (!(o instanceof String s) || s.isEmpty()) return; System.out.print(s); } catch (RuntimeException e) { return; }
-    String t = "after";
-    System.out.print(t);
-  }
-  static void afterIf(Object o, boolean flag) {
-    if (flag) { if (!(o instanceof String s) || s.isEmpty()) return; System.out.print(s); } else { return; }
-    String t = "after";
-    Runnable r = () -> System.out.print(t);
-    r.run();
-  }
   static String inFinally(Object o, int k) {
     if (!(o instanceof String s) || s.isEmpty()) return "-";
     while (s.length() < k) { try { p(s); } finally { s = s + "!"; } }
@@ -5950,10 +5939,38 @@ public class Names {
   }
   static String onABranch(Object o, boolean c) { switch (o) { case String s -> { if (c) s = s + "!"; return s; } default -> { return "d"; } } }
   public static void main(String[] z) {
-    afterTry("x"); afterIf("y", true);
-    System.out.println(" " + inFinally("x", 3) + inFinally("", 1) + " " + onABranch("a", true) + onABranch("b", false) + onABranch(1, true));
+    System.out.println(inFinally("x", 3) + inFinally("", 1) + " " + onABranch("a", true) + onABranch("b", false) + onABranch(1, true));
   }
 }`, true, false},
+		// A store under the test with no read in common is the next variable in
+		// the slot - after a try or an if the test sat in - or the pattern's own
+		// replacing its value, and nothing without a debug table says which: a
+		// later store joining one or the other decides what a read sees.
+		// Refused, each on its own so one written back has to run right.
+		{"PatternSlotAfterTry", `public class PatternSlotAfterTry {
+  static void afterTry(Object o) {
+    try { if (!(o instanceof String s) || s.isEmpty()) return; System.out.print(s); } catch (RuntimeException e) { return; }
+    String t = "after";
+    System.out.print(t);
+  }
+  public static void main(String[] z) { afterTry("x"); System.out.println(); }
+}`, false, false},
+		{"PatternSlotAfterIf", `public class PatternSlotAfterIf {
+  static void afterIf(Object o, boolean flag) {
+    if (flag) { if (!(o instanceof String s) || s.isEmpty()) return; System.out.print(s); } else { return; }
+    String t = "after";
+    Runnable r = () -> System.out.print(t);
+    r.run();
+  }
+  public static void main(String[] z) { afterIf("y", true); System.out.println(); }
+}`, false, false},
+		{"PatternSlotJoined", `public class PatternSlotJoined {
+  static void log(Object o) { System.out.print(o + " "); }
+  static void f(Object o, int k) {
+    if (o instanceof String s && !s.isEmpty()) { for (int i = 0; i < 3; i++) { log(s); if (k > 0) s = "dead"; s = "a" + i; } }
+  }
+  public static void main(String[] z) { f("q", 1); f("q", 0); System.out.println(); }
+}`, false, false},
 		// An arm's own variable inside a loop is hoisted by its first store;
 		// a later variable of the same name in the slot is another one.
 		{"ArmOwnInLoop", `public class ArmOwnInLoop {

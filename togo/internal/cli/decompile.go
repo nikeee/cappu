@@ -119,44 +119,18 @@ func (w *writers) decide(i int) {
 	// written by one that is, further up: Foo writes Foo.A, which it reads
 	// for itself, and A writes A.B through Foo's lookup.
 	if len(w.declaredBy[class]) == 0 {
-		for cut := strings.LastIndex(class, "$"); cut > 0; cut = strings.LastIndex(class[:cut], "$") {
-			outer, ok := w.byClass[class[:cut]]
-			if !ok || outer == i {
-				continue
-			}
-			w.decide(outer)
-			top := outer
-			for w.inside[top] >= 0 {
-				top = w.inside[top]
-			}
-			lookup, declares, level := w.lookup(top), w.files[outer].nested, w.level[outer]
-			for at := cut; level <= compiler.NestedDepth; {
-				next := strings.IndexByte(class[at+1:], '$')
-				name := class
-				if next >= 0 {
-					name = class[:at+1+next]
-				}
-				if !slices.Contains(declares, name) {
-					break
-				}
-				level++
-				found, ok := lookup(name)
-				if !ok {
-					break
-				}
-				if name == class {
-					if level <= compiler.NestedDepth && bytes.Equal(found, w.files[i].bytes) {
-						w.inside[i], w.level[i] = outer, level
-					}
-					return
-				}
-				read, err := compiler.ReadClassFile(found)
-				if err != nil {
-					break
-				}
-				declares, at = compiler.NestedClasses(read), at+1+next
-			}
+		outer, ok := w.ancestor(i)
+		if !ok {
 			return
+		}
+		w.decide(outer)
+		top := outer
+		for w.inside[top] >= 0 {
+			top = w.inside[top]
+		}
+		if level, _, written := w.chain(i, outer, w.lookup(top)); written &&
+			level+w.level[outer] <= compiler.NestedDepth {
+			w.inside[i], w.level[i] = outer, level+w.level[outer]
 		}
 		return
 	}
@@ -182,18 +156,62 @@ func (w *writers) decide(i int) {
 // declared reports a file whose class a class of the run declares, directly
 // or further up - one that is expected to be written inside.
 func (w *writers) declared(i int) bool {
-	class := w.files[i].class
-	if len(w.declaredBy[class]) > 0 {
+	if len(w.declaredBy[w.files[i].class]) > 0 {
 		return true
 	}
+	outer, ok := w.ancestor(i)
+	if !ok {
+		return false
+	}
+	top := outer
+	for w.inside[top] >= 0 {
+		top = w.inside[top]
+	}
+	_, declared, _ := w.chain(i, outer, w.lookup(top))
+	return declared
+}
+
+// ancestor is the closest file of the run whose class's name, followed by a
+// `$`, begins file i's.
+func (w *writers) ancestor(i int) (int, bool) {
+	class := w.files[i].class
 	for cut := strings.LastIndex(class, "$"); cut > 0; cut = strings.LastIndex(class[:cut], "$") {
-		if outer, ok := w.byClass[class[:cut]]; ok && outer != i && slices.ContainsFunc(w.files[outer].nested, func(name string) bool {
-			return strings.HasPrefix(class, name)
-		}) {
-			return true
+		if outer, ok := w.byClass[class[:cut]]; ok && outer != i {
+			return outer, true
 		}
 	}
-	return false
+	return 0, false
+}
+
+// chain follows file i's class down from the class of outer, one `$` at a
+// time, each a class the one before declares, read through lookup. It
+// reports how many levels down file i's class is, whether the declarations
+// lead there, and whether the lookup reads this very file for it.
+func (w *writers) chain(i, outer int, lookup compiler.Siblings) (level int, declared, same bool) {
+	class, declares := w.files[i].class, w.files[outer].nested
+	at := len(w.files[outer].class)
+	for level = 1; ; level++ {
+		next := strings.IndexByte(class[at+1:], '$')
+		name := class
+		if next >= 0 {
+			name = class[:at+1+next]
+		}
+		if !slices.Contains(declares, name) {
+			return 0, false, false
+		}
+		found, ok := lookup(name)
+		if name == class {
+			return level, true, ok && bytes.Equal(found, w.files[i].bytes)
+		}
+		if !ok {
+			return 0, false, false
+		}
+		read, err := compiler.ReadClassFile(found)
+		if err != nil {
+			return 0, false, false
+		}
+		declares, at = compiler.NestedClasses(read), at+1+next
+	}
 }
 
 func (w *writers) lookup(i int) compiler.Siblings {

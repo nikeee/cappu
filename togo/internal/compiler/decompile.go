@@ -3788,7 +3788,7 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 		case isStore && existing.FromPattern:
 			same, known := d.assignsPattern(existing, slot, pc, fallbackType)
 			if !known {
-				return nil, bail("a pattern variable assigned a value of another type")
+				return nil, bail("a pattern variable whose scope this phase cannot tell")
 			}
 			if same {
 				return existing, nil
@@ -3808,7 +3808,7 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 			// differently-typed values were split into two variables, and which
 			// one this reads is not something the bytecode still says.
 			if !isStore && len(existing.StoreBlocks) > 0 &&
-				d.reachesAvoiding(d.currentBlock, existing.StoreBlocks) {
+				d.reachesAvoiding(d.currentBlock, slot, existing) {
 				return nil, bail("local %d is written in more than one branch", slot)
 			}
 			return existing, nil
@@ -6566,25 +6566,24 @@ func (d *bodyDecompiler) flowBlockAt(pc int) int {
 	return found
 }
 
-// assignsPattern reports whether a store at pc - the pc after it - of a
-// value of valueType into a pattern's slot assigns the pattern's variable,
-// without a debug table to say where its scope ends, and whether that can
-// be told at all.
+// assignsPattern reports whether a store at pc - the pc after it - into a
+// pattern's slot assigns the pattern's variable, without a debug table to say
+// where its scope ends, and whether that can be told at all.
 //
 // It is the pattern's variable when the store shares a read with the binding:
 // what reads the slot afterwards reads either - through a catch or a finally
 // too. A finally's cleanup is written from the copy in the handler, which
-// rethrows and reads nothing after the store; the copy javac laid out on a
-// way off the range goes on to the reads, and is what answers for a cleanup
-// that does not branch.
+// rethrows and reads nothing after the store; the copies javac laid out on
+// the ways off the range go on to the reads, and are what answer.
 //
 // It is another variable when the test that binds the pattern does not lead
 // to the store: the scope is over, and javac reused the slot. Under the test
 // and with no read in common, both are possible - a variable after a block
 // the test sat in, or the pattern's own assigned a value that replaces the
-// old one everywhere it is read. Writing it as a variable of its own is the
-// same then, as long as it is of the same type; of another, which one source
-// declared decides an overload or a store later on, and nothing here says.
+// old one everywhere it is read. Written as a variable of its own, both run
+// the same - as long as it is of the same type, and no store into the slot
+// comes after it: one that does could belong to either, and joining the
+// wrong one changes what a read further on sees. Otherwise nothing says.
 func (d *bodyDecompiler) assignsPattern(pattern *local, slot, pc int, valueType string) (same, known bool) {
 	if d.sharesRead(pattern, slot, pc-1) {
 		return true, true
@@ -6601,7 +6600,40 @@ func (d *bodyDecompiler) assignsPattern(pattern *local, slot, pc int, valueType 
 	if !d.flowDominators[d.currentBlock][pattern.Binding] {
 		return false, true
 	}
-	return false, valueType == pattern.Type
+	return false, valueType == pattern.Type && !d.storesAfter(pc-1, slot)
+}
+
+// storesAfter reports whether a store into slot is reachable from the store
+// at pc - itself included, through a loop.
+func (d *bodyDecompiler) storesAfter(pc, slot int) bool {
+	flow := d.flowGraph()
+	block := flow[d.flowBlockAt(pc)]
+	if block == nil {
+		return true
+	}
+	stores := func(one Instruction) bool {
+		return (isOneOf(opBase(one.Mnemonic), "ilfda", "store") || opBase(one.Mnemonic) == "iinc") && slotOf(one) == slot
+	}
+	for _, one := range block.Instructions {
+		if one.Pc > pc && stores(one) {
+			return true
+		}
+	}
+	seen := map[int]bool{}
+	queue := append([]int(nil), block.Successors...)
+	for len(queue) > 0 {
+		at := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		if seen[at] || flow[at] == nil {
+			continue
+		}
+		seen[at] = true
+		if slices.ContainsFunc(flow[at].Instructions, stores) {
+			return true
+		}
+		queue = append(queue, flow[at].Successors...)
+	}
+	return false
 }
 
 // storedIn records the block a store to the variable sits in - and, for a
@@ -8841,28 +8873,54 @@ func (d *bodyDecompiler) withoutSkipped(b *block) *block {
 
 // reachesAvoiding reports whether a path from the entry reaches target without
 // passing a store.
-func (d *bodyDecompiler) reachesAvoiding(target int, stores map[int]bool) bool {
+func (d *bodyDecompiler) reachesAvoiding(target, slot int, entry *local) bool {
 	// A store in the reading block itself comes first: the read is what follows
 	// it, so that path is covered.
-	if stores[target] {
+	if entry.StoreBlocks[target] {
 		return false
 	}
-	// The ways out an exception takes are paths too: a catch beside the one
-	// that stores reads what was there before.
+	// The stores in a branching cleanup's copies are in blocks of their own
+	// in the flow graph, which every path through stores.
 	flow := d.flowGraph()
+	stores := maps.Clone(entry.StoreBlocks)
+	for _, pc := range entry.CopyStores {
+		stores[d.flowBlockAt(pc)] = true
+	}
+	// The ways out an exception takes are paths too: a catch beside the one
+	// that stores reads what was there before - also from a block that
+	// stores, when something in it can throw before it does. A parameter is
+	// stored before the first block runs.
 	seen := map[int]bool{}
 	queue := []int{d.entryPc}
 	for len(queue) > 0 {
 		at := queue[len(queue)-1]
 		queue = queue[:len(queue)-1]
-		if seen[at] || stores[at] || flow[at] == nil {
+		if seen[at] || flow[at] == nil {
 			continue
 		}
 		if at == target {
 			return true
 		}
 		seen[at] = true
-		queue = append(queue, flow[at].Successors...)
+		if !stores[at] {
+			queue = append(queue, flow[at].Successors...)
+			continue
+		}
+		late := false
+		for i, one := range flow[at].Instructions {
+			if isOneOf(opBase(one.Mnemonic), "ilfda", "store") && slotOf(one) == slot {
+				late = i > 0
+				break
+			}
+		}
+		if !late {
+			continue
+		}
+		for _, successor := range flow[at].Successors {
+			if !containsInt(d.flowPlain[at].Successors, successor) {
+				queue = append(queue, successor)
+			}
+		}
 	}
 	return false
 }
@@ -8879,6 +8937,22 @@ func (d *bodyDecompiler) sharesRead(entry *local, slot, pc int) bool {
 		return false
 	}
 	return d.sharesReadAt(entry, slot, pc)
+}
+
+// sharesReadOrCopies is sharesRead for the store at pc that also asks the
+// copies of a finally's cleanup when that is where the store is: the copy
+// that is written rethrows and reads nothing after it.
+func (d *bodyDecompiler) sharesReadOrCopies(entry *local, slot, pc int) bool {
+	if d.sharesRead(entry, slot, pc) {
+		return true
+	}
+	copies, _ := d.finallyCopies(slot, pc+1)
+	for _, store := range copies {
+		if d.sharesReadAt(entry, slot, store.Pc) {
+			return true
+		}
+	}
+	return false
 }
 
 // sharesReadAt is sharesRead for the store at pc, which need not be in the
@@ -9180,7 +9254,7 @@ func (d *bodyDecompiler) step(
 				// The same variable, when this store and the variable's flow to a
 				// read together; otherwise the slot may be a dead variable's, or
 				// another arm's own.
-				same := d.sharesRead(existing, slotOf(instruction), pc)
+				same := d.sharesReadOrCopies(existing, slotOf(instruction), pc)
 				switch {
 				case value.Text == "null" && same:
 					fallback = existing.Type
@@ -9292,7 +9366,7 @@ func (d *bodyDecompiler) step(
 		// as it would in source; an int stored into a guessed char, byte or
 		// short says the guess was wrong, and the variable an int all along.
 		if existing, ok := d.locals[slotOf(instruction)]; ok && !existing.Authoritative && existing.Origin == nil &&
-			fallback != "" && fallback != existing.Type && d.sharesRead(existing, slotOf(instruction), pc) {
+			fallback != "" && fallback != existing.Type && d.sharesReadOrCopies(existing, slotOf(instruction), pc) {
 			switch {
 			case existing.Type == "int" && erasedToInt[fallback] && fallback != "boolean":
 				fallback = "int"

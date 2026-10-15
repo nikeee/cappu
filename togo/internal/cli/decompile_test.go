@@ -380,3 +380,28 @@ func TestDecompileWritesDeeplyNestedClassesOnce(t *testing.T) {
 		t.Errorf("expected B once, inside A inside Foo (exit %d):\n%s\n%s", code, stdout, stderr)
 	}
 }
+
+// A top-level class whose name merely begins with a nested class's, `$` and
+// all, is no class the other declares: written as it is, without a note.
+func TestDecompileSaysNothingOfAClassNobodyDeclares(t *testing.T) {
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("no javac")
+	}
+	dir := t.TempDir()
+	for name, source := range map[string]string{
+		"Foo.java":     "package p;\npublic class Foo { public static class Ab { } }\n",
+		"Foo$Abc.java": "package p;\npublic class Foo$Abc { public int v() { return 7; } }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	classes := filepath.Join(dir, "c")
+	if out, err := exec.Command("javac", "--release", "21", "-d", classes, filepath.Join(dir, "Foo.java"), filepath.Join(dir, "Foo$Abc.java")).CombinedOutput(); err != nil {
+		t.Fatalf("javac: %v\n%s", err, out)
+	}
+	code, stdout, stderr := runDecompile(t, filepath.Join(classes, "p", "Foo.class"), filepath.Join(classes, "p", "Foo$Abc.class"))
+	if code != 0 || !strings.Contains(stdout, "return 7;") || stderr != "" {
+		t.Errorf("expected Foo$Abc written plainly, without a note (exit %d):\n%s\n%s", code, stdout, stderr)
+	}
+}
