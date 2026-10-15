@@ -643,3 +643,5 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-10-15 12:22 — i pulled form master. you may want to merge that into your branch. thencontinue
 - 2026-10-15 12:36 — continue building bsp
 - 2026-10-15 12:50 — create issues in the repository that capture the TODOs for proper bsp support
+- 2026-10-15 12:55 — create labels for dap, bsp, mcp, lsp and so on
+- 2026-10-15 12:57 — label the issues accordignly
