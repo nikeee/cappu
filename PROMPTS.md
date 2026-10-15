@@ -647,3 +647,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-10-15 12:57 — label the issues accordignly
 - 2026-10-15 13:05 — are there TODOs for mcp and dap? open issues for them as well
 - 2026-10-15 13:25 — add TODOs for the decompiler to the decompiler issue (as a sub issue, if makes sense)
+- 2026-10-15 13:45 — what else is missing?
