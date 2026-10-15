@@ -6019,8 +6019,39 @@ public class Names {
 		// finally around it too.
 		{"FinallyCopies", `public class FinallyCopies {
   static void log(CharSequence c) { System.out.print("CS:" + c + " "); }
+  static void boomOn(String s) { if (s.length() > 1) throw new IllegalStateException(); }
+  static void twice(Object o) { if (!(o instanceof String s) || s.isEmpty()) return; try { s = s + "!"; boomOn(s); s = s + "?"; } catch (RuntimeException e) { System.out.print(s); } }
+  static void catchInFinally(Object o) {
+    if (!(o instanceof String s) || s.isEmpty()) return;
+    try { boomOn(s); } catch (IllegalStateException e) { s = s + "!"; throw new RuntimeException(s); } finally { System.out.print("[" + s + "]"); }
+  }
+  // A finally's cleanup stores on the way off the range too, where it is
+  // not written: a read after the statement is reached through that store.
+  static String plain(String a) { String s; try { log(a); } finally { s = a + "!"; } return s; }
+  public static void main(String[] z) {
+    System.out.print(plain("q") + " ");
+    twice("x"); twice(1);
+    catchInFinally("x");
+    try { catchInFinally("yy"); } catch (RuntimeException e) { System.out.print(e.getMessage()); }
+    System.out.println();
+  }
+}`, true, false},
+		// Under the test that binds a pattern, with no read in common, a store
+		// of another type is the pattern's variable or the next one in its
+		// slot - which decides an overload - and a store in a cleanup that
+		// branches is skipped on some way off the range: what the bytecode
+		// does not say is refused, not guessed.
+		// Under the test that binds a pattern, with no read in common, a store
+		// of another type is the pattern's variable or the next one in its
+		// slot - which decides an overload - and a store in a cleanup that
+		// branches is skipped on some way off the range: what the bytecode
+		// does not say is refused, not guessed. Each on its own, so one
+		// written back has to run as the original does.
+		{"UndecidedOther", `public class UndecidedOther {
+  static void log(CharSequence c) { System.out.print("CS:" + c + " "); }
   static void log(StringBuilder c) { System.out.print("SB:" + c + " "); }
   static void boomOn(String s) { if (s.length() > 1) throw new IllegalStateException(); }
+  static void foo() { }
   static int other(Object o) {
     int r = 0;
     { if (!(o instanceof CharSequence s) || s.isEmpty()) return -1; r = s.length(); }
@@ -6028,35 +6059,31 @@ public class Names {
     try { r++; } finally { v = new StringBuilder("n" + r); log(v); }
     return r;
   }
-  static int boxed(Object o) {
-    int r = 0;
-    { if (!(o instanceof String s) || s.isEmpty()) return -1; r = s.length(); }
-    Integer v;
-    try { r++; } finally { v = r * 2; System.out.print(v); }
-    return r;
+  public static void main(String[] z) { System.out.println(other("abc") + " " + other(1)); }
+}`, false, false},
+		{"UndecidedReassigned", `public class UndecidedReassigned {
+  static void log(CharSequence c) { System.out.print("CS:" + c + " "); }
+  static void log(StringBuilder c) { System.out.print("SB:" + c + " "); }
+  static void boomOn(String s) { if (s.length() > 1) throw new IllegalStateException(); }
+  static void foo() { }
+  static void reassigned(Object o) {
+    if (!(o instanceof CharSequence s) || s.isEmpty()) return;
+    try { foo(); } finally { s = new StringBuilder("x").append(s); }
+    log(s);
   }
-  static void twice(Object o) { if (!(o instanceof String s) || s.isEmpty()) return; try { s = s + "!"; boomOn(s); s = s + "?"; } catch (RuntimeException e) { System.out.print(s); } }
-  static void catchInFinally(Object o) {
-    if (!(o instanceof String s) || s.isEmpty()) return;
-    try { boomOn(s); } catch (IllegalStateException e) { s = s + "!"; throw new RuntimeException(s); } finally { System.out.print("[" + s + "]"); }
-  }
-  // A finally's cleanup stores on the way off the range too, where it is
-  // not written: a read after the statement is reached through that store -
-  // or past it, where the cleanup branches.
-  static String plain(String a) { String s; try { log(a); } finally { s = a + "!"; } return s; }
+  public static void main(String[] z) { reassigned("a"); System.out.println(); }
+}`, false, false},
+		{"UndecidedBranching", `public class UndecidedBranching {
+  static void log(CharSequence c) { System.out.print("CS:" + c + " "); }
+  static void log(StringBuilder c) { System.out.print("SB:" + c + " "); }
+  static void boomOn(String s) { if (s.length() > 1) throw new IllegalStateException(); }
+  static void foo() { }
   static String branching(Object o, int k) {
     if (o instanceof String s && !s.isEmpty()) { try { boomOn(s); } finally { if (k > 0) s = s + "?"; } return s; }
     return "-";
   }
-  public static void main(String[] z) {
-    System.out.print(plain("q") + branching("y", 1) + branching("z", 0) + " ");
-    System.out.print(other("abc") + " " + other(1) + " " + boxed("ab") + " ");
-    twice("x"); twice(1);
-    catchInFinally("x");
-    try { catchInFinally("yy"); } catch (RuntimeException e) { System.out.print(e.getMessage()); }
-    System.out.println();
-  }
-}`, true, false},
+  public static void main(String[] z) { System.out.println(branching("y", 1) + branching("z", 0)); }
+}`, false, false},
 	}
 	for _, c := range cases {
 		for _, debug := range []bool{false, true} {

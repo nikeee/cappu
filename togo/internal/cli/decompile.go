@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"syscall"
 
@@ -76,26 +77,94 @@ func siblingsFor(file string, b []byte, named map[string]string) compiler.Siblin
 	}
 }
 
-// writtenInsideAnother reports a class another file of this run declares and
-// writes: one of the classes declaring it reads this very file for it. One
-// they read from elsewhere - another build beside them - is written on its
-// own instead, which is said, or it would be lost without a word.
-func writtenInsideAnother(file string, b []byte, declaredBy map[string][]compiler.Siblings) bool {
-	read, err := compiler.ReadClassFile(b)
-	if err != nil {
-		return false
+// runFile is one file of the run: its class and what that class declares.
+type runFile struct {
+	path   string
+	bytes  []byte
+	class  string
+	nested []string
+}
+
+// writers decides, for every file of the run, whether another file writes
+// it: a file's class writes the classes it declares, and those theirs, down
+// to compiler.NestedDepth - every one of them read through the lookup of the
+// class at the top, whose file is the one written. A declared class is
+// written inside only when that lookup reads this very file for it; one it
+// reads from elsewhere - another build beside it - is written on its own.
+type writers struct {
+	files      []runFile
+	declaredBy map[string][]int
+	resolver   map[int]compiler.Siblings
+	named      map[string]string
+	// inside[i] is the file whose class declares file i's and writes it, -1
+	// for one written on its own; level[i] how deep under its top it sits.
+	inside, level []int
+	state         []int // 0 unknown, 1 deciding, 2 decided
+}
+
+func (w *writers) decide(i int) {
+	if w.state[i] == 2 {
+		return
 	}
-	outers, ok := declaredBy[read.ThisClass]
-	if !ok {
-		return false
+	w.inside[i], w.level[i] = -1, 0
+	if w.state[i] == 1 {
+		return // a class declaring itself through others: written on its own
 	}
-	for _, siblings := range outers {
-		if found, ok := siblings(read.ThisClass); ok && bytes.Equal(found, b) {
-			return true
+	w.state[i] = 1
+	for _, outer := range w.declaredBy[w.files[i].class] {
+		if outer == i {
+			continue
+		}
+		w.decide(outer)
+		if w.level[outer]+1 > compiler.NestedDepth {
+			continue
+		}
+		top := outer
+		for w.inside[top] >= 0 {
+			top = w.inside[top]
+		}
+		if found, ok := w.lookup(top)(w.files[i].class); ok && bytes.Equal(found, w.files[i].bytes) {
+			w.inside[i], w.level[i] = outer, w.level[outer]+1
+			break
 		}
 	}
-	fmt.Fprintf(os.Stderr, "cappu: %s: written on its own: the class that declares it reads another copy, or none\n", file)
-	return false
+	w.state[i] = 2
+}
+
+func (w *writers) lookup(i int) compiler.Siblings {
+	if resolver, ok := w.resolver[i]; ok {
+		return resolver
+	}
+	resolver := siblingsFor(w.files[i].path, w.files[i].bytes, w.named)
+	w.resolver[i] = resolver
+	return resolver
+}
+
+// distinctFiles drops a file named again - by the same path, another one, or
+// a link. Files of different sizes are never one, so only those of one size
+// are compared.
+func distinctFiles(files []string) []string {
+	bySize := map[int64][]os.FileInfo{}
+	paths := map[string]bool{}
+	var out []string
+	for _, file := range files {
+		key := file
+		if abs, err := filepath.Abs(file); err == nil {
+			key = abs
+		}
+		if paths[key] {
+			continue
+		}
+		paths[key] = true
+		if info, err := os.Stat(file); err == nil {
+			if slices.ContainsFunc(bySize[info.Size()], func(one os.FileInfo) bool { return os.SameFile(one, info) }) {
+				continue
+			}
+			bySize[info.Size()] = append(bySize[info.Size()], info)
+		}
+		out = append(out, file)
+	}
+	return out
 }
 
 func RunDecompile(files []string, disasm bool) int {
@@ -103,30 +172,13 @@ func RunDecompile(files []string, disasm bool) int {
 		fmt.Fprint(os.Stderr, "usage: cappu decompile <file.class> ...\n")
 		return 2
 	}
-	// A file named twice - by another path, a link - is one file.
-	var kept []os.FileInfo
-	unique := files[:0:0]
-	for _, file := range files {
-		info, err := os.Stat(file)
-		if err == nil && slices.ContainsFunc(kept, func(one os.FileInfo) bool { return os.SameFile(one, info) }) {
-			continue
-		}
-		if err == nil {
-			kept = append(kept, info)
-		}
-		unique = append(unique, file)
-	}
-	files = unique
+	files = distinctFiles(files)
 	// A class the file of another one declares is not written twice: two
 	// declarations of one type do not compile together. Only what that other
 	// file actually writes is skipped - a name that merely looks nested is
 	// not, or the class would be lost without a word.
-	type outer struct {
-		file  string
-		bytes []byte
-	}
-	var outers []outer
-	declared, named := map[string][]int{}, map[string]string{}
+	w := &writers{declaredBy: map[string][]int{}, resolver: map[int]compiler.Siblings{}, named: map[string]string{}}
+	index := map[string]int{}
 	if !disasm {
 		for _, file := range files {
 			b, err := os.ReadFile(file)
@@ -137,43 +189,42 @@ func RunDecompile(files []string, disasm bool) int {
 			if err != nil {
 				continue
 			}
-			if _, twice := named[read.ThisClass]; twice {
-				named[read.ThisClass] = ""
+			if _, twice := w.named[read.ThisClass]; twice {
+				w.named[read.ThisClass] = ""
 			} else {
-				named[read.ThisClass] = file
+				w.named[read.ThisClass] = file
 			}
-			if nested := compiler.NestedClasses(read); len(nested) > 0 {
-				outers = append(outers, outer{file, b})
-				for _, name := range nested {
-					declared[name] = append(declared[name], len(outers)-1)
-				}
+			index[file] = len(w.files)
+			w.files = append(w.files, runFile{file, b, read.ThisClass, compiler.NestedClasses(read)})
+		}
+		for i, one := range w.files {
+			for _, name := range one.nested {
+				w.declaredBy[name] = append(w.declaredBy[name], i)
 			}
 		}
-	}
-	// Each declaring class's own lookup, built once - every one of its
-	// nested classes asks it.
-	resolvers := make([]compiler.Siblings, len(outers))
-	for i, one := range outers {
-		resolvers[i] = siblingsFor(one.file, one.bytes, named)
-	}
-	declaredBy := map[string][]compiler.Siblings{}
-	for name, indices := range declared {
-		for _, i := range indices {
-			declaredBy[name] = append(declaredBy[name], resolvers[i])
+		w.inside, w.level, w.state = make([]int, len(w.files)), make([]int, len(w.files)), make([]int, len(w.files))
+		for i := range w.files {
+			w.decide(i)
 		}
 	}
 	failed := false
 	for _, file := range files {
-		bytes, err := os.ReadFile(file)
-		if err == nil && writtenInsideAnother(file, bytes, declaredBy) {
+		i, known := index[file]
+		if known && w.inside[i] >= 0 {
 			continue
 		}
+		if known && len(w.declaredBy[w.files[i].class]) > 0 {
+			fmt.Fprintf(os.Stderr, "cappu: %s: written on its own, outside the class that declares it\n", file)
+		}
+		bytes, err := os.ReadFile(file)
 		if err == nil {
 			var text string
 			if disasm {
 				text, err = compiler.Disassemble(bytes)
+			} else if known {
+				text, err = DecompileToSourceWith(bytes, w.lookup(i))
 			} else {
-				text, err = DecompileToSourceWith(bytes, siblingsFor(file, bytes, named))
+				text, err = DecompileToSourceWith(bytes, siblingsFor(file, bytes, w.named))
 			}
 			if err == nil {
 				fmt.Print(text)

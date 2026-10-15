@@ -310,3 +310,66 @@ func TestDecompileWritesEveryNamedNestedClass(t *testing.T) {
 		}
 	}
 }
+
+// Classes nested in nested classes are written by the class at the top,
+// through its own lookup: a named copy of one that the top reads elsewhere
+// is written on its own, and said so. So is one nested deeper than a file
+// follows the classes it declares, which no class writes inside.
+func TestDecompileWritesDeeplyNestedClassesOnce(t *testing.T) {
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("no javac")
+	}
+	dir := t.TempDir()
+	compile := func(name, source string) string {
+		path := filepath.Join(dir, name, "Foo.java")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		classes := filepath.Join(dir, name, "c")
+		if out, err := exec.Command("javac", "--release", "21", "-d", classes, path).CombinedOutput(); err != nil {
+			t.Fatalf("javac: %v\n%s", err, out)
+		}
+		return filepath.Join(classes, "p")
+	}
+	two := func(v string) string {
+		return "package p;\npublic class Foo { public static class A { public static class B { public int v() { return " + v + "; } } } }\n"
+	}
+	v1, v2 := compile("v1", two("1")), compile("v2", two("2"))
+	// v1's A elsewhere, with v2's B beside it: Foo still writes A and B,
+	// both read beside Foo, and A's neighbour is not what it writes.
+	other := filepath.Join(dir, "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for from, to := range map[string]string{filepath.Join(v1, "Foo$A.class"): "Foo$A.class", filepath.Join(v2, "Foo$A$B.class"): "Foo$A$B.class"} {
+		b, err := os.ReadFile(from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(other, to), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, stdout, stderr := runDecompile(t, filepath.Join(v1, "Foo.class"), filepath.Join(other, "Foo$A.class"), filepath.Join(other, "Foo$A$B.class"))
+	if code != 0 || strings.Count(stdout, "int v()") != 2 || !strings.Contains(stdout, "return 2;") ||
+		!strings.Contains(stderr, "Foo$A$B.class: written on its own") {
+		t.Errorf("expected v1's B inside Foo and v2's on its own, said so (exit %d):\n%s\n%s", code, stdout, stderr)
+	}
+	deep := "package p;\npublic class Foo {"
+	for _, name := range []string{"A", "B", "C", "D", "E", "F", "G", "H", "I"} {
+		deep += " public static class " + name + " {"
+	}
+	deep += " public int v() { return 42; } " + strings.Repeat("}", 10) + "\n"
+	classes := compile("deep", deep)
+	all, err := filepath.Glob(filepath.Join(classes, "*.class"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr = runDecompile(t, all...)
+	if code != 0 || !strings.Contains(stdout, "return 42;") {
+		t.Errorf("expected the class nested past the depth a file follows (exit %d):\n%s\n%s", code, stdout, stderr)
+	}
+}

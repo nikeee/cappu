@@ -3159,8 +3159,9 @@ type bodyDecompiler struct {
 	methodFollowOf map[int]int
 	// dominators over the graph the throwing edges are in, for a `try`'s own end.
 	dominators map[int]map[int]bool
-	// flow is flowGraph's, once built.
-	flow map[int]*block
+	// flow is flowGraph's, once built, and flowDominators its dominators.
+	flow           map[int]*block
+	flowDominators map[int]map[int]bool
 	// ordered is every instruction of the method in order, once read.
 	ordered []Instruction
 	// active are the loops being written right now, innermost last.
@@ -3775,9 +3776,17 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 				(origin != nil && origin.Name == scoped.Name && origin.Type == scoped.Type)) {
 				return existing, nil
 			}
-		case isStore && existing.FromPattern && !d.assignsPattern(existing, slot, pc):
-			// The pattern's variable is out of scope here: javac put another
-			// one in the slot, and it is declared where it is written.
+		case isStore && existing.FromPattern:
+			same, known := d.assignsPattern(existing, slot, pc, fallbackType)
+			if !known {
+				return nil, bail("a pattern variable assigned a value of another type")
+			}
+			if same {
+				return existing, nil
+			}
+			// The pattern's variable is out of scope here, or this store
+			// begins a new value nothing of the old one reaches: either way it
+			// is declared where it is written.
 		case isStore && existing.Origin != nil:
 			// The debug table scoped the variable in this slot, and scopes
 			// nothing here: its range is over, and this store begins a variable
@@ -6518,28 +6527,41 @@ func (d *bodyDecompiler) flowGraph() map[int]*block {
 	return d.flow
 }
 
-// assignsPattern reports whether a store at pc - the pc after it - into a
-// pattern's slot assigns the pattern's variable, without a debug table to say
-// where its scope ends. Being under the test that binds it is not enough: a
-// variable after a `try` the test sits in is too, and javac reuses the slot
-// for it. A store the binding shares a read with is the same variable - what
-// reads the slot afterwards reads either, through a catch or a finally too.
+// assignsPattern reports whether a store at pc - the pc after it - of a
+// value of valueType into a pattern's slot assigns the pattern's variable,
+// without a debug table to say where its scope ends, and whether that can
+// be told at all.
 //
-// A finally's cleanup is written from the copy in the handler, which
-// rethrows and reads nothing after the store. javac lays the same
-// instructions out again on every way off the protected range, and the copy
-// there goes on to whatever reads the slot next: the store at the same place
-// in one of those copies is what answers.
-func (d *bodyDecompiler) assignsPattern(pattern *local, slot, pc int) bool {
+// It is the pattern's variable when the store shares a read with the binding:
+// what reads the slot afterwards reads either - through a catch or a finally
+// too. A finally's cleanup is written from the copy in the handler, which
+// rethrows and reads nothing after the store; the copy javac laid out on a
+// way off the range goes on to the reads, and is what answers for a cleanup
+// that does not branch.
+//
+// It is another variable when the test that binds the pattern does not lead
+// to the store: the scope is over, and javac reused the slot. Under the test
+// and with no read in common, both are possible - a variable after a block
+// the test sat in, or the pattern's own assigned a value that replaces the
+// old one everywhere it is read. Writing it as a variable of its own is the
+// same then, as long as it is of the same type; of another, which one source
+// declared decides an overload or a store later on, and nothing here says.
+func (d *bodyDecompiler) assignsPattern(pattern *local, slot, pc int, valueType string) (same, known bool) {
 	if d.sharesRead(pattern, slot, pc-1) {
-		return true
+		return true, true
 	}
 	for _, store := range d.finallyCopies(slot, pc) {
 		if d.sharesReadAt(pattern, slot, d.blockAt(store.Pc), store.Pc) {
-			return true
+			return true, true
 		}
 	}
-	return false
+	if d.flowDominators == nil {
+		d.flowDominators = dominators(d.flowGraph(), d.entryPc)
+	}
+	if !d.flowDominators[d.currentBlock][pattern.Binding] {
+		return false, true
+	}
+	return false, valueType == pattern.Type
 }
 
 // storedIn records the block a store to the variable sits in - and, for a
@@ -6557,11 +6579,16 @@ func (d *bodyDecompiler) storedIn(target *local, slot, pc int) {
 // the handler's copy, which is what is written, ending before pc - the same
 // store in each copy javac laid out on a way off the protected range. The
 // handler opens with the store of the exception, which no copy has; after
-// it, instruction for instruction, the copies match.
+// it, instruction for instruction, the copies match. Only for a cleanup that
+// does not branch: one that does is a single block in each copy, and where
+// in it a store may be skipped no block says.
 func (d *bodyDecompiler) finallyCopies(slot, pc int) []Instruction {
 	for _, region := range d.finallys {
 		if d.currentBlock < region.HandlerPc || d.currentBlock >= region.BodyEnd {
 			continue
+		}
+		if region.RethrowPc != 0 {
+			return nil
 		}
 		handler := d.instructionsFrom(region.HandlerPc)
 		at := -1
@@ -8875,20 +8902,15 @@ func (d *bodyDecompiler) readsBeforeStore(starts []int, slot int) map[int]bool {
 			continue
 		}
 		seen[at] = true
-		// A finally's copy on a way off its range is one block even where the
-		// cleanup branches: a store past a jump in it may not run.
-		stored, branched := false, false
+		stored := false
 		for _, instruction := range flow[at].Instructions {
 			base := opBase(instruction.Mnemonic)
 			if (isOneOf(base, "ilfda", "load") || base == "iinc") && slotOf(instruction) == slot {
 				reads[instruction.Pc] = true
 			}
-			if isOneOf(base, "ilfda", "store") && slotOf(instruction) == slot && !branched {
+			if isOneOf(base, "ilfda", "store") && slotOf(instruction) == slot {
 				stored = true
 				break
-			}
-			if conditionalBranches[instruction.Mnemonic] || isGotoMnemonic(instruction.Mnemonic) {
-				branched = true
 			}
 		}
 		if !stored {
