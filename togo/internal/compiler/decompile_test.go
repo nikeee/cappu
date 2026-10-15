@@ -5964,6 +5964,47 @@ public class Names {
   }
   public static void main(String[] z) { System.out.println(" " + e(new int[] {1, 2, 1})); }
 }`, false, true},
+		// From the review of those. A pattern's variable assigned in a try is
+		// read by the catch, the finally or the code after the try, through
+		// the way out an exception takes - and the read is shared all the
+		// same. A finally that assigns it a value of another type still
+		// assigns it.
+		{"PatternThroughExceptions", `public class PatternThroughExceptions {
+  static void boom() { throw new IllegalStateException(); }
+  static void boomOn(String s) { if (s.length() > 1) throw new IllegalStateException(); }
+  static void inCatch(Object o) { if (!(o instanceof String s) || s.isEmpty()) return; try { s = s + "!"; boom(); } catch (RuntimeException e) { System.out.print(s); } }
+  static void inFinally(Object o) { if (!(o instanceof String s) || s.isEmpty()) return; try { s = s + "!"; boomOn(s); } finally { System.out.print(s); } }
+  static void afterTry(Object o) { if (!(o instanceof String s) || s.isEmpty()) return; try { s = s + "!"; boom(); } catch (RuntimeException e) { } System.out.print(s); }
+  static int toNull(Object o) { if (!(o instanceof String s) || s.isEmpty()) return -1; int n = 0; while (s != null) { try { n++; } finally { s = null; } } return n; }
+  static int wider(Object o) { if (!(o instanceof CharSequence s) || s.isEmpty()) return -1; int n = 0; while (s.length() < 4) { try { n++; } finally { s = s + "!"; } } return n; }
+  public static void main(String[] z) {
+    inCatch("x"); inCatch(1);
+    try { inFinally("y"); } catch (RuntimeException e) { System.out.print("E"); }
+    afterTry("z");
+    System.out.println(" " + toNull("x") + toNull(1) + " " + wider("x") + wider(1));
+  }
+}`, true, false},
+		// A variable declared before the switch is in scope where the arms
+		// meet - by a row the last arm's store opened and that runs through
+		// the merge - while an arm's own one is not, even with a later
+		// variable of its name.
+		{"ArmScopes", `public class ArmScopes {
+  static int both(int[] ks) { int s = 0; for (int k : ks) { int y; int x = switch (k) { case 1 -> { y = 5; yield 1; } default -> { y = 7; yield 2; } }; s += y * x; } return s; }
+  static int last(int[] ks) { int s = 0; for (int k : ks) { int y; int x = switch (k) { case 1 -> { y = 5; yield 1; } default -> y = 7; }; s += y * x; } return s; }
+  static int later(int[] ks) {
+    int s = 0;
+    for (int k : ks) {
+      int x = switch (k) { case 1 -> { int y = k * 2; yield y + 1; } default -> 0; };
+      int y;
+      if (x >= 0) { y = x * 3; } else { throw new IllegalStateException(); }
+      Runnable r = () -> System.out.print("y" + y);
+      r.run();
+      s += y;
+    }
+    return s;
+  }
+  public static void main(String[] z) { int[] ks = {1, 2, 1}; System.out.println(" " + both(ks) + " " + last(ks) + " " + later(ks)); }
+}`, false, true},
 	}
 	for _, c := range cases {
 		for _, debug := range []bool{false, true} {

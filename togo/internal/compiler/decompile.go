@@ -3159,9 +3159,12 @@ type bodyDecompiler struct {
 	methodFollowOf map[int]int
 	// dominators over the graph the throwing edges are in, for a `try`'s own end.
 	dominators map[int]map[int]bool
-	// finallyDominators are the dominators with the edges into each finally's
-	// handler too, which the copy its cleanup is written from sits in.
+	// finallyDominators are the dominators of flowGraph, with the edges into
+	// each finally's handler too, which the copy its cleanup is written from
+	// sits in.
 	finallyDominators map[int]map[int]bool
+	// flow is flowGraph's, once built.
+	flow map[int]*block
 	// active are the loops being written right now, innermost last.
 	active []activeLoop
 	// switches are the `switch` statements being written right now, innermost last.
@@ -6482,36 +6485,35 @@ func (d *bodyDecompiler) loop(l *loop) (int, error) {
 	return d.foreverLoop(l)
 }
 
-// livesPast reports whether the debug table keeps a variable alive at or
-// after pc: a row of its slot and name begins there that no store into the
-// slot begins.
+// livesPast reports whether the debug table keeps a variable alive at pc, the
+// merge of a switch: a row of its slot and name covers it. An arm's own
+// variable is in scope inside its arm alone; one that lives on past the
+// switch is too at the merge - by a row the last arm's store opened and that
+// runs through it, or one that opens there.
 func (d *bodyDecompiler) livesPast(one *local, pc int) bool {
 	if one.Origin == nil {
 		return true
 	}
 	for _, row := range d.localTable {
-		if row.Slot == one.Origin.Slot && row.Name == one.Origin.Name && row.StartPc >= pc && !d.storeEndsAt(row.Slot, row.StartPc) {
+		if row.Slot == one.Origin.Slot && row.Name == one.Origin.Name && row.StartPc <= pc && pc < row.EndPc {
 			return true
 		}
 	}
 	return false
 }
 
-// storeEndsAt reports whether a store into slot is the instruction right
-// before pc.
-func (d *bodyDecompiler) storeEndsAt(slot, pc int) bool {
-	for _, b := range d.blocks {
-		for i, one := range b.Instructions {
-			next := endOf(b)
-			if i+1 < len(b.Instructions) {
-				next = b.Instructions[i+1].Pc
-			}
-			if next == pc && isOneOf(opBase(one.Mnemonic), "ilfda", "store") && slotOf(one) == slot {
-				return true
-			}
+// flowGraph is the blocks with every way an exception leaves them: into the
+// handlers of a try, a synchronized and a finally around them - which is how
+// a value stored in a try reaches the catch, the finally or the code after.
+func (d *bodyDecompiler) flowGraph() map[int]*block {
+	if d.flow == nil {
+		guarded := append([]monitorRegion{}, d.monitors...)
+		for _, one := range d.finallys {
+			guarded = append(guarded, monitorRegion{StartPc: one.StartPc, EndPc: one.EndPc, HandlerPc: one.HandlerPc})
 		}
+		d.flow = withExceptionEdges(d.blocks, d.regions, guarded)
 	}
-	return false
+	return d.flow
 }
 
 // assignsPattern reports whether a store at pc - the pc after it - into a
@@ -6519,7 +6521,8 @@ func (d *bodyDecompiler) storeEndsAt(slot, pc int) bool {
 // where its scope ends. Being under the test that binds it is not enough: a
 // variable after a `try` the test sits in is too, and javac reuses the slot
 // for it. A store the binding shares a read with is the same variable - what
-// reads the slot afterwards reads either. A finally's cleanup, written from
+// reads the slot afterwards reads either, through a catch or a finally too.
+// A finally's cleanup, written from
 // the copy that rethrows, reads nothing after its store, and there being
 // under the binding - with the cleanup reached from its protected range - is
 // what says it.
@@ -6530,11 +6533,7 @@ func (d *bodyDecompiler) assignsPattern(pattern *local, slot, pc int) bool {
 	for _, region := range d.finallys {
 		if d.currentBlock >= region.HandlerPc && d.currentBlock < region.BodyEnd {
 			if d.finallyDominators == nil {
-				guarded := append([]monitorRegion{}, d.monitors...)
-				for _, one := range d.finallys {
-					guarded = append(guarded, monitorRegion{StartPc: one.StartPc, EndPc: one.EndPc, HandlerPc: one.HandlerPc})
-				}
-				d.finallyDominators = dominators(withExceptionEdges(d.blocks, d.regions, guarded), d.entryPc)
+				d.finallyDominators = dominators(d.flowGraph(), d.entryPc)
 			}
 			return d.finallyDominators[d.currentBlock][pattern.Binding]
 		}
@@ -7483,13 +7482,14 @@ func (d *bodyDecompiler) takeOverBinding(start int, typ string) (string, bool) {
 		wanted = scoped.Name
 	}
 	one := &local{
-		Name:        d.freshName(wanted),
-		Type:        typ,
-		Declared:    true,
-		FromPattern: true,
-		Binding:     start,
-		Origin:      scoped,
-		StoreBlocks: map[int]bool{start: true},
+		Name:          d.freshName(wanted),
+		Type:          typ,
+		Declared:      true,
+		FromPattern:   true,
+		Authoritative: true,
+		Binding:       start,
+		Origin:        scoped,
+		StoreBlocks:   map[int]bool{start: true},
 	}
 	d.locals[slot] = one
 	d.byName[one.Name] = one
@@ -7654,8 +7654,7 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 	//
 	// Inside a loop or a branch even the arm's own variable is hoisted by its
 	// first store. Which one it is the debug table says: a variable that lives
-	// on past the switch has a row there that no store begins - one that a
-	// store begins is the next variable in the slot. The arm's own is
+	// on past the switch is in scope where the arms meet. The arm's own is
 	// declared at that first store, where source declared it.
 	freeze := func(from int) bool {
 		inArm := func(list *[]stmt, index int) bool { return list == statements && index >= from }
@@ -8246,7 +8245,8 @@ func (d *bodyDecompiler) bindLocal(bind *patternBinding, b *block, pc int) bool 
 	if err != nil || bound == nil {
 		return false
 	}
-	bound.Declared, bound.FromPattern, bound.Binding = true, true, b.Start
+	// Its type is the one the pattern names - what source declared.
+	bound.Declared, bound.FromPattern, bound.Binding, bound.Authoritative = true, true, b.Start, true
 	bound.StoreBlocks[b.Start] = true
 	bind.Name = bound.Name
 	d.bound = append(d.bound, bind)
@@ -8742,7 +8742,7 @@ func (d *bodyDecompiler) sharesRead(entry *local, slot, pc int) bool {
 		if d.blocks[start] == nil {
 			continue
 		}
-		for read := range d.readsBeforeStore(d.blocks[start].Successors, slot) {
+		for read := range d.readsBeforeStore(d.flowGraph()[start].Successors, slot) {
 			theirs[read] = true
 		}
 	}
@@ -8766,7 +8766,7 @@ func (d *bodyDecompiler) sharesRead(entry *local, slot, pc int) bool {
 			return false
 		}
 	}
-	for read := range d.readsBeforeStore(block.Successors, slot) {
+	for read := range d.readsBeforeStore(d.flowGraph()[d.currentBlock].Successors, slot) {
 		if theirs[read] {
 			return true
 		}
@@ -8783,12 +8783,13 @@ func (d *bodyDecompiler) readsBeforeStore(starts []int, slot int) map[int]bool {
 	for len(queue) > 0 {
 		at := queue[len(queue)-1]
 		queue = queue[:len(queue)-1]
-		if seen[at] || d.blocks[at] == nil {
+		flow := d.flowGraph()
+		if seen[at] || flow[at] == nil {
 			continue
 		}
 		seen[at] = true
 		stored := false
-		for _, instruction := range d.blocks[at].Instructions {
+		for _, instruction := range flow[at].Instructions {
 			base := opBase(instruction.Mnemonic)
 			if (isOneOf(base, "ilfda", "load") || base == "iinc") && slotOf(instruction) == slot {
 				reads[instruction.Pc] = true
@@ -8799,7 +8800,15 @@ func (d *bodyDecompiler) readsBeforeStore(starts []int, slot int) map[int]bool {
 			}
 		}
 		if !stored {
-			queue = append(queue, d.blocks[at].Successors...)
+			queue = append(queue, flow[at].Successors...)
+			continue
+		}
+		// What throws before the store reaches the handlers with the value
+		// from before it.
+		for _, successor := range flow[at].Successors {
+			if !containsInt(d.blocks[at].Successors, successor) {
+				queue = append(queue, successor)
+			}
 		}
 	}
 	return reads

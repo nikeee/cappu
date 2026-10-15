@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	"github.com/nikeee/cappu/internal/compiler"
@@ -74,10 +76,27 @@ func siblingsFor(file string, b []byte, named map[string]string) compiler.Siblin
 	}
 }
 
-// writtenInsideAnother reports a class another file of this run declares.
-func writtenInsideAnother(b []byte, declared map[string]bool) bool {
+// declaringFile is the file of this run whose class declares a nested one.
+type declaringFile struct {
+	file  string
+	bytes []byte
+}
+
+// writtenInsideAnother reports a class another file of this run declares and
+// writes: the one that class reads for it is this very file. One it reads
+// from elsewhere - another build beside it - leaves this one to be written
+// on its own, or it would be lost without a word.
+func writtenInsideAnother(b []byte, declared map[string]declaringFile, named map[string]string) bool {
 	read, err := compiler.ReadClassFile(b)
-	return err == nil && declared[read.ThisClass]
+	if err != nil {
+		return false
+	}
+	outer, ok := declared[read.ThisClass]
+	if !ok {
+		return false
+	}
+	found, ok := siblingsFor(outer.file, outer.bytes, named)(read.ThisClass)
+	return ok && bytes.Equal(found, b)
 }
 
 func RunDecompile(files []string, disasm bool) int {
@@ -85,11 +104,25 @@ func RunDecompile(files []string, disasm bool) int {
 		fmt.Fprint(os.Stderr, "usage: cappu decompile <file.class> ...\n")
 		return 2
 	}
+	// A file named twice is one file.
+	seen := map[string]bool{}
+	unique := files[:0:0]
+	for _, file := range files {
+		key := file
+		if abs, err := filepath.Abs(file); err == nil {
+			key = abs
+		}
+		if !seen[key] {
+			seen[key] = true
+			unique = append(unique, file)
+		}
+	}
+	files = unique
 	// A class the file of another one declares is not written twice: two
 	// declarations of one type do not compile together. Only what that other
 	// file actually writes is skipped - a name that merely looks nested is
 	// not, or the class would be lost without a word.
-	declared, named := map[string]bool{}, map[string]string{}
+	declared, named := map[string]declaringFile{}, map[string]string{}
 	if !disasm {
 		for _, file := range files {
 			b, err := os.ReadFile(file)
@@ -106,14 +139,16 @@ func RunDecompile(files []string, disasm bool) int {
 				named[read.ThisClass] = file
 			}
 			for _, name := range compiler.NestedClasses(read) {
-				declared[name] = true
+				if _, ok := declared[name]; !ok {
+					declared[name] = declaringFile{file, b}
+				}
 			}
 		}
 	}
 	failed := false
 	for _, file := range files {
 		bytes, err := os.ReadFile(file)
-		if err == nil && writtenInsideAnother(bytes, declared) {
+		if err == nil && writtenInsideAnother(bytes, declared, named) {
 			continue
 		}
 		if err == nil {

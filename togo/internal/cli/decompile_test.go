@@ -246,3 +246,62 @@ func TestDecompileKeepsTwoBuildsOfOneClassApart(t *testing.T) {
 		t.Errorf("expected each build's own nested class (exit %d):\n%s\n%s", code, stdout, stderr)
 	}
 }
+
+// A nested class named on the command line that its outer class does not
+// read for itself - not beside it, or another build of it - is written on
+// its own rather than dropped; one named twice is one file.
+func TestDecompileWritesEveryNamedNestedClass(t *testing.T) {
+	if _, err := exec.LookPath("javac"); err != nil {
+		t.Skip("no javac")
+	}
+	dir := t.TempDir()
+	nested := map[string]string{}
+	for _, v := range []string{"1", "2"} {
+		source := filepath.Join(dir, "src"+v, "Foo.java")
+		if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(source, []byte("package p;\npublic class Foo {\n  public static class In { public int v() { return "+v+"; } }\n  public int w() { return new In().v(); }\n}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		classes := filepath.Join(dir, "v"+v)
+		if out, err := exec.Command("javac", "--release", "21", "-d", classes, source).CombinedOutput(); err != nil {
+			t.Fatalf("javac: %v\n%s", err, out)
+		}
+		moved := filepath.Join(dir, "only"+v, "Foo$In.class")
+		if err := os.MkdirAll(filepath.Dir(moved), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(filepath.Join(classes, "p", "Foo$In.class"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(moved, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		nested[v] = moved
+	}
+	outer := filepath.Join(dir, "v1", "p", "Foo.class")
+	if err := os.Remove(filepath.Join(dir, "v1", "p", "Foo$In.class")); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name  string
+		files []string
+		want  []string
+	}{
+		{"two copies, neither beside", []string{outer, nested["1"], nested["2"]}, []string{"return 1;", "return 2;"}},
+		{"one file named twice", []string{outer, nested["1"], nested["1"]}, []string{"return 1;"}},
+		{"another build than the one beside", []string{filepath.Join(dir, "v2", "p", "Foo.class"), nested["1"]}, []string{"return 1;", "return 2;"}},
+	} {
+		code, stdout, stderr := runDecompile(t, c.files...)
+		for _, want := range c.want {
+			if code != 0 || !strings.Contains(stdout, want) {
+				t.Errorf("%s: expected %q (exit %d):\n%s\n%s", c.name, want, code, stdout, stderr)
+			}
+		}
+		if strings.Count(stdout, "int v()") != len(c.want) {
+			t.Errorf("%s: expected %d In:\n%s", c.name, len(c.want), stdout)
+		}
+	}
+}
