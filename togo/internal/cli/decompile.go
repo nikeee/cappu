@@ -316,11 +316,12 @@ func RunDecompile(files []string, disasm bool) int {
 		bytes, err := os.ReadFile(file)
 		if err == nil {
 			var text string
-			if disasm {
+			switch {
+			case disasm:
 				text, err = compiler.Disassemble(bytes)
-			} else if known {
+			case known:
 				text, err = DecompileToSourceWith(bytes, w.lookup(i))
-			} else {
+			default:
 				text, err = DecompileToSourceWith(bytes, siblingsFor(file, bytes, w.named))
 			}
 			if err == nil {

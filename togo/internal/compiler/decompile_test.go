@@ -6226,6 +6226,27 @@ public class LibraryArguments {
     System.out.println();
   }
 }`, true, false},
+		// An anonymous class inside another reads what the outer one
+		// captured, and the fields of the class around both, through the
+		// outer one's instance - which javac 21 does for a capture too.
+		{"ThroughEnclosingAnonymous", `public class ThroughEnclosingAnonymous {
+  String name = "M";
+  Runnable outer(String a, int n) {
+    return new Runnable() {
+      public void run() {
+        Runnable mid = new Runnable() {
+          public void run() {
+            Runnable in = new Runnable() { public void run() { System.out.print(name + a + n + "!"); } };
+            in.run();
+            System.out.print(a);
+          }
+        };
+        mid.run();
+      }
+    };
+  }
+  public static void main(String[] z) { new ThroughEnclosingAnonymous().outer("v", 3).run(); System.out.println(); }
+}`, true, false},
 	}
 	for _, c := range cases {
 		for _, debug := range []bool{false, true} {

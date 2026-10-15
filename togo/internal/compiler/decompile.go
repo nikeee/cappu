@@ -4638,6 +4638,7 @@ func (d *bodyDecompiler) anonymousBody(
 	}
 	names := map[string]string{}
 	taken := map[int]bool{}
+	through := ""
 	for slot, field := range captured {
 		// The enclosing instance comes first and is not an argument any more.
 		at, known := position[slot]
@@ -4649,10 +4650,20 @@ func (d *bodyDecompiler) anonymousBody(
 			return "", "", nil, bail("an anonymous class whose captures are not named")
 		case strings.HasPrefix(field, "this$"):
 			enclosing := simpleClassName(d.classFile.ThisClass)
-			// `Outer$1.this` is not a name: a class javac named for the method
-			// it sits in has none of its own.
-			if outer == nil || outer.Text != "this" || namedForAMethod.MatchString(enclosing) {
+			if outer == nil || outer.Text != "this" {
 				return "", "", nil, bail("an anonymous class holding an enclosing instance with no name")
+			}
+			// `Outer$1.this` is not a name: a class javac named for the method
+			// it sits in has none of its own. What javac 21 reads through it
+			// is a value that class captured - `this.this$0.val$a`, where
+			// later javac captures it again - and written inside that class,
+			// it is the capture passed on, which the pass around rewrites.
+			if namedForAMethod.MatchString(enclosing[strings.LastIndexByte(enclosing, '$')+1:]) {
+				if !d.classFile.Inlined {
+					return "", "", nil, bail("an anonymous class holding an enclosing instance with no name")
+				}
+				through = field
+				continue
 			}
 			// Written nested, the class is named as source declares it there,
 			// not by its binary name.
@@ -4832,11 +4843,23 @@ func (d *bodyDecompiler) anonymousBody(
 	})
 	// A field left over is one the constructor did not explain - except a
 	// capture this class passed on to one inside it, which still reads as this
-	// class's own field and which the pass around this one rewrites.
-	for _, match := range syntheticRead.FindAllString(body, -1) {
-		if !passedOn[match] {
+	// class's own field and which the pass around this one rewrites, and one
+	// read through the instance of the class around that has no name.
+	var rewritten strings.Builder
+	last := 0
+	for _, at := range syntheticRead.FindAllStringIndex(body, -1) {
+		match := body[at[0]:at[1]]
+		if passedOn[match] {
+			continue
+		}
+		if through == "" || match != "this."+through || !capturedRead.MatchString(body[at[1]:]) {
 			return "", "", nil, bail("an anonymous class holding a field its constructor did not explain")
 		}
+		rewritten.WriteString(body[last:at[0]] + "this")
+		last = at[1]
+	}
+	if last > 0 {
+		body = rewritten.String() + body[last:]
 	}
 	return body, named, kept, nil
 }
@@ -4854,6 +4877,10 @@ func (d *bodyDecompiler) capturedLocal(name string) {
 // syntheticRead matches a read of a synthetic field through `this`, which is
 // how the body of an anonymous class reaches a captured value.
 var syntheticRead = regexp.MustCompile(`this\.(?:val\$|this\$)[\w$]+`)
+
+// capturedRead matches what follows the read of an enclosing instance when
+// the field read through it is one that instance's class captured.
+var capturedRead = regexp.MustCompile(`^\.(?:val\$|this\$)`)
 
 // namedForAMethod matches the name javac gives a class that source wrote
 // inside a method: `Outer$1`, `Outer$1Local`.
@@ -8900,7 +8927,7 @@ func (d *bodyDecompiler) valueOfRegion(start, follow int, consumed *[]int) (expr
 	// has taken over is not part of either shape.
 	shape := d.withoutSkipped(b)
 	if b.Kind != blockSwitch && !isPureBlock(shape) &&
-		(containsInt(*consumed, start) || !(isArmBlock(shape) || stores && isStoringArmBlock(shape))) {
+		(containsInt(*consumed, start) || !isArmBlock(shape) && (!stores || !isStoringArmBlock(shape))) {
 		return expr{}, false, nil
 	}
 	if d.isLoopEdge(start) {
