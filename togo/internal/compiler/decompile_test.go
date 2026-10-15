@@ -5779,6 +5779,9 @@ func TestDecompileWhatTheReviewFound(t *testing.T) {
 	cases := []struct {
 		name, source string
 		whole        bool
+		// tableWhole is whole only with a debug table, which is what says
+		// where the variable a switch expression's arm writes lives.
+		tableWhole bool
 	}{
 		// A statement switch is first tried as an expression; a case that
 		// declares a local a lambda captures must leave nothing behind when
@@ -5795,7 +5798,7 @@ public class Rollback {
     }
   }
   public static void main(String[] z) { f(true, 1); f(true, 2); System.out.println(); }
-}`, true},
+}`, true, false},
 		// An arm's local inside a loop is hoisted by its store; declared back in
 		// the arm it is effectively final again, two arms' of one name too.
 		{"ArmInLoop", `import java.util.*; import java.util.function.*;
@@ -5813,7 +5816,7 @@ public class ArmInLoop {
     return out;
   }
   public static void main(String[] z) { for (Supplier<String> s : f(new int[] {1, 2, 3})) System.out.print(s.get()); System.out.println(); }
-}`, false},
+}`, false, false},
 		// The arm's name stays taken: a variable after the switch hoisted to
 		// the top of the body would otherwise be declared over it.
 		{"ArmName", `public class ArmName {
@@ -5823,7 +5826,7 @@ public class ArmInLoop {
     return r + j;
   }
   public static void main(String[] z) { System.out.println(f(1, true) + " " + f(2, false) + " " + f(3, true)); }
-}`, false},
+}`, false, false},
 		// A pattern's variable lives only where its test holds; a later local
 		// of the same name in the same slot is another variable.
 		{"PatternScope", `public class PatternScope {
@@ -5837,14 +5840,14 @@ public class ArmInLoop {
   }
   static int loopArm(Object o) { int n = 0; switch (o) { case String s -> { while (n < s.length()) n++; } default -> n = -1; } return n; }
   public static void main(String[] z) { System.out.println(g("abc") + " " + g(1) + " " + h("abc") + " " + h(1) + " " + twice("x") + twice(4) + " " + loopArm("abc") + loopArm(1)); }
-}`, false},
+}`, false, false},
 		// Only javac's own lowering is a String switch: a hash that is not the
 		// label's is a hand-written switch, and a lone surrogate keeps its escape.
 		{"Hashes", `public class Hashes {
   static int wrongHash(String s) { String t = s; int i = -1; switch (t.hashCode()) { case 1: if (t.equals("a")) i = 0; break; } switch (i) { case 0: return 10; default: return -5; } }
   static int surrogate(String s) { switch (s) { case "\uD800": return 1; case "\u0000": return 2; default: return 0; } }
   public static void main(String[] z) { System.out.println(wrongHash("a") + " " + surrogate("\uD800") + surrogate("\u0000") + surrogate("?")); }
-}`, true},
+}`, true, false},
 		// A type variable erases to its bound: an inner class of a generic one,
 		// through the method's own variable shadowing the class's, and not at
 		// all where the bound is a variable these signatures do not declare.
@@ -5859,7 +5862,7 @@ public class Erasures<X extends Number, U extends Number, T extends U> {
     Erasures<Integer, Integer, Integer> e = new Erasures<>();
     System.out.println(Erasures.<Outer<String>.Inner>inner().apply(o.new Inner()) + " " + e.<String>shadowed().apply(4) + " " + e.new Deep().<Integer>f().apply(7));
   }
-}`, false},
+}`, false, false},
 		// Read by its source name: a lambda parameter cast to a nested class,
 		// the instance an inner class's constructor is created against, and
 		// the one an anonymous class in a nested class reads.
@@ -5875,7 +5878,7 @@ public class Names {
     n.new Nested().r().run();
     System.out.println();
   }
-}`, true},
+}`, true, false},
 		// From the review of those fixes. A superclass that is an inner class
 		// of the same outer takes the instance implicitly only when it is the
 		// constructor's own; another one is source's `other.super()`.
@@ -5885,7 +5888,7 @@ public class Names {
   class A { String tag; A() { tag = name; } }
   class B extends A { B(OtherSuper other) { other.super(); System.out.println("B " + tag + " " + name); } }
   public static void main(String[] z) { new OtherSuper("m").new B(new OtherSuper("other")); }
-}`, true},
+}`, true, false},
 		// A pattern's variable that flow scoping keeps past its test, or that
 		// its arm assigns, is still that variable: a store to it is not the
 		// next variable in the slot.
@@ -5898,7 +5901,7 @@ public class Names {
   public static void main(String[] z) {
     System.out.println(f4(3, true) + " " + f4(3, false) + " " + f4("x", true) + " " + f5("a", 3) + f5("b", 0) + f5(1, 1) + " " + f6("ab") + f6(2) + " " + f7("ab") + " " + f8("ab") + f8(1));
   }
-}`, true},
+}`, true, false},
 		// A variable an arm writes but declared outside it is read after the
 		// switch: its declaration stays where it is.
 		{"ArmWritesOuter", `public class ArmWritesOuter {
@@ -5912,7 +5915,55 @@ public class Names {
     return s;
   }
   public static void main(String[] z) { System.out.println(g(new int[] {1, 2, 1})); }
-}`, false},
+}`, false, true},
+		// From the review of those. Without a debug table, a store under the
+		// test that binds a pattern is the pattern's variable only when it
+		// shares a read with it: after a try the test sits in, javac reuses
+		// the slot. A finally's cleanup, written from the copy that rethrows,
+		// reads nothing after its store, and there being under the binding is
+		// what counts. A case label's variable assigned on one branch of its
+		// arm is still one variable.
+		{"PatternSlot", `public class PatternSlot {
+  static void p(Object x) { System.out.print("O" + x); }
+  static void p(String x) { System.out.print("S" + x); }
+  static void afterTry(Object o) {
+    try { if (!(o instanceof String s) || s.isEmpty()) return; System.out.print(s); } catch (RuntimeException e) { return; }
+    String t = "after";
+    System.out.print(t);
+  }
+  static void afterIf(Object o, boolean flag) {
+    if (flag) { if (!(o instanceof String s) || s.isEmpty()) return; System.out.print(s); } else { return; }
+    String t = "after";
+    Runnable r = () -> System.out.print(t);
+    r.run();
+  }
+  static String inFinally(Object o, int k) {
+    if (!(o instanceof String s) || s.isEmpty()) return "-";
+    while (s.length() < k) { try { p(s); } finally { s = s + "!"; } }
+    return "done";
+  }
+  static String onABranch(Object o, boolean c) { switch (o) { case String s -> { if (c) s = s + "!"; return s; } default -> { return "d"; } } }
+  public static void main(String[] z) {
+    afterTry("x"); afterIf("y", true);
+    System.out.println(" " + inFinally("x", 3) + inFinally("", 1) + " " + onABranch("a", true) + onABranch("b", false) + onABranch(1, true));
+  }
+}`, true, false},
+		// An arm's own variable inside a loop is hoisted by its first store;
+		// a later variable of the same name in the slot is another one.
+		{"ArmOwnInLoop", `public class ArmOwnInLoop {
+  static int e(int[] ks) {
+    int s = 0;
+    for (int k : ks) {
+      int x = switch (k) { case 1 -> { int y = k * 2; yield y + 1; } default -> 0; };
+      int y = x * 3;
+      Runnable r = () -> System.out.print("y" + y);
+      r.run();
+      s += y;
+    }
+    return s;
+  }
+  public static void main(String[] z) { System.out.println(" " + e(new int[] {1, 2, 1})); }
+}`, false, true},
 	}
 	for _, c := range cases {
 		for _, debug := range []bool{false, true} {
@@ -5923,7 +5974,7 @@ public class Names {
 				if err != nil {
 					t.Fatalf("decompile: %v", err)
 				}
-				if c.whole && strings.Contains(source, "/* cappu:") {
+				if (c.whole || c.tableWhole && debug) && strings.Contains(source, "/* cappu:") {
 					t.Errorf("expected no bail:\n%s", source)
 				}
 				again := filepath.Join(dir, "again")

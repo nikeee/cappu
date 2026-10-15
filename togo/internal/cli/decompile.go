@@ -50,9 +50,11 @@ func DecompileToSourceWith(b []byte, siblings compiler.Siblings) (string, error)
 }
 
 // siblingsFor is SiblingsBeside for a class whose bytes are already read: the
-// name in them says which directory is the package root. A class named on the
-// command line is read from the file that names it, wherever that is - the
+// name in them says which directory is the package root. A class not beside
+// it but named on the command line is read from the file that names it - the
 // run skips it as written inside its outer class, which has to find it then.
+// A name two files of the run carry says nothing about which one is meant,
+// so only the one beside counts for it.
 func siblingsFor(file string, b []byte, named map[string]string) compiler.Siblings {
 	name := ""
 	if read, err := compiler.ReadClassFile(b); err == nil {
@@ -60,12 +62,15 @@ func siblingsFor(file string, b []byte, named map[string]string) compiler.Siblin
 	}
 	beside := compiler.SiblingsBeside(file, name)
 	return func(binaryName string) ([]byte, bool) {
-		if path, ok := named[binaryName]; ok {
+		if b, ok := beside(binaryName); ok {
+			return b, true
+		}
+		if path := named[binaryName]; path != "" {
 			if b, err := os.ReadFile(path); err == nil {
 				return b, true
 			}
 		}
-		return beside(binaryName)
+		return nil, false
 	}
 }
 
@@ -95,7 +100,11 @@ func RunDecompile(files []string, disasm bool) int {
 			if err != nil {
 				continue
 			}
-			named[read.ThisClass] = file
+			if _, twice := named[read.ThisClass]; twice {
+				named[read.ThisClass] = ""
+			} else {
+				named[read.ThisClass] = file
+			}
 			for _, name := range compiler.NestedClasses(read) {
 				declared[name] = true
 			}

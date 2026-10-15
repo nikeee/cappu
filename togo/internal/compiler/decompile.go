@@ -1286,8 +1286,7 @@ type local struct {
 	// that binds it holds. javac reuses the slot after that, and a store from
 	// outside is another variable - one that still needs a declaration.
 	FromPattern bool
-	// Binding is the block a pattern's variable is bound at the head of: what
-	// it dominates is where the variable is in scope.
+	// Binding is the block a pattern's variable is bound at the head of.
 	Binding int
 	// Origin is the debug-table row this name came from, when there is one.
 	Origin *localEntry
@@ -3160,6 +3159,9 @@ type bodyDecompiler struct {
 	methodFollowOf map[int]int
 	// dominators over the graph the throwing edges are in, for a `try`'s own end.
 	dominators map[int]map[int]bool
+	// finallyDominators are the dominators with the edges into each finally's
+	// handler too, which the copy its cleanup is written from sits in.
+	finallyDominators map[int]map[int]bool
 	// active are the loops being written right now, innermost last.
 	active []activeLoop
 	// switches are the `switch` statements being written right now, innermost last.
@@ -3772,11 +3774,9 @@ func (d *bodyDecompiler) local(slot, pc int, fallbackType string, isStore bool) 
 				(origin != nil && origin.Name == scoped.Name && origin.Type == scoped.Type)) {
 				return existing, nil
 			}
-		case isStore && existing.FromPattern && !d.dominates(existing.Binding, d.currentBlock):
-			// The pattern's variable is out of scope here - the store is not
-			// under the test that binds it: javac put another one in the slot,
-			// and it is declared where it is written. One under the test is
-			// the pattern's variable assigned, as source may.
+		case isStore && existing.FromPattern && !d.assignsPattern(existing, slot, pc):
+			// The pattern's variable is out of scope here: javac put another
+			// one in the slot, and it is declared where it is written.
 		case isStore && existing.Origin != nil:
 			// The debug table scoped the variable in this slot, and scopes
 			// nothing here: its range is over, and this store begins a variable
@@ -6482,13 +6482,64 @@ func (d *bodyDecompiler) loop(l *loop) (int, error) {
 	return d.foreverLoop(l)
 }
 
-// dominates reports whether every path from the entry to block passes through
-// at.
-func (d *bodyDecompiler) dominates(at, block int) bool {
-	if len(d.dominators) == 0 {
-		d.dominators = dominators(withExceptionEdges(d.blocks, d.regions, d.monitors), d.entryPc)
+// livesPast reports whether the debug table keeps a variable alive at or
+// after pc: a row of its slot and name begins there that no store into the
+// slot begins.
+func (d *bodyDecompiler) livesPast(one *local, pc int) bool {
+	if one.Origin == nil {
+		return true
 	}
-	return d.dominators[block][at]
+	for _, row := range d.localTable {
+		if row.Slot == one.Origin.Slot && row.Name == one.Origin.Name && row.StartPc >= pc && !d.storeEndsAt(row.Slot, row.StartPc) {
+			return true
+		}
+	}
+	return false
+}
+
+// storeEndsAt reports whether a store into slot is the instruction right
+// before pc.
+func (d *bodyDecompiler) storeEndsAt(slot, pc int) bool {
+	for _, b := range d.blocks {
+		for i, one := range b.Instructions {
+			next := endOf(b)
+			if i+1 < len(b.Instructions) {
+				next = b.Instructions[i+1].Pc
+			}
+			if next == pc && isOneOf(opBase(one.Mnemonic), "ilfda", "store") && slotOf(one) == slot {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// assignsPattern reports whether a store at pc - the pc after it - into a
+// pattern's slot assigns the pattern's variable, without a debug table to say
+// where its scope ends. Being under the test that binds it is not enough: a
+// variable after a `try` the test sits in is too, and javac reuses the slot
+// for it. A store the binding shares a read with is the same variable - what
+// reads the slot afterwards reads either. A finally's cleanup, written from
+// the copy that rethrows, reads nothing after its store, and there being
+// under the binding - with the cleanup reached from its protected range - is
+// what says it.
+func (d *bodyDecompiler) assignsPattern(pattern *local, slot, pc int) bool {
+	if d.sharesRead(pattern, slot, pc-1) {
+		return true
+	}
+	for _, region := range d.finallys {
+		if d.currentBlock >= region.HandlerPc && d.currentBlock < region.BodyEnd {
+			if d.finallyDominators == nil {
+				guarded := append([]monitorRegion{}, d.monitors...)
+				for _, one := range d.finallys {
+					guarded = append(guarded, monitorRegion{StartPc: one.StartPc, EndPc: one.EndPc, HandlerPc: one.HandlerPc})
+				}
+				d.finallyDominators = dominators(withExceptionEdges(d.blocks, d.regions, guarded), d.entryPc)
+			}
+			return d.finallyDominators[d.currentBlock][pattern.Binding]
+		}
+	}
+	return false
 }
 
 // reachesArm reports whether one arm of a branch runs into the other, which
@@ -7438,7 +7489,7 @@ func (d *bodyDecompiler) takeOverBinding(start int, typ string) (string, bool) {
 		FromPattern: true,
 		Binding:     start,
 		Origin:      scoped,
-		StoreBlocks: map[int]bool{},
+		StoreBlocks: map[int]bool{start: true},
 	}
 	d.locals[slot] = one
 	d.byName[one.Name] = one
@@ -7599,10 +7650,13 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 	// that were its own. One declared outside it - before the switch, or
 	// hoisted to the top of the body by its first store, inside a loop or a
 	// branch - lives on, may be read after the switch, and keeps its writes,
-	// marked as text now: they still say whether it is effectively final. One
-	// a lambda in the arm captures has to be, and when this arm's store
-	// hoisted it and wrote it once, it is declared at that store instead -
-	// where source declared it.
+	// marked as text now: they still say whether it is effectively final.
+	//
+	// Inside a loop or a branch even the arm's own variable is hoisted by its
+	// first store. Which one it is the debug table says: a variable that lives
+	// on past the switch has a row there that no store begins - one that a
+	// store begins is the next variable in the slot. The arm's own is
+	// declared at that first store, where source declared it.
 	freeze := func(from int) bool {
 		inArm := func(list *[]stmt, index int) bool { return list == statements && index >= from }
 		var scoped, hoisted, kept []*local
@@ -7619,7 +7673,7 @@ func (d *bodyDecompiler) trySwitchExpression(selector expr, bodies []int, keysOf
 			case declared:
 				scoped = append(scoped, one)
 			case one.Declaration != nil && one.Declaration.List == &d.hoisted && one.Declaration.Index >= hoistedBefore &&
-				len(one.Writes) == 1 && !one.Writes[0].InValue && slices.Contains(d.captured, one):
+				!one.Writes[0].InValue && !d.livesPast(one, follow):
 				hoisted = append(hoisted, one)
 				scoped = append(scoped, one)
 			default:
