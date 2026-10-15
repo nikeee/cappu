@@ -167,8 +167,17 @@ func (w *writers) declared(i int) bool {
 	for w.inside[top] >= 0 {
 		top = w.inside[top]
 	}
-	_, declared, _ := w.chain(i, outer, w.lookup(top))
-	return declared
+	if _, declared, _ := w.chain(i, outer, w.lookup(top)); declared {
+		return true
+	}
+	// A class in between that cannot be read leaves the chain unread; the
+	// first step down from the class of the run is still a declared one.
+	class, at := w.files[i].class, len(w.files[outer].class)
+	next := strings.IndexByte(class[at+1:], '$')
+	if next < 0 {
+		return false
+	}
+	return slices.Contains(w.files[outer].nested, class[:at+1+next])
 }
 
 // ancestor is the closest file of the run whose class's name, followed by a

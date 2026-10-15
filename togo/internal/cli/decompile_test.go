@@ -379,6 +379,24 @@ func TestDecompileWritesDeeplyNestedClassesOnce(t *testing.T) {
 	if code != 0 || strings.Count(stdout, "int v()") != 1 || stderr != "" {
 		t.Errorf("expected B once, inside A inside Foo (exit %d):\n%s\n%s", code, stdout, stderr)
 	}
+	// Without A to read, Foo writes no A and B stands on its own - said so.
+	alone := filepath.Join(dir, "alone")
+	if err := os.MkdirAll(alone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Foo.class", "Foo$A$B.class"} {
+		b, err := os.ReadFile(filepath.Join(v1, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(alone, name), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, stdout, stderr = runDecompile(t, filepath.Join(alone, "Foo.class"), filepath.Join(alone, "Foo$A$B.class"))
+	if code != 0 || strings.Count(stdout, "int v()") != 1 || !strings.Contains(stderr, "Foo$A$B.class: written on its own") {
+		t.Errorf("expected B on its own, said so (exit %d):\n%s\n%s", code, stdout, stderr)
+	}
 }
 
 // A top-level class whose name merely begins with a nested class's, `$` and

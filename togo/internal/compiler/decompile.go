@@ -1311,6 +1311,8 @@ type local struct {
 	// StoreBlocks are the blocks that store to it, which is what says whether a
 	// read is unambiguous.
 	StoreBlocks map[int]bool
+	// Parameter: it holds a value before the first instruction runs.
+	Parameter bool
 	// CopyStores are the stores to it in the copies of a branching finally's
 	// cleanup, which are not written and may be skipped: where its value may
 	// come from, not blocks every path through stores.
@@ -3871,6 +3873,17 @@ func (d *bodyDecompiler) callArguments(descriptor string, hasReceiver bool) ([]s
 		if err != nil {
 			return nil, err
 		}
+		// A variable whose type is only a guess - no debug table, and not a
+		// parameter - is declared as what was stored into it, which can be
+		// narrower than what source declared: javac then binds another
+		// overload (`Object x = s; log(x);` with `log(CharSequence)` beside
+		// `log(Object)`). Passed as the type the call was compiled against,
+		// it binds the same one; a widening cast compiles to nothing.
+		if guessed, ok := d.byName[value.Text]; ok && text == value.Text && !guessed.Authoritative &&
+			!primitiveTypeNames[target] && !primitiveTypeNames[guessed.Type] &&
+			sourceTypeText(target, d.self()) != guessed.Type {
+			text = "(" + sourceTypeText(target, d.self()) + ") " + text
+		}
 		// Java narrows an int constant implicitly when it is assigned, but never
 		// when it is passed: `f((byte) 3)` is the only way to write the call.
 		narrows := (target == "byte" || target == "short") && intLiteralText.MatchString(text)
@@ -5720,6 +5733,7 @@ func (d *bodyDecompiler) run(instructions []Instruction, exceptions []ExceptionE
 	// that reassigned it is as unambiguous as any other.
 	for _, parameter := range d.locals {
 		parameter.StoreBlocks[entry] = true
+		parameter.Parameter = true
 	}
 	if err := d.structure(entry, exitBlock); err != nil {
 		return err
@@ -5945,6 +5959,16 @@ func (d *bodyDecompiler) synchronizedStatement(b *block, kept []Instruction) (in
 	return follow, nil
 }
 
+// protects reports whether pc is in the protected range.
+func (region *finallyRegion) protects(pc int) bool {
+	for _, piece := range region.Ranges {
+		if pc >= piece[0] && pc < piece[1] {
+			return true
+		}
+	}
+	return false
+}
+
 // covers reports whether every block is in the protected range, the copies of
 // the body on the ways out included.
 func (region *finallyRegion) covers(body map[int]bool) bool {
@@ -5980,7 +6004,7 @@ func (d *bodyDecompiler) endsAFinally(start int) bool {
 func (d *bodyDecompiler) finallyAt(at int) (int, bool, error) {
 	// The outermost first: a `finally` inside another begins at the same
 	// block, and is written when the outer body reaches it again.
-	var outermost *finallyRegion
+	var candidates []*finallyRegion
 	for i := range d.finallys {
 		guarded := &d.finallys[i]
 		if guarded.StartPc != at || d.visited[at] || d.activeFinallys[guarded] {
@@ -5992,8 +6016,23 @@ func (d *bodyDecompiler) finallyAt(at int) (int, bool, error) {
 		if l := d.loops[at]; l != nil && !d.inActive(l) && !guarded.covers(l.Body) {
 			continue
 		}
+		candidates = append(candidates, guarded)
+	}
+	// The outer one protects the inner one's handler, the inner one not the
+	// outer's. Where they end says the same until both end at one place -
+	// both go on to the code after the outer cleanup's copy.
+	var outermost *finallyRegion
+	for _, guarded := range candidates {
 		if outermost == nil || guarded.EndPc > outermost.EndPc {
 			outermost = guarded
+		}
+	}
+	for _, guarded := range candidates {
+		if !slices.ContainsFunc(candidates, func(other *finallyRegion) bool {
+			return other != guarded && !guarded.protects(other.HandlerPc)
+		}) {
+			outermost = guarded
+			break
 		}
 	}
 	if outermost == nil {
@@ -6581,9 +6620,9 @@ func (d *bodyDecompiler) flowBlockAt(pc int) int {
 // and with no read in common, both are possible - a variable after a block
 // the test sat in, or the pattern's own assigned a value that replaces the
 // old one everywhere it is read. Written as a variable of its own, both run
-// the same - as long as it is of the same type, and no store into the slot
-// comes after it: one that does could belong to either, and joining the
-// wrong one changes what a read further on sees. Otherwise nothing says.
+// the same - as long as it is of the same type, and no store after it is the
+// pattern's own: that one would be taken for this one's, and the read it
+// feeds would see this one's value. Otherwise nothing says.
 func (d *bodyDecompiler) assignsPattern(pattern *local, slot, pc int, valueType string) (same, known bool) {
 	if d.sharesRead(pattern, slot, pc-1) {
 		return true, true
@@ -6600,27 +6639,56 @@ func (d *bodyDecompiler) assignsPattern(pattern *local, slot, pc int, valueType 
 	if !d.flowDominators[d.currentBlock][pattern.Binding] {
 		return false, true
 	}
-	return false, valueType == pattern.Type && !d.storesAfter(pc-1, slot)
+	return false, valueType == pattern.Type && !d.joinedLater(pattern, slot, pc-1)
 }
 
-// storesAfter reports whether a store into slot is reachable from the store
-// at pc - itself included, through a loop.
-func (d *bodyDecompiler) storesAfter(pc, slot int) bool {
+// joinedLater reports whether a store into slot reachable after the one at
+// pc - in the code written, or in a finally's copies of it - shares a read
+// with the pattern's variable. That store is the pattern's own then, and
+// writing this one as a variable of its own would leave the slot with two
+// candidates for it: the one chosen is the variable in the slot at that
+// point, which is this one's, and the read that store feeds would see this
+// one's value instead.
+func (d *bodyDecompiler) joinedLater(pattern *local, slot, pc int) bool {
 	flow := d.flowGraph()
-	block := flow[d.flowBlockAt(pc)]
-	if block == nil {
-		return true
+	theirs := d.readsOfStores(pattern, slot, -1)
+	if len(theirs) == 0 {
+		return false
 	}
-	stores := func(one Instruction) bool {
-		return (isOneOf(opBase(one.Mnemonic), "ilfda", "store") || opBase(one.Mnemonic) == "iinc") && slotOf(one) == slot
-	}
-	for _, one := range block.Instructions {
-		if one.Pc > pc && stores(one) {
-			return true
+	binding := flow[d.flowBlockAt(pattern.Binding)]
+	joins := func(one Instruction) bool {
+		if !isOneOf(opBase(one.Mnemonic), "ilfda", "store") || slotOf(one) != slot {
+			return false
 		}
+		if binding != nil && slices.ContainsFunc(binding.Instructions, func(own Instruction) bool { return own.Pc == one.Pc }) {
+			return false
+		}
+		for read := range d.readsAfter(one.Pc, slot) {
+			if theirs[read] {
+				return true
+			}
+		}
+		return false
+	}
+	starts := []int{pc}
+	copies, _ := d.finallyCopies(slot, pc+1)
+	for _, store := range copies {
+		starts = append(starts, store.Pc)
 	}
 	seen := map[int]bool{}
-	queue := append([]int(nil), block.Successors...)
+	var queue []int
+	for _, start := range starts {
+		block := flow[d.flowBlockAt(start)]
+		if block == nil {
+			continue
+		}
+		for _, one := range block.Instructions {
+			if one.Pc > start && joins(one) {
+				return true
+			}
+		}
+		queue = append(queue, block.Successors...)
+	}
 	for len(queue) > 0 {
 		at := queue[len(queue)-1]
 		queue = queue[:len(queue)-1]
@@ -6628,7 +6696,7 @@ func (d *bodyDecompiler) storesAfter(pc, slot int) bool {
 			continue
 		}
 		seen[at] = true
-		if slices.ContainsFunc(flow[at].Instructions, stores) {
+		if slices.ContainsFunc(flow[at].Instructions, joins) {
 			return true
 		}
 		queue = append(queue, flow[at].Successors...)
@@ -8906,8 +8974,12 @@ func (d *bodyDecompiler) reachesAvoiding(target, slot int, entry *local) bool {
 			queue = append(queue, flow[at].Successors...)
 			continue
 		}
+		// A parameter's value is there before its block runs.
 		late := false
 		for i, one := range flow[at].Instructions {
+			if at == d.entryPc && entry.Parameter {
+				break
+			}
 			if isOneOf(opBase(one.Mnemonic), "ilfda", "store") && slotOf(one) == slot {
 				late = i > 0
 				break
@@ -8958,12 +9030,23 @@ func (d *bodyDecompiler) sharesReadOrCopies(entry *local, slot, pc int) bool {
 // sharesReadAt is sharesRead for the store at pc, which need not be in the
 // block being written: a finally's copy is not written at all.
 func (d *bodyDecompiler) sharesReadAt(entry *local, slot, pc int) bool {
-	if len(entry.StoreBlocks) == 0 && len(entry.CopyStores) == 0 {
+	theirs := d.readsOfStores(entry, slot, d.blockAt(pc))
+	if len(theirs) == 0 {
 		return false
 	}
+	for read := range d.readsAfter(pc, slot) {
+		if theirs[read] {
+			return true
+		}
+	}
+	return false
+}
+
+// readsOfStores is the loads of the slot the variable's stores reach - those
+// in the block own aside, which is the store being decided.
+func (d *bodyDecompiler) readsOfStores(entry *local, slot, own int) map[int]bool {
 	flow := d.flowGraph()
 	theirs := map[int]bool{}
-	own := d.blockAt(pc)
 	for start := range entry.StoreBlocks {
 		if start == own {
 			continue
@@ -8987,15 +9070,7 @@ func (d *bodyDecompiler) sharesReadAt(entry *local, slot, pc int) bool {
 			theirs[read] = true
 		}
 	}
-	if len(theirs) == 0 {
-		return false
-	}
-	for read := range d.readsAfter(pc, slot) {
-		if theirs[read] {
-			return true
-		}
-	}
-	return false
+	return theirs
 }
 
 // readsAfter is the loads of the slot that the value stored at pc reaches:

@@ -5944,9 +5944,9 @@ public class Names {
 }`, true, false},
 		// A store under the test with no read in common is the next variable in
 		// the slot - after a try or an if the test sat in - or the pattern's own
-		// replacing its value, and nothing without a debug table says which: a
-		// later store joining one or the other decides what a read sees.
-		// Refused, each on its own so one written back has to run right.
+		// replacing its value. Written as a variable of its own both run the
+		// same, unless a later store is the pattern's own: that one would be
+		// taken for the new variable's, and is refused.
 		{"PatternSlotAfterTry", `public class PatternSlotAfterTry {
   static void afterTry(Object o) {
     try { if (!(o instanceof String s) || s.isEmpty()) return; System.out.print(s); } catch (RuntimeException e) { return; }
@@ -5954,7 +5954,7 @@ public class Names {
     System.out.print(t);
   }
   public static void main(String[] z) { afterTry("x"); System.out.println(); }
-}`, false, false},
+}`, true, false},
 		{"PatternSlotAfterIf", `public class PatternSlotAfterIf {
   static void afterIf(Object o, boolean flag) {
     if (flag) { if (!(o instanceof String s) || s.isEmpty()) return; System.out.print(s); } else { return; }
@@ -5963,7 +5963,7 @@ public class Names {
     r.run();
   }
   public static void main(String[] z) { afterIf("y", true); System.out.println(); }
-}`, false, false},
+}`, true, false},
 		{"PatternSlotJoined", `public class PatternSlotJoined {
   static void log(Object o) { System.out.print(o + " "); }
   static void f(Object o, int k) {
@@ -6128,6 +6128,47 @@ public class Names {
   }
   public static void main(String[] z) { f("q", 1); f("q", -1); f("q", 0); f(1, 1); System.out.println(); }
 }`, false, false},
+		// From the review of those. Two finallys that begin at one place both
+		// end where the outer cleanup's copy goes on: the outer one is the one
+		// whose range holds the inner one's handler. A parameter reassigned in
+		// a try still holds its value in the handler. A pattern's variable
+		// reassigned in a straight line, or bound again on the next turn, is
+		// renamed safely; only a later store that is the pattern's own - in
+		// the code or in a finally's copies - refuses it.
+		{"NestedFinallys", `public class NestedFinallys {
+  static void log(Object o) { System.out.print(o + " "); }
+  static void f(int k) {
+    try { try { log("body"); if (k > 0) throw new IllegalStateException(); } catch (IllegalStateException e) { log("catch"); } finally { log("inner"); } } finally { log("outer"); }
+  }
+  static int parse(String s) { try { s = s.trim(); return Integer.parseInt(s); } catch (NumberFormatException e) { log("bad:" + s); return -1; } }
+  static String twice(Object o) { if (!(o instanceof String s) || s.isEmpty()) return "-"; s = s.trim(); s = s.toUpperCase(); return s; }
+  static void again(Object[] os) { for (Object o : os) { if (o instanceof String s && !s.isEmpty()) { log(s); s = s + "!"; log(s); } } }
+  public static void main(String[] z) {
+    f(0); f(1);
+    System.out.println(parse(" 7 ") + " " + parse("x") + " " + twice(" ab ") + twice(""));
+    again(new Object[] {"a", "", "b"});
+    System.out.println();
+  }
+}`, true, false},
+		{"FinallyStoreJoined", `public class FinallyStoreJoined {
+  static void log(Object o) { System.out.print(o + " "); }
+  static void boom(int k) { if (k > 9) throw new IllegalStateException(); }
+  static void f(Object o, int k) {
+    if (o instanceof String s && !s.isEmpty()) { for (int i = 0; i < 3; i++) { log(s); try { boom(k); } finally { if (k > 0) s = "dead"; } s = "a" + i; } }
+  }
+  public static void main(String[] z) { f("q", 1); f("q", 0); System.out.println(); }
+}`, false, false},
+		// Without a debug table a variable is declared as what was stored in
+		// it, which can be narrower than what source declared: passed to an
+		// overloaded method it is written as the type the call was compiled
+		// against, so javac binds the same overload.
+		{"GuessedArguments", `public class GuessedArguments {
+  static void log(Object o) { System.out.print("O:" + o + " "); }
+  static void log(CharSequence o) { System.out.print("CS:" + o + " "); }
+  static CharSequence mk() { return "m"; }
+  static void f() { CharSequence s = mk(); Object x = s; log(x); log(s); }
+  public static void main(String[] z) { f(); System.out.println(); }
+}`, true, false},
 	}
 	for _, c := range cases {
 		for _, debug := range []bool{false, true} {
