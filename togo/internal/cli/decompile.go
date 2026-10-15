@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"syscall"
 
 	"github.com/nikeee/cappu/internal/compiler"
@@ -93,6 +94,7 @@ type runFile struct {
 // reads from elsewhere - another build beside it - is written on its own.
 type writers struct {
 	files      []runFile
+	byClass    map[string]int
 	declaredBy map[string][]int
 	resolver   map[int]compiler.Siblings
 	named      map[string]string
@@ -111,7 +113,54 @@ func (w *writers) decide(i int) {
 		return // a class declaring itself through others: written on its own
 	}
 	w.state[i] = 1
-	for _, outer := range w.declaredBy[w.files[i].class] {
+	defer func() { w.state[i] = 2 }()
+	class := w.files[i].class
+	// A class whose declaring class is not a file of the run may still be
+	// written by one that is, further up: Foo writes Foo.A, which it reads
+	// for itself, and A writes A.B through Foo's lookup.
+	if len(w.declaredBy[class]) == 0 {
+		for cut := strings.LastIndex(class, "$"); cut > 0; cut = strings.LastIndex(class[:cut], "$") {
+			outer, ok := w.byClass[class[:cut]]
+			if !ok || outer == i {
+				continue
+			}
+			w.decide(outer)
+			top := outer
+			for w.inside[top] >= 0 {
+				top = w.inside[top]
+			}
+			lookup, declares, level := w.lookup(top), w.files[outer].nested, w.level[outer]
+			for at := cut; level <= compiler.NestedDepth; {
+				next := strings.IndexByte(class[at+1:], '$')
+				name := class
+				if next >= 0 {
+					name = class[:at+1+next]
+				}
+				if !slices.Contains(declares, name) {
+					break
+				}
+				level++
+				found, ok := lookup(name)
+				if !ok {
+					break
+				}
+				if name == class {
+					if level <= compiler.NestedDepth && bytes.Equal(found, w.files[i].bytes) {
+						w.inside[i], w.level[i] = outer, level
+					}
+					return
+				}
+				read, err := compiler.ReadClassFile(found)
+				if err != nil {
+					break
+				}
+				declares, at = compiler.NestedClasses(read), at+1+next
+			}
+			return
+		}
+		return
+	}
+	for _, outer := range w.declaredBy[class] {
 		if outer == i {
 			continue
 		}
@@ -128,7 +177,23 @@ func (w *writers) decide(i int) {
 			break
 		}
 	}
-	w.state[i] = 2
+}
+
+// declared reports a file whose class a class of the run declares, directly
+// or further up - one that is expected to be written inside.
+func (w *writers) declared(i int) bool {
+	class := w.files[i].class
+	if len(w.declaredBy[class]) > 0 {
+		return true
+	}
+	for cut := strings.LastIndex(class, "$"); cut > 0; cut = strings.LastIndex(class[:cut], "$") {
+		if outer, ok := w.byClass[class[:cut]]; ok && outer != i && slices.ContainsFunc(w.files[outer].nested, func(name string) bool {
+			return strings.HasPrefix(class, name)
+		}) {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *writers) lookup(i int) compiler.Siblings {
@@ -177,7 +242,7 @@ func RunDecompile(files []string, disasm bool) int {
 	// declarations of one type do not compile together. Only what that other
 	// file actually writes is skipped - a name that merely looks nested is
 	// not, or the class would be lost without a word.
-	w := &writers{declaredBy: map[string][]int{}, resolver: map[int]compiler.Siblings{}, named: map[string]string{}}
+	w := &writers{byClass: map[string]int{}, declaredBy: map[string][]int{}, resolver: map[int]compiler.Siblings{}, named: map[string]string{}}
 	index := map[string]int{}
 	if !disasm {
 		for _, file := range files {
@@ -195,6 +260,9 @@ func RunDecompile(files []string, disasm bool) int {
 				w.named[read.ThisClass] = file
 			}
 			index[file] = len(w.files)
+			if _, ok := w.byClass[read.ThisClass]; !ok {
+				w.byClass[read.ThisClass] = len(w.files)
+			}
 			w.files = append(w.files, runFile{file, b, read.ThisClass, compiler.NestedClasses(read)})
 		}
 		for i, one := range w.files {
@@ -213,7 +281,7 @@ func RunDecompile(files []string, disasm bool) int {
 		if known && w.inside[i] >= 0 {
 			continue
 		}
-		if known && len(w.declaredBy[w.files[i].class]) > 0 {
+		if known && w.declared(i) {
 			fmt.Fprintf(os.Stderr, "cappu: %s: written on its own, outside the class that declares it\n", file)
 		}
 		bytes, err := os.ReadFile(file)

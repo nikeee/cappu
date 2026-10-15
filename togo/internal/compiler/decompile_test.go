@@ -6038,15 +6038,9 @@ public class Names {
 }`, true, false},
 		// Under the test that binds a pattern, with no read in common, a store
 		// of another type is the pattern's variable or the next one in its
-		// slot - which decides an overload - and a store in a cleanup that
-		// branches is skipped on some way off the range: what the bytecode
-		// does not say is refused, not guessed.
-		// Under the test that binds a pattern, with no read in common, a store
-		// of another type is the pattern's variable or the next one in its
-		// slot - which decides an overload - and a store in a cleanup that
-		// branches is skipped on some way off the range: what the bytecode
-		// does not say is refused, not guessed. Each on its own, so one
-		// written back has to run as the original does.
+		// slot - which decides an overload: what the bytecode does not say is
+		// refused, not guessed. Each on its own, so one written back has to
+		// run as the original does.
 		{"UndecidedOther", `public class UndecidedOther {
   static void log(CharSequence c) { System.out.print("CS:" + c + " "); }
   static void log(StringBuilder c) { System.out.print("SB:" + c + " "); }
@@ -6083,6 +6077,39 @@ public class Names {
     return "-";
   }
   public static void main(String[] z) { System.out.println(branching("y", 1) + branching("z", 0)); }
+}`, false, false},
+		// From the review of those. A finally's cleanup that branches is one
+		// block in each copy on the ways off its range, which hides whether a
+		// store in it runs; read from the instructions themselves, its copies
+		// say where the value goes - for a pattern's variable and any other.
+		// A catch beside the one that assigns a pattern's variable reads the
+		// old value, through the way out the exception takes.
+		{"BranchingCleanups", `public class BranchingCleanups {
+  static void log(Object o) { System.out.print("O:" + o + " "); }
+  static void foo() { }
+  static void inLoop(Object o, int k) {
+    if (o instanceof String s && !s.isEmpty()) { for (int i = 0; i < 3; i++) { log(s); try { foo(); } finally { if (k > 0) s = "a" + i; } } }
+  }
+  static void plain(int k) {
+    CharSequence v = "init";
+    for (int i = 0; i < 3; i++) { try { foo(); } finally { if (k > 0) v = "a"; } log(v); v = new StringBuilder("sb" + i); }
+  }
+  static void before(int k) {
+    CharSequence v = "init";
+    try { foo(); } finally { if (k > 0) foo(); v = "a"; }
+    int i = 0;
+    while (true) { log(v); if (++i >= 3) break; v = new StringBuilder("sb" + i); }
+  }
+  public static void main(String[] z) { inLoop("q", 1); inLoop("q", 0); plain(0); plain(1); before(0); before(1); System.out.println(); }
+}`, true, false},
+		{"SiblingCatch", `public class SiblingCatch {
+  static void boom(int k) { if (k > 0) throw new IllegalStateException("ise"); if (k < 0) throw new RuntimeException("re"); }
+  static void f(Object o, int k) {
+    if (o instanceof String s && !s.isEmpty()) {
+      try { boom(k); } catch (IllegalStateException e) { s = "x"; System.out.print("A " + s); } catch (RuntimeException e) { System.out.print("B " + s); }
+    }
+  }
+  public static void main(String[] z) { f("q", 1); f("q", -1); f("q", 0); f(1, 1); System.out.println(); }
 }`, false, false},
 	}
 	for _, c := range cases {

@@ -369,7 +369,14 @@ func TestDecompileWritesDeeplyNestedClassesOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, stdout, stderr = runDecompile(t, all...)
-	if code != 0 || !strings.Contains(stdout, "return 42;") {
-		t.Errorf("expected the class nested past the depth a file follows (exit %d):\n%s\n%s", code, stdout, stderr)
+	if code != 0 || strings.Count(stdout, "return 42;") != 1 || !strings.Contains(stderr, "Foo$A$B$C$D$E$F$G$H$I.class: written on its own") {
+		t.Errorf("expected the class nested past the depth a file follows, once and said so (exit %d):\n%s\n%s", code, stdout, stderr)
+	}
+	// A chain through a class the run does not name: Foo writes A, which it
+	// reads for itself, and A writes B - once.
+	v1Files := []string{filepath.Join(v1, "Foo.class"), filepath.Join(v1, "Foo$A$B.class")}
+	code, stdout, stderr = runDecompile(t, v1Files...)
+	if code != 0 || strings.Count(stdout, "int v()") != 1 || stderr != "" {
+		t.Errorf("expected B once, inside A inside Foo (exit %d):\n%s\n%s", code, stdout, stderr)
 	}
 }
