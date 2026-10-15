@@ -3165,6 +3165,9 @@ type bodyDecompiler struct {
 	methodFollowOf map[int]int
 	// dominators over the graph the throwing edges are in, for a `try`'s own end.
 	dominators map[int]map[int]bool
+	// finallyStops are where the bodies of the finallys being written end,
+	// innermost last, when that is one of their copies.
+	finallyStops []int
 	// flow is flowGraph's, once built, and flowDominators its dominators.
 	flow           map[int]*block
 	flowDominators map[int]map[int]bool
@@ -3864,7 +3867,9 @@ func descriptorParameters(descriptor string) []string {
 
 // declaredInThisFile reports a method or constructor that a class this file
 // writes declares - this class, or one nested with it in the class at the
-// top - other than an anonymous or local class's.
+// top - other than an anonymous or local class's. A method the owner
+// inherits counts when the class or interface it is inherited from is one of
+// those too; a constructor is never inherited.
 func (d *bodyDecompiler) declaredInThisFile(owner, name, descriptor string) bool {
 	top := func(binary string) string {
 		if cut := strings.IndexByte(binary, '$'); cut >= 0 {
@@ -3872,23 +3877,35 @@ func (d *bodyDecompiler) declaredInThisFile(owner, name, descriptor string) bool
 		}
 		return binary
 	}
-	if top(owner) != top(d.classFile.ThisClass) {
-		return false
-	}
-	if cut := strings.LastIndexByte(owner, '$'); cut >= 0 && cut+1 < len(owner) && owner[cut+1] >= '0' && owner[cut+1] <= '9' {
-		return false
-	}
-	declaring := d.classFile
-	if owner != d.classFile.ThisClass {
-		read, ok := SiblingClass(d.classFile.Siblings, owner)
-		if !ok {
+	seen := map[string]bool{}
+	var declares func(owner string) bool
+	declares = func(owner string) bool {
+		if seen[owner] || top(owner) != top(d.classFile.ThisClass) {
 			return false
 		}
-		declaring = read
+		seen[owner] = true
+		if cut := strings.LastIndexByte(owner, '$'); cut >= 0 && cut+1 < len(owner) && owner[cut+1] >= '0' && owner[cut+1] <= '9' {
+			return false
+		}
+		declaring := d.classFile
+		if owner != d.classFile.ThisClass {
+			read, ok := SiblingClass(d.classFile.Siblings, owner)
+			if !ok {
+				return false
+			}
+			declaring = read
+		}
+		if slices.ContainsFunc(declaring.Methods, func(one Member) bool {
+			return one.Name == name && one.Descriptor == descriptor
+		}) {
+			return true
+		}
+		if name == "<init>" {
+			return false
+		}
+		return declares(declaring.SuperClass) || slices.ContainsFunc(declaring.Interfaces, declares)
 	}
-	return slices.ContainsFunc(declaring.Methods, func(one Member) bool {
-		return one.Name == name && one.Descriptor == descriptor
-	})
+	return declares(owner)
 }
 
 // callArguments pops a call's arguments, coerced to the parameter types of
@@ -6180,9 +6197,15 @@ func (d *bodyDecompiler) finallyStatement(region *finallyRegion) (int, error) {
 		}
 	}
 	d.activeFinallys[region] = true
+	if stop != region.EndPc {
+		d.finallyStops = append(d.finallyStops, stop)
+	}
 	// opening: the body begins where the statement does, and where that is also
 	// a loop's header the first block is the body, not a `continue` into it.
 	body, err := d.capture(func() error { return d.structureFrom(region.StartPc, stop, true) })
+	if stop != region.EndPc {
+		d.finallyStops = d.finallyStops[:len(d.finallyStops)-1]
+	}
 	delete(d.activeFinallys, region)
 	if err != nil {
 		return 0, err
@@ -6256,6 +6279,15 @@ func (d *bodyDecompiler) tryStatement(region *tryRegion) (int, error) {
 	bodyStop, err := d.tryFollow(region)
 	if err != nil {
 		return 0, err
+	}
+	// Inside the body of a finally that ends at one of its copies, a try
+	// whose own ways on run through that copy ends there too: past it is the
+	// code after the finally, not this statement's.
+	if n := len(d.finallyStops); n > 0 {
+		if stop := d.finallyStops[n-1]; stop != bodyStop && d.reachableForward(region.StartPc)[stop] &&
+			(bodyStop == exitBlock || d.reachableForward(stop)[bodyStop]) {
+			bodyStop = stop
+		}
 	}
 	// Where the body leaves off is not always where the statement ends: when the
 	// exit is also a branch target, javac's jump over the handlers stands in a
@@ -6680,6 +6712,26 @@ func (d *bodyDecompiler) flowGraph() map[int]*block {
 		d.flow = withExceptionEdges(blocks, d.regions, guarded)
 	}
 	return d.flow
+}
+
+// reachableForward is the blocks some path from start reaches without going
+// round a loop: a loop's header is reached, but not walked on from - beyond
+// it is the next turn, not what follows start.
+func (d *bodyDecompiler) reachableForward(start int) map[int]bool {
+	seen := map[int]bool{}
+	queue := []int{start}
+	for len(queue) > 0 {
+		at := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		if seen[at] || d.blocks[at] == nil {
+			continue
+		}
+		seen[at] = true
+		if at == start || d.loops[at] == nil {
+			queue = append(queue, d.blocks[at].Successors...)
+		}
+	}
+	return seen
 }
 
 // flowBlockAt is the start of the block of flowGraph that holds pc.

@@ -6191,6 +6191,41 @@ public class LibraryArguments {
   }
   public static void main(String[] z) { for (int k = 0; k < 3; k++) f(k); System.out.println(); }
 }`, true, false},
+		// From the review of those. A method this file declares is cast to
+		// also where the call names a subclass or implementation that
+		// inherits it. A try with a catch and a finally as the last
+		// statement of a loop ends at the copy that goes on, not past it.
+		{"InheritedArguments", `public class InheritedArguments {
+  static class Base { void log(Object o) { System.out.print("O:" + o + " "); } void log(CharSequence o) { System.out.print("C:" + o + " "); } }
+  static class Sub extends Base { void g(CharSequence s) { Object x = s; log(x); } }
+  interface I { default void m(Object o) { System.out.print("IO:" + o + " "); } default void m(CharSequence o) { System.out.print("IC:" + o + " "); } }
+  static class C implements I { }
+  static void h(CharSequence s) { Object x = s; new C().m(x); }
+  public static void main(String[] z) { new Sub().g("s"); h("t"); System.out.println(); }
+}`, true, false},
+		{"TryCatchFinallyEndsLoop", `public class TryCatchFinallyEndsLoop {
+  static void work(int i) { if (i == 3) throw new IllegalStateException(); System.out.print("w" + i + " "); }
+  public static void main(String[] z) {
+    int i = 0;
+    while (i < 5) { i++; try { work(i); } catch (IllegalStateException e) { System.out.print("caught "); break; } finally { System.out.print("f" + i + " "); } }
+    System.out.println();
+  }
+}`, true, false},
+		{"TryInLoopInFinallyBody", `public class TryInLoopInFinallyBody {
+  static void work(int i, int j) { if ((i + j) % 3 == 0) throw new IllegalStateException(); System.out.print("w" + i + j + " "); }
+  public static void main(String[] z) {
+    int i = 0;
+    while (i < 4) {
+      i++;
+      try {
+        int j = 0;
+        while (j < 3) { j++; if (j == 2) continue; try { work(i, j); } catch (IllegalStateException e) { System.out.print("c" + j + " "); } }
+        if (i == 3) break;
+      } finally { System.out.print("f" + i + " "); }
+    }
+    System.out.println();
+  }
+}`, true, false},
 	}
 	for _, c := range cases {
 		for _, debug := range []bool{false, true} {
