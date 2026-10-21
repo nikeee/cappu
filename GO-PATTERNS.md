@@ -2,8 +2,8 @@
 
 Migration patterns for the TypeScript -> Go port of cappu (see issue #18). The
 Go build lives in `./togo`. Patterns here are drawn from the `tsgo`
-(Microsoft's TypeScript-Go, vendored at `./TypeScript-Go`) study plus decisions
-made for this project. **Amend this file whenever a new pattern is found.**
+(Microsoft's TypeScript-Go) study plus decisions made for this project.
+**Amend this file whenever a new pattern is found.**
 
 **`src/...` paths are provenance, not a place to look.** The port is finished
 and the TypeScript tree is gone; the last commit that still had it is `23e4b51`.
@@ -31,8 +31,9 @@ togo/
   .golangci.yml  .editorconfig  Makefile
 ```
 
-tsgo reference: `TypeScript-Go/cmd/tsgo`, `TypeScript-Go/internal/*`,
-`TypeScript-Go/go.mod` (module `github.com/microsoft/typescript-go`, `go 1.26`).
+tsgo reference: `cmd/tsgo`, `internal/*`, `go.mod` (module
+`github.com/microsoft/typescript-go`, `go 1.26`) in
+https://github.com/microsoft/typescript-go.
 
 ## Library / builtin mapping
 
@@ -206,8 +207,8 @@ error/warning that already goes to stderr is *also* echoed as a workflow command
 ## Static linking / build
 
 Per issue #18 the binary must run on any platform regardless of libc. Build
-with cgo off and stripped, exactly like tsgo (`TypeScript-Go/Herebyfile.mjs`
-sets `CGO_ENABLED=0`, `-ldflags=-s -w`, `-trimpath`):
+with cgo off and stripped, exactly like tsgo (`Herebyfile.mjs` sets
+`CGO_ENABLED=0`, `-ldflags=-s -w`, `-trimpath`):
 
 ```
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o dist/cappu ./cmd/cappu

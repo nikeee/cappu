@@ -4,8 +4,6 @@
     "*.md",
     "index.html",
     "**/*.icon/*",
-    "TypeScript/**",
-    "TypeScript-Go/**",
     "test-fixtures/**",
     "togo/internal/config/cappu.schema.json"
   ],

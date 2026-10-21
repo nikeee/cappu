@@ -650,3 +650,4 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-10-15 13:45 — what else is missing?
 - 2026-10-15 15:09 — yes
 - 2026-10-15 15:15 — take an issue that is sensible to do and do it in a sub-agent
+- 2026-10-21 13:10 — remove typescript-go from the repository

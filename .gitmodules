@@ -46,9 +46,6 @@
 	path = test-fixtures/emitter/corpus/commons-imaging
 	url = https://github.com/apache/commons-imaging.git
 	shallow = true
-[submodule "TypeScript-Go"]
-	path = TypeScript-Go
-	url = https://github.com/microsoft/typescript-go.git
 [submodule "test-fixtures/format/corpus/gjf"]
 	path = test-fixtures/format/corpus/gjf
 	url = https://github.com/google/google-java-format
