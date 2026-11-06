@@ -651,6 +651,9 @@ maybe the path should just be a directory and default to ./dist?
 - 2026-10-15 15:09 — yes
 - 2026-10-15 15:15 — take an issue that is sensible to do and do it in a sub-agent
 - 2026-10-21 13:10 — remove typescript-go from the repository
+- 2026-11-06 11:05 — schau nach, ob das package-management so ist, dass man da wie gewohnt für java-devs arbeiten kann. so mit BOM-support und so weiter
 - 2026-11-06 11:34 — suggest a design for changs in cappu.json
 - 2026-11-06 12:03 — mach alles so, auch 1-4. scopes passt so. vergiss nciht, die schemas anzupassen und so weiter. mach nach jedem schritt einen code-review
 - 2026-11-06 14:26 — add an example using these new features to the example dir
+- 2026-11-06 18:33 — kann ich comitten?
+- 2026-11-06 18:33 — ja, mach die zwei commits. ohne gpg-signing

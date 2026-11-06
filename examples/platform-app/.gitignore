@@ -1,0 +1,5 @@
+# installed dependencies, provisioned JDKs, generated sources, local state
+/.cappu/
+
+# build output of `cappu compile`
+/dist/

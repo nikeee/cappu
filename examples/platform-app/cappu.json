@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "output": "fat-jar",
+    "mainClass": "example.Main"
+  },
+  "dependencies": {
+    // A BOM: every Jackson module below takes its version from here.
+    "platform": {
+      "com.fasterxml.jackson:jackson-bom": "2.22.4"
+    },
+    "implementation": {
+      // "" = version managed by the platform
+      "com.fasterxml.jackson.core:jackson-databind": "",
+      "com.fasterxml.jackson.datatype:jackson-datatype-jsr310": "",
+      // object form: Guava without the annotation-only jars it drags in
+      "com.google.guava:guava": {
+        "version": "33.8.0-jre",
+        "exclude": [
+          "org.jspecify:jspecify",
+          "com.google.errorprone:error_prone_annotations",
+          "com.google.j2objc:j2objc-annotations"
+        ]
+      }
+    },
+    // javac sees it, the fat jar does not (Maven "provided")
+    "compileOnly": {
+      "org.jspecify:jspecify": "1.0.0"
+    },
+    // the fat jar ships it, javac never sees it (Maven "runtime")
+    "runtimeOnly": {
+      "com.h2database:h2": "2.5.252"
+    }
+  }
+}

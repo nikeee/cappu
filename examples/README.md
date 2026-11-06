@@ -14,5 +14,6 @@ output goes to `dist/`.
 - [resources-app](resources-app/README.md) - bundled main and test resources
 - [spring-boot-app](spring-boot-app/README.md) - booting Spring Boot from a single fat jar
 - [spring-boot-web-app](spring-boot-web-app/README.md) - a Spring Boot web app (embedded Tomcat) from a single fat jar
+- [platform-app](platform-app/README.md) - a BOM (`platform`), managed versions, exclusions and the `compileOnly` / `runtimeOnly` scopes
 
 `togo/cmd/cappu/examples_test.go` builds, runs, tests and audits every example end-to-end.

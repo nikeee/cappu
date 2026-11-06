@@ -176,6 +176,18 @@ func TestExampleGsonApp(t *testing.T) {
 	}
 }
 
+// platform-app: BOM-managed versions, an exclusion and the compileOnly /
+// runtimeOnly split (the H2 driver is runtimeOnly, so the query only works
+// when the fat jar ships it).
+func TestExamplePlatformApp(t *testing.T) {
+	if !e2eEnabled() {
+		t.Skip("set CAPPU_E2E=1 (with javac + Maven Central) to run the dependency e2e suite")
+	}
+	if got := runExample(t, "platform-app"); got != "{\"name\":\"1.0.0\",\"date\":\"2026-01-01\"}\nguava\n2\n" {
+		t.Errorf("platform-app stdout = %q", got)
+	}
+}
+
 func TestExampleJunitApp(t *testing.T) {
 	if !e2eEnabled() {
 		t.Skip("set CAPPU_E2E=1 (with javac + Maven Central) to run the dependency e2e suite")
