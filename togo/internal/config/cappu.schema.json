@@ -236,6 +236,7 @@
       }
     },
     "packageSources": {
+      "description": "maven2 repositories, consulted in order. A string is an anonymous URL; an object adds \"auth\", the NAME of the env vars CAPPU_SOURCE_NAME_USERNAME + CAPPU_SOURCE_NAME_PASSWORD or CAPPU_SOURCE_NAME_TOKEN. A file:// URL or a filesystem path (~/.m2/repository) is a local repository.",
       "default": [
         "https://maven-central-eu.storage-download.googleapis.com/maven2",
         "https://repo.maven.apache.org/maven2",
@@ -244,14 +245,33 @@
       ],
       "type": "array",
       "items": {
-        "type": "string"
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "auth": {
+                "description": "Env var name part for the credentials: CAPPU_SOURCE_<auth>_USERNAME + _PASSWORD, or _TOKEN.",
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
       }
     },
     "dependencies": {
       "default": {},
       "type": "object",
       "properties": {
-        "api": {
+        "platform": {
+          "description": "BOMs (\"group:artifact\": version) whose dependencyManagement supplies the versions of entries declared as \"\" and overrides transitive versions. When two platforms manage the same artifact, the first declared wins.",
           "default": {},
           "type": "object",
           "propertyNames": {
@@ -259,6 +279,16 @@
           },
           "additionalProperties": {
             "type": "string"
+          }
+        },
+        "api": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/dependency"
           }
         },
         "implementation": {
@@ -268,7 +298,29 @@
             "type": "string"
           },
           "additionalProperties": {
+            "$ref": "#/$defs/dependency"
+          }
+        },
+        "compileOnly": {
+          "description": "On the compile classpath only (Maven provided): never in a fat jar, a run, or the published runtime scope.",
+          "default": {},
+          "type": "object",
+          "propertyNames": {
             "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/dependency"
+          }
+        },
+        "runtimeOnly": {
+          "description": "Never on the compile classpath (Maven runtime): drivers and implementations loaded by name.",
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/dependency"
           }
         },
         "annotationProcessor": {
@@ -278,7 +330,7 @@
             "type": "string"
           },
           "additionalProperties": {
-            "type": "string"
+            "$ref": "#/$defs/dependency"
           }
         },
         "testImplementation": {
@@ -288,7 +340,7 @@
             "type": "string"
           },
           "additionalProperties": {
-            "type": "string"
+            "$ref": "#/$defs/dependency"
           }
         }
       }
@@ -314,6 +366,36 @@
     "publishRepository": {
       "type": "string",
       "format": "uri"
+    }
+  },
+  "$defs": {
+    "dependency": {
+      "description": "A version (\"\" when a platform manages it), or an object for a classifier and/or exclusions.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "description": "Omit (or \"\") to take the version from a platform.",
+              "type": "string"
+            },
+            "classifier": {
+              "type": "string"
+            },
+            "exclude": {
+              "description": "\"group:artifact\" patterns pruned from this dependency's transitive subtree; either side may be *.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }

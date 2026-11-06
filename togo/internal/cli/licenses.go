@@ -25,7 +25,7 @@ func WarnUnmappedLicenses(pkgs []packages.ResolvedPackage) {
 			}
 			name, _ := json.Marshal(license.Name)
 			fmt.Fprintf(os.Stderr, "%s %s: license %s has no SPDX mapping\n",
-				paint("yellow", "warning:"), pkg.Coordinates.String(), name)
+				paint("yellow", "warning:"), pkg.Coordinates.Label(), name)
 		}
 	}
 }
@@ -68,17 +68,22 @@ func licenseEntries(ls []packages.License) []licenseEntry {
 // raw POM name. --json emits the same data machine-readable. Port of
 // src/cli/licenses.ts.
 func RunLicenses(cfg *config.Config, jsonOut bool) int {
-	roots := append(sources.CompileRoots(cfg), sources.ProcessorRoots(cfg)...)
-	roots = append(roots, sources.TestRoots(cfg)...)
+	roots := sources.AllRoots(cfg)
 
 	resolving := 0
 	showProgress := ColorEnabled(isTTY(os.Stderr), os.Getenv)
-	resolution, err := packages.ResolveTransitive(roots, sources.Configured(cfg), func(packages.Coordinates) {
+	srcs := sources.Configured(cfg)
+	managed, err := sources.ManagedVersions(cfg, srcs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
+		return 1
+	}
+	resolution, err := packages.ResolveTransitive(roots, srcs, packages.ResolveOptions{Managed: managed, OnResolve: func(packages.Coordinates) {
 		if showProgress {
 			resolving++
 			fmt.Fprintf(os.Stderr, "\r\x1b[2Kresolving dependency graph (%d)...", resolving)
 		}
-	})
+	}})
 	if resolving > 0 {
 		fmt.Fprint(os.Stderr, "\r\x1b[2K")
 	}
@@ -90,7 +95,7 @@ func RunLicenses(cfg *config.Config, jsonOut bool) int {
 	rows := make([]licenseRow, 0, len(resolution.Packages))
 	for _, p := range resolution.Packages {
 		rows = append(rows, licenseRow{
-			Coordinate: string(p.Coordinates.String()),
+			Coordinate: p.Coordinates.Label(),
 			Licenses:   licenseEntries(p.Metadata.Licenses),
 		})
 	}

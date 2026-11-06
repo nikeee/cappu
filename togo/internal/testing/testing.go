@@ -42,12 +42,16 @@ func FindTestSources(cfg *config.Config) []string {
 	return build.JavaFilesIn(cfg.ResolvePath(config.DefaultTestSourcePath))
 }
 
-// dependencyClassPath is what test sources compile against: the main classes,
-// the compile deps and the test deps (jar-expanded).
+// dependencyClassPath is what test sources compile and run against: the main
+// classes, the compile deps (compileOnly included), the runtimeOnly deps and
+// the test deps (jar-expanded).
 func dependencyClassPath(cfg *config.Config) []string {
 	cp := []string{MainClassesDir(cfg)}
-	cp = append(cp, build.ClassPath(cfg)...)
-	cp = append(cp, build.ExpandJarDirs([]string{cfg.ResolvePath(config.DefaultTestClassPath)})...)
+	cp = append(cp, build.CompileClassPath(cfg)...)
+	cp = append(cp, build.ExpandJarDirs([]string{
+		cfg.ResolvePath(config.DefaultRuntimeOnlyPath),
+		cfg.ResolvePath(config.DefaultTestClassPath),
+	})...)
 	return cp
 }
 

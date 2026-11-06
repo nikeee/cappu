@@ -204,7 +204,7 @@ func (s *Server) onJavacOptions(params json.RawMessage) (any, *lsp.ResponseError
 		var classDir string
 		switch s.targetName(id) {
 		case "main":
-			classpath, classDir = build.ClassPath(s.cfg), testing.MainClassesDir(s.cfg)
+			classpath, classDir = build.CompileClassPath(s.cfg), testing.MainClassesDir(s.cfg)
 		case "test":
 			classpath, classDir = testing.TestRuntimeClassPath(s.cfg), testing.TestClassesDir(s.cfg)
 		default:
@@ -341,7 +341,7 @@ func (s *Server) onRun(ctx context.Context, params json.RawMessage) (any, *lsp.R
 		s.log(p.OriginID, 1, reason)
 		return result(false)
 	}
-	classPath := append([]string{outDir}, build.ClassPath(s.cfg)...)
+	classPath := append([]string{outDir}, build.RuntimeClassPath(s.cfg)...)
 	args := append([]string{"-cp", strings.Join(classPath, string(os.PathListSeparator)), mainClass}, p.Arguments...)
 	printer := func(method string) *lineWriter {
 		return newLineWriter(func(line string) {

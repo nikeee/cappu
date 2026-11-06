@@ -34,6 +34,10 @@ func TestResolveConfiguration(t *testing.T) {
 		"a":              "api",
 		"ap":             "annotationProcessor",
 		"ti":             "testImplementation",
+		"co":             "compileOnly",
+		"ro":             "runtimeOnly",
+		"platform":       "platform",
+		"p":              "platform",
 		"nope":           "",
 		"":               "",
 	}

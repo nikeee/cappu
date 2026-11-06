@@ -7,9 +7,9 @@ description: "Use when creating a new Java project with cappu, reading or editin
 
 cappu is a single-module Java toolchain driven by one JSONC file, `cappu.json`,
 found by walking up from the current directory (`-c <file>` points elsewhere).
-Every dependency version is pinned literally. There is no parent POM, BOM,
-`${property}` resolution, multi-module reactor, dependency exclusion, private
-repository auth, Kotlin or WAR support. `cappu config-schema` prints the schema;
+Dependency versions are pinned literally or managed by a BOM listed under
+`dependencies.platform`. There is no parent POM, `${property}` resolution,
+multi-module reactor, Kotlin or WAR support. `cappu config-schema` prints the schema;
 `references/cappu-json-fields.md` lists every field with defaults and gotchas.
 
 ## Procedure
@@ -40,8 +40,9 @@ repository auth, Kotlin or WAR support. `cappu config-schema` prints the schema;
        "mainClass": "com.example.Main" // only needed when more than one main() exists
      },
      "dependencies": {
+       "platform": { "org.junit:junit-bom": "6.1.1" },            // BOMs: manage versions of "" entries
        "implementation": { "com.google.code.gson:gson": "2.14.0" },
-       "testImplementation": { "org.junit.jupiter:junit-jupiter": "6.1.1" }
+       "testImplementation": { "org.junit.jupiter:junit-jupiter": "" } // version from the platform
      }
    }
    ```
@@ -61,7 +62,7 @@ repository auth, Kotlin or WAR support. `cappu config-schema` prints the schema;
 |------|------|---------|
 | `cappu.json` | project config, JSONC (comments and trailing commas allowed) | yes |
 | `cappu-lock.json` | resolved dependency set with a SHA-256 per jar | yes |
-| `.cappu/` | installed jars (`lib/classes`, `lib/test-classes`, `lib/processors`), provisioned JDK, local state | no, gitignore and dockerignore it |
+| `.cappu/` | installed jars (`lib/classes`, `lib/compile-only`, `lib/runtime-only`, `lib/test-classes`, `lib/processors`), provisioned JDK, local state | no, gitignore and dockerignore it |
 | `dist/` | every build output: classes, jars, POM, test reports, coverage | no |
 | `src/main/java`, `src/generated/java` | sources (`compilerOptions.sourcePaths`) | yes |
 | `src/main/resources` | copied verbatim into the classes tree or jar | yes |
@@ -69,6 +70,12 @@ repository auth, Kotlin or WAR support. `cappu config-schema` prints the schema;
 
 ## Frequent config tasks
 
+- **BOMs / platforms**: `dependencies.platform` lists BOMs
+  (`"org.springframework.boot:spring-boot-dependencies": "4.1.0"`); a
+  dependency declared with version `""` takes the platform's version, and the
+  platform overrides transitive versions. Exclusions and classifiers use the
+  object form (`{ "version": "1.0", "exclude": ["g:a"], "classifier": "x" }`).
+  See the `dependencies` skill.
 - **Annotation processors** go under `dependencies.annotationProcessor`
   (installed to `.cappu/lib/processors`, never on the compile classpath) and
   their API library under `implementation`. MapStruct: `org.mapstruct:mapstruct`
@@ -91,9 +98,20 @@ repository auth, Kotlin or WAR support. `cappu config-schema` prints the schema;
 - **Formatting and imports**: `formatterOptions.style` (`google` 2-space, `aosp`
   4-space), `ignore` globs, `importOrder`. See `build-test`.
 - **Tests**: `testOptions.outputFormat: "junit"`, `coverage: true`. See `build-test`.
-- **Package sources**: `packageSources` is a plain URL list (Google's Maven
-  Central mirror, Maven Central, maven.google.com and the Gradle plugin portal
-  by default; the mirror comes first because Central rate-limits). No credentials.
+- **Package sources**: `packageSources` lists maven2 repositories in lookup
+  order (Google's Maven Central mirror, Maven Central, maven.google.com and the
+  Gradle plugin portal by default; the mirror comes first because Central
+  rate-limits). An entry is a URL string, or `{ "url": "...", "auth": "NEXUS" }`
+  for a repository that needs credentials: `auth` names the env vars
+  `CAPPU_SOURCE_NEXUS_USERNAME` + `CAPPU_SOURCE_NEXUS_PASSWORD` (basic) or
+  `CAPPU_SOURCE_NEXUS_TOKEN` (bearer); nothing secret goes into the file, and a
+  missing credential fails the first fetch from that source naming the
+  variables; rejected credentials (HTTP 401/403) are an error, not a miss. A
+  `file://` URL or a path written as one (`/...`, `./...`, `../sibling/repo`,
+  `~/.m2/repository`; relative to cappu.json) is a local repository, read live
+  (no metadata cache). A bare host name without a scheme is a config error.
+  `-SNAPSHOT` jars never come from the global store and are re-downloaded on
+  every install.
 
 **Gotcha - `quiet` is not a config key.** The cappu repo's own `examples/*/cappu.json`
 set `compilerOptions.quiet`; the loader tolerates unknown keys, so it does nothing.

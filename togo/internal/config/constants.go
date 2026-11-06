@@ -20,6 +20,11 @@ const (
 	DefaultTestSourcePath      = "./src/test/java"
 	DefaultTestResourcePath    = "./src/test/resources"
 	DefaultTestClassPath       = "./.cappu/lib/test-classes"
+	// DefaultCompileOnlyPath / DefaultRuntimeOnlyPath hold the compileOnly and
+	// runtimeOnly jars: kept apart from lib/classes so the compile and the
+	// runtime classpath can differ.
+	DefaultCompileOnlyPath = "./.cappu/lib/compile-only"
+	DefaultRuntimeOnlyPath = "./.cappu/lib/runtime-only"
 	// DefaultTestReportsDir is where `cappu test` writes junit-XML reports when
 	// testOptions.outputFormat is "junit".
 	DefaultTestReportsDir = "./dist/test-results"
@@ -63,9 +68,17 @@ var DefaultSourcePaths = []string{DefaultSourcePath, DefaultGeneratedSourcePath}
 // what Maven and Gradle resolve from.
 var DefaultPackageSources = []string{MavenCentralMirror, MavenCentral, GoogleMaven, GradlePluginPortal}
 
-// Configurations are the dependency configurations, in resolution order. The
-// keys of the dependencies section mirror these names.
-var Configurations = []string{"api", "implementation", "annotationProcessor", "testImplementation"}
+// Configurations are the classpath dependency configurations, in resolution
+// order. The keys of the dependencies section mirror these names.
+var Configurations = []string{"api", "implementation", "compileOnly", "runtimeOnly", "annotationProcessor", "testImplementation"}
+
+// PlatformConfiguration is the dependencies key holding the BOMs
+// (`cappu add platform ...`); it is not a classpath configuration.
+const PlatformConfiguration = "platform"
+
+// AuthName is the charset of a packageSources auth name: it becomes part of
+// an env var (CAPPU_SOURCE_<NAME>_TOKEN), so upper case letters, digits, _.
+var AuthName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
 // MavenID is the Maven groupId/artifactId charset.
 var MavenID = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)

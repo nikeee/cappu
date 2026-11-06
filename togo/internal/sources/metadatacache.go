@@ -113,7 +113,39 @@ func (m *metadataCache) ListVersions(groupID, artifactID string) ([]string, erro
 	return versions, nil
 }
 
+// GetManaged is cached forever like GetMetadata: a released BOM is immutable.
+func (m *metadataCache) GetManaged(c packages.Coordinates) (map[packages.PackageKey]string, error) {
+	if c.IsSnapshot() {
+		return m.inner.GetManaged(c) // mutable: never cached
+	}
+	segments := append(strings.Split(string(c.GroupID), "."), string(c.ArtifactID), string(c.Version))
+	cacheFile := metadataCachePath(string(m.inner.Name()), segments, "managed.json")
+	if cacheFile != "" {
+		if data, err := os.ReadFile(cacheFile); err == nil {
+			var managed map[packages.PackageKey]string
+			if json.Unmarshal(data, &managed) == nil && managed != nil {
+				return managed, nil
+			}
+		}
+	}
+	managed, err := m.inner.GetManaged(c)
+	if err != nil {
+		return nil, err
+	}
+	if cacheFile != "" && managed != nil {
+		if os.MkdirAll(filepath.Dir(cacheFile), 0o755) == nil {
+			if b, err := json.Marshal(managed); err == nil {
+				_ = os.WriteFile(cacheFile, b, 0o644) // a read-only store never fails the lookup
+			}
+		}
+	}
+	return managed, nil
+}
+
 func (m *metadataCache) GetMetadata(c packages.Coordinates) (*packages.PackageMetadata, error) {
+	if c.IsSnapshot() {
+		return m.inner.GetMetadata(c) // mutable: never cached
+	}
 	segments := append(strings.Split(string(c.GroupID), "."), string(c.ArtifactID), string(c.Version))
 	cacheFile := metadataCachePath(string(m.inner.Name()), segments, "metadata.json")
 	if cacheFile != "" {

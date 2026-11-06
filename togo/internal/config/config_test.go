@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -48,11 +50,12 @@ func TestLoadAppliesDefaults(t *testing.T) {
 		cfg.CompilerOptions.SourcePaths[1] != DefaultGeneratedSourcePath {
 		t.Errorf("sourcePaths default = %v", cfg.CompilerOptions.SourcePaths)
 	}
-	wantSources := []string{MavenCentralMirror, MavenCentral, GoogleMaven, GradlePluginPortal}
+	wantSources := DefaultSources()
 	if !slices.Equal(cfg.PackageSources, wantSources) {
 		t.Errorf("packageSources default = %v, want %v", cfg.PackageSources, wantSources)
 	}
-	if cfg.Dependencies.API == nil || cfg.Dependencies.Implementation == nil {
+	if cfg.Dependencies.API == nil || cfg.Dependencies.Implementation == nil ||
+		cfg.Dependencies.CompileOnly == nil || cfg.Dependencies.RuntimeOnly == nil || cfg.Dependencies.Platform == nil {
 		t.Error("dependency maps should default to non-nil empty maps")
 	}
 }
@@ -365,5 +368,179 @@ func TestTestOptionsCoverageDefault(t *testing.T) {
 	}
 	if !cfg.TestOptions.Coverage {
 		t.Error("coverage: true should parse")
+	}
+}
+
+func TestDependencyStringOrObject(t *testing.T) {
+	path := writeConfig(t, `{
+  "dependencies": {
+    "platform": { "org.springframework.boot:spring-boot-dependencies": "4.1.0" },
+    "implementation": {
+      "org.springframework.boot:spring-boot-starter-web": "",
+      "com.google.code.gson:gson": "2.13.1",
+      "org.apache.commons:commons-lang3": { "version": "3.17.0", "exclude": ["commons-logging:commons-logging", "org.slf4j:*"] },
+      "io.netty:netty-transport-native-epoll": { "classifier": "linux-x86_64" }
+    }
+  }
+}`)
+	cfg, err := Load(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]Dependency{
+		"org.springframework.boot:spring-boot-starter-web": {},
+		"com.google.code.gson:gson":                        {Version: "2.13.1"},
+		"org.apache.commons:commons-lang3":                 {Version: "3.17.0", Exclude: []string{"commons-logging:commons-logging", "org.slf4j:*"}},
+		"io.netty:netty-transport-native-epoll":            {Classifier: "linux-x86_64"},
+	}
+	if !reflect.DeepEqual(cfg.Dependencies.Implementation, want) {
+		t.Errorf("implementation = %+v", cfg.Dependencies.Implementation)
+	}
+	if !cfg.Dependencies.Implementation["org.springframework.boot:spring-boot-starter-web"].Managed() {
+		t.Error("an empty version is a managed entry")
+	}
+	if cfg.Dependencies.Platform["org.springframework.boot:spring-boot-dependencies"] != "4.1.0" {
+		t.Errorf("platform = %v", cfg.Dependencies.Platform)
+	}
+	if !reflect.DeepEqual(cfg.Dependencies.Configuration("implementation"), want) || cfg.Dependencies.Configuration("platform") != nil {
+		t.Error("Configuration() should name the classpath configurations only")
+	}
+}
+
+func TestDependencyMarshalRoundTrip(t *testing.T) {
+	deps := map[string]Dependency{
+		"g:a": {Version: "1"},
+		"g:b": {Version: "1", Classifier: "c"},
+		"g:m": {},
+	}
+	b, err := json.Marshal(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a plain entry stays the string shorthand; a managed one is ""
+	if want := `{"g:a":"1","g:b":{"version":"1","classifier":"c"},"g:m":""}`; string(b) != want {
+		t.Errorf("marshal = %s, want %s", b, want)
+	}
+	var back map[string]Dependency
+	if err := json.Unmarshal(b, &back); err != nil || !reflect.DeepEqual(back, deps) {
+		t.Errorf("round trip = %+v (err %v)", back, err)
+	}
+}
+
+func TestLoadRejectsBadDependencies(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		{`{"dependencies":{"platform":{"org.x:bom":""}}}`, "needs a version"},
+		{`{"dependencies":{"implementation":{"org.x:y":""}}}`, "no platform manages it"},
+		{`{"dependencies":{"implementation":{"org.x:y":{"version":"1","exclude":["nocolon"]}}}}`, "exclude"},
+		{`{"dependencies":{"api":{"justartifact":"1"}}}`, "group:artifact"},
+	} {
+		if _, err := Load(writeConfig(t, tc.body), ""); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want one containing %q", tc.body, err, tc.want)
+		}
+	}
+	// "" is fine once a platform exists: whether it manages the key is only
+	// known at resolve time.
+	if _, err := Load(writeConfig(t, `{"dependencies":{"platform":{"org.x:bom":"1"},"implementation":{"org.x:y":""}}}`), ""); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestLoadKeepsPlatformDeclarationOrder(t *testing.T) {
+	path := writeConfig(t, `{
+  "dependencies": {
+    "platform": {
+      "org.z:last-bom": "1", // declared first: highest precedence
+      "org.a:first-bom": "2",
+    },
+  },
+}`)
+	cfg, err := Load(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Dependencies.PlatformKeys(); !reflect.DeepEqual(got, []string{"org.z:last-bom", "org.a:first-bom"}) {
+		t.Errorf("PlatformKeys = %v, want declaration order", got)
+	}
+	// keys the order does not know (added programmatically) follow, sorted
+	cfg.Dependencies.Platform["org.m:mid"] = "3"
+	cfg.Dependencies.Platform["org.b:b"] = "3"
+	if got := cfg.Dependencies.PlatformKeys(); !reflect.DeepEqual(got, []string{"org.z:last-bom", "org.a:first-bom", "org.b:b", "org.m:mid"}) {
+		t.Errorf("PlatformKeys = %v", got)
+	}
+}
+
+func TestParseRefusesManagedEntryWithoutPlatform(t *testing.T) {
+	// what `cappu remove platform` would write after dropping the only BOM
+	_, err := Parse([]byte(`{"dependencies":{"platform":{},"testImplementation":{"org.junit.jupiter:junit-jupiter":""}}}`), "/p/cappu.json")
+	if err == nil || !strings.Contains(err.Error(), "no platform manages it") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestPackageSourcesStringOrObject(t *testing.T) {
+	path := writeConfig(t, `{
+  "packageSources": [
+    "https://repo.maven.apache.org/maven2",
+    { "url": "https://nexus.corp.example/repository/maven-public", "auth": "NEXUS" },
+    "file:///opt/repo",
+    "~/.m2/repository",
+    "../sibling/repo"
+  ]
+}`)
+	cfg, err := Load(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []PackageSource{
+		{URL: "https://repo.maven.apache.org/maven2"},
+		{URL: "https://nexus.corp.example/repository/maven-public", Auth: "NEXUS"},
+		{URL: "file:///opt/repo"},
+		{URL: "~/.m2/repository"},
+		{URL: "../sibling/repo"},
+	}
+	if !reflect.DeepEqual(cfg.PackageSources, want) {
+		t.Errorf("packageSources = %+v", cfg.PackageSources)
+	}
+	for i, local := range []bool{false, false, true, true, true} {
+		if cfg.PackageSources[i].IsLocal() != local {
+			t.Errorf("%s IsLocal = %v, want %v", cfg.PackageSources[i].URL, !local, local)
+		}
+	}
+	if dir := cfg.PackageSources[2].LocalDir(cfg); dir != "/opt/repo" {
+		t.Errorf("file:// dir = %q", dir)
+	}
+	if dir := cfg.PackageSources[4].LocalDir(cfg); dir != filepath.Join(cfg.BaseDir, "../sibling/repo") {
+		t.Errorf("relative dir = %q", dir)
+	}
+	if home, _ := os.UserHomeDir(); cfg.PackageSources[3].LocalDir(cfg) != filepath.Join(home, ".m2/repository") {
+		t.Errorf("~ dir = %q", cfg.PackageSources[3].LocalDir(cfg))
+	}
+	b, _ := json.Marshal(cfg.PackageSources[:2])
+	if want := `["https://repo.maven.apache.org/maven2",{"url":"https://nexus.corp.example/repository/maven-public","auth":"NEXUS"}]`; string(b) != want {
+		t.Errorf("marshal = %s", b)
+	}
+}
+
+func TestLoadRejectsBadPackageSources(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		{`{"packageSources":[{"url":"https://x","auth":"nexus"}]}`, "env var name"},
+		{`{"packageSources":[{"url":"../repo","auth":"NEXUS"}]}`, "takes no auth"},
+		{`{"packageSources":[{"auth":"NEXUS"}]}`, "url must not be empty"},
+	} {
+		if _, err := Load(writeConfig(t, tc.body), ""); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want one containing %q", tc.body, err, tc.want)
+		}
+	}
+}
+
+func TestLoadRejectsSchemelessSourceAndNull(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		{`{"packageSources":["nexus.corp.example/repository/maven-public"]}`, "neither an http(s) URL nor a path"},
+		{`{"packageSources":[null]}`, "not null"},
+		{`{"dependencies":{"platform":{"org.p:bom":"1"},"implementation":{"org.x:y":null}}}`, "not null"},
+	} {
+		if _, err := Load(writeConfig(t, tc.body), ""); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want one containing %q", tc.body, err, tc.want)
+		}
 	}
 }

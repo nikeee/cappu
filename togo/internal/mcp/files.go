@@ -83,7 +83,7 @@ func findClass(cfg *config.Config, className string) ([]byte, error) {
 		}
 		return nil
 	}
-	for _, raw := range cfg.CompilerOptions.ClassPath {
+	for _, raw := range cfg.CompileClassPath() {
 		entry := cfg.ResolvePath(raw)
 		if strings.HasSuffix(entry, ".jar") {
 			if b := inJar(entry); b != nil {

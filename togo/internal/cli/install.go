@@ -8,7 +8,6 @@ import (
 	"github.com/nikeee/cappu/internal/config"
 	"github.com/nikeee/cappu/internal/install"
 	"github.com/nikeee/cappu/internal/jdks"
-	"github.com/nikeee/cappu/internal/packages"
 )
 
 // RunInstall handles `cappu install`: resolve + download the cappu.json
@@ -42,14 +41,14 @@ func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 	var bar *downloadBar
 	result, err := install.Dependencies(cfg, nil, install.Options{
 		UpdateLock: updateLock,
-		OnResolve: func(current packages.CoordinateString) {
+		OnResolve: func(current string) {
 			if showProgress {
 				resolving++
 				fmt.Fprintf(os.Stderr, "\r\x1b[2K%s %s %s",
-					errp("cyan", "resolving"), errp("bold", fmt.Sprintf("%d", resolving)), errp("dim", string(current)))
+					errp("cyan", "resolving"), errp("bold", fmt.Sprintf("%d", resolving)), errp("dim", current))
 			}
 		},
-		OnProgress: func(done, total int, current packages.CoordinateString) {
+		OnProgress: func(done, total int, current string) {
 			if !showProgress {
 				return
 			}
@@ -61,7 +60,7 @@ func runInstallWith(cfg *config.Config, verbose, updateLock bool) int {
 				bar = newDownloadBar(os.Stderr, "")
 				bar.start(total)
 			}
-			bar.update(done, string(current))
+			bar.update(done, current)
 		},
 	})
 	if resolving > 0 {
@@ -176,6 +175,8 @@ func summary(out func(format, text string) string, cats install.Categories) stri
 	var parts []string
 	for _, c := range []cat{
 		{len(cats.Compile), "compile dependency", "compile dependencies"},
+		{len(cats.CompileOnly), "compile-only dependency", "compile-only dependencies"},
+		{len(cats.RuntimeOnly), "runtime-only dependency", "runtime-only dependencies"},
 		{len(cats.Processor), "annotation processor", "annotation processors"},
 		{len(cats.Test), "test dependency", "test dependencies"},
 	} {

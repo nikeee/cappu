@@ -38,7 +38,12 @@ feature gaps behind these steps.
 | `maven.compiler.release` / `source` / `target` / `java.version` | `compilerOptions.release` (integer) |
 | dependency scope `compile` | `dependencies.implementation` (use `api` only if the type leaks into your public API) |
 | dependency scope `test` | `dependencies.testImplementation` |
-| dependency scope `provided` / `optional` / `runtime` | `dependencies.implementation` (**no exact equivalent** - lossy; fine for building, wrong for publishing) |
+| `<dependencyManagement>` entry with `<scope>import</scope>` (a BOM), Gradle `platform()` / `enforcedPlatform()` | `dependencies.platform` (`"group:artifact": "version"`); dependencies it manages are declared with version `""` |
+| `<exclusions>` on a dependency, Gradle `exclude(group:, module:)` | object form: `"g:a": { "version": "1.0", "exclude": ["x:y", "x:*"] }` |
+| `<classifier>` on a dependency | object form: `"g:a": { "version": "1.0", "classifier": "linux-x86_64" }` |
+| dependency scope `provided`, Gradle `compileOnly` | `dependencies.compileOnly` |
+| dependency scope `runtime`, Gradle `runtimeOnly` | `dependencies.runtimeOnly` |
+| `<optional>true</optional>` | `dependencies.implementation` (cappu has no optional flag; consumers of the published POM see it as `runtime`) |
 | annotation processor (compiler-plugin `annotationProcessorPaths`, or a `*-processor` artifact) | `dependencies.annotationProcessor` |
 | compiler-plugin `<compilerArgs>` / `<parameters>true`, Gradle `options.compilerArgs` | `compilerOptions.javacOptions` (string array, e.g. `["-parameters", "-Xlint:all"]`) |
 | non-default `<sourceDirectory>` / build-helper generated sources | `compilerOptions.sourcePaths` (array) |
@@ -69,12 +74,16 @@ Minimal example (single module):
 
 ## Resolving versions (the tedious part)
 
-cappu.json needs **every version pinned literally**. It does not read parent
-POMs, `<dependencyManagement>`, BOM imports, or `${property}` placeholders. When
-a `<dependency>` has no `<version>` (or uses `${...}`):
+cappu.json needs every version **pinned literally or managed by a platform**.
+A published BOM the project imports (spring-boot-dependencies, junit-bom,
+jackson-bom, kotlin-bom, ...) goes under `dependencies.platform`, and the
+dependencies it manages are declared with version `""`. cappu does not read the
+project's own parent POM or `${property}` placeholders, so for a version that
+comes from an unpublished parent or a property:
 - Resolve the property in the module pom, then its parent pom(s).
-- For BOM-managed versions (junit-bom, kotlin-bom, ...), fetch the parent pom
-  and grep the `<properties>` block, e.g.
+- If the parent only imports a published BOM, add that BOM as a platform
+  instead of copying its versions.
+- Otherwise fetch the parent pom and grep its `<properties>` block, e.g.
   `curl -s https://repo.maven.apache.org/maven2/org/apache/commons/commons-parent/102/commons-parent-102.pom`.
 - `cappu show group:artifact` prints the latest published version if you just
   want current.
@@ -109,7 +118,7 @@ nothing to build - do not create a cappu project for it.
 
 ## Gotchas checklist
 
-- [ ] Versions all pinned literally (no `${...}`, no BOM inheritance).
+- [ ] Versions pinned literally or `""` under a `platform` BOM (no `${...}`).
 - [ ] Right groupId per coordinate (install fails loudly on a wrong one).
 - [ ] Custom `classPath`? Re-list `./.cappu/lib/classes`.
 - [ ] Multi-module: build order set, upstream jars referenced.
@@ -117,8 +126,8 @@ nothing to build - do not create a cappu project for it.
 - [ ] After `cappu test`, missing-package errors may mean an **undeclared
       transitive test dep** (commons-lang needed `org.ow2.asm:asm` even though
       its pom doesn't list it) - add it explicitly.
-- [ ] `provided`/`optional`/`runtime` became `implementation` - note it if you
-      will publish.
+- [ ] `provided` -> `compileOnly`, `runtime` -> `runtimeOnly`; `optional`
+      became `implementation` - note it if you will publish.
 - [ ] Install shows `version X loses to Y` warnings? A version conflict was
       resolved against your declared version; if tests misbehave at runtime,
       pin the conflicting transitive dep explicitly.

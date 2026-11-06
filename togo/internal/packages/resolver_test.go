@@ -33,6 +33,15 @@ func pkg(spec string, deps ...dep) PackageMetadata {
 	return PackageMetadata{Coordinates: coord(spec), Dependencies: declarations}
 }
 
+// roots wraps coordinates as plain resolver roots (no exclusions).
+func roots(cs ...Coordinates) []DependencyDeclaration {
+	out := make([]DependencyDeclaration, len(cs))
+	for i, c := range cs {
+		out[i] = DependencyDeclaration{Coordinates: c}
+	}
+	return out
+}
+
 func names(packages []ResolvedPackage) []string {
 	out := make([]string, len(packages))
 	for i, p := range packages {
@@ -49,7 +58,7 @@ func TestResolveTransitiveBreadthFirst(t *testing.T) {
 		pkg("org.b:b:1", dep{spec: "org.c:c:1"}),
 		pkg("org.c:c:1"),
 	})
-	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:1")}, []PackageSource{source}, nil)
+	res, err := ResolveTransitive(roots(coord("org.a:a:1")), []PackageSource{source}, ResolveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,9 +86,9 @@ func TestResolveOnResolveOrder(t *testing.T) {
 	})
 	var seen []string
 	res, err := ResolveTransitive(
-		[]Coordinates{coord("org.a:a:1"), coord("org.missing:m:1")},
+		roots(coord("org.a:a:1"), coord("org.missing:m:1")),
 		[]PackageSource{source},
-		func(c Coordinates) { seen = append(seen, string(c.String())) },
+		ResolveOptions{OnResolve: func(c Coordinates) { seen = append(seen, string(c.String())) }},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +109,7 @@ func TestResolveNearestWins(t *testing.T) {
 		pkg("org.b:b:2"),
 		pkg("org.c:c:1", dep{spec: "org.b:b:2"}), // farther than a's direct b:1
 	})
-	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:1")}, []PackageSource{source}, nil)
+	res, err := ResolveTransitive(roots(coord("org.a:a:1")), []PackageSource{source}, ResolveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +128,7 @@ func TestResolveCyclesTerminate(t *testing.T) {
 		pkg("org.a:a:1", dep{spec: "org.b:b:1"}),
 		pkg("org.b:b:1", dep{spec: "org.a:a:1"}),
 	})
-	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:1")}, []PackageSource{source}, nil)
+	res, err := ResolveTransitive(roots(coord("org.a:a:1")), []PackageSource{source}, ResolveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +146,7 @@ func TestResolveScopeAndOptionalDoNotPropagate(t *testing.T) {
 		),
 		pkg("org.r:r:1"),
 	})
-	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:1")}, []PackageSource{source}, nil)
+	res, err := ResolveTransitive(roots(coord("org.a:a:1")), []PackageSource{source}, ResolveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +161,7 @@ func TestResolveScopeAndOptionalDoNotPropagate(t *testing.T) {
 func TestResolveSourcesInOrder(t *testing.T) {
 	primary := NewInMemoryPackageSource("primary", []PackageMetadata{pkg("org.a:a:1", dep{spec: "org.b:b:1"})})
 	fallback := NewInMemoryPackageSource("fallback", []PackageMetadata{pkg("org.a:a:1"), pkg("org.b:b:1")})
-	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:1")}, []PackageSource{primary, fallback}, nil)
+	res, err := ResolveTransitive(roots(coord("org.a:a:1")), []PackageSource{primary, fallback}, ResolveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +179,7 @@ func TestResolveMissingReportedOnce(t *testing.T) {
 	source := NewInMemoryPackageSource("test", []PackageMetadata{
 		pkg("org.a:a:1", dep{spec: "org.gone:gone:9"}, dep{spec: "org.gone:gone:9"}),
 	})
-	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:1")}, []PackageSource{source}, nil)
+	res, err := ResolveTransitive(roots(coord("org.a:a:1")), []PackageSource{source}, ResolveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,6 +227,9 @@ func (erroringSource) Search(string) ([]SearchHit, error)            { return ni
 func (erroringSource) ListVersions(string, string) ([]string, error) { return nil, nil }
 func (erroringSource) GetArtifact(Coordinates) ([]byte, error)       { return nil, nil }
 func (erroringSource) GetPom(Coordinates) ([]byte, error)            { return nil, nil }
+func (erroringSource) GetManaged(Coordinates) (map[PackageKey]string, error) {
+	return nil, nil
+}
 func (s erroringSource) GetMetadata(Coordinates) (*PackageMetadata, error) {
 	return nil, s.err
 }
@@ -227,7 +239,7 @@ func (s erroringSource) GetMetadata(Coordinates) (*PackageMetadata, error) {
 // would print as "not found in any package source").
 func TestResolveTransitivePropagatesFetchError(t *testing.T) {
 	boom := errors.New("repo.example: HTTP 429 after 4 attempts")
-	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:1")}, []PackageSource{erroringSource{err: boom}}, nil)
+	res, err := ResolveTransitive(roots(coord("org.a:a:1")), []PackageSource{erroringSource{err: boom}}, ResolveOptions{})
 	if err == nil {
 		t.Fatal("want the fetch error to propagate, got nil")
 	}
@@ -243,7 +255,7 @@ func TestResolveRangeRoot(t *testing.T) {
 		pkg("org.a:a:2.0", dep{spec: "org.b:b:1"}),
 		pkg("org.b:b:1"),
 	})
-	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:[1.0,2.0)")}, []PackageSource{source}, nil)
+	res, err := ResolveTransitive(roots(coord("org.a:a:[1.0,2.0)")), []PackageSource{source}, ResolveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +274,7 @@ func TestResolveRangeTransitive(t *testing.T) {
 		pkg("org.b:b:1.5"),
 		pkg("org.b:b:2.0"),
 	})
-	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:1")}, []PackageSource{source}, nil)
+	res, err := ResolveTransitive(roots(coord("org.a:a:1")), []PackageSource{source}, ResolveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +291,7 @@ func TestResolveRangeUnsatisfiable(t *testing.T) {
 		pkg("org.a:a:1.0"),
 		pkg("org.a:a:2.0"),
 	})
-	res, err := ResolveTransitive([]Coordinates{coord("org.a:a:[5.0,6.0)")}, []PackageSource{source}, nil)
+	res, err := ResolveTransitive(roots(coord("org.a:a:[5.0,6.0)")), []PackageSource{source}, ResolveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,5 +300,225 @@ func TestResolveRangeUnsatisfiable(t *testing.T) {
 	}
 	if len(res.Missing) != 1 || string(res.Missing[0].Coordinates.String()) != "org.a:a:[5.0,6.0)" {
 		t.Errorf("missing = %v", res.Missing)
+	}
+}
+
+func TestResolveExclusionsPruneSubtreePerPath(t *testing.T) {
+	// a -> b (excluding c:*) -> c -> d ; a -> e -> c
+	// c is pruned below b but still arrives via e (and brings d along): an
+	// exclusion is scoped to its path, not global.
+	b := pkg("org.b:b:1", dep{spec: "org.c:c:1"})
+	c := pkg("org.c:c:1", dep{spec: "org.d:d:1"})
+	source := NewInMemoryPackageSource("test", []PackageMetadata{
+		{Coordinates: coord("org.a:a:1"), Dependencies: []DependencyDeclaration{
+			{Coordinates: coord("org.b:b:1"), Exclusions: []string{"org.c:*"}},
+			{Coordinates: coord("org.e:e:1")},
+		}},
+		b, c,
+		pkg("org.d:d:1"),
+		pkg("org.e:e:1", dep{spec: "org.c:c:1"}),
+	})
+	res, err := ResolveTransitive(roots(coord("org.a:a:1")), []PackageSource{source}, ResolveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := names(res.Packages)
+	if !reflect.DeepEqual(got, []string{"org.a:a:1", "org.b:b:1", "org.e:e:1", "org.c:c:1", "org.d:d:1"}) {
+		t.Errorf("packages = %v", got)
+	}
+	for _, p := range res.Packages {
+		if p.Coordinates.String() == "org.c:c:1" && p.RequestedBy != coord("org.e:e:1") {
+			t.Errorf("c requested by %v, want e", p.RequestedBy)
+		}
+	}
+}
+
+func TestResolveExclusionsInheritDownThePath(t *testing.T) {
+	// a -> b (excluding d) -> c -> d : the exclusion declared on a->b prunes
+	// d two levels down, not just b's direct dependencies.
+	source := NewInMemoryPackageSource("test", []PackageMetadata{
+		{Coordinates: coord("org.a:a:1"), Dependencies: []DependencyDeclaration{
+			{Coordinates: coord("org.b:b:1"), Exclusions: []string{"org.d:d"}},
+		}},
+		pkg("org.b:b:1", dep{spec: "org.c:c:1"}),
+		pkg("org.c:c:1", dep{spec: "org.d:d:1"}),
+		pkg("org.d:d:1"),
+	})
+	res, err := ResolveTransitive(roots(coord("org.a:a:1")), []PackageSource{source}, ResolveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(res.Packages); !reflect.DeepEqual(got, []string{"org.a:a:1", "org.b:b:1", "org.c:c:1"}) {
+		t.Errorf("packages = %v", got)
+	}
+}
+
+func TestResolvePomOnlyAndClassifiers(t *testing.T) {
+	native := coord("io.n:n:1").WithClassifier("linux-x86_64")
+	source := NewInMemoryPackageSource("test", []PackageMetadata{
+		{Coordinates: coord("org.a:a:1"), Dependencies: []DependencyDeclaration{
+			{Coordinates: pomOnly("org.bom:bom:1")},
+			{Coordinates: coord("io.n:n:1")},
+			{Coordinates: native},
+		}},
+		pkg("org.bom:bom:1", dep{spec: "org.c:c:1"}),
+		// c also wants bom:1 as a plain jar: a distinct node from the pom edge
+		pkg("org.c:c:1", dep{spec: "org.bom:bom:1"}),
+		pkg("io.n:n:1"),
+	})
+	res, err := ResolveTransitive(roots(coord("org.a:a:1")), []PackageSource{source}, ResolveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Conflicts) != 0 {
+		t.Errorf("the plain and the classified jar are different keys, got conflicts %v", res.Conflicts)
+	}
+	var labels []string
+	for _, p := range res.Packages {
+		labels = append(labels, p.Coordinates.Label())
+	}
+	want := []string{"org.a:a:1", "org.bom:bom:1:pom", "io.n:n:1", "io.n:n:1:linux-x86_64", "org.c:c:1", "org.bom:bom:1"}
+	if !reflect.DeepEqual(labels, want) {
+		t.Errorf("packages = %v, want %v", labels, want)
+	}
+	if !res.Packages[1].Coordinates.PomOnly() || res.Packages[5].Coordinates.PomOnly() {
+		t.Error("the pom edge is pom-only, the jar edge is not")
+	}
+}
+
+func TestExcluded(t *testing.T) {
+	c := coord("org.slf4j:slf4j-api:2")
+	for pattern, want := range map[string]bool{
+		"org.slf4j:slf4j-api": true,
+		"org.slf4j:*":         true,
+		"*:slf4j-api":         true,
+		"*:*":                 true,
+		"org.slf4j:jcl":       false,
+		"org.other:*":         false,
+	} {
+		if got := excluded(c, []string{pattern}); got != want {
+			t.Errorf("excluded(%s) = %v, want %v", pattern, got, want)
+		}
+	}
+}
+
+func TestResolveManagedRootAndTransitiveOverride(t *testing.T) {
+	source := NewInMemoryPackageSource("test", []PackageMetadata{
+		pkg("org.a:a:1", dep{spec: "org.b:b:1"}),
+		pkg("org.b:b:1"),
+		pkg("org.b:b:2"),
+		pkg("org.c:c:3"),
+	})
+	managed := map[PackageKey]string{"org.b:b": "2", "org.c:c": "3"}
+	// c declared without a version: the platform fills it; a's b:1 is
+	// overridden to the managed b:2 without a conflict (Maven semantics).
+	res, err := ResolveTransitive(roots(coord("org.a:a:1"), coord("org.c:c:")), []PackageSource{source}, ResolveOptions{Managed: managed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(res.Packages); !reflect.DeepEqual(got, []string{"org.a:a:1", "org.c:c:3", "org.b:b:2"}) {
+		t.Errorf("packages = %v", got)
+	}
+	if len(res.Conflicts) != 0 {
+		t.Errorf("a managed override is not a conflict: %v", res.Conflicts)
+	}
+	if res.Packages[0].Managed || !res.Packages[1].Managed || !res.Packages[2].Managed {
+		t.Errorf("managed flags = %v %v %v", res.Packages[0].Managed, res.Packages[1].Managed, res.Packages[2].Managed)
+	}
+}
+
+func TestResolveExplicitRootBeatsPlatform(t *testing.T) {
+	source := NewInMemoryPackageSource("test", []PackageMetadata{pkg("org.a:a:1"), pkg("org.a:a:2")})
+	res, err := ResolveTransitive(roots(coord("org.a:a:1")), []PackageSource{source}, ResolveOptions{Managed: map[PackageKey]string{"org.a:a": "2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(res.Packages); !reflect.DeepEqual(got, []string{"org.a:a:1"}) || res.Packages[0].Managed {
+		t.Errorf("packages = %v managed=%v, want the declared a:1", got, res.Packages[0].Managed)
+	}
+}
+
+func TestResolveUnmanagedRootErrors(t *testing.T) {
+	source := NewInMemoryPackageSource("test", []PackageMetadata{pkg("org.a:a:1")})
+	_, err := ResolveTransitive(roots(coord("org.x:x:")), []PackageSource{source}, ResolveOptions{})
+	if err == nil || !strings.Contains(err.Error(), "org.x:x: no version given and no platform manages it") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestResolvePinnedRootIsNotOverriddenByPlatform(t *testing.T) {
+	// cappu.json pins b:1 while the platform says b:2: the pin wins, and a's
+	// transitive b:1 request is left alone, so there is no conflict either.
+	source := NewInMemoryPackageSource("test", []PackageMetadata{
+		pkg("org.a:a:1", dep{spec: "org.b:b:1"}),
+		pkg("org.b:b:1"),
+		pkg("org.b:b:2"),
+	})
+	res, err := ResolveTransitive(roots(coord("org.a:a:1"), coord("org.b:b:1")), []PackageSource{source},
+		ResolveOptions{Managed: map[PackageKey]string{"org.b:b": "2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(res.Packages); !reflect.DeepEqual(got, []string{"org.a:a:1", "org.b:b:1"}) || len(res.Conflicts) != 0 {
+		t.Errorf("packages = %v conflicts = %v", got, res.Conflicts)
+	}
+}
+
+func TestResolveRangeKeepsExtensionAndClassifier(t *testing.T) {
+	source := NewInMemoryPackageSource("test", []PackageMetadata{pkg("org.a:a:1.0"), pkg("org.a:a:1.5")})
+	ranged := coord("org.a:a:[1.0,2.0)").WithClassifier("tests")
+	ranged.Extension = "pom"
+	got, ok, err := resolveRange(ranged, []PackageSource{source})
+	if err != nil || !ok || got.Label() != "org.a:a:1.5:tests:pom" {
+		t.Errorf("resolveRange = %q ok=%v err=%v", got.Label(), ok, err)
+	}
+}
+
+func TestUnmanagedRootErrorIsTyped(t *testing.T) {
+	_, err := ResolveTransitive(roots(coord("org.x:x:")), nil, ResolveOptions{})
+	var unmanaged UnmanagedRootError
+	if !errors.As(err, &unmanaged) || unmanaged.Key != "org.x:x" {
+		t.Errorf("err = %v, want UnmanagedRootError for org.x:x", err)
+	}
+}
+
+func TestResolveRecordsEveryParentEdge(t *testing.T) {
+	// a -> c and b -> c: c is resolved once (via a) but b's edge is kept, so a
+	// consumer can rebuild the full graph.
+	source := NewInMemoryPackageSource("test", []PackageMetadata{
+		pkg("org.a:a:1", dep{spec: "org.c:c:1"}),
+		pkg("org.b:b:1", dep{spec: "org.c:c:1"}),
+		pkg("org.c:c:1"),
+	})
+	res, err := ResolveTransitive(roots(coord("org.a:a:1"), coord("org.b:b:1")), []PackageSource{source}, ResolveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := res.Packages[2]
+	if c.Coordinates.String() != "org.c:c:1" || c.RequestedBy != coord("org.a:a:1") || !reflect.DeepEqual(c.AlsoRequestedBy, []Coordinates{coord("org.b:b:1")}) {
+		t.Errorf("c = %+v", c)
+	}
+}
+
+func TestResolveRecordsLosingEdgeOnTheWinner(t *testing.T) {
+	// a -> b -> l:1 ; r -> l:2 (nearer): l:2 wins and b's edge now points at
+	// it, which is what a consumer partitioning by reachability must see.
+	source := NewInMemoryPackageSource("test", []PackageMetadata{
+		pkg("org.a:a:1", dep{spec: "org.b:b:1"}),
+		pkg("org.b:b:1", dep{spec: "org.l:l:1"}),
+		pkg("org.r:r:1", dep{spec: "org.l:l:2"}),
+		pkg("org.l:l:1"),
+		pkg("org.l:l:2"),
+	})
+	res, err := ResolveTransitive(roots(coord("org.a:a:1"), coord("org.r:r:1")), []PackageSource{source}, ResolveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range res.Packages {
+		if p.Coordinates.Key() == "org.l:l" {
+			if p.Coordinates.Version != "2" || p.RequestedBy != coord("org.r:r:1") || !reflect.DeepEqual(p.AlsoRequestedBy, []Coordinates{coord("org.b:b:1")}) {
+				t.Errorf("l = %+v", p)
+			}
+		}
 	}
 }

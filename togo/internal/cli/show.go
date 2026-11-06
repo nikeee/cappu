@@ -105,18 +105,12 @@ func metadataAcross(c packages.Coordinates, srcs []packages.PackageSource) *pack
 
 // gatherProjectContext reports where (if anywhere) this project depends on key.
 func gatherProjectContext(cfg *config.Config, key string) projectShow {
-	byName := map[string]map[string]string{
-		"api":                 cfg.Dependencies.API,
-		"implementation":      cfg.Dependencies.Implementation,
-		"annotationProcessor": cfg.Dependencies.AnnotationProcessor,
-		"testImplementation":  cfg.Dependencies.TestImplementation,
-	}
 	pc := projectShow{configurations: []string{}}
 	for _, name := range config.Configurations {
-		if v, ok := byName[name][key]; ok {
+		if v, ok := cfg.Dependencies.Configuration(name)[key]; ok {
 			pc.configurations = append(pc.configurations, name)
 			if pc.declared == "" {
-				pc.declared = v
+				pc.declared = v.Version // "" when a platform manages it
 			}
 		}
 	}

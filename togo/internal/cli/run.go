@@ -98,7 +98,7 @@ func RunRun(args []string, cfg *config.Config) int {
 		return 2
 	}
 
-	classPath := append([]string{outDir}, build.ClassPath(cfg)...)
+	classPath := append([]string{outDir}, build.RuntimeClassPath(cfg)...)
 	cmdArgs := append([]string{"-cp", strings.Join(classPath, string(os.PathListSeparator)), mainClass}, args...)
 	cmd := exec.Command(testing.ResolveJava(cfg), cmdArgs...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr

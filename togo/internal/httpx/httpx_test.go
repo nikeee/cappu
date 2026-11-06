@@ -27,7 +27,7 @@ func TestGetRetriesTransientThenSucceeds(t *testing.T) {
 	defer server.Close()
 
 	var slept []time.Duration
-	body, found, err := get(server.Client(), server.URL, func(d time.Duration) { slept = append(slept, d) }, func() float64 { return 0.5 })
+	body, found, err := get(server.Client(), server.URL, "", func(d time.Duration) { slept = append(slept, d) }, func() float64 { return 0.5 })
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestGetJittersBackoffByRng(t *testing.T) {
 	var slept []time.Duration
 	// a different rng yields a different sleep (0.1 * baseBackoff, not the fixed
 	// baseBackoff it used to be).
-	if _, _, err := get(server.Client(), server.URL, func(d time.Duration) { slept = append(slept, d) }, func() float64 { return 0.1 }); err != nil {
+	if _, _, err := get(server.Client(), server.URL, "", func(d time.Duration) { slept = append(slept, d) }, func() float64 { return 0.1 }); err != nil {
 		t.Fatal(err)
 	}
 	if len(slept) != 1 || slept[0] != baseBackoff/10 {
@@ -76,7 +76,7 @@ func TestGetPersistentTransientIsErrorNotMiss(t *testing.T) {
 	}))
 	defer server.Close()
 
-	body, found, err := get(server.Client(), server.URL, func(time.Duration) {}, func() float64 { return 0.5 })
+	body, found, err := get(server.Client(), server.URL, "", func(time.Duration) {}, func() float64 { return 0.5 })
 	if err == nil {
 		t.Fatal("want an error after exhausting retries, got nil (would be reported as a miss)")
 	}
@@ -96,7 +96,7 @@ func TestGetGenuine404IsMiss(t *testing.T) {
 	}))
 	defer server.Close()
 
-	body, found, err := get(server.Client(), server.URL, func(time.Duration) { t.Fatal("404 must not retry") }, func() float64 { return 0 })
+	body, found, err := get(server.Client(), server.URL, "", func(time.Duration) { t.Fatal("404 must not retry") }, func() float64 { return 0 })
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestGetHonorsRetryAfter(t *testing.T) {
 	defer server.Close()
 
 	var slept []time.Duration
-	if _, _, err := get(server.Client(), server.URL, func(d time.Duration) { slept = append(slept, d) }, func() float64 { return 0.5 }); err != nil {
+	if _, _, err := get(server.Client(), server.URL, "", func(d time.Duration) { slept = append(slept, d) }, func() float64 { return 0.5 }); err != nil {
 		t.Fatal(err)
 	}
 	if len(slept) != 1 || slept[0] != 2*time.Second {
@@ -166,4 +166,37 @@ func (neverEnding) Read(b []byte) (int, error) {
 		b[i] = 'x'
 	}
 	return len(b), nil
+}
+
+func TestGetAuthorizedSendsHeader(t *testing.T) {
+	var got string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+	auth := Auth{Basic: true, Username: "u", Password: "p"}
+	if _, found, err := GetAuthorized(server.Client(), server.URL, auth.Header()); err != nil || !found {
+		t.Fatalf("found=%v err=%v", found, err)
+	}
+	if got != "Basic dTpw" {
+		t.Errorf("Authorization = %q, want Basic dTpw", got)
+	}
+	if h := (Auth{Token: "t0k"}).Header(); h != "Bearer t0k" {
+		t.Errorf("bearer header = %q", h)
+	}
+}
+
+func TestRejectedCredentialsAreAnError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	if _, _, err := GetAuthorized(server.Client(), server.URL, "Bearer expired"); err == nil || !strings.Contains(err.Error(), "credentials were rejected") {
+		t.Errorf("authenticated 401 err = %v, want a rejection error", err)
+	}
+	// anonymous: a 401 is just a miss, like a 404 (the next source may have it)
+	if _, found, err := Get(server.Client(), server.URL); err != nil || found {
+		t.Errorf("anonymous 401: found=%v err=%v, want a miss", found, err)
+	}
 }

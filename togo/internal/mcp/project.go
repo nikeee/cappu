@@ -105,10 +105,14 @@ func NewProjectTools(cfg *config.Config, deps ProjectToolDeps) *ProjectTools {
 	return &ProjectTools{config: cfg, sources: srcs, auditSource: auditSource}
 }
 
-// resolveAll resolves the whole graph (compile + processor + test, transitive).
+// resolveAll resolves the whole graph (compile + processor + test, transitive)
+// under the platform-managed versions.
 func (t *ProjectTools) resolveAll() (packages.Resolution, error) {
-	roots := append(append(sources.CompileRoots(t.config), sources.ProcessorRoots(t.config)...), sources.TestRoots(t.config)...)
-	return packages.ResolveTransitive(roots, t.sources, nil)
+	managed, err := sources.ManagedVersions(t.config, t.sources)
+	if err != nil {
+		return packages.Resolution{}, err
+	}
+	return packages.ResolveTransitive(sources.AllRoots(t.config), t.sources, packages.ResolveOptions{Managed: managed})
 }
 
 // dependencyPath is the chain [root, ..., target] following requestedBy edges.
@@ -154,7 +158,7 @@ func (t *ProjectTools) Audit() (McpAuditReport, error) {
 	for _, p := range report.Vulnerable {
 		var pathStrs []string
 		for _, c := range dependencyPath(byKey, p.Coordinates) {
-			pathStrs = append(pathStrs, string(c.String()))
+			pathStrs = append(pathStrs, c.Label())
 		}
 		var advisories []McpAdvisory
 		for _, a := range p.Advisories {
@@ -169,7 +173,7 @@ func (t *ProjectTools) Audit() (McpAuditReport, error) {
 				Ignored:       reason,
 			})
 		}
-		vulnerable = append(vulnerable, McpVulnerablePackage{Coordinate: string(p.Coordinates.String()), Path: pathStrs, Advisories: advisories})
+		vulnerable = append(vulnerable, McpVulnerablePackage{Coordinate: p.Coordinates.Label(), Path: pathStrs, Advisories: advisories})
 	}
 	var stale []string
 	for _, ignore := range ignores.Stale {
@@ -194,7 +198,7 @@ func (t *ProjectTools) Licenses() ([]McpLicenseRow, error) {
 		for _, s := range p.Metadata.LicenseNormalized {
 			spdx = append(spdx, string(s))
 		}
-		rows = append(rows, McpLicenseRow{Coordinate: string(p.Coordinates.String()), Licenses: licenses, SPDX: spdx})
+		rows = append(rows, McpLicenseRow{Coordinate: p.Coordinates.Label(), Licenses: licenses, SPDX: spdx})
 	}
 	slices.SortStableFunc(rows, func(a, b McpLicenseRow) int { return cmp.Compare(a.Coordinate, b.Coordinate) })
 	return rows, nil
@@ -260,19 +264,18 @@ func (t *ProjectTools) DependencyTree(coord string) (DependencyTreeResult, error
 		for _, p := range resolution.Packages {
 			byKey[p.Coordinates.Key()] = p
 		}
-		g, a, v := splitCoord3(coord)
-		target := packages.NewCoordinates(g, a, v)
+		target := parseCoord(coord)
 		path := []string{}
 		for _, c := range dependencyPath(byKey, target) {
-			path = append(path, string(c.String()))
+			path = append(path, c.Label())
 		}
 		return DependencyTreeResult{Path: path}, nil
 	}
 	nodes := []McpTreeNode{}
 	for _, p := range resolution.Packages {
-		node := McpTreeNode{Coordinate: string(p.Coordinates.String()), Depth: p.Depth}
+		node := McpTreeNode{Coordinate: p.Coordinates.Label(), Depth: p.Depth}
 		if (p.RequestedBy != packages.Coordinates{}) {
-			node.RequestedBy = string(p.RequestedBy.String())
+			node.RequestedBy = p.RequestedBy.Label()
 		}
 		nodes = append(nodes, node)
 	}
@@ -288,14 +291,20 @@ func splitCoord2(coord string) (group, artifact string) {
 	return
 }
 
-func splitCoord3(coord string) (group, artifact, version string) {
-	parts := strings.SplitN(coord, ":", 3)
-	group = parts[0]
-	if len(parts) > 1 {
-		artifact = parts[1]
+// parseCoord reads a tree label back: "group:artifact:version", optionally
+// followed by ":classifier" and/or ":pom" (Coordinates.Label).
+func parseCoord(coord string) packages.Coordinates {
+	parts := strings.Split(coord, ":")
+	for len(parts) < 3 {
+		parts = append(parts, "")
 	}
-	if len(parts) > 2 {
-		version = parts[2]
+	c := packages.NewCoordinates(parts[0], parts[1], parts[2])
+	for _, q := range parts[3:] {
+		if q == "pom" {
+			c.Extension = "pom"
+		} else {
+			c.Classifier = packages.Classifier(q)
+		}
 	}
-	return
+	return c
 }

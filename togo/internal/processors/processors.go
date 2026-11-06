@@ -115,7 +115,7 @@ func DefaultExec(name string, args []string) ExecResult {
 
 // ProcOnlyArgs builds the -proc:only generation arguments.
 func ProcOnlyArgs(cfg *config.Config, files, jars []string, outSources, outClasses string) []string {
-	classPath := build.ClassPath(cfg)
+	classPath := build.CompileClassPath(cfg)
 	var sourcePaths []string
 	for _, p := range cfg.CompilerOptions.SourcePaths {
 		resolved := cfg.ResolvePath(p)

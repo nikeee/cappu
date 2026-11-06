@@ -102,3 +102,5 @@ func (s stubSource) GetMetadata(Coordinates) (*PackageMetadata, error) { return 
 func (s stubSource) GetArtifact(Coordinates) ([]byte, error) { return nil, nil }
 
 func (s stubSource) GetPom(Coordinates) ([]byte, error) { return nil, nil }
+
+func (s stubSource) GetManaged(Coordinates) (map[PackageKey]string, error) { return nil, nil }

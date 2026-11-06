@@ -82,3 +82,55 @@ func TestMissingCoordinates(t *testing.T) {
 		t.Errorf("GeneratePom should error mentioning version, got %v", err)
 	}
 }
+
+func TestGeneratePomPlatformClassifierExclusions(t *testing.T) {
+	pom, err := GeneratePom(cfgFrom(t, `{"groupId":"g","artifactId":"a","version":"1.0.0",
+		"dependencies":{
+			"platform":{"org.p:bom":"2"},
+			"implementation":{
+				"org.m:managed":"",
+				"io.n:n":{"version":"1","classifier":"linux-x86_64","exclude":["x:y","z:*"]}
+			}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		// the platform is imported, so consumers see the same managed versions
+		"  <dependencyManagement>\n    <dependencies>\n      <dependency>\n        <groupId>org.p</groupId>\n        <artifactId>bom</artifactId>\n        <version>2</version>\n        <type>pom</type>\n        <scope>import</scope>\n      </dependency>\n    </dependencies>\n  </dependencyManagement>",
+		// a managed entry carries no <version>
+		"      <artifactId>managed</artifactId>\n      <scope>runtime</scope>",
+		"      <classifier>linux-x86_64</classifier>",
+		"      <exclusions>\n        <exclusion>\n          <groupId>x</groupId>\n          <artifactId>y</artifactId>\n        </exclusion>\n        <exclusion>\n          <groupId>z</groupId>\n          <artifactId>*</artifactId>\n        </exclusion>\n      </exclusions>",
+	} {
+		if !strings.Contains(pom, want) {
+			t.Errorf("pom lacks:\n%s\n--- pom:\n%s", want, pom)
+		}
+	}
+}
+
+func TestGeneratePomScopesCompileOnlyAndRuntimeOnly(t *testing.T) {
+	pom, err := GeneratePom(cfgFrom(t, `{"groupId":"g","artifactId":"a","version":"1.0.0",
+		"dependencies":{"compileOnly":{"jakarta.servlet:api":"6"},"runtimeOnly":{"org.pg:driver":"42"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"      <artifactId>api</artifactId>\n      <version>6</version>\n      <scope>provided</scope>",
+		"      <artifactId>driver</artifactId>\n      <version>42</version>\n      <scope>runtime</scope>",
+	} {
+		if !strings.Contains(pom, want) {
+			t.Errorf("pom lacks:\n%s\n--- pom:\n%s", want, pom)
+		}
+	}
+}
+
+func TestGeneratePomImportsPlatformsInDeclarationOrder(t *testing.T) {
+	pom, err := GeneratePom(cfgFrom(t, `{"groupId":"g","artifactId":"a","version":"1.0.0",
+		"dependencies":{"platform":{"org.z:zbom":"1","org.a:abom":"1"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Index(pom, "<artifactId>zbom</artifactId>") > strings.Index(pom, "<artifactId>abom</artifactId>") {
+		t.Errorf("zbom is declared first and must be imported first (precedence):\n%s", pom)
+	}
+}

@@ -181,16 +181,16 @@ func q(s string) string {
 	return string(b)
 }
 
-// renderNested renders path -> value as nested object members.
-func renderNested(path []string, value string, multiline bool, indent, unit string) string {
+// renderNested renders path -> raw (already-JSON text) as nested object members.
+func renderNested(path []string, raw string, multiline bool, indent, unit string) string {
 	colon := ":"
 	if multiline {
 		colon = ": "
 	}
 	if len(path) == 1 {
-		return q(path[0]) + colon + q(value)
+		return q(path[0]) + colon + raw
 	}
-	inner := renderNested(path[1:], value, multiline, indent+unit, unit)
+	inner := renderNested(path[1:], raw, multiline, indent+unit, unit)
 	if multiline {
 		return q(path[0]) + colon + "{\n" + indent + unit + inner + "\n" + indent + "}"
 	}
@@ -229,16 +229,21 @@ func walk(text string, path []string) (parent objectSpan, found *member, rest []
 	return parent, nil, nil, nil
 }
 
-// setValue sets the string value at path, replacing an existing value in
-// place or inserting new members (creating intermediate sections) at the end
-// of the deepest existing object.
+// setValue sets the string value at path (see setRawValue).
 func setValue(text string, path []string, value string) (string, error) {
+	return setRawValue(text, path, q(value))
+}
+
+// setRawValue sets the value at path to raw (already-JSON text), replacing an
+// existing value in place or inserting new members (creating intermediate
+// sections) at the end of the deepest existing object.
+func setRawValue(text string, path []string, raw string) (string, error) {
 	parent, found, rest, err := walk(text, path)
 	if err != nil {
 		return "", err
 	}
 	if found != nil {
-		return text[:found.valueStart] + q(value) + text[found.valueEnd:], nil
+		return text[:found.valueStart] + raw + text[found.valueEnd:], nil
 	}
 	objectText := text[parent.open : parent.close+1]
 	multiline := strings.Contains(objectText, "\n")
@@ -249,7 +254,7 @@ func setValue(text string, path []string, value string) (string, error) {
 			indent = lineIndent(text, last.keyStart)
 			unit = indentUnit(lineIndent(text, parent.open), indent)
 		}
-		memberText := renderNested(rest, value, multiline, indent, unit)
+		memberText := renderNested(rest, raw, multiline, indent, unit)
 		// Respect an existing trailing comma; otherwise add the separator.
 		afterLast := skipTrivia(text, last.valueEnd)
 		hasTrailingComma := afterLast < len(text) && text[afterLast] == ','
@@ -274,7 +279,7 @@ func setValue(text string, path []string, value string) (string, error) {
 		indent = lineIndent(text, parent.open)
 		unit = "  "
 	}
-	memberText := renderNested(rest, value, grow, indent+unit, unit)
+	memberText := renderNested(rest, raw, grow, indent+unit, unit)
 	replacement := "{" + memberText + "}"
 	if grow {
 		replacement = "{\n" + indent + unit + memberText + "\n" + indent + "}"
@@ -340,6 +345,25 @@ func removeKey(text string, path []string) (string, bool, error) {
 	return out, true, nil
 }
 
+// platformKeyOrder is the declaration order of dependencies.platform's keys in
+// the config text, which decoding into a map cannot preserve. Nil when the
+// section is absent or not an object.
+func platformKeyOrder(text string) []string {
+	_, found, _, err := walk(text, []string{"dependencies", PlatformConfiguration})
+	if err != nil || found == nil || text[found.valueStart] != '{' {
+		return nil
+	}
+	object, err := parseObject(text, found.valueStart)
+	if err != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(object.members))
+	for _, m := range object.members {
+		keys = append(keys, m.key)
+	}
+	return keys
+}
+
 // SetStringField sets a top-level string field in the JSONC config text,
 // preserving comments and formatting (only the value's span changes).
 func SetStringField(text []byte, key, value string) ([]byte, error) {
@@ -347,11 +371,47 @@ func SetStringField(text []byte, key, value string) ([]byte, error) {
 	return []byte(out), err
 }
 
-// SetDependency inserts or overwrites dependencies.<configuration>.<key> in
-// the JSONC config text, preserving comments. Port of addDependencyToJsonc.
+// SetDependency inserts or overwrites the version of
+// dependencies.<configuration>.<key> in the JSONC config text, preserving
+// comments. An entry written in the object form keeps its other fields: only
+// its "version" member changes. Port of addDependencyToJsonc.
 func SetDependency(text []byte, configuration, key, version string) ([]byte, error) {
-	out, err := setValue(string(text), []string{"dependencies", configuration, key}, version)
+	path := []string{"dependencies", configuration, key}
+	if _, found, _, err := walk(string(text), path); err == nil && found != nil && string(text)[found.valueStart] == '{' {
+		path = append(path, "version")
+	}
+	out, err := setValue(string(text), path, version)
 	return []byte(out), err
+}
+
+// SetDependencyEntry inserts or overwrites dependencies.<configuration>.<key>
+// with a whole entry: the string shorthand when only a version is set, else
+// the one-line object form.
+func SetDependencyEntry(text []byte, configuration, key string, dep Dependency) ([]byte, error) {
+	out, err := setRawValue(string(text), []string{"dependencies", configuration, key}, renderDependency(dep))
+	return []byte(out), err
+}
+
+// renderDependency is the JSONC text of one entry, in cappu's house style.
+func renderDependency(dep Dependency) string {
+	if dep.Classifier == "" && len(dep.Exclude) == 0 {
+		return q(dep.Version)
+	}
+	var members []string
+	if dep.Version != "" {
+		members = append(members, q("version")+": "+q(dep.Version))
+	}
+	if dep.Classifier != "" {
+		members = append(members, q("classifier")+": "+q(dep.Classifier))
+	}
+	if len(dep.Exclude) > 0 {
+		quoted := make([]string, len(dep.Exclude))
+		for i, e := range dep.Exclude {
+			quoted[i] = q(e)
+		}
+		members = append(members, q("exclude")+": ["+strings.Join(quoted, ", ")+"]")
+	}
+	return "{ " + strings.Join(members, ", ") + " }"
 }
 
 // HasDependency reports whether dependencies.<configuration>.<key> exists.

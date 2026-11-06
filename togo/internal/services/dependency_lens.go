@@ -10,7 +10,9 @@ import (
 	"strings"
 )
 
-// DependencyEntry is one `"group:artifact": "version"` line.
+// DependencyEntry is one `"group:artifact": "version"` line, or the one-line
+// object form `"group:artifact": { "version": "...", ... }` (Version is ""
+// when the object has none: a platform manages it).
 type DependencyEntry struct {
 	GroupID    string
 	ArtifactID string
@@ -20,7 +22,10 @@ type DependencyEntry struct {
 	EndChar    int
 }
 
-var dependencyEntryRE = regexp.MustCompile(`^(\s*)("([^"\s:]+:[^"\s:]+)"\s*:\s*"([^"]*)")`)
+var (
+	dependencyEntryRE = regexp.MustCompile(`^(\s*)("([^"\s:]+:[^"\s:]+)"\s*:\s*(?:"([^"]*)"|(\{[^}]*\})))`)
+	objectVersionRE   = regexp.MustCompile(`"version"\s*:\s*"([^"]*)"`)
+)
 
 // FindDependencyEntries parses the dependency lines of a cappu.json text.
 func FindDependencyEntries(text string) []DependencyEntry {
@@ -38,10 +43,16 @@ func FindDependencyEntries(text string) []DependencyEntry {
 		if len(coords) > 1 {
 			artifactID = coords[1]
 		}
+		version := match[4]
+		if object := match[5]; object != "" {
+			if v := objectVersionRE.FindStringSubmatch(object); v != nil {
+				version = v[1]
+			}
+		}
 		entries = append(entries, DependencyEntry{
 			GroupID:    groupID,
 			ArtifactID: artifactID,
-			Version:    match[4],
+			Version:    version,
 			Line:       line,
 			StartChar:  len(match[1]),
 			EndChar:    len(match[1]) + len(match[2]),
@@ -61,10 +72,14 @@ type DependencyLens struct {
 }
 
 // DependencyLenses returns a lens per dependency whose newest published version
-// differs from the entry.
+// differs from the entry. An entry written as "" takes its version from a
+// platform and gets no lens of its own.
 func DependencyLenses(text string, lookup LatestVersionLookup) []DependencyLens {
 	var lenses []DependencyLens
 	for _, entry := range FindDependencyEntries(text) {
+		if entry.Version == "" {
+			continue
+		}
 		latest, ok := lookup(entry.GroupID, entry.ArtifactID)
 		if ok && latest != entry.Version {
 			lenses = append(lenses, DependencyLens{Entry: entry, Title: "newer version: " + latest})

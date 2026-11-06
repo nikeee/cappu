@@ -39,8 +39,12 @@ Consider this project as an exploration or proof-of-concept that Java can have b
 cappu init
 
 # install some dependency and add it to cappu.json
-# cappu add <configuration> <group:artifact:@version]>
+# cappu add <configuration> <group:artifact[:version]>
 cappu add implementation com.google.code.gson:gson:2.14.0
+
+# use a BOM: add it as a platform, then add managed dependencies without a version
+cappu add platform org.springframework.boot:spring-boot-dependencies:4.1.0
+cappu add implementation org.springframework.boot:spring-boot-starter-web
 
 # install dependencies from the lockfile (similar to npm ci)
 cappu install

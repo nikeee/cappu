@@ -31,8 +31,8 @@ func treeSource() *packages.InMemoryPackageSource {
 }
 
 func TestBuildForestNestsTransitiveUnderRequester(t *testing.T) {
-	res, err := packages.ResolveTransitive([]packages.Coordinates{treeCoord("org.x:app:1.0")},
-		[]packages.PackageSource{treeSource()}, nil)
+	res, err := packages.ResolveTransitive([]packages.DependencyDeclaration{{Coordinates: treeCoord("org.x:app:1.0")}},
+		[]packages.PackageSource{treeSource()}, packages.ResolveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,19 +45,19 @@ func TestBuildForestNestsTransitiveUnderRequester(t *testing.T) {
 			{Coordinate: "org.y:util:3.0", Dependencies: []treeNode{}},
 		},
 	}}
-	if got := buildForest(res); !reflect.DeepEqual(got, want) {
+	if got := buildForest(res, nil); !reflect.DeepEqual(got, want) {
 		t.Errorf("buildForest = %+v", got)
 	}
 }
 
 func TestBuildForestMarksUnresolvedRoot(t *testing.T) {
-	res, err := packages.ResolveTransitive([]packages.Coordinates{treeCoord("org.z:missing:9.9")},
-		[]packages.PackageSource{treeSource()}, nil)
+	res, err := packages.ResolveTransitive([]packages.DependencyDeclaration{{Coordinates: treeCoord("org.z:missing:9.9")}},
+		[]packages.PackageSource{treeSource()}, packages.ResolveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []treeNode{{Coordinate: "org.z:missing:9.9", Dependencies: []treeNode{}, Unresolved: true}}
-	if got := buildForest(res); !reflect.DeepEqual(got, want) {
+	if got := buildForest(res, nil); !reflect.DeepEqual(got, want) {
 		t.Errorf("buildForest = %+v", got)
 	}
 }
@@ -88,6 +88,17 @@ func TestFormatTreeRendersIndentedSections(t *testing.T) {
 func TestFormatTreeNothingDeclared(t *testing.T) {
 	got := FormatTree([]treeSection{{Configuration: "api", Tree: []treeNode{}}}, plainPaint)
 	if got != "no dependencies declared\n" {
+		t.Errorf("FormatTree = %q", got)
+	}
+}
+
+func TestFormatTreeMarksManaged(t *testing.T) {
+	sections := []treeSection{{Configuration: "implementation", Tree: []treeNode{{
+		Coordinate: "org.x:app:1.0", Managed: true,
+		Dependencies: []treeNode{{Coordinate: "org.x:lib:2.0", Dependencies: []treeNode{}, Managed: true}},
+	}}}}
+	want := "implementation\n└── org.x:app:1.0 (managed)\n    └── org.x:lib:2.0 (managed)\n"
+	if got := FormatTree(sections, plainPaint); got != want {
 		t.Errorf("FormatTree = %q", got)
 	}
 }

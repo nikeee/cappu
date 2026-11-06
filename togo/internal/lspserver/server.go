@@ -29,13 +29,13 @@ type Server struct {
 	checker *compiler.Checker
 	config  *config.Config
 
-	features         services.LanguageFeatures // language-level features of the target release, set once
-	docs             map[compiler.URI]string   // open document text (java + cappu.json)
-	roots            []string                  // workspace root URIs (re-scanned on rebuild)
-	inlayHints       services.InlayHintsSettings
-	packageSourceURL []string
-	packageSources   []packages.PackageSource
-	latestCache      map[string]latestEntry
+	features             services.LanguageFeatures // language-level features of the target release, set once
+	docs                 map[compiler.URI]string   // open document text (java + cappu.json)
+	roots                []string                  // workspace root URIs (re-scanned on rebuild)
+	inlayHints           services.InlayHintsSettings
+	packageSourceEntries []config.PackageSource
+	packageSources       []packages.PackageSource
+	latestCache          map[string]latestEntry
 
 	initialized      bool // initialize request seen
 	shutdownReceived bool // shutdown request seen (exit code contract)
@@ -76,17 +76,17 @@ func NewServer(cfg *config.Config) *Server {
 	program := compiler.NewProgram()
 	compiler.InstallJdkTypes(program, cfg)
 	s := &Server{
-		program:          program,
-		checker:          compiler.NewChecker(program, nullnessConfig(cfg)),
-		config:           cfg,
-		features:         services.NewLanguageFeatures(releaseOf(cfg)),
-		docs:             map[compiler.URI]string{},
-		inlayHints:       services.DefaultInlayHints,
-		packageSourceURL: config.DefaultPackageSources,
-		latestCache:      map[string]latestEntry{},
+		program:              program,
+		checker:              compiler.NewChecker(program, nullnessConfig(cfg)),
+		config:               cfg,
+		features:             services.NewLanguageFeatures(releaseOf(cfg)),
+		docs:                 map[compiler.URI]string{},
+		inlayHints:           services.DefaultInlayHints,
+		packageSourceEntries: config.DefaultSources(),
+		latestCache:          map[string]latestEntry{},
 	}
 	if cfg != nil {
-		s.packageSourceURL = cfg.PackageSources
+		s.packageSourceEntries = cfg.PackageSources
 		if h := cfg.LspOptions.InlayHints; h != nil {
 			s.inlayHints = services.InlayHintsSettings{ParameterNames: *h.ParameterNames, VarTypes: *h.VarTypes}
 		}
@@ -328,7 +328,7 @@ func (s *Server) fileWatchers() []map[string]any {
 		return watchers
 	}
 	watchers = append(watchers, map[string]any{"globPattern": "**/" + filepath.Base(s.config.ConfigPath)})
-	for _, p := range s.config.CompilerOptions.ClassPath {
+	for _, p := range s.config.CompileClassPath() {
 		entry := filepath.ToSlash(s.config.ResolvePath(p))
 		if strings.HasSuffix(entry, ".jar") {
 			watchers = append(watchers, map[string]any{"globPattern": entry})
@@ -385,7 +385,7 @@ func (s *Server) reloadConfig() bool {
 		return false
 	}
 	s.config = next
-	s.packageSourceURL = next.PackageSources
+	s.packageSourceEntries = next.PackageSources
 	s.packageSources = nil
 	s.latestCache = map[string]latestEntry{}
 	s.inlayHints = services.DefaultInlayHints

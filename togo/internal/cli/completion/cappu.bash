@@ -54,7 +54,8 @@ _cappu() {
     lsp|dap) flags="-p --port" ;;
     bsp) flags="--install" ;;
     rage) flags="--open" ;;
-    add|remove) first="api implementation annotationProcessor testImplementation" ;;
+    add) first="api implementation compileOnly runtimeOnly annotationProcessor testImplementation platform"; flags="--classifier --exclude" ;;
+    remove) first="api implementation compileOnly runtimeOnly annotationProcessor testImplementation platform" ;;
     version) first="major minor patch" ;;
     cache) first="clean verify" ;;
     completion) first="bash zsh" ;;

@@ -106,7 +106,7 @@ func missingConfiguredPaths(cfg *config.Config) []string {
 // loadConfiguredPaths in src/compiler/compiler.ts.
 func loadConfiguredSources(program *compiler.Program, cfg *config.Config) {
 	var classPaths []string
-	for _, p := range cfg.CompilerOptions.ClassPath {
+	for _, p := range cfg.CompileClassPath() {
 		classPaths = append(classPaths, cfg.ResolvePath(p))
 	}
 	compiler.LoadClassPath(program, classPaths)

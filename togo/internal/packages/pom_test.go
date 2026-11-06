@@ -351,3 +351,146 @@ func TestCyclicOrMissingParentChain(t *testing.T) {
 		t.Errorf("orphan: deps=%v incomplete=%v", orphan.Dependencies, incomplete2)
 	}
 }
+
+func TestParsePomTypeClassifierExclusions(t *testing.T) {
+	pom := `<project>
+    <groupId>org.example</groupId><artifactId>app</artifactId><version>1.0</version>
+    <properties><native.classifier>linux-x86_64</native.classifier></properties>
+    <dependencies>
+      <dependency><groupId>org.bom</groupId><artifactId>deps</artifactId><version>1</version><type>pom</type></dependency>
+      <dependency><groupId>org.t</groupId><artifactId>t</artifactId><version>1</version><type>test-jar</type></dependency>
+      <dependency><groupId>io.netty</groupId><artifactId>epoll</artifactId><version>4</version><classifier>${native.classifier}</classifier></dependency>
+      <dependency><groupId>io.netty</groupId><artifactId>tcnative</artifactId><version>2</version><classifier>${os.detected.classifier}</classifier></dependency>
+      <dependency><groupId>org.x</groupId><artifactId>x</artifactId><version>1</version>
+        <exclusions>
+          <exclusion><groupId>commons-logging</groupId><artifactId>commons-logging</artifactId></exclusion>
+          <exclusion><groupId>org.slf4j</groupId></exclusion><!-- a missing side matches nothing: dropped -->
+        </exclusions>
+      </dependency>
+    </dependencies>
+  </project>`
+	meta, incomplete := ParsePom(pom, coordsAppV1)
+	if incomplete {
+		t.Error("nothing should have been dropped")
+	}
+	want := []DependencyDeclaration{
+		{Coordinates: pomOnly("org.bom:deps:1")},
+		{Coordinates: coord("org.t:t:1").WithClassifier("tests")},
+		{Coordinates: coord("io.netty:epoll:4").WithClassifier("linux-x86_64")},
+		// an unresolvable classifier property falls back to the plain jar
+		{Coordinates: coord("io.netty:tcnative:2")},
+		{Coordinates: coord("org.x:x:1"), Exclusions: []string{"commons-logging:commons-logging"}},
+	}
+	if !reflect.DeepEqual(meta.Dependencies, want) {
+		t.Errorf("dependencies = %+v\nwant %+v", meta.Dependencies, want)
+	}
+}
+
+func pomOnly(spec string) Coordinates {
+	c := coord(spec)
+	c.Extension = "pom"
+	return c
+}
+
+func TestParsePomManagedScopeAndExclusions(t *testing.T) {
+	// <dependencyManagement> supplies what a dependency leaves unset (version,
+	// scope, exclusions), keyed by g:a:classifier so a test-jar entry does not
+	// clobber the plain one.
+	pom := `<project>
+    <groupId>org.example</groupId><artifactId>app</artifactId><version>1.0</version>
+    <dependencyManagement><dependencies>
+      <dependency><groupId>org.s</groupId><artifactId>core</artifactId><version>6</version>
+        <exclusions><exclusion><groupId>commons-logging</groupId><artifactId>commons-logging</artifactId></exclusion></exclusions>
+      </dependency>
+      <dependency><groupId>org.s</groupId><artifactId>core</artifactId><version>5</version><type>test-jar</type><scope>test</scope></dependency>
+      <dependency><groupId>org.o</groupId><artifactId>own</artifactId><version>1</version>
+        <exclusions><exclusion><groupId>a</groupId><artifactId>a</artifactId></exclusion></exclusions>
+      </dependency>
+    </dependencies></dependencyManagement>
+    <dependencies>
+      <dependency><groupId>org.s</groupId><artifactId>core</artifactId></dependency>
+      <dependency><groupId>org.s</groupId><artifactId>core</artifactId><type>test-jar</type></dependency>
+      <dependency><groupId>org.o</groupId><artifactId>own</artifactId>
+        <exclusions><exclusion><groupId>b</groupId><artifactId>b</artifactId></exclusion></exclusions>
+      </dependency>
+    </dependencies>
+  </project>`
+	meta, incomplete := ParsePom(pom, coordsAppV1)
+	if incomplete {
+		t.Error("every dependency is managed")
+	}
+	want := []DependencyDeclaration{
+		{Coordinates: coord("org.s:core:6"), Exclusions: []string{"commons-logging:commons-logging"}},
+		{Coordinates: coord("org.s:core:5").WithClassifier("tests"), Scope: "test"},
+		// own exclusions win over the managed ones (Maven merges only when unset)
+		{Coordinates: coord("org.o:own:1"), Exclusions: []string{"b:b"}},
+	}
+	if !reflect.DeepEqual(meta.Dependencies, want) {
+		t.Errorf("dependencies = %+v\nwant %+v", meta.Dependencies, want)
+	}
+}
+
+func TestGetManagedMergesChainAndImports(t *testing.T) {
+	poms := map[string]string{
+		"/org/x/parent/1/parent-1.pom": `<project>
+      <groupId>org.x</groupId><artifactId>parent</artifactId><version>1</version>
+      <properties><lib.version>1.5</lib.version></properties>
+      <dependencyManagement><dependencies>
+        <dependency><groupId>org.l</groupId><artifactId>lib</artifactId><version>${lib.version}</version></dependency>
+        <dependency><groupId>org.imp</groupId><artifactId>bom</artifactId><version>7</version><type>pom</type><scope>import</scope></dependency>
+      </dependencies></dependencyManagement>
+    </project>`,
+		"/org/x/bom/2/bom-2.pom": `<project>
+      <parent><groupId>org.x</groupId><artifactId>parent</artifactId><version>1</version></parent>
+      <artifactId>bom</artifactId>
+      <dependencyManagement><dependencies>
+        <dependency><groupId>org.l</groupId><artifactId>other</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>org.i</groupId><artifactId>x</artifactId><version>9</version></dependency>
+        <dependency><groupId>io.n</groupId><artifactId>n</artifactId><version>4</version><classifier>linux-x86_64</classifier></dependency>
+      </dependencies></dependencyManagement>
+    </project>`,
+		"/org/imp/bom/7/bom-7.pom": `<project>
+      <groupId>org.imp</groupId><artifactId>bom</artifactId><version>7</version>
+      <dependencyManagement><dependencies>
+        <dependency><groupId>org.i</groupId><artifactId>x</artifactId><version>1</version></dependency>
+        <dependency><groupId>org.i</groupId><artifactId>y</artifactId><version>2</version></dependency>
+      </dependencies></dependencyManagement>
+    </project>`,
+	}
+	src := sourceWith(poms)
+	got, err := src.GetManaged(NewCoordinates("org.x", "bom", "2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[PackageKey]string{
+		"org.l:lib":           "1.5", // parent, property interpolated
+		"org.l:other":         "2",   // ${project.version} of the BOM itself
+		"org.i:x":             "9",   // the chain's own entry beats the import
+		"org.i:y":             "2",   // from the imported BOM
+		"io.n:n:linux-x86_64": "4",   // keyed like Coordinates.Key
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("managed = %v\nwant %v", got, want)
+	}
+	if unknown, err := src.GetManaged(NewCoordinates("org.x", "nope", "1")); err != nil || unknown != nil {
+		t.Errorf("unknown BOM = %v, %v; want nil", unknown, err)
+	}
+}
+
+func TestParsePomManagedLookupUsesInterpolatedClassifier(t *testing.T) {
+	pom := `<project>
+    <groupId>org.example</groupId><artifactId>app</artifactId><version>1.0</version>
+    <properties><native.classifier>linux-x86_64</native.classifier></properties>
+    <dependencyManagement><dependencies>
+      <dependency><groupId>io.netty</groupId><artifactId>epoll</artifactId><version>4</version><classifier>linux-x86_64</classifier></dependency>
+    </dependencies></dependencyManagement>
+    <dependencies>
+      <dependency><groupId>io.netty</groupId><artifactId>epoll</artifactId><classifier>${native.classifier}</classifier></dependency>
+    </dependencies>
+  </project>`
+	meta, incomplete := ParsePom(pom, coordsAppV1)
+	want := []DependencyDeclaration{{Coordinates: coord("io.netty:epoll:4").WithClassifier("linux-x86_64")}}
+	if incomplete || !reflect.DeepEqual(meta.Dependencies, want) {
+		t.Errorf("dependencies = %+v (incomplete %v), want %+v", meta.Dependencies, incomplete, want)
+	}
+}

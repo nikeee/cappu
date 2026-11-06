@@ -189,3 +189,45 @@ func TestNonObjectConfigErrors(t *testing.T) {
 		t.Errorf("err = %v, want the shared non-object error", err)
 	}
 }
+
+func TestSetDependencyEntryObjectForm(t *testing.T) {
+	out, err := SetDependencyEntry([]byte(multi), "implementation", "io.netty:epoll",
+		Dependency{Classifier: "linux-x86_64", Exclude: []string{"a:b", "c:*"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(multi,
+		`"org.slf4j:slf4j-api": "2.0.0"`,
+		"\"org.slf4j:slf4j-api\": \"2.0.0\",\n      \"io.netty:epoll\": { \"classifier\": \"linux-x86_64\", \"exclude\": [\"a:b\", \"c:*\"] }", 1)
+	if string(out) != want {
+		t.Errorf("object entry = %s, want %s", out, want)
+	}
+	// only a version: the string shorthand
+	plain, err := SetDependencyEntry([]byte(multi), "implementation", "g:a", Dependency{Version: "1.0"})
+	if err != nil || !strings.Contains(string(plain), `"g:a": "1.0"`) {
+		t.Errorf("plain entry = %s (err %v)", plain, err)
+	}
+}
+
+func TestSetDependencyKeepsObjectFields(t *testing.T) {
+	text := `{
+  "dependencies": {
+    "implementation": {
+      "org.x:y": { "version": "1.0", "exclude": ["a:b"] }
+    }
+  }
+}
+`
+	got := set(t, text, "implementation", "org.x:y", "1.1")
+	want := strings.Replace(text, `"version": "1.0"`, `"version": "1.1"`, 1)
+	if got != want {
+		t.Errorf("bump = %s, want %s", got, want)
+	}
+}
+
+func TestSetDependencyCreatesPlatformSection(t *testing.T) {
+	got := set(t, multi, "platform", "org.x:bom", "2.0")
+	if !strings.Contains(got, "\"platform\": {\n      \"org.x:bom\": \"2.0\"\n    }") {
+		t.Errorf("platform insert = %s", got)
+	}
+}

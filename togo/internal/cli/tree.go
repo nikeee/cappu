@@ -24,6 +24,8 @@ type treeNode struct {
 	Dependencies []treeNode `json:"dependencies"`
 	// Unresolved marks a declared dependency no source could provide.
 	Unresolved bool `json:"unresolved,omitempty"`
+	// Managed marks a version a platform decided.
+	Managed bool `json:"managed,omitempty"`
 }
 
 type treeSection struct {
@@ -35,31 +37,24 @@ type paintFunc = func(format, text string) string
 
 func plainPaint(_, text string) string { return text }
 
-// configRoots is the declared roots of one named configuration, as coordinates.
-func configRoots(cfg *config.Config, configuration string) []packages.Coordinates {
-	switch configuration {
-	case "api":
-		return sources.RootsOf(cfg.Dependencies.API)
-	case "implementation":
-		return sources.RootsOf(cfg.Dependencies.Implementation)
-	case "annotationProcessor":
-		return sources.RootsOf(cfg.Dependencies.AnnotationProcessor)
-	case "testImplementation":
-		return sources.RootsOf(cfg.Dependencies.TestImplementation)
-	}
-	return nil
+// configRoots is the declared roots of one named configuration.
+func configRoots(cfg *config.Config, configuration string) []packages.DependencyDeclaration {
+	return sources.RootsOf(cfg.Dependencies.Configuration(configuration))
 }
 
-// buildForest turns one configuration's resolution into a forest by following
-// each package's single RequestedBy parent. Nearest-wins dedup means every
-// package appears exactly once, so no shared-subtree markers are needed; the
-// cycle guard is belt-and-suspenders against a pathological RequestedBy loop.
-func buildForest(res packages.Resolution) []treeNode {
+// buildForest turns a resolution into a forest by following each package's
+// single RequestedBy parent, starting from the roots in rootKeys (nil: every
+// root). Nearest-wins dedup means every package appears exactly once, so no
+// shared-subtree markers are needed; the cycle guard is belt-and-suspenders
+// against a pathological RequestedBy loop.
+func buildForest(res packages.Resolution, rootKeys map[packages.PackageKey]bool) []treeNode {
 	childrenByParent := map[packages.PackageKey][]packages.ResolvedPackage{}
 	var roots []packages.ResolvedPackage
 	for _, p := range res.Packages {
 		if p.RequestedBy == (packages.Coordinates{}) {
-			roots = append(roots, p)
+			if rootKeys == nil || rootKeys[p.Coordinates.Key()] {
+				roots = append(roots, p)
+			}
 			continue
 		}
 		key := p.RequestedBy.Key()
@@ -70,7 +65,7 @@ func buildForest(res packages.Resolution) []treeNode {
 	var toNode func(p packages.ResolvedPackage) treeNode
 	toNode = func(p packages.ResolvedPackage) treeNode {
 		key := p.Coordinates.Key()
-		node := treeNode{Coordinate: string(p.Coordinates.String()), Dependencies: []treeNode{}}
+		node := treeNode{Coordinate: p.Coordinates.Label(), Dependencies: []treeNode{}, Managed: p.Managed}
 		if seen[key] {
 			return node
 		}
@@ -87,11 +82,20 @@ func buildForest(res packages.Resolution) []treeNode {
 	}
 	// Surface declared roots that nothing could resolve - otherwise they vanish.
 	for _, m := range res.Missing {
-		if m.RequestedBy == (packages.Coordinates{}) {
-			forest = append(forest, treeNode{Coordinate: string(m.Coordinates.String()), Dependencies: []treeNode{}, Unresolved: true})
+		if m.RequestedBy == (packages.Coordinates{}) && (rootKeys == nil || rootKeys[m.Coordinates.Key()]) {
+			forest = append(forest, treeNode{Coordinate: m.Coordinates.Label(), Dependencies: []treeNode{}, Unresolved: true})
 		}
 	}
 	return forest
+}
+
+// rootKeysOf is the key set of declared roots, for buildForest.
+func rootKeysOf(roots []packages.DependencyDeclaration) map[packages.PackageKey]bool {
+	keys := map[packages.PackageKey]bool{}
+	for _, r := range roots {
+		keys[r.Key()] = true
+	}
+	return keys
 }
 
 func renderNodes(nodes []treeNode, prefix string, paint paintFunc) []string {
@@ -101,6 +105,8 @@ func renderNodes(nodes []treeNode, prefix string, paint paintFunc) []string {
 		label := node.Coordinate
 		if node.Unresolved {
 			label = node.Coordinate + " " + paint("yellow", "(unresolved)")
+		} else if node.Managed {
+			label = node.Coordinate + " " + paint("dim", "(managed)")
 		}
 		branch, cont := "├── ", "│   "
 		if last {
@@ -140,17 +146,40 @@ func RunTree(cfg *config.Config, jsonOut bool) int {
 		}
 	}
 
+	srcs := sources.Configured(cfg)
+	managed, err := sources.ManagedVersions(cfg, srcs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
+		return 1
+	}
+	// The four classpath configurations are one graph (what install resolves,
+	// see sources.MainRoots), shown as one forest per configuration's roots;
+	// processors and tests are their own graphs.
+	resolveOpts := packages.ResolveOptions{Managed: managed, OnResolve: onResolve}
+	fail := func(err error) int {
+		if resolving > 0 {
+			fmt.Fprint(os.Stderr, "\r\x1b[2K")
+		}
+		fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
+		return 1
+	}
+	main, err := packages.ResolveTransitive(sources.MainRoots(cfg), srcs, resolveOpts)
+	if err != nil {
+		return fail(err)
+	}
 	sections := make([]treeSection, 0, len(config.Configurations))
 	for _, configuration := range config.Configurations {
-		res, err := packages.ResolveTransitive(configRoots(cfg, configuration), sources.Configured(cfg), onResolve)
-		if err != nil {
-			if resolving > 0 {
-				fmt.Fprint(os.Stderr, "\r\x1b[2K")
+		roots := configRoots(cfg, configuration)
+		switch configuration {
+		case "annotationProcessor", "testImplementation":
+			res, err := packages.ResolveTransitive(roots, srcs, resolveOpts)
+			if err != nil {
+				return fail(err)
 			}
-			fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
-			return 1
+			sections = append(sections, treeSection{Configuration: configuration, Tree: buildForest(res, nil)})
+		default:
+			sections = append(sections, treeSection{Configuration: configuration, Tree: buildForest(main, rootKeysOf(roots))})
 		}
-		sections = append(sections, treeSection{Configuration: configuration, Tree: buildForest(res)})
 	}
 	if resolving > 0 {
 		fmt.Fprint(os.Stderr, "\r\x1b[2K")

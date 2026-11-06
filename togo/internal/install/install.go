@@ -22,12 +22,13 @@ import (
 const downloadConcurrency = 6
 
 // Options tunes a run. OnProgress is called per materialized package; OnResolve
-// per package while resolving (no lockfile). UpdateLock forces a re-resolve and
+// per package while resolving (no lockfile); both name the package by its
+// display label (Coordinates.Label). UpdateLock forces a re-resolve and
 // lockfile rewrite (used by `cappu add`).
 type Options struct {
 	UpdateLock bool
-	OnProgress func(done, total int, current packages.CoordinateString)
-	OnResolve  func(current packages.CoordinateString)
+	OnProgress func(done, total int, current string)
+	OnResolve  func(current string)
 }
 
 // Result is the print-free outcome of installDependencies; the CLI renders it.
@@ -45,9 +46,11 @@ type Result struct {
 
 // Categories splits the written jar paths by configuration.
 type Categories struct {
-	Compile   []string
-	Processor []string
-	Test      []string
+	Compile     []string
+	CompileOnly []string
+	RuntimeOnly []string
+	Processor   []string
+	Test        []string
 }
 
 // pending is a package queued for download (sha256/licenses known when locked).
@@ -78,7 +81,8 @@ func CheckLocked(cfg *config.Config) (ok bool, reason string) {
 	lock := lockfile.Read(cfg)
 	if lock == nil {
 		d := cfg.Dependencies
-		if len(d.API) > 0 || len(d.Implementation) > 0 ||
+		if len(d.Platform) > 0 || len(d.API) > 0 || len(d.Implementation) > 0 ||
+			len(d.CompileOnly) > 0 || len(d.RuntimeOnly) > 0 ||
 			len(d.AnnotationProcessor) > 0 || len(d.TestImplementation) > 0 {
 			return false, "no cappu-lock.json found; run `cappu install` to create it"
 		}
@@ -106,26 +110,36 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 	lockStale := lock != nil && !lock.Matches(cfg)
 
 	var resolution packages.Resolution
-	var toInstall, processorInstall, testInstall []pending
+	var toInstall, compileOnlyInstall, runtimeOnlyInstall, processorInstall, testInstall []pending
 	if lock != nil {
 		toInstall = fromLocked(lock.Packages)
+		compileOnlyInstall = fromLocked(lock.CompileOnlyPackages)
+		runtimeOnlyInstall = fromLocked(lock.RuntimeOnlyPackages)
 		processorInstall = fromLocked(lock.ProcessorPackages)
 		testInstall = fromLocked(lock.TestPackages)
 	} else {
-		onResolve := func(c packages.Coordinates) {
+		managed, err := sources.ManagedVersions(cfg, srcs)
+		if err != nil {
+			return Result{}, err
+		}
+		resolveOpts := packages.ResolveOptions{Managed: managed, OnResolve: func(c packages.Coordinates) {
 			if opts.OnResolve != nil {
-				opts.OnResolve(c.String())
+				opts.OnResolve(c.Label())
 			}
-		}
-		main, err := packages.ResolveTransitive(sources.CompileRoots(cfg), srcs, onResolve)
+		}}
+		// api/implementation, compileOnly and runtimeOnly form ONE graph (like
+		// Maven's compile/provided/runtime scopes): nearest wins across them,
+		// then each package lands in the lib dir its scope says.
+		main, err := packages.ResolveTransitive(sources.MainRoots(cfg), srcs, resolveOpts)
 		if err != nil {
 			return Result{}, err
 		}
-		processors, err := resolveIfAny(sources.ProcessorRoots(cfg), srcs, onResolve)
+		classes, compileOnly, runtimeOnly := partitionScopes(main, sources.CompileRoots(cfg), sources.CompileOnlyRoots(cfg), sources.RuntimeOnlyRoots(cfg))
+		processors, err := resolveIfAny(sources.ProcessorRoots(cfg), srcs, resolveOpts)
 		if err != nil {
 			return Result{}, err
 		}
-		tests, err := resolveIfAny(sources.TestRoots(cfg), srcs, onResolve)
+		tests, err := resolveIfAny(sources.TestRoots(cfg), srcs, resolveOpts)
 		if err != nil {
 			return Result{}, err
 		}
@@ -134,13 +148,15 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 			Conflicts: concat(main.Conflicts, processors.Conflicts, tests.Conflicts),
 			Missing:   concat(main.Missing, processors.Missing, tests.Missing),
 		}
-		toInstall = fromResolved(main.Packages)
+		toInstall = fromResolved(classes)
+		compileOnlyInstall = fromResolved(compileOnly)
+		runtimeOnlyInstall = fromResolved(runtimeOnly)
 		processorInstall = fromResolved(processors.Packages)
 		testInstall = fromResolved(tests.Packages)
 	}
 
 	targetDir := cfg.ResolvePath(config.DefaultClassPath)
-	total := len(toInstall) + len(processorInstall) + len(testInstall)
+	total := len(toInstall) + len(compileOnlyInstall) + len(runtimeOnlyInstall) + len(processorInstall) + len(testInstall)
 
 	result := Result{TargetDir: targetDir, FromLock: fromLock, LockStale: lockStale}
 	progressed := 0
@@ -149,12 +165,12 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 	// state, so serialize them.
 	var progressMu sync.Mutex
 	fetchOne := func(pkg pending, dir string) outcome {
-		id := string(pkg.coordinates.String())
+		id := pkg.coordinates.Label()
 		bytes, cached, found, ferr := artifactFrom(srcs, pkg.source, pkg.coordinates)
 		progressMu.Lock()
 		progressed++
 		if opts.OnProgress != nil {
-			opts.OnProgress(progressed, total, pkg.coordinates.String())
+			opts.OnProgress(progressed, total, id)
 		}
 		progressMu.Unlock()
 		if ferr != nil {
@@ -164,7 +180,9 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 			return outcome{noArtifact: id}
 		}
 		digest := lockfile.Sha256Of(bytes)
-		if pkg.hasSha && pkg.sha256 != digest {
+		// A snapshot's bytes change by design: the lock records them but a
+		// locked install takes whatever the source serves now.
+		if pkg.hasSha && pkg.sha256 != digest && !pkg.coordinates.IsSnapshot() {
 			// A locked install must produce the locked bytes: do not write, and
 			// evict the bad copy from the store (store-first, so it would
 			// otherwise re-fail every install).
@@ -174,7 +192,7 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 			}
 			return outcome{integrity: id}
 		}
-		file := filepath.Join(dir, string(pkg.coordinates.ArtifactID)+"-"+string(pkg.coordinates.Version)+".jar")
+		file := filepath.Join(dir, pkg.coordinates.ArtifactJarName())
 		// CoW-clone/hardlink from the store instead of writing a second copy
 		// (nikeee/cappu#35); fall back to the in-hand bytes when the store entry
 		// is missing (read-only or full store).
@@ -227,6 +245,14 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 	if err != nil {
 		return Result{}, err
 	}
+	compileOnlyOut, err := materialize(compileOnlyInstall, cfg.ResolvePath(config.DefaultCompileOnlyPath))
+	if err != nil {
+		return Result{}, err
+	}
+	runtimeOnlyOut, err := materialize(runtimeOnlyInstall, cfg.ResolvePath(config.DefaultRuntimeOnlyPath))
+	if err != nil {
+		return Result{}, err
+	}
 	procOut, err := materialize(processorInstall, cfg.ResolvePath(config.DefaultProcessorPath))
 	if err != nil {
 		return Result{}, err
@@ -237,24 +263,29 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 	}
 
 	mainLocked := result.assemble(mainOut, &result.InstalledByCategory.Compile)
+	compileOnlyLocked := result.assemble(compileOnlyOut, &result.InstalledByCategory.CompileOnly)
+	runtimeOnlyLocked := result.assemble(runtimeOnlyOut, &result.InstalledByCategory.RuntimeOnly)
 	procLocked := result.assemble(procOut, &result.InstalledByCategory.Processor)
 	testLocked := result.assemble(testOut, &result.InstalledByCategory.Test)
 
 	// Sort each set by coordinate so the lock is deterministic regardless of
 	// install/download order, keeping diffs minimal across runs.
-	sortLocked(mainLocked)
-	sortLocked(procLocked)
-	sortLocked(testLocked)
+	for _, set := range [][]lockfile.LockedPackage{mainLocked, compileOnlyLocked, runtimeOnlyLocked, procLocked, testLocked} {
+		sortLocked(set)
+	}
 
 	// The lock pins what was VERIFIABLY materialized: written only when the
 	// whole set arrived and resolution was complete.
 	if !fromLock && cfg.FromFile && len(resolution.Missing) == 0 && len(result.NoArtifact) == 0 {
 		newLock := &lockfile.Lockfile{
-			Version:           2,
-			Roots:             cfg.Dependencies,
-			Packages:          mainLocked,
-			ProcessorPackages: procLocked,
-			TestPackages:      testLocked,
+			Version:             2,
+			Roots:               cfg.Dependencies,
+			PlatformOrder:       cfg.Dependencies.PlatformKeys(),
+			Packages:            mainLocked,
+			CompileOnlyPackages: compileOnlyLocked,
+			RuntimeOnlyPackages: runtimeOnlyLocked,
+			ProcessorPackages:   procLocked,
+			TestPackages:        testLocked,
 		}
 		if err := lockfile.Write(cfg, newLock); err != nil {
 			return Result{}, err
@@ -268,7 +299,7 @@ func Dependencies(cfg *config.Config, srcs []packages.PackageSource, opts Option
 // deterministic regardless of download order.
 func sortLocked(pkgs []lockfile.LockedPackage) {
 	slices.SortFunc(pkgs, func(a, b lockfile.LockedPackage) int {
-		return cmp.Compare(a.Coords().String(), b.Coords().String())
+		return cmp.Compare(a.Coords().Label(), b.Coords().Label())
 	})
 }
 
@@ -303,6 +334,11 @@ func (r *Result) assemble(outcomes []outcome, groupInstalled *[]string) []lockfi
 // propagates) instead of being misreported as "source provided no jar".
 func artifactFrom(srcs []packages.PackageSource, preferred packages.SourceName, c packages.Coordinates) (bytes []byte, cached bool, found bool, err error) {
 	storePath, storeOK := StorePathFor(c)
+	// A SNAPSHOT is mutable by definition (a local `mvn install` rewrites it):
+	// never serve or keep it from the store, always go to the source.
+	if c.IsSnapshot() {
+		storeOK = false
+	}
 	if storeOK {
 		if data, rerr := os.ReadFile(storePath); rerr == nil {
 			return data, true, true, nil
@@ -344,16 +380,86 @@ func orderPreferred(srcs []packages.PackageSource, preferred packages.SourceName
 	return ordered
 }
 
-func resolveIfAny(roots []packages.Coordinates, srcs []packages.PackageSource, onResolve func(packages.Coordinates)) (packages.Resolution, error) {
+func resolveIfAny(roots []packages.DependencyDeclaration, srcs []packages.PackageSource, opts packages.ResolveOptions) (packages.Resolution, error) {
 	if len(roots) == 0 {
 		return packages.Resolution{}, nil
 	}
-	return packages.ResolveTransitive(roots, srcs, onResolve)
+	return packages.ResolveTransitive(roots, srcs, opts)
+}
+
+// partitionScopes splits one resolved graph into what goes to lib/classes,
+// lib/compile-only and lib/runtime-only, Maven style: a package declared as a
+// compileOnly or runtimeOnly root keeps that scope even when the compile graph
+// reaches it too (the nearest declaration decides), and everything reachable
+// from the compile roots without passing through such a root is a compile
+// package. The rest is compile-only and/or runtime-only by which roots reach
+// it; a package both reach (and the compile graph does not) goes to both dirs.
+func partitionScopes(res packages.Resolution, compileRoots, compileOnlyRoots, runtimeOnlyRoots []packages.DependencyDeclaration) (classes, compileOnly, runtimeOnly []packages.ResolvedPackage) {
+	keysOf := func(roots []packages.DependencyDeclaration) []packages.PackageKey {
+		keys := make([]packages.PackageKey, 0, len(roots))
+		for _, r := range roots {
+			keys = append(keys, r.Key())
+		}
+		return keys
+	}
+	children := map[packages.PackageKey][]packages.PackageKey{}
+	for _, p := range res.Packages {
+		for _, parent := range append([]packages.Coordinates{p.RequestedBy}, p.AlsoRequestedBy...) {
+			if parent != (packages.Coordinates{}) {
+				children[parent.Key()] = append(children[parent.Key()], p.Coordinates.Key())
+			}
+		}
+	}
+	reach := func(from []packages.PackageKey, stop map[packages.PackageKey]bool) map[packages.PackageKey]bool {
+		seen := map[packages.PackageKey]bool{}
+		queue := slices.Clone(from)
+		for len(queue) > 0 {
+			key := queue[0]
+			queue = queue[1:]
+			if seen[key] || stop[key] {
+				continue
+			}
+			seen[key] = true
+			queue = append(queue, children[key]...)
+		}
+		return seen
+	}
+	scopedRoots := map[packages.PackageKey]bool{}
+	compileKeys := map[packages.PackageKey]bool{}
+	for _, k := range keysOf(compileRoots) {
+		compileKeys[k] = true
+	}
+	for _, k := range concat(keysOf(compileOnlyRoots), keysOf(runtimeOnlyRoots)) {
+		if !compileKeys[k] { // declared under a compile configuration too: that wins
+			scopedRoots[k] = true
+		}
+	}
+	inClasses := reach(keysOf(compileRoots), scopedRoots)
+	inCompileOnly := reach(keysOf(compileOnlyRoots), nil)
+	inRuntimeOnly := reach(keysOf(runtimeOnlyRoots), nil)
+	for _, p := range res.Packages {
+		key := p.Coordinates.Key()
+		switch {
+		case inClasses[key]:
+			classes = append(classes, p)
+		default:
+			if inCompileOnly[key] {
+				compileOnly = append(compileOnly, p)
+			}
+			if inRuntimeOnly[key] {
+				runtimeOnly = append(runtimeOnly, p)
+			}
+		}
+	}
+	return classes, compileOnly, runtimeOnly
 }
 
 func fromResolved(pkgs []packages.ResolvedPackage) []pending {
 	out := make([]pending, 0, len(pkgs))
 	for _, p := range pkgs {
+		if p.Coordinates.PomOnly() {
+			continue // nothing to download or lock; its dependencies are in pkgs
+		}
 		out = append(out, pending{coordinates: p.Coordinates, source: p.Source, licenses: p.Metadata.Licenses})
 	}
 	return out

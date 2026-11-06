@@ -19,6 +19,9 @@ type fakeMetaSource struct {
 	pom       []byte
 	vCalls    int
 	metaCalls int
+	// managed is what GetManaged serves; managedCalls counts the fetches.
+	managed      map[packages.PackageKey]string
+	managedCalls int
 }
 
 func (s *fakeMetaSource) Name() packages.SourceName                   { return packages.SourceName(s.name) }
@@ -33,6 +36,10 @@ func (s *fakeMetaSource) GetMetadata(packages.Coordinates) (*packages.PackageMet
 }
 func (s *fakeMetaSource) GetArtifact(packages.Coordinates) ([]byte, error) { return nil, nil }
 func (s *fakeMetaSource) GetPom(packages.Coordinates) ([]byte, error)      { return s.pom, nil }
+func (s *fakeMetaSource) GetManaged(packages.Coordinates) (map[packages.PackageKey]string, error) {
+	s.managedCalls++
+	return s.managed, nil
+}
 
 func TestMetadataCacheListVersionsTTL(t *testing.T) {
 	t.Setenv("CAPPU_PACKAGE_STORE", filepath.Join(t.TempDir(), "store"))
@@ -88,5 +95,21 @@ func TestMetadataCachePersistsPomAndHash(t *testing.T) {
 	sum := sha256.Sum256(inner.pom)
 	if want := hex.EncodeToString(sum[:]); e.PomSha256 != want {
 		t.Errorf("pomSha256 = %q, want %q", e.PomSha256, want)
+	}
+}
+
+func TestMetadataCacheCachesManaged(t *testing.T) {
+	t.Setenv("CAPPU_PACKAGE_STORE", filepath.Join(t.TempDir(), "store"))
+	inner := &fakeMetaSource{name: "https://repo.test/m2", managed: map[packages.PackageKey]string{"g:a": "1"}}
+	src := WithMetadataCache(inner)
+	c := packages.NewCoordinates("org.x", "bom", "1")
+	for i := 0; i < 2; i++ {
+		got, err := src.GetManaged(c)
+		if err != nil || got["g:a"] != "1" {
+			t.Fatalf("managed = %v, %v", got, err)
+		}
+	}
+	if inner.managedCalls != 1 {
+		t.Errorf("GetManaged fetched %d times, want 1 (second from cache)", inner.managedCalls)
 	}
 }

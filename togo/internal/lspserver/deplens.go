@@ -6,13 +6,16 @@ package lspserver
 // Port of the dependency-lens half of src/services/server.ts.
 
 import (
+	"os"
 	"strconv"
 	"time"
 
 	"github.com/nikeee/cappu/internal/compiler"
+	"github.com/nikeee/cappu/internal/config"
 	"github.com/nikeee/cappu/internal/lsp"
 	"github.com/nikeee/cappu/internal/packages"
 	"github.com/nikeee/cappu/internal/services"
+	"github.com/nikeee/cappu/internal/sources"
 )
 
 func itoa(n int) string { return strconv.Itoa(n) }
@@ -23,9 +26,11 @@ func (s *Server) cachedLatestVersion(groupID, artifactID string) (string, bool) 
 		return cached.value, cached.ok
 	}
 	if s.packageSources == nil {
-		for _, url := range s.packageSourceURL {
-			s.packageSources = append(s.packageSources, packages.NewMavenRepositorySource(url, ""))
+		cfg := s.config
+		if cfg == nil {
+			cfg = &config.Config{BaseDir: "."}
 		}
+		s.packageSources = sources.FromEntries(cfg, s.packageSourceEntries, false, os.Getenv)
 	}
 	value, err := packages.LatestVersion(groupID, artifactID, s.packageSources)
 	entry := latestEntry{value: value, ok: err == nil && value != "", at: time.Now()}

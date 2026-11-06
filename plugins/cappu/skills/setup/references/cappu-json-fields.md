@@ -13,9 +13,9 @@ Unknown keys are ignored silently, so a typo does nothing rather than fail.
 | `version` | string | unset | strict semver `MAJOR.MINOR.PATCH[-prerelease]`. `cappu version major|minor|patch` bumps it |
 | `license` | string | unset | valid SPDX expression, otherwise config loading fails |
 | `jdk` | string | unset | `temurin-<n>` or `corretto-<n>`; provisioned by `cappu install`, used for compile, run and test; beats `compilerOptions.javac` |
-| `packageSources` | string[] | `https://maven-central-eu.storage-download.googleapis.com/maven2` (Central mirror), Maven Central, `https://maven.google.com`, `https://plugins.gradle.org/m2` | anonymous URLs only, no auth; the mirror is first because Central rate-limits |
+| `packageSources` | (string \| `{ "url": string, "auth"?: string }`)[] | `https://maven-central-eu.storage-download.googleapis.com/maven2` (Central mirror), Maven Central, `https://maven.google.com`, `https://plugins.gradle.org/m2` | lookup order; `auth` is the NAME in `CAPPU_SOURCE_NAME_USERNAME`/`_PASSWORD` or `CAPPU_SOURCE_NAME_TOKEN` (upper case, digits, `_`); a `file://` URL or a path (`~/.m2/repository`, relative to cappu.json) is a local repository; the mirror is first because Central rate-limits |
 | `publishRepository` | URL | unset | falls back to Maven Central; `--repo` and `CAPPU_PUBLISH_REGISTRY` override it |
-| `dependencies` | object | `{}` | four maps, see below |
+| `dependencies` | object | `{}` | six configuration maps plus `platform`, see below |
 | `compilerOptions` | object | `{}` | |
 | `testOptions` | object | `{}` | |
 | `formatterOptions` | object | `{}` | |
@@ -25,14 +25,25 @@ Unknown keys are ignored silently, so a typo does nothing rather than fail.
 
 ## dependencies
 
-Each configuration is a map `"group:artifact": "version"`.
+Each configuration is a map `"group:artifact": entry`, where entry is the
+version string, `""` for a version a platform manages, or an object
+`{ "version"?: string, "classifier"?: string, "exclude"?: string[] }` (omit
+`version` for a managed entry; `exclude` patterns are `group:artifact`, either
+side may be `*`). `dependencies.platform` is a map `"group:artifact": "version"`
+of BOMs: their `dependencyManagement` supplies the managed versions and
+overrides transitive versions; when two platforms manage the same artifact the
+first declared wins (file order; reordering re-resolves). A `""` entry with no platform at all is a config
+error; one no platform manages fails at resolve time.
 
 | Configuration | Installed to | Compile classpath | Meaning |
 |---|---|---|---|
 | `api` | `.cappu/lib/classes` | yes | like `implementation`, but the type is part of your public API; published with Maven `compile` scope |
-| `implementation` | `.cappu/lib/classes` | yes | normal compile and runtime dependency; Maven `compile`, `provided`, `runtime` and `optional` all map here; published with Maven `runtime` scope |
+| `implementation` | `.cappu/lib/classes` | yes | normal compile and runtime dependency; Maven `compile` and `optional` map here; published with Maven `runtime` scope |
+| `compileOnly` | `.cappu/lib/compile-only` | yes, compile only | Maven `provided`: on javac's classpath, never in a fat jar, `run` or a debuggee; published with Maven `provided` scope |
+| `runtimeOnly` | `.cappu/lib/runtime-only` | no, runtime (fat jar, `run`, tests, debuggee) only | Maven `runtime`: drivers, logging backends; published with Maven `runtime` scope |
 | `annotationProcessor` | `.cappu/lib/processors` | no, processor path only | the processor artifact itself; not published in the POM |
 | `testImplementation` | `.cappu/lib/test-classes` | tests only | JUnit, Mockito, ...; published with Maven `test` scope |
+| `platform` | nothing (metadata only) | no | BOMs; published as `<type>pom</type><scope>import</scope>` entries of `<dependencyManagement>` |
 
 ## compilerOptions
 
@@ -106,5 +117,6 @@ Go build only; the Node build ignores this section.
 | `CAPPU_PACKAGE_STORE` | global jar cache directory (default under `~/.cache/cappu`) |
 | `CAPPU_JDK_STORE` | global directory for provisioned JDKs |
 | `CAPPU_PUBLISH_REGISTRY`, `CAPPU_PUBLISH_USERNAME`, `CAPPU_PUBLISH_PASSWORD`, `CAPPU_PUBLISH_TOKEN` | `publish` target and credentials; see the `ci-release` skill |
+| `CAPPU_SOURCE_<NAME>_USERNAME` + `CAPPU_SOURCE_<NAME>_PASSWORD`, or `CAPPU_SOURCE_<NAME>_TOKEN` | credentials of the `packageSources` entry whose `auth` is `NAME` |
 | `CLAUDECODE`, `AGENT`, `AI_AGENT`, `CURSOR_AGENT`, `GEMINI_CLI`, `AUGMENT_AGENT`, `CLINE_ACTIVE`, `OPENCODE_CLIENT`, `TRAE_AI_SHELL_ID`, `CODEX_SANDBOX` | any non-empty value switches on agent mode (JSON or SARIF output, no colour) |
 | `GITHUB_ACTIONS`, `FORGEJO_ACTIONS`, `GITEA_ACTIONS` | `true` makes diagnostics also print `::error file=...,line=...::msg` annotations |

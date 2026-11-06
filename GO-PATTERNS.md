@@ -758,3 +758,48 @@ So `togo/internal/mcp/files.go` carries a copy of both helpers with a comment
 pointing at the original. Keep the copies in step when the CLI's change (the
 error wording is asserted by both MCP test suites), or move the pair into a
 small package below both once a third consumer appears.
+
+## String-or-object JSON values (config.Dependency) and ordered keys
+
+A cappu.json dependency entry is either the `"g:a": "version"` shorthand or an
+object (`{ "version", "classifier", "exclude" }`). Go has no union type, so
+`config.Dependency` carries both through custom marshalers:
+
+- `UnmarshalJSON` peeks at the first byte: `"` decodes into `Version`, anything
+  else decodes the object into `type plain Dependency` - a method-less alias of
+  the same struct, so `json.Unmarshal` does not recurse into our own method.
+- `MarshalJSON` writes the shorthand back when only `Version` is set, so a
+  round trip (cappu-lock.json `roots`, `cappu add`) leaves plain entries plain.
+- easyjson honours `json.Marshaler`/`json.Unmarshaler` on map values: the
+  generated lockfile code delegates with `in.Raw()` + `(v).UnmarshalJSON(data)`
+  and `out.Raw(v.MarshalJSON())`, so regenerating after the type change is all
+  that is needed (no hand edits, `go run github.com/mailru/easyjson/easyjson`
+  from the package dir works without installing the tool).
+- The JSON Schema expresses the union as `additionalProperties: {"$ref":
+  "#/$defs/dependency"}` with a `oneOf` of string and object; the drift test
+  walks `$defs` like any other `properties`, so the object's fields still have
+  to match the struct's json tags.
+- Editing: `SetDependencyEntry` renders the object form on one line in house
+  style; `SetDependency` (a version bump) checks whether the existing value
+  starts with `{` and then targets the nested `version` member, so an object
+  entry keeps its other fields. Reuse `setRawValue` when another member needs
+  non-string JSON.
+
+`config.PackageSource` (`"url"` string or `{ "url", "auth" }`) follows the same
+shape; reuse it for any further "shorthand or object" field rather than
+inventing a third encoding. Credentials never live in cappu.json: an `auth`
+name selects env vars (`CAPPU_SOURCE_<NAME>_*`), resolved through
+`httpx.ResolveAuth`, the one `Auth` type `cappu publish` and the package
+sources share. A source whose credentials are missing is still constructed
+(`packages.NewUnavailableSource`) so the failure surfaces when - and only
+when - that repository is actually consulted, naming the variables.
+
+A Go map also forgets key order, which matters where precedence is declaration
+order (`dependencies.platform`: the first declared BOM wins, like Maven's first
+import). `config.Load` recovers it with the JSONC walker already in
+`edit.go` (`walk` + `parseObject`) into a `json:"-"` field
+(`Dependencies.PlatformOrder`), `PlatformKeys()` merges it with any keys added
+programmatically (sorted, lowest precedence), and the lockfile pins the order
+in its own `platformOrder` field so a reorder is a stale lock. Do not put the
+order into the roots struct itself: a `json:"-"` field is invisible to the
+schema drift test and to easyjson, which is the point.

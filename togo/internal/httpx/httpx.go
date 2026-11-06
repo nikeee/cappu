@@ -13,6 +13,7 @@ package httpx
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"math/rand"
@@ -23,6 +24,39 @@ import (
 	"strings"
 	"time"
 )
+
+// BearerToken is a bearer credential, distinct from a plain string.
+type BearerToken string
+
+// Auth is a registry credential: Basic (username+password) or Bearer (token).
+// Shared by `cappu publish` (CAPPU_PUBLISH_*) and authenticated package
+// sources (CAPPU_SOURCE_<NAME>_*).
+type Auth struct {
+	Basic    bool
+	Username string
+	Password string
+	Token    BearerToken
+}
+
+// ResolveAuth reads credentials from env values: Basic when a username+password
+// pair is set, else Bearer from a token, else ok=false.
+func ResolveAuth(username, password, token string) (Auth, bool) {
+	if username != "" && password != "" {
+		return Auth{Basic: true, Username: username, Password: password}, true
+	}
+	if token != "" {
+		return Auth{Token: BearerToken(token)}, true
+	}
+	return Auth{}, false
+}
+
+// Header is the Authorization header value.
+func (a Auth) Header() string {
+	if a.Basic {
+		return "Basic " + base64.StdEncoding.EncodeToString([]byte(a.Username+":"+a.Password))
+	}
+	return "Bearer " + string(a.Token)
+}
 
 // Client is the shared outbound HTTP client. Transport timeouts bound the hang
 // scenarios (dial, TLS handshake, waiting for response headers) without capping
@@ -61,17 +95,26 @@ const (
 // maxFetchAttempts - so a rate limit surfaces as a real failure instead of a
 // false "not found". Used by the package fetchers (one POM at a time).
 func Get(client *http.Client, u string) (body []byte, found bool, err error) {
-	return get(client, u, time.Sleep, rand.Float64)
+	return get(client, u, "", time.Sleep, rand.Float64)
+}
+
+// GetAuthorized is Get with an Authorization header (an authenticated package
+// source). A 401/403 is a miss like a 404: the source does not serve it.
+func GetAuthorized(client *http.Client, u, authorization string) (body []byte, found bool, err error) {
+	return get(client, u, authorization, time.Sleep, rand.Float64)
 }
 
 // get is Get with an injectable sleep and rng so tests retry deterministically
 // without real delays.
-func get(client *http.Client, u string, sleep func(time.Duration), rng func() float64) ([]byte, bool, error) {
+func get(client *http.Client, u, authorization string, sleep func(time.Duration), rng func() float64) ([]byte, bool, error) {
 	backoff := baseBackoff
 	for attempt := 1; ; attempt++ {
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u, nil)
 		if err != nil {
 			return nil, false, err
+		}
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
 		}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -88,6 +131,11 @@ func get(client *http.Client, u string, sleep func(time.Duration), rng func() fl
 		}
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
 		resp.Body.Close()
+		if authorization != "" && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
+			// Credentials were sent and refused: not "the artifact is not
+			// here", which is what falling through to the next source would say.
+			return nil, false, fmt.Errorf("%s: HTTP %d: the configured credentials were rejected", hostOf(u), status)
+		}
 		if !retryStatuses[status] {
 			return nil, false, nil // a genuine miss (404/410/...): not retryable
 		}

@@ -68,10 +68,16 @@ _cappu() {
           _arguments $common '--json[emit machine-readable]' '*:query: ' && ret=0 ;;
         show)
           _arguments $common '--json[emit machine-readable]' '1:package (group\:artifact[\:version]): ' && ret=0 ;;
-        add|remove)
+        add)
           _arguments $common \
-            '1:configuration:(api implementation annotationProcessor testImplementation)' \
+            '--classifier[artifact classifier of the added entries]:classifier: ' \
+            '*--exclude[transitive group\:artifact to exclude below the added entries]:coordinate: ' \
+            '1:configuration:(api implementation compileOnly runtimeOnly annotationProcessor testImplementation platform)' \
             '*:coordinate (group\:artifact[\:version]): ' && ret=0 ;;
+        remove)
+          _arguments $common \
+            '1:configuration:(api implementation compileOnly runtimeOnly annotationProcessor testImplementation platform)' \
+            '*:coordinate (group\:artifact): ' && ret=0 ;;
         audit)
           _arguments $common \
             '--no-cache[ignore all caches]' \

@@ -437,7 +437,7 @@ func classpathFingerprint(cfg *config.Config) map[string]int64 {
 			fp[path] = info.ModTime().UnixNano()
 		}
 	}
-	for _, p := range cfg.CompilerOptions.ClassPath {
+	for _, p := range cfg.CompileClassPath() {
 		entry := cfg.ResolvePath(p)
 		if strings.HasSuffix(entry, ".jar") {
 			stat(entry)
@@ -462,7 +462,7 @@ func classpathFingerprint(cfg *config.Config) map[string]int64 {
 // by src/services/mcpServer.ts).
 func loadConfiguredSources(program *compiler.Program, cfg *config.Config) {
 	var classPaths []string
-	for _, p := range cfg.CompilerOptions.ClassPath {
+	for _, p := range cfg.CompileClassPath() {
 		classPaths = append(classPaths, cfg.ResolvePath(p))
 	}
 	compiler.LoadClassPath(program, classPaths)

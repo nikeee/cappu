@@ -182,10 +182,26 @@ func ExpandJarDirs(roots []string) []string {
 	return out
 }
 
-// ClassPath is the configured classPath, resolved and jar-expanded.
+// ClassPath is the configured classPath, resolved and jar-expanded: what the
+// compile and the runtime classpath share.
 func ClassPath(cfg *config.Config) []string {
-	resolved := make([]string, len(cfg.CompilerOptions.ClassPath))
-	for i, cp := range cfg.CompilerOptions.ClassPath {
+	return expandEntries(cfg, cfg.CompilerOptions.ClassPath)
+}
+
+// CompileClassPath is ClassPath plus the compileOnly jars: javac's -cp.
+func CompileClassPath(cfg *config.Config) []string {
+	return expandEntries(cfg, cfg.CompileClassPath())
+}
+
+// RuntimeClassPath is ClassPath plus the runtimeOnly jars (and never the
+// compileOnly ones): java's -cp.
+func RuntimeClassPath(cfg *config.Config) []string {
+	return expandEntries(cfg, cfg.RuntimeClassPath())
+}
+
+func expandEntries(cfg *config.Config, entries []string) []string {
+	resolved := make([]string, len(entries))
+	for i, cp := range entries {
 		resolved[i] = cfg.ResolvePath(cp)
 	}
 	return ExpandJarDirs(resolved)
@@ -234,7 +250,7 @@ func BuildJar(cfg *config.Config) (string, error) {
 	}
 	defer func() { _ = os.RemoveAll(classesDir) }()
 
-	if err := Compile(cfg, sources, classesDir, ClassPath(cfg)); err != nil {
+	if err := Compile(cfg, sources, classesDir, CompileClassPath(cfg)); err != nil {
 		return "", err
 	}
 

@@ -15,17 +15,16 @@ import (
 // configWith builds a config whose implementation deps are the given
 // "group:artifact:version" specs.
 func configWith(specs ...string) *config.Config {
-	impl := map[string]string{}
+	impl := map[string]config.Dependency{}
 	for _, spec := range specs {
-		g, a, v := splitCoord3(spec)
-		impl[g+":"+a] = v
+		c := parseCoord(spec)
+		impl[string(c.Key())] = config.Dependency{Version: string(c.Version)}
 	}
 	return &config.Config{Dependencies: config.Dependencies{Implementation: impl}}
 }
 
 func meta(spec string, mutate func(*packages.PackageMetadata)) packages.PackageMetadata {
-	g, a, v := splitCoord3(spec)
-	m := packages.PackageMetadata{Coordinates: packages.NewCoordinates(g, a, v)}
+	m := packages.PackageMetadata{Coordinates: parseCoord(spec)}
 	if mutate != nil {
 		mutate(&m)
 	}
@@ -33,8 +32,7 @@ func meta(spec string, mutate func(*packages.PackageMetadata)) packages.PackageM
 }
 
 func dep(spec string) packages.DependencyDeclaration {
-	g, a, v := splitCoord3(spec)
-	return packages.DependencyDeclaration{Coordinates: packages.NewCoordinates(g, a, v)}
+	return packages.DependencyDeclaration{Coordinates: parseCoord(spec)}
 }
 
 // fakeAuditSource returns advisories for the coordinates named in the map.
@@ -216,5 +214,17 @@ func TestProjectDependencyTreeWithCoord(t *testing.T) {
 	}
 	if strings.Join(res.Path, ",") != "org.a:a:1,org.b:b:1" {
 		t.Errorf("path = %v", res.Path)
+	}
+}
+
+func TestParseCoordReadsLabels(t *testing.T) {
+	got := parseCoord("g:a:1:linux-x86_64:pom")
+	want := packages.NewCoordinates("g", "a", "1").WithClassifier("linux-x86_64")
+	want.Extension = "pom"
+	if got != want {
+		t.Errorf("parseCoord = %+v, want %+v", got, want)
+	}
+	if short := parseCoord("g:a"); short != packages.NewCoordinates("g", "a", "") {
+		t.Errorf("parseCoord(g:a) = %+v", short)
 	}
 }

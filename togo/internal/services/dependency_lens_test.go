@@ -69,3 +69,26 @@ func TestDependencyLensUpToDate(t *testing.T) {
 		t.Errorf("artifacts = %v, want [gson]", arts)
 	}
 }
+
+func TestDependencyLensSkipsManagedEntries(t *testing.T) {
+	text := "{\n  \"dependencies\": {\n    \"implementation\": {\n      \"org.lib:core\": \"\",\n      \"org.lib:util\": \"1.0\"\n    }\n  }\n}\n"
+	lenses := DependencyLenses(text, func(_, _ string) (string, bool) { return "2.0", true })
+	if len(lenses) != 1 || lenses[0].Entry.ArtifactID != "util" {
+		t.Errorf("lenses = %+v, want only util (core's version comes from a platform)", lenses)
+	}
+}
+
+func TestFindDependencyEntriesObjectForm(t *testing.T) {
+	text := "{\n  \"dependencies\": {\n    \"implementation\": {\n" +
+		"      \"org.x:y\": { \"version\": \"1.0\", \"exclude\": [\"a:b\"] },\n" +
+		"      \"io.n:n\": { \"classifier\": \"linux-x86_64\" }\n    }\n  }\n}\n"
+	entries := FindDependencyEntries(text)
+	if len(entries) != 2 || entries[0].ArtifactID != "y" || entries[0].Version != "1.0" || entries[1].ArtifactID != "n" || entries[1].Version != "" {
+		t.Errorf("entries = %+v", entries)
+	}
+	// the object entry with a version gets a lens, the managed one does not
+	lenses := DependencyLenses(text, func(_, _ string) (string, bool) { return "2.0", true })
+	if len(lenses) != 1 || lenses[0].Entry.ArtifactID != "y" {
+		t.Errorf("lenses = %+v", lenses)
+	}
+}

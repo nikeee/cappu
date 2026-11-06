@@ -49,7 +49,22 @@ type MavenRepositorySource struct {
 // NewMavenRepositorySource builds a source for baseURL using HTTP fetchers.
 // searchURL is the solr index endpoint, or "" for a repository without one.
 func NewMavenRepositorySource(baseURL, searchURL string) *MavenRepositorySource {
-	return NewMavenRepositorySourceWithFetchers(baseURL, searchURL, httpFetchText(httpx.Client), httpFetchBytes(httpx.Client))
+	return NewAuthorizedMavenRepositorySource(baseURL, searchURL, "")
+}
+
+// NewAuthorizedMavenRepositorySource is NewMavenRepositorySource sending an
+// Authorization header ("" for an anonymous repository) with every request.
+func NewAuthorizedMavenRepositorySource(baseURL, searchURL, authorization string) *MavenRepositorySource {
+	return NewMavenRepositorySourceWithFetchers(baseURL, searchURL, httpFetchText(httpx.Client, authorization), httpFetchBytes(httpx.Client, authorization))
+}
+
+// NewUnavailableSource is a source whose every fetch fails with err: for a
+// repository whose credentials are not set, so the failure names the fix the
+// moment the repository is needed instead of silently resolving without it.
+func NewUnavailableSource(baseURL string, err error) *MavenRepositorySource {
+	return NewMavenRepositorySourceWithFetchers(baseURL, "",
+		func(string) (string, bool, error) { return "", false, err },
+		func(string) ([]byte, bool, error) { return nil, false, err })
 }
 
 // NewMavenRepositorySourceWithFetchers builds a source with injected fetchers
@@ -70,16 +85,16 @@ func NewMavenRepositorySourceWithFetchers(baseURL, searchURL string, fetchText F
 // Name is the repository url (a stable display name).
 func (s *MavenRepositorySource) Name() SourceName { return SourceName(s.baseURL) }
 
-func httpFetchText(client *http.Client) FetchText {
+func httpFetchText(client *http.Client, authorization string) FetchText {
 	return func(u string) (string, bool, error) {
-		body, found, err := httpx.Get(client, u)
+		body, found, err := httpx.GetAuthorized(client, u, authorization)
 		return string(body), found, err
 	}
 }
 
-func httpFetchBytes(client *http.Client) FetchBytes {
+func httpFetchBytes(client *http.Client, authorization string) FetchBytes {
 	return func(u string) ([]byte, bool, error) {
-		return httpx.Get(client, u)
+		return httpx.GetAuthorized(client, u, authorization)
 	}
 }
 
@@ -218,6 +233,28 @@ func (s *MavenRepositorySource) getMetadata(c Coordinates) (*PackageMetadata, bo
 	return &meta, incomplete, nil
 }
 
+// GetManaged returns the versions c's effective <dependencyManagement> (parent
+// chain plus imported BOMs) manages, interpolated; nil when the POM is missing.
+func (s *MavenRepositorySource) GetManaged(c Coordinates) (map[PackageKey]string, error) {
+	chain, err := s.chainFor(c)
+	if err != nil || chain == nil {
+		return nil, err
+	}
+	imported, err := s.importedManaged(chain, c, map[CoordinateString]bool{})
+	if err != nil {
+		return nil, err
+	}
+	properties := mergedProperties(chain)
+	managed := map[PackageKey]string{}
+	for key, entry := range mergedManaged(chain, c, imported) {
+		version := interpolate(entry.Version, properties, c)
+		if !strings.Contains(version, "${") {
+			managed[PackageKey(key)] = version
+		}
+	}
+	return managed, nil
+}
+
 const parentChainLimit = 16 // generous; real chains are 2-4 deep
 
 // cachedPom returns the cached parse for key, with ok=false on a cache miss.
@@ -304,12 +341,12 @@ func (s *MavenRepositorySource) chainFor(c Coordinates) ([]*RawPom, error) {
 	return chain, nil
 }
 
-// importedManaged returns the managed versions a chain pulls in via scope=import
+// importedManaged returns the managed entries a chain pulls in via scope=import
 // BOMs, fully interpolated. Precedence is Maven's: a nearer import wins.
-func (s *MavenRepositorySource) importedManaged(chain []*RawPom, c Coordinates, seen map[CoordinateString]bool) (map[string]string, error) {
+func (s *MavenRepositorySource) importedManaged(chain []*RawPom, c Coordinates, seen map[CoordinateString]bool) (map[string]rawDependency, error) {
 	properties := mergedProperties(chain)
-	result := map[string]string{}
-	absorb := func(entries map[string]string) {
+	result := map[string]rawDependency{}
+	absorb := func(entries map[string]rawDependency) {
 		for k, v := range entries {
 			if _, ok := result[k]; !ok {
 				result[k] = v
@@ -343,12 +380,13 @@ func (s *MavenRepositorySource) importedManaged(chain []*RawPom, c Coordinates, 
 			}
 			// the BOM's managed entries, interpolated in the BOM's own context
 			bomProperties := mergedProperties(bomChain)
-			bomManaged := map[string]string{}
+			bomManaged := map[string]rawDependency{}
 			for i := len(bomChain) - 1; i >= 0; i-- {
-				for managedKey, raw := range bomChain[i].Managed {
-					version := interpolate(raw, bomProperties, bom)
-					if !strings.Contains(version, "${") {
-						bomManaged[managedKey] = version
+				for key, entry := range bomChain[i].Managed {
+					entry.Version = interpolate(entry.Version, bomProperties, bom)
+					if !strings.Contains(entry.Version, "${") {
+						entry.Exclusions = interpolateAll(entry.Exclusions, bomProperties, bom)
+						bomManaged[interpolate(key, bomProperties, bom)] = entry
 					}
 				}
 			}
@@ -370,8 +408,9 @@ type RawPom struct {
 	Parent       *Coordinates
 	Properties   map[string]string
 	Dependencies []rawDependency
-	// Managed maps group:artifact -> raw version from <dependencyManagement>.
-	Managed map[string]string
+	// Managed holds the <dependencyManagement> entries as written, keyed by
+	// managedKey (g:a plus the classifier/type that make it a distinct artifact).
+	Managed map[string]rawDependency
 	// BomImports are the scope=import entries in <dependencyManagement>.
 	BomImports  []rawDependency
 	Description string
@@ -388,6 +427,10 @@ type rawDependency struct {
 	Version    string
 	Scope      string
 	Optional   string
+	Type       string
+	Classifier string
+	// Exclusions are "group:artifact" patterns as written (a side may be "*").
+	Exclusions []string
 }
 
 // xmlProperties captures the arbitrary child elements of <properties>.
@@ -422,6 +465,14 @@ type xmlDependency struct {
 	Version    string `xml:"version"`
 	Scope      string `xml:"scope"`
 	Optional   string `xml:"optional"`
+	Type       string `xml:"type"`
+	Classifier string `xml:"classifier"`
+	Exclusions struct {
+		Exclusion []struct {
+			GroupID    string `xml:"groupId"`
+			ArtifactID string `xml:"artifactId"`
+		} `xml:"exclusion"`
+	} `xml:"exclusions"`
 }
 
 type xmlProject struct {
@@ -455,7 +506,52 @@ type xmlProject struct {
 }
 
 func toRawDependency(d xmlDependency) rawDependency {
-	return rawDependency(d)
+	raw := rawDependency{
+		GroupID:    d.GroupID,
+		ArtifactID: d.ArtifactID,
+		Version:    d.Version,
+		Scope:      d.Scope,
+		Optional:   d.Optional,
+		Type:       d.Type,
+		Classifier: d.Classifier,
+	}
+	for _, e := range d.Exclusions.Exclusion {
+		// Maven (resolver's Exclusion) turns a missing side into "", which
+		// matches nothing - the exclusion is a validator warning and a no-op.
+		if e.GroupID == "" || e.ArtifactID == "" {
+			continue
+		}
+		raw.Exclusions = append(raw.Exclusions, e.GroupID+":"+e.ArtifactID)
+	}
+	return raw
+}
+
+// impliedClassifier is the declared classifier, else the one <type> implies
+// (test-jar -> "tests", ejb-client -> "client"), uninterpolated.
+func impliedClassifier(d rawDependency) string {
+	if d.Classifier != "" {
+		return d.Classifier
+	}
+	switch d.Type {
+	case "test-jar":
+		return "tests"
+	case "ejb-client":
+		return "client"
+	}
+	return ""
+}
+
+// managedKey is Maven's management key (g:a:type:classifier) in the shape the
+// rest of the parser uses: "g:a", plus ":classifier" and/or ":pom" when set.
+func managedKey(d rawDependency) string {
+	key := d.GroupID + ":" + d.ArtifactID
+	if c := impliedClassifier(d); c != "" {
+		key += ":" + c
+	}
+	if d.Type == "pom" {
+		key += ":pom"
+	}
+	return key
 }
 
 // parseMetadataVersions returns all versions from a maven-metadata.xml, oldest
@@ -478,7 +574,7 @@ func parseMetadataVersions(text string) []string {
 func parseRawPom(text string) *RawPom {
 	var project xmlProject
 	if err := xml.Unmarshal([]byte(text), &project); err != nil {
-		return &RawPom{Properties: map[string]string{}, Managed: map[string]string{}}
+		return &RawPom{Properties: map[string]string{}, Managed: map[string]rawDependency{}}
 	}
 
 	var parent *Coordinates
@@ -487,16 +583,17 @@ func parseRawPom(text string) *RawPom {
 		parent = &c
 	}
 
-	managed := map[string]string{}
+	managed := map[string]rawDependency{}
 	var bomImports []rawDependency
 	for _, dep := range project.DependencyManagement.Dependencies.Dependency {
 		if dep.GroupID == "" || dep.ArtifactID == "" || dep.Version == "" {
 			continue
 		}
+		raw := toRawDependency(dep)
 		if dep.Scope == "import" {
-			bomImports = append(bomImports, toRawDependency(dep))
+			bomImports = append(bomImports, raw)
 		} else {
-			managed[dep.GroupID+":"+dep.ArtifactID] = dep.Version
+			managed[managedKey(raw)] = raw
 		}
 	}
 
@@ -586,20 +683,13 @@ func mergedProperties(chain []*RawPom) map[string]string {
 
 // effectiveMetadata is the effective dependency list of a POM chain (child
 // first): properties merged child-over-parent, versions interpolated and filled
-// from <dependencyManagement> (chain entries first, then imported BOMs). The
-// bool reports whether any dependency was dropped for lack of a version.
-func effectiveMetadata(chain []*RawPom, c Coordinates, imported map[string]string) (PackageMetadata, bool) {
+// from <dependencyManagement> (chain entries first, then imported BOMs). A
+// managed entry also supplies the scope, optional flag and exclusions a
+// dependency leaves unset (Maven's DependencyManagementInjector). The bool
+// reports whether any dependency was dropped for lack of a version.
+func effectiveMetadata(chain []*RawPom, c Coordinates, imported map[string]rawDependency) (PackageMetadata, bool) {
 	properties := mergedProperties(chain)
-
-	managed := map[string]string{}
-	for k, v := range imported {
-		managed[k] = v
-	}
-	for i := len(chain) - 1; i >= 0; i-- {
-		for k, v := range chain[i].Managed {
-			managed[k] = v
-		}
-	}
+	managed := mergedManaged(chain, c, imported)
 
 	var child *RawPom
 	if len(chain) > 0 {
@@ -620,9 +710,11 @@ func effectiveMetadata(chain []*RawPom, c Coordinates, imported map[string]strin
 			if groupID == "" || artifactID == "" {
 				continue
 			}
+			classifier := effectiveClassifier(dep, properties, c)
+			m, hasManaged := managed[managedKey(rawDependency{GroupID: groupID, ArtifactID: artifactID, Type: dep.Type, Classifier: classifier})]
 			raw := dep.Version
-			if raw == "" {
-				raw = managed[groupID+":"+artifactID]
+			if raw == "" && hasManaged {
+				raw = m.Version
 			}
 			if raw == "" {
 				incomplete = true // unmanaged
@@ -633,10 +725,27 @@ func effectiveMetadata(chain []*RawPom, c Coordinates, imported map[string]strin
 				incomplete = true // beyond our property model
 				continue
 			}
+			scope, optional, exclusions := dep.Scope, dep.Optional, dep.Exclusions
+			if hasManaged {
+				if scope == "" {
+					scope = m.Scope
+				}
+				if optional == "" {
+					optional = m.Optional
+				}
+				if len(exclusions) == 0 {
+					exclusions = m.Exclusions
+				}
+			}
+			coordinates := NewCoordinates(groupID, artifactID, version).WithClassifier(classifier)
+			if dep.Type == "pom" {
+				coordinates.Extension = "pom"
+			}
 			dependencies = append(dependencies, DependencyDeclaration{
-				Coordinates: NewCoordinates(groupID, artifactID, version),
-				Scope:       MavenScope(dep.Scope),
-				Optional:    dep.Optional == "true",
+				Coordinates: coordinates,
+				Scope:       MavenScope(scope),
+				Optional:    optional == "true",
+				Exclusions:  interpolateAll(exclusions, properties, c),
 			})
 		}
 	}
@@ -675,9 +784,51 @@ func effectiveMetadata(chain []*RawPom, c Coordinates, imported map[string]strin
 	return meta, incomplete
 }
 
+// effectiveClassifier is a dependency's classifier (impliedClassifier),
+// interpolated.
+// ponytail: a classifier that still holds a property after interpolation
+// (netty's ${os.detected.classifier}, filled by a build extension we do not
+// run) is dropped rather than failing the dependency - the unclassified jar is
+// what every version of cappu so far has resolved there.
+func effectiveClassifier(dep rawDependency, properties map[string]string, project Coordinates) string {
+	classifier := interpolate(impliedClassifier(dep), properties, project)
+	if strings.Contains(classifier, "${") {
+		return ""
+	}
+	return classifier
+}
+
+func interpolateAll(values []string, properties map[string]string, project Coordinates) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, len(values))
+	for i, v := range values {
+		out[i] = interpolate(v, properties, project)
+	}
+	return out
+}
+
+// mergedManaged is a chain's effective <dependencyManagement>: imported BOM
+// entries, overridden by the chain's own entries parent-to-child (child wins).
+// Keys are interpolated; versions are left for the caller.
+func mergedManaged(chain []*RawPom, c Coordinates, imported map[string]rawDependency) map[string]rawDependency {
+	properties := mergedProperties(chain)
+	managed := map[string]rawDependency{}
+	for k, v := range imported {
+		managed[k] = v
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		for k, v := range chain[i].Managed {
+			managed[interpolate(k, properties, c)] = v
+		}
+	}
+	return managed
+}
+
 // ParsePom is a single-pom convenience (tests/tooling): the effective view of
 // one POM without its parents (parent-managed versions stay unresolved). The
 // bool reports whether any dependency was dropped for lack of a version.
 func ParsePom(text string, c Coordinates) (PackageMetadata, bool) {
-	return effectiveMetadata([]*RawPom{parseRawPom(text)}, c, map[string]string{})
+	return effectiveMetadata([]*RawPom{parseRawPom(text)}, c, map[string]rawDependency{})
 }

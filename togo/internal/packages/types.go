@@ -2,6 +2,8 @@
 // dependencies are searched and resolved from. Port of src/packages/.
 package packages
 
+import "strings"
+
 // Branded (named) domain primitives. Unlike the TypeScript original's
 // type-only brands - and unlike tsgo's aliases - these are real Go named types,
 // so the compiler refuses to mix a GroupId with an ArtifactId. Conversions at
@@ -38,6 +40,10 @@ type Coordinates struct {
 	Version    Version
 	// Classifier selects a qualified artifact of the same GAV; "" when absent.
 	Classifier Classifier
+	// Extension is "pom" for a <type>pom</type> dependency (metadata only, no
+	// jar) and "" for a jar. Like the classifier it is part of the identity:
+	// Maven keeps g:a:pom and g:a:jar as distinct nodes.
+	Extension string
 }
 
 // String returns "group:artifact:version".
@@ -46,8 +52,43 @@ func (c Coordinates) String() CoordinateString {
 }
 
 // Key is the conflict key: two versions of the same group:artifact conflict.
+// A classified artifact ("g:a:classifier") or a pom-only one ("g:a:pom") is
+// its own key, like Maven's g:a:type:classifier - the base jar, a
+// native-classifier jar and a pom-typed edge coexist.
 func (c Coordinates) Key() PackageKey {
-	return PackageKey(string(c.GroupID) + ":" + string(c.ArtifactID))
+	return PackageKey(string(c.GroupID) + ":" + string(c.ArtifactID) + c.qualifier())
+}
+
+// Label is the display form: "group:artifact:version", with ":classifier"
+// and/or ":pom" appended. String stays the GAV (the POM identity).
+func (c Coordinates) Label() string {
+	return string(c.String()) + c.qualifier()
+}
+
+func (c Coordinates) qualifier() string {
+	q := ""
+	if c.Classifier != "" {
+		q += ":" + string(c.Classifier)
+	}
+	if c.Extension != "" {
+		q += ":" + c.Extension
+	}
+	return q
+}
+
+// PomOnly reports a <type>pom</type> dependency: it contributes its transitive
+// dependencies but has no jar to install.
+func (c Coordinates) PomOnly() bool { return c.Extension == "pom" }
+
+// IsSnapshot reports a -SNAPSHOT version: mutable by definition, so it is never
+// served from the global store, never metadata-cached and never integrity
+// checked against the lock.
+func (c Coordinates) IsSnapshot() bool { return strings.HasSuffix(string(c.Version), "-SNAPSHOT") }
+
+// GAV is the plain group:artifact:version identity, stripped of classifier
+// and extension: what names the POM and its metadata.
+func (c Coordinates) GAV() Coordinates {
+	return Coordinates{GroupID: c.GroupID, ArtifactID: c.ArtifactID, Version: c.Version}
 }
 
 // NewCoordinates builds coordinates from raw strings - the single conversion
@@ -94,6 +135,9 @@ type DependencyDeclaration struct {
 	Scope MavenScope
 	// Optional dependencies do not propagate to consumers.
 	Optional bool
+	// Exclusions are the <exclusions> patterns ("group:artifact", either side
+	// may be "*") pruned from this dependency's subtree.
+	Exclusions []string
 }
 
 // PackageMetadata is the effective view of one package version: its declared
@@ -129,4 +173,8 @@ type PackageSource interface {
 	// GetPom returns the package's own POM bytes (not the merged parent chain),
 	// or nil if unavailable here.
 	GetPom(c Coordinates) ([]byte, error)
+	// GetManaged returns the versions a BOM manages (its <dependencyManagement>
+	// over the parent chain and imports), keyed like Coordinates.Key; nil if
+	// the POM is unknown here.
+	GetManaged(c Coordinates) (map[PackageKey]string, error)
 }

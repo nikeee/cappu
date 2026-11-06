@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/nikeee/cappu/internal/config"
 )
@@ -30,9 +29,8 @@ func RunRemove(configurationArg string, specs []string, configPathArg string, cf
 			fmt.Fprintf(os.Stderr, "cappu: not a coordinate: '%s'\n", spec)
 			emitAnnotation("error", fmt.Sprintf("not a coordinate: '%s'", spec), AnnotationLocation{})
 		}
-		fmt.Fprintf(os.Stderr, "usage: cappu remove <%s> <group:artifact> [more...]\n"+
-			"       aliases: a=api, i=implementation, ap=annotationProcessor, ti=testImplementation\n",
-			strings.Join(configurations, "|"))
+		fmt.Fprintf(os.Stderr, "usage: cappu remove <%s> <group:artifact> [more...]\n       %s\n",
+			usageConfigurations, usageAliases)
 		return 2
 	}
 	if !cfg.FromFile {
@@ -72,13 +70,15 @@ func RunRemove(configurationArg string, specs []string, configPathArg string, cf
 	if !any {
 		return 1
 	}
-	if err := os.WriteFile(configPath, text, 0o644); err != nil {
+	// Never write a cappu.json that will not load back: removing the only
+	// platform while "" entries depend on it is refused here.
+	reloaded, err := config.Parse(text, configPath)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
+		emitAnnotation("error", err.Error(), AnnotationLocation{})
 		return 1
 	}
-
-	reloaded, err := config.Load(configPath, "")
-	if err != nil {
+	if err := os.WriteFile(configPath, text, 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
 		return 1
 	}

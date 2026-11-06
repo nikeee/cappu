@@ -45,18 +45,22 @@ func RunAudit(cfg *config.Config, noCache, allowStaleIgnores bool, formatFlag *s
 	// are what let us show why a transitive package is here.
 	showProgress := ColorEnabled(isTTY(os.Stderr), os.Getenv)
 	resolving := 0
-	roots := append(sources.CompileRoots(cfg), sources.ProcessorRoots(cfg)...)
-	roots = append(roots, sources.TestRoots(cfg)...)
+	roots := sources.AllRoots(cfg)
 	srcs := sources.Configured(cfg)
 	if noCache {
 		srcs = sources.ConfiguredUncached(cfg)
 	}
-	resolution, err := packages.ResolveTransitive(roots, srcs, func(packages.Coordinates) {
+	managed, err := sources.ManagedVersions(cfg, srcs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cappu: %s\n", err)
+		return 1
+	}
+	resolution, err := packages.ResolveTransitive(roots, srcs, packages.ResolveOptions{Managed: managed, OnResolve: func(packages.Coordinates) {
 		if showProgress {
 			resolving++
 			fmt.Fprintf(os.Stderr, "\r\x1b[2Kresolving dependency graph (%d)...", resolving)
 		}
-	})
+	}})
 	if resolving > 0 {
 		fmt.Fprint(os.Stderr, "\r\x1b[2K")
 	}
@@ -170,7 +174,7 @@ func pathStrings(byKey map[packages.PackageKey]packages.ResolvedPackage, target 
 	path := dependencyPath(byKey, target)
 	out := make([]string, len(path))
 	for i, c := range path {
-		out[i] = string(c.String())
+		out[i] = c.Label()
 	}
 	return out
 }
@@ -266,7 +270,7 @@ func buildAuditSarif(report audit.AuditReport, ignores audit.IgnoreResult, byKey
 	rules := []sarifRule{}
 	results := []sarifResult{}
 	for _, p := range report.Vulnerable {
-		coordinate := string(p.Coordinates.String())
+		coordinate := p.Coordinates.Label()
 		path := pathStrings(byKey, p.Coordinates)
 		for _, a := range p.Advisories {
 			level, score := sarifSeverity(a.Severity)
@@ -342,7 +346,7 @@ func auditText(stdout *os.File, report audit.AuditReport, ignores audit.IgnoreRe
 	printTree := func(target packages.Coordinates) {
 		path := dependencyPath(byKey, target)
 		for i, c := range path {
-			label := string(c.String())
+			label := c.Label()
 			if i == len(path)-1 {
 				label = severityPaint(paint, audit.SeverityCritical, label) // deepest = bold red
 			} else {
@@ -382,7 +386,7 @@ func auditText(stdout *os.File, report audit.AuditReport, ignores audit.IgnoreRe
 			if reason, ok := ignores.Ignored(f.a); ok {
 				ignored = "  " + paint("yellow", "(ignored: "+reason+")")
 			}
-			fmt.Fprintf(stdout, "  %s  %s%s - %s%s%s\n", f.c.String(), f.a.ID, cve, f.a.Summary, fixed, ignored)
+			fmt.Fprintf(stdout, "  %s  %s%s - %s%s%s\n", f.c.Label(), f.a.ID, cve, f.a.Summary, fixed, ignored)
 			fmt.Fprintf(stdout, "    %s\n", paint("dim", f.a.URL))
 			printTree(f.c)
 		}

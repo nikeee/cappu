@@ -93,17 +93,22 @@ mount. `--artifact app` avoids guessing the `<artifactId>-<version>.jar` name.
      missing coordinates: exit 2 before anything is built. Compile or upload
      failure: exit 1.
 
-**Gotcha - private registries are publish-only.** Resolving dependencies from a
-registry that needs credentials is not supported (`packageSources` are anonymous
-URLs). Publishing to one works.
+**Private registries.** To resolve from one, list it in `packageSources` as
+`{ "url": "...", "auth": "NAME" }` and provide `CAPPU_SOURCE_NAME_TOKEN` (or
+`CAPPU_SOURCE_NAME_USERNAME` + `CAPPU_SOURCE_NAME_PASSWORD`) in CI, next to the
+`CAPPU_PUBLISH_*` secrets for publishing.
 
 **Gotcha - POM scopes follow Gradle's published-POM rules.** `api` becomes
-Maven `compile`, `implementation` becomes `runtime`, `testImplementation`
-becomes `test`, `annotationProcessor` is left out. Consumers cannot compile
+Maven `compile`, `implementation` and `runtimeOnly` become `runtime`,
+`compileOnly` becomes `provided`, `testImplementation` becomes `test`,
+`annotationProcessor` is left out. Each `platform` entry is published as a
+`<type>pom</type><scope>import</scope>` entry of `<dependencyManagement>`, and
+a dependency declared with version `""` is published without `<version>` (the
+imported platform supplies it to consumers). Classifiers and `exclude` patterns
+are published as `<classifier>` / `<exclusions>`. Consumers cannot compile
 against a `runtime` dependency, so any type that appears in your public API
-must be declared under `api`. Former Maven `provided` or `optional` deps that
-were folded into `implementation` are published as `runtime` and bundled into
-a fat jar.
+must be declared under `api`. Former Maven `optional` deps folded into
+`implementation` are published as `runtime` and bundled into a fat jar.
 
 ## Gotchas checklist
 

@@ -19,8 +19,36 @@ type ResolvedPackage struct {
 	Depth int
 	// RequestedBy is which package declared it (zero value for a root).
 	RequestedBy Coordinates
+	// AlsoRequestedBy are the other packages whose dependency edge resolved
+	// to this package later in the walk: a request for the same version, or
+	// for another one that lost to it (nearest wins makes that edge point
+	// here, as in Maven's graph). Together with RequestedBy these are every
+	// edge of the resolved graph.
+	AlsoRequestedBy []Coordinates
 	// Source is the source that provided the metadata.
 	Source SourceName
+	// Managed is true when a platform decided the version: a root declared
+	// without one, or a transitive whose declared version it overrode.
+	Managed bool
+}
+
+// UnmanagedRootError is returned by ResolveTransitive for a root declared
+// without a version that no platform manages.
+type UnmanagedRootError struct{ Key PackageKey }
+
+func (e UnmanagedRootError) Error() string {
+	return string(e.Key) + ": no version given and no platform manages it"
+}
+
+// ResolveOptions tunes ResolveTransitive.
+type ResolveOptions struct {
+	// Managed are the platform-managed versions (keyed like Coordinates.Key).
+	// They fill a root declared without a version and override the version a
+	// transitive POM declares - Maven's dependencyManagement semantics. A root
+	// with an explicit version keeps it.
+	Managed map[PackageKey]string
+	// OnResolve, when non-nil, is called once per package as it is fetched.
+	OnResolve func(Coordinates)
 }
 
 // VersionConflict records a same-package version clash; the nearer version won.
@@ -69,6 +97,32 @@ type frontierItem struct {
 	coordinates Coordinates
 	requestedBy Coordinates
 	isRoot      bool
+	managed     bool
+	// exclusions are the patterns every ancestor edge excluded, so an
+	// exclusion prunes the whole subtree below the edge that declared it (Maven
+	// semantics: path-scoped, a package excluded here may still arrive via
+	// another path).
+	exclusions []string
+}
+
+// excluded reports whether c matches any "group:artifact" pattern; either side
+// of a pattern may be "*".
+func excluded(c Coordinates, patterns []string) bool {
+	for _, pattern := range patterns {
+		group, artifact, _ := strings.Cut(pattern, ":")
+		if (group == "*" || group == string(c.GroupID)) && (artifact == "*" || artifact == string(c.ArtifactID)) {
+			return true
+		}
+	}
+	return false
+}
+
+// inheritExclusions is the parent's exclusions plus the edge's own.
+func inheritExclusions(parent, own []string) []string {
+	if len(own) == 0 {
+		return parent
+	}
+	return append(append(make([]string, 0, len(parent)+len(own)), parent...), own...)
 }
 
 // resolveRange resolves a Maven version range (`[1.0,2.0)`, `RELEASE`, ...)
@@ -96,22 +150,42 @@ func resolveRange(c Coordinates, sources []PackageSource) (Coordinates, bool, er
 		if version == "" {
 			return Coordinates{}, false, nil
 		}
-		return Coordinates{GroupID: c.GroupID, ArtifactID: c.ArtifactID, Version: Version(version)}, true, nil
+		c.Version = Version(version) // classifier and extension stay
+		return c, true, nil
 	}
 	return Coordinates{}, false, nil
 }
 
-// ResolveTransitive resolves roots and their transitive dependencies against
-// sources (consulted in order; the first source that knows a package provides
-// it). onResolve, when non-nil, is called once per package as it is fetched.
-func ResolveTransitive(roots []Coordinates, sources []PackageSource, onResolve func(Coordinates)) (Resolution, error) {
+// ResolveTransitive resolves roots (declared dependencies: coordinates plus
+// their own exclusions) and their transitive dependencies against sources
+// (consulted in order; the first source that knows a package provides it). A
+// root without a version takes it from opts.Managed; one no platform manages
+// is an error.
+func ResolveTransitive(roots []DependencyDeclaration, sources []PackageSource, opts ResolveOptions) (Resolution, error) {
 	res := Resolution{}
 	// group:artifact -> selected version (nearest wins: BFS reaches near first)
 	selected := map[PackageKey]string{}
+	// key -> index into res.Packages, to record the later parents of a package
+	index := map[PackageKey]int{}
 
 	frontier := make([]frontierItem, 0, len(roots))
+	// pinned are the roots with a version written out: cappu.json always wins
+	// over the platform for them, so transitive requests of the same artifact
+	// are left as declared (and mediate against the root as usual).
+	pinned := map[PackageKey]bool{}
 	for _, r := range roots {
-		frontier = append(frontier, frontierItem{coordinates: r, isRoot: true})
+		item := frontierItem{coordinates: r.Coordinates, isRoot: true, exclusions: r.Exclusions}
+		if item.coordinates.Version == "" {
+			version, ok := opts.Managed[item.coordinates.Key()]
+			if !ok {
+				return res, UnmanagedRootError{Key: item.coordinates.Key()}
+			}
+			item.coordinates.Version = Version(version)
+			item.managed = true
+		} else {
+			pinned[item.coordinates.Key()] = true
+		}
+		frontier = append(frontier, item)
 	}
 
 	for depth := 0; len(frontier) > 0; depth++ {
@@ -152,10 +226,13 @@ func ResolveTransitive(roots []Coordinates, sources []PackageSource, onResolve f
 						RejectedBy: rejectedBy,
 					})
 				}
+				if i, resolved := index[key]; resolved && !item.isRoot {
+					res.Packages[i].AlsoRequestedBy = append(res.Packages[i].AlsoRequestedBy, item.requestedBy)
+				}
 				continue // already resolved (or conflicting): never descend twice
 			}
-			if onResolve != nil {
-				onResolve(item.coordinates)
+			if opts.OnResolve != nil {
+				opts.OnResolve(item.coordinates)
 			}
 			meta, source, err := metadataFrom(sources, item.coordinates)
 			if err != nil {
@@ -170,21 +247,30 @@ func ResolveTransitive(roots []Coordinates, sources []PackageSource, onResolve f
 				continue
 			}
 			selected[key] = string(item.coordinates.Version)
+			index[key] = len(res.Packages)
 			res.Packages = append(res.Packages, ResolvedPackage{
 				Coordinates: item.coordinates,
 				Metadata:    *meta,
 				Depth:       depth,
 				RequestedBy: item.requestedBy,
 				Source:      source,
+				Managed:     item.managed,
 			})
 			for _, dep := range meta.Dependencies {
-				if !propagates(dep) {
+				if !propagates(dep) || excluded(dep.Coordinates, item.exclusions) {
 					continue
 				}
-				next = append(next, frontierItem{
+				child := frontierItem{
 					coordinates: dep.Coordinates,
 					requestedBy: item.coordinates,
-				})
+					exclusions:  inheritExclusions(item.exclusions, dep.Exclusions),
+				}
+				// A platform-managed version replaces whatever the POM declared.
+				if version, ok := opts.Managed[dep.Key()]; ok && !pinned[dep.Key()] && version != string(dep.Version) {
+					child.coordinates.Version = Version(version)
+					child.managed = true
+				}
+				next = append(next, child)
 			}
 		}
 		frontier = next
@@ -245,6 +331,20 @@ type InMemoryPackageSource struct {
 	name  string
 	byKey map[PackageKey][]PackageMetadata
 	keys  []PackageKey // insertion order, so Search is deterministic
+	// managed holds what a BOM manages, for platform tests.
+	managed map[CoordinateString]map[PackageKey]string
+}
+
+// SetManaged records the versions the BOM at c manages.
+func (s *InMemoryPackageSource) SetManaged(c Coordinates, managed map[PackageKey]string) {
+	if s.managed == nil {
+		s.managed = map[CoordinateString]map[PackageKey]string{}
+	}
+	s.managed[c.String()] = managed
+}
+
+func (s *InMemoryPackageSource) GetManaged(c Coordinates) (map[PackageKey]string, error) {
+	return s.managed[c.String()], nil
 }
 
 // NewInMemoryPackageSource builds an in-memory source from a list of metadata.
@@ -286,7 +386,8 @@ func (s *InMemoryPackageSource) ListVersions(groupID, artifactID string) ([]stri
 }
 
 func (s *InMemoryPackageSource) GetMetadata(c Coordinates) (*PackageMetadata, error) {
-	for _, p := range s.byKey[c.Key()] {
+	// A classified or pom-typed artifact shares the POM (and so the metadata) of its GAV.
+	for _, p := range s.byKey[c.GAV().Key()] {
 		if p.Coordinates.String() == c.String() {
 			pkg := p
 			return &pkg, nil

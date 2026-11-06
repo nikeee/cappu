@@ -51,6 +51,12 @@ func easyjsonAee5a8cfDecodeGithubComNikeeeCappuInternalLockfile(in *jlexer.Lexer
 			} else {
 				out.Version = string(in.String())
 			}
+		case "classifier":
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.Classifier = string(in.String())
+			}
 		default:
 			in.SkipRecursive()
 		}
@@ -79,6 +85,11 @@ func easyjsonAee5a8cfEncodeGithubComNikeeeCappuInternalLockfile(out *jwriter.Wri
 		const prefix string = ",\"version\":"
 		out.RawString(prefix)
 		out.String(string(in.Version))
+	}
+	if in.Classifier != "" {
+		const prefix string = ",\"classifier\":"
+		out.RawString(prefix)
+		out.String(string(in.Classifier))
 	}
 	out.RawByte('}')
 }
@@ -128,6 +139,33 @@ func easyjsonAee5a8cfDecodeGithubComNikeeeCappuInternalLockfile1(in *jlexer.Lexe
 			}
 		case "roots":
 			easyjsonAee5a8cfDecodeGithubComNikeeeCappuInternalConfig(in, &out.Roots)
+		case "platformOrder":
+			if in.IsNull() {
+				in.Skip()
+				out.PlatformOrder = nil
+			} else {
+				in.Delim('[')
+				if out.PlatformOrder == nil {
+					if !in.IsDelim(']') {
+						out.PlatformOrder = make([]string, 0, 4)
+					} else {
+						out.PlatformOrder = []string{}
+					}
+				} else {
+					out.PlatformOrder = (out.PlatformOrder)[:0]
+				}
+				for !in.IsDelim(']') {
+					var v1 string
+					if in.IsNull() {
+						in.Skip()
+					} else {
+						v1 = string(in.String())
+					}
+					out.PlatformOrder = append(out.PlatformOrder, v1)
+					in.WantComma()
+				}
+				in.Delim(']')
+			}
 		case "packages":
 			if in.IsNull() {
 				in.Skip()
@@ -144,13 +182,67 @@ func easyjsonAee5a8cfDecodeGithubComNikeeeCappuInternalLockfile1(in *jlexer.Lexe
 					out.Packages = (out.Packages)[:0]
 				}
 				for !in.IsDelim(']') {
-					var v1 LockedPackage
+					var v2 LockedPackage
 					if in.IsNull() {
 						in.Skip()
 					} else {
-						(v1).UnmarshalEasyJSON(in)
+						(v2).UnmarshalEasyJSON(in)
 					}
-					out.Packages = append(out.Packages, v1)
+					out.Packages = append(out.Packages, v2)
+					in.WantComma()
+				}
+				in.Delim(']')
+			}
+		case "compileOnlyPackages":
+			if in.IsNull() {
+				in.Skip()
+				out.CompileOnlyPackages = nil
+			} else {
+				in.Delim('[')
+				if out.CompileOnlyPackages == nil {
+					if !in.IsDelim(']') {
+						out.CompileOnlyPackages = make([]LockedPackage, 0, 0)
+					} else {
+						out.CompileOnlyPackages = []LockedPackage{}
+					}
+				} else {
+					out.CompileOnlyPackages = (out.CompileOnlyPackages)[:0]
+				}
+				for !in.IsDelim(']') {
+					var v3 LockedPackage
+					if in.IsNull() {
+						in.Skip()
+					} else {
+						(v3).UnmarshalEasyJSON(in)
+					}
+					out.CompileOnlyPackages = append(out.CompileOnlyPackages, v3)
+					in.WantComma()
+				}
+				in.Delim(']')
+			}
+		case "runtimeOnlyPackages":
+			if in.IsNull() {
+				in.Skip()
+				out.RuntimeOnlyPackages = nil
+			} else {
+				in.Delim('[')
+				if out.RuntimeOnlyPackages == nil {
+					if !in.IsDelim(']') {
+						out.RuntimeOnlyPackages = make([]LockedPackage, 0, 0)
+					} else {
+						out.RuntimeOnlyPackages = []LockedPackage{}
+					}
+				} else {
+					out.RuntimeOnlyPackages = (out.RuntimeOnlyPackages)[:0]
+				}
+				for !in.IsDelim(']') {
+					var v4 LockedPackage
+					if in.IsNull() {
+						in.Skip()
+					} else {
+						(v4).UnmarshalEasyJSON(in)
+					}
+					out.RuntimeOnlyPackages = append(out.RuntimeOnlyPackages, v4)
 					in.WantComma()
 				}
 				in.Delim(']')
@@ -171,13 +263,13 @@ func easyjsonAee5a8cfDecodeGithubComNikeeeCappuInternalLockfile1(in *jlexer.Lexe
 					out.ProcessorPackages = (out.ProcessorPackages)[:0]
 				}
 				for !in.IsDelim(']') {
-					var v2 LockedPackage
+					var v5 LockedPackage
 					if in.IsNull() {
 						in.Skip()
 					} else {
-						(v2).UnmarshalEasyJSON(in)
+						(v5).UnmarshalEasyJSON(in)
 					}
-					out.ProcessorPackages = append(out.ProcessorPackages, v2)
+					out.ProcessorPackages = append(out.ProcessorPackages, v5)
 					in.WantComma()
 				}
 				in.Delim(']')
@@ -198,13 +290,13 @@ func easyjsonAee5a8cfDecodeGithubComNikeeeCappuInternalLockfile1(in *jlexer.Lexe
 					out.TestPackages = (out.TestPackages)[:0]
 				}
 				for !in.IsDelim(']') {
-					var v3 LockedPackage
+					var v6 LockedPackage
 					if in.IsNull() {
 						in.Skip()
 					} else {
-						(v3).UnmarshalEasyJSON(in)
+						(v6).UnmarshalEasyJSON(in)
 					}
-					out.TestPackages = append(out.TestPackages, v3)
+					out.TestPackages = append(out.TestPackages, v6)
 					in.WantComma()
 				}
 				in.Delim(']')
@@ -233,6 +325,20 @@ func easyjsonAee5a8cfEncodeGithubComNikeeeCappuInternalLockfile1(out *jwriter.Wr
 		out.RawString(prefix)
 		easyjsonAee5a8cfEncodeGithubComNikeeeCappuInternalConfig(out, in.Roots)
 	}
+	if len(in.PlatformOrder) != 0 {
+		const prefix string = ",\"platformOrder\":"
+		out.RawString(prefix)
+		{
+			out.RawByte('[')
+			for v7, v8 := range in.PlatformOrder {
+				if v7 > 0 {
+					out.RawByte(',')
+				}
+				out.String(string(v8))
+			}
+			out.RawByte(']')
+		}
+	}
 	{
 		const prefix string = ",\"packages\":"
 		out.RawString(prefix)
@@ -240,11 +346,39 @@ func easyjsonAee5a8cfEncodeGithubComNikeeeCappuInternalLockfile1(out *jwriter.Wr
 			out.RawString("null")
 		} else {
 			out.RawByte('[')
-			for v4, v5 := range in.Packages {
-				if v4 > 0 {
+			for v9, v10 := range in.Packages {
+				if v9 > 0 {
 					out.RawByte(',')
 				}
-				(v5).MarshalEasyJSON(out)
+				(v10).MarshalEasyJSON(out)
+			}
+			out.RawByte(']')
+		}
+	}
+	if len(in.CompileOnlyPackages) != 0 {
+		const prefix string = ",\"compileOnlyPackages\":"
+		out.RawString(prefix)
+		{
+			out.RawByte('[')
+			for v11, v12 := range in.CompileOnlyPackages {
+				if v11 > 0 {
+					out.RawByte(',')
+				}
+				(v12).MarshalEasyJSON(out)
+			}
+			out.RawByte(']')
+		}
+	}
+	if len(in.RuntimeOnlyPackages) != 0 {
+		const prefix string = ",\"runtimeOnlyPackages\":"
+		out.RawString(prefix)
+		{
+			out.RawByte('[')
+			for v13, v14 := range in.RuntimeOnlyPackages {
+				if v13 > 0 {
+					out.RawByte(',')
+				}
+				(v14).MarshalEasyJSON(out)
 			}
 			out.RawByte(']')
 		}
@@ -254,11 +388,11 @@ func easyjsonAee5a8cfEncodeGithubComNikeeeCappuInternalLockfile1(out *jwriter.Wr
 		out.RawString(prefix)
 		{
 			out.RawByte('[')
-			for v6, v7 := range in.ProcessorPackages {
-				if v6 > 0 {
+			for v15, v16 := range in.ProcessorPackages {
+				if v15 > 0 {
 					out.RawByte(',')
 				}
-				(v7).MarshalEasyJSON(out)
+				(v16).MarshalEasyJSON(out)
 			}
 			out.RawByte(']')
 		}
@@ -268,11 +402,11 @@ func easyjsonAee5a8cfEncodeGithubComNikeeeCappuInternalLockfile1(out *jwriter.Wr
 		out.RawString(prefix)
 		{
 			out.RawByte('[')
-			for v8, v9 := range in.TestPackages {
-				if v8 > 0 {
+			for v17, v18 := range in.TestPackages {
+				if v17 > 0 {
 					out.RawByte(',')
 				}
-				(v9).MarshalEasyJSON(out)
+				(v18).MarshalEasyJSON(out)
 			}
 			out.RawByte(']')
 		}
@@ -317,22 +451,44 @@ func easyjsonAee5a8cfDecodeGithubComNikeeeCappuInternalConfig(in *jlexer.Lexer, 
 		key := in.UnsafeFieldName(false)
 		in.WantColon()
 		switch key {
+		case "platform":
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				in.Delim('{')
+				out.Platform = make(map[string]string)
+				for !in.IsDelim('}') {
+					key := string(in.String())
+					in.WantColon()
+					var v19 string
+					if in.IsNull() {
+						in.Skip()
+					} else {
+						v19 = string(in.String())
+					}
+					(out.Platform)[key] = v19
+					in.WantComma()
+				}
+				in.Delim('}')
+			}
 		case "api":
 			if in.IsNull() {
 				in.Skip()
 			} else {
 				in.Delim('{')
-				out.API = make(map[string]string)
+				out.API = make(map[string]config.Dependency)
 				for !in.IsDelim('}') {
 					key := string(in.String())
 					in.WantColon()
-					var v10 string
+					var v20 config.Dependency
 					if in.IsNull() {
 						in.Skip()
 					} else {
-						v10 = string(in.String())
+						if data := in.Raw(); in.Ok() {
+							in.AddError((v20).UnmarshalJSON(data))
+						}
 					}
-					(out.API)[key] = v10
+					(out.API)[key] = v20
 					in.WantComma()
 				}
 				in.Delim('}')
@@ -342,17 +498,63 @@ func easyjsonAee5a8cfDecodeGithubComNikeeeCappuInternalConfig(in *jlexer.Lexer, 
 				in.Skip()
 			} else {
 				in.Delim('{')
-				out.Implementation = make(map[string]string)
+				out.Implementation = make(map[string]config.Dependency)
 				for !in.IsDelim('}') {
 					key := string(in.String())
 					in.WantColon()
-					var v11 string
+					var v21 config.Dependency
 					if in.IsNull() {
 						in.Skip()
 					} else {
-						v11 = string(in.String())
+						if data := in.Raw(); in.Ok() {
+							in.AddError((v21).UnmarshalJSON(data))
+						}
 					}
-					(out.Implementation)[key] = v11
+					(out.Implementation)[key] = v21
+					in.WantComma()
+				}
+				in.Delim('}')
+			}
+		case "compileOnly":
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				in.Delim('{')
+				out.CompileOnly = make(map[string]config.Dependency)
+				for !in.IsDelim('}') {
+					key := string(in.String())
+					in.WantColon()
+					var v22 config.Dependency
+					if in.IsNull() {
+						in.Skip()
+					} else {
+						if data := in.Raw(); in.Ok() {
+							in.AddError((v22).UnmarshalJSON(data))
+						}
+					}
+					(out.CompileOnly)[key] = v22
+					in.WantComma()
+				}
+				in.Delim('}')
+			}
+		case "runtimeOnly":
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				in.Delim('{')
+				out.RuntimeOnly = make(map[string]config.Dependency)
+				for !in.IsDelim('}') {
+					key := string(in.String())
+					in.WantColon()
+					var v23 config.Dependency
+					if in.IsNull() {
+						in.Skip()
+					} else {
+						if data := in.Raw(); in.Ok() {
+							in.AddError((v23).UnmarshalJSON(data))
+						}
+					}
+					(out.RuntimeOnly)[key] = v23
 					in.WantComma()
 				}
 				in.Delim('}')
@@ -362,17 +564,19 @@ func easyjsonAee5a8cfDecodeGithubComNikeeeCappuInternalConfig(in *jlexer.Lexer, 
 				in.Skip()
 			} else {
 				in.Delim('{')
-				out.AnnotationProcessor = make(map[string]string)
+				out.AnnotationProcessor = make(map[string]config.Dependency)
 				for !in.IsDelim('}') {
 					key := string(in.String())
 					in.WantColon()
-					var v12 string
+					var v24 config.Dependency
 					if in.IsNull() {
 						in.Skip()
 					} else {
-						v12 = string(in.String())
+						if data := in.Raw(); in.Ok() {
+							in.AddError((v24).UnmarshalJSON(data))
+						}
 					}
-					(out.AnnotationProcessor)[key] = v12
+					(out.AnnotationProcessor)[key] = v24
 					in.WantComma()
 				}
 				in.Delim('}')
@@ -382,17 +586,19 @@ func easyjsonAee5a8cfDecodeGithubComNikeeeCappuInternalConfig(in *jlexer.Lexer, 
 				in.Skip()
 			} else {
 				in.Delim('{')
-				out.TestImplementation = make(map[string]string)
+				out.TestImplementation = make(map[string]config.Dependency)
 				for !in.IsDelim('}') {
 					key := string(in.String())
 					in.WantColon()
-					var v13 string
+					var v25 config.Dependency
 					if in.IsNull() {
 						in.Skip()
 					} else {
-						v13 = string(in.String())
+						if data := in.Raw(); in.Ok() {
+							in.AddError((v25).UnmarshalJSON(data))
+						}
 					}
-					(out.TestImplementation)[key] = v13
+					(out.TestImplementation)[key] = v25
 					in.WantComma()
 				}
 				in.Delim('}')
@@ -412,22 +618,43 @@ func easyjsonAee5a8cfEncodeGithubComNikeeeCappuInternalConfig(out *jwriter.Write
 	first := true
 	_ = first
 	{
-		const prefix string = ",\"api\":"
+		const prefix string = ",\"platform\":"
 		out.RawString(prefix[1:])
+		if in.Platform == nil && (out.Flags&jwriter.NilMapAsEmpty) == 0 {
+			out.RawString(`null`)
+		} else {
+			out.RawByte('{')
+			v26First := true
+			for v26Name, v26Value := range in.Platform {
+				if v26First {
+					v26First = false
+				} else {
+					out.RawByte(',')
+				}
+				out.String(string(v26Name))
+				out.RawByte(':')
+				out.String(string(v26Value))
+			}
+			out.RawByte('}')
+		}
+	}
+	{
+		const prefix string = ",\"api\":"
+		out.RawString(prefix)
 		if in.API == nil && (out.Flags&jwriter.NilMapAsEmpty) == 0 {
 			out.RawString(`null`)
 		} else {
 			out.RawByte('{')
-			v14First := true
-			for v14Name, v14Value := range in.API {
-				if v14First {
-					v14First = false
+			v27First := true
+			for v27Name, v27Value := range in.API {
+				if v27First {
+					v27First = false
 				} else {
 					out.RawByte(',')
 				}
-				out.String(string(v14Name))
+				out.String(string(v27Name))
 				out.RawByte(':')
-				out.String(string(v14Value))
+				out.Raw((v27Value).MarshalJSON())
 			}
 			out.RawByte('}')
 		}
@@ -439,16 +666,58 @@ func easyjsonAee5a8cfEncodeGithubComNikeeeCappuInternalConfig(out *jwriter.Write
 			out.RawString(`null`)
 		} else {
 			out.RawByte('{')
-			v15First := true
-			for v15Name, v15Value := range in.Implementation {
-				if v15First {
-					v15First = false
+			v28First := true
+			for v28Name, v28Value := range in.Implementation {
+				if v28First {
+					v28First = false
 				} else {
 					out.RawByte(',')
 				}
-				out.String(string(v15Name))
+				out.String(string(v28Name))
 				out.RawByte(':')
-				out.String(string(v15Value))
+				out.Raw((v28Value).MarshalJSON())
+			}
+			out.RawByte('}')
+		}
+	}
+	{
+		const prefix string = ",\"compileOnly\":"
+		out.RawString(prefix)
+		if in.CompileOnly == nil && (out.Flags&jwriter.NilMapAsEmpty) == 0 {
+			out.RawString(`null`)
+		} else {
+			out.RawByte('{')
+			v29First := true
+			for v29Name, v29Value := range in.CompileOnly {
+				if v29First {
+					v29First = false
+				} else {
+					out.RawByte(',')
+				}
+				out.String(string(v29Name))
+				out.RawByte(':')
+				out.Raw((v29Value).MarshalJSON())
+			}
+			out.RawByte('}')
+		}
+	}
+	{
+		const prefix string = ",\"runtimeOnly\":"
+		out.RawString(prefix)
+		if in.RuntimeOnly == nil && (out.Flags&jwriter.NilMapAsEmpty) == 0 {
+			out.RawString(`null`)
+		} else {
+			out.RawByte('{')
+			v30First := true
+			for v30Name, v30Value := range in.RuntimeOnly {
+				if v30First {
+					v30First = false
+				} else {
+					out.RawByte(',')
+				}
+				out.String(string(v30Name))
+				out.RawByte(':')
+				out.Raw((v30Value).MarshalJSON())
 			}
 			out.RawByte('}')
 		}
@@ -460,16 +729,16 @@ func easyjsonAee5a8cfEncodeGithubComNikeeeCappuInternalConfig(out *jwriter.Write
 			out.RawString(`null`)
 		} else {
 			out.RawByte('{')
-			v16First := true
-			for v16Name, v16Value := range in.AnnotationProcessor {
-				if v16First {
-					v16First = false
+			v31First := true
+			for v31Name, v31Value := range in.AnnotationProcessor {
+				if v31First {
+					v31First = false
 				} else {
 					out.RawByte(',')
 				}
-				out.String(string(v16Name))
+				out.String(string(v31Name))
 				out.RawByte(':')
-				out.String(string(v16Value))
+				out.Raw((v31Value).MarshalJSON())
 			}
 			out.RawByte('}')
 		}
@@ -481,16 +750,16 @@ func easyjsonAee5a8cfEncodeGithubComNikeeeCappuInternalConfig(out *jwriter.Write
 			out.RawString(`null`)
 		} else {
 			out.RawByte('{')
-			v17First := true
-			for v17Name, v17Value := range in.TestImplementation {
-				if v17First {
-					v17First = false
+			v32First := true
+			for v32Name, v32Value := range in.TestImplementation {
+				if v32First {
+					v32First = false
 				} else {
 					out.RawByte(',')
 				}
-				out.String(string(v17Name))
+				out.String(string(v32Name))
 				out.RawByte(':')
-				out.String(string(v17Value))
+				out.Raw((v32Value).MarshalJSON())
 			}
 			out.RawByte('}')
 		}
@@ -545,9 +814,9 @@ func easyjsonAee5a8cfDecodeGithubComNikeeeCappuInternalLockfile2(in *jlexer.Lexe
 					out.Licenses = (out.Licenses)[:0]
 				}
 				for !in.IsDelim(']') {
-					var v18 packages.License
-					easyjsonAee5a8cfDecodeGithubComNikeeeCappuInternalPackages(in, &v18)
-					out.Licenses = append(out.Licenses, v18)
+					var v33 packages.License
+					easyjsonAee5a8cfDecodeGithubComNikeeeCappuInternalPackages(in, &v33)
+					out.Licenses = append(out.Licenses, v33)
 					in.WantComma()
 				}
 				in.Delim(']')
@@ -586,11 +855,11 @@ func easyjsonAee5a8cfEncodeGithubComNikeeeCappuInternalLockfile2(out *jwriter.Wr
 		out.RawString(prefix)
 		{
 			out.RawByte('[')
-			for v19, v20 := range in.Licenses {
-				if v19 > 0 {
+			for v34, v35 := range in.Licenses {
+				if v34 > 0 {
 					out.RawByte(',')
 				}
-				easyjsonAee5a8cfEncodeGithubComNikeeeCappuInternalPackages(out, v20)
+				easyjsonAee5a8cfEncodeGithubComNikeeeCappuInternalPackages(out, v35)
 			}
 			out.RawByte(']')
 		}

@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/md5"
 	"crypto/sha1"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -32,34 +31,13 @@ func ResolvePublishRegistry(flag, configRepo, envRegistry string) string {
 	return config.DefaultPublishRegistry
 }
 
-// BearerToken is a registry bearer credential, distinct from a plain string.
-type BearerToken string
-
 // Auth is publishing credentials: Basic (username+password) or Bearer (token).
-type Auth struct {
-	Basic    bool
-	Username string
-	Password string
-	Token    BearerToken
-}
+type Auth = httpx.Auth
 
 // ResolvePublishAuth reads credentials from env: Basic when a username+password
 // pair is set, else Bearer from a token, else ok=false (the CLI then errors).
 func ResolvePublishAuth(username, password, token string) (Auth, bool) {
-	if username != "" && password != "" {
-		return Auth{Basic: true, Username: username, Password: password}, true
-	}
-	if token != "" {
-		return Auth{Token: BearerToken(token)}, true
-	}
-	return Auth{}, false
-}
-
-func (a Auth) header() string {
-	if a.Basic {
-		return "Basic " + base64.StdEncoding.EncodeToString([]byte(a.Username+":"+a.Password))
-	}
-	return "Bearer " + string(a.Token)
+	return httpx.ResolveAuth(username, password, token)
 }
 
 // Maven2Path is the maven2 path for a file: group dots become directories.
@@ -127,7 +105,7 @@ func PublishArtifacts(opts Options) ([]string, error) {
 	}
 	authorization := ""
 	if opts.Auth != nil {
-		authorization = opts.Auth.header()
+		authorization = opts.Auth.Header()
 	}
 	base := strings.TrimSuffix(opts.Repo, "/") + "/"
 	var uploaded []string

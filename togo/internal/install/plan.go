@@ -1,6 +1,7 @@
 package install
 
 import (
+	"errors"
 	"maps"
 	"regexp"
 	"slices"
@@ -29,10 +30,10 @@ type PickedVersion struct {
 
 // PickAddVersion chooses the version for key given an absent or partial spec:
 // the newest published version matching spec whose transitive resolution -
-// together with everything already configured - is conflict-free. When no
-// candidate is clean, the newest match is returned flagged incompatible. ok is
-// false when nothing matches at all.
-func PickAddVersion(cfg *config.Config, key, spec string, srcs []packages.PackageSource) (PickedVersion, bool, error) {
+// together with everything already configured, under the platform-managed
+// versions - is conflict-free. When no candidate is clean, the newest match is
+// returned flagged incompatible. ok is false when nothing matches at all.
+func PickAddVersion(cfg *config.Config, key, spec string, srcs []packages.PackageSource, managed map[packages.PackageKey]string) (PickedVersion, bool, error) {
 	groupID, artifactID, _ := strings.Cut(key, ":")
 	published, err := listVersions(groupID, artifactID, srcs)
 	if err != nil {
@@ -45,16 +46,16 @@ func PickAddVersion(cfg *config.Config, key, spec string, srcs []packages.Packag
 
 	// The new dependency joins the existing roots (any previous entry for the
 	// same key is superseded by the candidate).
-	var existing []packages.Coordinates
-	for _, c := range sources.CompileRoots(cfg) {
-		if string(c.GroupID)+":"+string(c.ArtifactID) != key {
+	var existing []packages.DependencyDeclaration
+	for _, c := range sources.MainRoots(cfg) {
+		if string(c.Coordinates.GAV().Key()) != key {
 			existing = append(existing, c)
 		}
 	}
 	for _, version := range candidates[:min(pickAttempts, len(candidates))] {
-		roots := append(append([]packages.Coordinates(nil), existing...),
-			packages.NewCoordinates(groupID, artifactID, version))
-		res, err := packages.ResolveTransitive(roots, srcs, nil)
+		roots := append(append([]packages.DependencyDeclaration(nil), existing...),
+			packages.DependencyDeclaration{Coordinates: packages.NewCoordinates(groupID, artifactID, version)})
+		res, err := packages.ResolveTransitive(roots, srcs, packages.ResolveOptions{Managed: managed})
 		if err != nil {
 			return PickedVersion{}, false, err
 		}
@@ -91,61 +92,150 @@ func majorOf(version string) string {
 	return version
 }
 
+// newerInMajor lists the stable versions of key newer than current within
+// current's major, newest first. Nil when current is not a published version
+// (unknown ordering: never risk a downgrade).
+func newerInMajor(key, current string, srcs []packages.PackageSource) ([]string, error) {
+	groupID, artifactID, _ := strings.Cut(key, ":")
+	published, err := listVersions(groupID, artifactID, srcs)
+	if err != nil {
+		return nil, err
+	}
+	order := packages.MatchingVersions(published, "") // newest (publish order) first
+	currentIndex := slices.Index(order, current)
+	if currentIndex < 0 {
+		return nil, nil
+	}
+	var newer []string
+	for _, v := range order[:currentIndex] {
+		if isStableVersion(v) && majorOf(v) == majorOf(current) {
+			newer = append(newer, v)
+		}
+	}
+	return newer, nil
+}
+
+func clean(res packages.Resolution) bool {
+	return len(res.Conflicts) == 0 && len(res.Missing) == 0
+}
+
 // PlanUpdates returns the newest STABLE version each declared dependency can
 // move to WITHIN its current major (no major bumps) while keeping its
-// configuration's transitive graph conflict-free and complete. Port of
+// configuration's transitive graph conflict-free and complete. Platforms move
+// first (a newer BOM moves every managed version at once; the compile graph
+// must stay clean under it), then the dependencies, checked against the moved
+// platform set; a managed entry has no version of its own to bump. Port of
 // planUpdates.
 func PlanUpdates(cfg *config.Config, srcs []packages.PackageSource) ([]DependencyBump, error) {
 	if srcs == nil {
 		srcs = sources.Configured(cfg)
 	}
-	working := map[string]map[string]string{
-		"api":                 clone(cfg.Dependencies.API),
-		"implementation":      clone(cfg.Dependencies.Implementation),
-		"annotationProcessor": clone(cfg.Dependencies.AnnotationProcessor),
-		"testImplementation":  clone(cfg.Dependencies.TestImplementation),
+	platform := cfg.Dependencies // Platform/PlatformOrder are read, Platform is replaced per trial
+	platform.Platform = maps.Clone(cfg.Dependencies.Platform)
+	working := map[string]map[string]config.Dependency{}
+	for _, name := range config.Configurations {
+		working[name] = maps.Clone(cfg.Dependencies.Configuration(name))
 	}
-	graphRoots := func(configuration string) []packages.Coordinates {
-		switch configuration {
-		case "annotationProcessor":
-			return sources.RootsOf(working["annotationProcessor"])
-		case "testImplementation":
-			return sources.RootsOf(working["testImplementation"])
-		default:
-			return append(sources.RootsOf(working["api"]), sources.RootsOf(working["implementation"])...)
+	// mainRoots is the one graph install resolves the main classpath as (see
+	// sources.MainRoots), from the working maps.
+	mainRoots := func() []packages.DependencyDeclaration {
+		var roots []packages.DependencyDeclaration
+		for _, name := range []string{"api", "implementation", "compileOnly", "runtimeOnly"} {
+			roots = append(roots, sources.RootsOf(working[name])...)
 		}
+		return roots
+	}
+	// graphRoots is the graph a configuration's entries are checked in: the
+	// main graph for the four classpath configurations, their own for
+	// processors and tests.
+	graphRoots := func(configuration string) []packages.DependencyDeclaration {
+		switch configuration {
+		case "annotationProcessor", "testImplementation":
+			return sources.RootsOf(working[configuration])
+		default:
+			return mainRoots()
+		}
+	}
+	// allClean reports whether every graph resolves clean and complete under
+	// a managed set. A root the trial platform no longer manages rejects the
+	// trial; any other resolve error propagates.
+	allClean := func(managed map[packages.PackageKey]string) (bool, error) {
+		graphs := [][]packages.DependencyDeclaration{mainRoots()}
+		for _, name := range []string{"annotationProcessor", "testImplementation"} {
+			if len(working[name]) > 0 {
+				graphs = append(graphs, graphRoots(name))
+			}
+		}
+		for _, roots := range graphs {
+			if len(roots) == 0 {
+				continue
+			}
+			res, err := packages.ResolveTransitive(roots, srcs, packages.ResolveOptions{Managed: managed})
+			var unmanaged packages.UnmanagedRootError
+			if errors.As(err, &unmanaged) {
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			if !clean(res) {
+				return false, nil
+			}
+		}
+		return true, nil
 	}
 
 	var bumps []DependencyBump
-	for _, configuration := range updateConfigs {
-		for _, key := range sortedKeys(working[configuration]) {
-			current := working[configuration][key]
-			groupID, artifactID, _ := strings.Cut(key, ":")
-			published, err := listVersions(groupID, artifactID, srcs)
+	for _, key := range platform.PlatformKeys() {
+		current := platform.Platform[key]
+		newer, err := newerInMajor(key, current, srcs)
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range newer[:min(updateAttempts, len(newer))] {
+			trial := platform
+			trial.Platform = maps.Clone(platform.Platform)
+			trial.Platform[key] = candidate
+			managed, err := sources.ManagedVersionsOf(trial, srcs)
 			if err != nil {
 				return nil, err
 			}
-			order := packages.MatchingVersions(published, "") // newest (publish order) first
-			currentIndex := slices.Index(order, current)
-			if currentIndex < 0 {
-				continue // unknown ordering: do not risk a downgrade
+			ok, err := allClean(managed)
+			if err != nil {
+				return nil, err
 			}
-			// newer, stable, and the same major (a 2.x dep never auto-bumps to 3.x)
-			var newer []string
-			for _, v := range order[:currentIndex] {
-				if isStableVersion(v) && majorOf(v) == majorOf(current) {
-					newer = append(newer, v)
-				}
+			if ok {
+				platform = trial
+				bumps = append(bumps, DependencyBump{Configuration: config.PlatformConfiguration, Key: key, From: current, To: candidate})
+				break
+			}
+		}
+	}
+	managed, err := sources.ManagedVersionsOf(platform, srcs)
+	if err != nil {
+		return nil, err
+	}
+	for _, configuration := range updateConfigs {
+		for _, key := range sortedKeys(working[configuration]) {
+			current := working[configuration][key]
+			if current.Managed() {
+				continue // the platform owns this version
+			}
+			newer, err := newerInMajor(key, current.Version, srcs)
+			if err != nil {
+				return nil, err
 			}
 			for _, candidate := range newer[:min(updateAttempts, len(newer))] {
 				roots := withVersion(graphRoots(configuration), key, candidate)
-				res, err := packages.ResolveTransitive(roots, srcs, nil)
+				res, err := packages.ResolveTransitive(roots, srcs, packages.ResolveOptions{Managed: managed})
 				if err != nil {
 					return nil, err
 				}
-				if len(res.Conflicts) == 0 && len(res.Missing) == 0 {
-					working[configuration][key] = candidate
-					bumps = append(bumps, DependencyBump{Configuration: configuration, Key: key, From: current, To: candidate})
+				if clean(res) {
+					bumped := current
+					bumped.Version = candidate
+					working[configuration][key] = bumped
+					bumps = append(bumps, DependencyBump{Configuration: configuration, Key: key, From: current.Version, To: candidate})
 					break
 				}
 			}
@@ -163,59 +253,61 @@ type OutdatedDependency struct {
 	Latest        string // newest stable overall (a major bump), "" if none
 }
 
-// PlanOutdated returns every declared dependency that has a newer published
-// stable version, with the newest in-major version (Wanted) and newest overall
-// (Latest). Read-only. Port of planOutdated.
+// PlanOutdated returns every declared dependency (platforms included) that has
+// a newer published stable version, with the newest in-major version (Wanted)
+// and newest overall (Latest). Managed entries have no version of their own and
+// are skipped. Read-only. Port of planOutdated.
 func PlanOutdated(cfg *config.Config, srcs []packages.PackageSource) ([]OutdatedDependency, error) {
 	if srcs == nil {
 		srcs = sources.Configured(cfg)
 	}
-	sections := []struct {
-		configuration string
-		deps          map[string]string
-	}{
-		{"api", cfg.Dependencies.API},
-		{"implementation", cfg.Dependencies.Implementation},
-		{"annotationProcessor", cfg.Dependencies.AnnotationProcessor},
-		{"testImplementation", cfg.Dependencies.TestImplementation},
+	type entry struct{ configuration, key, current string }
+	var entries []entry
+	for _, key := range cfg.Dependencies.PlatformKeys() {
+		entries = append(entries, entry{config.PlatformConfiguration, key, cfg.Dependencies.Platform[key]})
+	}
+	for _, name := range config.Configurations {
+		deps := cfg.Dependencies.Configuration(name)
+		for _, key := range sortedKeys(deps) {
+			if !deps[key].Managed() { // a managed entry has no version of its own
+				entries = append(entries, entry{name, key, deps[key].Version})
+			}
+		}
 	}
 	var out []OutdatedDependency
-	for _, section := range sections {
-		for _, key := range sortedKeys(section.deps) {
-			current := section.deps[key]
-			groupID, artifactID, _ := strings.Cut(key, ":")
-			published, err := listVersions(groupID, artifactID, srcs)
-			if err != nil {
-				return nil, err
-			}
-			order := packages.MatchingVersions(published, "") // newest first
-			currentIndex := slices.Index(order, current)
-			if currentIndex < 0 {
-				continue // unknown ordering: do not guess
-			}
-			var newer []string
-			for _, v := range order[:currentIndex] {
-				if isStableVersion(v) {
-					newer = append(newer, v)
-				}
-			}
-			if len(newer) == 0 {
-				continue
-			}
-			row := OutdatedDependency{Configuration: section.configuration, Key: key, Current: current}
-			if latest := newer[0]; latest != current {
-				row.Latest = latest
-			}
-			for _, v := range newer {
-				if majorOf(v) == majorOf(current) {
-					if v != current {
-						row.Wanted = v
-					}
-					break
-				}
-			}
-			out = append(out, row)
+	for _, e := range entries {
+		groupID, artifactID, _ := strings.Cut(e.key, ":")
+		published, err := listVersions(groupID, artifactID, srcs)
+		if err != nil {
+			return nil, err
 		}
+		order := packages.MatchingVersions(published, "") // newest first
+		currentIndex := slices.Index(order, e.current)
+		if currentIndex < 0 {
+			continue // unknown ordering: do not guess
+		}
+		var newer []string
+		for _, v := range order[:currentIndex] {
+			if isStableVersion(v) {
+				newer = append(newer, v)
+			}
+		}
+		if len(newer) == 0 {
+			continue
+		}
+		row := OutdatedDependency{Configuration: e.configuration, Key: e.key, Current: e.current}
+		if latest := newer[0]; latest != e.current {
+			row.Latest = latest
+		}
+		for _, v := range newer {
+			if majorOf(v) == majorOf(e.current) {
+				if v != e.current {
+					row.Wanted = v
+				}
+				break
+			}
+		}
+		out = append(out, row)
 	}
 	return out, nil
 }
@@ -236,26 +328,17 @@ func listVersions(groupID, artifactID string, srcs []packages.PackageSource) ([]
 }
 
 // withVersion returns roots with the entry for key set to version.
-func withVersion(roots []packages.Coordinates, key, version string) []packages.Coordinates {
-	out := make([]packages.Coordinates, len(roots))
+func withVersion(roots []packages.DependencyDeclaration, key, version string) []packages.DependencyDeclaration {
+	out := make([]packages.DependencyDeclaration, len(roots))
 	for i, c := range roots {
-		if string(c.GroupID)+":"+string(c.ArtifactID) == key {
-			out[i] = packages.NewCoordinates(string(c.GroupID), string(c.ArtifactID), version)
-		} else {
-			out[i] = c
+		if string(c.Coordinates.GAV().Key()) == key {
+			c.Version = packages.Version(version)
 		}
+		out[i] = c
 	}
 	return out
 }
 
-func clone(m map[string]string) map[string]string {
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
-}
-
-func sortedKeys(m map[string]string) []string {
+func sortedKeys[V any](m map[string]V) []string {
 	return slices.Sorted(maps.Keys(m))
 }

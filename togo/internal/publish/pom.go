@@ -14,7 +14,7 @@ import (
 // scopedConfig maps a declared dependency configuration to the Maven scope its
 // POM entry gets (Gradle-published-POM style); api -> compile (scope omitted).
 type scopedConfig struct {
-	deps  map[string]string
+	deps  map[string]config.Dependency
 	scope string
 }
 
@@ -49,25 +49,61 @@ func GeneratePom(cfg *config.Config) (string, error) {
 	scoped := []scopedConfig{
 		{cfg.Dependencies.API, ""}, // compile is Maven's default - no <scope>
 		{cfg.Dependencies.Implementation, "runtime"},
+		{cfg.Dependencies.CompileOnly, "provided"},
+		{cfg.Dependencies.RuntimeOnly, "runtime"},
 		{cfg.Dependencies.TestImplementation, "test"},
 	}
 	var deps []string
 	for _, sc := range scoped {
 		for _, coordinate := range sortedKeys(sc.deps) {
-			version := sc.deps[coordinate]
+			dep := sc.deps[coordinate]
 			groupID, artifactID, _ := strings.Cut(coordinate, ":")
 			lines := []string{
 				"    <dependency>",
 				"      <groupId>" + escapeXML(groupID) + "</groupId>",
 				"      <artifactId>" + escapeXML(artifactID) + "</artifactId>",
-				"      <version>" + escapeXML(version) + "</version>",
+			}
+			// A managed entry has no version of its own: the imported platform
+			// below supplies it to consumers, exactly as it did to this build.
+			if dep.Version != "" {
+				lines = append(lines, "      <version>"+escapeXML(dep.Version)+"</version>")
+			}
+			if dep.Classifier != "" {
+				lines = append(lines, "      <classifier>"+escapeXML(dep.Classifier)+"</classifier>")
 			}
 			if sc.scope != "" {
 				lines = append(lines, "      <scope>"+sc.scope+"</scope>")
 			}
+			if len(dep.Exclude) > 0 {
+				lines = append(lines, "      <exclusions>")
+				for _, pattern := range dep.Exclude {
+					exGroup, exArtifact, _ := strings.Cut(pattern, ":")
+					lines = append(lines,
+						"        <exclusion>",
+						"          <groupId>"+escapeXML(exGroup)+"</groupId>",
+						"          <artifactId>"+escapeXML(exArtifact)+"</artifactId>",
+						"        </exclusion>")
+				}
+				lines = append(lines, "      </exclusions>")
+			}
 			lines = append(lines, "    </dependency>")
 			deps = append(deps, strings.Join(lines, "\n"))
 		}
+	}
+	// Platforms become scope=import entries, so a consumer resolves the managed
+	// versions the way this build did.
+	var platforms []string
+	for _, coordinate := range cfg.Dependencies.PlatformKeys() { // declaration order: precedence
+		groupID, artifactID, _ := strings.Cut(coordinate, ":")
+		platforms = append(platforms, strings.Join([]string{
+			"      <dependency>",
+			"        <groupId>" + escapeXML(groupID) + "</groupId>",
+			"        <artifactId>" + escapeXML(artifactID) + "</artifactId>",
+			"        <version>" + escapeXML(cfg.Dependencies.Platform[coordinate]) + "</version>",
+			"        <type>pom</type>",
+			"        <scope>import</scope>",
+			"      </dependency>",
+		}, "\n"))
 	}
 
 	var lines []string
@@ -86,6 +122,11 @@ func GeneratePom(cfg *config.Config) (string, error) {
 	if cfg.License != "" {
 		add("  <licenses>", "    <license>", "      <name>"+escapeXML(cfg.License)+"</name>", "    </license>", "  </licenses>")
 	}
+	if len(platforms) > 0 {
+		add("  <dependencyManagement>", "    <dependencies>")
+		add(platforms...)
+		add("    </dependencies>", "  </dependencyManagement>")
+	}
 	if len(deps) > 0 {
 		add("  <dependencies>")
 		add(deps...)
@@ -97,6 +138,6 @@ func GeneratePom(cfg *config.Config) (string, error) {
 
 // sortedKeys gives deterministic dependency order (Go maps are unordered; the
 // Node build relies on cappu.json's object-key order).
-func sortedKeys(m map[string]string) []string {
+func sortedKeys[V any](m map[string]V) []string {
 	return slices.Sorted(maps.Keys(m))
 }

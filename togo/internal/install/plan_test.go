@@ -16,7 +16,7 @@ func TestPickAddVersionNewestCompatible(t *testing.T) {
 		},
 		versions: map[string][]string{"org.x:y": {"1.0", "2.0"}},
 	}
-	picked, ok, err := PickAddVersion(cfg, "org.x:y", "", []packages.PackageSource{src})
+	picked, ok, err := PickAddVersion(cfg, "org.x:y", "", []packages.PackageSource{src}, nil)
 	if err != nil || !ok {
 		t.Fatalf("PickAddVersion ok=%v err=%v", ok, err)
 	}
@@ -32,7 +32,7 @@ func TestPickAddVersionRespectsSpec(t *testing.T) {
 		meta:     map[packages.CoordinateString]packages.PackageMetadata{"org.x:y:1.5": meta("org.x:y:1.5")},
 		versions: map[string][]string{"org.x:y": {"1.5", "2.0"}},
 	}
-	picked, ok, err := PickAddVersion(cfg, "org.x:y", "1", []packages.PackageSource{src})
+	picked, ok, err := PickAddVersion(cfg, "org.x:y", "1", []packages.PackageSource{src}, nil)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
@@ -58,7 +58,7 @@ func conflictSource() *fakeSource {
 
 func TestPickAddVersionFallsToCompatible(t *testing.T) {
 	cfg := project(t, `{"dependencies":{"implementation":{"org.x:base":"1.0"}}}`)
-	picked, ok, err := PickAddVersion(cfg, "org.x:lib", "", []packages.PackageSource{conflictSource()})
+	picked, ok, err := PickAddVersion(cfg, "org.x:lib", "", []packages.PackageSource{conflictSource()}, nil)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
@@ -72,7 +72,7 @@ func TestPickAddVersionFallsToCompatible(t *testing.T) {
 func TestPickAddVersionIncompatible(t *testing.T) {
 	cfg := project(t, `{"dependencies":{"implementation":{"org.x:base":"1.0"}}}`)
 	// spec "2" matches only 2.0, which always conflicts -> newest match, flagged.
-	picked, ok, err := PickAddVersion(cfg, "org.x:lib", "2", []packages.PackageSource{conflictSource()})
+	picked, ok, err := PickAddVersion(cfg, "org.x:lib", "2", []packages.PackageSource{conflictSource()}, nil)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
@@ -84,7 +84,7 @@ func TestPickAddVersionIncompatible(t *testing.T) {
 func TestPickAddVersionNoMatch(t *testing.T) {
 	cfg := project(t, `{}`)
 	src := &fakeSource{name: "test", versions: map[string][]string{}}
-	if _, ok, err := PickAddVersion(cfg, "org.x:y", "", []packages.PackageSource{src}); ok || err != nil {
+	if _, ok, err := PickAddVersion(cfg, "org.x:y", "", []packages.PackageSource{src}, nil); ok || err != nil {
 		t.Errorf("expected no match (ok=false), got ok=%v err=%v", ok, err)
 	}
 }
@@ -223,5 +223,79 @@ func TestMajorOfEdgeCases(t *testing.T) {
 		if got := majorOf(tc.version); got != tc.want {
 			t.Errorf("majorOf(%q) = %q, want %q", tc.version, got, tc.want)
 		}
+	}
+}
+
+func TestPlanUpdatesBumpsPlatformAndSkipsManaged(t *testing.T) {
+	cfg := project(t, `{"dependencies":{"platform":{"org.p:bom":"1.0"},"implementation":{"org.a:a":"","org.b:b":"1.0"}}}`)
+	src := &fakeSource{
+		name: "test",
+		meta: map[packages.CoordinateString]packages.PackageMetadata{
+			"org.p:bom:1.0": meta("org.p:bom:1.0"), "org.p:bom:1.1": meta("org.p:bom:1.1"),
+			"org.a:a:1": meta("org.a:a:1"), "org.a:a:2": meta("org.a:a:2"),
+			"org.b:b:1.0": meta("org.b:b:1.0"), "org.b:b:1.1": meta("org.b:b:1.1"),
+		},
+		versions: map[string][]string{
+			"org.p:bom": {"1.0", "1.1"}, "org.a:a": {"1", "2"}, "org.b:b": {"1.0", "1.1"},
+		},
+		managed: map[packages.CoordinateString]map[packages.PackageKey]string{
+			"org.p:bom:1.0": {"org.a:a": "1"},
+			"org.p:bom:1.1": {"org.a:a": "2"},
+		},
+	}
+	bumps, err := PlanUpdates(cfg, []packages.PackageSource{src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the platform moves (taking the managed a with it), b bumps on its own,
+	// and the managed a is never bumped as a dependency
+	want := []DependencyBump{
+		{Configuration: "platform", Key: "org.p:bom", From: "1.0", To: "1.1"},
+		{Configuration: "implementation", Key: "org.b:b", From: "1.0", To: "1.1"},
+	}
+	if len(bumps) != 2 || bumps[0] != want[0] || bumps[1] != want[1] {
+		t.Errorf("bumps = %+v, want %+v", bumps, want)
+	}
+}
+
+func TestPlanOutdatedIncludesPlatformSkipsManaged(t *testing.T) {
+	cfg := project(t, `{"dependencies":{"platform":{"org.p:bom":"1.0"},"implementation":{"org.a:a":""}}}`)
+	src := &fakeSource{
+		name:     "test",
+		versions: map[string][]string{"org.p:bom": {"1.0", "1.2"}, "org.a:a": {"1", "2"}},
+	}
+	rows, err := PlanOutdated(cfg, []packages.PackageSource{src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := OutdatedDependency{Configuration: "platform", Key: "org.p:bom", Current: "1.0", Wanted: "1.2", Latest: "1.2"}
+	if len(rows) != 1 || rows[0] != want {
+		t.Errorf("rows = %+v, want [%+v]", rows, want)
+	}
+}
+
+func TestPlanUpdatesRejectsPlatformThatDropsManagedEntry(t *testing.T) {
+	// bom 1.1 no longer manages org.a:a (declared ""): that candidate is
+	// rejected, not an update failure, and the test graph is checked too.
+	cfg := project(t, `{"dependencies":{"platform":{"org.p:bom":"1.0"},"implementation":{"org.a:a":""},"testImplementation":{"org.t:t":""}}}`)
+	src := &fakeSource{
+		name: "test",
+		meta: map[packages.CoordinateString]packages.PackageMetadata{
+			"org.p:bom:1.0": meta("org.p:bom:1.0"), "org.p:bom:1.1": meta("org.p:bom:1.1"), "org.p:bom:1.2": meta("org.p:bom:1.2"),
+			"org.a:a:1": meta("org.a:a:1"), "org.t:t:1": meta("org.t:t:1"),
+		},
+		versions: map[string][]string{"org.p:bom": {"1.0", "1.1", "1.2"}},
+		managed: map[packages.CoordinateString]map[packages.PackageKey]string{
+			"org.p:bom:1.0": {"org.a:a": "1", "org.t:t": "1"},
+			"org.p:bom:1.1": {"org.a:a": "1"}, // drops the test dependency
+			"org.p:bom:1.2": {"org.t:t": "1"}, // drops the compile dependency
+		},
+	}
+	bumps, err := PlanUpdates(cfg, []packages.PackageSource{src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bumps) != 0 {
+		t.Errorf("neither candidate manages everything, want no bump; got %+v", bumps)
 	}
 }

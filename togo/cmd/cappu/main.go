@@ -198,10 +198,12 @@ func (c *licensesCmd) Run(a *appState) error {
 }
 
 type addCmd struct {
-	// No kong enum/required: RunAdd resolves aliases (a, i, ap, ti) and exits 2
-	// with the same usage text as the TS build (kong would reject aliases).
-	Configuration string   `arg:"" optional:"" help:"api|implementation|annotationProcessor|testImplementation"`
-	Coordinates   []string `arg:"" optional:"" name:"coord" help:"group:artifact[:version] ..."`
+	// No kong enum/required: RunAdd resolves aliases (a, i, ap, ti, p) and exits
+	// 2 with the same usage text as the TS build (kong would reject aliases).
+	Configuration string   `arg:"" optional:"" help:"api|implementation|compileOnly|runtimeOnly|annotationProcessor|testImplementation|platform"`
+	Coordinates   []string `arg:"" optional:"" name:"coord" help:"group:artifact[:version] ... (no version: the platform's, else the newest conflict-free)"`
+	Classifier    string   `help:"Artifact classifier of the added entries, e.g. linux-x86_64"`
+	Exclude       []string `help:"Transitive group:artifact to exclude below the added entries (repeatable; either side may be *)"`
 }
 
 func (c *addCmd) Run(a *appState) error {
@@ -209,13 +211,13 @@ func (c *addCmd) Run(a *appState) error {
 	if err != nil {
 		return err
 	}
-	return exit(cli.RunAdd(c.Configuration, c.Coordinates, a.configPath, cfg))
+	return exit(cli.RunAdd(c.Configuration, c.Coordinates, cli.AddOptions{Classifier: c.Classifier, Exclude: c.Exclude}, a.configPath, cfg))
 }
 
 type removeCmd struct {
-	// No kong enum/required: RunRemove resolves aliases (a, i, ap, ti) and
+	// No kong enum/required: RunRemove resolves aliases (a, i, ap, ti, p) and
 	// exits 2 with the same usage text as the TS build.
-	Configuration string   `arg:"" optional:"" help:"api|implementation|annotationProcessor|testImplementation"`
+	Configuration string   `arg:"" optional:"" help:"api|implementation|compileOnly|runtimeOnly|annotationProcessor|testImplementation|platform"`
 	Coordinates   []string `arg:"" optional:"" name:"coord" help:"group:artifact ..."`
 }
 

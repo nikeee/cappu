@@ -16,6 +16,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/nikeee/cappu/internal/config"
 	"github.com/nikeee/cappu/internal/packages"
@@ -54,14 +55,17 @@ type coordinates struct {
 	GroupID    string `json:"groupId"`
 	ArtifactID string `json:"artifactId"`
 	Version    string `json:"version"`
+	// Classifier is omitted for the plain artifact, so locks written before
+	// classifiers existed read back unchanged.
+	Classifier string `json:"classifier,omitempty"`
 }
 
 func newCoordinates(c packages.Coordinates) coordinates {
-	return coordinates{GroupID: string(c.GroupID), ArtifactID: string(c.ArtifactID), Version: string(c.Version)}
+	return coordinates{GroupID: string(c.GroupID), ArtifactID: string(c.ArtifactID), Version: string(c.Version), Classifier: string(c.Classifier)}
 }
 
 func (c coordinates) toDomain() packages.Coordinates {
-	return packages.NewCoordinates(c.GroupID, c.ArtifactID, c.Version)
+	return packages.NewCoordinates(c.GroupID, c.ArtifactID, c.Version).WithClassifier(c.Classifier)
 }
 
 // Lockfile is the cappu-lock.json document (only version 2 is honored).
@@ -70,10 +74,15 @@ func (c coordinates) toDomain() packages.Coordinates {
 type Lockfile struct {
 	Version int `json:"version"`
 	// Roots is the dependencies section this lock was resolved from.
-	Roots             config.Dependencies `json:"roots"`
-	Packages          []LockedPackage     `json:"packages"`
-	ProcessorPackages []LockedPackage     `json:"processorPackages,omitempty"`
-	TestPackages      []LockedPackage     `json:"testPackages,omitempty"`
+	Roots config.Dependencies `json:"roots"`
+	// PlatformOrder is the precedence order of Roots.Platform at resolve time
+	// (the map cannot carry it); reordering platforms re-resolves.
+	PlatformOrder       []string        `json:"platformOrder,omitempty"`
+	Packages            []LockedPackage `json:"packages"`
+	CompileOnlyPackages []LockedPackage `json:"compileOnlyPackages,omitempty"`
+	RuntimeOnlyPackages []LockedPackage `json:"runtimeOnlyPackages,omitempty"`
+	ProcessorPackages   []LockedPackage `json:"processorPackages,omitempty"`
+	TestPackages        []LockedPackage `json:"testPackages,omitempty"`
 }
 
 // lockTarget maps each locked configuration to the lib directory it installs
@@ -85,6 +94,8 @@ type lockTarget struct {
 
 var lockTargets = []lockTarget{
 	{config.DefaultClassPath, func(l *Lockfile) []LockedPackage { return l.Packages }},
+	{config.DefaultCompileOnlyPath, func(l *Lockfile) []LockedPackage { return l.CompileOnlyPackages }},
+	{config.DefaultRuntimeOnlyPath, func(l *Lockfile) []LockedPackage { return l.RuntimeOnlyPackages }},
 	{config.DefaultProcessorPath, func(l *Lockfile) []LockedPackage { return l.ProcessorPackages }},
 	{config.DefaultTestClassPath, func(l *Lockfile) []LockedPackage { return l.TestPackages }},
 }
@@ -136,21 +147,21 @@ func Write(cfg *config.Config, lock *Lockfile) error {
 }
 
 // Matches reports whether the lock was resolved from exactly this dependencies
-// section. Empty configurations are dropped before comparing, so locks written
-// before a configuration existed do not turn stale when the schema grows.
+// section, platform precedence included. Empty configurations are dropped
+// before comparing, so locks written before a configuration existed do not
+// turn stale when the schema grows.
 func (l *Lockfile) Matches(cfg *config.Config) bool {
-	return normalizeDeps(l.Roots) == normalizeDeps(cfg.Dependencies)
+	return normalizeDeps(l.Roots) == normalizeDeps(cfg.Dependencies) &&
+		slices.Equal(l.PlatformOrder, cfg.Dependencies.PlatformKeys())
 }
 
 func normalizeDeps(d config.Dependencies) string {
-	m := map[string]map[string]string{}
-	for name, entries := range map[string]map[string]string{
-		"api":                 d.API,
-		"implementation":      d.Implementation,
-		"annotationProcessor": d.AnnotationProcessor,
-		"testImplementation":  d.TestImplementation,
-	} {
-		if len(entries) > 0 {
+	m := map[string]any{}
+	if len(d.Platform) > 0 {
+		m[config.PlatformConfiguration] = d.Platform
+	}
+	for _, name := range config.Configurations {
+		if entries := d.Configuration(name); len(entries) > 0 {
 			m[name] = entries
 		}
 	}
@@ -170,11 +181,8 @@ func VerifyInstalled(cfg *config.Config) VerifyResult {
 	for _, target := range lockTargets {
 		for _, pkg := range target.packages(lock) {
 			c := pkg.Coordinates.toDomain()
-			id := string(c.String())
-			file := filepath.Join(
-				cfg.ResolvePath(target.dir),
-				string(c.ArtifactID)+"-"+string(c.Version)+".jar",
-			)
+			id := c.Label()
+			file := filepath.Join(cfg.ResolvePath(target.dir), c.ArtifactJarName())
 			digest, err := sha256File(file)
 			switch {
 			case errors.Is(err, os.ErrNotExist):
@@ -182,8 +190,8 @@ func VerifyInstalled(cfg *config.Config) VerifyResult {
 			case err != nil:
 				// Unreadable for another reason: treat as modified (cannot confirm).
 				result.Modified = append(result.Modified, id)
-			case digest == pkg.Sha256:
-				result.OK = append(result.OK, id)
+			case digest == pkg.Sha256 || c.IsSnapshot():
+				result.OK = append(result.OK, id) // a snapshot is mutable: present is enough
 			default:
 				result.Modified = append(result.Modified, id)
 			}

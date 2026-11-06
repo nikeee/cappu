@@ -5,7 +5,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -72,13 +74,197 @@ type DapOptions struct {
 	EnableAssertions bool `json:"enableAssertions"`
 }
 
+// Dependency is one entry of a dependencies map. In cappu.json it is the plain
+// `"group:artifact": "version"` string, or an object when more than a version
+// is needed: `{"version": "1.0", "classifier": "linux-x86_64", "exclude": ["g:a"]}`.
+// An empty Version means managed: a `platform` entry supplies it.
+type Dependency struct {
+	Version    string `json:"version,omitempty"`
+	Classifier string `json:"classifier,omitempty"`
+	// Exclude lists "group:artifact" patterns (either side may be "*") pruned
+	// from this dependency's transitive subtree.
+	Exclude []string `json:"exclude,omitempty"`
+}
+
+// UnmarshalJSON accepts the string shorthand or the object form.
+func (d *Dependency) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		return json.Unmarshal(b, &d.Version)
+	}
+	if string(b) == "null" {
+		return errors.New("a dependency must be a version string or an object, not null")
+	}
+	type plain Dependency // no methods, so this does not recurse
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	*d = Dependency(p)
+	return nil
+}
+
+// MarshalJSON writes the string shorthand when only a version is set, so a
+// round trip leaves a plain entry plain.
+func (d Dependency) MarshalJSON() ([]byte, error) {
+	if d.Classifier == "" && len(d.Exclude) == 0 {
+		return json.Marshal(d.Version)
+	}
+	type plain Dependency
+	return json.Marshal(plain(d))
+}
+
+// Managed reports whether the version is left to a platform entry.
+func (d Dependency) Managed() bool { return d.Version == "" }
+
+// PackageSource is one packageSources entry: the plain URL string, or an
+// object `{"url": ..., "auth": "NAME"}` for a repository that needs
+// credentials. NAME selects the env vars CAPPU_SOURCE_NAME_USERNAME +
+// CAPPU_SOURCE_NAME_PASSWORD (basic) or CAPPU_SOURCE_NAME_TOKEN (bearer);
+// nothing secret lives in cappu.json. A `file://` URL or a filesystem path
+// (`~/.m2/repository`, `../repo`, relative to cappu.json) is a local maven2
+// repository.
+type PackageSource struct {
+	URL  string `json:"url"`
+	Auth string `json:"auth,omitempty"`
+}
+
+// UnmarshalJSON accepts the string shorthand or the object form.
+func (s *PackageSource) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		return json.Unmarshal(b, &s.URL)
+	}
+	if string(b) == "null" {
+		return errors.New("a package source must be a URL string or an object, not null")
+	}
+	type plain PackageSource
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	*s = PackageSource(p)
+	return nil
+}
+
+// MarshalJSON writes the string shorthand for an anonymous source.
+func (s PackageSource) MarshalJSON() ([]byte, error) {
+	if s.Auth == "" {
+		return json.Marshal(s.URL)
+	}
+	type plain PackageSource
+	return json.Marshal(plain(s))
+}
+
+// IsLocal reports a local repository: a file:// URL or a path written as one
+// (absolute, ./, ../ or ~). A bare host name is neither: validate rejects it.
+func (s PackageSource) IsLocal() bool {
+	u := s.URL
+	return strings.HasPrefix(u, "file://") || strings.HasPrefix(u, "/") || strings.HasPrefix(u, "./") ||
+		strings.HasPrefix(u, "../") || u == "~" || strings.HasPrefix(u, "~/")
+}
+
+// LocalDir is the repository directory of a local source: `~` expanded,
+// relative paths resolved against the config's directory.
+func (s PackageSource) LocalDir(cfg *Config) string {
+	dir := strings.TrimPrefix(s.URL, "file://")
+	if dir == "~" || strings.HasPrefix(dir, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			dir = home + dir[1:]
+		}
+	}
+	return cfg.ResolvePath(dir)
+}
+
+// DefaultSources are DefaultPackageSources as entries.
+func DefaultSources() []PackageSource {
+	out := make([]PackageSource, 0, len(DefaultPackageSources))
+	for _, url := range DefaultPackageSources {
+		out = append(out, PackageSource{URL: url})
+	}
+	return out
+}
+
 // Dependencies are the "dependencies" section, keyed by configuration. Each
-// map is "group:artifact" -> version.
+// classpath configuration maps "group:artifact" -> Dependency; Platform maps
+// "group:artifact" -> version of a BOM whose <dependencyManagement> fills the
+// managed entries and overrides transitive versions (Maven semantics).
 type Dependencies struct {
-	API                 map[string]string `json:"api"`
-	Implementation      map[string]string `json:"implementation"`
-	AnnotationProcessor map[string]string `json:"annotationProcessor"`
-	TestImplementation  map[string]string `json:"testImplementation"`
+	Platform map[string]string `json:"platform"`
+	// PlatformOrder is the order the platform keys are written in cappu.json
+	// (a Go map forgets it): when two platforms manage the same artifact the
+	// first declared wins, like Maven's first import. Keys not listed here
+	// (added programmatically) follow in sorted order; see PlatformKeys.
+	PlatformOrder  []string              `json:"-"`
+	API            map[string]Dependency `json:"api"`
+	Implementation map[string]Dependency `json:"implementation"`
+	// CompileOnly is on the compile classpath only (Maven provided): never in
+	// a fat jar, a run or the published runtime scope.
+	CompileOnly map[string]Dependency `json:"compileOnly"`
+	// RuntimeOnly is never on the compile classpath (Maven runtime): drivers
+	// and implementations loaded by name.
+	RuntimeOnly         map[string]Dependency `json:"runtimeOnly"`
+	AnnotationProcessor map[string]Dependency `json:"annotationProcessor"`
+	TestImplementation  map[string]Dependency `json:"testImplementation"`
+}
+
+// PlatformKeys are the platform keys in precedence order: declaration order
+// first, then any key PlatformOrder does not list, sorted.
+func (d Dependencies) PlatformKeys() []string {
+	if len(d.Platform) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(d.Platform))
+	seen := map[string]bool{}
+	for _, key := range d.PlatformOrder {
+		if _, ok := d.Platform[key]; ok && !seen[key] {
+			keys = append(keys, key)
+			seen[key] = true
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(d.Platform)) {
+		if !seen[key] {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+// SetConfiguration replaces the entries of one classpath configuration; an
+// unknown name is ignored.
+func (d *Dependencies) SetConfiguration(name string, entries map[string]Dependency) {
+	switch name {
+	case "api":
+		d.API = entries
+	case "implementation":
+		d.Implementation = entries
+	case "compileOnly":
+		d.CompileOnly = entries
+	case "runtimeOnly":
+		d.RuntimeOnly = entries
+	case "annotationProcessor":
+		d.AnnotationProcessor = entries
+	case "testImplementation":
+		d.TestImplementation = entries
+	}
+}
+
+// Configuration returns the entries of one classpath configuration by its
+// cappu.json name, or nil for an unknown name (platform is not one).
+func (d Dependencies) Configuration(name string) map[string]Dependency {
+	switch name {
+	case "api":
+		return d.API
+	case "implementation":
+		return d.Implementation
+	case "compileOnly":
+		return d.CompileOnly
+	case "runtimeOnly":
+		return d.RuntimeOnly
+	case "annotationProcessor":
+		return d.AnnotationProcessor
+	case "testImplementation":
+		return d.TestImplementation
+	}
+	return nil
 }
 
 // FormatterOptions mirrors the "formatterOptions" section. Deliberately few
@@ -133,7 +319,7 @@ type Config struct {
 	FormatterOptions  FormatterOptions `json:"formatterOptions"`
 	TestOptions       TestOptions      `json:"testOptions"`
 	AuditOptions      AuditOptions     `json:"auditOptions"`
-	PackageSources    []string         `json:"packageSources"`
+	PackageSources    []PackageSource  `json:"packageSources"`
 	Dependencies      Dependencies     `json:"dependencies"`
 	JDK               string           `json:"jdk,omitempty"`
 	License           string           `json:"license,omitempty"`
@@ -180,14 +366,23 @@ func Load(explicitPath, cwd string) (*Config, error) {
 		}
 		return nil, err
 	}
+	return Parse(raw, path)
+}
 
+// Parse loads a config from the JSONC text of the file at path (which only
+// names it: for error messages and BaseDir). The editing commands parse the
+// text they are about to write, so an edit can never leave cappu.json
+// unloadable.
+func Parse(raw []byte, path string) (*Config, error) {
 	cfg := &Config{}
 	// jsonc.ToJSON strips comments and trailing commas in place, yielding plain
 	// JSON for the standard decoder. DisallowUnknownFields is intentionally NOT
 	// set: an unknown key (e.g. "$schema") is ignored, matching zod.
-	if err := json.Unmarshal(jsonc.ToJSON(raw), cfg); err != nil {
+	text := jsonc.ToJSON(slices.Clone(raw))
+	if err := json.Unmarshal(text, cfg); err != nil {
 		return nil, fmt.Errorf("invalid %s:\n%w", path, err)
 	}
+	cfg.Dependencies.PlatformOrder = platformKeyOrder(string(text))
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("invalid %s:\n%w", path, err)
@@ -301,20 +496,29 @@ func (c *Config) applyDefaults() {
 		c.AuditOptions.Ignore = []AuditIgnore{}
 	}
 	if c.PackageSources == nil {
-		c.PackageSources = append([]string(nil), DefaultPackageSources...)
+		c.PackageSources = DefaultSources()
 	}
 	d := &c.Dependencies
+	if d.Platform == nil {
+		d.Platform = map[string]string{}
+	}
 	if d.API == nil {
-		d.API = map[string]string{}
+		d.API = map[string]Dependency{}
 	}
 	if d.Implementation == nil {
-		d.Implementation = map[string]string{}
+		d.Implementation = map[string]Dependency{}
+	}
+	if d.CompileOnly == nil {
+		d.CompileOnly = map[string]Dependency{}
+	}
+	if d.RuntimeOnly == nil {
+		d.RuntimeOnly = map[string]Dependency{}
 	}
 	if d.AnnotationProcessor == nil {
-		d.AnnotationProcessor = map[string]string{}
+		d.AnnotationProcessor = map[string]Dependency{}
 	}
 	if d.TestImplementation == nil {
-		d.TestImplementation = map[string]string{}
+		d.TestImplementation = map[string]Dependency{}
 	}
 }
 
@@ -367,6 +571,25 @@ func (c *Config) validate() error {
 			return fmt.Errorf("auditOptions.ignore[%d].reason: must say why %s is accepted", i, ignore.ID)
 		}
 	}
+	if err := c.Dependencies.validate(); err != nil {
+		return err
+	}
+	for i, source := range c.PackageSources {
+		if source.URL == "" {
+			return fmt.Errorf("packageSources[%d]: url must not be empty", i)
+		}
+		if source.Auth != "" && !AuthName.MatchString(source.Auth) {
+			return fmt.Errorf("packageSources[%d]: auth %q must be an env var name part, e.g. \"NEXUS\" (CAPPU_SOURCE_NEXUS_TOKEN)", i, source.Auth)
+		}
+		if source.Auth != "" && source.IsLocal() {
+			return fmt.Errorf("packageSources[%d]: a local repository takes no auth", i)
+		}
+		if !source.IsLocal() {
+			if u, err := url.Parse(source.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				return fmt.Errorf("packageSources[%d]: %q is neither an http(s) URL nor a path (write a path as /..., ./..., ../... or ~/...)", i, source.URL)
+			}
+		}
+	}
 	if c.GroupID != "" && !MavenID.MatchString(c.GroupID) {
 		return fmt.Errorf("groupId: must be a Maven id (letters, digits, . _ -)")
 	}
@@ -385,6 +608,61 @@ func (c *Config) validate() error {
 		}
 	}
 	return nil
+}
+
+// validate checks the coordinate keys, that every platform is pinned, that a
+// managed entry has a platform to be managed by, and the exclude patterns.
+func (d Dependencies) validate() error {
+	for key, version := range d.Platform {
+		if !isCoordinateKey(key) {
+			return fmt.Errorf("dependencies.platform: %q must be \"group:artifact\"", key)
+		}
+		if version == "" {
+			return fmt.Errorf("dependencies.platform: %s needs a version", key)
+		}
+	}
+	for _, name := range Configurations {
+		for key, dep := range d.Configuration(name) {
+			if !isCoordinateKey(key) {
+				return fmt.Errorf("dependencies.%s: %q must be \"group:artifact\"", name, key)
+			}
+			if dep.Managed() && len(d.Platform) == 0 {
+				return fmt.Errorf("dependencies.%s: %s has no version and no platform manages it", name, key)
+			}
+			for _, pattern := range dep.Exclude {
+				if !IsExcludePattern(pattern) {
+					return fmt.Errorf("dependencies.%s: %s: exclude %q must be \"group:artifact\" (either side may be *)", name, key, pattern)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// isCoordinateKey reports whether key is "group:artifact".
+func isCoordinateKey(key string) bool {
+	group, artifact, ok := strings.Cut(key, ":")
+	return ok && MavenID.MatchString(group) && MavenID.MatchString(artifact)
+}
+
+// IsExcludePattern reports whether pattern is "group:artifact" with "*" allowed
+// on either side.
+func IsExcludePattern(pattern string) bool {
+	group, artifact, ok := strings.Cut(pattern, ":")
+	side := func(s string) bool { return s == "*" || MavenID.MatchString(s) }
+	return ok && side(group) && side(artifact)
+}
+
+// CompileClassPath are the classPath entries javac and the language server
+// compile against: the configured ones plus the compileOnly jars.
+func (c *Config) CompileClassPath() []string {
+	return append(slices.Clone(c.CompilerOptions.ClassPath), DefaultCompileOnlyPath)
+}
+
+// RuntimeClassPath are the entries a run, a debuggee or a fat jar needs: the
+// configured ones plus the runtimeOnly jars, never the compileOnly ones.
+func (c *Config) RuntimeClassPath() []string {
+	return append(slices.Clone(c.CompilerOptions.ClassPath), DefaultRuntimeOnlyPath)
 }
 
 // ResolvePath resolves a (possibly relative) path entry against the config's

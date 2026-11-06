@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/nikeee/cappu/internal/config"
@@ -103,5 +104,65 @@ func TestReadRequiresPackagesArray(t *testing.T) {
 	cfg = project(t, `{"version": 2, "packages": []}`)
 	if Read(cfg) == nil {
 		t.Error("a lock with an empty packages array is valid")
+	}
+}
+
+func TestVerifyClassifiedJar(t *testing.T) {
+	jar := []byte("native bytes")
+	lock := `{
+  "version": 2,
+  "roots": {},
+  "packages": [
+    {"coordinates":{"groupId":"g","artifactId":"n","version":"1","classifier":"linux-x86_64"},"source":"s","sha256":"` + sha(jar) + `"}
+  ]
+}`
+	cfg := project(t, lock)
+	installJar(t, cfg, "n", "1-linux-x86_64", jar)
+	got := VerifyInstalled(cfg)
+	if len(got.OK) != 1 || got.OK[0] != "g:n:1:linux-x86_64" {
+		t.Errorf("OK = %v, Missing = %v", got.OK, got.Missing)
+	}
+}
+
+func TestLockRoundTripsObjectRoots(t *testing.T) {
+	cfg := project(t, "")
+	roots := config.Dependencies{
+		Platform:       map[string]string{"org.p:bom": "1"},
+		Implementation: map[string]config.Dependency{"g:a": {}, "g:b": {Version: "1", Classifier: "c", Exclude: []string{"x:*"}}},
+	}
+	if err := Write(cfg, &Lockfile{Version: 2, Roots: roots, PlatformOrder: roots.PlatformKeys(), Packages: []LockedPackage{}}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(Path(cfg))
+	for _, want := range []string{`"g:a": ""`, `"classifier": "c"`, `"org.p:bom": "1"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("lock %s lacks %s", data, want)
+		}
+	}
+	back := Read(cfg)
+	if back == nil {
+		t.Fatal("lock not read back")
+	}
+	cfg.Dependencies.Platform, cfg.Dependencies.Implementation = roots.Platform, roots.Implementation
+	if !back.Matches(cfg) {
+		t.Errorf("round-tripped roots %+v should match %+v", back.Roots, cfg.Dependencies)
+	}
+	cfg.Dependencies.Platform = map[string]string{"org.p:bom": "2"}
+	if back.Matches(cfg) {
+		t.Error("a platform change must make the lock stale")
+	}
+}
+
+func TestMatchesTracksPlatformOrder(t *testing.T) {
+	cfg := project(t, "")
+	cfg.Dependencies.Platform = map[string]string{"org.a:bom": "1", "org.b:bom": "1"}
+	cfg.Dependencies.PlatformOrder = []string{"org.b:bom", "org.a:bom"}
+	lock := &Lockfile{Version: 2, Roots: cfg.Dependencies, PlatformOrder: cfg.Dependencies.PlatformKeys(), Packages: []LockedPackage{}}
+	if !lock.Matches(cfg) {
+		t.Error("same platforms in the same order should match")
+	}
+	cfg.Dependencies.PlatformOrder = []string{"org.a:bom", "org.b:bom"}
+	if lock.Matches(cfg) {
+		t.Error("reordering platforms changes precedence: the lock is stale")
 	}
 }

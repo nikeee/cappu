@@ -41,7 +41,7 @@ func CompileForDebug(cfg *config.Config) []javacdiag.CompileDiagnostic {
 	if javac == "" {
 		javac = cfg.CompilerOptions.Javac
 	}
-	cp := build.ClassPath(cfg)
+	cp := build.CompileClassPath(cfg)
 	args := []string{"-g", "-d", dir, "-encoding", "UTF-8"}
 	if cfg.CompilerOptions.Release != nil {
 		args = append(args, "--release", strconv.Itoa(*cfg.CompilerOptions.Release))
@@ -66,7 +66,7 @@ func CompileForDebug(cfg *config.Config) []javacdiag.CompileDiagnostic {
 
 // DebuggeeClassPath is the runtime classpath: debug classes + dependency jars.
 func DebuggeeClassPath(cfg *config.Config, extra []string) string {
-	cp := append([]string{DebugClassesDir(cfg)}, build.ClassPath(cfg)...)
+	cp := append([]string{DebugClassesDir(cfg)}, build.RuntimeClassPath(cfg)...)
 	cp = append(cp, extra...)
 	return strings.Join(cp, string(os.PathListSeparator))
 }

@@ -168,7 +168,7 @@ func classPathEntries(cfg *config.Config) []compiler.ZipEntryInput {
 			entries = append(entries, compiler.ZipEntryInput{Name: entry.Name, Bytes: entry.Read()})
 		}
 	}
-	for _, configured := range cfg.CompilerOptions.ClassPath {
+	for _, configured := range cfg.RuntimeClassPath() {
 		root := cfg.ResolvePath(configured)
 		if strings.HasSuffix(root, ".jar") {
 			addJar(root)
@@ -571,7 +571,7 @@ func toCompileDiagnostic(d compiler.Diagnostic, file string, text string, lineSt
 // sourcePaths (.java sources, for resolution only) into a program.
 func loadConfiguredPaths(program *compiler.Program, cfg *config.Config) {
 	var classPaths []string
-	for _, p := range cfg.CompilerOptions.ClassPath {
+	for _, p := range cfg.CompileClassPath() {
 		classPaths = append(classPaths, cfg.ResolvePath(p))
 	}
 	compiler.LoadClassPath(program, classPaths)
@@ -612,7 +612,7 @@ func runJavacCompile(files []string, outDir, output string, cfg *config.Config, 
 		_ = os.MkdirAll(genSources, 0o755)
 		args = append(args, "-processorpath", strings.Join(procJars, string(os.PathListSeparator)), "-s", genSources)
 	}
-	classPath := build.ClassPath(cfg)
+	classPath := build.CompileClassPath(cfg)
 	if len(classPath) > 0 {
 		args = append(args, "-cp", strings.Join(classPath, string(os.PathListSeparator)))
 	}
